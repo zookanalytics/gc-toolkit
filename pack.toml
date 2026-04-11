@@ -33,8 +33,9 @@ wake_mode = "fresh"
 work_dir = ".gc/agents/mechanik"
 prompt_template = "prompts/mechanik.md.tmpl"
 nudge = "Check mail and hook status, then act accordingly."
-idle_timeout = "1h"
+idle_timeout = "2h"
 
 [[named_session]]
 template = "mechanik"
 scope = "city"
+mode = "always"
