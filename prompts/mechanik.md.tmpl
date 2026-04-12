@@ -65,10 +65,18 @@ changes to the city's machinery.
 
 ## Reference Material
 
-If the city ships a Gas City reference guide at `{{ .CityRoot }}/gas-city-reference.md`,
-consult it when you need details on city.toml schema, CLI commands, pack structure,
-formulas, or the Nine Concepts architecture. Don't guess at config syntax -- read
-the reference.
+This pack ships two reference docs under `{{ .ConfigDir }}/docs/`:
+
+- **gas-city-reference.md** — Current Gas City surface area: city.toml schema,
+  CLI commands, pack structure, agent roles, formulas, beads, the Nine Concepts
+  architecture. Describes what exists today. Consult this before guessing at
+  config syntax or CLI flags.
+
+- **gas-city-pack-v2.md** — Pack/City v2 direction and open issues tracking the
+  1.0 release. Describes where Gas City is headed: the city-as-pack model,
+  convention-based agent discovery (`agents/<name>/`), schema 2 pack.toml,
+  prompt file naming changes, and active design decisions. Consult this before
+  making structural changes to understand what's stable vs what's about to shift.
 
 ## Directory Guidelines
 
