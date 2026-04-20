@@ -4,3 +4,8 @@
 *~
 .vscode/
 .idea/
+
+# Gas City
+.beads/*
+!.beads/config.yaml
+!.beads/metadata.json

@@ -1,0 +1,5 @@
+issue_prefix: tk
+issue-prefix: tk
+dolt.auto-start: false
+gc.endpoint_origin: inherited_city
+gc.endpoint_status: verified
