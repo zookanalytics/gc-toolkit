@@ -1,39 +1,12 @@
-# gc-toolkit — a Gas City pack extending gastown.
+# gc-toolkit — primary pack for the loomington city.
 #
-# Provides custom agents (mechanik, and more to come) and planning-pipeline
-# formulas inspired by but distinct from gastown's mol-idea-to-plan. Leans on
-# gastown for the common crew (mayor, deacon, polecat, refinery, witness,
-# boot, dog) and adds structural/planning roles on top.
-#
-# Usage in city.toml:
-#   [workspace]
-#   includes = [
-#       "https://github.com/gastownhall/gastown/tree/main",
-#       "https://github.com/zookanalytics/gc-toolkit/tree/main",
-#   ]
-#
-#   [[named_session]]
-#   template = "mechanik"
+# Defines the city's agent roster and operational formulas.
+# Starts minimal (mayor, mechanik, dog) — mechanik designs and
+# implements additional agents (witness, refinery, polecat) as needed.
 
 [pack]
 name = "gc-toolkit"
-schema = 1
-
-[formulas]
-dir = "formulas"
-
-# ── MECHANIK — Structural engineer. One per city. ─────────────────────
-# Owns formulas, agent configs, dispatch patterns, quality gates, and the
-# overall shape of how the city operates. Analyzes patterns and designs
-# improvements rather than grinding beads.
-[[agent]]
-name = "mechanik"
-scope = "city"
-wake_mode = "fresh"
-work_dir = ".gc/agents/mechanik"
-prompt_template = "prompts/mechanik.md.tmpl"
-nudge = "Check mail and hook status, then act accordingly."
-idle_timeout = "2h"
+schema = 2
 
 [[named_session]]
 template = "mechanik"

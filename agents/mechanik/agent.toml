@@ -1,0 +1,5 @@
+scope = "city"
+wake_mode = "fresh"
+work_dir = ".gc/agents/mechanik"
+nudge = "Check mail and hook status, then act accordingly."
+idle_timeout = "2h"
