@@ -1,199 +1,291 @@
-# Gas City Pack/City v2 — Direction and Open Issues
+# Gas City Pack/City v2 — What Shipped in 1.0
 
-> Working reference compiled from open `city-pack-v2` issues on
-> gastownhall/gascity. Current as of 2026-04-12.
-> Milestone: **1.0 (due 2026-04-21)**.
-
----
-
-## Context
-
-Gas City is undergoing its most significant structural change since the Gas Town
-migration: **Pack/City v2**. The core idea is that a city IS a pack. Convention-based
-directory layout replaces inline TOML agent blocks, prompts move to
-`agents/<name>/prompt.template.md`, and the root of a city gets its own `pack.toml`
-alongside `city.toml`. This unifies how packs and cities are authored, composed, and
-distributed.
-
-All 28 open `city-pack-v2` issues target the 1.0 milestone. They break into two
-phases: **0.13.6** (the release that lands the merge wave) and **post-0.13.6**
-(cleanup and polish before 1.0 GA).
+> Structural reference for Pack/City v2, the shape that landed with the
+> 1.0 release (2026-04-21) and is current as of **1.0.1 (2026-04-22)**.
+> The pre-release version of this doc tracked open issues; this version
+> records what was resolved, what the final decisions were, and which
+> quirks a mechanik should know when touching structural config.
 
 ---
 
-## What's Changing (Pack/City v2 Model)
+## Why v2 existed
 
-### The City-as-Pack Model
+Gas Town → Gas City converted a directory-structured orchestrator into a
+TOML-declared one, but kept a seam: **packs** were reusable pack directories
+while a **city** was a top-level TOML file with inline `[[agent]]` blocks.
+Composing a city from packs meant reconciling two different shapes.
 
-Today, a city has `city.toml` with `[[agent]]` blocks and a separate `packs/`
-directory for reusable pack content. In v2:
+V2 closes the seam: **a city IS a pack**. The city root has its own
+`pack.toml` (schema 2). Pack content is discovered by convention, not by
+listing. The result is that workspace imports, rig imports, and your own
+city root all follow the same rules.
 
-- The **city root itself is a pack** with its own `pack.toml` (schema 2)
-- Agents are discovered by **convention**: `agents/<name>/` directories
-- Prompts use **file-based discovery**: `agents/<name>/prompt.template.md`
-- Commands are discovered from `commands/<name>/run.sh` — including from the root city-pack
-- `city.toml` shrinks to city-specific concerns (rigs, daemon, beads, providers)
-- Pack content (agents, prompts, commands, formulas) lives in convention directories
+---
 
-### V2 City Layout (Target)
+## What v2 actually changed
 
-```
-my-city/
-├── pack.toml              # Root city-pack metadata (schema = 2)
-├── city.toml              # City-specific config (rigs, daemon, providers)
-├── agents/
-│   ├── mayor/
-│   │   └── prompt.template.md
-│   └── worker/
-│       └── prompt.template.md
-├── commands/
-│   └── hello/
-│       └── run.sh
-├── formulas/
-│   └── orders/
-├── .gc/                   # Runtime root (unchanged)
-└── ...
+### `pack.toml` (schema 2) at the city root
+
+Every v2 city root now has a `pack.toml`:
+
+```toml
+[pack]
+name = "my-city"
+schema = 2
+
+[imports.gastown]
+source = ".gc/system/packs/gastown"
+
+[defaults.rig]
+[defaults.rig.imports.gastown]
+source = ".gc/system/packs/gastown"
 ```
 
-Compare with the current (v1/legacy) layout where agents are defined inline in
-`city.toml` as `[[agent]]` blocks and prompts live in a flat `prompts/` directory.
+`[imports.<name>]` replaces the old `city.toml` `[packs.<name>]`. A
+binding name (the table key) is how other config references the import.
+Sources can be local paths or `github.com/org/repo` with `version` +
+optional `path`.
 
-### Key Design Decisions (In Progress)
+`[defaults.rig.imports.<name>]` is the v2 replacement for
+`default_rig_includes` — applied to every rig that doesn't override it.
 
-These are active design threads that shape how v2 will work:
+### Convention-based agent discovery
 
-| Decision | Issue | Status |
-|----------|-------|--------|
-| Template processing opt-in via `.tmpl` suffix | #582 | Under discussion for 0.13.6 |
-| `packs.lock` loader contract for remote imports | #583 | Leaning toward ship-as-is, fuller pass later |
-| `[agent_defaults]` as canonical name (drop `[agents]` alias) | #585 | Decided: stop documenting alias, remove later |
-| `.formula.toml` / `.order.toml` infix removal | #586 | Decided: keep for merge wave, remove after |
-| Rig path moves out of `city.toml` into `.gc/` | #588 | Design accepted for 0.13.6 |
-| `workspace.name` retirement as checked-in identity | #600 | Post-0.13.6 design |
-| `gc register --name` flag for local city alias | #602 | Accepted for 0.13.6 |
+An agent is now a **directory** under `agents/<name>/`. The directory
+name is the agent name; `agent.toml` has no `name` field. Prompts live
+next to the config as `prompt.template.md`.
+
+```
+agents/
+└── mayor/
+    ├── agent.toml
+    └── prompt.template.md
+```
+
+This applies to every pack: the city root, imported packs, and rig-local
+packs. `[[agent]]` blocks in `city.toml` still load for crew, patches,
+and one-offs, but the idiomatic shape is convention directories.
+
+### `.gc/site.toml` — machine-local identity
+
+v1 stored the workspace name and rig filesystem paths inside committed
+`city.toml`. v2 splits them out:
+
+```toml
+# .gc/site.toml (machine-local, not committed)
+workspace_name = "loomington"
+workspace_prefix = "lx"
+
+[[rig]]
+name = "gc-toolkit"
+path = "/home/zook/loomington/rigs/gc-toolkit"
+```
+
+```toml
+# city.toml (committed, portable)
+[[rigs]]
+name = "gc-toolkit"
+prefix = "tk"
+```
+
+`city.toml` now declares **logical** rigs (name + optional prefix +
+options); `.gc/site.toml` maps those names to **physical** filesystem
+paths. A committed `city.toml` works across machines without leaking
+absolute paths or requiring per-host edits.
+
+`gc register --name ALIAS` writes the machine-local alias here. It never
+modifies `city.toml`.
+
+### File naming
+
+| V1 | V2 |
+|----|----|
+| `prompts/<name>.md.tmpl` | `agents/<name>/prompt.template.md` |
+| `formulas/<name>.formula.toml` | `formulas/<name>.toml` |
+| `orders/<name>/order.toml` | `orders/<name>.toml` |
+
+The `.formula.` and `.order.` infixes were removed. The `.template.md`
+suffix is the new template marker (a design decision on #582 — plain
+`.md` is now allowed for literal content, and templates are explicit).
+
+### Root city-pack commands and skills
+
+A pack can now expose:
+
+- **Commands**: `commands/<name>/run.sh` → runs as `gc <name>`
+- **Skills**: `skills/<name>/SKILL.md` → surfaced via `gc skill list`
+- **Template fragments**: `template-fragments/<name>.md` → usable as
+  `{{ template "<name>" . }}` from prompts
+- **Overlays**: `overlays/<name>/` → provider settings injection
+
+These surfaces work from the city root itself (since it's a pack), from
+imported packs, and from rig-local packs. A previous v1 quirk
+(commands at the root were invisible) is fixed.
+
+### `[global]` in `pack.toml`
+
+```toml
+[global]
+session_live = [
+    "{{.ConfigDir}}/assets/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
+]
+```
+
+`[global]` applies session-wide hooks to every agent defined by the pack.
+Gastown uses this to install tmux themes and keybindings on every session
+without repeating the config per-agent.
+
+### `[[patches.agent]]` / `[[patches.rig]]` / `[[patches.provider]]`
+
+Post-composition overrides. Useful when importing a pack and tweaking
+one field without forking the whole thing:
+
+```toml
+[[patches.agent]]
+name = "dog"
+wake_mode = "fresh"
+work_dir = ".gc/agents/dogs/{{.AgentBase}}"
+```
+
+Patches run after imports are composed, so they override both
+convention-discovered agents and inline `[[agent]]` blocks.
 
 ---
 
-## Phase: 0.13.6 (Release Branch)
+## Design decisions that landed
 
-The 0.13.6 release lands the Pack/City v2 merge wave. These are the issues that
-must be resolved before it ships.
+The 1.0 release resolved the major design questions. The final positions:
 
-### Critical Bugs (P1) — Must Fix
-
-| Issue | Summary | Impact |
-|-------|---------|--------|
-| #601 | `gc register` rejects pack schema 2 cities | Blocks all v2 dogfooding |
-| #602 | `gc register` needs `--name` flag for local city alias | Local naming pushed into checked-in config |
-| #603 | `gc init` still emits the legacy scaffold | New cities learn the wrong shape |
-| #604 | Root city-pack commands not exposed as CLI commands | `commands/` from root pack don't work |
-| #605 | Runtime/register materializes legacy root `prompts/` in v2 cities | V2 cities grow unwanted legacy dirs |
-| #608 | `gc agent add` writes legacy `[[agent]]` config | Conflicts with v2 direction |
-| #609 | Root city-pack agents not discovered for prime/config | Convention agents invisible |
-| #610 | `gc prime` falls back for convention-discovered agents | Discovered agents render wrong prompt |
-| #613 | `gc session new` fails for managed Claude sessions in v2 cities | Session creation broken in v2 |
-
-### Design Decisions (P1-P2) — Must Resolve
-
-| Issue | Summary |
-|-------|---------|
-| #580 | Resolve `[agents]` field naming and defaultability before release |
-| #582 | Decide whether `.tmpl` suffix required for template processing |
-| #583 | Decide `packs.lock` loader contract for remote imports |
-| #588 | Move rig path and machine-local rig binding out of `city.toml` |
-| #595 | Validate `dog` and `maintenance` packaging in v2 model |
-
-### Bug Fixes (P2) — Should Fix
-
-| Issue | Summary |
-|-------|---------|
-| #606 | `bd` import binding shadow warning pollutes normal CLI use |
-| #607 | `gc rig remove` emits unrelated deprecation warnings from other cities |
-| #611 | Bundled packs still materialize deprecated order paths |
+| Question | Decision | Rationale |
+|----------|----------|-----------|
+| Template processing opt-in? | Yes — `.template.md` suffix required | Plain `.md` is literal content. Templates are explicit. |
+| `packs.lock` loader contract | Lock file written on `gc import install/upgrade`; checked by `gc import check` | Reproducible pack fetches, still fuzzy on tags |
+| `[agent_defaults]` canonical name | Kept `[agent_defaults]`; `[agents]` alias dropped | Less ambiguity with `[[agent]]` |
+| `.formula.` / `.order.` infix | Removed post-0.13.6 | Simpler naming |
+| Rig path location | `.gc/site.toml` (not `city.toml`) | Separates machine-local from committed config |
+| `workspace.name` | Retired as checked-in identity; lives in `.gc/site.toml` as `workspace_name` | Same reason — portability |
+| `gc register --name` | Shipped; stored in site-bound registry | Local naming without editing committed config |
+| `gc init` default shape | V2 (schema 2, convention directories, `.gc/site.toml`) | V1 still loads but new cities start v2 |
+| `gc agent add` | Writes convention-based `agents/<name>/` | Aligns with v2 default |
 
 ---
 
-## Phase: Post-0.13.6 (Before 1.0 GA)
+## Migration path for v1 cities
 
-Cleanup, documentation, and design refinement after the merge wave lands.
+```bash
+gc import migrate --dry-run    # preview
+gc import migrate              # rewrite in place
+```
 
-### Design Work
+`gc import migrate` handles:
+- Moving `workspace.includes` → `[imports]` in `pack.toml`
+- Converting `[[agent]]` tables → `agents/<name>/` directories
+- Relocating prompts, overlays, namepools into v2 shape
+- Adding a `pack.toml` if the city didn't have one
+- Moving `workspace.name` → `.gc/site.toml` `workspace_name`
+- Moving `[[rigs]] path = "..."` → `.gc/site.toml` `[[rig]] path = "..."`
 
-| Issue | Summary | Priority |
-|-------|---------|----------|
-| #585 | Remove `[agents]` alias support entirely | P2 |
-| #586 | Remove `.formula.` and `.order.` infixes from file naming | P2 |
-| #587 | Restate multi-city rig and bead-state separation in v2 terms | P2 |
-| #591 | Decide which packs become public starter/registry content | P2 |
-| #592 | Reconcile bootstrap registry and implicit-import behavior | P2 |
-| #600 | Retire `workspace.name` as checked-in city identity | P2 |
+The migrator is idempotent and does not touch legacy-but-still-loadable
+shapes that work fine (e.g. `[packs.<name>]` in `city.toml` — left alone
+unless you ask for a rewrite).
 
-### Migration & Documentation
+Manual fallback checklist: see `gas-city-reference.md` → "V1 → V2 Migration".
 
-| Issue | Summary | Priority |
-|-------|---------|----------|
-| #589 | Migrate example cities and packs to v2 format | P2 |
-| #590 | Publish current Pack/City v2 design doc, scrub stale refs | P2 |
-| #593 | Scrub and refresh tutorials after v2 format settles | P3 |
+---
 
-### Technical Debt
+## Backward compatibility (what still loads)
 
-| Issue | Summary | Priority |
-|-------|---------|----------|
-| #575 | Add `gc import check` for cache/materialization validation | P2 |
-| #594 | Evaluate narrow follow-up for loader-side `packs.lock` reads | P3 |
+- **Inline `[[agent]]`** blocks in `city.toml` — preserved for crew
+  members, one-off patches, or legacy cities
+- **`[packs.<name>]`** in `city.toml` — still resolves to an import
+- **Schema 1** packs — loaded in compatibility mode
+- **`prompts/<name>.md.tmpl`** — still recognized, not required to rename
+- **`formulas/<name>.formula.toml`** and `orders/<name>/order.toml` —
+  still scanned; the new naming takes precedence when both exist
+- **`[workspace] name`** in `city.toml` — if present, used; `.gc/site.toml`
+  `workspace_name` takes precedence when both are set
+
+The loader prefers v2 locations when there's a conflict, but will not
+silently drop v1 content.
 
 ---
 
 ## Implications for gc-toolkit
 
-These changes affect how we build and configure packs in this toolkit:
+### What we do in this pack now
 
-### What to Track
+- **`pack.toml` at toolkit root uses `schema = 2`** — this is the only
+  supported schema for new content
+- **Agent definitions live under `agents/<name>/`** with `agent.toml`
+  and `prompt.template.md` — see `rigs/gc-toolkit/agents/mechanik/`
+- **Formulas are `<name>.toml`** (no `.formula.` infix) under
+  `formulas/` if we ship any
+- **Orders are flat `<name>.toml`** under `orders/`
+- **Template fragments go under `template-fragments/`** and are
+  referenced as `{{ template "name" . }}`
+- **Overrides for imported-pack agents** go in `[[patches.agent]]`,
+  not pack forks
 
-1. **Schema version**: Our `pack.toml` currently uses `schema = 1`. When 0.13.6
-   ships with schema 2 support, we'll need to evaluate migration. The migration
-   doc referenced in #589 will be the operating checklist.
+### Principles that still hold (pre-existing guardrails)
 
-2. **Agent definition style**: We currently define agents with `[[agent]]` blocks
-   in pack TOML. V2 moves to convention-based `agents/<name>/` directories with
-   `prompt.template.md` files. The `gc agent add` command (#608) will also change.
+1. **Minimize gastown code changes** — divergence goes in gc-toolkit
+2. **Design for per-rig variation** — use `[[rigs.overrides]]` or
+   rig-local pack imports, not hardcoded forks
+3. **Convention over configuration** — prefer rig-local `pack.toml`
+   imports over inline `[[agent]]` blocks in `city.toml`
 
-3. **Prompt file naming**: Today prompts are `.md.tmpl` files in `prompts/`. V2
-   moves them to `agents/<name>/prompt.template.md`. There's an open question
-   (#582) about whether `.tmpl` suffix will be required for template processing —
-   plain `.md` may become literal content only.
+### New extension points
 
-4. **Command discovery**: V2 exposes `commands/<name>/run.sh` from packs as CLI
-   subcommands (#604). This is a new extensibility surface.
-
-5. **Formula/order file naming**: The `.formula.toml` and `.order.toml` infixes
-   will be removed post-0.13.6 (#586). Plan for simpler filenames.
-
-6. **Rig binding**: Rig path moves out of `city.toml` into `.gc/` (#588). This
-   affects how we document rig registration.
-
-7. **Remote imports**: The `packs.lock` contract (#583) and `gc import check`
-   (#575) affect how remote pack dependencies are resolved and validated.
-
-### What's Safe Now
-
-- The core city.toml schema (providers, beads, session, daemon, etc.) is stable
-- Bead store interface and `bd` CLI are unchanged
-- Formula/molecule/order runtime semantics are unchanged
-- Session providers (tmux, k8s, acp, etc.) are unchanged
-- The gastown agent roles (mayor, deacon, polecat, etc.) are unchanged in function
-- CLI command surface is additive, not breaking (new flags, not removed commands)
+- **Commands**: drop scripts under `commands/<name>/run.sh` to add
+  `gc <name>` subcommands for this toolkit's workflows
+- **Skills**: write `skills/<name>/SKILL.md` to surface toolkit-specific
+  reference docs to agents (shows up in `gc skill list`)
+- **Packs**: the toolkit itself is an import (`[imports.gc-toolkit]`
+  in the city's `pack.toml`). Nothing special — it's the same
+  convention as any other pack.
 
 ---
 
-## Timeline
+## Quirks and edge cases a mechanik should know
 
-| Date | Event |
-|------|-------|
-| 2026-04-11 | City-pack-v2 issues filed from dogfooding session |
-| 2026-04-12 | Today — 18 issues in 0.13.6 phase, 10 post-0.13.6 |
-| 2026-04-21 | 1.0 milestone due date |
+- **Agent identity resolution**: when an agent is defined in multiple
+  imported packs, the last import wins, then `[[patches.agent]]` on top.
+  Use `gc config explain` to see which source supplied each field.
+- **Prompt fragment collisions**: `template-fragments/foo.md` in two
+  different imported packs both register as `{{ template "foo" . }}`.
+  Last-import-wins. Qualify fragment names with the pack binding to
+  avoid collisions (e.g. `{{ template "gastown.propulsion-mayor" . }}`).
+- **Skill collisions**: `skills/<name>/SKILL.md` shares a namespace
+  after being pulled to the agent's vendor sink (e.g. `.claude/skills/`).
+  `gc doctor` surfaces collisions. Agent-scoped
+  (`agents/<name>/skills/`) always wins over pack-level when present.
+- **Named sessions are per-pack**: `[[named_session]]` in one pack does
+  not implicitly extend another pack's named sessions. A city pack's
+  `[[named_session]]` is the top-level roster.
+- **`city_agents` is the partition key**: if you write a dual-scope
+  pack, the `city_agents = ["mayor", ...]` field in its `pack.toml`
+  controls which agents come through as city-scoped vs rig-scoped. Get
+  this wrong and you'll spawn a city-scope agent inside each rig (or
+  vice versa).
+- **`.gc/site.toml` is authoritative for rig paths**: `gc rig add`
+  writes both `city.toml` (logical rig) and `.gc/site.toml` (physical
+  path). If you hand-edit, edit both.
+- **The root city-pack can be nearly empty**: you don't have to define
+  any agents at the city root — the imports carry the agents. `pack.toml`
+  + `city.toml` with rigs and imports is enough.
+- **`commands/` at the city root**: these become `gc <name>` globally
+  for anyone inside the city. Don't shadow built-in `gc` subcommands.
 
-The 1.0 release is 9 days away. The 0.13.6 release (which lands the v2 merge wave)
-must ship before that, leaving time for the post-0.13.6 cleanup pass.
+---
+
+## References
+
+- `gas-city-reference.md` — complete Gas City surface (CLI, config, agent
+  roles, runtime providers, migration, tutorials)
+- `gc import --help` — current import command surface
+- `gc config explain` — provenance annotations for every resolved field
+- `gc doctor --verbose` — warnings for v1 artifacts that should migrate
+- `.gc/system/packs/gastown/pack.toml` — reference v2 pack (imports,
+  `[global]`, `[[patches.agent]]`, `[[named_session]]`)
+- `.gc/system/packs/core/pack.toml` — minimal v2 pack (skills, shared
+  prompt assets)
