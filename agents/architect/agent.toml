@@ -1,0 +1,5 @@
+scope = "city"
+wake_mode = "fresh"
+work_dir = ".gc/agents/architect"
+nudge = "Check mail and open consult beads, then act accordingly."
+idle_timeout = "2h"
