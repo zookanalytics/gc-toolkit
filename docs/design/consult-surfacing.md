@@ -1,43 +1,53 @@
 # Consult-Bead Surfacing Channel — Design
 
-**Status:** design, not approved. Do not implement from this doc alone.
-**Bead:** [tk-uac](#references) — picks up from tk-a4t (architect) and tk-6s5
-(strategic direction).
+**Status:** approved design. Implementation bead to be filed by mechanik
+against this revision.
+**Beads:** [tk-uac](#references) (first-pass design, closed),
+[tk-89y](#references) (this revision, conversational-concierge model).
 **Audience:** overseer, mechanik, architect; future consult-producing
 specialists.
 
 ## 1. Problem
 
 Consult beads are how a specialist agent and the human overseer hold a
-conversation. The architect defined the bead shape — `architect-consult`
-label, `gc.consult_type` metadata, `[type] …` title prefix, replies as bead
-notes (`agents/architect/prompt.template.md` on
-`origin/polecat/tk-a4t-architect-skeleton`). That protocol answers *what a
-consult looks like*.
+conversation. The architect first defined the bead shape; this design
+generalizes it so any specialist can file. The shape is: `consult`
+label, `gc.consult_type` metadata, `[type] …` title prefix, back-and-forth
+captured as bead notes, filed as a dependency of the bead whose work
+the consult is blocking.
 
-It does not answer *how the overseer finds out one exists*. Without a
-surfacing channel, a consult filed at 09:05 sits unread; the architect's
-Partner hat fails silently; the roadmap's "branded context channels"
-primitive is violated by a general-text fallback; and the "consult" brand
-decays into another bead-queue the overseer has to remember to scan.
+That protocol answers *what a consult looks like*. It does not answer
+*how the overseer finds out one exists* or *how the conversation
+actually happens*. Without a surfacing channel, a consult filed at 09:05
+sits unread; the specialist's Partner hat fails silently; the roadmap's
+"branded context channels" primitive is violated by a general-text
+fallback; and the "consult" brand decays into another bead-queue the
+overseer has to remember to scan.
 
-This doc picks the **channel**. It does not redefine the bead shape. It is
+This doc picks the **channel** and the **conversation model**. It does
+not redefine the bead shape (beyond generalizing the label). It is
 rig-agnostic, merge-strategy-agnostic, and public-pack-safe.
 
 ## 2. Constraints (given, not re-litigated here)
 
 - **Distinct from mayor.** Overseer has explicitly rejected overloading
   mayor. Mayor is mid-conversation when the consult arrives; cramming a
-  second register onto the same surface makes both worse. (Input from
-  tk-uac description; echoed in `docs/roadmap.md` §Decisions §Open.)
-- **Honors the architect protocol.** Channel is a reader of
-  `architect-consult` / `gc.consult_type` / `[type] …`, not a redefiner.
-- **Rig-agnostic.** City-level machinery. The architect runs per-rig; the
-  consult channel runs across rigs.
-- **Public-pack.** No private rig names. No shared webhooks in the first
-  cut.
+  second register onto the same surface makes both worse.
+- **Consults are parent-bead dependencies, not standalone.** A consult
+  is always filed as a dependency of the bead whose work it is
+  blocking. Resolution (closing the consult) unblocks the parent via
+  the bead dependency graph. No separate "awaiting" state is needed or
+  wanted.
+- **Any specialist can file.** Not architect-only. The label is
+  `consult`; the specialist's identity travels in the owner/author
+  fields and is used for context loading.
+- **Rig-agnostic.** City-level machinery. Specialists can run per-rig;
+  the consult channel runs across rigs (with an allowed per-rig variant
+  where it earns its keep).
+- **Public-pack.** No private rig names. No shared webhooks in the
+  first cut.
 - **Design-only.** Implementation is out of scope for this bead; a
-  follow-up bead will carry the build.
+  follow-up bead filed by mechanik will carry the build.
 
 ## 3. Design axes
 
@@ -47,130 +57,107 @@ stay honest.
 | Axis | Values |
 | --- | --- |
 | **Aggregation site** | rig-local queue / city-level index / external |
-| **Delivery shape** | push-on-event / cadenced digest / on-demand pull / hybrid |
-| **Reply path** | overseer writes `bd update --notes` directly / typed reply through an agent / mail thread / external app |
+| **Delivery shape** | push-on-event / cadenced digest / on-demand pull / real-time conversation / hybrid |
+| **Reply path** | overseer writes `bd update --notes` directly / typed reply through an agent / mail thread / conversational turn with an agent / external app |
 | **Persistence** | stateless (queries on demand) / stateful (an agent holds the index) |
 
-Option A is stateful + city-index + cadenced-plus-on-demand + agent-mediated
-reply. Option B is stateless + city-index + cadenced-digest + direct-notes.
-Option C is stateful but shares state with mayor. Option D is external
-delivery on top of A or B.
+The approved design lands at: *city-level index · push-on-create +
+on-demand conversational pull · conversational turn with concierge ·
+stateful*. Options A–D below explore the space; §5 describes the
+approved design in detail.
 
-## 4. Options
+## 4. Options considered
 
 ### Option A — Dedicated city agent ("concierge")
 
-A new city-scoped agent, `agents/concierge/`, whose only job is to present
-and route consults.
+A new city-scoped agent, `agents/concierge/`, whose only job is to
+surface consults and host the conversation with the overseer that
+resolves them.
 
-**Mechanism.** On wake, concierge runs the consult query
-(`bd list --label architect-consult --status open,in_progress
---metadata-field gc.awaiting=human`), ranks entries by age and
-`gc.consult_type`, and produces a digest mail to the overseer with bead
-links and one-line summaries. Runs on `idle_timeout = "2h"`, wakes on
-`fresh` mode; can be nudged on demand (`gc nudge concierge
-"what's open?"`). When the overseer replies (by mail or by talking to
-concierge directly), concierge writes the reply back as `bd update <id>
---notes "…"` on the originating bead and flips `gc.awaiting=specialist`.
-The specialist's own Active hat pulls from there.
+**Mechanism (as explored).** Originally proposed as a morning-digest
+sender that mails the overseer a ranked list of open consults and
+threads prose replies back to the right beads. During review the
+mechanism was reshaped into a conversational model: push a short
+notification on consult creation, then hold a real-time conversation
+with the overseer on engagement — loading full bead context, ranking
+what's open by type and age, and writing decisions back as bead notes.
+§5 carries the full mechanism.
 
-The `gc.awaiting` metadata is the state machine: `human` → concierge
-surfaces; `specialist` → concierge hides; `resolved` → bead closes, consult
-is archived.
-
-**What the overseer's day looks like.** One branded sender ("concierge")
-delivers one mail in the morning containing *all* open consults, ranked.
-Overseer opens the mail, scans titles, replies to concierge in plain
-prose — "on the auth ADR, go with option 2; drift on rate-limits, file
-the correction." Concierge threads each answer to its bead. Overseer
-never uses `bd` directly for a consult.
+**What the overseer's day looks like (conversational model).** A
+notification arrives when a new consult is filed — the overseer is
+never waiting on cadence. When the overseer engages ("what's open?",
+"let's do UX reviews", or names a bead ID), concierge pulls up the
+relevant consults, reads their full context, and has a real conversation
+— prose in, prose back — in the same way they'd talk to any specialist.
+Concierge threads the decision to the bead and closes it, which
+automatically unblocks the parent work.
 
 **Failure modes.**
 
-- Concierge becomes a second mayor (scope creep). Mitigation: hard scope
-  in the prompt — *only* consults, no coordination. Reject dispatch
-  requests with a redirect to mayor.
-- Concierge itself becomes silent (no consults → no mail → overseer
-  forgets it exists). Mitigation: even an empty-digest morning mail
-  ("no open consults — X closed in last 24h") is a brand reinforcement;
-  the cost is low.
-- Reply misrouting: overseer replies conversationally referencing one
-  consult by number, concierge attaches to the wrong bead. Mitigation:
-  each digest line carries the explicit bead ID; concierge refuses to
-  attach a reply if the target is ambiguous and asks one clarifying
-  question.
+- Concierge becomes a second mayor (scope creep). Mitigation: hard
+  scope in the prompt — *only* consults, no coordination. Reject
+  dispatch requests with a redirect to mayor.
+- Concierge itself becomes silent (no consults → no conversation →
+  overseer forgets it exists). Mitigation: push-on-create keeps the
+  brand alive; optional weekly resurface for still-open consults keeps
+  stale ones from going invisible.
+- Reply misrouting: overseer's answer could apply to more than one open
+  consult. Mitigation: every digest line and every conversation turn
+  names the target consult; concierge refuses and asks once when
+  ambiguous.
 - Agent overhead: another persistent context, another wake script,
-  another surface to prompt-engineer.
+  another surface to prompt-engineer. Partly offset by city-scoping
+  and long idle timeout — if there are no consults, concierge is not
+  running.
 
 **What else this forces into the design.**
 
 - New `agents/concierge/` directory in the pack (agent.toml + prompt
   template). City-scoped, `fresh` wake mode, long idle timeout.
-- A small formula, `mol-consult-sweep` (or an inlined query in the
-  prompt), that runs the consult query and writes the digest.
-- Metadata convention: `gc.awaiting = human | specialist | resolved` on
-  every consult bead. The architect prompt needs one paragraph added to
-  set `gc.awaiting=human` on consult creation and flip to
-  `gc.awaiting=specialist` after a reply.
-- Mail-reply routing: concierge reads its own inbox, parses per-line
-  answers, writes bead notes. This is the non-trivial ergonomic bet.
-- A `gc nudge concierge` ritual — already supported by the `nudge`
+- A small formula or inlined query that runs the consult query and
+  produces the digest / conversation context.
+- Each specialist prompt gains the "push to concierge on consult
+  creation" instruction (for architect today; others as they land).
+- `gc nudge concierge` ritual — already supported by the `nudge`
   command.
 
 ### Option B — Mail-channel convention + consult digest formula
 
-No new agent. A periodic formula, `mol-consult-digest`, runs on the same
-machinery as `mol-digest-generate` (periodic, dog-pool dispatched) and
-mails the overseer a ranked list of open consults at a configured
+No new agent. A periodic formula, `mol-consult-digest`, runs on the
+same machinery as `mol-digest-generate` (periodic, dog-pool dispatched)
+and mails the overseer a ranked list of open consults at a configured
 interval.
 
-**Mechanism.** Same query as Option A, same metadata, same digest
-structure. The dog polecat runs the formula, composes the mail with a
-`[consults]` subject prefix, and sends to the overseer alias. Overseer
-replies by mail; there is a helper script (`gc consult reply <bead-id>
-"<note>"`) that the overseer invokes directly, or the overseer opens the
-bead and runs `bd update --notes`.
+**Mechanism.** Same query as Option A, same digest structure. The dog
+polecat runs the formula, composes the mail with a `[consults]` subject
+prefix, and sends to the overseer alias. Overseer replies by mail; a
+helper script (`gc consult reply <bead-id> "<note>"`) threads the reply,
+or the overseer opens the bead and runs `bd update --notes` directly.
 
-Alternatively (looser variant): no formula — just a subject-prefix
-convention (`[consult] …`) on mail sent by specialists when they file a
-consult, and a `gc mail inbox --label consult` convenience filter.
-
-**What the overseer's day looks like.** Mail arrives from the dog pool
-("sender: dog-1234 on behalf of mayor" or a dedicated alias). Overseer
-scans. To reply, they either run a helper script or edit the bead's
-notes directly. No agent persona to talk to — just a bundled mail.
+**What the overseer's day looks like.** Mail arrives from the dog pool.
+Overseer scans. To reply, they run a helper script or edit the bead's
+notes. No agent persona to talk to — just a bundled mail.
 
 **Failure modes.**
 
-- No brand. The overseer gets another digest from another dog polecat;
-  nothing about this surface says "this is the consult surface." Brand
-  failure is exactly the thing the roadmap primitive warns against.
-- Reply ergonomics. Writing a bead note is not a natural reply action
-  for the overseer; the friction compounds per consult. The helper
-  script fixes some of this but still requires overseer habit change.
-- Silent failure when empty. Unlike a persistent agent, a digest formula
-  that has nothing to report either (a) sends a no-op mail daily (noise)
-  or (b) sends nothing (brand invisibility). Neither is great.
-- Stale consults have no patrol. Option A's Active hat watches for
-  consults that have sat in `gc.awaiting=human` too long. Option B has no
-  one doing that.
-
-**What else this forces into the design.**
-
-- Formula: `mol-consult-digest.toml`, patterned on `mol-digest-generate`.
-- Configuration in `city.toml` under `[[formulas.periodic]]`.
-- Optional helper command: `gc consult reply` (gastown CLI change, not
-  pack-only — a bigger ask). Or: documented convention that overseer
-  types `bd update <id> --notes "..."` themselves.
-- Same `gc.awaiting` metadata on consults.
+- No brand. Another digest from another dog polecat; nothing about
+  this surface says "this is the consult surface." Brand failure is
+  exactly the thing the roadmap primitive warns against.
+- Reply ergonomics. Writing a bead note is not a natural reply action;
+  the friction compounds per consult.
+- Silent failure when empty. A digest formula that has nothing to
+  report either sends no-op mail daily (noise) or sends nothing (brand
+  invisibility).
+- No conversational surface. A digest is monologue; a real consult
+  frequently needs a back-and-forth.
+- Stale consults have no patrol. A persistent agent (Option A) can
+  notice consults that have sat too long; a digest formula cannot.
 
 ### Option C — Mayor overlay
 
 Mayor's prompt grows a "consult inbox" first-class section: on wake,
-mayor runs the consult query before the dispatch query and surfaces any
-`gc.awaiting=human` consults at the top of its response. Same reply
-mechanism as Option B (bead notes), but threaded through mayor as the
-surface.
+mayor runs the consult query before the dispatch query and surfaces
+open consults at the top of its response.
 
 **What the overseer's day looks like.** One surface (mayor), two
 registers: "here's your dispatch state, and here are three open
@@ -178,176 +165,322 @@ consults." Mayor gains context to know when to batch vs. interrupt.
 
 **Failure modes.**
 
-- This is the option the overseer already rejected. The failure mode was
-  felt in practice: mid-conversation context collision. "Feels like I'm
-  mid-conversation when I want to send it something else."
-- Mayor's dispatch cadence is not consult cadence. A consult may wait
-  two hours until the next dispatch turn; a dispatch decision may wait
-  because mayor is presenting consults.
+- This is the option the overseer already rejected. The failure mode
+  was felt in practice: mid-conversation context collision. "Feels
+  like I'm mid-conversation when I want to send it something else."
+- Mayor's dispatch cadence is not consult cadence.
 - Brand overload: mayor's brand is coordination. Tacking consults on
   erodes both brands instead of strengthening either.
-
-**What else this forces into the design.** Mayor prompt rewrite;
-additional fragment in `template-fragments/`; still needs the
-`gc.awaiting` metadata convention.
 
 ### Option D — Remote surface (Slack / email / webhook)
 
 An aggregator (Option A's concierge or Option B's formula) pushes a
-digest to an external channel.
-
-**What the overseer's day looks like.** Slack notification → click →
-reply in Slack → webhook turns it into a bead note.
+digest or notification to an external channel.
 
 **Failure modes.**
 
-- Credential management lives outside the public pack; putting it in the
-  pack by default leaks private configuration.
+- Credential management lives outside the public pack.
 - Hard to test without a real webhook endpoint.
-- Reply routing across systems (Slack → bead notes) is the hard part of
-  Option A multiplied by a network boundary.
+- Reply routing across systems (Slack → bead notes) is the hard part
+  of Option A multiplied by a network boundary.
 
-**Verdict.** Not a first-cut candidate. The design should remain
-*compatible* — meaning the aggregation step produces a structured
-payload (subject + body + bead links) that a future webhook can forward
-verbatim — but no external delivery target ships in the first version.
+**Verdict.** Not a first-cut candidate. The approved design stays
+compatible — concierge's notification payload is structured enough
+that a future webhook forwarder is a downstream layer — but no
+external delivery target ships in the first version.
 
-## 5. Recommendation
+## 5. Approved design
 
-**Adopt Option A: a dedicated city agent, `concierge`.** Keep Option B's
-digest formula alive as the *engine* the agent runs, but the agent is
-the surface.
+**Option A, with the mechanism reshaped into a conversational model.**
+Concierge is a dedicated city agent whose job is to notify on consult
+creation and hold a real-time conversation with the overseer that
+resolves consults and writes decisions back to the bead.
 
-### Why
+### 5.1 Concierge as conversational partner
 
-1. **Branded surface.** A named agent is the cheapest way to earn the
-   "branded context channel" primitive. The overseer knows who they are
-   talking to and what the register is. A dog polecat running a digest
-   cannot do that — it is, by construction, anonymous infrastructure.
-2. **Three-hat fit.** The channel role is genuinely three-hatted:
-   *Partner* (answers "what's open?" on demand), *Active* (notices
-   stale `awaiting=human` consults and nudges), *Library* (knows the
-   consult index across rigs). A formula cannot hold hats two or three
-   between invocations. The same argument gc-toolkit already made for
-   the architect applies here, at smaller scale.
-3. **Reply ergonomics.** Overseer replying to concierge in prose and
-   having it threaded to the right bead is materially better than
-   `bd update --notes`. This is the single biggest overseer-day
-   improvement.
-4. **Mayor stays pure.** The explicit constraint — distinct from
-   mayor — is honored by construction. Mayor and concierge do not share
-   context or conversation state.
-5. **Idle-cheap.** City-scoped, `idle_timeout = "2h"`, `wake_mode =
-   "fresh"` — if there are no consults, there is no running concierge.
-   The overhead worry from "another persistent agent" is smaller than it
-   looks.
+Concierge is not a digest sender. It is a conversational partner.
 
-### Why not Option B first, with A as upgrade path
+- **Push on create.** When a new consult is filed, concierge pushes a
+  short notification (mail or nudge) to the overseer. The overseer is
+  never waiting on cadence to discover a consult exists.
+- **Pull on engagement.** When the overseer engages — "what's open?",
+  "let's do UX reviews", a specific bead ID — concierge pulls up the
+  relevant consults, ranks them by type and age, reads each bead's
+  full context (description, notes, linked artifacts, parent-bead
+  context), and begins a conversation.
+- **Converse in prose.** The conversation is the interface. Overseer
+  speaks in prose; concierge responds in prose, grounded in the loaded
+  bead context. Back-and-forth until a decision lands.
+- **Write back and close.** When the overseer's decision is clear,
+  concierge writes it to the bead as a note and closes the consult.
+  Because the consult is a dependency of the parent bead, closing
+  unblocks the parent automatically.
 
-Defensible, and the second-best plan. Rejected because the brand is the
-load-bearing piece, not the mechanism. Shipping B first trains the
-overseer to a nameless digest; switching to A later then requires
-*retraining* the overseer onto a new surface. A dedicated agent from day
-one sets the right expectations cheaply.
+The overseer's experience is: "a new consult just landed. I can see
+what it is when I want to. When I'm ready, I tell concierge; we talk it
+through; it records the outcome." No bead CLI required for the common
+path.
 
-That said — **if concierge implementation stalls** (mail-reply routing
-turns out to be ugly, for example), ship Option B as a stopgap. It is
-not a dead-end; it is a strictly simpler version of the same aggregation
-query.
+### 5.2 Consults as parent-bead dependencies
 
-### Why not C or D
+A consult is never a floating bead. It is always filed as a dependency
+(directly or transitively) of the bead whose work it blocks.
 
-C was already rejected by the overseer and the design analysis confirms
-why. D is a later layer on top of whichever aggregator ships; do not
-build it first.
+- **Resolution unblocks.** Closing the consult propagates through the
+  bead dependency graph. The parent bead's assigned work resumes.
+- **No `gc.awaiting` state machine.** A consult is "open for the human"
+  when it is open and "resolved" when it is closed. The specialist's
+  filing, the concierge's conversation, and the final decision all
+  operate on bead state — no parallel metadata flags.
+- **Parent context travels.** Concierge can walk the dependency edge
+  upward to understand *why* the consult matters, and carry that
+  context into the conversation.
+
+### 5.3 Bead as conversation record
+
+Back-and-forth on the bead is allowed and expected — the same way a
+polecat bead captures its own progress as it works. The bead holds the
+conversation record plus the final decision.
+
+- **Live state lives in the session.** The concierge session (loaded
+  context, current conversation turn, pending questions) is ephemeral.
+  When the session ends, the bead is the durable artifact.
+- **Notes are the transcript.** Each meaningful turn — a posed option,
+  a clarification, a decision — lands as a bead note. A future
+  concierge (or any reader) can reconstruct the conversation from the
+  bead alone.
+- **Closing note carries the decision.** The final note on a consult
+  states the resolution explicitly so downstream readers do not have
+  to infer it from the transcript.
+
+The v1 design carries conversations through bead notes + concierge's
+in-context recall. The session-per-consult direction (see §5.11) will
+make live conversation even more natural in a future revision; the v1
+does not depend on it.
+
+### 5.4 Sub-bead nesting for mid-conversation side-quests
+
+When a consult cannot resolve without deeper investigation — reading
+existing code shape, reviewing a historical decision, running a quick
+prototype — a **sub-bead** is filed. This is the *standard* shape for
+mid-conversation side-quests, not an exception.
+
+Two modes:
+
+- **Blocking sub-bead.** The conversation pauses until the sub-bead
+  returns an answer. Example: "I can't pick between options A and B
+  until the architect reviews the existing ADR on retry behavior."
+  The consult depends on the sub-bead; the conversation resumes once
+  the sub-bead closes with its answer.
+- **Parallel sub-bead.** The conversation continues while the sub-bead
+  runs in the background. Example: "Kick off a benchmark on these two
+  approaches; keep discussing the design while we wait for numbers."
+  The sub-bead is an independent unit of work whose result feeds back
+  into the open conversation when ready.
+
+Concierge presents this choice explicitly when a side-quest comes up:
+"I can either file this as blocking (we pause here until it comes back)
+or parallel (I'll keep talking while it runs) — which do you want?"
+The overseer picks; concierge files appropriately.
+
+The architect's "sub-beads for side-quests" convention is the prior
+art; this design formalizes it as the standard mid-conversation shape.
+
+### 5.5 Context bar at filing
+
+Specialists file consults with enough context that the overseer (and
+concierge) can seek any remaining context from the bead alone. A
+consult bead is not a one-liner. The filing bar is part of the
+protocol.
+
+At minimum, a filed consult carries:
+
+- **Why this needs a decision.** The blocker or crossroads the
+  specialist has hit. What work stalls without an answer.
+- **Options on the table.** What the specialist has considered, with
+  the trade-offs for each. At least two options when a binary choice
+  is being posed.
+- **Links to artifacts.** Branches, diffs, prior beads, roadmap
+  entries, ADRs, docs, anything the overseer might want to open.
+- **Prior analysis.** Any research the specialist has already run —
+  so the overseer doesn't duplicate it in the conversation.
+
+A consult that does not carry this context should be rejected or
+augmented before it reaches concierge's notification path. The
+specialist is responsible for the bar; concierge does not rewrite
+filings but can kick them back.
+
+### 5.6 Label and metadata
+
+- **Label:** `consult`. Not `architect-consult`. Any specialist can
+  file.
+- **Consult type:** `gc.consult_type` metadata carries the type. The
+  current candidate taxonomy is {review, decision, drift, promotion,
+  ingest, research}; see §7 — worth a short pass to confirm (or
+  revise) before build.
+- **Title prefix:** `[type] …`, consistent with the original architect
+  convention.
+- **Dependency:** always filed as a dependency of the blocking parent
+  bead. No standalone consults.
+- **Routing:** concierge's query watches for open beads with label
+  `consult`, regardless of owner.
+
+### 5.7 Mayor ↔ concierge bidirectional awareness
+
+Mayor and concierge do not share work queues — their registers are
+distinct (coordination vs. consult surfacing). But each knows the other
+exists and redirects when mis-addressed.
+
+- **Mayor's prompt gains one paragraph.** If asked "what's pending my
+  feedback?" or "what consults are open?", ping or engage concierge.
+  Do not answer from mayor's own queue.
+- **Concierge's prompt gains the symmetric paragraph.** If asked about
+  dispatch state, worker counts, or coordination, redirect to mayor.
+
+This keeps each agent's brand clean without isolating them — the
+overseer gets redirected gracefully rather than bouncing off a silent
+agent.
+
+### 5.8 Cadence
+
+- **Push on create.** New consult → immediate notification. This is
+  the primary signal.
+- **No daily empty digest.** If nothing is open, concierge is silent.
+  "Nothing to report" mails train the overseer to ignore the sender.
+- **Optional periodic resurface.** Weekly-ish reminder of stale open
+  consults is acceptable to keep them visible. This is an option, not
+  a default — cities can enable it where the human's engagement
+  cadence makes it useful.
+- **On-demand pull.** "What's open?" and specific bead IDs are always
+  answerable — concierge responds to nudges regardless of push state.
+
+### 5.9 Deployment
+
+City-level agent is primary. Every city that adopts gc-toolkit's
+specialist stack runs one concierge across the rigs in that city.
+
+A **per-rig concierge variant** is allowed where a rig's consult
+volume or sensitivity justifies it — follows the mayor precedent. Some
+cities/rigs will want it; others won't. The prompt template is written
+to support both deployments with minimal divergence.
+
+Whether a per-rig concierge shares state with the city concierge or
+operates independently is open (see §7). The first implementation
+ships city-only.
+
+### 5.10 Reply ambiguity
+
+When the overseer's reply could apply to more than one open consult,
+concierge refuses and asks once.
+
+- Every conversation turn and every digest line names the target
+  consult by ID. This makes ambiguity rare in practice.
+- If the overseer's reply is still ambiguous, concierge asks one
+  clarifying question ("which one — tk-abc or tk-def?") rather than
+  guessing. No second clarification — if the second round is still
+  ambiguous, concierge files a meta-consult and backs off.
+
+Design goal: make ambiguity so rare by careful presentation that the
+refusal path is almost never exercised.
+
+### 5.11 Future primitive: session-per-consult
+
+A feasibility study (see tk-bek in [References](#references)) is
+running in parallel with this revision. It explores whether a future
+iteration should spawn a dedicated session per conversation —
+effectively making each consult a short-lived polecat with the filing
+specialist's context loaded — so the overseer is talking to "the
+specialist who filed this" rather than to concierge carrying a summary.
+
+This v1 design **does not depend on that primitive.** The v1 concierge
+holds conversations in its own persistent context. If the feasibility
+study recommends building session-per-consult, it becomes a later
+upgrade layer on top of the v1 machinery.
 
 ## 6. Scope of the first implementation
 
-If Option A is approved, the follow-up build is bounded:
+mechanik will file the implementation bead against this design. The
+build is bounded:
 
-- `agents/concierge/agent.toml` and `agents/concierge/prompt.template.md`
-  — city-scoped, fresh-wake, 2h idle.
-- Prompt defines: consult query, digest format, on-demand nudge
-  response, mail-reply → bead-note routing, `gc.awaiting` state machine.
-- Small `mol-consult-sweep.toml` formula if the prompt's inline logic
-  is not enough; otherwise, no new formula in round one.
-- One-line addition to the architect prompt: set
-  `gc.awaiting=human` on consult create, `gc.awaiting=specialist`
-  after a reply.
-- `city.toml` example wiring (copy-pasteable into a consuming city).
-- Documentation in `docs/` — a short README at `agents/concierge/` and
-  a note in `docs/roadmap.md`.
+- **`agents/concierge/agent.toml` and `agents/concierge/prompt.template.md`**
+  — city-scoped, fresh-wake, long idle timeout.
+- **Prompt defines**: the consult query (label-based, not
+  metadata-state-based), push-on-create notification, engagement-driven
+  context loading, conversation guidelines, bead-note writing, sub-bead
+  nesting (blocking vs. parallel), filing-bar rejection,
+  ambiguity-refusal protocol, mayor-redirection paragraph.
+- **Architect prompt edit**: replace any `gc.awaiting`-era instructions
+  with the "consult = parent-bead dependency" convention and the "push
+  notification to concierge on create" action.
+- **`city.toml` example wiring** — copy-pasteable into a consuming
+  city.
+- **Documentation** — short README at `agents/concierge/`, plus the
+  already-applied entry in `docs/roadmap.md`.
 
 Explicit non-goals for the first implementation:
 
-- No remote delivery (Slack/webhook) — the digest payload stays mail.
-- No multi-human addressing — one overseer alias in the first version.
-- No cross-rig patrol beyond the consult query — concierge does not
-  know anything about mayor's dispatch state.
+- **No remote delivery** (Slack, webhook). Notification payloads stay
+  on the pack's existing mail/nudge channels. A future webhook
+  forwarder is a layer on top.
+- **No multi-human addressing.** One overseer alias in the first
+  version.
+- **No session-per-consult spawning.** Tracked by tk-bek as a future
+  primitive; v1 concierge holds conversations in its own context.
+- **No cross-rig patrol beyond the consult query.** Concierge knows
+  nothing about mayor's dispatch state.
 
-## 7. Open questions for the overseer
+## 7. Residual open questions
 
-These need an explicit call; the design doc should not guess.
+These need an explicit call during (or before) implementation.
 
-1. **Agent name.** `concierge` is the working name. Alternatives
-   considered: `herald` (announces but does not route), `steward` (too
-   generic), `aide` (too subordinate). Landing on a name before the
-   build matters because the brand is the product.
-2. **Cadence default.** Morning-only (one mail/day), twice (morning +
-   afternoon), or on-event (push each new consult immediately, with a
-   daily recap)? Cadence drives perceived noise. Default proposal:
-   one morning digest + on-demand nudges, no per-event push.
-3. **Empty digest behavior.** Should concierge send a "nothing open"
-   mail on cadence (brand reinforcement) or stay silent (less noise)?
-   Default proposal: empty digest on cadence, at least weekly.
-4. **Reply routing ambiguity policy.** When the overseer's reply could
-   apply to more than one open consult, does concierge (a) pick the
-   newest, (b) apply to all of them, or (c) refuse and ask? Default
-   proposal: (c) refuse and ask, once; if still ambiguous, fall back
-   to filing a meta-consult.
-5. **`gc.awaiting` initial value.** The proposal assumes the specialist
-   (architect) sets it on consult creation. Alternative: concierge
-   infers it from the absence of a specialist reply. The former is
-   cleaner but requires updating every specialist prompt. The latter
-   is more decoupled but less precise. Default proposal: specialist
-   sets it; architect is the only consult-producer today, so the cost
-   is one prompt edit.
-6. **Should mayor know about concierge?** Mayor's role is coordination;
-   concierge's is consult surfacing. A question filed to mayor that
-   should have been a consult needs a redirect path. Default proposal:
-   mayor's prompt gets a one-paragraph "when to redirect to concierge"
-   section, but concierge does not appear in mayor's work queue.
-7. **Is this a city-level agent or a gc-toolkit-pack agent?** Strictly,
-   mechanik is already in the pack; concierge logically belongs there
-   too. But city agents are declared in `city.toml`, not in pack files.
-   The pack ships the prompt template and agent.toml; the consuming
-   city wires it in. Confirming that path is correct before build.
+1. **Consult-type taxonomy.** Current candidates: {review, decision,
+   drift, promotion, ingest, research}. Worth a short pass before
+   build to confirm the list or revise it — the set should cover the
+   common shapes without so many types that specialists guess wrong.
+2. **Per-rig vs. city-level state sharing.** When a rig adopts a
+   per-rig concierge, does it share the consult index with the city
+   concierge or operate independently? Decide when per-rig adoption
+   is first proposed; first implementation is city-only.
+3. **Agent name.** `concierge` is the working name and the name used
+   throughout this doc. Confirm (or replace) before build — the brand
+   is the product.
+
+Questions from the first-pass design that the approved model has
+settled (and so no longer appear here): the `gc.awaiting` state-machine
+initial value, cadence defaults, empty-digest behavior, reply-routing
+ambiguity policy, and whether mayor knows about concierge. Each is
+answered explicitly in §5.
 
 ## 8. Follow-up bead
 
-Filed as **tk-uac.1** — "Implement consult surfacing channel (concierge
-agent)." Contains scope (agent skeleton + architect prompt edit + example
-`city.toml` entry), a pre-build decision checklist pulled from §7, and
-mechanik-review-before-dispatch. The architect should author an ADR
-recording the decision once the concierge is operational.
+The original tk-uac.1 placeholder assumed the digest-model scope.
+Since the approved design reshapes the mechanism, **mechanik will file
+a fresh implementation bead** against this revision rather than editing
+tk-uac.1 in place. Nudging mechanik on the close of tk-89y is part of
+the handoff.
 
-tk-uac.1 is scoped to Option A. If a different option is approved,
-close tk-uac.1 and file a fresh implementation bead for the chosen
-option — the scope differs enough that editing is the wrong move.
+The fresh implementation bead carries:
+
+- Scope from §6.
+- Pre-build decision checklist from §7.
+- Architect prompt edit as a companion change.
+- Any ADR the architect wants to record once concierge is operational.
 
 ## References
 
-- `tk-uac` — this design bead.
-- `tk-uac.1` — implementation follow-up (Option A: concierge agent).
-- `tk-a4t` — architect agent skeleton (merged). Source of consult
-  protocol.
+- `tk-uac` — first-pass design bead (closed).
+- `tk-89y` — this revision, conversational-concierge model.
+- `tk-bek` — feasibility study: session-per-consult conversation
+  spawning (running in parallel; informs future upgrade path).
+- `tk-a4t` — architect agent skeleton (merged). Source of the original
+  consult protocol.
 - `tk-6s5` — strategic direction; the primitives this design obeys.
 - `agents/architect/prompt.template.md` on
   `origin/polecat/tk-a4t-architect-skeleton` — authoritative definition
-  of the consult bead shape.
+  of the consult bead shape (pre-generalization).
 - `agents/mechanik/prompt.template.md` on main — peer agent; precedent
   for city-scoped specialist pattern.
-- `docs/roadmap.md` — "Consult bead surfacing channel" open question
-  and "branded context channels" primitive.
+- `docs/roadmap.md` — "Consult bead surfacing channel" entry and
+  "branded context channels" primitive.
 - `formulas/mol-digest-generate.toml` in gastown — prior art for
   periodic mail-digest mechanics referenced in Option B.

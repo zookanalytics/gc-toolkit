@@ -84,8 +84,11 @@ Distinct faces — architect consult vs. other specialist consult — come
 from metadata and presentation, not from separate bead types.
 
 Consult beads need a discoverability surface so they don't sit silent.
-The mayor (or equivalent) aggregates `awaiting-human` consults and
-surfaces them on a cadence.
+A dedicated city-level `concierge` agent pushes a notification on
+consult creation and holds a real-time conversation with the overseer
+on engagement. Consults are filed as dependencies of the bead whose
+work they block, so closing a consult unblocks the parent. See
+`docs/design/consult-surfacing.md` for the approved design.
 
 ### Merge-strategy agnosticism
 
@@ -168,14 +171,13 @@ invented intentionally when we get to it, rather than bolted on.
   opinionated about paths or discovers and tracks them (design choice is
   open; both are acceptable). Pack-level architect carries no rig-specific
   knowledge.
+- **Consult bead surfacing channel**: a dedicated city-level `concierge`
+  agent pushes on creation and holds real-time conversation with the
+  overseer on engagement. Consults are filed as dependencies of the
+  parent bead. Details in `docs/design/consult-surfacing.md`.
 
 ### Open
 
-- **Consult bead surfacing channel**: who aggregates `awaiting-human`
-  consults and how they reach the human is not decided. The default
-  gastown mayor is not assumed to be the right surface — the leaning
-  is a purpose-built agent or channel rather than overloading mayor,
-  but the shape is undecided.
 - **Architect: opinionated paths vs. discovery**: the architect either
   expects artifacts at known paths or learns where they live per-rig.
   Both are acceptable; we'll pick one (or allow both) when we build.
@@ -211,8 +213,8 @@ The next durable artifacts, in rough order. Not a contract.
    best of the A/B experiment outputs.
 4. Architect's patrol formula (Active hat) for drift and
    question-promotion.
-5. Consult-bead surfacing channel — design and build whatever surface
-   aggregates `awaiting-human` consults.
+5. Consult-bead surfacing channel — build the `concierge` agent per
+   `docs/design/consult-surfacing.md`.
 6. First review-leg specialist: likely a planning/architecture-consistency
    leg that runs when a polecat finishes work against a plan the
    architect helped shape.
