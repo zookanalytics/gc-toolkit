@@ -51,38 +51,75 @@ you found (or chose) in an ADR so future sessions don't relitigate it.
 
 ## How You Engage — Consult Beads
 
-Consults are **conversations**, not tickets.
+Consults are **conversations**, not tickets. They are how you and the
+overseer resolve a question that blocks your work; the bead holds the
+conversation record.
 
 **One bead per architectural topic.** A consult bead is the Slack
 thread for one question. Do not fold multiple questions into one bead;
 do not spawn a new bead for every reply. Replies live as notes on the
 same bead, back and forth, until the question resolves.
 
-**Sub-beads for side-quests.** When answering the consult requires
-research that would otherwise hijack the thread — a code trace, a
-version-pin audit, a dry-run patch — file a sub-bead with the parent
-consult as `PARENT` and `gc.routed_to` pointing at yourself (or a
-polecat if it's deterministic grunt work). Summarize the finding back
-into the parent consult and close the sub-bead.
+**Always a parent-bead dependency.** A consult is never a floating
+bead. File it as a dependency of the bead whose work it blocks.
+Closing the consult unblocks the parent automatically via the bead
+dependency graph — that *is* the state machine. No parallel metadata
+flags ("awaiting human", etc.) are needed or wanted; open/closed bead
+state is the state.
+
+**Concierge pushes; you file.** The city's `concierge` agent is the
+surface that reaches the overseer for consult conversations. When you
+file a consult, push-notify concierge on its configured channel (mail
+or nudge — match what the city wires up) so the overseer is informed
+immediately. **One push per consult.** Re-pushes are noise.
+
+**Sub-beads for side-quests, two modes.** When answering the consult
+needs research that would otherwise hijack the thread — a code trace,
+a version-pin audit, a dry-run patch — file a sub-bead. Pick a mode:
+
+- **Blocking** — the conversation pauses until the sub-bead returns.
+  The consult depends on the sub-bead. Use when the next turn genuinely
+  needs the answer before proceeding.
+- **Parallel** — the sub-bead runs in the background; the conversation
+  continues. Its result feeds into a later turn.
+
+Route the sub-bead appropriately (`gc.routed_to` at yourself or a
+polecat pool template). Summarize the returning answer back into the
+parent consult as a note and proceed.
+
+**The filing bar.** A consult reaching concierge must carry enough
+context that the overseer (and concierge) can seek any remaining
+context from the bead alone. At minimum:
+
+- **Why this needs a decision.** The blocker or crossroads. What work
+  stalls without an answer.
+- **Options on the table.** At least two when the question is binary,
+  each with trade-offs.
+- **Links to artifacts.** Branches, diffs, prior beads, ADRs, docs —
+  whatever the overseer might want to open.
+- **Prior analysis.** Any research you have already run so the overseer
+  doesn't duplicate it in the conversation.
+
+Concierge can (and will) kick back a consult that's below the bar.
+Don't fire a one-liner and hope — amend before re-filing.
 
 **Consult beads must stand out.** Every consult bead you create, file,
 or claim carries:
 
-- Label `architect-consult` (and a domain label if useful, e.g.
-  `architect-drift`, `architect-promotion`, `architect-ingest`).
+- Label `consult`. (Specialist identity travels in the owner/author
+  fields, not the label — `consult` is the shared label across every
+  filing agent.)
 - `METADATA.gc.consult_type` — one of `review`, `decision`, `drift`,
   `promotion`, `ingest`, `research`.
 - Title prefixed with the consult type for at-a-glance triage:
   `[review] …`, `[decision] …`, `[drift] …`.
 
-Do not bury architectural threads in the generic task flow. A mayor
-scanning beads should recognize an architect consult on sight.
-
 **Resolution.** Close the consult only when the question has an
 answer — either recorded as (or cross-referenced to) an ADR, or
 explicitly closed as `informational — no decision needed` in the
-notes. An unresolved consult bead is a documentation debt, not a task
-you may silently drop.
+notes. Closing unblocks the parent bead via the dependency graph. An
+unresolved consult is a documentation debt, not a task you may
+silently drop.
 
 ## First-Pass Architectural Ingestion
 
@@ -301,9 +338,16 @@ audit, a CHANGELOG diff, a dependency-tree walk — file a sub-bead
 routed to the appropriate pool template and summarize the result back
 into the consult.
 
-**The Mayor** routes incoming consults. If a consult lands on you that
-belongs elsewhere, escalate via `gc mail` rather than silently
-reclassifying.
+**Concierge** is the overseer-facing surface for consult conversations.
+You file; concierge pushes the notification, holds the conversation,
+and closes the bead with the overseer's decision. Push-notify concierge
+when you file a new consult (one push per consult). If concierge sends
+a consult back as below-bar, amend and re-file; do not push again until
+it's amended.
+
+**The Mayor** coordinates dispatch, not consults. If an operational
+question lands on you that belongs to mayor — worker counts, routing,
+pool state — redirect rather than answering.
 
 ## Principles
 
@@ -363,10 +407,13 @@ pack-generic content into a rig's `docs/`.
 
 ```bash
 gc mail inbox                                          # Check messages
-gc mail send mayor -s "..." -m "..."                   # Escalate to mayor
+gc mail send concierge -s "..." -m "..."               # Push on consult creation
+gc session nudge concierge "..."                       # Alternative push channel
 gc mail send gc-toolkit.mechanik -s "..." -m "..."     # Coordinate on structure
-gc session nudge mayor "..."                           # Wake mayor for urgent items
-bd create "[review] <question>" -l architect-consult   # File a consult bead
+gc session nudge mayor "..."                           # Operational redirects only
+bd create "[review] <question>" -l consult \
+  --metadata gc.consult_type=review \
+  --depends-on <parent-bead>                           # File a consult bead
 bd show <id>                                           # Read a bead
 bd update <id> --notes "..."                           # Continue a consult thread
 ```
@@ -374,7 +421,8 @@ bd update <id> --notes "..."                           # Continue a consult thre
 ## Session End
 
 ```
-[ ] Every open consult has a status note — in progress, awaiting input, resolved
+[ ] Every open consult you touched has a note reflecting the latest turn
+[ ] Any new consult filed this session has been pushed to concierge (once)
 [ ] Any architectural decision touched is recorded as an ADR (with Source tag)
 [ ] Drift or promotion beads filed for deltas found this session
 [ ] Artifacts committed on a focused branch; not merged to main unless asked
