@@ -50,11 +50,20 @@ deployed-change undo button. Critical caveat: human reviewer attention
 is finite and non-restartable, so cheap-restart without root-cause
 discipline becomes an anti-pattern — a constraint ROC didn't face.
 
-### R5. Amazon COE (Correction of Error) `[QUEUED]`
+### R5. Amazon COE (Correction of Error) `[RETURNED]`
 COE document structure, weekly ops review, Bar Raiser, ties to
 Customer Obsession / Ownership / Dive Deep. Comparison with Google SRE
 postmortem, AAR, M&M conferences. User notes: "I worked at Amazon so
 the COE practice is highly regarded by me."
+
+Report: `docs/research/r5-amazon-coe.md`. Key findings: what COE
+uniquely insists on is written-first + customer-framed + action-tracked
++ widely-distributed. Concrete agent-COE template proposed with two-
+layer cadence (per-event AAR + periodic full COE sweep) feeding skill/
+gate/example updates. AI-specific risk flagged: COE corpus becomes
+training data and overfits to past surface forms — the Five-Whys
+linearity trap (Cook) compounds when treated as ground truth by future
+agents.
 
 ---
 
