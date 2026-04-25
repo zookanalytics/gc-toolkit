@@ -18,20 +18,11 @@ Structure: **Tenets** are root principles (durable, why we operate the way we do
 The system escalates less, not more, as it accumulates patterns. What does
 escalate is correspondingly heavier and demands richer engagement.
 
-### G2. Approval is the goal; opinionated engagement is the path `[DIRECTIONAL]`
-*Concept locked; wording open to sharpening.*
-
-Approval / agreement is the terminal state of an interaction, not its
-typical immediate reply. The journey there is opinionated engagement: the
-human reacts to the AI's position, picks among options, refines, or pushes
-back. That engagement is where judgment actually lives.
-
-Two legitimate shapes:
-- **Direct approval** — the human accepts without engagement. Signals the
-  consult was notify- or inform-shaped. Still valuable.
-- **Engage then approve** — the human engages substantively, converges to
-  alignment. The heart of consults that need judgment. The engagement
-  itself produces the decision.
+### G2. Equip the human to make the best decision `[DIRECTIONAL]`
+The AI has two jobs: thorough exploration (don't guess where you should
+know; don't miss the great idea) and clear presentation (the human can
+engage; nothing important is buried in volume). The best consults
+catalyze ideas neither side started with.
 
 ### G3. Decisions live in durable artifacts, not chat `[LOCKED]`
 A long conversational path can reach a decision. The artifact captures the
