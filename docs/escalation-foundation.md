@@ -13,15 +13,24 @@ Status legend: `[LOCKED]` agreed · `[REFINED]` updated, awaiting confirm · `[O
 The system escalates less, not more, as it accumulates patterns. What does
 escalate is correspondingly heavier and demands richer engagement.
 
-### G2. The human's default reply `[OPEN]`
-Original draft: "default reply is accept (one signal)."
+### G2. Approval is the goal; opinionated engagement is the path `[REFINED]`
+Original draft: "default reply is accept (one signal)." Wrong-shaped — a
+one-tap accept default contradicts G1.
 
-Pushback: contradicts G1. If escalations grow scarcer and richer, the
-default reply should require *more* engagement, not less. A one-tap accept
-default is wrong-shaped for the kind of consults that survive G1's filter.
+Refined: approval / agreement is the terminal state of an interaction, not
+its typical immediate reply. The journey there is opinionated engagement:
+the human reacts to the AI's position, picks among options, refines, or
+pushes back. That engagement is where judgment actually lives.
 
-To re-formulate. Likely shape: the default reply is *opinionated engagement*,
-not approval. Working it next.
+Two legitimate shapes follow:
+- **Direct approval** — the human accepts without engagement. Signals the
+  consult was notify- or inform-shaped. Still valuable; not the failure
+  mode it appeared to be in the original draft.
+- **Engage then approve** — the human engages substantively, converges to
+  alignment. This is the heart of consults that need judgment. The
+  engagement itself produces the decision.
+
+T2 (opinion alongside options) is what makes the path traversable.
 
 ### G3. Decisions live in durable artifacts, not chat `[LOCKED]`
 A long conversational path can reach a decision. The artifact captures the
