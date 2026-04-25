@@ -18,11 +18,24 @@ Status legend: `[QUEUED]` agent dispatched · `[IN PROGRESS]` agent running · `
 
 ## Queue
 
-### R1. Toyota Production System `[QUEUED]`
+### R1. Toyota Production System `[RETURNED]`
 Nemawashi, A3, hansei, kaizen, jidoka, andon cord, kanban, JIT,
 genchi genbutsu, poka-yoke, gemba walk. The canonical front+back+mid
 template for cheap-execution oversight. User notes: "very solid
 practices, absolutely worth deep understanding and references."
+
+Report: `docs/research/r1-toyota-production-system.md`. All 13
+practices covered with mechanics and failure modes. Most important
+thing that *didn't* transfer to software: the coach-apprentice dyad.
+AI-dev mappings: andon-as-escalation with pull-rate as a health
+metric, A3 as the canonical agent→human handoff artifact, nemawashi
+as pre-PR consensus, hansei after each task, poka-yoke via typed
+schemas and sandboxes. Critical limit (sharp): jidoka can't catch
+*semantic* defects like hallucination because the producer can't
+distinguish them from correct output. Steel-mans: DeMarco/Lister/
+Holub on manufacturing-vs-knowledge mismatch, Emiliani on Lean
+theater, Toyota's 2009-10 and 2022-24 scandals as evidence that
+scaling execution past the judgment layer fails silently.
 
 ### R2. Cheap prototyping (CAD, 3D print, rapid prototyping, on-demand fab) `[RETURNED]`
 Design thinking, MVP, lean startup, design sprints, dual-track agile.
