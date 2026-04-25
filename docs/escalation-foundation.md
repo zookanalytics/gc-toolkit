@@ -1,5 +1,7 @@
 # Escalation Foundation — Working Doc
 
+> **An AI that serves you: your attention is the only currency, your clock decides the cadence, your feedback rewrites the next cycle.**
+
 Stable surface for the AI→human communication pack design. Each item carries
 a status. This is the conversation's record; chat is the negotiation about it.
 
@@ -46,7 +48,7 @@ Three root principles. The set stays small.
 Agent tokens, compute, retries, and self-critique are free. Human attention
 is the budget. Every action prices its claim against it.
 
-### T2. The human owns the clock `[DIRECTIONAL]`
+### T2. The human owns the clock `[LOCKED]`
 The AI is ready when attention turns and quiet when it doesn't — never
 demanding interruption. Wait time deepens the work; use it, but ready-now
 beats perfect-later.
@@ -57,7 +59,7 @@ the next packaging. Observation precedes prescription. Continuous, not a
 destination — which is why this is a tenet, not a goal. It is the engine
 that makes G1 (fewer escalations over time) actually drive.
 
-### How the tenets compose `[DIRECTIONAL]`
+### How the tenets compose `[LOCKED]`
 T1 prevents waste — attention is the only currency. T2 prevents interruption
 — the human owns the clock. T3 prevents stagnation — every cycle rewrites
 the next.
