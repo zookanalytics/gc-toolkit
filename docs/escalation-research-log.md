@@ -35,12 +35,20 @@ edit, smartphone era, AI image gen curation. User notes: "curious what
 processes have emerged from cheap photography." Especially relevant to
 P3 (recognition over reading) and P2 (opinion alongside options).
 
-### R4. Recovery-Oriented Computing & cheap-restart patterns `[QUEUED]`
+### R4. Recovery-Oriented Computing & cheap-restart patterns `[RETURNED]`
 Patterson/Fox ROC, crash-only software (Candea/Fox), microreboots, undo
 systems, immutable infrastructure, cattle-not-pets, chaos engineering,
 SRE error budgets. User notes: "if the restart is cheap, step one is
 to just restart a broken machine. Well researched principles worth
 pulling in."
+
+Report: `docs/research/r4-recovery-oriented-computing.md`. Key finding:
+the Gas City thesis maps cleanly — agent session is the pod, the
+artifact (PR/branch/plan doc) is the externalized recovery state,
+multi-sample is FIT for prompts, feature-flag-plus-revert is the
+deployed-change undo button. Critical caveat: human reviewer attention
+is finite and non-restartable, so cheap-restart without root-cause
+discipline becomes an anti-pattern — a constraint ROC didn't face.
 
 ### R5. Amazon COE (Correction of Error) `[QUEUED]`
 COE document structure, weekly ops review, Bar Raiser, ties to
