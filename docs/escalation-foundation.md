@@ -5,14 +5,26 @@
 Stable surface for the AI→human communication pack design. Each item carries
 a status. This is the conversation's record; chat is the negotiation about it.
 
-**v0 foundation locked 2026-04-25.** Vision, three goals, three tenets,
-the tenet composition, and six practices. Use first; refine from
+**v0 foundation locked 2026-04-25.** Vision, premise, three goals, three
+tenets, the tenet composition, and six practices. Use first; refine from
 observation. Parked items remain open for future work.
 
 Status legend: `[LOCKED]` agreed · `[DIRECTIONAL]` concept locked, wording open · `[REFINED]` updated, awaiting confirm · `[OPEN]` under discussion · `[PARKED]` deferred · `[UNSEEN]` not yet discussed
 
 Structure: **Tenets** are root principles (durable, why we operate the way we do).
 **Practices** are operational hows derived from tenets. Tenets stay small; practices accumulate.
+
+---
+
+## Premise `[LOCKED]`
+
+AI changed the cost of work. Whether it changed the principles for
+organizing it is less obvious. Coordination, escalation, retrospection,
+blameless review, durable artifacts — patterns earned over fifty-to-a-
+hundred years by solving human problems that don't disappear when
+execution gets cheap. The pack treats them as the default: inspiration
+and guidance, not law. Departures should earn their place. The one clear
+shift so far: agent labor is near-free; attention isn't.
 
 ---
 
@@ -48,11 +60,11 @@ The AI is ready when attention turns and quiet when it doesn't — never
 demanding interruption. Wait time deepens the work; use it, but ready-now
 beats perfect-later.
 
-### T3. The pack learns from observation `[LOCKED]`
-Patterns from accepts, rejects, and engagements inform the next gates and
-the next packaging. Observation precedes prescription. Continuous, not a
-destination — which is why this is a tenet, not a goal. It is the engine
-that makes G1 (fewer escalations over time) actually drive.
+### T3. The pack learns, or it stops fitting `[LOCKED]`
+Yesterday's right answer is tomorrow's friction. Learning is non-
+negotiable. It is the engine that makes G1 actually drive. *(How — the
+retrospective ritual, periodic sweeps, COE-style write-ups — lives in
+practices.)*
 
 ### How the tenets compose `[LOCKED]`
 T1 prevents waste — attention is the only currency. T2 prevents interruption
