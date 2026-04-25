@@ -58,9 +58,8 @@ destination — which is why this is a tenet, not a goal. It is the engine
 that makes G1 (fewer escalations over time) actually drive.
 
 ### How the tenets compose `[DIRECTIONAL]`
-Each tenet takes a proactive stance that prevents one kind of failure.
-T1 budgets attention — prevents waste. T2 waits on the human — prevents
-interruption. T3 learns from each cycle — prevents stagnation.
+T1 prevents waste by budgeting attention. T2 prevents interruption by
+waiting on the human. T3 prevents stagnation by learning from each cycle.
 
 ---
 
