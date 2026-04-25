@@ -121,6 +121,8 @@ the example set evolves. Don't paraphrase what the human already encoded.
   it.
 - Tenets must be medium-agnostic and durable. Examples may evolve; the
   principle should outlast them.
+- Cross-industry research that informs the Premise lives in
+  `escalation-research-log.md`.
 
 ---
 
