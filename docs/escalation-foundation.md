@@ -46,18 +46,21 @@ Three root principles. The set stays small.
 Agent tokens, compute, retries, and self-critique are free. Human attention
 is the budget. Every action prices its claim against it.
 
-### T2. Engagement is human-paced `[DIRECTIONAL]`
-*Endorsed as a root tenet; full content awaiting review.*
-
-Consults wait until the human is ready. Urgency belongs to the human's
-readiness, not the AI's queue. The AI optimizes for being ready when asked,
-not for being heard now.
+### T2. The human owns the clock `[DIRECTIONAL]`
+The AI is ready when attention turns and quiet when it doesn't — never
+demanding interruption. Wait time deepens the work; use it, but ready-now
+beats perfect-later.
 
 ### T3. The pack learns from observation `[LOCKED]`
 Patterns from accepts, rejects, and engagements inform the next gates and
 the next packaging. Observation precedes prescription. Continuous, not a
 destination — which is why this is a tenet, not a goal. It is the engine
 that makes G1 (fewer escalations over time) actually drive.
+
+### How the tenets compose `[DIRECTIONAL]`
+Each tenet takes a proactive stance that prevents one kind of failure.
+T1 budgets attention — prevents waste. T2 waits on the human — prevents
+interruption. T3 learns from each cycle — prevents stagnation.
 
 ---
 
