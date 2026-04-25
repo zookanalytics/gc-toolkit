@@ -18,23 +18,18 @@ escalate is correspondingly heavier and demands richer engagement.
 
 ### G2. Approval is the goal; opinionated engagement is the path `[DIRECTIONAL]`
 *Concept locked; wording open to sharpening.*
-Original draft: "default reply is accept (one signal)." Wrong-shaped — a
-one-tap accept default contradicts G1.
 
-Refined: approval / agreement is the terminal state of an interaction, not
-its typical immediate reply. The journey there is opinionated engagement:
-the human reacts to the AI's position, picks among options, refines, or
-pushes back. That engagement is where judgment actually lives.
+Approval / agreement is the terminal state of an interaction, not its
+typical immediate reply. The journey there is opinionated engagement: the
+human reacts to the AI's position, picks among options, refines, or pushes
+back. That engagement is where judgment actually lives.
 
-Two legitimate shapes follow:
+Two legitimate shapes:
 - **Direct approval** — the human accepts without engagement. Signals the
-  consult was notify- or inform-shaped. Still valuable; not the failure
-  mode it appeared to be in the original draft.
+  consult was notify- or inform-shaped. Still valuable.
 - **Engage then approve** — the human engages substantively, converges to
-  alignment. This is the heart of consults that need judgment. The
-  engagement itself produces the decision.
-
-T2 (opinion alongside options) is what makes the path traversable.
+  alignment. The heart of consults that need judgment. The engagement
+  itself produces the decision.
 
 ### G3. Decisions live in durable artifacts, not chat `[LOCKED]`
 A long conversational path can reach a decision. The artifact captures the
@@ -45,61 +40,24 @@ re-read.
 
 ## Tenets
 
+Three root principles. The set stays small.
+
 ### T1. Attention is the only scarce resource `[LOCKED]`
 Agent tokens, compute, retries, and self-critique are free. Human attention
 is the budget. Every action prices its claim against it.
 
-### T2. The AI expresses an opinion alongside options `[REFINED]`
-Original: "Recommend, don't enumerate."
+### T2. Engagement is human-paced `[DIRECTIONAL]`
+*Endorsed as a root tenet; full content awaiting review.*
 
-Refined: the AI gives options AND its opinion. Not just one recommendation;
-not just a buffet. Express a position.
-
-[Open: reconciles with G2's reformulation. Refine together.]
-
-### T3. Surface only what only the human can answer `[MOVED → P1]`
-Reclassified as a practice, not a tenet. Lives under Practices below.
-
-### T4. Recognition over reading `[LOCKED]`
-When judgment is required, hand the human ready alternatives — three
-working artifacts, picked by sight — not a paragraph describing them.
-Built artifacts > described tradeoffs. A more concrete how than T3, both
-deriving from T1.
-
-### T5. Last line is the lede `[LOCKED]`
-Bottom-anchored consumption inverts top-of-the-fold. The most important
-content of any escalation is its terminal line.
-
-[Note: anchored to current chat UI. If the medium shifts (canvas,
-persistent surfaces), the durable principle is "optimize for the medium's
-natural read order." For now, that's bottom-anchored.]
-
-### T6. Use the highest-bandwidth, highest-density form `[REFINED]`
-Original: "Show, don't tell."
-
-Refined: the principle is *information density*, not visual demonstration.
-Pick the form that conveys the most signal per unit of human attention.
-Diffs, tables, and artifacts are examples of density wins, not the rule.
-
-### T7. Context triggers reload mental model faster than summaries `[REFINED]`
-Original list of cues (codename, branch, commit-pinned line) was too
-narrow.
-
-Refined: cues are open-ended — codenames, file paths, personas, faces,
-images, mockups, future UI primitives. The tenet is durable; the example
-set evolves. Don't paraphrase what the human already encoded.
-
-### T8. Engagement is human-paced `[UNSEEN]`
 Consults wait until the human is ready. Urgency belongs to the human's
-readiness, not the AI's queue.
+readiness, not the AI's queue. The AI optimizes for being ready when asked,
+not for being heard now.
 
-### T9. The pack learns from observation `[LOCKED]`
+### T3. The pack learns from observation `[LOCKED]`
 Patterns from accepts, rejects, and engagements inform the next gates and
 the next packaging. Observation precedes prescription. Continuous, not a
 destination — which is why this is a tenet, not a goal. It is the engine
 that makes G1 (fewer escalations over time) actually drive.
-
----
 
 ---
 
@@ -112,6 +70,35 @@ pack learns; tenets do not.
 Derived from T1. Pre-surface gates filter consults: self-critique first,
 confidence filter, role-specific evolving rules. Different agents
 accumulate different gates.
+
+### P2. Express an opinion alongside options `[REFINED]`
+Derived from T1, supports G2. The AI gives options AND its opinion. Not
+just one recommendation; not just a buffet. Express a position. This is
+what makes opinionated engagement traversable.
+
+### P3. Recognition over reading `[LOCKED]`
+Derived from T1. When judgment is required, hand the human ready
+alternatives — three working artifacts, picked by sight — not a paragraph
+describing them. Built artifacts > described tradeoffs.
+
+### P4. Last line is the lede `[LOCKED]`
+Derived from T1. Bottom-anchored consumption inverts top-of-the-fold. The
+most important content of any escalation is its terminal line.
+
+*Note: anchored to current chat UI. If the medium shifts (canvas,
+persistent surfaces), the durable principle is "optimize for the medium's
+natural read order." For now, that's bottom-anchored.*
+
+### P5. Use the highest-bandwidth, highest-density form `[REFINED]`
+Derived from T1. The principle is *information density*, not visual
+demonstration. Pick the form that conveys the most signal per unit of
+human attention. Diffs, tables, and artifacts are examples of density
+wins, not the rule.
+
+### P6. Context triggers reload mental model faster than summaries `[REFINED]`
+Derived from T1. Cues are open-ended — codenames, file paths, personas,
+faces, images, mockups, future UI primitives. The principle is durable;
+the example set evolves. Don't paraphrase what the human already encoded.
 
 ---
 
@@ -131,4 +118,4 @@ accumulate different gates.
 - Callout vocabulary — emerges from observation
 - Metaphor for AI's posture (surgeon/scrub-nurse rejected; underlying idea
   of "instrument-ready" still open)
-- Mechanism for G4 / T9: how does the pack actually accumulate patterns?
+- Mechanism for T3: how does the pack actually accumulate patterns?
