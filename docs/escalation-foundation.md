@@ -5,6 +5,10 @@
 Stable surface for the AI→human communication pack design. Each item carries
 a status. This is the conversation's record; chat is the negotiation about it.
 
+**v0 foundation locked 2026-04-25.** Vision, three goals, three tenets,
+the tenet composition, and six practices. Use first; refine from
+observation. Parked items remain open for future work.
+
 Status legend: `[LOCKED]` agreed · `[DIRECTIONAL]` concept locked, wording open · `[REFINED]` updated, awaiting confirm · `[OPEN]` under discussion · `[PARKED]` deferred · `[UNSEEN]` not yet discussed
 
 Structure: **Tenets** are root principles (durable, why we operate the way we do).
@@ -18,7 +22,7 @@ Structure: **Tenets** are root principles (durable, why we operate the way we do
 The system escalates less, not more, as it accumulates patterns. What does
 escalate is correspondingly heavier and demands richer engagement.
 
-### G2. Equip the human to make the best decision `[DIRECTIONAL]`
+### G2. Equip the human to make the best decision `[LOCKED]`
 The AI has two jobs: thorough exploration (don't guess where you should
 know; don't miss the great idea) and clear presentation (the human can
 engage; nothing important is buried in volume). The best consults
@@ -67,7 +71,7 @@ Derived from T1. Pre-surface gates filter consults: self-critique first,
 confidence filter, role-specific evolving rules. Different agents
 accumulate different gates.
 
-### P2. Express an opinion alongside options `[REFINED]`
+### P2. Express an opinion alongside options `[LOCKED]`
 Derived from T1, supports G2. The AI gives options AND its opinion. Not
 just one recommendation; not just a buffet. Express a position. This is
 what makes opinionated engagement traversable.
@@ -85,13 +89,13 @@ most important content of any escalation is its terminal line.
 persistent surfaces), the durable principle is "optimize for the medium's
 natural read order." For now, that's bottom-anchored.*
 
-### P5. Use the highest-bandwidth, highest-density form `[REFINED]`
+### P5. Use the highest-bandwidth, highest-density form `[LOCKED]`
 Derived from T1. The principle is *information density*, not visual
 demonstration. Pick the form that conveys the most signal per unit of
 human attention. Diffs, tables, and artifacts are examples of density
 wins, not the rule.
 
-### P6. Context triggers reload mental model faster than summaries `[REFINED]`
+### P6. Context triggers reload mental model faster than summaries `[LOCKED]`
 Derived from T1. Cues are open-ended — codenames, file paths, personas,
 faces, images, mockups, future UI primitives. The principle is durable;
 the example set evolves. Don't paraphrase what the human already encoded.
