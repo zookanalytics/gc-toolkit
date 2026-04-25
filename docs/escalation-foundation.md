@@ -13,7 +13,7 @@ Status legend: `[LOCKED]` agreed · `[REFINED]` updated, awaiting confirm · `[O
 The system escalates less, not more, as it accumulates patterns. What does
 escalate is correspondingly heavier and demands richer engagement.
 
-### G2. Approval is the goal; opinionated engagement is the path `[REFINED]`
+### G2. Approval is the goal; opinionated engagement is the path `[LOCKED]`
 Original draft: "default reply is accept (one signal)." Wrong-shaped — a
 one-tap accept default contradicts G1.
 
@@ -36,10 +36,6 @@ T2 (opinion alongside options) is what makes the path traversable.
 A long conversational path can reach a decision. The artifact captures the
 decision; the journey isn't rehashed and side roads don't distract on
 re-read.
-
-### G4. Gates and rules evolve from observation `[UNSEEN]`
-The pack learns. Patterns from accepts, rejects, and clarifications inform
-the next gates and packaging. Observation precedes prescription.
 
 ---
 
@@ -94,8 +90,11 @@ set evolves. Don't paraphrase what the human already encoded.
 Consults wait until the human is ready. Urgency belongs to the human's
 readiness, not the AI's queue.
 
-### T9. The pack learns `[UNSEEN]`
-(Possibly a goal — see G4.)
+### T9. The pack learns from observation `[LOCKED]`
+Patterns from accepts, rejects, and engagements inform the next gates and
+the next packaging. Observation precedes prescription. Continuous, not a
+destination — which is why this is a tenet, not a goal. It is the engine
+that makes G1 (fewer escalations over time) actually drive.
 
 ---
 
