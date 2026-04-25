@@ -120,4 +120,42 @@ The strongest steel-man: the picture-desk model presupposes a scarce *publicatio
 
 ## References
 
-_TBD_
+**Picture editing — practitioner**
+
+- John G. Morris, *Get the Picture: A Personal History of Photojournalism* (Random House, 1998; U. Chicago Press reissue 2002). Canonical insider account of the picture desk at *Life*, *Ladies' Home Journal*, Magnum, *Washington Post*, *NY Times*. Morris's chapters on selecting the Capa D-Day frames are the textbook case of cull-under-deadline.
+- John Loengard, *Pictures Under Discussion* (Amphoto, 1987). *Life*'s long-running picture editor on what makes a published frame; the chapter "Picking" is the cleanest articulation of recognition-pick discipline.
+- Sarah Greenough, ed., *Looking In: Robert Frank's "The Americans"* (NGA, 2009). Includes Frank's contact sheets with his grease-pencil picks, an unmatched primary source for how a master used the contact sheet as a thinking tool.
+- NPPA, *Best of Photojournalism* annual technical guidelines (bop.nppa.org). Specifies the IPTC/XMP metadata fields that constitute the picture-desk's recognition substrate.
+- Camera Bits, *Photo Mechanic* documentation. The de facto wire-service ingest tool; documentation reveals workflow assumptions (Tag = binary cull; Color Class = workflow state; IPTC stationery = caption templates).
+
+**Theory and criticism**
+
+- Susan Sontag, *On Photography* (FSG, 1977). The foundational critique: image proliferation levels meaning. The Marginalian's 2013 essay re-applying Sontag to social media is the standard secondary reading.
+- John Szarkowski, *The Photographer's Eye* (MoMA, 1966). Szarkowski's five-element vocabulary (the thing itself, the detail, the frame, time, vantage point) is exactly the kind of *recognition vocabulary* that makes an editor's eye fast.
+- David Levi Strauss, *Between the Eyes: Essays on Photography and Politics* (Aperture, 2003). Argues placement and scarcity are constitutive of a photograph's meaning — directly addresses the editorial-flattening critique.
+- Fred Ritchin, *After Photography* (W.W. Norton, 2008). On the digital and now AI rupture; useful on provenance and trust.
+- Geoff Dyer, *The Ongoing Moment* (Pantheon, 2005). Curation as criticism; reading a body of work by recurring motif.
+- Kyle Chayka, *Filterworld: How Algorithms Flattened Culture* (Doubleday, 2024). The contemporary case for algorithmic homogenization.
+
+**Cognitive science of recognition**
+
+- Gary Klein, *Sources of Power: How People Make Decisions* (MIT Press, 1998). Recognition-Primed Decision model: experts match scenes to a vocabulary of patterns and act on the first viable match.
+- Daniel Kahneman & Gary Klein, "Conditions for Intuitive Expertise: A Failure to Disagree," *American Psychologist* (2009). When recognition works (regular-feedback domains) and when it fails (politics, prediction).
+- Reingold, Charness, et al. on chess perception (multiple papers, 2001–2008). Empirical evidence that masters perceive board positions as chunks, not piece-by-piece.
+- Pat Croskerry, "The Importance of Cognitive Errors in Diagnosis" (*Acad. Med.*, 2003). The clinical-gestalt literature on when fast pattern-match goes wrong (the source of the gestalt-bias caveats).
+
+**AI image gen — working practice**
+
+- C2PA / Content Authenticity Initiative (contentauthenticity.org, c2pa.org). The provenance standard now embedded by Adobe Firefly, DALL-E, Midjourney, Gemini.
+- Adobe, "Content Authenticity Arrives for Enterprises" (business.adobe.com/blog, 2025). Enterprise rollout of Content Credentials in GenStudio and Firefly Services.
+- Jamey Gannon, "Workflow for Consistent Brand Imagery in Midjourney" (ChatPRD, 2024). Practitioner walkthrough of generate-broad-curate-ruthless and sref-as-house-style.
+- Marshall Atkinson on Midjourney art direction (House of GAI, 2024–25). Art-director-side workflow.
+- Casey Newton, *Platformer*, multiple essays on AI image gen workflows in newsrooms (2023–2026).
+- Midjourney v6/v7 documentation on `--sref`, `--cref`, and Style Tuner. The technical mechanism for institutional-style memory.
+
+**Workflow tools (primary sources)**
+
+- Adobe Lightroom Classic culling philosophy (Pick/Reject/Stars/Color Labels) — Adobe documentation and Julieanne Kost's training videos.
+- Capture One Sessions vs. Catalogs — Phase One documentation on production-grade ingest workflows.
+- Aftershoot, Narrative Select, Evoto — current AI-assisted Pass-1 cull tools; useful as reference for how Pass-1 automation reshapes the human's role to pure Pass-2 picking.
+

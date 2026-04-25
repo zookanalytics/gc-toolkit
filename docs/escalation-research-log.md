@@ -24,16 +24,44 @@ genchi genbutsu, poka-yoke, gemba walk. The canonical front+back+mid
 template for cheap-execution oversight. User notes: "very solid
 practices, absolutely worth deep understanding and references."
 
-### R2. Cheap prototyping (CAD, 3D print, rapid prototyping, on-demand fab) `[QUEUED]`
+### R2. Cheap prototyping (CAD, 3D print, rapid prototyping, on-demand fab) `[RETURNED]`
 Design thinking, MVP, lean startup, design sprints, dual-track agile.
 The counterintuitive finding that cheap iteration *raises* the bar for
 upstream rigor. User notes: "worth a deeper dive."
 
-### R3. Cheap photography → curation `[QUEUED]`
+Report: `docs/research/r2-cheap-prototyping.md`. Load-bearing finding:
+when iteration cost collapses, the bottleneck migrates to *framing*
+(what's worth iterating on) and *selection* (which of N survives), not
+execution. Empirical support: Thomke & Fujimoto front-loading research,
+Ward/Sobek set-based concurrent engineering, Kohavi A/B testing
+literature on hypothesis pre-registration. Portable patterns:
+hypothesis-first prompting (Ries), Pugh-matrix weighted selection with
+weights set *before* generation, three-tier design critique with named
+Decider (Knapp), prototype-lineage labels (looks-like → works-like →
+production-intent) to prevent prototype-as-spec confusion. Failure
+modes: sunk-cost fixation survives cheap prototyping (Viswanathan &
+Linsey), low-code's ~60% partial-rewrite rate (McKinsey), demo-driven
+development.
+
+### R3. Cheap photography → curation `[RETURNED]`
 Photo editor workflows, picture desks, contact sheet rituals, cull-then-
 edit, smartphone era, AI image gen curation. User notes: "curious what
 processes have emerged from cheap photography." Especially relevant to
 P3 (recognition over reading) and P2 (opinion alongside options).
+
+Report: `docs/research/r3-cheap-photography-curation.md`. P3 grounded
+in cognitive science: Klein's Recognition-Primed Decision (RPD),
+Kahneman/Klein on intuitive expertise, gestalt perception. Three
+conditions for recognition to work: rendered (not described) artifacts,
+sweep-friendly layout, reviewer-matched vocabulary. P2 grounded in the
+picture editor's flagged-pick-on-contact-sheet protocol: the social
+contract works because alternatives stay visible — agent opinionated,
+human sovereign, override cheap. Direct dev mappings: rendered UI
+variant grids (closest analog), test-output thumbnail grids, two-pass
+cull-then-pick (agent Pass 1 = objective failures, human Pass 2 =
+judgment). Steel-mans: decision fatigue, mid-curation drift, brand-fit
+homogenization, software lacks photography's "publication slot"
+scarcity (response: production config is the slot).
 
 ### R4. Recovery-Oriented Computing & cheap-restart patterns `[RETURNED]`
 Patterson/Fox ROC, crash-only software (Candea/Fox), microreboots, undo
