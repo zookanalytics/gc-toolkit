@@ -114,4 +114,7 @@ the example set evolves. Don't paraphrase what the human already encoded.
 - Callout vocabulary — emerges from observation
 - Metaphor for AI's posture (surgeon/scrub-nurse rejected; underlying idea
   of "instrument-ready" still open)
-- Mechanism for T3: how does the pack actually accumulate patterns?
+- T3's mechanism — the principle of learning holds; the mechanism design
+  waits until real use generates patterns. Direction-of-travel: guidance
+  paired with structural artifacts, evolved through consults about
+  guidance itself. Not designed yet.
