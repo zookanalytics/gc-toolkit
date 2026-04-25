@@ -3,7 +3,10 @@
 Stable surface for the AI→human communication pack design. Each item carries
 a status. This is the conversation's record; chat is the negotiation about it.
 
-Status legend: `[LOCKED]` agreed · `[REFINED]` updated, awaiting confirm · `[OPEN]` under discussion · `[PARKED]` deferred · `[UNSEEN]` not yet discussed
+Status legend: `[LOCKED]` agreed · `[DIRECTIONAL]` concept locked, wording open · `[REFINED]` updated, awaiting confirm · `[OPEN]` under discussion · `[PARKED]` deferred · `[UNSEEN]` not yet discussed
+
+Structure: **Tenets** are root principles (durable, why we operate the way we do).
+**Practices** are operational hows derived from tenets. Tenets stay small; practices accumulate.
 
 ---
 
@@ -13,7 +16,8 @@ Status legend: `[LOCKED]` agreed · `[REFINED]` updated, awaiting confirm · `[O
 The system escalates less, not more, as it accumulates patterns. What does
 escalate is correspondingly heavier and demands richer engagement.
 
-### G2. Approval is the goal; opinionated engagement is the path `[LOCKED]`
+### G2. Approval is the goal; opinionated engagement is the path `[DIRECTIONAL]`
+*Concept locked; wording open to sharpening.*
 Original draft: "default reply is accept (one signal)." Wrong-shaped — a
 one-tap accept default contradicts G1.
 
@@ -53,9 +57,8 @@ not just a buffet. Express a position.
 
 [Open: reconciles with G2's reformulation. Refine together.]
 
-### T3. Surface only what only the human can answer `[DERIVED]`
-Agreed in spirit, but follows from T1. Weaker as a standalone tenet.
-Candidate: collapse into T1 or drop.
+### T3. Surface only what only the human can answer `[MOVED → P1]`
+Reclassified as a practice, not a tenet. Lives under Practices below.
 
 ### T4. Recognition over reading `[LOCKED]`
 When judgment is required, hand the human ready alternatives — three
@@ -95,6 +98,20 @@ Patterns from accepts, rejects, and engagements inform the next gates and
 the next packaging. Observation precedes prescription. Continuous, not a
 destination — which is why this is a tenet, not a goal. It is the engine
 that makes G1 (fewer escalations over time) actually drive.
+
+---
+
+---
+
+## Practices
+
+Operational hows. Each derives from one or more tenets. The set grows as the
+pack learns; tenets do not.
+
+### P1. Surface only what only the human can answer `[LOCKED]`
+Derived from T1. Pre-surface gates filter consults: self-critique first,
+confidence filter, role-specific evolving rules. Different agents
+accumulate different gates.
 
 ---
 
