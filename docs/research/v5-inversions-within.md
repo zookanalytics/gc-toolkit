@@ -11,7 +11,22 @@
 
 ## Summary
 
-[pending]
+ROC's move was not a pattern; it was a *burden-of-proof flip*. Applied
+to the pack, the most generative inversions are the ones that flip a
+similar burden. **I1 (borrow-as-suspect, not borrow-as-default)** flips
+the evidentiary burden from departures to borrowings and gives V3's
+skeptical case a procedural shape. **I6 (optimize the no-consult
+path)** flips the measurement target from the visible 5% (consults) to
+the silent 95% (autonomous decisions), giving G1 a real metric beyond
+"escalations down." **I3 (agent escalates back into the human's
+framing)** flips the directionality of the consult itself — the agent
+challenges the question, not just answers it. These three are the
+strongest because each generates concrete practice changes that the
+pack does not currently have, each addresses a real failure mode V1 or
+V3 surfaced, and each is bounded enough to pilot without ripping out
+v0. The remaining inversions (I2 attention/judgment, I4 deliberate
+forgetting, I5 cheap judgment, I7 peer-flat, I8 rewrite cycle) range
+from partially generative to provocative-but-deferrable.
 
 ---
 
@@ -217,14 +232,124 @@ its forcing function.
 
 ### I7. Escalation = lower → higher → Peer-flat: escalation is just request
 
-[pending]
+**Dominant frame.** The vocabulary "escalation" implies a hierarchy:
+agent at a lower level, human at a higher one. The agent submits;
+the human adjudicates. P1's "only what only the human can answer" and
+B22's "agent as witness, human as author" both encode this asymmetry.
+
+**Inverted frame.** Drop the verticality. The agent and human are
+peers with different competencies. What looks like "escalation" is just
+a *request between equals* — the agent asks because the human is the
+specialist on this axis, not because the human is above the agent.
+Symmetrically, the human consults the agent because the agent is the
+specialist on volume, recall, and code structure, not because the
+agent is below.
+
+**What it generates.** The vocabulary changes: "consult" replaces
+"escalation" everywhere. The agent gets a parallel surface for
+*requesting human input* on its own terms — "I need a decision on X
+because it's a value tradeoff, not because I failed." More
+substantively, the agent gains license to *decline* a human request
+when the request would burn the agent's most scarce resource (context;
+I4) without justification. P2's "opinion alongside options" extends:
+the agent may withhold options if the question is malformed, and ask
+for reframing instead — same way a peer would. V3 J5 (peer-not-tool)
+is exactly this argument; the inversion makes it operational.
+
+**Worth taking seriously?** Yes — moderate. The vocabulary fix is
+cheap and clarifying; "consult" is more honest than "escalation" and
+already partially in use. The deeper move (agent declines human
+requests) is risky because authority asymmetries are not just framing —
+the human owns outcomes the agent does not, and the legal/operational
+buck stops there. Take the vocabulary; defer the authority shift until
+trust ledgers (I14) and silent-precision data (I6 above) make the
+peer claim defensible per skill. Adopt the renaming; treat the deeper
+inversion as a direction-of-travel.
 
 ### I8. Pack as refined corpus → Pack built to be replaced
 
-[pending]
+**Dominant frame.** The pack is a stable surface that *refines* over
+time. v0 is locked; subsequent rounds tighten and extend. T3 (the pack
+learns) implies incremental sharpening — yesterday's right answer
+becomes tomorrow's friction, but the *form* of the pack persists.
+
+**Inverted frame.** The pack is built to be *replaced wholesale* on a
+short cycle. Every six months (or every model generation), the
+foundation document is rewritten from scratch by an agent run against
+the accumulated AAR/COE corpus, and the previous version is
+*archived*, not iterated. The pack's value is in the *current
+formulation*, not in its lineage.
+
+**What it generates.** A "rewrite cadence" alongside the refine
+cadence. The unit of versioning is not a tightening but a *fresh
+synthesis*. The archive becomes a research input to the next pack, not
+the spine of the current one. Practices like M3 (disanalogy flagging)
+and M5 (coaching-terminates-in-artifact) stop being cumulative and
+start being *re-derived* each cycle — if a borrow can no longer
+justify itself in the current model regime, it doesn't migrate forward.
+Skills, gates, and fewshots get a fresh-eye review at each rewrite,
+which composes naturally with I4 (deliberate forgetting).
+
+**Worth taking seriously?** Mixed. The full version is too costly —
+foundation rewrites are expensive in the only currency T1 protects.
+But a *bounded* version of this is generative: every twelve months,
+hold a "pack rewrite" exercise where an agent drafts the next-version
+foundation from the AAR corpus and the current foundation, and the
+team chooses what to migrate forward *by exception*, not by default.
+This inverts the migration burden the same way I1 inverts the
+borrowing burden, and it operationalizes T3 in a way the current
+"learning" framing leaves vague. Worth piloting, not adopting wholesale.
 
 ---
 
 ## Recommendations
 
-[pending]
+The pack should consider adopting three of the eight inversions, each
+in a bounded form. They compose: I1 raises the bar for what enters the
+pack, I6 measures whether what's in the pack is actually working, I3
+changes what the consult is *for*.
+
+**Adopt I1 — burden of proof on the borrow.** Concretely: extend M3
+from "flag the disanalogy" to "name a falsification test." Every
+R1–R5-derived practice in `escalation-ideation.md` gets one inline
+sentence of the form "*This borrow is wrong if [specific AI failure
+mode] occurs at rate above [threshold].*" Practices that cannot
+articulate that test are not cut, but they sit in a "ritual under
+examination" status until they can. This is the cheapest inversion to
+adopt — it is a documentation discipline — and it neutralizes the
+single biggest risk V3 named (cargo-culted vocabulary, premise
+overreach). Cost: a few hours per practice on first pass, near-zero
+ongoing. Yield: V3's skeptical case becomes structural, not advisory.
+
+**Adopt I6 — measure the no-consult path.** Concretely: add a
+*silent-decision audit* practice to the F-cadence. A monthly sample of
+non-escalated agent runs gets human review against three questions:
+*Should this have escalated? Was the chosen path defensible? Would the
+human have chosen differently?* The audit feeds the trust ledger
+(I14/E10). This gives G1 ("fewer escalations, each higher-value") a
+real measurement instead of a directional hope, and it resolves A1's
+"zero escalations is a failure mode" concern with evidence rather
+than aphorism. Cost: ~1 hour/month at sample rate of ~10 runs. Yield:
+the pack stops flying blind on the 95% of agent work that never hits
+the consult queue, which is where most of the actual quality lives.
+
+**Adopt I3 (bounded) — license the Reflect-class consult.** Concretely:
+add a fourth escalation class to I1's Notify/Question/Review:
+*Reflect.* Used only when the agent identifies a structural conflict in
+the human's stated intent (goal contradicts constraint, plan
+contradicts spec, current request contradicts prior decision).
+Bounded: at most one Reflect per task, dispatched as a single batched
+question before generation begins, suppressed below a confidence
+threshold. The Reflect class makes G2's "catalyze ideas neither side
+started with" operational and gives the agent a structured way to
+challenge framing without burning attention budget on every turn.
+Cost: schema change to the escalation surface, prompt-side discipline
+to suppress over-firing. Yield: the consult occasionally produces a
+better *question*, not just a better answer, which is where the
+highest-value escalations actually live.
+
+The remaining inversions are not rejected — I4 (deliberate forgetting)
+and I7 (peer vocabulary) are particularly worth revisiting once the
+trust-ledger data exists to support them. But the three above are the
+ones whose insight is concrete enough, bounded enough, and forcing
+enough to land now without disrupting v0's foundation.

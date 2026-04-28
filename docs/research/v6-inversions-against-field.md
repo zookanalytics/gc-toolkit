@@ -11,7 +11,27 @@
 
 ## Summary
 
-[pending]
+Recovery-Oriented Computing's productive move was to invert the
+reliability field's dominant framing — stop maximizing MTBF, start
+minimizing MTTR — and the inversion generated a richer design space.
+The same exercise, applied to the AI-assisted-development field's
+2026 framings, yields eight inversions of varying strength. The
+strongest three — *harness over model* (inversion 1), *detect-and-
+correct over reduce-rate* (inversion 4), and *legible limits over
+apparent intelligence* (inversion 6) — converge on a counter-
+position the gas city pack already embodies but does not yet name:
+the pack is, in effect, an MTTR-minimizing discipline for human-AI
+escalation, deployed against a field that mostly pursues MTBF-shaped
+metrics (better benchmarks, lower hallucination rates, longer
+unsupervised runs). Two further inversions — *legibility over
+autonomy* (2) and *workflows are obsolete* (5) — push back on the
+pack's current shape and suggest specific edits: a legibility cap on
+autonomy, and explicit acknowledgment that some borrowed
+disciplines apply to work that AI may have made obsolete. Three
+remaining inversions — strategic friction, model-diversity checks,
+and "document the rejected alternative" — are generative additions
+the pack can absorb without restructuring.
+
 
 ---
 
@@ -210,26 +230,229 @@ lean here; this inversion would harden the lean into a tenet.
 
 ### 7. "Standardize on a single model / vendor" → "use model diversity as mutual check"
 
-[pending]
+**Field frame.** Enterprise procurement, MCP-server bundling, and
+most agent-platform pitches assume a *single primary model* per
+deployment. Cursor defaults to one model; Devin runs on its native
+stack; Anthropic's enterprise pitch is Claude-everything; OpenAI's
+is GPT-everything. Vendor lock-in is treated as efficiency.
+
+**Inversion.** Run multiple models adversarially against each
+other on consequential outputs. Model diversity is a *check*: when
+GPT-class and Claude-class models disagree, that disagreement is
+signal. Convergent agreement across heterogeneous models is
+stronger evidence than any single model's confidence.
+
+**What it generates.** A pack on this footing adds a diversity-
+check practice for high-stakes consults: route the same question to
+two architecturally different models, surface the *delta*, escalate
+on disagreement. This is a structural variant of Farquhar's
+semantic-entropy approach (multi-sample), but across model
+families instead of across temperatures. B6 (andon for agents)
+gets a new trigger class: *cross-model disagreement on the answer*.
+Pairs naturally with P2's opinion-bearing format.
+
+**Generative or empty.** *Generative but expensive.* Token-cost and
+latency cost are real; the inversion only earns its place on
+high-reversibility-cost decisions. As a *gating* practice on
+Review-class escalations, it is strong. As a default, it is waste.
+
 
 ### 8. "Document the decision" → "document why we almost did the other thing"
 
-[pending]
+**Field frame.** ADRs, design docs, and the entire postmortem
+genre document *the decision taken*. Amazon's COE template, AWS
+Well-Architected reviews, and most internal RFCs ask "what did we
+do and why." The road not taken appears, if at all, as a one-line
+"considered alternatives" footnote.
+
+**Inversion.** The durable artifact captures *why we almost did
+the other thing*. The closest rejected option, the trigger that
+would have flipped the decision, and the evidence threshold needed
+to revisit. The decision is the cheap part; the *boundary* is the
+expensive part.
+
+**What it generates.** A pack on this footing rewrites the
+escalation-closure template around "rejected alternative + flip
+condition," not "decision + rationale." T3 (learning compounds)
+gains a sharper mechanism: re-reading old decisions surfaces *what
+would change them*, which is the input that retrospective ritual
+actually needs. G3 (decisions live in durable artifacts) becomes
+"the *near-miss* lives in the artifact." When models change or
+context shifts, the flip-condition is the re-evaluation trigger;
+without it, every old decision must be re-derived from scratch.
+
+**Generative or empty.** *Generative.* Directly addresses the
+context-rot problem: an artifact that captures its own flip
+condition is robust to the model rolling, the retrieval corpus
+shifting, or the team's intuitions changing. Cheap to add; high-
+leverage on a 6-month timescale.
+
 
 ---
 
 ## Where inversions challenge the pack
 
-[pending]
+Two inversions sit *uneasily* with v0 and force a question the pack
+has not answered.
+
+**Inversion 5 (workflows are obsolete) challenges the Premise.** The
+pack's premise opens with "AI changed the cost of work. Whether it
+changed the principles for organizing it is less obvious," and lands
+on a borrow-as-default stance. The strong form of inversion 5 says
+AI changed *what is worth organizing in the first place*, which
+makes the borrowed disciplines apply to a problem that no longer
+matters at the same intensity. The pack's defense — that
+coordination, escalation, and retrospection problems do not
+disappear when execution gets cheap — is only true for the *work
+that survives the reframing*. If most of today's tickets are
+made-cheap-enough-to-skip rather than made-cheap-enough-to-do, the
+pack is solving the wrong half of the field. v3-skeptic's "treat
+every borrowing as a falsifiable hypothesis" is the right
+mitigation, but it does not go all the way to the work-selection
+question.
+
+**Inversion 2 (legibility over autonomy) challenges T2's framing.**
+T2 says "the human owns the clock," which is compatible with both
+poles of the autonomy slider — quiet long-running agent, or short
+synchronous agent — as long as the human controls onset. The
+legibility inversion is sharper: *no matter what the human chose, an
+illegible long-run is failure*. This implies a *cap* on autonomy
+that T2 does not currently impose. The pack would need to add
+either a tenet ("the agent's output must be reviewable in seconds,
+not minutes") or harden P3 from a practice into a constraint.
+v2-prior-art's B28 (autonomy slider as a per-task setting) makes the
+slider parametric but does not force this cap.
+
 
 ---
 
 ## Where inversions reinforce the pack
 
-[pending]
+Three inversions strongly support the pack's existing posture
+against the field's center of gravity.
+
+**Inversion 1 (harness over model) reinforces T1, T3, and the entire
+practice layer.** The pack's investment in surface-design (P3, P4,
+P5), structural gates implied by P1, and learning-as-non-negotiable
+(T3) all assume harness work *is* the leverage. Most of the field
+spends its budget on model selection and prompt-craft; the pack
+spends it on the surrounding apparatus. The inversion validates the
+budget split and supplies the explicit theory the v0 foundation
+implies but does not state.
+
+**Inversion 4 (cheap-detect-and-correct over reduce-rate) reinforces
+T3 and sharpens G1.** G1 ("fewer escalations over time, each one
+higher-value") is an MTTR-shaped goal in disguise: it does not
+promise to eliminate escalations but to make their *handling cost*
+fall and their *value* rise. The hallucination inversion — and ROC
+itself — is the same shape one layer down. This is the pack's
+strongest alignment with a generative field-level inversion, and it
+suggests the pack should be more explicit that **G1 is the
+escalation-domain equivalent of MTTR-minimization, not
+MTBF-maximization.** Naming this would make the pack's posture
+unambiguous against a field that mostly chases MTBF analogues
+(better models, lower hallucination rate, higher benchmark scores).
+
+**Inversion 6 (legible limits over apparent intelligence) reinforces
+P2 and P6.** P2 (opinion alongside options) and P6 (context cues
+reload mental models) both presume the AI's job is to *be useful
+under fallibility*, not to perform certainty. The field's polished-
+artifact UX is the local enemy; the inversion supplies the structural
+case. This is also the inversion most directly defended by empirical
+evidence (METR's perception/reality gap, the confirmation-bias
+arXiv result, GitClear's churn data) — all three studies show that
+*hidden* limits cost more than *named* limits.
+
+The synthesis: inversions 1, 4, and 6 form a coherent counter-
+position against the field's model-centric, autonomy-maximizing,
+confidence-projecting consensus. The pack should foreground that it
+*is* this counter-position, rather than presenting itself as
+"borrowed disciplines applied to a new domain." The borrowings are
+the implementation; the inversions are the thesis.
+
 
 ---
 
 ## References
 
-[pending]
+### Inversions cited or implicit
+
+- Patterson, D., Brown, A., Broadwell, P., Candea, G., Chen, M.,
+  Cutler, J., Enriquez, P., Fox, A., Kıcıman, E., Merzbacher, M.,
+  Oppenheimer, D., Sastry, N., Tetzlaff, W., Traupman, J., Treuhaft,
+  N. (2002). *Recovery-Oriented Computing (ROC): Motivation,
+  Definition, Techniques, and Case Studies.* UC Berkeley CS Tech
+  Report UCB//CSD-02-1175. The MTBF→MTTR inversion this exercise
+  reuses.
+
+### Field exemplars cited
+
+- Karpathy, A. (2025). *Software Is Changing (Again)* / "Software
+  3.0" talk. https://www.latent.space/p/s3 — autonomy slider as
+  product surface; "Iron Man suit, not Iron Man robot."
+- Willison, S. (2025). *The Lethal Trifecta for AI Agents*.
+  https://simonw.substack.com/p/the-lethal-trifecta-for-ai-agents
+- Willison, S. (2025). *Vibe engineering*.
+  https://simonwillison.net/2025/Oct/7/vibe-engineering/ — "won't
+  commit code I cannot explain."
+- Willison, S. (2025). *Agentic Engineering Patterns*.
+  https://simonwillison.net/guides/agentic-engineering-patterns/
+  how-coding-agents-work/ — harness engineering as the unit of
+  design.
+- Anthropic Engineering. *Equipping Agents for the Real World with
+  Agent Skills*. https://www.anthropic.com/engineering/equipping-
+  agents-for-the-real-world-with-agent-skills
+- Anthropic. *Claude Code Best Practices*.
+  https://code.claude.com/docs/en/best-practices — sub-agents,
+  hooks, plugins.
+- OpenAI. *Introducing Operator*. https://openai.com/index/
+  introducing-operator/ — categorical refusal and watch mode.
+- OpenAI Agents SDK. *Human-in-the-loop*. https://openai.github.io/
+  openai-agents-python/human_in_the_loop/ — typed-approval signature.
+- LangChain. *Introducing Ambient Agents*. https://blog.langchain.
+  com/introducing-ambient-agents/ — Notify / Question / Review.
+- Cognition. *Devin* product marketing — autonomy-as-headline
+  exemplar.
+- Cursor. https://cursor.com/docs/context/rules — flow-optimized
+  developer-tool UX.
+- Replit. Agent V2 / *env-as-product* (Amjad Masad public posts).
+- Litt, G. *Code like a surgeon* (October 2025); *Malleable software
+  in the age of LLMs* (March 2023). https://www.geoffreylitt.com/
+- Lütke, T. (April 2025). Internal Shopify "reflexive AI use" memo.
+- Hamel Husain. *Your AI Product Needs Evals*. https://hamel.dev/
+  blog/posts/evals/
+
+### Empirical evidence
+
+- He, H. et al. (Thinking Machines Lab). *Defeating Nondeterminism
+  in LLM Inference* (September 2025). https://thinkingmachines.ai/
+  blog/defeating-nondeterminism-in-llm-inference/
+- Hong, K. et al. (Chroma). *Context Rot* (2025).
+  https://www.trychroma.com/research/context-rot
+- Farquhar, S. et al. *Detecting hallucinations in large language
+  models using semantic entropy*. *Nature*, 2024.
+  https://www.nature.com/articles/s41586-024-07421-0
+- Becker, J. et al. (METR). *Measuring the Impact of Early-2025 AI
+  on Experienced Open-Source Developer Productivity* (July 2025).
+  https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-
+  dev-study/
+- *Measuring and Exploiting Confirmation Bias in LLM-Assisted
+  Security Code Review*. arXiv:2603.18740 (2026).
+- GitClear. *AI Copilot Code Quality: 2025 Data Suggests 4x Growth
+  in Code Clones* (Feb 2025). https://www.gitclear.com/
+  ai_assistant_code_quality_2025_research
+- Vaccaro, M., Almaatouq, A., Malone, T. (2024). *When Combinations
+  of Humans and AI are Useful*. Nature Human Behaviour
+  meta-analysis.
+- Russell, S. (2019). *Human Compatible*. Assistance games / CIRL.
+
+### Pack source documents
+
+- `/home/user/gc-toolkit/docs/escalation-foundation.md` — v0.
+- `/home/user/gc-toolkit/docs/research/v2-ai-native-prior-art.md` —
+  prior art survey.
+- `/home/user/gc-toolkit/docs/research/v3-skeptic.md` — producer-
+  side hidden assumptions.
+- `/home/user/gc-toolkit/docs/research/r4-recovery-oriented-
+  computing.md` — the ROC borrowing this exercise mirrors.
+
