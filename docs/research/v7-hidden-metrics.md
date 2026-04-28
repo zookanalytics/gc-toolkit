@@ -2,19 +2,20 @@
 
 ## Summary
 
-The pack's current metric set is producer-side and rate-shaped: counts and ratios about what
-the agent does (escalation rate, cull rate, override rate, eval pass rate, reversibility burn,
-closure latency). Every one of these treats the human reviewer as a constant-quality oracle
-who simply receives output. That assumption is the blind spot. Reviewers degrade, frames go
-unchallenged, the pack's own self-knowledge stays implicit, and large categories of work — the
-ones that resolve in deferral, in re-framing, in slow trust erosion — leave no trace in the
-current numbers. The most generative reframing is to shift from *agent-side throughput
-metrics* to *reviewer-state and frame-state metrics*: how clear is the human's mental model
-right now, how stale are the artifacts the pack relies on, and how often does the agent get
-the question itself wrong (versus its answer to a correct question). Three candidates below —
-**Frame-redirect rate**, **Reviewer trust trajectory**, and **Half-life of skills/gates** —
-expose entire design spaces (frame-first practices, reviewer-as-asset cultivation, decay
-maintenance) that the current metric set cannot see.
+The pack's current metrics are producer-side and rate-shaped — counts and ratios about
+what the agent does (escalation rate, cull rate, override rate, eval pass, reversibility
+burn, closure latency). All of them implicitly treat the human reviewer as a
+constant-quality oracle who receives output. That assumption is the blind spot. Reviewers
+degrade, frames go unchallenged, the pack's own self-knowledge stays implicit, and whole
+categories of work — those that resolve in deferral, re-framing, or slow trust erosion —
+leave no trace in the current numbers. The generative reframe is to shift from
+*agent-side throughput metrics* to *reviewer-state and frame-state metrics*: how clear is
+the human's mental model right now, how stale are the artifacts the pack relies on, and
+how often does the agent get the *question* wrong versus its *answer* to a correct
+question. Three candidates below — **Frame-redirect rate**, **Reviewer trust
+trajectory**, and **Half-life of skills/gates** — expose entire design spaces
+(frame-first practices, reviewer-as-asset cultivation, decay maintenance) the current
+metric set cannot see.
 
 ## Hidden metric catalog
 
@@ -84,175 +85,150 @@ even when nothing has fired against it for months.
 
 ### H4. Time-to-first-judgment
 
-**The hidden metric.** Wall-clock time between the agent producing reviewable output and
-the human meaningfully engaging with it. Not the closure latency (E3, which measures
-action-item lifecycle), but the *attention-arrival latency*: how long does work sit in the
-queue before a human looks?
+**The hidden metric.** Wall-clock between the agent producing reviewable output and a
+human actually engaging. Not E3 (action-item lifecycle) — *attention-arrival latency*.
 
-**What measuring it would expose.** The pack optimizes for the cost of each consult once a
-human is reading, but doesn't measure the *queue depth* in front of the human. A reviewer
-who finally engages 18 hours after the agent produced output is engaging with stale
-context — the agent's reasoning is no longer fresh, the project state may have moved.
-Surfaces a design space the current pack has not entered: *queue-aware generation*. If the
-queue is deep, the agent should produce more self-contained, context-resilient artifacts;
-if the queue is shallow, denser, faster handoffs win.
+**What it would expose.** The pack optimizes the cost of each consult once a human reads,
+but doesn't measure queue depth in front of the human. A reviewer engaging 18 hours later
+engages with stale context. Opens *queue-aware generation*: deeper queue → more
+self-contained, context-resilient artifacts; shallow queue → denser, faster handoffs.
 
-**What practices would emerge.** Queue-depth-aware autonomy slider (I2/I13) — the agent
-operates more conservatively as queue depth grows. Backpressure on the agent: refuse to
-generate new work until the queue drains. "Aging" tags on consults so the human can see
-what's stalest, not just what's newest. Possibly a re-context step where the agent
-refreshes its own framing before the human engages with old output.
+**Practices that emerge.** Queue-depth-aware autonomy (I2/I13). Backpressure: refuse new
+generation until queue drains. Aging tags on consults. A re-context step where the agent
+refreshes its framing before the human engages with old output.
 
-**Why we're ignoring it.** Hard to measure without instrumentation on both sides (when did
-the human actually look?). Also disguised as closure latency, which it isn't — closure
-latency starts when judgment happens.
+**Why ignored.** Needs instrumentation on both sides (when did the human *actually* look?).
+Disguised as closure latency, which starts only after judgment.
 
 ### H5. Information-density-per-consult
 
-**The hidden metric.** Bits of decision-relevant signal per token (or per second of human
-attention) in each consult. P5 names "information density" as a principle; the pack does
-not measure whether actual consults achieve it.
+**The hidden metric.** Bits of decision-relevant signal per token (or per second of
+attention). P5 names density as a principle; the pack does not measure whether actual
+consults achieve it.
 
-**What measuring it would expose.** The principle without the metric is exhortation. A
-consult that takes 800 words to convey one bit ("approve / reject") is an attention burn;
-the pack has no signal for catching this. Surfaces design space around *consult
-compression*: structural templates that bound length per decision-bit, automated checks
-that the lede is in the terminal line (P4), and rejection of consults that fail a density
-threshold.
+**What it would expose.** Principle without metric is exhortation. An 800-word consult
+delivering one bit ("approve / reject") is an attention burn the pack cannot detect.
+Opens *consult compression*: templates that bound length per decision-bit, automated lede
+checks (P4), rejection of consults below a density threshold.
 
-**What practices would emerge.** A consult linter that scores draft escalations on a rough
-density proxy (decision tokens / total tokens). A "lede check" before a consult is
-delivered: can the human give a thumbs-up/down based on the last paragraph alone? Rewrite
-loops that target density, run by the agent against itself before the consult lands.
+**Practices that emerge.** A consult linter on draft escalations (decision tokens / total
+tokens as a rough proxy). A lede check: can the human decide from the terminal line
+alone? Self-rewrite loops the agent runs against itself before delivery.
 
-**Why we're ignoring it.** Density is hard to measure mechanically — bits-of-signal is
-fuzzy and varies by reviewer. Also: the pack's culture rewards thorough exploration (G2),
-which can quietly subsidize verbose output as evidence of effort.
+**Why ignored.** Bits-of-signal is fuzzy and varies by reviewer. Also: G2 rewards
+thorough exploration, which can quietly subsidize verbose output as evidence of effort.
 
 ### H6. Decisions-deferred rate
 
-**The hidden metric.** Of consults that close, what fraction close in "let's wait and see /
-revisit later / park" rather than a forward decision? The pack treats deferrals as benign
-("the artifact captures it"), but a high deferral rate is evidence the consult shape isn't
-forcing decisions.
+**The hidden metric.** Of consults that close, what fraction close in "wait and see /
+revisit / park" rather than a forward decision? The pack treats deferrals as benign; a
+high deferral rate suggests the consult isn't forcing decisions.
 
-**What measuring it would expose.** Deferral is hidden cost — the question will return,
-the context will be colder, the prior agent state may be gone. The design space opened:
-*forcing-function design*. Some deferrals are wise (waiting for real information); many
-are the consult failing to package the decision in a way that lets the human commit.
+**What it would expose.** Deferral is hidden cost — the question returns colder, prior
+agent state may be gone. Opens *forcing-function design*: distinguishing wise deferrals
+(waiting for real information) from unforced ones (the consult failed to package the
+decision).
 
-**What practices would emerge.** Per-consult tag: forward-decision / structured-deferral /
-unforced-deferral. A "what would close this?" required field on every parked decision —
-naming the observation or input that would force resolution. A deferral budget per task
-class: above threshold, spec quality is the issue, not patience.
+**Practices that emerge.** Per-consult tag: forward / structured-deferral / unforced.
+"What would close this?" as a required field on every parked decision. A per-task-class
+deferral budget — above threshold, spec quality is the issue, not patience.
 
-**Why we're ignoring it.** Deferrals feel virtuous (humility, T2's "wait deepens the
-work"); the cost is invisible because it lands on a future cycle. Also: closure metrics
-(E3) treat any close as a close, not distinguishing committed from deferred.
+**Why ignored.** Deferrals feel virtuous (humility, T2's "wait deepens the work"); the
+cost lands on a future cycle, invisible now. E3 treats any close as a close.
 
 ### H7. Surface area of irreversible actions
 
-**The hidden metric.** Total *count* of irreversible-action paths reachable in the pack —
-not the per-period burn rate (E4), but the static surface: how many tools, in how many
-skills, can fire send/charge/deploy/publish/drop without a staged surface? Surface area
-grows monotonically in a pack that only tracks rate.
+**The hidden metric.** Static *count* of irreversible paths reachable in the pack — not
+E4's per-period burn, but how many tools across how many skills can fire
+send/charge/deploy/publish/drop without a staged surface. Surface grows monotonically in
+a pack that tracks only rate.
 
-**What measuring it would expose.** E4 measures usage; H7 measures *exposure*. A pack
-whose surface area is growing is accumulating risk even when current burn is low. Design
-space opened: *irreversible-surface budget* (cap the number of naked irreversible
-bindings, force consolidation through staged surfaces / I12), and audit rituals that
-periodically count and prune.
+**What it would expose.** E4 measures usage; H7 measures *exposure*. A pack with growing
+surface accumulates risk even when current burn is low. Opens *irreversible-surface
+budget*: cap naked bindings, force consolidation through staged surfaces (I12), audit
+periodically.
 
-**What practices would emerge.** A per-tool registry with reversibility class (auto/notify/
-approve/refuse, per I7). A surface-area count surfaced in the F8 monthly review. A
-no-net-new rule: any new irreversible path requires retiring an existing one or routing
-through an existing staged surface.
+**Practices that emerge.** A per-tool registry with reversibility class (per I7).
+Surface-area count in the F8 monthly review. A no-net-new rule: any new irreversible path
+requires retiring one or routing through an existing staged surface.
 
-**Why we're ignoring it.** Easy to count but nobody is counting; the pack's discipline is
-on usage events, not the static graph. Also: removing irreversible paths is dull
-maintenance work that competes with feature work for attention.
+**Why ignored.** Easy to count, but nobody is. Discipline is on usage events, not the
+static graph. Removing irreversible paths is dull maintenance competing with feature work.
 
 ### H8. Pack self-knowledge depth
 
-**The hidden metric.** What can the pack answer about itself, on demand, without a human
-constructing the answer from scratch? "What skills exist?" "Which fired this week?" "Which
-have never been validated against the current model?" "What's the override rate on
-skill X?" If a question requires hand-rolled investigation, the pack doesn't know that
-thing about itself.
+**The hidden metric.** What the pack can answer about itself on demand without a human
+hand-rolling the answer. "What skills exist?" "Which fired this week?" "Which haven't
+been validated on the current model?" "Override rate on skill X?" If a question needs
+investigation, the pack doesn't know.
 
-**What measuring it would expose.** A pack with shallow self-knowledge cannot run any of
-the meta-practices (M1–M5) reliably; every retrospective is a from-scratch investigation.
-The design space opened: *introspectable pack* — assets discoverable by query, metrics
-queryable by skill/task-class/reviewer, audit trails that aren't pulled from chat scrollback.
+**What it would expose.** Shallow self-knowledge means meta-practices (M1–M5) cannot run
+reliably; every retrospective is from-scratch. Opens *introspectable pack*: assets
+discoverable by query, metrics queryable by skill/task-class/reviewer, audit trails that
+aren't pulled from chat scrollback.
 
-**What practices would emerge.** A `pack status` command that answers a fixed catalog of
-questions about the pack's current state. Mandatory metadata on every skill (last-fired,
-owner, model set, reversibility class). A self-audit skill that runs the catalog and
-flags gaps. Concretely: most of the metrics in this very document presuppose this
-infrastructure — without H8 the others are aspirational.
+**Practices that emerge.** A `pack status` command answering a fixed catalog. Mandatory
+metadata on every skill (last-fired, owner, model set, reversibility class). A self-audit
+skill that runs the catalog and flags gaps. Most metrics in this document presuppose this
+infrastructure.
 
-**Why we're ignoring it.** It's infrastructure, not practice; nobody escalates because
-self-knowledge is shallow, they just spend extra hours when an audit comes due. Also:
-each individual metric looks measurable in isolation, so the systemic gap stays
-invisible.
+**Why ignored.** Infrastructure, not practice; no escalation when self-knowledge is
+shallow, just extra audit hours later. Each metric looks measurable in isolation, so the
+systemic gap stays invisible.
 
 ### H9. Distance from last known-good state
 
-**The hidden metric.** For an agent in a long session: how many steps / file edits / tool
-calls since the last state a human explicitly affirmed? B5 (externalize state) and C6
-(plan-doc) provide the substrate; nothing measures *drift* from a checkpointed-good state.
+**The hidden metric.** For a long-running agent: how many steps / file edits / tool calls
+since the last state a human explicitly affirmed? B5 and C6 provide the substrate;
+nothing measures *drift*.
 
-**What measuring it would expose.** Drift is silent and compounding. An agent twenty
-steps past its last green light is operating on twenty layers of unverified inference; a
-review at step twenty is much more expensive than at step five. Surfaces design space
-around *drift budgets* and *checkpoint cadence*: forced re-affirmation when distance
-exceeds threshold, structural rollback to last-good rather than forward-patching when
-something goes wrong.
+**What it would expose.** Drift is silent and compounding. An agent twenty steps past
+its last green light is running on twenty layers of unverified inference; review at step
+twenty is far more expensive than at step five. Opens *drift budgets* and *checkpoint
+cadence*: forced re-affirmation past threshold, rollback to last-good rather than
+forward-patching.
 
-**What practices would emerge.** A drift counter on every long-running session.
-Auto-pause on threshold with a sweep-ready summary (overlaps I13 backpressure but on the
-session-internal axis, not the queue axis). "Snap back" as a first-class verb — return to
-last-known-good and replay forward with the new information.
+**Practices that emerge.** A drift counter per session. Auto-pause on threshold with
+sweep-ready summary (session-internal sibling of I13's queue backpressure). "Snap back"
+as a first-class verb — return to last-known-good and replay forward with new
+information.
 
-**Why we're ignoring it.** No instrumentation captures "last known-good"; the concept
-isn't even named in the pack. Disguised by reversibility framing — "we can always undo"
-hides the fact that undoing twenty steps is much more expensive than undoing two.
+**Why ignored.** No instrumentation captures "last known-good"; the concept isn't named.
+Disguised by reversibility framing — "we can always undo" hides that undoing twenty
+steps is much more expensive than undoing two.
 
 ## Recommendations
 
-Of the nine candidates, three open the largest design space if the pack started measuring
-them. Each is generative because it exposes a *category* of work the current metric set
-cannot see, not just a sharper version of an existing number.
+Three of the nine open the largest design space — each generative because it exposes a
+*category* of work the current metric set cannot see, not just a sharper version of an
+existing number.
 
 **1. Frame-redirect rate (H1) — most generative.** Distinguishing "wrong answer" from
-"wrong question" is the move that lets the pack invest upstream of generation. Every
-practice in the current set (P1–P6, B1–B26) operates *after* the frame is set; if frame
-errors are common, the entire practice stack is patching the wrong layer. Measuring this
-forces the pack to invent frame-checkout rituals, candidate-of-frames before
-candidate-of-solutions, and a sharper hypothesis-doc shape (B4 with the question itself as
-the deliverable). It is also the most ROC-shaped reframe in the catalog: just as MTTR
-exposed crash-only software and microreboots, frame-redirect exposes a class of design
-moves (frame-first generation, two-tier consults, framing-as-artifact) the pack currently
+"wrong question" lets the pack invest upstream of generation. Every current practice
+(P1–P6, B1–B26) operates *after* the frame is set; if frame errors are common, the whole
+practice stack is patching the wrong layer. Measuring this forces frame-checkout
+rituals, candidate-of-frames before candidate-of-solutions, and B4 sharpened so the
+question itself is the deliverable. The most ROC-shaped reframe in the catalog: as MTTR
+exposed crash-only software and microreboots, frame-redirect exposes frame-first
+generation, two-tier consults, and framing-as-artifact — design moves the pack currently
 cannot name.
 
-**2. Reviewer trust trajectory (H2).** The pack's economics rest on T1 (attention as
-currency), but T1 silently assumes constant-quality attention. Trust is the missing state
-variable. Measuring trajectory — not just override rate — converts the reviewer from a
-consumed resource into a cultivated asset and opens the design space of trust-rebuild
-rituals, trust-aware autonomy sliders, and skill-level trust ledgers (sharpening I14).
-This is the metric most likely to reshape the *human side* of the pack, where the current
-metric set is silent.
+**2. Reviewer trust trajectory (H2).** T1 rests on attention-as-currency but silently
+assumes constant-quality attention. Trust is the missing state variable. Measuring
+trajectory — not just override rate — converts the reviewer from a consumed resource
+into a cultivated asset, opening trust-rebuild rituals, trust-aware autonomy sliders,
+and skill-level trust ledgers (sharpening I14). The metric most likely to reshape the
+*human side* of the pack, where the current set is silent.
 
 **3. Half-life of skills and gates (H3).** T3 says the pack learns; the pack's metrics
-only model accretion. Half-life surfaces the symmetric truth: the pack also rots. This
-exposes a maintenance discipline the pack is missing entirely — periodic re-validation,
-asset retirement, model-upgrade re-tuning beyond what I11 covers. It is also the cheapest
-to instrument (a timestamp on every asset) and the most under-rewarded culturally, which
-is exactly why naming it as a metric is generative: it forces a kind of work the pack
-otherwise will not do.
+only model accretion. Half-life surfaces the symmetric truth — the pack also rots. This
+exposes a maintenance discipline the pack lacks entirely: periodic re-validation, asset
+retirement, model-upgrade re-tuning beyond what I11 covers. Cheapest to instrument (a
+timestamp), most under-rewarded culturally — which is exactly why naming it forces work
+the pack otherwise will not do.
 
-The honest synthesis: H8 (pack self-knowledge depth) is a precondition for the others.
+Honest caveat: **H8 (pack self-knowledge depth) is a precondition for the other three.**
 Measuring frame-redirects, trust trajectories, or skill half-life requires an
-introspectable pack. H8 isn't itself the most generative metric, but it gates the
-infrastructure under which the top three become real rather than aspirational. If only one
-investment is made, make it H8; the others follow.
+introspectable pack. H8 isn't the most generative metric on its own, but it gates the
+infrastructure under which the top three become real rather than aspirational. If only
+one investment lands, make it H8; the others follow.
