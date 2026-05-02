@@ -8,6 +8,11 @@
 name = "gc-toolkit"
 schema = 2
 
+[global]
+session_live = [
+    "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
+]
+
 [[named_session]]
 template = "mechanik"
 scope = "city"
