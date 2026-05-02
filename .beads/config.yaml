@@ -4,4 +4,4 @@ dolt.auto-start: false
 gc.endpoint_origin: inherited_city
 gc.endpoint_status: verified
 
-sync.remote: "git+https://github.com/zookanalytics/gc-toolkit.git"
+sync.remote: "git+ssh://git@github.com/zookanalytics/gc-toolkit.git"
