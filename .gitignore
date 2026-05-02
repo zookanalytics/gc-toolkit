@@ -10,4 +10,5 @@
 !.beads/config.yaml
 !.beads/metadata.json
 .claude/skills/
-scripts/
+.gc/
+/scripts/
