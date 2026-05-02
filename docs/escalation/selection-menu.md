@@ -5,9 +5,9 @@
 > downstream effects of picking each. Pick what to discuss; defer the rest.**
 
 This doc is the contact sheet over the work in
-`docs/escalation-ideation.md` and the five research reports
-(`docs/research/r1-r5-*.md`) plus four validation reports
-(`docs/research/v1-v4-*.md`). The ideation doc is the full inventory
+`docs/escalation/ideation.md` and the five research reports
+(`docs/escalation/research/r1-r5-*.md`) plus four validation reports
+(`docs/escalation/research/v1-v4-*.md`). The ideation doc is the full inventory
 (~150 candidates); this menu surfaces the load-bearing decisions and
 my lean on each, so your job is selection, not generation.
 

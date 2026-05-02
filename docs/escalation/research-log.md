@@ -1,6 +1,6 @@
 # Escalation Research Log
 
-Companion to `escalation-foundation.md`. Captures the cross-industry
+Companion to `docs/escalation-foundation.md`. Captures the cross-industry
 research that informs the pack's borrowing strategy (see Premise: "AI
 changed the cost of work, not [necessarily] the principles of organizing
 it").
@@ -24,7 +24,7 @@ genchi genbutsu, poka-yoke, gemba walk. The canonical front+back+mid
 template for cheap-execution oversight. User notes: "very solid
 practices, absolutely worth deep understanding and references."
 
-Report: `docs/research/r1-toyota-production-system.md`. All 13
+Report: `docs/escalation/research/r1-toyota-production-system.md`. All 13
 practices covered with mechanics and failure modes. Most important
 thing that *didn't* transfer to software: the coach-apprentice dyad.
 AI-dev mappings: andon-as-escalation with pull-rate as a health
@@ -42,7 +42,7 @@ Design thinking, MVP, lean startup, design sprints, dual-track agile.
 The counterintuitive finding that cheap iteration *raises* the bar for
 upstream rigor. User notes: "worth a deeper dive."
 
-Report: `docs/research/r2-cheap-prototyping.md`. Load-bearing finding:
+Report: `docs/escalation/research/r2-cheap-prototyping.md`. Load-bearing finding:
 when iteration cost collapses, the bottleneck migrates to *framing*
 (what's worth iterating on) and *selection* (which of N survives), not
 execution. Empirical support: Thomke & Fujimoto front-loading research,
@@ -62,7 +62,7 @@ edit, smartphone era, AI image gen curation. User notes: "curious what
 processes have emerged from cheap photography." Especially relevant to
 P3 (recognition over reading) and P2 (opinion alongside options).
 
-Report: `docs/research/r3-cheap-photography-curation.md`. P3 grounded
+Report: `docs/escalation/research/r3-cheap-photography-curation.md`. P3 grounded
 in cognitive science: Klein's Recognition-Primed Decision (RPD),
 Kahneman/Klein on intuitive expertise, gestalt perception. Three
 conditions for recognition to work: rendered (not described) artifacts,
@@ -83,7 +83,7 @@ SRE error budgets. User notes: "if the restart is cheap, step one is
 to just restart a broken machine. Well researched principles worth
 pulling in."
 
-Report: `docs/research/r4-recovery-oriented-computing.md`. Key finding:
+Report: `docs/escalation/research/r4-recovery-oriented-computing.md`. Key finding:
 the Gas City thesis maps cleanly — agent session is the pod, the
 artifact (PR/branch/plan doc) is the externalized recovery state,
 multi-sample is FIT for prompts, feature-flag-plus-revert is the
@@ -97,7 +97,7 @@ Customer Obsession / Ownership / Dive Deep. Comparison with Google SRE
 postmortem, AAR, M&M conferences. User notes: "I worked at Amazon so
 the COE practice is highly regarded by me."
 
-Report: `docs/research/r5-amazon-coe.md`. Key findings: what COE
+Report: `docs/escalation/research/r5-amazon-coe.md`. Key findings: what COE
 uniquely insists on is written-first + customer-framed + action-tracked
 + widely-distributed. Concrete agent-COE template proposed with two-
 layer cadence (per-event AAR + periodic full COE sweep) feeding skill/

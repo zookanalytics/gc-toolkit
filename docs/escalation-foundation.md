@@ -5,9 +5,10 @@
 Stable surface for the AI→human communication pack design. Each item carries
 a status. This is the conversation's record; chat is the negotiation about it.
 
-**v0 foundation locked 2026-04-25.** Vision, premise, three goals, three
-tenets, the tenet composition, and six practices. Use first; refine from
-observation. Parked items remain open for future work.
+**In active iteration.** Captures the current strategic stance, not the
+final word. Subject to internal and external review; pieces will be
+revised as use generates evidence. Supporting research, ideation,
+selection menus, and roadmap items live under `docs/escalation/`.
 
 Status legend: `[LOCKED]` agreed · `[DIRECTIONAL]` concept locked, wording open · `[REFINED]` updated, awaiting confirm · `[OPEN]` under discussion · `[PARKED]` deferred · `[UNSEEN]` not yet discussed
 
@@ -23,8 +24,13 @@ organizing it is less obvious. Coordination, escalation, retrospection,
 blameless review, durable artifacts — patterns earned over fifty-to-a-
 hundred years by solving human problems that don't disappear when
 execution gets cheap. The pack treats them as the default: inspiration
-and guidance, not law. Departures should earn their place. The one clear
-shift so far: agent labor is near-free; attention isn't.
+and guidance, not law. Departures should earn their place.
+
+Every borrowing carries a falsification test — a specific AI-era failure
+mode that would invalidate it. Finding such failures is how we know the
+borrowing is real, not cargo-cult.
+
+The one clear shift so far: agent labor is near-free; attention isn't.
 
 ---
 
@@ -52,8 +58,9 @@ re-read.
 Three root principles. The set stays small.
 
 ### T1. Attention is the only scarce resource `[LOCKED]`
-Agent tokens, compute, retries, and self-critique are free. Human attention
-is the budget. Every action prices its claim against it.
+Agent tokens, compute, retries, and self-critique are free and restartable.
+Human attention is finite and not restartable on demand. Every action
+prices its claim against it.
 
 ### T2. The human owns the clock `[LOCKED]`
 The AI is ready when attention turns and quiet when it doesn't — never
@@ -66,10 +73,16 @@ negotiable. It is the engine that makes G1 actually drive. *(How — the
 retrospective ritual, periodic sweeps, COE-style write-ups — lives in
 practices.)*
 
+### T4. Automation drifts unless deliberately audited `[LOCKED]`
+A pack that doesn't check itself slides toward defects it can't see. We
+expect to find drift in our own gates, prompts, and skills — finding it
+is how we know we're paying attention.
+
 ### How the tenets compose `[LOCKED]`
-T1 prevents waste — attention is the only currency. T2 prevents interruption
-— the human owns the clock. T3 prevents stagnation — every cycle rewrites
-the next.
+T1 prevents waste — attention is the only currency. T2 prevents
+interruption — the human owns the clock. T3 prevents stagnation — every
+cycle rewrites the next. T4 prevents drift — the pack checks itself so
+automation doesn't quietly outrun the judgment that authorized it.
 
 ---
 
@@ -82,6 +95,16 @@ pack learns; tenets do not.
 Derived from T1. Pre-surface gates filter consults: self-critique first,
 confidence filter, role-specific evolving rules. Different agents
 accumulate different gates.
+
+Escalations are typed by their attention claim:
+- *Notify* — async, batchable, no decision needed.
+- *Question* — pauses agent until answered.
+- *Review* — precedes an irreversible action; must complete first.
+- *Reflect* — agent challenges the human's framing when high-confidence
+  structural conflict warrants. Bounded; dispatched as a single
+  question, not a stream.
+
+The harness routes by class so the human's surfaces match the call.
 
 ### P2. Express an opinion alongside options `[LOCKED]`
 Derived from T1, supports G2. The AI gives options AND its opinion. Not
@@ -121,18 +144,17 @@ the example set evolves. Don't paraphrase what the human already encoded.
   it.
 - Tenets must be medium-agnostic and durable. Examples may evolve; the
   principle should outlast them.
-- Cross-industry research that informs the Premise lives in
-  `escalation-research-log.md`.
+- Supporting material — research, ideation, selection menus, marching
+  orders for downstream agent work, and roadmap items — lives under
+  `docs/escalation/`.
 
 ---
 
 ## Parked
 
-- Specific skill list — derives from foundation, not before
-- Callout vocabulary — emerges from observation
-- Metaphor for AI's posture (surgeon/scrub-nurse rejected; underlying idea
-  of "instrument-ready" still open)
-- T3's mechanism — the principle of learning holds; the mechanism design
-  waits until real use generates patterns. Direction-of-travel: guidance
-  paired with structural artifacts, evolved through consults about
-  guidance itself. Not designed yet.
+- Specific skill list — derives from foundation; downstream agent work
+  selects the first set based on marching orders.
+- Callout vocabulary — emerges from observation.
+- Metaphor for AI's posture (surgeon/scrub-nurse rejected; "instrument-
+  ready" idea still open; default for now is no metaphor — the practices
+  encode the relationship).

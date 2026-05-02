@@ -43,7 +43,7 @@ does. T1 is doing more work than v0 knew.
 
 ## V1 Red-Team verdicts (summary)
 
-Full report: `docs/research/v1-red-team.md`. Three load-bearing structural
+Full report: `docs/escalation/research/v1-red-team.md`. Three load-bearing structural
 findings the pack hadn't named:
 
 - **Attention-budget overdraft.** A2 sharpens T1 to "non-restartable,"
@@ -584,8 +584,8 @@ Geoffrey Litt, Tobi Lütke, the Vaccaro meta-analysis. V4 mapped the
 genuinely AI-native problems with no clean human precedent. The
 combined set is below.
 
-Full reports: `docs/research/v2-ai-native-prior-art.md`,
-`docs/research/v4-ai-native-inventions.md`.
+Full reports: `docs/escalation/research/v2-ai-native-prior-art.md`,
+`docs/escalation/research/v4-ai-native-inventions.md`.
 
 ### From V2 (prior art)
 
@@ -700,7 +700,7 @@ B23 / E10.**
 
 ## J. V3 Skeptic — hidden producer-side assumptions
 
-V3 (full report: `docs/research/v3-skeptic.md`) names the structural
+V3 (full report: `docs/escalation/research/v3-skeptic.md`) names the structural
 assumption shared by *all* the borrowed disciplines in R1–R5: that
 the producer is **deterministic, reproducible, finitely-set, legibly-
 fidelitous, and the bottleneck**. AI agents violate all five
