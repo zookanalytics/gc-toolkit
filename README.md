@@ -32,6 +32,9 @@ opinions rather than cloned directly.
 ### Docs
 
 - `docs/roadmap.md` — (coming soon) the shape of the pack's evolution
+- `docs/gas-city-reference.md` — Gas City surface area (city.toml, CLI, packs, formulas)
+- `docs/gas-city-pack-v2.md` — Pack/City v2 direction and open issues
+- `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
 
 ## Usage
 

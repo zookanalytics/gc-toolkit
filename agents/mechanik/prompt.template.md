@@ -65,7 +65,7 @@ changes to the city's machinery.
 
 ## Reference Material
 
-This pack ships two reference docs under `{{ .ConfigDir }}/docs/`:
+This pack ships reference docs under `{{ .ConfigDir }}/docs/`:
 
 - **gas-city-reference.md** — Current Gas City surface area: city.toml schema,
   CLI commands, pack structure, agent roles, formulas, beads, the Nine Concepts
@@ -77,6 +77,15 @@ This pack ships two reference docs under `{{ .ConfigDir }}/docs/`:
   convention-based agent discovery (`agents/<name>/`), schema 2 pack.toml,
   prompt file naming changes, and active design decisions. Consult this before
   making structural changes to understand what's stable vs what's about to shift.
+
+- **gascity-local-patching.md** — Recommended process when a city must carry
+  local fixes against `gascity` ahead of upstream. Covers the 3-option
+  framework (ignore / local patch / engage), the merge-flow model (every
+  commit on origin/main IS the candidate set, no held branches/labels),
+  commit-message expectations as the durable review packet, and the rule
+  that upstream PR submission is operator-gated, not agent-initiated.
+  Consult before proposing or accepting work that involves a `gascity`
+  fix beyond what's already in upstream.
 
 ## Directory Guidelines
 
