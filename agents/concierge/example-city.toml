@@ -24,10 +24,10 @@ mode = "always"
 
 # v2 session-per-consult — register the consult-host template as
 # city-scoped, on-demand spawning (no `mode = "always"`). Concierge
-# spawns one per resolution engagement via:
-#
-#     gc session new consult-host --alias consult-<bead-id> --no-attach
-#     "$GC_CONFIG_DIR"/assets/scripts/consult-attach.sh consult-<bead-id>
+# spawns one per resolution engagement; its prompt carries the spawn
+# command + the path to the tmux switch helper (resolved at session
+# start via `{{ .ConfigDir }}`). The consuming city does not invoke
+# the helper directly — only concierge does.
 #
 # See docs/design/consult-session-v2-impl.md for the full protocol.
 

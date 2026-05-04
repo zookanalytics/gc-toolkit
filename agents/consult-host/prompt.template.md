@@ -119,14 +119,14 @@ notes, summarize the answer back into the consult, continue.
 
 If the consult bead carries `metadata.gc.consult_filed_by` (or you
 can derive the filing specialist from `created_by`), check for a
-specialist consult layer:
+specialist consult layer in this pack:
 
 ```bash
 SPECIALIST=$(bd show "$CONSULT" --json | jq -r '
     .[0].metadata."gc.consult_filed_by" //
     (.[0].created_by // "" | sub("^.+__"; "") | sub("^.+/"; ""))
 ')
-LAYER="$GC_CONFIG_DIR/agents/$SPECIALIST/consult-layer.md"
+LAYER="{{ .ConfigDir }}/agents/$SPECIALIST/consult-layer.md"
 [ -n "$SPECIALIST" ] && [ -f "$LAYER" ] && cat "$LAYER"
 ```
 

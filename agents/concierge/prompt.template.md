@@ -134,7 +134,7 @@ yourself.
 
 ```bash
 gc session new consult-host --alias "consult-<bead-id>" --no-attach
-"$GC_CONFIG_DIR"/assets/scripts/consult-attach.sh "consult-<bead-id>"
+{{ .ConfigDir }}/assets/scripts/consult-attach.sh "consult-<bead-id>"
 ```
 
 What that does:
@@ -403,7 +403,7 @@ bd create "[type] <question>" -l consult \
 
 # Hand off to a consult-host (the resolution path):
 gc session new consult-host --alias "consult-<bead-id>" --no-attach
-"$GC_CONFIG_DIR"/assets/scripts/consult-attach.sh "consult-<bead-id>"
+{{ .ConfigDir }}/assets/scripts/consult-attach.sh "consult-<bead-id>"
 ```
 
 Note: `bd update --status=closed` for a consult is the host's

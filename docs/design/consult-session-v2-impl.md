@@ -85,7 +85,8 @@ concierge: gc session new consult-host --alias consult-<bead> --no-attach
 runtime spawns a new consult-host session, alias=consult-<bead>
          │
          ▼
-concierge: $GC_CONFIG_DIR/assets/scripts/consult-attach.sh consult-<bead>
+concierge: {{ .ConfigDir }}/assets/scripts/consult-attach.sh consult-<bead>
+         (path is Go-template-resolved at concierge's session start)
          │
          ▼
 script: tmux switch-client -t consult-<bead>   (on $GC_TMUX_SOCKET)
@@ -139,7 +140,7 @@ SPECIALIST=$(bd show "$CONSULT" --json | jq -r '
     .[0].metadata."gc.consult_filed_by" //
     (.[0].created_by // "" | sub("^.+__"; "") | sub("^.+/"; ""))
 ')
-LAYER="$GC_CONFIG_DIR/agents/$SPECIALIST/consult-layer.md"
+LAYER="{{ .ConfigDir }}/agents/$SPECIALIST/consult-layer.md"
 [ -n "$SPECIALIST" ] && [ -f "$LAYER" ] && cat "$LAYER"
 ```
 

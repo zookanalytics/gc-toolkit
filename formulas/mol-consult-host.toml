@@ -135,20 +135,10 @@ starts.
 
 **6. Apply the specialist layer (if any).**
 
-If the bead carries `metadata.gc.consult_filed_by` (or you can derive
-the specialist from `created_by`), check for a specialist consult
-layer in the pack:
-
-```bash
-SPECIALIST=$(bd show "$CONSULT" --json | jq -r '
-    .[0].metadata."gc.consult_filed_by" //
-    (.[0].created_by // "" | sub("^.+__"; "") | sub("^.+/"; ""))
-')
-LAYER="$GC_CONFIG_DIR/agents/$SPECIALIST/consult-layer.md"
-if [ -n "$SPECIALIST" ] && [ -f "$LAYER" ]; then
-    cat "$LAYER"     # read it; apply as a context layer for this conversation
-fi
-```
+Your prompt template carries the specialist-layer lookup snippet with
+the pack path already resolved (it uses `{{ .ConfigDir }}`, which is
+expanded at session start). Run that snippet to derive the filing
+specialist from the bead and read the layer file if present.
 
 The layer is **not** a full specialist persona — it is a fragment
 that adjusts your register and points at central knowledge the
