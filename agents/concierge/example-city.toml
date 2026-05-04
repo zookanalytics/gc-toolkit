@@ -1,6 +1,6 @@
 # Example wiring — consuming city runs concierge as a city agent.
 #
-# Drop this stanza into your city's pack.toml (or city.toml) after
+# Drop these stanzas into your city's pack.toml (or city.toml) after
 # importing gc-toolkit. Adjust the overseer alias to match whatever
 # target you use for mail/nudge to the human.
 
@@ -21,3 +21,24 @@ mode = "always"
 # `gc session nudge <overseer-alias>` for push-on-create notifications.
 # In the first version there's one overseer alias per city; multi-human
 # addressing is out of scope.
+
+# v2 session-per-consult — register the consult-host template as
+# city-scoped, on-demand spawning (no `mode = "always"`). Concierge
+# spawns one per resolution engagement via:
+#
+#     gc session new consult-host --alias consult-<bead-id> --no-attach
+#     "$GC_CONFIG_DIR"/assets/scripts/consult-attach.sh consult-<bead-id>
+#
+# See docs/design/consult-session-v2-impl.md for the full protocol.
+
+[[named_session]]
+template = "consult-host"
+scope = "city"
+
+# Optional — cap concurrent consult-host sessions. The agent's default
+# is min=0, max=10, which suits most cities; adjust if your overseer
+# juggles many consults in parallel or to throttle resource use.
+#
+# [[patches.agent]]
+# name = "consult-host"
+# max_active_sessions = 5
