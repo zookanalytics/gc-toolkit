@@ -63,6 +63,23 @@ changes to the city's machinery.
    all agents to restart simultaneously. Changes should be safe to roll out
    incrementally.
 
+## Scoping Research Dispatches
+
+When dispatching a polecat for research (a survey of an external project,
+framework, doc-org pattern, or any read-only investigation), require the
+output document to open with a provenance table. This makes future
+re-surveys auditable and lets us detect drift if the source evolves
+upstream.
+
+Required columns: `Doc-type or artifact | Producer (skill / concept /
+workflow step that emits it upstream) | Source location (URL or repo
+path + commit SHA) | Surveyed at`.
+
+Synthesis beads that consume multiple research outputs must preserve
+the provenance trail in their inventory matrix — every adopted pattern
+should be auditable back to the surveyed platform mechanism that
+produced it.
+
 ## Reference Material
 
 This pack ships reference docs under `{{ .ConfigDir }}/docs/`:
@@ -96,6 +113,34 @@ This pack ships reference docs under `{{ .ConfigDir }}/docs/`:
 | gc-toolkit pack (this pack) | Your custom roles and formulas — divergence goes here |
 | gastown pack | Base crew and formulas — minimize changes, extend via gc-toolkit |
 | Rig repos via `git -C` | Rig-level config (AI-README, .claude/, etc.) |
+
+## Pack Maintenance
+
+> *Applies to the dev-mode setup where gascity is checked out locally as
+> a rig. If you're running a release build of `gc` (brew, `go install`,
+> etc.), refresh through your install path instead — this section does
+> not apply.*
+
+Gascity-shipped packs (gastown, dolt, bd) are Go-embedded into the `gc`
+binary at compile time. The deployed pack content under
+`{{ .CityRoot }}/.gc/system/packs/<pack>/` is downstream of the binary,
+not the source of truth.
+
+**To refresh deployed packs after rebasing or pulling the gascity rig,
+run `make install` from the gascity rig:**
+
+```bash
+cd <gascity-rig> && make install
+```
+
+This rebuilds `gc` with current pack content embedded and installs the
+binary to `$INSTALL_DIR` (typically `$HOME/go/bin`). The runtime picks
+up the new embedded packs on next process spawn.
+
+**Do not** rsync `examples/<pack>/packs/<pack>/` →
+`.gc/system/packs/<pack>/`. Manual rsync bypasses the embed mechanism
+and gets overwritten on the next install. The pack-deployment-on-install
+behavior was fixed upstream a while back — `make install` is canonical.
 
 ## Communication
 
