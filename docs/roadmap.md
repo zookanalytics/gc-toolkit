@@ -85,10 +85,16 @@ from metadata and presentation, not from separate bead types.
 
 Consult beads need a discoverability surface so they don't sit silent.
 A dedicated city-level `concierge` agent pushes a notification on
-consult creation and holds a real-time conversation with the overseer
-on engagement. Consults are filed as dependencies of the bead whose
-work they block, so closing a consult unblocks the parent. See
-`docs/design/consult-surfacing.md` for the approved design.
+consult creation and runs the triage conversation with the overseer
+("what's open?", "let's look at the review queue"). When the overseer
+commits to resolving a specific consult, concierge spawns a
+`consult-host` session for that bead and switches the overseer's tmux
+client into it; the host loads the bead in full and converses
+directly. Consults are filed as dependencies of the bead whose work
+they block, so closing a consult unblocks the parent. See
+`docs/design/consult-surfacing.md` (v1 surfacing model) and
+`docs/design/consult-session-v2-impl.md` (v2 session-per-consult, as
+built).
 
 ### Merge-strategy agnosticism
 
@@ -172,9 +178,12 @@ invented intentionally when we get to it, rather than bolted on.
   open; both are acceptable). Pack-level architect carries no rig-specific
   knowledge.
 - **Consult bead surfacing channel**: a dedicated city-level `concierge`
-  agent pushes on creation and holds real-time conversation with the
-  overseer on engagement. Consults are filed as dependencies of the
-  parent bead. Details in `docs/design/consult-surfacing.md`.
+  agent pushes on creation and runs the triage conversation with the
+  overseer; on resolution, it spawns a `consult-host` session for the
+  bead and switches the overseer's tmux client into it. Consults are
+  filed as dependencies of the parent bead. Details in
+  `docs/design/consult-surfacing.md` (v1 surfacing) and
+  `docs/design/consult-session-v2-impl.md` (v2 session-per-consult).
 
 ### Open
 
@@ -213,8 +222,18 @@ The next durable artifacts, in rough order. Not a contract.
    best of the A/B experiment outputs.
 4. Architect's patrol formula (Active hat) for drift and
    question-promotion.
-5. Consult-bead surfacing channel — build the `concierge` agent per
-   `docs/design/consult-surfacing.md`.
+5. Consult-bead surfacing channel — `concierge` agent landed (v1
+   model from `docs/design/consult-surfacing.md`); session-per-consult
+   v2 (Shape A — direct tmux attach, brand evaporates in-session)
+   landed on top, per `docs/design/consult-session-v2-impl.md`.
+   Pending build-signals from operating data:
+   - second consult-producing specialist (forces the
+     `consult-layer.md` pattern past one example);
+   - cold-start-latency feel under sustained use (revisit warm pools
+     only if the lazy spawn turns out to hurt engagement);
+   - re-engagement frequency within minutes vs. hours (revisit the
+     fresh-spawn-only default if short-cycle re-engagement becomes
+     common).
 6. First review-leg specialist: likely a planning/architecture-consistency
    leg that runs when a polecat finishes work against a plan the
    architect helped shape.
