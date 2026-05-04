@@ -12,3 +12,4 @@ CONFIGDIR="$1"
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh"
+gcmux bind-key a run-shell "$CONFIGDIR/assets/scripts/tmux-spawn-scratch.sh $CONFIGDIR"
