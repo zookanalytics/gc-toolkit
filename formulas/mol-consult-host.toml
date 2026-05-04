@@ -1,0 +1,340 @@
+description = """
+Consult conversation hosting — Shape A (direct tmux attach).
+
+Spawn a session that loads a consult bead's full context and hosts the
+overseer's conversation directly. The session is the conversational
+register; the bead is the durable record. Concierge routes; this
+session converses.
+
+Modeled on `mol-do-work` and `mol-polecat-work`. Where polecats run
+autonomously and emit code, a consult-host session waits for the
+overseer to attach via tmux. Each meaningful turn lands on the bead
+as a note. On decision, the host writes the closing note, closes the
+consult, and drains.
+
+## Lifecycle
+
+1. **Spawn.** Concierge creates this session with
+   `gc session new consult-host --alias consult-<bead>` after the
+   overseer engages a specific consult.
+2. **Load context.** The session reads its consult bead in full
+   (description, all notes, parent dependency, linked artifacts) and
+   composes the opening orientation message.
+3. **Wait for attach.** The overseer attaches directly via tmux
+   (`gc session attach consult-<bead>` or via the switch-client helper
+   concierge runs). Brand evaporates by design — the loaded bead
+   context is what matters, not the host's identity.
+4. **Converse.** Back-and-forth. Each meaningful turn writes a bead
+   note. Side-quests file sub-beads (blocking via `gc session wait
+   --on-beads`, parallel via plain dependency).
+5. **Capture decision.** The overseer signals a decision; the host
+   folds it into a closing note and closes the consult. The parent
+   bead's dependency resolves automatically.
+6. **Drain.** `gc runtime drain-ack` ends the session.
+
+## Re-engagement
+
+Fresh spawn every engagement — same lifecycle as a polecat that dies
+and resumes. The bead carries the conversation as notes, so a new
+session reading the bead has full history. No new pause/resume
+machinery; reuse the polecat lifecycle.
+
+If the overseer detaches without a decision, the host writes a "session
+paused" note before draining. The next engagement spawns fresh and
+reads the pause note alongside prior turns.
+
+## Sub-bead nesting
+
+Existing primitives only:
+
+- **Blocking sub-bead** — file with `--parent <consult>`; route to the
+  appropriate pool; `gc session wait --on-beads <sub-bead> --sleep`.
+  The reconciler wakes the host when the sub-bead closes; the host
+  reads the answer and resumes the conversation.
+- **Parallel sub-bead** — file with `--depends-on <consult>` (or no
+  parent edge); route to the pool; continue conversing. The host or
+  concierge folds the result back when it lands.
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| consult_bead | concierge (via session alias) | The consult bead ID this host owns. The session alias is `consult-<bead>`; the bead ID is parsed from `$GC_ALIAS` at startup. |
+
+The formula itself does not require `consult_bead` as a `--var`
+because the spawn uses the alias to encode it. Including the variable
+here is for documentation; load-context resolves it from the alias.
+"""
+formula = "mol-consult-host"
+version = 1
+
+[vars]
+[vars.consult_bead]
+description = "The consult bead ID this session hosts (resolved from $GC_ALIAS at startup)"
+default = ""
+
+[[steps]]
+id = "load-context"
+title = "Load the consult bead and prepare to converse"
+description = """
+Initialize and load the consult you are hosting. Run before the
+overseer attaches, so the first message they see is grounded in the
+bead.
+
+**1. Resolve the consult bead from the session alias.**
+
+Concierge spawned you with `--alias consult-<bead-id>`. Extract the
+bead ID:
+
+```bash
+CONSULT="${GC_ALIAS#consult-}"
+[ "$CONSULT" = "$GC_ALIAS" ] && {
+    echo "consult-host expected alias 'consult-<bead-id>', got '$GC_ALIAS'" >&2
+    gc runtime drain-ack
+    exit 1
+}
+```
+
+If the alias does not parse, the spawn was wrong — drain immediately
+and let concierge retry.
+
+**2. Prime your environment:**
+
+```bash
+gc prime
+bd prime
+```
+
+**3. Read the consult bead in full:**
+
+```bash
+bd show "$CONSULT"                        # description, notes, dependencies, metadata
+bd show "$CONSULT" --json | jq '.[0].metadata'
+```
+
+Read everything: the description, *every* note (each one is a prior
+turn), labels, `gc.consult_type`, and the dependency edges. No
+summaries. No skimming.
+
+**4. Walk the parent.**
+
+Consults are dependencies of the bead they block. Read the parent so
+you understand *why* this consult exists and what work resumes on
+close:
+
+```bash
+bd deps "$CONSULT"                        # find the parent
+bd show <parent-id>                       # read the parent
+```
+
+**5. Read linked artifacts.**
+
+Any branches, ADRs, design docs, prior beads the description references
+— read them now. No bald responses from memory once the conversation
+starts.
+
+**6. Apply the specialist layer (if any).**
+
+If the bead carries `metadata.gc.consult_filed_by` (or you can derive
+the specialist from `created_by`), check for a specialist consult
+layer in the pack:
+
+```bash
+SPECIALIST=$(bd show "$CONSULT" --json | jq -r '
+    .[0].metadata."gc.consult_filed_by" //
+    (.[0].created_by // "" | sub("^.+__"; "") | sub("^.+/"; ""))
+')
+LAYER="$GC_CONFIG_DIR/agents/$SPECIALIST/consult-layer.md"
+if [ -n "$SPECIALIST" ] && [ -f "$LAYER" ]; then
+    cat "$LAYER"     # read it; apply as a context layer for this conversation
+fi
+```
+
+The layer is **not** a full specialist persona — it is a fragment
+that adjusts your register and points at central knowledge the
+specialist relies on. You remain the consult host; the layer informs
+how you carry the conversation in this domain.
+
+**7. Compose the opening orientation.**
+
+Prepare the first message you'll send when the overseer attaches.
+Plain prose. Names the bead and the trigger. Example shape:
+
+```
+consult <bead-id> — [<type>] <title>
+filed by <specialist> · blocks <parent-id> (<parent title>)
+
+<one-line summary of the question or crossroads>
+
+ready when you are.
+```
+
+Do not lead with persona. The overseer attached to talk about the
+consult; the bead context is the first thing they should see.
+
+**Exit criteria:** Bead read in full, parent loaded, artifacts and
+specialist layer absorbed, opening message ready, awaiting attach."""
+
+[[steps]]
+id = "host-conversation"
+title = "Hold the consult conversation"
+needs = ["load-context"]
+description = """
+Converse with the overseer. Each meaningful turn lands on the bead as
+a note. The bead is the durable record; you are the ephemeral register
+that carries this engagement.
+
+**1. Deliver the opening message on attach.**
+
+When the overseer attaches via tmux, send the orientation composed in
+load-context as your first message. Then wait.
+
+**2. Converse in prose.**
+
+- Overseer speaks in prose; you respond in prose.
+- Ground every response in loaded bead context — never improvise from
+  memory. Re-read the bead with `bd show $CONSULT` if you suspect a
+  recent note added context (e.g., a sub-bead returned).
+- Each meaningful turn lands on the bead as a note:
+
+```bash
+bd update "$CONSULT" --notes "<turn summary or pasted exchange>"
+```
+
+  A meaningful turn is: a posed option, a clarification offered, a
+  partial decision, a research result folded back. Casual filler does
+  not need a note; substance does.
+
+**3. Sub-beads for side-quests.**
+
+When the conversation needs research, code reading, prototyping, or
+benchmarking, file a sub-bead. Offer the choice explicitly:
+
+> "I can file this as **blocking** — we pause here until it returns —
+> or **parallel** — I keep talking while it runs. Which?"
+
+Then file accordingly:
+
+```bash
+# Blocking: consult depends on sub-bead; conversation pauses.
+SUB=$(bd create "research: <description>" -t task --parent "$CONSULT" \
+        --json | jq -r '.id')
+gc sling <rig>/<pool> "$SUB"                         # route to a worker
+gc session wait --on-beads "$SUB" --sleep \
+    --note "sub-bead $SUB returned; resume the consult"
+# Reconciler wakes you when $SUB closes. Resume from here.
+```
+
+```bash
+# Parallel: sub-bead is independent; conversation continues.
+SUB=$(bd create "research: <description>" -t task \
+        --depends-on "$CONSULT" --json | jq -r '.id')
+gc sling <rig>/<pool> "$SUB"
+# No `session wait`. Continue the conversation. Check `bd show $SUB`
+# on demand or fold the result back when concierge nudges you on close.
+```
+
+For the blocking flavor, when you wake from `session wait`, read the
+sub-bead's notes, summarize the answer back into the consult, and
+continue.
+
+**4. Ambiguity belongs upstream.**
+
+Concierge owns the ambiguity-policy across multiple open consults.
+You only host one. If the overseer's reply seems to be about a
+different consult, redirect — never act on a sibling:
+
+> "That sounds like a different consult (tk-xyz?). Drain here when
+> you're done with this one and concierge can route you over."
+
+**5. Filing-bar belongs upstream.**
+
+Concierge gatekeeps the filing bar before pushing. By the time you
+host, the bead met the bar — don't second-guess it. If the filing is
+genuinely deficient mid-conversation (e.g., the overseer surfaces a
+missing artifact), file a follow-up note and ask the overseer how to
+proceed; do not silently rewrite the original filing.
+
+**Exit criteria:** A decision is signalled (proceed to capture-decision)
+or the overseer detaches without a decision (proceed with the pause
+branch in capture-decision)."""
+
+[[steps]]
+id = "capture-decision"
+title = "Capture the decision (or pause), close, and drain"
+needs = ["host-conversation"]
+description = """
+The conversation has ended for now. Make the outcome durable, then
+drain. You cease to exist after this step; the bead carries the record.
+
+**Two exit branches:**
+
+### A. Decision reached
+
+The overseer signalled a clear decision.
+
+**1. Write the closing note.** Fold the conversation into a single,
+explicit resolution. Downstream readers must not have to infer the
+outcome from back-and-forth.
+
+```bash
+bd update "$CONSULT" --notes "Decision: <explicit resolution>
+
+<short rationale or constraints, if any>
+"
+```
+
+**2. Close the consult.**
+
+```bash
+bd update "$CONSULT" --status=closed
+```
+
+The parent bead's `DEPENDS ON` resolves automatically; parent work
+unblocks via the bead dependency graph.
+
+**3. Notify concierge.**
+
+Concierge picks up the close via its consult query, but a nudge
+shortens the loop:
+
+```bash
+gc session nudge concierge "consult $CONSULT closed: <one-line decision>"
+```
+
+### B. Overseer disengaged without a decision
+
+The overseer detached or signalled "let me come back to this."
+
+**1. Write a pause note** describing where the conversation is. The
+next fresh spawn reads this and resumes.
+
+```bash
+bd update "$CONSULT" --notes "Session paused: <state>
+
+Open questions / next turn:
+- <what the next session should pick up>
+"
+```
+
+**2. Do NOT close the consult.** A paused consult stays open so it
+remains in concierge's query for re-engagement.
+
+**3. Nudge concierge.**
+
+```bash
+gc session nudge concierge "consult $CONSULT paused; bead has the state"
+```
+
+### Both branches: drain
+
+```bash
+gc runtime drain-ack
+exit
+```
+
+`gc runtime drain-ack` signals the reconciler to kill this session.
+You are GONE. There is no idle state. Re-engagement spawns fresh.
+
+**Exit criteria:** Bead has either a decision-and-close or a pause
+note, concierge nudged, session drained."""
