@@ -42,3 +42,18 @@ scope = "city"
 # [[patches.agent]]
 # name = "consult-host"
 # max_active_sessions = 5
+
+# Mayor ↔ concierge bidirectional awareness — append the
+# `mayor-concierge-redirect` fragment to gastown's mayor prompt so it
+# redirects consult-style questions ("what's pending my feedback?",
+# "what consults are open?") to concierge instead of answering from its
+# own queue. The fragment is shipped by gc-toolkit at
+# `template-fragments/mayor-concierge-redirect.template.md`. Gastown's
+# mayor prompt is `.template.md`, so `append_fragments` auto-appends.
+# Drop this stanza when you adopt concierge in your city.
+#
+# Per §5.7 of `docs/design/consult-surfacing.md`.
+
+[[patches.agent]]
+name = "gastown.mayor"
+append_fragments = ["mayor-concierge-redirect"]

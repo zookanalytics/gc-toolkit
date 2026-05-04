@@ -184,6 +184,13 @@ invented intentionally when we get to it, rather than bolted on.
   filed as dependencies of the parent bead. Details in
   `docs/design/consult-surfacing.md` (v1 surfacing) and
   `docs/design/consult-session-v2-impl.md` (v2 session-per-consult).
+- **Mayor ↔ concierge bidirectional awareness via overlay fragment**:
+  the mayor side of the redirect (§5.7 of the consult-surfacing design)
+  ships as a gc-toolkit overlay — `template-fragments/mayor-concierge-redirect.template.md`
+  plus an `append_fragments` patch on `gastown.mayor` shown in
+  `agents/concierge/example-city.toml`. No fork of gastown's mayor
+  prompt; consuming cities opt in by adopting the wiring stanza
+  alongside the concierge `[[named_session]]`.
 
 ### Open
 
