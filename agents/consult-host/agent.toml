@@ -1,0 +1,7 @@
+scope = "city"
+wake_mode = "fresh"
+work_dir = ".gc/agents/consult-host/{{.AgentBase}}"
+nudge = "Run gc hook; the alias names the consult bead you host."
+idle_timeout = "30m"
+min_active_sessions = 0
+max_active_sessions = 10
