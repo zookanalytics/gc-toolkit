@@ -15,10 +15,6 @@
 # A soft-guard fragment (template-fragments/scratch-clone-guard.md) is
 # appended to the persona — it tells the scratch what is free to do, what
 # to ask about, and what to avoid while the registered agent is mid-flight.
-#
-# The exclusion list refuses cloning of formula-driven (polecat, refinery,
-# witness, dog) and lifecycle/internal (boot, control-dispatcher,
-# consult-host) agents whose identity is not a stable named persona.
 set -e
 
 CONFIGDIR="$1"
@@ -39,27 +35,13 @@ SESSION=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 AGENT=$(gcmux show-environment -t "$SESSION" GC_AGENT 2>/dev/null | sed -n 's/^GC_AGENT=//p')
 [ -z "$AGENT" ] && AGENT=$(printf '%s' "$SESSION" | sed 's/.*__//')
 
-# Short label for the window name — last `.`-separated segment, so
-# `gc-toolkit.mechanik` -> `mechanik`, `gastown.mayor` -> `mayor`.
-SHORT_AGENT=$(printf '%s' "$AGENT" | sed 's/.*\.//')
-
-# 3. Exclusion list — refuse for formula-driven and lifecycle/internal
-#    agents. Default-allow so new named-crew additions get scratch
-#    cloning automatically.
-case "$AGENT" in
-    *polecat*|*refinery*|*witness*|*dog*|*boot*|*control-dispatcher*|*consult-host*)
-        gcmux display-message "Scratch clone not enabled for $AGENT (named crew only)"
-        exit 0
-        ;;
-esac
-
-# 4. Resolve the registered agent's cwd from pane :^.0 (first window,
+# 3. Resolve the registered agent's cwd from pane :^.0 (first window,
 #    first pane, regardless of base-index). Mirrors the convention used
 #    by GetPaneWorkDir / GetPaneCommand in gascity's runtime/tmux.
 CWD=$(gcmux display-message -t "$SESSION:^.0" -p '#{pane_current_path}' 2>/dev/null || true)
 [ -z "$CWD" ] && CWD="$HOME"
 
-# 5. Compose the scratch system prompt: persona + guard fragment, with
+# 4. Compose the scratch system prompt: persona + guard fragment, with
 #    <agent-name> substituted in the guard. --strict makes gc prime fail
 #    loudly on a typo'd agent name instead of returning a generic prompt.
 GUARD_FRAGMENT="$CONFIGDIR/template-fragments/scratch-clone-guard.md"
@@ -73,15 +55,26 @@ gc prime --strict "$AGENT" > "$TMPFILE"
 printf '\n\n' >> "$TMPFILE"
 sed "s|<agent-name>|$AGENT|g" "$GUARD_FRAGMENT" >> "$TMPFILE"
 
-# 6. Open a new window in the same session, in the registered agent's
+# 5. Open a new window in the same session, in the registered agent's
 #    cwd, running an unregistered claude with the composed system prompt.
 #    GC_SCRATCH=1 marks the env so downstream tooling can detect the
 #    scratch. The temp prompt file is removed once claude exits.
 #
-#    `tmux kill-pane` at the end is required because named-crew sessions
-#    set `remain-on-exit on` (so the registered agent's pane can be
-#    respawned in place). New windows inherit that option; without an
-#    explicit kill, the scratch window would linger as `[Exited]` after
-#    claude exits.
-gcmux new-window -t "$SESSION" -c "$CWD" -n "scratch-$SHORT_AGENT" \
-    "GC_SCRATCH=1 claude --bare --append-system-prompt-file '$TMPFILE' ; rm -f '$TMPFILE' ; tmux kill-pane"
+#    Window name is just `scratch` (the session name already says which
+#    agent is hosting). Multiple scratches in one session show as `scratch`
+#    `scratch` and are disambiguated by `prefix + w` indices, matching the
+#    convention for the default `prefix + c` (multiple `zsh` windows).
+#
+#    `--bare` is intentionally NOT used: it would skip OAuth/keychain auth,
+#    which is the only auth path on this host. We also don't pass
+#    `--settings <city>`, so the city's hooks (UserPromptSubmit drains
+#    nudges, Stop injects, etc.) don't fire in the scratch — the scratch
+#    must not pull mail/nudges that belong to the registered agent.
+#
+#    Named-crew sessions set `remain-on-exit on` so their primary pane can
+#    be respawned in place by `gc session reset`. New windows inherit that
+#    option; we override it on the captured pane id so the scratch window
+#    closes cleanly when claude exits instead of lingering as `[Exited]`.
+PANE_ID=$(gcmux new-window -P -F '#{pane_id}' -t "$SESSION" -c "$CWD" -n scratch \
+    "GC_SCRATCH=1 claude --append-system-prompt-file '$TMPFILE' ; rm -f '$TMPFILE'")
+gcmux set-option -p -t "$PANE_ID" remain-on-exit off
