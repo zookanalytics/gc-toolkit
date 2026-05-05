@@ -1,36 +1,34 @@
-# Note: dog is NOT in this directory by design
+# Note: dog lives in maintenance, not gc-toolkit
 
-**Dog is provided by the auto-included maintenance pack** at
+**Dog is intentionally provided by the auto-included maintenance pack** at
 `.gc/system/packs/maintenance/agents/dog/` (re-materialized from the gc binary
-embed on every `gc start`).
+embed on every `gc start`). Dog is shared housekeeping infrastructure — orphan
+sweeps, jsonl backups, reaper, shutdown dance — that belongs in maintenance's
+central scope, not in our domain-specific roster.
 
-We tried to vendor `agents/dog/` into gc-toolkit during the Lane C cutover
-2026-05-05 and hit the V2 validator gap: `cmd/gc/embed_builtin_packs.go`
-unconditionally adds maintenance to the city's workspace.includes, so
-maintenance.dog lands in `cfg.Agents` with `BindingName=""` (city-local). Our
-gc-toolkit.dog (BindingName="gc-toolkit") collides on bare-name uniqueness in
-`ValidateAgents` (`config.go:2548`, keys on `(Dir, Name)` not on
-BindingName). Pack-level `[[patches.agent]]` from gc-toolkit can't reach the
-auto-included maintenance.dog (patches only match within the same pack's
-loaded agent list per `applyPackAgentPatches` in `pack.go:2147`), so we lose
-the gastown wake_mode/work_dir patch behavior for dog.
+gc-toolkit owns the **domain crew** (mayor, deacon, boot, witness, refinery,
+polecat). Dog is the **utility worker** that all packs use; it stays central.
 
-## What we run with
+## What we run
 
 - `dog` (bare name, no binding): scope=city, fallback=true, idle_timeout=2h,
   max_active_sessions=3 (from `.gc/system/packs/maintenance/agents/dog/agent.toml`)
-- No `wake_mode = "fresh"` (was set by gastown's `[[patches.agent]]`; we no
-  longer have that patch).
-- No `work_dir = ".gc/agents/dogs/{{.AgentBase}}"` (same reason).
+- gc binary auto-includes maintenance via
+  `cmd/gc/embed_builtin_packs.go:builtinPackIncludes` — no city-config edit
+  needed.
 
-## When this becomes ownable
+## Lane C history
 
-Either of the following upstream gascity changes would unblock vendoring dog:
-1. `ValidateAgents` becomes binding-aware (keys on `(Dir, BindingName, Name)`).
-2. `builtinPackIncludes` becomes opt-out or skips packs the user has shadowed.
-3. Pack-level `[[patches.agent]]` learns to target qualified names from sibling
-   packs (cross-pack patching).
+We initially tried to vendor `agents/dog/` into gc-toolkit during the 2026-05-05
+cutover. It collided with maintenance.dog on bare-name uniqueness in V2
+`ValidateAgents` (which is binding-blind — see the spike doc empirical
+correction). When we hit that, we recognized dog as appropriately central
+rather than fight the loader. Cleaner outcome: gc-toolkit owns the domain
+roster; maintenance owns the housekeeping. The architectural seam matches the
+intent.
 
-Filed as part of the V2 conformance tracking in
-`docs/research/pack-architecture/spike-gc-toolkit-as-primary-pack.md`
-(Empirical correction section, 2026-05-05).
+## When to revisit
+
+If we ever need a dog variant with custom prompt or behavior specific to this
+city (not just configuration via `[[patches.agent]]`), re-evaluate then.
+Otherwise the current split is the right one.
