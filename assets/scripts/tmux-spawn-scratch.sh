@@ -39,6 +39,15 @@ SESSION=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 HAS_CLIENT=1
 [ -z "$SESSION" ] && { HAS_CLIENT=0; SESSION=$(gcmux display-message -p '#{session_name}'); }
 
+# 1b. If invoked from inside the sibling scratch session, resolve back to
+#     the host so GC_AGENT and pane :^.0 cwd are read from the registered
+#     agent. The sibling is named `<host>-scratch` per step 5; without
+#     this, step 2's fallback yields `<agent>-scratch` and `gc prime`
+#     fails. Step 5's has-session branch then reuses the existing sibling.
+case "$SESSION" in
+    *-scratch) SESSION="${SESSION%-scratch}" ;;
+esac
+
 # 2. Resolve the agent name. Prefer GC_AGENT from the session environment
 #    (canonical rig.agent or city.agent form, the key gc prime expects).
 #    Fall back to deriving from the session name suffix (gascity uses
