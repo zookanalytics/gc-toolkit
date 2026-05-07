@@ -73,6 +73,10 @@ default = "false"
 description = "Seconds to wait for events before re-checking (exponential backoff)"
 default = "30"
 
+[vars.auto_ff_rig_main]
+description = "After a successful direct merge, attempt to fast-forward the rig's canonical checkout (\\$GC_RIG_ROOT) when it is on the target branch with a clean tree. Best-effort; never blocks the merge."
+default = "true"
+
 [[steps]]
 id = "check-inbox"
 title = "Context check, then mail"
@@ -411,6 +415,47 @@ gc bd close $WORK --reason "Merged to $TARGET at $(git rev-parse --short HEAD)"
 git branch -d temp
 ```
 If delete_merged_branches = "true": `git push origin --delete $BRANCH`
+
+**5. Auto-fast-forward rig canonical checkout (best-effort):**
+
+**Config: auto_ff_rig_main = {{auto_ff_rig_main}}**
+
+If `auto_ff_rig_main = "true"`, attempt to keep the rig's canonical checkout
+(`$GC_RIG_ROOT`) in sync with the freshly pushed `$TARGET`. The merge metadata
+is already recorded and the bead is already closed — this is a side-effect
+cleanup that MUST NOT abort the merge or affect bead state on failure.
+
+```bash
+RIG_ROOT="${GC_RIG_ROOT:-}"
+if [ "{{auto_ff_rig_main}}" = "true" ] && [ -n "$RIG_ROOT" ] \
+   && { [ -d "$RIG_ROOT/.git" ] || [ -f "$RIG_ROOT/.git" ]; }; then
+  RIG_BRANCH=$(git -C "$RIG_ROOT" branch --show-current 2>/dev/null || echo "")
+  RIG_DIRTY=$(git -C "$RIG_ROOT" status --porcelain 2>/dev/null)
+  if [ "$RIG_BRANCH" = "$TARGET" ] && [ -z "$RIG_DIRTY" ]; then
+    git -C "$RIG_ROOT" fetch --quiet origin "$TARGET" 2>/dev/null || true
+    if git -C "$RIG_ROOT" merge-base --is-ancestor \
+         "$TARGET" "origin/$TARGET" 2>/dev/null; then
+      if git -C "$RIG_ROOT" pull --ff-only --quiet origin "$TARGET" 2>/dev/null; then
+        echo "Auto-FF: $RIG_ROOT $TARGET → $(git -C "$RIG_ROOT" rev-parse --short HEAD)"
+      else
+        echo "Auto-FF: pull failed (best-effort, ignoring)"
+      fi
+    else
+      BEHIND=$(git -C "$RIG_ROOT" rev-list --count "$TARGET..origin/$TARGET" 2>/dev/null || echo "?")
+      AHEAD=$(git -C "$RIG_ROOT" rev-list --count "origin/$TARGET..$TARGET" 2>/dev/null || echo "?")
+      echo "Auto-FF: $RIG_ROOT diverged ($AHEAD ahead, $BEHIND behind origin/$TARGET) — not modifying"
+    fi
+  elif [ -n "$RIG_DIRTY" ]; then
+    echo "Auto-FF: $RIG_ROOT has uncommitted changes — skipping"
+  elif [ "$RIG_BRANCH" != "$TARGET" ]; then
+    echo "Auto-FF: $RIG_ROOT on '$RIG_BRANCH', not '$TARGET' — skipping"
+  fi
+fi
+```
+
+If `auto_ff_rig_main = "false"`: skip entirely. The stance can shift to a
+different surfacing mechanism (cron, hook, manual) without changing this
+formula.
 
 **If MERGE_STRATEGY = "mr":**
 
