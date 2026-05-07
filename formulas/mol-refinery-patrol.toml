@@ -29,7 +29,7 @@ closes the bead once the PR is verified.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-refinery-patrol"
-version = 3
+version = 4
 contract = "graph.v2"
 
 [vars]
@@ -77,20 +77,25 @@ default = "30"
 id = "check-inbox"
 title = "Context check, then mail"
 description = """
-**1. Context check (FIRST — before any work):**
-```bash
-RSS=$(ps -o rss= -p $$ | tr -d ' ')
-RSS_MB=$((RSS / 1024))
-```
+**1. Cycle-recycle check (FIRST — before any work):**
 
-If RSS > 1500 MB or context feels heavy, request a restart:
+Apply the cycle-recycle policy. Recycle if either trigger has fired:
+
+- You have **closed 3+ patrol wisps** in this session.
+- You have done **4+ consecutive empty `gc events --watch` waits**
+  (~30 min idle).
+
+To recycle:
 ```bash
-gc runtime request-restart
+gc handoff "context cycle: <reason>"
 ```
-This sets `GC_RESTART_REQUESTED` metadata on the session and blocks
-forever. The controller will kill and restart the session on the next
-reconcile tick. The current wisp stays assigned and the new session
-the new session re-reads formula steps and resumes from context.
+Then sit idle and surface the handoff message — the operator will
+`/clear` and the next session resumes from the HANDOFF bead. For
+controller-restartable sessions `gc handoff` also requests a restart.
+
+Full policy and rationale (thresholds, RSS-as-fallback, optional
+verification command): `template-fragments/cycle-recycle.template.md`
+(named template `cycle-recycle`).
 
 **2. Check mail:**
 ```bash
