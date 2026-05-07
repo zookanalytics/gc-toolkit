@@ -1,0 +1,22 @@
+# Star Trek crew — distinct from gastown.polecat (Mad Max) and polecat-codex
+# (Aliens) so gemini pool members are visually identifiable.
+data
+picard
+riker
+worf
+geordi
+troi
+crusher
+ro
+guinan
+wesley
+tasha
+barclay
+ogawa
+keiko
+jadzia
+miles
+julian
+benjamin
+jake
+nog

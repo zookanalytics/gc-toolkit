@@ -1,0 +1,20 @@
+# polecat-gemini — pool of polecat workers backed by the Gemini CLI provider.
+#
+# DISABLED: the parent directory is named `_polecat-gemini` (underscore prefix);
+# gc agent discovery (gascity/internal/config/agent_discovery.go) skips dirs
+# prefixed with `_` or `.`, so this pool stays out of the active roster.
+#
+# To enable:
+#   mv .../agents/_polecat-gemini .../agents/polecat-gemini
+#   gc reload   # or restart the supervisor
+#
+# Mirrors polecat-codex shape; provider switches the agent process to `gemini`.
+scope = "rig"
+provider = "gemini"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/polecat-gemini/{{.AgentBase}}"
+nudge = "Run gc hook; it checks assigned work first, then routed pool work."
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+min_active_sessions = 0
+max_active_sessions = 5
