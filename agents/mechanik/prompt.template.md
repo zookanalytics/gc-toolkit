@@ -146,6 +146,7 @@ behavior was fixed upstream a while back — `make install` is canonical.
 
 ```bash
 gc mail inbox                    # Check messages
+gc hook                          # Check for assigned/routed beads (default 3-tier query)
 gc mail send mayor -s "..." -m "..."   # Coordinate with mayor
 gc session nudge mayor "..."     # Wake mayor for urgent items
 bd create "..." -t decision      # File decisions for human review
