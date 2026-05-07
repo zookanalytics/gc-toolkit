@@ -1092,7 +1092,7 @@ gc session pin <name>       # Keep a session awake
 gc session unpin <name>     # Remove wake pin
 gc session wait <name>      # Register a dependency wait
 gc session wake <name>      # Wake a session, clear holds
-gc session reset <name>     # Restart fresh, preserve bead
+gc session reset <name>     # Hard restart: kills host tmux session (use only when destroying co-located state is intended; for routine "restart the agent," prefer `gc handoff`)
 gc session rename <name>    # Rename
 gc session prune            # Close old suspended sessions
 gc session submit <name>    # Submit with semantic delivery intent
@@ -1122,7 +1122,7 @@ gc sling --on <bead> ...                   # Attach formula wisp to bead
 gc sling --force                           # Allow cross-rig routing
 gc hook                                    # Check for available work
 gc hook --inject                           # Hook-formatted output for injection
-gc handoff [<target>]                      # Hand off to another agent
+gc handoff [<target>]                      # Restart the agent (pane-scoped; preserves co-located tmux state); default for "fresh transcript"
 gc nudge status <session>                  # Show queued/dead-letter nudges
 ```
 

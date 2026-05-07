@@ -42,10 +42,12 @@ work:
   itself — the session reads on startup. That is already how
   `mol-do-work` and the polecat formulas operate.
 - **Session lifecycle.** `gc runtime drain-ack` ends a session
-  cleanly. `gc session reset` restarts a session fresh while
-  preserving its bead — this is the "re-engage with current bead
-  state" primitive. `gc session suspend`/`resume` preserve conversation
-  state across a pause.
+  cleanly. `gc handoff` is the pane-scoped "restart the agent"
+  primitive (preserves co-located tmux state); `gc session reset`
+  is the host-session-destroying variant for the rare cases where
+  a clean process tree is required. Either preserves the bead.
+  `gc session suspend`/`resume` preserve conversation state across
+  a pause.
 - **Dependency waits.** `gc session wait --on-beads <id> --sleep`
   registers a dependency wait so the session drains to sleep and the
   reconciler wakes it when the watched bead closes. This is the
