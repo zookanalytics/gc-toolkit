@@ -4,21 +4,19 @@
 #
 # Bound to `prefix + a` ("ask") by tmux-bindings.sh. From inside a tmux
 # session running a named-crew agent (mechanik, mayor, deacon, concierge,
-# architect, ...), this spawns an unregistered claude in a **sibling tmux
-# session** named `<host-session>-scratch`, with the same persona prompt
-# and working directory as the registered agent in pane :^.0 of the host.
-#
-# The sibling session is created on first use and reused for subsequent
-# scratches from the same host (each new spawn opens another `scratch`
-# window in the sibling). The operator's client is switched to the sibling
-# so the new scratch is in front; jump back via `prefix + S`.
+# architect, ...), this opens a new window in the same session running an
+# unregistered claude with the same persona prompt and working directory
+# as the registered agent in pane :^.0.
 #
 # Scratch clones are NOT registered: no wisp, no mail/nudge delivery, no
-# respawn lifecycle, and the sibling session is unknown to the controller.
-# They survive `gc session reset <host>` (which kills only the host tmux
-# session — not the sibling) and `gc session kill <host>` (same — only the
-# host is registered). Sibling teardown is automatic: when the last scratch
-# window exits, tmux destroys the now-empty sibling session.
+# respawn lifecycle. They survive `gc handoff` (the routine restart
+# path, which uses `respawn-pane` on :^.0 only — co-located scratch
+# windows persist). They die with `gc session reset` and `gc session
+# kill`, both of which destroy the whole tmux session. That's an
+# accepted tradeoff: per the tk-my4za audit, `gc handoff` is the
+# default for "restart the agent" and `gc session reset` is reserved
+# for the rare case where destroying the whole process tree is
+# genuinely intended.
 #
 # A soft-guard fragment (template-fragments/scratch-clone-guard.md) is
 # appended to the persona — it tells the scratch what is free to do, what
@@ -32,21 +30,9 @@ gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
 # 1. Resolve the active session. Prefer the focused client's session
 #    (the user who pressed prefix + a); fall back to the run-shell
-#    context's session if no client is currently associated. Track
-#    whether a focused client exists — only then can we switch its view
-#    to the sibling session at step 5.
+#    context's session if no client is currently associated.
 SESSION=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
-HAS_CLIENT=1
-[ -z "$SESSION" ] && { HAS_CLIENT=0; SESSION=$(gcmux display-message -p '#{session_name}'); }
-
-# 1b. If invoked from inside the sibling scratch session, resolve back to
-#     the host so GC_AGENT and pane :^.0 cwd are read from the registered
-#     agent. The sibling is named `<host>-scratch` per step 5; without
-#     this, step 2's fallback yields `<agent>-scratch` and `gc prime`
-#     fails. Step 5's has-session branch then reuses the existing sibling.
-case "$SESSION" in
-    *-scratch) SESSION="${SESSION%-scratch}" ;;
-esac
+[ -z "$SESSION" ] && SESSION=$(gcmux display-message -p '#{session_name}')
 
 # 2. Resolve the agent name. Prefer GC_AGENT from the session environment
 #    (canonical rig.agent or city.agent form, the key gc prime expects).
@@ -75,23 +61,15 @@ gc prime --strict "$AGENT" > "$TMPFILE"
 printf '\n\n' >> "$TMPFILE"
 sed "s|<agent-name>|$AGENT|g" "$GUARD_FRAGMENT" >> "$TMPFILE"
 
-# 5. Spawn the scratch in a sibling tmux session named
-#    `<host-session>-scratch`, in the registered agent's cwd, running an
-#    unregistered claude with the composed system prompt. GC_SCRATCH=1
-#    marks the env so downstream tooling can detect the scratch. The temp
-#    prompt file is removed once claude exits.
+# 5. Open a new window in the same session, in the registered agent's
+#    cwd, running an unregistered claude with the composed system prompt.
+#    GC_SCRATCH=1 marks the env so downstream tooling can detect the
+#    scratch. The temp prompt file is removed once claude exits.
 #
-#    Sibling-session model: scratches must survive `gc session reset
-#    <host>`, which destroys the entire host tmux session (not just pane
-#    :^.0). Hosting scratches in a sibling — unknown to the controller —
-#    decouples them from the host's lifecycle. The sibling is created on
-#    first spawn and reused for subsequent ones; when the last scratch
-#    window exits, tmux destroys the sibling automatically.
-#
-#    Window name is just `scratch`. Multiple scratches in the sibling
-#    show as `scratch` `scratch` and are disambiguated by `prefix + w`
-#    indices, matching the convention for the default `prefix + c`
-#    (multiple `zsh` windows).
+#    Window name is just `scratch` (the session name already says which
+#    agent is hosting). Multiple scratches in one session show as `scratch`
+#    `scratch` and are disambiguated by `prefix + w` indices, matching the
+#    convention for the default `prefix + c` (multiple `zsh` windows).
 #
 #    `--bare` is intentionally NOT used: it would skip OAuth/keychain auth,
 #    which is the only auth path on this host. We also don't pass
@@ -99,27 +77,11 @@ sed "s|<agent-name>|$AGENT|g" "$GUARD_FRAGMENT" >> "$TMPFILE"
 #    nudges, Stop injects, etc.) don't fire in the scratch — the scratch
 #    must not pull mail/nudges that belong to the registered agent.
 #
-#    Sibling sessions are not touched by the controller's `setRemainOnExit`
-#    (they aren't registered). Default tmux behavior leaves remain-on-exit
-#    off so panes close cleanly. We still set it explicitly at pane scope
-#    in case a server-wide override (`set -g remain-on-exit on`) is in
-#    effect — the scratch window must close, not linger as `[Exited]`.
-SIBLING="${SESSION}-scratch"
-SCRATCH_CMD="GC_SCRATCH=1 claude --append-system-prompt-file '$TMPFILE' ; rm -f '$TMPFILE'"
-if gcmux has-session -t "$SIBLING" 2>/dev/null; then
-    PANE_ID=$(gcmux new-window -P -F '#{pane_id}' -t "$SIBLING" -c "$CWD" -n scratch \
-        "$SCRATCH_CMD")
-else
-    PANE_ID=$(gcmux new-session -d -P -F '#{pane_id}' -s "$SIBLING" -c "$CWD" -n scratch \
-        "$SCRATCH_CMD")
-fi
+#    Named-crew sessions set `remain-on-exit on` so their primary pane
+#    can be respawned in place by `gc handoff` (which uses tmux
+#    `respawn-pane` on :^.0). New windows inherit that option; we
+#    override it on the captured pane id so the scratch window closes
+#    cleanly when claude exits instead of lingering as `[Exited]`.
+PANE_ID=$(gcmux new-window -P -F '#{pane_id}' -t "$SESSION" -c "$CWD" -n scratch \
+    "GC_SCRATCH=1 claude --append-system-prompt-file '$TMPFILE' ; rm -f '$TMPFILE'")
 gcmux set-option -p -t "$PANE_ID" remain-on-exit off
-
-# 6. Switch the operator's client to the sibling so the new scratch is in
-#    front. Only meaningful when this script was invoked by a focused
-#    client (the run-shell from a key binding); on context-less
-#    invocations we leave the spawn in place and let the operator reach
-#    it via `prefix + S`.
-if [ "$HAS_CLIENT" = 1 ]; then
-    gcmux switch-client -t "$SIBLING" 2>/dev/null || true
-fi
