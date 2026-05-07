@@ -12,6 +12,29 @@ ready, never via shortcut commits to main. Operator note: gc-toolkit holds an
 intentionally low CI/pre-merge bar; adoption should be lightweight (docs +
 small capability fixes), not heavy CI gates.
 
+## Terminology addendum (added during adoption, 2026-05-07, tk-jkesf)
+
+The original research used the new term **"dispatch branch"** with the
+naming convention `dispatch/<convoy-or-bead-id>-<slug>`. Implementing
+the recommendations surfaced an existing primitive the survey missed:
+`gc convoy create --owned --target integration/<convoy-id>` is the
+canonical CLI for the exact pattern this doc describes, and
+`mol-refinery-patrol` already uses the term **"integration branch"**
+with `integration/<convoy-id>` naming (see `integration_branch_auto_land`,
+`gc convoy target`, and the refinery prompt's "Landing integration
+branches" line).
+
+Adoption therefore uses the existing term and convention. **Where this
+doc says "dispatch branch" or `dispatch/<convoy-id>`, the implementation
+reads "integration branch" or `integration/<convoy-id>`** — the pattern
+itself survives unchanged. R5's proposed `gc dispatch …` subcommand is
+also redundant with `gc convoy create --owned` and should stay deferred
+on those grounds, not just cost grounds. The §2.2 search that found
+"zero branches matching `dispatch/*`, `anchor/*`, `mechanik/*`, or
+`convoy/*`" did not check `integration/*`; in practice, very few
+convoys had exercised the path before this adoption, so the absence is
+unsurprising regardless of naming.
+
 ## Provenance
 
 | Doc-type or artifact | Producer (skill / formula / rig component) | Source location (path + commit SHA, or URL) | Surveyed at |

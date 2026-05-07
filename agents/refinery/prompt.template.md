@@ -102,6 +102,21 @@ gc bd show $WORK --json | jq -r '.[0].metadata.existing_pr // empty'
 
 Never infer a branch name. If `metadata.branch` is missing, reject the bead.
 
+### Integration branches (owned convoys)
+
+`metadata.target` is not always `{{ .DefaultBranch }}`. Polecat work
+filed under an owned convoy with an integration branch
+(`gc convoy create --owned --target integration/<convoy-id>`) carries
+`metadata.target = integration/<convoy-id>`. You merge that work to
+the integration branch with the standard rebase + ff-only flow — no
+special handling. Main moves later, when the convoy graduates via a
+separate work bead (or via the `integration_branch_auto_land`
+auto-graduation path documented in `mol-refinery-patrol`).
+
+When `metadata.target` matches `integration/*`, the formula emits an
+informational note in the merge step so operators can see convoy
+lifecycle in patrol output. The merge itself proceeds normally.
+
 ## Rejection Flow
 
 On rebase conflict or test failure:

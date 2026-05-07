@@ -299,6 +299,12 @@ if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
   MERGE_STRATEGY="mr"
 fi
 
+case "$TARGET" in
+  integration/*)
+    echo "INFO: Merging $WORK to integration branch '$TARGET' (not {{target_branch}}). A graduation bead is required to land this work to {{target_branch}}; see 'gc convoy land' and the integration_branch_auto_land patrol step."
+    ;;
+esac
+
 block_existing_pr() {
   reason="$1"
   gc bd update $WORK \

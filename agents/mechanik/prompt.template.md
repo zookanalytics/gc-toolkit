@@ -80,6 +80,87 @@ the provenance trail in their inventory matrix — every adopted pattern
 should be auditable back to the surveyed platform mechanism that
 produced it.
 
+## Sharing Input Artifacts Across N Polecat Dispatches
+
+When you need a single input artifact (a decisions doc, a research
+synthesis, a shared spec) visible to multiple polecat dispatches before
+any of them have produced work worth merging, do **not** commit the
+artifact directly to `{{ .DefaultBranch }}`. That violates the
+branch-based-dispatch principle (decided in `tk-w7mjt`) and was the
+shape of the 2026-05-06 shortcut incident (`7453fa4`).
+
+The supported path is an **owned convoy with an integration branch**.
+Gas City already has the primitives — `gc convoy create --owned`
+combined with `gc convoy target` (or `--target` at create time) sets
+`metadata.target = integration/<convoy-id>` on the convoy bead, and
+child work beads inherit that target via the convoy-ancestor walk in
+`gc sling`.
+
+### Recipe
+
+```bash
+# 1. Create the owned convoy with an integration branch as target.
+CONVOY=$(gc convoy create "<initiative>" --owned \
+    --target "integration/<convoy-id>" --json | jq -r .convoy_id)
+
+# 2. Push the integration branch with the shared artifact.
+git fetch --prune origin
+git checkout -b "integration/<convoy-id>" "origin/{{ .DefaultBranch }}"
+git add <artifact-path>
+git commit -m "convoy(<convoy-id>): seed integration branch with <artifact>"
+git push -u origin "integration/<convoy-id>"
+
+# 3. File child work beads under the convoy.
+WORK=$(gc bd create "<task title>" -t task --json | jq -r .id)
+gc bd dep add "$WORK" "$CONVOY" --type=parent-child
+
+# 4. Sling polecats. Children inherit metadata.target from the convoy
+#    ancestor walk, so polecats branch from origin/integration/<convoy-id>
+#    and the refinery rebases polecat work back onto the integration branch.
+gc sling "$RIG/polecat" "$WORK"
+
+# 5. When the convoy is complete, file a graduation bead that squash-merges
+#    integration/<convoy-id> back to {{ .DefaultBranch }}, then
+#    `gc convoy land <CONVOY>` once all children are closed.
+```
+
+### Two levers, both supported
+
+The base branch a polecat lands on is resolved by `gc sling` at pour
+time (see `mol-polecat-work` formula preamble for the full order):
+
+1. `metadata.target` on the work bead, if set.
+2. `metadata.target` on a convoy ancestor.
+3. The rig repo's default branch (`{{ .DefaultBranch }}`).
+
+You have two equivalent ways to override the default:
+
+- **Bead-level (sticky, recommended for owned convoys):** set
+  `metadata.target` on the convoy via `gc convoy create --target …` or
+  `gc convoy target <id> integration/<convoy-id>`. Children inherit it.
+  Persists across retries.
+- **Sling-level (per-invocation):** `gc sling <target> <bead> --var
+  base_branch=integration/<convoy-id>`. Explicit `--var` always wins
+  over the auto-compute. Useful when you want to point a single polecat
+  at a non-default base without mutating the bead. The polecat re-anchors
+  `metadata.target = {{`{{base_branch}}`}}` at submit, so the refinery
+  still merges to the same target.
+
+### Anti-pattern (do not do this)
+
+```bash
+# WRONG: commits a bead-local artifact directly to {{ .DefaultBranch }}.
+git checkout {{ .DefaultBranch }}
+git add specs/<bead-id>/decisions.md
+git commit -m "specs: add decisions doc"
+git push origin {{ .DefaultBranch }}
+```
+
+This is the 2026-05-06 shortcut. It puts bead-local content on the
+authoritative reference branch and bypasses the refinery. The owned-
+convoy + integration-branch path costs a few extra commands and keeps
+the principle intact.
+
 ## Reference Material
 
 This pack ships reference docs under `{{ .ConfigDir }}/docs/`:
