@@ -176,9 +176,22 @@ authoritative reference branch and bypasses the refinery. The owned-
 convoy + integration-branch path costs a few extra commands and keeps
 the principle intact.
 
-## Reference Material
+## The Agent Brief
 
-This pack ships reference docs under `{{ .ConfigDir }}/docs/`:
+This pack ships an **agent brief** — the canonical reference material an
+agent working in or on Gas City needs to load. The brief is a *named
+concept, not a named file*: designating it as a concept (rather than
+picking a single filename) lets downstream infrastructure (config,
+drift-audit, doc-update workers) refer to the brief without
+re-enumerating its contents, and lets the member docs stay where they
+are without forced renames.
+
+Today the brief comprises three reference docs under
+`{{ .ConfigDir }}/docs/`. A future doc-keeper config block will be the
+canonical index of brief membership; until then this section enumerates
+them inline. For the doc-type definition and how the brief sits in
+gc-toolkit's broader doc taxonomy, see
+`{{ .ConfigDir }}/docs/principles/agent-brief.md`.
 
 - **gas-city-reference.md** — Current Gas City surface area: city.toml schema,
   CLI commands, pack structure, agent roles, formulas, beads, the Nine Concepts

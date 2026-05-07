@@ -195,6 +195,9 @@ location follow in the next section.
    Rolled forward as the pack evolves; carries a "current as of" stamp
    in the body.
    *Examples (existing):* `gas-city-reference.md`, `gascity-local-patching.md`.
+   *Sub-flavour:* the **agent brief** — the subset of reference manuals
+   loaded routinely into agent prompts as context. Defined in
+   `principles/agent-brief.md`.
 
 2. **Versioned reference** — A snapshot of a reference tied to a specific
    release of the underlying surface. Filed when the surface ships and
