@@ -1,0 +1,23 @@
+# Alien franchise crew — distinct from gastown.polecat (Mad Max) so codex
+# pool members are visually identifiable in `gc session list` and tmux.
+ripley
+hicks
+bishop
+hudson
+vasquez
+drake
+gorman
+dietrich
+ferro
+spunkmeyer
+apone
+frost
+crowe
+hooper
+wierzbowski
+ash
+parker
+brett
+dallas
+kane
+lambert

@@ -1,0 +1,15 @@
+# polecat-codex — pool of polecat workers backed by the Codex CLI provider.
+# Mirrors gastown.polecat shape; provider switches the agent process to `codex`.
+# Distinct work_dir keeps codex worktrees out of the default polecats/ tree.
+scope = "rig"
+provider = "codex"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
+nudge = "Run gc hook; it checks assigned work first, then routed pool work."
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+min_active_sessions = 0
+# Capped at 2 while codex polecats are still being shaken out; revisit once
+# we've validated end-to-end on signal-loom. Per-rig cap (each importing rig
+# gets its own pool of up to 2).
+max_active_sessions = 2
