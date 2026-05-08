@@ -235,6 +235,11 @@ draw_ctx_watch() {
 
     sess_list=$(printf '%s' "$sessions_json" | python3 -c '
 import json, sys
+# Roles whose statusline carries no LLM context — peeking them is pure
+# waste (each peek is a tmux capture-pane). Skip BEFORE the peek loop so
+# they also drop out of the "(of N polled)" total. Extend this set if
+# more non-LLM agent types emerge.
+SKIP_ROLES = {"control-dispatcher"}
 try:
     data = json.load(sys.stdin)
 except Exception:
@@ -246,6 +251,10 @@ for s in data:
         continue
     sid = s.get("ID", "")
     tmpl = s.get("Template", "")
+    rig, role = tmpl.split("/", 1) if "/" in tmpl else ("city", tmpl)
+    role_short = role.split(".")[-1] if "." in role else role
+    if role_short in SKIP_ROLES:
+        continue
     if sid:
         print(f"{sid}\t{tmpl}")
 ')
@@ -293,15 +302,14 @@ for r in rows:
 
 print(f"  {counts['watch']} watch · {counts['care']} care · {counts['red']} red  (of {len(rows)} polled)")
 
-body = [r for r in rows if r["tier"] in ("watch", "care", "red", "midturn")]
-body.sort(key=lambda r: (-(r["n"] if r["n"] is not None else -1), r["id"]))
+body = [r for r in rows if r["tier"] in ("watch", "care", "red")]
+body.sort(key=lambda r: (-r["n"], r["id"]))
 
 if not body:
     print("  (all under 12%)")
 else:
     for r in body:
-        label = "" if r["tier"] == "midturn" else r["tier"]
-        print(f"  {r['id']:<10}  {r['tmpl']:<32}  {r['ctx']:<8} {label}")
+        print(f"  {r['id']:<10}  {r['tmpl']:<32}  {r['ctx']:<8} {r['tier']}")
 PY
 }
 
