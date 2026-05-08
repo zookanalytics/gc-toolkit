@@ -138,11 +138,15 @@ list_rigs() {
     done
 }
 
-# peek_ctx <session-id> — extract the freshest ctx:N% from the session's
-# statusline. tail -1 picks the latest render in the visible buffer.
-# Empty result means mid-turn (Claude generating, statusline not redrawn).
+# peek_ctx <session-id> — extract the freshest context-used percentage as
+# an integer from the session's statusline. Matches Claude's `ctx:N%` and
+# Codex's `Context N% used`. tail -1 picks the latest render in the
+# visible buffer. Empty result means mid-turn (statusline not redrawn).
 peek_ctx() {
-    gc session peek "$1" 2>/dev/null | grep -oE 'ctx:[0-9]+%' | tail -1
+    gc session peek "$1" 2>/dev/null \
+      | grep -oE 'ctx:[0-9]+%|Context [0-9]+% used' \
+      | tail -1 \
+      | grep -oE '[0-9]+'
 }
 
 section_divider() {
@@ -255,7 +259,7 @@ for s in data:
     fi
 
     python3 - "$ctx_data" <<'PY'
-import re, sys
+import sys
 rows = []
 try:
     with open(sys.argv[1]) as f:
@@ -263,12 +267,11 @@ try:
             parts = line.rstrip("\n").split("\t")
             while len(parts) < 3:
                 parts.append("")
-            sid, tmpl, ctx = parts[0], parts[1], parts[2]
+            sid, tmpl, pct = parts[0], parts[1], parts[2]
             if not sid:
                 continue
-            m = re.match(r"ctx:(\d+)%", ctx)
-            if m:
-                n = int(m.group(1))
+            if pct.isdigit():
+                n = int(pct)
                 if n < 12:
                     tier = "hidden"
                 elif n <= 25:
