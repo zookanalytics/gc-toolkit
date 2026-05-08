@@ -6,8 +6,9 @@
 #   1. Rigs — per-rig polecat count + refinery state
 #   2. Open decision beads (city + every rig)
 #   3. Mail addressed to human
-#   4. Open P0/P1 beads (city + every rig)
-#   5. Call timings — per-call durations for this tick
+#   4. Context watch — sessions with elevated context usage
+#   5. Open P0/P1 beads (city + every rig)
+#   6. Call timings — top 5 per-call durations for this tick
 #
 # Bead lookups go through `gc bd ... --rig <name> --json` because bare
 # `bd` from a rig CWD mis-routes to the city DB. Rigs auto-discovered
@@ -137,6 +138,13 @@ list_rigs() {
     done
 }
 
+# peek_ctx <session-id> — extract the freshest ctx:N% from the session's
+# statusline. tail -1 picks the latest render in the visible buffer.
+# Empty result means mid-turn (Claude generating, statusline not redrawn).
+peek_ctx() {
+    gc session peek "$1" 2>/dev/null | grep -oE 'ctx:[0-9]+%' | tail -1
+}
+
 section_divider() {
     printf '\n══════════════════════════════════════════════════════════════\n'
     printf '  %s\n' "$1"
@@ -196,7 +204,6 @@ draw_section() {
 #                (wisp title is shown when present)
 draw_rigs() {
     section_divider 'RIGS'
-    sessions_json=$(timed_capture "session-list" gc session list --json)
     # Wipe any prior tick's refinery JSON files; one file per rig so
     # we don't have to escape multi-line pretty-printed JSON in a
     # combined index file.
@@ -212,6 +219,89 @@ draw_rigs() {
     printf '%s' "$sessions_json" | REFINERY_DIR="$REFINERY_DIR" python3 "$RIGS_PY"
 }
 
+# draw_ctx_watch — surface sessions whose context window is filling up so
+# the operator can see expensive agents before they bite. Walks every
+# non-closed session (active + asleep — asleep matters because a high-ctx
+# asleep agent wakes up expensive on its first turn), peeks the
+# statusline, tiers the result, and prints only watch/care/red.
+draw_ctx_watch() {
+    section_divider 'CONTEXT WATCH'
+    ctx_data="$TMPDIR/ctx_data"
+    : > "$ctx_data"
+
+    sess_list=$(printf '%s' "$sessions_json" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for s in data:
+    if s.get("Closed"):
+        continue
+    if s.get("State") not in ("active", "asleep"):
+        continue
+    sid = s.get("ID", "")
+    tmpl = s.get("Template", "")
+    if sid:
+        print(f"{sid}\t{tmpl}")
+')
+
+    if [ -n "$sess_list" ]; then
+        printf '%s\n' "$sess_list" | while read -r sid tmpl; do
+            [ -z "$sid" ] && continue
+            ctx=$(timed_capture "ctx-peek:$sid" peek_ctx "$sid")
+            printf '%s\t%s\t%s\n' "$sid" "$tmpl" "$ctx" >> "$ctx_data"
+        done
+    fi
+
+    python3 - "$ctx_data" <<'PY'
+import re, sys
+rows = []
+try:
+    with open(sys.argv[1]) as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            while len(parts) < 3:
+                parts.append("")
+            sid, tmpl, ctx = parts[0], parts[1], parts[2]
+            if not sid:
+                continue
+            m = re.match(r"ctx:(\d+)%", ctx)
+            if m:
+                n = int(m.group(1))
+                if n < 12:
+                    tier = "hidden"
+                elif n <= 25:
+                    tier = "watch"
+                elif n <= 49:
+                    tier = "care"
+                else:
+                    tier = "red"
+                rows.append({"id": sid, "tmpl": tmpl, "ctx": f"ctx:{n}%", "n": n, "tier": tier})
+            else:
+                rows.append({"id": sid, "tmpl": tmpl, "ctx": "ctx:…", "n": None, "tier": "midturn"})
+except FileNotFoundError:
+    pass
+
+counts = {"watch": 0, "care": 0, "red": 0}
+for r in rows:
+    if r["tier"] in counts:
+        counts[r["tier"]] += 1
+
+print(f"  {counts['watch']} watch · {counts['care']} care · {counts['red']} red  (of {len(rows)} polled)")
+
+body = [r for r in rows if r["tier"] in ("watch", "care", "red", "midturn")]
+body.sort(key=lambda r: (-(r["n"] if r["n"] is not None else -1), r["id"]))
+
+if not body:
+    print("  (all under 12%)")
+else:
+    for r in body:
+        label = "" if r["tier"] == "midturn" else r["tier"]
+        print(f"  {r['id']:<10}  {r['tmpl']:<32}  {r['ctx']:<8} {label}")
+PY
+}
+
 draw_timings() {
     section_divider 'CALL TIMINGS (this tick)'
     if [ ! -s "$TIMINGS_FILE" ]; then
@@ -225,7 +315,7 @@ draw_timings() {
         echo "$total" > "$TICK_MAX_FILE"
         new_max="  ← new max"
     fi
-    sort -k1,1nr "$TIMINGS_FILE" | awk '{printf "  %-40s %5d ms\n", $2, $1}'
+    sort -k1,1nr "$TIMINGS_FILE" | head -5 | awk '{printf "  %-40s %5d ms\n", $2, $1}'
     printf '  %-40s %5d ms%s\n' 'TOTAL (this tick)' "$total" "$new_max"
     printf '  %-40s %5d ms\n' 'TOTAL MAX (since launch)' "$(cat "$TICK_MAX_FILE")"
 }
@@ -243,11 +333,15 @@ while :; do
     clear_pane
     printf '═══ Gas City attention ── %s ═══\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 
+    sessions_json=$(timed_capture "session-list" gc session list --json)
+
     draw_rigs
     draw_section 'OPEN DECISION BEADS' 'decision' -t decision --status open
 
     section_divider 'MAIL TO HUMAN'
     timed_pass "mail-inbox-human" gc mail inbox human || printf '  (gc mail inbox unavailable)\n'
+
+    draw_ctx_watch
 
     draw_section 'OPEN P0/P1 BEADS' 'p01' -p 0,1 --status open,in_progress
 
