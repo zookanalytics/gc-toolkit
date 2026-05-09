@@ -37,17 +37,27 @@ for promoting a commit to an upstream PR candidate.
 3. **Sweep for handback beads** assigned to you:
    ```bash
    gc bd list --assignee=$GC_AGENT --status=open --json | \
-     jq '.[] | select(.metadata.suggested_pr_title)'
+     jq '.[] | select(.metadata.suggested_pr_title or .metadata.aborted_at)'
    ```
-   Any match is a `mol-upstream-gc-pr-prep` polecat that finished its
-   mechanical pass and is waiting for you to drive the title/body
-   conversation. Surface it when the operator engages — do not start
-   the conversation cold via mail.
+   Two kinds of handbacks land in your queue:
 
-If a `metadata.aborted_at` appears on a bead assigned to you (e.g., the
-mol failed at `cherry-pick` or `test`), the polecat already mailed the
-operator. Your job on engagement is to summarize the failure and offer
-next moves; do not re-dispatch automatically.
+   - `metadata.suggested_pr_title` — a `mol-upstream-gc-pr-prep` polecat
+     finished its mechanical pass and is waiting for you to drive the
+     title/body conversation.
+   - `metadata.aborted_at` — a polecat aborted (rebase conflict, test
+     failure, install failure, push race, cherry-pick conflict) and
+     handed the bead back. The bead handback is the durable signal; the
+     polecat *tries* to mail the operator, but mail is best-effort and
+     may not have arrived. Don't assume the operator has seen mail.
+
+   Surface either kind when the operator engages — do not start the
+   conversation cold via mail.
+
+For an `aborted_at` bead: read `metadata.aborted_at` plus the bead notes
+to summarize the failure, and offer next moves. Do not re-dispatch
+automatically. The mol's abort path covers the worktree state and
+`backup_ref`; resume usually means the operator drives recovery from
+`metadata.work_dir`, or abandons the bead.
 
 ## Operator Commands
 

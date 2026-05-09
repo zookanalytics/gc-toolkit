@@ -25,13 +25,19 @@ it's a controlled rebase with a verdict-keeping survey.
 | Step | Failure handling |
 |------|------------------|
 | survey | LLM judgment can be wrong; record verdicts on the bead and proceed — the rebase step's patch-id check is the safety net for `drop-merged-upstream` |
-| rebase | Conflicts halt the chain; mail operator and stop. The `metadata.backup_ref` makes any state recoverable |
-| test | Mail operator with failure tail; bead stays open so a fix can resume |
-| install | Mail operator; bead stays open |
-| push | `--force-with-lease` rejection means a parallel push raced us — do NOT retry, mail and stop |"""
+| rebase | Conflicts halt the chain. Bead handback (`metadata.aborted_at=rebase`) is the durable signal; mail is best-effort follow-up. `metadata.backup_ref` makes any state recoverable. |
+| test | Bead handback (`aborted_at=test`) lands first; mail with failure tail is best-effort. Bead stays open so a fix can resume. |
+| install | Bead handback (`aborted_at=install`) first; mail best-effort. Bead stays open. |
+| push | `--force-with-lease` rejection means a parallel push raced us — do NOT retry. Bead handback (`aborted_at=push`) first; mail best-effort. |
+
+All four post-survey abort paths share the same shape: lock in the bead
+handback (`aborted_at`, status=open, reassignment to `notify_recipient`)
+**before** sending mail. The keeper's prime sweep catches `aborted_at`
+beads on next operator engagement, so even a silent mail failure surfaces
+the abort within one operator engagement cycle."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 3
+version = 4
 
 [vars]
 [vars.upstream_remote]
@@ -268,11 +274,24 @@ If the rebase fails on conflicts:
 git status --short > /tmp/rebase-conflicts-{{issue}}.txt
 ```
 2. Abort: `git rebase --abort`
-3. Mail the operator and stop:
+3. Lock in the durable abort signal, then mail the operator (best-effort):
+
+The bead handback (`metadata.aborted_at`, status=open, reassignment) is
+the source of truth — run it FIRST so the abort is recoverable even if
+mail send fails or this prose is partially executed. The mail is a
+best-effort follow-up; the keeper's prime sweep catches aborted beads
+on next operator engagement.
+
 ```bash
+gc bd update {{issue}} \
+  --set-metadata aborted_at=rebase \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
-gc mail send {{notify_recipient}} -s "gascity rebase: conflicts" -m "$(cat <<EOF
+if ! gc mail send {{notify_recipient}} -s "gascity rebase: conflicts" -m "$(cat <<EOF
 The rebase of {{origin_remote}}/{{upstream_branch}} onto {{upstream_remote}}/{{upstream_branch}}
 hit conflicts. The rebase has been aborted; the worktree is back at the
 pre-rebase tip.
@@ -286,12 +305,9 @@ $(cat /tmp/rebase-conflicts-{{issue}}.txt)
 Next: drive the rebase by hand from the worktree, or close the bead if
 you've decided the conflict isn't worth resolving now.
 EOF
-)"
-gc bd update {{issue}} \
-  --set-metadata aborted_at=rebase \
-  --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+)"; then
+    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+fi
 gc runtime drain-ack
 exit 0
 ```
@@ -314,11 +330,10 @@ git log {{upstream_remote}}/{{upstream_branch}}..HEAD --oneline
 ```
 
 The output must match the `keep` rows from `metadata.commit_verdicts`. If
-anything unexpected is in the post-rebase log, mail the operator and stop
-using the same pattern as the conflict case — including the lifecycle
-handback (`--status=open`, `--assignee={{notify_recipient}}`,
-`--set-metadata gc.routed_to={{notify_recipient}}`) — with
-`metadata.aborted_at=rebase-mismatch`.
+anything unexpected is in the post-rebase log, abort using the same pattern
+as the conflict case — bead handback first (`--status=open`,
+`--assignee={{notify_recipient}}`, `--set-metadata gc.routed_to={{notify_recipient}}`,
+`--set-metadata aborted_at=rebase-mismatch`), then the best-effort mail.
 
 **Exit criteria:** HEAD is rebased onto `{{upstream_remote}}/{{upstream_branch}}`;
 the post-rebase commit log matches the `keep` set from the verdict table."""
@@ -336,14 +351,20 @@ description = """
 
 If tests pass, close this step and proceed.
 
-If tests fail:
+If tests fail, lock in the durable abort signal first, then mail (best-effort):
 ```bash
+gc bd update {{issue}} \
+  --set-metadata aborted_at=test \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+
 TEST_TAIL=$(tail -200 <test output file or capture>)
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 VERDICTS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_verdicts')
 
-gc mail send {{notify_recipient}} -s "gascity rebase: tests failed" -m "$(cat <<EOF
+if ! gc mail send {{notify_recipient}} -s "gascity rebase: tests failed" -m "$(cat <<EOF
 Rebase succeeded but {{test_command}} failed on the rebased branch.
 
 Worktree: $WORKTREE
@@ -359,12 +380,9 @@ $VERDICTS
 Next: investigate from the worktree. To restore the pre-rebase state:
   git reset --hard $BACKUP_REF
 EOF
-)"
-gc bd update {{issue}} \
-  --set-metadata aborted_at=test \
-  --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+)"; then
+    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+fi
 gc runtime drain-ack
 exit 0
 ```
@@ -387,16 +405,22 @@ description = """
 
 If install passes, close this step and proceed.
 
-If install fails: same pattern as the test failure — including the
-lifecycle handback — but with `metadata.aborted_at=install` and subject
+If install fails: same pattern as the test failure — bead handback first,
+mail second (best-effort) — with `metadata.aborted_at=install` and subject
 `gascity rebase: install failed`:
 
 ```bash
+gc bd update {{issue}} \
+  --set-metadata aborted_at=install \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+
 INSTALL_TAIL=$(<install output, last 200 lines>)
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 
-gc mail send {{notify_recipient}} -s "gascity rebase: install failed" -m "$(cat <<EOF
+if ! gc mail send {{notify_recipient}} -s "gascity rebase: install failed" -m "$(cat <<EOF
 Rebase and tests passed but {{install_command}} failed.
 
 Worktree: $WORKTREE
@@ -409,12 +433,9 @@ $INSTALL_TAIL
 Next: investigate from the worktree. To restore the pre-rebase state:
   git reset --hard $BACKUP_REF
 EOF
-)"
-gc bd update {{issue}} \
-  --set-metadata aborted_at=install \
-  --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+)"; then
+    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+fi
 gc runtime drain-ack
 exit 0
 ```
@@ -440,13 +461,19 @@ If `--force-with-lease` is rejected (someone else pushed to
 
 **Do NOT retry. Do NOT use plain `--force`.**
 
-Mail the operator and stop:
+Lock in the durable abort signal first, then mail the operator (best-effort):
 ```bash
+gc bd update {{issue}} \
+  --set-metadata aborted_at=push \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 NEW_REMOTE=$(git rev-parse {{origin_remote}}/{{upstream_branch}})
 
-gc mail send {{notify_recipient}} -s "gascity rebase: push race" -m "$(cat <<EOF
+if ! gc mail send {{notify_recipient}} -s "gascity rebase: push race" -m "$(cat <<EOF
 git push --force-with-lease was rejected — {{origin_remote}}/{{upstream_branch}}
 moved between our fetch and our push. Someone else pushed; we will not
 overwrite their work.
@@ -459,12 +486,9 @@ Bead: {{issue}}
 Next: review what landed remotely. If the new commits should be absorbed,
 restart this rebase mol on a fresh bead.
 EOF
-)"
-gc bd update {{issue}} \
-  --set-metadata aborted_at=push \
-  --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+)"; then
+    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+fi
 gc runtime drain-ack
 exit 0
 ```
