@@ -143,7 +143,7 @@ proceed."""
 [[steps]]
 id = "cherry-pick"
 title = "Cherry-pick the operator's commit onto upstream"
-needs = ["workspace-setup"]
+needs = ["self-review"]
 description = """
 ```bash
 COMMIT_SHA=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_sha')
@@ -179,15 +179,22 @@ EOF
 gc mail send overseer -s "pr-prep: cherry-pick conflict for {{issue}}" -m "(see keeper mail)"
 ```
 
-3. Set the abort marker and exit:
+3. Set the abort marker, hand the bead back to the keeper, and exit:
 ```bash
-gc bd update {{issue}} --set-metadata aborted_at=cherry-pick
+gc bd update {{issue}} \
+  --set-metadata aborted_at=cherry-pick \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
 gc runtime drain-ack
 exit 0
 ```
 
-**Bead stays open** — the operator can decide to abandon the bead or
-resume from `metadata.work_dir` after splitting the commit.
+**Bead stays open and assigned to the keeper** — without the lifecycle
+handback the bead would strand on this drained session. The keeper's
+prime sweep notices `metadata.aborted_at`, surfaces the failure to the
+operator, and the operator can decide to abandon the bead or resume
+from `metadata.work_dir` after splitting the commit.
 
 **Exit criteria:** HEAD has the cherry-picked commit; working tree is clean."""
 
@@ -282,13 +289,19 @@ EOF
 )"
 gc mail send overseer -s "pr-prep: tests failed for {{issue}}" -m "(see keeper mail)"
 
-gc bd update {{issue}} --set-metadata aborted_at=test
+gc bd update {{issue}} \
+  --set-metadata aborted_at=test \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
 gc runtime drain-ack
 exit 0
 ```
 
-**Bead stays open** — the operator may decide the failure means the
-commit isn't viable upstream as-is, or may pursue a fix."""
+**Bead stays open and assigned to the keeper** — the lifecycle handback
+puts the bead back where the keeper's prime sweep will see it. The
+operator may decide the failure means the commit isn't viable upstream
+as-is, or may pursue a fix."""
 
 [[steps]]
 id = "push-branch"
@@ -321,8 +334,35 @@ If the push fails because the branch already exists on `{{origin_remote}}`
 (rare — repeated pr-prep runs for the same commit), retry with
 `--force-with-lease`. Do NOT use plain `--force`. If `--force-with-lease`
 is also rejected, mail the keeper and operator with subject
-`pr-prep: branch race for {{issue}}` and abort with
-`metadata.aborted_at=push-branch`.
+`pr-prep: branch race for {{issue}}` and abort with the lifecycle handback:
+
+```bash
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+
+gc mail send "$REQUESTING_KEEPER" -s "pr-prep: branch race for {{issue}}" -m "$(cat <<EOF
+git push --force-with-lease was rejected on $(git branch --show-current).
+Someone else pushed to that branch on {{origin_remote}}.
+
+Bead: {{issue}}
+Worktree: $(pwd)
+
+Next: review what landed remotely. If the new commits should supersede
+this prep, abandon this bead; otherwise restart pr-prep on a fresh bead.
+EOF
+)"
+gc mail send overseer -s "pr-prep: branch race for {{issue}}" -m "(see keeper mail)"
+
+gc bd update {{issue}} \
+  --set-metadata aborted_at=push-branch \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+gc runtime drain-ack
+exit 0
+```
+
+**Bead stays open and assigned to the keeper** — same handback pattern
+as the other abort paths.
 
 **Exit criteria:** branch is on `{{origin_remote}}`; `metadata.branch_url`
 records the GitHub URL."""
@@ -377,7 +417,7 @@ Persist:
 gc bd update {{issue}} --set-metadata suggested_pr_body="<body>"
 ```
 
-**4. Decide on a companion issue:**
+**4. Decide on a companion issue and always set every issue field:**
 
 An upstream issue helps when:
 - The change is RFC-shaped (asking upstream's opinion before code review)
@@ -391,39 +431,77 @@ An issue is **not** worth filing for:
 - Refactors that are obviously equivalent
 - Doc fixes
 
-Always record `issue_advice` (`yes: <reason>` or `no: <reason>`):
-```bash
-gc bd update {{issue}} --set-metadata issue_advice="<yes/no + reason>"
-```
+Decide `ISSUE_DECISION=yes` or `ISSUE_DECISION=no` and an explanatory
+`ISSUE_REASON`. **Then write all four issue-related metadata keys** —
+`issue_advice`, `suggested_issue_title`, `suggested_issue_body`, and
+later `gh_issue_command`. For the no-issue case, store empty strings;
+the keeper template treats empty values as "no issue surfaced" and
+skips the issue block. The contract is "always set, possibly empty",
+so the keeper never has to special-case missing keys.
 
-If yes, draft the issue title and body the same way as the PR (commit
-subject as title; body grounded in the commit + why-it-matters):
 ```bash
+ISSUE_DECISION=yes   # or "no"
+ISSUE_REASON="<one-line rationale>"
+
+if [ "$ISSUE_DECISION" = "yes" ]; then
+  ISSUE_TITLE="<drafted title>"
+  ISSUE_BODY="<drafted body>"
+else
+  ISSUE_TITLE=""
+  ISSUE_BODY=""
+fi
+
 gc bd update {{issue}} \
-  --set-metadata suggested_issue_title="<title>" \
-  --set-metadata suggested_issue_body="<body>"
+  --set-metadata issue_advice="${ISSUE_DECISION}: ${ISSUE_REASON}" \
+  --set-metadata suggested_issue_title="$ISSUE_TITLE" \
+  --set-metadata suggested_issue_body="$ISSUE_BODY"
 ```
 
-**5. Build the ready-to-paste gh commands:**
+**5. Build the ready-to-paste gh commands with concrete values:**
 
 Note: PR/issue creation is currently blocked at the city level. These
 commands are stored on the bead so the operator can paste them outside
 the agent harness once the policy unblocks.
 
-```bash
-PR_CMD="gh pr create --repo gastownhall/gascity --base {{upstream_branch}} --head <fork-owner>:<branch> --title '<title>' --body '<body>'"
-ISSUE_CMD="gh issue create --repo gastownhall/gascity --title '<title>' --body '<body>'"  # only if issue_advice=yes
+The stored command must be ready to paste — no `<fork-owner>` or
+`<branch>` placeholders left in the string. Resolve everything from the
+worktree state: fork-owner from `git remote get-url {{origin_remote}}`,
+branch from `git branch --show-current` (matches `metadata.branch`),
+title and body from the metadata you just persisted. Use `printf %q` to
+shell-escape the title and body so multi-line bodies and quote
+characters round-trip safely on paste.
 
-gc bd update {{issue}} --set-metadata gh_pr_command="$PR_CMD"
-[ "<issue_advice>" = "yes" ] && gc bd update {{issue}} --set-metadata gh_issue_command="$ISSUE_CMD"
+```bash
+ORIGIN_URL=$(git remote get-url {{origin_remote}})
+# Pull the owner segment out of either git@github.com:owner/repo(.git)
+# or https://github.com/owner/repo(.git)
+FORK_OWNER=$(printf '%s' "$ORIGIN_URL" | \
+  sed -E 's#^git@github.com:([^/]+)/.*#\\1#; t; s#^https?://github.com/([^/]+)/.*#\\1#')
+BRANCH=$(git branch --show-current)
+PR_TITLE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.suggested_pr_title')
+PR_BODY=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.suggested_pr_body')
+
+PR_CMD=$(printf 'gh pr create --repo gastownhall/gascity --base %s --head %s:%s --title %q --body %q' \
+  "{{upstream_branch}}" "$FORK_OWNER" "$BRANCH" "$PR_TITLE" "$PR_BODY")
+
+if [ "$ISSUE_DECISION" = "yes" ]; then
+  ISSUE_CMD=$(printf 'gh issue create --repo gastownhall/gascity --title %q --body %q' \
+    "$ISSUE_TITLE" "$ISSUE_BODY")
+else
+  ISSUE_CMD=""
+fi
+
+gc bd update {{issue}} \
+  --set-metadata gh_pr_command="$PR_CMD" \
+  --set-metadata gh_issue_command="$ISSUE_CMD"
 ```
 
-The fork owner can be derived from `git remote get-url {{origin_remote}}`;
-the branch is what's on `metadata.branch`.
-
-**Exit criteria:** `metadata` carries `branch_url`, `suggested_pr_title`,
-`suggested_pr_body`, `issue_advice`, optionally `suggested_issue_title` /
-`suggested_issue_body`, `gh_pr_command`, optionally `gh_issue_command`."""
+**Exit criteria:** `metadata` carries every promised key with concrete
+values: `branch_url`, `suggested_pr_title`, `suggested_pr_body`,
+`suggested_issue_title`, `suggested_issue_body`, `issue_advice`,
+`gh_pr_command`, `gh_issue_command`. Issue fields are empty strings
+when no issue is recommended; `gh_pr_command` contains a fully
+resolved command (no placeholders)."""
 
 [[steps]]
 id = "handback-to-keeper"

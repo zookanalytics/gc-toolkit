@@ -148,7 +148,7 @@ The post-rebase verification work for this formula lives in the `test` and
 [[steps]]
 id = "survey"
 title = "Classify each divergent commit as drop-merged-upstream / drop-supplanted / keep"
-needs = ["workspace-setup"]
+needs = ["self-review"]
 description = """
 Build a verdict table for every commit on `{{origin_remote}}/{{upstream_branch}}`
 that is not on `{{upstream_remote}}/{{upstream_branch}}`. The verdicts feed
@@ -249,7 +249,11 @@ Next: drive the rebase by hand from the worktree, or close the bead if
 you've decided the conflict isn't worth resolving now.
 EOF
 )"
-gc bd update {{issue}} --set-metadata aborted_at=rebase
+gc bd update {{issue}} \
+  --set-metadata aborted_at=rebase \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
 gc runtime drain-ack
 exit 0
 ```
@@ -273,7 +277,10 @@ git log {{upstream_remote}}/{{upstream_branch}}..HEAD --oneline
 
 The output must match the `keep` rows from `metadata.commit_verdicts`. If
 anything unexpected is in the post-rebase log, mail the operator and stop
-(same pattern as the conflict case, but `aborted_at=rebase-mismatch`).
+using the same pattern as the conflict case — including the lifecycle
+handback (`--status=open`, `--assignee={{notify_recipient}}`,
+`--set-metadata gc.routed_to={{notify_recipient}}`) — with
+`metadata.aborted_at=rebase-mismatch`.
 
 **Exit criteria:** HEAD is rebased onto `{{upstream_remote}}/{{upstream_branch}}`;
 the post-rebase commit log matches the `keep` set from the verdict table."""
@@ -315,13 +322,19 @@ Next: investigate from the worktree. To restore the pre-rebase state:
   git reset --hard $BACKUP_REF
 EOF
 )"
-gc bd update {{issue}} --set-metadata aborted_at=test
+gc bd update {{issue}} \
+  --set-metadata aborted_at=test \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
 gc runtime drain-ack
 exit 0
 ```
 
 **Bead stays open** — the operator (or a follow-up polecat) resumes from
-`metadata.work_dir`."""
+`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign,
+`gc.routed_to`) is what actually puts the bead back in the operator's
+queue; without it the bead would strand on this drained session."""
 
 [[steps]]
 id = "install"
@@ -336,10 +349,39 @@ description = """
 
 If install passes, close this step and proceed.
 
-If install fails: same pattern as the test failure but with
-`metadata.aborted_at=install` and subject `gascity rebase: install failed`.
-Mail body should include the failure tail, the worktree path, and the
-backup ref. Bead stays open."""
+If install fails: same pattern as the test failure — including the
+lifecycle handback — but with `metadata.aborted_at=install` and subject
+`gascity rebase: install failed`:
+
+```bash
+INSTALL_TAIL=$(<install output, last 200 lines>)
+BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
+WORKTREE=$(pwd)
+
+gc mail send {{notify_recipient}} -s "gascity rebase: install failed" -m "$(cat <<EOF
+Rebase and tests passed but {{install_command}} failed.
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+Bead: {{issue}}
+
+Failure tail:
+$INSTALL_TAIL
+
+Next: investigate from the worktree. To restore the pre-rebase state:
+  git reset --hard $BACKUP_REF
+EOF
+)"
+gc bd update {{issue}} \
+  --set-metadata aborted_at=install \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+gc runtime drain-ack
+exit 0
+```
+
+**Bead stays open** — the operator drives recovery."""
 
 [[steps]]
 id = "push"
@@ -380,7 +422,11 @@ Next: review what landed remotely. If the new commits should be absorbed,
 restart this rebase mol on a fresh bead.
 EOF
 )"
-gc bd update {{issue}} --set-metadata aborted_at=push
+gc bd update {{issue}} \
+  --set-metadata aborted_at=push \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
 gc runtime drain-ack
 exit 0
 ```

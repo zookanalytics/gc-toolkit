@@ -61,8 +61,14 @@ RIG_PATH=$(gc rig path gascity)
 cd "$RIG_PATH"
 BEAD=$(gc bd create "Rebase gascity from upstream" -t task \
   --set-metadata notify_recipient=overseer --json | jq -r '.id')
-gc sling gascity/polecat "$BEAD" --var formula=mol-upstream-gc-rebase
+gc sling gascity/polecat "$BEAD" --on mol-upstream-gc-rebase
 ```
+
+`--on <formula>` is what attaches the wisp to the bead. `--var k=v` is
+formula-variable substitution; without `--on` it does not attach a formula
+at all. The rebase mol's vars all have defaults, so no `--var` flags are
+needed here unless the operator wants to override one (e.g.,
+`--var notify_recipient=…`).
 
 Tell the operator:
 
@@ -85,8 +91,16 @@ BEAD=$(gc bd create "Prep upstream PR for $(git -C "$RIG_PATH" rev-parse --short
   --set-metadata commit_sha=<sha> \
   --set-metadata requesting_keeper=$GC_AGENT \
   --json | jq -r '.id')
-gc sling gascity/polecat "$BEAD" --var formula=mol-upstream-gc-pr-prep
+gc sling gascity/polecat "$BEAD" --on mol-upstream-gc-pr-prep \
+  --var commit_sha=<sha> \
+  --var requesting_keeper="$GC_AGENT"
 ```
+
+`--on <formula>` attaches the prep mol to the bead; `--var commit_sha=…`
+and `--var requesting_keeper=…` satisfy the formula's required-var
+declarations. The same values are also stamped as bead metadata above —
+the formula's `workspace-setup` step reads from metadata as the durable
+source, the `--var` pair satisfies the formula contract at cook time.
 
 Tell the operator:
 
