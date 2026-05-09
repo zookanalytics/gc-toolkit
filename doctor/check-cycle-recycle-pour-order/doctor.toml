@@ -1,0 +1,1 @@
+description = "Cycle-recycle exit pours next wisp BEFORE gc handoff (pour-before-burn invariant)"

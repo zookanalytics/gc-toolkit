@@ -21,15 +21,27 @@ Recycle when **either** trigger fires:
    or work is found — the next idle stretch is what counts, not the
    cumulative.
 
-**Action when a trigger fires:**
+**Action when a trigger fires (pour-next-before-handoff):**
+
+The formula's universal invariant is **"pour next before burn current"** —
+every other exit path obeys it. Cycle-recycle must obey it too, so the
+post-`/clear` session has an in-progress wisp waiting on its hook
+regardless of whether the startup discovery query catches it.
 
 ```bash
-gc handoff "context cycle: <reason>"
+# 1. Pour the next wisp BEFORE handoff so the inheriting session
+#    finds a fresh in-progress wisp on its hook.
+NEXT=$(gc bd mol wisp <mol-{role}-patrol> --root-only <vars...> --json | jq -r '.new_epic_id')
+gc bd update "$NEXT" --assignee=$GC_AGENT
+
+# 2. Hand off, mentioning the next-wisp ID so the next session knows
+#    what to inherit even if discovery somehow misses it.
+gc handoff "context cycle: <reason> (next wisp: $NEXT)"
 ```
 
 Examples:
-- `gc handoff "context cycle: 3 patrol wisps closed this session"`
-- `gc handoff "context cycle: 30+ min idle, find-work events accumulated"`
+- `gc handoff "context cycle: 3 patrol wisps closed this session (next wisp: $NEXT)"`
+- `gc handoff "context cycle: 30+ min idle, find-work events accumulated (next wisp: $NEXT)"`
 
 `gc handoff` writes a durable HANDOFF bead and, for
 controller-restartable sessions, also requests a restart. For
@@ -37,14 +49,26 @@ on-demand named sessions (refinery, witness, and deacon when configured
 that way), the handoff mail is sent but the controller cannot restart
 the user-attended process — **the operator must `/clear`** to recycle.
 Either way, the next session reads the HANDOFF bead and resumes from
-clean state.
+clean state. Including `$NEXT` in the message body makes the inherited
+wisp ID discoverable to the new session even if its tier-1 in-progress
+query somehow misses it (race, status flip, etc.).
 
 **After running `gc handoff`:**
 
-- Sit idle. Do not start the next cycle.
-- Surface the handoff message in your output so the operator sees it.
-- Wait for `/clear` (or controller restart). The next session resumes
-  from the HANDOFF bead.
+- Sit idle. Do not start the next cycle yourself — the new wisp is
+  poured but unstarted, waiting for the post-`/clear` session.
+- Surface the handoff message (with the next-wisp ID) in your output so
+  the operator sees it.
+- Wait for `/clear` (or controller restart). The next session reads
+  the HANDOFF bead, finds the in-progress wisp via its tier-1 startup
+  query, and resumes from clean state.
+
+**Pathological-loop note.** If the cycle-recycle trigger somehow fires
+repeatedly (e.g. event-watch loop bug, runaway counter), each cycle
+adds a new wisp with no opportunity to burn the prior one. Accumulated
+wisps are detectable as multiple open patrol wisps assigned to
+`$GC_ALIAS`; the startup discovery's tier-3 step adopts the newest and
+closes older ones with `'orphaned cross-rotation'` reason.
 
 **Verifying the wisp count (optional):**
 
