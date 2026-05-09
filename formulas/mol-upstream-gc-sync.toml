@@ -1,0 +1,242 @@
+description = """
+Detect upstream-gascity drift in the vendored gastown pack. Read-only —
+walks `agents/*/PROVENANCE.md`, asks the gascity rig what's changed since
+each pinned commit, writes a markdown report into bead notes plus a
+referenced file. No file mutation. No pin bumps. Apply and pin-bump are
+follow-up mols.
+
+Extends `mol-polecat-base` for `load-context`, but replaces the
+`implement / self-review` chain with a single `survey` step that drives
+`tools/upstream-gc-sync.sh`, then a `report-and-close` step that persists
+the output and closes the bead.
+
+This mol is the read-only half of the gastown sync workflow. Pair with a
+v2 apply mol that consumes `metadata.report_file` to land hunks and bump
+pins.
+
+## Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| upstream_rig | gascity | The upstream rig name (resolved via `gc rig path`) |
+| upstream_ref | origin/main | Ref in the upstream rig to compare each pin against |
+| sync_script | tools/upstream-gc-sync.sh | Drift-detector script (relative to pack root) |
+| with_diff | 0 | If `1`, include unified diffs per agent (verbose) |
+| notify_recipient | (empty) | Optional mail address; if set, the report is mailed in addition to being written to bead notes |
+
+## Failure modes
+
+| Step | Failure handling |
+|------|------------------|
+| workspace-setup | Worktree creation or upstream fetch failure → halt; bead stays open with `metadata.aborted_at=workspace-setup` |
+| survey | Script not found, rig path missing, ref unreachable → write the failure tail into bead notes, set `metadata.aborted_at=survey`, drain and exit. Bead stays open for operator review. |
+| report-and-close | Should not fail; if it does, the report file is still on disk under `metadata.work_dir` |"""
+formula = "mol-upstream-gc-sync"
+extends = ["mol-polecat-base"]
+version = 1
+
+[vars]
+[vars.upstream_rig]
+description = "Upstream rig name (resolved via 'gc rig path')"
+default = "gascity"
+
+[vars.upstream_ref]
+description = "Ref in the upstream rig to compare each pin against"
+default = "origin/main"
+
+[vars.sync_script]
+description = "Drift-detector script path (relative to the pack root)"
+default = "tools/upstream-gc-sync.sh"
+
+[vars.with_diff]
+description = "If '1', the report includes per-agent unified diffs"
+default = "0"
+
+[vars.notify_recipient]
+description = "Optional mail address to notify with the report (e.g., overseer, gascity-keeper). Empty = skip mail."
+default = ""
+
+[[steps]]
+id = "workspace-setup"
+title = "Set up gc-toolkit worktree (read-only — no branch needed)"
+needs = ["load-context"]
+description = """
+This mol is read-only. We don't create a feature branch — the survey
+step runs the drift-detector script and writes a report to the bead.
+The worktree exists so the script's CWD is a deterministic pack root
+and so multiple sync runs don't collide.
+
+**1. Reuse or create the worktree:**
+
+```bash
+WORKTREE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty')
+```
+
+If `WORKTREE` is non-empty and points to an existing directory, `cd`
+there and skip to step 2.
+
+Otherwise create one scoped to this bead:
+```bash
+git fetch --prune origin
+WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
+git worktree add "$WORKTREE_PATH" --detach "origin/{{base_branch}}"
+cd "$WORKTREE_PATH"
+gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH"
+```
+
+The worktree is detached — no branch is created. This mol never
+commits, so there's nothing to push.
+
+**2. Fetch upstream rig:**
+```bash
+RIG_ROOT=$(gc rig path {{upstream_rig}})
+git -C "$RIG_ROOT" fetch --prune origin
+```
+
+The drift detector compares each pin against `{{upstream_ref}}` in
+this rig — a fresh fetch is required so the report reflects current
+upstream state, not a stale local view.
+
+If `gc rig path {{upstream_rig}}` fails (rig not present in this
+city), record the failure and abort:
+```bash
+gc bd update {{issue}} --set-metadata aborted_at=workspace-setup \
+    --notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
+gc runtime drain-ack
+exit 1
+```
+
+**Exit criteria:** worktree exists at `metadata.work_dir`; upstream
+rig `{{upstream_rig}}` has been fetched."""
+
+[[steps]]
+id = "preflight-tests"
+title = "Skip — sync variant is read-only"
+needs = ["workspace-setup"]
+description = """
+This mol does not modify code, run tests, or build anything. Its only
+runtime dependencies are the `gc` CLI, `git`, and a POSIX shell — all
+guaranteed by the polecat session.
+
+Close this step and proceed."""
+
+[[steps]]
+id = "implement"
+title = "Skip — replaced by survey step"
+needs = ["preflight-tests"]
+description = """
+The work for this formula is the `survey` step below. Close this step
+and proceed."""
+
+[[steps]]
+id = "self-review"
+title = "Skip — replaced by survey step"
+needs = ["implement"]
+description = """
+There is no implementation diff to review — the report itself is the
+deliverable, and `report-and-close` persists it. Close this step
+and proceed."""
+
+[[steps]]
+id = "survey"
+title = "Run the drift-detector script and capture the report"
+needs = ["workspace-setup"]
+description = """
+Drive `{{sync_script}}` against the upstream rig and capture stdout
+to a report file under the worktree.
+
+**1. Verify the script is present and executable:**
+```bash
+SCRIPT={{sync_script}}
+if [ ! -x "$SCRIPT" ]; then
+    gc bd update {{issue}} --set-metadata aborted_at=survey \
+        --notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
+    gc runtime drain-ack
+    exit 1
+fi
+```
+
+**2. Run the script and capture output:**
+
+```bash
+RIG_ROOT=$(gc rig path {{upstream_rig}})
+REPORT_DIR="$(pwd)/.gc/upstream-gc-sync"
+mkdir -p "$REPORT_DIR"
+REPORT_FILE="$REPORT_DIR/{{issue}}.md"
+ERR_FILE="$REPORT_DIR/{{issue}}.err"
+
+EXTRA_ARGS=()
+if [ "{{with_diff}}" = "1" ]; then
+    EXTRA_ARGS+=(--with-diff)
+fi
+
+if "$SCRIPT" \
+        --rig-path "$RIG_ROOT" \
+        --upstream-ref "{{upstream_ref}}" \
+        "${EXTRA_ARGS[@]}" \
+        > "$REPORT_FILE" 2> "$ERR_FILE"; then
+    gc bd update {{issue}} --set-metadata report_file="$REPORT_FILE"
+else
+    gc bd update {{issue}} --set-metadata aborted_at=survey \
+        --notes "$(cat <<EOF
+Sync script failed.
+
+Stderr:
+$(cat "$ERR_FILE" 2>/dev/null || echo "(stderr capture missing)")
+
+Stdout (if any):
+$(cat "$REPORT_FILE" 2>/dev/null || echo "(stdout capture missing)")
+EOF
+)"
+    gc runtime drain-ack
+    exit 1
+fi
+```
+
+**Exit criteria:** `metadata.report_file` records the path to the
+captured report; the file exists and is non-empty."""
+
+[[steps]]
+id = "report-and-close"
+title = "Append report to bead notes, optionally mail, close bead, exit"
+needs = ["survey"]
+description = """
+Persist the report so it survives without depending on the worktree,
+optionally mail a copy, then close the bead.
+
+**1. Append the report to bead notes:**
+```bash
+REPORT_FILE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.report_file')
+gc bd update {{issue}} --notes "$(cat "$REPORT_FILE")"
+```
+
+The notes carry the full markdown — anyone with `gc bd show {{issue}}`
+can read the report directly without filesystem access.
+
+**2. Optionally mail the report:**
+
+If `{{notify_recipient}}` is non-empty, mail a copy:
+```bash
+RECIPIENT="{{notify_recipient}}"
+if [ -n "$RECIPIENT" ]; then
+    gc mail send "$RECIPIENT" \
+        -s "upstream-gc-sync: drift report for {{issue}}" \
+        -m "$(cat "$REPORT_FILE")"
+fi
+```
+
+**3. Close the bead:**
+```bash
+gc bd close {{issue}} --reason "Drift report generated: $REPORT_FILE"
+```
+
+**4. Drain and exit:**
+```bash
+gc runtime drain-ack
+exit 0
+```
+
+**Exit criteria:** bead is closed; `metadata.report_file` references
+the on-disk report; bead notes carry the markdown body; if
+`{{notify_recipient}}` was set, the recipient has been mailed; session
+has drained."""
