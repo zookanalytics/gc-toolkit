@@ -1,0 +1,5 @@
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/agents/gascity-keeper"
+nudge = "Check for PR-prep handback beads, then engage the operator."
+idle_timeout = "2h"

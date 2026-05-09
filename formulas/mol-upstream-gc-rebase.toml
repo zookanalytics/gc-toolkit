@@ -1,0 +1,481 @@
+description = """
+Rebase the gascity rig's `origin/main` onto `upstream/main`, drop already-
+landed-or-supplanted local commits, run tests, install, push, and notify the
+operator. Autonomous through push: completion is either an "everything is up
+to date" mail to the operator or an "I've been mailed to take action" mail.
+
+Extends `mol-polecat-base` for the standard polecat lifecycle entry points
+(load-context, workspace-setup) but uses its own gating steps in place of
+the implement / self-review pair — the work isn't a feature implementation,
+it's a controlled rebase with a verdict-keeping survey.
+
+## Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| upstream_remote | upstream | Git remote name pointing at gastownhall/gascity |
+| origin_remote | origin | Git remote name pointing at the city's fork |
+| upstream_branch | main | Branch to rebase onto and push back to |
+| test_command | make test | Test command run after rebase |
+| install_command | make install | Local rebuild of `gc` into `$INSTALL_DIR` |
+| notify_recipient | overseer | Mail target on completion / abort |
+
+## Failure modes
+
+| Step | Failure handling |
+|------|------------------|
+| survey | LLM judgment can be wrong; record verdicts on the bead and proceed — the rebase step's patch-id check is the safety net for `drop-merged-upstream` |
+| rebase | Conflicts halt the chain; mail operator and stop. The `metadata.backup_ref` makes any state recoverable |
+| test | Mail operator with failure tail; bead stays open so a fix can resume |
+| install | Mail operator; bead stays open |
+| push | `--force-with-lease` rejection means a parallel push raced us — do NOT retry, mail and stop |"""
+formula = "mol-upstream-gc-rebase"
+extends = ["mol-polecat-base"]
+version = 1
+
+[vars]
+[vars.upstream_remote]
+description = "Git remote name pointing at the upstream gascity repository"
+default = "upstream"
+
+[vars.origin_remote]
+description = "Git remote name pointing at the city's fork"
+default = "origin"
+
+[vars.upstream_branch]
+description = "Branch to rebase onto and push back to"
+default = "main"
+
+[vars.test_command]
+description = "Command run after rebase to verify correctness"
+default = "make test"
+
+[vars.install_command]
+description = "Command that rebuilds and installs the gc binary locally"
+default = "make install"
+
+[vars.notify_recipient]
+description = "Mail target for completion and abort notifications"
+default = "overseer"
+
+[[steps]]
+id = "workspace-setup"
+title = "Set up gascity worktree, fetch upstream, write safety backup ref"
+needs = ["load-context"]
+description = """
+Establish a clean worktree on the gascity rig at `{{origin_remote}}/{{upstream_branch}}`,
+fetch the upstream remote, and write a backup ref so the rebase is recoverable.
+
+**1. Locate the gascity rig:**
+The keeper dispatches this mol from the gascity rig's bead store. The rig
+checkout is at `$GC_RIG_ROOT` (when running rig-scoped) or you can resolve
+via `gc rig path gascity` from the city root.
+
+**2. Reuse or create the worktree:**
+
+Check `metadata.work_dir` first:
+```bash
+WORKTREE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty')
+```
+
+If it points to an existing directory, `cd` there and skip to step 3.
+
+Otherwise, create one scoped to this bead:
+```bash
+RIG_ROOT=$(gc rig path gascity)
+WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
+git -C "$RIG_ROOT" fetch --prune {{origin_remote}}
+git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"
+cd "$WORKTREE_PATH"
+gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH" --set-metadata branch="rebase/{{issue}}"
+```
+
+The local working branch (`rebase/{{issue}}`) lets us rebase without touching
+`{{upstream_branch}}` until the push step. The bead's branch metadata records
+the working branch, not the destination — the destination is `{{upstream_branch}}`
+on `{{origin_remote}}` and the push step writes there with `--force-with-lease`.
+
+**3. Fetch the upstream remote:**
+```bash
+git fetch {{upstream_remote}} --prune
+```
+
+**4. Write the safety backup ref:**
+```bash
+BACKUP_TS=$(date -u +%Y%m%dT%H%M%SZ)
+BACKUP_REF="refs/backups/main-pre-rebase-$BACKUP_TS"
+git update-ref "$BACKUP_REF" HEAD
+gc bd update {{issue}} --set-metadata backup_ref="$BACKUP_REF"
+```
+
+The backup ref points at the pre-rebase tip of `{{origin_remote}}/{{upstream_branch}}`.
+If the rebase has to be unwound, `git reset --hard $BACKUP_REF` restores the
+pre-rebase state, and the ref is included in the operator's completion mail.
+
+**Exit criteria:** worktree exists at `metadata.work_dir`; HEAD matches the
+pre-rebase tip of `{{origin_remote}}/{{upstream_branch}}`; `metadata.backup_ref`
+is recorded; `{{upstream_remote}}` has been fetched."""
+
+[[steps]]
+id = "preflight-tests"
+title = "Skip — rebase variant uses its own gates"
+needs = ["workspace-setup"]
+description = """
+This formula replaces the standard polecat preflight/implement/self-review
+sequence with `survey → rebase → test → install → push → notify-and-close`.
+There is no preflight to run on `{{upstream_branch}}` for this variant —
+the rebase step's patch-id checks plus the post-rebase test gate cover what
+preflight would have caught.
+
+Close this step and proceed."""
+
+[[steps]]
+id = "implement"
+title = "Skip — replaced by survey + rebase steps"
+needs = ["preflight-tests"]
+description = """
+The implementation work for this formula lives in the `survey` and `rebase`
+steps below. Close this step and proceed."""
+
+[[steps]]
+id = "self-review"
+title = "Skip — replaced by test + install steps"
+needs = ["implement"]
+description = """
+The post-rebase verification work for this formula lives in the `test` and
+`install` steps below. Close this step and proceed."""
+
+[[steps]]
+id = "survey"
+title = "Classify each divergent commit as drop-merged-upstream / drop-supplanted / keep"
+needs = ["self-review"]
+description = """
+Build a verdict table for every commit on `{{origin_remote}}/{{upstream_branch}}`
+that is not on `{{upstream_remote}}/{{upstream_branch}}`. The verdicts feed
+the rebase step (drop-supplanted commits get rewritten away; drop-merged-upstream
+commits are dropped automatically by patch-id matching).
+
+**1. Compute the divergent set:**
+```bash
+git range-diff {{upstream_remote}}/{{upstream_branch}}...{{origin_remote}}/{{upstream_branch}}
+git log --oneline {{upstream_remote}}/{{upstream_branch}}..{{origin_remote}}/{{upstream_branch}}
+```
+
+`range-diff` shows whether each origin commit has a patch-id match upstream
+(`=`), a fuzzy match (`~`), or no match (`>`). Use this as input to the
+verdicts but don't blindly trust it — read each commit.
+
+**2. Classify each origin commit:**
+
+For each commit (oldest → newest), pick exactly one verdict:
+
+- **drop-merged-upstream** — Patch-id-equal (or trivially-equal) to a commit
+  on `{{upstream_remote}}/{{upstream_branch}}`. The rebase will drop it
+  automatically.
+- **drop-supplanted** — Upstream solves the same problem differently
+  (different patch-id; same root cause). LLM judgment: read the upstream
+  log around `{{upstream_remote}}/{{upstream_branch}}` for adjacent fixes.
+  This commit must be rewritten out via `git rebase -i` in the next step.
+- **keep** — Local-only patch with no upstream equivalent. The rebase
+  carries it forward.
+
+**3. Persist the verdicts (markdown to bead notes, JSON to metadata):**
+
+Markdown table for `gc bd update --notes`:
+```
+| sha | subject | verdict | rationale |
+|-----|---------|---------|-----------|
+| abc1234 | <subject> | drop-merged-upstream | matches upstream <upstream-sha> by patch-id |
+| def5678 | <subject> | drop-supplanted | superseded by upstream <upstream-sha> (different approach) |
+| ...     | ...     | keep | local-only fix, no upstream equivalent |
+```
+
+JSON for `metadata.commit_verdicts` (one entry per origin commit):
+```json
+[
+  {"sha": "abc1234", "subject": "...", "verdict": "drop-merged-upstream", "rationale": "..."},
+  {"sha": "def5678", "subject": "...", "verdict": "drop-supplanted", "rationale": "...", "upstream_ref": "..."},
+  {"sha": "ghi9abc", "subject": "...", "verdict": "keep", "rationale": "..."}
+]
+```
+
+Write both:
+```bash
+gc bd update {{issue}} --notes "<markdown table here>"
+gc bd update {{issue}} --set-metadata commit_verdicts='<json string>'
+```
+
+**Exit criteria:** every divergent commit has a verdict on the bead; the
+`metadata.commit_verdicts` JSON is parseable and the markdown table is
+readable in the bead notes."""
+
+[[steps]]
+id = "rebase"
+title = "Rebase onto upstream and rewrite drop-supplanted commits away"
+needs = ["survey"]
+description = """
+Run the rebase. Patch-id matching drops `drop-merged-upstream` commits
+automatically; `drop-supplanted` commits get explicit `drop` markers via
+interactive rebase.
+
+**1. Run the rebase:**
+```bash
+git rebase {{upstream_remote}}/{{upstream_branch}}
+```
+
+If the rebase fails on conflicts:
+
+1. Capture the conflict tail:
+```bash
+git status --short > /tmp/rebase-conflicts-{{issue}}.txt
+```
+2. Abort: `git rebase --abort`
+3. Mail the operator and stop:
+```bash
+BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
+WORKTREE=$(pwd)
+gc mail send {{notify_recipient}} -s "gascity rebase: conflicts" -m "$(cat <<EOF
+The rebase of {{origin_remote}}/{{upstream_branch}} onto {{upstream_remote}}/{{upstream_branch}}
+hit conflicts. The rebase has been aborted; the worktree is back at the
+pre-rebase tip.
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+Bead: {{issue}}
+Conflicts:
+$(cat /tmp/rebase-conflicts-{{issue}}.txt)
+
+Next: drive the rebase by hand from the worktree, or close the bead if
+you've decided the conflict isn't worth resolving now.
+EOF
+)"
+gc bd update {{issue}} \
+  --set-metadata aborted_at=rebase \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+gc runtime drain-ack
+exit 0
+```
+
+**2. Drop supplanted commits via interactive rebase:**
+
+If `metadata.commit_verdicts` contains any `drop-supplanted` entries, run:
+```bash
+git rebase -i {{upstream_remote}}/{{upstream_branch}}
+```
+and mark each `drop-supplanted` sha as `drop` in the editor. (Set
+`GIT_SEQUENCE_EDITOR` to a script that mutates the rebase todo list if
+you want to script this rather than open an editor.)
+
+If there are no `drop-supplanted` entries, skip this sub-step.
+
+**3. Sanity check the kept set:**
+```bash
+git log {{upstream_remote}}/{{upstream_branch}}..HEAD --oneline
+```
+
+The output must match the `keep` rows from `metadata.commit_verdicts`. If
+anything unexpected is in the post-rebase log, mail the operator and stop
+using the same pattern as the conflict case — including the lifecycle
+handback (`--status=open`, `--assignee={{notify_recipient}}`,
+`--set-metadata gc.routed_to={{notify_recipient}}`) — with
+`metadata.aborted_at=rebase-mismatch`.
+
+**Exit criteria:** HEAD is rebased onto `{{upstream_remote}}/{{upstream_branch}}`;
+the post-rebase commit log matches the `keep` set from the verdict table."""
+
+[[steps]]
+id = "test"
+title = "Run the test suite on the rebased branch"
+needs = ["rebase"]
+description = """
+**Config: test_command = {{test_command}}**
+
+```bash
+{{test_command}}
+```
+
+If tests pass, close this step and proceed.
+
+If tests fail:
+```bash
+TEST_TAIL=$(tail -200 <test output file or capture>)
+BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
+WORKTREE=$(pwd)
+VERDICTS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_verdicts')
+
+gc mail send {{notify_recipient}} -s "gascity rebase: tests failed" -m "$(cat <<EOF
+Rebase succeeded but {{test_command}} failed on the rebased branch.
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+Bead: {{issue}}
+
+Failure tail:
+$TEST_TAIL
+
+Verdicts (commit_verdicts):
+$VERDICTS
+
+Next: investigate from the worktree. To restore the pre-rebase state:
+  git reset --hard $BACKUP_REF
+EOF
+)"
+gc bd update {{issue}} \
+  --set-metadata aborted_at=test \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+gc runtime drain-ack
+exit 0
+```
+
+**Bead stays open** — the operator (or a follow-up polecat) resumes from
+`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign,
+`gc.routed_to`) is what actually puts the bead back in the operator's
+queue; without it the bead would strand on this drained session."""
+
+[[steps]]
+id = "install"
+title = "Rebuild and install gc from the rebased state"
+needs = ["test"]
+description = """
+**Config: install_command = {{install_command}}**
+
+```bash
+{{install_command}}
+```
+
+If install passes, close this step and proceed.
+
+If install fails: same pattern as the test failure — including the
+lifecycle handback — but with `metadata.aborted_at=install` and subject
+`gascity rebase: install failed`:
+
+```bash
+INSTALL_TAIL=$(<install output, last 200 lines>)
+BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
+WORKTREE=$(pwd)
+
+gc mail send {{notify_recipient}} -s "gascity rebase: install failed" -m "$(cat <<EOF
+Rebase and tests passed but {{install_command}} failed.
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+Bead: {{issue}}
+
+Failure tail:
+$INSTALL_TAIL
+
+Next: investigate from the worktree. To restore the pre-rebase state:
+  git reset --hard $BACKUP_REF
+EOF
+)"
+gc bd update {{issue}} \
+  --set-metadata aborted_at=install \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+gc runtime drain-ack
+exit 0
+```
+
+**Bead stays open** — the operator drives recovery."""
+
+[[steps]]
+id = "push"
+title = "Push the rebased branch to origin with --force-with-lease"
+needs = ["install"]
+description = """
+**Config: origin_remote = {{origin_remote}}**
+**Config: upstream_branch = {{upstream_branch}}**
+
+```bash
+git push {{origin_remote}} HEAD:{{upstream_branch}} --force-with-lease
+```
+
+If the push succeeds, close this step and proceed.
+
+If `--force-with-lease` is rejected (someone else pushed to
+`{{origin_remote}}/{{upstream_branch}}` after our `git fetch`):
+
+**Do NOT retry. Do NOT use plain `--force`.**
+
+Mail the operator and stop:
+```bash
+BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
+WORKTREE=$(pwd)
+NEW_REMOTE=$(git rev-parse {{origin_remote}}/{{upstream_branch}})
+
+gc mail send {{notify_recipient}} -s "gascity rebase: push race" -m "$(cat <<EOF
+git push --force-with-lease was rejected — {{origin_remote}}/{{upstream_branch}}
+moved between our fetch and our push. Someone else pushed; we will not
+overwrite their work.
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+New remote tip: $NEW_REMOTE
+Bead: {{issue}}
+
+Next: review what landed remotely. If the new commits should be absorbed,
+restart this rebase mol on a fresh bead.
+EOF
+)"
+gc bd update {{issue}} \
+  --set-metadata aborted_at=push \
+  --status=open \
+  --assignee="{{notify_recipient}}" \
+  --set-metadata gc.routed_to="{{notify_recipient}}"
+gc runtime drain-ack
+exit 0
+```
+
+**Exit criteria:** `{{origin_remote}}/{{upstream_branch}}` now points at the
+rebased HEAD."""
+
+[[steps]]
+id = "notify-and-close"
+title = "Mail the completion summary, append to bead notes, close bead"
+needs = ["push"]
+description = """
+Compose the completion summary using the verdict table and the rebase
+outcome, send it as mail, append a clean copy to bead notes, close the bead.
+
+**1. Build the summary:**
+
+Sections to include:
+- **Dropped commits** — the `drop-merged-upstream` and `drop-supplanted`
+  rows from `metadata.commit_verdicts`, each with sha, subject, verdict,
+  rationale.
+- **Upstream commits absorbed** — `git log --oneline <pre-rebase-tip>..{{upstream_remote}}/{{upstream_branch}}`
+  where `<pre-rebase-tip>` is the backup ref.
+- **Test outcome** — pass (we got here) plus the test command name.
+- **Install outcome** — pass.
+- **Push outcome** — pushed `<new-sha>` to `{{origin_remote}}/{{upstream_branch}}`.
+- **Backup ref** — name and pre-rebase tip sha, so the operator can roll
+  back without paging this mol back in.
+
+**2. Mail the operator:**
+```bash
+gc mail send {{notify_recipient}} -s "gascity rebase: complete" -m "<summary>"
+```
+
+**3. Append the same summary to bead notes:**
+```bash
+gc bd update {{issue}} --notes "<summary>"
+```
+
+**4. Close the bead:**
+```bash
+gc bd close {{issue}} --reason "Rebased {{origin_remote}}/{{upstream_branch}} onto {{upstream_remote}}/{{upstream_branch}}; pushed $(git rev-parse --short HEAD)"
+```
+
+**5. Drain and exit:**
+```bash
+gc runtime drain-ack
+exit 0
+```
+
+**Exit criteria:** completion mail sent; bead notes carry the summary;
+bead is closed; session has drained."""

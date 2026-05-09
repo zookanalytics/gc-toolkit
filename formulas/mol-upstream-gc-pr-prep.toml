@@ -1,0 +1,556 @@
+description = """
+Prepare an upstream pull request from a single local-fork commit. Mechanical
+work through `push-branch`, then a `prepare-pr-handoff` step that drafts the
+PR title/body (and an optional issue draft), then a `handback-to-keeper` step
+that re-routes the bead to the requesting keeper for the conversational tail.
+
+PR creation itself is operator-gated and currently blocked at the city level —
+this mol stops at branch push + draft-on-bead. The keeper (or operator) decides
+when and whether to run the assembled `gh pr create` command.
+
+Extends `mol-polecat-base` for load-context but replaces the implement /
+self-review chain with the cherry-pick / scrub / test / push / draft / handback
+sequence below.
+
+## Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| commit_sha | yes (set by keeper as `metadata.commit_sha`) | the local commit to extract |
+| upstream_remote | no (default `upstream`) | upstream remote name |
+| origin_remote | no (default `origin`) | origin remote name |
+| upstream_branch | no (default `main`) | branch this PR will target |
+| test_command | no (default `make test`) | post-cherry-pick test command |
+| requesting_keeper | yes (set by keeper as `metadata.requesting_keeper`) | who to hand back to |
+
+## Failure modes
+
+| Step | Failure handling |
+|------|------------------|
+| cherry-pick | Conflict halts the chain; mail keeper + operator with conflict tail; bead stays open |
+| scrub-commit-message | If something looks ambiguous after scrub, keep the conservative rewrite; mention in bead notes |
+| test | Failure mails keeper + operator; bead stays open (operator decides whether to investigate or abandon) |
+| push-branch | If origin already has the branch and rejects, retry with `--force-with-lease`; if that also rejects, treat as race |
+| prepare-pr-handoff | LLM judgment — record `issue_advice` even when no |
+| handback-to-keeper | Reassign + nudge; the keeper's prime sweeps for `metadata.suggested_pr_title` |"""
+formula = "mol-upstream-gc-pr-prep"
+extends = ["mol-polecat-base"]
+version = 1
+
+[vars]
+[vars.commit_sha]
+description = "The local commit on origin/main to extract for upstream submission"
+required = true
+
+[vars.upstream_remote]
+description = "Git remote name pointing at the upstream gascity repository"
+default = "upstream"
+
+[vars.origin_remote]
+description = "Git remote name pointing at the city's fork"
+default = "origin"
+
+[vars.upstream_branch]
+description = "Branch the eventual upstream PR will target"
+default = "main"
+
+[vars.test_command]
+description = "Test command run after cherry-pick + scrub"
+default = "make test"
+
+[vars.requesting_keeper]
+description = "Keeper agent address (e.g., gascity/gascity-keeper) the bead returns to after prep"
+required = true
+
+[[steps]]
+id = "workspace-setup"
+title = "Set up gascity worktree branched off upstream"
+needs = ["load-context"]
+description = """
+Branch off `{{upstream_remote}}/{{upstream_branch}}` (NOT `{{origin_remote}}`)
+so the PR's commit history is upstream-relative. The keeper has stamped
+`metadata.commit_sha` and `metadata.requesting_keeper` on this bead.
+
+**1. Read the inputs:**
+```bash
+COMMIT_SHA=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_sha')
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+```
+
+If either is empty, the keeper failed to stamp metadata — escalate to the
+operator with subject `pr-prep: missing metadata` and exit. Do not invent
+defaults.
+
+**2. Reuse or create the worktree:**
+
+Check `metadata.work_dir` first:
+```bash
+WORKTREE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty')
+```
+
+If it exists, `cd` there and skip to step 3.
+
+Otherwise create one branched off upstream:
+```bash
+RIG_ROOT=$(gc rig path gascity)
+SHORT_SHA=$(git -C "$RIG_ROOT" rev-parse --short "$COMMIT_SHA")
+BRANCH="upstream-pr/$SHORT_SHA"
+WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
+
+git -C "$RIG_ROOT" fetch --prune {{upstream_remote}}
+git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "$BRANCH" "{{upstream_remote}}/{{upstream_branch}}"
+cd "$WORKTREE_PATH"
+gc bd update {{issue}} \
+  --set-metadata work_dir="$WORKTREE_PATH" \
+  --set-metadata branch="$BRANCH"
+```
+
+If the branch name collides with an existing worktree branch (rare —
+multiple PRs from the same short-sha), append `-{{issue}}` to disambiguate.
+
+**Exit criteria:** worktree at `$WORKTREE_PATH`; branch `upstream-pr/<short-sha>`
+based on `{{upstream_remote}}/{{upstream_branch}}`; both recorded on the bead."""
+
+[[steps]]
+id = "preflight-tests"
+title = "Skip — pr-prep variant uses its own gates"
+needs = ["workspace-setup"]
+description = """
+This formula's gating happens in `cherry-pick` (conflict check), `test`
+(post-scrub test), and `push-branch`. There is nothing useful to preflight
+on a fresh branch off `{{upstream_remote}}/{{upstream_branch}}`.
+
+Close this step and proceed."""
+
+[[steps]]
+id = "implement"
+title = "Skip — replaced by cherry-pick + scrub-commit-message steps"
+needs = ["preflight-tests"]
+description = """
+The implementation work for this formula lives in `cherry-pick` and
+`scrub-commit-message` below. Close this step and proceed."""
+
+[[steps]]
+id = "self-review"
+title = "Skip — replaced by test + prepare-pr-handoff steps"
+needs = ["implement"]
+description = """
+The post-implementation verification for this formula is the `test` step,
+and the diff-review duty is taken on by `prepare-pr-handoff` (which has to
+read the commit anyway to draft the title and body). Close this step and
+proceed."""
+
+[[steps]]
+id = "cherry-pick"
+title = "Cherry-pick the operator's commit onto upstream"
+needs = ["self-review"]
+description = """
+```bash
+COMMIT_SHA=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_sha')
+git cherry-pick "$COMMIT_SHA"
+```
+
+If the cherry-pick succeeds, close this step and proceed.
+
+If the cherry-pick conflicts:
+
+1. Capture the conflict tail:
+```bash
+git status --short > /tmp/cherry-pick-conflict-{{issue}}.txt
+git cherry-pick --abort
+```
+
+2. Mail the keeper AND the operator:
+```bash
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+gc mail send "$REQUESTING_KEEPER" -s "pr-prep: cherry-pick conflict for {{issue}}" -m "$(cat <<EOF
+Cherry-pick of $COMMIT_SHA onto {{upstream_remote}}/{{upstream_branch}} conflicted.
+
+Bead: {{issue}}
+Worktree: $(pwd)
+Conflicts:
+$(cat /tmp/cherry-pick-conflict-{{issue}}.txt)
+
+Likely cause: the commit depends on local-only context that doesn't exist
+upstream. Consider whether the commit needs to be split, rebased onto a
+prior local commit first, or simply isn't a viable upstream-PR candidate.
+EOF
+)"
+gc mail send overseer -s "pr-prep: cherry-pick conflict for {{issue}}" -m "(see keeper mail)"
+```
+
+3. Set the abort marker, hand the bead back to the keeper, and exit:
+```bash
+gc bd update {{issue}} \
+  --set-metadata aborted_at=cherry-pick \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+gc runtime drain-ack
+exit 0
+```
+
+**Bead stays open and assigned to the keeper** — without the lifecycle
+handback the bead would strand on this drained session. The keeper's
+prime sweep notices `metadata.aborted_at`, surfaces the failure to the
+operator, and the operator can decide to abandon the bead or resume
+from `metadata.work_dir` after splitting the commit.
+
+**Exit criteria:** HEAD has the cherry-picked commit; working tree is clean."""
+
+[[steps]]
+id = "scrub-commit-message"
+title = "Strip city-internal references from the commit message"
+needs = ["cherry-pick"]
+description = """
+Read the cherry-picked commit message and rewrite anything that would leak
+city-internal context to the upstream repo. This protects the operator's
+fork-internal taxonomy (bead IDs, agent handles, rig names) from showing
+up in upstream history.
+
+**1. Read the message:**
+```bash
+git log -1 --format='%B' > /tmp/scrub-before-{{issue}}.txt
+```
+
+**2. Scan for these patterns (LLM judgment, not blind regex):**
+
+- Bead-ID-shaped tokens — `lx-…`, `gc-…`, `tk-…`, `sl-…` (lowercase prefix
+  followed by short slug). Borderline cases: a token like `gc-init` could
+  be a real upstream symbol; consider context.
+- Rig names visible in the commit — `gc-toolkit`, `signal-loom`, `loomington`.
+- City references — `loomington`, "this city", "our city".
+- Internal handle names — `mechanik`, `mayor`, `deacon`, `polecat`, `witness`,
+  `refinery`, `boot`, `concierge`, `consult-host`, `keeper`. (These are
+  city-architecture concepts; they don't belong in upstream PR descriptions.)
+
+**3. Rewrite the message:**
+
+If anything matches, rewrite to remove or generalize:
+- Drop the line entirely if it's something like `Tracking: tk-abc123`.
+- Replace internal handles with neutral wording — e.g. "the city's keeper agent" → "tooling".
+- Generalize rig names — `gc-toolkit pack` → "downstream pack".
+
+Then amend:
+```bash
+git commit --amend -m "$(cat /tmp/scrub-after-{{issue}}.txt)"
+```
+
+If nothing matches, leave the message untouched.
+
+**4. Record the diff for the operator's review:**
+```bash
+SCRUB_BEFORE=$(cat /tmp/scrub-before-{{issue}}.txt)
+SCRUB_AFTER=$(git log -1 --format='%B')
+gc bd update {{issue}} --set-metadata scrub_diff="$(cat <<EOF
+BEFORE:
+$SCRUB_BEFORE
+
+AFTER:
+$SCRUB_AFTER
+EOF
+)"
+```
+
+The keeper surfaces this diff during the handback conversation so the
+operator can object if the scrub overreached.
+
+**Exit criteria:** commit message contains no city-internal references;
+`metadata.scrub_diff` records before/after; if no changes were needed,
+`metadata.scrub_diff` says so."""
+
+[[steps]]
+id = "test"
+title = "Run the test suite on the cherry-picked branch"
+needs = ["scrub-commit-message"]
+description = """
+**Config: test_command = {{test_command}}**
+
+```bash
+{{test_command}}
+```
+
+If tests pass, close this step and proceed.
+
+If tests fail:
+```bash
+TEST_TAIL=$(<test output, last 200 lines>)
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+
+gc mail send "$REQUESTING_KEEPER" -s "pr-prep: tests failed for {{issue}}" -m "$(cat <<EOF
+Cherry-pick succeeded but {{test_command}} failed on the rebased branch.
+
+Bead: {{issue}}
+Worktree: $(pwd)
+
+Failure tail:
+$TEST_TAIL
+EOF
+)"
+gc mail send overseer -s "pr-prep: tests failed for {{issue}}" -m "(see keeper mail)"
+
+gc bd update {{issue}} \
+  --set-metadata aborted_at=test \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+gc runtime drain-ack
+exit 0
+```
+
+**Bead stays open and assigned to the keeper** — the lifecycle handback
+puts the bead back where the keeper's prime sweep will see it. The
+operator may decide the failure means the commit isn't viable upstream
+as-is, or may pursue a fix."""
+
+[[steps]]
+id = "push-branch"
+title = "Push the prepped branch to origin"
+needs = ["test"]
+description = """
+**Config: origin_remote = {{origin_remote}}**
+
+Push the local `upstream-pr/<short-sha>` branch to `{{origin_remote}}` so
+upstream's PR can target it later. This is a feature branch push, not a
+push to `{{upstream_branch}}`.
+
+```bash
+BRANCH=$(git branch --show-current)
+git push {{origin_remote}} HEAD
+```
+
+Record the branch URL on the bead for the keeper conversation:
+```bash
+ORIGIN_URL=$(git remote get-url {{origin_remote}})
+# Convert git@github.com:owner/repo.git → https://github.com/owner/repo
+HTTPS_URL=$(printf '%s' "$ORIGIN_URL" | \
+  sed -E 's#^git@github.com:([^/]+)/([^.]+)(\\.git)?$#https://github.com/\\1/\\2#' | \
+  sed -E 's#\\.git$##')
+BRANCH_URL="$HTTPS_URL/tree/$BRANCH"
+gc bd update {{issue}} --set-metadata branch_url="$BRANCH_URL"
+```
+
+If the push fails because the branch already exists on `{{origin_remote}}`
+(rare — repeated pr-prep runs for the same commit), retry with
+`--force-with-lease`. Do NOT use plain `--force`. If `--force-with-lease`
+is also rejected, mail the keeper and operator with subject
+`pr-prep: branch race for {{issue}}` and abort with the lifecycle handback:
+
+```bash
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+
+gc mail send "$REQUESTING_KEEPER" -s "pr-prep: branch race for {{issue}}" -m "$(cat <<EOF
+git push --force-with-lease was rejected on $(git branch --show-current).
+Someone else pushed to that branch on {{origin_remote}}.
+
+Bead: {{issue}}
+Worktree: $(pwd)
+
+Next: review what landed remotely. If the new commits should supersede
+this prep, abandon this bead; otherwise restart pr-prep on a fresh bead.
+EOF
+)"
+gc mail send overseer -s "pr-prep: branch race for {{issue}}" -m "(see keeper mail)"
+
+gc bd update {{issue}} \
+  --set-metadata aborted_at=push-branch \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+gc runtime drain-ack
+exit 0
+```
+
+**Bead stays open and assigned to the keeper** — same handback pattern
+as the other abort paths.
+
+**Exit criteria:** branch is on `{{origin_remote}}`; `metadata.branch_url`
+records the GitHub URL."""
+
+[[steps]]
+id = "prepare-pr-handoff"
+title = "Draft PR title/body, optional issue, and gh commands"
+needs = ["push-branch"]
+description = """
+LLM judgment work: read the cherry-picked commit, draft a PR title/body,
+decide whether an upstream issue would help, draft commands. Persist all
+artifacts to bead metadata so the keeper can surface them in the handback
+conversation.
+
+**1. Read the commit:**
+```bash
+git log -1 --format='%H%n%s%n%b'
+git show HEAD --stat
+```
+
+**2. Draft the PR title:**
+
+Default: the cleaned commit subject. If the subject is already shaped like a
+good upstream title, use it as-is. If the subject reads city-internally
+(survived scrub but still has tone), rewrite to be neutral — typically
+imperative verb + scope (e.g., "Fix race in cache reconcile").
+
+Persist:
+```bash
+gc bd update {{issue}} --set-metadata suggested_pr_title="<title>"
+```
+
+**3. Draft the PR body:**
+
+Structure:
+```
+<commit body>
+
+## Why this PR
+
+<one-paragraph stub the keeper iterates on with the operator —
+ set the stage: what the commit fixes/adds, why it's worth landing
+ upstream, any caveats or trade-offs the operator should call out>
+```
+
+The "## Why this PR" stub is intentionally short and editable — the
+operator and keeper finalize this together. Don't oversell; flag
+unknowns.
+
+Persist:
+```bash
+gc bd update {{issue}} --set-metadata suggested_pr_body="<body>"
+```
+
+**4. Decide on a companion issue and always set every issue field:**
+
+An upstream issue helps when:
+- The change is RFC-shaped (asking upstream's opinion before code review)
+- The behavioural decision is worth surfacing publicly (e.g., "should we
+  drop X, alternative is Y")
+- The fix touches a known-contentious area (commit history, agent
+  prompt-template format, schema).
+
+An issue is **not** worth filing for:
+- Pure bug fixes with a clear repro (the PR is the artifact)
+- Refactors that are obviously equivalent
+- Doc fixes
+
+Decide `ISSUE_DECISION=yes` or `ISSUE_DECISION=no` and an explanatory
+`ISSUE_REASON`. **Then write all four issue-related metadata keys** —
+`issue_advice`, `suggested_issue_title`, `suggested_issue_body`, and
+later `gh_issue_command`. For the no-issue case, store empty strings;
+the keeper template treats empty values as "no issue surfaced" and
+skips the issue block. The contract is "always set, possibly empty",
+so the keeper never has to special-case missing keys.
+
+```bash
+ISSUE_DECISION=yes   # or "no"
+ISSUE_REASON="<one-line rationale>"
+
+if [ "$ISSUE_DECISION" = "yes" ]; then
+  ISSUE_TITLE="<drafted title>"
+  ISSUE_BODY="<drafted body>"
+else
+  ISSUE_TITLE=""
+  ISSUE_BODY=""
+fi
+
+gc bd update {{issue}} \
+  --set-metadata issue_advice="${ISSUE_DECISION}: ${ISSUE_REASON}" \
+  --set-metadata suggested_issue_title="$ISSUE_TITLE" \
+  --set-metadata suggested_issue_body="$ISSUE_BODY"
+```
+
+**5. Build the ready-to-paste gh commands with concrete values:**
+
+Note: PR/issue creation is currently blocked at the city level. These
+commands are stored on the bead so the operator can paste them outside
+the agent harness once the policy unblocks.
+
+The stored command must be ready to paste — no `<fork-owner>` or
+`<branch>` placeholders left in the string. Resolve everything from the
+worktree state: fork-owner from `git remote get-url {{origin_remote}}`,
+branch from `git branch --show-current` (matches `metadata.branch`),
+title and body from the metadata you just persisted. Use `printf %q` to
+shell-escape the title and body so multi-line bodies and quote
+characters round-trip safely on paste.
+
+```bash
+ORIGIN_URL=$(git remote get-url {{origin_remote}})
+# Pull the owner segment out of either git@github.com:owner/repo(.git)
+# or https://github.com/owner/repo(.git)
+FORK_OWNER=$(printf '%s' "$ORIGIN_URL" | \
+  sed -E 's#^git@github.com:([^/]+)/.*#\\1#; t; s#^https?://github.com/([^/]+)/.*#\\1#')
+BRANCH=$(git branch --show-current)
+PR_TITLE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.suggested_pr_title')
+PR_BODY=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.suggested_pr_body')
+
+PR_CMD=$(printf 'gh pr create --repo gastownhall/gascity --base %s --head %s:%s --title %q --body %q' \
+  "{{upstream_branch}}" "$FORK_OWNER" "$BRANCH" "$PR_TITLE" "$PR_BODY")
+
+if [ "$ISSUE_DECISION" = "yes" ]; then
+  ISSUE_CMD=$(printf 'gh issue create --repo gastownhall/gascity --title %q --body %q' \
+    "$ISSUE_TITLE" "$ISSUE_BODY")
+else
+  ISSUE_CMD=""
+fi
+
+gc bd update {{issue}} \
+  --set-metadata gh_pr_command="$PR_CMD" \
+  --set-metadata gh_issue_command="$ISSUE_CMD"
+```
+
+**Exit criteria:** `metadata` carries every promised key with concrete
+values: `branch_url`, `suggested_pr_title`, `suggested_pr_body`,
+`suggested_issue_title`, `suggested_issue_body`, `issue_advice`,
+`gh_pr_command`, `gh_issue_command`. Issue fields are empty strings
+when no issue is recommended; `gh_pr_command` contains a fully
+resolved command (no placeholders)."""
+
+[[steps]]
+id = "handback-to-keeper"
+title = "Reassign the bead to the keeper, nudge, mail backstop"
+needs = ["prepare-pr-handoff"]
+description = """
+Mirror the polecat→refinery handoff contract, but the destination is the
+requesting keeper, not the rig refinery. The bead stays **open** — the
+keeper closes it after the title/body conversation with the operator.
+
+**1. Reassign and re-route:**
+```bash
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+gc bd update {{issue}} \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+```
+
+**2. Nudge the keeper (ephemeral signal):**
+```bash
+gc session nudge "$REQUESTING_KEEPER" "PR prep ready: {{issue}}"
+```
+
+**3. Mail the operator a backstop note:**
+
+The keeper might be a fresh-spawn agent that wasn't running when this mol
+finished. The mail is a durable record so the operator can revisit even
+if they didn't notice the keeper's notification.
+
+```bash
+BRANCH_URL=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.branch_url')
+gc mail send overseer -s "pr-prep ready: {{issue}}" -m "$(cat <<EOF
+PR prep is complete for {{issue}}. Branch pushed: $BRANCH_URL.
+
+The keeper ($REQUESTING_KEEPER) has been re-assigned the bead and
+nudged. When you're ready to refine the PR title / body, engage the
+keeper — it'll surface the drafts and the gh commands for review.
+
+If the keeper isn't running, just spawn it: gc session new $REQUESTING_KEEPER.
+EOF
+)"
+```
+
+**4. Drain and exit:**
+```bash
+gc runtime drain-ack
+exit 0
+```
+
+**Exit criteria:** bead is open and assigned to the keeper; nudge sent;
+operator has a mailed pointer; session has drained."""
