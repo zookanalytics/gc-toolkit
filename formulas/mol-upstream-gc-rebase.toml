@@ -31,7 +31,7 @@ it's a controlled rebase with a verdict-keeping survey.
 | push | `--force-with-lease` rejection means a parallel push raced us — do NOT retry, mail and stop |"""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 2
+version = 3
 
 [vars]
 [vars.upstream_remote]
@@ -69,7 +69,8 @@ fetch the upstream remote, and write a backup ref so the rebase is recoverable.
 **1. Locate the gascity rig:**
 The keeper dispatches this mol from the gascity rig's bead store. The rig
 checkout is at `$GC_RIG_ROOT` (when running rig-scoped) or you can resolve
-via `gc rig path gascity` from the city root.
+via `gc rig list --json` from the city root (top-level `.rigs[]` array
+with `.name` and `.path` keys).
 
 **2. Reuse or create the worktree:**
 
@@ -82,7 +83,7 @@ If it points to an existing directory, `cd` there and skip to step 3.
 
 Otherwise, create one scoped to this bead:
 ```bash
-RIG_ROOT=$(gc rig path gascity)
+RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
 git -C "$RIG_ROOT" fetch --prune {{origin_remote}}
 git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"

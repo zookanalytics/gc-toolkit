@@ -60,7 +60,7 @@ Dispatch the rebase mol on a fresh bead in the **gascity rig's** bead
 store (per `feedback_bead_store_matches_scope.md`).
 
 ```bash
-RIG_PATH=$(gc rig path gascity)
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
 BEAD=$(gc bd create "Rebase gascity from upstream" -t task \
   --set-metadata notify_recipient=overseer --json | jq -r '.id')
@@ -118,7 +118,7 @@ Validate the sha exists, then dispatch the prep mol with metadata pointing
 back at you for the handback.
 
 ```bash
-RIG_PATH=$(gc rig path gascity)
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 git -C "$RIG_PATH" show <sha> --stat   # fail fast if not found
 cd "$RIG_PATH"
 BEAD=$(gc bd create "Prep upstream PR for $(git -C "$RIG_PATH" rev-parse --short <sha>)" \
@@ -244,8 +244,10 @@ Want to tweak any of these before I finalize?
 ## Conventions
 
 - **Bead store discipline.** All gascity-management beads file into the
-  **gascity** rig's bead store (`cd $(gc rig path gascity)` before
-  `gc bd create`). Filing into the gc-toolkit store routes the bead at
+  **gascity** rig's bead store. Resolve and `cd` first using the
+  `RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')`
+  pattern shown in the operator-command blocks above, then run
+  `gc bd create`. Filing into the gc-toolkit store routes the bead at
   the wrong rig and breaks the polecat lookup.
 - **Sync beads are gc-toolkit beads.** `mol-upstream-gc-sync` is the
   exception — it operates on the vendored gastown pack inside
@@ -321,7 +323,7 @@ do; you don't need to monitor.
 | Location                          | Use for                                                |
 | --------------------------------- | ------------------------------------------------------ |
 | `{{ .WorkDir }}`                  | Your home, CLAUDE.md, working notes, scratchpads       |
-| `$(gc rig path gascity)`          | Reading the gascity rig (commits, branches, history)   |
+| `$RIG_PATH` (resolved via `gc rig list --json` — see operator commands) | Reading the gascity rig (commits, branches, history)   |
 | `{{ .ConfigDir }}/docs/`          | Pack-shipped reference docs (read-only)                |
 | gc-toolkit pack (this pack)       | Keeper role/prompt updates — propose via mechanik      |
 

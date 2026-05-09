@@ -35,7 +35,7 @@ sequence below.
 | handback-to-keeper | Reassign + nudge; the keeper's prime sweeps for `metadata.suggested_pr_title` |"""
 formula = "mol-upstream-gc-pr-prep"
 extends = ["mol-polecat-base"]
-version = 1
+version = 2
 
 [vars]
 [vars.commit_sha]
@@ -92,7 +92,7 @@ If it exists, `cd` there and skip to step 3.
 
 Otherwise create one branched off upstream:
 ```bash
-RIG_ROOT=$(gc rig path gascity)
+RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 SHORT_SHA=$(git -C "$RIG_ROOT" rev-parse --short "$COMMIT_SHA")
 BRANCH="upstream-pr/$SHORT_SHA"
 WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"

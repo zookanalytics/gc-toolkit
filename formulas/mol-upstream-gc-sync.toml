@@ -18,7 +18,7 @@ pins.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| upstream_rig | gascity | The upstream rig name (resolved via `gc rig path`) |
+| upstream_rig | gascity | The upstream rig name (resolved via `gc rig list --json`) |
 | upstream_ref | origin/main | Ref in the upstream rig to compare each pin against |
 | sync_script | tools/upstream-gc-sync.sh | Drift-detector script (relative to pack root) |
 | with_diff | 0 | If `1`, include unified diffs per agent (verbose) |
@@ -33,11 +33,11 @@ pins.
 | report-and-close | Should not fail; if it does, the report file is still on disk under `metadata.work_dir` |"""
 formula = "mol-upstream-gc-sync"
 extends = ["mol-polecat-base"]
-version = 2
+version = 3
 
 [vars]
 [vars.upstream_rig]
-description = "Upstream rig name (resolved via 'gc rig path')"
+description = "Upstream rig name (resolved via 'gc rig list --json')"
 default = "gascity"
 
 [vars.upstream_ref]
@@ -89,7 +89,7 @@ commits, so there's nothing to push.
 
 **2. Fetch upstream rig:**
 ```bash
-RIG_ROOT=$(gc rig path {{upstream_rig}})
+RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="{{upstream_rig}}") | .path')
 git -C "$RIG_ROOT" fetch --prune origin
 ```
 
@@ -97,8 +97,14 @@ The drift detector compares each pin against `{{upstream_ref}}` in
 this rig — a fresh fetch is required so the report reflects current
 upstream state, not a stale local view.
 
-If `gc rig path {{upstream_rig}}` fails (rig not present in this
-city), record the failure, hand the bead back to a durable owner, and abort:
+`gc rig list --json` is the stable shape: top-level `.rigs[]` with
+`.name` and `.path` keys. A `select` that matches no rig prints an
+empty string, which makes the next `git -C "" fetch` fail loudly —
+that's the trigger for the abort path below.
+
+If `{{upstream_rig}}` is not present in `gc rig list --json` (rig not
+registered in this city), record the failure, hand the bead back to
+a durable owner, and abort:
 ```bash
 ABORT_OWNER="{{notify_recipient}}"
 [ -z "$ABORT_OWNER" ] && ABORT_OWNER="overseer"
@@ -175,7 +181,7 @@ fi
 **2. Run the script and capture output:**
 
 ```bash
-RIG_ROOT=$(gc rig path {{upstream_rig}})
+RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="{{upstream_rig}}") | .path')
 REPORT_DIR="$(pwd)/.gc/upstream-gc-sync"
 mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/{{issue}}.md"

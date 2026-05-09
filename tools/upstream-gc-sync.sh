@@ -24,7 +24,7 @@ that contains agents/*/PROVENANCE.md.
 
 Options:
   --rig-path <path>     Path to the upstream rig checkout
-                        (default: gc rig path gascity)
+                        (default: looked up via 'gc rig list --json')
   --upstream-ref <ref>  Ref to compare each pin against
                         (default: origin/main)
   --with-diff           Include unified diffs per agent (verbose)
@@ -56,8 +56,12 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$RIG_PATH" ]; then
-    if ! RIG_PATH=$(gc rig path gascity 2>/dev/null); then
-        echo "ERROR: 'gc rig path gascity' failed; pass --rig-path explicitly." >&2
+    if ! RIG_PATH=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.name=="gascity") | .path'); then
+        echo "ERROR: 'gc rig list --json | jq ...' failed; pass --rig-path explicitly." >&2
+        exit 2
+    fi
+    if [ -z "$RIG_PATH" ]; then
+        echo "ERROR: rig 'gascity' not found in 'gc rig list --json'; pass --rig-path explicitly." >&2
         exit 2
     fi
 fi
