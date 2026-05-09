@@ -31,7 +31,7 @@ it's a controlled rebase with a verdict-keeping survey.
 | push | `--force-with-lease` rejection means a parallel push raced us — do NOT retry, mail and stop |"""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 1
+version = 2
 
 [vars]
 [vars.upstream_remote]
@@ -100,21 +100,58 @@ on `{{origin_remote}}` and the push step writes there with `--force-with-lease`.
 git fetch {{upstream_remote}} --prune
 ```
 
-**4. Write the safety backup ref:**
+**4. Write (or reuse) the safety backup ref:**
+
+The backup ref must always point at the pre-rebase tip of
+`{{origin_remote}}/{{upstream_branch}}`. On a fresh run, mint one. On a
+resume after a mid-rebase crash (worktree exists, HEAD has already moved
+off the upstream tip) we MUST NOT mint a new ref — it would point at the
+post-rebase HEAD and silently destroy the rollback target.
+
 ```bash
-BACKUP_TS=$(date -u +%Y%m%dT%H%M%SZ)
-BACKUP_REF="refs/backups/main-pre-rebase-$BACKUP_TS"
-git update-ref "$BACKUP_REF" HEAD
-gc bd update {{issue}} --set-metadata backup_ref="$BACKUP_REF"
+EXISTING_BACKUP=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref // empty')
+
+if [ -n "$EXISTING_BACKUP" ] && \
+        git rev-parse --verify "${EXISTING_BACKUP}^{commit}" >/dev/null 2>&1; then
+    BACKUP_REF="$EXISTING_BACKUP"
+    echo "Reusing existing backup ref: $BACKUP_REF -> $(git rev-parse --short "$BACKUP_REF")"
+else
+    PRE_REBASE_TIP=$(git rev-parse --verify "{{origin_remote}}/{{upstream_branch}}")
+    HEAD_SHA=$(git rev-parse HEAD)
+    if [ "$HEAD_SHA" != "$PRE_REBASE_TIP" ]; then
+        echo "ERROR: HEAD ($HEAD_SHA) does not match {{origin_remote}}/{{upstream_branch}}" >&2
+        echo "       tip ($PRE_REBASE_TIP). Refusing to mint a new backup_ref —" >&2
+        echo "       a new ref here would point at post-rebase state." >&2
+        echo "       Recover the pre-rebase tip into HEAD, or set metadata.backup_ref" >&2
+        echo "       by hand if you know the prior rollback target." >&2
+        gc bd update {{issue}} \
+            --set-metadata aborted_at=workspace-setup \
+            --status=open \
+            --assignee="{{notify_recipient}}" \
+            --set-metadata gc.routed_to="{{notify_recipient}}" \
+            --notes "Refused to mint backup_ref: HEAD ($HEAD_SHA) does not match {{origin_remote}}/{{upstream_branch}} ($PRE_REBASE_TIP). Resume requires manual recovery."
+        gc runtime drain-ack
+        exit 1
+    fi
+    BACKUP_TS=$(date -u +%Y%m%dT%H%M%SZ)
+    BACKUP_REF="refs/backups/main-pre-rebase-$BACKUP_TS"
+    git update-ref "$BACKUP_REF" "$PRE_REBASE_TIP"
+    gc bd update {{issue}} \
+        --set-metadata backup_ref="$BACKUP_REF" \
+        --set-metadata pre_rebase_tip="$PRE_REBASE_TIP"
+fi
 ```
 
 The backup ref points at the pre-rebase tip of `{{origin_remote}}/{{upstream_branch}}`.
 If the rebase has to be unwound, `git reset --hard $BACKUP_REF` restores the
 pre-rebase state, and the ref is included in the operator's completion mail.
+`metadata.pre_rebase_tip` records the same sha for cross-check, so a future
+operator can verify the backup ref hasn't been silently overwritten.
 
 **Exit criteria:** worktree exists at `metadata.work_dir`; HEAD matches the
-pre-rebase tip of `{{origin_remote}}/{{upstream_branch}}`; `metadata.backup_ref`
-is recorded; `{{upstream_remote}}` has been fetched."""
+pre-rebase tip of `{{origin_remote}}/{{upstream_branch}}` on a fresh run (or
+the backup ref already validates on a resume); `metadata.backup_ref` is
+recorded; `{{upstream_remote}}` has been fetched."""
 
 [[steps]]
 id = "preflight-tests"

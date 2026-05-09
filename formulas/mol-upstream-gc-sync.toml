@@ -33,7 +33,7 @@ pins.
 | report-and-close | Should not fail; if it does, the report file is still on disk under `metadata.work_dir` |"""
 formula = "mol-upstream-gc-sync"
 extends = ["mol-polecat-base"]
-version = 1
+version = 2
 
 [vars]
 [vars.upstream_rig]
@@ -98,13 +98,23 @@ this rig — a fresh fetch is required so the report reflects current
 upstream state, not a stale local view.
 
 If `gc rig path {{upstream_rig}}` fails (rig not present in this
-city), record the failure and abort:
+city), record the failure, hand the bead back to a durable owner, and abort:
 ```bash
-gc bd update {{issue}} --set-metadata aborted_at=workspace-setup \
+ABORT_OWNER="{{notify_recipient}}"
+[ -z "$ABORT_OWNER" ] && ABORT_OWNER="overseer"
+gc bd update {{issue}} \
+    --set-metadata aborted_at=workspace-setup \
+    --status=open \
+    --assignee="$ABORT_OWNER" \
+    --set-metadata gc.routed_to="$ABORT_OWNER" \
     --notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
 gc runtime drain-ack
 exit 1
 ```
+
+Without the `--status=open`/reassign/`gc.routed_to` triplet the bead would
+strand `in_progress` on this drained session — same lifecycle-class regression
+the rebase/pr-prep abort paths already fix.
 
 **Exit criteria:** worktree exists at `metadata.work_dir`; upstream
 rig `{{upstream_rig}}` has been fetched."""
@@ -149,7 +159,13 @@ to a report file under the worktree.
 ```bash
 SCRIPT={{sync_script}}
 if [ ! -x "$SCRIPT" ]; then
-    gc bd update {{issue}} --set-metadata aborted_at=survey \
+    ABORT_OWNER="{{notify_recipient}}"
+    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="overseer"
+    gc bd update {{issue}} \
+        --set-metadata aborted_at=survey \
+        --status=open \
+        --assignee="$ABORT_OWNER" \
+        --set-metadata gc.routed_to="$ABORT_OWNER" \
         --notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
     gc runtime drain-ack
     exit 1
@@ -177,7 +193,13 @@ if "$SCRIPT" \
         > "$REPORT_FILE" 2> "$ERR_FILE"; then
     gc bd update {{issue}} --set-metadata report_file="$REPORT_FILE"
 else
-    gc bd update {{issue}} --set-metadata aborted_at=survey \
+    ABORT_OWNER="{{notify_recipient}}"
+    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="overseer"
+    gc bd update {{issue}} \
+        --set-metadata aborted_at=survey \
+        --status=open \
+        --assignee="$ABORT_OWNER" \
+        --set-metadata gc.routed_to="$ABORT_OWNER" \
         --notes "$(cat <<EOF
 Sync script failed.
 

@@ -210,6 +210,15 @@ else
         echo '```'
         echo
 
+        if [ "$file_count" -gt 0 ]; then
+            echo "### Changed files"
+            echo
+            echo '```'
+            printf '%s\n' "$diff_files"
+            echo '```'
+            echo
+        fi
+
         diff_stat=$(git -C "$RIG_PATH" diff --stat "$pin..$UPSTREAM_REF" -- "$rel" 2>/dev/null || true)
         if [ -n "$diff_stat" ]; then
             echo "### Diff stat"

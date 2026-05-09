@@ -160,19 +160,38 @@ Want to tweak any of these before I finalize?
        --set-metadata final_issue_title="<title>" \
        --set-metadata final_issue_body="<body>"
      ```
-   - Compose the `gh` commands with the final values:
+   - Compose the `gh` commands with the final values **inlined as concrete
+     strings** — no `<fork-owner>`, `<branch>`, `<final title>`, or
+     `<final body>` placeholders left for the operator to substitute. The
+     prep mol stamped `metadata.branch_url` and `metadata.branch`; pull the
+     fork-owner out of the URL, the branch name from metadata, and the
+     operator-approved title/body from the final_* fields you just wrote.
+     Use `printf %q` to shell-escape title and body so multi-line bodies and
+     embedded quotes round-trip safely on paste:
      ```bash
-     gc bd update <bead> --set-metadata final_pr_command="$(cat <<EOF
-gh pr create \\
-  --repo gastownhall/gascity \\
-  --base main \\
-  --head <fork-owner>:<branch> \\
-  --title '<final title>' \\
-  --body '<final body>'
-EOF
-)"
-     # similarly for final_issue_command if applicable
+     META=$(gc bd show <bead> --json | jq -r '.[0].metadata')
+     BRANCH=$(printf '%s' "$META" | jq -r '.branch')
+     BRANCH_URL=$(printf '%s' "$META" | jq -r '.branch_url')
+     FORK_OWNER=$(printf '%s' "$BRANCH_URL" | \
+       sed -E 's#^https?://github.com/([^/]+)/.*#\1#')
+     PR_TITLE=$(printf '%s' "$META" | jq -r '.final_pr_title')
+     PR_BODY=$(printf '%s' "$META" | jq -r '.final_pr_body')
+
+     PR_CMD=$(printf 'gh pr create --repo gastownhall/gascity --base main --head %s:%s --title %q --body %q' \
+       "$FORK_OWNER" "$BRANCH" "$PR_TITLE" "$PR_BODY")
+     gc bd update <bead> --set-metadata final_pr_command="$PR_CMD"
+
+     # If the operator decided to file an issue too:
+     ISSUE_TITLE=$(printf '%s' "$META" | jq -r '.final_issue_title // empty')
+     ISSUE_BODY=$(printf '%s' "$META" | jq -r '.final_issue_body // empty')
+     if [ -n "$ISSUE_TITLE" ]; then
+       ISSUE_CMD=$(printf 'gh issue create --repo gastownhall/gascity --title %q --body %q' \
+         "$ISSUE_TITLE" "$ISSUE_BODY")
+       gc bd update <bead> --set-metadata final_issue_command="$ISSUE_CMD"
+     fi
      ```
+     The persisted (and mailed) command must be ready-to-paste — operator
+     copies it once, no edits needed.
    - Mail the operator the ready-to-paste commands as a durable record:
      ```bash
      gc mail send overseer -s "PR ready to file: <bead>" -m "<commands>"
@@ -276,7 +295,7 @@ gc bd show <id>                                        # Read a bead in full
 gc bd show <id> --json | jq '.[0].metadata'            # Read metadata
 gc bd update <id> --set-metadata <k>=<v>               # Persist conversation outcomes
 gc bd close <id> --reason "..."                        # Close after finalize
-gc sling gascity/polecat <bead> --var formula=<mol>    # Dispatch a polecat
+gc sling gascity/polecat <bead> --on <mol>             # Dispatch a polecat with formula
 ```
 
 ## Session End
