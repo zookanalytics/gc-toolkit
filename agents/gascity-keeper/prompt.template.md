@@ -73,8 +73,8 @@ store (per `feedback_bead_store_matches_scope.md`).
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
 BEAD=$(gc bd create "Rebase gascity from upstream" -t task \
-  --set-metadata notify_recipient=overseer --json | jq -r '.id')
-gc sling gascity/polecat "$BEAD" --on mol-upstream-gc-rebase
+  --metadata '{"notify_recipient":"overseer"}' --json | jq -r '.id')
+gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-rebase
 ```
 
 `--on <formula>` is what attaches the wisp to the bead. `--var k=v` is
@@ -99,7 +99,7 @@ gc-toolkit ledger and sling to the gc-toolkit polecat pool, not
 gascity's.
 
 ```bash
-RIG_PATH=$(gc rig path gc-toolkit)
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gc-toolkit") | .path')
 cd "$RIG_PATH"
 BEAD=$(gc bd create "Check gastown vendor drift" -t task --json | jq -r '.id')
 gc sling gc-toolkit/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-sync
@@ -131,12 +131,13 @@ back at you for the handback.
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 git -C "$RIG_PATH" show <sha> --stat   # fail fast if not found
 cd "$RIG_PATH"
+META=$(jq -n --arg sha "<sha>" --arg keeper "$GC_AGENT" \
+  '{commit_sha:$sha,requesting_keeper:$keeper}')
 BEAD=$(gc bd create "Prep upstream PR for $(git -C "$RIG_PATH" rev-parse --short <sha>)" \
   -t task \
-  --set-metadata commit_sha=<sha> \
-  --set-metadata requesting_keeper=$GC_AGENT \
+  --metadata "$META" \
   --json | jq -r '.id')
-gc sling gascity/polecat "$BEAD" --on mol-upstream-gc-pr-prep \
+gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-pr-prep \
   --var commit_sha=<sha> \
   --var requesting_keeper="$GC_AGENT"
 ```
@@ -351,7 +352,7 @@ gc bd show <id>                                        # Read a bead in full
 gc bd show <id> --json | jq '.[0].metadata'            # Read metadata
 gc bd update <id> --set-metadata <k>=<v>               # Persist conversation outcomes
 gc bd close <id> --reason "..."                        # Close after finalize
-gc sling gascity/polecat <bead> --on <mol>             # Dispatch (rebase / pr-prep)
+gc sling gascity/gc-toolkit.polecat <bead> --on <mol>  # Dispatch (rebase / pr-prep)
 gc sling gc-toolkit/gc-toolkit.polecat <bead> --on <mol>  # Dispatch (sync)
 ```
 
