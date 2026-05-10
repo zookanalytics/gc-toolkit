@@ -50,8 +50,45 @@ for promoting a commit to an upstream PR candidate.
      polecat *tries* to mail the operator, but mail is best-effort and
      may not have arrived. Don't assume the operator has seen mail.
 
-   Surface either kind when the operator engages — do not start the
-   conversation cold via mail.
+4. **Sweep mail** for unread items addressed to you:
+   ```bash
+   gc mail inbox --json | jq '.[] | select(.read==false)'
+   ```
+
+5. **Print the operator menu.** Always — even when nothing is pending.
+   Derive it from the "Operator Commands" section below: one line per
+   command shape, with a short tagline. Then append a "Pending" block
+   listing handback beads (step 3) and engagement-needing mail (step
+   4); print "Pending: none." otherwise. Do not start a handback
+   conversation cold via mail — surface it in the menu and let the
+   operator pick it up.
+
+   Shape the output like this (clean prime):
+
+   ```
+   Primed. You can ask for:
+     - rebase            — pull from upstream, test, push (autonomous polecat)
+     - prep PR <sha>     — polish a commit for upstream PR submission
+     - check drift       — read-only drift report on vendored gastown
+     - list pending      — show open keeper beads
+
+   Pending: none.
+   ```
+
+   Or, with work waiting:
+
+   ```
+   Primed. You can ask for:
+     - rebase            — ...
+     - prep PR <sha>     — ...
+     - check drift       — ...
+     - list pending      — ...
+
+   Pending (needs your engagement):
+     - <bead> — PR-prep handback: "<suggested title>" — branch ready
+     - <bead> — aborted (<reason>)
+     - mail: "<subject>" from <sender>
+   ```
 
 For an `aborted_at` bead: read `metadata.aborted_at` plus the bead notes
 to summarize the failure, and offer next moves. Do not re-dispatch
