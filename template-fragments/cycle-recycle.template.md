@@ -9,14 +9,12 @@ policy below.
 
 Recycle when **either** trigger fires:
 
-1. **Completed-wisp count.** You have closed **3 or more** patrol wisps
-   in this session. Each patrol cycle pours and burns one wisp; three
-   full cycles is roughly the point at which find-work polling and
-   event-metadata accumulation start to dominate context.
+1. **Completed-wisp count.** You have closed **6 or more** patrol wisps
+   in this session. Each patrol cycle pours and burns one wisp.
 
-2. **Idle-poll count.** You have done **4 or more** consecutive
+2. **Idle-poll count.** You have done **8 or more** consecutive
    `gc events --watch` waits that returned with no events and no work
-   found (~30 minutes of idle polling at the default 30s→300s
+   found (~45+ minutes of idle polling at the default 30s→300s
    exponential backoff). Reset the counter as soon as an event arrives
    or work is found — the next idle stretch is what counts, not the
    cumulative.
@@ -40,8 +38,8 @@ gc handoff "context cycle: <reason> (next wisp: $NEXT)"
 ```
 
 Examples:
-- `gc handoff "context cycle: 3 patrol wisps closed this session (next wisp: $NEXT)"`
-- `gc handoff "context cycle: 30+ min idle, find-work events accumulated (next wisp: $NEXT)"`
+- `gc handoff "context cycle: 6 patrol wisps closed this session (next wisp: $NEXT)"`
+- `gc handoff "context cycle: 45+ min idle, find-work events accumulated (next wisp: $NEXT)"`
 
 `gc handoff` writes a durable HANDOFF bead and, for
 controller-restartable sessions, also requests a restart. For
@@ -94,13 +92,14 @@ re-check the counters more strictly — but do not recycle on RSS alone.
 
 **Why these specific thresholds:**
 
-- N=3 wisps: observed point where the find-work polling loop begins to
-  dominate context (gc-toolkit refinery, 2026-05-06: 63% context after
-  one completed wisp + one in-progress over 5h49m — most of the bloat
-  was idle-poll history, not merge work).
-- M=4 idle waits: with the default 30s timeout doubling to a 300s cap,
-  four consecutive empties is roughly 30 min of accumulated event
-  metadata.
+- N=6 wisps and M=8 idle waits: raised 2026-05-09 from N=3/M=4 because
+  the original numbers (calibrated on a single 2026-05-06 observation
+  of 63% context after 1+1 wisps in 5h49m) caused agents to recycle
+  before they accomplished much real work. Idle-poll history was the
+  dominant context bloat in that observation, not merge work, so for
+  active patrols the original ceiling was much lower than necessary.
+  These new thresholds are still proxies — the structural fix is
+  context-fill measurement (`gc context --usage` per FUTURE.md).
 - `gc handoff` over `gc runtime request-restart`: `request-restart`
   silently no-ops for on-demand named sessions because the controller
   cannot restart user-attended processes. `gc handoff` always writes a
