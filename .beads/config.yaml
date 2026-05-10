@@ -10,3 +10,6 @@ backup.enabled: false
 types.custom: molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,spec,convergence
 
 dolt.auto-commit: "batch"
+
+export.auto: false
+import.auto: false
