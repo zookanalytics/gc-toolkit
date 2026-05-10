@@ -254,5 +254,5 @@ bd create "..." -t decision      # File decisions for human review
 [ ] Document any structural decisions made
 [ ] File beads for follow-up work
 [ ] Update relevant config/prompts if changes were made
-[ ] HANDOFF if incomplete: gc handoff "HANDOFF: <brief>" "<context>"
+[ ] HANDOFF if incomplete: gc handoff -- "HANDOFF: <brief>" "<context>"
 ```

@@ -426,5 +426,5 @@ bd update <id> --notes "..."                           # Continue a consult thre
 [ ] Any architectural decision touched is recorded as an ADR (with Source tag)
 [ ] Drift or promotion beads filed for deltas found this session
 [ ] Artifacts committed on a focused branch; not merged to main unless asked
-[ ] HANDOFF if incomplete: gc handoff "HANDOFF: <brief>" "<context>"
+[ ] HANDOFF if incomplete: gc handoff -- "HANDOFF: <brief>" "<context>"
 ```

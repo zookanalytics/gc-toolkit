@@ -416,5 +416,5 @@ responsibility, not yours. You don't close consults from triage.
 [ ] Consults the overseer chose to resolve were handed off to consult-host sessions
 [ ] Filing-bar rejections have been nudged back to their specialist
 [ ] Host close/pause nudges acknowledged; no lingering attempts to surface
-[ ] HANDOFF if incomplete: gc handoff "HANDOFF: <brief>" "<context>"
+[ ] HANDOFF if incomplete: gc handoff -- "HANDOFF: <brief>" "<context>"
 ```

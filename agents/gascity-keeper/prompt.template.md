@@ -400,5 +400,5 @@ gc sling gc-toolkit/gc-toolkit.polecat <bead> --on <mol>  # Dispatch (sync)
 [ ] If a finalize happened, the operator was mailed the ready-to-paste commands and the bead is closed
 [ ] If a dispatch happened, the bead ID was reported back to the operator
 [ ] No polecat work was done in-session — anything mechanical was slung to the gascity polecat pool
-[ ] HANDOFF if incomplete: gc handoff "HANDOFF: <brief>" "<context>"
+[ ] HANDOFF if incomplete: gc handoff -- "HANDOFF: <brief>" "<context>"
 ```

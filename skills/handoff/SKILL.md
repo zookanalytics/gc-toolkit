@@ -114,19 +114,23 @@ up live threads.
 **Clean reset (nothing in flight) — exact command:**
 
 ```bash
-gc handoff "clean reset"
+gc handoff -- "clean reset"
 ```
 
 **With carry-forward (live threads from the inventory) — exact
 command:**
 
 ```bash
-gc handoff "context refresh" "$(cat <<'EOF'
+gc handoff -- "context refresh" "$(cat <<'EOF'
 <live thread 1>: <where the discussion stands; what's open>
 <live thread 2>: <where the discussion stands; what's open>
 EOF
 )"
 ```
+
+The `--` terminates flag parsing so the body can start with `-`
+(markdown bullets, bead IDs like `- gc-9czy7 (...)`, etc.) without
+pflag treating it as a flag bundle.
 
 After running the command, before the restart fires, emit this exact
 line so the operator sees a consistent message:
