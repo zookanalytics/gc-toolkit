@@ -19,25 +19,32 @@ it's a controlled rebase with a verdict-keeping survey.
 | test_command | make test | Test command run after rebase |
 | install_command | make install | Local rebuild of `gc` into `$INSTALL_DIR` |
 | notify_recipient | overseer | Mail target on completion / abort |
+| requesting_keeper | (empty) | Keeper address for the rare conflict-handback; falls back to notify_recipient if unset |
 
 ## Failure modes
 
 | Step | Failure handling |
 |------|------------------|
 | survey | LLM judgment can be wrong; record verdicts on the bead and proceed — the rebase step's patch-id check is the safety net for `drop-merged-upstream` |
-| rebase | Conflicts halt the chain. Bead handback (`metadata.aborted_at=rebase`) is the durable signal; mail is best-effort follow-up. `metadata.backup_ref` makes any state recoverable. |
+| rebase | Conflicts auto-resolve in favor of upstream (per-file: `git checkout --ours` / `git rm`) with a full audit trail on `metadata.upstream_wins_log`. The rare-fallback (rebase still stuck after `--ours`-everything) hands the bead back to `metadata.requesting_keeper` with `metadata.conflict_questions`; the post-rebase `test` step is the safety net for "we dropped something that mattered." `metadata.backup_ref` keeps any state recoverable. |
 | test | Bead handback (`aborted_at=test`) lands first; mail with failure tail is best-effort. Bead stays open so a fix can resume. |
 | install | Bead handback (`aborted_at=install`) first; mail best-effort. Bead stays open. |
 | push | `--force-with-lease` rejection means a parallel push raced us — do NOT retry. Bead handback (`aborted_at=push`) first; mail best-effort. |
 
-All four post-survey abort paths share the same shape: lock in the bead
-handback (`aborted_at`, status=open, reassignment to `notify_recipient`)
-**before** sending mail. The keeper's prime sweep catches `aborted_at`
-beads on next operator engagement, so even a silent mail failure surfaces
-the abort within one operator engagement cycle."""
+The post-survey **abort** paths (test, install, push) share the same
+shape: lock in the bead handback (`aborted_at`, status=open, reassignment
+to `notify_recipient`) **before** sending mail. The keeper's prime sweep
+catches `aborted_at` beads on next operator engagement, so even a silent
+mail failure surfaces the abort within one operator engagement cycle.
+
+The rebase **rare-fallback handback** (upstream-wins exhausted, still
+stuck) is a different shape: bead handback uses `metadata.conflict_questions`
++ reassignment to `metadata.requesting_keeper`, with the worktree kept
+mid-rebase for cheap resume. The keeper's prime sweep matches
+`conflict_questions` as a peer predicate to `aborted_at`."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 5
+version = 6
 
 [vars]
 [vars.upstream_remote]
@@ -63,6 +70,10 @@ default = "make install"
 [vars.notify_recipient]
 description = "Mail target for completion and abort notifications"
 default = "overseer"
+
+[vars.requesting_keeper]
+description = "Keeper agent address (e.g., gascity/gascity-keeper) for the rare conflict-handback case. Optional; the rebase step falls back to notify_recipient if unset, but a keeper-aware operator should stamp metadata.requesting_keeper at dispatch so the cooperative-handback path lands cleanly."
+default = ""
 
 [[steps]]
 id = "workspace-setup"
@@ -297,62 +308,285 @@ table), the sequence editor is a no-op and the rebase behaves like a
 plain `git rebase {{upstream_remote}}/{{upstream_branch}}` with patch-id
 auto-drops.
 
-**2. Run the scripted rebase:**
+**2. Defensive abort on resume.**
+
+If a rebase is already in progress (resume after a prior rare-fallback
+handback), abort it so we restart from a clean slate. The
+`metadata.work_dir` reuse in `workspace-setup` means the worktree may
+still be mid-rebase from a previous polecat that handed back to the
+keeper. After abort, HEAD goes back to where the rebase started
+(`{{origin_remote}}/{{upstream_branch}}`), which matches `metadata.backup_ref`.
+
+```bash
+if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+    git rebase --abort
+fi
+```
+
+**3. Read prior audit log and operator answers (if any):**
+
+```bash
+UPSTREAM_WINS_LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.upstream_wins_log // "[]"')
+CONFLICT_ANSWERS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_answers // "{}"')
+```
+
+On a fresh run, both default to empty. On a resume after a keeper-driven
+operator conversation, `conflict_answers` is a JSON object mapping file
+path to one of `ours` | `theirs` | `delete` — operator directives for
+files that upstream-wins could not resolve last round. The polecat
+applies these per-file before falling through to upstream-wins.
+
+**4. Run the scripted rebase (do not fail on conflicts):**
+
 ```bash
 GIT_SEQUENCE_EDITOR=/tmp/seqedit-{{issue}}.sh \
-  git rebase -i {{upstream_remote}}/{{upstream_branch}}
+  git rebase -i {{upstream_remote}}/{{upstream_branch}} || true
 ```
 
 `drop-merged-upstream` commits are still auto-dropped by patch-id
 matching. `drop-supplanted` commits are scripted to `drop` in the todo
-before replay. `keep` commits replay onto upstream.
+before replay. `keep` commits replay onto upstream. Conflicts during
+replay do not halt the chain — they are handled by the upstream-wins
+loop in step 5.
 
-If the rebase fails on conflicts, the conflict is on a `keep` commit:
+**5. Conflict-resolution loop (upstream-wins, with answer overrides).**
 
-1. Capture the conflict tail:
+While the rebase is in progress (i.e., stopped on a conflict), resolve
+each unmerged file per the upstream-wins rule, append an audit-log
+entry, and continue (or skip if the commit becomes empty).
+
+**Rebase semantics gotcha:** during `git rebase`, `--ours` is the rebase
+base (`{{upstream_remote}}/{{upstream_branch}}` + accepted replays so
+far) and `--theirs` is the local commit being replayed. "Upstream wins"
+maps to `--ours` during rebase, not `--theirs`.
+
+Per-file rules:
+
+| `git status --porcelain` status | Meaning | Resolution | Logged case |
+|---------------------------------|---------|------------|-------------|
+| `UU` / `AA` / `AU` | both modified / both added / added by us | `git checkout --ours -- <file>; git add -- <file>` | `both-modified` |
+| `DU` | deleted upstream, modified locally | `git rm -- <file>` | `deleted-upstream` |
+| `UD` | modified upstream, deleted locally | `git checkout --ours -- <file>; git add -- <file>` | `deleted-locally` |
+| `UA` / `DD` / other | rename / move / unusual | `git rm -- <file>` (with `--ours` fallback) | `rename` |
+
+If `metadata.conflict_answers` maps the file to a directive (`ours` /
+`theirs` / `delete`), apply that instead of the upstream-wins rule and
+log `answer-ours` / `answer-theirs` / `answer-delete` with
+`resolution_source=answer`.
+
+After resolving every file in the conflict:
+- If nothing is staged (commit fully absorbed by upstream):
+  `git rebase --skip`, log `empty-commit-skipped`.
+- Otherwise: `git rebase --continue`.
+
+If either `--skip` or `--continue` exits non-zero, the rebase is
+genuinely stuck — set `STUCK=1` and break out of the loop.
+
+A safety bound (`MAX_ITERATIONS`) prevents infinite loops on pathological
+rebase states.
+
 ```bash
-git status --short > /tmp/rebase-conflicts-{{issue}}.txt
+STUCK=0
+ITERATIONS=0
+MAX_ITERATIONS=500
+while [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; do
+    ITERATIONS=$((ITERATIONS + 1))
+    if [ "$ITERATIONS" -gt "$MAX_ITERATIONS" ]; then
+        STUCK=1
+        echo "ERROR: exceeded MAX_ITERATIONS=$MAX_ITERATIONS in upstream-wins loop" >&2
+        break
+    fi
+
+    COMMIT_SHA=$(git rev-parse REBASE_HEAD 2>/dev/null \
+        || cat .git/rebase-merge/stopped-sha 2>/dev/null \
+        || cat .git/rebase-apply/original-commit 2>/dev/null \
+        || echo "unknown")
+    COMMIT_SUBJECT=$(git log -1 --format='%s' "$COMMIT_SHA" 2>/dev/null || echo "(unknown)")
+    UPSTREAM_AT_CONFLICT=$(git rev-parse HEAD)
+
+    git status --porcelain | awk '$1 ~ /^(DD|AU|UD|UA|DU|AA|UU)$/' \
+        > /tmp/unmerged-{{issue}}.txt
+
+    if [ ! -s /tmp/unmerged-{{issue}}.txt ]; then
+        # No unmerged files but rebase active — try to advance.
+        if ! git rebase --continue >/tmp/rebase-out-{{issue}}.txt 2>&1; then
+            STUCK=1
+            break
+        fi
+        continue
+    fi
+
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        STATUS=$(printf '%s' "$line" | cut -c1-2)
+        FILE=$(printf '%s' "$line" | sed -E 's/^.. //')
+
+        ANSWER=$(printf '%s' "$CONFLICT_ANSWERS" | jq -r --arg f "$FILE" '.[$f] // empty')
+        SOURCE="upstream-wins"
+        RESOLVED_CASE=""
+
+        if [ -n "$ANSWER" ]; then
+            case "$ANSWER" in
+                ours|keep-upstream)
+                    git checkout --ours -- "$FILE" && git add -- "$FILE"
+                    RESOLVED_CASE="answer-ours"
+                    SOURCE="answer"
+                    ;;
+                theirs|take-local)
+                    git checkout --theirs -- "$FILE" && git add -- "$FILE"
+                    RESOLVED_CASE="answer-theirs"
+                    SOURCE="answer"
+                    ;;
+                delete|remove)
+                    git rm -- "$FILE" 2>/dev/null || true
+                    RESOLVED_CASE="answer-delete"
+                    SOURCE="answer"
+                    ;;
+                *)
+                    ANSWER=""   # unknown answer — fall through to upstream-wins
+                    ;;
+            esac
+        fi
+
+        if [ -z "$ANSWER" ]; then
+            case "$STATUS" in
+                UU|AA|AU)
+                    git checkout --ours -- "$FILE" && git add -- "$FILE"
+                    RESOLVED_CASE="both-modified"
+                    ;;
+                DU)
+                    git rm -- "$FILE"
+                    RESOLVED_CASE="deleted-upstream"
+                    ;;
+                UD)
+                    git checkout --ours -- "$FILE" && git add -- "$FILE"
+                    RESOLVED_CASE="deleted-locally"
+                    ;;
+                UA|DD)
+                    git rm -- "$FILE" 2>/dev/null \
+                        || { git checkout --ours -- "$FILE" 2>/dev/null && git add -- "$FILE"; }
+                    RESOLVED_CASE="rename"
+                    ;;
+                *)
+                    git checkout --ours -- "$FILE" 2>/dev/null && git add -- "$FILE" \
+                        || git rm -- "$FILE" 2>/dev/null || true
+                    RESOLVED_CASE="rename"
+                    ;;
+            esac
+        fi
+
+        ENTRY=$(jq -nc \
+            --arg sha "$COMMIT_SHA" \
+            --arg subj "$COMMIT_SUBJECT" \
+            --arg file "$FILE" \
+            --arg kind "$RESOLVED_CASE" \
+            --arg upstream "$UPSTREAM_AT_CONFLICT" \
+            --arg source "$SOURCE" \
+            '{commit_sha:$sha, commit_subject:$subj, file:$file, case:$kind, dropped_hunks:"upstream-wins (see commit for original local hunks)", upstream_at_conflict:$upstream, resolution_source:$source}')
+        UPSTREAM_WINS_LOG=$(printf '%s' "$UPSTREAM_WINS_LOG" | jq -c ". + [$ENTRY]")
+    done < /tmp/unmerged-{{issue}}.txt
+
+    if git diff --cached --quiet; then
+        # Commit absorbed by upstream — skip.
+        ENTRY=$(jq -nc \
+            --arg sha "$COMMIT_SHA" \
+            --arg subj "$COMMIT_SUBJECT" \
+            --arg upstream "$UPSTREAM_AT_CONFLICT" \
+            '{commit_sha:$sha, commit_subject:$subj, file:"(all)", case:"empty-commit-skipped", dropped_hunks:"commit-skipped", upstream_at_conflict:$upstream, resolution_source:"upstream-wins"}')
+        UPSTREAM_WINS_LOG=$(printf '%s' "$UPSTREAM_WINS_LOG" | jq -c ". + [$ENTRY]")
+        if ! git rebase --skip >/tmp/rebase-out-{{issue}}.txt 2>&1; then
+            STUCK=1
+            break
+        fi
+    else
+        if ! git rebase --continue >/tmp/rebase-out-{{issue}}.txt 2>&1; then
+            STUCK=1
+            break
+        fi
+    fi
+done
+
+# Persist the audit log (even partial — useful for keeper handback context).
+gc bd update {{issue}} --set-metadata upstream_wins_log="$UPSTREAM_WINS_LOG"
 ```
-2. Abort: `git rebase --abort`
-3. Lock in the durable abort signal, then mail the operator (best-effort):
 
-The bead handback (`metadata.aborted_at`, status=open, reassignment) is
-the source of truth — run it FIRST so the abort is recoverable even if
-mail send fails or this prose is partially executed. The mail is a
-best-effort follow-up; the keeper's prime sweep catches aborted beads
-on next operator engagement.
+**6. Rare-fallback: cooperative handback to the requesting keeper.**
+
+If `STUCK=1`, upstream-wins resolution could not complete. This path is
+expected to be vanishingly rare under the upstream-wins rule; reaching
+it implies a pathological case (sentinel files, repo-state corruption,
+rebase-state confusion).
+
+The handback uses **`metadata.conflict_questions`** as the durable
+signal (the keeper's prime sweep matches it alongside `aborted_at` and
+`suggested_pr_title`). The worktree is **kept mid-rebase** so a new
+polecat can defensively `git rebase --abort` and resume cheaply once
+the operator has written `metadata.conflict_answers`.
 
 ```bash
-gc bd update {{issue}} \
-  --set-metadata aborted_at=rebase \
-  --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+if [ "$STUCK" = "1" ]; then
+    REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+    [ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
 
-BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
-WORKTREE=$(pwd)
-if ! gc mail send {{notify_recipient}} -s "gascity rebase: conflicts" -m "$(cat <<EOF
-The rebase of {{origin_remote}}/{{upstream_branch}} onto {{upstream_remote}}/{{upstream_branch}}
-hit conflicts on a kept commit. The rebase has been aborted; the worktree
-is back at the pre-rebase tip.
+    # Build conflict_questions JSON: one entry per still-unmerged file.
+    QUESTIONS=$(git status --porcelain \
+        | awk '$1 ~ /^(DD|AU|UD|UA|DU|AA|UU)$/' \
+        | jq -R -s '
+            split("\n")
+            | map(select(length > 0))
+            | map({
+                file: (.[3:]),
+                case: (.[:2]),
+                question: "upstream-wins resolution did not complete; operator directive needed. Set metadata.conflict_answers as a JSON object mapping this file path to one of: \"ours\" (take upstream), \"theirs\" (take local commit), \"delete\" (remove)."
+              })')
 
-Worktree: $WORKTREE
+    git status --short > /tmp/conflict-state-{{issue}}.txt
+    REBASE_OUT_TAIL=$(tail -50 /tmp/rebase-out-{{issue}}.txt 2>/dev/null || echo "(no rebase output captured)")
+    BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
+    WORKTREE=$(pwd)
+
+    gc bd update {{issue}} \
+        --set-metadata conflict_questions="$QUESTIONS" \
+        --status=open \
+        --assignee="$REQUESTING_KEEPER" \
+        --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+
+    if ! gc mail send "$REQUESTING_KEEPER" -s "gascity rebase: conflict-questions for {{issue}}" -m "$(cat <<EOF
+Rebase of {{origin_remote}}/{{upstream_branch}} onto {{upstream_remote}}/{{upstream_branch}}
+hit conflicts that upstream-wins auto-resolution could not complete.
+This is the rare-fallback path.
+
+Audit log of resolutions applied this round: metadata.upstream_wins_log
+Remaining irresolvable files (operator directives needed): metadata.conflict_questions
+
+Worktree: $WORKTREE (kept mid-rebase; a new polecat will defensively abort and resume)
 Backup ref: $BACKUP_REF
 Bead: {{issue}}
-Conflicts:
-$(cat /tmp/rebase-conflicts-{{issue}}.txt)
 
-Next: drive the rebase by hand from the worktree, or close the bead if
-you've decided the conflict isn't worth resolving now.
+Current unmerged state:
+$(cat /tmp/conflict-state-{{issue}}.txt)
+
+Rebase output tail:
+$REBASE_OUT_TAIL
+
+Next: engage the operator. They write metadata.conflict_answers (JSON
+object mapping each remaining file path to "ours" | "theirs" | "delete"),
+then re-dispatch this mol on the same bead. A new polecat will:
+  1. Reuse the worktree via metadata.work_dir.
+  2. git rebase --abort defensively at the start of the rebase step.
+  3. Redo the rebase from scratch, applying conflict_answers to the
+     irresolvable cases (and upstream-wins to anything else that
+     conflicts after upstream may have moved).
 EOF
 )"; then
-    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+        echo "WARN: mail send failed for {{issue}}; conflict_questions handback is the durable signal" >&2
+    fi
+    gc runtime drain-ack
+    exit 0
 fi
-gc runtime drain-ack
-exit 0
 ```
 
-**3. Sanity check the kept set:**
+**7. Sanity check the kept set:**
 ```bash
 git log {{upstream_remote}}/{{upstream_branch}}..HEAD --oneline
 ```
@@ -538,6 +772,12 @@ Sections to include:
 - **Dropped commits** — the `drop-merged-upstream` and `drop-supplanted`
   rows from `metadata.commit_verdicts`, each with sha, subject, verdict,
   rationale.
+- **Upstream-wins resolutions** — a compact rendering of
+  `metadata.upstream_wins_log` (if non-empty). One line per resolution
+  entry: `<short-sha> <file> <case> (<resolution_source>)`. Lead with a
+  one-line summary: "Dropped N local hunks across M files; full log in
+  bead notes at metadata.upstream_wins_log." If the log is empty, omit
+  this section entirely (no conflicts means upstream-wins never fired).
 - **Upstream commits absorbed** — `git log --oneline <pre-rebase-tip>..{{upstream_remote}}/{{upstream_branch}}`
   where `<pre-rebase-tip>` is the backup ref.
 - **Test outcome** — pass (we got here) plus the test command name.
@@ -546,15 +786,39 @@ Sections to include:
 - **Backup ref** — name and pre-rebase tip sha, so the operator can roll
   back without paging this mol back in.
 
+Build the upstream-wins rendering with jq:
+```bash
+WINS_LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.upstream_wins_log // "[]"')
+WINS_COUNT=$(printf '%s' "$WINS_LOG" | jq 'length')
+if [ "$WINS_COUNT" -gt 0 ]; then
+    WINS_FILES=$(printf '%s' "$WINS_LOG" | jq -r '[.[] | .file] | unique | length')
+    WINS_HEADLINE="Upstream-wins applied $WINS_COUNT resolution(s) across $WINS_FILES file(s); full log on metadata.upstream_wins_log."
+    WINS_DETAIL=$(printf '%s' "$WINS_LOG" | jq -r '.[] | "  \\(.commit_sha[0:8]) \\(.file)  case=\\(.case)  source=\\(.resolution_source)"')
+else
+    WINS_HEADLINE=""
+    WINS_DETAIL=""
+fi
+```
+
 **2. Mail the operator:**
 ```bash
 gc mail send {{notify_recipient}} -s "gascity rebase: complete" -m "<summary>"
 ```
 
-**3. Append the same summary to bead notes:**
+The mailed summary inlines `$WINS_HEADLINE` and `$WINS_DETAIL` when
+non-empty so the operator can see at a glance whether any local hunks
+were dropped without paging in the full JSON. The full
+`metadata.upstream_wins_log` JSON stays on the bead for forensic review.
+
+**3. Append the same summary to bead notes (markdown form):**
 ```bash
 gc bd update {{issue}} --notes "<summary>"
 ```
+
+The bead-notes version of the upstream-wins section can be a full
+markdown table rather than the compact text rendering — it's the
+durable forensic record the operator audits when they suspect a drop
+was wrong.
 
 **4. Close the bead:**
 ```bash
@@ -567,5 +831,7 @@ gc runtime drain-ack
 exit 0
 ```
 
-**Exit criteria:** completion mail sent; bead notes carry the summary;
-bead is closed; session has drained."""
+**Exit criteria:** completion mail sent (including upstream-wins headline
+if any resolutions fired); bead notes carry the summary plus the markdown
+table of upstream-wins resolutions; `metadata.upstream_wins_log` remains
+on the bead as the JSON record; bead is closed; session has drained."""
