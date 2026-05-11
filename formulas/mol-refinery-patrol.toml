@@ -29,7 +29,7 @@ closes the bead once the PR is verified.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-refinery-patrol"
-version = 4
+version = 5
 contract = "graph.v2"
 
 [vars]
@@ -445,22 +445,70 @@ fi
 skip steps 2-5 below and execute the "If MERGE_STRATEGY = 'mr'" block
 instead. The rebased `temp` branch is still available for the PR push.**
 
-**2. Verify push:**
-```bash
-git fetch origin
-LOCAL=$(git rev-parse $TARGET)
-REMOTE=$(git rev-parse origin/$TARGET)
-[ "$LOCAL" = "$REMOTE" ] || echo "PUSH FAILED — do not proceed"
-```
-If SHAs differ: STOP. Debug and retry. Do NOT continue.
+**2. MERGE COMPLETION GATE — verify remote, then close. DO NOT improvise.**
 
-**3. Record merge metadata and close work bead:**
+Phantom-merge prevention. tk-c9q75 documented a case where the bead was
+closed with a hand-written "merged to main" claim while the merge commit
+never reached `origin/$TARGET`. This block is the ONLY sanctioned way to
+record a successful merge. Run it EXACTLY as written. If anything in this
+block fails, DO NOT close the bead, DO NOT set `merge_result=merged`, and
+DO NOT improvise an alternate close path.
+
+Three independent checks must all pass:
+
+1. The `temp` branch (rebased work, created in the rebase step) must exist
+   — its absence proves the merge step never ran.
+2. Local `$TARGET` HEAD must equal `temp` — proves the ff-only merge
+   actually advanced the target locally (not a stale checkout).
+3. The merge SHA must be reachable from `origin/$TARGET` — proves the
+   push landed.
+
+Check 1 + 2 catch the failure mode where the agent skipped the merge step
+entirely; alone, check 3 passes vacuously in that case because the stale
+HEAD is still an ancestor of any newer `origin/$TARGET`.
+
+```bash
+git fetch origin "$TARGET"
+MERGE_SHA=$(git rev-parse HEAD)
+ORIGIN_TARGET_SHA=$(git rev-parse "origin/$TARGET")
+TEMP_SHA=$(git rev-parse --verify --quiet temp 2>/dev/null || echo "")
+
+phantom_merge_abort() {
+  echo "PHANTOM MERGE PREVENTED for $WORK:"
+  echo "  reason:           $1"
+  echo "  local HEAD:       $MERGE_SHA"
+  echo "  origin/$TARGET:   $ORIGIN_TARGET_SHA"
+  echo "  temp branch SHA:  ${TEMP_SHA:-<missing>}"
+  gc mail send mayor/ -s "REFINERY: phantom-merge prevented for $WORK" -m "Refinery refused to close $WORK because: $1
+Local HEAD: $MERGE_SHA
+origin/$TARGET: $ORIGIN_TARGET_SHA
+temp branch: ${TEMP_SHA:-<missing>}
+Bead remains assigned to refinery for investigation."
+  echo "STOP. Bead NOT closed. Debug, push, then re-enter this step."
+  gc runtime drain-ack
+  exit 1
+}
+
+if [ -z "$TEMP_SHA" ]; then
+  phantom_merge_abort "temp branch missing — rebase/merge step was skipped"
+fi
+if [ "$MERGE_SHA" != "$TEMP_SHA" ]; then
+  phantom_merge_abort "HEAD != temp — ff-only merge did not happen (HEAD is stale)"
+fi
+if ! git merge-base --is-ancestor "$MERGE_SHA" "origin/$TARGET"; then
+  phantom_merge_abort "merge SHA not reachable from origin/$TARGET — push did not land"
+fi
+echo "Push verified: $MERGE_SHA (= temp) is on origin/$TARGET."
+```
+
+**3. Atomic merge-record + close (canonical close_reason; do not reword):**
 ```bash
 gc bd update $WORK \
   --set-metadata merge_result=merged \
-  --set-metadata merged_sha=$(git rev-parse HEAD) \
-  --set-metadata merged_target=$TARGET
-gc bd close $WORK --reason "Merged to $TARGET at $(git rev-parse --short HEAD)"
+  --set-metadata merged_sha="$MERGE_SHA" \
+  --set-metadata merged_target="$TARGET" \
+  --set-metadata merge_verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+gc bd close $WORK --reason "Merged to $TARGET at $(git rev-parse --short HEAD) (verified on origin/$TARGET)"
 ```
 
 **4. Cleanup:**
