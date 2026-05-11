@@ -50,18 +50,35 @@ for promoting a commit to an upstream PR candidate.
      polecat *tries* to mail the operator, but mail is best-effort and
      may not have arrived. Don't assume the operator has seen mail.
 
-4. **Sweep mail** for unread items addressed to you:
+4. **Sweep stale rebase branches** in the gascity rig:
+   ```bash
+   RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+   git -C "$RIG_PATH" for-each-ref --format='%(refname:short)' refs/heads/rebase/ | \
+     while read br; do
+       bead="${br#rebase/}"
+       bd_status=$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].status // empty')
+       [ "$bd_status" = "closed" ] && echo "$br (bead $bead closed)"
+     done
+   ```
+   These are `mol-upstream-gc-rebase` working branches left behind after
+   the bead closed. The formula doesn't reap them, and manual recovery
+   often skips cleanup. Surface them in the menu so the operator can
+   `git -C "$RIG_PATH" branch -D <br>` once they confirm origin/main
+   carries the work (range-diff against `metadata.pre_rebase_tip` if
+   unsure).
+
+5. **Sweep mail** for unread items addressed to you:
    ```bash
    gc mail inbox --json | jq '.[] | select(.read==false)'
    ```
 
-5. **Print the operator menu.** Always — even when nothing is pending.
+6. **Print the operator menu.** Always — even when nothing is pending.
    Derive it from the "Operator Commands" section below: one line per
    command shape, with a short tagline. Then append a "Pending" block
-   listing handback beads (step 3) and engagement-needing mail (step
-   4); print "Pending: none." otherwise. Do not start a handback
-   conversation cold via mail — surface it in the menu and let the
-   operator pick it up.
+   listing handback beads (step 3), stale rebase branches (step 4), and
+   engagement-needing mail (step 5); print "Pending: none." otherwise.
+   Do not start a handback conversation cold via mail — surface it in the
+   menu and let the operator pick it up.
 
    Shape the output like this (clean prime):
 
@@ -87,14 +104,40 @@ for promoting a commit to an upstream PR candidate.
    Pending (needs your engagement):
      - <bead> — PR-prep handback: "<suggested title>" — branch ready
      - <bead> — aborted (<reason>)
+     - stale: rebase/<bead> (bead closed; safe to delete after confirming origin/main)
      - mail: "<subject>" from <sender>
    ```
 
-For an `aborted_at` bead: read `metadata.aborted_at` plus the bead notes
-to summarize the failure, and offer next moves. Do not re-dispatch
-automatically. The mol's abort path covers the worktree state and
-`backup_ref`; resume usually means the operator drives recovery from
-`metadata.work_dir`, or abandons the bead.
+For an `aborted_at` bead, before summarizing the failure check whether
+the rebase actually landed out-of-band (manual operator/mayor recovery
+that bypassed the formula's notify-and-close):
+
+```bash
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+PRE=$(gc bd show <bead> --json | jq -r '.[0].metadata.pre_rebase_tip // empty')
+git -C "$RIG_PATH" fetch --quiet origin
+CURRENT=$(git -C "$RIG_PATH" rev-parse origin/main)
+[ -n "$PRE" ] && [ "$PRE" != "$CURRENT" ] && \
+  git -C "$RIG_PATH" range-diff "$PRE..$CURRENT" "$PRE..rebase/<bead>" 2>/dev/null
+```
+
+`pre_rebase_tip` is the durable anchor the formula records at workspace-
+setup; trust origin/main vs `pre_rebase_tip` (plus the range-diff against
+the polecat's local `rebase/<bead>` if it survives) over ad-hoc metadata
+like `resolved_at_tip` — a recovery worktree's intermediate SHA pinned in
+metadata is NOT what landed on origin/main.
+
+- **origin/main unchanged** (`$PRE == $CURRENT`): abort is real, recovery
+  still pending. Summarize the failure for the operator and offer next
+  moves. Do not re-dispatch automatically. The mol's abort path covers
+  the worktree state and `backup_ref`; resume usually means the operator
+  drives recovery from `metadata.work_dir`, or abandons the bead.
+- **origin/main moved AND range-diff matches the polecat's `keep` set**:
+  the rebase landed out-of-band. Tell the operator `aborted_at` is stale
+  and offer to clear it (see Conventions). The bead is effectively done
+  even though the metadata still flags an abort.
+- **origin/main moved AND range-diff diverges**: something else landed.
+  Surface it as unusual — escalate to mayor before clearing `aborted_at`.
 
 ## Operator Commands
 
@@ -306,6 +349,22 @@ Want to tweak any of these before I finalize?
   job. The PR-prep mol pushes feature branches only, never `main`.
 - **Don't bypass the polecat.** Even a "tiny" rebase goes through the
   rebase mol — the survey/verdict/backup discipline is the point.
+- **Manual-recovery metadata convention.** When an operator or mayor
+  resolves a `mol-upstream-gc-rebase` abort by hand and pushes the
+  result, the bead must reflect what's on origin/main, not a local
+  intermediate SHA. The minimum:
+  1. Clear the abort flag: `gc bd update <bead> --unset-metadata aborted_at`
+  2. Add a comment describing what landed and how (the resolution path,
+     not just the final SHA).
+  3. If using close-reason text, cite `git rev-parse origin/main` AFTER
+     the push — never a local recovery-worktree SHA.
+
+  Optional but encouraged: `--set-metadata resolved_by=<agent-or-operator>`
+  and `--set-metadata final_tip=<pushed-sha>` for the audit trail. The
+  contradictory state `aborted_at` + ad-hoc resolution flags
+  (`rebase_status: resolved`, `resolved_at_tip: <local-sha>`) forces the
+  keeper to fall back on range-diff to figure out what actually landed —
+  cleared `aborted_at` is the durable signal of recovery.
 - **Stay quiet when nothing is open.** No "nothing to report" mails.
 
 ## Working With Other Agents
