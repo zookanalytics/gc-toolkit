@@ -67,22 +67,34 @@ Apply the cycle-recycle policy. Recycle if either trigger has fired:
 
 To recycle (pour-next-before-handoff — the formula's universal invariant):
 ```bash
-# Pour the next wisp BEFORE handoff so the post-/clear session has
-# an in-progress wisp on its hook regardless of discovery races.
+# 1. Pour the next wisp BEFORE handoff so the inheriting session
+#    finds an in-progress wisp on its hook regardless of discovery races.
 NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id')
 gc bd update "$NEXT" --assignee=$GC_AGENT
 
-# Then hand off, mentioning the next wisp ID for inheritance.
+# 2. Write durable HANDOFF mail. For controller-restartable sessions this
+#    also stops the runtime so the controller respawns; for on-demand
+#    named sessions (e.g. named deacon) it only writes mail and returns.
 gc handoff "context cycle: <reason> (next wisp: $NEXT)"
-```
-Then sit idle and surface the handoff message — the operator will
-`/clear` and the next session resumes from the HANDOFF bead with
-`$NEXT` already on its hook. For controller-restartable sessions
-`gc handoff` also requests a restart.
 
-Full policy and rationale (thresholds, RSS-as-fallback, optional
-verification command): `template-fragments/cycle-recycle.template.md`
-(named template `cycle-recycle`).
+# 3. Trigger the actual restart. For controller-restartable sessions the
+#    runtime is already stopped so this is effectively a no-op. For
+#    on-demand named deacon this respawns the user-attended process and
+#    clears any tripped named-session respawn circuit breaker.
+gc session reset "$GC_ALIAS"
+```
+Surface the handoff message before step 3 fires. The chained
+handoff + reset covers both controller-restartable and on-demand named
+sessions: handoff is the state-capture command (durable HANDOFF mail
+always written), reset is the explicit-restart-trigger for the
+named-deacon class. **No operator `/clear` is required** — the new
+session boots from the controller-driven respawn, reads the HANDOFF
+bead on first action, and resumes with `$NEXT` already on its hook.
+
+Full policy, rationale, and caveats (thresholds, RSS-as-fallback,
+host-tmux-kill cost, optional verification command):
+`template-fragments/cycle-recycle.template.md` (named template
+`cycle-recycle`).
 
 **2. Check mail:**
 ```bash
@@ -360,20 +372,32 @@ at both start and end). Recycle if either trigger has fired:
 
 To recycle (pour-next-before-handoff — the formula's universal invariant):
 ```bash
-# Pour the next wisp BEFORE handoff so the post-/clear session has
-# an in-progress wisp on its hook regardless of discovery races.
+# 1. Pour the next wisp BEFORE handoff so the inheriting session
+#    finds an in-progress wisp on its hook regardless of discovery races.
 NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id')
 gc bd update "$NEXT" --assignee=$GC_AGENT
 
-# Then hand off, mentioning the next wisp ID for inheritance.
+# 2. Write durable HANDOFF mail. For controller-restartable sessions this
+#    also stops the runtime so the controller respawns; for on-demand
+#    named sessions (e.g. named deacon) it only writes mail and returns.
 gc handoff "context cycle: <reason> (next wisp: $NEXT)"
-```
-Then sit idle and surface the handoff message — the operator will
-`/clear` and the next session resumes from the HANDOFF bead with
-`$NEXT` already on its hook. For controller-restartable sessions
-`gc handoff` also requests a restart.
 
-Full policy and rationale: `template-fragments/cycle-recycle.template.md`
+# 3. Trigger the actual restart. For controller-restartable sessions the
+#    runtime is already stopped so this is effectively a no-op. For
+#    on-demand named deacon this respawns the user-attended process and
+#    clears any tripped named-session respawn circuit breaker.
+gc session reset "$GC_ALIAS"
+```
+Surface the handoff message before step 3 fires. The chained
+handoff + reset covers both controller-restartable and on-demand named
+sessions: handoff is the state-capture command (durable HANDOFF mail
+always written), reset is the explicit-restart-trigger for the
+named-deacon class. **No operator `/clear` is required** — the new
+session boots from the controller-driven respawn, reads the HANDOFF
+bead on first action, and resumes with `$NEXT` already on its hook.
+
+Full policy, rationale, and caveats (thresholds, RSS-as-fallback,
+host-tmux-kill cost): `template-fragments/cycle-recycle.template.md`
 (named template `cycle-recycle`).
 
 If recycle did NOT fire, pour the next iteration the normal way:
