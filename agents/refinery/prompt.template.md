@@ -205,6 +205,12 @@ If `metadata.existing_pr` is present while `merge_strategy` is unset or
 `direct`, treat the handoff as `mr`. An existing PR cannot be validated
 and then ignored by landing directly to the target branch.
 
+If a `direct` push is rejected by GitHub because the target branch is
+protected (GH006 / GH013 / "protected branch" / "Changes must be made
+through a pull request"), auto-promote the work bead to
+`merge_strategy=pr` and continue down the PR path in the same wisp. No
+escalation to mayor; the formula handles this inline.
+
 ---
 
 ## Communication

@@ -398,12 +398,52 @@ fi
 
 **If MERGE_STRATEGY = "direct" (default):**
 
-**1. Merge and push target branch:**
+If the push to `$TARGET` is rejected because the target branch is
+GitHub-protected (GH006 / GH013 / "protected branch" / "Changes must be
+made through a pull request" / "approving review" / "Cannot update this
+protected ref"), refinery automatically promotes the work bead to
+`merge_strategy=pr` and continues under the "mr" block below — no
+operator intervention required. Any other push failure stops the wisp
+for debugging.
+
+**1. Merge target branch locally and push (auto-promote on protected branch):**
 ```bash
 git checkout $TARGET
 git merge --ff-only temp
-git push origin $TARGET
+
+is_protected_branch_error() {
+  case "$1" in
+    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|\
+    *"Changes must be made through a pull request"*|\
+    *"approving review"*|*"Cannot update this protected ref"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+PUSH_ERR=$(mktemp)
+if git push origin $TARGET 2>"$PUSH_ERR"; then
+  rm -f "$PUSH_ERR"
+else
+  PUSH_STDERR=$(cat "$PUSH_ERR")
+  rm -f "$PUSH_ERR"
+  if is_protected_branch_error "$PUSH_STDERR"; then
+    echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
+    gc bd update $WORK --set-metadata merge_strategy=pr
+    MERGE_STRATEGY=mr
+    git reset --hard "origin/$TARGET"
+    # Fall through to the "If MERGE_STRATEGY = 'mr'" block below.
+  else
+    echo "Push failed: $PUSH_STDERR"
+    echo "STOP. Debug and retry. Do NOT continue."
+    gc runtime drain-ack
+    exit 1
+  fi
+fi
 ```
+
+**If `$MERGE_STRATEGY` was just flipped to `mr` (auto-promotion fired),
+skip steps 2-5 below and execute the "If MERGE_STRATEGY = 'mr'" block
+instead. The rebased `temp` branch is still available for the PR push.**
 
 **2. Verify push:**
 ```bash
