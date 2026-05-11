@@ -37,7 +37,7 @@ beads on next operator engagement, so even a silent mail failure surfaces
 the abort within one operator engagement cycle."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 4
+version = 5
 
 [vars]
 [vars.upstream_remote]
@@ -255,19 +255,59 @@ readable in the bead notes."""
 
 [[steps]]
 id = "rebase"
-title = "Rebase onto upstream and rewrite drop-supplanted commits away"
+title = "Rebase onto upstream, dropping merged and supplanted commits in one pass"
 needs = ["survey"]
 description = """
-Run the rebase. Patch-id matching drops `drop-merged-upstream` commits
-automatically; `drop-supplanted` commits get explicit `drop` markers via
-interactive rebase.
+Run a single scripted `git rebase -i` that drops `drop-supplanted` commits
+up front via a sequence-editor script. Patch-id matching still drops
+`drop-merged-upstream` commits automatically. Remaining `keep` commits
+replay onto upstream.
 
-**1. Run the rebase:**
+Dropping supplanted commits in the rebase todo (before replay) means a
+supplanted commit can never conflict — it's removed before git tries to
+apply it. Any conflict that fires here is on a `keep` commit, which is
+tk-gzat2's redesign territory.
+
+**1. Build the sequence-editor script.**
+
+The script mutates the rebase todo list git generates: for every sha in
+`metadata.commit_verdicts` whose verdict is `drop-supplanted`, rewrite
+`pick <sha>` → `drop <sha>` in the todo file. The shas are passed in
+via the exported `DROP_SHAS` environment variable so the heredoc body
+can stay quoted (no escaping ambiguity).
+
 ```bash
-git rebase {{upstream_remote}}/{{upstream_branch}}
+DROP_SHAS=$(gc bd show {{issue}} --json | jq -r \
+  '.[0].metadata.commit_verdicts // "[]" | fromjson
+   | map(select(.verdict=="drop-supplanted") | .sha) | join(" ")')
+export DROP_SHAS
+
+cat > /tmp/seqedit-{{issue}}.sh <<'SEQ'
+#!/bin/sh
+todo=$1
+for sha in $DROP_SHAS; do
+  sed -i -E "s/^pick (${sha}[[:alnum:]]*) /drop \\1 /" "$todo"
+done
+SEQ
+chmod +x /tmp/seqedit-{{issue}}.sh
 ```
 
-If the rebase fails on conflicts:
+If `DROP_SHAS` is empty (no `drop-supplanted` entries in the verdict
+table), the sequence editor is a no-op and the rebase behaves like a
+plain `git rebase {{upstream_remote}}/{{upstream_branch}}` with patch-id
+auto-drops.
+
+**2. Run the scripted rebase:**
+```bash
+GIT_SEQUENCE_EDITOR=/tmp/seqedit-{{issue}}.sh \
+  git rebase -i {{upstream_remote}}/{{upstream_branch}}
+```
+
+`drop-merged-upstream` commits are still auto-dropped by patch-id
+matching. `drop-supplanted` commits are scripted to `drop` in the todo
+before replay. `keep` commits replay onto upstream.
+
+If the rebase fails on conflicts, the conflict is on a `keep` commit:
 
 1. Capture the conflict tail:
 ```bash
@@ -293,8 +333,8 @@ BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 if ! gc mail send {{notify_recipient}} -s "gascity rebase: conflicts" -m "$(cat <<EOF
 The rebase of {{origin_remote}}/{{upstream_branch}} onto {{upstream_remote}}/{{upstream_branch}}
-hit conflicts. The rebase has been aborted; the worktree is back at the
-pre-rebase tip.
+hit conflicts on a kept commit. The rebase has been aborted; the worktree
+is back at the pre-rebase tip.
 
 Worktree: $WORKTREE
 Backup ref: $BACKUP_REF
@@ -311,18 +351,6 @@ fi
 gc runtime drain-ack
 exit 0
 ```
-
-**2. Drop supplanted commits via interactive rebase:**
-
-If `metadata.commit_verdicts` contains any `drop-supplanted` entries, run:
-```bash
-git rebase -i {{upstream_remote}}/{{upstream_branch}}
-```
-and mark each `drop-supplanted` sha as `drop` in the editor. (Set
-`GIT_SEQUENCE_EDITOR` to a script that mutates the rebase todo list if
-you want to script this rather than open an editor.)
-
-If there are no `drop-supplanted` entries, skip this sub-step.
 
 **3. Sanity check the kept set:**
 ```bash
