@@ -23,8 +23,8 @@ Recycle when **either** trigger fires:
 
 The formula's universal invariant is **"pour next before burn current"** —
 every other exit path obeys it. Cycle-recycle must obey it too, so the
-post-`/clear` session has an in-progress wisp waiting on its hook
-regardless of whether the startup discovery query catches it.
+inheriting session has an in-progress wisp waiting on its hook regardless
+of whether the startup discovery query catches it.
 
 ```bash
 # 1. Pour the next wisp BEFORE handoff so the inheriting session
@@ -32,9 +32,20 @@ regardless of whether the startup discovery query catches it.
 NEXT=$(gc bd mol wisp <mol-{role}-patrol> --root-only <vars...> --json | jq -r '.new_epic_id')
 gc bd update "$NEXT" --assignee=$GC_AGENT
 
-# 2. Hand off, mentioning the next-wisp ID so the next session knows
-#    what to inherit even if discovery somehow misses it.
+# 2. Hand off so the inheriting session has resume state. For
+#    controller-restartable sessions, gc handoff also stops the
+#    runtime so the controller respawns it; this command will not
+#    return on those sessions.
 gc handoff "context cycle: <reason> (next wisp: $NEXT)"
+
+# 3. Trigger the actual restart. For controller-restartable sessions
+#    `gc handoff` already stopped the runtime, so execution typically
+#    never reaches this line. For on-demand named sessions (refinery,
+#    witness, deacon when configured that way) `gc handoff` returns
+#    without restarting — `gc session reset` is what triggers the
+#    fresh respawn. It also clears any tripped named-session respawn
+#    circuit breaker before requesting the restart.
+gc session reset "$GC_ALIAS"
 ```
 
 Examples:
@@ -44,22 +55,23 @@ Examples:
 `gc handoff` writes a durable HANDOFF bead and, for
 controller-restartable sessions, also requests a restart. For
 on-demand named sessions (refinery, witness, and deacon when configured
-that way), the handoff mail is sent but the controller cannot restart
-the user-attended process — **the operator must `/clear`** to recycle.
-Either way, the next session reads the HANDOFF bead and resumes from
-clean state. Including `$NEXT` in the message body makes the inherited
-wisp ID discoverable to the new session even if its tier-1 in-progress
-query somehow misses it (race, status flip, etc.).
+that way), `gc handoff` only writes the mail — the chained
+`gc session reset "$GC_ALIAS"` is what restarts the user-attended
+process. Either way, the next session reads the HANDOFF bead and
+resumes from clean state. Including `$NEXT` in the message body makes
+the inherited wisp ID discoverable to the new session even if its
+tier-1 in-progress query somehow misses it (race, status flip, etc.).
 
-**After running `gc handoff`:**
+**After running the recycle sequence:**
 
-- Sit idle. Do not start the next cycle yourself — the new wisp is
-  poured but unstarted, waiting for the post-`/clear` session.
-- Surface the handoff message (with the next-wisp ID) in your output so
-  the operator sees it.
-- Wait for `/clear` (or controller restart). The next session reads
-  the HANDOFF bead, finds the in-progress wisp via its tier-1 startup
-  query, and resumes from clean state.
+- The controller stops this session and starts a fresh one. The new
+  session reads the HANDOFF bead, finds the in-progress wisp via its
+  tier-1 startup query, and resumes from clean state — no operator
+  `/clear` required.
+- Surface the handoff message (with the next-wisp ID) in your output
+  for observability before the runtime stops.
+- Do not start the next cycle yourself — the new wisp is poured and
+  waiting for the inheriting session.
 
 **Pathological-loop note.** If the cycle-recycle trigger somehow fires
 repeatedly (e.g. event-watch loop bug, runaway counter), each cycle
@@ -100,10 +112,14 @@ re-check the counters more strictly — but do not recycle on RSS alone.
   active patrols the original ceiling was much lower than necessary.
   These new thresholds are still proxies — the structural fix is
   context-fill measurement (`gc context --usage` per FUTURE.md).
-- `gc handoff` over `gc runtime request-restart`: `request-restart`
-  silently no-ops for on-demand named sessions because the controller
-  cannot restart user-attended processes. `gc handoff` always writes a
-  HANDOFF bead, so the next session has clean resume state regardless
-  of whether a controller restart, an operator `/clear`, or a
-  PreCompact hook restarted it.
+- `gc handoff` + `gc session reset` over `gc runtime request-restart`:
+  `request-restart` silently no-ops for on-demand named sessions because
+  the controller cannot restart user-attended processes via that path.
+  `gc handoff` always writes a HANDOFF bead so the next session has
+  clean resume state; chaining `gc session reset "$GC_ALIAS"` after it
+  triggers the actual restart for on-demand named sessions (and clears
+  any tripped respawn circuit breaker). For controller-restartable
+  sessions `gc handoff` already requested the restart, so the chained
+  `gc session reset` typically never executes — it is a safety net for
+  the case where `gc handoff` returned without stopping the runtime.
 {{ end }}

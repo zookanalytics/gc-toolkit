@@ -76,18 +76,28 @@ Apply the cycle-recycle policy. Recycle if either trigger has fired:
 
 To recycle (pour-next-before-handoff — the formula's universal invariant):
 ```bash
-# Pour the next wisp BEFORE handoff so the post-/clear session has
+# Pour the next wisp BEFORE handoff so the inheriting session has
 # an in-progress wisp on its hook regardless of discovery races.
 NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --json | jq -r '.new_epic_id')
 gc bd update "$NEXT" --assignee=$GC_AGENT
 
-# Then hand off, mentioning the next wisp ID for inheritance.
+# Hand off, mentioning the next wisp ID for inheritance. For
+# controller-restartable sessions gc handoff also stops the runtime so
+# the controller respawns it; for on-demand named sessions it only
+# writes the mail.
 gc handoff "context cycle: <reason> (next wisp: $NEXT)"
+
+# Trigger the actual restart. For controller-restartable sessions
+# gc handoff already stopped the runtime so execution typically never
+# reaches this line; for on-demand named sessions gc session reset is
+# what respawns the user-attended process. It also clears any tripped
+# named-session respawn circuit breaker.
+gc session reset "$GC_ALIAS"
 ```
-Then sit idle and surface the handoff message — the operator will
-`/clear` and the next session resumes from the HANDOFF bead with
-`$NEXT` already on its hook. For controller-restartable sessions
-`gc handoff` also requests a restart.
+Surface the handoff message for observability before the runtime
+stops. The controller respawns this session and the new instance
+resumes from the HANDOFF bead with `$NEXT` already on its hook —
+no operator `/clear` required.
 
 Full policy and rationale (thresholds, RSS-as-fallback, optional
 verification command): `template-fragments/cycle-recycle.template.md`
@@ -484,18 +494,28 @@ at both start and end). Recycle if either trigger has fired:
 
 To recycle (pour-next-before-handoff — the formula's universal invariant):
 ```bash
-# Pour the next wisp BEFORE handoff so the post-/clear session has
+# Pour the next wisp BEFORE handoff so the inheriting session has
 # an in-progress wisp on its hook regardless of discovery races.
 NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --json | jq -r '.new_epic_id')
 gc bd update "$NEXT" --assignee=$GC_AGENT
 
-# Then hand off, mentioning the next wisp ID for inheritance.
+# Hand off, mentioning the next wisp ID for inheritance. For
+# controller-restartable sessions gc handoff also stops the runtime so
+# the controller respawns it; for on-demand named sessions it only
+# writes the mail.
 gc handoff "context cycle: <reason> (next wisp: $NEXT)"
+
+# Trigger the actual restart. For controller-restartable sessions
+# gc handoff already stopped the runtime so execution typically never
+# reaches this line; for on-demand named sessions gc session reset is
+# what respawns the user-attended process. It also clears any tripped
+# named-session respawn circuit breaker.
+gc session reset "$GC_ALIAS"
 ```
-Then sit idle and surface the handoff message — the operator will
-`/clear` and the next session resumes from the HANDOFF bead with
-`$NEXT` already on its hook. For controller-restartable sessions
-`gc handoff` also requests a restart.
+Surface the handoff message for observability before the runtime
+stops. The controller respawns this session and the new instance
+resumes from the HANDOFF bead with `$NEXT` already on its hook —
+no operator `/clear` required.
 
 Full policy and rationale: `template-fragments/cycle-recycle.template.md`
 (named template `cycle-recycle`).
