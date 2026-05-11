@@ -7,6 +7,8 @@
 **Source commits:** see branch
 **Surveyed at:** 2026-05-11
 
+**v2 incorporates mechanik review (PR #9, `tk-q6oye`):** removed `max_active_sessions` cap (operator-unbounded concurrency), dropped the `[[named_session]] mechanik-side` block (pool semantics, not singleton), sharpened role fragment with active-action / not-system-of-record framing.
+
 ## Provenance
 
 | Doc-type / artifact | Producer | Source | Surveyed at |

@@ -5,7 +5,6 @@ attach = true
 wake_mode = "resume"
 idle_timeout = "8h"
 min_active_sessions = 0
-max_active_sessions = 4
 
 # Cross-reference: render the canonical mechanik's prompt template under
 # this agent's identity. Path is pack-root-relative —
