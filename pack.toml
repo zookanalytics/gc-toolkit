@@ -29,6 +29,11 @@ scope = "city"
 mode = "always"
 
 [[named_session]]
+template = "mechanik-side"
+scope = "rig"
+mode = "on_demand"
+
+[[named_session]]
 template = "mayor"
 scope = "city"
 mode = "always"
