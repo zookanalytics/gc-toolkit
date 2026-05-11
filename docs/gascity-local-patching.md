@@ -198,6 +198,33 @@ your fix landing under a different name (drop your patch), sometimes
 it's an adjacent change you can adapt to (rebase the patch), sometimes
 it's a fundamental redesign that requires rewriting your patch.
 
+### Agent-driven rebase
+
+In agent-driven cities the keeper dispatches `mol-upstream-gc-rebase` to
+do this work. The polecat runs the survey + rebase + test + install +
+push chain autonomously. When the rebase halts on a kept commit because
+upstream shifted the surrounding code, the polecat does NOT auto-resolve
+in favor of upstream (that silently drops your patch's work) and does
+NOT abort wholesale (that defeats agent dispatch). Instead it dispatches
+a focused rework polecat with fresh context that re-implements the
+commit's *intent* on the new upstream layer.
+
+The rework polecat self-classifies its work:
+- **mechanical** — the intent transfers cleanly, only anchors shifted.
+  Rebase continues with the rework commit replacing the conflicted apply.
+- **dropped-absorbed** — upstream already provides the behavior; the
+  commit is skipped.
+- **judgment-required** — the rework required a design call. A second
+  polecat reviews the rework before the rebase continues; if rejected,
+  a fresh rework is dispatched with the rejection reason in context.
+- **infeasible** — the rework couldn't be done from the polecat's
+  context. The keeper hands the bead back for operator intervention.
+
+The keeper's completion mail surfaces a per-conflict audit log so the
+operator can see which kept commits required rework and how each was
+classified. The full audit lives in `metadata.conflict_resolutions` on
+the rebase bead.
+
 **Never run destructive git operations directly in a `gascity` rig that
 has active worktrees.** Polecats and other agents may be working there.
 Use `git worktree add` for isolation, or coordinate via the city's
