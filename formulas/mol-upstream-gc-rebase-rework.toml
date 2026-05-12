@@ -1,0 +1,379 @@
+description = """
+Rework a single conflicted kept commit during a gascity upstream rebase.
+
+The `mol-upstream-gc-rebase` parent halts when `git rebase` cannot apply a
+kept commit cleanly because upstream shifted the surrounding code. Auto-
+resolving in favor of upstream (the v6 upstream-wins approach) silently
+discards real work. Auto-failing back to the operator on every conflict
+loses the value of agent dispatch. This formula is the middle path: a
+focused polecat re-implements the commit's *intent* against the new
+upstream layer in the rebase worktree, classifies the work it did, and
+the parent rebase polecat acts on the classification.
+
+The rework polecat:
+
+1. Shares the parent's mid-rebase worktree (read from
+   `metadata.work_dir`). The `.git/rebase-merge/` state survives drain
+   and is left intact for the parent polecat to resume.
+2. Reads the captured conflict context (`metadata.context_file`, plus the
+   commit body and adjacent upstream diffs prepared at dispatch).
+3. Classifies the work into one of four outcomes:
+   - **mechanical** — intent preserved, only anchor/surrounding code
+     shifted. Apply the equivalent change against the new layer. No
+     design judgment required.
+   - **dropped-absorbed** — upstream already provides this behavior or
+     supersedes it. Skip the commit; the parent polecat will
+     `git rebase --skip`.
+   - **judgment-required** — rework needed a design call (different API
+     surface, deprecated dependency, behavior choice). Do the rework
+     AND self-report so the parent dispatches a review polecat before
+     `git rebase --continue`.
+   - **infeasible** — the rework cannot be done from this polecat's
+     context. Hand back to the requesting keeper with a question for
+     the operator.
+4. Commits the rework onto the rebase HEAD (for `mechanical` and
+   `judgment-required`); leaves the index clean (for `dropped-absorbed`);
+   neither commits nor resolves conflicts (for `infeasible`).
+5. Sets `metadata.classification` (and `metadata.judgment_summary` when
+   applicable) on the rework bead, closes the rework bead, nudges the
+   requesting keeper so the parent rebase mol can be re-poured.
+
+Extends `mol-polecat-base` for `load-context` only — the rest of the
+polecat-work chain (workspace-setup that creates a new worktree,
+preflight, implement, self-review, submit-to-refinery) does not apply.
+We share the parent's worktree and we do not push a feature branch.
+
+## Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| issue | yes | The rework bead this polecat is working on |
+| rebase_bead | yes (set by parent rebase polecat as metadata.rebase_bead) | The parent rebase bead |
+| requesting_keeper | yes (set by parent as metadata.requesting_keeper) | Keeper to nudge on completion |
+
+The rework bead must carry the following metadata at dispatch (stamped by
+the parent rebase polecat):
+
+| Field | Description |
+|-------|-------------|
+| work_dir | Shared rebase worktree path (parent's metadata.work_dir) |
+| rebase_bead | Parent rebase bead ID |
+| requesting_keeper | Keeper agent address for handback nudge |
+| commit_sha | The conflicted kept commit's SHA |
+| commit_subject | The conflicted kept commit's subject (for human-readable context) |
+| conflicted_files | JSON array of file paths the rebase halted on |
+| context_file | Path inside the worktree to the markdown context dump |
+
+## Failure modes
+
+| Step | Failure handling |
+|------|------------------|
+| workspace-setup | Worktree missing or wrong commit mid-rebase → set `metadata.classification=infeasible`, set `metadata.infeasible_reason`, close, nudge keeper. The parent rebase polecat will see infeasible on re-entry and hand the rebase bead back to the keeper. |
+| classify-and-rework | Operator-relevant judgment is fine (that's the `judgment-required` classification) — only mark `infeasible` when the polecat genuinely cannot proceed (missing dependencies, undecidable scope, context exhausted) |"""
+formula = "mol-upstream-gc-rebase-rework"
+extends = ["mol-polecat-base"]
+version = 1
+
+[vars]
+[vars.issue]
+description = "The rework bead assigned to this polecat"
+required = true
+
+[vars.rebase_bead]
+description = "The parent rebase bead (also stamped as metadata.rebase_bead on the rework bead)"
+required = true
+
+[vars.requesting_keeper]
+description = "Keeper agent address to nudge on completion (also stamped as metadata.requesting_keeper)"
+required = true
+
+[[steps]]
+id = "workspace-setup"
+title = "Enter the shared rebase worktree and verify the mid-rebase target commit"
+needs = ["load-context"]
+description = """
+Reuse the parent rebase polecat's worktree. Do NOT create a new one.
+Do NOT touch `.git/rebase-merge/` — the parent expects to resume.
+
+**1. Read the dispatch metadata:**
+```bash
+WORK_DIR=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty')
+REBASE_BEAD=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.rebase_bead // empty')
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+TARGET_SHA=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_sha // empty')
+CONTEXT_FILE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.context_file // empty')
+CONFLICTED_FILES=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflicted_files // "[]"')
+```
+
+If any of `WORK_DIR`, `REBASE_BEAD`, `REQUESTING_KEEPER`, `TARGET_SHA`
+are empty, the dispatch was malformed — close with
+`metadata.classification=infeasible`, `metadata.infeasible_reason="missing
+dispatch metadata"`, nudge `{{requesting_keeper}}`, drain.
+
+**2. Enter the shared worktree:**
+```bash
+cd "$WORK_DIR"
+```
+
+If the directory does not exist, set `metadata.classification=infeasible`
+with `metadata.infeasible_reason="shared worktree missing at $WORK_DIR"`
+and drain (see step 4 of `classify-and-rework`).
+
+**3. Verify the mid-rebase target matches our assignment.**
+
+Defensive: a previous keeper-handback may have left mid-rebase state from
+a different commit. Only `git rebase --abort` if the in-progress commit
+is NOT ours; never abort our own assignment.
+
+```bash
+if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+    IN_PROGRESS_SHA=$(git rev-parse REBASE_HEAD 2>/dev/null \
+        || cat .git/rebase-merge/stopped-sha 2>/dev/null \
+        || cat .git/rebase-apply/original-commit 2>/dev/null \
+        || echo "")
+    if [ -z "$IN_PROGRESS_SHA" ]; then
+        echo "ERROR: mid-rebase state present but cannot identify in-progress commit" >&2
+        # Treat as infeasible; the parent will see and hand back.
+        gc bd update {{issue}} \
+            --set-metadata classification=infeasible \
+            --set-metadata infeasible_reason="mid-rebase state present but in-progress commit unidentifiable"
+        gc bd close {{issue}} --reason "infeasible: mid-rebase state unreadable"
+        gc session nudge "$REQUESTING_KEEPER" "rework {{issue}} infeasible (mid-rebase unreadable); rebase $REBASE_BEAD needs re-pour"
+        gc runtime drain-ack
+        exit 0
+    fi
+    # Match by prefix (REBASE_HEAD is a full sha; TARGET_SHA from metadata may be short).
+    case "$IN_PROGRESS_SHA" in
+        ${TARGET_SHA}*) : ;;  # match — proceed
+        *)
+            echo "ERROR: mid-rebase commit $IN_PROGRESS_SHA does not match assignment $TARGET_SHA" >&2
+            gc bd update {{issue}} \
+                --set-metadata classification=infeasible \
+                --set-metadata infeasible_reason="mid-rebase commit $IN_PROGRESS_SHA != assigned $TARGET_SHA"
+            gc bd close {{issue}} --reason "infeasible: mid-rebase commit drift"
+            gc session nudge "$REQUESTING_KEEPER" "rework {{issue}} infeasible (commit drift); rebase $REBASE_BEAD needs re-pour"
+            gc runtime drain-ack
+            exit 0
+            ;;
+    esac
+else
+    echo "ERROR: no rebase in progress in shared worktree" >&2
+    gc bd update {{issue}} \
+        --set-metadata classification=infeasible \
+        --set-metadata infeasible_reason="shared worktree is not mid-rebase"
+    gc bd close {{issue}} --reason "infeasible: shared worktree not mid-rebase"
+    gc session nudge "$REQUESTING_KEEPER" "rework {{issue}} infeasible (not mid-rebase); rebase $REBASE_BEAD needs re-pour"
+    gc runtime drain-ack
+    exit 0
+fi
+```
+
+**Exit criteria:** cwd is the shared mid-rebase worktree; the in-progress
+commit matches `metadata.commit_sha`; rebase state is untouched.
+"""
+
+[[steps]]
+id = "preflight-tests"
+title = "Skip — rework polecat operates inside a mid-rebase worktree"
+needs = ["workspace-setup"]
+description = """
+The parent rebase polecat's `preflight-tests` step is already a no-op for
+the rebase family; the rework polecat inherits that. Running tests inside
+a mid-rebase worktree would conflate the rebase's failure surface with
+the rework's. The parent's `test` step (post-rebase, post-rework-stack)
+is the durable safety net for the kept set.
+
+Close this step and proceed."""
+
+[[steps]]
+id = "implement"
+title = "Skip — replaced by classify-and-rework"
+needs = ["preflight-tests"]
+description = """
+The actual work lives in `classify-and-rework`. Close this step and
+proceed."""
+
+[[steps]]
+id = "self-review"
+title = "Skip — replaced by classify-and-rework's commit shape"
+needs = ["implement"]
+description = """
+The rework polecat's commit shape and bead-metadata reporting are the
+self-review surface for this formula. The parent rebase polecat's
+`test` and `install` steps cover post-rework verification on the full
+kept stack. Close this step and proceed."""
+
+[[steps]]
+id = "classify-and-rework"
+title = "Read the conflict context, classify, do the rework (or skip), commit"
+needs = ["self-review"]
+description = """
+This is the core step. Read the context, decide the classification, and
+act accordingly. Self-report so the parent rebase polecat can route on
+re-entry without re-deriving your reasoning.
+
+**1. Read the context.**
+
+```bash
+CONTEXT_FILE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.context_file')
+TARGET_SHA=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_sha')
+TARGET_SUBJECT=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_subject')
+CONFLICTED_FILES=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflicted_files')
+
+cat "$CONTEXT_FILE"
+git status --short
+```
+
+The context file (prepared by the parent at dispatch) carries:
+- The kept commit's full body (`git log -1 --format='%B' $TARGET_SHA`).
+- The conflicted files' status from `git status --porcelain`.
+- The conflict markers in each conflicted file (raw content with `<<<<<<<`).
+- Upstream's recent diffs touching the same files
+  (`git log -p upstream/main -- <file>` for each conflicted file, bounded
+  to a reasonable recent window).
+- The goal-not-implementation framing and the four-class rule.
+
+**2. Classify.**
+
+Our fork commits represent goals/intents, not literal implementations.
+Pick exactly one classification for the work in front of you:
+
+- **mechanical** — The kept commit's intent transfers cleanly to the new
+  upstream layer. Anchors moved, identifiers got renamed, surrounding
+  code shifted, but the change you need to make is structurally the same.
+  No design call, no alternative considered, no judgment.
+
+  Examples: function the commit modified was renamed, the call site
+  moved into a helper, a struct field's location in initialization
+  changed.
+
+- **dropped-absorbed** — Upstream already provides the behavior the
+  commit was adding, OR upstream removed the surface the commit targeted
+  in a way that makes the commit moot. The right action is to drop the
+  commit (the parent rebase polecat will `git rebase --skip`).
+
+  Examples: cache mechanism the commit added is now built into upstream;
+  config field the commit deprecated has been removed upstream entirely.
+
+- **judgment-required** — The rework requires a design call. Multiple
+  reasonable ways to apply the intent; a public API surface change; a
+  behavior choice that affects callers; the commit's original assumption
+  no longer holds. Do the rework, AND self-report so a review polecat is
+  dispatched before the rebase continues.
+
+  Examples: API the commit modified got split into two functions
+  upstream — pick which side the change applies to; commit added a flag
+  whose semantics now overlap with an upstream flag; commit relied on a
+  deprecated dependency now removed and a replacement is non-obvious.
+
+- **infeasible** — You cannot complete this rework from this polecat's
+  context. Missing dependencies the polecat can't fetch; the scope
+  exploded beyond the original commit; context exhaustion approaching
+  before the work can complete; the kept commit's intent fundamentally
+  conflicts with upstream's direction and needs operator input.
+
+  Examples: dependency the commit used was renamed AND the new dep
+  isn't pinned in the build; the conflict touches 30+ files (scope too
+  broad for one rework polecat); the commit message says "TODO: ask
+  operator about X" and upstream changes make X now matter.
+
+**3. Act on the classification.**
+
+### mechanical
+
+Apply the equivalent change on the new layer. Edit each conflicted file
+(remove conflict markers; write the intended new state), `git add` the
+files, and commit:
+
+```bash
+git add -- $(printf '%s' "$CONFLICTED_FILES" | jq -r '.[]')
+git commit -m "rework $(printf '%s' "$TARGET_SHA" | cut -c1-12): $TARGET_SUBJECT (per {{issue}})
+
+Original commit's intent ported to post-upstream code in the shared
+rebase worktree. See {{issue}} for context and metadata.classification."
+```
+
+Then record on the bead:
+```bash
+FILES_CHANGED=$(git diff --name-only HEAD~1 HEAD | jq -R . | jq -s .)
+gc bd update {{issue}} \
+    --set-metadata classification=mechanical \
+    --set-metadata files_changed="$FILES_CHANGED" \
+    --notes "Mechanical rework of $TARGET_SHA. Files: $(printf '%s' "$FILES_CHANGED" | jq -r '. | join(", ")')"
+```
+
+### dropped-absorbed
+
+Do NOT commit. Reset the working tree to the rebase HEAD so the index
+is clean (no staged conflict resolution):
+
+```bash
+git reset --hard HEAD
+```
+
+This leaves the rebase mid-flight on the same conflicted commit; when
+the parent rebase polecat resumes, it will `git rebase --skip`.
+
+Record:
+```bash
+gc bd update {{issue}} \
+    --set-metadata classification=dropped-absorbed \
+    --notes "Upstream already provides this behavior or supersedes the commit. Recommended action: git rebase --skip. Rationale: <one to three sentences>."
+```
+
+### judgment-required
+
+Apply the rework you believe is correct (same shape as `mechanical`),
+commit it, AND self-report the judgment:
+
+```bash
+git add -- $(printf '%s' "$CONFLICTED_FILES" | jq -r '.[]')
+git commit -m "rework $(printf '%s' "$TARGET_SHA" | cut -c1-12): $TARGET_SUBJECT (per {{issue}})
+
+Original commit's intent ported to post-upstream code in the shared
+rebase worktree. Classification: judgment-required (review pending).
+See {{issue}} for context and metadata.judgment_summary."
+
+FILES_CHANGED=$(git diff --name-only HEAD~1 HEAD | jq -R . | jq -s .)
+gc bd update {{issue}} \
+    --set-metadata classification=judgment-required \
+    --set-metadata files_changed="$FILES_CHANGED" \
+    --set-metadata judgment_summary="<one to three sentences describing the design call you made and the alternatives considered>" \
+    --notes "Judgment-required rework of $TARGET_SHA. See metadata.judgment_summary."
+```
+
+The parent rebase polecat will dispatch a review polecat against this
+commit before `git rebase --continue`.
+
+### infeasible
+
+Do NOT commit. Leave the worktree as-is (mid-rebase, conflicts unresolved).
+Record:
+
+```bash
+gc bd update {{issue}} \
+    --set-metadata classification=infeasible \
+    --set-metadata infeasible_reason="<concise one-liner: missing dep / scope too broad / context exhausted / operator input needed>" \
+    --notes "Infeasible: <full explanation with what's blocking and what the operator should consider>."
+```
+
+The parent rebase polecat will hand the rebase bead back to the keeper
+with the rework's `infeasible_reason` surfaced for the operator.
+
+**4. Close the rework bead and nudge the keeper:**
+
+```bash
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+REBASE_BEAD=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.rebase_bead')
+CLASSIFICATION=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.classification')
+
+gc bd close {{issue}} --reason "Rework classified: $CLASSIFICATION"
+gc session nudge "$REQUESTING_KEEPER" "rework {{issue}} done ($CLASSIFICATION); rebase $REBASE_BEAD ready to re-pour"
+gc runtime drain-ack
+exit 0
+```
+
+**Exit criteria:** `metadata.classification` is set to one of the four
+values; the worktree state matches the classification (committed for
+mechanical/judgment-required, clean for dropped-absorbed, untouched for
+infeasible); the rework bead is closed; the keeper has been nudged."""

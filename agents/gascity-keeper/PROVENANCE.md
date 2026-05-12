@@ -43,6 +43,10 @@ only into the gascity rig.
 
 - `formulas/mol-upstream-gc-rebase.toml` — the rebase mol the keeper
   dispatches on "rebase from upstream" / "sync from upstream" commands.
+- `formulas/mol-upstream-gc-rebase-rework.toml` — the focused rework mol
+  the rebase polecat dispatches per conflicted kept commit; the keeper
+  doesn't dispatch this directly but participates in the re-pour loop
+  via the `rebase_in_progress` handback.
 - `formulas/mol-upstream-gc-pr-prep.toml` — the PR-prep mol the keeper
   dispatches on "prep PR for &lt;sha&gt;" commands; this mol hands the
   bead back to the keeper for the title/body conversation.

@@ -37,17 +37,24 @@ for promoting a commit to an upstream PR candidate.
 3. **Sweep for handback beads** assigned to you:
    ```bash
    gc bd list --assignee=$GC_AGENT --status=open --json | \
-     jq '.[] | select(.metadata.suggested_pr_title or .metadata.aborted_at or .metadata.conflict_questions)'
+     jq '.[] | select(.metadata.suggested_pr_title or .metadata.aborted_at or .metadata.conflict_questions or .metadata.rebase_in_progress)'
    ```
-   Three kinds of handbacks land in your queue:
+   Four kinds of handbacks land in your queue:
 
    - `metadata.suggested_pr_title` — a `mol-upstream-gc-pr-prep` polecat
      finished its mechanical pass and is waiting for you to drive the
      title/body conversation.
+   - `metadata.rebase_in_progress` — a `mol-upstream-gc-rebase` polecat
+     halted mid-rebase to dispatch a focused rework polecat (or review
+     polecat) for a conflicted kept commit, then drained. The bead is
+     parked with `metadata.pending_rework` (and sometimes
+     `metadata.pending_review`) pointing at the child bead. When that
+     child bead is **closed**, you re-pour the rebase mol against the
+     parent bead and the rebase polecat picks up from where it stopped.
+     See the "Rebase-In-Progress Handback" section below.
    - `metadata.conflict_questions` — a `mol-upstream-gc-rebase` polecat
-     exhausted upstream-wins auto-resolution and needs operator directives
-     for files it couldn't resolve. This is the cooperative rare-fallback
-     (vanishingly rare under the upstream-wins rule). See the
+     escalated because a rework polecat reported `infeasible` or the
+     rebase got stuck and needs operator intervention. See the
      "Conflict-Questions Handback" section below for the conversation.
    - `metadata.aborted_at` — a polecat aborted on a post-rebase step
      (test failure, install failure, push race, or cherry-pick conflict
@@ -55,11 +62,11 @@ for promoting a commit to an upstream PR candidate.
      *tries* to mail the operator, but mail is best-effort and may not
      have arrived. Don't assume the operator has seen mail.
 
-   Note: `aborted_at` is no longer set by the rebase step itself —
-   upstream-wins handles conflicts inline and the rare-fallback uses
-   `conflict_questions`. The `aborted_at` predicate above is kept for
-   the other abort paths (test/install/push/cherry-pick) and as a
-   belt-and-suspenders catch for any legacy dead-end.
+   Note: `aborted_at` is not set by the rebase step itself for kept-
+   commit conflicts — those go through the rework-polecat dispatch
+   flow (`rebase_in_progress`) or escalate via `conflict_questions` on
+   genuine stuck states. The `aborted_at` predicate is kept for the
+   other abort paths (test/install/push/cherry-pick).
 
 4. **Sweep stale rebase branches** in the gascity rig:
    ```bash
@@ -114,7 +121,9 @@ for promoting a commit to an upstream PR candidate.
 
    Pending (needs your engagement):
      - <bead> — PR-prep handback: "<suggested title>" — branch ready
-     - <bead> — rebase conflict-questions (<N> files need operator directives)
+     - <bead> — rebase-in-progress: rework <child-bead> classified <classification> (ready to re-pour)
+     - <bead> — rebase-in-progress: review <child-bead> closed with verdict <approve|reject> (ready to re-pour)
+     - <bead> — rebase conflict-questions (operator intervention needed)
      - <bead> — aborted (<reason>)
      - stale: rebase/<bead> (bead closed; safe to delete after confirming origin/main)
      - mail: "<subject>" from <sender>
@@ -175,21 +184,24 @@ gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-rebase \
 `--on <formula>` is what attaches the wisp to the bead. `--var k=v` is
 formula-variable substitution; without `--on` it does not attach a formula
 at all. Stamping `requesting_keeper` (both in bead metadata and as a
-formula var) lets the polecat hand the bead back to you in the rare-
-fallback case where upstream-wins auto-resolution doesn't complete; the
-polecat falls back to `notify_recipient` if no keeper is stamped. The
-other rebase mol vars have defaults, so no further `--var` flags are
-needed unless the operator overrides one.
+formula var) lets the polecat hand the bead back to you for the rework
+re-pour loop (`rebase_in_progress`) or the operator-intervention escape
+hatch (`conflict_questions`). The polecat falls back to `notify_recipient`
+if no keeper is stamped. The other rebase mol vars have defaults, so no
+further `--var` flags are needed unless the operator overrides one.
 
 Tell the operator:
 
-> Polecat dispatched on bead `<id>`. Autonomous run — survey, rebase
-> (upstream-wins on any conflicts, with audit log), test, install, push.
-> You'll get a "complete" mail summarizing the outcome (including any
-> upstream-wins resolutions), or an action-required mail if a post-
-> rebase step aborted (test failure, install failure, push race), or a
-> rare conflict-questions handback to me if upstream-wins couldn't
-> complete.
+> Polecat dispatched on bead `<id>`. Autonomous run — survey, rebase,
+> test, install, push. Kept-commit conflicts dispatch a focused rework
+> polecat that re-implements the commit's intent on the new upstream
+> layer (mechanical / dropped-absorbed / judgment-required /
+> infeasible classification); judgment-required reworks get reviewed
+> before the rebase continues. You'll get a "complete" mail summarizing
+> the outcome (including any rework dispatches and their classifications),
+> or an action-required mail if a post-rebase step aborted (test, install,
+> push), or a handback to me if a rework reported `infeasible` or the
+> rebase got stuck.
 
 ### "check vendor drift" / "is gastown stale?"
 
@@ -353,14 +365,99 @@ Want to tweak any of these before I finalize?
    closing with reason `"PR opened: <url>"`. The operator decides when
    that flip happens; you don't anticipate it.
 
+## Rebase-In-Progress Handback
+
+When a bead with `metadata.rebase_in_progress=true` is your assignment,
+a `mol-upstream-gc-rebase` polecat halted mid-rebase to dispatch a
+focused rework polecat (or review polecat) for a conflicted kept commit
+and drained. The bead carries `metadata.pending_rework` (and possibly
+`metadata.pending_review`) pointing at the child bead. Your job is
+operationally simple: when the child closes, re-pour the rebase mol on
+the parent bead.
+
+You can also be nudged proactively — rework and review polecats nudge
+you on completion. Either way, the wake-up does the same thing.
+
+1. **Read the bead in full** — `gc bd show <id>` plus
+   `gc bd show <id> --json | jq '.[0].metadata'`. The relevant fields:
+   - `metadata.pending_rework` — rework bead ID; check its status.
+   - `metadata.pending_review` — review bead ID (set when a rework
+     classified `judgment-required` and a review polecat was
+     dispatched); check its status.
+   - `metadata.conflict_resolutions` — audit log of resolutions
+     applied so far (read-only; growing across re-pours).
+   - `metadata.work_dir` — the rebase polecat's worktree, mid-rebase.
+   - `metadata.requesting_keeper` — should match `$GC_AGENT`.
+   - `metadata.backup_ref` — the pre-rebase rollback target.
+
+2. **Decide whether to re-pour.**
+
+```bash
+REWORK=$(gc bd show <bead> --json | jq -r '.[0].metadata.pending_rework // empty')
+REVIEW=$(gc bd show <bead> --json | jq -r '.[0].metadata.pending_review // empty')
+
+# The newer of pending_review and pending_rework is the gate.
+GATE="$REVIEW"
+[ -z "$GATE" ] && GATE="$REWORK"
+
+if [ -n "$GATE" ]; then
+    STATUS=$(gc bd show "$GATE" --json | jq -r '.[0].status // empty')
+    if [ "$STATUS" != "closed" ]; then
+        echo "Child bead $GATE still $STATUS; the rebase is parked. No re-pour yet."
+    else
+        echo "Child bead $GATE is closed; ready to re-pour the rebase mol on <bead>."
+    fi
+fi
+```
+
+If the child is not closed yet, do nothing — the child polecat will
+nudge you (or be visible on next prime). Don't re-pour while a child is
+still in flight; the rebase polecat will detect the pre-mature wake and
+drain immediately.
+
+3. **Re-pour when the child is closed.**
+
+```bash
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+cd "$RIG_PATH"
+gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
+  --var requesting_keeper="$GC_AGENT"
+```
+
+The new rebase polecat reuses `metadata.work_dir`, reads
+`metadata.pending_rework` and `metadata.pending_review`, applies the
+classification (mechanical → continue; dropped-absorbed → skip;
+judgment-required → dispatch review or, if review approved, continue;
+infeasible → set `metadata.conflict_questions` and hand back), then
+either continues the rebase to the next conflict (where it will
+dispatch the next rework polecat and drain again) or runs the rest of
+the chain (test → install → push → notify-and-close).
+
+Tell the operator (only if they engaged you; otherwise stay quiet):
+
+> Rebase <bead>: rework <rework-bead> classified <classification>.
+> Re-poured the rebase mol; polecat will continue from where it
+> stopped. Next stop: another rework if there are more conflicts,
+> otherwise test/install/push.
+
+4. **If a review came back with `verdict=reject`**, the next rebase
+   polecat dispatches a fresh rework against the same conflict with
+   the rejection reason in context. You don't need to do anything
+   different — re-pour and the polecat handles it.
+
 ## Conflict-Questions Handback
 
 When a bead with `metadata.conflict_questions` is your assignment, a
-`mol-upstream-gc-rebase` polecat exhausted upstream-wins auto-resolution
-and needs operator directives to finish the rebase. This path is
-expected to be vanishingly rare under the upstream-wins rule — reaching
-it implies a pathological case (sentinel files, repo-state corruption,
-or a rebase state the auto-resolver could not advance past).
+`mol-upstream-gc-rebase` polecat escalated because:
+- A rework polecat reported `infeasible` (couldn't complete the rework
+  from its context), OR
+- The rebase polecat got stuck in a state it can't advance past
+  (`MAX_DISPATCHES` exceeded, mid-rebase commit unidentifiable, etc).
+
+Both shapes write `metadata.conflict_questions` as a JSON array with
+one entry per blocker, describing the situation. This path is expected
+to be rare under the rework-dispatch rule — reaching it implies a
+pathological case the focused rework polecat couldn't navigate.
 
 Before opening the conversation, **verify the rebase didn't land out-of-
 band**. Use the same `pre_rebase_tip` vs `origin/main` check described
@@ -369,15 +466,16 @@ the polecat's `keep` set, the rebase landed by some other path — clear
 `conflict_questions` (and `aborted_at` if set) and treat the bead as
 done, with a note explaining the recovery.
 
-Otherwise, walk the operator through the irresolvable files:
+Otherwise, walk the operator through the blockers:
 
 1. **Read the bead in full** — `gc bd show <id>` plus
    `gc bd show <id> --json | jq '.[0].metadata'`. The relevant fields:
-   - `metadata.conflict_questions` — JSON array, one entry per
-     still-unmerged file: `{file, case, question}`.
-   - `metadata.upstream_wins_log` — JSON array of resolutions the
-     polecat already applied this round. Helpful context for the
-     operator (what was auto-resolved before getting stuck).
+   - `metadata.conflict_questions` — JSON array, one entry per blocker
+     with `commit_sha`, `commit_subject`, optional `rework_bead`,
+     and `question`.
+   - `metadata.conflict_resolutions` — audit log of resolutions already
+     applied this rebase. Helpful context (what the polecat got through
+     before stalling).
    - `metadata.commit_verdicts` — the survey output.
    - `metadata.work_dir` — the polecat's worktree, still mid-rebase.
    - `metadata.backup_ref` — the pre-rebase rollback target.
@@ -385,63 +483,52 @@ Otherwise, walk the operator through the irresolvable files:
 2. **Surface the situation:**
 
 ```
-Rebase polecat for <bead> hit conflicts that upstream-wins couldn't
-resolve. <N> files need operator directives.
+Rebase polecat for <bead> escalated <N> blocker(s) that need operator
+intervention.
 
-Already auto-resolved this round (upstream-wins): <M> resolutions
-across <K> files — see metadata.upstream_wins_log for the audit log.
+Already resolved this rebase (conflict_resolutions): <M> conflicts
+across the prior keeps — see metadata.conflict_resolutions for the
+audit log.
 
-Still unresolved:
-  - <file 1> (status: <case>): <question>
-  - <file 2> (status: <case>): <question>
-  ...
+Current blocker(s):
+  - <commit_sha> (<commit_subject>): <question>
+  - ...
 
-For each, pick one of:
-  - ours    — take upstream's version (drop the local commit's changes)
-  - theirs  — take the local commit's version (override upstream)
-  - delete  — remove the file entirely
+Options:
+  - drive by hand     — go to metadata.work_dir, resolve, git rebase --continue, push, then ask me to clear the metadata
+  - skip the commit   — git rebase --skip in the worktree (loses that commit's work for this rebase)
+  - abort             — git rebase --abort + git reset --hard $BACKUP_REF (full rollback)
 
-What should we do with each?
+What would you like to do?
 ```
 
-3. **Persist the answers.** When the operator decides, write
-   `metadata.conflict_answers` as a JSON object mapping each file path
-   to the chosen action:
+3. **Apply the operator's choice.**
+
+If the operator drives by hand: tell them the worktree is at
+`metadata.work_dir`, mid-rebase. After they resolve, `git rebase
+--continue` to completion, and push to `origin/main` themselves, apply
+the same manual-recovery convention as for `aborted_at` beads (clear
+the flag, note what landed, cite `origin/main` after the push):
 
 ```bash
-ANSWERS=$(jq -n '{
-  "path/to/file1": "ours",
-  "path/to/file2": "theirs",
-  "path/to/file3": "delete"
-}')
-gc bd update <bead> --set-metadata conflict_answers="$ANSWERS"
+gc bd update <bead> --unset-metadata conflict_questions
+gc bd update <bead> --unset-metadata rebase_in_progress
+gc bd update <bead> --unset-metadata pending_rework
+gc bd update <bead> --unset-metadata pending_review
+gc bd close <bead> --reason "manual rebase resolution; landed on $(git -C "$RIG_PATH" rev-parse --short origin/main)"
 ```
 
-4. **Re-dispatch the rebase mol on the same bead.** The polecat reuses
-   `metadata.work_dir`, defensively aborts the in-progress rebase, redoes
-   the survey + rebase from scratch, and applies the operator's answers
-   to the irresolvable files (and upstream-wins to any other conflicts —
-   upstream may have moved since the previous attempt).
+If the operator wants to skip the offending commit and let the polecat
+continue: clear `conflict_questions`, leave the worktree mid-rebase,
+and re-pour the rebase mol. The polecat will re-enter mid-rebase, see
+no pending_rework or pending_review, fall into the conflict loop, and
+dispatch a fresh rework. If the operator wants the polecat to genuinely
+SKIP the commit (not rework), they'd need to do that in the worktree
+themselves via `git rebase --skip` before clearing the metadata.
 
-```bash
-RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
-cd "$RIG_PATH"
-gc bd update <bead> --status=open --unset-metadata conflict_questions
-gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
-  --var requesting_keeper="$GC_AGENT"
-```
-
-Clear `conflict_questions` on dispatch so it no longer shows in your
-prime sweep — the bead is back in flight. Leave `conflict_answers` on
-the bead (the polecat reads it).
-
-5. **If the operator wants to drive the resolution by hand instead**,
-   they're in their own seat — don't re-dispatch. Tell them the worktree
-   is at `metadata.work_dir`, mid-rebase. They resolve, `git rebase
-   --continue` to completion, push to `origin/main` themselves, and ask
-   you to clear the conflict-questions metadata when done. Apply the
-   same manual-recovery convention as for `aborted_at` beads (clear the
-   flag, note what landed, cite `origin/main` after the push).
+If the operator wants to abort: have them run `git rebase --abort` and
+`git reset --hard $BACKUP_REF` in the worktree, then close the bead
+with a rollback note.
 
 ## Conventions
 
