@@ -1,7 +1,4 @@
 scope = "rig"
-provider = "claude"
-session = "tmux"
-attach = true
 wake_mode = "resume"
 idle_timeout = "8h"
 min_active_sessions = 0
@@ -24,7 +21,7 @@ append_fragments = ["mechanik-thread-role"]
 work_dir = ".gc/worktrees/{{.Rig}}/mechanik-thread/{{.AgentBase}}"
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 
-nudge = "Operator focus thread. Check mail (gc mail inbox); the canonical mechanik handles routed work."
+nudge = "Operator nudge — return to the focus thread. Routed mail and routed work go to the canonical mechanik; check mail (gc mail inbox) only if the operator left a direct message."
 
 # Never-matching predicates: threads are operator-spawned only.
 # work_query returns empty JSON so the reconciler never claims work or

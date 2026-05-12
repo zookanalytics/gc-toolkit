@@ -40,8 +40,9 @@ are provided in §C below.
 - `agents/mechanik-thread/PROVENANCE.md` — provenance note
 - `template-fragments/mechanik-thread-role.template.md` — thread-role
   clarification fragment, injected via `append_fragments`
-- `pack.toml` — `[[named_session]]` entry for operator-spawn UX
-  (`scope = "rig"`, `mode = "on_demand"`)
+- `pack.toml` — net-zero in v2. v1 added a `[[named_session]]` block;
+  the v2 respin removed it (named-session + pool semantics were in
+  tension — see §A.3).
 
 Canonical mechanik (`agents/mechanik/*`) is **not** modified.
 
@@ -123,17 +124,15 @@ spawns getting distinct directories without race. See §C.
 
 ```toml
 min_active_sessions = 0
-max_active_sessions = 4
+# max_active_sessions intentionally omitted — unbounded (v2)
 ```
 
-Plus `pack.toml` named_session entry:
-
-```toml
-[[named_session]]
-template = "mechanik-thread"
-scope = "rig"
-mode = "on_demand"
-```
+No `[[named_session]]` entry in `pack.toml`. v1 added one with
+`mode = "on_demand"`, but on-demand named-session semantics conflict
+with pool semantics: on-demand would reopen a single canonical name
+rather than spawn numbered instances. v2 drops the block; pool agents
+are operator-spawnable via fully-qualified `gc session new` without a
+named-session declaration.
 
 **Reconciler behavior (static read).** `EffectiveMinActiveSessions()`
 returns 0 (`internal/config/config.go:2176-2181`), so the reconciler
@@ -144,12 +143,13 @@ auto-spawns on city start.
 
 **Operator spawn path.** `gc session new gc-toolkit/gc-toolkit.mechanik-thread`
 falls under `cmdSessionNew` (`cmd/gc/session_model_phase0_cli_surface_spec_test.go:486`).
-For agents with `max_active_sessions > 1`, gascity creates pool
-instances numbered `<template>-1`, `<template>-2`, … up to the cap.
+For pool agents (`max_active_sessions != 1`), gascity creates instances
+numbered `<template>-1`, `<template>-2`, … on each invocation.
 
-**Cap behavior.** `EffectiveMaxActiveSessions()` returns
-`*MaxActiveSessions = 4`. The reconciler / session-new path checks
-against this cap and returns an error when exceeded.
+**Cap behavior.** With `max_active_sessions` unset,
+`EffectiveMaxActiveSessions()` returns the unlimited sentinel
+(`internal/config/config.go:2169-2170`); the reconciler does not
+enforce a cap. The operator is the only gate on concurrency.
 (Code path: `internal/agentutil/pool.go:23`,
 `internal/agentutil/resolve.go:136,162`.)
 
@@ -261,15 +261,13 @@ gc session new gc-toolkit/gc-toolkit.mechanik-thread
 
 gc session new gc-toolkit/gc-toolkit.mechanik-thread
 gc session new gc-toolkit/gc-toolkit.mechanik-thread
-gc session new gc-toolkit/gc-toolkit.mechanik-thread
-# Expect: spawns -2, -3, -4.
-
-gc session new gc-toolkit/gc-toolkit.mechanik-thread
-# Expect: error citing max_active_sessions=4 cap.
+# Expect: spawns -2, -3. Concurrency is unbounded in v2; the operator
+# stops when they're done. (No cap-error test — `max_active_sessions`
+# is unset.)
 
 # Verification 2 — separate workspace
 ls /home/zook/loomington/.gc/worktrees/gc-toolkit/mechanik-thread/
-# Expect: gc-toolkit.mechanik-thread-1/, -2/, -3/, -4/ each its own worktree.
+# Expect: gc-toolkit.mechanik-thread-1/, -2/, -3/ — each its own worktree.
 
 # Verification 4 — GC_AGENT identity in beads
 # Attach to mechanik-thread-1, run:
