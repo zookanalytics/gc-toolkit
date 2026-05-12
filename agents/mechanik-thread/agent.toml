@@ -1,0 +1,32 @@
+scope = "rig"
+wake_mode = "resume"
+idle_timeout = "8h"
+min_active_sessions = 0
+
+# Cross-reference: render the canonical mechanik's prompt template under
+# this agent's identity. Path is pack-root-relative —
+# compose.adjustFragmentPath translates it to city-root-relative before
+# render. Template variables (.AgentName, .RigName, .WorkDir) bind to the
+# thread's identity, not the canonical's, because PromptContext is
+# built per-agent at render time (cmd/gc/template_resolve.go).
+prompt_template = "agents/mechanik/prompt.template.md"
+
+# Append a thread role clarification after the canonical body
+# renders. Fragment ships at template-fragments/mechanik-thread-role.template.md.
+append_fragments = ["mechanik-thread-role"]
+
+# Each instance gets its own worktree, separate from canonical mechanik's
+# .gc/agents/mechanik home. AgentBase parameterizes by per-instance name
+# (e.g., mechanik-thread-1), so concurrent threads do not stomp each other.
+work_dir = ".gc/worktrees/{{.Rig}}/mechanik-thread/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+
+nudge = "Operator nudge — return to the focus thread. Routed mail and routed work go to the canonical mechanik; check mail (gc mail inbox) only if the operator left a direct message."
+
+# Never-matching predicates: threads are operator-spawned only.
+# work_query returns empty JSON so the reconciler never claims work or
+# auto-spawns to satisfy demand. sling_query exits non-zero so
+# `gc sling gc-toolkit/gc-toolkit.mechanik-thread <bead>` surfaces an
+# explicit error instead of silently routing.
+work_query = "printf '[]'"
+sling_query = "echo 'mechanik-thread is operator-spawned only; not a sling target' >&2; exit 1"
