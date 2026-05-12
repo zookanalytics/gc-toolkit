@@ -60,10 +60,18 @@ context or restart — should be clarified before invoking. Ask: *"Do
 you want a handoff (fresh transcript) or just a summary in place?"*
 
 Don't invoke for: a wedged or hallucinating agent (recommend
-`gc session reset <alias>` instead), or routine context trimming where
-continuity matters more than scope reset (recommend `/compact`
-instead). Surface those alternatives if the operator's phrasing
-suggests one of them is the better fit.
+`gc session reset <alias>` instead — reset is correct here because
+handoff would block on the frozen runtime), or routine context
+trimming where continuity matters more than scope reset (recommend
+`/compact` instead). Surface those alternatives if the operator's
+phrasing suggests one of them is the better fit.
+
+The wedged-agent carve-out is specific to the **operator-initiated
+carry-forward sweep** flow this skill governs. Cycle-recycle is a
+different flow: it legitimately chains `gc handoff` (state-capture)
+followed by `gc session reset` (restart-trigger) for on-demand named
+sessions, and that chaining is correct there. See
+`template-fragments/cycle-recycle.template.md`.
 
 ## The carry-forward decision
 
@@ -189,9 +197,16 @@ fires, the old session is gone. Trust the mail.
 
 ## Don't pivot mid-skill
 
-If during the carry-forward sweep you find yourself reaching for
-`/compact`, `gc session reset`, or `gc session kill` instead — stop.
-Surface to the operator that one of those might be a better fit and
-let them redirect. By the time this skill is firing, the operator
-has decided on a handoff; pivoting silently to a different tool
-breaks that intent.
+If during the **operator-initiated carry-forward sweep** you find
+yourself reaching for `/compact`, `gc session reset`, or `gc session
+kill` instead — stop. Surface to the operator that one of those
+might be a better fit and let them redirect. By the time this skill
+is firing, the operator has decided on a handoff; pivoting silently
+to a different tool breaks that intent.
+
+This is specific to the carry-forward sweep flow, not a blanket
+prohibition on chaining handoff with reset. Cycle-recycle is a
+different, automated flow that legitimately chains `gc handoff`
+followed by `gc session reset` to recycle on-demand named coords
+without operator `/clear`; that pattern is documented in
+`template-fragments/cycle-recycle.template.md` and is allowed.

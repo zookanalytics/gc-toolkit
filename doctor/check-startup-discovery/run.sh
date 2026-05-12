@@ -3,10 +3,12 @@
 #
 # Tier-1 (in-progress wisp) was the historical query and is preserved.
 # Tier-2 catches routed work beads with metadata.branch — these arrive when a
-# polecat completes work between cycle-recycle handoff and operator /clear.
-# Without tier-2 the work bead is invisible to the post-/clear session and
-# sits open until manual nudge. See rigs/gc-toolkit/specs/tk-fyzvk for the
-# full diagnostic.
+# polecat completes work after the inheriting session has already booted from
+# the controller-driven respawn (handoff for controller-restartable, the
+# chained reset for on-demand named) but before the boot-time tier-1 query
+# fired. Without tier-2 the work bead is invisible to the inheriting session
+# and sits open until manual nudge. See rigs/gc-toolkit/specs/tk-fyzvk for
+# the full diagnostic.
 #
 # Tier-3 catches open patrol wisps left behind by pour-before-burn
 # cycle-recycle, including pathological multi-wisp accumulation from a
