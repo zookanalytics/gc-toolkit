@@ -6,7 +6,7 @@
 
 ## Goals
 
-Pool of polecat workers backed by the Codex CLI provider (`provider = "codex"`) instead of the default Claude provider. Distinct `work_dir` keeps codex worktrees out of the default polecats/ tree. Otherwise mirrors `agents/polecat/` shape (rig-scoped, ephemeral, pre-start `worktree-setup.sh`).
+Pool of polecat workers backed by the Codex CLI provider (`provider = "codex"`) instead of the default Claude provider. Distinct `work_dir` keeps codex worktrees out of the default polecats/ tree. Otherwise mirrors the imported gastown `polecat` shape (rig-scoped, ephemeral, pre-start `worktree-setup.sh`).
 
 ## Why we built this
 
