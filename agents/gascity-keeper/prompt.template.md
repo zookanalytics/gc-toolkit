@@ -420,9 +420,31 @@ drain immediately.
 ```bash
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
-gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
+gc bd update <bead> --assignee ""
+gc sling gascity/gc-toolkit.polecat <bead> \
   --var requesting_keeper="$GC_AGENT"
 ```
+
+Re-pour differs from first dispatch in two ways — both load-bearing,
+both easy to miss:
+
+- **No `--on mol-upstream-gc-rebase`.** The first sling attached the
+  molecule; the bead now carries `metadata.molecule_id` permanently.
+  Re-sling with `--on` errors out (`bead <id> already has attached
+  molecule <mol-id>`, also rejected with `--force`). A bare sling
+  re-engages the existing wisp — the polecat reads
+  `metadata.pending_rework` / `pending_review` / `work_dir` /
+  `conflict_resolutions` from the bead and continues. `dispatch_count`
+  bumps on claim.
+- **Clear `assignee` first.** The rebase formula's handback step set
+  `assignee=$REQUESTING_KEEPER` (you) so the bead landed in your
+  pending sweep. A bare sling only flips `gc.routed_to`; it does NOT
+  touch assignee. The supervisor's pool scale-check (`Ready ∧ assignee
+  == "" ∧ gc.routed_to == <pool-template>`) skips beads with a
+  non-empty assignee, so without the clear the bead silently sits
+  unclaimed — `routed_to` points at the polecat pool, but no polecat
+  ever materializes. Clearing assignee restores the scale-check signal
+  and the supervisor spawns a fresh rebase polecat on the next tick.
 
 The new rebase polecat reuses `metadata.work_dir`, reads
 `metadata.pending_rework` and `metadata.pending_review`, applies the
