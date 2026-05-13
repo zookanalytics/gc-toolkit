@@ -1,8 +1,7 @@
 # Example wiring — consuming city runs concierge as a city agent.
 #
 # Drop these stanzas into your city's pack.toml (or city.toml) after
-# importing gc-toolkit. Adjust the overseer alias to match whatever
-# target you use for mail/nudge to the human.
+# importing gc-toolkit.
 
 [[named_session]]
 template = "concierge"
@@ -15,12 +14,6 @@ mode = "always"
 # [[patches.agent]]
 # name = "concierge"
 # idle_timeout = "4h"
-
-# Overseer alias — wire the push channel to whoever the human reads.
-# Concierge uses `gc mail send <overseer-alias>` and
-# `gc session nudge <overseer-alias>` for push-on-create notifications.
-# In the first version there's one overseer alias per city; multi-human
-# addressing is out of scope.
 
 # v2 session-per-consult — register the consult-host template as
 # city-scoped, on-demand spawning (no `mode = "always"`). Concierge

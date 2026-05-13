@@ -176,7 +176,7 @@ upstream. Consider whether the commit needs to be split, rebased onto a
 prior local commit first, or simply isn't a viable upstream-PR candidate.
 EOF
 )"
-gc mail send overseer -s "pr-prep: cherry-pick conflict for {{issue}}" -m "(see keeper mail)"
+gc mail send human -s "pr-prep: cherry-pick conflict for {{issue}}" -m "(see keeper mail)"
 ```
 
 3. Set the abort marker, hand the bead back to the keeper, and exit:
@@ -287,7 +287,7 @@ Failure tail:
 $TEST_TAIL
 EOF
 )"
-gc mail send overseer -s "pr-prep: tests failed for {{issue}}" -m "(see keeper mail)"
+gc mail send human -s "pr-prep: tests failed for {{issue}}" -m "(see keeper mail)"
 
 gc bd update {{issue}} \
   --set-metadata aborted_at=test \
@@ -350,7 +350,7 @@ Next: review what landed remotely. If the new commits should supersede
 this prep, abandon this bead; otherwise restart pr-prep on a fresh bead.
 EOF
 )"
-gc mail send overseer -s "pr-prep: branch race for {{issue}}" -m "(see keeper mail)"
+gc mail send human -s "pr-prep: branch race for {{issue}}" -m "(see keeper mail)"
 
 gc bd update {{issue}} \
   --set-metadata aborted_at=push-branch \
@@ -534,7 +534,7 @@ if they didn't notice the keeper's notification.
 
 ```bash
 BRANCH_URL=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.branch_url')
-gc mail send overseer -s "pr-prep ready: {{issue}}" -m "$(cat <<EOF
+gc mail send human -s "pr-prep ready: {{issue}}" -m "$(cat <<EOF
 PR prep is complete for {{issue}}. Branch pushed: $BRANCH_URL.
 
 The keeper ($REQUESTING_KEEPER) has been re-assigned the bead and

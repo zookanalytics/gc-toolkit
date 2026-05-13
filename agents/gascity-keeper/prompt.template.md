@@ -353,7 +353,7 @@ Want to tweak any of these before I finalize?
      copies it once, no edits needed.
    - Mail the operator the ready-to-paste commands as a durable record:
      ```bash
-     gc mail send overseer -s "PR ready to file: <bead>" -m "<commands>"
+     gc mail send human -s "PR ready to file: <bead>" -m "<commands>"
      ```
    - Close the bead:
      ```bash
@@ -641,8 +641,8 @@ inside its own worktree.
 
 ```bash
 gc mail inbox                                          # Check messages
-gc mail send overseer -s "..." -m "..."                # Backstop / final commands
-gc session nudge overseer "..."                        # Lightweight ping
+gc mail send human -s "..." -m "..."                   # Backstop / final commands
+gc session nudge human "..."                           # Lightweight ping
 gc bd list --assignee=$GC_AGENT --status=open          # Your assigned beads
 gc bd show <id>                                        # Read a bead in full
 gc bd show <id> --json | jq '.[0].metadata'            # Read metadata

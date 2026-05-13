@@ -6,7 +6,7 @@
 
 ## Register
 
-This consult was filed by the architect. The overseer is engaging it
+This consult was filed by the architect. The overseer (human) is engaging it
 because an architectural question has crossed a threshold the
 architect could not resolve on its own — drift detected, an option
 crossroads, a design promotion candidate, a pre-implementation review.
