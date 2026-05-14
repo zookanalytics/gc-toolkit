@@ -24,8 +24,13 @@ belong nowhere.
 
 - One agent: `mechanik`, a city-scoped structural engineer for the pack
   itself — owns formulas, agent configs, dispatch patterns, conventions.
-- Two reference docs under `docs/`: one describing current Gas City surface
-  area, one tracking pack/city v2 direction.
+- An **agent brief** under `docs/` — the canonical reference material an
+  agent working in or on Gas City loads as context. Today five docs:
+  one index into upstream docs (`gascity-reference.md`) plus four
+  gc-toolkit-specific process docs (local-patching, upstream-engagement,
+  rebase-conventions, polecat-patterns). See `principles/agent-brief.md`
+  for the doc-type definition and the canonical membership list, and
+  `gascity-reference.md` for the bar applied before adding new entries.
 - No formulas yet. No other agents yet.
 
 This roadmap describes what fills out from here.

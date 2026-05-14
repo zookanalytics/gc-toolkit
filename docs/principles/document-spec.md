@@ -17,8 +17,8 @@ synthesis settles on that location for three reasons that the spec
 itself argues for:
 
 1. **`docs/<topic>.md` is gc-toolkit's existing pattern** for project-wide
-   reference content (`gas-city-reference.md`, `gas-city-pack-v2.md`,
-   `gascity-local-patching.md`, `roadmap.md`). A new spec describing how
+   reference content (`gascity-reference.md`, `gascity-local-patching.md`,
+   `roadmap.md`). A new spec describing how
    gc-toolkit's docs work belongs in that same flat tier — central,
    refreshed in place, one of its kind.
 2. **`principles/` is a sub-tier**, not a separate root. The principle of
@@ -88,7 +88,7 @@ provenance column lists each contributing survey.
 | Doc-type | Producer (platform mechanism) | Default location | Central/Local | Cross-doc reference scheme | Lifecycle marker | Provenance |
 |---|---|---|---|---|---|---|
 | **Reference manual (canonical)** | Hand-authored doc; rolled forward in place | BMAD: `docs/reference/<topic>.md` (Diátaxis quadrant). Gas Town: `<rig>/docs/<topic>.md` flat. Superpowers: `docs/<topic>.md` plus `docs/<harness>/<topic>.md`. Kiro/Spec Kit: no equivalent in the toolkit's own tree (their docs are user-edit context). | Central | Inter-doc markdown links; section anchors; sometimes glob discovery (BMAD) | Header date stamp ("Current as of v1.0.1") + body status prose | bmad-method.md (Diátaxis), gastown.md (line 87+), superpowers.md (`docs/` layout) |
-| **Versioned reference (release-bound)** | Hand-authored snapshot tied to a version; new file per major | Gas Town: `<rig>/docs/<topic>-v<N>.md` (e.g., `gas-city-pack-v2.md`). Distinct from rolled-forward references. | Central | Body opens with release tag; older versions remain alongside | Filename version suffix; body opens with release date | gastown.md ("Filename version suffixes") |
+| **Versioned reference (release-bound)** | Hand-authored snapshot tied to a version; new file per major | Gas Town: `<rig>/docs/<topic>-v<N>.md` pattern (instance `gas-city-pack-v2.md` existed at survey time; removed from gc-toolkit in `tk-13a8x` and absorbed into upstream `gastownhall/gascity` `docs/packv2/`). Distinct from rolled-forward references. | Central | Body opens with release tag; older versions remain alongside | Filename version suffix; body opens with release date | gastown.md ("Filename version suffixes") |
 | **Roadmap (living)** | Hand-authored ongoing plan | BMAD: `docs/roadmap.mdx` (single MDX). Gas Town: `<rig>/docs/roadmap.md` and/or top-level `SDK-ROADMAP.md`. Superpowers: not present (release-notes carries forward-looking content). | Central, singular | Markdown links + section anchors | None on the file; entries reflect status via prose | bmad-method.md, gastown.md (FUTURE.md / SDK-ROADMAP.md) |
 | **Style guide / conventions** | Hand-authored project rules | BMAD: `docs/_STYLE_GUIDE.md` (underscore prefix sorts to top). Spec Kit: `.specify/memory/constitution.md` (single project-wide). Kiro: foundational steering trio (`product.md` / `tech.md` / `structure.md`). | Central, singular per concern | Articles cited by number (Spec Kit `Article VII`); sections by anchor | Spec Kit: trailing `**Version**: X.Y.Z` semver line; others: none | bmad-method.md, spec-kit.md, kiro.md (Steering) |
 | **Brief / PR-FAQ** | Workflow command (BMAD `bmad-product-brief`, `bmad-prfaq`) | BMAD: `{planning_artifacts}/product-brief-{project_name}.md` (Class B project-name-keyed). | Central, project-name-keyed | Glob discovery (`*brief*.md`) by downstream skills; runtime `inputDocuments` frontmatter | None (`stepsCompleted` runtime array, not lifecycle) | bmad-method-templates.md (Class B) |
@@ -194,13 +194,18 @@ location follow in the next section.
    pack (e.g., gc binary surface, pack/city structure, agent semantics).
    Rolled forward as the pack evolves; carries a "current as of" stamp
    in the body.
-   *Examples (existing):* `gas-city-reference.md`, `gascity-local-patching.md`.
+   *Examples (existing):* `gascity-reference.md`, `gascity-local-patching.md`.
+   *Sub-flavour:* the **agent brief** — an agent-context set spanning
+   reference docs loaded routinely into agent prompts. Defined in
+   `principles/agent-brief.md`.
 
 2. **Versioned reference** — A snapshot of a reference tied to a specific
    release of the underlying surface. Filed when the surface ships and
    doesn't roll forward; old versions accumulate alongside the rolled
    reference.
-   *Examples (existing):* `gas-city-pack-v2.md`.
+   *Examples (existing):* none in gc-toolkit today (the former
+   `gas-city-pack-v2.md` was removed in `tk-13a8x` when its content
+   landed upstream as `docs/packv2/` in `gastownhall/gascity`).
 
 3. **Roadmap (living)** — A single project-wide planning doc whose
    purpose is "open this and find where we are." Updated in place,
@@ -297,8 +302,8 @@ gc-toolkit ships as a Gas Town pack (it has `pack.toml`, `agents/`,
 
 | # | Doc-type | Default location | Filename style | Rationale |
 |---|---|---|---|---|
-| 1 | Reference manual | `docs/<topic>.md` (flat) | kebab-case `.md` | Matches existing pattern (`gas-city-reference.md`, `gascity-local-patching.md`). BMAD-aligned: directory carries the type, filename carries the topic. Flat tier keeps `ls docs/` legible. |
-| 2 | Versioned reference | `docs/<topic>-v<N>.md` (flat) | kebab + `-v<N>` suffix | Matches existing `gas-city-pack-v2.md`. Gas Town's only convention for release-frozen docs; keeps it. |
+| 1 | Reference manual | `docs/<topic>.md` (flat) | kebab-case `.md` | Matches existing pattern (`gascity-reference.md`, `gascity-local-patching.md`). BMAD-aligned: directory carries the type, filename carries the topic. Flat tier keeps `ls docs/` legible. |
+| 2 | Versioned reference | `docs/<topic>-v<N>.md` (flat) | kebab + `-v<N>` suffix | Gas Town's only convention for release-frozen docs; keeps it. (No current instance in gc-toolkit after `tk-13a8x`; the pattern lives in upstream gascity, e.g. `gastownhall/gascity` `docs/packv2/`.) |
 | 3 | Roadmap (living) | `docs/roadmap.md` (singleton) | fixed `roadmap.md` | Matches existing. BMAD ships `docs/roadmap.mdx` as a singleton; gc-toolkit follows. |
 | 4 | Principle | `docs/principles/<topic>.md` | kebab-case `.md` | New directory (created by this synthesis). Sub-tier of central; multiple principle docs sit alongside. Spec Kit's `constitution.md` is the closest analogue but argues for one-file; BMAD's `_STYLE_GUIDE.md` argues for one file *per concern*. The directory accommodates either: a single `document-spec.md` today, more files later. |
 | 5 | Constitution (deferred) | `docs/principles/constitution.md` (if adopted) | fixed `constitution.md` | Open question. If gc-toolkit decides to consolidate principles into one versioned file (Spec Kit pattern), this is its location. Otherwise unused. |
@@ -384,8 +389,9 @@ choices"). A single canonical filename signals central; varying
 filenames or directory grouping signals local.
 
 **Naming corollary:** central docs use *topic* names that don't change
-when the contents are rewritten (`gas-city-reference.md` stays named
-that way as it rolls forward). Local docs use *concern* names that pin
+when the contents are rewritten (`gascity-local-patching.md` stays
+named that way as it rolls forward). Local docs use *concern* names
+that pin
 the doc to its origin (`spike-gc-toolkit-as-primary-pack.md` pins to
 the spike's question; renaming would obscure the historical record).
 
@@ -411,7 +417,7 @@ that the parent bead flagged as worth surfacing.
 
 | Mechanism | Used by | Strength | Weakness |
 |---|---|---|---|
-| **Markdown link to relative path** (`[gas-city-reference](../gas-city-reference.md)`) | Spec Kit (`**Spec**: [link]`), Gas Town (existing design docs), Kiro | Works in any markdown renderer; survives if both files move together | Breaks silently on rename; not greppable as a citation |
+| **Markdown link to relative path** (`[gascity-reference](../gascity-reference.md)`) | Spec Kit (`**Spec**: [link]`), Gas Town (existing design docs), Kiro | Works in any markdown renderer; survives if both files move together | Breaks silently on rename; not greppable as a citation |
 | **`[Source: <path>#<section>]` citation** | BMAD (`bmad-create-story/template.md`) | Greppable; visible as a citation in prose; lighter than a full link | Requires the section anchor stays stable |
 | **Numbered identifiers within a doc** (`FR-001`, `T###`, `CHK###`, `Article VII`) | Spec Kit, BMAD (Epic.Story), Superpowers (none — uses dates) | Stable, sortable, pronounceable; survives reorder if the IDs are not tied to position | Brittle when the IDs *are* tied to position (Spec Kit's `[US1]` shifts on reorder; Kiro's `_Requirements: 1.2_` shifts on reorder) |
 | **Bead-ID anchor** (gc-toolkit-specific: `tk-yiwfz`, `tk-yiwfz.4`) | Used informally already in gc-toolkit design docs (e.g., `consult-surfacing.md` references `tk-uac`) | Stable global IDs; survive file moves; tie a doc to its bead-tracked work history | Requires the reader to know about the beads system; not a self-contained citation |
@@ -495,9 +501,11 @@ where they'd land:
 
 | Current path | Proposed path | Reason |
 |---|---|---|
-| `docs/gas-city-reference.md` | unchanged | Reference manual, type 1, central tier flat |
-| `docs/gas-city-pack-v2.md` | unchanged | Versioned reference, type 2 |
+| `docs/gascity-reference.md` | unchanged | Reference manual (index), type 1, central tier flat. Renamed from `gas-city-reference.md` and rewritten as an index in `tk-13a8x`. |
 | `docs/gascity-local-patching.md` | unchanged | Reference manual (process), type 1 |
+| `docs/gascity-upstream-engagement.md` | unchanged | Reference manual (process), type 1. Added in `tk-13a8x`. |
+| `docs/gascity-rebase-conventions.md` | unchanged | Reference manual (process), type 1. Added in `tk-13a8x`. |
+| `docs/gascity-polecat-patterns.md` | unchanged | Reference manual (process), type 1. Added in `tk-13a8x`. |
 | `docs/roadmap.md` | unchanged | Roadmap, type 3 |
 | `docs/design/consult-surfacing.md` | unchanged | Design, type 6 |
 | `docs/design/consult-session-feasibility.md` | unchanged | Design, type 6 |
@@ -678,7 +686,7 @@ If the operator adopts this spec by closing parent `tk-yiwfz` with
    migration notes above).
 2. **Update operator-facing references** to point at this doc as the
    gc-toolkit document spec (e.g., from `roadmap.md`,
-   `gas-city-reference.md`, or the rig-level `CLAUDE.md`-equivalent).
+   `gascity-reference.md`, or the rig-level `CLAUDE.md`-equivalent).
 3. **Resolve open questions Q1–Q8** as separate downstream beads,
    filed against the relevant doc-type when the question becomes
    load-bearing (rather than pre-deciding now).
