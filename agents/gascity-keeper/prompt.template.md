@@ -174,7 +174,7 @@ store (per `feedback_bead_store_matches_scope.md`).
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
 META=$(jq -n --arg keeper "$GC_AGENT" \
-  '{notify_recipient:"overseer", requesting_keeper:$keeper}')
+  '{notify_recipient:"human", requesting_keeper:$keeper}')
 BEAD=$(gc bd create "Rebase gascity from upstream" -t task \
   --metadata "$META" --json | jq -r '.id')
 gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-rebase \
@@ -225,7 +225,7 @@ knobs:
 
 - `--var with_diff=1` — include unified diffs per agent in the report
   (verbose).
-- `--var notify_recipient=overseer` — mail a copy of the report on
+- `--var notify_recipient=human` — mail a copy of the report on
   completion (default: empty; the report only lands on bead notes).
 
 Tell the operator:
@@ -353,7 +353,7 @@ Want to tweak any of these before I finalize?
      copies it once, no edits needed.
    - Mail the operator the ready-to-paste commands as a durable record:
      ```bash
-     gc mail send overseer -s "PR ready to file: <bead>" -m "<commands>"
+     gc mail send human -s "PR ready to file: <bead>" -m "<commands>"
      ```
    - Close the bead:
      ```bash
@@ -735,8 +735,7 @@ inside its own worktree.
 
 ```bash
 gc mail inbox                                          # Check messages
-gc mail send overseer -s "..." -m "..."                # Backstop / final commands
-gc session nudge overseer "..."                        # Lightweight ping
+gc mail send human -s "..." -m "..."                   # Backstop / final commands
 gc bd list --assignee=$GC_AGENT --status=open          # Your assigned beads
 gc bd show <id>                                        # Read a bead in full
 gc bd show <id> --json | jq '.[0].metadata'            # Read metadata

@@ -53,7 +53,7 @@ description = "If '1', the report includes per-agent unified diffs"
 default = "0"
 
 [vars.notify_recipient]
-description = "Optional mail address to notify with the report (e.g., overseer, gascity-keeper). Empty = skip mail."
+description = "Optional mail address to notify with the report (e.g., human, gascity-keeper). Empty = skip mail."
 default = ""
 
 [[steps]]
@@ -107,7 +107,7 @@ registered in this city), record the failure, hand the bead back to
 a durable owner, and abort:
 ```bash
 ABORT_OWNER="{{notify_recipient}}"
-[ -z "$ABORT_OWNER" ] && ABORT_OWNER="overseer"
+[ -z "$ABORT_OWNER" ] && ABORT_OWNER="human"
 gc bd update {{issue}} \
     --set-metadata aborted_at=workspace-setup \
     --status=open \
@@ -166,7 +166,7 @@ to a report file under the worktree.
 SCRIPT={{sync_script}}
 if [ ! -x "$SCRIPT" ]; then
     ABORT_OWNER="{{notify_recipient}}"
-    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="overseer"
+    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="human"
     gc bd update {{issue}} \
         --set-metadata aborted_at=survey \
         --status=open \
@@ -200,7 +200,7 @@ if "$SCRIPT" \
     gc bd update {{issue}} --set-metadata report_file="$REPORT_FILE"
 else
     ABORT_OWNER="{{notify_recipient}}"
-    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="overseer"
+    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="human"
     gc bd update {{issue}} \
         --set-metadata aborted_at=survey \
         --status=open \

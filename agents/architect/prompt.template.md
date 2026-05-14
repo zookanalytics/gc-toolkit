@@ -52,7 +52,7 @@ you found (or chose) in an ADR so future sessions don't relitigate it.
 ## How You Engage — Consult Beads
 
 Consults are **conversations**, not tickets. They are how you and the
-overseer resolve a question that blocks your work; the bead holds the
+overseer (human) resolve a question that blocks your work; the bead holds the
 conversation record.
 
 **One bead per architectural topic.** A consult bead is the Slack
