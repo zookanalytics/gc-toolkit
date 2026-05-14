@@ -117,59 +117,97 @@ no need to parse `gc config show`.
 
 **First-message capture:**
 
-`tmux command-prompt -p` is the obvious primitive but its `%%`
-substitution is **textual with no shell quoting** — any single quote,
-dollar sign, or space in operator input will break the wrapping
-command. Rejected.
-
-The first attempt used `display-popup -E` with `IFS= read -r msg`
-in the popup's shell, re-execing the script with
-`THREAD_SPAWN_MESSAGE="$msg"`. In practice this didn't ship: the
-popup's terminal line discipline didn't reliably deliver Enter to
-`read`, so the operator couldn't submit, and single-line input
-foreclosed multi-line drafting anyway.
-
-The shipped approach is `display-popup -E` running
-`${EDITOR:-vi}` on a tempfile (`mktemp -t thread-spawn.XXXXXX`),
-then re-execing the script with `THREAD_SPAWN_MESSAGE_FILE` pointing
-at the tempfile. Multi-line drafting is natural; submit is the
-editor's save+quit gesture; cancel is exit-empty (Phase 2 checks
-`! -s` and emits a status-bar message). The popup is bordered, sized
-`-w 100 -h 30` for editing room, and titled with the role and the
-submit/cancel hint.
-
-The script is two-phased on the `THREAD_SPAWN_MESSAGE_FILE` env var:
-phase 1 (var unset) opens the popup; phase 2 (var set) reads the
-tempfile, removes it, and proceeds to spawn + nudge. Passing a
-*path* through the env instead of the message body sidesteps the
-multi-line-through-env problem entirely. Both phases live in one
-file, no separate helper script.
-
-**Spawn + seed:**
+`tmux command-prompt -p` is the shipped primitive. Bindings install:
 
 ```sh
-SPAWN_OUT=$(gc session new "$THREAD_TEMPLATE" --no-attach 2>&1)
-SESSION_ID=$(printf '%s\n' "$SPAWN_OUT" \
-    | sed -n 's/^Session \([^ ]*\) created.*/\1/p' | head -1)
-gc session nudge --delivery=queue "$SESSION_ID" "$THREAD_SPAWN_MESSAGE"
+gcmux bind-key a command-prompt -p "thread msg (Enter; blank = no seed):" \
+    "run-shell '$CONFIGDIR/assets/scripts/tmux-spawn-thread.sh $CONFIGDIR \"%%\"'"
 ```
+
+The operator gets a single-line bottom-bar prompt; Enter submits and
+substitutes the input into `%%`. Blank Enter is allowed and means
+"spawn without seeding a first message." The script's `$2` is the
+operator's input (may be empty), and the spawn-vs-spawn+nudge fork
+keys on `[ -n "$THREAD_SPAWN_MESSAGE" ]`.
+
+Two earlier approaches were tried and dropped:
+
+1. `display-popup -E` running `IFS= read -r msg` inside the popup's
+   shell. The popup's terminal line discipline didn't reliably
+   deliver Enter to `read`, so the operator couldn't submit.
+
+2. `display-popup -E` running `${EDITOR:-vi}` on a tempfile, then
+   re-execing the script with `THREAD_SPAWN_MESSAGE_FILE` pointing at
+   the tempfile (two-phase script keyed on that env var). Multi-line
+   drafting was natural but the editor cold-start + popup overhead
+   made the common case — short first prompt — feel like ceremony.
+   Operator feedback after the queue-nudge fix landed (efbb1c8) was
+   that the residual ~15s wait wasn't the nudge; it was `gc session
+   new`. Backgrounding the spawn (see next subsection) plus a
+   `command-prompt` instead of an editor popup brought the operator's
+   pane back sub-second.
+
+The cost of `command-prompt`: tmux's `%%` substitution is **textual
+with no shell quoting**. If the operator's input contains an
+unescaped `"` or `\`, the resulting `run-shell` argument re-parses
+incorrectly and the spawn breaks. This is documented in the script
+header and acknowledged as a known limitation. The script treats
+`$2` as the raw message; the responsibility for safe characters
+sits with the operator (or with a follow-up that switches the
+input path to tmux `set-buffer` + `save-buffer` + `cat` of a
+tempfile, which sidesteps the quoting hazard at the cost of more
+moving parts).
+
+A note on tmux `-1`: `command-prompt -1` means "accept one key
+press" (i.e., the input is a single character), not "single-line."
+`command-prompt` is always a single-row bottom-bar prompt; the
+default behavior is the one we want — arbitrary text terminated by
+Enter. So this binding intentionally omits `-1`.
+
+**Async spawn:**
+
+`gc session new` is the throughput bottleneck on the operator's
+key-to-prompt-return loop: controller cold-start + worktree setup +
+session bead create sums to ~15s. The script wraps the spawn + nudge
+logic in a backgrounded subshell so the foreground returns immediately
+after the template probe; the operator's pane unblocks sub-second.
+Spawn outcomes (success, spawn failure, nudge failure) surface
+asynchronously via `tmux display-message` at the status bar.
+
+```sh
+(
+    SPAWN_OUT=$(gc session new "$THREAD_TEMPLATE" --no-attach 2>&1)
+    SESSION_ID=$(printf '%s\n' "$SPAWN_OUT" \
+        | sed -n 's/^Session \([^ ]*\) created.*/\1/p' | head -1)
+    if [ -n "$THREAD_SPAWN_MESSAGE" ]; then
+        gc session nudge --delivery=queue "$SESSION_ID" "$THREAD_SPAWN_MESSAGE"
+    fi
+    gcmux display-message "spawned ..."
+) &
+```
+
+The template probe (`gc prime --strict`) stays inline because it's
+fast (no provider start) and a missing-template should fail before
+backgrounding anything — otherwise the operator gets no signal that
+their key press did nothing useful.
 
 `--delivery=queue` durably enqueues the nudge keyed on the canonical
 session ID and returns immediately. The supervisor-side dispatcher
 (`gascity/cmd/gc/nudge_dispatcher.go:115`) scans open session beads
 each pass and delivers the queued message as soon as the new thread's
 provider is observed running — `obs.Running` is the only state gate,
-so a target still in `creating` at enqueue time is fine.
+so a target still in `creating` at enqueue time is fine. Skipping
+the nudge call entirely when `$THREAD_SPAWN_MESSAGE` is empty is the
+blank-input path — the thread spawns and the operator gets a
+no-seed status message.
 
-Earlier drafts used the default `--delivery=wait-idle`, which blocks
-the caller until the provider reports ready. For an operator-spawned
-thread, claude cold-start is ~20-30s, and `wait-idle` held the
-display-popup open for that whole window — the popup couldn't close
-and the operator couldn't return to the originating pane until the
-script returned. `--delivery=queue` trades the "delivered before
-return" guarantee for instant return; loss of the first message would
-require the queue file to disappear before the dispatcher's next
-pass, which is the same durability domain as any other queued nudge.
+Earlier iterations chained `gc session new` + a default-delivery
+nudge inline in the script's foreground. `wait-idle` would have
+blocked the operator's pane on claude cold-start (~20-30s); the
+queue-mode nudge fixed that for the nudge portion (efbb1c8), but
+`gc session new` itself still blocked for the controller bring-up.
+Backgrounding the whole spawn + nudge block makes both bottlenecks
+invisible to the operator's pane.
 
 `--alias` is intentionally **not** passed: the runtime prefixes any
 operator-supplied alias with the active binding namespace (e.g.
@@ -198,8 +236,10 @@ script changes.
       by `RoleName`; both threads append it; old fragment removed
 - [x] `assets/scripts/tmux-spawn-thread.sh` exists and is executable;
       detects current agent via `GC_AGENT`, maps role idempotently,
-      probes template existence, popup-prompts for first message,
-      spawns + seeds via queue nudge (instant return), fails soft on
+      probes template existence, reads the first message from `$2`
+      (supplied by tmux `command-prompt` substitution), backgrounds
+      spawn + seed via queue nudge for instant operator-pane return,
+      treats blank input as "spawn without seed," fails soft on
       missing template
 - [x] `assets/scripts/tmux-bindings.sh:15` repointed at the new script
 - [x] This design doc
@@ -250,6 +290,16 @@ which is the scope-correctness signal.
 
 ## Out of scope / follow-ups
 
+- **Multi-line first messages.** `command-prompt` is single-row.
+  Operators wanting multi-line input can paste with newlines
+  escaped, or we revisit the popup-editor approach as a separate
+  binding (e.g. `prefix + A` for "ask, long form").
+- **Quote- and backslash-safe first messages.** Today's binding
+  fails to spawn if the operator's message contains `"` or `\`
+  (tmux `%%` substitution is unquoted). A `set-buffer %% \;
+  save-buffer -b 0 /tmp/...` chain plus a tempfile read in the
+  script would sidestep this; revisit if operators hit the
+  limitation in practice.
 - **Auto-switch into the new thread.** `Ctrl-B + S` picker is the
   current path; revisit if friction.
 - **deacon-thread / witness-thread / refinery-thread.** Patrol /
