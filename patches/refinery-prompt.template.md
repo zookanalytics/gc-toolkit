@@ -71,6 +71,51 @@ if [ -z "$WISP" ]; then
     --has-metadata-key=branch --exclude-type=epic --json --limit=1 \
     | jq -r '.[0].id // empty')
   if [ -n "$WORK" ]; then
+    # Routing-guard: a rebase bead (mol-upstream-gc-rebase*) requires
+    # `git push --force-with-lease HEAD:main`, which refinery MUST NOT
+    # do (refinery never force-pushes to main/master). The rebase
+    # polecat owns its bead through its own terminal `push` step.
+    # If a rebase bead reaches us, something upstream of refinery has
+    # leaked the routing — reject the bead and hand it back to the
+    # requesting keeper (or escalate to mayor when the keeper isn't
+    # known). Detect via `metadata.molecule_id` walk; fall back to
+    # `metadata.backup_ref` which the rebase mol stamps at workspace-
+    # setup and never clears.
+    MOL_ID=$(gc bd show "$WORK" --json | jq -r '.[0].metadata.molecule_id // empty')
+    MOL_TITLE=""
+    if [ -n "$MOL_ID" ]; then
+      MOL_TITLE=$(gc bd show "$MOL_ID" --json 2>/dev/null | jq -r '.[0].title // empty')
+    fi
+    BACKUP_REF=$(gc bd show "$WORK" --json | jq -r '.[0].metadata.backup_ref // empty')
+    IS_REBASE=0
+    case "$MOL_TITLE" in
+      mol-upstream-gc-rebase|mol-upstream-gc-rebase-rework) IS_REBASE=1 ;;
+    esac
+    [ -n "$BACKUP_REF" ] && IS_REBASE=1
+    if [ "$IS_REBASE" = "1" ]; then
+      REBASE_KEEPER=$(gc bd show "$WORK" --json | jq -r '.[0].metadata.requesting_keeper // empty')
+      echo "ROUTING LEAK: rebase bead $WORK (mol=$MOL_TITLE, backup_ref=$BACKUP_REF) reached refinery — rejecting." >&2
+      if [ -n "$REBASE_KEEPER" ]; then
+        gc bd update "$WORK" \
+          --status=open \
+          --assignee="$REBASE_KEEPER" \
+          --set-metadata gc.routed_to="$REBASE_KEEPER" \
+          --set-metadata refinery_rejected_rebase_leak=true \
+          --notes "Refinery rejected as rebase-bead routing leak; reset to requesting_keeper=$REBASE_KEEPER."
+        gc session nudge "$REBASE_KEEPER" "rebase bead $WORK reached refinery (routing leak); handed back to you — investigate dispatch chain"
+      else
+        gc bd update "$WORK" \
+          --assignee="mayor/" \
+          --set-metadata gc.routed_to=mayor/ \
+          --set-metadata refinery_rejected_rebase_leak=true \
+          --notes "Refinery rejected as rebase-bead routing leak; no requesting_keeper set — escalating to mayor."
+        gc mail send mayor/ -s "ESCALATION: rebase bead $WORK reached refinery (no keeper)" \
+          -m "Rebase bead $WORK (mol=$MOL_TITLE, backup_ref=$BACKUP_REF) was assigned to refinery, but rebase beads require force-push to main which refinery never does, and metadata.requesting_keeper is empty so I cannot hand it back. Investigate the dispatch chain and re-route this bead manually."
+      fi
+      WORK=""
+    fi
+  fi
+  if [ -n "$WORK" ]; then
     echo "Found routed work bead: $WORK — pouring wisp and entering formula at find-work"
     WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --json | jq -r '.new_epic_id')
     gc bd update "$WISP" --assignee="$GC_ALIAS"

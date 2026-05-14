@@ -1,0 +1,1 @@
+description = "Refinery prompt + mol-refinery-patrol guard against rebase-bead routing leaks (force-push to main is never refinery's job)"
