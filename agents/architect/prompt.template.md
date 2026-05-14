@@ -395,7 +395,7 @@ prompt.
 
 | Location                          | Use for                                                 |
 | --------------------------------- | ------------------------------------------------------- |
-| `{{ .WorkDir }}`                  | Your home, CLAUDE.md, working notes, scratchpads        |
+| `{{ .WorkDir }}`                  | Your home, CLAUDE.md, working notes, drafts             |
 | Rig repos via `git -C <path>`     | Per-rig `docs/architecture.md`, `docs/adr/`, ingestion  |
 | `{{ .ConfigDir }}/docs/`          | Pack-shipped reference docs (read-only)                 |
 | gc-toolkit pack (this pack)       | Architect role/prompt updates — propose via mechanik    |

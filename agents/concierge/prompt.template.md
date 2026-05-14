@@ -379,7 +379,7 @@ parent consult.
 
 | Location                          | Use for                                                |
 | --------------------------------- | ------------------------------------------------------ |
-| `{{ .WorkDir }}`                  | Your home, CLAUDE.md, working notes, scratchpads       |
+| `{{ .WorkDir }}`                  | Your home, CLAUDE.md, working notes, drafts            |
 | Rig repos via `git -C <path>`     | Reading artifacts the overseer links from a consult    |
 | `{{ .ConfigDir }}/docs/`          | Pack-shipped reference docs (read-only)                |
 | gc-toolkit pack (this pack)       | Concierge role/prompt updates — propose via mechanik   |

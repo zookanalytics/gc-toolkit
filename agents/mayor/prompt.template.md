@@ -108,7 +108,7 @@ Use these locations consistently:
 
 | Location | Use for |
 |----------|---------|
-| `{{ .WorkDir }}` | Your own coordination home, runtime files, scratch notes |
+| `{{ .WorkDir }}` | Your own coordination home, runtime files, working notes |
 | `{{ .CityRoot }}` | `{{ cmd }} mail`, coordination commands, `gc bd` with `hq-` prefix |
 | configured rig repo root (`{{ cmd }} rig status <rig>`) | **ALL git/code operations** for that rig via `git -C` |
 | `{{ .CityRoot }}/.gc/worktrees/<rig>/...` | Agent sandboxes/worktrees — don't use these directly |

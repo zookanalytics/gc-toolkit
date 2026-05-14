@@ -9,10 +9,10 @@
 # The first message is delivered via `gc session nudge --delivery=wait-idle`
 # the moment the new thread is idle and ready to receive input.
 #
-# Threads are registered agents (unlike scratch clones): they appear in
-# `gc session list`, survive `gc session reset` of the canonical, and
-# carry the full role persona. The canonical handles routed mail and
-# routed work; threads are operator-spawned only.
+# Threads are registered agents: they appear in `gc session list`,
+# survive `gc session reset` of the canonical, and carry the full role
+# persona. The canonical handles routed mail and routed work; threads
+# are operator-spawned only.
 #
 # Idempotent role mapping:
 #   mayor             -> mayor-thread
@@ -22,16 +22,21 @@
 #   polecat-1         -> polecat-thread         (no template -> soft fail)
 #
 # Two-phase via popup re-invoke:
-#   Phase 1 (no THREAD_SPAWN_MESSAGE): open display-popup; the popup's
-#     shell reads operator input via `read -r` (safe for any characters)
-#     and re-execs this script with THREAD_SPAWN_MESSAGE in the env.
-#   Phase 2 (THREAD_SPAWN_MESSAGE set): probe the template, spawn the
-#     session, nudge the first message.
+#   Phase 1 (no THREAD_SPAWN_MESSAGE_FILE): open display-popup running the
+#     operator's $EDITOR on a tempfile; on save+quit the popup's shell
+#     re-execs this script with THREAD_SPAWN_MESSAGE_FILE pointing at the
+#     tempfile.
+#   Phase 2 (THREAD_SPAWN_MESSAGE_FILE set): read the file (empty = cancel),
+#     probe the template, spawn the session, nudge the first message.
 #
-# Why a popup rather than tmux command-prompt: command-prompt's %%
-# substitution is textual with no shell quoting, so any quote/dollar/space
-# in operator input would break the wrapping command. The popup gives a
-# real shell where `read -r` captures the input as a single safe string.
+# Why an editor rather than tmux command-prompt or in-popup `read`:
+# command-prompt's %% substitution is textual with no shell quoting, so any
+# quote/dollar/space in operator input would break the wrapping command.
+# An in-popup `read -r` looked simpler but in practice the popup terminal's
+# line discipline doesn't reliably deliver Enter to `read`, so the operator
+# can't submit. An editor on a tempfile sidesteps both: multi-line is
+# natural, submit is the editor's save+quit gesture, and a tempfile path
+# survives env-var passing where a multi-line value would not.
 set -eu
 
 CONFIGDIR="${1:?missing config-dir}"
@@ -41,8 +46,7 @@ gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
 # 1. Resolve the active session. Prefer the focused client's session
 #    (the operator who pressed prefix + a); fall back to the run-shell
-#    context's session if no client is currently associated. Mirrors
-#    tmux-spawn-scratch.sh.
+#    context's session if no client is currently associated.
 SESSION=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 [ -z "$SESSION" ] && SESSION=$(gcmux display-message -p '#{session_name}')
 
@@ -77,17 +81,28 @@ if ! gc prime --strict "$THREAD_TEMPLATE" >/dev/null 2>&1; then
     exit 0
 fi
 
-# 5. Phase 1 — open the popup to capture a first message, then re-exec
-#    this script with THREAD_SPAWN_MESSAGE set. We pass the script path
-#    and CONFIGDIR through the popup's shell command line at outer-shell
-#    expansion time, so the popup's fresh shell can find them.
-if [ -z "${THREAD_SPAWN_MESSAGE:-}" ]; then
-    gcmux display-popup -E -B -w 80 -h 5 \
-        "sh -c 'printf \"first message to $THREAD_TEMPLATE: \"; IFS= read -r msg; [ -z \"\$msg\" ] && exit 0; THREAD_SPAWN_MESSAGE=\"\$msg\" \"$SCRIPT_PATH\" \"$CONFIGDIR\"'"
+# 5. Phase 1 — open the popup running ${EDITOR:-vi} on a tempfile, then
+#    re-exec this script with THREAD_SPAWN_MESSAGE_FILE pointing at it.
+#    We pass the script path and CONFIGDIR through the popup's shell at
+#    outer-shell expansion time, so the popup's fresh shell can find them.
+#    The popup is bordered + sized for multi-line drafting; the title
+#    advertises the submit/cancel gestures.
+if [ -z "${THREAD_SPAWN_MESSAGE_FILE:-}" ]; then
+    TMPF=$(mktemp -t thread-spawn.XXXXXX)
+    gcmux display-popup -E -w 100 -h 30 -T " first message to $THREAD_TEMPLATE — save+quit to send, exit empty to cancel " \
+        "sh -c '${EDITOR:-vi} \"$TMPF\"; THREAD_SPAWN_MESSAGE_FILE=\"$TMPF\" \"$SCRIPT_PATH\" \"$CONFIGDIR\"'"
     exit 0
 fi
 
-# Phase 2 — operator has supplied a first message.
+# Phase 2 — operator has supplied a first-message tempfile path. Empty file
+# means cancel; non-empty contents are the message body (multi-line OK).
+if [ ! -s "$THREAD_SPAWN_MESSAGE_FILE" ]; then
+    rm -f "$THREAD_SPAWN_MESSAGE_FILE"
+    gcmux display-message "thread spawn cancelled: empty message"
+    exit 0
+fi
+THREAD_SPAWN_MESSAGE=$(cat "$THREAD_SPAWN_MESSAGE_FILE")
+rm -f "$THREAD_SPAWN_MESSAGE_FILE"
 
 # 6. Generate a short alias for the new thread session. "thread-<6 hex>"
 #    gives ~16M of namespace, plenty for parallel threads in one

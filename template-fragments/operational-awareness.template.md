@@ -120,7 +120,7 @@ EOF
 
 **Dolt health — your part:**
 - Nudge, don't mail for routine communication
-- Don't create unnecessary beads — file real work, not scratchpads
+- Don't create unnecessary beads — file real work, not throwaway notes
 - Close your beads — open beads that linger become pollution
 - When Dolt is slow/down: check `gc doctor`, nudge Deacon — don't restart Dolt yourself
 {{ end }}
