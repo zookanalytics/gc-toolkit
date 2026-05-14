@@ -174,7 +174,7 @@ store (per `feedback_bead_store_matches_scope.md`).
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
 META=$(jq -n --arg keeper "$GC_AGENT" \
-  '{notify_recipient:"overseer", requesting_keeper:$keeper}')
+  '{notify_recipient:"human", requesting_keeper:$keeper}')
 BEAD=$(gc bd create "Rebase gascity from upstream" -t task \
   --metadata "$META" --json | jq -r '.id')
 gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-rebase \
@@ -225,7 +225,7 @@ knobs:
 
 - `--var with_diff=1` — include unified diffs per agent in the report
   (verbose).
-- `--var notify_recipient=overseer` — mail a copy of the report on
+- `--var notify_recipient=human` — mail a copy of the report on
   completion (default: empty; the report only lands on bead notes).
 
 Tell the operator:
