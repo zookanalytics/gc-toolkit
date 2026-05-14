@@ -418,36 +418,43 @@ drain immediately.
 3. **Re-pour when the child is closed.**
 
 ```bash
-RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
-cd "$RIG_PATH"
-gc bd update <bead> --assignee ""
-gc sling gascity/gc-toolkit.polecat <bead> \
-  --var requesting_keeper="$GC_AGENT"
+gc bd update <bead> \
+  --status open \
+  --assignee "" \
+  --set-metadata gc.routed_to=gascity/gc-toolkit.polecat
+gc bd update <bead> --set-metadata requesting_keeper="$GC_AGENT"
 ```
 
-Re-pour differs from first dispatch in two ways — both load-bearing,
-both easy to miss:
+Re-pour is a direct metadata update — **not** `gc sling`. Bare
+`gc sling <pool> <bead>` against this task-type rebase parent expands
+the parent's task children (the rework/review beads the rebase polecat
+created) rather than routing the parent itself, so the parent never
+re-enters the polecat pool. Sling-with-`--on` is also out, because the
+molecule is already attached and re-attach errors with `bead <id>
+already has attached molecule <mol-id>` (also rejected with `--force`).
 
-- **No `--on mol-upstream-gc-rebase`.** The first sling attached the
-  molecule; the bead now carries `metadata.molecule_id` permanently.
-  Re-sling with `--on` errors out (`bead <id> already has attached
-  molecule <mol-id>`, also rejected with `--force`). A bare sling
-  re-engages the existing wisp — the polecat reads
-  `metadata.pending_rework` / `pending_review` / `work_dir` /
-  `conflict_resolutions` from the bead and continues. `dispatch_count`
-  bumps on claim.
-- **Clear `assignee` first.** The rebase formula's handback step set
-  `assignee=$REQUESTING_KEEPER` (you) so the bead landed in your
-  pending sweep. A bare sling only flips `gc.routed_to`; it does NOT
-  touch assignee. The supervisor's pool scale-check (`Ready ∧ assignee
-  == "" ∧ gc.routed_to == <pool-template>`) skips beads with a
-  non-empty assignee, so without the clear the bead silently sits
-  unclaimed — `routed_to` points at the polecat pool, but no polecat
-  ever materializes. Clearing assignee restores the scale-check signal
-  and the supervisor spawns a fresh rebase polecat on the next tick.
+The direct update reproduces the parent-routing shape the supervisor's
+pool scale-check expects (`Ready ∧ assignee == "" ∧ gc.routed_to ==
+<pool-template>`):
+
+- **`--status open`** flips the bead back to `Ready`. The handback step
+  left it `open`, but be explicit — the supervisor only spawns for
+  ready beads.
+- **`--assignee ""`** clears the keeper assignment. The handback step
+  set `assignee=$REQUESTING_KEEPER` (you) so the bead landed in your
+  pending sweep; the scale-check skips beads with a non-empty
+  assignee, so without the clear the bead silently sits unclaimed and
+  no polecat ever materializes.
+- **`--set-metadata gc.routed_to=gascity/gc-toolkit.polecat`** routes
+  the bead to the polecat pool — the signal `gc sling` would have set
+  if it had behaved.
+- **`--set-metadata requesting_keeper="$GC_AGENT"`** re-stamps the
+  keeper so the new polecat can hand the bead back to you if it stalls
+  again.
 
 The new rebase polecat reuses `metadata.work_dir`, reads
-`metadata.pending_rework` and `metadata.pending_review`, applies the
+`metadata.pending_rework` / `metadata.pending_review` /
+`metadata.conflict_resolutions` from the bead, applies the
 classification (mechanical → continue; dropped-absorbed → skip;
 judgment-required → dispatch review or, if review approved, continue;
 infeasible → set `metadata.conflict_questions` and hand back), then
