@@ -186,11 +186,15 @@ drift-audit, doc-update workers) refer to the brief without
 re-enumerating its contents, and lets the member docs stay where they
 are without forced renames.
 
-Today the brief comprises three reference docs under
-`{{ .ConfigDir }}/docs/`. A future doc-keeper config block will be the
-canonical index of brief membership; until then this section enumerates
-them inline. For the doc-type definition and how the brief sits in
-gc-toolkit's broader doc taxonomy, see
+The brief comprises three reference docs under
+`{{ .ConfigDir }}/docs/`. The **canonical membership list** lives in
+`{{ .ConfigDir }}/docs/principles/agent-brief.md` — downstream config,
+drift-audit, and doc-update tooling point there. The bullets below are
+an **operational rendering** of that canonical list, inlined here so
+agents have the references at boot without an extra read. A future
+doc-keeper config block (parent `tk-yw3zb`) will replace both with a
+single canonical index. For the doc-type framing and how the brief sits
+in gc-toolkit's broader doc taxonomy, see
 `{{ .ConfigDir }}/docs/principles/agent-brief.md`.
 
 - **gas-city-reference.md** — Current Gas City surface area: city.toml schema,
