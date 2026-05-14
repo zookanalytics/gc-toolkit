@@ -1,6 +1,6 @@
 # Agent brief
 
-> **Status:** sibling principle to `document-spec.md`. Filed separately
+> **Status:** sibling principle to [document-spec.md](./document-spec.md). Filed separately
 > because parent `tk-yiwfz` (which adopts the doc-spec) is still in
 > proposal state and we want the two adoptions decoupled — adopting
 > "agent brief" as a named concept does not require waiting on doc-spec
@@ -19,11 +19,14 @@ filename lets downstream infrastructure (config, drift-audit,
 doc-update workers) refer to the brief without enumerating its
 contents, and lets member docs keep their existing names.
 
-In gc-toolkit's doc-type taxonomy (see `document-spec.md`), the brief
-is a **sub-flavour of doc-type 1 (Reference manual)**: the subset of
-reference manuals an agent role-template loads as context. A reference
-manual that is not part of the brief is still a reference manual; the
-brief is the subset agents consume routinely.
+In gc-toolkit's doc-type taxonomy (see
+[document-spec.md](./document-spec.md)), the brief is an
+**agent-context set**: a cross-type designation over the docs an agent
+role-template loads as routine context. The designation spans doc-types
+rather than being a subset of any one of them — today's brief comprises
+two doc-type 1 (Reference manual) docs and one doc-type 2 (Versioned
+reference) doc. A doc in the brief keeps its own doc-type classification;
+the brief is the union an agent consumes.
 
 ## Today's canonical brief
 
@@ -42,8 +45,16 @@ files, not a rename: zero file moves.
 
 ## Where the canonical list lives
 
-Today the list lives in this doc and in the "Agent Brief" section of
-`agents/mechanik/prompt.template.md`. The two are kept in sync by hand.
+This doc is the **single canonical location** for the brief membership
+list ("Today's canonical brief" section above). Downstream
+configuration, drift-audit tooling, and doc-update workers point here.
+
+The "Agent Brief" section of
+[`agents/mechanik/prompt.template.md`](../../agents/mechanik/prompt.template.md)
+carries an **operational rendering** of the canonical list — the same
+bullets inlined into the prompt because agents must remain
+self-contained at boot. If the two diverge, this doc is authoritative
+and the prompt rendering must be re-synced from it.
 
 When the doc-keeper config block ships (parent `tk-yw3zb`), the
 canonical list moves into pack/rig config: **config IS the index**. At
@@ -52,5 +63,7 @@ template references config rather than enumerating files.
 
 ## Cross-reference
 
-`document-spec.md` (sibling) — gc-toolkit's full doc-type taxonomy.
-The agent brief is a sub-flavour of doc-type 1 (Reference manual) there.
+[document-spec.md](./document-spec.md) (sibling) — gc-toolkit's full
+doc-type taxonomy. The agent brief spans multiple doc-types in that
+taxonomy (currently doc-types 1 and 2); the unified framing lives here
+rather than in the taxonomy itself.
