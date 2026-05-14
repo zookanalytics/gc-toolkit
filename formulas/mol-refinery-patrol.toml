@@ -29,7 +29,7 @@ closes the bead once the PR is verified.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-refinery-patrol"
-version = 5
+version = 6
 contract = "graph.v2"
 
 [vars]
@@ -163,10 +163,15 @@ BRANCH=$(gc bd show $WORK --json | jq -r '.[0].metadata.branch')
 TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_branch}}"')
 ```
 
-Fetch and attempt mechanical rebase:
+Fetch and attempt mechanical rebase. The temp branch is work-specific
+(`temp-$WORK`) and is deleted-and-recreated here so its presence in the
+later merge-completion gate proves THIS work's rebase/merge path ran,
+not a leftover from a previous patrol:
 ```bash
 git fetch --prune origin
-git checkout -b temp origin/$BRANCH
+TEMP_BRANCH="temp-$WORK"
+git branch -D "$TEMP_BRANCH" 2>/dev/null || true
+git checkout -B "$TEMP_BRANCH" origin/$BRANCH
 git rebase origin/$TARGET
 ```
 
@@ -188,7 +193,7 @@ gc bd update $WORK \
   --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 ```
 4. Do NOT delete the branch (new polecat needs it for conflict resolution).
-5. Clean up temp branch: `git checkout {{target_branch}} && git branch -D temp`
+5. Clean up temp branch: `git checkout {{target_branch}} && git branch -D "temp-$WORK"`
 6. Pour next patrol iteration before burning:
 ```bash
 NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id')
@@ -260,7 +265,7 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
        --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
      ```
    - Delete branch: `git push origin --delete $BRANCH`
-   - Clean up: `git checkout "$TARGET" && git branch -D temp`
+   - Clean up: `git checkout "$TARGET" && git branch -D "temp-$WORK"`
    - Pour next patrol iteration before burning:
      ```bash
      NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id')
@@ -408,8 +413,9 @@ for debugging.
 
 **1. Merge target branch locally and push (auto-promote on protected branch):**
 ```bash
+TEMP_BRANCH="temp-$WORK"
 git checkout $TARGET
-git merge --ff-only temp
+git merge --ff-only "$TEMP_BRANCH"
 
 is_protected_branch_error() {
   case "$1" in
@@ -443,77 +449,111 @@ fi
 
 **If `$MERGE_STRATEGY` was just flipped to `mr` (auto-promotion fired),
 skip steps 2-5 below and execute the "If MERGE_STRATEGY = 'mr'" block
-instead. The rebased `temp` branch is still available for the PR push.**
+instead. The rebased `temp-$WORK` branch is still available for the PR push.**
 
 **2. MERGE COMPLETION GATE — verify remote, then close. DO NOT improvise.**
 
 Phantom-merge prevention. tk-c9q75 documented a case where the bead was
 closed with a hand-written "merged to main" claim while the merge commit
-never reached `origin/$TARGET`. This block is the ONLY sanctioned way to
-record a successful merge. Run it EXACTLY as written. If anything in this
-block fails, DO NOT close the bead, DO NOT set `merge_result=merged`, and
-DO NOT improvise an alternate close path.
+never reached `origin/$TARGET`. The codex review of v5 (tk-ursrt) showed
+the v5 gate could still be tricked by ambient git state: checking the
+process's `HEAD` instead of the local `$TARGET` ref let a stale-`$TARGET`
+checkout pass, and accepting any `temp` branch let an unrelated work's
+leftover branch satisfy the gate.
 
-Three independent checks must all pass:
+v6 closes both holes. This block is the ONLY sanctioned way to record a
+successful merge. Run it EXACTLY as written. If anything in this block
+fails, DO NOT close the bead, DO NOT set `merge_result=merged`, and DO
+NOT improvise an alternate close path.
 
-1. The `temp` branch (rebased work, created in the rebase step) must exist
-   — its absence proves the merge step never ran.
-2. Local `$TARGET` HEAD must equal `temp` — proves the ff-only merge
-   actually advanced the target locally (not a stale checkout).
-3. The merge SHA must be reachable from `origin/$TARGET` — proves the
-   push landed.
+Four independent checks must all pass:
 
-Check 1 + 2 catch the failure mode where the agent skipped the merge step
-entirely; alone, check 3 passes vacuously in that case because the stale
-HEAD is still an ancestor of any newer `origin/$TARGET`.
+1. The work-specific `temp-$WORK` branch must exist — its absence proves
+   either the rebase/merge step never ran for THIS work, or a previous
+   patrol's leftover `temp` is being mistaken for the current work's
+   output.
+2. The current branch must be `$TARGET` — proves `git checkout $TARGET`
+   in step 1 actually ran (caller is on the target branch, not still
+   sitting on the temp).
+3. The local `$TARGET` ref must equal `temp-$WORK` — proves the
+   `git merge --ff-only` in step 1 actually advanced the local target
+   branch (not just the working tree's `HEAD`).
+4. The local `$TARGET` SHA must be reachable from `origin/$TARGET` —
+   proves the push landed.
+
+Checks 1+3 catch the failure mode codex reproduced where a stale
+unrelated `temp` and a stale local `$TARGET` would let v5's HEAD-based
+checks pass vacuously. Check 2 makes the "what does HEAD mean" question
+moot by pinning the caller to `$TARGET` before reading the target ref.
 
 ```bash
 git fetch origin "$TARGET"
-MERGE_SHA=$(git rev-parse HEAD)
-ORIGIN_TARGET_SHA=$(git rev-parse "origin/$TARGET")
-TEMP_SHA=$(git rev-parse --verify --quiet temp 2>/dev/null || echo "")
+TEMP_BRANCH="temp-$WORK"
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+TARGET_SHA=$(git rev-parse --verify --quiet "refs/heads/$TARGET" 2>/dev/null || echo "")
+ORIGIN_TARGET_SHA=$(git rev-parse --verify --quiet "refs/remotes/origin/$TARGET" 2>/dev/null || echo "")
+TEMP_SHA=$(git rev-parse --verify --quiet "refs/heads/$TEMP_BRANCH" 2>/dev/null || echo "")
 
 phantom_merge_abort() {
   echo "PHANTOM MERGE PREVENTED for $WORK:"
-  echo "  reason:           $1"
-  echo "  local HEAD:       $MERGE_SHA"
-  echo "  origin/$TARGET:   $ORIGIN_TARGET_SHA"
-  echo "  temp branch SHA:  ${TEMP_SHA:-<missing>}"
+  echo "  reason:               $1"
+  echo "  current branch:       ${CURRENT_BRANCH:-<detached>}"
+  echo "  local $TARGET SHA:    ${TARGET_SHA:-<missing>}"
+  echo "  origin/$TARGET SHA:   ${ORIGIN_TARGET_SHA:-<missing>}"
+  echo "  $TEMP_BRANCH SHA:     ${TEMP_SHA:-<missing>}"
   gc mail send mayor/ -s "REFINERY: phantom-merge prevented for $WORK" -m "Refinery refused to close $WORK because: $1
-Local HEAD: $MERGE_SHA
-origin/$TARGET: $ORIGIN_TARGET_SHA
-temp branch: ${TEMP_SHA:-<missing>}
+current branch: ${CURRENT_BRANCH:-<detached>}
+local $TARGET: ${TARGET_SHA:-<missing>}
+origin/$TARGET: ${ORIGIN_TARGET_SHA:-<missing>}
+$TEMP_BRANCH: ${TEMP_SHA:-<missing>}
 Bead remains assigned to refinery for investigation."
   echo "STOP. Bead NOT closed. Debug, push, then re-enter this step."
   gc runtime drain-ack
   exit 1
 }
 
+# Gate check 1: this work's temp branch must exist.
 if [ -z "$TEMP_SHA" ]; then
-  phantom_merge_abort "temp branch missing — rebase/merge step was skipped"
+  phantom_merge_abort "$TEMP_BRANCH missing — rebase/merge step was skipped for this work"
 fi
-if [ "$MERGE_SHA" != "$TEMP_SHA" ]; then
-  phantom_merge_abort "HEAD != temp — ff-only merge did not happen (HEAD is stale)"
+# Gate check 2: caller must be on $TARGET (not still on the temp branch).
+if [ "$CURRENT_BRANCH" != "$TARGET" ]; then
+  phantom_merge_abort "current branch is '${CURRENT_BRANCH:-<detached>}', expected '$TARGET' — checkout step was skipped"
 fi
-if ! git merge-base --is-ancestor "$MERGE_SHA" "origin/$TARGET"; then
-  phantom_merge_abort "merge SHA not reachable from origin/$TARGET — push did not land"
+# Gate check 3: local $TARGET branch ref must equal $TEMP_BRANCH ref.
+if [ -z "$TARGET_SHA" ]; then
+  phantom_merge_abort "local $TARGET branch ref missing — no local target to merge into"
 fi
-echo "Push verified: $MERGE_SHA (= temp) is on origin/$TARGET."
+if [ "$TARGET_SHA" != "$TEMP_SHA" ]; then
+  phantom_merge_abort "local $TARGET ($TARGET_SHA) != $TEMP_BRANCH ($TEMP_SHA) — ff-only merge did not advance the local target"
+fi
+# Gate check 4: local $TARGET must be reachable from origin/$TARGET (push landed).
+if [ -z "$ORIGIN_TARGET_SHA" ]; then
+  phantom_merge_abort "origin/$TARGET missing — no remote target to compare against"
+fi
+if ! git merge-base --is-ancestor "$TARGET_SHA" "refs/remotes/origin/$TARGET"; then
+  phantom_merge_abort "local $TARGET SHA not reachable from origin/$TARGET — push did not land"
+fi
+MERGE_SHA="$TARGET_SHA"
+echo "Push verified: $MERGE_SHA (= $TEMP_BRANCH = local $TARGET) is on origin/$TARGET."
 ```
 
-**3. Atomic merge-record + close (canonical close_reason; do not reword):**
+**3. Atomic merge-record + close (canonical close_reason; do not reword).
+The close reason uses `$MERGE_SHA` (the gate-verified `$TARGET` SHA), not
+`HEAD`, so the recorded short SHA is provably the value that passed every
+gate check above:**
 ```bash
 gc bd update $WORK \
   --set-metadata merge_result=merged \
   --set-metadata merged_sha="$MERGE_SHA" \
   --set-metadata merged_target="$TARGET" \
   --set-metadata merge_verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-gc bd close $WORK --reason "Merged to $TARGET at $(git rev-parse --short HEAD) (verified on origin/$TARGET)"
+gc bd close $WORK --reason "Merged to $TARGET at $(git rev-parse --short "$MERGE_SHA") (verified on origin/$TARGET)"
 ```
 
 **4. Cleanup:**
 ```bash
-git branch -d temp
+git branch -d "$TEMP_BRANCH"
 ```
 If delete_merged_branches = "true": `git push origin --delete $BRANCH`
 
@@ -565,12 +605,13 @@ request and treats PR creation as the terminal handoff for this work bead.
 
 **1. Push the rebased branch back to origin:**
 ```bash
-git checkout temp
+TEMP_BRANCH="temp-$WORK"
+git checkout "$TEMP_BRANCH"
 git push origin HEAD:$BRANCH --force-with-lease
 ```
 If `--force-with-lease` fails, the existing PR branch moved after your
-fetch. STOP, fetch the latest branch, rebase your temp branch again, and
-retry with `--force-with-lease`. Do not use plain `--force`.
+fetch. STOP, fetch the latest branch, rebase your `$TEMP_BRANCH` again,
+and retry with `--force-with-lease`. Do not use plain `--force`.
 
 **2. Reuse, create, or discover the pull request:**
 ```bash
@@ -684,7 +725,7 @@ gc bd close $WORK --reason "Pull request ready: $PR_URL"
 **5. Cleanup:**
 ```bash
 git checkout "$TARGET"
-git branch -d temp
+git branch -d "$TEMP_BRANCH"
 ```
 Do NOT delete `$BRANCH` in mr mode — GitHub pull requests need the source branch.
 
