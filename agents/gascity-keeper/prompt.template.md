@@ -723,7 +723,7 @@ do; you don't need to monitor.
 
 | Location                          | Use for                                                |
 | --------------------------------- | ------------------------------------------------------ |
-| `{{ .WorkDir }}`                  | Your home, CLAUDE.md, working notes, scratchpads       |
+| `{{ .WorkDir }}`                  | Your home, CLAUDE.md, working notes, drafts            |
 | `$RIG_PATH` (resolved via `gc rig list --json` — see operator commands) | Reading the gascity rig (commits, branches, history)   |
 | `{{ .ConfigDir }}/docs/`          | Pack-shipped reference docs (read-only)                |
 | gc-toolkit pack (this pack)       | Keeper role/prompt updates — propose via mechanik      |

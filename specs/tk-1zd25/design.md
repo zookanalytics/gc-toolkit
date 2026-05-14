@@ -23,11 +23,17 @@ generalizing the Role+Thread primitive to a second interactive role
 | `template-fragments/mechanik-thread-role.template.md` | deleted | Replaced by `thread-role` |
 | `assets/scripts/tmux-spawn-thread.sh` | new | `Ctrl-B + a` handler — detects current agent, spawns matching thread |
 | `assets/scripts/tmux-bindings.sh` | `Ctrl-B + a` repointed: `tmux-spawn-scratch.sh` → `tmux-spawn-thread.sh` | Threads supersede scratches for the role-as-conversation pattern |
+| `assets/scripts/tmux-spawn-scratch.sh` | **deleted** | Replaced by threads; no callers after the bindings update |
+| `template-fragments/scratch-clone-guard.md` | **deleted** | Companion fragment for the deleted scratch script |
+| `agents/{mayor,architect,concierge,gascity-keeper}/prompt.template.md` | "scratch notes" / "scratchpads" → "working notes" / "drafts" | Drop residual user-facing "scratch" terminology |
+| `template-fragments/operational-awareness.template.md` | "scratchpads" → "throwaway notes" | Same |
+| `docs/gas-city-reference.md` | "scratch windows" dropped from `gc session reset` warning | Stale after scratch removal |
 
-The `tmux-spawn-scratch.sh` script and `scratch-clone-guard.md`
-fragment are **kept in place** as dead code (no callers after the
-bindings update). Scope of this bead is the thread primitive; scratch
-removal can be a follow-up if there's no value left.
+Scratch removal was originally scoped as a follow-up (see "Out of
+scope" below pre-amendment), but operator feedback during smoke-test
+loading was that leaving the dead script/fragment in tree adds
+confusion: threads now directly replace scratches, so the cleanup is
+bundled into this bead.
 
 ## Design — what makes this clean
 
@@ -114,17 +120,29 @@ no need to parse `gc config show`.
 `tmux command-prompt -p` is the obvious primitive but its `%%`
 substitution is **textual with no shell quoting** — any single quote,
 dollar sign, or space in operator input will break the wrapping
-command. I rejected this approach.
+command. Rejected.
 
-Instead the script uses `display-popup -E` to open an interactive
-sub-shell that reads input via `IFS= read -r msg`, then re-execs
-the script with `THREAD_SPAWN_MESSAGE="$msg"` in the env. The shell
-takes care of quoting end-to-end; the operator can type any
-character.
+The first attempt used `display-popup -E` with `IFS= read -r msg`
+in the popup's shell, re-execing the script with
+`THREAD_SPAWN_MESSAGE="$msg"`. In practice this didn't ship: the
+popup's terminal line discipline didn't reliably deliver Enter to
+`read`, so the operator couldn't submit, and single-line input
+foreclosed multi-line drafting anyway.
 
-The script is two-phased on the `THREAD_SPAWN_MESSAGE` env var:
-phase 1 (var unset) opens the popup; phase 2 (var set) skips the
-popup and proceeds to spawn + nudge. This keeps both phases in one
+The shipped approach is `display-popup -E` running
+`${EDITOR:-vi}` on a tempfile (`mktemp -t thread-spawn.XXXXXX`),
+then re-execing the script with `THREAD_SPAWN_MESSAGE_FILE` pointing
+at the tempfile. Multi-line drafting is natural; submit is the
+editor's save+quit gesture; cancel is exit-empty (Phase 2 checks
+`! -s` and emits a status-bar message). The popup is bordered, sized
+`-w 100 -h 30` for editing room, and titled with the role and the
+submit/cancel hint.
+
+The script is two-phased on the `THREAD_SPAWN_MESSAGE_FILE` env var:
+phase 1 (var unset) opens the popup; phase 2 (var set) reads the
+tempfile, removes it, and proceeds to spawn + nudge. Passing a
+*path* through the env instead of the message body sidesteps the
+multi-line-through-env problem entirely. Both phases live in one
 file, no separate helper script.
 
 **Spawn + seed:**
@@ -216,9 +234,6 @@ which is the scope-correctness signal.
   automation roles, not interactive — no operator-facing thread case.
 - **polecat-thread.** Polecats are transient; threading isn't
   meaningful.
-- **Removing `tmux-spawn-scratch.sh` and `scratch-clone-guard.md`.**
-  Now dead code (no bound callers). Leaving until a separate cleanup
-  bead — keeps this PR scoped to the thread primitive.
 - **Rig-scoped thread templates.** Not needed yet; the bare-name
   resolution in the script (and `resolveSessionTemplate` upstream)
   picks up either scope so no script change is required when one

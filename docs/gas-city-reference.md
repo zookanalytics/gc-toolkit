@@ -1092,7 +1092,7 @@ gc session pin <name>       # Keep a session awake
 gc session unpin <name>     # Remove wake pin
 gc session wait <name>      # Register a dependency wait
 gc session wake <name>      # Wake a session, clear holds
-gc session reset <name>     # Explicit-restart-trigger: kills host tmux session and respawns. State-capture is `gc handoff`'s job — chain `gc handoff` first to write the durable HANDOFF mail, then `gc session reset` to force the actual respawn for on-demand named sessions (canonical cycle-recycle pattern). WARNING: destroys co-located tmux state (helper panes, scratch windows, attached operator)
+gc session reset <name>     # Explicit-restart-trigger: kills host tmux session and respawns. State-capture is `gc handoff`'s job — chain `gc handoff` first to write the durable HANDOFF mail, then `gc session reset` to force the actual respawn for on-demand named sessions (canonical cycle-recycle pattern). WARNING: destroys co-located tmux state (helper panes, attached operator)
 gc session rename <name>    # Rename
 gc session prune            # Close old suspended sessions
 gc session submit <name>    # Submit with semantic delivery intent
