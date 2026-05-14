@@ -4,12 +4,18 @@ idle_timeout = "8h"
 min_active_sessions = 0
 
 # Cross-reference: render the canonical mayor's prompt template under
-# this agent's identity. Path is pack-root-relative —
-# compose.adjustFragmentPath translates it to city-root-relative before
-# render. Template variables (.AgentName, .RigName, .WorkDir) bind to the
-# thread's identity, not the canonical's, because PromptContext is
-# built per-agent at render time (cmd/gc/template_resolve.go).
-prompt_template = "agents/mayor/prompt.template.md"
+# this agent's identity. PR #10's Lane-B migration deleted
+# agents/mayor/prompt.template.md and moved the canonical post-patch
+# prompt to patches/mayor-prompt.template.md — that is now the
+# composed mayor prompt that gets applied via [[patches.agent]] to
+# the imported gastown mayor. Point the thread at the same overlay so
+# both surfaces stay in lockstep.
+# Path is pack-root-relative — compose.adjustFragmentPath translates
+# it to city-root-relative before render. Template variables
+# (.AgentName, .RigName, .WorkDir) bind to the thread's identity, not
+# the canonical's, because PromptContext is built per-agent at render
+# time (cmd/gc/template_resolve.go).
+prompt_template = "patches/mayor-prompt.template.md"
 
 # Append the generic thread-role fragment. RoleName (below) drives the
 # parameterization so the same fragment serves mayor-thread / mechanik-thread
