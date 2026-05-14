@@ -1,54 +1,66 @@
 # gc-toolkit — primary pack for the loomington city.
 #
-# Vendored gastown roster (mayor, deacon, boot, witness, refinery, polecat) at
-# gascity@669586546a 2026-05-05 (Lane C — see
-# docs/research/pack-architecture/spike-gc-toolkit-as-primary-pack.md).
-# Native gc-toolkit agents (mechanik, architect, concierge, consult-host,
-# polecat-codex). Per-agent provenance in agents/<name>/PROVENANCE.md.
+# Lane B (2026-05-11): gc-toolkit imports the gastown pack wholesale and
+# layers per-agent patches. See
+# docs/research/pack-architecture/pack-patch-timing-analysis.md for the
+# safety verdict and prerequisites; the prereqs (city-level
+# [imports.gastown] removed, [rigs.imports.gastown] removed) were
+# captured during Lane C cutover and remain in effect.
+#
+# Native gc-toolkit agents (architect, concierge, consult-host,
+# gascity-keeper, mechanik, polecat-codex, _polecat-gemini) ship under
+# agents/. Gastown roster (boot, deacon, mayor, polecat, refinery,
+# witness) is imported and divergences are expressed as bare-name
+# [[patches.agent]] — prompts in patches/, plus a polecat-convoys
+# template-fragment for the additive integration-branch section.
 #
 # Dog is intentionally NOT vendored: the gc binary auto-includes the
-# maintenance pack (cmd/gc/embed_builtin_packs.go:builtinPackIncludes), which
-# ships dog as a city-local agent. Vendoring our own would collide on
-# bare-name uniqueness in the V2 validator. We accept maintenance.dog
-# defaults pending an upstream fix.
+# maintenance pack (cmd/gc/embed_builtin_packs.go:builtinPackIncludes),
+# which ships dog as a city-local agent. Gastown's import of
+# maintenance is deduplicated against that auto-include by pack name.
 
 [pack]
 name = "gc-toolkit"
 schema = 2
 
+[imports.gastown]
+# City-root-relative (`//` prefix) so the import works from any path
+# the rig is checked out at — under `rigs/gc-toolkit/` in production
+# or under `.gc/worktrees/` during polecat work. The materialized
+# gastown copy is refreshed on every `gc` start from the embedded
+# gastown PackFS (see `cmd/gc/embed_builtin_packs.go`).
+source = "//.gc/system/packs/gastown"
+
 [global]
 session_live = [
-    "{{.ConfigDir}}/assets/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
-    "{{.ConfigDir}}/assets/scripts/tmux-keybindings.sh {{.ConfigDir}}",
     "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
 ]
+
+[[patches.agent]]
+name = "boot"
+prompt_template = "patches/boot-prompt.template.md"
+
+[[patches.agent]]
+name = "deacon"
+prompt_template = "patches/deacon-prompt.template.md"
+
+[[patches.agent]]
+name = "mayor"
+prompt_template = "patches/mayor-prompt.template.md"
+
+[[patches.agent]]
+name = "polecat"
+inject_fragments_append = ["polecat-convoys"]
+
+[[patches.agent]]
+name = "refinery"
+prompt_template = "patches/refinery-prompt.template.md"
+
+[[patches.agent]]
+name = "witness"
+prompt_template = "patches/witness-prompt.template.md"
 
 [[named_session]]
 template = "mechanik"
 scope = "city"
 mode = "always"
-
-[[named_session]]
-template = "mayor"
-scope = "city"
-mode = "always"
-
-[[named_session]]
-template = "deacon"
-scope = "city"
-mode = "always"
-
-[[named_session]]
-template = "boot"
-scope = "city"
-mode = "always"
-
-[[named_session]]
-template = "witness"
-scope = "rig"
-mode = "always"
-
-[[named_session]]
-template = "refinery"
-scope = "rig"
-mode = "on_demand"

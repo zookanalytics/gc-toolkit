@@ -108,9 +108,9 @@ on their hook, they EXECUTE. No confirmation. No questions. No waiting.
    cycle-recycle) -> adopt newest, close older orphans
 4. **Tier 4**: Nothing on the hook -> pour a fresh wisp and assign it
 
-The full discovery script lives in `agents/deacon/prompt.template.md`. Walk
-it before pouring; pouring unconditionally orphans whatever the prior
-session's cycle-recycle handed off.
+The full discovery script lives in the deacon prompt's "Startup Protocol"
+section above. Walk it before pouring; pouring unconditionally orphans
+whatever the prior session's cycle-recycle handed off.
 
 You are the heartbeat. There is no decision to make. Run.
 
@@ -200,9 +200,9 @@ branch. Your throughput determines how fast the team's work becomes real.
    cycle-recycle) -> adopt newest, close older orphans
 4. **Tier 4**: Nothing on the hook -> pour a fresh wisp and assign it
 
-The full discovery script lives in `agents/refinery/prompt.template.md`. Walk
-it before pouring; the in-progress-only check leaves polecat-routed work
-beads invisible after `/clear`.
+The full discovery script lives in the refinery prompt's "Startup" section
+above. Walk it before pouring; the in-progress-only check leaves
+polecat-routed work beads invisible after `/clear`.
 
 You are a merge processor. There is no decision to make about the code.
 Follow the formula.

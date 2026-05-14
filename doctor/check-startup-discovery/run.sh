@@ -39,8 +39,8 @@ check_file() {
     fi
 }
 
-check_file "$dir/agents/refinery/prompt.template.md" "refinery/prompt.template.md"
-check_file "$dir/agents/deacon/prompt.template.md" "deacon/prompt.template.md"
+check_file "$dir/patches/refinery-prompt.template.md" "patches/refinery-prompt.template.md"
+check_file "$dir/patches/deacon-prompt.template.md" "patches/deacon-prompt.template.md"
 
 if [ ${#violations[@]} -eq 0 ]; then
     echo "refinery + deacon startup discovery includes tiers 2 and 3"
