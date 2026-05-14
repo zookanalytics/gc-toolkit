@@ -6,10 +6,14 @@
 
 ## Goals
 
-Operator-spawnable, rig-scoped thread of `mechanik`. Provides
+Operator-spawnable, city-scoped thread of `mechanik`. Provides
 parallel conversational access to the mechanik role for focused
 thinking work, without competing with the canonical mechanik for
 routed mail and work.
+
+Scope mirrors the canonical mechanik (`scope = "city"`) so
+threads register as `gc-toolkit.mechanik-thread` rather than
+the rig-prefixed `gc-toolkit/gc-toolkit.mechanik-thread`.
 
 Concurrency is unbounded (no `max_active_sessions`); the operator
 spawns as many threads as they need. Each instance gets its own git
@@ -40,9 +44,11 @@ canonical because it is a distinct agent identity in pack config.
   (`AgentName`, `RigName`, `WorkDir`). When mechanik's prompt evolves,
   threads pick up the change on next spawn — no duplication.
 
-- `append_fragments = ["mechanik-thread-role"]` appends a role-
-  clarification block after the canonical body. The fragment ships
-  at `template-fragments/mechanik-thread-role.template.md`.
+- `append_fragments = ["thread-role"]` appends a role-
+  clarification block after the canonical body. The generic
+  fragment at `template-fragments/thread-role.template.md`
+  is shared with `mayor-thread` and parameterized by
+  the `RoleName` env var (substituted as `{{ .RoleName }}`).
 
 - `work_query = "printf '[]'"` and a non-zero-exit `sling_query`
   keep the thread off the routed-work and sling-target paths.
@@ -54,7 +60,8 @@ canonical because it is a distinct agent identity in pack config.
 
 - `min_active_sessions = 0` means the reconciler does not pre-spawn,
   and `max_active_sessions` is unset (unbounded). The operator spawns
-  via `gc session new gc-toolkit/gc-toolkit.mechanik-thread`; gascity
-  numbers pool instances `mechanik-thread-1`, `-2`, … on each spawn.
+  via `gc session new mechanik-thread`; gascity numbers pool instances
+  `mechanik-thread-1`, `-2`, … on each spawn.
 
 > 2026-05-11: renamed from `mechanik-side` to `mechanik-thread` pre-merge per mechanik+operator decision (slit FP design `Thread` primitive; cross-platform convergence on thread-as-conversation-identity).
+> 2026-05-13: scope corrected from `rig` to `city` (tk-1zd25); role fragment generalized to shared `thread-role` with `RoleName` env var parameterization.
