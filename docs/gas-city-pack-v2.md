@@ -127,7 +127,7 @@ imported packs, and from rig-local packs. A previous v1 quirk
 ```toml
 [global]
 session_live = [
-    "{{.ConfigDir}}/assets/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
+    "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
 ]
 ```
 
