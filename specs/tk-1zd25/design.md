@@ -151,12 +151,25 @@ file, no separate helper script.
 SPAWN_OUT=$(gc session new "$THREAD_TEMPLATE" --no-attach 2>&1)
 SESSION_ID=$(printf '%s\n' "$SPAWN_OUT" \
     | sed -n 's/^Session \([^ ]*\) created.*/\1/p' | head -1)
-gc session nudge --delivery=wait-idle "$SESSION_ID" "$THREAD_SPAWN_MESSAGE"
+gc session nudge --delivery=queue "$SESSION_ID" "$THREAD_SPAWN_MESSAGE"
 ```
 
-`--delivery=wait-idle` (the default for `gc session nudge`) blocks
-until the new session's provider reports ready, so the first
-message is not lost to a still-initializing terminal.
+`--delivery=queue` durably enqueues the nudge keyed on the canonical
+session ID and returns immediately. The supervisor-side dispatcher
+(`gascity/cmd/gc/nudge_dispatcher.go:115`) scans open session beads
+each pass and delivers the queued message as soon as the new thread's
+provider is observed running — `obs.Running` is the only state gate,
+so a target still in `creating` at enqueue time is fine.
+
+Earlier drafts used the default `--delivery=wait-idle`, which blocks
+the caller until the provider reports ready. For an operator-spawned
+thread, claude cold-start is ~20-30s, and `wait-idle` held the
+display-popup open for that whole window — the popup couldn't close
+and the operator couldn't return to the originating pane until the
+script returned. `--delivery=queue` trades the "delivered before
+return" guarantee for instant return; loss of the first message would
+require the queue file to disappear before the dispatcher's next
+pass, which is the same durability domain as any other queued nudge.
 
 `--alias` is intentionally **not** passed: the runtime prefixes any
 operator-supplied alias with the active binding namespace (e.g.
@@ -186,7 +199,8 @@ script changes.
 - [x] `assets/scripts/tmux-spawn-thread.sh` exists and is executable;
       detects current agent via `GC_AGENT`, maps role idempotently,
       probes template existence, popup-prompts for first message,
-      spawns + seeds via wait-idle nudge, fails soft on missing template
+      spawns + seeds via queue nudge (instant return), fails soft on
+      missing template
 - [x] `assets/scripts/tmux-bindings.sh:15` repointed at the new script
 - [x] This design doc
 - [ ] Live `Ctrl-B + a` test from mayor / mechanik / mechanik-thread

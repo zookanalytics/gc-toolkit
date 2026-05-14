@@ -6,8 +6,9 @@
 # session running an interactive named agent (mayor, mechanik), this
 # opens a tmux popup asking for a first message, then spawns the
 # corresponding <role>-thread as a registered city-scoped session.
-# The first message is delivered via `gc session nudge --delivery=wait-idle`
-# the moment the new thread is idle and ready to receive input.
+# The first message is durably queued via `gc session nudge --delivery=queue`
+# so the spawn call returns immediately; the supervisor-side dispatcher
+# drains the queue into the new thread as soon as its provider is running.
 #
 # Threads are registered agents: they appear in `gc session list`,
 # survive `gc session reset` of the canonical, and carry the full role
@@ -124,10 +125,15 @@ if [ -z "$SESSION_ID" ]; then
     exit 1
 fi
 
-# 8. Seed the first message. --delivery=wait-idle waits for the new
-#    session's provider to report ready before injecting input, so the
-#    message is not lost to a still-initializing terminal.
-if ! gc session nudge --delivery=wait-idle "$SESSION_ID" "$THREAD_SPAWN_MESSAGE" >/dev/null 2>&1; then
+# 8. Seed the first message. --delivery=queue durably enqueues the
+#    nudge keyed on the canonical session ID and returns immediately,
+#    so the popup closes and the operator gets their pane back without
+#    waiting on claude cold-start (~20-30s). The supervisor-side
+#    dispatcher scans open session beads each pass and delivers the
+#    queued message as soon as the new thread's provider is running;
+#    queue persistence is independent of session state, so a target
+#    still in `creating` is fine.
+if ! gc session nudge --delivery=queue "$SESSION_ID" "$THREAD_SPAWN_MESSAGE" >/dev/null 2>&1; then
     gcmux display-message "thread spawn: nudge to '$SESSION_ID' failed; session created but first message not delivered"
     exit 1
 fi
