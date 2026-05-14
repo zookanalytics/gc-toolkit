@@ -1,4 +1,4 @@
-scope = "rig"
+scope = "city"
 wake_mode = "resume"
 idle_timeout = "8h"
 min_active_sessions = 0
@@ -11,22 +11,33 @@ min_active_sessions = 0
 # built per-agent at render time (cmd/gc/template_resolve.go).
 prompt_template = "agents/mechanik/prompt.template.md"
 
-# Append a thread role clarification after the canonical body
-# renders. Fragment ships at template-fragments/mechanik-thread-role.template.md.
-append_fragments = ["mechanik-thread-role"]
+# Append the generic thread-role fragment. RoleName (below) drives the
+# parameterization so the same fragment serves mayor-thread / mechanik-thread
+# / future <role>-thread variants without duplication.
+append_fragments = ["thread-role"]
 
 # Each instance gets its own worktree, separate from canonical mechanik's
 # .gc/agents/mechanik home. AgentBase parameterizes by per-instance name
 # (e.g., mechanik-thread-1), so concurrent threads do not stomp each other.
-work_dir = ".gc/worktrees/{{.Rig}}/mechanik-thread/{{.AgentBase}}"
-pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+#
+# City-scoped agents have empty .Rig/.RigRoot (those derive from agent
+# dir/rig assignment, which city-scoped pack agents lack). Use literal
+# "gc-toolkit" in the path and {{.ConfigDir}} (pack source) as the git
+# repo root passed to worktree-setup.sh.
+work_dir = ".gc/worktrees/gc-toolkit/mechanik-thread/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.ConfigDir}} {{.WorkDir}} {{.AgentBase}} --sync"]
 
 nudge = "Operator nudge — return to the focus thread. Routed mail and routed work go to the canonical mechanik; check mail (gc mail inbox) only if the operator left a direct message."
 
 # Never-matching predicates: threads are operator-spawned only.
 # work_query returns empty JSON so the reconciler never claims work or
 # auto-spawns to satisfy demand. sling_query exits non-zero so
-# `gc sling gc-toolkit/gc-toolkit.mechanik-thread <bead>` surfaces an
+# `gc sling gc-toolkit.mechanik-thread <bead>` surfaces an
 # explicit error instead of silently routing.
 work_query = "printf '[]'"
 sling_query = "echo 'mechanik-thread is operator-spawned only; not a sling target' >&2; exit 1"
+
+# RoleName drives the generic thread-role fragment. Substituted into the
+# fragment as {{ .RoleName }} via PromptContext.Env -> template data.
+[env]
+RoleName = "mechanik"
