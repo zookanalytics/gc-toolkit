@@ -236,6 +236,11 @@ The context file (prepared by the parent at dispatch) carries:
 **2. Classify.**
 
 Our fork commits represent goals/intents, not literal implementations.
+The spirit of every local commit is fixing an underlying problem; when
+upstream solves that problem its own way, the strategic goal is to shrink
+the surface of custom commits we maintain as upstream improves.
+Preserving adjacent bits because they're nice runs in the wrong direction.
+
 Pick exactly one classification for the work in front of you:
 
 - **mechanical** — The kept commit's intent transfers cleanly to the new
@@ -250,7 +255,9 @@ Pick exactly one classification for the work in front of you:
 - **dropped-absorbed** — Upstream already provides the behavior the
   commit was adding, OR upstream removed the surface the commit targeted
   in a way that makes the commit moot. The right action is to drop the
-  commit (the parent rebase polecat will `git rebase --skip`).
+  **entire** commit (the parent rebase polecat will `git rebase --skip`).
+  Do not salvage adjacent code, tests, or refactors that rode along on
+  the commit — see the action section below for the anti-back-port rule.
 
   Examples: cache mechanism the commit added is now built into upstream;
   config field the commit deprecated has been removed upstream entirely.
@@ -303,6 +310,28 @@ gc bd update {{issue}} \
 ```
 
 ### dropped-absorbed
+
+The kept commit was a unit-of-intent. The intent is gone (upstream
+solved it its own way). The **entire** commit goes — including anything
+that rode along.
+
+Do NOT:
+
+- Cherry-pick adjacent changes from the absorbed commit onto a synthetic
+  follow-up commit.
+- Back-port tests we wrote against the now-fixed-upstream bug. Those
+  tests target a problem upstream has solved differently; keeping them
+  overfits to our old implementation.
+- Preserve "interesting" refactors, helper renames, or quality-of-life
+  adjustments that happened to ride along on the commit. The strategic
+  goal is to shrink the surface of custom commits we maintain as
+  upstream improves; preserving adjacent bits because they're nice runs
+  in the wrong direction.
+
+If a piece of the absorbed commit genuinely has independent value
+(unrelated bug fix that got bundled, a real net improvement), file a
+NEW bead with that scope and let it land as a fresh commit on its own
+merits — do NOT smuggle it through the rebase as commit-preservation.
 
 Do NOT commit. Reset the working tree to the rebase HEAD so the index
 is clean (no staged conflict resolution):
