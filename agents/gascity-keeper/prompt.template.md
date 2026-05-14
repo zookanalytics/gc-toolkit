@@ -392,6 +392,100 @@ you on completion. Either way, the wake-up does the same thing.
 
 2. **Decide whether to re-pour.**
 
+First, a defensive review-dispatch backstop. The rebase polecat is
+supposed to dispatch a review polecat itself when a rework closes
+`classification=judgment-required` (see
+`formulas/mol-upstream-gc-rebase.toml:715-764`). That dispatch lives
+inside the polecat's prompt, and polecat-follows-prompt is
+non-deterministic — re-poured rebase polecats have been observed
+skipping the review-dispatch block, leaving the bead parked with no
+review filed and `metadata.pending_review` unset. This shape-check
+catches that case and dispatches the review polecat from here.
+**Defense-in-depth** — the polecat-side block stays in place and runs
+first in the common case. The shape that triggers it:
+
+- `metadata.rebase_in_progress` = `true`
+- `metadata.pending_rework` is set, that bead's `status` = `closed`,
+  and its `metadata.classification` = `judgment-required`
+- `metadata.pending_review` is unset
+
+Negative cases — fall through to the normal GATE: rework was
+`mechanical`, `dropped-absorbed`, or `infeasible` (the polecat's
+re-pour handles those, and `infeasible` already sets
+`conflict_questions`); or `pending_review` is already set.
+
+```bash
+REBASE_META=$(gc bd show <bead> --json | jq -r '.[0].metadata')
+REBASE_IN_PROGRESS=$(printf '%s' "$REBASE_META" | jq -r '.rebase_in_progress // empty')
+PENDING_REWORK=$(printf '%s' "$REBASE_META" | jq -r '.pending_rework // empty')
+PENDING_REVIEW=$(printf '%s' "$REBASE_META" | jq -r '.pending_review // empty')
+
+if [ "$REBASE_IN_PROGRESS" = "true" ] && [ -n "$PENDING_REWORK" ] && [ -z "$PENDING_REVIEW" ]; then
+    REWORK=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0]')
+    REWORK_STATUS=$(printf '%s' "$REWORK" | jq -r '.status // empty')
+    CLASSIFICATION=$(printf '%s' "$REWORK" | jq -r '.metadata.classification // empty')
+
+    if [ "$REWORK_STATUS" = "closed" ] && [ "$CLASSIFICATION" = "judgment-required" ]; then
+        REWORK_COMMIT_SHA=$(printf '%s' "$REWORK" | jq -r '.metadata.commit_sha // empty')
+        REWORK_COMMIT_SUBJECT=$(printf '%s' "$REWORK" | jq -r '.metadata.commit_subject // empty')
+        JUDGMENT=$(printf '%s' "$REWORK" | jq -r '.metadata.judgment_summary // empty')
+        WORK_DIR=$(printf '%s' "$REBASE_META" | jq -r '.work_dir // empty')
+
+        REVIEW_META=$(jq -n \
+            --arg coordinator "$GC_AGENT" \
+            --arg work_dir "$WORK_DIR" \
+            --arg rework_bead "$PENDING_REWORK" \
+            --arg rebase_bead "<bead>" \
+            --arg commit_sha "$REWORK_COMMIT_SHA" \
+            --arg commit_subject "$REWORK_COMMIT_SUBJECT" \
+            --arg judgment "$JUDGMENT" \
+            '{coordinator:$coordinator, work_dir:$work_dir, rework_bead:$rework_bead, rebase_bead:$rebase_bead, commit_sha:$commit_sha, commit_subject:$commit_subject, judgment_summary:$judgment, review_id:("rebase-rework-" + $rebase_bead), review_phase:"rebase-rework", review_leg:"approve-or-reject"}')
+
+        REVIEW_DESC="Review the rework polecat's judgment-required rework of commit $REWORK_COMMIT_SHA ($REWORK_COMMIT_SUBJECT). The rework polecat reported: $JUDGMENT
+
+Read the rework commit at HEAD in the shared worktree (metadata.work_dir). Read the original kept commit's intent from rework bead $PENDING_REWORK's metadata.context_file. Read upstream's adjacent code.
+
+Verdict: approve if the rework correctly ports the original intent onto the new upstream layer and the design call was reasonable. Reject if the rework misses the intent, makes a bad design call, or introduces regression risk.
+
+Write your full review report to bead notes. Set metadata.verdict='approve' or metadata.verdict='reject'; on reject, also set metadata.reject_reason. Set metadata.rework_bead='$PENDING_REWORK' so the rebase polecat can correlate. Close the bead via mol-review-leg's notify-close step (which mails $GC_AGENT)."
+
+        REVIEW_BEAD=$(gc bd create \
+            --title "review rework $REWORK_COMMIT_SHA: $REWORK_COMMIT_SUBJECT" \
+            --type task \
+            --priority 2 \
+            --parent <bead> \
+            --metadata "$REVIEW_META" \
+            --description "$REVIEW_DESC" \
+            --json | jq -r '.id')
+
+        POLECAT_POOL=$(printf '%s' "$REBASE_META" | jq -r '."gc.routed_to" // empty' \
+            | sed 's/[^/]*$/gc-toolkit.polecat/')
+        [ -z "$POLECAT_POOL" ] && POLECAT_POOL="gascity/gc-toolkit.polecat"
+        gc sling "$POLECAT_POOL" "$REVIEW_BEAD" --on mol-review-leg
+
+        gc bd update <bead> \
+            --set-metadata pending_review="$REVIEW_BEAD" \
+            --set-metadata last_review_bead="$REVIEW_BEAD"
+
+        echo "Defensive dispatch: filed review bead $REVIEW_BEAD for rework $PENDING_REWORK; falling through to GATE — it will park on the review bead."
+    fi
+fi
+```
+
+If the defensive block fired (printed "Defensive dispatch: …"), tell
+the operator (only if they engaged you on this turn):
+
+> Rebase <bead>: rework <rework-bead> closed judgment-required but no
+> review polecat had been dispatched. Filed review bead <review-bead>
+> and dispatched a review polecat (defensive keeper-side check). Will
+> re-pour the rebase mol when the review closes.
+
+Either way (defensive block fired or not), continue to the GATE check
+below. If the defensive block fired, `pending_review` is now set, GATE
+will resolve to the new review bead, see it's still open, and correctly
+park the rebase. Do **not** re-pour this turn — the review bead must
+close first.
+
 ```bash
 REWORK=$(gc bd show <bead> --json | jq -r '.[0].metadata.pending_rework // empty')
 REVIEW=$(gc bd show <bead> --json | jq -r '.[0].metadata.pending_review // empty')
