@@ -495,7 +495,7 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 if [ "{{auto_ff_rig_main}}" = "true" ] && [ -n "$RIG_ROOT" ] \
    && { [ -d "$RIG_ROOT/.git" ] || [ -f "$RIG_ROOT/.git" ]; }; then
   RIG_BRANCH=$(git -C "$RIG_ROOT" branch --show-current 2>/dev/null || echo "")
-  RIG_DIRTY=$(git -C "$RIG_ROOT" status --porcelain 2>/dev/null)
+  RIG_DIRTY=$(git -C "$RIG_ROOT" status --porcelain --untracked-files=no 2>/dev/null)
   if [ "$RIG_BRANCH" = "$TARGET" ] && [ -z "$RIG_DIRTY" ]; then
     git -C "$RIG_ROOT" fetch --quiet origin "$TARGET" 2>/dev/null || true
     if git -C "$RIG_ROOT" merge-base --is-ancestor \
