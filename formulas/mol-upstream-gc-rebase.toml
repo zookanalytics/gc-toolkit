@@ -18,7 +18,7 @@ it's a controlled rebase with a verdict-keeping survey.
 | upstream_branch | main | Branch to rebase onto and push back to |
 | test_command | make test | Test command run after rebase |
 | install_command | make install | Local rebuild of `gc` into `$INSTALL_DIR` |
-| notify_recipient | overseer | Mail target on completion / abort |
+| notify_recipient | human | Mail target on completion / abort |
 | requesting_keeper | (empty) | Keeper address for the rework-dispatch handback; falls back to notify_recipient if unset |
 
 ## Conflict handling: dispatch a rework polecat per kept-commit conflict
@@ -107,7 +107,7 @@ default = "make install"
 
 [vars.notify_recipient]
 description = "Mail target for completion and abort notifications"
-default = "overseer"
+default = "human"
 
 [vars.requesting_keeper]
 description = "Keeper agent address (e.g., gascity/gascity-keeper) for the rework-dispatch handback. Optional; the rebase step falls back to notify_recipient if unset, but a keeper-aware operator should stamp metadata.requesting_keeper at dispatch so the cooperative-handback path lands cleanly."
