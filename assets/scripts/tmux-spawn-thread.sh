@@ -104,27 +104,32 @@ fi
 THREAD_SPAWN_MESSAGE=$(cat "$THREAD_SPAWN_MESSAGE_FILE")
 rm -f "$THREAD_SPAWN_MESSAGE_FILE"
 
-# 6. Generate a short alias for the new thread session. "thread-<6 hex>"
-#    gives ~16M of namespace, plenty for parallel threads in one
-#    operator session. The runtime promotes it to a workspace-unique
-#    handle.
-RAND=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
-ALIAS="thread-${RAND}"
-
-# 7. Spawn the thread session, no-attach so the operator can stay in
+# 6. Spawn the thread session, no-attach so the operator can stay in
 #    the originating pane. Errors surface via display-message — the
-#    operator sees them in the status bar.
-if ! ERR=$(gc session new "$THREAD_TEMPLATE" --alias "$ALIAS" --no-attach 2>&1); then
-    gcmux display-message "thread spawn failed: $ERR"
+#    operator sees them in the status bar. We do NOT pass --alias: the
+#    runtime would prefix it with the binding namespace (e.g.
+#    "thread-abc" -> "<binding>.thread-abc"), and the un-prefixed value
+#    would not resolve in the nudge below. The canonical session ID
+#    returned by `gc session new` is what we route on.
+if ! SPAWN_OUT=$(gc session new "$THREAD_TEMPLATE" --no-attach 2>&1); then
+    gcmux display-message "thread spawn failed: $SPAWN_OUT"
+    exit 1
+fi
+
+# 7. Parse the canonical session ID from the success line:
+#    "Session <id> created from template <template> ..."
+SESSION_ID=$(printf '%s\n' "$SPAWN_OUT" | sed -n 's/^Session \([^ ]*\) created.*/\1/p' | head -1)
+if [ -z "$SESSION_ID" ]; then
+    gcmux display-message "thread spawn: could not parse session id from gc output"
     exit 1
 fi
 
 # 8. Seed the first message. --delivery=wait-idle waits for the new
 #    session's provider to report ready before injecting input, so the
 #    message is not lost to a still-initializing terminal.
-if ! gc session nudge --delivery=wait-idle "$ALIAS" "$THREAD_SPAWN_MESSAGE" >/dev/null 2>&1; then
-    gcmux display-message "thread spawn: nudge to '$ALIAS' failed; session created but first message not delivered"
+if ! gc session nudge --delivery=wait-idle "$SESSION_ID" "$THREAD_SPAWN_MESSAGE" >/dev/null 2>&1; then
+    gcmux display-message "thread spawn: nudge to '$SESSION_ID' failed; session created but first message not delivered"
     exit 1
 fi
 
-gcmux display-message "spawned $THREAD_TEMPLATE (alias $ALIAS); use prefix+S to switch"
+gcmux display-message "spawned $THREAD_TEMPLATE ($SESSION_ID); use prefix+S to switch"

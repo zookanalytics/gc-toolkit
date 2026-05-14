@@ -148,14 +148,22 @@ file, no separate helper script.
 **Spawn + seed:**
 
 ```sh
-gc session new "$THREAD_TEMPLATE" --alias "$ALIAS" --no-attach
-gc session nudge --delivery=wait-idle "$ALIAS" "$THREAD_SPAWN_MESSAGE"
+SPAWN_OUT=$(gc session new "$THREAD_TEMPLATE" --no-attach 2>&1)
+SESSION_ID=$(printf '%s\n' "$SPAWN_OUT" \
+    | sed -n 's/^Session \([^ ]*\) created.*/\1/p' | head -1)
+gc session nudge --delivery=wait-idle "$SESSION_ID" "$THREAD_SPAWN_MESSAGE"
 ```
 
 `--delivery=wait-idle` (the default for `gc session nudge`) blocks
 until the new session's provider reports ready, so the first
-message is not lost to a still-initializing terminal. Aliases are
-`thread-<6 hex chars>` from `/dev/urandom`.
+message is not lost to a still-initializing terminal.
+
+`--alias` is intentionally **not** passed: the runtime prefixes any
+operator-supplied alias with the active binding namespace (e.g.
+`thread-abc` → `<binding>.thread-abc`), and the un-prefixed value
+would not resolve in the nudge call. We route on the canonical
+session ID printed by `gc session new` to its stdout
+(`gascity/cmd/gc/cmd_session.go:316`) instead.
 
 **Scope handling:**
 
