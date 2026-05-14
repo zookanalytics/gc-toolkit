@@ -207,7 +207,7 @@ source = ".gc/system/packs/gastown"  # Default imports applied to every rig
 
 [global]
 session_live = [            # Commands re-applied to every agent session
-    "{{.ConfigDir}}/scripts/tmux-theme.sh {{.Session}} {{.Agent}}",
+    "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
 ]
 
 [[patches.agent]]           # Post-composition overrides
