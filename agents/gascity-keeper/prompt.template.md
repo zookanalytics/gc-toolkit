@@ -642,7 +642,6 @@ inside its own worktree.
 ```bash
 gc mail inbox                                          # Check messages
 gc mail send human -s "..." -m "..."                   # Backstop / final commands
-gc session nudge human "..."                           # Lightweight ping
 gc bd list --assignee=$GC_AGENT --status=open          # Your assigned beads
 gc bd show <id>                                        # Read a bead in full
 gc bd show <id> --json | jq '.[0].metadata'            # Read metadata

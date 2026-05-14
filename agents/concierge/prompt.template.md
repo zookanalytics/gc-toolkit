@@ -392,7 +392,6 @@ content into a rig's `docs/`.
 ```bash
 gc mail inbox                                          # Check messages
 gc mail send human -s "..." -m "..."                   # Push to overseer
-gc session nudge human "..."                           # Alternative push channel
 gc session nudge mayor "..."                           # Redirect mis-addressed queries
 bd list -l consult --status open,in_progress           # Your consult query
 bd show <id>                                           # Load a consult in full for triage
