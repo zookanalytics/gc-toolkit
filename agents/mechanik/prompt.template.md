@@ -186,8 +186,10 @@ drift-audit, doc-update workers) refer to the brief without
 re-enumerating its contents, and lets the member docs stay where they
 are without forced renames.
 
-The brief comprises three reference docs under
-`{{ .ConfigDir }}/docs/`. The **canonical membership list** lives in
+The brief comprises five reference docs under
+`{{ .ConfigDir }}/docs/` — one index into upstream Gas City
+documentation plus four gc-toolkit-specific process docs. The
+**canonical membership list** lives in
 `{{ .ConfigDir }}/docs/principles/agent-brief.md` — downstream config,
 drift-audit, and doc-update tooling point there. The bullets below are
 an **operational rendering** of that canonical list, inlined here so
@@ -197,25 +199,42 @@ single canonical index. For the doc-type framing and how the brief sits
 in gc-toolkit's broader doc taxonomy, see
 `{{ .ConfigDir }}/docs/principles/agent-brief.md`.
 
-- **gas-city-reference.md** — Current Gas City surface area: city.toml schema,
-  CLI commands, pack structure, agent roles, formulas, beads, the Nine Concepts
-  architecture. Describes what exists today. Consult this before guessing at
-  config syntax or CLI flags.
+- **gascity-reference.md** — Index of canonical Gas City documentation
+  at `docs.gascityhall.com` (CLI, config, formulas, providers, trust
+  boundaries, PackV2, tutorials, schemas). The index points; it does
+  not paraphrase. Also carries the four-condition bar gc-toolkit
+  applies before adding any new `docs/gascity-*.md` doc. Consult this
+  before guessing at config syntax or CLI flags — and before deciding
+  whether a new doc belongs in gc-toolkit or upstream.
 
-- **gas-city-pack-v2.md** — Pack/City v2 direction and open issues tracking the
-  1.0 release. Describes where Gas City is headed: the city-as-pack model,
-  convention-based agent discovery (`agents/<name>/`), schema 2 pack.toml,
-  prompt file naming changes, and active design decisions. Consult this before
-  making structural changes to understand what's stable vs what's about to shift.
+- **gascity-local-patching.md** — Recommended process when a city must
+  carry local fixes against `gascity` ahead of upstream. Covers the
+  merge-flow model (every commit on origin/main IS the candidate set,
+  no held branches or labels), commit-message expectations as the
+  durable review packet, and the fork-setup conventions. Consult
+  before proposing or accepting work that involves a `gascity` fix
+  beyond what's already in upstream.
 
-- **gascity-local-patching.md** — Recommended process when a city must carry
-  local fixes against `gascity` ahead of upstream. Covers the 3-option
-  framework (ignore / local patch / engage), the merge-flow model (every
-  commit on origin/main IS the candidate set, no held branches/labels),
-  commit-message expectations as the durable review packet, and the rule
-  that upstream PR submission is operator-gated, not agent-initiated.
-  Consult before proposing or accepting work that involves a `gascity`
-  fix beyond what's already in upstream.
+- **gascity-upstream-engagement.md** — When and how to engage upstream
+  `gastownhall/gascity`. The three-option framework (ignore / local
+  patch / engage), commit-as-review-packet shape, operator-gated PR
+  submission, candidate-set model, and the compare-URL handoff form
+  for PR creation. Consult before scoping work that touches the
+  upstream relationship.
+
+- **gascity-rebase-conventions.md** — gc-toolkit's framework for
+  rebasing local `origin/main` commits onto upstream changes. Default
+  rework (not auto-drop), dropped-absorbed = drop the whole commit,
+  force-push owned by the rebase polecat (never refinery), and the
+  no-dead-end conflict policy. Consult before scoping rebase work or
+  diagnosing a rebase that landed at the wrong agent.
+
+- **gascity-polecat-patterns.md** — Operational patterns for polecat
+  work in gc-toolkit. Closed beads have `assignee=null` so audits
+  must query `metadata.gc.routed_to`; rotation salvage defaults to
+  accept-loss; refinery delivers to PR-open and the operator merges
+  externally. Consult when designing audit queries or interpreting
+  refinery-handoff state.
 
 ## Directory Guidelines
 
