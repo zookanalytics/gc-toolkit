@@ -3,7 +3,9 @@
 **Audit bead:** tk-fxs87
 **Feeds verdict on:** tk-wv6m6 (decision: should `gc handoff` be the universal 'restart the agent' path, including for on-demand named sessions?)
 **Surveyed at:** 2026-05-11
-**Upstream commit surveyed:** `d11ee0e12da211d622ffe919adef69c4ce493eff` (`zookanalytics/gascity` fork, tracking `gastownhall/gascity`)
+**Upstream commit surveyed:** `d11ee0e12da211d622ffe919adef69c4ce493eff` — note: this commit was on a local feature branch of the `zookanalytics/gascity` fork (e.g., `polecat/gc-9czy7-gc-hook-exit-stance`, `backups/main-pre-rebase-20260513T000452Z`), **not** on `origin/main` or `upstream/main` at the time of survey or now. The cited file paths and line numbers are anchored to that snapshot.
+
+**Cross-check against current `upstream/main` (`71e5847e27bf5b605cff9dc8d80df61420ee585d`, 2026-05-14):** conclusions unchanged — the named-session restart gate in `gc handoff` is still in place, the reconciler's restart-request handler is still mode-agnostic, and the config-drift attached guard still does not cover the restart-request path. Line numbers below may have drifted under current `upstream/main`; the structural findings hold.
 
 ## TL;DR
 
@@ -36,7 +38,7 @@ The named-session restart skip in `gc handoff` is **deliberate refusal**, codifi
 | Issue #744 (closed) | gastownhall/gascity | https://github.com/gastownhall/gascity/issues/744 | 2026-05-11 |
 | PR #745 (closed superseded) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/745 | 2026-05-11 |
 | PR #927 (merged) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/927 | 2026-05-11 |
-| Issue #1102 (closed) | gastownhall/gascity | https://github.com/gastownhall/gascity/issues/1102 | 2026-05-11 |
+| PR #1102 (closed) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/1102 | 2026-05-11 |
 | PR #1552 / PR #1568 (merged) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/1568 | 2026-05-11 |
 | Issue #1087 (open) | gastownhall/gascity | https://github.com/gastownhall/gascity/issues/1087 | 2026-05-11 |
 | Issue #1276 (open) | gastownhall/gascity | https://github.com/gastownhall/gascity/issues/1276 | 2026-05-11 |
@@ -175,17 +177,17 @@ Searched gastownhall/gascity issues and PRs for "handoff", "named session", "res
 
 | # | State | Title | Relevance |
 |---|---|---|---|
-| 1087 | OPEN | feat: Introduce "automatic" vs "interactive" agents | **Directly relevant.** Operator advocates *more* protection for interactive sessions, not less. Argues against any auto-restart of human-attended agents. Active since 2026-04-21, no maintainer pushback in body. |
+| 1087 | OPEN | feat: Introduce "automatic" vs "interactive" agents | **Directly relevant.** Operator advocates *more* protection for interactive sessions, not less. Argues against any auto-restart of human-attended agents. Active since 2026-04-21. Maintainer comments on #1087 are not advocating auto-restart; they discuss attachment/working-state protection and shape — extending existing named-session config rather than a new mode. The direction of travel still supports more protection for operator-adjacent sessions. |
 | 1893 | OPEN | bug: alive on_demand sessions ignore bd update --assignee | Recent (2026-05-09) confirmation that **`gc session reset` is the de facto workaround** for restart needs on on-demand named sessions. Operator workaround: *"`gc session reset <session-id>` for each stale named session before slinging new work."* No comment from operator that handoff should pick this up. |
 | 1276 | OPEN | gc runtime request-restart panics with empty select{} deadlock | Tangential. Documents the same gate (`TestRuntimeRequestRestartNamedOnDemandReturnsWithoutBlocking`) without challenging it. |
-| 1493 | OPEN | bug: named-always session post-churn stays asleep indefinitely | Concerns `always` named sessions, not on-demand. |
+| 1493 | OPEN as of 2026-05-11 survey; CLOSED 2026-05-12 (post-survey) | bug: named-always session post-churn stays asleep indefinitely | Concerns `always` named sessions, not on-demand. |
 
 Closed/merged precedent for the current shape:
 
 - Issue #744 (closed 2026-04-15) — origin of the skip.
 - PR #745 (closed 2026-04-15) — original implementation, superseded.
 - PR #927 (merged 2026-04-19) — final form of the skip; cited in test comment.
-- Issue #1102 (closed 2026-04-22) — generalized failure to `always` mode during PreCompact.
+- PR #1102 (closed 2026-04-22) — generalized failure to `always` mode during PreCompact.
 - PR #1552/#1568 (merged 2026-05-01) — `gc handoff --auto` for PreCompact; the *"right discriminator isn't the bead — it's the call site"*. This is the most recent statement of intent and it **moves further away** from "controller can/can't restart" toward "auto vs explicit invocation context."
 
 **No open issue or PR advocates "extend `gc handoff` to also restart on-demand named sessions."** No issue references gastownhall/gascity#744 in the direction of reversing it. The upstream conversation is moving toward *more* operator-attachment protection, not less.
