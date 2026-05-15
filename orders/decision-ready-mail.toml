@@ -1,0 +1,14 @@
+# decision-ready-mail — mail human when a decision bead becomes review-ready.
+#
+# Operator decision (2026-05-15, tk-f2wpu): the surfacing channel for
+# "decision bead has all blockers closed" is `gc mail send <operator>`.
+# Cockpit panel, nudge, and auto-dispatch are explicitly out of scope.
+#
+# Trigger: cooldown 1m. The script is cheap (one `bd ready` query per
+# scope; mail/metadata writes only on new transitions), idempotent via
+# metadata.gc.decision_notified=true on the decision bead.
+[order]
+description = "Mail human when a decision bead has all blockers closed"
+trigger     = "cooldown"
+interval    = "1m"
+exec        = "$PACK_DIR/assets/scripts/decision-ready-mail.sh"
