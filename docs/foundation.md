@@ -1,31 +1,32 @@
 # Foundation
 
-See also: [North Star](north-star.md) — the pack thesis.
+gc-toolkit is a pack for Gas City, the multi-agent runtime, that gets work done by relentlessly focusing on high-bandwidth human interaction.
 
-> **An AI that serves you: your attention is the only currency, your clock decides the cadence, your feedback rewrites the next cycle.**
+AI changed the cost of work. Agent iteration, parallel exploration, and self-critique are cheap. Human attention is scarce, context-bound, and not restartable on demand. gc-toolkit turns that asymmetry into operating discipline: agents do the cheap work before they interrupt, the surface makes judgment easier rather than transferring work back to the operator, and every lesson compounds into the pack so attention is never spent twice.
 
-Stable surface for the AI→human communication pack design. Each item carries
-a status. This is the conversation's record; chat is the negotiation about it.
+## Core Beliefs
 
-Structure: **Tenets** are root principles (durable, why we operate the way we do).
-**Practices** are operational hows derived from tenets. Tenets stay small; practices accumulate.
+**Human attention is the budget.** Attention is genuinely scarce and not restartable on demand.
 
----
+**Agents earn every interaction.** Make it count: do the cheap work, plan ahead, and frame the choice. Every interruption justifies the attention it claims.
 
-## Premise
+**Agents improve.** Lessons come from doing; the system carries them across restarts so the next conversation starts smarter.
 
-AI changed the cost of work. Whether it changed the principles for
-organizing it is less obvious. Coordination, escalation, retrospection,
-blameless review, durable artifacts — patterns earned over fifty-to-a-
-hundred years by solving human problems that don't disappear when
-execution gets cheap. The pack treats them as the default: inspiration
-and guidance, not law. Departures should earn their place.
+**Agents make their edges visible.** Looking smart and being smart are different. Legible agents show which.
 
-Every borrowing carries a falsification test — a specific AI-era failure
-mode that would invalidate it. Finding such failures is how we know the
-borrowing is real, not cargo-cult.
+**Decisions have a home.** Documentation is the system's memory. What's written survives; what isn't, doesn't.
 
-The one clear shift so far: agent labor is near-free; attention isn't.
+## Boundaries
+
+gc-toolkit will not fork or replace Gas City or Gastown. It augments them with pack-local opinions, patches, agents, skills, and conventions.
+
+gc-toolkit will not add process for its own sake. Review legs are partners, not walls; consults are for judgment, not ritual; metrics must trigger corrective action or they are noise.
+
+gc-toolkit will not treat cheap restart as root cause. Re-rolling an agent until a plausible diff appears launders defects into reviewer fatigue. The right answer is to make the failure legible and improve the pack.
+
+## Who It Is For
+
+gc-toolkit codifies a set of principles for working with AI-era agents, currently realized on Gas City but applicable to any multi-agent engine. It's for operators who want agent labor to feel abundant without making human judgment feel cheap. It fits teams and solo operators who value durable records, explicit handoffs, and agents that can act autonomously while making their edges visible. Good gc-toolkit work leaves the next contributor with fewer questions, better artifacts, and a clearer sense of what the system believes.
 
 ---
 
