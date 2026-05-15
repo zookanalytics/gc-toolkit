@@ -2,19 +2,20 @@
 # tmux-spawn-thread.sh — Spawn a Role+Thread of the current pane's named agent.
 # Usage: tmux-spawn-thread.sh <config-dir>
 #
-# Bound to `prefix + a` ("ask") by tmux-bindings.sh, which wires it
-# behind tmux's `command-prompt`. The operator gets a single-line
-# bottom-bar prompt; on Enter, tmux stashes the input in a buffer
-# named `gc-thread-msg` and invokes this script. Blank input is
-# allowed — the thread spawns without a seed message in that case.
+# Bound to `prefix + a` ("ask") by tmux-bindings.sh, which simply
+# invokes this script with `run-shell -b`. The script handles input
+# itself: it opens a tmux popup running `gum input`, the operator
+# types a first-message seed and presses Enter to submit. Esc or a
+# blank Enter spawns the thread without a seed (the message-less
+# path is preserved).
 #
 # The slow part of the work (`gc session new` + first-message nudge
-# + creating->active poll) is backgrounded so command-prompt returns
-# control to the operator's pane immediately. While the background
-# runs, the operator's session shows a `[spawning ...]` / `[starting
-# ...]` indicator in status-right so they don't stare at a blank
-# pane. Final outcome (ready / stalled / error) surfaces via a 5- to
-# 10-second `tmux display-message`.
+# + creating->active poll) is backgrounded inside the script so the
+# operator's pane stays responsive after the popup closes. While
+# the background runs, the operator's session shows a `[spawning
+# ...]` / `[starting ...]` indicator in status-right so they don't
+# stare at a blank pane. Final outcome (ready / stalled / error)
+# surfaces via a 5- to 10-second `tmux display-message`.
 #
 # Threads are registered agents: they appear in `gc session list`,
 # survive `gc session reset` of the canonical, and carry the full
@@ -28,45 +29,40 @@
 #   mechanik-thread-1 -> mechanik-thread        (pool member -> sibling)
 #   polecat-1         -> polecat-thread         (no template -> soft fail)
 #
-# Quoting limitations: the binding stashes input via tmux
-# `set-buffer "%%"`, whose tmux double-quote rules tolerate
-# apostrophes ("let's", "I'm", "don't") but still break on a literal
-# `"` or `\` in the prompt input. If you need either character in a
-# first message, spawn without a seed (just press Enter at the
-# prompt) and then send the real first message via
-# `gc session nudge <session-id> "..."` — shell quoting there is
-# yours to control. Multi-line input is out of scope (tmux
-# command-prompt is single-row by design).
+# Input arrives via `gum input` inside a tmux `display-popup -E`,
+# not tmux's `%%` substitution layer. gum reads /dev/tty in raw
+# mode and returns the bytes verbatim, so apostrophes, embedded
+# `"`, `\`, and other shell metacharacters all pass through cleanly
+# with no quoting hazards. Single-line by design (Enter submits) —
+# multi-line first messages remain out of scope. `gum` is expected
+# on PATH (linuxbrew default install at
+# `/home/linuxbrew/.linuxbrew/bin/gum`); if absent the script
+# surfaces a clear install hint via display-message and exits
+# rather than silently degrading.
 set -eu
 
 CONFIGDIR="${1:?missing config-dir}"
 
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
-# 1. Read the first-message payload from the tmux buffer the binding
-#    stashed it in, then delete the buffer so a follow-up spawn does
-#    not inherit stale input. Missing/empty buffer means "no seed."
-THREAD_SPAWN_MESSAGE=$(gcmux save-buffer -b gc-thread-msg - 2>/dev/null || true)
-gcmux delete-buffer -b gc-thread-msg 2>/dev/null || true
-
-# 2. Resolve the active session. Prefer the focused client's session
+# 1. Resolve the active session. Prefer the focused client's session
 #    (the operator who pressed prefix + a); fall back to the run-shell
 #    context's session if no client is currently associated.
 SESSION=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 [ -z "$SESSION" ] && SESSION=$(gcmux display-message -p '#{session_name}')
 
-# 3. Resolve the agent name. Prefer GC_AGENT from the session
+# 2. Resolve the agent name. Prefer GC_AGENT from the session
 #    environment; fall back to deriving from the session name suffix
 #    (gascity uses `<rig>__<agent>` for tmux session names).
 AGENT=$(gcmux show-environment -t "$SESSION" GC_AGENT 2>/dev/null | sed -n 's/^GC_AGENT=//p')
 [ -z "$AGENT" ] && AGENT=$(printf '%s' "$SESSION" | sed 's/.*__//')
 
 if [ -z "$AGENT" ]; then
-    gcmux display-message "thread spawn: cannot resolve current agent (no GC_AGENT, no parseable session name)"
+    gcmux display-message -d 10000 "thread spawn: cannot resolve current agent (no GC_AGENT, no parseable session name)"
     exit 1
 fi
 
-# 4. Derive the canonical role base from the qualified agent identity.
+# 3. Derive the canonical role base from the qualified agent identity.
 #    Strip everything up to and including the last "." (rig-prefix or
 #    binding), then strip trailing "-<digits>" (pool member suffix) and
 #    trailing "-thread" (already a thread). What remains is the role.
@@ -74,7 +70,7 @@ BARE=$(printf '%s' "$AGENT" | sed 's|.*\.||')
 ROLE=$(printf '%s' "$BARE" | sed -E 's/-[0-9]+$//' | sed -E 's/-thread$//')
 THREAD_TEMPLATE="${ROLE}-thread"
 
-# 5. Verify a <role>-thread template exists. `gc prime --strict` exits
+# 4. Verify a <role>-thread template exists. `gc prime --strict` exits
 #    non-zero for "agent not found in city config", which is exactly
 #    the missing-template case we want to surface as a soft failure.
 #    Bare-name resolution (gascity/cmd/gc/cmd_session.go:539) matches
@@ -82,9 +78,37 @@ THREAD_TEMPLATE="${ROLE}-thread"
 #    for both city- and rig-scoped thread templates as long as the
 #    <role>-thread name is unique in the city's agent set.
 if ! gc prime --strict "$THREAD_TEMPLATE" >/dev/null 2>&1; then
-    gcmux display-message "thread spawn: no '$THREAD_TEMPLATE' template for role '$ROLE'"
+    gcmux display-message -d 10000 "thread spawn: no '$THREAD_TEMPLATE' template for role '$ROLE'"
     exit 0
 fi
+
+# 5a. Pre-check `gum` is on PATH before opening the popup. If the
+#     binary is missing the popup's inner shell would render an
+#     opaque "command not found" and close instantly; surface a
+#     clear install hint instead.
+if ! command -v gum >/dev/null 2>&1; then
+    gcmux display-message -d 10000 "thread spawn: 'gum' not on PATH; install with 'brew install gum'"
+    exit 0
+fi
+
+# 5b. Read the first-message payload via `gum input` running in a
+#     tmux popup. gum opens /dev/tty in raw mode, so any character
+#     (apostrophes, embedded `"`, `\`, multi-byte) flows through
+#     verbatim — no tmux `%%` substitution, no shell quoting
+#     hazards. display-popup -E blocks until the popup closes
+#     (Enter submits, Esc cancels, blank Enter = no seed); the
+#     enclosing script is invoked with `run-shell -b`, so tmux
+#     backgrounds the whole thing and the operator's pane stays
+#     responsive throughout. Empty `THREAD_SPAWN_MESSAGE` selects
+#     the no-seed path in the spawn phase below.
+TMPFILE=$(mktemp -t gc-thread-msg.XXXXXX)
+trap 'rm -f "$TMPFILE"' EXIT
+
+gcmux display-popup -E -w 80% -h 5 \
+    "gum input --prompt='thread msg > ' --placeholder='Enter to submit, Esc/blank = no seed' > '$TMPFILE'" \
+    2>/dev/null || true
+
+THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
 
 # 6. Background the slow path. `gc session new` does controller cold-
 #    start, worktree setup, and session bead creation — ~15s. The
@@ -92,9 +116,10 @@ fi
 #    (reconciler pre_start fetches + rebases the worktree, then
 #    starts the claude provider; once the provider is observed
 #    running, state flips to `active`). If we run it inline, the
-#    command-prompt's run-shell blocks the operator's pane until
-#    that completes. Backgrounding lets command-prompt return
-#    immediately; the operator gets their pane back sub-second.
+#    operator stares at a closed-popup aftermath until everything
+#    settles. Backgrounding lets the script's foreground exit
+#    immediately after the popup closes; the subshell continues to
+#    update status-right and surface display-message on completion.
 #
 #    While the background runs, we set status-right on the
 #    operator's session so they see a persistent in-flight indicator
