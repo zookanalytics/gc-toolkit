@@ -12,5 +12,10 @@ CONFIGDIR="$1"
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh"
+
+# Stash the prompt input in a tmux buffer (tmux's own quoting rules,
+# not shell) so apostrophes in common contractions like "let's" parse
+# cleanly instead of breaking the shell-quoted run-shell argument.
+# The spawn script reads + deletes the buffer.
 gcmux bind-key a command-prompt -p "thread msg (Enter; blank = no seed):" \
-    "run-shell '$CONFIGDIR/assets/scripts/tmux-spawn-thread.sh $CONFIGDIR \"%%\"'"
+    "{ set-buffer -b gc-thread-msg \"%%\" ; run-shell '$CONFIGDIR/assets/scripts/tmux-spawn-thread.sh $CONFIGDIR' }"
