@@ -9,13 +9,19 @@
 # blank Enter spawns the thread without a seed (the message-less
 # path is preserved).
 #
-# The slow part of the work (`gc session new` + first-message nudge
-# + creating->active poll) is backgrounded inside the script so the
-# operator's pane stays responsive after the popup closes. While
-# the background runs, the operator's session shows a `[spawning
-# ...]` / `[starting ...]` indicator in status-right so they don't
-# stare at a blank pane. Final outcome (ready / stalled / error)
-# surfaces via a 5- to 10-second `tmux display-message`.
+# The slow part of the work (`gc session new` + creating->active
+# poll + first-message nudge) is backgrounded inside the script so
+# the operator's pane stays responsive after the popup closes.
+# While the background runs, the operator's session shows a
+# `[spawning ...]` / `[starting ...]` indicator in status-right so
+# they don't stare at a blank pane. The original status-right
+# value is captured before the indicator is set and restored on
+# every exit path so Gas Town's session-scoped status format
+# isn't wiped by an unset. The nudge runs AFTER `active` (with
+# `--delivery=immediate`) to avoid the queued-nudge fence-mismatch
+# that drops first-messages during bring-up. Final outcome (ready
+# / stalled / error) surfaces via a 5- to 10-second
+# `tmux display-message`.
 #
 # Threads are registered agents: they appear in `gc session list`,
 # survive `gc session reset` of the canonical, and carry the full
@@ -143,6 +149,28 @@ THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
 #    resolve in the nudge below. The canonical session ID returned
 #    by `gc session new` is what we route on.
 (
+    # Capture the operator session's existing status-right before
+    # we overwrite it with our spawn indicator. Gas Town's
+    # tmux-theme.sh sets status-right at SESSION scope to its
+    # `#(status-line.sh ...) %H:%M` format; cleaning up with `-u
+    # status-right` would unset the session value and revert to
+    # the (empty) global, wiping the operator's status line. We
+    # restore by re-setting the original value at every exit
+    # path. `show-options -v` returns the raw value (no `name
+    # "value"` wrapper), which round-trips cleanly back through
+    # set-option. Empty captured value means no session-scope
+    # value existed; in that case fall through to `-u` so we
+    # don't pin an empty string in place of the global.
+    ORIG_STATUS=$(gcmux show-options -t "$SESSION" -v status-right 2>/dev/null || true)
+
+    restore_status_right() {
+        if [ -n "$ORIG_STATUS" ]; then
+            gcmux set-option -t "$SESSION" status-right "$ORIG_STATUS" 2>/dev/null || true
+        else
+            gcmux set-option -t "$SESSION" -u status-right 2>/dev/null || true
+        fi
+    }
+
     # 6a. Spawn phase. The status-right indicator is session-scoped
     #     so the operator sees it across all panes/windows in their
     #     session. `2>/dev/null || true` swallows benign failures
@@ -151,47 +179,53 @@ THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
     gcmux set-option -t "$SESSION" status-right "[spawning ${THREAD_TEMPLATE}...] " 2>/dev/null || true
 
     if ! SPAWN_OUT=$(gc session new "$THREAD_TEMPLATE" --no-attach 2>&1); then
-        gcmux set-option -t "$SESSION" -u status-right 2>/dev/null || true
+        restore_status_right
         gcmux display-message -d 10000 "thread spawn failed: $SPAWN_OUT"
         exit 1
     fi
     SESSION_ID=$(printf '%s\n' "$SPAWN_OUT" | sed -n 's/^Session \([^ ]*\) created.*/\1/p' | head -1)
     if [ -z "$SESSION_ID" ]; then
-        gcmux set-option -t "$SESSION" -u status-right 2>/dev/null || true
+        restore_status_right
         gcmux display-message -d 10000 "thread spawn: could not parse session id from gc output"
         exit 1
-    fi
-    if [ -n "$THREAD_SPAWN_MESSAGE" ]; then
-        # --delivery=queue durably enqueues the nudge keyed on the
-        # canonical session ID and returns immediately, so the
-        # background subshell exits without waiting on claude
-        # cold-start. The supervisor-side dispatcher scans open
-        # session beads each pass and delivers the queued message
-        # as soon as the new thread's provider is running; queue
-        # persistence is independent of session state, so a target
-        # still in `creating` is fine.
-        if ! gc session nudge --delivery=queue "$SESSION_ID" "$THREAD_SPAWN_MESSAGE" >/dev/null 2>&1; then
-            gcmux set-option -t "$SESSION" -u status-right 2>/dev/null || true
-            gcmux display-message -d 10000 "thread spawn: nudge to '$SESSION_ID' failed; session created but first message not delivered"
-            exit 1
-        fi
     fi
 
     # 6b. Start phase. The bead exists; the reconciler runs pre_start
     #     and then starts the provider. Poll `gc session list` every
-    #     2s until state flips to `active`. 3-minute cap prevents a
-    #     wedged reconciler from stranding the indicator forever.
+    #     2s until state flips to `active`. 10-minute cap is a safety
+    #     net for a wedged reconciler: normal cold-start completes in
+    #     30-60s, but slow cold-start (reconciler busy + first-thread
+    #     claude pre-warm on an idle city) can run 5-7 min.
     gcmux set-option -t "$SESSION" status-right "[starting ${THREAD_TEMPLATE}...] " 2>/dev/null || true
 
     STATE=""
-    DEADLINE=$(( $(date +%s) + 180 ))
+    DEADLINE=$(( $(date +%s) + 600 ))
     while [ "$(date +%s)" -lt "$DEADLINE" ]; do
         STATE=$(gc session list 2>/dev/null | awk -v id="$SESSION_ID" '$1 == id { print $3 }')
         [ "$STATE" = "active" ] && break
         sleep 2
     done
 
-    gcmux set-option -t "$SESSION" -u status-right 2>/dev/null || true
+    # 6c. Deliver the first-message nudge AFTER the session reaches
+    #     active. --delivery=immediate avoids the queued-nudge fence
+    #     mismatch (gascity-internal: queued items capture the
+    #     target's continuationEpoch at enqueue time, but the epoch
+    #     advances during session bring-up, so the dispatcher
+    #     rejects the queued item when state flips to active). With
+    #     immediate delivery the session is already running and
+    #     there's no queue to revalidate. If the poll timed out
+    #     before active, we don't nudge — the stall message tells
+    #     the operator they can re-send manually via `gc session
+    #     nudge <id> "..."`.
+    if [ "$STATE" = "active" ] && [ -n "$THREAD_SPAWN_MESSAGE" ]; then
+        if ! gc session nudge --delivery=immediate "$SESSION_ID" "$THREAD_SPAWN_MESSAGE" >/dev/null 2>&1; then
+            restore_status_right
+            gcmux display-message -d 10000 "thread spawn: nudge to '$SESSION_ID' failed; session active but first message not delivered"
+            exit 1
+        fi
+    fi
+
+    restore_status_right
     if [ "$STATE" = "active" ]; then
         gcmux display-message -d 5000 "thread ready: $THREAD_TEMPLATE ($SESSION_ID) — prefix+S to switch"
     else
