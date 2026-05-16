@@ -23,11 +23,12 @@
 # threads are operator-spawned only.
 #
 # Idempotent role mapping:
-#   mayor             -> mayor-thread
-#   mechanik          -> mechanik-thread
-#   mechanik-thread   -> mechanik-thread        (another instance, not -thread-thread)
-#   mechanik-thread-1 -> mechanik-thread        (pool member -> sibling)
-#   polecat-1         -> polecat-thread         (no template -> soft fail)
+#   mayor                          -> mayor-thread
+#   mechanik                       -> mechanik-thread
+#   mechanik-thread                -> mechanik-thread        (another instance, not -thread-thread)
+#   mechanik-thread-1              -> mechanik-thread        (pool member -> sibling)
+#   mechanik-thread-adhoc-<hex>    -> mechanik-thread        (ad-hoc explicit name -> sibling)
+#   polecat-1                      -> polecat-thread         (no template -> soft fail)
 #
 # Input arrives via `gum input` inside a tmux `display-popup -E`,
 # not tmux's `%%` substitution layer. gum reads /dev/tty in raw
@@ -64,10 +65,18 @@ fi
 
 # 3. Derive the canonical role base from the qualified agent identity.
 #    Strip everything up to and including the last "." (rig-prefix or
-#    binding), then strip trailing "-<digits>" (pool member suffix) and
-#    trailing "-thread" (already a thread). What remains is the role.
+#    binding), then strip trailing "-adhoc-<hex>" (gascity-assigned
+#    ad-hoc explicit name from `GenerateAdhocExplicitName`), trailing
+#    "-<digits>" (pool member suffix), and trailing "-thread" (already
+#    a thread). The adhoc strip must run first so an ad-hoc-spawned
+#    thread (e.g. `mechanik-thread-adhoc-e045476bfb`) collapses to
+#    `mechanik-thread` before the `-thread` strip reduces it to
+#    `mechanik`. What remains is the role.
 BARE=$(printf '%s' "$AGENT" | sed 's|.*\.||')
-ROLE=$(printf '%s' "$BARE" | sed -E 's/-[0-9]+$//' | sed -E 's/-thread$//')
+ROLE=$(printf '%s' "$BARE" \
+    | sed -E 's/-adhoc-[a-f0-9]+$//' \
+    | sed -E 's/-[0-9]+$//' \
+    | sed -E 's/-thread$//')
 THREAD_TEMPLATE="${ROLE}-thread"
 
 # 4. Verify a <role>-thread template exists. `gc prime --strict` exits
