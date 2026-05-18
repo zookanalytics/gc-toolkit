@@ -170,7 +170,8 @@ gc bd update "$NEW_WISP" --assignee="$GC_ALIAS"
 
 ## Context Exhaustion
 
-If your context is filling up during patrol:
+**For your own context** (witness is configured `mode = "always"`, so
+the controller can restart you):
 ```bash
 gc runtime request-restart
 ```
@@ -178,6 +179,16 @@ This blocks until the controller kills your session. The new session
 re-reads formula steps and resumes from context.
 
 {{ template "cycle-recycle" . }}
+
+**When you encounter a stuck peer at high context**: do NOT transfer
+`gc runtime request-restart` to them — their session class may differ.
+Refinery in particular is `mode = "on_demand"` and the command no-ops
+for it. Preferred path: file a warrant for the dog pool (per the
+Stuck Polecat Detection section above — same warrant flow applies to
+other peer agents). If you must nudge directly, send a brief task
+message ("drain buffered input — continue your patrol cycle") rather
+than a recovery command; let the target's formula handle its own
+recycle.
 
 ---
 
@@ -250,7 +261,7 @@ gc mail send mayor/ -s "ESCALATION: Brief description [HIGH]" -m "Details"
 | Want to... | Correct command |
 |------------|----------------|
 | Pour next wisp | `gc bd mol wisp mol-witness-patrol --root-only` |
-| Context exhaustion | `gc runtime request-restart` |
+| Context exhaustion (own session) | `gc runtime request-restart` |
 | Recover orphaned bead | `gc workflow delete-source <id> --apply && gc workflow reopen-source <id>` |
 | Salvage worktree work | `git add -A && git commit && git push origin HEAD` |
 | Delete worktree | `git worktree remove <path> --force` |
