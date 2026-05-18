@@ -32,8 +32,18 @@ schema = 2
 source = "//.gc/system/packs/gastown"
 
 [global]
+# Ordering is load-bearing. Gastown's tmux-theme.sh runs first (from
+# the imported pack) and sets the full status-bar theme, including a
+# status-right that points at gastown's status-line.sh. Our overrides
+# below run AFTER (see gascity/internal/config/pack.go:1450 — "Collect
+# globals: included globals first, then this pack's own"; iterated
+# in order at runtime/tmux/adapter.go:824). The override script
+# rewrites status-right to point at gc-toolkit-status-line.sh, which
+# adds the composable title and indicator slots while preserving
+# gastown's tier theming and `%H:%M` time slot.
 session_live = [
     "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
+    "{{.ConfigDir}}/assets/scripts/tmux-status-line-override.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
 ]
 
 [[patches.agent]]
