@@ -12,5 +12,7 @@ CONFIGDIR="$1"
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh"
-gcmux bind-key a command-prompt -p "thread msg (Enter; blank = no seed):" \
-    "run-shell '$CONFIGDIR/assets/scripts/tmux-spawn-thread.sh $CONFIGDIR \"%%\"'"
+
+# Spawn a thread of the current pane's role. Input handling (gum
+# input in a tmux popup) lives in the script — see tmux-spawn-thread.sh.
+gcmux bind-key a run-shell -b "$CONFIGDIR/assets/scripts/tmux-spawn-thread.sh $CONFIGDIR"
