@@ -133,9 +133,12 @@ BEGIN {
     win_marker = (sw > 1 ? "▣" : " ")
     pc = pane_count[name] + 0
 
-    # Resolve session title with boring-suppression + truncation. Strip a
-    # leading "<rig>/" before comparing — gc titles often carry the rig
-    # prefix that the picker collapses out of the display column.
+    # Resolve session title with boring-suppression + truncation. Normalize
+    # both sides before comparing: strip a leading "<rig>/" from the title
+    # (gc titles often carry the rig prefix that the picker collapses out
+    # of the display column) and a trailing "-adhoc-<hex>" from the display
+    # (thread sessions get an adhoc-suffix while their canonical title set
+    # by the thread-title producer skill does not).
     title = gc_title[name]
     if (title != "") {
         title_cmp = title
@@ -143,7 +146,9 @@ BEGIN {
         if (substr(title, 1, length(rig_pfx)) == rig_pfx) {
             title_cmp = substr(title, length(rig_pfx) + 1)
         }
-        if (title_cmp == display) {
+        display_cmp = display
+        sub(/-adhoc-[0-9a-f]+$/, "", display_cmp)
+        if (title_cmp == display_cmp) {
             title = ""
         } else if (length(title) > 40) {
             title = substr(title, 1, 39) "…"
