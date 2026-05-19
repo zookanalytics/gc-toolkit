@@ -7,7 +7,7 @@ gc.endpoint_status: verified
 sync.remote: "git+ssh://git@github.com/zookanalytics/gc-toolkit.git"
 
 backup.enabled: false
-types.custom: molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,spec,convergence
+types.custom: molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,spec,convergence,step
 
 dolt.auto-commit: "batch"
 
