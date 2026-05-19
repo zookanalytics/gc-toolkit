@@ -1,0 +1,30 @@
+{
+  "_note": "bd list does not publish a --json-schema (gc bd list --json-schema returns json_supported=false). The shape below was captured empirically from `gc bd list --limit 1 --json` on 2026-05-19 by reading top-level object keys. This is NOT an authoritative schema — Phase 2 should either commit a hand-pinned reference here or push a follow-up to bd to publish one.",
+  "captured_at": "2026-05-19T15:26:00Z",
+  "captured_via": "gc bd list --limit 1 --json | python3 -c 'list keys'",
+  "captured_against": "bd version 1.0.4 (0bf33da63)",
+  "top_level_shape": "array<object>",
+  "object_keys_seen": [
+    "id",
+    "title",
+    "description",
+    "status",
+    "priority",
+    "issue_type",
+    "created_at",
+    "updated_at",
+    "metadata",
+    "dependencies",
+    "dependency_count",
+    "dependent_count",
+    "comment_count",
+    "parent"
+  ],
+  "publisher_response": {
+    "schema_version": "1",
+    "command": ["bd"],
+    "transport": "jsonl",
+    "json_supported": false,
+    "schemas": {}
+  }
+}
