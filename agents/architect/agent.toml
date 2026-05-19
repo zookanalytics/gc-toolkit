@@ -3,3 +3,6 @@ wake_mode = "fresh"
 work_dir = ".gc/agents/architect"
 nudge = "Check mail and open consult beads, then act accordingly."
 idle_timeout = "2h"
+
+[env]
+BASH_ENV = "${GT_ROOT}/rigs/gc-toolkit/assets/shell/gc-toolkit-init.sh"

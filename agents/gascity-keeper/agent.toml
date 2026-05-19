@@ -3,3 +3,6 @@ wake_mode = "fresh"
 work_dir = ".gc/agents/gascity-keeper"
 nudge = "Check for PR-prep handback beads, then engage the operator."
 idle_timeout = "2h"
+
+[env]
+BASH_ENV = "${GT_ROOT}/rigs/gc-toolkit/assets/shell/gc-toolkit-init.sh"

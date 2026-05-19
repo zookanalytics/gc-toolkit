@@ -13,3 +13,6 @@ min_active_sessions = 0
 # we've validated end-to-end on signal-loom. Per-rig cap (each importing rig
 # gets its own pool of up to 2).
 max_active_sessions = 2
+
+[env]
+BASH_ENV = "${GT_ROOT}/rigs/gc-toolkit/assets/shell/gc-toolkit-init.sh"

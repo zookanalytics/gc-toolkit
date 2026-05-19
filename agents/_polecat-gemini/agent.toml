@@ -18,3 +18,6 @@ pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.Wo
 idle_timeout = "2h"
 min_active_sessions = 0
 max_active_sessions = 5
+
+[env]
+BASH_ENV = "${GT_ROOT}/rigs/gc-toolkit/assets/shell/gc-toolkit-init.sh"
