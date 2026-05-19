@@ -168,9 +168,22 @@ THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
     # 6a. Spawn phase. `2>/dev/null || true` on the write is
     #     defensive: /tmp is writable on every supported host, but
     #     a wedged disk shouldn't take the spawn down with it.
+    #
+    #     When the operator typed a first-message seed in the popup,
+    #     pass it as --title-hint so gascity's title model auto-seeds
+    #     a short title from that text (a literal short version is
+    #     set immediately and refined in the background). When the
+    #     popup was blank/Esc'd, omit --title-hint and let gascity
+    #     fall back to its default title (the agent name) — the
+    #     operator can refine later via the /thread-title skill.
+    #     Positional-arg shuffling preserves the quoted message
+    #     through field-splitting; `set --` only touches the
+    #     subshell's $@ (CONFIGDIR is already captured above).
     echo "[spawning ${THREAD_TEMPLATE}...]" > "$INDICATOR" 2>/dev/null || true
 
-    if ! SPAWN_OUT=$(gc session new "$THREAD_TEMPLATE" --no-attach 2>&1); then
+    set -- "$THREAD_TEMPLATE" --no-attach
+    [ -n "$THREAD_SPAWN_MESSAGE" ] && set -- "$@" --title-hint "$THREAD_SPAWN_MESSAGE"
+    if ! SPAWN_OUT=$(gc session new "$@" 2>&1); then
         gcmux display-message -d 10000 "thread spawn failed: $SPAWN_OUT"
         exit 1
     fi

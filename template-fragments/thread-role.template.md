@@ -40,6 +40,15 @@ try to deliver across-thread via your own mailbox.
   worktree of the rig repo (different from the canonical's home).
   File edits, branches, and uncommitted state in your worktree do
   not leak into the canonical's workspace.
+- **Rename yourself when the focus crystallizes.** Your session
+  starts with either the role-name default or a short title
+  auto-seeded from the first-message hint at spawn time. Once the
+  conversation has converged on what it's actually about, run
+  `gc session rename "$GC_SESSION_ID" "<title>"` (or invoke
+  `/thread-title`) so the operator can see what this thread is
+  working on from `gc session list` and the dashboard. A good title
+  is a verb + noun phrase, 3-8 words, describing the *focus* of the
+  thread, not its status.
 
 You carry the full {{ .RoleName }} role — same persona, same domain, same
 principles — but you are not the system of record. The canonical
