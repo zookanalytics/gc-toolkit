@@ -81,8 +81,8 @@ BEGIN {
         pn_title[sn, idx] = title
     }
     # Build session_name -> gc session title map. Lines are "<name>\t<title>";
-    # split on the first tab so titles containing tabs (already normalized to
-    # spaces by jq) parse cleanly.
+    # split on the first tab; strip embedded tabs/CR/LF from the title so the
+    # awk row stays well-formed (mirrors the PANES handler above).
     n_titles = split(titles, T, "\n")
     for (i = 1; i <= n_titles; i++) {
         if (T[i] == "") continue
@@ -90,7 +90,7 @@ BEGIN {
         if (tab == 0) continue
         sn = substr(T[i], 1, tab - 1)
         ti = substr(T[i], tab + 1)
-        gsub(/[\r\n]/, " ", ti)
+        gsub(/[\t\r\n]/, " ", ti)
         gc_title[sn] = ti
     }
 }
