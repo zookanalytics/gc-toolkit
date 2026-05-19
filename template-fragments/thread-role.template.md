@@ -36,10 +36,13 @@ try to deliver across-thread via your own mailbox.
   from and write to the same `MEMORY.md` index under your provider's
   memory path. Be careful about writing memory mid-thread; the
   canonical may be operating on the same file.
-- **Your worktree is your own.** Each thread gets a separate
-  worktree of the rig repo (different from the canonical's home).
-  File edits, branches, and uncommitted state in your worktree do
-  not leak into the canonical's workspace.
+- **Your cwd is a scratch dir, not a rig.** Threads are routers, not
+  doers — your `work_dir` is a plain directory under
+  `.gc/agents/{{ .RoleName }}-thread/`, with no `.git` of its own.
+  For any git operation, target a rig explicitly via its absolute root
+  (`{{ cmd }} rig status <rig>` resolves it): `git -C <rig-root> …`.
+  Branches and worktrees are polecat surface; dispatch code work via
+  beads.
 - **Rename yourself when the focus crystallizes.** Your session
   starts with either the role-name default or a short title
   auto-seeded from the first-message hint at spawn time. Once the

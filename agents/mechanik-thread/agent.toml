@@ -16,16 +16,13 @@ prompt_template = "agents/mechanik/prompt.template.md"
 # / future <role>-thread variants without duplication.
 append_fragments = ["thread-role"]
 
-# Each instance gets its own worktree, separate from canonical mechanik's
+# Plain scratch directory, same shape as the canonical mechanik's
 # .gc/agents/mechanik home. AgentBase parameterizes by per-instance name
-# (e.g., mechanik-thread-1), so concurrent threads do not stomp each other.
-#
-# City-scoped agents have empty .Rig/.RigRoot (those derive from agent
-# dir/rig assignment, which city-scoped pack agents lack). Use literal
-# "gc-toolkit" in the path and {{.ConfigDir}} (pack source) as the git
-# repo root passed to worktree-setup.sh.
-work_dir = ".gc/worktrees/gc-toolkit/mechanik-thread/{{.AgentBase}}"
-pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.ConfigDir}} {{.WorkDir}} {{.AgentBase}} --sync"]
+# (e.g., mechanik-thread-1), so concurrent threads have independent
+# scratch dirs. Threads are routers, not doers — any git operation
+# targets a rig via `git -C rigs/<rig>` (or `cd rigs/<rig> && …`),
+# matching the canonical mechanik's pattern.
+work_dir = ".gc/agents/mechanik-thread/{{.AgentBase}}"
 
 nudge = "Operator nudge — return to the focus thread. Routed mail and routed work go to the canonical mechanik; check mail (gc mail inbox) only if the operator left a direct message."
 
