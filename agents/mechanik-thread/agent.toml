@@ -38,3 +38,4 @@ sling_query = "echo 'mechanik-thread is operator-spawned only; not a sling targe
 # fragment as {{ .RoleName }} via PromptContext.Env -> template data.
 [env]
 RoleName = "mechanik"
+PATH = "${GT_ROOT}/rigs/gc-toolkit/assets/bin:${PATH}"

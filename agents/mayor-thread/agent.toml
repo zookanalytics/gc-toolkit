@@ -44,3 +44,4 @@ sling_query = "echo 'mayor-thread is operator-spawned only; not a sling target' 
 # fragment as {{ .RoleName }} via PromptContext.Env -> template data.
 [env]
 RoleName = "mayor"
+PATH = "${GT_ROOT}/rigs/gc-toolkit/assets/bin:${PATH}"

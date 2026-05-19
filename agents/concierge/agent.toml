@@ -3,3 +3,6 @@ wake_mode = "fresh"
 work_dir = ".gc/agents/concierge"
 nudge = "Check push notifications / open consults, then engage the overseer if they're ready."
 idle_timeout = "2h"
+
+[env]
+PATH = "${GT_ROOT}/rigs/gc-toolkit/assets/bin:${PATH}"
