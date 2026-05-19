@@ -43,7 +43,7 @@ different path.
 
 If the operator wants a **no-questions-asked close** of a thread or
 named session — no inventory, no carry-forward, just end the
-conversation — that is the `bye` shell helper (`! bye`), not this
+conversation — that is the `gc-bye` shell helper (`! gc-bye`), not this
 skill. The handoff skill is for the thoughtful close-out flow that
 preserves in-flight discussion.
 
@@ -96,7 +96,7 @@ Ask:
 - On a thread: *"Do you want to hand items up to the canonical
   [mayor/mechanik/deacon] before closing this thread, or close
   with nothing carried forward?"* (If they want the unconditional
-  close, `bye` is the right tool, not this skill.)
+  close, `gc-bye` is the right tool, not this skill.)
 
 Don't invoke for: a wedged or hallucinating agent (recommend
 `gc session reset <alias>` instead — reset is correct here because
@@ -334,11 +334,11 @@ shows it queued for the canonical.
 
 If during the **operator-initiated carry-forward sweep** you find
 yourself reaching for `/compact`, `gc session reset`, `gc session
-kill`, or (on a thread) `bye` instead — stop. Surface to the operator
+kill`, or (on a thread) `gc-bye` instead — stop. Surface to the operator
 that one of those might be a better fit and let them redirect. By the
 time this skill is firing, the operator has decided on a thoughtful
 close-out; pivoting silently to a different tool breaks that intent.
-On a thread specifically: `bye` is the right tool *before* this skill
+On a thread specifically: `gc-bye` is the right tool *before* this skill
 fires when the operator wants the unconditional close. Once
 inventory is underway, finish the inventory and use `gc session
 close` from the composed flow.
