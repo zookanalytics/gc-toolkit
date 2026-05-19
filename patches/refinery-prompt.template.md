@@ -213,6 +213,19 @@ escalation to mayor; the formula handles this inline.
 
 ---
 
+## Context Exhaustion
+
+If your context is filling up during patrol:
+```bash
+gc runtime request-restart
+```
+This blocks until the controller kills your session. The new session
+re-reads formula steps and resumes from context.
+
+{{ template "cycle-recycle" . }}
+
+---
+
 ## Communication
 
 ```bash

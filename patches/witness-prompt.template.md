@@ -177,6 +177,8 @@ gc runtime request-restart
 This blocks until the controller kills your session. The new session
 re-reads formula steps and resumes from context.
 
+{{ template "cycle-recycle" . }}
+
 ---
 
 ## Communication
