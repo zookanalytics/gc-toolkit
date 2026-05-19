@@ -221,7 +221,7 @@ else
 fi
 
 if [ "$ACTIVE_IDX" -ge 0 ]; then
-    gcmux display-menu -T " Sessions " -x C -y C -C "$ACTIVE_IDX" "$@"
+    gcmux display-menu -T " Sessions " -x C -y C -C "$ACTIVE_IDX" -- "$@"
 else
-    gcmux display-menu -T " Sessions " -x C -y C "$@"
+    gcmux display-menu -T " Sessions " -x C -y C -- "$@"
 fi
