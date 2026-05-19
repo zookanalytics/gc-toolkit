@@ -76,14 +76,9 @@ BEGIN {
 }
 {
     name = $1; attached = $2 + 0; sw = $3 + 0; agent = $4
-    if (!all && name != active) {
-        if (name ~ /polecat/) next
-        if (name ~ /control-dispatcher/) next
-        if (name ~ /deacon/) next
-        if (name ~ /witness/) next
-        if (name ~ /dog/) next
-        if (name ~ /boot/) next
-    }
+
+    # Derive rig BEFORE the filter so polecat counts cover hidden sessions
+    # too (spec: count includes ALL polecat sessions in rig, visible+hidden).
     slash = index(agent, "/")
     if (slash > 0) {
         rig = substr(agent, 1, slash - 1)
@@ -100,6 +95,19 @@ BEGIN {
         rig = "city"; rig_sort = "0city"
         display = name
     }
+
+    if (name ~ /polecat/) polecat_count[rig]++
+    rig_sort_of[rig] = rig_sort
+
+    if (!all && name != active) {
+        if (name ~ /polecat/) next
+        if (name ~ /control-dispatcher/) next
+        if (name ~ /deacon/) next
+        if (name ~ /witness/) next
+        if (name ~ /dog/) next
+        if (name ~ /boot/) next
+    }
+    rig_visible[rig] = 1
     sub_pri = (display ~ /polecat/ ? 9 : 5)
     marker  = (attached > 0 ? "*" : " ")
     win_marker = (sw > 1 ? "▣" : " ")
@@ -124,6 +132,18 @@ BEGIN {
                 rig, pane_marker, name, wi, pi, cmd, title
         }
     }
+}
+END {
+    # Header rows are collapsed-mode only. sub_pri=-1 (col 2) makes them
+    # sort ahead of S (5) and P (9) rows within the same rig_sort group.
+    # Only emit for rigs that have at least one row surviving the filter,
+    # so all-filtered rigs do not leave a dangling header.
+    if (all) exit
+    for (r in rig_visible) {
+        rs = rig_sort_of[r]
+        pc = polecat_count[r] + 0
+        printf "%s\t-1\t\t\tH\t%s\t%d\n", rs, r, pc
+    }
 }' | sort -t"$TAB" -k1,1 -k2,2n -k3,3 -k4,4 | cut -f5-)
 
 MAX_RIG=$(printf '%s\n' "$LIST" | awk -F"$TAB" 'NF { if (length($2) > m) m = length($2) } END { print (m+0) }')
@@ -134,8 +154,33 @@ set --
 i=1
 menu_idx=0
 ACTIVE_IDX=-1
+emitted_header=0
 while IFS="$TAB" read -r row_type rig c3 c4 c5 c6 c7 c8; do
     [ -z "$row_type" ] && continue
+    if [ "$row_type" = "H" ]; then
+        # Per-rig grouped header — disabled (leading `-`) so it renders but is
+        # not selectable. Does NOT consume a hotkey slot. Blank separator
+        # between groups, but not before the first header.
+        count="$c3"
+        if [ "$emitted_header" -eq 1 ]; then
+            set -- "$@" "" "" ""
+            menu_idx=$((menu_idx + 1))
+        fi
+        if [ "$count" -gt 0 ]; then
+            if [ "$count" -eq 1 ]; then
+                noun="polecat"
+            else
+                noun="polecats"
+            fi
+            label="-  ── $rig • $count $noun ──  "
+        else
+            label="-  ── $rig ──  "
+        fi
+        set -- "$@" "$label" "" ""
+        menu_idx=$((menu_idx + 1))
+        emitted_header=1
+        continue
+    fi
     pad=$((MAX_RIG - ${#rig}))
     [ "$pad" -lt 0 ] && pad=0
     if [ "$row_type" = "S" ]; then
@@ -176,7 +221,7 @@ else
 fi
 
 if [ "$ACTIVE_IDX" -ge 0 ]; then
-    gcmux display-menu -T " Sessions " -x C -y C -C "$ACTIVE_IDX" "$@"
+    gcmux display-menu -T " Sessions " -x C -y C -C "$ACTIVE_IDX" -- "$@"
 else
-    gcmux display-menu -T " Sessions " -x C -y C "$@"
+    gcmux display-menu -T " Sessions " -x C -y C -- "$@"
 fi

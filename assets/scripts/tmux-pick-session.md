@@ -86,13 +86,78 @@ It is **separate** from the inline pane expansion: a single-window,
 multi-pane session gets the inline pane sub-rows but **not** the `▣`.
 The two markers answer different questions.
 
+## Per-rig grouped headers
+
+In the **default collapsed view** (`ALL=0`) the picker anchors each
+rig's sessions under a header row:
+
+    ── city ──
+    [city]       *▣  gc-toolkit.mechanik
+    [city]       *   gc-toolkit.mayor
+
+    ── gascity • 3 polecats ──
+    [gascity]    *▣  gc-toolkit.refinery
+    [gascity]        gc-toolkit.witness
+
+    ── gc-toolkit ──
+    [gc-toolkit]     gc-toolkit.deacon
+
+    ── signal-loom • 1 polecat ──
+    [signal-loom]    gc-toolkit.witness
+
+    [ show all ]
+
+Rules:
+
+- Header always rendered per rig group that has at least one visible
+  session row. Rigs with all sessions filtered out get NO header (no
+  dangling group).
+- Polecat-count suffix only when count > 0. Singular `1 polecat`,
+  plural `N polecats`.
+- Headers are disabled tmux `display-menu` rows (leading `-` on the
+  name — tmux strips it and renders the rest dim and non-selectable).
+- Blank separator line (empty menu entry `"" "" ""`) between groups,
+  not before the first group.
+- The `--all` mode keeps the flat layout — no headers, no
+  separators — because polecats are visible there and the extra
+  framing would be noise.
+
+### Polecat detection
+
+A session counts as a polecat iff its `session_name` contains the
+substring `polecat`. This mirrors the existing collapsed-mode filter
+rule, so it catches every variant by convention:
+
+- `polecat-adhoc-*` (claude pool)
+- `polecat-codex-adhoc-*` (codex pool)
+- `polecat-<bead-id>` (named-pool dispatches: slit, furiosa, rictus, nux)
+- future agent-provider prefixes (`polecat-gemini-*`, …)
+
+The count covers ALL polecat sessions in the rig — visible AND
+hidden. The currently-attached session is always shown but still
+counts.
+
+### Why headers are disabled rows, not separators
+
+tmux `display-menu` treats `""` as a horizontal-rule separator (no
+text) and `-<name>` as a non-selectable item (renders, ignored on
+pick). Headers carry the rig name + polecat count, so they're
+disabled items. The blank between groups uses the separator form.
+
+### MAX_RIG width
+
+Header rows put the rig name in the same field 2 that S/P rows use
+for the `[rig]` column. The width calculation is unchanged — the rig
+name in a header has the same length as the rig name in its session
+rows, so `MAX_RIG` stays correct without a special case.
+
 ## Hotkey allocation
 
 Per-row hotkeys come from `abcdefghijklmnopqrstuvwxyz0123456789` (36
-slots). Each row consumes one slot in order — session rows AND pane
-sub-rows alike. Beyond row 36, rows still render and remain pickable
-via arrow-Enter, but get no hotkey letter (existing behavior,
-preserved).
+slots). Each **session or pane row** consumes one slot in order.
+Header rows and blank separators do **not** consume slots. Beyond row
+36, rows still render and remain pickable via arrow-Enter, but get no
+hotkey letter (existing behavior, preserved).
 
 This means a city with many multi-pane sessions can run out of
 hotkey letters faster than before. We accept this — the alphabet is
@@ -111,6 +176,10 @@ currently-attached session. Pane sub-rows do NOT change cursor
 placement. Picking the parent session row from this position is a
 no-op (`switch-client -t` to where you already are), but the cursor
 gives spatial context for "where am I in the list."
+
+`ACTIVE_IDX` counts every emitted menu item — sessions, panes,
+headers, blank separators — so it still points at the session row,
+not at the header above it.
 
 ## Filter toggle
 
@@ -134,3 +203,6 @@ beneath sessions that survive the filter pass.
 - fzf or `display-popup -E` rewrite
 - mail-counts, agent metadata, last-bead inline in the row
 - changing the `prefix+S` binding line in `~/.tmux.conf`
+- per-rig grouped headers in `--all` mode
+- richer per-rig status in the header (windows count, attached-state
+  rollup, mail counts) — only the polecat count is rendered today
