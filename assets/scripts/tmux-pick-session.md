@@ -65,6 +65,90 @@ Picking a session row (the parent) still does plain
 `switch-client -t <session>` — i.e., lands on whatever pane the
 session was last on. Existing behavior preserved.
 
+## Session title column
+
+Each row joins the tmux session list with `gc session list --json` on
+`session_name` and renders the gc session title in a right-side column:
+
+    [<rig>]<pad>  *▣  <pack>.<role>                              ← no title (boring or no match)
+    [<rig>]<pad>  *▣  <pack>.<role><pad2>  │ <40-char title>     ← with title
+
+The title is the operator-meaningful label set at session creation
+(`--title`, `--title-hint`) or via `gc session rename`. Example titles
+that already exist in the corpus today:
+
+    Force-spawn: PR21 doc-ref fix
+    Force-spawn polecat #2 for rework queue
+    Rework iteration one
+    Review PR#8
+
+### Boring-title suppression
+
+Many sessions carry a default title that matches the picker's derived
+display (e.g. `gc-toolkit/gc-toolkit.refinery` for a session the
+picker already labels `gc-toolkit.refinery`). Rendering those would be
+pure noise. Suppression rule:
+
+- Strip a leading `<rig>/` prefix from the title before comparing.
+  Titles like `gc-toolkit/gc-toolkit.refinery` collapse to
+  `gc-toolkit.refinery` for the comparison — matching the picker's
+  rig-prefix-collapsed display column.
+- If the (stripped) title equals the display, omit the entire
+  ` │ <title>` suffix. The row renders exactly as it did before this
+  feature shipped.
+
+When suppressed, the row does NOT pad out to the divider column. Only
+rows that actually carry a title pay for the alignment.
+
+### Truncation
+
+`MAX_TITLE = 40` bytes (awk `length()` semantics; mostly ASCII in
+practice). Titles longer than 40 are truncated to 39 bytes + `…`,
+mirroring the pane-title truncation style already in the script
+(`cut -c1-30…`), one char wider to fit full session titles.
+
+### Divider alignment
+
+`MAX_DISPLAY` is computed across the row set as the max display
+width among S rows that carry a non-empty title. The shell loop pads
+the display column out to `MAX_DISPLAY` before emitting ` │ <title>`,
+so the divider lines up vertically across rows that have titles.
+Rows without titles end at `<pack>.<role>` and do not pad.
+
+### Graceful fallback
+
+`gc session list --json` is a subprocess call. It is bounded with
+`timeout 3 gc session list --json` so a wedged data plane cannot
+block the picker. Any failure — non-zero exit, missing `gc`, missing
+`jq`, parse error, timeout — yields an empty `TITLES` and the picker
+renders without any titles. The menu must always open; titles are
+strictly optional adornment.
+
+### Data source
+
+```
+gc session list --json
+```
+
+Returns `{sessions: [{session_name, title, …}, …]}`. The picker's
+existing `#{session_name}` key from `tmux list-sessions` joins
+directly to `.sessions[].session_name`, with no name translation.
+
+### --all mode
+
+Titles render in both default and `--all` modes. The most
+title-rich sessions today are force-spawn polecats (hidden in
+default mode), so `--all` is where the change is most visible. But
+mechanik-thread, mayor-thread, and other sessions with non-default
+titles also benefit in default mode.
+
+### Why not strip the rig prefix from the rendered title
+
+The comparison strips `<rig>/` only to detect boringness. When the
+title is shown, it is shown verbatim. A title that survived the
+boring check carries information the operator chose to put there —
+the toolkit does not second-guess what part of it is "redundant."
+
 ## Multi-window indicator (▣)
 
 A session with more than one tmux window gets a `▣` glyph adjacent to
@@ -201,7 +285,12 @@ beneath sessions that survive the filter pass.
 
 - preview pane / live `capture-pane` tail
 - fzf or `display-popup -E` rewrite
-- mail-counts, agent metadata, last-bead inline in the row
+- mail counts, agent metadata, last-bead inline in the row
+- auto-updating the session title from the current claimed bead.
+  Titles are set at session creation (`--title`, `--title-hint`) or
+  via `gc session rename` — that machinery exists already and is not
+  the picker's concern.
+- a separate "current bead" column distinct from title
 - changing the `prefix+S` binding line in `~/.tmux.conf`
 - per-rig grouped headers in `--all` mode
 - richer per-rig status in the header (windows count, attached-state
