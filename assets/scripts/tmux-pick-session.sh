@@ -49,8 +49,15 @@ TAB="$(printf '\t')"
 # so the awk pre-pass joins fields 6+ back into the title.
 PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
+# Per-session GC titles (session_name\ttitle, one per line). The 3s timeout
+# bounds a wedged data plane — any failure (timeout, missing gc, jq parse
+# error) yields an empty TITLES and the picker renders without titles.
+TITLES=$(timeout 3 gc session list --json 2>/dev/null \
+    | jq -r '.sessions[]? | select(.title != null and .title != "") | "\(.session_name)\t\(.title)"' 2>/dev/null \
+    || true)
+
 LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' | awk -F'|' \
-    -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" '
+    -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" -v titles="$TITLES" '
 BEGIN {
     n_panes = split(panes, P, "\n")
     for (i = 1; i <= n_panes; i++) {
@@ -72,6 +79,19 @@ BEGIN {
         pn_pa[sn, idx] = pa
         pn_cmd[sn, idx] = cmd
         pn_title[sn, idx] = title
+    }
+    # Build session_name -> gc session title map. Lines are "<name>\t<title>";
+    # split on the first tab so titles containing tabs (already normalized to
+    # spaces by jq) parse cleanly.
+    n_titles = split(titles, T, "\n")
+    for (i = 1; i <= n_titles; i++) {
+        if (T[i] == "") continue
+        tab = index(T[i], "\t")
+        if (tab == 0) continue
+        sn = substr(T[i], 1, tab - 1)
+        ti = substr(T[i], tab + 1)
+        gsub(/[\r\n]/, " ", ti)
+        gc_title[sn] = ti
     }
 }
 {
@@ -113,10 +133,27 @@ BEGIN {
     win_marker = (sw > 1 ? "▣" : " ")
     pc = pane_count[name] + 0
 
+    # Resolve session title with boring-suppression + truncation. Strip a
+    # leading "<rig>/" before comparing — gc titles often carry the rig
+    # prefix that the picker collapses out of the display column.
+    title = gc_title[name]
+    if (title != "") {
+        title_cmp = title
+        rig_pfx = rig "/"
+        if (substr(title, 1, length(rig_pfx)) == rig_pfx) {
+            title_cmp = substr(title, length(rig_pfx) + 1)
+        }
+        if (title_cmp == display) {
+            title = ""
+        } else if (length(title) > 40) {
+            title = substr(title, 1, 39) "…"
+        }
+    }
+
     # Session row — sort key cols 1-4 (rig_sort, sub_pri, name, "0"),
-    # then payload (S, rig, marker, win_marker, name, display).
-    printf "%s\t%d\t%s\t0\tS\t%s\t%s\t%s\t%s\t%s\n", \
-        rig_sort, sub_pri, name, rig, marker, win_marker, name, display
+    # then payload (S, rig, marker, win_marker, name, display, title).
+    printf "%s\t%d\t%s\t0\tS\t%s\t%s\t%s\t%s\t%s\t%s\n", \
+        rig_sort, sub_pri, name, rig, marker, win_marker, name, display, title
 
     # Pane sub-rows (only when session has >1 pane). Sort key col 4
     # uses zero-padded "1_<window>_<pane>" so panes sort within a
@@ -148,6 +185,10 @@ END {
 
 MAX_RIG=$(printf '%s\n' "$LIST" | awk -F"$TAB" 'NF { if (length($2) > m) m = length($2) } END { print (m+0) }')
 [ -z "$MAX_RIG" ] || [ "$MAX_RIG" -lt 4 ] && MAX_RIG=4
+
+# Max display width across S rows that carry a title — used to align the
+# `│` divider column. Rows without a title do not pad out to the divider.
+MAX_DISPLAY=$(printf '%s\n' "$LIST" | awk -F"$TAB" '$1 == "S" && $7 != "" { if (length($6) > m) m = length($6) } END { print (m+0) }')
 
 HOTKEYS="abcdefghijklmnopqrstuvwxyz0123456789"
 set --
@@ -184,8 +225,14 @@ while IFS="$TAB" read -r row_type rig c3 c4 c5 c6 c7 c8; do
     pad=$((MAX_RIG - ${#rig}))
     [ "$pad" -lt 0 ] && pad=0
     if [ "$row_type" = "S" ]; then
-        marker="$c3"; win_marker="$c4"; name="$c5"; display="$c6"
-        label=$(printf '  [%s]%*s  %s%s  %s  ' "$rig" "$pad" '' "$marker" "$win_marker" "$display")
+        marker="$c3"; win_marker="$c4"; name="$c5"; display="$c6"; title="$c7"
+        if [ -n "$title" ]; then
+            dpad=$((MAX_DISPLAY - ${#display}))
+            [ "$dpad" -lt 0 ] && dpad=0
+            label=$(printf '  [%s]%*s  %s%s  %s%*s  │ %s  ' "$rig" "$pad" '' "$marker" "$win_marker" "$display" "$dpad" '' "$title")
+        else
+            label=$(printf '  [%s]%*s  %s%s  %s  ' "$rig" "$pad" '' "$marker" "$win_marker" "$display")
+        fi
         cmd_str="switch-client -t $name"
     else
         # P row payload: c3=pane_marker, c4=name, c5=window, c6=pane, c7=cmd, c8=title
