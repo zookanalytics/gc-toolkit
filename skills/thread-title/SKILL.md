@@ -1,6 +1,6 @@
 ---
 name: thread-title
-description: Use when the operator explicitly asks to set, view, or suggest a title for the current session. Triggers include "rename this thread", "what's my title", "set the title to X", or "suggest a title". Reads `session.title` via `gc session list --json`; writes via `gc session rename`.
+description: Use when the operator explicitly asks to set, view, or suggest a title for the current session. Triggers include "rename this thread", "what's my title", "set the title to X", or "suggest a title".
 ---
 
 # Thread Title
@@ -29,8 +29,10 @@ This skill has three forms. Pick one based on what the operator typed:
   applied.
 
 If the operator says "rename" or "title" without specifying a value
-and without `--suggest`, ask: *"Do you have a title in mind, or
-should I propose one?"* — then route to set or suggest.
+and without `--suggest`, route to the Suggest form below — propose a
+title and let the operator confirm, edit, or skip. Don't ask whether
+they have one in mind first; the absence of a value is the signal to
+suggest.
 
 ## View
 
