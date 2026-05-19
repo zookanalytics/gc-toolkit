@@ -41,18 +41,22 @@ gc session list --json \
     | jq -r --arg id "$GC_SESSION_ID" \
         '.sessions[]
          | select(.id == $id)
-         | (if .title == .agent_name
+         | (.agent_name | sub("-adhoc-.*$"; "")) as $role
+         | (if .title == .agent_name or .title == $role
               then "(no title set)"
               else (.title // "(no title set)")
             end)'
 ```
 
 The `title` field is plumbed end-to-end in gascity but defaults to the
-agent name (e.g. `gc-toolkit/gc-toolkit.mayor-thread`) when no
-operator or agent has refined it. The jq above collapses the
-"`title == agent_name`" sentinel to `(no title set)` so the report
-reflects whether a *meaningful* title exists, not whether the field
-happens to be populated.
+agent name (e.g. `gc-toolkit.polecat`) when no operator or agent has
+refined it. For thread agents — whose `agent_name` includes an
+`-adhoc-<hex>` suffix — gascity strips that suffix when assigning the
+default, so `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` gets the
+default title `gc-toolkit.mayor-thread`. The jq above collapses both
+forms to `(no title set)` so the report reflects whether a
+*meaningful* title exists, not whether the field happens to be
+populated.
 
 ## Set
 
