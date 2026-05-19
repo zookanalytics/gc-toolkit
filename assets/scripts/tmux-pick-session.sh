@@ -49,8 +49,16 @@ TAB="$(printf '\t')"
 # so the awk pre-pass joins fields 6+ back into the title.
 PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
+# Session title map: tmux session_name → gc session title. Bound the
+# fetch so a wedged data plane never blocks the picker. Any failure
+# (timeout, missing jq, malformed JSON) yields an empty map and the
+# script renders without titles — never a broken layout.
+TITLES=$(timeout 3 gc session list --json 2>/dev/null \
+    | jq -r '.sessions[]? | select((.session_name // "") != "" and (.title // "") != "") | [.session_name, (.title | gsub("[\\t\\r\\n]"; " "))] | @tsv' 2>/dev/null \
+    || true)
+
 LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' | awk -F'|' \
-    -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" '
+    -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" -v titles="$TITLES" '
 BEGIN {
     n_panes = split(panes, P, "\n")
     for (i = 1; i <= n_panes; i++) {
@@ -72,6 +80,17 @@ BEGIN {
         pn_pa[sn, idx] = pa
         pn_cmd[sn, idx] = cmd
         pn_title[sn, idx] = title
+    }
+    # Title map: tmux session_name → gc session title. jq already
+    # sanitized tabs/newlines, so a plain TSV split is safe.
+    n_titles = split(titles, TL, "\n")
+    for (i = 1; i <= n_titles; i++) {
+        if (TL[i] == "") continue
+        tab = index(TL[i], "\t")
+        if (tab == 0) continue
+        sn = substr(TL[i], 1, tab - 1)
+        t  = substr(TL[i], tab + 1)
+        if (sn != "" && t != "") title_of[sn] = t
     }
 }
 {
@@ -113,10 +132,23 @@ BEGIN {
     win_marker = (sw > 1 ? "▣" : " ")
     pc = pane_count[name] + 0
 
+    # Session title — render only when it differs from the picker
+    # display. Normalize by stripping a leading "<rig>/" prefix so
+    # "<rig>/<pack>.<role>" (the default boring title) matches the
+    # display "<pack>.<role>".
+    stitle = (name in title_of) ? title_of[name] : ""
+    if (stitle != "") {
+        norm = stitle
+        if (rig != "city" && index(norm, rig "/") == 1) {
+            norm = substr(norm, length(rig) + 2)
+        }
+        if (norm == display) stitle = ""
+    }
+
     # Session row — sort key cols 1-4 (rig_sort, sub_pri, name, "0"),
-    # then payload (S, rig, marker, win_marker, name, display).
-    printf "%s\t%d\t%s\t0\tS\t%s\t%s\t%s\t%s\t%s\n", \
-        rig_sort, sub_pri, name, rig, marker, win_marker, name, display
+    # then payload (S, rig, marker, win_marker, name, display, stitle).
+    printf "%s\t%d\t%s\t0\tS\t%s\t%s\t%s\t%s\t%s\t%s\n", \
+        rig_sort, sub_pri, name, rig, marker, win_marker, name, display, stitle
 
     # Pane sub-rows (only when session has >1 pane). Sort key col 4
     # uses zero-padded "1_<window>_<pane>" so panes sort within a
@@ -148,6 +180,12 @@ END {
 
 MAX_RIG=$(printf '%s\n' "$LIST" | awk -F"$TAB" 'NF { if (length($2) > m) m = length($2) } END { print (m+0) }')
 [ -z "$MAX_RIG" ] || [ "$MAX_RIG" -lt 4 ] && MAX_RIG=4
+
+# Divider alignment: pad the display column out to the widest display
+# among rows that actually carry a title. Rows without a title don't
+# pad and end at <pack>.<role>.
+MAX_DISPLAY=$(printf '%s\n' "$LIST" | awk -F"$TAB" '$1 == "S" && $7 != "" { if (length($6) > m) m = length($6) } END { print (m+0) }')
+[ -z "$MAX_DISPLAY" ] && MAX_DISPLAY=0
 
 HOTKEYS="abcdefghijklmnopqrstuvwxyz0123456789"
 set --
@@ -184,8 +222,19 @@ while IFS="$TAB" read -r row_type rig c3 c4 c5 c6 c7 c8; do
     pad=$((MAX_RIG - ${#rig}))
     [ "$pad" -lt 0 ] && pad=0
     if [ "$row_type" = "S" ]; then
-        marker="$c3"; win_marker="$c4"; name="$c5"; display="$c6"
-        label=$(printf '  [%s]%*s  %s%s  %s  ' "$rig" "$pad" '' "$marker" "$win_marker" "$display")
+        marker="$c3"; win_marker="$c4"; name="$c5"; display="$c6"; stitle="$c7"
+        if [ -n "$stitle" ]; then
+            # 40-char ceiling: 39 + `…` when cut. Mirrors the
+            # pane-title truncation pattern, slightly wider.
+            if [ ${#stitle} -gt 40 ]; then
+                stitle="$(printf '%s' "$stitle" | cut -c1-39)…"
+            fi
+            pad2=$((MAX_DISPLAY - ${#display}))
+            [ "$pad2" -lt 0 ] && pad2=0
+            label=$(printf '  [%s]%*s  %s%s  %s%*s  │ %s  ' "$rig" "$pad" '' "$marker" "$win_marker" "$display" "$pad2" '' "$stitle")
+        else
+            label=$(printf '  [%s]%*s  %s%s  %s  ' "$rig" "$pad" '' "$marker" "$win_marker" "$display")
+        fi
         cmd_str="switch-client -t $name"
     else
         # P row payload: c3=pane_marker, c4=name, c5=window, c6=pane, c7=cmd, c8=title

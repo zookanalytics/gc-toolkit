@@ -65,6 +65,102 @@ Picking a session row (the parent) still does plain
 `switch-client -t <session>` — i.e., lands on whatever pane the
 session was last on. Existing behavior preserved.
 
+## Session title column
+
+Each session row can carry a meaningful title in a right-side column,
+separated by a `│` divider:
+
+    [<rig>]<pad>  *▣  <pack>.<role>                              ← no title
+    [<rig>]<pad>  *▣  <pack>.<role><pad2>  │ <session title>     ← with title
+
+Layout details:
+
+- The divider is a Unicode `│` (U+2502). Adjacent rows that carry a
+  title align their dividers; rows without one end at `<pack>.<role>`
+  and do NOT pad out to the divider column.
+- `MAX_DISPLAY` is computed across S rows that carry a title. It's
+  the max length of `<pack>.<role>` in that subset. The same display
+  on a non-titled row is not padded — only titled rows participate.
+- Titles longer than 40 chars truncate to 39 chars + `…` (40 visible
+  cells total). Mirrors the pane-title truncation pattern, slightly
+  wider for full session titles.
+
+### Boring-title suppression
+
+Many sessions have a title equal to their derived display name plus
+a `<rig>/` prefix — e.g., the picker shows `gc-toolkit.refinery` but
+the gc title is `gc-toolkit/gc-toolkit.refinery`. That's not new
+information; rendering it would add visual noise.
+
+The rule: strip a leading `<rig>/` from the title (matching the
+picker's derived rig for that row) before comparing. If the
+normalized title equals the display, suppress the entire ` │ <title>`
+suffix. The boring case renders exactly as it did before this
+feature was added.
+
+The strip only kicks in for non-city rigs — `city` rows have no
+`<rig>/` prefix in the display, so no normalization is needed.
+
+### Data source and join
+
+The picker fetches the title map from:
+
+    timeout 3 gc session list --json | jq -r '.sessions[]? | …'
+
+The join key is `session_name` — present on both the tmux side
+(`#{session_name}`) and the gc session record. jq sanitizes the
+title (strips `\t\r\n`) so it's safe to embed in the awk pipeline's
+TSV channel.
+
+### Graceful fallback
+
+`gc session list --json` is a subprocess against the data plane and
+can fail in several ways. The picker MUST still render in every
+case — no titles, no broken layout, no missing menu.
+
+- Bound the call with `timeout 3`. A wedged Dolt cannot block the
+  picker beyond 3s.
+- Non-zero exit (gc errors, command-not-found, timeout): the `|| true`
+  trailer reduces the failure to an empty `TITLES` string.
+- Malformed JSON: jq errors are suppressed (`2>/dev/null`) and produce
+  empty output.
+- Empty output / no session_name+title pairs: the awk title map stays
+  empty.
+
+In every failure mode, every row renders as if the feature were
+disabled. `MAX_DISPLAY` falls back to 0; the `if [ -n "$stitle" ]`
+guard in the shell ensures no row tries to render a divider.
+
+### Mode coverage
+
+Titles render in **both** default collapsed mode and `--all` mode.
+The most title-rich rows today are force-spawn polecats, which are
+hidden in default mode and only visible under `--all` — so the
+operator gains the most visibility there. Coordinator threads with
+custom titles also benefit in default mode.
+
+### Worked example
+
+`--all` mode with a mix of boring, meaningful, and truncated titles:
+
+    [city]         ▣  gc-toolkit.mayor
+    [city]         ▣  gc-toolkit.mayor-thread-adhoc-93f76e17c4  │ gc-toolkit.mayor-thread
+    [gascity]         gc-toolkit.polecat-adhoc-aaa              │ Force-spawn: PR21 doc-ref fix
+    [gascity]         gc-toolkit.polecat-adhoc-bbb              │ Very long title that should definitely…
+    [gc-toolkit]      gc-toolkit.furiosa
+    [gc-toolkit]  *   gc-toolkit.nux
+    [gc-toolkit]      gc-toolkit.refinery
+
+Notes:
+
+- `gc-toolkit.mayor` has no gc title set → no divider.
+- `gc-toolkit.nux` / `gc-toolkit.refinery` carry the boring default
+  title (`gc-toolkit/gc-toolkit.nux` etc.) → suppressed.
+- Polecat-adhoc rows show their force-spawn intent; the second one
+  truncated to 39 + `…`.
+- `MAX_DISPLAY` here is 40 (the mayor-thread row), so the dividers
+  on shorter polecat displays pad out to that width.
+
 ## Multi-window indicator (▣)
 
 A session with more than one tmux window gets a `▣` glyph adjacent to
@@ -201,7 +297,13 @@ beneath sessions that survive the filter pass.
 
 - preview pane / live `capture-pane` tail
 - fzf or `display-popup -E` rewrite
-- mail-counts, agent metadata, last-bead inline in the row
+- mail-counts, bead IDs, current-claimed-bead inline in the row
+  (session title is now in scope — see "Session title column" above
+  for what it covers and what it deliberately does not)
+- auto-updating the session title from current work / claimed bead.
+  Titles are set at session creation (`--title`, `--title-hint`) or
+  via `gc session rename`; the picker only renders what's already
+  there.
 - changing the `prefix+S` binding line in `~/.tmux.conf`
 - per-rig grouped headers in `--all` mode
 - richer per-rig status in the header (windows count, attached-state
