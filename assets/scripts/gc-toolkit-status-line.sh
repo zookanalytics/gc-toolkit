@@ -4,9 +4,15 @@
 # Usage: gc-toolkit-status-line.sh <agent-name>
 #
 # Replaces gastown's status-line.sh as the body of #(...) in status-right.
-# Adds two composable slots after the agent label:
+# Renders two composable slots followed by hook/mail counts:
 #
-#   <agent> [<title>] [<indicator>] | 🪝 N | 📬 M
+#   [<title>] [<indicator>] | 🪝 N | 📬 M
+#
+# The agent name is intentionally NOT rendered here — it lives on the
+# left side of the status bar (see tmux-status-line-override.sh, which
+# also overrides status-left with a short-name form of $AGENT). When
+# title, indicator, and both counts are all empty, this script emits
+# nothing and tmux shows just " %H:%M".
 #
 # - <title>     : from `gc session list --json`. Hidden when title equals
 #                 the agent name (the gascity default — no operator-set
@@ -101,14 +107,14 @@ if [ -f "$INDICATOR_FILE" ]; then
 fi
 
 # --- Width budget enforcement -------------------------------------------
-# Compute byte-length of fixed footprint (agent + counts). Whatever's
-# left is shared between title and indicator. Truncate title first
-# (the bead's rule), then indicator. Multi-byte characters cost more
-# bytes than cells, so byte-length is a conservative over-estimate;
-# the visible output may be a few cells under budget. Acceptable for
-# a status bar.
+# Compute byte-length of fixed footprint (counts only — the agent name
+# no longer lives on this side of the status bar). Whatever's left is
+# shared between title and indicator. Truncate title first (the bead's
+# rule), then indicator. Multi-byte characters cost more bytes than
+# cells, so byte-length is a conservative over-estimate; the visible
+# output may be a few cells under budget. Acceptable for a status bar.
 
-fixed="${agent}${hook_seg}${mail_seg}"
+fixed="${hook_seg}${mail_seg}"
 fixed_len=${#fixed}
 remaining=$(( BUDGET - fixed_len ))
 [ "$remaining" -lt 0 ] && remaining=0
@@ -132,13 +138,18 @@ trim() {
     fi
 }
 
-# Title gets at most half the remaining (but cap at 24 either way).
-# This keeps title from starving the indicator when both are present.
+# When indicator is also present, split remaining width half-and-half
+# so neither slot starves the other. When indicator is empty, give
+# title the full remaining width (minus the leading space). No fixed
+# upper cap — operator-set titles are the primary content of the
+# right side now that the agent prefix is gone.
 if [ -n "$title" ]; then
-    half=$(( remaining / 2 ))
-    title_max=24
-    [ "$title_max" -gt "$half" ] && title_max=$half
-    # +1 for the leading space we'll emit before the title.
+    if [ -n "$indicator" ]; then
+        title_max=$(( remaining / 2 ))
+    else
+        title_max=$remaining
+    fi
+    # -1 reserves the leading space we emit before the title.
     title=$(trim "$title" $(( title_max - 1 )))
     if [ -n "$title" ]; then
         remaining=$(( remaining - ${#title} - 1 ))
@@ -151,7 +162,10 @@ if [ -n "$indicator" ]; then
 fi
 
 # --- Emit ----------------------------------------------------------------
-printf '%s' "$agent"
+# Every non-empty segment carries its own leading-space (or pipe-space
+# for counts), so concatenation is order-only — no separator joins.
+# When all four are empty the script emits nothing and tmux renders
+# just the trailing " %H:%M" from gastown's status-right format.
 [ -n "$title" ] && printf ' %s' "$title"
 [ -n "$indicator" ] && printf ' %s' "$indicator"
 [ -n "$hook_seg" ] && printf '%s' "$hook_seg"
