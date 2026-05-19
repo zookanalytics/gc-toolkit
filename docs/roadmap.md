@@ -25,12 +25,15 @@ belong nowhere.
 - One agent: `mechanik`, a city-scoped structural engineer for the pack
   itself — owns formulas, agent configs, dispatch patterns, conventions.
 - An **agent brief** under `docs/` — the canonical reference material an
-  agent working in or on Gas City loads as context. Today five docs:
-  one index into upstream docs (`gascity-reference.md`) plus four
-  gc-toolkit-specific process docs (local-patching, upstream-engagement,
-  rebase-conventions, polecat-patterns). See `principles/agent-brief.md`
-  for the doc-type definition and the canonical membership list, and
-  `gascity-reference.md` for the bar applied before adding new entries.
+  agent working in or on Gas City loads as context. Today two docs:
+  one index into upstream docs (`gascity-reference.md`) plus one
+  gc-toolkit-specific process doc (`gascity-local-patching.md`). See
+  `principles/agent-brief.md` for the doc-type definition and the
+  canonical membership list, and `gascity-reference.md` for the bar
+  applied before adding new entries. Operational doctrine (upstream
+  engagement, rebase conventions, polecat patterns) lives in
+  `template-fragments/` and is injected into agent prompts, not the
+  brief.
 - No formulas yet. No other agents yet.
 
 This roadmap describes what fills out from here.

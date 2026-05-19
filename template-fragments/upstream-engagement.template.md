@@ -1,15 +1,11 @@
----
-name: gascity upstream engagement
-description: When and how gc-toolkit engages upstream gascity — three-option framework, commit-as-review-packet, operator-gated PR submission.
----
-
-# Gascity upstream engagement
+{{ define "upstream-engagement" }}
+## Gascity upstream engagement
 
 This doc describes when and how gc-toolkit engages upstream
 `gastownhall/gascity`. It is gc-toolkit-specific because the
 engagement framing is a project convention, not a Gas City feature.
 
-## The three-option framework
+### The three-option framework
 
 For every bug or design gap you hit in upstream `gascity`, evaluate
 which of three options applies:
@@ -29,7 +25,7 @@ Default to option 1. Move to option 2 when the bug is hot and you
 can't wait. Move to option 3 only when you have something new, *and*
 you've decided you want the public footprint of an upstream PR.
 
-## The commit message IS the review packet
+### The commit message IS the review packet
 
 Because gc-toolkit doesn't retain per-patch branches after merge, the
 commit on `origin/main` carries the entire case for the change. The
@@ -57,7 +53,7 @@ Each local-patch commit body should cover:
 The body should read like a self-contained upstream PR description —
 if promoted later it should be copy-pasteable with minimal editing.
 
-## Operator-gated PR submission
+### Operator-gated PR submission
 
 **Agents do not file upstream PRs on their own initiative.** Upstream
 submission is a user-gated, conversation-initiated decision. The
@@ -83,7 +79,7 @@ context in the commit message. Upstream merge becomes a
 stop-condition the operator evaluates later, not work the city
 schedules.
 
-## The candidate-set model
+### The candidate-set model
 
 `gc-toolkit`'s convention is: **every commit on `origin/main` that
 diverges from `upstream/main` is, by definition, a future
@@ -101,7 +97,7 @@ discipline: every commit on `origin/main` must carry full
 review-packet context because there is no separate place to record
 that context later.
 
-## PR-creation handoff: compare URL, not `gh pr create`
+### PR-creation handoff: compare URL, not `gh pr create`
 
 When the operator chooses to promote a commit, the deliverable
 back to them is a **GitHub compare URL** with title and body
@@ -126,8 +122,9 @@ Testing checklist → Checklist (linked issue, tests, docs, breaking
 changes). Adapt the commit body into that structure before locking
 the URL in.
 
-## When you are asked "what's left on this bead?"
+### When you are asked "what's left on this bead?"
 
 Upstream PR work is **not** a valid answer. The right answer ends at
 "local fix shipped, commit carries review packet; operator reviews
 for upstream submission at their discretion."
+{{ end }}

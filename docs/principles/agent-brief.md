@@ -31,8 +31,9 @@ consumes.
 
 ## Today's canonical brief
 
-Five reference docs under `docs/` collectively comprise the brief — one
-index, one process doc, three gc-toolkit-specific learnings:
+Two reference docs under `docs/` collectively comprise the brief — one
+index into upstream Gas City documentation, plus one gc-toolkit-specific
+process doc:
 
 - **[`gascity-reference.md`](../gascity-reference.md)** — index of
   canonical Gas City documentation at `docs.gascityhall.com`. The
@@ -41,18 +42,23 @@ index, one process doc, three gc-toolkit-specific learnings:
 - **[`gascity-local-patching.md`](../gascity-local-patching.md)** —
   recommended process when a city must carry local fixes against
   `gascity` ahead of upstream.
-- **[`gascity-upstream-engagement.md`](../gascity-upstream-engagement.md)**
-  — when and how to engage upstream gascity (the three-option
-  framework, commit-message-as-review-packet, operator-gated PR
-  submission).
-- **[`gascity-rebase-conventions.md`](../gascity-rebase-conventions.md)**
-  — gc-toolkit's framework for rebasing local commits onto upstream
-  changes (default rework not auto-drop, dropped-absorbed semantics,
-  force-push ownership, conflict policy).
-- **[`gascity-polecat-patterns.md`](../gascity-polecat-patterns.md)** —
-  gc-toolkit's operational patterns for polecat work (assignee
-  cleared on close, rotation salvage threshold, refinery PR-handoff
-  contract).
+
+The brief is **reference**, not **instruction**. Institutional Gas City
+knowledge belongs here so an agent (today: `mechanik`) can do its job
+without re-researching how Gas City works each time. Operational
+doctrine — what to do, when to do it, how to avoid known pitfalls —
+does **not** belong in the brief; it belongs alongside the agents that
+follow it.
+
+Three previously-bundled "learnings" — upstream engagement, rebase
+conventions, polecat patterns — moved out to
+`template-fragments/{upstream-engagement,rebase-conventions,polecat-patterns}.template.md`
+and are injected directly into the agent prompts that need them
+(mayor: upstream-engagement; polecat and refinery: rebase-conventions
++ polecat-patterns; mechanik: all three). The wiring lives in
+`pack.toml`'s `[[patches.agent]]` blocks (for polecat) and in the
+prompt patches under `patches/` (for mayor and refinery); mechanik
+includes them directly in its native prompt template.
 
 ## The bar
 

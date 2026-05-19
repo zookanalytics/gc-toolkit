@@ -526,6 +526,18 @@ The proposal is **maximally non-disruptive**: it codifies existing
 practice plus a small principles tier. No existing doc moves under
 the proposed defaults.
 
+**Subsequent change (`tk-kohcke`, 2026-05-19):** three of the rows
+above — `docs/gascity-upstream-engagement.md`,
+`docs/gascity-rebase-conventions.md`,
+`docs/gascity-polecat-patterns.md` — were later relocated to
+`template-fragments/{upstream-engagement,rebase-conventions,polecat-patterns}.template.md`
+and injected directly into the agent prompts that need them. The
+relocation reflects the recognition that instructional content
+belongs alongside the agents that follow it, not in the agent brief
+alongside Gas City reference material. See
+[`agent-brief.md`](./agent-brief.md) for the narrowed two-doc brief
+shape.
+
 **Existing patterns this spec implicitly endorses without enforcing:**
 
 - `**Status:**` body prose lines on design docs (existing

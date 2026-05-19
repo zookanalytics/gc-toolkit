@@ -112,8 +112,9 @@ Machine-readable artifacts. Each link is the canonical download.
 
 Topics gc-toolkit has hit in practice that have no upstream coverage
 yet. Entries here are a TBD list; the resolution is to file an
-upstream PR (per [`gascity-upstream-engagement.md`](./gascity-upstream-engagement.md))
-rather than restate the content in this index.
+upstream PR (per the `upstream-engagement` template-fragment injected
+into the mechanik and mayor prompts) rather than restate the content
+in this index.
 
 - *(none recorded yet — when you find a gap, file the bead and add a
   pointer here)*

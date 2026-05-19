@@ -1,15 +1,11 @@
----
-name: gascity polecat patterns
-description: gc-toolkit operational patterns for polecat work — assignee-cleared-on-close querying, rotation salvage policy, refinery PR-handoff contract.
----
-
-# Gascity polecat patterns
+{{ define "polecat-patterns" }}
+## Gascity polecat patterns
 
 Operational patterns for polecat work in gc-toolkit. These are
 fork-side conventions, not Gas City features: each is a "how we use
 the SDK" decision rather than a description of what the SDK does.
 
-## Assignee is cleared on close — query `gc.routed_to`, not `assignee`
+### Assignee is cleared on close — query `gc.routed_to`, not `assignee`
 
 When a polecat finishes work and closes a bead, the `assignee`
 field is cleared to `null`. Routing only persists in
@@ -38,7 +34,7 @@ produce beads with no routing — they sit in the queue forever
 until someone slings them. That is not a regression; it is the
 model.
 
-## Rotation salvage: accept loss by default
+### Rotation salvage: accept loss by default
 
 When a polecat session ends mid-work on a bead and the pool spawns
 a replacement that picks up the same bead with a fresh branch, do
@@ -70,7 +66,7 @@ recovery cases — those assume no successor in flight. With a
 successor active, the formula's "push to branch" step is no
 longer the right move.
 
-## Refinery PR-handoff contract
+### Refinery PR-handoff contract
 
 When the refinery closes an impl bead with metadata
 `merge_result=pull_request` and `pr_url=<url>`, the work is
@@ -97,13 +93,4 @@ the merge itself, but as of 2026-05-06 that is still external.
   `merge_result` metadata appears, and the refinery is alive but
   not picking up the work. The trigger to investigate is "bead
   never closed," not "PR not merged."
-
-## Cross-references
-
-- [`gascity-rebase-conventions.md`](./gascity-rebase-conventions.md)
-  — rebase polecats own their own force-push step; refinery never
-  force-pushes. Closely related to the refinery contract above.
-- [`gascity-upstream-engagement.md`](./gascity-upstream-engagement.md)
-  — operator-gated PR submission framing. The refinery contract
-  here covers the *internal* gc-toolkit fork merge step, not the
-  *external* upstream submission.
+{{ end }}

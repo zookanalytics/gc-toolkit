@@ -186,9 +186,9 @@ drift-audit, doc-update workers) refer to the brief without
 re-enumerating its contents, and lets the member docs stay where they
 are without forced renames.
 
-The brief comprises five reference docs under
+The brief comprises two reference docs under
 `{{ .ConfigDir }}/docs/` — one index into upstream Gas City
-documentation plus four gc-toolkit-specific process docs. The
+documentation plus one gc-toolkit-specific process doc. The
 **canonical membership list** lives in
 `{{ .ConfigDir }}/docs/principles/agent-brief.md` — downstream config,
 drift-audit, and doc-update tooling point there. The bullets below are
@@ -215,26 +215,24 @@ in gc-toolkit's broader doc taxonomy, see
   before proposing or accepting work that involves a `gascity` fix
   beyond what's already in upstream.
 
-- **gascity-upstream-engagement.md** — When and how to engage upstream
-  `gastownhall/gascity`. The three-option framework (ignore / local
-  patch / engage), commit-as-review-packet shape, operator-gated PR
-  submission, candidate-set model, and the compare-URL handoff form
-  for PR creation. Consult before scoping work that touches the
-  upstream relationship.
+Operational doctrine — upstream engagement, rebase conventions, and
+polecat patterns — is not part of the brief. It lives in
+`{{ .ConfigDir }}/template-fragments/` and is injected directly into
+the agent prompts that need it (mechanik below; mayor, polecat, and
+refinery via their own patches). Instructional content belongs
+alongside the agents that follow it, not in the brief.
 
-- **gascity-rebase-conventions.md** — gc-toolkit's framework for
-  rebasing local `origin/main` commits onto upstream changes. Default
-  rework (not auto-drop), dropped-absorbed = drop the whole commit,
-  force-push owned by the rebase polecat (never refinery), and the
-  no-dead-end conflict policy. Consult before scoping rebase work or
-  diagnosing a rebase that landed at the wrong agent.
+---
 
-- **gascity-polecat-patterns.md** — Operational patterns for polecat
-  work in gc-toolkit. Closed beads have `assignee=null` so audits
-  must query `metadata.gc.routed_to`; rotation salvage defaults to
-  accept-loss; refinery delivers to PR-open and the operator merges
-  externally. Consult when designing audit queries or interpreting
-  refinery-handoff state.
+{{ template "upstream-engagement" . }}
+
+---
+
+{{ template "rebase-conventions" . }}
+
+---
+
+{{ template "polecat-patterns" . }}
 
 ## Directory Guidelines
 

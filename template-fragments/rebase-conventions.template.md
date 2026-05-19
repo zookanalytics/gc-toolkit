@@ -1,16 +1,12 @@
----
-name: gascity rebase conventions
-description: gc-toolkit's framework for rebasing local gascity commits onto upstream — default rework, dropped-absorbed semantics, force-push ownership, conflict policy.
----
-
-# Gascity rebase conventions
+{{ define "rebase-conventions" }}
+## Gascity rebase conventions
 
 When `zookanalytics/gascity:main` rebases onto `upstream/main`, local
 commits meet upstream's evolution. The four rules below define how
 gc-toolkit handles that meeting. They are gc-toolkit-specific because
 upstream `gascity` doesn't carry a fork; this is fork-side framing.
 
-## Default: rework intent on new upstream, don't auto-drop
+### Default: rework intent on new upstream, don't auto-drop
 
 When a local commit conflicts with upstream's evolution, the default
 is **rework the intent on top of new upstream**, not auto-drop. Local
@@ -40,7 +36,7 @@ Polecats classify each conflict into one of four cases:
 Default action is rework. Drop is only correct when upstream-side
 absorption is clearly identifiable.
 
-## Dropped-absorbed: drop the WHOLE commit
+### Dropped-absorbed: drop the WHOLE commit
 
 When the classification is `dropped-absorbed`, the **entire commit
 goes**. Do not:
@@ -61,7 +57,7 @@ If a piece of the absorbed commit genuinely has independent value
 scope and let it land as a fresh commit on its own merits — don't
 smuggle it through the rebase as commit-preservation.
 
-## Force-push ownership: rebase polecat, never refinery
+### Force-push ownership: rebase polecat, never refinery
 
 Rebase outcomes against `upstream/main` produce divergent history
 (post-rebase `origin/main` shows N ahead, M behind in *both*
@@ -78,7 +74,7 @@ does the force-push:
   `requires_force_push=true` metadata flags. The rule stays absolute.
 - **The rebase polecat owns its own `push` step.** The rebase
   formula's terminal step uses `--force-with-lease`, runs under
-  `notify_recipient=overseer`, and has its own race-loss escalation
+  `notify_recipient=human`, and has its own race-loss escalation
   path. That is the sanctioned channel for the force-push.
 
 If a rebase-shaped bead ends up at `assignee=<rig>/gc-toolkit.refinery`
@@ -88,7 +84,7 @@ step. The fallback while the routing bug exists is escalation to
 mayor and operator-gated manual force-push; the structural fix is
 upstream of refinery.
 
-## Conflict policy: must not dead-end
+### Conflict policy: must not dead-end
 
 `abort + mail + drain` is **not an acceptable terminal outcome** for
 a rebase conflict. The polecat must either:
@@ -112,14 +108,4 @@ This stance applies to **other abort paths too** (test failure,
 install failure, push race): once cooperative handback is
 structural, those surface as questions to the operator, not
 terminal aborts.
-
-## Cross-references
-
-- [`gascity-local-patching.md`](./gascity-local-patching.md) — the
-  fork-setup, branch model, and sync workflow. This doc layers
-  rebase-specific conventions on top.
-- [`gascity-upstream-engagement.md`](./gascity-upstream-engagement.md)
-  — when to engage upstream at all. Drop decisions in this doc
-  presume the local patch existed for a real reason; engagement
-  decisions cover whether that reason is still worth surfacing
-  upstream.
+{{ end }}

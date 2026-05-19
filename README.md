@@ -34,9 +34,6 @@ opinions rather than cloned directly.
 - `docs/roadmap.md` — (coming soon) the shape of the pack's evolution
 - `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`
 - `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
-- `docs/gascity-upstream-engagement.md` — when and how to engage upstream `gastownhall/gascity`
-- `docs/gascity-rebase-conventions.md` — gc-toolkit's framework for rebasing local commits onto upstream
-- `docs/gascity-polecat-patterns.md` — gc-toolkit operational patterns for polecat work
 
 ## Usage
 
