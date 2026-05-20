@@ -1,3 +1,8 @@
+---
+name: Spec Kit — document templates and recording locations
+description: Survey of GitHub Spec Kit's per-feature directories, fixed-name spec/plan/tasks pair, and constitution doc; one of six platform surveys input to the gc-toolkit document spec.
+---
+
 # Spec Kit — document templates and recording locations
 
 Survey of **GitHub Spec Kit** (github.com/github/spec-kit), the open-source

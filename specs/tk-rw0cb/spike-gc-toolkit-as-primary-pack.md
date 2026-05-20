@@ -1,3 +1,8 @@
+---
+name: Spike — gc-toolkit as the Primary Pack
+description: Read-only survey of how gc-toolkit would wrap gastown as the primary pack under pack v2, with provenance, patch surfaces, and conformance gaps.
+---
+
 # Spike: gc-toolkit as the Primary Pack (Wrapping gastown)
 
 > **Bead:** tk-rw0cb. **Surveyed:** 2026-05-05. **Author:** Mechanik.

@@ -1,3 +1,8 @@
+---
+name: BMAD Method — document naming conventions
+description: Survey of BMAD Method's directory layout, filename conventions, lifecycle markers, and stated rationale; one of six platform surveys input to the gc-toolkit document spec.
+---
+
 # BMAD Method — document naming conventions
 
 ## Source surveyed

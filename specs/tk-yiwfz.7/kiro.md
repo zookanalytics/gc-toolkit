@@ -1,3 +1,8 @@
+---
+name: Kiro — document naming conventions
+description: Survey of Kiro (kiro.dev) doc-type taxonomy and Steering documents; one of six platform surveys input to the gc-toolkit document spec.
+---
+
 # Kiro — document naming conventions
 
 Survey of Kiro (kiro.dev), an agentic IDE from Amazon, with focus on

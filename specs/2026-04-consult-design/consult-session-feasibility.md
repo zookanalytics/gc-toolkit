@@ -1,3 +1,8 @@
+---
+name: Session-per-Consult — Feasibility Study
+description: Parallel-track feasibility analysis for a session-per-consult upgrade over the v1 conversational-concierge model; informs whether the upgrade is worth scoping.
+---
+
 # Session-per-Consult — Feasibility Study
 
 **Status:** feasibility analysis, not approved. Parallel track to v1
@@ -397,7 +402,7 @@ build-signal). Scope sketch:
 - `tk-uac` — original consult-surfacing design (now v1 model).
 - `tk-a4t` — architect skeleton; source of consult protocol.
 - `tk-6s5` — gc-toolkit strategic direction.
-- `docs/design/consult-surfacing.md` — v1 design doc on
+- [`consult-surfacing.md`](./consult-surfacing.md) — v1 design doc on
   `origin/polecat/tk-uac-consult-surfacing-design` (to be revised on
   tk-89y).
 - `.gc/system/packs/core/assets/prompts/pool-worker.md` — existing

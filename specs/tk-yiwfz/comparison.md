@@ -327,10 +327,10 @@ the interest of compactness.
 ### 11. Citation path style — repo-root vs relative-from-spec
 
 - **A**: Repo-root paths, e.g.,
-  `[Source: docs/research/naming-conventions/bmad-method.md#…]`.
+  `[Source: specs/tk-yiwfz.1/bmad-method.md#…]`.
 - **B**: Repo-root paths, same form as A.
 - **C**: Relative paths from the spec file, e.g.,
-  `[Source: ../../docs/research/naming-conventions/bmad-method.md#…]`.
+  `[Source: ../tk-yiwfz.1/bmad-method.md#…]`.
 
 **Tradeoff**: repo-root paths are stable if the doc moves and read
 clearly without knowing the doc's location (A, B); relative paths
@@ -530,10 +530,10 @@ remain so for the downstream converged synthesis:
   [`specs/tk-yiwfz.9/synthesis.md`](../tk-yiwfz.9/synthesis.md),
   [`specs/tk-yiwfz.10/synthesis.md`](../tk-yiwfz.10/synthesis.md).
 - **v1 reference** (context only):
-  [`docs/principles/document-spec.md`](../../docs/principles/document-spec.md).
+  [`specs/tk-yiwfz.4/document-spec.md`](../tk-yiwfz.4/document-spec.md).
 - **Six platform surveys** (referenced by the drafts, not re-cited
-  here): `docs/research/naming-conventions/{bmad-method,
-  bmad-method-templates, superpowers, gastown, spec-kit, kiro}.md`.
+  here): `../tk-yiwfz.{1,2,3,5,6,7}/{bmad-method, superpowers, gastown,
+  bmad-method-templates, spec-kit, kiro}.md`.
 - **This bead**: `tk-yiwfz.11`. Filed by mechanik on operator request to
   close the gap between the three draft polecats (closed 2026-05-07)
   and the downstream converged synthesis. **Inventory only — no winner

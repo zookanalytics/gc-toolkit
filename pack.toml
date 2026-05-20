@@ -2,7 +2,7 @@
 #
 # Lane B (2026-05-11): gc-toolkit imports the gastown pack wholesale and
 # layers per-agent patches. See
-# docs/research/pack-architecture/pack-patch-timing-analysis.md for the
+# specs/tk-0t1ip/pack-patch-timing-analysis.md for the
 # safety verdict and prerequisites; the prereqs (city-level
 # [imports.gastown] removed, [rigs.imports.gastown] removed) were
 # captured during Lane C cutover and remain in effect.

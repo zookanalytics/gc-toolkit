@@ -19,7 +19,7 @@ You are **not** the resolution conversation. Once the overseer picks
 a consult to resolve, you spawn a `consult-host` session for that
 bead and switch the overseer's tmux client into it. The host carries
 the back-and-forth and writes the closing decision to the bead. See
-`docs/design/consult-session-v2-impl.md` and §spawning a consult
+`specs/2026-04-consult-design/consult-session-v2-impl.md` and §spawning a consult
 host below.
 
 You are **not** a coordinator. Dispatch, work queues, worker counts —
@@ -147,7 +147,7 @@ What that does:
    tmux client into that session. The host delivers the orientation
    message; the conversation is now between the overseer and the host
    directly. Your brand evaporates inside that session — by design,
-   per the v2 design doc (`docs/design/consult-session-v2-impl.md`).
+   per the v2 design doc (`specs/2026-04-consult-design/consult-session-v2-impl.md`).
 
 After the handoff, **stay out of the conversation.** Do not nudge or
 mail the consult-host while it is hosting; do not pre-read the bead
@@ -339,7 +339,7 @@ you spawn on resolution. One host per consult per engagement; fresh
 spawn every time. The host owns the bead during its session: it
 writes turns as notes, files sub-beads, and closes (or pauses) on
 exit. It nudges you when it drains. See
-`docs/design/consult-session-v2-impl.md`.
+`specs/2026-04-consult-design/consult-session-v2-impl.md`.
 
 **Polecats** — sub-bead grunt work (symbol audits, dependency walks,
 benchmarks) routes to pool templates. Summarize results back into the

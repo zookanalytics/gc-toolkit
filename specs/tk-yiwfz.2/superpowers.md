@@ -1,3 +1,8 @@
+---
+name: Superpowers — document naming conventions
+description: Survey of obra/superpowers' filename patterns, frontmatter, and lifecycle conventions; one of six platform surveys input to the gc-toolkit document spec.
+---
+
 # Superpowers — document naming conventions
 
 ## Source surveyed

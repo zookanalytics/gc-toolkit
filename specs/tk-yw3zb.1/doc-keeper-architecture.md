@@ -246,8 +246,8 @@ source_paths = []                           # organic-only
 brief = true
 
 [[doc-keeper.brief]]
-path = "docs/principles/document-spec.md"
-source_paths = ["docs/principles/document-spec.md"]
+path = "specs/tk-yiwfz.4/document-spec.md"
+source_paths = ["specs/tk-yiwfz.4/document-spec.md"]
 brief = false
 ```
 

@@ -1,3 +1,8 @@
+---
+name: Gas Town — document naming conventions
+description: Survey of Gas Town's in-tree doc-type conventions and design-doc patterns; one of six platform surveys input to the gc-toolkit document spec.
+---
+
 # Gas Town — document naming conventions
 
 ## Source surveyed
@@ -266,7 +271,7 @@ Design docs use prose status lines near the top:
 > **Status:** approved design. Implementation bead to be filed by
 > mechanik against this revision.
 
-Visible in `docs/design/consult-surfacing.md`. There is no YAML
+Visible in [`../2026-04-consult-design/consult-surfacing.md`](../2026-04-consult-design/consult-surfacing.md). There is no YAML
 frontmatter — the status is one of the first lines in the document
 body.
 

@@ -1,3 +1,8 @@
+---
+name: BMAD Method — document templates and recording locations
+description: Templates re-survey complementing the BMAD naming survey; covers per-template detail and output-recording locations across BMAD's workflows.
+---
+
 # BMAD Method — document templates and recording locations
 
 ## Reference to prior round
