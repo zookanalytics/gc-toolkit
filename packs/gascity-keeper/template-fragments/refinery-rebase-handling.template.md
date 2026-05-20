@@ -54,20 +54,44 @@ flow (no force-push, ever).
 
 When `IS_REBASE=1`:
 
-1. **Fetch and verify the branch is current.** Refuse to land a stale
-   working branch — the rebase polecat may have completed against an
-   older `upstream/main` than what's now on origin:
+1. **Fetch and verify `origin/main` is still at the pre-rebase tip.**
+   Refuse to land a stale working branch — the rebase polecat may have
+   completed against an older `upstream/main` than what's now on
+   origin. The rebase formula stamps `metadata.pre_rebase_tip` (and
+   `metadata.backup_ref`) at workspace-setup with the SHA of
+   `origin/main` it observed before rewriting history. Compare the
+   current `origin/main` tip against that recorded SHA:
 
    ```bash
    git fetch --prune origin
    BRANCH=$(gc bd show "$WORK" --json | jq -r '.[0].metadata.branch')
    git checkout "$BRANCH"
-   git rev-list --left-right --count "$BRANCH...origin/main"
+
+   PRE_REBASE_TIP=$(gc bd show "$WORK" --json \
+     | jq -r '.[0].metadata.pre_rebase_tip // .[0].metadata.backup_ref // empty')
+   if [ -z "$PRE_REBASE_TIP" ]; then
+     echo "ERROR: rebase bead $WORK missing metadata.pre_rebase_tip/backup_ref — cannot verify race-loss safely" >&2
+     # Refuse to push; escalate via the same race-loss path below.
+     exit 1
+   fi
+
+   # PRE_REBASE_TIP may be a SHA or a refname (e.g. refs/backup/main-pre-rebase).
+   PRE_REBASE_SHA=$(git rev-parse "$PRE_REBASE_TIP^{commit}")
+   CURRENT_MAIN_SHA=$(git rev-parse origin/main)
    ```
 
-   `--left-right` reports `<branch-ahead> <main-ahead>`. For a fresh
-   rebase, expect `main-ahead = 0` (the rebased branch supersedes
-   `main` entirely). If `main-ahead > 0`, **another change landed on
+   Why not `git rev-list --left-right --count "$BRANCH...origin/main"`
+   with an expected `main-ahead = 0`? A history-rewriting rebase
+   replaces the OLD `origin/main` commits with new SHAs. The old
+   commits stay reachable from `origin/main` but are not reachable
+   from the rebased branch, so they show up as right-only in the
+   symmetric difference even when nothing raced — `main-ahead > 0`
+   is the steady state for a clean rebase, not a race indicator.
+   Comparing `origin/main` to the recorded `pre_rebase_tip` is the
+   correct test: equal means no race, unequal means another change
+   landed.
+
+   If `PRE_REBASE_SHA != CURRENT_MAIN_SHA`, **another change landed on
    `main` after the polecat finished its rebase** — see Race loss
    below.
 
@@ -90,11 +114,21 @@ When `IS_REBASE=1`:
    exception to the core "NEVER force-push to `main`" rule:
 
    ```bash
-   git push --force-with-lease=main:origin/main origin "$BRANCH:main"
+   git push --force-with-lease=main:"$PRE_REBASE_SHA" origin "$BRANCH:main"
    ```
 
-   `--force-with-lease=main:origin/main` ensures the push only lands
-   if `origin/main` is still at the tip we observed when we fetched.
+   The expected-value form `--force-with-lease=main:"$PRE_REBASE_SHA"`
+   uses the SHA the rebase polecat saw before rewriting history (the
+   `metadata.pre_rebase_tip` resolved above), NOT the just-fetched
+   `origin/main`. Using `origin/main` as the expected value defeats
+   the protection: the preceding `git fetch --prune origin` already
+   updated the local `origin/main` ref, so the lease form
+   `--force-with-lease=main:origin/main` would compare the remote tip
+   to itself and ALWAYS pass — a genuine race that landed between
+   rebase-finish and refinery-push would not be detected.
+
+   Pinning the lease to `$PRE_REBASE_SHA` ensures the push only lands
+   if `origin/main` is still at the tip the rebase polecat observed.
    This is the safety net that converts a silent race into a refused
    push.
 

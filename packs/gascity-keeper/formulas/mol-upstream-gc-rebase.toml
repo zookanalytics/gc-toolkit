@@ -1011,9 +1011,12 @@ exit 0
 **Race-loss against `{{upstream_branch}}` is no longer this step's
 concern.** If `{{origin_remote}}/{{upstream_branch}}` moves between
 our fetch and refinery's force-push, the refinery overlay detects it
-via `--force-with-lease=main:origin/main` and escalates to mayor —
-see `refinery-rebase-handling` in the `gascity-keeper` sub-pack. We
-do NOT block on that race here; we hand off and exit.
+by comparing the current `{{origin_remote}}/{{upstream_branch}}` tip
+to `metadata.pre_rebase_tip` (and pinning the
+`--force-with-lease=<branch>:<sha>` expected value to the same SHA)
+and escalates to mayor — see `refinery-rebase-handling` in the
+`gascity-keeper` sub-pack. We do NOT block on that race here; we
+hand off and exit.
 
 **Exit criteria:** `{{origin_remote}}/refs/heads/rebase/{{issue}}`
 points at the rebased HEAD; the polecat's working branch is pushed
@@ -1111,9 +1114,11 @@ gc bd update {{issue}} \
 
 # Reassign to the rig-scoped refinery. ${GC_RIG:+$GC_RIG/} produces
 # "<rig>/" when running under a rig session, or empty in HQ-only
-# cities. Plain "refinery" matches gc-toolkit's bare-name patch
-# binding (the same form mol-polecat-work uses for its done sequence).
-REFINERY_TARGET="${GC_RIG:+$GC_RIG/}refinery"
+# cities. The binding-qualified name is `gc-toolkit.refinery` — the
+# refinery comes from gc-toolkit's import into gascity, so its
+# qualified name carries the `gc-toolkit.` prefix (matching the same
+# form `mol-polecat-work` uses: `${GC_RIG:+$GC_RIG/}gc-toolkit.refinery`).
+REFINERY_TARGET="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
 gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET" --set-metadata gc.routed_to="$REFINERY_TARGET"
 
 # Wake/nudge are best-effort — refinery's event watcher will catch the
