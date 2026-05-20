@@ -195,6 +195,29 @@ Nudges from other agents may arrive via your hook. When working:
 
 **Before your session ends, you MUST run the done sequence.**
 
+There are two done sequences — pick by whether your task produced
+commits. The impl sequence routes the bead to the refinery for
+merge. For tasks that produce no commits (PR reviews, research
+syntheses, investigations that land in bead notes), routing to
+refinery strands the bead: refinery sees `metadata.branch` but the
+branch has nothing ahead of the target, rejects the merge, and the
+bead loiters open until a human closes it.
+
+The "ABSOLUTE RESTRICTION: No Bead Closing" rule at the top of
+this prompt applies to **impl** beads — closure of those must
+come from the refinery after a verified merge. Non-impl beads have
+nothing for the refinery to verify, so the polecat closes them
+itself.
+
+**Detect at done time:**
+
+```bash
+TARGET=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.target // "{{ .DefaultBranch }}"')
+COMMITS=$(git rev-list "origin/$TARGET..HEAD" --count 2>/dev/null || echo 0)
+```
+
+### Impl done sequence (`COMMITS > 0`)
+
 ```bash
 git push origin HEAD
 gc bd update <work-bead> \
@@ -207,10 +230,28 @@ gc runtime drain-ack
 exit
 ```
 
-Your work is not complete until you run these commands. `gc runtime drain-ack`
-signals the reconciler to kill this session — it will only restart you if the
-pool check command finds more work. Sitting idle after finishing implementation
-is the "Idle Polecat heresy."
+### Non-impl done sequence (`COMMITS == 0`)
+
+The artifact is already where it belongs (`gh pr review` for
+reviews, `gc bd update --notes` for research, etc.). Close the bead
+yourself — this is the one situation in which a polecat closes the
+bead. Do NOT set `metadata.branch`, do NOT set `metadata.target`,
+do NOT route to refinery.
+
+```bash
+# 1. Stamp task-specific metadata (review_id, pr_url, verdict, etc.)
+gc bd update <work-bead> --set-metadata <task-specific fields>
+# 2. Close the bead with a reason describing the task kind.
+gc bd close <work-bead> --reason "<review|research|investigation> complete"
+gc runtime drain-ack
+exit
+```
+
+Your work is not complete until you run the appropriate done
+sequence. `gc runtime drain-ack` signals the reconciler to kill
+this session — it will only restart you if the pool check command
+finds more work. Sitting idle after finishing implementation is
+the "Idle Polecat heresy."
 
 ---
 
@@ -220,7 +261,8 @@ is the "Idle Polecat heresy."
 
 | Want to... | Correct command |
 |------------|----------------|
-| Signal work complete | Done sequence (push, set metadata, reassign, `gc runtime drain-ack`, exit) |
+| Signal work complete (impl: commits made) | Impl done sequence — push branch, set metadata, reassign to refinery, drain, exit |
+| Signal work complete (non-impl: zero commits) | Non-impl done sequence — stamp task metadata, `gc bd close`, drain, exit |
 | Read formula steps | `gc bd show <wisp-id>` (shows formula ref) |
 | Escalate blocker | `WITNESS_TARGET="${GC_RIG:+$GC_RIG/}witness"; gc mail send "$WITNESS_TARGET" -s "ESCALATION: desc [HIGH]" -m "..."` |
 | Context exhaustion | `gc runtime request-restart` |
