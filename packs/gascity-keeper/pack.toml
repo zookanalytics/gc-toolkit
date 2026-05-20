@@ -29,6 +29,31 @@ schema = 2
 # importing city's `city.toml` carries `[[rigs.patches]]` blocks for
 # the gascity rig alongside `[rigs.imports.gascity-keeper]`.
 
+# Example wiring (in the importing city's `city.toml`):
+#
+#   [[rigs]]
+#   name = "<rig-name>"  # the rig that should run the keeper
+#
+#   [rigs.imports.gc-toolkit]
+#   source = "<path-to-your-gc-toolkit-checkout>"
+#
+#   [rigs.imports.gascity-keeper]
+#   source = "<path-to-your-gc-toolkit-checkout>/packs/gascity-keeper"
+#
+#   [[rigs.patches]]
+#   agent = "refinery"
+#   inject_fragments_append = ["rebase-conventions", "refinery-rebase-handling"]
+#
+#   [[rigs.patches]]
+#   agent = "polecat"
+#   inject_fragments_append = ["rebase-conventions"]
+#
+# The `[[rigs.patches]]` blocks are nested inside the `[[rigs]]`
+# block (TOML scoping), so they apply to that one rig only.
+# After editing city.toml, run `gc config show` to confirm the
+# keeper resolves as `<rig-name>/gascity-keeper.keeper` and the
+# fragments compose into the rig's refinery and polecat.
+
 # Materialise the keeper on demand in whichever rig imports this pack.
 # The agent ships as bare `keeper` inside the sub-pack; the binding
 # qualifier comes from the import (e.g., `gascity-keeper.keeper`),
