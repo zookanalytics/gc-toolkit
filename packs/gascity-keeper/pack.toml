@@ -12,7 +12,8 @@
 #
 # Imported only by the gascity rig — the rig that maintains the
 # `zookanalytics/gascity ← gastownhall/gascity` fork. Other rigs
-# that import gc-toolkit (gc-toolkit itself, signal-loom) do NOT
+# that import gc-toolkit (gc-toolkit's own rig, or any other rig
+# pulling in gc-toolkit purely for its skills/prompts) do NOT
 # pick this up.
 
 [pack]
@@ -30,6 +31,10 @@ schema = 2
 # importing city/rig — the importing city's `city.toml` carries
 # `[[rigs.patches]]` blocks for the gascity rig alongside
 # `[rigs.imports.gascity-keeper]`.
+
+# For the broader gc-toolkit install context (importing gc-toolkit,
+# `[[rigs.overrides]]`, verification with `gc doctor`), see
+# `docs/install.md` in the gc-toolkit repo root.
 
 # Example wiring (in the importing city's `city.toml`):
 #

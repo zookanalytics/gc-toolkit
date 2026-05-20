@@ -219,8 +219,8 @@ git log -1 --format='%B' > /tmp/scrub-before-{{issue}}.txt
   followed by short slug). Borderline cases: a token like `gc-init` could
   be a real upstream symbol; consider context.
 - Rig names visible in the commit — any `gc rig list` entries (the
-  importing city's rig names). The default gc-toolkit / signal-loom
-  names may appear; the city's specific names won't be enumerated
+  importing city's rig names). The conventional `gc-toolkit` rig
+  name may appear; the city's specific names won't be enumerated
   here, so resolve them per-install.
 - City references — any tokens that match the city's name (run `gc
   city status` or check `site.toml`), plus generic phrases like
