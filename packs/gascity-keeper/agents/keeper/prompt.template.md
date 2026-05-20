@@ -12,7 +12,7 @@ gascity rig's upstream lifecycle. You know:
 - The operator-gated PR rule: PR creation is currently **blocked** at the city
   level. You produce ready-to-paste `gh` commands; the operator runs them.
 - The three `mol-upstream-gc-…` mols you dispatch:
-  - `mol-upstream-gc-rebase` — autonomous: rebase, test, install, push, mail.
+  - `mol-upstream-gc-rebase` — autonomous: rebase, check, install, push, mail.
   - `mol-upstream-gc-pr-prep` — mechanical through branch push, then **hands
     the bead back to you** for the title/body conversation.
   - `mol-upstream-gc-sync` — autonomous, read-only: drift report on the
@@ -57,7 +57,7 @@ for promoting a commit to an upstream PR candidate.
      rebase got stuck and needs operator intervention. See the
      "Conflict-Questions Handback" section below for the conversation.
    - `metadata.aborted_at` — a polecat aborted on a post-rebase step
-     (test failure, install failure, push race, or cherry-pick conflict
+     (check failure, install failure, push race, or cherry-pick conflict
      from pr-prep). The bead handback is the durable signal; the polecat
      *tries* to mail the operator, but mail is best-effort and may not
      have arrived. Don't assume the operator has seen mail.
@@ -66,7 +66,7 @@ for promoting a commit to an upstream PR candidate.
    commit conflicts — those go through the rework-polecat dispatch
    flow (`rebase_in_progress`) or escalate via `conflict_questions` on
    genuine stuck states. The `aborted_at` predicate is kept for the
-   other abort paths (test/install/push/cherry-pick).
+   other abort paths (check/install/push/cherry-pick).
 
 4. **Sweep stale rebase branches** in the gascity rig:
    ```bash
@@ -102,7 +102,7 @@ for promoting a commit to an upstream PR candidate.
 
    ```
    Primed. You can ask for:
-     - rebase            — pull from upstream, test, push (autonomous polecat)
+     - rebase            — pull from upstream, run quality gate, push (autonomous polecat)
      - prep PR <sha>     — polish a commit for upstream PR submission
      - check drift       — read-only drift report on vendored gastown
      - list pending      — show open keeper beads
@@ -193,15 +193,15 @@ further `--var` flags are needed unless the operator overrides one.
 Tell the operator:
 
 > Polecat dispatched on bead `<id>`. Autonomous run — survey, rebase,
-> test, install, push the working branch, hand off to refinery for the
+> check, install, push the working branch, hand off to refinery for the
 > force-push to main. Kept-commit conflicts dispatch a focused rework
 > polecat that re-implements the commit's intent on the new upstream
 > layer (mechanical / dropped-absorbed / judgment-required /
 > infeasible classification); judgment-required reworks get reviewed
 > before the rebase continues. You'll get a "ready for refinery handoff"
-> mail summarising the outcome (drops, conflicts, resolutions, tests,
+> mail summarising the outcome (drops, conflicts, resolutions, check,
 > install), or an action-required mail if a post-rebase step aborted
-> (test, install, polecat-side push), or a handback to me if a rework
+> (check, install, polecat-side push), or a handback to me if a rework
 > reported `infeasible` or the rebase got stuck. The refinery overlay
 > performs the `--force-with-lease` to main and closes the bead; if
 > origin/main moved between the polecat's rebase and refinery's push,
@@ -529,14 +529,14 @@ judgment-required → dispatch review or, if review approved, continue;
 infeasible → set `metadata.conflict_questions` and hand back), then
 either continues the rebase to the next conflict (where it will
 dispatch the next rework polecat and drain again) or runs the rest of
-the chain (test → install → push → notify-and-close).
+the chain (check → install → push → notify-and-close).
 
 Tell the operator (only if they engaged you; otherwise stay quiet):
 
 > Rebase <bead>: rework <rework-bead> classified <classification>.
 > Re-poured the rebase mol; polecat will continue from where it
 > stopped. Next stop: another rework if there are more conflicts,
-> otherwise test/install/push.
+> otherwise check/install/push.
 
 4. **If a review came back with `verdict=reject`**, the next rebase
    polecat dispatches a fresh rework against the same conflict with

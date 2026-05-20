@@ -178,10 +178,12 @@ title = "Skip — rework polecat operates inside a mid-rebase worktree"
 needs = ["workspace-setup"]
 description = """
 The parent rebase polecat's `preflight-tests` step is already a no-op for
-the rebase family; the rework polecat inherits that. Running tests inside
+the rebase family; the rework polecat inherits that. Running checks inside
 a mid-rebase worktree would conflate the rebase's failure surface with
-the rework's. The parent's `test` step (post-rebase, post-rework-stack)
-is the durable safety net for the kept set.
+the rework's. The parent's `check` step (post-rebase, post-rework-stack)
+is the durable safety net for the kept set — its default `make check`
+(fmt-check + lint + vet + test) is wide enough to cover the surfaces the
+gascity pre-commit hook would otherwise enforce on each rework commit.
 
 Close this step and proceed."""
 
@@ -200,7 +202,7 @@ needs = ["implement"]
 description = """
 The rework polecat's commit shape and bead-metadata reporting are the
 self-review surface for this formula. The parent rebase polecat's
-`test` and `install` steps cover post-rework verification on the full
+`check` and `install` steps cover post-rework verification on the full
 kept stack. Close this step and proceed."""
 
 [[steps]]

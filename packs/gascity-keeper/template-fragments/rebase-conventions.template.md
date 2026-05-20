@@ -120,7 +120,7 @@ on preserved intent). Saying "the polecat hit a conflict, here's
 the backup ref, you take it from here" violates the keeper-polecat
 contract and silently risks losing real work.
 
-This stance applies to **other abort paths too** (test failure,
+This stance applies to **other abort paths too** (check failure,
 install failure, push race): once cooperative handback is
 structural, those surface as questions to the operator, not
 terminal aborts.
