@@ -30,9 +30,8 @@ rule.
 plus a manual read of every file in `assets/scripts/` at HEAD of
 `integration/smoke-tests`. Files with no structured-output
 consumption (`consult-attach.sh`, `tmux-bindings.sh`,
-`tmux-status-line-override.sh`, `worktree-setup.sh`,
-`tmux-pick-session.sh`) are listed for the empty-row audit at the
-bottom of this section.
+`tmux-status-line-override.sh`, `worktree-setup.sh`) are listed
+for the empty-row audit at the bottom of this section.
 
 The inventory matrix below counts a row for every site where the
 script reads structured output from a `gc` (or `bd`) subprocess —
@@ -52,27 +51,25 @@ recommendation). Each script's section also fields the
 | 5 | `gc-toolkit-status-line.sh` | 88–91 | `gc session list --state active --json` | piped to `jq` | `jq -r --arg a` | `map(select(.AgentName == $a)) | .[0].Title` *(broken — see §1.3; PR #37 fix lives on a polecat branch not yet merged to integration)* |
 | 6 | `tmux-spawn-thread.sh` | 207 | `gc session list` (no `--json`) | piped to `awk` | `awk` field split | column 1 = id, column 3 = state |
 | 7 | `tmux-spawn-thread.sh` | 190 | `gc session new ... 2>&1` | `sed -n 's/^Session \([^ ]*\) created.*/\1/p'` | `sed` regex | producer must emit `Session <id> created` on first matching line |
+| 8 | `tmux-pick-session.sh` | 55-56 | `gc session list --json` | piped to `jq` | `jq -r` | `.sessions[]?.session_name`, `.sessions[]?.title` |
 | — | `consult-attach.sh` | — | (none) | — | — | — |
 | — | `tmux-bindings.sh` | — | (none) | — | — | — |
-| — | `tmux-pick-session.sh` | — | (none — consumes `tmux list-sessions`/`list-panes`, not `gc`) | — | — | — |
 | — | `tmux-status-line-override.sh` | — | (none) | — | — | — |
 | — | `worktree-setup.sh` | — | (none) | — | — | — |
 
 Schema-path notation: `[]` = top-level array element; `[i]` = i-th
 element; field path is dotted from there.
 
-Total: 7 active rows across 3 scripts; 5 empty rows for files in
+Total: 8 active rows across 4 scripts; 4 empty rows for files in
 scope with no structured-output consumption (`consult-attach.sh`,
-`tmux-bindings.sh`, `tmux-pick-session.sh`,
-`tmux-status-line-override.sh`, `worktree-setup.sh`) — per the
-bead's "empty file → empty row is fine" rule.
+`tmux-bindings.sh`, `tmux-status-line-override.sh`,
+`worktree-setup.sh`) — per the bead's "empty file → empty row is
+fine" rule.
 
-(`tmux-pick-session.sh` consumes only `tmux list-sessions` and
-`tmux list-panes` output, not `gc`. It is flagged in the bead
-description as a future row "after `tk-slncyq` lands" but
-`tk-slncyq` has landed on `integration/smoke-tests` without
-introducing a `gc session list --json` call yet — verified by
-re-grepping the file at HEAD.)
+(Row 8 covers the `gc session list --json` call introduced by
+`tk-slncyq` / PR #36. That change shipped to `main` before
+`integration/smoke-tests` was synced; the row was added when
+integration caught up to main under `tk-3qis4y`.)
 
 ### 1.3 Findings from the inventory
 
@@ -215,9 +212,9 @@ runner can satisfy via either approach.
 
 Concretely:
 
-- For inventory rows whose producer publishes a schema (row 5 —
-  `gc session list`), the harness fetches the schema via `gc
-  <cmd> --json-schema`, walks the manifest's path list, and
+- For inventory rows whose producer publishes a schema (rows 5
+  and 8 — `gc session list`), the harness fetches the schema via
+  `gc <cmd> --json-schema`, walks the manifest's path list, and
   fails on the first unresolved path. This is the cheap, fast
   gate — runs on every `tests/smoke/run.sh` invocation, gives
   the PR #37 bug class a fast feedback signal, no fixture rot.
@@ -271,8 +268,8 @@ Concretely:
 
 ### 3.2 Why this and not pure-A or pure-B
 
-Pure A loses three of seven inventory rows on `gc bd list`
-alone, plus rows 6 and 7. Five of seven rows uncovered is not a
+Pure A loses three of eight inventory rows on `gc bd list`
+alone, plus rows 6 and 7. Five of eight rows uncovered is not a
 viable gate for the mol's stated goal.
 
 Pure B catches everything but pays the bootstrap cost — an
@@ -310,9 +307,12 @@ One polecat. Produces:
   captured fixture into a script via the agreed override seam
   and asserts on its stdout.
 - `tests/smoke/manifest.tsv` — initial rows covering
-  `gc-toolkit-status-line.sh` (the PR #37 regression-pin) and
-  one row from `cockpit.sh` (proving the fixture path works
-  end-to-end). All rows for all scripts come in Phase 3.
+  `gc-toolkit-status-line.sh` (the PR #37 regression-pin,
+  approach B), `tmux-pick-session.sh` row 8 (approach A —
+  exercises the schema-walk path on `gc session list`, no
+  fixture), and one row from `cockpit.sh` (approach B, proving
+  the fixture path works end-to-end). All other rows come in
+  Phase 3.
 - `tests/smoke/fixtures/session-list.json` — captured `gc
   session list --json` for the status-line.sh test.
 - `assets/scripts/gc-toolkit-status-line.sh` — minimal override
