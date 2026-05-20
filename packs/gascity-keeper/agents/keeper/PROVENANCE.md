@@ -1,8 +1,12 @@
-# Agent: gascity-keeper
+# Agent: keeper (in pack: gascity-keeper)
 
 **Status:** native
 **Source:** N/A (gc-toolkit-original)
 **Drift:** N/A
+
+Bare name `keeper` inside the `gascity-keeper` sub-pack. Qualified
+externally as `<binding>.keeper` (e.g., `gascity/gascity-keeper.keeper`
+when the gascity rig imports this pack under binding `gascity-keeper`).
 
 ## Goals
 
@@ -30,14 +34,20 @@ companion issue, paste the final `gh` command) is what the keeper owns.
 
 ## Notes
 
-Rig-scoped to gascity, on-demand only — no `[[named_session]]` entry in
-`pack.toml`. Matches the concierge / architect / consult-host pattern:
-spawned by an operator command, prime-sweeps for handback beads, surfaces
+Rig-scoped, on-demand. The sub-pack's `[[named_session]]` block declares
+`scope = "rig"` + `mode = "on_demand"`, so the keeper materialises in
+whichever rig imports `gascity-keeper` (currently only `gascity`). Matches
+the concierge / architect / consult-host lifecycle pattern: spawned by an
+operator command (or routed handback bead), prime-sweeps, surfaces
 artifacts when engaged, drains on idle.
 
-Part of the gascity-management family (`mol-upstream-gc-…` mols + this
-keeper). If the family grows past 3-4 mols, extract to a sub-pack loaded
-only into the gascity rig.
+Originally shipped under `rigs/gc-toolkit/agents/gascity-keeper/` with the
+"extract to a sub-pack if the mol family grows past 3-4 mols" rider. The
+family now carries four mols (`mol-upstream-gc-{rebase,rebase-rework,
+pr-prep,sync}`) plus the rebase doctrine and refinery overlay, so the
+extraction landed under `rigs/gc-toolkit/packs/gascity-keeper/`. The
+sibling `formulas/`, `template-fragments/`, and `patches/` directories
+hold the rest of the bundle.
 
 ## Related artifacts
 

@@ -193,15 +193,19 @@ further `--var` flags are needed unless the operator overrides one.
 Tell the operator:
 
 > Polecat dispatched on bead `<id>`. Autonomous run — survey, rebase,
-> test, install, push. Kept-commit conflicts dispatch a focused rework
+> test, install, push the working branch, hand off to refinery for the
+> force-push to main. Kept-commit conflicts dispatch a focused rework
 > polecat that re-implements the commit's intent on the new upstream
 > layer (mechanical / dropped-absorbed / judgment-required /
 > infeasible classification); judgment-required reworks get reviewed
-> before the rebase continues. You'll get a "complete" mail summarizing
-> the outcome (including any rework dispatches and their classifications),
-> or an action-required mail if a post-rebase step aborted (test, install,
-> push), or a handback to me if a rework reported `infeasible` or the
-> rebase got stuck.
+> before the rebase continues. You'll get a "ready for refinery handoff"
+> mail summarising the outcome (drops, conflicts, resolutions, tests,
+> install), or an action-required mail if a post-rebase step aborted
+> (test, install, polecat-side push), or a handback to me if a rework
+> reported `infeasible` or the rebase got stuck. The refinery overlay
+> performs the `--force-with-lease` to main and closes the bead; if
+> origin/main moved between the polecat's rebase and refinery's push,
+> refinery escalates to mayor (no silent overwrite).
 
 ### "check vendor drift" / "is gastown stale?"
 
@@ -637,8 +641,11 @@ with a rollback note.
   gc-toolkit, not on the gascity rig, so its beads file into the
   **gc-toolkit** rig's bead store and sling to
   `gc-toolkit/gc-toolkit.polecat`.
-- **Don't push origin/main.** That's the `mol-upstream-gc-rebase` mol's
-  job. The PR-prep mol pushes feature branches only, never `main`.
+- **Don't push origin/main.** The `mol-upstream-gc-rebase` polecat
+  pushes its working branch (`rebase/<bead>`) only; the refinery's
+  `gascity-keeper` overlay performs the `--force-with-lease` to `main`
+  once the polecat hands off. The PR-prep mol pushes feature branches
+  only, never `main`.
 - **Don't bypass the polecat.** Even a "tiny" rebase goes through the
   rebase mol — the survey/verdict/backup discipline is the point.
 - **Manual-recovery metadata convention.** When an operator or mayor

@@ -1,0 +1,39 @@
+# gascity-keeper — opt-in sub-pack for the gascity rig.
+#
+# Bundles the keeper agent (operator front-end for upstream sync /
+# rebase / PR-prep workflows), its supporting formulas (the
+# `mol-upstream-gc-*` family), and the rebase-handling doctrine that
+# refinery and polecat in a fork-bearing rig need.
+#
+# Imports nothing on its own. The patches below target agents that
+# the importing rig pulled in via gc-toolkit (refinery, polecat),
+# so this pack only composes correctly when loaded alongside the
+# gc-toolkit core pack.
+#
+# Imported only by the gascity rig — the rig that maintains the
+# `zookanalytics/gascity ← gastownhall/gascity` fork. Other rigs
+# that import gc-toolkit (gc-toolkit itself, signal-loom) do NOT
+# pick this up.
+
+[pack]
+name = "gascity-keeper"
+schema = 2
+
+# The sub-pack ships the keeper, its `mol-upstream-gc-*` formulas, and
+# the rebase-handling fragments. It does NOT carry `[[patches.agent]]`
+# blocks: sub-pack patches can only target agents the sub-pack itself
+# imports, and importing gastown here would duplicate gastown's agents
+# under the `gascity-keeper` binding (so the gc-toolkit-patched refinery
+# / polecat get shadowed by bare gastown copies). The right home for
+# the fragment-injection patches is the importing city/rig — see
+# `loomington/city.toml` for the `[[rigs.patches]]` blocks the gascity
+# rig adds alongside `[rigs.imports.gascity-keeper]`.
+
+# Materialise the keeper on demand in whichever rig imports this pack.
+# The agent ships as bare `keeper` inside the sub-pack; the binding
+# qualifier comes from the import (e.g., `gascity-keeper.keeper`),
+# and the rig prefix from the importing rig (`gascity/gascity-keeper.keeper`).
+[[named_session]]
+template = "keeper"
+scope = "rig"
+mode = "on_demand"

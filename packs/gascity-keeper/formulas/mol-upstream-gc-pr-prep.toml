@@ -59,7 +59,7 @@ description = "Test command run after cherry-pick + scrub"
 default = "make test"
 
 [vars.requesting_keeper]
-description = "Keeper agent address (e.g., gascity/gascity-keeper) the bead returns to after prep"
+description = "Keeper agent address (e.g., gascity/gascity-keeper.keeper) the bead returns to after prep"
 required = true
 
 [[steps]]
