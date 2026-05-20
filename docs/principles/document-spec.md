@@ -503,9 +503,9 @@ where they'd land:
 |---|---|---|
 | `docs/gascity-reference.md` | unchanged | Reference manual (index), type 1, central tier flat. Renamed from `gas-city-reference.md` and rewritten as an index in `tk-13a8x`. |
 | `docs/gascity-local-patching.md` | unchanged | Reference manual (process), type 1 |
-| `docs/gascity-upstream-engagement.md` | unchanged | Reference manual (process), type 1. Added in `tk-13a8x`. |
-| `docs/gascity-rebase-conventions.md` | unchanged | Reference manual (process), type 1. Added in `tk-13a8x`. |
-| `docs/gascity-polecat-patterns.md` | unchanged | Reference manual (process), type 1. Added in `tk-13a8x`. |
+| `docs/gascity-upstream-engagement.md` | unchanged under proposal; later relocated to `template-fragments/upstream-engagement.template.md` (see footnotes) | Reference manual (process), type 1. Added in `tk-13a8x`. |
+| `docs/gascity-rebase-conventions.md` | unchanged under proposal; later relocated to `packs/gascity-keeper/template-fragments/rebase-conventions.template.md` (see footnotes) | Reference manual (process), type 1. Added in `tk-13a8x`. |
+| `docs/gascity-polecat-patterns.md` | unchanged under proposal; later relocated to `packs/gascity-keeper/template-fragments/polecat-patterns.template.md` (see footnotes) | Reference manual (process), type 1. Added in `tk-13a8x`. |
 | `docs/roadmap.md` | unchanged | Roadmap, type 3 |
 | `docs/design/consult-surfacing.md` | unchanged | Design, type 6 |
 | `docs/design/consult-session-feasibility.md` | unchanged | Design, type 6 |
@@ -514,7 +514,7 @@ where they'd land:
 | `docs/research/pack-architecture/spike-*.md` | unchanged | Research, type 7 |
 | (this doc) `docs/principles/document-spec.md` | new file in new directory | Principle, type 4 |
 
-**Net change:**
+**Net change (original proposal, pre-`tk-kohcke`/`tk-vhjsv`/`tk-pym9ff`):**
 
 - One new directory: `docs/principles/`
 - One new file: `docs/principles/document-spec.md` (this doc)

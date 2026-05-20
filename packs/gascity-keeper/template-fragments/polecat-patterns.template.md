@@ -7,9 +7,9 @@ the SDK" decision rather than a description of what the SDK does.
 
 ### Assignee is cleared on close — query `gc.routed_to`, not `assignee`
 
-When a polecat finishes work and closes a bead, the `assignee`
-field is cleared to `null`. Routing only persists in
-`metadata["gc.routed_to"]`.
+When a bead is closed (typically by the refinery after polecat
+handoff), the `assignee` field is cleared to `null`. Routing only
+persists in `metadata["gc.routed_to"]`.
 
 **Implication:** Auditing polecat activity by filtering on
 `assignee` produces wrong answers for closed beads. A query like
