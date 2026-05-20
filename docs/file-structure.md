@@ -279,7 +279,7 @@ inline with a standard markdown link. Descriptive text in the link
 carries the provenance; the URL is plumbing.
 
 ```markdown
-This layout matches [Spec Kit's per-feature directories](docs/research/naming-conventions/spec-kit.md#feature-dirs).
+This layout matches [Spec Kit's per-feature directories](../specs/tk-yiwfz.6/spec-kit.md).
 ```
 
 ## Drafting and adoption

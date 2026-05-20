@@ -114,6 +114,15 @@ determine where you left off from context (git state, bead state).
 
 That's it. The formula IS your brain. Follow it.
 
+## Context Exhaustion
+
+**For your own context** (refinery is configured `mode = "on_demand"`,
+so the controller cannot restart you — `gc runtime request-restart` is
+a documented no-op for you and will print "Restart skipped for named
+session"). The cycle-recycle policy below is your recovery path.
+
+{{ template "cycle-recycle" . }}
+
 ---
 
 ## Sequential Rebase Protocol
@@ -210,19 +219,6 @@ protected (GH006 / GH013 / "protected branch" / "Changes must be made
 through a pull request"), auto-promote the work bead to
 `merge_strategy=pr` and continue down the PR path in the same wisp. No
 escalation to mayor; the formula handles this inline.
-
----
-
-## Context Exhaustion
-
-If your context is filling up during patrol:
-```bash
-gc runtime request-restart
-```
-This blocks until the controller kills your session. The new session
-re-reads formula steps and resumes from context.
-
-{{ template "cycle-recycle" . }}
 
 ---
 

@@ -1,18 +1,28 @@
-# gc-toolkit — primary pack for the loomington city.
+# gc-toolkit — primary pack for a Gas Town city.
 #
 # Lane B (2026-05-11): gc-toolkit imports the gastown pack wholesale and
 # layers per-agent patches. See
-# docs/research/pack-architecture/pack-patch-timing-analysis.md for the
+# specs/tk-0t1ip/pack-patch-timing-analysis.md for the
 # safety verdict and prerequisites; the prereqs (city-level
 # [imports.gastown] removed, [rigs.imports.gastown] removed) were
 # captured during Lane C cutover and remain in effect.
 #
 # Native gc-toolkit agents (architect, concierge, consult-host,
-# gascity-keeper, mechanik, polecat-codex, _polecat-gemini) ship under
-# agents/. Gastown roster (boot, deacon, mayor, polecat, refinery,
-# witness) is imported and divergences are expressed as bare-name
-# [[patches.agent]] — prompts in patches/, plus a polecat-convoys
-# template-fragment for the additive integration-branch section.
+# mechanik, polecat-codex, _polecat-gemini, plus the *-thread
+# variants) ship under agents/. Gastown roster (boot, deacon, mayor,
+# polecat, refinery, witness) is imported and divergences are
+# expressed as bare-name [[patches.agent]] — prompts in patches/,
+# plus a polecat-convoys template-fragment for the additive
+# integration-branch section.
+#
+# Opt-in sub-packs ship under packs/<name>/ and are imported by
+# specific rigs (not by gc-toolkit's importers). The first sub-pack
+# is `packs/gascity-keeper/` — the keeper agent + the
+# mol-upstream-gc-* formula family + the refinery rebase-handling
+# overlay, all of which are gascity-fork-specific and should not be
+# loaded into rigs that don't carry a fork. See
+# `packs/gascity-keeper/pack.toml` for the import wiring that the
+# gascity rig adds in city.toml.
 #
 # Dog is intentionally NOT vendored: the gc binary auto-includes the
 # maintenance pack (cmd/gc/embed_builtin_packs.go:builtinPackIncludes),

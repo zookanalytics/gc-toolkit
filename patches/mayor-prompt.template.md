@@ -239,6 +239,10 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 
 ---
 
+{{ template "upstream-engagement" . }}
+
+---
+
 ## Communication
 
 ```bash

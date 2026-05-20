@@ -22,7 +22,7 @@ mode = "always"
 # start via `{{ .ConfigDir }}`). The consuming city does not invoke
 # the helper directly — only concierge does.
 #
-# See docs/design/consult-session-v2-impl.md for the full protocol.
+# See specs/2026-04-consult-design/consult-session-v2-impl.md for the full protocol.
 
 [[named_session]]
 template = "consult-host"
@@ -45,7 +45,7 @@ scope = "city"
 # mayor prompt is `.template.md`, so `append_fragments` auto-appends.
 # Drop this stanza when you adopt concierge in your city.
 #
-# Per §5.7 of `docs/design/consult-surfacing.md`.
+# Per §5.7 of `specs/2026-04-consult-design/consult-surfacing.md`.
 
 [[patches.agent]]
 name = "gastown.mayor"

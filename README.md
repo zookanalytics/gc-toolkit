@@ -31,24 +31,28 @@ opinions rather than cloned directly.
 
 ### Docs
 
+- `docs/foundation.md` — guiding beliefs and operating discipline behind gc-toolkit
+- `docs/install.md` — wiring gc-toolkit into a city (imports, sub-packs, patches, verification)
 - `docs/roadmap.md` — (coming soon) the shape of the pack's evolution
-- `docs/gas-city-reference.md` — Gas City surface area (city.toml, CLI, packs, formulas)
-- `docs/gas-city-pack-v2.md` — Pack/City v2 direction and open issues
+- `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`
 - `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
+- `docs/file-structure.md` — conventions for where docs and specs live in this pack
 
 ## Usage
 
-Add gc-toolkit to your `city.toml` workspace includes alongside gastown:
+Import `gc-toolkit` from a rig in your `city.toml`:
 
 ```toml
-[workspace]
-includes = [
-    "https://github.com/gastownhall/gastown/tree/main",
-    "https://github.com/zookanalytics/gc-toolkit/tree/main",
-]
+[[rigs]]
+name = "my-rig"
+prefix = "mr"
+
+[rigs.imports.gc-toolkit]
+source = "rigs/gc-toolkit"
 ```
 
-gc-toolkit provides a `mechanik` named session template. To start one:
+gc-toolkit provides a `mechanik` named session template. Declare it
+once at the city level:
 
 ```toml
 [[named_session]]
@@ -61,6 +65,11 @@ Then:
 gc start
 gc session attach mechanik
 ```
+
+See [`docs/install.md`](docs/install.md) for the full install
+reference — remote imports, opt-in sub-packs (`gascity-keeper`),
+`[[rigs.patches]]` fragment wiring, per-rig overrides, and `gc
+doctor` verification.
 
 ## Relationship to gastown
 

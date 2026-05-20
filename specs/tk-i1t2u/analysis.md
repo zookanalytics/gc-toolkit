@@ -25,8 +25,8 @@ re-surveying upstream platforms.
 | C | `specs/tk-yiwfz.10/synthesis.md` | 291 | codex |
 
 All three drafts cite the anchor and the six surveys at
-`docs/research/naming-conventions/{bmad-method, bmad-method-templates,
-superpowers, gastown, spec-kit, kiro}.md`.
+`../tk-yiwfz.{1,2,3,5,6,7}/{bmad-method, superpowers, gastown,
+bmad-method-templates, spec-kit, kiro}.md`.
 
 ## 2. Convergence
 

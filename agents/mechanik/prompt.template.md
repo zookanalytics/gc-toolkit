@@ -176,29 +176,43 @@ authoritative reference branch and bypasses the refinery. The owned-
 convoy + integration-branch path costs a few extra commands and keeps
 the principle intact.
 
-## Reference Material
+## The Agent Brief
 
-This pack ships reference docs under `{{ .ConfigDir }}/docs/`:
+The agent brief is two reference docs under `{{ .ConfigDir }}/docs/`
+— one index into upstream Gas City documentation plus one
+gc-toolkit-specific process doc:
 
-- **gas-city-reference.md** — Current Gas City surface area: city.toml schema,
-  CLI commands, pack structure, agent roles, formulas, beads, the Nine Concepts
-  architecture. Describes what exists today. Consult this before guessing at
-  config syntax or CLI flags.
+- **gascity-reference.md** — Index of canonical Gas City documentation
+  at `docs.gascityhall.com` (CLI, config, formulas, providers, trust
+  boundaries, PackV2, tutorials, schemas). The index points; it does
+  not paraphrase. Also carries the four-condition bar gc-toolkit
+  applies before adding any new `docs/gascity-*.md` doc. Consult this
+  before guessing at config syntax or CLI flags — and before deciding
+  whether a new doc belongs in gc-toolkit or upstream.
 
-- **gas-city-pack-v2.md** — Pack/City v2 direction and open issues tracking the
-  1.0 release. Describes where Gas City is headed: the city-as-pack model,
-  convention-based agent discovery (`agents/<name>/`), schema 2 pack.toml,
-  prompt file naming changes, and active design decisions. Consult this before
-  making structural changes to understand what's stable vs what's about to shift.
+- **gascity-local-patching.md** — Recommended process when a city must
+  carry local fixes against `gascity` ahead of upstream. Covers the
+  merge-flow model (every commit on origin/main IS the candidate set,
+  no held branches or labels), commit-message expectations as the
+  durable review packet, and the fork-setup conventions. Consult
+  before proposing or accepting work that involves a `gascity` fix
+  beyond what's already in upstream.
 
-- **gascity-local-patching.md** — Recommended process when a city must carry
-  local fixes against `gascity` ahead of upstream. Covers the 3-option
-  framework (ignore / local patch / engage), the merge-flow model (every
-  commit on origin/main IS the candidate set, no held branches/labels),
-  commit-message expectations as the durable review packet, and the rule
-  that upstream PR submission is operator-gated, not agent-initiated.
-  Consult before proposing or accepting work that involves a `gascity`
-  fix beyond what's already in upstream.
+Operational doctrine has two homes. **Upstream engagement** is broadly
+applicable to any consumer carrying local gascity patches; it lives in
+core gc-toolkit's `{{ .ConfigDir }}/template-fragments/` and is
+injected directly into this prompt (below) and the mayor prompt.
+**Gascity-rig-specific doctrine** — rebase conventions, polecat
+patterns, refinery rebase handling — ships with the opt-in
+`packs/gascity-keeper/` sub-pack and is wired into the gascity rig's
+polecat and refinery via `[[rigs.patches]]` blocks in the importing
+city's `city.toml`. Mechanik in a non-gascity rig does not receive
+those fragments. Instructional content belongs alongside the agents
+that follow it, not in the brief.
+
+---
+
+{{ template "upstream-engagement" . }}
 
 ## Directory Guidelines
 

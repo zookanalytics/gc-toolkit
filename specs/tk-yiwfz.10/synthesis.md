@@ -21,7 +21,7 @@ document enter the context window? Central docs are loaded as current
 truth. Local docs are loaded only through the work context that makes
 them meaningful.
 [Source: ../tk-yiwfz/decisions.md#ai-centric-not-human-centric]
-[Source: ../../docs/research/naming-conventions/bmad-method.md#doc-type-taxonomy]
+[Source: ../tk-yiwfz.1/bmad-method.md#doc-type-taxonomy]
 
 ## Reader Queries Drive the Layout
 
@@ -67,8 +67,8 @@ under `.kiro/`; the convergence is the separate specs workspace, not
 nesting specs under reference docs. Keeping `specs/` at repo root also
 lets Spec-Kit-aware tools file into the expected path without
 reconfiguration. [Source: ../tk-yiwfz/decisions.md#two-root-layout]
-[Source: ../../docs/research/naming-conventions/spec-kit.md#central-vs-local-documents]
-[Source: ../../docs/research/naming-conventions/kiro.md#central-vs-local-documents]
+[Source: ../tk-yiwfz.6/spec-kit.md#central-vs-local-documents]
+[Source: ../tk-yiwfz.7/kiro.md#central-vs-local-documents]
 
 ## Central Docs: `docs/`
 
@@ -95,9 +95,9 @@ surface, not v1's "minimal migration" argument. BMAD and Gas Town both
 show durable docs being rolled forward in place; Spec Kit and Kiro put
 project-wide principles/configuration outside their per-feature specs
 buckets. [Source: ../tk-yiwfz/decisions.md#central-tier-docs]
-[Source: ../../docs/research/naming-conventions/bmad-method-templates.md#central-vs-local-documents]
-[Source: ../../docs/research/naming-conventions/gastown.md#lifecycle-markers]
-[Source: ../../docs/research/naming-conventions/spec-kit.md#central-vs-local-documents]
+[Source: ../tk-yiwfz.5/bmad-method-templates.md#central-vs-local-documents]
+[Source: ../tk-yiwfz.3/gastown.md#lifecycle-markers]
+[Source: ../tk-yiwfz.6/spec-kit.md#central-vs-local-documents]
 
 ## Local Specs: `specs/<bead-id>/`
 
@@ -138,10 +138,10 @@ plans/specs in place rather than archiving them; BMAD's local
 many-per-project artifacts vary by ID, slug, or date because they are
 work records rather than central truth. gc-toolkit adopts the same
 "work bucket stays put" principle, but uses bead IDs instead of local
-feature names, ordinal prefixes, or date-slugs. [Source: ../../docs/research/naming-conventions/spec-kit.md#project-feature-scope-unit]
-[Source: ../../docs/research/naming-conventions/kiro.md#project-feature-scope-unit]
-[Source: ../../docs/research/naming-conventions/superpowers.md#whats-not-a-lifecycle-marker]
-[Source: ../../docs/research/naming-conventions/bmad-method-templates.md#central-vs-local-documents]
+feature names, ordinal prefixes, or date-slugs. [Source: ../tk-yiwfz.6/spec-kit.md#project-feature-scope-unit]
+[Source: ../tk-yiwfz.7/kiro.md#project-feature-scope-unit]
+[Source: ../tk-yiwfz.2/superpowers.md#whats-not-a-lifecycle-marker]
+[Source: ../tk-yiwfz.5/bmad-method-templates.md#central-vs-local-documents]
 
 ## Versioning
 
@@ -156,10 +156,10 @@ a release-frozen snapshot is genuinely needed. [Source: ../tk-yiwfz/decisions.md
 Gas Town has a versioned reference example and Spec Kit versions its
 constitution, but neither pattern generalizes across the six sources.
 BMAD and Superpowers use release notes/changelogs for package releases,
-not per-doc version suffixes. [Source: ../../docs/research/naming-conventions/gastown.md#lifecycle-markers]
-[Source: ../../docs/research/naming-conventions/spec-kit.md#lifecycle-markers]
-[Source: ../../docs/research/naming-conventions/bmad-method.md#lifecycle-markers]
-[Source: ../../docs/research/naming-conventions/superpowers.md#lifecycle-markers]
+not per-doc version suffixes. [Source: ../tk-yiwfz.3/gastown.md#lifecycle-markers]
+[Source: ../tk-yiwfz.6/spec-kit.md#lifecycle-markers]
+[Source: ../tk-yiwfz.1/bmad-method.md#lifecycle-markers]
+[Source: ../tk-yiwfz.2/superpowers.md#lifecycle-markers]
 
 ## Frontmatter
 
@@ -185,10 +185,10 @@ Kit's command `handoffs` are valuable for command-palette workflow
 suggestions, but gc-toolkit is not standardizing those semantics for
 documents today. Superpowers and Kiro skills converge on
 `name` + `description` as the discovery surface; that is the part
-gc-toolkit adopts. [Source: ../../docs/research/naming-conventions/kiro.md#steering-documents-kiro-specific]
-[Source: ../../docs/research/naming-conventions/spec-kit.md#command-files-specifytemplatescommandsnamemd]
-[Source: ../../docs/research/naming-conventions/superpowers.md#frontmatter-on-skills-functional-not-lifecycle]
-[Source: ../../docs/research/naming-conventions/kiro.md#skill-skillmd]
+gc-toolkit adopts. [Source: ../tk-yiwfz.7/kiro.md#steering-documents-kiro-specific]
+[Source: ../tk-yiwfz.6/spec-kit.md#command-files-specifytemplatescommandsnamemd]
+[Source: ../tk-yiwfz.2/superpowers.md#frontmatter-on-skills-functional-not-lifecycle]
+[Source: ../tk-yiwfz.7/kiro.md#skill-skillmd]
 
 ## Cross-Document References
 
@@ -216,10 +216,10 @@ history. The rejected set is either brittle under reordering (Spec Kit
 `[US1]`, Kiro requirement numbers), redundant with bead IDs and git
 timestamps (shared slug/date pairing), ambiguous at runtime (BMAD
 globs), or harness-specific (Kiro live embeds). [Source: ../tk-yiwfz/decisions.md#cross-doc-references]
-[Source: ../../docs/research/naming-conventions/bmad-method-templates.md#cross-doc-reference-scheme]
-[Source: ../../docs/research/naming-conventions/spec-kit.md#cross-doc-reference-scheme]
-[Source: ../../docs/research/naming-conventions/kiro.md#cross-doc-reference-scheme]
-[Source: ../../docs/research/naming-conventions/superpowers.md#well-named-patterns-with-reasoning]
+[Source: ../tk-yiwfz.5/bmad-method-templates.md#cross-doc-reference-scheme]
+[Source: ../tk-yiwfz.6/spec-kit.md#cross-doc-reference-scheme]
+[Source: ../tk-yiwfz.7/kiro.md#cross-doc-reference-scheme]
+[Source: ../tk-yiwfz.2/superpowers.md#well-named-patterns-with-reasoning]
 
 ## Drafting, Adoption, and Migration
 
@@ -246,8 +246,8 @@ moves, and it does not bundle the migration into the synthesis.
 
 This synthesis uses `../tk-yiwfz/decisions.md` as the authority for
 directional defaults, the six survey files under
-`../../docs/research/naming-conventions/` as cross-source evidence,
-and `../../docs/principles/document-spec.md` as v1 context only. It
+`../tk-yiwfz.{1,2,3,5,6,7}/` as cross-source evidence,
+and `../tk-yiwfz.4/document-spec.md` as v1 context only. It
 does not re-survey upstream projects; the survey files carry the
 upstream commit-SHA provenance. Every cross-source claim above cites
 the survey file it draws from, while every gc-toolkit-specific default

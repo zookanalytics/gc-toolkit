@@ -87,10 +87,16 @@ fi
 if [ "$read_cache" -eq 0 ]; then
     raw_title=$(gc session list --state active --json 2>/dev/null \
         | jq -r --arg a "$agent" \
-            'map(select(.AgentName == $a)) | .[0].Title // ""' 2>/dev/null \
+            '.sessions | map(select(.agent_name == $a)) | .[0].title // ""' 2>/dev/null \
         || true)
-    # Hide when title is the default (equals the agent name).
-    if [ "$raw_title" = "$agent" ] || [ "$raw_title" = "null" ]; then
+    # Hide when title is the gascity default. For most agents that
+    # means title == agent_name; for thread agents gascity strips the
+    # `-adhoc-<hex>` suffix when assigning the default, so the title
+    # equals the role name instead (e.g. agent_name
+    # `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` → default title
+    # `gc-toolkit.mayor-thread`). Strip the suffix and compare both.
+    agent_role="${agent%-adhoc-*}"
+    if [ "$raw_title" = "$agent" ] || [ "$raw_title" = "$agent_role" ] || [ "$raw_title" = "null" ]; then
         title=""
     else
         title="$raw_title"

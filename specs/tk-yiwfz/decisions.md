@@ -7,7 +7,7 @@ description: Directional calls captured from 2026-05-06 operator/mechanik conver
 
 Captured from operator/mechanik conversation on 2026-05-06. These directional
 calls anchor the v2 synthesis. The v1 synthesis at
-`docs/principles/document-spec.md` (filed by polecat `gc-toolkit.furiosa` against
+`specs/tk-yiwfz.4/document-spec.md` (filed by polecat `gc-toolkit.furiosa` against
 `tk-yiwfz.4`) provides the inventory and survey provenance; this document
 records what *we decided to do with that inventory*.
 
@@ -348,10 +348,9 @@ live-file-embed (`#[[file:<path>]]`).
 ## Provenance
 
 - **Conversation**: 2026-05-06, operator + mechanik (`gc-toolkit.mechanik`).
-- **v1 synthesis**: `rigs/gc-toolkit/docs/principles/document-spec.md`
+- **v1 synthesis**: `rigs/gc-toolkit/specs/tk-yiwfz.4/document-spec.md`
   (polecat `gc-toolkit.furiosa`, bead `tk-yiwfz.4`). Stays at v1 location
   until migration bead.
 - **Six surveys feeding both v1 and v2**:
-  `rigs/gc-toolkit/docs/research/naming-conventions/{bmad-method,
-  bmad-method-templates,superpowers,gastown,spec-kit,kiro}.md`. Stay at
-  v1 location until migration.
+  `rigs/gc-toolkit/specs/tk-yiwfz.{1,2,3,5,6,7}/{bmad-method,
+  superpowers,gastown,bmad-method-templates,spec-kit,kiro}.md`.
