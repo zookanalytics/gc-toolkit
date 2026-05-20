@@ -20,14 +20,16 @@ name = "gascity-keeper"
 schema = 2
 
 # The sub-pack ships the keeper, its `mol-upstream-gc-*` formulas, and
-# the rebase-handling fragments. It does NOT carry `[[patches.agent]]`
-# blocks: sub-pack patches can only target agents the sub-pack itself
-# imports, and importing gastown here would duplicate gastown's agents
-# under the `gascity-keeper` binding (so the gc-toolkit-patched refinery
-# / polecat get shadowed by bare gastown copies). The right home for
-# the fragment-injection patches is the importing city/rig — the
-# importing city's `city.toml` carries `[[rigs.patches]]` blocks for
-# the gascity rig alongside `[rigs.imports.gascity-keeper]`.
+# the gascity-rig-specific fragments (rebase-conventions,
+# polecat-patterns, refinery-rebase-handling). It does NOT carry
+# `[[patches.agent]]` blocks: sub-pack patches can only target agents
+# the sub-pack itself imports, and importing gastown here would
+# duplicate gastown's agents under the `gascity-keeper` binding (so the
+# gc-toolkit-patched refinery / polecat get shadowed by bare gastown
+# copies). The right home for the fragment-injection patches is the
+# importing city/rig — the importing city's `city.toml` carries
+# `[[rigs.patches]]` blocks for the gascity rig alongside
+# `[rigs.imports.gascity-keeper]`.
 
 # Example wiring (in the importing city's `city.toml`):
 #
@@ -46,7 +48,7 @@ schema = 2
 #
 #   [[rigs.patches]]
 #   agent = "polecat"
-#   inject_fragments_append = ["rebase-conventions"]
+#   inject_fragments_append = ["rebase-conventions", "polecat-patterns"]
 #
 # The `[[rigs.patches]]` blocks are nested inside the `[[rigs]]`
 # block (TOML scoping), so they apply to that one rig only.
