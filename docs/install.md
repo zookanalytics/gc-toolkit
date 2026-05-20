@@ -212,8 +212,8 @@ fields on a per-rig basis:
 
 ```toml
 [[rigs]]
-name = "signal-loom"
-prefix = "sl"
+name = "my-rig"
+prefix = "mr"
 
 [rigs.imports.gc-toolkit]
 source = "rigs/gc-toolkit"
