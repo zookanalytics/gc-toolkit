@@ -15,10 +15,13 @@ routed mail and work.
 Scope mirrors the canonical mayor (`scope = "city"`) so threads
 register as `gc-toolkit.mayor-thread` rather than the rig-prefixed
 form. Concurrency is unbounded (no `max_active_sessions`); the operator
-spawns as many threads as they need. Each instance gets its own git
-worktree of the rig repo (separate from the canonical's
-`.gc/agents/mayor` home), so concurrent threads do not stomp each
-other's filesystem.
+spawns as many threads as they need. Each instance gets its own
+plain scratch directory under `.gc/agents/mayor-thread/` — same
+shape as the canonical mayor's `.gc/agents/mayor` home — so
+concurrent threads have independent scratch space. Threads are
+routers, not doers; any git work targets a rig via
+`git -C rigs/<rig>` (matching the canonical's pattern), so they do
+not need a private checkout.
 
 ## Why we built this
 
@@ -57,3 +60,5 @@ they are patrol / automation roles, not operator-facing.
   and `max_active_sessions` is unset (unbounded). The operator spawns
   via `gc session new mayor-thread`; gascity numbers pool instances
   `mayor-thread-1`, `-2`, … on each spawn.
+
+> 2026-05-19: `work_dir` reshaped from `.gc/worktrees/gc-toolkit/mayor-thread/<base>` (git worktree) to `.gc/agents/mayor-thread/<base>` (plain scratch dir) (tk-pzls5c). Threads are routers, not doers — mayor is strictly a coordinator — so no private rig checkout is needed. `pre_start` worktree-setup call dropped; rig git ops use `git -C rigs/<rig> …` like the canonical. Existing thread-worktree orphans on disk are out of scope for this change; deferred to `tk-cwsj1`.
