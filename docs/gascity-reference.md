@@ -15,18 +15,18 @@ this index.
 
 A doc lives under `docs/gascity-*.md` only when **all four** hold:
 
-1. **It's about gc-toolkit's _use_ of Gas City, not Gas City itself.**
-   Generic Gas City knowledge belongs upstream — file a PR to
-   `gastownhall/gascity`.
+1. **It serves gc-toolkit's work.** Lean on upstream Gas City
+   documentation where it exists. Capture content here when we've
+   learned something not yet documented upstream, or when reframing
+   it for our own use is materially more effective. Pure duplication
+   of upstream content doesn't earn its place.
 2. **The learning is durable, not bead-tied.** One-incident gotchas
    live in `specs/<bead-id>/` or working memory.
 3. **Someone owns keeping it current** as upstream Gas City evolves.
 4. **It's non-obvious** — a competent new contributor wouldn't infer
    it from upstream docs plus the code.
 
-If any of the four fail, the content does not belong here. The
-`gascity-*.md` series is gc-toolkit-specific learnings; broad Gas City
-content goes upstream or stays out.
+If any of the four fail, the content does not belong here.
 
 ## Getting started
 
