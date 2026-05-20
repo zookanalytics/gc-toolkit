@@ -18,10 +18,11 @@ pushes its rebased commits to the polecat-owned ref
 refinery overlay detects the rebase bead (via `metadata.molecule_id`
 matching `mol-upstream-gc-rebase*`, with `metadata.backup_ref` as a
 fallback signal), runs preflight against the rebased branch, performs
-the `git push --force-with-lease={{upstream_branch}}:origin/{{upstream_branch}}`,
-and closes the bead. This keeps the absolute "polecats never
-force-push to `main`" rule intact while authorising the legitimate
-rebase tail in one auditable place (refinery + rig-scoped overlay).
+the safe force-push to `{{upstream_branch}}` (see
+`refinery-rebase-handling` for the exact lease form), and closes
+the bead. This keeps the absolute "polecats never force-push to
+`main`" rule intact while authorising the legitimate rebase tail in
+one auditable place (refinery + rig-scoped overlay).
 
 ## Variables
 
@@ -1099,11 +1100,11 @@ was wrong.
 The refinery overlay shipped by the `gascity-keeper` sub-pack
 (`refinery-rebase-handling` fragment) recognises rebase beads via
 `metadata.molecule_id` and `metadata.backup_ref`, runs preflight
-against the rebased branch, performs the
-`git push --force-with-lease={{upstream_branch}}:origin/{{upstream_branch}} origin rebase/{{issue}}:{{upstream_branch}}`,
-and closes the bead. Race loss against `{{upstream_branch}}`
-escalates to mayor from the refinery side — it is no longer this
-polecat's problem.
+against the rebased branch, performs the safe force-push to
+`{{upstream_branch}}` (see `refinery-rebase-handling` for the exact
+lease form), and closes the bead. Race loss against
+`{{upstream_branch}}` escalates to mayor from the refinery side — it
+is no longer this polecat's problem.
 
 ```bash
 # Make sure the metadata refinery reads matches what we pushed.
