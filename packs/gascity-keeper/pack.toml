@@ -31,6 +31,10 @@ schema = 2
 # `[[rigs.patches]]` blocks for the gascity rig alongside
 # `[rigs.imports.gascity-keeper]`.
 
+# For the broader gc-toolkit install context (importing gc-toolkit,
+# `[[rigs.overrides]]`, verification with `gc doctor`), see
+# `docs/install.md` in the gc-toolkit repo root.
+
 # Example wiring (in the importing city's `city.toml`):
 #
 #   [[rigs]]
