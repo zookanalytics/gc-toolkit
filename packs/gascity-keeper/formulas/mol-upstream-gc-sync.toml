@@ -53,7 +53,7 @@ description = "If '1', the report includes per-agent unified diffs"
 default = "0"
 
 [vars.notify_recipient]
-description = "Optional mail address to notify with the report (e.g., human, gascity-keeper). Empty = skip mail."
+description = "Optional mail address to notify with the report (e.g., human, gascity/gascity-keeper.keeper). Empty = skip mail."
 default = ""
 
 [[steps]]

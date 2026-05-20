@@ -1,13 +1,28 @@
 description = """
 Rebase the gascity rig's `origin/main` onto `upstream/main`, drop already-
-landed-or-supplanted local commits, run tests, install, push, and notify the
-operator. Autonomous through push: completion is either an "everything is up
-to date" mail to the operator or an "I've been mailed to take action" mail.
+landed-or-supplanted local commits, run tests, install, push the working
+branch (`rebase/{{issue}}`) to origin, and hand off to refinery for the
+force-push to `{{upstream_branch}}`.
 
 Extends `mol-polecat-base` for the standard polecat lifecycle entry points
 (load-context, workspace-setup) but uses its own gating steps in place of
 the implement / self-review pair — the work isn't a feature implementation,
 it's a controlled rebase with a verdict-keeping survey.
+
+**Force-push ownership (v7+):** The terminal force-push that lands the
+rebased history onto `{{upstream_branch}}` is performed by the
+rig-scoped refinery via the `gascity-keeper` sub-pack's
+`refinery-rebase-handling` overlay, not by this polecat. The polecat
+pushes its rebased commits to the polecat-owned ref
+`refs/heads/rebase/{{issue}}` and reassigns the bead to refinery; the
+refinery overlay detects the rebase bead (via `metadata.molecule_id`
+matching `mol-upstream-gc-rebase*`, with `metadata.backup_ref` as a
+fallback signal), runs preflight against the rebased branch, performs
+the safe force-push to `{{upstream_branch}}` (see
+`refinery-rebase-handling` for the exact lease form), and closes
+the bead. This keeps the absolute "polecats never force-push to
+`main`" rule intact while authorising the legitimate rebase tail in
+one auditable place (refinery + rig-scoped overlay).
 
 ## Variables
 
@@ -62,7 +77,7 @@ routing — no silent drops, no auto-resolution.
 | rebase | Conflicts dispatch a rework polecat per conflicted kept commit. The post-rebase `test` step is the safety net for "we accepted a rework that broke the kept set." `metadata.backup_ref` keeps any state recoverable. |
 | test | Bead handback (`aborted_at=test`) lands first; mail with failure tail is best-effort. Bead stays open so a fix can resume. |
 | install | Bead handback (`aborted_at=install`) first; mail best-effort. Bead stays open. |
-| push | `--force-with-lease` rejection means a parallel push raced us — do NOT retry. Bead handback (`aborted_at=push`) first; mail best-effort. |
+| push | Push of `HEAD:rebase/{{issue}}` is fast-forward on the polecat-owned ref — failures here are auth/network/ref-protection, NOT a race against `{{upstream_branch}}`. Bead handback (`aborted_at=push`) first; mail best-effort. Race-loss against `{{upstream_branch}}` is detected and escalated by refinery via the overlay's `--force-with-lease` lease, not by this step. |
 
 The post-survey **abort** paths (test, install, push) share the same
 shape: lock in the bead handback (`aborted_at`, status=open, reassignment
@@ -82,7 +97,7 @@ uses the legacy `metadata.conflict_questions` shape so the keeper's
 existing operator conversation handles it without bespoke flow."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 7
+version = 8
 
 [vars]
 [vars.upstream_remote]
@@ -110,7 +125,7 @@ description = "Mail target for completion and abort notifications"
 default = "human"
 
 [vars.requesting_keeper]
-description = "Keeper agent address (e.g., gascity/gascity-keeper) for the rework-dispatch handback. Optional; the rebase step falls back to notify_recipient if unset, but a keeper-aware operator should stamp metadata.requesting_keeper at dispatch so the cooperative-handback path lands cleanly."
+description = "Keeper agent address (e.g., gascity/gascity-keeper.keeper) for the rework-dispatch handback. Optional; the rebase step falls back to notify_recipient if unset, but a keeper-aware operator should stamp metadata.requesting_keeper at dispatch so the cooperative-handback path lands cleanly."
 default = ""
 
 [[steps]]
@@ -147,9 +162,13 @@ gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH" --set-metadata b
 ```
 
 The local working branch (`rebase/{{issue}}`) lets us rebase without touching
-`{{upstream_branch}}` until the push step. The bead's branch metadata records
-the working branch, not the destination — the destination is `{{upstream_branch}}`
-on `{{origin_remote}}` and the push step writes there with `--force-with-lease`.
+`{{upstream_branch}}` at all. The polecat's push step writes only to
+`refs/heads/rebase/{{issue}}` on `{{origin_remote}}` (a fast-forward push
+on the polecat-owned ref); refinery's `refinery-rebase-handling` overlay
+performs the `--force-with-lease` that lands the history onto
+`{{upstream_branch}}`. The bead's `metadata.branch` records the polecat
+working branch; `metadata.target = {{upstream_branch}}` (stamped at
+hand-off) records the destination refinery will land it to.
 
 **3. Fetch the upstream remote:**
 ```bash
@@ -933,24 +952,32 @@ exit 0
 
 [[steps]]
 id = "push"
-title = "Push the rebased branch to origin with --force-with-lease"
+title = "Push the rebased branch to origin (polecat-owned ref, no force on main)"
 needs = ["install"]
 description = """
 **Config: origin_remote = {{origin_remote}}**
 **Config: upstream_branch = {{upstream_branch}}**
 
+The polecat pushes its rebased history to its own ref
+(`rebase/{{issue}}`) — NOT to `{{upstream_branch}}`. The force-push
+that lands the rebased history onto `{{upstream_branch}}` is owned by
+the rig-scoped refinery via the `gascity-keeper` sub-pack's
+`refinery-rebase-handling` overlay. Splitting the push step preserves
+the absolute "polecats never force-push to main" rule for every
+polecat path, while keeping the legitimate force-push in one
+auditable place (refinery).
+
 ```bash
-git push {{origin_remote}} HEAD:{{upstream_branch}} --force-with-lease
+git push {{origin_remote}} HEAD:rebase/{{issue}}
 ```
 
-If the push succeeds, close this step and proceed.
+This is a fast-forward push to the polecat's own branch, so no
+`--force` and no `--force-with-lease` are needed or appropriate.
 
-If `--force-with-lease` is rejected (someone else pushed to
-`{{origin_remote}}/{{upstream_branch}}` after our `git fetch`):
+If the push fails for an unexpected reason (auth, network, ref
+protection on `refs/heads/rebase/*`), do NOT retry blindly. Lock in
+the durable abort signal first, then mail the operator (best-effort):
 
-**Do NOT retry. Do NOT use plain `--force`.**
-
-Lock in the durable abort signal first, then mail the operator (best-effort):
 ```bash
 gc bd update {{issue}} \
   --set-metadata aborted_at=push \
@@ -960,20 +987,20 @@ gc bd update {{issue}} \
 
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
-NEW_REMOTE=$(git rev-parse {{origin_remote}}/{{upstream_branch}})
 
-if ! gc mail send {{notify_recipient}} -s "gascity rebase: push race" -m "$(cat <<EOF
-git push --force-with-lease was rejected — {{origin_remote}}/{{upstream_branch}}
-moved between our fetch and our push. Someone else pushed; we will not
-overwrite their work.
+if ! gc mail send {{notify_recipient}} -s "gascity rebase: push to rebase ref failed" -m "$(cat <<EOF
+git push {{origin_remote}} HEAD:rebase/{{issue}} failed. The polecat
+pushes its working branch only; the force-push that lands the rebase
+onto {{upstream_branch}} is owned by the refinery overlay and has NOT
+fired yet.
 
 Worktree: $WORKTREE
 Backup ref: $BACKUP_REF
-New remote tip: $NEW_REMOTE
 Bead: {{issue}}
 
-Next: review what landed remotely. If the new commits should be absorbed,
-restart this rebase mol on a fresh bead.
+Next: investigate the push failure (auth, network, ref protection on
+refs/heads/rebase/*). The rebased history is intact in the worktree;
+once the push lands, refinery handles the rest.
 EOF
 )"; then
     echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
@@ -982,17 +1009,32 @@ gc runtime drain-ack
 exit 0
 ```
 
-**Exit criteria:** `{{origin_remote}}/{{upstream_branch}}` now points at the
-rebased HEAD."""
+**Race-loss against `{{upstream_branch}}` is no longer this step's
+concern.** If `{{origin_remote}}/{{upstream_branch}}` moves between
+our fetch and refinery's force-push, the refinery overlay detects it
+by comparing the current `{{origin_remote}}/{{upstream_branch}}` tip
+to `metadata.pre_rebase_tip` (and pinning the
+`--force-with-lease=<branch>:<sha>` expected value to the same SHA)
+and escalates to mayor — see `refinery-rebase-handling` in the
+`gascity-keeper` sub-pack. We do NOT block on that race here; we
+hand off and exit.
+
+**Exit criteria:** `{{origin_remote}}/refs/heads/rebase/{{issue}}`
+points at the rebased HEAD; the polecat's working branch is pushed
+and ready for refinery to land."""
 
 [[steps]]
-id = "notify-and-close"
-title = "Mail the completion summary, append to bead notes, close bead"
+id = "notify-and-handoff"
+title = "Mail the completion summary, append to bead notes, hand off to refinery"
 needs = ["push"]
 description = """
 Compose the completion summary using the verdict table, the conflict
 resolutions log, and the rebase outcome, send it as mail, append a
-clean copy to bead notes, close the bead.
+clean copy to bead notes, then reassign the bead to refinery for the
+force-push to `{{upstream_branch}}`. **Do NOT close the bead** — only
+the refinery closes after the force-push lands (see the polecat
+contract: polecats never close their own work bead, and rebase polecats
+follow the same rule now that refinery owns the terminal landing).
 
 **1. Build the summary:**
 
@@ -1032,13 +1074,16 @@ fi
 
 **2. Mail the operator:**
 ```bash
-gc mail send {{notify_recipient}} -s "gascity rebase: complete" -m "<summary>"
+gc mail send {{notify_recipient}} -s "gascity rebase: ready for refinery handoff" -m "<summary>"
 ```
 
-The mailed summary inlines `$RES_HEADLINE` and `$RES_DETAIL` when
-non-empty so the operator can see at a glance whether any kept commits
-required rework. The full `metadata.conflict_resolutions` JSON stays on
-the bead for forensic review.
+The summary describes the rebase outcome (drops, conflicts,
+resolutions, tests, install) and notes that refinery will perform the
+force-push to `{{upstream_branch}}` next. The mailed summary inlines
+`$RES_HEADLINE` and `$RES_DETAIL` when non-empty so the operator can
+see at a glance whether any kept commits required rework. The full
+`metadata.conflict_resolutions` JSON stays on the bead for forensic
+review.
 
 **3. Append the same summary to bead notes (markdown form):**
 ```bash
@@ -1050,9 +1095,37 @@ markdown table rather than the compact text rendering — it's the
 durable forensic record the operator audits when they suspect a rework
 was wrong.
 
-**4. Close the bead:**
+**4. Hand off the bead to refinery for the force-push to `{{upstream_branch}}`:**
+
+The refinery overlay shipped by the `gascity-keeper` sub-pack
+(`refinery-rebase-handling` fragment) recognises rebase beads via
+`metadata.molecule_id` and `metadata.backup_ref`, runs preflight
+against the rebased branch, performs the safe force-push to
+`{{upstream_branch}}` (see `refinery-rebase-handling` for the exact
+lease form), and closes the bead. Race loss against
+`{{upstream_branch}}` escalates to mayor from the refinery side — it
+is no longer this polecat's problem.
+
 ```bash
-gc bd close {{issue}} --reason "Rebased {{origin_remote}}/{{upstream_branch}} onto {{upstream_remote}}/{{upstream_branch}}; pushed $(git rev-parse --short HEAD)"
+# Make sure the metadata refinery reads matches what we pushed.
+# branch was set in workspace-setup; refresh in case it drifted.
+gc bd update {{issue}} \
+  --set-metadata branch=rebase/{{issue}} \
+  --set-metadata target={{upstream_branch}}
+
+# Reassign to the rig-scoped refinery. ${GC_RIG:+$GC_RIG/} produces
+# "<rig>/" when running under a rig session, or empty in HQ-only
+# cities. The binding-qualified name is `gc-toolkit.refinery` — the
+# refinery comes from gc-toolkit's import into gascity, so its
+# qualified name carries the `gc-toolkit.` prefix (matching the same
+# form `mol-polecat-work` uses: `${GC_RIG:+$GC_RIG/}gc-toolkit.refinery`).
+REFINERY_TARGET="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
+gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET" --set-metadata gc.routed_to="$REFINERY_TARGET"
+
+# Wake/nudge are best-effort — refinery's event watcher will catch the
+# assignment regardless, but the explicit prompt shortens the latency.
+gc session wake "$REFINERY_TARGET" || true
+gc session nudge "$REFINERY_TARGET" "Rebase bead {{issue}} ready: force-push rebase/{{issue}} onto {{upstream_branch}}." || true
 ```
 
 **5. Drain and exit:**
@@ -1064,4 +1137,7 @@ exit 0
 **Exit criteria:** completion mail sent (including conflict-resolutions
 headline if any reworks fired); bead notes carry the summary plus the
 markdown table of resolutions; `metadata.conflict_resolutions` remains
-on the bead as the JSON record; bead is closed; session has drained."""
+on the bead as the JSON record; bead is reassigned to refinery with
+`metadata.branch=rebase/{{issue}}` and `metadata.target={{upstream_branch}}`;
+session has drained. The bead stays OPEN — refinery closes it after
+the force-push lands."""
