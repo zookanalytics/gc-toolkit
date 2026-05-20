@@ -51,14 +51,21 @@ does **not** belong in the brief; it belongs alongside the agents that
 follow it.
 
 Three previously-bundled "learnings" — upstream engagement, rebase
-conventions, polecat patterns — moved out to
-`template-fragments/{upstream-engagement,rebase-conventions,polecat-patterns}.template.md`
-and are injected directly into the agent prompts that need them
-(mayor: upstream-engagement; polecat and refinery: rebase-conventions
-+ polecat-patterns; mechanik: all three). The wiring lives in
-`pack.toml`'s `[[patches.agent]]` blocks (for polecat) and in the
-prompt patches under `patches/` (for mayor and refinery); mechanik
-includes them directly in its native prompt template.
+conventions, polecat patterns — moved out to template-fragments with
+two homes. **Upstream engagement** is broadly applicable to any
+consumer carrying local gascity patches; it lives in core gc-toolkit
+at `template-fragments/upstream-engagement.template.md` and is
+injected into the mayor and mechanik prompts. **Rebase conventions**
+and **polecat patterns** are gascity-rig-specific (they assume a fork
+relationship to upstream `gascity`); together with
+`refinery-rebase-handling` they ship in the opt-in
+`packs/gascity-keeper/` sub-pack at
+`packs/gascity-keeper/template-fragments/`. Their injection into the
+gascity rig's polecat and refinery is wired via `[[rigs.patches]]`
+blocks in the importing city's `city.toml` (see
+`packs/gascity-keeper/pack.toml` for the example block). Mechanik in
+a non-gascity rig does not receive the gascity-rig-specific
+fragments.
 
 ## The bar
 

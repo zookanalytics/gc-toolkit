@@ -215,24 +215,21 @@ in gc-toolkit's broader doc taxonomy, see
   before proposing or accepting work that involves a `gascity` fix
   beyond what's already in upstream.
 
-Operational doctrine — upstream engagement, rebase conventions, and
-polecat patterns — is not part of the brief. It lives in
-`{{ .ConfigDir }}/template-fragments/` and is injected directly into
-the agent prompts that need it (mechanik below; mayor, polecat, and
-refinery via their own patches). Instructional content belongs
-alongside the agents that follow it, not in the brief.
+Operational doctrine has two homes. **Upstream engagement** is broadly
+applicable to any consumer carrying local gascity patches; it lives in
+core gc-toolkit's `{{ .ConfigDir }}/template-fragments/` and is
+injected directly into this prompt (below) and the mayor prompt.
+**Gascity-rig-specific doctrine** — rebase conventions, polecat
+patterns, refinery rebase handling — ships with the opt-in
+`packs/gascity-keeper/` sub-pack and is wired into the gascity rig's
+polecat and refinery via `[[rigs.patches]]` blocks in the importing
+city's `city.toml`. Mechanik in a non-gascity rig does not receive
+those fragments. Instructional content belongs alongside the agents
+that follow it, not in the brief.
 
 ---
 
 {{ template "upstream-engagement" . }}
-
----
-
-{{ template "rebase-conventions" . }}
-
----
-
-{{ template "polecat-patterns" . }}
 
 ## Directory Guidelines
 

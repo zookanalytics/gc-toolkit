@@ -30,10 +30,14 @@ belong nowhere.
   gc-toolkit-specific process doc (`gascity-local-patching.md`). See
   `principles/agent-brief.md` for the doc-type definition and the
   canonical membership list, and `gascity-reference.md` for the bar
-  applied before adding new entries. Operational doctrine (upstream
-  engagement, rebase conventions, polecat patterns) lives in
+  applied before adding new entries. Operational doctrine lives in
   `template-fragments/` and is injected into agent prompts, not the
-  brief.
+  brief, with two homes: broadly applicable doctrine (today:
+  `upstream-engagement`) ships in core gc-toolkit, while
+  gascity-rig-specific doctrine (`rebase-conventions`,
+  `polecat-patterns`, `refinery-rebase-handling`) ships in the opt-in
+  `packs/gascity-keeper/` sub-pack and is wired into the gascity rig's
+  polecat and refinery via `[[rigs.patches]]` in city.toml.
 - No formulas yet. No other agents yet.
 
 This roadmap describes what fills out from here.

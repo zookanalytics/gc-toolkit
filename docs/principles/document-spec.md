@@ -530,13 +530,25 @@ the proposed defaults.
 above — `docs/gascity-upstream-engagement.md`,
 `docs/gascity-rebase-conventions.md`,
 `docs/gascity-polecat-patterns.md` — were later relocated to
-`template-fragments/{upstream-engagement,rebase-conventions,polecat-patterns}.template.md`
-and injected directly into the agent prompts that need them. The
-relocation reflects the recognition that instructional content
-belongs alongside the agents that follow it, not in the agent brief
-alongside Gas City reference material. See
+template-fragments and injected directly into the agent prompts that
+need them. The relocation reflects the recognition that instructional
+content belongs alongside the agents that follow it, not in the agent
+brief alongside Gas City reference material. See
 [`agent-brief.md`](./agent-brief.md) for the narrowed two-doc brief
 shape.
+
+**Further refinement (`tk-vhjsv` + `tk-pym9ff`, 2026-05-20):** the three
+relocated fragments split into two homes by audience.
+`upstream-engagement` is broadly applicable to any consumer carrying
+local gascity patches and stays in core gc-toolkit at
+`template-fragments/upstream-engagement.template.md`.
+`rebase-conventions` and `polecat-patterns` are gascity-rig-specific
+(they assume a fork relationship to upstream `gascity`) and moved into
+the opt-in `packs/gascity-keeper/` sub-pack alongside the new
+`refinery-rebase-handling` fragment. The sub-pack's three fragments
+are wired into the gascity rig's polecat and refinery via
+`[[rigs.patches]]` blocks in the importing city's `city.toml`; rigs
+that import gc-toolkit without the sub-pack do not receive them.
 
 **Existing patterns this spec implicitly endorses without enforcing:**
 
