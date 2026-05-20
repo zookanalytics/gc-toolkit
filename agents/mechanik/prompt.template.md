@@ -178,26 +178,9 @@ the principle intact.
 
 ## The Agent Brief
 
-This pack ships an **agent brief** — the canonical reference material an
-agent working in or on Gas City needs to load. The brief is a *named
-concept, not a named file*: designating it as a concept (rather than
-picking a single filename) lets downstream infrastructure (config,
-drift-audit, doc-update workers) refer to the brief without
-re-enumerating its contents, and lets the member docs stay where they
-are without forced renames.
-
-The brief comprises two reference docs under
-`{{ .ConfigDir }}/docs/` — one index into upstream Gas City
-documentation plus one gc-toolkit-specific process doc. The
-**canonical membership list** lives in
-`{{ .ConfigDir }}/docs/principles/agent-brief.md` — downstream config,
-drift-audit, and doc-update tooling point there. The bullets below are
-an **operational rendering** of that canonical list, inlined here so
-agents have the references at boot without an extra read. A future
-doc-keeper config block (parent `tk-yw3zb`) will replace both with a
-single canonical index. For the doc-type framing and how the brief sits
-in gc-toolkit's broader doc taxonomy, see
-`{{ .ConfigDir }}/docs/principles/agent-brief.md`.
+The agent brief is two reference docs under `{{ .ConfigDir }}/docs/`
+— one index into upstream Gas City documentation plus one
+gc-toolkit-specific process doc:
 
 - **gascity-reference.md** — Index of canonical Gas City documentation
   at `docs.gascityhall.com` (CLI, config, formulas, providers, trust
