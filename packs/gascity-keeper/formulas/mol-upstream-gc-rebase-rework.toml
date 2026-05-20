@@ -296,7 +296,7 @@ files, and commit:
 
 ```bash
 git add -- $(printf '%s' "$CONFLICTED_FILES" | jq -r '.[]')
-git commit -m "rework $(printf '%s' "$TARGET_SHA" | cut -c1-12): $TARGET_SUBJECT (per {{issue}})
+git commit --no-verify -m "rework $(printf '%s' "$TARGET_SHA" | cut -c1-12): $TARGET_SUBJECT (per {{issue}})
 
 Original commit's intent ported to post-upstream code in the shared
 rebase worktree. See {{issue}} for context and metadata.classification."
@@ -359,7 +359,7 @@ commit it, AND self-report the judgment:
 
 ```bash
 git add -- $(printf '%s' "$CONFLICTED_FILES" | jq -r '.[]')
-git commit -m "rework $(printf '%s' "$TARGET_SHA" | cut -c1-12): $TARGET_SUBJECT (per {{issue}})
+git commit --no-verify -m "rework $(printf '%s' "$TARGET_SHA" | cut -c1-12): $TARGET_SUBJECT (per {{issue}})
 
 Original commit's intent ported to post-upstream code in the shared
 rebase worktree. Classification: judgment-required (review pending).
