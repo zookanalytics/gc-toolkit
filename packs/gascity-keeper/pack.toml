@@ -12,7 +12,8 @@
 #
 # Imported only by the gascity rig — the rig that maintains the
 # `zookanalytics/gascity ← gastownhall/gascity` fork. Other rigs
-# that import gc-toolkit (gc-toolkit itself, signal-loom) do NOT
+# that import gc-toolkit (gc-toolkit's own rig, or any other rig
+# pulling in gc-toolkit purely for its skills/prompts) do NOT
 # pick this up.
 
 [pack]

@@ -13,8 +13,7 @@ This guide covers:
 5. [Verification](#5-verification)
 
 For Gas City and pack/city v2 background, see
-[`gas-city-reference.md`](gas-city-reference.md) and
-[`gas-city-pack-v2.md`](gas-city-pack-v2.md).
+[`gascity-reference.md`](gascity-reference.md).
 
 ---
 
@@ -110,9 +109,12 @@ prefix = "mr"
 [rigs.imports.gc-toolkit]
 source = "rigs/gc-toolkit"
 
-[rigs.imports.<sub-pack-name>]
-source = "rigs/gc-toolkit/packs/<sub-pack-name>"
+[rigs.imports.gascity-keeper]
+source = "rigs/gc-toolkit/packs/gascity-keeper"
 ```
+
+Substitute the binding key and `source` for whichever sub-pack you
+are wiring; the shape is the same.
 
 A sub-pack typically ships:
 
@@ -136,15 +138,10 @@ the fork. The snippet covers:
 - `[[rigs.patches]]` fragment-injection blocks for refinery and polecat
 - A note on the resolved keeper identity
 
-Add a city-level named session if you want the keeper spawnable via
-`gc session new`:
-
-```toml
-[[named_session]]
-template = "gascity-keeper.keeper"   # <binding>.<agent>
-dir = "my-rig"                       # scope to the rig
-mode = "on_demand"
-```
+The sub-pack itself ships a `[[named_session]]` with
+`scope = "rig"`, so the keeper is automatically spawnable in the
+importing rig — no extra `[[named_session]]` block is required in
+`city.toml`. Adding one duplicates the resolved identity.
 
 The `gascity-keeper.` prefix is the **import binding** (the table
 key under `[rigs.imports.gascity-keeper]`). `keeper` is the agent's
@@ -188,7 +185,7 @@ Other fields available on a patch block (subset most-used):
 | `env` | Per-rig environment variables (as a sub-table) |
 
 The complete patch-block field list is in
-[`gas-city-reference.md`](gas-city-reference.md#configuration-reference).
+[`gascity-reference.md`](gascity-reference.md#configuration-reference).
 
 ### Resolution order
 
@@ -307,10 +304,13 @@ gc session attach mechanik
 ```
 
 If the `mechanik` session comes up with the gc-toolkit prompt header,
-the import composed correctly. For a sub-pack like `gascity-keeper`:
+the import composed correctly. For a sub-pack like `gascity-keeper`,
+address the template by its fully-qualified `<rig>/<binding>.<template>`
+form from the city root (or run from the rig directory / pass
+`--rig <rig>`):
 
 ```bash
-gc session new gascity-keeper.keeper
+gc session new <rig>/gascity-keeper.keeper
 gc session attach <alias>
 ```
 
