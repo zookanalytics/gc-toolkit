@@ -22,29 +22,68 @@ it.
 
 ### Detect at done time
 
+A bead is non-impl if ANY of the following match. Check in priority
+order — explicit signals from the spawner are the most reliable;
+the zero-commit check is the durable structural fallback that
+catches tasks the spawner didn't label.
+
+1. **Explicit PR signal** — `metadata.pr_number` or `metadata.pr_url`
+   is set. Review-task formulas stamp these.
+2. **Title convention** — bead title matches `^Review PR#\d+`.
+3. **Explicit task-kind label** — `metadata.task_kind` is `review`,
+   `research`, or `investigation`. (The spawner may not set this
+   today; this is the future-friendly hook.)
+4. **Zero-commit fallback** — `git rev-list <target>..HEAD --count`
+   is `0`. Structural catch for unlabeled tasks; also catches the
+   case where a review touched a config file in passing but didn't
+   actually produce mergeable work.
+
 ```bash
-TARGET=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.target // "{{ .DefaultBranch }}"')
+META=$(gc bd show <work-bead> --json | jq -c '.[0]')
+TARGET=$(echo "$META" | jq -r '.metadata.target // "{{ .DefaultBranch }}"')
 COMMITS=$(git rev-list "origin/$TARGET..HEAD" --count 2>/dev/null || echo 0)
+
+NON_IMPL=""
+[ -n "$(echo "$META" | jq -r '.metadata.pr_number // .metadata.pr_url // empty')" ] && NON_IMPL=1
+echo "$META" | jq -r '.title // ""' | grep -qE '^Review PR#[0-9]+' && NON_IMPL=1
+echo "$META" | jq -r '.metadata.task_kind // ""' | grep -qE '^(review|research|investigation)$' && NON_IMPL=1
+[ "$COMMITS" -eq 0 ] && NON_IMPL=1
 ```
 
-If `COMMITS > 0`: run the impl done sequence in the FINAL REMINDER
-above. If `COMMITS == 0`: run the non-impl done sequence below
-instead. The "Never Close Beads" prohibition is lifted for this one
-case — polecats close non-impl beads themselves because there is
-nothing for the refinery to merge.
+If `NON_IMPL` is set: run the non-impl done sequence below. Otherwise:
+run the impl done sequence in the FINAL REMINDER above. The "Never
+Close Beads" prohibition is lifted for the non-impl case — polecats
+close non-impl beads themselves because there is nothing for the
+refinery to merge.
 
 ### Non-impl done sequence
 
-The artifact is already where it belongs (`gh pr review` for
-reviews, `gc bd update --notes` for research, etc.). Do NOT set
-`metadata.branch`, do NOT set `metadata.target`, do NOT route to
-refinery.
+Do NOT set `metadata.branch`, `metadata.target`, or route to
+refinery — there is nothing for the refinery to merge. Post the
+artifact yourself before closing; one of the recurrences this
+override exists to fix was a review bead whose review never
+reached GitHub.
 
 ```bash
-# 1. Stamp task-specific metadata (review_id, pr_url, verdict, etc.)
+# 1. Post the artifact if it isn't already posted.
+#    - Review tasks (pr_number/pr_url set): submit the verdict via
+#      `gh pr review <num>` with the body and verdict flag. BEFORE
+#      posting, check whether an earlier attempt already submitted
+#      a review under your handle — don't double-post:
+#        gh api repos/<owner>/<repo>/pulls/<num>/reviews \
+#          | jq '.[] | select(.user.login == "<your-handle>") | .submitted_at'
+#      A recent submission means skip the post step.
+#    - Research/investigation tasks: ensure findings live in the
+#      bead via `gc bd update <work-bead> --notes "..."` before close.
+gh pr review <pr-num> ...   # or: gc bd update <work-bead> --notes "..."
+
+# 2. Stamp task-specific metadata (review_id, pr_url, verdict, etc.)
 gc bd update <work-bead> --set-metadata <task-specific fields>
-# 2. Close the bead with a reason describing the task kind.
+
+# 3. Close the bead with a reason describing the task kind.
 gc bd close <work-bead> --reason "<review|research|investigation> complete"
+
+# 4. Drain and exit.
 gc runtime drain-ack
 exit
 ```

@@ -195,29 +195,6 @@ Nudges from other agents may arrive via your hook. When working:
 
 **Before your session ends, you MUST run the done sequence.**
 
-There are two done sequences — pick by whether your task produced
-commits. The impl sequence routes the bead to the refinery for
-merge. For tasks that produce no commits (PR reviews, research
-syntheses, investigations that land in bead notes), routing to
-refinery strands the bead: refinery sees `metadata.branch` but the
-branch has nothing ahead of the target, rejects the merge, and the
-bead loiters open until a human closes it.
-
-The "ABSOLUTE RESTRICTION: No Bead Closing" rule at the top of
-this prompt applies to **impl** beads — closure of those must
-come from the refinery after a verified merge. Non-impl beads have
-nothing for the refinery to verify, so the polecat closes them
-itself.
-
-**Detect at done time:**
-
-```bash
-TARGET=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.target // "{{ .DefaultBranch }}"')
-COMMITS=$(git rev-list "origin/$TARGET..HEAD" --count 2>/dev/null || echo 0)
-```
-
-### Impl done sequence (`COMMITS > 0`)
-
 ```bash
 git push origin HEAD
 gc bd update <work-bead> \
@@ -230,22 +207,7 @@ gc runtime drain-ack
 exit
 ```
 
-### Non-impl done sequence (`COMMITS == 0`)
-
-The artifact is already where it belongs (`gh pr review` for
-reviews, `gc bd update --notes` for research, etc.). Close the bead
-yourself — this is the one situation in which a polecat closes the
-bead. Do NOT set `metadata.branch`, do NOT set `metadata.target`,
-do NOT route to refinery.
-
-```bash
-# 1. Stamp task-specific metadata (review_id, pr_url, verdict, etc.)
-gc bd update <work-bead> --set-metadata <task-specific fields>
-# 2. Close the bead with a reason describing the task kind.
-gc bd close <work-bead> --reason "<review|research|investigation> complete"
-gc runtime drain-ack
-exit
-```
+{{ template "polecat-non-impl-done" . }}
 
 Your work is not complete until you run the appropriate done
 sequence. `gc runtime drain-ack` signals the reconciler to kill
