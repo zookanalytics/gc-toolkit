@@ -1,7 +1,12 @@
+---
+name: Pack-Patch Timing Analysis — V2 Two-Surface System
+description: Read-only verification of when pack-level vs city-level patches apply in the v2 loader; companion to the gc-toolkit-as-primary-pack spike.
+---
+
 # Pack-Patch Timing Analysis — V2 Two-Surface System
 
 > **Bead:** tk-0t1ip. **Surveyed:** 2026-05-11. **Author:** Polecat gc-toolkit.nux.
-> Read-only verification of `spike-gc-toolkit-as-primary-pack.md`. No edits to gascity source.
+> Read-only verification of [`spike-gc-toolkit-as-primary-pack.md`](../tk-rw0cb/spike-gc-toolkit-as-primary-pack.md). No edits to gascity source.
 
 ## Provenance
 
@@ -20,7 +25,7 @@
 | `builtinPackIncludes` (auto-include policy) | `rigs/gascity/cmd/gc/embed_builtin_packs.go@d11ee0e1:60-87` | 2026-05-11 |
 | V2 loader design: "Apply patches" step | `rigs/gascity/docs/packv2/doc-loader-v2.md@d11ee0e1:603-608` | 2026-05-11 |
 | Wrapper-pack precedent (bare-name patch) | `rigs/gascity/examples/gastown/packs/gastown/pack.toml@d11ee0e1:27-30` | 2026-05-11 |
-| Spike under verification | `docs/research/pack-architecture/spike-gc-toolkit-as-primary-pack.md` | 2026-05-11 |
+| Spike under verification | `specs/tk-rw0cb/spike-gc-toolkit-as-primary-pack.md` | 2026-05-11 |
 
 The spike pinned its citations at gascity SHA `669586546a`; line numbers have shifted slightly. This analysis re-pins at current HEAD `d11ee0e1` and has verified every load-bearing claim still holds.
 

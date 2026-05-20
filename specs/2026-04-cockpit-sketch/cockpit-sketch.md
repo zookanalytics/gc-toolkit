@@ -1,3 +1,8 @@
+---
+name: Cockpit — observability TUI session sketch
+description: Sketch for a non-LLM tmux-attachable city observability view, with launcher script and proposed agent/provider wiring; not yet activated.
+---
+
 # Cockpit — observability TUI session sketch
 
 A non-LLM tmux session managed by Gas City's supervisor. Goal: a

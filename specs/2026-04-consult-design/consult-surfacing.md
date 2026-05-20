@@ -1,3 +1,8 @@
+---
+name: Consult-Bead Surfacing Channel — Design
+description: Approved v1 design for the conversational-concierge consult model; generalizes the consult-bead shape for any specialist to file.
+---
+
 # Consult-Bead Surfacing Channel — Design
 
 **Status:** approved design. Implementation bead to be filed by mechanik

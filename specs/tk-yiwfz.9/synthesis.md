@@ -89,7 +89,7 @@ Diátaxis (tutorials / how-to / reference / explanation) is a
 human-centric framing — its categories partition docs by *which mode
 of human learning is happening when the doc is read*. BMAD adopts it
 verbatim for its user-facing site
-[Source: docs/research/naming-conventions/bmad-method.md#directory-structure].
+[Source: specs/tk-yiwfz.1/bmad-method.md#directory-structure].
 
 For a spec that has to serve human and AI readers together, the
 relevant axis is not "what learning mode is this" but
@@ -129,9 +129,9 @@ Three reasons converge on this shape:
    sources with the most-developed AI-driven workflows — both put
    per-feature work directly under `specs/`, not nested inside a
    broader docs tier. Spec Kit writes `specs/<NNN>-<short-name>/`
-   [Source: docs/research/naming-conventions/spec-kit.md#output-document-types-—-inventory];
+   [Source: specs/tk-yiwfz.6/spec-kit.md#output-document-types-—-inventory];
    Kiro writes `.kiro/specs/<feature-name>/`
-   [Source: docs/research/naming-conventions/kiro.md#directory-structure].
+   [Source: specs/tk-yiwfz.7/kiro.md#directory-structure].
    The two reference projects most invested in agentic
    per-feature workflows agree.
 
@@ -236,7 +236,7 @@ No `archive/` directory. No `done/` sub-tier. No periodic sweep that
 moves "stale" docs anywhere. The convergent finding across surveyed
 sources — BMAD, Superpowers, Kiro, Spec Kit all converge on no
 archive directory, with deletion + git history as the retirement path
-[Source: docs/research/naming-conventions/bmad-method.md#doc-type-taxonomy]
+[Source: specs/tk-yiwfz.1/bmad-method.md#doc-type-taxonomy]
 — validates this; the central-vs-local epistemic distinction
 explains why it is correct: a closed bead doesn't change the
 truth-status of its docs (they were always historical record), so
@@ -247,14 +247,14 @@ there is nothing to archive *from*.
 - **No `-v<N>` filename suffix on docs.** Gas Town's `gas-city-pack-v2.md`
   is a 1-of-6 case that v1 of this synthesis carried over as
   precedent
-  [Source: docs/research/naming-conventions/gastown.md#filename-patterns];
+  [Source: specs/tk-yiwfz.3/gastown.md#filename-patterns];
   v2 drops it. If a release-frozen snapshot is genuinely needed, it
   is a git tag plus a pointer line in the live doc, not a duplicated
   file.
 - **No trailing semver line on principles.** Spec Kit's
   constitution.md is the only surveyed source with a built-in semver
   footer
-  [Source: docs/research/naming-conventions/spec-kit.md#constitution-—-constitutionmd-templatesconstitution-templatemd];
+  [Source: specs/tk-yiwfz.6/spec-kit.md#constitution-—-constitutionmd-templatesconstitution-templatemd];
   gc-toolkit doesn't currently face the constitution-versioning
   problem and inheriting the apparatus is overhead.
 - **No sync-impact-report HTML comments per amendment.** Same source,
@@ -307,7 +307,7 @@ That's it.
 The `description` field is a **discoverability hook**, not a summary
 of the doc's body. Superpowers' "Use when …" discipline for skill
 descriptions
-[Source: docs/research/naming-conventions/superpowers.md#well-named-patterns-with-reasoning]
+[Source: specs/tk-yiwfz.2/superpowers.md#well-named-patterns-with-reasoning]
 documents the failure mode: when descriptions summarise the body, AI
 agents follow the description instead of reading the body. For docs
 this matters less directly, but the same instinct applies — write a
@@ -319,7 +319,7 @@ restates its content.
 - **`inclusion` / `fileMatchPattern` (Kiro).** Kiro's steering files
   use `inclusion: always | fileMatch | manual | auto` to control
   when the harness loads them
-  [Source: docs/research/naming-conventions/kiro.md#filename-patterns].
+  [Source: specs/tk-yiwfz.7/kiro.md#filename-patterns].
   Adopting this would commit gc-toolkit to a specific
   context-loading model that is harness-specific (Kiro), and the
   problem it solves — "which docs enter the agent context when" —
@@ -327,7 +327,7 @@ restates its content.
   prematurely.
 - **`handoffs` (Spec Kit).** Spec Kit command files declare
   downstream commands in a `handoffs:` list
-  [Source: docs/research/naming-conventions/spec-kit.md#command-files-—-specifytemplatescommandsname-md].
+  [Source: specs/tk-yiwfz.6/spec-kit.md#command-files-—-specifytemplatescommandsname-md].
   gc-toolkit's beads system already captures handoffs (assignee
   changes, dependency edges); adding a duplicate frontmatter
   channel for them creates two truths.
@@ -358,7 +358,7 @@ for "this doc descends from bead X" — the path says it.
 
 This is gc-toolkit's principal departure from the surveyed reference
 projects, all of which converge on "path is the identifier"
-[Source: docs/research/naming-conventions/bmad-method-templates.md#central-vs-local-documents].
+[Source: specs/tk-yiwfz.5/bmad-method-templates.md#central-vs-local-documents].
 The departure is justified: gc-toolkit's beads system already tracks
 work units with stable global IDs, and not using those IDs would
 forfeit gc-toolkit's strongest cross-doc anchor.
@@ -368,11 +368,11 @@ forfeit gc-toolkit's strongest cross-doc anchor.
 When one doc draws facts from another and the reader benefits from
 inline provenance, cite the source path and section anchor. Borrowed
 from BMAD's story-template convention
-[Source: docs/research/naming-conventions/bmad-method-templates.md#cross-doc-reference-scheme].
+[Source: specs/tk-yiwfz.5/bmad-method-templates.md#cross-doc-reference-scheme].
 
 ```markdown
 The convergent finding across all surveyed sources is no archive
-directory [Source: docs/research/naming-conventions/bmad-method.md#doc-type-taxonomy].
+directory [Source: specs/tk-yiwfz.1/bmad-method.md#doc-type-taxonomy].
 ```
 
 This document uses citations exactly that way, and so should any
@@ -383,21 +383,21 @@ research surveys.
 
 - **Numbered identifiers within a doc** (`FR-001`, `T###`,
   `CHK###`, `Article VII`)
-  [Source: docs/research/naming-conventions/spec-kit.md#tasks-—-tasksmd-templatestasks-templatemd].
+  [Source: specs/tk-yiwfz.6/spec-kit.md#tasks-—-tasksmd-templatestasks-templatemd].
   Brittle when tied to position; redundant with bead-IDs as the
   durable join key. Adopt only inside a doc-type whose authors
   formally need stable cross-doc anchors to numbered items.
 - **Filename pairing by shared slug + date** (Superpowers
   `YYYY-MM-DD-<slug>.md` ↔ `YYYY-MM-DD-<slug>-design.md`)
-  [Source: docs/research/naming-conventions/superpowers.md#filename-patterns].
+  [Source: specs/tk-yiwfz.2/superpowers.md#filename-patterns].
   Beads already timestamp the work; the date prefix is redundant,
   and pairing files by date+slug requires renaming both together.
 - **Glob discovery** (BMAD `*prd*.md`)
-  [Source: docs/research/naming-conventions/bmad-method-templates.md#cross-doc-reference-scheme].
+  [Source: specs/tk-yiwfz.5/bmad-method-templates.md#cross-doc-reference-scheme].
   Ambiguous when multiple matches exist; explicit refs are clearer
   for gc-toolkit's per-bead-directory scope.
 - **Live-file embed** (Kiro `#[[file:<path>]]`)
-  [Source: docs/research/naming-conventions/kiro.md#filename-patterns].
+  [Source: specs/tk-yiwfz.7/kiro.md#filename-patterns].
   Requires harness support gc-toolkit doesn't have. Adopting it
   would mean *adding* a feature, not following a convention.
 
@@ -456,7 +456,7 @@ vendor gc-toolkit into their own city is a separate concern and
 hasn't been written. When demand for one materialises, the question
 of where it lives (root, `docs/`, or both via the
 `AGENTS.md`-as-symlink pattern Superpowers uses
-[Source: docs/research/naming-conventions/superpowers.md#filename-patterns])
+[Source: specs/tk-yiwfz.2/superpowers.md#filename-patterns])
 becomes load-bearing.
 
 ### Cross-bead query tooling
@@ -472,9 +472,9 @@ part of the spec itself.
 - **Anchor**: [`specs/tk-yiwfz/decisions.md`](../tk-yiwfz/decisions.md)
   — directional calls from operator/mechanik conversation 2026-05-06.
 - **Surveys** (cited inline above): six platform surveys at
-  `docs/research/naming-conventions/{bmad-method, bmad-method-templates,
-  superpowers, gastown, spec-kit, kiro}.md`. Each carries
+  `../tk-yiwfz.{1,2,3,5,6,7}/{bmad-method, superpowers, gastown,
+  bmad-method-templates, spec-kit, kiro}.md`. Each carries
   commit-SHA-and-path provenance to upstream.
-- **v1 synthesis**: `docs/principles/document-spec.md`
+- **v1 synthesis**: `specs/tk-yiwfz.4/document-spec.md`
   (polecat `gc-toolkit.furiosa`, bead `tk-yiwfz.4`). Reference for
   context; v2 is a clean rewrite, not a templated edit.

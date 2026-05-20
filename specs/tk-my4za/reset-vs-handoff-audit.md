@@ -44,7 +44,7 @@ restart.
 | `skills/handoff/SKILL.md` | 189 | `If during the carry-forward sweep you find yourself reaching for \`/compact\`, \`gc session reset\`, or \`gc session kill\` instead — stop.` | Enumerated alternative |
 | `docs/gas-city-reference.md` | 1095 | `gc session reset <name>     # Hard restart: kills host tmux session (use only when destroying co-located state is intended; for routine "restart the agent," prefer \`gc handoff\`)` | CLI cheatsheet entry — already updated by furiosa WIP |
 | `docs/gas-city-reference.md` | 1125 | `gc handoff [<target>]                      # Restart the agent (pane-scoped; preserves co-located tmux state); default for "fresh transcript"` | CLI cheatsheet entry — already updated by furiosa WIP |
-| `docs/design/consult-session-feasibility.md` | 44–50 | `\`gc handoff\` is the pane-scoped "restart the agent" primitive (preserves co-located tmux state); \`gc session reset\` is the host-session-destroying variant for the rare cases where a clean process tree is required. Either preserves the bead.` | Design-doc explanation — already updated by furiosa WIP |
+| `specs/2026-04-consult-design/consult-session-feasibility.md` | 44–50 | `\`gc handoff\` is the pane-scoped "restart the agent" primitive (preserves co-located tmux state); \`gc session reset\` is the host-session-destroying variant for the rare cases where a clean process tree is required. Either preserves the bead.` | Design-doc explanation — already updated by furiosa WIP |
 | `assets/scripts/tmux-spawn-scratch.sh` | 18 | `# They survive \`gc session reset <host>\` (which kills only the host tmux session — not the sibling)` | Architectural comment |
 | `assets/scripts/tmux-spawn-scratch.sh` | 84 | `#    Sibling-session model: scratches must survive \`gc session reset <host>\`, which destroys the entire host tmux session (not just pane :^.0).` | Architectural comment |
 
@@ -110,7 +110,7 @@ The cycle/recycle and operational-awareness fragments already prescribe
 | `skills/handoff/SKILL.md:189` | **Keep as reset** | This is enumerating the alternatives the operator might pivot to mid-skill (`/compact`, `gc session reset`, `gc session kill`) and instructing the agent *not* to silently switch. The mention of reset here is by-name reference, not a recommendation to use it for routine restart. |
 | `docs/gas-city-reference.md:1095` | **Switch to handoff (already applied)** | CLI cheatsheet originally said `gc session reset <name>     # Restart fresh, preserve bead`. Furiosa's WIP rewrote it to flag the host-tmux-destroying behavior and steer routine restart to `gc handoff`. Aligns with the rule. |
 | `docs/gas-city-reference.md:1125` | **Switch to handoff (already applied)** | CLI cheatsheet originally said `gc handoff [<target>]                      # Hand off to another agent`. Furiosa's WIP rewrote it to make handoff's pane-scoped, preserve-co-located-state semantics explicit, and to mark it the default for "fresh transcript." |
-| `docs/design/consult-session-feasibility.md:44–50` | **Switch to handoff (already applied)** | Design doc originally listed reset as the only "re-engage with current bead state" primitive. Furiosa's WIP added handoff as the pane-scoped default and reset as the rare destructive variant. |
+| `specs/2026-04-consult-design/consult-session-feasibility.md:44–50` | **Switch to handoff (already applied)** | Design doc originally listed reset as the only "re-engage with current bead state" primitive. Furiosa's WIP added handoff as the pane-scoped default and reset as the rare destructive variant. |
 | `assets/scripts/tmux-spawn-scratch.sh:18` | **Keep as reset** | Architectural comment explaining *why* the sibling-session model exists — it's a behavioural description of what reset does, not a recommendation for operators. |
 | `assets/scripts/tmux-spawn-scratch.sh:84` | **Keep as reset** | Same as line 18. (Note: tk-mjvm9 will revert the sibling-session model after this bead lands; modifying these comments here would conflict with that follow-up.) |
 
@@ -131,7 +131,7 @@ Already handoff-aligned — nothing to classify.
 1. `docs/gas-city-reference.md` — line 1095 reset row now flags the host-tmux
    destruction and steers routine restart to `gc handoff`; line 1125 handoff
    row now describes pane-scoped semantics and "default for fresh transcript."
-2. `docs/design/consult-session-feasibility.md` — session-lifecycle bullet
+2. `specs/2026-04-consult-design/consult-session-feasibility.md` — session-lifecycle bullet
    now positions handoff as the pane-scoped restart primitive and reset as
    the rare destructive variant.
 

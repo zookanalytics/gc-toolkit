@@ -92,8 +92,8 @@ commits to resolving a specific consult, concierge spawns a
 client into it; the host loads the bead in full and converses
 directly. Consults are filed as dependencies of the bead whose work
 they block, so closing a consult unblocks the parent. See
-`docs/design/consult-surfacing.md` (v1 surfacing model) and
-`docs/design/consult-session-v2-impl.md` (v2 session-per-consult, as
+`specs/2026-04-consult-design/consult-surfacing.md` (v1 surfacing model) and
+`specs/2026-04-consult-design/consult-session-v2-impl.md` (v2 session-per-consult, as
 built).
 
 ### Merge-strategy agnosticism
@@ -182,8 +182,8 @@ invented intentionally when we get to it, rather than bolted on.
   overseer; on resolution, it spawns a `consult-host` session for the
   bead and switches the overseer's tmux client into it. Consults are
   filed as dependencies of the parent bead. Details in
-  `docs/design/consult-surfacing.md` (v1 surfacing) and
-  `docs/design/consult-session-v2-impl.md` (v2 session-per-consult).
+  `specs/2026-04-consult-design/consult-surfacing.md` (v1 surfacing) and
+  `specs/2026-04-consult-design/consult-session-v2-impl.md` (v2 session-per-consult).
 - **Mayor ↔ concierge bidirectional awareness via overlay fragment**:
   the mayor side of the redirect (§5.7 of the consult-surfacing design)
   ships as a gc-toolkit overlay — `template-fragments/mayor-concierge-redirect.template.md`
@@ -230,9 +230,9 @@ The next durable artifacts, in rough order. Not a contract.
 4. Architect's patrol formula (Active hat) for drift and
    question-promotion.
 5. Consult-bead surfacing channel — `concierge` agent landed (v1
-   model from `docs/design/consult-surfacing.md`); session-per-consult
+   model from `specs/2026-04-consult-design/consult-surfacing.md`); session-per-consult
    v2 (Shape A — direct tmux attach, brand evaporates in-session)
-   landed on top, per `docs/design/consult-session-v2-impl.md`.
+   landed on top, per `specs/2026-04-consult-design/consult-session-v2-impl.md`.
    Pending build-signals from operating data:
    - second consult-producing specialist (forces the
      `consult-layer.md` pattern past one example);

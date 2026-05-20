@@ -1,3 +1,8 @@
+---
+name: gc-toolkit document spec (v1 synthesis)
+description: Superseded v1 synthesis under tk-yiwfz.4; the adopted central reference is docs/file-structure.md (commit 8015761). Retained as historical proposal.
+---
+
 # gc-toolkit document spec
 
 > **Status:** proposal. Not yet adopted. Adoption is the operator closing
@@ -6,8 +11,9 @@
 > does not bind future authors.
 >
 > **Bead:** `tk-yiwfz.4` (this synthesis). **Inputs:**
-> `tk-yiwfz.{1,2,3,5,6,7}` (six platform surveys under
-> `docs/research/naming-conventions/`).
+> `tk-yiwfz.{1,2,3,5,6,7}` (six platform surveys, originally filed under
+> `docs/research/naming-conventions/`; now relocated to
+> `specs/tk-yiwfz.{1,2,3,5,6,7}/`).
 > **Surveyed at:** 2026-05-06. **Author:** polecat `gc-toolkit.furiosa`.
 
 ## Why this lives at `docs/principles/document-spec.md`
@@ -72,12 +78,12 @@ Six platform surveys feed the matrix:
 
 | Survey | Source file | Upstream surveyed at |
 |---|---|---|
-| BMAD (naming) | `docs/research/naming-conventions/bmad-method.md` | `github.com/bmad-code-org/BMAD-METHOD` ~v6.6.0 era |
-| BMAD (templates) | `docs/research/naming-conventions/bmad-method-templates.md` | `github.com/bmad-code-org/BMAD-METHOD` @ `e36f219` (2026-05-01) |
-| Superpowers | `docs/research/naming-conventions/superpowers.md` | `github.com/obra/superpowers` v5.0.7 (2026-03-31) |
-| Gas Town | `docs/research/naming-conventions/gastown.md` | `rigs/gascity/examples/gastown/` + `rigs/gc-toolkit/docs/` (in-tree) |
-| Spec Kit | `docs/research/naming-conventions/spec-kit.md` | `github.com/github/spec-kit` @ `0f26551` (2026-05-05) |
-| Kiro | `docs/research/naming-conventions/kiro.md` | `kiro.dev/docs/` + community templates (2026-05-05) |
+| BMAD (naming) | [`../tk-yiwfz.1/bmad-method.md`](../tk-yiwfz.1/bmad-method.md) | `github.com/bmad-code-org/BMAD-METHOD` ~v6.6.0 era |
+| BMAD (templates) | [`../tk-yiwfz.5/bmad-method-templates.md`](../tk-yiwfz.5/bmad-method-templates.md) | `github.com/bmad-code-org/BMAD-METHOD` @ `e36f219` (2026-05-01) |
+| Superpowers | [`../tk-yiwfz.2/superpowers.md`](../tk-yiwfz.2/superpowers.md) | `github.com/obra/superpowers` v5.0.7 (2026-03-31) |
+| Gas Town | [`../tk-yiwfz.3/gastown.md`](../tk-yiwfz.3/gastown.md) | `rigs/gascity/examples/gastown/` + `rigs/gc-toolkit/docs/` (in-tree) |
+| Spec Kit | [`../tk-yiwfz.6/spec-kit.md`](../tk-yiwfz.6/spec-kit.md) | `github.com/github/spec-kit` @ `0f26551` (2026-05-05) |
+| Kiro | [`../tk-yiwfz.7/kiro.md`](../tk-yiwfz.7/kiro.md) | `kiro.dev/docs/` + community templates (2026-05-05) |
 
 Throughout the matrix, cells point to one of the six surveys for the
 authoritative quotation. Where a row aggregates multiple surveys, the
@@ -224,15 +230,16 @@ until the work is done. Many per project.**
    carries `**Status:**` prose ("draft", "approved design", "implemented",
    "rejected") in the gc-toolkit current style. Survives after adoption
    as the historical record of the decision.
-   *Examples (existing):* `docs/design/consult-surfacing.md`,
-   `docs/design/consult-session-{feasibility,v2-impl}.md`.
+   *Examples (existing):* [`../2026-04-consult-design/consult-surfacing.md`](../2026-04-consult-design/consult-surfacing.md),
+   [`../2026-04-consult-design/consult-session-feasibility.md`](../2026-04-consult-design/consult-session-feasibility.md),
+   [`../2026-04-consult-design/consult-session-v2-impl.md`](../2026-04-consult-design/consult-session-v2-impl.md).
 
 7. **Research / investigation** — A survey, spike, or comparative
    investigation that informs a downstream decision. Write-once: the
    facts at the time-of-survey are pinned by the doc; later changes file
    a new doc rather than rewriting the old.
-   *Examples (existing):* `docs/research/naming-conventions/*.md` (this
-   bead's six inputs), `docs/research/pack-architecture/spike-*.md`.
+   *Examples (existing):* `../tk-yiwfz.{1,2,3,5,6,7}/*.md` (this bead's
+   six inputs), [`../tk-rw0cb/spike-gc-toolkit-as-primary-pack.md`](../tk-rw0cb/spike-gc-toolkit-as-primary-pack.md).
 
 8. **Feature work bundle** — A directory grouping the docs that drive a
    specific named effort (the "escalation" workstream is the live
@@ -499,12 +506,12 @@ where they'd land:
 | `docs/gas-city-pack-v2.md` | unchanged | Versioned reference, type 2 |
 | `docs/gascity-local-patching.md` | unchanged | Reference manual (process), type 1 |
 | `docs/roadmap.md` | unchanged | Roadmap, type 3 |
-| `docs/design/consult-surfacing.md` | unchanged | Design, type 6 |
-| `docs/design/consult-session-feasibility.md` | unchanged | Design, type 6 |
-| `docs/design/consult-session-v2-impl.md` | unchanged | Design, type 6 |
-| `docs/research/naming-conventions/*.md` (six surveys) | unchanged | Research, type 7 |
-| `docs/research/pack-architecture/spike-*.md` | unchanged | Research, type 7 |
-| (this doc) `docs/principles/document-spec.md` | new file in new directory | Principle, type 4 |
+| `specs/2026-04-consult-design/consult-surfacing.md` | unchanged | Design, type 6 |
+| `specs/2026-04-consult-design/consult-session-feasibility.md` | unchanged | Design, type 6 |
+| `specs/2026-04-consult-design/consult-session-v2-impl.md` | unchanged | Design, type 6 |
+| `specs/tk-yiwfz.{1,2,3,5,6,7}/*.md` (six surveys) | unchanged | Research, type 7 |
+| `specs/tk-rw0cb/spike-*.md`, `specs/tk-0t1ip/pack-patch-timing-analysis.md` | unchanged | Research, type 7 |
+| (this doc) `specs/tk-yiwfz.4/document-spec.md` | new file in new directory | Principle, type 4 |
 
 **Net change:**
 
@@ -702,9 +709,9 @@ material it documents.
 **Branch:** `polecat/tk-yiwfz.4-document-spec-synthesis`
 **Parent bead:** `tk-yiwfz`
 **Sibling synthesis inputs:**
-- `tk-yiwfz.1` → `docs/research/naming-conventions/bmad-method.md`
-- `tk-yiwfz.2` → `docs/research/naming-conventions/superpowers.md`
-- `tk-yiwfz.3` → `docs/research/naming-conventions/gastown.md`
-- `tk-yiwfz.5` → `docs/research/naming-conventions/bmad-method-templates.md`
-- `tk-yiwfz.6` → `docs/research/naming-conventions/spec-kit.md`
-- `tk-yiwfz.7` → `docs/research/naming-conventions/kiro.md`
+- `tk-yiwfz.1` → [`../tk-yiwfz.1/bmad-method.md`](../tk-yiwfz.1/bmad-method.md)
+- `tk-yiwfz.2` → [`../tk-yiwfz.2/superpowers.md`](../tk-yiwfz.2/superpowers.md)
+- `tk-yiwfz.3` → [`../tk-yiwfz.3/gastown.md`](../tk-yiwfz.3/gastown.md)
+- `tk-yiwfz.5` → [`../tk-yiwfz.5/bmad-method-templates.md`](../tk-yiwfz.5/bmad-method-templates.md)
+- `tk-yiwfz.6` → [`../tk-yiwfz.6/spec-kit.md`](../tk-yiwfz.6/spec-kit.md)
+- `tk-yiwfz.7` → [`../tk-yiwfz.7/kiro.md`](../tk-yiwfz.7/kiro.md)

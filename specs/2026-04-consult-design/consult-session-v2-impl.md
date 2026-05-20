@@ -1,3 +1,8 @@
+---
+name: Session-per-Consult v2 — As-Built Implementation
+description: As-built implementation of session-per-consult Shape A (direct tmux attach, brand evaporates in-session); records implementation choices made within the approved feasibility shape.
+---
+
 # Session-per-Consult v2 — As-Built Implementation
 
 **Status:** implemented. Shape A (direct tmux attach, brand
@@ -9,7 +14,7 @@ specialists; future maintainers reading why this shape and not
 another.
 
 This document describes what shipped. It is **not** a redesign of the
-feasibility study (`docs/design/consult-session-feasibility.md`); it
+feasibility study ([`consult-session-feasibility.md`](./consult-session-feasibility.md)); it
 records the implementation choices made within the shape that study
 proposed and the overseer approved. Read the feasibility doc first if
 you need the *why*; read this doc to understand what's in the pack
@@ -270,8 +275,8 @@ paused) cleanly.
 
 ## 11. References
 
-- `docs/design/consult-surfacing.md` — v1 concierge design.
-- `docs/design/consult-session-feasibility.md` — v2 feasibility study;
+- [`consult-surfacing.md`](./consult-surfacing.md) — v1 concierge design.
+- [`consult-session-feasibility.md`](./consult-session-feasibility.md) — v2 feasibility study;
   the *why* behind these choices.
 - `formulas/mol-consult-host.toml` — the formula.
 - `agents/consult-host/prompt.template.md` — the generic host prompt.
