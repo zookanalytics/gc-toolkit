@@ -27,8 +27,7 @@ schema = 2
 # / polecat get shadowed by bare gastown copies). The right home for
 # the fragment-injection patches is the importing city/rig — the
 # importing city's `city.toml` carries `[[rigs.patches]]` blocks for
-# the gascity rig alongside `[rigs.imports.gascity-keeper]`. See the
-# sub-pack's README (or that of your city) for the concrete wiring.
+# the gascity rig alongside `[rigs.imports.gascity-keeper]`.
 
 # Materialise the keeper on demand in whichever rig imports this pack.
 # The agent ships as bare `keeper` inside the sub-pack; the binding
