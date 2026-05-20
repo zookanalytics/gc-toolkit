@@ -31,7 +31,7 @@ one auditable place (refinery + rig-scoped overlay).
 | upstream_remote | upstream | Git remote name pointing at gastownhall/gascity |
 | origin_remote | origin | Git remote name pointing at the city's fork |
 | upstream_branch | main | Branch to rebase onto and push back to |
-| test_command | make test | Test command run after rebase |
+| check_command | make check | Post-rebase quality gate (fmt-check + lint + vet + test in gascity) |
 | install_command | make install | Local rebuild of `gc` into `$INSTALL_DIR` |
 | notify_recipient | human | Mail target on completion / abort |
 | requesting_keeper | (empty) | Keeper address for the rework-dispatch handback; falls back to notify_recipient if unset |
@@ -74,12 +74,12 @@ routing — no silent drops, no auto-resolution.
 | Step | Failure handling |
 |------|------------------|
 | survey | LLM judgment can be wrong; record verdicts on the bead and proceed — the rebase step's patch-id check is the safety net for `drop-merged-upstream` |
-| rebase | Conflicts dispatch a rework polecat per conflicted kept commit. The post-rebase `test` step is the safety net for "we accepted a rework that broke the kept set." `metadata.backup_ref` keeps any state recoverable. |
-| test | Bead handback (`aborted_at=test`) lands first; mail with failure tail is best-effort. Bead stays open so a fix can resume. |
+| rebase | Conflicts dispatch a rework polecat per conflicted kept commit. The post-rebase `check` step is the safety net for "we accepted a rework that broke the kept set." `metadata.backup_ref` keeps any state recoverable. |
+| check | Bead handback (`aborted_at=check`) lands first; mail with failure tail is best-effort. Bead stays open so a fix can resume. The default `make check` covers fmt-check, lint, vet, and test — a failure here points at any of those surfaces. |
 | install | Bead handback (`aborted_at=install`) first; mail best-effort. Bead stays open. |
 | push | Push of `HEAD:rebase/{{issue}}` is fast-forward on the polecat-owned ref — failures here are auth/network/ref-protection, NOT a race against `{{upstream_branch}}`. Bead handback (`aborted_at=push`) first; mail best-effort. Race-loss against `{{upstream_branch}}` is detected and escalated by refinery via the overlay's `--force-with-lease` lease, not by this step. |
 
-The post-survey **abort** paths (test, install, push) share the same
+The post-survey **abort** paths (check, install, push) share the same
 shape: lock in the bead handback (`aborted_at`, status=open, reassignment
 to `notify_recipient`) **before** sending mail. The keeper's prime sweep
 catches `aborted_at` beads on next operator engagement, so even a silent
@@ -97,7 +97,7 @@ uses the legacy `metadata.conflict_questions` shape so the keeper's
 existing operator conversation handles it without bespoke flow."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 8
+version = 9
 
 [vars]
 [vars.upstream_remote]
@@ -112,9 +112,9 @@ default = "origin"
 description = "Branch to rebase onto and push back to"
 default = "main"
 
-[vars.test_command]
-description = "Command run after rebase to verify correctness"
-default = "make test"
+[vars.check_command]
+description = "Post-rebase quality gate command. The default `make check` in gascity is `fmt-check lint vet test` — running the full Go pipeline on the rebased tip. The wider gate is the authoritative safety net for the kept set, since rework polecats commit with `--no-verify` and the gascity pre-commit hook (which covers the same surfaces) is bypassed per rework. Operators can override (e.g., `--var check_command='make test'` to scope down) but the default is intentionally the full gate."
+default = "make check"
 
 [vars.install_command]
 description = "Command that rebuilds and installs the gc binary locally"
@@ -234,10 +234,10 @@ title = "Skip — rebase variant uses its own gates"
 needs = ["workspace-setup"]
 description = """
 This formula replaces the standard polecat preflight/implement/self-review
-sequence with `survey → rebase → test → install → push → notify-and-close`.
+sequence with `survey → rebase → check → install → push → notify-and-close`.
 There is no preflight to run on `{{upstream_branch}}` for this variant —
-the rebase step's patch-id checks plus the post-rebase test gate cover what
-preflight would have caught.
+the rebase step's patch-id checks plus the post-rebase quality gate cover
+what preflight would have caught.
 
 Close this step and proceed."""
 
@@ -251,10 +251,10 @@ steps below. Close this step and proceed."""
 
 [[steps]]
 id = "self-review"
-title = "Skip — replaced by test + install steps"
+title = "Skip — replaced by check + install steps"
 needs = ["implement"]
 description = """
-The post-rebase verification work for this formula lives in the `test` and
+The post-rebase verification work for this formula lives in the `check` and
 `install` steps below. Close this step and proceed."""
 
 [[steps]]
@@ -839,41 +839,52 @@ classification-driven substitutions for any conflicted keeps);
 records every resolution that fired this rebase."""
 
 [[steps]]
-id = "test"
-title = "Run the test suite on the rebased branch"
+id = "check"
+title = "Run the post-rebase quality gate on the rebased branch"
 needs = ["rebase"]
 description = """
-**Config: test_command = {{test_command}}**
+**Config: check_command = {{check_command}}**
 
 ```bash
-{{test_command}}
+{{check_command}}
 ```
 
-If tests pass, close this step and proceed.
+The default `{{check_command}}` in gascity is `make check`, which runs
+`fmt-check lint vet test` — the full Go quality gate on the rebased tip.
+This is the authoritative post-rebase safety net for the kept set: rework
+polecats commit with `--no-verify` and the gascity pre-commit hook (which
+covers fmt-check, lint, vet, regen-artifacts, and test) is bypassed per
+rework commit, so the wider gate here has to cover those surfaces.
 
-If tests fail, lock in the durable abort signal first, then mail (best-effort):
+If the gate passes, close this step and proceed.
+
+If the gate fails, lock in the durable abort signal first, then mail (best-effort):
 ```bash
 gc bd update {{issue}} \
-  --set-metadata aborted_at=test \
+  --set-metadata aborted_at=check \
   --status=open \
   --assignee="{{notify_recipient}}" \
   --set-metadata gc.routed_to="{{notify_recipient}}"
 
-TEST_TAIL=$(tail -200 <test output file or capture>)
+CHECK_TAIL=$(tail -200 <check output file or capture>)
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 VERDICTS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_verdicts')
 RESOLUTIONS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
 
-if ! gc mail send {{notify_recipient}} -s "gascity rebase: tests failed" -m "$(cat <<EOF
-Rebase succeeded but {{test_command}} failed on the rebased branch.
+if ! gc mail send {{notify_recipient}} -s "gascity rebase: post-rebase check failed" -m "$(cat <<EOF
+Rebase succeeded but {{check_command}} failed on the rebased branch.
+
+The default check_command is `make check` (fmt-check + lint + vet + test).
+The failure may be in any of those surfaces — read the tail to narrow it
+down before diving into a specific subsystem.
 
 Worktree: $WORKTREE
 Backup ref: $BACKUP_REF
 Bead: {{issue}}
 
 Failure tail:
-$TEST_TAIL
+$CHECK_TAIL
 
 Verdicts (commit_verdicts):
 $VERDICTS
@@ -896,14 +907,16 @@ exit 0
 `gc.routed_to`) is what actually puts the bead back in the operator's
 queue; without it the bead would strand on this drained session.
 
-A test failure on the rebased branch often points at a rework polecat's
+A check failure on the rebased branch often points at a rework polecat's
 choice — read `metadata.conflict_resolutions` and inspect the rework
-beads (especially `judgment-required` ones) to narrow down what changed."""
+beads (especially `judgment-required` ones) to narrow down what changed.
+The wider gate also catches fmt/lint/vet regressions that a rework may
+have introduced; the failure tail is the first place to look."""
 
 [[steps]]
 id = "install"
 title = "Rebuild and install gc from the rebased state"
-needs = ["test"]
+needs = ["check"]
 description = """
 **Config: install_command = {{install_command}}**
 
@@ -913,7 +926,7 @@ description = """
 
 If install passes, close this step and proceed.
 
-If install fails: same pattern as the test failure — bead handback first,
+If install fails: same pattern as the check failure — bead handback first,
 mail second (best-effort) — with `metadata.aborted_at=install` and subject
 `gascity rebase: install failed`:
 
@@ -1050,7 +1063,7 @@ Sections to include:
   If the log is empty, omit this section entirely.
 - **Upstream commits absorbed** — `git log --oneline <pre-rebase-tip>..{{upstream_remote}}/{{upstream_branch}}`
   where `<pre-rebase-tip>` is the backup ref.
-- **Test outcome** — pass (we got here) plus the test command name.
+- **Check outcome** — pass (we got here) plus the check command name (default `make check` = fmt-check + lint + vet + test).
 - **Install outcome** — pass.
 - **Push outcome** — pushed `<new-sha>` to `{{origin_remote}}/{{upstream_branch}}`.
 - **Backup ref** — name and pre-rebase tip sha, so the operator can roll
@@ -1078,7 +1091,7 @@ gc mail send {{notify_recipient}} -s "gascity rebase: ready for refinery handoff
 ```
 
 The summary describes the rebase outcome (drops, conflicts,
-resolutions, tests, install) and notes that refinery will perform the
+resolutions, check, install) and notes that refinery will perform the
 force-push to `{{upstream_branch}}` next. The mailed summary inlines
 `$RES_HEADLINE` and `$RES_DETAIL` when non-empty so the operator can
 see at a glance whether any kept commits required rework. The full
