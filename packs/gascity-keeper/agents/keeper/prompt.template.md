@@ -518,6 +518,9 @@ drain immediately.
 ```bash
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
+# Sling stamps gc.routed_to but not assignee; clear the parked keeper
+# assignee so the pool reconciler doesn't skip the bead as claimed.
+gc bd update <bead> --assignee ""
 gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
   --var requesting_keeper="$GC_AGENT"
 ```
@@ -623,6 +626,22 @@ no pending_rework or pending_review, fall into the conflict loop, and
 dispatch a fresh rework. If the operator wants the polecat to genuinely
 SKIP the commit (not rework), they'd need to do that in the worktree
 themselves via `git rebase --skip` before clearing the metadata.
+
+```bash
+gc bd update <bead> \
+  --unset-metadata conflict_questions \
+  --unset-metadata pending_rework \
+  --unset-metadata pending_review \
+  --assignee ""
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+cd "$RIG_PATH"
+gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
+  --var requesting_keeper="$GC_AGENT"
+```
+
+`--assignee ""` is required for the same reason as the rebase-in-progress
+re-pour above — the infeasible/stuck escalation parked this bead with
+`assignee=$REQUESTING_KEEPER`, and `gc sling` does not clear it.
 
 If the operator wants to abort: have them run `git rebase --abort` and
 `git reset --hard $BACKUP_REF` in the worktree, then close the bead
