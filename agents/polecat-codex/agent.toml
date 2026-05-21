@@ -1,6 +1,9 @@
 # polecat-codex — pool of polecat workers backed by the Codex CLI provider.
-# Mirrors gastown.polecat shape; provider switches the agent process to `codex`.
+# Same role as gastown.polecat; provider switches the agent process to `codex`.
 # Distinct work_dir keeps codex worktrees out of the default polecats/ tree.
+# The prompt is shared with gastown's polecat by reference (prompt_template
+# below) — intentional divergence is limited to provider, work_dir, and
+# session-cap.
 scope = "rig"
 provider = "codex"
 wake_mode = "fresh"
@@ -13,3 +16,12 @@ min_active_sessions = 0
 # we've validated end-to-end on signal-loom. Per-rig cap (each importing rig
 # gets its own pool of up to 2).
 max_active_sessions = 2
+
+# Share the polecat prompt by reference instead of carrying a near-duplicate.
+# Path is city-root-relative (resolved via promptTemplateSourcePath, not the
+# fragment-include path-adjuster). The materialized gastown pack is refreshed
+# on every `gc` start from the embedded gastown PackFS. inject_fragments
+# mirrors the polecat patch in pack.toml so this pool gets identical convoy
+# and non-impl-done guidance.
+prompt_template = ".gc/system/packs/gastown/agents/polecat/prompt.template.md"
+inject_fragments = ["polecat-convoys", "polecat-non-impl-done"]
