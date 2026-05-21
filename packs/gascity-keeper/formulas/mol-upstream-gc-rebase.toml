@@ -156,7 +156,15 @@ Otherwise, create one scoped to this bead:
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
 git -C "$RIG_ROOT" fetch --prune {{origin_remote}}
-git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"
+if git -C "$RIG_ROOT" rev-parse --verify "refs/heads/rebase/{{issue}}" >/dev/null 2>&1; then
+    # Branch already exists (recovery after worktree wipe). Re-attach
+    # the existing branch to a new worktree path without creating it.
+    # The branch sits at its prior tip; step 4's backup_ref/HEAD check
+    # catches any unexpected state (e.g. mid-rebase HEAD).
+    git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" "rebase/{{issue}}"
+else
+    git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"
+fi
 cd "$WORKTREE_PATH"
 gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH" --set-metadata branch="rebase/{{issue}}"
 ```
