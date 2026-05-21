@@ -18,10 +18,12 @@ min_active_sessions = 0
 max_active_sessions = 2
 
 # Share the polecat prompt by reference instead of carrying a near-duplicate.
-# Path is city-root-relative (resolved via promptTemplateSourcePath, not the
-# fragment-include path-adjuster). The materialized gastown pack is refreshed
-# on every `gc` start from the embedded gastown PackFS. inject_fragments
-# mirrors the polecat patch in pack.toml so this pool gets identical convoy
-# and non-impl-done guidance.
-prompt_template = ".gc/system/packs/gastown/agents/polecat/prompt.template.md"
+# The `//` prefix marks the path as city-root-relative; without it,
+# adjustFragmentPath (gascity internal/config/compose.go) joins the path
+# with the agent's source dir and the renderer silently falls back to the
+# default agent prompt. The materialized gastown pack is refreshed on every
+# `gc` start from the embedded gastown PackFS. inject_fragments mirrors
+# the polecat patch in pack.toml so this pool gets identical convoy and
+# non-impl-done guidance.
+prompt_template = "//.gc/system/packs/gastown/agents/polecat/prompt.template.md"
 inject_fragments = ["polecat-convoys", "polecat-non-impl-done"]
