@@ -207,10 +207,13 @@ gc runtime drain-ack
 exit
 ```
 
-Your work is not complete until you run these commands. `gc runtime drain-ack`
-signals the reconciler to kill this session — it will only restart you if the
-pool check command finds more work. Sitting idle after finishing implementation
-is the "Idle Polecat heresy."
+{{ template "polecat-non-impl-done" . }}
+
+Your work is not complete until you run the appropriate done
+sequence. `gc runtime drain-ack` signals the reconciler to kill
+this session — it will only restart you if the pool check command
+finds more work. Sitting idle after finishing implementation is
+the "Idle Polecat heresy."
 
 ---
 
@@ -220,7 +223,8 @@ is the "Idle Polecat heresy."
 
 | Want to... | Correct command |
 |------------|----------------|
-| Signal work complete | Done sequence (push, set metadata, reassign, `gc runtime drain-ack`, exit) |
+| Signal work complete (impl: commits made) | Impl done sequence — push branch, set metadata, reassign to refinery, drain, exit |
+| Signal work complete (non-impl: zero commits) | Non-impl done sequence — stamp task metadata, `gc bd close`, drain, exit |
 | Read formula steps | `gc bd show <wisp-id>` (shows formula ref) |
 | Escalate blocker | `WITNESS_TARGET="${GC_RIG:+$GC_RIG/}witness"; gc mail send "$WITNESS_TARGET" -s "ESCALATION: desc [HIGH]" -m "..."` |
 | Context exhaustion | `gc runtime request-restart` |

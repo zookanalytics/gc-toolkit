@@ -70,7 +70,7 @@ prompt_template = "patches/mayor-prompt.template.md"
 
 [[patches.agent]]
 name = "polecat"
-inject_fragments_append = ["polecat-convoys"]
+inject_fragments_append = ["polecat-convoys", "polecat-non-impl-done"]
 
 [[patches.agent]]
 name = "refinery"
