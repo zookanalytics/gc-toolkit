@@ -6,11 +6,9 @@
 # escalates via conflict_questions, it parks the work bead with
 # `assignee=$REQUESTING_KEEPER` and `gc.routed_to=$REQUESTING_KEEPER`.
 # The keeper later re-pours via `gc sling <pool> <bead> --on ...`. `gc
-# sling` stamps `gc.routed_to` but does NOT clear `assignee` by default
-# (upstream architectural ruling from @julianknutsen 2026-05-21: the
-# default sling path does not stamp both), so without `--reassign`
-# (upstream PR #1841) the pool reconciler sees a stale claim, skips the
-# bead, and the rebase strands.
+# sling` stamps `gc.routed_to` but does NOT clear `assignee` by default,
+# so without `--reassign` the pool reconciler sees a stale claim, skips
+# the bead, and the rebase strands.
 #
 # Discriminator: re-pour slings use the `<bead>` placeholder + a concrete
 # mol name (`--on mol-...`). Initial-dispatch slings use a shell-var
@@ -93,7 +91,7 @@ check_reassign_on_repour() {
     while IFS=$'\t' read -r line_no cmd; do
         [ -z "$line_no" ] && continue
         if ! echo "$cmd" | grep -qE -- '(^|[[:space:]])--reassign([[:space:]]|$)'; then
-            violations+=("$label:$line_no: re-pour sling without '--reassign' flag (parked-assignee race; see tk-1h9ipf, upstream PR #1841)")
+            violations+=("$label:$line_no: re-pour sling without '--reassign' flag (parked-assignee race; see tk-1h9ipf)")
         fi
     done <<< "$sites"
 }

@@ -1133,10 +1133,6 @@ gc bd update {{issue}} \
 # qualified name carries the `gc-toolkit.` prefix (matching the same
 # form `mol-polecat-work` uses: `${GC_RIG:+$GC_RIG/}gc-toolkit.refinery`).
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
-# Named-session delivery: stamp `assignee` only. Per @julianknutsen's
-# 2026-05-21 architectural ruling, `gc sling`/named-session routing
-# should not write both `assignee` and `gc.routed_to` — they are not
-# duplicates, and double-stamping invites stale-route confusion later.
 gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET"
 
 # Wake/nudge are best-effort — refinery's event watcher will catch the

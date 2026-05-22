@@ -518,10 +518,6 @@ drain immediately.
 ```bash
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
-# `gc sling` stamps `gc.routed_to` but does NOT clear `assignee`, so the
-# parked keeper assignee would shadow the pool route and the reconciler
-# would skip the bead as claimed. `--reassign` (upstream PR #1841)
-# collapses the unassign + sling into one atomic step.
 gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
   --reassign \
   --var requesting_keeper="$GC_AGENT"
@@ -640,12 +636,6 @@ gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
   --reassign \
   --var requesting_keeper="$GC_AGENT"
 ```
-
-`--reassign` is required for the same reason as the rebase-in-progress
-re-pour above — the infeasible/stuck escalation parked this bead with
-`assignee=$REQUESTING_KEEPER`, and `gc sling` does not clear `assignee`
-by default. `--reassign` (upstream PR #1841) unassigns and routes in
-one atomic step.
 
 If the operator wants to abort: have them run `git rebase --abort` and
 `git reset --hard $BACKUP_REF` in the worktree, then close the bead
