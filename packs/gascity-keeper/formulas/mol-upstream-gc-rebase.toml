@@ -169,7 +169,7 @@ WORKTREE_PATH="$GC_CITY_PATH/.gc/worktrees/gascity/rebase-{{issue}}"
 mkdir -p "$(dirname "$WORKTREE_PATH")"
 git -C "$RIG_ROOT" fetch --prune {{origin_remote}}
 git -C "$RIG_ROOT" worktree prune
-if git -C "$RIG_ROOT" show-ref --verify --quiet "refs/heads/rebase/{{issue}}"; then
+if git -C "$RIG_ROOT" rev-parse --verify "refs/heads/rebase/{{issue}}" >/dev/null 2>&1; then
     # Reattach an existing branch (survived a reaped worktree) to the
     # new path. `worktree prune` above drops stale `.git/worktrees/<name>`
     # admin entries so this `add` does not collide with the dead claim.
