@@ -239,8 +239,8 @@ script changes.
       probes template existence, reads the first message from `$2`
       (supplied by tmux `command-prompt` substitution), backgrounds
       spawn + seed via queue nudge for instant operator-pane return,
-      treats blank input as "spawn without seed," fails soft on
-      missing template
+      treats blank Enter as "spawn without seed" and Esc as
+      "cancel," fails soft on missing template
 - [x] `assets/scripts/tmux-bindings.sh:15` repointed at the new script
 - [x] This design doc
 - [ ] Live `Ctrl-B + a` test from mayor / mechanik / mechanik-thread
