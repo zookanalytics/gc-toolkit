@@ -1,0 +1,1 @@
+description = "Rebase mol's worktree-create reuses an existing rebase/<issue> branch (recovery after worktree wipe)"

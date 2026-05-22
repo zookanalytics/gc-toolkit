@@ -97,7 +97,7 @@ uses the legacy `metadata.conflict_questions` shape so the keeper's
 existing operator conversation handles it without bespoke flow."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 9
+version = 10
 
 [vars]
 [vars.upstream_remote]
@@ -151,12 +151,33 @@ WORKTREE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty'
 
 If it points to an existing directory, `cd` there and skip to step 3.
 
-Otherwise, create one scoped to this bead:
+Otherwise, create one at a rig-level path under the city runtime tree.
+The path must NOT be derived from `$(pwd)` (the polecat's worktree root)
+because the polecat alias is encoded in that path — a re-pour to any
+other pool polecat would then fail to resume from `metadata.work_dir`.
+Anchoring to `$GC_CITY_PATH/.gc/worktrees/gascity/rebase-<bead>` keeps
+the worktree alongside the existing per-rig agent worktrees (polecats,
+refinery) and is polecat-alias-independent, so any pool polecat can
+resume from `metadata.work_dir`. The directory name is a single segment
+(`rebase-<bead>`, not `rebase/<bead>`) so the two-level walkers in
+gascity's `WorktreeCheck` and `NestedWorktreePruneCheck` discover and
+prune it:
 ```bash
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
-WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
+: "${GC_CITY_PATH:?GC_CITY_PATH must be set; refusing to derive worktree path from /}"
+WORKTREE_PATH="$GC_CITY_PATH/.gc/worktrees/gascity/rebase-{{issue}}"
+mkdir -p "$(dirname "$WORKTREE_PATH")"
 git -C "$RIG_ROOT" fetch --prune {{origin_remote}}
-git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"
+git -C "$RIG_ROOT" worktree prune
+if git -C "$RIG_ROOT" rev-parse --verify "refs/heads/rebase/{{issue}}" >/dev/null 2>&1; then
+    # Reattach an existing branch (survived a reaped worktree) to the
+    # new path. `worktree prune` above drops stale `.git/worktrees/<name>`
+    # admin entries so this `add` does not collide with the dead claim.
+    git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" "rebase/{{issue}}"
+else
+    # Fresh start: create the branch from the upstream tip.
+    git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"
+fi
 cd "$WORKTREE_PATH"
 gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH" --set-metadata branch="rebase/{{issue}}"
 ```
