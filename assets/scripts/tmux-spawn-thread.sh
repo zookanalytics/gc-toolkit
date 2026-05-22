@@ -180,9 +180,11 @@ THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
     #     pass it as --title-hint so gascity's title model auto-seeds
     #     a short title from that text (a literal short version is
     #     set immediately and refined in the background). When the
-    #     popup was blank/Esc'd, omit --title-hint and let gascity
-    #     fall back to its default title (the agent name) — the
-    #     operator can refine later via the /thread-title skill.
+    #     popup was blank (Enter on an empty input), omit --title-hint
+    #     and let gascity fall back to its default title (the agent
+    #     name) — the operator can refine later via the /thread-title
+    #     skill. (Esc no longer reaches this block; it cancels at the
+    #     popup exit-code check above.)
     #     Positional-arg shuffling preserves the quoted message
     #     through field-splitting; `set --` only touches the
     #     subshell's $@ (CONFIGDIR is already captured above).
