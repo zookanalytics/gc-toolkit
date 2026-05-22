@@ -97,7 +97,7 @@ uses the legacy `metadata.conflict_questions` shape so the keeper's
 existing operator conversation handles it without bespoke flow."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 9
+version = 10
 
 [vars]
 [vars.upstream_remote]
@@ -156,17 +156,58 @@ Otherwise, create one scoped to this bead:
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
 git -C "$RIG_ROOT" fetch --prune {{origin_remote}}
+# Drop stale .git/worktrees/<name>/ admin metadata for worktree dirs
+# that were reaped without `git worktree remove`. Without this, the
+# re-attach below trips `fatal: 'rebase/<issue>' is already used by
+# worktree at <missing-path>`. `worktree prune` only removes admin
+# entries whose underlying path is missing, so a genuinely live
+# worktree on a different path still blocks the re-attach.
+git -C "$RIG_ROOT" worktree prune
+REATTACHED=0
 if git -C "$RIG_ROOT" rev-parse --verify "refs/heads/rebase/{{issue}}" >/dev/null 2>&1; then
     # Branch already exists (recovery after worktree wipe). Re-attach
     # the existing branch to a new worktree path without creating it.
     # The branch sits at its prior tip; step 4's backup_ref/HEAD check
     # catches any unexpected state (e.g. mid-rebase HEAD).
     git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" "rebase/{{issue}}"
+    REATTACHED=1
 else
     git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"
 fi
 cd "$WORKTREE_PATH"
 gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH" --set-metadata branch="rebase/{{issue}}"
+
+# Re-attach validation: if metadata signals an in-flight rebase
+# (`rebase_in_progress=true`, `pending_rework`, or `pending_review`)
+# but the reaped worktree's `.git/rebase-merge`/`.git/rebase-apply`
+# state did not survive, refuse to continue. Otherwise the next steps
+# would silently start a fresh `git rebase -i` from the partial-replay
+# tip, conflating the in-flight rebase's intermediate state with a new
+# rebase base. Hand back to the keeper for operator intervention.
+if [ "$REATTACHED" = "1" ]; then
+    REATTACH_META=$(gc bd show {{issue}} --json | jq -c '.[0].metadata')
+    REATTACH_RIP=$(printf '%s' "$REATTACH_META" | jq -r '.rebase_in_progress // ""')
+    REATTACH_REWORK=$(printf '%s' "$REATTACH_META" | jq -r '.pending_rework // ""')
+    REATTACH_REVIEW=$(printf '%s' "$REATTACH_META" | jq -r '.pending_review // ""')
+    if [ "$REATTACH_RIP" = "true" ] || [ -n "$REATTACH_REWORK" ] || [ -n "$REATTACH_REVIEW" ]; then
+        REBASE_MERGE_DIR=$(git rev-parse --git-path rebase-merge)
+        REBASE_APPLY_DIR=$(git rev-parse --git-path rebase-apply)
+        if [ ! -d "$REBASE_MERGE_DIR" ] && [ ! -d "$REBASE_APPLY_DIR" ]; then
+            echo "ERROR: metadata claims rebase is in flight, but the re-attached worktree" >&2
+            echo "       carries no .git/rebase-merge or .git/rebase-apply state (the prior" >&2
+            echo "       worktree's rebase admin did not survive the reap). Refusing to" >&2
+            echo "       silently start a fresh rebase from the partial-replay tip." >&2
+            gc bd update {{issue}} \
+                --set-metadata aborted_at=workspace-setup-reattach \
+                --status=open \
+                --assignee="{{notify_recipient}}" \
+                --set-metadata gc.routed_to="{{notify_recipient}}" \
+                --notes "Refused re-attach on $WORKTREE_PATH: metadata signals in-flight rebase (rebase_in_progress=$REATTACH_RIP, pending_rework=$REATTACH_REWORK, pending_review=$REATTACH_REVIEW) but neither .git/rebase-merge nor .git/rebase-apply survived the reaped worktree. Recovery requires keeper intervention: either reset rebase/{{issue}} to metadata.backup_ref and clear rebase_in_progress/pending_rework/pending_review to start fresh, or hand-rebuild the rebase state in the new worktree."
+            gc runtime drain-ack
+            exit 1
+        fi
+    fi
+fi
 ```
 
 The local working branch (`rebase/{{issue}}`) lets us rebase without touching

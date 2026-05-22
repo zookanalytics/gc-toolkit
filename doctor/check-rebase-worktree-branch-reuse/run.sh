@@ -51,6 +51,16 @@ if ! grep -qE 'worktree add "\$WORKTREE_PATH" -b "rebase/\{\{issue\}\}" "\{\{ori
     violations+=("missing fresh-run 'worktree add ... -b \"rebase/{{issue}}\" \"{{origin_remote}}/{{upstream_branch}}\"' (create path lost)")
 fi
 
+# 4. Stale-worktree prune must run before the rev-parse guard so that a
+#    reaped-worktree run can re-attach the branch without tripping
+#    `fatal: 'rebase/<issue>' is already used by worktree at <missing>`.
+#    Pinned here because the workspace-setup recovery flow only works if
+#    the prune call stays in place; removing it would reintroduce the
+#    stale-claim symptom that codex reproduced on PR #53.
+if ! grep -qE 'git -C "\$RIG_ROOT" worktree prune' "$file"; then
+    violations+=("missing 'git -C \"\$RIG_ROOT\" worktree prune' before rev-parse guard (stale-worktree recovery absent)")
+fi
+
 if [ ${#violations[@]} -eq 0 ]; then
     echo "mol-upstream-gc-rebase workspace-setup handles existing rebase/<issue> branch (recovery after worktree wipe)"
     exit 0
