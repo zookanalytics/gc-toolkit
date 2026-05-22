@@ -172,7 +172,28 @@ if git -C "$RIG_ROOT" rev-parse --verify "refs/heads/rebase/{{issue}}" >/dev/nul
     git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" "rebase/{{issue}}"
     REATTACHED=1
 else
-    git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}"
+    # Cold-start race-absorb (belt-and-suspenders to the keeper claim
+    # gate): between our rev-parse above and `worktree add -b` below,
+    # another polecat that also slipped past the gate may have created
+    # `rebase/{{issue}}`. If `worktree add -b` fails with "already
+    # exists", fall through once to the re-attach path and let step 4's
+    # backup_ref/HEAD check plus the REATTACHED=1 validation block
+    # below catch any genuinely broken state. A single absorb is
+    # enough; a loop would mask real failure.
+    WT_ERR=$(mktemp)
+    if ! git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "rebase/{{issue}}" "{{origin_remote}}/{{upstream_branch}}" 2>"$WT_ERR"; then
+        if grep -q "already exists" "$WT_ERR"; then
+            rm -f "$WT_ERR"
+            git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" "rebase/{{issue}}"
+            REATTACHED=1
+        else
+            cat "$WT_ERR" >&2
+            rm -f "$WT_ERR"
+            exit 1
+        fi
+    else
+        rm -f "$WT_ERR"
+    fi
 fi
 cd "$WORKTREE_PATH"
 gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH" --set-metadata branch="rebase/{{issue}}"
