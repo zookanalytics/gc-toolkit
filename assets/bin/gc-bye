@@ -1,13 +1,16 @@
 #!/usr/bin/env sh
-# bye — self-close this agent session.
+# gc-bye — self-close this agent session.
 #
-# nohup + & survives the Stop→store.Close ordering issue in `gc session
-# close` when an agent closes itself (see gc-hybst). Drop once fixed.
+# nohup + & previously worked around the Stop→store.Close ordering race
+# in self-close (gc-hybst). The race was eliminated by gascity#12
+# (gc-dofiih, 2026-05-20: close bead before stopping runtime). Kept as
+# defense-in-depth — the cost is one backgrounded exec, the benefit is
+# resilience if the close-before-stop ordering ever regresses.
 
 target="$GC_ALIAS"
 if [ -z "$target" ]; then
-  echo "bye: GC_ALIAS unset — try \`gc session close <name>\`" >&2
+  echo "gc-bye: GC_ALIAS unset — try \`gc session close <name>\`" >&2
   exit 1
 fi
 nohup gc session close "$target" >/dev/null 2>&1 &
-echo "bye: scheduled close of $target"
+echo "gc-bye: scheduled close of $target"
