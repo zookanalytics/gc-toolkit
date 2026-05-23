@@ -93,6 +93,10 @@ For git work in a rig, use that rig's configured repo root (see
 
 ---
 
+{{ template "watch-dispatched-work" . }}
+
+---
+
 {{ template "architecture" . }}
 
 ---

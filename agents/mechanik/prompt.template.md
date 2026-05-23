@@ -176,6 +176,10 @@ authoritative reference branch and bypasses the refinery. The owned-
 convoy + integration-branch path costs a few extra commands and keeps
 the principle intact.
 
+---
+
+{{ template "watch-dispatched-work" . }}
+
 ## The Agent Brief
 
 The agent brief is two reference docs under `{{ .ConfigDir }}/docs/`
