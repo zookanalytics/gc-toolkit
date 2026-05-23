@@ -85,9 +85,13 @@ if [ -f "$TITLE_CACHE" ]; then
 fi
 
 if [ "$read_cache" -eq 0 ]; then
-    raw_title=$(gc session list --state active --json 2>/dev/null \
-        | jq -r --arg a "$agent" \
-            '.sessions | map(select(.agent_name == $a)) | .[0].title // ""' 2>/dev/null \
+    if [ -n "${GC_SESSION_LIST_OVERRIDE:-}" ]; then
+        raw=$(cat "$GC_SESSION_LIST_OVERRIDE" 2>/dev/null || true)
+    else
+        raw=$(gc session list --state active --json 2>/dev/null || true)
+    fi
+    raw_title=$(printf '%s' "$raw" | jq -r --arg a "$agent" \
+        '.sessions | map(select(.agent_name == $a)) | .[0].title // ""' 2>/dev/null \
         || true)
     # Hide when title is the gascity default. For most agents that
     # means title == agent_name; for thread agents gascity strips the
