@@ -224,7 +224,6 @@ else
             --set-metadata aborted_at=workspace-setup \
             --status=open \
             --assignee="{{notify_recipient}}" \
-            --set-metadata gc.routed_to="{{notify_recipient}}" \
             --notes "Refused to mint backup_ref: HEAD ($HEAD_SHA) does not match {{origin_remote}}/{{upstream_branch}} ($PRE_REBASE_TIP). Resume requires manual recovery."
         gc runtime drain-ack
         exit 1
@@ -528,8 +527,7 @@ if [ -n "$PENDING_REWORK" ] && [ "$REDISPATCH_AFTER_REJECT" != "1" ]; then
                 --unset-metadata pending_rework \
                 --unset-metadata rebase_in_progress \
                 --status=open \
-                --assignee="$REQUESTING_KEEPER" \
-                --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+                --assignee="$REQUESTING_KEEPER"
             gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: rework infeasible on $REWORK_COMMIT_SHA — operator intervention needed"
             gc runtime drain-ack
             exit 0
@@ -742,8 +740,7 @@ if { [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; } \
         --set-metadata pending_rework="$REWORK_BEAD" \
         --set-metadata dispatch_count="$DISPATCHES" \
         --status=open \
-        --assignee="$REQUESTING_KEEPER" \
-        --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+        --assignee="$REQUESTING_KEEPER"
 
     gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: dispatched rework polecat on $REWORK_BEAD for $SHORT_SHA ($COMMIT_SUBJECT); re-pour when rework closes"
 
@@ -794,8 +791,7 @@ Write your full review report to bead notes. Set metadata.verdict='approve' or m
         --set-metadata last_review_bead="$REVIEW_BEAD" \
         --set-metadata dispatch_count="$DISPATCHES" \
         --status=open \
-        --assignee="$REQUESTING_KEEPER" \
-        --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+        --assignee="$REQUESTING_KEEPER"
 
     gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: dispatched review polecat on $REVIEW_BEAD for judgment-required rework $PENDING_REWORK; re-pour when review closes"
 
@@ -821,8 +817,7 @@ if [ "$STUCK" = "1" ]; then
         --set-metadata conflict_questions="$QUESTIONS" \
         --unset-metadata rebase_in_progress \
         --status=open \
-        --assignee="$REQUESTING_KEEPER" \
-        --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+        --assignee="$REQUESTING_KEEPER"
     gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: stuck — operator intervention needed (see metadata.conflict_questions)"
     gc runtime drain-ack
     exit 0
@@ -840,7 +835,6 @@ The output must roughly match the `keep` rows from
 have the same intent). If anything obviously wrong is in the post-rebase
 log, abort using the same pattern as the conflict case — bead handback
 first (`--status=open`, `--assignee={{notify_recipient}}`,
-`--set-metadata gc.routed_to={{notify_recipient}}`,
 `--set-metadata aborted_at=rebase-mismatch`), then the best-effort mail.
 
 **6. Clear rebase-in-progress flags:**
@@ -884,8 +878,7 @@ If the gate fails, lock in the durable abort signal first, then mail (best-effor
 gc bd update {{issue}} \
   --set-metadata aborted_at=check \
   --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+  --assignee="{{notify_recipient}}"
 
 CHECK_TAIL=$(tail -200 <check output file or capture>)
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
@@ -924,9 +917,9 @@ exit 0
 ```
 
 **Bead stays open** — the operator (or a follow-up polecat) resumes from
-`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign,
-`gc.routed_to`) is what actually puts the bead back in the operator's
-queue; without it the bead would strand on this drained session.
+`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign)
+is what actually puts the bead back in the operator's queue; without
+it the bead would strand on this drained session.
 
 A check failure on the rebased branch often points at a rework polecat's
 choice — read `metadata.conflict_resolutions` and inspect the rework
@@ -955,8 +948,7 @@ mail second (best-effort) — with `metadata.aborted_at=install` and subject
 gc bd update {{issue}} \
   --set-metadata aborted_at=install \
   --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+  --assignee="{{notify_recipient}}"
 
 INSTALL_TAIL=$(<install output, last 200 lines>)
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
@@ -1016,8 +1008,7 @@ the durable abort signal first, then mail the operator (best-effort):
 gc bd update {{issue}} \
   --set-metadata aborted_at=push \
   --status=open \
-  --assignee="{{notify_recipient}}" \
-  --set-metadata gc.routed_to="{{notify_recipient}}"
+  --assignee="{{notify_recipient}}"
 
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
@@ -1154,7 +1145,7 @@ gc bd update {{issue}} \
 # qualified name carries the `gc-toolkit.` prefix (matching the same
 # form `mol-polecat-work` uses: `${GC_RIG:+$GC_RIG/}gc-toolkit.refinery`).
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
-gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET" --set-metadata gc.routed_to="$REFINERY_TARGET"
+gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET"
 
 # Wake/nudge are best-effort — refinery's event watcher will catch the
 # assignment regardless, but the explicit prompt shortens the latency.

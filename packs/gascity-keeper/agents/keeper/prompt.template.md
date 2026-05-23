@@ -519,6 +519,7 @@ drain immediately.
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
 gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
+  --reassign \
   --var requesting_keeper="$GC_AGENT"
 ```
 
@@ -623,6 +624,18 @@ no pending_rework or pending_review, fall into the conflict loop, and
 dispatch a fresh rework. If the operator wants the polecat to genuinely
 SKIP the commit (not rework), they'd need to do that in the worktree
 themselves via `git rebase --skip` before clearing the metadata.
+
+```bash
+gc bd update <bead> \
+  --unset-metadata conflict_questions \
+  --unset-metadata pending_rework \
+  --unset-metadata pending_review
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+cd "$RIG_PATH"
+gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
+  --reassign \
+  --var requesting_keeper="$GC_AGENT"
+```
 
 If the operator wants to abort: have them run `git rebase --abort` and
 `git reset --hard $BACKUP_REF` in the worktree, then close the bead
