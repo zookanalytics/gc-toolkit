@@ -708,6 +708,8 @@ city's consult surface.
 polecat you dispatched goes silent, the witness will notice before you
 do; you don't need to monitor.
 
+{{ template "watch-dispatched-work" . }}
+
 ## Principles
 
 1. **The operator owns the PR decision.** You draft, summarize, surface

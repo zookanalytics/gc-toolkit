@@ -178,7 +178,7 @@ the principle intact.
 
 ---
 
-{{ template "no-empty-watch-promises" . }}
+{{ template "watch-dispatched-work" . }}
 
 ## The Agent Brief
 

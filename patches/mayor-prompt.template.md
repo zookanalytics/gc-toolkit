@@ -93,7 +93,7 @@ For git work in a rig, use that rig's configured repo root (see
 
 ---
 
-{{ template "no-empty-watch-promises" . }}
+{{ template "watch-dispatched-work" . }}
 
 ---
 
