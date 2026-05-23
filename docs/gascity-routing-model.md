@@ -96,6 +96,16 @@ on the assignee field — no error, no spurious update. Callers that
 don't know the bead's prior state can pass `--reassign`
 unconditionally and trust the routing call to be safe.
 
+### Adjacent — `gc.run_target` (graph.v2 step routing)
+
+`gc.run_target` is metadata on individual template steps inside
+graph.v2 formula files (e.g., `mol-review-quorum.toml`), not
+per-bead routing. It lives at a different layer than the three
+sling lanes above: those route a single bead between agents,
+while `gc.run_target` routes a step within a formula expansion.
+Don't conflate it with `gc.routed_to` when you see it in formula
+files.
+
 ## Note: upstream tutorial wording
 
 `docs/tutorials/06-beads.md` (upstream) still says, at line ~389:
