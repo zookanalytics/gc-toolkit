@@ -16,11 +16,20 @@
 # Output grammar (one JSON object per line):
 #   {"ts":"<rfc3339>","bead":"<id>","type":"watch_start","status":"<initial>"}
 #   {"ts":"<rfc3339>","bead":"<id>","type":"status_change","from":"<prior>","to":"<new>"}
-#   {"ts":"<rfc3339>","bead":"<id>","type":"watch_end","reason":"closed|already_closed|timeout|killed|stream_error_<n>"}
+#   {"ts":"<rfc3339>","bead":"<id>","type":"watch_end","reason":"<reason>"}
+#
+# watch_end reasons:
+#   closed                        — bead reached terminal status (closed)
+#   already_closed                — bead was already closed at startup
+#   timeout                       — timeout(1) wrapper fired
+#   killed                        — TERM/INT/HUP received
+#   startup_no_cursor             — gc events --seq did not return a usable cursor
+#   stream_ended_before_terminal  — event stream closed cleanly before the bead reached a terminal status
+#   stream_error_<n>              — gc events --follow exited non-zero (n = exit code)
 #
 # Exit codes:
-#   0   terminal status reached (closed, already_closed) or clean stream end
-#   1   bead not found / startup error
+#   0   terminal status reached (closed, already_closed)
+#   1   bead not found / startup error (incl. startup_no_cursor) / stream_ended_before_terminal / stream_error_<n>
 #   2   usage error
 #   124 timeout fired (also emits watch_end reason=timeout)
 #   143 SIGTERM received (also emits watch_end reason=killed)
@@ -100,10 +109,19 @@ cleanup() {
 
 on_kill() {
     emit_end killed || true
-    cleanup
     exit 143
 }
+# EXIT runs cleanup unconditionally so a broken stdout consumer, a `set -e`
+# trip on a failing jq write, or any other unexpected exit path still tears
+# down the producer + FIFO. cleanup() is idempotent.
+trap cleanup EXIT
 trap on_kill TERM INT HUP
+# SIGPIPE: ignore. Stdout is the notification channel; if the consumer
+# disappears, jq's writes will fail with EPIPE rather than killing the
+# process via signal. set -e then exits the script and the EXIT trap
+# cleans up. The exit code will be non-zero (jq's write-error code),
+# which is the right signal: the watch ended abnormally.
+trap '' PIPE
 
 # Snapshot the current event-stream cursor BEFORE reading the bead. Any
 # status transitions that race between the bd show below and the follow
@@ -124,6 +142,18 @@ if [ "$INIT" = "closed" ]; then
     exit 0
 fi
 
+# Cursor is the replay anchor for transitions that race against the bd
+# show above. Without it, `gc events --follow` falls back to a bare-follow
+# mode (no `--after`) that gascity gc-4elgv2 documents as unreliable —
+# the producer can sit silent indefinitely, breaking the "I'll let you
+# know" promise with no error signal. Fail loudly instead of attempting
+# the bare-follow fallback.
+if ! printf '%s' "$CURSOR" | grep -Eq '^[0-9]+$'; then
+    echo "gc-bd-watch: gc events --seq did not return a usable cursor; aborting" >&2
+    emit_end startup_no_cursor
+    exit 1
+fi
+
 PRIOR="$INIT"
 
 # Producer/consumer via fifo so the consumer loop runs in the main shell —
@@ -138,13 +168,8 @@ mkfifo "$FIFO"
 # --type isn't repeatable; subscribe to all events for this bead and filter
 # type in the loop. The payload-match restricts to one bead-id, so the
 # stream is already narrow.
-if [ -n "$CURSOR" ]; then
-    timeout "$TIMEOUT" gc events --follow --after "$CURSOR" --payload-match "bead.id=$BEAD" \
-        > "$FIFO" 2>/dev/null &
-else
-    timeout "$TIMEOUT" gc events --follow --payload-match "bead.id=$BEAD" \
-        > "$FIFO" 2>/dev/null &
-fi
+timeout "$TIMEOUT" gc events --follow --after "$CURSOR" --payload-match "bead.id=$BEAD" \
+    > "$FIFO" 2>/dev/null &
 PRODUCER=$!
 
 # Consume from the fifo. `read` returns non-zero on EOF, which is how we
@@ -174,22 +199,26 @@ done <"$FIFO"
 # the wait status to distinguish timeout from a stream error.
 # `|| PRODUCER_EXIT=$?` keeps set -e from short-circuiting on non-zero
 # wait status — we explicitly want to inspect it.
+#
+# A clean producer exit (status 0) BEFORE the bead reaches a terminal
+# status is treated as an error: a watcher that ends without "closed"
+# but reports success is a silent dropped notification, which is the
+# exact failure mode this script exists to prevent.
 if [ -z "$EXIT_REASON" ]; then
     PRODUCER_EXIT=0
     wait "$PRODUCER" 2>/dev/null || PRODUCER_EXIT=$?
     PRODUCER=""
     case "$PRODUCER_EXIT" in
         124) EXIT_REASON="timeout" ;;
-        0)   EXIT_REASON="stream_end" ;;
+        0)   EXIT_REASON="stream_ended_before_terminal" ;;
         *)   EXIT_REASON="stream_error_$PRODUCER_EXIT" ;;
     esac
 fi
 
 emit_end "$EXIT_REASON"
-cleanup
 
 case "$EXIT_REASON" in
-    closed|stream_end) exit 0 ;;
-    timeout)           exit 124 ;;
-    *)                 exit 1 ;;
+    closed)  exit 0 ;;
+    timeout) exit 124 ;;
+    *)       exit 1 ;;
 esac
