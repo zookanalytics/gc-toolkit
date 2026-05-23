@@ -41,7 +41,7 @@ agent="${1:-}"
 slug=$(printf '%s' "$agent" | sed 's|[./]|-|g')
 
 TITLE_CACHE="/tmp/gc-title-${slug}"
-# TTL: titles change rarely (operator-initiated, via /thread-title or
+# TTL: titles change rarely (operator-initiated, via /session-title or
 # gc session rename). gc hook + gc mail check already take 5-20s per
 # refresh on a loaded Dolt server, so a too-short TTL is meaningless
 # — the cache mtime is set when the previous run finished its
