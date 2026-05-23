@@ -142,12 +142,13 @@ if [ "$INIT" = "closed" ]; then
     exit 0
 fi
 
-# Cursor is the replay anchor for transitions that race against the bd
-# show above. Without it, `gc events --follow` falls back to a bare-follow
-# mode (no `--after`) that gascity gc-4elgv2 documents as unreliable —
-# the producer can sit silent indefinitely, breaking the "I'll let you
-# know" promise with no error signal. Fail loudly instead of attempting
-# the bare-follow fallback.
+# Cursor is the replay anchor for transitions that race against the
+# `gc bd show` above. Between the `gc events --seq` and the bd show,
+# the bead can transition; without `--after`, the follow stream starts
+# at the current head and silently misses anything that happened in
+# that startup window — exactly the lost-notification shape this
+# watcher exists to prevent. Fail loud on a missing cursor rather than
+# ship a watcher that can miss the window it was created for.
 if ! printf '%s' "$CURSOR" | grep -Eq '^[0-9]+$'; then
     echo "gc-bd-watch: gc events --seq did not return a usable cursor; aborting" >&2
     emit_end startup_no_cursor
