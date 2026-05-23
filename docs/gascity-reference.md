@@ -125,7 +125,7 @@ Topics gc-toolkit has captured locally, where upstream coverage is
 missing, partial, or contradicted by a more recent maintainer ruling.
 Entries here are gc-toolkit-authored prose, not upstream pointers.
 
-- [Gas City routing model: sling vs assignee vs `--reassign`](gascity-routing-model.md) — three-lane routing model per the PR #1736 ruling, with an audit list of sites that still set both `assignee` and `gc.routed_to`.
+- [Gas City routing model: sling vs assignee vs `--reassign`](gascity-routing-model.md) — three-lane routing model per the PR #1736 ruling.
 
 ## Refresh procedure
 
