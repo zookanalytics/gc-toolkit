@@ -27,6 +27,7 @@ moves between them.
 |---|---|---|---|---|---|
 | **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work | no — Tier 3 skipped | refinery, gascity-keeper |
 | **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, boot, witness, mechanik (gc-toolkit) |
+| **Patrol (overlay)** | named singleton + patrol-cycle prompt (4-tier startup, pour-before-burn) | yes — runs as the underlying named singleton | yes, as underlying named | no — Tier 3 skipped; patrol wisps are produced, not consumed via routed queue | deacon, witness, refinery |
 | **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
 | **Thread (operator-spawned)** | agent with `work_query = "printf '[]'"` + `sling_query` that exits non-zero | no, N instances | never (work query is a stub) | no | mayor-thread, mechanik-thread |
 | **Manual** | `gc session new <template>` | no — just a session_origin | no — operator initiates | depends on the agent's variant | any template invoked this way |
@@ -118,12 +119,17 @@ mode = "always"
 | String | Value |
 |---|---|
 | Template | `mechanik` |
-| Scope | `city` (no rig prefix) |
+| Scope | `city` (no scope-dir prefix) |
 | BindingName | `gc-toolkit` (import binding) |
-| QualifiedName | `gc-toolkit/gc-toolkit.mechanik` |
+| Dir | `""` (city scope leaves Dir empty) |
+| QualifiedName | `gc-toolkit.mechanik` |
 
-Same doubled segment, same reason: import binding name and pack
-name match.
+Verify live: `gc session list` shows the alias `gc-toolkit.mechanik` —
+no leading `<dir>/` segment, because `NamedSession.QualifiedName()`
+only prepends `Dir` when non-empty
+(`rigs/gascity/internal/config/config.go`). Rig-scoped sessions get
+the rig name as Dir (see the polecat example above); city-scoped
+sessions do not.
 
 ## Variant A — Named singletons (`[[named_session]]`)
 
@@ -142,10 +148,20 @@ mode = "on_demand" | "always"  # default: "on_demand"
 
 ### Identity
 
-QualifiedName is `<scope-dir>/<binding>.<identity>` after import
-expansion. For city-scoped sessions Dir is the pack's scope dir;
-for rig-scoped sessions Dir is the rig name. See the worked
-example above.
+QualifiedName composes from `Dir` and `IdentityName` after import
+expansion:
+
+- **Rig-scoped** (`scope = "rig"`): Dir is the rig name, so
+  QualifiedName is `<rig>/<binding>.<identity>` (e.g.,
+  `gc-toolkit/gc-toolkit.witness`).
+- **City-scoped** (`scope = "city"`): Dir is `""`, so QualifiedName
+  is just `<binding>.<identity>` (e.g., `gc-toolkit.mechanik`,
+  `gc-toolkit.mayor`).
+
+`NamedSession.QualifiedName()` only prepends `Dir + "/"` when `Dir`
+is non-empty; everywhere you address a city-scoped singleton (nudge,
+mail, `--assignee`, `gc.routed_to`), use the bare
+`<binding>.<identity>` form. See the worked examples above.
 
 ### Lifecycle
 
@@ -174,19 +190,25 @@ footgun](#gc-session-kill-vs-close).
 ### Addressing
 
 ```bash
-# Wake / send a nudge to the canonical singleton.
-gc session nudge gc-toolkit/gc-toolkit.mechanik "..."
+# Wake / send a nudge to a city-scoped canonical singleton.
+gc session nudge gc-toolkit.mechanik "..."
 
 # Mail to the canonical singleton.
-gc mail send gc-toolkit/gc-toolkit.mechanik -s "..." -m "..."
+gc mail send gc-toolkit.mechanik -s "..." -m "..."
 
 # Direct work assignment (Lane 2 — see gascity-routing-model.md).
-bd update tk-abcde --assignee gc-toolkit/gc-toolkit.mechanik
+bd update tk-abcde --assignee gc-toolkit.mechanik
+
+# Rig-scoped singletons keep the rig name as a prefix.
+gc session nudge gc-toolkit/gc-toolkit.witness "..."
 ```
 
-All three commands expect the **QualifiedName** form. Bare template
-names and `<binding>.<template>` without the scope prefix both
-fail; see the [addressing footgun](#gc-session-new-requires-the-fully-qualified-form).
+All four commands expect the **QualifiedName** form — the alias
+shown in `gc session list`. The rule is the same for both scopes:
+the address is exactly what `NamedSession.QualifiedName()` computes
+(see [Identity](#identity)). Bare template names (without the
+binding prefix) do not match; for the `gc session new` template form
+see the [addressing footgun](#gc-session-new-requires-the-fully-qualified-form).
 
 ### Work routing visibility
 
@@ -347,12 +369,21 @@ sling_query = "echo 'mayor-thread is operator-spawned only; not a sling target' 
 
 ### Identity
 
-- Template: `mayor-thread`, `mechanik-thread`, …
-- QualifiedName: `<rig>/<pack>.<template>` (e.g.,
-  `gc-toolkit/gc-toolkit.mayor-thread`)
+Thread agents inherit their canonical's scope (see [Threads do not
+change agent scope](#threads-do-not-change-agent-scope) below) —
+both checked-in thread agents (`mayor-thread`, `mechanik-thread`)
+declare `scope = "city"`, matching their canonicals.
+
+- Template name: `mayor-thread`, `mechanik-thread`, …
+- Template QualifiedName: `<binding>.<template>` for city-scoped
+  threads (e.g., `gc-toolkit.mayor-thread`); rig-scoped would prefix
+  the rig name.
+- Per-instance alias: `<binding>.<template>-adhoc-<id>` (city) or
+  `<rig>/<binding>.<template>-adhoc-<id>` (rig). Verify via
+  `gc session list`.
 - Per-instance AgentBase: assigned at spawn, drives
-  `work_dir = ".gc/agents/mayor-thread/{{.AgentBase}}"` so
-  parallel threads don't collide in their scratch dirs.
+  `work_dir = ".gc/agents/<template>/{{.AgentBase}}"` so parallel
+  threads don't collide in their scratch dirs.
 
 ### Lifecycle
 
@@ -377,15 +408,125 @@ the scope.
 ### Addressing
 
 ```bash
-gc session new gc-toolkit/gc-toolkit.mayor-thread my-focus-thread
+# City-scoped thread (current mayor-thread / mechanik-thread).
+gc session new gc-toolkit.mayor-thread --alias my-focus-thread
 # spawns gc-toolkit.mayor-thread-adhoc-<id>, returns the session name
 
-gc session nudge gc-toolkit.mayor-thread-adhoc-<id> "..."  # to the specific instance
+gc session nudge gc-toolkit.mayor-thread-adhoc-<id> "..."  # specific instance
 gc mail send gc-toolkit.mayor-thread-adhoc-<id> -s "..." -m "..."
 ```
 
+A rig-scoped thread (if one existed) would spawn from the
+`<rig>/<binding>.<template>` form instead; see [gc session new
+addressing footgun](#gc-session-new-requires-the-fully-qualified-form).
+
 `gc sling <thread-qualified-name> <bead>` is explicitly rejected
 by the thread's `sling_query` stub.
+
+## Variant D — Patrol agents (overlay)
+
+Patrol agents are **not** a distinct configuration variant. They
+are named singletons (Variant A) whose prompt template adds a
+patrol-wisp cycle on top of the standard lifecycle. Deacon,
+witness, and refinery are the patrol agents in the gastown base —
+each `[[named_session]]` declares them like any other singleton,
+but their prompts (and the `propulsion-deacon`, `propulsion-witness`,
+`propulsion-refinery` fragments in
+`rigs/gascity/examples/gastown/packs/maintenance/template-fragments/propulsion.template.md`)
+implement the patrol contract described below.
+
+This is called out as its own variant because the contract has
+substantial mechanics that pool workers and threads do not have,
+and because regressions in this contract show up as
+missed-MERGE_READY and stale-patrol incidents (`tk-fyzvk`,
+`tk-6hm32`, `tk-yvtiv`).
+
+### Patrol wisps
+
+Each patrol cycle is a single bead — a **patrol wisp** — owned by
+the agent. The wisp is created at cycle start, status flips through
+`in_progress` while the agent works, and it is closed when the
+cycle completes. The next cycle pours a fresh wisp before burning
+the old one (**pour-before-burn**), so the agent always has a
+discoverable hook.
+
+Patrol wisps are **root-level**: they are not sub-beads of a
+parent workflow molecule. Each cycle is its own root.
+
+### Startup discovery (4-tier)
+
+When a patrol agent starts (boot, restart, or recovery), it walks
+four tiers before pouring a fresh wisp. The first tier that returns
+work wins:
+
+1. **In-progress wisp** — `bd list --status=in_progress
+   --assignee=$GC_AGENT`. Crash recovery: pick up where you left
+   off mid-cycle.
+2. **Routed work bead** — `bd ready --has-metadata-key=branch
+   --assignee=...`. Catches work that arrived during a
+   cycle-recycle window (e.g., operator `/clear`).
+3. **Open patrol wisp** — adopt the newest OPEN patrol wisp owned
+   by this agent; close older duplicates as
+   `orphaned cross-rotation`. Covers wisps that survived a
+   rotation without being claimed.
+4. **Fresh pour** — only when 1-3 are empty. Create a new patrol
+   wisp and claim it `in_progress`.
+
+This shape is enforced at pack-validate time by
+`doctor/check-startup-discovery/`; if `gc doctor` flags a patrol
+agent's prompt as missing tier 2 or 3, expect missed-MERGE_READY-
+style stalls. The reference implementation lives in
+`agents/refinery/prompt.template.md` and
+`agents/deacon/prompt.template.md`.
+
+### Lifecycle
+
+Beyond what the underlying named singleton provides:
+
+- **Restart-friendly.** A patrol agent can be killed mid-cycle
+  without losing work — tier-1 recovers via the `in_progress`
+  wisp. Use `gc runtime request-restart` (preferred) or
+  `gc session reset` when a refresh is needed; `gc session kill`
+  also works for patrols because the reconciler will respawn and
+  the new instance will adopt the in-flight wisp via tier 1.
+- **Handoff.** Patrols do not need explicit operator-driven
+  handoff — the next cycle is the handoff. Closing the current
+  wisp and the cycle-recycle behavior in the prompt template
+  together carry the cadence.
+- **Health.** Patrol freshness is checked by deacon's own patrol
+  (`mol-deacon-patrol.toml`): a stale patrol wisp on witness or
+  refinery surfaces as a deacon warning. The reconciler also
+  surfaces patrol agents that are alive-but-stuck via
+  `gc doctor` checks.
+
+### Addressing
+
+Same as the underlying named singleton — patrols use the same
+QualifiedName (`<rig>/<binding>.<template>` for the rig-scoped
+witness/refinery, `<binding>.<template>` for the city-scoped
+deacon). See [Variant A — Named singletons](#variant-a--named-singletons-named_session).
+
+### Work routing visibility
+
+Same Tier 1 + Tier 2 gating as named singletons —
+`$GC_SESSION_ORIGIN=named` skips Tier 3 routed pool. Patrol wisps
+are *produced* by the patrol cycle itself (Tier 1 / Tier 2 hits),
+not consumed from the routed pool. Outside work that needs a
+specific patrol agent to act should use `bd update --assignee
+<patrol-qualified-name>` (Lane 2), not `gc sling` — same rule as
+any named singleton.
+
+### Examples in the wild
+
+- **Deacon** (`gc-toolkit.deacon`, city-scoped, `mode = "always"`):
+  cross-rig gate checks, convoy dispatch, stuck-agent escalation.
+  Patrol cycle: `mol-deacon-patrol.toml`.
+- **Witness** (`<rig>/gc-toolkit.witness`, rig-scoped,
+  `mode = "always"`): per-rig orphan worktree salvage, stuck polecat
+  detection, missing-bead-owner surfacing.
+- **Refinery** (`<rig>/gc-toolkit.refinery`, rig-scoped,
+  `mode = "on_demand"`): merge queue processor; patrol cycle pours
+  per merge-queue iteration.
 
 ## session_origin: ephemeral vs. manual vs. named
 
@@ -451,7 +592,11 @@ only covers *what each variant can see*.
 
 The "address as" column gives the form you should pass to the
 command. "✗" means the operation is not meaningful for the
-variant (and either errors or is a no-op).
+variant (and either errors or is a no-op). Patrol agents
+(Variant D) are not a separate column — they address identically
+to named singletons (their underlying variant); see
+[Variant D — Patrol agents](#variant-d--patrol-agents-overlay) for
+the cycle-level mechanics that the matrix does not capture.
 
 | Command | Named singleton | Pool worker | Thread |
 |---|---|---|---|
@@ -460,7 +605,7 @@ variant (and either errors or is a no-op).
 | `gc session close <id>` | session bead ID (atomically stops runtime + closes bead) | session bead ID | session bead ID |
 | `gc session kill <id>` | session bead ID (stops tmux only; reconciler may restart) | session bead ID | session bead ID |
 | `gc session reset <id>` | session bead ID | session bead ID | session bead ID |
-| `gc session wake <addr>` | QualifiedName | QualifiedName (wakes a sleeping instance) | ✗ (work_query stub never matches) |
+| `gc session wake <addr>` | session id or alias (QualifiedName works since alias == QualifiedName) | session id or instance alias — **not** the pool QualifiedName | session id or adhoc alias |
 | `gc session list` | shows canonical alias | shows each instance | shows each adhoc instance |
 | `gc session peek <id>` | session bead ID | session bead ID | session bead ID |
 | `gc session wait <id>` | session bead ID | session bead ID | session bead ID |
@@ -472,8 +617,14 @@ variant (and either errors or is a no-op).
 | `bd update <bead> --assignee <addr>` | QualifiedName (Lane 2) | instance name (Lane 2; usually unwanted for pool work — prefer sling) | adhoc session name |
 | `bd update <bead> --set-metadata gc.routed_to=<target>` | ✗ — singleton ignores Tier 3 | QualifiedName / PoolName (Lane 1) | ✗ — work_query stub ignores Tier 3 |
 | `gc sling <target> <bead>` | ✗ — singleton ignores Tier 3 (use `bd update --assignee`) | QualifiedName / PoolName (Lane 1) | ✗ — sling_query exits non-zero |
-| `gc agent list` | shows the template | shows the template + instances | shows the template |
-| `gc agent drain <addr>` | QualifiedName | QualifiedName (drains the whole pool) | ✗ |
+| `gc runtime drain <addr>` | session id or alias | session id or instance alias (no pool-level drain — drain each instance, or shrink `max_active_sessions` in config) | session id or adhoc alias |
+
+Inventory-style listing (`gc agent list`) and pool-wide drain
+(`gc agent drain`) were removed when runtime ops moved out of
+`gc agent`. The remaining `gc agent` subcommands are `add`,
+`resume`, and `suspend` (config-level only). To enumerate live
+agents, use `gc session list`; to drain a specific session, use
+`gc runtime drain <session-id-or-alias>` as shown above.
 
 ## Known footguns
 
