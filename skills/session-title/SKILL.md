@@ -64,9 +64,13 @@ to re-query:
 > *Title set to "<text>".*
 
 No proposal step, no permission prompt. If recent context is too thin
-to choose a focused title, say so rather than guessing — and fall back
-to Suggest behavior (propose and wait) so the operator can supply
-direction.
+to choose a focused title, say so rather than guessing — explain that
+context is thin and ask the operator to supply a phrase, or to use
+`--suggest` if they want a proposal first. Do **not** silently fall
+through into Suggest; the no-args path is direct-auto-apply by design,
+and routing into propose-and-wait breaks that contract. `--suggest`
+remains the explicit form when the operator wants to see and approve a
+proposal.
 
 ## Set
 
@@ -147,7 +151,7 @@ it's applied. Name what's still ahead.
 > shipping the follow-ups. The title locks the popup to a question
 > that's already answered.
 >
-> **Good:** *"ship gc-8p3dnt doc + codex review"* — names the work
+> **Good:** *"ship session-title doc + codex review"* — names the work
 > still ahead. Operator scanning `gc session list` sees what this
 > session is actually on.
 
@@ -165,6 +169,10 @@ Optimize for **future-self at a glance**:
   footer column.
 - Topic, not status. "debugging X" or "wip X" is noise — every live
   session is in progress. "X" alone says more.
+- Human-meaningful references, not opaque IDs. `<repo> PR #N`, topic
+  names (`session-title`, `signal-loom`), and verb-noun phrases all
+  scan. Bare bead IDs (`tk-xxxxx`, `gc-yyyyy`) leave the operator
+  with nothing to read at a glance.
 
 ## When to self-rename (without being asked)
 
@@ -188,9 +196,12 @@ Canonical agents (mayor, mechanik, deacon) **rotate** their title as
 focus shifts. Unlike threads, the canonical's role-name default
 (`mayor`, `mechanik`, `deacon`) gives the operator no signal beyond
 "this agent is alive." A rotating focus title — `skill rename
-audit`, `signal-loom landing convoy`, `tk-jct1gk PR triage` — makes
-`gc session list` and the session popup scannable: the operator
-sees what each canonical is currently on without having to peek.
+audit`, `signal-loom landing convoy`, `gc-toolkit PR #60 review
+triage` — makes `gc session list` and the session popup scannable:
+the operator sees what each canonical is currently on without having
+to peek. As in thread mode, the title must use a human-meaningful
+reference (a `<repo> PR #N` form or topic/verb-noun phrase) — a bare
+bead ID gives the operator nothing to scan.
 
 The rotation is a single `gc session rename` per focus shift, run by
 the agent itself (not the operator). See the
