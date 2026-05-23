@@ -19,8 +19,9 @@ past the session.
 After `gc sling <pool> <bead>` to dispatch, spawn
 `{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>` as a
 backgrounded shell command and observe its stdout. Match on
-`"type":"status_change"` for any transition, or narrow to the
-specific status you care about, e.g. `"to":"closed"`.
+`"type":"status_change"`. Every meaningful transition fires one
+event — that includes states like `blocked` that need intervention,
+not just `closed`.
 
 **Claude Code example:**
 
@@ -44,12 +45,6 @@ parse line-by-line:
 {"ts":"<rfc3339>","bead":"<id>","type":"status_change","from":"<prior>","to":"<new>"}
 {"ts":"<rfc3339>","bead":"<id>","type":"watch_end","reason":"closed|already_closed|timeout|killed|stream_error_<n>"}
 ```
-
-`bead.updated` fires on every metadata write, label change, and
-cache-reconcile pass; the script filters those out and only emits on
-real status transitions, so your line-match stays cheap. Match on
-`"type":"status_change"` for any transition, or narrow to
-`"to":"closed"` when you only care about completion.
 
 ### When the pattern fits a different shape
 
