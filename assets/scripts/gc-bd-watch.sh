@@ -3,11 +3,15 @@
 #
 # Usage: gc-bd-watch <bead-id> [--timeout=DURATION]
 #
-# Designed to be spawned via Bash(run_in_background) by an agent that
-# wants to be woken when a bead transitions status. Each stdout line is
-# a self-contained JSON object; consumers parse line-by-line and apply
-# Monitor patterns against `"type":"status_change"` or the desired
-# target status (e.g. `"to":"closed"`).
+# Designed to be spawned as a background process by an agent's
+# harness. Each stdout line is a self-contained JSON object; consumers
+# parse line-by-line and match on `"type":"status_change"` (or the
+# desired target status, e.g. `"to":"closed"`) to wake on real
+# transitions.
+#
+# Claude Code example:
+#   Bash(command: "<this script> <bead>", run_in_background: true)
+#   Monitor that bash id for "status_change" lines
 #
 # DURATION accepts any value timeout(1) understands (e.g. 30s, 5m, 24h).
 # Default: 24h. The watcher exits as soon as the bead reaches a terminal
@@ -37,7 +41,7 @@
 # Noise filtering. `bead.updated` fires on every metadata write, label
 # change, and cache-reconcile pass — not just status changes. The script
 # tracks the prior status in-process and emits `status_change` only on a
-# real transition. Consumers' Monitor matches stay cheap.
+# real transition. Consumers' line-matches stay cheap.
 
 set -eu
 
@@ -45,9 +49,9 @@ usage() {
     cat >&2 <<'EOF'
 Usage: gc-bd-watch <bead-id> [--timeout=DURATION]
 
-Emits JSONL bead-state updates to stdout. Designed for
-`Bash(run_in_background: true)` + Monitor. DURATION is any value
-timeout(1) accepts (default 24h).
+Emits JSONL bead-state updates to stdout. Designed to run as a
+background process whose stdout is observed by the spawning agent's
+harness. DURATION is any value timeout(1) accepts (default 24h).
 EOF
 }
 

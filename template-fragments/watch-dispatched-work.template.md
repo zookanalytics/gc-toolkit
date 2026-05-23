@@ -6,18 +6,28 @@ progress back to the operator, spawn a watcher in the same turn. The
 watcher wakes you when the bead transitions, so you can surface
 status changes without polling.
 
-The canonical mechanism is the gc-toolkit pack's `gc-bd-watch` script
-spawned via `Bash(run_in_background: true)` and observed via Monitor.
-The script runs for the lifetime of this session — the harness
-retires it at session end, so the watcher never leaks past the
-session — and emits one JSONL line per meaningful bead transition.
+The canonical mechanism is the gc-toolkit pack's `gc-bd-watch`
+script. It runs as a long-lived background process whose stdout is a
+JSONL stream — one line per meaningful bead transition. Spawn it via
+whatever your harness provides for background shell + line-
+monitoring; the harness should wake you on each emitted line and
+tear the process down at session end, so the watcher never leaks
+past the session.
 
 ### The ritual
+
+After `gc sling <pool> <bead>` to dispatch, spawn
+`{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>` as a
+backgrounded shell command and observe its stdout. Match on
+`"type":"status_change"` for any transition, or narrow to the
+specific status you care about, e.g. `"to":"closed"`.
+
+**Claude Code example:**
 
 ```
 gc sling <pool> <bead>
 Bash(command: "{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>", run_in_background: true)
-Monitor that bash id for "status_change" lines (or the specific status you care about, e.g. `"to":"closed"`)
+Monitor that bash id for "status_change" lines
 ```
 
 `{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh` resolves to this
@@ -37,7 +47,7 @@ parse line-by-line:
 
 `bead.updated` fires on every metadata write, label change, and
 cache-reconcile pass; the script filters those out and only emits on
-real status transitions, so your Monitor pattern stays cheap. Match on
+real status transitions, so your line-match stays cheap. Match on
 `"type":"status_change"` for any transition, or narrow to
 `"to":"closed"` when you only care about completion.
 
@@ -45,8 +55,8 @@ real status transitions, so your Monitor pattern stays cheap. Match on
 
 A few dispatch shapes have their own surfacing mechanism:
 
-- **Parallel dispatches** — spawn one watcher per bead and Monitor
-  each bash id for its bead's transition. The ritual scales by
+- **Parallel dispatches** — spawn one watcher per bead and observe
+  each one for its bead's transition. The ritual scales by
   multiplication.
 - **Cross-session durable notification** — `gc order` event-trigger
   carries the signal across session boundaries; reach for it when the
