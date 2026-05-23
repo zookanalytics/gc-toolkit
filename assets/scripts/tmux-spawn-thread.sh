@@ -182,7 +182,7 @@ THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
     #     set immediately and refined in the background). When the
     #     popup was blank (Enter on an empty input), omit --title-hint
     #     and let gascity fall back to its default title (the agent
-    #     name) — the operator can refine later via the /thread-title
+    #     name) — the operator can refine later via the /session-title
     #     skill. (Esc no longer reaches this block; it cancels at the
     #     popup exit-code check above.)
     #     Positional-arg shuffling preserves the quoted message

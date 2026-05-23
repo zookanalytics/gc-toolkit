@@ -138,7 +138,7 @@ BEGIN {
     # (gc titles often carry the rig prefix that the picker collapses out
     # of the display column) and a trailing "-adhoc-<hex>" from the display
     # (thread sessions get an adhoc-suffix while their canonical title set
-    # by the thread-title producer skill does not).
+    # by the session-title producer skill does not).
     title = gc_title[name]
     if (title != "") {
         title_cmp = title

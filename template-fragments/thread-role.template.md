@@ -48,7 +48,7 @@ try to deliver across-thread via your own mailbox.
   auto-seeded from the first-message hint at spawn time. Once the
   conversation has converged on what it's actually about, run
   `gc session rename "$GC_SESSION_ID" "<title>"` (or invoke
-  `/thread-title`) so the operator can see what this thread is
+  `/session-title`) so the operator can see what this thread is
   working on from `gc session list` and the dashboard. A good title
   is a verb + noun phrase, 3-8 words, describing the *focus* of the
   thread, not its status.

@@ -77,7 +77,7 @@ Importing gc-toolkit binds the following into the rig:
 - **Polecat fragment** — `polecat-convoys` appended to the polecat
   prompt for owned-convoy awareness.
 - **Skills** — surfaced via `gc skill list` (e.g.,
-  `gc-toolkit.handoff`, `gc-toolkit.thread-title`).
+  `gc-toolkit.handoff`, `gc-toolkit.session-title`).
 - **Template fragments** — `operational-awareness`, `propulsion`,
   `polecat-convoys`, `cycle-recycle`, and others available to
   `inject_fragments_append` / `append_fragments`.
@@ -292,7 +292,7 @@ Confirms the skills gc-toolkit exposes are visible to an agent:
 gc skill list --agent <rig>/gc-toolkit.polecat
 ```
 
-You should see `gc-toolkit.handoff` and `gc-toolkit.thread-title`
+You should see `gc-toolkit.handoff` and `gc-toolkit.session-title`
 alongside the `core.*` skills.
 
 ### Smoke test

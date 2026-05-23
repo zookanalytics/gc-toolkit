@@ -218,6 +218,10 @@ that follow it, not in the brief.
 
 {{ template "upstream-engagement" . }}
 
+---
+
+{{ template "canonical-self-rename" . }}
+
 ## Directory Guidelines
 
 | Location | Use for |
