@@ -896,9 +896,9 @@ exit 0
 ```
 
 **Bead stays open** — the operator (or a follow-up polecat) resumes from
-`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign,
-`gc.routed_to`) is what actually puts the bead back in the operator's
-queue; without it the bead would strand on this drained session.
+`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign)
+is what actually puts the bead back in the operator's queue; without
+it the bead would strand on this drained session.
 
 A check failure on the rebased branch often points at a rework polecat's
 choice — read `metadata.conflict_resolutions` and inspect the rework
