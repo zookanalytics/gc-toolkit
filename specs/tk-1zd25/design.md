@@ -236,10 +236,12 @@ script changes.
       by `RoleName`; both threads append it; old fragment removed
 - [x] `assets/scripts/tmux-spawn-thread.sh` exists and is executable;
       detects current agent via `GC_AGENT`, maps role idempotently,
-      probes template existence, reads the first message from `$2`
-      (supplied by tmux `command-prompt` substitution), backgrounds
-      spawn + seed via queue nudge for instant operator-pane return,
-      treats blank input as "spawn without seed," fails soft on
+      probes template existence, reads the first message from a
+      tempfile populated by `gum input` in a `tmux display-popup -E`
+      (popup exit code captured so Esc/Ctrl-C/popup failure is
+      treated as cancel), backgrounds spawn + seed via queue nudge
+      for instant operator-pane return, treats blank Enter as
+      "spawn without seed" and Esc as "cancel," fails soft on
       missing template
 - [x] `assets/scripts/tmux-bindings.sh:15` repointed at the new script
 - [x] This design doc

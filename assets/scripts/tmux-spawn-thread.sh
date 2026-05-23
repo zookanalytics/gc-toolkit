@@ -5,9 +5,9 @@
 # Bound to `prefix + a` ("ask") by tmux-bindings.sh, which simply
 # invokes this script with `run-shell -b`. The script handles input
 # itself: it opens a tmux popup running `gum input`, the operator
-# types a first-message seed and presses Enter to submit. Esc or a
-# blank Enter spawns the thread without a seed (the message-less
-# path is preserved).
+# types a first-message seed and presses Enter to submit. Esc
+# cancels the spawn entirely; a blank Enter spawns the thread
+# without a seed (the message-less path is preserved).
 #
 # The slow part of the work (`gc session new` + creating->active
 # poll + first-message nudge) is backgrounded inside the script so
@@ -112,18 +112,25 @@ fi
 #     tmux popup. gum opens /dev/tty in raw mode, so any character
 #     (apostrophes, embedded `"`, `\`, multi-byte) flows through
 #     verbatim — no tmux `%%` substitution, no shell quoting
-#     hazards. display-popup -E blocks until the popup closes
-#     (Enter submits, Esc cancels, blank Enter = no seed); the
-#     enclosing script is invoked with `run-shell -b`, so tmux
-#     backgrounds the whole thing and the operator's pane stays
-#     responsive throughout. Empty `THREAD_SPAWN_MESSAGE` selects
-#     the no-seed path in the spawn phase below.
+#     hazards. display-popup -E propagates the inner gum exit code:
+#     Enter returns 0 (with or without text); Esc returns 130. We
+#     exit early on non-zero so Esc is a true cancel — no spawn,
+#     no indicator file. Blank Enter falls through with an empty
+#     THREAD_SPAWN_MESSAGE, selecting the no-seed path in the spawn
+#     phase below. The enclosing script is invoked with `run-shell
+#     -b`, so tmux backgrounds the whole thing and the operator's
+#     pane stays responsive throughout.
 TMPFILE=$(mktemp -t gc-thread-msg.XXXXXX)
 trap 'rm -f "$TMPFILE"' EXIT
 
+EXIT_CODE=0
 gcmux display-popup -E -w 80% -h 5 \
-    "gum input --prompt='thread msg > ' --placeholder='Enter to submit, Esc/blank = no seed' > '$TMPFILE'" \
-    2>/dev/null || true
+    "gum input --prompt='thread msg > ' --placeholder='Enter to submit, Esc to cancel' > '$TMPFILE'" \
+    2>/dev/null || EXIT_CODE=$?
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+    exit 0
+fi
 
 THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
 
@@ -173,9 +180,11 @@ THREAD_SPAWN_MESSAGE=$(cat "$TMPFILE" 2>/dev/null || true)
     #     pass it as --title-hint so gascity's title model auto-seeds
     #     a short title from that text (a literal short version is
     #     set immediately and refined in the background). When the
-    #     popup was blank/Esc'd, omit --title-hint and let gascity
-    #     fall back to its default title (the agent name) — the
-    #     operator can refine later via the /thread-title skill.
+    #     popup was blank (Enter on an empty input), omit --title-hint
+    #     and let gascity fall back to its default title (the agent
+    #     name) — the operator can refine later via the /thread-title
+    #     skill. (Esc no longer reaches this block; it cancels at the
+    #     popup exit-code check above.)
     #     Positional-arg shuffling preserves the quoted message
     #     through field-splitting; `set --` only touches the
     #     subshell's $@ (CONFIGDIR is already captured above).
