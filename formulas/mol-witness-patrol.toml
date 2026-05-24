@@ -161,6 +161,10 @@ a NEW session with a different ID — the old one never comes back.
    SESSIONS_JSON=$(gc session list --state=all --json)
    SESSION_BEADS_JSON=$(gc bd list --type=session --label=gc:session --include-infra --include-gates --all --json --limit=0)
 
+   # NOTE: post-tk-foudmx, `gc session list --json` returns
+   # `{filters, schema_version, sessions:[...], summary}` with snake_case
+   # session fields (id, session_name, alias, agent_name, state, closed).
+   # Pre-tk-foudmx shape was a bare array with PascalCase keys.
    MATCH_JSON=$(jq -n \
      --arg assignee "$ASSIGNEE" \
      --argjson sessions "$SESSIONS_JSON" \
@@ -172,11 +176,11 @@ a NEW session with a different ID — the old one never comes back.
          }}
          end;
 
-       (reduce $sessions[] as $s ({};
-         add(.; $s.ID; $s.State; ($s.Closed // false))
-         | add(.; $s.SessionName; $s.State; ($s.Closed // false))
-         | add(.; $s.Alias; $s.State; ($s.Closed // false))
-         | add(.; $s.AgentName; $s.State; ($s.Closed // false))
+       (reduce $sessions.sessions[] as $s ({};
+         add(.; $s.id; $s.state; ($s.closed // false))
+         | add(.; $s.session_name; $s.state; ($s.closed // false))
+         | add(.; $s.alias; $s.state; ($s.closed // false))
+         | add(.; $s.agent_name; $s.state; ($s.closed // false))
        )) as $from_session_list
        | reduce $session_beads[] as $b ($from_session_list;
            add(.; $b.metadata.configured_named_identity; $b.metadata.state; ($b.status == "closed")))
