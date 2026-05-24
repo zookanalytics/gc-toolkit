@@ -21,6 +21,14 @@ Recycle when **either** trigger fires:
 
 **Action when a trigger fires (pour-next-before-handoff):**
 
+> **NEVER ask the operator whether to recycle.** The recycle sequence
+> below is the autonomous decision. Do not invoke `AskUserQuestion`,
+> `/handoff`, or any other interactive consent UI at the threshold
+> boundary — heartbeat agents (witness, deacon, refinery) blocking on
+> consent stalls patrols, gate checks, and orphan sweeps for as long as
+> the prompt sits unanswered. The threshold IS the directive: when
+> either trigger above fires, execute the sequence immediately.
+
 The formula's universal invariant is **"pour next before burn current"** —
 every other exit path obeys it. Cycle-recycle must obey it too, so the
 inheriting session finds an in-progress wisp on its hook regardless of
