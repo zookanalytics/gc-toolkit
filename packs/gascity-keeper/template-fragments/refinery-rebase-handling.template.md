@@ -132,9 +132,57 @@ When `IS_REBASE=1`:
    This is the safety net that converts a silent race into a refused
    push.
 
-4. **Mark the bead landed and close it.** The standard
+4. **Sync the rig's local main checkout to the new tip.** The
+   force-push above advanced `origin/main`, but the rig's checkout
+   at `<rig-root>` is still on the OLD divergent `main` and won't
+   reflect the new history until something updates it. The operator
+   builds from and references that checkout — leaving it stale after
+   every rebase landing is the bug this step fixes.
+
+   Safety is skip-and-report: only reset when the rig is on `main`
+   AND clean. If it's on a feature branch or has dirty state, record
+   the skip in `metadata.rig_update_result` so the close notification
+   (step 5) tells the operator to sync manually. Never surprise WIP.
+
+   ```bash
+   # GC_RIG is set in rig-bound sessions. Fall back to gascity —
+   # that's the only rig importing gascity-keeper today.
+   RIG_NAME="${GC_RIG:-gascity}"
+   RIG_ROOT=$(gc rig list --json \
+       | jq -r '.rigs[] | select(.name=="'"$RIG_NAME"'") | .path')
+
+   if [ -z "$RIG_ROOT" ] || [ ! -d "$RIG_ROOT" ]; then
+       RIG_UPDATE_RESULT="skipped: rig $RIG_NAME not resolvable"
+   else
+       git -C "$RIG_ROOT" fetch --prune origin >/dev/null 2>&1 || true
+
+       CURRENT_BRANCH=$(git -C "$RIG_ROOT" rev-parse --abbrev-ref HEAD)
+       DIRTY_COUNT=$(git -C "$RIG_ROOT" status --porcelain | wc -l)
+
+       if [ "$CURRENT_BRANCH" = "main" ] && [ "$DIRTY_COUNT" -eq 0 ]; then
+           OLD_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+           git -C "$RIG_ROOT" reset --hard origin/main >/dev/null 2>&1
+           NEW_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+           # Sweep reaped worktree admin entries. In-flight polecat
+           # worktrees still finish on their own bases by design; prune
+           # only removes records for directories that already vanished.
+           git -C "$RIG_ROOT" worktree prune >/dev/null 2>&1
+           RIG_UPDATE_RESULT="reset: $OLD_SHA -> $NEW_SHA (worktree prune ran)"
+       else
+           RIG_UPDATE_RESULT="skipped: branch=$CURRENT_BRANCH dirty=$DIRTY_COUNT (operator must sync)"
+       fi
+   fi
+
+   gc bd update "$WORK" --set-metadata rig_update_result="$RIG_UPDATE_RESULT"
+   ```
+
+5. **Mark the bead landed and close it.** The standard
    merge_strategy=direct close path applies — set `merge_result=force_lease`
    and `pr_url=` (rebase bypasses PR creation by design), then close.
+   The close notification (mail or nudge to the gascity-keeper) MUST
+   surface `metadata.rig_update_result` so the operator can see at a
+   glance whether the rig followed the rebase or still needs a manual
+   sync.
 
 ### Race loss
 
