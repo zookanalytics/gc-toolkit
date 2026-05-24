@@ -77,6 +77,10 @@ default = "30"
 description = "After a successful direct merge, attempt to fast-forward the rig's canonical checkout (\\$GC_RIG_ROOT) when it is on the target branch with a clean tree. Best-effort; never blocks the merge."
 default = "true"
 
+[vars.review_gate]
+description = "Pre-publish review gate for mr-mode PRs. 'codex' opens PRs as draft and dispatches a review bead to the rig's codex polecat pool; empty disables the gate (PRs open non-draft as today)."
+default = "codex"
+
 [[steps]]
 id = "check-inbox"
 title = "Context check, then mail"
@@ -518,10 +522,16 @@ Automated pull request published by Gastown Refinery.
 EOF
 )
 
+PR_DRAFT_FLAG=""
+if [ "{{review_gate}}" = "codex" ]; then
+  PR_DRAFT_FLAG="--draft"
+fi
+
 if [ -n "$EXISTING_PR" ]; then
   PR_REF="$EXISTING_PR"
 else
   PR_URL=$(gh pr create \
+    $PR_DRAFT_FLAG \
     --base "$TARGET" \
     --head "$BRANCH" \
     --title "$ISSUE_TITLE ($WORK)" \
@@ -602,7 +612,36 @@ fi
 If this command fails or prints empty output: STOP. Debug and retry. Do NOT continue.
 
 **4. Record PR metadata and close the work bead:**
+
+If `review_gate = "codex"`, dispatch a review bead for the codex
+polecat pool BEFORE closing the work bead. Idempotent — a second
+refinery pass on the same PR will reuse the existing review bead.
+
 ```bash
+if [ "{{review_gate}}" = "codex" ]; then
+  CODEX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
+  FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+  REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
+
+  EXISTING_REVIEW=$(gc bd list --search "Review PR#$PR_NUMBER" \
+    --status=open --limit=1 --json 2>/dev/null \
+    | jq -r '.[0].id // empty')
+
+  if [ -z "$EXISTING_REVIEW" ]; then
+    REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
+    gc bd update "$REVIEW_BEAD" \
+      --set-metadata task_kind=review \
+      --set-metadata pr_url="$PR_URL" \
+      --set-metadata pr_number="$PR_NUMBER" \
+      --set-metadata work_bead="$WORK" \
+      --set-metadata fix_target_pool="$FIX_POOL" \
+      --assignee="$CODEX_POOL" \
+      --set-metadata gc.routed_to="$CODEX_POOL"
+    gc session wake "$CODEX_POOL" || true
+    gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for PR#$PR_NUMBER" || true
+  fi
+fi
+
 gc bd update $WORK \
   --set-metadata merge_result=pull_request \
   --set-metadata pr_url="$PR_URL" \

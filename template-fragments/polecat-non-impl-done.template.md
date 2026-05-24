@@ -87,4 +87,49 @@ gc bd close <work-bead> --reason "<review|research|investigation> complete"
 gc runtime drain-ack
 exit
 ```
+
+### Fix-target dispatch (pre-publish review gate)
+
+When `metadata.fix_target_pool` is set, the review is a pre-publish
+gate (refinery opened the PR as draft and is waiting on your verdict
+to either ready it for operator review or kick the work bead back to
+the implementation pool). After posting the verdict via
+`gh pr review` (step 1 above) and BEFORE closing the bead (step 3
+above), act on it:
+
+```bash
+FIX_POOL=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.fix_target_pool // empty')
+PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
+
+if [ -n "$FIX_POOL" ]; then
+  case "$VERDICT" in
+    APPROVE|COMMENT)
+      # No blocking findings. Un-draft the PR so the operator sees it.
+      gh pr ready "$PR_NUMBER"
+      ;;
+    REQUEST_CHANGES)
+      # Findings need addressing. File a fix bead that resumes the
+      # PR branch via the existing rejection-resume flow.
+      PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
+      PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
+      FIX_BEAD=$(gc bd create "Address codex findings on PR#$PR_NUMBER" -t task --json | jq -r .id)
+      gc bd update "$FIX_BEAD" \
+        --set-metadata branch="$PR_HEAD" \
+        --set-metadata target="$PR_BASE" \
+        --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
+        --set-metadata source_review_bead=<work-bead> \
+        --assignee="$FIX_POOL" \
+        --set-metadata gc.routed_to="$FIX_POOL"
+      gc session wake "$FIX_POOL" || true
+      ;;
+  esac
+fi
+```
+
+`$VERDICT` is whichever verdict you submitted via `gh pr review` —
+`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`. Treat `COMMENT` as
+non-blocking (operator sees the PR with your notes attached).
+
+After this step, close the review bead as in the existing flow
+(step 3 of the Non-impl done sequence above).
 {{ end }}
