@@ -11,7 +11,23 @@ CONFIGDIR="$1"
 
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
-gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh"
+# sq <string> — POSIX shell-quote $1 for safe embedding in a sh -c body.
+# Wraps in '...' with any internal ' broken out as '\''. The captured
+# city path is interpolated into the bound run-shell body; without
+# sh-level quoting, whitespace or shell metacharacters in the path
+# would silently mis-route the picker's API call.
+sq() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# Capture the city path at install time. bind-key is server-wide and
+# the binding fires from tmux's env (which doesn't carry Gas City's
+# session env), so the picker can't rely on $GC_CITY_PATH being set
+# when the user later presses the key. Baking the path into the
+# binding makes the API city lookup deterministic.
+CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+
+gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --city-path $(sq "$CITY_PATH")"
 
 # Spawn a thread of the current pane's role. Input handling (gum
 # input in a tmux popup) lives in the script — see tmux-spawn-thread.sh.

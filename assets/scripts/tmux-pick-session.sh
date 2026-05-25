@@ -2,11 +2,14 @@
 # tmux-pick-session.sh — Gas City session picker.
 # Companion design notes: tmux-pick-session.md (alongside this file).
 #
-# Usage: tmux-pick-session.sh [--all]
+# Usage: tmux-pick-session.sh [--all] [--city-path <path>]
 #
 # Default filter hides polecat-*, control-dispatcher, deacon, witness,
 # dog, boot. The currently-attached session is always shown.
 # --all disables the filter; toggle from inside the menu via [.].
+# --city-path is the absolute path of the city this binding belongs
+# to — baked in by tmux-bindings.sh at install time so the API URL is
+# deterministic even though the key fires from tmux's bare env.
 #
 # Rig + identity derivation (per-session GC_AGENT env):
 #   - "<rig>/<pack>.<role>" → rig = <rig>,  display = <pack>.<role>
@@ -38,23 +41,94 @@
 set -e
 
 ALL=0
-[ "${1:-}" = "--all" ] && ALL=1
+EXPLICIT_CITY_PATH=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --all) ALL=1; shift ;;
+        --city-path) EXPLICIT_CITY_PATH="${2:-}"; shift 2 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
 
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 SCRIPT="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 ACTIVE=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 TAB="$(printf '\t')"
 
+# sq <string> — POSIX shell-quote $1 for safe embedding in a sh -c body.
+# Wraps in '...' with any internal ' broken out as '\''. Used wherever
+# a captured path is interpolated into a tmux command string; without
+# it a path containing whitespace or shell metacharacters would be
+# split or re-interpreted, silently mis-routing the API call.
+sq() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# Supervisor API discovery — see gc-toolkit-status-line.sh for the
+# canonical comment. Port honors ~/.gc/supervisor.toml; city name is
+# resolved by matching the current city path against [[cities]] entries
+# in ~/.gc/cities.toml. Keep in lockstep with status-line / cockpit.
+gc_api_base() {
+    port=8372
+    cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
+    if [ -f "$cfg" ]; then
+        v=$(awk -F= '/^[[:space:]]*port[[:space:]]*=/ { gsub(/[[:space:]]/,"",$2); print $2; exit }' "$cfg" 2>/dev/null)
+        [ -n "$v" ] && port=$v
+    fi
+    printf 'http://127.0.0.1:%s' "$port"
+}
+gc_city_name() {
+    cfg="${GC_HOME:-$HOME/.gc}/cities.toml"
+    city_path="${EXPLICIT_CITY_PATH:-${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}}"
+    # No cwd walk-up — see gc-toolkit-status-line.sh for rationale.
+    [ -z "$city_path" ] && return
+    city_path="${city_path%/}"
+    if [ -f "$cfg" ]; then
+        name=$(awk -v want="$city_path" '
+            BEGIN { in_block=0; p=""; n=""; found=0 }
+            /^\[\[cities\]\]/ {
+                if (in_block && p == want && n != "") { print n; found=1; exit }
+                in_block=1; p=""; n=""; next
+            }
+            /^\[/ {
+                if (in_block && p == want && n != "") { print n; found=1; exit }
+                in_block=0; next
+            }
+            in_block && /^[[:space:]]*path[[:space:]]*=[[:space:]]*"[^"]*"/ {
+                v=$0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); p=v
+            }
+            in_block && /^[[:space:]]*name[[:space:]]*=[[:space:]]*"[^"]*"/ {
+                v=$0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); n=v
+            }
+            END {
+                if (!found && in_block && p == want && n != "") print n
+            }
+        ' "$cfg")
+        [ -n "$name" ] && { printf '%s' "$name"; return; }
+    fi
+    basename "$city_path"
+}
+
 # One row per pane across all sessions. pane_title can contain `|`,
 # so the awk pre-pass joins fields 6+ back into the title.
 PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
-# Per-session GC titles (session_name\ttitle, one per line). The 3s timeout
-# bounds a wedged data plane — any failure (timeout, missing gc, jq parse
-# error) yields an empty TITLES and the picker renders without titles.
-TITLES=$(timeout 3 gc session list --json 2>/dev/null \
-    | jq -r '.sessions[]? | select(.title != null and .title != "") | "\(.session_name)\t\(.title)"' 2>/dev/null \
-    || true)
+# Per-session GC titles (session_name\ttitle, one per line). The supervisor
+# API's CachingStore answers in tens of ms steady-state vs the 75-190ms
+# idle / 5-20s loaded cost of the gc-CLI subprocess. curl -f swallows the
+# body during the cold-cache 503 window after `gc start`; any failure
+# (timeout, missing curl, jq parse error) yields an empty TITLES and the
+# picker renders without titles. Skipped entirely when no city resolves —
+# `/v0/city//sessions` would just 404.
+TITLES=""
+CITY_NAME=$(gc_city_name)
+if [ -n "$CITY_NAME" ]; then
+    TITLES=$(curl -sf --max-time 3 \
+        "$(gc_api_base)/v0/city/$CITY_NAME/sessions" 2>/dev/null \
+        | jq -r '.items[]? | select(.title != null and .title != "") | "\(.session_name)\t\(.title)"' 2>/dev/null \
+        || true)
+fi
 
 LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' | awk -F'|' \
     -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" -v titles="$TITLES" '
@@ -266,10 +340,18 @@ $LIST
 LIST_EOF
 
 set -- "$@" "" "" ""
+# Preserve --city-path through the self-reinvoke; the binding runs from
+# tmux's bare env so re-running without it would re-introduce the
+# multi-city mis-route the install-time capture closes. sq() wraps the
+# path in sh-level single quotes; the outer run-shell wrap uses TMUX
+# double quotes so the inner ' chars don't terminate the menu-command
+# group at tmux's parser layer.
+reinvoke_suffix=""
+[ -n "$EXPLICIT_CITY_PATH" ] && reinvoke_suffix=" --city-path $(sq "$EXPLICIT_CITY_PATH")"
 if [ "$ALL" -eq 1 ]; then
-    set -- "$@" "  [ show fewer ]  " "." "run-shell '$SCRIPT'"
+    set -- "$@" "  [ show fewer ]  " "." "run-shell \"$SCRIPT$reinvoke_suffix\""
 else
-    set -- "$@" "  [ show all ]  " "." "run-shell '$SCRIPT --all'"
+    set -- "$@" "  [ show all ]  " "." "run-shell \"$SCRIPT --all$reinvoke_suffix\""
 fi
 
 if [ "$ACTIVE_IDX" -ge 0 ]; then
