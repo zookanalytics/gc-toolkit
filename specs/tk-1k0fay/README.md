@@ -59,13 +59,13 @@ indexes which sources cover which functional area.
 
 | Source | License | Vendorable? |
 |---|---|---|
-| `anthropics/skills` | Apache-2.0 for 13 of 17 skills; proprietary "source-available" for 4 document skills (`docx`, `pdf`, `pptx`, `xlsx`); no top-level LICENSE | Apache-2.0 skills yes; document skills no |
+| `anthropics/skills` | Mix of Apache-2.0 skills, proprietary "source-available" document skills (`docx`, `pdf`, `pptx`, `xlsx`), and one skill (`doc-coauthoring`) with no LICENSE.txt — licensing unclear; no top-level LICENSE in the repo | Apache-2.0 skills yes; document skills no; `doc-coauthoring` unclear |
 | `obra/superpowers` | MIT (Copyright Jesse Vincent 2025) | Yes |
 | `bmad-code-org/BMAD-METHOD` | MIT (Copyright BMad Code, LLC 2025) + BMad trademark notice (see `TRADEMARK.md`) | Yes (software MIT); marks restricted |
 | `github/spec-kit` | MIT (Copyright GitHub, Inc.) | Yes |
 | Kiro Steering (kiro.dev) | Proprietary — Kiro IDE & CLI under AWS IP License; docs openly readable but not declared vendorable | No vendoring; pattern can be modeled |
 | Gas Town (`rigs/gascity/examples/gastown/`) | MIT (Copyright Steve Yegge 2025) | Yes |
-| Claude Code built-in skills | Proprietary — CLI-bundled; some bundled skills sourced from `anthropics/skills` (mixed Apache-2.0 + source-available) | No vendoring of bundled binary; per-source skills per their license |
+| Claude Code built-in skills | Proprietary — CLI-bundled; the public `anthropics/skills` repo is reference/demo material, not the bundled implementation source (only `claude-api` clearly overlaps) | No vendoring of bundled binary; per-source skills per their license |
 
 ## What's in scope vs out of scope
 

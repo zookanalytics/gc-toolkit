@@ -21,7 +21,7 @@ created 2025-09-22, 140k stars, topic `agent-skills`.
 | Plugin marketplace manifest | `.claude-plugin/` (Claude Code plugin packaging) | [`.claude-plugin/marketplace.json`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/.claude-plugin/marketplace.json) @ 690f15c | 2026-05-24 |
 | Skill template | `template/` directory | [`template/SKILL.md`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/template/SKILL.md) @ 690f15c | 2026-05-24 |
 | Third-party notices | repo root (binary deps in skills) | [`THIRD_PARTY_NOTICES.md`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/THIRD_PARTY_NOTICES.md) @ 690f15c | 2026-05-24 |
-| Apache-2.0 license file (per skill) | open-source skills (13 of 17) | e.g. [`skills/algorithmic-art/LICENSE.txt`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/skills/algorithmic-art/LICENSE.txt) @ 690f15c | 2026-05-24 |
+| Apache-2.0 license file (per skill) | open-source skills (most of the catalog; see the License section for the list) | e.g. [`skills/algorithmic-art/LICENSE.txt`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/skills/algorithmic-art/LICENSE.txt) @ 690f15c | 2026-05-24 |
 | Proprietary license file (per skill) | source-available skills (`docx`, `pdf`, `pptx`, `xlsx`) | e.g. [`skills/docx/LICENSE.txt`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/skills/docx/LICENSE.txt) @ 690f15c | 2026-05-24 |
 | `skills/` root directory | catalog index of named skills | [`skills/`](https://github.com/anthropics/skills/tree/690f15cac7f7b4c055c5ab109c79ed9259934081/skills) @ 690f15c | 2026-05-24 |
 
@@ -30,17 +30,21 @@ created 2025-09-22, 140k stars, topic `agent-skills`.
 The repository has **no top-level `LICENSE` file** — the GitHub API
 returns `"license": null` for the repo. Licensing is per-skill:
 
-- **Apache-2.0** for 13 skills (open source). Verified at
+- **Apache-2.0** for the majority of skills (open source). Verified
+  at
   [`skills/algorithmic-art/LICENSE.txt`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/skills/algorithmic-art/LICENSE.txt)
-  — standard Apache License Version 2.0, January 2004 text. Same
-  Apache-2.0 file is bundled in: `algorithmic-art`,
-  `brand-guidelines`, `canvas-design`, `claude-api`,
-  `frontend-design`, `internal-comms`, `mcp-builder`,
+  — standard Apache License Version 2.0, January 2004 text. The
+  same Apache-2.0 file is bundled in this list of skills:
+  `algorithmic-art`, `brand-guidelines`, `canvas-design`,
+  `claude-api`, `frontend-design`, `internal-comms`, `mcp-builder`,
   `skill-creator`, `slack-gif-creator`, `theme-factory`,
-  `web-artifacts-builder`, `webapp-testing`. (`doc-coauthoring` has
-  no LICENSE file — see catalog.)
-- **Proprietary / source-available** for 4 skills (`docx`, `pdf`,
-  `pptx`, `xlsx`). Their `LICENSE.txt` files (e.g.
+  `web-artifacts-builder`, `webapp-testing`.
+- **`doc-coauthoring` has no `LICENSE.txt`** and no `license`
+  frontmatter field — **licensing unclear; do not vendor without
+  resolution.** Do NOT assume Apache-2.0 by analogy with the other
+  example skills.
+- **Proprietary / source-available** for the four document skills
+  (`docx`, `pdf`, `pptx`, `xlsx`). Their `LICENSE.txt` files (e.g.
   [`skills/docx/LICENSE.txt`](https://github.com/anthropics/skills/blob/690f15cac7f7b4c055c5ab109c79ed9259934081/skills/docx/LICENSE.txt))
   state: "© 2025 Anthropic, PBC. All rights reserved" and restrict
   extraction, reproduction, derivative works, distribution,
@@ -280,10 +284,12 @@ Plugin grouping per
   `webapp-testing`
 - **claude-api**: `claude-api` (standalone)
 
-Frontmatter field usage observed across the 17 skills: every
-SKILL.md uses `name` + `description`. 16 of 17 declare `license`
-(only `doc-coauthoring` omits it; that skill also has no
-`LICENSE.txt` in its directory). None of the 17 use
+Frontmatter field usage observed across the in-repo skills: every
+SKILL.md uses `name` + `description`. Most skills declare
+`license`; the exceptions are `doc-coauthoring` (which also has no
+`LICENSE.txt` in its directory — licensing unclear) and
+`skill-creator` (which bundles an Apache `LICENSE.txt` but omits
+the frontmatter field). None of the surveyed skills use
 `compatibility`, `metadata`, or `allowed-tools` frontmatter fields.
 
 ## Representative skills (3 detailed)
@@ -408,11 +414,13 @@ repository contains Anthropic's implementation of skills for
 Claude. For information about the Agent Skills standard, see
 agentskills.io."*
 
-**Two-field minimum frontmatter.** Across all 17 in-repo skills,
-`name` and `description` are universal; `license` is used by 16/17;
-`compatibility`, `metadata`, `allowed-tools` are never used in this
-repo. The spec marks `allowed-tools` as "Experimental — Support for
-this field may vary between agent implementations."
+**Two-field minimum frontmatter.** Across the in-repo skills,
+`name` and `description` are universal; `license` is used by most
+skills (with `doc-coauthoring` and `skill-creator` as the
+exceptions that omit the field); `compatibility`, `metadata`,
+`allowed-tools` are never used in this repo. The spec marks
+`allowed-tools` as "Experimental — Support for this field may vary
+between agent implementations."
 
 **Triggering goes in the `description` only.** From `skill-creator`
 SKILL.md: *"All 'when to use' info goes here, not in the body."*
@@ -455,21 +463,25 @@ the Claude API. Skills can also be uploaded to Claude.ai.
 Validation tool is `skills-ref validate ./my-skill` from the
 agentskills/agentskills repo.
 
-**Bifurcated licensing in one repo.** Apache-2.0 for 13
-demonstration skills; bespoke proprietary text for the four
-document skills (`docx`, `pdf`, `pptx`, `xlsx`) that are
-*"source-available, not open source"* per the README, framed as
-production-skill reference implementations. `doc-coauthoring` is
-the lone skill with neither a `license` frontmatter field nor a
-`LICENSE.txt` file in its directory.
+**Bifurcated licensing in one repo.** Apache-2.0 for the majority
+of demonstration skills (see the License section for the explicit
+list); bespoke proprietary text for the four document skills
+(`docx`, `pdf`, `pptx`, `xlsx`) that are *"source-available, not
+open source"* per the README, framed as production-skill reference
+implementations. `doc-coauthoring` is the lone skill with neither a
+`license` frontmatter field nor a `LICENSE.txt` file in its
+directory — its licensing is unclear and it should not be vendored
+without explicit resolution from upstream.
 
 **Heavy use of `scripts/office/schemas/`** in
 `docx`/`pptx`/`xlsx`: vendored ISO-IEC29500-4_2016 OOXML XSD
 schemas plus ECMA-fourth-edition OPC schemas plus Microsoft WML
 schemas — illustrating the spec's "any additional files or
 directories" allowance and the scale skills can reach when they
-need precise validation (the `docx` skill alone bundles 32 XSDs and
-a `soffice.py` driver).
+need precise validation. Each of the three document skills
+(`docx`, `pptx`, `xlsx`) ships its own large vendored XSD tree
+(dozens of `.xsd` files per skill at the pinned tree) alongside a
+`soffice.py` driver.
 
 **Commit-message style.** Sample latest commit: `"Add CMA
 claude-api skill updates (#1164)"` — short conventional title

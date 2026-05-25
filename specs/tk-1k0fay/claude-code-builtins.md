@@ -12,20 +12,22 @@ description: Per-source survey of Claude Code's CLI-bundled skills (verify, code
 | Built-in skills catalog (this document) | Claude Code CLI v2.1.150 bundled skills + commands reference | https://code.claude.com/docs/en/commands.md | 2026-05-24 |
 | Skills documentation | Anthropic's Claude Code documentation | https://code.claude.com/docs/en/skills.md | 2026-05-24 |
 | Code Review documentation | Anthropic's Claude Code documentation | https://code.claude.com/docs/en/code-review.md | 2026-05-24 |
-| Bundled skill source repository | anthropics/skills public repository | https://github.com/anthropics/skills | 2026-05-24 |
+| Public reference / demo skills repository (not the bundled-skill source) | anthropics/skills public repository — overlaps with the bundled catalog only for `claude-api`; the rest are reference/demo skills, not the implementations shipped in the CLI | https://github.com/anthropics/skills | 2026-05-24 |
 
 ## License / source ownership
 
 Claude Code is Anthropic's official CLI tool. Built-in commands and
 bundled skills ship under the Claude Code license (proprietary,
 bundled with the CLI binary at
-`/home/zook/.local/share/claude/versions/2.1.150`). Individual
-bundled skill implementations may also be available in the public
-`anthropics/skills` repository under separate licensing
-(source-available for document-skills, Apache 2.0 for
-example-skills). The bundled skills included in the CLI itself
-(`/verify`, `/code-review`, `/batch`, etc.) are proprietary to
-Anthropic and distributed as part of the Claude Code binary.
+`/home/zook/.local/share/claude/versions/2.1.150`). The public
+`anthropics/skills` repository is a separate codebase — primarily
+reference/demo/public skills (source-available document-skills,
+Apache 2.0 example-skills) — and is not the source of the CLI's
+bundled skills. Of the bundled catalog, only `claude-api` clearly
+overlaps with content published in that public repo; the rest of
+the bundled skills (`/verify`, `/code-review`, `/batch`, etc.) are
+proprietary to Anthropic and distributed as part of the Claude Code
+binary.
 
 ## Skill format
 
@@ -67,7 +69,13 @@ my-skill/
 
 Every skill has a `SKILL.md` file with two parts:
 
-**Part 1: YAML frontmatter** (between `---` markers):
+**Part 1: YAML frontmatter** (between `---` markers). Note: the
+Agent Skills standard requires both `name` and `description`. The
+Claude Code skills docs treat frontmatter fields as optional and
+recommend `description`; in practice a Claude Code skill that omits
+`description` will still load but is not discoverable for
+model-driven invocation. Treat the example below as a representative
+superset of fields seen across the docs — not a required schema:
 
 ```yaml
 ---
@@ -79,7 +87,6 @@ allowed-tools: Bash Git Read
 context: fork
 agent: Explore
 effort: high
-paths: src/*.js,tests/**
 when_to_use: Additional context for triggering
 argument-hint: [argument-name]
 ---
@@ -121,27 +128,34 @@ use /run-skill-generator to record the recipe.
 
 ## Built-in skill catalog
 
-The table below lists all built-in skills that ship with Claude
-Code v2.1.150. These skills are marked **Skill** in the commands
-reference and are prompt-based (Claude orchestrates the work).
+The table below lists the commands marked **Skill** in the Claude
+Code commands reference for v2.1.150 — 9 entries that are
+prompt-based (Claude orchestrates the work). A separate set
+(`/init`, `/review`, `/security-review`) is described in the skills
+docs as available through the Skill tool but is not marked Skill in
+the commands table; those are noted below the main table.
 
 | Name | 1-line purpose | When-to-invoke trigger | Slash command? (Y/N) |
 |---|---|---|---|
 | `batch` | Orchestrate large-scale changes across a codebase in parallel (5-30 units) | When refactoring spans multiple independent files/modules | Y: `/batch <instruction>` |
+| `claude-api` | Load Claude API reference material for project language + Managed Agents | When building/debugging Claude API / Anthropic SDK apps; auto-triggers on anthropic imports | Y: `/claude-api [migrate|managed-agents-onboard]` |
 | `code-review` | Review the current diff for correctness bugs at adjustable effort level | Before shipping; checking diff for bugs; optional inline PR comments | Y: `/code-review [effort] [--comment] [target]` |
 | `debug` | Enable debug logging and troubleshoot issues by reading session logs | When diagnosing runtime or configuration errors | Y: `/debug [description]` |
+| `fewer-permission-prompts` | Scan transcripts for common read-only tool calls and add allowlist | When reducing permission prompt fatigue in repeat workflows | Y: `/fewer-permission-prompts` |
 | `loop` | Run a prompt or slash command repeatedly on an interval or self-paced | For monitoring tasks, polling, or autonomous maintenance checks | Y: `/loop [interval] [prompt]` |
-| `claude-api` | Load Claude API reference material for project language + Managed Agents | When building/debugging Claude API / Anthropic SDK apps; auto-triggers on anthropic imports | Y: `/claude-api [migrate|managed-agents-onboard]` |
-| `verify` | Build and run app to confirm code change does what it should | Before testing/shipping; verifying changes work against running app | Y: `/verify` |
 | `run` | Launch and drive project's app to see a change working | During development; testing changes against live running app | Y: `/run` |
 | `run-skill-generator` | Teach `/run` and `/verify` how to build/launch from clean environment | When project has non-standard build process (database, env vars, multi-step launch) | Y: `/run-skill-generator` |
-| `security-review` | Analyze pending changes on current branch for security vulnerabilities | Before shipping; reviewing for injection, auth, data exposure risks | Y: `/security-review` |
-| `fewer-permission-prompts` | Scan transcripts for common read-only tool calls and add allowlist | When reducing permission prompt fatigue in repeat workflows | Y: `/fewer-permission-prompts` |
-| `schedule` | Create, update, list, or run scheduled routines (cron on Anthropic infrastructure) | For automated recurring tasks (daily code reviews, dependency audits, etc.) | Y: `/schedule [description]` |
+| `verify` | Build and run app to confirm code change does what it should | Before testing/shipping; verifying changes work against running app | Y: `/verify` |
 
-Total built-in skills: **12** (the catalog list shows 11; the
-`init` command, while listed under commands rather than skills, has
-skill-like behavior — see the manifest below).
+Commands marked **Skill** in the commands table: see the list above.
+
+**Available via Skill tool but not marked Skill in the commands
+table** (described in the skills docs): `/init` (generate CLAUDE.md),
+`/review` (review a pull request), `/security-review` (analyze
+pending changes for security vulnerabilities). These appear in the
+commands reference without the Skill marker but are documented as
+Skill-tool-invocable. `/schedule` similarly ships as a command for
+scheduled routines and is not marked Skill in the commands table.
 
 ## Representative skills (2-3 detailed examples)
 
@@ -397,10 +411,11 @@ but are pre-authored by Anthropic and distributed with the CLI.
 
 The bundled skills listed in this catalog are authored by Anthropic
 and compiled into the Claude Code binary. They are not individually
-stored as `.md` files on disk. However, skill implementations and
-examples for some bundled skills may be available in the public
-`anthropics/skills` repository (https://github.com/anthropics/skills)
-under separate licensing:
+stored as `.md` files on disk. The public `anthropics/skills`
+repository (https://github.com/anthropics/skills) is a separate,
+reference/demo/public catalog rather than the bundled-skill source —
+of the bundled catalog, only `claude-api` clearly overlaps with
+content in that public repo. The public repo's contents include:
 
 - **Example skills** (apache-2.0): General patterns, creative
   tasks, test generation
@@ -409,7 +424,8 @@ under separate licensing:
 
 These public skills are reference implementations or examples; the
 actual bundled skills in Claude Code v2.1.150 are the compiled
-versions in the binary.
+versions in the binary and are not, in general, drawn from this
+repository.
 
 ### Skill invocation surface
 
@@ -422,13 +438,14 @@ interactive Claude Code sessions:
 
 ### Non-skill commands
 
-The Claude Code CLI also includes 150+ built-in commands that are
+The Claude Code CLI also includes many built-in commands that are
 not skills (e.g., `/help`, `/exit`, `/model`, `/effort`, `/context`,
 `/compact`, `/mcp`, `/permissions`, `/resume`, `/rewind`, `/diff`,
-etc.). These are hard-coded into the CLI and do not use the skill
+etc.). Current official command docs list roughly ninety commands
+total, with only the entries marked **Skill** being prompt-based;
+the rest are hard-coded into the CLI and do not use the skill
 mechanism. They appear in the same `/` menu but are clearly
-distinguished in the commands reference. Only entries marked
-**Skill** are prompt-based skills.
+distinguished in the commands reference.
 
 ### Tool availability to skills
 
@@ -444,21 +461,31 @@ pre-approval for specific tools without per-use permission prompts.
 
 ## Manifest of CLI-bundled skills
 
+Commands marked **Skill** in the commands reference (prompt-based,
+Claude-orchestrated):
+
 1. **`batch`** — Parallel large-scale refactoring across isolated
    worktrees
-2. **`code-review`** — Correctness review with effort-level tuning
-3. **`debug`** — Debug logging and session troubleshooting
-4. **`loop`** — Recurring task automation (interval or self-paced)
-5. **`claude-api`** — Claude API reference + model migration
-6. **`verify`** — App testing against running instance
+2. **`claude-api`** — Claude API reference + model migration
+3. **`code-review`** — Correctness review with effort-level tuning
+4. **`debug`** — Debug logging and session troubleshooting
+5. **`fewer-permission-prompts`** — Permission allowlist generator
+6. **`loop`** — Recurring task automation (interval or self-paced)
 7. **`run`** — App launch and observation
 8. **`run-skill-generator`** — Learn project build/launch recipe
-9. **`security-review`** — Vulnerability scanning on diffs
-10. **`fewer-permission-prompts`** — Permission allowlist generator
-11. **`schedule`** — Scheduled routine creation (cron on Anthropic
-    infra)
-12. **`init`** — Generate CLAUDE.md project file (listed as
-    command, has skill behavior)
+9. **`verify`** — App testing against running instance
+
+Documented as available through the Skill tool but not marked
+**Skill** in the commands table:
+
+- **`init`** — Generate CLAUDE.md project file
+- **`review`** — Review a pull request
+- **`security-review`** — Vulnerability scanning on diffs
+
+Also shipped as commands (not marked Skill in the commands table):
+
+- **`schedule`** — Scheduled routine creation (cron on Anthropic
+  infra)
 
 All are invocable via slash commands and callable by Claude in
 appropriate contexts. None require external installation; all ship

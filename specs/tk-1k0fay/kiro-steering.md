@@ -27,12 +27,13 @@ description: Per-source survey of Kiro's steering-documents convention (and adja
 
 ## License / source ownership
 
-Kiro is a commercial AI IDE produced by Amazon / AWS. Per the Kiro
-license page, "The Kiro IDE and CLI are proprietary software" and are
-"licensed to you as 'AWS Content' under the AWS Customer Agreement or
-other written agreement with us governing your use of AWS services,
-and the AWS Intellectual Property License." Copyright is held by
-"©2026 Amazon.com, Inc. or its affiliates."
+Kiro is a commercial AI IDE produced by Amazon / AWS. Per AWS Content
+terms applied to Kiro materials (licensed as "AWS Content" under the
+AWS Customer Agreement or other written agreement governing AWS
+services, plus the AWS Intellectual Property License) and the absence
+of any open-source declaration on the license page, the Kiro IDE/CLI
+is best treated as proprietary. Copyright is held by "©2026
+Amazon.com, Inc. or its affiliates."
 
 Kiro itself is not open source (it incorporates open-source
 components such as Chromium, Bun, and various LGPL-licensed
@@ -85,8 +86,8 @@ Some inclusion modes require additional fields (e.g.,
 Free-form markdown. Body content can include guidance, code
 examples, before/after comparisons, and live-file embeds via
 `#[[file:<relative_file_name>]]` syntax. The docs note best
-practice is to "include contextual reasoning, not just rules" and
-"provide code examples and comparisons."
+practice is to include contextual reasoning rather than just rules,
+and to provide code examples and comparisons.
 
 **When it loads (inclusion modes):**
 - `always` — loaded into every interaction automatically (default).
@@ -183,7 +184,7 @@ understanding."
 | `structure.md` | "Outlines file organization, naming conventions, import patterns, and architectural decisions." Ensures generated code integrates seamlessly with existing codebases. | Always (every interaction) | `.kiro/steering/structure.md` |
 | User-created steering doc (workspace) | User-defined guidance for a single project. Created via Steering panel `+` button with descriptive filename. | Per inclusion mode in frontmatter | `.kiro/steering/<name>.md` |
 | User-created steering doc (global) | User-defined guidance applied across all workspaces. | Per inclusion mode in frontmatter | `~/.kiro/steering/<name>.md` |
-| `AGENTS.md` (interop) | AGENTS.md-standard directive file read by Kiro alongside steering. Always included; no inclusion-mode support. | Always | `.kiro/steering/AGENTS.md`, workspace root, or `~/.kiro/steering/AGENTS.md` |
+| `AGENTS.md` (interop) | AGENTS.md-standard directive file read by Kiro alongside steering. Always included; no inclusion-mode support. | Always | Workspace root `AGENTS.md` or global `~/.kiro/steering/AGENTS.md` |
 
 The docs describe "Common Steering Strategies" — user-authored
 domains typically include:
@@ -215,8 +216,8 @@ inclusion: always
 ---
 ```
 
-Behavior: "Loaded into every interaction automatically." Suitable
-for "core standards that should influence all code generation" —
+Behavior: loaded into every interaction automatically. Suitable for
+core standards that should influence all code generation —
 workspace-wide standards, technology preferences, universal coding
 conventions. This is the default mode for the three foundational
 files (`product.md`, `tech.md`, `structure.md`).
@@ -234,8 +235,8 @@ fileMatchPattern: "components/**/*.tsx"
 ---
 ```
 
-Behavior: "Automatically included only when working with matching
-files." Reduces context noise by loading specialized guidance
+Behavior: automatically included only when working with matching
+files. Reduces context noise by loading specialized guidance
 contextually.
 
 Patterns accept a single glob string or an array of patterns:

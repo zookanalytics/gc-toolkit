@@ -37,15 +37,15 @@ Surveyed at: 2026-05-24
 ## License
 
 **MIT License**, copyright 2025 BMad Code, LLC. Source:
-[`LICENSE` @ ee47e30](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/LICENSE)
-(lines 1, 5).
+[`LICENSE` @ ee47e30](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/LICENSE).
 
 The license file additionally carries a trademark notice covering
 "BMad", "BMad Method", "BMad Core" (and casings/variants such as
 BMAD, BMAD-METHOD), with details in
 [`TRADEMARK.md`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/TRADEMARK.md).
 Use of the software is MIT; use of the marks for derivative
-branding is restricted.
+branding is restricted — keep the trademark caveat visible when
+citing BMAD's MIT status.
 
 ## Skill format / schema
 
@@ -60,7 +60,8 @@ explicit "Skill Spec Cheatsheet."
 
 A skill is a directory containing a required `SKILL.md` entrypoint
 plus optional sibling resources. The conventional layout observed
-across BMAD's 32 named skills:
+across BMAD's named skills (44 total — 12 in `src/core-skills` and
+32 in `src/bmm-skills`; see the catalog below for the breakdown):
 
 ```
 <skill-dir>/                # directory name MUST equal SKILL.md frontmatter `name` (SKILL-05)
@@ -104,17 +105,18 @@ files):
   paths resolve from skill root, `{skill-root}` is the install
   dir, `{project-root}` is the project working dir, `{skill-name}`
   is the directory basename.
-- `## On Activation` — numbered six-step activation: (1) resolve
-  customization via `python3
+- `## On Activation` — numbered activation steps following a
+  similar shape across skills (exact count varies; persona skills
+  may extend it — e.g., `bmad-agent-analyst` has eight). The
+  common backbone: (1) resolve customization via `python3
   {project-root}/_bmad/scripts/resolve_customization.py --skill
   {skill-root} --key workflow` (or `--key agent`), (2) execute
   `activation_steps_prepend`, (3) load persistent facts, (4) load
   config from `{project-root}/_bmad/bmm/config.yaml`, (5) greet
   `{user_name}` in `{communication_language}`, (6) execute
-  `activation_steps_append`. This skeleton repeats verbatim across
-  most workflow skills (see e.g.
+  `activation_steps_append`. See e.g.
   [`bmad-dev-story/SKILL.md`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/4-implementation/bmad-dev-story/SKILL.md),
-  [`bmad-prd/SKILL.md`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/2-plan-workflows/bmad-prd/SKILL.md)).
+  [`bmad-prd/SKILL.md`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/2-plan-workflows/bmad-prd/SKILL.md).
 - `## Paths` — variables that point to external project paths
   (e.g. `sprint_status = {implementation_artifacts}/sprint-status.yaml`).
   Per PATH-04, intra-skill paths must NOT be variable-ized.
@@ -258,10 +260,11 @@ pass covers the rest.
 
 ## Skill catalog
 
-All 32 named skills enumerated across the two modules. Phase column
-uses `core` for core-skills tier and `bmm-N` (1-4) for bmm-skills
-tier. Triggers are quoted from each skill's `description`
-frontmatter field (the "Use when..." clause where present).
+All 44 named skills enumerated across the two modules (12 core +
+32 BMM). Phase column uses `core` for core-skills tier and `bmm-N`
+(1-4) for bmm-skills tier. Triggers are quoted from each skill's
+`description` frontmatter field (the "Use when..." clause where
+present).
 
 ### Core-skills tier (12 skills) — `src/core-skills/`
 
@@ -466,13 +469,14 @@ description: Strategic business analyst and requirements expert. Use when the us
 **Body section structure:** `# Mary — Business Analyst` →
 `## Overview` (identity statement: "You are Mary, the Business
 Analyst...") → `## Conventions` (path resolution) → `## On
-Activation` (six-step, resolves customization with `--key agent`
-instead of `--key workflow`; Step 3 is `Adopt Persona` — embodies
-persona from Overview AND layers customized `{agent.role}`,
-`{agent.identity}`, `{agent.communication_style}`,
-`{agent.principles}`; Step 6 greeting prefixes `{agent.icon}` and
-continues to do so throughout session). Persona persists when the
-user invokes other skills.
+Activation` (eight steps for this skill — persona skills can extend
+the base activation skeleton; resolves customization with `--key
+agent` instead of `--key workflow`; the `Adopt Persona` step
+embodies persona from Overview AND layers customized
+`{agent.role}`, `{agent.identity}`, `{agent.communication_style}`,
+`{agent.principles}`; the greeting step prefixes `{agent.icon}` and
+continues to do so throughout the session). Persona persists when
+the user invokes other skills.
 
 **Dependencies on other skills:** Tells user `bmad-help` is
 available. The skill itself does not invoke other skills directly
@@ -624,19 +628,20 @@ directory. Action invocation context is part of the response when
 mermaid diagram!" per the response-format rules in
 [`bmad-help/SKILL.md`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/core-skills/bmad-help/SKILL.md)).
 
-### Six-step activation skeleton
+### Shared activation skeleton
 
-Workflow and persona SKILL.md files share an identical six-step
-`## On Activation`: (1) resolve customization via the Python
-script, (2) prepend hooks, (3) load persistent facts / adopt
-persona, (4) load config from
-`{project-root}/_bmad/bmm/config.yaml`, (5) greet `{user_name}` in
-`{communication_language}`, (6) append hooks. Repeated verbatim
-across
+Workflow and persona SKILL.md files share a similar `## On
+Activation` shape but exact step counts vary by skill. The common
+backbone: (1) resolve customization via the Python script, (2)
+prepend hooks, (3) load persistent facts / adopt persona, (4) load
+config from `{project-root}/_bmad/bmm/config.yaml`, (5) greet
+`{user_name}` in `{communication_language}`, (6) append hooks.
+Persona skills can extend this — e.g.,
+[`bmad-agent-analyst`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/1-analysis/bmad-agent-analyst/SKILL.md)
+runs an eight-step activation. Examples of skills following the
+shape:
 [`bmad-prd`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/2-plan-workflows/bmad-prd/SKILL.md),
-[`bmad-dev-story`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/4-implementation/bmad-dev-story/SKILL.md),
-[`bmad-agent-analyst`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/1-analysis/bmad-agent-analyst/SKILL.md),
-etc.
+[`bmad-dev-story`](https://github.com/bmad-code-org/BMAD-METHOD/blob/ee47e30cf6bffb00eddfba4f4943df40071a3388/src/bmm-skills/4-implementation/bmad-dev-story/SKILL.md).
 
 ### Language honoring throughout the run
 
@@ -760,7 +765,8 @@ is being deprecated.
 - `tools/skill-validator.md` + `tools/validate-skills.js` —
   validation rule catalog + deterministic checker
 - `bmad-modules.yaml` — external-module registry (5 official
-  modules: TEA, BMB, automator, CIS, GDS, WDS)
+  BMad-org modules: TEA, BMB, CIS, GDS, WDS — plus `automator`,
+  marked experimental upstream)
 
 External modules (Test Architect, BMad Builder, Creative
 Intelligence Suite, Game Dev Studio, Whiteport Design Studio) are

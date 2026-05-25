@@ -37,7 +37,10 @@ MIT License, "Copyright GitHub, Inc.", at the repo root.
 
 ## Command / artifact format (skill-adjacent)
 
-Spec Kit does **not** use `SKILL.md` files in its own source tree.
+Spec Kit does **not** use `SKILL.md` files in the main
+command/template tree; one exists under
+[`.github/skills/add-community-extension/SKILL.md`](https://github.com/github/spec-kit/blob/a08af08415432db2ae15b70e82400eaad9dbfd2f/.github/skills/add-community-extension/SKILL.md)
+(a community-extension authoring skill).
 Each command is defined as a single markdown file under
 [`templates/commands/`](https://github.com/github/spec-kit/tree/a08af08415432db2ae15b70e82400eaad9dbfd2f/templates/commands).
 The Specify CLI then "installs" these command files into the
@@ -85,10 +88,12 @@ and
 6. **`## Post-Execution Checks`** — symmetric
    `hooks.after_<command>` scan.
 
-**Filing convention** — every spec-kit command writes into a
-single per-feature directory. The canonical structure is described
-in
-[`templates/plan-template.md` § Project Structure](https://github.com/github/spec-kit/blob/a08af08415432db2ae15b70e82400eaad9dbfd2f/templates/plan-template.md):
+**Filing convention** — most spec-kit commands write into a
+single per-feature directory; `constitution` is project-level (it
+edits `.specify/memory/constitution.md`) and `analyze` is strictly
+read-only (no file writes). See
+[`templates/plan-template.md`](https://github.com/github/spec-kit/blob/a08af08415432db2ae15b70e82400eaad9dbfd2f/templates/plan-template.md)
+for the plan skeleton. The canonical per-feature layout is:
 
 ```text
 specs/[###-feature-name]/
@@ -236,8 +241,8 @@ Total: nine command files (`analyze`, `checklist`, `clarify`,
   organized as **Phase 1: Setup → Phase 2: Foundational → Phase
   3+: one phase per user story (priority order) → Final Phase:
   Polish**; each task uses the strict checklist format `- [ ] [ID]
-  [P?] [Story] Description` with absolute file paths and a `[P]`
-  marker for parallel-safe items; emit a Dependencies section
+  [P?] [Story] Description` with repo-relative exact paths and a
+  `[P]` marker for parallel-safe items; emit a Dependencies section
   showing user-story completion order plus parallel-execution
   examples per story; finish by reporting total task count,
   per-story count, parallel opportunities, MVP scope (typically
@@ -245,9 +250,9 @@ Total: nine command files (`analyze`, `checklist`, `clarify`,
 - **Output artifact:** `specs/<feature>/tasks.md`.
 - **Dependencies:** Requires `plan.md` and `spec.md` in the feature
   dir. The `setup-tasks.sh` script enforces the plan.md
-  prerequisite — quoting the script: `if [[ ! -f "$IMPL_PLAN" ]];
-  then echo "ERROR: plan.md not found in $FEATURE_DIR"; echo "Run
-  /speckit.plan first..." >&2; exit 1; fi`
+  prerequisite — it checks for `$IMPL_PLAN`, prints a "plan.md not
+  found" error directing the user to run `/speckit.plan` first, and
+  exits non-zero
   ([`scripts/bash/setup-tasks.sh`](https://github.com/github/spec-kit/blob/a08af08415432db2ae15b70e82400eaad9dbfd2f/scripts/bash/setup-tasks.sh)).
 
 ## Notable conventions
@@ -342,10 +347,12 @@ Total: nine command files (`analyze`, `checklist`, `clarify`,
   [`templates/commands/constitution.md`](https://github.com/github/spec-kit/blob/a08af08415432db2ae15b70e82400eaad9dbfd2f/templates/commands/constitution.md)
   requires bumping a semver-style `CONSTITUTION_VERSION`
   (MAJOR/MINOR/PATCH), updating `LAST_AMENDED_DATE`, **and**
-  running a consistency-propagation checklist that walks
-  `templates/plan-template.md`, `templates/spec-template.md`,
-  `templates/tasks-template.md`, every file under
-  `templates/commands/*.md`, and runtime guidance docs. It then
+  running a consistency-propagation checklist that walks the
+  installed project paths under `.specify/templates/plan-template.md`,
+  `.specify/templates/spec-template.md`,
+  `.specify/templates/tasks-template.md`, every file under
+  `.specify/templates/commands/*.md`, and runtime guidance docs. It
+  then
   prepends a "Sync Impact Report" HTML comment to the
   constitution listing modified principles, added/removed
   sections, templates updated (✅ / ⚠ pending), and deferred

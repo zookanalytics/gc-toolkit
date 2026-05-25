@@ -162,8 +162,7 @@ fill" list:
   `{document_output_language}` config keys but no skill that
   performs translation as a workflow.
 - **Accessibility audit.** No source ships an a11y-specific skill,
-  though `webapp-testing` could host one and `frontend-design`
-  mentions accessibility in passing.
+  though `webapp-testing` could host one.
 - **Visual diff / screenshot review.** `webapp-testing` captures
   screenshots; no source produces a skill that *compares* before/
   after screenshots and flags visual regressions.
@@ -171,9 +170,9 @@ fill" list:
   prompt mentions a "Capability Ledger" (the beads ledger), but
   no source ships a skill that *queries* it for trends or for
   agent-capability profiling.
-- **Stakeholder mail / outbound external comms drafting.** BMAD's
-  `internal-comms` covers internal; no source ships a customer-
-  facing / external-stakeholder comms skill.
+- **Stakeholder mail / outbound external comms drafting.**
+  Anthropic's `internal-comms` covers internal; no source ships a
+  customer-facing / external-stakeholder comms skill.
 - **Data analysis (notebook / Jupyter).** Spreadsheet ops via
   `xlsx`; no notebook-grade exploratory analysis skill.
 - **Compliance / audit-trail generation for regulated workflows.**
@@ -181,12 +180,15 @@ fill" list:
   logs (BMAD, Spec Kit) and the bead ledger (Gas Town) approach
   the territory.
 
-## Overlaps — areas where 3+ sources converge
+## Overlaps — notable convergence (2+ sources)
 
 These are the areas where multiple independent ecosystems have
 independently arrived at a skill/command for the same purpose.
-Convergence is evidence the pattern has been re-derived; it does
-not by itself justify adoption.
+Most clusters have 3+ sources; a few have only 2 but are included
+because the convergence is structurally interesting. Per-cluster
+counts vary; check the header on each subsection. Convergence is
+evidence the pattern has been re-derived; it does not by itself
+justify adoption.
 
 ### 1. Plan / task execution (5 sources)
 
@@ -237,32 +239,41 @@ Convergence: don't claim "done" without evidence. Superpowers and
 Gas Town encode the discipline; `/verify` and `webapp-testing`
 provide the means.
 
-### 5. Subagent / parallel dispatch (5 sources)
+### 5. Subagent / parallel dispatch (4 sources)
 
 - SP: `dispatching-parallel-agents`, `subagent-driven-development`
 - BMAD: parallel reviewers within `bmad-code-review`, `bmad-party-mode`
-- AN: skills' `context: fork` extension
-- SK: `handoffs: send: true` chained dispatch
 - GT: `mol-idea-to-plan` (6+ parallel review-leg dispatches)
 - CC: `/batch` (5-30 isolated worktree subagents)
 
-Six sources ship some flavor of "fan work out to multiple
+Four sources ship some flavor of "fan work out to multiple
 independent agents." The patterns vary (Superpowers
 fresh-subagent-per-task; Gas Town named review legs; `/batch`
-worktree-isolated PRs; Spec Kit chained slash-command handoffs;
-BMAD's `bmad-party-mode` real subagents per persona).
+worktree-isolated PRs; BMAD's `bmad-party-mode` real subagents per
+persona). Spec Kit's `handoffs:` and Anthropic's `context: fork`
+are adjacent but not equivalent: Spec Kit handoffs are sequential
+UI hand-off chips between slash commands, and `context: fork` is a
+Claude Code extension to the skill spec rather than a parallel-
+dispatch mechanism in the public-skills repo itself.
 
-### 6. Skill authoring / meta-skill (3 sources)
+### 6. Skill authoring / meta-skill (2 sources, +1 adjacent)
 
 - SP: `writing-skills` (TDD-for-skills, pressure-test transcripts)
-- BMAD: `bmad-customize` + `tools/skill-validator.md` rule catalog
 - AN: `skill-creator` (eval/benchmark/improve-description loop)
+- (BMAD adjacent / partial: `bmad-customize` edits override layers
+  rather than authoring new skills end-to-end; `bmad-distillator`
+  compresses source docs into embeddable form. Both touch
+  skill-adjacent authoring but neither is a direct counterpart to
+  `writing-skills` / `skill-creator`.)
 
-Three independent skill ecosystems each ship a meta-skill for
-authoring more skills. All three impose discipline on the
+Two independent skill ecosystems each ship a true authoring meta-
+skill for producing more skills, both imposing discipline on the
 description-field's wording (Superpowers' "description = WHEN
-only", BMAD's "Use when" trigger phrase requirement, Anthropic's
-"include both what AND when").
+only" vs. Anthropic's "include both what AND when"). BMAD's
+adjacent skills cover override-editing and source-doc compression
+— a related but distinct shape, and worth noting precisely because
+it shows the same ecosystem can ship skill-adjacent meta-tooling
+without converging on the full author-a-new-skill pattern.
 
 ### 7. Steering / always-loaded project context (4 sources)
 
@@ -322,23 +333,26 @@ workflow customization. The merge semantics differ (BMAD's
 "arrays-of-tables keyed by code or id" is the most-structured;
 Kiro's straight precedence is the simplest).
 
-### 11. Persona / role-shaped agents (2-3 sources)
+### 11. Persona / role-shaped agents (2 sources, +1 adjacent)
 
 - BMAD: 6 named personas (Mary, Paige, John, Sally, Winston, Amelia)
   with literary voice descriptors
 - GT: 6 runtime agent roles (mayor, deacon, boot, witness, refinery,
   polecat — agents, not skill personas, but role-shaped)
 - (SP adjacent: subagent prompts are role-shaped — implementer,
-  spec-reviewer, code-quality-reviewer — but anonymous)
+  spec-reviewer, code-quality-reviewer — but anonymous, and SP is
+  marked absent in the persona/named-agents matrix row above
+  because it ships no named-persona convention.)
 
-Two-and-a-half sources organize agent labor by named role. BMAD's
+Two sources organize agent labor by named role, with Superpowers
+adjacent via anonymous role-shaped subagent prompts. BMAD's
 personas layer onto workflow skills (Mary stays "Mary" when she
 runs the brainstorming skill); Gas Town's roles are runtime
-agents bound to molecules. The two are structurally distinct but
-functionally overlapping: both partition agentic work by named
-role.
+agents bound to molecules. The two named-role ecosystems are
+structurally distinct but functionally overlapping: both partition
+agentic work by named role.
 
-### 12. Recurring loops / patrol (3 sources)
+### 12. Recurring loops / patrol (2 sources, +1 adjacent)
 
 - GT: `mol-deacon-patrol`, `mol-witness-patrol`, `mol-refinery-patrol`
 - CC: `/loop`, `/schedule`
