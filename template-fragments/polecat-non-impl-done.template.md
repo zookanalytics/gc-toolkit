@@ -112,12 +112,17 @@ if [ -n "$FIX_POOL" ]; then
       # PR branch via the existing rejection-resume flow.
       PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
       PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
+      PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --json url -q .url)
       FIX_BEAD=$(gc bd create "Address codex findings on PR#$PR_NUMBER" -t task --json | jq -r .id)
       gc bd update "$FIX_BEAD" \
         --set-metadata branch="$PR_HEAD" \
         --set-metadata target="$PR_BASE" \
         --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
         --set-metadata source_review_bead=<work-bead> \
+        --set-metadata merge_strategy=pr \
+        --set-metadata existing_pr="$PR_URL_FOR_FIX" \
+        --set-metadata pr_url="$PR_URL_FOR_FIX" \
+        --set-metadata pr_number="$PR_NUMBER" \
         --set-metadata gc.routed_to="$FIX_POOL"
       gc session wake "$FIX_POOL" || true
       ;;
