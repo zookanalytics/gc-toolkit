@@ -247,6 +247,18 @@ Both are scoped to one rig in `city.toml`. The pragmatic split:
 Either form can carry env / pool fields — pick by intent rather than
 mechanics. `gc config explain` resolves both.
 
+### Refinery merge defaults
+
+The refinery's `direct` merge default matches upstream gascity
+expectations for fork-keeper rigs. Downstream cities that want
+PR-default refinery output should set
+`default_merge_strategy = "mr"` at the city level in `city.toml`.
+All rigs in the city inherit the setting unless an individual rig
+overrides it. Per-bead `metadata.merge_strategy` always wins over
+the city/rig default. The gascity-keeper upstream-rebase workflow
+uses different formulas (`mol-upstream-gc-rebase` etc.) and is
+unaffected by this setting.
+
 ---
 
 ## 5. Verification
