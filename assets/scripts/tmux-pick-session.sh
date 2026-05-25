@@ -171,8 +171,10 @@ BEGIN {
 {
     name = $1; attached = $2 + 0; sw = $3 + 0; agent = $4
 
-    # Derive rig BEFORE the filter so polecat counts cover hidden sessions
-    # too (spec: count includes ALL polecat sessions in rig, visible+hidden).
+    # Derive rig BEFORE the filter so per-rig state (rig_seen,
+    # polecat_count) covers hidden sessions too (spec: count includes
+    # ALL polecat sessions in rig, visible+hidden; rig_seen drives the
+    # always-on per-rig header in the END block).
     slash = index(agent, "/")
     if (slash > 0) {
         rig = substr(agent, 1, slash - 1)
@@ -192,6 +194,7 @@ BEGIN {
 
     if (name ~ /polecat/) polecat_count[rig]++
     rig_sort_of[rig] = rig_sort
+    rig_seen[rig] = 1
 
     if (!all && name != active) {
         if (name ~ /polecat/) next
@@ -201,7 +204,6 @@ BEGIN {
         if (name ~ /dog/) next
         if (name ~ /boot/) next
     }
-    rig_visible[rig] = 1
     sub_pri = (display ~ /polecat/ ? 9 : 5)
     marker  = (attached > 0 ? "*" : " ")
     win_marker = (sw > 1 ? "▣" : " ")
@@ -252,10 +254,15 @@ BEGIN {
 END {
     # Header rows are collapsed-mode only. sub_pri=-1 (col 2) makes them
     # sort ahead of S (5) and P (9) rows within the same rig_sort group.
-    # Only emit for rigs that have at least one row surviving the filter,
-    # so all-filtered rigs do not leave a dangling header.
+    # Emit a header for every rig with at least one tmux session, even
+    # when the filter hides every session in that rig — the rig still
+    # surfaces as a bare `── <rig> ──` (or `── <rig> • N polecats ──`).
+    # Operators use the picker primarily for topology awareness;
+    # a rig whose only sessions are hidden polecats would otherwise
+    # vanish from the menu and its polecat count would be unreachable
+    # without `.` (show all). See tmux-pick-session.md for full rationale.
     if (all) exit
-    for (r in rig_visible) {
+    for (r in rig_seen) {
         rs = rig_sort_of[r]
         pc = polecat_count[r] + 0
         printf "%s\t-1\t\t\tH\t%s\t%d\n", rs, r, pc

@@ -193,9 +193,17 @@ rig's sessions under a header row:
 
 Rules:
 
-- Header always rendered per rig group that has at least one visible
-  session row. Rigs with all sessions filtered out get NO header (no
-  dangling group).
+- Header always rendered per rig group with at least one tmux session,
+  regardless of whether any session survives the default filter. A rig
+  whose body is fully filtered renders as a bare `── <rig> ──` (or
+  `── <rig> • N polecats ──`) with no selectable rows beneath. That is
+  the intended UX: "this rig exists, hit `.` to see what's hidden."
+  Rationale: the operator's primary use of the picker is topology
+  awareness, not just session-jumping. A rig existing-but-currently-quiet
+  — especially one whose only sessions are hidden polecats — is
+  information worth surfacing. Without this rule the polecat count
+  (the surfacing mechanism for hidden polecats) is itself hidden when
+  every other session in the rig also matches the default filter.
 - Polecat-count suffix only when count > 0. Singular `1 polecat`,
   plural `N polecats`.
 - Headers are disabled tmux `display-menu` rows (leading `-` on the
