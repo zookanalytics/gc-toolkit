@@ -623,7 +623,9 @@ if [ "{{review_gate}}" = "codex" ]; then
   FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
   REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
 
-  EXISTING_REVIEW=$(gc bd list --search "Review PR#$PR_NUMBER" \
+  EXISTING_REVIEW=$(gc bd list \
+    --metadata-field task_kind=review \
+    --metadata-field pr_number="$PR_NUMBER" \
     --status=open --limit=1 --json 2>/dev/null \
     | jq -r '.[0].id // empty')
 
