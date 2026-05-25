@@ -118,7 +118,6 @@ if [ -n "$FIX_POOL" ]; then
         --set-metadata target="$PR_BASE" \
         --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
         --set-metadata source_review_bead=<work-bead> \
-        --assignee="$FIX_POOL" \
         --set-metadata gc.routed_to="$FIX_POOL"
       gc session wake "$FIX_POOL" || true
       ;;

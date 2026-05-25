@@ -635,7 +635,6 @@ if [ "{{review_gate}}" = "codex" ]; then
       --set-metadata pr_number="$PR_NUMBER" \
       --set-metadata work_bead="$WORK" \
       --set-metadata fix_target_pool="$FIX_POOL" \
-      --assignee="$CODEX_POOL" \
       --set-metadata gc.routed_to="$CODEX_POOL"
     gc session wake "$CODEX_POOL" || true
     gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for PR#$PR_NUMBER" || true
