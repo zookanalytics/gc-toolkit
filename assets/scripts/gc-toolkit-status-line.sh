@@ -61,8 +61,8 @@ INDICATOR_FILE="/tmp/gc-status-${slug}.indicator"
 # $GC_CITY_ROOT are diagnostic fallbacks. When no [[cities]] entry
 # matches we fall back to basename of the path; when no path is
 # available at all gc_city_name() returns empty and the caller skips
-# the API call. The helpers are duplicated across status-line / picker
-# / cockpit; keep them in lockstep.
+# the API call. The helpers are duplicated across status-line / picker;
+# keep them in lockstep.
 gc_api_base() {
     port=8372
     cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
@@ -78,7 +78,7 @@ gc_city_name() {
     # No cwd walk-up: reproducing gc's findCity heuristics here risks
     # diverging silently from the canonical implementation, and the
     # explicit arg + env chain already covers every real callsite
-    # (status-line / picker baked at install time, cockpit at launch).
+    # (status-line / picker baked at install time).
     # Caller treats empty output as "no API available".
     [ -z "$city_path" ] && return
     city_path="${city_path%/}"
