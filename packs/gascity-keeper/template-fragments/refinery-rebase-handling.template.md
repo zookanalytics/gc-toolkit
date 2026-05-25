@@ -139,10 +139,15 @@ When `IS_REBASE=1`:
    builds from and references that checkout — leaving it stale after
    every rebase landing is the bug this step fixes.
 
-   Safety is skip-and-report: only reset when the rig is on `main`
-   AND clean. If it's on a feature branch or has dirty state, record
-   the skip in `metadata.rig_update_result` so the close notification
-   (step 5) tells the operator to sync manually. Never surprise WIP.
+   Safety is skip-and-report: only reset when the rig is on `main`,
+   clean, AND its HEAD still matches the pre-rebase tip the polecat
+   observed (`$PRE_REBASE_SHA` from step 1). If it's on a feature
+   branch, has dirty state, has drifted to a different `main` tip
+   (unpublished commits, divergent ancestor), or if `fetch`/`reset`
+   itself fails, record the skip/error in `metadata.rig_update_result`
+   so the close notification (step 5) tells the operator to sync
+   manually. Never surprise WIP, never silently discard local commits,
+   and never report a sync that didn't actually happen.
 
    ```bash
    # GC_RIG is set in rig-bound sessions. Fall back to gascity —
@@ -153,23 +158,40 @@ When `IS_REBASE=1`:
 
    if [ -z "$RIG_ROOT" ] || [ ! -d "$RIG_ROOT" ]; then
        RIG_UPDATE_RESULT="skipped: rig $RIG_NAME not resolvable"
+   elif ! git -C "$RIG_ROOT" fetch --prune origin >/dev/null 2>&1; then
+       # Don't claim a sync when we never saw the new origin/main —
+       # otherwise we could reset to a stale tip and record
+       # `reset: old -> old` while the rig is still on the old history.
+       RIG_UPDATE_RESULT="skipped: fetch origin failed in $RIG_ROOT (operator must sync)"
    else
-       git -C "$RIG_ROOT" fetch --prune origin >/dev/null 2>&1 || true
-
        CURRENT_BRANCH=$(git -C "$RIG_ROOT" rev-parse --abbrev-ref HEAD)
        DIRTY_COUNT=$(git -C "$RIG_ROOT" status --porcelain | wc -l)
+       CURRENT_HEAD_SHA=$(git -C "$RIG_ROOT" rev-parse HEAD)
 
-       if [ "$CURRENT_BRANCH" = "main" ] && [ "$DIRTY_COUNT" -eq 0 ]; then
-           OLD_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
-           git -C "$RIG_ROOT" reset --hard origin/main >/dev/null 2>&1
-           NEW_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
-           # Sweep reaped worktree admin entries. In-flight polecat
-           # worktrees still finish on their own bases by design; prune
-           # only removes records for directories that already vanished.
-           git -C "$RIG_ROOT" worktree prune >/dev/null 2>&1
-           RIG_UPDATE_RESULT="reset: $OLD_SHA -> $NEW_SHA (worktree prune ran)"
-       else
+       if [ "$CURRENT_BRANCH" != "main" ] || [ "$DIRTY_COUNT" -ne 0 ]; then
            RIG_UPDATE_RESULT="skipped: branch=$CURRENT_BRANCH dirty=$DIRTY_COUNT (operator must sync)"
+       elif [ "$CURRENT_HEAD_SHA" != "$PRE_REBASE_SHA" ]; then
+           # Clean local main, but HEAD is not at the pre-rebase tip
+           # the polecat saw. Could be unpublished local commits or a
+           # divergent ancestor — `reset --hard origin/main` would
+           # silently discard them. Skip and report.
+           OLD_SHORT=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+           EXPECTED_SHORT=$(git -C "$RIG_ROOT" rev-parse --short "$PRE_REBASE_SHA" 2>/dev/null \
+                            || printf '%.10s' "$PRE_REBASE_SHA")
+           RIG_UPDATE_RESULT="skipped: HEAD=$OLD_SHORT does not match pre_rebase_tip=$EXPECTED_SHORT (operator must sync)"
+       else
+           OLD_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+           if ! git -C "$RIG_ROOT" reset --hard origin/main >/dev/null 2>&1; then
+               RIG_UPDATE_RESULT="error: reset --hard origin/main failed in $RIG_ROOT (operator must sync)"
+           else
+               NEW_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+               # Sweep reaped worktree admin entries. In-flight polecat
+               # worktrees still finish on their own bases by design;
+               # prune only removes records for directories that already
+               # vanished.
+               git -C "$RIG_ROOT" worktree prune >/dev/null 2>&1
+               RIG_UPDATE_RESULT="reset: $OLD_SHA -> $NEW_SHA (worktree prune ran)"
+           fi
        fi
    fi
 
