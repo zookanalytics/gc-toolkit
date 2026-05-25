@@ -14,11 +14,12 @@
 # title, indicator, and both counts are all empty, this script emits
 # nothing and tmux shows just " %H:%M".
 #
-# - <title>     : from `gc session list --json`. Hidden when title equals
-#                 the agent name (the gascity default — no operator-set
-#                 title yet). Cached in /tmp/gc-title-<slug> for
-#                 TITLE_TTL seconds to avoid hammering Dolt every
-#                 5-second tmux refresh.
+# - <title>     : from the supervisor API (/v0/city/<name>/sessions).
+#                 Hidden when title equals the agent name (the gascity
+#                 default — no operator-set title yet). The server's
+#                 CachingStore memoizes the response, so per-pane tmux
+#                 refreshes collapse to one Dolt walk per cache window;
+#                 no local /tmp cache is needed.
 # - <indicator> : verbatim contents of /tmp/gc-status-<slug>.indicator
 #                 if the file exists. Any gc-toolkit script can write or
 #                 clear this file; the next status refresh picks it up.
@@ -40,18 +41,30 @@ agent="${1:-}"
 # Filesystem-safe slug: replace path-/dot-bearing characters with `-`.
 slug=$(printf '%s' "$agent" | sed 's|[./]|-|g')
 
-TITLE_CACHE="/tmp/gc-title-${slug}"
-# TTL: titles change rarely (operator-initiated, via /session-title or
-# gc session rename). gc hook + gc mail check already take 5-20s per
-# refresh on a loaded Dolt server, so a too-short TTL is meaningless
-# — the cache mtime is set when the previous run finished its
-# `gc session list --json` query, and a 15s window can be entirely
-# consumed by the other gc calls in this script. 60s keeps the slot
-# fresh enough that an operator rename appears within one or two
-# tmux status-interval ticks, and matches the rough cadence at which
-# titles actually change.
-TITLE_TTL=60
 INDICATOR_FILE="/tmp/gc-status-${slug}.indicator"
+
+# Resolve supervisor base URL + city name. Honor ~/.gc/supervisor.toml
+# port override; fall back to the default 8372. City name comes from
+# ~/.gc/cities.toml; if that's missing, derive from $GC_CITY_PATH.
+# The helpers are duplicated across status-line / picker / cockpit;
+# keep them in lockstep.
+gc_api_base() {
+    port=8372
+    cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
+    if [ -f "$cfg" ]; then
+        v=$(awk -F= '/^[[:space:]]*port[[:space:]]*=/ { gsub(/[[:space:]]/,"",$2); print $2; exit }' "$cfg" 2>/dev/null)
+        [ -n "$v" ] && port=$v
+    fi
+    printf 'http://127.0.0.1:%s' "$port"
+}
+gc_city_name() {
+    cfg="${GC_HOME:-$HOME/.gc}/cities.toml"
+    if [ -f "$cfg" ]; then
+        name=$(awk -F= '/^[[:space:]]*name[[:space:]]*=/ { gsub(/["[:space:]]/,"",$2); print $2; exit }' "$cfg" 2>/dev/null)
+        [ -n "$name" ] && { printf '%s' "$name"; return; }
+    fi
+    basename "${GC_CITY_PATH:-/}"
+}
 
 # BUDGET caps total bytes emitted by this script. tmux-theme.sh sets
 # status-right-length=80 and appends " %H:%M" after the #() expansion,
@@ -69,40 +82,27 @@ mail_seg=""
 [ "${m:-0}" -gt 0 ] && mail_seg=" | 📬 ${m}"
 
 # --- Title slot ---------------------------------------------------------
-# Cached in /tmp/gc-title-<slug>. Cache hit when file is younger than
-# TITLE_TTL. Cache contents are the already-filtered title (empty
-# string means "hide the slot").
-
+# One HTTP round-trip per refresh; the server's CachingStore memoizes
+# the underlying Dolt walk so concurrent panes don't fan out. curl -f
+# silences the body during the ~1-2s cold-cache 503 window after
+# `gc start`; jq fails closed when input is empty.
 title=""
-read_cache=0
-if [ -f "$TITLE_CACHE" ]; then
-    cache_mtime=$(stat -c %Y "$TITLE_CACHE" 2>/dev/null || echo 0)
-    now=$(date +%s)
-    if [ $(( now - cache_mtime )) -lt "$TITLE_TTL" ]; then
-        read_cache=1
-        title=$(cat "$TITLE_CACHE" 2>/dev/null || true)
-    fi
-fi
-
-if [ "$read_cache" -eq 0 ]; then
-    raw_title=$(gc session list --state active --json 2>/dev/null \
-        | jq -r --arg a "$agent" \
-            '.sessions | map(select(.agent_name == $a)) | .[0].title // ""' 2>/dev/null \
-        || true)
-    # Hide when title is the gascity default. For most agents that
-    # means title == agent_name; for thread agents gascity strips the
-    # `-adhoc-<hex>` suffix when assigning the default, so the title
-    # equals the role name instead (e.g. agent_name
-    # `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` → default title
-    # `gc-toolkit.mayor-thread`). Strip the suffix and compare both.
-    agent_role="${agent%-adhoc-*}"
-    if [ "$raw_title" = "$agent" ] || [ "$raw_title" = "$agent_role" ] || [ "$raw_title" = "null" ]; then
-        title=""
-    else
-        title="$raw_title"
-    fi
-    # Update cache (best-effort; tmux must not see errors).
-    printf '%s' "$title" > "$TITLE_CACHE" 2>/dev/null || true
+raw_title=$(curl -sf --max-time 3 \
+    "$(gc_api_base)/v0/city/$(gc_city_name)/sessions?state=active" 2>/dev/null \
+    | jq -r --arg a "$agent" \
+        '.items | map(select(.alias == $a)) | .[0].title // ""' 2>/dev/null \
+    || true)
+# Hide when title is the gascity default. For most agents that means
+# title == alias; for thread agents gascity strips the `-adhoc-<hex>`
+# suffix when assigning the default, so the title equals the role name
+# instead (e.g. alias `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` →
+# default title `gc-toolkit.mayor-thread`). Strip the suffix and
+# compare both.
+agent_role="${agent%-adhoc-*}"
+if [ "$raw_title" = "$agent" ] || [ "$raw_title" = "$agent_role" ] || [ "$raw_title" = "null" ]; then
+    title=""
+else
+    title="$raw_title"
 fi
 
 # --- Indicator slot -----------------------------------------------------

@@ -45,15 +45,40 @@ SCRIPT="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 ACTIVE=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 TAB="$(printf '\t')"
 
+# Supervisor API discovery — see gc-toolkit-status-line.sh for the
+# canonical comment. Port honors ~/.gc/supervisor.toml; city name comes
+# from ~/.gc/cities.toml. Keep in lockstep with status-line / cockpit.
+gc_api_base() {
+    port=8372
+    cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
+    if [ -f "$cfg" ]; then
+        v=$(awk -F= '/^[[:space:]]*port[[:space:]]*=/ { gsub(/[[:space:]]/,"",$2); print $2; exit }' "$cfg" 2>/dev/null)
+        [ -n "$v" ] && port=$v
+    fi
+    printf 'http://127.0.0.1:%s' "$port"
+}
+gc_city_name() {
+    cfg="${GC_HOME:-$HOME/.gc}/cities.toml"
+    if [ -f "$cfg" ]; then
+        name=$(awk -F= '/^[[:space:]]*name[[:space:]]*=/ { gsub(/["[:space:]]/,"",$2); print $2; exit }' "$cfg" 2>/dev/null)
+        [ -n "$name" ] && { printf '%s' "$name"; return; }
+    fi
+    basename "${GC_CITY_PATH:-/}"
+}
+
 # One row per pane across all sessions. pane_title can contain `|`,
 # so the awk pre-pass joins fields 6+ back into the title.
 PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
-# Per-session GC titles (session_name\ttitle, one per line). The 3s timeout
-# bounds a wedged data plane — any failure (timeout, missing gc, jq parse
-# error) yields an empty TITLES and the picker renders without titles.
-TITLES=$(timeout 3 gc session list --json 2>/dev/null \
-    | jq -r '.sessions[]? | select(.title != null and .title != "") | "\(.session_name)\t\(.title)"' 2>/dev/null \
+# Per-session GC titles (session_name\ttitle, one per line). The supervisor
+# API's CachingStore answers in tens of ms steady-state vs the 75-190ms
+# idle / 5-20s loaded cost of the gc-CLI subprocess. curl -f swallows the
+# body during the cold-cache 503 window after `gc start`; any failure
+# (timeout, missing curl, jq parse error) yields an empty TITLES and the
+# picker renders without titles.
+TITLES=$(curl -sf --max-time 3 \
+    "$(gc_api_base)/v0/city/$(gc_city_name)/sessions" 2>/dev/null \
+    | jq -r '.items[]? | select(.title != null and .title != "") | "\(.session_name)\t\(.title)"' 2>/dev/null \
     || true)
 
 LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' | awk -F'|' \

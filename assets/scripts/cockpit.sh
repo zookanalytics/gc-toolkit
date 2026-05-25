@@ -24,15 +24,37 @@ CITY="${GC_CITY:-/home/zook/loomington}"
 INTERVAL="${COCKPIT_INTERVAL:-60}"
 
 # Resolve gc commands against the city even when launched from elsewhere
-# (e.g. ad-hoc runs from /tmp). All `gc bd list`, `gc session list`,
-# `gc mail` calls below depend on city auto-discovery from cwd.
+# (e.g. ad-hoc runs from /tmp). All `gc bd list`, `gc mail` calls below
+# depend on city auto-discovery from cwd.
 cd "$CITY" || exit 1
+
+# Supervisor API discovery — see gc-toolkit-status-line.sh for the
+# canonical comment. Port honors ~/.gc/supervisor.toml; city name comes
+# from ~/.gc/cities.toml. Keep in lockstep with status-line / picker.
+gc_api_base() {
+    port=8372
+    cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
+    if [ -f "$cfg" ]; then
+        v=$(awk -F= '/^[[:space:]]*port[[:space:]]*=/ { gsub(/[[:space:]]/,"",$2); print $2; exit }' "$cfg" 2>/dev/null)
+        [ -n "$v" ] && port=$v
+    fi
+    printf 'http://127.0.0.1:%s' "$port"
+}
+gc_city_name() {
+    cfg="${GC_HOME:-$HOME/.gc}/cities.toml"
+    if [ -f "$cfg" ]; then
+        name=$(awk -F= '/^[[:space:]]*name[[:space:]]*=/ { gsub(/["[:space:]]/,"",$2); print $2; exit }' "$cfg" 2>/dev/null)
+        [ -n "$name" ] && { printf '%s' "$name"; return; }
+    fi
+    basename "${GC_CITY_PATH:-/}"
+}
 
 TMPDIR=$(mktemp -d -t cockpit.XXXXXX)
 TIMINGS_FILE="$TMPDIR/timings"
 TICK_MAX_FILE="$TMPDIR/tick_max"
 REFINERY_DIR="$TMPDIR/refinery"
 RIGS_PY="$TMPDIR/rigs.py"
+CTX_PY="$TMPDIR/ctx.py"
 mkdir -p "$REFINERY_DIR"
 trap 'rm -rf "$TMPDIR"' EXIT
 # On signal-driven shutdown (supervisor stop, manual ^C), exit immediately
@@ -47,10 +69,13 @@ echo 0 > "$TICK_MAX_FILE"
 cat > "$RIGS_PY" <<'PY'
 import json, os, sys, collections, glob
 
+# Supervisor API shape: {"items": [...], "total": N}. Closed sessions are
+# excluded by default so we don't need to filter them here.
 try:
-    sessions = json.load(sys.stdin)
+    payload = json.load(sys.stdin)
 except Exception:
-    sessions = []
+    payload = {}
+sessions = payload.get("items", []) if isinstance(payload, dict) else []
 
 ref_state = {}
 for path in glob.glob(os.path.join(os.environ["REFINERY_DIR"], "*.json")):
@@ -67,10 +92,8 @@ for path in glob.glob(os.path.join(os.environ["REFINERY_DIR"], "*.json")):
 polecat_count = collections.Counter()
 refinery_sess = {}
 for s in sessions:
-    if s.get("Closed"):
-        continue
-    tmpl = s.get("Template", "")
-    state = s.get("State", "")
+    tmpl = s.get("template", "")
+    state = s.get("state", "")
     if "/" in tmpl:
         rig, role = tmpl.split("/", 1)
     else:
@@ -100,6 +123,67 @@ for rig in rig_order:
     pc = polecat_count.get(rig, 0)
     rf = "—" if rig == "city" else fmt_refinery(rig)
     print(f"  {rig:<14}  polecats: {pc}  ·  refinery: {rf}")
+PY
+
+# Context-watch renderer. Same heredoc-vs-pipe constraint as RIGS_PY —
+# we feed sessions_json on stdin, so the script lives in its own file.
+cat > "$CTX_PY" <<'PY'
+import json, sys
+
+# Roles whose context_pct is structurally absent (no LLM behind them).
+# Skip BEFORE counting so they drop out of "(of N polled)". Extend this
+# set if more non-LLM agent types emerge.
+SKIP_ROLES = {"control-dispatcher"}
+
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    payload = {}
+sessions = payload.get("items", []) if isinstance(payload, dict) else []
+
+rows = []
+for s in sessions:
+    if s.get("state") not in ("active", "asleep"):
+        continue
+    tmpl = s.get("template", "")
+    rig, role = tmpl.split("/", 1) if "/" in tmpl else ("city", tmpl)
+    role_short = role.split(".")[-1] if "." in role else role
+    if role_short in SKIP_ROLES:
+        continue
+    sid = s.get("id", "")
+    if not sid:
+        continue
+    pct = s.get("context_pct")
+    if isinstance(pct, int):
+        if pct < 12:
+            tier = "hidden"
+        elif pct <= 25:
+            tier = "watch"
+        elif pct <= 49:
+            tier = "care"
+        else:
+            tier = "red"
+        rows.append({"id": sid, "tmpl": tmpl, "ctx": f"ctx:{pct}%", "n": pct, "tier": tier})
+    else:
+        # context_pct null/missing: agent is mid-turn or hasn't reported
+        # yet. Show as midturn so the operator knows it was polled.
+        rows.append({"id": sid, "tmpl": tmpl, "ctx": "ctx:…", "n": None, "tier": "midturn"})
+
+counts = {"watch": 0, "care": 0, "red": 0}
+for r in rows:
+    if r["tier"] in counts:
+        counts[r["tier"]] += 1
+
+print(f"  {counts['watch']} watch · {counts['care']} care · {counts['red']} red  (of {len(rows)} polled)")
+
+body = [r for r in rows if r["tier"] in ("watch", "care", "red")]
+body.sort(key=lambda r: (-r["n"], r["id"]))
+
+if not body:
+    print("  (all under 12%)")
+else:
+    for r in body:
+        print(f"  {r['id']:<10}  {r['tmpl']:<32}  {r['ctx']:<8} {r['tier']}")
 PY
 
 now_ns() { date +%s%N; }
@@ -136,17 +220,6 @@ list_rigs() {
         [ -d "$r/.beads" ] || continue
         basename "$r"
     done
-}
-
-# peek_ctx <session-id> — extract the freshest context-used percentage as
-# an integer from the session's statusline. Matches Claude's `ctx:N%` and
-# Codex's `Context N% used`. tail -1 picks the latest render in the
-# visible buffer. Empty result means mid-turn (statusline not redrawn).
-peek_ctx() {
-    gc session peek "$1" 2>/dev/null \
-      | grep -oE 'ctx:[0-9]+%|Context [0-9]+% used' \
-      | tail -1 \
-      | grep -oE '[0-9]+'
 }
 
 section_divider() {
@@ -199,7 +272,7 @@ draw_section() {
 
 # draw_rigs — per-rig polecat count + refinery state.
 #
-# Polecat count: sessions with Template ".../*polecat*" and State=active.
+# Polecat count: sessions with template ".../*polecat*" and state=active.
 # Refinery state:
 #   - missing  → no refinery session for this rig (printed as "—")
 #   - asleep   → refinery session exists but tmux pane idle/closed
@@ -224,93 +297,14 @@ draw_rigs() {
 }
 
 # draw_ctx_watch — surface sessions whose context window is filling up so
-# the operator can see expensive agents before they bite. Walks every
-# non-closed session (active + asleep — asleep matters because a high-ctx
-# asleep agent wakes up expensive on its first turn), peeks the
-# statusline, tiers the result, and prints only watch/care/red.
+# the operator can see expensive agents before they bite. Reads
+# context_pct directly from the supervisor API response (single bulk
+# fetch in the main loop) instead of per-session `gc session peek`
+# subprocesses. Tiers each non-closed agent session and prints only
+# watch/care/red.
 draw_ctx_watch() {
     section_divider 'CONTEXT WATCH'
-    ctx_data="$TMPDIR/ctx_data"
-    : > "$ctx_data"
-
-    sess_list=$(printf '%s' "$sessions_json" | python3 -c '
-import json, sys
-# Roles whose statusline carries no LLM context — peeking them is pure
-# waste (each peek is a tmux capture-pane). Skip BEFORE the peek loop so
-# they also drop out of the "(of N polled)" total. Extend this set if
-# more non-LLM agent types emerge.
-SKIP_ROLES = {"control-dispatcher"}
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for s in data:
-    if s.get("Closed"):
-        continue
-    if s.get("State") not in ("active", "asleep"):
-        continue
-    sid = s.get("ID", "")
-    tmpl = s.get("Template", "")
-    rig, role = tmpl.split("/", 1) if "/" in tmpl else ("city", tmpl)
-    role_short = role.split(".")[-1] if "." in role else role
-    if role_short in SKIP_ROLES:
-        continue
-    if sid:
-        print(f"{sid}\t{tmpl}")
-')
-
-    if [ -n "$sess_list" ]; then
-        printf '%s\n' "$sess_list" | while read -r sid tmpl; do
-            [ -z "$sid" ] && continue
-            ctx=$(timed_capture "ctx-peek:$sid" peek_ctx "$sid")
-            printf '%s\t%s\t%s\n' "$sid" "$tmpl" "$ctx" >> "$ctx_data"
-        done
-    fi
-
-    python3 - "$ctx_data" <<'PY'
-import sys
-rows = []
-try:
-    with open(sys.argv[1]) as f:
-        for line in f:
-            parts = line.rstrip("\n").split("\t")
-            while len(parts) < 3:
-                parts.append("")
-            sid, tmpl, pct = parts[0], parts[1], parts[2]
-            if not sid:
-                continue
-            if pct.isdigit():
-                n = int(pct)
-                if n < 12:
-                    tier = "hidden"
-                elif n <= 25:
-                    tier = "watch"
-                elif n <= 49:
-                    tier = "care"
-                else:
-                    tier = "red"
-                rows.append({"id": sid, "tmpl": tmpl, "ctx": f"ctx:{n}%", "n": n, "tier": tier})
-            else:
-                rows.append({"id": sid, "tmpl": tmpl, "ctx": "ctx:…", "n": None, "tier": "midturn"})
-except FileNotFoundError:
-    pass
-
-counts = {"watch": 0, "care": 0, "red": 0}
-for r in rows:
-    if r["tier"] in counts:
-        counts[r["tier"]] += 1
-
-print(f"  {counts['watch']} watch · {counts['care']} care · {counts['red']} red  (of {len(rows)} polled)")
-
-body = [r for r in rows if r["tier"] in ("watch", "care", "red")]
-body.sort(key=lambda r: (-r["n"], r["id"]))
-
-if not body:
-    print("  (all under 12%)")
-else:
-    for r in body:
-        print(f"  {r['id']:<10}  {r['tmpl']:<32}  {r['ctx']:<8} {r['tier']}")
-PY
+    printf '%s' "$sessions_json" | python3 "$CTX_PY"
 }
 
 draw_timings() {
@@ -344,7 +338,17 @@ while :; do
     clear_pane
     printf '═══ Gas City attention ── %s ═══\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 
-    sessions_json=$(timed_capture "session-list" gc session list --json)
+    # Single supervisor-API fetch per tick. The Dolt walk is served from
+    # CachingStore (shared with status-line / picker polls). `peek=true`
+    # asks the handler to enrich each session with context_pct by tailing
+    # the transcript file — required for draw_ctx_watch; the per-session
+    # peek runs uncached, but the cockpit cadence (60s default) and
+    # ~tens-of-sessions scale keep this well below the prior cost of N
+    # `gc session peek` tmux capture-pane subprocesses. curl -f swallows
+    # the body during the cold-cache 503 window after `gc start`;
+    # downstream Python falls through to "no sessions" on empty input.
+    sessions_json=$(timed_capture "session-list" curl -sf --max-time 5 \
+        "$(gc_api_base)/v0/city/$(gc_city_name)/sessions?peek=true")
 
     draw_rigs
     draw_section 'OPEN DECISION BEADS' 'decision' -t decision --status open
