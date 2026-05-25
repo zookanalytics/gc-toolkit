@@ -282,6 +282,8 @@ Read the merge target and merge strategy from the work bead metadata:
 BRANCH=$(gc bd show $WORK --json | jq -r '.[0].metadata.branch')
 TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_branch}}"')
 MERGE_STRATEGY=$(gc bd show $WORK --json | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
+# Normalize empty: `--var default_merge_strategy=` bypasses formula default.
+MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 EXISTING_PR=$(gc bd show $WORK --json | jq -r '.[0].metadata.existing_pr // empty')
 ORIGIN_REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
 if [ "$MERGE_STRATEGY" = "pr" ]; then
