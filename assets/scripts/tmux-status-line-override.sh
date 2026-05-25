@@ -29,11 +29,29 @@ CONFIGDIR="${3:?missing config-dir}"
 
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
+# sq <string> — POSIX shell-quote $1 for safe embedding in a sh -c body.
+# Wraps in '...' with any internal ' broken out as '\''. The captured
+# city path is reintroduced as a shell token inside the status-right
+# #() body; without sh-level quoting, whitespace or shell metacharacters
+# would silently mis-route the API call. The agent name comes from
+# gascity-validated config and doesn't need the same treatment.
+sq() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# Capture the city path at install time. The status-right command we
+# write below is later interpolated by tmux from its own environment,
+# which is NOT guaranteed to carry the Gas City session env (tmux
+# servers outlive the spawning session). Baking the path into the
+# command makes the helper deterministic without forcing env
+# propagation through tmux.
+CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+
 # Point status-right at gc-toolkit's status-line script. Mirrors
 # gastown's tmux-theme.sh format ("<script-output> %H:%M") so the
 # time slot continues to appear in the same position.
 gcmux set-option -t "$SESSION" status-right \
-    "#($CONFIGDIR/assets/scripts/gc-toolkit-status-line.sh $AGENT) %H:%M" \
+    "#($CONFIGDIR/assets/scripts/gc-toolkit-status-line.sh $AGENT $(sq "$CITY_PATH")) %H:%M" \
     2>/dev/null || true
 
 # Replace status-left's "$icon $AGENT" with "$icon $short". The
