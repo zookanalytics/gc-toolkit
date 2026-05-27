@@ -280,10 +280,18 @@ while : ; do
         fi
     done <"$FIFO"
 
-    # Per-attempt teardown. Capture producer exit status before clearing
-    # PRODUCER so the EXIT trap doesn't double-wait on a reaped pid.
-    # `|| PRODUCER_EXIT=$?` keeps set -e from short-circuiting on non-zero
-    # wait status — we explicitly want to inspect it.
+    # Per-attempt teardown. Reap PRODUCER before clearing the variable
+    # so the EXIT trap doesn't see an empty PRODUCER and leak the
+    # `timeout ... gc events --follow` process for the rest of the
+    # global timeout budget (default 24h). Two paths:
+    #   - ATTEMPT_REASON empty: consumer hit EOF on the fifo, so the
+    #     producer already exited; `wait` collects its status so we
+    #     can classify the failure mode.
+    #   - ATTEMPT_REASON set (terminal event consumed): producer is
+    #     still alive — `gc events --follow` keeps streaming until
+    #     timeout(1) fires or we kill it. Kill, then reap.
+    # `|| PRODUCER_EXIT=$?` keeps set -e from short-circuiting on
+    # non-zero wait status — we explicitly want to inspect it.
     if [ -z "$ATTEMPT_REASON" ]; then
         PRODUCER_EXIT=0
         wait "$PRODUCER" 2>/dev/null || PRODUCER_EXIT=$?
@@ -292,6 +300,9 @@ while : ; do
             0)   ATTEMPT_REASON="stream_ended_before_terminal" ;;
             *)   ATTEMPT_REASON="stream_error_$PRODUCER_EXIT" ;;
         esac
+    else
+        kill "$PRODUCER" 2>/dev/null || true
+        wait "$PRODUCER" 2>/dev/null || true
     fi
     PRODUCER=""
     rm -f "$FIFO"
