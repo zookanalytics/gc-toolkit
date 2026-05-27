@@ -20,16 +20,17 @@
 # Output grammar (one JSON object per line):
 #   {"ts":"<rfc3339>","bead":"<id>","type":"watch_start","status":"<initial>"}
 #   {"ts":"<rfc3339>","bead":"<id>","type":"status_change","from":"<prior>","to":"<new>"}
+#   {"ts":"<rfc3339>","bead":"<id>","type":"watch_reconnect","attempt":<n>,"reason":"<retry-reason>"}
 #   {"ts":"<rfc3339>","bead":"<id>","type":"watch_end","reason":"<reason>"}
 #
 # watch_end reasons:
 #   closed                        — bead reached terminal status (closed)
 #   already_closed                — bead was already closed at startup
-#   timeout                       — timeout(1) wrapper fired
+#   timeout                       — timeout(1) wrapper fired or the total deadline expired
 #   killed                        — TERM/INT/HUP received
 #   startup_no_cursor             — gc events --seq did not return a usable cursor
-#   stream_ended_before_terminal  — event stream closed cleanly before the bead reached a terminal status
-#   stream_error_<n>              — gc events --follow exited non-zero (n = exit code)
+#   stream_ended_before_terminal  — event stream closed cleanly before the bead reached a terminal status (after exhausting reconnects)
+#   stream_error_<n>              — gc events --follow exited non-zero (n = exit code, after exhausting reconnects)
 #
 # Exit codes:
 #   0   terminal status reached (closed, already_closed)
@@ -37,6 +38,24 @@
 #   2   usage error
 #   124 timeout fired (also emits watch_end reason=timeout)
 #   143 SIGTERM received (also emits watch_end reason=killed)
+#
+# Stream-error resilience. `gc events --follow` can drop for transient
+# reasons (Dolt hiccup, connection blip, internal cursor issue) without
+# the bead itself being terminal. The watcher wraps producer + consumer
+# in a retry loop, advancing the resume cursor from each event's `.seq`
+# so transitions emitted during the hiccup are replayed on reconnect.
+# Each retry emits one `watch_reconnect` line and sleeps with exponential
+# backoff before respawning. The reconnect budget resets whenever the
+# stream makes forward progress (new `.seq`).
+#
+# Tunables (env vars):
+#   GC_BD_WATCH_MAX_RECONNECT     — max consecutive failed reconnects before giving up (default 5)
+#   GC_BD_WATCH_BACKOFF_INITIAL   — initial sleep between reconnects, in seconds; doubles per attempt (default 2)
+#
+# The total wall-clock budget is fixed at startup from --timeout — retries
+# do NOT reset it. Per-attempt timeouts are computed against the original
+# deadline, so an N-hour watch followed by reconnects is still bounded
+# by the original N hours.
 #
 # Noise filtering. `bead.updated` fires on every metadata write, label
 # change, and cache-reconcile pass — not just status changes. The script
@@ -79,6 +98,27 @@ done
 
 [ -n "$BEAD" ] || { usage; exit 2; }
 
+# Reconnect tunables. Validated below — bad values fall back to defaults
+# rather than fail at first arithmetic use, so a typo'd env var can't
+# silently kill a long watch.
+MAX_RECONNECT="${GC_BD_WATCH_MAX_RECONNECT:-5}"
+BACKOFF_INITIAL="${GC_BD_WATCH_BACKOFF_INITIAL:-2}"
+printf '%s' "$MAX_RECONNECT"   | grep -Eq '^[0-9]+$' || MAX_RECONNECT=5
+printf '%s' "$BACKOFF_INITIAL" | grep -Eq '^[0-9]+$' || BACKOFF_INITIAL=2
+
+# Convert a timeout(1)-style duration ("30s", "5m", "24h", "1d", or bare
+# integer seconds) to integer seconds for deadline math.
+duration_to_seconds() {
+    awk -v d="$1" 'BEGIN {
+        n = d
+        sub(/[smhd]$/, "", n)
+        if (d ~ /d$/)      print int(n * 86400)
+        else if (d ~ /h$/) print int(n * 3600)
+        else if (d ~ /m$/) print int(n * 60)
+        else               print int(n)
+    }'
+}
+
 now_ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
 emit_start()  {
@@ -88,6 +128,10 @@ emit_start()  {
 emit_change() {
     jq -nc --arg ts "$(now_ts)" --arg bead "$BEAD" --arg from "$1" --arg to "$2" \
         '{ts:$ts,bead:$bead,type:"status_change",from:$from,to:$to}'
+}
+emit_reconnect() {
+    jq -nc --arg ts "$(now_ts)" --arg bead "$BEAD" --argjson attempt "$1" --arg reason "$2" \
+        '{ts:$ts,bead:$bead,type:"watch_reconnect",attempt:$attempt,reason:$reason}'
 }
 emit_end()    {
     jq -nc --arg ts "$(now_ts)" --arg bead "$BEAD" --arg reason "$1" \
@@ -161,64 +205,144 @@ fi
 
 PRIOR="$INIT"
 
-# Producer/consumer via fifo so the consumer loop runs in the main shell —
-# updates to PRIOR persist, and we can exit cleanly when we see the closed
-# event. A `... | while read` pipeline would put the loop in a subshell.
-FIFO=$(mktemp -u -t gc-bd-watch.XXXXXX) || {
-    echo "gc-bd-watch: failed to allocate fifo path" >&2
-    exit 1
-}
-mkfifo "$FIFO"
+# Wall-clock deadline. The per-attempt timeout is recomputed against this
+# deadline each retry, so retries do not extend the total budget.
+TIMEOUT_SECS="$(duration_to_seconds "$TIMEOUT")"
+if ! printf '%s' "$TIMEOUT_SECS" | grep -Eq '^[0-9]+$' || [ "$TIMEOUT_SECS" -le 0 ]; then
+    echo "gc-bd-watch: could not parse --timeout=$TIMEOUT into seconds" >&2
+    exit 2
+fi
+DEADLINE_TS=$(( $(date +%s) + TIMEOUT_SECS ))
 
-# --type isn't repeatable; subscribe to all events for this bead and filter
-# type in the loop. The payload-match restricts to one bead-id, so the
-# stream is already narrow.
-timeout "$TIMEOUT" gc events --follow --after "$CURSOR" --payload-match "bead.id=$BEAD" \
-    > "$FIFO" 2>/dev/null &
-PRODUCER=$!
-
-# Consume from the fifo. `read` returns non-zero on EOF, which is how we
-# detect the producer (or its wrapping timeout) exited. The fifo redirect
-# is at loop scope so the descriptor stays open across iterations.
+# Retry loop. Each iteration spawns one producer + drains its fifo. If
+# the producer dies before the bead reaches a terminal status, we emit
+# a `watch_reconnect` event, sleep with exponential backoff, and respawn
+# at the most recently observed `seq` so transitions emitted during the
+# hiccup are replayed. The attempts budget resets whenever the stream
+# makes forward progress (cursor advances).
+LAST_CURSOR="$CURSOR"
+ATTEMPTS=0
+BACKOFF="$BACKOFF_INITIAL"
 EXIT_REASON=""
-while IFS= read -r LINE; do
-    [ -n "$LINE" ] || continue
-    TYPE="$(printf '%s\n' "$LINE" | jq -r '.type // empty' 2>/dev/null || true)"
-    case "$TYPE" in
-        bead.updated|bead.closed) ;;
-        *) continue ;;
-    esac
-    NEW="$(printf '%s\n' "$LINE" | jq -r '.payload.bead.status // empty' 2>/dev/null || true)"
-    [ -n "$NEW" ] || continue
-    [ "$NEW" = "$PRIOR" ] && continue
-    emit_change "$PRIOR" "$NEW"
-    PRIOR="$NEW"
-    if [ "$NEW" = "closed" ]; then
-        EXIT_REASON="closed"
+
+while : ; do
+    NOW=$(date +%s)
+    REMAINING=$(( DEADLINE_TS - NOW ))
+    if [ "$REMAINING" -le 0 ]; then
+        EXIT_REASON="timeout"
         break
     fi
-done <"$FIFO"
 
-# Determine why the loop ended. If we saw `closed` above we already know.
-# Otherwise the producer (or its timeout) wrapper closed the fifo; check
-# the wait status to distinguish timeout from a stream error.
-# `|| PRODUCER_EXIT=$?` keeps set -e from short-circuiting on non-zero
-# wait status — we explicitly want to inspect it.
-#
-# A clean producer exit (status 0) BEFORE the bead reaches a terminal
-# status is treated as an error: a watcher that ends without "closed"
-# but reports success is a silent dropped notification, which is the
-# exact failure mode this script exists to prevent.
-if [ -z "$EXIT_REASON" ]; then
-    PRODUCER_EXIT=0
-    wait "$PRODUCER" 2>/dev/null || PRODUCER_EXIT=$?
+    # Per-attempt fifo. A fresh fifo per attempt avoids any chance of
+    # straggling writes from the prior (killed) producer being read as
+    # the next attempt's first line.
+    FIFO=$(mktemp -u -t gc-bd-watch.XXXXXX) || {
+        echo "gc-bd-watch: failed to allocate fifo path" >&2
+        exit 1
+    }
+    mkfifo "$FIFO"
+
+    # --type isn't repeatable; subscribe to all events for this bead and
+    # filter type in the loop. The payload-match restricts to one bead-id,
+    # so the stream is already narrow.
+    timeout "${REMAINING}s" gc events --follow --after "$LAST_CURSOR" --payload-match "bead.id=$BEAD" \
+        > "$FIFO" 2>/dev/null &
+    PRODUCER=$!
+
+    # Consume from the fifo. `read` returns non-zero on EOF, which is how
+    # we detect the producer (or its wrapping timeout) exited.
+    ATTEMPT_REASON=""
+    while IFS= read -r LINE; do
+        [ -n "$LINE" ] || continue
+        # Advance the resume cursor on every event we see. Reset the
+        # reconnect budget on real forward progress — five consecutive
+        # failures with no event in between is the persistent-outage
+        # signal we want to catch; a hiccup mid-watch is not.
+        SEQ="$(printf '%s\n' "$LINE" | jq -r '.seq // empty' 2>/dev/null || true)"
+        if [ -n "$SEQ" ] && printf '%s' "$SEQ" | grep -Eq '^[0-9]+$' && [ "$SEQ" != "$LAST_CURSOR" ]; then
+            LAST_CURSOR="$SEQ"
+            ATTEMPTS=0
+            BACKOFF="$BACKOFF_INITIAL"
+        fi
+        TYPE="$(printf '%s\n' "$LINE" | jq -r '.type // empty' 2>/dev/null || true)"
+        case "$TYPE" in
+            bead.updated|bead.closed) ;;
+            *) continue ;;
+        esac
+        NEW="$(printf '%s\n' "$LINE" | jq -r '.payload.bead.status // empty' 2>/dev/null || true)"
+        [ -n "$NEW" ] || continue
+        [ "$NEW" = "$PRIOR" ] && continue
+        emit_change "$PRIOR" "$NEW"
+        PRIOR="$NEW"
+        if [ "$NEW" = "closed" ]; then
+            ATTEMPT_REASON="closed"
+            break
+        fi
+    done <"$FIFO"
+
+    # Per-attempt teardown. Reap PRODUCER before clearing the variable
+    # so the EXIT trap doesn't see an empty PRODUCER and leak the
+    # `timeout ... gc events --follow` process for the rest of the
+    # global timeout budget (default 24h). Two paths:
+    #   - ATTEMPT_REASON empty: consumer hit EOF on the fifo, so the
+    #     producer already exited; `wait` collects its status so we
+    #     can classify the failure mode.
+    #   - ATTEMPT_REASON set (terminal event consumed): producer is
+    #     still alive — `gc events --follow` keeps streaming until
+    #     timeout(1) fires or we kill it. Kill, then reap.
+    # `|| PRODUCER_EXIT=$?` keeps set -e from short-circuiting on
+    # non-zero wait status — we explicitly want to inspect it.
+    if [ -z "$ATTEMPT_REASON" ]; then
+        PRODUCER_EXIT=0
+        wait "$PRODUCER" 2>/dev/null || PRODUCER_EXIT=$?
+        case "$PRODUCER_EXIT" in
+            124) ATTEMPT_REASON="timeout" ;;
+            0)   ATTEMPT_REASON="stream_ended_before_terminal" ;;
+            *)   ATTEMPT_REASON="stream_error_$PRODUCER_EXIT" ;;
+        esac
+    else
+        kill "$PRODUCER" 2>/dev/null || true
+        wait "$PRODUCER" 2>/dev/null || true
+    fi
     PRODUCER=""
-    case "$PRODUCER_EXIT" in
-        124) EXIT_REASON="timeout" ;;
-        0)   EXIT_REASON="stream_ended_before_terminal" ;;
-        *)   EXIT_REASON="stream_error_$PRODUCER_EXIT" ;;
+    rm -f "$FIFO"
+    FIFO=""
+
+    case "$ATTEMPT_REASON" in
+        closed)
+            EXIT_REASON="closed"
+            break
+            ;;
+        timeout)
+            # Per-attempt timeout is set to the remaining global budget,
+            # so 124 here means the whole watch timed out.
+            EXIT_REASON="timeout"
+            break
+            ;;
+        stream_error_*|stream_ended_before_terminal)
+            ATTEMPTS=$(( ATTEMPTS + 1 ))
+            if [ "$ATTEMPTS" -ge "$MAX_RECONNECT" ]; then
+                # Persistent failure: preserve the existing terminal
+                # reasons so consumers keying on `stream_error_<n>` keep
+                # working.
+                EXIT_REASON="$ATTEMPT_REASON"
+                break
+            fi
+            emit_reconnect "$ATTEMPTS" "$ATTEMPT_REASON"
+            # Don't sleep past the deadline.
+            NOW=$(date +%s)
+            REMAINING=$(( DEADLINE_TS - NOW ))
+            if [ "$REMAINING" -le 0 ]; then
+                EXIT_REASON="timeout"
+                break
+            fi
+            SLEEP_TIME="$BACKOFF"
+            [ "$SLEEP_TIME" -gt "$REMAINING" ] && SLEEP_TIME="$REMAINING"
+            sleep "$SLEEP_TIME"
+            BACKOFF=$(( BACKOFF * 2 ))
+            ;;
     esac
-fi
+done
 
 emit_end "$EXIT_REASON"
 

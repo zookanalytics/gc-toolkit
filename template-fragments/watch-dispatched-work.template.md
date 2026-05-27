@@ -63,8 +63,16 @@ parse line-by-line:
 ```json
 {"ts":"<rfc3339>","bead":"<id>","type":"watch_start","status":"<initial>"}
 {"ts":"<rfc3339>","bead":"<id>","type":"status_change","from":"<prior>","to":"<new>"}
-{"ts":"<rfc3339>","bead":"<id>","type":"watch_end","reason":"closed|already_closed|timeout|killed|stream_error_<n>"}
+{"ts":"<rfc3339>","bead":"<id>","type":"watch_reconnect","attempt":<n>,"reason":"stream_error_<n>|stream_ended_before_terminal"}
+{"ts":"<rfc3339>","bead":"<id>","type":"watch_end","reason":"closed|already_closed|timeout|killed|stream_error_<n>|stream_ended_before_terminal"}
 ```
+
+`watch_reconnect` is informational — the watcher hit a transient stream
+failure and is reconnecting at the most recently observed `seq`. Consumers
+keying on `"type":"status_change"` ignore it; the next real transition
+still fires a `status_change` event once the stream recovers. If reconnects
+exhaust the budget (`GC_BD_WATCH_MAX_RECONNECT`, default 5), the final
+`watch_end` carries the underlying failure reason.
 
 ### When the pattern fits a different shape
 
