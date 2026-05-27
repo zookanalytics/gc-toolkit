@@ -68,7 +68,7 @@ sq() {
 # Supervisor API discovery — see gc-toolkit-status-line.sh for the
 # canonical comment. Port honors ~/.gc/supervisor.toml; city name is
 # resolved by matching the current city path against [[cities]] entries
-# in ~/.gc/cities.toml. Keep in lockstep with status-line / cockpit.
+# in ~/.gc/cities.toml. Keep in lockstep with status-line.
 gc_api_base() {
     port=8372
     cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
