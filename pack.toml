@@ -57,10 +57,6 @@ session_live = [
 ]
 
 [[patches.agent]]
-name = "boot"
-prompt_template = "patches/boot-prompt.template.md"
-
-[[patches.agent]]
 name = "deacon"
 prompt_template = "patches/deacon-prompt.template.md"
 inject_fragments_append = ["canonical-self-rename"]
