@@ -12,9 +12,9 @@
 # gc_city_name() for rationale.
 #
 # Replaces gastown's status-line.sh as the body of #(...) in status-right.
-# Renders two composable slots followed by hook/mail counts:
+# Renders two composable slots, hook/mail counts, and a timing slot:
 #
-#   [<title>] [<indicator>] | 🪝 N | 📬 M
+#   [<title>] [<indicator>] | 🪝 N | 📬 M | ⏱ T ms
 #
 # The agent name is intentionally NOT rendered here — it lives on the
 # left side of the status bar (see tmux-status-line-override.sh, which
@@ -33,6 +33,12 @@
 #                 clear this file; the next status refresh picks it up.
 #                 Last-writer-wins. Writers MUST `rm -f` the file when
 #                 their work completes (trap on EXIT is the safe pattern).
+# - <timing>    : wall time across the three downstream queries below
+#                 (gc hook, gc mail check, supervisor sessions curl).
+#                 Always rendered. Surfaces when the status refresh
+#                 starts paying real cost. Falls back to whole-second
+#                 precision on dates without %N support — the value
+#                 stays numeric but loses sub-second resolution.
 #
 # Width budget: total output capped at BUDGET chars; truncate title
 # first (with ellipsis), then indicator. Counts always render — they're
@@ -113,6 +119,21 @@ gc_city_name() {
 # which is ~6 cells. Leave headroom so the time slot is never crowded.
 BUDGET=72
 
+# --- Time downstream queries -------------------------------------------
+# Brackets the three subprocess/network calls below. GNU date returns
+# nanoseconds for %N; non-GNU returns the literal "N", so probe once
+# and degrade to whole-second precision rather than poisoning the math.
+case "$(date +%N 2>/dev/null)" in
+    ''|N) NS_OK=0 ;;
+    *)    NS_OK=1 ;;
+esac
+_ns_now() {
+    t=$(date +%s%N 2>/dev/null)
+    [ "$NS_OK" = 1 ] || t="${t%N}000000000"
+    printf '%s' "$t"
+}
+start_t=$(_ns_now)
+
 # --- Fixed segments: hook / mail counts (always render) -----------------
 
 w=$(gc hook "$agent" 2>/dev/null | grep -c . || true)
@@ -140,6 +161,9 @@ if [ -n "$city_name" ]; then
             '.items | map(select(.alias == $a)) | .[0].title // ""' 2>/dev/null \
         || true)
 fi
+end_t=$(_ns_now)
+elapsed_ms=$(( (${end_t:-0} - ${start_t:-0}) / 1000000 ))
+timing_seg=" | ⏱ ${elapsed_ms}ms"
 # Hide when title is the gascity default. For most agents that means
 # title == alias; for thread agents gascity strips the `-adhoc-<hex>`
 # suffix when assigning the default, so the title equals the role name
@@ -161,14 +185,15 @@ if [ -f "$INDICATOR_FILE" ]; then
 fi
 
 # --- Width budget enforcement -------------------------------------------
-# Compute byte-length of fixed footprint (counts only — the agent name
-# no longer lives on this side of the status bar). Whatever's left is
-# shared between title and indicator. Truncate title first (the bead's
-# rule), then indicator. Multi-byte characters cost more bytes than
-# cells, so byte-length is a conservative over-estimate; the visible
-# output may be a few cells under budget. Acceptable for a status bar.
+# Compute byte-length of fixed footprint (counts + timing — the agent
+# name no longer lives on this side of the status bar). Whatever's left
+# is shared between title and indicator. Truncate title first (the
+# bead's rule), then indicator. Multi-byte characters cost more bytes
+# than cells, so byte-length is a conservative over-estimate; the
+# visible output may be a few cells under budget. Acceptable for a
+# status bar.
 
-fixed="${hook_seg}${mail_seg}"
+fixed="${hook_seg}${mail_seg}${timing_seg}"
 fixed_len=${#fixed}
 remaining=$(( BUDGET - fixed_len ))
 [ "$remaining" -lt 0 ] && remaining=0
@@ -224,4 +249,5 @@ fi
 [ -n "$indicator" ] && printf ' %s' "$indicator"
 [ -n "$hook_seg" ] && printf '%s' "$hook_seg"
 [ -n "$mail_seg" ] && printf '%s' "$mail_seg"
+[ -n "$timing_seg" ] && printf '%s' "$timing_seg"
 exit 0
