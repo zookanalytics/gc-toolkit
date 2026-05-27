@@ -150,47 +150,51 @@ When `IS_REBASE=1`:
    and never report a sync that didn't actually happen.
 
    ```bash
-   # GC_RIG is set in rig-bound sessions. Fall back to gascity —
-   # that's the only rig importing gascity-keeper today.
-   RIG_NAME="${GC_RIG:-gascity}"
-   RIG_ROOT=$(gc rig list --json \
-       | jq -r '.rigs[] | select(.name=="'"$RIG_NAME"'") | .path')
-
-   if [ -z "$RIG_ROOT" ] || [ ! -d "$RIG_ROOT" ]; then
-       RIG_UPDATE_RESULT="skipped: rig $RIG_NAME not resolvable"
-   elif ! git -C "$RIG_ROOT" fetch --prune origin >/dev/null 2>&1; then
-       # Don't claim a sync when we never saw the new origin/main —
-       # otherwise we could reset to a stale tip and record
-       # `reset: old -> old` while the rig is still on the old history.
-       RIG_UPDATE_RESULT="skipped: fetch origin failed in $RIG_ROOT (operator must sync)"
+   # GC_RIG is set in rig-bound sessions. Without it, report a
+   # configuration problem instead of guessing at a rig name.
+   RIG_NAME="${GC_RIG:-}"
+   if [ -z "$RIG_NAME" ]; then
+       RIG_UPDATE_RESULT="skipped: GC_RIG unset (operator must sync)"
    else
-       CURRENT_BRANCH=$(git -C "$RIG_ROOT" rev-parse --abbrev-ref HEAD)
-       DIRTY_COUNT=$(git -C "$RIG_ROOT" status --porcelain | wc -l)
-       CURRENT_HEAD_SHA=$(git -C "$RIG_ROOT" rev-parse HEAD)
+       RIG_ROOT=$(gc rig list --json \
+           | jq -r '.rigs[] | select(.name=="'"$RIG_NAME"'") | .path')
 
-       if [ "$CURRENT_BRANCH" != "main" ] || [ "$DIRTY_COUNT" -ne 0 ]; then
-           RIG_UPDATE_RESULT="skipped: branch=$CURRENT_BRANCH dirty=$DIRTY_COUNT (operator must sync)"
-       elif [ "$CURRENT_HEAD_SHA" != "$PRE_REBASE_SHA" ]; then
-           # Clean local main, but HEAD is not at the pre-rebase tip
-           # the polecat saw. Could be unpublished local commits or a
-           # divergent ancestor — `reset --hard origin/main` would
-           # silently discard them. Skip and report.
-           OLD_SHORT=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
-           EXPECTED_SHORT=$(git -C "$RIG_ROOT" rev-parse --short "$PRE_REBASE_SHA" 2>/dev/null \
-                            || printf '%.10s' "$PRE_REBASE_SHA")
-           RIG_UPDATE_RESULT="skipped: HEAD=$OLD_SHORT does not match pre_rebase_tip=$EXPECTED_SHORT (operator must sync)"
+       if [ -z "$RIG_ROOT" ] || [ ! -d "$RIG_ROOT" ]; then
+           RIG_UPDATE_RESULT="skipped: rig $RIG_NAME not resolvable"
+       elif ! git -C "$RIG_ROOT" fetch --prune origin >/dev/null 2>&1; then
+           # Don't claim a sync when we never saw the new origin/main —
+           # otherwise we could reset to a stale tip and record
+           # `reset: old -> old` while the rig is still on the old history.
+           RIG_UPDATE_RESULT="skipped: fetch origin failed in $RIG_ROOT (operator must sync)"
        else
-           OLD_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
-           if ! git -C "$RIG_ROOT" reset --hard origin/main >/dev/null 2>&1; then
-               RIG_UPDATE_RESULT="error: reset --hard origin/main failed in $RIG_ROOT (operator must sync)"
+           CURRENT_BRANCH=$(git -C "$RIG_ROOT" rev-parse --abbrev-ref HEAD)
+           DIRTY_COUNT=$(git -C "$RIG_ROOT" status --porcelain | wc -l)
+           CURRENT_HEAD_SHA=$(git -C "$RIG_ROOT" rev-parse HEAD)
+
+           if [ "$CURRENT_BRANCH" != "main" ] || [ "$DIRTY_COUNT" -ne 0 ]; then
+               RIG_UPDATE_RESULT="skipped: branch=$CURRENT_BRANCH dirty=$DIRTY_COUNT (operator must sync)"
+           elif [ "$CURRENT_HEAD_SHA" != "$PRE_REBASE_SHA" ]; then
+               # Clean local main, but HEAD is not at the pre-rebase tip
+               # the polecat saw. Could be unpublished local commits or a
+               # divergent ancestor — `reset --hard origin/main` would
+               # silently discard them. Skip and report.
+               OLD_SHORT=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+               EXPECTED_SHORT=$(git -C "$RIG_ROOT" rev-parse --short "$PRE_REBASE_SHA" 2>/dev/null \
+                                || printf '%.10s' "$PRE_REBASE_SHA")
+               RIG_UPDATE_RESULT="skipped: HEAD=$OLD_SHORT does not match pre_rebase_tip=$EXPECTED_SHORT (operator must sync)"
            else
-               NEW_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
-               # Sweep reaped worktree admin entries. In-flight polecat
-               # worktrees still finish on their own bases by design;
-               # prune only removes records for directories that already
-               # vanished.
-               git -C "$RIG_ROOT" worktree prune >/dev/null 2>&1
-               RIG_UPDATE_RESULT="reset: $OLD_SHA -> $NEW_SHA (worktree prune ran)"
+               OLD_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+               if ! git -C "$RIG_ROOT" reset --hard origin/main >/dev/null 2>&1; then
+                   RIG_UPDATE_RESULT="error: reset --hard origin/main failed in $RIG_ROOT (operator must sync)"
+               else
+                   NEW_SHA=$(git -C "$RIG_ROOT" rev-parse --short HEAD)
+                   # Sweep reaped worktree admin entries. In-flight polecat
+                   # worktrees still finish on their own bases by design;
+                   # prune only removes records for directories that already
+                   # vanished.
+                   git -C "$RIG_ROOT" worktree prune >/dev/null 2>&1
+                   RIG_UPDATE_RESULT="reset: $OLD_SHA -> $NEW_SHA (worktree prune ran)"
+               fi
            fi
        fi
    fi
