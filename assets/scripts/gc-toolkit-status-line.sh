@@ -116,7 +116,7 @@ BUDGET=72
 # --- Fixed segments: hook / mail counts (always render) -----------------
 
 w=$(gc hook "$agent" 2>/dev/null | grep -c . || true)
-m=$(gc mail check "$agent" 2>/dev/null | awk '{print $1+0}' || true)
+m=$(gc mail count "$agent" --json 2>/dev/null | jq -r '.unread // 0' 2>/dev/null || echo 0)
 
 hook_seg=""
 [ "${w:-0}" -gt 0 ] && hook_seg=" | 🪝 ${w}"
