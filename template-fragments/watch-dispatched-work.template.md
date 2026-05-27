@@ -7,29 +7,49 @@ watcher wakes you when the bead transitions, so you can surface
 status changes without polling.
 
 The canonical mechanism is the gc-toolkit pack's `gc-bd-watch`
-script. It runs as a long-lived background process whose stdout is a
-JSONL stream — one line per meaningful bead transition. Spawn it via
-whatever your harness provides for background shell + line-
-monitoring; the harness should wake you on each emitted line and
-tear the process down at session end, so the watcher never leaks
-past the session.
+script. It runs as a long-lived process whose stdout is a JSONL
+stream — one line per meaningful bead transition. Spawn it under a
+per-line-notifying tool (Claude Code's `Monitor`); each emitted line
+wakes the agent, and the harness tears the process down at session
+end so the watcher never leaks past the session.
 
 ### The ritual
 
 After `gc sling <pool> <bead>` to dispatch, spawn
-`{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>` as a
-backgrounded shell command and observe its stdout. Match on
-`"type":"status_change"`. Every meaningful transition fires one
-event — that includes states like `blocked` that need intervention,
-not just `closed`.
+`{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>` under a
+per-line-notifying tool and observe each emitted JSONL line as a
+notification. Match on `"type":"status_change"`. Every meaningful
+transition fires one event — that includes states like `blocked`
+that need intervention, not just `closed`.
 
 **Claude Code example:**
 
 ```
 gc sling <pool> <bead>
-Bash(command: "{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>", run_in_background: true)
-Monitor that bash id for "status_change" lines
+Monitor(
+  command: "{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>",
+  description: "watching <bead>",
+  persistent: true,
+)
 ```
+
+Notes:
+
+- Each stdout line from `gc-bd-watch.sh` becomes one notification
+  to the agent. Match `"type":"status_change"` for real transitions;
+  the `watch_start` / `watch_end` boundary events arrive too and are
+  useful for confirming the watcher actually started / for reading
+  the exit `reason` when it stops.
+- `persistent: true` is the right knob for bead watches because
+  beads can take hours-to-days (operator interruption, polecat
+  rework loops, refinery queue). The default 300s `Monitor` timeout
+  is calibrated for builds/CI and would kill the watch mid-bead.
+- Do NOT also spawn the script via `Bash(run_in_background: true)`.
+  `Bash` with `run_in_background` notifies only on process exit, not
+  per stdout line — pairing it with `Monitor` against the same bash
+  id is not a supported wiring, and spawning a second invocation
+  costs an extra `gc events --follow` subscription and risks the
+  operator wiring the wrong one.
 
 `{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh` resolves to this
 pack's installed location — no `PATH` setup required. One invocation

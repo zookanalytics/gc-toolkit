@@ -10,8 +10,8 @@
 # transitions.
 #
 # Claude Code example:
-#   Bash(command: "<this script> <bead>", run_in_background: true)
-#   Monitor that bash id for "status_change" lines
+#   Monitor(command: "<this script> <bead>", description: "watching <bead>", persistent: true)
+#   Each emitted JSONL line is a notification; match on "type":"status_change".
 #
 # DURATION accepts any value timeout(1) understands (e.g. 30s, 5m, 24h).
 # Default: 24h. The watcher exits as soon as the bead reaches a terminal
