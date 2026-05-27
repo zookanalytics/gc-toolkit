@@ -2,35 +2,50 @@
 ### Cycle-recycle policy
 
 Long-running patrol agents (refinery, witness, deacon) need to recycle
-their context periodically so it doesn't accumulate from idle polling and
-event metadata. The structural fix is `gc context --usage` (gascity
-FUTURE.md tier 3, NEEDS IMPL); until that lands, apply the heuristic
-policy below.
+their context periodically so it doesn't accumulate from idle polling
+and event metadata. This template adds a single **proactive** check on
+top of standard GasTown — Claude's PreCompact hook in
+`internal/hooks/config/claude.json` runs the auto-handoff sequence
+when Claude is about to compact, and remains the reactive safety net
+at the model's own compaction edge.
 
-Recycle when **either** trigger fires:
+**Trigger.** At end-of-wisp, query `input_tokens` from the supervisor
+API. If the value is at or above 200K, run the pour-next-before-handoff
+sequence below.
 
-1. **Completed-wisp count.** You have closed **6 or more** patrol wisps
-   in this session. Each patrol cycle pours and burns one wisp.
+```bash
+# Supervisor API: $GC_API_URL when exported, else gc-toolkit's
+# canonical default (port 8372 from ~/.gc/supervisor.toml via the
+# gc_api_base helper pattern). City name resolves from $GC_CITY path
+# via the gc cities registry; agent name from $GC_AGENT.
+API_URL="${GC_API_URL:-http://127.0.0.1:8372}"
+CITY=$(gc cities --json 2>/dev/null | jq -r --arg p "$GC_CITY" '.cities[] | select(.path == $p) | .name')
+TOKENS=$(curl -sf --max-time 3 "$API_URL/v0/city/$CITY/agent/$GC_AGENT" 2>/dev/null | jq '.input_tokens // 0' 2>/dev/null || echo 0)
+TOKENS=${TOKENS:-0}  # empty stdin → jq emits nothing → default to 0 for the test below
+if [ "$TOKENS" -ge 200000 ]; then
+  # pour-next-before-handoff ritual (below)
+fi
+```
 
-2. **Idle-poll count.** You have done **8 or more** consecutive
-   `gc events --watch` waits that returned with no events and no work
-   found (~45+ minutes of idle polling at the default 30s→300s
-   exponential backoff). Reset the counter as soon as an event arrives
-   or work is found — the next idle stretch is what counts, not the
-   cumulative.
+If the curl fails or `input_tokens` is null (API unreachable, provider
+with no transcript adapter), the check skips silently — PreCompact
+still fires at the model's compaction edge. No fallback heuristic.
 
-**Action when a trigger fires (pour-next-before-handoff):**
+200K is an absolute work-product threshold, not a percentage. A
+200K-window agent fires at its natural compaction edge; a 1M-window
+agent at 20%. Equally correct in both cases, no model-window table
+involved.
 
-> **NEVER ask the operator whether to recycle.** The recycle sequence
-> below is the autonomous decision. Do not invoke `AskUserQuestion`,
-> `/handoff`, or any other interactive consent UI at the threshold
-> boundary — heartbeat agents (witness, deacon, refinery) blocking on
-> consent stalls patrols, gate checks, and orphan sweeps for as long as
-> the prompt sits unanswered. The threshold IS the directive: when
-> either trigger above fires, execute the sequence immediately.
+**Action when the trigger fires (pour-next-before-handoff):**
+
+> **NEVER ask the operator whether to recycle.** Do not invoke
+> `AskUserQuestion`, `/handoff`, or any other interactive consent UI
+> at the threshold boundary — heartbeat agents (witness, deacon,
+> refinery) blocking on consent stall patrols and gate checks for as
+> long as the prompt sits unanswered. The threshold IS the directive.
 
 The formula's universal invariant is **"pour next before burn current"** —
-every other exit path obeys it. Cycle-recycle must obey it too, so the
+every exit path obeys it. Cycle-recycle must obey it too, so the
 inheriting session finds an in-progress wisp on its hook regardless of
 whether the startup discovery query catches it.
 
@@ -43,7 +58,7 @@ gc bd update "$NEXT" --assignee=$GC_AGENT
 # 2. Write the durable HANDOFF mail. For controller-restartable sessions
 #    this also stops the runtime so the controller respawns; for on-demand
 #    named sessions it only writes mail and returns.
-gc handoff "context cycle: <reason> (next wisp: $NEXT)"
+gc handoff "context cycle: input_tokens reached $TOKENS (next wisp: $NEXT)"
 
 # 3. Trigger the actual restart. For controller-restartable sessions
 #    gc handoff already stopped the runtime so this typically never runs.
@@ -53,38 +68,7 @@ gc handoff "context cycle: <reason> (next wisp: $NEXT)"
 gc session reset "$GC_ALIAS"
 ```
 
-Examples:
-- `gc handoff "context cycle: 6 patrol wisps closed this session (next wisp: $NEXT)"`
-- `gc handoff "context cycle: 45+ min idle, find-work events accumulated (next wisp: $NEXT)"`
-
-**Layered model.** `gc handoff` is the state-capture command: it always
-writes the durable HANDOFF bead, and for controller-restartable
-sessions it also stops the runtime so the controller respawns the
-process. `gc session reset` is the explicit-restart-trigger: it does
-not write mail of its own — the durable record is the HANDOFF bead
-from step 2 — but it forces a fresh respawn for on-demand named
-sessions where `gc handoff` cannot. Chaining the two covers both
-classes from a single recycle path: step 2 captures state; step 3 is a
-no-op for controller-restartable (the runtime is already stopped) and
-the actual restart trigger for on-demand named.
-
-Including `$NEXT` in the message body makes the inherited wisp ID
-discoverable to the new session even if its tier-1 in-progress query
-somehow misses it (race, status flip, etc.).
-
-**After running the recycle sequence:**
-
-- The new session boots from the controller-driven respawn (step 2 for
-  controller-restartable, step 3 for on-demand named) and reads the
-  HANDOFF bead on its first action.
-- It finds the in-progress next wisp via its tier-1 startup query
-  (assignee = `$GC_ALIAS`, status = `in_progress`) and resumes from
-  clean state. **No operator `/clear` is required** — the chain handles
-  the restart end-to-end.
-- Surface the handoff message (with the next-wisp ID) in your output
-  before the reset fires so any attached operator sees what happened.
-
-**Cost / caveats.**
+**Caveats.**
 
 - `gc session reset` invokes `tmux kill-session`. The host tmux session
   for the agent is destroyed and respawned. Anything not written to
@@ -96,61 +80,23 @@ somehow misses it (race, status flip, etc.).
   and survives the restart. It is the canonical carry-forward; the new
   session reads it on first action.
 - The platform's restart-request path **does not check operator
-  attachment**. The config-drift path does (session reconciler), but
-  restart-request bypasses it. If the operator is attached to the
-  named coord's tmux pane to watch or debug at the moment cycle-recycle
-  fires, the session will be killed under the operator without
-  warning.
-- Implication for trigger design: cycle-recycle thresholds must be
-  tight. Don't fire on weak signals. The canonical thresholds (6
-  patrol wisps closed OR 8 idle waits since last work) exist for this
-  reason — they're set high enough that recycle reflects a genuine
-  need for fresh context, not noise.
+  attachment**. If the operator is attached to the named coord's tmux
+  pane to watch or debug at the moment cycle-recycle fires, the
+  session will be killed under the operator without warning.
+- `gc handoff` (state capture) chained with `gc session reset`
+  (restart trigger) covers both controller-restartable and on-demand
+  named sessions from one recycle path. `gc handoff` always writes
+  the HANDOFF bead and stops the runtime for controller-restartable
+  classes; `gc session reset` is a no-op for those and the actual
+  restart trigger for on-demand named. Including `$NEXT` in the
+  handoff body makes the inherited wisp ID discoverable even if the
+  new session's tier-1 startup query misses it.
 
-**Pathological-loop note.** If the cycle-recycle trigger somehow fires
-repeatedly (e.g. event-watch loop bug, runaway counter), each cycle
-adds a new wisp with no opportunity to burn the prior one. Accumulated
-wisps are detectable as multiple open patrol wisps assigned to
-`$GC_ALIAS`; the startup discovery's tier-3 step adopts the newest and
-closes older ones with `'orphaned cross-rotation'` reason.
-
-**Verifying the wisp count (optional):**
-
-```bash
-gc bd list \
-  --type=molecule --mol-type=patrol \
-  --assignee="$GC_ALIAS" \
-  --status=closed \
-  --closed-after="$SESSION_START_ISO" \
-  --json | jq length
-```
-
-`$SESSION_START_ISO` is the ISO timestamp captured when this session
-began (e.g. `date -Iseconds` written to a session-scoped temp file the
-first time the recycle check runs). The check is for verification —
-your own count of completed cycles in this session is the authoritative
-signal.
-
-**RSS as a fallback only.** Process RSS does not track Claude's context
-window directly, so it is not a primary trigger. If RSS exceeds 1500 MB
-*and* neither trigger above has fired, treat it as a soft warning to
-re-check the counters more strictly — but do not recycle on RSS alone.
-
-**Why these specific thresholds:**
-
-- N=6 wisps and M=8 idle waits: raised 2026-05-09 from N=3/M=4 because
-  the original numbers (calibrated on a single 2026-05-06 observation
-  of 63% context after 1+1 wisps in 5h49m) caused agents to recycle
-  before they accomplished much real work. Idle-poll history was the
-  dominant context bloat in that observation, not merge work, so for
-  active patrols the original ceiling was much lower than necessary.
-  These new thresholds are still proxies — the structural fix is
-  context-fill measurement (`gc context --usage` per FUTURE.md).
-- `gc handoff` chained with `gc session reset` over `gc runtime
-  request-restart` alone: `request-restart` silently no-ops for
-  on-demand named sessions because the controller cannot restart
-  user-attended processes from inside the session. `gc handoff` always
-  writes the durable HANDOFF bead (the canonical carry-forward), and
-  the chained `gc session reset` is what actually respawns named
-  sessions without requiring operator `/clear`.
+**Why 200K.** Operator decision 2026-05-24. Replaces the earlier
+wisp-count (N=6) and idle-poll-count (M=8) proxies, which over-fired
+in event-noisy rigs — live 2026-05-24 evidence showed witness/deacon
+recycling every ~10 min while sitting at 25% context. Reading
+`input_tokens` directly removes the proxy counters and the
+model-window table from the equation, leaving one simple rule: cycle
+when the work product has actually grown to ~200K tokens.
 {{ end }}
