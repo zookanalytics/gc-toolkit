@@ -1,0 +1,1 @@
+description = "gc-toolkit artifacts (formulas/, assets/scripts/, template-fragments/ defines) don't silently shadow gastown base — allowlisted mirrors WARN when base advances"
