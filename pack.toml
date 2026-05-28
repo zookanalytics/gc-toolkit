@@ -11,9 +11,13 @@
 # mechanik, polecat-codex, _polecat-gemini, plus the *-thread
 # variants) ship under agents/. Gastown roster (boot, deacon, mayor,
 # polecat, refinery, witness) is imported and divergences are
-# expressed as bare-name [[patches.agent]] — prompts in patches/,
-# plus a polecat-convoys template-fragment for the additive
-# integration-branch section.
+# expressed as bare-name [[patches.agent]] — pure fragment-append
+# overlays on top of base prompts. Each gc-toolkit-specific doctrine
+# (heartbeat-no-consent-ui, layered-startup-discovery-{deacon,refinery},
+# convoy-integration-branch-mayor, polecat-convoys, polecat-non-impl-done)
+# lives in template-fragments/ and is named explicitly in
+# inject_fragments_append below; the base prompt template is reused
+# verbatim from gastown. No whole-file prompt mirrors.
 #
 # Opt-in sub-packs ship under packs/<name>/ and are imported by
 # specific rigs (not by gc-toolkit's importers). The first sub-pack
@@ -58,13 +62,18 @@ session_live = [
 
 [[patches.agent]]
 name = "deacon"
-prompt_template = "patches/deacon-prompt.template.md"
-inject_fragments_append = ["canonical-self-rename"]
+inject_fragments_append = [
+    "canonical-self-rename",
+    "heartbeat-no-consent-ui",
+    "layered-startup-discovery-deacon",
+]
 
 [[patches.agent]]
 name = "mayor"
-prompt_template = "patches/mayor-prompt.template.md"
-inject_fragments_append = ["canonical-self-rename"]
+inject_fragments_append = [
+    "canonical-self-rename",
+    "convoy-integration-branch-mayor",
+]
 
 [[patches.agent]]
 name = "polecat"
@@ -72,11 +81,15 @@ inject_fragments_append = ["polecat-convoys", "polecat-non-impl-done"]
 
 [[patches.agent]]
 name = "refinery"
-prompt_template = "patches/refinery-prompt.template.md"
+inject_fragments_append = [
+    "layered-startup-discovery-refinery",
+]
 
 [[patches.agent]]
 name = "witness"
-prompt_template = "patches/witness-prompt.template.md"
+inject_fragments_append = [
+    "heartbeat-no-consent-ui",
+]
 
 [[named_session]]
 template = "mechanik"
