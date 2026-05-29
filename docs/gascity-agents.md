@@ -605,7 +605,9 @@ the cycle-level mechanics that the matrix does not capture.
 | `gc session close <id>` | session bead ID (atomically stops runtime + closes bead) | session bead ID | session bead ID |
 | `gc session kill <id>` | session bead ID (stops tmux only; reconciler may restart) | session bead ID | session bead ID |
 | `gc session reset <id>` | session bead ID | session bead ID | session bead ID |
-| `gc session wake <addr>` | session id or alias (QualifiedName works since alias == QualifiedName) | session id or instance alias — **not** the pool QualifiedName | session id or adhoc alias |
+| `gc session wake <addr>` | session id or alias (QualifiedName works since alias == QualifiedName); **clears holds + requests start — not how you stay up**, see [Keeping an `on_demand` session up](#keeping-an-on_demand-session-up-pin--attach--unpin) | session id or instance alias — **not** the pool QualifiedName | session id or adhoc alias |
+| `gc session pin <addr>` | session id or alias; durable awake hold (materializes the canonical if not yet started) | session id or instance alias | session id or adhoc alias |
+| `gc session unpin <addr>` | session id or alias; removes the pin, reconciler re-applies wake/sleep | session id or instance alias | session id or adhoc alias |
 | `gc session list` | shows canonical alias | shows each instance | shows each adhoc instance |
 | `gc session peek <id>` | session bead ID | session bead ID | session bead ID |
 | `gc session wait <id>` | session bead ID | session bead ID | session bead ID |
@@ -753,6 +755,93 @@ worktree before discovering it lost the race.
 different polecat than the one you're running in. Verify peer
 state before re-implementing — they may already be working on
 it.
+
+## Keeping an `on_demand` session up (pin / attach / unpin)
+
+An `on_demand` named singleton (refinery, gascity-keeper) is **not
+materialized when it has no work** — that is the [Lifecycle](#lifecycle)
+contract, and it is also why reaching one *interactively* is confusing.
+`gc session wake` starts the runtime but only **clears holds and
+requests a start**; it is not a durable reason to stay up, so the
+reconciler drains the session again shortly after — the
+"no-wake-reason" you see in the logs. Operators have burned real time
+tracing exactly this.
+
+To keep an `on_demand` session up while you work with it, give it a
+**durable** reason to stay: a pin.
+
+### What counts as a wake reason
+
+The reconciler keeps a session materialized only while one of these
+holds. Anything else drains on the next patrol.
+
+| Wake reason | Durable? | How |
+|---|---|---|
+| Work on the hook (a bead `assignee`'d or `gc.routed_to` the agent) | yes — until the work is done | dispatch (`bd update --assignee`, `gc sling`) |
+| A pin | yes — until you `unpin` | `gc session pin` |
+| An active attach | **no — transient**; drops when you detach, even to hop tmux windows | `gc session attach` |
+
+`gc session wake` is deliberately **absent** from this list: it clears
+holds and requests a start, but is not itself a reason to stay up.
+
+### Interactive — pin → attach → engage → unpin
+
+```bash
+gc session pin <rig>/<agent>      # durable "I'm using it now" hold; survives detach + tmux hops
+gc session attach <rig>/<agent>   # how you VIEW the pinned session
+# ... have the conversation ...
+gc session unpin <rig>/<agent>    # "done — reclaim the slot"; drops back to on_demand idle
+```
+
+A pin is still genuinely on-demand — *you* chose the window — and is
+**not** the always-live `mode = "always"` config (see
+[Lifecycle](#lifecycle)). Two caveats from the commands themselves:
+`pin` sets the awake override but does **not** clear suspend holds or
+other hard blockers, so if the session is held, `wake` first to clear
+the hold, then `pin` to keep it up; and `unpin` does **not** force an
+immediate stop — the reconciler re-applies the normal wake/sleep rules
+on its next pass.
+
+### Autonomous — give it work, don't pin
+
+If the session only needs to *do a job* (rebase, sync, PR-prep, a
+merge), don't pin it — hand it work, which is itself a wake reason:
+
+```bash
+bd update <bead> --assignee <rig>/<agent>   # Lane 2: direct to a named singleton
+gc sling <rig>/<pool> <bead>                # Lane 1: routed pool work (pool workers)
+```
+
+The session materializes to process the bead and drains when the hook
+is empty again. Pinning is only for the interactive "I want to talk to
+it" case.
+
+### Pin the canonical session, not a fresh one
+
+Pin **the** canonical session — the instance that already shows in
+`gc session list` with its alias equal to the QualifiedName
+(`<rig>/<agent>`). Reaching for `gc session new` instead spawns a
+separate `…-adhoc-<id>` thread *alongside* the canonical one — the
+[duplicate named-session footgun](#duplicate-named-session-via-manual-spawn).
+You don't need to `new` it first: if the canonical session isn't
+materialized yet, `gc session pin <rig>/<agent>` creates its canonical
+bead so the reconciler can start it.
+
+### Future ergonomics (gascity-side, not implemented here)
+
+Recorded desire-paths, **not** shipped behavior and **not** part of
+this doc's contract. The pin → attach → unpin dance is a real UX gap:
+`on_demand` "drain when idle" (slot economy) conflicts with using a
+keeper as an interactive assistant. These are `gc`-CLI / rig-config
+changes to file under the `gascity` (`gc`) rig when scoped — **not**
+gc-toolkit docs:
+
+- `gc session attach --pin` — attach *and* set the durable pin in one
+  step, unpinning on exit (the cleanest one-step interactive path).
+- Default-pin the canonical keeper in the `gascity-keeper` rig config —
+  always available, at the cost of a held slot.
+- A short keep-alive grace window after detach, so a quick
+  detach/reattach doesn't drain the session.
 
 ## Refresh procedure
 

@@ -63,3 +63,7 @@ hold the rest of the bundle.
 - `docs/gascity-local-patching.md` — the operator-level doc the keeper
   references on prime; describes when local-patching is appropriate and
   the bar for promoting a commit to an upstream PR candidate.
+- `docs/gascity-agents.md` → "Keeping an `on_demand` session up
+  (pin / attach / unpin)" — why this on-demand keeper drains on idle and
+  how to keep it up interactively (pin → attach → unpin) instead of just
+  `wake`-ing it.

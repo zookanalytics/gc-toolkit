@@ -326,6 +326,12 @@ gc session new <rig>/gascity-keeper.keeper
 gc session attach <alias>
 ```
 
+The keeper runs `on_demand`, so it drains once idle — and `gc session
+wake` alone won't hold it up. To keep it up while you work with it, `gc
+session pin <rig>/gascity-keeper.keeper` (then `unpin` when done); see
+[gascity-agents.md → Keeping an `on_demand` session
+up](gascity-agents.md#keeping-an-on_demand-session-up-pin--attach--unpin).
+
 ---
 
 ## Gotchas
