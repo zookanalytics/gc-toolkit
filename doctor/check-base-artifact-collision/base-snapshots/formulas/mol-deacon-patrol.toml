@@ -59,18 +59,22 @@ default = "60"
 
 [[steps]]
 id = "check-inbox"
-title = "Cycle-recycle check, then mail"
+title = "Context check, then mail"
 description = """
-**1. Cycle-recycle check (FIRST — before any work):**
+**1. Context check (FIRST — before any work):**
+```bash
+RSS=$(ps -o rss= -p $$ | tr -d ' ')
+RSS_MB=$((RSS / 1024))
+```
 
-Apply cycle-recycle per the `cycle-recycle` template in your prompt
-(thresholds, action sequence, rationale, and caveats live there).
-
-gc-toolkit local delta: cycle-recycle replaces base's inline RSS +
-`gc runtime request-restart` heuristic, because the gc-toolkit cycle-
-recycle template already encodes thresholds (input_tokens >= 200K) and
-the request-restart action — the inline RSS check would just be a
-weaker duplicate.
+If RSS > 1500 MB or context feels heavy, request a restart:
+```bash
+gc runtime request-restart
+```
+This sets `GC_RESTART_REQUESTED` metadata on the session and blocks
+forever. The controller will kill and restart the session on the next
+reconcile tick. The current wisp stays assigned and the new session
+the new session re-reads formula steps and resumes from context.
 
 **2. Check mail:**
 ```bash
@@ -366,37 +370,18 @@ id = "system-health"
 title = "Run system diagnostics"
 needs = ["dolt-health"]
 description = """
-Run `gc doctor --json` for a workspace health check. **Always
-pass `--json`.** The default human output puts a count in the headline
-message (e.g. "1 session model finding(s)") and hides the actionable
-list of findings in `CheckResult.Details` unless `--verbose` is set.
-The `--json` mode is the stable machine-readable contract: every check
-emits `{name, status, message, details[], fix_hint, fix_error,
-fix_attempted, fixed}` regardless of verbosity, plus a `summary`
-object with `{passed, warned, failed, fixed}`. Schema:
-`engdocs/contributors/doctor-json.md`.
-
-gc-toolkit local delta: keep `--json` parsing. Base v14 uses a bare
-`gc doctor` whose human-output count is a regression for the deacon
-(needs the structured findings list to decide whether to act or
-escalate). Roll forward to base once #<TBD-upstream-issue> lands.
+Run `gc doctor` for a quick workspace health check.
 
 ```bash
-gc doctor --json | jq '.checks[] | select(.status != "ok")'
+gc doctor
 ```
 
-That filter shows only the warning/error checks with their full
-details — the actionable subset.
-
 **For simple findings:** Act directly (e.g., stale lock files, temp
-directory cleanup, broken worktrees via `gc doctor --fix`).
+directory cleanup).
 
-**For complex findings:** Escalate to mayor. Forward the offending
-check object verbatim (it includes `name`, `message`, `details`, and
-any `fix_hint`) so the mayor sees the same machine-readable context:
+**For complex findings:** Escalate to mayor with context:
 ```bash
-finding=$(gc doctor --json | jq '.checks[] | select(.name=="<check>")')
-gc mail send mayor/ -s "DOCTOR: <finding>" -m "$finding"
+gc mail send mayor/ -s "DOCTOR: <finding>" -m "<details>"
 ```
 
 Close this step after check."""
@@ -410,18 +395,14 @@ description = """
 
 End of patrol cycle. Pour the next iteration, then wait or exit.
 
-**1. Cycle-recycle check:**
+**1. Context check:**
 
-Re-apply cycle-recycle per the `cycle-recycle` template in your prompt
-(thresholds, action sequence, rationale, and caveats live there). The
-deacon recycles at both start AND end of cycle, so the same trigger
-counters apply.
-
-gc-toolkit local delta: cycle-recycle replaces base's inline RSS +
-`gc runtime request-restart` heuristic, matching the start-of-cycle
-override above.
-
-If recycle did NOT fire, pour the next iteration the normal way:
+If context feels heavy or RSS is high:
+```bash
+gc runtime request-restart
+```
+This blocks forever. The controller restarts you. The next wisp
+is already assigned — the new session resumes from context.
 
 **2. Quick inbox check (end-of-cycle hygiene):**
 ```bash

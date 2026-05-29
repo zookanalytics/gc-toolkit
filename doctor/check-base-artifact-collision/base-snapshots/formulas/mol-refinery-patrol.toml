@@ -1,7 +1,7 @@
 description = """
 Refinery patrol loop. Poured as a root-only wisp on startup:
 
-  gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}}
+  gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}}
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: check for work, merge one branch, pour
@@ -65,10 +65,6 @@ default = ""
 description = "Default target branch for merges"
 default = "main"
 
-[vars.default_merge_strategy]
-description = "Default when bead metadata.merge_strategy is unset. 'direct' = FF + push to target. 'mr'/'pr' = open pull request."
-default = "direct"
-
 [vars.delete_merged_branches]
 description = "Whether to delete source branches after merge"
 default = "true"
@@ -80,14 +76,6 @@ default = "false"
 [vars.event_timeout]
 description = "Seconds to sleep before re-checking for work. Replaces former event-watch loop which hot-spun on cache-reconcile firehose."
 default = "60"
-
-[vars.auto_ff_rig_main]
-description = "After a successful direct merge, attempt to fast-forward the rig's canonical checkout (\\$GC_RIG_ROOT) when it is on the target branch with a clean tree. Best-effort; never blocks the merge."
-default = "true"
-
-[vars.review_gate]
-description = "Pre-publish review gate for mr-mode PRs. 'codex' opens PRs as draft and dispatches a review bead to the rig's codex polecat pool; empty disables the gate (PRs open non-draft as today)."
-default = "codex"
 
 [[steps]]
 id = "validate-identity"
@@ -132,7 +120,7 @@ CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next refinery wisp; not requesting restart."
   gc runtime drain-ack
@@ -249,7 +237,7 @@ CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next refinery wisp; not burning."
   gc runtime drain-ack
@@ -341,7 +329,7 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
      if [ -z "$CURRENT_WISP" ]; then
        CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
      fi
-     NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --json | jq -r '.new_epic_id // empty')
+     NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id // empty')
      if [ -z "$NEXT" ]; then
        echo "Could not pour next refinery wisp; not burning."
        gc runtime drain-ack
@@ -389,12 +377,7 @@ Read the merge target and merge strategy from the work bead metadata:
 ```bash
 BRANCH=$(gc bd show $WORK --json | jq -r '.[0].metadata.branch')
 TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_branch}}"')
-MERGE_STRATEGY=$(gc bd show $WORK --json | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
-# gc-toolkit local delta: normalize empty default_merge_strategy var. When the
-# wisp is poured with `--var default_merge_strategy=` (e.g., an operator
-# bypasses the formula default explicitly), the substitution leaves
-# MERGE_STRATEGY empty and `direct` is the safe fallback.
-MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
+MERGE_STRATEGY=$(gc bd show $WORK --json | jq -r '.[0].metadata.merge_strategy // "direct"')
 EXISTING_PR=$(gc bd show $WORK --json | jq -r '.[0].metadata.existing_pr // empty')
 ORIGIN_REPO_ERROR=""
 if command -v gh >/dev/null 2>&1; then
@@ -422,15 +405,6 @@ if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
   MERGE_STRATEGY="mr"
 fi
 
-# gc-toolkit local delta: surface integration-branch targets so the operator
-# knows direct refinery handling lands on the convoy's integration branch, not
-# {{target_branch}}; graduation is a separate work bead.
-case "$TARGET" in
-  integration/*)
-    echo "INFO: Merging $WORK to integration branch '$TARGET' (not {{target_branch}}). A graduation bead is required to land this work to {{target_branch}}; see 'gc convoy land' and the integration_branch_auto_land patrol step."
-    ;;
-esac
-
 block_existing_pr() {
   reason="$1"
   gc bd update $WORK \
@@ -454,7 +428,7 @@ Target: $TARGET"
     gc runtime drain-ack
     exit 1
   fi
-  NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --json | jq -r '.new_epic_id // empty')
+  NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id // empty')
   if [ -z "$NEXT" ]; then
     echo "Could not pour next refinery wisp; not burning."
     gc runtime drain-ack
@@ -640,52 +614,12 @@ fi
 
 **If MERGE_STRATEGY = "direct" (default):**
 
-gc-toolkit local delta: if the push to `$TARGET` is rejected because the
-target branch is GitHub-protected (GH006 / GH013 / "protected branch" /
-"Changes must be made through a pull request" / "approving review" /
-"Cannot update this protected ref"), refinery automatically promotes the
-work bead to `merge_strategy=pr` and continues under the "mr" block below
-— no operator intervention required. Any other push failure stops the
-wisp for debugging.
-
-**1. Merge target branch locally and push (auto-promote on protected branch):**
+**1. Merge and push target branch:**
 ```bash
 git checkout $TARGET
 git merge --ff-only temp
-
-is_protected_branch_error() {
-  case "$1" in
-    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|\
-    *"Changes must be made through a pull request"*|\
-    *"approving review"*|*"Cannot update this protected ref"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-PUSH_ERR=$(mktemp)
-if git push origin $TARGET 2>"$PUSH_ERR"; then
-  rm -f "$PUSH_ERR"
-else
-  PUSH_STDERR=$(cat "$PUSH_ERR")
-  rm -f "$PUSH_ERR"
-  if is_protected_branch_error "$PUSH_STDERR"; then
-    echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-    gc bd update $WORK --set-metadata merge_strategy=pr
-    MERGE_STRATEGY=mr
-    git reset --hard "origin/$TARGET"
-    # Fall through to the "If MERGE_STRATEGY = 'mr'" block below.
-  else
-    echo "Push failed: $PUSH_STDERR"
-    echo "STOP. Debug and retry. Do NOT continue."
-    gc runtime drain-ack
-    exit 1
-  fi
-fi
+git push origin $TARGET
 ```
-
-**If `$MERGE_STRATEGY` was just flipped to `mr` (auto-promotion fired),
-skip steps 2-5 below and execute the "If MERGE_STRATEGY = 'mr'" block
-instead. The rebased `temp` branch is still available for the PR push.**
 
 **2. Verify push:**
 ```bash
@@ -724,48 +658,6 @@ git switch --detach HEAD
 ```
 If delete_merged_branches = "true": `git push origin --delete $BRANCH`
 
-**5. Auto-fast-forward rig canonical checkout (best-effort):**
-
-**Config: auto_ff_rig_main = {{auto_ff_rig_main}}**
-
-gc-toolkit local delta: if `auto_ff_rig_main = "true"`, attempt to keep
-the rig's canonical checkout (`$GC_RIG_ROOT`) in sync with the freshly
-pushed `$TARGET`. The merge metadata is already recorded and the bead is
-already closed — this is a side-effect cleanup that MUST NOT abort the
-merge or affect bead state on failure.
-
-```bash
-RIG_ROOT="${GC_RIG_ROOT:-}"
-if [ "{{auto_ff_rig_main}}" = "true" ] && [ -n "$RIG_ROOT" ] \
-   && { [ -d "$RIG_ROOT/.git" ] || [ -f "$RIG_ROOT/.git" ]; }; then
-  RIG_BRANCH=$(git -C "$RIG_ROOT" branch --show-current 2>/dev/null || echo "")
-  RIG_DIRTY=$(git -C "$RIG_ROOT" status --porcelain --untracked-files=no 2>/dev/null)
-  if [ "$RIG_BRANCH" = "$TARGET" ] && [ -z "$RIG_DIRTY" ]; then
-    git -C "$RIG_ROOT" fetch --quiet origin "$TARGET" 2>/dev/null || true
-    if git -C "$RIG_ROOT" merge-base --is-ancestor \
-         "$TARGET" "origin/$TARGET" 2>/dev/null; then
-      if git -C "$RIG_ROOT" pull --ff-only --quiet origin "$TARGET" 2>/dev/null; then
-        echo "Auto-FF: $RIG_ROOT $TARGET → $(git -C "$RIG_ROOT" rev-parse --short HEAD)"
-      else
-        echo "Auto-FF: pull failed (best-effort, ignoring)"
-      fi
-    else
-      BEHIND=$(git -C "$RIG_ROOT" rev-list --count "$TARGET..origin/$TARGET" 2>/dev/null || echo "?")
-      AHEAD=$(git -C "$RIG_ROOT" rev-list --count "origin/$TARGET..$TARGET" 2>/dev/null || echo "?")
-      echo "Auto-FF: $RIG_ROOT diverged ($AHEAD ahead, $BEHIND behind origin/$TARGET) — not modifying"
-    fi
-  elif [ -n "$RIG_DIRTY" ]; then
-    echo "Auto-FF: $RIG_ROOT has uncommitted changes — skipping"
-  elif [ "$RIG_BRANCH" != "$TARGET" ]; then
-    echo "Auto-FF: $RIG_ROOT on '$RIG_BRANCH', not '$TARGET' — skipping"
-  fi
-fi
-```
-
-If `auto_ff_rig_main = "false"`: skip entirely. The stance can shift to a
-different surfacing mechanism (cron, hook, manual) without changing this
-formula.
-
 **If MERGE_STRATEGY = "mr":**
 
 Refinery does NOT land the branch directly. Instead it publishes a pull
@@ -787,10 +679,6 @@ file (using `--body-file` avoids quoting/encoding hazards with multi-line
 markdown). The body always carries the bead's full description (the
 "why"), and includes the polecat's implementation notes (the "what")
 when present.
-
-gc-toolkit local delta: if `review_gate = "codex"`, open the PR as draft
-so the codex review-bead gate (dispatched in step 4) gates ready-status
-on the codex reviewer's verdict.
 
 ```bash
 WORK_JSON=$(gc bd show $WORK --json)
@@ -825,17 +713,11 @@ PR_BODY_FILE=$(mktemp)
   printf -- '- Rebased on `%s` via Gastown Refinery.\n' "$TARGET"
 } > "$PR_BODY_FILE"
 
-PR_DRAFT_FLAG=""
-if [ "{{review_gate}}" = "codex" ]; then
-  PR_DRAFT_FLAG="--draft"
-fi
-
 if [ -n "$EXISTING_PR" ]; then
   PR_REF="$EXISTING_PR"
 else
   if command -v gh >/dev/null 2>&1; then
     PR_URL=$(gh pr create \
-      $PR_DRAFT_FLAG \
       --base "$TARGET" \
       --head "$BRANCH" \
       --title "$ISSUE_TITLE ($WORK)" \
@@ -873,8 +755,7 @@ else
         --arg head "$BRANCH" \
         --arg base "$TARGET" \
         --rawfile body "$PR_BODY_FILE" \
-        --argjson draft "$( [ -n "$PR_DRAFT_FLAG" ] && echo true || echo false )" \
-        '{title:$title, head:$head, base:$base, body:$body, draft:$draft}')
+        '{title:$title, head:$head, base:$base, body:$body}')
       CREATED=$(curl_gh_api "$PR_ERR" \
         -X POST "$API/pulls" \
         -d "$CREATE_PAYLOAD")
@@ -990,37 +871,7 @@ request. `--unset-metadata rejection_reason` clears any stale rejection
 field from an earlier rejected/reworked attempt before the successful
 close.
 
-gc-toolkit local delta: if `review_gate = "codex"`, dispatch a review
-bead for the codex polecat pool BEFORE closing the work bead. Idempotent
-— a second refinery pass on the same PR will reuse the existing review
-bead.
-
 ```bash
-if [ "{{review_gate}}" = "codex" ]; then
-  CODEX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
-  FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
-  REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
-
-  EXISTING_REVIEW=$(gc bd list \
-    --metadata-field task_kind=review \
-    --metadata-field pr_number="$PR_NUMBER" \
-    --status=open,in_progress --limit=1 --json 2>/dev/null \
-    | jq -r '.[0].id // empty')
-
-  if [ -z "$EXISTING_REVIEW" ]; then
-    REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
-    gc bd update "$REVIEW_BEAD" \
-      --set-metadata task_kind=review \
-      --set-metadata pr_url="$PR_URL" \
-      --set-metadata pr_number="$PR_NUMBER" \
-      --set-metadata work_bead="$WORK" \
-      --set-metadata fix_target_pool="$FIX_POOL" \
-      --set-metadata gc.routed_to="$CODEX_POOL"
-    gc session wake "$CODEX_POOL" || true
-    gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for PR#$PR_NUMBER" || true
-  fi
-fi
-
 gc bd update $WORK \
   --set-metadata merge_result=pull_request \
   --set-metadata pr_url="$PR_URL" \
@@ -1110,7 +961,7 @@ CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next refinery wisp; not burning."
   gc runtime drain-ack

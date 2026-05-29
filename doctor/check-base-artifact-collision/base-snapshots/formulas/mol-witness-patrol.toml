@@ -71,18 +71,22 @@ default = "60"
 
 [[steps]]
 id = "check-inbox"
-title = "Cycle-recycle check, then mail"
+title = "Context check, then mail"
 description = """
-**1. Cycle-recycle check (FIRST — before any work):**
+**1. Context check (FIRST — before any work):**
+```bash
+RSS=$(ps -o rss= -p $$ | tr -d ' ')
+RSS_MB=$((RSS / 1024))
+```
 
-Apply cycle-recycle per the `cycle-recycle` template in your prompt
-(thresholds, action sequence, rationale, and caveats live there).
-
-gc-toolkit local delta: cycle-recycle replaces base's inline RSS +
-`gc runtime request-restart` heuristic, because the gc-toolkit cycle-
-recycle template already encodes thresholds (input_tokens >= 200K) and
-the request-restart action — the inline RSS check would just be a
-weaker duplicate.
+If RSS > 1500 MB or context feels heavy, request a restart:
+```bash
+gc runtime request-restart
+```
+This sets `GC_RESTART_REQUESTED` metadata on the session and blocks
+forever. The controller will kill and restart the session on the next
+reconcile tick. The current wisp stays assigned and the new session
+the new session re-reads formula steps and resumes from context.
 
 **2. Check mail:**
 ```bash
@@ -177,12 +181,6 @@ a NEW session with a different ID — the old one never comes back.
    SESSIONS_JSON=$(gc session list --state=all --json)
    SESSION_BEADS_JSON=$(gc bd list --type=session --label=gc:session --include-infra --include-gates --all --json --limit=0)
 
-   # gc-toolkit local delta: post-tk-foudmx, `gc session list --json` returns
-   # `{filters, schema_version, sessions:[...], summary}` with snake_case
-   # session fields (id, session_name, alias, agent_name, state, closed).
-   # Pre-tk-foudmx shape was a bare array with PascalCase keys; base v10
-   # still references that older shape, so we override here to match
-   # current `gc session list` output.
    MATCH_JSON=$(jq -n \
      --arg assignee "$ASSIGNEE" \
      --argjson sessions "$SESSIONS_JSON" \
@@ -194,11 +192,11 @@ a NEW session with a different ID — the old one never comes back.
          }}
          end;
 
-       (reduce $sessions.sessions[] as $s ({};
-         add(.; $s.id; $s.state; ($s.closed // false))
-         | add(.; $s.session_name; $s.state; ($s.closed // false))
-         | add(.; $s.alias; $s.state; ($s.closed // false))
-         | add(.; $s.agent_name; $s.state; ($s.closed // false))
+       (reduce $sessions[] as $s ({};
+         add(.; $s.ID; $s.State; ($s.Closed // false))
+         | add(.; $s.SessionName; $s.State; ($s.Closed // false))
+         | add(.; $s.Alias; $s.State; ($s.Closed // false))
+         | add(.; $s.AgentName; $s.State; ($s.Closed // false))
        )) as $from_session_list
        | reduce $session_beads[] as $b ($from_session_list;
            add(.; $b.metadata.configured_named_identity; $b.metadata.state; ($b.status == "closed")))
@@ -240,11 +238,7 @@ Our job is to ensure work reaches the branch so it's schedulable.
 Read the bead metadata to find the worktree and branch:
 ```bash
 META=$(gc bd show <bead> --json | jq '.[0].metadata')
-# gc-toolkit local delta: polecat formula records the per-bead worktree in
-# metadata.work_dir (not metadata.worktree). Base v10 reads .worktree, which
-# is empty for every gc-toolkit polecat handoff; we read .work_dir to match
-# what mol-polecat-work.workspace-setup actually writes.
-WORKTREE=$(echo "$META" | jq -r '.work_dir // empty')
+WORKTREE=$(echo "$META" | jq -r '.worktree // empty')
 BRANCH=$(echo "$META" | jq -r '.branch // empty')
 ```
 
@@ -484,18 +478,14 @@ description = """
 
 End of patrol cycle. Pour the next iteration, then wait or exit.
 
-**1. Cycle-recycle check:**
+**1. Context check:**
 
-Re-apply cycle-recycle per the `cycle-recycle` template in your prompt
-(thresholds, action sequence, rationale, and caveats live there). The
-witness recycles at both start AND end of cycle, so the same trigger
-counters apply.
-
-gc-toolkit local delta: cycle-recycle replaces base's inline RSS +
-`gc runtime request-restart` heuristic, matching the start-of-cycle
-override above.
-
-If recycle did NOT fire, pour the next iteration the normal way:
+If context feels heavy or RSS is high:
+```bash
+gc runtime request-restart
+```
+This blocks forever. The controller restarts you. The next wisp
+is already assigned — the new session resumes from context.
 
 **2. Pour next iteration BEFORE burning:**
 ```bash
