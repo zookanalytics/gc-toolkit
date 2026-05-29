@@ -40,10 +40,13 @@
 #   4. Commit the reconciled file + the refreshed snapshot together.
 #
 # Allowlist policy (HEAD-frozen pairs):
-#   - assets/scripts/worktree-setup.sh — exact-mirror of base (no local
-#     deltas); native gc-toolkit polecat-codex / _polecat-gemini agents
-#     reference {{.ConfigDir}}/assets/scripts/worktree-setup.sh, and
-#     ConfigDir does not fall through to imported packs.
+#   - assets/scripts/worktree-setup.sh — base + whitespace-safe branch-create
+#     argv local delta (the base built the worktree-add invocation as an
+#     unquoted command string, splitting rig/worktree paths that contain
+#     whitespace; the mirror builds argv via `set --` instead). Native
+#     gc-toolkit polecat-codex / _polecat-gemini agents reference
+#     {{.ConfigDir}}/assets/scripts/worktree-setup.sh, and ConfigDir does not
+#     fall through to imported packs. Preserve this delta when reconciling.
 #   - formulas/mol-deacon-patrol.toml — base + cycle-recycle + gc doctor
 #     --json local deltas (validated 2026-05-27).
 #   - formulas/mol-refinery-patrol.toml — base + default_merge_strategy +

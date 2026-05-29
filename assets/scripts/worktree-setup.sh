@@ -129,14 +129,15 @@ if git -C "$RIG_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
         exit 1
     fi
 else
+    # Build the worktree-add argv directly (not a command string) so $RIG_ROOT,
+    # $WT, and friends survive as single arguments when paths contain
+    # whitespace. Append the explicit start-point only when origin/HEAD is
+    # configured; otherwise fall back to current HEAD as before.
+    set -- worktree add "$WT" -b "$BRANCH"
     if [ -n "$DEFAULT_REF" ]; then
-        WORKTREE_ADD="git -C $RIG_ROOT worktree add $WT -b $BRANCH $DEFAULT_REF"
-    else
-        # Fallback: no origin/HEAD configured (detached, or no remote default
-        # set). Create from current HEAD as before.
-        WORKTREE_ADD="git -C $RIG_ROOT worktree add $WT -b $BRANCH"
+        set -- "$@" "$DEFAULT_REF"
     fi
-    if ! GIT_LFS_SKIP_SMUDGE=1 $WORKTREE_ADD; then
+    if ! GIT_LFS_SKIP_SMUDGE=1 git -C "$RIG_ROOT" "$@"; then
         echo "worktree-setup: failed to create worktree at $WT from $RIG_ROOT (branch $BRANCH)" >&2
         restore_stage
         exit 1

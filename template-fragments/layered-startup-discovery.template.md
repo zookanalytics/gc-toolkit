@@ -10,8 +10,14 @@ Pouring unconditionally would orphan whatever the prior session left
 behind.
 
 ```bash
+# Identity: discovery filters on $GC_AGENT, the canonical mailbox identity the
+# patrol formula also assigns to. $GC_ALIAS can legitimately be empty (the
+# harness guarantees $GC_AGENT, falling back to the session name); polling on
+# an empty alias is what self-polled for hours with queued beads (upstream
+# #1833). Do not switch these back to $GC_ALIAS.
+
 # Tier 1 — In-progress patrol wisp (resume in place)
-WISP=$(gc bd list --assignee="$GC_ALIAS" --status=in_progress \
+WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress \
   --type=molecule --include-infra --json --limit=1 | jq -r '.[0].id // empty')
 if [ -n "$WISP" ]; then
   echo "Resuming in-progress wisp: $WISP"
@@ -21,13 +27,13 @@ fi
 # Defensive: deacon rarely receives branch-bearing work beads, but
 # structural symmetry with refinery startup avoids surprise gaps.
 if [ -z "$WISP" ]; then
-  WORK=$(gc bd list --assignee="$GC_ALIAS" --status=open \
+  WORK=$(gc bd list --assignee="$GC_AGENT" --status=open \
     --has-metadata-key=branch --exclude-type=epic --json --limit=1 \
     | jq -r '.[0].id // empty')
   if [ -n "$WORK" ]; then
     echo "Found routed work bead: $WORK — pouring wisp; formula handles the work"
     WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix={{ .BindingPrefix }} --json | jq -r '.new_epic_id')
-    gc bd update "$WISP" --assignee="$GC_ALIAS"
+    gc bd update "$WISP" --assignee="$GC_AGENT"
   fi
 fi
 
@@ -37,7 +43,7 @@ fi
 # ones with reason 'orphaned cross-rotation'.
 if [ -z "$WISP" ]; then
   # Wisp records carry the formula name in `title` (no metadata.formula field).
-  ORPHANS=$(gc bd list --assignee="$GC_ALIAS" --status=open --type=molecule \
+  ORPHANS=$(gc bd list --assignee="$GC_AGENT" --status=open --type=molecule \
     --include-infra --json | jq -r '[.[] | select(.title == "mol-deacon-patrol")] | sort_by(.created_at) | reverse')
   COUNT=$(echo "$ORPHANS" | jq 'length')
   if [ "$COUNT" -gt 0 ]; then
@@ -55,7 +61,7 @@ fi
 # Tier 4 — Pour fresh wisp (no in-progress, no routed work, no open wisp)
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix={{ .BindingPrefix }} --json | jq -r '.new_epic_id')
-  gc bd update "$WISP" --assignee="$GC_ALIAS"
+  gc bd update "$WISP" --assignee="$GC_AGENT"
   echo "Poured fresh wisp: $WISP"
 fi
 
@@ -75,8 +81,16 @@ bead, or an orphaned cross-rotation wisp is picked up first. Pouring
 unconditionally would orphan whatever the prior session left behind.
 
 ```bash
+# Identity: discovery filters on $GC_AGENT, the canonical mailbox identity the
+# refinery formula validates and assigns to. $GC_ALIAS can legitimately be
+# empty (the harness guarantees $GC_AGENT, falling back to the session name);
+# polling on an empty alias is what self-polled for 13h42m with seven queued
+# beads while looking healthy-idle (upstream #1833). Do not switch these back
+# to $GC_ALIAS — startup discovery runs before the formula's validate-identity
+# guard, so it must use the safe identity from the first query.
+
 # Tier 1 — In-progress patrol wisp (resume in place)
-WISP=$(gc bd list --assignee="$GC_ALIAS" --status=in_progress \
+WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress \
   --type=molecule --include-infra --json --limit=1 | jq -r '.[0].id // empty')
 if [ -n "$WISP" ]; then
   echo "Resuming in-progress wisp: $WISP"
@@ -88,13 +102,13 @@ fi
 # If cycle-recycle interleaved with a polecat handoff, the work bead
 # is here even though no in-progress wisp exists yet.
 if [ -z "$WISP" ]; then
-  WORK=$(gc bd list --assignee="$GC_ALIAS" --status=open \
+  WORK=$(gc bd list --assignee="$GC_AGENT" --status=open \
     --has-metadata-key=branch --exclude-type=epic --json --limit=1 \
     | jq -r '.[0].id // empty')
   if [ -n "$WORK" ]; then
     echo "Found routed work bead: $WORK — pouring wisp and entering formula at find-work"
     WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --var default_merge_strategy={{ or .DefaultMergeStrategy "direct" }} --json | jq -r '.new_epic_id')
-    gc bd update "$WISP" --assignee="$GC_ALIAS"
+    gc bd update "$WISP" --assignee="$GC_AGENT"
     # Re-enter formula at find-work; it will pick up $WORK.
   fi
 fi
@@ -105,7 +119,7 @@ fi
 # close older ones with reason 'orphaned cross-rotation'.
 if [ -z "$WISP" ]; then
   # Wisp records carry the formula name in `title` (no metadata.formula field).
-  ORPHANS=$(gc bd list --assignee="$GC_ALIAS" --status=open --type=molecule \
+  ORPHANS=$(gc bd list --assignee="$GC_AGENT" --status=open --type=molecule \
     --include-infra --json | jq -r '[.[] | select(.title == "mol-refinery-patrol")] | sort_by(.created_at) | reverse')
   COUNT=$(echo "$ORPHANS" | jq 'length')
   if [ "$COUNT" -gt 0 ]; then
@@ -124,7 +138,7 @@ fi
 # Tier 4 — Pour fresh wisp (no in-progress, no routed work, no open wisp)
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --var default_merge_strategy={{ or .DefaultMergeStrategy "direct" }} --json | jq -r '.new_epic_id')
-  gc bd update "$WISP" --assignee="$GC_ALIAS"
+  gc bd update "$WISP" --assignee="$GC_AGENT"
   echo "Poured fresh wisp: $WISP"
 fi
 ```
