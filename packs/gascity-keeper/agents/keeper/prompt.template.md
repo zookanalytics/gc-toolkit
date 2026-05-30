@@ -56,17 +56,30 @@ for promoting a commit to an upstream PR candidate.
      escalated because a rework polecat reported `infeasible` or the
      rebase got stuck and needs operator intervention. See the
      "Conflict-Questions Handback" section below for the conversation.
-   - `metadata.aborted_at` — a polecat aborted on a post-rebase step
-     (check failure, install failure, push race, or cherry-pick conflict
-     from pr-prep). The bead handback is the durable signal; the polecat
-     *tries* to mail the operator, but mail is best-effort and may not
-     have arrived. Don't assume the operator has seen mail.
+   - `metadata.aborted_at` — a polecat (or the refinery) aborted a step
+     that needs operator attention. Reason values you'll see:
+       - rebase mol: `workspace-setup` (backup-ref mint refused),
+         `check` (post-rebase quality gate failed), `install`,
+         `push` (polecat-side push to the rebase ref failed),
+         `rebase-mismatch` (post-rebase log diverged from the keep set).
+       - pr-prep mol: `cherry-pick`, `test`, `push-branch`.
+       - refinery overlay: `refinery-race-loss` (origin/main advanced
+         after the rebase finished — see Race-loss below).
+
+     These beads are reassigned to YOU (the keeper) and carry the failure
+     tail in the bead **notes**, so the handback is durable: your prime
+     sweep (`assignee=$GC_AGENT` + `aborted_at`) reliably catches it on the
+     next operator engagement, and the polecat/refinery also **nudges you**
+     for a timely signal. A best-effort mail to the operator may also fire,
+     but it is now a SECONDARY backstop — don't assume the operator saw it,
+     and don't wait for it. The bead on your hook IS the durable signal.
 
    Note: `aborted_at` is not set by the rebase step itself for kept-
    commit conflicts — those go through the rework-polecat dispatch
    flow (`rebase_in_progress`) or escalate via `conflict_questions` on
-   genuine stuck states. The `aborted_at` predicate is kept for the
-   other abort paths (check/install/push/cherry-pick).
+   genuine stuck states. The `aborted_at` predicate covers the other
+   abort paths (rebase check/install/push/workspace-setup/rebase-mismatch,
+   pr-prep cherry-pick/test/push-branch, and refinery race-loss).
 
 4. **Sweep stale rebase branches** in the gascity rig:
    ```bash
@@ -159,6 +172,16 @@ metadata is NOT what landed on origin/main.
   even though the metadata still flags an abort.
 - **origin/main moved AND range-diff diverges**: something else landed.
   Surface it as unusual — escalate to mayor before clearing `aborted_at`.
+
+For `aborted_at=refinery-race-loss` specifically, the cause is already
+known: the refinery's `--force-with-lease` detected that `origin/main`
+advanced between the polecat's rebase and the refinery's push, so it
+refused the force-push and handed the bead back to you (the bead also
+carries `metadata.rejection_reason`). This is the "origin/main moved AND
+range-diff diverges" shape above. Walk the operator through the options —
+re-pour the rebase atop the new `origin/main`, drop it if what landed
+supersedes it, or take it by hand — the same decision the refinery's
+mayor escalation describes. Don't auto-retry the landing.
 
 ## Operator Commands
 

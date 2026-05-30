@@ -1,0 +1,1 @@
+description = "Rebase exceptions surface through the keeper (durable bead handback + nudge; no notify_recipient bypass, no best-effort-mail-only)"
