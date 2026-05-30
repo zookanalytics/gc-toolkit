@@ -67,7 +67,7 @@ session was last on. Existing behavior preserved.
 
 ## Session title column
 
-Each row joins the tmux session list with `gc session list --json` on
+Each row joins the tmux session list with the supervisor sessions API on
 `session_name` and renders the gc session title in a right-side column:
 
     [<rig>]<pad>  *▣  <pack>.<role>                              ← no title (boring or no match)
@@ -117,22 +117,27 @@ Rows without titles end at `<pack>.<role>` and do not pad.
 
 ### Graceful fallback
 
-`gc session list --json` is a subprocess call. It is bounded with
-`timeout 3 gc session list --json` so a wedged data plane cannot
-block the picker. Any failure — non-zero exit, missing `gc`, missing
-`jq`, parse error, timeout — yields an empty `TITLES` and the picker
-renders without any titles. The menu must always open; titles are
-strictly optional adornment.
+Titles come from a `curl` call to the supervisor sessions API, bounded
+with `curl --max-time 3` so a wedged data plane cannot block the
+picker. Any failure — non-zero exit (including the cold-cache 503
+swallowed by `curl -f`), missing `curl`, missing `jq`, parse error,
+timeout — yields an empty `TITLES` and the picker renders without any
+titles. The call is skipped entirely when no city resolves. The menu
+must always open; titles are strictly optional adornment.
 
 ### Data source
 
 ```
-gc session list --json
+GET <api-base>/v0/city/<city>/sessions
 ```
 
-Returns `{sessions: [{session_name, title, …}, …]}`. The picker's
+Returns `{items: [{session_name, title, …}, …]}`. The picker's
 existing `#{session_name}` key from `tmux list-sessions` joins
-directly to `.sessions[].session_name`, with no name translation.
+directly to `.items[].session_name`, with no name translation. The
+script resolves `<api-base>` (supervisor port) and `<city>` via its
+`gc_api_base` / `gc_city_name` helpers — see their comment block for
+the `~/.gc/supervisor.toml` port and `~/.gc/cities.toml`
+city-resolution detail.
 
 ### --all mode
 
