@@ -106,16 +106,51 @@ If the approval is on an older commit → **block**: "Approval is stale (approve
 ### 4. Codex review resolved on HEAD_SHA  *(Gas City review gate)*
 
 The refinery opens `mr`-mode PRs as a draft and dispatches a codex review bead
-(`task_kind=review`, `pr_number=<n>`). Confirm none is still outstanding:
+(`task_kind=review`, `pr_number=<n>`) to the codex polecat pool. The reviewer
+posts its verdict as a GitHub PR review and then **closes its own bead.** That
+last fact is the trap: a query for `open`/`in_progress` review beads returns
+empty in three states you must not conflate — reviewed on this head, reviewed on
+an *older* head (stale), and never reviewed at all. An empty bead list is the
+default, **not** evidence of a current review. The durable record of *which
+commit was reviewed* is the GitHub review's `commit_id`; bind the gate to that,
+never to bead status alone.
+
+Confirm both:
+
+**No review is still pending** — a bead mid-flight hasn't posted its verdict:
 
 ```bash
 gc bd list --metadata-field task_kind=review --metadata-field pr_number=<number> \
   --status=open,in_progress --json
 ```
 
-- Any `open`/`in_progress` review bead → **block**: "Codex review still pending."
-- If the resolved review predates `HEAD_SHA` (commits landed after it was
-  reviewed) → **block** and re-dispatch the review for the final head.
+Any result → **block**: "Codex review still pending."
+
+**A codex review resolved on HEAD_SHA** — positively confirm the verdict landed
+on *this* head. The review beads record the `review_id` of the GitHub review
+they posted; read those (include `closed` — the reviewer closes the bead after
+posting), then read the PR's reviews with the commit each was submitted against:
+
+```bash
+# review_ids the codex reviewer recorded — the durable bead -> GitHub-review
+# link, across every review round for this PR:
+gc bd list --metadata-field task_kind=review --metadata-field pr_number=<number> \
+  --status=open,in_progress,closed --json | jq '[.[].metadata.review_id // empty]'
+
+# every review on the PR, with the commit it was submitted against:
+REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+gh api "repos/$REPO/pulls/<number>/reviews" \
+  --jq '.[] | {id, user: .user.login, state, commit_id}'
+```
+
+A recorded codex `review_id` must appear with `commit_id == HEAD_SHA`. If **no**
+codex review resolves on HEAD_SHA — none was ever dispatched, or every one sits
+on an earlier commit (commits landed after the last review) — **block**: "No
+current-head codex review (head `<HEAD_SHA>`) — re-dispatch the codex review for
+the final head and wait." Fail closed: if the ledger recorded no `review_id`
+(older reviews predate that field), fall back to requiring at least one PR
+review submitted against HEAD_SHA **and** a dispatched review bead for this PR;
+absent either, block. Never infer a current review from an empty bead list.
 
 Codex review is a **requirement, not a ship decision** — it is a precondition
 here, never the authorization. The human approval (step 3) is the authorization.
@@ -226,4 +261,5 @@ re-validated against the full integration diff before it lands.
 | "The description can be fixed later" | It can't be edited after merge. Fix it now (and you can — fix-and-merge). |
 | "It was approved, so it's fine" | Approval may predate the final head. Re-check on HEAD_SHA. |
 | "Codex passed, ship it" | Codex is a precondition, not the ship decision. Approval on the head is. |
+| "No open review bead, so it's been reviewed" | A closed or missing bead also means *stale* or *never* reviewed. Confirm a codex review's `commit_id` is HEAD_SHA. |
 | "Mergeable is probably fine" | Run the check. UNKNOWN merges fail with misleading errors. |
