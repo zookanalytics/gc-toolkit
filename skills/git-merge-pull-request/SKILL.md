@@ -59,8 +59,36 @@ optimistically; never push code to make a check pass.
 
 ### 2. CI green on HEAD_SHA
 
-From `statusCheckRollup`, every check is either `SUCCESS`/`COMPLETED` or a
-legitimate `SKIPPED` (conditional/platform workflow). Any real failure blocks.
+`statusCheckRollup` mixes two node types that report their result in
+**different fields** — conflating them is exactly how a failed run slips
+through this last gate:
+
+- **`CheckRun`** (GitHub Actions / Checks API) — the pass/fail lives in
+  `conclusion`, **not** `status`. `status == COMPLETED` only means the run
+  reached a terminal state; a `FAILURE`, `CANCELLED`, `TIMED_OUT`,
+  `ACTION_REQUIRED`, or `STARTUP_FAILURE` run is *also* `COMPLETED`. Green
+  requires `conclusion == SUCCESS` (or a legitimate `SKIPPED` — a
+  conditional/platform workflow that didn't apply). **Any completed run whose
+  `conclusion` is not `SUCCESS`/`SKIPPED` blocks.** While a run is still going
+  `conclusion` is `null` — not green, so it blocks too.
+- **`StatusContext`** (legacy commit-status API) — the result lives in `state`.
+  Green requires `state == SUCCESS`. `FAILURE`/`ERROR` block; `PENDING`/`EXPECTED`
+  hasn't passed yet, so it blocks until it does.
+
+You must positively confirm every check is green; anything you can't confirm
+blocks (fail closed). The gate is clear only when this lists nothing:
+
+```bash
+gh pr view <number> --json statusCheckRollup --jq '
+  .statusCheckRollup[]
+  | select(
+      (.__typename == "CheckRun"      and .conclusion != "SUCCESS" and .conclusion != "SKIPPED")
+      or
+      (.__typename == "StatusContext" and .state != "SUCCESS")
+    )
+  | {name: (.name // .context), type: .__typename, status, conclusion, state}'
+```
+
 A flaky check may be re-run; a genuine failure means STOP and inform the user.
 
 ### 3. Approval is on HEAD_SHA  *(Gas City checks this itself)*
