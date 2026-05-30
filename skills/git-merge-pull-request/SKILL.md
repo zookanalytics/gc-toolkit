@@ -34,13 +34,17 @@ gh pr list --head <branch-name> --json number --jq '.[0].number'
 
 ## Pin the head
 
-Capture the head SHA once. Everything validates against **this** SHA. If the
-head moves while you work, start over against the new head.
+Capture the head SHA once into `HEAD_SHA`. Everything below validates against
+**this** SHA, and the final merge is bound to it with `--match-head-commit`. If
+the head moves while you work, start over against the new head.
 
 ```bash
+# Pin the exact commit under review — every check and the merge bind to this:
+HEAD_SHA=$(gh pr view <number> --json headRefOid --jq .headRefOid)
+
+# Read the full state to validate (title/body/CI/reviews) against HEAD_SHA:
 gh pr view <number> --json \
   number,title,body,headRefName,headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews
-# HEAD_SHA := .headRefOid
 ```
 
 ## Pre-merge validation — fail closed
@@ -199,11 +203,20 @@ mechanical accuracy fix, not a change to the shipped code.
 
 ## Merge — squash only
 
-The repo ruleset permits squash merges only.
+The repo ruleset permits squash merges only. **Bind the merge to the pinned
+head** with `--match-head-commit "$HEAD_SHA"`. Every check above was evaluated
+against `HEAD_SHA`; the commit that actually merges must be that same SHA.
+Without the binding, a push landing in the gap between the last check and the
+merge would let GitHub squash an unvalidated head — bypassing the CI, approval,
+codex-review, and title/body gates this skill exists to enforce.
 
 ```bash
-gh pr merge <number> --squash --delete-branch
+gh pr merge <number> --squash --delete-branch --match-head-commit "$HEAD_SHA"
 ```
+
+If GitHub rejects the merge for a head mismatch, the PR changed under you —
+**do not retry against the new head.** Start over from "Pin the head": re-pin
+the new SHA and re-validate every check against it before merging.
 
 The validated title/body are the squash commit message.
 
@@ -214,6 +227,7 @@ gh pr view <number> --json mergeable,mergeStateStatus
 ```
 
 - `CONFLICTING` → needs rebase/resolution; user decides approach, then return to "Pin the head."
+- Head mismatch (`--match-head-commit` rejected — the head moved after you pinned it) → return to "Pin the head" and re-validate against the new SHA. Never drop the flag to force the merge.
 - Branch-protection/ruleset violation → re-check steps 2–4 (a required check or approval regressed).
 - Permissions → inform the user.
 
@@ -261,5 +275,6 @@ re-validated against the full integration diff before it lands.
 | "The description can be fixed later" | It can't be edited after merge. Fix it now (and you can — fix-and-merge). |
 | "It was approved, so it's fine" | Approval may predate the final head. Re-check on HEAD_SHA. |
 | "Codex passed, ship it" | Codex is a precondition, not the ship decision. Approval on the head is. |
+| "The head won't move between the last check and the merge" | It can. Bind the merge to `HEAD_SHA` with `--match-head-commit`; a mismatch means re-pin and re-validate. |
 | "No open review bead, so it's been reviewed" | A closed or missing bead also means *stale* or *never* reviewed. Confirm a codex review's `commit_id` is HEAD_SHA. |
 | "Mergeable is probably fine" | Run the check. UNKNOWN merges fail with misleading errors. |
