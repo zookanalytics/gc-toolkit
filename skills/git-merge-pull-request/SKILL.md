@@ -107,19 +107,32 @@ If the approval is on an older commit → **block**: "Approval is stale (approve
 `<sha>`, head is `<HEAD_SHA>`) — re-approve the final head." This is the
 "approved before the final head" case, and GitHub will not catch it here.
 
-### 4. Codex review resolved on HEAD_SHA  *(Gas City review gate)*
+### 4. Codex review resolved on HEAD_SHA *with a non-blocking verdict*  *(Gas City review gate)*
 
 The refinery opens `mr`-mode PRs as a draft and dispatches a codex review bead
 (`task_kind=review`, `pr_number=<n>`) to the codex polecat pool. The reviewer
-posts its verdict as a GitHub PR review and then **closes its own bead.** That
-last fact is the trap: a query for `open`/`in_progress` review beads returns
-empty in three states you must not conflate — reviewed on this head, reviewed on
-an *older* head (stale), and never reviewed at all. An empty bead list is the
-default, **not** evidence of a current review. The durable record of *which
-commit was reviewed* is the GitHub review's `commit_id`; bind the gate to that,
-never to bead status alone.
+posts its verdict as a GitHub PR review, **records that verdict on its bead
+(`metadata.verdict` is `APPROVE`, `COMMENT`, or `REQUEST_CHANGES`, alongside the
+`review_id` and `head_sha` it posted against), then closes its own bead.** Two
+traps follow:
 
-Confirm both:
+- **Which commit was reviewed.** A query for `open`/`in_progress` review beads
+  returns empty in three states you must not conflate — reviewed on this head,
+  reviewed on an *older* head (stale), and never reviewed at all. An empty bead
+  list is the default, **not** evidence of a current review. The durable record
+  of *which commit was reviewed* is the GitHub review's `commit_id` (mirrored on
+  the bead as `metadata.head_sha`).
+- **What the verdict was.** A blocking `REQUEST_CHANGES` does not always look
+  blocking on GitHub: for a bot-authored PR, GitHub rejects a formal self
+  request-changes and downgrades the review to `COMMENTED` (the bead records this
+  as `github_review_state: COMMENTED` with `github_request_changes_blocked` set).
+  So the GitHub review `state` can read `COMMENTED` while the codex verdict was
+  `REQUEST_CHANGES`. The durable record of *what was decided* is the bead's
+  `metadata.verdict` — trust it, never the GitHub `state`.
+
+Bind the gate to both durable records (`commit_id`/`head_sha` **and** the bead
+`verdict`), never to bead status or GitHub state alone. Confirm all of the
+following:
 
 **No review is still pending** — a bead mid-flight hasn't posted its verdict:
 
@@ -130,16 +143,18 @@ gc bd list --metadata-field task_kind=review --metadata-field pr_number=<number>
 
 Any result → **block**: "Codex review still pending."
 
-**A codex review resolved on HEAD_SHA** — positively confirm the verdict landed
-on *this* head. The review beads record the `review_id` of the GitHub review
-they posted; read those (include `closed` — the reviewer closes the bead after
-posting), then read the PR's reviews with the commit each was submitted against:
+**A codex review resolved on HEAD_SHA** — positively confirm a verdict landed on
+*this* head. Read the review beads (include `closed` — the reviewer closes the
+bead after posting) with the `review_id`, `head_sha`, and `verdict` each
+recorded, then read the PR's reviews with the commit each was submitted against:
 
 ```bash
-# review_ids the codex reviewer recorded — the durable bead -> GitHub-review
-# link, across every review round for this PR:
+# codex review beads for this PR — the durable bead -> GitHub-review link, the
+# head each was posted against, and the verdict each round recorded:
 gc bd list --metadata-field task_kind=review --metadata-field pr_number=<number> \
-  --status=open,in_progress,closed --json | jq '[.[].metadata.review_id // empty]'
+  --status=open,in_progress,closed --json \
+  | jq '[.[] | {bead: .id, review_id: .metadata.review_id, head_sha: .metadata.head_sha,
+                verdict: .metadata.verdict, github_state: .metadata.github_review_state}]'
 
 # every review on the PR, with the commit it was submitted against:
 REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
@@ -147,14 +162,44 @@ gh api "repos/$REPO/pulls/<number>/reviews" \
   --jq '.[] | {id, user: .user.login, state, commit_id}'
 ```
 
-A recorded codex `review_id` must appear with `commit_id == HEAD_SHA`. If **no**
-codex review resolves on HEAD_SHA — none was ever dispatched, or every one sits
-on an earlier commit (commits landed after the last review) — **block**: "No
-current-head codex review (head `<HEAD_SHA>`) — re-dispatch the codex review for
-the final head and wait." Fail closed: if the ledger recorded no `review_id`
-(older reviews predate that field), fall back to requiring at least one PR
-review submitted against HEAD_SHA **and** a dispatched review bead for this PR;
-absent either, block. Never infer a current review from an empty bead list.
+The current-head codex review is the bead whose `review_id` maps to a GitHub
+review with `commit_id == HEAD_SHA` (equivalently, `metadata.head_sha ==
+HEAD_SHA`). If **none** resolves on HEAD_SHA — never dispatched, or every one
+sits on an earlier commit (commits landed after the last review) — **block**:
+"No current-head codex review (head `<HEAD_SHA>`) — re-dispatch the codex review
+for the final head and wait."
+
+**That current-head verdict is non-blocking** — "resolved" means the findings
+cleared, not merely that a review exists. Block when any of these holds:
+
+- the matching current-head bead's `metadata.verdict` is `REQUEST_CHANGES` (or
+  `CHANGES_REQUESTED`) — even when its `github_review_state` shows the downgraded
+  `COMMENTED`;
+- the GitHub review `state` on HEAD_SHA is `CHANGES_REQUESTED` (covers
+  human-authored PRs, where GitHub keeps the real state);
+- an unresolved fix bead exists for this PR — a `REQUEST_CHANGES` spawns a fix
+  bead (`metadata.source_review_bead` = the review bead, `metadata.fix_bead` on
+  the review bead points the other way) routed back to the implementation pool,
+  and while it is `open`/`in_progress` the findings are still being worked:
+
+  ```bash
+  gc bd list --metadata-field source_review_bead=<review-bead-id> \
+    --status=open,in_progress --json   # any result → block
+  ```
+
+→ **block**: "Codex requested changes on head `<HEAD_SHA>` — resolve the
+findings and re-review." Blocking findings clear only when a *later* codex
+review on a *newer* head returns non-blocking; require a positive `APPROVE` or a
+non-blocking `COMMENT` recorded **on HEAD_SHA**, never one carried over from an
+earlier head.
+
+Fail closed: if a matching current-head `review_id` is recorded but carries no
+`verdict` (older reviews predate that field), do not assume non-blocking — fall
+back to the GitHub review `state` (treat `CHANGES_REQUESTED` as blocking; require
+an explicit `APPROVED`/`COMMENTED` state on HEAD_SHA) **and** require no open fix
+bead for this PR. If you still cannot positively confirm a non-blocking
+current-head review, block. Never infer a current — or a resolved — review from
+an empty bead list.
 
 Codex review is a **requirement, not a ship decision** — it is a precondition
 here, never the authorization. The human approval (step 3) is the authorization.
@@ -277,4 +322,5 @@ re-validated against the full integration diff before it lands.
 | "Codex passed, ship it" | Codex is a precondition, not the ship decision. Approval on the head is. |
 | "The head won't move between the last check and the merge" | It can. Bind the merge to `HEAD_SHA` with `--match-head-commit`; a mismatch means re-pin and re-validate. |
 | "No open review bead, so it's been reviewed" | A closed or missing bead also means *stale* or *never* reviewed. Confirm a codex review's `commit_id` is HEAD_SHA. |
+| "The codex review shows `COMMENTED`, so nothing's blocking" | A bot-authored PR can't carry a formal `REQUEST_CHANGES`; GitHub downgrades it to `COMMENTED`. Trust the bead's `metadata.verdict`, not the GitHub `state` — and block any open fix bead. |
 | "Mergeable is probably fine" | Run the check. UNKNOWN merges fail with misleading errors. |
