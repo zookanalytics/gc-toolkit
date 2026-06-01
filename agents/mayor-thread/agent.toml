@@ -25,7 +25,7 @@ prompt_template = "//.gc/system/packs/gastown/agents/mayor/prompt.template.md"
 # the generic thread-role fragment. RoleName (below) drives the
 # parameterization so the same fragment serves mayor-thread / mechanik-thread
 # / future <role>-thread variants without duplication.
-append_fragments = ["convoy-integration-branch-mayor", "thread-role"]
+append_fragments = ["convoy-integration-branch-mayor", "thread-role", "operator-next-step-trailing"]
 
 # Plain scratch directory, same shape as the canonical mayor's
 # .gc/agents/mayor home. AgentBase parameterizes by per-instance name
