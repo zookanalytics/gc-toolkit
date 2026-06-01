@@ -256,6 +256,11 @@ Header rows and blank separators do **not** consume slots. Beyond row
 36, rows still render and remain pickable via arrow-Enter, but get no
 hotkey letter (existing behavior, preserved).
 
+The two fixed bottom entries use punctuation keys *outside* this
+keyspace — `,` (keeper pin/unpin) and `.` (filter toggle) — so they
+stay stable regardless of how many rows precede them and never collide
+with a per-row letter.
+
 This means a city with many multi-pane sessions can run out of
 hotkey letters faster than before. We accept this — the alphabet is
 bounded, and arrow-keys still work. If it becomes a real problem in
@@ -278,6 +283,25 @@ gives spatial context for "where am I in the list."
 headers, blank separators — so it still points at the session row,
 not at the header above it.
 
+## Keeper pin/unpin entry
+
+A fixed entry sits just above `[ show all ]`: `[ ⚡ pin keeper ]` when the
+gascity-keeper is down, `[ ✕ unpin keeper ]` when it is up. It is a
+standalone menu action, **not** a per-session row — the keeper runs
+`on_demand`, so when drained it has no pane (no row to hang a per-row action
+on), yet the operator still needs a surface to bring it up.
+
+Both the state detection and the pin/unpin call live in the sibling
+`tmux-keeper-toggle.sh` (one shared helper). The picker calls it in `state`
+mode to choose the label — a single local `tmux list-sessions` check (keeper
+"up" == its canonical session is materialized), with no `gc`/beads
+round-trip on the render path. Selecting the entry runs the helper's
+`toggle` via `run-shell -b`, so a slow `gc session pin` cannot freeze the
+server. Its hotkey is `,` — a fixed punctuation slot (like `.` for the
+filter toggle), outside the `a-z0-9` per-row keyspace so it never collides.
+See `gascity-agents.md` → "The gascity-keeper front-door" for the
+operator-facing model.
+
 ## Filter toggle
 
 Default mode hides session names matching `polecat`,
@@ -293,6 +317,8 @@ beneath sessions that survive the filter pass.
 
 - `tmux-pick-session.sh` — the script
 - `tmux-pick-session.md` — this doc
+- `tmux-keeper-toggle.sh` — the keeper pin/unpin helper the picker shells
+  out to for the fixed `[ pin/unpin keeper ]` entry (state + toggle)
 
 ## Out of scope
 
