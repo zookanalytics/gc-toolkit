@@ -355,6 +355,25 @@ set -- "$@" "" "" ""
 # group at tmux's parser layer.
 reinvoke_suffix=""
 [ -n "$EXPLICIT_CITY_PATH" ] && reinvoke_suffix=" --city-path $(sq "$EXPLICIT_CITY_PATH")"
+
+# Fixed keeper pin/unpin entry, sitting alongside [ show all ] as a
+# standalone menu action rather than a per-session row. The gascity-keeper
+# runs on_demand, so when it is drained it has no pane — and therefore no
+# row to hang a per-row action on — yet the operator still needs a surface
+# to bring it up. tmux-keeper-toggle.sh owns both the state-detection and
+# the pin/unpin call (one shared helper, no duplicated logic); we ask it for
+# the current state to render the matching label. The ',' hotkey is a fixed
+# punctuation slot (like '.' for show-all) so it never collides with the
+# a-z0-9 per-row hotkeys. run-shell -b backgrounds the toggle so a slow
+# `gc session pin` cannot freeze the server (cf. tmux-spawn-thread.sh).
+KEEPER_TOGGLE="$(dirname "$SCRIPT")/tmux-keeper-toggle.sh"
+if [ "$("$KEEPER_TOGGLE" state 2>/dev/null || echo down)" = "up" ]; then
+    keeper_label="  [ ✕ unpin keeper ]  "
+else
+    keeper_label="  [ ⚡ pin keeper ]  "
+fi
+set -- "$@" "$keeper_label" "," "run-shell -b \"$KEEPER_TOGGLE toggle$reinvoke_suffix\""
+
 if [ "$ALL" -eq 1 ]; then
     set -- "$@" "  [ show fewer ]  " "." "run-shell \"$SCRIPT$reinvoke_suffix\""
 else
