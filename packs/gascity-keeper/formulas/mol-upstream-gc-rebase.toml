@@ -75,15 +75,23 @@ routing — no silent drops, no auto-resolution.
 |------|------------------|
 | survey | LLM judgment can be wrong; record verdicts on the bead and proceed — the rebase step's patch-id check is the safety net for `drop-merged-upstream` |
 | rebase | Conflicts dispatch a rework polecat per conflicted kept commit. The post-rebase `check` step is the safety net for "we accepted a rework that broke the kept set." `metadata.backup_ref` keeps any state recoverable. |
-| check | Bead handback (`aborted_at=check`) lands first; mail with failure tail is best-effort. Bead stays open so a fix can resume. The default `make check` covers fmt-check, lint, vet, and test — a failure here points at any of those surfaces. |
-| install | Bead handback (`aborted_at=install`) first; mail best-effort. Bead stays open. |
-| push | Push of `HEAD:rebase/{{issue}}` is fast-forward on the polecat-owned ref — failures here are auth/network/ref-protection, NOT a race against `{{upstream_branch}}`. Bead handback (`aborted_at=push`) first; mail best-effort. Race-loss against `{{upstream_branch}}` is detected and escalated by refinery via the overlay's `--force-with-lease` lease, not by this step. |
+| check | Keeper handback (`aborted_at=check`, reassign to `requesting_keeper`, failure tail in bead notes) + keeper nudge land first; mail to `notify_recipient` is a secondary backstop. Bead stays open so a fix can resume. The default `make check` covers fmt-check, lint, vet, and test — a failure here points at any of those surfaces. |
+| install | Keeper handback (`aborted_at=install`, reassign to `requesting_keeper`, tail in notes) + keeper nudge first; mail secondary. Bead stays open. |
+| push | Push of `HEAD:rebase/{{issue}}` is fast-forward on the polecat-owned ref — failures here are auth/network/ref-protection, NOT a race against `{{upstream_branch}}`. Keeper handback (`aborted_at=push`, reassign to `requesting_keeper`, context in notes) + keeper nudge first; mail secondary. Race-loss against `{{upstream_branch}}` is detected and escalated by refinery via the overlay's `--force-with-lease` lease, not by this step. |
 
-The post-survey **abort** paths (check, install, push) share the same
-shape: lock in the bead handback (`aborted_at`, status=open, reassignment
-to `notify_recipient`) **before** sending mail. The keeper's prime sweep
-catches `aborted_at` beads on next operator engagement, so even a silent
-mail failure surfaces the abort within one operator engagement cycle.
+The post-survey **abort** paths (check, install, push) — and the
+workspace-setup backup-ref refusal and the rebase-mismatch sanity abort —
+share the same keeper-routed shape: reassign the bead to the requesting
+keeper (`requesting_keeper`, falling back to `notify_recipient` only when
+no keeper was stamped), record the failure tail in the bead **notes**
+(durable even if mail fails), set `aborted_at`, and **nudge the keeper**,
+all **before** any mail. Mail to `notify_recipient` is a SECONDARY backstop
+only — never the primary operator signal. The keeper's prime sweep matches
+`aborted_at` beads assigned to it, so a human-needing abort surfaces on the
+next operator engagement with the keeper regardless of whether mail
+arrived. We do not assign the operator's mail alias as the bead owner: the
+keeper is the durable holder and the operator's contact point (the keeper
+is the single upstream front-door; see gastownhall/gascity#2082 alignment).
 
 The rebase **rework-dispatch handback** is a different shape: bead
 handback uses `metadata.rebase_in_progress=true` + `metadata.pending_rework`
@@ -220,11 +228,21 @@ else
         echo "       a new ref here would point at post-rebase state." >&2
         echo "       Recover the pre-rebase tip into HEAD, or set metadata.backup_ref" >&2
         echo "       by hand if you know the prior rollback target." >&2
+        # Route the abort THROUGH the keeper: reassign to the requesting
+        # keeper (fall back to notify_recipient only when no keeper was
+        # stamped — the non-keeper manual-dispatch case), and nudge it.
+        # The keeper's prime sweep matches metadata.aborted_at, so the
+        # abort surfaces on the next operator engagement; the nudge is the
+        # timely signal. We do NOT assign the operator's mail alias as the
+        # bead owner — the keeper is the durable holder + operator contact.
+        REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+        [ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
         gc bd update {{issue}} \
             --set-metadata aborted_at=workspace-setup \
             --status=open \
-            --assignee="{{notify_recipient}}" \
+            --assignee="$REQUESTING_KEEPER" \
             --notes "Refused to mint backup_ref: HEAD ($HEAD_SHA) does not match {{origin_remote}}/{{upstream_branch}} ($PRE_REBASE_TIP). Resume requires manual recovery."
+        gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: aborted at workspace-setup (backup_ref mint refused) — operator engagement needed (metadata.aborted_at=workspace-setup)" || true
         gc runtime drain-ack
         exit 1
     fi
@@ -833,9 +851,14 @@ git log {{upstream_remote}}/{{upstream_branch}}..HEAD --oneline
 The output must roughly match the `keep` rows from
 `metadata.commit_verdicts` (rework commits replace conflicted keeps and
 have the same intent). If anything obviously wrong is in the post-rebase
-log, abort using the same pattern as the conflict case — bead handback
-first (`--status=open`, `--assignee={{notify_recipient}}`,
-`--set-metadata aborted_at=rebase-mismatch`), then the best-effort mail.
+log, abort using the same keeper-routed pattern as the `check`/`install`
+aborts — compute `REQUESTING_KEEPER` (from `metadata.requesting_keeper`,
+falling back to `{{notify_recipient}}` only when unset), then bead
+handback first (`--status=open`, `--assignee="$REQUESTING_KEEPER"`,
+`--set-metadata aborted_at=rebase-mismatch`, with the mismatch detail in
+`--notes`), nudge `"$REQUESTING_KEEPER"`, then the secondary best-effort
+mail to `{{notify_recipient}}`. Do NOT assign the bead to
+`{{notify_recipient}}` directly — the keeper is the durable holder.
 
 **6. Clear rebase-in-progress flags:**
 
@@ -873,19 +896,53 @@ rework commit, so the wider gate here has to cover those surfaces.
 
 If the gate passes, close this step and proceed.
 
-If the gate fails, lock in the durable abort signal first, then mail (best-effort):
+If the gate fails, route the abort THROUGH the keeper. Capture the
+failure context first, then lock in the durable handback (reassign to the
+keeper + record the failure tail in the bead notes so it survives even if
+mail never arrives), nudge the keeper, and only then send best-effort mail
+to the operator as a SECONDARY backstop:
 ```bash
-gc bd update {{issue}} \
-  --set-metadata aborted_at=check \
-  --status=open \
-  --assignee="{{notify_recipient}}"
-
+# Capture the failure context first so it can be written durably to the bead.
 CHECK_TAIL=$(tail -200 <check output file or capture>)
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 VERDICTS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_verdicts')
 RESOLUTIONS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
 
+# Durable, un-missable handback: reassign to the requesting keeper (fall
+# back to notify_recipient only when no keeper was stamped) and write the
+# failure tail into the bead notes. The keeper's prime sweep matches
+# metadata.aborted_at, so this surfaces on the next operator engagement
+# without depending on mail; the bead notes carry the context the keeper
+# needs to summarize it.
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+[ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
+
+gc bd update {{issue}} \
+  --set-metadata aborted_at=check \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --notes "$(cat <<EOF
+Post-rebase {{check_command}} FAILED on the rebased branch (aborted_at=check).
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+
+Failure tail:
+$CHECK_TAIL
+
+To restore the pre-rebase state: git reset --hard $BACKUP_REF
+EOF
+)"
+
+# Timely signal: nudge the keeper. Best-effort (|| true) — the keeper is
+# on_demand, so the durable bead handback above is the real guarantee; the
+# nudge just shortens latency when the keeper is already engaged.
+gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: post-rebase check failed — operator engagement needed (metadata.aborted_at=check; failure tail in bead notes)" || true
+
+# Secondary backstop ONLY: best-effort mail to the operator. The durable
+# operator-facing surface is the keeper handback above (assignee +
+# aborted_at + notes + nudge); mail is not relied upon.
 if ! gc mail send {{notify_recipient}} -s "gascity rebase: post-rebase check failed" -m "$(cat <<EOF
 Rebase succeeded but {{check_command}} failed on the rebased branch.
 
@@ -910,16 +967,17 @@ Next: investigate from the worktree. To restore the pre-rebase state:
   git reset --hard $BACKUP_REF
 EOF
 )"; then
-    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+    echo "WARN: mail send failed for {{issue}}; the keeper handback (assignee + aborted_at + notes + nudge) is the durable signal" >&2
 fi
 gc runtime drain-ack
 exit 0
 ```
 
-**Bead stays open** — the operator (or a follow-up polecat) resumes from
-`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign)
-is what actually puts the bead back in the operator's queue; without
-it the bead would strand on this drained session.
+**Bead stays open and lands on the keeper's hook** — the keeper (or a
+follow-up polecat the operator dispatches) resumes from
+`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign to
+the keeper) is what actually surfaces the bead in the keeper's prime
+sweep; without it the bead would strand on this drained session.
 
 A check failure on the rebased branch often points at a rework polecat's
 choice — read `metadata.conflict_resolutions` and inspect the rework
@@ -940,20 +998,40 @@ description = """
 
 If install passes, close this step and proceed.
 
-If install fails: same pattern as the check failure — bead handback first,
-mail second (best-effort) — with `metadata.aborted_at=install` and subject
+If install fails: same keeper-routed pattern as the check failure —
+durable handback to the keeper first (reassign + failure tail in bead
+notes), nudge the keeper, then best-effort mail to the operator as a
+secondary backstop — with `metadata.aborted_at=install` and subject
 `gascity rebase: install failed`:
 
 ```bash
-gc bd update {{issue}} \
-  --set-metadata aborted_at=install \
-  --status=open \
-  --assignee="{{notify_recipient}}"
-
 INSTALL_TAIL=$(<install output, last 200 lines>)
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+[ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
+
+gc bd update {{issue}} \
+  --set-metadata aborted_at=install \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --notes "$(cat <<EOF
+Rebase and tests passed but {{install_command}} FAILED (aborted_at=install).
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+
+Failure tail:
+$INSTALL_TAIL
+
+To restore the pre-rebase state: git reset --hard $BACKUP_REF
+EOF
+)"
+
+gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: install failed — operator engagement needed (metadata.aborted_at=install; failure tail in bead notes)" || true
+
+# Secondary backstop ONLY: best-effort mail to the operator.
 if ! gc mail send {{notify_recipient}} -s "gascity rebase: install failed" -m "$(cat <<EOF
 Rebase and tests passed but {{install_command}} failed.
 
@@ -968,13 +1046,14 @@ Next: investigate from the worktree. To restore the pre-rebase state:
   git reset --hard $BACKUP_REF
 EOF
 )"; then
-    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+    echo "WARN: mail send failed for {{issue}}; the keeper handback (assignee + aborted_at + notes + nudge) is the durable signal" >&2
 fi
 gc runtime drain-ack
 exit 0
 ```
 
-**Bead stays open** — the operator drives recovery."""
+**Bead stays open and lands on the keeper's hook** — the keeper surfaces
+it to the operator, who drives recovery from `metadata.work_dir`."""
 
 [[steps]]
 id = "push"
@@ -1001,18 +1080,38 @@ This is a fast-forward push to the polecat's own branch, so no
 `--force` and no `--force-with-lease` are needed or appropriate.
 
 If the push fails for an unexpected reason (auth, network, ref
-protection on `refs/heads/rebase/*`), do NOT retry blindly. Lock in
-the durable abort signal first, then mail the operator (best-effort):
+protection on `refs/heads/rebase/*`), do NOT retry blindly. Route the
+abort THROUGH the keeper — durable handback first (reassign + context in
+bead notes), nudge the keeper, then best-effort mail to the operator as a
+secondary backstop:
 
 ```bash
-gc bd update {{issue}} \
-  --set-metadata aborted_at=push \
-  --status=open \
-  --assignee="{{notify_recipient}}"
-
 BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
 WORKTREE=$(pwd)
 
+REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+[ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
+
+gc bd update {{issue}} \
+  --set-metadata aborted_at=push \
+  --status=open \
+  --assignee="$REQUESTING_KEEPER" \
+  --notes "$(cat <<EOF
+git push {{origin_remote}} HEAD:rebase/{{issue}} FAILED (aborted_at=push).
+The rebased history is intact in the worktree; the refinery force-push to
+{{upstream_branch}} has NOT fired yet.
+
+Worktree: $WORKTREE
+Backup ref: $BACKUP_REF
+
+Next: investigate the push failure (auth, network, ref protection on
+refs/heads/rebase/*). Once the push lands, refinery handles the rest.
+EOF
+)"
+
+gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: push to rebase ref failed — operator engagement needed (metadata.aborted_at=push; context in bead notes)" || true
+
+# Secondary backstop ONLY: best-effort mail to the operator.
 if ! gc mail send {{notify_recipient}} -s "gascity rebase: push to rebase ref failed" -m "$(cat <<EOF
 git push {{origin_remote}} HEAD:rebase/{{issue}} failed. The polecat
 pushes its working branch only; the force-push that lands the rebase
@@ -1028,7 +1127,7 @@ refs/heads/rebase/*). The rebased history is intact in the worktree;
 once the push lands, refinery handles the rest.
 EOF
 )"; then
-    echo "WARN: mail send failed for {{issue}}; bead handback is the durable signal" >&2
+    echo "WARN: mail send failed for {{issue}}; the keeper handback (assignee + aborted_at + notes + nudge) is the durable signal" >&2
 fi
 gc runtime drain-ack
 exit 0
