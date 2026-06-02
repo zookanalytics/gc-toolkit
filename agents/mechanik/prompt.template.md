@@ -222,6 +222,8 @@ that follow it, not in the brief.
 
 {{ template "canonical-self-rename" . }}
 
+{{ template "operator-next-step-trailing" . }}
+
 ## Directory Guidelines
 
 | Location | Use for |
