@@ -605,7 +605,9 @@ the cycle-level mechanics that the matrix does not capture.
 | `gc session close <id>` | session bead ID (atomically stops runtime + closes bead) | session bead ID | session bead ID |
 | `gc session kill <id>` | session bead ID (stops tmux only; reconciler may restart) | session bead ID | session bead ID |
 | `gc session reset <id>` | session bead ID | session bead ID | session bead ID |
-| `gc session wake <addr>` | session id or alias (QualifiedName works since alias == QualifiedName) | session id or instance alias — **not** the pool QualifiedName | session id or adhoc alias |
+| `gc session wake <addr>` | session id or alias (QualifiedName works since alias == QualifiedName); **clears holds + requests a start — not a durable reason to stay up**, see [the keeper front-door](#the-gascity-keeper-front-door) | session id or instance alias — **not** the pool QualifiedName | session id or adhoc alias |
+| `gc session pin <addr>` | session id or alias; durable awake hold (materializes the canonical if not yet started) | session id or instance alias | session id or adhoc alias |
+| `gc session unpin <addr>` | session id or alias; removes the pin, reconciler re-applies wake/sleep | session id or instance alias | session id or adhoc alias |
 | `gc session list` | shows canonical alias | shows each instance | shows each adhoc instance |
 | `gc session peek <id>` | session bead ID | session bead ID | session bead ID |
 | `gc session wait <id>` | session bead ID | session bead ID | session bead ID |
@@ -753,6 +755,75 @@ worktree before discovering it lost the race.
 different polecat than the one you're running in. Verify peer
 state before re-implementing — they may already be working on
 it.
+
+## The gascity-keeper front-door
+
+The **gascity-keeper** (`gascity/gascity-keeper.keeper`) is the
+operator's single front-door for the forked upstream repos
+(`gastownhall/gascity`). It runs `on_demand` **on purpose**:
+whether it is up is itself the signal — keeper **up** means you are
+in upstream-engagement mode (a rebase or sync is hot), keeper
+**down** means you are not thinking about upstream. Presence *is*
+state; there is no separate dashboard to check.
+
+**Bring it up / dismiss it — from the `S` picker.** A drained
+on_demand session has no pane, so you cannot reach it by switching
+to a pane. The `S` session picker therefore carries a fixed entry,
+next to `[ show all ]`, that pins or unpins the keeper:
+
+- keeper unpinned → `[ ⚡ pin keeper ]` → pins it; it materializes
+  (if it was down) and, on the next picker open, shows up as a
+  navigable pane you switch to like any other agent.
+- keeper pinned → `[ ✕ unpin keeper ]` → unpins it; it drains once
+  idle.
+- `[ keeper… ]` → the pin state could not be read in time (beads
+  slow or unreachable). The entry still toggles — it re-checks on
+  selection and refuses only if the state is still unknown.
+
+The label tracks the **pin**, not mere liveness: a keeper that is up
+only because work sits on its hook is unpinned and still shows
+`[ ⚡ pin keeper ]` — pinning it then keeps it up once that work
+finishes. That entry is the surface — you do not run `gc session`
+verbs by hand. It is wired to
+`assets/scripts/tmux-keeper-toggle.sh`, which owns the pin/unpin
+call and the pin-state detection (it reads the keeper session
+bead's `metadata.pin_awake`; tmux liveness cannot distinguish
+pinned from merely-working).
+
+**Talk to it, or give it work.** Pin only when you want to
+*converse* — surface a rebase summary, refine a PR draft, ask an
+upstream question. If you only need a *job done* (rebase, sync,
+PR-prep), don't pin — hand it the work, which is itself a wake
+reason; it materializes, runs, surfaces any questions back to you,
+and drains on its own:
+
+```bash
+bd update <bead> --assignee gascity/gascity-keeper.keeper   # Lane 2
+```
+
+### Lifecycle background
+
+`gc session wake` does **not** keep the keeper up: it clears holds
+and requests a start, but is not itself a durable reason to stay
+up, so the reconciler drains the session again shortly after — the
+"no-wake-reason" you see in the logs. The reconciler keeps a
+session materialized only while one of these holds:
+
+| Wake reason | Durable? | How |
+|---|---|---|
+| Work on the hook (a bead `assignee`'d to the agent) | yes — until the work is done | `bd update --assignee`, `gc sling` |
+| A pin | yes — until you unpin | the `S`-picker entry (or `gc session pin`) |
+| An active attach | **no** — drops the moment you detach, even to hop tmux windows | `gc session attach` |
+
+A pin is still genuinely on-demand — *you* chose the window — and
+is **not** the always-live `mode = "always"` config (see
+[Lifecycle](#lifecycle)). The pin targets **the** canonical
+session, the one whose alias equals the QualifiedName in
+`gc session list`; reaching for `gc session new` instead spawns a
+separate `…-adhoc-<id>` thread *alongside* it (the [duplicate
+named-session footgun](#duplicate-named-session-via-manual-spawn)).
+You don't need to create it first — pinning a not-yet-materialized
+canonical session creates its bead so the reconciler can start it.
 
 ## Refresh procedure
 
