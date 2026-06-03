@@ -182,9 +182,10 @@ the principle intact.
 
 ## The Agent Brief
 
-The agent brief is two reference docs under `{{ .ConfigDir }}/docs/`
-— one index into upstream Gas City documentation plus one
-gc-toolkit-specific process doc:
+The agent brief is three reference docs under `{{ .ConfigDir }}/docs/`
+— one index into upstream Gas City documentation, one
+gc-toolkit-specific process doc, and one gc-toolkit-native tooling
+reference:
 
 - **gascity-reference.md** — Index of canonical Gas City documentation
   at `docs.gascityhall.com` (CLI, config, formulas, providers, trust
@@ -201,6 +202,15 @@ gc-toolkit-specific process doc:
   durable review packet, and the fork-setup conventions. Consult
   before proposing or accepting work that involves a `gascity` fix
   beyond what's already in upstream.
+
+- **tmux-session-picker.md** — Agent-facing reference for the Gas City
+  session picker (`prefix+S`), the operator's primary pick-by-title
+  jumper between agent sessions. Covers the default filter, rig-grouped
+  layout, title column, and visual indicators — plus the load-bearing
+  fact that a drained `on_demand` session has no tmux pane and is
+  therefore invisible to the picker. Consult before reasoning about
+  session lifecycle, materialization (`always` vs `on_demand`), or
+  titling.
 
 Operational doctrine has two homes. **Upstream engagement** is broadly
 applicable to any consumer carrying local gascity patches; it lives in
