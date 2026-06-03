@@ -3,6 +3,15 @@ name: Consult-Bead Surfacing Channel — Design
 description: Approved v1 design for the conversational-concierge consult model; generalizes the consult-bead shape for any specialist to file.
 ---
 
+> **STATUS: SUPERSEDED (2026-06-02).** The conversational-concierge
+> direction approved here was never deployed (zero consult beads;
+> concierge never ran). Replaced by the deterministic human-attention
+> surface: decision bead lo-0hvt (HQ) +
+> `assets/scripts/gc-attention.sh` (PR #83). Key reversal: the surface
+> is deterministic ranking — no LLM in the hot path; conversations
+> happen in operator-spawned threads bound to a picked item. This
+> document remains as historical record of the options considered.
+
 # Consult-Bead Surfacing Channel — Design
 
 **Status:** approved design. Implementation bead to be filed by mechanik

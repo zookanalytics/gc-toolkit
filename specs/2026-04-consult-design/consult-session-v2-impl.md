@@ -3,6 +3,15 @@ name: Session-per-Consult v2 — As-Built Implementation
 description: As-built implementation of session-per-consult Shape A (direct tmux attach, brand evaporates in-session); records implementation choices made within the approved feasibility shape.
 ---
 
+> **STATUS: SUPERSEDED (2026-06-02).** The concierge/consult-host
+> implementation recorded here was never deployed (zero consult beads;
+> concierge never ran). Replaced by the deterministic human-attention
+> surface: decision bead lo-0hvt (HQ) +
+> `assets/scripts/gc-attention.sh` (PR #83). Key reversal: the surface
+> is deterministic ranking — no LLM in the hot path; conversations
+> happen in operator-spawned threads bound to a picked item. This
+> document remains as historical record of what was built and why.
+
 # Session-per-Consult v2 — As-Built Implementation
 
 **Status:** implemented. Shape A (direct tmux attach, brand
