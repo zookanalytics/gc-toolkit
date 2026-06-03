@@ -771,14 +771,24 @@ on_demand session has no pane, so you cannot reach it by switching
 to a pane. The `S` session picker therefore carries a fixed entry,
 next to `[ show all ]`, that pins or unpins the keeper:
 
-- keeper down → `[ ⚡ pin keeper ]` → pins it; it materializes and,
-  on the next picker open, shows up as a navigable pane you switch
-  to like any other agent.
-- keeper up → `[ ✕ unpin keeper ]` → unpins it; it drains once idle.
+- keeper unpinned → `[ ⚡ pin keeper ]` → pins it; it materializes
+  (if it was down) and, on the next picker open, shows up as a
+  navigable pane you switch to like any other agent.
+- keeper pinned → `[ ✕ unpin keeper ]` → unpins it; it drains once
+  idle.
+- `[ keeper… ]` → the pin state could not be read in time (beads
+  slow or unreachable). The entry still toggles — it re-checks on
+  selection and refuses only if the state is still unknown.
 
-That entry is the surface — you do not run `gc session` verbs by
-hand. It is wired to `assets/scripts/tmux-keeper-toggle.sh`, which
-owns the pin/unpin call and the up/down detection.
+The label tracks the **pin**, not mere liveness: a keeper that is up
+only because work sits on its hook is unpinned and still shows
+`[ ⚡ pin keeper ]` — pinning it then keeps it up once that work
+finishes. That entry is the surface — you do not run `gc session`
+verbs by hand. It is wired to
+`assets/scripts/tmux-keeper-toggle.sh`, which owns the pin/unpin
+call and the pin-state detection (it reads the keeper session
+bead's `metadata.pin_awake`; tmux liveness cannot distinguish
+pinned from merely-working).
 
 **Talk to it, or give it work.** Pin only when you want to
 *converse* — surface a rebase summary, refine a PR draft, ask an

@@ -286,21 +286,33 @@ not at the header above it.
 ## Keeper pin/unpin entry
 
 A fixed entry sits just above `[ show all ]`: `[ ⚡ pin keeper ]` when the
-gascity-keeper is down, `[ ✕ unpin keeper ]` when it is up. It is a
+gascity-keeper is unpinned, `[ ✕ unpin keeper ]` when it is pinned, and a
+neutral `[ keeper… ]` when the pin state cannot be read in time. It is a
 standalone menu action, **not** a per-session row — the keeper runs
 `on_demand`, so when drained it has no pane (no row to hang a per-row action
 on), yet the operator still needs a surface to bring it up.
 
-Both the state detection and the pin/unpin call live in the sibling
+Both the pin-state detection and the pin/unpin call live in the sibling
 `tmux-keeper-toggle.sh` (one shared helper). The picker calls it in `state`
-mode to choose the label — a single local `tmux list-sessions` check (keeper
-"up" == its canonical session is materialized), with no `gc`/beads
-round-trip on the render path. Selecting the entry runs the helper's
-`toggle` via `run-shell -b`, so a slow `gc session pin` cannot freeze the
-server. Its hotkey is `,` — a fixed punctuation slot (like `.` for the
-filter toggle), outside the `a-z0-9` per-row keyspace so it never collides.
-See `gascity-agents.md` → "The gascity-keeper front-door" for the
-operator-facing model.
+mode to choose the label. The label tracks the **real durable pin** — the
+keeper session bead's `metadata.pin_awake` — not tmux liveness: an
+on_demand keeper materializes for any durable wake reason (most commonly
+work on its hook), so a live pane does not imply a pin, and a
+liveness-derived label would offer "unpin" on a keeper the operator never
+pinned. Neither the `gc session list --json` rows nor the supervisor
+sessions API expose pin state, so the helper makes a two-step gc/beads
+read — resolve the keeper's session bead ID by alias from one
+`gc session list --json` call, then read `pin_awake` via `gc bd show` —
+with each step wall-clock bounded so a slow or wedged beads backend
+cannot stall the picker open: on timeout/failure the label degrades to
+the neutral `[ keeper… ]` instead of guessing. Selecting the entry runs
+the helper's `toggle` via `run-shell -b`, so a slow `gc session pin`
+cannot freeze the server; `toggle` re-reads the pin state itself (under a
+more generous bound, since it runs backgrounded) and refuses to act while
+it is unknown — so the neutral entry stays actionable. Its hotkey is `,`
+— a fixed punctuation slot (like `.` for the filter toggle), outside the
+`a-z0-9` per-row keyspace so it never collides. See `gascity-agents.md` →
+"The gascity-keeper front-door" for the operator-facing model.
 
 ## Filter toggle
 

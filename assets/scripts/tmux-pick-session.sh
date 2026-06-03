@@ -360,18 +360,27 @@ reinvoke_suffix=""
 # standalone menu action rather than a per-session row. The gascity-keeper
 # runs on_demand, so when it is drained it has no pane — and therefore no
 # row to hang a per-row action on — yet the operator still needs a surface
-# to bring it up. tmux-keeper-toggle.sh owns both the state-detection and
-# the pin/unpin call (one shared helper, no duplicated logic); we ask it for
-# the current state to render the matching label. The ',' hotkey is a fixed
-# punctuation slot (like '.' for show-all) so it never collides with the
-# a-z0-9 per-row hotkeys. run-shell -b backgrounds the toggle so a slow
-# `gc session pin` cannot freeze the server (cf. tmux-spawn-thread.sh).
+# to bring it up. tmux-keeper-toggle.sh owns both the pin-state detection
+# and the pin/unpin call (one shared helper, no duplicated logic); we ask
+# it for the current state to render the matching label. The label tracks
+# the real durable pin (the keeper session bead's pin_awake), not tmux
+# liveness — a keeper materialized by hooked work is up but unpinned and
+# must still offer [ pin ]. That read is a bounded gc/beads round-trip, so
+# the state call threads --city-path for deterministic resolution from
+# tmux's bare env (unlike the pure-tmux check it replaces); when it can't
+# answer in time the entry degrades to a neutral [ keeper… ] label rather
+# than stalling the picker or guessing — toggle re-reads state itself, so
+# the entry stays actionable. The ',' hotkey is a fixed punctuation slot
+# (like '.' for show-all) so it never collides with the a-z0-9 per-row
+# hotkeys. run-shell -b backgrounds the toggle so a slow `gc session pin`
+# cannot freeze the server (cf. tmux-spawn-thread.sh).
 KEEPER_TOGGLE="$(dirname "$SCRIPT")/tmux-keeper-toggle.sh"
-if [ "$("$KEEPER_TOGGLE" state 2>/dev/null || echo down)" = "up" ]; then
-    keeper_label="  [ ✕ unpin keeper ]  "
-else
-    keeper_label="  [ ⚡ pin keeper ]  "
-fi
+# shellcheck disable=SC2086 # ${EXPLICIT_CITY_PATH:+…} expands to 0 or 2 fields
+case "$("$KEEPER_TOGGLE" ${EXPLICIT_CITY_PATH:+--city-path "$EXPLICIT_CITY_PATH"} state 2>/dev/null || echo unknown)" in
+    up)   keeper_label="  [ ✕ unpin keeper ]  " ;;
+    down) keeper_label="  [ ⚡ pin keeper ]  " ;;
+    *)    keeper_label="  [ keeper… ]  " ;;
+esac
 set -- "$@" "$keeper_label" "," "run-shell -b \"$KEEPER_TOGGLE toggle$reinvoke_suffix\""
 
 if [ "$ALL" -eq 1 ]; then
