@@ -4,7 +4,9 @@ The Gas City session picker, bound to `prefix+S` in tmux:
 
     run-shell /home/zook/loomington/rigs/gc-toolkit/assets/scripts/tmux-pick-session.sh
 
-This is the operator's primary jumper between Gas City agent sessions.
+This is the operator's primary jumper between Gas City agent
+sessions — documented here for both the script's maintainers and the
+agents pointed at these notes by the mechanik Agent Brief.
 
 ## Who this is for
 
@@ -17,6 +19,34 @@ witness, dog, boot) hidden by default.
 It is **not** trying to be a full tmux-feature-parity picker. No
 preview pane. No fzf. No mail-counts / agent-metadata / last-bead in
 the row. It is a scoped, fast picker tuned for our rig topology.
+
+## Implications for agents
+
+The mechanics live in the rest of this file; what follows is the
+judgment those mechanics force on agents.
+
+- **Drained sessions are invisible.** The picker enumerates live
+  tmux sessions (`tmux list-sessions`). A drained `on_demand`
+  session has no pane, so it does not appear in the menu and is not
+  counted in its rig header — unreachable by the operator's
+  pick-by-title navigation. This is the documented root of the
+  pin-vs-attach friction and the keeper "always-materialize"
+  decision. When making session-lifecycle or materialization calls
+  (`always` vs `on_demand`, pin vs attach), account for picker
+  visibility: an agent the operator needs to reach by title should
+  be materialized, not drained.
+
+- **Titles are the operator's scannability surface.** The gc session
+  title an agent sets (`--title`, `--title-hint`, `gc session
+  rename`) is what renders in the title column, boring titles
+  suppressed (see "Session title column"). This is why the
+  canonical-self-rename doctrine
+  (`template-fragments/canonical-self-rename.template.md`) matters:
+  an un-renamed session is a needle in the role column.
+
+- The companion `prefix+a` binding (installed by
+  `tmux-bindings.sh`, runs `tmux-spawn-thread.sh`) spawns a thread
+  of the current pane's role.
 
 ## Why display-menu, not choose-tree
 
