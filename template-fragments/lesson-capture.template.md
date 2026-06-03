@@ -29,7 +29,9 @@ agent prompt, a formula step, a convention doc, a review check — file a
 lesson bead in HQ:
 
 ```bash
-gc bd create "LESSON: <one-line imperative form of the correction>" \
+# -C "$GC_CITY" forces the HQ store — without it, rig agents file
+# into their rig's bead DB and the mechanik never sees the lesson.
+gc bd create -C "$GC_CITY" "LESSON: <one-line imperative form of the correction>" \
   -t task -l lesson -a gc-toolkit.mechanik \
   -d "<operator's correction as close to verbatim as practical>
 Context: <what you were doing when corrected; bead/PR/session refs>
@@ -38,10 +40,10 @@ Suggested durable home: <prompt amendment | fragment | formula step | convention
 
 **The bar:** real corrections only — a lesson bead is a claim that the
 process should change. Before filing, check
-`gc bd list -l lesson --status open,in_progress` (open AND in_progress —
-claim flips status) and extend an existing bead's notes instead of
-duplicating. Do not file statistics, scores, or "the operator approved
-this" — approvals are not lessons.
+`gc bd list -C "$GC_CITY" -l lesson --status open,in_progress` (same HQ
+store; open AND in_progress — claim flips status) and extend an existing
+bead's notes instead of duplicating. Do not file statistics, scores, or
+"the operator approved this" — approvals are not lessons.
 
 The mechanik triages lesson beads, picks the durable home, dispatches
 the change, and closes the bead with a pointer to the shipped change.
