@@ -3,6 +3,16 @@ name: Session-per-Consult — Feasibility Study
 description: Parallel-track feasibility analysis for a session-per-consult upgrade over the v1 conversational-concierge model; informs whether the upgrade is worth scoping.
 ---
 
+> **STATUS: SUPERSEDED (2026-06-02).** The session-per-consult
+> direction this study fed was never deployed (zero consult beads;
+> concierge never ran). Replaced by the deterministic human-attention
+> surface: decision bead lo-0hvt (HQ) +
+> `assets/scripts/gc-attention.sh` (PR #83). Key reversal: the surface
+> is deterministic ranking — no LLM in the hot path; conversations
+> happen in operator-spawned threads bound to a picked item. The
+> direction is superseded; the feasibility analysis itself is kept as
+> useful background reference.
+
 # Session-per-Consult — Feasibility Study
 
 **Status:** feasibility analysis, not approved. Parallel track to v1
