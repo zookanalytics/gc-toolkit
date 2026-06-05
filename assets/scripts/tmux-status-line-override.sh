@@ -80,6 +80,10 @@ esac
 gcmux set-option -t "$SESSION" status-left "$icon $short " \
     2>/dev/null || true
 
+# Override gastown tmux-theme.sh's `status-interval 5`: refresh the
+# status bar every 30s, ~6x fewer per-pane hook/mail/curl probes.
+gcmux set-option -t "$SESSION" status-interval 30 2>/dev/null || true
+
 # Defensive sweep of stale slot files from crashed writers. /tmp
 # survives session lifetime but accumulates across reboots; writers
 # clean up via trap on EXIT, but a SIGKILL'd or aborted-during-setup
