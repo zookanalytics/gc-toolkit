@@ -29,9 +29,15 @@
 # relied upon (it needs shared-server mode).
 #
 # ── Per-anchor deterministic frontier facts ──────────────────────────
-#   • N/M            — children/members closed (N) of total (M). Convoy
-#                      totals come from `gc convoy list` progress; epic
-#                      totals from the `--parent` child roll-up.
+#   • N/M            — children/members closed (N) of total (M). Epic
+#                      children come from the `--parent` roll-up; convoy
+#                      members from the convoy bead's tracks deps
+#                      (`bd show --include-dependents`). N/M and the
+#                      frontier derive from the SAME child set, so a row
+#                      cannot self-contradict. `gc convoy list` .progress
+#                      is kept ONLY as a cross-check: any disagreement
+#                      with the resolved set is surfaced as
+#                      `progress_mismatch` in the JSON output.
 #   • open/in-progress/assigned — counts over the open frontier.
 #   • stranded       — decomposed (M>0) with open children but ZERO
 #                      in-progress: work exists but nothing is moving.
@@ -212,7 +218,11 @@ printf '%s' "$convoys" | jq -c '.[]' | while IFS= read -r convoy; do
     beads="$path/.beads"
     [ -d "$beads" ] || continue
 
-    # One show call yields the convoy body, its parent, and its members.
+    # One show call yields the convoy body, its parent, and its members
+    # (tracks deps → dependents). The dependents are the CANONICAL child
+    # set: the render pass derives N/M and the frontier from it. The
+    # `gc convoy list` .progress counts ride along only as a cross-check
+    # (surfaced as progress_mismatch); they never feed N/M.
     show=$(gcq bd show "$cid" --db "$beads" --include-dependents --json)
     printf '%s' "$show" | jq -e 'type=="array" and length>0' >/dev/null 2>&1 || continue
     parent=$(printf '%s' "$show" | jq -r '.[0].parent // empty')
@@ -243,8 +253,15 @@ def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as 
 | map(
     . as $a
     | ($a.children // []) as $ch
-    | (if ($a.progress != null) then $a.progress.total else ($ch|length) end) as $m
-    | (if ($a.progress != null) then $a.progress.closed else ([$ch[]|select(.status=="closed")]|length) end) as $closed
+    # N/M and the frontier BOTH derive from $ch — the one resolved child
+    # set (epic --parent roll-up, or convoy tracks deps). A convoy whose
+    # dependents diverge from its tracked-member counts therefore still
+    # renders self-consistently; the divergence itself is surfaced as
+    # $pmismatch instead of silently skewing N/M.
+    | ($ch|length) as $m
+    | ([$ch[]|select(.status=="closed")]|length) as $closed
+    | (if $a.progress == null then false
+       else (($a.progress.total // -1) != $m or ($a.progress.closed // -1) != $closed) end) as $pmismatch
     | [$ch[] | select(.status != "closed")] as $openset
     | ($openset|length) as $open
     | ([$ch[]|select(.status=="in_progress")]|length) as $inprog
@@ -294,6 +311,7 @@ def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as 
         n_closed:$closed, m_total:$m, open:$open, in_progress:$inprog, assigned:$assigned,
         stranded:($m>0 and $open>0 and $inprog==0), empty:($m==0 and $a.source!="decision"),
         complete:($m>0 and $open==0),
+        progress_mismatch:$pmismatch,
         stale_days:$stale, priority:$a.priority, cross_rig_refs:$xrefs,
         updated_at:$a.updated_at, frontier:$frontier, needs:$needs,
         rank_score: (($sev|sevrank)*1000000 + $weight*1000 + ([$stale,999]|min))
