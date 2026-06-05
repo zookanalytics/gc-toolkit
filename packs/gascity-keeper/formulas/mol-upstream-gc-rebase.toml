@@ -105,7 +105,7 @@ uses the legacy `metadata.conflict_questions` shape so the keeper's
 existing operator conversation handles it without bespoke flow."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 10
+version = 11
 
 [vars]
 [vars.upstream_remote]
@@ -883,8 +883,21 @@ needs = ["rebase"]
 description = """
 **Config: check_command = {{check_command}}**
 
+**Resume-skip on an unchanged HEAD (trust-and-skip).** Mirrors the
+`metadata.commit_verdicts` resume-skip in the survey step. `{{check_command}}`
+(`make check`) runs the full Go pipeline (~15min); a worker that loses a
+completed gate to mid-wait compaction would otherwise re-run it from scratch.
+Trust a prior pass on this exact rebased tree, keyed to HEAD sha — any HEAD
+change (rebase advanced, fresh re-pour onto new upstream) yields a different
+sha, so a stale stamp won't match and the gate re-runs:
 ```bash
-{{check_command}}
+HEAD_SHA=$(git rev-parse HEAD)
+if [ "$(gc bd show {{issue}} --json | jq -r '.[0].metadata.check_passed_sha // empty')" = "$HEAD_SHA" ]; then
+    echo "check already passed at this HEAD ($HEAD_SHA); trust-and-skip"
+    # Gate already green on this exact tree — skip the rest of this step and proceed to install.
+else
+    {{check_command}}
+fi
 ```
 
 The default `{{check_command}}` in gascity is `make check`, which runs
@@ -894,7 +907,12 @@ polecats commit with `--no-verify` and the gascity pre-commit hook (which
 covers fmt-check, lint, vet, regen-artifacts, and test) is bypassed per
 rework commit, so the wider gate here has to cover those surfaces.
 
-If the gate passes, close this step and proceed.
+If the gate passes, stamp the HEAD sha so a later resume on this same
+rebased tree trusts the pass and skips the gate, then close this step and
+proceed:
+```bash
+gc bd update {{issue}} --set-metadata check_passed_sha="$(git rev-parse HEAD)"
+```
 
 If the gate fails, route the abort THROUGH the keeper. Capture the
 failure context first, then lock in the durable handback (reassign to the
@@ -992,11 +1010,24 @@ needs = ["check"]
 description = """
 **Config: install_command = {{install_command}}**
 
+**Resume-skip on an unchanged HEAD (trust-and-skip).** Same HEAD-keyed
+guard as the check step, keyed to `metadata.install_passed_sha` — trust a
+prior install on this exact rebased tree; any HEAD change re-runs it:
 ```bash
-{{install_command}}
+HEAD_SHA=$(git rev-parse HEAD)
+if [ "$(gc bd show {{issue}} --json | jq -r '.[0].metadata.install_passed_sha // empty')" = "$HEAD_SHA" ]; then
+    echo "install already passed at this HEAD ($HEAD_SHA); trust-and-skip"
+    # Already installed from this exact tree — skip the rest of this step and proceed to push.
+else
+    {{install_command}}
+fi
 ```
 
-If install passes, close this step and proceed.
+If install passes, stamp the HEAD sha so a later resume on this same tree
+trusts the pass, then close this step and proceed:
+```bash
+gc bd update {{issue}} --set-metadata install_passed_sha="$(git rev-parse HEAD)"
+```
 
 If install fails: same keeper-routed pattern as the check failure —
 durable handback to the keeper first (reassign + failure tail in bead
