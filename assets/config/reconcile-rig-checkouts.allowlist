@@ -1,0 +1,26 @@
+# reconcile-rig-checkouts — KNOWN DIVERGENCE allowlist.
+#
+# Repo-relative path globs, one per line. A local deviation (commit or dirty
+# hunk) whose paths are all matched here is classified KNOWN DIVERGENCE:
+# machine-local / bd-owned content that legitimately differs from origin/main.
+# KNOWN paths are KEPT across an advance (preserved, never reset to origin) and
+# NEVER block reconciliation.
+#
+# STATIC by design (tk-yjtf, operator decision 2026-06-05): this list is
+# operator-extended only — edit this file and land it through a PR. There is no
+# auto-learning, so real work can never be silently absorbed into the tolerated
+# class. Add the narrowest pattern that covers a genuinely machine-local path.
+#
+# Matching rules (see assets/scripts/reconcile-rig-checkouts.sh:path_allowlisted):
+#   - "dir/**" or "dir/"  -> matches the dir itself and everything under it
+#   - a pattern containing * or ?  -> shell glob against the repo-relative path
+#   - anything else  -> exact path, or a directory prefix (path under it)
+# Blank lines and lines starting with '#' are ignored.
+#
+# Extra patterns may also be injected at runtime via the RECONCILE_ALLOWLIST_EXTRA
+# env var (newline- or ':'-separated) without editing this file.
+
+# bd-owned ledger state. .beads/* is gitignored except the tracked config.yaml
+# and metadata.json (see the rig .gitignore); bd rewrites these continuously, so
+# they must never be treated as novel work or reset out from under bd.
+.beads/**

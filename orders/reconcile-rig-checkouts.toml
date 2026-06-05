@@ -1,0 +1,66 @@
+# reconcile-rig-checkouts — keep managed rigs/* checkouts synced to their
+# origin/main, escalating ONLY on novel local work that conflicts with upstream.
+#
+# ## Why this order exists
+# The live rig checkouts under rigs/* are what the runtime executes (pack
+# `source = "rigs/<rig>"`; there is no separately-deployed copy). They drift
+# from origin/main because the refinery merges via its OWN clone — a merged PR
+# is NOT live until someone syncs the checkout. Observed 2026-06-05: the
+# gc-toolkit checkout was 7 merged PRs behind AND dirty with three changes that
+# were all already on origin. A naive `reset --hard` would have been lossless
+# that day but in general risks eating real local work; a naive "dirty -> notify"
+# spams, because bd writes .beads/ continuously.
+#
+# ## What it does (design: tk-yjtf, impl: tk-nu5u)
+# Per run, per managed rig checkout: `git fetch origin`, then classify every
+# local deviation (a commit in origin/main..HEAD OR a dirty hunk) into one of
+# three buckets:
+#   1. KNOWN DIVERGENCE  — matches the declared allowlist (seed: .beads/**),
+#      machine-local / bd-owned. KEEP, never block, record in the ledger.
+#   2. ALREADY UPSTREAM  — content already on origin/main (patch-equivalent
+#      commit via `git cherry`; blob-identical dirty file). Obsolete residue;
+#      discard and advance past it. Never block.
+#   3. NOVEL REAL WORK   — in-scope content, not on origin, not allowlisted:
+#        - conflicts with origin (upstream also changed those paths) -> BLOCK +
+#          escalate to the mayor; do NOT mutate the checkout.
+#        - no conflict -> advance anyway, preserve the work on top, flag it in
+#          the ledger as a PR-promotion candidate.
+# Net: hard-stop on exactly one case — novel work colliding with upstream — and
+# auto-advance through everything else.
+#
+# ## Rollout (Principle 5: safe incremental rollout)
+# Ships in OBSERVE (dry-run) mode via [order.env] RECONCILE_DRY_RUN below:
+# classify + report + refresh the ledger and any mayor escalation, but make
+# ZERO checkout mutations. The operator watches it classify real drift, then
+# flips RECONCILE_DRY_RUN to "0" to grant write authority.
+#
+# ## Trigger
+# Periodic backstop only for v1 (catches bd / manual / post-merge drift on a
+# cadence). A post-merge event trigger is deferred — the work bead closes at
+# PR-creation, not at merge, so `bead.closed` on the work bead is not the merge
+# signal; whether a clean "origin advanced" event exists is a follow-up (tk-nu5u
+# description, "Event/post-merge trigger").
+#
+# Discovered by convention: gc scans <packDir>/orders/*.toml for every pack dir,
+# and the gc-toolkit pack is loaded at city scope (internal/orderdiscovery
+# CityOrderRoots -> orderRoots over cfg.PackDirs). No pack.toml declaration is
+# needed; `gc order list` will show this order, and dynamic reload (ga-lqdcbh)
+# picks it up without a controller restart.
+[order]
+description = "Reconcile managed rig checkouts to origin/main; escalate only on conflicting novel work"
+trigger = "cooldown"
+interval = "15m"
+exec = "$PACK_DIR/assets/scripts/reconcile-rig-checkouts.sh"
+scope = "city"
+
+[order.env]
+# OBSERVE MODE. "1" (or unset) = dry-run: zero checkout mutations. Flip to "0"
+# to grant write authority once the operator has watched the ledger classify
+# real drift. The script also defaults to dry-run when this is unset, so the
+# safe behavior holds even if this block is removed.
+RECONCILE_DRY_RUN = "1"
+# Escalation target for blocked (novel-conflict) rigs. The script files one
+# idempotent bead per blocked rig, owned by / routed to this address, and
+# closes it when the rig stops conflicting. Override to "gc-toolkit.mayor" if
+# bare "mayor" does not resolve in this city's routing.
+RECONCILE_MAYOR_ADDR = "mayor"
