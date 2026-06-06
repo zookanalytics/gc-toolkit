@@ -40,6 +40,13 @@ A rig blocks iff it has ≥1 novel-conflicting deviation. Otherwise it advances
 (`.beads/`) and non-conflicting novel work; already-upstream commits are dropped
 (the pre-advance sha is logged + recorded; `git reflog` is the backstop).
 
+Preservation is exact: a local **deletion** of an allowlisted path stays deleted
+(it is never resurrected from origin by the `reset --hard`), and dirty **binary**
+novel work is preserved (captured with `git diff --binary`, with a working-tree
+byte snapshot as the failure-path backstop). Non-conflicting novel work is never
+silently lost — even when the re-apply onto `origin/main` fails, the checkout is
+reverted to its pre-advance state (content **and** dirty work) and the rig blocks.
+
 Untracked files are ignored by default (`-uno`): they survive any advance
 untouched and in practice are machine-local cruft (`backup/*`, `LOCK`,
 `.local_version`). Set `RECONCILE_INCLUDE_UNTRACKED=1` to classify them too.

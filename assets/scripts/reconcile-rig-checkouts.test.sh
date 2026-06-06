@@ -206,6 +206,61 @@ assert_eq "f3 incident: tuning+formula already-upstream" "2" "$(ledger f3 . .cou
 assert_eq "f3 incident: dry-run mutates nothing" "$HEAD_F3" "$(git_q "$TESTROOT/f3/checkout" rev-parse HEAD)"
 assert_eq "f3 incident: event.conf untouched"   "flush=off" "$(cat "$TESTROOT/f3/checkout/event.conf")"
 
+echo "== Fixture 4: dirty tracked BINARY novel work is preserved across an advance =="
+# Regression for tk-26cp finding #1: a dirty tracked binary novel file was
+# captured with a plain `git diff` (-> "Binary files differ", unapplicable),
+# `git apply` failed, and the failure path reset to pre_sha — silently dropping
+# the binary while reporting the rig blocked. The fix captures with `git diff
+# --binary` (applies cleanly) and snapshots the bytes as a failure-path backstop.
+new_fixture f4
+# Publish a tracked binary asset to origin so it exists at the merge-base ...
+printf '\x00\x01\x02BIN-ORIG\x03\x04\x00' >"$TESTROOT/f4/upstream/logo.bin"
+origin_commit f4 "upstream: add binary asset"
+git_q "$TESTROOT/f4/checkout" pull -q origin main   # checkout pulls it (HEAD==origin)
+# ... origin then advances an unrelated text file so the checkout falls 1 behind.
+printf 'v2\n' >"$TESTROOT/f4/upstream/app.txt"
+origin_commit f4 "upstream: bump app to v2"
+# checkout dirties the binary with novel bytes origin never saw (non-conflicting:
+# origin did not touch logo.bin since the merge-base).
+printf '\x00\x01\x02BIN-LOCAL-NOVEL\x05\x06\x07\x00\x08' >"$TESTROOT/f4/checkout/logo.bin"
+WANT_BIN_SHA="$(git_q "$TESTROOT/f4/checkout" hash-object logo.bin)"
+
+run_reconcile f4 0 # enforce — perform the advance
+assert_eq "f4: status advanced"               "advanced" "$(ledger f4 . .status)"
+assert_eq "f4: novel_nonconflicting == 1"     "1"  "$(ledger f4 . .counts.novel_nonconflicting)"
+assert_eq "f4: app.txt advanced to v2"        "v2" "$(cat "$TESTROOT/f4/checkout/app.txt")"
+assert_eq "f4: dirty binary novel preserved"  "$WANT_BIN_SHA" \
+    "$(git_q "$TESTROOT/f4/checkout" hash-object logo.bin 2>/dev/null)"
+
+echo "== Fixture 5: an allowlisted tracked deletion (unstaged) survives an advance =="
+# Regression for tk-26cp finding #2: deleting an allowlisted tracked file locally
+# must survive the advance — reset --hard resurrects the origin copy unless the
+# snapshot records the deletion and the restore re-removes it.
+new_fixture f5
+printf 'v2\n' >"$TESTROOT/f5/upstream/app.txt"
+origin_commit f5 "upstream: bump app to v2"      # checkout falls 1 behind -> advances
+rm -f "$TESTROOT/f5/checkout/.beads/config.yaml" # unstaged deletion (stays in index)
+
+run_reconcile f5 0 # enforce
+assert_eq "f5: status advanced"                "advanced" "$(ledger f5 . .status)"
+assert_eq "f5: deletion classified known"      "1"  "$(ledger f5 . .counts.known)"
+assert_eq "f5: app.txt advanced to v2"         "v2" "$(cat "$TESTROOT/f5/checkout/app.txt")"
+assert_eq "f5: allowlisted deletion preserved" "absent" \
+    "$([ -e "$TESTROOT/f5/checkout/.beads/config.yaml" ] && echo present || echo absent)"
+
+echo "== Fixture 6: an allowlisted tracked deletion (staged via git rm) survives =="
+# Staged deletions leave the index, so the ls-files snapshot loop misses them;
+# the fix also scans the staged diff (--diff-filter=D) to catch this path.
+new_fixture f6
+printf 'v2\n' >"$TESTROOT/f6/upstream/app.txt"
+origin_commit f6 "upstream: bump app to v2"
+git_q "$TESTROOT/f6/checkout" rm -q .beads/config.yaml  # staged deletion
+
+run_reconcile f6 0 # enforce
+assert_eq "f6: status advanced"                "advanced" "$(ledger f6 . .status)"
+assert_eq "f6: staged deletion preserved"      "absent" \
+    "$([ -e "$TESTROOT/f6/checkout/.beads/config.yaml" ] && echo present || echo absent)"
+
 echo
 if [ "$FAILS" -eq 0 ]; then
     echo "ALL TESTS PASSED"

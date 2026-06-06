@@ -355,29 +355,59 @@ advance_rig() {
     snap="$(mktemp -d)" || return 1
 
     # 1. Snapshot working-tree content of tracked allowlisted files (.beads/
-    #    config.yaml, metadata.json). Gitignored .beads/* dolt data is untracked
-    #    and survives reset --hard untouched, so it needs no snapshot.
-    local -a tracked_allow=()
+    #    config.yaml, metadata.json), and record any deleted locally. Gitignored
+    #    .beads/* dolt data is untracked and survives reset --hard untouched, so
+    #    it needs no snapshot.
+    local -a tracked_allow=() tracked_allow_del=()
     while IFS= read -r f; do
         [ -n "$f" ] || continue
-        if path_allowlisted "$f"; then
+        path_allowlisted "$f" || continue
+        if [ -e "$dir/$f" ]; then
             tracked_allow+=("$f")
-            if [ -e "$dir/$f" ]; then
-                mkdir -p "$snap/allow/$(dirname "$f")"
-                cp -p "$dir/$f" "$snap/allow/$f" 2>/dev/null || true
-            fi
+            mkdir -p "$snap/allow/$(dirname "$f")"
+            cp -p "$dir/$f" "$snap/allow/$f" 2>/dev/null || true
+        else
+            # Allowlisted tracked path deleted locally (unstaged rm leaves it in
+            # the index). Record the deletion so the restore re-removes it after
+            # reset --hard — otherwise the origin copy bd/the operator
+            # intentionally deleted is resurrected. (tk-26cp finding #2.)
+            tracked_allow_del+=("$f")
         fi
     done < <(git -C "$dir" ls-files 2>/dev/null)
+    # Staged deletions (git rm) are gone from the index, so ls-files misses
+    # them — collect them from the staged diff against HEAD.
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        path_allowlisted "$f" || continue
+        [ -e "$dir/$f" ] || tracked_allow_del+=("$f")
+    done < <(git -C "$dir" diff --cached --name-only --diff-filter=D HEAD 2>/dev/null)
 
     # 2. Capture non-conflicting novel work (committed + tracked-dirty) as a diff
     #    whose pre-image is the remote tree, so it re-applies cleanly post-reset.
     #    Untracked novel files survive reset --hard and need no capture.
     local patch="$snap/novel.patch" have_patch=0
+    local -a upaths=() novel_present=() novel_deleted=()
     if [ "${#NOVEL_NC_PATHS[@]}" -gt 0 ]; then
-        local -a upaths=()
-        while IFS= read -r f; do [ -n "$f" ] && upaths+=("$f"); done \
+        local p
+        while IFS= read -r p; do [ -n "$p" ] && upaths+=("$p"); done \
             < <(printf '%s\n' "${NOVEL_NC_PATHS[@]}" | sort -u)
-        if git -C "$dir" diff "$remote" -- "${upaths[@]}" >"$patch" 2>/dev/null && [ -s "$patch" ]; then
+        # Snapshot novel working-tree bytes (and deletions) too. `git diff` cannot
+        # round-trip dirty BINARY content, and the apply-failure path below resets
+        # to pre_sha (committed state only) — so without this snapshot a dirty
+        # binary (or otherwise unapplicable) novel file is silently dropped while
+        # the rig is reported blocked. (tk-26cp finding #1.)
+        for p in "${upaths[@]}"; do
+            if [ -e "$dir/$p" ] && { [ ! -d "$dir/$p" ] || [ -L "$dir/$p" ]; }; then
+                mkdir -p "$snap/novel/$(dirname "$p")"
+                cp -p "$dir/$p" "$snap/novel/$p" 2>/dev/null || true
+                novel_present+=("$p")
+            elif [ ! -e "$dir/$p" ]; then
+                novel_deleted+=("$p")
+            fi
+        done
+        # --binary so a binary novel file yields an APPLICABLE patch; plain
+        # `git diff` emits "Binary files differ", which `git apply` rejects.
+        if git -C "$dir" diff --binary "$remote" -- "${upaths[@]}" >"$patch" 2>/dev/null && [ -s "$patch" ]; then
             have_patch=1
         fi
     fi
@@ -390,7 +420,9 @@ advance_rig() {
         return 1
     fi
 
-    # 4. Restore allowlisted tracked files exactly as bd left them.
+    # 4. Restore allowlisted tracked files exactly as bd left them — copy back
+    #    snapshotted content and re-apply local deletions (so the advance never
+    #    resurrects an allowlisted path that was deleted locally).
     for f in "${tracked_allow[@]:-}"; do
         [ -n "$f" ] || continue
         if [ -e "$snap/allow/$f" ]; then
@@ -398,18 +430,42 @@ advance_rig() {
             cp -p "$snap/allow/$f" "$dir/$f" 2>/dev/null || true
         fi
     done
+    for f in "${tracked_allow_del[@]:-}"; do
+        [ -n "$f" ] || continue
+        rm -f "$dir/$f" 2>/dev/null || true
+    done
 
     # 5. Re-apply non-conflicting novel work on top. By construction the patch's
     #    pre-image is the remote tree we just reset to, so it applies cleanly;
     #    if it does not, revert wholesale to pre_sha and signal a block — novel
     #    work is never silently lost.
     if [ "$have_patch" -eq 1 ]; then
-        if ! git -C "$dir" apply "$patch" 2>/dev/null; then
+        if ! git -C "$dir" apply --binary "$patch" 2>/dev/null; then
             err "advance: re-applying novel work failed for $dir; reverting to $pre_sha"
             git -C "$dir" reset --hard "$pre_sha" >/dev/null 2>&1 || true
+            # Restore allowlisted paths: snapshotted content, then local deletions.
             for f in "${tracked_allow[@]:-}"; do
                 [ -n "$f" ] || continue
                 [ -e "$snap/allow/$f" ] && cp -p "$snap/allow/$f" "$dir/$f" 2>/dev/null || true
+            done
+            for f in "${tracked_allow_del[@]:-}"; do
+                [ -n "$f" ] || continue
+                rm -f "$dir/$f" 2>/dev/null || true
+            done
+            # Restore novel dirty work from the byte snapshot. reset --hard pre_sha
+            # only brought back COMMITTED state; uncommitted novel content (esp.
+            # binary) must be put back so non-conflicting novel work is never
+            # silently lost, even on the block path. (tk-26cp finding #1.)
+            for f in "${novel_present[@]:-}"; do
+                [ -n "$f" ] || continue
+                if [ -e "$snap/novel/$f" ]; then
+                    mkdir -p "$dir/$(dirname "$f")"
+                    cp -p "$snap/novel/$f" "$dir/$f" 2>/dev/null || true
+                fi
+            done
+            for f in "${novel_deleted[@]:-}"; do
+                [ -n "$f" ] || continue
+                rm -f "$dir/$f" 2>/dev/null || true
             done
             rm -rf "$snap"
             return 2
