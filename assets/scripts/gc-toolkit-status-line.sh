@@ -24,10 +24,11 @@
 #
 # - <title>     : from the supervisor API (/v0/city/<name>/sessions).
 #                 Hidden when title equals the agent name (the gascity
-#                 default — no operator-set title yet). The server's
-#                 CachingStore memoizes the response, so per-pane tmux
-#                 refreshes collapse to one Dolt walk per cache window;
-#                 no local /tmp cache is needed.
+#                 default — no operator-set title yet). The title slot
+#                 requests view=summary — the lean read-model view (no
+#                 per-session enrichment) — so each refresh is sub-100ms
+#                 and forks nothing downstream; no local /tmp cache is
+#                 needed.
 # - <indicator> : verbatim contents of /tmp/gc-status-<slug>.indicator
 #                 if the file exists. Any gc-toolkit script can write or
 #                 clear this file; the next status refresh picks it up.
@@ -145,10 +146,12 @@ mail_seg=""
 [ "${m:-0}" -gt 0 ] && mail_seg=" | 📬 ${m}"
 
 # --- Title slot ---------------------------------------------------------
-# One HTTP round-trip per refresh; the server's CachingStore memoizes
-# the underlying Dolt walk so concurrent panes don't fan out. curl -f
-# silences the body during the ~1-2s cold-cache 503 window after
-# `gc start`; jq fails closed when input is empty.
+# One HTTP round-trip per refresh, served from the lean view=summary
+# read-model view (no per-session enrichment) — so each refresh is
+# sub-100ms and forks nothing downstream, even with many panes
+# refreshing concurrently. curl -f silences the body during the ~1-2s
+# 503 window after `gc start` before the read-model is ready; jq fails
+# closed when input is empty.
 title=""
 raw_title=""
 city_name=$(gc_city_name)
@@ -156,7 +159,7 @@ city_name=$(gc_city_name)
 # would just 404 and add latency to every status refresh.
 if [ -n "$city_name" ]; then
     raw_title=$(curl -sf --max-time 3 \
-        "$(gc_api_base)/v0/city/$city_name/sessions?state=active" 2>/dev/null \
+        "$(gc_api_base)/v0/city/$city_name/sessions?state=active&view=summary" 2>/dev/null \
         | jq -r --arg a "$agent" \
             '.items | map(select(.alias == $a)) | .[0].title // ""' 2>/dev/null \
         || true)
