@@ -1,0 +1,17 @@
+# reconcile-rig-checkouts — keep the live rigs/* checkouts advanced to origin.
+#
+# The live rigs/* checkouts are what the runtime executes (pack
+# source = "rigs/<rig>"); the refinery merges PRs via its own clone, so a
+# merged PR is not live until the checkout syncs. This order fast-forwards
+# each non-HQ rig checkout to origin's default branch every 15m.
+#
+# Ships ENABLED with no dry-run knob: `git merge --ff-only` cannot clobber
+# work — it advances only on a clean fast-forward and refuses on divergence.
+# A refusal is escalated to the mayor for judgment (see the script and
+# docs/rig-checkout-reconciler.md). Design: bead tk-yjtf.
+[order]
+description = "Fast-forward live rigs/* checkouts to origin; escalate divergence to the mayor"
+trigger = "cooldown"
+interval = "15m"
+exec = "$PACK_DIR/assets/scripts/reconcile-rig-checkouts.sh"
+scope = "city"
