@@ -82,8 +82,11 @@ CLI surface: it **enumerates `gc session list --json`** (the lone command that
 lists session beads — exposing id/alias/session_name/template/state) and
 **confirms each candidate's `hosts_bead` by id**, with the forward cache on the
 work bead as the O(1) fast path. For v1 (alias = bead id) the enumeration is
-filtered by `alias == <bead>` and confirmed against the explicit `hosts_bead`
-source of truth.
+**prefiltered** by `alias == <bead>` (a cheap candidate filter, never proof of
+hosting) and then **resolved strictly** by confirming the explicit
+`hosts_bead == <bead>` source of truth by id — so a still-live session merely
+*aliased* to the bead (e.g. after `unlink`, before its session is torn down)
+does **not** resolve, and `unlink` genuinely unbinds a live host.
 
 The fixture proves the design's *intended* mechanism (`ListByMetadata
 hosts_bead=X`) works on **listable** beads, so the mechanism itself is verified;

@@ -19,6 +19,7 @@
 #   Assertion 4  reverse-resolvable (search finds the host) ...... AUTOMATED
 #   Assertion 5  resume reflects a mid-suspend change ............ AUTOMATED (data half)
 #   + lineage append is carried from day one .................... AUTOMATED
+#   + resolve requires hosts_bead (alias is a prefilter only) ... AUTOMATED
 #
 # Exit 0 iff every automated assertion passes.
 #
@@ -40,8 +41,9 @@ hdr()  { printf '\n== %s ==\n' "$*"; }
 
 meta() { gc bd show "$1" --json 2>/dev/null | jq -r --arg k "$2" '.[0].metadata[$k] // empty'; }
 
-WORK=""; SESS=""
+WORK=""; SESS=""; SHIM_DIR=""
 cleanup() {
+    [ -n "$SHIM_DIR" ] && rm -rf "$SHIM_DIR" || true
     [ "$KEEP" = "1" ] && { note "--keep: leaving WORK=$WORK SESS=$SESS open"; return; }
     for b in "$WORK" "$SESS"; do
         [ -n "$b" ] && gc bd close "$b" --reason "binding fixture teardown" >/dev/null 2>&1 || true
@@ -132,6 +134,52 @@ LEN3="$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
 [ "$LEN3" = "2" ] \
     && ok "re-bind at the same epoch is idempotent (lineage stays 2)" \
     || bad "lineage grew on idempotent re-bind = $LEN3 (want 2)"
+
+hdr "Resolve contract — session-list path requires hosts_bead; alias is a prefilter (codex PR#98 / tk-mv7qu)"
+# Regression guard for the codex finding on PR#98: in the `gc session list`
+# search path, alias==<bead> is a PREFILTER ONLY — resolution requires the
+# source-of-truth reverse link hosts_bead==<bead>, confirmed by id. Without
+# it, `unlink` can't unbind a still-live host (resolve keeps returning it by
+# alias and `up` re-wakes it), and a foreign session sharing the alias is
+# mis-reported as the host.
+#
+# No live session is spawned (a polecat must not). A PATH shim stubs
+# `gc session list` to present SESS as a live bead-host aliased to WORK and
+# delegates every other `gc` call to the real binary; toggling SESS.hosts_bead
+# drives the two cases. WORK is linked to SESS at epoch 2 coming in.
+SHIM_DIR="$(mktemp -d)"
+REAL_GC="$(command -v gc)"
+cat >"$SHIM_DIR/gc" <<SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[{"id":"$SESS","session_name":"bead-host--$WORK","alias":"$WORK","state":"running","template":"agents/bead-host"}]}'
+    exit 0
+fi
+exec "$REAL_GC" "\$@"
+SHIM
+chmod +x "$SHIM_DIR/gc"
+
+# (a) Positive: SESS still carries hosts_bead==WORK → the stubbed session-list
+#     row resolves via the reverse-link confirmation (proves the prefilter
+#     still admits a genuine host — the fix is not an over-correction).
+PATH="$SHIM_DIR:$PATH" "$TOOL" resolve "$WORK" 2>/dev/null | grep -q "$SESS" \
+    && ok "session-list row WITH hosts_bead==WORK resolves (reverse link confirmed by id)" \
+    || bad "resolve missed a genuine host on the session-list path"
+
+# (b) Negative: clear the reverse link (the post-unlink / foreign-alias case).
+#     The SAME live alias-matching row must now NOT resolve.
+"$TOOL" unlink "$WORK" >/dev/null
+[ -z "$(meta "$SESS" hosts_bead)" ] \
+    || bad "precondition: SESS.hosts_bead should be clear after unlink (got '$(meta "$SESS" hosts_bead)')"
+if PATH="$SHIM_DIR:$PATH" "$TOOL" resolve "$WORK" >/dev/null 2>&1; then
+    bad "alias-only live session resolved as host (alias wrongly treated as proof of hosting)"
+else
+    ok "alias-only live session does NOT resolve once hosts_bead is cleared (alias is a prefilter)"
+fi
+
+# Restore the binding so the teardown-sanity checks below see a bound pair.
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
+rm -rf "$SHIM_DIR"; SHIM_DIR=""
 
 hdr "Teardown sanity — unlink clears links, preserves lineage"
 "$TOOL" unlink "$WORK" >/dev/null

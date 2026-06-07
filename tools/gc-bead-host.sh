@@ -160,9 +160,13 @@ cmd_lineage() {
 #
 # Fast path: the forward cache on the work bead (O(1)). Authoritative
 # search: enumerate `gc session list` (the only CLI surface that lists
-# session beads), keep bead-host sessions whose alias == the bead OR whose
-# session bead carries hosts_bead == the bead, and confirm against the
-# source-of-truth reverse link by id. Prints one TSV row per host:
+# session beads), PREFILTER the candidates cheaply (a bead-host template
+# session, or any session aliased to the bead), then RESOLVE strictly by the
+# source-of-truth reverse link, confirmed by id: a session hosts the bead
+# iff its session bead carries hosts_bead == <bead>. Alias is a PREFILTER
+# ONLY, never proof of hosting — a still-live session merely aliased to the
+# bead (after `unlink`, or a foreign session sharing the alias) must NOT
+# resolve. Prints one TSV row per host:
 #   <session-bead-id>\t<session_name>\t<alias>\t<state>
 cmd_resolve() {
     local work="${1:-}"
@@ -179,12 +183,18 @@ cmd_resolve() {
     if [ -n "$rows" ]; then
         while IFS=$'\t' read -r sid sname salias sstate stmpl; do
             [ -n "$sid" ] || continue
+            # Prefilter (cheap): a bead-host template session, or any session
+            # aliased to the bead. Alias here is ONLY a prefilter to bound the
+            # per-session metadata reads below — never proof of hosting.
             case "$stmpl" in *bead-host*) : ;; *) [ "$salias" = "$work" ] || continue ;; esac
-            # Confirm the source-of-truth reverse link by id.
-            if [ "$(meta_get "$sid" hosts_bead)" = "$work" ] || [ "$salias" = "$work" ]; then
-                printf '%s\t%s\t%s\t%s\n' "$sid" "$sname" "$salias" "$sstate"
-                found=1
-            fi
+            # Resolve strictly by the source-of-truth reverse link, by id.
+            # NOT `|| salias == work`: an alias-only match (a live session left
+            # aliased after `unlink`, or a foreign session sharing the alias)
+            # must not resolve — else `unlink` could never unbind a live host
+            # and `up` would immediately re-wake it.
+            [ "$(meta_get "$sid" hosts_bead)" = "$work" ] || continue
+            printf '%s\t%s\t%s\t%s\n' "$sid" "$sname" "$salias" "$sstate"
+            found=1
         done <<<"$rows"
     fi
 
