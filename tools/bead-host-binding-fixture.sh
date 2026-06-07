@@ -181,6 +181,46 @@ fi
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 rm -rf "$SHIM_DIR"; SHIM_DIR=""
 
+hdr "Unlink without the forward cache — reverse link still cleared (codex PR#98 blocking)"
+# Regression guard for the SECOND codex finding on PR#98: `unlink <work>` must
+# clear the source-of-truth reverse link even when the optional forward cache
+# (host_session on the work bead) is absent — a partial `link`, a manually
+# cleared cache, or the documented "perf cache only" case. Reproduces the
+# reviewer's repro: link a pair, drop ONLY the forward cache, unlink, then assert
+# the reverse hosts_bead is gone (else `resolve` keeps finding the host via the
+# source of truth and `up` re-wakes a host that was meant to be unbound). No
+# shim/live session needed: SESS is a listable stand-in, so unlink's reverse
+# search finds it via `gc bd list --metadata-field hosts_bead=WORK` (the same
+# enumerate-and-confirm covers real session beads via `gc session list`).
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                    # ensure bound
+gc bd update "$WORK" --unset-metadata host_session \
+                     --unset-metadata host_session_name \
+                     --unset-metadata host_session_epoch >/dev/null 2>&1
+[ -z "$(meta "$WORK" host_session)" ] && [ "$(meta "$SESS" hosts_bead)" = "$WORK" ] \
+    && ok "precondition: forward cache cleared, reverse link still intact" \
+    || bad "precondition not met (cache=$(meta "$WORK" host_session) reverse=$(meta "$SESS" hosts_bead))"
+"$TOOL" unlink "$WORK" >/dev/null
+[ -z "$(meta "$SESS" hosts_bead)" ] \
+    && ok "unlink cleared SESS.hosts_bead with NO forward cache (reverse = source of truth)" \
+    || bad "unlink left SESS.hosts_bead=$(meta "$SESS" hosts_bead) — reverse link not cleared"
+# Restore the binding for the teardown-sanity section below.
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
+
+hdr "Default verb — bare '<bead-id>' routes to 'up' (codex PR#98 non-blocking)"
+# `gc bead-host <id>` (hence `gc-bead-host.sh <id>`) is advertised as shorthand
+# for `up <id>`. Prove the dispatch routes a bare id to `up` instead of failing
+# with "unknown command". A definitely-absent id hits up's require_bead guard,
+# so no live session is spawned.
+ABSENT="tk-no-such-bead-$$"
+DEFOUT="$("$TOOL" "$ABSENT" 2>&1 || true)"
+printf '%s' "$DEFOUT" | grep -q "unknown command" \
+    && bad "bare id still treated as a command: $DEFOUT" \
+    || ok "bare id routes to 'up' (no 'unknown command'; up reported: $(printf '%s' "$DEFOUT" | head -1 | cut -c1-60))"
+# A genuine unknown OPTION still errors — only bare words default to 'up'.
+"$TOOL" --frobnicate >/dev/null 2>&1 \
+    && bad "unknown option --frobnicate did not error" \
+    || ok "unknown option still rejected (only bare ids default to 'up')"
+
 hdr "Teardown sanity — unlink clears links, preserves lineage"
 "$TOOL" unlink "$WORK" >/dev/null
 [ -z "$(meta "$WORK" host_session)" ] && [ -z "$(meta "$SESS" hosts_bead)" ] \

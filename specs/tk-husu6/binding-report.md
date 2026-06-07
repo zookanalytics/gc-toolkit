@@ -23,7 +23,7 @@ on `tk-husu6` (reverse link is the source of truth).
    `resolve` / `link` / `unlink` / `lineage` subcommands.
 3. **The durable binding** — metadata-only, no schema migration (below).
 4. **`tools/bead-host-binding-fixture.sh`** — the automatable half of the
-   5-assertion gate (15 assertions, all passing), runnable by a polecat (no live
+   5-assertion gate (21 assertions, all passing), runnable by a polecat (no live
    sessions). The live half is the operator checklist at the end of this doc.
 
 ---
@@ -88,6 +88,16 @@ hosting) and then **resolved strictly** by confirming the explicit
 *aliased* to the bead (e.g. after `unlink`, before its session is torn down)
 does **not** resolve, and `unlink` genuinely unbinds a live host.
 
+`unlink` runs the same reverse search to find what to clear: it removes the
+`hosts_bead` source of truth on every session bead still bound to the work bead,
+located via the reverse search and **not** via the forward cache — so a partial
+`link` (reverse written, forward not), a manually cleared cache, or the documented
+"perf cache only" case still unbinds cleanly. Both surfaces are used: `gc bd list
+--metadata-field hosts_bead=<bead>` for listable beads (the design's ListByMetadata)
+and the `gc session list` enumerate-and-confirm for real session beads. Depending
+on the forward cache here was the PR#98 regression (a missing cache left the reverse
+link dangling, so `resolve` kept finding the host and `up` re-woke it).
+
 The fixture proves the design's *intended* mechanism (`ListByMetadata
 hosts_bead=X`) works on **listable** beads, so the mechanism itself is verified;
 only the *session-bead surface* is missing. **Follow-up `tk-3gga1`** (discovered
@@ -113,7 +123,7 @@ The automated half runs with **no live sessions** — a polecat may run it (the
 sessions). Run it:
 
 ```bash
-tools/bead-host-binding-fixture.sh        # 15 assertions; exit 0 iff all pass
+tools/bead-host-binding-fixture.sh        # 21 assertions; exit 0 iff all pass
 ```
 
 It creates two throwaway `task` beads (titled `FIXTURE: …`) as stand-ins, links

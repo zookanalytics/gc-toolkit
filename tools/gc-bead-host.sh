@@ -53,6 +53,7 @@ die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 usage() {
     cat <<EOF
 Usage: $PROG <command> [args]
+       $PROG <bead-id>                  Shorthand for '$PROG up <bead-id>'.
 
 Commands:
   up <bead-id>                         Spawn-or-resume the bead's host and write
@@ -129,20 +130,65 @@ cmd_link() {
     printf '%s\n' "$sess"
 }
 
+# candidate_session_ids <work> — print the bead id of every session bead that
+# MIGHT host <work>, for unlink to confirm-and-clear. The forward host_session
+# cache is only an accelerator and may be absent (a partial link, a manually
+# cleared cache, or the documented "perf cache only" case), so unlink must NOT
+# rely on it to find the session — it enumerates the source-of-truth reverse
+# link instead. Two surfaces cover the REVERSE SEARCH CAVEAT (session beads are
+# not uniformly bd-listable):
+#   (1) `gc bd list --metadata-field hosts_bead=<work>` — listable beads only
+#       (real session beads are filtered out by `gc bd list`); covers the
+#       design's ListByMetadata mechanism and the fixture's stand-in beads.
+#       These are already a confirmed metadata match.
+#   (2) `gc session list` — real session beads, prefiltered by the bead-host
+#       template or an alias match (a cheap candidate filter, never proof of
+#       hosting; the caller confirms hosts_bead==<work> by id).
+candidate_session_ids() {
+    local work="$1"
+    gc bd list --metadata-field "hosts_bead=$work" --json 2>/dev/null \
+        | jq -r '.[]?.id // empty' 2>/dev/null || true
+    gc session list --state all --json 2>/dev/null \
+        | jq -r --arg w "$work" \
+            '(.sessions // .)[]? | select((.template // "" | test("bead-host")) or (.alias // "") == $w) | .id' \
+        2>/dev/null || true
+}
+
 cmd_unlink() {
     local work="${1:-}" sess="${2:-}"
     [ -n "$work" ] || { usage; die "unlink needs <bead-id>"; }
     require_bead "$work"
-    [ -n "$sess" ] || sess="$(meta_get "$work" host_session)"
 
+    # Read the forward cache BEFORE clearing it: it names one session to unbind
+    # and may be the ONLY pointer left if that session has dropped out of
+    # `gc session list` and isn't bd-listable.
+    local cached; cached="$(meta_get "$work" host_session)"
+
+    # Clear the forward cache on the work bead (the optional accelerator).
     gc bd update "$work" \
         --unset-metadata host_session \
         --unset-metadata host_session_name \
         --unset-metadata host_session_epoch >/dev/null 2>&1 || true
-    if [ -n "$sess" ] && bead_exists "$sess"; then
-        gc bd update "$sess" --unset-metadata hosts_bead >/dev/null 2>&1 || true
-    fi
-    log "unlinked: $work (was -> ${sess:-<none>}); lineage preserved"
+
+    # Clear the reverse link — the SOURCE OF TRUTH — on every session bead bound
+    # to this work bead. Do NOT depend on the forward cache to locate it: if the
+    # cache is missing, a left-behind hosts_bead would let `resolve` keep
+    # returning the host and `up` re-wake it. Candidates, deduped: the explicit
+    # session arg, the cache we just read, and the authoritative reverse search.
+    # Every candidate is cleared only while it STILL points here (confirmed by
+    # id), so a stale cache or shared alias can't unbind another work's host.
+    local candidates
+    candidates="$(printf '%s\n' "$sess" "$cached"; candidate_session_ids "$work")"
+    local seen=" " cleared="" s
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        case "$seen" in *" $s "*) continue ;; esac
+        seen="$seen$s "
+        [ "$(meta_get "$s" hosts_bead)" = "$work" ] || continue
+        gc bd update "$s" --unset-metadata hosts_bead >/dev/null 2>&1 || true
+        cleared="${cleared:+$cleared,}$s"
+    done <<<"$candidates"
+    log "unlinked: $work (cleared -> ${cleared:-<none>}); lineage preserved"
 }
 
 cmd_lineage() {
@@ -255,15 +301,19 @@ cmd_up() {
 
 main() {
     local cmd="${1:-help}"
-    shift || true
     case "$cmd" in
-        up)       cmd_up "$@" ;;
-        resolve)  cmd_resolve "$@" ;;
-        link)     cmd_link "$@" ;;
-        unlink)   cmd_unlink "$@" ;;
-        lineage)  cmd_lineage "$@" ;;
-        -h|--help|help) usage ;;
-        *) usage; die "unknown command: $cmd" ;;
+        up)       shift; cmd_up "$@" ;;
+        resolve)  shift; cmd_resolve "$@" ;;
+        link)     shift; cmd_link "$@" ;;
+        unlink)   shift; cmd_unlink "$@" ;;
+        lineage)  shift; cmd_lineage "$@" ;;
+        -h|--help|help|'') usage ;;
+        -*) usage; die "unknown option: $cmd" ;;
+        # Default verb: `$PROG <bead-id>` == `$PROG up <bead-id>` (the design's
+        # Interface table names the convenience `gc bead-host <id>`). A bare
+        # first arg is treated as a bead id — do NOT shift, so it reaches cmd_up
+        # as $1; a non-bead typo surfaces as cmd_up's 'bead not found'.
+        *) cmd_up "$@" ;;
     esac
 }
 
