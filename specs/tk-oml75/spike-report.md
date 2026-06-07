@@ -12,37 +12,57 @@ own. *Working* design artifact (untracked, **not in the repo**):
 `.designs/bead-universe/design-doc.md` in the `coord-bead-universe` worktree
 (Phase 0; Risks §1–2; Open Q §2).
 **Surveyed at:** 2026-06-06
+**Status:** **PRELIMINARY analysis + operator confirmatory checklist — the
+Phase-0 gate is NOT closed by this PR.** The spike bead prescribed a *per-bead*
+probe (spawn a host aliased to a bead, mark it, suspend, wake, recall) plus its
+wake-to-recall wall clock. Those two measurements side-effect the live city and
+are **deferred to the operator** (§B precedent; verbatim script in §C). What
+follows is the evidence that makes A2 the **recommended** outcome and the
+checklist to confirm it — a recommendation pending confirmation, not a closed
+decision.
 
 ---
 
-## TL;DR — Verdict
+## TL;DR — Recommendation (preliminary)
 
-**Decision: A2 (binding is the cheap assembly). Do NOT pull the durable-state
-store (A3) into Phase 1.**
+**Recommended outcome: A2 (binding is the cheap assembly); do NOT pull the
+durable-state store (A3) into Phase 1.** This is a *recommendation*, not a
+closed Phase-0 decision — it is confirmed only when the operator runs and
+records the per-bead probe in §C.
 
 `wake_mode=resume` carries the conversation across a full suspend/reap/wake
-cycle. This is proven **in production today**, not just asserted: a live
+cycle. This is shown **in production today** for a *long-lived thread*: a live
 `mayor-thread` resumed its conversation across a **14.7-hour cold gap** in a
 single provider session — coherent throughout. The resume mechanism
 (provider-transcript replay keyed by the stable session identity) is
 **role-agnostic**: a per-bead host is mechanically identical to that thread
-except for its alias and prompt, neither of which touches the resume path.
-So the fidelity finding transfers to the bead-host.
+except for its alias and prompt, neither of which touches the resume path. So
+the fidelity finding is *expected* to transfer to the bead-host — but the bead
+explicitly asked for the *per-bead* label, "not just a long-lived city thread,"
+and that literal probe is deferred (below), so the transfer is an **argument,
+not yet a measurement.**
 
-The three measurements are recorded in §1–§3. The **one residual risk** that
-the read-only spike cannot fully settle is the *provider-transcript retention
-TTL for very long suspends* (days/weeks) — design Open Question #2 — and that
-is a retention question, not a fidelity question. The design already carries
-the cheap A3 hook (`session_lineage`) and a logged-`fresh`-re-prime degraded
-fallback, so adopting A3 later (if steady-state TTL proves too short) stays
-cheap. **A2 holds; A3 stays a contingency, not Phase-1 scope.**
+**Measurement status against the bead's three asks:**
 
-One confirmatory step is **deferred to the operator** (per the `tk-k9s0k`
-precedent: *a polecat must not spawn/reset agents in the live city*) — a live
-per-bead probe, scripted verbatim in §C. It is expected to confirm, not flip,
-the decision: the production evidence below is already a *stronger* fidelity
-signal than the minimal probe the spike prescribed (15 h cold gap vs. a
-minutes-long suspend).
+| Bead ask | Status in this PR |
+|---|---|
+| (1) Fidelity — *per-bead* recall across suspend/wake | **Deferred** to operator probe (§C). Read-only production evidence (§1) makes A2 likely, but it is a long-lived *thread*, not the prescribed per-bead host. |
+| (2) Token cost of one universe-load | **Recorded** (§2): ~506 tok for real epic `tk-q4xaj`. |
+| (3) Wall-clock to materialize / resume | **Partly recorded** (§3): slice rebuild sub-second (measured); per-bead runtime wake-to-recall **deferred** to §C step 3. |
+
+The **residual risk** that even a passing probe cannot settle is the
+*provider-transcript retention TTL for very long suspends* (days/weeks) —
+design Open Question #2 — a retention question, not a fidelity one. The design
+already carries the cheap A3 hook (`session_lineage`) and a logged-`fresh`-
+re-prime degraded fallback, so adopting A3 later (if steady-state TTL proves
+too short) stays cheap. **A2 is the recommendation; A3 stays a contingency.**
+
+The gating per-bead probe is **deferred to the operator** (per the `tk-k9s0k`
+precedent: *a polecat must not spawn/reset agents in the live city*) — scripted
+verbatim in §C. It is *expected* to confirm A2: the production evidence below
+is a *stronger* fidelity signal than the minimal probe the spike prescribed
+(15 h cold gap vs. a minutes-long suspend). But until it is run and recorded,
+**the Phase-0 gate stays open.**
 
 ---
 
@@ -66,8 +86,8 @@ minutes-long suspend).
 
 The cited design doc is an untracked working artifact in the
 `coord-bead-universe` worktree, **not committed to the repo** — so the claims
-this decision rests on are restated here, and are independently durable in the
-bd ledger (spike `tk-oml75`, epic `tk-q4xaj`, decision `tk-yrio`).
+this recommendation rests on are restated here, and are independently durable in
+the bd ledger (spike `tk-oml75`, epic `tk-q4xaj`, decision `tk-yrio`).
 
 **A2 vs A3** (design "Trade-offs and Decisions"; spike `tk-oml75` acceptance):
 
@@ -149,7 +169,11 @@ design").
 **Finding.** `wake_mode=resume` **carries the conversation across a full cold
 gap** (here ~15 h, dwarfing any controller drain) with a single, continuous
 provider session. Because the resume path is role-agnostic (above), this is
-the bead-host's resume behaviour too. **Fidelity: PASS (production-proven).**
+*expected* to be the bead-host's resume behaviour too. **Fidelity: PASS for the
+resume *mechanism* — production-proven on a long-lived thread.** The *per-bead*
+label the bead explicitly asked for is **not yet measured**: that is the
+deferred operator probe (§C), and the Phase-0 gate stays open until it is run
+and recorded.
 
 **What this does NOT prove** (honest scoping):
 
@@ -220,16 +244,20 @@ saving against a fragile Dolt.
 
 ---
 
-## Decision: A2 vs A3
+## Recommendation: A2 vs A3 (pending the operator probe)
 
 > A2 = resume-binding works ⇒ Phase 1 is the cheap metadata-link assembly.
 > A3 = resume fidelity too short ⇒ pull a durable conversation-state store into Phase 1.
 
-**A2.** Resume fidelity is proven at the mechanism level and demonstrated in
-production across a 15-hour cold gap; binding is metadata-only (settled in the
-design, no migration); the universe slice is tiny (~506 tok) and rebuilds
-sub-second. There is no fidelity-driven reason to build a durable-state store
-for v1.
+**Recommended: A2 — pending confirmation.** Resume fidelity is proven at the
+*mechanism* level and demonstrated in production across a 15-hour cold gap (on
+a long-lived *thread*, not the prescribed per-bead host); binding is
+metadata-only (settled in the design, no migration); the universe slice is tiny
+(~506 tok) and rebuilds sub-second. On this evidence there is no fidelity-driven
+reason to build a durable-state store for v1 — so A2 is the recommendation. **It
+is not yet a closed decision:** the Phase-0 gate this bead defines closes only
+when the operator runs §C and records the per-bead fidelity + wake-to-recall
+measurements. A failing probe would re-open A2-vs-A3 (see §C pass criteria).
 
 **A3 stays a contingency, not Phase-1 scope.** The single thing that could
 flip the decision is the steady-state **transcript-retention TTL** for
@@ -242,7 +270,9 @@ de-risks a later flip cheaply:
   (degraded, not silent) rather than failing.
 
 So even the worst case is a logged degrade with a pre-wired upgrade path —
-which is exactly why A2 is safe to commit now.
+which is why A2 is the **low-regret recommendation**: adopting it keeps Phase 1
+cheap, and a later flip to A3 (if the operator probe or steady-state TTL forces
+it) stays cheap too.
 
 ---
 
