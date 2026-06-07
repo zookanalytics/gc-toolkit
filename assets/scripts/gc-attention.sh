@@ -1,6 +1,10 @@
 #!/bin/sh
-# gc-attention.sh — the `gc attention` command: a cross-rig human-attention
-# board plus the pick-a-row launcher that lands you in a bead's conversation.
+# gc-attention.sh — the cross-rig human-attention board plus the pick-a-row
+# launcher that lands you in a bead's conversation. The operator reaches it
+# via the prefix+b tmux board picker (tmux-pick-attention.sh) or by running
+# this script directly; it is NOT a registered gc subcommand. Pack commands
+# bind under the pack name (`gc <pack> <cmd>`), so there is no top-level
+# attention command — invoke this script (or the picker), not `gc`.
 #
 # Usage:
 #   gc-attention [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]

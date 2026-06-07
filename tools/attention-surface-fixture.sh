@@ -136,6 +136,36 @@ ec=0; "$TOOL" open 2>/dev/null || ec=$?;            eq "open with no bead errors
 ec=0; "$TOOL" clear 2>/dev/null || ec=$?;           eq "clear with no bead errors (exit 2)"       "2" "$ec"
 ec=0; "$TOOL" bogus-verb 2>/dev/null || ec=$?;      eq "unknown verb errors (exit 2)"             "2" "$ec"
 
+echo "── contract: operator surface is the runnable script, not a phantom gc subcommand ──"
+# The regression this guards (PR #100 review): the docs/prompt advertised a
+# `gc attention …` CLI that was never registered, so a bare invocation renders
+# root gc help. Pack commands bind under the pack name (`gc <pack> <cmd>`), so
+# no top-level attention subcommand can exist. The runnable surface is THIS
+# script — reached via the prefix+b tmux picker (tmux-pick-attention.sh →
+# gc-attention.sh) or run directly — plus tools/gc-bead-host.sh. These
+# assertions lock the operator-facing docs to that reality.
+
+# (a) the documented script entry actually runs and prints its own usage.
+has  "script --help prints usage" "Usage:" "$("$TOOL" --help 2>&1 || true)"
+has  "script -h prints usage"     "Usage:" "$("$TOOL" -h 2>&1 || true)"
+
+# (b) no operator-facing surface file advertises the phantom CLI. The match is
+#     the space-form ("gc attention …", incl. backtick-wrapped); the real
+#     script name "gc-attention" (hyphen) is intentionally NOT matched.
+SURFACE_FILES=(
+    "$HERE/../assets/scripts/gc-attention.sh"
+    "$HERE/../agents/bead-host/prompt.template.md"
+    "$HERE/../agents/bead-host/agent.toml"
+    "$HERE/../agents/bead-host/PROVENANCE.md"
+)
+phantom=""
+for f in "${SURFACE_FILES[@]}"; do
+    [ -f "$f" ] || continue
+    hit="$(grep -nF 'gc attention' "$f" 2>/dev/null || true)"
+    [ -n "$hit" ] && phantom+="$f: $hit"$'\n'
+done
+absent "no operator surface file advertises a phantom 'gc attention' CLI" "gc attention" "$phantom"
+
 # ---------------------------------------------------------------------------
 # Best-effort LIVE smokes (skipped cleanly when no city / gc is reachable).
 # ---------------------------------------------------------------------------

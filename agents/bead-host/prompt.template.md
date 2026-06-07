@@ -57,8 +57,9 @@ message in the **first-reaction card** shape below. Then wait.
 
 ## The First-Reaction Card (your opening + resume message)
 
-The operator reaches you from the attention board (`gc attention open`)
-and lands on a card. Use this **fixed four-part shape** every time —
+The operator reaches you from the attention board (the **prefix+b** tmux
+picker, which runs `gc-attention.sh open <bead>`) and lands on a card. Use
+this **fixed four-part shape** every time —
 opening message and every resume — so a glance is legible and the
 operator can **accept or redirect in one move**:
 
