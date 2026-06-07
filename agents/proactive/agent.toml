@@ -1,0 +1,76 @@
+# proactive — the dedicated, small, mr-only pool that runs slung first
+# reactions. Phase 4 of the Bead-Universe Operating Model (epic tk-q4xaj;
+# bead tk-3d0uh; design Key Components 5-6, Phase 4).
+#
+# "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
+# (formulas/mol-first-reaction.toml) slung at a bead: a cheap first reaction
+# that reads the body, writes a first-reaction card to the notes, and flags
+# the bead onto the attention board so the human arrives at advanced work.
+# This pool is where those slung reactions execute. It is a sibling of the
+# impl polecat pool — same worktree/refinery machinery — with three
+# deliberate differences:
+#
+#   max_active_sessions = 2   A DEDICATED, SMALL pool so proactive can never
+#                             starve impl work (the polecat pool keeps its own
+#                             5 slots). The design's "max 2-3"; start at 2.
+#
+#   work_query SHEDS at the   The city-wide session cap (design's "reconciler
+#   city cap                  clamp"). The reconciler runs work_query to decide
+#                             whether to spawn; this one emits [] (no demand)
+#                             when active city sessions are at/over
+#                             GC_PROACTIVE_CITY_CAP (~8-16 band, default 12).
+#                             Only THIS pool consults the clamp, so proactive
+#                             is the first thing to shed under session pressure
+#                             (design degraded mode "proactive sheds first").
+#                             The clamp is INLINE here (not a tool call) because
+#                             work_query's template surface has no {{.ConfigDir}}
+#                             — only {{.Rig}}/{{.RigRoot}}/… — so a pack-relative
+#                             tool path would not resolve in importing rigs. The
+#                             same logic is mirrored, testably, in
+#                             tools/gc-proactive.sh `demand` (the gate fixture
+#                             drives that copy).
+#
+#   mr-only for code          A first reaction is notes-only by default. IF it
+#                             produces code, that output takes the codex-gated
+#                             `mr` path, never `direct` (the security
+#                             invariant — enforced by the city default
+#                             default_merge_strategy="mr", by GC_DEFAULT_MERGE_
+#                             STRATEGY below, and by tools/gc-proactive.sh which
+#                             refuses --merge direct). See PROVENANCE.md.
+#
+# Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on
+# mol-first-reaction --merge mr` (operator/board one-shot) or by the
+# process-scan `tools/gc-proactive.sh scan --sling` (movable-forward beads).
+# NOT a resident loop either way.
+
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/proactive/{{.AgentBase}}"
+nudge = "Run gc hook; proactive demand is routed first-reaction work (mol-first-reaction). If the city is at the session cap, you'll find nothing — drain."
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+min_active_sessions = 0
+# Dedicated + small: never starves the impl polecat pool's 5 slots. The
+# design's "max 2-3" budget; start conservative at 2.
+max_active_sessions = 2
+
+# THE CITY-WIDE SHED CLAMP (the reconciler clamp). Emit [] — no demand, so the
+# reconciler spawns nothing and an idle worker drains — when active city
+# sessions are at/over the cap. Otherwise emit the standard routed pool demand
+# (ready, unassigned, non-epic beads routed to this pool). The pool suffix
+# `gc-toolkit.proactive` is fixed for this agent; only the rig varies, so it is
+# templated and the rest is literal (no shell metacharacters in rig names).
+# Mirrors tools/gc-proactive.sh `demand`; keep the two in sync (gate-asserted).
+work_query = '''
+target="{{.Rig}}/gc-toolkit.proactive"
+active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
+if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-12}" ]; then printf '[]'; exit 0; fi
+r=$(bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null)
+if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
+'''
+
+# The mr-invariant, belt-and-suspenders: even if a first reaction produces
+# code and reaches the refinery, the merge strategy defaults to mr (never
+# direct). Mirrors the refinery override in city.toml.
+[env]
+GC_DEFAULT_MERGE_STRATEGY = "mr"
