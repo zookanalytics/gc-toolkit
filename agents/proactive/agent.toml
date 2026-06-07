@@ -57,15 +57,18 @@ max_active_sessions = 2
 # THE CITY-WIDE SHED CLAMP (the reconciler clamp). Emit [] — no demand, so the
 # reconciler spawns nothing and an idle worker drains — when active city
 # sessions are at/over the cap. Otherwise emit the standard routed pool demand
-# (ready, unassigned, non-epic beads routed to this pool). The pool suffix
-# `gc-toolkit.proactive` is fixed for this agent; only the rig varies, so it is
-# templated and the rest is literal (no shell metacharacters in rig names).
-# Mirrors tools/gc-proactive.sh `demand`; keep the two in sync (gate-asserted).
+# (ready, unassigned, non-epic beads routed to this pool), RANKED BY BOARD
+# WEIGHT so the scarce slots go to the highest-priority work first (the board's
+# prio_w = max(0, 4-p), oldest-first within a band) instead of bd-ready's
+# oldest-across-all-priorities order. The pool suffix `gc-toolkit.proactive` is
+# fixed for this agent; only the rig varies, so it is templated and the rest is
+# literal (no shell metacharacters in rig names). The ranking jq is mirrored in
+# tools/gc-proactive.sh `board_rank`; keep the two in sync (gate-asserted).
 work_query = '''
 target="{{.Rig}}/gc-toolkit.proactive"
 active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
 if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-12}" ]; then printf '[]'; exit 0; fi
-r=$(bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null)
+r=$(bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
 if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
 '''
 

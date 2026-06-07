@@ -64,6 +64,16 @@ flag **and** a process-scan form. Both are served:
   `GC_PROACTIVE_CITY_CAP` (~8-16 band, default 12). Only this pool consults the
   clamp, so **proactive is the first thing to shed** under session pressure
   (design degraded mode "proactive sheds first").
+- **Board-weight ranking** of what fills the scarce slots. The clamps decide
+  *how many* proactive sessions run; this decides *which* work they spend on.
+  `demand` and `scan` rank candidates by the attention board's priority weight
+  (`prio_w = max(0, 4 - priority)`, oldest-first within a band) rather than
+  plain bd-ready oldest order, so a high-priority bead is not starved behind
+  older low-priority work. The full board weight also adds subtree size +
+  cross-rig refs, but each needs a query per bead — too costly for a
+  `work_query` — so only the priority term (free in the ready-list JSON) is
+  reused. Mirrored in `gc-proactive.sh board_rank` and the `work_query`;
+  gate-asserted.
 
 ### Why the clamp is INLINE in `work_query` (not a tool call)
 
@@ -121,19 +131,27 @@ surfaces via the flag + reason.
 
 ---
 
-## The gate (`tools/proactive-first-reaction-fixture.sh`) — 45/45
+## The gate (`tools/proactive-first-reaction-fixture.sh`) — 57/57
 
 Maps to the design's Phase 4 acceptance, hermetically:
 
 - **the cap halts proactive at the limit** — `demand` flows routed work below
   the cap, sheds `[]` at/over it; the `cap` verb mirrors with an exit code.
+- **board-weight ranking** — `demand` and `scan` return candidates ranked by
+  the board's priority weight (oldest-first within a band), so a high-priority
+  bead leads and an older low-priority bead ranks last.
+- **target resolution** — `sling` emits the rig-qualified
+  `<rig>/gc-toolkit.proactive` target and **fails closed** when it cannot
+  qualify a bare name (no `GC_RIG`); an already-qualified override is honored.
 - **mr-invariant** — `sling` refuses `--merge direct`, bakes in
   `--on mol-first-reaction --merge mr`, allows `local`, routes to the pool.
+- **usage/parser agree** — the usage advertises no flag the parser rejects
+  (the unimplemented `--reason` was removed).
 - **the formula contract** — the three steps, the four-part card, flags onto
   the board, forbids `gc bd close` on the target, releases it `--status=open`,
   pins code output to `merge_strategy=mr`, tags reached content.
 - **the pool budget** — small dedicated pool (max 2), the shed clamp, mr
-  default, rig scope.
+  default, rig scope, board-weight ranking.
 - **the provenance discipline** — fetch fences as untrusted; the fed slice does
   not.
 

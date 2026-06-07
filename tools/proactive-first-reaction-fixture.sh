@@ -64,8 +64,12 @@ has() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "contains: $2" "$3" ;; esac;
 absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac; }
 
 # ---------------------------------------------------------------------------
-# Seed: five active city sessions, two routed proactive beads, one scan
-# candidate. Distinct counts make the cap thresholds unambiguous.
+# Seed: five active city sessions; three routed proactive beads and two scan
+# candidates, each priority- and age-stamped so the BOARD-WEIGHT RANKING is
+# observable (highest priority first, oldest-first within a band — NOT plain
+# bd-ready oldest order). Distinct session counts make the cap thresholds
+# unambiguous. Priorities use the bead convention (lower number = higher
+# priority); the board weight is prio_w = max(0, 4 - priority).
 # ---------------------------------------------------------------------------
 cat > "$FXDIR/sessions.json" <<'JSON'
 {"sessions":[
@@ -77,18 +81,34 @@ cat > "$FXDIR/sessions.json" <<'JSON'
   {"id":"lx-6","state":"suspended"}
 ]}
 JSON
+# Ranking-revealing order: px-mid-hi and px-new-hi share the top band (P1);
+# px-mid-hi is older so it leads. px-old-lo is the OLDEST overall but lowest
+# priority (P3), so a board-weight rank must place it LAST — a plain
+# oldest-first sort would put it first. JSON order here is intentionally NOT
+# the expected ranked order, so a no-op (unranked) tool fails the assertions.
 cat > "$FXDIR/ready.json" <<'JSON'
-[{"id":"px-1","title":"react to me"},{"id":"px-2","title":"me too"}]
+[
+  {"id":"px-old-lo","title":"oldest but low priority","priority":3,"created_at":"2026-01-01T00:00:00Z"},
+  {"id":"px-new-hi","title":"newest, high priority","priority":1,"created_at":"2026-03-01T00:00:00Z"},
+  {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"}
+]
 JSON
 cat > "$FXDIR/scan.json" <<'JSON'
-[{"id":"px-9","title":"movable-forward","description":"has a body to react to"}]
+[
+  {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z"},
+  {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z"}
+]
 JSON
 
-P() { GC_PROACTIVE_FIXTURE="$FXDIR" "$PROACTIVE" "$@"; }
+# Drive the tool through its fixture hook. GC_RIG is pinned so the rig-scoped
+# pool target resolves deterministically to gc-toolkit/gc-toolkit.proactive
+# (the qualified form gc sling and gc.routed_to require), independent of the
+# ambient environment — the fixture stays hermetic.
+P() { GC_RIG=gc-toolkit GC_PROACTIVE_FIXTURE="$FXDIR" "$PROACTIVE" "$@"; }
 
 echo "── the cap halts proactive at the limit (the reconciler clamp) ──"
 # Five active sessions. Below the cap, routed demand flows; at/over it, shed.
-eq "below cap (cap 10, active 5): routed demand flows (2 beads)" "2" \
+eq "below cap (cap 10, active 5): routed demand flows (3 beads)" "3" \
    "$(GC_PROACTIVE_CITY_CAP=10 P demand | jq 'length')"
 eq "AT cap (cap 5, active 5): proactive SHEDS (0 beads)"          "0" \
    "$(GC_PROACTIVE_CITY_CAP=5 P demand | jq 'length')"
@@ -96,6 +116,18 @@ eq "OVER cap (cap 4, active 5): proactive SHEDS (0 beads)"        "0" \
    "$(GC_PROACTIVE_CITY_CAP=4 P demand | jq 'length')"
 eq "shed output is a valid empty JSON array (work_query contract)" "array" \
    "$(GC_PROACTIVE_CITY_CAP=5 P demand | jq -r 'type')"
+
+echo "── proactive budget is ranked by board weight, not bd-ready oldest ──"
+# The scarce proactive slots (pool max 2 + city cap) must spend on the
+# highest-priority work first, oldest-first within a band. The seed's JSON
+# order is deliberately the WRONG order, so an unranked tool fails here.
+RANK="$(GC_PROACTIVE_CITY_CAP=10 P demand)"
+eq "highest-priority bead leads (oldest within its band)" "px-mid-hi" \
+   "$(printf '%s' "$RANK" | jq -r '.[0].id')"
+eq "same-priority tiebreak is oldest-first"               "px-new-hi" \
+   "$(printf '%s' "$RANK" | jq -r '.[1].id')"
+eq "lower-priority bead ranks LAST despite being oldest"  "px-old-lo" \
+   "$(printf '%s' "$RANK" | jq -r '.[2].id')"
 # The `cap` verb reflects the same state with an exit code.
 ec=0; GC_PROACTIVE_CITY_CAP=10 P cap >/dev/null 2>&1 || ec=$?; eq "cap verb: ok below limit (exit 0)" "0" "$ec"
 ec=0; GC_PROACTIVE_CITY_CAP=5  P cap >/dev/null 2>&1 || ec=$?; eq "cap verb: shed at limit (exit non-zero)" "1" "$ec"
@@ -110,14 +142,39 @@ DRY="$(P sling px-1 --dry-run 2>&1 || true)"
 has "default sling attaches mol-first-reaction" "--on mol-first-reaction" "$DRY"
 has "default sling pins the mr path"            "--merge mr"              "$DRY"
 absent "default sling never routes direct"      "--merge direct"          "$DRY"
-has "sling routes to the proactive pool"        "gc-toolkit.proactive"    "$DRY"
+has "sling target is RIG-QUALIFIED (gc sling resolves it)" "gc-toolkit/gc-toolkit.proactive" "$DRY"
 # local is the one allowed non-mr path (never direct).
 has "GC_PROACTIVE_MERGE=local is allowed"        "--merge local" \
     "$(GC_PROACTIVE_MERGE=local P sling px-1 --dry-run 2>&1 || true)"
 
-echo "── the process-scan trigger (movable-forward beads) ──"
-eq  "scan --json surfaces the seeded candidate" "px-9" "$(P scan --json | jq -r '.[0].id')"
-has "scan (human) lists the candidate"          "px-9" "$(P scan)"
+echo "── target resolution: rig-qualify or fail closed (never a bare name) ──"
+# A bare (un-rig-qualified) agent name is unroutable — gc sling rejects it as
+# unknown. With no GC_RIG to qualify the bare default base, sling must FAIL
+# CLOSED rather than emit an unroutable command. (env -u GC_RIG drops it; the
+# default POOL_BASE is the bare "gc-toolkit.proactive".)
+ec=0; env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" "$PROACTIVE" sling px-1 --dry-run >/dev/null 2>&1 || ec=$?
+eq  "sling fails closed when it can't rig-qualify (no GC_RIG)" "1" "$ec"
+has "the fail-closed error explains the cause" "rig-qualify" \
+    "$(env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" "$PROACTIVE" sling px-1 --dry-run 2>&1 || true)"
+# An already-qualified GC_PROACTIVE_POOL is used verbatim — no GC_RIG needed.
+has "an already-qualified pool target needs no GC_RIG" "altrig/gc-toolkit.proactive" \
+    "$(env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" GC_PROACTIVE_POOL=altrig/gc-toolkit.proactive \
+        "$PROACTIVE" sling px-1 --dry-run 2>&1 || true)"
+
+echo "── the process-scan trigger (movable-forward beads, board-ranked) ──"
+eq  "scan --json ranks the high-priority candidate first" "px-hi" "$(P scan --json | jq -r '.[0].id')"
+eq  "scan --json ranks the low-priority candidate last"   "px-lo" "$(P scan --json | jq -r '.[1].id')"
+has "scan (human) lists a candidate"                      "px-hi" "$(P scan)"
+
+echo "── usage/parser agree: no advertised-but-unimplemented flags ──"
+# Finding: usage advertised `sling --reason R` but the parser rejected it.
+# gc sling has no --reason and the formula has no reason var, so it was removed
+# from the usage. Guard both directions: usage must not advertise it, and the
+# parser must still reject a stray --reason as a clear error.
+absent "usage no longer advertises the unimplemented --reason flag" "--reason" \
+    "$(P --help 2>&1 || true)"
+ec=0; P sling px-1 --reason whatever --dry-run >/dev/null 2>&1 || ec=$?
+eq  "sling rejects an unknown --reason flag (non-zero)" "1" "$ec"
 
 echo "── the formula contract (mol-first-reaction) ──"
 F="$(cat "$FORMULA_TOML")"
@@ -148,6 +205,8 @@ case "$MAX" in 2|3) ok "dedicated small pool (max_active_sessions=$MAX in 2-3)" 
 has "work_query carries the city-cap shed clamp" "GC_PROACTIVE_CITY_CAP"  "$A"
 has "work_query sheds with an empty array"       "printf '[]'"            "$A"
 has "work_query routes to this pool"             "gc-toolkit.proactive"   "$A"
+has "work_query rig-qualifies the route"         '{{.Rig}}/gc-toolkit.proactive' "$A"
+has "work_query ranks routed demand by board weight (prio_w)" "prio_w"   "$A"
 has "pool defaults the mr merge strategy"        'GC_DEFAULT_MERGE_STRATEGY = "mr"' "$A"
 has "pool is rig-scoped"                         'scope = "rig"'          "$A"
 
@@ -185,6 +244,20 @@ if command -v gc >/dev/null 2>&1 && gc session list --json >/dev/null 2>&1; then
     esac
 else
     printf '  skip  live cap probe (no reachable city)\n'
+fi
+
+echo "── live (best-effort): sling target resolves rig-qualified ──"
+# The reviewer's repro was a LIVE dry-run that emitted a BARE target. With no
+# fixture the tool resolves the REAL rig-qualified target from GC_RIG and
+# prints the gc sling command shape (then shells out to gc sling -n). We
+# assert the EMITTED target carries the rig prefix — independent of whether the
+# pool agent is registered in the live city yet, so this stays green on an
+# un-graduated branch (registration is a separate, post-graduation concern).
+if [ -n "${GC_RIG:-}" ] && command -v gc >/dev/null 2>&1; then
+    livedry="$("$PROACTIVE" sling __resolution_probe__ --dry-run 2>&1 || true)"
+    has "live sling target carries the rig prefix" "$GC_RIG/gc-toolkit.proactive" "$livedry"
+else
+    printf '  skip  live target-resolution probe (no GC_RIG / gc)\n'
 fi
 
 echo ""

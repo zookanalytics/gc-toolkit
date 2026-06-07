@@ -56,8 +56,13 @@
 # bead). Nothing here closes or merges anything.
 #
 # Tunables (env):
-#   GC_PROACTIVE_POOL          proactive pool agent base name
-#                              (default "gc-toolkit.proactive").
+#   GC_PROACTIVE_POOL          proactive pool agent name. A bare base name
+#                              (default "gc-toolkit.proactive") is rig-
+#                              qualified to "<GC_RIG>/<base>" — the form the
+#                              rig-scoped pool is addressed by (agent.toml
+#                              watches {{.Rig}}/gc-toolkit.proactive, and
+#                              `gc sling` rejects a bare agent name). Pass an
+#                              already-qualified "<rig>/<base>" to override.
 #   GC_PROACTIVE_CITY_CAP      city-wide active-session ceiling for the
 #                              shed clamp (default 12; operator-tunable in
 #                              the design's 8-16 band).
@@ -89,6 +94,46 @@ FORMULA="mol-first-reaction"
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 
+# resolve_pool_target [override] -> the RIG-QUALIFIED pool target.
+# The proactive pool is rig-scoped: agents/proactive/agent.toml watches
+# `{{.Rig}}/gc-toolkit.proactive` and `gc sling` only resolves agents by their
+# qualified `<rig>/<base>` name (a bare base is an unknown agent), so both the
+# sling target and the `gc.routed_to` demand filter MUST carry the rig prefix.
+# We DERIVE it from GC_RIG (matching the done-sequence's
+# ${GC_RIG:+$GC_RIG/}gc-toolkit.refinery idiom). If the configured target is
+# already qualified (contains '/'), it is used verbatim; otherwise we fail
+# CLOSED when GC_RIG is unset rather than silently emitting an unroutable bare
+# name — the bug this guards against.
+resolve_pool_target() {
+    local base="${1:-}"
+    [ -n "$base" ] || base="$POOL_BASE"
+    case "$base" in
+        */*) printf '%s' "$base" ;;                       # already <rig>/<base>
+        *)
+            if [ -n "${GC_RIG:-}" ]; then
+                printf '%s/%s' "$GC_RIG" "$base"
+            else
+                die "cannot rig-qualify proactive target '$base': set GC_RIG or pass a <rig>/<base> target (the pool is rig-scoped — agents/proactive/agent.toml watches {{.Rig}}/gc-toolkit.proactive, and gc sling rejects a bare agent name)"
+            fi
+            ;;
+    esac
+}
+
+# board_rank — re-rank a JSON array of beads (stdin) by the attention board's
+# PRIORITY weight so the scarce proactive slots (pool max 2 + city cap) go to
+# the highest-weight work, not merely the oldest. We reuse the board's priority
+# component verbatim — assets/scripts/gc-attention.sh prio_w = max(0, 4 - p),
+# i.e. P0->4 … P4->0, null->1 — and keep oldest-first as the in-band tiebreaker
+# so a priority band still drains fairly. The board's other two weight terms
+# (subtree size + cross-rig refs) are deliberately OMITTED: each needs a query
+# per bead, too costly for a work_query/scan that runs against the shared Dolt.
+# This same ranking is mirrored inline in agents/proactive/agent.toml's
+# work_query (the real reconciler clamp); keep the two in sync.
+board_rank() {
+    jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end);
+        sort_by(-(prio_w(.priority)), (.created_at // ""))'
+}
+
 usage() {
     cat <<EOF
 Usage: $PROG demand [<pool-target>]   Pool work_query: emit routed proactive
@@ -97,7 +142,7 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit routed proactive
        $PROG scan [--json] [--sling]  Find movable-forward / opt-in beads; with
                                       --sling, sling a first reaction at each
                                       (capped). Read-only without --sling.
-       $PROG sling <bead> [--reason R] [--nudge] [-n|--dry-run]
+       $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
                                       direct (the security invariant).
@@ -149,27 +194,31 @@ cmd_cap() {
 # ---------------------------------------------------------------------------
 
 cmd_demand() {
-    local target="${1:-$POOL_BASE}"
-
     # The shed clamp: at/over the city cap, there is NO proactive demand.
     if at_cap; then
         printf '[]'
         return 0
     fi
 
+    local r='[]'
     if [ -n "$FIXTURE" ]; then
-        if [ -f "$FIXTURE/ready.json" ]; then cat "$FIXTURE/ready.json"; else printf '[]'; fi
-        return 0
+        if [ -f "$FIXTURE/ready.json" ]; then r="$(cat "$FIXTURE/ready.json")"; fi
+    else
+        # Standard pool demand: ready (deps closed), unassigned, not an epic,
+        # routed to this proactive pool. The route is rig-qualified (see
+        # resolve_pool_target) so it matches the gc.routed_to the pool's
+        # agent.toml work_query writes. Mirrors the polecat probe, pinned to
+        # the proactive target.
+        local target
+        target="$(resolve_pool_target "${1:-}")"
+        r="$(bd ready --metadata-field "gc.routed_to=$target" --unassigned \
+                --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
+        [ -n "$r" ] || r='[]'
     fi
-
-    # Standard pool demand: ready (deps closed), unassigned, not an epic,
-    # routed to this proactive pool. Mirrors the polecat probe but pinned to
-    # the proactive target. oldest-first so the queue drains fairly.
-    local r
-    r="$(bd ready --metadata-field "gc.routed_to=$target" --unassigned \
-            --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
-    [ -n "$r" ] || r='[]'
-    printf '%s' "$r"
+    # Rank by board weight: spend the scarce proactive slots on the
+    # highest-priority work first (oldest-first within a band), not whatever
+    # bd-ready returned oldest-first across all priorities.
+    printf '%s' "$r" | board_rank
 }
 
 # ---------------------------------------------------------------------------
@@ -181,7 +230,9 @@ cmd_demand() {
 
 scan_candidates() {
     if [ -n "$FIXTURE" ]; then
-        if [ -f "$FIXTURE/scan.json" ]; then cat "$FIXTURE/scan.json"; else printf '[]'; fi
+        local raw='[]'
+        if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
+        printf '%s' "$raw" | board_rank
         return 0
     fi
 
@@ -199,6 +250,9 @@ scan_candidates() {
                 --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
     [ -n "$movable" ] || movable='[]'
 
+    # Union, drop already-handled, dedup, then rank by board weight so a
+    # --sling sweep spends its limited headroom on the highest-priority
+    # candidates first.
     jq -s '
         (.[0] + .[1])
         | map(select(
@@ -208,7 +262,7 @@ scan_candidates() {
             and ((.description // "") != "")
           ))
         | unique_by(.id)
-    ' <(printf '%s' "$optin") <(printf '%s' "$movable")
+    ' <(printf '%s' "$optin") <(printf '%s' "$movable") | board_rank
 }
 
 cmd_scan() {
@@ -290,11 +344,14 @@ cmd_sling() {
         return 0
     fi
 
-    local target="$POOL_BASE"
+    local target
+    target="$(resolve_pool_target)"
 
-    # Build the sling argv. --on attaches the mol-first-reaction wisp to the
-    # existing bead; --merge pins the path; --reassign hands a human-held bead
-    # to the pool cleanly.
+    # Build the sling argv. The target is rig-qualified (resolve_pool_target)
+    # so `gc sling` resolves the rig-scoped pool agent rather than rejecting a
+    # bare name; --on attaches the mol-first-reaction wisp to the existing
+    # bead; --merge pins the path; --reassign hands a human-held bead to the
+    # pool cleanly.
     set -- "$target" "$bead" --on "$FORMULA" --merge "$MERGE" --reassign
     [ -n "$nudge" ] && set -- "$@" --nudge
 
