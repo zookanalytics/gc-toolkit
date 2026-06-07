@@ -4,7 +4,13 @@
 (child of epic `tk-q4xaj`, *Bead-Universe Operating Model v1 — implementation*)
 **Branch:** `polecat/tk-oml75`
 **Polecat:** `gc-toolkit/gc-toolkit.furiosa` (session `lx-wisp-k7wzdv`)
-**Design doc:** `.designs/bead-universe/design-doc.md` (Phase 0; Risks §1–2; Open Q §2)
+**Design source (durable):** the A2/A3 criteria, the Open Question, and the
+cold-by-default constraint are durably captured in the bd ledger — spike bead
+`tk-oml75`, epic `tk-q4xaj`, decision `tk-yrio` — and restated below under
+**Design context (inlined for durability)**, so this report is auditable on its
+own. *Working* design artifact (untracked, **not in the repo**):
+`.designs/bead-universe/design-doc.md` in the `coord-bead-universe` worktree
+(Phase 0; Risks §1–2; Open Q §2).
 **Surveyed at:** 2026-06-06
 
 ---
@@ -45,13 +51,45 @@ minutes-long suspend).
 | Artifact surveyed | Source | Read at |
 |---|---|---|
 | Spike spec | bd `tk-oml75` | 2026-06-06 |
-| Design doc (mechanism claims, A2/A3, Open Qs) | `.designs/bead-universe/design-doc.md` | 2026-06-06 |
+| A2/A3 decision criteria + Open Q #2 + cold-by-default (durable) | bd `tk-oml75` body + epic `tk-q4xaj` body (bd ledger) — inlined in "Design context" below | 2026-06-06 |
+| Design doc — mechanism claims, A2/A3, Open Qs (*working artifact, **untracked**, not committed to the repo*) | `coord-bead-universe` worktree: `.designs/bead-universe/design-doc.md` | 2026-06-06 |
 | `consult-host` shape (the shape to clone) | `agents/consult-host/agent.toml` + `prompt.template.md` | 2026-06-06 |
 | `mayor-thread` shape (`wake_mode=resume` reference) | `agents/mayor-thread/agent.toml` | 2026-06-06 |
 | **Production resume evidence** | session `lx-wisp-twghx` transcript `c30cacb0-…jsonl` | 2026-06-06 |
 | Token cost | `gc bd show` over real epic `tk-q4xaj` + 5 children | 2026-06-06 |
 | Precedent for operator-deferral | `specs/tk-k9s0k/spike-report.md` §B–§C | 2026-06-06 |
 | Consult prior art (resume direction history) | `specs/2026-04-consult-design/consult-session-feasibility.md` | 2026-06-06 |
+
+---
+
+## Design context (inlined for durability)
+
+The cited design doc is an untracked working artifact in the
+`coord-bead-universe` worktree, **not committed to the repo** — so the claims
+this decision rests on are restated here, and are independently durable in the
+bd ledger (spike `tk-oml75`, epic `tk-q4xaj`, decision `tk-yrio`).
+
+**A2 vs A3** (design "Trade-offs and Decisions"; spike `tk-oml75` acceptance):
+
+- **A2 — resume-binding (the design's chosen path).** A bead's 1:1 host is
+  reconstructed on demand and the conversation is carried by the provider's
+  native resume; the bead↔session link is metadata only. Phase 1 is then the
+  cheap metadata-link assembly.
+- **A3 — durable conversation-state store.** A separate store duplicating what
+  the provider already persists (and adding Dolt load). The design pulls A3 into
+  v1 **only if** the spike shows resume fidelity is too short; the cheap hook
+  (`gc.session_lineage`) is carried either way, so a later flip stays cheap.
+- **Decision rule** (spike `tk-oml75` acceptance, design Phase 0): good fidelity
+  ⇒ A2 (binding is the cheap assembly in Phase 1); poor fidelity ⇒ pull A3 into
+  Phase 1, *proven before paying for it*.
+
+**Open Question #2 — provider-transcript retention window** (design "Open
+Questions" #2): the spike measures one suspend/wake cycle; the steady-state
+retention TTL is what sets whether A3 is ever needed. It is a *retention*
+property, not a *fidelity* one — the sole input that could later flip A2→A3.
+
+**Cross-cutting constraint under test** (epic `tk-q4xaj`): *cold-by-default —
+suspend/resume, not warm.* The measurements below test exactly that bet.
 
 ---
 
@@ -70,7 +108,8 @@ The bead-host probe is exactly `consult-host`'s per-bead shape with
 design doc's Key Component #1 calls for.
 
 **Resume is provider-transcript replay keyed by the stable session identity**
-(design doc §"single most important finding"; Data Model §"Binding"). The key
+(design doc §"single most important finding"; Data Model §"Binding" — and
+proven empirically below in §1, not merely asserted). The key
 property for this spike: that replay path is **independent of what the session
 is *about*.** The provider session is keyed by session identity +
 `continuation_epoch`, not by role, prompt, or alias. A `mayor-thread` and a
@@ -214,6 +253,14 @@ Not committed as a shippable agent (Phase 1 builds the real
 (§C) is reproducible. It is `consult-host` + the two design-specified changes,
 plus operator-only guards so the probe never claims pool work.
 
+**Placement (explicit).** This is a **city-scoped convention agent**:
+`gc agent add --name bead-host-probe` scaffolds it under `agents/bead-host-probe/`
+(per `gc agent add` — "schema-2 convention agents are city-scoped"), matching
+the `scope = "city"` below. It is therefore launched by its **bare template
+name** (`gc session new bead-host-probe`, mirroring the local `consult-host`
+precedent) — *not* the slash-qualified `gc-toolkit/bead-host-probe` form, which
+addresses imported binding agents and will not resolve for this city scaffold.
+
 `agents/bead-host-probe/agent.toml`:
 
 ```toml
@@ -280,9 +327,12 @@ cd /home/zook/loomington
 gc agent add --name bead-host-probe          # then paste §A agent.toml + prompt
 gc reload
 
-# 1. Create the host on a real epic, no attach.
+# 1. Create the host on a real epic, no attach. The probe is a city-scoped
+#    convention agent (step 0), so it launches by its BARE template name —
+#    NOT the slash-qualified `rig/agent` form (that addresses imported binding
+#    agents and will not resolve for a city scaffold).
 BEAD=tk-q4xaj
-gc session new gc-toolkit/bead-host-probe --alias "$BEAD" --no-attach
+gc session new bead-host-probe --alias "$BEAD" --no-attach
 sleep 15; gc session peek "$BEAD" --lines 20   # expect: one-line universe summary
 
 # 2. Advance once with a distinctive marker.
