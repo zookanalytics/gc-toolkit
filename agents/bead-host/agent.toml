@@ -29,9 +29,10 @@
 # auto-spawns one to satisfy pool demand; sling_query exits non-zero so
 # an accidental `gc sling … bead-host` surfaces an explicit error rather
 # than silently routing. A host is created on demand by
-# tools/gc-bead-host.sh (or, in Phase 3, the `gc attention open`
-# launcher) — capability, not deployment. Any bead CAN get a host; not
-# every bead has one.
+# tools/gc-bead-host.sh (or by the attention board picker — prefix+b /
+# `gc-attention.sh open`, a thin front door over the same tool) —
+# capability, not deployment. Any bead CAN get a host; not every bead
+# has one.
 #
 # The durable bead<->session link is metadata-only and lives OUTSIDE
 # this config: tools/gc-bead-host.sh writes it atomically on host
@@ -59,4 +60,4 @@ nudge = 'Operator returned. Re-read your bead first — `gc bd show "$GC_ALIAS"`
 # to satisfy demand; sling_query exits non-zero so an explicit error
 # surfaces instead of a silent route.
 work_query = "printf '[]'"
-sling_query = "echo 'bead-host is operator-spawned only (tools/gc-bead-host.sh / gc attention open); not a sling target' >&2; exit 1"
+sling_query = "echo 'bead-host is operator-spawned only (tools/gc-bead-host.sh / gc-attention.sh open); not a sling target' >&2; exit 1"
