@@ -7,8 +7,8 @@
 # [imports.gastown] removed, [rigs.imports.gastown] removed) were
 # captured during Lane C cutover and remain in effect.
 #
-# Native gc-toolkit agents (architect, concierge, consult-host,
-# mechanik, polecat-codex, _polecat-gemini, plus the *-thread
+# Native gc-toolkit agents (architect, mechanik, polecat-codex,
+# _polecat-gemini, plus the *-thread
 # variants) ship under agents/. Gastown roster (boot, deacon, mayor,
 # polecat, refinery, witness) is imported and divergences are
 # expressed as bare-name [[patches.agent]] — pure fragment-append
