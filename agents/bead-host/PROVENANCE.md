@@ -21,8 +21,8 @@ host is created-or-resumed already primed with its universe, they ratify
 or redirect in one move, and leave. Between visits the conversation is
 suspended, not destroyed — re-opening resumes it.
 
-This config is the binding spine (Phase 1). It is `consult-host`'s
-per-bead shape (alias = bead id → 1:1 for free) with `wake_mode = resume`
+This config is the binding spine (Phase 1). It is a per-bead session
+config (alias = bead id → 1:1 for free) with `wake_mode = resume`
 (carry the conversation; the mayor-thread mechanism) and a long
 `idle_timeout` (suspend, don't die). The P0 spike (tk-oml75) proved the
 resume mechanism carries a conversation across a ~15h cold gap and

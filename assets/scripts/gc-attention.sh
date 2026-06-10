@@ -291,15 +291,15 @@ cmd_open() {
     bust_cache
 
     # Land in it. The host's tmux session is named by its alias (== the
-    # bead id — the consult-host/bead-host convention). From INSIDE tmux
-    # (the picker / a keybinding) switch the client to it, reusing the
-    # proven consult-attach.sh wait-and-switch. From a plain shell, fall
+    # bead id — the bead-host alias convention). From INSIDE tmux (the
+    # picker / a keybinding) switch the client to it, reusing the proven
+    # tmux-switch-to-session.sh wait-and-switch. From a plain shell, fall
     # back to `gc session attach`, the general attach-or-resume primitive.
     # The host is up either way, so a context that can't switch is
     # reported with a manual hint, never fatal.
     echo "$PROG: host for $bead is up — landing..." >&2
-    if [ -n "${TMUX:-}" ] && [ -x "$SCRIPT_DIR/consult-attach.sh" ]; then
-        "$SCRIPT_DIR/consult-attach.sh" "$bead" || {
+    if [ -n "${TMUX:-}" ] && [ -x "$SCRIPT_DIR/tmux-switch-to-session.sh" ]; then
+        "$SCRIPT_DIR/tmux-switch-to-session.sh" "$bead" || {
             echo "$PROG: host for $bead is up; could not switch the tmux client." >&2
             echo "       Switch yourself:  prefix+S  (or: tmux switch-client -t $bead)" >&2
         }
