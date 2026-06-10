@@ -11,11 +11,13 @@ cluster. Inventory found **335 references across 31 files** — far broader
 than the five listed targets — so this report records what was removed,
 what was updated, what was deliberately left, and why.
 
-PR #106 carries two commits: the cluster removal (`b044f1d`) and a
-follow-up (`9dcb69d`) that — addressing the first codex review — retired
-the remaining live-surface references in
-`agents/architect/prompt.template.md` and `docs/roadmap.md`. This report
-reflects the PR head after both.
+PR #106's substantive changes are two commits: the cluster removal
+(`b044f1d`) and a follow-up (`9dcb69d`) that — addressing the first codex
+review — retired the remaining live-surface references in
+`agents/architect/prompt.template.md` and `docs/roadmap.md`. Later commits
+re-sync this audit report with the PR head as subsequent reviews land
+(this paragraph's own correction among them), so they touch no shipped
+code. This report reflects the current PR head.
 
 ## Removed
 
