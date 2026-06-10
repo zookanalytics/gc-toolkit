@@ -42,13 +42,6 @@
 # mol-first-reaction --merge mr` (operator/board one-shot) or by the
 # process-scan `tools/gc-proactive.sh scan --sling` (movable-forward beads).
 # NOT a resident loop either way.
-#
-# DEFAULT-DISABLED (auto-spawn off). The reconciler NEVER auto-spawns a
-# proactive worker by default: the work_query below emits [] unless
-# GC_PROACTIVE_ENABLED is truthy (1/true/yes/on). Run proactive MANUALLY via
-# `tools/gc-proactive.sh sling <bead>` or `scan --sling` — those call gc sling
-# directly, bypass this gate, and always work. Set GC_PROACTIVE_ENABLED=1 to
-# opt into demand-driven auto-spawn (then the city-cap shed clamp below applies).
 
 scope = "rig"
 wake_mode = "fresh"
@@ -61,12 +54,10 @@ min_active_sessions = 0
 # design's "max 2-3" budget; start conservative at 2.
 max_active_sessions = 2
 
-# THE DEFAULT-DISABLED GATE (auto-spawn opt-in). FIRST and gc-free: emit [] —
-# no demand, so the reconciler spawns nothing — unless GC_PROACTIVE_ENABLED is
-# truthy (1/true/yes/on). Default unset ⇒ disabled, so a disabled proactive
-# surface costs zero gc calls. Mirrored in tools/gc-proactive.sh
-# `proactive_auto_enabled` (gate-asserted); keep the two in sync. Manual
-# sling/scan bypass this entirely (they call gc sling directly).
+# THE DEFAULT-DISABLED GATE (auto-spawn opt-in). FIRST and gc-free: emit []
+# unless GC_PROACTIVE_ENABLED is truthy, so a disabled surface costs zero gc
+# calls. Mirrored in tools/gc-proactive.sh `proactive_auto_enabled`
+# (gate-asserted); keep the two in sync.
 #
 # THE CITY-WIDE SHED CLAMP (the reconciler clamp). Emit [] — no demand, so the
 # reconciler spawns nothing and an idle worker drains — when active city
