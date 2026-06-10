@@ -103,7 +103,7 @@ Then write a CARD (not prose) into the bead notes. The shape is FIXED — it is
 what the board picker lands the human on, so it must be scannable:
 
 ```bash
-gc bd update {{issue}} --notes "$(cat <<'EOF'
+gc bd update {{issue}} --append-notes "$(cat <<'EOF'
 # First reaction · <one-line what-this-is>
 
 ## Understanding

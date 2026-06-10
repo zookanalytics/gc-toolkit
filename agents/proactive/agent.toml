@@ -18,7 +18,7 @@
 #   city cap                  clamp"). The reconciler runs work_query to decide
 #                             whether to spawn; this one emits [] (no demand)
 #                             when active city sessions are at/over
-#                             GC_PROACTIVE_CITY_CAP (~8-16 band, default 12).
+#                             GC_PROACTIVE_CITY_CAP (~8-16 band, default 20).
 #                             Only THIS pool consults the clamp, so proactive
 #                             is the first thing to shed under session pressure
 #                             (design degraded mode "proactive sheds first").
@@ -67,8 +67,8 @@ max_active_sessions = 2
 work_query = '''
 target="{{.Rig}}/gc-toolkit.proactive"
 active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
-if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-12}" ]; then printf '[]'; exit 0; fi
-r=$(bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
+if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '[]'; exit 0; fi
+r=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
 if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
 '''
 
