@@ -25,6 +25,10 @@
 #      implements. NOT a resident loop — it is a process you run (operator,
 #      a patrol/cron, or the pool's own demand probe).
 #
+# ── Default-disabled: auto-spawn is OFF unless opted in ──────────────
+# `demand` (the work_query, mirrored here) emits [] unless GC_PROACTIVE_ENABLED
+# is truthy — the conservative default. See the GC_PROACTIVE_ENABLED tunable.
+#
 # ── The budget (design Key Component 5; "budget sessions, not bytes") ─
 # Two independent clamps, because proactive fan-out spends whole sessions
 # against a fragile shared Dolt:
@@ -56,6 +60,11 @@
 # bead). Nothing here closes or merges anything.
 #
 # Tunables (env):
+#   GC_PROACTIVE_ENABLED       master switch for demand-driven AUTO-SPAWN.
+#                              Default-disabled: unset ⇒ `demand` emits [] (no
+#                              auto-spawn). Truthy (1/true/yes/on) opts in.
+#                              Gates auto-spawn ONLY — manual sling/scan ignore
+#                              it.
 #   GC_PROACTIVE_POOL          proactive pool agent name. A bare base name
 #                              (default "gc-toolkit.proactive") is rig-
 #                              qualified to "<GC_RIG>/<base>" — the form the
@@ -158,7 +167,8 @@ board_rank() {
 usage() {
     cat <<EOF
 Usage: $PROG demand [<pool-target>]   Pool work_query: emit routed proactive
-                                      beads, or [] when the city is at the
+                                      beads, or [] when AUTO-SPAWN is disabled
+                                      (the default) or the city is at the
                                       session cap (the shed clamp). Read-only.
        $PROG scan [--json] [--sling]  Find movable-forward / opt-in beads; with
                                       --sling, sling a first reaction at each
@@ -214,7 +224,25 @@ cmd_cap() {
 # emit the standard pool demand (ready, unassigned, routed-to-us beads).
 # ---------------------------------------------------------------------------
 
+# proactive_auto_enabled -> true iff auto-spawn is opted in via
+# GC_PROACTIVE_ENABLED. Mirrored inline in agents/proactive/agent.toml's
+# work_query (the real reconciler clamp); keep the two truthy sets in sync
+# (gate-asserted).
+proactive_auto_enabled() {
+    case "${GC_PROACTIVE_ENABLED:-}" in
+        1|true|yes|on) return 0 ;;
+        *)             return 1 ;;
+    esac
+}
+
 cmd_demand() {
+    # Gate FIRST — before the shed clamp — so a disabled surface emits []
+    # regardless of city load and pays no session/ready queries.
+    if ! proactive_auto_enabled; then
+        printf '[]'
+        return 0
+    fi
+
     # The shed clamp: at/over the city cap, there is NO proactive demand.
     if at_cap; then
         printf '[]'

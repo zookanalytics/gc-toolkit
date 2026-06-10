@@ -54,6 +54,11 @@ min_active_sessions = 0
 # design's "max 2-3" budget; start conservative at 2.
 max_active_sessions = 2
 
+# THE DEFAULT-DISABLED GATE (auto-spawn opt-in). FIRST and gc-free: emit []
+# unless GC_PROACTIVE_ENABLED is truthy, so a disabled surface costs zero gc
+# calls. Mirrored in tools/gc-proactive.sh `proactive_auto_enabled`
+# (gate-asserted); keep the two in sync.
+#
 # THE CITY-WIDE SHED CLAMP (the reconciler clamp). Emit [] — no demand, so the
 # reconciler spawns nothing and an idle worker drains — when active city
 # sessions are at/over the cap. Otherwise emit the standard routed pool demand
@@ -65,6 +70,7 @@ max_active_sessions = 2
 # literal (no shell metacharacters in rig names). The ranking jq is mirrored in
 # tools/gc-proactive.sh `board_rank`; keep the two in sync (gate-asserted).
 work_query = '''
+case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '[]'; exit 0 ;; esac
 target="{{.Rig}}/gc-toolkit.proactive"
 active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
 if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '[]'; exit 0; fi
