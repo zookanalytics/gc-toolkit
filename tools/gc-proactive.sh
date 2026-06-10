@@ -36,7 +36,7 @@
 #   • CITY-WIDE SESSION CAP — `demand` (the proactive pool's work_query)
 #     SHEDS — emits `[]`, so the reconciler spawns nothing — when the count
 #     of active city sessions is at/over GC_PROACTIVE_CITY_CAP (~8-16 band,
-#     default 12). This is the design's "reconciler clamp": the reconciler
+#     default 20). This is the design's "reconciler clamp": the reconciler
 #     runs work_query to decide whether to spawn, and an empty result means
 #     "no demand." Proactive is the FIRST thing to shed under session
 #     pressure (design degraded mode "proactive sheds first") because only
@@ -64,7 +64,7 @@
 #                              `gc sling` rejects a bare agent name). Pass an
 #                              already-qualified "<rig>/<base>" to override.
 #   GC_PROACTIVE_CITY_CAP      city-wide active-session ceiling for the
-#                              shed clamp (default 12; operator-tunable in
+#                              shed clamp (default 20; operator-tunable in
 #                              the design's 8-16 band).
 #   GC_PROACTIVE_MERGE         merge strategy for slung output (default
 #                              "mr"; "local" allowed; "direct" REFUSED).
@@ -85,7 +85,7 @@ set -euo pipefail
 PROG="${0##*/}"
 
 POOL_BASE="${GC_PROACTIVE_POOL:-gc-toolkit.proactive}"
-CITY_CAP="${GC_PROACTIVE_CITY_CAP:-12}"
+CITY_CAP="${GC_PROACTIVE_CITY_CAP:-20}"
 MERGE="${GC_PROACTIVE_MERGE:-mr}"
 SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
@@ -117,6 +117,27 @@ resolve_pool_target() {
             fi
             ;;
     esac
+}
+
+# rig_beads_db -> this rig's `.beads` dir, to pin `gc bd --db` for parity with
+# the attention board (assets/scripts/gc-attention.sh resolves the rig path from
+# `gc rig list`/GC_RIG, then `$path/.beads`). We pin --db because bare `bd` (and
+# `gc bd` without --db) resolves `.beads` by walking UP from cwd — but the
+# proactive work_dir is a git worktree where `.beads` is gitignored, so the
+# up-walk overshoots to the HQ `lx` ledger (the wrong store) and demand comes
+# back empty. Echoes the path, or nothing when it cannot resolve (no GC_RIG, or
+# no `.beads` at the path); callers then fall back to a bare `gc bd ready`, which
+# still routes through GasCity (gc resolves the rig from GC_RIG/cwd) rather than
+# the `bd` binary. Only reached on the live path (the FIXTURE branches return
+# first), so the gate stays hermetic.
+rig_beads_db() {
+    [ -n "${GC_RIG:-}" ] || return 0
+    local path
+    path="$(gc rig list --json 2>/dev/null \
+        | jq -r --arg n "$GC_RIG" '.rigs[]? | select(.name==$n) | .path' 2>/dev/null \
+        | head -n1 || true)"
+    [ -n "$path" ] && [ -d "$path/.beads" ] && printf '%s' "$path/.beads"
+    return 0
 }
 
 # board_rank — re-rank a JSON array of beads (stdin) by the attention board's
@@ -209,9 +230,11 @@ cmd_demand() {
         # resolve_pool_target) so it matches the gc.routed_to the pool's
         # agent.toml work_query writes. Mirrors the polecat probe, pinned to
         # the proactive target.
-        local target
+        local target db
         target="$(resolve_pool_target "${1:-}")"
-        r="$(bd ready --metadata-field "gc.routed_to=$target" --unassigned \
+        db="$(rig_beads_db)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        r="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.routed_to=$target" --unassigned \
                 --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
         [ -n "$r" ] || r='[]'
     fi
@@ -236,9 +259,12 @@ scan_candidates() {
         return 0
     fi
 
-    # (A) explicit opt-in: beads that asked for a first reaction.
-    local optin movable
-    optin="$(bd ready --metadata-field "gc.proactive=1" --unassigned \
+    # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
+    # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
+    local optin movable db
+    db="$(rig_beads_db)"
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+    optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
                 --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
     [ -n "$optin" ] || optin='[]'
 
@@ -246,7 +272,8 @@ scan_candidates() {
     # the ones already advanced (gc.proactive_reaction set), already
     # hand-raised (gc.attention set), or already routed somewhere — those are
     # not "able to be updated" by a fresh first reaction.
-    movable="$(bd ready --unassigned --exclude-type=epic --json \
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+    movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
                 --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
     [ -n "$movable" ] || movable='[]'
 

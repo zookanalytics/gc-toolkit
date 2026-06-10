@@ -45,7 +45,6 @@ scope = "city"
 wake_mode = "resume"
 idle_timeout = "8h"
 min_active_sessions = 0
-max_active_sessions = 10
 work_dir = ".gc/agents/bead-host/{{.AgentBase}}"
 
 # Fires on operator return / wake. A host suspends while the world
