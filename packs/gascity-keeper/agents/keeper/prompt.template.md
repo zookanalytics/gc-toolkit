@@ -127,6 +127,7 @@ for promoting a commit to an upstream PR candidate.
    Primed. You can ask for:
      - rebase            — pull from upstream, run quality gate, push (autonomous polecat)
      - prep PR <sha>     — polish a commit for upstream PR submission
+     - prep PR batch <sha> <sha> … [as <branch>] — bundle commits into one PR (old→new order)
      - check drift       — read-only drift report on vendored gastown
      - list pending      — show open keeper beads
 
@@ -272,10 +273,10 @@ Tell the operator:
 > lands in the bead notes — once it closes, `gc bd show <id>` shows
 > the drift summary. Nothing on disk gets changed.
 
-### "prep PR for &lt;commit-sha&gt;"
+### "prep PR for &lt;commit-sha&gt;" / "prep PR batch &lt;sha&gt; … [as &lt;branch&gt;]"
 
-Validate the sha exists, then dispatch the prep mol with metadata pointing
-back at you for the handback.
+**Single-commit form.** Validate the sha exists, then dispatch the prep mol
+with metadata pointing back at you for the handback.
 
 ```bash
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
@@ -297,6 +298,57 @@ and `--var requesting_keeper=…` satisfy the formula's required-var
 declarations. The same values are also stamped as bead metadata above —
 the formula's `workspace-setup` step reads from metadata as the durable
 source, the `--var` pair satisfies the formula contract at cook time.
+
+**Batch form — `prep PR batch <sha> <sha> … [as <branch-name>]`.** Bundle
+several *related* commits into ONE upstream PR (cleaner review upstream, fewer
+PRs to shepherd). List the SHAs in apply order — **old→new, exactly as they sit
+on `origin/main`** (topological order); the mol cherry-picks them in that order
+onto a single branch. The optional `as <branch-name>` names the branch
+explicitly (e.g. `as upstream-pr/test-env-isolation`); omit it and a batch
+defaults to `upstream-pr/<bead-id>`.
+
+```bash
+RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+
+# Ordered SHA list (old→new) + optional branch name parsed from the operator's
+# command, e.g. "prep PR batch e0c9b0b9 81278f31 3672f669 as upstream-pr/test-env-isolation".
+SHAS="<sha> <sha> …"          # space-separated, apply order (old→new)
+BRANCH_NAME="<branch-name>"   # from `as <branch-name>`, else leave empty
+
+# Validate every sha exists before creating the bead (fail fast).
+for SHA in $SHAS; do
+  git -C "$RIG_PATH" show --stat "$SHA" >/dev/null || {
+    echo "prep PR batch: commit $SHA not found in $RIG_PATH — aborting"; return 1
+  }
+done
+cd "$RIG_PATH"
+
+# Stamp metadata: space-joined ordered list, plus branch_name only when given.
+META=$(jq -n --arg shas "$SHAS" --arg keeper "$GC_AGENT" --arg branch "$BRANCH_NAME" \
+  '{commit_sha:$shas, requesting_keeper:$keeper}
+   + (if $branch == "" then {} else {branch_name:$branch} end)')
+NCOMMITS=$(printf '%s' "$SHAS" | wc -w | tr -d ' ')
+BEAD=$(gc bd create "Prep upstream PR (batch: $NCOMMITS commits)" \
+  -t task --metadata "$META" --json | jq -r '.id')
+
+# Dispatch. Pass --var branch_name only when the operator named one.
+if [ -n "$BRANCH_NAME" ]; then
+  gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-pr-prep \
+    --var commit_sha="$SHAS" \
+    --var requesting_keeper="$GC_AGENT" \
+    --var branch_name="$BRANCH_NAME"
+else
+  gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-pr-prep \
+    --var commit_sha="$SHAS" \
+    --var requesting_keeper="$GC_AGENT"
+fi
+```
+
+The single form is just the N=1 case (one sha, no `as`); both share the mol.
+A cherry-pick conflict on any commit hands the bead back with
+`metadata.conflict_sha` naming the offending commit — surface it to the
+operator as "commit <X> conflicts on current upstream; drop it from the batch
+or split it."
 
 Tell the operator:
 

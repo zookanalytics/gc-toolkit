@@ -1,8 +1,10 @@
 description = """
-Prepare an upstream pull request from a single local-fork commit. Mechanical
-work through `push-branch`, then a `prepare-pr-handoff` step that drafts the
-PR title/body (and an optional issue draft), then a `handback-to-keeper` step
-that re-routes the bead to the requesting keeper for the conversational tail.
+Prepare an upstream pull request from one or more local-fork commits. An
+ordered batch is cherry-picked onto a single branch and lands as one combined
+PR draft; N=1 is the original single-commit behavior. Mechanical work through
+`push-branch`, then a `prepare-pr-handoff` step that drafts the PR title/body
+(and an optional issue draft), then a `handback-to-keeper` step that re-routes
+the bead to the requesting keeper for the conversational tail.
 
 PR creation itself is operator-gated and currently blocked at the city level —
 this mol stops at branch push + draft-on-bead. The keeper (or operator) decides
@@ -16,7 +18,8 @@ sequence below.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| commit_sha | yes (set by keeper as `metadata.commit_sha`) | the local commit to extract |
+| commit_sha | yes (set by keeper as `metadata.commit_sha`) | ordered, whitespace-separated list of one-or-more local commits to extract (old→new; N=1 = single-commit) |
+| branch_name | no (set by keeper as `metadata.branch_name`) | explicit PR branch name; empty → `upstream-pr/<short-sha>` (N=1) or `upstream-pr/<issue>` (batch) |
 | upstream_remote | no (default `upstream`) | upstream remote name |
 | origin_remote | no (default `origin`) | origin remote name |
 | upstream_branch | no (default `main`) | branch this PR will target |
@@ -27,20 +30,24 @@ sequence below.
 
 | Step | Failure handling |
 |------|------------------|
-| cherry-pick | Conflict halts the chain; mail keeper + operator with conflict tail; bead stays open |
-| scrub-commit-message | If something looks ambiguous after scrub, keep the conservative rewrite; mention in bead notes |
+| cherry-pick | A conflict on any commit halts the chain; records which `conflict_sha`; resets the branch to the upstream base (no partial branch stranded); mails keeper + operator; hands the bead back to the keeper |
+| scrub-commit-message | No-op marker — the scrub is applied per-commit inside the cherry-pick loop; this step persists the combined `scrub_diff` covering every commit |
 | test | Failure mails keeper + operator; bead stays open (operator decides whether to investigate or abandon) |
 | push-branch | If origin already has the branch and rejects, retry with `--force-with-lease`; if that also rejects, treat as race |
 | prepare-pr-handoff | LLM judgment — record `issue_advice` even when no |
 | handback-to-keeper | Reassign + nudge; the keeper's prime sweeps for `metadata.suggested_pr_title` |"""
 formula = "mol-upstream-gc-pr-prep"
 extends = ["mol-polecat-base"]
-version = 2
+version = 3
 
 [vars]
 [vars.commit_sha]
-description = "The local commit on origin/main to extract for upstream submission"
+description = "Whitespace-separated, ORDERED list of one-or-more local commits on origin/main to extract for upstream submission. Apply order is topological — old→new, as the commits sit on origin/main. A single SHA (N=1) is the original single-commit behavior."
 required = true
+
+[vars.branch_name]
+description = "Explicit name for the assembled PR branch. Empty (default): a single SHA yields upstream-pr/<short-sha> (today's behavior), multiple SHAs yield upstream-pr/<issue> (stable + unique). Set: used verbatim, e.g. upstream-pr/test-env-isolation."
+default = ""
 
 [vars.upstream_remote]
 description = "Git remote name pointing at the upstream gascity repository"
@@ -69,17 +76,21 @@ needs = ["load-context"]
 description = """
 Branch off `{{upstream_remote}}/{{upstream_branch}}` (NOT `{{origin_remote}}`)
 so the PR's commit history is upstream-relative. The keeper has stamped
-`metadata.commit_sha` and `metadata.requesting_keeper` on this bead.
+`metadata.commit_sha` (an ordered, whitespace-separated list of one-or-more
+SHAs, old→new as they sit on origin/main) and `metadata.requesting_keeper` on
+this bead, plus an optional `metadata.branch_name`.
 
 **1. Read the inputs:**
 ```bash
 COMMIT_SHA=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_sha')
 REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+BRANCH_NAME=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.branch_name // empty')
 ```
 
-If either is empty, the keeper failed to stamp metadata — escalate to the
-operator with subject `pr-prep: missing metadata` and exit. Do not invent
-defaults.
+`COMMIT_SHA` holds the whole ordered batch (one SHA for the N=1 case). If
+`COMMIT_SHA` or `REQUESTING_KEEPER` is empty, the keeper failed to stamp
+metadata — escalate to the operator with subject `pr-prep: missing metadata`
+and exit. Do not invent defaults. `BRANCH_NAME` is optional and may be empty.
 
 **2. Reuse or create the worktree:**
 
@@ -93,8 +104,25 @@ If it exists, `cd` there and skip to step 3.
 Otherwise create one branched off upstream:
 ```bash
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
-SHORT_SHA=$(git -C "$RIG_ROOT" rev-parse --short "$COMMIT_SHA")
-BRANCH="upstream-pr/$SHORT_SHA"
+
+# Split the ordered SHA list into positional params so we can count it (N)
+# and grab the first commit. Intentional whitespace word-splitting.
+# shellcheck disable=SC2086
+set -- $COMMIT_SHA
+N=$#
+
+# Branch-naming rule:
+#   branch_name set       → use it verbatim
+#   empty + single SHA    → upstream-pr/<short-sha>   (today's behavior)
+#   empty + multiple SHAs → upstream-pr/{{issue}}     (stable + unique)
+if [ -n "$BRANCH_NAME" ]; then
+  BRANCH="$BRANCH_NAME"
+elif [ "$N" -eq 1 ]; then
+  SHORT_SHA=$(git -C "$RIG_ROOT" rev-parse --short "$1")
+  BRANCH="upstream-pr/$SHORT_SHA"
+else
+  BRANCH="upstream-pr/{{issue}}"
+fi
 WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
 
 git -C "$RIG_ROOT" fetch --prune {{upstream_remote}}
@@ -105,11 +133,15 @@ gc bd update {{issue}} \
   --set-metadata branch="$BRANCH"
 ```
 
-If the branch name collides with an existing worktree branch (rare —
-multiple PRs from the same short-sha), append `-{{issue}}` to disambiguate.
+If the branch name collides with an existing worktree branch (rare — repeated
+single-commit PRs from the same short-sha, or a hand-picked `branch_name`
+reused), append `-{{issue}}` to disambiguate. The empty-`branch_name` batch
+default (`upstream-pr/{{issue}}`) is already unique per bead.
 
-**Exit criteria:** worktree at `$WORKTREE_PATH`; branch `upstream-pr/<short-sha>`
-based on `{{upstream_remote}}/{{upstream_branch}}`; both recorded on the bead."""
+**Exit criteria:** worktree at `$WORKTREE_PATH`; branch computed per the rule
+above — `upstream-pr/<short-sha>` for a single commit, `upstream-pr/{{issue}}`
+for an un-named batch, or the explicit `branch_name` — based on
+`{{upstream_remote}}/{{upstream_branch}}`; both recorded on the bead."""
 
 [[steps]]
 id = "preflight-tests"
@@ -142,78 +174,84 @@ proceed."""
 
 [[steps]]
 id = "cherry-pick"
-title = "Cherry-pick the operator's commit onto upstream"
+title = "Cherry-pick the ordered batch onto upstream, scrubbing each commit"
 needs = ["self-review"]
 description = """
+Apply the ordered batch of one-or-more commits onto the upstream-based branch,
+in order (old→new), and scrub each commit's message *while it is HEAD* (amending
+a non-HEAD commit afterward is fiddly, so the scrub is folded into this loop
+instead of living in its own step). N=1 is exactly the original single-commit
+path: one cherry-pick, one scrub.
+
 ```bash
 COMMIT_SHA=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_sha')
-git cherry-pick "$COMMIT_SHA"
-```
 
-If the cherry-pick succeeds, close this step and proceed.
+# Fresh combined-scrub log. The (now no-op) scrub-commit-message step reads
+# this back and persists it as metadata.scrub_diff for the keeper.
+SCRUB_LOG=/tmp/scrub-all-{{issue}}.txt
+: > "$SCRUB_LOG"
 
-If the cherry-pick conflicts:
+# Intentional whitespace word-splitting over the ordered SHA list.
+# shellcheck disable=SC2086
+for SHA in $COMMIT_SHA; do
+  if ! git cherry-pick "$SHA"; then
+    # --- Conflict on THIS commit: capture which, reset, hand back. ---
+    git status --short > /tmp/cherry-pick-conflict-{{issue}}.txt
+    git cherry-pick --abort
+    # Reset the branch back to the upstream base so no partial batch strands.
+    git reset --hard "{{upstream_remote}}/{{upstream_branch}}"
 
-1. Capture the conflict tail:
-```bash
-git status --short > /tmp/cherry-pick-conflict-{{issue}}.txt
-git cherry-pick --abort
-```
-
-2. Mail the keeper AND the operator:
-```bash
-REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
-gc mail send "$REQUESTING_KEEPER" -s "pr-prep: cherry-pick conflict for {{issue}}" -m "$(cat <<EOF
-Cherry-pick of $COMMIT_SHA onto {{upstream_remote}}/{{upstream_branch}} conflicted.
+    REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+    gc mail send "$REQUESTING_KEEPER" -s "pr-prep: cherry-pick conflict for {{issue}}" -m "$(cat <<EOF
+Cherry-pick of $SHA onto {{upstream_remote}}/{{upstream_branch}} conflicted.
 
 Bead: {{issue}}
 Worktree: $(pwd)
+Batch: $COMMIT_SHA
+Conflicting commit: $SHA
 Conflicts:
 $(cat /tmp/cherry-pick-conflict-{{issue}}.txt)
 
-Likely cause: the commit depends on local-only context that doesn't exist
-upstream. Consider whether the commit needs to be split, rebased onto a
-prior local commit first, or simply isn't a viable upstream-PR candidate.
+Commit $SHA of the batch conflicts on current upstream — drop it from the
+batch or split it. Likely cause: the commit depends on local-only context
+that doesn't exist upstream. The branch was reset to the upstream base; no
+partial batch was left behind.
 EOF
 )"
-gc mail send human -s "pr-prep: cherry-pick conflict for {{issue}}" -m "(see keeper mail)"
+    gc mail send human -s "pr-prep: cherry-pick conflict for {{issue}}" -m "(see keeper mail)"
+
+    gc bd update {{issue}} \
+      --set-metadata aborted_at=cherry-pick \
+      --set-metadata conflict_sha="$SHA" \
+      --status=open \
+      --assignee="$REQUESTING_KEEPER" \
+      --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+    gc runtime drain-ack
+    exit 0
+  fi
+
+  # --- Scrub THIS commit's message while it is HEAD (see pattern list below). ---
+  git log -1 --format='%B' > /tmp/scrub-before-{{issue}}.txt
+  # ...inspect; if a rewrite is needed: git commit --amend -m "<scrubbed message>"...
+  {
+    echo "=== $SHA ==="
+    echo "BEFORE:"
+    cat /tmp/scrub-before-{{issue}}.txt
+    echo
+    echo "AFTER:"
+    git log -1 --format='%B'
+    echo
+  } >> "$SCRUB_LOG"
+done
 ```
 
-3. Set the abort marker, hand the bead back to the keeper, and exit:
-```bash
-gc bd update {{issue}} \
-  --set-metadata aborted_at=cherry-pick \
-  --status=open \
-  --assignee="$REQUESTING_KEEPER" \
-  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
-gc runtime drain-ack
-exit 0
-```
+If every commit applies cleanly, close this step and proceed.
 
-**Bead stays open and assigned to the keeper** — without the lifecycle
-handback the bead would strand on this drained session. The keeper's
-prime sweep notices `metadata.aborted_at`, surfaces the failure to the
-operator, and the operator can decide to abandon the bead or resume
-from `metadata.work_dir` after splitting the commit.
-
-**Exit criteria:** HEAD has the cherry-picked commit; working tree is clean."""
-
-[[steps]]
-id = "scrub-commit-message"
-title = "Strip city-internal references from the commit message"
-needs = ["cherry-pick"]
-description = """
-Read the cherry-picked commit message and rewrite anything that would leak
-city-internal context to the upstream repo. This protects the operator's
-fork-internal taxonomy (bead IDs, agent handles, rig names) from showing
-up in upstream history.
-
-**1. Read the message:**
-```bash
-git log -1 --format='%B' > /tmp/scrub-before-{{issue}}.txt
-```
-
-**2. Scan for these patterns (LLM judgment, not blind regex):**
+**Scrub each commit (LLM judgment, not blind regex).** Run this against the
+message of the commit you just picked, while it is HEAD. Rewrite anything that
+would leak city-internal context to the upstream repo, protecting the
+operator's fork-internal taxonomy (bead IDs, agent handles, rig names) from
+upstream history. Scan for these patterns:
 
 - Bead-ID-shaped tokens — `lx-…`, `gc-…`, `tk-…`, `sl-…` (lowercase prefix
   followed by short slug). Borderline cases: a token like `gc-init` could
@@ -229,40 +267,65 @@ git log -1 --format='%B' > /tmp/scrub-before-{{issue}}.txt
   `refinery`, `boot`, `concierge`, `consult-host`, `keeper`. (These are
   city-architecture concepts; they don't belong in upstream PR descriptions.)
 
-**3. Rewrite the message:**
-
-If anything matches, rewrite to remove or generalize:
+If anything matches, rewrite to remove or generalize, then `git commit --amend`:
 - Drop the line entirely if it's something like `Tracking: tk-abc123`.
-- Replace internal handles with neutral wording — e.g. "the city's keeper agent" → "tooling".
+- Replace internal handles with neutral wording — e.g. "the city's keeper
+  agent" → "tooling".
 - Generalize rig names — `gc-toolkit pack` → "downstream pack".
 
-Then amend:
+If nothing matches, leave the message untouched — the before/after entry in
+the scrub log will simply be identical. Either way, append one `=== <sha> ===`
+before/after block per commit to `/tmp/scrub-all-{{issue}}.txt` (the loop above
+does this) so the scrub-commit-message step can persist the full rewrite set.
+
+**Conflict handback (inside the loop).** When any commit conflicts: capture the
+conflict tail, `git cherry-pick --abort`, **reset the branch to
+`{{upstream_remote}}/{{upstream_branch}}` so no partial batch strands**, set
+`metadata.aborted_at=cherry-pick` and `metadata.conflict_sha=<sha>`, mail the
+keeper + operator naming the offending commit, hand the bead back to the
+keeper, and exit. The keeper's prime sweep notices `metadata.aborted_at` /
+`metadata.conflict_sha` and surfaces "commit <X> of the batch conflicts on
+current upstream — drop it from the batch or split it." The operator can then
+resume from `metadata.work_dir` after editing the batch.
+
+**Bead stays open and assigned to the keeper** on the conflict path — without
+the lifecycle handback the bead would strand on this drained session.
+
+**Exit criteria:** HEAD carries every commit of the batch in order, each with a
+scrubbed message; working tree is clean; `/tmp/scrub-all-{{issue}}.txt` holds a
+before/after block per commit."""
+
+[[steps]]
+id = "scrub-commit-message"
+title = "Persist the combined scrub diff (scrub applied per-commit in cherry-pick)"
+needs = ["cherry-pick"]
+description = """
+Scrubbing of city-internal references now happens per-commit *inside* the
+`cherry-pick` loop, while each commit is HEAD (amending a non-HEAD commit
+afterward is fiddly). This step no longer rewrites anything — it is a no-op
+marker that persists the COMBINED before/after record the loop accumulated, so
+the keeper can surface the full rewrite set across every commit in the batch
+(a single block for the N=1 case).
+
+The cherry-pick loop wrote a `=== <sha> ===` before/after block per commit to
+`/tmp/scrub-all-{{issue}}.txt`. Persist it verbatim:
+
 ```bash
-git commit --amend -m "$(cat /tmp/scrub-after-{{issue}}.txt)"
+SCRUB_LOG=/tmp/scrub-all-{{issue}}.txt
+if [ -s "$SCRUB_LOG" ]; then
+  gc bd update {{issue}} --set-metadata scrub_diff="$(cat "$SCRUB_LOG")"
+else
+  # The log should never be empty after a successful cherry-pick step; if it
+  # is, the loop was skipped — record that rather than silently passing.
+  gc bd update {{issue}} --set-metadata scrub_diff="(no scrub log found — cherry-pick loop did not run?)"
+fi
 ```
 
-If nothing matches, leave the message untouched.
+The keeper surfaces this diff during the handback conversation so the operator
+can object if a scrub overreached on any commit.
 
-**4. Record the diff for the operator's review:**
-```bash
-SCRUB_BEFORE=$(cat /tmp/scrub-before-{{issue}}.txt)
-SCRUB_AFTER=$(git log -1 --format='%B')
-gc bd update {{issue}} --set-metadata scrub_diff="$(cat <<EOF
-BEFORE:
-$SCRUB_BEFORE
-
-AFTER:
-$SCRUB_AFTER
-EOF
-)"
-```
-
-The keeper surfaces this diff during the handback conversation so the
-operator can object if the scrub overreached.
-
-**Exit criteria:** commit message contains no city-internal references;
-`metadata.scrub_diff` records before/after; if no changes were needed,
-`metadata.scrub_diff` says so."""
+**Exit criteria:** `metadata.scrub_diff` records a before/after block for every
+commit in the batch (a single block for N=1)."""
 
 [[steps]]
 id = "test"
@@ -315,9 +378,12 @@ needs = ["test"]
 description = """
 **Config: origin_remote = {{origin_remote}}**
 
-Push the local `upstream-pr/<short-sha>` branch to `{{origin_remote}}` so
-upstream's PR can target it later. This is a feature branch push, not a
-push to `{{upstream_branch}}`.
+Push the computed branch — `metadata.branch`, whatever the workspace-setup
+rule produced (`upstream-pr/<short-sha>` for a single commit, an explicit
+`branch_name`, or `upstream-pr/{{issue}}` for an un-named batch) — to
+`{{origin_remote}}` so upstream's PR can target it later. This is a feature
+branch push, not a push to `{{upstream_branch}}`. `git branch --show-current`
+resolves whichever name was computed; no short-sha assumption.
 
 ```bash
 BRANCH=$(git branch --show-current)
@@ -382,40 +448,64 @@ decide whether an upstream issue would help, draft commands. Persist all
 artifacts to bead metadata so the keeper can surface them in the handback
 conversation.
 
-**1. Read the commit:**
+**1. Read the commits (the whole batch, oldest→newest):**
 ```bash
-git log -1 --format='%H%n%s%n%b'
-git show HEAD --stat
+git log --reverse --format='%H%n%s%n%b%n--' {{upstream_remote}}/{{upstream_branch}}..HEAD
+git diff --stat {{upstream_remote}}/{{upstream_branch}}..HEAD
 ```
+For N=1 this lists the single commit; for a batch it lists every commit in
+apply order (old→new).
 
-**2. Draft the PR title:**
+**2. Draft the PR title — the batch theme:**
 
-Default: the cleaned commit subject. If the subject is already shaped like a
-good upstream title, use it as-is. If the subject reads city-internally
-(survived scrub but still has tone), rewrite to be neutral — typically
-imperative verb + scope (e.g., "Fix race in cache reconcile").
+For a single commit (N=1): the cleaned commit subject — today's behavior. If
+the subject is already shaped like a good upstream title, use it as-is. If it
+reads city-internally (survived scrub but still has tone), rewrite to be
+neutral — imperative verb + scope (e.g., "Fix race in cache reconcile").
+
+For a batch (N>1): synthesize a title that names the *theme* of the whole set,
+NOT any single commit's subject — e.g. "Isolate tests from host GC_*/DOLT_*
+environment".
 
 Persist:
 ```bash
 gc bd update {{issue}} --set-metadata suggested_pr_title="<title>"
 ```
 
-**3. Draft the PR body:**
+**3. Draft the PR body — rationale + per-commit bullets:**
 
-Structure:
+For a single commit (N=1), keep today's shape — the commit speaks for itself,
+so omit the per-commit list:
 ```
 <commit body>
 
 ## Why this PR
 
-<one-paragraph stub the keeper iterates on with the operator —
- set the stage: what the commit fixes/adds, why it's worth landing
- upstream, any caveats or trade-offs the operator should call out>
+<one-paragraph stub the keeper iterates on with the operator — set the
+ stage: what the commit fixes/adds, why it's worth landing upstream, any
+ caveats or trade-offs the operator should call out>
 ```
 
-The "## Why this PR" stub is intentionally short and editable — the
-operator and keeper finalize this together. Don't oversell; flag
-unknowns.
+For a batch (N>1), lead with a short rationale, then a per-commit bullet list
+(each commit's subject + one line of what/why), then the same editable stub:
+```
+<short rationale: what this PR changes overall and why the set is worth
+ landing upstream>
+
+## Commits
+
+- <commit 1 subject> — <one line: what it does / why>
+- <commit 2 subject> — <one line: what it does / why>
+- …
+
+## Why this PR
+
+<one-paragraph stub the keeper iterates on with the operator — caveats,
+ trade-offs, anything the operator should call out>
+```
+
+The "## Why this PR" stub is intentionally short and editable in both cases —
+the operator and keeper finalize it together. Don't oversell; flag unknowns.
 
 Persist:
 ```bash
