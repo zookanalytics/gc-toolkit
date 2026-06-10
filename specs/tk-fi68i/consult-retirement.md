@@ -9,7 +9,13 @@ This bead inventoried every reference to `consult-host`, `concierge`,
 `consult-attach`, and `mol-consult-host`, then removed the self-contained
 cluster. Inventory found **335 references across 31 files** — far broader
 than the five listed targets — so this report records what was removed,
-what was deliberately left, and why.
+what was updated, what was deliberately left, and why.
+
+PR #106 carries two commits: the cluster removal (`b044f1d`) and a
+follow-up (`9dcb69d`) that — addressing the first codex review — retired
+the remaining live-surface references in
+`agents/architect/prompt.template.md` and `docs/roadmap.md`. This report
+reflects the PR head after both.
 
 ## Removed
 
@@ -26,8 +32,29 @@ what was deliberately left, and why.
 
 The two satellites are not in the original five-item target list but are
 unambiguous cluster artifacts whose only consumers were the deleted
-agents. Removing them is the only way to clear those references without
-touching the governed architect prompt below.
+agents. Removing them in the cluster commit cleared those references
+without editing the governed architect prompt — which the follow-up
+commit then retired separately (see *Updated in place* below).
+
+## Updated in place (follow-up commit `9dcb69d`)
+
+The first codex review flagged two non-historical references as blocking:
+the live architect prompt still routed to `concierge`, and the roadmap
+still presented the channel as current with links to deleted paths. Both
+are the references the original pass had left for follow-up; the
+follow-up commit retired them.
+
+| Path | Change | Refs |
+| --- | --- | --- |
+| `agents/architect/prompt.template.md` | Dropped all routing to the deleted `concierge` agent — the "Concierge pushes; you file" framing, the `Concierge` collaborator subsection, the `gc mail send` / `gc session nudge concierge` push channels, and the concierge session-end checklist item; reworded the filing-bar / kick-back prose. Consults now surface via the bead queue — the model the prompt already declares authoritative ("open/closed bead state is the state"). | 12 → 0 |
+| `docs/roadmap.md` | Marked the consult-surfacing channel **retired (2026-06-10)** in all three locations (narrative pillar, Settled decision, Near-term milestone 5) and removed the dangling links to deleted paths (`specs/2026-04-consult-design/`, `template-fragments/mayor-concierge-redirect.template.md`, `agents/concierge/example-city.toml`); points readers to this report instead. | 10 → 5 |
+
+The architect-prompt edit stayed within mechanical retirement: it removes
+routing to a now-absent agent and leans on the bead-queue surfacing the
+prompt already declared authoritative, rather than redesigning the
+consult model. The roadmap's surviving five references are now past-tense
+retirement notes that document this removal (and point here) — the
+"intentionally-kept historical mention" the verify criteria allow.
 
 ## Load-safety verification (why this does not break the engine)
 
@@ -49,44 +76,13 @@ touching the governed architect prompt below.
 
 Per this bead's Step 1 ("if a reference is load-bearing — would break
 `gc` pack load, another live agent, or a keybinding — STOP and report
-rather than ripping it out"), the following references were **not**
-removed. None breaks pack load (verified above); each is either a
-governed live-agent surface or a historical record.
+rather than ripping it out"), the references below were **not** removed.
+None breaks pack load (verified above); each is a non-load-bearing
+sub-pack reference or an immutable historical record. (The two live
+surfaces originally listed here — the architect prompt and the roadmap —
+were retired by the follow-up commit; see *Updated in place* above.)
 
-### 1. `agents/architect/prompt.template.md` — governed live agent
-
-The **architect is a live agent that stays** (not in the target list).
-Its prompt weaves `concierge` into its core consult-surfacing
-engagement model: "Concierge pushes; you file" (≈L70), the filing bar
-(≈L90), the kick-back behavior (≈L103), the `Concierge` collaborator
-subsection (≈L341), the `gc mail send concierge` / `gc session nudge
-concierge` push channels (≈L410), and the session-end checklist (≈L425).
-
-Crucially, the architect prompt itself states (≈L401) that **architect
-role/prompt updates are "proposed via mechanik"** — they are governed,
-not unilaterally editable by a polecat. Removing concierge from the pack
-makes these references stale (the push now targets a removed agent, but
-since concierge was never deployed the push was already a no-op, so
-nothing actively breaks).
-
-**Recommended follow-up:** a mechanik-proposed change to the architect
-prompt to redesign how the architect surfaces consults to the overseer
-now that the concierge push channel is retired (push the overseer
-directly? rely on bead polling?). That is a design decision for the
-architect owner, not mechanical dead-code deletion.
-
-### 2. `docs/roadmap.md` — vision narrative
-
-The gc-toolkit roadmap describes the consult-surfacing channel as a
-"Decided" pillar and a landed "Near-term" milestone, and links to the
-now-deleted `specs/2026-04-consult-design/` (those links now dangle).
-Rewriting the roadmap's forward-looking review-leg / architect vision to
-represent the retirement is a roadmap/product decision beyond a
-dead-code deletion. **Recommended follow-up:** a roadmap-update pass
-(doc-keeper / mechanik) to mark consult-surfacing retired and fix the
-dangling spec links.
-
-### 3. `packs/gascity-keeper/` — separate opt-in sub-pack
+### 1. `packs/gascity-keeper/` — separate opt-in sub-pack
 
 `agents/keeper/prompt.template.md` (a "Concierge / consult-host —
 neither of these apply" contrast disclaimer), `agents/keeper/PROVENANCE.md`
@@ -96,7 +92,7 @@ example references. This is a gascity-fork-specific sub-pack imported
 only by the gascity rig; the references are non-load-bearing and largely
 historical. Left for a separate sub-pack-scoped cleanup if desired.
 
-### 4. Historical specs — `specs/tk-*/` (10 files)
+### 2. Historical specs — `specs/tk-*/` (11 files)
 
 `tk-1zd25`, `tk-3pr5t`, `tk-my4za`, `tk-px5od` (5 files), `tk-rw0cb`,
 `tk-yiwfz.3`, `tk-yw3zb.1` are immutable historical design docs that
@@ -106,8 +102,20 @@ a word from a past design record rewrites history to no benefit.
 
 ## Net result
 
-Inventory references dropped from **335 across 31 files** to **49 across
-16 files** — all 16 are in the four call-out categories above. The
-self-contained cluster (agents, formula, script, design doc, and its two
-orphaned satellites) is gone; the pack loads clean with no live
-consult-host / concierge deployment remaining.
+Inventory references dropped from **335 across 31 files** at branch start
+to **49 across 16 files** after the cluster removal, then to **32 across
+15 files** at the PR head once the follow-up retired the architect-prompt
+and roadmap references. The remaining 32 fall in three non-load-bearing
+buckets:
+
+- **`docs/roadmap.md`** (5) — past-tense retirement notes documenting
+  this removal and pointing here.
+- **`packs/gascity-keeper/`** (3, across 3 files) — opt-in sub-pack:
+  prose / provenance / example mentions.
+- **historical specs** (24, across 11 files) — immutable design records.
+
+No live `consult-host` / `concierge` surface remains: the self-contained
+cluster (agents, formula, script, design doc, and its two orphaned
+satellites) is deleted, the architect prompt no longer routes to a
+removed agent, and the roadmap marks the channel retired. The pack loads
+clean with no consult-host / concierge deployment.
