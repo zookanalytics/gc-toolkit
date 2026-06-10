@@ -101,11 +101,54 @@ above), act on it:
 FIX_POOL=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.fix_target_pool // empty')
 PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
 
+# retry_graphql CMD... — run a GitHub GraphQL mutation with bounded backoff.
+# GitHub GraphQL mutations (e.g. `gh pr ready`, which calls
+# markPullRequestReadyForReview) intermittently return transient failures — a
+# flaky 401, a timeout, a 5xx — that self-heal within seconds. A bare one-shot
+# call strands state on such a blip (a fully-reviewed PR left in draft), so
+# retry up to 5 times with growing backoff (2s, 4s, 8s, 8s). Returns 0 as soon
+# as one attempt succeeds; non-zero only if every attempt fails — a genuine
+# persistent failure worth escalating. POSIX sh, no new deps.
+retry_graphql() {
+  _attempt=1
+  _delay=2
+  while :; do
+    if "$@"; then
+      return 0
+    fi
+    if [ "$_attempt" -ge 5 ]; then
+      return 1
+    fi
+    echo "retry_graphql: '$*' failed (attempt $_attempt/5); retrying in ${_delay}s" >&2
+    sleep "$_delay"
+    _attempt=$((_attempt + 1))
+    _delay=$((_delay * 2))
+    [ "$_delay" -gt 8 ] && _delay=8
+  done
+}
+
 if [ -n "$FIX_POOL" ]; then
   case "$VERDICT" in
     APPROVE|COMMENT)
       # No blocking findings. Un-draft the PR so the operator sees it.
-      gh pr ready "$PR_NUMBER"
+      # `gh pr ready` is the only state-stranding GraphQL mutation in this
+      # flow, so retry transient failures before escalating. (The `gh pr view`
+      # reads in the REQUEST_CHANGES arm are idempotent queries, not mutations,
+      # and safe to fail loudly — they are intentionally left un-retried.)
+      if ! retry_graphql gh pr ready "$PR_NUMBER"; then
+        # Retry budget exhausted — a persistent failure, not a self-healing
+        # blip. Escalate via the block-bead + witness path so a human can
+        # publish the PR once GitHub auth/API recovers. Do NOT fall through to
+        # close the bead: the un-draft is still pending.
+        WITNESS_TARGET="${GC_RIG:+$GC_RIG/}gc-toolkit.witness"
+        gc mail send "$WITNESS_TARGET" \
+          -s "ESCALATION: PR#$PR_NUMBER stuck in draft after review [HIGH]" \
+          -m "Codex review returned $VERDICT (non-blocking) but 'gh pr ready $PR_NUMBER' failed after 5 retries with backoff. The PR is fully reviewed and mergeable but stuck in draft. Once GitHub auth/API is healthy, run: gh pr ready $PR_NUMBER"
+        gc bd update <work-bead> --status=blocked \
+          --notes "Un-draft of PR#$PR_NUMBER failed after 5 retries; escalated to witness. PR reviewed ($VERDICT) but stuck in draft."
+        gc runtime drain-ack
+        exit
+      fi
       ;;
     REQUEST_CHANGES)
       # Findings need addressing. File a fix bead that resumes the
