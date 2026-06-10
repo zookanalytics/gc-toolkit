@@ -94,17 +94,17 @@ Distinct faces — architect consult vs. other specialist consult — come
 from metadata and presentation, not from separate bead types.
 
 Consult beads need a discoverability surface so they don't sit silent.
-A dedicated city-level `concierge` agent pushes a notification on
-consult creation and runs the triage conversation with the overseer
-("what's open?", "let's look at the review queue"). When the overseer
-commits to resolving a specific consult, concierge spawns a
-`consult-host` session for that bead and switches the overseer's tmux
-client into it; the host loads the bead in full and converses
-directly. Consults are filed as dependencies of the bead whose work
-they block, so closing a consult unblocks the parent. See
-`specs/2026-04-consult-design/consult-surfacing.md` (v1 surfacing model) and
-`specs/2026-04-consult-design/consult-session-v2-impl.md` (v2 session-per-consult, as
-built).
+The surface is the consult bead itself: filed with the `consult` label
+as a dependency of the bead whose work it blocks, so closing a consult
+unblocks the parent. An open consult in the queue is the notification;
+a city may wire a watcher or notification channel over consult-labeled
+beads, but bead state is the durable record.
+
+> **Retired (2026-06-10):** an earlier model shipped a dedicated
+> city-level `concierge` agent that pushed on consult creation and
+> spawned a `consult-host` tmux session per consult. That cluster was
+> never deployed and has been removed; consult surfacing now rests on
+> the bead queue as above. See `specs/tk-fi68i/consult-retirement.md`.
 
 ### Merge-strategy agnosticism
 
@@ -187,20 +187,14 @@ invented intentionally when we get to it, rather than bolted on.
   opinionated about paths or discovers and tracks them (design choice is
   open; both are acceptable). Pack-level architect carries no rig-specific
   knowledge.
-- **Consult bead surfacing channel**: a dedicated city-level `concierge`
-  agent pushes on creation and runs the triage conversation with the
-  overseer; on resolution, it spawns a `consult-host` session for the
-  bead and switches the overseer's tmux client into it. Consults are
-  filed as dependencies of the parent bead. Details in
-  `specs/2026-04-consult-design/consult-surfacing.md` (v1 surfacing) and
-  `specs/2026-04-consult-design/consult-session-v2-impl.md` (v2 session-per-consult).
-- **Mayor ↔ concierge bidirectional awareness via overlay fragment**:
-  the mayor side of the redirect (§5.7 of the consult-surfacing design)
-  ships as a gc-toolkit overlay — `template-fragments/mayor-concierge-redirect.template.md`
-  plus an `append_fragments` patch on `gastown.mayor` shown in
-  `agents/concierge/example-city.toml`. No fork of gastown's mayor
-  prompt; consuming cities opt in by adopting the wiring stanza
-  alongside the concierge `[[named_session]]`.
+- **Consult bead surfacing channel (retired 2026-06-10)**: consults
+  surface via the bead queue — filed with the `consult` label as
+  dependencies of the parent bead, discoverable as open beads. An
+  earlier decision shipped a dedicated city-level `concierge` agent
+  (push on creation + triage conversation) that spawned a `consult-host`
+  tmux session per consult, plus a `gastown.mayor` overlay fragment for
+  bidirectional awareness; that cluster was never deployed and has been
+  removed. See `specs/tk-fi68i/consult-retirement.md`.
 
 ### Open
 
@@ -239,18 +233,12 @@ The next durable artifacts, in rough order. Not a contract.
    best of the A/B experiment outputs.
 4. Architect's patrol formula (Active hat) for drift and
    question-promotion.
-5. Consult-bead surfacing channel — `concierge` agent landed (v1
-   model from `specs/2026-04-consult-design/consult-surfacing.md`); session-per-consult
-   v2 (Shape A — direct tmux attach, brand evaporates in-session)
-   landed on top, per `specs/2026-04-consult-design/consult-session-v2-impl.md`.
-   Pending build-signals from operating data:
-   - second consult-producing specialist (forces the
-     `consult-layer.md` pattern past one example);
-   - cold-start-latency feel under sustained use (revisit warm pools
-     only if the lazy spawn turns out to hurt engagement);
-   - re-engagement frequency within minutes vs. hours (revisit the
-     fresh-spawn-only default if short-cycle re-engagement becomes
-     common).
+5. Consult-bead surfacing channel — **retired (2026-06-10).** A
+   `concierge` agent (v1 push surfacing) plus a session-per-consult v2
+   (direct tmux attach) were built but never deployed; the cluster has
+   been removed in favor of bead-queue surfacing — consults surface as
+   `consult`-labeled beads parented to the work they block. See
+   `specs/tk-fi68i/consult-retirement.md`.
 6. First review-leg specialist: likely a planning/architecture-consistency
    leg that runs when a polecat finishes work against a plan the
    architect helped shape.

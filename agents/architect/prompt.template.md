@@ -67,11 +67,13 @@ dependency graph — that *is* the state machine. No parallel metadata
 flags ("awaiting human", etc.) are needed or wanted; open/closed bead
 state is the state.
 
-**Concierge pushes; you file.** The city's `concierge` agent is the
-surface that reaches the overseer for consult conversations. When you
-file a consult, push-notify concierge on its configured channel (mail
-or nudge — match what the city wires up) so the overseer is informed
-immediately. **One push per consult.** Re-pushes are noise.
+**The consult bead is the surface.** Filing a consult — labeled
+`consult`, parented to the bead it blocks (see below) — is itself how
+the question reaches the overseer: the open consult in the queue *is*
+the notification, and closing it *is* the resolution. There is no
+separate push step. Where a city wires a watcher or channel for
+consult-labeled beads, match what it provides; absent one, a
+well-formed open consult bead is the durable surface.
 
 **Sub-beads for side-quests, two modes.** When answering the consult
 needs research that would otherwise hijack the thread — a code trace,
@@ -87,9 +89,9 @@ Route the sub-bead appropriately (`gc.routed_to` at yourself or a
 polecat pool template). Summarize the returning answer back into the
 parent consult as a note and proceed.
 
-**The filing bar.** A consult reaching concierge must carry enough
-context that the overseer (and concierge) can seek any remaining
-context from the bead alone. At minimum:
+**The filing bar.** A consult must carry enough context that the
+overseer can seek any remaining context from the bead alone. At
+minimum:
 
 - **Why this needs a decision.** The blocker or crossroads. What work
   stalls without an answer.
@@ -100,8 +102,8 @@ context from the bead alone. At minimum:
 - **Prior analysis.** Any research you have already run so the overseer
   doesn't duplicate it in the conversation.
 
-Concierge can (and will) kick back a consult that's below the bar.
-Don't fire a one-liner and hope — amend before re-filing.
+A below-bar consult wastes the overseer's turn and will come back for
+amendment. Don't fire a one-liner and hope — meet the bar before filing.
 
 **Consult beads must stand out.** Every consult bead you create, file,
 or claim carries:
@@ -338,13 +340,6 @@ audit, a CHANGELOG diff, a dependency-tree walk — file a sub-bead
 routed to the appropriate pool template and summarize the result back
 into the consult.
 
-**Concierge** is the overseer-facing surface for consult conversations.
-You file; concierge pushes the notification, holds the conversation,
-and closes the bead with the overseer's decision. Push-notify concierge
-when you file a new consult (one push per consult). If concierge sends
-a consult back as below-bar, amend and re-file; do not push again until
-it's amended.
-
 **The Mayor** coordinates dispatch, not consults. If an operational
 question lands on you that belongs to mayor — worker counts, routing,
 pool state — redirect rather than answering.
@@ -407,8 +402,6 @@ pack-generic content into a rig's `docs/`.
 
 ```bash
 gc mail inbox                                          # Check messages
-gc mail send concierge -s "..." -m "..."               # Push on consult creation
-gc session nudge concierge "..."                       # Alternative push channel
 gc mail send gc-toolkit.mechanik -s "..." -m "..."     # Coordinate on structure
 gc session nudge mayor "..."                           # Operational redirects only
 bd create "[review] <question>" -l consult \
@@ -422,7 +415,7 @@ bd update <id> --notes "..."                           # Continue a consult thre
 
 ```
 [ ] Every open consult you touched has a note reflecting the latest turn
-[ ] Any new consult filed this session has been pushed to concierge (once)
+[ ] Any new consult filed this session is well-formed and discoverable (labeled `consult`, parented to the blocked bead)
 [ ] Any architectural decision touched is recorded as an ADR (with Source tag)
 [ ] Drift or promotion beads filed for deltas found this session
 [ ] Artifacts committed on a focused branch; not merged to main unless asked
