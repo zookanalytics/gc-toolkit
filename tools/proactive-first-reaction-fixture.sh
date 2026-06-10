@@ -10,6 +10,11 @@
 # already gates (board → pick → land → answer), so this fixture is NOT that. It
 # locks down the deterministic Phase-4 machinery underneath it:
 #
+#   • AUTO-SPAWN IS DEFAULT-DISABLED — tools/gc-proactive.sh `demand` (the
+#     pool's work_query, mirrored) emits [] unless GC_PROACTIVE_ENABLED is opted
+#     in, so the reconciler auto-spawns nothing by default. Manual sling/scan
+#     bypass the gate and always work. The cap/ranking checks below opt in
+#     (GC_PROACTIVE_ENABLED=1) to exercise the demand-flow path.
 #   • THE CAP HALTS PROACTIVE — tools/gc-proactive.sh `demand` (the pool's
 #     work_query, mirrored) SHEDS (emits []) at/over the city session cap, and
 #     flows routed work below it. This is the design's reconciler clamp +
@@ -105,23 +110,30 @@ JSON
 # (the qualified form gc sling and gc.routed_to require), independent of the
 # ambient environment — the fixture stays hermetic.
 P() { GC_RIG=gc-toolkit GC_PROACTIVE_FIXTURE="$FXDIR" "$PROACTIVE" "$@"; }
+# PD = P with demand-driven auto-spawn opted in. Auto-spawn is now
+# DEFAULT-DISABLED (the operator's conservative default), so the cap/ranking
+# assertions — which need demand to actually FLOW — drive the tool through PD.
+# The default-disabled behavior (flag unset ⇒ []) is asserted on its own below.
+PD() { GC_PROACTIVE_ENABLED=1 GC_RIG=gc-toolkit GC_PROACTIVE_FIXTURE="$FXDIR" "$PROACTIVE" "$@"; }
 
 echo "── the cap halts proactive at the limit (the reconciler clamp) ──"
-# Five active sessions. Below the cap, routed demand flows; at/over it, shed.
+# Auto-spawn opted in (PD) so demand actually flows; the cap is what we test
+# here. Five active sessions. Below the cap, routed demand flows; at/over it,
+# shed.
 eq "below cap (cap 10, active 5): routed demand flows (3 beads)" "3" \
-   "$(GC_PROACTIVE_CITY_CAP=10 P demand | jq 'length')"
+   "$(GC_PROACTIVE_CITY_CAP=10 PD demand | jq 'length')"
 eq "AT cap (cap 5, active 5): proactive SHEDS (0 beads)"          "0" \
-   "$(GC_PROACTIVE_CITY_CAP=5 P demand | jq 'length')"
+   "$(GC_PROACTIVE_CITY_CAP=5 PD demand | jq 'length')"
 eq "OVER cap (cap 4, active 5): proactive SHEDS (0 beads)"        "0" \
-   "$(GC_PROACTIVE_CITY_CAP=4 P demand | jq 'length')"
+   "$(GC_PROACTIVE_CITY_CAP=4 PD demand | jq 'length')"
 eq "shed output is a valid empty JSON array (work_query contract)" "array" \
-   "$(GC_PROACTIVE_CITY_CAP=5 P demand | jq -r 'type')"
+   "$(GC_PROACTIVE_CITY_CAP=5 PD demand | jq -r 'type')"
 
 echo "── proactive budget is ranked by board weight, not bd-ready oldest ──"
 # The scarce proactive slots (pool max 2 + city cap) must spend on the
 # highest-priority work first, oldest-first within a band. The seed's JSON
 # order is deliberately the WRONG order, so an unranked tool fails here.
-RANK="$(GC_PROACTIVE_CITY_CAP=10 P demand)"
+RANK="$(GC_PROACTIVE_CITY_CAP=10 PD demand)"
 eq "highest-priority bead leads (oldest within its band)" "px-mid-hi" \
    "$(printf '%s' "$RANK" | jq -r '.[0].id')"
 eq "same-priority tiebreak is oldest-first"               "px-new-hi" \
@@ -132,6 +144,75 @@ eq "lower-priority bead ranks LAST despite being oldest"  "px-old-lo" \
 ec=0; GC_PROACTIVE_CITY_CAP=10 P cap >/dev/null 2>&1 || ec=$?; eq "cap verb: ok below limit (exit 0)" "0" "$ec"
 ec=0; GC_PROACTIVE_CITY_CAP=5  P cap >/dev/null 2>&1 || ec=$?; eq "cap verb: shed at limit (exit non-zero)" "1" "$ec"
 has "cap verb names the SHED state" "SHED" "$(GC_PROACTIVE_CITY_CAP=5 P cap 2>&1 || true)"
+
+echo "── auto-spawn is DEFAULT-DISABLED (opt-in via GC_PROACTIVE_ENABLED) ──"
+# The operator's conservative default: the reconciler auto-spawns NO proactive
+# worker unless GC_PROACTIVE_ENABLED is truthy. We're below the cap with three
+# routed beads present, so ONLY the new gate can produce [] here. (The leading
+# `unset` guards against an ambient GC_PROACTIVE_ENABLED in the test env.)
+eq "default (flag unset): demand SHEDS to [] (no auto-spawn)"   "0" \
+   "$(unset GC_PROACTIVE_ENABLED; GC_PROACTIVE_CITY_CAP=10 P demand | jq 'length')"
+eq "default (flag unset): demand is a valid empty array"        "array" \
+   "$(unset GC_PROACTIVE_ENABLED; GC_PROACTIVE_CITY_CAP=10 P demand | jq -r 'type')"
+# Opt in: demand flows the ranked routed beads again.
+eq "enabled (=1): demand flows the routed beads (3)"            "3" \
+   "$(GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=10 P demand | jq 'length')"
+eq "enabled (=1): still board-ranked (highest-prio leads)"      "px-mid-hi" \
+   "$(GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=10 P demand | jq -r '.[0].id')"
+# The gate does NOT bypass the shed clamp: enabled but at the cap still sheds.
+eq "enabled but AT cap: shed clamp still applies (0)"           "0" \
+   "$(GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=5 P demand | jq 'length')"
+# Manual sling is UNGATED by the flag — a single-bead sling works in BOTH
+# states (the gate clamps ONLY auto-spawn / demand, never the manual path).
+has "manual sling works with the flag UNSET (dry-run)"   "--merge mr" \
+    "$(unset GC_PROACTIVE_ENABLED; P sling px-1 --dry-run 2>&1 || true)"
+has "manual sling works with the flag ENABLED (dry-run)" "--merge mr" \
+    "$(GC_PROACTIVE_ENABLED=1 P sling px-1 --dry-run 2>&1 || true)"
+
+echo "── the gate lives in the REAL work_query too (agent.toml, gc-free, FIRST) ──"
+# Drive the agent.toml work_query directly (not just the tool mirror): extract
+# the ''' body, substitute the template vars, and run it under sh. The gate is
+# FIRST and gc-free, so with the flag unset it must emit [] WITHOUT calling gc.
+# A POISON gc on PATH drops a sentinel file when invoked, so we can tell whether
+# the gate short-circuited before any gc call (the work_query's internal
+# 2>/dev/null would otherwise hide a gc invocation).
+extract_work_query() {
+    local line cap=0
+    while IFS= read -r line; do
+        if [ "$cap" = 0 ]; then
+            [ "$line" = "work_query = '''" ] && cap=1
+            continue
+        fi
+        [ "$line" = "'''" ] && break
+        printf '%s\n' "$line"
+    done < "$AGENT_TOML"
+}
+WQ="$(extract_work_query | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
+POISON="$(mktemp -d)"
+cat > "$POISON/gc" <<SH
+#!/bin/sh
+: > "$POISON/called"
+exit 99
+SH
+chmod +x "$POISON/gc"
+rm -f "$POISON/called"
+wq_out="$(env -u GC_PROACTIVE_ENABLED PATH="$POISON:$PATH" sh -c "$WQ" 2>/dev/null || true)"
+eq "work_query: default-disabled emits [] (the real reconciler gate)" "[]" "$wq_out"
+if [ -e "$POISON/called" ]; then
+    bad "work_query: disabled path is gc-free (gate is FIRST)" "no gc call" "gc was called"
+else
+    ok  "work_query: disabled path is gc-free (gate is FIRST)"
+fi
+# Sanity: the [] above is the GATE, not an always-empty query. With the flag ON
+# the gate falls through to the gc-backed body, which hits the poison gc.
+rm -f "$POISON/called"
+GC_PROACTIVE_ENABLED=1 PATH="$POISON:$PATH" sh -c "$WQ" >/dev/null 2>&1 || true
+if [ -e "$POISON/called" ]; then
+    ok  "work_query: enabled falls THROUGH the gate to the gc body"
+else
+    bad "work_query: enabled falls through to the gc body" "gc called" "gc not called"
+fi
+rm -rf "$POISON"
 
 echo "── the security invariant: proactive output is mr-only, never direct ──"
 ec=0; GC_PROACTIVE_MERGE=direct P sling px-1 --dry-run >/dev/null 2>&1 || ec=$?
@@ -202,6 +283,7 @@ A="$(cat "$AGENT_TOML")"
 MAX="$(printf '%s\n' "$A" | sed -n 's/^max_active_sessions *= *\([0-9][0-9]*\).*/\1/p' | head -n1)"
 case "$MAX" in 2|3) ok "dedicated small pool (max_active_sessions=$MAX in 2-3)" ;;
    *) bad "dedicated small pool (max_active_sessions in 2-3)" "2 or 3" "$MAX" ;; esac
+has "work_query carries the default-disabled auto-spawn gate" "GC_PROACTIVE_ENABLED" "$A"
 has "work_query carries the city-cap shed clamp" "GC_PROACTIVE_CITY_CAP"  "$A"
 has "work_query sheds with an empty array"       "printf '[]'"            "$A"
 has "work_query routes to this pool"             "gc-toolkit.proactive"   "$A"
