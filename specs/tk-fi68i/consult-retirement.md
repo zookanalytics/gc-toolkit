@@ -124,10 +124,12 @@ example references. This is a gascity-fork-specific sub-pack imported
 only by the gascity rig; the references are non-load-bearing and largely
 historical. Left for a separate sub-pack-scoped cleanup if desired.
 
-### 2. Historical specs — `specs/tk-*/` (10 files)
+### 2. Historical specs — `specs/` design records (16 files)
 
-`tk-1zd25`, `tk-3pr5t`, `tk-my4za`, `tk-px5od` (4 files), `tk-rw0cb`,
-`tk-yiwfz.3`, `tk-yw3zb.1` are immutable historical design docs that
+`tk-1zd25`, `tk-3pr5t`, `tk-husu6`, `tk-my4za`, `tk-oml75`,
+`tk-px5od` (4 files), `tk-rw0cb`, `tk-yiwfz.3`, `tk-yw3zb.1`, and the
+`specs/bead-universe/` set (`design-doc`, `prd-draft`, `prd-review`,
+`human-clarifications`) are immutable historical design docs that
 mention the cluster in the context of past work. These are the
 "intentionally-kept historical mention[s]" the verify allows; scrubbing
 a word from a past design record rewrites history to no benefit.
@@ -137,7 +139,7 @@ a word from a past design record rewrites history to no benefit.
 Inventory references dropped from **335 across 31 files** at branch start
 to **49 across 16 files** after the cluster removal (`b044f1d`). At the
 current PR head — excluding this report's own inventory, which names the
-cluster terms throughout by nature — **35 references across 14 files**
+cluster terms throughout by nature — **60 references across 20 files**
 remain, all non-load-bearing:
 
 - **`docs/roadmap.md`** (10) — past-tense retirement notes documenting
@@ -147,12 +149,17 @@ remain, all non-load-bearing:
   are records, not live wiring.
 - **`packs/gascity-keeper/`** (3, across 3 files) — opt-in sub-pack:
   prose / provenance / example mentions.
-- **historical specs** (22, across 10 files) — immutable design records.
+- **historical specs** (47, across 16 files) — immutable design records
+  under `specs/`, spanning the `tk-*` design docs and the
+  `specs/bead-universe/` set (§2 above).
 
 These counts are a snapshot of the current head; they shift as this report
 and the roadmap notes are reworded, so the durable invariant — not the
 number — is what matters: no live `consult-host` / `concierge` / architect
-surface remains. The self-contained cluster (agents, formula, script,
+surface remains. The head count is reproducible at any commit via `git grep
+-cE 'consult-host|concierge|consult-attach|mol-consult-host' -- .
+':!specs/tk-fi68i/consult-retirement.md'` (per-file counts; pipe to `wc -l`
+for the line total). The self-contained cluster (agents, formula, script,
 design doc, and its two orphaned satellites) is deleted, the architect
 agent — the consult producer — is removed in full, and the roadmap marks
 the whole consult model retired. The pack loads clean with no
