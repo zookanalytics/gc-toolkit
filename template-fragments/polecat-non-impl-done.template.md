@@ -105,7 +105,11 @@ if [ -n "$FIX_POOL" ]; then
   case "$VERDICT" in
     APPROVE|COMMENT)
       # No blocking findings. Un-draft the PR so the operator sees it.
-      gh pr ready "$PR_NUMBER"
+      # Best-effort: if this one-shot fails (transient GraphQL error, a
+      # restart mid-flow, a Dolt wedge), do NOT block the review bead or
+      # escalate — the refinery patrol's draft-PR reconcile pass converges
+      # the PR to ready on its next idle wake.
+      gh pr ready "$PR_NUMBER" || echo "un-draft failed; refinery patrol will reconcile this PR's draft state" >&2
       ;;
     REQUEST_CHANGES)
       # Findings need addressing. File a fix bead that resumes the
