@@ -156,10 +156,17 @@ remain, all non-load-bearing:
 These counts are a snapshot of the current head; they shift as this report
 and the roadmap notes are reworded, so the durable invariant — not the
 number — is what matters: no live `consult-host` / `concierge` / architect
-surface remains. The head count is reproducible at any commit via `git grep
--cE 'consult-host|concierge|consult-attach|mol-consult-host' -- .
-':!specs/tk-fi68i/consult-retirement.md'` (per-file counts; pipe to `wc -l`
-for the line total). The self-contained cluster (agents, formula, script,
+surface remains. The head counts are reproducible at any commit, scoped
+to the tree minus this report. The **60-reference total** is the
+matching-line count: `git grep -nE
+'consult-host|concierge|consult-attach|mol-consult-host' -- .
+':!specs/tk-fi68i/consult-retirement.md' | wc -l`. The **20-file count**
+swaps `-n` for `-l` (list matching files): `git grep -lE
+'consult-host|concierge|consult-attach|mol-consult-host' -- .
+':!specs/tk-fi68i/consult-retirement.md' | wc -l`. Note that `git grep
+-cE ... | wc -l` counts matching files (20), not references — sum its
+per-file counts with `awk -F: '{n += $NF} END {print n}'` to get 60. The
+self-contained cluster (agents, formula, script,
 design doc, and its two orphaned satellites) is deleted, the architect
 agent — the consult producer — is removed in full, and the roadmap marks
 the whole consult model retired. The pack loads clean with no
