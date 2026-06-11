@@ -58,8 +58,9 @@ hold the rest of the bundle.
   doesn't dispatch this directly but participates in the re-pour loop
   via the `rebase_in_progress` handback.
 - `formulas/mol-upstream-gc-pr-prep.toml` — the PR-prep mol the keeper
-  dispatches on "prep PR for &lt;sha&gt;" commands; this mol hands the
-  bead back to the keeper for the title/body conversation.
+  dispatches on "prep PR for &lt;sha&gt;" / "prep PR batch &lt;sha&gt; …"
+  commands (single commit or an ordered multi-commit batch on one branch);
+  this mol hands the bead back to the keeper for the title/body conversation.
 - `docs/gascity-local-patching.md` — the operator-level doc the keeper
   references on prime; describes when local-patching is appropriate and
   the bar for promoting a commit to an upstream PR candidate.

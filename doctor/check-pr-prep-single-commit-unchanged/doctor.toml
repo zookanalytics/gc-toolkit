@@ -1,0 +1,1 @@
+description = "mol-upstream-gc-pr-prep keeps the single-commit (N=1) path after batch support: required commit_sha, empty-default branch_name, upstream-pr/<short-sha> branch, per-sha cherry-pick (tk-ur4o2)"
