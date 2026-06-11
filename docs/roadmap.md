@@ -47,9 +47,10 @@ These are the ideas every addition should be consistent with.
 ### Branded context channels
 
 Every user-facing surface — agent name, document path, bead type, subject
-prefix — must carry a recognizable brand. When the user sees "architect" or
-opens `architecture.md`, the brand pre-loads the mental model: they know
-the scope, the shape of the conversation, what context to bring.
+prefix — must carry a recognizable brand. When the user sees a branded
+agent name or opens a file like `architecture.md`, the brand pre-loads the
+mental model: they know the scope, the shape of the conversation, what
+context to bring.
 
 Branded surfaces are what make engagement high-bandwidth. The user skips
 to the actual question fast because the surface itself told them the rest.
@@ -60,8 +61,9 @@ sentence. If you can't, don't add it.
 
 ### Three hats (for any specialist agent)
 
-Any agent dedicated to a domain — architect today, others possibly later —
-is expected to wear three hats within that domain:
+Any agent dedicated to a domain — the architect explored this pattern
+(since retired from core; see below), others possibly later — is expected
+to wear three hats within that domain:
 
 1. **Partner** — reactive. There for you. Answers questions, consults
    when invited, records decisions as they land.
@@ -77,10 +79,10 @@ is expected to wear three hats within that domain:
 
 Continuous responsibilities (hat 2, hat 3) can only live in a dedicated
 agent — a formula-only role can't patrol or maintain an index between
-invocations. That's why specialist work in gc-toolkit picks dedicated
+invocations. That's why specialist work in gc-toolkit would pick dedicated
 agents over formula roles when the three-hat pattern applies.
 
-### Consult beads
+### Consult beads — retired from core (2026-06-10)
 
 Agent-to-human dialogue travels on **consult beads**. One bead per
 conversation. The bead holds the back-and-forth until resolved, then
@@ -100,11 +102,14 @@ unblocks the parent. An open consult in the queue is the notification;
 a city may wire a watcher or notification channel over consult-labeled
 beads, but bead state is the durable record.
 
-> **Retired (2026-06-10):** an earlier model shipped a dedicated
+> **Retired from core (2026-06-10):** consult beads were the architect's
+> engagement model. An earlier iteration also shipped a dedicated
 > city-level `concierge` agent that pushed on consult creation and
-> spawned a `consult-host` tmux session per consult. That cluster was
-> never deployed and has been removed; consult surfacing now rests on
-> the bead queue as above. See `specs/tk-fi68i/consult-retirement.md`.
+> spawned a `consult-host` tmux session per consult. None of the pieces —
+> the producer (architect), the surfacer (concierge), or the host
+> (consult-host) — was ever deployed in a running city; all have been
+> removed from core. The model above is kept as a record of the idea, not
+> a current mechanism. See `specs/tk-fi68i/consult-retirement.md`.
 
 ### Merge-strategy agnosticism
 
@@ -115,10 +120,22 @@ adapts.
 
 ## What we're building
 
-### The architect
+### The architect — explored, retired from core (2026-06-10)
 
-A dedicated conversational agent that wears the three hats for a rig's
-architecture. First specialist agent the pack will ship.
+> **Retired from core (2026-06-10):** the architect was the first
+> specialist agent the pack explored, but — like the `concierge` /
+> `consult-host` cluster that was to surface its consults — it was never
+> deployed in any running city. The operator's call on PR #106: the core
+> idea may be worth revisiting later, but having it committed into core
+> caused more confusion than it solved. The agent (`agents/architect/`)
+> has been removed; the vision below is kept as a record of the idea, not
+> a commitment to build. With the architect (the consult *producer*) gone
+> alongside the surfacer and host, the consult-bead engagement model is
+> retired from core as a whole. See
+> `specs/tk-fi68i/consult-retirement.md`.
+
+The vision was a dedicated conversational agent that wears the three hats
+(above) for a rig's architecture — the first specialist the pack explored.
 
 **Partner**: consults during `mol-idea-to-plan`. Answers architecture
 questions on demand. Records decisions as ADRs.
@@ -170,53 +187,70 @@ invented intentionally when we get to it, rather than bolted on.
 
 ### Settled
 
-- **Architect is a dedicated agent**, not a role inside a planning formula.
-  Reason: the Active and Library hats require persistence between
-  invocations.
-- **Engagement travels on consult beads**, one bead per conversation,
-  sub-beads for research side-quests. Metadata and presentation give
-  distinct faces.
+- **Architect is a dedicated agent** *(retired from core 2026-06-10)*, not
+  a role inside a planning formula. Reason: the Active and Library hats
+  require persistence between invocations. The agent was never deployed
+  and has been removed; kept as a record. See *The architect* above and
+  `specs/tk-fi68i/consult-retirement.md`.
+- **Engagement travels on consult beads** *(retired from core 2026-06-10)*,
+  one bead per conversation, sub-beads for research side-quests. Metadata
+  and presentation give distinct faces. The consult model retired from
+  core along with the architect; see *Consult beads* above.
 - **Merge-strategy agnostic**: gc-toolkit does not default or force a
   merge strategy. Consuming rigs choose.
 - **Review legs, not gates**: the language matters. Passes are partners,
   not walls.
 - **Pack is publishable and public**: all artifacts reference only public
   projects. No private rig names appear in pack artifacts.
-- **Architect reads from rig-stored artifacts**: everything the architect
-  reasons about is stored in the consuming rig. Architect is either
-  opinionated about paths or discovers and tracks them (design choice is
-  open; both are acceptable). Pack-level architect carries no rig-specific
-  knowledge.
-- **Consult bead surfacing channel (retired 2026-06-10)**: consults
-  surface via the bead queue — filed with the `consult` label as
-  dependencies of the parent bead, discoverable as open beads. An
-  earlier decision shipped a dedicated city-level `concierge` agent
-  (push on creation + triage conversation) that spawned a `consult-host`
-  tmux session per consult, plus a `gastown.mayor` overlay fragment for
-  bidirectional awareness; that cluster was never deployed and has been
-  removed. See `specs/tk-fi68i/consult-retirement.md`.
+- **Architect reads from rig-stored artifacts** *(retired from core
+  2026-06-10)*: everything the architect reasoned about would be stored in
+  the consuming rig. Architect was to be either opinionated about paths or
+  discover and track them (design choice was left open; both were
+  acceptable). Pack-level architect would carry no rig-specific knowledge.
+  See *The architect* above.
+- **Consult model, end to end (retired from core 2026-06-10)**: the
+  surfacing channel was to be the bead queue — consults filed with the
+  `consult` label as dependencies of the parent bead, discoverable as open
+  beads. An earlier decision shipped a dedicated city-level `concierge`
+  agent (push on creation + triage conversation) that spawned a
+  `consult-host` tmux session per consult, plus a `gastown.mayor` overlay
+  fragment for bidirectional awareness. None of it — producer (architect),
+  surfacer (concierge), or host (consult-host) — was ever deployed; all
+  have been removed from core. See `specs/tk-fi68i/consult-retirement.md`.
 
 ### Open
 
-- **Architect: opinionated paths vs. discovery**: the architect either
-  expects artifacts at known paths or learns where they live per-rig.
-  Both are acceptable; we'll pick one (or allow both) when we build.
+- **Architect: opinionated paths vs. discovery** *(moot — architect
+  retired from core 2026-06-10)*: the architect would either expect
+  artifacts at known paths or learn where they live per-rig. Both were
+  acceptable; the choice is moot now that the agent is retired.
 - **Review leg configuration shape**: which legs are pack-default vs
   per-rig opt-in, and where that configuration lives, is not yet drawn.
-- **Architect tool-configuration interface**: the `[tools]` extensibility
-  is noted but not designed. No current OSS codebase-comprehension
-  tool is committed to.
-- **Planning formula override scope**: `mol-idea-to-plan` will likely
-  need extension points for the architect to attach to. Whether that
-  means overriding gastown's formula or contributing a pre/post-step
-  extension mechanism is open.
-- **Sub-bead ergonomics**: the Slack-conversation metaphor works if
-  creating, tracking, and resolving sub-beads feels natural. The
-  existing bead CLI may or may not meet that bar; we'll learn by use.
+- **Architect tool-configuration interface** *(moot — architect retired
+  from core 2026-06-10)*: the `[tools]` extensibility was noted but never
+  designed. No OSS codebase-comprehension tool was committed to.
+- **Planning formula override scope** *(moot — architect retired from core
+  2026-06-10)*: `mol-idea-to-plan` would have needed extension points for
+  the architect to attach to. Whether that meant overriding gastown's
+  formula or a pre/post-step extension mechanism was left open — moot
+  without the architect.
+- **Sub-bead ergonomics** *(moot — consult model retired from core
+  2026-06-10)*: the Slack-conversation metaphor worked if creating,
+  tracking, and resolving sub-beads felt natural. Moot now that the
+  consult model is retired from core.
 
 ## Near-term
 
 The next durable artifacts, in rough order. Not a contract.
+
+> **Retired from core (2026-06-10):** items 1–5 below described the
+> architect build-out (the A/B ingestion experiment, the
+> `agents/architect/` agent, its ingest and patrol formulas) and the
+> consult-bead surfacing channel. The architect and the consult model are
+> retired from core — kept as a record of the plan, not a current
+> commitment. See *The architect* above and
+> `specs/tk-fi68i/consult-retirement.md`. Review legs (item 6) remain a
+> live direction, independent of the architect.
 
 1. **First-pass ingestion A/B experiment (before the architect exists).**
    Run two or more polecats on a pilot rig, each using a different
@@ -233,15 +267,15 @@ The next durable artifacts, in rough order. Not a contract.
    best of the A/B experiment outputs.
 4. Architect's patrol formula (Active hat) for drift and
    question-promotion.
-5. Consult-bead surfacing channel — **retired (2026-06-10).** A
+5. Consult-bead surfacing channel — **retired from core (2026-06-10).** A
    `concierge` agent (v1 push surfacing) plus a session-per-consult v2
    (direct tmux attach) were built but never deployed; the cluster has
-   been removed in favor of bead-queue surfacing — consults surface as
-   `consult`-labeled beads parented to the work they block. See
+   been removed. With the architect (the only consult producer) also
+   retired, the consult model is gone from core entirely. See
    `specs/tk-fi68i/consult-retirement.md`.
-6. First review-leg specialist: likely a planning/architecture-consistency
-   leg that runs when a polecat finishes work against a plan the
-   architect helped shape.
+6. First review-leg specialist: likely a planning/consistency leg that
+   runs when a polecat finishes work against the plan it was given.
+   (Review legs do not depend on the architect.)
 
 ## Changelog
 
