@@ -215,12 +215,8 @@ idle loop is the ONLY thing that runs on the {{event_timeout}} cadence when
 the refinery is idle, so the reconcile lives here rather than in a standalone
 step that idle would never reach.
 ```bash
-RECONCILE=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts/reconcile-draft-prs.sh" \
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/reconcile-draft-prs.sh"; do
-  if [ -x "$cand" ]; then RECONCILE="$cand"; break; fi
-done
-if [ -n "$RECONCILE" ]; then
+RECONCILE="{{ .ConfigDir }}/assets/scripts/reconcile-draft-prs.sh"
+if [ -x "$RECONCILE" ]; then
   # Best-effort: a failed pass is retried next idle wake, never blocks find-work.
   "$RECONCILE" || echo "reconcile-draft-prs: pass failed (non-fatal); retries next idle wake" >&2
 fi
