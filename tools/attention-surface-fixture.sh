@@ -11,8 +11,9 @@
 #
 #   • the 4th anchor kind — a flagged bead (gc.attention=1) is admitted, lands
 #     in its own FLAGGED band, and floats above every other anchor;
-#   • the liveness glyph — the alias==bead-id join over `gc session list`
-#     resolves hot / warm / cold correctly;
+#   • the liveness glyph — the pack-namespaced-alias → bead-id join over
+#     `gc session list` (bead-host sessions only) resolves hot/warm/cold,
+#     and a live host keeps a decomposed anchor out of the stranded band;
 #   • the row cap — the board never balloons past the cap, and --limit=0 opts
 #     out for tooling;
 #   • the --json contract — additive only (new `live` field present; existing
@@ -71,14 +72,17 @@ cat > "$FXDIR/anchors.ndjson" <<'JSON'
 {"id":"tk-flagwarm","title":"Stale spec","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[],"reason":"needs a re-read","flagged_at":"2026-06-06T00:00:00Z"}
 JSON
 
-# Sessions: tk-flaghot has an ACTIVE host (hot); tk-flagwarm a SUSPENDED one
-# (warm); everything else cold. A foreign session aliased to a non-bead must
-# not perturb the join.
+# Sessions model the real shape: a bead-host alias is pack-namespaced
+# (<pack>.<bead-id>) and carries the bead-host template, so the board's
+# liveness join strips the leading "<pack>." and joins only bead-host
+# sessions. tk-flaghot has an ACTIVE host (hot); tk-flagwarm a SUSPENDED one
+# (warm); everything else cold. The refinery (non-bead-host template, aliased
+# with slashes) must NOT perturb the join.
 cat > "$FXDIR/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-1","alias":"tk-flaghot","state":"active","running":true,"attached":false},
-  {"id":"lx-2","alias":"tk-flagwarm","state":"suspended","running":false,"attached":false},
-  {"id":"lx-9","alias":"gc-toolkit/gc-toolkit.refinery","state":"active","running":true}
+  {"id":"lx-1","alias":"gc-toolkit.tk-flaghot","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":false},
+  {"id":"lx-2","alias":"gc-toolkit.tk-flagwarm","template":"gc-toolkit.bead-host","state":"suspended","running":false,"attached":false},
+  {"id":"lx-9","alias":"gc-toolkit/gc-toolkit.refinery","template":"gc-toolkit.refinery","state":"active","running":true}
 ]}
 JSON
 
@@ -91,13 +95,45 @@ eq   "top row is a flagged bead"             "FLAGGED" "$(printf '%s' "$J" | jq 
 eq   "flagged floats above the stranded epic" "true"  "$(printf '%s' "$J" | jq -r '(.[0].rank_score) > (.[]|select(.kind=="epic").rank_score)')"
 has  "flagged frontier carries the reason"   "CI red" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flaghot").frontier')"
 
-echo "── hermetic: liveness glyph join (alias==bead-id) ──"
+echo "── hermetic: liveness glyph join (pack-namespaced alias → bead-id) ──"
 eq   "hot host resolves hot"   "hot"  "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flaghot").live')"
 eq   "suspended host is warm"  "warm" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flagwarm").live')"
 eq   "no host is cold"         "cold" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").live')"
 eq   "live field is on every row (additive contract)" "4" "$(printf '%s' "$J" | jq '[.[]|select(.live!=null)]|length')"
 has  "hot glyph in human table"   "●" "$(B)"
 has  "warm glyph in human table"  "◐" "$(B)"
+
+echo "── hermetic: live host ⇒ active, not stranded (tk-q4xaj.2) ──"
+# A decomposed epic with open children and ZERO in-progress is the classic
+# "stranded/HIGH" shape — UNLESS a live bead-host is resident, in which case
+# it is being worked via a 1:1 conversation, not via child polecats. Two
+# sibling epics with the identical stranded shape: tk-hosted has a HOT host,
+# tk-lonely has none. The fix must spare the hosted one and ONLY the hosted
+# one (liveness-gated, not a blanket suppression).
+LIVE="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
+cat > "$LIVE/anchors.ndjson" <<'JSON'
+{"id":"tk-hosted","title":"Hosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-08T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-h1","status":"open","assignee":""},{"id":"tk-h2","status":"open","assignee":""}]}
+{"id":"tk-lonely","title":"Unhosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-08T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-l1","status":"open","assignee":""},{"id":"tk-l2","status":"open","assignee":""}]}
+JSON
+cat > "$LIVE/sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-h","alias":"gc-toolkit.tk-hosted","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":true}
+]}
+JSON
+LIVEJ="$(GC_ATTENTION_FIXTURE="$LIVE" "$TOOL" --json)"
+eq     "hosted epic resolves hot"               "hot"    "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").live')"
+eq     "hosted epic is NORMAL, not HIGH"        "NORMAL" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").severity')"
+eq     "hosted epic is NOT stranded"            "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").stranded')"
+has    "hosted epic frontier reads in-conversation" "in conversation" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
+absent "hosted epic frontier drops (stranded)"  "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
+has    "hosted epic needs is open-to-join"      "open to join" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").needs')"
+has    "hosted epic still shows the hot glyph"  "●" "$(GC_ATTENTION_FIXTURE="$LIVE" "$TOOL")"
+# Control: the unhosted sibling, identical shape but no host, stays HIGH.
+eq     "unhosted sibling stays cold"            "cold"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").live')"
+eq     "unhosted sibling stays HIGH"            "HIGH"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
+eq     "unhosted sibling stays stranded"        "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").stranded')"
+has    "unhosted sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
+rm -rf "$LIVE"
 
 echo "── hermetic: --json contract stays additive (existing fields intact) ──"
 for f in id rig kind title severity weight n_closed m_total open in_progress frontier needs rank_score; do

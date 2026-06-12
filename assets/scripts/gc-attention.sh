@@ -66,18 +66,25 @@
 #                      `progress_mismatch` in the JSON output. Decisions
 #                      and flagged beads carry no frontier (N/M = —).
 #   • open/in-progress/assigned — counts over the open frontier.
-#   • stranded       — decomposed (M>0) with open children but ZERO
-#                      in-progress: work exists but nothing is moving.
+#   • stranded       — decomposed (M>0) with open children, ZERO
+#                      in-progress, AND no live host: work exists but
+#                      nothing is moving. A live host counts as moving —
+#                      the bead is worked via a resident 1:1 conversation,
+#                      not via in-progress child polecats.
 #   • empty          — an epic/convoy with no children (M==0).
 #   • complete       — M>0 but every child closed (0 open): awaiting
 #                      graduation/close.
-#   • live           — host liveness, joined from `gc session list` by
-#                      alias==bead-id (a bead-host's alias IS its bead):
+#   • live           — host liveness, joined from `gc session list` by the
+#                      bead-id the host's alias encodes. A bead-host alias
+#                      is pack-namespaced (<pack>.<bead-id>), so the leading
+#                      "<pack>." is stripped and only bead-host template
+#                      sessions are joined:
 #                      "hot" (active session — open ATTACHES instantly),
 #                      "warm" (suspended/asleep — open RESUMES the saved
 #                      conversation), or "cold" (no host — open
 #                      MATERIALIZES one). The glance answers "is anyone
-#                      home?" before you pick the row.
+#                      home?" before you pick the row. A live host also
+#                      keeps the anchor out of the stranded/HIGH band.
 #   • stale_days     — days since the anchor itself was last updated.
 #   • cross_rig_refs — DETERMINISTIC prose scan of the anchor body for
 #                      bead-ids belonging to OTHER rigs (cross-rig work
@@ -90,10 +97,12 @@
 # weight PROXY, then by staleness:
 #
 #   FLAGGED   a bead explicitly raised onto the board (hand-raised).
-#   HIGH      stranded frontier (decomposed, open, 0 in-progress).
+#   HIGH      stranded frontier (decomposed, open, 0 in-progress, and no
+#             live host).
 #   ELEVATED  a `decision` (human-gated), OR an otherwise-NORMAL anchor
 #             gone stale (> STALE_DAYS days).
-#   NORMAL    active frontier (has in-progress work).
+#   NORMAL    active frontier (has in-progress work, OR a live host —
+#             someone is in the conversation).
 #   LOW       empty epic (0 children) or complete convoy (all closed).
 #
 #   weight PROXY = M (subtree size)
@@ -378,15 +387,25 @@ cmd_board() {
     fi
 
     # ── Liveness join (always fresh: one cheap session-list call) ─────
-    # alias==bead-id is the bead-host binding. Map bead-id -> host state.
+    # A bead-host's session alias is pack-namespaced — <pack>.<bead-id>
+    # (e.g. gc-toolkit.tk-q4xaj) — so key the map by the bead-id the alias
+    # encodes: strip the leading "<pack>." segment, restricted to bead-host
+    # template sessions. This mirrors gc-bead-host.sh's own reverse-
+    # resolution (template ~ "bead-host"); a foreign session (the refinery,
+    # a crew) is excluded and never marks an anchor live. An alias with no
+    # dot is used as-is (sub leaves a non-matching string unchanged). Map
+    # bead-id -> host state.
     if [ -n "$FIXTURE" ]; then
         sess_raw=$([ -f "$FIXTURE/sessions.json" ] && cat "$FIXTURE/sessions.json" || printf '{}')
     else
         sess_raw=$(gcq session list --state all --json)
     fi
     SESS_MAP=$(printf '%s' "$sess_raw" | jq -c '
-        [ (.sessions // . // [])[]? | select((.alias // "") != "")
-          | {key:(.alias), value:{state:(.state//""), running:(.running//false), attached:(.attached//false)}} ]
+        [ (.sessions // . // [])[]?
+          | select((.alias // "") != "")
+          | select((.template // "") | test("bead-host"))
+          | {key:((.alias) | sub("^[^.]+\\.";"")),
+             value:{state:(.state//""), running:(.running//false), attached:(.attached//false)}} ]
         | from_entries' 2>/dev/null || printf '{}')
 
     # ── Compute facts, rank, render (single jq pass) ──────────────────
@@ -418,17 +437,22 @@ def epoch($s): ($s | if . == null or . == "" then null
                 | scan("(?:" + ($others|join("|")) + ")-[a-z0-9]{3,8}") ]
               | map(select(. as $r | ($rignames | index($r)) == null and $r != $a.id))
               | unique ) end) as $xrefs
-    # host liveness, joined by alias==bead-id
+    # host liveness, joined by the bead-id the host alias encodes
+    # (SESS_MAP already stripped the pack prefix, bead-host sessions only)
     | ($sessmap[$a.id] // null) as $host
     | (if $host==null then "cold"
        elif ($host.state=="active" or $host.running==true) then "hot"
        else "warm" end) as $live
-    # severity band
+    # severity band. A live host (hot/warm) is active work via a 1:1
+    # resident conversation, not via in-progress child polecats — so
+    # "0 in-progress" is NOT stranded when someone is home. Stranded/HIGH
+    # is reserved for a decomposed anchor with open children, zero
+    # in-progress, AND no live host.
     | (if $a.source=="flagged" then "FLAGGED"
        elif $a.source=="decision" then "ELEVATED"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
-       elif ($open>0 and $inprog==0) then "HIGH"
+       elif ($open>0 and $inprog==0 and $live=="cold") then "HIGH"
        else "NORMAL" end) as $sev0
     | (if ($sev0=="NORMAL" and $stale > '"$STALE_DAYS"') then "ELEVATED" else $sev0 end) as $sev
     | ($m + prio_w($a.priority) + ([$xrefs|length, '"$XREF_CAP"'] | min)) as $weight
@@ -437,6 +461,8 @@ def epoch($s): ($s | if . == null or . == "" then null
        elif $a.source=="decision" then "human-gated decision"
        elif $m==0 then "empty — no children"
        elif $open==0 then "all \($m) closed · 0 open"
+       elif ($inprog==0 and $live=="hot") then "\($open) open · in conversation"
+       elif ($inprog==0 and $live=="warm") then "\($open) open · host asleep"
        elif $inprog==0 then "\($open) open · 0 in-progress (stranded)"
        else "\($open) open · \($inprog) in-progress" end) as $frontier
     | ($open_ids[0:3] | join(",")) as $heads
@@ -446,13 +472,15 @@ def epoch($s): ($s | if . == null or . == "" then null
        elif $a.source=="decision" then "operator decision"
        elif $m==0 then "decompose or close"
        elif $open==0 then (if $a.source=="convoy" then "graduate / close" else "close or extend" end)
+       elif ($inprog==0 and $live=="hot") then "open to join"
+       elif ($inprog==0 and $live=="warm") then "open to resume"
        elif $inprog==0 then ("assign " + (if $heads=="" then "frontier" else $heads end) + (if ($open>3) then " (+\($open-3))" else "" end) + $blurb)
        else "in flight" end) as $needs
     | {
         id:$a.id, rig:$a.rig, kind:$a.kind, title:$a.title,
         severity:$sev, weight:$weight, live:$live,
         n_closed:$closed, m_total:$m, open:$open, in_progress:$inprog, assigned:$assigned,
-        stranded:($m>0 and $open>0 and $inprog==0),
+        stranded:($m>0 and $open>0 and $inprog==0 and $live=="cold"),
         empty:($m==0 and $a.source!="decision" and $a.source!="flagged"),
         complete:($m>0 and $open==0),
         progress_mismatch:$pmismatch,
