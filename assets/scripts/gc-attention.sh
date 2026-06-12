@@ -168,11 +168,14 @@ Usage:
   gc-attention open  <bead-id>                 land in the bead (resume-or-create its host)
   gc-attention flag  <bead-id> --reason "..."  raise this bead onto the board
   gc-attention clear <bead-id>                 lower it again (the handled row leaves)
+  gc-attention react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, decisions, and flagged beads) by how much
 they need a human's attention. open/flag/clear close the
-board→land→accept/redirect→leave loop.
+board→land→accept/redirect→leave loop; react slings a proactive first
+reaction (via tools/gc-proactive.sh, on the codex-gated mr path) so a
+takeaway-less row self-heals to an explanatory NEEDS on the next render.
 
   --json             Emit the ranked board as a JSON array (stable contract).
   --limit=N          Show only the top N rows (0 = all/uncapped; default caps at 50).
@@ -192,6 +195,7 @@ iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 BEAD_HOST_TOOL="${GC_BEAD_HOST_TOOL:-$SCRIPT_DIR/../../tools/gc-bead-host.sh}"
+PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 
 # ── Cache location ───────────────────────────────────────────────────
 # Keyed by city path so distinct cities don't collide. Cache format:
@@ -318,6 +322,59 @@ cmd_open() {
             echo "       Attach it yourself:  gc session attach $bead" >&2
         }
     fi
+}
+
+# ── Verb: react ──────────────────────────────────────────────────────
+# The discoverable front-door for a proactive first reaction. A takeaway-
+# less board row explains little; `react <id>` slings mol-first-reaction at
+# the bead so a worker writes a first-reaction CARD and stamps gc.takeaway —
+# cmd_board then self-heals that row to explanatory on the next render.
+#
+# THIN WRAPPER: it owns no sling logic. It reuses tools/gc-proactive.sh's
+# `sling` verb verbatim, which bakes in the budget/cap clamp AND the codex-
+# gated `mr` merge path (the epic's proactive-code security invariant) — so
+# the front-door inherits those guarantees instead of re-deriving them.
+cmd_react() {
+    bead=""; reason=""; nudge=""; dry=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --reason=*) reason="${1#--reason=}"; shift ;;
+            --reason) shift; [ $# -gt 0 ] || { echo "$PROG: react: --reason requires a value" >&2; exit 2; }; reason="$1"; shift ;;
+            --nudge) nudge=1; shift ;;
+            -n|--dry-run) dry=1; shift ;;
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: react: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: react takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    [ -n "$bead" ] || { echo "$PROG: react needs <bead-id>" >&2; usage; exit 2; }
+
+    tool="$PROACTIVE_TOOL"
+    [ -x "$tool" ] || tool="$(command -v gc-proactive.sh 2>/dev/null || true)"
+    [ -n "$tool" ] && [ -x "$tool" ] \
+        || { echo "$PROG: react: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)" >&2; exit 4; }
+
+    # Pin bd at the bead's rig so the sling's demand/route resolve in the
+    # right per-rig ledger even cross-rig (parity with open/flag/clear).
+    path=$(rig_path_for_bead "$bead")
+    [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+
+    # The reason is operator intent for the log/trail. gc-proactive.sh sling
+    # reads the bead BODY (it has no --reason; the first reaction's seed is the
+    # body), so we surface the reason here and never forward it — forwarding an
+    # unknown flag would make the sling error.
+    [ -n "$reason" ] && echo "$PROG: react $bead — $reason" >&2
+
+    # Reuse the existing sling verbatim; pass through --nudge / --dry-run.
+    set -- sling "$bead"
+    [ -n "$nudge" ] && set -- "$@" --nudge
+    [ -n "$dry" ] && set -- "$@" --dry-run
+    "$tool" "$@" || { echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2; exit 4; }
+
+    # Best-effort: the reaction (card + gc.takeaway) lands ASYNC in the slung
+    # session, so this only clears the cache for the next glance; the gather's
+    # TTL covers the window until the reaction actually writes.
+    if [ -z "$dry" ]; then bust_cache; fi
 }
 
 # ── Verb: board (default) ────────────────────────────────────────────
@@ -465,17 +522,25 @@ def epoch($s): ($s | if . == null or . == "" then null
        elif ($inprog==0 and $live=="warm") then "\($open) open · host asleep"
        elif $inprog==0 then "\($open) open · 0 in-progress (stranded)"
        else "\($open) open · \($inprog) in-progress" end) as $frontier
-    | ($open_ids[0:3] | join(",")) as $heads
-    | (if ($a.source!="decision" and $a.source!="flagged" and $m>0 and $open>0 and $inprog==0 and ($xrefs|length)>0)
-       then " · refs " + ($xrefs[0:3]|join(",")) else "" end) as $blurb
-    | (if $a.source=="flagged" then ("open & ratify" + (if $live=="cold" then "" else " (" + $live + ")" end))
+    # The LLM-authored takeaway (host or proactive), if any: the board-visible
+    # headline of what this anchor concluded / what it needs. Collapse any
+    # internal whitespace (a stray newline would break the table) and trim.
+    | (($a.takeaway // "") | gsub("[[:space:]]+";" ") | gsub("^ | $";"")) as $takeaway
+    | (if $live=="hot" then "host live" elif $live=="warm" then "host asleep" else "no host" end) as $hostnote
+    # NEEDS is the one-glance answer for a human: the LLM takeaway sentence
+    # when one exists, else a TERSE deterministic STATE phrase — never a
+    # bead-id list. The mechanical heads/xref ids move to --json only
+    # (open_heads, cross_rig_refs), so the human table stays explanatory and
+    # cannot emit a raw/truncated bead-id.
+    | (if ($takeaway|length) > 0 then $takeaway
+       elif $a.source=="flagged" then ("open & ratify" + (if $live=="cold" then "" else " (" + $live + ")" end))
        elif $a.source=="decision" then "operator decision"
-       elif $m==0 then "decompose or close"
-       elif $open==0 then (if $a.source=="convoy" then "graduate / close" else "close or extend" end)
+       elif $m==0 then ("no children, " + $hostnote + " — " + (if $live=="cold" then "needs an owner" else "decompose or assign" end))
+       elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
        elif ($inprog==0 and $live=="hot") then "open to join"
        elif ($inprog==0 and $live=="warm") then "open to resume"
-       elif $inprog==0 then ("assign " + (if $heads=="" then "frontier" else $heads end) + (if ($open>3) then " (+\($open-3))" else "" end) + $blurb)
-       else "in flight" end) as $needs
+       elif $inprog==0 then "decomposed, idle — assign or host"
+       else ("in flight" + (if $live=="cold" then "" else " (" + $hostnote + ")" end)) end) as $needs
     | {
         id:$a.id, rig:$a.rig, kind:$a.kind, title:$a.title,
         severity:$sev, weight:$weight, live:$live,
@@ -485,6 +550,10 @@ def epoch($s): ($s | if . == null or . == "" then null
         complete:($m>0 and $open==0),
         progress_mismatch:$pmismatch,
         stale_days:$stale, priority:$a.priority, cross_rig_refs:$xrefs,
+        open_heads:$open_ids,
+        takeaway:(if ($takeaway|length)>0 then $takeaway else null end),
+        takeaway_at:(($a.takeaway_at // "") | if .=="" then null else . end),
+        takeaway_by:(($a.takeaway_by // "") | if .=="" then null else . end),
         reason:($a.reason // null), flagged_at:($a.flagged_at // null),
         updated_at:$a.updated_at, frontier:$frontier, needs:$needs,
         rank_score: (($sev|sevrank)*1000000 + $weight*1000 + ([$stale,999]|min))
@@ -539,7 +608,7 @@ def glyph: {"hot":"●","warm":"◐","cold":"·"}[.] // "·";
 '
     printf '\nLegend: FLAGGED=hand-raised · HIGH=stranded · ELEVATED=decision/stale · NORMAL=active · LOW=empty/complete\n'
     printf 'Liveness: ● hot (open attaches) · ◐ warm (open resumes) · · cold (open materializes)\n'
-    printf 'open <id> to land · flag <id> --reason to raise · clear <id> to lower. Ranking is a deterministic proxy.\n'
+    printf 'open <id> to land · flag <id> --reason to raise · clear <id> to lower · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
 }
 
 # ── Anchor gather (the cached, Dolt-heavy part) ──────────────────────
@@ -563,6 +632,9 @@ gather_anchors() {
                 '{id, title:(.title//""), kind:"epic", source:"epic", rig:$rig, prefix:$prefix,
                   priority:(.priority//3), updated_at:(.updated_at//""), description:(.description//""),
                   progress:null,
+                  takeaway:(.metadata["gc.takeaway"] // ""),
+                  takeaway_at:(.metadata["gc.takeaway_at"] // ""),
+                  takeaway_by:(.metadata["gc.takeaway_by"] // ""),
                   children:[$ch[] | {id, status, assignee}]}' >> "$ANCHORS"
         done
 
@@ -572,7 +644,10 @@ gather_anchors() {
             --arg rig "$name" --arg prefix "$prefix" \
             '.[] | {id, title:(.title//""), kind:"decision", source:"decision", rig:$rig, prefix:$prefix,
                     priority:(.priority//3), updated_at:(.updated_at//""), description:(.description//""),
-                    progress:null, children:[]}' >> "$ANCHORS"
+                    progress:null, children:[],
+                    takeaway:(.metadata["gc.takeaway"] // ""),
+                    takeaway_at:(.metadata["gc.takeaway_at"] // ""),
+                    takeaway_by:(.metadata["gc.takeaway_by"] // "")}' >> "$ANCHORS"
 
         # Flagged: any open/in-progress/blocked bead a host or operator raised
         # by setting the gc.attention=1 sentinel. The reason/at ride alongside.
@@ -583,7 +658,10 @@ gather_anchors() {
                     priority:(.priority//3), updated_at:(.updated_at//""),
                     description:(.description//""), progress:null, children:[],
                     reason:(.metadata["gc.attention_reason"] // ""),
-                    flagged_at:(.metadata["gc.attention_at"] // "")}' >> "$ANCHORS"
+                    flagged_at:(.metadata["gc.attention_at"] // ""),
+                    takeaway:(.metadata["gc.takeaway"] // ""),
+                    takeaway_at:(.metadata["gc.takeaway_at"] // ""),
+                    takeaway_by:(.metadata["gc.takeaway_by"] // "")}' >> "$ANCHORS"
     done
 
     # Floating owned convoys (cross-rig). `gc convoy list` already
@@ -612,6 +690,9 @@ gather_anchors() {
                 rig:$rig, prefix:$prefix, priority:($b.priority//3),
                 updated_at:($b.updated_at//""), description:($b.description//""),
                 progress:($cv.progress // null),
+                takeaway:($b.metadata["gc.takeaway"] // ""),
+                takeaway_at:($b.metadata["gc.takeaway_at"] // ""),
+                takeaway_by:($b.metadata["gc.takeaway_by"] // ""),
                 children:[($b.dependents // [])[] | {id, status, assignee}]}' >> "$ANCHORS"
     done
 }
@@ -621,8 +702,9 @@ case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
     flag)          shift; cmd_flag "$@" ;;
     clear|unflag)  shift; cmd_clear "$@" ;;
+    react)         shift; cmd_react "$@" ;;
     board)         shift; cmd_board "$@" ;;
     -h|--help|help) usage; exit 0 ;;
     ''|-*)         cmd_board "$@" ;;          # no verb, or a board flag → board (back-compat)
-    *)             echo "$PROG: unknown verb '$1' (try: board, open, flag, clear, help)" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '$1' (try: board, open, flag, clear, react, help)" >&2; usage; exit 2 ;;
 esac

@@ -135,10 +135,53 @@ eq     "unhosted sibling stays stranded"        "true"   "$(printf '%s' "$LIVEJ"
 has    "unhosted sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
 rm -rf "$LIVE"
 
-echo "── hermetic: --json contract stays additive (existing fields intact) ──"
-for f in id rig kind title severity weight n_closed m_total open in_progress frontier needs rank_score; do
+echo "── hermetic: --json contract stays additive (existing + new fields intact) ──"
+# Existing fields MUST persist (additive-only contract); the takeaway feature
+# ADDS open_heads + takeaway/_at/_by (always-present keys, null when absent).
+for f in id rig kind title severity weight n_closed m_total open in_progress frontier needs rank_score \
+         open_heads takeaway takeaway_at takeaway_by; do
     eq "field '$f' present on every row" "true" "$(printf '%s' "$J" | jq -c "[.[]|has(\"$f\")]|all")"
 done
+
+echo "── hermetic: takeaway drives NEEDS (present → sentence; absent → terse, no bead-ids) ──"
+# The feature's core contract (bead tk-q4xaj.3): an anchor's gc.takeaway is the
+# NEEDS sentence; when absent NEEDS is a TERSE deterministic phrase, never a
+# bead-id list; the mechanical heads/xref ids move to --json (open_heads,
+# cross_rig_refs). A whitespace-laden takeaway is collapsed to one line so it
+# can never break the human table.
+TKV="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$TKV/rigs.json"; printf '{}' > "$TKV/sessions.json"
+cat > "$TKV/anchors.ndjson" <<'JSON'
+{"id":"tk-tk","title":"has takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"takeaway":"need operator to pick the storage backend before schema lands","takeaway_at":"2026-06-10T00:00:00Z","takeaway_by":"proactive","children":[{"id":"tk-c1","status":"open","assignee":""},{"id":"tk-c2","status":"closed","assignee":""}]}
+{"id":"tk-bare","title":"stranded no takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"blocks sl-zzz9 downstream","progress":null,"takeaway":"","children":[{"id":"tk-c3","status":"open","assignee":""},{"id":"tk-c4","status":"open","assignee":""}]}
+{"id":"tk-ml","title":"whitespacey takeaway","kind":"decision","source":"decision","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"takeaway":"line one\nline two   trailing  ","children":[]}
+JSON
+TKJ="$(GC_ATTENTION_FIXTURE="$TKV" "$TOOL" --json)"
+# Present: the takeaway sentence IS the NEEDS, and the by/at ride into --json.
+has "takeaway present → NEEDS is the sentence" "pick the storage backend" \
+    "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-tk").needs')"
+eq  "takeaway present → JSON .takeaway carries the sentence" \
+    "need operator to pick the storage backend before schema lands" \
+    "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-tk").takeaway')"
+eq  "takeaway present → JSON .takeaway_by is recorded" "proactive" \
+    "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-tk").takeaway_by')"
+# Absent: a terse phrase, NO frontier bead-id and NO cross-rig bead-id.
+NB="$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").needs')"
+has    "takeaway absent → NEEDS is a terse human phrase"  "decomposed, idle" "$NB"
+absent "takeaway absent → NEEDS has NO frontier bead-id"  "tk-c3"            "$NB"
+absent "takeaway absent → NEEDS has NO cross-rig bead-id" "sl-zzz9"          "$NB"
+eq     "takeaway absent → JSON .takeaway is null"         "null"             "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").takeaway')"
+# The mechanical ids moved to --json (open_heads + the existing cross_rig_refs).
+has "frontier heads moved to --json open_heads"    "tk-c3"   "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").open_heads|join(",")')"
+has "cross-rig refs moved to --json cross_rig_refs" "sl-zzz9" "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").cross_rig_refs|join(",")')"
+# Whitespace/newlines in a takeaway are collapsed to one table-safe line.
+eq  "whitespacey takeaway collapses to one line" "line one line two trailing" \
+    "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-ml").needs')"
+# Human table: the takeaway sentence shows; no raw/truncated bead-id leaks in.
+HT="$(GC_ATTENTION_FIXTURE="$TKV" "$TOOL")"
+has    "human table shows the takeaway sentence"        "pick the storage backend" "$HT"
+absent "human table leaks no frontier bead-id (tk-c3)"  "tk-c3"                    "$HT"
+absent "human table leaks no cross-rig bead-id (sl-zzz9)" "sl-zzz9"                "$HT"
+rm -rf "$TKV"
 
 echo "── hermetic: row cap + --limit=0 opt-out ──"
 eq   "default cap honored (MAX_ROWS=2 → 2 rows)" "2" "$(GC_ATTENTION_MAX_ROWS=2 B --json | jq 'length')"
@@ -171,6 +214,34 @@ ec=0; "$TOOL" flag tk-x 2>/dev/null || ec=$?;       eq "flag with no --reason er
 ec=0; "$TOOL" open 2>/dev/null || ec=$?;            eq "open with no bead errors (exit 2)"        "2" "$ec"
 ec=0; "$TOOL" clear 2>/dev/null || ec=$?;           eq "clear with no bead errors (exit 2)"       "2" "$ec"
 ec=0; "$TOOL" bogus-verb 2>/dev/null || ec=$?;      eq "unknown verb errors (exit 2)"             "2" "$ec"
+
+echo "── hermetic: react is the front-door over gc-proactive.sh sling (mr path, codex-gated) ──"
+# react <id> is a THIN wrapper over tools/gc-proactive.sh `sling` — it owns no
+# sling logic. Driven through the REAL gc-proactive.sh on its --dry-run path
+# (GC_PROACTIVE_FIXTURE makes that path echo the resolved command instead of
+# calling gc), so this proves the WIRING end-to-end: react → sling →
+# mol-first-reaction on the mr path, never direct.
+PROACTIVE_TOOL_REAL="$HERE/gc-proactive.sh"
+if [ -x "$PROACTIVE_TOOL_REAL" ]; then
+    RX="$(GC_RIG=gc-toolkit GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
+          GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
+    has    "react slings mol-first-reaction"          "--on mol-first-reaction"         "$RX"
+    has    "react pins the codex-gated mr path"       "--merge mr"                      "$RX"
+    absent "react never routes direct"                "--merge direct"                  "$RX"
+    has    "react targets the rig-qualified pool"     "gc-toolkit/gc-toolkit.proactive" "$RX"
+    has    "react passes the bead through to sling"   "tk-epic"                         "$RX"
+    # --reason is accepted as operator intent but NOT forwarded (sling has none).
+    RXR="$(GC_RIG=gc-toolkit GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
+           GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" react tk-epic --reason "pick a backend" --dry-run 2>&1 || true)"
+    has    "react surfaces the operator --reason"     "pick a backend"                  "$RXR"
+    absent "react does NOT forward --reason to sling" "--reason"                        "$RXR"
+else
+    printf '  skip  react→sling wiring (gc-proactive.sh not found at %s)\n' "$PROACTIVE_TOOL_REAL"
+fi
+# Dispatch + fail-closed validation for the new verb.
+ec=0; "$TOOL" react 2>/dev/null || ec=$?;  eq "react with no bead errors (exit 2)" "2" "$ec"
+has "help lists the react verb"  "react"            "$("$TOOL" help 2>&1 || true)"
+has "usage documents react"      "react <bead-id>"  "$("$TOOL" --help 2>&1 || true)"
 
 echo "── contract: operator surface is the runnable script, not a phantom gc subcommand ──"
 # The regression this guards (PR #100 review): the docs/prompt advertised a

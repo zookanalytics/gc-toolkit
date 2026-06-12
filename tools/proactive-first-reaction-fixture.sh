@@ -277,6 +277,11 @@ has "formula releases the bead OPEN"            "--status=open"           "$F"
 # mr-invariant inside the formula's code path.
 has "formula pins code output to mr"            "merge_strategy=mr"       "$F"
 has "formula tags reached content untrusted"    "UNTRUSTED DATA"          "$F"
+# The board-visible takeaway: stamped (by=proactive) alongside the
+# gc.proactive_reaction advance marker, so gc-attention.sh renders an
+# explanatory NEEDS for the bead instead of a terse fallback (bead tk-q4xaj.3).
+has "formula stamps the board takeaway"            "gc.takeaway"              "$F"
+has "formula attributes the takeaway to proactive" "gc.takeaway_by=proactive" "$F"
 
 echo "── the pool budget + clamp (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"
@@ -298,6 +303,8 @@ has "prompt names the formula"                  "mol-first-reaction"     "$PM"
 has "prompt forbids closing the target"         "Close the target"       "$PM"
 has "prompt keeps code on the mr path"          "mr path only"           "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
+has "prompt stamps the board takeaway"             "gc.takeaway"              "$PM"
+has "prompt attributes the takeaway to proactive"  "gc.takeaway_by=proactive" "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"
 UFX="$(mktemp -d)"

@@ -125,10 +125,21 @@ Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
 on a snapshot that may have moved by the time the human reads it (design Risk
 "stale proactive worldview"). The `## Found` timestamp is that stamp.
 
-**Stamp the advance marker** so the scan never re-reacts to this bead and the
-board can tell an auto-advance from a hand-raise:
+**Stamp the advance marker AND the board-visible takeaway** in one update. The
+marker (`gc.proactive_reaction=1`) stops the scan from re-reacting and lets the
+board tell an auto-advance from a hand-raise. The **takeaway** is this card's
+one-line headline — the single sentence the attention board renders as the
+anchor's NEEDS, so a glance explains what the reaction concluded / what it
+needs. Derive it from your **## Decision needed** (the one thing the human must
+accept or redirect); keep it ≤140 chars on ONE line (the board collapses stray
+whitespace, but a tight single line reads best):
 ```bash
-gc bd update {{issue}} --set-metadata gc.proactive_reaction=1
+TAKEAWAY="<one-line distillation of ## Decision needed, ≤140 chars>"
+gc bd update {{issue}} \
+  --set-metadata gc.proactive_reaction=1 \
+  --set-metadata gc.takeaway="$TAKEAWAY" \
+  --set-metadata gc.takeaway_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --set-metadata gc.takeaway_by=proactive
 ```
 
 **mr-invariant (only if this reaction produced code).** A first reaction is
