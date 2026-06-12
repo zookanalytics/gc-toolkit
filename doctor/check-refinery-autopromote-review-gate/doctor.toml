@@ -1,0 +1,1 @@
+description = "Refinery direct→pr auto-promote funnels into the single mr PR surface so the codex review gate (draft PR + review bead) fires; the direct-success tail is guarded against firing after auto-promotion"
