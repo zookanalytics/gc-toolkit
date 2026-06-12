@@ -215,9 +215,18 @@ idle loop is the ONLY thing that runs on the {{event_timeout}} cadence when
 the refinery is idle, so the reconcile lives here rather than in a standalone
 step that idle would never reach.
 ```bash
+# Resolve the reconcile script from the gc-toolkit pack. Dotted Go-template
+# field tokens (dot-prefixed names such as a ConfigDir accessor) do NOT render
+# in formula step descriptions (formula.Substitute expands only single-word
+# formula vars), and no pack-dir env var (GC_PACK_DIR/GC_CONFIG_DIR) is exported
+# to agents — so resolve from agent-env paths. The owning rig finds the script
+# under its own root; importer rigs (signal-loom, gascity, shutupandlisten) find
+# it at <city>/rigs/gc-toolkit (all four import "source = rigs/gc-toolkit").
+# First executable match wins.
 RECONCILE=""
 for cand in "${GC_RIG_ROOT:-}/assets/scripts/reconcile-draft-prs.sh" \
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/reconcile-draft-prs.sh"; do
+            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/reconcile-draft-prs.sh" \
+            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts/reconcile-draft-prs.sh"; do
   if [ -x "$cand" ]; then RECONCILE="$cand"; break; fi
 done
 if [ -n "$RECONCILE" ]; then
