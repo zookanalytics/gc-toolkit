@@ -1,0 +1,71 @@
+# skills.lock.toml — manifest of skills vendored from external sources.
+#
+# This file describes which third-party skills are vendored into this pack,
+# where they were fetched from, and which revision they were pinned to.
+# The companion tooling (tools/refresh-skills.sh, tools/validate-skills.sh,
+# and the Makefile targets) walks this file to refresh and validate the
+# on-disk copies under skills/ and agents/*/skills/.
+#
+# Vendoring (rather than fetch-at-runtime) is deliberate: it preserves
+# scope, audit, and version control over external skills whose upstream
+# distribution formats (curl installers, plugin marketplaces, bare repos)
+# do not speak Gas City pack semantics natively.
+#
+# See docs/skills-vendoring.md for the full guide.
+#
+# ---------------------------------------------------------------------------
+# Schema (v1)
+# ---------------------------------------------------------------------------
+#
+# Top-level:
+#   schema = 1     Required. Bumped on breaking changes to the manifest shape.
+#
+# Each [[external]] block describes one vendored skill:
+#
+#   name        Required. Stable local identifier for refresh diffing and
+#               for the `make refresh-skills SKILL=<name>` selector. Must be
+#               unique within the manifest.
+#
+#   source      Required. Upstream source URL. For fetcher = "git", this is
+#               a clonable repo URL (https or ssh).
+#
+#   ref         Required. Pin: tag, full SHA, or branch. Tag and full SHA
+#               are deterministic; branch refs emit a non-fatal warning
+#               from validate-skills because they drift on upstream pushes.
+#
+#   fetcher     Required. v1 supports "git" only. The values "skills-sh",
+#               "curl", and "plugin" are RESERVED for follow-up work and
+#               will be rejected by validate-skills.
+#
+#   subpath     Optional. Path inside the fetched source where the skill
+#               lives, when the skill is not at the repo root. Defaults to
+#               the repo root ("").
+#
+#   vendor_at   Required. Target inside this pack. Determines scope:
+#                 - "skills/<name>/"               -> pack-wide, every agent
+#                                                    that imports gc-toolkit
+#                 - "agents/<agent>/skills/<name>/" -> agent-only
+#               Trailing slash required. Two manifest entries cannot share
+#               the same vendor_at (validator enforces this).
+#
+#   license     Required. Upstream license identifier (typically SPDX).
+#               Operator-declared; refresh does not auto-detect. Any
+#               LICENSE / COPYING / NOTICE files found alongside the
+#               skill are vendored as-is for compliance.
+#
+#   notes       Optional. Free-text context surfaced in refresh-skills
+#               output and useful for PR descriptions.
+#
+# ---------------------------------------------------------------------------
+
+schema = 1
+
+[[external]]
+name = "brand-guidelines"
+source = "https://github.com/anthropics/skills"
+ref = "690f15cac7f7b4c055c5ab109c79ed9259934081"
+fetcher = "git"
+subpath = "skills/brand-guidelines"
+vendor_at = "skills/brand-guidelines/"
+license = "Apache-2.0"
+notes = "End-to-end mock entry. Anthropic's public agent-skills catalog; the brand-guidelines skill is small, self-contained, and ships its own LICENSE.txt — useful as the canary for the refresh pipeline."
