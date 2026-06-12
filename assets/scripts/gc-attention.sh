@@ -192,6 +192,9 @@ iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 BEAD_HOST_TOOL="${GC_BEAD_HOST_TOOL:-$SCRIPT_DIR/../../tools/gc-bead-host.sh}"
+# The in-tmux switcher is a sibling under assets/scripts/. Overridable for
+# relocated installs and for hermetic tests (mirrors GC_BEAD_HOST_TOOL).
+TMUX_SWITCH_TOOL="${GC_TMUX_SWITCH_TOOL:-$SCRIPT_DIR/tmux-switch-to-session.sh}"
 
 # ── Cache location ───────────────────────────────────────────────────
 # Keyed by city path so distinct cities don't collide. Cache format:
@@ -299,18 +302,25 @@ cmd_open() {
     fi
     bust_cache
 
-    # Land in it. The host's tmux session is named by its alias (== the
-    # bead id — the bead-host alias convention). From INSIDE tmux (the
-    # picker / a keybinding) switch the client to it, reusing the proven
-    # tmux-switch-to-session.sh wait-and-switch. From a plain shell, fall
-    # back to `gc session attach`, the general attach-or-resume primitive.
-    # The host is up either way, so a context that can't switch is
-    # reported with a manual hint, never fatal.
+    # Land in it. A bead-host's real tmux session is named by its session_name
+    # (`s-<session-id>`) — NOT the bead id and NOT the (rig-prefixed) alias. `up`
+    # cached that name on the work bead as host_session_name (gc-bead-host.sh's
+    # link step); read it back and switch to THAT. Passing the bead id — as this
+    # did before tk-8v5j0 — could never match `tmux has-session`, so every
+    # in-tmux open timed out at the switch helper's poll budget. Fall back to the
+    # bead id only if the cache is somehow unresolved. From a plain shell, fall
+    # back to `gc session attach` (which resolves the alias at the gc layer, so
+    # it keeps taking the bead id). The host is up either way, so a context that
+    # can't switch is reported with a manual hint, never fatal.
+    switch_target=$(gc bd show "$bead" --json 2>/dev/null \
+        | jq -r '.[0].metadata.host_session_name // empty' 2>/dev/null || true)
+    [ -n "$switch_target" ] || switch_target="$bead"
+
     echo "$PROG: host for $bead is up — landing..." >&2
-    if [ -n "${TMUX:-}" ] && [ -x "$SCRIPT_DIR/tmux-switch-to-session.sh" ]; then
-        "$SCRIPT_DIR/tmux-switch-to-session.sh" "$bead" || {
+    if [ -n "${TMUX:-}" ] && [ -x "$TMUX_SWITCH_TOOL" ]; then
+        "$TMUX_SWITCH_TOOL" "$switch_target" || {
             echo "$PROG: host for $bead is up; could not switch the tmux client." >&2
-            echo "       Switch yourself:  prefix+S  (or: tmux switch-client -t $bead)" >&2
+            echo "       Switch yourself:  prefix+S  (or: tmux switch-client -t $switch_target)" >&2
         }
     else
         gc session attach "$bead" || {

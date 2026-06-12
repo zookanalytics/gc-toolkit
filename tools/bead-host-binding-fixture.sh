@@ -42,10 +42,12 @@ hdr()  { printf '\n== %s ==\n' "$*"; }
 meta() { gc bd show "$1" --json 2>/dev/null | jq -r --arg k "$2" '.[0].metadata[$k] // empty'; }
 
 WORK=""; SESS=""; SHIM_DIR=""
+W2=""; DEAD=""; OLD=""; NEW=""; RECREATE_SHIM=""
 cleanup() {
     [ -n "$SHIM_DIR" ] && rm -rf "$SHIM_DIR" || true
-    [ "$KEEP" = "1" ] && { note "--keep: leaving WORK=$WORK SESS=$SESS open"; return; }
-    for b in "$WORK" "$SESS"; do
+    [ -n "$RECREATE_SHIM" ] && rm -rf "$RECREATE_SHIM" || true
+    [ "$KEEP" = "1" ] && { note "--keep: leaving WORK=$WORK SESS=$SESS W2=$W2 DEAD=$DEAD OLD=$OLD NEW=$NEW open"; return; }
+    for b in "$WORK" "$SESS" "$W2" "$DEAD" "$OLD" "$NEW"; do
         [ -n "$b" ] && gc bd close "$b" --reason "binding fixture teardown" >/dev/null 2>&1 || true
     done
 }
@@ -229,6 +231,75 @@ hdr "Teardown sanity — unlink clears links, preserves lineage"
 [ "$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)" = "2" ] \
     && ok "lineage preserved through unlink (durable record)" \
     || bad "unlink dropped the lineage"
+
+hdr "tk-8v5j0 — a dead bound host must not resolve; 'up' re-creates a fresh one"
+# Two regressions behind the gc-attention 'open' failure (tk-8v5j0): a
+# failed-create corpse left bound to a work bead (a) must NOT resolve as a
+# resumable host — the forward-cache fallback skips dead pointers so 'up'
+# recreates; and (b) when a bound host fails to wake, 'up' must unlink the stale
+# binding and create a FRESH host instead of masking the failure as a phantom
+# "up". No live session is spawned (a polecat must not): a PATH shim stubs
+# 'gc session new/wake/list' and stand-in task beads model the sessions.
+W2="$(gc bd create "FIXTURE: tk-8v5j0 recreate work stand-in" -t task --json 2>/dev/null | jq -r '.id')"
+DEAD="$(gc bd create "FIXTURE: tk-8v5j0 dead (failed-create) host stand-in" -t task --json 2>/dev/null | jq -r '.id')"
+OLD="$(gc bd create "FIXTURE: tk-8v5j0 stale bound host stand-in" -t task --json 2>/dev/null | jq -r '.id')"
+NEW="$(gc bd create "FIXTURE: tk-8v5j0 fresh host stand-in" -t task --json 2>/dev/null | jq -r '.id')"
+[ -n "$W2" ] && [ -n "$DEAD" ] && [ -n "$OLD" ] && [ -n "$NEW" ] \
+    || { echo "failed to create tk-8v5j0 stand-in beads" >&2; exit 2; }
+# Stand-in session beads carry the lifecycle field 'up' reads (metadata.state):
+# DEAD is a failed-create corpse; OLD looks live (its WAKE is what fails); NEW is
+# the freshly-created host that registers immediately.
+gc bd update "$DEAD" --set-metadata session_name="s-$DEAD" --set-metadata continuation_epoch="1" --set-metadata state="failed-create" >/dev/null 2>&1
+gc bd update "$OLD"  --set-metadata session_name="s-$OLD"  --set-metadata continuation_epoch="1" --set-metadata state="awake" >/dev/null 2>&1
+gc bd update "$NEW"  --set-metadata session_name="s-$NEW"  --set-metadata continuation_epoch="1" --set-metadata state="awake" >/dev/null 2>&1
+note "W2=$W2  DEAD=$DEAD(failed-create)  OLD=$OLD(stale-live)  NEW=$NEW(fresh)"
+
+# (a) resolve must skip a failed-create cache pointer → reports "no host".
+"$TOOL" link "$W2" "$DEAD" >/dev/null
+if "$TOOL" resolve "$W2" >/dev/null 2>&1; then
+    bad "resolve returned a host for a failed-create cache pointer (must be 'no host')"
+else
+    ok "resolve treats a failed-create cache pointer as 'no host' (so 'up' recreates)"
+fi
+"$TOOL" unlink "$W2" >/dev/null
+
+# (b) a bound host whose wake fails → 'up' unlinks the stale binding, creates fresh.
+"$TOOL" link "$W2" "$OLD" >/dev/null
+RECREATE_SHIM="$(mktemp -d)"
+REAL_GC="$(command -v gc)"
+cat >"$RECREATE_SHIM/gc" <<SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[{"id":"$OLD","session_name":"s-$OLD","alias":"$W2","state":"active","template":"agents/bead-host"}]}'
+    exit 0
+fi
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "wake" ]; then
+    echo "gc session wake: session not found" >&2   # the dead host can't wake
+    exit 1
+fi
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "new" ]; then
+    printf '%s\n' '{"session_id":"$NEW","session_name":"s-$NEW"}'   # create, no real spawn
+    exit 0
+fi
+exec "$REAL_GC" "\$@"
+SHIM
+chmod +x "$RECREATE_SHIM/gc"
+
+PATH="$RECREATE_SHIM:$PATH" "$TOOL" up "$W2" >/dev/null 2>&1 || true
+rm -rf "$RECREATE_SHIM"; RECREATE_SHIM=""
+[ "$(meta "$W2" host_session)" = "$NEW" ] \
+    && ok "up re-created: W2.host_session now points at the FRESH host ($NEW)" \
+    || bad "up did not re-create: W2.host_session=$(meta "$W2" host_session) (want $NEW)"
+[ "$(meta "$W2" host_session_name)" = "s-$NEW" ] \
+    && ok "forward cache carries the fresh session_name (s-$NEW)" \
+    || bad "host_session_name=$(meta "$W2" host_session_name) (want s-$NEW)"
+[ "$(meta "$NEW" hosts_bead)" = "$W2" ] \
+    && ok "fresh host's reverse link points back at W2" \
+    || bad "NEW.hosts_bead=$(meta "$NEW" hosts_bead) (want $W2)"
+[ -z "$(meta "$OLD" hosts_bead)" ] \
+    && ok "stale host was unlinked (OLD.hosts_bead cleared, no phantom resume)" \
+    || bad "stale binding survived: OLD.hosts_bead=$(meta "$OLD" hosts_bead) (want empty)"
+"$TOOL" unlink "$W2" >/dev/null 2>&1 || true
 
 hdr "Operator-deferred (NOT run here — need a live LLM session)"
 note "Assertion 2: a resumed host RECALLS a distinctive marker across suspend/wake."
