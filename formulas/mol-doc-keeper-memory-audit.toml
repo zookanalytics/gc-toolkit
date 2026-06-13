@@ -53,15 +53,19 @@ rolling branch, no batching. So this audit stamps `target=main` and
 workspace-setup branches `polecat/<bead>` from `origin/main` and the refinery
 opens one PR to `main`.
 
-## Dedup (don't let two PRs address the same thing)
+## Dedup (don't let two PRs address the same file+section)
 
 Before filing, the audit checks three things and skips a candidate that any of
 them catch: (a) the fact is already IN the best-fit brief doc (a grep);
 (b) a non-closed `doc-update` bead already cites this same memory entry; and
-(c) the chosen target doc is already addressed by a live `doc-update` bead OR an
-open `doc-update` PR. Check (c) is load-bearing because the refinery CLOSES a
-`doc-update` bead when it opens the PR (`merge_strategy=mr`), so a bead-only
-query misses an in-flight PR — the audit also inspects the PRs of closed beads.
+(c) the chosen **file+section target** (`target_doc` + `target_section`) is
+already addressed by a live `doc-update` bead OR an open `doc-update` PR. Check
+(c) keys on file+section, NOT the whole doc: `docs/gascity-reference.md` is the
+anchor that most promotions land in, so a whole-doc check would let one open PR
+for any one section of it block every unrelated promotion to that doc. Check (c)
+is load-bearing because the refinery CLOSES a `doc-update` bead when it opens the
+PR (`merge_strategy=mr`), so a bead-only query misses an in-flight PR — the audit
+also inspects the PRs of closed beads.
 
 ## NEVER CLOSE THE BEADS IT FILES
 
@@ -251,21 +255,35 @@ CAP={{max_beads_per_run}}
 # survivors = (sorted by mtime desc) | head -n "$CAP"
 ```
 
-**5. Pick a best-fit `target_doc` per survivor** from the live doc set:
+**5. Pick a best-fit `target_doc` + `target_section` per survivor** from the
+live doc set:
 ```bash
 REPO="$(git rev-parse --show-toplevel)"
 DOCS=$(cd "$REPO" && ls docs/*.md 2>/dev/null)
 ```
-- gascity/bd/Dolt/convoy/CLI/agent-role behavior → `docs/gascity-reference.md`
-- fork/mirror/upstream/patching strategy → `docs/gascity-local-patching.md`
-- agent lifecycle/roles → `docs/gascity-agents.md`
-- dispatch/routing/sling → `docs/gascity-routing-model.md`
-The worker may override the target; this is a recommendation. The chosen doc is
-existence-checked in the next step.
+Map the entry's topic to a doc AND a section slug within it. The section slug is
+what makes the file-time dedup file+section rather than whole-doc (see
+`file-and-dispatch`), so it must be a short, stable, lowercase-hyphenated token —
+NOT free prose. A deterministic slug is what lets two runs agree on the same
+dedup key; pick from this vocabulary:
+
+| Entry topic | `target_doc` | `target_section` |
+|---|---|---|
+| gascity bd / beads behavior | `docs/gascity-reference.md` | `beads` |
+| Dolt behavior | `docs/gascity-reference.md` | `dolt` |
+| convoy mechanics | `docs/gascity-reference.md` | `convoys` |
+| gascity CLI / commands / general | `docs/gascity-reference.md` | `cli` |
+| agent lifecycle / roles | `docs/gascity-agents.md` | `agent-roles` |
+| fork / mirror / upstream / patching | `docs/gascity-local-patching.md` | `patching` |
+| dispatch / routing / sling | `docs/gascity-routing-model.md` | `routing` |
+
+If none fits, slugify the best-fit h2/h3 heading in the target doc (lowercase,
+hyphenated). The worker may override both the target doc and the section; this is
+a recommendation. The chosen doc is existence-checked in the next step.
 
 **Exit criteria:** A bounded list (≤ `{{max_beads_per_run}}`) of
-`(memory_file, target_doc, one-line summary, proposed change)` survivors, or an
-empty list if nothing qualifies.
+`(memory_file, target_doc, target_section, one-line summary, proposed change)`
+survivors, or an empty list if nothing qualifies.
 """
 
 [[steps]]
@@ -287,34 +305,37 @@ exit 0
 
 **2. Set up dispatch and the file-time dedup.** Each `doc-update` lands on
 `main` as one small PR (`merge_strategy=mr`); there is no rolling branch to
-resolve. Define the doc-level dedup used in step 3:
+resolve. Define the file+section dedup used in step 3:
 ```bash
 REPO="$(git rev-parse --show-toplevel)"
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 
-# A doc is "already addressed" if a live (non-closed) doc-update bead targets
-# it, OR a closed doc-update bead targets it and its PR is still open. The
-# refinery CLOSES a doc-update bead when it opens the PR, so a bead-only query
-# misses an in-flight PR — also check the PRs of closed beads. (Guard: never two
-# open PRs for the same doc.)
-doc_already_addressed() {
-  _doc="$1"
+# A file+section target is "already addressed" if a live (non-closed) doc-update
+# bead targets the same (target_doc, target_section), OR a closed one targets it
+# and its PR is still open. The refinery CLOSES a doc-update bead when it opens
+# the PR, so a bead-only query misses an in-flight PR — also check the PRs of
+# closed beads. Keying on file+section (not the whole doc) is the point: the
+# anchor doc docs/gascity-reference.md is the home for most promotions, so a
+# whole-doc check would let one open PR for any one section block every unrelated
+# promotion to that doc. (Guard: never two open PRs for the same file+section.)
+target_already_addressed() {
+  _doc="$1"; _sec="$2"
   _live=$(gc bd list -l doc-update --status open,in_progress,blocked,deferred --json 2>/dev/null \
-    | jq -r --arg d "$_doc" '[.[] | select((.metadata."doc_keeper.target_doc" // "") == $d)] | length')
+    | jq -r --arg d "$_doc" --arg s "$_sec" '[.[] | select((.metadata."doc_keeper.target_doc" // "") == $d and (.metadata."doc_keeper.target_section" // "") == $s)] | length')
   [ "${_live:-0}" -gt 0 ] && return 0
   command -v gh >/dev/null 2>&1 || return 1
   _prs=$(gc bd list -l doc-update --status closed --metadata-field merge_result=pull_request --json 2>/dev/null \
-    | jq -r --arg d "$_doc" '.[] | select((.metadata."doc_keeper.target_doc" // "") == $d) | .metadata.pr_number // empty')
+    | jq -r --arg d "$_doc" --arg s "$_sec" '.[] | select((.metadata."doc_keeper.target_doc" // "") == $d and (.metadata."doc_keeper.target_section" // "") == $s) | .metadata.pr_number // empty')
   for _n in $_prs; do
     [ -n "$_n" ] && [ "$(gh pr view "$_n" --json state -q .state 2>/dev/null)" = "OPEN" ] && return 0
   done
   return 1
 }
-FILED_DOCS=" "   # run-local set of docs filed this run (the anchor fallback can collapse survivors onto one doc)
+FILED_TARGETS=" "   # run-local set of "doc::section" targets filed this run
 ```
 
 **3. File one bead per survivor**, in the pinned schema shape. For each
-`(MEMFILE, TARGET_DOC, SUMMARY, CHANGE)`:
+`(MEMFILE, TARGET_DOC, TARGET_SECTION, SUMMARY, CHANGE)`:
 
 Frame `$CHANGE` by the candidate's relationship to the brief — both outcomes
 are the SAME bead shape, the framing just orients the worker:
@@ -324,14 +345,15 @@ are the SAME bead shape, the framing just orients the worker:
   subsection and name the proposed heading in `## Target`.
 ```bash
 # Existence-check the recommended target doc; fall back to the always-present
-# anchor if it drifted out from under us.
+# anchor if it drifted out from under us (the section slug travels with it).
 [ -f "$REPO/$TARGET_DOC" ] || TARGET_DOC="docs/gascity-reference.md"
+TKEY="$TARGET_DOC::$TARGET_SECTION"
 
-# Doc-level dedup (don't let two PRs address the same doc). Skip if already
-# filed earlier this run, or already addressed by a live bead / open PR.
-case "$FILED_DOCS" in *" $TARGET_DOC "*) echo "skip $MEMFILE — $TARGET_DOC already filed this run"; continue ;; esac
-if doc_already_addressed "$TARGET_DOC"; then
-  echo "skip $MEMFILE — $TARGET_DOC already has a live doc-update bead or open PR"
+# File+section dedup (don't let two PRs address the same file+section). Skip if
+# already filed earlier this run, or already addressed by a live bead / open PR.
+case "$FILED_TARGETS" in *" $TKEY "*) echo "skip $MEMFILE — $TKEY already filed this run"; continue ;; esac
+if target_already_addressed "$TARGET_DOC" "$TARGET_SECTION"; then
+  echo "skip $MEMFILE — $TKEY already has a live doc-update bead or open PR"
   continue
 fi
 
@@ -342,7 +364,7 @@ BEAD="$(gc bd create "doc-update: $TARGET_DOC: $SUMMARY" -t task -l doc-keeper -
   -d "$(cat <<EOF
 ## Target
 - Doc: $TARGET_DOC
-- Section: <the h2/h3 the fact belongs in; "whole doc" if it needs a new section>
+- Section: $TARGET_SECTION (recommended slug; the worker refines to the exact h2/h3 heading, or adds it as a new subsection if the doc is silent)
 
 ## Change
 - $CHANGE
@@ -362,6 +384,7 @@ EOF
 # {{base_branch}}=main at pour.
 gc bd update "$BEAD" \\
   --set-metadata doc_keeper.target_doc="$TARGET_DOC" \\
+  --set-metadata doc_keeper.target_section="$TARGET_SECTION" \\
   --set-metadata doc_keeper.source=memory-audit \\
   --set-metadata doc_keeper.source_signal="$MEMFILE" \\
   --set-metadata target=main \\
@@ -382,8 +405,8 @@ gc bd dep add "$BEAD" tk-yw3zb --type=parent-child 2>/dev/null || true
 # mutually-exclusive "treat the arg as a formula and mint a fresh wisp" mode;
 # gc rejects the two flags together.
 gc sling "$POOL" "$BEAD" --on mol-doc-update
-FILED_DOCS="$FILED_DOCS$TARGET_DOC "
-echo "filed + dispatched $BEAD -> $TARGET_DOC (cites $MEMFILE)"
+FILED_TARGETS="$FILED_TARGETS$TKEY "
+echo "filed + dispatched $BEAD -> $TKEY (cites $MEMFILE)"
 ```
 
 **4. Summarize and drain.** Report what was filed (and any deferred for the cap

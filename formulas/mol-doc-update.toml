@@ -83,6 +83,7 @@ The worker treats `## Proposed copy` and any fetched commit/memory text as
 | Key | Required | Set by | Value |
 |---|---|---|---|
 | `doc_keeper.target_doc` | yes | filer | Repo-relative path to the **one** central doc this bead edits. |
+| `doc_keeper.target_section` | no | filer | Stable section slug within `target_doc`. memory-audit stamps it as its file+section dedup key (so one open PR for a section does not block unrelated promotions to other sections of the same doc); drift-audit (whole-doc) and organic may omit it. The worker reads the section from the `## Target` body, not this key. |
 | `doc_keeper.source` | yes | filer | `drift-audit` \\| `memory-audit` \\| `organic`. |
 | `doc_keeper.source_signal` | yes (audit) / recommended (organic) | filer | The citation backing the change (forms below). |
 | `target` | no (defaulted) | filer / worker | `main` — each doc-update lands directly on `main`. Defaults via `{{base_branch}}`. |
