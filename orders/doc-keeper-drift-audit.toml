@@ -1,0 +1,54 @@
+# doc-keeper drift audit — periodic agent-brief drift scan.
+# Epic tk-yw3zb, sub-bead .8 (cron registration); design
+# specs/tk-yw3zb.1/doc-keeper-architecture.md §7.
+#
+# Fires the mol-doc-keeper-drift-audit formula (sub-bead .6) on a 24h
+# cooldown. One fire = one audit run: a polecat scans the tracked
+# agent-brief docs against the current HEADs of the repos they track,
+# files zero-or-more `doc-update` beads (schema per sub-bead .5), and
+# drains. Those beads flow through the shared mol-doc-update worker →
+# refinery pipeline exactly like an organic or memory-audit update.
+#
+# ── Why an in-pack order, not a hand-registered city cron ───────────────
+# Per the epic rescope (2026-06-12) enablement IS the pack being
+# imported: no [doc-keeper].enabled flag, no config read. This order
+# ships in the gc-toolkit pack's orders/ layer, so the schedule goes
+# live for any rig that imports gc-toolkit and is inert otherwise. The
+# town's CronCreate is session-only (does not survive a controller
+# restart); the `gc order` system is durable because the order file
+# IS the registration and is re-scanned on every `gc` start.
+#
+# ── Scope + pool: why rig-scoped with a BARE pool ──────────────────────
+# The gc-toolkit pack is imported by several rigs (gc-toolkit,
+# signal-loom, gascity, shutupandlisten — see the city's city.toml). A
+# formula order instantiates its wisp in the bead store resolved from
+# (scope, pool), and the worker must read that same store:
+#   • scope="city" puts the wisp in the CITY store, which rig polecats
+#     (BEADS_DIR-pinned to their own rig) never read → never claimed.
+#   • a rig-QUALIFIED pool ("gc-toolkit/gc-toolkit.polecat") on a
+#     rig-scoped order puts the wisp in the IMPORTING rig's store but
+#     routes it to gc-toolkit's pool → stranded in every importer that
+#     is not gc-toolkit itself.
+#   • a BARE pool ("gc-toolkit.polecat") qualifies within each importing
+#     rig to that rig's OWN polecat pool, with the wisp in that same
+#     rig's store → always self-consistent.
+# Hence rig scope + bare pool. The tracked-doc table inside the formula
+# is the gc-toolkit agent brief; in an importer that does not carry
+# those docs every entry is skipped, so the run there is a cheap,
+# idempotent no-op (it files nothing) rather than an error.
+#
+# ── Pool-wake prerequisite (cross-bead) ────────────────────────────────
+# A formula routed to a scale-from-zero pool only wakes a worker when
+# its compiled root is Ready-visible — i.e. the formula declares a
+# top-level `phase = "vapor"` (or is graph.v2). The .6/.7 audit
+# formulas must carry `phase = "vapor"` for this order to spawn a
+# polecat from an idle pool; see the handoff note on bead tk-yw3zb.8.
+# Merge ordering: land .6/.7 (the formulas) before/with this order so a
+# fire does not fail "formula not found".
+[order]
+description = "doc-keeper: scan gascity + gc-toolkit HEAD for agent-brief drift; file doc-update beads"
+formula = "mol-doc-keeper-drift-audit"
+trigger = "cooldown"
+interval = "24h"
+pool = "gc-toolkit.polecat"
+scope = "rig"
