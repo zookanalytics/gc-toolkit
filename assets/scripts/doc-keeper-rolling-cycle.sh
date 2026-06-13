@@ -46,12 +46,6 @@ die() { log "$*"; exit 1; }
 command -v gh >/dev/null 2>&1 || die "gh not found on PATH"
 command -v jq >/dev/null 2>&1 || die "jq not found on PATH"
 
-# Fail fast if gh cannot reach the repo. Without this probe a transient gh
-# error would return an empty PR list, which the discovery below would misread
-# as "no open cycle" — and we'd wrongly open a duplicate. Refuse to guess.
-gh pr list --base "$BASE" --state open --limit 1 --json number >/dev/null 2>&1 \
-    || die "gh pr list failed (auth/network?) — refusing to guess cycle state"
-
 # Pull the trailing rolling-cycle numbers out of a `gh pr list --json` blob and
 # reduce them with a jq verb (min for discovery, max for numbering). Branches
 # whose suffix is not a plain integer are ignored — only this script mints the
@@ -70,10 +64,19 @@ reduce_cycle_numbers() { # <jq-reduce-verb>  (reads gh JSON on stdin)
 # DISCOVER: the lowest-numbered OPEN rolling PR, or "" if none. Lowest-N is the
 # convergence tiebreaker — if a race ever leaves two cycles open at once, every
 # caller picks the same one and the operator closes the stray.
+#
+# A gh/jq failure is NOT "no open cycle": reading an errored query as empty would
+# open a duplicate. Keep the query and the reduce as separate statements so a
+# real failure of either propagates (die) instead of being masked — only a
+# clean, genuinely-empty result returns "". This is the "refuse to guess"
+# contract, enforced at the query itself rather than a single upfront probe.
 discover() {
-    local n
-    n=$(gh pr list --base "$BASE" --state open --limit 200 \
-            --json number,headRefName 2>/dev/null | reduce_cycle_numbers min) || return 0
+    local json n
+    json=$(gh pr list --base "$BASE" --state open --limit 200 \
+            --json number,headRefName) \
+        || die "gh pr list (open cycles) failed (auth/network?) — refusing to guess cycle state"
+    n=$(printf '%s\n' "$json" | reduce_cycle_numbers min) \
+        || die "could not parse open-cycle PR list — refusing to guess cycle state"
     [ "${n:--1}" -ge 0 ] && printf '%s%s' "$PREFIX" "$n"
     return 0
 }
@@ -95,8 +98,15 @@ fi
 #     forking a duplicate.
 # Two concurrent callers therefore compute the same number and converge.
 git fetch "$REMOTE" "$BASE" --quiet 2>/dev/null || die "cannot fetch $REMOTE/$BASE"
-max_pr=$(gh pr list --base "$BASE" --state all --limit 400 \
-            --json headRefName 2>/dev/null | reduce_cycle_numbers max) || max_pr=0
+# A gh/jq failure here is unknown history, NOT "no prior cycles": a false
+# max_pr=0 would mint cycle 1 again and reuse a retired number. Propagate either
+# failure (die) rather than falling back — the same "refuse to guess" contract
+# discover() enforces for the open-cycle query.
+all_json=$(gh pr list --base "$BASE" --state all --limit 400 \
+            --json headRefName) \
+    || die "gh pr list (cycle history) failed (auth/network?) — refusing to guess cycle state"
+max_pr=$(printf '%s\n' "$all_json" | reduce_cycle_numbers max) \
+    || die "could not parse cycle-history PR list — refusing to guess cycle state"
 next=$((max_pr + 1))
 branch="${PREFIX}${next}"
 log "no open cycle; opening $branch (highest prior cycle: $max_pr)"

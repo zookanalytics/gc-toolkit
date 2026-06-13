@@ -9,7 +9,9 @@
 # is never disturbed; (d) a merged cycle's number is retired (next = N+1);
 # (e) an abandoned (closed) cycle's number is also retired; (f) lowest-N wins
 # when two cycles are open at once; (g) a crashed creation (branch pushed, PR
-# missing) self-heals instead of forking a duplicate.
+# missing) self-heals instead of forking a duplicate; (h,i) hard push / PR-create
+# failures refuse to emit an unverified cycle; (j,k,l) gh-list / history / parse
+# failures refuse to guess cycle state instead of opening a duplicate.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +53,17 @@ while [ $# -gt 0 ]; do
 done
 case "$sub" in
   list)
+    # Failure-injection knobs (test-only). FAKE_GH_LIST_FAIL models a gh/network
+    # failure on the list query; it matches a --state value (open|all) so a test
+    # can fail just the discovery query or just the history query. FAKE_GH_LIST_GARBAGE
+    # models a successful call that returns unparseable output (jq-reduce failure).
+    if [ -n "${FAKE_GH_LIST_FAIL:-}" ] && \
+       { [ "$FAKE_GH_LIST_FAIL" = any ] || [ "$FAKE_GH_LIST_FAIL" = "$state" ]; }; then
+      echo "fake gh: forced list failure (test, state=$state)" >&2; exit 1
+    fi
+    if [ -n "${FAKE_GH_LIST_GARBAGE:-}" ]; then
+      echo "this is not json"; exit 0
+    fi
     awk -F'|' -v st="$state" '
       BEGIN { printf "[" }
       NF>=2 && (st=="all" || $2==st) {
@@ -81,6 +94,7 @@ has_branch_on() { git -C "$1" rev-parse --verify --quiet "refs/heads/$2" >/dev/n
 ahead_count()   { git -C "$TMP/remote.git" rev-list --count "main..$1"; }
 branch_tree()   { git -C "$TMP/remote.git" rev-parse "$1^{tree}"; }
 set_state()     { sed -i "s#^$1|[^|]*#$1|$2#" "$LEDGER"; }
+remote_branches() { git -C "$TMP/remote.git" for-each-ref --format='%(refname)' refs/heads/ | sort; }
 
 CALLER_BRANCH="$(git -C "$TMP/caller" symbolic-ref --short HEAD)"
 
@@ -165,6 +179,47 @@ else
   ok "hard PR-create failure exits non-zero"
 fi
 eq "$out" "" "hard PR-create failure prints nothing on stdout"
+
+# --- (j) Discovery query failure: `gh pr list` (open cycles) errors -> die. ---
+# A transient gh/network failure on discovery must NOT be read as "no open
+# cycle" and mint a duplicate. Refuse to guess: non-zero exit, no stdout, and no
+# new branch on the remote (die happens before any push).
+: > "$LEDGER"
+before="$(remote_branches)"
+if out="$( cd "$TMP/caller" && FAKE_GH_LIST_FAIL=open bash "$SCRIPT" 2>/dev/null )"; then
+  bad "discovery query failure exits non-zero"
+else
+  ok "discovery query failure exits non-zero"
+fi
+eq "$out" "" "discovery query failure prints nothing on stdout"
+eq "$(remote_branches)" "$before" "discovery query failure mints no branch"
+
+# --- (k) History query failure: discovery finds no open cycle, then the
+# `--state all` history query errors -> die. A false max_pr=0 fallback would
+# reuse a retired number; instead refuse to guess. Discovery (open) succeeds and
+# is empty, isolating the failure to the history (all-state) call.
+: > "$LEDGER"
+before="$(remote_branches)"
+if out="$( cd "$TMP/caller" && FAKE_GH_LIST_FAIL=all bash "$SCRIPT" 2>/dev/null )"; then
+  bad "history query failure exits non-zero"
+else
+  ok "history query failure exits non-zero"
+fi
+eq "$out" "" "history query failure prints nothing on stdout"
+eq "$(remote_branches)" "$before" "history query failure mints no branch"
+
+# --- (l) Unparseable PR list: `gh pr list` succeeds but returns non-JSON, so
+# the jq reduce fails -> die. The reduce failure must propagate, not be masked
+# as an empty cycle state.
+: > "$LEDGER"
+before="$(remote_branches)"
+if out="$( cd "$TMP/caller" && FAKE_GH_LIST_GARBAGE=1 bash "$SCRIPT" 2>/dev/null )"; then
+  bad "unparseable PR list exits non-zero"
+else
+  ok "unparseable PR list exits non-zero"
+fi
+eq "$out" "" "unparseable PR list prints nothing on stdout"
+eq "$(remote_branches)" "$before" "unparseable PR list mints no branch"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
