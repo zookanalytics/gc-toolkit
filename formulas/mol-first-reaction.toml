@@ -125,11 +125,13 @@ Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
 on a snapshot that may have moved by the time the human reads it (design Risk
 "stale proactive worldview"). The `## Found` timestamp is that stamp.
 
-**Stamp the advance marker** so the scan never re-reacts to this bead and the
-board can tell an auto-advance from a hand-raise:
-```bash
-gc bd update {{issue}} --set-metadata gc.proactive_reaction=1
-```
+The card's one-line headline doubles as the board-visible **takeaway** — the
+single sentence `gc-attention.sh` renders as the anchor's NEEDS, so a glance
+explains what the reaction concluded / what it needs. Derive it from your
+**## Decision needed** (the one thing the human must accept or redirect); keep
+it ≤140 chars on ONE line (the wrapper collapses stray whitespace, but a tight
+single line reads best). You stamp it in the final step, folded into the bead's
+release (`takeaway … --release`) — one Dolt write, not a separate stamp here.
 
 **mr-invariant (only if this reaction produced code).** A first reaction is
 notes-only by default. If — and only if — you wrote code, it takes the
@@ -162,10 +164,17 @@ This sets `gc.attention=1` (+ reason + timestamp) — the same hand-raise a
 bead-host uses — so the flagged bead floats to the board's FLAGGED band. The
 human picks the row, lands in the card, and accepts/redirects in one move.
 
-**2. Release the bead — open, unassigned, NOT closed.** Clear the pool route
-and assignee so it is back in the human's court, carrying the card + the flag:
+**2. Stamp the takeaway and release the bead — open, unassigned, NOT closed —
+in ONE call.** `takeaway … --release` writes the board headline AND releases the
+bead: it clears the pool route and assignee so the bead is back in the human's
+court (carrying the card + the flag) and folds in the `gc.proactive_reaction=1`
+advance marker (which stops the scan from re-reacting), all in the same Dolt
+write. The **takeaway** is your card's one-line headline, derived from
+**## Decision needed**, ≤140 chars on ONE line:
 ```bash
-gc bd update {{issue}} --status=open --assignee="" --set-metadata gc.routed_to=""
+ATTN="$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/gc-attention.sh"
+TAKEAWAY="<one-line distillation of ## Decision needed, ≤140 chars>"
+"$ATTN" takeaway {{issue}} "$TAKEAWAY" --by proactive --release
 ```
 
 **3. Drain.** The reaction session is one-shot — it ends here:
