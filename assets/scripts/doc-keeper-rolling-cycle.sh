@@ -108,16 +108,23 @@ base_sha=$(git rev-parse "$REMOTE/$BASE")
 seed=$(printf 'docs: open rolling cycle %s\n\nTracking commit for the doc-keeper rolling PR (specs/tk-yw3zb.4).\n' \
         "$next" | git commit-tree "${base_sha}^{tree}" -p "$base_sha")
 
-# Push the branch. Tolerate an existing ref: a concurrent racer or a crashed
-# prior creation — either way we fall through and make sure the PR exists.
+# Push the branch. A failed push is only benign when the branch is ALREADY on
+# the remote — the expected race: a concurrent racer or a crashed prior
+# creation that got as far as pushing. If the push fails AND the branch is
+# absent, that is a hard auth/network/branch-protection failure; refuse to
+# return a cycle whose branch does not exist.
 if git push "$REMOTE" "${seed}:refs/heads/${branch}" >/dev/null 2>&1; then
     log "pushed ${branch}"
-else
+elif [ -n "$(git ls-remote --heads "$REMOTE" "$branch" 2>/dev/null)" ]; then
     log "branch ${branch} already on ${REMOTE} — ensuring its PR"
+else
+    die "push of ${branch} failed and it is absent on ${REMOTE} (auth/network/branch protection?)"
 fi
 
-# Open the long-lived tracking PR. Tolerate "already exists" from a racer or a
-# heal of a crashed creation.
+# Open the long-lived tracking PR. A failed create is only benign when an open
+# PR for this branch ALREADY exists — a racer or the heal of a crashed
+# creation. If create fails AND no open PR exists, that is a hard failure;
+# refuse to return a cycle with no tracking PR.
 if gh pr create --base "$BASE" --head "$branch" \
         --title "docs: rolling agent-brief cycle ${next}" \
         --body "$(cat <<EOF
@@ -133,11 +140,19 @@ Mechanism: specs/tk-yw3zb.4/rolling-cycle-mechanism.md
 EOF
 )" >/dev/null 2>&1; then
     log "opened tracking PR for ${branch}"
+elif gh pr list --base "$BASE" --head "$branch" --state open --json number 2>/dev/null \
+        | jq -e 'length > 0' >/dev/null; then
+    log "PR for ${branch} already open — continuing"
 else
-    log "PR for ${branch} already open (or create failed) — continuing"
+    die "gh pr create for ${branch} failed and no open PR exists (auth/network/branch protection?)"
 fi
 
 # Return the canonical open cycle (lowest-N) so all racers converge on one
-# answer even if a duplicate slipped through.
+# answer even if a duplicate slipped through. The guards above already
+# confirmed this branch and its PR exist, so discovery must see at least this
+# cycle; an empty result means the remote state is inconsistent — fail rather
+# than emit an unverified branch (the old `${final:-$branch}` fallback could
+# print a cycle whose tracking PR never opened).
 final="$(discover)"
-printf '%s\n' "${final:-$branch}"
+[ -n "$final" ] || die "post-create verification failed: no open rolling PR found after creating ${branch}"
+printf '%s\n' "$final"

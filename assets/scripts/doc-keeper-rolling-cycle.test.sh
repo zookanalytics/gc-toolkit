@@ -59,6 +59,9 @@ case "$sub" in
       }
       END { print "]" }' "$FAKE_PR_LEDGER" ;;
   create)
+    if [ -n "${FAKE_GH_CREATE_FAIL:-}" ]; then
+      echo "fake gh: forced create failure (test)" >&2; exit 1
+    fi
     if awk -F'|' -v h="$head" '$1==h && $2=="open"{f=1} END{exit !f}' "$FAKE_PR_LEDGER"; then
       echo "fake gh: a pull request for $head already exists" >&2; exit 1
     fi
@@ -74,6 +77,7 @@ export PATH="$TMP/bin:$PATH" FAKE_PR_LEDGER="$LEDGER"
 run() { ( cd "$TMP/caller" && bash "$SCRIPT" 2>/dev/null ); }
 open_count()    { awk -F'|' -v h="$1" '$1==h && $2=="open"'    "$LEDGER" | wc -l | tr -d ' '; }
 has_branch()    { git -C "$TMP/remote.git" rev-parse --verify --quiet "refs/heads/$1" >/dev/null; }
+has_branch_on() { git -C "$1" rev-parse --verify --quiet "refs/heads/$2" >/dev/null; }
 ahead_count()   { git -C "$TMP/remote.git" rev-list --count "main..$1"; }
 branch_tree()   { git -C "$TMP/remote.git" rev-parse "$1^{tree}"; }
 set_state()     { sed -i "s#^$1|[^|]*#$1|$2#" "$LEDGER"; }
@@ -123,6 +127,44 @@ has_branch "docs/rolling-10" && bad "discovery must not open a new cycle" || ok 
 out="$(run)"
 eq "$out" "docs/rolling-1" "crashed creation heals onto the orphan branch"
 eq "$(open_count docs/rolling-1)" "1" "heal opens the missing tracking PR"
+
+# --- (h) Hard push failure: push rejected AND branch absent -> die, no stdout.
+# A bare remote whose pre-receive hook rejects every push models an
+# auth/network/branch-protection failure. The script must NOT print a cycle
+# whose branch was never created (the old code logged the failure as benign
+# and returned docs/rolling-N anyway).
+FAILREMOTE="$TMP/failremote.git"
+git clone -q --bare "$SRC" "$FAILREMOTE"
+cat > "$FAILREMOTE/hooks/pre-receive" <<'HOOK'
+#!/bin/sh
+echo "pre-receive: rejecting push (test)" >&2
+exit 1
+HOOK
+chmod +x "$FAILREMOTE/hooks/pre-receive"
+git -C "$TMP/caller" remote add failremote "$FAILREMOTE"
+git -C "$TMP/caller" fetch -q failremote
+: > "$LEDGER"
+if out="$( cd "$TMP/caller" && DOC_KEEPER_CYCLE_REMOTE=failremote bash "$SCRIPT" 2>/dev/null )"; then
+  bad "hard push failure exits non-zero"
+else
+  ok "hard push failure exits non-zero"
+fi
+eq "$out" "" "hard push failure prints nothing on stdout"
+has_branch_on "$FAILREMOTE" "docs/rolling-1" && bad "no phantom branch after a failed push" || ok "no phantom branch after a failed push"
+
+# --- (i) Hard PR-create failure: branch present but `gh pr create` hard-fails
+# and no open PR exists -> die, no stdout. Distinct from the benign
+# "already exists" race (exit 1 + a ledger hit) that case (g) covers.
+# docs/rolling-1 already exists on origin from case (a), so the push is the
+# benign non-fast-forward race and the flow reaches the create guard, which
+# must NOT mask a real create failure.
+: > "$LEDGER"
+if out="$( cd "$TMP/caller" && FAKE_GH_CREATE_FAIL=1 bash "$SCRIPT" 2>/dev/null )"; then
+  bad "hard PR-create failure exits non-zero"
+else
+  ok "hard PR-create failure exits non-zero"
+fi
+eq "$out" "" "hard PR-create failure prints nothing on stdout"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
