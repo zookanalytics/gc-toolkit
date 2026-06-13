@@ -19,14 +19,9 @@ SESSION="$1"
 
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
-# Wait for the session to register before switching to it. A freshly-created
-# bead-host's cold start can exceed 10s (observed up to ~60s), so the budget is
-# GC_TMUX_SWITCH_TIMEOUT seconds (default 45), polled every 0.25s. The old fixed
-# ~10s budget abandoned slow cold starts (tk-8v5j0).
-timeout_s="${GC_TMUX_SWITCH_TIMEOUT:-45}"
-case "$timeout_s" in ''|*[!0-9]*) timeout_s=45 ;; esac
+# Wait up to ~10s for the session to register before switching to it.
+attempts=40
 sleep_per=0.25
-attempts=$(( timeout_s * 4 ))
 i=0
 while [ "$i" -lt "$attempts" ]; do
     if gcmux has-session -t "$SESSION" 2>/dev/null; then
@@ -37,5 +32,5 @@ while [ "$i" -lt "$attempts" ]; do
     sleep "$sleep_per"
 done
 
-echo "tmux-switch-to-session.sh: session '$SESSION' did not register within ${timeout_s}s" >&2
+echo "tmux-switch-to-session.sh: session '$SESSION' did not register within 10s" >&2
 exit 1
