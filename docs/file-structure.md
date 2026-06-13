@@ -14,6 +14,18 @@ the approach:
 - If the document records work, file it in `specs/<bead-id>/` and
   preserve it as context.
 
+## Scope
+
+**Mandate.** Where gc-toolkit writes its own documentation and specs,
+and the rules that govern each: the central/local tier split, the
+directory layout, filename and path discipline, frontmatter, the
+[`## Scope` convention](#the-scope-section), and cross-doc references.
+
+**Boundaries.** This governs gc-toolkit's *internal* docs; it does not
+apply to customer-facing documentation, and it does not prescribe the
+*content* of any individual doc (that lives in the doc itself). It says
+where a doc goes and how it is named and framed — not what it must say.
+
 ## Use Cases
 
 | Query | Filing rule it implies |
@@ -249,6 +261,42 @@ a 1-2 sentence overview of why the doc exists, or when to use it.
 A description helps a reader answer "is this the right document for
 my question?" — not give the answer itself. It shouldn't restate the
 doc's body, and shouldn't change often as the doc evolves.
+
+## The Scope section
+
+Every authoritative `docs/` doc carries a `## Scope` section in its
+body — the doc's charter. It states two things:
+
+- **Mandate** — what the doc intends to represent: the subject it
+  speaks on authoritatively.
+- **Boundaries** — what it deliberately does *not* cover, and where the
+  adjacent material lives instead.
+
+Scope is the doc's own statement of what "true and complete" means for
+it. A reader uses it to decide whether a fact belongs here; a
+maintainer uses it as the thing the doc is judged against — is every
+claim still true *within this mandate* (no drift), and is everything
+inside the mandate actually captured (no gap)? The check is against the
+charter the doc declares, not against a diff of git history.
+
+**Distinct from frontmatter `description` — do not merge them.** They
+sit at different altitudes:
+
+| | `description` (frontmatter) | `## Scope` (body) |
+|---|---|---|
+| Size | one line | a short section |
+| Job | discovery / index summary | the doc's charter |
+| Answers | "is this the doc I want?" | "what does this doc own, and where are its edges?" |
+| Changes | rarely | only when the mandate or boundaries genuinely shift |
+
+Keep it tight: a mandate sentence and a short boundary list, not a
+table of contents. Scope describes the doc's *remit*, not its current
+outline — an outline drifts with every edit; a remit shouldn't.
+
+Existing docs grow a `## Scope` as they are next touched — the same way
+[a central doc is updated alongside the change that affects
+it](#drafting-and-adoption) — and a new authoritative doc carries one
+from the start.
 
 ## Cross-doc references
 

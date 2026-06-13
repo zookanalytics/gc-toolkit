@@ -21,6 +21,25 @@ When in doubt about *routing* — `assignee` vs `gc.routed_to` vs
 This doc covers *who* the agents are; that doc covers *how* work
 moves between them.
 
+## Scope
+
+**Mandate.** The single-page reference for the agent *variants* Gas
+City supports — named singletons, pool workers, threads, and the patrol
+overlay — and the contracts for identifying, addressing, spawning,
+terminating, and routing work to each. It captures the corners that
+surface only when variants mix and the footguns each variant has
+already cost.
+
+**Boundaries.** This doc covers *who* the agents are, not *how* work
+moves between them — the `assignee` / `gc.routed_to` / `--reassign`
+routing model is [gascity-routing-model.md](gascity-routing-model.md).
+It consolidates rather than re-teaches the underlying session/agent
+primitives (those are upstream —
+[02-agents](https://docs.gascityhall.com/tutorials/02-agents),
+[03-sessions](https://docs.gascityhall.com/tutorials/03-sessions)), and
+it does not cover prompt-template authoring or any single agent's role
+behavior.
+
 ## Variants at a glance
 
 | Variant | Configured by | Singleton? | Auto-spawned? | Routed work? | Examples |

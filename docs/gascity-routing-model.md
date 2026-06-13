@@ -5,6 +5,21 @@ description: How `gc sling`, direct assignee, and `gc sling --reassign` differ �
 
 # Gas City routing model: sling vs assignee vs `--reassign`
 
+## Scope
+
+**Mandate.** How the three ways of moving a bead to a worker differ —
+`gc sling <target> <bead>` (queue/template routing), `bd update
+--assignee` (direct named-session delivery), and `gc sling --reassign`
+(combined unassign + route) — and which of `assignee` / `gc.routed_to`
+each lane is supposed to set, per the maintainer's PR #1736 ruling.
+
+**Boundaries.** This doc covers *how* work moves between agents, not
+*who* the agents are — agent variants, identity, and lifecycle are
+[gascity-agents.md](gascity-agents.md). It is anchored to the #1736
+ruling and the `--reassign` mechanics (PR #1841); it is not a general
+`gc sling` tutorial, and graph.v2 step routing (`gc.run_target`)
+appears only as an adjacent contrast, not as the doc's subject.
+
 ## Provenance
 
 | Doc-type or artifact | Producer | Source location | Surveyed at |

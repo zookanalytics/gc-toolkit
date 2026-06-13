@@ -11,6 +11,23 @@
 
 ---
 
+## Scope
+
+**Mandate.** The recommended process for a city that must carry local
+fixes against a `gascity` rig: when to patch versus wait or engage
+upstream, fork and remote setup, the patch flow, commit messages as the
+review packet, promoting a local commit to an upstream-PR candidate,
+dropping a patch once upstream lands a fix, and the sync/rebase
+workflow.
+
+**Boundaries.** This is a workflow doc about *carrying* patches, not a
+reference for `gascity`'s own internals or behavior (that is
+[gascity-reference.md](gascity-reference.md) and upstream docs). It is
+deliberately temporary — every local patch is a tax, so the doc
+describes how to patch well only *when you've decided you must*, and
+exists to make itself unnecessary (see [When this doc should
+disappear](#when-this-doc-should-disappear)).
+
 ## When to local-patch
 
 When you hit a bug or design gap in `gascity` that's blocking your city,
