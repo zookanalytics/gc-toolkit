@@ -398,13 +398,21 @@ gc bd update "$BEAD" \\
 # Parent under the epic so audit beads group with doc-keeper.
 gc bd dep add "$BEAD" tk-yw3zb --type=parent-child 2>/dev/null || true
 
-# Dispatch: attach the worker wisp and route to the polecat pool. sling sets up
-# routing; the pre-stamped target makes workspace-setup branch from main.
+# Dispatch to the worker, routing to the polecat pool. The bespoke
+# `mol-doc-update` worker is being retired — a doc-update is ordinary polecat
+# work that runs through the standard `mol-polecat-work` lifecycle — so fall
+# back to plain pool routing (`gc.routed_to`) when the formula is no longer
+# registered, mirroring drift-audit so the signal is never lost. The
+# pre-stamped target=main makes workspace-setup branch from main either way.
 # `--on <formula>` attaches the wisp to the existing bead (the bead is the
 # positional arg) — do NOT combine with `-f`/`--formula`, which is the
 # mutually-exclusive "treat the arg as a formula and mint a fresh wisp" mode;
 # gc rejects the two flags together.
-gc sling "$POOL" "$BEAD" --on mol-doc-update
+if bd formula list 2>/dev/null | grep -q 'mol-doc-update'; then
+  gc sling "$POOL" "$BEAD" --on mol-doc-update >/dev/null 2>&1 || gc bd update "$BEAD" --set-metadata gc.routed_to="$POOL" >/dev/null
+else
+  gc bd update "$BEAD" --set-metadata gc.routed_to="$POOL" >/dev/null
+fi
 FILED_TARGETS="$FILED_TARGETS$TKEY "
 echo "filed + dispatched $BEAD -> $TKEY (cites $MEMFILE)"
 ```
