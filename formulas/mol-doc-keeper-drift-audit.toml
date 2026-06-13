@@ -1,0 +1,356 @@
+description = """
+doc-keeper drift audit — survey the **agent brief** (a small set of central
+docs) against the current HEADs of the repos they track, and file one
+`doc-update` bead per drifted doc. Read-only: it produces beads, never edits a
+doc.
+
+Part of the doc-keeper machinery (epic `tk-yw3zb`; this is sub-bead
+`tk-yw3zb.6`, design `specs/tk-yw3zb.1/doc-keeper-architecture.md` §5a). Its
+output is the drift feed into the shared `doc-update` pipeline: the beads it
+files match the pinned schema in `docs/principles/doc-keeper-bead-schema.md`
+(sub-bead `tk-yw3zb.5`), are picked up by the `mol-doc-update` worker formula,
+and land on the rolling docs branch via the refinery — exactly like an organic
+or memory-audit `doc-update`. This formula is indistinguishable downstream.
+
+## Dispatch (one-shot, periodic)
+
+Poured by a cooldown `gc order` onto the polecat pool (sub-bead `tk-yw3zb.8`,
+design §7) — NOT a self-looping patrol. One pour = one audit run: scan, file
+zero-or-more `doc-update` beads, drain. The cooldown re-pours on the next
+interval. The order must pass the pour vars below (mirrors how the witness /
+refinery patrols are poured for this rig):
+
+  gc bd mol wisp mol-doc-keeper-drift-audit --root-only \\
+    --var binding_prefix={{binding_prefix}} \\
+    --var gascity_rig={{gascity_rig}} \\
+    --var audit_max_beads_per_run={{audit_max_beads_per_run}}
+
+## The agent brief (tracked docs) — a constant, not config
+
+The epic rescope (2026-06-12) dropped the `[doc-keeper]` config block, so the
+tracked set is a CONSTANT in this formula (see the `TABLE` in `audit-and-file`).
+The canonical set is the three brief docs named on `tk-yw3zb.6`, reconciled to
+the paths that actually exist in the repo:
+
+| brief intent (bead text)        | real path                         | tracked source globs |
+|---------------------------------|-----------------------------------|----------------------|
+| gas-city-reference.md           | `docs/gascity-reference.md`       | gascity: cmd, internal, docs |
+| gas-city-pack-v2.md             | `docs/gas-city-pack-v2.md` (absent today) | gascity: pack/city internals |
+| gascity-local-patching.md       | `docs/gascity-local-patching.md`  | none (organic-only) |
+
+Name reconciliation: the bead and the architecture brief use idealized
+hyphenated names (`gas-city-reference.md`); the repo uses `gascity-reference.md`
+and has no `gas-city-pack-v2.md` yet. Entries whose doc is absent on the default
+branch are skipped (logged) — they auto-enroll the run after the doc is created.
+`docs/principles/document-spec.md` joins the set when `tk-yiwfz` adopts; add a
+row then.
+
+## Drift model and the baseline
+
+Drift for a doc = "a commit touched a path the doc tracks since the doc was last
+audited." The baseline (the "since") is the keystone. Two baselines that the
+bead's original sketch assumed do NOT work here, and were ruled out by
+inspection:
+
+- **In-doc `Current as of` stamp** — the real brief docs carry none (only
+  `name`/`description` frontmatter), and this formula is read-only so it cannot
+  add one. So the baseline cannot live in the doc.
+- **Doc's own last-commit date** — gascity moves continuously, so any doc not
+  edited in the last few hours would always show "newer" source commits → a
+  clean run would never be zero.
+
+So the baseline lives in a singleton **state bead** (label
+`doc-keeper-audit-state`, `pinned`): per tracked doc, metadata
+`base_<sanitized-path> = <gascity_sha>|<gc-toolkit_sha>` records the HEADs at the
+last audit. A doc with no recorded baseline ENROLLS at the current HEADs and
+files nothing. Drift = `git log base..HEAD -- <source globs>` is non-empty. The
+baseline advances to HEAD whenever the signal is captured (a bead filed, or an
+open bead already covers it) or there was no drift — only a per-run-cap deferral
+leaves it unadvanced so the next run re-detects.
+
+This makes a clean run deterministically zero, and is idempotent: re-running
+right after a clean run files nothing.
+
+## Verification (acceptance: clean → 0, mocked drift → non-zero)
+
+The bead asks for "checkout-then-revert of a doc" to mock drift. Because the
+baseline is in the state bead (not the doc — see above), the equivalent,
+reversible mock is to rewind one doc's recorded baseline so real, already-landed
+source commits fall inside the window:
+
+  STATE=$(bd list --label doc-keeper-audit-state --json | jq -r '.[0].id')
+  # rewind docs/gascity-reference.md's baseline ~20 gascity commits back:
+  OLD=$(git -C "$GC_CITY/rigs/{{gascity_rig}}" rev-parse 'origin/main~20')
+  HEAD_C=$(git -C "$GC_RIG_ROOT" rev-parse origin/main)
+  gc bd update "$STATE" --set-metadata base_docs_gascity_reference_md="$OLD|$HEAD_C"
+  # run the audit → it files one doc-update bead for docs/gascity-reference.md.
+  # restore: the audit advances the baseline to HEAD when it files, so a second
+  # run is clean again; or reset the key by hand to undo without filing.
+
+This is equivalent in effect to landing a source commit and watching the next
+audit react — the same signal, mocked reversibly without touching gascity.
+
+## Output: the pinned doc-update schema
+
+Each filed bead matches `docs/principles/doc-keeper-bead-schema.md`:
+type `task`; labels `doc-keeper`,`doc-update`; body `## Target` / `## Change` /
+`## Source / Why`; metadata `doc_keeper.target_doc`, `doc_keeper.source=drift-audit`,
+`doc_keeper.source_signal=<repo> <base>..<head>`. The audit cites the commits and
+names the doc — it never writes the prose; the worker reads `git log -p` of the
+cited range and writes the edit (and may close as a no-op if review shows no
+change is needed).
+
+Guardrails: at most `{{audit_max_beads_per_run}}` beads per run; never a second
+open bead for a doc that already has one (dedup on
+`metadata.doc_keeper.target_doc`).
+
+## Read-only invariant
+
+The audit edits NO repository files. It writes only bead state: the
+`doc-update` beads and the `doc-keeper-audit-state` baseline bead. Doc edits are
+the worker's job, on a branch, through the refinery.
+"""
+formula = "mol-doc-keeper-drift-audit"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+[vars.binding_prefix]
+description = "Import binding prefix for gastown agent identities, including trailing dot when bound (e.g. 'gc-toolkit.'). Used to address the polecat pool for dispatch."
+default = ""
+
+[vars.gascity_rig]
+description = "Sibling rig directory under $GC_CITY/rigs that holds the upstream gascity checkout. Used as both the repo path and the source_signal repo label."
+default = "gascity"
+
+[vars.audit_max_beads_per_run]
+description = "Safety cap on doc-update beads filed per audit run, so a high-drift window cannot swamp the polecat pool. Deferred docs are picked up on the next run."
+default = "5"
+
+[[steps]]
+id = "prime"
+title = "Prime and orient"
+description = """
+Load role + beads context, then orient on what this run does. No side effects
+here — the audit and any bead writes happen in `audit-and-file`.
+
+```bash
+gc prime
+gc bd prime
+```
+
+This is the doc-keeper **drift audit** (epic `tk-yw3zb`, sub-bead `tk-yw3zb.6`).
+You will, in the next step:
+
+1. Resolve the current HEADs of the tracked repos (gascity + gc-toolkit).
+2. Read the per-doc baseline from the singleton `doc-keeper-audit-state` bead
+   (create + initialize it on first run; enroll new docs with no finding).
+3. For each tracked agent-brief doc, ask "did any tracked source path move
+   since the baseline?" and, if so, file ONE `doc-update` bead citing the
+   commit range — capped, de-duplicated, schema-conformant.
+4. Drain.
+
+You do NOT edit any doc. The audit is read-only over the repos; it writes only
+bead state. Read `audit-and-file` in full before running it — it carries the
+tracked-doc table, the baseline rules, and the filing contract.
+"""
+
+[[steps]]
+id = "audit-and-file"
+title = "Scan tracked docs for drift and file doc-update beads"
+needs = ["prime"]
+description = """
+Run the audit. The whole procedure is one idempotent pass: re-running it is
+safe (already-filed signals are caught by the open-bead dedup, and baselines
+only advance once a signal is captured). Read it, then run it.
+
+**The tracked-doc table** (real paths; `-` = no source globs for that repo).
+Rows whose doc is absent on the gc-toolkit default branch are skipped and
+auto-enroll once the doc exists:
+
+- `docs/gascity-reference.md` — gascity globs: `cmd internal docs`
+- `docs/gas-city-pack-v2.md` — gascity globs: `internal/packman internal/packregistry internal/cityinit internal/citylayout internal/builtinpacks` (doc absent today → skipped until authored; confirm globs when it is)
+- `docs/gascity-local-patching.md` — no globs (organic-only; never yields a drift finding, tracked for completeness)
+
+```bash
+GASCITY_RIG="{{gascity_rig}}"
+MAX="{{audit_max_beads_per_run}}"
+POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+GASCITY_DIR="$GC_CITY/rigs/$GASCITY_RIG"
+GCTK_DIR="$GC_RIG_ROOT"
+
+# Resolve each repo's default branch (fallback: main).
+defbranch() {
+  b=$(git -C "$1" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+  b=${b#origin/}
+  if [ -n "$b" ]; then echo "$b"; else echo main; fi
+}
+GASCITY_DEF=$(defbranch "$GASCITY_DIR")
+GCTK_DEF=$(defbranch "$GCTK_DIR")
+
+# Best-effort freshen (the rig-checkout reconciler keeps rigs/* current; this is
+# belt-and-suspenders and offline-safe).
+git -C "$GASCITY_DIR" fetch --quiet origin "$GASCITY_DEF" 2>/dev/null || true
+git -C "$GCTK_DIR"   fetch --quiet origin "$GCTK_DEF"   2>/dev/null || true
+GASCITY_HEAD=$(git -C "$GASCITY_DIR" rev-parse "origin/$GASCITY_DEF" 2>/dev/null || git -C "$GASCITY_DIR" rev-parse HEAD)
+GCTK_HEAD=$(git -C "$GCTK_DIR" rev-parse "origin/$GCTK_DEF" 2>/dev/null || git -C "$GCTK_DIR" rev-parse HEAD)
+echo "Audit HEADs: $GASCITY_RIG=$GASCITY_HEAD  gc-toolkit=$GCTK_HEAD"
+
+# Resolve (or create) the singleton baseline-state bead.
+STATE=$(bd list --label doc-keeper-audit-state --json 2>/dev/null | jq -r '.[0].id // empty')
+if [ -z "$STATE" ]; then
+  STATE=$(gc bd create "doc-keeper drift-audit baseline state (reference; do not work)" -t task -l doc-keeper-audit-state --json | jq -r '.id // .[0].id')
+  gc bd update "$STATE" --status=pinned --notes "Singleton baseline-state bead for mol-doc-keeper-drift-audit. Per tracked doc, metadata key base_<sanitized-path> holds <gascity_sha>|<gc-toolkit_sha> = the HEADs at last audit. New docs enroll at current HEAD with no finding; drift = commits in base..HEAD on the doc's tracked source globs."
+  echo "Created baseline-state bead $STATE (first audit run — docs enroll, nothing filed)."
+fi
+
+filed=0
+while IFS='|' read -r doc gglobs cglobs <&3; do
+  [ -z "$doc" ] && continue
+
+  # Doc must exist on the gc-toolkit default branch; otherwise skip (it enrolls
+  # the run after it is created).
+  if ! git -C "$GCTK_DIR" cat-file -e "origin/$GCTK_DEF:$doc" 2>/dev/null; then
+    echo "skip $doc — not present on origin/$GCTK_DEF yet"
+    continue
+  fi
+
+  key="base_$(printf '%s' "$doc" | tr -c 'a-zA-Z0-9' '_')"
+  base=$(gc bd show "$STATE" --json | jq -r --arg k "$key" '.[0].metadata[$k] // empty')
+
+  # No baseline yet → enroll at current HEADs, file nothing.
+  if [ -z "$base" ]; then
+    gc bd update "$STATE" --set-metadata "$key=$GASCITY_HEAD|$GCTK_HEAD" >/dev/null
+    echo "enrolled $doc at baseline $GASCITY_HEAD|$GCTK_HEAD (no finding)"
+    continue
+  fi
+  base_g=${base%%|*}
+  base_c=${base##*|}
+
+  # Compute drift windows on the tracked source globs (word-split is intended).
+  sig=""
+  commits=""
+  if [ "$gglobs" != "-" ] && [ -n "$gglobs" ]; then
+    # shellcheck disable=SC2086
+    gc_commits=$(git -C "$GASCITY_DIR" log --oneline "$base_g..$GASCITY_HEAD" -- $gglobs 2>/dev/null)
+    if [ -n "$gc_commits" ]; then
+      gsig="$GASCITY_RIG ${base_g:0:9}..${GASCITY_HEAD:0:9}"
+      sig="$gsig"
+      commits="$commits
+[$gsig]
+$gc_commits"
+    fi
+  fi
+  if [ "$cglobs" != "-" ] && [ -n "$cglobs" ]; then
+    # shellcheck disable=SC2086
+    ct_commits=$(git -C "$GCTK_DIR" log --oneline "$base_c..$GCTK_HEAD" -- $cglobs 2>/dev/null)
+    if [ -n "$ct_commits" ]; then
+      csig="gc-toolkit ${base_c:0:9}..${GCTK_HEAD:0:9}"
+      if [ -n "$sig" ]; then sig="$sig; $csig"; else sig="$csig"; fi
+      commits="$commits
+[$csig]
+$ct_commits"
+    fi
+  fi
+
+  # No drift → advance baseline (keeps the window tight) and move on.
+  if [ -z "$sig" ]; then
+    gc bd update "$STATE" --set-metadata "$key=$GASCITY_HEAD|$GCTK_HEAD" >/dev/null
+    echo "clean $doc — baseline advanced to current HEADs"
+    continue
+  fi
+
+  # Dedup: never a second open doc-update bead for the same doc.
+  dupe=$(bd list --label doc-update --status open --json 2>/dev/null | jq -r --arg d "$doc" '[.[] | select((.metadata."doc_keeper.target_doc" // "") == $d)] | length')
+  if [ "${dupe:-0}" -gt 0 ]; then
+    echo "drift on $doc but an open doc-update bead already targets it — advancing baseline, not double-filing"
+    gc bd update "$STATE" --set-metadata "$key=$GASCITY_HEAD|$GCTK_HEAD" >/dev/null
+    continue
+  fi
+
+  # Per-run cap: defer (do NOT advance baseline) so next run re-detects.
+  if [ "$filed" -ge "$MAX" ]; then
+    echo "cap $MAX reached — deferring $doc to the next run"
+    continue
+  fi
+
+  # File the doc-update bead in the pinned schema.
+  body="## Target
+- Doc: $doc
+- Section: whole doc — the drift audit cannot localize the section; the worker narrows it from the cited commits.
+
+## Change
+- Review $doc against the commits cited below and refresh any content they invalidate. The audit does NOT propose prose: read the cited commits ('git log -p' in the named repo) and write the real edit. If review shows nothing needs changing, close the bead as a no-op.
+
+## Source / Why
+- Drift audit: these commits touched paths this doc tracks since the last audit baseline.
+$commits"
+  bead=$(gc bd create "doc-update: $doc: review — tracked sources moved (drift audit)" -t task -l doc-keeper,doc-update -d "$body" --json | jq -r '.id // .[0].id')
+  if [ -z "$bead" ] || [ "$bead" = "null" ]; then
+    echo "WARN: could not create doc-update bead for $doc; leaving baseline unadvanced" >&2
+    continue
+  fi
+  gc bd update "$bead" \
+    --set-metadata doc_keeper.target_doc="$doc" \
+    --set-metadata doc_keeper.source=drift-audit \
+    --set-metadata doc_keeper.source_signal="$sig" >/dev/null
+  gc bd update "$bead" --parent tk-yw3zb >/dev/null 2>&1 || true
+
+  # Pre-stamp the rolling-cycle target before dispatch (schema doc §2). Guarded:
+  # the rolling-cycle script + the mol-doc-update worker land with sibling beads
+  # (tk-yw3zb.4 / tk-yw3zb.5); degrade cleanly if not present yet at runtime —
+  # an unstamped bead is reconciled by mol-doc-update's load-context.
+  ROLL="$GCTK_DIR/assets/scripts/doc-keeper-rolling-cycle.sh"
+  if [ -x "$ROLL" ]; then
+    rt=$("$ROLL" 2>/dev/null) || rt=""
+    if [ -n "$rt" ]; then
+      gc bd update "$bead" --set-metadata target="$rt" --set-metadata merge_strategy=direct >/dev/null
+    fi
+  fi
+
+  # Dispatch to the worker. If mol-doc-update is not registered yet, route the
+  # bead to the pool so the signal is not lost.
+  if bd formula list 2>/dev/null | grep -q 'mol-doc-update'; then
+    gc sling "$POOL" "$bead" --on mol-doc-update >/dev/null 2>&1 || gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
+  else
+    gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
+  fi
+
+  filed=$((filed + 1))
+  gc bd update "$STATE" --set-metadata "$key=$GASCITY_HEAD|$GCTK_HEAD" >/dev/null
+  echo "filed doc-update $bead for $doc (signal: $sig)"
+done 3<<'TABLE'
+docs/gascity-reference.md|cmd internal docs|-
+docs/gas-city-pack-v2.md|internal/packman internal/packregistry internal/cityinit internal/citylayout internal/builtinpacks|-
+docs/gascity-local-patching.md|-|-
+TABLE
+
+echo "drift-audit complete: filed $filed doc-update bead(s) this run (cap $MAX)."
+```
+
+**Exit criteria:** every tracked doc was either enrolled (first sight), found
+clean (baseline advanced), found already-covered by an open bead, filed as a new
+`doc-update` bead, or deferred by the cap. No repository file was edited.
+"""
+
+[[steps]]
+id = "drain"
+title = "Summarize and drain"
+needs = ["audit-and-file"]
+description = """
+The audit is a one-shot run; the cooldown order re-pours the next one. There is
+no work bead to hand off and nothing to close — the `doc-update` beads you filed
+are routed to the worker, and the baseline-state bead is `pinned` reference.
+
+Print a one-line summary (count filed this run, from `audit-and-file`), then
+drain:
+
+```bash
+gc runtime drain-ack
+```
+
+Do NOT push a branch, hand to the refinery, or close any bead — this formula
+files beads and exits. The doc edits happen later, in `mol-doc-update`, on a
+branch, through the refinery.
+"""
