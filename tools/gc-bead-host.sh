@@ -91,6 +91,21 @@ require_bead() {
     bead_exists "$1" || die "bead '$1' not found (looked up via 'gc bd show')"
 }
 
+# host_title <work> — the scannable bead-host session title,
+# "<bead-id> · <bead-title>", capped to ~60 display chars so the prefix+S
+# picker shows which bead a host belongs to instead of the generic
+# "gc-toolkit.bead-host". jq slices by Unicode codepoint (never splits a
+# multibyte char); falls back to the bare id when the bead has no title.
+host_title() {
+    local work="$1" t
+    t="$(bead_json "$work" | jq -r --arg id "$work" '
+        (.title // "") as $bt
+        | (if ($bt | length) > 0 then ($id + " · " + $bt) else $id end)
+        | .[0:60]' 2>/dev/null || true)"
+    [ -n "$t" ] || t="$work"
+    printf '%s' "$t"
+}
+
 # ---- link / unlink / lineage (pure metadata; testable offline) -------------
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -270,6 +285,12 @@ cmd_up() {
     [ -n "$work" ] || { usage; die "up needs <bead-id>"; }
     require_bead "$work"
 
+    # A scannable session title, set on BOTH spawn and resume, so the
+    # prefix+S picker and the attention board name the bead instead of the
+    # generic "gc-toolkit.bead-host". Best-effort: a rename failure is never
+    # fatal to spawn-or-resume.
+    local htitle; htitle="$(host_title "$work")"
+
     # Already bound + a live/suspended session? Resume it.
     local existing
     existing="$(cmd_resolve "$work" 2>/dev/null | head -1 || true)"
@@ -278,15 +299,17 @@ cmd_up() {
         IFS=$'\t' read -r sid sname salias sstate <<<"$existing"
         log "host exists for $work: session=$sid state=$sstate — waking/resuming"
         gc session wake "${salias:-$work}" >/dev/null 2>&1 || true
+        gc session rename "$sid" "$htitle" >/dev/null 2>&1 || true
         cmd_link "$work" "$sid" "$sname" "$(meta_get "$sid" continuation_epoch)" >/dev/null
         printf '%s\n' "$sid"
         return 0
     fi
 
-    # No host — create one aliased to the bead (alias=bead-id enforces 1:1).
+    # No host — create one aliased to the bead (alias=bead-id enforces 1:1),
+    # titled with the bead so the picker is scannable.
     log "creating bead-host for $work"
     local out sid sname
-    out="$(gc session new bead-host --alias "$work" --no-attach --json 2>/dev/null)" \
+    out="$(gc session new bead-host --alias "$work" --title "$htitle" --no-attach --json 2>/dev/null)" \
         || die "gc session new bead-host failed (is the bead-host agent loaded? run 'gc reload')"
     sid="$(printf '%s' "$out"   | jq -r '.session_id // empty')"
     sname="$(printf '%s' "$out" | jq -r '.session_name // empty')"
