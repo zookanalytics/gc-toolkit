@@ -11,7 +11,7 @@
 #   gc-attention open  <bead-id>                 land in the bead (resume-or-create its host)
 #   gc-attention flag  <bead-id> --reason "..."  raise this bead onto the board
 #   gc-attention clear <bead-id>                 lower it again (the handled row leaves)
-#   gc-attention takeaway <bead-id> "<text>" [--by …] [--note …]  set the board-visible takeaway headline
+#   gc-attention takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline
 #
 # Phase 3 of the Bead-Universe Operating Model (epic tk-q4xaj; bead
 # tk-qkags; design Key Component 4, Phase 3). The board (the default
@@ -170,7 +170,7 @@ Usage:
   gc-attention flag  <bead-id> --reason "..."  raise this bead onto the board
   gc-attention clear <bead-id>                 lower it again (the handled row leaves)
   gc-attention react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-attention takeaway <bead-id> "<text>" [--by host|proactive] [--note "..."]  set the board-visible takeaway headline
+  gc-attention takeaway <bead-id> "<text>" [--by host|proactive] [--release]  set the board-visible takeaway headline
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, decisions, and flagged beads) by how much
@@ -179,7 +179,9 @@ board→land→accept/redirect→leave loop; react slings a proactive first
 reaction (via tools/gc-proactive.sh, on the codex-gated mr path) so a
 takeaway-less row self-heals to an explanatory NEEDS on the next render.
 takeaway writes that NEEDS headline directly — the thin writer the host and
-proactive worker call to stamp gc.takeaway (+_at/+_by) in one update.
+proactive worker call to stamp gc.takeaway (+_at/+_by) in one update; with
+--release it also reopens/unassigns/clears the route and marks the proactive
+reaction in that same write (the proactive worker's one-call close).
 
   --json             Emit the ranked board as a JSON array (stable contract).
   --limit=N          Show only the top N rows (0 = all/uncapped; default caps at 50).
@@ -290,14 +292,20 @@ cmd_clear() {
 # Mirrors flag/clear: resolve the bead's rig db, stamp the three fields in ONE
 # update, then bust the cache so the next board glance reflects the new
 # headline (an improvement over the old inline form, which never busted it).
+#
+# --release folds the proactive reaction-release into the SAME update: alongside
+# the takeaway stamp it ALSO marks the reaction + reopens + unassigns + clears
+# the route (gc.proactive_reaction=1, --status=open, empty --assignee, empty
+# gc.routed_to) in one Dolt write. The proactive worker / mol-first-reaction
+# call `takeaway … --release` as their single closing step, replacing a takeaway
+# stamp followed by a separate release `gc bd update`.
 cmd_takeaway() {
-    bead=""; text=""; by="host"; note=""; npos=0
+    bead=""; text=""; by="host"; release=""; npos=0
     while [ $# -gt 0 ]; do
         case "$1" in
-            --by=*)   by="${1#--by=}"; shift ;;
-            --by)     shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --by requires a value" >&2; exit 2; }; by="$1"; shift ;;
-            --note=*) note="${1#--note=}"; shift ;;
-            --note)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --note requires a value" >&2; exit 2; }; note="$1"; shift ;;
+            --by=*)    by="${1#--by=}"; shift ;;
+            --by)      shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --by requires a value" >&2; exit 2; }; by="$1"; shift ;;
+            --release) release=1; shift ;;
             -h|--help) usage; exit 0 ;;
             -*) echo "$PROG: takeaway: unknown flag '$1'" >&2; exit 2 ;;
             *)
@@ -326,20 +334,21 @@ cmd_takeaway() {
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
-    # Build the update args with `set --`, NOT ${note:+--notes "$note"}: $note
-    # and $text contain spaces and an unquoted ${var:+…} would word-split them.
-    # The optional --note folds into the SAME update (as --notes) so a host's
-    # per-turn note + takeaway stay ONE Dolt write.
+    # Build the update args with `set --` ($text/$by contain spaces, so an
+    # unquoted ${var:+…} would word-split them). --release folds the proactive
+    # reaction-release bundle into the SAME update so the takeaway stamp and the
+    # release stay ONE Dolt write.
     set --
-    [ -n "$note" ] && set -- "$@" --notes "$note"
     set -- "$@" --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by"
+    [ -n "$release" ] && set -- "$@" --status=open --assignee= \
+               --set-metadata "gc.routed_to=" --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
     bust_cache
-    echo "takeaway set on $bead (by $by): $text"
+    echo "takeaway set on $bead (by $by)${release:+ [released]}: $text"
 }
 
 # ── Verb: open ───────────────────────────────────────────────────────

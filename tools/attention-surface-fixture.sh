@@ -222,6 +222,16 @@ ec=0; "$TOOL" takeaway tk-x 2>/dev/null || ec=$?;   eq "takeaway with no text er
 ec=0; "$TOOL" takeaway tk-x "   " 2>/dev/null || ec=$?; eq "takeaway with whitespace-only text errors (exit 2)" "2" "$ec"
 has  "help lists the takeaway verb" "takeaway"           "$("$TOOL" help 2>&1 || true)"
 has  "usage documents takeaway"     "takeaway <bead-id>" "$("$TOOL" --help 2>&1 || true)"
+# --release is a recognized boolean flag on takeaway. Probe it WITHOUT a bead so
+# the parse-level error (missing bead-id) proves the flag was consumed — not
+# rejected as unknown — and no Dolt write is reached. The usage advertises it.
+REL_OUT="$("$TOOL" takeaway --release 2>&1 || true)"
+has    "takeaway --release is a recognized flag (not unknown)" "needs <bead-id>" "$REL_OUT"
+absent "takeaway --release is not rejected as unknown"         "unknown flag"    "$REL_OUT"
+has    "usage documents the takeaway --release flag"           "--release"       "$("$TOOL" --help 2>&1 || true)"
+# The retired --note flag is now an UNKNOWN flag (takeaway is takeaway-only).
+NOTE_OUT="$("$TOOL" takeaway tk-x sometext --note whatever 2>&1 || true)"
+has    "the retired takeaway --note flag is now rejected as unknown" "unknown flag" "$NOTE_OUT"
 
 echo "── hermetic: react is the front-door over gc-proactive.sh sling (mr path, codex-gated) ──"
 # react <id> is a THIN wrapper over tools/gc-proactive.sh `sling` — it owns no
@@ -301,12 +311,13 @@ else
     printf '  skip  live board smoke (no reachable city)\n'
 fi
 
-# Opt-in: a full flag→board→clear + takeaway round-trip on an operator-chosen
-# bead. The fixture never invents or closes a bead — it writes only to the bead
-# the operator named, and both legs self-clean (clear undoes flag; the unset
-# undoes takeaway, which has no inverse verb).
+# Opt-in: a full flag→board→clear + takeaway + takeaway --release round-trip on
+# an operator-chosen bead. The fixture never invents or closes a bead — it writes
+# only to the bead the operator named, and every leg self-cleans (clear undoes
+# flag; the unset undoes takeaway; the --release leg captures and restores the
+# bead's prior lifecycle fields and unsets the marker it set).
 if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
-    echo "── live (opt-in): flag → board → clear + takeaway round-trip on $GC_ATTENTION_FLAG_SMOKE_BEAD ──"
+    echo "── live (opt-in): flag/clear + takeaway + takeaway --release round-trip on $GC_ATTENTION_FLAG_SMOKE_BEAD ──"
     bead="$GC_ATTENTION_FLAG_SMOKE_BEAD"
     "$TOOL" flag "$bead" --reason "attention-surface-fixture smoke" >/dev/null 2>&1 \
         && ok "flag $bead" || bad "flag $bead" "exit 0" "non-zero"
@@ -332,6 +343,34 @@ if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
         && ok "unset the smoke takeaway (cleanup)" || bad "unset the smoke takeaway" "exit 0" "non-zero"
     eq "bead no longer carries gc.takeaway" "" \
         "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway"] // ""')"
+    # --release leg: ONE call stamps the takeaway AND releases the bead (reopen,
+    # unassign, clear route, mark reacted). Capture the prior lifecycle fields so
+    # we can restore them — unlike the takeaway-only leg above, --release mutates
+    # status/assignee/route.
+    PRIOR_STATUS="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].status // "open"')"
+    PRIOR_ASSIGNEE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].assignee // ""')"
+    PRIOR_ROUTE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.routed_to"] // ""')"
+    "$TOOL" takeaway "$bead" "attention-surface-fixture release smoke" --by proactive --release >/dev/null 2>&1 \
+        && ok "takeaway --release $bead" || bad "takeaway --release $bead" "exit 0" "non-zero"
+    RELJSON="$(gc bd show "$bead" --json 2>/dev/null)"
+    eq "release stamps the gc.takeaway headline"      "attention-surface-fixture release smoke" \
+        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.takeaway"] // ""')"
+    eq "release attributes the takeaway to proactive" "proactive" \
+        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.takeaway_by"] // ""')"
+    eq "release reopens the bead (status=open)"       "open" \
+        "$(printf '%s' "$RELJSON" | jq -r '.[0].status // ""')"
+    eq "release clears the assignee"                  "" \
+        "$(printf '%s' "$RELJSON" | jq -r '.[0].assignee // ""')"
+    eq "release clears the pool route (gc.routed_to)" "" \
+        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.routed_to"] // ""')"
+    eq "release marks the proactive reaction"         "1" \
+        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.proactive_reaction"] // ""')"
+    # Restore the prior lifecycle fields + unset the smoke takeaway/marker.
+    gc bd update "$bead" --status="$PRIOR_STATUS" --assignee="$PRIOR_ASSIGNEE" \
+        --set-metadata gc.routed_to="$PRIOR_ROUTE" \
+        --unset-metadata gc.takeaway --unset-metadata gc.takeaway_at --unset-metadata gc.takeaway_by \
+        --unset-metadata gc.proactive_reaction >/dev/null 2>&1 \
+        && ok "restore lifecycle + unset the release smoke (cleanup)" || bad "restore the release smoke" "exit 0" "non-zero"
 else
     printf '  skip  live flag→clear + takeaway round-trip (set GC_ATTENTION_FLAG_SMOKE_BEAD=<id> to run)\n'
 fi
