@@ -312,7 +312,7 @@ $commits"
   # Dispatch to the worker. If mol-doc-update is not registered yet, route the
   # bead to the pool so the signal is not lost.
   if bd formula list 2>/dev/null | grep -q 'mol-doc-update'; then
-    gc sling "$POOL" mol-doc-update -f --on "$bead" >/dev/null 2>&1 || gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
+    gc sling "$POOL" "$bead" --on mol-doc-update >/dev/null 2>&1 || gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
   else
     gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
   fi
