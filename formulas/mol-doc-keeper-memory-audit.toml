@@ -7,9 +7,9 @@ Part of the doc-keeper machinery (epic `tk-yw3zb`, sub-bead `tk-yw3zb.7`;
 design `specs/tk-yw3zb.1/doc-keeper-architecture.md` §5b and
 `specs/tk-yw3zb.1/central-doc-inventory.md` §2b). doc-keeper keeps the brief
 current from three feeds — a drift audit (`.6`), this memory audit (`.7`), and
-organic filing — all producing the SAME `doc-update` bead shape
-(`docs/principles/doc-keeper-bead-schema.md`) so they are indistinguishable to
-the `mol-doc-update` worker (`.5`) and the refinery.
+organic filing — all producing the SAME `doc-update` bead shape (see the
+`mol-doc-update` worker formula description) so they are indistinguishable to
+that worker (`.5`) and the refinery.
 
 ## What this audit does (and does not)
 
@@ -18,8 +18,8 @@ buckets, and for the promote-worthy ones FILES a `doc-update` bead citing the
 memory file as the source signal. It does **not** edit any central doc, and it
 does **not** mutate the memory directory — the audit only surfaces; mechanik
 (the memory's owner) and the operator decide whether a promotion actually
-lands, via the normal worker → refinery → rolling-PR pipeline. The proposed
-target doc and any drafted copy are recommendations the worker may override.
+lands, via the normal worker → refinery → PR pipeline. The proposed target doc
+and any drafted copy are recommendations the worker may override.
 
 ## The three buckets (central-doc-inventory.md §2b)
 
@@ -45,24 +45,30 @@ audit that itself drifts is the one thing it cannot afford. The brief set is a
 constant in this formula (not a config block — the epic rescope dropped
 `[doc-keeper]`); the runtime check keeps that constant honest.
 
-## The rolling-cycle target is pre-stamped (the dispatch contract)
+## The target is main, the merge is a PR
 
-`doc-update` edits merge onto a long-lived `docs/rolling-N` branch, not `main`
-(`tk-yw3zb.4`). `metadata.target = docs/rolling-N` MUST be stamped on each bead
-**before** it is slung, because `gc sling` bakes `{{base_branch}}` from
-`metadata.target` at pour time and the inherited `mol-doc-update`
-workspace-setup/submit-and-exit would otherwise strand the edit on `main`
-(schema doc §2). So this audit resolves the rolling target with the shared
-`assets/scripts/doc-keeper-rolling-cycle.sh` and stamps it on every bead it
-files — but only once it has at least one bead to file, so a clean run never
-opens an empty cycle.
+`doc-update` edits land on `main`, each as its own small pull request — no
+rolling branch, no batching. So this audit stamps `target=main` and
+`merge_strategy=mr` on every bead it files; the inherited `mol-doc-update`
+workspace-setup branches `polecat/<bead>` from `origin/main` and the refinery
+opens one PR to `main`.
+
+## Dedup (don't let two PRs address the same thing)
+
+Before filing, the audit checks three things and skips a candidate that any of
+them catch: (a) the fact is already IN the best-fit brief doc (a grep);
+(b) a non-closed `doc-update` bead already cites this same memory entry; and
+(c) the chosen target doc is already addressed by a live `doc-update` bead OR an
+open `doc-update` PR. Check (c) is load-bearing because the refinery CLOSES a
+`doc-update` bead when it opens the PR (`merge_strategy=mr`), so a bead-only
+query misses an in-flight PR — the audit also inspects the PRs of closed beads.
 
 ## NEVER CLOSE THE BEADS IT FILES
 
 This audit CREATES `doc-update` beads and hands each to a worker via
-`gc sling ... mol-doc-update`. The worker edits the doc and the refinery merges
-and closes the bead. The audit never edits a doc, never pushes a branch, and
-never closes a `doc-update` bead — it surfaces and dispatches, then drains.
+`gc sling ... mol-doc-update`. The worker edits the doc and the refinery opens
+the PR and closes the bead. The audit never edits a doc, never pushes a branch,
+and never closes a `doc-update` bead — it surfaces and dispatches, then drains.
 
 ## Variables
 
@@ -106,9 +112,8 @@ id = "load-context"
 title = "Prime, locate the memory source, and pin the audit's frame of reference"
 description = """
 Initialize, confirm the memory directory exists, and refresh the repo view so
-the brief-doc set and the rolling-cycle resolution reflect current `main`. This
-audit is read-only and files no commits — it has no per-bead worktree and no
-refinery handoff.
+the brief-doc set reflects current `main`. This audit is read-only and files no
+commits — it has no per-bead worktree and no refinery handoff.
 
 **1. Prime your environment:**
 ```bash
@@ -117,8 +122,7 @@ gc bd prime                 # beads context
 ```
 
 **2. Pin the repo and refresh the brief view.** The audit reads central docs to
-avoid re-promoting already-covered facts, and runs the shared rolling-cycle
-script from the checkout; both must reflect current `main`:
+avoid re-promoting already-covered facts; that view must reflect current `main`:
 ```bash
 REPO="$(git rev-parse --show-toplevel)"
 git -C "$REPO" fetch origin main --quiet || true   # best-effort freshness
@@ -235,6 +239,8 @@ LIVE_SIGNALS=$(gc bd list -l doc-update --status open,in_progress,blocked,deferr
 # skip the entry if "$MEM/<entry>.md" is already in "$LIVE_SIGNALS".
 ```
 Keep only entries that are durable, not already covered, and not already filed.
+(A third dedup — the chosen target doc already has a live bead or open PR — is
+applied at file time in `file-and-dispatch`, once the target doc is picked.)
 
 **4. Bound and order.** Sort the survivors by file mtime (most recent first) and
 keep at most `{{max_beads_per_run}}`. If you dropped any for the cap, note the
@@ -268,45 +274,43 @@ title = "File a schema-shaped doc-update bead per survivor, dispatch it, and dra
 needs = ["scan-and-classify"]
 description = """
 Turn each surviving candidate into ONE `doc-update` bead in the pinned shape
-(`docs/principles/doc-keeper-bead-schema.md`), pre-stamp the rolling-cycle
-target, and hand it to a worker. Then drain — this session is one-shot.
+(see the `mol-doc-update` worker formula description), targeting `main` as one
+small PR, and hand it to a worker. Then drain — this session is one-shot.
 
-**1. Clean run? Drain, opening no cycle.** If `scan-and-classify` yielded no
-survivors, the audit is a no-op this cycle. Do NOT resolve the rolling cycle
-(opening an empty `docs/rolling-N` is wasteful):
+**1. Clean run? Drain.** If `scan-and-classify` yielded no survivors, the audit
+is a no-op this cycle:
 ```bash
 echo "memory-audit: no promote candidates this run — nothing to file."
 gc runtime drain-ack
 exit 0
 ```
 
-**2. Resolve the rolling-cycle target ONCE** (only now that there is ≥1 bead to
-file). The pre-stamp is the dispatch contract (schema §2) — `metadata.target`
-must be a `docs/rolling-N` branch BEFORE the bead is slung:
+**2. Set up dispatch and the file-time dedup.** Each `doc-update` lands on
+`main` as one small PR (`merge_strategy=mr`); there is no rolling branch to
+resolve. Define the doc-level dedup used in step 3:
 ```bash
 REPO="$(git rev-parse --show-toplevel)"
-ROLL="$REPO/assets/scripts/doc-keeper-rolling-cycle.sh"
-TARGET="$("$ROLL")" || {
-  # The script (tk-yw3zb.4) resolves or opens the cycle. If it is absent or
-  # fails, do NOT file beads off the rolling cycle — escalate and drain so the
-  # next run retries cleanly once the script is present.
-  echo "rolling-cycle resolve failed (script $ROLL absent or errored) — escalating, not filing." >&2
-  WITNESS_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}witness"
-  gc mail send "$WITNESS_TARGET" -s "HELP: doc-keeper memory-audit rolling-cycle resolve failed [MED]" \\
-    -m "assets/scripts/doc-keeper-rolling-cycle.sh did not resolve a docs/rolling-N target; held filing this run."
-  gc runtime drain-ack
-  exit 0
-}
-case "$TARGET" in
-  docs/rolling-*) echo "Rolling target: $TARGET" ;;
-  *) echo "rolling-cycle script returned unexpected target '$TARGET' — escalating, not filing." >&2
-     WITNESS_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}witness"
-     gc mail send "$WITNESS_TARGET" -s "HELP: doc-keeper rolling target malformed [MED]" \\
-       -m "doc-keeper-rolling-cycle.sh returned '$TARGET', expected docs/rolling-N. Held filing."
-     gc runtime drain-ack
-     exit 0 ;;
-esac
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+
+# A doc is "already addressed" if a live (non-closed) doc-update bead targets
+# it, OR a closed doc-update bead targets it and its PR is still open. The
+# refinery CLOSES a doc-update bead when it opens the PR, so a bead-only query
+# misses an in-flight PR — also check the PRs of closed beads. (Guard: never two
+# open PRs for the same doc.)
+doc_already_addressed() {
+  _doc="$1"
+  _live=$(gc bd list -l doc-update --status open,in_progress,blocked,deferred --json 2>/dev/null \
+    | jq -r --arg d "$_doc" '[.[] | select((.metadata."doc_keeper.target_doc" // "") == $d)] | length')
+  [ "${_live:-0}" -gt 0 ] && return 0
+  command -v gh >/dev/null 2>&1 || return 1
+  _prs=$(gc bd list -l doc-update --status closed --metadata-field merge_result=pull_request --json 2>/dev/null \
+    | jq -r --arg d "$_doc" '.[] | select((.metadata."doc_keeper.target_doc" // "") == $d) | .metadata.pr_number // empty')
+  for _n in $_prs; do
+    [ -n "$_n" ] && [ "$(gh pr view "$_n" --json state -q .state 2>/dev/null)" = "OPEN" ] && return 0
+  done
+  return 1
+}
+FILED_DOCS=" "   # run-local set of docs filed this run (the anchor fallback can collapse survivors onto one doc)
 ```
 
 **3. File one bead per survivor**, in the pinned schema shape. For each
@@ -322,6 +326,14 @@ are the SAME bead shape, the framing just orients the worker:
 # Existence-check the recommended target doc; fall back to the always-present
 # anchor if it drifted out from under us.
 [ -f "$REPO/$TARGET_DOC" ] || TARGET_DOC="docs/gascity-reference.md"
+
+# Doc-level dedup (don't let two PRs address the same doc). Skip if already
+# filed earlier this run, or already addressed by a live bead / open PR.
+case "$FILED_DOCS" in *" $TARGET_DOC "*) echo "skip $MEMFILE — $TARGET_DOC already filed this run"; continue ;; esac
+if doc_already_addressed "$TARGET_DOC"; then
+  echo "skip $MEMFILE — $TARGET_DOC already has a live doc-update bead or open PR"
+  continue
+fi
 
 # Body: the four schema sections. The audit CITES and names the section; it does
 # not write the final prose. ## Proposed copy is an OPTIONAL starting draft the
@@ -344,46 +356,48 @@ BEAD="$(gc bd create "doc-update: $TARGET_DOC: $SUMMARY" -t task -l doc-keeper -
 EOF
 )" --json | jq -r '.id // .[0].id')"
 
-# Metadata contract (schema §1b). Note: bd metadata keys use the underscore
-# namespace `doc_keeper.*` (hyphens are rejected); the rolling target is
-# pre-stamped HERE, before the sling.
+# Metadata contract. Note: bd metadata keys use the underscore namespace
+# `doc_keeper.*` (hyphens are rejected). target=main + merge_strategy=mr make the
+# worker open one small PR to main; stamped before the sling so `gc sling` bakes
+# {{base_branch}}=main at pour.
 gc bd update "$BEAD" \\
   --set-metadata doc_keeper.target_doc="$TARGET_DOC" \\
   --set-metadata doc_keeper.source=memory-audit \\
   --set-metadata doc_keeper.source_signal="$MEMFILE" \\
-  --set-metadata target="$TARGET" \\
-  --set-metadata merge_strategy=direct
+  --set-metadata target=main \\
+  --set-metadata merge_strategy=mr
 
 # If the entry carries operator PII / internal URLs / absolute home paths, tag
 # it so the worker paraphrases rather than promoting verbatim (schema treats
 # proposed copy as untrusted; this makes the intent explicit):
 #   gc bd update "$BEAD" --set-metadata doc_keeper.needs_paraphrase=true
 
-# Parent under the epic so audit beads group with doc-keeper (the rolling cycle
-# itself is carried by metadata.target, not the parent — schema §6).
+# Parent under the epic so audit beads group with doc-keeper.
 gc bd dep add "$BEAD" tk-yw3zb --type=parent-child 2>/dev/null || true
 
 # Dispatch: attach the worker wisp and route to the polecat pool. sling sets up
-# routing; the pre-stamped target makes workspace-setup branch from the rolling
-# branch (schema §5). `--on <formula>` attaches the wisp to the existing bead
-# (the bead is the positional arg) — do NOT combine with `-f`/`--formula`, which
-# is the mutually-exclusive "treat the arg as a formula and mint a fresh wisp"
-# mode; gc rejects the two flags together.
+# routing; the pre-stamped target makes workspace-setup branch from main.
+# `--on <formula>` attaches the wisp to the existing bead (the bead is the
+# positional arg) — do NOT combine with `-f`/`--formula`, which is the
+# mutually-exclusive "treat the arg as a formula and mint a fresh wisp" mode;
+# gc rejects the two flags together.
 gc sling "$POOL" "$BEAD" --on mol-doc-update
+FILED_DOCS="$FILED_DOCS$TARGET_DOC "
 echo "filed + dispatched $BEAD -> $TARGET_DOC (cites $MEMFILE)"
 ```
 
-**4. Summarize and drain.** Report what was filed (and any deferred for the cap)
-so the run is auditable, then end — the audit is one-shot:
+**4. Summarize and drain.** Report what was filed (and any deferred for the cap
+or dedup) so the run is auditable, then end — the audit is one-shot:
 ```bash
-echo "memory-audit complete: filed N bead(s) onto $TARGET; deferred M to next cycle."
+echo "memory-audit complete: filed N bead(s) to main; deferred M to next cycle."
 gc runtime drain-ack
 ```
 
 **Never** run `gc bd close` on a filed `doc-update` bead, and never edit a
-central doc here. The worker edits; the refinery merges and closes. This audit
-surfaces and dispatches, full stop.
+central doc here. The worker edits; the refinery opens the PR and closes the
+bead. This audit surfaces and dispatches, full stop.
 
-**Exit criteria:** Each survivor became one schema-shaped, rolling-target-stamped
-`doc-update` bead routed to the worker pool; the session drained.
+**Exit criteria:** Each survivor became one schema-shaped `doc-update` bead
+(target `main`, `merge_strategy=mr`) routed to the worker pool, or was skipped by
+dedup; the session drained.
 """
