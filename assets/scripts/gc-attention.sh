@@ -299,19 +299,41 @@ cmd_open() {
     fi
     bust_cache
 
-    # Land in it. The host's tmux session is named by its alias (== the
-    # bead id — the bead-host alias convention). From INSIDE tmux (the
-    # picker / a keybinding) switch the client to it, reusing the proven
-    # tmux-switch-to-session.sh wait-and-switch. From a plain shell, fall
-    # back to `gc session attach`, the general attach-or-resume primitive.
-    # The host is up either way, so a context that can't switch is
-    # reported with a manual hint, never fatal.
+    # Land in it. A bead-host's real tmux session is named by its session_name
+    # (`s-<session-id>`) — NOT the bead id and NOT the (rig-prefixed) alias. `up`
+    # cached that name on the work bead as host_session_name (gc-bead-host.sh's
+    # link step); read it back and switch to THAT. Fall back to the bead id only
+    # if the cache is somehow unresolved.
+    switch_target=$(gc bd show "$bead" --json 2>/dev/null \
+        | jq -r '.[0].metadata.host_session_name // empty' 2>/dev/null || true)
+    [ -n "$switch_target" ] || switch_target="$bead"
+
     echo "$PROG: host for $bead is up — landing..." >&2
-    if [ -n "${TMUX:-}" ] && [ -x "$SCRIPT_DIR/tmux-switch-to-session.sh" ]; then
-        "$SCRIPT_DIR/tmux-switch-to-session.sh" "$bead" || {
-            echo "$PROG: host for $bead is up; could not switch the tmux client." >&2
-            echo "       Switch yourself:  prefix+S  (or: tmux switch-client -t $bead)" >&2
-        }
+    # "In a tmux" is NOT "in the GC tmux". Switch the client ONLY when the host
+    # session lives on the tmux server we're attached to right now. On a separate
+    # window (a different tmux server) that session isn't here and never will be:
+    # a switch can't land, the old poll-everywhere path turned that into a 45s
+    # hang, and forcing it would hijack an unrelated client on the other server.
+    #
+    # `up` returned only after the host reached a live/registered state
+    # (gc-bead-host.sh blocks on it), so an IMMEDIATE has-session probe is
+    # authoritative — no poll needed. Use bare tmux (honoring $TMUX, the CURRENT
+    # server), never `-L $GC_TMUX_SOCKET`: the question is "is the host on the
+    # server I'm on now?". Under the board picker's `run-shell`, $TMUX is the GC
+    # city server (GC_TMUX_SOCKET is unset there), so the picker path lands.
+    if [ -n "${TMUX:-}" ]; then
+        if tmux has-session -t "$switch_target" 2>/dev/null; then
+            # Same server (board picker / gc-tmux-shell) — land the client.
+            tmux switch-client -t "$switch_target" || {
+                echo "$PROG: host for $bead is up; could not switch the tmux client." >&2
+                echo "       Switch yourself:  prefix+S  (or: tmux switch-client -t $switch_target)" >&2
+            }
+        else
+            # Different tmux server (separate window) — bring-up done, report and
+            # return promptly. No switch (would hijack), no poll (would hang).
+            echo "$PROG: host for $bead is up (tmux session $switch_target on the gc tmux server)." >&2
+            echo "       Land it:  prefix+S  (or, on the gc tmux: tmux switch-client -t $switch_target)" >&2
+        fi
     else
         gc session attach "$bead" || {
             echo "$PROG: host for $bead is up; could not attach from this context." >&2

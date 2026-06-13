@@ -106,6 +106,64 @@ host_title() {
     printf '%s' "$t"
 }
 
+# ---- host liveness (the dead-corpse vocabulary; tk-8v5j0) -------------------
+
+# is_dead_state <state> — the bead-host lifecycle states that mean a corpse
+# (NOT resumable). Centralized so resolve and up agree on what "dead" is. A
+# bead-host's lifecycle is carried in the session bead's metadata.state:
+# awake/asleep/active are live & resumable; a never-spawned create lands in
+# failed-create (and closes the bead).
+is_dead_state() {
+    case "$1" in
+        failed-create|failed|closed|terminated|dead|aborted|gone|errored) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# session_is_dead <session-bead-id> — succeeds (0) when the session bead is a
+# dead/failed/closed corpse that must NOT be reported as a resumable host. Two
+# independent signals: a failed create CLOSES the bead (status=closed), and the
+# lifecycle metadata.state lands in a dead state. Either ⇒ dead; a vanished
+# bead (no object) is also dead. resolve uses this so a stale forward-cache
+# pointer at a failed-create corpse resolves as "no host" and `up` recreates.
+session_is_dead() {
+    local obj status state
+    obj="$(bead_json "$1")"
+    [ -n "$obj" ] || return 0
+    status="$(printf '%s' "$obj" | jq -r '.status // empty' 2>/dev/null || true)"
+    if [ "$status" = "closed" ]; then return 0; fi
+    state="$(printf '%s' "$obj" | jq -r '.metadata.state // empty' 2>/dev/null || true)"
+    is_dead_state "$state"
+}
+
+# wait_until_registered <session-bead-id> — block (bounded) until a freshly
+# created or woken host actually registers, so a caller that switches/attaches
+# into the tmux session does not race a slow cold start (tk-8v5j0 acceptance
+# #3). `gc session new --no-attach` returns at state=start-pending; the runtime
+# and tmux session register a moment later (observed 0–60s+). Returns:
+#   0  a live state was reached, OR the budget elapsed (best-effort proceed —
+#      the switch helper keeps its own poll budget as a backstop)
+#   1  the host went to a dead/failed-create state — a HARD failure the caller
+#      must surface instead of reporting a phantom "up"
+# Budget is GC_BEAD_HOST_UP_TIMEOUT seconds (default 60).
+wait_until_registered() {
+    local sid="$1" budget="${GC_BEAD_HOST_UP_TIMEOUT:-60}" waited=0 obj status state
+    case "$budget" in ''|*[!0-9]*) budget=60 ;; esac
+    while [ "$waited" -lt "$budget" ]; do
+        obj="$(bead_json "$sid")"
+        if [ -n "$obj" ]; then
+            status="$(printf '%s' "$obj" | jq -r '.status // empty' 2>/dev/null || true)"
+            state="$(printf '%s' "$obj" | jq -r '.metadata.state // empty' 2>/dev/null || true)"
+            if [ "$status" = "closed" ] || is_dead_state "$state"; then return 1; fi
+            case "$state" in awake|active|asleep|running|ready|resumed|live) return 0 ;; esac
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    log "warning: bead-host $sid did not register within ${budget}s — proceeding (caller's switch keeps polling)"
+    return 0
+}
+
 # ---- link / unlink / lineage (pure metadata; testable offline) -------------
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -261,9 +319,15 @@ cmd_resolve() {
 
     if [ "$found" -eq 0 ]; then
         # Fall back to the forward cache (e.g. host suspended out of the
-        # session list, or a fixture using listable stand-in beads).
+        # session list, or a fixture using listable stand-in beads). Skip a
+        # DEAD pointer (tk-8v5j0): a failed-create / closed corpse still carries
+        # the reverse link, so without this guard resolve reports it as
+        # resumable and `up` wake-masks it forever. A dead cache pointer must
+        # resolve as "no host" so `up` creates fresh.
         local cached; cached="$(meta_get "$work" host_session)"
-        if [ -n "$cached" ] && bead_exists "$cached" && [ "$(meta_get "$cached" hosts_bead)" = "$work" ]; then
+        if [ -n "$cached" ] && bead_exists "$cached" \
+           && [ "$(meta_get "$cached" hosts_bead)" = "$work" ] \
+           && ! session_is_dead "$cached"; then
             printf '%s\t%s\t%s\t%s\n' "$cached" \
                 "$(meta_get "$cached" session_name)" \
                 "$(meta_get "$cached" alias)" \
@@ -291,18 +355,28 @@ cmd_up() {
     # fatal to spawn-or-resume.
     local htitle; htitle="$(host_title "$work")"
 
-    # Already bound + a live/suspended session? Resume it.
+    # Already bound + a live/suspended session? Resume it — but VERIFY the
+    # resume actually took. The original code masked the wake result
+    # (`gc session wake ... || true`), so a dead/failed-create corpse that
+    # slipped past resolve was reported as a phantom "up" and could never come
+    # up (tk-8v5j0). Wake-and-verify: a failed wake — or a host that never
+    # registers — means the binding is STALE. Unlink it and fall through to the
+    # create path for a fresh host instead of masking the failure.
     local existing
     existing="$(cmd_resolve "$work" 2>/dev/null | head -1 || true)"
     if [ -n "$existing" ]; then
         local sid sname salias sstate
         IFS=$'\t' read -r sid sname salias sstate <<<"$existing"
         log "host exists for $work: session=$sid state=$sstate — waking/resuming"
-        gc session wake "${salias:-$work}" >/dev/null 2>&1 || true
-        gc session rename "$sid" "$htitle" >/dev/null 2>&1 || true
-        cmd_link "$work" "$sid" "$sname" "$(meta_get "$sid" continuation_epoch)" >/dev/null
-        printf '%s\n' "$sid"
-        return 0
+        if gc session wake "${salias:-$work}" >/dev/null 2>&1 && wait_until_registered "$sid"; then
+            gc session rename "$sid" "$htitle" >/dev/null 2>&1 || true
+            cmd_link "$work" "$sid" "$sname" "$(meta_get "$sid" continuation_epoch)" >/dev/null
+            printf '%s\n' "$sid"
+            return 0
+        fi
+        log "host for $work did not resume (session=$sid state=${sstate:-?}) — stale binding; unlinking and creating fresh"
+        cmd_unlink "$work" "$sid" >/dev/null 2>&1 || true
+        # fall through to the create path below.
     fi
 
     # No host — create one aliased to the bead (alias=bead-id enforces 1:1),
@@ -314,6 +388,15 @@ cmd_up() {
     sid="$(printf '%s' "$out"   | jq -r '.session_id // empty')"
     sname="$(printf '%s' "$out" | jq -r '.session_name // empty')"
     [ -n "$sid" ] || die "gc session new returned no session_id: $out"
+
+    # `gc session new --no-attach` returns at state=start-pending; the runtime
+    # and the host's tmux session register a moment later. Block (bounded) until
+    # it registers so the caller's switch/attach does not race the cold start
+    # (tk-8v5j0 acceptance #3). A create that flips to failed-create is a hard
+    # error — surface it, never report a phantom "up".
+    if ! wait_until_registered "$sid"; then
+        die "bead-host for $work failed to start (session $sid went failed-create/dead)"
+    fi
 
     cmd_link "$work" "$sid" "$sname" "$(meta_get "$sid" continuation_epoch)" >/dev/null
     log "bead-host up: $work -> session $sid ($sname)"
