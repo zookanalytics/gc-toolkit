@@ -7,10 +7,10 @@ doc.
 Part of the doc-keeper machinery (epic `tk-yw3zb`; this is sub-bead
 `tk-yw3zb.6`, design `specs/tk-yw3zb.1/doc-keeper-architecture.md` §5a). Its
 output is the drift feed into the shared `doc-update` pipeline: the beads it
-files match the pinned schema in `docs/principles/doc-keeper-bead-schema.md`
-(sub-bead `tk-yw3zb.5`), are picked up by the `mol-doc-update` worker formula,
-and land on the rolling docs branch via the refinery — exactly like an organic
-or memory-audit `doc-update`. This formula is indistinguishable downstream.
+files match the pinned schema (see the `mol-doc-update` worker formula
+description, sub-bead `tk-yw3zb.5`), are picked up by that worker, and open one
+small PR to `main` via the refinery — exactly like an organic or memory-audit
+`doc-update`. This formula is indistinguishable downstream.
 
 ## Dispatch (one-shot, periodic)
 
@@ -64,9 +64,9 @@ So the baseline lives in a singleton **state bead** (label
 `base_<sanitized-path> = <gascity_sha>|<gc-toolkit_sha>` records the HEADs at the
 last audit. A doc with no recorded baseline ENROLLS at the current HEADs and
 files nothing. Drift = `git log base..HEAD -- <source globs>` is non-empty. The
-baseline advances to HEAD whenever the signal is captured (a bead filed, or an
-open bead already covers it) or there was no drift — only a per-run-cap deferral
-leaves it unadvanced so the next run re-detects.
+baseline advances to HEAD whenever the signal is captured (a bead filed, or a
+live bead / open PR already covers it) or there was no drift — only a
+per-run-cap deferral leaves it unadvanced so the next run re-detects.
 
 This makes a clean run deterministically zero, and is idempotent: re-running
 right after a clean run files nothing.
@@ -92,17 +92,18 @@ audit react — the same signal, mocked reversibly without touching gascity.
 
 ## Output: the pinned doc-update schema
 
-Each filed bead matches `docs/principles/doc-keeper-bead-schema.md`:
-type `task`; labels `doc-keeper`,`doc-update`; body `## Target` / `## Change` /
-`## Source / Why`; metadata `doc_keeper.target_doc`, `doc_keeper.source=drift-audit`,
-`doc_keeper.source_signal=<repo> <base>..<head>`. The audit cites the commits and
-names the doc — it never writes the prose; the worker reads `git log -p` of the
-cited range and writes the edit (and may close as a no-op if review shows no
-change is needed).
+Each filed bead matches the schema in the `mol-doc-update` worker formula
+description: type `task`; labels `doc-keeper`,`doc-update`; body `## Target` /
+`## Change` / `## Source / Why`; metadata `doc_keeper.target_doc`,
+`doc_keeper.source=drift-audit`, `doc_keeper.source_signal=<repo> <base>..<head>`,
+plus `target=main` and `merge_strategy=mr` so the worker opens one small PR to
+`main`. The audit cites the commits and names the doc — it never writes the
+prose; the worker reads `git log -p` of the cited range and writes the edit (and
+may close as a no-op if review shows no change is needed).
 
 Guardrails: at most `{{audit_max_beads_per_run}}` beads per run; never a second
-open bead for a doc that already has one (dedup on
-`metadata.doc_keeper.target_doc`).
+bead for a doc already addressed by a live `doc-update` bead OR an open
+`doc-update` PR (file-level dedup — the audit always reviews the whole doc).
 
 ## Read-only invariant
 
@@ -170,8 +171,8 @@ title = "Scan tracked docs for drift and file doc-update beads"
 needs = ["prime"]
 description = """
 Run the audit. The whole procedure is one idempotent pass: re-running it is
-safe (already-filed signals are caught by the open-bead dedup, and baselines
-only advance once a signal is captured). Read it, then run it.
+safe (already-addressed docs are caught by the dedup, and baselines only advance
+once a signal is captured). Read it, then run it.
 
 **The tracked-doc table** (real paths; `-` = no source globs for that repo).
 Rows whose doc is absent on the gc-toolkit default branch are skipped and
@@ -187,6 +188,25 @@ MAX="{{audit_max_beads_per_run}}"
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 GASCITY_DIR="$GC_CITY/rigs/$GASCITY_RIG"
 GCTK_DIR="$GC_RIG_ROOT"
+
+# Dedup helper. A doc is "already addressed" if a live (non-closed) doc-update
+# bead targets it, OR a closed doc-update bead targets it and its PR is still
+# open. The refinery CLOSES a doc-update bead when it opens the PR
+# (merge_strategy=mr), so a bead-only query misses an in-flight PR — we also
+# check the PRs of closed beads. (Guard: never two open PRs for the same doc.)
+doc_already_addressed() {
+  _doc="$1"
+  _live=$(bd list -l doc-update --status open,in_progress,blocked,deferred --json 2>/dev/null \
+    | jq -r --arg d "$_doc" '[.[] | select((.metadata."doc_keeper.target_doc" // "") == $d)] | length')
+  [ "${_live:-0}" -gt 0 ] && return 0
+  command -v gh >/dev/null 2>&1 || return 1
+  _prs=$(bd list -l doc-update --status closed --metadata-field merge_result=pull_request --json 2>/dev/null \
+    | jq -r --arg d "$_doc" '.[] | select((.metadata."doc_keeper.target_doc" // "") == $d) | .metadata.pr_number // empty')
+  for _n in $_prs; do
+    [ -n "$_n" ] && [ "$(gh pr view "$_n" --json state -q .state 2>/dev/null)" = "OPEN" ] && return 0
+  done
+  return 1
+}
 
 # Resolve each repo's default branch (fallback: main).
 defbranch() {
@@ -269,10 +289,11 @@ $ct_commits"
     continue
   fi
 
-  # Dedup: never a second open doc-update bead for the same doc.
-  dupe=$(bd list --label doc-update --status open --json 2>/dev/null | jq -r --arg d "$doc" '[.[] | select((.metadata."doc_keeper.target_doc" // "") == $d)] | length')
-  if [ "${dupe:-0}" -gt 0 ]; then
-    echo "drift on $doc but an open doc-update bead already targets it — advancing baseline, not double-filing"
+  # Dedup: skip if a live doc-update bead OR an open doc-update PR already
+  # addresses this doc. Advance the baseline (the signal is captured by the
+  # existing bead/PR) rather than double-filing.
+  if doc_already_addressed "$doc"; then
+    echo "drift on $doc but a live doc-update bead or open PR already targets it — advancing baseline, not double-filing"
     gc bd update "$STATE" --set-metadata "$key=$GASCITY_HEAD|$GCTK_HEAD" >/dev/null
     continue
   fi
@@ -294,7 +315,7 @@ $ct_commits"
 ## Source / Why
 - Drift audit: these commits touched paths this doc tracks since the last audit baseline.
 $commits"
-  bead=$(gc bd create "doc-update: $doc: review — tracked sources moved (drift audit)" -t task -l doc-keeper,doc-update -d "$body" --json | jq -r '.id // .[0].id')
+  bead=$(gc bd create "doc-update: $doc: review — tracked sources moved (drift audit)" -t task -l doc-keeper -l doc-update -d "$body" --json | jq -r '.id // .[0].id')
   if [ -z "$bead" ] || [ "$bead" = "null" ]; then
     echo "WARN: could not create doc-update bead for $doc; leaving baseline unadvanced" >&2
     continue
@@ -305,17 +326,10 @@ $commits"
     --set-metadata doc_keeper.source_signal="$sig" >/dev/null
   gc bd update "$bead" --parent tk-yw3zb >/dev/null 2>&1 || true
 
-  # Pre-stamp the rolling-cycle target before dispatch (schema doc §2). Guarded:
-  # the rolling-cycle script + the mol-doc-update worker land with sibling beads
-  # (tk-yw3zb.4 / tk-yw3zb.5); degrade cleanly if not present yet at runtime —
-  # an unstamped bead is reconciled by mol-doc-update's load-context.
-  ROLL="$GCTK_DIR/assets/scripts/doc-keeper-rolling-cycle.sh"
-  if [ -x "$ROLL" ]; then
-    rt=$("$ROLL" 2>/dev/null) || rt=""
-    if [ -n "$rt" ]; then
-      gc bd update "$bead" --set-metadata target="$rt" --set-metadata merge_strategy=direct >/dev/null
-    fi
-  fi
+  # Land this doc-update on main as one small PR (merge_strategy=mr). No rolling
+  # branch — each doc-update is a complete, targeted change to main. Stamped
+  # before dispatch so `gc sling` bakes {{base_branch}}=main at pour.
+  gc bd update "$bead" --set-metadata target=main --set-metadata merge_strategy=mr >/dev/null
 
   # Dispatch to the worker. If mol-doc-update is not registered yet, route the
   # bead to the pool so the signal is not lost.
@@ -338,8 +352,9 @@ echo "drift-audit complete: filed $filed doc-update bead(s) this run (cap $MAX).
 ```
 
 **Exit criteria:** every tracked doc was either enrolled (first sight), found
-clean (baseline advanced), found already-covered by an open bead, filed as a new
-`doc-update` bead, or deferred by the cap. No repository file was edited.
+clean (baseline advanced), found already-addressed by a live bead or open PR,
+filed as a new `doc-update` bead, or deferred by the cap. No repository file was
+edited.
 """
 
 [[steps]]

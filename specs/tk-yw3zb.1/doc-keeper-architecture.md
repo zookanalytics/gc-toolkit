@@ -6,9 +6,9 @@ description: How the gc-toolkit doc-keeper machinery routes drift signals and me
 # doc-keeper Architecture Brief
 
 doc-keeper is a maintenance regime, not a new agent. It composes existing
-gc-toolkit primitives — orders, formulas, polecats, refinery, convoys — into
-a loop that keeps the central-tier docs enumerated in
-`[doc-keeper].brief` (see `specs/tk-yw3zb.1/central-doc-inventory.md`)
+gc-toolkit primitives — orders, formulas, polecats, refinery — into
+a loop that keeps the central-tier docs enumerated as a constant in each
+audit formula (see `specs/tk-yw3zb.1/central-doc-inventory.md`)
 current as the world or the codebase evolves.
 
 ## 1. The loop
@@ -29,11 +29,9 @@ current as the world or the codebase evolves.
                                       ▼
                     pushes branch, reassigns to refinery
                                       ▼
-                refinery rebases, runs gates, merges to main
+                refinery rebases, runs gates, opens one PR to main
                                       ▼
-                          (optional) batched into a
-                          rolling integration branch
-                          via a doc-keeper convoy
+                       operator reviews and merges the PR
 ```
 
 Every arrow is an existing primitive. Nothing in this design adds a new
@@ -55,10 +53,10 @@ flows the same way as a code-touching bead:
    gc-toolkit rig leaves these empty in `pack.toml`, so all of these
    skip silently for our doc-only beads — as they do today for any
    bead in this rig. **No special doc-only test bypass is required.**
-5. Refinery executes `merge-push` per `metadata.merge_strategy`:
-   - `direct` (default): fast-forward to `metadata.target` and push.
-   - `mr` / `pr`: open a GitHub PR and treat PR creation as the
-     terminal handoff.
+5. Refinery executes `merge-push` per `metadata.merge_strategy`. Every
+   doc-update bead sets `mr`, so refinery opens one GitHub PR to `main`
+   and treats PR creation as the terminal handoff. (The generic refinery
+   also supports a `direct` fast-forward; doc-keeper does not use it.)
 6. Refinery closes the bead with merge metadata.
 
 **Molecule shape** (the polecat-side contract, set by the worker formula
@@ -71,8 +69,8 @@ described in §4):
 | Description | What needs to change, why, source signal (drift hash diff or memory file cite), proposed copy or diff |
 | Branch | `polecat/<bead-id>` (formula default) |
 | Commit prefix | `docs(<scope>): ...` to match existing rig commit style |
-| `metadata.target` | `main` for direct flow, or `integration/doc-keeper-<period>` when batching (§3) |
-| `metadata.merge_strategy` | `direct` for the steady state |
+| `metadata.target` | `main` — every doc-update lands directly on `main` |
+| `metadata.merge_strategy` | `mr` — one small PR to `main` per edit (§3) |
 
 ### Why no special doc-only handling
 
@@ -86,50 +84,24 @@ real-time signal that the gate fits a different policy than blind-on-all-
 beads — at which point we revisit. We do not pre-build a bypass for a
 gate that does not exist.
 
-## 3. Batching: convoys + integration branches
+## 3. No batching: one small PR per edit
 
-The bead description asks "how does refinery batch overlapping branches
-into one rolling PR?" — refinery itself does **not** batch. It processes
-one bead per wisp iteration. Batching is achieved one layer up via
-**owned convoys with integration-branch targets**:
+An earlier design batched overlapping doc edits into a rolling
+integration branch via an owned convoy, graduating the cycle to `main`
+as one "rolling PR." The **2026-06-12 epic rescope dropped that
+apparatus** in favour of the simplest thing that works: each
+`doc-update` bead lands on `main` as its own small pull request
+(`metadata.target = main`, `metadata.merge_strategy = mr`). No rolling
+branch, no convoy, no cycle period.
 
-```bash
-gc convoy create doc-keeper-cycle-2026-W19 \
-  --owned \
-  --target integration/doc-keeper-2026-W19 \
-  --merge mr
-```
+Refinery still processes one bead per wisp iteration; the difference is
+that there is no batching layer above it. One edit, one PR — each
+reviewed and merged independently. This keeps every diff small and the
+rejection-resume path clean, at the cost of more (but smaller) PRs.
 
-The convoy sets `metadata.target = integration/doc-keeper-2026-W19` on
-itself; child work beads inherit the target via the existing convoy-
-ancestor walk (`mol-polecat-work` step `workspace-setup` resolves
-`{{base_branch}}` from the parent convoy). Each doc-update bead lands
-into the integration branch as the worker polecat completes it.
-
-When the cycle closes (the cron fires the next audit, or an operator
-ends the cycle):
-
-```bash
-gc convoy land doc-keeper-cycle-2026-W19
-```
-
-`gc convoy land` (existing command) creates a graduation bead targeting
-`main`; refinery handles the graduation as a normal merge or PR per
-`--merge` setting. Setting `--merge mr` on the convoy means refinery's
-graduation step opens one PR for the whole cycle's worth of doc edits —
-the "rolling PR" pattern.
-
-The cycle period is **doc-keeper config**, not refinery config. Default
-proposal: weekly cycles named `doc-keeper-<ISO-week>`. Sub-bead
-`tk-yw3zb.4` owns the rolling-cycle mechanism in detail; this brief
-records that the mechanism is `gc convoy --owned --target integration/...`
-and not new infrastructure.
-
-If `[doc-keeper].batching = false`, child beads target `main` directly
-and the rolling-PR pattern is skipped. Direct-merge mode is the simplest
-path and is the recommended starting point for week one — switch on
-batching only when individual doc edits start landing too noisily on
-main.
+The retired mechanism lived in `specs/tk-yw3zb.4/rolling-cycle-mechanism.md`
+and `assets/scripts/doc-keeper-rolling-cycle*.sh`; both were deleted in
+the same simplification.
 
 ## 4. Worker polecat formula (`mol-doc-update`)
 
@@ -139,9 +111,9 @@ type** — same `gc-toolkit.polecat` template fills the role.
 | Step (inherited from base) | Override note |
 |---|---|
 | `load-context` | Read `metadata.source_signal` (drift hash + path, or memory file path); load the cited central doc; load the source signal contents. |
-| `workspace-setup` | Standard polecat-work workspace-setup. Honors `{{base_branch}}` from convoy chain (§3). |
+| `workspace-setup` | Standard polecat-work workspace-setup; branches `polecat/<bead>` from `origin/main` (`{{base_branch}}` defaults to `main`). |
 | `preflight-tests` | Inherited; skips silently when commands empty. |
-| `implement` | Edit the single central doc named in the bead. Make a single focused commit `docs(<scope>): ...`. Forbidden: editing files outside the central-tier set in `[doc-keeper].brief`. |
+| `implement` | Edit the single central doc named in the bead. Make a single focused commit `docs(<scope>): ...`. Forbidden: editing files outside the tracked central-tier doc set. |
 | `self-review` | Inherited. |
 | `submit-and-exit` | Inherited. |
 
@@ -161,12 +133,12 @@ update beads per run to avoid swamping the pool.
 Fires on cron (§7). Walks the diff between **last-audit hashes** (stored
 in a per-doc audit-state bead per central doc) and current HEAD across
 two repositories: gascity at `$GASCITY_REMOTE/main` and gc-toolkit at
-`origin/main`. For each tracked doc in `[doc-keeper].brief`, asks: does
-any commit in the diff window touch a section the doc claims authority
-over? Section ownership is encoded by a `<!-- doc-keeper:owns
-<glob-pattern> -->` annotation block in each tracked doc, OR a
-`source_paths = [...]` field per doc in `[doc-keeper].brief`. Anything
-hitting an owned glob produces one `doc-update` bead.
+`origin/main`. For each tracked doc in the formula's constant tracked-doc
+table, asks: does any commit in the diff window touch a path the doc
+claims authority over? Each table entry maps a doc to the source-path
+globs it tracks (the rescope folded the old per-doc `source_paths` config
+into this in-formula table). Anything hitting an owned glob produces one
+`doc-update` bead.
 
 The audit does **not** propose edits. It cites the commits that triggered
 the signal and the section that needs review. The worker polecat reads
@@ -191,8 +163,8 @@ candidate** pattern from `central-doc-inventory.md` §2b. Implementation:
    `feedback_execute_*`) skew bucket B; `project_*` that name an incident
    verb (panic, crash, race, leak) skew bucket C.
 3. For each bucket-A entry, file ONE `doc-update` bead with proposed
-   target doc (best fit from `[doc-keeper].brief`), proposed paragraph
-   draft, and the source memory file cited. The proposed target is the
+   target doc (best fit from the tracked central-tier doc set), proposed
+   paragraph draft, and the source memory file cited. The proposed target is the
    audit's recommendation; the worker polecat may pick a different
    target doc if the recommendation is wrong.
 
@@ -200,98 +172,74 @@ The memory remains mechanik's. The audit only surfaces.
 
 Sub-bead `tk-yw3zb.7`.
 
-## 6. Configuration: `[doc-keeper]` block
+## 6. Configuration: none (the rescope dropped `[doc-keeper]`)
 
-Lives in `pack.toml` (per-rig) or city.toml (cross-rig override). Per
-sub-bead `tk-yw3zb.3`, the schema lock proposal:
+An earlier design proposed a `[doc-keeper]` block in `pack.toml` (an
+`enabled` flag, a `batching` toggle, a `cycle_period`, a per-run bead
+cap, and the tracked-doc `brief` list). The **2026-06-12 epic rescope
+removed it**. doc-keeper now reads no config block:
 
-```toml
-[doc-keeper]
-enabled = true
-batching = false                            # default off; switch on later
-cycle_period = "weekly"                     # weekly | manual
-audit_max_beads_per_run = 5                 # safety cap
-brief_label = "agent brief"                 # display name for the canonical-three (§1a row 3-5)
+- **Enablement is import.** The two audit orders ship in the gc-toolkit
+  pack's `orders/` layer (§7). Importing the pack makes them live; a rig
+  that does not import gc-toolkit never sees them. There is no `enabled`
+  flag to read.
+- **The tracked-doc set is a constant** inside each audit formula,
+  existence-checked against the live `docs/*.md` set at run time — a
+  formula whose own doc list drifts is the one thing the audit cannot
+  afford. See `central-doc-inventory.md` for the canonical list.
+- **The per-run bead cap is a formula var** (`audit_max_beads_per_run`,
+  poured at dispatch — drift-audit default 5, memory-audit default 3),
+  not a config field.
+- **No batching toggle** — batching was dropped wholesale (§3).
 
-[[doc-keeper.brief]]
-path = "docs/file-structure.md"
-source_paths = ["docs/file-structure.md"]   # self-referential; only PRs that touch this file
-brief = false
-
-[[doc-keeper.brief]]
-path = "docs/roadmap.md"
-source_paths = []                           # purely organic; drift-audit yields nothing for this
-brief = false
-
-[[doc-keeper.brief]]
-path = "docs/gas-city-reference.md"
-source_paths = [
-    "rigs/gascity/cmd/**",
-    "rigs/gascity/internal/**",
-    "rigs/gascity/docs/**",
-]
-brief = true                                # part of the canonical-three
-
-[[doc-keeper.brief]]
-path = "docs/gas-city-pack-v2.md"
-source_paths = [
-    "rigs/gascity/internal/pack/**",
-    "rigs/gascity/internal/city/**",
-]
-brief = true
-
-[[doc-keeper.brief]]
-path = "docs/gascity-local-patching.md"
-source_paths = []                           # organic-only
-brief = true
-
-[[doc-keeper.brief]]
-path = "specs/tk-yiwfz.4/document-spec.md"
-source_paths = ["specs/tk-yiwfz.4/document-spec.md"]
-brief = false
-```
-
-`source_paths` is the explicit input the drift-audit walks. Empty
-`source_paths` means "no drift-audit findings for this doc; updates
-happen organically or via memory-audit." Authoritative spec lives with
-sub-bead `tk-yw3zb.3`.
+Current brief landing docs (verify at file time; names drift):
+`docs/gascity-reference.md` (the always-present anchor),
+`docs/gascity-local-patching.md`, `docs/gascity-agents.md`,
+`docs/gascity-routing-model.md`. The earlier hyphenated names
+(`gas-city-reference.md`, `gas-city-pack-v2.md`) do not exist in the repo.
 
 ## 7. Cron registration
 
 Cron in this city is the `gc order` system, not crond. Orders live in
-`<rig>/orders/<name>.toml`; the deacon's `periodic-formulas` step
-dispatches them via cooldown/cron triggers (see
-`rigs/gc-toolkit/orders/digest-generate.toml` for the existing pattern).
+`<rig>/orders/<name>.toml`; the order file IS the registration and is
+re-scanned on every `gc` start, so the schedule is durable across
+controller restarts (unlike the session-only town `CronCreate`).
 
-Two new orders, both gated by `[doc-keeper].enabled = true`. Sub-bead
-`tk-yw3zb.8` owns wiring; the shape:
+Two orders ship in the gc-toolkit pack's `orders/` layer. There is no
+`enabled` gate — enablement is the pack being imported (§6). Both are
+**rig-scoped with a BARE pool** so the wisp lands in, and is claimed
+from, each importing rig's own polecat store; a rig-qualified pool or a
+city scope would strand it. Sub-bead `tk-yw3zb.8` owns wiring; the
+shipped shape:
 
 ```toml
-# rigs/gc-toolkit/orders/doc-keeper-drift-audit.toml
+# orders/doc-keeper-drift-audit.toml
 [order]
-description = "Scan gascity + gc-toolkit HEAD for drift against tracked central docs"
+description = "doc-keeper: scan gascity + gc-toolkit HEAD for agent-brief drift; file doc-update beads"
 formula = "mol-doc-keeper-drift-audit"
 trigger = "cooldown"
-interval = "168h"                           # weekly
-pool = "gc-toolkit/gc-toolkit.polecat"
-enabled_when = "config.doc_keeper.enabled"
+interval = "24h"
+pool = "gc-toolkit.polecat"
+scope = "rig"
 ```
 
 ```toml
-# rigs/gc-toolkit/orders/doc-keeper-memory-audit.toml
+# orders/doc-keeper-memory-audit.toml
 [order]
-description = "Scan mechanik auto-memory for promote-to-central-doc candidates"
+description = "doc-keeper: scan mechanik auto-memory for promote-to-brief candidates; file doc-update beads"
 formula = "mol-doc-keeper-memory-audit"
 trigger = "cooldown"
-interval = "168h"                           # weekly, lagged 24h behind drift-audit
-pool = "gc-toolkit/gc-toolkit.polecat"
-enabled_when = "config.doc_keeper.enabled"
+interval = "24h"
+pool = "gc-toolkit.polecat"
+scope = "rig"
 ```
 
-`enabled_when` is conditional support that may need adding to the order
-runner if it doesn't exist yet — `tk-yw3zb.8` confirms during wiring;
-fallback is to leave the orders absent until enabled and add them at
-flip-on time.
+**Pool-wake prerequisite:** a formula routed to a scale-from-zero pool
+only wakes a worker when its compiled root is Ready-visible, which
+requires the audit formulas to declare a top-level `phase = "vapor"`.
+Without it the order fires on schedule but no polecat spawns. Land the
+`.6`/`.7` formulas before/with these orders so a fire never fails
+"formula not found."
 
 ## 8. Sub-bead mapping
 
@@ -300,17 +248,19 @@ How the seven existing build-phase sub-beads (`tk-yw3zb.2` through
 
 | Sub-bead | Section in this brief |
 |---|---|
-| `tk-yw3zb.2` doc-keeper: rename to 'agent brief' terminology | `central-doc-inventory.md` §1a; this brief §6 (`brief_label`, `brief = true` rows) |
-| `tk-yw3zb.3` doc-keeper: define `[doc-keeper]` config block | this brief §6 |
-| `tk-yw3zb.4` doc-keeper: rolling-cycle mechanism | this brief §3 |
+| `tk-yw3zb.2` doc-keeper: rename to 'agent brief' terminology | `central-doc-inventory.md` §1a; this brief §6 |
+| `tk-yw3zb.3` doc-keeper: define `[doc-keeper]` config block | **superseded** — the `[doc-keeper]` config block was dropped by the 2026-06-12 rescope (§6) |
+| `tk-yw3zb.4` doc-keeper: rolling-cycle mechanism | **superseded** — the rolling-cycle apparatus was dropped by the rescope; spec + scripts deleted (§3) |
 | `tk-yw3zb.5` doc-keeper: doc-update worker polecat formula | this brief §4 |
 | `tk-yw3zb.6` doc-keeper: drift-audit polecat formula | this brief §5a |
 | `tk-yw3zb.7` doc-keeper: memory-audit polecat formula | this brief §5b |
 | `tk-yw3zb.8` doc-keeper: cron registration | this brief §7 |
 
-The dependency wiring on those sub-beads (`tk-yw3zb.2` blocks the rest
-because terminology must lock before `[doc-keeper]` config schema)
-remains correct under this brief — no rewires needed.
+The build-phase dependency wiring predates the rescope: with `.3` (config
+block) and `.4` (rolling-cycle) now superseded (§6, §3), those two drop off
+the critical path. The terminology lock (`tk-yw3zb.2`) and the `.5`–`.8`
+worker/audit/cron chain still stand — no rewires needed for the surviving
+work.
 
 ## 9. Open questions for mechanik review
 
@@ -318,17 +268,8 @@ remains correct under this brief — no rewires needed.
   is recommended by the inventory but not filed as a sub-bead. File a
   one-shot cleanup bead under `tk-yw3zb`, or skip and leave the
   misplacement cosmetic? (No effect on doc-keeper functioning either way.)
-- **`source_paths` annotation form** — `[doc-keeper.brief].source_paths`
-  in pack.toml (proposed in §6) vs. inline `<!-- doc-keeper:owns ... -->`
-  HTML-comment annotation in each doc. Pack.toml keeps the manifest
-  central and reviewable; inline annotation keeps the binding next to
-  the prose. Recommendation: pack.toml — single-source of truth, easy
-  to grep, cheap to refactor.
-- **Cycle period** — weekly is a guess. If drift-audit yield is consistently
-  zero for several cycles, lengthen to monthly. If memory-audit yield is
-  routinely too high to triage in one cycle, shorten or split.
 - **First-run yield expectation** — §1d of the inventory predicts a
-  high-yield first memory-audit pass against `docs/gas-city-reference.md`.
-  The `audit_max_beads_per_run = 5` cap will throttle that first pass —
-  may need raising to e.g. 20 for the initial backfill, then ratcheted
-  back to 5.
+  high-yield first memory-audit pass against `docs/gascity-reference.md`.
+  The `audit_max_beads_per_run` var (memory-audit default 3) throttles
+  that first pass — pour a higher value (e.g. 20) for the initial
+  backfill, then let it default back.
