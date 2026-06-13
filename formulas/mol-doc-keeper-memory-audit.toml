@@ -217,11 +217,14 @@ genuinely needs surfacing:
 # (a) Already covered? If the best-fit brief doc already states the fact, the
 #     promotion already happened — skip. Cheap grep on a few salient terms from
 #     the entry's name/description; a hit means covered.
-# (b) Already filed? De-dup against OPEN doc-update beads citing this same
-#     memory file, so consecutive runs don't double-file:
-OPEN_SIGNALS=$(gc bd list -l doc-update --status open --json 2>/dev/null \
+# (b) Already filed? De-dup against LIVE (non-closed) doc-update beads citing
+#     this same memory file, so consecutive runs don't double-file. A claimed
+#     bead goes in_progress (and recovery can leave one blocked/deferred), so a
+#     query of only `open` would let a later run re-file a candidate whose first
+#     update is still in flight:
+LIVE_SIGNALS=$(gc bd list -l doc-update --status open,in_progress,blocked,deferred --json 2>/dev/null \
   | jq -r '.[].metadata."doc_keeper.source_signal" // empty')
-# skip the entry if "$MEM/<entry>.md" is already in "$OPEN_SIGNALS".
+# skip the entry if "$MEM/<entry>.md" is already in "$LIVE_SIGNALS".
 ```
 Keep only entries that are durable, not already covered, and not already filed.
 
@@ -354,8 +357,11 @@ gc bd dep add "$BEAD" tk-yw3zb --type=parent-child 2>/dev/null || true
 
 # Dispatch: attach the worker wisp and route to the polecat pool. sling sets up
 # routing; the pre-stamped target makes workspace-setup branch from the rolling
-# branch (schema §5).
-gc sling "$POOL" mol-doc-update -f --on "$BEAD"
+# branch (schema §5). `--on <formula>` attaches the wisp to the existing bead
+# (the bead is the positional arg) — do NOT combine with `-f`/`--formula`, which
+# is the mutually-exclusive "treat the arg as a formula and mint a fresh wisp"
+# mode; gc rejects the two flags together.
+gc sling "$POOL" "$BEAD" --on mol-doc-update
 echo "filed + dispatched $BEAD -> $TARGET_DOC (cites $MEMFILE)"
 ```
 
