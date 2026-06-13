@@ -18,9 +18,10 @@ design-session rationale and the prior-art that the model draws on.
   was landed verbatim as `docs/personas.md`.
 - **Builds on:** the shipped bead-universe layer (bead-host / proactive agents,
   `mol-first-reaction`, `gc-attention.sh`).
-- **Prior art:** five surveys, persisted provenance-stamped under
-  [`research/prior-art.md`](research/prior-art.md) so adopted patterns stay
-  auditable.
+- **Prior art:** five surveys, persisted in full (primary-source write-ups +
+  provenance) under [`research/`](research/) and indexed by
+  [`research/prior-art.md`](research/prior-art.md), so adopted patterns stay
+  auditable from the repo alone.
 
 ## The model (lean) — design rationale
 
