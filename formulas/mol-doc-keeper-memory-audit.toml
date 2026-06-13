@@ -74,6 +74,14 @@ never closes a `doc-update` bead — it surfaces and dispatches, then drains.
 """
 formula = "mol-doc-keeper-memory-audit"
 
+# Pool-wake prerequisite (load-bearing — do not remove). The cooldown order
+# orders/doc-keeper-memory-audit.toml pours this formula onto a scale-from-zero
+# polecat pool. A pooled formula only wakes a worker when its compiled root is
+# Ready-visible, which requires a top-level `phase`. Without this the order
+# fires on schedule but no polecat spawns and the audit silently never runs.
+# See bead tk-yw3zb.8 and the order file's "Pool-wake prerequisite" note.
+phase = "vapor"
+
 [requires]
 formula_compiler = ">=2.0.0"
 
