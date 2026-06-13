@@ -204,7 +204,7 @@ case "$TARGET" in
       --notes "doc-keeper: pinned rolling target $NEWTARGET; blocked pending re-sling through mol-doc-update (see docs/principles/doc-keeper-bead-schema.md §2)."
     WITNESS_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}witness"
     gc mail send "$WITNESS_TARGET" -s "doc-update bead $WORK_BEAD_ID had no rolling target [MED]" \\
-      -m "Pinned target=$NEWTARGET; bead blocked. Re-sling through mol-doc-update so the wisp pours from the rolling branch: gc sling $POOL mol-doc-update -f --on $WORK_BEAD_ID"
+      -m "Pinned target=$NEWTARGET; bead blocked. Re-sling through mol-doc-update so the wisp pours from the rolling branch: gc sling $POOL $WORK_BEAD_ID --on mol-doc-update --force"
     gc runtime drain-ack
     exit 0
     ;;

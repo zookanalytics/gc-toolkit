@@ -69,7 +69,7 @@ is rejected). A change that spans two docs is two beads.
 
 **Dispatch** is not a metadata field. The filer routes the bead to a worker by
 attaching the formula wisp and slinging it to the polecat pool —
-`gc sling <rig>/gc-toolkit.polecat mol-doc-update -f --on <bead>` (see §5) —
+`gc sling <rig>/gc-toolkit.polecat <bead> --on mol-doc-update` (see §5) —
 which sets up routing itself.
 
 ## 2. The rolling-cycle target is pre-stamped (the dispatch contract)
@@ -183,7 +183,7 @@ and route it to the polecat pool (sling sets up the routing — no need to hand-
 `gc.routed_to`):
 
 ```bash
-gc sling "${GC_RIG:+$GC_RIG/}gc-toolkit.polecat" mol-doc-update -f --on "$bead"
+gc sling "${GC_RIG:+$GC_RIG/}gc-toolkit.polecat" "$bead" --on mol-doc-update
 ```
 
 A polecat claims it and runs the formula: `load-context` confirms
