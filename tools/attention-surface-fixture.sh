@@ -214,6 +214,14 @@ ec=0; "$TOOL" flag tk-x 2>/dev/null || ec=$?;       eq "flag with no --reason er
 ec=0; "$TOOL" open 2>/dev/null || ec=$?;            eq "open with no bead errors (exit 2)"        "2" "$ec"
 ec=0; "$TOOL" clear 2>/dev/null || ec=$?;           eq "clear with no bead errors (exit 2)"       "2" "$ec"
 ec=0; "$TOOL" bogus-verb 2>/dev/null || ec=$?;      eq "unknown verb errors (exit 2)"             "2" "$ec"
+# takeaway: a thin metadata-writer verb (like flag/clear), but bead-id AND text
+# are BOTH required — missing either fails closed (exit 2). Whitespace-only text
+# counts as missing (it collapses to empty before the check).
+ec=0; "$TOOL" takeaway 2>/dev/null || ec=$?;        eq "takeaway with no bead errors (exit 2)"    "2" "$ec"
+ec=0; "$TOOL" takeaway tk-x 2>/dev/null || ec=$?;   eq "takeaway with no text errors (exit 2)"    "2" "$ec"
+ec=0; "$TOOL" takeaway tk-x "   " 2>/dev/null || ec=$?; eq "takeaway with whitespace-only text errors (exit 2)" "2" "$ec"
+has  "help lists the takeaway verb" "takeaway"           "$("$TOOL" help 2>&1 || true)"
+has  "usage documents takeaway"     "takeaway <bead-id>" "$("$TOOL" --help 2>&1 || true)"
 
 echo "── hermetic: react is the front-door over gc-proactive.sh sling (mr path, codex-gated) ──"
 # react <id> is a THIN wrapper over tools/gc-proactive.sh `sling` — it owns no
@@ -293,9 +301,12 @@ else
     printf '  skip  live board smoke (no reachable city)\n'
 fi
 
-# Opt-in: a full flag→board→clear round-trip on an operator-chosen bead.
+# Opt-in: a full flag→board→clear + takeaway round-trip on an operator-chosen
+# bead. The fixture never invents or closes a bead — it writes only to the bead
+# the operator named, and both legs self-clean (clear undoes flag; the unset
+# undoes takeaway, which has no inverse verb).
 if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
-    echo "── live (opt-in): flag → board → clear round-trip on $GC_ATTENTION_FLAG_SMOKE_BEAD ──"
+    echo "── live (opt-in): flag → board → clear + takeaway round-trip on $GC_ATTENTION_FLAG_SMOKE_BEAD ──"
     bead="$GC_ATTENTION_FLAG_SMOKE_BEAD"
     "$TOOL" flag "$bead" --reason "attention-surface-fixture smoke" >/dev/null 2>&1 \
         && ok "flag $bead" || bad "flag $bead" "exit 0" "non-zero"
@@ -307,8 +318,22 @@ if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
         && ok "clear $bead" || bad "clear $bead" "exit 0" "non-zero"
     eq "bead no longer carries gc.attention" "" \
         "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.attention"] // ""')"
+    # takeaway: write the headline, read back the THREE metadata fields, then
+    # unset them (the clean-up leg — takeaway has no inverse verb).
+    "$TOOL" takeaway "$bead" "attention-surface-fixture smoke takeaway" --by host >/dev/null 2>&1 \
+        && ok "takeaway $bead" || bad "takeaway $bead" "exit 0" "non-zero"
+    eq "bead now carries the gc.takeaway headline" "attention-surface-fixture smoke takeaway" \
+        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway"] // ""')"
+    eq "bead now carries gc.takeaway_by=host" "host" \
+        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway_by"] // ""')"
+    eq "bead now carries a non-empty gc.takeaway_at stamp" "true" \
+        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '(.[0].metadata["gc.takeaway_at"] // "") != ""')"
+    gc bd update "$bead" --unset-metadata gc.takeaway --unset-metadata gc.takeaway_at --unset-metadata gc.takeaway_by >/dev/null 2>&1 \
+        && ok "unset the smoke takeaway (cleanup)" || bad "unset the smoke takeaway" "exit 0" "non-zero"
+    eq "bead no longer carries gc.takeaway" "" \
+        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway"] // ""')"
 else
-    printf '  skip  live flag→clear round-trip (set GC_ATTENTION_FLAG_SMOKE_BEAD=<id> to run)\n'
+    printf '  skip  live flag→clear + takeaway round-trip (set GC_ATTENTION_FLAG_SMOKE_BEAD=<id> to run)\n'
 fi
 
 echo ""

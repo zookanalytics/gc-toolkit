@@ -66,18 +66,16 @@ exit
    ATTN="$(git rev-parse --show-toplevel)/assets/scripts/gc-attention.sh"
    "$ATTN" flag <id> --reason "advanced: first reaction ready — accept or redirect"
    ```
-5. **Mark it reacted, stamp the board takeaway, and release it — OPEN,
-   unassigned, NOT closed.** The **takeaway** is your card's one-line headline
-   (derived from **Decision needed**, ≤140 chars on ONE line) — the attention
-   board renders it as this bead's NEEDS so a glance explains the state:
+5. **Stamp the board takeaway via the wrapper, then release the bead — OPEN,
+   unassigned, NOT closed — with the reacted marker folded into the release.**
+   The **takeaway** is your card's one-line headline (derived from **Decision
+   needed**, ≤140 chars on ONE line) — the attention board renders it as this
+   bead's NEEDS so a glance explains the state:
    ```bash
    TAKEAWAY="<one-line distillation of Decision needed, ≤140 chars>"
-   gc bd update <id> \
-     --set-metadata gc.proactive_reaction=1 \
-     --set-metadata gc.takeaway="$TAKEAWAY" \
-     --set-metadata gc.takeaway_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-     --set-metadata gc.takeaway_by=proactive
-   gc bd update <id> --status=open --assignee="" --set-metadata gc.routed_to=""
+   "$ATTN" takeaway <id> "$TAKEAWAY" --by proactive
+   gc bd update <id> --status=open --assignee="" --set-metadata gc.routed_to="" \
+     --set-metadata gc.proactive_reaction=1
    gc runtime drain-ack
    exit
    ```

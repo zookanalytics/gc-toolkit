@@ -277,11 +277,14 @@ has "formula releases the bead OPEN"            "--status=open"           "$F"
 # mr-invariant inside the formula's code path.
 has "formula pins code output to mr"            "merge_strategy=mr"       "$F"
 has "formula tags reached content untrusted"    "UNTRUSTED DATA"          "$F"
-# The board-visible takeaway: stamped (by=proactive) alongside the
-# gc.proactive_reaction advance marker, so gc-attention.sh renders an
-# explanatory NEEDS for the bead instead of a terse fallback (bead tk-q4xaj.3).
-has "formula stamps the board takeaway"            "gc.takeaway"              "$F"
-has "formula attributes the takeaway to proactive" "gc.takeaway_by=proactive" "$F"
+# The board-visible takeaway: stamped (by=proactive) via the gc-attention.sh
+# `takeaway` wrapper, with the gc.proactive_reaction advance marker now folded
+# into the release update — so gc-attention.sh renders an explanatory NEEDS for
+# the bead instead of a terse fallback (bead tk-q4xaj.3). The raw metadata triple
+# moved into the wrapper, so we assert the call shape, not the fields.
+has "formula stamps the board takeaway via the wrapper" "takeaway {{issue}}"      "$F"
+has "formula attributes the takeaway to proactive"      "--by proactive"          "$F"
+has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
 
 echo "── the pool budget + clamp (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"
@@ -303,8 +306,9 @@ has "prompt names the formula"                  "mol-first-reaction"     "$PM"
 has "prompt forbids closing the target"         "Close the target"       "$PM"
 has "prompt keeps code on the mr path"          "mr path only"           "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
-has "prompt stamps the board takeaway"             "gc.takeaway"              "$PM"
-has "prompt attributes the takeaway to proactive"  "gc.takeaway_by=proactive" "$PM"
+has "prompt stamps the board takeaway via the wrapper" "takeaway <id>"           "$PM"
+has "prompt attributes the takeaway to proactive"      "--by proactive"          "$PM"
+has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1" "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"
 UFX="$(mktemp -d)"

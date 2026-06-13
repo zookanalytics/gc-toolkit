@@ -115,11 +115,10 @@ explains where the conversation stands without opening it. Do both in **one**
 update (one Dolt write):
 
 ```bash
-gc bd update "$BEAD" \
-  --notes "<turn summary: an option posed, a decision, a finding>" \
-  --set-metadata gc.takeaway="<≤140-char one-line: current thinking / what you need>" \
-  --set-metadata gc.takeaway_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --set-metadata gc.takeaway_by=host
+"{{ .ConfigDir }}/assets/scripts/gc-attention.sh" takeaway "$BEAD" \
+  "<≤140-char one-line: current thinking / what you need>" \
+  --by host \
+  --note "<turn summary: an option posed, a decision, a finding>"
 ```
 
 Casual filler does not need a note. A decision always does. Keeping the
@@ -173,10 +172,8 @@ one last time so the board headline reflects exactly where you left off — your
 note-before-you-sleep:
 
 ```bash
-gc bd update "$BEAD" \
-  --set-metadata gc.takeaway="<≤140-char one-line: where this stands / what it needs next>" \
-  --set-metadata gc.takeaway_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --set-metadata gc.takeaway_by=host
+"{{ .ConfigDir }}/assets/scripts/gc-attention.sh" takeaway "$BEAD" \
+  "<≤140-char one-line: where this stands / what it needs next>" --by host
 gc runtime drain-ack
 ```
 

@@ -38,10 +38,14 @@ has() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "contains: $2" "$3" ;; esac;
 
 PM="$(cat "$PROMPT_MD")"
 
-echo "── the host stamps the board takeaway (by=host) ──"
-has "prompt instructs setting gc.takeaway"        "gc.takeaway"         "$PM"
-has "prompt attributes the takeaway to the host"  "gc.takeaway_by=host" "$PM"
-has "prompt freshness-stamps the takeaway"        "gc.takeaway_at"      "$PM"
+echo "── the host stamps the board takeaway (by=host) via the wrapper ──"
+# The raw gc.takeaway/_at/_by triple now lives inside gc-attention.sh; the
+# prompt's contract is the WRAPPER INVOCATION (… takeaway "$BEAD" … --by host),
+# which owns the three-field stamp + the freshness timestamp. So assert the
+# call shape, not the now-encapsulated metadata fields.
+# shellcheck disable=SC2016  # intentional: match the LITERAL "$BEAD" in the prompt text, no expansion
+has "prompt refreshes the takeaway via the gc-attention wrapper" 'gc-attention.sh" takeaway "$BEAD"' "$PM"
+has "prompt attributes the takeaway to the host"                 "--by host"                          "$PM"
 
 echo "── the cadence: per meaningful turn + before an intentional drain ──"
 has "prompt ties the takeaway to each meaningful turn" "Each Meaningful Turn"        "$PM"
