@@ -385,6 +385,7 @@ EOF
 # worker open one small PR to main; stamped before routing so the worker's
 # `mol-polecat-work` workspace-setup branches from main when it claims the bead.
 gc bd update "$BEAD" \\
+  --set-metadata task_kind=doc-update \\
   --set-metadata doc_keeper.target_doc="$TARGET_DOC" \\
   --set-metadata doc_keeper.target_section="$TARGET_SECTION" \\
   --set-metadata doc_keeper.source=memory-audit \\

@@ -95,7 +95,8 @@ audit react — the same signal, mocked reversibly without touching gascity.
 Each filed bead matches the pinned `doc-update` schema (see
 `specs/tk-yw3zb.1/doc-keeper-architecture.md` §2): type `task`; labels
 `doc-keeper`,`doc-update`; body `## Target` /
-`## Change` / `## Source / Why`; metadata `doc_keeper.target_doc`,
+`## Change` / `## Source / Why`; metadata `task_kind=doc-update` (the
+discriminator, mirroring refinery's `task_kind=review`), `doc_keeper.target_doc`,
 `doc_keeper.source=drift-audit`, `doc_keeper.source_signal=<repo> <base>..<head>`,
 plus `target=main` and `merge_strategy=mr` so the worker opens one small PR to
 `main`. The audit cites the commits and names the doc — it never writes the
@@ -322,6 +323,7 @@ $commits"
     continue
   fi
   gc bd update "$bead" \
+    --set-metadata task_kind=doc-update \
     --set-metadata doc_keeper.target_doc="$doc" \
     --set-metadata doc_keeper.source=drift-audit \
     --set-metadata doc_keeper.source_signal="$sig" >/dev/null

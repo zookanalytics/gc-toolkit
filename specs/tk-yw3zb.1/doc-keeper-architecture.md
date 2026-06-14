@@ -64,11 +64,12 @@ polecat, §4):
 
 | Field | Value |
 |---|---|
-| Bead type | `task` (no new type required; `doc-update` is a label, not a type) |
+| Bead type | `task` — no new bead *type*; `doc-update` is carried as the `task_kind` metadata discriminator (below) plus `doc-keeper`/`doc-update` labels |
 | Title | `doc-update: <docs/path>: <one-line summary>` |
 | Description | What needs to change, why, source signal (drift hash diff or memory file cite), proposed copy or diff |
 | Branch | `polecat/<bead-id>` (formula default) |
 | Commit prefix | `docs(<scope>): ...` to match existing rig commit style |
+| `metadata.task_kind` | `doc-update` — the discriminator downstream consumers filter on (mirrors refinery's `task_kind=review`); stamped by both audit filing paths before routing (§5) |
 | `metadata.target` | `main` — every doc-update lands directly on `main` |
 | `metadata.merge_strategy` | `mr` — one small PR to `main` per edit (§3) |
 
@@ -256,7 +257,7 @@ How the seven existing build-phase sub-beads (`tk-yw3zb.2` through
 | `tk-yw3zb.2` doc-keeper: rename to 'agent brief' terminology | `central-doc-inventory.md` §1a; this brief §6 |
 | `tk-yw3zb.3` doc-keeper: define `[doc-keeper]` config block | **superseded** — the `[doc-keeper]` config block was dropped by the 2026-06-12 rescope (§6) |
 | `tk-yw3zb.4` doc-keeper: rolling-cycle mechanism | **superseded** — the rolling-cycle apparatus was dropped by the rescope; spec + scripts deleted (§3) |
-| `tk-yw3zb.5` doc-keeper: doc-update worker polecat formula | this brief §4 |
+| `tk-yw3zb.5` doc-keeper: doc-update worker polecat formula | this brief §4 — **rescoped**: no bespoke worker formula; the thin `mol-doc-update` (`extends = ["mol-polecat-work"]`) was dropped by the change-unit rescope in favour of standard `mol-polecat-work` driven by the bead shape |
 | `tk-yw3zb.6` doc-keeper: drift-audit polecat formula | this brief §5a |
 | `tk-yw3zb.7` doc-keeper: memory-audit polecat formula | this brief §5b |
 | `tk-yw3zb.8` doc-keeper: cron registration | this brief §7 |
