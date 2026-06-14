@@ -7,9 +7,9 @@ Part of the doc-keeper machinery (epic `tk-yw3zb`, sub-bead `tk-yw3zb.7`;
 design `specs/tk-yw3zb.1/doc-keeper-architecture.md` §5b and
 `specs/tk-yw3zb.1/central-doc-inventory.md` §2b). doc-keeper keeps the brief
 current from three feeds — a drift audit (`.6`), this memory audit (`.7`), and
-organic filing — all producing the SAME `doc-update` bead shape (see the
-`mol-doc-update` worker formula description) so they are indistinguishable to
-that worker (`.5`) and the refinery.
+organic filing — all producing the SAME `doc-update` bead shape (see
+`specs/tk-yw3zb.1/doc-keeper-architecture.md` §2) so they are indistinguishable
+to the standard worker polecat (`mol-polecat-work`) and the refinery.
 
 ## What this audit does (and does not)
 
@@ -49,7 +49,7 @@ constant in this formula (not a config block — the epic rescope dropped
 
 `doc-update` edits land on `main`, each as its own small pull request — no
 rolling branch, no batching. So this audit stamps `target=main` and
-`merge_strategy=mr` on every bead it files; the inherited `mol-doc-update`
+`merge_strategy=mr` on every bead it files; the standard `mol-polecat-work`
 workspace-setup branches `polecat/<bead>` from `origin/main` and the refinery
 opens one PR to `main`.
 
@@ -69,10 +69,12 @@ also inspects the PRs of closed beads.
 
 ## NEVER CLOSE THE BEADS IT FILES
 
-This audit CREATES `doc-update` beads and hands each to a worker via
-`gc sling ... mol-doc-update`. The worker edits the doc and the refinery opens
-the PR and closes the bead. The audit never edits a doc, never pushes a branch,
-and never closes a `doc-update` bead — it surfaces and dispatches, then drains.
+This audit CREATES `doc-update` beads and hands each to a worker polecat by
+routing it to the polecat pool (`gc.routed_to`), where the standard
+`mol-polecat-work` lifecycle claims and runs it. The worker edits the doc and
+the refinery opens the PR and closes the bead. The audit never edits a doc,
+never pushes a branch, and never closes a `doc-update` bead — it surfaces and
+dispatches, then drains.
 
 ## Variables
 
@@ -292,7 +294,7 @@ title = "File a schema-shaped doc-update bead per survivor, dispatch it, and dra
 needs = ["scan-and-classify"]
 description = """
 Turn each surviving candidate into ONE `doc-update` bead in the pinned shape
-(see the `mol-doc-update` worker formula description), targeting `main` as one
+(see `specs/tk-yw3zb.1/doc-keeper-architecture.md` §2), targeting `main` as one
 small PR, and hand it to a worker. Then drain — this session is one-shot.
 
 **1. Clean run? Drain.** If `scan-and-classify` yielded no survivors, the audit
@@ -380,8 +382,8 @@ EOF
 
 # Metadata contract. Note: bd metadata keys use the underscore namespace
 # `doc_keeper.*` (hyphens are rejected). target=main + merge_strategy=mr make the
-# worker open one small PR to main; stamped before the sling so `gc sling` bakes
-# {{base_branch}}=main at pour.
+# worker open one small PR to main; stamped before routing so the worker's
+# `mol-polecat-work` workspace-setup branches from main when it claims the bead.
 gc bd update "$BEAD" \\
   --set-metadata doc_keeper.target_doc="$TARGET_DOC" \\
   --set-metadata doc_keeper.target_section="$TARGET_SECTION" \\
@@ -398,21 +400,11 @@ gc bd update "$BEAD" \\
 # Parent under the epic so audit beads group with doc-keeper.
 gc bd dep add "$BEAD" tk-yw3zb --type=parent-child 2>/dev/null || true
 
-# Dispatch to the worker, routing to the polecat pool. The bespoke
-# `mol-doc-update` worker is being retired — a doc-update is ordinary polecat
-# work that runs through the standard `mol-polecat-work` lifecycle — so fall
-# back to plain pool routing (`gc.routed_to`) when the formula is no longer
-# registered, mirroring drift-audit so the signal is never lost. The
-# pre-stamped target=main makes workspace-setup branch from main either way.
-# `--on <formula>` attaches the wisp to the existing bead (the bead is the
-# positional arg) — do NOT combine with `-f`/`--formula`, which is the
-# mutually-exclusive "treat the arg as a formula and mint a fresh wisp" mode;
-# gc rejects the two flags together.
-if bd formula list 2>/dev/null | grep -q 'mol-doc-update'; then
-  gc sling "$POOL" "$BEAD" --on mol-doc-update >/dev/null 2>&1 || gc bd update "$BEAD" --set-metadata gc.routed_to="$POOL" >/dev/null
-else
-  gc bd update "$BEAD" --set-metadata gc.routed_to="$POOL" >/dev/null
-fi
+# Dispatch to the worker by routing to the polecat pool. A doc-update is
+# ordinary polecat work: route the bead (`gc.routed_to`) and the standard
+# `mol-polecat-work` lifecycle claims and runs it — there is no bespoke worker
+# formula. The pre-stamped target=main makes workspace-setup branch from main.
+gc bd update "$BEAD" --set-metadata gc.routed_to="$POOL" >/dev/null
 FILED_TARGETS="$FILED_TARGETS$TKEY "
 echo "filed + dispatched $BEAD -> $TKEY (cites $MEMFILE)"
 ```

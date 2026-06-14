@@ -7,10 +7,10 @@ doc.
 Part of the doc-keeper machinery (epic `tk-yw3zb`; this is sub-bead
 `tk-yw3zb.6`, design `specs/tk-yw3zb.1/doc-keeper-architecture.md` §5a). Its
 output is the drift feed into the shared `doc-update` pipeline: the beads it
-files match the pinned schema (see the `mol-doc-update` worker formula
-description, sub-bead `tk-yw3zb.5`), are picked up by that worker, and open one
-small PR to `main` via the refinery — exactly like an organic or memory-audit
-`doc-update`. This formula is indistinguishable downstream.
+files match the pinned schema (see `specs/tk-yw3zb.1/doc-keeper-architecture.md`
+§2), are picked up by a standard worker polecat (`mol-polecat-work`), and open
+one small PR to `main` via the refinery — exactly like an organic or
+memory-audit `doc-update`. This formula is indistinguishable downstream.
 
 ## Dispatch (one-shot, periodic)
 
@@ -92,8 +92,9 @@ audit react — the same signal, mocked reversibly without touching gascity.
 
 ## Output: the pinned doc-update schema
 
-Each filed bead matches the schema in the `mol-doc-update` worker formula
-description: type `task`; labels `doc-keeper`,`doc-update`; body `## Target` /
+Each filed bead matches the pinned `doc-update` schema (see
+`specs/tk-yw3zb.1/doc-keeper-architecture.md` §2): type `task`; labels
+`doc-keeper`,`doc-update`; body `## Target` /
 `## Change` / `## Source / Why`; metadata `doc_keeper.target_doc`,
 `doc_keeper.source=drift-audit`, `doc_keeper.source_signal=<repo> <base>..<head>`,
 plus `target=main` and `merge_strategy=mr` so the worker opens one small PR to
@@ -328,16 +329,15 @@ $commits"
 
   # Land this doc-update on main as one small PR (merge_strategy=mr). No rolling
   # branch — each doc-update is a complete, targeted change to main. Stamped
-  # before dispatch so `gc sling` bakes {{base_branch}}=main at pour.
+  # before routing so the worker's `mol-polecat-work` workspace-setup branches
+  # from main when it claims the bead.
   gc bd update "$bead" --set-metadata target=main --set-metadata merge_strategy=mr >/dev/null
 
-  # Dispatch to the worker. If mol-doc-update is not registered yet, route the
-  # bead to the pool so the signal is not lost.
-  if bd formula list 2>/dev/null | grep -q 'mol-doc-update'; then
-    gc sling "$POOL" "$bead" --on mol-doc-update >/dev/null 2>&1 || gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
-  else
-    gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
-  fi
+  # Dispatch to the worker by routing to the polecat pool. A doc-update is
+  # ordinary polecat work: route the bead (`gc.routed_to`) and the standard
+  # `mol-polecat-work` lifecycle claims and runs it — there is no bespoke worker
+  # formula.
+  gc bd update "$bead" --set-metadata gc.routed_to="$POOL" >/dev/null
 
   filed=$((filed + 1))
   gc bd update "$STATE" --set-metadata "$key=$GASCITY_HEAD|$GCTK_HEAD" >/dev/null
@@ -374,6 +374,6 @@ gc runtime drain-ack
 ```
 
 Do NOT push a branch, hand to the refinery, or close any bead — this formula
-files beads and exits. The doc edits happen later, in `mol-doc-update`, on a
-branch, through the refinery.
+files beads and exits. The doc edits happen later, in the standard
+`mol-polecat-work` worker polecat, on a branch, through the refinery.
 """

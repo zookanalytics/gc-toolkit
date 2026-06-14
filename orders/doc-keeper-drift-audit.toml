@@ -5,9 +5,10 @@
 # Fires the mol-doc-keeper-drift-audit formula (sub-bead .6) on a 24h
 # cooldown. One fire = one audit run: a polecat scans the tracked
 # agent-brief docs against the current HEADs of the repos they track,
-# files zero-or-more `doc-update` beads (schema per sub-bead .5), and
-# drains. Those beads flow through the shared mol-doc-update worker →
-# refinery pipeline exactly like an organic or memory-audit update.
+# files zero-or-more `doc-update` beads (schema per the architecture
+# brief §2), and drains. Those beads flow through the shared standard
+# polecat (mol-polecat-work) → refinery pipeline exactly like an
+# organic or memory-audit update.
 #
 # ── Why an in-pack order, not a hand-registered city cron ───────────────
 # Per the epic rescope (2026-06-12) enablement IS the pack being

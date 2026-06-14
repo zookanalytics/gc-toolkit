@@ -59,8 +59,8 @@ flows the same way as a code-touching bead:
    also supports a `direct` fast-forward; doc-keeper does not use it.)
 6. Refinery closes the bead with merge metadata.
 
-**Molecule shape** (the polecat-side contract, set by the worker formula
-described in §4):
+**Molecule shape** (the polecat-side contract consumed by the worker
+polecat, §4):
 
 | Field | Value |
 |---|---|
@@ -103,24 +103,29 @@ The retired mechanism lived in `specs/tk-yw3zb.4/rolling-cycle-mechanism.md`
 and `assets/scripts/doc-keeper-rolling-cycle*.sh`; both were deleted in
 the same simplification.
 
-## 4. Worker polecat formula (`mol-doc-update`)
+## 4. Worker polecat (standard `mol-polecat-work`)
 
-A new variant of `mol-polecat-work`. **Formula identity, not a new agent
-type** — same `gc-toolkit.polecat` template fills the role.
+No bespoke worker formula. A `doc-update` bead is ordinary polecat
+work: the audit (or organic filer) routes it to the `gc-toolkit.polecat`
+pool (`metadata.gc.routed_to`) and the **standard `mol-polecat-work`
+lifecycle** claims and runs it. The bead's body and metadata — not a
+custom formula — steer the edit:
 
-| Step (inherited from base) | Override note |
+| Standard step | What a `doc-update` bead drives |
 |---|---|
-| `load-context` | Read `metadata.source_signal` (drift hash + path, or memory file path); load the cited central doc; load the source signal contents. |
-| `workspace-setup` | Standard polecat-work workspace-setup; branches `polecat/<bead>` from `origin/main` (`{{base_branch}}` defaults to `main`). |
-| `preflight-tests` | Inherited; skips silently when commands empty. |
-| `implement` | Edit the single central doc named in the bead. Make a single focused commit `docs(<scope>): ...`. Forbidden: editing files outside the tracked central-tier doc set. |
+| `load-context` | Bead body cites the source signal (drift hash + path, or memory file path) and names the target doc; the polecat loads the cited central doc and the signal contents. |
+| `workspace-setup` | Branches `polecat/<bead>` from `origin/main` (`metadata.target` defaults to `main`). |
+| `preflight-tests` | Inherited; skips silently when the rig leaves the commands empty. |
+| `implement` | Edit the single central doc named in `## Target` / `metadata.doc_keeper.target_doc`. One focused `docs(<scope>): ...` commit; touch no file outside the tracked central-tier doc set. |
 | `self-review` | Inherited. |
-| `submit-and-exit` | Inherited. |
+| `submit-and-exit` | Inherited — reassigns to the refinery, which opens one PR to `main` (`merge_strategy=mr`). |
 
-Sub-bead `tk-yw3zb.5` owns the formula authoring; this brief records
-the *shape*. Single-doc scope per bead is the keystone — keeps the
-worker polecat short, the diff small, and the rejection-resume path
-clean.
+An earlier design (sub-bead `tk-yw3zb.5`) gave this leg its own thin
+`extends = ["mol-polecat-work"]` formula (`mol-doc-update`); the
+change-unit rescope dropped it in favour of plain `mol-polecat-work`
+driven by the bead shape. Single-doc scope per bead remains the
+keystone — it keeps the worker polecat short, the diff small, and the
+rejection-resume path clean.
 
 ## 5. Audit-feed formulas
 

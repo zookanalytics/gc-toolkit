@@ -6,7 +6,8 @@
 # cooldown. One fire = one run: a polecat scans mechanik's auto-memory
 # for entries that should promote into the agent brief and files
 # `doc-update` beads on the same schema and through the same
-# mol-doc-update worker → refinery pipeline as the drift audit.
+# standard polecat (mol-polecat-work) → refinery pipeline as the
+# drift audit.
 #
 # Enablement, scope, pool, and the pool-wake `phase = "vapor"`
 # prerequisite are identical to the drift-audit order and explained in
