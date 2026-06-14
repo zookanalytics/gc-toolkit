@@ -237,6 +237,14 @@ rig_path_for_bead() {
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .path' 2>/dev/null | head -n1
 }
 
+# rig_name_for_bead <bead-id> — the rig NAME owning the bead, by id prefix;
+# empty if no rig matches. Parallel to rig_path_for_bead but returns .name —
+# the value gc-proactive.sh rig-qualifies its pool target from via GC_RIG.
+rig_name_for_bead() {
+    enumerate_rigs
+    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
+}
+
 # ── Verb: flag ───────────────────────────────────────────────────────
 # Raise a bead onto the board. `gc.attention=1` is the stable, exact-
 # match-listable sentinel the board's 4th-anchor query filters on; the
@@ -452,6 +460,17 @@ cmd_react() {
     # right per-rig ledger even cross-rig (parity with open/flag/clear).
     path=$(rig_path_for_bead "$bead")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+
+    # gc-proactive.sh rig-qualifies its pool target from GC_RIG and fails
+    # CLOSED when it is unset; export the bead's rig so the sling resolves
+    # <rig>/gc-toolkit.proactive even from a GC_RIG-less shell (the normal
+    # operator path) or cross-rig. Gate on the NAME resolving — NOT on
+    # $path/.beads existing (unlike BEADS_DIR above) — so a cross-rig react
+    # still qualifies the target where the local .beads dir isn't present. The
+    # bead's rig is authoritative, so this overrides any ambient GC_RIG: a tk-
+    # bead's reaction routes to gc-toolkit's proactive pool regardless.
+    rig=$(rig_name_for_bead "$bead")
+    [ -n "$rig" ] && export GC_RIG="$rig"
 
     # The reason is operator intent for the log/trail. gc-proactive.sh sling
     # reads the bead BODY (it has no --reason; the first reaction's seed is the
