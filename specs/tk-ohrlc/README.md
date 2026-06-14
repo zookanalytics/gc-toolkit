@@ -48,8 +48,8 @@ left as a TBD stub. The deliverable is a **findings write-up**, not a doc edit.
    (removes the description from context but blocks preload — a real exclusivity
    constraint), or `skillOverrides` settings. `allowed-tools` scopes **capability, not
    visibility** — don't conflate.
-4. **Assume-persona entry point.** In-session: `/invoke` the persona identity skill (it
-   persists for the session). At boot: **`--agent <name>` / the `agent` setting** runs an
+4. **Assume-persona entry point.** In-session: invoke the persona identity skill via its
+   `/<skill-name>` command (it persists for the session). At boot: **`--agent <name>` / the `agent` setting** runs an
    agent as the main session, with `skills:` preloads + an `initialPrompt` (which
    processes commands/skills) — the cleanest documented "boot as the persona." No bare
    `claude --skill` flag exists.

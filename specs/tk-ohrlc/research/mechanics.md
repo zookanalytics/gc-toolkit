@@ -213,7 +213,7 @@ two clean ways to honor it, and they pull in opposite directions on one field:
 - **Path C — `disable-model-invocation: true` on every process-skill.** Out of
   everyone's context; invoked only by explicit `/name`. **But** then they are **not**
   `skills:`-preloadable and **not** auto-selectable, so the persona's identity skill
-  must explicitly tell the agent to `/invoke` each process-skill at the right moment.
+  must explicitly tell the agent to invoke each process-skill by name (`/<skill-name>`) at the right moment.
   Maximum thrift, most manual.
 
 These are genuine trade-offs, which is why the epic routed them back for discussion.
@@ -240,8 +240,8 @@ SKILL.md body and **persist for the rest of the session**:
 2. **Claude auto-selects** on `description` match — unless the skill is
    `disable-model-invocation: true`.
 
-So the lightweight "assume persona X" in a plain session is simply **invoke
-`/persona-x`** (the persona's identity skill); its body — the always-on identity — then
+So the lightweight "assume persona X" in a plain session is simply
+**`/persona-x`** (the persona's identity skill); its body — the always-on identity — then
 rides the rest of the session.
 
 **There is no bare `claude --skill X` flag** to boot a fresh session already wearing a
@@ -254,7 +254,7 @@ research under-reported:
   - carry an **`initialPrompt`** — quoted: *"Auto-submitted as the first user turn when
     this agent runs as the main session agent (via `--agent` or the `agent` setting).
     Commands and skills are processed. Prepended to any user-provided prompt."*
-    So `initialPrompt` can `/invoke` the persona identity skill (or seed the first
+    So `initialPrompt` can invoke the persona identity skill via its `/persona-x` command (or seed the first
     task) at boot.
 
 That combination — an agent definition whose body is (or loads) the persona identity,
@@ -274,7 +274,7 @@ existing agent model.
   Gas City use case.
 
 **Persona implication.** Two entry points, pick per situation:
-- **Switch within a live plain session** → `/invoke` the persona identity skill.
+- **Switch within a live plain session** → invoke the persona identity skill (`/persona-x`).
 - **Spawn an agent that *is* the persona** → an `.claude/agents/` definition (or the
   `--agent` boot path) with `skills:` preloads + `initialPrompt`. This is the natural
   home for the epic's "an AGENT = a persona instantiated as a standing/addressable
@@ -290,7 +290,7 @@ a persona instantiated as a standing instance; curate skills per consumer, NOT g
 The mechanics land as:
 
 - **"A persona is a skill" → yes, mechanically.** The identity is one `SKILL.md`;
-  `/invoke` it to wear it; it persists for the session. ✔
+  invoke it by name (`/persona-x`) to wear it; it persists for the session. ✔
 - **"Processes are skills that ride with the persona" → use the subagent `skills:`
   preload (Path A) or a per-persona plugin (Path B).** Native per-agent *visibility*
   scoping of plain project skills does **not** exist, so "ride with the persona, not
