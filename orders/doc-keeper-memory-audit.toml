@@ -4,9 +4,9 @@
 #
 # Fires the mol-doc-keeper-memory-audit formula (sub-bead .7) on a 24h
 # cooldown. One fire = one run: a polecat scans mechanik's auto-memory
-# for entries that should promote into the agent brief and files
-# `doc-update` beads on the same schema and through the same
-# mol-doc-update worker → refinery pipeline as the drift audit.
+# for durable learnings that fall inside a brief's `## Scope` but aren't
+# captured yet, and files change-unit `doc-update` beads through the same
+# pool worker (mol-polecat-work) → refinery pipeline as the drift audit.
 #
 # Enablement, scope, pool, and the pool-wake `phase = "vapor"`
 # prerequisite are identical to the drift-audit order and explained in

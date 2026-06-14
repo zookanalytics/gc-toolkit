@@ -1,15 +1,43 @@
 ---
-name: Central-Doc Inventory for doc-keeper
-description: Inventory of gc-toolkit central-tier documentation candidates plus operational-knowledge surfaces, evaluated against docs/file-structure.md tier criteria, with per-item maintenance-mechanism recommendations.
+name: Central-Doc Inventory for doc-keeper (historical scout survey)
+description: The original scout survey of gc-toolkit central-tier doc candidates and operational-knowledge surfaces, evaluated against docs/file-structure.md tier criteria. SUPERSEDED for the live design by doc-keeper-architecture.md (the charter-driven model); retained as the historical inventory of surfaces.
 ---
 
 # Central-Doc Inventory for doc-keeper
 
-This inventory is the input to the `[doc-keeper]` config block (sub-bead
-`tk-yw3zb.3`). Each row classifies an existing artifact against
+> **Superseded — historical scout survey.** The live doc-keeper design is the
+> charter-driven model in
+> [`doc-keeper-architecture.md`](doc-keeper-architecture.md); this inventory is
+> retained only as the original survey of doc / agent / memory surfaces. The
+> machinery it describes was reworked by the 2026-06-13 operator review of #122,
+> so the following prescriptions below are **no longer how doc-keeper works** —
+> read them as history, not instruction:
+>
+> - **No `[doc-keeper]` config block, no enumerated brief list, no
+>   "no-implicit-globbing" rule (§3a).** The brief set is exactly the
+>   `docs/gascity-*.md` glob resolved at run time — one source of truth, so
+>   there is no list to maintain and §3a's "deliberate config edit, not a glob"
+>   is inverted. Enablement is the pack being imported.
+> - **The idealized names `gas-city-reference.md` / `gas-city-pack-v2.md` and
+>   the `docs/principles/document-spec.md` doc (§1a, §1b, §3d) never existed in
+>   the repo.** The real briefs are `docs/gascity-{agents,local-patching,
+>   reference,routing-model}.md`.
+> - **The memory bucket A/B/C model (§2b) is replaced by scope judgment.** A
+>   memory learning promotes iff it falls inside some brief's `## Scope` and is
+>   not captured there; "stay-local" falls out of being outside every scope, not
+>   from a filename family.
+> - **doc-update beads are change-unit, not per-doc.** One upstream change or
+>   learning = one atomic bead/PR (it may touch several briefs); a standard
+>   `task` bead with `task_kind=doc-update`, no custom schema.
+>
+> Still current below: the survey of which `docs/` files, agent templates, and
+> memory entries exist and how they tier (§1, §2), and the migration parking lot
+> for `docs/design/` and `docs/research/` (§1c, §1d, §3b).
+
+Each row below classifies an existing artifact against
 `docs/file-structure.md`'s two-tier criteria (durable + authoritative + owned)
-and proposes a keep-current mechanism. Decisions noted as *recommend* are
-the scout's call; mechanik signs off before any of them lands as config.
+and proposes a keep-current mechanism — the original scout's recommendations,
+preserved as filed.
 
 ## Method
 
