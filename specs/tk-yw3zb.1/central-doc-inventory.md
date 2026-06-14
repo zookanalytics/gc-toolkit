@@ -30,9 +30,15 @@ description: The original scout survey of gc-toolkit central-tier doc candidates
 >   learning = one atomic bead/PR (it may touch several briefs); a standard
 >   `task` bead with `task_kind=doc-update`, no custom schema.
 >
-> Still current below: the survey of which `docs/` files, agent templates, and
-> memory entries exist and how they tier (§1, §2), and the migration parking lot
-> for `docs/design/` and `docs/research/` (§1c, §1d, §3b).
+> Still current below: the tiering *method* (§"Method") and its application to
+> agent templates and memory entries (§2), and the migration parking lot for
+> `docs/design/` and `docs/research/` (§1c, §1d, §3b). The §1a/§1b top-level
+> `docs/` rows are **not** live — they preserve the original survey's idealized
+> names (`docs/gas-city-reference.md`, `docs/gas-city-pack-v2.md`,
+> `docs/principles/document-spec.md`); the bullet above corrects them to the
+> real `docs/gascity-{agents,local-patching,reference,routing-model}.md` brief
+> set, so do not read those rows as a current account of which `docs/` files
+> exist.
 
 Each row below classifies an existing artifact against
 `docs/file-structure.md`'s two-tier criteria (durable + authoritative + owned)
