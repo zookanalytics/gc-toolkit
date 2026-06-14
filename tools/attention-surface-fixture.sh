@@ -253,6 +253,23 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
            GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" react tk-epic --reason "pick a backend" --dry-run 2>&1 || true)"
     has    "react surfaces the operator --reason"     "pick a backend"                  "$RXR"
     absent "react does NOT forward --reason to sling" "--reason"                        "$RXR"
+    # Regression (tk-82g33): react must SELF-SUPPLY GC_RIG so the sling can
+    # rig-qualify its pool target even from a GC_RIG-less shell — the NORMAL
+    # operator path (the prefix+b board picker and a bare shell both lack it).
+    # The assertions above pre-set GC_RIG=gc-toolkit, which MASKS the bug by
+    # letting resolve_pool_target read it from the environment; here we DROP it
+    # with `env -u GC_RIG` and prove react derives gc-toolkit from the tk- bead's
+    # own rig. The fixture's rigs.json already maps tk→gc-toolkit, so no fixture
+    # data change is needed. "rig-qualify" is the fail-closed die() phrase —
+    # asserting it absent proves the guard never fired.
+    RXNR="$(env -u GC_RIG GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
+            GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
+    has    "react self-supplies the rig (no GC_RIG → still rig-qualified)" \
+           "gc-toolkit/gc-toolkit.proactive" "$RXNR"
+    has    "react (no GC_RIG) still slings mol-first-reaction" "--on mol-first-reaction" "$RXNR"
+    has    "react (no GC_RIG) still pins the codex-gated mr path" "--merge mr"           "$RXNR"
+    has    "react (no GC_RIG) passes the bead through"         "tk-epic"                 "$RXNR"
+    absent "react (no GC_RIG) never hits the fail-closed guard" "rig-qualify"            "$RXNR"
 else
     printf '  skip  react→sling wiring (gc-proactive.sh not found at %s)\n' "$PROACTIVE_TOOL_REAL"
 fi
