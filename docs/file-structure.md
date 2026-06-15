@@ -16,15 +16,16 @@ the approach:
 
 ## Scope
 
-**Mandate.** Where gc-toolkit writes its own documentation and specs,
-and the rules that govern each: the central/local tier split, the
-directory layout, filename and path discipline, frontmatter, the
-[`## Scope` convention](#the-scope-section), and cross-doc references.
+**Mandate.** The conventions that decide where gc-toolkit's own
+documentation and specs are filed, and how they are named, framed, and
+cross-referenced — the central-versus-local tier split and the
+discipline that keeps each tier's promise: central docs true, local docs
+preserved as history.
 
-**Boundaries.** This governs gc-toolkit's *internal* docs; it does not
-apply to customer-facing documentation, and it does not prescribe the
-*content* of any individual doc (that lives in the doc itself). It says
-where a doc goes and how it is named and framed — not what it must say.
+**Boundaries.** This governs gc-toolkit's *internal* docs, not
+customer-facing documentation. It sets where a doc goes and how it is
+framed — never what any individual doc must *say*; that is the doc's own
+content, governed by that doc's [`## Scope`](#the-scope-section).
 
 ## Use Cases
 
@@ -265,22 +266,53 @@ doc's body, and shouldn't change often as the doc evolves.
 ## The Scope section
 
 Every authoritative `docs/` doc carries a `## Scope` section in its
-body — the doc's charter. It states two things:
+body — the doc's charter. What follows is the **scope standard**: what
+a `## Scope` is, what makes one good, and how it is maintained.
 
-- **Mandate** — what the doc intends to represent: the subject it
-  speaks on authoritatively.
-- **Boundaries** — what it deliberately does *not* cover, and where the
-  adjacent material lives instead.
+This standard is **v1** — a deliberate first cut, expected to sharpen as
+we accumulate calibration examples and as the doc-keeper audits expose
+what it fails to pin down. It is the current best articulation, not a
+finished spec.
+
+### What a scope is
+
+A scope states, at the right altitude, **what the doc is responsible
+for representing**. It has two parts:
+
+- **Mandate** — the subject the doc speaks on authoritatively: what it
+  intends to represent, completely and truthfully.
+- **Boundaries** — what the doc deliberately does *not* cover, and where
+  the adjacent material lives instead.
 
 Scope is the doc's own statement of what "true and complete" means for
-it. A reader uses it to decide whether a fact belongs here; a
-maintainer uses it as the thing the doc is judged against — is every
-claim still true *within this mandate* (no drift), and is everything
-inside the mandate actually captured (no gap)? The check is against the
-charter the doc declares, not against a diff of git history.
+it. A reader uses it to decide whether a fact belongs here; the
+doc-keeper and a human maintainer use it as the thing the doc is judged
+against — is every claim still true *within this mandate* (no drift),
+and is everything inside the mandate actually captured (no gap)? The
+check is against the charter the doc declares, not against a diff of
+git history.
 
-**Distinct from frontmatter `description` — do not merge them.** They
-sit at different altitudes:
+### What makes a good scope
+
+- **It states the mandate, not the implementation.** The mandate names
+  the doc's *remit* — what it is responsible for. It does not enumerate
+  the doc's contents: the sections, steps, commands, and mechanisms are
+  what the scope *governs*, not what it lists. A remit is stable; an
+  outline drifts with every edit. If the mandate reads like a table of
+  contents, it is pitched too low.
+- **It is distinct from the frontmatter [`description`](#frontmatter).**
+  The two may share a subject, but they do different jobs at different
+  altitudes. The `description` is a one-line discovery blurb in the
+  index — "is this the doc I want?" The scope is the in-body charter —
+  "what does this doc own, and where are its edges?" A scope that merely
+  re-words the description in longer form has not earned its place; the
+  mandate must add the precision — named subjects, the doc's distinctive
+  angle — and the boundaries a one-line blurb cannot carry.
+- **It names its boundaries.** A boundary states what is deliberately out
+  and points at where it lives instead. Boundaries are what let an audit
+  tell two failure modes apart: something *in-scope but missing* is a gap
+  to close; something *out-of-scope* was correctly skipped. Without
+  stated edges, every absence looks like a gap.
 
 | | `description` (frontmatter) | `## Scope` (body) |
 |---|---|---|
@@ -290,13 +322,37 @@ sit at different altitudes:
 | Changes | rarely | only when the mandate or boundaries genuinely shift |
 
 Keep it tight: a mandate sentence and a short boundary list, not a
-table of contents. Scope describes the doc's *remit*, not its current
-outline — an outline drifts with every edit; a remit shouldn't.
+table of contents.
 
-Existing docs grow a `## Scope` as they are next touched — the same way
-[a central doc is updated alongside the change that affects
-it](#drafting-and-adoption) — and a new authoritative doc carries one
-from the start.
+### A calibration example
+
+[gascity-agents.md](gascity-agents.md)'s scope is the reference for a
+good one. Its mandate names its subjects concretely — the agent
+*variants* (named singletons, pool workers, threads, the patrol overlay)
+and the contracts for each — and states the doc's distinctive angle, the
+corners that surface only when variants mix, without listing the doc's
+section headings. Its boundaries draw a crisp line — *who* the agents
+are, not *how* work moves between them (that is
+[gascity-routing-model.md](gascity-routing-model.md)) — and disclaim the
+adjacent material (the upstream primitives, prompt-template authoring,
+single-agent role behavior), so an audit reads those absences as
+deliberate, not as gaps. It is kept exemplary on purpose; read the live
+section for the current wording.
+
+### How a scope is maintained
+
+A scope is **stable**. It is revised only when the doc is
+*re-chartered* — when its mandate or boundaries genuinely shift — not as
+the doc's content churns. Content moves whenever the world does; the
+charter that governs it should not move with it.
+
+The doc-keeper **reads** the scope — it is the measuring stick the audit
+holds the doc against — but it does not author or rewrite it.
+Re-chartering is a deliberate human editorial act, the same kind of
+decision as [adding a new central doc](#drafting-and-adoption).
+
+Existing docs grow a `## Scope` as they are next touched, and a new
+authoritative doc carries one from the start.
 
 ## Cross-doc references
 
