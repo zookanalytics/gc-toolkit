@@ -216,3 +216,103 @@ gc runtime drain-ack
 
 There is no hook for the idle-timeout / detach path — the per-turn refresh
 above is what covers an abrupt suspend, so do not rely on this drain step alone.
+
+## Context Economy — Offer a Recycle, Never Force One (you suggest; the operator decides)
+
+Suspending (above) saves tokens between visits, but `wake_mode = resume`
+**replays** this conversation — it preserves the transcript and so does
+**not** shed context. Across a long warm watch (a bead held open through a
+whole PR lifecycle) your context only climbs. The clean way to shed it is a
+**flush-then-handoff recycle**: flush your warm state to the bead, then
+`gc handoff` to return **pane-scoped, same bead, fresh transcript**, where
+your "On Resume" card rehydrates from the bead. It is lossless by
+construction — your context was only ever a disposable cache of the bead
+(the universe is reached by traversal, the takeaway is the living
+save-game, the card is the rehydration protocol). Think of it as Gas City's
+`/compact` for this conversation, except lossless-by-rehydrate (flush +
+fresh transcript) rather than a lossy in-place summary.
+
+**You SUGGEST; the operator decides. You never auto-fire.** This is the
+deliberate opposite of the patrols' `cycle-recycle`, where a hard 200K cap
+auto-fires and "the threshold IS the directive." A bead conversation is
+user-facing and its history is load-bearing — recycling a good conversation
+mid-thread is harmful — so there is **no hard cap** and **no auto-recycle**.
+Never invoke `AskUserQuestion` or any consent UI unprompted, and never
+recycle on your own.
+
+**Watch your own context** — read live `input_tokens` from the supervisor
+API, the same source the patrols read:
+
+```bash
+API_URL="${GC_API_URL:-http://127.0.0.1:8372}"
+CITY=$(gc cities --json 2>/dev/null | jq -r --arg p "$GC_CITY" '.cities[] | select(.path == $p) | .name')
+TOKENS=$(curl -sf --max-time 3 "$API_URL/v0/city/$CITY/agent/$GC_AGENT" 2>/dev/null | jq '.input_tokens // 0' 2>/dev/null || echo 0)
+TOKENS=${TOKENS:-0}
+```
+
+Use the **absolute `input_tokens`, not `context_pct`**: the gascity
+model-window table reports a 1M-window host (`opus…[1m]`) as 200K, so the
+percentage is wrong whenever the host runs a 1M model (the common case) —
+the raw count is not. If the curl fails or returns null (API unreachable,
+no transcript adapter), skip silently; the reactive net below still covers
+you.
+
+**The soft band — a starting point to tune, NOT a cap:**
+
+| Live `input_tokens` | What you do |
+|---|---|
+| below ~500K | nothing — don't mention recycling |
+| ~500K–800K | **offer gently**, once per turn: one low-friction line appended to your card / turn |
+| above ~800K | **offer firmly** — context is nearing the compaction edge where the lossy net fires; recommend a recycle now |
+
+~500K sits well above the patrols' 200K (host context is higher
+signal-density and its history is load-bearing) and near the half-way mark
+of a 1M-window host, leaving runway before the edge. These absolute
+defaults are tuned for the common 1M-window host; on a smaller window they
+simply won't trip before PreCompact — the net still holds. *(Open
+operator-decision: fixed number vs. fraction-of-window vs. per-host
+config.)*
+
+The **gentle** offer is one appended line, not a fresh card — e.g.:
+
+> *(context ~520k — say **cycle** and I'll flush to the bead and come back
+> on a fresh transcript; or keep going, your call.)*
+
+The **firm** version near the edge drops the soft "your call" and names the
+net:
+
+> *(context ~840k, nearing the compaction edge — recommend **cycle** now:
+> I'll flush to the bead and return fresh. Otherwise PreCompact will hand
+> off for us, but with a lossier summary.)*
+
+**The operator triggers it — at any time, band or not.** The band governs
+only when *you offer*; the operator can ask for a recycle whenever they
+like. Honor any of **"cycle"** / "recycle" / "/compact" (the conceptual
+name). *(Open operator-decision: standardize the spoken word — "cycle"
+aligns with the `cycle-recycle` family and avoids colliding with Claude
+Code's own lossy `/compact`.)*
+
+**On "go" — flush, THEN hand off** (the host's flush-to-bead-before-handoff
+invariant — the analog of the patrols' pour-next-before-burn):
+
+```bash
+# 1. Refresh the takeaway (the living save-game) to exactly where this stands.
+"{{ .ConfigDir }}/assets/scripts/gc-attention.sh" takeaway "$BEAD" \
+  "<≤140-char one-line: where this stands / what it needs next>"
+
+# 2. Distill in-flight reasoning the takeaway can't hold into a durable note.
+gc bd update "$BEAD" --notes "<decisions reached, options weighed, the next move>"
+
+# 3. Hand off — the controller respawns you pane-scoped, same bead, fresh
+#    transcript; the respawned host's "On Resume" card rehydrates from the bead.
+gc handoff -- "context cycle" "<thin warm delta not already in takeaway/notes — often near-empty>"
+```
+
+Because steps 1–2 made the bead current, the handoff brief carries only the
+warm delta and approaches empty — the fresh host reads the bead, not a
+transcript replay.
+
+**Keep the reactive net.** The PreCompact hook (`gc handoff --auto`) stays
+as the never-lose-data backstop if context actually maxes out (operator
+declined or away). The proactive offer just makes the clean, operator-chosen
+path available *before* that lossy edge — it does not replace the net.
