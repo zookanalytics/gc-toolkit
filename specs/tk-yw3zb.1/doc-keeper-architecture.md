@@ -14,10 +14,9 @@ codebase evolve.
 
 The brief is the set of authoritative briefs under `docs/gascity-*.md`,
 discovered by **globbing that path** — never a hand-maintained list (a
-list recorded twice is a list that drifts). Today the glob is four docs:
-`gascity-agents.md`, `gascity-local-patching.md`, `gascity-reference.md`,
-`gascity-routing-model.md`. A fifth dropped into `docs/gascity-*.md`
-(e.g. a future `gascity-packs.md`) enrolls automatically.
+list recorded twice is a list that drifts), and so never enumerated
+here. A new doc dropped into `docs/gascity-*.md` (e.g. a future
+`gascity-packs.md`) enrolls automatically; a removed one drops out.
 
 Each brief declares a **`## Scope`** section — its charter: the mandate
 it speaks on and the boundaries it deliberately leaves to adjacent docs
@@ -227,10 +226,10 @@ removed it**. doc-keeper now reads no config block:
   not a config field.
 - **No batching toggle** — batching was dropped wholesale (§3).
 
-The glob resolves today to the four briefs named in "The charter model"
-above. The earlier idealized names (`gas-city-reference.md`,
+The earlier idealized names (`gas-city-reference.md`,
 `gas-city-pack-v2.md`) and the `docs/principles/document-spec.md`
-central doc never existed in the repo and are not part of the set.
+central doc never existed in the repo, so the `docs/gascity-*.md` glob
+does not match them — they are not part of the set.
 
 ## 7. Cron registration
 
@@ -303,7 +302,7 @@ model above. It lands in stages:
 
 | Bead | Carries |
 |---|---|
-| `tk-yw3zb.10` | **Foundation (landed):** the `## Scope` convention in `docs/file-structure.md`, a `## Scope` charter on each of the 4 briefs, and this brief's re-model to the charter-driven model. |
+| `tk-yw3zb.10` | **Foundation (landed):** the `## Scope` convention in `docs/file-structure.md`, a `## Scope` charter on each `docs/gascity-*.md` brief, and this brief's re-model to the charter-driven model. |
 | `tk-o28ci` | doc-update bead-shape + worker conformance: a standard `task` bead + `task_kind=doc-update`, dropping the `extends` extension and the custom schema, with the unit of work = the change (§4). The keystone shape. |
 | `tk-ej8s1` | charter-driven audit re-model (§5): both audits glob `docs/gascity-*.md`, read each `## Scope`, and emit change-unit beads; fixes the formula doc-set/reference errors and reconciles `central-doc-inventory.md`. Blocked by `tk-o28ci`. |
 
