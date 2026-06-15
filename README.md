@@ -37,6 +37,7 @@ opinions rather than cloned directly.
 - `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`
 - `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
 - `docs/file-structure.md` — conventions for where docs and specs live in this pack
+- `docs/personas.md` — the persona/agent model: a persona is a skill (identity plus process-skills), and when a persona earns a standing addressable agent
 
 ## Usage
 

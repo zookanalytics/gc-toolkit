@@ -97,3 +97,12 @@ inject_fragments_append = [
 template = "mechanik"
 scope = "city"
 mode = "always"
+
+# architect — the first persona (epic tk-ae96t), instantiated as a standing
+# instance. on_demand: dormant until pinned/nudged or assigned an
+# architect-design/architect-review bead (not materialized otherwise). Scope is
+# city for this first build; rig-scoped architects are the Layer-3 follow-up.
+[[named_session]]
+template = "architect"
+scope = "city"
+mode = "on_demand"

@@ -1,0 +1,41 @@
+# architect — the architect persona, instantiated as a standing instance.
+#
+# This is the AGENT form of the architect persona (the persona itself is the
+# city-wide `architect` identity skill; see skills/architect/SKILL.md and
+# docs/personas.md "Persona vs. agent"). Most architect use is transient — any
+# session can wear the `architect` skill — so this agent exists only because the
+# two jobs that earn a standing instance do: PATROL for architectural drift and
+# GATE/review structural changes.
+#
+# Path A, realized natively for Gas City: the architect's process-skills
+# (architect-design, architect-review) live agent-local under
+# `agents/architect/skills/`. Gas City materializes agent-local skills only into
+# THIS agent's session (city-wide ∪ agent-local; agent-local wins) — so the
+# methods "ride with the persona" and never enter a plain worker's context.
+# That replaces the Claude-native `skills:` preload + `skillOverrides` trim the
+# mechanics write-up described: the `skills =` agent field is a deprecated
+# tombstone (ignored; hard error in v0.16) and Gas City does not author
+# `skillOverrides`, so agent-local placement is the load-bearing mechanism here.
+# (See specs/tk-ae96t.1/README.md and docs/personas.md "Mechanics".)
+#
+# Scope is city for this first build (gc-toolkit's own architect, sibling to
+# mechanik). The epic's "every rig gets a rig-scoped architect" is the Layer-3
+# cross-rig follow-up (Gas City import) — out of scope for this bead.
+
+scope = "city"
+
+# Fresh per engagement. The architect's continuity lives in the artifact it
+# owns — docs/architecture.md — not in a warm session. Each design/review is a
+# discrete task with its own context (the bead, the diff, the arch doc), so a
+# fresh context per wake keeps the singleton from accumulating unbounded state.
+wake_mode = "fresh"
+idle_timeout = "2h"
+work_dir = ".gc/agents/architect"
+
+nudge = "Re-establish the shape first — read docs/architecture.md (or infer it from the code if absent) — then handle the design/review at hand. Wear the architect identity; engage architect-design to settle structure, architect-review to assess a change."
+
+# Dormant by default: the architect never claims pool work and never auto-spawns
+# to satisfy pool demand. It materializes on demand — operator pin/nudge, or an
+# architect-design / architect-review bead assigned to it. (The autonomous
+# drift-patrol loop and architect-bead routing are a follow-up, not this bead.)
+work_query = "printf '[]'"
