@@ -9,10 +9,8 @@ description: How `gc sling`, direct assignee, and `gc sling --reassign` differ �
 
 **Mandate.** How work is routed to agents: how a bead reaches the worker
 that will act on it, and — the doc's distinctive charge — which routing
-field each path of delivery is responsible for setting (`assignee` for
-direct, named delivery; `gc.routed_to` for the pool). It is the
-authority on that field-level contract, settled by the maintainer's
-PR #1736 ruling.
+field each delivery path is responsible for setting. It is the authority
+on that field-level contract.
 
 **Boundaries.** This doc covers *how* work moves between agents, not
 *who* the agents are — agent variants, identity, and lifecycle live in

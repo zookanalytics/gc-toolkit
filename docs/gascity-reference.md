@@ -13,11 +13,13 @@ this index.
 
 ## Scope
 
-**Mandate.** An index into the canonical Gas City documentation at
-https://docs.gascityhall.com/ — grouped by topic — plus
-[the bar](#the-bar) gc-toolkit applies before adding a new
-`docs/gascity-*.md` doc, the local supplements that clear that bar, and
-the known gaps in upstream coverage.
+**Mandate.** The grounding in canonical Gas City documentation that the
+rest of gc-toolkit's Gas City material is built on — the reference point
+that ties this toolkit back to the upstream source of truth at
+https://docs.gascityhall.com/, which the sibling `docs/gascity-*.md`
+briefs extend rather than restate. In that role it also holds
+[the bar](#the-bar) gc-toolkit applies before standing up a Gas City
+brief of its own, and marks where upstream coverage falls short.
 
 **Boundaries.** This file is an *index*, not a summary: it links to
 upstream docs and does not paraphrase or mirror them. When a topic

@@ -5,8 +5,10 @@ description: Where gc-toolkit writes documentation and specs, with rules for doc
 
 # File-Structure Conventions
 
-This document describes where gc-toolkit writes documentation. It
-does not apply to customer-facing documentation. Two rules define
+This document describes how gc-toolkit writes documentation — the
+conventions its agents, personas, and skills follow wherever they write
+it, including documentation they write into other repositories. It does
+not apply to customer-facing documentation. Two rules define
 the approach:
 
 - If the document says what's true now, file it in `docs/` and keep
@@ -16,16 +18,18 @@ the approach:
 
 ## Scope
 
-**Mandate.** The conventions that decide where gc-toolkit's own
-documentation and specs are filed, and how they are named, framed, and
+**Mandate.** The conventions that decide where the documentation and
+specs gc-toolkit writes are filed, and how they are named, framed, and
 cross-referenced — the central-versus-local tier split and the
 discipline that keeps each tier's promise: central docs true, local docs
 preserved as history.
 
-**Boundaries.** This governs gc-toolkit's *internal* docs, not
-customer-facing documentation. It sets where a doc goes and how it is
-framed — never what any individual doc must *say*; that is the doc's own
-content, governed by that doc's [`## Scope`](#the-scope-section).
+**Boundaries.** This governs how gc-toolkit writes documentation — what
+its agents, personas, and skills produce, wherever they write it,
+including into other repositories — not customer-facing documentation. It
+sets where a doc goes and how it is framed — never what any individual doc
+must *say*; that is the doc's own content, governed by that doc's
+[`## Scope`](#the-scope-section).
 
 ## Use Cases
 
@@ -285,12 +289,12 @@ for representing**. It has two parts:
   the adjacent material lives instead.
 
 Scope is the doc's own statement of what "true and complete" means for
-it. A reader uses it to decide whether a fact belongs here; the
-doc-keeper and a human maintainer use it as the thing the doc is judged
-against — is every claim still true *within this mandate* (no drift),
-and is everything inside the mandate actually captured (no gap)? The
-check is against the charter the doc declares, not against a diff of
-git history.
+it. A reader uses it to decide whether a fact belongs here; whatever
+holds the doc to account — an agent, an audit, a human maintainer — uses
+it as the thing the doc is judged against: is every claim still true
+*within this mandate* (no drift), and is everything inside the mandate
+actually captured (no gap)? The check is against the charter the doc
+declares, not against a diff of git history.
 
 ### What makes a good scope
 
@@ -326,33 +330,46 @@ table of contents.
 
 ### A calibration example
 
-[gascity-agents.md](gascity-agents.md)'s scope is the reference for a
-good one. Its mandate names its subjects concretely — the agent
-*variants* (named singletons, pool workers, threads, the patrol overlay)
-and the contracts for each — and states the doc's distinctive angle, the
-corners that surface only when variants mix, without listing the doc's
-section headings. Its boundaries draw a crisp line — *who* the agents
-are, not *how* work moves between them (that is
-[gascity-routing-model.md](gascity-routing-model.md)) — and disclaim the
-adjacent material (the upstream primitives, prompt-template authoring,
-single-agent role behavior), so an audit reads those absences as
-deliberate, not as gaps. It is kept exemplary on purpose; read the live
-section for the current wording.
+The point is the *shape*, so this example is deliberately contrived —
+anchoring the standard to a real file would only make the standard drift
+as that file is improved. Suppose a doc owns *how a project cuts
+releases*. A good scope for it might read:
+
+> **Mandate.** How a release is produced and published — the stages a
+> change moves through from a green `main` to a tagged, announced
+> artifact, and the rule that holds across all of them: nothing ships
+> that `main` hasn't already proven. It is the authority on that
+> *sequence* and its gates, not on any single tool that implements a
+> stage.
+>
+> **Boundaries.** This covers *cutting* a release, not deciding what goes
+> *into* one — feature selection and changelog content belong with the
+> work that produces them. It does not document the CI system's own
+> configuration, and it treats the artifact store as a downstream given:
+> named, not specified.
+
+Read it for the moves, not the subject. The mandate names concrete
+subjects — the stages, the gates — and states a distinctive angle (the
+invariant that ties them together) without reciting the doc's section
+headings. The boundaries draw a crisp line — cutting a release versus
+filling one — and disclaim the adjacent material, so an absence reads as
+deliberate, not as a gap. A live doc's real scope is always the better
+calibration; this one only shows the form.
 
 ### How a scope is maintained
 
-A scope is **stable**. It is revised only when the doc is
-*re-chartered* — when its mandate or boundaries genuinely shift — not as
-the doc's content churns. Content moves whenever the world does; the
-charter that governs it should not move with it.
+A scope is **stable**, but not frozen. It evolves in two cases: when the
+doc is *re-chartered* — its mandate or boundaries genuinely shift — and
+when the scope itself has become *inaccurate*, no longer describing what
+the doc is responsible for. What it does *not* track is ordinary content
+churn: the content beneath the charter moves whenever the world does,
+while the charter that governs it stays put.
 
-The doc-keeper **reads** the scope — it is the measuring stick the audit
-holds the doc against — but it does not author or rewrite it.
+**Agents read** the scope as the measuring stick — it is what a doc's
+claims are held against to decide whether the doc is true and complete,
+whatever process is doing the reading. They do not author or rewrite it.
 Re-chartering is a deliberate human editorial act, the same kind of
 decision as [adding a new central doc](#drafting-and-adoption).
-
-Existing docs grow a `## Scope` as they are next touched, and a new
-authoritative doc carries one from the start.
 
 ## Cross-doc references
 

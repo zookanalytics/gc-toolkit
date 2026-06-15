@@ -13,10 +13,11 @@
 
 ## Scope
 
-**Mandate.** The recommended process for a city that must carry local
-fixes against a `gascity` rig — how to decide whether to patch at all,
-carry a patch well while minimizing its tax, route it upstream, and
-retire it once upstream lands a fix.
+**Mandate.** The recommended process for a city running a *fork* of
+`gascity` that must carry local fixes ahead of — or instead of —
+upstream: how to decide whether to patch at all, carry the patch well on
+the fork while minimizing its tax, route it upstream, and retire it once
+upstream lands a fix.
 
 **Boundaries.** This is a workflow doc about *carrying* patches, not a
 reference for `gascity`'s own internals or behavior (that is
