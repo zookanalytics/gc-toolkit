@@ -108,8 +108,11 @@ then **proven by building the architect** (tk-ae96t.1). Full findings:
   portable **identity** skill stays city-wide on purpose: it's the "wear the
   persona" entry point any session can load.
 - **Assuming a persona.** Transiently, load the identity skill (`/architect`) and
-  it rides the session. As a standing instance, an agent definition *is* the persona
-  — it wears the identity and has its process-skills materialized.
+  it rides the session — the lens, not the methods: the `architect-design` /
+  `architect-review` skills are agent-local, so a transient wearer reasons in
+  those modes directly rather than loading them. As a standing instance, an agent
+  definition *is* the persona — it wears the identity and has its process-skills
+  materialized.
 
 > The build added one lesson worth keeping: a framework may offer a *better* native
 > scoping primitive than the generic mechanics suggest. Prefer it, and record the
