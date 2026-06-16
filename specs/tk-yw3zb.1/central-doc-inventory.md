@@ -30,15 +30,18 @@ description: The original scout survey of gc-toolkit central-tier doc candidates
 >   learning = one atomic bead/PR (it may touch several briefs); a standard
 >   `task` bead with `task_kind=doc-update`, no custom schema.
 >
-> Still current below: the tiering *method* (§"Method") and its application to
-> agent templates and memory entries (§2), and the migration parking lot for
-> `docs/design/` and `docs/research/` (§1c, §1d, §3b). The §1a/§1b top-level
-> `docs/` rows are **not** live — they preserve the original survey's idealized
-> names (`docs/gas-city-reference.md`, `docs/gas-city-pack-v2.md`,
-> `docs/principles/document-spec.md`); the bullet above corrects them to the
-> real `docs/gascity-{agents,local-patching,reference,routing-model}.md` brief
-> set, so do not read those rows as a current account of which `docs/` files
-> exist.
+> Read the whole survey as history, not instruction. Where the tiering
+> *method* (§"Method") and its application to agent templates and memory
+> entries (§2), and the migration parking lot for `docs/design/` and
+> `docs/research/` (§1c, §1d, §3b), still describe real surfaces, consult them
+> as the original scout's reasoning — not as a current account of how
+> doc-keeper works. The §1a/§1b top-level `docs/` rows are **not** live and
+> never were: they preserve the original survey's idealized names
+> (`docs/gas-city-reference.md`, `docs/gas-city-pack-v2.md`,
+> `docs/principles/document-spec.md`), which never existed in the repo; the
+> bullet above maps them to the real
+> `docs/gascity-{agents,local-patching,reference,routing-model}.md` brief set,
+> so do not read those rows as a current account of which `docs/` files exist.
 
 Each row below classifies an existing artifact against
 `docs/file-structure.md`'s two-tier criteria (durable + authoritative + owned)
@@ -70,15 +73,15 @@ For each item, asked the four file-structure.md questions:
 |---|---|---|---|---|
 | `docs/file-structure.md` | central | gc-toolkit | organic (touched in same PR as the convention change) | **keep central; doc-keeper-tracked** |
 | `docs/roadmap.md` | central | mechanik | organic (touched as roadmap state moves) + periodic drift-audit on referenced features/beads | **keep central; doc-keeper-tracked** |
-| `docs/gas-city-reference.md` (1600 lines) | central | gc-toolkit ⨯ gascity | drift-audit (gascity HEAD changes invalidate sections) | **keep central; doc-keeper-tracked; "agent brief"** |
-| `docs/gas-city-pack-v2.md` (291 lines) | central | gc-toolkit ⨯ gascity | drift-audit | **keep central; doc-keeper-tracked; "agent brief"** |
+| `docs/gas-city-reference.md` (1600 lines) — *idealized name; never existed* | central | gc-toolkit ⨯ gascity | drift-audit (gascity HEAD changes invalidate sections) | **keep central; doc-keeper-tracked; "agent brief"** |
+| `docs/gas-city-pack-v2.md` (291 lines) — *idealized name; never existed* | central | gc-toolkit ⨯ gascity | drift-audit | **keep central; doc-keeper-tracked; "agent brief"** |
 | `docs/gascity-local-patching.md` (218 lines) | central | gc-toolkit | organic (touched as local-patching strategy evolves) | **keep central; doc-keeper-tracked; "agent brief"** |
 
 ### 1b. `docs/principles/`
 
 | Path | Tier | Owner | Keep-current mechanism | Decision |
 |---|---|---|---|---|
-| `docs/principles/document-spec.md` (710 lines) | central | gc-toolkit | organic + memory-audit (mechanik observations may surface principle drift) | **keep central; doc-keeper-tracked** |
+| `docs/principles/document-spec.md` (710 lines) — *idealized name; never existed* | central | gc-toolkit | organic + memory-audit (mechanik observations may surface principle drift) | **keep central; doc-keeper-tracked** |
 
 ### 1c. `docs/design/`
 
