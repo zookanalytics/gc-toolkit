@@ -157,9 +157,10 @@ This is plain polecat work, expressed in plain Gas City primitives:
 
 > **Build status.** The worker leg is being conformed to this model by
 > the machinery split filed under `tk-yw3zb` (§8). The earlier
-> `mol-doc-update` formula used `extends` + a custom bead schema + a
-> one-doc scope guard; the change-unit model drops all three — a change
-> that legitimately spans two briefs is one atomic PR, not two beads.
+> `mol-doc-update` formula (now removed) used `extends` + a custom bead
+> schema + a one-doc scope guard; the change-unit model drops all three —
+> a change that legitimately spans two briefs is one atomic PR, not two
+> beads.
 
 ## 5. Audit-feed formulas
 
