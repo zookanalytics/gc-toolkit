@@ -157,9 +157,10 @@ This is plain polecat work, expressed in plain Gas City primitives:
 
 > **Build status.** The worker leg is being conformed to this model by
 > the machinery split filed under `tk-yw3zb` (§8). The earlier
-> `mol-doc-update` formula used `extends` + a custom bead schema + a
-> one-doc scope guard; the change-unit model drops all three — a change
-> that legitimately spans two briefs is one atomic PR, not two beads.
+> `mol-doc-update` formula (now removed) used `extends` + a custom bead
+> schema + a one-doc scope guard; the change-unit model drops all three —
+> a change that legitimately spans two briefs is one atomic PR, not two
+> beads.
 
 ## 5. Audit-feed formulas
 
@@ -173,17 +174,21 @@ body, deduped on the change.
 
 ### 5a. drift-audit (`mol-doc-keeper-drift-audit`) — keep each brief *true*
 
-Fires on cron. For each brief, given the upstream movement in the repos
-it tracks (gascity at its remote `main`, gc-toolkit at `origin/main`,
-since the last audit baseline), it asks the charter question: **is the
-doc still true within its `## Scope`?** A change that invalidates a
-claim the doc makes *inside its mandate* is drift, and the audit files
-one change-unit bead citing the triggering commits as provenance. The
-audit does not write the edit — it cites the change and names the
-affected brief(s); the worker reads the cited commits and writes the
-fix. (How the audit derives "relevant to this scope" from a prose
-`## Scope` — versus the retired hardcoded per-doc source-glob table — is
-the open design question in §9, owned by the `.6` re-model.)
+Fires on cron. For each brief, it verifies the brief's load-bearing
+claims against the *current* state of the upstream it tracks (gascity at
+its remote `main`, gc-toolkit at `origin/main`) and asks the charter
+question: **is the doc still true within its `## Scope`?** A change that
+invalidates a claim the doc makes *inside its mandate* is drift, and the
+audit files one change-unit bead citing the triggering commits as
+provenance. The audit does not write the edit — it cites the change and
+names the affected brief(s); the worker reads the cited commits and
+writes the fix. Relevance is derived by the audit agent reading the prose
+`## Scope` semantically: the scope names the upstream surface the brief is
+accountable for, and that is the audit's only relevance signal. There is
+no hardcoded per-doc source-glob table (the model the operator rejected)
+and no stored commit-SHA baseline — the audit is **stateless**, checking
+claims against current upstream rather than diffing a saved cursor. (A
+future scope-derived relevance *hint* is noted in §9.)
 
 Sub-bead `tk-yw3zb.6` (re-model tracked by §8).
 
@@ -304,26 +309,33 @@ model above. It lands in stages:
 |---|---|
 | `tk-yw3zb.10` | **Foundation (landed):** the `## Scope` convention in `docs/file-structure.md`, a `## Scope` charter on each `docs/gascity-*.md` brief, and this brief's re-model to the charter-driven model. |
 | `tk-o28ci` | doc-update bead-shape + worker conformance: a standard `task` bead + `task_kind=doc-update`, dropping the `extends` extension and the custom schema, with the unit of work = the change (§4). The keystone shape. |
-| `tk-ej8s1` | charter-driven audit re-model (§5): both audits glob `docs/gascity-*.md`, read each `## Scope`, and emit change-unit beads; fixes the formula doc-set/reference errors and reconciles `central-doc-inventory.md`. Blocked by `tk-o28ci`. |
+| `tk-ej8s1` | charter-driven audit re-model (§5): both audits glob `docs/gascity-*.md`, read each `## Scope`, and emit change-unit beads; fixes the formula doc-set/reference errors and reconciles `central-doc-inventory.md`. Ordered after `tk-o28ci`. |
 
-The `.5`/`.6`/`.7` formulas are re-modeled by `tk-o28ci` / `tk-ej8s1`;
-until those land, the formulas on this branch still implement the
-pre-charter (source-glob + custom-schema) shape, so this brief leads the
-implementation by design.
+The `.5`/`.6`/`.7` formulas are re-modeled by `tk-o28ci` / `tk-ej8s1`,
+and that re-model has now landed: `tk-o28ci` deleted the bespoke
+`mol-doc-update` worker formula (a doc-update is plain `mol-polecat-work`,
+§4), and `tk-ej8s1` (this change) re-modeled both audit formulas to the
+charter-driven shape (§5) — glob `docs/gascity-*.md`, read each
+`## Scope`, stateless, emitting change-unit beads. The pre-charter shape
+(per-doc source-glob table + custom bead schema + audit-state baseline) is
+gone from the formulas, so this brief and the formulas it describes are
+now consistent.
 
 ## 9. Open questions for mechanik review
 
-- **Deriving scope-relevance from a prose `## Scope`** (owned by
-  `tk-ej8s1`, §5a). The retired model used a hardcoded per-doc
-  source-glob table — the thing the operator rejected. The charter model
-  needs a non-hardcoded way for an audit to decide "this upstream change
-  / this learning is relevant to *this* brief's scope." Candidates:
-  (a) grep upstream commit diffs / memory entries for salient terms
-  drawn from the doc's `## Scope`; (b) a coarse audit (any upstream
-  movement) that hands the true-within-scope / in-scope-but-missing
-  judgment to the worker reading the `## Scope`; (c) a lightweight,
-  scope-derived (not hand-maintained) relevance hint. This shapes both
-  audits and the per-doc baseline/state mechanism.
+- **Deriving scope-relevance from a prose `## Scope`** — *resolved by
+  `tk-ej8s1` (§5a); kept here as the decision plus its one open
+  refinement.* The retired model used a hardcoded per-doc source-glob
+  table — the thing the operator rejected. The landed model is the coarse
+  option: a **stateless** audit where the agent reads each brief's prose
+  `## Scope` and judges relevance semantically — the scope names the
+  upstream surface the brief tracks, so neither a source-glob table nor a
+  per-doc baseline/state is needed. The only *future* refinement (not
+  blocking, not yet built) is whether to add a lightweight, scope-derived
+  relevance *hint* — e.g. grepping upstream diffs / memory entries for
+  salient terms drawn from the `## Scope` — to narrow the agent's reading
+  on large upstream histories. That would stay a heuristic over a
+  stateless audit, never a reintroduced baseline.
 - **A `gascity-packs.md` brief?** The operator flagged packs as a topic
   of particular interest worth its own brief. It is not yet written; if
   added under `docs/gascity-*.md` with a `## Scope`, it enrolls in both

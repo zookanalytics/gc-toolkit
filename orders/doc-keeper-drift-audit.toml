@@ -3,11 +3,13 @@
 # specs/tk-yw3zb.1/doc-keeper-architecture.md §7.
 #
 # Fires the mol-doc-keeper-drift-audit formula (sub-bead .6) on a 24h
-# cooldown. One fire = one audit run: a polecat scans the tracked
-# agent-brief docs against the current HEADs of the repos they track,
-# files zero-or-more `doc-update` beads (schema per sub-bead .5), and
-# drains. Those beads flow through the shared mol-doc-update worker →
-# refinery pipeline exactly like an organic or memory-audit update.
+# cooldown. One fire = one audit run: a polecat globs the agent-brief
+# docs (docs/gascity-*.md), judges each against its `## Scope` charter
+# given current upstream movement, files zero-or-more change-unit
+# `doc-update` beads, and drains. Each bead is a standard task bead
+# (task_kind=doc-update) routed to the polecat pool; a worker picks it
+# up under mol-polecat-work and the refinery opens one small PR to main,
+# exactly like an organic or memory-audit update.
 #
 # ── Why an in-pack order, not a hand-registered city cron ───────────────
 # Per the epic rescope (2026-06-12) enablement IS the pack being
@@ -32,10 +34,10 @@
 #   • a BARE pool ("gc-toolkit.polecat") qualifies within each importing
 #     rig to that rig's OWN polecat pool, with the wisp in that same
 #     rig's store → always self-consistent.
-# Hence rig scope + bare pool. The tracked-doc table inside the formula
-# is the gc-toolkit agent brief; in an importer that does not carry
-# those docs every entry is skipped, so the run there is a cheap,
-# idempotent no-op (it files nothing) rather than an error.
+# Hence rig scope + bare pool. The formula globs docs/gascity-*.md for
+# the gc-toolkit agent brief; in an importer that carries no such docs
+# the glob is empty, so the run there is a cheap, idempotent no-op (it
+# files nothing) rather than an error.
 #
 # ── Pool-wake prerequisite (cross-bead) ────────────────────────────────
 # A formula routed to a scale-from-zero pool only wakes a worker when
