@@ -219,41 +219,35 @@ above is what covers an abrupt suspend, so do not rely on this drain step alone.
 
 ## Context Economy — Offer a Recycle, Never Force One
 
-A warm host's context only climbs — `wake_mode = resume` **replays** the
-transcript, it does not shed it. To shed it, **recycle**: flush warm state to
-the bead, then `gc handoff` → **pane-scoped, same bead, fresh transcript** (the
-"On Resume" card rehydrates from the bead, so *progress* is lossless; only live
-continuity drops). **`/compact`** is the lighter, continuity-preserving alternative.
+A warm host's context only climbs: `wake_mode = resume` **replays** the
+transcript, it doesn't shed it. To shed it, **recycle** — flush warm state to
+the bead, then `gc handoff` for a fresh, same-bead transcript (the "On Resume"
+card rehydrates progress from the bead; only live continuity drops). `/compact`
+is the lighter, continuity-preserving alternative.
 
-**You SUGGEST; the operator decides — never auto-fire, never invoke a consent
-UI unprompted.** There is no hard cap; the band below only governs when you offer.
-
-Watch your context with the band reporter — it reads your own transcript tail
-(the `[1m]`-window detection and 200K fail-safe live in the script):
+**You SUGGEST; the operator decides** — never auto-fire or pop a consent UI
+unprompted, and there is no hard cap. The band (read from your own transcript
+tail; `[1m]` detection and the 200K fail-safe live in the script) only governs
+when you offer:
 
 ```bash
 "{{ .ConfigDir }}/assets/scripts/gc-context-size.sh"
 # → fill=<n> window=<n> pct=<n> soft=<n> edge=<n> band=<below|offer|edge|unknown> fill_h=~Nk
 ```
 
-- `below` (or `unknown` = no transcript yet) — say nothing about recycling.
-- `offer` — offer **gently**: one low-friction line that turn naming `fill_h` and the `cycle` option, left as their call.
-- `edge` — nearing the compaction edge: offer **firmly**, recommend recycling now.
+- `below` / `unknown` — stay silent.
+- `offer` — offer gently: one line naming `fill_h` and the `cycle` option.
+- `edge` — near the compaction edge: offer firmly, recommend recycling now.
 
-The operator can trigger a recycle anytime, band or not. Treat **"cycle"** as
-the fresh-restart recycle and **`/compact`** as the lighter
-continuity-preserving path — different actions, not synonyms.
-
-**On "cycle" — flush, THEN hand off** (flush-to-bead-before-handoff):
+On **"cycle"** (the operator can ask anytime), flush THEN hand off:
 
 ```bash
 "{{ .ConfigDir }}/assets/scripts/gc-attention.sh" takeaway "$BEAD" \
   "<≤140-char: where this stands / what it needs next>"
 gc bd update "$BEAD" --notes "<in-flight reasoning the takeaway can't hold>"
 gc handoff "context cycle" "<thin warm delta — often near-empty>"
-# fallback if a handoff returns without restarting: gc session reset "$GC_ALIAS"
+# fallback if handoff returns without restarting: gc session reset "$GC_ALIAS"
 ```
 
-A bumped `$GC_CONTINUATION_EPOCH` confirms the transcript reset (constant across
-ordinary resume wakes). PreCompact (`gc handoff --auto`) is the never-lose-data
-backstop if context maxes out with the operator away.
+`$GC_CONTINUATION_EPOCH` bumps on reset. PreCompact (`gc handoff --auto`) is the
+never-lose-data backstop if context maxes out with the operator away.

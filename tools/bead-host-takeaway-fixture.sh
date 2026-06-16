@@ -13,6 +13,8 @@
 #   • tell the host to refresh gc.takeaway on each meaningful turn — takeaway-
 #     only (the per-turn note ritual is gone; host is the default --by); AND
 #   • tell it to refresh the takeaway before an intentional drain; AND
+#   • tell it to flush the takeaway before a context-recycle handoff (the
+#     "cycle" flush-before-handoff sequence); AND
 #   • justify the per-turn cadence — there is no runtime drain hook for the hard
 #     idle-timeout/detach case, so per-turn freshness is what survives a suspend.
 #
@@ -46,10 +48,11 @@ echo "── the host stamps the board takeaway via the wrapper (takeaway-only) 
 # call shape, not the encapsulated metadata fields.
 # shellcheck disable=SC2016  # intentional: match the LITERAL "$BEAD" in the prompt text, no expansion
 has "prompt refreshes the takeaway via the gc-attention wrapper" 'gc-attention.sh" takeaway "$BEAD"' "$PM"
-# Both the per-turn block AND the drain block must invoke the wrapper.
+# The per-turn block, the drain block, AND the cycle-flush (flush-before-handoff)
+# block must each invoke the wrapper.
 # shellcheck disable=SC2016  # intentional: the literal "$BEAD" is prompt text, not expanded here
 CALLS="$(grep -cF 'gc-attention.sh" takeaway "$BEAD"' "$PROMPT_MD" || true)"
-eq "per-turn AND drain blocks each invoke the takeaway wrapper" "2" "$CALLS"
+eq "per-turn, drain, AND cycle-flush blocks each invoke the takeaway wrapper" "3" "$CALLS"
 # Takeaway-only: the per-turn note ritual is gone. Match --note as a FLAG (not
 # the longer gc-bd --notes capability, which stays in the Communication list).
 NOTE_FLAG_HITS="$(grep -nE -- '--note([^s]|$)' "$PROMPT_MD" || true)"
