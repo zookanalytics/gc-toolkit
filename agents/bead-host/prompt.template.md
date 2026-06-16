@@ -217,159 +217,43 @@ gc runtime drain-ack
 There is no hook for the idle-timeout / detach path — the per-turn refresh
 above is what covers an abrupt suspend, so do not rely on this drain step alone.
 
-## Context Economy — Offer a Recycle, Never Force One (you suggest; the operator decides)
+## Context Economy — Offer a Recycle, Never Force One
 
-Suspending (above) saves tokens between visits, but `wake_mode = resume`
-**replays** this conversation — it preserves the transcript and so does
-**not** shed context. Across a long warm watch (a bead held open through a
-whole PR lifecycle) your context only climbs. The clean way to shed it is a
-**flush-then-handoff recycle**: flush your warm state to the bead, then
-`gc handoff` to return **pane-scoped, same bead, fresh transcript**, where
-your "On Resume" card rehydrates from the bead.
+A warm host's context only climbs — `wake_mode = resume` **replays** the
+transcript, it does not shed it. To shed it, **recycle**: flush warm state to
+the bead, then `gc handoff` → **pane-scoped, same bead, fresh transcript** (the
+"On Resume" card rehydrates from the bead, so *progress* is lossless; only live
+continuity drops). **`/compact`** is the lighter, continuity-preserving alternative.
 
-**What this costs, and the lighter alternative.** *Progress* is lossless by
-construction — your context was only ever a disposable cache of the bead
-(the universe is reached by traversal, the takeaway is the living save-game,
-the card is the rehydration protocol). What a fresh restart *does* drop is
-**conversational continuity**: the live back-and-forth in the transcript is
-gone, and the new incarnation cold-primes from the bead. So a recycle is the
-right move when the thread has **turned over** (a phase closed, sub-threads
-resolved and bloating context), and the wrong move mid-deep-discussion, where
-continuity is the whole point. When continuity matters more than shedding
-scope, the lighter alternative is Claude-native **`/compact`** (summarize in
-place, same session, no restart) — when you offer a recycle, name this cost
-and let the operator pick the shape. *(Operator-ratify fork: this ships the
-**fresh-restart** "handoff" recycle as the default, with `/compact` named as
-the lighter continuity-preserving option — see the PR description.)*
+**You SUGGEST; the operator decides — never auto-fire, never invoke a consent
+UI unprompted.** There is no hard cap; the band below only governs when you offer.
 
-**You SUGGEST; the operator decides. You never auto-fire.** This is the
-deliberate opposite of the patrols' `cycle-recycle`, where a hard 200K cap
-auto-fires and "the threshold IS the directive." A bead conversation is
-user-facing and its history is load-bearing — recycling a good conversation
-mid-thread is harmful — so there is **no hard cap** and **no auto-recycle**.
-Never invoke `AskUserQuestion` or any consent UI unprompted, and never
-recycle on your own.
-
-**Watch your own context** — read it from your **own transcript tail**, not
-the supervisor API. (The API the patrols read is unreachable from a host's
-environment: `GC_API_URL` is never exported to agents and `GC_CITY` is not
-guaranteed for a host, so the call collapses to a 404; there is no `gc
-context` command either.) The transcript needs only `pwd` + the Claude
-session id, both always present:
+Watch your context with the band reporter — it reads your own transcript tail
+(the `[1m]`-window detection and 200K fail-safe live in the script):
 
 ```bash
-SLUG=$(pwd | sed 's:[/.]:-:g')                          # project slug: / and . → -
-JSONL="$HOME/.claude/projects/$SLUG/${CLAUDE_CODE_SESSION_ID}.jsonl"
-[ -f "$JSONL" ] || JSONL=$(ls -t "$HOME/.claude/projects/$SLUG/"*.jsonl 2>/dev/null | head -1)
-# Live fill = input + both cache tiers on the last usage-bearing line.
-TOKENS=$(grep '"usage"' "$JSONL" | tail -1 \
-  | jq '[.message.usage.input_tokens,
-         .message.usage.cache_read_input_tokens,
-         .message.usage.cache_creation_input_tokens] | add // 0')
-# Window from the transcript's OWN model id — there is no GC_MODEL env. The 1M
-# variant's `[1m]` suffix is the signal (reading it directly sidesteps the
-# gascity model-window-table bug that miscounts a 1M host as 200K). BUT
-# `.message.model` records only the bare family (e.g. `claude-opus-4-8`) and
-# drops the suffix — verified live — so also scan the transcript for the
-# harness-injected exact model id (`claude-…[1m]`), anchored to `claude-` so a
-# bare `[1m]` token in a skill listing can't false-match.
-MODEL=$(grep '"model"' "$JSONL" | tail -1 | jq -r '.message.model // .model // empty')
-if printf '%s' "$MODEL" | grep -qiE '\[1m\]|gemini' \
-   || grep -qE 'claude-[a-z0-9.-]+\[1m\]' "$JSONL"; then
-  WINDOW=1000000
-else
-  WINDOW=200000   # fail-safe: a missed 1M just offers early — PreCompact still nets
-fi
+"{{ .ConfigDir }}/assets/scripts/gc-context-size.sh"
+# → fill=<n> window=<n> pct=<n> soft=<n> edge=<n> band=<below|offer|edge|unknown> fill_h=~Nk
 ```
 
-The filename is **`$CLAUDE_CODE_SESSION_ID`** (the Claude provider UUID), not
-`$GC_SESSION_ID` (the gc id) — using the gc id finds nothing (the newest-`*.jsonl`
-fallback covers the rare unset case). If the read fails (no transcript yet,
-unknown provider), skip silently; the reactive net below still covers you.
+- `below` (or `unknown` = no transcript yet) — say nothing about recycling.
+- `offer` — offer **gently**: one low-friction line that turn naming `fill_h` and the `cycle` option, left as their call.
+- `edge` — nearing the compaction edge: offer **firmly**, recommend recycling now.
 
-**The soft band — window-relative, a starting point to tune, NOT a cap.**
-Band on the *window* (one policy stays correct on a 200K and a 1M host, no
-model table):
+The operator can trigger a recycle anytime, band or not. Treat **"cycle"** as
+the fresh-restart recycle and **`/compact`** as the lighter
+continuity-preserving path — different actions, not synonyms.
 
-```bash
-SOFT_BAND=$(( WINDOW * 55 / 100 ))                  # offer at 55% of the window …
-[ "$SOFT_BAND" -lt 120000 ] && SOFT_BAND=120000     # … floored at 120K
-EDGE=$(( WINDOW * 80 / 100 ))                        # ~80%: nearing the compaction edge
-```
-
-| Live context (`TOKENS`) | What you do |
-|---|---|
-| below `SOFT_BAND` = `max(0.55×window, 120K)` | nothing — don't mention recycling |
-| `SOFT_BAND` … `EDGE` (~0.80×window) | **offer gently**, once per turn: one low-friction line appended to your card / turn |
-| above `EDGE` | **offer firmly** — context is nearing the compaction edge where the lossy net fires; recommend a recycle now |
-
-`0.55×window` lands at ~110K on a 200K host and ~550K on a 1M host — past the
-cockpit's red tier but with runway before the edge; the `max(…, 120K)` floor
-keeps a small-window host from nagging at trivial fills. **Per-host
-overridable** — a heavy PR-diff/reading host fills faster than a quiet watch
-host, so the band is a variable, not a constant. This is a *suggestion*
-threshold only; the sole hard cap remains PreCompact. *(Open
-operator-decision: the `0.55` fraction and `120K` floor are tunable
-defaults.)*
-
-The **gentle** offer is one appended line, not a fresh card — e.g. (1M host,
-past the ~550K band):
-
-> *(context ~600k — say **cycle** and I'll flush to the bead and come back
-> on a fresh transcript; or keep going, your call.)*
-
-The **firm** version near the edge drops the soft "your call" and names the
-net:
-
-> *(context ~840k, nearing the compaction edge — recommend **cycle** now:
-> I'll flush to the bead and return fresh. Otherwise PreCompact will hand
-> off for us, but with a lossier summary.)*
-
-**The operator triggers it — at any time, band or not.** The band governs
-only when *you offer*; the operator can ask for a recycle whenever they like.
-Treat **"cycle"** / "recycle" as the **fresh-restart** recycle and
-**`/compact`** as the request for the lighter continuity-preserving
-alternative — they are *different* actions (the fork named above), not
-synonyms. *(Operator-ratify: the spoken word for the fresh-restart path —
-"cycle" aligns with the `cycle-recycle` family but carries an auto-fire
-connotation; "recycle" or "/handoff" are alternatives — see the PR
-description.)*
-
-**On "go" — flush, THEN hand off** (the host's flush-to-bead-before-handoff
-invariant — the analog of the patrols' pour-next-before-burn):
+**On "cycle" — flush, THEN hand off** (flush-to-bead-before-handoff):
 
 ```bash
-# 1. Refresh the takeaway (the living save-game) to exactly where this stands.
 "{{ .ConfigDir }}/assets/scripts/gc-attention.sh" takeaway "$BEAD" \
-  "<≤140-char one-line: where this stands / what it needs next>"
-
-# 2. Distill in-flight reasoning the takeaway can't hold into a durable note.
-gc bd update "$BEAD" --notes "<decisions reached, options weighed, the next move>"
-
-# 3. Hand off — the controller respawns you pane-scoped, same bead, fresh
-#    transcript; the respawned host's "On Resume" card rehydrates from the bead.
-#    A bead-host is controller-restartable (it is NOT a *configured* named
-#    session), so this self-handoff really does restart you into a fresh window.
-gc handoff -- "context cycle" "<thin warm delta not already in takeaway/notes — often near-empty>"
-
-# Gate-free fallback if a handoff ever returns without restarting: gc session
-# reset restarts unconditionally into a fresh transcript on the same alias.
-#   gc session reset "$GC_ALIAS"
+  "<≤140-char: where this stands / what it needs next>"
+gc bd update "$BEAD" --notes "<in-flight reasoning the takeaway can't hold>"
+gc handoff "context cycle" "<thin warm delta — often near-empty>"
+# fallback if a handoff returns without restarting: gc session reset "$GC_ALIAS"
 ```
 
-Because steps 1–2 made the bead current, the handoff brief carries only the
-warm delta and approaches empty — the fresh host reads the bead, not a
-transcript replay.
-
-**Confirm you actually recycled.** The post-recycle incarnation is a *cold
-prime*, not a transcript resume — its first move is the "On Resume" card
-rebuilt from `gc bd show "$BEAD"` + the carry-forward note, with no prior
-turns to replay. You can verify the reset happened: `$GC_CONTINUATION_EPOCH`
-**increments** in the new incarnation (it stays constant across ordinary
-resume-mode wakes), so a bumped epoch is your proof the transcript was reset
-rather than replayed.
-
-**Keep the reactive net.** The PreCompact hook (`gc handoff --auto`) stays
-as the never-lose-data backstop if context actually maxes out (operator
-declined or away). The proactive offer just makes the clean, operator-chosen
-path available *before* that lossy edge — it does not replace the net.
+A bumped `$GC_CONTINUATION_EPOCH` confirms the transcript reset (constant across
+ordinary resume wakes). PreCompact (`gc handoff --auto`) is the never-lose-data
+backstop if context maxes out with the operator away.
