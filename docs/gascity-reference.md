@@ -11,6 +11,23 @@ a topic feels like it needs prose explanation here, that is a signal
 the prose belongs in an upstream PR to `gastownhall/gascity`, not in
 this index.
 
+## Scope
+
+**Mandate.** The grounding in canonical Gas City documentation that the
+rest of gc-toolkit's Gas City material is built on — the reference point
+that ties this toolkit back to the upstream source of truth at
+https://docs.gascityhall.com/, which the sibling `docs/gascity-*.md`
+briefs extend rather than restate. In that role it also holds
+[the bar](#the-bar) gc-toolkit applies before standing up a Gas City
+brief of its own, and marks where upstream coverage falls short.
+
+**Boundaries.** This file is an *index*, not a summary: it links to
+upstream docs and does not paraphrase or mirror them. When a topic
+seems to need prose here, that prose belongs in an upstream PR to
+`gastownhall/gascity`, not in this index. The substantive local content
+lives in the sibling `docs/gascity-*.md` briefs (agents, routing-model,
+local-patching); this doc points at them rather than restating them.
+
 ## The bar
 
 A doc lives under `docs/gascity-*.md` only when **all four** hold:

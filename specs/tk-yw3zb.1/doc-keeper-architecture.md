@@ -6,10 +6,36 @@ description: How the gc-toolkit doc-keeper machinery routes drift signals and me
 # doc-keeper Architecture Brief
 
 doc-keeper is a maintenance regime, not a new agent. It composes existing
-gc-toolkit primitives — orders, formulas, polecats, refinery — into
-a loop that keeps the central-tier docs enumerated as a constant in each
-audit formula (see `specs/tk-yw3zb.1/central-doc-inventory.md`)
-current as the world or the codebase evolves.
+gc-toolkit primitives — orders, formulas, polecats, refinery — into a
+loop that keeps gc-toolkit's **agent brief** current as the world and the
+codebase evolve.
+
+## The charter model
+
+The brief is the set of authoritative briefs under `docs/gascity-*.md`,
+discovered by **globbing that path** — never a hand-maintained list (a
+list recorded twice is a list that drifts), and so never enumerated
+here. A new doc dropped into `docs/gascity-*.md` (e.g. a future
+`gascity-packs.md`) enrolls automatically; a removed one drops out.
+
+Each brief declares a **`## Scope`** section — its charter: the mandate
+it speaks on and the boundaries it deliberately leaves to adjacent docs
+(the convention is defined in `docs/file-structure.md` → "The Scope
+section"). The charter is what doc-keeper holds each doc accountable to,
+and the two ways a doc can fall out of step with its charter are exactly
+the two audits:
+
+- **Drift** — a claim in the doc is no longer true *within its scope*
+  because an upstream change invalidated it. The **drift audit** catches
+  this (keep each brief *true*).
+- **Gap** — something *inside the doc's scope* is missing: a durable
+  learning that belongs in the charter but was never written down. The
+  **memory audit** catches this (keep each brief *complete*).
+
+doc-keeper judges each brief against what its `## Scope` says it intends
+to represent — not against a diff of git history. The unit of work it
+produces is one upstream **change or learning** (§4), which may touch
+more than one brief.
 
 ## 1. The loop
 
@@ -25,7 +51,7 @@ current as the world or the codebase evolves.
                                       ▼
                           worker polecat claims one
                                       ▼
-                            edits one central doc
+                        edits the impacted brief(s)
                                       ▼
                     pushes branch, reassigns to refinery
                                       ▼
@@ -34,8 +60,8 @@ current as the world or the codebase evolves.
                        operator reviews and merges the PR
 ```
 
-Every arrow is an existing primitive. Nothing in this design adds a new
-agent type, new bead type, or new merge mechanism.
+Every arrow is an existing primitive: existing agent types, a standard
+`task` bead, and the generic refinery on its existing PR merge path.
 
 ## 2. Refinery contract for doc-only beads
 
@@ -59,14 +85,14 @@ flows the same way as a code-touching bead:
    also supports a `direct` fast-forward; doc-keeper does not use it.)
 6. Refinery closes the bead with merge metadata.
 
-**Molecule shape** (the polecat-side contract, set by the worker formula
-described in §4):
+**Molecule shape** (the polecat-side contract — the change-unit bead of
+§4):
 
 | Field | Value |
 |---|---|
-| Bead type | `task` (no new type required; `doc-update` is a label, not a type) |
-| Title | `doc-update: <docs/path>: <one-line summary>` |
-| Description | What needs to change, why, source signal (drift hash diff or memory file cite), proposed copy or diff |
+| Bead type | a standard `task` bead; doc-keeper is carried by `task_kind=doc-update` plus the `doc-keeper` / `doc-update` labels |
+| Title | `doc-update: <one-line summary of the change>` |
+| Description | the change request and its provenance — the upstream commit or memory entry that prompted it, the brief(s) it impacts, and what should change |
 | Branch | `polecat/<bead-id>` (formula default) |
 | Commit prefix | `docs(<scope>): ...` to match existing rig commit style |
 | `metadata.target` | `main` — every doc-update lands directly on `main` |
@@ -103,74 +129,81 @@ The retired mechanism lived in `specs/tk-yw3zb.4/rolling-cycle-mechanism.md`
 and `assets/scripts/doc-keeper-rolling-cycle*.sh`; both were deleted in
 the same simplification.
 
-## 4. Worker polecat formula (`mol-doc-update`)
+## 4. The doc-update unit of work
 
-A new variant of `mol-polecat-work`. **Formula identity, not a new agent
-type** — same `gc-toolkit.polecat` template fills the role.
+The unit of work is **one upstream change or learning**, not "one doc".
+A single change can touch several briefs at once — a routing-model
+change that affects both `gascity-routing-model.md` and the routing
+notes in `gascity-agents.md`, say — and the worker addresses it as ONE
+atomic commit/PR editing whatever brief(s) the change impacts, carrying
+clear **provenance**: the upstream gascity / gc-toolkit commit, or the
+memory entry, that prompted it. Dedup is on the **change** — never two
+PRs for the same change, and never two open PRs racing the same target.
 
-| Step (inherited from base) | Override note |
-|---|---|
-| `load-context` | Read `metadata.source_signal` (drift hash + path, or memory file path); load the cited central doc; load the source signal contents. |
-| `workspace-setup` | Standard polecat-work workspace-setup; branches `polecat/<bead>` from `origin/main` (`{{base_branch}}` defaults to `main`). |
-| `preflight-tests` | Inherited; skips silently when commands empty. |
-| `implement` | Edit the single central doc named in the bead. Make a single focused commit `docs(<scope>): ...`. Forbidden: editing files outside the tracked central-tier doc set. |
-| `self-review` | Inherited. |
-| `submit-and-exit` | Inherited. |
+This is plain polecat work, expressed in plain Gas City primitives:
 
-Sub-bead `tk-yw3zb.5` owns the formula authoring; this brief records
-the *shape*. Single-doc scope per bead is the keystone — keeps the
-worker polecat short, the diff small, and the rejection-resume path
-clean.
+- A doc-update bead is a **standard `task` bead** with a metadata
+  discriminator — `task_kind=doc-update` plus the `doc-keeper` /
+  `doc-update` labels — exactly as `mol-refinery-patrol` discriminates
+  its pre-publish review beads with `task_kind=review`. There is **no
+  custom bead "schema"**: the change request — which brief(s), what
+  change, what provenance — lives in the bead body.
+- It runs through the **standard `mol-polecat-work` lifecycle** — claim
+  → branch → implement → self-review → refinery handoff. There is **no
+  bespoke formula "extension"**: editing a doc is ordinary polecat work,
+  and the polecat template already carries the skills to do it. The
+  refinery opens one PR to `main` (`merge_strategy=mr`) and closes the
+  bead, with no knowledge that doc-keeper exists.
+
+> **Build status.** The worker leg is being conformed to this model by
+> the machinery split filed under `tk-yw3zb` (§8). The earlier
+> `mol-doc-update` formula used `extends` + a custom bead schema + a
+> one-doc scope guard; the change-unit model drops all three — a change
+> that legitimately spans two briefs is one atomic PR, not two beads.
 
 ## 5. Audit-feed formulas
 
-Two cron-fired formulas produce update beads. Both are stateless modulo
-git+memory and both are bounded — they file a configurable max number of
-update beads per run to avoid swamping the pool.
+Two cron-fired formulas (§7) surface work against the charter model.
+Both glob `docs/gascity-*.md` for the brief set — no enumerated list —
+and read each brief's `## Scope` to decide what is in-bounds. Both are
+read-only (they file beads, never edit docs), bounded by a per-run cap,
+and emit the same change-unit bead shape (§4): a standard `task` bead
+with `task_kind=doc-update`, the change request and provenance in the
+body, deduped on the change.
 
-### 5a. drift-audit (`mol-doc-keeper-drift-audit`)
+### 5a. drift-audit (`mol-doc-keeper-drift-audit`) — keep each brief *true*
 
-Fires on cron (§7). Walks the diff between **last-audit hashes** (stored
-in a per-doc audit-state bead per central doc) and current HEAD across
-two repositories: gascity at `$GASCITY_REMOTE/main` and gc-toolkit at
-`origin/main`. For each tracked doc in the formula's constant tracked-doc
-table, asks: does any commit in the diff window touch a path the doc
-claims authority over? Each table entry maps a doc to the source-path
-globs it tracks (the rescope folded the old per-doc `source_paths` config
-into this in-formula table). Anything hitting an owned glob produces one
-`doc-update` bead.
+Fires on cron. For each brief, given the upstream movement in the repos
+it tracks (gascity at its remote `main`, gc-toolkit at `origin/main`,
+since the last audit baseline), it asks the charter question: **is the
+doc still true within its `## Scope`?** A change that invalidates a
+claim the doc makes *inside its mandate* is drift, and the audit files
+one change-unit bead citing the triggering commits as provenance. The
+audit does not write the edit — it cites the change and names the
+affected brief(s); the worker reads the cited commits and writes the
+fix. (How the audit derives "relevant to this scope" from a prose
+`## Scope` — versus the retired hardcoded per-doc source-glob table — is
+the open design question in §9, owned by the `.6` re-model.)
 
-The audit does **not** propose edits. It cites the commits that triggered
-the signal and the section that needs review. The worker polecat reads
-the cited commits and writes the actual edit.
+Sub-bead `tk-yw3zb.6` (re-model tracked by §8).
 
-Sub-bead `tk-yw3zb.6`.
+### 5b. memory-audit (`mol-doc-keeper-memory-audit`) — keep each brief *complete*
 
-### 5b. memory-audit (`mol-doc-keeper-memory-audit`)
+Fires on cron. This is the **gap** audit. It scans accumulated durable
+learnings (mechanik's auto-memory, primarily) and, for each, asks the
+charter question from the other side: **does this fall inside some
+brief's `## Scope` but isn't captured there?** An in-scope-but-missing
+learning is a gap, and the audit files one change-unit bead proposing
+the addition, citing the memory entry as provenance. (Worked example
+from the operator: convention learnings like "GC uses `task_kind`, not
+custom bead schemas; mols don't use a bespoke extension" fall inside a
+brief's scope and should be caught as missing.) Stay-local notes —
+corrections about an agent's own conduct, or one-off resolved incidents
+whose durable record is git + the bead trail — fall *outside* every
+brief's scope and are no-ops. The memory stays mechanik's; the audit
+only surfaces.
 
-Fires on cron (§7). Walks `/home/zook/.claude/projects/-home-zook-
-loomington/memory/` looking for entries that match the **promote
-candidate** pattern from `central-doc-inventory.md` §2b. Implementation:
-
-1. List all memory `.md` files modified since `last-audit-tick` (stored
-   in an audit-state bead).
-2. For each, classify into bucket A (promote candidate) / B (rule + reason
-   stay-local) / C (incident stay-local). Classification is a deterministic
-   filename-+-frontmatter check, not LLM judgment, to keep the audit cheap
-   and idempotent. Filename heuristics: `project_gascity_*`,
-   `project_gastown_*`, `project_gc_toolkit_*` skew bucket A; `feedback_*`
-   that name mechanik behaviors (e.g. `feedback_dont_*`,
-   `feedback_execute_*`) skew bucket B; `project_*` that name an incident
-   verb (panic, crash, race, leak) skew bucket C.
-3. For each bucket-A entry, file ONE `doc-update` bead with proposed
-   target doc (best fit from the tracked central-tier doc set), proposed
-   paragraph draft, and the source memory file cited. The proposed target is the
-   audit's recommendation; the worker polecat may pick a different
-   target doc if the recommendation is wrong.
-
-The memory remains mechanik's. The audit only surfaces.
-
-Sub-bead `tk-yw3zb.7`.
+Sub-bead `tk-yw3zb.7` (re-model tracked by §8).
 
 ## 6. Configuration: none (the rescope dropped `[doc-keeper]`)
 
@@ -183,20 +216,20 @@ removed it**. doc-keeper now reads no config block:
   pack's `orders/` layer (§7). Importing the pack makes them live; a rig
   that does not import gc-toolkit never sees them. There is no `enabled`
   flag to read.
-- **The tracked-doc set is a constant** inside each audit formula,
-  existence-checked against the live `docs/*.md` set at run time — a
-  formula whose own doc list drifts is the one thing the audit cannot
-  afford. See `central-doc-inventory.md` for the canonical list.
+- **The brief set is the `docs/gascity-*.md` glob**, resolved at run
+  time — not an enumerated list in config, in a formula, or in this
+  brief. There is exactly one source of truth (the filesystem), so the
+  set cannot drift from a stale second copy. A new `docs/gascity-*.md`
+  enrolls on the next run; a removed one drops out.
 - **The per-run bead cap is a formula var** (`audit_max_beads_per_run`,
   poured at dispatch — drift-audit default 5, memory-audit default 3),
   not a config field.
 - **No batching toggle** — batching was dropped wholesale (§3).
 
-Current brief landing docs (verify at file time; names drift):
-`docs/gascity-reference.md` (the always-present anchor),
-`docs/gascity-local-patching.md`, `docs/gascity-agents.md`,
-`docs/gascity-routing-model.md`. The earlier hyphenated names
-(`gas-city-reference.md`, `gas-city-pack-v2.md`) do not exist in the repo.
+The earlier idealized names (`gas-city-reference.md`,
+`gas-city-pack-v2.md`) and the `docs/principles/document-spec.md`
+central doc never existed in the repo, so the `docs/gascity-*.md` glob
+does not match them — they are not part of the set.
 
 ## 7. Cron registration
 
@@ -262,8 +295,40 @@ the critical path. The terminology lock (`tk-yw3zb.2`) and the `.5`–`.8`
 worker/audit/cron chain still stand — no rewires needed for the surviving
 work.
 
+### Charter-driven re-model (operator #122 review)
+
+The 2026-06-13 operator review of #122 reworked doc-keeper to the charter
+model above. It lands in stages:
+
+| Bead | Carries |
+|---|---|
+| `tk-yw3zb.10` | **Foundation (landed):** the `## Scope` convention in `docs/file-structure.md`, a `## Scope` charter on each `docs/gascity-*.md` brief, and this brief's re-model to the charter-driven model. |
+| `tk-o28ci` | doc-update bead-shape + worker conformance: a standard `task` bead + `task_kind=doc-update`, dropping the `extends` extension and the custom schema, with the unit of work = the change (§4). The keystone shape. |
+| `tk-ej8s1` | charter-driven audit re-model (§5): both audits glob `docs/gascity-*.md`, read each `## Scope`, and emit change-unit beads; fixes the formula doc-set/reference errors and reconciles `central-doc-inventory.md`. Blocked by `tk-o28ci`. |
+
+The `.5`/`.6`/`.7` formulas are re-modeled by `tk-o28ci` / `tk-ej8s1`;
+until those land, the formulas on this branch still implement the
+pre-charter (source-glob + custom-schema) shape, so this brief leads the
+implementation by design.
+
 ## 9. Open questions for mechanik review
 
+- **Deriving scope-relevance from a prose `## Scope`** (owned by
+  `tk-ej8s1`, §5a). The retired model used a hardcoded per-doc
+  source-glob table — the thing the operator rejected. The charter model
+  needs a non-hardcoded way for an audit to decide "this upstream change
+  / this learning is relevant to *this* brief's scope." Candidates:
+  (a) grep upstream commit diffs / memory entries for salient terms
+  drawn from the doc's `## Scope`; (b) a coarse audit (any upstream
+  movement) that hands the true-within-scope / in-scope-but-missing
+  judgment to the worker reading the `## Scope`; (c) a lightweight,
+  scope-derived (not hand-maintained) relevance hint. This shapes both
+  audits and the per-doc baseline/state mechanism.
+- **A `gascity-packs.md` brief?** The operator flagged packs as a topic
+  of particular interest worth its own brief. It is not yet written; if
+  added under `docs/gascity-*.md` with a `## Scope`, it enrolls in both
+  audits automatically (no list to update — that is the point of the
+  glob). File it as its own doc bead when the content is ready.
 - **Migration of `docs/design/` and `docs/research/`** to `specs/<bead>/`
   is recommended by the inventory but not filed as a sub-bead. File a
   one-shot cleanup bead under `tk-yw3zb`, or skip and leave the

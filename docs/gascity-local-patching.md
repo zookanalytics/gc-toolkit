@@ -11,6 +11,22 @@
 
 ---
 
+## Scope
+
+**Mandate.** The recommended process for a city running a *fork* of
+`gascity` that must carry local fixes ahead of — or instead of —
+upstream: how to decide whether to patch at all, carry the patch well on
+the fork while minimizing its tax, route it upstream, and retire it once
+upstream lands a fix.
+
+**Boundaries.** This is a workflow doc about *carrying* patches, not a
+reference for `gascity`'s own internals or behavior (that is
+[gascity-reference.md](gascity-reference.md) and upstream docs). It is
+deliberately temporary — every local patch is a tax, so the doc
+describes how to patch well only *when you've decided you must*, and
+exists to make itself unnecessary (see [When this doc should
+disappear](#when-this-doc-should-disappear)).
+
 ## When to local-patch
 
 When you hit a bug or design gap in `gascity` that's blocking your city,
