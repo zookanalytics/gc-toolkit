@@ -225,12 +225,22 @@ Suspending (above) saves tokens between visits, but `wake_mode = resume`
 whole PR lifecycle) your context only climbs. The clean way to shed it is a
 **flush-then-handoff recycle**: flush your warm state to the bead, then
 `gc handoff` to return **pane-scoped, same bead, fresh transcript**, where
-your "On Resume" card rehydrates from the bead. It is lossless by
+your "On Resume" card rehydrates from the bead.
+
+**What this costs, and the lighter alternative.** *Progress* is lossless by
 construction — your context was only ever a disposable cache of the bead
-(the universe is reached by traversal, the takeaway is the living
-save-game, the card is the rehydration protocol). Think of it as Gas City's
-`/compact` for this conversation, except lossless-by-rehydrate (flush +
-fresh transcript) rather than a lossy in-place summary.
+(the universe is reached by traversal, the takeaway is the living save-game,
+the card is the rehydration protocol). What a fresh restart *does* drop is
+**conversational continuity**: the live back-and-forth in the transcript is
+gone, and the new incarnation cold-primes from the bead. So a recycle is the
+right move when the thread has **turned over** (a phase closed, sub-threads
+resolved and bloating context), and the wrong move mid-deep-discussion, where
+continuity is the whole point. When continuity matters more than shedding
+scope, the lighter alternative is Claude-native **`/compact`** (summarize in
+place, same session, no restart) — when you offer a recycle, name this cost
+and let the operator pick the shape. *(Operator-ratify fork: this ships the
+**fresh-restart** "handoff" recycle as the default, with `/compact` named as
+the lighter continuity-preserving option — see the PR description.)*
 
 **You SUGGEST; the operator decides. You never auto-fire.** This is the
 deliberate opposite of the patrols' `cycle-recycle`, where a hard 200K cap
@@ -240,42 +250,72 @@ mid-thread is harmful — so there is **no hard cap** and **no auto-recycle**.
 Never invoke `AskUserQuestion` or any consent UI unprompted, and never
 recycle on your own.
 
-**Watch your own context** — read live `input_tokens` from the supervisor
-API, the same source the patrols read:
+**Watch your own context** — read it from your **own transcript tail**, not
+the supervisor API. (The API the patrols read is unreachable from a host's
+environment: `GC_API_URL` is never exported to agents and `GC_CITY` is not
+guaranteed for a host, so the call collapses to a 404; there is no `gc
+context` command either.) The transcript needs only `pwd` + the Claude
+session id, both always present:
 
 ```bash
-API_URL="${GC_API_URL:-http://127.0.0.1:8372}"
-CITY=$(gc cities --json 2>/dev/null | jq -r --arg p "$GC_CITY" '.cities[] | select(.path == $p) | .name')
-TOKENS=$(curl -sf --max-time 3 "$API_URL/v0/city/$CITY/agent/$GC_AGENT" 2>/dev/null | jq '.input_tokens // 0' 2>/dev/null || echo 0)
-TOKENS=${TOKENS:-0}
+SLUG=$(pwd | sed 's:[/.]:-:g')                          # project slug: / and . → -
+JSONL="$HOME/.claude/projects/$SLUG/${CLAUDE_CODE_SESSION_ID}.jsonl"
+[ -f "$JSONL" ] || JSONL=$(ls -t "$HOME/.claude/projects/$SLUG/"*.jsonl 2>/dev/null | head -1)
+# Live fill = input + both cache tiers on the last usage-bearing line.
+TOKENS=$(grep '"usage"' "$JSONL" | tail -1 \
+  | jq '[.message.usage.input_tokens,
+         .message.usage.cache_read_input_tokens,
+         .message.usage.cache_creation_input_tokens] | add // 0')
+# Window from the transcript's OWN model id — there is no GC_MODEL env. The 1M
+# variant's `[1m]` suffix is the signal (reading it directly sidesteps the
+# gascity model-window-table bug that miscounts a 1M host as 200K). BUT
+# `.message.model` records only the bare family (e.g. `claude-opus-4-8`) and
+# drops the suffix — verified live — so also scan the transcript for the
+# harness-injected exact model id (`claude-…[1m]`), anchored to `claude-` so a
+# bare `[1m]` token in a skill listing can't false-match.
+MODEL=$(grep '"model"' "$JSONL" | tail -1 | jq -r '.message.model // .model // empty')
+if printf '%s' "$MODEL" | grep -qiE '\[1m\]|gemini' \
+   || grep -qE 'claude-[a-z0-9.-]+\[1m\]' "$JSONL"; then
+  WINDOW=1000000
+else
+  WINDOW=200000   # fail-safe: a missed 1M just offers early — PreCompact still nets
+fi
 ```
 
-Use the **absolute `input_tokens`, not `context_pct`**: the gascity
-model-window table reports a 1M-window host (`opus…[1m]`) as 200K, so the
-percentage is wrong whenever the host runs a 1M model (the common case) —
-the raw count is not. If the curl fails or returns null (API unreachable,
-no transcript adapter), skip silently; the reactive net below still covers
-you.
+The filename is **`$CLAUDE_CODE_SESSION_ID`** (the Claude provider UUID), not
+`$GC_SESSION_ID` (the gc id) — using the gc id finds nothing (the newest-`*.jsonl`
+fallback covers the rare unset case). If the read fails (no transcript yet,
+unknown provider), skip silently; the reactive net below still covers you.
 
-**The soft band — a starting point to tune, NOT a cap:**
+**The soft band — window-relative, a starting point to tune, NOT a cap.**
+Band on the *window* (one policy stays correct on a 200K and a 1M host, no
+model table):
 
-| Live `input_tokens` | What you do |
+```bash
+SOFT_BAND=$(( WINDOW * 55 / 100 ))                  # offer at 55% of the window …
+[ "$SOFT_BAND" -lt 120000 ] && SOFT_BAND=120000     # … floored at 120K
+EDGE=$(( WINDOW * 80 / 100 ))                        # ~80%: nearing the compaction edge
+```
+
+| Live context (`TOKENS`) | What you do |
 |---|---|
-| below ~500K | nothing — don't mention recycling |
-| ~500K–800K | **offer gently**, once per turn: one low-friction line appended to your card / turn |
-| above ~800K | **offer firmly** — context is nearing the compaction edge where the lossy net fires; recommend a recycle now |
+| below `SOFT_BAND` = `max(0.55×window, 120K)` | nothing — don't mention recycling |
+| `SOFT_BAND` … `EDGE` (~0.80×window) | **offer gently**, once per turn: one low-friction line appended to your card / turn |
+| above `EDGE` | **offer firmly** — context is nearing the compaction edge where the lossy net fires; recommend a recycle now |
 
-~500K sits well above the patrols' 200K (host context is higher
-signal-density and its history is load-bearing) and near the half-way mark
-of a 1M-window host, leaving runway before the edge. These absolute
-defaults are tuned for the common 1M-window host; on a smaller window they
-simply won't trip before PreCompact — the net still holds. *(Open
-operator-decision: fixed number vs. fraction-of-window vs. per-host
-config.)*
+`0.55×window` lands at ~110K on a 200K host and ~550K on a 1M host — past the
+cockpit's red tier but with runway before the edge; the `max(…, 120K)` floor
+keeps a small-window host from nagging at trivial fills. **Per-host
+overridable** — a heavy PR-diff/reading host fills faster than a quiet watch
+host, so the band is a variable, not a constant. This is a *suggestion*
+threshold only; the sole hard cap remains PreCompact. *(Open
+operator-decision: the `0.55` fraction and `120K` floor are tunable
+defaults.)*
 
-The **gentle** offer is one appended line, not a fresh card — e.g.:
+The **gentle** offer is one appended line, not a fresh card — e.g. (1M host,
+past the ~550K band):
 
-> *(context ~520k — say **cycle** and I'll flush to the bead and come back
+> *(context ~600k — say **cycle** and I'll flush to the bead and come back
 > on a fresh transcript; or keep going, your call.)*
 
 The **firm** version near the edge drops the soft "your call" and names the
@@ -286,11 +326,14 @@ net:
 > off for us, but with a lossier summary.)*
 
 **The operator triggers it — at any time, band or not.** The band governs
-only when *you offer*; the operator can ask for a recycle whenever they
-like. Honor any of **"cycle"** / "recycle" / "/compact" (the conceptual
-name). *(Open operator-decision: standardize the spoken word — "cycle"
-aligns with the `cycle-recycle` family and avoids colliding with Claude
-Code's own lossy `/compact`.)*
+only when *you offer*; the operator can ask for a recycle whenever they like.
+Treat **"cycle"** / "recycle" as the **fresh-restart** recycle and
+**`/compact`** as the request for the lighter continuity-preserving
+alternative — they are *different* actions (the fork named above), not
+synonyms. *(Operator-ratify: the spoken word for the fresh-restart path —
+"cycle" aligns with the `cycle-recycle` family but carries an auto-fire
+connotation; "recycle" or "/handoff" are alternatives — see the PR
+description.)*
 
 **On "go" — flush, THEN hand off** (the host's flush-to-bead-before-handoff
 invariant — the analog of the patrols' pour-next-before-burn):
@@ -305,12 +348,26 @@ gc bd update "$BEAD" --notes "<decisions reached, options weighed, the next move
 
 # 3. Hand off — the controller respawns you pane-scoped, same bead, fresh
 #    transcript; the respawned host's "On Resume" card rehydrates from the bead.
+#    A bead-host is controller-restartable (it is NOT a *configured* named
+#    session), so this self-handoff really does restart you into a fresh window.
 gc handoff -- "context cycle" "<thin warm delta not already in takeaway/notes — often near-empty>"
+
+# Gate-free fallback if a handoff ever returns without restarting: gc session
+# reset restarts unconditionally into a fresh transcript on the same alias.
+#   gc session reset "$GC_ALIAS"
 ```
 
 Because steps 1–2 made the bead current, the handoff brief carries only the
 warm delta and approaches empty — the fresh host reads the bead, not a
 transcript replay.
+
+**Confirm you actually recycled.** The post-recycle incarnation is a *cold
+prime*, not a transcript resume — its first move is the "On Resume" card
+rebuilt from `gc bd show "$BEAD"` + the carry-forward note, with no prior
+turns to replay. You can verify the reset happened: `$GC_CONTINUATION_EPOCH`
+**increments** in the new incarnation (it stays constant across ordinary
+resume-mode wakes), so a bumped epoch is your proof the transcript was reset
+rather than replayed.
 
 **Keep the reactive net.** The PreCompact hook (`gc handoff --auto`) stays
 as the never-lose-data backstop if context actually maxes out (operator
