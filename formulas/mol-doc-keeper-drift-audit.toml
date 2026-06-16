@@ -70,8 +70,8 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Import binding prefix for gastown agent identities, including trailing dot when bound (e.g. 'gc-toolkit.'). Used to address the polecat pool for dispatch."
-default = ""
+description = "Import binding prefix for gastown agent identities, with the trailing dot (e.g. 'gc-toolkit.'). Combined with the rig qualifier it names the polecat pool the filed doc-update beads route to (${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat). Non-empty default — unlike the sling-poured patrol formulas, this audit is poured by a gc order, and the order-dispatch path does NOT inject routing vars, so this default is the value used at runtime. 'gc-toolkit.' matches every importer's default_sling_target (<rig>/gc-toolkit.polecat)."
+default = "gc-toolkit."
 
 [vars.gascity_rig]
 description = "Sibling rig directory under $GC_CITY/rigs that holds the upstream gascity checkout. Used as both the repo path and the provenance repo label."

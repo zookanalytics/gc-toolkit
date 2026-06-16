@@ -55,7 +55,7 @@ the refinery opens the PR and closes the bead.
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| binding_prefix | pour | Import binding prefix for gastown agent identities (trailing dot when bound). |
+| binding_prefix | default | Binding prefix naming the polecat pool the filed beads route to ('gc-toolkit.'); order-poured, so this default is the effective value. |
 | memory_dir | pour (default) | Absolute path to mechanik's auto-memory directory (read-only). |
 | max_beads_per_run | pour (default) | Safety cap on beads filed per run; excess defers to the next cycle. |
 """
@@ -74,9 +74,9 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Import binding prefix for gastown agent identities, including trailing dot when bound."
+description = "Import binding prefix for gastown agent identities, with the trailing dot (e.g. 'gc-toolkit.'). Combined with the rig qualifier it names the polecat pool the filed doc-update beads route to (${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat). Non-empty default — unlike the sling-poured patrol formulas, this audit is poured by a gc order, and the order-dispatch path does NOT inject routing vars, so this default is the value used at runtime. 'gc-toolkit.' matches every importer's default_sling_target (<rig>/gc-toolkit.polecat)."
 required = false
-default = ""
+default = "gc-toolkit."
 
 [vars.memory_dir]
 description = "Absolute path to mechanik's auto-memory directory (the audit source; read-only)."
