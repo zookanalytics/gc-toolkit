@@ -126,10 +126,10 @@ a different commit. Only `git rebase --abort` if the in-progress commit
 is NOT ours; never abort our own assignment.
 
 ```bash
-if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
     IN_PROGRESS_SHA=$(git rev-parse REBASE_HEAD 2>/dev/null \
-        || cat .git/rebase-merge/stopped-sha 2>/dev/null \
-        || cat .git/rebase-apply/original-commit 2>/dev/null \
+        || cat "$(git rev-parse --git-path rebase-merge)/stopped-sha" 2>/dev/null \
+        || cat "$(git rev-parse --git-path rebase-apply)/original-commit" 2>/dev/null \
         || echo "")
     if [ -z "$IN_PROGRESS_SHA" ]; then
         echo "ERROR: mid-rebase state present but cannot identify in-progress commit" >&2
