@@ -13,10 +13,8 @@ field each delivery path is responsible for setting. It is the authority
 on that field-level contract.
 
 **Boundaries.** This doc covers *how* work moves between agents, not
-*who* the agents are — agent variants, identity, and lifecycle live in
-[gascity-agents.md](gascity-agents.md). It is not a general `gc sling`
-tutorial, and graph.v2 step routing (`gc.run_target`) appears only as an
-adjacent contrast, not as the doc's subject.
+*who* the agents are — that's [gascity-agents.md](gascity-agents.md). It
+defines the routing contract; it is not a command tutorial.
 
 ## Provenance
 
