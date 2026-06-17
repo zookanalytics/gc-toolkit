@@ -426,7 +426,7 @@ if [ -n "$PENDING_REVIEW" ]; then
         # Reset the rejected rework commit off HEAD so we're back to the
         # mid-rebase conflict state. The rework polecat's commit was the
         # last commit; HEAD~1 is the pre-rework rebase HEAD.
-        if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+        if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
             git reset --hard HEAD~1
         fi
         gc bd update {{issue}} --unset-metadata pending_review
@@ -435,7 +435,7 @@ if [ -n "$PENDING_REVIEW" ]; then
         REDISPATCH_PRIOR_REWORK="$PENDING_REWORK"
     else
         echo "WARN: review bead $PENDING_REVIEW closed without metadata.verdict; treating as reject for safety." >&2
-        if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+        if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
             git reset --hard HEAD~1
         fi
         gc bd update {{issue}} --unset-metadata pending_review
@@ -574,10 +574,20 @@ export DROP_SHAS
 
 cat > /tmp/seqedit-{{issue}}.sh <<'SEQ'
 #!/bin/sh
+# git rebase -i writes ABBREVIATED hashes in the todo (e.g. "pick 7cf82bef0 # ...").
+# DROP_SHAS holds FULL 40-char shas from metadata.commit_verdicts. Match the todo's
+# (possibly abbreviated) hash as a PREFIX of a full drop sha; rewrite pick -> drop.
 todo=$1
-for sha in $DROP_SHAS; do
-  sed -i -E "s/^pick (${sha}[[:alnum:]]*) /drop \\1 /" "$todo"
-done
+awk -v drops="$DROP_SHAS" '
+  BEGIN { n = split(drops, d, " ") }
+  /^pick / {
+    h = $2
+    for (i = 1; i <= n; i++) {
+      if (substr(d[i], 1, length(h)) == h) { sub(/^pick/, "drop"); break }
+    }
+  }
+  { print }
+' "$todo" > "$todo.tmp" && mv "$todo.tmp" "$todo"
 SEQ
 chmod +x /tmp/seqedit-{{issue}}.sh
 ```
@@ -594,7 +604,7 @@ rejected a rework), the rebase is already in progress. Otherwise, start
 fresh.
 
 ```bash
-if [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ] && [ "$STUCK" != "1" ]; then
+if [ ! -d "$(git rev-parse --git-path rebase-merge)" ] && [ ! -d "$(git rev-parse --git-path rebase-apply)" ] && [ "$STUCK" != "1" ]; then
     GIT_SEQUENCE_EDITOR=/tmp/seqedit-{{issue}}.sh \
       git rebase -i {{upstream_remote}}/{{upstream_branch}} \
       >/tmp/rebase-out-{{issue}}.txt 2>&1 || true
@@ -623,19 +633,19 @@ repo states.
 DISPATCHES=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.dispatch_count // "0"')
 MAX_DISPATCHES=50
 
-if { [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; } && [ "$STUCK" != "1" ]; then
+if { [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; } && [ "$STUCK" != "1" ]; then
     if [ "$DISPATCHES" -ge "$MAX_DISPATCHES" ]; then
         echo "ERROR: exceeded MAX_DISPATCHES=$MAX_DISPATCHES; treating as stuck" >&2
         STUCK=1
     fi
 fi
 
-if { [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; } \
+if { [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; } \
         && [ "$STUCK" != "1" ] && [ "$DISPATCH_REVIEW" != "1" ]; then
 
     COMMIT_SHA=$(git rev-parse REBASE_HEAD 2>/dev/null \
-        || cat .git/rebase-merge/stopped-sha 2>/dev/null \
-        || cat .git/rebase-apply/original-commit 2>/dev/null \
+        || cat "$(git rev-parse --git-path rebase-merge)/stopped-sha" 2>/dev/null \
+        || cat "$(git rev-parse --git-path rebase-apply)/original-commit" 2>/dev/null \
         || echo "")
     if [ -z "$COMMIT_SHA" ]; then
         echo "ERROR: cannot identify in-progress commit; treating as stuck" >&2
@@ -643,7 +653,7 @@ if { [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; } \
     fi
 fi
 
-if { [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; } \
+if { [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; } \
         && [ "$STUCK" != "1" ] && [ "$DISPATCH_REVIEW" != "1" ] \
         && [ -n "$COMMIT_SHA" ]; then
 
@@ -653,8 +663,10 @@ if { [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; } \
         | awk '$1 ~ /^(DD|AU|UD|UA|DU|AA|UU)$/ { print $2 }' \
         | jq -R . | jq -sc .)
 
-    # Build context dump file in the worktree (.git is preserved across drain).
-    CONTEXT_FILE="$(pwd)/.git/rework-context-${COMMIT_SHA}.md"
+    # Build the context dump inside the per-worktree git dir (preserved across drain).
+    # rev-parse --git-path resolves the real git dir whether .git is a directory or a
+    # linked-worktree gitdir pointer file, so the write never fails on $(pwd)/.git.
+    CONTEXT_FILE="$(git rev-parse --git-path "rework-context-${COMMIT_SHA}.md")"
     {
         echo "# Rework context for commit $COMMIT_SHA"
         echo
