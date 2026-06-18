@@ -245,13 +245,13 @@ This spec takes a stance on two frontmatter fields, `name` and
 ```yaml
 ---
 name: <descriptive name>
-description: <1-2 sentence overview>
+description: <why the doc exists / when to use it>
 ---
 ```
 
 `name` is a contextual reminder of which doc this is — "Spec for
-XYZ" triggers a memory in a way `spec.md` doesn't. `description` is
-a 1-2 sentence overview of why the doc exists, or when to use it.
+XYZ" triggers a memory in a way `spec.md` doesn't. `description`
+orients the reader to why the doc exists, or when to use it.
 
 - **Mandatory on local spec docs.** Filenames inside `specs/<bead>/`
   are flexible, so frontmatter carries the reader's orientation.
