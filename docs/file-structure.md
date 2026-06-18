@@ -245,13 +245,13 @@ This spec takes a stance on two frontmatter fields, `name` and
 ```yaml
 ---
 name: <descriptive name>
-description: <1-2 sentence overview>
+description: <why the doc exists / when to use it>
 ---
 ```
 
 `name` is a contextual reminder of which doc this is — "Spec for
-XYZ" triggers a memory in a way `spec.md` doesn't. `description` is
-a 1-2 sentence overview of why the doc exists, or when to use it.
+XYZ" triggers a memory in a way `spec.md` doesn't. `description`
+orients the reader to why the doc exists, or when to use it.
 
 - **Mandatory on local spec docs.** Filenames inside `specs/<bead>/`
   are flexible, so frontmatter carries the reader's orientation.
@@ -297,22 +297,21 @@ declares, not a diff of git history.
   the moment a member is added or renamed, it is pitched too low.
 - **It is distinct from the frontmatter [`description`](#frontmatter).**
   The two may share a subject but do different jobs: the `description` is
-  a one-line discovery blurb — "is this the doc I want?"; the scope is the
-  in-body charter — "what does this doc own, and where are its edges?" A
-  scope that merely re-words the description in longer form has not earned
-  its place — it must add the precision and the boundaries a one-line
-  blurb cannot carry.
-- **Its boundaries disclaim, they don't wire.** A boundary marks what is
-  deliberately out and points at where it lives instead — "the *how*
-  lives in the sibling doc." It stops there: it does not catalog the
-  doc's references or list siblings as further reading. Boundaries are
-  what let an audit tell two failure modes apart: something *in-scope but
-  missing* is a gap to close; something *out-of-scope* was correctly
-  skipped. Without stated edges, every absence looks like a gap.
+  for discovery — "is this the doc I want?"; the scope is the in-body
+  charter — "what does this doc own, and where are its edges?" A scope
+  that merely re-words the description has not earned its place — it must
+  add the precision and the boundaries discovery alone cannot carry.
+- **It points at edges, it doesn't catalog references.** A boundary
+  marks what is deliberately out and points at where it lives instead —
+  "the *how* lives in the sibling doc." It stops there: it does not
+  catalog the doc's references or list siblings as further reading.
+  Boundaries are what let an audit tell two failure modes apart:
+  something *in-scope but missing* is a gap to close; something
+  *out-of-scope* was correctly skipped. Without stated edges, every
+  absence looks like a gap.
 
 | | `description` (frontmatter) | `## Scope` (body) |
 |---|---|---|
-| Size | one line | a short section |
 | Job | discovery / index summary | the doc's charter |
 | Answers | "is this the doc I want?" | "what does this doc own, and where are its edges?" |
 
@@ -321,27 +320,30 @@ table of contents.
 
 ### A calibration example
 
-The point is the *shape*, so this example is deliberately contrived.
-Suppose a doc owns *how a project cuts releases*. A good scope for it
-might read:
+Consider a repository's own release-process doc — a concrete doc whose
+body enumerates the real specifics: every stage in order, the CI tool
+that runs the gates, the artifact store the build lands in. Its `## Scope`
+names none of those individually; it names only the category they fall
+under:
 
-> **Mandate.** How a release is produced and published. It is the
-> authority on the *sequence* and its gates, not on any single tool that
-> implements a stage.
+> **Mandate.** How a release is produced and published — the sequence a
+> change moves through and its gates.
 >
-> **Boundaries.** This covers *cutting* a release, not deciding what goes
-> *into* one — feature selection and changelog content belong with the
-> work that produces them. It does not document the CI system's own
-> configuration, and it treats the artifact store as a downstream given:
-> named, not specified.
+> **Boundaries.** This covers *producing and publishing* a release, not
+> deciding what goes *into* one — feature selection and changelog content
+> belong with the work that produces them.
 
-Read it for the moves, not the subject. The mandate names the *category*
-— the sequence and its gates — without naming the members inside it: no
-single stage, no specific tool. That is what keeps it stable: the stages
-can be renamed or reordered and the scope still holds. The boundaries
-draw a crisp line — cutting a release versus filling one — and disclaim
-the adjacent material without wiring it in, so an absence reads as
-deliberate, not as a gap.
+Read it for the moves, not the subject. The doc's body still enumerates
+the specifics — the stages, the CI tool, the artifact store; the scope
+does not. Its mandate names only the *category* those specifics fall
+under — the sequence and its gates. That is the whole of
+category-not-members: it governs what the *scope* lists, not what the
+*doc* covers. Naming the category is what keeps the scope stable — stages
+can be renamed or reordered and the mandate still holds, even as the body
+that enumerates them changes. The boundaries draw a crisp line —
+producing a release versus choosing what goes into it — and disclaim only
+that genuinely-adjacent material without wiring it in, so an absence reads
+as deliberate, not as a gap.
 
 ### How a scope is maintained
 
