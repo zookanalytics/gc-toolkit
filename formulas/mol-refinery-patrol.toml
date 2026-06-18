@@ -712,7 +712,17 @@ else
     gc bd update $WORK --set-metadata merge_strategy=pr
     MERGE_STRATEGY=mr
     git reset --hard "origin/$TARGET"
-    # Fall through to the "If MERGE_STRATEGY = 'mr'" block below.
+    # AUTO-PROMOTED. The rebased work is still on `temp` and has NOT been
+    # pushed. Do NOT create a PR or close the bead here — this arm only
+    # flips the strategy and resets. Steps 2-5 of this direct block are
+    # the direct-success tail and are each guarded with
+    # `[ "$MERGE_STRATEGY" = "direct" ]`, so they all no-op now that
+    # MERGE_STRATEGY=mr. The single PR-creation surface is the
+    # "If MERGE_STRATEGY = 'mr'" block below: its step 1 pushes `temp` to
+    # $BRANCH, its step 2 opens the PR `--draft` under review_gate=codex,
+    # and its step 4 dispatches the codex review bead. Fall straight
+    # through to it.
+    echo "Auto-promoted to PR handoff; continuing in the MERGE_STRATEGY=mr block (the single PR-creation surface — draft PR + codex review bead)."
   else
     echo "Push failed: $PUSH_STDERR"
     echo "STOP. Debug and retry. Do NOT continue."
@@ -722,20 +732,29 @@ else
 fi
 ```
 
-**If `$MERGE_STRATEGY` was just flipped to `mr` (auto-promotion fired),
-skip steps 2-5 below and execute the "If MERGE_STRATEGY = 'mr'" block
-instead. The rebased `temp` branch is still available for the PR push.**
+**Auto-promotion control flow — READ BEFORE CONTINUING.** If the push
+above was rejected for a protected branch, `MERGE_STRATEGY` is now `mr`
+and the direct merge did NOT land. Steps 2-5 below are the
+direct-success tail; each is guarded with `[ "$MERGE_STRATEGY" =
+"direct" ]`, so after auto-promotion every one of them no-ops. Do not
+create a PR, close the bead, or delete `temp` here. Fall straight
+through to the "If MERGE_STRATEGY = 'mr'" block — it is the single
+PR-creation surface and the ONLY place that opens the draft PR and
+dispatches the codex review bead. The rebased `temp` branch is still
+present and unpushed, ready for that block's step 1.
 
-**2. Verify push:**
+**2. Verify push (direct-success tail — guarded; skipped after auto-promotion):**
 ```bash
-git fetch origin
-LOCAL=$(git rev-parse $TARGET)
-REMOTE=$(git rev-parse origin/$TARGET)
-[ "$LOCAL" = "$REMOTE" ] || echo "PUSH FAILED — do not proceed"
+if [ "$MERGE_STRATEGY" = "direct" ]; then
+  git fetch origin
+  LOCAL=$(git rev-parse $TARGET)
+  REMOTE=$(git rev-parse origin/$TARGET)
+  [ "$LOCAL" = "$REMOTE" ] || echo "PUSH FAILED — do not proceed"
+fi
 ```
 If SHAs differ: STOP. Debug and retry. Do NOT continue.
 
-**3. Record merge metadata and close work bead:**
+**3. Record merge metadata and close work bead (direct-success tail — guarded):**
 
 Run as a single chained command so the metadata write cannot be skipped
 when the close-reason already names the SHA. Both the `--set-metadata`
@@ -743,25 +762,36 @@ write and the `gc bd close` are required — `merged_sha` and
 `merged_target` are the only forensic breadcrumbs tying a closed bead
 to its merge commit on `$TARGET`. `--unset-metadata rejection_reason`
 clears any stale rejection field from an earlier rejected/reworked
-attempt before the successful close.
+attempt before the successful close. The `[ "$MERGE_STRATEGY" =
+"direct" ]` guard is load-bearing: after an auto-promotion nothing
+merged to `$TARGET`, so closing the bead as `merged` here would be a
+false close — the guard makes this step a no-op in that case.
 
 ```bash
-MERGED_SHA=$(git rev-parse HEAD) && \
-MERGED_SHORT=$(git rev-parse --short HEAD) && \
-gc bd update $WORK \
-  --set-metadata merge_result=merged \
-  --set-metadata merged_sha=$MERGED_SHA \
-  --set-metadata merged_target=$TARGET \
-  --unset-metadata rejection_reason && \
-gc bd close $WORK --reason "Merged to $TARGET at $MERGED_SHORT"
+if [ "$MERGE_STRATEGY" = "direct" ]; then
+  MERGED_SHA=$(git rev-parse HEAD) && \
+  MERGED_SHORT=$(git rev-parse --short HEAD) && \
+  gc bd update $WORK \
+    --set-metadata merge_result=merged \
+    --set-metadata merged_sha=$MERGED_SHA \
+    --set-metadata merged_target=$TARGET \
+    --unset-metadata rejection_reason && \
+  gc bd close $WORK --reason "Merged to $TARGET at $MERGED_SHORT"
+fi
 ```
 
-**4. Cleanup (leaves worktree detached so other worktrees can hold $TARGET):**
+**4. Cleanup (direct-success tail — guarded so `temp` survives auto-promotion; leaves worktree detached so other worktrees can hold $TARGET):**
 ```bash
-git branch -d temp
-git switch --detach HEAD
+if [ "$MERGE_STRATEGY" = "direct" ]; then
+  git branch -d temp
+  git switch --detach HEAD
+  if [ "{{delete_merged_branches}}" = "true" ]; then
+    git push origin --delete $BRANCH
+  fi
+fi
 ```
-If delete_merged_branches = "true": `git push origin --delete $BRANCH`
+Do NOT delete `temp` after an auto-promotion — the "mr" block below
+pushes it to `$BRANCH` for the pull request.
 
 **5. Auto-fast-forward rig canonical checkout (best-effort):**
 
@@ -775,7 +805,7 @@ merge or affect bead state on failure.
 
 ```bash
 RIG_ROOT="${GC_RIG_ROOT:-}"
-if [ "{{auto_ff_rig_main}}" = "true" ] && [ -n "$RIG_ROOT" ] \
+if [ "$MERGE_STRATEGY" = "direct" ] && [ "{{auto_ff_rig_main}}" = "true" ] && [ -n "$RIG_ROOT" ] \
    && { [ -d "$RIG_ROOT/.git" ] || [ -f "$RIG_ROOT/.git" ]; }; then
   RIG_BRANCH=$(git -C "$RIG_ROOT" branch --show-current 2>/dev/null || echo "")
   RIG_DIRTY=$(git -C "$RIG_ROOT" status --porcelain --untracked-files=no 2>/dev/null)
@@ -809,6 +839,16 @@ formula.
 
 Refinery does NOT land the branch directly. Instead it publishes a pull
 request and treats PR creation as the terminal handoff for this work bead.
+
+This block is the single PR-creation surface. It runs both when the bead
+was dispatched with `merge_strategy=mr`/`pr` AND when the direct path
+auto-promoted on a protected-branch rejection (above). In the
+auto-promoted case the rebased work is still on `temp` and unpushed, so
+step 1 (push) must run before step 2 (open PR) — do not skip it. The
+draft-PR flag (step 2) and the codex review-bead dispatch (step 4) are
+the review gate, both keyed on `review_gate = "codex"`; routing all PR
+creation through here is what guarantees the gate fires for
+auto-promoted work too.
 
 **1. Push the rebased branch back to origin:**
 ```bash
