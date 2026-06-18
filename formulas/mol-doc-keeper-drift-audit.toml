@@ -7,62 +7,15 @@ files one change-unit `doc-update` bead per upstream change, citing the
 triggering commits as provenance. Read-only: it produces beads, never edits a
 doc.
 
-Part of the doc-keeper machinery (epic `tk-yw3zb`, sub-bead `tk-yw3zb.6`;
-design `specs/tk-yw3zb.1/doc-keeper-architecture.md` §5a, change-unit bead
-shape §4). Its output is the drift feed into the shared `doc-update` pipeline:
-a standard `task` bead a pool polecat picks up under `mol-polecat-work`, edits
-the impacted brief(s), and hands to the refinery for one small PR to `main` —
-indistinguishable from a memory-audit or organic `doc-update`.
-
-## The charter model
-
-The brief set is the `docs/gascity-*.md` glob, resolved at run time — one
-source of truth (the filesystem), so there is no list to keep in sync. Each
-brief declares a `## Scope` (mandate + boundaries; the convention is in
-`docs/file-structure.md`), and the audit holds the brief accountable to that
-charter: it reads the `## Scope` and judges, semantically, whether the brief's
-claims still hold against current upstream — "is this still true within the
-mandate?". The `## Scope` is the only relevance signal it needs; the prior
-per-doc source-path table and commit-SHA baseline are gone.
-
-## Dispatch (one-shot, periodic)
-
-Poured by a cooldown `gc order` onto the polecat pool (sub-bead `tk-yw3zb.8`,
-design §7) — NOT a self-looping patrol. One pour = one audit run: scan, file
-zero-or-more `doc-update` beads, drain. The cooldown re-pours on the next
-interval. The order passes the pour vars below.
-
-## Output: the change-unit doc-update bead (design §4)
-
-The unit of work is **one upstream change**, not "one doc" — a single change
-may invalidate claims in more than one brief, and the worker addresses it as
-ONE atomic commit/PR. Each filed bead is a standard `task` bead carrying:
-`task_kind=doc-update` plus the `doc-keeper` / `doc-update` labels (the
-discriminator — there is no custom bead schema); the change request and its
-provenance in the body (`## Target` / `## Change` / `## Provenance`); and
-`target=main` + `merge_strategy=mr` so the worker opens one small PR to `main`.
-The audit cites the upstream commits and names the impacted brief(s); it never
-writes the prose — the worker reads the cited commits and writes the edit (and
-may close as a no-op if review shows nothing needs changing).
-
-Dedup is on the **change**: never two beads or two open PRs for the same
-upstream change or the same brief+area. At most `{{audit_max_beads_per_run}}`
-beads per run; the rest defer to the next run.
-
-## Read-only invariant
-
-The audit edits NO repository files and keeps NO audit-state bead. It writes
-only the `doc-update` beads it files. Doc edits are the worker's job, on a
-branch, through the refinery.
+One pour = one audit run, poured periodically onto the polecat pool. Each filed
+bead (`task_kind=doc-update`, `target=main`, `merge_strategy=mr`) feeds the
+shared `doc-update` pipeline — a pool polecat edits the brief(s) under
+`mol-polecat-work` and the refinery opens one small PR to `main`.
 """
 formula = "mol-doc-keeper-drift-audit"
 
-# Pool-wake prerequisite (load-bearing — do not remove). The cooldown order
-# orders/doc-keeper-drift-audit.toml pours this formula onto a scale-from-zero
-# polecat pool. A pooled formula only wakes a worker when its compiled root is
-# Ready-visible, which requires a top-level `phase`. Without this the order
-# fires on schedule but no polecat spawns and the audit silently never runs.
-# See bead tk-yw3zb.8 and the order file's "Pool-wake prerequisite" note.
+# Load-bearing — do not remove. The top-level `phase` makes the compiled root
+# Ready-visible; without it the cooldown order's pour fires but no polecat spawns.
 phase = "vapor"
 
 [requires]
@@ -93,13 +46,9 @@ gc prime
 gc bd prime
 ```
 
-This is the doc-keeper **drift audit** (keep each brief *true*). In the next
-step you will glob the briefs, read each brief's `## Scope`, judge whether any
-claim is stale against current upstream, and file one change-unit `doc-update`
-bead per stale upstream change — capped, de-duplicated, citing provenance. You
-do NOT edit any doc and you keep NO state bead; the audit is read-only over the
-repos and writes only the beads it files. Read `audit-and-file` in full before
-running it.
+This is the doc-keeper **drift audit** (keep each brief *true*) — read-only: it
+files `doc-update` beads, never edits a doc, keeps no state bead. Read
+`audit-and-file` in full before running it.
 """
 
 [[steps]]
@@ -141,34 +90,30 @@ echo "Upstream HEADs: {{gascity_rig}}=$(git -C "$GASCITY_DIR" rev-parse --short 
 
 This is a reading task, not a diff-matching script. For each brief in `$BRIEFS`:
 
-1. **Read the brief**, especially its `## Scope` — the *mandate* (what it
-   claims authority over) and the *boundaries* (what it defers to adjacent
-   docs). The scope is your only relevance signal: it tells you which upstream
-   subjects this brief is accountable for. A brief's scope often names the exact
-   upstream surface it tracks — commands, PR numbers, subsystems, sibling docs;
-   use those as your entry points into upstream history.
+1. **Read the brief's `## Scope`** — its *mandate* (what it claims authority
+   over) and *boundaries* (what it defers to adjacent docs). The scope is your
+   only relevance signal; it often names the exact upstream surface it tracks
+   (commands, PR numbers, subsystems, sibling docs) — use those as entry points
+   into upstream history.
 
-2. **Ask the charter question:** is any substantive claim the brief makes
-   *within its mandate* no longer true, because the upstream it tracks
-   (`{{gascity_rig}}` at `origin/$GASCITY_DEF`, gc-toolkit at
-   `origin/$GCTK_DEF`) has moved? Verify the brief's load-bearing claims
-   against current upstream — read the relevant upstream code/docs/commits
-   (`git -C "$GASCITY_DIR" log -p`, `git show`, file reads) for the surface the
-   scope points at. A claim that is merely *incomplete* is the memory audit's
-   job (gap), not yours; you handle claims that are now *wrong* (drift).
+2. **Ask the charter question:** is any substantive claim *within the mandate*
+   no longer true because the upstream it tracks (`{{gascity_rig}}` at
+   `origin/$GASCITY_DEF`, gc-toolkit at `origin/$GCTK_DEF`) has moved? Verify
+   load-bearing claims against current upstream (`git -C "$GASCITY_DIR" log -p`,
+   `git show`, file reads) for the surface the scope points at. A merely
+   *incomplete* claim is the memory audit's job (gap); you handle claims that are
+   now *wrong* (drift).
 
-3. **Find provenance.** For each stale claim, identify the upstream commit(s)
-   that made it stale — that is what the worker needs and what the bead cites.
-   If you cannot point at a specific upstream change, you do not yet have drift;
-   leave it (a vague "this feels dated" is not a finding).
+3. **Find provenance.** Identify the upstream commit(s) that made each stale
+   claim stale — that is what the bead cites. No specific upstream change means
+   no drift yet; leave it (a vague "this feels dated" is not a finding).
 
-4. **Group by change.** One upstream change that invalidates claims in several
-   briefs is ONE finding (one bead spanning those briefs), not one per brief.
-   Conversely, two unrelated upstream changes hitting the same brief are two
-   findings. The unit is the change.
+4. **Group by change.** One upstream change invalidating claims in several briefs
+   is ONE finding (one bead spanning them), not one per brief; two unrelated
+   changes hitting one brief are two findings. The unit is the change.
 
-Anything outside a brief's `## Scope` boundaries is not drift for that brief —
-the scope is deliberately bounded, and the adjacent doc owns that material.
+Anything outside a brief's `## Scope` is not drift for that brief — the scope is
+bounded, and the adjacent doc owns that material.
 
 ## 3. Dedup, cap, and file
 
@@ -235,9 +180,8 @@ echo "filed doc-update $BEAD -> $IMPACTED"
 ```
 
 Routing the bead to the pool (`gc.routed_to=$POOL`, unassigned) is the dispatch:
-a pool polecat claims it and runs the standard `mol-polecat-work` lifecycle —
-there is no bespoke worker formula. The pre-stamped `target=main` makes its
-workspace-setup branch from `origin/main`.
+a pool polecat claims it and runs the standard `mol-polecat-work` lifecycle — no
+bespoke worker formula.
 
 **Exit criteria:** every brief was read and judged against its `## Scope`; each
 stale upstream change became one change-unit `doc-update` bead (or was skipped
