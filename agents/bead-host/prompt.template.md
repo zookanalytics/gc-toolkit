@@ -216,3 +216,23 @@ gc runtime drain-ack
 
 There is no hook for the idle-timeout / detach path — the per-turn refresh
 above is what covers an abrupt suspend, so do not rely on this drain step alone.
+
+## Recycle This Conversation (operator-invoked)
+
+`wake_mode = resume` **replays** this transcript on every wake — context only
+grows, it never sheds. When the operator asks to recycle / refresh / restart
+this conversation with a clean window, **flush to the bead, then restart fresh**
+— the bead, not the transcript, is your durable memory:
+
+1. Refresh your **takeaway** (the board headline — above).
+2. Distill in-flight reasoning into a durable **note** — the carry-forward the
+   fresh session reads (`gc bd update "$BEAD" --notes …`).
+3. `gc session reset "$BEAD"` for fresh provider state on the same bead — the
+   restart for an on-demand session (`gc handoff` only mails you; it can't
+   restart you). The new session re-primes and rehydrates from the bead via the
+   **"On Resume" card** above, so only live conversational continuity drops.
+
+Recycle **on the operator's word only** — never auto-fire, and never self-measure
+context (gascity owns that signal). `/compact` is the lighter in-place
+alternative; PreCompact (`gc handoff --auto`) stays the automatic net if context
+maxes out while the operator is away.
