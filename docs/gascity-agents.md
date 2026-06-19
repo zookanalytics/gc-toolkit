@@ -21,6 +21,18 @@ When in doubt about *routing* — `assignee` vs `gc.routed_to` vs
 This doc covers *who* the agents are; that doc covers *how* work
 moves between them.
 
+## Scope
+
+**Mandate.** The single-page reference for the agent *variants* Gas
+City supports — what each one is, and how each is identified and run. It
+captures the corners that surface only when those variants mix and the
+footguns they have already cost.
+
+**Boundaries.** This doc covers *who* the agents are, not *how* work
+moves between them — the routing model is
+[gascity-routing-model.md](gascity-routing-model.md). It does not cover
+prompt-template authoring or any single agent's role behavior.
+
 ## Variants at a glance
 
 | Variant | Configured by | Singleton? | Auto-spawned? | Routed work? | Examples |

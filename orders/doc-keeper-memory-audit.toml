@@ -1,0 +1,25 @@
+# doc-keeper memory audit — periodic auto-memory promotion scan.
+# Epic tk-yw3zb, sub-bead .8 (cron registration); design
+# specs/tk-yw3zb.1/doc-keeper-architecture.md §7.
+#
+# Fires the mol-doc-keeper-memory-audit formula (sub-bead .7) on a 24h
+# cooldown. One fire = one run: a polecat scans mechanik's auto-memory
+# for durable learnings that fall inside a brief's `## Scope` but aren't
+# captured yet, and files change-unit `doc-update` beads through the same
+# pool worker (mol-polecat-work) → refinery pipeline as the drift audit.
+#
+# Enablement, scope, pool, and the pool-wake `phase = "vapor"`
+# prerequisite are identical to the drift-audit order and explained in
+# full there — see orders/doc-keeper-drift-audit.toml. In short:
+# ships in-pack (importing gc-toolkit = live, not imported = inert);
+# rig-scoped with a BARE pool so the wisp lands in, and is claimed
+# from, each importing rig's own polecat store; the .7 formula needs a
+# top-level `phase = "vapor"` to wake a scale-from-zero pool, and must
+# merge before/with this order.
+[order]
+description = "doc-keeper: scan mechanik auto-memory for promote-to-brief candidates; file doc-update beads"
+formula = "mol-doc-keeper-memory-audit"
+trigger = "cooldown"
+interval = "24h"
+pool = "gc-toolkit.polecat"
+scope = "rig"

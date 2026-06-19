@@ -1,0 +1,210 @@
+description = """
+doc-keeper drift audit — keep each agent brief **true**. Glob the briefs
+(`docs/gascity-*.md`), read each brief's `## Scope`, and ask the charter
+question: given how the repos it tracks have moved upstream, is any claim the
+brief makes *within its scope* now false? Each stale claim is drift; the audit
+files one change-unit `doc-update` bead per upstream change, citing the
+triggering commits as provenance. Read-only: it produces beads, never edits a
+doc.
+
+One pour = one audit run, poured periodically onto the polecat pool. Each filed
+bead (`task_kind=doc-update`, `target=main`, `merge_strategy=mr`) feeds the
+shared `doc-update` pipeline — a pool polecat edits the brief(s) under
+`mol-polecat-work` and the refinery opens one small PR to `main`.
+"""
+formula = "mol-doc-keeper-drift-audit"
+
+# Load-bearing — do not remove. The top-level `phase` makes the compiled root
+# Ready-visible; without it the cooldown order's pour fires but no polecat spawns.
+phase = "vapor"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+[vars.binding_prefix]
+description = "Import binding prefix for gastown agent identities, with the trailing dot (e.g. 'gc-toolkit.'). Combined with the rig qualifier it names the polecat pool the filed doc-update beads route to (${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat). Non-empty default — unlike the sling-poured patrol formulas, this audit is poured by a gc order, and the order-dispatch path does NOT inject routing vars, so this default is the value used at runtime. 'gc-toolkit.' matches every importer's default_sling_target (<rig>/gc-toolkit.polecat)."
+default = "gc-toolkit."
+
+[vars.gascity_rig]
+description = "Sibling rig directory under $GC_CITY/rigs that holds the upstream gascity checkout. Used as both the repo path and the provenance repo label."
+default = "gascity"
+
+[vars.audit_max_beads_per_run]
+description = "Safety cap on doc-update beads filed per audit run, so a high-drift window cannot swamp the polecat pool. Deferred changes are picked up on the next run."
+default = "5"
+
+[[steps]]
+id = "prime"
+title = "Prime and orient"
+description = """
+Load role + beads context, then orient. No side effects here — the scan and any
+bead writes happen in `audit-and-file`.
+
+```bash
+gc prime
+gc bd prime
+```
+
+This is the doc-keeper **drift audit** (keep each brief *true*) — read-only: it
+files `doc-update` beads, never edits a doc, keeps no state bead. Read
+`audit-and-file` in full before running it.
+"""
+
+[[steps]]
+id = "audit-and-file"
+title = "Judge each brief against its ## Scope and file change-unit doc-update beads"
+needs = ["prime"]
+description = """
+One idempotent pass. Re-running is safe: a change already addressed by a live
+bead or open PR is caught by the dedup, and the semantic per-scope judgment —
+not a stored baseline — is what makes a clean run file nothing.
+
+## 1. Resolve the brief set and the repos
+
+```bash
+REPO="$(git rev-parse --show-toplevel)"
+MAX="{{audit_max_beads_per_run}}"
+POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+GASCITY_DIR="$GC_CITY/rigs/{{gascity_rig}}"
+GCTK_DIR="$GC_RIG_ROOT"
+
+# The brief set IS the glob — one source of truth (the filesystem). No list.
+BRIEFS=$(cd "$REPO" && ls docs/gascity-*.md 2>/dev/null)
+if [ -z "$BRIEFS" ]; then
+  echo "no docs/gascity-*.md briefs in this rig — nothing to audit (cheap no-op)."
+  gc runtime drain-ack
+  exit 0
+fi
+echo "Briefs in scope:"; echo "$BRIEFS"
+
+# Resolve each repo's default branch (fallback: main) and freshen best-effort.
+defbranch() { b=$(git -C "$1" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null); b=${b#origin/}; [ -n "$b" ] && echo "$b" || echo main; }
+GASCITY_DEF=$(defbranch "$GASCITY_DIR"); GCTK_DEF=$(defbranch "$GCTK_DIR")
+git -C "$GASCITY_DIR" fetch --quiet origin "$GASCITY_DEF" 2>/dev/null || true
+git -C "$GCTK_DIR"   fetch --quiet origin "$GCTK_DEF"   2>/dev/null || true
+echo "Upstream HEADs: {{gascity_rig}}=$(git -C "$GASCITY_DIR" rev-parse --short "origin/$GASCITY_DEF" 2>/dev/null) gc-toolkit=$(git -C "$GCTK_DIR" rev-parse --short "origin/$GCTK_DEF" 2>/dev/null)"
+```
+
+## 2. Judge each brief against its `## Scope` (the audit proper)
+
+This is a reading task, not a diff-matching script. For each brief in `$BRIEFS`:
+
+1. **Read the brief's `## Scope`** — its *mandate* (what it claims authority
+   over) and *boundaries* (what it defers to adjacent docs). The scope is your
+   only relevance signal; it often names the exact upstream surface it tracks
+   (commands, PR numbers, subsystems, sibling docs) — use those as entry points
+   into upstream history.
+
+2. **Ask the charter question:** is any substantive claim *within the mandate*
+   no longer true because the upstream it tracks (`{{gascity_rig}}` at
+   `origin/$GASCITY_DEF`, gc-toolkit at `origin/$GCTK_DEF`) has moved? Verify
+   load-bearing claims against current upstream (`git -C "$GASCITY_DIR" log -p`,
+   `git show`, file reads) for the surface the scope points at. A merely
+   *incomplete* claim is the memory audit's job (gap); you handle claims that are
+   now *wrong* (drift).
+
+3. **Find provenance.** Identify the upstream commit(s) that made each stale
+   claim stale — that is what the bead cites. No specific upstream change means
+   no drift yet; leave it (a vague "this feels dated" is not a finding).
+
+4. **Group by change.** One upstream change invalidating claims in several briefs
+   is ONE finding (one bead spanning them), not one per brief; two unrelated
+   changes hitting one brief are two findings. The unit is the change.
+
+Anything outside a brief's `## Scope` is not drift for that brief — the scope is
+bounded, and the adjacent doc owns that material.
+
+## 3. Dedup, cap, and file
+
+For each finding, before filing, skip it if the same change is already in
+flight. Refinery CLOSES a `doc-update` bead when it opens the PR
+(`merge_strategy=mr`), so a bead-only query misses an in-flight PR — also check
+the PRs of recently-closed `doc-update` beads.
+
+```bash
+# Live (non-closed) doc-update beads, and the open PRs of closed ones, as the
+# dedup surface. Read their titles/bodies to decide "same change?" — dedup is on
+# the change (the upstream commit / brief+area), keyed off the provenance you
+# cite, NOT on a whole-doc match (one open PR for an unrelated change to a brief
+# must not block a different change to the same brief).
+LIVE_DU=$(gc bd list -l doc-update --status open,in_progress,blocked,deferred --json 2>/dev/null)
+echo "$LIVE_DU" | jq -r '.[] | "live doc-update \\(.id): \\(.title)"' 2>/dev/null
+if command -v gh >/dev/null 2>&1; then
+  gc bd list -l doc-update --status closed --metadata-field merge_result=pull_request --json 2>/dev/null \
+    | jq -r '.[].metadata.pr_number // empty' | while read -r n; do
+        [ -n "$n" ] && [ "$(gh pr view "$n" --json state -q .state 2>/dev/null)" = "OPEN" ] \
+          && echo "open doc-update PR #$n: $(gh pr view "$n" --json title -q .title 2>/dev/null)"
+      done
+fi
+```
+
+Skip a finding whose change (provenance + impacted brief/area) already appears
+above. File at most `$MAX` beads this run; defer the rest (note the count — they
+re-surface next run, since the dedup state is the live beads + open PRs).
+
+For each finding you DO file, in the change-unit shape:
+
+```bash
+# $IMPACTED = space/comma list of the brief path(s) this change touches.
+# $WHAT     = one line: what is now stale and what should change.
+# $PROV     = provenance: "<repo> <short-sha>..<short-sha>" plus the salient
+#             commit subject(s), so the worker can `git log -p` the range.
+BODY="## Target
+- Brief(s): $IMPACTED
+
+## Change
+- $WHAT
+- The audit does not propose prose: read the cited commits ('git log -p' in the
+  named repo) and write the real edit. If review shows nothing needs changing,
+  close as a no-op.
+
+## Provenance
+- Drift: an upstream change moved a surface one or more briefs above track.
+$PROV"
+
+BEAD=$(gc bd create "doc-update: $WHAT" -t task -l doc-keeper -l doc-update -d "$BODY" --json | jq -r '.id // .[0].id')
+[ -z "$BEAD" ] || [ "$BEAD" = "null" ] && { echo "WARN: could not create doc-update bead; skipping" >&2; continue; }
+
+# Change-unit discriminator + pipeline routing (no custom schema; task_kind +
+# labels carry it, mirroring how mol-refinery-patrol marks task_kind=review).
+# target=main + merge_strategy=mr make the pool worker (mol-polecat-work) branch
+# from main and the refinery open one small PR to main.
+gc bd update "$BEAD" \
+  --set-metadata task_kind=doc-update \
+  --set-metadata target=main \
+  --set-metadata merge_strategy=mr \
+  --set-metadata gc.routed_to="$POOL"
+gc bd dep add "$BEAD" tk-yw3zb --type=parent-child 2>/dev/null || true
+echo "filed doc-update $BEAD -> $IMPACTED"
+```
+
+Routing the bead to the pool (`gc.routed_to=$POOL`, unassigned) is the dispatch:
+a pool polecat claims it and runs the standard `mol-polecat-work` lifecycle — no
+bespoke worker formula.
+
+**Exit criteria:** every brief was read and judged against its `## Scope`; each
+stale upstream change became one change-unit `doc-update` bead (or was skipped
+by dedup / deferred by the cap). No repository file was edited and no state bead
+was written.
+"""
+
+[[steps]]
+id = "drain"
+title = "Summarize and drain"
+needs = ["audit-and-file"]
+description = """
+The audit is a one-shot run; the cooldown order re-pours the next one. There is
+no work bead to hand off and nothing to close — the `doc-update` beads you filed
+are routed to the worker pool.
+
+Print a one-line summary (count filed this run vs deferred), then drain:
+
+```bash
+gc runtime drain-ack
+```
+
+Do NOT push a branch, hand to the refinery, or close any bead — this formula
+files beads and exits. The doc edits happen later, in `mol-polecat-work`, on a
+branch, through the refinery.
+"""

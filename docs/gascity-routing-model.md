@@ -5,6 +5,17 @@ description: How `gc sling`, direct assignee, and `gc sling --reassign` differ �
 
 # Gas City routing model: sling vs assignee vs `--reassign`
 
+## Scope
+
+**Mandate.** How work is routed to agents: how a bead reaches the worker
+that will act on it, and — the doc's distinctive charge — which routing
+field each delivery path is responsible for setting. It is the authority
+on that field-level contract.
+
+**Boundaries.** This doc covers *how* work moves between agents, not
+*who* the agents are — that's [gascity-agents.md](gascity-agents.md). It
+defines the routing contract; it is not a command tutorial.
+
 ## Provenance
 
 | Doc-type or artifact | Producer | Source location | Surveyed at |
