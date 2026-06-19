@@ -118,9 +118,9 @@ gc-toolkit does not restate them.
 Machine-readable artifacts. Each link is the canonical download.
 
 - Schemas index: https://docs.gascityhall.com/schema
-- OpenAPI 3.1: https://docs.gascityhall.com/schema/openapi.json
-- Events JSONL: https://docs.gascityhall.com/schema/events.json
-- City config: https://docs.gascityhall.com/schema/city-schema.json
+- OpenAPI 3.1: https://docs.gascity.com/reference/schema/openapi.json
+- Events JSONL: https://docs.gascity.com/reference/schema/events.json
+- City config: https://docs.gascity.com/reference/schema/city-schema.json
 
 ## Gaps
 
