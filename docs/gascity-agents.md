@@ -37,8 +37,8 @@ prompt-template authoring or any single agent's role behavior.
 
 | Variant | Configured by | Singleton? | Auto-spawned? | Routed work? | Examples |
 |---|---|---|---|---|---|
-| **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work | no — Tier 3 skipped | refinery, gascity-keeper |
-| **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, boot, witness, mechanik (gc-toolkit) |
+| **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work | no — Tier 3 skipped | boot, refinery, gascity-keeper |
+| **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, witness, mechanik (gc-toolkit) |
 | **Patrol (overlay)** | named singleton + patrol-cycle prompt (4-tier startup, pour-before-burn) | yes — runs as the underlying named singleton | yes, as underlying named | no — Tier 3 skipped; patrol wisps are produced, not consumed via routed queue | deacon, witness, refinery |
 | **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
 | **Thread (operator-spawned)** | agent with `work_query = "printf '[]'"` + `sling_query` that exits non-zero | no, N instances | never (work query is a stub) | no | mayor-thread, mechanik-thread |
@@ -82,7 +82,11 @@ Source for the computation: `NamedSession.QualifiedName()` in
 
 ### Worked example — the gc-toolkit polecat
 
-Pack file at `rigs/gascity/examples/gastown/packs/gastown/agents/polecat/agent.toml`:
+Pack file — the gastown pack's `agents/polecat/agent.toml`. The
+gastown pack is consumed as a pinned module import
+(`github.com/gastownhall/gascity-packs`, wired via `[imports.gastown]`
+in `rigs/gascity/examples/gastown/pack.toml`), so its agent templates
+live in the module rather than the city tree:
 
 ```toml
 scope = "rig"
@@ -236,7 +240,8 @@ lane breakdown.
 
 ### Examples in the wild
 
-From `rigs/gascity/examples/gastown/packs/gastown/pack.toml`:
+From the gastown pack's `pack.toml` (`github.com/gastownhall/gascity-packs`,
+imported via `rigs/gascity/examples/gastown/pack.toml`):
 
 ```toml
 [[named_session]]
@@ -252,7 +257,7 @@ mode = "always"
 [[named_session]]
 template = "boot"
 scope = "city"
-mode = "always"
+mode = "on_demand"
 
 [[named_session]]
 template = "witness"
@@ -265,9 +270,13 @@ scope = "rig"
 mode = "on_demand"
 ```
 
-`refinery` is the lone `on_demand` in the gastown base — it's
-expected to be up while a merge queue has work, otherwise allowed
-to sleep. Everything else in the base set is `mode = "always"`.
+`boot` and `refinery` are the `on_demand` members of the gastown
+base. `refinery` is expected to be up while a merge queue has work,
+otherwise allowed to sleep; `boot` stays dormant until there is
+something to judge (`mode = "always"` would revive it every patrol
+tick and write a session bead each time — the dominant source of
+city-store churn on an idle town). The remaining base singletons
+(`mayor`, `deacon`, `witness`) are `mode = "always"`.
 
 ## Variant B — Pool workers
 
@@ -341,7 +350,7 @@ worker in the pool.
 `polecat` (gastown base):
 
 ```toml
-# rigs/gascity/examples/gastown/packs/gastown/agents/polecat/agent.toml
+# gastown pack (github.com/gastownhall/gascity-packs): agents/polecat/agent.toml
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
@@ -352,12 +361,11 @@ min_active_sessions = 0
 max_active_sessions = 5
 ```
 
-`dog` (gastown maintenance pack):
+`dog` (gastown base):
 
 ```toml
-# rigs/gascity/examples/gastown/packs/maintenance/agents/dog/agent.toml
+# gastown pack (github.com/gastownhall/gascity-packs): agents/dog/agent.toml
 scope = "city"
-fallback = true
 idle_timeout = "2h"
 min_active_sessions = 0
 max_active_sessions = 3
@@ -443,9 +451,9 @@ patrol-wisp cycle on top of the standard lifecycle. Deacon,
 witness, and refinery are the patrol agents in the gastown base —
 each `[[named_session]]` declares them like any other singleton,
 but their prompts (and the `propulsion-deacon`, `propulsion-witness`,
-`propulsion-refinery` fragments in
-`rigs/gascity/examples/gastown/packs/maintenance/template-fragments/propulsion.template.md`)
-implement the patrol contract described below.
+`propulsion-refinery` fragments in the gastown pack's
+`template-fragments/propulsion.template.md`) implement the patrol
+contract described below.
 
 This is called out as its own variant because the contract has
 substantial mechanics that pool workers and threads do not have,
