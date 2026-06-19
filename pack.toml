@@ -38,12 +38,13 @@ name = "gc-toolkit"
 schema = 2
 
 [imports.gastown]
-# City-root-relative (`//` prefix) so the import works from any path
-# the rig is checked out at — under `rigs/gc-toolkit/` in production
-# or under `.gc/worktrees/` during polecat work. The materialized
-# gastown copy is refreshed on every `gc` start from the embedded
-# gastown PackFS (see `cmd/gc/embed_builtin_packs.go`).
-source = "//.gc/system/packs/gastown"
+# gastown composes from the public gascity-packs registry, resolved from
+# the user-global pack cache (the running binary pre-seeds that cache with
+# its embedded gastown PackFS at this pin). The per-city
+# .gc/system/packs/gastown tree was retired upstream — builtin packs are
+# no longer materialized into the city; see cmd/gc/embed_builtin_packs.go.
+source = "https://github.com/gastownhall/gascity-packs/tree/main/gastown"
+version = "sha:4212acb7046c11f6f633df73307006493185233a"
 
 [global]
 # Ordering is load-bearing. Gastown's tmux-theme.sh runs first (from
