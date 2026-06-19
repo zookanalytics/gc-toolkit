@@ -852,13 +852,21 @@ pinned from merely-working).
 **Talk to it, or give it work.** Pin only when you want to
 *converse* — surface a rebase summary, refine a PR draft, ask an
 upstream question. If you only need a *job done* (rebase, sync,
-PR-prep), don't pin — hand it the work, which is itself a wake
-reason; it materializes, runs, surfaces any questions back to you,
-and drains on its own:
+PR-prep) and the keeper is **already up**, don't pin — hand it the
+work; while it is materialized the hook-work keeps it up, so it
+runs, surfaces any questions back to you, and drains on its own:
 
 ```bash
 bd update <bead> --assignee gascity/gascity-keeper.keeper   # Lane 2
 ```
+
+**Caveat — a keeper already drained to `asleep` may not wake from
+the hand-off.** Newly-assigned hook work does not reliably re-wake a
+drained `on_demand` singleton
+([footgun](#drained-on_demand-singleton-wont-self-wake-for-newly-queued-work)),
+so the bead can sit unprocessed. Pin first — the `[ ⚡ pin keeper ]`
+picker entry materializes a down keeper, which then drains the
+queued bead — or apply the footgun's pin-then-wake force-recipe.
 
 ### Lifecycle background
 
