@@ -71,28 +71,28 @@ If any of the four fail, the content does not belong here.
 
 ## Pack v2 (current pack model)
 
-The migration guide and the shareable-packs guide are the canonical
-narrative entry points; the design notes in `gastownhall/gascity` are
-the deep reference.
+The shareable-packs guide is the canonical narrative entry point; the
+design notes in `gastownhall/gascity` are the deep reference. The
+standalone migration guide was retired upstream — PackV2 migration now
+lives in `gc doctor` (`gc doctor --fix` repairs legacy `pack.toml`) and
+the shareable-packs guide.
 
-- Migration guide (Gas City 0.14.0 city or pack → PackV2): https://docs.gascityhall.com/guides/migrating-to-pack-vnext
 - Shareable packs (creating, importing, customizing PackV2 packs): https://docs.gascityhall.com/guides/shareable-packs
-- Pack v2 design: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-pack-v2.md
-- Pack loader v2: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-loader-v2.md
-- Agent v2: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-agent-v2.md
-- Commands: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-commands.md
-- Directory conventions: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-directory-conventions.md
-- Packman (pack-management CLI): https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-packman.md
-- Rig binding phases: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-rig-binding-phases.md
-- Conformance matrix: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-conformance-matrix.md
-- Consistency audit: https://github.com/gastownhall/gascity/blob/main/docs/packv2/doc-consistency-audit.md
-- Migration source (MDX): https://github.com/gastownhall/gascity/blob/main/docs/packv2/migration.mdx
-- Skew analysis: https://github.com/gastownhall/gascity/blob/main/docs/packv2/skew-analysis.md
+- Pack v2 design: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-pack-v2.md
+- Pack loader v2: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-loader-v2.md
+- Agent v2: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-agent-v2.md
+- Commands: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-commands.md
+- Directory conventions: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-directory-conventions.md
+- Packman (pack-management CLI): https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-packman.md
+- Rig binding phases: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-rig-binding-phases.md
+- Conformance matrix: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-conformance-matrix.md
+- Consistency audit: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-consistency-audit.md
+- Migration source (MDX): https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/migration.mdx
+- Skew analysis: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/skew-analysis.md
 
 ## Guides
 
 - Guides index: https://docs.gascityhall.com/guides
-- Migrating to PackV2: https://docs.gascityhall.com/guides/migrating-to-pack-vnext
 - Authoring and importing shareable packs: https://docs.gascityhall.com/guides/shareable-packs
 
 ## Troubleshooting
