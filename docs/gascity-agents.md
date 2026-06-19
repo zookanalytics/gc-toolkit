@@ -82,7 +82,11 @@ Source for the computation: `NamedSession.QualifiedName()` in
 
 ### Worked example — the gc-toolkit polecat
 
-Pack file at `rigs/gascity/examples/gastown/packs/gastown/agents/polecat/agent.toml`:
+Pack file — the gastown pack's `agents/polecat/agent.toml`. The
+gastown pack is consumed as a pinned module import
+(`github.com/gastownhall/gascity-packs`, wired via `[imports.gastown]`
+in `rigs/gascity/examples/gastown/pack.toml`), so its agent templates
+live in the module rather than the city tree:
 
 ```toml
 scope = "rig"
@@ -236,7 +240,8 @@ lane breakdown.
 
 ### Examples in the wild
 
-From `rigs/gascity/examples/gastown/packs/gastown/pack.toml`:
+From the gastown pack's `pack.toml` (`github.com/gastownhall/gascity-packs`,
+imported via `rigs/gascity/examples/gastown/pack.toml`):
 
 ```toml
 [[named_session]]
@@ -341,7 +346,7 @@ worker in the pool.
 `polecat` (gastown base):
 
 ```toml
-# rigs/gascity/examples/gastown/packs/gastown/agents/polecat/agent.toml
+# gastown pack (github.com/gastownhall/gascity-packs): agents/polecat/agent.toml
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
@@ -352,12 +357,11 @@ min_active_sessions = 0
 max_active_sessions = 5
 ```
 
-`dog` (gastown maintenance pack):
+`dog` (gastown base):
 
 ```toml
-# rigs/gascity/examples/gastown/packs/maintenance/agents/dog/agent.toml
+# gastown pack (github.com/gastownhall/gascity-packs): agents/dog/agent.toml
 scope = "city"
-fallback = true
 idle_timeout = "2h"
 min_active_sessions = 0
 max_active_sessions = 3
@@ -443,9 +447,9 @@ patrol-wisp cycle on top of the standard lifecycle. Deacon,
 witness, and refinery are the patrol agents in the gastown base —
 each `[[named_session]]` declares them like any other singleton,
 but their prompts (and the `propulsion-deacon`, `propulsion-witness`,
-`propulsion-refinery` fragments in
-`rigs/gascity/examples/gastown/packs/maintenance/template-fragments/propulsion.template.md`)
-implement the patrol contract described below.
+`propulsion-refinery` fragments in the gastown pack's
+`template-fragments/propulsion.template.md`) implement the patrol
+contract described below.
 
 This is called out as its own variant because the contract has
 substantial mechanics that pool workers and threads do not have,
