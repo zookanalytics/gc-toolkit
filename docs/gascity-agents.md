@@ -37,7 +37,7 @@ prompt-template authoring or any single agent's role behavior.
 
 | Variant | Configured by | Singleton? | Auto-spawned? | Routed work? | Examples |
 |---|---|---|---|---|---|
-| **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work | no — Tier 3 skipped | refinery, gascity-keeper |
+| **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work — but **not** once drained to `asleep` ([footgun](#drained-on_demand-singleton-wont-self-wake-for-newly-queued-work)) | no — Tier 3 skipped | refinery, gascity-keeper |
 | **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, boot, witness, mechanik (gc-toolkit) |
 | **Patrol (overlay)** | named singleton + patrol-cycle prompt (4-tier startup, pour-before-burn) | yes — runs as the underlying named singleton | yes, as underlying named | no — Tier 3 skipped; patrol wisps are produced, not consumed via routed queue | deacon, witness, refinery |
 | **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
@@ -182,7 +182,7 @@ The controller's reconciler evaluates desired state every
 
 | Mode | Desired state when no work | Desired state when work appears |
 |---|---|---|
-| `on_demand` | not materialized (sleeping at most) | spawn the canonical session |
+| `on_demand` | not materialized (sleeping at most) | spawn the canonical session — but one already drained to `asleep` won't reliably self-wake from a statically-assigned bead ([footgun](#drained-on_demand-singleton-wont-self-wake-for-newly-queued-work)) |
 | `always` | spawn and keep alive, regardless of work | spawn and keep alive |
 
 **Sleep policy.** `mode = "always"` is incompatible with
