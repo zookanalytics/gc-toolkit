@@ -17,8 +17,10 @@ This skill has three shapes. Pick one by reading `$GC_TEMPLATE`, checking
 in order (most specific first):
 
 - **Bead-host self-recycle path** — the resident conversation for one
-  work bead: the `wake_mode = resume` bead-host whose `$GC_ALIAS` *is* the
-  bead id. `$GC_TEMPLATE`'s agent-name component is `bead-host` (e.g.
+  work bead: the `wake_mode = resume` bead-host bound to one bead (its
+  `$GC_ALIAS` carries that bead id behind a rig prefix —
+  `gc-toolkit.tk-6d0vb` for bead `tk-6d0vb`). `$GC_TEMPLATE`'s agent-name
+  component is `bead-host` (e.g.
   `gc-toolkit.bead-host`). This is a **same-bead** recycle — the host
   restarts itself on the same bead with a fresh transcript, and the
   **bead** (its notes + takeaway) is the carry-forward: no mail, no
@@ -42,7 +44,7 @@ in order (most specific first):
   (`gc-toolkit.<role>`, derived from the template) and the thread
   session is closed.
 
-If `$GC_TEMPLATE` falls outside both shapes — an `mode = "on_demand"`
+If `$GC_TEMPLATE` falls outside all three shapes — an `mode = "on_demand"`
 session like refinery, or anything else the operator wants handed off
 — **stop and confirm before proceeding.** `gc handoff` will write the
 mail but cannot restart the user-attended process, so the next-life
@@ -92,7 +94,7 @@ The operator triggers this skill — not the agent's own judgment.
 Recognize these phrasings as triggers:
 
 **Bead-host self-recycle triggers** (current session is a bead-host —
-`$GC_ALIAS` is its bead id):
+`$GC_ALIAS` carries its bead id behind a rig prefix):
 
 - "Recycle" / "recycle this conversation" / "recycle the context"
 - "Reset context" / "fresh context" / "clean slate on this bead"
@@ -146,14 +148,20 @@ operator asks** (triggers above); never auto-fire.
 
 **1. Flush warm state to the bead.** The bead's notes + takeaway are what
 the fresh session reads back, so refresh both — nothing in flight should
-survive only in the transcript:
+survive only in the transcript. A bead-host's `$GC_ALIAS` is prefixed
+(e.g. `gc-toolkit.tk-6d0vb`), **not** the raw bead id, so derive the bead
+from the session bead first and use `$BEAD` for every `gc bd` / takeaway
+call:
+
+```bash
+BEAD=$(gc bd show "$GC_SESSION_ID" --json | jq -r '.[0].metadata.hosts_bead')
+```
 
 - **Takeaway** — re-stamp this bead's board headline (your usual per-turn
-  takeaway call) so it names exactly where this stands.
+  takeaway call, targeting `$BEAD`) so it names exactly where this stands.
 - **Note** — distill the in-flight reasoning a cold resume needs:
 
   ```bash
-  BEAD="$GC_ALIAS"                  # a bead-host's alias is its bead id
   gc bd update "$BEAD" --notes "$(cat <<'EOF'
   <what's being weighed, what's open, the next move — terse and resumable,
   the same shape as a handoff body but written into the bead>
@@ -164,7 +172,7 @@ survive only in the transcript:
 **2. Restart fresh on the same bead.**
 
 ```bash
-gc session reset "$BEAD"           # fresh provider state, same bead (no close)
+gc session reset "$GC_SESSION_ID"  # reset the session; same bead stays attached (no close)
 ```
 
 Use `gc session reset`, **not** `gc handoff`: the bead already holds the
