@@ -78,8 +78,13 @@ fi
 
 base="$city/.gc/system/packs/gastown"
 if [ ! -d "$base" ]; then
-    echo "base gastown pack not found under $city/.gc/system/packs/gastown — cannot check"
-    exit 2
+    # The .gc/system/packs tree was retired upstream — builtin/imported packs
+    # now resolve from the user-global pack cache at a content-addressed path
+    # this check cannot locate without a gc affordance to resolve a transitive
+    # import's dir. Skip (visible WARN) instead of erroring until gc-xdzml
+    # reconnects the base lookup.
+    echo "gastown base pack not materialized (import-cache model); collision check skipped — see gc-xdzml"
+    exit 1
 fi
 
 snap_root="$dir/doctor/check-base-artifact-collision/base-snapshots"

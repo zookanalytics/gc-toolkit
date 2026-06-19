@@ -14,12 +14,12 @@ min_active_sessions = 0
 # (canonical-self-rename is intentionally not appended: it is
 # canonical-identity title hygiene, threads manage their title via the
 # session-title skill, and the pre-tk-kdu2v5 overlay never carried it.)
-# The // prefix resolves against the materialized gastown pack, same
-# form as polecat-codex. Template variables (.AgentName, .RigName,
-# .WorkDir) bind to the thread's identity, not the canonical's, because
-# PromptContext is built per-agent at render time
+# The "<pack>//<subpath>" form resolves against the imported gastown
+# pack's cache dir, same form as polecat-codex. Template variables
+# (.AgentName, .RigName, .WorkDir) bind to the thread's identity, not the
+# canonical's, because PromptContext is built per-agent at render time
 # (cmd/gc/template_resolve.go).
-prompt_template = "//.gc/system/packs/gastown/agents/mayor/prompt.template.md"
+prompt_template = "gastown//agents/mayor/prompt.template.md"
 
 # Append the mayor dispatch doctrine (lockstep with the canonical) plus
 # the generic thread-role fragment. RoleName (below) drives the
