@@ -37,8 +37,8 @@ prompt-template authoring or any single agent's role behavior.
 
 | Variant | Configured by | Singleton? | Auto-spawned? | Routed work? | Examples |
 |---|---|---|---|---|---|
-| **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work | no — Tier 3 skipped | boot, refinery, gascity-keeper |
-| **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, witness, mechanik (gc-toolkit) |
+| **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work | no — Tier 3 skipped | refinery, gascity-keeper |
+| **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, boot, witness, mechanik (gc-toolkit) |
 | **Patrol (overlay)** | named singleton + patrol-cycle prompt (4-tier startup, pour-before-burn) | yes — runs as the underlying named singleton | yes, as underlying named | no — Tier 3 skipped; patrol wisps are produced, not consumed via routed queue | deacon, witness, refinery |
 | **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
 | **Thread (operator-spawned)** | agent with `work_query = "printf '[]'"` + `sling_query` that exits non-zero | no, N instances | never (work query is a stub) | no | mayor-thread, mechanik-thread |
@@ -257,7 +257,7 @@ mode = "always"
 [[named_session]]
 template = "boot"
 scope = "city"
-mode = "on_demand"
+mode = "always"
 
 [[named_session]]
 template = "witness"
@@ -270,13 +270,9 @@ scope = "rig"
 mode = "on_demand"
 ```
 
-`boot` and `refinery` are the `on_demand` members of the gastown
-base. `refinery` is expected to be up while a merge queue has work,
-otherwise allowed to sleep; `boot` stays dormant until there is
-something to judge (`mode = "always"` would revive it every patrol
-tick and write a session bead each time — the dominant source of
-city-store churn on an idle town). The remaining base singletons
-(`mayor`, `deacon`, `witness`) are `mode = "always"`.
+`refinery` is the lone `on_demand` in the gastown base — it's
+expected to be up while a merge queue has work, otherwise allowed
+to sleep. Everything else in the base set is `mode = "always"`.
 
 ## Variant B — Pool workers
 
