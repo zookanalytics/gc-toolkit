@@ -633,11 +633,15 @@ the cycle-level mechanics that the matrix does not capture.
 | `gc sling <target> <bead>` | ✗ — singleton ignores Tier 3 (use `bd update --assignee`) | QualifiedName / PoolName (Lane 1) | ✗ — sling_query exits non-zero |
 | `gc runtime drain <addr>` | session id or alias | session id or instance alias (no pool-level drain — drain each instance, or shrink `max_active_sessions` in config) | session id or adhoc alias |
 
-Inventory-style listing (`gc agent list`) and pool-wide drain
-(`gc agent drain`) were removed when runtime ops moved out of
-`gc agent`. The remaining `gc agent` subcommands are `add`,
-`resume`, and `suspend` (config-level only). To enumerate live
-agents, use `gc session list`; to drain a specific session, use
+Pool-wide drain (`gc agent drain`) was removed when the runtime
+ops (`drain`/`undrain`/`drain-ack`/`request-restart`) moved out
+of `gc agent` into `gc runtime`. The remaining `gc agent`
+subcommands are config-level only: `add`, `list`, `resume`, and
+`suspend`. `gc agent list` enumerates **configured** agents from
+the resolved city configuration (pass `--json` to inspect
+routing fields like the effective `work_query` and
+`sling_query`) — distinct from `gc session list`, which
+enumerates **live** sessions. To drain a specific session, use
 `gc runtime drain <session-id-or-alias>` as shown above.
 
 ## Known footguns
