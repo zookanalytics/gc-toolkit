@@ -428,7 +428,7 @@ close` from the composed flow.
 
 This is specific to the carry-forward sweep flow, not a blanket
 prohibition on `gc session reset`. The **bead-host self-recycle** above
-legitimately uses it — operator-invoked, `gc session reset "$BEAD"` is
+legitimately uses it — operator-invoked, `gc session reset "$GC_SESSION_ID"` is
 the restart, no mail. Cycle-recycle likewise chains `gc handoff` then
 `gc session reset` to recycle on-demand named coords without operator
 `/clear`, documented in `template-fragments/cycle-recycle.template.md`.
