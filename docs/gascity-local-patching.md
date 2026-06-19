@@ -238,6 +238,30 @@ operator can see which kept commits required rework and how each was
 classified. The full audit lives in `metadata.conflict_resolutions` on
 the rebase bead.
 
+**Landing the rebase is the refinery's job, not the keeper's.** The
+polecat pushes the rebased history as a `rebase/<bead>` branch — it does
+*not* fast-forward `main` itself. From there the rig refinery (the same
+merge queue that lands ordinary work) takes over: it runs a fresh full
+preflight (the rig's `make check`) on the rebased branch, force-leases it
+onto `main` (`git push --force-with-lease=main:<anchor>`, so a concurrent
+move of `main` aborts the push instead of clobbering it), closes the
+rebase bead with `merge_result=force_lease`, and mails the keeper. The
+keeper hand-lands nothing; it just watches for the close, or for a
+handback if the refinery's preflight fails. (Behaviour change verified
+2026-06-05 — earlier the keeper landed the rebase by hand after the
+polecat pushed.)
+
+**The one manual step left is the local rig-checkout sync.** Landing moves
+`origin/main`, but the rig's working checkout does not follow
+automatically. The refinery skips this sync and reports it whenever the
+checkout looks dirty or divergent — and that report is *often a false
+positive*, typically an untracked build wrapper sitting in the checkout
+rather than real divergence. Before running any `git reset --hard
+origin/main`, confirm there is genuine ahead/behind divergence (e.g.
+`git status -sb` and `git rev-list --left-right --count
+origin/main...HEAD`), and preserve any local `.beads/config.yaml` tuning
+that may not exist on the landed `origin/main`.
+
 **Never run destructive git operations directly in a `gascity` rig that
 has active worktrees.** Polecats and other agents may be working there.
 Use `git worktree add` for isolation, or coordinate via the city's
