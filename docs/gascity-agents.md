@@ -768,6 +768,53 @@ different polecat than the one you're running in. Verify peer
 state before re-implementing — they may already be working on
 it.
 
+### Drained `on_demand` singleton won't self-wake for newly-queued work
+
+**Memory:** `reference-refinery-asleep-slow-wake-for-queued-merges.md`
+**Tracking bug:** `gc-klb7r` (P1).
+
+The [lifecycle table](#lifecycle-background) lists "work on the
+hook" as a durable wake reason — but that holds only while the
+session is **already up**. It does not cover the cold start. A
+named singleton running `mode = "on_demand"` (e.g. the rig
+refinery) that has already drained to `asleep` will **not reliably
+self-wake** when a bead is queued or `assignee`'d to it *after* the
+drain: the reconciler's idle-sleep gate (`compute_awake_set.go`)
+derives no wake-reason from a statically-assigned bead, so the
+session stays down until some *other* reconcile happens to wake it.
+Observed latency runs from tens of minutes to multiple hours; the
+confirmed-bug variant does not self-resolve at all until patched,
+so a queued merge can park the rig's throughput indefinitely.
+
+**Detection.** A bead is queued or `assignee`'d to the singleton
+(e.g. a polecat handed a merge to the refinery) yet sits
+unprocessed, while `gc session list` shows the target `asleep`.
+
+**What does not wake it.**
+
+- `gc session nudge` on an asleep session only **queues** the
+  nudge; it does not wake it.
+- bare `gc session wake` returns `wake_requested`, but the
+  reconciler still computes no wake-reason and the session stays
+  asleep.
+- `gc rig restart` only cycles agents that are *already running*
+  (witness, dispatcher); it will not start an asleep `on_demand`
+  refinery. (There is no `gc rig start`/`stop` — only
+  `restart`/`resume`/`suspend`.)
+
+**Recovery (force-recipe).** Pin, then wake. The pin is a durable
+manual hold — a wake-reason independent of demand-detection — so
+the reconciler starts the session within a tick or two; it then
+scans its queue and drains the work. Unpin once the queue clears to
+return the singleton to `on_demand` idle:
+
+```bash
+gc session pin <session-id>
+gc session wake <session-id>
+# ... session materializes, drains its queued work ...
+gc session unpin <session-id>   # once the queued work clears
+```
+
 ## The gascity-keeper front-door
 
 The **gascity-keeper** (`gascity/gascity-keeper.keeper`) is the
@@ -823,7 +870,7 @@ session materialized only while one of these holds:
 
 | Wake reason | Durable? | How |
 |---|---|---|
-| Work on the hook (a bead `assignee`'d to the agent) | yes — until the work is done | `bd update --assignee`, `gc sling` |
+| Work on the hook (a bead `assignee`'d to the agent) | yes *while already up* — but hook-work does **not** re-wake a singleton that has drained to `asleep` ([footgun](#drained-on_demand-singleton-wont-self-wake-for-newly-queued-work)) | `bd update --assignee`, `gc sling` |
 | A pin | yes — until you unpin | the `S`-picker entry (or `gc session pin`) |
 | An active attach | **no** — drops the moment you detach, even to hop tmux windows | `gc session attach` |
 
