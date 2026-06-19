@@ -32,6 +32,7 @@ opinions rather than cloned directly.
 ### Docs
 
 - `docs/foundation.md` — guiding beliefs and operating discipline behind gc-toolkit
+- `docs/role-model.md` — the stable contract behind every role (taxonomy, universal contract, invariants), separate from the agent files that realize it
 - `docs/install.md` — wiring gc-toolkit into a city (imports, sub-packs, patches, verification)
 - `docs/roadmap.md` — (coming soon) the shape of the pack's evolution
 - `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`

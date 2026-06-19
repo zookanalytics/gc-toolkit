@@ -36,6 +36,11 @@ belong nowhere.
   `polecat-patterns`, `refinery-rebase-handling`) ships in the opt-in
   `packs/gascity-keeper/` sub-pack and is wired into the gascity rig's
   polecat and refinery via `[[rigs.patches]]` in city.toml.
+- A **role model** under `docs/role-model.md` — the stable contract behind
+  every role (taxonomy, the universal contract a role answers, cross-role
+  relationships, invariants), separate from the `agents/<name>/` files that
+  realize it. The spec/realization split applies `file-structure.md`'s
+  "category, not members" Scope doctrine to roles.
 - No formulas yet. No other agents yet.
 
 This roadmap describes what fills out from here.
