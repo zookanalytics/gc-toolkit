@@ -25,6 +25,7 @@ defines the routing contract; it is not a command tutorial.
 | `TestDoSling_Reassign_NoOpWhenAlreadyEmpty` | gastown source | `rigs/gascity/internal/sling/sling_test.go:3809` (added in `043e61ea6cb99a9f89657e292c9459be8620714c`, observed at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17`) | 2026-05-21 |
 | Upstream tutorial `docs/tutorials/06-beads.md` — **superseded by PR #1736 ruling, not yet updated** | gastownhall/gascity | https://github.com/gastownhall/gascity/blob/19a0bb201eb6d1723a10eecdae20371bd8ceeb17/docs/tutorials/06-beads.md (last touched in `eac98595e701008087f7ee6acecbf55d5dca7794`) | 2026-05-21 |
 | Upstream CLI reference (`--reassign` row only) | gastownhall/gascity | `rigs/gascity/docs/reference/cli.md:2789` at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17` | 2026-05-21 |
+| `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 
 ## The maintainer's ruling
 
@@ -64,6 +65,16 @@ The three lanes below are the resulting model.
   ```
 - **Does NOT:** set `assignee`. The reconciler picks an available
   worker from the pool by matching `gc.routed_to`.
+- **Cross-store boundary:** sling routes only *within a single bead
+  store*. It refuses to route a bead that lives in one rig's `.beads`
+  store to a target (pool or agent) in a *different* rig's store —
+  failing with `gc sling: refusing cross-store route: …` — because Gas
+  City keeps per-rig isolated Dolt stores. **`--force` does not override
+  this:** that flag relaxes only the cross-*rig* name guard, not the
+  cross-*store* reachability guard. To hand work to another rig's pool,
+  re-file (create) the bead in the *destination* rig's store and sling
+  it there; a cross-store sling left unguarded would silently wedge the
+  target pool.
 
 ### Lane 2 — `bd update <bead> --assignee <named-session>`: direct named-session delivery
 
