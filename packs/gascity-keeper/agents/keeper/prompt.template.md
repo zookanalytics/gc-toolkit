@@ -211,8 +211,17 @@ META=$(jq -n --arg keeper "$GC_AGENT" \
   '{notify_recipient:"human", requesting_keeper:$keeper}')
 BEAD=$(gc bd create "Rebase gascity from upstream" -t task \
   --metadata "$META" --json | jq -r '.id')
-gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-rebase \
-  --var requesting_keeper="$GC_AGENT"
+SLING_JSON=$(gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-rebase \
+  --var requesting_keeper="$GC_AGENT" \
+  --json)
+# Record the wisp so the rework/review re-pour loop can burn it before
+# minting the next one — otherwise each resume orphans the prior wisp's
+# root + step beads (tk-kgnad). Durable rebase state lives on $BEAD's
+# metadata, not the wisp, so the wisp is always safe to discard at re-pour.
+NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
+[ -z "$NEW_WISP" ] && NEW_WISP=$(gc bd show "$BEAD" --json | jq -r '.[0].metadata.molecule_id // empty')
+[ -n "$NEW_WISP" ] && gc bd update "$BEAD" --set-metadata current_wisp="$NEW_WISP" \
+  || echo "warning: new wisp id unresolved; current_wisp not set on $BEAD" >&2
 ```
 
 `--on <formula>` is what attaches the wisp to the bead. `--var k=v` is
@@ -600,12 +609,36 @@ drain immediately.
 
 3. **Re-pour when the child is closed.**
 
+Burn the prior wisp first, then re-pour and record the new one. Each
+re-sling mints a fresh `mol-upstream-gc-rebase` wisp (root + step beads);
+without the burn the prior set is abandoned at the polecat's drain and
+orphans the bead store (tk-kgnad). The burn is safe — all durable rebase
+state lives on `<bead>`'s metadata, not the wisp.
+
 ```bash
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
-gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
+
+# Burn the prior wisp. Guard: never burn the work bead; log (don't
+# silently skip) when there's nothing to burn or the burn no-ops.
+PREV_WISP=$(gc bd show <bead> --json | jq -r '.[0].metadata.current_wisp // empty')
+if [ -z "$PREV_WISP" ]; then
+  echo "note: no current_wisp on <bead>; nothing to burn" >&2
+elif [ "$PREV_WISP" = "<bead>" ] || gc bd mol burn --dry-run "$PREV_WISP" 2>/dev/null | grep -q "(<bead>)"; then
+  echo "SAFETY: refusing to burn $PREV_WISP — it resolves to work bead <bead>" >&2
+else
+  gc bd mol burn --force "$PREV_WISP" || echo "note: prior wisp $PREV_WISP already gone; continuing" >&2
+fi
+
+# Re-pour, then record the new wisp for the next resume to burn.
+SLING_JSON=$(gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
   --reassign \
-  --var requesting_keeper="$GC_AGENT"
+  --var requesting_keeper="$GC_AGENT" \
+  --json)
+NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
+[ -z "$NEW_WISP" ] && NEW_WISP=$(gc bd show <bead> --json | jq -r '.[0].metadata.molecule_id // empty')
+[ -n "$NEW_WISP" ] && gc bd update <bead> --set-metadata current_wisp="$NEW_WISP" \
+  || echo "warning: new wisp id unresolved; current_wisp not set on <bead>" >&2
 ```
 
 The new rebase polecat reuses `metadata.work_dir`, reads
@@ -717,9 +750,27 @@ gc bd update <bead> \
   --unset-metadata pending_review
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
-gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
+
+# Same burn-before-repour discipline as the rework/review re-pour above
+# (tk-kgnad): discard the prior wisp so the skip-and-continue resume does
+# not orphan it. Guard never burns the work bead.
+PREV_WISP=$(gc bd show <bead> --json | jq -r '.[0].metadata.current_wisp // empty')
+if [ -z "$PREV_WISP" ]; then
+  echo "note: no current_wisp on <bead>; nothing to burn" >&2
+elif [ "$PREV_WISP" = "<bead>" ] || gc bd mol burn --dry-run "$PREV_WISP" 2>/dev/null | grep -q "(<bead>)"; then
+  echo "SAFETY: refusing to burn $PREV_WISP — it resolves to work bead <bead>" >&2
+else
+  gc bd mol burn --force "$PREV_WISP" || echo "note: prior wisp $PREV_WISP already gone; continuing" >&2
+fi
+
+SLING_JSON=$(gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
   --reassign \
-  --var requesting_keeper="$GC_AGENT"
+  --var requesting_keeper="$GC_AGENT" \
+  --json)
+NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
+[ -z "$NEW_WISP" ] && NEW_WISP=$(gc bd show <bead> --json | jq -r '.[0].metadata.molecule_id // empty')
+[ -n "$NEW_WISP" ] && gc bd update <bead> --set-metadata current_wisp="$NEW_WISP" \
+  || echo "warning: new wisp id unresolved; current_wisp not set on <bead>" >&2
 ```
 
 If the operator wants to abort: have them run `git rebase --abort` and
