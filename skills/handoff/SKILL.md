@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Use when the operator explicitly asks to handoff, reset, wrap up, hand a thread back to its canonical, get fresh context, or restart a coordination agent (mayor, mechanik, deacon). Do not invoke from internal judgment that a handoff would be useful — propose it in conversation and let the operator decide.
+description: Use when the operator explicitly asks to handoff, reset, wrap up, recycle a session, hand a thread back to its canonical, get fresh context, or restart a coordination agent (mayor, mechanik, deacon) or a bead-host (the resident conversation for one work bead). Do not invoke from internal judgment that a handoff would be useful — propose it in conversation and let the operator decide.
 ---
 
 # Handoff
@@ -13,8 +13,16 @@ description: Use when the operator explicitly asks to handoff, reset, wrap up, h
 
 ## Detect the session shape
 
-This skill has two paths. Pick one by reading `$GC_TEMPLATE`:
+This skill has three shapes. Pick one by reading `$GC_TEMPLATE`, checking
+in order (most specific first):
 
+- **Bead-host self-recycle path** — the resident conversation for one
+  work bead: a `wake_mode = resume` bead-host whose `$GC_TEMPLATE`
+  agent-name component is `bead-host` (e.g. `gc-toolkit.bead-host`), and
+  whose `$GC_ALIAS` carries the bead id behind a rig prefix
+  (`gc-toolkit.tk-6d0vb` for bead `tk-6d0vb`). Handle it entirely in
+  **Bead-host self-recycle** below; the inventory / disposition / mail
+  machinery the two cross-agent paths use does not apply.
 - **Canonical path** — controller-restartable named sessions: the
   always-on coordination agents in this city (mayor, mechanik, deacon,
   boot, witness). Their `mode = "always"` declaration in `pack.toml`
@@ -32,7 +40,7 @@ This skill has two paths. Pick one by reading `$GC_TEMPLATE`:
   (`gc-toolkit.<role>`, derived from the template) and the thread
   session is closed.
 
-If `$GC_TEMPLATE` falls outside both shapes — an `mode = "on_demand"`
+If `$GC_TEMPLATE` falls outside all three shapes — an `mode = "on_demand"`
 session like refinery, or anything else the operator wants handed off
 — **stop and confirm before proceeding.** `gc handoff` will write the
 mail but cannot restart the user-attended process, so the next-life
@@ -73,6 +81,13 @@ forgotten.
 The operator triggers this skill — not the agent's own judgment.
 Recognize these phrasings as triggers:
 
+**Bead-host self-recycle triggers** (current session is a bead-host —
+`$GC_ALIAS` carries its bead id behind a rig prefix):
+
+- "Recycle" / "recycle this conversation" / "recycle the context"
+- "Reset context" / "fresh context" / "clean slate on this bead"
+- "Restart this conversation with a clean window"
+
 **Canonical path triggers** (mayor, mechanik, deacon, boot, witness):
 
 - "Handoff" / "let's handoff" / "do a handoff"
@@ -112,10 +127,50 @@ followed by `gc session reset` (restart-trigger) for on-demand named
 sessions, and that chaining is correct there. See
 `template-fragments/cycle-recycle.template.md`.
 
+## Bead-host self-recycle
+
+A bead-host hosts one bead, and that bead — its notes + takeaway — is the
+carry-forward. Flush to the bead, then reset the session on it; the respawn
+rehydrates from the bead. Operator-invoked only (triggers above).
+
+**1. Flush warm state to the bead.** Refresh the takeaway and a durable
+note so nothing in flight survives only in the transcript. A bead-host's
+`$GC_ALIAS` is rig-prefixed (e.g. `gc-toolkit.tk-6d0vb`), **not** the raw
+bead id, so resolve the bead from the session bead and use `$BEAD` for
+every `gc bd` / takeaway call:
+
+```bash
+BEAD=$(gc bd show "$GC_SESSION_ID" --json | jq -r '.[0].metadata.hosts_bead')
+```
+
+- **Takeaway** — re-stamp this bead's board headline (your usual per-turn
+  takeaway call, targeting `$BEAD`) so it names exactly where this stands.
+- **Note** — distill the in-flight reasoning a cold resume needs:
+
+  ```bash
+  gc bd update "$BEAD" --notes "$(cat <<'EOF'
+  <what's being weighed, what's open, the next move — terse and resumable>
+  EOF
+  )"
+  ```
+
+**2. Reset the session on the same bead.**
+
+```bash
+gc session reset "$GC_SESSION_ID"  # reset the session; same bead stays attached (no close)
+```
+
+Reset by the **session** id, not the work bead. No handoff-mail: the bead
+already holds the carry-forward, so a HANDOFF mail would only duplicate it
+(`gc handoff` *can* restart a bead-host — skipping the mail just avoids the
+duplicate).
+
 ## The carry-forward decision
 
-This step is shared by both paths. Inventory first, then apply the
-path-specific disposition rules below.
+This step is shared by the two **cross-agent** paths (canonical and thread
+hand-up); a bead-host self-recycle skips it — its carry-forward is the
+bead, handled above. Inventory first, then apply the path-specific
+disposition rules below.
 
 **Inventory the live conversation, not the work list.** Read back
 through the recent transcript and identify threads that the operator
@@ -344,8 +399,6 @@ inventory is underway, finish the inventory and use `gc session
 close` from the composed flow.
 
 This is specific to the carry-forward sweep flow, not a blanket
-prohibition on chaining handoff with reset. Cycle-recycle is a
-different, automated flow that legitimately chains `gc handoff`
-followed by `gc session reset` to recycle on-demand named coords
-without operator `/clear`; that pattern is documented in
-`template-fragments/cycle-recycle.template.md` and is allowed.
+prohibition on `gc session reset`. The **bead-host self-recycle** above
+legitimately uses it — operator-invoked, `gc session reset "$GC_SESSION_ID"`
+is the restart, no mail.
