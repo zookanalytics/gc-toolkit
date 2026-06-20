@@ -17,16 +17,12 @@ This skill has three shapes. Pick one by reading `$GC_TEMPLATE`, checking
 in order (most specific first):
 
 - **Bead-host self-recycle path** — the resident conversation for one
-  work bead: the `wake_mode = resume` bead-host bound to one bead (its
-  `$GC_ALIAS` carries that bead id behind a rig prefix —
-  `gc-toolkit.tk-6d0vb` for bead `tk-6d0vb`). `$GC_TEMPLATE`'s agent-name
-  component is `bead-host` (e.g.
-  `gc-toolkit.bead-host`). This is a **same-bead** recycle — the host
-  restarts itself on the same bead with a fresh transcript, and the
-  **bead** (its notes + takeaway) is the carry-forward: no mail, no
-  cross-agent hand-up. Handle it entirely in **Bead-host self-recycle**
-  below; the inventory / disposition / mail machinery the two cross-agent
-  paths use does not apply.
+  work bead: a `wake_mode = resume` bead-host whose `$GC_TEMPLATE`
+  agent-name component is `bead-host` (e.g. `gc-toolkit.bead-host`), and
+  whose `$GC_ALIAS` carries the bead id behind a rig prefix
+  (`gc-toolkit.tk-6d0vb` for bead `tk-6d0vb`). Handle it entirely in
+  **Bead-host self-recycle** below; the inventory / disposition / mail
+  machinery the two cross-agent paths use does not apply.
 - **Canonical path** — controller-restartable named sessions: the
   always-on coordination agents in this city (mayor, mechanik, deacon,
   boot, witness). Their `mode = "always"` declaration in `pack.toml`
@@ -69,24 +65,16 @@ discussion*: what the operator and agent were mid-thread on, what
 ideas are open, what direction is being weighed. If it lives only in
 the transcript, it dies unless the handoff carries it.
 
-The vehicle follows the handoff's **topology** — state travels by mail
-only when it must cross agents; a same-bead recycle keeps it in the bead:
+The vehicle differs by path:
 
-- **Bead-host self-recycle path** — *no mail.* The host restarts on its
-  own bead, so the **bead itself** (notes + takeaway, refreshed before the
-  reset) is the carry-forward and the source of truth. A HANDOFF mail
-  would only duplicate what the bead already holds — and the bead, not a
-  copy, is what the respawned host reads back.
 - **Canonical path** — the controller replaces the transcript and the
   next-life agent reads the durable HANDOFF mail on its first action.
 - **Thread hand-up path** — this thread's transcript ends; the canonical
   reads the HANDOFF mail on its next mail-check hook (which fires on
   the next prompt the operator sends to the canonical).
 
-Where state *does* cross agents, prefer a thin "fresh context is in
-bead X" pointer over a copied dump when the bead can hold the body.
-Anything *not* carried — left out of the handoff body, or (for a
-bead-host) not flushed to the bead — is intentionally forgotten.
+Anything *not* mentioned in the handoff body is intentionally
+forgotten.
 
 ## When the operator asks for it
 
@@ -141,17 +129,15 @@ sessions, and that chaining is correct there. See
 
 ## Bead-host self-recycle
 
-A bead-host hosts **one** bead, and that bead — not a mail, not the live
-transcript — is its durable memory. Recycling is therefore *flush to the
-bead, then restart fresh on the same bead*. Run it **only when the
-operator asks** (triggers above); never auto-fire.
+A bead-host hosts one bead, and that bead — its notes + takeaway — is the
+carry-forward. Flush to the bead, then reset the session on it; the respawn
+rehydrates from the bead. Operator-invoked only (triggers above).
 
-**1. Flush warm state to the bead.** The bead's notes + takeaway are what
-the fresh session reads back, so refresh both — nothing in flight should
-survive only in the transcript. A bead-host's `$GC_ALIAS` is prefixed
-(e.g. `gc-toolkit.tk-6d0vb`), **not** the raw bead id, so derive the bead
-from the session bead first and use `$BEAD` for every `gc bd` / takeaway
-call:
+**1. Flush warm state to the bead.** Refresh the takeaway and a durable
+note so nothing in flight survives only in the transcript. A bead-host's
+`$GC_ALIAS` is rig-prefixed (e.g. `gc-toolkit.tk-6d0vb`), **not** the raw
+bead id, so resolve the bead from the session bead and use `$BEAD` for
+every `gc bd` / takeaway call:
 
 ```bash
 BEAD=$(gc bd show "$GC_SESSION_ID" --json | jq -r '.[0].metadata.hosts_bead')
@@ -163,35 +149,21 @@ BEAD=$(gc bd show "$GC_SESSION_ID" --json | jq -r '.[0].metadata.hosts_bead')
 
   ```bash
   gc bd update "$BEAD" --notes "$(cat <<'EOF'
-  <what's being weighed, what's open, the next move — terse and resumable,
-  the same shape as a handoff body but written into the bead>
+  <what's being weighed, what's open, the next move — terse and resumable>
   EOF
   )"
   ```
 
-**2. Restart fresh on the same bead.**
+**2. Reset the session on the same bead.**
 
 ```bash
 gc session reset "$GC_SESSION_ID"  # reset the session; same bead stays attached (no close)
 ```
 
-Use `gc session reset`, **not** `gc handoff`: the bead already holds the
-carry-forward from step 1, so a HANDOFF mail would only duplicate it.
-(That is the reason — *avoid needless mail* — not a claim that `gc
-handoff` can't restart a bead-host. It can.)
-
-**3. Rehydrate is automatic.** The respawned host re-primes (`gc prime`)
-and re-reads the bead through its **"On Resume" card**, picking up from
-the refreshed notes + takeaway. Only live conversational continuity drops
-— which is the whole point of a recycle.
-
-**Boundaries.** Operator-invoked only; never self-measure context to
-decide when to fire — gascity owns that signal. The automatic net is
-unchanged and separate: Claude Code's PreCompact hook still runs `gc
-handoff --auto` at the model's compaction edge if context fills while the
-operator is away. If the operator wants to keep the live transcript
-rather than reset it, `/compact` is the lighter in-place alternative —
-surface that instead.
+Reset by the **session** id, not the work bead. No handoff-mail: the bead
+already holds the carry-forward, so a HANDOFF mail would only duplicate it
+(`gc handoff` *can* restart a bead-host — skipping the mail just avoids the
+duplicate).
 
 ## The carry-forward decision
 
@@ -428,8 +400,5 @@ close` from the composed flow.
 
 This is specific to the carry-forward sweep flow, not a blanket
 prohibition on `gc session reset`. The **bead-host self-recycle** above
-legitimately uses it — operator-invoked, `gc session reset "$GC_SESSION_ID"` is
-the restart, no mail. Cycle-recycle likewise chains `gc handoff` then
-`gc session reset` to recycle on-demand named coords without operator
-`/clear`, documented in `template-fragments/cycle-recycle.template.md`.
-Both are allowed.
+legitimately uses it — operator-invoked, `gc session reset "$GC_SESSION_ID"`
+is the restart, no mail.
