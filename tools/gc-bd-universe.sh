@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # gc-bd-universe.sh — emit a bead's "universe slice": the fed/fetchable/out
-# context tiers that prime a bead-host. Phase 2 of the Bead-Universe Operating
+# context tiers that prime a wellhead. Phase 2 of the Bead-Universe Operating
 # Model (epic tk-q4xaj; bead tk-oqmc7; design Key Component 3, Data Model,
 # Phase 2).
 #
 # This is the design's `gc bd universe <id> --slice` projection. `gc bd` is a
 # passthrough to upstream `bd` (Go) and has no `universe` subcommand, so — like
-# Phase 1's `gc bead-host` (tools/gc-bead-host.sh) — the projection ships as a
+# Phase 1's `gc wellhead` (tools/gc-wellhead.sh) — the projection ships as a
 # path-invoked shell tool. It is the ONE shared contract the launcher, the
 # attention board, and slung mols all consume, so they agree on what a bead's
 # universe is.
@@ -34,7 +34,7 @@
 # when no PR is referenced, vs `error` (exit 3) when a referenced PR cannot
 # be reached.
 #
-# ON RESUME: a bead-host re-injects a freshly recomputed `slice` on every wake
+# ON RESUME: a wellhead re-injects a freshly recomputed `slice` on every wake
 # so it reflects post-suspend reality (new notes, a PR that opened, CI that
 # flipped) rather than a stale snapshot. This tool is stateless — each call
 # recomputes from live `bd`/`gh` — so "recompute on resume" is just "call

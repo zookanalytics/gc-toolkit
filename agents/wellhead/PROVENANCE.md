@@ -1,4 +1,4 @@
-# Agent: bead-host
+# Agent: wellhead
 
 **Status:** native
 **Source:** N/A (gc-toolkit-original)
@@ -7,7 +7,7 @@
 ## Goals
 
 The resident LLM for a single work bead — Phase 1 of the Bead-Universe
-Operating Model (epic tk-q4xaj, design Key Component 1). A bead-host is a
+Operating Model (epic tk-q4xaj, design Key Component 1). A wellhead is a
 per-bead conversation, created/suspended/resumed on demand, primed with
 the bead's context-reachable universe, that the operator lands in to
 "engage one piece of work at a time, fully, in the bead that *is* that
@@ -27,14 +27,14 @@ config (alias = bead id → 1:1 for free) with `wake_mode = resume`
 `idle_timeout` (suspend, don't die). The P0 spike (tk-oml75) proved the
 resume mechanism carries a conversation across a ~15h cold gap and
 recommended A2 (binding is the cheap metadata assembly; no durable-state
-store), which this agent + tools/gc-bead-host.sh implement.
+store), which this agent + tools/gc-wellhead.sh implement.
 
 ## Notes
 
 City-scoped, on-demand, purely interactive. Never claims pool work
 (`work_query` returns `[]`) and is never a sling target (`sling_query`
 errors) — same never-matching-predicate pattern as mayor-thread. Created
-by `tools/gc-bead-host.sh <bead-id>` (spawn-or-resume + durable
+by `tools/gc-wellhead.sh <bead-id>` (spawn-or-resume + durable
 dual-link), or by the attention board picker (prefix+b /
 `gc-attention.sh open`), a thin front door over the same tool.
 

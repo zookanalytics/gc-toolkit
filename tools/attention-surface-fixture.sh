@@ -12,7 +12,7 @@
 #   • the 4th anchor kind — a flagged bead (gc.attention=1) is admitted, lands
 #     in its own FLAGGED band, and floats above every other anchor;
 #   • the liveness glyph — the pack-namespaced-alias → bead-id join over
-#     `gc session list` (bead-host sessions only) resolves hot/warm/cold,
+#     `gc session list` (wellhead sessions only) resolves hot/warm/cold,
 #     and a live host keeps a decomposed anchor out of the stranded band;
 #   • the row cap — the board never balloons past the cap, and --limit=0 opts
 #     out for tooling;
@@ -72,16 +72,16 @@ cat > "$FXDIR/anchors.ndjson" <<'JSON'
 {"id":"tk-flagwarm","title":"Stale spec","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[],"reason":"needs a re-read","flagged_at":"2026-06-06T00:00:00Z"}
 JSON
 
-# Sessions model the real shape: a bead-host alias is pack-namespaced
-# (<pack>.<bead-id>) and carries the bead-host template, so the board's
-# liveness join strips the leading "<pack>." and joins only bead-host
+# Sessions model the real shape: a wellhead alias is pack-namespaced
+# (<pack>.<bead-id>) and carries the wellhead template, so the board's
+# liveness join strips the leading "<pack>." and joins only wellhead
 # sessions. tk-flaghot has an ACTIVE host (hot); tk-flagwarm a SUSPENDED one
-# (warm); everything else cold. The refinery (non-bead-host template, aliased
+# (warm); everything else cold. The refinery (non-wellhead template, aliased
 # with slashes) must NOT perturb the join.
 cat > "$FXDIR/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-1","alias":"gc-toolkit.tk-flaghot","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":false},
-  {"id":"lx-2","alias":"gc-toolkit.tk-flagwarm","template":"gc-toolkit.bead-host","state":"suspended","running":false,"attached":false},
+  {"id":"lx-1","alias":"gc-toolkit.tk-flaghot","template":"gc-toolkit.wellhead","state":"active","running":true,"attached":false},
+  {"id":"lx-2","alias":"gc-toolkit.tk-flagwarm","template":"gc-toolkit.wellhead","state":"suspended","running":false,"attached":false},
   {"id":"lx-9","alias":"gc-toolkit/gc-toolkit.refinery","template":"gc-toolkit.refinery","state":"active","running":true}
 ]}
 JSON
@@ -105,7 +105,7 @@ has  "warm glyph in human table"  "◐" "$(B)"
 
 echo "── hermetic: live host ⇒ active, not stranded (tk-q4xaj.2) ──"
 # A decomposed epic with open children and ZERO in-progress is the classic
-# "stranded/HIGH" shape — UNLESS a live bead-host is resident, in which case
+# "stranded/HIGH" shape — UNLESS a live wellhead is resident, in which case
 # it is being worked via a 1:1 conversation, not via child polecats. Two
 # sibling epics with the identical stranded shape: tk-hosted has a HOT host,
 # tk-lonely has none. The fix must spare the hosted one and ONLY the hosted
@@ -117,7 +117,7 @@ cat > "$LIVE/anchors.ndjson" <<'JSON'
 JSON
 cat > "$LIVE/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-h","alias":"gc-toolkit.tk-hosted","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":true}
+  {"id":"lx-h","alias":"gc-toolkit.tk-hosted","template":"gc-toolkit.wellhead","state":"active","running":true,"attached":true}
 ]}
 JSON
 LIVEJ="$(GC_ATTENTION_FIXTURE="$LIVE" "$TOOL" --json)"
@@ -284,7 +284,7 @@ echo "── contract: operator surface is the runnable script, not a phantom gc
 # root gc help. Pack commands bind under the pack name (`gc <pack> <cmd>`), so
 # no top-level attention subcommand can exist. The runnable surface is THIS
 # script — reached via the prefix+b tmux picker (tmux-pick-attention.sh →
-# gc-attention.sh) or run directly — plus tools/gc-bead-host.sh. These
+# gc-attention.sh) or run directly — plus tools/gc-wellhead.sh. These
 # assertions lock the operator-facing docs to that reality.
 
 # (a) the documented script entry actually runs and prints its own usage.
@@ -296,9 +296,9 @@ has  "script -h prints usage"     "Usage:" "$("$TOOL" -h 2>&1 || true)"
 #     script name "gc-attention" (hyphen) is intentionally NOT matched.
 SURFACE_FILES=(
     "$HERE/../assets/scripts/gc-attention.sh"
-    "$HERE/../agents/bead-host/prompt.template.md"
-    "$HERE/../agents/bead-host/agent.toml"
-    "$HERE/../agents/bead-host/PROVENANCE.md"
+    "$HERE/../agents/wellhead/prompt.template.md"
+    "$HERE/../agents/wellhead/agent.toml"
+    "$HERE/../agents/wellhead/PROVENANCE.md"
 )
 phantom=""
 for f in "${SURFACE_FILES[@]}"; do

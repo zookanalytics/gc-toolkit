@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# bead-host-takeaway-fixture.sh — automatable assertions that the bead-host
+# wellhead-takeaway-fixture.sh — automatable assertions that the wellhead
 # prompt instructs the resident host to keep its board-visible gc.takeaway
 # current (epic tk-q4xaj; bead tk-q4xaj.3).
 #
 # The takeaway is the one-line headline gc-attention.sh renders as a bead's
-# NEEDS. A bead-host keeps it fresh so a glance off the board explains where the
+# NEEDS. A wellhead keeps it fresh so a glance off the board explains where the
 # conversation stands without opening it. Whether a LIVE host actually writes
 # the metadata on a real turn needs a live LLM session — that is operator-
-# deferred (the same class as bead-host-binding-fixture.sh assertions 2 & 5).
+# deferred (the same class as wellhead-binding-fixture.sh assertions 2 & 5).
 # What IS automatable, and what this fixture locks, is the PROMPT CONTRACT: the
-# bead-host prompt must
+# wellhead prompt must
 #   • tell the host to refresh gc.takeaway on each meaningful turn — takeaway-
 #     only (the per-turn note ritual is gone; host is the default --by); AND
 #   • tell it to refresh the takeaway before an intentional drain; AND
@@ -20,14 +20,14 @@
 # sessions. Mirrors how proactive-first-reaction-fixture.sh verifies its
 # worker-prompt contract ("the worker prompt names the contract").
 #
-# Run:   tools/bead-host-takeaway-fixture.sh
+# Run:   tools/wellhead-takeaway-fixture.sh
 # Exit:  0 iff every assertion passes.
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-PROMPT_MD="$ROOT/agents/bead-host/prompt.template.md"
+PROMPT_MD="$ROOT/agents/wellhead/prompt.template.md"
 [ -f "$PROMPT_MD" ] || { echo "fixture: $PROMPT_MD missing" >&2; exit 2; }
 
 PASS=0
@@ -67,5 +67,5 @@ echo "── the takeaway is the board's NEEDS (the why) ──"
 has "prompt ties the takeaway to the board NEEDS"  "NEEDS" "$PM"
 
 echo ""
-echo "bead-host-takeaway-fixture: $PASS passed, $FAIL failed"
+echo "wellhead-takeaway-fixture: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

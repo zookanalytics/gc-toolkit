@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Use when the operator explicitly asks to handoff, reset, wrap up, recycle a session, hand a thread back to its canonical, get fresh context, or restart a coordination agent (mayor, mechanik, deacon) or a bead-host (the resident conversation for one work bead). Do not invoke from internal judgment that a handoff would be useful — propose it in conversation and let the operator decide.
+description: Use when the operator explicitly asks to handoff, reset, wrap up, recycle a session, hand a thread back to its canonical, get fresh context, or restart a coordination agent (mayor, mechanik, deacon) or a wellhead (the resident conversation for one work bead). Do not invoke from internal judgment that a handoff would be useful — propose it in conversation and let the operator decide.
 ---
 
 # Handoff
@@ -16,12 +16,12 @@ description: Use when the operator explicitly asks to handoff, reset, wrap up, r
 This skill has three shapes. Pick one by reading `$GC_TEMPLATE`, checking
 in order (most specific first):
 
-- **Bead-host self-recycle path** — the resident conversation for one
-  work bead: a `wake_mode = resume` bead-host whose `$GC_TEMPLATE`
-  agent-name component is `bead-host` (e.g. `gc-toolkit.bead-host`), and
+- **Wellhead self-recycle path** — the resident conversation for one
+  work bead: a `wake_mode = resume` wellhead whose `$GC_TEMPLATE`
+  agent-name component is `wellhead` (e.g. `gc-toolkit.wellhead`), and
   whose `$GC_ALIAS` carries the bead id behind a rig prefix
   (`gc-toolkit.tk-6d0vb` for bead `tk-6d0vb`). Handle it entirely in
-  **Bead-host self-recycle** below; the inventory / disposition / mail
+  **Wellhead self-recycle** below; the inventory / disposition / mail
   machinery the two cross-agent paths use does not apply.
 - **Canonical path** — controller-restartable named sessions: the
   always-on coordination agents in this city (mayor, mechanik, deacon,
@@ -81,7 +81,7 @@ forgotten.
 The operator triggers this skill — not the agent's own judgment.
 Recognize these phrasings as triggers:
 
-**Bead-host self-recycle triggers** (current session is a bead-host —
+**Wellhead self-recycle triggers** (current session is a wellhead —
 `$GC_ALIAS` carries its bead id behind a rig prefix):
 
 - "Recycle" / "recycle this conversation" / "recycle the context"
@@ -127,14 +127,14 @@ followed by `gc session reset` (restart-trigger) for on-demand named
 sessions, and that chaining is correct there. See
 `template-fragments/cycle-recycle.template.md`.
 
-## Bead-host self-recycle
+## Wellhead self-recycle
 
-A bead-host hosts one bead, and that bead — its notes + takeaway — is the
+A wellhead hosts one bead, and that bead — its notes + takeaway — is the
 carry-forward. Flush to the bead, then reset the session on it; the respawn
 rehydrates from the bead. Operator-invoked only (triggers above).
 
 **1. Flush warm state to the bead.** Refresh the takeaway and a durable
-note so nothing in flight survives only in the transcript. A bead-host's
+note so nothing in flight survives only in the transcript. A wellhead's
 `$GC_ALIAS` is rig-prefixed (e.g. `gc-toolkit.tk-6d0vb`), **not** the raw
 bead id, so resolve the bead from the session bead and use `$BEAD` for
 every `gc bd` / takeaway call:
@@ -162,13 +162,13 @@ gc session reset "$GC_SESSION_ID"  # reset the session; same bead stays attached
 
 Reset by the **session** id, not the work bead. No handoff-mail: the bead
 already holds the carry-forward, so a HANDOFF mail would only duplicate it
-(`gc handoff` *can* restart a bead-host — skipping the mail just avoids the
+(`gc handoff` *can* restart a wellhead — skipping the mail just avoids the
 duplicate).
 
 ## The carry-forward decision
 
 This step is shared by the two **cross-agent** paths (canonical and thread
-hand-up); a bead-host self-recycle skips it — its carry-forward is the
+hand-up); a wellhead self-recycle skips it — its carry-forward is the
 bead, handled above. Inventory first, then apply the path-specific
 disposition rules below.
 
@@ -399,6 +399,6 @@ inventory is underway, finish the inventory and use `gc session
 close` from the composed flow.
 
 This is specific to the carry-forward sweep flow, not a blanket
-prohibition on `gc session reset`. The **bead-host self-recycle** above
+prohibition on `gc session reset`. The **wellhead self-recycle** above
 legitimately uses it — operator-invoked, `gc session reset "$GC_SESSION_ID"`
 is the restart, no mail.

@@ -68,7 +68,7 @@ gc bd show {{issue}} --json | jq '.[0].metadata'
 
 # The Phase-2 fed slice: the bead's body + 1-hop neighborhood (counts +
 # titles) + notes tail. This is the SAME contract the board and the
-# bead-host use. Resolve the tool from the rig checkout:
+# wellhead use. Resolve the tool from the rig checkout:
 TOOLS="$(git rev-parse --show-toplevel 2>/dev/null)/tools"
 "$TOOLS/gc-bd-universe.sh" slice {{issue}}
 ```
@@ -161,7 +161,7 @@ ATTN="$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/gc-attention.s
 "$ATTN" flag {{issue}} --reason "advanced: first reaction ready — accept or redirect"
 ```
 This sets `gc.attention=1` (+ reason + timestamp) — the same hand-raise a
-bead-host uses — so the flagged bead floats to the board's FLAGGED band. The
+wellhead uses — so the flagged bead floats to the board's FLAGGED band. The
 human picks the row, lands in the card, and accepts/redirects in one move.
 
 **2. Stamp the takeaway and release the bead — open, unassigned, NOT closed —

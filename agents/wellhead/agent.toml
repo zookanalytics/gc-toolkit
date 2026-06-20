@@ -1,7 +1,7 @@
-# bead-host — a per-bead conversation register, in resume mode.
+# wellhead — a per-bead conversation register, in resume mode.
 #
 # Phase 1 of the Bead-Universe Operating Model (Key Component 1; spike
-# tk-oml75 §A; specs/tk-husu6/binding-report.md). A bead-host is a
+# tk-oml75 §A; specs/tk-husu6/binding-report.md). A wellhead is a
 # per-bead session whose alias = the bead id — alias uniqueness gives
 # 1:1 for free — with two deliberate changes:
 #
@@ -16,24 +16,24 @@
 #                          resumable) — it does not die. Matches the
 #                          proven mayor-thread resume config.
 #
-# Cold-by-default: a host suspends between visits and resumes on demand
+# Cold-by-default: a wellhead suspends between visits and resumes on demand
 # rather than staying warm (design "Cold-by-default"). Reconstruction is
 # cheap — sub-second slice rebuild, seconds to resume the runtime (spike
 # §3) — so we lean on suspend/resume instead of holding a context window
 # against the fragile shared Dolt for a ~500-token saving.
 #
-# Purely interactive: a bead-host never claims pool work and is never a
+# Purely interactive: a wellhead never claims pool work and is never a
 # sling target. work_query returns empty JSON so the reconciler never
 # auto-spawns one to satisfy pool demand; sling_query exits non-zero so
-# an accidental `gc sling … bead-host` surfaces an explicit error rather
-# than silently routing. A host is created on demand by
-# tools/gc-bead-host.sh (or by the attention board picker — prefix+b /
+# an accidental `gc sling … wellhead` surfaces an explicit error rather
+# than silently routing. A wellhead is created on demand by
+# tools/gc-wellhead.sh (or by the attention board picker — prefix+b /
 # `gc-attention.sh open`, a thin front door over the same tool) —
-# capability, not deployment. Any bead CAN get a host; not every bead
+# capability, not deployment. Any bead CAN get a wellhead; not every bead
 # has one.
 #
 # The durable bead<->session link is metadata-only and lives OUTSIDE
-# this config: tools/gc-bead-host.sh writes it atomically on host
+# this config: tools/gc-wellhead.sh writes it atomically on host
 # creation. The reverse link `hosts_bead` on the session bead is the
 # source of truth (resolved by search); the forward `host_session` on
 # the work bead is an optional cache. See
@@ -43,18 +43,18 @@ scope = "city"
 wake_mode = "resume"
 idle_timeout = "8h"
 min_active_sessions = 0
-work_dir = ".gc/agents/bead-host/{{.AgentBase}}"
+work_dir = ".gc/agents/wellhead/{{.AgentBase}}"
 
-# Fires on operator return / wake. A host suspends while the world
+# Fires on operator return / wake. A wellhead suspends while the world
 # moves (new notes land, a PR opens, CI flips), so the first thing on
 # resume is to re-read the bead — reflect current reality, not the
 # stale snapshot from before the suspend (binding assertion 5).
 nudge = 'Operator returned. Re-read your bead first — `gc bd show "$GC_ALIAS"` — it may have changed while you were suspended. Then continue the conversation.'
 
-# Purely interactive host: never claim pool work, never a sling target.
+# Purely interactive wellhead: never claim pool work, never a sling target.
 # Same never-matching-predicate pattern as mayor-thread: work_query
 # returns empty JSON so the reconciler never claims work or auto-spawns
 # to satisfy demand; sling_query exits non-zero so an explicit error
 # surfaces instead of a silent route.
 work_query = "printf '[]'"
-sling_query = "echo 'bead-host is operator-spawned only (tools/gc-bead-host.sh / gc-attention.sh open); not a sling target' >&2; exit 1"
+sling_query = "echo 'wellhead is operator-spawned only (tools/gc-wellhead.sh / gc-attention.sh open); not a sling target' >&2; exit 1"

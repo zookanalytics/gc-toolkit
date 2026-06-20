@@ -57,7 +57,7 @@ The first reaction NEVER closes the target work bead — it advances it (card +
 `gc.attention` flag) and releases it open for the human to accept/redirect.
 The `gc.proactive_reaction` marker stops the scan from re-reacting. The card
 shape (Understanding · Found · Proposal · Decision needed) is the same one the
-bead-host opens with and the board picker lands the human on.
+wellhead opens with and the board picker lands the human on.
 
 Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — the shed clamp
 halts proactive at the cap; the mr-invariant refuses `direct`; the formula

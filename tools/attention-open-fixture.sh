@@ -10,14 +10,14 @@
 # unrelated client) and must NOT poll (the old 45s budget turned that into a
 # hang). It brings the host up, prints a land-it hint, and returns promptly.
 #
-# Because `up` now blocks until the host registers (gc-bead-host.sh), `cmd_open`
+# Because `up` now blocks until the host registers (gc-wellhead.sh), `cmd_open`
 # discriminates with an IMMEDIATE `tmux has-session` probe on the current server
 # and talks to tmux directly (no switch helper). So this fixture shims `tmux`:
 #   - has-session -t <t>   : exit 0 iff FIXTURE_HAS_SESSION=1 AND <t> matches the
 #                            expected session_name — models "is the host on THIS
 #                            tmux server?" (true = same server, false = separate)
 #   - switch-client -t <t> : records <t> instead of touching a real client
-# and stubs the bead-host `up` (GC_BEAD_HOST_TOOL) to a no-op so no live session
+# and stubs the wellhead `up` (GC_WELLHEAD_TOOL) to a no-op so no live session
 # is spawned and no real tmux client is touched (a polecat must not).
 #
 # Cases (revision acceptance #4):
@@ -58,14 +58,14 @@ SHIM_DIR="$(mktemp -d)"
 SWITCH_REC="$SHIM_DIR/switch-target.txt"
 ERR_LOG="$SHIM_DIR/open.err"
 
-# Stub bead-host tool: `open` calls `<tool> up <bead>`; the forward cache is
+# Stub wellhead tool: `open` calls `<tool> up <bead>`; the forward cache is
 # pre-seeded by the test (host_session_name on the work bead), so the stub only
 # needs to succeed without spawning a host.
-cat >"$SHIM_DIR/bead-host-stub.sh" <<'STUB'
+cat >"$SHIM_DIR/wellhead-stub.sh" <<'STUB'
 #!/usr/bin/env bash
 exit 0
 STUB
-chmod +x "$SHIM_DIR/bead-host-stub.sh"
+chmod +x "$SHIM_DIR/wellhead-stub.sh"
 
 # Fake tmux: cmd_open now talks to tmux directly (no switch helper). Reads its
 # behavior from the env the test exports (quoted heredoc -> nothing expanded at
@@ -110,7 +110,7 @@ run_open() {
     FIXTURE_EXPECT_SESSION="s-$WORK" \
     SWITCH_REC="$SWITCH_REC" \
     TMUX="fake-tmux,1,0" \
-    GC_BEAD_HOST_TOOL="$SHIM_DIR/bead-host-stub.sh" \
+    GC_WELLHEAD_TOOL="$SHIM_DIR/wellhead-stub.sh" \
     PATH="$SHIM_DIR:$PATH" \
         timeout 10 "$ATTENTION" open "$WORK" >/dev/null 2>"$ERR_LOG" || RC=$?
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bead-host-binding-fixture.sh — automatable assertions for the durable
+# wellhead-binding-fixture.sh — automatable assertions for the durable
 # bead<->session binding (tk-husu6, Phase 1). Exercises the metadata
 # contract end-to-end against the live rig ledger using THROWAWAY plain
 # `task` beads as stand-ins — no live sessions are spawned, so a polecat
@@ -23,13 +23,13 @@
 #
 # Exit 0 iff every automated assertion passes.
 #
-# Usage: bead-host-binding-fixture.sh [--keep]
+# Usage: wellhead-binding-fixture.sh [--keep]
 #   --keep   leave the stand-in beads open (for debugging)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOL="$HERE/gc-bead-host.sh"
+TOOL="$HERE/gc-wellhead.sh"
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
@@ -56,15 +56,15 @@ trap cleanup EXIT
 [ -x "$TOOL" ] || { echo "tool not found/executable: $TOOL" >&2; exit 2; }
 
 hdr "Setup: create throwaway stand-in beads (rig ledger, plain task type)"
-WORK="$(gc bd create "FIXTURE: bead-host binding work stand-in" -t task --json 2>/dev/null | jq -r '.id')"
-SESS="$(gc bd create "FIXTURE: bead-host binding session stand-in" -t task --json 2>/dev/null | jq -r '.id')"
+WORK="$(gc bd create "FIXTURE: wellhead binding work stand-in" -t task --json 2>/dev/null | jq -r '.id')"
+SESS="$(gc bd create "FIXTURE: wellhead binding session stand-in" -t task --json 2>/dev/null | jq -r '.id')"
 [ -n "$WORK" ] && [ -n "$SESS" ] || { echo "failed to create stand-in beads" >&2; exit 2; }
 # Make SESS look like a session bead (the fields the binding keys on).
-gc bd update "$SESS" --set-metadata session_name="bead-host--$WORK" \
+gc bd update "$SESS" --set-metadata session_name="wellhead--$WORK" \
                      --set-metadata continuation_epoch="1" \
                      --set-metadata generation="1" >/dev/null 2>&1
 note "WORK (work bead)    = $WORK"
-note "SESS (session bead) = $SESS  session_name=bead-host--$WORK epoch=1"
+note "SESS (session bead) = $SESS  session_name=wellhead--$WORK epoch=1"
 
 hdr "Assertion 1 — create + dual-link resolves both ways"
 "$TOOL" link "$WORK" "$SESS" >/dev/null
@@ -74,7 +74,7 @@ hdr "Assertion 1 — create + dual-link resolves both ways"
 [ "$(meta "$WORK" host_session)" = "$SESS" ] \
     && ok "forward cache: WORK.host_session == SESS" \
     || bad "forward cache missing/wrong: WORK.host_session=$(meta "$WORK" host_session)"
-[ "$(meta "$WORK" host_session_name)" = "bead-host--$WORK" ] \
+[ "$(meta "$WORK" host_session_name)" = "wellhead--$WORK" ] \
     && ok "forward cache carries session_name" \
     || bad "host_session_name=$(meta "$WORK" host_session_name)"
 [ "$(meta "$WORK" host_session_epoch)" = "1" ] \
@@ -91,7 +91,7 @@ printf '%s' "$HITS" | grep -q "$SESS" \
     || bad "ListByMetadata hosts_bead search did not find SESS (got: $HITS)"
 # (b) The tool's resolve (forward-cache + session-list path) finds it too.
 "$TOOL" resolve "$WORK" 2>/dev/null | grep -q "$SESS" \
-    && ok "gc-bead-host.sh resolve $WORK returns the host" \
+    && ok "gc-wellhead.sh resolve $WORK returns the host" \
     || bad "resolve did not return the host"
 
 hdr "Assertion 5 — resume reflects a mid-suspend change (data half)"
@@ -146,7 +146,7 @@ hdr "Resolve contract — session-list path requires hosts_bead; alias is a pref
 # mis-reported as the host.
 #
 # No live session is spawned (a polecat must not). A PATH shim stubs
-# `gc session list` to present SESS as a live bead-host aliased to WORK and
+# `gc session list` to present SESS as a live wellhead aliased to WORK and
 # delegates every other `gc` call to the real binary; toggling SESS.hosts_bead
 # drives the two cases. WORK is linked to SESS at epoch 2 coming in.
 SHIM_DIR="$(mktemp -d)"
@@ -154,7 +154,7 @@ REAL_GC="$(command -v gc)"
 cat >"$SHIM_DIR/gc" <<SHIM
 #!/usr/bin/env bash
 if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
-    printf '%s\n' '{"sessions":[{"id":"$SESS","session_name":"bead-host--$WORK","alias":"$WORK","state":"running","template":"agents/bead-host"}]}'
+    printf '%s\n' '{"sessions":[{"id":"$SESS","session_name":"wellhead--$WORK","alias":"$WORK","state":"running","template":"agents/wellhead"}]}'
     exit 0
 fi
 exec "$REAL_GC" "\$@"
@@ -209,7 +209,7 @@ gc bd update "$WORK" --unset-metadata host_session \
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 
 hdr "Default verb — bare '<bead-id>' routes to 'up' (codex PR#98 non-blocking)"
-# `gc bead-host <id>` (hence `gc-bead-host.sh <id>`) is advertised as shorthand
+# `gc wellhead <id>` (hence `gc-wellhead.sh <id>`) is advertised as shorthand
 # for `up <id>`. Prove the dispatch routes a bare id to `up` instead of failing
 # with "unknown command". A definitely-absent id hits up's require_bead guard,
 # so no live session is spawned.
@@ -270,7 +270,7 @@ REAL_GC="$(command -v gc)"
 cat >"$RECREATE_SHIM/gc" <<SHIM
 #!/usr/bin/env bash
 if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
-    printf '%s\n' '{"sessions":[{"id":"$OLD","session_name":"s-$OLD","alias":"$W2","state":"active","template":"agents/bead-host"}]}'
+    printf '%s\n' '{"sessions":[{"id":"$OLD","session_name":"s-$OLD","alias":"$W2","state":"active","template":"agents/wellhead"}]}'
     exit 0
 fi
 if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "wake" ]; then

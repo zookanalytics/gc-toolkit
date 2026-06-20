@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# gc-bead-host.sh — spawn-or-resume a bead-host and maintain the durable
+# gc-wellhead.sh — spawn-or-resume a wellhead and maintain the durable
 # bead<->session binding. Phase 1 of the Bead-Universe Operating Model
 # (epic tk-q4xaj; bead tk-husu6; design Key Components 1-2).
 #
-# A bead-host is the resident LLM for one work bead (agents/bead-host),
+# A wellhead is the resident LLM for one work bead (agents/wellhead),
 # aliased to the bead id and run in resume mode. This is the "thin sugar"
-# the design's Interface table names `gc bead-host <id>`: it creates the
+# the design's Interface table names `gc wellhead <id>`: it creates the
 # host (or resumes an existing one) and writes the durable link
 # atomically on host creation.
 #
@@ -67,7 +67,7 @@ Commands:
   lineage <bead-id>                    Print the work bead's host lineage. Read-only.
   help                                 Show this help.
 
-A bead-host is agents/bead-host run in resume mode, aliased to the bead id.
+A wellhead is agents/wellhead run in resume mode, aliased to the bead id.
 See specs/tk-husu6/binding-report.md for the full contract and the operator
 confirmatory checklist.
 EOF
@@ -91,10 +91,10 @@ require_bead() {
     bead_exists "$1" || die "bead '$1' not found (looked up via 'gc bd show')"
 }
 
-# host_title <work> — the scannable bead-host session title,
+# host_title <work> — the scannable wellhead session title,
 # "<bead-id> · <bead-title>", capped to ~60 display chars so the prefix+S
 # picker shows which bead a host belongs to instead of the generic
-# "gc-toolkit.bead-host". jq slices by Unicode codepoint (never splits a
+# "gc-toolkit.wellhead". jq slices by Unicode codepoint (never splits a
 # multibyte char); falls back to the bare id when the bead has no title.
 host_title() {
     local work="$1" t
@@ -108,9 +108,9 @@ host_title() {
 
 # ---- host liveness (the dead-corpse vocabulary; tk-8v5j0) -------------------
 
-# is_dead_state <state> — the bead-host lifecycle states that mean a corpse
+# is_dead_state <state> — the wellhead lifecycle states that mean a corpse
 # (NOT resumable). Centralized so resolve and up agree on what "dead" is. A
-# bead-host's lifecycle is carried in the session bead's metadata.state:
+# wellhead's lifecycle is carried in the session bead's metadata.state:
 # awake/asleep/active are live & resumable; a never-spawned create lands in
 # failed-create (and closes the bead).
 is_dead_state() {
@@ -145,9 +145,9 @@ session_is_dead() {
 #      the switch helper keeps its own poll budget as a backstop)
 #   1  the host went to a dead/failed-create state — a HARD failure the caller
 #      must surface instead of reporting a phantom "up"
-# Budget is GC_BEAD_HOST_UP_TIMEOUT seconds (default 60).
+# Budget is GC_WELLHEAD_UP_TIMEOUT seconds (default 60).
 wait_until_registered() {
-    local sid="$1" budget="${GC_BEAD_HOST_UP_TIMEOUT:-60}" waited=0 obj status state
+    local sid="$1" budget="${GC_WELLHEAD_UP_TIMEOUT:-60}" waited=0 obj status state
     case "$budget" in ''|*[!0-9]*) budget=60 ;; esac
     while [ "$waited" -lt "$budget" ]; do
         obj="$(bead_json "$sid")"
@@ -160,7 +160,7 @@ wait_until_registered() {
         sleep 1
         waited=$((waited + 1))
     done
-    log "warning: bead-host $sid did not register within ${budget}s — proceeding (caller's switch keeps polling)"
+    log "warning: wellhead $sid did not register within ${budget}s — proceeding (caller's switch keeps polling)"
     return 0
 }
 
@@ -214,7 +214,7 @@ cmd_link() {
 #       (real session beads are filtered out by `gc bd list`); covers the
 #       design's ListByMetadata mechanism and the fixture's stand-in beads.
 #       These are already a confirmed metadata match.
-#   (2) `gc session list` — real session beads, prefiltered by the bead-host
+#   (2) `gc session list` — real session beads, prefiltered by the wellhead
 #       template or an alias match (a cheap candidate filter, never proof of
 #       hosting; the caller confirms hosts_bead==<work> by id).
 candidate_session_ids() {
@@ -223,7 +223,7 @@ candidate_session_ids() {
         | jq -r '.[]?.id // empty' 2>/dev/null || true
     gc session list --state all --json 2>/dev/null \
         | jq -r --arg w "$work" \
-            '(.sessions // .)[]? | select((.template // "" | test("bead-host")) or (.alias // "") == $w) | .id' \
+            '(.sessions // .)[]? | select((.template // "" | test("wellhead")) or (.alias // "") == $w) | .id' \
         2>/dev/null || true
 }
 
@@ -279,7 +279,7 @@ cmd_lineage() {
 #
 # Fast path: the forward cache on the work bead (O(1)). Authoritative
 # search: enumerate `gc session list` (the only CLI surface that lists
-# session beads), PREFILTER the candidates cheaply (a bead-host template
+# session beads), PREFILTER the candidates cheaply (a wellhead template
 # session, or any session aliased to the bead), then RESOLVE strictly by the
 # source-of-truth reverse link, confirmed by id: a session hosts the bead
 # iff its session bead carries hosts_bead == <bead>. Alias is a PREFILTER
@@ -302,10 +302,10 @@ cmd_resolve() {
     if [ -n "$rows" ]; then
         while IFS=$'\t' read -r sid sname salias sstate stmpl; do
             [ -n "$sid" ] || continue
-            # Prefilter (cheap): a bead-host template session, or any session
+            # Prefilter (cheap): a wellhead template session, or any session
             # aliased to the bead. Alias here is ONLY a prefilter to bound the
             # per-session metadata reads below — never proof of hosting.
-            case "$stmpl" in *bead-host*) : ;; *) [ "$salias" = "$work" ] || continue ;; esac
+            case "$stmpl" in *wellhead*) : ;; *) [ "$salias" = "$work" ] || continue ;; esac
             # Resolve strictly by the source-of-truth reverse link, by id.
             # NOT `|| salias == work`: an alias-only match (a live session left
             # aliased after `unlink`, or a foreign session sharing the alias)
@@ -343,7 +343,7 @@ cmd_resolve() {
 
 # The live path: create the host if none exists, else wake the suspended
 # one, then (re)write the binding. Must be run where `gc session new
-# bead-host` resolves (the bead-host agent loaded into the running city).
+# wellhead` resolves (the wellhead agent loaded into the running city).
 cmd_up() {
     local work="${1:-}"
     [ -n "$work" ] || { usage; die "up needs <bead-id>"; }
@@ -351,7 +351,7 @@ cmd_up() {
 
     # A scannable session title, set on BOTH spawn and resume, so the
     # prefix+S picker and the attention board name the bead instead of the
-    # generic "gc-toolkit.bead-host". Best-effort: a rename failure is never
+    # generic "gc-toolkit.wellhead". Best-effort: a rename failure is never
     # fatal to spawn-or-resume.
     local htitle; htitle="$(host_title "$work")"
 
@@ -381,10 +381,10 @@ cmd_up() {
 
     # No host — create one aliased to the bead (alias=bead-id enforces 1:1),
     # titled with the bead so the picker is scannable.
-    log "creating bead-host for $work"
+    log "creating wellhead for $work"
     local out sid sname
-    out="$(gc session new bead-host --alias "$work" --title "$htitle" --no-attach --json 2>/dev/null)" \
-        || die "gc session new bead-host failed (is the bead-host agent loaded? run 'gc reload')"
+    out="$(gc session new wellhead --alias "$work" --title "$htitle" --no-attach --json 2>/dev/null)" \
+        || die "gc session new wellhead failed (is the wellhead agent loaded? run 'gc reload')"
     sid="$(printf '%s' "$out"   | jq -r '.session_id // empty')"
     sname="$(printf '%s' "$out" | jq -r '.session_name // empty')"
     [ -n "$sid" ] || die "gc session new returned no session_id: $out"
@@ -395,11 +395,11 @@ cmd_up() {
     # (tk-8v5j0 acceptance #3). A create that flips to failed-create is a hard
     # error — surface it, never report a phantom "up".
     if ! wait_until_registered "$sid"; then
-        die "bead-host for $work failed to start (session $sid went failed-create/dead)"
+        die "wellhead for $work failed to start (session $sid went failed-create/dead)"
     fi
 
     cmd_link "$work" "$sid" "$sname" "$(meta_get "$sid" continuation_epoch)" >/dev/null
-    log "bead-host up: $work -> session $sid ($sname)"
+    log "wellhead up: $work -> session $sid ($sname)"
     printf '%s\n' "$sid"
 }
 
@@ -416,7 +416,7 @@ main() {
         -h|--help|help|'') usage ;;
         -*) usage; die "unknown option: $cmd" ;;
         # Default verb: `$PROG <bead-id>` == `$PROG up <bead-id>` (the design's
-        # Interface table names the convenience `gc bead-host <id>`). A bare
+        # Interface table names the convenience `gc wellhead <id>`). A bare
         # first arg is treated as a bead id — do NOT shift, so it reaches cmd_up
         # as $1; a non-bead typo surfaces as cmd_up's 'bead not found'.
         *) cmd_up "$@" ;;

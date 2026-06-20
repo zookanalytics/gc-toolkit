@@ -31,7 +31,7 @@
 #   clear → the operator ratifies/redirects and the handled row leaves
 #           the board (a shrinking queue).
 #
-# `open` is a thin front door over tools/gc-bead-host.sh (the Phase 1
+# `open` is a thin front door over tools/gc-wellhead.sh (the Phase 1
 # spawn-or-resume + durable bead<->session link) followed by
 # `gc session attach` (the Phase-0/1 resume mechanism). It owns no new
 # lifecycle — it assembles the proven primitives.
@@ -76,9 +76,9 @@
 #   • complete       — M>0 but every child closed (0 open): awaiting
 #                      graduation/close.
 #   • live           — host liveness, joined from `gc session list` by the
-#                      bead-id the host's alias encodes. A bead-host alias
+#                      bead-id the host's alias encodes. A wellhead alias
 #                      is pack-namespaced (<pack>.<bead-id>), so the leading
-#                      "<pack>." is stripped and only bead-host template
+#                      "<pack>." is stripped and only wellhead template
 #                      sessions are joined:
 #                      "hot" (active session — open ATTACHES instantly),
 #                      "warm" (suspended/asleep — open RESUMES the saved
@@ -200,7 +200,7 @@ iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # assets/scripts/ and tools/ are siblings under the pack root.
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-BEAD_HOST_TOOL="${GC_BEAD_HOST_TOOL:-$SCRIPT_DIR/../../tools/gc-bead-host.sh}"
+WELLHEAD_TOOL="${GC_WELLHEAD_TOOL:-$SCRIPT_DIR/../../tools/gc-wellhead.sh}"
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 
 # ── Cache location ───────────────────────────────────────────────────
@@ -294,7 +294,7 @@ cmd_clear() {
 }
 
 # ── Verb: takeaway ───────────────────────────────────────────────────
-# Write the board-visible takeaway headline — the thin writer the bead-host
+# Write the board-visible takeaway headline — the thin writer the wellhead
 # and proactive worker call instead of inlining the `gc bd update
 # --set-metadata gc.takeaway=… gc.takeaway_at=… gc.takeaway_by=…` triple.
 # Mirrors flag/clear: resolve the bead's rig db, stamp the three fields in ONE
@@ -367,9 +367,9 @@ cmd_takeaway() {
 cmd_open() {
     bead="${1:-}"
     case "$bead" in -h|--help) usage; exit 0 ;; "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
-    [ -x "$BEAD_HOST_TOOL" ] || command -v gc-bead-host.sh >/dev/null 2>&1 \
-        || { echo "$PROG: open: cannot find gc-bead-host.sh (looked at $BEAD_HOST_TOOL)" >&2; exit 4; }
-    tool="$BEAD_HOST_TOOL"; [ -x "$tool" ] || tool="$(command -v gc-bead-host.sh)"
+    [ -x "$WELLHEAD_TOOL" ] || command -v gc-wellhead.sh >/dev/null 2>&1 \
+        || { echo "$PROG: open: cannot find gc-wellhead.sh (looked at $WELLHEAD_TOOL)" >&2; exit 4; }
+    tool="$WELLHEAD_TOOL"; [ -x "$tool" ] || tool="$(command -v gc-wellhead.sh)"
 
     # Point bd at the bead's rig so spawn-or-resume + the durable link
     # land in the right per-rig ledger even cross-rig (BEADS_DIR pins bd).
@@ -378,14 +378,14 @@ cmd_open() {
 
     # Spawn-or-resume + write the durable bead<->session link (Phase 1).
     if ! "$tool" up "$bead"; then
-        echo "$PROG: open: gc-bead-host.sh up '$bead' failed" >&2
+        echo "$PROG: open: gc-wellhead.sh up '$bead' failed" >&2
         exit 4
     fi
     bust_cache
 
-    # Land in it. A bead-host's real tmux session is named by its session_name
+    # Land in it. A wellhead's real tmux session is named by its session_name
     # (`s-<session-id>`) — NOT the bead id and NOT the (rig-prefixed) alias. `up`
-    # cached that name on the work bead as host_session_name (gc-bead-host.sh's
+    # cached that name on the work bead as host_session_name (gc-wellhead.sh's
     # link step); read it back and switch to THAT. Fall back to the bead id only
     # if the cache is somehow unresolved.
     switch_target=$(gc bd show "$bead" --json 2>/dev/null \
@@ -400,7 +400,7 @@ cmd_open() {
     # hang, and forcing it would hijack an unrelated client on the other server.
     #
     # `up` returned only after the host reached a live/registered state
-    # (gc-bead-host.sh blocks on it), so an IMMEDIATE has-session probe is
+    # (gc-wellhead.sh blocks on it), so an IMMEDIATE has-session probe is
     # authoritative — no poll needed. Use bare tmux (honoring $TMUX, the CURRENT
     # server), never `-L $GC_TMUX_SOCKET`: the question is "is the host on the
     # server I'm on now?". Under the board picker's `run-shell`, $TMUX is the GC
@@ -557,11 +557,11 @@ cmd_board() {
     fi
 
     # ── Liveness join (always fresh: one cheap session-list call) ─────
-    # A bead-host's session alias is pack-namespaced — <pack>.<bead-id>
+    # A wellhead's session alias is pack-namespaced — <pack>.<bead-id>
     # (e.g. gc-toolkit.tk-q4xaj) — so key the map by the bead-id the alias
-    # encodes: strip the leading "<pack>." segment, restricted to bead-host
-    # template sessions. This mirrors gc-bead-host.sh's own reverse-
-    # resolution (template ~ "bead-host"); a foreign session (the refinery,
+    # encodes: strip the leading "<pack>." segment, restricted to wellhead
+    # template sessions. This mirrors gc-wellhead.sh's own reverse-
+    # resolution (template ~ "wellhead"); a foreign session (the refinery,
     # a crew) is excluded and never marks an anchor live. An alias with no
     # dot is used as-is (sub leaves a non-matching string unchanged). Map
     # bead-id -> host state.
@@ -573,7 +573,7 @@ cmd_board() {
     SESS_MAP=$(printf '%s' "$sess_raw" | jq -c '
         [ (.sessions // . // [])[]?
           | select((.alias // "") != "")
-          | select((.template // "") | test("bead-host"))
+          | select((.template // "") | test("wellhead"))
           | {key:((.alias) | sub("^[^.]+\\.";"")),
              value:{state:(.state//""), running:(.running//false), attached:(.attached//false)}} ]
         | from_entries' 2>/dev/null || printf '{}')
@@ -608,7 +608,7 @@ def epoch($s): ($s | if . == null or . == "" then null
               | map(select(. as $r | ($rignames | index($r)) == null and $r != $a.id))
               | unique ) end) as $xrefs
     # host liveness, joined by the bead-id the host alias encodes
-    # (SESS_MAP already stripped the pack prefix, bead-host sessions only)
+    # (SESS_MAP already stripped the pack prefix, wellhead sessions only)
     | ($sessmap[$a.id] // null) as $host
     | (if $host==null then "cold"
        elif ($host.state=="active" or $host.running==true) then "hot"
