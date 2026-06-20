@@ -102,6 +102,61 @@ exactly what your fork carries at any moment.
 
 ---
 
+## Prefer overlays over whole-file mirrors
+
+The easiest patch to write is often the most expensive one to carry: a
+**whole-file mirror**, where you copy a base pack artifact wholesale and
+edit the copy. In a pack-based rig, any local file whose **basename
+collides** with a base artifact — a formula, prompt, template-fragment, or
+script shipped by one of the base packs — silently **shadows the base by
+name** and freezes it at the version you copied. When upstream later
+improves that artifact, your mirror suppresses the fix, and nothing warns
+you: the mirror keeps working, just at the old behavior.
+
+A mirror pays the maximum divergence tax — you now own an entire file
+forever — to carry a change that is usually small. Prefer a **targeted
+overlay**: modify only what you need through the rig's overlay primitives
+(append a fragment with `inject_fragments_append`, patch a single agent
+field, override one value) and let everything else fall through to the
+base. The exemplar is the `polecat` patch — it appends doctrine fragments
+with no `prompt_template` replacement, so every upstream prompt improvement
+still reaches it. A full mirror is only justified when the artifact is
+*entirely* custom with no base counterpart (a city's bespoke status-line
+script, say): there is no upstream fix to freeze, because there is no
+upstream version.
+
+### Auditing a fork for mirrors
+
+Mirrors accumulate — a fork that started lean drifts as customizations get
+made the quick way — and the leak surface is **wider than `pack.toml`
+declares**. Audit by **basename collision against the base packs**, not by
+the manifest alone. Three sub-classes, in rough order of danger:
+
+1. **Implicit mirrors (most dangerous).** Files under `formulas/` or
+   `assets/scripts/` that shadow a base file by name with *no* `pack.toml`
+   entry. A manifest-only audit shows nothing — they are invisible until
+   you compare basenames against the base packs directly.
+2. **Declared mirrors.** A `[[patches.agent]] prompt_template = …` entry in
+   `pack.toml` that swaps in a whole prompt. Visible in the manifest, but
+   still a full mirror that freezes the base prompt.
+3. **Fragment redefines.** A `{{ define "X" }}` in `template-fragments/`
+   whose template name collides with a base-defined name and shadows it.
+
+For each suspect, check whether it has actually diverged: a formula mirror a
+version behind the base is stale and usually safe to drop; a script, prompt,
+or fragment should be diffed against the base for the blocks it is missing.
+A net-new artifact with no base name collision is not a mirror and needs no
+action.
+
+The durable fix is a **permanent guard** — a doctor or CI check that flags
+any local artifact whose basename collides with a base pack artifact, and
+warns on version drift for any mirror you have deliberately kept and
+allowlisted. A guard catches the implicit mirrors a human audit misses, and
+turns "remember to re-audit the fork" into "the fork cannot silently grow a
+new mirror."
+
+---
+
 ## Commit messages are the review packet
 
 Because no candidate branches are retained, the commit message *is* the
