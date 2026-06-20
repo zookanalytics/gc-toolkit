@@ -66,6 +66,48 @@ recovery cases — those assume no successor in flight. With a
 successor active, the formula's "push to branch" step is no
 longer the right move.
 
+### Worktree reclaim: gate on predecessor-session liveness, not staleness
+
+The rule above governs *salvaging* a dead predecessor's work. Its
+mirror image is *reclaiming* a worktree judged orphaned — removing it
+from disk and/or repointing `metadata.work_dir` to your own tree.
+That judgment **must** turn on whether the owning session is actually
+dead, never on how stale the worktree looks.
+
+**Staleness is not death.** A pool polecat that is alive but idle
+between claims holds no beads and touches no files, so its worktree is
+indistinguishable from an abandoned one — no beads held, files minutes
+or hours old. Reclaim on that heuristic and, when the live predecessor
+takes its next bead, it follows the now-repointed (or recreated)
+`work_dir` straight into your tree: two live polecats editing one
+worktree, staged union, no commits, branch unpushed. That is incident
+gc-7hf34 (2026-06-20) — resolved with zero loss, but only by luck.
+
+**The gate.** Before you `rm` a predecessor worktree OR repoint
+`metadata.work_dir`, resolve the session that owns the tree — the
+agent alias is the worktree directory's basename (e.g.
+`.../polecats/gc-toolkit.capable` → `gc-toolkit.capable`), or read the
+bead's last assignee — and check its state:
+
+```bash
+OWNER=$(basename "$PREDECESSOR_WORK_DIR")   # e.g. gc-toolkit.capable
+gc session list --state all --json \
+  | jq -r --arg o "$OWNER" \
+      '.sessions[] | select((.alias // "") | endswith($o)) | "\(.state) running=\(.running)"'
+```
+
+Reclaim **only** when the owning session is `closed` or absent from
+the list. Any live state — `active`, `asleep`, `suspended` — means it
+can resume and follow `work_dir` back into the tree. `asleep` is a
+scaled-to-zero pool slot, not a dead one; it wakes on the next claim.
+
+If the predecessor is still in flight, do **not** reclaim: take a
+fresh worktree (or defer) and leave its `work_dir` untouched.
+
+This sharpens the orphan-recovery assumption cited above — those
+recovery cases presume the predecessor is gone. `gc session list` is
+how you verify that; a no-beads-held / stale-files signal is not.
+
 ### Refinery PR-handoff contract
 
 When the refinery closes an impl bead with metadata
