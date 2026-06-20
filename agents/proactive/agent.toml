@@ -15,8 +15,10 @@
 #                             5 slots). The design's "max 2-3"; start at 2.
 #
 #   work_query SHEDS at the   The city-wide session cap (design's "reconciler
-#   city cap                  clamp"). The reconciler runs work_query to decide
-#                             whether to spawn; this one emits [] (no demand)
+#   city cap                  clamp"). work_query is the WORKER's discovery query
+#                             (what a running worker greps for its bead); the
+#                             reconciler's SPAWN decision runs scale_check below.
+#                             Both carry this clamp and emit "no demand" (0 / [])
 #                             when active city sessions are at/over
 #                             GC_PROACTIVE_CITY_CAP (~8-16 band, default 20).
 #                             Only THIS pool consults the clamp, so proactive
@@ -76,6 +78,19 @@ active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(
 if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '[]'; exit 0; fi
 r=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
 if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
+'''
+
+# scale_check is the reconciler's SPAWN predicate (work_query above is only the
+# running worker's discovery query). The PR #105 disable gate lived in work_query
+# alone, so spawns bypassed it; this mirrors that GC_PROACTIVE_ENABLED gate and
+# city-cap shed in COUNT form (0 = no demand = no spawn). Full rationale: tk-8j2g1.
+scale_check = '''
+case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '0'; exit 0 ;; esac
+target="{{.Rig}}/gc-toolkit.proactive"
+active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
+if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '0'; exit 0; fi
+n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --limit 0 2>/dev/null | jq 'length' 2>/dev/null)
+if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
 '''
 
 # The mr-invariant, belt-and-suspenders: even if a first reaction produces

@@ -176,18 +176,20 @@ echo "── the gate lives in the REAL work_query too (agent.toml, gc-free, FIR
 # A POISON gc on PATH drops a sentinel file when invoked, so we can tell whether
 # the gate short-circuited before any gc call (the work_query's internal
 # 2>/dev/null would otherwise hide a gc invocation).
-extract_work_query() {
-    local line cap=0
+# Extract the triple-single-quoted body of TOML key $1 from $AGENT_TOML. Used
+# for both work_query (here) and scale_check (the spawn-gate section below).
+extract_toml_block() {
+    local key="$1" line cap=0
     while IFS= read -r line; do
         if [ "$cap" = 0 ]; then
-            [ "$line" = "work_query = '''" ] && cap=1
+            [ "$line" = "$key = '''" ] && cap=1
             continue
         fi
         [ "$line" = "'''" ] && break
         printf '%s\n' "$line"
     done < "$AGENT_TOML"
 }
-WQ="$(extract_work_query | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
+WQ="$(extract_toml_block work_query | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
 POISON="$(mktemp -d)"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
@@ -211,6 +213,47 @@ if [ -e "$POISON/called" ]; then
     ok  "work_query: enabled falls THROUGH the gate to the gc body"
 else
     bad "work_query: enabled falls through to the gc body" "gc called" "gc not called"
+fi
+rm -rf "$POISON"
+
+echo "── the SPAWN gate lives in scale_check too (agent.toml, gc-free, FIRST) ──"
+# The bug (tk-8j2g1): the reconciler's pool SPAWN decision runs scale_check, NOT
+# work_query. With scale_check absent, gascity falls back to a raw routed COUNT
+# (config.poolDemandCountShell) that ignores GC_PROACTIVE_ENABLED, so a disabled
+# pool keeps spawning workers that boot, find nothing, and drain. scale_check
+# must mirror work_query's gate + cap shed in COUNT form: emit 0 (gc-free, FIRST)
+# when the flag is off, an integer count when enabled. Same extract/POISON probe
+# as the work_query gate above, but the count-form sheds with 0 (not []).
+SC_RAW="$(extract_toml_block scale_check)"
+SC="$(printf '%s\n' "$SC_RAW" | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
+eq  "scale_check is present in agent.toml"          "yes" "$([ -n "$SC_RAW" ] && echo yes || echo no)"
+has "scale_check sheds in COUNT form (0, not [])"   "printf '0'"            "$SC_RAW"
+has "scale_check carries the same enable gate"      "GC_PROACTIVE_ENABLED"  "$SC_RAW"
+has "scale_check carries the same city-cap clamp"   "GC_PROACTIVE_CITY_CAP" "$SC_RAW"
+has "scale_check rig-qualifies the same route"      '{{.Rig}}/gc-toolkit.proactive' "$SC_RAW"
+POISON="$(mktemp -d)"
+cat > "$POISON/gc" <<SH
+#!/bin/sh
+: > "$POISON/called"
+exit 99
+SH
+chmod +x "$POISON/gc"
+rm -f "$POISON/called"
+sc_out="$(env -u GC_PROACTIVE_ENABLED PATH="$POISON:$PATH" sh -c "$SC" 2>/dev/null || true)"
+eq "scale_check: default-disabled emits 0 (the real spawn gate)" "0" "$sc_out"
+if [ -e "$POISON/called" ]; then
+    bad "scale_check: disabled path is gc-free (gate is FIRST)" "no gc call" "gc was called"
+else
+    ok  "scale_check: disabled path is gc-free (gate is FIRST)"
+fi
+# Sanity: the 0 above is the GATE, not an always-zero query. With the flag ON the
+# gate falls through to the gc-backed count, which hits the poison gc.
+rm -f "$POISON/called"
+GC_PROACTIVE_ENABLED=1 PATH="$POISON:$PATH" sh -c "$SC" >/dev/null 2>&1 || true
+if [ -e "$POISON/called" ]; then
+    ok  "scale_check: enabled falls THROUGH the gate to the gc body"
+else
+    bad "scale_check: enabled falls through to the gc body" "gc called" "gc not called"
 fi
 rm -rf "$POISON"
 
@@ -300,6 +343,7 @@ has "work_query sheds with an empty array"       "printf '[]'"            "$A"
 has "work_query routes to this pool"             "gc-toolkit.proactive"   "$A"
 has "work_query rig-qualifies the route"         '{{.Rig}}/gc-toolkit.proactive' "$A"
 has "work_query ranks routed demand by board weight (prio_w)" "prio_w"   "$A"
+has "pool carries a scale_check SPAWN gate (tk-8j2g1)" "scale_check = '''" "$A"
 has "pool defaults the mr merge strategy"        'GC_DEFAULT_MERGE_STRATEGY = "mr"' "$A"
 has "pool is rig-scoped"                         'scope = "rig"'          "$A"
 
