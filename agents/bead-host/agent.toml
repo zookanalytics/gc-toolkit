@@ -49,7 +49,7 @@ work_dir = ".gc/agents/bead-host/{{.AgentBase}}"
 # moves (new notes land, a PR opens, CI flips), so the first thing on
 # resume is to re-read the bead — reflect current reality, not the
 # stale snapshot from before the suspend (binding assertion 5).
-nudge = 'Operator returned. Re-read your bead first — `gc bd show "$GC_ALIAS"` — it may have changed while you were suspended. Then continue the conversation.'
+nudge = 'Operator returned. Re-read your bead first — it may have changed while you were suspended. Then continue the conversation.'
 
 # Purely interactive host: never claim pool work, never a sling target.
 # Same never-matching-predicate pattern as mayor-thread: work_query
