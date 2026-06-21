@@ -37,6 +37,7 @@ opinions rather than cloned directly.
 - `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`
 - `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
 - `docs/file-structure.md` — conventions for where docs and specs live in this pack
+- `docs/skills.md` — how skills are authored, filed, and exposed so one `SKILL.md` serves both Gas City and (when portable) Claude / Codex
 
 ## Usage
 
