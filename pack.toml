@@ -28,10 +28,10 @@
 # `packs/gascity-keeper/pack.toml` for the import wiring that the
 # gascity rig adds in city.toml.
 #
-# Dog is intentionally NOT vendored: the gc binary auto-includes the
-# maintenance pack (cmd/gc/embed_builtin_packs.go:builtinPackIncludes),
-# which ships dog as a city-local agent. Gastown's import of
-# maintenance is deduplicated against that auto-include by pack name.
+# Dog is intentionally NOT vendored: the imported gastown pack owns the
+# dog pool (gastown/agents/dog/; gastown pack.toml: "This pack owns its
+# dog pool") and ships dog as a city-scoped agent, so gc-toolkit needs no
+# roster entry of its own.
 
 [pack]
 name = "gc-toolkit"
