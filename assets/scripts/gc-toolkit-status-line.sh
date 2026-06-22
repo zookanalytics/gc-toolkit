@@ -12,9 +12,9 @@
 # gc_city_name() for rationale.
 #
 # Replaces gastown's status-line.sh as the body of #(...) in status-right.
-# Renders two composable slots, hook/mail counts, and a timing slot:
+# Renders two composable slots plus hook/mail counts:
 #
-#   [<title>] [<indicator>] | 🪝 N | 📬 M | ⏱ T ms
+#   [<title>] [<indicator>] | 🪝 N | 📬 M
 #
 # The agent name is intentionally NOT rendered here — it lives on the
 # left side of the status bar (see tmux-status-line-override.sh, which
@@ -26,20 +26,27 @@
 #                 Hidden when title equals the agent name (the gascity
 #                 default — no operator-set title yet). The title slot
 #                 requests view=summary — the lean read-model view (no
-#                 per-session enrichment) — so each refresh is sub-100ms
-#                 and forks nothing downstream; no local /tmp cache is
-#                 needed.
+#                 per-session enrichment).
 # - <indicator> : verbatim contents of /tmp/gc-status-<slug>.indicator
 #                 if the file exists. Any gc-toolkit script can write or
 #                 clear this file; the next status refresh picks it up.
 #                 Last-writer-wins. Writers MUST `rm -f` the file when
 #                 their work completes (trap on EXIT is the safe pattern).
-# - <timing>    : wall time across the three downstream queries below
-#                 (gc hook, gc mail check, supervisor sessions curl).
-#                 Always rendered. Surfaces when the status refresh
-#                 starts paying real cost. Falls back to whole-second
-#                 precision on dates without %N support — the value
-#                 stays numeric but loses sub-second resolution.
+#                 Read LIVE on every render (never cached) so the
+#                 [spawning …] feedback appears and clears on the next
+#                 refresh rather than being delayed by up to one TTL.
+#
+# TTL cache (perf): the three fork-heavy queries — `gc hook`,
+# `gc mail count`, and the supervisor `curl` — are cached together in
+# one per-(city,agent) file for GC_STATUSLINE_TTL seconds (default 30).
+# tmux re-evaluates status #() on every redraw (status-interval is a MAX,
+# not a minimum), so without a cache an actively-attached pane forks
+# gc+curl into Beads/the supervisor ~1×/second. With the cache, a render
+# inside the TTL is a pure file read: no gc/curl fork. Each underlying
+# query is additionally bounded by `timeout 2s` (run_bounded) so a wedged
+# backend can never hang tmux. Structure adapted from gascity-packs
+# v0.3.1 gastown/assets/scripts/status-line.sh. Overrides:
+# GC_STATUSLINE_TTL (seconds), GC_STATUSLINE_CACHE_DIR (path).
 #
 # Width budget: total output capped at BUDGET chars; truncate title
 # first (with ellipsis), then indicator. Counts always render — they're
@@ -115,64 +122,139 @@ gc_city_name() {
     basename "$city_path"
 }
 
+# --- TTL cache helpers --------------------------------------------------
+# Adapted from gascity-packs v0.3.1 status-line.sh. run_bounded caps each
+# backend query at 2s (no-op when `timeout` is unavailable); is_number /
+# cache_mtime guard the freshness math; json_array_count returns the
+# element count of a JSON array emitted by the bounded command.
+run_bounded() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 2s "$@"
+    else
+        "$@"
+    fi
+}
+
+is_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+cache_mtime() {
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'
+}
+
+json_array_count() {
+    if ! command -v jq >/dev/null 2>&1; then
+        printf '0'
+        return 0
+    fi
+    n=$(run_bounded "$@" 2>/dev/null | jq 'if type == "array" then length else 0 end' 2>/dev/null || true)
+    case "$n" in
+        ''|*[!0-9]*) printf '0' ;;
+        *) printf '%s' "$n" ;;
+    esac
+}
+
 # BUDGET caps total bytes emitted by this script. tmux-theme.sh sets
 # status-right-length=80 and appends " %H:%M" after the #() expansion,
 # which is ~6 cells. Leave headroom so the time slot is never crowded.
 BUDGET=72
 
-# --- Time downstream queries -------------------------------------------
-# Brackets the three subprocess/network calls below. GNU date returns
-# nanoseconds for %N; non-GNU returns the literal "N", so probe once
-# and degrade to whole-second precision rather than poisoning the math.
-case "$(date +%N 2>/dev/null)" in
-    ''|N) NS_OK=0 ;;
-    *)    NS_OK=1 ;;
-esac
-_ns_now() {
-    t=$(date +%s%N 2>/dev/null)
-    [ "$NS_OK" = 1 ] || t="${t%N}000000000"
-    printf '%s' "$t"
-}
-start_t=$(_ns_now)
+# --- Cache the three fork-heavy queries ---------------------------------
+# hook count, mail unread count, and the supervisor title curl share one
+# per-(city,agent) cache file. Layout: line 1 = "<hook> <mail>" (two
+# integers), line 2 = the raw title (may be empty or contain spaces;
+# never a newline). A render within the TTL reads this file and forks
+# neither gc nor curl.
+cache_ttl="${GC_STATUSLINE_TTL:-30}"
+is_number "$cache_ttl" || cache_ttl=30
+if [ -n "${GC_STATUSLINE_CACHE_DIR:-}" ]; then
+    cache_dir="$GC_STATUSLINE_CACHE_DIR"
+    cache_private=0
+else
+    cache_base="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+    uid=$(id -u 2>/dev/null || printf 'unknown')
+    cache_dir="$cache_base/gc-statusline-$uid"
+    cache_private=1
+fi
+cache_city="${EXPLICIT_CITY_PATH:-${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}}"
+safe_agent=$(printf '%s' "$agent" | tr -c 'A-Za-z0-9._-' '_')
+cache_key=$(printf '%s\n%s\n' "$cache_city" "$agent" | cksum | awk '{print $1}')
+cache="$cache_dir/gc-statusline-${safe_agent}-${cache_key}.cache"
+
+w=0
+m=0
+raw_title=""
+
+now=$(date +%s 2>/dev/null || printf '0')
+mtime=$(cache_mtime "$cache")
+if is_number "$now" && is_number "$mtime" && [ "$mtime" -gt 0 ] && [ "$((now - mtime))" -lt "$cache_ttl" ]; then
+    # Cache hit — read counts (line 1) and raw title (line 2). IFS= on the
+    # title read preserves embedded spaces.
+    {
+        read -r w m
+        IFS= read -r raw_title
+    } < "$cache" 2>/dev/null || true
+    is_number "${w:-}" || w=0
+    is_number "${m:-}" || m=0
+else
+    # Cache miss/stale — run the fork-heavy queries, each bounded by 2s.
+
+    # gc hook ready-work count (array length — 0 when idle). json_array_count
+    # parses the JSON array, so it is correct regardless of pretty-printing
+    # and for the empty-array case.
+    w=$(json_array_count gc hook "$agent")
+
+    # gc mail unread count. gc-toolkit uses `gc mail count` (not gastown's
+    # `gc mail check`) — a deliberate perf divergence (PR #74).
+    m=$(run_bounded gc mail count "$agent" --json 2>/dev/null | jq -r '.unread // 0' 2>/dev/null || echo 0)
+    is_number "$m" || m=0
+
+    # Supervisor title. One HTTP round-trip, lean view=summary read-model.
+    # Skip entirely when no city resolves — `/v0/city//sessions` would just
+    # 404 and add latency. run_bounded (timeout 2s) is the bound when the
+    # `timeout` binary exists; curl --max-time is the fallback bound when it
+    # does not. curl -f silences the body during the ~1-2s 503 window after
+    # `gc start`; jq fails closed when input is empty.
+    city_name=$(gc_city_name)
+    if [ -n "$city_name" ]; then
+        raw_title=$(run_bounded curl -sf --max-time 2 \
+            "$(gc_api_base)/v0/city/$city_name/sessions?state=active&view=summary" 2>/dev/null \
+            | jq -r --arg a "$agent" \
+                '.items | map(select(.alias == $a)) | .[0].title // ""' 2>/dev/null \
+            || true)
+    fi
+
+    # Persist atomically (temp + rename) so a concurrent reader — e.g. a
+    # second pane attached to the same agent — never sees a torn write.
+    mkdir -p "$cache_dir" 2>/dev/null || true
+    [ "$cache_private" = 1 ] && chmod 700 "$cache_dir" 2>/dev/null || true
+    tmp="$cache.$$.tmp"
+    if printf '%s %s\n%s\n' "${w:-0}" "${m:-0}" "$raw_title" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    fi
+fi
+
+is_number "${w:-}" || w=0
+is_number "${m:-}" || m=0
 
 # --- Fixed segments: hook / mail counts (always render) -----------------
-
-w=$(gc hook "$agent" 2>/dev/null | grep -c . || true)
-m=$(gc mail count "$agent" --json 2>/dev/null | jq -r '.unread // 0' 2>/dev/null || echo 0)
-
 hook_seg=""
-[ "${w:-0}" -gt 0 ] && hook_seg=" | 🪝 ${w}"
+[ "$w" -gt 0 ] && hook_seg=" | 🪝 ${w}"
 mail_seg=""
-[ "${m:-0}" -gt 0 ] && mail_seg=" | 📬 ${m}"
+[ "$m" -gt 0 ] && mail_seg=" | 📬 ${m}"
 
-# --- Title slot ---------------------------------------------------------
-# One HTTP round-trip per refresh, served from the lean view=summary
-# read-model view (no per-session enrichment) — so each refresh is
-# sub-100ms and forks nothing downstream, even with many panes
-# refreshing concurrently. curl -f silences the body during the ~1-2s
-# 503 window after `gc start` before the read-model is ready; jq fails
-# closed when input is empty.
+# --- Title slot presentation --------------------------------------------
+# Pure string work (no fork), runs every render. Hide when title is the
+# gascity default. For most agents that means title == alias; for thread
+# agents gascity strips the `-adhoc-<hex>` suffix when assigning the
+# default, so the title equals the role name instead (e.g. alias
+# `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` → default title
+# `gc-toolkit.mayor-thread`). Strip the suffix and compare both.
 title=""
-raw_title=""
-city_name=$(gc_city_name)
-# Skip the API call entirely when no city resolves — `/v0/city//sessions`
-# would just 404 and add latency to every status refresh.
-if [ -n "$city_name" ]; then
-    raw_title=$(curl -sf --max-time 3 \
-        "$(gc_api_base)/v0/city/$city_name/sessions?state=active&view=summary" 2>/dev/null \
-        | jq -r --arg a "$agent" \
-            '.items | map(select(.alias == $a)) | .[0].title // ""' 2>/dev/null \
-        || true)
-fi
-end_t=$(_ns_now)
-elapsed_ms=$(( (${end_t:-0} - ${start_t:-0}) / 1000000 ))
-timing_seg=" | ⏱ ${elapsed_ms}ms"
-# Hide when title is the gascity default. For most agents that means
-# title == alias; for thread agents gascity strips the `-adhoc-<hex>`
-# suffix when assigning the default, so the title equals the role name
-# instead (e.g. alias `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` →
-# default title `gc-toolkit.mayor-thread`). Strip the suffix and
-# compare both.
 agent_role="${agent%-adhoc-*}"
 if [ "$raw_title" = "$agent" ] || [ "$raw_title" = "$agent_role" ] || [ "$raw_title" = "null" ]; then
     title=""
@@ -188,15 +270,15 @@ if [ -f "$INDICATOR_FILE" ]; then
 fi
 
 # --- Width budget enforcement -------------------------------------------
-# Compute byte-length of fixed footprint (counts + timing — the agent
-# name no longer lives on this side of the status bar). Whatever's left
-# is shared between title and indicator. Truncate title first (the
-# bead's rule), then indicator. Multi-byte characters cost more bytes
-# than cells, so byte-length is a conservative over-estimate; the
-# visible output may be a few cells under budget. Acceptable for a
-# status bar.
+# Compute byte-length of fixed footprint (the counts — the agent name no
+# longer lives on this side of the status bar, and the timing slot has
+# been removed). Whatever's left is shared between title and indicator.
+# Truncate title first (the bead's rule), then indicator. Multi-byte
+# characters cost more bytes than cells, so byte-length is a conservative
+# over-estimate; the visible output may be a few cells under budget.
+# Acceptable for a status bar.
 
-fixed="${hook_seg}${mail_seg}${timing_seg}"
+fixed="${hook_seg}${mail_seg}"
 fixed_len=${#fixed}
 remaining=$(( BUDGET - fixed_len ))
 [ "$remaining" -lt 0 ] && remaining=0
@@ -252,5 +334,4 @@ fi
 [ -n "$indicator" ] && printf ' %s' "$indicator"
 [ -n "$hook_seg" ] && printf '%s' "$hook_seg"
 [ -n "$mail_seg" ] && printf '%s' "$mail_seg"
-[ -n "$timing_seg" ] && printf '%s' "$timing_seg"
 exit 0
