@@ -12,9 +12,9 @@
 # gc_city_name() for rationale.
 #
 # Replaces gastown's status-line.sh as the body of #(...) in status-right.
-# Renders two composable slots plus hook/mail counts:
+# Renders two composable slots, hook/mail counts, and a cache-miss timing slot:
 #
-#   [<title>] [<indicator>] | 🪝 N | 📬 M
+#   [<title>] [<indicator>] | 🪝 N | 📬 M | ⏱ T.Ts
 #
 # The agent name is intentionally NOT rendered here — it lives on the
 # left side of the status bar (see tmux-status-line-override.sh, which
@@ -47,6 +47,11 @@
 # backend can never hang tmux. Structure adapted from gascity-packs
 # v0.3.1 gastown/assets/scripts/status-line.sh. Overrides:
 # GC_STATUSLINE_TTL (seconds), GC_STATUSLINE_CACHE_DIR (path).
+#
+# Timing slot (perf): on a cache MISS — and only then — a trailing
+# "⏱ T.Ts" slot reports the wall time of the uncached hook+mail+title
+# work in seconds, rounded to one decimal. A cache HIT is a pure file
+# read with nothing meaningful to time, so the slot is omitted entirely.
 #
 # Width budget: total output capped at BUDGET chars; truncate title
 # first (with ellipsis), then indicator. Counts always render — they're
@@ -158,6 +163,19 @@ json_array_count() {
     esac
 }
 
+# _ns_now emits a nanosecond wall clock for the cache-miss timing slot.
+# NS_OK is set by the cache-miss branch (its only caller) right before the
+# first call: 1 when `date +%N` yields real nanoseconds, 0 when a non-GNU
+# date echoes a literal "N" and we degrade to whole-second precision
+# rather than poisoning the arithmetic. Keeping the probe off the top
+# level means a cache hit never forks `date +%N` — the hot path stays a
+# pure file read.
+_ns_now() {
+    t=$(date +%s%N 2>/dev/null)
+    [ "$NS_OK" = 1 ] || t="${t%N}000000000"
+    printf '%s' "$t"
+}
+
 # BUDGET caps total bytes emitted by this script. tmux-theme.sh sets
 # status-right-length=80 and appends " %H:%M" after the #() expansion,
 # which is ~6 cells. Leave headroom so the time slot is never crowded.
@@ -202,6 +220,11 @@ if is_number "$now" && is_number "$mtime" && [ "$mtime" -gt 0 ] && [ "$((now - m
     is_number "${m:-}" || m=0
 else
     # Cache miss/stale — run the fork-heavy queries, each bounded by 2s.
+    # Time only this branch: the timing slot reports the cost of the
+    # uncached work, so a cache hit stays a pure file read (no slot, and
+    # the `date +%N` probe below never runs on that hot path).
+    case "$(date +%N 2>/dev/null)" in ''|N) NS_OK=0 ;; *) NS_OK=1 ;; esac
+    miss_start=$(_ns_now)
 
     # gc hook ready-work count (array length — 0 when idle). json_array_count
     # parses the JSON array, so it is correct regardless of pretty-printing
@@ -227,6 +250,7 @@ else
                 '.items | map(select(.alias == $a)) | .[0].title // ""' 2>/dev/null \
             || true)
     fi
+    miss_end=$(_ns_now)
 
     # Persist atomically (temp + rename) so a concurrent reader — e.g. a
     # second pane attached to the same agent — never sees a torn write.
@@ -240,6 +264,18 @@ fi
 
 is_number "${w:-}" || w=0
 is_number "${m:-}" || m=0
+
+# --- Timing slot (cache-miss only) --------------------------------------
+# miss_start/miss_end are set only in the cache-miss branch above, so on a
+# cache hit timing_seg stays empty and nothing is emitted. Convert the
+# nanosecond delta to tenths of a second, rounding to nearest (+0.05s),
+# then render as N.Ns — seconds to one decimal (e.g. "1.5s").
+timing_seg=""
+if [ -n "${miss_start:-}" ] && [ -n "${miss_end:-}" ]; then
+    elapsed_tenths=$(( (miss_end - miss_start + 50000000) / 100000000 ))
+    [ "$elapsed_tenths" -lt 0 ] && elapsed_tenths=0
+    timing_seg=" | ⏱ $(( elapsed_tenths / 10 )).$(( elapsed_tenths % 10 ))s"
+fi
 
 # --- Fixed segments: hook / mail counts (always render) -----------------
 hook_seg=""
@@ -270,15 +306,15 @@ if [ -f "$INDICATOR_FILE" ]; then
 fi
 
 # --- Width budget enforcement -------------------------------------------
-# Compute byte-length of fixed footprint (the counts — the agent name no
-# longer lives on this side of the status bar, and the timing slot has
-# been removed). Whatever's left is shared between title and indicator.
-# Truncate title first (the bead's rule), then indicator. Multi-byte
-# characters cost more bytes than cells, so byte-length is a conservative
+# Compute byte-length of fixed footprint (the counts plus the cache-miss
+# timing slot — the agent name no longer lives on this side of the status
+# bar). Whatever's left is shared between title and indicator. Truncate
+# title first (the bead's rule), then indicator. Multi-byte characters
+# cost more bytes than cells, so byte-length is a conservative
 # over-estimate; the visible output may be a few cells under budget.
 # Acceptable for a status bar.
 
-fixed="${hook_seg}${mail_seg}"
+fixed="${hook_seg}${mail_seg}${timing_seg}"
 fixed_len=${#fixed}
 remaining=$(( BUDGET - fixed_len ))
 [ "$remaining" -lt 0 ] && remaining=0
@@ -328,10 +364,12 @@ fi
 # --- Emit ----------------------------------------------------------------
 # Every non-empty segment carries its own leading-space (or pipe-space
 # for counts), so concatenation is order-only — no separator joins.
-# When all four are empty the script emits nothing and tmux renders
-# just the trailing " %H:%M" from gastown's status-right format.
+# When every segment is empty the script emits nothing and tmux renders
+# just the trailing " %H:%M" from gastown's status-right format. The
+# timing slot is last (cache-miss renders only) — the old slot's position.
 [ -n "$title" ] && printf ' %s' "$title"
 [ -n "$indicator" ] && printf ' %s' "$indicator"
 [ -n "$hook_seg" ] && printf '%s' "$hook_seg"
 [ -n "$mail_seg" ] && printf '%s' "$mail_seg"
+[ -n "$timing_seg" ] && printf '%s' "$timing_seg"
 exit 0
