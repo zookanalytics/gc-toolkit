@@ -112,6 +112,16 @@ This is a reading task, not a diff-matching script. For each brief in `$BRIEFS`:
    is ONE finding (one bead spanning them), not one per brief; two unrelated
    changes hitting one brief are two findings. The unit is the change.
 
+**Nature line (shared with the memory audit).** The briefs carry *structural*
+truths — durable contracts and by-design sharp edges — not *operational* state.
+A live defect with a tracked fix (a bead id plus an "until <X> lands" expiry) is
+operational by construction and self-expires when the fix lands, so a structural
+reference never tracks its bug-fix lifecycle. Do not "fix drift" by promoting
+such a defect into a brief; and if a brief already carries a defect-with-tracked-
+fix as a footgun, that is mis-filed operational content for the bead/git trail to
+own, not a structural claim whose staleness you chase as drift. Keep this
+consistent with mol-doc-keeper-memory-audit's nature gate.
+
 Anything outside a brief's `## Scope` is not drift for that brief — the scope is
 bounded, and the adjacent doc owns that material.
 
