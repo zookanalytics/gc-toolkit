@@ -859,8 +859,12 @@ Signals that this doc needs a refresh:
   (currently three tiers; Tier 3 gated by `$GC_SESSION_ORIGIN`).
 - A new variant emerges — e.g., something that is neither
   `[[named_session]]`, pool, nor operator-spawned thread.
-- A new gc-toolkit auto-memory entry describes a contract-level
-  footgun (not a one-off incident).
+- A new gc-toolkit auto-memory entry documents a *by-design* sharp
+  edge — a contract-level consequence a consumer must account for
+  permanently — and NOT a defect with a tracked fix. A defect (a
+  bead id plus an "until <X> lands" expiry) is operational and
+  self-expiring; it belongs in memory and the bead trail, never in
+  this footgun section.
 
 To audit drift against upstream, diff `NamedSession` and
 `Agent.EffectiveWorkQuery()` since the last refresh:
@@ -871,7 +875,11 @@ git -C rigs/gascity log --since='<last refresh>' \
   | grep -E '^\+.*NamedSession|^\+.*WorkQuery'
 ```
 
-The memory entries cited above are point-in-time observations.
-If you find one stale (the symptom no longer reproduces, or the
-fix has been merged), update the memory entry and adjust the
-footgun section here in the same PR.
+The footguns above are *by-design* sharp edges, not defects: each
+documents a contract that holds on purpose (see the watch-don't-fix
+reopen conditions on its bead). Remove one only when the underlying
+contract genuinely changes — a design decision, surfaced as drift —
+not as a "reap it when the fix merges" chore. A structural reference
+does not track bug-fix lifecycles: a defect with a tracked fix is
+operational, self-expires, and lives in memory and the bead/git
+trail, never here.
