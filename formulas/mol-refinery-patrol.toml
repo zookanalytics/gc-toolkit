@@ -751,10 +751,34 @@ branch_has_real_change "origin/$TARGET" temp || \
   halt_false_completion "$BRANCH" "$(git merge-base "origin/$TARGET" temp 2>/dev/null || printf '%s' "origin/$TARGET")"
 ```
 
-**1. Merge target branch locally and push (auto-promote on protected branch):**
+**1. Merge, push, verify, and close work bead (auto-promote on protected branch):**
+
+Run this as one script. It merges, pushes, verifies the remote target ref,
+then records merge metadata and closes the bead. It uses a temporary
+detached worktree for the target branch because the real target branch may
+already be checked out in the rig's canonical worktree (`$GC_RIG_ROOT`). Do
+NOT replace this with `git checkout $TARGET` — that fails with `fatal:
+'$TARGET' is already used by worktree` under the normal multi-worktree
+layout and halts the merge before push/auto-promote. The metadata write
+happens only after the remote target ref is verified at the merged SHA.
+
+gc-toolkit local delta: the protected-branch auto-promote (per the note
+above) lives in the push branch below — a GitHub-protected `$TARGET` flips
+the bead to `merge_strategy=pr` and falls through to the "mr" block instead
+of failing. The rebased `temp` branch is never touched by the merge (it
+happens in the throwaway worktree against `temp`'s SHA), so it stays intact
+and checked out in the refinery worktree for the PR push.
+
 ```bash
-git checkout $TARGET
-git merge --ff-only temp
+set -e
+
+MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
+MERGE_WT="$MERGE_PARENT/target"
+cleanup_merge_wt() {
+  git worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true
+  rm -rf "$MERGE_PARENT"
+}
+trap cleanup_merge_wt EXIT
 
 is_protected_branch_error() {
   case "$1" in
@@ -765,18 +789,41 @@ is_protected_branch_error() {
   esac
 }
 
+git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
+TEMP_SHA=$(git rev-parse temp)
+git worktree add --detach "$MERGE_WT" "origin/$TARGET"
+git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
+MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
+MERGED_SHORT=$(git -C "$MERGE_WT" rev-parse --short HEAD)
+
 PUSH_ERR=$(mktemp)
-if git push origin $TARGET 2>"$PUSH_ERR"; then
+if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
   rm -f "$PUSH_ERR"
+
+  git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
+  REMOTE=$(git rev-parse "origin/$TARGET")
+  if [ "$MERGED_SHA" != "$REMOTE" ]; then
+    echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP. Do not mutate bead state."
+    gc runtime drain-ack
+    exit 1
+  fi
+
+  gc bd update "$WORK" \
+    --set-metadata merge_result=merged \
+    --set-metadata merged_sha="$MERGED_SHA" \
+    --set-metadata merged_target="$TARGET" \
+    --unset-metadata rejection_reason && \
+  gc bd close "$WORK" --reason "Merged to $TARGET at $MERGED_SHORT"
 else
   PUSH_STDERR=$(cat "$PUSH_ERR")
   rm -f "$PUSH_ERR"
   if is_protected_branch_error "$PUSH_STDERR"; then
     echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-    gc bd update $WORK --set-metadata merge_strategy=pr
+    gc bd update "$WORK" --set-metadata merge_strategy=pr
     MERGE_STRATEGY=mr
-    git reset --hard "origin/$TARGET"
-    # Fall through to the "If MERGE_STRATEGY = 'mr'" block below.
+    # temp is untouched and still checked out in the refinery worktree; the
+    # throwaway merge worktree is removed by the trap. Fall through to the
+    # "If MERGE_STRATEGY = 'mr'" block below.
   else
     echo "Push failed: $PUSH_STDERR"
     echo "STOP. Debug and retry. Do NOT continue."
@@ -786,48 +833,28 @@ else
 fi
 ```
 
+If the script exits non-zero: STOP. Debug and retry. Do NOT write merge
+metadata, close the bead, or delete the source branch.
+
+Both the `--set-metadata` write and the `gc bd close` are required —
+`merged_sha` and `merged_target` are the only forensic breadcrumbs tying a
+closed bead to its merge commit on `$TARGET`. `--unset-metadata
+rejection_reason` clears any stale rejection field from an earlier
+rejected/reworked attempt before the successful close.
+
 **If `$MERGE_STRATEGY` was just flipped to `mr` (auto-promotion fired),
-skip steps 2-5 below and execute the "If MERGE_STRATEGY = 'mr'" block
-instead. The rebased `temp` branch is still available for the PR push.**
+skip steps 2-3 below and execute the "If MERGE_STRATEGY = 'mr'" block
+instead. The rebased `temp` branch is still checked out in the refinery
+worktree and available for the PR push.**
 
-**2. Verify push:**
+**2. Cleanup (leaves worktree detached so other worktrees can hold $TARGET):**
 ```bash
-git fetch origin
-LOCAL=$(git rev-parse $TARGET)
-REMOTE=$(git rev-parse origin/$TARGET)
-[ "$LOCAL" = "$REMOTE" ] || echo "PUSH FAILED — do not proceed"
-```
-If SHAs differ: STOP. Debug and retry. Do NOT continue.
-
-**3. Record merge metadata and close work bead:**
-
-Run as a single chained command so the metadata write cannot be skipped
-when the close-reason already names the SHA. Both the `--set-metadata`
-write and the `gc bd close` are required — `merged_sha` and
-`merged_target` are the only forensic breadcrumbs tying a closed bead
-to its merge commit on `$TARGET`. `--unset-metadata rejection_reason`
-clears any stale rejection field from an earlier rejected/reworked
-attempt before the successful close.
-
-```bash
-MERGED_SHA=$(git rev-parse HEAD) && \
-MERGED_SHORT=$(git rev-parse --short HEAD) && \
-gc bd update $WORK \
-  --set-metadata merge_result=merged \
-  --set-metadata merged_sha=$MERGED_SHA \
-  --set-metadata merged_target=$TARGET \
-  --unset-metadata rejection_reason && \
-gc bd close $WORK --reason "Merged to $TARGET at $MERGED_SHORT"
-```
-
-**4. Cleanup (leaves worktree detached so other worktrees can hold $TARGET):**
-```bash
-git branch -d temp
-git switch --detach HEAD
+git checkout --detach "origin/$TARGET" >/dev/null 2>&1 || true
+git branch -d temp || git branch -D temp || true
 ```
 If delete_merged_branches = "true": `git push origin --delete $BRANCH`
 
-**5. Auto-fast-forward rig canonical checkout (best-effort):**
+**3. Auto-fast-forward rig canonical checkout (best-effort):**
 
 **Config: auto_ff_rig_main = {{auto_ff_rig_main}}**
 
