@@ -1,21 +1,22 @@
-# Note: dog lives in maintenance, not gc-toolkit
+# Note: dog is owned by the imported gastown pack, not gc-toolkit
 
-**Dog is intentionally provided by the auto-included maintenance pack** at
-`.gc/system/packs/maintenance/agents/dog/` (re-materialized from the gc binary
-embed on every `gc start`). Dog is shared housekeeping infrastructure — orphan
-sweeps, jsonl backups, reaper, shutdown dance — that belongs in maintenance's
-central scope, not in our domain-specific roster.
+**Dog is intentionally provided by the imported gastown pack** at
+`gastown/agents/dog/` (gastown's `pack.toml`: "This pack owns its dog pool").
+Dog is shared housekeeping infrastructure — orphan sweeps, jsonl backups,
+reaper, shutdown dance — that belongs in gastown's central city scope, not in
+our domain-specific roster.
 
 gc-toolkit owns the **domain crew** (mayor, deacon, boot, witness, refinery,
 polecat). Dog is the **utility worker** that all packs use; it stays central.
 
 ## What we run
 
-- `dog` (bare name, no binding): scope=city, fallback=true, idle_timeout=2h,
-  max_active_sessions=3 (from `.gc/system/packs/maintenance/agents/dog/agent.toml`)
-- gc binary auto-includes maintenance via
-  `cmd/gc/embed_builtin_packs.go:builtinPackIncludes` — no city-config edit
-  needed.
+- `dog` (bare name, no binding): scope=city, idle_timeout=2h,
+  max_active_sessions=3 (from gastown's `agents/dog/agent.toml`)
+- Dog ships with the imported gastown pack, which owns the dog pool — no
+  city-config edit needed. Required builtin packs are core/bd/dolt only
+  (`cmd/gc/embed_builtin_packs.go:requiredBuiltinPackNames`); the maintenance
+  pack that formerly auto-included dog is retired.
 
 ## Lane C history
 
@@ -24,8 +25,9 @@ cutover. It collided with maintenance.dog on bare-name uniqueness in V2
 `ValidateAgents` (which is binding-blind — see the spike doc empirical
 correction). When we hit that, we recognized dog as appropriately central
 rather than fight the loader. Cleaner outcome: gc-toolkit owns the domain
-roster; maintenance owns the housekeeping. The architectural seam matches the
-intent.
+roster; the central utility pack owns the housekeeping. The architectural seam
+matches the intent (maintenance provided that dog then; the imported gastown
+pack owns it now).
 
 ## When to revisit
 

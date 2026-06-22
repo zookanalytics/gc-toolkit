@@ -250,26 +250,17 @@ that follow it, not in the brief.
 > etc.), refresh through your install path instead — this section does
 > not apply.*
 
-Gascity-shipped packs (gastown, dolt, bd) are Go-embedded into the `gc`
-binary at compile time. The deployed pack content under
-`{{ .CityRoot }}/.gc/system/packs/<pack>/` is downstream of the binary,
-not the source of truth.
-
-**To refresh deployed packs after rebasing or pulling the gascity rig,
-run `make install` from the gascity rig:**
+You reference packs through `pack.toml` `[imports.<name>]` entries (pins
+recorded in `packs.lock`). Because pack content is compiled into the `gc`
+binary, you update it by rebuilding:
 
 ```bash
 cd <gascity-rig> && make install
 ```
 
-This rebuilds `gc` with current pack content embedded and installs the
-binary to `$INSTALL_DIR` (typically `$HOME/go/bin`). The runtime picks
-up the new embedded packs on next process spawn.
-
-**Do not** rsync `examples/<pack>/packs/<pack>/` →
-`.gc/system/packs/<pack>/`. Manual rsync bypasses the embed mechanism
-and gets overwritten on the next install. The pack-deployment-on-install
-behavior was fixed upstream a while back — `make install` is canonical.
+That installs a `gc` carrying the current pack content to `$INSTALL_DIR`
+(typically `$HOME/go/bin`); `[imports]` resolve at the updated pins on the
+next spawn.
 
 ## Communication
 
