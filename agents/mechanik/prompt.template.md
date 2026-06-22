@@ -250,26 +250,17 @@ that follow it, not in the brief.
 > etc.), refresh through your install path instead — this section does
 > not apply.*
 
-Builtin packs are **never materialized into the city**. The `gc` binary
-embeds them and pre-seeds the user-global repo cache at each pack's
-canonical pin; `pack.toml` `[imports.<name>]` entries resolve their
-bundled sources from that cache, with the resolved pins recorded in
-`packs.lock`. A bundled source pinned at any other commit is an ordinary
-remote import and is fetched for real. The retired
-`{{ .CityRoot }}/.gc/system/packs/<pack>/` tree is pruned on sight.
-
-**To refresh the embedded packs after rebasing or pulling the gascity
-rig, run `make install` from the gascity rig:**
+You reference packs through `pack.toml` `[imports.<name>]` entries (pins
+recorded in `packs.lock`). Because pack content is compiled into the `gc`
+binary, you update it by rebuilding:
 
 ```bash
 cd <gascity-rig> && make install
 ```
 
-This rebuilds `gc` with current pack content embedded and installs the
-binary to `$INSTALL_DIR` (typically `$HOME/go/bin`). On the next process
-spawn the binary re-seeds the user-global cache, so `[imports]` resolve
-at the freshly embedded pins; the cache self-heals, so there is nothing
-to materialize or rsync by hand.
+That installs a `gc` carrying the current pack content to `$INSTALL_DIR`
+(typically `$HOME/go/bin`); `[imports]` resolve at the updated pins on the
+next spawn.
 
 ## Communication
 
