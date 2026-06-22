@@ -48,14 +48,8 @@
 # v0.3.1 gastown/assets/scripts/status-line.sh. Overrides:
 # GC_STATUSLINE_TTL (seconds), GC_STATUSLINE_CACHE_DIR (path).
 #
-# Timing slot (perf): a trailing "⏱ T.Ts" slot reports the wall time of
-# the last *uncached* hook+mail+title work in seconds, rounded to one
-# decimal. The duration is measured on a cache MISS and persisted in the
-# cache (line 3); EVERY render — hit and miss — displays that persisted
-# last-miss duration. Showing it on the ~1×/sec cache-HIT renders (not
-# just the ~1×/TTL miss) keeps the backend slowness continuously visible
-# rather than letting the fast cache-hit read mask it. The hot-path render
-# stays a pure file read: the `date +%N` timing probe runs only on a miss.
+# Timing slot (perf): trailing "⏱ T.Ts" = last uncached hook+mail+title
+# wall time (1 decimal); measured on a miss, cached (line 3), shown always.
 #
 # Width budget: total output capped at BUDGET chars; truncate title
 # first (with ellipsis), then indicator. Counts always render — they're
@@ -135,12 +129,7 @@ gc_city_name() {
 # Adapted from gascity-packs v0.3.1 status-line.sh. run_bounded caps each
 # backend query at 10s (no-op when `timeout` is unavailable); is_number /
 # cache_mtime guard the freshness math; json_array_count returns the
-# element count of a JSON array emitted by the bounded command. The bound
-# is 10s, not v0.3.1's 2s: a busy agent's `gc hook` / `gc mail count` can
-# run ~1.9s — right at a 2s edge — so under Dolt load they intermittently
-# timed out, the count was written as 0, and the slot dropped (observed
-# flicker). 10s lets the slow query finish (counts stop dropping); the
-# true render cost is surfaced via the timing slot, not masked at 2s.
+# element count of a JSON array emitted by the bounded command.
 run_bounded() {
     if command -v timeout >/dev/null 2>&1; then
         timeout 10s "$@"
@@ -192,10 +181,8 @@ BUDGET=72
 
 # --- Cache the three fork-heavy queries ---------------------------------
 # hook count, mail unread count, and the supervisor title curl share one
-# per-(city,agent) cache file. Layout: line 1 = "<hook> <mail>" (two
-# integers), line 2 = the raw title (may be empty or contain spaces;
-# never a newline). A render within the TTL reads this file and forks
-# neither gc nor curl.
+# per-(city,agent) cache file. Layout: line 1 "<hook> <mail>", line 2 raw
+# title (spaces ok, never a newline), line 3 last-miss tenths; TTL read = no fork.
 cache_ttl="${GC_STATUSLINE_TTL:-30}"
 is_number "$cache_ttl" || cache_ttl=30
 if [ -n "${GC_STATUSLINE_CACHE_DIR:-}" ]; then
@@ -220,11 +207,7 @@ display_tenths=""
 now=$(date +%s 2>/dev/null || printf '0')
 mtime=$(cache_mtime "$cache")
 if is_number "$now" && is_number "$mtime" && [ "$mtime" -gt 0 ] && [ "$((now - mtime))" -lt "$cache_ttl" ]; then
-    # Cache hit — read counts (line 1), raw title (line 2), and the
-    # persisted last-miss timing in tenths of a second (line 3). IFS= on
-    # the title read preserves embedded spaces. An old 2-line cache (written
-    # before timing was persisted) leaves display_tenths empty, so the
-    # timing slot is simply omitted until the next miss rewrites line 3.
+    # Cache hit — read line 1 counts, line 2 title, line 3 tenths; IFS= keeps title spaces.
     {
         read -r w m
         IFS= read -r raw_title
@@ -234,11 +217,7 @@ if is_number "$now" && is_number "$mtime" && [ "$mtime" -gt 0 ] && [ "$((now - m
     is_number "${m:-}" || m=0
     is_number "${display_tenths:-}" || display_tenths=""
 else
-    # Cache miss/stale — run the fork-heavy queries, each bounded by
-    # run_bounded (10s). Measure only this branch: the timing slot reports
-    # the cost of the uncached work, and the persisted result is what a
-    # later cache hit displays — so the hot-path hit never forks the
-    # `date +%N` probe below, it just reads back the cached tenths.
+    # Cache miss/stale — run the fork-heavy queries (run_bounded, 10s).
     case "$(date +%N 2>/dev/null)" in ''|N) NS_OK=0 ;; *) NS_OK=1 ;; esac
     miss_start=$(_ns_now)
 
@@ -253,13 +232,8 @@ else
     is_number "$m" || m=0
 
     # Supervisor title. One HTTP round-trip, lean view=summary read-model.
-    # Skip entirely when no city resolves — `/v0/city//sessions` would just
-    # 404 and add latency. The title curl keeps its own tight --max-time 2:
-    # the supervisor read-model is a fast local API (not a Dolt query), so
-    # it needs none of run_bounded's wider 10s headroom, and --max-time is
-    # also the sole bound when the `timeout` binary is absent. curl -f
-    # silences the body during the ~1-2s 503 window after `gc start`; jq
-    # fails closed when input is empty.
+    # Skip when no city resolves (avoids a 404 + latency). curl --max-time 2
+    # bounds it; curl -f hides the body during the post-`gc start` 503 window.
     city_name=$(gc_city_name)
     if [ -n "$city_name" ]; then
         raw_title=$(run_bounded curl -sf --max-time 2 \
@@ -270,16 +244,12 @@ else
     fi
     miss_end=$(_ns_now)
 
-    # Convert the nanosecond delta to tenths of a second, rounding to
-    # nearest (+0.05s). This value is rendered now AND persisted (cache
-    # line 3) so subsequent cache-HIT renders display the same last-miss
-    # duration instead of timing their own ~0.02s file read.
+    # Nanosecond delta to tenths of a second (round to nearest, +0.05s).
     display_tenths=$(( (miss_end - miss_start + 50000000) / 100000000 ))
     [ "$display_tenths" -lt 0 ] && display_tenths=0
 
     # Persist atomically (temp + rename) so a concurrent reader — e.g. a
     # second pane attached to the same agent — never sees a torn write.
-    # Line 3 carries the last-miss timing in tenths (read back on hits).
     mkdir -p "$cache_dir" 2>/dev/null || true
     [ "$cache_private" = 1 ] && chmod 700 "$cache_dir" 2>/dev/null || true
     tmp="$cache.$$.tmp"
@@ -292,13 +262,7 @@ is_number "${w:-}" || w=0
 is_number "${m:-}" || m=0
 
 # --- Timing slot (persistent) -------------------------------------------
-# display_tenths is the last *uncached* hook+mail+title duration in tenths
-# of a second: measured fresh on a cache miss above, or read from cache
-# line 3 on a hit. Rendering it on EVERY render keeps the backend slowness
-# visible on the ~1×/sec cache-hit renders instead of only flashing on the
-# ~1×/TTL miss. It is empty (slot omitted) only until the first miss
-# populates it, or when an old 2-line cache predates the persisted timing.
-# Render as N.Ns — seconds to one decimal (e.g. "1.5s").
+# Render display_tenths as "⏱ N.Ns" (one decimal); empty until the first miss.
 timing_seg=""
 if is_number "${display_tenths:-}"; then
     timing_seg=" | ⏱ $(( display_tenths / 10 )).$(( display_tenths % 10 ))s"
@@ -393,8 +357,7 @@ fi
 # for counts), so concatenation is order-only — no separator joins.
 # When every segment is empty the script emits nothing and tmux renders
 # just the trailing " %H:%M" from gastown's status-right format. The
-# timing slot is last — the old slot's position; it now renders on every
-# render (the persisted last-miss duration), not just cache misses.
+# timing slot is last — the old slot's position (now every render).
 [ -n "$title" ] && printf ' %s' "$title"
 [ -n "$indicator" ] && printf ' %s' "$indicator"
 [ -n "$hook_seg" ] && printf '%s' "$hook_seg"
