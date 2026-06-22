@@ -58,13 +58,24 @@ The three lanes below are the resulting model.
   the default sling path and the dispatch shape used by mayor,
   mechanik, deacon, and refinery when handing work back to the
   polecat pool.
-- **Sets:** `metadata.gc.routed_to=<target>`. Leaves `assignee` empty.
+- **Sets:** `metadata.gc.routed_to=<target>`. For a **pool target**
+  (an agent that supports instance expansion) it leaves `assignee`
+  empty. For a **singleton target** (a named session — no instance
+  expansion) it *also* stamps `assignee=<target>`, because the
+  singleton's hook skips the Tier 3 routed-pool query and would
+  otherwise never surface the bead. That singleton stamp automates the
+  ruling's own "assign the named-session identity directly" step, so it
+  refines rather than contradicts the "no `assignee` by default"
+  decision quoted above.
 - **CLI example:**
   ```bash
-  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde
+  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde    # pool: gc.routed_to only
+  gc sling gc-toolkit/gc-toolkit.mechanik tk-abcde   # singleton: gc.routed_to + assignee
   ```
-- **Does NOT:** set `assignee`. The reconciler picks an available
-  worker from the pool by matching `gc.routed_to`.
+- **Does NOT:** set `assignee` **for pool targets** — the reconciler
+  picks an available worker from the pool by matching `gc.routed_to`.
+  (Singleton targets are the exception just described: sling stamps
+  the assignee so the named session's own hook surfaces the work.)
 - **Cross-store boundary:** sling routes only *within a single bead
   store*. It refuses to route a bead that lives in one rig's `.beads`
   store to a target (pool or agent) in a *different* rig's store —
@@ -100,14 +111,21 @@ The three lanes below are the resulting model.
   step so the bead is never momentarily double-stamped. Added in
   PR #1841 (merged 2026-05-12) to make this transition atomic from
   the caller's perspective.
-- **Sets:** `metadata.gc.routed_to=<target>` and clears `assignee`
-  to empty.
+- **Sets:** `metadata.gc.routed_to=<target>` and clears the prior
+  `assignee`. For a **pool target** the assignee stays empty after
+  the clear. For a **singleton target** the Lane 1 singleton stamp
+  still runs *after* the clear, so the net effect is "prior assignee
+  cleared, `assignee=<target>` set."
 - **CLI example:**
   ```bash
-  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde --reassign
+  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde --reassign   # pool: clear, then gc.routed_to only
   ```
-- **Does NOT:** stamp a new assignee. The combined behavior is *clear*
-  + *route*, never *clear* + *re-assign-to-someone-else*.
+- **Does NOT:** re-assign to a *third party*. `--reassign` itself only
+  ever clears the prior assignee — it never names a new one. For pool
+  targets the result is *clear* + *route* with no assignee; for
+  singleton targets the new `assignee=<target>` comes from the Lane 1
+  singleton-stamp rule (the sling target itself), not from
+  `--reassign`.
 
 #### `--reassign` idempotency
 

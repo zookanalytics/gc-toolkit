@@ -232,9 +232,13 @@ Named singletons run their `gc hook` work query with
 `$GC_SESSION_ORIGIN=named`. The Tier 3 routed-pool tier is gated
 to `ephemeral` (or empty) origins only — named singletons see
 only **Tier 1** (in-progress, crash recovery) and **Tier 2**
-(ready, pre-assigned) work. Routing work to a named singleton
-must use `bd update --assignee`, not `gc.routed_to`. See [Work
-routing](#work-routing) and
+(ready, pre-assigned) work. They still skip Tier 3, but routing
+work to a named singleton no longer requires hand-stamping the
+assignee: `gc sling <singleton-qualified-name> <bead>` detects
+the singleton target and stamps `assignee=<target>` alongside
+`gc.routed_to`, so the bead surfaces via the singleton's Tier 2
+(`bd ready --assignee`) query. `bd update <bead> --assignee` is
+still valid and equivalent. See [Work routing](#work-routing) and
 [gascity-routing-model.md](gascity-routing-model.md) for the
 lane breakdown.
 
@@ -528,9 +532,11 @@ Same Tier 1 + Tier 2 gating as named singletons —
 `$GC_SESSION_ORIGIN=named` skips Tier 3 routed pool. Patrol wisps
 are *produced* by the patrol cycle itself (Tier 1 / Tier 2 hits),
 not consumed from the routed pool. Outside work that needs a
-specific patrol agent to act should use `bd update --assignee
-<patrol-qualified-name>` (Lane 2), not `gc sling` — same rule as
-any named singleton.
+specific patrol agent to act can be routed with `gc sling
+<patrol-qualified-name> <bead>` — which stamps `assignee` for
+singleton targets so the work surfaces via Tier 2 — or assigned
+directly with `bd update --assignee <patrol-qualified-name>`
+(Lane 2). Same rule as any named singleton.
 
 ### Examples in the wild
 
@@ -634,7 +640,7 @@ the cycle-level mechanics that the matrix does not capture.
 | `gc mail inbox` | reads `assignee=<my-ids>` | reads `assignee=<my-ids>` | reads `assignee=<my-ids>` |
 | `bd update <bead> --assignee <addr>` | QualifiedName (Lane 2) | instance name (Lane 2; usually unwanted for pool work — prefer sling) | adhoc session name |
 | `bd update <bead> --set-metadata gc.routed_to=<target>` | ✗ — singleton ignores Tier 3 | QualifiedName / PoolName (Lane 1) | ✗ — work_query stub ignores Tier 3 |
-| `gc sling <target> <bead>` | ✗ — singleton ignores Tier 3 (use `bd update --assignee`) | QualifiedName / PoolName (Lane 1) | ✗ — sling_query exits non-zero |
+| `gc sling <target> <bead>` | QualifiedName — stamps `assignee`+`gc.routed_to`, so Tier 2 surfaces it (Lane 1) | QualifiedName / PoolName (Lane 1) | ✗ — sling_query exits non-zero |
 | `gc runtime drain <addr>` | session id or alias | session id or instance alias (no pool-level drain — drain each instance, or shrink `max_active_sessions` in config) | session id or adhoc alias |
 
 Pool-wide drain (`gc agent drain`) was removed when the runtime
@@ -720,15 +726,23 @@ controller to consider this session still desired and respawn
 it." If you `kill` a named singleton whose bead is still active,
 the next reconciler patrol will materialize it again.
 
-### Named singletons cannot consume routed (`gc.routed_to`) work
+### Stamping only `gc.routed_to` on a named singleton strands the work
 
 Named singletons run with `$GC_SESSION_ORIGIN=named`, which
-skips the Tier 3 routed-pool query. If you `gc sling
-<singleton-qualified-name> <bead>`, the bead gets stamped with
-`gc.routed_to` but the singleton's hook will not see it.
+skips the Tier 3 routed-pool query. A bead carrying *only*
+`gc.routed_to=<singleton>` — e.g. from `bd update <bead>
+--set-metadata gc.routed_to=<singleton-qualified-name>` — is
+invisible to the singleton's hook, which runs only Tier 1 / Tier 2
+(assignee match).
 
-Use `bd update <bead> --assignee <singleton-qualified-name>`
-(Lane 2) instead. See [gascity-routing-model.md, Lane
+`gc sling <singleton-qualified-name> <bead>` is the safe path: it
+detects the singleton target and stamps `assignee=<target>`
+alongside `gc.routed_to`, so the bead surfaces via the singleton's
+Tier 2 (`bd ready --assignee`) query. `bd update <bead> --assignee
+<singleton-qualified-name>` (Lane 2) is the equivalent explicit
+form. See [gascity-routing-model.md, Lane
+1](gascity-routing-model.md#lane-1--gc-sling-target-bead-queue--template-routing)
+and [Lane
 2](gascity-routing-model.md#lane-2--bd-update-bead---assignee-named-session-direct-named-session-delivery).
 
 ### Pool workers cannot consume routed work in manual sessions
