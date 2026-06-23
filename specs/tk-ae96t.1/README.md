@@ -1,9 +1,25 @@
 ---
 name: First architect persona — build record (tk-ae96t.1)
-description: Work record for tk-ae96t.1 — building the FIRST gc-toolkit persona (the architect) on Path A, grounded in a prior-art survey (BMAD "Winston", Roo Code Architect mode, wshobson/agents, Martin Fowler). Records what landed where, the key wiring decision (agent-local skills realize Path A natively, replacing the deprecated skills: preload + un-authored skillOverrides), and that this PR supersedes the held #123 (docs/personas.md) and #130 (mechanics findings). Held for operator review; sets the convention every later persona follows.
+description: Work record for tk-ae96t.1 — building the FIRST gc-toolkit persona (the architect) on Path A, grounded in a prior-art survey (BMAD "Winston", Roo Code Architect mode, wshobson/agents, Martin Fowler). Records what landed where, the key wiring decision (agent-local skills realize Path A natively, replacing the deprecated skills: preload + un-authored skillOverrides), and that this PR supersedes the held #123 (docs/personas.md) and #130 (mechanics findings). SUPERSEDED by tk-ae96t.2 (PR#166): the standing `architect` agent + agent-local method-skills were dropped for top-level city-wide method-skills + a proof-point mol (mol-architect-review); this file is retained as the Path A historical build record (its agents/architect/… and pack.toml paths are pre-rework and no longer in the tree).
 ---
 
 # First architect persona — build record
+
+> **⚠ Superseded by tk-ae96t.2 (PR #166).** This file is the original **Path A**
+> build record. Path A shipped a **standing `architect` agent** with **agent-local**
+> method-skills; the tk-ae96t.2 rework **dropped that shape**. What actually landed:
+>
+> - `skills/architect/SKILL.md` — identity skill, city-wide (kept from Path A)
+> - `skills/architect-design/SKILL.md` — method-skill, **top-level** city-wide
+> - `skills/architect-review/SKILL.md` — method-skill, **top-level** city-wide
+> - `formulas/mol-architect-review.toml` — the proof-point mol (runs `architect-review`
+>   as a step, with no standing agent)
+> - **no** `agents/architect/` standing agent and **no** `pack.toml` named session
+>
+> The current persona contract is [`docs/personas.md`](../../docs/personas.md).
+> **Everything below is the Path A record, kept for provenance — its
+> `agents/architect/…` and `pack.toml` paths are pre-rework and are no longer in the
+> tree.**
 
 This directory is the bead-local record for **tk-ae96t.1**, which builds the
 **first gc-toolkit persona — the architect** — on the persona-as-skill model
@@ -29,7 +45,13 @@ persona-vs-agent distinction).
 - **Built on the settled mechanics:** [`specs/tk-ohrlc/research/mechanics.md`](../tk-ohrlc/research/mechanics.md)
   (the four "Mechanics" questions, verified against current Claude Code docs).
 
-## What landed where
+## What landed where (Path A — pre-rework)
+
+> **Historical.** The `agents/architect/…` and `pack.toml` entries below are the
+> **original Path A** shape. tk-ae96t.2 moved both method-skills to top-level
+> `skills/`, removed the standing agent and its `pack.toml` session, and added
+> `mol-architect-review`. The shape that actually shipped is the bulleted list in
+> the banner at the top of this file.
 
 **The persona (framework-neutral content; Claude/Gas-City specifics only in
 packaging):**
