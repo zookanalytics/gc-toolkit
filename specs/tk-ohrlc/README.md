@@ -5,6 +5,14 @@ description: Work record for tk-ohrlc — the investigation that settles the fou
 
 # Personas mechanics — investigation record
 
+> **Note — tk-ae96t.2 (PR #166).** The persona runtime-form trade-off this
+> investigation frames as open — **Path A / B / C** (subagent-preload vs. per-persona
+> plugin vs. `disable-model-invocation`) — was subsequently resolved by the first
+> persona implementation: the architect ships **top-level / city-wide method-skills**
+> plus a proof-point mol (`mol-architect-review`), with **no standing agent**. These
+> remain the mechanics findings (verified 2026-06-14); the resolution lives in
+> [`docs/personas.md`](../../docs/personas.md).
+
 This directory is the bead-local record for **tk-ohrlc**, which **investigates** the
 four deferred "Mechanics" questions that `docs/personas.md`
 left as a TBD stub. The deliverable is a **findings write-up**, not a doc edit.

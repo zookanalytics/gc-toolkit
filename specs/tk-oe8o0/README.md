@@ -5,6 +5,15 @@ description: Work record for adopting docs/personas.md — the design-session ra
 
 # Personas model — landing record
 
+> **Note — tk-ae96t.2 (PR #166).** One mechanism in the design rationale below was
+> revised by the first persona implementation. Where this record reasons that a
+> persona's process-skills "**ride with the persona**" (agent-local) and only
+> broadly-shared methods go top-level, tk-ae96t.2 instead placed the architect's
+> **method-skills top-level / city-wide**, relying on progressive disclosure to keep
+> plain workers minimal (no standing agent; a proof-point mol exercises the method).
+> The current persona contract is [`docs/personas.md`](../../docs/personas.md); this
+> record is kept as the design-session rationale and prior-art survey.
+
 This directory is the historical record for **tk-oe8o0**, which adopted the
 persona/agent model as a central doc. The authoritative, lean statement is
 [`docs/personas.md`](../../docs/personas.md); this record preserves the fuller

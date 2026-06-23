@@ -113,5 +113,7 @@ The architect is the first persona built on this model:
   picture.
 
 A standing `architect` agent (for drift patrol / structural gating) is a later
-step, taken only if those continuous jobs are actually needed. The prior art the
-persona was grounded in is in [`specs/tk-ae96t.1/`](../specs/tk-ae96t.1/README.md).
+step, taken only if those continuous jobs are actually needed. The architect's
+prior-art grounding and its Path A **build record** (superseded by tk-ae96t.2,
+kept for provenance — the current shape is the one described above) are in
+[`specs/tk-ae96t.1/`](../specs/tk-ae96t.1/README.md).
