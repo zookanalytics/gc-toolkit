@@ -26,6 +26,7 @@ defines the routing contract; it is not a command tutorial.
 | Upstream tutorial `docs/tutorials/06-beads.md` — **superseded by PR #1736 ruling, not yet updated** | gastownhall/gascity | https://github.com/gastownhall/gascity/blob/19a0bb201eb6d1723a10eecdae20371bd8ceeb17/docs/tutorials/06-beads.md (last touched in `eac98595e701008087f7ee6acecbf55d5dca7794`) | 2026-05-21 |
 | Upstream CLI reference (`--reassign` row only) | gastownhall/gascity | `rigs/gascity/docs/reference/cli.md:2789` at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17` | 2026-05-21 |
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
+| PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
 
 ## The maintainer's ruling
 
@@ -136,15 +137,26 @@ on the assignee field — no error, no spurious update. Callers that
 don't know the bead's prior state can pass `--reassign`
 unconditionally and trust the routing call to be safe.
 
-### Adjacent — `gc.run_target` (graph.v2 step routing)
+### Adjacent — `gc.run_target` (deprecated wire field; compile-time authoring hint)
 
-`gc.run_target` is metadata on individual template steps inside
-graph.v2 formula files (e.g., `mol-review-quorum.toml`), not
-per-bead routing. It lives at a different layer than the three
-sling lanes above: those route a single bead between agents,
-while `gc.run_target` routes a step within a formula expansion.
-Don't conflate it with `gc.routed_to` when you see it in formula
-files.
+`gc.run_target` still appears as metadata on individual template
+steps inside graph.v2 formula files — e.g. `mol-review-quorum.toml`
+sets it on each review lane and the synthesis step — so you *will*
+see it there. But it is **not** a live, parallel routing field, and
+it does not route anything at runtime. Upstream PR #2779
+(`ga-eld2x`, merged 2026-06-01) made `gc.routed_to` the sole
+*persisted* routing key that every runtime demand / claim / scale
+reader consults, and demoted `gc.run_target` to a compile-time
+recipe-authoring hint: it declares a step's intended config/pool
+target for the steps where `assignee` can't be used (check and
+control-dispatch steps), and the stampers resolve it **into**
+`gc.routed_to` before the bead is persisted. So `gc.run_target` is
+an authoring-time precursor to `gc.routed_to`, not a sibling routing
+key alongside it — don't conflate the two when you see
+`gc.run_target` in formula files. A bare `gc.run_target` left on a
+stored bead is inert authoring provenance; `gc doctor --fix`
+backfills `gc.routed_to` for any pre-migration workflow root that
+still carries only the old field.
 
 ## Note: upstream tutorial wording
 
