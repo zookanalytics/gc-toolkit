@@ -1,18 +1,30 @@
 ---
 name: Architect prior-art — index + distillation
-description: Provenance-stamped index of the prior-art behind the gc-toolkit architect persona (BMAD-METHOD "Winston"; Roo Code Architect mode; wshobson/agents backend-architect + ship-mate/architect; Martin Fowler "Who Needs an Architect?") and the cross-cutting distillation of what makes a strong architect — identity stance, what it owns, core methods — that the authored persona is built from. Keeps the design auditable from the repo alone.
+description: Provenance-stamped index of the prior-art behind the gc-toolkit architect persona (BMAD-METHOD "Winston"; Roo Code Architect mode; wshobson/agents backend-architect + ship-mate/architect; Martin Fowler "Who Needs an Architect?") and the cross-cutting distillation of what makes a strong architect — identity stance, what it owns, core methods — that the authored persona is built from. Keeps the design auditable from the repo alone. SUPERSEDED by tk-ae96t.2 (PR#166): the survey + distillation are unchanged, but the persona shape this index references was reworked — Path A's standing `architect` agent + agent-local method-skills were dropped for top-level city-wide skills (`skills/architect`, `skills/architect-design`, `skills/architect-review`) plus the proof-point mol `mol-architect-review`; no `agents/architect/` standing agent remains.
 ---
 
 # Architect prior-art — index + distillation
+
+> **⚠ Superseded by tk-ae96t.2 (PR #166).** The prior-art surveys and the
+> distillation below are **current and unchanged** — only the *persona shape* this
+> index references was reworked. Path A shipped a **standing `architect` agent** with
+> **agent-local** method-skills; tk-ae96t.2 **dropped that shape**. The persona
+> actually ships as **top-level city-wide skills** — `skills/architect` (identity),
+> `skills/architect-design`, `skills/architect-review` — plus the proof-point mol
+> `formulas/mol-architect-review.toml`, with **no `agents/architect/` standing agent**.
+> The current persona contract is [`docs/personas.md`](../../../docs/personas.md); the
+> Path A build record is [`../README.md`](../README.md).
 
 This is the **provenance-stamped index** behind the first gc-toolkit persona, the
 **architect** (epic `tk-ae96t`, operator decision Path A, 2026-06-14). The bead's
 STEP 1 surveyed strong architect prior art from live sources; the full write-ups
 live alongside this file and are linked below, so the patterns folded into the
-authored persona stay auditable from the repo alone. The persona itself —
-`skills/architect`, `skills/architect-design`, `skills/architect-review`, and the
-`agents/architect` standing form — is **built from the distillation at the bottom
-of this file.**
+authored persona stay auditable from the repo alone. The persona's methods —
+the **top-level city-wide skills** `skills/architect` (identity),
+`skills/architect-design`, and `skills/architect-review`, plus the proof-point mol
+`formulas/mol-architect-review.toml` (Path A's `agents/architect` standing form was
+**dropped** in the tk-ae96t.2 rework — see the banner above) — are **built from the
+distillation at the bottom of this file.**
 
 This survey is deliberately *architect-specific*, complementary to the
 *persona-system* surveys under [`specs/tk-oe8o0/research/`](../../tk-oe8o0/research/prior-art.md)
