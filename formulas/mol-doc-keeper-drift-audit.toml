@@ -123,7 +123,10 @@ own, not a structural claim whose staleness you chase as drift. Keep this
 consistent with mol-doc-keeper-memory-audit's nature gate.
 
 Anything outside a brief's `## Scope` is not drift for that brief — the scope is
-bounded, and the adjacent doc owns that material.
+bounded, and the adjacent doc owns that material. Topical adjacency is not
+ownership: a brief that merely touches a surface, rather than holding the mandate
+for it, is not the brief whose drift you track — keep this consistent with
+mol-doc-keeper-memory-audit's gate-2 discriminator.
 
 ## 3. Dedup, cap, and file
 
