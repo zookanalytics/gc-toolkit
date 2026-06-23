@@ -1,14 +1,15 @@
 ---
 name: architect-review
-description: The architect's review method — assess a proposed change or PRD AGAINST the shape of the system. Use to judge whether a diff, design, or requirements doc respects the system's boundaries and contracts, whether it introduces architectural drift (a structural change that should have updated docs/architecture.md but didn't), and what it costs future change. Produces findings and recommendations, not verdicts. Engaged by the architect persona/agent; not for plain workers.
+description: The architect's review method — assess a proposed change or PRD AGAINST the shape of the system. Use to judge whether a diff, design, or requirements doc respects the system's boundaries and contracts, whether it introduces architectural drift (a structural change that should have updated docs/architecture.md but didn't), and what it costs future change. Produces findings and recommendations, not verdicts. Invoke it on its own as a mol step, or engage it when you have worn the architect identity.
 ---
 
 # architect-review
 
-> A **process-skill** of the architect persona (see the `architect` identity
+> A **method-skill** of the architect persona (see the `architect` identity
 > skill). Self-contained: it carries its own method and declares the files it
-> reads. Engaged when the architect *reviews* — holding a change up against the
-> shape of the system.
+> reads. Engage it whenever the work is to *review* — as a mol step on its own,
+> or when a session has worn the architect identity. Holding a change up against
+> the shape of the system.
 
 ## Files I read
 

@@ -1,14 +1,15 @@
 ---
 name: architect-design
-description: The architect's design method — settle the STRUCTURE of a change or a new system. Use to turn a PRD, a rough idea, or an existing codebase into the architectural decisions that keep implementation coherent: elicit context first, pin only the invariants that would let independently-built parts diverge, and record each decision with its rationale into docs/architecture.md. Engaged by the architect persona/agent; not for plain workers.
+description: The architect's design method — settle the STRUCTURE of a change or a new system. Use to turn a PRD, a rough idea, or an existing codebase into the architectural decisions that keep implementation coherent: elicit context first, pin only the invariants that would let independently-built parts diverge, and record each decision with its rationale into docs/architecture.md. Invoke it on its own as a mol step, or engage it when you have worn the architect identity.
 ---
 
 # architect-design
 
-> A **process-skill** of the architect persona (see the `architect` identity
+> A **method-skill** of the architect persona (see the `architect` identity
 > skill). Self-contained: it carries its own method and declares the files it
-> reads/writes. Engaged when the architect *designs* — settling structure before
-> the code is written.
+> reads/writes. Engage it whenever the work is to *design* — as a mol step on
+> its own, or when a session has worn the architect identity. Settling structure
+> before the code is written.
 
 ## Files I read and write
 

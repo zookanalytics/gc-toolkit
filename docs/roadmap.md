@@ -135,11 +135,13 @@ adapts.
 >
 > **Revived as a persona (2026-06-15 — tk-ae96t.1):** "revisit later"
 > arrived. The architect is back, but *not* as the consult-model
-> conversational agent below: it is now realized as a **persona** — a
-> portable identity skill (`skills/architect/`) plus agent-local design /
-> review method-skills, instantiated as a standing `architect` agent
-> (`agents/architect/`, registered in `pack.toml`) that patrols
-> architectural drift and gates structural changes. The consult-bead /
+> conversational agent below: it is now realized as a **persona** — a portable
+> identity skill (`skills/architect/`) plus `architect-design` /
+> `architect-review` method-skills (ordinary city-wide skills under `skills/`,
+> invocable on their own). Its first proof point is the **`mol-architect-review`**
+> formula, which runs `architect-review` as a mol step — no standing agent. A
+> standing `architect` agent (drift patrol / structural gating) is a later step,
+> taken only if those continuous jobs are actually needed. The consult-bead /
 > `concierge` / `consult-host` machinery stays retired. See
 > [`docs/personas.md`](personas.md).
 
@@ -196,13 +198,15 @@ invented intentionally when we get to it, rather than bolted on.
 
 ### Settled
 
-- **Architect is a dedicated agent** *(consult-model form retired 2026-06-10;
-  revived as a persona 2026-06-15)*, not a role inside a planning formula.
-  Reason: its patrol/gate jobs need a continuous, addressable owner. The
-  consult-model agent was removed; the architect is now back as a persona
-  with a standing `architect` agent. See *The architect* above and
-  [`docs/personas.md`](personas.md); `specs/tk-fi68i/consult-retirement.md`
-  records the consult-model retirement.
+- **Architect is a persona, not a planning-formula role** *(consult-model form
+  retired 2026-06-10; revived as a persona 2026-06-15)*. It is realized as
+  skills — a portable identity (`skills/architect/`) plus `architect-design` /
+  `architect-review` method-skills that any mol step or worn session can invoke.
+  A standing `architect` agent is deferred: it is earned only if drift patrol or
+  structural gating ever need a continuous, addressable owner. The first proof
+  point is the `mol-architect-review` formula — the method run as a mol step,
+  not an agent. See *The architect* above and [`docs/personas.md`](personas.md);
+  `specs/tk-fi68i/consult-retirement.md` records the consult-model retirement.
 - **Engagement travels on consult beads** *(retired from core 2026-06-10)*,
   one bead per conversation, sub-beads for research side-quests. Metadata
   and presentation give distinct faces. The consult model retired from
@@ -259,11 +263,14 @@ The next durable artifacts, in rough order. Not a contract.
 > standing agent's ingest and patrol formulas) and the consult-bead
 > surfacing channel. The architect itself has since been revived as a
 > *persona* (2026-06-15; see *The architect* above and
-> [`docs/personas.md`](personas.md)) — the standing `architect` agent now
-> ships — but that build-out stays a record, not a current commitment: the
-> agent ships *without* the ingest/patrol formulas (a follow-up), and the
-> consult model stays retired. See `specs/tk-fi68i/consult-retirement.md`.
-> Review legs (item 6) remain a live direction, independent of the architect.
+> [`docs/personas.md`](personas.md)) — realized as skills, with
+> `architect-review` proven as a mol step (`mol-architect-review`), **not** a
+> standing agent — but that consult-model build-out stays a record, not a
+> current commitment: no standing `architect` agent ships yet (deferred until
+> drift patrol / structural gating is actually needed), the ingest/patrol
+> formulas remain a follow-up, and the consult model stays retired. See
+> `specs/tk-fi68i/consult-retirement.md`. Review legs (item 6) remain a live
+> direction, independent of the architect.
 
 1. **First-pass ingestion A/B experiment (before the architect exists).**
    Run two or more polecats on a pilot rig, each using a different
