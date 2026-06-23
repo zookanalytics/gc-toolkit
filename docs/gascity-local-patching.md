@@ -20,9 +20,12 @@ carry one through retiring it once upstream lands a fix.
 
 **Boundaries.** This is a workflow doc about *carrying* patches, not a
 reference for `gascity`'s own internals or behavior — that lives in
-[gascity-reference.md](gascity-reference.md) and upstream docs. It is
-deliberately temporary, and exists to make itself unnecessary (see [When
-this doc should disappear](#when-this-doc-should-disappear)).
+[gascity-reference.md](gascity-reference.md) and upstream docs. Nor does it
+cover constructing gc-toolkit's own pack *overlay* — layering pack artifacts
+over the base packs is a different layer from patching gascity *source*, and is
+out of this doc's mandate. It is deliberately temporary, and exists to make
+itself unnecessary (see [When this doc should
+disappear](#when-this-doc-should-disappear)).
 
 ## When to local-patch
 

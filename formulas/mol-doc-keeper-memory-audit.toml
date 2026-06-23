@@ -130,11 +130,22 @@ cleared gate 1: does it fall inside some brief's *mandate* (not its excluded
 boundaries) and is it **not already written** there? If yes, it is a gap — a
 promote candidate. If it falls outside every mandate, it stays local.
 
+**Topical adjacency is not mandate ownership.** A mandate broad enough to
+*accommodate* a learning is not the same as one that *owns* it: the test is
+whether the learning is *what the brief is about*, not whether it could be filed
+under a generous reading. A brief that merely touches the same area reads like a
+home but isn't one — when no brief *cleanly owns* the learning, it stays local,
+never force-fit into the nearest or most-adjacent doc. When you drop a structural
+(gate-1-clearing) entry for lack of a clean owner, surface it as a one-line
+**missing-brief observation** in the run output — a surfaced signal only, never a
+new bead and never brief-creation work (whether such a brief should exist is out
+of scope for this audit).
+
 Each gate excludes in its own way, by design: gate 1 drops operational lore even
-when it is on-topic; gate 2 drops structural truths that belong to no brief or
-are already captured. Agent-conduct corrections and one-off resolved incidents
-(durable record: git + the bead trail) fall to one or both — by nature or by
-scope, never by filename.
+when it is on-topic; gate 2 drops structural truths that belong to no brief — or
+are only *adjacent* to one — or are already captured. Agent-conduct corrections
+and one-off resolved incidents (durable record: git + the bead trail) fall to one
+or both — by nature or by scope, never by filename.
 
 **Base rate.** Mechanik auto-memory is overwhelmingly operational lore — live
 defects, workarounds, calibrations, incident notes. The **expected** outcome of
@@ -148,6 +159,14 @@ that the nature gate is being skipped.
   with `task_kind`, not custom per-kind schemas; mols don't use a bespoke
   `extends` extension" is a *structural* truth — it clears gate 1 — and is a
   legitimate gap if no brief states it.
+- Contra worked example (operator): the "mirror-vs-overlay / basename-collision"
+  learning about constructing gc-toolkit's pack overlay is *also* structural — it
+  clears gate 1 — yet does **not** promote. `gascity-local-patching.md` is about
+  patching gascity *source* in a fork; the learning is about overlaying *pack
+  artifacts* over the base packs, a different layer no brief's mandate cleanly
+  owns. This is the canonical structural-but-no-clean-owner case: it stays local
+  (force-fitting it into the nearest doc is exactly the miss this gate prevents),
+  with a missing-brief observation surfaced.
 - "Already written" is checked cheaply: grep the best-fit brief for a few salient
   terms from the entry; a clear hit means the promotion already happened — drop
   it.
@@ -182,7 +201,9 @@ open beads/PRs, so this is naturally resumable).
 
 **Exit criteria:** A bounded list (≤ `{{max_beads_per_run}}`) of
 `(memory_file, target_brief(s), one-line summary, proposed change)` gaps, or an
-empty list if nothing qualifies.
+empty list if nothing qualifies; plus any **missing-brief observations** —
+structural entries dropped for lack of a clean owner — surfaced as one-line notes
+in the run output.
 """
 
 [[steps]]
