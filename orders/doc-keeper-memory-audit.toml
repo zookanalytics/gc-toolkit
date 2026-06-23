@@ -8,14 +8,14 @@
 # captured yet, and files change-unit `doc-update` beads through the same
 # pool worker (mol-polecat-work) → refinery pipeline as the drift audit.
 #
-# Enablement, scope, pool, and the pool-wake `phase = "vapor"`
+# Enablement, scope, pool, and the pool-wake (Ready-surface)
 # prerequisite are identical to the drift-audit order and explained in
 # full there — see orders/doc-keeper-drift-audit.toml. In short:
 # ships in-pack (importing gc-toolkit = live, not imported = inert);
 # rig-scoped with a BARE pool so the wisp lands in, and is claimed
-# from, each importing rig's own polecat store; the .7 formula needs a
-# top-level `phase = "vapor"` to wake a scale-from-zero pool, and must
-# merge before/with this order.
+# from, each importing rig's own polecat store; the .7 formula is
+# graph.v2, so its compiled root is Ready-visible without a top-level
+# `phase = "vapor"`, and must merge before/with this order.
 [order]
 description = "doc-keeper: scan mechanik auto-memory for promote-to-brief candidates; file doc-update beads"
 formula = "mol-doc-keeper-memory-audit"

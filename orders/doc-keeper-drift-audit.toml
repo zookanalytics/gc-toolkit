@@ -41,10 +41,12 @@
 #
 # ── Pool-wake prerequisite (cross-bead) ────────────────────────────────
 # A formula routed to a scale-from-zero pool only wakes a worker when
-# its compiled root is Ready-visible — i.e. the formula declares a
-# top-level `phase = "vapor"` (or is graph.v2). The .6/.7 audit
-# formulas must carry `phase = "vapor"` for this order to spawn a
-# polecat from an idle pool; see the handoff note on bead tk-yw3zb.8.
+# its compiled root is Ready-visible. The .6/.7 audit formulas are
+# graph.v2 (`[requires] formula_compiler = ">=2.0.0"`): the compiled
+# `gc.kind=workflow` root is Ready-visible (passes RecipeHasReadySurface)
+# and pool-routed WITHOUT a top-level `phase = "vapor"`. Do not add vapor —
+# it forces a root-only wisp whose workflow-finalize control bead is never
+# created, so the root can never self-close (the tk-crcl5 / PR #164 fix).
 # Merge ordering: land .6/.7 (the formulas) before/with this order so a
 # fire does not fail "formula not found".
 [order]

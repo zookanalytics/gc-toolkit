@@ -14,10 +14,6 @@ shared `doc-update` pipeline — a pool polecat edits the brief(s) under
 """
 formula = "mol-doc-keeper-drift-audit"
 
-# Load-bearing — do not remove. The top-level `phase` makes the compiled root
-# Ready-visible; without it the cooldown order's pour fires but no polecat spawns.
-phase = "vapor"
-
 [requires]
 formula_compiler = ">=2.0.0"
 
