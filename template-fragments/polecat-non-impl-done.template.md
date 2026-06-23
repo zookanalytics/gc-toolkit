@@ -126,10 +126,22 @@ if [ -n "$FIX_POOL" ]; then
         # Re-open the anchor as fix-pool demand. Its branch + PR metadata are
         # intact from gating, so a fix polecat resumes the EXISTING PR branch
         # via the rejection-resume flow.
+        #
+        # CLEAR the gating marker (merge_result): while rework is in flight the
+        # anchor is NOT the idle gating anchor, and both reconcile passes key off
+        # merge_result. reconcile-draft-prs.sh guard (b) EXCLUDES any open
+        # PR-referencing bead that still carries merge_result (it reads that as
+        # the idle gating anchor) and would otherwise un-draft this PR
+        # mid-rework; reconcile-merged-prs.sh scans merge_result=pull_request
+        # anchors and would otherwise queue this still-in-flight PR for
+        # auto-merge. The refinery re-stamps merge_result=pull_request when the
+        # fix is resubmitted (mol-refinery-patrol merge-push step 4), so gating
+        # resumes on re-publish. See docs/work-bead-state-machine.md.
         gc bd update "$ANCHOR" \
           --status=open --assignee="" \
           --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
-          --set-metadata gc.routed_to="$FIX_POOL"
+          --set-metadata gc.routed_to="$FIX_POOL" \
+          --unset-metadata merge_result
         gc session wake "$FIX_POOL" || true
       else
         # Fallback — no gating anchor resolved (a pre-close-on-merge PR, or the

@@ -62,13 +62,19 @@ while IFS= read -r row; do
     skipped=$((skipped + 1)); continue
   fi
 
-  PR_JSON=$(gh pr view "$num" --json state,merged,mergeCommit,isDraft,baseRefName 2>/dev/null)
+  # Query `mergedAt`, NOT `merged`: `merged` is not a `gh pr view --json` field
+  # on supported gh versions — it errors `Unknown JSON field: "merged"` and,
+  # with stderr suppressed, empties PR_JSON, so every anchor is skipped forever
+  # and close-on-merge never closes anything. A non-null `mergedAt` (state also
+  # reaches MERGED) is the authoritative merge signal. The test's gh stub
+  # rejects unsupported fields to guard against reintroducing this.
+  PR_JSON=$(gh pr view "$num" --json state,mergedAt,mergeCommit,isDraft,baseRefName 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "reconcile-merged-prs: PR#$num view failed; skip $id (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   state=$(printf '%s' "$PR_JSON" | jq -r '.state // ""')
-  merged=$(printf '%s' "$PR_JSON" | jq -r '.merged // false')
+  merged=$(printf '%s' "$PR_JSON" | jq -r 'if (.mergedAt != null) or (.state == "MERGED") then "true" else "false" end')
   is_draft=$(printf '%s' "$PR_JSON" | jq -r '.isDraft // false')
   merge_oid=$(printf '%s' "$PR_JSON" | jq -r '.mergeCommit.oid // ""')
   [ -n "$target" ] || target=$(printf '%s' "$PR_JSON" | jq -r '.baseRefName // "main"')

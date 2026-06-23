@@ -12,7 +12,14 @@
 #       (close-on-merge: the work bead stays OPEN with pr_number=N and
 #        merge_result=pull_request; guard (b) must EXCLUDE it, else the anchor
 #        would pin its own PR in draft forever — the regression this guards).
-#   (6) idempotent: a readied PR leaves the --draft set, so a second pass is
+#   (6) draft + CLOSED (REQUEST_CHANGES) review + OPEN rework anchor -> NOT un-drafted
+#       (close-on-merge rework: the SAME work anchor is re-routed to the fix pool
+#        with merge_result CLEARED. Guard (b) must KEEP it — a cleared
+#        merge_result on an open PR-referencing bead reads as rework-in-flight —
+#        else the PR is un-drafted mid-rework. The mirror of (5): merge_result
+#        PRESENT = idle gating (un-draft OK); merge_result CLEARED = rework in
+#        flight (keep draft). Guards finding 2.)
+#   (7) idempotent: a readied PR leaves the --draft set, so a second pass is
 #       a no-op (convergence — the whole point of the reconciler).
 set -euo pipefail
 
@@ -37,7 +44,8 @@ cat > "$TMP/drafts.json" <<'JSON'
   {"number":102,"headRefName":"polecat/tk-bbb"},
   {"number":103,"headRefName":"polecat/tk-ccc"},
   {"number":104,"headRefName":"polecat/tk-ddd"},
-  {"number":105,"headRefName":"polecat/tk-eee"}
+  {"number":105,"headRefName":"polecat/tk-eee"},
+  {"number":106,"headRefName":"polecat/tk-fff"}
 ]
 JSON
 
@@ -50,6 +58,10 @@ JSON
 #   104: review still in_progress                            -> keep draft
 #   105: review concluded (closed) + the OPEN gating anchor  -> reconcile
 #        (anchor carries merge_result=pull_request; guard (b) must skip it)
+#   106: review concluded (closed, REQUEST_CHANGES) + the OPEN rework anchor
+#        (the SAME work anchor re-routed to the fix pool, merge_result CLEARED)
+#        -> keep draft (guard (b) must KEEP it — cleared merge_result reads as
+#        rework in flight; the mirror of 105)
 cat > "$TMP/beads" <<'LEDGER'
 101|review|closed|
 102|review|closed|
@@ -57,6 +69,8 @@ cat > "$TMP/beads" <<'LEDGER'
 104|review|in_progress|
 105|review|closed|
 105||open|pull_request
+106|review|closed|
+106||open|
 LEDGER
 
 : > "$TMP/readied"
@@ -136,6 +150,8 @@ readied 104 && bad "(4) in_progress review -> must NOT un-draft" \
             || ok "(4) review still in_progress -> NOT un-drafted"
 readied 105 && ok "(5) open gating anchor (merge_result) excluded -> un-drafted" \
             || bad "(5) open gating anchor (merge_result) excluded -> un-drafted"
+readied 106 && bad "(6) rework anchor (merge_result cleared) -> must NOT un-draft mid-rework" \
+            || ok "(6) rework anchor (merge_result cleared) -> NOT un-drafted"
 eq "$(wc -l < "$TMP/readied" | tr -d ' ')" "2" "exactly two PRs reconciled in run 1"
 printf '%s\n' "$OUT1" | grep -q "2 reconciled" \
   && ok "run 1 summary reports 2 reconciled" \

@@ -34,31 +34,49 @@ bead-C|203|main
 bead-D|204|main
 A
 
-# PR states (gh pr view source): pr|state|merged|isDraft|mergeOid|baseRefName
-#   201 merged          -> close anchor bead-A
+# PR states (gh pr view source): pr|state|mergedAt|isDraft|mergeOid|baseRefName
+#   201 merged          -> close anchor bead-A   (mergedAt set = authoritative merge)
 #   202 closed, unmerged -> abandon anchor bead-B + escalate
 #   203 open, ready      -> queue auto-merge
 #   204 open, draft      -> skip
 cat > "$TMP/prs" <<'P'
-201|MERGED|true|false|abc12345def67890|main
-202|CLOSED|false|false||main
-203|OPEN|false|false||main
-204|OPEN|false|true||main
+201|MERGED|2026-06-23T01:00:00Z|false|abc12345def67890|main
+202|CLOSED||false||main
+203|OPEN||false||main
+204|OPEN||true||main
 P
 
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
 
 # --- gh stub: pr view (emit state JSON), pr merge (record auto-merge). --------
+# The `pr view` arm VALIDATES the requested `--json` fields against the set a
+# supported gh actually exposes for a PR, and errors (exit 1, like real gh) on
+# any unknown field. This is the regression guard for the field-shape bug:
+# `merged` is NOT a pr-view field (`mergedAt` is), so a buggy
+# `--json ...merged...` empties PR_JSON and the disposition matrix below fails —
+# exactly the real-world failure where close-on-merge silently closes nothing.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$1 $2" in
   "pr view")
-    num="$3"
-    while IFS='|' read -r pr state merged isdraft oid base; do
+    num="$3"; shift 3
+    fields=""
+    while [ $# -gt 0 ]; do case "$1" in --json) fields="$2"; shift 2 ;; *) shift ;; esac; done
+    # Supported `gh pr view --json` fields (subset; notably NOT `merged`).
+    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName url title body author additions deletions mergeable "
+    OIFS="$IFS"; IFS=','
+    for f in $fields; do
+      case "$SUPPORTED" in
+        *" $f "*) : ;;
+        *) IFS="$OIFS"; echo "Unknown JSON field: \"$f\"" >&2; exit 1 ;;
+      esac
+    done
+    IFS="$OIFS"
+    while IFS='|' read -r pr state mergedat isdraft oid base; do
       [ "$pr" = "$num" ] || continue
-      jq -n --arg s "$state" --argjson m "$merged" --argjson d "$isdraft" \
+      jq -n --arg s "$state" --arg ma "$mergedat" --argjson d "$isdraft" \
             --arg o "$oid" --arg b "$base" \
-        '{state:$s, merged:$m, isDraft:$d, mergeCommit:(if $o=="" then null else {oid:$o} end), baseRefName:$b}'
+        '{state:$s, mergedAt:(if $ma=="" then null else $ma end), isDraft:$d, mergeCommit:(if $o=="" then null else {oid:$o} end), baseRefName:$b}'
       exit 0
     done < "$FAKE_PRS"
     exit 0 ;;
@@ -128,6 +146,19 @@ has '^bead-D$' "$TMP/closed" && bad "(4) draft anchor must NOT be closed" \
 printf '%s\n' "$OUT1" | grep -q "1 closed, 1 abandoned" \
   && ok "run 1 summary reports 1 closed, 1 abandoned" \
   || bad "run 1 summary (got: $OUT1)"
+
+# --- Regression guard (field shape): only gh-supported --json fields. ---------
+# The stub models real gh: it REJECTS `merged` (the field the original bug
+# requested) and ACCEPTS `mergedAt`. The disposition matrix above already
+# exercises this end-to-end (the script would skip every anchor on a rejected
+# field); these direct probes document the contract so a reintroduced `merged`
+# fails loudly with an obvious message.
+gh pr view 201 --json merged >/dev/null 2>&1 \
+  && bad "(6) gh stub must REJECT unsupported field 'merged' (models real gh)" \
+  || ok "(6) unsupported --json field 'merged' rejected (guards the field-shape bug)"
+gh pr view 201 --json state,mergedAt,mergeCommit,isDraft,baseRefName >/dev/null 2>&1 \
+  && ok "(6) the script's --json field set is accepted by the gh stub" \
+  || bad "(6) the script's --json field set must be accepted"
 
 # --- Run 2: convergence. bead-A (closed) + bead-B (abandoned) leave the set. --
 MAIL_BEFORE=$(wc -l < "$TMP/mail" | tr -d ' ')

@@ -71,7 +71,7 @@ gc sling
 | building | in_progress | polecat | — | `work_dir`, `branch` |
 | handed off | open | refinery | — | `branch`, `target` |
 | **gating** | **open** | **—** | **—** | `pr_url`, `pr_number`, `merge_result=pull_request` |
-| rework | open | — | `<fix-pool>` | `rejection_reason` + PR fields retained |
+| rework | open | — | `<fix-pool>` | `rejection_reason` set, `merge_result` **cleared**, PR fields (`pr_url`, `pr_number`, `branch`) retained |
 | closed (merged) | closed | — | — | `merged_sha`, `merge_result=merged` |
 | abandoned | open | — | `human` | `merge_result=abandoned` (escalated to mayor) |
 
@@ -108,10 +108,14 @@ convergent reconcile passes each idle wake (cheap, idempotent, modeled on the
 town's other reconcilers — config-drift drain, witness orphan-recovery):
 
 1. **draft-PR reconcile** (`reconcile-draft-prs.sh`) — un-draft a codex-gated
-   PR once its review has concluded and no rework is in flight. The open
-   gating anchor itself carries `pr_number`, so this pass explicitly excludes
-   the anchor (it has `merge_result` set) from its "rework in flight" guard —
-   otherwise the anchor would pin its own PR in draft forever.
+   PR once its review has concluded and no rework is in flight. Both the idle
+   gating anchor and an in-flight rework anchor carry `pr_number`, so the
+   "rework in flight" guard discriminates on `merge_result`: the **idle**
+   gating anchor carries `merge_result=pull_request` and is *excluded* (else it
+   would pin its own PR in draft forever), whereas a **rework** anchor has had
+   `merge_result` cleared by the REQUEST_CHANGES transition and so is *kept* as
+   in-flight — the PR stays draft until the fix is resubmitted and the refinery
+   re-stamps `merge_result=pull_request`.
 2. **merged-PR reconcile** (`reconcile-merged-prs.sh`) — for each open gating
    anchor (`merge_result=pull_request`):
    - PR **merged** -> close the anchor, `"Merged to $TARGET at <sha>"`,
