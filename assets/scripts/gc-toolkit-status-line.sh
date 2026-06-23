@@ -232,11 +232,11 @@ else
     is_number "$m" || m=0
 
     # Supervisor title. One HTTP round-trip, lean view=summary read-model.
-    # Skip when no city resolves (avoids a 404 + latency). curl --max-time 2
+    # Skip when no city resolves (avoids a 404 + latency). curl --max-time 10
     # bounds it; curl -f hides the body during the post-`gc start` 503 window.
     city_name=$(gc_city_name)
     if [ -n "$city_name" ]; then
-        raw_title=$(run_bounded curl -sf --max-time 2 \
+        raw_title=$(run_bounded curl -sf --max-time 10 \
             "$(gc_api_base)/v0/city/$city_name/sessions?state=active&view=summary" 2>/dev/null \
             | jq -r --arg a "$agent" \
                 '.items | map(select(.alias == $a)) | .[0].title // ""' 2>/dev/null \
