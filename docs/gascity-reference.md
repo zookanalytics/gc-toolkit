@@ -64,20 +64,30 @@ If any of the four fail, the content does not belong here.
 - CLI reference: https://docs.gascity.com/reference/cli
 - HTTP + SSE API (supervisor control plane): https://docs.gascity.com/reference/api
 - Events (`gc events` output formats): https://docs.gascity.com/reference/events
-- Formulas (structure and placement): https://docs.gascity.com/reference/formula
+- Formulas — the contract guide (v1 and v2 are peers): https://docs.gascity.com/guides/understanding-formulas
+- Formula spec — v2 (graph / orchestrated contract): https://docs.gascity.com/reference/specs/formula-spec-v2
+- Formula spec — v1 (default contract): https://docs.gascity.com/reference/specs/formula-spec-v1
+- Specs register (index of reference specs): https://docs.gascity.com/reference/specs
+- Formulas architecture (implementation internals, deep reference): https://github.com/gastownhall/gascity/blob/main/engdocs/architecture/formulas.md
 - Exec beads provider: https://docs.gascity.com/reference/exec-beads-provider
 - Exec session provider: https://docs.gascity.com/reference/exec-session-provider
 - Trust boundaries (command execution model): https://docs.gascity.com/reference/trust-boundaries
 
 ## Pack v2 (current pack model)
 
-The shareable-packs guide is the canonical narrative entry point; the
-design notes in `gastownhall/gascity` are the deep reference. The
-standalone migration guide was retired upstream — PackV2 migration now
-lives in `gc doctor` (`gc doctor --fix` repairs legacy `pack.toml`) and
-the shareable-packs guide.
+The pack spec is the authoritative reference and the understanding-packs
+guide is the narrative entry point; the shareable-packs guide covers the
+create / import / customize workflow. The design notes in
+`gastownhall/gascity` are deep reference. The standalone migration guide
+was retired upstream — PackV2 migration now lives in `gc doctor` (`gc
+doctor --fix` repairs legacy `pack.toml`) and the shareable-packs guide.
 
+- Pack spec (authoritative `pack.toml` + layout reference): https://docs.gascity.com/reference/specs/pack-spec
+- Understanding packs (pack model, imports, scope, patches, loading order): https://docs.gascity.com/guides/understanding-packs
 - Shareable packs (creating, importing, customizing PackV2 packs): https://docs.gascity.com/guides/shareable-packs
+
+Deep reference — PackV2 design notes in `gastownhall/gascity`:
+
 - Pack v2 design: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-pack-v2.md
 - Pack loader v2: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-loader-v2.md
 - Agent v2: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-agent-v2.md
@@ -141,6 +151,7 @@ Entries here are gc-toolkit-authored prose, not upstream pointers.
 
 - [Gas City agent types](gascity-agents.md) — the agent variants (named singletons, pool workers, threads, patrol overlay), with their identity, lifecycle, addressing, and work-routing contracts.
 - [Gas City routing model: sling vs assignee vs `--reassign`](gascity-routing-model.md) — three-lane routing model per the PR #1736 ruling.
+- [Gas City pack & formula authoring](gascity-packs.md) — non-obvious pack/formula authoring rules for building gc-toolkit on the base packs: choosing a contract, the v2 opt-in, and the `pack.toml` / layering traps.
 
 ## Refresh procedure
 
@@ -163,6 +174,15 @@ To detect drift:
 
    `301`/`302`/`308` redirects are fine; `404` means the page moved or
    was removed upstream.
+
+   **A green link-check is not proof of coverage.** A `301`/`302`/`308`
+   redirect — or even a `200` — can mask an upstream *content
+   restructure*: the URL still resolves, but its target no longer covers
+   the same topic. This is exactly how the #3461 formula move slipped past
+   the last refresh — `reference/formula` kept resolving while its content
+   was split into the v1/v2 specs and the understanding-formulas guide. For
+   any topic that matters, open the target and confirm it still says what
+   this index claims it does.
 
 2. **For maintainers with a local gascity checkout**, audit
    added/moved files since the last refresh:
