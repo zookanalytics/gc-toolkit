@@ -1,6 +1,6 @@
 ---
 name: gascity reference index
-description: Index of canonical Gas City documentation at https://docs.gascityhall.com/, plus the bar gc-toolkit applies before adding new gascity-* docs.
+description: Index of canonical Gas City documentation at https://docs.gascity.com/, plus the bar gc-toolkit applies before adding new gascity-* docs.
 ---
 
 # gascity reference index
@@ -16,7 +16,7 @@ this index.
 **Mandate.** The grounding in canonical Gas City documentation that the
 rest of gc-toolkit's Gas City material is built on — the reference point
 that ties this toolkit back to the upstream source of truth at
-https://docs.gascityhall.com/. In that role it also holds
+https://docs.gascity.com/. In that role it also holds
 [the bar](#the-bar) gc-toolkit applies before standing up a Gas City
 brief of its own, and marks where upstream coverage falls short.
 
@@ -44,30 +44,30 @@ If any of the four fail, the content does not belong here.
 
 ## Getting started
 
-- Installation: https://docs.gascityhall.com/getting-started/installation
-- Quickstart: https://docs.gascityhall.com/getting-started/quickstart
-- Coming from Gas Town: https://docs.gascityhall.com/getting-started/coming-from-gastown
-- Repository map: https://docs.gascityhall.com/getting-started/repository-map
-- Install/setup troubleshooting: https://docs.gascityhall.com/getting-started/troubleshooting
+- Installation: https://docs.gascity.com/getting-started/installation
+- Quickstart: https://docs.gascity.com/getting-started/quickstart
+- Coming from Gas Town: https://docs.gascity.com/getting-started/coming-from-gastown
+- Repository map: https://docs.gascity.com/getting-started/repository-map
+- Install/setup troubleshooting: https://docs.gascity.com/getting-started/troubleshooting
 
 ## Architecture & concepts
 
-- Internals overview: https://docs.gascityhall.com/internals
-- Beads topology (one Dolt server, isolated beads): https://docs.gascityhall.com/internals/beads-topology
+- Internals overview: https://docs.gascity.com/internals
+- Beads topology (one Dolt server, isolated beads): https://docs.gascity.com/internals/beads-topology
 
 ## Configuration
 
-- Config reference (city.toml, pack.toml, rig configs): https://docs.gascityhall.com/reference/config
+- Config reference (city.toml, pack.toml, rig configs): https://docs.gascity.com/reference/config
 
 ## CLI / API / events / formulas / providers / trust boundaries
 
-- CLI reference: https://docs.gascityhall.com/reference/cli
-- HTTP + SSE API (supervisor control plane): https://docs.gascityhall.com/reference/api
-- Events (`gc events` output formats): https://docs.gascityhall.com/reference/events
-- Formulas (structure and placement): https://docs.gascityhall.com/reference/formula
-- Exec beads provider: https://docs.gascityhall.com/reference/exec-beads-provider
-- Exec session provider: https://docs.gascityhall.com/reference/exec-session-provider
-- Trust boundaries (command execution model): https://docs.gascityhall.com/reference/trust-boundaries
+- CLI reference: https://docs.gascity.com/reference/cli
+- HTTP + SSE API (supervisor control plane): https://docs.gascity.com/reference/api
+- Events (`gc events` output formats): https://docs.gascity.com/reference/events
+- Formulas (structure and placement): https://docs.gascity.com/reference/formula
+- Exec beads provider: https://docs.gascity.com/reference/exec-beads-provider
+- Exec session provider: https://docs.gascity.com/reference/exec-session-provider
+- Trust boundaries (command execution model): https://docs.gascity.com/reference/trust-boundaries
 
 ## Pack v2 (current pack model)
 
@@ -77,7 +77,7 @@ standalone migration guide was retired upstream — PackV2 migration now
 lives in `gc doctor` (`gc doctor --fix` repairs legacy `pack.toml`) and
 the shareable-packs guide.
 
-- Shareable packs (creating, importing, customizing PackV2 packs): https://docs.gascityhall.com/guides/shareable-packs
+- Shareable packs (creating, importing, customizing PackV2 packs): https://docs.gascity.com/guides/shareable-packs
 - Pack v2 design: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-pack-v2.md
 - Pack loader v2: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-loader-v2.md
 - Agent v2: https://github.com/gastownhall/gascity/blob/main/engdocs/design/packv2/doc-agent-v2.md
@@ -92,32 +92,32 @@ the shareable-packs guide.
 
 ## Guides
 
-- Guides index: https://docs.gascityhall.com/guides
-- Authoring and importing shareable packs: https://docs.gascityhall.com/guides/shareable-packs
+- Guides index: https://docs.gascity.com/guides
+- Authoring and importing shareable packs: https://docs.gascity.com/guides/shareable-packs
 
 ## Troubleshooting
 
-- Dolt bloat recovery: https://docs.gascityhall.com/troubleshooting/dolt-bloat-recovery
+- Dolt bloat recovery: https://docs.gascity.com/troubleshooting/dolt-bloat-recovery
 
 ## Tutorials
 
 Upstream owns hands-on walkthroughs. Consult these when bootstrapping;
 gc-toolkit does not restate them.
 
-- Tutorials index: https://docs.gascityhall.com/tutorials
-- Cities and rigs: https://docs.gascityhall.com/tutorials/01-cities-and-rigs
-- Agents: https://docs.gascityhall.com/tutorials/02-agents
-- Sessions: https://docs.gascityhall.com/tutorials/03-sessions
-- Communication: https://docs.gascityhall.com/tutorials/04-communication
-- Formulas: https://docs.gascityhall.com/tutorials/05-formulas
-- Beads (universal work primitive): https://docs.gascityhall.com/tutorials/06-beads
-- Orders: https://docs.gascityhall.com/tutorials/07-orders
+- Tutorials index: https://docs.gascity.com/tutorials
+- Cities and rigs: https://docs.gascity.com/tutorials/01-cities-and-rigs
+- Agents: https://docs.gascity.com/tutorials/02-agents
+- Sessions: https://docs.gascity.com/tutorials/03-sessions
+- Communication: https://docs.gascity.com/tutorials/04-communication
+- Formulas: https://docs.gascity.com/tutorials/05-formulas
+- Beads (universal work primitive): https://docs.gascity.com/tutorials/06-beads
+- Orders: https://docs.gascity.com/tutorials/07-orders
 
 ## Schemas
 
 Machine-readable artifacts. Each link is the canonical download.
 
-- Schemas index: https://docs.gascityhall.com/schema
+- Schemas index: https://docs.gascity.com/schema
 - OpenAPI 3.1: https://docs.gascity.com/reference/schema/openapi.json
 - Events JSONL: https://docs.gascity.com/reference/schema/events.json
 - City config: https://docs.gascity.com/reference/schema/city-schema.json
