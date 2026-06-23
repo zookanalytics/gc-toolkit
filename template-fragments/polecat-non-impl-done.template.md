@@ -90,11 +90,13 @@ exit
 
 ### Fix-target dispatch (pre-publish review gate)
 
-When `metadata.fix_target_pool` is set, the review is a pre-publish
-gate (refinery opened the PR as draft and is waiting on your verdict
-to either ready it for operator review or kick the work bead back to
-the implementation pool). After posting the verdict via
-`gh pr review` (step 1 above) and BEFORE closing the bead (step 3
+When `metadata.fix_target_pool` is set, the review is a pre-publish gate
+(the refinery opened the PR as draft and is waiting on your verdict). Under
+close-on-merge the work bead stays OPEN as the PR's gating anchor: on
+APPROVE/COMMENT you un-draft the PR (the anchor closes later, on merge, via
+the refinery's reconcile pass — not here); on REQUEST_CHANGES you re-route
+that SAME anchor back to the implementation pool. After posting the verdict
+via `gh pr review` (step 1 above) and BEFORE closing the REVIEW bead (step 3
 above), act on it:
 
 ```bash
@@ -112,23 +114,45 @@ if [ -n "$FIX_POOL" ]; then
       gh pr ready "$PR_NUMBER" || echo "un-draft failed; refinery patrol will reconcile this PR's draft state" >&2
       ;;
     REQUEST_CHANGES)
-      # Findings need addressing. File a fix bead that resumes the
-      # PR branch via the existing rejection-resume flow.
-      PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
-      PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
-      PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --json url -q .url)
-      FIX_BEAD=$(gc bd create "Address codex findings on PR#$PR_NUMBER" -t task --json | jq -r .id)
-      gc bd update "$FIX_BEAD" \
-        --set-metadata branch="$PR_HEAD" \
-        --set-metadata target="$PR_BASE" \
-        --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
-        --set-metadata source_review_bead=<work-bead> \
-        --set-metadata merge_strategy=pr \
-        --set-metadata existing_pr="$PR_URL_FOR_FIX" \
-        --set-metadata pr_url="$PR_URL_FOR_FIX" \
-        --set-metadata pr_number="$PR_NUMBER" \
-        --set-metadata gc.routed_to="$FIX_POOL"
-      gc session wake "$FIX_POOL" || true
+      # Close-on-merge: the work anchor stays OPEN through gating, so rework
+      # re-routes the SAME anchor back to the fix pool — NOT a separate fix bead
+      # (which would leave two open anchors on one PR). Resolve the anchor as the
+      # bead this review gates: the dependent of the blocks-dep the refinery
+      # attached (`gc bd dep <review> --blocks <anchor>`). See
+      # docs/work-bead-state-machine.md.
+      ANCHOR=$(gc bd dep list <work-bead> --direction=up -t blocks --json 2>/dev/null \
+        | jq -r '.[0].id // empty')
+      if [ -n "$ANCHOR" ]; then
+        # Re-open the anchor as fix-pool demand. Its branch + PR metadata are
+        # intact from gating, so a fix polecat resumes the EXISTING PR branch
+        # via the rejection-resume flow.
+        gc bd update "$ANCHOR" \
+          --status=open --assignee="" \
+          --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
+          --set-metadata gc.routed_to="$FIX_POOL"
+        gc session wake "$FIX_POOL" || true
+      else
+        # Fallback — no gating anchor resolved (a pre-close-on-merge PR, or the
+        # gate-dep failed to attach). File a standalone fix bead via the legacy
+        # rejection-resume flow so rework never deadlocks; warn so the missing
+        # edge is noticed.
+        echo "WARN: no gating anchor for review <work-bead>; filing a standalone fix bead" >&2
+        PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
+        PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
+        PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --json url -q .url)
+        FIX_BEAD=$(gc bd create "Address codex findings on PR#$PR_NUMBER" -t task --json | jq -r .id)
+        gc bd update "$FIX_BEAD" \
+          --set-metadata branch="$PR_HEAD" \
+          --set-metadata target="$PR_BASE" \
+          --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
+          --set-metadata source_review_bead=<work-bead> \
+          --set-metadata merge_strategy=pr \
+          --set-metadata existing_pr="$PR_URL_FOR_FIX" \
+          --set-metadata pr_url="$PR_URL_FOR_FIX" \
+          --set-metadata pr_number="$PR_NUMBER" \
+          --set-metadata gc.routed_to="$FIX_POOL"
+        gc session wake "$FIX_POOL" || true
+      fi
       ;;
   esac
 fi

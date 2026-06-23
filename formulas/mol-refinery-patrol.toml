@@ -23,9 +23,12 @@ Merge strategy is per-work-bead metadata:
 - `direct` (default): fast-forward merge to target and push
 - `mr` / `pr`: publish a GitHub pull request instead of landing directly
 
-In `mr` mode, refinery treats PR publication as the terminal handoff for
-the direct-bead workflow: it records the PR URL on the work bead and
-closes the bead once the PR is verified.
+In `mr` mode, refinery does NOT land the branch directly. It publishes a
+pull request, records the PR on the work bead, and transitions the bead to
+a GATING state — it stays OPEN. The bead closes later, on a verified merge
+to its target (close-on-merge), reconciled in the find-work idle loop.
+Stock GasTown closes at PR-creation; this pack keeps the bead open so
+`closed` always means merged. See docs/work-bead-state-machine.md.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-refinery-patrol"
@@ -207,7 +210,13 @@ If NO work found: sleep, reconcile stranded draft PRs, then re-check.
 sleep {{event_timeout}}
 ```
 
-**2. Reconcile review-cleared-but-draft PRs (best-effort, every idle wake).**
+**2. Reconcile PR state (best-effort, every idle wake).** Two convergent
+passes run here on the idle cadence: (a) un-draft codex-gated PRs whose review
+concluded, and (b) close-on-merge — close gating anchors whose PR has merged,
+flag abandoned PRs, and queue auto-merge for ready ones. Both are the net for
+single best-effort one-shots that can fail for any reason.
+
+Pass (a) — un-draft review-cleared PRs.
 The codex review gate opens PRs as draft and un-drafts them with a single
 best-effort `gh pr ready` at the tail of the review. If that one-shot fails
 for ANY reason (transient GraphQL error, the review polecat killed mid-flow,
@@ -221,24 +230,44 @@ plus a couple `gc bd list` per draft PR, and draft PRs are few. The find-work
 idle loop is the ONLY thing that runs on the {{event_timeout}} cadence when
 the refinery is idle, so the reconcile lives here rather than in a standalone
 step that idle would never reach.
+
+Pass (b) — close-on-merge (`reconcile-merged-prs.sh`). mr-mode keeps the work
+bead OPEN as the PR's gating anchor (merge-push step 4); this pass is what
+later closes it. For each open gating anchor (`merge_result=pull_request`) it
+reads the PR: merged -> close the bead `"Merged to <target> at <sha>"`
+(mirroring direct-mode); closed-unmerged -> abandoned (route to human, escalate
+once); open+ready -> best-effort `gh pr merge --auto`; open+draft -> leave to
+pass (a). Enumerated by bead so each PR resolves in-repo. Convergent + cheap —
+one `gh pr view` per anchor, anchors are few. See
+docs/work-bead-state-machine.md.
 ```bash
-# Resolve the reconcile script from the gc-toolkit pack. Dotted Go-template
+# Resolve the reconcile scripts from the gc-toolkit pack. Dotted Go-template
 # field tokens (dot-prefixed names such as a ConfigDir accessor) do NOT render
 # in formula step descriptions (formula.Substitute expands only single-word
 # formula vars), and no pack-dir env var (GC_PACK_DIR/GC_CONFIG_DIR) is exported
-# to agents — so resolve from agent-env paths. The owning rig finds the script
+# to agents — so resolve from agent-env paths. The owning rig finds the scripts
 # under its own root; importer rigs (signal-loom, gascity, shutupandlisten) find
-# it at <city>/rigs/gc-toolkit (all four import "source = rigs/gc-toolkit").
-# First executable match wins.
-RECONCILE=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts/reconcile-draft-prs.sh" \
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/reconcile-draft-prs.sh" \
-            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts/reconcile-draft-prs.sh"; do
-  if [ -x "$cand" ]; then RECONCILE="$cand"; break; fi
+# them at <city>/rigs/gc-toolkit (all four import "source = rigs/gc-toolkit").
+# First existing scripts dir wins.
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" \
+            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \
+            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/reconcile-draft-prs.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
 done
-if [ -n "$RECONCILE" ]; then
-  # Best-effort: a failed pass is retried next idle wake, never blocks find-work.
-  "$RECONCILE" || echo "reconcile-draft-prs: pass failed (non-fatal); retries next idle wake" >&2
+if [ -n "$SCRIPTS_DIR" ]; then
+  # Both passes are best-effort: a failed pass is retried next idle wake and
+  # never blocks find-work.
+  # (a) Un-draft codex-gated PRs whose review has concluded.
+  "$SCRIPTS_DIR/reconcile-draft-prs.sh" \
+    || echo "reconcile-draft-prs: pass failed (non-fatal); retries next idle wake" >&2
+  # (b) Close-on-merge: close gating anchors whose PR merged, flag abandoned
+  #     PRs to human, queue auto-merge for ready ones. Guarded by -x so an
+  #     importer rig that has not yet synced the new script degrades to (a) only.
+  if [ -x "$SCRIPTS_DIR/reconcile-merged-prs.sh" ]; then
+    "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
+      || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
+  fi
 fi
 ```
 
@@ -899,7 +928,10 @@ formula.
 **If MERGE_STRATEGY = "mr":**
 
 Refinery does NOT land the branch directly. Instead it publishes a pull
-request and treats PR creation as the terminal handoff for this work bead.
+request and treats PR creation as the terminal handoff for THIS PATROL
+ITERATION — but NOT as completion of the work bead. Under close-on-merge the
+work bead stays OPEN as the PR's gating anchor and closes only when the PR
+merges (step 4 + reconcile-merged-prs.sh). See docs/work-bead-state-machine.md.
 
 **0. Refuse a 0-diff branch (false-completion guard):**
 
@@ -1121,20 +1153,27 @@ fi
 ```
 If this command fails or prints empty output: STOP. Debug and retry. Do NOT continue.
 
-**4. Record PR metadata and close the work bead:**
+**4. Record PR metadata and transition the work bead to GATING (it stays OPEN):**
 
-Run as a single chained command so the metadata write cannot be skipped
-when the close-reason already names the PR. Both the `--set-metadata`
-write and the `gc bd close` are required — `pr_url` and `pr_number`
-are the only forensic breadcrumbs tying a closed bead to its pull
-request. `--unset-metadata rejection_reason` clears any stale rejection
-field from an earlier rejected/reworked attempt before the successful
-close.
+gc-toolkit local delta (close-on-merge): mr-mode does NOT close the work
+bead here. Stock GasTown closes at PR-creation; this pack keeps the bead
+OPEN as the PR's gating anchor so `closed` always means *merged* and the
+dep graph keeps showing who is on which PR. The bead closes later, on a
+verified merge, via `reconcile-merged-prs.sh` in the find-work idle loop.
+See docs/work-bead-state-machine.md.
 
-gc-toolkit local delta: if `review_gate = "codex"`, dispatch a review
-bead for the codex polecat pool BEFORE closing the work bead. Idempotent
-— a second refinery pass on the same PR will reuse the existing review
-bead.
+The refinery's active endpoint is still PR-created (the bounded patrol loop
+is preserved): it records the PR, hands the bead to gating, and moves on —
+it does NOT babysit the PR to merge. `pr_url` and `pr_number` are the
+forensic breadcrumbs tying the bead to its pull request; `merge_result=pull_request`
+is the gating marker the reconcile pass scans for. `--unset-metadata
+rejection_reason` clears any stale rejection field from an earlier reworked
+attempt.
+
+gc-toolkit local delta: if `review_gate = "codex"`, dispatch a review bead
+for the codex polecat pool and attach it as a GATE DEP of the work anchor
+(the review bead BLOCKS the anchor) BEFORE the gating transition. Idempotent
+— a second refinery pass on the same PR reuses the open review bead.
 
 ```bash
 if [ "{{review_gate}}" = "codex" ]; then
@@ -1154,22 +1193,43 @@ if [ "{{review_gate}}" = "codex" ]; then
       --set-metadata task_kind=review \
       --set-metadata pr_url="$PR_URL" \
       --set-metadata pr_number="$PR_NUMBER" \
-      --set-metadata work_bead="$WORK" \
       --set-metadata fix_target_pool="$FIX_POOL" \
       --set-metadata gc.routed_to="$CODEX_POOL"
+    # Gate-as-dep (close-on-merge): the review bead BLOCKS the open anchor.
+    # Replaces the retired backward work_bead pointer — the dep graph now
+    # carries the gate, and the rework arm resolves the anchor by walking this
+    # edge (gc bd dep list <review> --direction=up -t blocks). Best-effort: a
+    # failed edge must not strand the PR (the review still routes), so warn.
+    gc bd dep "$REVIEW_BEAD" --blocks "$WORK" \
+      || echo "WARN: could not attach review $REVIEW_BEAD as a gate-dep of $WORK" >&2
     gc session wake "$CODEX_POOL" || true
     gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for PR#$PR_NUMBER" || true
   fi
 fi
 
+# Close-on-merge: keep the work bead OPEN as the PR's gating anchor. Record the
+# PR fields + merged_target, mark it gating (merge_result=pull_request), and
+# DETACH it from both work queues so it is neither re-grabbed nor read as demand:
+#   - assignee="" -> find-work (assignee=$GC_AGENT, open, has branch) skips it,
+#     so the refinery does not re-open the PR in a loop;
+#   - gc.routed_to="" -> the open + unassigned anchor is NOT pool demand.
+# It closes later, on a verified merge, via reconcile-merged-prs.sh in the
+# find-work idle loop. This REPLACES the stock `gc bd close ... "Pull request
+# ready"`; closure now means merged, never handed-off.
 gc bd update $WORK \
+  --status=open \
+  --assignee="" \
   --set-metadata merge_result=pull_request \
   --set-metadata pr_url="$PR_URL" \
   --set-metadata pr_number="$PR_NUMBER" \
   --set-metadata merged_target="$TARGET" \
-  --unset-metadata rejection_reason && \
-gc bd close $WORK --reason "Pull request ready: $PR_URL"
+  --set-metadata gc.routed_to="" \
+  --unset-metadata rejection_reason
 ```
+If the gating update fails, the bead stays assigned to the refinery and OPEN —
+it is simply re-processed next patrol iteration (the `EXISTING_REVIEW` guard and
+PR reuse make the retry idempotent). Do NOT hand-close it; closure is the
+merge-detection pass's job alone.
 
 **5. Cleanup (leaves worktree detached so other worktrees can hold $TARGET):**
 ```bash
@@ -1191,7 +1251,10 @@ The Gastown example refinery supports direct and mr/pr merge strategies only."
 ```
 Do NOT close the bead, delete the branch, or burn the wisp until a human decides how to proceed.
 
-**GATE**: direct mode requires verified target push. mr mode requires verified PR URL. Bead closure only happens after the selected handoff is confirmed."""
+**GATE**: direct mode requires a verified target push, then closes the bead. mr
+mode requires a verified PR URL, then transitions the bead to GATING (it stays
+OPEN); the bead closes only on a verified merge (reconcile-merged-prs.sh), never
+at handoff."""
 
 [[steps]]
 id = "patrol-summary"

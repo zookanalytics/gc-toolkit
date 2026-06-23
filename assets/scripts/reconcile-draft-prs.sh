@@ -61,14 +61,18 @@ while IFS=$'\t' read -r num head; do
     continue
   fi
 
-  # Guard (b): no open/in_progress bead may reference this PR. An open review
-  # bead means a review is still running; an open fix bead (pr_number=N, filed
-  # by the REQUEST_CHANGES arm) means rework is in flight. Either way the PR
-  # must stay draft.
+  # Guard (b): no open/in_progress bead may reference this PR — EXCEPT the
+  # gating anchor itself. Under close-on-merge the work bead stays OPEN with
+  # pr_number=N (merge_result=pull_request) from PR-creation until the merge
+  # closes it; that anchor is NOT "rework in flight", so it must not pin its own
+  # PR in draft. Exclude any bead carrying merge_result (only the anchor does).
+  # What remains and legitimately blocks un-drafting: an open review bead (a
+  # review still running) or an open fix bead (REQUEST_CHANGES rework: pr_number=N,
+  # no merge_result). --limit raised so the filter sees every referencing bead.
   inflight=$(gc bd list \
     --metadata-field pr_number="$num" \
-    --status open,in_progress --limit=1 --json 2>/dev/null \
-    | jq -r '.[0].id // empty' 2>/dev/null)
+    --status open,in_progress --limit=20 --json 2>/dev/null \
+    | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
   if [ -n "$inflight" ]; then
     skipped=$((skipped + 1))
     continue
