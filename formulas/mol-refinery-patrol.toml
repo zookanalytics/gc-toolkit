@@ -30,9 +30,6 @@ closes the bead once the PR is verified.
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-refinery-patrol"
 
-[requires]
-formula_compiler = ">=2.0.0"
-
 [vars]
 [vars.binding_prefix]
 description = "Import binding prefix for gastown agent identities, including trailing dot when bound."

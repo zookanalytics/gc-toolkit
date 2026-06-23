@@ -41,7 +41,6 @@ work. Then it drains. One reaction, then gone.
 | issue | sling (`--on` attaches this wisp to the bead) | The bead to react to. |
 """
 formula = "mol-first-reaction"
-version = 1
 
 [vars]
 [vars.issue]
