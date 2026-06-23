@@ -105,7 +105,10 @@ line and keep the v2 compiler — not the reverse.)
 The reason the legacy hack existed: routing to a scale-from-zero pool needs a
 **Ready-visible** surface, and a v1 molecule-container root is not Ready-visible
 (`gc sling` rejects it), so `phase="vapor"`/root-only was the v1 workaround. A
-**v2 workflow root is Ready-visible on its own** — it pool-routes without vapor.
+**v2 workflow instead materializes independently routable, Ready-visible *step*
+beads** that wake the pool without vapor; the workflow root itself depends on
+`workflow-finalize` and stays blocked — **not** Ready-visible — while the
+workflow runs.
 Migrating to v2 is upstream's recommended remedy; the `phase="vapor"` alternative
 named in the same error text is the legacy path, not a v2 option
 (formula-spec-v2, *Conformance → Differences from v1*).
