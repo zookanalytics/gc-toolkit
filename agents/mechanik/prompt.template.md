@@ -134,9 +134,11 @@ gc bd dep add "$WORK" "$CONVOY" --type=parent-child
 #    and the refinery rebases polecat work back onto the integration branch.
 gc sling "$RIG/polecat" "$WORK"
 
-# 5. When the convoy is complete, file a graduation bead that squash-merges
-#    integration/<convoy-id> back to {{ .DefaultBranch }}, then
-#    `gc convoy land <CONVOY>` once all children are closed.
+# 5. When all children close, the refinery graduates the convoy
+#    automatically: it assigns the convoy bead to itself and opens a
+#    human-approved integration/<convoy-id> -> {{ .DefaultBranch }} PR
+#    through the same work-bead machine. No manual graduation bead and no
+#    `gc convoy land` (see docs/work-bead-state-machine.md).
 ```
 
 ### Two levers, both supported

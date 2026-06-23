@@ -78,8 +78,8 @@ description = "Whether to delete source branches after merge"
 default = "true"
 
 [vars.integration_branch_auto_land]
-description = "Auto-create work beads to land completed integration branches"
-default = "false"
+description = "System-auto convoy graduation. When an OWNED integration convoy's members are all closed (== all merged, under close-on-merge), the refinery assigns the convoy bead to itself and lands integration->main through the same work-bead machine (a human-approved PR). Default on; set 'false' as a kill-switch. Non-owned auto-convoys (per-sling tracking bundles) are never affected."
+default = "true"
 
 [vars.event_timeout]
 description = "Seconds to sleep before re-checking for work. Replaces former event-watch loop which hot-spun on cache-reconcile firehose."
@@ -210,10 +210,11 @@ If NO work found: sleep, reconcile stranded draft PRs, then re-check.
 sleep {{event_timeout}}
 ```
 
-**2. Reconcile PR state (best-effort, every idle wake).** Two convergent
+**2. Reconcile state (best-effort, every idle wake).** Three convergent
 passes run here on the idle cadence: (a) un-draft codex-gated PRs whose review
-concluded, and (b) close-on-merge — close gating anchors whose PR has merged,
-flag abandoned PRs, and queue auto-merge for ready ones. Both are the net for
+concluded, (b) close-on-merge — close gating anchors whose PR has merged,
+flag abandoned PRs, and queue auto-merge for ready ones, and (c) graduate
+owned integration convoys whose members are now all closed. All are the net for
 single best-effort one-shots that can fail for any reason.
 
 Pass (a) — un-draft review-cleared PRs.
@@ -240,6 +241,20 @@ once); open+ready -> best-effort `gh pr merge --auto`; open+draft -> leave to
 pass (a). Enumerated by bead so each PR resolves in-repo. Convergent + cheap —
 one `gh pr view` per anchor, anchors are few. See
 docs/work-bead-state-machine.md.
+
+Pass (c) — convoy graduation (`reconcile-graduated-convoys.sh`, gated on
+`integration_branch_auto_land`). The same machine ONE LEVEL UP. Runs AFTER pass
+(b), so the wake that closes a convoy's last merged child immediately graduates
+the now-complete convoy. For each OWNED integration convoy whose members are
+ALL closed it assigns the convoy bead to the refinery as an ordinary mr-mode
+work bead (`branch=integration/<id>`, `target={{target_branch}}`,
+`merge_strategy=mr`); the next iteration lands integration->main behind a
+human-approved PR. The interlock: under close-on-merge a child closes only on
+merge, so "all closed" == "all merged" — graduation can never assemble a
+half-built integration branch. Owned-only and rig-scoped — non-owned
+auto-convoys (per-sling tracking bundles) are never touched. Idempotent: a
+convoy already carrying `branch` (graduation initiated) is skipped. See
+docs/work-bead-state-machine.md.
 ```bash
 # Resolve the reconcile scripts from the gc-toolkit pack. Dotted Go-template
 # field tokens (dot-prefixed names such as a ConfigDir accessor) do NOT render
@@ -256,7 +271,7 @@ for cand in "${GC_RIG_ROOT:-}/assets/scripts" \
   if [ -x "$cand/reconcile-draft-prs.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
 done
 if [ -n "$SCRIPTS_DIR" ]; then
-  # Both passes are best-effort: a failed pass is retried next idle wake and
+  # All passes are best-effort: a failed pass is retried next idle wake and
   # never blocks find-work.
   # (a) Un-draft codex-gated PRs whose review has concluded.
   "$SCRIPTS_DIR/reconcile-draft-prs.sh" \
@@ -267,6 +282,16 @@ if [ -n "$SCRIPTS_DIR" ]; then
   if [ -x "$SCRIPTS_DIR/reconcile-merged-prs.sh" ]; then
     "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
       || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
+  fi
+  # (c) Convoy graduation: assign each OWNED integration convoy whose members
+  #     are all closed (== all merged) to the refinery for an integration->main
+  #     PR. Runs AFTER (b) so the wake that closes the last child graduates the
+  #     convoy in the same pass. Gated on integration_branch_auto_land (default
+  #     "true"; "false" is the kill-switch) and -x (importer-rig degradation).
+  if [ "{{integration_branch_auto_land}}" != "false" ] \
+     && [ -x "$SCRIPTS_DIR/reconcile-graduated-convoys.sh" ]; then
+    "$SCRIPTS_DIR/reconcile-graduated-convoys.sh" --target "{{target_branch}}" \
+      || echo "reconcile-graduated-convoys: pass failed (non-fatal); retries next idle wake" >&2
   fi
 fi
 ```
@@ -498,10 +523,11 @@ fi
 
 # gc-toolkit local delta: surface integration-branch targets so the operator
 # knows direct refinery handling lands on the convoy's integration branch, not
-# {{target_branch}}; graduation is a separate work bead.
+# {{target_branch}}; graduation to {{target_branch}} is system-auto once all the
+# convoy's children close (find-work pass (c), reconcile-graduated-convoys.sh).
 case "$TARGET" in
   integration/*)
-    echo "INFO: Merging $WORK to integration branch '$TARGET' (not {{target_branch}}). A graduation bead is required to land this work to {{target_branch}}; see 'gc convoy land' and the integration_branch_auto_land patrol step."
+    echo "INFO: Merging $WORK to integration branch '$TARGET' (not {{target_branch}}). The owning OWNED convoy graduates to {{target_branch}} automatically once all its children close — the refinery opens a human-approved integration->{{target_branch}} PR (find-work pass (c), gated on integration_branch_auto_land). No manual graduation bead or 'gc convoy land' needed."
     ;;
 esac
 
@@ -1285,28 +1311,22 @@ needs = ["patrol-summary"]
 description = """
 **Config: integration_branch_auto_land = {{integration_branch_auto_land}}**
 
-**1. Integration branch check (only if auto_land = "true"):**
+**1. Convoy graduation — handled by the find-work idle loop, not here.**
 
-If the merge target was an integration branch, check if the parent
-owned convoy is now fully closed:
-```bash
-gc bd list --type=convoy --status=open
-```
-For each owned convoy with an integration branch: if ALL children are
-closed, assign the convoy bead itself to you with the metadata needed
-for a merge:
-```bash
-gc bd update <convoy-id> --assignee=$GC_AGENT \
-  --set-metadata branch=<integration-branch> \
-  --set-metadata target={{target_branch}}
-```
-The next patrol iteration picks up the convoy like any other work bead
-and merges the integration branch to {{target_branch}} normally.
+Graduation is a convergent reconcile pass (`reconcile-graduated-convoys.sh`,
+pass (c) of the find-work step), not an inline post-merge step. It must live
+there: under close-on-merge a convoy CHILD closes only when
+`reconcile-merged-prs.sh` observes its PR merged — on an idle wake, not
+synchronously at this merge — so the wake that closes a convoy's last child is
+exactly where "all members closed" first becomes true. Pass (c) runs right
+after (b) on that same wake and assigns the now-complete OWNED convoy to the
+refinery (`branch=integration/<id>`, `target={{target_branch}}`,
+`merge_strategy=mr`) to land integration->main behind a human-approved PR.
+Owned-only, rig-scoped, idempotent. No coordinator and no `gc convoy land` in
+the loop. Nothing to do in this step.
 
 **FORBIDDEN**: Landing integration branches via raw `git merge`/`git push`.
-The convoy bead assignment is the ONLY path.
-
-If auto_land = "false": skip this entirely.
+The convoy-bead assignment in pass (c) is the ONLY path.
 
 **2. Resolve the current wisp, pour next iteration, then burn this wisp:**
 ```bash

@@ -103,7 +103,7 @@ reconciler. The thing that watches it is the merge-detection pass.
 
 ### Transitions the refinery drives on an idle pass
 
-The refinery's `find-work` step, when no work is assigned, runs two
+The refinery's `find-work` step, when no work is assigned, runs three
 convergent reconcile passes each idle wake (cheap, idempotent, modeled on the
 town's other reconcilers — config-drift drain, witness orphan-recovery):
 
@@ -130,6 +130,17 @@ town's other reconcilers — config-drift drain, witness orphan-recovery):
      protection (a required approving review) still gates the actual merge —
      auto-merge only removes the manual "merge" click, it does not let the
      refinery self-merge.
+3. **convoy graduation** (`reconcile-graduated-convoys.sh`) — the convoy half of
+   close-on-merge, runs *after* pass 2 so the same wake that closes a convoy's
+   last merged child graduates the now-complete convoy. For each **owned**
+   integration convoy whose members are all closed, it assigns the convoy bead
+   to the refinery as an ordinary mr-mode work bead (`branch=integration/<id>`,
+   `target=main`, `merge_strategy=mr`); the next iteration lands
+   integration->main behind a human-approved PR. Owned-only and rig-scoped —
+   the non-owned auto-convoys (per-sling tracking bundles) are never touched.
+   Idempotent: a convoy already carrying `branch` (graduation initiated) is
+   skipped. Gated on `integration_branch_auto_land` (default on; the kill-switch
+   is `"false"`). See "One level up" below.
 
 This is why merge-detection is reconcile-driven rather than a poll loop: the
 refinery never sits and polls GitHub as a primary trigger. `gh pr merge
@@ -162,19 +173,35 @@ and the levels **chain through the target**:
 | work bead | its code gates pass | `integration/<id>` | merged to integration |
 | convoy | all its members are closed | `main` | integration merged to main |
 
-It graduates *through* the work-bead machine itself: the refinery assigns the
-convoy bead to itself with `branch=integration/<id>`, `target=main`, and it
-walks `in_progress -> PR -> merge -> closed` like any bead. So it is
+It graduates *through* the work-bead machine itself, and **system-auto**: a
+convergent find-work pass (`reconcile-graduated-convoys.sh`, pass 3 above)
+detects an owned convoy's completion and assigns the convoy bead to the refinery
+with `branch=integration/<id>`, `target=main`, `merge_strategy=mr`; the refinery
+then walks it `in_progress -> PR -> merge -> closed` like any bead. So it is
 **recursion** — one machine, defined once, applied to an aggregate — not a
 duplicated second machine. The target chain (member ->
 `integration/<id>` -> `main`) threads the levels.
+
+No coordinator drives this loop — no mayor, no `gc convoy land`. `gc convoy
+land` remains available as a manual bead-state-flip primitive, but it is not the
+graduation driver. Graduation is scoped to **owned** integration convoys; the
+non-owned auto-convoys (the per-sling tracking bundles) carry no integration
+branch and auto-close on their own — they never graduate.
 
 Because a convoy child now closes on **merge to its integration branch**
 (not at PR-creation), a convoy's completion gate shifts from "all children
 PR-created" to "all children merged." That is the more correct gate — the
 integration branch actually contains the children's work before graduation —
 but it is the reason close-on-merge and the graduation path are designed
-together.
+together. This is the **interlock**: "all members closed" now means "all
+members merged," so graduation can never assemble a half-built integration
+branch. An abandoned child stays open (escalated, not closed), so it keeps the
+convoy incomplete and blocks graduation until a human resolves it.
+
+**Bootstrap.** The graduation mechanism cannot graduate the change that
+introduces it: this pack delta (the graduation pass together with
+close-on-merge) lands to `main` by an ordinary human-approved PR, like any other
+pack change.
 
 ## Deliberate divergence from stock GasTown
 
