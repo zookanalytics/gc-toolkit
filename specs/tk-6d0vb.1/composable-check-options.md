@@ -19,7 +19,8 @@ today**, and lays out three implementation options (pure pack-side / ride the
 core seam / hybrid) with a recommendation.
 
 All citations are `path:line` against the trees read on 2026-06-24
-(`rigs/gascity` @ `e03fa1b`, `rigs/gc-toolkit`, `~/.gc/system/packs/gastown`).
+(`rigs/gascity` @ `fd543f2`, `rigs/gc-toolkit` @ `e03fa1b`,
+`~/.gc/system/packs/gastown`).
 
 ---
 
