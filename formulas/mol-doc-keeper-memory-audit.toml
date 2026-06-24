@@ -61,6 +61,11 @@ git -C "$REPO" fetch origin main --quiet || true   # best-effort freshness
 MEM="{{memory_dir}}"
 if [ ! -d "$MEM" ]; then
   echo "memory dir $MEM not present — nothing to audit this run."
+  # Close this step bead before draining. A graph.v2 step advances by CLOSING
+  # its bead, not by drain-ack alone; a drain-acking session that still owns an
+  # open assigned step bead is parked and re-pooled — a fresh worker re-wakes on
+  # this same step forever. Closing it lets the graph reach workflow-finalize.
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
   gc runtime drain-ack
   exit 0
 fi
@@ -69,10 +74,16 @@ fi
 BRIEFS=$(cd "$REPO" && ls docs/gascity-*.md 2>/dev/null)
 if [ -z "$BRIEFS" ]; then
   echo "no docs/gascity-*.md briefs in this rig — nothing to promote into (no-op)."
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
   gc runtime drain-ack
   exit 0
 fi
 echo "Auditing memory at $MEM against briefs:"; echo "$BRIEFS"
+
+# Non-terminal step complete: close this step bead so the graph advances to
+# scan-and-classify. No drain-ack — the same session continues (continuation-
+# group affinity), carrying $REPO / $MEM / $BRIEFS into the next step.
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
 ```
 
 **Exit criteria:** Environment primed; `$REPO`, `$MEM`, and `$BRIEFS` resolved;
@@ -195,6 +206,16 @@ first) and keep at most `{{max_beads_per_run}}`; if you dropped any for the cap,
 note the count — they re-surface next run (the state is the memory mtime + the
 open beads/PRs, so this is naturally resumable).
 
+## 5. Close this step (non-terminal — same session continues)
+
+Once the survivor list is determined, close this step bead so the graph advances
+to `file-and-dispatch`. No drain-ack — the same session continues (continuation-
+group affinity), carrying the survivor list forward into the next step.
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
+
 **Exit criteria:** A bounded list (≤ `{{max_beads_per_run}}`) of
 `(memory_file, target_brief(s), one-line summary, proposed change)` gaps, or an
 empty list if nothing qualifies; plus any **missing-brief observations** —
@@ -216,6 +237,7 @@ one-shot.
 ```bash
 if [ -z "$SURVIVORS" ]; then   # however you tracked the step-2 result
   echo "memory-audit: no in-scope gaps this run — nothing to file."
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
   gc runtime drain-ack
   exit 0
 fi
@@ -267,6 +289,9 @@ bespoke worker formula.
 
 ```bash
 echo "memory-audit complete: filed N bead(s) to main; deferred M to next cycle."
+# Terminal step: close this step bead, THEN drain. The dispatcher's
+# workflow-finalize closes the kind=workflow root once every step is closed.
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
 gc runtime drain-ack
 ```
 

@@ -45,6 +45,14 @@ gc bd prime
 This is the doc-keeper **drift audit** (keep each brief *true*) — read-only: it
 files `doc-update` beads, never edits a doc, keeps no state bead. Read
 `audit-and-file` in full before running it.
+
+Then close this step so the graph advances to `audit-and-file`. No drain-ack —
+a graph.v2 step advances by CLOSING its bead, and the same session continues
+(continuation-group affinity) into the next step:
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
 """
 
 [[steps]]
@@ -69,6 +77,10 @@ GCTK_DIR="$GC_RIG_ROOT"
 BRIEFS=$(cd "$REPO" && ls docs/gascity-*.md 2>/dev/null)
 if [ -z "$BRIEFS" ]; then
   echo "no docs/gascity-*.md briefs in this rig — nothing to audit (cheap no-op)."
+  # Close this step bead before draining. A graph.v2 step advances by CLOSING
+  # its bead; a drain-acking session that still owns an open assigned step bead
+  # is parked and re-pooled, re-waking a fresh worker on this step forever.
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
   gc runtime drain-ack
   exit 0
 fi
@@ -192,6 +204,16 @@ Routing the bead to the pool (`gc.routed_to=$POOL`, unassigned) is the dispatch:
 a pool polecat claims it and runs the standard `mol-polecat-work` lifecycle — no
 bespoke worker formula.
 
+## 4. Close this step (non-terminal — same session continues)
+
+After every finding is filed (or skipped/deferred), close this step bead so the
+graph advances to `drain`. No drain-ack here — the same session continues
+(continuation-group affinity) to the terminal step.
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
+
 **Exit criteria:** every brief was read and judged against its `## Scope`; each
 stale upstream change became one change-unit `doc-update` bead (or was skipped
 by dedup / deferred by the cap). No repository file was edited and no state bead
@@ -204,16 +226,24 @@ title = "Summarize and drain"
 needs = ["audit-and-file"]
 description = """
 The audit is a one-shot run; the cooldown order re-pours the next one. There is
-no work bead to hand off and nothing to close — the `doc-update` beads you filed
-are routed to the worker pool.
+no work bead to hand off and no *filed* `doc-update` bead to close — those are
+routed to the worker pool and the refinery closes them when it opens their PRs.
 
-Print a one-line summary (count filed this run vs deferred), then drain:
+This is the terminal graph step, so it still closes its **own** step bead — that
+is how a graph.v2 step advances — before draining. The dispatcher's
+`workflow-finalize` then closes the `kind=workflow` root once every step is
+closed; skip this close and the drained session keeps an open assigned step
+bead, so a fresh worker re-pools on it forever (the loop this audit must avoid).
+
+Print a one-line summary (count filed this run vs deferred), close this step,
+then drain:
 
 ```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
 gc runtime drain-ack
 ```
 
-Do NOT push a branch, hand to the refinery, or close any bead — this formula
-files beads and exits. The doc edits happen later, in `mol-polecat-work`, on a
-branch, through the refinery.
+Do NOT push a branch, hand to the refinery, or close any **filed** `doc-update`
+bead — this formula files beads and exits. The doc edits happen later, in
+`mol-polecat-work`, on a branch, through the refinery.
 """
