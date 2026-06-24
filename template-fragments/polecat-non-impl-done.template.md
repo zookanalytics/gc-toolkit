@@ -128,9 +128,20 @@ if [ -n "$FIX_POOL" ]; then
       # stale and re-gates the merge. Best-effort; a miss just defers auto-merge
       # to the next signoff round, it never merges prematurely.
       if [ -n "$ANCHOR" ]; then
-        PR_HEAD_OID=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid 2>/dev/null)
-        [ -n "$PR_HEAD_OID" ] && gc bd update "$ANCHOR" \
-          --set-metadata signoff_head="$PR_HEAD_OID" >/dev/null 2>&1 || true
+        # Stamp the EXACT commit the signoff reviewed, read from the reviews API
+        # (.commit_id) — NOT the PR's live head. The head can advance between the
+        # review and this stamp; stamping the live head would mark an UNREVIEWED
+        # commit as signoff-validated and let it auto-merge, defeating the
+        # stale-head guard. GitHub attaches the review to the head at submission,
+        # so .commit_id is exactly what was reviewed: a commit pushed afterward
+        # leaves signoff_head != live head and correctly re-gates the merge. Take
+        # the latest review under your own handle (the one just submitted).
+        REVIEW_HANDLE=$(gh api user -q .login 2>/dev/null)
+        REVIEWED_OID=$(gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/reviews" 2>/dev/null \
+          | jq -r --arg h "$REVIEW_HANDLE" \
+              '[.[] | select(.user.login == $h)] | sort_by(.submitted_at) | last | .commit_id // empty' 2>/dev/null)
+        [ -n "$REVIEWED_OID" ] && gc bd update "$ANCHOR" \
+          --set-metadata signoff_head="$REVIEWED_OID" >/dev/null 2>&1 || true
       fi
       # Un-draft the PR so the operator sees it. Best-effort: if this one-shot
       # fails (transient GraphQL error, a restart mid-flow, a Dolt wedge), do

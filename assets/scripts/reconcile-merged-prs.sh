@@ -11,12 +11,19 @@
 #                          Flag: merge_result=abandoned, route to human, escalate
 #                          once. We lack context, so we never auto-close it.
 #   PR open, ready      -> queue `gh pr merge --auto` ONLY while the live head is
-#                          signoff-validated (signoff_head == headRefOid) — the
-#                          check-set's title/description-current member, so a
-#                          stale approval or a post-signoff rework commit cannot
-#                          merge prematurely. Branch protection still gates the
-#                          real merge; the refinery never self-merges.
+#                          signoff-validated (signoff_head == headRefOid — the
+#                          check-set's title/description-current member) AND no
+#                          open rework/review child references the PR (an open
+#                          child holds the merge). A stale approval, a
+#                          post-signoff rework commit, or in-flight rework
+#                          therefore cannot merge prematurely. Branch protection
+#                          still gates the real merge; the refinery never
+#                          self-merges.
 #   PR open, draft      -> skip (reconcile-draft-prs.sh owns un-drafting).
+#
+#   ANY state, retargeted (live base != anchor merged_target) -> never close as
+#                          landed and never auto-merge (the work would land on
+#                          the wrong branch); route to human + escalate once.
 #
 # This is the bead-CLOSER half of close-on-land: an anchor stays OPEN from
 # PR-creation until THIS pass observes an authoritative merge. `closed` thus
@@ -56,7 +63,7 @@ ROWS=$(printf '%s' "$ANCHORS" \
   | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), signoff: (.metadata.signoff_head // "")}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "reconcile-merged-prs: no gating anchors"; exit 0; }
 
-closed=0; abandoned=0; automerge=0; escalated=0; skipped=0
+closed=0; abandoned=0; automerge=0; escalated=0; retargeted=0; skipped=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -83,7 +90,49 @@ while IFS= read -r row; do
   is_draft=$(printf '%s' "$PR_JSON" | jq -r '.isDraft // false')
   merge_oid=$(printf '%s' "$PR_JSON" | jq -r '.mergeCommit.oid // ""')
   head_oid=$(printf '%s' "$PR_JSON" | jq -r '.headRefOid // ""')
-  [ -n "$target" ] || target=$(printf '%s' "$PR_JSON" | jq -r '.baseRefName // "main"')
+  base=$(printf '%s' "$PR_JSON" | jq -r '.baseRefName // ""')
+  # `target` is the anchor's recorded merged_target — the branch it expects to
+  # land on. Keep the raw value for the retarget guard below; fall back to the
+  # live base only when the anchor never recorded one (older anchors / direct
+  # dispatches have nothing to mismatch against).
+  recorded_target="$target"
+  [ -n "$target" ] || target="${base:-main}"
+
+  # --- Retarget guard: live base must still match the anchor's expected target.
+  # The anchor stamped merged_target at publication. If PR#$num's LIVE base no
+  # longer matches it, the PR was retargeted after publication, so a merge would
+  # land (or has landed) on the WRONG branch: closing as "Merged to <expected>"
+  # would record a landing that never happened, and queuing auto-merge would push
+  # the work to the wrong target. Do neither while mismatched. Fires for the
+  # merged close path and the open/ready auto-merge path — NOT open/draft (that
+  # is reconcile-draft-prs.sh's domain) and NOT closed/unmerged (handled as
+  # abandoned below). Flip the gating marker off pull_request so the anchor
+  # leaves this scan: that escalates exactly once (mirroring out-of-band-close
+  # handling), routes a human, and clears the now-meaningless signoff_head. The
+  # anchor stays OPEN — the work has not landed on its target.
+  if { [ "$merged" = "true" ] || { [ "$state" = "OPEN" ] && [ "$is_draft" != "true" ]; }; } \
+       && [ -n "$recorded_target" ] && [ -n "$base" ] && [ "$recorded_target" != "$base" ]; then
+    gc bd update "$id" \
+      --assignee="" \
+      --set-metadata merge_result=retargeted \
+      --set-metadata gc.routed_to=human \
+      --set-metadata blocked_reason="PR#$num retargeted: base '$base' != expected target '$recorded_target'" \
+      --unset-metadata signoff_head >/dev/null 2>&1
+    retargeted=$((retargeted + 1))
+    if gc mail send mayor/ -s "ESCALATION: PR#$num retargeted ($base != $recorded_target) for $id" \
+         -m "Gating anchor $id expects PR#$num to land on '$recorded_target' (merged_target,
+stamped at publication), but the PR now targets '$base' — it was retargeted after
+the refinery published it. The merge reconciler will NOT close this anchor as
+landed nor queue auto-merge while base != expected target: either would
+record/produce a landing on the wrong branch. The bead is left OPEN, routed to
+human (merge_result=retargeted). Decide: retarget PR#$num back to
+'$recorded_target' and reset merge_result=pull_request to re-engage, or update the
+anchor's merged_target if the new base is intentional." >/dev/null 2>&1; then
+      escalated=$((escalated + 1))
+    fi
+    echo "reconcile-merged-prs: $id flagged — PR#$num retargeted (base '$base' != target '$recorded_target'); routed to human + escalated"
+    continue
+  fi
 
   # --- PR merged: close the anchor (close-FIRST for convergence). -----------
   # If the close fails the anchor stays open + merge_result=pull_request and is
@@ -154,6 +203,24 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
       echo "reconcile-merged-prs: PR#$num head not signoff-validated (have '${signoff_head:-none}', live '$head_oid'); auto-merge held (anchor $id)"
       skipped=$((skipped + 1)); continue
     fi
+    # An open rework/review child holds the merge (docs/work-bead-state-machine.md:
+    # an anchor lands only when ALL its children are closed). signoff_head alone
+    # is not enough — the REQUEST_CHANGES arm clears it only best-effort when the
+    # anchor edge resolves, and another check can file a rework child whose edge
+    # is missing, so a stale signoff_head can coexist with open rework. Reuse
+    # reconcile-draft-prs.sh guard (b): hold auto-merge while ANY open/in_progress
+    # bead OTHER than this anchor references the PR. The anchor carries
+    # merge_result; rework children and review beads do not — so excluding the
+    # anchor's own id plus any merge_result-carrying bead leaves exactly the
+    # in-flight rework/review set.
+    inflight=$(gc bd list \
+      --metadata-field pr_number="$num" \
+      --status open,in_progress --limit=20 --json 2>/dev/null \
+      | jq -r --arg anchor "$id" '[.[] | select(.id != $anchor) | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
+    if [ -n "$inflight" ]; then
+      echo "reconcile-merged-prs: PR#$num has open rework/review bead $inflight; auto-merge held (anchor $id)"
+      skipped=$((skipped + 1)); continue
+    fi
     # Best-effort + idempotent: queue auto-merge so GitHub lands the PR once
     # approvals + checks pass. Branch protection still gates the real merge.
     # --squash matches the repo's squash-merge convention (commit "(#N)" tail).
@@ -169,5 +236,5 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
   skipped=$((skipped + 1))
 done <<< "$ROWS"
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $automerge auto-merge queued, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $automerge auto-merge queued, $skipped skipped"
 exit 0
