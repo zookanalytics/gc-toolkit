@@ -88,83 +88,91 @@ gc runtime drain-ack
 exit
 ```
 
-### Fix-target dispatch (pre-publish review gate)
+### Fix-target dispatch (pre-publish signoff gate)
 
-When `metadata.fix_target_pool` is set, the review is a pre-publish gate
-(the refinery opened the PR as draft and is waiting on your verdict). Under
-close-on-merge the work bead stays OPEN as the PR's gating anchor: on
-APPROVE/COMMENT you un-draft the PR (the anchor closes later, on merge, via
-the refinery's reconcile pass — not here); on REQUEST_CHANGES you re-route
-that SAME anchor back to the implementation pool. After posting the verdict
-via `gh pr review` (step 1 above) and BEFORE closing the REVIEW bead (step 3
-above), act on it:
+When `metadata.fix_target_pool` is set, the review is a **signoff gate** — one
+member of the gating anchor's check-set (see docs/work-bead-state-machine.md).
+The refinery opened the PR as draft and is waiting on your verdict. The
+**anchor** stays OPEN as the PR's gating bead; it closes later, on merge, via
+the refinery's reconcile pass — never here. Resolve the anchor as the bead this
+review gates — the dependent of the `blocks` dep the refinery attached
+(`gc bd dep <review> --blocks <anchor>`):
+
+- **APPROVE/COMMENT** — the signoff passes on the **current** head. Stamp the
+  head you signed off as `signoff_head` on the anchor (this is the check-set's
+  *title/description validated-current* member: it tells the merge reconcile
+  that the latest commit — title + body included — was reviewed, so auto-merge
+  may fire). Then un-draft the PR.
+- **REQUEST_CHANGES** — file a **new rework child** against the anchor (rework
+  is a new child, never the same bead reopened and never a cleared marker; see
+  docs/work-bead-state-machine.md). Clear `signoff_head` so the now-unvalidated
+  head cannot auto-merge.
+
+After posting the verdict via `gh pr review` (step 1 above) and BEFORE closing
+the REVIEW bead (step 3 above), act on it:
 
 ```bash
 FIX_POOL=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.fix_target_pool // empty')
 PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
 
+# The anchor is the bead this review gates (BLOCKS edge, walked upward).
+ANCHOR=$(gc bd dep list <work-bead> --direction=up -t blocks --json 2>/dev/null \
+  | jq -r '.[0].id // empty')
+
 if [ -n "$FIX_POOL" ]; then
   case "$VERDICT" in
     APPROVE|COMMENT)
-      # No blocking findings. Un-draft the PR so the operator sees it.
-      # Best-effort: if this one-shot fails (transient GraphQL error, a
-      # restart mid-flow, a Dolt wedge), do NOT block the review bead or
-      # escalate — the refinery patrol's draft-PR reconcile pass converges
-      # the PR to ready on its next idle wake.
+      # Record which head the signoff validated — the title/description-current
+      # check. reconcile-merged-prs.sh enables auto-merge only while
+      # signoff_head still equals the PR's live head; any later commit makes it
+      # stale and re-gates the merge. Best-effort; a miss just defers auto-merge
+      # to the next signoff round, it never merges prematurely.
+      if [ -n "$ANCHOR" ]; then
+        PR_HEAD_OID=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid 2>/dev/null)
+        [ -n "$PR_HEAD_OID" ] && gc bd update "$ANCHOR" \
+          --set-metadata signoff_head="$PR_HEAD_OID" >/dev/null 2>&1 || true
+      fi
+      # Un-draft the PR so the operator sees it. Best-effort: if this one-shot
+      # fails (transient GraphQL error, a restart mid-flow, a Dolt wedge), do
+      # NOT block the review bead or escalate — the refinery patrol's draft-PR
+      # reconcile pass converges the PR to ready on its next idle wake.
       gh pr ready "$PR_NUMBER" || echo "un-draft failed; refinery patrol will reconcile this PR's draft state" >&2
       ;;
     REQUEST_CHANGES)
-      # Close-on-merge: the work anchor stays OPEN through gating, so rework
-      # re-routes the SAME anchor back to the fix pool — NOT a separate fix bead
-      # (which would leave two open anchors on one PR). Resolve the anchor as the
-      # bead this review gates: the dependent of the blocks-dep the refinery
-      # attached (`gc bd dep <review> --blocks <anchor>`). See
+      # Rework is a NEW child of the anchor, not the same anchor reopened and
+      # not a flag toggled back on it. The child resumes the EXISTING PR branch
+      # via the rejection-resume flow, so a fix polecat reworks the same PR
+      # (never a fresh one). Linking it parent-child to the anchor keeps the dep
+      # graph honest about who is on this PR and — because the anchor cannot
+      # complete while a child is open — holds the merge until the rework lands.
+      # The anchor's gating marker (merge_result) is LEFT INTACT; the PR still
+      # exists, so the anchor's state must keep saying so. See
       # docs/work-bead-state-machine.md.
-      ANCHOR=$(gc bd dep list <work-bead> --direction=up -t blocks --json 2>/dev/null \
-        | jq -r '.[0].id // empty')
+      PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
+      PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
+      PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --json url -q .url)
+      FIX_BEAD=$(gc bd create "Rework PR#$PR_NUMBER: address signoff findings" -t task --json | jq -r .id)
+      gc bd update "$FIX_BEAD" \
+        --set-metadata branch="$PR_HEAD" \
+        --set-metadata target="$PR_BASE" \
+        --set-metadata rejection_reason="signoff requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
+        --set-metadata source_review_bead=<work-bead> \
+        --set-metadata merge_strategy=mr \
+        --set-metadata existing_pr="$PR_URL_FOR_FIX" \
+        --set-metadata pr_url="$PR_URL_FOR_FIX" \
+        --set-metadata pr_number="$PR_NUMBER" \
+        --set-metadata gc.routed_to="$FIX_POOL"
+      # Attach as a child of the anchor (visibility + completion interlock).
+      # Best-effort: a failed edge must not strand the rework, so warn only.
       if [ -n "$ANCHOR" ]; then
-        # Re-open the anchor as fix-pool demand. Its branch + PR metadata are
-        # intact from gating, so a fix polecat resumes the EXISTING PR branch
-        # via the rejection-resume flow.
-        #
-        # CLEAR the gating marker (merge_result): while rework is in flight the
-        # anchor is NOT the idle gating anchor, and both reconcile passes key off
-        # merge_result. reconcile-draft-prs.sh guard (b) EXCLUDES any open
-        # PR-referencing bead that still carries merge_result (it reads that as
-        # the idle gating anchor) and would otherwise un-draft this PR
-        # mid-rework; reconcile-merged-prs.sh scans merge_result=pull_request
-        # anchors and would otherwise queue this still-in-flight PR for
-        # auto-merge. The refinery re-stamps merge_result=pull_request when the
-        # fix is resubmitted (mol-refinery-patrol merge-push step 4), so gating
-        # resumes on re-publish. See docs/work-bead-state-machine.md.
-        gc bd update "$ANCHOR" \
-          --status=open --assignee="" \
-          --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
-          --set-metadata gc.routed_to="$FIX_POOL" \
-          --unset-metadata merge_result
-        gc session wake "$FIX_POOL" || true
+        gc bd dep add "$FIX_BEAD" "$ANCHOR" --type=parent-child \
+          || echo "WARN: could not link rework $FIX_BEAD under anchor $ANCHOR" >&2
+        # The head is no longer signoff-validated — re-gate the merge.
+        gc bd update "$ANCHOR" --unset-metadata signoff_head >/dev/null 2>&1 || true
       else
-        # Fallback — no gating anchor resolved (a pre-close-on-merge PR, or the
-        # gate-dep failed to attach). File a standalone fix bead via the legacy
-        # rejection-resume flow so rework never deadlocks; warn so the missing
-        # edge is noticed.
-        echo "WARN: no gating anchor for review <work-bead>; filing a standalone fix bead" >&2
-        PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
-        PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
-        PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --json url -q .url)
-        FIX_BEAD=$(gc bd create "Address codex findings on PR#$PR_NUMBER" -t task --json | jq -r .id)
-        gc bd update "$FIX_BEAD" \
-          --set-metadata branch="$PR_HEAD" \
-          --set-metadata target="$PR_BASE" \
-          --set-metadata rejection_reason="codex review requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
-          --set-metadata source_review_bead=<work-bead> \
-          --set-metadata merge_strategy=pr \
-          --set-metadata existing_pr="$PR_URL_FOR_FIX" \
-          --set-metadata pr_url="$PR_URL_FOR_FIX" \
-          --set-metadata pr_number="$PR_NUMBER" \
-          --set-metadata gc.routed_to="$FIX_POOL"
-        gc session wake "$FIX_POOL" || true
+        echo "WARN: no gating anchor resolved for review <work-bead>; rework $FIX_BEAD filed unlinked" >&2
       fi
+      gc session wake "$FIX_POOL" || true
       ;;
   esac
 fi

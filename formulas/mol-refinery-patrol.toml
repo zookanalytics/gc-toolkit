@@ -24,11 +24,13 @@ Merge strategy is per-work-bead metadata:
 - `mr` / `pr`: publish a GitHub pull request instead of landing directly
 
 In `mr` mode, refinery does NOT land the branch directly. It publishes a
-pull request, records the PR on the work bead, and transitions the bead to
-a GATING state — it stays OPEN. The bead closes later, on a verified merge
-to its target (close-on-merge), reconciled in the find-work idle loop.
-Stock GasTown closes at PR-creation; this pack keeps the bead open so
-`closed` always means merged. See docs/work-bead-state-machine.md.
+pull request, records the PR on the anchor bead, and transitions it to a
+GATING state — it stays OPEN. The anchor closes later, on a verified merge to
+its target (close-on-land), reconciled in the find-work idle loop. The anchor
+is typically a CONVOY graduating its branch to the target (every PR is an
+owned convoy; see docs/work-bead-state-machine.md), but the mechanism is the
+same for any mr-mode bead. Stock GasTown closes at PR-creation; this pack
+keeps the bead open so `closed` always means landed.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-refinery-patrol"
@@ -78,7 +80,7 @@ description = "Whether to delete source branches after merge"
 default = "true"
 
 [vars.integration_branch_auto_land]
-description = "System-auto convoy graduation. When an OWNED integration convoy's members are all closed (== all merged, under close-on-merge), the refinery assigns the convoy bead to itself and lands integration->main through the same work-bead machine (a human-approved PR). Default on; set 'false' as a kill-switch. Non-owned auto-convoys (per-sling tracking bundles) are never affected."
+description = "System-auto convoy graduation. When an OWNED integration convoy's members are all closed (== all merged, under close-on-land), the refinery assigns the convoy bead to itself and lands integration->main through the same work-bead machine (a human-approved PR). Default on; set 'false' as a kill-switch. Non-owned auto-convoys (per-sling tracking bundles) are never affected."
 default = "true"
 
 [vars.event_timeout]
@@ -212,10 +214,11 @@ sleep {{event_timeout}}
 
 **2. Reconcile state (best-effort, every idle wake).** Three convergent
 passes run here on the idle cadence: (a) un-draft codex-gated PRs whose review
-concluded, (b) close-on-merge — close gating anchors whose PR has merged,
-flag abandoned PRs, and queue auto-merge for ready ones, and (c) graduate
-owned integration convoys whose members are now all closed. All are the net for
-single best-effort one-shots that can fail for any reason.
+concluded, (b) close-on-land — close gating anchors whose PR has merged,
+flag out-of-band-closed PRs, and queue auto-merge for signoff-validated ready
+ones, and (c) graduate owned integration convoys whose members are now all
+closed. All are the net for single best-effort one-shots that can fail for any
+reason.
 
 Pass (a) — un-draft review-cleared PRs.
 The codex review gate opens PRs as draft and un-drafts them with a single
@@ -232,15 +235,18 @@ idle loop is the ONLY thing that runs on the {{event_timeout}} cadence when
 the refinery is idle, so the reconcile lives here rather than in a standalone
 step that idle would never reach.
 
-Pass (b) — close-on-merge (`reconcile-merged-prs.sh`). mr-mode keeps the work
-bead OPEN as the PR's gating anchor (merge-push step 4); this pass is what
-later closes it. For each open gating anchor (`merge_result=pull_request`) it
-reads the PR: merged -> close the bead `"Merged to <target> at <sha>"`
-(mirroring direct-mode); closed-unmerged -> abandoned (route to human, escalate
-once); open+ready -> best-effort `gh pr merge --auto`; open+draft -> leave to
-pass (a). Enumerated by bead so each PR resolves in-repo. Convergent + cheap —
-one `gh pr view` per anchor, anchors are few. See
-docs/work-bead-state-machine.md.
+Pass (b) — close-on-land (`reconcile-merged-prs.sh`). mr-mode keeps the anchor
+(a convoy graduating, or any mr-mode bead) OPEN as the PR's gating bead
+(merge-push step 4); this pass is what later closes it. For each open gating
+anchor (`merge_result=pull_request`) it reads the PR: merged -> close the bead
+`"Merged to <target> at <sha>"` (mirroring direct-mode); closed-unmerged ->
+out-of-band close (the refinery did not do it; route to human, escalate once);
+open+ready -> queue `gh pr merge --auto` ONLY while the live head is
+signoff-validated (`signoff_head` == headRefOid — the check-set's
+title/description-current member, so a stale approval or a post-signoff rework
+commit cannot merge early); open+draft -> leave to pass (a). Enumerated by bead
+so each PR resolves in-repo. Convergent + cheap — one `gh pr view` per anchor,
+anchors are few. See docs/work-bead-state-machine.md.
 
 Pass (c) — convoy graduation (`reconcile-graduated-convoys.sh`, gated on
 `integration_branch_auto_land`). The same machine ONE LEVEL UP. Runs AFTER pass
@@ -249,7 +255,7 @@ the now-complete convoy. For each OWNED integration convoy whose members are
 ALL closed it assigns the convoy bead to the refinery as an ordinary mr-mode
 work bead (`branch=integration/<id>`, `target={{target_branch}}`,
 `merge_strategy=mr`); the next iteration lands integration->main behind a
-human-approved PR. The interlock: under close-on-merge a child closes only on
+human-approved PR. The interlock: under close-on-land a child closes only on
 merge, so "all closed" == "all merged" — graduation can never assemble a
 half-built integration branch. Owned-only and rig-scoped — non-owned
 auto-convoys (per-sling tracking bundles) are never touched. Idempotent: a
@@ -276,9 +282,10 @@ if [ -n "$SCRIPTS_DIR" ]; then
   # (a) Un-draft codex-gated PRs whose review has concluded.
   "$SCRIPTS_DIR/reconcile-draft-prs.sh" \
     || echo "reconcile-draft-prs: pass failed (non-fatal); retries next idle wake" >&2
-  # (b) Close-on-merge: close gating anchors whose PR merged, flag abandoned
-  #     PRs to human, queue auto-merge for ready ones. Guarded by -x so an
-  #     importer rig that has not yet synced the new script degrades to (a) only.
+  # (b) Close-on-land: close gating anchors whose PR merged, flag out-of-band
+  #     closed PRs to human, queue auto-merge for signoff-validated ready ones.
+  #     Guarded by -x so an importer rig that has not yet synced the new script
+  #     degrades to (a) only.
   if [ -x "$SCRIPTS_DIR/reconcile-merged-prs.sh" ]; then
     "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
       || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
@@ -955,9 +962,10 @@ formula.
 
 Refinery does NOT land the branch directly. Instead it publishes a pull
 request and treats PR creation as the terminal handoff for THIS PATROL
-ITERATION — but NOT as completion of the work bead. Under close-on-merge the
-work bead stays OPEN as the PR's gating anchor and closes only when the PR
-merges (step 4 + reconcile-merged-prs.sh). See docs/work-bead-state-machine.md.
+ITERATION — but NOT as completion. Under close-on-land the anchor (a convoy
+graduating to {{target_branch}}, or any mr-mode bead) stays OPEN as the PR's
+gating bead and closes only when the PR merges (step 4 +
+reconcile-merged-prs.sh). See docs/work-bead-state-machine.md.
 
 **0. Refuse a 0-diff branch (false-completion guard):**
 
@@ -1179,14 +1187,16 @@ fi
 ```
 If this command fails or prints empty output: STOP. Debug and retry. Do NOT continue.
 
-**4. Record PR metadata and transition the work bead to GATING (it stays OPEN):**
+**4. Record PR metadata and transition the anchor to GATING (it stays OPEN):**
 
-gc-toolkit local delta (close-on-merge): mr-mode does NOT close the work
-bead here. Stock GasTown closes at PR-creation; this pack keeps the bead
-OPEN as the PR's gating anchor so `closed` always means *merged* and the
-dep graph keeps showing who is on which PR. The bead closes later, on a
-verified merge, via `reconcile-merged-prs.sh` in the find-work idle loop.
-See docs/work-bead-state-machine.md.
+gc-toolkit local delta (close-on-land): mr-mode does NOT close this bead
+here. Stock GasTown closes at PR-creation; this pack keeps the bead OPEN as
+the PR's gating anchor so `closed` always means *landed* and the dep graph
+keeps showing who is on which PR. In the universalized model this anchor is
+typically a CONVOY graduating its branch to {{target_branch}}, but the
+mechanism is identical for any mr-mode bead. The anchor closes later, on a
+verified merge, via `reconcile-merged-prs.sh` in the find-work idle loop. See
+docs/work-bead-state-machine.md.
 
 The refinery's active endpoint is still PR-created (the bounded patrol loop
 is preserved): it records the PR, hands the bead to gating, and moves on —
@@ -1196,10 +1206,11 @@ is the gating marker the reconcile pass scans for. `--unset-metadata
 rejection_reason` clears any stale rejection field from an earlier reworked
 attempt.
 
-gc-toolkit local delta: if `review_gate = "codex"`, dispatch a review bead
-for the codex polecat pool and attach it as a GATE DEP of the work anchor
-(the review bead BLOCKS the anchor) BEFORE the gating transition. Idempotent
-— a second refinery pass on the same PR reuses the open review bead.
+gc-toolkit local delta: if `review_gate = "codex"`, dispatch a signoff bead
+(one member of the anchor's check-set) for the codex polecat pool and attach
+it as a GATE DEP of the anchor (the signoff bead BLOCKS the anchor) BEFORE the
+gating transition. Idempotent — a second refinery pass on the same PR reuses
+the open signoff bead.
 
 ```bash
 if [ "{{review_gate}}" = "codex" ]; then
@@ -1221,7 +1232,7 @@ if [ "{{review_gate}}" = "codex" ]; then
       --set-metadata pr_number="$PR_NUMBER" \
       --set-metadata fix_target_pool="$FIX_POOL" \
       --set-metadata gc.routed_to="$CODEX_POOL"
-    # Gate-as-dep (close-on-merge): the review bead BLOCKS the open anchor.
+    # Gate-as-dep (close-on-land): the review bead BLOCKS the open anchor.
     # Replaces the retired backward work_bead pointer — the dep graph now
     # carries the gate, and the rework arm resolves the anchor by walking this
     # edge (gc bd dep list <review> --direction=up -t blocks). Best-effort: a
@@ -1233,15 +1244,15 @@ if [ "{{review_gate}}" = "codex" ]; then
   fi
 fi
 
-# Close-on-merge: keep the work bead OPEN as the PR's gating anchor. Record the
-# PR fields + merged_target, mark it gating (merge_result=pull_request), and
+# Close-on-land: keep the anchor OPEN as the PR's gating bead. Record the PR
+# fields + merged_target, mark it gating (merge_result=pull_request), and
 # DETACH it from both work queues so it is neither re-grabbed nor read as demand:
 #   - assignee="" -> find-work (assignee=$GC_AGENT, open, has branch) skips it,
 #     so the refinery does not re-open the PR in a loop;
 #   - gc.routed_to="" -> the open + unassigned anchor is NOT pool demand.
 # It closes later, on a verified merge, via reconcile-merged-prs.sh in the
 # find-work idle loop. This REPLACES the stock `gc bd close ... "Pull request
-# ready"`; closure now means merged, never handed-off.
+# ready"`; closure now means landed, never handed-off.
 gc bd update $WORK \
   --status=open \
   --assignee="" \
@@ -1315,7 +1326,7 @@ description = """
 
 Graduation is a convergent reconcile pass (`reconcile-graduated-convoys.sh`,
 pass (c) of the find-work step), not an inline post-merge step. It must live
-there: under close-on-merge a convoy CHILD closes only when
+there: under close-on-land a convoy CHILD closes only when
 `reconcile-merged-prs.sh` observes its PR merged — on an idle wake, not
 synchronously at this merge — so the wake that closes a convoy's last child is
 exactly where "all members closed" first becomes true. Pass (c) runs right

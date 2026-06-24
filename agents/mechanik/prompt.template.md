@@ -95,21 +95,33 @@ the provenance trail in their inventory matrix — every adopted pattern
 should be auditable back to the surveyed platform mechanism that
 produced it.
 
-## Sharing Input Artifacts Across N Polecat Dispatches
+## Dispatch shape: a PR is an owned convoy
 
-When you need a single input artifact (a decisions doc, a research
-synthesis, a shared spec) visible to multiple polecat dispatches before
-any of them have produced work worth merging, do **not** commit the
-artifact directly to `{{ .DefaultBranch }}`. That violates the
-branch-based-dispatch principle (decided in `tk-w7mjt`) and was the
-shape of the 2026-05-06 shortcut incident (`7453fa4`).
+The default shape for any PR-bearing dispatch is an **owned convoy** that
+anchors the PR — and its rework — through to landed. This is not a special
+case for big initiatives: a lone bead is the **one-child** convoy, a
+multi-bead initiative is the **many-child** convoy. The same machine either
+way (see [docs/work-bead-state-machine.md](../docs/work-bead-state-machine.md));
+the convoy is the bead that stays open until the work merges, so `closed`
+always means landed and the dep graph always shows who is on which PR. This
+is dispatch-level knowledge, not mechanik-specific — the shared recipe lives
+in the convoy template fragment; what follows is the same recipe in context.
 
-The supported path is an **owned convoy with an integration branch**.
-Gas City already has the primitives — `gc convoy create --owned`
-combined with `gc convoy target` (or `--target` at create time) sets
-`metadata.target = integration/<convoy-id>` on the convoy bead, and
-child work beads inherit that target via the convoy-ancestor walk in
-`gc sling`.
+Gas City has the primitives — `gc convoy create --owned` combined with
+`gc convoy target` (or `--target` at create time) sets `metadata.target` on
+the convoy bead, and child work beads inherit that target via the
+convoy-ancestor walk in `gc sling`. The convoy owns a stable branch that is
+the head of its PR; the name (`integration/<convoy-id>`) is a convention, not
+a requirement.
+
+### The many-child case: sharing an input artifact
+
+When several polecat dispatches need a single input artifact (a decisions
+doc, a research synthesis, a shared spec) before any have produced work worth
+merging, do **not** commit the artifact directly to `{{ .DefaultBranch }}`.
+That violates the branch-based-dispatch principle (decided in `tk-w7mjt`) and
+was the shape of the 2026-05-06 shortcut incident (`7453fa4`). Seed it on the
+convoy's branch instead:
 
 ### Recipe
 
@@ -135,10 +147,8 @@ gc bd dep add "$WORK" "$CONVOY" --type=parent-child
 gc sling "$RIG/polecat" "$WORK"
 
 # 5. When all children close, the refinery graduates the convoy
-#    automatically: it assigns the convoy bead to itself and opens a
-#    human-approved integration/<convoy-id> -> {{ .DefaultBranch }} PR
-#    through the same work-bead machine. No manual graduation bead and no
-#    `gc convoy land` (see docs/work-bead-state-machine.md).
+#    automatically (convoy branch -> {{ .DefaultBranch }}); no manual
+#    graduation bead, no `gc convoy land`. See docs/work-bead-state-machine.md.
 ```
 
 ### Two levers, both supported

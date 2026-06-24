@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # reconcile-graduated-convoys — system-auto convoy graduation: the convoy half
-# of close-on-merge, one level up. When an OWNED integration convoy's members
+# of close-on-land, one level up. When an OWNED integration convoy's members
 # are ALL closed, assign the convoy bead to the refinery as an ordinary mr-mode
 # work bead (branch=integration/<id>, target=<main>, merge_strategy=mr). The
 # next find-work iteration picks it up and walks it through the SAME work-bead
@@ -8,13 +8,13 @@
 # coordinator (mayor/mechanik) sits in this loop; `gc convoy land` remains a
 # manual bead-state-flip primitive but is NOT the driver.
 #
-# THE INTERLOCK (why this ships WITH close-on-merge, tk-6d0vb.1.1): a convoy
-# child closes ONLY on merge to its integration branch (close-on-merge). So
+# THE INTERLOCK (why this ships WITH close-on-land, tk-6d0vb.1.1): a convoy
+# child closes ONLY on merge to its integration branch (close-on-land). So
 # "all members closed" == "all members MERGED": the integration branch already
 # contains every child's work before this pass ever fires. Graduation can never
 # assemble a half-built branch. An abandoned child stays OPEN (escalated by
 # reconcile-merged-prs.sh, not closed), so it keeps the convoy incomplete and
-# blocks graduation until a human resolves it. Before close-on-merge a child
+# blocks graduation until a human resolves it. Before close-on-land a child
 # closed at PR-CREATION, so "all closed" could mean "nothing merged" and
 # graduation would fire on an empty branch — that is the bug the two beads
 # close together.

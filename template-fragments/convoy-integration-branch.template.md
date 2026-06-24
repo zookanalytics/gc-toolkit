@@ -1,14 +1,20 @@
 {{ define "convoy-integration-branch-mayor" }}
-## Sharing input artifacts across N polecats
+## A PR is an owned convoy (default dispatch shape)
 
-When a dispatch needs a shared input artifact (a decisions doc, a
-research synthesis, a spec) visible to multiple polecats before any
-have produced work worth merging, do **not** commit the artifact
-directly to the rig's default branch. That violates the
-branch-based-dispatch principle (decided in `tk-w7mjt`) and was the
-shape of the 2026-05-06 shortcut incident (`7453fa4`).
+The default shape for any PR-bearing dispatch is an **owned convoy** that
+anchors the PR — and its rework — to landed: a lone bead is the one-child
+convoy, a multi-bead initiative the many-child convoy (same machine; see
+[docs/work-bead-state-machine.md](../docs/work-bead-state-machine.md)). The
+convoy stays open until its work merges, so `closed` always means landed.
 
-The supported path is an **owned convoy with an integration branch**:
+The many-child case below also covers a **shared input artifact** (a
+decisions doc, a research synthesis, a spec) that several polecats need
+before any have produced work worth merging: do **not** commit it directly
+to the rig's default branch — that violates the branch-based-dispatch
+principle (`tk-w7mjt`) and was the shape of the 2026-05-06 shortcut incident
+(`7453fa4`). Seed it on the convoy's integration branch instead.
+
+The path is an **owned convoy with an integration branch**:
 
 ```bash
 # 1. Create owned convoy with integration branch as target.

@@ -22,7 +22,7 @@
 #       actually concluded. This also scopes the pass to codex-gated PRs: a
 #       human's manual draft PR has no review bead and is NEVER touched.
 #   (b) NO open/in_progress bead references the PR — no review still running,
-#       and no REQUEST_CHANGES rework in flight (that arm files a fix bead
+#       and no REQUEST_CHANGES rework in flight (that arm files a fix CHILD
 #       carrying pr_number=N; an open one means the PR must stay draft).
 #
 # Idempotent + best-effort: once readied a PR leaves the --draft set, so the
@@ -62,13 +62,14 @@ while IFS=$'\t' read -r num head; do
   fi
 
   # Guard (b): no open/in_progress bead may reference this PR — EXCEPT the
-  # gating anchor itself. Under close-on-merge the work bead stays OPEN with
-  # pr_number=N (merge_result=pull_request) from PR-creation until the merge
-  # closes it; that anchor is NOT "rework in flight", so it must not pin its own
-  # PR in draft. Exclude any bead carrying merge_result (only the anchor does).
-  # What remains and legitimately blocks un-drafting: an open review bead (a
-  # review still running) or an open fix bead (REQUEST_CHANGES rework: pr_number=N,
-  # no merge_result). --limit raised so the filter sees every referencing bead.
+  # gating anchor itself. Under close-on-land the anchor (a convoy, or any
+  # mr-mode bead) stays OPEN with pr_number=N (merge_result=pull_request) from
+  # PR-creation until the merge closes it; that anchor is NOT "rework in flight",
+  # so it must not pin its own PR in draft. Exclude any bead carrying merge_result
+  # (only the anchor does). What remains and legitimately blocks un-drafting: an
+  # open review bead (a signoff still running) or an open rework CHILD
+  # (REQUEST_CHANGES files one with pr_number=N and no merge_result). --limit
+  # raised so the filter sees every referencing bead.
   inflight=$(gc bd list \
     --metadata-field pr_number="$num" \
     --status open,in_progress --limit=20 --json 2>/dev/null \

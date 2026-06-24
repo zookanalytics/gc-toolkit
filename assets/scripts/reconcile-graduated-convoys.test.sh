@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for reconcile-graduated-convoys.sh (system-auto convoy
-# graduation, the convoy half of close-on-merge).
+# graduation, the convoy half of close-on-land).
 #
 # Stubs `gc` (convoy list + rig convoy ledger + bead show/update) on PATH. No
 # live city, Dolt, or network. Covers the graduation gate end to end:
@@ -8,7 +8,7 @@
 #       the refinery with branch=integration/<id>, target=main, merge_strategy=mr
 #       (a human-approved PR gates integration->main, NOT a direct FF)
 #   (2) THE INTERLOCK: a half-built owned convoy (a member still open) is NOT
-#       graduated — close-on-merge makes "all closed" == "all merged", so this
+#       graduated — close-on-land makes "all closed" == "all merged", so this
 #       never fires on a partial integration branch
 #   (3) owned-only scope: a non-owned auto-convoy (per-sling bundle) is untouched
 #   (4) rig scope: an owned+complete convoy in ANOTHER rig is NOT graduated

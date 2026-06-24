@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# reconcile-merged-prs — close-on-merge convergent pass. Walk the open gating
-# anchors (work beads parked OPEN on a published PR, marked
-# merge_result=pull_request by mol-refinery-patrol merge-push step 4) and
-# reconcile each to its pull request's real state:
+# reconcile-merged-prs — close-on-land convergent pass. Walk the open gating
+# anchors (the bead parked OPEN on a published PR — a convoy graduating to main,
+# or any mr-mode bead — marked merge_result=pull_request by mol-refinery-patrol
+# merge-push step 4) and reconcile each to its pull request's real state:
 #
 #   PR merged           -> close the anchor "Merged to <target> at <sha>"
 #                          (merge_result=merged, merged_sha) — mirrors direct-mode.
-#   PR closed, unmerged -> abandoned: flip merge_result=abandoned, route to
-#                          human, escalate to mayor once. Honest (the work did
-#                          not land) but no longer a silent open anchor.
-#   PR open, ready      -> best-effort `gh pr merge --auto` so the merge lands
-#                          once approvals + checks pass. Branch protection still
-#                          gates the real merge; auto-merge only drops the manual
-#                          click. The refinery never self-merges.
+#   PR closed, unmerged -> out-of-band close (the refinery did not do it; it
+#                          closes its own abandoned PRs + anchors together).
+#                          Flag: merge_result=abandoned, route to human, escalate
+#                          once. We lack context, so we never auto-close it.
+#   PR open, ready      -> queue `gh pr merge --auto` ONLY while the live head is
+#                          signoff-validated (signoff_head == headRefOid) — the
+#                          check-set's title/description-current member, so a
+#                          stale approval or a post-signoff rework commit cannot
+#                          merge prematurely. Branch protection still gates the
+#                          real merge; the refinery never self-merges.
 #   PR open, draft      -> skip (reconcile-draft-prs.sh owns un-drafting).
 #
-# This is the bead-CLOSER half of close-on-merge: a work bead stays OPEN from
+# This is the bead-CLOSER half of close-on-land: an anchor stays OPEN from
 # PR-creation until THIS pass observes an authoritative merge. `closed` thus
-# always means merged, never handed-off. See docs/work-bead-state-machine.md.
+# always means landed, never handed-off. The composable check-set that gates the
+# merge lives in docs/work-bead-state-machine.md.
 #
 # The refinery patrol runs this on each idle wake, folded into the find-work
 # step's sleep loop alongside reconcile-draft-prs.sh. Convergent + idempotent: a
@@ -49,7 +53,7 @@ ANCHORS=$(gc bd list --status=open \
 # loop) so the loop runs in THIS shell and the counters below survive — the
 # same pipe/subshell guard reconcile-draft-prs.sh relies on.
 ROWS=$(printf '%s' "$ANCHORS" \
-  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // "")}' 2>/dev/null)
+  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), signoff: (.metadata.signoff_head // "")}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "reconcile-merged-prs: no gating anchors"; exit 0; }
 
 closed=0; abandoned=0; automerge=0; escalated=0; skipped=0
@@ -58,6 +62,7 @@ while IFS= read -r row; do
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '.pr // empty')
   target=$(printf '%s' "$row" | jq -r '.target // empty')
+  signoff_head=$(printf '%s' "$row" | jq -r '.signoff // empty')
   if [ -z "$id" ] || [ -z "$num" ]; then
     skipped=$((skipped + 1)); continue
   fi
@@ -65,10 +70,10 @@ while IFS= read -r row; do
   # Query `mergedAt`, NOT `merged`: `merged` is not a `gh pr view --json` field
   # on supported gh versions — it errors `Unknown JSON field: "merged"` and,
   # with stderr suppressed, empties PR_JSON, so every anchor is skipped forever
-  # and close-on-merge never closes anything. A non-null `mergedAt` (state also
+  # and close-on-land never closes anything. A non-null `mergedAt` (state also
   # reaches MERGED) is the authoritative merge signal. The test's gh stub
   # rejects unsupported fields to guard against reintroducing this.
-  PR_JSON=$(gh pr view "$num" --json state,mergedAt,mergeCommit,isDraft,baseRefName 2>/dev/null)
+  PR_JSON=$(gh pr view "$num" --json state,mergedAt,mergeCommit,isDraft,baseRefName,headRefOid 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "reconcile-merged-prs: PR#$num view failed; skip $id (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
@@ -77,6 +82,7 @@ while IFS= read -r row; do
   merged=$(printf '%s' "$PR_JSON" | jq -r 'if (.mergedAt != null) or (.state == "MERGED") then "true" else "false" end')
   is_draft=$(printf '%s' "$PR_JSON" | jq -r '.isDraft // false')
   merge_oid=$(printf '%s' "$PR_JSON" | jq -r '.mergeCommit.oid // ""')
+  head_oid=$(printf '%s' "$PR_JSON" | jq -r '.headRefOid // ""')
   [ -n "$target" ] || target=$(printf '%s' "$PR_JSON" | jq -r '.baseRefName // "main"')
 
   # --- PR merged: close the anchor (close-FIRST for convergence). -----------
@@ -100,32 +106,52 @@ while IFS= read -r row; do
     continue
   fi
 
-  # --- PR closed, unmerged: abandoned path. --------------------------------
-  # Flip off the gating marker (so this pass never re-scans it), route to human,
-  # escalate to mayor once. Leave it OPEN — the work did not land, so closing
-  # would falsely read as done. Mirrors block_existing_pr's human hand-off.
+  # --- PR closed, unmerged: out-of-band close. -----------------------------
+  # This anchor is still OPEN with its gating marker, yet its PR is CLOSED —
+  # so the refinery did NOT close it (a refinery abandonment closes the anchor
+  # in the same step it closes the PR, and that anchor would no longer be in
+  # this open scan). Someone closed it OUT OF BAND — a human, or a process
+  # outside Gas City. We have no context for why, so we do not guess: flip off
+  # the gating marker (so this pass never re-scans it), route to a human, and
+  # escalate once. Leave it OPEN — the work did not land, so closing would
+  # falsely read as done. (When *we* abandon, we close our own PR + anchor
+  # proactively and never reach here — see docs/work-bead-state-machine.md.)
   if [ "$state" = "CLOSED" ]; then
     gc bd update "$id" \
       --assignee="" \
       --set-metadata merge_result=abandoned \
       --set-metadata gc.routed_to=human \
-      --set-metadata blocked_reason="PR#$num closed without merging" >/dev/null 2>&1
+      --set-metadata blocked_reason="PR#$num closed out-of-band without merging" >/dev/null 2>&1
     abandoned=$((abandoned + 1))
-    if gc mail send mayor/ -s "ESCALATION: abandoned PR#$num for $id" \
-         -m "Gating anchor $id is parked on PR#$num, which was CLOSED without merging.
-The bead is left OPEN, routed to human (merge_result=abandoned). Decide: reopen
-for rework (re-route to the fix pool with a rejection_reason) or close as
-wontfix/duplicate/not-planned. Close-on-merge never auto-closes an unmerged
-anchor." >/dev/null 2>&1; then
+    if gc mail send mayor/ -s "ESCALATION: out-of-band close of PR#$num for $id" \
+         -m "Gating anchor $id is parked on PR#$num, which was CLOSED without merging
+by something OUTSIDE the refinery (the refinery closes its own abandoned PRs and
+their anchors together, so this was not us). The bead is left OPEN, routed to
+human (merge_result=abandoned). Decide: reopen for rework (file a fix child with
+a rejection_reason) or close as wontfix/duplicate/not-planned. The refinery never
+auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
       escalated=$((escalated + 1))
     fi
-    echo "reconcile-merged-prs: $id abandoned — PR#$num closed unmerged; routed to human + escalated"
+    echo "reconcile-merged-prs: $id flagged — PR#$num closed out-of-band; routed to human + escalated"
     continue
   fi
 
-  # --- PR open: queue auto-merge if ready, else leave draft to the other pass.
+  # --- PR open: queue auto-merge if the check-set permits, else wait. -------
   if [ "$state" = "OPEN" ]; then
     if [ "$is_draft" = "true" ]; then
+      skipped=$((skipped + 1)); continue
+    fi
+    # Title/description-current check (a composable check-set member; see
+    # docs/work-bead-state-machine.md). Auto-merge fires the instant CI +
+    # approval clear, which can be STALE — an approval from an earlier diff
+    # whose title/body no longer describe what will land, or a rework commit
+    # pushed after the signoff. The signoff stamps signoff_head = the head it
+    # validated; we enable auto-merge ONLY while that still equals the live
+    # head. A mismatch (a later commit, or no signoff yet) means the current
+    # head is unvalidated: leave the PR open and unqueued so a fresh signoff
+    # round runs first. This is what makes auto-merge safe to use broadly.
+    if [ -z "$signoff_head" ] || [ "$signoff_head" != "$head_oid" ]; then
+      echo "reconcile-merged-prs: PR#$num head not signoff-validated (have '${signoff_head:-none}', live '$head_oid'); auto-merge held (anchor $id)"
       skipped=$((skipped + 1)); continue
     fi
     # Best-effort + idempotent: queue auto-merge so GitHub lands the PR once
@@ -133,7 +159,7 @@ anchor." >/dev/null 2>&1; then
     # --squash matches the repo's squash-merge convention (commit "(#N)" tail).
     if gh pr merge "$num" --auto --squash >/dev/null 2>&1; then
       automerge=$((automerge + 1))
-      echo "reconcile-merged-prs: PR#$num auto-merge queued (anchor $id)"
+      echo "reconcile-merged-prs: PR#$num auto-merge queued (anchor $id, head signoff-validated)"
     else
       skipped=$((skipped + 1))
     fi
