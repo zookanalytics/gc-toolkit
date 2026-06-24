@@ -1,6 +1,6 @@
 ---
 name: Work-bead state machine
-description: The lifecycle a unit of work moves through as one bead, and which evidence — pull request, signoff, CI, approval — drives each transition between dispatch and closure. Read it to know what a bead's status is allowed to mean.
+description: The lifecycle a unit of work moves through as one bead — whether it produces code, a committed artifact, or a recorded decision — and the evidence (merge, commit, signoff, CI, approval) that drives each transition between dispatch and closure. Read it to know what a bead's status is allowed to mean.
 ---
 
 # Work-bead state machine: a bead closes when its work lands
@@ -9,9 +9,11 @@ description: The lifecycle a unit of work moves through as one bead, and which e
 
 **Mandate.** The lifecycle of a single unit of work as it moves through
 gc-toolkit: the states a work bead occupies from dispatch to closure, the
-transitions between them, and the evidence — pull request, signoff, CI,
-approval — that drives each transition. It owns one invariant above all:
-**what `closed` is allowed to mean.**
+transitions between them, and the evidence — pull request, commit, signoff,
+CI, approval — that drives each transition. It owns one invariant above all:
+**what `closed` is allowed to mean** — and it owns that meaning for *every*
+kind of unit, whether the unit produces code, a keepable artifact, or a
+recorded decision.
 
 **Boundaries.** This doc covers the *states a bead moves through*, not the
 *routing* that delivers it to an agent — the field-level contract (sling vs
@@ -20,46 +22,130 @@ direct assignee vs `gc.routed_to`) lives in
 refinery's role *in* the machine, not the refinery's full patrol loop, which
 lives in the `mol-refinery-patrol` formula. It is not a command tutorial.
 
-## The invariant: `closed` means landed
+## The invariant: `closed` means the output has landed
 
 Everything is a bead. A unit of work is a single bead that holds its own
-state; the PR, branch, signoff, and CI are **evidence** that drive its
-transitions — not separate truth. A bead is `closed` only when its work has
-**landed on its `target`**: "done" means landed, never "the work is now
-someone else's problem."
+state; the PR, branch, signoff, CI, and commit are **evidence** that drive its
+transitions — not separate truth. A bead is `closed` only when its **output
+has landed** — wherever that output lands. "Done" means landed; it never means
+"the work is now someone else's problem."
 
-This is **locality of truth**: the bead you query tells the truth about its
-own doneness without a tree-walk. A still-open bead is still-unlanded work; a
+This is **locality of truth**: the bead you query tells the truth about its own
+doneness without a tree-walk. A still-open bead is still-unlanded work; a
 closed bead is landed work. Nothing in between reads as done.
 
-What "landed" means depends on what the bead produces:
-
-- **code** — landed = **merged to `target`**. The merge commit is the
-  evidence (`merged_sha`).
-- **a published artifact** (research synthesis, a decisions doc, an
-  investigation finding) — landed = the artifact is **written to its durable
-  home and made available** (posted to the bead, committed to a doc tree,
-  recorded where its consumers look). There is no merge and no `merged_sha`;
-  the worker closes the bead itself when the artifact is in place.
-
-Both are "landed," and neither is a **handoff**. Closing a research bead the
-moment its synthesis is published is *completion*, not handing the work to
-someone else to finish — the distinction the word "handoff" must not blur. A
-bead may *unblock* downstream beads when it lands (that is what dependencies
-are for), but it closes because **its own** deliverable is done, not because
-responsibility moved. The anti-pattern `closed` exists to forbid is closing a
-bead while its deliverable is still unlanded — a code bead closed at
+Closing is **completion, not handoff** — a distinction the word "handoff" must
+not blur. Closing a research bead the moment its synthesis is recorded is
+*completion*, not handing the work to someone else to finish. A bead may
+*unblock* downstream beads when it lands (that is what dependencies are for),
+but it closes because **its own** output is done, not because responsibility
+moved. The anti-pattern `closed` exists to forbid is closing a bead while its
+output is still unlanded — the classic case being a code bead closed at
 PR-creation, before the PR merges.
 
-`target` is not always `main`:
+## What "landed" means: landing-target and check-set are per-unit
 
-- **a bead landing to `main`** — `target == main`; landed when merged to main.
-- **a bead under a convoy** — `target ==` the convoy's branch; landed when
-  merged there. `main` moves later, when the convoy itself lands (below).
-- **a published-artifact bead** — no merge target; landed when posted. This
-  path is out of the PR machine below and is unchanged by close-on-land.
+> **Proposed in this revision — flagged for review.** This section and *"Work
+> is a graph, not a line"* below are the **proposed generalization** of the
+> model beyond code-to-main. They answer the open question *"not everything is
+> code, not everything is linear — where do artifacts go?"* The code path
+> (merge-to-`main` through a check-set) in the rest of this doc is unchanged
+> and already in use; the artifact / decision landing modes and the graph
+> framing are new here so the generalization can be accepted or revised on its
+> own. Nothing below changes how a code bead lands.
 
-## The machine (one bead)
+Not every unit produces code, and not every output belongs in `main`. The
+generalization is that **two properties are declared per unit** and the rest of
+the machine is identical:
+
+- a **landing-target** — *where* this unit's output comes to rest, and
+- a **check-set** — *what must hold* before it may come to rest there
+  (next section).
+
+There is **no code/non-code fork** in the machine. There is one machine,
+parameterized per unit. Code is its richest instantiation; a keepable artifact
+is a lighter one; an ephemeral finding is the lightest. The three landing modes
+are just three settings of those two per-unit properties:
+
+| Unit produces… | landing-target | check-set | `closed` means | `merged_sha`? |
+|---|---|---|---|---|
+| **code** | `main` (or a convoy branch) via PR | signoff · CI · approval · title/description current · merged | the commits merged to the target | yes |
+| **a keepable artifact** (a spec, a design doc, the "5 UX options") | the repo — `specs/<bead-id>/` or `docs/` — via a *lighter* PR | review-or-none; **no CI** | the file is committed on its target | yes (the commit) |
+| **an ephemeral finding or decision** (a research result consumed at once, a recorded choice) | the **bead itself** — its notes | the finding/decision is **recorded** | the note is written | no |
+
+The dividing question is simply: **does the output get committed?**
+
+- **Keepable → commit it.** If the output is worth keeping — a spec, a design,
+  a set of options, an investigation report others will re-read — it lands in
+  the repo under `specs/<bead-id>/` (or `docs/` for durable reference
+  material), exactly like code, but through a *lighter* check-set: a review if
+  the unit wants one, no CI, no build gate. It is still a real landing; the
+  commit is the `merged_sha`.
+- **Ephemeral → record it.** If the output is consumed immediately — a decision
+  that only needs to be *known*, a finding that exists only to unblock the next
+  unit — it lands in the **bead's own notes**. There is no merge, no
+  `merged_sha`; the worker closes the bead when the note is in place. This is
+  the one mode that is wholly outside the PR machine below.
+
+So `merged_sha` is the code-and-committed-artifact signal, not a universal one:
+an ephemeral unit lands without a commit and closes anyway. That is by design —
+the invariant is *landed*, and "landed" is whatever the unit's landing-target
+makes it.
+
+This is the **same shape as `owned = f(target)`** in the routing model: a
+unit's behavior falls out of *what it is and where it lands*, declared once,
+not out of a special case bolted onto the machine. The check-set is a per-unit
+property in exactly the way the landing-target is.
+
+**Live example — the failure this prevents.** This very initiative produced a
+keepable spec, `specs/tk-6d0vb.1/composable-check-options.md`. It was authored
+at the right path — but it sits on an unmerged polecat branch and is **not on
+`main`**. Under this model that spec **has not landed**: its bead must not read
+`closed`, and the way it lands is by *committing it to its target* (a lighter
+PR to `main`), not by loitering on a branch where its consumers cannot find it.
+An orphaned artifact on a dead branch is precisely the "unlanded but treated as
+done" state the invariant forbids.
+
+## Work is a graph, not a line
+
+A unit rarely stands alone, and the work that surrounds it is **not a
+sequence**. Units chain through the **dependency graph**, and the convoy that
+holds them (next sections) is a **graph of units**, not a line. The graph is
+where exploration, fan-out, and fan-in live — and each node is a unit with its
+own landing-target and check-set, so a single piece of work can mix all three
+landing modes.
+
+A worked, non-linear example — *propose options → choose → implement*:
+
+```
+  explore option A --\
+  explore option B ---\
+  explore option C ----+--> choose ----> implement ----> (lands to main)
+  explore option D ---/    (decision)    (code)
+  explore option E --/     (fan-in)
+  (fan-out: 5 units)
+```
+
+- the **explore** units each produce a *keepable artifact* — they land in
+  `specs/<bead-id>/` (a lighter PR, no CI) and close when committed;
+- **choose** produces an *ephemeral decision* — it depends on the explore
+  units, lands in its own notes (the choice, and why), and closes when
+  recorded;
+- **implement** produces *code* — it depends on the decision and lands to
+  `main` through the full check-set.
+
+Five explorations are five units that fan out; the decision fans them back in;
+implementation consumes the decision. The dependency edges, not a linear
+status, carry the shape of the work. "Closed" still means the same thing at
+every node — *that node's* output has landed — but *where* it lands differs by
+node, which is exactly what the per-unit landing-target buys.
+
+## The machine (one unit)
+
+The states below are drawn for the **code** path — the richest instantiation.
+A keepable-artifact unit runs the *same* states through a lighter check-set; an
+ephemeral unit skips the PR machine entirely and closes straight from
+`in_progress` when its note is recorded.
 
 ```
 dispatch
@@ -90,7 +176,7 @@ dispatch
 | building | in_progress | worker | — | `work_dir`, `branch` |
 | handed off | open | refinery | — | `branch`, `target` |
 | **gating** | **open** | **—** | **—** | `pr_url`, `pr_number`, `merge_result=pull_request` |
-| closed (landed) | closed | — | — | `merged_sha` (code) / close reason (artifact) |
+| closed (landed) | closed | — | — | `merged_sha` (code / committed artifact) / close reason (ephemeral) |
 | abandoned | closed / open | — | — / `human` | PR closed unmerged: refinery-closed, or escalated if out-of-band |
 
 The **gating** state is the one close-on-land adds. The anchor stays open —
@@ -109,13 +195,15 @@ reconciler. The thing that watches it is the refinery's reconcile pass.
 ### Movers
 
 - The **worker** (a polecat) builds (`open -> in_progress -> hands off`) and
-  reworks. It never closes a code bead.
-- The **refinery** is the only mover that reaches `closed` for code. It opens
-  the PR, transitions the anchor to gating, and — on a later idle pass —
-  detects that the check-set has cleared and the PR has merged, and closes.
-  The refinery's *active* endpoint is still PR-created: it hands the anchor to
-  gating and moves on; it does **not** babysit a PR to merge. Closure is
-  reconciled, not awaited. Keeping closure in this one mover is deliberate:
+  reworks. It never closes a code bead. (It *does* close its own ephemeral unit
+  — there is nothing to merge — and hands a keepable artifact to the refinery
+  like any other PR.)
+- The **refinery** is the only mover that reaches `closed` for anything that
+  merges. It opens the PR, transitions the anchor to gating, and — on a later
+  idle pass — detects that the check-set has cleared and the PR has merged, and
+  closes. The refinery's *active* endpoint is still PR-created: it hands the
+  anchor to gating and moves on; it does **not** babysit a PR to merge. Closure
+  is reconciled, not awaited. Keeping closure in this one mover is deliberate:
   one authority over "did it land" means there is no second place for that
   state to drift out of sync.
 - **The check-set** is a set of conditions (next section). They are pluggable;
@@ -143,6 +231,9 @@ privileged. The set is **composable**: the signoff gate is one *pluggable*
 member, not a hardcoded step. A rig may add or drop members (a second
 reviewer, a license check, a changelog check) without changing the machine —
 the machine only asks "are all members of this anchor's check-set satisfied?"
+A lighter landing (a keepable artifact) is the *same* mechanism with a smaller
+set — drop CI, keep "merged"; an ephemeral unit's set is a single member,
+"recorded."
 
 Two consequences worth stating, because they are easy to get wrong:
 
@@ -191,14 +282,14 @@ pointed at an *already-closed* work bead as its primary reference, which was
 counterproductive precisely because the thing it pointed at was already done.
 The edge now points the right way: the gate blocks something still open.
 
-## Everything is a convoy: one machine, applied at two levels
+## Everything is a convoy: one machine, applied at every level
 
 The anchor that carries a PR through its check-set is a **convoy** — a bead
 whose members are work beads (joined by parent-child tracks). This is not a
 second machine bolted on for aggregates; it is the **same machine** run at a
 different level, and the levels chain through `target`:
 
-| | lands when... | target | `closed` means |
+| | lands when… | target | `closed` means |
 |---|---|---|---|
 | child work bead | its commits merge to the convoy branch | the convoy branch | merged to the convoy branch |
 | convoy | all children closed **and** its check-set clears | `main` | merged to `main` |
@@ -219,17 +310,21 @@ through every rework round* — to landed. There is no separate model for "a
 single bead" versus "a set of beads": one bead is the degenerate convoy, the
 same machine with a member count of one.
 
-> **A note on what "owned" selects.** An *owned* convoy is one whose lifecycle
-> is driven deliberately — it holds open until its check-set clears and lands
-> through the machine. Gas City also has *un-owned auto-convoys*: lightweight
-> per-sling tracking bundles that auto-close when their members close. Those
-> are a **tracking** device, not an **anchor** — they carry no branch, no
-> check-set, and never gate a landing. The two are not a fork in the work
-> machine: the anchor is *always* an owned convoy, created on purpose at
-> dispatch; the auto-convoy is a separate bookkeeping concept that happens to
-> share the word. Branch and merge-strategy stay orthogonal to ownership —
-> "owned" changes only the **close-condition** (check-set vs. auto-close), not
-> how a child contributes commits.
+> **Owned vs. un-owned is a per-unit property, not a fork.** Gas City also has
+> *un-owned auto-convoys*: lightweight per-sling tracking bundles that
+> auto-close when their members close. It is tempting to read "owned convoy
+> that gates on a check-set" vs. "un-owned convoy that just auto-closes" as two
+> different machines — it is not. The only thing "owned" changes is the
+> convoy's **close-condition**: an owned convoy's close-condition is *its
+> check-set clears*; an un-owned convoy's close-condition is the trivial *all
+> members closed*. That is the **same kind of per-unit property** as the
+> landing-target and the check-set above — `owned = f(intent)`, just as
+> `target` and check-set are declared per unit. An un-owned auto-convoy is
+> simply a convoy whose check-set is empty; it carries no branch and never
+> gates a landing because there is nothing in its set to wait on. One machine,
+> two settings — not a second mechanism that happens to share the word
+> "convoy." Branch and merge-strategy stay orthogonal to ownership: "owned"
+> changes only the close-condition, not how a child contributes commits.
 
 A child contributes to the convoy branch **however it needs** — one commit, a
 dozen, a rebase that owns none of them, or none at all (a child can exist to
@@ -267,21 +362,23 @@ refinery did not initiate. There, the anchor is flagged and routed to a human
 (`gc.routed_to=human`) because only they know why it happened. The rule is:
 *we close what we abandoned; we escalate only what someone else closed.*
 
-## Draft PRs are transitional
+## Draft PRs are scaffolding, slated for removal
 
-Today the signoff gate runs against a **draft** PR: the refinery opens the PR
-as draft, the signoff concludes, and a reconcile pass un-drafts it. This
-exists because, historically, "is this PR actually ready?" had no better
-signal than draft state.
+The model's intended end state is **no draft PRs**. A signoff is a check in the
+set like any other, and the cleaner shape is for the validating work to happen
+*before* the PR is opened (or as an ordinary check on a normal PR), so that
+**every PR that exists is a real candidate** and carries, in its own record,
+the evidence of what validated it. That is where this is going.
 
-This is **not** where the model wants to end up. The intent is to **drop draft
-PRs**: a signoff is a check in the set like any other, and the cleaner shape
-is for the validating work to happen *before* the PR is opened (or as an
-ordinary check on a normal PR), so that every PR that exists is a real
-candidate and carries, in its own record, the evidence of what validated it.
-Draft-gating is retained for now as a transitional mechanism; the check-set
-model above is written so that removing it later changes one member's
-implementation, not the machine.
+Today the signoff gate still runs against a **draft** PR: the refinery opens
+the PR as draft, the signoff concludes, and a reconcile pass un-drafts it. This
+is **scaffolding**, retained only because, historically, "is this PR actually
+ready?" had no better signal than draft state — and it is explicitly *not* the
+target model. The check-set model above is written so that dropping draft later
+changes **one member's implementation** (where the signoff runs), not the
+machine: the signoff stays a check, it just stops needing a draft to hold the
+PR back. Removing the draft mechanism is left to a later, separate change; the
+core model here already assumes its absence.
 
 ## Deliberate divergence from stock GasTown
 
@@ -293,5 +390,7 @@ formula and its reconcile scripts; gascity core is untouched and gains no new
 status (`gating` is a metadata marker on an ordinary `open` bead, not a core
 state). The convoy-close authority is the refinery's reconcile pass, not a
 core `on_close` hook — chosen so the machine stays bead-native and the core
-hook is removable later. Direct-mode and published-artifact beads are
-unchanged.
+hook is removable later. The generalization of `closed`-means-landed across
+code, committed artifacts, and ephemeral decisions (above) is likewise a
+gc-toolkit framing layered on bead-native primitives, not a core change.
+Direct-mode beads are unchanged.
