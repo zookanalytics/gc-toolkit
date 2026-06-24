@@ -45,14 +45,16 @@ PR-creation, before the PR merges.
 
 ## What "landed" means: landing-target and check-set are per-unit
 
-> **Proposed in this revision — flagged for review.** This section and *"Work
-> is a graph, not a line"* below are the **proposed generalization** of the
-> model beyond code-to-main. They answer the open question *"not everything is
-> code, not everything is linear — where do artifacts go?"* The code path
-> (merge-to-`main` through a check-set) in the rest of this doc is unchanged
-> and already in use; the artifact / decision landing modes and the graph
-> framing are new here so the generalization can be accepted or revised on its
-> own. Nothing below changes how a code bead lands.
+> **Adopted, with one piece tabled.** This section and *"Work is a graph, not a
+> line"* below generalize the model beyond code-to-`main`: a unit's
+> landing-target and check-set are declared per unit, and work is a graph of
+> such units rather than a line. That generalization is **adopted**. **One**
+> sub-option is explicitly **tabled for now** — a *lighter-weight* landing for
+> keepable artifacts (a reduced check-set: a review or none, no CI). Today
+> every **committed** output, code or artifact, pays the **full PR gate** (the
+> main-approval gate is the control we want); the lighter artifact path is a
+> future option we may add later, not current. Nothing here changes how a code
+> bead lands.
 
 Not every unit produces code, and not every output belongs in `main`. The
 generalization is that **two properties are declared per unit** and the rest of
@@ -63,24 +65,29 @@ the machine is identical:
   (next section).
 
 There is **no code/non-code fork** in the machine. There is one machine,
-parameterized per unit. Code is its richest instantiation; a keepable artifact
-is a lighter one; an ephemeral finding is the lightest. The three landing modes
-are just three settings of those two per-unit properties:
+parameterized per unit. A **committed output** — whether code or a keepable
+artifact — lands in the repo through a **normal PR** and pays the same full
+check-set; an **ephemeral** finding or decision lands in its own bead and is
+simply recorded. (Code is the richest instantiation because it has CI to run;
+an artifact PR is the *same* gate, with checks that simply have nothing to do
+where there is no code.) The two live landing modes are two settings of those
+per-unit properties:
 
 | Unit produces… | landing-target | check-set | `closed` means | `merged_sha`? |
 |---|---|---|---|---|
-| **code** | `main` (or a convoy branch) via PR | signoff · CI · approval · title/description current · merged | the commits merged to the target | yes |
-| **a keepable artifact** (a spec, a design doc, the "5 UX options") | the repo — `specs/<bead-id>/` or `docs/` — via a *lighter* PR | review-or-none; **no CI** | the file is committed on its target | yes (the commit) |
+| **a committed output** — code, *or* a keepable artifact (a spec, a design doc, the "5 UX options") | the repo via a **normal PR**: `main` or a convoy branch for code; `specs/<bead-id>/` or `docs/` for an artifact | signoff · CI (where it applies) · approval · title/description current · merged | the commits merged to the target | yes |
 | **an ephemeral finding or decision** (a research result consumed at once, a recorded choice) | the **bead itself** — its notes | the finding/decision is **recorded** | the note is written | no |
 
 The dividing question is simply: **does the output get committed?**
 
-- **Keepable → commit it.** If the output is worth keeping — a spec, a design,
-  a set of options, an investigation report others will re-read — it lands in
-  the repo under `specs/<bead-id>/` (or `docs/` for durable reference
-  material), exactly like code, but through a *lighter* check-set: a review if
-  the unit wants one, no CI, no build gate. It is still a real landing; the
-  commit is the `merged_sha`.
+- **Keepable → commit it through a normal PR.** If the output is worth keeping
+  — a spec, a design, a set of options, an investigation report others will
+  re-read — it lands in the repo under `specs/<bead-id>/` (or `docs/` for
+  durable reference material), through the **same PR machine and full
+  check-set as code**: it pays the main-approval gate (and CI wherever it
+  applies). It is a real landing; the commit is the `merged_sha`. The only
+  thing that differs from code is *where* it comes to rest, not *how* it gets
+  there.
 - **Ephemeral → record it.** If the output is consumed immediately — a decision
   that only needs to be *known*, a finding that exists only to unblock the next
   unit — it lands in the **bead's own notes**. There is no merge, no
@@ -101,7 +108,7 @@ property in exactly the way the landing-target is.
 keepable spec, `specs/tk-6d0vb.1/composable-check-options.md`. It was authored
 at the right path — but it sits on an unmerged polecat branch and is **not on
 `main`**. Under this model that spec **has not landed**: its bead must not read
-`closed`, and the way it lands is by *committing it to its target* (a lighter
+`closed`, and the way it lands is by *committing it to its target* (a normal
 PR to `main`), not by loitering on a branch where its consumers cannot find it.
 An orphaned artifact on a dead branch is precisely the "unlanded but treated as
 done" state the invariant forbids.
@@ -112,7 +119,7 @@ A unit rarely stands alone, and the work that surrounds it is **not a
 sequence**. Units chain through the **dependency graph**, and the convoy that
 holds them (next sections) is a **graph of units**, not a line. The graph is
 where exploration, fan-out, and fan-in live — and each node is a unit with its
-own landing-target and check-set, so a single piece of work can mix all three
+own landing-target and check-set, so a single piece of work can mix both
 landing modes.
 
 A worked, non-linear example — *propose options → choose → implement*:
@@ -127,7 +134,7 @@ A worked, non-linear example — *propose options → choose → implement*:
 ```
 
 - the **explore** units each produce a *keepable artifact* — they land in
-  `specs/<bead-id>/` (a lighter PR, no CI) and close when committed;
+  `specs/<bead-id>/` through a normal PR and close when committed;
 - **choose** produces an *ephemeral decision* — it depends on the explore
   units, lands in its own notes (the choice, and why), and closes when
   recorded;
@@ -143,7 +150,8 @@ node, which is exactly what the per-unit landing-target buys.
 ## The machine (one unit)
 
 The states below are drawn for the **code** path — the richest instantiation.
-A keepable-artifact unit runs the *same* states through a lighter check-set; an
+A keepable-artifact unit runs the *same* states through the *same* check-set
+(an ordinary PR; CI simply has nothing to run where there is no code); an
 ephemeral unit skips the PR machine entirely and closes straight from
 `in_progress` when its note is recorded.
 
@@ -231,9 +239,9 @@ privileged. The set is **composable**: the signoff gate is one *pluggable*
 member, not a hardcoded step. A rig may add or drop members (a second
 reviewer, a license check, a changelog check) without changing the machine —
 the machine only asks "are all members of this anchor's check-set satisfied?"
-A lighter landing (a keepable artifact) is the *same* mechanism with a smaller
-set — drop CI, keep "merged"; an ephemeral unit's set is a single member,
-"recorded."
+A keepable-artifact PR uses this **same** set — approval and a current
+title/description still gate it; CI simply has nothing to run where there is no
+code. An ephemeral unit's set is a single member, "recorded."
 
 Two consequences worth stating, because they are easy to get wrong:
 
