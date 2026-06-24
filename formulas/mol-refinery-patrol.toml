@@ -120,51 +120,22 @@ Close this step only when `$GC_AGENT` is confirmed non-empty."""
 
 [[steps]]
 id = "check-inbox"
-title = "Context check, then mail"
+title = "Check mail"
 needs = ["validate-identity"]
 description = """
-**1. Context check (FIRST — before any work):**
+**Context recycling is automatic — do NOT run a context check here.** The
+`Stop` hook shipped in `overlays/cycle-recycle/` and staged into this agent's
+work dir (`.claude/settings.json` + `.claude/hooks/cycle-recycle.sh`) enforces
+the 200K input_tokens recycle deterministically every turn, regardless of LLM
+state, and on cross writes the HANDOFF mail and resets the session. The
+refinery previously had only a subjective "if context feels heavy" check and
+referenced cycle-recycle nowhere — the worst case this fixes (tk-g8pfg), since
+a heavy-context session is exactly when the model stops noticing it should
+recycle. The new session resumes via its startup-adopt path. See
+`template-fragments/cycle-recycle.template.md` for the policy the hook
+implements. Nothing context-related belongs in this step anymore.
 
-If context feels heavy (multi-hour session, large recent diffs, or you notice
-yourself taking shortcuts or summarizing prematurely), pour and assign the next
-wisp, burn the current wisp, then request a restart:
-```bash
-CURRENT_WISP=${GC_BEAD_ID:-}
-if [ -z "$CURRENT_WISP" ]; then
-  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
-fi
-NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --json | jq -r '.new_epic_id // empty')
-if [ -z "$NEXT" ]; then
-  echo "Could not pour next refinery wisp; not requesting restart."
-  gc runtime drain-ack
-  exit 1
-fi
-if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
-  echo "Could not assign next refinery wisp; not requesting restart."
-  gc runtime drain-ack
-  exit 1
-fi
-if [ -n "$CURRENT_WISP" ]; then
-  gc bd mol burn "$CURRENT_WISP" --force
-else
-  echo "Could not resolve current wisp; not requesting restart."
-  gc runtime drain-ack
-  exit 1
-fi
-gc runtime request-restart
-RESTART_STATUS=$?
-echo "Restart request returned with status $RESTART_STATUS; stop this session now."
-exit "$RESTART_STATUS"
-```
-This sets `GC_RESTART_REQUESTED` metadata on the session and blocks until the
-controller stops this session; on controller fault it can return nonzero after
-a bounded timeout. If the command returns for any reason, stop immediately. Do
-not check mail, close this step, or process merge work from this old session
-after burning the current wisp. On the normal path, the controller kills and
-restarts the session on the next reconcile tick. The new session wakes on the
-wisp you just assigned and re-reads formula steps with fresh context.
-
-**2. Check mail:**
+**Check mail:**
 ```bash
 gc mail inbox
 ```

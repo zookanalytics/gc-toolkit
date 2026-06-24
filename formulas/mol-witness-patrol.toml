@@ -71,20 +71,21 @@ default = "60"
 
 [[steps]]
 id = "check-inbox"
-title = "Cycle-recycle check, then mail"
+title = "Check mail"
 description = """
-**1. Cycle-recycle check (FIRST — before any work):**
+**Cycle-recycle is automatic — do NOT run a context check here.** Recycling at
+the 200K input_tokens threshold is enforced deterministically by the `Stop`
+hook shipped in `overlays/cycle-recycle/` and staged into this agent's work dir
+(`.claude/settings.json` + `.claude/hooks/cycle-recycle.sh`). The harness runs
+that hook every turn regardless of LLM state — which is the whole point: the
+soft "apply the cycle-recycle template" prose that used to live in this step
+degraded exactly as context filled, so the recycle never fired (tk-g8pfg). The
+hook self-gates to patrol roles, writes the HANDOFF mail, and resets the
+session; the policy it implements lives in
+`template-fragments/cycle-recycle.template.md`. Nothing context-related belongs
+in this step anymore.
 
-Apply cycle-recycle per the `cycle-recycle` template in your prompt
-(thresholds, action sequence, rationale, and caveats live there).
-
-gc-toolkit local delta: cycle-recycle replaces base's inline RSS +
-`gc runtime request-restart` heuristic, because the gc-toolkit cycle-
-recycle template already encodes thresholds (input_tokens >= 200K) and
-the request-restart action — the inline RSS check would just be a
-weaker duplicate.
-
-**2. Check mail:**
+**Check mail:**
 ```bash
 gc mail inbox
 ```
@@ -501,33 +502,24 @@ description = """
 
 End of patrol cycle. Pour the next iteration, then wait or exit.
 
-**1. Cycle-recycle check:**
+Cycle-recycle is automatic — the `Stop` hook (see `check-inbox`) handles
+context recycling deterministically, so this step no longer runs a context
+check. Always pour the next iteration:
 
-Re-apply cycle-recycle per the `cycle-recycle` template in your prompt
-(thresholds, action sequence, rationale, and caveats live there). The
-witness recycles at both start AND end of cycle, so the same trigger
-counters apply.
-
-gc-toolkit local delta: cycle-recycle replaces base's inline RSS +
-`gc runtime request-restart` heuristic, matching the start-of-cycle
-override above.
-
-If recycle did NOT fire, pour the next iteration the normal way:
-
-**2. Pour next iteration BEFORE burning:**
+**1. Pour next iteration BEFORE burning:**
 ```bash
 NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --json | jq -r '.new_epic_id')
 gc bd update "$NEXT" --assignee=$GC_AGENT
 ```
 
-**3. Wait before next cycle:**
+**2. Wait before next cycle:**
 ```bash
 sleep {{event_timeout}}
 ```
 
 Previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. Fixed sleep gives predictable idle cost.
 
-**4. Burn this wisp:**
+**3. Burn this wisp:**
 ```bash
 gc bd mol burn <this-wisp-id> --force
 ```
