@@ -1183,10 +1183,13 @@ rejection_reason` clears any stale rejection field from an earlier reworked
 attempt.
 
 gc-toolkit local delta: if `review_gate = "codex"`, dispatch a signoff bead
-(one member of the anchor's check-set) for the codex polecat pool and attach
-it as a GATE DEP of the anchor (the signoff bead BLOCKS the anchor) BEFORE the
-gating transition. Idempotent — a second refinery pass on the same PR reuses
-the open signoff bead.
+(one member of the anchor's check-set) for the codex polecat pool and record the
+review->anchor link (anchor_bead metadata + a best-effort BLOCKS edge) BEFORE the
+gating transition. The transition is then FAIL-CLOSED on that link: the anchor is
+detached into gating only once anchor_bead is verified recorded on the review
+bead; otherwise it stays assigned for the next patrol to retry, never detached
+into a gating state the signoff cannot rediscover. Idempotent — a second refinery
+pass on the same PR reuses the open signoff bead and re-verifies (heals) the link.
 
 ```bash
 if [ "{{review_gate}}" = "codex" ]; then
@@ -1229,7 +1232,33 @@ if [ "{{review_gate}}" = "codex" ]; then
     gc session wake "$CODEX_POOL" || true
     gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for PR#$PR_NUMBER" || true
   fi
+  # The review bead the fail-closed gate below verifies: the one just created, or
+  # the reused open one (which the dispatch above does NOT re-stamp).
+  REVIEW_FOR_GATE="${REVIEW_BEAD:-$EXISTING_REVIEW}"
 fi
+
+# Fail-closed (finding fix #2): do NOT detach the anchor into gating unless the
+# durable review->anchor link (anchor_bead) is RECORDED. The dispatch stamps it
+# atomically for a NEW review, but a reused review (EXISTING_REVIEW) was never
+# stamped, and any stamp can fail transiently — so heal it here and VERIFY it
+# persisted. If it cannot be recorded, leave $WORK assigned to the refinery and
+# OPEN; the next patrol retries (idempotent: the EXISTING_REVIEW guard + this
+# heal converge). Detaching with no recoverable anchor would strand the PR: the
+# signoff could not stamp signoff_head and reconcile-merged-prs.sh would hold
+# auto-merge forever. The markers let the regression test extract this exact
+# snippet (assets/scripts/signoff-anchor-failclosed.test.sh).
+# >>> signoff-anchor-failclosed
+if [ -n "${REVIEW_FOR_GATE:-}" ]; then
+  gc bd update "$REVIEW_FOR_GATE" --set-metadata anchor_bead="$WORK" >/dev/null 2>&1 || true
+  RECORDED_ANCHOR=$(gc bd show "$REVIEW_FOR_GATE" --json 2>/dev/null \
+    | jq -r '.[0].metadata.anchor_bead // empty')
+  if [ "$RECORDED_ANCHOR" != "$WORK" ]; then
+    echo "Anchor linkage (anchor_bead) not durably recorded on review $REVIEW_FOR_GATE; leaving $WORK assigned to refinery for retry." >&2
+    gc runtime drain-ack
+    exit 1
+  fi
+fi
+# <<< signoff-anchor-failclosed
 
 # Close-on-land: keep the anchor OPEN as the PR's gating bead. Record the PR
 # fields + merged_target, mark it gating (merge_result=pull_request), and
