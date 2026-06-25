@@ -44,7 +44,7 @@ schema = 2
 # .gc/system/packs/gastown tree was retired upstream — builtin packs are
 # no longer materialized into the city; see cmd/gc/embed_builtin_packs.go.
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gastown"
-version = "sha:4212acb7046c11f6f633df73307006493185233a"
+version = "sha:33d3a430a67d1782ad364556cb566bdb01d0afe3"
 
 [global]
 # Ordering is load-bearing. Gastown's tmux-theme.sh runs first (from
