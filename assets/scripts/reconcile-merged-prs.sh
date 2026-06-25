@@ -19,7 +19,8 @@
 #                          therefore cannot merge prematurely. Branch protection
 #                          still gates the real merge; the refinery never
 #                          self-merges.
-#   PR open, draft      -> skip (reconcile-draft-prs.sh owns un-drafting).
+#   PR open, draft      -> skip (drafts are retired, so the refinery creates no
+#                          draft PR; a stray draft is left untouched).
 #
 #   ANY state, retargeted (live base != anchor merged_target) -> never close as
 #                          landed and never auto-merge (the work would land on
@@ -31,11 +32,11 @@
 # merge lives in docs/work-bead-state-machine.md.
 #
 # The refinery patrol runs this on each idle wake, folded into the find-work
-# step's sleep loop alongside reconcile-draft-prs.sh. Convergent + idempotent: a
-# closed anchor leaves the gating set (status), an abandoned anchor flips off
-# merge_result=pull_request, so neither is re-scanned; a transient failure is
-# simply retried next idle pass. Cheap — one `gh pr view` per gating anchor, and
-# gating anchors are few (bounded by in-flight PRs).
+# step's sleep loop. Convergent + idempotent: a closed anchor leaves the gating
+# set (status), an abandoned anchor flips off merge_result=pull_request, so
+# neither is re-scanned; a transient failure is simply retried next idle pass.
+# Cheap — one `gh pr view` per gating anchor, and gating anchors are few
+# (bounded by in-flight PRs).
 #
 # Enumerated by BEAD, not by `gh pr list`: each anchor's pr_number resolves in
 # this repo by construction, so there is no cross-repo PR-number collision.
@@ -45,8 +46,8 @@
 # it never closes one.
 set -uo pipefail
 
-# gh is the only way to read PR state here (like the codex gate and the
-# draft-PR reconciler). Without it there is nothing to do.
+# gh is the only way to read PR state here (like the codex gate). Without it
+# there is nothing to do.
 command -v gh >/dev/null 2>&1 || exit 0
 
 # Open gating anchors in this rig's ledger.
@@ -57,8 +58,8 @@ ANCHORS=$(gc bd list --status=open \
   || { echo "reconcile-merged-prs: no gating anchors"; exit 0; }
 
 # One compact JSON row per anchor. Built into a variable (not piped into the
-# loop) so the loop runs in THIS shell and the counters below survive — the
-# same pipe/subshell guard reconcile-draft-prs.sh relies on.
+# loop) so the loop runs in THIS shell and the counters below survive the
+# pipe/subshell boundary.
 ROWS=$(printf '%s' "$ANCHORS" \
   | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), signoff: (.metadata.signoff_head // "")}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "reconcile-merged-prs: no gating anchors"; exit 0; }
@@ -104,8 +105,8 @@ while IFS= read -r row; do
   # land (or has landed) on the WRONG branch: closing as "Merged to <expected>"
   # would record a landing that never happened, and queuing auto-merge would push
   # the work to the wrong target. Do neither while mismatched. Fires for the
-  # merged close path and the open/ready auto-merge path — NOT open/draft (that
-  # is reconcile-draft-prs.sh's domain) and NOT closed/unmerged (handled as
+  # merged close path and the open/ready auto-merge path — NOT open/draft (a
+  # stray draft is skipped) and NOT closed/unmerged (handled as
   # abandoned below). Flip the gating marker off pull_request so the anchor
   # leaves this scan: that escalates exactly once (mirroring out-of-band-close
   # handling), routes a human, and clears the now-meaningless signoff_head. The
@@ -207,15 +208,17 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
     # an anchor lands only when ALL its children are closed). signoff_head alone
     # is not enough — the REQUEST_CHANGES arm clears it only best-effort when the
     # anchor edge resolves, and another check can file a rework child whose edge
-    # is missing, so a stale signoff_head can coexist with open rework. Reuse
-    # reconcile-draft-prs.sh guard (b): hold auto-merge while ANY open/in_progress
-    # bead OTHER than this anchor references the PR. The anchor carries
-    # merge_result; rework children and review beads do not — so excluding the
-    # anchor's own id plus any merge_result-carrying bead leaves exactly the
-    # in-flight rework/review set.
+    # is missing, so a stale signoff_head can coexist with open rework. Hold
+    # auto-merge while ANY open/in_progress bead OTHER than this anchor references
+    # the PR. The anchor carries merge_result; rework children and review beads do
+    # not — so excluding the anchor's own id plus any merge_result-carrying bead
+    # leaves exactly the in-flight rework/review set.
+    # --limit=0 (unbounded): a bounded list could truncate the qualifying child
+    # past the cap and let a PR auto-merge while rework is still open — the
+    # merge-safety gate must see EVERY referencing bead, not a page of them.
     inflight=$(gc bd list \
       --metadata-field pr_number="$num" \
-      --status open,in_progress --limit=20 --json 2>/dev/null \
+      --status open,in_progress --limit=0 --json 2>/dev/null \
       | jq -r --arg anchor "$id" '[.[] | select(.id != $anchor) | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
     if [ -n "$inflight" ]; then
       echo "reconcile-merged-prs: PR#$num has open rework/review bead $inflight; auto-merge held (anchor $id)"

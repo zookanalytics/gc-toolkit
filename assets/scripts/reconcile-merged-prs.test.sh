@@ -9,7 +9,7 @@
 #   (2) PR closed, unmerged    -> anchor flagged (merge_result=abandoned,
 #                                 routed to human) + mayor escalated once
 #   (3) PR open, ready, head signoff-validated, no open child -> auto-merge queued
-#   (4) PR open, draft          -> skipped (left to reconcile-draft-prs.sh)
+#   (4) PR open, draft          -> skipped (drafts retired; a stray draft is left alone)
 #   (3b) PR open, ready, signoff_head STALE  -> auto-merge HELD
 #   (3c) PR open, ready, signoff_head MISSING -> auto-merge HELD
 #   (3d) PR open, ready, head signoff-validated BUT an open rework child
@@ -46,6 +46,8 @@ mkdir -p "$TMP/bin"
 #   bead-G signoff-validated but has an OPEN rework child -> auto-merge HELD
 #   bead-H signoff-validated but PR 208 retargeted        -> auto-merge HELD + flagged
 #   bead-I merged but PR 209 merged to wrong base         -> NOT closed + flagged
+#   bead-J signoff-validated, open child sits PAST the former --limit=20 cap
+#          -> auto-merge HELD (the referencing-bead scan must be unbounded)
 cat > "$TMP/anchors" <<'A'
 bead-A|201|main|
 bead-B|202|main|
@@ -56,6 +58,7 @@ bead-F|206|main|
 bead-G|207|main|HEADG0000000
 bead-H|208|main|HEADH0000000
 bead-I|209|main|
+bead-J|210|main|HEADJ0000000
 A
 
 # PR states (gh pr view source): pr|state|mergedAt|isDraft|mergeOid|baseRefName|headRefOid
@@ -68,6 +71,7 @@ A
 #   207 open, ready, head==signoff (open child holds it) -> hold auto-merge
 #   208 open, ready, head==signoff BUT base=integration/foo != main -> retarget
 #   209 merged BUT to integration/foo != main -> retarget (NOT closed as landed)
+#   210 open, ready, head==signoff, open child past the former cap -> hold auto-merge
 cat > "$TMP/prs" <<'P'
 201|MERGED|2026-06-23T01:00:00Z|false|abc12345def67890|main|HEAD20100000
 202|CLOSED||false||main|HEAD20200000
@@ -78,15 +82,28 @@ cat > "$TMP/prs" <<'P'
 207|OPEN||false||main|HEADG0000000
 208|OPEN||false||integration/foo|HEADH0000000
 209|MERGED|2026-06-23T02:00:00Z|false|cafe1234abcd5678|integration/foo|HEADI0000000
+210|OPEN||false||main|HEADJ0000000
 P
 
 # Open rework/review children referencing a PR (gc bd list pr_number= source):
-# pr_number|child_id|merge_result. Only PR 207 has an open rework child; it
-# carries NO merge_result (only the anchor does), so the finding-3 guard must
-# count it and hold the merge. PR 203 has no child entry -> not held.
+# pr_number|child_id|merge_result. PR 207 has an open rework child; it carries NO
+# merge_result (only the anchor does), so the finding-3 guard must count it and
+# hold the merge. PR 203 has no child entry -> not held.
 cat > "$TMP/children" <<'C'
 207|child-G|
 C
+
+# PR 210 (anchor bead-J): 24 decoy referencing beads that the script's jq
+# EXCLUDES (they carry merge_result, like the anchor), then ONE real open rework
+# child (no merge_result) LAST. With the anchor the real child sits at row ~26 —
+# past the former --limit=20 cap. A bounded `gc bd list` would truncate it out
+# and let PR 210 auto-merge while rework is open; the scan must be unbounded
+# (--limit=0) to see it. This is the Scope C regression: an open child beyond the
+# former cap must HOLD the merge.
+for i in $(seq -w 1 24); do
+  printf '210|decoy-%s|pull_request\n' "$i" >> "$TMP/children"
+done
+printf '210|child-J|\n' >> "$TMP/children"
 
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"
 : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
@@ -141,6 +158,18 @@ chmod +x "$TMP/bin/gh"
 #       open rework/review children (no merge_result — the script must COUNT them).
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+# Honor `gc bd list --limit=N` (N>0 truncates the page; 0/absent = unbounded),
+# exactly as real gc does — the raw DB page is capped BEFORE the script's jq
+# filters it. This is what lets the Scope C regression distinguish a bounded
+# scan (drops the child past the cap) from the unbounded `--limit=0` scan.
+emit_rows() {
+  raw="[$1]"; n="$2"
+  if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then
+    printf '%s' "$raw" | jq -c ".[:$n]"
+  else
+    printf '%s\n' "$raw"
+  fi
+}
 if [ "$1" = "mail" ]; then
   shift; subj=""
   while [ $# -gt 0 ]; do case "$1" in -s) subj="$2"; shift 2 ;; *) shift ;; esac; done
@@ -149,6 +178,7 @@ fi
 [ "$1" = "bd" ] || exit 0
 case "$2" in
   list)
+    lim=$(printf '%s' "$*" | sed -n 's/.*--limit=\([0-9][0-9]*\).*/\1/p')
     case "$*" in
       *"merge_result=pull_request"*)
         out=""
@@ -160,7 +190,7 @@ case "$2" in
           obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","signoff_head":"%s"}}' "$id" "$pr" "$target" "$signoff")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
-        printf '[%s]\n' "$out" ;;
+        emit_rows "$out" "$lim" ;;
       *"pr_number="*)
         prnum=$(printf '%s' "$*" | sed -n 's/.*pr_number=\([0-9][0-9]*\).*/\1/p')
         out=""
@@ -184,7 +214,7 @@ case "$2" in
             if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
           done < "$FAKE_CHILDREN"
         fi
-        printf '[%s]\n' "$out" ;;
+        emit_rows "$out" "$lim" ;;
       *) printf '[]\n' ;;
     esac ;;
   close)
@@ -241,6 +271,15 @@ has '^207$' "$TMP/automerge" && bad "(3d) open rework child must HOLD auto-merge
 printf '%s\n' "$OUT1" | grep -q 'PR#207 has open rework/review bead child-G' \
   && ok "(3d) hold names the open rework child" \
   || bad "(3d) hold names the open rework child (got: $OUT1)"
+# Scope C: an open rework child PAST the former --limit=20 cap must still HOLD the
+# merge. The referencing-bead scan is unbounded (--limit=0); a bounded scan would
+# truncate child-J (row ~26, behind 24 jq-excluded decoys + the anchor) and let
+# PR 210 auto-merge while rework is open.
+has '^210$' "$TMP/automerge" && bad "(3e) open child past former cap must HOLD auto-merge" \
+                             || ok "(3e) open child beyond former cap -> auto-merge held (unbounded scan)"
+printf '%s\n' "$OUT1" | grep -q 'PR#210 has open rework/review bead child-J' \
+  && ok "(3e) hold names the child found past the former cap" \
+  || bad "(3e) hold names the child past former cap (got: $OUT1)"
 # Finding 1: a retargeted PR is never auto-merged and never closed-as-landed.
 has '^208$' "$TMP/automerge" && bad "(7) retargeted PR must HOLD auto-merge" \
                              || ok "(7) ready PR retargeted (base != target) -> auto-merge held"

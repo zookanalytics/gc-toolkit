@@ -8,16 +8,12 @@
 # coordinator (mayor/mechanik) sits in this loop; `gc convoy land` remains a
 # manual bead-state-flip primitive but is NOT the driver.
 #
-# THE INTERLOCK (why this ships WITH close-on-land, tk-6d0vb.1.1): a convoy
-# child closes ONLY on merge to its integration branch (close-on-land). So
-# "all members closed" == "all members MERGED": the integration branch already
-# contains every child's work before this pass ever fires. Graduation can never
-# assemble a half-built branch. An abandoned child stays OPEN (escalated by
-# reconcile-merged-prs.sh, not closed), so it keeps the convoy incomplete and
-# blocks graduation until a human resolves it. Before close-on-land a child
-# closed at PR-CREATION, so "all closed" could mean "nothing merged" and
-# graduation would fire on an empty branch — that is the bug the two beads
-# close together.
+# THE INTERLOCK: a convoy child closes ONLY on merge to its integration branch
+# (close-on-land). So "all members closed" == "all members MERGED": the
+# integration branch already contains every child's work before this pass ever
+# fires. Graduation can never assemble a half-built branch. An abandoned child
+# stays OPEN (escalated by reconcile-merged-prs.sh, not closed), so it keeps the
+# convoy incomplete and blocks graduation until a human resolves it.
 #
 # SCOPE: OWNED integration convoys in THIS rig only.
 #   - Owned-ness + member progress live in ConvoyFields, surfaced ONLY by
@@ -65,14 +61,18 @@ fi
 CONVOYS=$(gc convoy list --json 2>/dev/null)
 [ -n "$CONVOYS" ] || { echo "reconcile-graduated-convoys: convoy list unavailable"; exit 0; }
 
-# Candidate = owned + integration/* target + has members + ALL members closed.
-# progress.total>0 guards an empty convoy; closed==total is the completion gate
-# (== all-merged, per the interlock above).
+# Candidate = targets the integration boundary AND all members closed (== all
+# merged, per the interlock above) AND has members. The graduation predicate is
+# the target + completion, not ownership per se; `owned` is the core label that
+# carries the integration target, kept as the underlying mechanism that scopes
+# this to integration convoys (per-sling auto-convoys are un-owned and carry no
+# integration/* target). progress.total>0 guards an empty convoy; closed==total
+# is the completion gate.
 CANDS=$(printf '%s' "$CONVOYS" | jq -r '
   .convoys[]?
-  | select(.owned == true)
   | select((.fields.target // "") | startswith("integration/"))
   | select(.progress.total > 0 and .progress.closed == .progress.total)
+  | select(.owned == true)
   | "\(.id)\t\(.fields.target)"' 2>/dev/null)
 [ -n "$CANDS" ] || { echo "reconcile-graduated-convoys: no complete owned integration convoys"; exit 0; }
 

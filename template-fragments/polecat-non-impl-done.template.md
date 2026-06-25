@@ -92,17 +92,17 @@ exit
 
 When `metadata.fix_target_pool` is set, the review is a **signoff gate** — one
 member of the gating anchor's check-set (see docs/work-bead-state-machine.md).
-The refinery opened the PR as draft and is waiting on your verdict. The
-**anchor** stays OPEN as the PR's gating bead; it closes later, on merge, via
-the refinery's reconcile pass — never here. Resolve the anchor as the bead this
-review gates — the dependent of the `blocks` dep the refinery attached
-(`gc bd dep <review> --blocks <anchor>`):
+The refinery published the PR (non-draft) and is waiting on your verdict; the
+signoff holds the merge, not draft state. The **anchor** stays OPEN as the PR's
+gating bead; it closes later, on merge, via the refinery's reconcile pass —
+never here. Resolve the anchor as the bead this review gates — the dependent of
+the `blocks` dep the refinery attached (`gc bd dep <review> --blocks <anchor>`):
 
 - **APPROVE/COMMENT** — the signoff passes on the **current** head. Stamp the
   head you signed off as `signoff_head` on the anchor (this is the check-set's
   *title/description validated-current* member: it tells the merge reconcile
   that the latest commit — title + body included — was reviewed, so auto-merge
-  may fire). Then un-draft the PR.
+  may fire). The PR is already non-draft; nothing else to publish.
 - **REQUEST_CHANGES** — file a **new rework child** against the anchor (rework
   is a new child, never the same bead reopened and never a cleared marker; see
   docs/work-bead-state-machine.md). Clear `signoff_head` so the now-unvalidated
@@ -143,11 +143,9 @@ if [ -n "$FIX_POOL" ]; then
         [ -n "$REVIEWED_OID" ] && gc bd update "$ANCHOR" \
           --set-metadata signoff_head="$REVIEWED_OID" >/dev/null 2>&1 || true
       fi
-      # Un-draft the PR so the operator sees it. Best-effort: if this one-shot
-      # fails (transient GraphQL error, a restart mid-flow, a Dolt wedge), do
-      # NOT block the review bead or escalate — the refinery patrol's draft-PR
-      # reconcile pass converges the PR to ready on its next idle wake.
-      gh pr ready "$PR_NUMBER" || echo "un-draft failed; refinery patrol will reconcile this PR's draft state" >&2
+      # The PR is already non-draft (drafts are retired). The signoff_head stamp
+      # above is the only action: it lets reconcile-merged-prs.sh queue auto-merge
+      # once the head it validated is still live.
       ;;
     REQUEST_CHANGES)
       # Rework is a NEW child of the anchor, not the same anchor reopened and

@@ -92,7 +92,7 @@ description = "After a successful direct merge, attempt to fast-forward the rig'
 default = "true"
 
 [vars.review_gate]
-description = "Pre-publish review gate for mr-mode PRs. 'codex' opens PRs as draft and dispatches a review bead to the rig's codex polecat pool; empty disables the gate (PRs open non-draft as today)."
+description = "Signoff gate for mr-mode PRs. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member; the PR opens non-draft and auto-merge is held until the signoff validates the head (signoff_head). Empty disables the gate."
 default = "codex"
 
 [[steps]]
@@ -205,37 +205,24 @@ gc bd show $WORK --json | jq '.[0].metadata'
 The bead MUST have `metadata.branch`. If `metadata.target` is missing,
 use {{target_branch}} as default. Note the work bead ID and close this step.
 
-If NO work found: sleep, reconcile stranded draft PRs, then re-check.
+If NO work found: sleep, reconcile in-flight PRs and convoys, then re-check.
 
 **1. Sleep before re-checking:**
 ```bash
 sleep {{event_timeout}}
 ```
 
-**2. Reconcile state (best-effort, every idle wake).** Three convergent
-passes run here on the idle cadence: (a) un-draft codex-gated PRs whose review
-concluded, (b) close-on-land — close gating anchors whose PR has merged,
-flag out-of-band-closed PRs, and queue auto-merge for signoff-validated ready
-ones, and (c) graduate owned integration convoys whose members are now all
-closed. All are the net for single best-effort one-shots that can fail for any
-reason.
+**2. Reconcile state (best-effort, every idle wake).** Two convergent
+passes run here on the idle cadence: (a) close-on-land — close gating anchors
+whose PR has merged, flag out-of-band-closed PRs, and queue auto-merge for
+signoff-validated ready ones, and (b) graduate owned integration convoys whose
+members are now all closed. Both are the net for single best-effort one-shots
+that can fail for any reason. The find-work idle loop is the ONLY thing that
+runs on the {{event_timeout}} cadence when the refinery is idle, so the
+reconcile lives here rather than in a standalone step that idle would never
+reach.
 
-Pass (a) — un-draft review-cleared PRs.
-The codex review gate opens PRs as draft and un-drafts them with a single
-best-effort `gh pr ready` at the tail of the review. If that one-shot fails
-for ANY reason (transient GraphQL error, the review polecat killed mid-flow,
-a deploy/restart, a Dolt wedge) the PR is stranded in draft with no other
-recovery. This convergent pass is the net: it un-drafts a PR ONLY when a
-codex review bead for it is CLOSED (a review concluded — which also scopes
-the pass to codex-gated PRs; human drafts have no review bead) AND no
-open/in_progress bead references it (no review still running, no
-REQUEST_CHANGES rework in flight). Idempotent and cheap — one `gh pr list`
-plus a couple `gc bd list` per draft PR, and draft PRs are few. The find-work
-idle loop is the ONLY thing that runs on the {{event_timeout}} cadence when
-the refinery is idle, so the reconcile lives here rather than in a standalone
-step that idle would never reach.
-
-Pass (b) — close-on-land (`reconcile-merged-prs.sh`). mr-mode keeps the anchor
+Pass (a) — close-on-land (`reconcile-merged-prs.sh`). mr-mode keeps the anchor
 (a convoy graduating, or any mr-mode bead) OPEN as the PR's gating bead
 (merge-push step 4); this pass is what later closes it. For each open gating
 anchor (`merge_result=pull_request`) it reads the PR: merged -> close the bead
@@ -244,13 +231,14 @@ out-of-band close (the refinery did not do it; route to human, escalate once);
 open+ready -> queue `gh pr merge --auto` ONLY while the live head is
 signoff-validated (`signoff_head` == headRefOid — the check-set's
 title/description-current member, so a stale approval or a post-signoff rework
-commit cannot merge early); open+draft -> leave to pass (a). Enumerated by bead
-so each PR resolves in-repo. Convergent + cheap — one `gh pr view` per anchor,
-anchors are few. See docs/work-bead-state-machine.md.
+commit cannot merge early); open+draft -> skip (drafts are retired, so no PR is
+created draft; a stray draft is left untouched). Enumerated by bead so each PR
+resolves in-repo. Convergent + cheap — one `gh pr view` per anchor, anchors are
+few. See docs/work-bead-state-machine.md.
 
-Pass (c) — convoy graduation (`reconcile-graduated-convoys.sh`, gated on
+Pass (b) — convoy graduation (`reconcile-graduated-convoys.sh`, gated on
 `integration_branch_auto_land`). The same machine ONE LEVEL UP. Runs AFTER pass
-(b), so the wake that closes a convoy's last merged child immediately graduates
+(a), so the wake that closes a convoy's last merged child immediately graduates
 the now-complete convoy. For each OWNED integration convoy whose members are
 ALL closed it assigns the convoy bead to the refinery as an ordinary mr-mode
 work bead (`branch=integration/<id>`, `target={{target_branch}}`,
@@ -274,27 +262,21 @@ SCRIPTS_DIR=""
 for cand in "${GC_RIG_ROOT:-}/assets/scripts" \
             "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \
             "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/reconcile-draft-prs.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+  if [ -x "$cand/reconcile-merged-prs.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
 done
 if [ -n "$SCRIPTS_DIR" ]; then
-  # All passes are best-effort: a failed pass is retried next idle wake and
+  # Both passes are best-effort: a failed pass is retried next idle wake and
   # never blocks find-work.
-  # (a) Un-draft codex-gated PRs whose review has concluded.
-  "$SCRIPTS_DIR/reconcile-draft-prs.sh" \
-    || echo "reconcile-draft-prs: pass failed (non-fatal); retries next idle wake" >&2
-  # (b) Close-on-land: close gating anchors whose PR merged, flag out-of-band
+  # (a) Close-on-land: close gating anchors whose PR merged, flag out-of-band
   #     closed PRs to human, queue auto-merge for signoff-validated ready ones.
-  #     Guarded by -x so an importer rig that has not yet synced the new script
-  #     degrades to (a) only.
-  if [ -x "$SCRIPTS_DIR/reconcile-merged-prs.sh" ]; then
-    "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
-      || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
-  fi
-  # (c) Convoy graduation: assign each OWNED integration convoy whose members
+  "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
+    || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
+  # (b) Convoy graduation: assign each OWNED integration convoy whose members
   #     are all closed (== all merged) to the refinery for an integration->main
-  #     PR. Runs AFTER (b) so the wake that closes the last child graduates the
+  #     PR. Runs AFTER (a) so the wake that closes the last child graduates the
   #     convoy in the same pass. Gated on integration_branch_auto_land (default
-  #     "true"; "false" is the kill-switch) and -x (importer-rig degradation).
+  #     "true"; "false" is the kill-switch) and -x (importer rigs that have not
+  #     yet synced this script degrade to pass (a) only).
   if [ "{{integration_branch_auto_land}}" != "false" ] \
      && [ -x "$SCRIPTS_DIR/reconcile-graduated-convoys.sh" ]; then
     "$SCRIPTS_DIR/reconcile-graduated-convoys.sh" --target "{{target_branch}}" \
@@ -995,9 +977,10 @@ markdown). The body always carries the bead's full description (the
 "why"), and includes the polecat's implementation notes (the "what")
 when present.
 
-gc-toolkit local delta: if `review_gate = "codex"`, open the PR as draft
-so the codex review-bead gate (dispatched in step 4) gates ready-status
-on the codex reviewer's verdict.
+The PR always opens non-draft — every PR that exists is a real candidate.
+When `review_gate = "codex"` the signoff gate (dispatched in step 4) holds
+the merge instead: auto-merge stays held until the signoff validates the
+head, so no draft state is needed to gate readiness.
 
 ```bash
 WORK_JSON=$(gc bd show $WORK --json)
@@ -1032,17 +1015,11 @@ PR_BODY_FILE=$(mktemp)
   printf -- '- Rebased on `%s` via Gastown Refinery.\n' "$TARGET"
 } > "$PR_BODY_FILE"
 
-PR_DRAFT_FLAG=""
-if [ "{{review_gate}}" = "codex" ]; then
-  PR_DRAFT_FLAG="--draft"
-fi
-
 if [ -n "$EXISTING_PR" ]; then
   PR_REF="$EXISTING_PR"
 else
   if command -v gh >/dev/null 2>&1; then
     PR_URL=$(gh pr create \
-      $PR_DRAFT_FLAG \
       --base "$TARGET" \
       --head "$BRANCH" \
       --title "$ISSUE_TITLE ($WORK)" \
@@ -1080,8 +1057,7 @@ else
         --arg head "$BRANCH" \
         --arg base "$TARGET" \
         --rawfile body "$PR_BODY_FILE" \
-        --argjson draft "$( [ -n "$PR_DRAFT_FLAG" ] && echo true || echo false )" \
-        '{title:$title, head:$head, base:$base, body:$body, draft:$draft}')
+        '{title:$title, head:$head, base:$base, body:$body, draft:false}')
       CREATED=$(curl_gh_api "$PR_ERR" \
         -X POST "$API/pulls" \
         -d "$CREATE_PAYLOAD")
