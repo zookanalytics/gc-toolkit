@@ -1237,8 +1237,14 @@ if [ "{{review_gate}}" = "codex" ]; then
   REVIEW_FOR_GATE="${REVIEW_BEAD:-$EXISTING_REVIEW}"
 fi
 
-# Fail-closed (finding fix #2): do NOT detach the anchor into gating unless the
-# durable review->anchor link (anchor_bead) is RECORDED. The dispatch stamps it
+# Capture the rendered review-gate mode for the codex fail-closed check below.
+# Kept OUTSIDE the signoff-anchor-failclosed markers so the extracted snippet
+# stays template-free — the regression test drives REVIEW_GATE through the env.
+REVIEW_GATE="{{review_gate}}"
+
+# Fail-closed (finding fix #2; finding fix #3 adds the codex-id guard inside the
+# markers below): do NOT detach the anchor into gating unless the durable
+# review->anchor link (anchor_bead) is RECORDED. The dispatch stamps it
 # atomically for a NEW review, but a reused review (EXISTING_REVIEW) was never
 # stamped, and any stamp can fail transiently — so heal it here and VERIFY it
 # persisted. If it cannot be recorded, leave $WORK assigned to the refinery and
@@ -1248,6 +1254,23 @@ fi
 # auto-merge forever. The markers let the regression test extract this exact
 # snippet (assets/scripts/signoff-anchor-failclosed.test.sh).
 # >>> signoff-anchor-failclosed
+# Finding fix #3 (codex gate requires a review id): an empty REVIEW_FOR_GATE in
+# codex mode means review create/lookup failed — gc bd create returned no id on a
+# transient CLI failure (jq on empty input exits 0, and this block is not under
+# set -e), so REVIEW_BEAD and EXISTING_REVIEW are both empty. The no-op path below
+# (`if [ -n ... ]`) would then SKIP the gate and fall through to the gating
+# transition, detaching the anchor with no review bead. That strands the PR
+# exactly like the unrecorded-anchor case: reconcile-merged-prs.sh holds
+# auto-merge waiting for signoff_head, but no review bead exists to ever stamp it.
+# Fail closed — leave $WORK assigned to the refinery and OPEN so the next patrol
+# retries (idempotent: the EXISTING_REVIEW guard heals on retry). Non-codex gates
+# legitimately have no review bead, so this fires ONLY when codex review is the
+# required gate.
+if [ "${REVIEW_GATE:-}" = "codex" ] && [ -z "${REVIEW_FOR_GATE:-}" ]; then
+  echo "Codex review gate required but no review id (create/lookup failed); leaving $WORK assigned to refinery for retry." >&2
+  gc runtime drain-ack
+  exit 1
+fi
 if [ -n "${REVIEW_FOR_GATE:-}" ]; then
   gc bd update "$REVIEW_FOR_GATE" --set-metadata anchor_bead="$WORK" >/dev/null 2>&1 || true
   RECORDED_ANCHOR=$(gc bd show "$REVIEW_FOR_GATE" --json 2>/dev/null \
