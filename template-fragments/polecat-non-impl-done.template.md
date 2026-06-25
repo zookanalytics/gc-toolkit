@@ -115,9 +115,23 @@ the REVIEW bead (step 3 above), act on it:
 FIX_POOL=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.fix_target_pool // empty')
 PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
 
-# The anchor is the bead this review gates (BLOCKS edge, walked upward).
+# Resolve the anchor (the bead this review gates) two ways, in order:
+#   1. the BLOCKS edge, walked upward — the primary, dep-graph-honest path;
+#   2. metadata.anchor_bead on THIS review bead — a durable fallback the
+#      dispatch stamps atomically with the review's routing fields.
+# The edge is attached best-effort at dispatch (a failed edge must not strand
+# the PR). But if the edge is dropped and we resolve ONLY via it, ANCHOR is
+# empty, signoff_head is never stamped, and reconcile-merged-prs.sh holds
+# auto-merge forever ("no signoff yet") — nothing re-dispatches the review, so
+# the PR is stuck. The anchor_bead fallback survives a lost edge. The markers
+# below let the regression test extract and exercise this exact snippet
+# (assets/scripts/signoff-anchor-resolution.test.sh).
+# >>> signoff-anchor-resolve
 ANCHOR=$(gc bd dep list <work-bead> --direction=up -t blocks --json 2>/dev/null \
   | jq -r '.[0].id // empty')
+[ -z "$ANCHOR" ] && ANCHOR=$(gc bd show <work-bead> --json 2>/dev/null \
+  | jq -r '.[0].metadata.anchor_bead // empty')
+# <<< signoff-anchor-resolve
 
 if [ -n "$FIX_POOL" ]; then
   case "$VERDICT" in

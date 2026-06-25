@@ -1202,19 +1202,30 @@ if [ "{{review_gate}}" = "codex" ]; then
 
   if [ -z "$EXISTING_REVIEW" ]; then
     REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
+    # anchor_bead is the DURABLE anchor pointer: it is set atomically with the
+    # review's routing fields here, so it is as reliable as the review's own
+    # dispatch. The completion path resolves the anchor by the BLOCKS edge first
+    # and falls back to this field when the edge is missing
+    # (template-fragments/polecat-non-impl-done.template.md).
     gc bd update "$REVIEW_BEAD" \
       --set-metadata task_kind=review \
       --set-metadata pr_url="$PR_URL" \
       --set-metadata pr_number="$PR_NUMBER" \
       --set-metadata fix_target_pool="$FIX_POOL" \
+      --set-metadata anchor_bead="$WORK" \
       --set-metadata gc.routed_to="$CODEX_POOL"
     # Gate-as-dep (close-on-land): the review bead BLOCKS the open anchor.
     # Replaces the retired backward work_bead pointer — the dep graph now
     # carries the gate, and the rework arm resolves the anchor by walking this
-    # edge (gc bd dep list <review> --direction=up -t blocks). Best-effort: a
-    # failed edge must not strand the PR (the review still routes), so warn.
+    # edge (gc bd dep list <review> --direction=up -t blocks).
+    #
+    # The edge is best-effort: a failed edge must not strand the PR (the review
+    # still routes), so we only warn. The completion path does not depend on the
+    # edge alone — it falls back to metadata.anchor_bead (stamped above) so a
+    # dropped edge cannot leave the anchor un-signoff-stamped and hold
+    # auto-merge forever.
     gc bd dep "$REVIEW_BEAD" --blocks "$WORK" \
-      || echo "WARN: could not attach review $REVIEW_BEAD as a gate-dep of $WORK" >&2
+      || echo "WARN: could not attach review $REVIEW_BEAD as a gate-dep of $WORK (anchor_bead fallback persists the link)" >&2
     gc session wake "$CODEX_POOL" || true
     gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for PR#$PR_NUMBER" || true
   fi
