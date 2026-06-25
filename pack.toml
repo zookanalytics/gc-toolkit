@@ -68,6 +68,11 @@ inject_fragments_append = [
     "heartbeat-no-consent-ui",
     "layered-startup-discovery-deacon",
 ]
+# Deterministic cycle-recycle: overlays/cycle-recycle/ ships a Claude `Stop` hook
+# (.claude/settings.json + .claude/hooks/cycle-recycle.sh) staged into this agent's
+# work dir. It self-gates to patrol roles, so the same overlay is a safe no-op
+# elsewhere.
+overlay_dir = "overlays/cycle-recycle"
 
 [[patches.agent]]
 name = "mayor"
@@ -86,12 +91,16 @@ name = "refinery"
 inject_fragments_append = [
     "layered-startup-discovery-refinery",
 ]
+# Deterministic cycle-recycle (see deacon patch above).
+overlay_dir = "overlays/cycle-recycle"
 
 [[patches.agent]]
 name = "witness"
 inject_fragments_append = [
     "heartbeat-no-consent-ui",
 ]
+# Deterministic cycle-recycle (see deacon patch above).
+overlay_dir = "overlays/cycle-recycle"
 
 [[named_session]]
 template = "mechanik"

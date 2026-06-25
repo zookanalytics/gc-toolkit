@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\"; S=\"${GC_DIR:-${CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/cycle-recycle.sh\"; [ -f \"$S\" ] && sh \"$S\" || true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+description = "Deterministic cycle-recycle Stop hook is shipped (overlays/cycle-recycle/) and wired (overlay_dir) onto witness/deacon/refinery, so the 200K context recycle can't be silently un-shipped (tk-g8pfg; supersedes the pour-before-handoff check)"
