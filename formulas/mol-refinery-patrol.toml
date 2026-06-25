@@ -123,18 +123,6 @@ id = "check-inbox"
 title = "Check mail"
 needs = ["validate-identity"]
 description = """
-**Context recycling is automatic — do NOT run a context check here.** The
-`Stop` hook shipped in `overlays/cycle-recycle/` and staged into this agent's
-work dir (`.claude/settings.json` + `.claude/hooks/cycle-recycle.sh`) enforces
-the 200K input_tokens recycle deterministically every turn, regardless of LLM
-state, and on cross writes the HANDOFF mail and resets the session. The
-refinery previously had only a subjective "if context feels heavy" check and
-referenced cycle-recycle nowhere — the worst case this fixes (tk-g8pfg), since
-a heavy-context session is exactly when the model stops noticing it should
-recycle. The new session resumes via its startup-adopt path. See
-`template-fragments/cycle-recycle.template.md` for the policy the hook
-implements. Nothing context-related belongs in this step anymore.
-
 **Check mail:**
 ```bash
 gc mail inbox

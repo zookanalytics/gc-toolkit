@@ -9,10 +9,9 @@ unanswered — patrols missed to a blocking prompt are work the town
 cannot do without you.
 
 - **Recycle decisions are deterministic and hook-enforced.** The
-  cycle-recycle `Stop` hook (`overlays/cycle-recycle/`) recycles you at
-  the 200K threshold with no involvement from you — you do not decide
-  whether to recycle and do not run a recycle sequence by hand. The
-  threshold IS the decision; do not vote on it.
+  cycle-recycle `Stop` hook (`overlays/cycle-recycle/`) recycles you with
+  no involvement from you — you do not decide whether to recycle and do
+  not run a recycle sequence by hand.
 - **Context exhaustion:** if you ever need to bail mid-task before the
   hook's turn-boundary check fires, `gc runtime request-restart` (this
   session is `mode = "always"`; the controller respawns) is the manual

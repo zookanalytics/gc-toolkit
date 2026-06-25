@@ -33,6 +33,9 @@
 #   * ALWAYS exit 0 so the Stop event is never blocked, and keep stdout empty
 #     (all diagnostics to stderr) so Claude never parses a stray block decision.
 #   * Under threshold is the common path and must stay cheap: one bounded curl.
+#   * Over threshold, DEFER (never force) the recycle while an operator is
+#     attached or the refinery is mid git-op; uncertain -> skip. PreCompact
+#     stays the net for any deferred turn.
 #
 # If the supervisor API is unreachable or input_tokens is unknown, the check
 # skips silently — Claude's PreCompact hook remains the reactive safety net at
@@ -61,6 +64,49 @@ case "$TOKENS" in
   '' | *[!0-9]*) exit 0 ;; # empty / null / non-numeric -> unknown, skip silently
 esac
 [ "$TOKENS" -ge 200000 ] || exit 0 # under threshold -> cheap no-op (the common path)
+
+# --- 2.5. Safety guards: defer (don't force) the recycle at a bad moment --
+# `gc session reset` preserves identity/alias/mail/queued work but resets the
+# conversation, so don't land it (a) under an operator attached to watch/debug
+# the pane, or (b) on the refinery mid git-op. These run only on the rare
+# over-threshold path. Bias: uncertain -> SKIP (exit 0) — deferring only delays
+# the recycle (the hook re-checks next turn; PreCompact stays the reactive net),
+# whereas a mistimed restart interrupts an operator or a multi-turn merge.
+
+# (a) Attached session (all patrol roles): defer while a tmux client is watching.
+if [ -n "${TMUX:-}" ]; then
+  attached="$(tmux display-message -p '#{session_attached}' 2>/dev/null || true)"
+  case "$attached" in
+    0) : ;; # no client attached -> safe to recycle
+    '' | *[!0-9]*) # query failed / non-numeric -> uncertain -> defer
+      echo "cycle-recycle: attachment state unknown; deferring recycle" >&2; exit 0 ;;
+    *) # one or more clients attached -> defer
+      echo "cycle-recycle: session attached ($attached client(s)); deferring recycle" >&2; exit 0 ;;
+  esac
+fi
+
+# (b) Refinery mid git-op: defer while a rebase/merge is in flight or a tracked
+# tree is dirty, in either the refinery's own worktree (CWD) or the rig's
+# canonical checkout ($GC_RIG_ROOT). Witness/deacon are idle pollers with no
+# long git ops, so this is refinery-only. Untracked files are normal scratch and
+# are ignored (mirrors the formula's rig ff-merge dirtiness check).
+if [ "$role" = refinery ]; then
+  _git_busy() { # $1=dir; exit 0 if a git op is in progress or the tree is dirty
+    [ -n "$1" ] || return 1
+    ( cd "$1" 2>/dev/null || exit 1
+      git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
+      gd="$(git rev-parse --git-dir 2>/dev/null)" || exit 1
+      for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+        [ -e "$gd/$m" ] && exit 0
+      done
+      [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] && exit 0
+      exit 1 )
+  }
+  if _git_busy "$PWD" || _git_busy "${GC_RIG_ROOT:-}"; then
+    echo "cycle-recycle: refinery mid git-op (rebase/merge or dirty tree); deferring recycle" >&2
+    exit 0
+  fi
+fi
 
 # --- 3. Over threshold: recycle (HANDOFF mail + restart) ------------------
 echo "cycle-recycle: $AGENT at input_tokens=$TOKENS (>=200000) — handoff + reset" >&2

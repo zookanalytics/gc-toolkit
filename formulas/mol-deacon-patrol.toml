@@ -61,18 +61,6 @@ default = "60"
 id = "check-inbox"
 title = "Check mail"
 description = """
-**Cycle-recycle is automatic — do NOT run a context check here.** Recycling at
-the 200K input_tokens threshold is enforced deterministically by the `Stop`
-hook shipped in `overlays/cycle-recycle/` and staged into this agent's work dir
-(`.claude/settings.json` + `.claude/hooks/cycle-recycle.sh`). The harness runs
-that hook every turn regardless of LLM state — which is the whole point: the
-soft "apply the cycle-recycle template" prose that used to live in this step
-degraded exactly as context filled, so the recycle never fired (tk-g8pfg). The
-hook self-gates to patrol roles, writes the HANDOFF mail, and resets the
-session; the policy it implements lives in
-`template-fragments/cycle-recycle.template.md`. Nothing context-related belongs
-in this step anymore.
-
 **Check mail:**
 ```bash
 gc mail inbox
@@ -424,10 +412,6 @@ description = """
 **Config: event_timeout = {{event_timeout}}**
 
 End of patrol cycle. Pour the next iteration, then wait or exit.
-
-Cycle-recycle is automatic — the `Stop` hook (see `check-inbox`) handles
-context recycling deterministically, so this step no longer runs a context
-check.
 
 **1. Quick inbox check (end-of-cycle hygiene):**
 ```bash
