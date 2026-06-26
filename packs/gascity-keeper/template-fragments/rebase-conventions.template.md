@@ -124,4 +124,32 @@ This stance applies to **other abort paths too** (check failure,
 install failure, push race): once cooperative handback is
 structural, those surface as questions to the operator, not
 terminal aborts.
+
+### Re-pour over a paused rebase is resume, not duplicate dispatch
+
+When you claim `load-context` for a fresh `mol-upstream-gc-rebase`
+root and the issue already has a rebase in progress, treat that as
+the formula's designed resume path. **Proceed; do not park it as a
+duplicate dispatch** when all of these are true:
+
+- The issue has `metadata.rebase_in_progress=true`,
+  `metadata.work_dir` set, and `metadata.commit_verdicts` set.
+- The fresh root's `gc.var.issue` points at that same issue.
+- `metadata.pending_rework` is unset or points to a closed rework bead.
+
+This resume is safe because the formula is guarded for exactly this
+case. `workspace-setup` checks `metadata.work_dir` first, changes into
+that worktree, and skips creating a from-scratch worktree. `survey`
+checks `metadata.commit_verdicts` first and skips re-surveying. The
+rebase step reads the closed `metadata.pending_rework` and, for
+mechanical rework, runs `git -c core.editor=true rebase --continue`.
+There is no from-scratch survey, no restart that destroys the rework
+fix, and no second force-push track from the original polecat: the
+original polecat drained when it handed `pending_rework` to the keeper.
+
+Still park a true duplicate: a second fresh root for an issue with no
+paused rebase or no `metadata.rebase_in_progress`, or two fresh roots
+racing before any `metadata.work_dir` exists. A concurrent live polecat
+on the same worktree is the separate `polecat-patterns`
+worktree-reclaim/liveness concern, not this rule.
 {{ end }}
