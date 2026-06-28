@@ -186,3 +186,43 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
   | `[formulas].dir` | the well-known `formulas/` directory |
   | `[pack].includes` | `[imports.<binding>]` |
   | `[agents]`, `[defaults.rig.imports]`, `[[patches.rigs]]`, `[[patches.providers]]` | city-level only (`city.toml`), not `pack.toml` |
+
+## 7. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
+
+Gas City expands `{{...}}` through **two different engines**, and writing the
+prompt form in a formula silently no-ops the formula. Know which surface you
+are authoring:
+
+- **Prompts and template-fragments** (`*.template.md`, plus `session_setup` /
+  `pre_start` commands) render through Go `text/template` with a populated
+  context, so **dotted tokens resolve**: `{{.ConfigDir}}`, `{{.RigRoot}}`,
+  `{{.WorkDir}}`. The `pre_start` example in
+  [gascity-agents.md](gascity-agents.md)
+  (`{{.ConfigDir}}/assets/scripts/worktree-setup.sh …`) relies on exactly this.
+- **Formula / molecule step bodies** (`formulas/*.toml` `description`, and a
+  step's `title` / `id` / `condition` / metadata) are expanded by **plain string
+  substitution over a strict `{{name}}` pattern** — `[a-zA-Z_][a-zA-Z0-9_]*`,
+  **no leading dot, no spaces** — with **no `text/template` pass at all**.
+  Formula vars are that no-dot form (`{{base_branch}}`, `{{binding_prefix}}`,
+  `{{event_timeout}}`).
+
+So a dotted `{{ .ConfigDir }}` in a formula body never matches the var pattern:
+it **survives literally and silently no-ops**. An
+`[ -x "{{ .ConfigDir }}/assets/scripts/foo.sh" ]` guard written in a formula is
+always false, and the script never runs.
+
+**To call a pack script from a formula body, resolve at shell runtime via
+exported env — never the token:**
+
+```bash
+"$GC_RIG_ROOT/assets/scripts/foo.sh"               # owning rig only (repo == pack)
+"$GC_CITY_PATH/rigs/<pack>/assets/scripts/foo.sh"  # also resolves for importer rigs
+```
+
+`$GC_RIG_ROOT` points at the agent's own rig checkout, so it finds the script
+only for the **owning** rig; the `$GC_CITY_PATH/rigs/<pack>/…` form is the
+portable one, because every agent shares `$GC_CITY_PATH` (the city root) and the
+script lives in the owning pack's tree under it. Do **not** reach for
+`$GC_PACK_DIR` or `$GC_CONFIG_DIR` — they are populated only for order/command
+execution and are **not exported to agent or worker sessions**, so a formula
+that references them resolves an empty path.
