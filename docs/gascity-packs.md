@@ -200,11 +200,12 @@ are authoring:
   [gascity-agents.md](gascity-agents.md)
   (`{{.ConfigDir}}/assets/scripts/worktree-setup.sh …`) relies on exactly this.
 - **Formula / molecule step bodies** (`formulas/*.toml` `description`, and a
-  step's `title` / `id` / `condition` / metadata) are expanded by **plain string
+  step's `title` / `condition` / metadata) are expanded by **plain string
   substitution over a strict `{{name}}` pattern** — `[a-zA-Z_][a-zA-Z0-9_]*`,
   **no leading dot, no spaces** — with **no `text/template` pass at all**.
   Formula vars are that no-dot form (`{{base_branch}}`, `{{binding_prefix}}`,
-  `{{event_timeout}}`).
+  `{{event_timeout}}`). A step's `id` is **not** substituted — it is used
+  verbatim as the bead's `Ref` / `gc.step_ref`, so it must be a literal.
 
 So a dotted `{{ .ConfigDir }}` in a formula body never matches the var pattern:
 it **survives literally and silently no-ops**. An
