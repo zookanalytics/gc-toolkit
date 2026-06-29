@@ -37,14 +37,21 @@
 # lifecycle — it assembles the proven primitives.
 #
 # ── What is an anchor ────────────────────────────────────────────────
-# FOUR kinds of OPEN top-level anchors are collected, cross-rig:
+# FIVE kinds of OPEN top-level anchors are collected, cross-rig:
 #   1. epic       — every open `epic`-type bead (per-rig durable anchor).
 #   2. convoy     — OWNED convoys that are NOT under an epic (floating
-#                   "epic-improvisers"). Machine `sling-*` convoys and
-#                   un-owned convoys are excluded.
-#   3. decision   — every open `decision`-type bead (human-gated; only a
+#                   "epic-improvisers"). MACHINE convoys are transient and
+#                   excluded: `sling-*` AND the per-sling `input convoy
+#                   for …` one-child wrappers.
+#   3. unowned    — a NON-machine convoy that is NOT owned. Under the
+#                   everything-is-owned law (work-bead-state-machine.md)
+#                   every PR/branch/unit is owned by a bead, so an unowned
+#                   non-machine convoy is the orphan EXCEPTION the observer
+#                   must CATCH — surfaced HIGH, never silently dropped (the
+#                   old `owned==true` filter hid exactly this case).
+#   4. decision   — every open `decision`-type bead (human-gated; only a
 #                   human can move it).
-#   4. flagged    — any open bead with `metadata.gc.attention=1` (set by
+#   5. flagged    — any open bead with `metadata.gc.attention=1` (set by
 #                   `gc-attention flag`): a bead's LLM, or the operator,
 #                   has explicitly raised it. Flagged rows float to the
 #                   very top (their own FLAGGED band) — a hand was raised.
@@ -67,11 +74,21 @@
 #                      `progress_mismatch` in the JSON output. Decisions
 #                      and flagged beads carry no frontier (N/M = —).
 #   • open/in-progress/assigned — counts over the open frontier.
-#   • stranded       — decomposed (M>0) with open children, ZERO
+#   • stranded       — decomposed (M>0) with open children, ZERO LIVE
 #                      in-progress, AND no live host: work exists but
 #                      nothing is moving. A live host counts as moving —
 #                      the bead is worked via a resident 1:1 conversation,
-#                      not via in-progress child polecats.
+#                      not via in-progress child polecats. An in-progress
+#                      child whose OWNING session is dead (state
+#                      archived/closed/absent — keyed off .state, never
+#                      .running, per the witness orphan-liveness rule) does
+#                      NOT count as moving: it is the canonical UNKNOWN-stuck
+#                      case, so a frontier of only dead-owner children reads
+#                      stranded, not active (PROBLEM 1).
+#   • dead_owner     — count of in-progress children with a dead/absent
+#                      owner. Surfaced as "stuck (dead owner)" and never
+#                      masks a stall; the stuck ids ride into --json as
+#                      dead_owner_heads.
 #   • empty          — an epic/convoy with no children (M==0).
 #   • complete       — M>0 but every child closed (0 open): awaiting
 #                      graduation/close.
@@ -98,11 +115,14 @@
 # weight PROXY, then by staleness:
 #
 #   FLAGGED   a bead explicitly raised onto the board (hand-raised).
-#   HIGH      stranded frontier (decomposed, open, 0 in-progress, and no
-#             live host).
-#   ELEVATED  a `decision` (human-gated), OR an otherwise-NORMAL anchor
-#             gone stale (> STALE_DAYS days).
-#   NORMAL    active frontier (has in-progress work, OR a live host —
+#   HIGH      stranded frontier (decomposed, open, no LIVE in-progress, and
+#             no live host — incl. a frontier whose only in-progress
+#             children have dead owners), OR an unowned non-machine convoy
+#             (the orphan exception).
+#   ELEVATED  a `decision` (human-gated); an otherwise-NORMAL anchor gone
+#             stale (> STALE_DAYS days); OR a still-moving anchor that has a
+#             dead-owner (stuck) in-progress child to recover.
+#   NORMAL    active frontier (has LIVE in-progress work, OR a live host —
 #             someone is in the conversation).
 #   LOW       empty epic (0 children) or complete convoy (all closed).
 #
@@ -121,8 +141,10 @@
 # (one-line summary), `needs` (short hint), and `live` (host state).
 # `--json` is the stable contract for downstream tooling (the tmux
 # board picker reads it). The array is additive-only — new fields
-# (`live`, `host_session_name`, kind "flagged", severity "FLAGGED")
-# were added without changing or removing any existing field.
+# (`live`, `host_session_name`, kind "flagged", severity "FLAGGED";
+# `in_progress_live`, `in_progress_dead`, `dead_owner`, `dead_owner_heads`,
+# `owned`, kind "unowned") were added without changing or removing any
+# existing field.
 #
 # ── Row cap & cache (the board must scale) ───────────────────────────
 # The gather hits every rig's Dolt and costs ~seconds; the liveness
@@ -578,6 +600,23 @@ cmd_board() {
              value:{state:(.state//""), running:(.running//false), attached:(.attached//false)}} ]
         | from_entries' 2>/dev/null || printf '{}')
 
+    # ── Owner liveness join (child-owner state; PROBLEM 1) ────────────
+    # A child bead's `assignee` is its OWNING session — the session_name a
+    # polecat recorded when it claimed the bead (e.g.
+    # gc-toolkit__polecat-lx-bj70b), or a routed alias. To tell whether an
+    # in-progress child is actually being worked, we need its owner's session
+    # state, so map EVERY session (not just bead-hosts) by BOTH its
+    # session_name AND its alias -> state. The render keys off .state, never
+    # .running (which is null for an active session mid-churn and would
+    # false-flag a live polecat as a dead owner); an owner is dead when its
+    # state is archived/closed OR it is absent from the list entirely.
+    OWNER_MAP=$(printf '%s' "$sess_raw" | jq -c '
+        [ (.sessions // . // [])[]?
+          | (.state // "") as $st
+          | [ (.session_name // empty), (.alias // empty) ][]
+          | {key:., value:$st} ]
+        | from_entries' 2>/dev/null || printf '{}')
+
     # ── Compute facts, rank, render (single jq pass) ──────────────────
     RENDER='
 def sevrank: {"FLAGGED":4,"HIGH":3,"ELEVATED":2,"NORMAL":1,"LOW":0}[.];
@@ -585,6 +624,18 @@ def prio_w($p): (if $p==null then 1 else ([0, 4 - $p] | max) end);
 def epoch($s): ($s | if . == null or . == "" then null
                      else (sub("\\.[0-9]+";"") | sub("Z$";"") )
                           | (try (. + "Z" | strptime("%Y-%m-%dT%H:%M:%SZ") | mktime) catch null) end);
+# Is a child bead'\''s owning session alive? Keyed off .state per the witness
+# orphan-liveness rule: archived/closed/absent = dead owner (an orphaned
+# in-progress bead — the canonical UNKNOWN-stuck case). An empty assignee is
+# treated as no live owner. Never consults .running (null during churn).
+def owner_live($assignee):
+    ($assignee // "") as $a
+    | if $a == "" then false
+      else ($ownermap[$a] // null) as $st
+           | if $st == null then false
+             elif ($st == "archived" or $st == "closed") then false
+             else true end
+      end;
 
 [ inputs ]
 | map(
@@ -597,6 +648,11 @@ def epoch($s): ($s | if . == null or . == "" then null
     | [$ch[] | select(.status != "closed")] as $openset
     | ($openset|length) as $open
     | ([$ch[]|select(.status=="in_progress")]|length) as $inprog
+    # in-progress work only counts as MOVING when its owner is live; an
+    # in-progress child with a dead/absent owner is stuck, not active.
+    | ([$ch[]|select(.status=="in_progress" and owner_live(.assignee))]|length) as $inprog_live
+    | ($inprog - $inprog_live) as $inprog_dead
+    | [ $ch[] | select(.status=="in_progress" and (owner_live(.assignee)|not)) | .id ] as $dead_owner_heads
     | ([$openset[]|select((.assignee // "") != "")]|length) as $assigned
     | [ $openset[] | select((.assignee // "")=="" or .status!="in_progress") | .id ] as $open_ids
     | (epoch($a.updated_at)) as $upd
@@ -619,22 +675,27 @@ def epoch($s): ($s | if . == null or . == "" then null
     # is reserved for a decomposed anchor with open children, zero
     # in-progress, AND no live host.
     | (if $a.source=="flagged" then "FLAGGED"
+       elif $a.source=="unowned" then "HIGH"
        elif $a.source=="decision" then "ELEVATED"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
-       elif ($open>0 and $inprog==0 and $live=="cold") then "HIGH"
+       elif ($open>0 and $inprog_live==0 and $live=="cold") then "HIGH"
+       elif ($inprog_dead>0) then "ELEVATED"
        else "NORMAL" end) as $sev0
     | (if ($sev0=="NORMAL" and $stale > '"$STALE_DAYS"') then "ELEVATED" else $sev0 end) as $sev
     | ($m + prio_w($a.priority) + ([$xrefs|length, '"$XREF_CAP"'] | min)) as $weight
     # one-line frontier summary
+    | (if $inprog_dead>0 then " · \($inprog_dead) stuck (dead owner)" else "" end) as $deadsfx
     | (if $a.source=="flagged" then ("flagged: " + (($a.reason // "needs a human")[0:26]))
+       elif $a.source=="unowned" then "unowned convoy — no owning bead"
        elif $a.source=="decision" then "human-gated decision"
        elif $m==0 then "empty — no children"
        elif $open==0 then "all \($m) closed · 0 open"
-       elif ($inprog==0 and $live=="hot") then "\($open) open · in conversation"
-       elif ($inprog==0 and $live=="warm") then "\($open) open · host asleep"
-       elif $inprog==0 then "\($open) open · 0 in-progress (stranded)"
-       else "\($open) open · \($inprog) in-progress" end) as $frontier
+       elif ($inprog_live==0 and $inprog_dead>0 and $live=="cold") then "\($open) open · \($inprog_dead) stuck (dead owner)"
+       elif ($inprog_live==0 and $live=="hot") then ("\($open) open · in conversation" + $deadsfx)
+       elif ($inprog_live==0 and $live=="warm") then ("\($open) open · host asleep" + $deadsfx)
+       elif $inprog_live==0 then "\($open) open · 0 in-progress (stranded)"
+       else "\($open) open · \($inprog_live) in-progress" + $deadsfx end) as $frontier
     # The LLM-authored takeaway (host or proactive), if any: the board-visible
     # headline of what this anchor concluded / what it needs. Collapse any
     # internal whitespace (a stray newline would break the table) and trim.
@@ -646,24 +707,29 @@ def epoch($s): ($s | if . == null or . == "" then null
     # (open_heads, cross_rig_refs), so the human table stays explanatory and
     # cannot emit a raw/truncated bead-id.
     | (if ($takeaway|length) > 0 then $takeaway
+       elif $a.source=="unowned" then "unowned — assign an owning bead"
        elif $a.source=="flagged" then ("open & ratify" + (if $live=="cold" then "" else " (" + $live + ")" end))
        elif $a.source=="decision" then "operator decision"
        elif $m==0 then ("no children, " + $hostnote + " — " + (if $live=="cold" then "needs an owner" else "decompose or assign" end))
        elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
-       elif ($inprog==0 and $live=="hot") then "open to join"
-       elif ($inprog==0 and $live=="warm") then "open to resume"
-       elif $inprog==0 then "decomposed, idle — assign or host"
-       else ("in flight" + (if $live=="cold" then "" else " (" + $hostnote + ")" end)) end) as $needs
+       elif ($inprog_live==0 and $inprog_dead>0 and $live=="cold") then "dead owner — recover or reassign"
+       elif ($inprog_live==0 and $live=="hot") then "open to join"
+       elif ($inprog_live==0 and $live=="warm") then "open to resume"
+       elif $inprog_live==0 then "decomposed, idle — assign or host"
+       else (if $inprog_dead>0 then "in flight — \($inprog_dead) stuck, recover"
+             else ("in flight" + (if $live=="cold" then "" else " (" + $hostnote + ")" end)) end) end) as $needs
     | {
         id:$a.id, rig:$a.rig, kind:$a.kind, title:$a.title,
         severity:$sev, weight:$weight, live:$live,
         n_closed:$closed, m_total:$m, open:$open, in_progress:$inprog, assigned:$assigned,
-        stranded:($m>0 and $open>0 and $inprog==0 and $live=="cold"),
-        empty:($m==0 and $a.source!="decision" and $a.source!="flagged"),
+        in_progress_live:$inprog_live, in_progress_dead:$inprog_dead, dead_owner:($inprog_dead>0),
+        owned:(if ($a|has("owned")) then $a.owned else null end),
+        stranded:($m>0 and $open>0 and $inprog_live==0 and $live=="cold"),
+        empty:($m==0 and $a.source!="decision" and $a.source!="flagged" and $a.source!="unowned"),
         complete:($m>0 and $open==0),
         progress_mismatch:$pmismatch,
         stale_days:$stale, priority:$a.priority, cross_rig_refs:$xrefs,
-        open_heads:$open_ids,
+        open_heads:$open_ids, dead_owner_heads:$dead_owner_heads,
         takeaway:(if ($takeaway|length)>0 then $takeaway else null end),
         takeaway_at:(($a.takeaway_at // "") | if .=="" then null else . end),
         takeaway_by:(($a.takeaway_by // "") | if .=="" then null else . end),
@@ -681,7 +747,8 @@ def epoch($s): ($s | if . == null or . == "" then null
     else {ids:(.ids + [$r.id]), out:(.out + [$r])} end) | .out
 '
     FULL=$(jq -c -n --argjson prefixes "$PREFIXES" --argjson rignames "$RIGNAMES" \
-        --argjson now "$NOW_EPOCH" --argjson sessmap "$SESS_MAP" "$RENDER" < "$ANCHORS")
+        --argjson now "$NOW_EPOCH" --argjson sessmap "$SESS_MAP" --argjson ownermap "$OWNER_MAP" \
+        "$RENDER" < "$ANCHORS")
     TOTAL=$(printf '%s' "$FULL" | jq 'length')
     if [ "$EFFLIMIT" -gt 0 ]; then
         BOARD=$(printf '%s' "$FULL" | jq -c --argjson n "$EFFLIMIT" '.[0:$n]')
@@ -719,7 +786,7 @@ def glyph: {"hot":"●","warm":"◐","cold":"·"}[.] // "·";
         + ((if (.kind=="decision" or .kind=="flagged") then "—" else "\(.n_closed)/\(.m_total)" end)|rpad(7))
         + ((.frontier)|rpad(36)) + (.needs) )
 '
-    printf '\nLegend: FLAGGED=hand-raised · HIGH=stranded · ELEVATED=decision/stale · NORMAL=active · LOW=empty/complete\n'
+    printf '\nLegend: FLAGGED=hand-raised · HIGH=stranded/unowned · ELEVATED=decision/stale/stuck · NORMAL=active · LOW=empty/complete\n'
     printf 'Liveness: ● hot (open attaches) · ◐ warm (open resumes) · · cold (open materializes)\n'
     printf 'open <id> to land · flag <id> --reason to raise · clear <id> to lower · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
 }
@@ -777,10 +844,21 @@ gather_anchors() {
                     takeaway_by:(.metadata["gc.takeaway_by"] // "")}' >> "$ANCHORS"
     done
 
-    # Floating owned convoys (cross-rig). `gc convoy list` already
-    # aggregates across rigs. Keep owned, drop machine `sling-*`, resolve
-    # each to its rig, and confirm it is floating (parent == null).
-    convoys=$(printf '%s' "$(gcq convoy list --json)" | jq -c '[.convoys[]? | select(.owned==true) | select((.title // "") | startswith("sling-") | not)]' 2>/dev/null || printf '[]')
+    # Floating convoys (cross-rig). `gc convoy list` already aggregates across
+    # rigs. Drop MACHINE convoys — `sling-*` AND the per-sling `input convoy
+    # for …` one-child wrappers, both transient/auto — then keep the rest,
+    # resolve each to its rig, and confirm it is floating (parent == null).
+    # An OWNED convoy is a floating epic-improviser anchor (kind "convoy"); a
+    # NON-machine convoy that is NOT owned is the orphan EXCEPTION (kind
+    # "unowned") the observer SURFACES instead of dropping — under the
+    # everything-is-owned law every PR/unit is owned by a bead, so an unowned
+    # non-machine convoy is exactly what the observer must catch (PROBLEM 2).
+    # (Old behavior `select(.owned==true)` silently hid that exception and let
+    # the new `input convoy for …` machine kind through only by accident.)
+    convoys=$(printf '%s' "$(gcq convoy list --json)" | jq -c '
+        [ .convoys[]?
+          | select((.title // "") | startswith("sling-") | not)
+          | select((.title // "") | startswith("input convoy for") | not) ]' 2>/dev/null || printf '[]')
     printf '%s' "$convoys" | jq -c '.[]' | while IFS= read -r convoy; do
         cid=$(printf '%s' "$convoy" | jq -r '.id')
         cprefix=${cid%%-*}
@@ -796,10 +874,15 @@ gather_anchors() {
         parent=$(printf '%s' "$show" | jq -r '.[0].parent // empty')
         [ -z "$parent" ] || continue
 
+        # owned → floating epic-improviser (kind "convoy"); unowned non-machine
+        # → the orphan exception (kind "unowned"). Carry the bool so the render
+        # ranks the exception HIGH instead of letting it pass as a normal row.
+        owned=$(printf '%s' "$convoy" | jq -r 'if .owned==true then "true" else "false" end')
         printf '%s' "$show" | jq -c \
-            --argjson cv "$convoy" --arg rig "$name" --arg prefix "$cprefix" \
+            --argjson cv "$convoy" --arg rig "$name" --arg prefix "$cprefix" --argjson owned "$owned" \
             '.[0] as $b
-             | {id:$cv.id, title:($cv.title//$b.title//""), kind:"convoy", source:"convoy",
+             | (if $owned then "convoy" else "unowned" end) as $kind
+             | {id:$cv.id, title:($cv.title//$b.title//""), kind:$kind, source:$kind, owned:$owned,
                 rig:$rig, prefix:$prefix, priority:($b.priority//3),
                 updated_at:($b.updated_at//""), description:($b.description//""),
                 progress:($cv.progress // null),
