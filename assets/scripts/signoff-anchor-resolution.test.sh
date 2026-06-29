@@ -13,8 +13,8 @@
 #
 # The bug this guards (PR#163 signoff finding): if completion resolves the
 # anchor ONLY by the best-effort BLOCKS edge and that edge was dropped, ANCHOR
-# is empty, signoff_head is never stamped, and reconcile-merged-prs.sh holds
-# auto-merge forever ("no signoff yet") with nothing to re-dispatch the review.
+# is empty, signoff_head is never stamped, and the merge skill holds the merge
+# forever ("no signoff yet") with nothing to re-dispatch the review.
 # The fix is a durable metadata.anchor_bead fallback, resolved when the edge is
 # missing.
 #

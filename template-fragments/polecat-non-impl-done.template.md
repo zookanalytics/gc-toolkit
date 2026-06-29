@@ -100,13 +100,13 @@ the `blocks` dep the refinery attached (`gc bd dep <review> --blocks <anchor>`):
 
 - **APPROVE/COMMENT** — the signoff passes on the **current** head. Stamp the
   head you signed off as `signoff_head` on the anchor (this is the check-set's
-  *title/description validated-current* member: it tells the merge reconcile
-  that the latest commit — title + body included — was reviewed, so auto-merge
+  *title/description validated-current* member: it tells the merge skill
+  that the latest commit — title + body included — was reviewed, so the merge
   may fire). The PR is already non-draft; nothing else to publish.
 - **REQUEST_CHANGES** — file a **new rework child** against the anchor (rework
   is a new child, never the same bead reopened and never a cleared marker; see
   docs/work-bead-state-machine.md). Clear `signoff_head` so the now-unvalidated
-  head cannot auto-merge.
+  head cannot be merged.
 
 After posting the verdict via `gh pr review` (step 1 above) and BEFORE closing
 the REVIEW bead (step 3 above), act on it:
@@ -121,8 +121,8 @@ PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
 #      dispatch stamps atomically with the review's routing fields.
 # The edge is attached best-effort at dispatch (a failed edge must not strand
 # the PR). But if the edge is dropped and we resolve ONLY via it, ANCHOR is
-# empty, signoff_head is never stamped, and reconcile-merged-prs.sh holds
-# auto-merge forever ("no signoff yet") — nothing re-dispatches the review, so
+# empty, signoff_head is never stamped, and the merge skill holds the merge
+# forever ("no signoff yet") — nothing re-dispatches the review, so
 # the PR is stuck. The anchor_bead fallback survives a lost edge. The markers
 # below let the regression test extract and exercise this exact snippet
 # (assets/scripts/signoff-anchor-resolution.test.sh).
@@ -137,15 +137,15 @@ if [ -n "$FIX_POOL" ]; then
   case "$VERDICT" in
     APPROVE|COMMENT)
       # Record which head the signoff validated — the title/description-current
-      # check. reconcile-merged-prs.sh enables auto-merge only while
-      # signoff_head still equals the PR's live head; any later commit makes it
-      # stale and re-gates the merge. Best-effort; a miss just defers auto-merge
-      # to the next signoff round, it never merges prematurely.
+      # check. The merge skill merges only while signoff_head still equals the
+      # PR's live head; any later commit makes it stale and re-gates the merge.
+      # Best-effort; a miss just defers the merge to the next signoff round, it
+      # never merges prematurely.
       if [ -n "$ANCHOR" ]; then
         # Stamp the EXACT commit the signoff reviewed, read from the reviews API
         # (.commit_id) — NOT the PR's live head. The head can advance between the
         # review and this stamp; stamping the live head would mark an UNREVIEWED
-        # commit as signoff-validated and let it auto-merge, defeating the
+        # commit as signoff-validated and let it merge, defeating the
         # stale-head guard. GitHub attaches the review to the head at submission,
         # so .commit_id is exactly what was reviewed: a commit pushed afterward
         # leaves signoff_head != live head and correctly re-gates the merge. Take
@@ -158,8 +158,8 @@ if [ -n "$FIX_POOL" ]; then
           --set-metadata signoff_head="$REVIEWED_OID" >/dev/null 2>&1 || true
       fi
       # The PR is already non-draft (drafts are retired). The signoff_head stamp
-      # above is the only action: it lets reconcile-merged-prs.sh queue auto-merge
-      # once the head it validated is still live.
+      # above is the only action: it lets the merge skill merge the PR once the
+      # head it validated is still live.
       ;;
     REQUEST_CHANGES)
       # Rework is a NEW child of the anchor, not the same anchor reopened and
