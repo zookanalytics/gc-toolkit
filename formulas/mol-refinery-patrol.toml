@@ -92,7 +92,7 @@ description = "After a successful direct merge, attempt to fast-forward the rig'
 default = "true"
 
 [vars.review_gate]
-description = "Signoff gate for mr-mode PRs. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member; the PR opens non-draft and auto-merge is held until the signoff validates the head (signoff_head). Empty disables the gate."
+description = "Signoff gate for mr-mode PRs. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member; the PR opens non-draft and the merge is held until the signoff validates the head (signoff_head). Empty disables the gate."
 default = "codex"
 
 [[steps]]
@@ -172,28 +172,42 @@ sleep {{event_timeout}}
 ```
 
 **2. Reconcile state (best-effort, every idle wake).** Two convergent
-passes run here on the idle cadence: (a) close-on-land — close gating anchors
-whose PR has merged, flag out-of-band-closed PRs, and queue auto-merge for
-signoff-validated ready ones, and (b) graduate owned integration convoys whose
-members are now all closed. Both are the net for single best-effort one-shots
+passes run here on the idle cadence: (a) close-on-land — the merge skill lands
+each ready gating anchor (validate -> merge -> record) and the detect-only
+observer closes anchors whose PR merged and flags out-of-band-closed PRs, and
+(b) graduate owned integration convoys whose members are now all closed. Both
+are the net for single best-effort one-shots
 that can fail for any reason. The find-work idle loop is the ONLY thing that
 runs on the {{event_timeout}} cadence when the refinery is idle, so the
 reconcile lives here rather than in a standalone step that idle would never
 reach.
 
-Pass (a) — close-on-land (`reconcile-merged-prs.sh`). mr-mode keeps the anchor
-(a convoy graduating, or any mr-mode bead) OPEN as the PR's gating bead
-(merge-push step 4); this pass is what later closes it. For each open gating
-anchor (`merge_result=pull_request`) it reads the PR: merged -> close the bead
-`"Merged to <target> at <sha>"` (mirroring direct-mode); closed-unmerged ->
+Pass (a) — close-on-land, in two roles. mr-mode keeps the anchor (a convoy
+graduating, or any mr-mode bead) OPEN as the PR's gating bead (merge-push step
+4); this pass is what later lands and closes it.
+
+(a0) The MERGE SKILL (`merge-skill.sh`) — the single writer of merged-truth. For
+each open gating anchor whose PR is open+ready it runs validate -> merge ->
+record: validate the live base == the anchor's `merged_target`, the live head ==
+`signoff_head` (the check-set's title/description-current member, so a stale
+approval or a post-signoff rework commit cannot merge early), no open rework
+child holds the PR, and `mergeStateStatus == CLEAN` (CI + approval + base-current
++ no-conflict); then an EXPLICIT `gh pr merge --squash` (NOT auto-merge); then
+close the bead `"Merged to <target> at <sha>"` + stamp `merge_result=merged`. The
+refinery is the single writer — it does not delegate the landing to GitHub
+auto-merge and poll. This RETIRES `gh pr merge --auto` as the main-PR path.
+
+(a1) The detect-only OBSERVER (`reconcile-merged-prs.sh`) — runs AFTER the skill,
+with NO merge authority. For each open gating anchor (`merge_result=pull_request`)
+it reads the PR: merged -> close the bead `"Merged to <target> at <sha>"`
+(mirroring direct-mode; the convergent record + the backstop for a skill that
+died between merging and recording, or an out-of-band merge); closed-unmerged ->
 out-of-band close (the refinery did not do it; route to human, escalate once);
-open+ready -> queue `gh pr merge --auto` ONLY while the live head is
-signoff-validated (`signoff_head` == headRefOid — the check-set's
-title/description-current member, so a stale approval or a post-signoff rework
-commit cannot merge early); open+draft -> skip (drafts are retired, so no PR is
-created draft; a stray draft is left untouched). Enumerated by bead so each PR
-resolves in-repo. Convergent + cheap — one `gh pr view` per anchor, anchors are
-few. See docs/work-bead-state-machine.md.
+open+ready -> leave it for the skill; open+draft -> skip (drafts are retired, so
+no PR is created draft; a stray draft is left untouched); retargeted (live base
+!= `merged_target`) -> never close as landed, route to human, escalate once.
+Enumerated by bead so each PR resolves in-repo. Convergent + cheap — one `gh pr
+view` per anchor, anchors are few. See docs/work-bead-state-machine.md.
 
 Pass (b) — convoy graduation (`reconcile-graduated-convoys.sh`, gated on
 `integration_branch_auto_land`). The same machine ONE LEVEL UP. Runs AFTER pass
@@ -224,10 +238,25 @@ for cand in "${GC_RIG_ROOT:-}/assets/scripts" \
   if [ -x "$cand/reconcile-merged-prs.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
 done
 if [ -n "$SCRIPTS_DIR" ]; then
-  # Both passes are best-effort: a failed pass is retried next idle wake and
+  # All passes are best-effort: a failed pass is retried next idle wake and
   # never blocks find-work.
-  # (a) Close-on-land: close gating anchors whose PR merged, flag out-of-band
-  #     closed PRs to human, queue auto-merge for signoff-validated ready ones.
+  # (a0) Merge skill: the single writer of merged-truth. For each ready gating
+  #      anchor it runs validate -> merge -> record — an EXPLICIT `gh pr merge
+  #      --squash`, NOT GitHub auto-merge. Runs BEFORE the observer so a ready PR
+  #      lands and records in this same pass; the observer is then the convergent
+  #      backstop. -x guard: importer rigs that have not yet synced this script
+  #      degrade to the observer-only passes (a ready PR simply waits for the
+  #      synced pack rather than landing via the retired auto-merge path).
+  if [ -x "$SCRIPTS_DIR/merge-skill.sh" ]; then
+    "$SCRIPTS_DIR/merge-skill.sh" \
+      || echo "merge-skill: pass failed (non-fatal); retries next idle wake" >&2
+  else
+    echo "merge-skill: merge-skill.sh not found in $SCRIPTS_DIR; ready PRs wait for a synced pack (auto-merge retired)" >&2
+  fi
+  # (a1) Close-on-land OBSERVER (detect-only): close gating anchors whose PR
+  #      merged (the convergent record + backstop for a skill that died between
+  #      merging and recording), flag out-of-band-closed / retargeted PRs to
+  #      human. NO merge authority — it never runs `gh pr merge`.
   "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
     || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
   # (b) Convoy graduation: assign each OWNED integration convoy whose members
@@ -938,7 +967,7 @@ when present.
 
 The PR always opens non-draft — every PR that exists is a real candidate.
 When `review_gate = "codex"` the signoff gate (dispatched in step 4) holds
-the merge instead: auto-merge stays held until the signoff validates the
+the merge instead: the merge stays held until the signoff validates the
 head, so no draft state is needed to gate readiness.
 
 ```bash
@@ -1185,7 +1214,7 @@ if [ "{{review_gate}}" = "codex" ]; then
     # still routes), so we only warn. The completion path does not depend on the
     # edge alone — it falls back to metadata.anchor_bead (stamped above) so a
     # dropped edge cannot leave the anchor un-signoff-stamped and hold
-    # auto-merge forever.
+    # the merge forever.
     gc bd dep "$REVIEW_BEAD" --blocks "$WORK" \
       || echo "WARN: could not attach review $REVIEW_BEAD as a gate-dep of $WORK (anchor_bead fallback persists the link)" >&2
     gc session wake "$CODEX_POOL" || true
@@ -1209,8 +1238,8 @@ REVIEW_GATE="{{review_gate}}"
 # persisted. If it cannot be recorded, leave $WORK assigned to the refinery and
 # OPEN; the next patrol retries (idempotent: the EXISTING_REVIEW guard + this
 # heal converge). Detaching with no recoverable anchor would strand the PR: the
-# signoff could not stamp signoff_head and reconcile-merged-prs.sh would hold
-# auto-merge forever. The markers let the regression test extract this exact
+# signoff could not stamp signoff_head and the merge skill would hold the
+# merge forever. The markers let the regression test extract this exact
 # snippet (assets/scripts/signoff-anchor-failclosed.test.sh).
 # >>> signoff-anchor-failclosed
 # Finding fix #3 (codex gate requires a review id): an empty REVIEW_FOR_GATE in
@@ -1219,8 +1248,8 @@ REVIEW_GATE="{{review_gate}}"
 # set -e), so REVIEW_BEAD and EXISTING_REVIEW are both empty. The no-op path below
 # (`if [ -n ... ]`) would then SKIP the gate and fall through to the gating
 # transition, detaching the anchor with no review bead. That strands the PR
-# exactly like the unrecorded-anchor case: reconcile-merged-prs.sh holds
-# auto-merge waiting for signoff_head, but no review bead exists to ever stamp it.
+# exactly like the unrecorded-anchor case: the merge skill holds the merge
+# waiting for signoff_head, but no review bead exists to ever stamp it.
 # Fail closed — leave $WORK assigned to the refinery and OPEN so the next patrol
 # retries (idempotent: the EXISTING_REVIEW guard heals on retry). Non-codex gates
 # legitimately have no review bead, so this fires ONLY when codex review is the

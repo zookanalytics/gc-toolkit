@@ -332,7 +332,7 @@ Stock GasTown mr-mode closes the work bead at **PR-creation**. gc-toolkit keeps
 the bead **open through gating and closes it on land**, so `closed` always means
 landed and the dependency graph always shows which bead owns which PR. This is a
 **pack-only delta** — it lives entirely in the `mol-refinery-patrol` formula and
-its reconcile scripts (`reconcile-merged-prs.sh`,
+its merge skill + reconcile scripts (`merge-skill.sh`, `reconcile-merged-prs.sh`,
 `reconcile-graduated-convoys.sh`); gascity core is untouched and gains no new
 status (`gating` is a metadata marker on an ordinary `open` bead).
 **Direct-mode beads are unchanged.**
