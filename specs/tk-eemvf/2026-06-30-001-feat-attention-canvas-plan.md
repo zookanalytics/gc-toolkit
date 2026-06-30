@@ -4,7 +4,7 @@ status: active
 date: 2026-06-30
 deepened: 2026-06-30
 origin: "bead tk-eemvf (gc-toolkit) — Attention Canvas design epic"
-target_repo: gc-toolkit rig (rigs/gc-toolkit). Paths are repo-relative to that rig unless prefixed `city:` (the town root city.toml / city-scoped pack).
+target_repo: gc-toolkit rig (rigs/gc-toolkit). Paths are repo-relative to that rig (`services/…`, `assets/…`, `docs/…`, `specs/…`) unless prefixed `city:`, which marks a town-root path — the town `city.toml`, a city-scoped pack/service, another rig (`city:rigs/gascity/…`), or a town-root file (`city:build-optimized.sh`, `city:setup/`). Bare code-probe pointers into gascity core (`internal/…`, `cmd/…`) are relative to the gascity rig root.
 ---
 
 # feat: Attention Canvas — spatial operator dashboard
@@ -37,17 +37,17 @@ The Attention Canvas is the GUI surface of that same model. It must let the oper
 - **R4** — Pack-local: no fork of gascity core (no new native `/v0` route, no edit to the stock `gc dashboard`). (origin: tk-eemvf — foundation "augment, don't fork core")
 - **R5** — Retire `gc-attention.sh`: its model is reimplemented in Go; the production service does not shell the bash script.
 - **R6** — Drill-in plane: from a tile, dive to live detail (bead/session state, live activity) and an embedded live terminal.
-- **R7** — Honor the foundation philosophy: pull-not-interrupt; perceptual/spatial grounding is the "context trigger," not notifications. (origin: tk-eemvf; rigs/gc-toolkit/docs/foundation.md)
+- **R7** — Honor the foundation philosophy: pull-not-interrupt; perceptual/spatial grounding is the "context trigger," not notifications. (origin: tk-eemvf; docs/foundation.md)
 - **R8** — The board's JSON contract is **typed and additive-only**, and is the single contract the frontend mirrors.
 
 ---
 
 ## Key Technical Decisions
 
-- **KTD1 — Web, not native; Vite + React + TS; mirror `gc dashboard`.** The stock dashboard is already a Vite/TS bundle, `go:embed`-served by a near-static Go handler, with the browser talking directly to the supervisor `:8372` (typed `openapi-fetch` client + SSE). We mirror that shape and add React for the canvas/terminal libs (tldraw/xyflow, xterm.js are React-first). *Rationale + alternatives:* see Alternatives. (probe: rigs/gascity/cmd/gc/dashboard/)
+- **KTD1 — Web, not native; Vite + React + TS; mirror `gc dashboard`.** The stock dashboard is already a Vite/TS bundle, `go:embed`-served by a near-static Go handler, with the browser talking directly to the supervisor `:8372` (typed `openapi-fetch` client + SSE). We mirror that shape and add React for the canvas/terminal libs (tldraw/xyflow, xterm.js are React-first). *Rationale + alternatives:* see Alternatives. (probe: city:rigs/gascity/cmd/gc/dashboard/)
 - **KTD2 — Board service = long-lived Go `proxy_process` workspace-service.** Verified long-lived (spawned once, Unix-socket reverse-proxied, health-checked, auto-restart on crash) — so it holds an in-memory cache across requests. Reached at `/v0/city/<cityName>/svc/attention/...`. (probe: internal/workspacesvc/proxy_process.go)
 - **KTD3 — Data path v1 = the supervisor loopback HTTP API** (`http://127.0.0.1:<api-port>/v0/city/<cityName>/...`), behind an internal `Source` interface. The supervisor base URL is passed explicitly as a `--supervisor http://127.0.0.1:8372` command arg — **NOT auto-discovered** (`gc dashboard` actually requires `--api` / `cfg.API.Port`, a gascity-internal call the standalone module can't import; the `proxy_process` env carries no api port; `:8372` lives in the supervisor launch config, not `city.toml`, which has no `[api]` section). Probe-confirmed sufficient for the whole model. Honors R3 (the supervisor API is a Gas City API). The **only** contract-compliant escalation if perf ever bites is the in-process beads library API ("through beads") or a sanctioned new Gas City endpoint — **never raw Dolt SQL.** (probe: internal/api/huma_handlers_beads.go, _convoys.go, _sessions_query.go)
-- **KTD4 — `[[service]]` must be declared at CITY scope, not in the rig-imported gc-toolkit pack.** `[[service]]` is forbidden in rig-imported packs; gc-toolkit is rig-imported. The Go binary lives in `rigs/gc-toolkit/`; the `[[service]]` stanza lives in the city root pack (`city:city.toml`), and **`command` resolves from the CITY ROOT** (`cmd.Dir` = `~/loomington`, NOT the gc-toolkit dir), so it must be city-root-relative: `command = ["rigs/gc-toolkit/services/attention/attention-svc", "--supervisor", "http://127.0.0.1:8372"]`. (probe: internal/config/pack.go:166,300; compose.go:261-271; proxy_process.go:349-354)
+- **KTD4 — `[[service]]` must be declared at CITY scope, not in the rig-imported gc-toolkit pack.** `[[service]]` is forbidden in rig-imported packs; gc-toolkit is rig-imported. The Go binary lives in `city:rigs/gc-toolkit/`; the `[[service]]` stanza lives in the city root pack (`city:city.toml`), and **`command` resolves from the CITY ROOT** (`cmd.Dir` = `~/loomington`, NOT the gc-toolkit dir), so it must be city-root-relative: `command = ["rigs/gc-toolkit/services/attention/attention-svc", "--supervisor", "http://127.0.0.1:8372"]`. (probe: internal/config/pack.go:166,300; compose.go:261-271; proxy_process.go:349-354)
 - **KTD5 — The service `go:embed`s the Vite build and serves the SPA at its mount root, plus the `/attention` API.** One artifact. Because the mount path (`/v0/city/<cityName>/svc/attention/`) contains a runtime city name, the SPA injects a **`<base href>` tag from the `GC_SERVICE_URL_PREFIX` env** (the supervisor provides it; mirrors the stock dashboard's `supervisor-url` injection) — more robust than Vite `base: "./"`, which 404s on a bare `…/svc/attention` URL with no trailing slash (assets resolve to `…/svc/assets/…`). Also 301-redirect the bare mount to the trailing-slash form. (The stock dashboard hardcodes root and cannot be sub-path-mounted — we deliberately diverge.)
 - **KTD6 — Two contracts, two data origins for the frontend.** Board tiles come from *this service* (`/svc/attention/attention`), typed by a hand-written TS type mirroring the Go board struct (the `/svc/` surface is absent from the supervisor OpenAPI). Drill-in/live + terminal come from the *supervisor* `:8372` (free OpenAPI-typed client + SSE) and *ttyd* (`/terminal`) respectively.
 - **KTD7 — Poll with server-side cache now; structure for event-push later.** The board is a poll snapshot with a short server-side TTL cache (replacing the bash 45s file cache). Leave a seam for supervisor SSE (`/v0/events/stream`) to invalidate the cache / push later.
@@ -87,7 +87,7 @@ Plane 1 (board tiles) is the new build. Plane 2 (drill-in/live) and Plane 3 (ter
 ## Output Structure
 
 ```
-rigs/gc-toolkit/services/attention/
+services/attention/
   go.mod                      # standalone module; NO gascity-internal imports (talks to the supervisor over HTTP)
   main.go                     # GC_SERVICE_SOCKET listener, health, route mount, SIGTERM
   internal/
@@ -98,7 +98,7 @@ rigs/gc-toolkit/services/attention/
   web/                        # Vite + React + TS SPA (base: "./")
     src/
     dist/                     # built bundle, go:embed-ed by main.go
-rigs/gc-toolkit/docs/design/  # Claude Design input bundle (parallel track)
+specs/tk-eemvf/design/        # Claude Design input bundle (this PR; parallel track)
 city:city.toml                # [[service]] name="attention" kind="proxy_process" (city-scoped)
 ```
 
@@ -128,7 +128,7 @@ Units are grouped into phases. Backend phases (U1–U4) are detailed; frontend/d
 - **Dependencies:** U1.
 - **Files:** `services/attention/internal/source/source.go` (interface), `source/supervisor.go` (impl), `source/supervisor_test.go`.
 - **Approach:** Define `Source` with methods for: open epics (`GET /beads?type=epic`), all-status child roll-up (`GET /beads/graph/{id}` — NOT `/deps`, which omits closed), owned convoys (`GET /convoys` + `GET /convoy/{id}` for dependents + Progress{Total,Closed}), `gc:wait` (`GET /beads?label=`), flagged (`GET /beads` then in-process `gc.attention=1` filter — no server-side metadata filter), session liveness (`GET /sessions?view=full` — the only source of live running/attached). Take the supervisor base URL from the `--supervisor` arg (KTD3) — there is no auto-discovery path. Treat `Partial`/`PartialErrors` as first-class (degrade the row, don't fail the board).
-- **Patterns to follow:** the stock dashboard's typed client construction (rigs/gascity/cmd/gc/dashboard/web/src/api.ts) for endpoint shapes; loopback is always host-allowlisted.
+- **Patterns to follow:** the stock dashboard's typed client construction (city:rigs/gascity/cmd/gc/dashboard/web/src/api.ts) for endpoint shapes; loopback is always host-allowlisted.
 - **Test scenarios:** each method against recorded supervisor JSON fixtures; a rig-store-unhealthy partial response degrades one tile and still returns the board; api-port discovery fallback path; the `Source` interface is satisfied by a mock for downstream tests.
 - **Verification:** all model inputs obtainable through `Source`; no raw Dolt/SQL anywhere (R3 audit: grep the module for `sql.Open`/`mysql`/`dolt` → none); **supervisor-vs-bash anchor-set equivalence** confirmed on the same live store (the bash gathers via per-rig `gc bd list --db` and swaps the child-rollup to `/beads/graph` — verify the supervisor-sourced anchor set matches the bash set; golden parity alone can't catch a source divergence).
 
@@ -159,7 +159,7 @@ Units are grouped into phases. Backend phases (U1–U4) are detailed; frontend/d
 - **Requirements:** R1, R2, KTD5.
 - **Dependencies:** U4 (contract); design handoff (visual direction).
 - **Files:** `services/attention/web/` (Vite app, `base: "./"`), `services/attention/main.go` (add `go:embed web/dist` + static serve at mount root).
-- **Approach:** Mirror rigs/gascity/cmd/gc/dashboard structure (embed + serve + one meta-injection if needed for the supervisor base URL). Relative asset base for sub-path mounting (KTD5).
+- **Approach:** Mirror city:rigs/gascity/cmd/gc/dashboard structure (embed + serve + one meta-injection if needed for the supervisor base URL). Relative asset base for sub-path mounting (KTD5).
 - **Test scenarios:** build embeds; assets resolve under a `/svc/attention/`-style prefix (not just root). *(Visual behavior tested in U6.)*
 - **Verification:** SPA loads through the tailscale origin at the service mount.
 
@@ -203,7 +203,7 @@ Units are grouped into phases. Backend phases (U1–U4) are detailed; frontend/d
 - **Goal:** Production wiring: the city-scoped `[[service]]` declaration, a build step for the Go binary + Vite bundle, and verified reachability through tailscale.
 - **Requirements:** R2, R4, KTD4, KTD5.
 - **Dependencies:** U4 (real service), U5 (embedded SPA).
-- **Files:** `city:city.toml` ([[service]] final), a build wrapper (mirror loomington/build-optimized.sh patterns for a new artifact), `setup/` step if a systemd/tailscale change is needed.
+- **Files:** `city:city.toml` ([[service]] final), a build wrapper (mirror `city:build-optimized.sh` patterns for a new artifact), `city:setup/` step if a systemd/tailscale change is needed.
 - **Approach:** Finalize the city-root-relative `command` with `--supervisor` (KTD3/KTD4); `health_path=/healthz`. The city.toml edit + supervisor restart is **operator-gated** (CoreFingerprint drift drains sessions; whole-town bounce — see Risks). Verify `/svc/attention/` is covered by the existing `/v0` tailscale route AND admitted by the loopback private-service guard. Document the portability caveat (a city importing gc-toolkit must declare the service itself) and the redeploy mechanism (iterating the binary needs the service/supervisor restarted to pick it up).
 - **Test scenarios:** service comes up under the supervisor; health green; reachable loopback + tailscale; survives supervisor restart.
 
@@ -279,11 +279,11 @@ Units are grouped into phases. Backend phases (U1–U4) are detailed; frontend/d
 
 ## Sources & Research
 
-Five code probes this session (rigs/gascity unless noted):
+Five code probes this session (gascity core unless noted; per the path convention, bare `internal/…`/`cmd/…` are relative to the gascity rig root):
 1. **Dashboard arch** — cmd/gc/dashboard/ (go:embed Vite SPA on :8080; browser→:8372 typed client + SSE; root-path-only via Vite base).
 2. **Supervisor extensibility** — internal/api supervisor route registration (typed `/v0` routes hardcoded = fork to add); `proxy_process` `/svc/` seam is the sanctioned non-fork extension (supervisor.go:176 → handler_services.go → workspacesvc/proxy_process.go; pack services merged compose.go:258-271).
-3. **Attention data contract** — rigs/gc-toolkit/assets/scripts/gc-attention.sh (pure `gc`-CLI aggregation; fields; poll model + 45s file cache).
+3. **Attention data contract** — `assets/scripts/gc-attention.sh` (gc-toolkit-local; pure `gc`-CLI aggregation; fields; poll model + 45s file cache).
 4. **proxy_process lifecycle** — internal/workspacesvc/proxy_process.go (long-lived; `GC_SERVICE_SOCKET`; 5s ready; health_path; auto-restart).
 5. **Endpoint sufficiency** — internal/api/huma_handlers_beads.go/_convoys.go/_sessions_query.go (cross-rig union server-side; `/beads/graph` for all-status roll-up; no server-side metadata filter; `/sessions?view=full` = only live running/attached source; partial-aggregation semantics).
 
-Foundation/philosophy: rigs/gc-toolkit/docs/foundation.md. Origin epic + recorded decisions: bead `tk-eemvf`. Precedent: bead `tk-q4xaj`. In-flight: bead `tk-sy3vj` (U1).
+Foundation/philosophy: `docs/foundation.md`. Origin epic + recorded decisions: bead `tk-eemvf`. Precedent: bead `tk-q4xaj`. In-flight: bead `tk-sy3vj` (U1).

@@ -6,9 +6,16 @@ This folder is the **input bundle** for a visual-exploration session in
 - `attention-canvas-design-brief.md` — the heart: purpose, soul, jobs, the
   canvas idiom, the data, the bar, and the open questions. **Read this first.**
 - `attention-board-sample.json` — a **real** captured snapshot of the data the
-  tiles render (11 anchors, every severity band, both liveness states, four
-  projects). Prototype against this; it's the exact `--json` contract the live
-  app will consume. Mock more tiles in the same shape if you need volume.
+  tiles render: 11 anchors across four rigs, covering four of the five severity
+  bands (`HIGH`, `ELEVATED`, `NORMAL`, `LOW` — no `FLAGGED`) and two of the
+  three liveness states (`cold`, `hot` — no `warm`). It captures the **current**
+  `gc-attention --json` output: a top-level ranked **array** of tiles (the
+  bash-PoC contract). The planned attention **service** (plan U1/U4) serves
+  those same tiles inside a typed **envelope** `{generated_at, total, tiles[]}`,
+  so the **per-tile** field shape is what's stable across both — prototype
+  against the tiles. Mock more in the same shape for volume, including the two
+  rare states this snapshot lacks (a `FLAGGED` hand-raised tile, a `warm`
+  suspended-host tile) — the brief asks you to design those bands anyway.
 - `how-to.md` — this file.
 
 ---
