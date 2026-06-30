@@ -159,6 +159,19 @@ func TestGatherDegradesOnPartialFailure(t *testing.T) {
 	}
 }
 
+func TestGatherErrorsOnTotalOutage(t *testing.T) {
+	// A server that 500s every request stands in for a fully unreachable
+	// supervisor: no fetch succeeds, so Gather must error (server -> 502) rather
+	// than return an empty board that reads as "nothing needs attention".
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	if _, err := newTestSource(t, srv).Gather(context.Background()); err == nil {
+		t.Error("expected an error when every fetch fails (total outage)")
+	}
+}
+
 func TestAliasBeadID(t *testing.T) {
 	cases := map[string]string{
 		"gc-toolkit.tk-flaghot":          "tk-flaghot",

@@ -41,8 +41,9 @@ func main() {
 		log.Fatal("GC_SERVICE_SOCKET is not set; run me as a proxy_process workspace-service")
 	}
 
+	ttl := cacheTTL()
 	src := source.NewSupervisorSource()
-	srv := server.New(src, cacheTTL())
+	srv := server.New(src, ttl)
 
 	// The supervisor removes any stale socket before spawning us, so we own
 	// creation. net.Listen("unix") unlinks the socket on close.
@@ -68,7 +69,7 @@ func main() {
 		_ = httpServer.Shutdown(shutCtx)
 	}()
 
-	log.Printf("serving attention board on %s (cache ttl %s)", socket, cacheTTL())
+	log.Printf("serving attention board on %s (cache ttl %s)", socket, ttl)
 	if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("serve: %v", err)
 	}

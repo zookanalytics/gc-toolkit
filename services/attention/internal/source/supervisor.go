@@ -231,6 +231,7 @@ type gatherState struct {
 	anchors     []board.Anchor
 	partial     bool
 	partialErrs []string
+	anyOK       bool // at least one fetch succeeded — distinguishes partial from total outage
 }
 
 func (g *gatherState) note(partial bool, errs []string) {
@@ -239,6 +240,10 @@ func (g *gatherState) note(partial bool, errs []string) {
 	}
 	g.partialErrs = append(g.partialErrs, errs...)
 }
+
+// ok records a successful fetch. If no fetch succeeds, Gather treats the gather
+// as a total outage and errors rather than returning a misleading empty board.
+func (g *gatherState) ok() { g.anyOK = true }
 
 // rigOf resolves a bead's rig name from its id prefix (e.g. "su-lou" -> "su" ->
 // "shutupandlisten"). Falls back to the bare prefix when unknown.
@@ -265,6 +270,7 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 	if err := s.getJSON(ctx, "/rigs", &rigs); err != nil {
 		g.note(true, []string{"rigs: " + err.Error()})
 	} else {
+		g.ok()
 		for _, r := range rigs.Items {
 			if r.Prefix != "" {
 				g.rigByPrefix[r.Prefix] = r.Name
@@ -276,9 +282,13 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 	s.gatherDecisions(ctx, g)
 	s.gatherFlagged(ctx, g)
 	s.gatherConvoys(ctx, g)
+	sessions := s.gatherSessions(ctx, g)
 
-	sessions, sPartial, sErrs := s.gatherSessions(ctx)
-	g.note(sPartial, sErrs)
+	// Every fetch failed — the supervisor is unreachable, not merely degraded.
+	// Error so the server returns 502 instead of a misleading empty board.
+	if !g.anyOK {
+		return nil, fmt.Errorf("supervisor unreachable: %s", strings.Join(g.partialErrs, "; "))
+	}
 
 	return &Result{
 		Anchors:       g.anchors,
@@ -295,6 +305,7 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 		return
 	}
 	g.note(epics.Partial, epics.PartialErrors)
+	g.ok()
 	for _, e := range epics.Items {
 		rig, prefix := g.rigOf(e.ID)
 		children := s.epicChildren(ctx, g, e.ID)
@@ -342,6 +353,7 @@ func (s *SupervisorSource) gatherDecisions(ctx context.Context, g *gatherState) 
 		return
 	}
 	g.note(decisions.Partial, decisions.PartialErrors)
+	g.ok()
 	for _, d := range decisions.Items {
 		rig, prefix := g.rigOf(d.ID)
 		g.anchors = append(g.anchors, board.Anchor{
@@ -373,6 +385,7 @@ func (s *SupervisorSource) gatherFlagged(ctx context.Context, g *gatherState) {
 			return
 		}
 		g.note(env.Partial, env.PartialErrors)
+		g.ok()
 		for _, b := range env.Items {
 			if b.Metadata["gc.attention"] != "1" {
 				continue
@@ -420,6 +433,7 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 		return
 	}
 	g.note(convoys.Partial, convoys.PartialErrors)
+	g.ok()
 	for _, c := range convoys.Items {
 		if c.Parent != "" || strings.HasPrefix(c.Title, "sling-") {
 			continue
@@ -456,12 +470,15 @@ func (s *SupervisorSource) convoyChildren(ctx context.Context, g *gatherState, c
 // alias is <pack>.<bead-id>; the key is the bead-id (everything after the first
 // dot), matching gc-attention.sh's alias strip. Only sessions whose template
 // names a bead-host are joined.
-func (s *SupervisorSource) gatherSessions(ctx context.Context) (map[string]board.HostSession, bool, []string) {
+func (s *SupervisorSource) gatherSessions(ctx context.Context, g *gatherState) map[string]board.HostSession {
+	out := map[string]board.HostSession{}
 	var env sessionsEnvelope
 	if err := s.getJSON(ctx, "/sessions?view=full", &env); err != nil {
-		return map[string]board.HostSession{}, true, []string{"sessions: " + err.Error()}
+		g.note(true, []string{"sessions: " + err.Error()})
+		return out
 	}
-	out := make(map[string]board.HostSession, len(env.Items))
+	g.note(env.Partial, env.PartialErrors)
+	g.ok()
 	for _, sess := range env.Items {
 		if !strings.Contains(sess.Template, "bead-host") {
 			continue
@@ -472,7 +489,7 @@ func (s *SupervisorSource) gatherSessions(ctx context.Context) (map[string]board
 		}
 		out[key] = board.HostSession{State: sess.State, Running: sess.Running}
 	}
-	return out, env.Partial, env.PartialErrors
+	return out
 }
 
 // aliasBeadID strips the leading "<pack>." from a bead-host alias, returning the
