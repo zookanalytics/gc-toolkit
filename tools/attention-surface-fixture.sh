@@ -111,9 +111,15 @@ echo "── hermetic: live host ⇒ active, not stranded (tk-q4xaj.2) ──"
 # tk-lonely has none. The fix must spare the hosted one and ONLY the hosted
 # one (liveness-gated, not a blanket suppression).
 LIVE="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
-cat > "$LIVE/anchors.ndjson" <<'JSON'
-{"id":"tk-hosted","title":"Hosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-08T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-h1","status":"open","assignee":""},{"id":"tk-h2","status":"open","assignee":""}]}
-{"id":"tk-lonely","title":"Unhosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-08T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-l1","status":"open","assignee":""},{"id":"tk-l2","status":"open","assignee":""}]}
+# updated_at must be RECENT, not a hardcoded date: this case asserts NORMAL,
+# and a fixed past date eventually crosses STALE_DAYS and bumps NORMAL→ELEVATED
+# (a time-bomb). Compute it relative to now so the assertion never rots. The
+# heredoc is intentionally UNquoted so $LIVE_RECENT interpolates (the JSON lines
+# carry no other shell metacharacters).
+LIVE_RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat > "$LIVE/anchors.ndjson" <<JSON
+{"id":"tk-hosted","title":"Hosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-h1","status":"open","assignee":""},{"id":"tk-h2","status":"open","assignee":""}]}
+{"id":"tk-lonely","title":"Unhosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-l1","status":"open","assignee":""},{"id":"tk-l2","status":"open","assignee":""}]}
 JSON
 cat > "$LIVE/sessions.json" <<'JSON'
 {"sessions":[
@@ -135,11 +141,90 @@ eq     "unhosted sibling stays stranded"        "true"   "$(printf '%s' "$LIVEJ"
 has    "unhosted sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
 rm -rf "$LIVE"
 
+echo "── hermetic: dead-owner in-progress is stuck, not moving (PROBLEM 1) ──"
+# An in-progress child counts as MOVING only if its owning session is live.
+# A child in_progress whose owner is dead (archived/closed/absent — keyed off
+# .state, NEVER .running) is the canonical UNKNOWN-stuck case: it must NOT mask
+# a stall. Four sibling epics, identical shape: a DEAD owner (session archived),
+# an ABSENT owner (assignee not in the session list at all), a LIVE-owner
+# control (session active, .running null to prove we ignore it), and a MIXED
+# anchor (one live + one dead in-progress child). Recent updated_at so the
+# staleness bump never perturbs the severity assertions.
+DO="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$DO/rigs.json"
+DO_RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat > "$DO/anchors.ndjson" <<JSON
+{"id":"tk-dead","title":"Dead-owner epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$DO_RECENT","description":"","progress":null,"children":[{"id":"tk-d1","status":"in_progress","assignee":"gc-toolkit__polecat-dead"},{"id":"tk-d2","status":"open","assignee":""}]}
+{"id":"tk-absent","title":"Absent-owner epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$DO_RECENT","description":"","progress":null,"children":[{"id":"tk-ab1","status":"in_progress","assignee":"gc-toolkit__polecat-gone"},{"id":"tk-ab2","status":"open","assignee":""}]}
+{"id":"tk-live","title":"Live-owner epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$DO_RECENT","description":"","progress":null,"children":[{"id":"tk-lv1","status":"in_progress","assignee":"gc-toolkit__polecat-live"},{"id":"tk-lv2","status":"open","assignee":""}]}
+{"id":"tk-mixed","title":"Mixed-owner epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$DO_RECENT","description":"","progress":null,"children":[{"id":"tk-mx1","status":"in_progress","assignee":"gc-toolkit__polecat-live"},{"id":"tk-mx2","status":"in_progress","assignee":"gc-toolkit__polecat-dead"},{"id":"tk-mx3","status":"open","assignee":""}]}
+JSON
+cat > "$DO/sessions.json" <<'JSON'
+{"sessions":[
+  {"session_name":"gc-toolkit__polecat-dead","alias":"gc-toolkit/gc-toolkit.deadcat","template":"gc-toolkit/gc-toolkit.polecat","state":"archived","running":false},
+  {"session_name":"gc-toolkit__polecat-live","alias":"gc-toolkit/gc-toolkit.livecat","template":"gc-toolkit/gc-toolkit.polecat","state":"active","running":null}
+]}
+JSON
+DOJ="$(GC_ATTENTION_FIXTURE="$DO" "$TOOL" --json)"
+# Dead owner (session archived) → the in-progress child does not count as moving.
+eq  "dead-owner: in_progress_live is 0"            "0"      "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").in_progress_live')"
+eq  "dead-owner: in_progress_dead is 1"            "1"      "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").in_progress_dead')"
+eq  "dead-owner: dead_owner flag true"             "true"   "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").dead_owner')"
+eq  "dead-owner: severity HIGH (stuck surfaced)"   "HIGH"   "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").severity')"
+eq  "dead-owner: stranded true"                    "true"   "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").stranded')"
+has "dead-owner: frontier names the stuck child"   "stuck (dead owner)" "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").frontier')"
+has "dead-owner: needs says recover/reassign"      "dead owner"         "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").needs')"
+has "dead-owner: stuck id rides into dead_owner_heads" "tk-d1"          "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").dead_owner_heads|join(",")')"
+# Absent owner (assignee not in the session list) is dead too.
+eq  "absent-owner: dead_owner flag true"           "true"   "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-absent").dead_owner')"
+eq  "absent-owner: severity HIGH"                  "HIGH"   "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-absent").severity')"
+# Live-owner control: the SAME shape stays active (NORMAL), not stranded — and
+# liveness keys off .state (active), never .running (null here would false-flag).
+eq  "live-owner: in_progress_live is 1"            "1"      "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-live").in_progress_live')"
+eq  "live-owner: dead_owner flag false"            "false"  "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-live").dead_owner')"
+eq  "live-owner: severity NORMAL"                  "NORMAL" "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-live").severity')"
+eq  "live-owner: not stranded"                     "false"  "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-live").stranded')"
+absent "live-owner: a null .running does NOT mark it stuck" "stuck" "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-live").frontier')"
+# Mixed: one live + one dead in-progress → still moving (ELEVATED), stuck surfaced.
+eq  "mixed: in_progress_live is 1"                 "1"        "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-mixed").in_progress_live')"
+eq  "mixed: in_progress_dead is 1"                 "1"        "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-mixed").in_progress_dead')"
+eq  "mixed: severity ELEVATED (moving + a stuck child)" "ELEVATED" "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-mixed").severity')"
+eq  "mixed: not stranded (live work present)"      "false"    "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-mixed").stranded')"
+has "mixed: frontier shows live + stuck"           "stuck (dead owner)" "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-mixed").frontier')"
+rm -rf "$DO"
+
+echo "── hermetic: unowned non-machine convoy is the orphan exception (PROBLEM 2) ──"
+# Everything-is-owned: a non-machine convoy that is NOT owned is the orphan
+# EXCEPTION the observer must SURFACE (HIGH), never drop. An OWNED convoy stays a
+# normal floating anchor. (The render path is driven directly here; the gather's
+# machine-convoy exclusion — sling-* and "input convoy for …" — is a Dolt-side
+# filter exercised by the live smoke, not hermetically.)
+UO="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$UO/rigs.json"; printf '{}' > "$UO/sessions.json"
+UO_RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat > "$UO/anchors.ndjson" <<JSON
+{"id":"tk-orphan","title":"Orphan convoy","kind":"unowned","source":"unowned","owned":false,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$UO_RECENT","description":"","progress":null,"children":[{"id":"tk-orf1","status":"open","assignee":""}]}
+{"id":"tk-owncv","title":"Owned initiative","kind":"convoy","source":"convoy","owned":true,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$UO_RECENT","description":"","progress":null,"children":[{"id":"tk-ow1","status":"closed","assignee":""}]}
+JSON
+UOJ="$(GC_ATTENTION_FIXTURE="$UO" "$TOOL" --json)"
+eq  "unowned: kind is unowned"                 "unowned" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").kind')"
+eq  "unowned: severity HIGH (orphan exception)" "HIGH"   "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").severity')"
+eq  "unowned: owned field is false"            "false"   "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").owned')"
+has "unowned: frontier flags no owning bead"   "unowned convoy" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").frontier')"
+has "unowned: needs says assign an owning bead" "assign an owning bead" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").needs')"
+eq  "unowned: floats above the owned convoy"   "true"    "$(printf '%s' "$UOJ" | jq -r '(.[]|select(.id=="tk-orphan").rank_score) > (.[]|select(.id=="tk-owncv").rank_score)')"
+# Owned convoy stays a normal floating anchor (kind convoy, owned true, here LOW
+# because all children closed) — never mislabelled as the unowned exception.
+eq  "owned convoy: kind is convoy"             "convoy"  "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").kind')"
+eq  "owned convoy: owned field is true"        "true"    "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").owned')"
+has "owned convoy: complete reads graduate"    "graduate" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").needs')"
+absent "owned convoy: not flagged unowned"     "unowned convoy" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").frontier')"
+rm -rf "$UO"
+
 echo "── hermetic: --json contract stays additive (existing + new fields intact) ──"
 # Existing fields MUST persist (additive-only contract); the takeaway feature
 # ADDS open_heads + takeaway/_at/_by (always-present keys, null when absent).
 for f in id rig kind title severity weight n_closed m_total open in_progress frontier needs rank_score \
-         open_heads takeaway takeaway_at takeaway_by; do
+         open_heads takeaway takeaway_at takeaway_by \
+         in_progress_live in_progress_dead dead_owner dead_owner_heads owned; do
     eq "field '$f' present on every row" "true" "$(printf '%s' "$J" | jq -c "[.[]|has(\"$f\")]|all")"
 done
 
