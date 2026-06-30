@@ -8,7 +8,7 @@
 # unconditionally, so if the anchor_bead write itself does NOT persist (a
 # transient Dolt failure, or a reused review the dispatch never stamped), the
 # anchor is detached with no recoverable link: signoff_head is never stamped and
-# reconcile-merged-prs.sh holds auto-merge forever = stranded PR.
+# the merge skill holds the merge forever = stranded PR.
 #
 # Fix #2 (formulas/mol-refinery-patrol.toml, `signoff-anchor-failclosed`
 # markers): before detaching, heal anchor_bead on the review bead and VERIFY it
