@@ -422,10 +422,13 @@ func flaggedStatus(status string) bool {
 	}
 }
 
-// gatherConvoys admits owned, floating convoys (parent==null and title not
-// "sling-*"). The supervisor /convoys list omits the `owned` flag, so the
-// title-prefix filter approximates ownership (sling-* convoys are the
-// auto-generated, unowned ones); true owned-filtering is a follow-up.
+// gatherConvoys admits floating convoys, excluding the transient MACHINE
+// convoys the way gc-attention.sh does: titles starting with "sling-" (the
+// auto-generated sling wrappers) and "input convoy for" (the per-sling input
+// wrappers). The live supervisor /convoys list omits both `parent` and the
+// `owned` flag, so the title-prefix filter — not parent==null or an owned
+// decode — is what keeps machine convoys out; partitioning the remaining
+// floating convoys into owned vs. unowned is a deferred follow-up.
 func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 	var convoys listEnvelope
 	if err := s.getJSON(ctx, "/convoys", &convoys); err != nil {
@@ -435,7 +438,13 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 	g.note(convoys.Partial, convoys.PartialErrors)
 	g.ok()
 	for _, c := range convoys.Items {
-		if c.Parent != "" || strings.HasPrefix(c.Title, "sling-") {
+		// Skip parented (non-floating) convoys and the transient MACHINE
+		// convoys — "sling-*" and "input convoy for ..." — mirroring the
+		// gc-attention.sh filter. The live API omits `parent`, so the two
+		// title prefixes do the real exclusion work.
+		if c.Parent != "" ||
+			strings.HasPrefix(c.Title, "sling-") ||
+			strings.HasPrefix(c.Title, "input convoy for") {
 			continue
 		}
 		rig, prefix := g.rigOf(c.ID)

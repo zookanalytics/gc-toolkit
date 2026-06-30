@@ -39,11 +39,16 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 				"beads":[{"id":"tk-epic","status":"open"},{"id":"tk-a","status":"open"},{"id":"tk-b","status":"closed"}],
 				"deps":[{"from":"tk-epic","to":"tk-a","kind":"parent-child"},{"from":"tk-epic","to":"tk-b","kind":"parent-child"}]}`)
 		case path == base+"/convoys":
+			// tk-inputcv mirrors the live API shape for a per-sling input
+			// wrapper: title "input convoy for ...", and crucially NO `parent`
+			// field (the live /convoys feed omits it). It must be excluded by
+			// the title prefix alone, not by the parent check.
 			writeJSON(w, `{"items":[
 				{"id":"tk-cv","title":"real convoy","status":"open","issue_type":"convoy","parent":""},
 				{"id":"tk-sling","title":"sling-tk-x","status":"open","issue_type":"convoy","parent":""},
-				{"id":"tk-child-cv","title":"child convoy","status":"open","issue_type":"convoy","parent":"tk-epic"}
-			],"total":3}`)
+				{"id":"tk-child-cv","title":"child convoy","status":"open","issue_type":"convoy","parent":"tk-epic"},
+				{"id":"tk-inputcv","title":"input convoy for tk-sy3vj","status":"open","issue_type":"convoy"}
+			],"total":4}`)
 		case path == base+"/convoy/tk-cv":
 			writeJSON(w, `{"convoy":{"id":"tk-cv","status":"open"},"children":[{"id":"cv1","status":"open"},{"id":"cv2","status":"in_progress"}],"progress":{"total":2,"closed":0}}`)
 		case path == base+"/sessions":
@@ -124,6 +129,11 @@ func TestGatherMapsAllKinds(t *testing.T) {
 	}
 	if ok, _, _, _, _, _ := anchorByID(res, "tk-child-cv"); ok {
 		t.Error("non-floating (parented) convoy must be filtered out")
+	}
+	// The per-sling "input convoy for ..." machine wrapper carries no parent in
+	// the live feed, so only the title-prefix filter excludes it.
+	if ok, _, _, _, _, _ := anchorByID(res, "tk-inputcv"); ok {
+		t.Error("input convoy machine wrapper must be filtered out")
 	}
 
 	// Sessions: bead-host alias stripped to bead-id; refinery (non-bead-host) skipped.
