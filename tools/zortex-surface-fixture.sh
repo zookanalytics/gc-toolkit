@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# attention-surface-fixture.sh — the automatable assertions for the Phase 3
-# attention surface (epic tk-q4xaj; bead tk-qkags; design Phase 3).
+# zortex-surface-fixture.sh — the automatable assertions for the Phase 3
+# Zortex surface (epic tk-q4xaj; bead tk-qkags; design Phase 3).
 #
 # Phase 3's SHIP gate is the operator-judged capstone (board → pick a flagged
 # bead → land in its resumed universe → it answers a pre-seeded reach-requiring
@@ -22,20 +22,20 @@
 #     fail-closed arg checks.
 #
 # HERMETIC BY DESIGN. The board's render/rank/glyph path is driven through the
-# tool's GC_ATTENTION_FIXTURE hook (canned anchors.ndjson + sessions.json +
+# tool's GC_ZORTEX_FIXTURE hook (canned anchors.ndjson + sessions.json +
 # rigs.json under a temp dir), so these assertions write NOTHING to Dolt and
 # need no live city. A best-effort read-only smoke at the end proves the real
 # gather+contract on the live city; an OPT-IN flag→clear round-trip
-# (GC_ATTENTION_FLAG_SMOKE_BEAD=<id>) exercises the live write path on a bead
+# (GC_ZORTEX_FLAG_SMOKE_BEAD=<id>) exercises the live write path on a bead
 # the operator chooses — the fixture never invents or closes a bead of its own.
 #
-# Run:   tools/attention-surface-fixture.sh
+# Run:   tools/zortex-surface-fixture.sh
 # Exit:  0 iff every hermetic assertion passes.
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-TOOL="$HERE/../assets/scripts/gc-attention.sh"
+TOOL="$HERE/../assets/scripts/gc-zortex.sh"
 [ -x "$TOOL" ] || { echo "fixture: $TOOL not executable" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "fixture: jq required" >&2; exit 2; }
 
@@ -53,7 +53,7 @@ has() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "contains: $2" "$3" ;; esac;
 absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac; }
 
 # Board run against the seeded fixture (no Dolt, no live city).
-B() { GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" "$@"; }
+B() { GC_ZORTEX_FIXTURE="$FXDIR" "$TOOL" "$@"; }
 
 # ---------------------------------------------------------------------------
 # Seed: 1 rig, and four anchors — a flagged bead with a HOT host, a stranded
@@ -126,14 +126,14 @@ cat > "$LIVE/sessions.json" <<'JSON'
   {"id":"lx-h","alias":"gc-toolkit.tk-hosted","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":true}
 ]}
 JSON
-LIVEJ="$(GC_ATTENTION_FIXTURE="$LIVE" "$TOOL" --json)"
+LIVEJ="$(GC_ZORTEX_FIXTURE="$LIVE" "$TOOL" --json)"
 eq     "hosted epic resolves hot"               "hot"    "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").live')"
 eq     "hosted epic is NORMAL, not HIGH"        "NORMAL" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").severity')"
 eq     "hosted epic is NOT stranded"            "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").stranded')"
 has    "hosted epic frontier reads in-conversation" "in conversation" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
 absent "hosted epic frontier drops (stranded)"  "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
 has    "hosted epic needs is open-to-join"      "open to join" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").needs')"
-has    "hosted epic still shows the hot glyph"  "●" "$(GC_ATTENTION_FIXTURE="$LIVE" "$TOOL")"
+has    "hosted epic still shows the hot glyph"  "●" "$(GC_ZORTEX_FIXTURE="$LIVE" "$TOOL")"
 # Control: the unhosted sibling, identical shape but no host, stays HIGH.
 eq     "unhosted sibling stays cold"            "cold"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").live')"
 eq     "unhosted sibling stays HIGH"            "HIGH"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
@@ -164,7 +164,7 @@ cat > "$DO/sessions.json" <<'JSON'
   {"session_name":"gc-toolkit__polecat-live","alias":"gc-toolkit/gc-toolkit.livecat","template":"gc-toolkit/gc-toolkit.polecat","state":"active","running":null}
 ]}
 JSON
-DOJ="$(GC_ATTENTION_FIXTURE="$DO" "$TOOL" --json)"
+DOJ="$(GC_ZORTEX_FIXTURE="$DO" "$TOOL" --json)"
 # Dead owner (session archived) → the in-progress child does not count as moving.
 eq  "dead-owner: in_progress_live is 0"            "0"      "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").in_progress_live')"
 eq  "dead-owner: in_progress_dead is 1"            "1"      "$(printf '%s' "$DOJ" | jq -r '.[]|select(.id=="tk-dead").in_progress_dead')"
@@ -204,7 +204,7 @@ cat > "$UO/anchors.ndjson" <<JSON
 {"id":"tk-orphan","title":"Orphan convoy","kind":"unowned","source":"unowned","owned":false,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$UO_RECENT","description":"","progress":null,"children":[{"id":"tk-orf1","status":"open","assignee":""}]}
 {"id":"tk-owncv","title":"Owned initiative","kind":"convoy","source":"convoy","owned":true,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$UO_RECENT","description":"","progress":null,"children":[{"id":"tk-ow1","status":"closed","assignee":""}]}
 JSON
-UOJ="$(GC_ATTENTION_FIXTURE="$UO" "$TOOL" --json)"
+UOJ="$(GC_ZORTEX_FIXTURE="$UO" "$TOOL" --json)"
 eq  "unowned: kind is unowned"                 "unowned" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").kind')"
 eq  "unowned: severity HIGH (orphan exception)" "HIGH"   "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").severity')"
 eq  "unowned: owned field is false"            "false"   "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-orphan").owned')"
@@ -240,7 +240,7 @@ cat > "$TKV/anchors.ndjson" <<'JSON'
 {"id":"tk-bare","title":"stranded no takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"blocks sl-zzz9 downstream","progress":null,"takeaway":"","children":[{"id":"tk-c3","status":"open","assignee":""},{"id":"tk-c4","status":"open","assignee":""}]}
 {"id":"tk-ml","title":"whitespacey takeaway","kind":"decision","source":"decision","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"takeaway":"line one\nline two   trailing  ","children":[]}
 JSON
-TKJ="$(GC_ATTENTION_FIXTURE="$TKV" "$TOOL" --json)"
+TKJ="$(GC_ZORTEX_FIXTURE="$TKV" "$TOOL" --json)"
 # Present: the takeaway sentence IS the NEEDS, and the by/at ride into --json.
 has "takeaway present → NEEDS is the sentence" "pick the storage backend" \
     "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-tk").needs')"
@@ -262,17 +262,17 @@ has "cross-rig refs moved to --json cross_rig_refs" "sl-zzz9" "$(printf '%s' "$T
 eq  "whitespacey takeaway collapses to one line" "line one line two trailing" \
     "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-ml").needs')"
 # Human table: the takeaway sentence shows; no raw/truncated bead-id leaks in.
-HT="$(GC_ATTENTION_FIXTURE="$TKV" "$TOOL")"
+HT="$(GC_ZORTEX_FIXTURE="$TKV" "$TOOL")"
 has    "human table shows the takeaway sentence"        "pick the storage backend" "$HT"
 absent "human table leaks no frontier bead-id (tk-c3)"  "tk-c3"                    "$HT"
 absent "human table leaks no cross-rig bead-id (sl-zzz9)" "sl-zzz9"                "$HT"
 rm -rf "$TKV"
 
 echo "── hermetic: row cap + --limit=0 opt-out ──"
-eq   "default cap honored (MAX_ROWS=2 → 2 rows)" "2" "$(GC_ATTENTION_MAX_ROWS=2 B --json | jq 'length')"
-eq   "--limit=0 overrides the cap (all 4)"       "4" "$(GC_ATTENTION_MAX_ROWS=2 B --json --limit=0 | jq 'length')"
+eq   "default cap honored (MAX_ROWS=2 → 2 rows)" "2" "$(GC_ZORTEX_MAX_ROWS=2 B --json | jq 'length')"
+eq   "--limit=0 overrides the cap (all 4)"       "4" "$(GC_ZORTEX_MAX_ROWS=2 B --json --limit=0 | jq 'length')"
 eq   "--limit=1 takes the single top row"        "1" "$(B --json --limit=1 | jq 'length')"
-has  "capped table notes 'showing N of M'" "showing 2 of 4" "$(GC_ATTENTION_MAX_ROWS=2 B)"
+has  "capped table notes 'showing N of M'" "showing 2 of 4" "$(GC_ZORTEX_MAX_ROWS=2 B)"
 
 echo "── hermetic: dedup (a bead matched by two gathers shows once) ──"
 DUP="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$DUP/rigs.json"; printf '{}' > "$DUP/sessions.json"
@@ -280,15 +280,15 @@ cat > "$DUP/anchors.ndjson" <<'JSON'
 {"id":"tk-dup","title":"Dual","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-a","status":"open","assignee":""}]}
 {"id":"tk-dup","title":"Dual","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[],"reason":"look here","flagged_at":"2026-06-07T00:00:00Z"}
 JSON
-DUPJ="$(GC_ATTENTION_FIXTURE="$DUP" "$TOOL" --json)"
+DUPJ="$(GC_ZORTEX_FIXTURE="$DUP" "$TOOL" --json)"
 eq   "flagged-epic dedups to a single row" "1"       "$(printf '%s' "$DUPJ" | jq 'length')"
 eq   "the surviving row is the FLAGGED one" "flagged" "$(printf '%s' "$DUPJ" | jq -r '.[0].kind')"
 rm -rf "$DUP"
 
 echo "── hermetic: empty board ──"
 EMPTY="$(mktemp -d)"; : > "$EMPTY/anchors.ndjson"; cp "$FXDIR/rigs.json" "$EMPTY/rigs.json"; printf '{}' > "$EMPTY/sessions.json"
-has  "empty board says nothing floats" "Nothing floats" "$(GC_ATTENTION_FIXTURE="$EMPTY" "$TOOL" 2>/dev/null)"
-eq   "empty board --json is []" "0" "$(GC_ATTENTION_FIXTURE="$EMPTY" "$TOOL" --json | jq 'length')"
+has  "empty board says nothing floats" "Nothing floats" "$(GC_ZORTEX_FIXTURE="$EMPTY" "$TOOL" 2>/dev/null)"
+eq   "empty board --json is []" "0" "$(GC_ZORTEX_FIXTURE="$EMPTY" "$TOOL" --json | jq 'length')"
 rm -rf "$EMPTY"
 
 echo "── hermetic: verb dispatch + fail-closed validation ──"
@@ -327,7 +327,7 @@ echo "── hermetic: react is the front-door over gc-proactive.sh sling (mr pa
 PROACTIVE_TOOL_REAL="$HERE/gc-proactive.sh"
 if [ -x "$PROACTIVE_TOOL_REAL" ]; then
     RX="$(GC_RIG=gc-toolkit GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
-          GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
+          GC_ZORTEX_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
     has    "react slings mol-first-reaction"          "--on mol-first-reaction"         "$RX"
     has    "react pins the codex-gated mr path"       "--merge mr"                      "$RX"
     absent "react never routes direct"                "--merge direct"                  "$RX"
@@ -335,7 +335,7 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
     has    "react passes the bead through to sling"   "tk-epic"                         "$RX"
     # --reason is accepted as operator intent but NOT forwarded (sling has none).
     RXR="$(GC_RIG=gc-toolkit GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
-           GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" react tk-epic --reason "pick a backend" --dry-run 2>&1 || true)"
+           GC_ZORTEX_FIXTURE="$FXDIR" "$TOOL" react tk-epic --reason "pick a backend" --dry-run 2>&1 || true)"
     has    "react surfaces the operator --reason"     "pick a backend"                  "$RXR"
     absent "react does NOT forward --reason to sling" "--reason"                        "$RXR"
     # Regression (tk-82g33): react must SELF-SUPPLY GC_RIG so the sling can
@@ -348,7 +348,7 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
     # data change is needed. "rig-qualify" is the fail-closed die() phrase —
     # asserting it absent proves the guard never fired.
     RXNR="$(env -u GC_RIG GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
-            GC_ATTENTION_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
+            GC_ZORTEX_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
     has    "react self-supplies the rig (no GC_RIG → still rig-qualified)" \
            "gc-toolkit/gc-toolkit.proactive" "$RXNR"
     has    "react (no GC_RIG) still slings mol-first-reaction" "--on mol-first-reaction" "$RXNR"
@@ -365,11 +365,11 @@ has "usage documents react"      "react <bead-id>"  "$("$TOOL" --help 2>&1 || tr
 
 echo "── contract: operator surface is the runnable script, not a phantom gc subcommand ──"
 # The regression this guards (PR #100 review): the docs/prompt advertised a
-# `gc attention …` CLI that was never registered, so a bare invocation renders
+# `gc zortex …` CLI that was never registered, so a bare invocation renders
 # root gc help. Pack commands bind under the pack name (`gc <pack> <cmd>`), so
-# no top-level attention subcommand can exist. The runnable surface is THIS
-# script — reached via the prefix+b tmux picker (tmux-pick-attention.sh →
-# gc-attention.sh) or run directly — plus tools/gc-bead-host.sh. These
+# no top-level zortex subcommand can exist. The runnable surface is THIS
+# script — reached via the prefix+b tmux picker (tmux-pick-zortex.sh →
+# gc-zortex.sh) or run directly — plus tools/gc-bead-host.sh. These
 # assertions lock the operator-facing docs to that reality.
 
 # (a) the documented script entry actually runs and prints its own usage.
@@ -377,10 +377,10 @@ has  "script --help prints usage" "Usage:" "$("$TOOL" --help 2>&1 || true)"
 has  "script -h prints usage"     "Usage:" "$("$TOOL" -h 2>&1 || true)"
 
 # (b) no operator-facing surface file advertises the phantom CLI. The match is
-#     the space-form ("gc attention …", incl. backtick-wrapped); the real
-#     script name "gc-attention" (hyphen) is intentionally NOT matched.
+#     the space-form ("gc zortex …", incl. backtick-wrapped); the real
+#     script name "gc-zortex" (hyphen) is intentionally NOT matched.
 SURFACE_FILES=(
-    "$HERE/../assets/scripts/gc-attention.sh"
+    "$HERE/../assets/scripts/gc-zortex.sh"
     "$HERE/../agents/bead-host/prompt.template.md"
     "$HERE/../agents/bead-host/agent.toml"
     "$HERE/../agents/bead-host/PROVENANCE.md"
@@ -388,10 +388,10 @@ SURFACE_FILES=(
 phantom=""
 for f in "${SURFACE_FILES[@]}"; do
     [ -f "$f" ] || continue
-    hit="$(grep -nF 'gc attention' "$f" 2>/dev/null || true)"
+    hit="$(grep -nF 'gc zortex' "$f" 2>/dev/null || true)"
     [ -n "$hit" ] && phantom+="$f: $hit"$'\n'
 done
-absent "no operator surface file advertises a phantom 'gc attention' CLI" "gc attention" "$phantom"
+absent "no operator surface file advertises a phantom 'gc zortex' CLI" "gc zortex" "$phantom"
 
 # ---------------------------------------------------------------------------
 # Best-effort LIVE smokes (skipped cleanly when no city / gc is reachable).
@@ -418,10 +418,10 @@ fi
 # only to the bead the operator named, and every leg self-cleans (clear undoes
 # flag; the unset undoes takeaway; the --release leg captures and restores the
 # bead's prior lifecycle fields and unsets the marker it set).
-if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
-    echo "── live (opt-in): flag/clear + takeaway + takeaway --release round-trip on $GC_ATTENTION_FLAG_SMOKE_BEAD ──"
-    bead="$GC_ATTENTION_FLAG_SMOKE_BEAD"
-    "$TOOL" flag "$bead" --reason "attention-surface-fixture smoke" >/dev/null 2>&1 \
+if [ -n "${GC_ZORTEX_FLAG_SMOKE_BEAD:-}" ]; then
+    echo "── live (opt-in): flag/clear + takeaway + takeaway --release round-trip on $GC_ZORTEX_FLAG_SMOKE_BEAD ──"
+    bead="$GC_ZORTEX_FLAG_SMOKE_BEAD"
+    "$TOOL" flag "$bead" --reason "zortex-surface-fixture smoke" >/dev/null 2>&1 \
         && ok "flag $bead" || bad "flag $bead" "exit 0" "non-zero"
     eq "bead now carries gc.attention=1" "1" \
         "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.attention"] // ""')"
@@ -433,9 +433,9 @@ if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
         "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.attention"] // ""')"
     # takeaway: write the headline, read back the THREE metadata fields, then
     # unset them (the clean-up leg — takeaway has no inverse verb).
-    "$TOOL" takeaway "$bead" "attention-surface-fixture smoke takeaway" --by host >/dev/null 2>&1 \
+    "$TOOL" takeaway "$bead" "zortex-surface-fixture smoke takeaway" --by host >/dev/null 2>&1 \
         && ok "takeaway $bead" || bad "takeaway $bead" "exit 0" "non-zero"
-    eq "bead now carries the gc.takeaway headline" "attention-surface-fixture smoke takeaway" \
+    eq "bead now carries the gc.takeaway headline" "zortex-surface-fixture smoke takeaway" \
         "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway"] // ""')"
     eq "bead now carries gc.takeaway_by=host" "host" \
         "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.takeaway_by"] // ""')"
@@ -452,10 +452,10 @@ if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
     PRIOR_STATUS="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].status // "open"')"
     PRIOR_ASSIGNEE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].assignee // ""')"
     PRIOR_ROUTE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.routed_to"] // ""')"
-    "$TOOL" takeaway "$bead" "attention-surface-fixture release smoke" --by proactive --release >/dev/null 2>&1 \
+    "$TOOL" takeaway "$bead" "zortex-surface-fixture release smoke" --by proactive --release >/dev/null 2>&1 \
         && ok "takeaway --release $bead" || bad "takeaway --release $bead" "exit 0" "non-zero"
     RELJSON="$(gc bd show "$bead" --json 2>/dev/null)"
-    eq "release stamps the gc.takeaway headline"      "attention-surface-fixture release smoke" \
+    eq "release stamps the gc.takeaway headline"      "zortex-surface-fixture release smoke" \
         "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.takeaway"] // ""')"
     eq "release attributes the takeaway to proactive" "proactive" \
         "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.takeaway_by"] // ""')"
@@ -474,9 +474,9 @@ if [ -n "${GC_ATTENTION_FLAG_SMOKE_BEAD:-}" ]; then
         --unset-metadata gc.proactive_reaction >/dev/null 2>&1 \
         && ok "restore lifecycle + unset the release smoke (cleanup)" || bad "restore the release smoke" "exit 0" "non-zero"
 else
-    printf '  skip  live flag→clear + takeaway round-trip (set GC_ATTENTION_FLAG_SMOKE_BEAD=<id> to run)\n'
+    printf '  skip  live flag→clear + takeaway round-trip (set GC_ZORTEX_FLAG_SMOKE_BEAD=<id> to run)\n'
 fi
 
 echo ""
-echo "attention-surface-fixture: $PASS passed, $FAIL failed"
+echo "zortex-surface-fixture: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

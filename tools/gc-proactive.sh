@@ -6,10 +6,10 @@
 # "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
 # slung at a bead: a cheap first reaction (read the body → articulate /
 # research → write a first-reaction CARD to the bead notes → flag the bead
-# onto the attention board) so the human arrives at *advanced* work. This
+# onto the Zortex board) so the human arrives at *advanced* work. This
 # tool is the budget-and-trigger layer around that sling. It owns no new
 # lifecycle — it assembles `gc sling`, `gc bd ready`, `gc session list`, and
-# the Phase-3 attention board (assets/scripts/gc-attention.sh).
+# the Phase-3 Zortex board (assets/scripts/gc-zortex.sh).
 #
 # ── The two triggers (operator refinement on tk-3d0uh) ───────────────
 # The proactive trigger has TWO forms, and this tool serves both:
@@ -129,7 +129,7 @@ resolve_pool_target() {
 }
 
 # rig_beads_db -> this rig's `.beads` dir, to pin `gc bd --db` for parity with
-# the attention board (assets/scripts/gc-attention.sh resolves the rig path from
+# the Zortex board (assets/scripts/gc-zortex.sh resolves the rig path from
 # `gc rig list`/GC_RIG, then `$path/.beads`). We pin --db because bare `bd` (and
 # `gc bd` without --db) resolves `.beads` by walking UP from cwd — but the
 # proactive work_dir is a git worktree where `.beads` is gitignored, so the
@@ -149,10 +149,10 @@ rig_beads_db() {
     return 0
 }
 
-# board_rank — re-rank a JSON array of beads (stdin) by the attention board's
+# board_rank — re-rank a JSON array of beads (stdin) by the Zortex board's
 # PRIORITY weight so the scarce proactive slots (pool max 2 + city cap) go to
 # the highest-weight work, not merely the oldest. We reuse the board's priority
-# component verbatim — assets/scripts/gc-attention.sh prio_w = max(0, 4 - p),
+# component verbatim — assets/scripts/gc-zortex.sh prio_w = max(0, 4 - p),
 # i.e. P0->4 … P4->0, null->1 — and keep oldest-first as the in-band tiebreaker
 # so a priority band still drains fairly. The board's other two weight terms
 # (subtree size + cross-rig refs) are deliberately OMITTED: each needs a query

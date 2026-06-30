@@ -233,7 +233,7 @@ hdr "Teardown sanity — unlink clears links, preserves lineage"
     || bad "unlink dropped the lineage"
 
 hdr "tk-8v5j0 — a dead bound host must not resolve; 'up' re-creates a fresh one"
-# Two regressions behind the gc-attention 'open' failure (tk-8v5j0): a
+# Two regressions behind the gc-zortex 'open' failure (tk-8v5j0): a
 # failed-create corpse left bound to a work bead (a) must NOT resolve as a
 # resumable host — the forward-cache fallback skips dead pointers so 'up'
 # recreates; and (b) when a bound host fails to wake, 'up' must unlink the stale

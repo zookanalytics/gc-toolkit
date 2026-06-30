@@ -5,7 +5,7 @@
 # "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
 # (formulas/mol-first-reaction.toml) slung at a bead: a cheap first reaction
 # that reads the body, writes a first-reaction card to the notes, and flags
-# the bead onto the attention board so the human arrives at advanced work.
+# the bead onto the Zortex board so the human arrives at advanced work.
 # This pool is where those slung reactions execute. It is a sibling of the
 # impl polecat pool — same worktree/refinery machinery — with three
 # deliberate differences:

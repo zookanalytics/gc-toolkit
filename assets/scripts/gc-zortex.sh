@@ -1,17 +1,17 @@
 #!/bin/sh
-# gc-attention.sh — the cross-rig human-attention board plus the pick-a-row
+# gc-zortex.sh — the cross-rig human-attention board plus the pick-a-row
 # launcher that lands you in a bead's conversation. The operator reaches it
-# via the prefix+b tmux board picker (tmux-pick-attention.sh) or by running
+# via the prefix+b tmux board picker (tmux-pick-zortex.sh) or by running
 # this script directly; it is NOT a registered gc subcommand. Pack commands
 # bind under the pack name (`gc <pack> <cmd>`), so there is no top-level
-# attention command — invoke this script (or the picker), not `gc`.
+# zortex command — invoke this script (or the picker), not `gc`.
 #
 # Usage:
-#   gc-attention [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
-#   gc-attention open  <bead-id>                 land in the bead (resume-or-create its host)
-#   gc-attention flag  <bead-id> --reason "..."  raise this bead onto the board
-#   gc-attention clear <bead-id>                 lower it again (the handled row leaves)
-#   gc-attention takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline
+#   gc-zortex [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
+#   gc-zortex open  <bead-id>                 land in the bead (resume-or-create its host)
+#   gc-zortex flag  <bead-id> --reason "..."  raise this bead onto the board
+#   gc-zortex clear <bead-id>                 lower it again (the handled row leaves)
+#   gc-zortex takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline
 #
 # Phase 3 of the Bead-Universe Operating Model (epic tk-q4xaj; bead
 # tk-qkags; design Key Component 4, Phase 3). The board (the default
@@ -52,7 +52,7 @@
 #   4. decision   — every open `decision`-type bead (human-gated; only a
 #                   human can move it).
 #   5. flagged    — any open bead with `metadata.gc.attention=1` (set by
-#                   `gc-attention flag`): a bead's LLM, or the operator,
+#                   `gc-zortex flag`): a bead's LLM, or the operator,
 #                   has explicitly raised it. Flagged rows float to the
 #                   very top (their own FLAGGED band) — a hand was raised.
 #
@@ -149,11 +149,11 @@
 # ── Row cap & cache (the board must scale) ───────────────────────────
 # The gather hits every rig's Dolt and costs ~seconds; the liveness
 # join is a single fast `gc session list`. So the EXPENSIVE GATHER is
-# cached (default TTL GC_ATTENTION_CACHE_TTL=45s) while liveness +
+# cached (default TTL GC_ZORTEX_CACHE_TTL=45s) while liveness +
 # ranking are recomputed every glance — a glance is sub-second on a warm
 # cache and the host state is never stale. `--refresh` (or `flag`/
 # `clear`/`open`, which bust the cache) forces a fresh gather. Rows are
-# CAPPED at GC_ATTENTION_MAX_ROWS (default 50) by default so the board
+# CAPPED at GC_ZORTEX_MAX_ROWS (default 50) by default so the board
 # can never balloon to "every bead"; `--limit=N` overrides with an
 # explicit N, and `--limit=0` means ALL (uncapped) for tooling.
 #
@@ -163,7 +163,7 @@
 #   3   missing dependency (jq / gc) or could not enumerate rigs
 #   4   verb runtime failure (e.g. bead not found, host spawn failed)
 #
-# Test hook: GC_ATTENTION_FIXTURE=<dir> — when set, the board reads
+# Test hook: GC_ZORTEX_FIXTURE=<dir> — when set, the board reads
 # canned data instead of Dolt/sessions: <dir>/anchors.ndjson (one anchor
 # object per line, the gathered shape) and <dir>/sessions.json (the
 # `gc session list --json` shape). Keeps the Phase 3 render/rank/glyph
@@ -171,14 +171,14 @@
 
 set -eu
 
-PROG="gc-attention"
+PROG="gc-zortex"
 
 # ── Tunables ─────────────────────────────────────────────────────────
 STALE_DAYS=14                                   # > this many days since update → staleness bump
 XREF_CAP=5                                       # max cross-rig refs that count toward weight
-MAX_ROWS="${GC_ATTENTION_MAX_ROWS:-50}"          # default row cap (--limit=0 disables)
-CACHE_TTL="${GC_ATTENTION_CACHE_TTL:-45}"        # seconds the gather cache stays fresh
-FIXTURE="${GC_ATTENTION_FIXTURE:-}"              # test hook (see header)
+MAX_ROWS="${GC_ZORTEX_MAX_ROWS:-50}"          # default row cap (--limit=0 disables)
+CACHE_TTL="${GC_ZORTEX_CACHE_TTL:-45}"        # seconds the gather cache stays fresh
+FIXTURE="${GC_ZORTEX_FIXTURE:-}"              # test hook (see header)
 # Fall back to defaults on a non-numeric override so `set -e` arithmetic
 # (the cap + cache-age tests) can't crash the board on a bad env value.
 case "$MAX_ROWS"  in ''|*[!0-9]*) MAX_ROWS=50 ;; esac
@@ -187,12 +187,12 @@ case "$CACHE_TTL" in ''|*[!0-9]*) CACHE_TTL=45 ;; esac
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-attention [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
-  gc-attention open  <bead-id>                 land in the bead (resume-or-create its host)
-  gc-attention flag  <bead-id> --reason "..."  raise this bead onto the board
-  gc-attention clear <bead-id>                 lower it again (the handled row leaves)
-  gc-attention react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-attention takeaway <bead-id> "<text>" [--by host|proactive] [--release]  set the board-visible takeaway headline
+  gc-zortex [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
+  gc-zortex open  <bead-id>                 land in the bead (resume-or-create its host)
+  gc-zortex flag  <bead-id> --reason "..."  raise this bead onto the board
+  gc-zortex clear <bead-id>                 lower it again (the handled row leaves)
+  gc-zortex react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
+  gc-zortex takeaway <bead-id> "<text>" [--by host|proactive] [--release]  set the board-visible takeaway headline
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, decisions, and flagged beads) by how much
@@ -229,7 +229,7 @@ PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # Keyed by city path so distinct cities don't collide. Cache format:
 # line 1 = gather epoch, lines 2.. = anchors ndjson (portable: no stat(1)
 # / find(1) mtime flags, which differ GNU vs BSD).
-CACHE_DIR="${TMPDIR:-/tmp}/gc-attention-cache.$(id -u 2>/dev/null || echo 0)"
+CACHE_DIR="${TMPDIR:-/tmp}/gc-zortex-cache.$(id -u 2>/dev/null || echo 0)"
 _city_key=$(printf '%s' "${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-default}}}" | cksum | cut -d' ' -f1)
 CACHE_FILE="$CACHE_DIR/anchors-$_city_key.ndjson"
 
@@ -295,7 +295,7 @@ cmd_flag() {
         --set-metadata "gc.attention_at=$(iso_now)" >/dev/null 2>&1 \
         || { echo "$PROG: flag: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
     bust_cache
-    echo "flagged $bead onto the attention board: $reason"
+    echo "flagged $bead onto the Zortex board: $reason"
 }
 
 # ── Verb: clear ──────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ cmd_clear() {
         --unset-metadata "gc.attention_at" >/dev/null 2>&1 \
         || { echo "$PROG: clear: could not update '$bead'" >&2; exit 4; }
     bust_cache
-    echo "cleared $bead from the attention board"
+    echo "cleared $bead from the Zortex board"
 }
 
 # ── Verb: takeaway ───────────────────────────────────────────────────
@@ -765,7 +765,7 @@ def owner_live($assignee):
     # ── Human-readable table ─────────────────────────────────────────
     RIGCOUNT=$(printf '%s' "$RIGS" | jq 'length')
     src="live"; [ "$gathered_from_cache" -eq 1 ] && src="cached ${CACHE_TTL}s"
-    printf 'gc-attention — cross-rig human-attention board\n'
+    printf 'gc-zortex — cross-rig human-attention board\n'
     if [ "$SHOWN" -lt "$TOTAL" ]; then
         printf '%s · %s rigs · showing %s of %s anchors (%s)\n\n' "$NOW_ISO" "$RIGCOUNT" "$SHOWN" "$TOTAL" "$src"
     else

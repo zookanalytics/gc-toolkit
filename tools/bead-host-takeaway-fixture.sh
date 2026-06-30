@@ -3,7 +3,7 @@
 # prompt instructs the resident host to keep its board-visible gc.takeaway
 # current (epic tk-q4xaj; bead tk-q4xaj.3).
 #
-# The takeaway is the one-line headline gc-attention.sh renders as a bead's
+# The takeaway is the one-line headline gc-zortex.sh renders as a bead's
 # NEEDS. A bead-host keeps it fresh so a glance off the board explains where the
 # conversation stands without opening it. Whether a LIVE host actually writes
 # the metadata on a real turn needs a live LLM session — that is operator-
@@ -40,15 +40,15 @@ has() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "contains: $2" "$3" ;; esac;
 PM="$(cat "$PROMPT_MD")"
 
 echo "── the host stamps the board takeaway via the wrapper (takeaway-only) ──"
-# The raw gc.takeaway/_at/_by triple lives inside gc-attention.sh; the prompt's
+# The raw gc.takeaway/_at/_by triple lives inside gc-zortex.sh; the prompt's
 # contract is the WRAPPER INVOCATION (… takeaway "$BEAD" "<headline>") — takeaway-
 # only, with no --by (host is the default) and no folded-in --note. So assert the
 # call shape, not the encapsulated metadata fields.
 # shellcheck disable=SC2016  # intentional: match the LITERAL "$BEAD" in the prompt text, no expansion
-has "prompt refreshes the takeaway via the gc-attention wrapper" 'gc-attention.sh" takeaway "$BEAD"' "$PM"
+has "prompt refreshes the takeaway via the gc-zortex wrapper" 'gc-zortex.sh" takeaway "$BEAD"' "$PM"
 # Both the per-turn block AND the drain block must invoke the wrapper.
 # shellcheck disable=SC2016  # intentional: the literal "$BEAD" is prompt text, not expanded here
-CALLS="$(grep -cF 'gc-attention.sh" takeaway "$BEAD"' "$PROMPT_MD" || true)"
+CALLS="$(grep -cF 'gc-zortex.sh" takeaway "$BEAD"' "$PROMPT_MD" || true)"
 eq "per-turn AND drain blocks each invoke the takeaway wrapper" "2" "$CALLS"
 # Takeaway-only: the per-turn note ritual is gone. Match --note as a FLAG (not
 # the longer gc-bd --notes capability, which stays in the Communication list).
