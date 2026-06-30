@@ -50,7 +50,8 @@
 #   - formulas/mol-deacon-patrol.toml — base + cycle-recycle + gc doctor
 #     --json local deltas (validated 2026-05-27).
 #   - formulas/mol-refinery-patrol.toml — base + default_merge_strategy +
-#     auto_ff_rig_main + review_gate + protected-branch auto-promote +
+#     auto_ff_rig_main + check_set (merge-gate check-set, retires review_gate +
+#     signoff_head) + protected-branch auto-promote +
 #     integration-branch INFO local deltas.
 #   - formulas/mol-witness-patrol.toml — base + cycle-recycle +
 #     snake_case session-list jq + .work_dir metadata local deltas.

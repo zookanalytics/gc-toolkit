@@ -8,13 +8,13 @@
 #     review->anchor *best-effort* (a failed edge only warns; it must not
 #     strand the PR).
 #   - COMPLETION (template-fragments/polecat-non-impl-done.template.md) resolves
-#     the anchor to stamp signoff_head (APPROVE/COMMENT) or clear it + file a
-#     rework child (REQUEST_CHANGES).
+#     the anchor to stamp check.<gate>=green@<head> (APPROVE/COMMENT) or clear it
+#     + file a rework child (REQUEST_CHANGES).
 #
 # The bug this guards (PR#163 signoff finding): if completion resolves the
 # anchor ONLY by the best-effort BLOCKS edge and that edge was dropped, ANCHOR
-# is empty, signoff_head is never stamped, and the merge skill holds the merge
-# forever ("no signoff yet") with nothing to re-dispatch the review.
+# is empty, the check.<gate> marker is never stamped, and the merge skill holds
+# the merge forever ("no signoff yet") with nothing to re-dispatch the review.
 # The fix is a durable metadata.anchor_bead fallback, resolved when the edge is
 # missing.
 #

@@ -15,12 +15,14 @@
 #   validate -> merge -> record
 #
 #   validate: the PR's live base == the anchor's merged_target (no retarget),
-#             the live head == signoff_head (the check-set's title/description-
-#             current member), no open rework/review child references the PR (an
-#             open child holds the merge — an anchor lands only when ALL its
-#             children are closed), and GitHub reports the PR mergeable with its
-#             required check-set green (mergeStateStatus=CLEAN folds CI +
-#             approval + base-current + no-conflict into one signal).
+#             every gate the anchor declares in check_set is green AT THE LIVE
+#             HEAD (per-gate marker check.<name>=green@<head>, so a stale approval
+#             or a post-review commit re-gates instead of merging), no open
+#             rework/review child references the PR (an open child holds the
+#             merge — an anchor lands only when ALL its children are closed), and
+#             GitHub reports the PR mergeable with its required check-set green
+#             (mergeStateStatus=CLEAN folds CI + approval + base-current +
+#             no-conflict into one signal).
 #   merge:    `gh pr merge --squash` — an IMMEDIATE merge, NOT `--auto`. Branch
 #             protection still gates the real merge server-side; a server-side
 #             refusal leaves the anchor OPEN and is retried next idle pass.
@@ -60,7 +62,7 @@ ANCHORS=$(gc bd list --status=open \
 # loop) so the loop runs in THIS shell and the counters below survive the
 # pipe/subshell boundary.
 ROWS=$(printf '%s' "$ANCHORS" \
-  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), signoff: (.metadata.signoff_head // "")}' 2>/dev/null)
+  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), meta: (.metadata // {})}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "merge-skill: no gating anchors"; exit 0; }
 
 merged=0; held=0; skipped=0
@@ -69,7 +71,6 @@ while IFS= read -r row; do
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '.pr // empty')
   target=$(printf '%s' "$row" | jq -r '.target // empty')
-  signoff_head=$(printf '%s' "$row" | jq -r '.signoff // empty')
   if [ -z "$id" ] || [ -z "$num" ]; then
     skipped=$((skipped + 1)); continue
   fi
@@ -106,12 +107,32 @@ while IFS= read -r row; do
     echo "merge-skill: PR#$num base '$base' != target '$target' (retargeted); merge held (anchor $id, observer escalates)"
     held=$((held + 1)); continue
   fi
-  # Title/description-current: the signed-off head must still be the live head.
-  # A mismatch (a post-signoff commit, or no signoff yet) means the current head
-  # is unvalidated — hold so a fresh signoff round validates it first. This is
-  # the check-set member that stops a stale approval carrying an out-of-date PR.
-  if [ -z "$signoff_head" ] || [ "$signoff_head" != "$head_oid" ]; then
-    echo "merge-skill: PR#$num head not signoff-validated (have '${signoff_head:-none}', live '$head_oid'); merge held (anchor $id)"
+  # Check-set: every gate the anchor declares in check_set must be green AT THE
+  # LIVE HEAD, recorded as a per-gate marker check.<name>=green@<head_oid>. The
+  # green@<sha> form folds two checks the old single signoff_head conflated —
+  # "this gate passed" and "title/description current at this commit" — into one
+  # value: a post-review commit moves the head, so a marker stamped at the old
+  # head (green@<old-sha>) no longer matches and the gate re-gates, stopping a
+  # stale approval from carrying an out-of-date PR onto the target. An EMPTY
+  # check_set declares NO gates, and the merge is then governed only by the
+  # remaining members below (no-retarget, no-open-child, mergeStateStatus=CLEAN
+  # = CI + approval). That empty case is the bug fix: the former code held the
+  # merge UNCONDITIONALLY on a missing signoff_head even when no signoff gate was
+  # required, stranding human-approved CLEAN PRs forever; a no-gate check_set now
+  # lands once CLEAN. `hold_gate` is the first gate not green at the live head
+  # (empty string when all are), computed in jq so a dynamic marker key
+  # (check.<name>) needs no bash-array gymnastics.
+  hold_gate=$(printf '%s' "$row" | jq -r --arg head "$head_oid" '
+    . as $row
+    | (($row.checkset // "")
+        | split(",")
+        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+        | map(select(length > 0))) as $gates
+    | (first( $gates[] | select( (($row.meta["check." + .]) // "") != ("green@" + $head) ) )) // ""
+  ' 2>/dev/null)
+  if [ -n "$hold_gate" ]; then
+    have=$(printf '%s' "$row" | jq -r --arg k "check.$hold_gate" '.meta[$k] // "none"' 2>/dev/null)
+    echo "merge-skill: PR#$num check '$hold_gate' not green at live head (have '$have', want 'green@$head_oid'); merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
   # An open rework/review child holds the merge (docs/work-bead-state-machine.md:

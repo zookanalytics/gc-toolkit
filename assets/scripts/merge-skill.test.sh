@@ -5,11 +5,13 @@
 #
 # The skill is the LANDING path that replaces GitHub auto-merge: for each OPEN
 # gating anchor it runs validate -> merge -> record. Covered:
-#   (1) ready (base==target, head==signoff, no child, mergeStateStatus=CLEAN)
-#        -> MERGED (gh pr merge --squash) + anchor closed "Merged to <target> at
-#           <sha>" + merge_result=merged recorded
-#   (2) signoff_head STALE  -> merge HELD (head not signoff-validated)
-#   (3) signoff_head MISSING -> merge HELD
+#   (1) ready (base==target, every check_set gate green@head, no child,
+#        mergeStateStatus=CLEAN) -> MERGED (gh pr merge --squash) + anchor closed
+#        "Merged to <target> at <sha>" + merge_result=merged recorded
+#   (1b) NO-GATE: empty check_set + CLEAN -> MERGED (the bug fix — a missing gate
+#        marker no longer holds a human-approved CLEAN PR forever)
+#   (2) check.codex STALE (green@<old-head>) -> merge HELD (not green at live head)
+#   (3) check.codex MISSING but codex in check_set -> merge HELD
 #   (4) mergeStateStatus=BLOCKED -> merge HELD (CI/approval not green)
 #   (5) mergeStateStatus=BEHIND  -> merge HELD (base moved)
 #   (6) open rework child references the PR -> merge HELD (a child holds the land)
@@ -38,32 +40,37 @@ has() { grep -q "$1" "$2" 2>/dev/null; }
 
 mkdir -p "$TMP/bin"
 
-# Gating anchors (gc bd list source): id|pr_number|merged_target|signoff_head
+# Gating anchors (gc bd list source): id|pr_number|merged_target|check_set|check.codex
+# The 5th column is the anchor's per-gate marker value for check.codex; a
+# "green@<oid>" value means "the codex gate passed at commit <oid>". bead-NOGATE
+# has an empty check_set (declares no gates) and no marker.
 cat > "$TMP/anchors" <<'A'
-bead-CLEAN|301|main|HEAD301
-bead-STALE|302|main|STALE302
-bead-NOSIGN|303|main|
-bead-BLOCKED|304|main|HEAD304
-bead-CHILD|305|main|HEAD305
-bead-RETARGET|306|main|HEAD306
-bead-DRAFT|307|main|HEAD307
-bead-MERGED|308|main|HEAD308
-bead-BEHIND|309|main|HEAD309
-bead-CAPCHILD|310|main|HEAD310
+bead-CLEAN|301|main|codex|green@HEAD301
+bead-STALE|302|main|codex|green@STALE302
+bead-NOSIGN|303|main|codex|
+bead-BLOCKED|304|main|codex|green@HEAD304
+bead-CHILD|305|main|codex|green@HEAD305
+bead-RETARGET|306|main|codex|green@HEAD306
+bead-DRAFT|307|main|codex|green@HEAD307
+bead-MERGED|308|main|codex|green@HEAD308
+bead-BEHIND|309|main|codex|green@HEAD309
+bead-CAPCHILD|310|main|codex|green@HEAD310
+bead-NOGATE|311|main||
 A
 
 # PR states (gh pr view source):
 #   pr|state|isDraft|baseRefName|headRefOid|mergeStateStatus|mergeable|mergeOid
-#   301 OPEN, base==target, head==signoff, CLEAN -> MERGED + recorded
-#   302 OPEN, head != signoff (stale)            -> HELD
-#   303 OPEN, anchor has no signoff              -> HELD
-#   304 OPEN, head==signoff BUT mergeState BLOCKED -> HELD
-#   305 OPEN, head==signoff, CLEAN, open child   -> HELD
-#   306 OPEN, base=integration/foo != main       -> HELD (retargeted)
-#   307 OPEN, draft                              -> skipped
-#   308 MERGED already                           -> skipped (observer's job)
-#   309 OPEN, head==signoff BUT mergeState BEHIND  -> HELD
-#   310 OPEN, head==signoff, CLEAN, open child past former cap -> HELD
+#   301 OPEN, base==target, check.codex green@head, CLEAN -> MERGED + recorded
+#   302 OPEN, check.codex green@old-head (stale)  -> HELD
+#   303 OPEN, codex in check_set but no marker    -> HELD
+#   304 OPEN, check green@head BUT mergeState BLOCKED -> HELD
+#   305 OPEN, check green@head, CLEAN, open child -> HELD
+#   306 OPEN, base=integration/foo != main        -> HELD (retargeted)
+#   307 OPEN, draft                               -> skipped
+#   308 MERGED already                            -> skipped (observer's job)
+#   309 OPEN, check green@head BUT mergeState BEHIND -> HELD
+#   310 OPEN, check green@head, CLEAN, open child past former cap -> HELD
+#   311 OPEN, empty check_set (no gate), CLEAN    -> MERGED (the bug fix)
 cat > "$TMP/prs" <<'P'
 301|OPEN|false|main|HEAD301|CLEAN|MERGEABLE|a301c0ffee123456
 302|OPEN|false|main|HEAD302|CLEAN|MERGEABLE|
@@ -75,6 +82,7 @@ cat > "$TMP/prs" <<'P'
 308|MERGED|false|main|HEAD308|CLEAN|MERGEABLE|d308dead00beef11
 309|OPEN|false|main|HEAD309|BEHIND|MERGEABLE|
 310|OPEN|false|main|HEAD310|CLEAN|MERGEABLE|
+311|OPEN|false|main|HEAD311|CLEAN|MERGEABLE|b311c0ffee654321
 P
 
 # Open rework/review children referencing a PR (gc bd list pr_number= source):
@@ -149,17 +157,17 @@ case "$2" in
     case "$*" in
       *"merge_result=pull_request"*)
         out=""
-        while IFS='|' read -r id pr target signoff; do
+        while IFS='|' read -r id pr target checkset checkcodex; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","signoff_head":"%s"}}' "$id" "$pr" "$target" "$signoff")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s"}}' "$id" "$pr" "$target" "$checkset" "$checkcodex")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         emit_rows "$out" "$lim" ;;
       *"pr_number="*)
         prnum=$(printf '%s' "$*" | sed -n 's/.*pr_number=\([0-9][0-9]*\).*/\1/p')
         out=""
-        while IFS='|' read -r id pr target signoff; do
+        while IFS='|' read -r id pr target checkset checkcodex; do
           [ -n "$id" ] || continue
           [ "$pr" = "$prnum" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
@@ -213,6 +221,15 @@ grep -q 'Merged to main at a301c0ff' "$TMP/closelog" \
 has '^bead-CLEAN$' "$TMP/mergedrec" && ok "(1) merge_result=merged recorded on anchor" \
                                     || bad "(1) merge_result=merged recorded"
 
+# (1b) THE BUG FIX: an anchor with an empty check_set (no required gate) merges
+# once CLEAN, instead of the former unconditional hold on a missing signoff_head.
+has '^311$' "$TMP/merged" && ok "(1b) no-gate PR (empty check_set) -> merged (missing gate no longer holds forever)" \
+                          || bad "(1b) no-gate PR -> merged"
+has '^bead-NOGATE$' "$TMP/closed" && ok "(1b) no-gate anchor closed (record)" \
+                                  || bad "(1b) no-gate anchor closed"
+has '^bead-NOGATE$' "$TMP/mergedrec" && ok "(1b) merge_result=merged recorded on no-gate anchor" \
+                                     || bad "(1b) no-gate merge_result recorded"
+
 # (2)-(10) every other anchor is HELD or skipped — NOT merged.
 for n in 302 303 304 305 306 307 308 309 310; do
   has "^$n$" "$TMP/merged" && bad "($n) anchor must NOT be merged" \
@@ -220,11 +237,11 @@ for n in 302 303 304 305 306 307 308 309 310; do
 done
 
 # Hold reasons name the specific gate that blocked each PR.
-printf '%s\n' "$OUT1" | grep -q "PR#302 head not signoff-validated" \
-  && ok "(2) stale signoff_head -> held, reason names the signoff gate" \
-  || bad "(2) stale signoff hold reason (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "PR#303 head not signoff-validated" \
-  && ok "(3) missing signoff_head -> held" || bad "(3) missing signoff hold (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#302 check 'codex' not green at live head" \
+  && ok "(2) stale check.codex (green@old-head) -> held, reason names the gate" \
+  || bad "(2) stale check hold reason (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#303 check 'codex' not green at live head" \
+  && ok "(3) missing check.codex (codex in check_set) -> held" || bad "(3) missing check hold (got: $OUT1)"
 printf '%s\n' "$OUT1" | grep -q "PR#304 not mergeable yet (mergeStateStatus='BLOCKED'" \
   && ok "(4) BLOCKED -> held, reason names mergeStateStatus" || bad "(4) BLOCKED hold (got: $OUT1)"
 printf '%s\n' "$OUT1" | grep -q "PR#309 not mergeable yet (mergeStateStatus='BEHIND'" \
@@ -241,12 +258,13 @@ printf '%s\n' "$OUT1" | grep -q "PR#310 has open rework/review bead child-310" \
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \
                                   || ok "(9) already-merged anchor left for the observer"
 
-# (INV) exactly one PR was merged.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "1" "(INV) exactly one PR merged (the fully-validated head)"
+# (INV) exactly two PRs were merged: the fully-validated gated head (301) and the
+# no-gate PR (311). No held/skipped anchor leaked through.
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "2" "(INV) exactly two PRs merged (gated head 301 + no-gate 311)"
 
 # Summary counters.
-printf '%s\n' "$OUT1" | grep -q "1 merged" \
-  && ok "run 1 summary reports 1 merged" || bad "run 1 summary merged count (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "2 merged" \
+  && ok "run 1 summary reports 2 merged" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard: only gh-supported --json fields. ----------------------
 gh pr view 301 --json merged >/dev/null 2>&1 \
@@ -261,7 +279,8 @@ gh pr view 301 --json mergeCommit >/dev/null 2>&1 \
 
 # --- Run 2: convergence. The merged+closed anchor leaves the gating set. -------
 bash "$SCRIPT" >/dev/null
-eq "$(grep -c '^301$' "$TMP/merged")" "1" "(5c) merged anchor not re-merged on second pass"
+eq "$(grep -c '^301$' "$TMP/merged")" "1" "(5c) merged gated anchor not re-merged on second pass"
+eq "$(grep -c '^311$' "$TMP/merged")" "1" "(5c) merged no-gate anchor not re-merged on second pass"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -67,7 +67,7 @@ ANCHORS=$(gc bd list --status=open \
 # loop) so the loop runs in THIS shell and the counters below survive the
 # pipe/subshell boundary.
 ROWS=$(printf '%s' "$ANCHORS" \
-  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // "")}' 2>/dev/null)
+  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // "")}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "reconcile-merged-prs: no gating anchors"; exit 0; }
 
 closed=0; abandoned=0; escalated=0; retargeted=0; skipped=0
@@ -113,16 +113,24 @@ while IFS= read -r row; do
   # stray draft is skipped) and NOT closed/unmerged (handled as
   # abandoned below). Flip the gating marker off pull_request so the anchor
   # leaves this scan: that escalates exactly once (mirroring out-of-band-close
-  # handling), routes a human, and clears the now-meaningless signoff_head. The
-  # anchor stays OPEN — the work has not landed on its target.
+  # handling), routes a human, and clears the now-meaningless per-gate check.*
+  # markers (so a re-engaged anchor must re-earn every gate against the new base,
+  # never merging on a review of the pre-retarget diff). The anchor stays OPEN —
+  # the work has not landed on its target.
   if { [ "$merged" = "true" ] || { [ "$state" = "OPEN" ] && [ "$is_draft" != "true" ]; }; } \
        && [ -n "$recorded_target" ] && [ -n "$base" ] && [ "$recorded_target" != "$base" ]; then
+    # Build --unset-metadata flags for each gate the anchor declared in check_set.
+    # The markers are dynamic keys (check.<name>), so they cannot be a single
+    # static flag; empty check_set yields no flags. Intentionally word-split on use.
+    UNSET_CHECKS=$(printf '%s' "$row" | jq -r '
+      ((.checkset // "") | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
+       | map("--unset-metadata", "check." + .) | .[])' 2>/dev/null | tr '\n' ' ')
     gc bd update "$id" \
       --assignee="" \
       --set-metadata merge_result=retargeted \
       --set-metadata gc.routed_to=human \
       --set-metadata blocked_reason="PR#$num retargeted: base '$base' != expected target '$recorded_target'" \
-      --unset-metadata signoff_head >/dev/null 2>&1
+      $UNSET_CHECKS >/dev/null 2>&1
     retargeted=$((retargeted + 1))
     if gc mail send mayor/ -s "ESCALATION: PR#$num retargeted ($base != $recorded_target) for $id" \
          -m "Gating anchor $id expects PR#$num to land on '$recorded_target' (merged_target,
@@ -195,8 +203,9 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
   # NO merge authority and never runs `gh pr merge`. A non-draft open PR is left
   # for the skill; a draft is skipped (drafts are retired). Either way the anchor
   # stays OPEN until the merged-close path above observes an authoritative merge.
-  # The merge gate (signoff_head, the open-rework-child hold, mergeability) lives
-  # in the merge skill, not here — keeping the observer free of merge authority.
+  # The merge gate (the check_set markers, the open-rework-child hold,
+  # mergeability) lives in the merge skill, not here — keeping the observer free
+  # of merge authority.
   if [ "$state" = "OPEN" ]; then
     skipped=$((skipped + 1)); continue
   fi

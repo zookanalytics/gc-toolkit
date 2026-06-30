@@ -216,10 +216,10 @@ For a bead landing to `main`:
 
 | Check | Satisfied by | Evidence |
 |---|---|---|
-| **signoff** | the signoff gate (a review step) | the gate's bead is closed/approved |
+| **signoff** | the signoff gate (a review step) | a `check.<name>=green@<head>` marker on the anchor |
 | **CI** | the rig's CI on the PR | required checks green |
 | **approval** | a human (or delegated) approver | an approving PR review |
-| **title/description current** | a validation step | title + body match the latest diff |
+| **title/description current** | the head-bound marker | every gate marker is `green@<live-head>` |
 | **merged** | the merge itself | `merged_sha` exists |
 
 These are the **same class of thing**: a PR triggers CI, which runs
@@ -231,11 +231,24 @@ license check, a changelog check) without changing the machine, which only ever
 asks "are all members of this convoy's check-set satisfied?" A keepable-artifact
 PR uses this same set; an ephemeral unit's set is the single member "recorded."
 
+**How the check-set is recorded (gc-toolkit).** Each gate is realized as a
+per-gate marker on the gating anchor — `check.<name>=green@<sha>`, meaning "gate
+`<name>` passed at commit `<sha>`." The anchor declares which gates apply in a
+`check_set` metadata field (comma-separated gate names; empty declares no gates),
+and the merge skill (`merge-skill.sh`) holds the merge until **every** gate named
+in `check_set` is green **at the live head** — each `check.<name>` must equal
+`green@<live-head-oid>`. Adding a gate is adding a name to `check_set` plus
+whatever step stamps its marker; the merge skill is unchanged. This replaces the
+retired `signoff_head` field (a single conflated marker) and the `review_gate`
+string var: the per-gate marker model is the composable check-set made concrete.
+
 **`title/description current` is load-bearing.** Approval and CI can be
 **stale**: an approval given on an earlier diff, with a title and body that no
 longer describe what will land, can still read as green. Approval alone is
-therefore not a sufficient gate; the **merge skill validates that the title and
-body still describe the latest commits before it merges**, so a stale approval
+therefore not a sufficient gate; each gate's marker is **bound to the head it
+validated** (`green@<sha>`), so the merge skill merges only while every gate is
+green at the *live* head — a later commit moves the head, the marker no longer
+matches `green@<live-head>`, and the gate re-gates. A stale approval therefore
 cannot carry an out-of-date PR onto the target.
 
 ## Rework is a new child
