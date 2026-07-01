@@ -29,13 +29,13 @@ CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --city-path $(sq "$CITY_PATH")"
 
-# Attention board — the sibling of prefix+S. prefix+S answers "what's
+# Helm — the sibling of prefix+S. prefix+S answers "what's
 # running"; prefix+b answers "what needs me": a ranked cross-rig board of
 # OPEN anchors (epics, floating convoys, decisions, flagged beads). Pick a
 # row and it resumes-or-materializes that bead's resident host and lands
 # you in the conversation. Phase 3 of the Bead-Universe Operating Model
-# (bead tk-qkags; design Key Component 4). See tmux-pick-attention.sh.
-gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-attention.sh --city-path $(sq "$CITY_PATH")"
+# (bead tk-qkags; design Key Component 4). See tmux-pick-helm.sh.
+gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
 
 # Spawn a thread of the current pane's role. Input handling (gum
 # input in a tmux popup) lives in the script — see tmux-spawn-thread.sh.

@@ -8,7 +8,7 @@
 # passthrough to upstream `bd` (Go) and has no `universe` subcommand, so — like
 # Phase 1's `gc bead-host` (tools/gc-bead-host.sh) — the projection ships as a
 # path-invoked shell tool. It is the ONE shared contract the launcher, the
-# attention board, and slung mols all consume, so they agree on what a bead's
+# Helm, and slung mols all consume, so they agree on what a bead's
 # universe is.
 #
 # THE THREE TIERS (design Key Component 3):
