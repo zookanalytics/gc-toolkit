@@ -1182,7 +1182,16 @@ into a gating state the signoff cannot rediscover. Idempotent — a second refin
 pass on the same PR reuses the open signoff bead and re-verifies (heals) the link.
 
 ```bash
-if printf '%s' ",{{check_set}}," | grep -q ",codex,"; then
+# check_set membership is normalized the SAME way merge-skill.sh enforces it
+# (split on comma, trim surrounding whitespace, drop empties) so a natural-form
+# list like "lint, codex" dispatches the codex gate HERE and is enforced by the
+# merge skill. A raw comma-delimited substring match misses the spaced form:
+# the review bead is never created, yet merge-skill.sh still trims to `codex` and
+# holds the merge forever on a check.codex marker nothing will ever stamp
+# (tk-aj4ua). The same trim/filter is inlined verbatim at the fail-closed site
+# below (not factored into a shared helper) because that site is extracted and
+# run standalone by signoff-anchor-failclosed.test.sh.
+if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
   CODEX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
   FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
   REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
@@ -1257,7 +1266,10 @@ CHECK_SET="{{check_set}}"
 # retries (idempotent: the EXISTING_REVIEW guard heals on retry). Non-codex gates
 # legitimately have no review bead, so this fires ONLY when codex review is a
 # required check-set member.
-if printf '%s' ",${CHECK_SET:-}," | grep -q ",codex," && [ -z "${REVIEW_FOR_GATE:-}" ]; then
+# Membership normalized identically to the dispatch site above (split on comma,
+# trim, drop empties) so a spaced "lint, codex" is recognized here too — matching
+# merge-skill.sh enforcement so dispatch and fail-closed never diverge (tk-aj4ua).
+if printf '%s' "${CHECK_SET:-}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex && [ -z "${REVIEW_FOR_GATE:-}" ]; then
   echo "Codex review gate required but no review id (create/lookup failed); leaving $WORK assigned to refinery for retry." >&2
   gc runtime drain-ack
   exit 1

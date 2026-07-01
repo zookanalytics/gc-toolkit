@@ -131,6 +131,18 @@ eq "$(gate rb-1 work-1 '' codex)" "0" \
 #     (fix #2 still applies under codex mode).
 eq "$(gate rb-1 work-1 1 codex)" "1" \
    "(H) codex gate + anchor not recorded -> transition deferred (fail-closed, exit 1)"
+# (I) THE tk-aj4ua FIX: a natural-form spaced check-set "lint, codex" must parse
+#     identically to "lint,codex" — codex IS a member, so the missing-review-id
+#     gate fails closed (exit 1). The old literal ",codex," grep saw the space and
+#     treated codex as ABSENT, skipping the gate (exit 0) while merge-skill.sh
+#     still trimmed to `codex` and enforced it -> stranded PR. This case fails on
+#     the pre-fix grep and passes only with the normalized (trim) membership test.
+eq "$(gate '' work-1 '' 'lint, codex')" "1" \
+   "(I) spaced check-set 'lint, codex' + missing review id -> fail-closed (exit 1)"
+# (J) spaced check-set + review id present + anchor records -> proceeds (parity
+#     with (G): normalization must not over-fire and block a valid transition).
+eq "$(gate rb-1 work-1 '' 'lint, codex')" "0" \
+   "(J) spaced check-set 'lint, codex' + review id present + recorded -> proceeds"
 
 # --- Gate wiring: the formula must feed REVIEW_FOR_GATE from the dispatched or
 #     reused review bead, else the gate never runs. ----------------------------

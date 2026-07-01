@@ -116,6 +116,20 @@ printf '%s' "$REVIEW_UPDATE" | grep -q -- '--set-metadata anchor_bead="\$WORK"' 
   && ok "(E) dispatch stamps anchor_bead=\$WORK atomically in the review-bead update batch" \
   || bad "(E) dispatch must stamp --set-metadata anchor_bead=\"\$WORK\" in the review-bead update batch"
 
+# --- check_set membership normalization (tk-aj4ua): BOTH codex-membership tests
+#     (dispatch ~L1185 + fail-closed ~L1260) must normalize check_set — trim a
+#     spaced list — the SAME way merge-skill.sh enforces it, so a natural-form
+#     "lint, codex" cannot make one path skip codex while the other enforces it
+#     (the stranded-PR class). Static guards on the raw formula so a regression
+#     to the brittle literal grep is caught even though the dispatch site is not
+#     executed here. -------------------------------------------------------------
+grep -qF ',codex,' "$TOML" \
+  && bad "(F) brittle literal ',codex,' membership grep still present -> a spaced 'lint, codex' would strand the PR" \
+  || ok "(F) no brittle literal ',codex,' membership grep in the formula"
+NORM_COUNT=$(grep -cF "grep -qxF codex" "$TOML" || true)
+eq "$NORM_COUNT" "2" \
+   "(G) both codex-membership sites (dispatch + fail-closed) use the normalized whole-line match"
+
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
