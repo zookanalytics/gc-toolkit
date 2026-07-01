@@ -35,8 +35,8 @@ City-scoped, on-demand, purely interactive. Never claims pool work
 (`work_query` returns `[]`) and is never a sling target (`sling_query`
 errors) — same never-matching-predicate pattern as mayor-thread. Created
 by `tools/gc-bead-host.sh <bead-id>` (spawn-or-resume + durable
-dual-link), or by the attention board picker (prefix+b /
-`gc-attention.sh open`), a thin front door over the same tool.
+dual-link), or by the Helm picker (prefix+b /
+`gc-helm.sh open`), a thin front door over the same tool.
 
 The durable bead<->session link is metadata-only (no schema migration):
 reverse `hosts_bead` on the session bead is the source of truth, forward

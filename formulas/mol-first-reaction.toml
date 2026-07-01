@@ -12,7 +12,7 @@ hands it back to the human. It never closes the target.
 create/decomposition). The worker reads the bead's body — its durable
 seed/prompt — does the cheap reaction (research→spec, or "read the body and
 articulate what it means"), writes a first-reaction CARD to the bead notes,
-and FLAGS the bead onto the attention board so the human arrives at advanced
+and FLAGS the bead onto the Helm so the human arrives at advanced
 work. Then it drains. One reaction, then gone.
 
 ## The contract (what makes this not a review leg)
@@ -26,7 +26,7 @@ work. Then it drains. One reaction, then gone.
    Found (freshness-stamped) · Proposal · Decision needed` — the same card
    the board picker lands the human on (design Interface).
 3. **Flag, don't close.** Raise the bead onto the board
-   (`gc-attention.sh flag`) so it surfaces as *advanced*. Leave the work bead
+   (`gc-helm.sh flag`) so it surfaces as *advanced*. Leave the work bead
    OPEN and unassigned for the human to accept/redirect. Closing it would
    claim the work is done — it is not.
 4. **mr-only for code.** A first reaction is notes-only by default. IF it
@@ -126,7 +126,7 @@ on a snapshot that may have moved by the time the human reads it (design Risk
 "stale proactive worldview"). The `## Found` timestamp is that stamp.
 
 The card's one-line headline doubles as the board-visible **takeaway** — the
-single sentence `gc-attention.sh` renders as the anchor's NEEDS, so a glance
+single sentence `gc-helm.sh` renders as the anchor's NEEDS, so a glance
 explains what the reaction concluded / what it needs. Derive it from your
 **## Decision needed** (the one thing the human must accept or redirect); keep
 it ≤140 chars on ONE line (the wrapper collapses stray whitespace, but a tight
@@ -155,9 +155,9 @@ The reaction is on the bead. Now make the human SEE it, then get out of the
 way. Do NOT close the work bead — a first reaction advances it; it does not
 finish it.
 
-**1. Flag the bead onto the attention board** (it surfaces as *advanced*):
+**1. Flag the bead onto the Helm** (it surfaces as *advanced*):
 ```bash
-ATTN="$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/gc-attention.sh"
+ATTN="$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/gc-helm.sh"
 "$ATTN" flag {{issue}} --reason "advanced: first reaction ready — accept or redirect"
 ```
 This sets `gc.attention=1` (+ reason + timestamp) — the same hand-raise a
@@ -172,7 +172,7 @@ advance marker (which stops the scan from re-reacting), all in the same Dolt
 write. The **takeaway** is your card's one-line headline, derived from
 **## Decision needed**, ≤140 chars on ONE line:
 ```bash
-ATTN="$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/gc-attention.sh"
+ATTN="$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/gc-helm.sh"
 TAKEAWAY="<one-line distillation of ## Decision needed, ≤140 chars>"
 "$ATTN" takeaway {{issue}} "$TAKEAWAY" --by proactive --release
 ```
