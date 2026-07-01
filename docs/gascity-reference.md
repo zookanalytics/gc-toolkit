@@ -47,13 +47,13 @@ If any of the four fail, the content does not belong here.
 - Installation: https://docs.gascity.com/getting-started/installation
 - Quickstart: https://docs.gascity.com/getting-started/quickstart
 - Coming from Gas Town: https://docs.gascity.com/getting-started/coming-from-gastown
-- Repository map: https://docs.gascity.com/getting-started/repository-map
+- How Gas City works (incl. repository map): https://docs.gascity.com/getting-started/how-gas-city-works
 - Install/setup troubleshooting: https://docs.gascity.com/getting-started/troubleshooting
 
 ## Architecture & concepts
 
-- Internals overview: https://docs.gascity.com/internals
-- Beads topology (one Dolt server, isolated beads): https://docs.gascity.com/internals/beads-topology
+- Reference overview (incl. internals): https://docs.gascity.com/reference/index
+- Beads topology (one Dolt server, isolated beads): https://docs.gascity.com/reference/internal/beads-topology
 
 ## Configuration
 
@@ -127,7 +127,7 @@ gc-toolkit does not restate them.
 
 Machine-readable artifacts. Each link is the canonical download.
 
-- Schemas index: https://docs.gascity.com/schema
+- Schemas index: https://docs.gascity.com/reference/schema/index
 - OpenAPI 3.1: https://docs.gascity.com/reference/schema/openapi.json
 - Events JSONL: https://docs.gascity.com/reference/schema/events.json
 - City config: https://docs.gascity.com/reference/schema/city-schema.json
