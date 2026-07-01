@@ -8,13 +8,13 @@
 #     review->anchor *best-effort* (a failed edge only warns; it must not
 #     strand the PR).
 #   - COMPLETION (template-fragments/polecat-non-impl-done.template.md) resolves
-#     the anchor to stamp signoff_head (APPROVE/COMMENT) or clear it + file a
-#     rework child (REQUEST_CHANGES).
+#     the anchor to stamp check.<gate>=green@<head> (APPROVE/COMMENT) or clear it
+#     + file a rework child (REQUEST_CHANGES).
 #
 # The bug this guards (PR#163 signoff finding): if completion resolves the
 # anchor ONLY by the best-effort BLOCKS edge and that edge was dropped, ANCHOR
-# is empty, signoff_head is never stamped, and the merge skill holds the merge
-# forever ("no signoff yet") with nothing to re-dispatch the review.
+# is empty, the check.<gate> marker is never stamped, and the merge skill holds
+# the merge forever ("no signoff yet") with nothing to re-dispatch the review.
 # The fix is a durable metadata.anchor_bead fallback, resolved when the edge is
 # missing.
 #
@@ -115,6 +115,20 @@ REVIEW_UPDATE="$(awk '
 printf '%s' "$REVIEW_UPDATE" | grep -q -- '--set-metadata anchor_bead="\$WORK"' \
   && ok "(E) dispatch stamps anchor_bead=\$WORK atomically in the review-bead update batch" \
   || bad "(E) dispatch must stamp --set-metadata anchor_bead=\"\$WORK\" in the review-bead update batch"
+
+# --- check_set membership normalization (tk-aj4ua): BOTH codex-membership tests
+#     (dispatch ~L1185 + fail-closed ~L1260) must normalize check_set — trim a
+#     spaced list — the SAME way merge-skill.sh enforces it, so a natural-form
+#     "lint, codex" cannot make one path skip codex while the other enforces it
+#     (the stranded-PR class). Static guards on the raw formula so a regression
+#     to the brittle literal grep is caught even though the dispatch site is not
+#     executed here. -------------------------------------------------------------
+grep -qF ',codex,' "$TOML" \
+  && bad "(F) brittle literal ',codex,' membership grep still present -> a spaced 'lint, codex' would strand the PR" \
+  || ok "(F) no brittle literal ',codex,' membership grep in the formula"
+NORM_COUNT=$(grep -cF "grep -qxF codex" "$TOML" || true)
+eq "$NORM_COUNT" "2" \
+   "(G) both codex-membership sites (dispatch + fail-closed) use the normalized whole-line match"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -99,13 +99,15 @@ never here. Resolve the anchor as the bead this review gates — the dependent o
 the `blocks` dep the refinery attached (`gc bd dep <review> --blocks <anchor>`):
 
 - **APPROVE/COMMENT** — the signoff passes on the **current** head. Stamp the
-  head you signed off as `signoff_head` on the anchor (this is the check-set's
-  *title/description validated-current* member: it tells the merge skill
-  that the latest commit — title + body included — was reviewed, so the merge
-  may fire). The PR is already non-draft; nothing else to publish.
+  gate green at the head you signed off as `check.<gate>=green@<head>` on the
+  anchor (the gate name comes from the review bead's `metadata.check_name`,
+  default `codex`). The `green@<sha>` value folds "this gate passed" and "title +
+  body validated at this commit" into one: a later commit moves the head, so the
+  marker no longer matches and the gate re-gates. The PR is already non-draft;
+  nothing else to publish.
 - **REQUEST_CHANGES** — file a **new rework child** against the anchor (rework
   is a new child, never the same bead reopened and never a cleared marker; see
-  docs/work-bead-state-machine.md). Clear `signoff_head` so the now-unvalidated
+  docs/work-bead-state-machine.md). Clear `check.<gate>` so the now-unvalidated
   head cannot be merged.
 
 After posting the verdict via `gh pr review` (step 1 above) and BEFORE closing
@@ -114,6 +116,10 @@ the REVIEW bead (step 3 above), act on it:
 ```bash
 FIX_POOL=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.fix_target_pool // empty')
 PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
+# Which check-set gate this review satisfies — the per-gate marker key is
+# check.<CHECK_NAME>. The dispatch stamps check_name=codex; default to codex for
+# an older review bead created before the field existed.
+CHECK_NAME=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.check_name // "codex"')
 
 # Resolve the anchor (the bead this review gates) two ways, in order:
 #   1. the BLOCKS edge, walked upward — the primary, dep-graph-honest path;
@@ -121,8 +127,8 @@ PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
 #      dispatch stamps atomically with the review's routing fields.
 # The edge is attached best-effort at dispatch (a failed edge must not strand
 # the PR). But if the edge is dropped and we resolve ONLY via it, ANCHOR is
-# empty, signoff_head is never stamped, and the merge skill holds the merge
-# forever ("no signoff yet") — nothing re-dispatches the review, so
+# empty, the gate marker check.<gate> is never stamped, and the merge skill holds
+# the merge forever ("no signoff yet") — nothing re-dispatches the review, so
 # the PR is stuck. The anchor_bead fallback survives a lost edge. The markers
 # below let the regression test extract and exercise this exact snippet
 # (assets/scripts/signoff-anchor-resolution.test.sh).
@@ -136,30 +142,31 @@ ANCHOR=$(gc bd dep list <work-bead> --direction=up -t blocks --json 2>/dev/null 
 if [ -n "$FIX_POOL" ]; then
   case "$VERDICT" in
     APPROVE|COMMENT)
-      # Record which head the signoff validated — the title/description-current
-      # check. The merge skill merges only while signoff_head still equals the
-      # PR's live head; any later commit makes it stale and re-gates the merge.
-      # Best-effort; a miss just defers the merge to the next signoff round, it
-      # never merges prematurely.
+      # Record the gate green at the head the signoff validated, as the per-gate
+      # marker check.<CHECK_NAME>=green@<reviewed-oid>. The merge skill merges
+      # only while that marker still equals green@<live-head>; any later commit
+      # makes it stale and re-gates the merge. Best-effort; a miss just defers the
+      # merge to the next signoff round, it never merges prematurely.
       if [ -n "$ANCHOR" ]; then
         # Stamp the EXACT commit the signoff reviewed, read from the reviews API
         # (.commit_id) — NOT the PR's live head. The head can advance between the
         # review and this stamp; stamping the live head would mark an UNREVIEWED
-        # commit as signoff-validated and let it merge, defeating the
-        # stale-head guard. GitHub attaches the review to the head at submission,
-        # so .commit_id is exactly what was reviewed: a commit pushed afterward
-        # leaves signoff_head != live head and correctly re-gates the merge. Take
-        # the latest review under your own handle (the one just submitted).
+        # commit as gate-green and let it merge, defeating the stale-head guard.
+        # GitHub attaches the review to the head at submission, so .commit_id is
+        # exactly what was reviewed: a commit pushed afterward leaves
+        # check.<gate> = green@<old-head> != green@<live-head> and correctly
+        # re-gates the merge. Take the latest review under your own handle (the
+        # one just submitted).
         REVIEW_HANDLE=$(gh api user -q .login 2>/dev/null)
         REVIEWED_OID=$(gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/reviews" 2>/dev/null \
           | jq -r --arg h "$REVIEW_HANDLE" \
               '[.[] | select(.user.login == $h)] | sort_by(.submitted_at) | last | .commit_id // empty' 2>/dev/null)
         [ -n "$REVIEWED_OID" ] && gc bd update "$ANCHOR" \
-          --set-metadata signoff_head="$REVIEWED_OID" >/dev/null 2>&1 || true
+          --set-metadata "check.$CHECK_NAME=green@$REVIEWED_OID" >/dev/null 2>&1 || true
       fi
-      # The PR is already non-draft (drafts are retired). The signoff_head stamp
-      # above is the only action: it lets the merge skill merge the PR once the
-      # head it validated is still live.
+      # The PR is already non-draft (drafts are retired). The check.<gate> stamp
+      # above is the only action: it lets the merge skill merge the PR once every
+      # check-set gate is green at the still-live head.
       ;;
     REQUEST_CHANGES)
       # Rework is a NEW child of the anchor, not the same anchor reopened and
@@ -190,8 +197,8 @@ if [ -n "$FIX_POOL" ]; then
       if [ -n "$ANCHOR" ]; then
         gc bd dep add "$FIX_BEAD" "$ANCHOR" --type=parent-child \
           || echo "WARN: could not link rework $FIX_BEAD under anchor $ANCHOR" >&2
-        # The head is no longer signoff-validated — re-gate the merge.
-        gc bd update "$ANCHOR" --unset-metadata signoff_head >/dev/null 2>&1 || true
+        # The head is no longer gate-validated — clear the gate marker to re-gate.
+        gc bd update "$ANCHOR" --unset-metadata "check.$CHECK_NAME" >/dev/null 2>&1 || true
       else
         echo "WARN: no gating anchor resolved for review <work-bead>; rework $FIX_BEAD filed unlinked" >&2
       fi

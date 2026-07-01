@@ -91,8 +91,8 @@ default = "60"
 description = "After a successful direct merge, attempt to fast-forward the rig's canonical checkout (\\$GC_RIG_ROOT) when it is on the target branch with a clean tree. Best-effort; never blocks the merge."
 default = "true"
 
-[vars.review_gate]
-description = "Signoff gate for mr-mode PRs. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member; the PR opens non-draft and the merge is held until the signoff validates the head (signoff_head). Empty disables the gate."
+[vars.check_set]
+description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. Empty declares no gates (the merge is then governed only by CI + approval + no-open-child). Replaces the retired review_gate string + signoff_head side-channel."
 default = "codex"
 
 [[steps]]
@@ -188,9 +188,10 @@ graduating, or any mr-mode bead) OPEN as the PR's gating bead (merge-push step
 
 (a0) The MERGE SKILL (`merge-skill.sh`) — the single writer of merged-truth. For
 each open gating anchor whose PR is open+ready it runs validate -> merge ->
-record: validate the live base == the anchor's `merged_target`, the live head ==
-`signoff_head` (the check-set's title/description-current member, so a stale
-approval or a post-signoff rework commit cannot merge early), no open rework
+record: validate the live base == the anchor's `merged_target`, every gate in the
+anchor's `check_set` is green at the live head (per-gate marker
+check.<name>=green@<head>, so a stale approval or a post-review commit re-gates
+instead of merging early), no open rework
 child holds the PR, and `mergeStateStatus == CLEAN` (CI + approval + base-current
 + no-conflict); then an EXPLICIT `gh pr merge --squash` (NOT auto-merge); then
 close the bead `"Merged to <target> at <sha>"` + stamp `merge_result=merged`. The
@@ -966,9 +967,10 @@ markdown). The body always carries the bead's full description (the
 when present.
 
 The PR always opens non-draft — every PR that exists is a real candidate.
-When `review_gate = "codex"` the signoff gate (dispatched in step 4) holds
-the merge instead: the merge stays held until the signoff validates the
-head, so no draft state is needed to gate readiness.
+When the `check_set` includes `codex` the signoff gate (dispatched in step 4)
+holds the merge instead: the merge stays held until the codex gate is green at
+the live head (check.codex=green@<head>), so no draft state is needed to gate
+readiness.
 
 ```bash
 WORK_JSON=$(gc bd show $WORK --json)
@@ -1170,8 +1172,8 @@ is the gating marker the reconcile pass scans for. `--unset-metadata
 rejection_reason` clears any stale rejection field from an earlier reworked
 attempt.
 
-gc-toolkit local delta: if `review_gate = "codex"`, dispatch a signoff bead
-(one member of the anchor's check-set) for the codex polecat pool and record the
+gc-toolkit local delta: if `codex` is a member of `check_set`, dispatch a signoff
+bead (one member of the anchor's check-set) for the codex polecat pool and record the
 review->anchor link (anchor_bead metadata + a best-effort BLOCKS edge) BEFORE the
 gating transition. The transition is then FAIL-CLOSED on that link: the anchor is
 detached into gating only once anchor_bead is verified recorded on the review
@@ -1180,7 +1182,16 @@ into a gating state the signoff cannot rediscover. Idempotent — a second refin
 pass on the same PR reuses the open signoff bead and re-verifies (heals) the link.
 
 ```bash
-if [ "{{review_gate}}" = "codex" ]; then
+# check_set membership is normalized the SAME way merge-skill.sh enforces it
+# (split on comma, trim surrounding whitespace, drop empties) so a natural-form
+# list like "lint, codex" dispatches the codex gate HERE and is enforced by the
+# merge skill. A raw comma-delimited substring match misses the spaced form:
+# the review bead is never created, yet merge-skill.sh still trims to `codex` and
+# holds the merge forever on a check.codex marker nothing will ever stamp
+# (tk-aj4ua). The same trim/filter is inlined verbatim at the fail-closed site
+# below (not factored into a shared helper) because that site is extracted and
+# run standalone by signoff-anchor-failclosed.test.sh.
+if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
   CODEX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
   FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
   REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
@@ -1200,6 +1211,7 @@ if [ "{{review_gate}}" = "codex" ]; then
     # (template-fragments/polecat-non-impl-done.template.md).
     gc bd update "$REVIEW_BEAD" \
       --set-metadata task_kind=review \
+      --set-metadata check_name=codex \
       --set-metadata pr_url="$PR_URL" \
       --set-metadata pr_number="$PR_NUMBER" \
       --set-metadata fix_target_pool="$FIX_POOL" \
@@ -1225,10 +1237,10 @@ if [ "{{review_gate}}" = "codex" ]; then
   REVIEW_FOR_GATE="${REVIEW_BEAD:-$EXISTING_REVIEW}"
 fi
 
-# Capture the rendered review-gate mode for the codex fail-closed check below.
-# Kept OUTSIDE the signoff-anchor-failclosed markers so the extracted snippet
-# stays template-free — the regression test drives REVIEW_GATE through the env.
-REVIEW_GATE="{{review_gate}}"
+# Capture the rendered check-set for the codex fail-closed check below. Kept
+# OUTSIDE the signoff-anchor-failclosed markers so the extracted snippet stays
+# template-free — the regression test drives CHECK_SET through the env.
+CHECK_SET="{{check_set}}"
 
 # Fail-closed (finding fix #2; finding fix #3 adds the codex-id guard inside the
 # markers below): do NOT detach the anchor into gating unless the durable
@@ -1238,7 +1250,7 @@ REVIEW_GATE="{{review_gate}}"
 # persisted. If it cannot be recorded, leave $WORK assigned to the refinery and
 # OPEN; the next patrol retries (idempotent: the EXISTING_REVIEW guard + this
 # heal converge). Detaching with no recoverable anchor would strand the PR: the
-# signoff could not stamp signoff_head and the merge skill would hold the
+# signoff could not stamp check.codex and the merge skill would hold the
 # merge forever. The markers let the regression test extract this exact
 # snippet (assets/scripts/signoff-anchor-failclosed.test.sh).
 # >>> signoff-anchor-failclosed
@@ -1249,12 +1261,15 @@ REVIEW_GATE="{{review_gate}}"
 # (`if [ -n ... ]`) would then SKIP the gate and fall through to the gating
 # transition, detaching the anchor with no review bead. That strands the PR
 # exactly like the unrecorded-anchor case: the merge skill holds the merge
-# waiting for signoff_head, but no review bead exists to ever stamp it.
+# waiting for check.codex, but no review bead exists to ever stamp it.
 # Fail closed — leave $WORK assigned to the refinery and OPEN so the next patrol
 # retries (idempotent: the EXISTING_REVIEW guard heals on retry). Non-codex gates
-# legitimately have no review bead, so this fires ONLY when codex review is the
-# required gate.
-if [ "${REVIEW_GATE:-}" = "codex" ] && [ -z "${REVIEW_FOR_GATE:-}" ]; then
+# legitimately have no review bead, so this fires ONLY when codex review is a
+# required check-set member.
+# Membership normalized identically to the dispatch site above (split on comma,
+# trim, drop empties) so a spaced "lint, codex" is recognized here too — matching
+# merge-skill.sh enforcement so dispatch and fail-closed never diverge (tk-aj4ua).
+if printf '%s' "${CHECK_SET:-}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex && [ -z "${REVIEW_FOR_GATE:-}" ]; then
   echo "Codex review gate required but no review id (create/lookup failed); leaving $WORK assigned to refinery for retry." >&2
   gc runtime drain-ack
   exit 1
@@ -1287,6 +1302,7 @@ gc bd update $WORK \
   --set-metadata pr_url="$PR_URL" \
   --set-metadata pr_number="$PR_NUMBER" \
   --set-metadata merged_target="$TARGET" \
+  --set-metadata check_set="{{check_set}}" \
   --set-metadata gc.routed_to="" \
   --unset-metadata rejection_reason
 ```
