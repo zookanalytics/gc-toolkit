@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# attention-open-fixture.sh — hermetic regression for gc-attention.sh `open`'s
+# helm-open-fixture.sh — hermetic regression for gc-helm.sh `open`'s
 # tmux landing logic (tk-8v5j0).
 #
 # `open` must switch the tmux client to the host's session_name (`s-<id>`) ONLY
@@ -24,11 +24,11 @@
 #   (a) same server     -> switch-client lands on session_name (s-<id>)
 #   (b) different server -> no switch-client, hint printed, returns fast (no hang)
 #
-# Exit 0 iff both assertions pass.  Usage: attention-open-fixture.sh [--keep]
+# Exit 0 iff both assertions pass.  Usage: helm-open-fixture.sh [--keep]
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ATTENTION="$HERE/../assets/scripts/gc-attention.sh"
+ATTENTION="$HERE/../assets/scripts/gc-helm.sh"
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
@@ -38,19 +38,19 @@ bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAIL=$((FAIL+1)); }
 note() { printf '  ---- %s\n' "$*"; }
 hdr()  { printf '\n== %s ==\n' "$*"; }
 
-[ -x "$ATTENTION" ] || { echo "gc-attention.sh not found/executable: $ATTENTION" >&2; exit 2; }
+[ -x "$ATTENTION" ] || { echo "gc-helm.sh not found/executable: $ATTENTION" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 
 WORK=""; SHIM_DIR=""
 cleanup() {
     [ -n "$SHIM_DIR" ] && rm -rf "$SHIM_DIR" || true
     [ "$KEEP" = "1" ] && { note "--keep: leaving WORK=$WORK open"; return; }
-    [ -n "$WORK" ] && gc bd close "$WORK" --reason "attention-open fixture teardown" >/dev/null 2>&1 || true
+    [ -n "$WORK" ] && gc bd close "$WORK" --reason "helm-open fixture teardown" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 hdr "Setup: stand-in work bead + stub up / fake tmux"
-WORK="$(gc bd create "FIXTURE: tk-8v5j0 attention-open work stand-in" -t task --json 2>/dev/null | jq -r '.id')"
+WORK="$(gc bd create "FIXTURE: tk-8v5j0 helm-open work stand-in" -t task --json 2>/dev/null | jq -r '.id')"
 [ -n "$WORK" ] || { echo "failed to create stand-in bead" >&2; exit 2; }
 note "WORK = $WORK"
 
@@ -135,5 +135,5 @@ GOT="$(cat "$SWITCH_REC" 2>/dev/null || true)"
     || { bad "want NO switch + land-it hint + prompt return (got switch='$GOT', rc=$RC)"; note "stderr:"; sed 's/^/    /' "$ERR_LOG" >&2 || true; }
 
 hdr "Result"
-printf 'attention-open assertions: %d passed, %d failed\n' "$PASS" "$FAIL"
+printf 'helm-open assertions: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

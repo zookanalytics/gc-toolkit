@@ -312,7 +312,7 @@ has "card · Found (freshness-stamped)"          "Found"                   "$F"
 has "card · Proposal"                           "Proposal"                "$F"
 has "card · Decision needed"                    "Decision needed"         "$F"
 # Surfaces as advanced: it flags the bead onto the board.
-has "formula flags the bead onto the board"     "gc-attention.sh"         "$F"
+has "formula flags the bead onto the board"     "gc-helm.sh"         "$F"
 has "formula raises the hand (flag verb)"       "flag {{issue}}"          "$F"
 # Never closes the target work bead.
 has "formula forbids closing the target"        "gc bd close"             "$F"
@@ -322,7 +322,7 @@ absent "formula has no separate --status=open release update" "--status=open" "$
 # mr-invariant inside the formula's code path.
 has "formula pins code output to mr"            "merge_strategy=mr"       "$F"
 has "formula tags reached content untrusted"    "UNTRUSTED DATA"          "$F"
-# The board-visible takeaway: stamped (by=proactive) via the gc-attention.sh
+# The board-visible takeaway: stamped (by=proactive) via the gc-helm.sh
 # `takeaway` wrapper, now with `--release` folding the reaction-release bundle
 # (reopen, unassign, clear route, the gc.proactive_reaction advance marker) into
 # the SAME Dolt write — one call replaces the takeaway stamp + a separate release

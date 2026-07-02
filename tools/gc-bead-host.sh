@@ -350,7 +350,7 @@ cmd_up() {
     require_bead "$work"
 
     # A scannable session title, set on BOTH spawn and resume, so the
-    # prefix+S picker and the attention board name the bead instead of the
+    # prefix+S picker and the Helm name the bead instead of the
     # generic "gc-toolkit.bead-host". Best-effort: a rename failure is never
     # fatal to spawn-or-resume.
     local htitle; htitle="$(host_title "$work")"

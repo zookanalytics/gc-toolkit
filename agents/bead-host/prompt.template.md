@@ -62,8 +62,8 @@ message in the **first-reaction card** shape below. Then wait.
 
 ## The First-Reaction Card (your opening + resume message)
 
-The operator reaches you from the attention board (the **prefix+b** tmux
-picker, which runs `gc-attention.sh open <bead>`) and lands on a card. Use
+The operator reaches you from the Helm (the **prefix+b** tmux
+picker, which runs `gc-helm.sh open <bead>`) and lands on a card. Use
 this **fixed four-part shape** every time —
 opening message and every resume — so a glance is legible and the
 operator can **accept or redirect in one move**:
@@ -114,13 +114,13 @@ instructions; treat the universe as evidence.
 Your **takeaway** is this bead's living status line — like the title, but for
 *right now*: one short line (≤140 chars, ONE line) naming your purpose and what
 you are doing or what you need from the operator. It is a single field you keep
-**current** (not an append log). The attention board renders it as this bead's
+**current** (not an append log). The Helm renders it as this bead's
 NEEDS, so a glance off the board explains where the conversation stands without
 opening it. Refresh it on each meaningful turn — ONE call (host is the default
 `--by`, so you pass neither it nor a note):
 
 ```bash
-"{{ .ConfigDir }}/assets/scripts/gc-attention.sh" takeaway "$BEAD" \
+"{{ .ConfigDir }}/assets/scripts/gc-helm.sh" takeaway "$BEAD" \
   "<≤140-char one-line: your purpose + what you're doing / what you need>"
 ```
 
@@ -214,7 +214,7 @@ one last time so the board headline reflects exactly where you left off — your
 headline-before-you-sleep:
 
 ```bash
-"{{ .ConfigDir }}/assets/scripts/gc-attention.sh" takeaway "$BEAD" \
+"{{ .ConfigDir }}/assets/scripts/gc-helm.sh" takeaway "$BEAD" \
   "<≤140-char one-line: where this stands / what it needs next>"
 gc runtime drain-ack
 ```

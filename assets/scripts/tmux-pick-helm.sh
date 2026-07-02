@@ -1,16 +1,16 @@
 #!/bin/sh
-# tmux-pick-attention.sh — Gas City attention-board picker (pick-a-row → land).
+# tmux-pick-helm.sh — Gas City Helm picker (pick-a-row → land).
 #
-# Usage: tmux-pick-attention.sh [--city-path <path>]
+# Usage: tmux-pick-helm.sh [--city-path <path>]
 #
 # The board half of the bead-universe loop, bound to a sibling of the
 # live-session picker (prefix+S stays "what's running"; this is "what
 # needs me"). Phase 3 of the Bead-Universe Operating Model (bead
 # tk-qkags; design Key Component 4, Interface "board loop").
 #
-# Reads the ranked board from `gc-attention.sh --json` (cached, so a
+# Reads the ranked board from `gc-helm.sh --json` (cached, so a
 # glance is sub-second) and renders it as a tmux display-menu. Picking a
-# row runs `gc-attention.sh open <bead>`, which resumes-or-materializes
+# row runs `gc-helm.sh open <bead>`, which resumes-or-materializes
 # that bead's resident host and lands the operator in the conversation —
 # one keystroke from "I see the row" to "I'm in the advanced universe."
 #
@@ -49,8 +49,8 @@ sq() {
 }
 
 SCRIPT="$(readlink -f "$0" 2>/dev/null || echo "$0")"
-ATTN="$(dirname "$SCRIPT")/gc-attention.sh"
-[ -x "$ATTN" ] || { gcmux display-message -d 4000 "attention: gc-attention.sh not found"; exit 0; }
+ATTN="$(dirname "$SCRIPT")/gc-helm.sh"
+[ -x "$ATTN" ] || { gcmux display-message -d 4000 "Helm: gc-helm.sh not found"; exit 0; }
 
 # Make `gc`'s city discovery deterministic from tmux's bare env: export
 # the baked city path and cd into it so `gc rig/convoy/session list`
@@ -66,7 +66,7 @@ COUNT=$(printf '%s' "$BOARD" | jq 'length' 2>/dev/null || echo 0)
 case "$COUNT" in ''|*[!0-9]*) COUNT=0 ;; esac
 
 if [ "$COUNT" -eq 0 ]; then
-    gcmux display-message -d 4000 "attention board: nothing needs you. (Nothing floats.)"
+    gcmux display-message -d 4000 "Helm: nothing needs you. (Nothing floats.)"
     exit 0
 fi
 
@@ -113,4 +113,4 @@ ROWS_EOF
 set -- "$@" "" "" ""
 set -- "$@" "  [ refresh ]  " "r" "run-shell -b \"${CMD_PREFIX}${SQ_ATTN} board --refresh >/dev/null 2>&1\""
 
-gcmux display-menu -T " Attention — what needs you " -x C -y C -- "$@"
+gcmux display-menu -T " Helm — what needs you " -x C -y C -- "$@"
