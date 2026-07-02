@@ -23,7 +23,7 @@ func tileByID(b Board, id string) (Tile, bool) {
 }
 
 // TestFourAnchorBoard reproduces the primary golden case from
-// tools/attention-surface-fixture.sh (lines 63-104): one hot-hosted flagged
+// tools/helm-surface-fixture.sh (lines 63-104): one hot-hosted flagged
 // bead, a stranded epic, a decision, and a warm-hosted flagged bead. The
 // assertions mirror the fixture's eq/has checks exactly.
 func TestFourAnchorBoard(t *testing.T) {
@@ -143,7 +143,7 @@ func TestLiveHostSparesStranded(t *testing.T) {
 
 // TestDedupKeepsHigherBand verifies that an id gathered twice (e.g. an epic that
 // is also flagged) survives once, in its higher (FLAGGED) band — the
-// sort-then-dedup contract from gc-attention.sh lines 675-681.
+// sort-then-dedup contract from gc-helm.sh lines 675-681.
 func TestDedupKeepsHigherBand(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-dup", Title: "as epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{

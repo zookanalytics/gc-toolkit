@@ -1,4 +1,4 @@
-// Package source is the data-access seam for the attention service. It defines
+// Package source is the data-access seam for the Helm service. It defines
 // the [Source] interface — the single boundary through which the service reads
 // bead/session state — and a [SupervisorSource] that satisfies it over the Gas
 // City supervisor's loopback HTTP API.
@@ -15,7 +15,7 @@ package source
 import (
 	"context"
 
-	"github.com/zookanalytics/gc-toolkit/services/attention/internal/board"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
 // Result is one gather pass: the raw anchors and the bead-id→liveness map that

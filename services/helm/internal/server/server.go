@@ -1,8 +1,8 @@
-// Package server exposes the attention board over HTTP with a small server-side
+// Package server exposes the Helm board over HTTP with a small server-side
 // TTL cache. It is transport-agnostic: [Server.Handler] returns an
 // [http.Handler] that the cmd wires onto a unix socket (the proxy_process
 // contract). Requests arrive path-stripped — the service mounted at
-// /v0/city/<c>/svc/attention is reached as GET /attention (and the bare mount as
+// /v0/city/<c>/svc/helm is reached as GET /helm (and the bare mount as
 // GET /).
 package server
 
@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/attention/internal/board"
-	"github.com/zookanalytics/gc-toolkit/services/attention/internal/source"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
 )
 
-// Server computes and serves the attention board, caching the computed board for
+// Server computes and serves the Helm board, caching the computed board for
 // a TTL so polling clients do not re-drive the supervisor gather on every hit.
 type Server struct {
 	src source.Source
@@ -35,12 +35,12 @@ func New(src source.Source, ttl time.Duration) *Server {
 	return &Server{src: src, ttl: ttl, now: time.Now}
 }
 
-// Handler returns the HTTP routes: GET /attention (and bare /) serve the board;
+// Handler returns the HTTP routes: GET /helm (and bare /) serve the board;
 // GET /healthz is the liveness probe (no gather).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/attention", s.handleBoard)
+	mux.HandleFunc("/helm", s.handleBoard)
 	mux.HandleFunc("/", s.handleRoot)
 	return mux
 }
@@ -63,7 +63,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	b, err := s.Board(r.Context())
 	if err != nil {
-		log.Printf("attention: board gather failed: %v", err)
+		log.Printf("helm: board gather failed: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "board unavailable: " + err.Error()})
@@ -73,7 +73,7 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(b); err != nil {
-		log.Printf("attention: encode failed: %v", err)
+		log.Printf("helm: encode failed: %v", err)
 	}
 }
 

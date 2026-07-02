@@ -1,5 +1,5 @@
-// Package board is the Go port of the attention-board MODEL — the ranking and
-// derivation logic that the bash proof-of-concept (assets/scripts/gc-attention.sh)
+// Package board is the Go port of the Helm board MODEL — the ranking and
+// derivation logic that the bash proof-of-concept (assets/scripts/gc-helm.sh)
 // computes in a single jq pass. It is deliberately free of I/O: a [Source]
 // gathers raw [Anchor] data and a session-liveness map, and [BuildBoard] turns
 // those into a ranked, deduplicated [Board].
@@ -7,7 +7,7 @@
 // SPIKE SCOPE. This is the minimal subset proven by the tk-sy3vj spike. The
 // per-tile fields are exactly {id, rig, kind, title, severity, live, n_closed,
 // m_total, open, in_progress, frontier, needs, rank_score} plus the envelope
-// {generated_at, total, tiles}. The following gc-attention.sh behaviours are
+// {generated_at, total, tiles}. The following gc-helm.sh behaviours are
 // deferred to a follow-up bead and intentionally NOT reproduced here:
 //
 //   - the full rank weight (priority + cross-rig-ref scan): the spike weight is
@@ -34,7 +34,7 @@ const (
 	SevLow      Severity = "LOW"      // empty or fully closed
 )
 
-// sevRank mirrors gc-attention.sh's `def sevrank`. It is the dominant term in
+// sevRank mirrors gc-helm.sh's `def sevrank`. It is the dominant term in
 // rank_score, multiplied by 1e6 so the band always outweighs the weight and
 // staleness terms.
 func (s Severity) rank() int {
@@ -53,7 +53,7 @@ func (s Severity) rank() int {
 }
 
 // Liveness is the resolved host-session state for an anchor: "hot", "warm", or
-// "cold". It mirrors the three-valued $live in gc-attention.sh.
+// "cold". It mirrors the three-valued $live in gc-helm.sh.
 type Liveness string
 
 const (
@@ -70,7 +70,7 @@ type HostSession struct {
 }
 
 // liveness reduces a host session to hot/warm/cold, mirroring lines 612-615 of
-// gc-attention.sh: cold when absent, hot when active or running, else warm.
+// gc-helm.sh: cold when absent, hot when active or running, else warm.
 func liveness(h *HostSession) Liveness {
 	switch {
 	case h == nil:
@@ -92,7 +92,7 @@ type Child struct {
 }
 
 // Anchor is one raw gather result before derivation — the Go analogue of a line
-// in gc-attention.sh's anchors.ndjson. A [Source] produces these; [BuildBoard]
+// in gc-helm.sh's anchors.ndjson. A [Source] produces these; [BuildBoard]
 // consumes them.
 type Anchor struct {
 	ID       string  `json:"id"`
@@ -107,7 +107,7 @@ type Anchor struct {
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
-// frontend. Field order matches the gc-attention.sh --json object for the spike
+// frontend. Field order matches the gc-helm.sh --json object for the spike
 // subset.
 type Tile struct {
 	ID         string   `json:"id"`

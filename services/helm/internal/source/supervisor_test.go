@@ -197,8 +197,8 @@ func TestAliasBeadID(t *testing.T) {
 }
 
 func TestDiscoverCityFromURLPrefix(t *testing.T) {
-	t.Setenv("GC_ATTENTION_CITY", "")
-	t.Setenv("GC_SERVICE_URL_PREFIX", "/v0/city/loomington/svc/attention")
+	t.Setenv("GC_HELM_CITY", "")
+	t.Setenv("GC_SERVICE_URL_PREFIX", "/v0/city/loomington/svc/helm")
 	if got := discoverCity(); got != "loomington" {
 		t.Errorf("discoverCity from URL prefix = %q, want loomington", got)
 	}

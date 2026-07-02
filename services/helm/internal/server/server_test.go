@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/attention/internal/board"
-	"github.com/zookanalytics/gc-toolkit/services/attention/internal/source"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
 )
 
 // fakeSource returns canned anchors and counts gather calls so cache behaviour
@@ -50,7 +50,7 @@ func TestHealthz(t *testing.T) {
 
 func TestBoardEndpointRanks(t *testing.T) {
 	s := New(newFake(), time.Minute)
-	for _, path := range []string{"/attention", "/"} {
+	for _, path := range []string{"/helm", "/"} {
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
 		if rr.Code != http.StatusOK {
@@ -113,7 +113,7 @@ func TestBoardErrorIs502(t *testing.T) {
 	f := &fakeSource{err: context.DeadlineExceeded}
 	s := New(f, time.Minute)
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/attention", nil))
+	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/helm", nil))
 	if rr.Code != http.StatusBadGateway {
 		t.Errorf("gather error status = %d, want 502", rr.Code)
 	}

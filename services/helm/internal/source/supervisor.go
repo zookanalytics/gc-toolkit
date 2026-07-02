@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/attention/internal/board"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
 // defaultSupervisorPort is the supervisor's documented default loopback port
@@ -54,8 +54,8 @@ func WithHTTPClient(c *http.Client) Option { return func(s *SupervisorSource) { 
 
 // NewSupervisorSource builds a source, discovering the supervisor base URL and
 // city name from the environment the way the gc CLI does (see PART A of the
-// client guide): base URL from GC_ATTENTION_SUPERVISOR_URL or supervisor.toml
-// (default 127.0.0.1:8372); city from GC_ATTENTION_CITY, the
+// client guide): base URL from GC_HELM_SUPERVISOR_URL or supervisor.toml
+// (default 127.0.0.1:8372); city from GC_HELM_CITY, the
 // GC_SERVICE_URL_PREFIX the supervisor injects, or the GC_CITY path basename.
 func NewSupervisorSource(opts ...Option) *SupervisorSource {
 	s := &SupervisorSource{
@@ -70,7 +70,7 @@ func NewSupervisorSource(opts ...Option) *SupervisorSource {
 }
 
 func discoverBaseURL() string {
-	if v := strings.TrimSpace(os.Getenv("GC_ATTENTION_SUPERVISOR_URL")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("GC_HELM_SUPERVISOR_URL")); v != "" {
 		return strings.TrimRight(v, "/")
 	}
 	port := defaultSupervisorPort
@@ -116,7 +116,7 @@ func readSupervisorPort(path string) (int, bool) {
 }
 
 func discoverCity() string {
-	if v := strings.TrimSpace(os.Getenv("GC_ATTENTION_CITY")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("GC_HELM_CITY")); v != "" {
 		return v
 	}
 	// GC_SERVICE_URL_PREFIX = /v0/city/<city>/svc/<name>
@@ -322,7 +322,7 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 	}
 }
 
-// epicChildren returns the epic's DIRECT children (matching gc-attention.sh's
+// epicChildren returns the epic's DIRECT children (matching gc-helm.sh's
 // `bd list --parent`), reading the all-status graph roll-up so closed children
 // are counted. Direct children are the parent-child edges out of the root.
 func (s *SupervisorSource) epicChildren(ctx context.Context, g *gatherState, epicID string) []board.Child {
@@ -423,7 +423,7 @@ func flaggedStatus(status string) bool {
 }
 
 // gatherConvoys admits floating convoys, excluding the transient MACHINE
-// convoys the way gc-attention.sh does: titles starting with "sling-" (the
+// convoys the way gc-helm.sh does: titles starting with "sling-" (the
 // auto-generated sling wrappers) and "input convoy for" (the per-sling input
 // wrappers). The live supervisor /convoys list omits both `parent` and the
 // `owned` flag, so the title-prefix filter — not parent==null or an owned
@@ -440,7 +440,7 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 	for _, c := range convoys.Items {
 		// Skip parented (non-floating) convoys and the transient MACHINE
 		// convoys — "sling-*" and "input convoy for ..." — mirroring the
-		// gc-attention.sh filter. The live API omits `parent`, so the two
+		// gc-helm.sh filter. The live API omits `parent`, so the two
 		// title prefixes do the real exclusion work.
 		if c.Parent != "" ||
 			strings.HasPrefix(c.Title, "sling-") ||
@@ -477,7 +477,7 @@ func (s *SupervisorSource) convoyChildren(ctx context.Context, g *gatherState, c
 
 // gatherSessions builds the bead-id→liveness map from bead-host sessions. The
 // alias is <pack>.<bead-id>; the key is the bead-id (everything after the first
-// dot), matching gc-attention.sh's alias strip. Only sessions whose template
+// dot), matching gc-helm.sh's alias strip. Only sessions whose template
 // names a bead-host are joined.
 func (s *SupervisorSource) gatherSessions(ctx context.Context, g *gatherState) map[string]board.HostSession {
 	out := map[string]board.HostSession{}
@@ -502,7 +502,7 @@ func (s *SupervisorSource) gatherSessions(ctx context.Context, g *gatherState) m
 }
 
 // aliasBeadID strips the leading "<pack>." from a bead-host alias, returning the
-// bead-id key (gc-attention.sh: sub("^[^.]+\\.";"")).
+// bead-id key (gc-helm.sh: sub("^[^.]+\\.";"")).
 func aliasBeadID(alias string) string {
 	if i := strings.IndexByte(alias, '.'); i >= 0 {
 		return alias[i+1:]

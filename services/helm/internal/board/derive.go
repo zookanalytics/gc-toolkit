@@ -7,7 +7,7 @@ import (
 )
 
 // rankSeverityMultiplier and rankWeightMultiplier keep the three rank_score
-// terms in non-overlapping decimal lanes, exactly as gc-attention.sh does:
+// terms in non-overlapping decimal lanes, exactly as gc-helm.sh does:
 // severity (0-4) * 1e6 dominates, weight (capped < 1000) * 1e3 is the middle
 // term, and the staleness tiebreaker (capped at 999) occupies the units. The
 // caps below preserve that invariant.
@@ -22,7 +22,7 @@ const (
 // The follow-up bead reintroduces this from a richer source.
 const staleDays = 0
 
-// prioWeight mirrors gc-attention.sh's `def prio_w($p)`: max(0, 4-priority),
+// prioWeight mirrors gc-helm.sh's `def prio_w($p)`: max(0, 4-priority),
 // with a nil/absent priority treated as the gather default (priority 3 → 1).
 // P1→3, P2→2, P3→1, P4→0.
 func prioWeight(priority *int) int {
@@ -32,7 +32,7 @@ func prioWeight(priority *int) int {
 	return max(0, 4-*priority)
 }
 
-// counts derives the four child-status counts (lines 592-601 of gc-attention.sh).
+// counts derives the four child-status counts (lines 592-601 of gc-helm.sh).
 // open counts every non-closed child (including blocked/deferred); inProgress is
 // strictly status=="in_progress".
 func counts(children []Child) (mTotal, nClosed, open, inProgress int) {
@@ -86,7 +86,7 @@ func rankScore(sev Severity, mTotal int, priority *int) int {
 		min(staleDays, rankTermCap)
 }
 
-// truncRunes returns the first n runes of s (gc-attention.sh slices reason[0:26]
+// truncRunes returns the first n runes of s (gc-helm.sh slices reason[0:26]
 // by codepoint, not byte).
 func truncRunes(s string, n int) string {
 	r := []rune(s)
@@ -125,7 +125,7 @@ func frontier(a Anchor, mTotal, open, inProgress int, live Liveness) string {
 
 // needs is the "what does a human do" hint (lines 648-656), using the
 // deterministic phrase only. The takeaway-driven sentence is deferred, so the
-// leading takeaway branch of gc-attention.sh is intentionally omitted here.
+// leading takeaway branch of gc-helm.sh is intentionally omitted here.
 func needs(a Anchor, mTotal, open, inProgress int, live Liveness) string {
 	hostnote := "no host"
 	switch live {
