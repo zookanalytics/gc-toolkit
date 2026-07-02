@@ -116,19 +116,60 @@ printf '%s' "$REVIEW_UPDATE" | grep -q -- '--set-metadata anchor_bead="\$WORK"' 
   && ok "(E) dispatch stamps anchor_bead=\$WORK atomically in the review-bead update batch" \
   || bad "(E) dispatch must stamp --set-metadata anchor_bead=\"\$WORK\" in the review-bead update batch"
 
-# --- check_set membership normalization (tk-aj4ua): BOTH codex-membership tests
-#     (dispatch ~L1185 + fail-closed ~L1260) must normalize check_set — trim a
-#     spaced list — the SAME way merge-skill.sh enforces it, so a natural-form
-#     "lint, codex" cannot make one path skip codex while the other enforces it
-#     (the stranded-PR class). Static guards on the raw formula so a regression
-#     to the brittle literal grep is caught even though the dispatch site is not
-#     executed here. -------------------------------------------------------------
+# --- Pre-open dispatch wiring (tk-6d0vb.1.8): the PRE-OPEN review bead carries
+#     review_branch/review_base (the compare-range the reviewer diffs, and the
+#     template's pre-open discriminator) AND anchor_bead, in one update batch —
+#     since the awk above grabs the FIRST review-bead update (the pre-open one),
+#     REVIEW_UPDATE is that batch. The completion path (resolution snippet tested
+#     above) and the fail-closed gate both depend on anchor_bead being here too. -
+printf '%s' "$REVIEW_UPDATE" | grep -qF -- '--set-metadata review_branch="$BRANCH"' \
+  && ok "(E2) pre-open dispatch stamps review_branch=\$BRANCH (reviewer compare-range + template discriminator)" \
+  || bad "(E2) pre-open dispatch must stamp --set-metadata review_branch=\"\$BRANCH\""
+printf '%s' "$REVIEW_UPDATE" | grep -qF -- '--set-metadata review_base="$TARGET"' \
+  && ok "(E3) pre-open dispatch stamps review_base=\$TARGET" \
+  || bad "(E3) pre-open dispatch must stamp --set-metadata review_base=\"\$TARGET\""
+
+# --- Template pre-open arm (tk-6d0vb.1.8): the fix-target dispatch discriminates
+#     pre-open by review_branch and reads the reviewed oid from the BRANCH head
+#     (git rev-parse origin/<branch>) — NOT the reviews API, since no PR/review
+#     exists yet — so the stamped check.<gate> matches the head the resolver opens
+#     the PR at. --------------------------------------------------------------
+grep -qF 'REVIEW_BRANCH=$(gc bd show <work-bead> --json' "$TEMPLATE" \
+  && ok "(H) template reads metadata.review_branch (pre-open discriminator)" \
+  || bad "(H) template must read metadata.review_branch to discriminate pre-open"
+# (I) The pre-open pass arm must stamp the gate at the PINNED reviewed_oid — the
+#     commit codex actually reviewed, read back from the review bead — NOT a
+#     re-derived live head. If the branch advances between the review and the
+#     stamp, a re-derived head would certify an UNREVIEWED commit as gate-green;
+#     the post-open arm avoids this via the reviews-API .commit_id, the pre-open
+#     arm via a reviewed_oid pinned at diff time.
+grep -qF "jq -r '.[0].metadata.reviewed_oid // empty'" "$TEMPLATE" \
+  && ok "(I) template pre-open pass stamps from the pinned reviewed_oid (stale-head guard)" \
+  || bad "(I) template pre-open pass must read the pinned metadata.reviewed_oid, not re-derive the live head"
+# (I2) step 1 must PIN reviewed_oid (git rev-parse at diff time) onto the review
+#      bead, so the pass arm above has an authoritative commit to stamp.
+grep -qF 'reviewed_oid="$REVIEWED_OID"' "$TEMPLATE" \
+  && ok "(I2) template step-1 pins reviewed_oid on the review bead at diff time" \
+  || bad "(I2) template step-1 must record --set-metadata reviewed_oid=\"\$REVIEWED_OID\""
+# (I3) the stale-head regression guard: the pre-open pass must NOT re-derive the
+#      live branch head (git rev-parse origin/<review_branch>) for the stamp.
+grep -qF 'git rev-parse "origin/$REVIEW_BRANCH"' "$TEMPLATE" \
+  && bad "(I3) pre-open pass must NOT re-derive the live head (stale-head regression)" \
+  || ok "(I3) pre-open pass does not re-derive the live head for the stamp"
+
+# --- check_set membership normalization (tk-aj4ua): BOTH codex-membership sites
+#     must normalize check_set — trim a spaced list — the SAME way merge-skill.sh
+#     enforces it, so a natural-form "lint, codex" cannot make one path skip codex
+#     while the other enforces it (the stranded-PR class). Since tk-6d0vb.1.8 the
+#     dispatch keys off a precomputed CODEX_GATE, so the two normalizing sites are
+#     the step-2 gate DECISION and the fail-closed site. Static guards on the raw
+#     formula so a regression to the brittle literal grep is caught. -------------
 grep -qF ',codex,' "$TOML" \
   && bad "(F) brittle literal ',codex,' membership grep still present -> a spaced 'lint, codex' would strand the PR" \
   || ok "(F) no brittle literal ',codex,' membership grep in the formula"
 NORM_COUNT=$(grep -cF "grep -qxF codex" "$TOML" || true)
 eq "$NORM_COUNT" "2" \
-   "(G) both codex-membership sites (dispatch + fail-closed) use the normalized whole-line match"
+   "(G) both codex-membership sites (step-2 gate decision + fail-closed) use the normalized whole-line match"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

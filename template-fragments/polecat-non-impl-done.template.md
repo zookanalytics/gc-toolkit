@@ -81,10 +81,31 @@ reached GitHub.
 #        gh api repos/<owner>/<repo>/pulls/<num>/reviews \
 #          | jq '.[] | select(.user.login == "<your-handle>") | .submitted_at'
 #      A recent submission means skip the post step.
+#    - PRE-OPEN review tasks (`metadata.review_branch` set, NO `pr_number` —
+#      the pre-open codex gate, tk-6d0vb.1.8): there is NO PR yet. Review the
+#      BRANCH compare-range instead of a PR, and record the verdict in THIS
+#      review bead's notes — the refinery replays it as the opening PR comment
+#      when pre-open-resolve.sh opens the PR. Do NOT `gh pr review` (no PR):
+#        RB=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.review_branch')
+#        RBASE=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.review_base // "main"')
+#        git fetch origin "$RBASE" "$RB"
+#        REVIEWED_OID=$(git rev-parse "origin/$RB")   # PIN the commit you review
+#        git diff "origin/$RBASE...$REVIEWED_OID"     # review THAT exact commit
+#      Record BOTH the verdict (notes) AND the reviewed commit (reviewed_oid), so
+#      the pass arm below stamps the gate at the commit you actually reviewed and
+#      never a head that moved after — the same stale-head guard the post-open arm
+#      gets from the reviews API `.commit_id`:
+#        gc bd update <work-bead> --set-metadata reviewed_oid="$REVIEWED_OID" \
+#          --notes "<verdict + findings>"
+#      Then set VERDICT=COMMENT (pass) or VERDICT=REQUEST_CHANGES; the
+#      fix-target dispatch below stamps check.codex at reviewed_oid (pass) or
+#      files a rework child against the branch (changes).
 #    - Research/investigation tasks: ensure findings live in the
 #      bead via `gc bd update <work-bead> --notes "..."` before close.
-gh pr review <pr-num> --comment --body "<verdict + notes>"   # signoff PASS: COMMENT only, never --approve
+gh pr review <pr-num> --comment --body "<verdict + notes>"   # POST-OPEN signoff PASS: COMMENT only, never --approve
 # changes needed → gh pr review <pr-num> --request-changes --body "<blocking findings>"
+# PRE-OPEN (review_branch set): NO gh pr review — record the verdict in notes instead:
+#   gc bd update <work-bead> --notes "<verdict + findings>"
 # (research/investigation instead: gc bd update <work-bead> --notes "...")
 
 # 2. Stamp task-specific metadata (review_id, pr_url, verdict, etc.)
@@ -102,36 +123,54 @@ exit
 
 When `metadata.fix_target_pool` is set, the review is a **signoff gate** — one
 member of the gating anchor's check-set (see docs/work-bead-state-machine.md).
-The refinery published the PR (non-draft) and is waiting on your verdict; the
-signoff holds the merge, not draft state. The **anchor** stays OPEN as the PR's
-gating bead; it closes later, on merge, via the refinery's reconcile pass —
-never here. Resolve the anchor as the bead this review gates — the dependent of
-the `blocks` dep the refinery attached (`gc bd dep <review> --blocks <anchor>`):
+There are two shapes, discriminated by `metadata.review_branch`:
+
+- **POST-OPEN** (`pr_number` set): the refinery published the PR (non-draft) and
+  is waiting on your verdict; the signoff holds the merge, not draft state.
+- **PRE-OPEN** (`review_branch` set, no `pr_number` — the pre-open codex gate,
+  tk-6d0vb.1.8): there is NO PR yet. Your signoff gates whether the PR OPENS at
+  all — `pre-open-resolve.sh` opens the non-draft PR only once you stamp
+  `check.codex` green at the branch head, so the PR is codex-green at birth
+  (preserving #163 non-draft and #185 comment-only). Pass stamps the marker on
+  the branch head; changes file a rework child against the branch (no PR yet to
+  reopen).
+
+Either way the **anchor** stays OPEN as the PR's gating bead; it closes later, on
+merge, via the refinery's reconcile pass — never here. Resolve the anchor as the
+bead this review gates — the dependent of the `blocks` dep the refinery attached
+(`gc bd dep <review> --blocks <anchor>`):
 
 - **COMMENT (signoff pass)** — the signoff passes on the **current** head. The
-  verdict is posted as a non-blocking COMMENT, never an APPROVE (see step 1: the
-  city never approves — approval is external/human). Stamp the gate green at the
-  head you signed off as `check.<gate>=green@<head>` on the anchor (the gate name
-  comes from the review bead's `metadata.check_name`, default `codex`). The
-  `green@<sha>` value folds "this gate passed" and "title + body validated at
-  this commit" into one: a later commit moves the head, so the marker no longer
-  matches and the gate re-gates. The PR is already non-draft; nothing else to
-  publish.
+  verdict is a non-blocking COMMENT, never an APPROVE (see step 1: the city never
+  approves — approval is external/human); post-open it is a `gh pr review
+  --comment`, pre-open it is recorded in this bead's notes and replayed at
+  PR-open. Stamp the gate green at the head you signed off as
+  `check.<gate>=green@<head>` on the anchor (the gate name comes from the review
+  bead's `metadata.check_name`, default `codex`). The `green@<sha>` value folds
+  "this gate passed" and "title + body validated at this commit" into one: a
+  later commit moves the head, so the marker no longer matches and the gate
+  re-gates. Post-open the PR is already non-draft; pre-open the marker lets
+  pre-open-resolve.sh open it.
 - **REQUEST_CHANGES** — file a **new rework child** against the anchor (rework
   is a new child, never the same bead reopened and never a cleared marker; see
   docs/work-bead-state-machine.md). Clear `check.<gate>` so the now-unvalidated
-  head cannot be merged.
+  head cannot be merged (pre-open: so pre-open-resolve.sh does not open a PR).
 
 After posting the verdict via `gh pr review` (step 1 above) and BEFORE closing
 the REVIEW bead (step 3 above), act on it:
 
 ```bash
 FIX_POOL=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.fix_target_pool // empty')
-PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number')
+PR_NUMBER=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.pr_number // empty')
 # Which check-set gate this review satisfies — the per-gate marker key is
 # check.<CHECK_NAME>. The dispatch stamps check_name=codex; default to codex for
 # an older review bead created before the field existed.
 CHECK_NAME=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.check_name // "codex"')
+# Pre-open discriminator (tk-6d0vb.1.8): a PRE-OPEN review carries review_branch
+# (the compare-range it diffed) and NO pr_number; POST-OPEN carries pr_number.
+# The arms below stamp/rework against the branch (pre-open) or the PR (post-open).
+REVIEW_BRANCH=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.review_branch // empty')
+REVIEW_BASE=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.review_base // "main"')
 
 # Resolve the anchor (the bead this review gates) two ways, in order:
 #   1. the BLOCKS edge, walked upward — the primary, dep-graph-honest path;
@@ -164,56 +203,86 @@ if [ -n "$FIX_POOL" ]; then
       # makes it stale and re-gates the merge. Best-effort; a miss just defers the
       # merge to the next signoff round, it never merges prematurely.
       if [ -n "$ANCHOR" ]; then
-        # Stamp the EXACT commit the signoff reviewed, read from the reviews API
-        # (.commit_id) — NOT the PR's live head. The head can advance between the
-        # review and this stamp; stamping the live head would mark an UNREVIEWED
-        # commit as gate-green and let it merge, defeating the stale-head guard.
-        # GitHub attaches the review to the head at submission, so .commit_id is
-        # exactly what was reviewed: a commit pushed afterward leaves
-        # check.<gate> = green@<old-head> != green@<live-head> and correctly
-        # re-gates the merge. Take the latest review under your own handle (the
-        # one just submitted).
-        REVIEW_HANDLE=$(gh api user -q .login 2>/dev/null)
-        REVIEWED_OID=$(gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/reviews" 2>/dev/null \
-          | jq -r --arg h "$REVIEW_HANDLE" \
-              '[.[] | select(.user.login == $h)] | sort_by(.submitted_at) | last | .commit_id // empty' 2>/dev/null)
+        if [ -n "$REVIEW_BRANCH" ]; then
+          # PRE-OPEN: no PR/review API to attach the reviewed commit to, so use the
+          # reviewed_oid you PINNED at diff time (step 1) — NOT a re-derived live
+          # head. The branch can advance between the review and this stamp (a
+          # recovery polecat resuming the branch, an operator fixup); stamping the
+          # live head would certify an UNREVIEWED commit as gate-green — exactly the
+          # stale-head hazard the post-open arm avoids via .commit_id. If
+          # reviewed_oid is absent (step 1 did not pin it), stamp NOTHING: the
+          # resolver then holds until a re-review, a safe no-merge — never an
+          # unreviewed merge.
+          REVIEWED_OID=$(gc bd show <work-bead> --json 2>/dev/null \
+            | jq -r '.[0].metadata.reviewed_oid // empty')
+        else
+          # POST-OPEN: stamp the EXACT commit the signoff reviewed, read from the
+          # reviews API (.commit_id) — NOT the PR's live head. The head can advance
+          # between the review and this stamp; stamping the live head would mark an
+          # UNREVIEWED commit as gate-green and let it merge, defeating the
+          # stale-head guard. GitHub attaches the review to the head at submission,
+          # so .commit_id is exactly what was reviewed. Take the latest review
+          # under your own handle (the one just submitted).
+          REVIEW_HANDLE=$(gh api user -q .login 2>/dev/null)
+          REVIEWED_OID=$(gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/reviews" 2>/dev/null \
+            | jq -r --arg h "$REVIEW_HANDLE" \
+                '[.[] | select(.user.login == $h)] | sort_by(.submitted_at) | last | .commit_id // empty' 2>/dev/null)
+        fi
         [ -n "$REVIEWED_OID" ] && gc bd update "$ANCHOR" \
           --set-metadata "check.$CHECK_NAME=green@$REVIEWED_OID" >/dev/null 2>&1 || true
       fi
-      # The PR is already non-draft (drafts are retired). The check.<gate> stamp
-      # above is the only action: it lets the merge skill merge the PR once every
+      # POST-OPEN the PR is already non-draft; PRE-OPEN the stamp lets
+      # pre-open-resolve.sh open the (codex-green) PR. Either way the check.<gate>
+      # marker is the only action: the merge skill merges the PR once every
       # check-set gate is green at the still-live head.
       ;;
     REQUEST_CHANGES)
-      # Rework is a NEW child of the anchor, not the same anchor reopened and
-      # not a flag toggled back on it. The child resumes the EXISTING PR branch
-      # via the rejection-resume flow, so a fix polecat reworks the same PR
-      # (never a fresh one). Linking it parent-child to the anchor keeps the dep
-      # graph honest about who is on this PR and — because the anchor cannot
-      # complete while a child is open — holds the merge until the rework lands.
-      # The anchor's gating marker (merge_result) is LEFT INTACT; the PR still
-      # exists, so the anchor's state must keep saying so. See
-      # docs/work-bead-state-machine.md.
-      PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
-      PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
-      PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --json url -q .url)
-      FIX_BEAD=$(gc bd create "Rework PR#$PR_NUMBER: address signoff findings" -t task --json | jq -r .id)
-      gc bd update "$FIX_BEAD" \
-        --set-metadata branch="$PR_HEAD" \
-        --set-metadata target="$PR_BASE" \
-        --set-metadata rejection_reason="signoff requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
-        --set-metadata source_review_bead=<work-bead> \
-        --set-metadata merge_strategy=mr \
-        --set-metadata existing_pr="$PR_URL_FOR_FIX" \
-        --set-metadata pr_url="$PR_URL_FOR_FIX" \
-        --set-metadata pr_number="$PR_NUMBER" \
-        --set-metadata gc.routed_to="$FIX_POOL"
+      # Rework is a NEW child of the anchor, not the same anchor reopened and not
+      # a flag toggled back on it. The child resumes the SAME branch via the
+      # rejection-resume flow (never a fresh one). Linking it parent-child to the
+      # anchor keeps the dep graph honest and — because the anchor cannot complete
+      # while a child is open — holds the merge (post-open) or the PR-open
+      # (pre-open) until the rework lands. The anchor's merge_result marker is LEFT
+      # INTACT; the PR (or the pre_open_gate) still exists, so the anchor's state
+      # must keep saying so. See docs/work-bead-state-machine.md.
+      if [ -n "$REVIEW_BRANCH" ]; then
+        # PRE-OPEN: no PR yet. The child resumes the BRANCH; NO existing_pr /
+        # pr_number. When it hands back, the refinery re-dispatches codex on the
+        # (new) branch head via the pre-open path — the PR still never opens until
+        # codex is green. review_base is the intended landing target.
+        FIX_BEAD=$(gc bd create "Rework branch $REVIEW_BRANCH: address pre-open signoff findings" -t task --json | jq -r .id)
+        gc bd update "$FIX_BEAD" \
+          --set-metadata branch="$REVIEW_BRANCH" \
+          --set-metadata target="$REVIEW_BASE" \
+          --set-metadata rejection_reason="pre-open signoff requested changes on branch $REVIEW_BRANCH; see review bead notes for findings" \
+          --set-metadata source_review_bead=<work-bead> \
+          --set-metadata merge_strategy=mr \
+          --set-metadata gc.routed_to="$FIX_POOL"
+      else
+        # POST-OPEN: the PR exists. The child resumes the EXISTING PR branch and
+        # carries existing_pr so the fix reworks the SAME PR (never a fresh one).
+        PR_HEAD=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
+        PR_BASE=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName)
+        PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --json url -q .url)
+        FIX_BEAD=$(gc bd create "Rework PR#$PR_NUMBER: address signoff findings" -t task --json | jq -r .id)
+        gc bd update "$FIX_BEAD" \
+          --set-metadata branch="$PR_HEAD" \
+          --set-metadata target="$PR_BASE" \
+          --set-metadata rejection_reason="signoff requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
+          --set-metadata source_review_bead=<work-bead> \
+          --set-metadata merge_strategy=mr \
+          --set-metadata existing_pr="$PR_URL_FOR_FIX" \
+          --set-metadata pr_url="$PR_URL_FOR_FIX" \
+          --set-metadata pr_number="$PR_NUMBER" \
+          --set-metadata gc.routed_to="$FIX_POOL"
+      fi
       # Attach as a child of the anchor (visibility + completion interlock).
       # Best-effort: a failed edge must not strand the rework, so warn only.
       if [ -n "$ANCHOR" ]; then
         gc bd dep add "$FIX_BEAD" "$ANCHOR" --type=parent-child \
           || echo "WARN: could not link rework $FIX_BEAD under anchor $ANCHOR" >&2
-        # The head is no longer gate-validated — clear the gate marker to re-gate.
+        # The head is no longer gate-validated — clear the gate marker to re-gate
+        # (pre-open: so pre-open-resolve.sh will not open a PR on unreviewed work).
         gc bd update "$ANCHOR" --unset-metadata "check.$CHECK_NAME" >/dev/null 2>&1 || true
       else
         echo "WARN: no gating anchor resolved for review <work-bead>; rework $FIX_BEAD filed unlinked" >&2
@@ -224,13 +293,14 @@ if [ -n "$FIX_POOL" ]; then
 fi
 ```
 
-`$VERDICT` is whichever verdict you submitted via `gh pr review`. Codex emits
-only `COMMENT` (the signoff pass — posted as a non-blocking comment, **never**
-`APPROVE`; the city does not approve PRs, approval is external/human) or
-`REQUEST_CHANGES` (rework needed). `COMMENT` is non-blocking: the operator sees
-the PR with your notes attached, and the merge is held by the recorded
-`check.<gate>=green@<head>` marker plus external approval — not by a GitHub
-approval from the bot.
+`$VERDICT` is the verdict you decided: post-open you submitted it via `gh pr
+review`; pre-open (no PR yet) you recorded it in the review bead notes and set
+`$VERDICT` yourself. Codex emits only `COMMENT` (the signoff pass — a non-blocking
+comment, **never** `APPROVE`; the city does not approve PRs, approval is
+external/human) or `REQUEST_CHANGES` (rework needed). `COMMENT` is non-blocking:
+the merge is held by the recorded `check.<gate>=green@<head>` marker plus external
+approval — not by a GitHub approval from the bot. Pre-open, that same marker is
+also what lets `pre-open-resolve.sh` open the PR (codex-green at birth).
 
 After this step, close the review bead as in the existing flow
 (step 3 of the Non-impl done sequence above).

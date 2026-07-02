@@ -161,6 +161,18 @@ printf '%s' "$SNIPPET" | grep -q 'gc runtime drain-ack' \
   && ok "(E) fail path drain-acks so the next patrol retries" \
   || bad "(E) fail path must gc runtime drain-ack before exiting"
 
+# --- Pre-open transition is ALSO fail-closed (tk-6d0vb.1.8). The gate snippet is
+#     SHARED: both the post-open (merge_result=pull_request) and the pre-open
+#     (merge_result=pre_open_gate) transitions run AFTER it, so an anchor with no
+#     recoverable review->anchor link is never detached into EITHER gating state.
+#     Guard that the pre_open_gate transition sits downstream of the fail-closed
+#     markers in the formula. -----------------------------------------------------
+FC_END=$(grep -n '# <<< signoff-anchor-failclosed' "$TOML" | head -1 | cut -d: -f1)
+PREOPEN_LINE=$(grep -n -- '--set-metadata merge_result=pre_open_gate' "$TOML" | head -1 | cut -d: -f1)
+{ [ -n "$FC_END" ] && [ -n "$PREOPEN_LINE" ] && [ "$PREOPEN_LINE" -gt "$FC_END" ]; } \
+  && ok "(K) pre_open_gate transition is downstream of the fail-closed gate (shared gate protects the pre-open path)" \
+  || bad "(K) pre_open_gate transition must follow the fail-closed markers (got FC_END=$FC_END pre_open=$PREOPEN_LINE)"
+
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
