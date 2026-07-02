@@ -196,6 +196,15 @@ grep -q '^bead-HASPR	404$' "$TMP/fliplog" \
 has '^polecat/feat-d$' "$TMP/created" && bad "(HASPR) must NOT open a second PR" \
                                       || ok "(HASPR) no second PR created (orphan-convoy convergence)"
 
+# (STATE) the existing-PR lookup must query --state all, not --state open: a
+# parent stranded in pre_open_gate after a pre-open rework, whose sibling PR has
+# already MERGED, must still flip onto the pull_request scan the merged-close
+# observer watches (reconcile-merged-prs.sh scans only pull_request). A --state
+# open lookup would miss the merged sibling and strand the parent open forever.
+grep -qF 'gh pr list --head "$branch" --state all' "$SCRIPT" \
+  && ok "(STATE) existing-PR lookup uses --state all (a merged/closed sibling PR still flips the orphan → observable)" \
+  || bad "(STATE) existing-PR lookup must use --state all so a merged sibling PR flips the orphan (observer-blindness fix)"
+
 # (INV) exactly one `gh pr create` this pass — only the green no-PR anchor.
 eq "$(wc -l < "$TMP/created" | tr -d ' ')" "1" "(INV) exactly one PR created (the green no-PR anchor)"
 

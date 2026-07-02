@@ -137,9 +137,25 @@ printf '%s' "$REVIEW_UPDATE" | grep -qF -- '--set-metadata review_base="$TARGET"
 grep -qF 'REVIEW_BRANCH=$(gc bd show <work-bead> --json' "$TEMPLATE" \
   && ok "(H) template reads metadata.review_branch (pre-open discriminator)" \
   || bad "(H) template must read metadata.review_branch to discriminate pre-open"
+# (I) The pre-open pass arm must stamp the gate at the PINNED reviewed_oid — the
+#     commit codex actually reviewed, read back from the review bead — NOT a
+#     re-derived live head. If the branch advances between the review and the
+#     stamp, a re-derived head would certify an UNREVIEWED commit as gate-green;
+#     the post-open arm avoids this via the reviews-API .commit_id, the pre-open
+#     arm via a reviewed_oid pinned at diff time.
+grep -qF "jq -r '.[0].metadata.reviewed_oid // empty'" "$TEMPLATE" \
+  && ok "(I) template pre-open pass stamps from the pinned reviewed_oid (stale-head guard)" \
+  || bad "(I) template pre-open pass must read the pinned metadata.reviewed_oid, not re-derive the live head"
+# (I2) step 1 must PIN reviewed_oid (git rev-parse at diff time) onto the review
+#      bead, so the pass arm above has an authoritative commit to stamp.
+grep -qF 'reviewed_oid="$REVIEWED_OID"' "$TEMPLATE" \
+  && ok "(I2) template step-1 pins reviewed_oid on the review bead at diff time" \
+  || bad "(I2) template step-1 must record --set-metadata reviewed_oid=\"\$REVIEWED_OID\""
+# (I3) the stale-head regression guard: the pre-open pass must NOT re-derive the
+#      live branch head (git rev-parse origin/<review_branch>) for the stamp.
 grep -qF 'git rev-parse "origin/$REVIEW_BRANCH"' "$TEMPLATE" \
-  && ok "(I) template pre-open pass stamps the gate from the branch head (git rev-parse origin/<branch>)" \
-  || bad "(I) template pre-open pass must read the reviewed oid via git rev-parse origin/<branch>"
+  && bad "(I3) pre-open pass must NOT re-derive the live head (stale-head regression)" \
+  || ok "(I3) pre-open pass does not re-derive the live head for the stamp"
 
 # --- check_set membership normalization (tk-aj4ua): BOTH codex-membership sites
 #     must normalize check_set — trim a spaced list — the SAME way merge-skill.sh

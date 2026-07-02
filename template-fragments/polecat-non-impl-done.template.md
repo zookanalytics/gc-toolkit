@@ -89,10 +89,16 @@ reached GitHub.
 #        RB=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.review_branch')
 #        RBASE=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.review_base // "main"')
 #        git fetch origin "$RBASE" "$RB"
-#        git diff "origin/$RBASE...origin/$RB"   # the diff the PR would show
-#        gc bd update <work-bead> --notes "<verdict + findings>"   # replayed at PR-open
+#        REVIEWED_OID=$(git rev-parse "origin/$RB")   # PIN the commit you review
+#        git diff "origin/$RBASE...$REVIEWED_OID"     # review THAT exact commit
+#      Record BOTH the verdict (notes) AND the reviewed commit (reviewed_oid), so
+#      the pass arm below stamps the gate at the commit you actually reviewed and
+#      never a head that moved after — the same stale-head guard the post-open arm
+#      gets from the reviews API `.commit_id`:
+#        gc bd update <work-bead> --set-metadata reviewed_oid="$REVIEWED_OID" \
+#          --notes "<verdict + findings>"
 #      Then set VERDICT=COMMENT (pass) or VERDICT=REQUEST_CHANGES; the
-#      fix-target dispatch below stamps check.codex on the branch head (pass) or
+#      fix-target dispatch below stamps check.codex at reviewed_oid (pass) or
 #      files a rework child against the branch (changes).
 #    - Research/investigation tasks: ensure findings live in the
 #      bead via `gc bd update <work-bead> --notes "..."` before close.
@@ -198,13 +204,17 @@ if [ -n "$FIX_POOL" ]; then
       # merge to the next signoff round, it never merges prematurely.
       if [ -n "$ANCHOR" ]; then
         if [ -n "$REVIEW_BRANCH" ]; then
-          # PRE-OPEN: no PR/review yet, so read the reviewed commit directly from
-          # the branch head you diffed (git rev-parse origin/<review_branch>). This
-          # is the EXACT commit pre-open-resolve.sh will open the PR at, so the
-          # marker matches the PR's birth head. If the branch advances before the
-          # PR opens, green@<old-head> != green@<live-head> and the resolver holds.
-          git fetch origin "$REVIEW_BRANCH" >/dev/null 2>&1 || true
-          REVIEWED_OID=$(git rev-parse "origin/$REVIEW_BRANCH" 2>/dev/null)
+          # PRE-OPEN: no PR/review API to attach the reviewed commit to, so use the
+          # reviewed_oid you PINNED at diff time (step 1) — NOT a re-derived live
+          # head. The branch can advance between the review and this stamp (a
+          # recovery polecat resuming the branch, an operator fixup); stamping the
+          # live head would certify an UNREVIEWED commit as gate-green — exactly the
+          # stale-head hazard the post-open arm avoids via .commit_id. If
+          # reviewed_oid is absent (step 1 did not pin it), stamp NOTHING: the
+          # resolver then holds until a re-review, a safe no-merge — never an
+          # unreviewed merge.
+          REVIEWED_OID=$(gc bd show <work-bead> --json 2>/dev/null \
+            | jq -r '.[0].metadata.reviewed_oid // empty')
         else
           # POST-OPEN: stamp the EXACT commit the signoff reviewed, read from the
           # reviews API (.commit_id) — NOT the PR's live head. The head can advance

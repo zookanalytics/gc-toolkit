@@ -1020,8 +1020,13 @@ CODEX_GATE=0
 if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
   CODEX_GATE=1
 fi
+# PRE_OPEN also requires gh: the pre-open PR-create resolver (pre-open-resolve.sh)
+# opens the PR via gh, so a no-gh (REST-fallback) rig must stay on the post-open
+# path or its PR would never open. merge-skill/observer already require gh, so
+# this only preserves the no-gh path's prior behavior (open via REST for manual
+# merge), never regresses it.
 PRE_OPEN=0
-if [ "$CODEX_GATE" = 1 ] && [ -z "$EXISTING_PR" ]; then
+if [ "$CODEX_GATE" = 1 ] && [ -z "$EXISTING_PR" ] && command -v gh >/dev/null 2>&1; then
   PRE_OPEN=1
 fi
 

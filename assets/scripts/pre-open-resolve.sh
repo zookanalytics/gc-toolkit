@@ -86,10 +86,16 @@ while IFS= read -r row; do
   fi
   [ -n "$target" ] || target="main"
 
-  # --- A PR already open for this branch? --------------------------------------
-  # If a sibling anchor's resolve (or a post-open rework) already opened it, just
-  # flip THIS anchor to pull_request so it too closes on merge (never open a twin).
-  EXIST_JSON=$(gh pr list --head "$branch" --state open \
+  # --- A PR already exists for this branch (any state)? ------------------------
+  # If a sibling anchor's resolve (or a post-open rework) already opened it, flip
+  # THIS anchor to pull_request so it becomes visible to the merge skill + the
+  # merged-close observer (never open a twin). --state ALL (not just open): a
+  # sibling PR that already MERGED or closed must still flip this anchor onto the
+  # pull_request scan the observer watches — otherwise a parent left in
+  # pre_open_gate after a pre-open rework, whose sibling PR merged, would strand
+  # open forever (reconcile-merged-prs.sh scans only pull_request). The flip
+  # stamps NO gate marker, so the merge skill still re-gates before any merge.
+  EXIST_JSON=$(gh pr list --head "$branch" --state all \
     --json number,url --limit 1 2>/dev/null)
   exist_num=$(printf '%s' "$EXIST_JSON" | jq -r '.[0].number // empty' 2>/dev/null)
   exist_url=$(printf '%s' "$EXIST_JSON" | jq -r '.[0].url // empty' 2>/dev/null)
