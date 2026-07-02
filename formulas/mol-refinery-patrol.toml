@@ -171,14 +171,16 @@ If NO work found: sleep, reconcile in-flight PRs and convoys, then re-check.
 sleep {{event_timeout}}
 ```
 
-**2. Reconcile state (best-effort, every idle wake).** Two convergent
-passes run here on the idle cadence: (a) close-on-land — the merge skill lands
-each ready gating anchor (validate -> merge -> record) and the detect-only
-observer closes anchors whose PR merged and flags out-of-band-closed PRs, and
-(b) graduate owned integration convoys whose members are now all closed. Both
-are the net for single best-effort one-shots
-that can fail for any reason. The find-work idle loop is the ONLY thing that
-runs on the {{event_timeout}} cadence when the refinery is idle, so the
+**2. Reconcile state (best-effort, every idle wake).** Three convergent
+passes run here on the idle cadence: (a-pre) pre-open PR-create — open the PR for
+each anchor parked in `pre_open_gate` whose codex signoff is green at the branch
+head (the second half of the pre-open codex gate; the PR is born codex-green,
+tk-6d0vb.1.8); (a) close-on-land — the merge skill lands each ready gating anchor
+(validate -> merge -> record) and the detect-only observer closes anchors whose
+PR merged and flags out-of-band-closed PRs; and (b) graduate owned integration
+convoys whose members are now all closed. All are the net for single best-effort
+one-shots that can fail for any reason. The find-work idle loop is the ONLY thing
+that runs on the {{event_timeout}} cadence when the refinery is idle, so the
 reconcile lives here rather than in a standalone step that idle would never
 reach.
 
@@ -241,6 +243,17 @@ done
 if [ -n "$SCRIPTS_DIR" ]; then
   # All passes are best-effort: a failed pass is retried next idle wake and
   # never blocks find-work.
+  # (a-pre) Pre-open PR-create resolver (pre-open codex gate, tk-6d0vb.1.8): for
+  #      each anchor parked in pre_open_gate whose codex signoff is green at the
+  #      branch head, OPEN the non-draft PR and flip it to pull_request so the
+  #      merge skill below can gate it. Runs BEFORE the merge skill so a freshly
+  #      opened PR enters the gating set promptly (it will not merge the same pass
+  #      — CI/approval are still pending). -x guard: importer rigs that have not
+  #      synced this script leave pre-open anchors parked until the pack syncs.
+  if [ -x "$SCRIPTS_DIR/pre-open-resolve.sh" ]; then
+    "$SCRIPTS_DIR/pre-open-resolve.sh" \
+      || echo "pre-open-resolve: pass failed (non-fatal); retries next idle wake" >&2
+  fi
   # (a0) Merge skill: the single writer of merged-truth. For each ready gating
   #      anchor it runs validate -> merge -> record — an EXPLICIT `gh pr merge
   #      --squash`, NOT GitHub auto-merge. Runs BEFORE the observer so a ready PR
@@ -958,7 +971,21 @@ If `--force-with-lease` fails, the existing PR branch moved after your
 fetch. STOP, fetch the latest branch, rebase your temp branch again, and
 retry with `--force-with-lease`. Do not use plain `--force`.
 
-**2. Reuse, create, or discover the pull request:**
+**2. Decide pre-open vs post-open, then (post-open only) reuse/create the PR:**
+
+gc-toolkit local delta (pre-open codex gate, tk-6d0vb.1.8): when `codex` is a
+member of `check_set` and this is the FIRST handoff (no `existing_pr`), the PR is
+NOT opened here. Codex reviews the BRANCH first — step 4 dispatches the review
+against the `origin/<base>...origin/<branch>` compare-range — and the anchor
+parks in the `pre_open_gate` sub-state. A later idle pass (`pre-open-resolve.sh`,
+folded into find-work) opens the non-draft PR only once `check.codex=green@<head>`,
+so a PR that becomes visible is codex-vetted at birth. This preserves #163 (still
+non-draft, no draft phase re-introduced) and #185 (comment-only), and closes the
+window in which a non-draft PR was public before codex confirmed. The POST-OPEN
+path below is unchanged and still runs for two cases: a check_set WITHOUT codex
+(open the PR immediately, gate on CI + approval only), and any `existing_pr`
+rework (the PR already exists, so codex reworks run on the open PR via the
+template's post-open `gh pr review` arm).
 
 Read the bead's description and notes once and stage them into a PR body
 file (using `--body-file` avoids quoting/encoding hazards with multi-line
@@ -970,7 +997,9 @@ The PR always opens non-draft — every PR that exists is a real candidate.
 When the `check_set` includes `codex` the signoff gate (dispatched in step 4)
 holds the merge instead: the merge stays held until the codex gate is green at
 the live head (check.codex=green@<head>), so no draft state is needed to gate
-readiness.
+readiness. With the pre-open gate above, the codex member is already green when
+the PR opens; a post-open rework that pushes a new commit re-gates it exactly as
+before (the marker is head-bound).
 
 ```bash
 WORK_JSON=$(gc bd show $WORK --json)
@@ -981,6 +1010,24 @@ ISSUE_NOTES=$(printf '%s' "$WORK_JSON" | jq -r '.[0].notes // empty')
 ISSUE_TYPE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].issue_type // "task"')
 ISSUE_PRIORITY=$(printf '%s' "$WORK_JSON" | jq -r '.[0].priority // empty')
 
+# Pre-open codex gate decision (tk-6d0vb.1.8). CODEX_GATE: is codex a member of
+# the check_set? Normalized the SAME way merge-skill.sh enforces it (split on
+# comma, trim surrounding whitespace, drop empties) so a spaced "lint, codex" is
+# recognized — matching the fail-closed site below and the merge skill (tk-aj4ua).
+# PRE_OPEN: codex gate AND no PR yet (first handoff). An existing_pr rework stays
+# on the post-open path (its PR is already open; codex reworks run on it).
+CODEX_GATE=0
+if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
+  CODEX_GATE=1
+fi
+PRE_OPEN=0
+if [ "$CODEX_GATE" = 1 ] && [ -z "$EXISTING_PR" ]; then
+  PRE_OPEN=1
+fi
+
+# POST-OPEN only: reuse/create + verify the PR now. Skipped entirely in pre-open,
+# where pre-open-resolve.sh opens the PR later once codex is green.
+if [ "$PRE_OPEN" = 0 ]; then
 PR_BODY_FILE=$(mktemp)
 {
   echo "## Summary"
@@ -1084,10 +1131,8 @@ else
 fi
 
 rm -f "$PR_BODY_FILE"
-```
 
-**3. Verify the pull request exists:**
-```bash
+# Verify the pull request exists and has the expected shape (post-open path).
 PR_ERR=$(mktemp)
 PR_INFO=$(lookup_pr_info "$PR_REF" "$PR_ERR")
 PR_STATUS=$?
@@ -1150,10 +1195,11 @@ if [ "$PR_HEAD_REPO" != "$ORIGIN_REPO" ]; then
   gc runtime drain-ack
   exit 1
 fi
+fi
 ```
-If this command fails or prints empty output: STOP. Debug and retry. Do NOT continue.
+If this command fails or prints empty output (post-open path): STOP. Debug and retry. Do NOT continue.
 
-**4. Record PR metadata and transition the anchor to GATING (it stays OPEN):**
+**4. Dispatch the codex signoff (branch pre-open, or PR post-open) and transition the anchor to GATING (it stays OPEN):**
 
 gc-toolkit local delta (close-on-land): mr-mode does NOT close this bead
 here. Stock GasTown closes at PR-creation; this pack keeps the bead OPEN as
@@ -1164,43 +1210,56 @@ mechanism is identical for any mr-mode bead. The anchor closes later, on a
 verified merge, via `reconcile-merged-prs.sh` in the find-work idle loop. See
 docs/work-bead-state-machine.md.
 
-The refinery's active endpoint is still PR-created (the bounded patrol loop
-is preserved): it records the PR, hands the bead to gating, and moves on —
-it does NOT babysit the PR to merge. `pr_url` and `pr_number` are the
-forensic breadcrumbs tying the bead to its pull request; `merge_result=pull_request`
-is the gating marker the reconcile pass scans for. `--unset-metadata
-rejection_reason` clears any stale rejection field from an earlier reworked
-attempt.
+The refinery's active endpoint hands the bead to a gating sub-state and moves on
+(the bounded patrol loop is preserved) — it does NOT babysit the PR to merge.
+POST-OPEN the anchor goes straight to `merge_result=pull_request` with the PR
+recorded (`pr_url`/`pr_number` are the forensic breadcrumbs; the reconcile pass
+scans for that marker). PRE-OPEN (codex gate, first handoff) there is no PR yet:
+the anchor goes to `merge_result=pre_open_gate` and `pre-open-resolve.sh` opens
+the PR later once codex is green. Either way `--unset-metadata rejection_reason`
+clears a stale rejection field from an earlier reworked attempt.
 
 gc-toolkit local delta: if `codex` is a member of `check_set`, dispatch a signoff
-bead (one member of the anchor's check-set) for the codex polecat pool and record the
-review->anchor link (anchor_bead metadata + a best-effort BLOCKS edge) BEFORE the
-gating transition. The transition is then FAIL-CLOSED on that link: the anchor is
-detached into gating only once anchor_bead is verified recorded on the review
-bead; otherwise it stays assigned for the next patrol to retry, never detached
-into a gating state the signoff cannot rediscover. Idempotent — a second refinery
-pass on the same PR reuses the open signoff bead and re-verifies (heals) the link.
+bead (one member of the anchor's check-set) for the codex polecat pool and record
+the review->anchor link (anchor_bead metadata + a best-effort BLOCKS edge) BEFORE
+the gating transition. PRE-OPEN the review targets the BRANCH compare-range
+(`review_branch`/`review_base`, no PR yet); POST-OPEN it targets the open PR
+(`pr_url`/`pr_number`). The transition is then FAIL-CLOSED on that link: the
+anchor is detached into gating only once anchor_bead is verified recorded on the
+review bead; otherwise it stays assigned for the next patrol to retry, never
+detached into a gating state the signoff cannot rediscover. Idempotent — a second
+refinery pass reuses the open signoff bead and re-verifies (heals) the link.
 
 ```bash
-# check_set membership is normalized the SAME way merge-skill.sh enforces it
-# (split on comma, trim surrounding whitespace, drop empties) so a natural-form
-# list like "lint, codex" dispatches the codex gate HERE and is enforced by the
-# merge skill. A raw comma-delimited substring match misses the spaced form:
-# the review bead is never created, yet merge-skill.sh still trims to `codex` and
-# holds the merge forever on a check.codex marker nothing will ever stamp
-# (tk-aj4ua). The same trim/filter is inlined verbatim at the fail-closed site
-# below (not factored into a shared helper) because that site is extracted and
-# run standalone by signoff-anchor-failclosed.test.sh.
-if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
+# CODEX_GATE / PRE_OPEN were computed in step 2. When codex is a check-set
+# member, dispatch the signoff review — pre-open against the branch, post-open
+# against the PR. The check_set membership normalization (whole-line match) lives
+# at the step-2 decision and at the fail-closed site below (inlined there so the
+# extracted signoff-anchor-failclosed snippet is self-contained); this site keys
+# off the precomputed CODEX_GATE instead of re-normalizing.
+if [ "$CODEX_GATE" = 1 ]; then
   CODEX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
   FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
-  REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
 
-  EXISTING_REVIEW=$(gc bd list \
-    --metadata-field task_kind=review \
-    --metadata-field pr_number="$PR_NUMBER" \
-    --status=open,in_progress --limit=1 --json 2>/dev/null \
-    | jq -r '.[0].id // empty')
+  # Dedup an in-flight review so a second refinery pass reuses it (idempotent)
+  # rather than dispatching a twin. Pre-open keys the lookup on the branch +
+  # anchor (no PR number exists yet); post-open keys on the PR number.
+  if [ "$PRE_OPEN" = 1 ]; then
+    REVIEW_TITLE="Review branch $BRANCH -> $TARGET: $ISSUE_TITLE"
+    EXISTING_REVIEW=$(gc bd list \
+      --metadata-field task_kind=review \
+      --metadata-field review_branch="$BRANCH" \
+      --metadata-field anchor_bead="$WORK" \
+      --status=open,in_progress --limit=1 --json 2>/dev/null \
+      | jq -r '.[0].id // empty')
+  else
+    REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
+    EXISTING_REVIEW=$(gc bd list \
+      --metadata-field task_kind=review \
+      --metadata-field pr_number="$PR_NUMBER" \
+      --status=open,in_progress --limit=1 --json 2>/dev/null \
+      | jq -r '.[0].id // empty')
+  fi
 
   if [ -z "$EXISTING_REVIEW" ]; then
     REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
@@ -1208,15 +1267,28 @@ if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space
     # review's routing fields here, so it is as reliable as the review's own
     # dispatch. The completion path resolves the anchor by the BLOCKS edge first
     # and falls back to this field when the edge is missing
-    # (template-fragments/polecat-non-impl-done.template.md).
-    gc bd update "$REVIEW_BEAD" \
-      --set-metadata task_kind=review \
-      --set-metadata check_name=codex \
-      --set-metadata pr_url="$PR_URL" \
-      --set-metadata pr_number="$PR_NUMBER" \
-      --set-metadata fix_target_pool="$FIX_POOL" \
-      --set-metadata anchor_bead="$WORK" \
-      --set-metadata gc.routed_to="$CODEX_POOL"
+    # (template-fragments/polecat-non-impl-done.template.md). PRE-OPEN stamps
+    # review_branch/review_base (the compare-range the reviewer diffs, and the
+    # template's pre-open discriminator); POST-OPEN stamps pr_url/pr_number.
+    if [ "$PRE_OPEN" = 1 ]; then
+      gc bd update "$REVIEW_BEAD" \
+        --set-metadata task_kind=review \
+        --set-metadata check_name=codex \
+        --set-metadata review_branch="$BRANCH" \
+        --set-metadata review_base="$TARGET" \
+        --set-metadata fix_target_pool="$FIX_POOL" \
+        --set-metadata anchor_bead="$WORK" \
+        --set-metadata gc.routed_to="$CODEX_POOL"
+    else
+      gc bd update "$REVIEW_BEAD" \
+        --set-metadata task_kind=review \
+        --set-metadata check_name=codex \
+        --set-metadata pr_url="$PR_URL" \
+        --set-metadata pr_number="$PR_NUMBER" \
+        --set-metadata fix_target_pool="$FIX_POOL" \
+        --set-metadata anchor_bead="$WORK" \
+        --set-metadata gc.routed_to="$CODEX_POOL"
+    fi
     # Gate-as-dep (close-on-land): the review bead BLOCKS the open anchor.
     # Replaces the retired backward work_bead pointer — the dep graph now
     # carries the gate, and the rework arm resolves the anchor by walking this
@@ -1230,7 +1302,7 @@ if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space
     gc bd dep "$REVIEW_BEAD" --blocks "$WORK" \
       || echo "WARN: could not attach review $REVIEW_BEAD as a gate-dep of $WORK (anchor_bead fallback persists the link)" >&2
     gc session wake "$CODEX_POOL" || true
-    gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for PR#$PR_NUMBER" || true
+    gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for $WORK" || true
   fi
   # The review bead the fail-closed gate below verifies: the one just created, or
   # the reused open one (which the dispatch above does NOT re-stamp).
@@ -1286,25 +1358,40 @@ if [ -n "${REVIEW_FOR_GATE:-}" ]; then
 fi
 # <<< signoff-anchor-failclosed
 
-# Close-on-land: keep the anchor OPEN as the PR's gating bead. Record the PR
-# fields + merged_target, mark it gating (merge_result=pull_request), and
-# DETACH it from both work queues so it is neither re-grabbed nor read as demand:
+# Close-on-land: keep the anchor OPEN as the PR's gating bead, DETACHED from both
+# work queues so it is neither re-grabbed nor read as demand:
 #   - assignee="" -> find-work (assignee=$GC_AGENT, open, has branch) skips it,
-#     so the refinery does not re-open the PR in a loop;
+#     so the refinery does not re-open/re-gate it in a loop;
 #   - gc.routed_to="" -> the open + unassigned anchor is NOT pool demand.
 # It closes later, on a verified merge, via reconcile-merged-prs.sh in the
 # find-work idle loop. This REPLACES the stock `gc bd close ... "Pull request
 # ready"`; closure now means landed, never handed-off.
-gc bd update $WORK \
-  --status=open \
-  --assignee="" \
-  --set-metadata merge_result=pull_request \
-  --set-metadata pr_url="$PR_URL" \
-  --set-metadata pr_number="$PR_NUMBER" \
-  --set-metadata merged_target="$TARGET" \
-  --set-metadata check_set="{{check_set}}" \
-  --set-metadata gc.routed_to="" \
-  --unset-metadata rejection_reason
+if [ "$PRE_OPEN" = 1 ]; then
+  # PRE-OPEN: no PR yet. Park in the pre_open_gate sub-state; pre-open-resolve.sh
+  # opens the non-draft PR once check.codex=green@<branch-head> and flips this to
+  # merge_result=pull_request. branch/target (set by the polecat) stay on the bead
+  # for the resolver; merged_target records the intended landing base.
+  gc bd update $WORK \
+    --status=open \
+    --assignee="" \
+    --set-metadata merge_result=pre_open_gate \
+    --set-metadata merged_target="$TARGET" \
+    --set-metadata check_set="{{check_set}}" \
+    --set-metadata gc.routed_to="" \
+    --unset-metadata rejection_reason
+else
+  # POST-OPEN: the PR exists. Record its fields + merged_target and mark it gating.
+  gc bd update $WORK \
+    --status=open \
+    --assignee="" \
+    --set-metadata merge_result=pull_request \
+    --set-metadata pr_url="$PR_URL" \
+    --set-metadata pr_number="$PR_NUMBER" \
+    --set-metadata merged_target="$TARGET" \
+    --set-metadata check_set="{{check_set}}" \
+    --set-metadata gc.routed_to="" \
+    --unset-metadata rejection_reason
+fi
 ```
 If the gating update fails, the bead stays assigned to the refinery and OPEN —
 it is simply re-processed next patrol iteration (the `EXISTING_REVIEW` guard and
@@ -1332,9 +1419,11 @@ The Gastown example refinery supports direct and mr/pr merge strategies only."
 Do NOT close the bead, delete the branch, or burn the wisp until a human decides how to proceed.
 
 **GATE**: direct mode requires a verified target push, then closes the bead. mr
-mode requires a verified PR URL, then transitions the bead to GATING (it stays
-OPEN); the bead closes only on a verified merge (reconcile-merged-prs.sh), never
-at handoff."""
+mode POST-OPEN requires a verified PR URL, then transitions the bead to GATING
+(`merge_result=pull_request`, stays OPEN). mr mode PRE-OPEN (codex gate, first
+handoff) transitions to `pre_open_gate` with NO PR — `pre-open-resolve.sh` opens
+the PR once codex is green, moving it to `pull_request`. Either way the bead
+closes only on a verified merge (reconcile-merged-prs.sh), never at handoff."""
 
 [[steps]]
 id = "patrol-summary"
