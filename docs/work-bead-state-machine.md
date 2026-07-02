@@ -156,8 +156,13 @@ dispatch
        -> the worker claims -> in_progress            (builds on its branch, sets target)
             -> hands off -> open . assignee=refinery . branch,target set
                  -> direct-mode: FF-merge to target, push -> closed "Merged to <target> at <sha>"
-                 -> mr-mode: push branch, open PR to target
-                       -> GATING . open . assignee="" . gc.routed_to="" . pr_url,pr_number set
+                 -> mr-mode, codex in check-set (pre-open gate): push branch, dispatch codex on the BRANCH
+                       -> PRE-OPEN GATING . open . assignee="" . gc.routed_to="" . merge_result=pre_open_gate
+                       |    (no PR yet; the codex signoff gates whether the PR opens at all)
+                       |- codex green@<head> -> pre-open-resolve.sh opens the non-draft PR -> GATING (below)
+                       \- codex needs work   -> rework: a NEW child filed against the branch (no PR yet)
+                 -> mr-mode, otherwise (no codex gate, or existing PR): push branch, open PR to target
+                       -> GATING . open . assignee="" . gc.routed_to="" . pr_url,pr_number . merge_result=pull_request
                        |    (the check-set hangs off it as gate conditions)
                        |- check-set clears -> merge skill merges + records -> closed "Merged to <target> at <sha>"
                        |- a check needs work          -> rework: a NEW child filed against it
@@ -170,6 +175,7 @@ dispatch
 | pool demand | open | — | `<pool>` | `branch` unset until claimed |
 | building | in_progress | the worker | — | `work_dir`, `branch` |
 | handed off | open | refinery | — | `branch`, `target` |
+| **pre-open gating** | **open** | **—** | **—** | `branch`, `merged_target`, `merge_result=pre_open_gate` (codex gate, before the PR opens) |
 | **gating** | **open** | **—** | **—** | `pr_url`, `pr_number`, `merge_result=pull_request` |
 | closed (landed) | closed | — | — | `merged_sha` (committed output) / close reason (ephemeral) |
 | abandoned | closed / open | — | — / `human` | PR closed unmerged: refinery-closed, or escalated if out-of-band |
@@ -190,6 +196,17 @@ purpose:
 
 A gating convoy is therefore invisible to find-work and to the pool reconciler;
 the only thing that watches it is the refinery's reconcile pass.
+
+**Pre-open gating** (`merge_result=pre_open_gate`) is another such sub-state
+marker, added per the above without a new status. When `codex` is a check-set
+member, the refinery dispatches the codex signoff against the **branch** and
+parks the bead here — detached from both queues exactly like gating — *before*
+opening the PR. An idle-loop pass beside the merge skill (`pre-open-resolve.sh`)
+opens the non-draft PR only once `check.codex` is green at the branch head, moving
+the bead to ordinary `pull_request` gating. A PR that becomes visible is thus
+codex-green at birth, with no draft phase (drafts stay retired, #163). Only the
+codex member moves ahead of PR-creation; CI and approval stay post-open, gated at
+merge by the same check-set the merge skill already enforces.
 
 **The movers.** The **worker** builds (`open → in_progress → hands off`) and
 reworks; the machine names a role, not a specific agent. The worker closes its
@@ -241,6 +258,14 @@ in `check_set` is green **at the live head** — each `check.<name>` must equal
 whatever step stamps its marker; the merge skill is unchanged. This replaces the
 retired `signoff_head` field (a single conflated marker) and the `review_gate`
 string var: the per-gate marker model is the composable check-set made concrete.
+
+**codex gates before the PR opens (gc-toolkit, tk-6d0vb.1.8).** The `codex`
+member is special only in *when* its marker is produced. The refinery stamps
+`check.codex=green@<branch-head>` on the branch during **pre-open gating** (above)
+so the PR opens already codex-green; the very same head-bound marker then re-gates
+at merge if a later commit moves the head. Every other member — CI, approval — is
+produced post-open and gated at merge. The merge skill is unchanged either way: it
+asks only "is every check-set member green at the live head?"
 
 **`title/description current` is load-bearing.** Approval and CI can be
 **stale**: an approval given on an earlier diff, with a title and body that no
@@ -346,6 +371,6 @@ the bead **open through gating and closes it on land**, so `closed` always means
 landed and the dependency graph always shows which bead owns which PR. This is a
 **pack-only delta** — it lives entirely in the `mol-refinery-patrol` formula and
 its merge skill + reconcile scripts (`merge-skill.sh`, `reconcile-merged-prs.sh`,
-`reconcile-graduated-convoys.sh`); gascity core is untouched and gains no new
-status (`gating` is a metadata marker on an ordinary `open` bead).
-**Direct-mode beads are unchanged.**
+`reconcile-graduated-convoys.sh`, `pre-open-resolve.sh`); gascity core is
+untouched and gains no new status (`gating` and `pre_open_gate` are metadata
+markers on an ordinary `open` bead). **Direct-mode beads are unchanged.**
