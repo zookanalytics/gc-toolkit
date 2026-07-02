@@ -1,7 +1,7 @@
 # Attention Canvas — design brief
 
 > Input for a Claude Design visual-exploration session.
-> Companion files in this folder: `attention-board-sample.json` (real data the
+> Companion files in this folder: `helm-board-sample.json` (real data the
 > tiles render) and `how-to.md` (how to run the session).
 >
 > You may have zero context on "Gas City." You don't need it. You need to
@@ -178,8 +178,8 @@ it *is* the attention-conservation mechanism. Specifically:
 ## 7. The data each tile renders
 
 Every tile is one **anchor** — a top-level unit of work. The board is produced
-by a real tool (`gc-attention`) whose `--json` output is the live contract; a
-representative **real** snapshot is in `attention-board-sample.json` (11 tiles).
+by a real tool (`gc-helm`) whose `--json` output is the live contract; a
+representative **real** snapshot is in `helm-board-sample.json` (11 tiles).
 Open it alongside this section. Here is what the fields *mean* (grouped by what
 they're for, not alphabetically):
 
@@ -277,7 +277,7 @@ A design north star for the tile face: **`severity` drives the visual weight,
   Tailwind** SPA. The zoomable canvas is a mature JS canvas lib
   (tldraw / xyflow / Excalidraw class). The embedded terminal is **xterm.js**.
 - **Three data planes** feed the surface — useful to keep distinct in your head:
-  1. **Board tiles** — the array in `attention-board-sample.json`, refreshed by
+  1. **Board tiles** — the array in `helm-board-sample.json`, refreshed by
      polling (it's an expensive cross-project aggregation with its own cache; it
      does not stream). This is the canvas content.
   2. **Drill-in + liveness** — richer per-stream detail and live session state,

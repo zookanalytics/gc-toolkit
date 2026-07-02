@@ -5,12 +5,12 @@ This folder is the **input bundle** for a visual-exploration session in
 
 - `attention-canvas-design-brief.md` — the heart: purpose, soul, jobs, the
   canvas idiom, the data, the bar, and the open questions. **Read this first.**
-- `attention-board-sample.json` — a **real** captured snapshot of the data the
+- `helm-board-sample.json` — a **real** captured snapshot of the data the
   tiles render: 11 anchors across four rigs, covering four of the five severity
   bands (`HIGH`, `ELEVATED`, `NORMAL`, `LOW` — no `FLAGGED`) and two of the
   three liveness states (`cold`, `hot` — no `warm`). It captures the **current**
-  `gc-attention --json` output: a top-level ranked **array** of tiles (the
-  bash-PoC contract). The planned attention **service** (plan U1/U4) serves
+  `gc-helm --json` output: a top-level ranked **array** of tiles (the
+  bash-PoC contract). The planned Helm **service** (plan U1/U4) serves
   those same tiles inside a typed **envelope** `{generated_at, total, tiles[]}`,
   so the **per-tile** field shape is what's stable across both — prototype
   against the tiles. Mock more in the same shape for volume, including the two
@@ -93,9 +93,9 @@ it:
   *visual-language* reference, not the structural template.
 
 - **The data contract**, if you want to regenerate or extend the sample:
-  `rigs/gc-toolkit/assets/scripts/gc-attention.sh` (its header documents every
+  `rigs/gc-toolkit/assets/scripts/gc-helm.sh` (its header documents every
   `--json` field). Re-capture a fresh snapshot with:
-  `bash rigs/gc-toolkit/assets/scripts/gc-attention.sh board --json`
+  `bash rigs/gc-toolkit/assets/scripts/gc-helm.sh board --json`
   (run from the city root, `/home/zook/loomington`).
 
 ---
