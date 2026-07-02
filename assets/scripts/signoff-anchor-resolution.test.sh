@@ -8,8 +8,8 @@
 #     review->anchor *best-effort* (a failed edge only warns; it must not
 #     strand the PR).
 #   - COMPLETION (template-fragments/polecat-non-impl-done.template.md) resolves
-#     the anchor to stamp check.<gate>=green@<head> (APPROVE/COMMENT) or clear it
-#     + file a rework child (REQUEST_CHANGES).
+#     the anchor to stamp check.<gate>=green@<head> (COMMENT signoff pass) or
+#     clear it + file a rework child (REQUEST_CHANGES).
 #
 # The bug this guards (PR#163 signoff finding): if completion resolves the
 # anchor ONLY by the best-effort BLOCKS edge and that edge was dropped, ANCHOR

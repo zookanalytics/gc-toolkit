@@ -66,16 +66,26 @@ reached GitHub.
 
 ```bash
 # 1. Post the artifact if it isn't already posted.
-#    - Review tasks (pr_number/pr_url set): submit the verdict via
-#      `gh pr review <num>` with the body and verdict flag. BEFORE
-#      posting, check whether an earlier attempt already submitted
-#      a review under your handle — don't double-post:
+#    - Review tasks (pr_number/pr_url set): post the signoff as a
+#      NON-BLOCKING COMMENT — always `gh pr review --comment`, NEVER
+#      `gh pr review --approve`. COMMENT-only is BY DESIGN, not a
+#      permission fallback: at this phase the city never approves a PR —
+#      approval is EXTERNAL (a human, on GitHub). Codex is a review GATE,
+#      and the merge is held by the recorded `check.<gate>=green@<head>`
+#      marker (stamped in the signoff-gate section below) plus that
+#      external approval — never by a GitHub approval from the bot.
+#      Commenting (not approving) keeps correctness independent of whether
+#      the bot actor happens to hold GitHub approve permission. BEFORE
+#      posting, check whether an earlier attempt already submitted a
+#      review under your handle — don't double-post:
 #        gh api repos/<owner>/<repo>/pulls/<num>/reviews \
 #          | jq '.[] | select(.user.login == "<your-handle>") | .submitted_at'
 #      A recent submission means skip the post step.
 #    - Research/investigation tasks: ensure findings live in the
 #      bead via `gc bd update <work-bead> --notes "..."` before close.
-gh pr review <pr-num> ...   # or: gc bd update <work-bead> --notes "..."
+gh pr review <pr-num> --comment --body "<verdict + notes>"   # signoff PASS: COMMENT only, never --approve
+# changes needed → gh pr review <pr-num> --request-changes --body "<blocking findings>"
+# (research/investigation instead: gc bd update <work-bead> --notes "...")
 
 # 2. Stamp task-specific metadata (review_id, pr_url, verdict, etc.)
 gc bd update <work-bead> --set-metadata <task-specific fields>
@@ -98,13 +108,15 @@ gating bead; it closes later, on merge, via the refinery's reconcile pass —
 never here. Resolve the anchor as the bead this review gates — the dependent of
 the `blocks` dep the refinery attached (`gc bd dep <review> --blocks <anchor>`):
 
-- **APPROVE/COMMENT** — the signoff passes on the **current** head. Stamp the
-  gate green at the head you signed off as `check.<gate>=green@<head>` on the
-  anchor (the gate name comes from the review bead's `metadata.check_name`,
-  default `codex`). The `green@<sha>` value folds "this gate passed" and "title +
-  body validated at this commit" into one: a later commit moves the head, so the
-  marker no longer matches and the gate re-gates. The PR is already non-draft;
-  nothing else to publish.
+- **COMMENT (signoff pass)** — the signoff passes on the **current** head. The
+  verdict is posted as a non-blocking COMMENT, never an APPROVE (see step 1: the
+  city never approves — approval is external/human). Stamp the gate green at the
+  head you signed off as `check.<gate>=green@<head>` on the anchor (the gate name
+  comes from the review bead's `metadata.check_name`, default `codex`). The
+  `green@<sha>` value folds "this gate passed" and "title + body validated at
+  this commit" into one: a later commit moves the head, so the marker no longer
+  matches and the gate re-gates. The PR is already non-draft; nothing else to
+  publish.
 - **REQUEST_CHANGES** — file a **new rework child** against the anchor (rework
   is a new child, never the same bead reopened and never a cleared marker; see
   docs/work-bead-state-machine.md). Clear `check.<gate>` so the now-unvalidated
@@ -141,7 +153,11 @@ ANCHOR=$(gc bd dep list <work-bead> --direction=up -t blocks --json 2>/dev/null 
 
 if [ -n "$FIX_POOL" ]; then
   case "$VERDICT" in
-    APPROVE|COMMENT)
+    # Signoff pass. Codex posts COMMENT by design (step 1: never --approve — the
+    # city does not approve PRs; approval is external/human). APPROVE is matched
+    # only defensively for a legacy/stray verdict; codex never emits it. Either
+    # way the pass action is identical: stamp the per-gate marker.
+    COMMENT|APPROVE)
       # Record the gate green at the head the signoff validated, as the per-gate
       # marker check.<CHECK_NAME>=green@<reviewed-oid>. The merge skill merges
       # only while that marker still equals green@<live-head>; any later commit
@@ -208,9 +224,13 @@ if [ -n "$FIX_POOL" ]; then
 fi
 ```
 
-`$VERDICT` is whichever verdict you submitted via `gh pr review` —
-`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`. Treat `COMMENT` as
-non-blocking (operator sees the PR with your notes attached).
+`$VERDICT` is whichever verdict you submitted via `gh pr review`. Codex emits
+only `COMMENT` (the signoff pass — posted as a non-blocking comment, **never**
+`APPROVE`; the city does not approve PRs, approval is external/human) or
+`REQUEST_CHANGES` (rework needed). `COMMENT` is non-blocking: the operator sees
+the PR with your notes attached, and the merge is held by the recorded
+`check.<gate>=green@<head>` marker plus external approval — not by a GitHub
+approval from the bot.
 
 After this step, close the review bead as in the existing flow
 (step 3 of the Non-impl done sequence above).
