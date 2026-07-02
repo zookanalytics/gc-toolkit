@@ -27,6 +27,7 @@ defines the routing contract; it is not a command tutorial.
 | Upstream CLI reference (`--reassign` row only) | gastownhall/gascity | `rigs/gascity/docs/reference/cli.md:2789` at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17` | 2026-05-21 |
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
+| PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (**OPEN + approved, NOT merged** at survey time; not in our deployed `gc`) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670 | 2026-07-02 |
 
 ## The maintainer's ruling
 
@@ -136,6 +137,47 @@ contract: when `assignee` is already empty, `--reassign` is a no-op
 on the assignee field — no error, no spurious update. Callers that
 don't know the bead's prior state can pass `--reassign`
 unconditionally and trust the routing call to be safe.
+
+### Adjacent — targetless sling resolution (`default_sling_target`)
+
+All three lanes above name an explicit target. `gc sling <bead>` with
+**no target argument** is also valid: `gc` resolves the target from the
+bead's rig `default_sling_target` config (singular — a single target
+string) in `city.toml`, then routes through **Lane 1**. The field
+contract is therefore exactly Lane 1's — a **pool target** gets
+`metadata.gc.routed_to=<target>` and no `assignee`; a **singleton
+target** additionally gets `assignee=<target>` from the same
+singleton-stamp rule. Resolution only chooses *which* target Lane 1
+receives; it introduces no new field behavior.
+
+This path is **live in our deployed `gc` today.** Every gc-toolkit rig
+points `default_sling_target` at its own polecat pool in `city.toml`
+(e.g. `default_sling_target = "gc-toolkit/gc-toolkit.polecat"`), so a
+bare `gc sling <bead>` in any of our rigs lands the bead on that rig's
+pool via `gc.routed_to`, where the pool's demand-driven scale_check
+fans out an ephemeral polecat to pick it up.
+
+- **CLI example:**
+  ```bash
+  gc sling tk-abcde    # no target → resolves default_sling_target, routes via Lane 1
+  ```
+
+> **Note: `default_sling_targets` (plural) is upstream-pending — not in
+> our binary, and deliberately not adopted.** Upstream PR #3670 (`feat:
+> add default_sling_targets for multi-target random dispatch`,
+> gastownhall/gascity) adds a plural `default_sling_targets = ["rig/a",
+> "rig/b"]` (a `[]string`): a targetless sling picks **one entry at
+> uniform random** per dispatch, and the plural form takes **precedence
+> over** the singular `default_sling_target` when both are set. As of
+> 2026-07-02 that PR is **open and approved but unmerged**, so it is
+> **not** a feature of our deployed `gc` — do not describe or rely on it
+> as live. We have also **chosen not to adopt** it: the polecat pool
+> already gives us demand-driven elasticity behind a *single* target
+> (scale_check fans out ephemeral polecats to queue depth), whereas
+> `default_sling_targets` is a *static, load- and health-blind*
+> client-side fan-out across a fixed named set — no use case here. This
+> note records the decision so a future reader asking "why don't we use
+> random multi-target dispatch?" finds it.
 
 ### Adjacent — `gc.run_target` (deprecated wire field; compile-time authoring hint)
 
