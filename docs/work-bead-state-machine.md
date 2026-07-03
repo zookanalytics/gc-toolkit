@@ -156,12 +156,12 @@ dispatch
        -> the worker claims -> in_progress            (builds on its branch, sets target)
             -> hands off -> open . assignee=refinery . branch,target set
                  -> direct-mode: FF-merge to target, push -> closed "Merged to <target> at <sha>"
-                 -> mr-mode, codex in check-set (pre-open gate): push branch, dispatch codex on the BRANCH
+                 -> mr-mode, a pre-open check-set member (currently codex): push branch, dispatch codex on the BRANCH
                        -> PRE-OPEN GATING . open . assignee="" . gc.routed_to="" . merge_result=pre_open_gate
                        |    (no PR yet; the codex signoff gates whether the PR opens at all)
                        |- codex green@<head> -> pre-open-resolve.sh opens the non-draft PR -> GATING (below)
                        \- codex needs work   -> rework: a NEW child filed against the branch (no PR yet)
-                 -> mr-mode, otherwise (no codex gate, or existing PR): push branch, open PR to target
+                 -> mr-mode, otherwise (no pre-open member, or existing PR): push branch, open PR to target
                        -> GATING . open . assignee="" . gc.routed_to="" . pr_url,pr_number . merge_result=pull_request
                        |    (the check-set hangs off it as gate conditions)
                        |- check-set clears -> merge skill merges + records -> closed "Merged to <target> at <sha>"
@@ -175,7 +175,7 @@ dispatch
 | pool demand | open | — | `<pool>` | `branch` unset until claimed |
 | building | in_progress | the worker | — | `work_dir`, `branch` |
 | handed off | open | refinery | — | `branch`, `target` |
-| **pre-open gating** | **open** | **—** | **—** | `branch`, `merged_target`, `merge_result=pre_open_gate` (codex gate, before the PR opens) |
+| **pre-open gating** | **open** | **—** | **—** | `branch`, `merged_target`, `merge_result=pre_open_gate` (pre-open subset — currently `{codex}` — runs before the PR opens) |
 | **gating** | **open** | **—** | **—** | `pr_url`, `pr_number`, `merge_result=pull_request` |
 | closed (landed) | closed | — | — | `merged_sha` (committed output) / close reason (ephemeral) |
 | abandoned | closed / open | — | — / `human` | PR closed unmerged: refinery-closed, or escalated if out-of-band |
@@ -198,15 +198,20 @@ A gating convoy is therefore invisible to find-work and to the pool reconciler;
 the only thing that watches it is the refinery's reconcile pass.
 
 **Pre-open gating** (`merge_result=pre_open_gate`) is another such sub-state
-marker, added per the above without a new status. When `codex` is a check-set
-member, the refinery dispatches the codex signoff against the **branch** and
-parks the bead here — detached from both queues exactly like gating — *before*
-opening the PR. An idle-loop pass beside the merge skill (`pre-open-resolve.sh`)
-opens the non-draft PR only once `check.codex` is green at the branch head, moving
-the bead to ordinary `pull_request` gating. A PR that becomes visible is thus
-codex-green at birth, with no draft phase (drafts stay retired, #163). Only the
-codex member moves ahead of PR-creation; CI and approval stay post-open, gated at
-merge by the same check-set the merge skill already enforces.
+marker, added per the above without a new status. It is the phase in which a
+**subset of the check-set runs early — against the branch, before the PR opens.**
+That pre-open subset is **currently exactly `{codex}`**: the refinery dispatches
+the codex signoff against the **branch** and parks the bead here — detached from
+both queues exactly like gating — *before* opening the PR. An idle-loop pass
+beside the merge skill (`pre-open-resolve.sh`) opens the non-draft PR only once
+every pre-open member is green at the branch head — today just `check.codex` —
+moving the bead to ordinary `pull_request` gating. A PR that becomes visible is
+thus codex-green at birth, with no draft phase (drafts stay retired, #163). The
+pre-open subset is the only part of the check-set that moves ahead of
+PR-creation; the rest — CI, approval — stay post-open, gated at merge by the same
+check-set the merge skill already enforces. Which members run pre-open is fixed in
+code today; making that membership data-driven is a recorded, not-yet-built
+extension (see [the check-set](#the-check-set-one-class-of-gate)).
 
 **The movers.** The **worker** builds (`open → in_progress → hands off`) and
 reworks; the machine names a role, not a specific agent. The worker closes its
@@ -259,13 +264,40 @@ whatever step stamps its marker; the merge skill is unchanged. This replaces the
 retired `signoff_head` field (a single conflated marker) and the `review_gate`
 string var: the per-gate marker model is the composable check-set made concrete.
 
-**codex gates before the PR opens (gc-toolkit, tk-6d0vb.1.8).** The `codex`
-member is special only in *when* its marker is produced. The refinery stamps
-`check.codex=green@<branch-head>` on the branch during **pre-open gating** (above)
-so the PR opens already codex-green; the very same head-bound marker then re-gates
-at merge if a later commit moves the head. Every other member — CI, approval — is
+**The pre-open subset: members that run before the PR opens (gc-toolkit,
+tk-6d0vb.1.8).** Some check-set members can be produced *early* — against the
+branch, before the PR exists — instead of post-open. These form the **pre-open
+subset** of the check-set. A member in the subset is special only in *when* its
+marker is produced, not in kind: the refinery stamps `check.<name>=green@<branch-head>`
+on the branch during **pre-open gating** (above) so the PR opens already green on
+that member, and the very same head-bound marker re-gates at merge if a later
+commit moves the head. Every member outside the subset — CI, approval — is
 produced post-open and gated at merge. The merge skill is unchanged either way: it
 asks only "is every check-set member green at the live head?"
+
+**The pre-open subset is currently exactly `{codex}`, and that membership is
+hardcoded, not data-driven.** `pre-open-resolve.sh` reads only `check.codex` and
+holds PR-open until it is green@head; `mol-refinery-patrol.toml` dispatches codex
+specifically. What is *already* generic is the pre-open **phase** itself — the
+`merge_result=pre_open_gate` state and `pre-open-resolve.sh` are phase-named, not
+codex-named — so growing the subset needs no undoing of the shipped gate (PR #186).
+
+> **Planned extension — data-driven pre-open membership** (recorded here as
+> intent; **not built** — YAGNI until a real second pre-open check exists). To run
+> more than codex before the PR opens, make the subset a declared property of the
+> check-set rather than a constant in code:
+> - **Declare membership as data** — a `pre_open_subset` field listing which
+>   members run pre-open, or a per-check `phase=pre_open|merge` attribute carried
+>   alongside `check_set`.
+> - **Gate PR-open on all pre-open members** — `pre-open-resolve.sh` opens the PR
+>   once *every* declared pre-open member is green@head, not only `check.codex`.
+> - **Dispatch each pre-open member against the branch** — the refinery fans out
+>   one branch-side dispatch per pre-open member, the way it dispatches codex today.
+>
+> **Build trigger:** a second check is wanted pre-open. Design tk-6d0vb.1.7 (Q7)
+> already names **CI moving pre-open** as the likely candidate. When it fires, file
+> a separate implementation bead; nothing in the shipped pre-open gate (PR #186)
+> blocks the path.
 
 **`title/description current` is load-bearing.** Approval and CI can be
 **stale**: an approval given on an earlier diff, with a title and body that no
