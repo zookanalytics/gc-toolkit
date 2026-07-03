@@ -1,6 +1,5 @@
 scope = "city"
 wake_mode = "resume"
-idle_timeout = "8h"
 min_active_sessions = 0
 
 # Cross-reference: render the canonical mechanik's prompt template under
