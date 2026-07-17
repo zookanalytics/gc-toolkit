@@ -252,6 +252,58 @@ META=$(gc bd show <bead> --json | jq '.[0].metadata')
 # what mol-polecat-work.workspace-setup actually writes.
 WORKTREE=$(echo "$META" | jq -r '.work_dir // empty')
 BRANCH=$(echo "$META" | jq -r '.branch // empty')
+
+# HUSK GUARD (gc-7v0lx / gc-5v01w): a husk work_dir — the git worktree was
+# removed but the directory survives (typically only .gc/ left) — still lets
+# `cd "$WORKTREE"` succeed, but every subsequent git command then walks UP to
+# the nearest enclosing repo: the TOWN repo at /home/zook/loomington. So
+# `git add -A && git commit && git push origin HEAD` would capture and publish
+# the operator's uncommitted town-repo WIP to origin/main. Before ANY salvage
+# git write, assert work_dir is its OWN git worktree root; if git resolves it
+# to a parent/town repo, refuse salvage.
+# The markers let the regression test extract and exercise this exact snippet
+# (assets/scripts/husk-guard.test.sh).
+# >>> husk-guard
+WORKTREE_SAFE=0
+if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
+  EXPECTED_ROOT=$(cd "$WORKTREE" && pwd -P)
+  ACTUAL_ROOT=$(git -C "$WORKTREE" rev-parse --show-toplevel 2>/dev/null)
+  if [ -n "$ACTUAL_ROOT" ] && [ "$ACTUAL_ROOT" = "$EXPECTED_ROOT" ]; then
+    WORKTREE_SAFE=1
+  else
+    echo "witness: REFUSING salvage for <bead> — work_dir $WORKTREE is a husk (git toplevel='${ACTUAL_ROOT:-<none>}' != worktree root '$EXPECTED_ROOT'); skipping add/commit/push to avoid town-repo contamination." >&2
+  fi
+fi
+# <<< husk-guard
+```
+
+**Husk work_dir → refuse salvage, treat as Case E.**
+
+`WORKTREE_SAFE=1` means `$WORKTREE` is its own git worktree root and salvage
+git writes are safe. `WORKTREE_SAFE=0` means the directory is absent, or it is
+a **husk** whose git commands resolve to an enclosing repo. When it is `0`:
+
+- **Skip Cases B, C, and D entirely** — they `cd "$WORKTREE"` and run
+  `git add -A` / `git commit` / `git push`, which from a husk would commit and
+  publish the town repo's working tree. There is nothing salvageable in a husk;
+  the worktree git data is already gone.
+- Handle the bead as **Case E** (nothing to salvage): escalate, then fall
+  through to Step 3 for cleanup / return-to-pool. Step 3's own `git` calls run
+  from the rig root, not `$WORKTREE`, so they stay safe.
+
+Case A is unaffected: it queries `origin` from the rig root and never touches
+`$WORKTREE`. Case B's `git ls-remote` must still be gated, because from a husk
+it would resolve `origin` from the **town** repo and answer for the wrong
+remote — reporting the branch missing and falling through to Case C's writes.
+
+Escalate the refusal (work_dir was recorded but is unusable — worth a look):
+```bash
+gc mail send mayor/ -s "SALVAGE_REFUSED: <bead> husk work_dir" -m "Bead <bead> recorded work_dir=$WORKTREE, but it is not its own git worktree root.
+git toplevel: ${ACTUAL_ROOT:-<none>}
+Expected root: $EXPECTED_ROOT
+Observation: worktree git data is gone (husk). Salvage add/commit/push was REFUSED — running it would have committed and pushed the enclosing (town) repo's working tree to origin/main.
+Action: treated as Case E (nothing to salvage); bead returned to pool.
+Branch: ${BRANCH:-none}"
 ```
 
 Check the bead and worktree state, then act:
@@ -265,50 +317,77 @@ If branch exists on origin → skip to Step 3 (cleanup).
 
 **Case B: Worktree exists, branch pushed but not on origin yet.**
 Branch is recorded in metadata but polecat may have crashed before push.
+Requires `WORKTREE_SAFE=1` — a husk resolves `origin` from the town repo.
 ```bash
-cd "$WORKTREE"
-git ls-remote --heads origin $BRANCH
+if [ "$WORKTREE_SAFE" != "1" ]; then
+  echo "husk work_dir — Case B does not apply (see HUSK GUARD); handle as Case E." >&2
+else
+  cd "$WORKTREE"
+  git ls-remote --heads origin $BRANCH
+fi
 ```
 If branch IS on origin → skip to Step 3.
 If branch is NOT on origin → fall through to Case C.
 
 **Case C: Worktree exists with unpushed commits.**
 Work is committed locally but never pushed. Branch is not yet canonical.
+Requires `WORKTREE_SAFE=1` — this case performs git WRITES.
 ```bash
-cd "$WORKTREE"
-BRANCH=$(git branch --show-current)
-git log origin/main..HEAD --oneline  # Shows unpushed commits
+if [ "$WORKTREE_SAFE" != "1" ]; then
+  echo "husk work_dir — REFUSING Case C salvage writes (see HUSK GUARD); handle as Case E." >&2
+else
+  cd "$WORKTREE"
+  BRANCH=$(git branch --show-current)
+  git log origin/main..HEAD --oneline  # Shows unpushed commits
+fi
 ```
-Commit any remaining uncommitted/untracked work first (safeguard):
+Commit any remaining uncommitted/untracked work first (safeguard) — still
+only when `WORKTREE_SAFE=1`, since `git add -A` from a husk stages the town
+repo's working tree:
 ```bash
-git status --porcelain
-# If any output:
-git add -A
-git commit -m "witness: salvage uncommitted work (<bead>)"
+if [ "$WORKTREE_SAFE" = "1" ]; then
+  cd "$WORKTREE"
+  git status --porcelain
+  # If any output:
+  git add -A
+  git commit -m "witness: salvage uncommitted work (<bead>)"
+fi
 ```
 Publish the work to make branch canonical:
 ```bash
-git push origin HEAD
-gc bd update <bead> --set-metadata branch=$BRANCH
+if [ "$WORKTREE_SAFE" = "1" ]; then
+  cd "$WORKTREE"
+  git push origin HEAD
+  gc bd update <bead> --set-metadata branch=$BRANCH
+fi
 ```
 Skip to Step 3 (cleanup).
 
 **Case D: Worktree exists with ONLY uncommitted/untracked changes (no commits).**
 Same resolution as Case C. All work is useful work — never discard.
+Requires `WORKTREE_SAFE=1` — this case performs git WRITES.
 ```bash
-cd "$WORKTREE"
-git add -A
-git commit -m "witness: salvage work from orphaned agent (<bead>)"
-BRANCH=$(git branch --show-current)
-git push origin HEAD
-gc bd update <bead> --set-metadata branch=$BRANCH
+if [ "$WORKTREE_SAFE" != "1" ]; then
+  echo "husk work_dir — REFUSING Case D salvage writes (see HUSK GUARD); handle as Case E." >&2
+else
+  cd "$WORKTREE"
+  git add -A
+  git commit -m "witness: salvage work from orphaned agent (<bead>)"
+  BRANCH=$(git branch --show-current)
+  git push origin HEAD
+  gc bd update <bead> --set-metadata branch=$BRANCH
+fi
 ```
 Skip to Step 3 (cleanup).
 
-**Case E: No worktree exists (`metadata.work_dir` missing or directory gone),
-no branch on origin.**
-Nothing to salvage. The bead goes back to pool and a new polecat
-starts fresh.
+**Case E: Nothing salvageable.** Either no worktree exists
+(`metadata.work_dir` missing or directory gone) and no branch is on origin,
+or the HUSK GUARD refused (`WORKTREE_SAFE=0`) because `$WORKTREE` is a husk
+whose git commands resolve to an enclosing repo.
+
+Nothing to salvage — a husk's git data is already gone, and no `git add -A` /
+`commit` / `push` may run against it. The bead goes back to pool and a new
+polecat starts fresh.
 
 **Step 3: Verify work on main before resetting.**
 
