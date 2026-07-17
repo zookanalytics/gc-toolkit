@@ -62,7 +62,7 @@ ANCHORS=$(gc bd list --status=open \
 # loop) so the loop runs in THIS shell and the counters below survive the
 # pipe/subshell boundary.
 ROWS=$(printf '%s' "$ANCHORS" \
-  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), meta: (.metadata // {})}' 2>/dev/null)
+  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), hold: (.metadata.merge_hold // ""), meta: (.metadata // {})}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "merge-skill: no gating anchors"; exit 0; }
 
 merged=0; held=0; skipped=0
@@ -71,6 +71,7 @@ while IFS= read -r row; do
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '.pr // empty')
   target=$(printf '%s' "$row" | jq -r '.target // empty')
+  hold=$(printf '%s' "$row" | jq -r '.hold // empty')
   if [ -z "$id" ] || [ -z "$num" ]; then
     skipped=$((skipped + 1)); continue
   fi
@@ -99,6 +100,22 @@ while IFS= read -r row; do
   [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
 
   # --- validate -----------------------------------------------------------
+  # Operator hold: metadata.merge_hold on the anchor is an explicit operator gate
+  # ("do not land yet — awaiting manual sign-off"). When truthy the skill must NOT
+  # merge no matter how green the PR looks. Checked FIRST, before every PR-state
+  # gate: it is the cheapest gate (metadata already in hand) and the highest
+  # priority (an intentional operator block, independent of PR state), so a held
+  # anchor short-circuits before the referencing-bead `gc bd list`. Before this
+  # gate the hold was honored only INCIDENTALLY — when the PR happened to be
+  # non-CLEAN (BLOCKED/BEHIND) — so a fully-CLEAN held PR would squash-merge to the
+  # target with no operator signal. Truthy = set and not empty/false/0 (operators
+  # set merge_hold=true); an unset or explicitly-false marker does not hold.
+  case "$hold" in
+    ""|false|False|FALSE|0|null) : ;;
+    *)
+      echo "merge-skill: PR#$num merge_hold set (operator gate); merge held for operator (anchor $id)"
+      held=$((held + 1)); continue ;;
+  esac
   # Retarget: live base must still match the anchor's recorded merged_target. A
   # mismatch means the PR was retargeted after publication; merging would land on
   # the WRONG branch. Hold — the observer (reconcile-merged-prs.sh) escalates the

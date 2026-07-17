@@ -20,7 +20,10 @@
 #   (9) already MERGED -> skipped (the observer records it, not the skill)
 #   (10) open rework child PAST the former --limit cap -> merge HELD (the
 #        referencing-bead scan is unbounded, --limit=0)
-#   (INV) `gh pr merge` is reached for EXACTLY the one fully-validated PR — no
+#   (11) metadata.merge_hold=true on the anchor -> merge HELD even when the PR is
+#        fully CLEAN and every gate is green (operator gate; before the fix such a
+#        CLEAN held PR squash-merged with no operator signal)
+#   (INV) `gh pr merge` is reached for EXACTLY the fully-validated PRs — no
 #         other anchor is merged.
 #   (5c) convergence: a merged+closed anchor leaves the gating set, so a second
 #        pass does not re-merge it.
@@ -40,10 +43,13 @@ has() { grep -q "$1" "$2" 2>/dev/null; }
 
 mkdir -p "$TMP/bin"
 
-# Gating anchors (gc bd list source): id|pr_number|merged_target|check_set|check.codex
+# Gating anchors (gc bd list source):
+#   id|pr_number|merged_target|check_set|check.codex|merge_hold
 # The 5th column is the anchor's per-gate marker value for check.codex; a
 # "green@<oid>" value means "the codex gate passed at commit <oid>". bead-NOGATE
-# has an empty check_set (declares no gates) and no marker.
+# has an empty check_set (declares no gates) and no marker. The 6th column is
+# metadata.merge_hold (an operator gate); rows that omit it read as "" (no hold),
+# so only bead-HOLD carries it.
 cat > "$TMP/anchors" <<'A'
 bead-CLEAN|301|main|codex|green@HEAD301
 bead-STALE|302|main|codex|green@STALE302
@@ -56,6 +62,7 @@ bead-MERGED|308|main|codex|green@HEAD308
 bead-BEHIND|309|main|codex|green@HEAD309
 bead-CAPCHILD|310|main|codex|green@HEAD310
 bead-NOGATE|311|main||
+bead-HOLD|312|main|codex|green@HEAD312|true
 A
 
 # PR states (gh pr view source):
@@ -71,6 +78,7 @@ A
 #   309 OPEN, check green@head BUT mergeState BEHIND -> HELD
 #   310 OPEN, check green@head, CLEAN, open child past former cap -> HELD
 #   311 OPEN, empty check_set (no gate), CLEAN    -> MERGED (the bug fix)
+#   312 OPEN, check green@head, CLEAN BUT merge_hold=true -> HELD (operator gate)
 cat > "$TMP/prs" <<'P'
 301|OPEN|false|main|HEAD301|CLEAN|MERGEABLE|a301c0ffee123456
 302|OPEN|false|main|HEAD302|CLEAN|MERGEABLE|
@@ -83,6 +91,7 @@ cat > "$TMP/prs" <<'P'
 309|OPEN|false|main|HEAD309|BEHIND|MERGEABLE|
 310|OPEN|false|main|HEAD310|CLEAN|MERGEABLE|
 311|OPEN|false|main|HEAD311|CLEAN|MERGEABLE|b311c0ffee654321
+312|OPEN|false|main|HEAD312|CLEAN|MERGEABLE|
 P
 
 # Open rework/review children referencing a PR (gc bd list pr_number= source):
@@ -157,17 +166,17 @@ case "$2" in
     case "$*" in
       *"merge_result=pull_request"*)
         out=""
-        while IFS='|' read -r id pr target checkset checkcodex; do
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s"}}' "$id" "$pr" "$target" "$checkset" "$checkcodex")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s"}}' "$id" "$pr" "$target" "$checkset" "$checkcodex" "$merge_hold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         emit_rows "$out" "$lim" ;;
       *"pr_number="*)
         prnum=$(printf '%s' "$*" | sed -n 's/.*pr_number=\([0-9][0-9]*\).*/\1/p')
         out=""
-        while IFS='|' read -r id pr target checkset checkcodex; do
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold; do
           [ -n "$id" ] || continue
           [ "$pr" = "$prnum" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
@@ -230,8 +239,8 @@ has '^bead-NOGATE$' "$TMP/closed" && ok "(1b) no-gate anchor closed (record)" \
 has '^bead-NOGATE$' "$TMP/mergedrec" && ok "(1b) merge_result=merged recorded on no-gate anchor" \
                                      || bad "(1b) no-gate merge_result recorded"
 
-# (2)-(10) every other anchor is HELD or skipped — NOT merged.
-for n in 302 303 304 305 306 307 308 309 310; do
+# (2)-(12) every other anchor is HELD or skipped — NOT merged.
+for n in 302 303 304 305 306 307 308 309 310 312; do
   has "^$n$" "$TMP/merged" && bad "($n) anchor must NOT be merged" \
                           || ok "($n) anchor not merged"
 done
@@ -253,6 +262,9 @@ printf '%s\n' "$OUT1" | grep -q "PR#306 base 'integration/foo' != target 'main' 
 printf '%s\n' "$OUT1" | grep -q "PR#310 has open rework/review bead child-310" \
   && ok "(10) open child past former cap -> held (unbounded scan found it)" \
   || bad "(10) past-cap child hold (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#312 merge_hold set (operator gate)" \
+  && ok "(11) merge_hold=true -> held, reason names the operator gate" \
+  || bad "(11) merge_hold hold reason (got: $OUT1)"
 
 # (9) already-merged anchor is NOT closed by the skill (the observer records it).
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \
