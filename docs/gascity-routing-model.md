@@ -188,8 +188,8 @@ Behavior, read from the resolver
   set, **the plural wins**.
 - **Uniform-random pick.** When the plural is non-empty, `gc` selects
   **one** entry uniformly at random per dispatch
-  (`rand.Intn(len(targets))`) and routes that single target through
-  Lane 1; each entry is resolved exactly as a singular
+  (`rand.Intn(len(rig.DefaultSlingTargets))`) and routes that single
+  target through Lane 1; each entry is resolved exactly as a singular
   `default_sling_target` would be.
 - **Empty-entry guard.** An empty string entry in the list is a hard
   error (`gc sling: rig %q has an empty entry in default_sling_targets`).
