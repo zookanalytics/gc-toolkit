@@ -27,7 +27,7 @@ defines the routing contract; it is not a command tutorial.
 | Upstream CLI reference (`--reassign` row only) | gastownhall/gascity | `rigs/gascity/docs/reference/cli.md:2789` at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17` | 2026-05-21 |
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
-| PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (**merged upstream 2026-07-03**; adopted in our fork as `a2be625b9`, live in our deployed `gc`) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
+| PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
 
 ## The maintainer's ruling
 
@@ -157,13 +157,13 @@ Lane 1's — a **pool target** gets `metadata.gc.routed_to=<target>` and no
 from the same singleton-stamp rule. Resolution only chooses *which*
 target Lane 1 receives; it introduces no new field behavior.
 
-The singular path is **live in our deployed `gc` today** and is what our
-rigs actually use. Every gc-toolkit rig points `default_sling_target` at
-its own polecat pool in `city.toml` (e.g. `default_sling_target =
-"gc-toolkit/gc-toolkit.polecat"`), so a bare `gc sling <bead>` in any of
-our rigs lands the bead on that rig's pool via `gc.routed_to`, where the
-pool's demand-driven scale_check fans out an ephemeral polecat to pick it
-up.
+The typical configuration points a rig's `default_sling_target` at that
+rig's own polecat pool in `city.toml` — e.g. `default_sling_target =
+"gc-toolkit/gc-toolkit.polecat"`, the shape the `binding_prefix`
+defaults in gc-toolkit's doc-keeper audit formulas assume of every
+importing rig. A bare `gc sling <bead>` then lands the bead on the
+owning rig's pool via `gc.routed_to`, where the pool's demand-driven
+scale_check fans out an ephemeral polecat to pick it up.
 
 - **CLI example:**
   ```bash
@@ -172,10 +172,9 @@ up.
 
 #### `default_sling_targets` (plural) — random multi-target dispatch
 
-`default_sling_targets` (plural) is **adopted and in our deployed `gc`.**
-Upstream PR #3670 (`feat: add default_sling_targets for multi-target
-random dispatch`, gastownhall/gascity) **merged 2026-07-03** and is in our
-fork as commit `a2be625b9`; the field is
+`default_sling_targets` was added by upstream PR #3670 (`feat: add
+default_sling_targets for multi-target random dispatch`,
+gastownhall/gascity, merged 2026-07-03); the field is
 `default_sling_targets = ["rig/a", "rig/b"]` (`[]string`,
 `rigs/gascity/internal/config/config.go:645`).
 
@@ -195,13 +194,14 @@ Behavior, read from the resolver
 - **Empty-entry guard.** An empty string entry in the list is a hard
   error (`gc sling: rig %q has an empty entry in default_sling_targets`).
 
-No rig in this city sets `default_sling_targets` today — the polecat pool
-already gives demand-driven elasticity behind a *single* target
-(scale_check fans out ephemeral polecats to queue depth), so the static,
-client-side random fan-out across a fixed named set has no use here yet.
-The field is available in our binary; this section records its real
-behavior — and its precedence over the singular — so a future reader
-finds it accurate.
+**When to reach for the plural.** A polecat pool already provides
+demand-driven elasticity behind a *single* target — scale_check fans
+out ephemeral polecats to queue depth — so the plural's static,
+client-side random fan-out adds nothing for capacity behind one pool.
+It earns its place only when dispatches should be spread across
+*distinct named targets* (separate pools, or a mix of pools and named
+sessions). Remember the precedence rule: a non-empty plural silently
+supersedes a configured singular.
 
 ### Adjacent — `gc.run_target` (deprecated wire field; compile-time authoring hint)
 
