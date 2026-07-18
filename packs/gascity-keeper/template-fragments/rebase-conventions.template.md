@@ -136,6 +136,27 @@ duplicate dispatch** when all of these are true:
   `metadata.work_dir` set, and `metadata.commit_verdicts` set.
 - The fresh root's `gc.var.issue` points at that same issue.
 - `metadata.pending_rework` is unset or points to a closed rework bead.
+- The issue carries the keeper's hand-off token and it matches your
+  root: `metadata.resume_handoff` on the issue equals
+  `gc.var.resume_handoff` on the fresh root, exact string match.
+
+The token is what makes proceeding provably safe. The three state
+conditions above are also true for a spurious re-dispatch that fires
+while an earlier polecat is still driving the rebase — state alone
+cannot tell a deliberate hand-off from a re-fire, and proceeding on a
+re-fire risks a concurrent `git rebase --continue` and a double
+force-push to main. The keeper mints `resume_handoff` only at its
+deliberate re-pour — the moment it steps back from the rebase — and
+threads the same value through the sling, so only the wisp it poured
+right then can match. No token, or a token that doesn't match yours:
+**park**, even with every state condition satisfied. A legitimate
+resume never loses out — the keeper's next deliberate re-pour mints a
+fresh token.
+
+Once you commit to the resume — before entering the worktree or
+driving the rebase — consume the token with
+`gc bd update <issue> --unset-metadata resume_handoff`, so a
+subsequent re-fire finds no token and parks.
 
 This resume is safe because the formula is guarded for exactly this
 case. `workspace-setup` checks `metadata.work_dir` first, changes into
@@ -149,7 +170,9 @@ original polecat drained when it handed `pending_rework` to the keeper.
 
 Still park a true duplicate: a second fresh root for an issue with no
 paused rebase or no `metadata.rebase_in_progress`, or two fresh roots
-racing before any `metadata.work_dir` exists. A concurrent live polecat
+racing before any `metadata.work_dir` exists, or any root whose
+`gc.var.resume_handoff` is absent or doesn't match the issue's current
+`metadata.resume_handoff`. A concurrent live polecat
 on the same worktree is the separate `polecat-patterns`
 worktree-reclaim/liveness concern, not this rule.
 {{ end }}
