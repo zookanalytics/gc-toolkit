@@ -615,6 +615,16 @@ without the burn the prior set is abandoned at the polecat's drain and
 orphans the bead store (tk-kgnad). The burn is safe — all durable rebase
 state lives on `<bead>`'s metadata, not the wisp.
 
+The re-pour also mints the **resume hand-off token**: stamp
+`metadata.resume_handoff` on `<bead>` and thread the same value through
+the sling as `--var resume_handoff`. The token proves to the resuming
+polecat that this re-pour is your deliberate hand-off — you are
+stepping back from the rebase — not a spurious re-fire racing a live
+driver; the rebase-conventions fragment's resume rule requires it
+before the polecat will proceed, and the polecat consumes it when it
+commits to the resume. Set it only here, at the deliberate re-pour —
+never on an initial dispatch.
+
 ```bash
 RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 cd "$RIG_PATH"
@@ -630,10 +640,22 @@ else
   gc bd mol burn --force "$PREV_WISP" || echo "note: prior wisp $PREV_WISP already gone; continuing" >&2
 fi
 
+# Mint the resume hand-off token, keyed to the just-closed gate child
+# plus the current dispatch_count so a token minted for this delegation
+# can never validate a later one. Stamp it immediately before the sling
+# and thread the identical value into the wisp: the polecat proceeds
+# only on an exact issue-vs-root match, so a stale wisp re-fire (no
+# var, or an old one) parks itself.
+GATE_CHILD=$(gc bd show <bead> --json | jq -r '.[0].metadata | .pending_review // .pending_rework // empty')
+DISPATCH_COUNT=$(gc bd show <bead> --json | jq -r '.[0].metadata.dispatch_count // "0"')
+HANDOFF_TOKEN="${GATE_CHILD}:${DISPATCH_COUNT}"
+gc bd update <bead> --set-metadata resume_handoff="$HANDOFF_TOKEN"
+
 # Re-pour, then record the new wisp for the next resume to burn.
 SLING_JSON=$(gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
   --reassign \
   --var requesting_keeper="$GC_AGENT" \
+  --var resume_handoff="$HANDOFF_TOKEN" \
   --json)
 NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
 [ -z "$NEW_WISP" ] && NEW_WISP=$(gc bd show <bead> --json | jq -r '.[0].metadata.molecule_id // empty')
@@ -763,9 +785,19 @@ else
   gc bd mol burn --force "$PREV_WISP" || echo "note: prior wisp $PREV_WISP already gone; continuing" >&2
 fi
 
+# This is a deliberate hand-off over a paused rebase too, so mint the
+# resume hand-off token just like the rebase-in-progress re-pour. No
+# gate child on this path (the operator authorised the continue and
+# pending_rework/pending_review were just cleared), so key the token
+# to the path name plus the current dispatch_count.
+DISPATCH_COUNT=$(gc bd show <bead> --json | jq -r '.[0].metadata.dispatch_count // "0"')
+HANDOFF_TOKEN="conflict-questions:${DISPATCH_COUNT}"
+gc bd update <bead> --set-metadata resume_handoff="$HANDOFF_TOKEN"
+
 SLING_JSON=$(gc sling gascity/gc-toolkit.polecat <bead> --on mol-upstream-gc-rebase \
   --reassign \
   --var requesting_keeper="$GC_AGENT" \
+  --var resume_handoff="$HANDOFF_TOKEN" \
   --json)
 NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
 [ -z "$NEW_WISP" ] && NEW_WISP=$(gc bd show <bead> --json | jq -r '.[0].metadata.molecule_id // empty')
