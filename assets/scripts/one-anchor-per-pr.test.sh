@@ -40,8 +40,14 @@ mkdir -p "$TMP/bin"
 # --- gc stub: the anchor lookup the resolve snippet performs. -----------------
 # `gc bd list --status=open --metadata-field merge_result=<v> --metadata-field
 # branch=<b> --limit=N --json` filtered against a fixture of
-#   id|merge_result|branch|created
+#   id|merge_result|branch|created_at
 # rows (open beads). Everything else exits 0 with no output.
+#
+# The emitted row shape mirrors REAL `gc bd list --json`: the creation timestamp
+# is `created_at`, and there is NO `created` key. Emitting `created` here is what
+# let the shipped resolver's `sort_by(.created // .id)` pass while silently
+# falling back to id order against live beads. An empty timestamp column omits
+# the key entirely (exercises the last-resort `.id` tiebreak).
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
@@ -53,12 +59,17 @@ for a in "$@"; do
   esac
 done
 out=""
-while IFS='|' read -r id rmr rbr created; do
+while IFS='|' read -r id rmr rbr created_at; do
   [ -n "$id" ] || continue
   [ "$rmr" = "$mr" ] || continue
   [ "$rbr" = "$br" ] || continue
-  obj=$(printf '{"id":"%s","created":"%s","metadata":{"merge_result":"%s","branch":"%s"}}' \
-    "$id" "$created" "$rmr" "$rbr")
+  if [ -n "$created_at" ]; then
+    ts=$(printf '"created_at":"%s",' "$created_at")
+  else
+    ts=""
+  fi
+  obj=$(printf '{"id":"%s",%s"metadata":{"merge_result":"%s","branch":"%s"}}' \
+    "$id" "$ts" "$rmr" "$rbr")
   if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
 done < "$FAKE_ANCHORS"
 printf '[%s]\n' "$out"
@@ -120,12 +131,31 @@ eq "$(resolve work-1 polecat/work-1)" "|work-1" \
 
 # (5) Legacy double-anchor on the branch: deterministic pick — the OLDEST row
 #     (the original anchor predates any rework-minted duplicate).
+#
+#     The fixture is adversarial to the two ways this can silently degrade, so
+#     the assertion actually tests the sort key rather than luck:
+#       - id ordering  — the newer duplicate's id sorts FIRST lexicographically,
+#         so a resolver reading a non-existent timestamp field (the tk-52mrh
+#         defect: `.created` on a row that only has `created_at`) collapses to
+#         `.id` and elects the gateless duplicate;
+#       - no ordering  — the newer duplicate is also the FIRST input row, so a
+#         missing/stable-no-op sort picks it too.
+#     Only sorting on the real `created_at` yields tk-zzzz9.
 cat > "$FAKE_ANCHORS" <<'A'
-dup-newer|pull_request|polecat/parent|2026-07-15T00:00:00Z
-anchor-orig|pull_request|polecat/parent|2026-07-01T00:00:00Z
+tk-aaaa1|pull_request|polecat/parent|2026-07-15T00:00:00Z
+tk-zzzz9|pull_request|polecat/parent|2026-07-01T00:00:00Z
 A
-eq "$(resolve rework-2 polecat/parent)" "anchor-orig|anchor-orig" \
-   "(5) two candidates -> oldest (original) anchor wins deterministically"
+eq "$(resolve rework-2 polecat/parent)" "tk-zzzz9|tk-zzzz9" \
+   "(5) two candidates -> oldest (original) anchor wins on created_at, not id order"
+
+# (5b) Timestamps absent entirely (defensive): the resolver must still be
+#      DETERMINISTIC rather than input-order-dependent, falling back to id.
+cat > "$FAKE_ANCHORS" <<'A'
+tk-zzzz9|pull_request|polecat/parent|
+tk-aaaa1|pull_request|polecat/parent|
+A
+eq "$(resolve rework-2 polecat/parent)" "tk-aaaa1|tk-aaaa1" \
+   "(5b) no created_at on any row -> deterministic \$WORK-independent id tiebreak"
 
 # --- Static guards: the terminal arm's shape in the formula. ------------------
 # Extract the rework arm: from the terminal marker's `if [ -n "$EXISTING_ANCHOR"`

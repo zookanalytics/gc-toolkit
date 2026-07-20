@@ -1257,6 +1257,14 @@ refinery pass reuses the open signoff bead and re-verifies (heals) the link.
 # bypassing codex) and, carrying merge_result, was also invisible to the merge
 # skill's in-flight-rework hold. The markers let the regression test extract
 # and exercise this snippet (assets/scripts/one-anchor-per-pr.test.sh).
+#
+# Multi-candidate tiebreak: pick the OLDEST anchor (the original predates any
+# rework-minted duplicate). `gc bd list --json` names the creation timestamp
+# `created_at` — `.created` does not exist on a real row, so sorting on it alone
+# collapses to lexicographic id order and can elect the NEWER, gateless duplicate
+# as GATING_ANCHOR (stamping anchor_bead + check.<name> on the wrong bead while
+# the true anchor stays red). `.created` is kept only as a defensive fallback for
+# a differently-shaped row; `.id` is the last-resort determinism guarantee.
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
 for MR_STATE in pull_request pre_open_gate; do
@@ -1266,7 +1274,7 @@ for MR_STATE in pull_request pre_open_gate; do
     --metadata-field branch="$BRANCH" \
     --limit=10 --json 2>/dev/null \
     | jq -r --arg self "$WORK" \
-        '[.[] | select(.id != $self)] | sort_by(.created // .id) | .[0].id // empty' 2>/dev/null)
+        '[.[] | select(.id != $self)] | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null)
 done
 GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
 # <<< one-anchor-per-pr-resolve
