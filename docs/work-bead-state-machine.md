@@ -328,6 +328,22 @@ The signoff gate **attaches as a dependency of the open convoy** — the gate's
 bead BLOCKS the convoy (`gc bd dep <gate> --blocks <convoy>`). The dependency
 graph then shows directly which bead owns which PR and what it waits on.
 
+**A rework child never becomes a second anchor — one gating anchor per PR
+(tk-ynz4b).** When a rework child hands its fix back through the refinery, its
+commits are already on the convoy branch, which *is* that child's landing
+target — so the hand-back closes the child as landed-on-branch and gating
+continues on the existing anchor alone. The child is never stamped
+`merge_result`: while open it is exactly what the merge skill's
+in-flight-rework hold counts (open, references the PR, no `merge_result`), and
+stamping it would enroll it in the anchor enumeration as a second anchor with
+no `check_set` — the PR's effective gate would become its *weakest* anchor,
+landing the PR past a red codex gate. The re-review dispatched at hand-back
+anchors to the existing anchor (its `check.<name>` markers are the ones the
+merge skill and `pre-open-resolve.sh` read). Independently, the merge skill
+refuses to merge any PR claimed by more than one open anchor: a legacy
+double-anchor pair is held — never merged through either anchor — until the
+duplicate is closed or demoted.
+
 ## When a child isn't landing
 
 A convoy cannot complete while a child is open — that is the completion gate

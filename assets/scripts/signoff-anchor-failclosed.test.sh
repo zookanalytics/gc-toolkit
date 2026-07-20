@@ -143,6 +143,21 @@ eq "$(gate '' work-1 '' 'lint, codex')" "1" \
 #     with (G): normalization must not over-fire and block a valid transition).
 eq "$(gate rb-1 work-1 '' 'lint, codex')" "0" \
    "(J) spaced check-set 'lint, codex' + review id present + recorded -> proceeds"
+# (L) one-anchor-per-PR (tk-ynz4b): on a rework hand-back the resolved gating
+#     anchor (GATING_ANCHOR) differs from $WORK — the heal must record THAT
+#     anchor on the review, never the rework bead, or the signoff would stamp
+#     check.<name> on a bead the merge skill does not gate on. Cases (A)-(J)
+#     leave GATING_ANCHOR unset and exercise the ${GATING_ANCHOR:-$WORK}
+#     first-handoff fallback.
+: > "$FAKE_META"
+if CHECK_SET=codex REVIEW_FOR_GATE=rb-2 WORK=rework-1 GATING_ANCHOR=anchor-1 \
+     FAIL_ANCHOR_WRITE='' bash "$TMP/run.sh" >/dev/null 2>&1; then
+  rec=$(awk -F'|' '$1=="rb-2" && $2=="anchor_bead" {v=$3} END{print v}' "$FAKE_META" 2>/dev/null)
+  eq "$rec" "anchor-1" \
+     "(L) rework hand-back: anchor_bead records the resolved gating anchor, not \$WORK"
+else
+  bad "(L) rework hand-back gate must proceed when the anchor write persists"
+fi
 
 # --- Gate wiring: the formula must feed REVIEW_FOR_GATE from the dispatched or
 #     reused review bead, else the gate never runs. ----------------------------

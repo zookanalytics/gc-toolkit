@@ -112,9 +112,13 @@ REVIEW_UPDATE="$(awk '
   /gc bd update "\$REVIEW_BEAD"/ {f=1}
   f {print}
   f && !/\\[[:space:]]*$/ {exit}' "$TOML")"
-printf '%s' "$REVIEW_UPDATE" | grep -q -- '--set-metadata anchor_bead="\$WORK"' \
-  && ok "(E) dispatch stamps anchor_bead=\$WORK atomically in the review-bead update batch" \
-  || bad "(E) dispatch must stamp --set-metadata anchor_bead=\"\$WORK\" in the review-bead update batch"
+# The stamped pointer is the RESOLVED gating anchor (one-anchor-per-pr-resolve,
+# tk-ynz4b): $WORK on a first handoff, the existing anchor on a rework
+# hand-back — never unconditionally $WORK, or a rework's signoff would stamp
+# check.<name> on the rework bead instead of the anchor the merge skill gates on.
+printf '%s' "$REVIEW_UPDATE" | grep -q -- '--set-metadata anchor_bead="\$GATING_ANCHOR"' \
+  && ok "(E) dispatch stamps anchor_bead=\$GATING_ANCHOR atomically in the review-bead update batch" \
+  || bad "(E) dispatch must stamp --set-metadata anchor_bead=\"\$GATING_ANCHOR\" in the review-bead update batch"
 
 # --- Pre-open dispatch wiring (tk-6d0vb.1.8): the PRE-OPEN review bead carries
 #     review_branch/review_base (the compare-range the reviewer diffs, and the

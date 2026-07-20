@@ -14,7 +14,9 @@
 #
 #   validate -> merge -> record
 #
-#   validate: the PR's live base == the anchor's merged_target (no retarget),
+#   validate: the PR is claimed by exactly ONE open anchor (a second anchor
+#             would let the weakest check_set decide the merge — tk-ynz4b),
+#             the PR's live base == the anchor's merged_target (no retarget),
 #             every gate the anchor declares in check_set is green AT THE LIVE
 #             HEAD (per-gate marker check.<name>=green@<head>, so a stale approval
 #             or a post-review commit re-gates instead of merging), no open
@@ -64,6 +66,19 @@ ANCHORS=$(gc bd list --status=open \
 ROWS=$(printf '%s' "$ANCHORS" \
   | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), hold: (.metadata.merge_hold // ""), meta: (.metadata // {})}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "merge-skill: no gating anchors"; exit 0; }
+
+# One-anchor-per-PR guard (tk-ynz4b): the loop below validates each anchor
+# INDEPENDENTLY, so a PR claimed by more than one open anchor is gated by its
+# WEAKEST anchor — e.g. a rework child that leaked into the anchor class with no
+# check_set would land the PR while the real anchor's codex gate is red, and
+# (carrying merge_result) that same leaked bead is invisible to the in-flight
+# rework hold below. One gating anchor per PR is the design intent
+# (docs/work-bead-state-machine.md); the refinery no longer mints a second
+# anchor on rework hand-back (mol-refinery-patrol.toml one-anchor-per-pr arm),
+# so a duplicate here is legacy/out-of-band state. Precompute the pr_numbers
+# claimed by >1 open anchor; EVERY anchor of such a PR is held in validate.
+DUP_PRS=$(printf '%s\n' "$ROWS" \
+  | jq -rs '[.[] | .pr | select(. != "")] | group_by(.) | map(select(length > 1) | .[0]) | .[]' 2>/dev/null)
 
 merged=0; held=0; skipped=0
 while IFS= read -r row; do
@@ -116,6 +131,15 @@ while IFS= read -r row; do
       echo "merge-skill: PR#$num merge_hold set (operator gate); merge held for operator (anchor $id)"
       held=$((held + 1)); continue ;;
   esac
+  # One-anchor-per-PR (tk-ynz4b): this PR is claimed by multiple open anchors,
+  # so no single anchor's check_set can be trusted to speak for the PR — the
+  # weakest would decide the merge. Hold every anchor of the PR; the hold
+  # releases on a later pass once exactly one open anchor remains (close/demote
+  # the duplicate — usually the rework-minted one — to repair the taxonomy).
+  if [ -n "$DUP_PRS" ] && printf '%s\n' "$DUP_PRS" | grep -qxF "$num"; then
+    echo "merge-skill: PR#$num has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor $id) — close/demote the duplicate anchor to release (tk-ynz4b)"
+    held=$((held + 1)); continue
+  fi
   # Retarget: live base must still match the anchor's recorded merged_target. A
   # mismatch means the PR was retargeted after publication; merging would land on
   # the WRONG branch. Hold — the observer (reconcile-merged-prs.sh) escalates the
