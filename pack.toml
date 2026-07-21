@@ -13,7 +13,7 @@
 # polecat, refinery, witness) is imported and divergences are
 # expressed as bare-name [[patches.agent]] — pure fragment-append
 # overlays on top of base prompts. Each gc-toolkit-specific doctrine
-# (heartbeat-no-consent-ui, layered-startup-discovery-{deacon,refinery},
+# (heartbeat-no-consent-ui, layered-startup-discovery-{deacon,refinery,witness},
 # convoy-integration-branch-mayor, polecat-convoys, polecat-non-impl-done,
 # operator-next-step-trailing) lives in template-fragments/ and is named
 # explicitly in inject_fragments_append below; the base prompt template is
@@ -98,6 +98,11 @@ overlay_dir = "overlays/cycle-recycle"
 name = "witness"
 inject_fragments_append = [
     "heartbeat-no-consent-ui",
+    # Base witness reconciles its patrol wisps with `gc bd list --type=molecule`
+    # and no --include-infra. Wisps are ephemeral (<store>.wisps), so those
+    # queries return empty and every restart pours a fresh wisp while leaking
+    # the prior one (tk-1waw2). This fragment supersedes both reconcile sites.
+    "layered-startup-discovery-witness",
 ]
 # Deterministic cycle-recycle (see deacon patch above).
 overlay_dir = "overlays/cycle-recycle"
