@@ -155,8 +155,11 @@ determine where you left off from context (git state, bead state).
 
 This supersedes the reconcile snippets in the `## Startup Protocol` and
 `## CRITICAL: No Idle State Between Cycles` sections above. Same logic —
-reconcile to exactly one patrol wisp, burn the surplus — with one
-correction: every `--type=molecule` query carries `--include-infra`.
+reconcile to exactly one patrol wisp, burn the surplus — with three
+corrections, each of which the deacon and refinery blocks already make:
+every `--type=molecule` query carries `--include-infra`; every one of them
+is scoped to `mol-witness-patrol` roots; and the surviving wisp is adopted
+(`--status=in_progress`) before the formula runs.
 
 Patrol wisps are EPHEMERAL — they live in `<store>.wisps`, not `.issues`.
 `gc bd list` reads `.issues` by default, so a `--type=molecule` query
@@ -170,7 +173,8 @@ leaked wisps observed live 2026-06-26; tk-1waw2).
 Unlike the deacon and refinery blocks there is no tier-2
 routed-work-bead query here: the witness monitors other agents' work
 rather than receiving branch-bearing work beads of its own. The
-divergence this block fixes is ephemeral blindness, not tier coverage.
+divergences this block fixes are ephemeral blindness, formula scoping,
+and wisp adoption — not tier coverage.
 
 ```bash
 # Step 1: Reconcile your patrol wisps to exactly one (town ledger, via gc bd).
@@ -178,10 +182,13 @@ divergence this block fixes is ephemeral blindness, not tier coverage.
 # burn the surplus so restarts never accumulate duplicates. Wisp roots are
 # molecules — filter --type=molecule, never --type=wisp. --include-infra is
 # REQUIRED: wisps are ephemeral, so without it both queries return empty and
-# every restart leaks a wisp.
+# every restart leaks a wisp. Filter on title as well: molecule roots are
+# formula-specific (the deacon/refinery blocks filter the same way), so an
+# unrelated root assigned to the witness must never be adopted as the patrol
+# wisp or burned as "surplus".
 WISP_IDS=$(
-  gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[].id'
-  gc bd list --assignee="$GC_AGENT" --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[].id'
+  gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-witness-patrol") | .id'
+  gc bd list --assignee="$GC_AGENT" --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-witness-patrol") | .id'
 )
 WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')           # keep one (prefers in_progress)
 for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do  # burn any surplus
@@ -196,6 +203,14 @@ else
   WISP=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id')
   gc bd update "$WISP" --assignee="$GC_AGENT"
 fi
+
+# Adopt the wisp you are about to execute: mark it in_progress (this leaves the
+# assignee untouched). Without it the ACTIVE patrol wisp stays open — visible as
+# queued work while it runs, and indistinguishable from the *next* wisp that
+# next-iteration pours before burning this one. A restart at that moment sees two
+# open wisps and can keep or burn the wrong one. Marking it in_progress is also
+# what makes Step 1's in_progress-first ordering select the running wisp.
+gc bd update "$WISP" --status=in_progress
 
 # Step 3: Execute — read formula steps and work through them in order
 ```
@@ -213,12 +228,17 @@ surplus is invisible and gets leaked instead of burned.
 ```bash
 CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
-  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=1 --json | jq -r '.[0].id // empty')
+  # Title-filtered like Step 1 — this id is burned below, so an unrelated
+  # molecule root must never land in it. Filtering happens in jq, so the query
+  # must not cap itself at --limit=1: that could return one non-patrol root and
+  # filter to empty while the real patrol wisp exists.
+  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-witness-patrol")] | .[0].id // empty')
 fi
 # Reconcile queued (open) patrol wisps to exactly one. A prior cycle may have
 # poured a next wisp without burning, or a restart may have raced — keep the
-# first and burn the surplus so wisps never accumulate.
-OPEN_WISPS=$(gc bd list --assignee="$GC_AGENT" --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[].id')
+# first and burn the surplus so wisps never accumulate. Same title filter as
+# Step 1: only mol-witness-patrol roots are ours to burn.
+OPEN_WISPS=$(gc bd list --assignee="$GC_AGENT" --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-witness-patrol") | .id')
 ASSIGNED_WISP=$(printf '%s\n' $OPEN_WISPS | sed -n '1p')
 for extra in $(printf '%s\n' $OPEN_WISPS | sed '1d'); do
   gc bd mol burn "$extra" --force

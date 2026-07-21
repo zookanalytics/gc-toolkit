@@ -5,6 +5,8 @@
 #   refinery + deacon — tiers 2 and 3 present (see below)
 #   refinery + deacon + witness — every wisp reconcile query is
 #                                 ephemeral-aware (--include-infra)
+#   witness — every wisp reconcile query is scoped to mol-witness-patrol
+#             roots (see below)
 #
 # Tier-1 (in-progress wisp) was the historical query and is preserved.
 # Tier-2 catches routed work beads with metadata.branch — these arrive when a
@@ -27,6 +29,13 @@
 # every restart. The witness shipped that bug (three leaked wisps observed
 # live 2026-06-26); deacon and refinery already comply, so the check locks
 # the invariant in for all three.
+#
+# The formula-scoping assertion (tk-6sbaf) covers the mirror-image hazard in
+# the same reconcile: molecule roots are formula-specific, so a reconcile that
+# keeps one wisp and burns the rest must filter on the patrol title or it can
+# adopt — or destroy — an unrelated molecule root that happens to be assigned
+# to the same agent. Only the witness block burns surplus during startup, so
+# only it is held to this.
 #
 # Post-tk-kdu2v5 the doctrine lives in a single shared fragment file
 # (template-fragments/layered-startup-discovery.template.md) with named
@@ -51,12 +60,15 @@ if [ ! -f "$fragment" ]; then
     exit 2
 fi
 
-# check_block <define-name> <label> [require_tiers]
+# check_block <define-name> <label> [require_tiers] [patrol_title]
 # require_tiers=tiers → also assert the tier-2 and tier-3 queries.
+# patrol_title=<formula>  → also assert every molecule-root query is scoped to
+#                           that formula's wisps.
 check_block() {
     local block_name="$1"
     local label="$2"
     local require_tiers="${3:-}"
+    local patrol_title="${4:-}"
     # Extract the block content between `{{ define "block_name" }}` and `{{ end }}`.
     local block
     block=$(awk -v name="$block_name" '
@@ -97,14 +109,31 @@ check_block() {
     if [ "${offenders:-0}" -gt 0 ]; then
         violations+=("$label: $offenders wisp query(ies) missing --include-infra (ephemeral wisps are invisible without it)")
     fi
+    # Formula scoping: molecule roots are formula-specific, so a reconcile that
+    # picks a survivor and BURNS the rest must filter on the patrol title first
+    # — otherwise an unrelated molecule root assigned to the same agent is
+    # adopted as the patrol wisp or destroyed as "surplus". Asserted only for
+    # blocks whose reconcile burns (witness); the deacon/refinery tier-1 resume
+    # query feeds no burn, so it is intentionally unscoped there, and their
+    # tier-3 adoption already filters on title.
+    if [ -n "$patrol_title" ]; then
+        local unscoped
+        unscoped=$(printf '%s\n' "$joined" \
+            | grep -- "gc bd list" \
+            | grep -- "--type=molecule" \
+            | grep -cvF -- "$patrol_title" || true)
+        if [ "${unscoped:-0}" -gt 0 ]; then
+            violations+=("$label: $unscoped wisp query(ies) not scoped to $patrol_title (an unrelated molecule root could be adopted or burned)")
+        fi
+    fi
 }
 
 check_block "layered-startup-discovery-refinery" "refinery" tiers
 check_block "layered-startup-discovery-deacon" "deacon" tiers
-check_block "layered-startup-discovery-witness" "witness"
+check_block "layered-startup-discovery-witness" "witness" "" "mol-witness-patrol"
 
 if [ ${#violations[@]} -eq 0 ]; then
-    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware"
+    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol"
     exit 0
 fi
 
