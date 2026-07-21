@@ -28,6 +28,16 @@
 #        PR -> no second rebase child (it would race the one in flight).
 #   (11) PR open, mergeable UNKNOWN (GitHub still computing) -> nothing: an
 #        indeterminate reading must never be treated as a conflict.
+#   (12) open PR whose bead is CLOSED (anchorless) -> reported + escalated ONCE,
+#        bounded by an anchorless_flagged marker on the closed bead; never
+#        merged, closed, or reopened (disposition is an operator call).
+#   (13) open PR that a LIVE bead references (anchor or rework child) -> not a
+#        finding; and the tracked-set match is exact, so PR#7 never satisfies
+#        PR#77.
+#   (14) open PR with NO bead in any state -> reported but NOT escalated (nothing
+#        durable to bound a mail with, so it must not repeat every wake).
+#   (15) zero gating anchors is NOT an early exit — the anchorless scan still
+#        runs (zero anchors + open PRs is exactly the stranded state).
 #   (INV) the observer NEVER runs `gh pr merge` for ANY anchor — no merge authority.
 #   (5) convergence: closed / flagged / retargeted anchors leave the gating set,
 #       so a second pass does not re-close, re-escalate, or re-flag them; the
@@ -97,7 +107,45 @@ cat > "$TMP/prs" <<'P'
 213|OPEN||false||main|polecat/bead-M|head213|MERGEABLE|BLOCKED
 P
 
-: > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"
+# Open PRs as `gh pr list` sees them (the anchorless scan's PR -> BEAD side):
+#   pr|isDraft|headRefName|baseRefName
+#   203 tracked by live anchor bead-C            -> not a finding
+#   211 tracked by live anchor bead-K + child-K  -> not a finding
+#   301 bead closed (dead-1)                     -> flagged + escalated once
+#   302 no bead in any state                     -> flagged, NOT escalated
+#   303 draft, bead closed (dead-3)              -> flagged (draft) + escalated
+#   304 bead closed, marker ALREADY set          -> flagged, not re-escalated
+#   77  no bead, but a live bead references PR#7 -> flagged (exact match, not
+#                                                   swallowed by the "7" prefix)
+cat > "$TMP/openprs" <<'O'
+203|false|polecat/bead-C|main
+211|false|polecat/bead-K|main
+301|false|polecat/dead-1|main
+302|false|somebody/manual-pr|main
+303|true|polecat/dead-3|main
+304|false|polecat/dead-4|main
+77|false|polecat/dead-x|main
+O
+
+# Closed beads that still name a PR (the anchorless arm's bead resolution):
+#   pr<TAB>bead-id<TAB>anchorless_flagged-marker<TAB>merge_result<TAB>created_at
+# "-" means empty. It has to be a placeholder rather than an empty field: TAB is
+# IFS *whitespace*, so bash collapses a run of them and an empty middle column
+# would silently shift every field after it.
+# PR#301 models the real shape: THREE closed beads name it — a review bead, a
+# later "address findings" rework child, and the anchor that actually opened the
+# PR. Both the rework child and the anchor carry merge_result, and the anchor is
+# listed LAST, so only "oldest bead carrying merge_result" resolves it correctly.
+# dead-4 is pre-flagged, so it must be reported but NOT re-escalated.
+printf '%s\n' \
+  '301	review-1	-	-	2026-01-02T00:00:00Z' \
+  '301	rework-1	-	pull_request	2026-01-03T00:00:00Z' \
+  '301	dead-1	-	pull_request	2026-01-01T00:00:00Z' \
+  '303	dead-3	-	pull_request	2026-01-01T00:00:00Z' \
+  '304	dead-4	304	pull_request	2026-01-01T00:00:00Z' \
+  > "$TMP/dead"
+
+: > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mailbody"
 : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
 : > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
 : > "$TMP/staled"
@@ -106,7 +154,9 @@ P
 # the conflict arm reuses that query so it never races a rework already in
 # flight). pr<TAB>child-id. Seeded with one for PR#211 (case 10); the arm appends
 # its own children here as it files them, exactly as the real ledger would.
-printf '211\tchild-K\n' > "$TMP/children"
+# PR#7 is referenced by a live child so that "7" lands in the tracked set — the
+# fixture for case (13)'s exact-match guard against open PR#77.
+printf '211\tchild-K\n7\tchild-tiny\n' > "$TMP/children"
 
 FIX_POOL="test-rig/gc-toolkit.polecat"
 
@@ -150,6 +200,18 @@ case "$1 $2" in
       exit 0
     done < "$FAKE_PRS"
     exit 0 ;;
+  "pr list")
+    # Open PRs, for the anchorless (PR -> BEAD) scan.
+    out=""
+    while IFS='|' read -r pr isdraft head base; do
+      [ -n "$pr" ] || continue
+      obj=$(jq -n --arg n "$pr" --argjson d "$isdraft" --arg h "$head" --arg b "$base" \
+        '{number:($n|tonumber), url:("https://github.com/acme/repo/pull/" + $n),
+          isDraft:$d, headRefName:$h, baseRefName:$b}')
+      if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+    done < "$FAKE_OPENPRS"
+    printf '[%s]\n' "$out"
+    exit 0 ;;
   "pr merge")
     printf '%s\n' "$3" >> "$FAKE_AUTOMERGE" ;;
 esac
@@ -169,9 +231,17 @@ chmod +x "$TMP/bin/gh"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 if [ "$1" = "mail" ]; then
-  shift; subj=""
-  while [ $# -gt 0 ]; do case "$1" in -s) subj="$2"; shift 2 ;; *) shift ;; esac; done
-  printf '%s\n' "$subj" >> "$FAKE_MAIL"; exit 0
+  shift; subj=""; body=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -s) subj="$2"; shift 2 ;;
+      -m) body="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  printf '%s\n' "$subj" >> "$FAKE_MAIL"
+  printf '%s\n' "$body" >> "$FAKE_MAILBODY"
+  exit 0
 fi
 if [ "$1" = "session" ]; then
   [ "${2:-}" = "wake" ] && printf '%s\n' "${3:-}" >> "$FAKE_WAKES"
@@ -181,6 +251,45 @@ fi
 case "$2" in
   list)
     case "$*" in
+      *"--status closed"*)
+        # CLOSED bead that still names a PR — the anchorless arm's resolution of
+        # "who used to own this PR". Must be matched BEFORE the generic
+        # pr_number= arm below, which would otherwise swallow it and return the
+        # live children instead.
+        num=""
+        for a in "$@"; do case "$a" in pr_number=*) num="${a#pr_number=}" ;; esac; done
+        out=""
+        while IFS="$(printf '\t')" read -r pr bid flagged mres created; do
+          [ "$pr" = "$num" ] || continue
+          [ "$flagged" = "-" ] && flagged=""
+          [ "$mres" = "-" ] && mres=""
+          obj=$(printf '{"id":"%s","created_at":"%s","metadata":{"pr_number":"%s","anchorless_flagged":"%s","merge_result":"%s"}}' \
+                  "$bid" "$created" "$pr" "$flagged" "$mres")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_DEAD"
+        printf '[%s]\n' "$out" ;;
+      *"open,in_progress,blocked"*)
+        # Every LIVE bead that names a PR: gating anchors still in the set, plus
+        # open rework/review children. This is the tracked set the anchorless
+        # scan subtracts from `gh pr list`.
+        # FAKE_LIVE_FAIL models a failed ledger read (empty output, NOT "[]") so
+        # the fail-closed guard can be exercised.
+        [ -n "${FAKE_LIVE_FAIL:-}" ] && exit 0
+        out=""
+        while IFS='|' read -r id pr target; do
+          [ -n "$id" ] || continue
+          grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
+          grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
+          grep -qx "$id" "$FAKE_RETARGETED" 2>/dev/null && continue
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s"}}' "$id" "$pr")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_ANCHORS"
+        while IFS="$(printf '\t')" read -r pr cid; do
+          [ -n "$cid" ] || continue
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s"}}' "$cid" "$pr")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_CHILDREN"
+        printf '[%s]\n' "$out" ;;
       *"merge_result=pull_request"*)
         out=""
         while IFS='|' read -r id pr target; do
@@ -234,6 +343,12 @@ case "$2" in
       case "$a" in
         stale_base_head=*) printf '%s\t%s\n' "$id" "${a#stale_base_head=}" >> "$FAKE_STALED" ;;
         pr_number=*)       printf '%s\t%s\n' "${a#pr_number=}" "$id" >> "$FAKE_CHILDREN" ;;
+        anchorless_flagged=*)
+          # Mirror the escalation bound onto the closed bead, so a later pass
+          # sees it and does not re-escalate.
+          awk -F'\t' -v i="$id" -v v="${a#anchorless_flagged=}" \
+              'BEGIN{OFS="\t"} $2==i{$3=v} {print}' "$FAKE_DEAD" > "$FAKE_DEAD.n" \
+            && mv "$FAKE_DEAD.n" "$FAKE_DEAD" ;;
       esac
     done ;;
   dep)
@@ -249,7 +364,8 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_RETARGETED="$TMP/retargeted" \
        FAKE_AUTOMERGE="$TMP/automerge" FAKE_MAIL="$TMP/mail" FAKE_CLOSELOG="$TMP/closelog" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
-       FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children"
+       FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
+       FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody"
 
 # --- Run 1: the disposition matrix. ------------------------------------------
 OUT1="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
@@ -314,6 +430,72 @@ eq "$(grep -c 'Rebase PR#212' "$TMP/created")" "0" \
 eq "$(grep -c 'Rebase PR#203' "$TMP/created")" "0" \
    "(11) a ready (non-conflicted) PR gets no rebase child"
 
+# --- (12)(13)(14) anchorless open PRs: the PR -> BEAD direction. --------------
+# (12) closed bead + open PR: the close-on-publish blind spot. Reported and
+# escalated exactly once, bounded by a marker on the closed bead.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#301' \
+  && ok "(12) open PR whose bead is CLOSED is reported as anchorless" \
+  || bad "(12) open PR whose bead is CLOSED is reported as anchorless (got: $OUT1)"
+eq "$(grep -c 'anchorless open PR#301' "$TMP/mail")" "1" \
+   "(12) anchorless PR escalated to mayor once"
+grep '^dead-1' "$TMP/updates" | grep -q 'anchorless_flagged=301' \
+  && ok "(12) escalation bounded by an anchorless_flagged marker on the closed bead" \
+  || bad "(12) escalation bounded by an anchorless_flagged marker (got: $(grep dead-1 "$TMP/updates" || true))"
+# Resolution must land on the bead that OPENED the PR — not a review bead (no
+# merge_result) and not a later rework child (same marker, newer).
+grep -q '^review-1' "$TMP/updates" \
+  && bad "(12) review bead must not be marked in place of the anchor" \
+  || ok "(12) anchor resolved over a review bead that names the same PR"
+grep -q '^rework-1' "$TMP/updates" \
+  && bad "(12) later rework child must not be marked in place of the opening anchor" \
+  || ok "(12) oldest merge_result bead wins over a later rework child sharing the marker"
+grep -q 'anchorless open PR#301 (bead dead-1 is closed)' "$TMP/mail" \
+  && ok "(12) escalation names the anchor bead the operator must reopen" \
+  || bad "(12) escalation names the anchor bead (got: $(grep 301 "$TMP/mail" || true))"
+grep -q 'dead-1, review-1, rework-1' "$TMP/mailbody" \
+  && ok "(12) escalation lists every closed bead naming the PR, oldest first" \
+  || bad "(12) escalation lists every closed bead naming the PR (got: $(grep -o 'All:.*' "$TMP/mailbody" || true))"
+# Detect + surface ONLY: the arm must not close, reopen, or otherwise dispose.
+has '^dead-1$' "$TMP/closed" && bad "(12) anchorless arm must NOT close anything" \
+                             || ok "(12) anchorless arm closes nothing (detect + surface only)"
+grep '^dead-1' "$TMP/updates" | grep -q 'status' \
+  && bad "(12) anchorless arm must NOT reopen the closed bead" \
+  || ok "(12) anchorless arm never reopens the closed bead (disposition is the operator's)"
+# A draft is still invisible to every automated path, so it is still a finding —
+# labelled so the operator can weight it.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#303 (draft)' \
+  && ok "(12) anchorless draft PR reported and labelled as a draft" \
+  || bad "(12) anchorless draft PR reported and labelled (got: $OUT1)"
+# Already-escalated: keep reporting (still stranded), do not re-mail.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#304' \
+  && ok "(12) already-flagged anchorless PR still reported each pass" \
+  || bad "(12) already-flagged anchorless PR still reported each pass"
+eq "$(grep -c 'anchorless open PR#304' "$TMP/mail")" "0" \
+   "(12) already-flagged anchorless PR is not re-escalated"
+
+# (13) a PR any LIVE bead references is tracked by something -> not a finding.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#203' \
+  && bad "(13) PR tracked by a live gating anchor must not be flagged" \
+  || ok "(13) PR tracked by a live gating anchor is not flagged"
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#211' \
+  && bad "(13) PR tracked by a live rework child must not be flagged" \
+  || ok "(13) PR tracked by a live rework child is not flagged"
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#77' \
+  && ok "(13) tracked-set match is exact — PR#77 not satisfied by tracked PR#7" \
+  || bad "(13) tracked-set match is exact — PR#77 not satisfied by tracked PR#7 (got: $OUT1)"
+
+# (14) no bead in any state: report it, but never mail — there is nothing
+# durable to bound the escalation, so mailing would repeat every wake forever.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#302' \
+  && ok "(14) open PR with no bead in any state is reported" \
+  || bad "(14) open PR with no bead in any state is reported (got: $OUT1)"
+eq "$(grep -c 'anchorless open PR#302' "$TMP/mail")" "0" \
+   "(14) unboundable (no-bead) finding is reported but never escalated"
+
+printf '%s\n' "$OUT1" | grep -q '5 anchorless open PRs' \
+  && ok "run 1 summary reports 5 anchorless open PRs" \
+  || bad "run 1 summary anchorless count (got: $OUT1)"
+
 # (INV) NO MERGE AUTHORITY: the observer must never call `gh pr merge` for ANY
 # anchor — the seam that the auto-merge retirement turns on. $FAKE_AUTOMERGE
 # stays empty across the entire run (ready, draft, retargeted, merged alike).
@@ -351,6 +533,8 @@ eq "$(grep -c '^bead-A$' "$TMP/closed")" "1" "(5) merged anchor not re-closed on
 eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "$MAIL_BEFORE" "(5) flagged + retargeted anchors not re-escalated on second pass"
 eq "$(grep -c 'Rebase PR#210' "$TMP/created")" "1" \
    "(5) stale-base anchor stays in the gating set but files no second rebase child"
+eq "$(grep -c 'anchorless open PR#301' "$TMP/mail")" "1" \
+   "(12) anchorless PR not re-escalated on a second pass (marker converged)"
 
 # --- Run 3: the marker is what bounds it, and it re-arms when the head moves. --
 # Close the rebase child (as the patrol does on hand-back) so the in-flight guard
@@ -380,6 +564,36 @@ M_UPDATES=$(grep '^bead-M' "$TMP/updates" || true)
 printf '%s\n' "$M_UPDATES" | grep -q 'gc.routed_to=human' \
   && ok "(9) no fix pool -> anchor routed to human" \
   || bad "(9) no fix pool -> anchor routed to human (got: $M_UPDATES)"
+
+# --- Run 5: zero gating anchors must NOT short-circuit the anchorless scan. ---
+# Before the anchorless arm this pass returned early on an empty gating set. That
+# is the worst possible place to go blind: zero live anchors WITH open PRs is
+# precisely the stranded state the scan exists to surface.
+: > "$TMP/anchors"
+printf '305|false|polecat/dead-5|main\n' > "$TMP/openprs"
+OUT5="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
+printf '%s\n' "$OUT5" | grep -q 'no gating anchors' \
+  && ok "(15) empty gating set still reported" \
+  || bad "(15) empty gating set still reported (got: $OUT5)"
+printf '%s\n' "$OUT5" | grep -q 'ANCHORLESS PR#305' \
+  && ok "(15) anchorless scan runs even with zero gating anchors" \
+  || bad "(15) anchorless scan runs even with zero gating anchors (got: $OUT5)"
+
+# --- Run 6: fail CLOSED when the live-bead read fails. -----------------------
+# An empty ledger read is indistinguishable from "no bead tracks anything". If
+# the scan trusted it, EVERY open PR would be flagged and escalated at once — a
+# mail storm out of a transient Dolt blip. It must report nothing instead.
+MAIL_BEFORE6=$(wc -l < "$TMP/mail" | tr -d ' ')
+printf '306|false|polecat/dead-6|main\n' > "$TMP/openprs"
+OUT6="$(FAKE_LIVE_FAIL=1 bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>/dev/null)"
+printf '%s\n' "$OUT6" | grep -q 'ANCHORLESS' \
+  && bad "(14) failed live-bead read must not flag anything (fail closed)" \
+  || ok "(14) failed live-bead read flags nothing (fail closed, no mail storm)"
+eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "$MAIL_BEFORE6" \
+   "(14) failed live-bead read escalates nothing"
+printf '%s\n' "$OUT6" | grep -q '0 anchorless open PRs' \
+  && ok "(14) failed live-bead read reports a zero anchorless count" \
+  || bad "(14) failed live-bead read reports a zero anchorless count (got: $OUT6)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

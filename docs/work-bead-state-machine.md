@@ -182,6 +182,7 @@ dispatch
 | **gating, stale base** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_base_head`, `blocked_reason`, and an open rebase child |
 | closed (landed) | closed | — | — | `merged_sha` (committed output) / close reason (ephemeral) |
 | abandoned | closed / open | — | — / `human` | PR closed unmerged: refinery-closed, or escalated if out-of-band |
+| **anchorless** | **closed** | **—** | **—** | Not a state close-on-land creates: bead closed while its PR is still OPEN, so every bead-side scan is blind to it. Found by the PR → bead pass and marked `anchorless_flagged`; disposition is an operator call |
 
 `open` is the **canonical status for unlanded work**; the machine adds no new
 top-level status. **gating** is a *sub-state marker* — metadata that refines
@@ -443,6 +444,45 @@ never the anchor reopened. Two properties make it converge:
 
 This is still observation, not merge authority: the observer routes work and
 records why, and the merge skill remains the single writer of merged-truth.
+
+## Anchorless PRs: reconciling from the other side
+
+Every automated path in close-on-land starts from the **bead**: the merge skill,
+the merge observer, and the refinery patrol all enumerate gating anchors and read
+each one's `pr_number`. That is sound while the bead outlives the PR — which the
+close-on-land model guarantees, since the anchor closes only on land.
+
+It fails in the one state the model is designed to prevent but cannot retroact:
+a PR whose bead is **closed** (or gone). Such a PR is not merely unhandled, it is
+*unseen* — no scan starts anywhere that would reach it. It never appears in a
+queue, never escalates, never times out. It does not read as broken; it reads as
+absent. The pre-`#163` close-on-publish model created exactly this state by
+design (bead closed at PR-creation), and the PRs it stranded sat untouched for
+weeks — surfaced only when a human cross-checked `gh pr list` against the ledger
+by hand.
+
+So the observer also reconciles **PR → bead**: enumerate open PRs, subtract every
+PR number any *live* bead references, and report the remainder. Two rules keep it
+honest:
+
+- **Detect and surface only.** It never merges, closes, or reopens an anchorless
+  PR. Disposition — land it, close it as abandoned, or reopen the bead for
+  rework — needs context the observer does not have, and stays an operator call.
+  It emits the finding; a human decides.
+- **Escalate once, or not at all.** A PR whose closed bead is resolvable is
+  escalated once, bounded by an `anchorless_flagged` marker written to that bead
+  *before* the mail goes out. A PR with no bead in any state is reported to the
+  log but never mailed: there is nowhere durable to record that we already said
+  it, so mailing would repeat every patrol wake forever. Likewise, a failed
+  ledger read is empty rather than `[]`, and the scan fails **closed** on it —
+  treating "I could not read the ledger" as "nothing is tracked" would flag every
+  open PR at once.
+
+Note the asymmetry with the rest of this document: the other dispositions fix a
+bead whose PR misbehaved, while this one surfaces a PR whose bead is already
+gone. Closing the loop from both directions is what makes "the bead is the index
+of in-flight work" safe to rely on — any state where a PR outlives its anchor
+falls out of that index silently, and only the PR-side scan catches it.
 
 ## Divergence from stock GasTown
 

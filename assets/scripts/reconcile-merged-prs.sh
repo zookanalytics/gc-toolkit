@@ -28,6 +28,11 @@
 #   PR open, draft      -> skip (drafts are retired, so the refinery creates no
 #                          draft PR; a stray draft is left untouched).
 #
+#   Open PR, no live bead -> ANCHORLESS: the PR outlived its gating bead, so no
+#                          automated path can see it at all. Report it and
+#                          escalate once. DETECT + SURFACE ONLY — never merge,
+#                          close, or reopen it; disposition is an operator call.
+#
 #   ANY state, retargeted (live base != anchor merged_target) -> never close as
 #                          landed (the work would land on the wrong branch), and
 #                          the merge skill independently refuses to merge it;
@@ -47,8 +52,12 @@
 # simply retried next idle pass. Cheap — one `gh pr view` per gating anchor, and
 # gating anchors are few (bounded by in-flight PRs).
 #
-# Enumerated by BEAD, not by `gh pr list`: each anchor's pr_number resolves in
-# this repo by construction, so there is no cross-repo PR-number collision.
+# Reconciled from BOTH sides. The per-anchor pass above walks BEAD -> PR: each
+# anchor's pr_number resolves in this repo by construction, so there is no
+# cross-repo PR-number collision. But that direction can only ever see PRs a live
+# bead still names — so the anchorless pass at the end walks PR -> BEAD, and
+# reports open PRs no live bead points at. Neither direction alone covers the
+# state where a PR outlives its anchor.
 #
 # NOT set -e: best-effort, must never abort the patrol's idle loop. A bead is
 # CLOSED only on an authoritative merged=true — any tool error skips the anchor,
@@ -78,15 +87,21 @@ command -v gh >/dev/null 2>&1 || exit 0
 ANCHORS=$(gc bd list --status=open \
   --metadata-field merge_result=pull_request \
   --limit=200 --json 2>/dev/null)
-[ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ] \
-  || { echo "reconcile-merged-prs: no gating anchors"; exit 0; }
 
 # One compact JSON row per anchor. Built into a variable (not piped into the
 # loop) so the loop runs in THIS shell and the counters below survive the
 # pipe/subshell boundary.
-ROWS=$(printf '%s' "$ANCHORS" \
-  | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // "")}' 2>/dev/null)
-[ -n "$ROWS" ] || { echo "reconcile-merged-prs: no gating anchors"; exit 0; }
+ROWS=""
+if [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ]; then
+  ROWS=$(printf '%s' "$ANCHORS" \
+    | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // "")}' 2>/dev/null)
+fi
+# No anchors is NOT an early exit: the anchorless pass below walks PR -> BEAD and
+# is at its MOST relevant here (zero live anchors + open PRs is precisely the
+# stranded state it exists to surface). Returning early on an empty gating set —
+# as this did before the anchorless arm — would blind the pass exactly when it
+# matters. Only the per-anchor loop is skipped.
+[ -n "$ROWS" ] || echo "reconcile-merged-prs: no gating anchors"
 
 closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; skipped=0
 while IFS= read -r row; do
@@ -369,5 +384,129 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
   skipped=$((skipped + 1))
 done <<< "$ROWS"
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $skipped skipped"
+# --- Anchorless open PRs: the PR outlived its gating bead. -------------------
+# Everything above enumerates BEAD -> PR, so it can only ever see a PR some live
+# bead still names. A PR whose bead is CLOSED (or gone) is invisible to EVERY
+# automated path — not this pass, not the merge skill, not the patrol — because
+# all of them start from the bead. Nothing reports it, so it does not read as
+# broken; it reads as absent.
+#
+# Not hypothetical: the pre-#163 close-on-publish model closed the work bead at
+# PR-CREATION rather than on land, and the PRs it stranded sat untouched for
+# weeks — surfaced only when a human cross-checked `gh pr list` against the
+# ledger by hand. The close-on-land model no longer creates that state, but the
+# blind spot outlives its cause: any path where a PR outlives its anchor (an
+# operator closing a bead early, a force-rewrite, a deleted bead) re-enters it.
+#
+# So close the loop from the other side: walk PR -> BEAD and report open PRs no
+# live bead points at. DETECT + SURFACE ONLY — never merge, close, or reopen
+# one. Disposition (land it, close it, rework it) needs context this pass does
+# not have and stays an operator call; see docs/work-bead-state-machine.md.
+anchorless=0
+PR_LIST=$(gh pr list --state open --limit 200 \
+  --json number,url,isDraft,headRefName,baseRefName 2>/dev/null)
+if [ -z "$PR_LIST" ]; then
+  # Distinct from "[]" (a real, empty result): empty output means the call
+  # failed. Skip rather than guess — retried next pass.
+  echo "reconcile-merged-prs: open-PR enumeration failed; anchorless scan skipped (retry next pass)" >&2
+elif [ "$PR_LIST" != "[]" ]; then
+  # Every PR number named by a LIVE bead — gating anchors, rework children, and
+  # review beads alike. ONE ledger query rather than one per PR: a PR named by
+  # ANY live bead is tracked by something and is not a finding, whether or not
+  # that bead is the anchor.
+  LIVE=$(gc bd list --status open,in_progress,blocked --limit=0 --json 2>/dev/null)
+  if [ -z "$LIVE" ]; then
+    # FAIL CLOSED. Empty output here is indistinguishable from a failed ledger
+    # read, and treating it as "nothing is tracked" would flag every open PR at
+    # once and escalate a storm. A genuinely empty ledger returns "[]", a
+    # different string, and does fall through to the scan below.
+    echo "reconcile-merged-prs: live-bead read failed; anchorless scan skipped (retry next pass)" >&2
+  else
+    TRACKED=$(printf '%s' "$LIVE" \
+      | jq -r '[.[] | .metadata.pr_number // empty | tostring] | unique | .[]' 2>/dev/null)
+    PR_ROWS=$(printf '%s' "$PR_LIST" \
+      | jq -r '.[] | [(.number|tostring), .url, (.isDraft|tostring), .headRefName, .baseRefName] | join("|")' 2>/dev/null)
+    while IFS='|' read -r pnum purl pdraft phead pbase; do
+      [ -n "${pnum:-}" ] || continue
+      # Tracked by a live bead -> not a finding. Exact-match so PR#7 is never
+      # satisfied by PR#77.
+      printf '%s\n' "$TRACKED" | grep -qxF "$pnum" && continue
+
+      # Resolve the bead that DID name this PR, if one still exists. A closed one
+      # is the high-confidence signature (a Gas City PR whose anchor closed out
+      # from under it) AND the only durable place to bound the escalation.
+      # --limit=0 (all), not a page: the pick below is "oldest carrying
+      # merge_result", so a truncated page could hide the very bead we want.
+      # The pr_number filter keeps the result to a handful either way.
+      dead=$(gc bd list --status closed --metadata-field pr_number="$pnum" \
+               --limit=0 --json 2>/dev/null)
+      # Several closed beads routinely name one PR — the anchor that opened it,
+      # its review beads, and any "address findings" rework children. Pick the
+      # bead that OPENED the PR, since that is the one an operator reopens to
+      # re-engage it: filter to those carrying merge_result (the gating-anchor
+      # signature, which review beads lack), then take the OLDEST, because the
+      # rework children that share that marker were all created later. Fall back
+      # to the oldest bead of any kind if none carries the marker.
+      dead_row=$(printf '%s' "$dead" | jq -c '
+        (map(select((.metadata.merge_result // "") != "")) | sort_by(.created_at // "")) as $anchors
+        | (if ($anchors | length) > 0 then $anchors else sort_by(.created_at // "") end)
+        | .[0] // empty' 2>/dev/null)
+      dead_id=$(printf '%s' "$dead_row" | jq -r '.id // empty' 2>/dev/null)
+      dead_flag=$(printf '%s' "$dead_row" | jq -r '.metadata.anchorless_flagged // empty' 2>/dev/null)
+      # Every closed bead naming this PR, oldest first. The disposition may touch
+      # more than the one we mark, so the operator gets the whole set, not just
+      # our pick.
+      dead_all=$(printf '%s' "$dead" \
+        | jq -r '[sort_by(.created_at // "") | .[].id] | join(", ")' 2>/dev/null)
+      anchorless=$((anchorless + 1))
+      draft_note=""
+      [ "$pdraft" = "true" ] && draft_note=" (draft)"
+
+      if [ -z "$dead_id" ]; then
+        # No bead names this PR in any state. It may never have been Gas City's
+        # (a human or bot opened it), so this is reported but NOT escalated:
+        # there is nothing durable to mark, and an unbounded mail would repeat
+        # every wake. The log line is the surface.
+        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — no bead in any state references it; not tracked by any automated path"
+        continue
+      fi
+      if [ "$dead_flag" = "$pnum" ]; then
+        # Already escalated for this PR. Keep reporting it (it is still stranded)
+        # but do not re-mail.
+        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED; already escalated, awaiting operator disposition"
+        continue
+      fi
+      # Stamp FIRST, mail second — the same close-FIRST convergence the merged
+      # path uses. If the stamp fails we have no bound, so we must NOT mail:
+      # report loudly and retry next pass. A delayed escalation is recoverable;
+      # a mail storm is not.
+      if gc bd update "$dead_id" --set-metadata anchorless_flagged="$pnum" >/dev/null 2>&1; then
+        if gc mail send mayor/ -s "ESCALATION: anchorless open PR#$pnum (bead $dead_id is closed)" \
+             -m "PR#$pnum is OPEN but its bead $dead_id is CLOSED, so no automated path can see it.
+Every close-on-land path — this reconciler, the merge skill, the refinery patrol —
+enumerates from the BEAD, so a closed bead with an open PR is invisible to all of
+them: it will never be landed, rejected, or escalated on its own.
+
+  PR:     $purl$draft_note
+  Branch: ${phead:-?} -> ${pbase:-?}
+  Bead:   $dead_id (closed) — the bead that opened the PR
+  All:    ${dead_all:-$dead_id} (every closed bead naming PR#$pnum, oldest first)
+
+The refinery took NO action: disposition is an operator call, not a merge-processor
+one. Decide: LAND it (approve on GitHub, then reopen the bead as a gating anchor —
+status=open, merge_result=pull_request, check_set/check.* at the live head — so the
+merge skill lands and closes it), CLOSE the PR as abandoned (the bead is already
+closed; nothing else to do), or REWORK it (reopen the bead and route it to a
+polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; then
+          escalated=$((escalated + 1))
+        fi
+        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED; routed to operator + escalated"
+      else
+        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note — could not mark bead $dead_id; not escalating unbounded (retry next pass)" >&2
+      fi
+    done <<< "$PR_ROWS"
+  fi
+fi
+
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $anchorless anchorless open PRs, $skipped skipped"
 exit 0
