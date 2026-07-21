@@ -19,9 +19,20 @@
 #   (8) PR merged BUT to a base != anchor target (retargeted) -> anchor NOT
 #        closed as landed (would record a landing that never happened); flagged
 #        retargeted + escalated once.
+#   (9) PR open, CONFLICTING (stale base: the target was rewritten under it) ->
+#        a rebase CHILD is filed against the anchor and routed to the fix pool,
+#        the anchor STAYS gating (merge_result=pull_request untouched, so the
+#        merge skill still lands it once the rebase clears), and the arm is
+#        bounded to one rebase per head via stale_base_head.
+#   (10) PR open, CONFLICTING but a rework/review child is already open for the
+#        PR -> no second rebase child (it would race the one in flight).
+#   (11) PR open, mergeable UNKNOWN (GitHub still computing) -> nothing: an
+#        indeterminate reading must never be treated as a conflict.
 #   (INV) the observer NEVER runs `gh pr merge` for ANY anchor — no merge authority.
 #   (5) convergence: closed / flagged / retargeted anchors leave the gating set,
-#       so a second pass does not re-close, re-escalate, or re-flag them.
+#       so a second pass does not re-close, re-escalate, or re-flag them; the
+#       stale-base anchor STAYS in the set (by design) and is held from re-filing
+#       by its stale_base_head marker instead.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,6 +55,10 @@ mkdir -p "$TMP/bin"
 #   bead-D open, draft               -> skipped
 #   bead-H open, ready, retargeted   -> flagged retargeted + escalated, never closed
 #   bead-I merged to wrong base      -> NOT closed as landed; flagged retargeted
+#   bead-J open, CONFLICTING         -> rebase child filed + routed; STAYS gating
+#   bead-K open, CONFLICTING, child in flight -> no second rebase child
+#   bead-L open, mergeable UNKNOWN   -> nothing (indeterminate is not a conflict)
+#   bead-M open, ready (turns CONFLICTING in run 4, which passes no --fix-pool)
 cat > "$TMP/anchors" <<'A'
 bead-A|201|main
 bead-B|202|main
@@ -51,26 +66,49 @@ bead-C|203|main
 bead-D|204|main
 bead-H|208|main
 bead-I|209|main
+bead-J|210|main
+bead-K|211|main
+bead-L|212|main
+bead-M|213|main
 A
 
-# PR states (gh pr view source): pr|state|mergedAt|isDraft|mergeOid|baseRefName
+# PR states (gh pr view source):
+#   pr|state|mergedAt|isDraft|mergeOid|baseRefName|headRefName|headRefOid|mergeable|mergeStateStatus
 #   201 merged to main            -> close anchor bead-A (mergedAt set = merge)
 #   202 closed, unmerged          -> flag anchor bead-B + escalate
 #   203 open, ready               -> observer leaves it (detect-only)
 #   204 open, draft               -> skip
 #   208 open, base=integration/foo != main -> retarget (flagged, never merged)
 #   209 merged BUT to integration/foo != main -> retarget (NOT closed as landed)
+#   210 open, CONFLICTING/DIRTY   -> stale base: rebase child routed to the pool
+#   211 open, CONFLICTING/DIRTY, already has an open rework child -> no new child
+#   212 open, UNKNOWN/UNKNOWN     -> still computing; must NOT read as a conflict
+#   213 open, ready for now       -> rewritten to CONFLICTING before run 4
 cat > "$TMP/prs" <<'P'
-201|MERGED|2026-06-23T01:00:00Z|false|abc12345def67890|main
-202|CLOSED||false||main
-203|OPEN||false||main
-204|OPEN||true||main
-208|OPEN||false||integration/foo
-209|MERGED|2026-06-23T02:00:00Z|false|cafe1234abcd5678|integration/foo
+201|MERGED|2026-06-23T01:00:00Z|false|abc12345def67890|main|polecat/bead-A|head201|MERGEABLE|CLEAN
+202|CLOSED||false||main|polecat/bead-B|head202|UNKNOWN|UNKNOWN
+203|OPEN||false||main|polecat/bead-C|head203|MERGEABLE|BLOCKED
+204|OPEN||true||main|polecat/bead-D|head204|MERGEABLE|BLOCKED
+208|OPEN||false||integration/foo|polecat/bead-H|head208|MERGEABLE|BLOCKED
+209|MERGED|2026-06-23T02:00:00Z|false|cafe1234abcd5678|integration/foo|polecat/bead-I|head209|MERGEABLE|CLEAN
+210|OPEN||false||main|polecat/bead-J|head210|CONFLICTING|DIRTY
+211|OPEN||false||main|polecat/bead-K|head211|CONFLICTING|DIRTY
+212|OPEN||false||main|polecat/bead-L|head212|UNKNOWN|UNKNOWN
+213|OPEN||false||main|polecat/bead-M|head213|MERGEABLE|BLOCKED
 P
 
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"
 : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/staled"
+
+# Open rework/review children referencing a PR (the merge skill's in-flight set;
+# the conflict arm reuses that query so it never races a rework already in
+# flight). pr<TAB>child-id. Seeded with one for PR#211 (case 10); the arm appends
+# its own children here as it files them, exactly as the real ledger would.
+printf '211\tchild-K\n' > "$TMP/children"
+
+FIX_POOL="test-rig/gc-toolkit.polecat"
 
 # --- gh stub: pr view (emit state JSON), pr merge (record any merge attempt). --
 # The `pr view` arm VALIDATES the requested `--json` fields against the set a
@@ -100,11 +138,15 @@ case "$1 $2" in
       esac
     done
     IFS="$OIFS"
-    while IFS='|' read -r pr state mergedat isdraft oid base; do
+    while IFS='|' read -r pr state mergedat isdraft oid base head headoid mergeable mergestate; do
       [ "$pr" = "$num" ] || continue
       jq -n --arg s "$state" --arg ma "$mergedat" --argjson d "$isdraft" \
-            --arg o "$oid" --arg b "$base" \
-        '{state:$s, mergedAt:(if $ma=="" then null else $ma end), isDraft:$d, mergeCommit:(if $o=="" then null else {oid:$o} end), baseRefName:$b}'
+            --arg o "$oid" --arg b "$base" --arg h "$head" --arg ho "$headoid" \
+            --arg m "$mergeable" --arg ms "$mergestate" --arg n "$num" \
+        '{state:$s, mergedAt:(if $ma=="" then null else $ma end), isDraft:$d,
+          mergeCommit:(if $o=="" then null else {oid:$o} end), baseRefName:$b,
+          headRefName:$h, headRefOid:$ho, mergeable:$m, mergeStateStatus:$ms,
+          url:("https://github.com/acme/repo/pull/" + $n)}'
       exit 0
     done < "$FAKE_PRS"
     exit 0 ;;
@@ -115,18 +157,25 @@ exit 0
 GH
 chmod +x "$TMP/bin/gh"
 
-# --- gc stub: bd list / bd close / bd update + mail. --------------------------
+# --- gc stub: bd list / create / close / update / dep + session + mail. -------
 # bd list reflects state: a closed, flagged (abandoned), or retargeted anchor
 # leaves the gating set, which is what makes the convergence assertion
-# meaningful. Only the gating-anchor scan is modeled —
-# `--metadata-field merge_result=pull_request` — because the detect-only observer
-# does NOT scan referencing children (that hold moved to the merge skill).
+# meaningful. A stale-base anchor deliberately does NOT leave it (the merge skill
+# must keep watching the PR), so the gating rows carry the stale_base_head marker
+# the conflict arm stamps — that marker, not the scan, is what bounds it.
+# Two list shapes are modeled: the gating-anchor scan
+# (`--metadata-field merge_result=pull_request`) and the conflict arm's
+# in-flight-rework probe (`--metadata-field pr_number=<n>`).
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 if [ "$1" = "mail" ]; then
   shift; subj=""
   while [ $# -gt 0 ]; do case "$1" in -s) subj="$2"; shift 2 ;; *) shift ;; esac; done
   printf '%s\n' "$subj" >> "$FAKE_MAIL"; exit 0
+fi
+if [ "$1" = "session" ]; then
+  [ "${2:-}" = "wake" ] && printf '%s\n' "${3:-}" >> "$FAKE_WAKES"
+  exit 0
 fi
 [ "$1" = "bd" ] || exit 0
 case "$2" in
@@ -139,12 +188,32 @@ case "$2" in
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_RETARGETED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s"}}' "$id" "$pr" "$target")
+          staled=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_STALED" 2>/dev/null | tail -1)
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s"}}' \
+                  "$id" "$pr" "$target" "$id" "$staled")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
+      *"pr_number="*)
+        # In-flight rework/review children for one PR (no merge_result — that is
+        # what distinguishes a child from the anchor itself).
+        num=""
+        for a in "$@"; do case "$a" in pr_number=*) num="${a#pr_number=}" ;; esac; done
+        out=""
+        while IFS="$(printf '\t')" read -r pr cid; do
+          [ "$pr" = "$num" ] || continue
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s"}}' "$cid" "$pr")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_CHILDREN"
+        printf '[%s]\n' "$out" ;;
       *) printf '[]\n' ;;
     esac ;;
+  create)
+    # Mint a deterministic child id and echo it in `--json` shape.
+    n=$(( $(wc -l < "$FAKE_CREATED") + 1 ))
+    cid="fix-$n"
+    printf '%s\t%s\n' "$cid" "$3" >> "$FAKE_CREATED"
+    printf '{"id":"%s"}\n' "$cid" ;;
   close)
     id="$3"; shift 3
     reason=""
@@ -153,10 +222,22 @@ case "$2" in
     printf '%s\t%s\n' "$id" "$reason" >> "$FAKE_CLOSELOG" ;;
   update)
     id="$3"
+    printf '%s\t%s\n' "$id" "$*" >> "$FAKE_UPDATES"
     case "$*" in
       *merge_result=abandoned*)  printf '%s\n' "$id" >> "$FAKE_ABANDONED" ;;
       *merge_result=retargeted*) printf '%s\n' "$id" >> "$FAKE_RETARGETED" ;;
-    esac ;;
+    esac
+    # Mirror the two metadata writes the ledger would make visible to later
+    # passes: the anchor's stale_base_head marker, and a child joining the
+    # in-flight set once it carries pr_number.
+    for a in "$@"; do
+      case "$a" in
+        stale_base_head=*) printf '%s\t%s\n' "$id" "${a#stale_base_head=}" >> "$FAKE_STALED" ;;
+        pr_number=*)       printf '%s\t%s\n' "${a#pr_number=}" "$id" >> "$FAKE_CHILDREN" ;;
+      esac
+    done ;;
+  dep)
+    printf '%s\n' "$*" >> "$FAKE_DEPS" ;;
 esac
 exit 0
 GC
@@ -166,10 +247,12 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_CLOSED="$TMP/closed" FAKE_ABANDONED="$TMP/abandoned" \
        FAKE_RETARGETED="$TMP/retargeted" \
-       FAKE_AUTOMERGE="$TMP/automerge" FAKE_MAIL="$TMP/mail" FAKE_CLOSELOG="$TMP/closelog"
+       FAKE_AUTOMERGE="$TMP/automerge" FAKE_MAIL="$TMP/mail" FAKE_CLOSELOG="$TMP/closelog" \
+       FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
+       FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children"
 
 # --- Run 1: the disposition matrix. ------------------------------------------
-OUT1="$(bash "$SCRIPT")"
+OUT1="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
 
 has '^bead-A$' "$TMP/closed" && ok "(1) merged PR -> anchor closed" \
                              || bad "(1) merged PR -> anchor closed"
@@ -196,6 +279,40 @@ has '^bead-I$' "$TMP/closed" && bad "(8) merged-to-wrong-base anchor must NOT be
 has '^bead-I$' "$TMP/retargeted" && ok "(8) merged-to-wrong-base anchor flagged retargeted" \
                                  || bad "(8) merged-to-wrong-base anchor flagged retargeted"
 eq "$(grep -c 'PR#209 retargeted' "$TMP/mail")" "1" "(8) merged-to-wrong-base escalates once"
+
+# (9) stale base: a conflicted PR gets a rebase CHILD routed to the fix pool, and
+# the anchor STAYS gating so the merge skill still lands it after the rebase.
+eq "$(grep -c 'Rebase PR#210' "$TMP/created")" "1" "(9) conflicted PR -> one rebase child filed"
+grep -q "gc.routed_to=$FIX_POOL" "$TMP/updates" \
+  && ok "(9) rebase child routed to the fix pool" \
+  || bad "(9) rebase child routed to the fix pool (got: $(cat "$TMP/updates"))"
+grep -q 'existing_pr=https://github.com/acme/repo/pull/210' "$TMP/updates" \
+  && ok "(9) rebase child reworks the EXISTING PR (existing_pr set)" \
+  || bad "(9) rebase child must carry existing_pr so no second PR is opened"
+J_UPDATES=$(grep '^bead-J' "$TMP/updates" || true)
+printf '%s\n' "$J_UPDATES" | grep -q 'stale_base_head=head210' \
+  && ok "(9) anchor marked stale_base_head at the detected head" \
+  || bad "(9) anchor marked stale_base_head at the detected head (got: $J_UPDATES)"
+printf '%s\n' "$J_UPDATES" | grep -q 'merge_result=' \
+  && bad "(9) anchor must KEEP merge_result=pull_request (the merge skill still lands it)" \
+  || ok "(9) anchor keeps merge_result=pull_request (stays gating, unlike retarget/abandon)"
+has '^bead-J$' "$TMP/closed" && bad "(9) conflicted anchor must NOT be closed" \
+                             || ok "(9) conflicted anchor not closed"
+grep -q 'fix-1 bead-J' "$TMP/deps" \
+  && ok "(9) rebase child linked parent-child under the anchor" \
+  || bad "(9) rebase child linked parent-child under the anchor (got: $(cat "$TMP/deps"))"
+grep -qx "$FIX_POOL" "$TMP/wakes" && ok "(9) fix pool woken for the rebase" \
+                                  || bad "(9) fix pool woken for the rebase"
+eq "$(grep -c 'PR#210' "$TMP/mail")" "0" "(9) a routable conflict does not escalate to mayor"
+
+# (10) a rework/review child is already open for PR#211 -> do not race it.
+eq "$(grep -c 'Rebase PR#211' "$TMP/created")" "0" \
+   "(10) conflicted PR with a rework child in flight -> no second rebase child"
+# (11) UNKNOWN is GitHub still computing, not a conflict.
+eq "$(grep -c 'Rebase PR#212' "$TMP/created")" "0" \
+   "(11) mergeable=UNKNOWN never treated as a conflict"
+eq "$(grep -c 'Rebase PR#203' "$TMP/created")" "0" \
+   "(11) a ready (non-conflicted) PR gets no rebase child"
 
 # (INV) NO MERGE AUTHORITY: the observer must never call `gh pr merge` for ANY
 # anchor — the seam that the auto-merge retirement turns on. $FAKE_AUTOMERGE
@@ -229,9 +346,40 @@ gh pr view 201 --json state,mergedAt,mergeCommit,isDraft,baseRefName >/dev/null 
 
 # --- Run 2: convergence. Closed / flagged / retargeted anchors leave the set. -
 MAIL_BEFORE=$(wc -l < "$TMP/mail" | tr -d ' ')
-bash "$SCRIPT" >/dev/null
+bash "$SCRIPT" --fix-pool "$FIX_POOL" >/dev/null
 eq "$(grep -c '^bead-A$' "$TMP/closed")" "1" "(5) merged anchor not re-closed on second pass"
 eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "$MAIL_BEFORE" "(5) flagged + retargeted anchors not re-escalated on second pass"
+eq "$(grep -c 'Rebase PR#210' "$TMP/created")" "1" \
+   "(5) stale-base anchor stays in the gating set but files no second rebase child"
+
+# --- Run 3: the marker is what bounds it, and it re-arms when the head moves. --
+# Close the rebase child (as the patrol does on hand-back) so the in-flight guard
+# no longer applies — the stale_base_head marker alone must hold the arm.
+awk -F'\t' '$1 != "210"' "$TMP/children" > "$TMP/children.next"
+mv "$TMP/children.next" "$TMP/children"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" >/dev/null
+eq "$(grep -c 'Rebase PR#210' "$TMP/created")" "1" \
+   "(9) same head, child closed -> stale_base_head alone bounds it to one rebase"
+# The polecat pushed: same conflict, NEW head -> a genuinely new stall, so re-arm.
+sed 's/^210|\(.*\)|head210|/210|\1|head210b|/' "$TMP/prs" > "$TMP/prs.next"
+mv "$TMP/prs.next" "$TMP/prs"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" >/dev/null
+eq "$(grep -c 'Rebase PR#210' "$TMP/created")" "2" \
+   "(9) head moved and still conflicting -> arm re-fires for the new head"
+
+# --- Run 4: no fix pool -> escalate to human rather than file an unroutable ---
+# child. Flip PR#213 to CONFLICTING and run with no --fix-pool.
+sed 's/^213|.*/213|OPEN||false||main|polecat\/bead-M|head213|CONFLICTING|DIRTY/' "$TMP/prs" > "$TMP/prs.next"
+mv "$TMP/prs.next" "$TMP/prs"
+bash "$SCRIPT" >/dev/null
+eq "$(grep -c 'Rebase PR#213' "$TMP/created")" "0" \
+   "(9) no fix pool -> no unroutable rebase child is filed"
+eq "$(grep -c 'PR#213 conflicted (stale base) with no fix pool' "$TMP/mail")" "1" \
+   "(9) no fix pool -> escalated to mayor once"
+M_UPDATES=$(grep '^bead-M' "$TMP/updates" || true)
+printf '%s\n' "$M_UPDATES" | grep -q 'gc.routed_to=human' \
+  && ok "(9) no fix pool -> anchor routed to human" \
+  || bad "(9) no fix pool -> anchor routed to human (got: $M_UPDATES)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

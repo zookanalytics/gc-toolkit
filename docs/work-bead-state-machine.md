@@ -166,6 +166,8 @@ dispatch
                        |    (the check-set hangs off it as gate conditions)
                        |- check-set clears -> merge skill merges + records -> closed "Merged to <target> at <sha>"
                        |- a check needs work          -> rework: a NEW child filed against it
+                       |- base rewritten (CONFLICTING) -> rebase: a NEW child filed against it,
+                       |                                  routed to the fix pool; stays gating
                        \- PR abandoned                -> the PR is closed and the convoy closed
                                                          (or escalated, if closed out-of-band)
 ```
@@ -177,6 +179,7 @@ dispatch
 | handed off | open | refinery | — | `branch`, `target` |
 | **pre-open gating** | **open** | **—** | **—** | `branch`, `merged_target`, `merge_result=pre_open_gate` (pre-open subset — currently `{codex}` — runs before the PR opens) |
 | **gating** | **open** | **—** | **—** | `pr_url`, `pr_number`, `merge_result=pull_request` |
+| **gating, stale base** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_base_head`, `blocked_reason`, and an open rebase child |
 | closed (landed) | closed | — | — | `merged_sha` (committed output) / close reason (ephemeral) |
 | abandoned | closed / open | — | — / `human` | PR closed unmerged: refinery-closed, or escalated if out-of-band |
 
@@ -411,6 +414,35 @@ detecting a known external discrepancy** — the same out-of-band backstop as th
 merge observer, consistent with the taxonomy above, not the in-flow escalation
 it rules out. The rule: **we close what we abandoned; we escalate only what
 someone else closed.**
+
+## Stale base: the conflict we route, not escalate
+
+A rewritten target branch — an upstream-rebase landing that force-pushes `main` —
+rewrites every open PR's base commit out of existence, and **every** open gating
+anchor goes CONFLICTING at once. The merge skill correctly refuses to merge a
+conflicted PR, but unlike its other holds (BLOCKED, BEHIND, UNSTABLE, UNKNOWN)
+this one never clears on retry: the anchor is detached from both work queues by
+design, so without an arm for it nothing ever dispatches the rebase and the work
+is stranded — invisibly, since a gating anchor is watched only by the observer.
+
+The observer therefore files a **rebase child** of the anchor and routes it to the
+fix pool, the same shape as a check that needs work: rework is always a new child,
+never the anchor reopened. Two properties make it converge:
+
+- **The anchor stays gating** (`merge_result=pull_request` intact). This is the
+  one discrepancy the observer does *not* flip off the gating marker for, because
+  it is the one that needs no human decision — the remedy is mechanical. Flipping
+  it would also drop the anchor out of the *merge skill's* scan, so the rebased,
+  green PR would sit ready with nothing left to land it. The open child holds the
+  merge meanwhile (an anchor lands only when all its children are closed), and on
+  hand-back the one-anchor-per-PR arm closes the child as landed-on-branch rather
+  than minting a second anchor.
+- **One rebase per head** (`stale_base_head=<head at detection>`). The arm re-arms
+  only when the head moves, so a later rewrite that conflicts the *new* head is
+  treated as the new stall it is, while an unchanged head is never re-filed.
+
+This is still observation, not merge authority: the observer routes work and
+records why, and the merge skill remains the single writer of merged-truth.
 
 ## Divergence from stock GasTown
 
