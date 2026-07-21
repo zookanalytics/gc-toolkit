@@ -73,7 +73,7 @@ default = "main"
 
 [vars.default_merge_strategy]
 description = "Default when bead metadata.merge_strategy is unset. 'direct' = FF + push to target. 'mr'/'pr' = open pull request."
-default = "direct"
+default = "mr"
 
 [vars.delete_merged_branches]
 description = "Whether to delete source branches after merge"

@@ -107,7 +107,7 @@ if [ -z "$WISP" ]; then
     | jq -r '.[0].id // empty')
   if [ -n "$WORK" ]; then
     echo "Found routed work bead: $WORK — pouring wisp and entering formula at find-work"
-    WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --var default_merge_strategy={{ or .DefaultMergeStrategy "direct" }} --json | jq -r '.new_epic_id')
+    WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --var default_merge_strategy=mr --json | jq -r '.new_epic_id')
     gc bd update "$WISP" --assignee="$GC_AGENT"
     # Re-enter formula at find-work; it will pick up $WORK.
   fi
@@ -137,7 +137,7 @@ fi
 
 # Tier 4 — Pour fresh wisp (no in-progress, no routed work, no open wisp)
 if [ -z "$WISP" ]; then
-  WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --var default_merge_strategy={{ or .DefaultMergeStrategy "direct" }} --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --var default_merge_strategy=mr --json | jq -r '.new_epic_id')
   gc bd update "$WISP" --assignee="$GC_AGENT"
   echo "Poured fresh wisp: $WISP"
 fi
