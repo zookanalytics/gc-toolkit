@@ -73,7 +73,10 @@ for promoting a commit to an upstream PR candidate.
    - `metadata.aborted_at` — a polecat (or the refinery) aborted a step
      that needs operator attention. Reason values you'll see:
        - rebase mol: `workspace-setup` (backup-ref mint refused),
-         `check` (post-rebase quality gate failed), `install`,
+         `rebase-loop-exhausted` (v12: the rebase check loop burned all
+         `max_attempts` without a green gate — see below),
+         `check` (post-rebase quality gate failed — legacy v11 only; v12
+         folds the gate into the rebase loop), `install`,
          `push` (polecat-side push to the rebase ref failed),
          `rebase-mismatch` (post-rebase log diverged from the keep set).
        - pr-prep mol: `cherry-pick`, `test`, `push-branch`.
@@ -88,12 +91,45 @@ for promoting a commit to an upstream PR candidate.
      but it is now a SECONDARY backstop — don't assume the operator saw it,
      and don't wait for it. The bead on your hook IS the durable signal.
 
-   Note: `aborted_at` is not set by the rebase step itself for kept-
-   commit conflicts — those go through the rework-polecat dispatch
-   flow (`rebase_in_progress`) or escalate via `conflict_questions` on
-   genuine stuck states. The `aborted_at` predicate covers the other
-   abort paths (rebase check/install/push/workspace-setup/rebase-mismatch,
-   pr-prep cherry-pick/test/push-branch, and refinery race-loss).
+   Note: no individual conflict aborts the rebase. A v12 conflict is just
+   the next check-loop iteration; a v11 conflict went through the
+   rework-polecat dispatch flow (`rebase_in_progress`). What `aborted_at`
+   covers is a step that stopped for good: the whole v12 loop giving up
+   (`rebase-loop-exhausted`), the post-rebase steps
+   (install/push/workspace-setup/rebase-mismatch, plus v11's separate
+   `check`), pr-prep cherry-pick/test/push-branch, and refinery race-loss.
+
+   **`rebase-loop-exhausted` (v12)** means the check loop ran out of
+   attempts without the exit condition ever going green — the rebase is
+   parked wherever the last iteration left it, `install`/`push` never
+   ran, and the `<wf>.rebase` control bead is closed `gc.outcome=fail`.
+   The bead notes carry the last exit-condition verdict, the worktree,
+   the backup ref, and how many `conflict_questions` were recorded; read
+   `metadata.conflict_questions` first, since a stuck conflict is the
+   usual reason a loop burns its whole budget. From there it is the same
+   conversation as the `conflict_questions` handback below — resolve by
+   hand from `metadata.work_dir`, unwind with `metadata.backup_ref`, or
+   re-pour once the blocker is decided.
+
+   **Backstop.** That handback is written by the loop's exit condition, so
+   a store outage at exactly that moment can lose it while the control
+   bead still closes `fail`. When a rebase looks stalled and nothing is on
+   your hook, resolve it from the wisp you stamped at dispatch:
+   ```bash
+   RIG_PATH=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+   cd "$RIG_PATH"
+   gc bd list --status=open --has-metadata-key current_wisp --json | \
+     jq -r '.[] | "\(.id) \(.metadata.current_wisp)"' | \
+     while read -r bead wisp; do
+       gc bd list --all --include-infra --limit 0 --json \
+         --metadata-field "gc.root_bead_id=$wisp" --metadata-field "gc.kind=ralph" | \
+         jq -r --arg b "$bead" '.[] | select(.metadata."gc.outcome"=="fail")
+                                    | "\($b) — rebase loop failed (control \(.id))"'
+     done
+   ```
+   A hit is the same situation as `aborted_at=rebase-loop-exhausted`;
+   surface it in the menu and stamp the flag yourself so the next sweep
+   catches it normally.
 
 4. **Sweep stale rebase branches** in the gascity rig:
    ```bash
@@ -149,10 +185,11 @@ for promoting a commit to an upstream PR candidate.
 
    Pending (needs your engagement):
      - <bead> — PR-prep handback: "<suggested title>" — branch ready
-     - <bead> — rebase-in-progress: rework <child-bead> classified <classification> (ready to re-pour)
-     - <bead> — rebase-in-progress: review <child-bead> closed with verdict <approve|reject> (ready to re-pour)
+     - <bead> — rebase loop exhausted after <n> attempts (<m> conflict questions recorded)
      - <bead> — rebase conflict-questions (operator intervention needed)
      - <bead> — aborted (<reason>)
+     - <bead> — rebase-in-progress: rework <child-bead> classified <classification> (ready to re-pour) [legacy v11]
+     - <bead> — rebase-in-progress: review <child-bead> closed with verdict <approve|reject> (ready to re-pour) [legacy v11]
      - stale: rebase/<bead> (bead closed; safe to delete after confirming origin/main)
      - mail: "<subject>" from <sender>
    ```
@@ -218,10 +255,11 @@ BEAD=$(gc bd create "Rebase gascity from upstream" -t task \
 SLING_JSON=$(gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-rebase \
   --var requesting_keeper="$GC_AGENT" \
   --json)
-# Record the wisp so the rework/review re-pour loop can burn it before
-# minting the next one — otherwise each resume orphans the prior wisp's
-# root + step beads (tk-kgnad). Durable rebase state lives on $BEAD's
-# metadata, not the wisp, so the wisp is always safe to discard at re-pour.
+# Record the wisp. It is how you resolve this rebase's `<wf>.rebase` control
+# bead later (the loop-exhaustion backstop in "On Wake / Prime"), and any
+# re-pour burns it before minting the next one — otherwise each resume orphans
+# the prior wisp's root + step beads (tk-kgnad). Durable rebase state lives on
+# $BEAD's metadata, not the wisp, so the wisp is always safe to discard.
 NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
 [ -z "$NEW_WISP" ] && NEW_WISP=$(gc bd show "$BEAD" --json | jq -r '.[0].metadata.molecule_id // empty')
 [ -n "$NEW_WISP" ] && gc bd update "$BEAD" --set-metadata current_wisp="$NEW_WISP" \
@@ -231,28 +269,33 @@ NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
 `--on <formula>` is what attaches the wisp to the bead. `--var k=v` is
 formula-variable substitution; without `--on` it does not attach a formula
 at all. Stamping `requesting_keeper` (both in bead metadata and as a
-formula var) lets the polecat hand the bead back to you for the rework
-re-pour loop (`rebase_in_progress`) or the operator-intervention escape
-hatch (`conflict_questions`). The polecat falls back to `notify_recipient`
-if no keeper is stamped. The other rebase mol vars have defaults, so no
-further `--var` flags are needed unless the operator overrides one.
+formula var) is what routes every handback to you: an aborted post-rebase
+step, and — in v12 — the rebase loop giving up
+(`aborted_at=rebase-loop-exhausted`, written by the loop's exit
+condition). The fallback is `notify_recipient` if no keeper is stamped.
+The other rebase mol vars have defaults, so no further `--var` flags are
+needed unless the operator overrides one.
 
 Tell the operator:
 
 > Polecat dispatched on bead `<id>`. Autonomous run — survey, rebase,
-> check, install, push the working branch, hand off to refinery for the
-> force-push to main. Kept-commit conflicts dispatch a focused rework
-> polecat that re-implements the commit's intent on the new upstream
-> layer (mechanical / dropped-absorbed / judgment-required /
-> infeasible classification); judgment-required reworks get reviewed
-> before the rebase continues. You'll get a "ready for refinery handoff"
-> mail summarising the outcome (drops, conflicts, resolutions, check,
-> install), or an action-required mail if a post-rebase step aborted
-> (check, install, polecat-side push), or a handback to me if a rework
-> reported `infeasible` or the rebase got stuck. The refinery overlay
-> performs the `--force-with-lease` to main and closes the bead; if
-> origin/main moved between the polecat's rebase and refinery's push,
-> refinery escalates to mayor (no silent overwrite).
+> install, push the working branch, hand off to refinery for the
+> force-push to main. The rebase is a check loop: each conflict is met by
+> a fresh iteration that reworks the commit's intent onto the new
+> upstream layer (mechanical / dropped-absorbed / judgment-required
+> classification, decided in-iteration) and the loop only exits once the
+> post-rebase quality gate is green at the rebased HEAD. There are no
+> rework or review polecats and nothing to re-pour between conflicts.
+> You'll get a "ready for refinery handoff" mail summarising the outcome
+> (drops, conflicts, resolutions, check, install), or an action-required
+> mail if install or the polecat-side push aborted. Two things come back
+> to me instead: a conflict the loop can't decide (recorded as
+> `conflict_questions`), and the loop running out of attempts without a
+> green gate (`aborted_at=rebase-loop-exhausted`) — either way the bead
+> lands on my hook with the details in its notes and I'll raise it with
+> you. The refinery overlay performs the `--force-with-lease` to main and
+> closes the bead; if origin/main moved between the polecat's rebase and
+> refinery's push, refinery escalates to mayor (no silent overwrite).
 
 ### "check vendor drift" / "is gastown stale?"
 
@@ -702,16 +745,21 @@ Tell the operator (only if they engaged you; otherwise stay quiet):
 ## Conflict-Questions Handback
 
 When a bead with `metadata.conflict_questions` is your assignment, a
-`mol-upstream-gc-rebase` polecat escalated because:
-- A rework polecat reported `infeasible` (couldn't complete the rework
-  from its context), OR
-- The rebase polecat got stuck in a state it can't advance past
-  (`MAX_DISPATCHES` exceeded, mid-rebase commit unidentifiable, etc).
+`mol-upstream-gc-rebase` polecat hit a conflict it would have had to guess
+at, and recorded the question instead of faking a resolution:
+- v12: a check-loop iteration judged a conflicted commit `infeasible` to
+  port. The iteration leaves the rebase where it is and closes; the bead
+  reaches you when the loop later runs out of attempts, so it normally
+  arrives carrying `aborted_at=rebase-loop-exhausted` as well.
+- v11 (legacy): a rework polecat reported `infeasible`, or the rebase
+  polecat got stuck in a state it couldn't advance past (`MAX_DISPATCHES`
+  exceeded, mid-rebase commit unidentifiable, etc).
 
 Both shapes write `metadata.conflict_questions` as a JSON array with
-one entry per blocker, describing the situation. This path is expected
-to be rare under the rework-dispatch rule — reaching it implies a
-pathological case the focused rework polecat couldn't navigate.
+one entry per blocker, describing the situation. Reaching it means a
+commit whose intent could not be re-established on the new upstream
+layer without a human decision — the loop is deliberately not allowed to
+resolve that by guessing.
 
 Before opening the conversation, **verify the rebase didn't land out-of-
 band**. Use the same `pre_rebase_tip` vs `origin/main` check described

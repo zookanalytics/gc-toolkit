@@ -134,7 +134,13 @@ What this means for you as a polecat driving an iteration:
 
 Budget exhaustion (`max_attempts`) closes the control bead
 `gc.outcome=fail` and leaves `install`/`push` blocked. That is the
-escalation signal for a rebase the loop could not finish.
+escalation signal for a rebase the loop could not finish. Because no
+agent runs after it, the exit condition itself performs the handback on
+the last failing attempt: the issue bead gets
+`aborted_at=rebase-loop-exhausted`, goes back to
+`metadata.requesting_keeper` with the failure tail in its notes, and the
+keeper is nudged. You never have to arrange that from inside an
+iteration.
 
 ### Conflict policy: must not dead-end
 
@@ -146,8 +152,9 @@ a rebase conflict. The polecat must either:
 2. **Pause with concrete questions** for the operator, routed
    through the gascity-keeper. Stamp `metadata.conflict_questions` on
    the bead, leave the rebase where it stands, and let the loop
-   exhaust — the keeper drives the operator conversation from the
-   recorded questions and the control bead's `gc.outcome=fail`.
+   exhaust — the exhaustion handback above puts the bead on the
+   keeper's hook, and the keeper drives the operator conversation from
+   the recorded questions.
 
 The abort-and-mail shape is unacceptable because it leaves the
 operator with manual git work the polecat is supposed to handle —

@@ -60,7 +60,14 @@ when the rebase is finished, the worktree is clean, HEAD sits on top of
 the upstream tip recorded in `metadata.rebase_onto_sha`, and
 `metadata.check_passed_sha` equals the live HEAD. Anything else fails and
 the next iteration starts. Exhausting `max_attempts` closes the control
-bead with `gc.outcome = fail` and leaves `install` / `push` blocked.
+bead with `gc.outcome = fail` and leaves `install` / `push` blocked — and
+because nothing runs after that, the exit condition performs the keeper
+handback itself on the last failing attempt: it stamps
+`aborted_at=rebase-loop-exhausted` on the work bead, reassigns it to
+`requesting_keeper` with the failure tail in the notes, and nudges. A
+control bead that closes `fail` without a keeper-visible work bead is the
+stranded state this rewrite exists to remove, so the handback is part of
+the exit condition rather than a step an exhausted loop never reaches.
 
 Prior iterations remain as durable history — retries append, they never
 reopen. `metadata.conflict_resolutions` still accumulates one audit entry
@@ -98,7 +105,7 @@ local hunks remains gone: no silent drops, no auto-resolution.
 | Step | Failure handling |
 |------|------------------|
 | survey | LLM judgment can be wrong; record verdicts on the bead and proceed — the rebase step's patch-id check is the safety net for `drop-merged-upstream` |
-| rebase | A conflict is the next iteration, not a failure. The step's own exit condition (`rebase-check.sh`) is the safety net for "we accepted a resolution that broke the kept set": it will not pass until `{{check_command}}` is green at the live HEAD, so a bad resolution simply fails the gate and buys another iteration. `metadata.backup_ref` keeps any state recoverable. Exhausting `max_attempts` closes the control bead `gc.outcome=fail`, which is the escalation signal — the keeper sweeps it alongside `aborted_at` and `conflict_questions`. |
+| rebase | A conflict is the next iteration, not a failure. The step's own exit condition (`rebase-check.sh`) is the safety net for "we accepted a resolution that broke the kept set": it will not pass until `{{check_command}}` is green at the live HEAD, so a bad resolution simply fails the gate and buys another iteration. `metadata.backup_ref` keeps any state recoverable. Exhausting `max_attempts` closes the control bead `gc.outcome=fail`; the exit condition hands the work bead back to the keeper on that last failing attempt (`aborted_at=rebase-loop-exhausted`, reassigned, failure tail in notes, nudge), so the keeper's ordinary `aborted_at` sweep surfaces it. |
 | install | Keeper handback (`aborted_at=install`, reassign to `requesting_keeper`, tail in notes) + keeper nudge first; mail secondary. Bead stays open. |
 | push | Push of `HEAD:rebase/{{issue}}` is fast-forward on the polecat-owned ref — failures here are auth/network/ref-protection, NOT a race against `{{upstream_branch}}`. Keeper handback (`aborted_at=push`, reassign to `requesting_keeper`, context in notes) + keeper nudge first; mail secondary. Race-loss against `{{upstream_branch}}` is detected and escalated by refinery via the overlay's `--force-with-lease` lease, not by this step. |
 
@@ -120,15 +127,19 @@ handback (`metadata.rebase_in_progress=true` + `metadata.pending_rework` +
 reassignment to the keeper, worktree parked mid-rebase awaiting a re-pour)
 is gone: the loop keeps the worktree and resumes itself, so there is
 nothing for the keeper to re-pour. Those two metadata keys are no longer
-written by this formula.
+written by this formula. The one handback the rebase step still performs is
+at the END of the loop, described above: `aborted_at=rebase-loop-exhausted`,
+written by the exit condition, not by an iteration.
 
 A conflict the iteration genuinely cannot resolve uses the existing
 `metadata.conflict_questions` shape — the iteration records the question,
 leaves the rebase where it is, and does NOT fake a resolution. The loop
-then exhausts its budget and the control bead closes `gc.outcome=fail`.
-The keeper's operator conversation handles `conflict_questions` as
-before; `gc.outcome=fail` on the control bead is the peer signal that the
-loop stopped trying."""
+then exhausts its budget, the control bead closes `gc.outcome=fail`, and
+the exit condition routes the work bead to the keeper carrying both
+`conflict_questions` and `aborted_at=rebase-loop-exhausted`. The keeper's
+operator conversation handles `conflict_questions` as before; what changed
+is that it now reliably reaches the keeper's hook instead of depending on
+an agent that has already stopped running."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
 version = 12
@@ -632,8 +643,14 @@ gc bd update {{issue}} \\
   --set-metadata conflict_questions="$(printf '%s' "$QUESTIONS" | jq -c ". + [$ENTRY]")"
 ```
 
-The loop will then exhaust `max_attempts` and the control bead closes with
-`gc.outcome=fail`, which is the escalation signal the keeper sweeps.
+Then close your bead as usual (step 7) — do NOT reassign it to the keeper
+and do NOT drain-and-park. Recording the question is the whole escalation
+on your side: the loop runs out its remaining attempts, and on the last
+failing attempt the exit condition hands {{issue}} back to the keeper for
+you (`aborted_at=rebase-loop-exhausted`, reassigned to
+`metadata.requesting_keeper`, failure tail appended to the notes, keeper
+nudged) while the control bead closes `gc.outcome=fail`.
+
 `metadata.backup_ref` still restores the pre-rebase state if an operator
 decides to unwind: `git reset --hard $(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')`.
 
@@ -660,15 +677,20 @@ worktree closer to that state has done its job."""
 # Total iterations including the first. Each iteration can resolve several
 # conflicts, so this bounds pathological churn rather than conflict count; the
 # v11 hand-rolled loop used MAX_DISPATCHES=50 for the same purpose, one
-# dispatch per conflict. Exhaustion closes the control bead gc.outcome=fail.
+# dispatch per conflict. Exhaustion closes the control bead gc.outcome=fail, and
+# the exit condition hands the work bead back to the keeper on that last failing
+# attempt (aborted_at=rebase-loop-exhausted) — it reads this budget off the
+# control bead's gc.max_attempts, so changing the number here needs no other
+# edit.
 max_attempts = 25
 
 [steps.check.check]
 mode = "exec"
 path = "../assets/scripts/rebase-check.sh"
-# The script only reads bead metadata and git state — it verifies the gate, it
-# does not run it (see the header of rebase-check.sh for why). 2m is slack for
-# a loaded Dolt, not a budget for `make check`.
+# The script reads bead metadata and git state — it verifies the gate, it does
+# not run it (see the header of rebase-check.sh for why). Its one write is the
+# exhaustion handback on the final failing attempt. 2m is slack for a loaded
+# Dolt, not a budget for `make check`.
 timeout = "2m"
 
 [[steps]]
