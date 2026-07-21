@@ -34,54 +34,83 @@ one auditable place (refinery + rig-scoped overlay).
 | check_command | make check | Post-rebase quality gate (fmt-check + lint + vet + test in gascity) |
 | install_command | make install | Local rebuild of `gc` into `$INSTALL_DIR` |
 | notify_recipient | human | Mail target on completion / abort |
-| requesting_keeper | (empty) | Keeper address for the rework-dispatch handback; falls back to notify_recipient if unset |
+| requesting_keeper | (empty) | Keeper address for the install/push abort handbacks; falls back to notify_recipient if unset |
 
-## Conflict handling: dispatch a rework polecat per kept-commit conflict
+## Conflict handling: one fresh iteration per conflict (check loop)
 
 Our fork commits represent goals/intents, not literal implementations.
 When `git rebase` halts on a kept commit because upstream shifted the
-surrounding code, the rebase polecat:
+surrounding code, the *intent* still applies even though the diff does
+not — so a conflict is not a failure, it is the next unit of work.
 
-1. Captures the conflict context (kept commit body, conflicted file
-   status + markers, upstream's recent diffs touching the same files).
-2. Files a rework bead (parent-child to the rebase bead) and dispatches
-   a focused rework polecat under `mol-upstream-gc-rebase-rework`, which
-   shares this worktree and the in-progress rebase state.
-3. Sets `metadata.rebase_in_progress=true` and `metadata.pending_rework`
-   on the rebase bead, reassigns it to the requesting keeper, drains.
-4. On re-entry (keeper re-pours after the rework polecat closes its
-   bead), reads the rework's classification and routes:
-   - **mechanical** — `git rebase --continue` (rework polecat already
-     committed); log an audit entry.
-   - **dropped-absorbed** — `git rebase --skip`; log an audit entry.
-   - **judgment-required** — file a review bead, sling a review polecat
-     against the rework commit; on approve, `git rebase --continue`; on
-     reject, file a follow-up rework bead with the rejection reason and
-     drain again.
-   - **infeasible** — hand the rebase bead back to the keeper with the
-     rework's `infeasible_reason` surfaced via `metadata.conflict_questions`
-     so the operator can intervene.
-5. The audit log `metadata.conflict_resolutions` accumulates one entry
-   per resolved conflict.
+The `rebase` step is a **check loop** (`[steps.check]`, formulas v2
+§3.1). The orchestrator runs the step, runs an exit-condition script when
+the iteration closes, and while that script fails it appends another
+iteration. Each iteration is its own bead with its own agent session, so
+every conflict is met with fresh context. The step materializes as:
 
-This replaces the v6 upstream-wins/`--ours` mechanism (tk-gzat2),
-which silently dropped local hunks. The rework-polecat path treats
-each conflict as a small, focused rework with classification-driven
-routing — no silent drops, no auto-resolution.
+| Bead | Kind | Role |
+|------|------|------|
+| `<wf>.rebase.spec` | `spec` | the serialized step definition (stable prompt) |
+| `<wf>.rebase.iteration.N` | (work) | resume the worktree, advance the rebase, run the gate |
+| `<wf>.rebase` | `ralph` | control bead; blocks on the live iteration, holds loop state |
+
+`assets/scripts/rebase-check.sh` is the exit condition. It passes only
+when the rebase is finished, the worktree is clean, HEAD sits on top of
+the upstream tip recorded in `metadata.rebase_onto_sha`, and
+`metadata.check_passed_sha` equals the live HEAD. Anything else fails and
+the next iteration starts. Exhausting `max_attempts` closes the control
+bead with `gc.outcome = fail` and leaves `install` / `push` blocked — and
+because nothing runs after that, the exit condition performs the keeper
+handback itself on the last failing attempt: it stamps
+`aborted_at=rebase-loop-exhausted` on the work bead, reassigns it to
+`requesting_keeper` with the failure tail in the notes, and nudges. A
+control bead that closes `fail` without a keeper-visible work bead is the
+stranded state this rewrite exists to remove, so the handback is part of
+the exit condition rather than a step an exhausted loop never reaches.
+
+Prior iterations remain as durable history — retries append, they never
+reopen. `metadata.conflict_resolutions` still accumulates one audit entry
+per resolved conflict.
+
+**Iterations must be pool-routed.** The runtime recycles the previous
+iteration's worker session before appending the next one, but only when
+the attempt target is a pool (`beadUsesMetadataPoolRouteWithConfig` in
+`internal/dispatch/control.go`, called from `internal/dispatch/retry.go`).
+Sling this formula at a pool, never at a named agent: a named target
+skips the recycle, iteration N+1 lands in the session that ran iteration
+N with iteration N still in its context window, and the fresh-context
+property this design exists for is lost. The step declares no `assignee`
+— which `[steps.check]` forbids anyway.
+
+**This replaces the v11 rework-polecat dispatch.** v11 hand-rolled the
+same loop out of bead-filing, metadata flags, and re-pour: capture the
+conflict, file a rework bead, sling a rework polecat under
+`mol-upstream-gc-rebase-rework`, set `metadata.rebase_in_progress` +
+`metadata.pending_rework`, hand the bead back to the keeper and drain,
+then read the classification on re-entry. Every known defect in this area
+was a defect in that mechanism rather than in rebasing — re-pour was a
+fallback that could not resume a paused rebase and burned ~12 steps, a
+handback had to clear the assignee or the bead went invisible to
+`scale_check`, and an open rework required a drain before re-pour. The
+loop state now lives in the control bead and the exit condition is a
+script, so none of those states exist. `mol-upstream-gc-rebase-rework` is
+kept for manual dispatch, but this formula no longer slings it.
+
+The v6 upstream-wins/`--ours` mechanism (tk-gzat2) that silently dropped
+local hunks remains gone: no silent drops, no auto-resolution.
 
 ## Failure modes
 
 | Step | Failure handling |
 |------|------------------|
 | survey | LLM judgment can be wrong; record verdicts on the bead and proceed — the rebase step's patch-id check is the safety net for `drop-merged-upstream` |
-| rebase | Conflicts dispatch a rework polecat per conflicted kept commit. The post-rebase `check` step is the safety net for "we accepted a rework that broke the kept set." `metadata.backup_ref` keeps any state recoverable. |
-| check | Keeper handback (`aborted_at=check`, reassign to `requesting_keeper`, failure tail in bead notes) + keeper nudge land first; mail to `notify_recipient` is a secondary backstop. Bead stays open so a fix can resume. The default `make check` covers fmt-check, lint, vet, and test — a failure here points at any of those surfaces. |
+| rebase | A conflict is the next iteration, not a failure. The step's own exit condition (`rebase-check.sh`) is the safety net for "we accepted a resolution that broke the kept set": it will not pass until `{{check_command}}` is green at the live HEAD, so a bad resolution simply fails the gate and buys another iteration. `metadata.backup_ref` keeps any state recoverable. Exhausting `max_attempts` closes the control bead `gc.outcome=fail`; the exit condition hands the work bead back to the keeper on that last failing attempt (`aborted_at=rebase-loop-exhausted`, reassigned, failure tail in notes, nudge), so the keeper's ordinary `aborted_at` sweep surfaces it. |
 | install | Keeper handback (`aborted_at=install`, reassign to `requesting_keeper`, tail in notes) + keeper nudge first; mail secondary. Bead stays open. |
 | push | Push of `HEAD:rebase/{{issue}}` is fast-forward on the polecat-owned ref — failures here are auth/network/ref-protection, NOT a race against `{{upstream_branch}}`. Keeper handback (`aborted_at=push`, reassign to `requesting_keeper`, context in notes) + keeper nudge first; mail secondary. Race-loss against `{{upstream_branch}}` is detected and escalated by refinery via the overlay's `--force-with-lease` lease, not by this step. |
 
-The post-survey **abort** paths (check, install, push) — and the
-workspace-setup backup-ref refusal and the rebase-mismatch sanity abort —
-share the same keeper-routed shape: reassign the bead to the requesting
+The post-rebase **abort** paths (install, push) — and the
+workspace-setup backup-ref refusal — share the same keeper-routed shape: reassign the bead to the requesting
 keeper (`requesting_keeper`, falling back to `notify_recipient` only when
 no keeper was stamped), record the failure tail in the bead **notes**
 (durable even if mail fails), set `aborted_at`, and **nudge the keeper**,
@@ -93,19 +122,34 @@ arrived. We do not assign the operator's mail alias as the bead owner: the
 keeper is the durable holder and the operator's contact point (the keeper
 is the single upstream front-door; see gastownhall/gascity#2082 alignment).
 
-The rebase **rework-dispatch handback** is a different shape: bead
-handback uses `metadata.rebase_in_progress=true` + `metadata.pending_rework`
-+ reassignment to `metadata.requesting_keeper`, with the worktree kept
-mid-rebase so the next polecat can resume cheaply. The keeper's prime
-sweep matches `rebase_in_progress=true` as a peer predicate to
-`aborted_at` and `conflict_questions`.
+The rebase step no longer hands back mid-loop. v11's rework-dispatch
+handback (`metadata.rebase_in_progress=true` + `metadata.pending_rework` +
+reassignment to the keeper, worktree parked mid-rebase awaiting a re-pour)
+is gone: the loop keeps the worktree and resumes itself, so there is
+nothing for the keeper to re-pour. Those two metadata keys are no longer
+written by this formula. The one handback the rebase step still performs is
+at the END of the loop, described above: `aborted_at=rebase-loop-exhausted`,
+written by the exit condition, not by an iteration.
 
-The rebase **infeasible handback** (rework polecat reported infeasible)
-uses the legacy `metadata.conflict_questions` shape so the keeper's
-existing operator conversation handles it without bespoke flow."""
+A conflict the iteration genuinely cannot resolve uses the existing
+`metadata.conflict_questions` shape — the iteration records the question,
+leaves the rebase where it is, and does NOT fake a resolution. The loop
+then exhausts its budget, the control bead closes `gc.outcome=fail`, and
+the exit condition routes the work bead to the keeper carrying both
+`conflict_questions` and `aborted_at=rebase-loop-exhausted`. The keeper's
+operator conversation handles `conflict_questions` as before; what changed
+is that it now reliably reaches the keeper's hook instead of depending on
+an agent that has already stopped running."""
 formula = "mol-upstream-gc-rebase"
 extends = ["mol-polecat-base"]
-version = 11
+version = 12
+
+# The `rebase` step uses [steps.check], a graph-only construct, so the v2
+# contract is declared explicitly (formulas v2 §5). `mol-polecat-base` already
+# requires the same range; the constraint sets must overlap or resolution fails
+# with formula.compiler_requirement_conflict.
+[requires]
+formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.upstream_remote]
@@ -121,7 +165,7 @@ description = "Branch to rebase onto and push back to"
 default = "main"
 
 [vars.check_command]
-description = "Post-rebase quality gate command. The default `make check` in gascity is `fmt-check lint vet test` — running the full Go pipeline on the rebased tip. The wider gate is the authoritative safety net for the kept set, since rework polecats commit with `--no-verify` and the gascity pre-commit hook (which covers the same surfaces) is bypassed per rework. Operators can override (e.g., `--var check_command='make test'` to scope down) but the default is intentionally the full gate."
+description = "Post-rebase quality gate command. The default `make check` in gascity is `fmt-check lint vet test` — running the full Go pipeline on the rebased tip. The wider gate is the authoritative safety net for the kept set, since conflict resolutions are committed by `git rebase --continue` and the gascity pre-commit hook (which covers the same surfaces) does not run on them. Operators can override (e.g., `--var check_command='make test'` to scope down) but the default is intentionally the full gate."
 default = "make check"
 
 [vars.install_command]
@@ -266,16 +310,26 @@ pre-rebase tip of `{{origin_remote}}/{{upstream_branch}}` on a fresh run (or
 the backup ref already validates on a resume); `metadata.backup_ref` is
 recorded; `{{upstream_remote}}` has been fetched."""
 
+# The next three steps are OVERRIDES, not filler. `mol-polecat-base` defines
+# real `preflight-tests`, `implement`, and `self-review` steps, and `extends`
+# merges a parent step in unless the child replaces it by ID (`mergeSteps` in
+# internal/formula/parser.go — there is no mechanism to drop an inherited step).
+# Deleting these stubs therefore does not remove three steps; it resurrects the
+# base's generic feature-implementation steps and runs them against the gascity
+# rebase worktree. They stay until this formula stops extending the base.
+
 [[steps]]
 id = "preflight-tests"
 title = "Skip — rebase variant uses its own gates"
 needs = ["workspace-setup"]
 description = """
-This formula replaces the standard polecat preflight/implement/self-review
-sequence with `survey → rebase → check → install → push → notify-and-close`.
+Neutralizes `mol-polecat-base`'s preflight step. This formula replaces the
+standard polecat preflight/implement/self-review sequence with
+`survey → rebase → install → push → notify-and-close`.
+
 There is no preflight to run on `{{upstream_branch}}` for this variant —
-the rebase step's patch-id checks plus the post-rebase quality gate cover
-what preflight would have caught.
+the rebase step's patch-id checks, plus the quality gate the rebase check
+loop will not pass without, cover what preflight would have caught.
 
 Close this step and proceed."""
 
@@ -284,16 +338,22 @@ id = "implement"
 title = "Skip — replaced by survey + rebase steps"
 needs = ["preflight-tests"]
 description = """
-The implementation work for this formula lives in the `survey` and `rebase`
-steps below. Close this step and proceed."""
+Neutralizes `mol-polecat-base`'s implement step. The implementation work
+for this formula lives in the `survey` and `rebase` steps below.
+
+Close this step and proceed."""
 
 [[steps]]
 id = "self-review"
-title = "Skip — replaced by check + install steps"
+title = "Skip — replaced by the rebase check loop + install"
 needs = ["implement"]
 description = """
-The post-rebase verification work for this formula lives in the `check` and
-`install` steps below. Close this step and proceed."""
+Neutralizes `mol-polecat-base`'s self-review step. The post-rebase
+verification work for this formula lives inside the `rebase` check loop
+(which will not exit until `{{check_command}}` is green at the rebased
+HEAD) and in the `install` step below.
+
+Close this step and proceed."""
 
 [[steps]]
 id = "survey"
@@ -372,202 +432,78 @@ readable in the bead notes."""
 
 [[steps]]
 id = "rebase"
-title = "Rebase onto upstream; dispatch rework polecat per kept-commit conflict"
+title = "Rebase onto upstream, one conflict per iteration, until the gate is green"
 needs = ["survey"]
 description = """
-Run a single scripted `git rebase -i` that drops `drop-supplanted` commits
-up front via a sequence-editor script. Patch-id matching still drops
-`drop-merged-upstream` commits automatically. Remaining `keep` commits
-replay onto upstream.
+**Config: check_command = {{check_command}}**
 
-A conflict on a `keep` commit is *not* a failure — it is the dispatch
-point for a focused rework polecat that re-implements the commit's
-intent on the new upstream layer.
+You are **one iteration of a check loop**. Read this whole step before you
+touch anything.
 
-**1. Handle a resume that's mid-rebase with pending_rework or pending_review.**
+You may be iteration 1 starting a fresh rebase, or iteration N resuming a
+rebase that halted on a conflict, or the iteration that only has to get the
+quality gate green. Nothing from a previous iteration is in your context —
+that is the point of the design, not an accident. Determine where you are
+from the worktree and the bead, never from memory or assumption.
 
-If `metadata.pending_rework` is set, a prior polecat dispatched a rework
-polecat and drained. Read the rework bead's classification and route.
+When you close your bead the orchestrator runs the step's exit condition
+(`assets/scripts/rebase-check.sh`). It passes only when all of these hold:
 
-If `metadata.pending_review` is set, a prior polecat dispatched a review
-polecat after a `judgment-required` rework. Read the review verdict and
-route.
+- no rebase is in progress in the worktree,
+- the worktree is clean,
+- HEAD sits on top of `metadata.rebase_onto_sha`,
+- `metadata.check_passed_sha` equals the live HEAD.
+
+If it fails, the orchestrator appends the next iteration with a fresh
+session. You do not need to finish everything in one turn; you do need to
+leave the worktree and the bead in a truthful state.
+
+**1. Enter the worktree.**
+
+All work happens in the gascity rebase worktree that `workspace-setup`
+recorded. Never work in the rig checkout.
 
 ```bash
-PENDING_REWORK=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.pending_rework // empty')
-PENDING_REVIEW=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.pending_review // empty')
-REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
-[ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
-STUCK=0
-REDISPATCH_AFTER_REJECT=0
-REDISPATCH_REJECT_REASON=""
-REDISPATCH_PRIOR_REWORK=""
-DISPATCH_REVIEW=0
-VERDICT_PATH=""
+WORKTREE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty')
+[ -n "$WORKTREE" ] || { echo "ERROR: no metadata.work_dir on {{issue}}" >&2; exit 1; }
+cd "$WORKTREE" || exit 1
 ```
 
-**1a. If pending_review is set, handle the review verdict first.**
+**2. Determine which state you are in.**
 
 ```bash
-if [ -n "$PENDING_REVIEW" ]; then
-    REVIEW_STATUS=$(gc bd show "$PENDING_REVIEW" --json | jq -r '.[0].status // empty')
-    if [ "$REVIEW_STATUS" != "closed" ]; then
-        echo "ERROR: pending_review $PENDING_REVIEW is not closed yet; cannot proceed." >&2
-        echo "Keeper re-poured prematurely. Drain and let the keeper re-pour when review closes." >&2
-        gc runtime drain-ack
-        exit 1
-    fi
-    VERDICT=$(gc bd show "$PENDING_REVIEW" --json | jq -r '.[0].metadata.verdict // empty')
-    if [ "$VERDICT" = "approve" ]; then
-        gc bd update {{issue}} --unset-metadata pending_review
-        VERDICT_PATH="approve"
-    elif [ "$VERDICT" = "reject" ]; then
-        REJECT_REASON=$(gc bd show "$PENDING_REVIEW" --json | jq -r '.[0].metadata.reject_reason // "review rejected the rework"')
-        # Reset the rejected rework commit off HEAD so we're back to the
-        # mid-rebase conflict state. The rework polecat's commit was the
-        # last commit; HEAD~1 is the pre-rework rebase HEAD.
-        if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
-            git reset --hard HEAD~1
-        fi
-        gc bd update {{issue}} --unset-metadata pending_review
-        REDISPATCH_AFTER_REJECT=1
-        REDISPATCH_REJECT_REASON="$REJECT_REASON"
-        REDISPATCH_PRIOR_REWORK="$PENDING_REWORK"
-    else
-        echo "WARN: review bead $PENDING_REVIEW closed without metadata.verdict; treating as reject for safety." >&2
-        if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
-            git reset --hard HEAD~1
-        fi
-        gc bd update {{issue}} --unset-metadata pending_review
-        REDISPATCH_AFTER_REJECT=1
-        REDISPATCH_REJECT_REASON="review closed without verdict metadata"
-        REDISPATCH_PRIOR_REWORK="$PENDING_REWORK"
-    fi
+if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+    STATE=mid-rebase
+elif [ -z "$(gc bd show {{issue}} --json | jq -r '.[0].metadata.rebase_onto_sha // empty')" ]; then
+    STATE=fresh
+else
+    STATE=rebased
 fi
+echo "iteration state: $STATE"
 ```
 
-**1b. If pending_rework is set (and we didn't just reject), handle the
-classification.**
+**3. STATE=fresh — start the rebase.**
+
+Fetch upstream and pin the tip you are rebasing onto. Pin it exactly once:
+the exit condition requires HEAD to sit on top of
+`metadata.rebase_onto_sha`, so a later re-fetch that moved the tip would
+make an already-started rebase impossible to pass. On any resume, do NOT
+re-fetch and do NOT re-stamp.
 
 ```bash
-if [ -n "$PENDING_REWORK" ] && [ "$REDISPATCH_AFTER_REJECT" != "1" ]; then
-    REWORK_STATUS=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0].status // empty')
-    if [ "$REWORK_STATUS" != "closed" ]; then
-        echo "ERROR: pending_rework $PENDING_REWORK is not closed yet; cannot proceed." >&2
-        gc runtime drain-ack
-        exit 1
-    fi
-    CLASSIFICATION=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0].metadata.classification // empty')
-    REWORK_COMMIT_SHA=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0].metadata.commit_sha // empty')
-    REWORK_COMMIT_SUBJECT=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0].metadata.commit_subject // empty')
-    REWORK_FILES=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0].metadata.files_changed // "[]"')
-
-    case "$CLASSIFICATION" in
-        mechanical)
-            # Rework polecat committed onto HEAD; continue the rebase.
-            if ! git -c core.editor=true rebase --continue >/tmp/rebase-out-{{issue}}.txt 2>&1; then
-                STUCK=1
-            fi
-            ENTRY=$(jq -nc \
-                --arg sha "$REWORK_COMMIT_SHA" \
-                --arg subj "$REWORK_COMMIT_SUBJECT" \
-                --arg cls "$CLASSIFICATION" \
-                --arg rework "$PENDING_REWORK" \
-                --argjson files "$REWORK_FILES" \
-                '{commit_sha:$sha, commit_subject:$subj, classification:$cls, resolution:"reworked", rework_bead:$rework, review_bead:null, judgment_summary:null, files_changed:$files}')
-            LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
-            LOG=$(printf '%s' "$LOG" | jq -c ". + [$ENTRY]")
-            gc bd update {{issue}} --set-metadata conflict_resolutions="$LOG" --unset-metadata pending_rework
-            ;;
-        dropped-absorbed)
-            # Worktree was left clean; skip the conflicted commit.
-            if ! git -c core.editor=true rebase --skip >/tmp/rebase-out-{{issue}}.txt 2>&1; then
-                STUCK=1
-            fi
-            ENTRY=$(jq -nc \
-                --arg sha "$REWORK_COMMIT_SHA" \
-                --arg subj "$REWORK_COMMIT_SUBJECT" \
-                --arg cls "$CLASSIFICATION" \
-                --arg rework "$PENDING_REWORK" \
-                '{commit_sha:$sha, commit_subject:$subj, classification:$cls, resolution:"skipped", rework_bead:$rework, review_bead:null, judgment_summary:null, files_changed:[]}')
-            LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
-            LOG=$(printf '%s' "$LOG" | jq -c ". + [$ENTRY]")
-            gc bd update {{issue}} --set-metadata conflict_resolutions="$LOG" --unset-metadata pending_rework
-            ;;
-        judgment-required)
-            JUDGMENT=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0].metadata.judgment_summary // empty')
-            if [ "$VERDICT_PATH" = "approve" ]; then
-                # Review approved this commit; continue.
-                if ! git -c core.editor=true rebase --continue >/tmp/rebase-out-{{issue}}.txt 2>&1; then
-                    STUCK=1
-                fi
-                # PENDING_REVIEW was unset above; pull the review bead from
-                # the existing conflict_resolutions partial (we passed it
-                # through the approve-path metadata write).
-                REVIEW_FOR_LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.last_review_bead // ""')
-                ENTRY=$(jq -nc \
-                    --arg sha "$REWORK_COMMIT_SHA" \
-                    --arg subj "$REWORK_COMMIT_SUBJECT" \
-                    --arg cls "$CLASSIFICATION" \
-                    --arg rework "$PENDING_REWORK" \
-                    --arg review "$REVIEW_FOR_LOG" \
-                    --arg judgment "$JUDGMENT" \
-                    --argjson files "$REWORK_FILES" \
-                    '{commit_sha:$sha, commit_subject:$subj, classification:$cls, resolution:"reworked-with-review", rework_bead:$rework, review_bead:$review, judgment_summary:$judgment, files_changed:$files}')
-                LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
-                LOG=$(printf '%s' "$LOG" | jq -c ". + [$ENTRY]")
-                gc bd update {{issue}} --set-metadata conflict_resolutions="$LOG" --unset-metadata pending_rework --unset-metadata last_review_bead
-            else
-                # Need to dispatch the review polecat.
-                DISPATCH_REVIEW=1
-            fi
-            ;;
-        infeasible)
-            INFEASIBLE_REASON=$(gc bd show "$PENDING_REWORK" --json | jq -r '.[0].metadata.infeasible_reason // "rework polecat reported infeasible"')
-            ENTRY=$(jq -nc \
-                --arg sha "$REWORK_COMMIT_SHA" \
-                --arg subj "$REWORK_COMMIT_SUBJECT" \
-                --arg cls "$CLASSIFICATION" \
-                --arg rework "$PENDING_REWORK" \
-                --arg reason "$INFEASIBLE_REASON" \
-                '{commit_sha:$sha, commit_subject:$subj, classification:$cls, resolution:"escalated-to-keeper", rework_bead:$rework, review_bead:null, judgment_summary:null, files_changed:[], infeasible_reason:$reason}')
-            LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
-            LOG=$(printf '%s' "$LOG" | jq -c ". + [$ENTRY]")
-            QUESTIONS=$(jq -nc \
-                --arg sha "$REWORK_COMMIT_SHA" \
-                --arg subj "$REWORK_COMMIT_SUBJECT" \
-                --arg rework "$PENDING_REWORK" \
-                --arg reason "$INFEASIBLE_REASON" \
-                '[{commit_sha:$sha, commit_subject:$subj, rework_bead:$rework, question:("rework polecat reported infeasible: " + $reason + ". Operator must intervene — either drive the rework by hand in the worktree, or skip the commit via git rebase --skip, or git rebase --abort to roll back.")}]')
-            gc bd update {{issue}} \
-                --set-metadata conflict_resolutions="$LOG" \
-                --set-metadata conflict_questions="$QUESTIONS" \
-                --unset-metadata pending_rework \
-                --unset-metadata rebase_in_progress \
-                --status=open \
-                --assignee="$REQUESTING_KEEPER"
-            gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: rework infeasible on $REWORK_COMMIT_SHA — operator intervention needed"
-            gc runtime drain-ack
-            exit 0
-            ;;
-        *)
-            echo "ERROR: pending_rework $PENDING_REWORK closed without metadata.classification" >&2
-            STUCK=1
-            ;;
-    esac
-fi
+git fetch {{upstream_remote}} {{upstream_branch}}
+ONTO=$(git rev-parse {{upstream_remote}}/{{upstream_branch}})
+gc bd update {{issue}} --set-metadata rebase_onto_sha="$ONTO"
 ```
 
-**1c. Build the sequence-editor script (for the fresh-rebase case).**
-
-The script mutates the rebase todo list git generates: for every sha in
-`metadata.commit_verdicts` whose verdict is `drop-supplanted`, rewrite
-`pick <sha>` → `drop <sha>` in the todo file. The shas are passed in
-via the exported `DROP_SHAS` environment variable so the heredoc body
-can stay quoted (no escaping ambiguity).
+Build the sequence-editor script. It mutates the todo list git generates:
+for every sha in `metadata.commit_verdicts` whose verdict is
+`drop-supplanted`, rewrite `pick <sha>` to `drop <sha>`. The shas are
+passed via the exported `DROP_SHAS` variable so the heredoc body can stay
+quoted (no escaping ambiguity).
 
 ```bash
-DROP_SHAS=$(gc bd show {{issue}} --json | jq -r \
+DROP_SHAS=$(gc bd show {{issue}} --json | jq -r \\
   '.[0].metadata.commit_verdicts // "[]" | fromjson
    | map(select(.verdict=="drop-supplanted") | .sha) | join(" ")')
 export DROP_SHAS
@@ -590,435 +526,177 @@ awk -v drops="$DROP_SHAS" '
 ' "$todo" > "$todo.tmp" && mv "$todo.tmp" "$todo"
 SEQ
 chmod +x /tmp/seqedit-{{issue}}.sh
+
+GIT_SEQUENCE_EDITOR=/tmp/seqedit-{{issue}}.sh \\
+  git rebase -i "$ONTO" >/tmp/rebase-out-{{issue}}.txt 2>&1 || true
 ```
 
-If `DROP_SHAS` is empty (no `drop-supplanted` entries in the verdict
-table), the sequence editor is a no-op and the rebase behaves like a
-plain `git rebase {{upstream_remote}}/{{upstream_branch}}` with patch-id
-auto-drops.
+If `DROP_SHAS` is empty the sequence editor is a no-op and this behaves
+like a plain `git rebase {{upstream_remote}}/{{upstream_branch}}` with
+patch-id auto-drops. `drop-merged-upstream` commits are dropped
+automatically by patch-id matching; `keep` commits replay onto upstream.
 
-**1d. Start the rebase (only if not already mid-rebase).**
+A conflict here is expected and is not a failure. Fall through to step 4.
 
-If we resumed from a rework-classification branch above (or if we just
-rejected a rework), the rebase is already in progress. Otherwise, start
-fresh.
+**4. STATE=mid-rebase — resolve the conflict in front of you.**
+
+This is the core of the loop and the reason each iteration gets a fresh
+session.
+
+Our fork commits represent goals or bugs we are trying to address, not
+hard-and-fast implementations. When upstream shifts the surrounding code
+the commit will not apply cleanly — but the *intention* usually still
+applies with some cleanup. Read the conflicted commit holistically and
+rework its intent onto the new upstream layer.
 
 ```bash
-if [ ! -d "$(git rev-parse --git-path rebase-merge)" ] && [ ! -d "$(git rev-parse --git-path rebase-apply)" ] && [ "$STUCK" != "1" ]; then
-    GIT_SEQUENCE_EDITOR=/tmp/seqedit-{{issue}}.sh \
-      git rebase -i {{upstream_remote}}/{{upstream_branch}} \
-      >/tmp/rebase-out-{{issue}}.txt 2>&1 || true
-fi
+COMMIT_SHA=$(git rev-parse REBASE_HEAD 2>/dev/null || echo "")
+git log -1 --format='%s%n%n%b' "$COMMIT_SHA"   # what this commit was FOR
+git status --porcelain                          # what is conflicted
+git log -p -5 {{upstream_remote}}/{{upstream_branch}} -- <conflicted file>
 ```
 
-`drop-merged-upstream` commits are auto-dropped by patch-id matching.
-`drop-supplanted` commits are scripted to `drop` in the todo before
-replay. `keep` commits replay onto upstream. Conflicts during replay do
-NOT halt the chain — they are handled by the dispatch-rework-polecat
-loop below.
+Judge each conflicted commit as one of the four standard classifications
+(the same vocabulary the `rebase-conventions` fragment defines):
 
-**2. Dispatch rework polecat per conflicted kept commit.**
+- **mechanical** — the intent ports over directly; resolve the markers,
+  keep the commit.
+- **dropped-absorbed** — upstream already provides the behavior, so the
+  commit's reason-for-existing is gone. `git rebase --skip` it, and drop
+  the WHOLE commit — do not preserve bundled extras.
+- **judgment-required** — the intent applies but the shape must change.
+  Make the call yourself and record your reasoning in the audit entry
+  below; there is no review polecat to route it to.
+- **infeasible** — you cannot port it without guessing. Do NOT invent a
+  resolution and do NOT skip it to make the loop pass; see step 6.
 
-While the rebase is in progress (stopped on a conflict) and we haven't
-already drained for a pending rework/review, capture the conflict
-context, file a rework bead, sling the rework polecat, set the rebase
-bead's drain state, and exit. The keeper re-pours us when the rework
-completes.
-
-Each polecat session dispatches AT MOST one rework polecat. A safety
-bound (`MAX_DISPATCHES`) prevents runaway dispatch loops on pathological
-repo states.
+Resolve, stage, and continue:
 
 ```bash
-DISPATCHES=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.dispatch_count // "0"')
-MAX_DISPATCHES=50
-
-if { [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; } && [ "$STUCK" != "1" ]; then
-    if [ "$DISPATCHES" -ge "$MAX_DISPATCHES" ]; then
-        echo "ERROR: exceeded MAX_DISPATCHES=$MAX_DISPATCHES; treating as stuck" >&2
-        STUCK=1
-    fi
-fi
-
-if { [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; } \
-        && [ "$STUCK" != "1" ] && [ "$DISPATCH_REVIEW" != "1" ]; then
-
-    COMMIT_SHA=$(git rev-parse REBASE_HEAD 2>/dev/null \
-        || cat "$(git rev-parse --git-path rebase-merge)/stopped-sha" 2>/dev/null \
-        || cat "$(git rev-parse --git-path rebase-apply)/original-commit" 2>/dev/null \
-        || echo "")
-    if [ -z "$COMMIT_SHA" ]; then
-        echo "ERROR: cannot identify in-progress commit; treating as stuck" >&2
-        STUCK=1
-    fi
-fi
-
-if { [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; } \
-        && [ "$STUCK" != "1" ] && [ "$DISPATCH_REVIEW" != "1" ] \
-        && [ -n "$COMMIT_SHA" ]; then
-
-    COMMIT_SUBJECT=$(git log -1 --format='%s' "$COMMIT_SHA" 2>/dev/null || echo "(unknown)")
-    COMMIT_BODY=$(git log -1 --format='%B' "$COMMIT_SHA" 2>/dev/null || echo "")
-    CONFLICTED_FILES_JSON=$(git status --porcelain \
-        | awk '$1 ~ /^(DD|AU|UD|UA|DU|AA|UU)$/ { print $2 }' \
-        | jq -R . | jq -sc .)
-
-    # Build the context dump inside the per-worktree git dir (preserved across drain).
-    # rev-parse --git-path resolves the real git dir whether .git is a directory or a
-    # linked-worktree gitdir pointer file, so the write never fails on $(pwd)/.git.
-    CONTEXT_FILE="$(git rev-parse --git-path "rework-context-${COMMIT_SHA}.md")"
-    {
-        echo "# Rework context for commit $COMMIT_SHA"
-        echo
-        echo "## Conflicted kept commit"
-        echo
-        echo "Subject: $COMMIT_SUBJECT"
-        echo "SHA: $COMMIT_SHA"
-        echo
-        echo "Full commit body:"
-        echo
-        echo '```'
-        echo "$COMMIT_BODY"
-        echo '```'
-        echo
-        echo "## Conflict status"
-        echo
-        echo '```'
-        git status --porcelain
-        echo '```'
-        echo
-        echo "## Conflicted files (raw content with conflict markers)"
-        echo
-        for f in $(printf '%s' "$CONFLICTED_FILES_JSON" | jq -r '.[]'); do
-            echo "### $f"
-            echo
-            echo '```'
-            cat "$f" 2>/dev/null || echo "(file unreadable)"
-            echo '```'
-            echo
-        done
-        echo "## Upstream's recent diffs touching the same files"
-        echo
-        for f in $(printf '%s' "$CONFLICTED_FILES_JSON" | jq -r '.[]'); do
-            echo "### $f"
-            echo
-            echo '```'
-            git log -p -5 {{upstream_remote}}/{{upstream_branch}} -- "$f" 2>/dev/null | head -500
-            echo '```'
-            echo
-        done
-        echo "## Goal-not-implementation framing"
-        echo
-        echo "Our fork commits represent goals or bugs we are trying to address,"
-        echo "not hard and fast implementations. When upstream shifts the surrounding"
-        echo "code, the commit will not apply cleanly — but the intention should"
-        echo "apply cleanly with some cleanup. Look at the work this commit did"
-        echo "holistically and rework it to apply on top of the new upstream."
-        echo
-        echo "Classify into one of: mechanical | dropped-absorbed | judgment-required | infeasible."
-        echo "See mol-upstream-gc-rebase-rework formula's classify-and-rework step"
-        echo "for the full classification rule."
-    } > "$CONTEXT_FILE"
-
-    if [ "$REDISPATCH_AFTER_REJECT" = "1" ]; then
-        {
-            echo
-            echo "## PRIOR REVIEW REJECTED A PREVIOUS REWORK"
-            echo
-            echo "Prior rework bead: $REDISPATCH_PRIOR_REWORK"
-            echo
-            echo "Rejection reason:"
-            echo "$REDISPATCH_REJECT_REASON"
-            echo
-            echo "Adjust your approach to address the rejection."
-        } >> "$CONTEXT_FILE"
-    fi
-
-    SHORT_SHA=$(printf '%s' "$COMMIT_SHA" | cut -c1-12)
-    REWORK_META=$(jq -n \
-        --arg work_dir "$(pwd)" \
-        --arg rebase_bead "{{issue}}" \
-        --arg requesting_keeper "$REQUESTING_KEEPER" \
-        --arg commit_sha "$COMMIT_SHA" \
-        --arg commit_subject "$COMMIT_SUBJECT" \
-        --argjson conflicted_files "$CONFLICTED_FILES_JSON" \
-        --arg context_file "$CONTEXT_FILE" \
-        '{work_dir:$work_dir, rebase_bead:$rebase_bead, requesting_keeper:$requesting_keeper, commit_sha:$commit_sha, commit_subject:$commit_subject, conflicted_files:$conflicted_files, context_file:$context_file}')
-
-    REWORK_DESC="Rework the kept commit $COMMIT_SHA ($COMMIT_SUBJECT) onto post-upstream code. See metadata.context_file for the full conflict context, conflicted files, and upstream's recent diffs touching the same files. Classify your work into mechanical | dropped-absorbed | judgment-required | infeasible and self-report on metadata.classification before closing. The parent rebase polecat will route based on your classification."
-
-    REWORK_BEAD=$(gc bd create \
-        --title "rework $SHORT_SHA: $COMMIT_SUBJECT" \
-        --type task \
-        --priority 2 \
-        --parent "{{issue}}" \
-        --metadata "$REWORK_META" \
-        --description "$REWORK_DESC" \
-        --json | jq -r '.id')
-
-    # Resolve the polecat pool from our own routing if available.
-    POLECAT_POOL=$(gc bd show {{issue}} --json | jq -r '.[0].metadata."gc.routed_to" // empty' \
-        | sed 's/[^/]*$/gc-toolkit.polecat/')
-    [ -z "$POLECAT_POOL" ] && POLECAT_POOL="gascity/gc-toolkit.polecat"
-    gc sling "$POLECAT_POOL" "$REWORK_BEAD" --on mol-upstream-gc-rebase-rework \
-        --var rebase_bead="{{issue}}" \
-        --var requesting_keeper="$REQUESTING_KEEPER"
-
-    DISPATCHES=$((DISPATCHES + 1))
-    gc bd update {{issue}} \
-        --set-metadata rebase_in_progress=true \
-        --set-metadata pending_rework="$REWORK_BEAD" \
-        --set-metadata dispatch_count="$DISPATCHES" \
-        --status=open \
-        --assignee="$REQUESTING_KEEPER"
-
-    gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: dispatched rework polecat on $REWORK_BEAD for $SHORT_SHA ($COMMIT_SUBJECT); re-pour when rework closes"
-
-    gc runtime drain-ack
-    exit 0
-fi
+git add <resolved files>
+git -c core.editor=true rebase --continue
 ```
 
-**3. Dispatch review polecat (set by 1b when judgment-required).**
+Keep going while you are making real progress in this turn. Resolving
+several conflicts in one iteration is good — the loop is a safety net for
+when context runs short or a conflict needs a fresh pair of eyes, not a
+quota of one conflict per session. Stop when the rebase finishes, or when
+you would be guessing.
+
+Append one audit entry per conflict you resolve:
 
 ```bash
-if [ "$DISPATCH_REVIEW" = "1" ] && [ "$STUCK" != "1" ]; then
-    REVIEW_META=$(jq -n \
-        --arg coordinator "$REQUESTING_KEEPER" \
-        --arg work_dir "$(pwd)" \
-        --arg rework_bead "$PENDING_REWORK" \
-        --arg rebase_bead "{{issue}}" \
-        --arg commit_sha "$REWORK_COMMIT_SHA" \
-        --arg commit_subject "$REWORK_COMMIT_SUBJECT" \
-        --arg judgment "$JUDGMENT" \
-        '{coordinator:$coordinator, work_dir:$work_dir, rework_bead:$rework_bead, rebase_bead:$rebase_bead, commit_sha:$commit_sha, commit_subject:$commit_subject, judgment_summary:$judgment, review_id:("rebase-rework-" + $rebase_bead), review_phase:"rebase-rework", review_leg:"approve-or-reject"}')
-
-    REVIEW_DESC="Review the rework polecat's judgment-required rework of commit $REWORK_COMMIT_SHA ($REWORK_COMMIT_SUBJECT). The rework polecat reported: $JUDGMENT
-
-Read the rework commit at HEAD in the shared worktree (metadata.work_dir). Read the original kept commit's intent from rework bead $PENDING_REWORK's metadata.context_file. Read upstream's adjacent code.
-
-Verdict: approve if the rework correctly ports the original intent onto the new upstream layer and the design call was reasonable. Reject if the rework misses the intent, makes a bad design call, or introduces regression risk.
-
-Write your full review report to bead notes. Set metadata.verdict='approve' or metadata.verdict='reject'; on reject, also set metadata.reject_reason. Set metadata.rework_bead='$PENDING_REWORK' so the rebase polecat can correlate. Close the bead via mol-review-leg's notify-close step (which mails $REQUESTING_KEEPER)."
-
-    REVIEW_BEAD=$(gc bd create \
-        --title "review rework $REWORK_COMMIT_SHA: $REWORK_COMMIT_SUBJECT" \
-        --type task \
-        --priority 2 \
-        --parent "{{issue}}" \
-        --metadata "$REVIEW_META" \
-        --description "$REVIEW_DESC" \
-        --json | jq -r '.id')
-
-    POLECAT_POOL=$(gc bd show {{issue}} --json | jq -r '.[0].metadata."gc.routed_to" // empty' \
-        | sed 's/[^/]*$/gc-toolkit.polecat/')
-    [ -z "$POLECAT_POOL" ] && POLECAT_POOL="gascity/gc-toolkit.polecat"
-    gc sling "$POLECAT_POOL" "$REVIEW_BEAD" --on mol-review-leg
-
-    DISPATCHES=$((DISPATCHES + 1))
-    gc bd update {{issue}} \
-        --set-metadata pending_review="$REVIEW_BEAD" \
-        --set-metadata last_review_bead="$REVIEW_BEAD" \
-        --set-metadata dispatch_count="$DISPATCHES" \
-        --status=open \
-        --assignee="$REQUESTING_KEEPER"
-
-    gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: dispatched review polecat on $REVIEW_BEAD for judgment-required rework $PENDING_REWORK; re-pour when review closes"
-
-    gc runtime drain-ack
-    exit 0
-fi
+ENTRY=$(jq -nc --arg sha "$COMMIT_SHA" --arg subj "<subject>" \\
+  --arg cls "<mechanical|dropped-absorbed|judgment-required>" \\
+  --arg res "<what you did and why>" \\
+  '{commit_sha:$sha, commit_subject:$subj, classification:$cls, resolution:$res}')
+LOG=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
+LOG=$(printf '%s' "$LOG" | jq -c ". + [$ENTRY]")
+gc bd update {{issue}} --set-metadata conflict_resolutions="$LOG"
 ```
 
-**4. Stuck handling — escalate via conflict_questions.**
+**5. STATE=rebased — get the quality gate green.**
 
-If `STUCK=1`, escalate via `metadata.conflict_questions` so the keeper's
-existing operator conversation flow handles it:
-
-```bash
-if [ "$STUCK" = "1" ]; then
-    BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
-    REBASE_OUT_TAIL=$(tail -50 /tmp/rebase-out-{{issue}}.txt 2>/dev/null || echo "(no rebase output)")
-    QUESTIONS=$(jq -nc \
-        --arg tail "$REBASE_OUT_TAIL" \
-        --arg backup "$BACKUP_REF" \
-        '[{commit_sha:"(unknown)", commit_subject:"(stuck)", question:("rebase polecat got stuck and could not advance. Backup ref: " + $backup + ". Operator intervention needed. Recent rebase output: " + $tail)}]')
-    gc bd update {{issue}} \
-        --set-metadata conflict_questions="$QUESTIONS" \
-        --unset-metadata rebase_in_progress \
-        --status=open \
-        --assignee="$REQUESTING_KEEPER"
-    gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: stuck — operator intervention needed (see metadata.conflict_questions)"
-    gc runtime drain-ack
-    exit 0
-fi
-```
-
-**5. Rebase complete — sanity check the kept set.**
+Sanity-check the kept set first: the log below should roughly match the
+`keep` rows in `metadata.commit_verdicts`, allowing for reworked commits
+that carry the same intent.
 
 ```bash
 git log {{upstream_remote}}/{{upstream_branch}}..HEAD --oneline
 ```
 
-The output must roughly match the `keep` rows from
-`metadata.commit_verdicts` (rework commits replace conflicted keeps and
-have the same intent). If anything obviously wrong is in the post-rebase
-log, abort using the same keeper-routed pattern as the `check`/`install`
-aborts — compute `REQUESTING_KEEPER` (from `metadata.requesting_keeper`,
-falling back to `{{notify_recipient}}` only when unset), then bead
-handback first (`--status=open`, `--assignee="$REQUESTING_KEEPER"`,
-`--set-metadata aborted_at=rebase-mismatch`, with the mismatch detail in
-`--notes`), nudge `"$REQUESTING_KEEPER"`, then the secondary best-effort
-mail to `{{notify_recipient}}`. Do NOT assign the bead to
-`{{notify_recipient}}` directly — the keeper is the durable holder.
-
-**6. Clear rebase-in-progress flags:**
+Then run the gate. `{{check_command}}` is the authoritative safety net for
+the kept set: conflict resolutions land without the gascity pre-commit
+hook, so this is what covers fmt-check, lint, vet, and test.
 
 ```bash
-gc bd update {{issue}} \
-    --unset-metadata rebase_in_progress \
-    --unset-metadata pending_rework \
-    --unset-metadata pending_review \
-    --unset-metadata last_review_bead
+{{check_command}}
 ```
 
-**Exit criteria:** HEAD is rebased onto `{{upstream_remote}}/{{upstream_branch}}`;
-the post-rebase commit log is consistent with the `keep` set (with
-classification-driven substitutions for any conflicted keeps);
-`metadata.rebase_in_progress` is unset; `metadata.conflict_resolutions`
-records every resolution that fired this rebase."""
+- **Green** — stamp the HEAD it passed at. The exit condition compares this
+  to the live HEAD, so stamp it *after* your last commit, never before:
+  ```bash
+  gc bd update {{issue}} --set-metadata check_passed_sha="$(git rev-parse HEAD)"
+  ```
+- **Red** — fixing it is your job, not an abort. A gate failure often points
+  at a resolution an earlier iteration made; read
+  `metadata.conflict_resolutions` to find the likely culprit. Fix it, commit,
+  re-run the gate, and re-stamp. If you run out of context first, just close
+  your bead — the next iteration picks it up from here.
 
-[[steps]]
-id = "check"
-title = "Run the post-rebase quality gate on the rebased branch"
-needs = ["rebase"]
-description = """
-**Config: check_command = {{check_command}}**
+The stamp is bound to a sha, so any commit you make after stamping
+invalidates it and the loop correctly re-gates.
 
-**Resume-skip on an unchanged HEAD (trust-and-skip).** Mirrors the
-`metadata.commit_verdicts` resume-skip in the survey step. `{{check_command}}`
-(`make check`) runs the full Go pipeline (~15min); a worker that loses a
-completed gate to mid-wait compaction would otherwise re-run it from scratch.
-Trust a prior pass on this exact rebased tree, keyed to HEAD sha — any HEAD
-change (rebase advanced, fresh re-pour onto new upstream) yields a different
-sha, so a stale stamp won't match and the gate re-runs:
+**6. If you are genuinely stuck.**
+
+Record the question and leave the rebase where it is. Do not fabricate a
+resolution, do not `git rebase --skip` a commit you did not judge absorbed,
+and do not `git rebase --abort` — the abort would discard the work every
+prior iteration did.
+
 ```bash
-HEAD_SHA=$(git rev-parse HEAD)
-if [ "$(gc bd show {{issue}} --json | jq -r '.[0].metadata.check_passed_sha // empty')" = "$HEAD_SHA" ]; then
-    echo "check already passed at this HEAD ($HEAD_SHA); trust-and-skip"
-    # Gate already green on this exact tree — skip the rest of this step and proceed to install.
-else
-    {{check_command}}
-fi
+QUESTIONS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_questions // "[]"')
+ENTRY=$(jq -nc --arg sha "$COMMIT_SHA" --arg subj "<subject>" \\
+  --arg q "<what you need decided, and what you already ruled out>" \\
+  '{commit_sha:$sha, commit_subject:$subj, question:$q}')
+gc bd update {{issue}} \\
+  --set-metadata conflict_questions="$(printf '%s' "$QUESTIONS" | jq -c ". + [$ENTRY]")"
 ```
 
-The default `{{check_command}}` in gascity is `make check`, which runs
-`fmt-check lint vet test` — the full Go quality gate on the rebased tip.
-This is the authoritative post-rebase safety net for the kept set: rework
-polecats commit with `--no-verify` and the gascity pre-commit hook (which
-covers fmt-check, lint, vet, regen-artifacts, and test) is bypassed per
-rework commit, so the wider gate here has to cover those surfaces.
+Then close your bead as usual (step 7) — do NOT reassign it to the keeper
+and do NOT drain-and-park. Recording the question is the whole escalation
+on your side: the loop runs out its remaining attempts, and on the last
+failing attempt the exit condition hands {{issue}} back to the keeper for
+you (`aborted_at=rebase-loop-exhausted`, reassigned to
+`metadata.requesting_keeper`, failure tail appended to the notes, keeper
+nudged) while the control bead closes `gc.outcome=fail`.
 
-If the gate passes, stamp the HEAD sha so a later resume on this same
-rebased tree trusts the pass and skips the gate, then close this step and
-proceed:
+`metadata.backup_ref` still restores the pre-rebase state if an operator
+decides to unwind: `git reset --hard $(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')`.
+
+**7. Close your iteration bead.**
+
+Closing your bead is what runs the exit condition. Do NOT drain and park,
+do NOT reassign the bead to the keeper, and do NOT re-pour anything — those
+were the v11 mechanisms and they no longer exist here.
+
 ```bash
-gc bd update {{issue}} --set-metadata check_passed_sha="$(git rev-parse HEAD)"
+gc bd close <your-iteration-bead-id> --reason "rebase iteration complete"
 ```
 
-If the gate fails, route the abort THROUGH the keeper. Capture the
-failure context first, then lock in the durable handback (reassign to the
-keeper + record the failure tail in the bead notes so it survives even if
-mail never arrives), nudge the keeper, and only then send best-effort mail
-to the operator as a SECONDARY backstop:
-```bash
-# Capture the failure context first so it can be written durably to the bead.
-CHECK_TAIL=$(tail -200 <check output file or capture>)
-BACKUP_REF=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.backup_ref')
-WORKTREE=$(pwd)
-VERDICTS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.commit_verdicts')
-RESOLUTIONS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.conflict_resolutions // "[]"')
+Close it by **explicit id**. A pool-claimed polecat often has `GC_BEAD_ID`
+unset, so a guarded `gc bd close "$GC_BEAD_ID"` silently no-ops and the loop
+stalls with the control bead blocked on a live iteration forever.
 
-# Durable, un-missable handback: reassign to the requesting keeper (fall
-# back to notify_recipient only when no keeper was stamped) and write the
-# failure tail into the bead notes. The keeper's prime sweep matches
-# metadata.aborted_at, so this surfaces on the next operator engagement
-# without depending on mail; the bead notes carry the context the keeper
-# needs to summarize it.
-REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
-[ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
+**Exit criteria (for the step, not for you):** the rebase is finished, the
+worktree is clean, HEAD sits on top of `metadata.rebase_onto_sha`, and
+`metadata.check_passed_sha` equals HEAD. Any iteration that leaves the
+worktree closer to that state has done its job."""
 
-gc bd update {{issue}} \
-  --set-metadata aborted_at=check \
-  --status=open \
-  --assignee="$REQUESTING_KEEPER" \
-  --notes "$(cat <<EOF
-Post-rebase {{check_command}} FAILED on the rebased branch (aborted_at=check).
+[steps.check]
+# Total iterations including the first. Each iteration can resolve several
+# conflicts, so this bounds pathological churn rather than conflict count; the
+# v11 hand-rolled loop used MAX_DISPATCHES=50 for the same purpose, one
+# dispatch per conflict. Exhaustion closes the control bead gc.outcome=fail, and
+# the exit condition hands the work bead back to the keeper on that last failing
+# attempt (aborted_at=rebase-loop-exhausted) — it reads this budget off the
+# control bead's gc.max_attempts, so changing the number here needs no other
+# edit.
+max_attempts = 25
 
-Worktree: $WORKTREE
-Backup ref: $BACKUP_REF
-
-Failure tail:
-$CHECK_TAIL
-
-To restore the pre-rebase state: git reset --hard $BACKUP_REF
-EOF
-)"
-
-# Timely signal: nudge the keeper. Best-effort (|| true) — the keeper is
-# on_demand, so the durable bead handback above is the real guarantee; the
-# nudge just shortens latency when the keeper is already engaged.
-gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: post-rebase check failed — operator engagement needed (metadata.aborted_at=check; failure tail in bead notes)" || true
-
-# Secondary backstop ONLY: best-effort mail to the operator. The durable
-# operator-facing surface is the keeper handback above (assignee +
-# aborted_at + notes + nudge); mail is not relied upon.
-if ! gc mail send {{notify_recipient}} -s "gascity rebase: post-rebase check failed" -m "$(cat <<EOF
-Rebase succeeded but {{check_command}} failed on the rebased branch.
-
-The default check_command is `make check` (fmt-check + lint + vet + test).
-The failure may be in any of those surfaces — read the tail to narrow it
-down before diving into a specific subsystem.
-
-Worktree: $WORKTREE
-Backup ref: $BACKUP_REF
-Bead: {{issue}}
-
-Failure tail:
-$CHECK_TAIL
-
-Verdicts (commit_verdicts):
-$VERDICTS
-
-Conflict resolutions applied this rebase:
-$RESOLUTIONS
-
-Next: investigate from the worktree. To restore the pre-rebase state:
-  git reset --hard $BACKUP_REF
-EOF
-)"; then
-    echo "WARN: mail send failed for {{issue}}; the keeper handback (assignee + aborted_at + notes + nudge) is the durable signal" >&2
-fi
-gc runtime drain-ack
-exit 0
-```
-
-**Bead stays open and lands on the keeper's hook** — the keeper (or a
-follow-up polecat the operator dispatches) resumes from
-`metadata.work_dir`. The lifecycle handback (`--status=open`, reassign to
-the keeper) is what actually surfaces the bead in the keeper's prime
-sweep; without it the bead would strand on this drained session.
-
-A check failure on the rebased branch often points at a rework polecat's
-choice — read `metadata.conflict_resolutions` and inspect the rework
-beads (especially `judgment-required` ones) to narrow down what changed.
-The wider gate also catches fmt/lint/vet regressions that a rework may
-have introduced; the failure tail is the first place to look."""
+[steps.check.check]
+mode = "exec"
+path = "../assets/scripts/rebase-check.sh"
+# The script reads bead metadata and git state — it verifies the gate, it does
+# not run it (see the header of rebase-check.sh for why). Its one write is the
+# exhaustion handback on the final failing attempt. 2m is slack for a loaded
+# Dolt, not a budget for `make check`.
+timeout = "2m"
 
 [[steps]]
 id = "install"
 title = "Rebuild and install gc from the rebased state"
-needs = ["check"]
+needs = ["rebase"]
 description = """
 **Config: install_command = {{install_command}}**
 
@@ -1211,9 +889,9 @@ Sections to include:
   rationale.
 - **Conflict resolutions** — a compact rendering of
   `metadata.conflict_resolutions` (if non-empty). One line per resolution
-  entry: `<short-sha> <classification> <resolution> rework=<bead>
-  review=<bead-or-none>`. Lead with a one-line summary:
-  "N conflicts resolved (M mechanical, K dropped-absorbed, J reworked-with-review)."
+  entry: `<short-sha> <classification> <resolution>`. Lead with a
+  one-line summary:
+  "N conflicts resolved (M mechanical, K dropped-absorbed, J judgment-required)."
   If the log is empty, omit this section entirely.
 - **Upstream commits absorbed** — `git log --oneline <pre-rebase-tip>..{{upstream_remote}}/{{upstream_branch}}`
   where `<pre-rebase-tip>` is the backup ref.
@@ -1231,8 +909,8 @@ if [ "$RES_COUNT" -gt 0 ]; then
     MECH=$(printf '%s' "$RESOLUTIONS" | jq '[.[] | select(.classification=="mechanical")] | length')
     DROPPED=$(printf '%s' "$RESOLUTIONS" | jq '[.[] | select(.classification=="dropped-absorbed")] | length')
     JUDGED=$(printf '%s' "$RESOLUTIONS" | jq '[.[] | select(.classification=="judgment-required")] | length')
-    RES_HEADLINE="$RES_COUNT conflict(s) resolved: $MECH mechanical, $DROPPED dropped-absorbed, $JUDGED reviewed-rework; full log on metadata.conflict_resolutions."
-    RES_DETAIL=$(printf '%s' "$RESOLUTIONS" | jq -r '.[] | "  \\(.commit_sha[0:8]) classification=\\(.classification) resolution=\\(.resolution) rework=\\(.rework_bead) review=\\(.review_bead // "none")"')
+    RES_HEADLINE="$RES_COUNT conflict(s) resolved: $MECH mechanical, $DROPPED dropped-absorbed, $JUDGED judgment-required; full log on metadata.conflict_resolutions."
+    RES_DETAIL=$(printf '%s' "$RESOLUTIONS" | jq -r '.[] | "  \\(.commit_sha[0:8]) classification=\\(.classification) resolution=\\(.resolution)"')
 else
     RES_HEADLINE=""
     RES_DETAIL=""
