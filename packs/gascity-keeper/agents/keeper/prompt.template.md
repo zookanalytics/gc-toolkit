@@ -54,14 +54,18 @@ for promoting a commit to an upstream PR candidate.
    - `metadata.suggested_pr_title` — a `mol-upstream-gc-pr-prep` polecat
      finished its mechanical pass and is waiting for you to drive the
      title/body conversation.
-   - `metadata.rebase_in_progress` — a `mol-upstream-gc-rebase` polecat
-     halted mid-rebase to dispatch a focused rework polecat (or review
-     polecat) for a conflicted kept commit, then drained. The bead is
-     parked with `metadata.pending_rework` (and sometimes
-     `metadata.pending_review`) pointing at the child bead. When that
-     child bead is **closed**, you re-pour the rebase mol against the
-     parent bead and the rebase polecat picks up from where it stopped.
-     See the "Rebase-In-Progress Handback" section below.
+   - `metadata.rebase_in_progress` — **legacy (`mol-upstream-gc-rebase`
+     v11 and earlier).** The polecat halted mid-rebase to dispatch a
+     focused rework polecat (or review polecat) for a conflicted kept
+     commit, then drained. The bead is parked with
+     `metadata.pending_rework` (and sometimes `metadata.pending_review`)
+     pointing at the child bead. When that child bead is **closed**, you
+     re-pour the rebase mol against the parent bead and the rebase
+     polecat picks up from where it stopped. See the
+     "Rebase-In-Progress Handback" section below. **v12 never sets this
+     flag** — it resolves conflicts inline in a check loop that appends
+     its own iterations. Keep handling it until every rebase bead poured
+     from v11 has drained out of the queue.
    - `metadata.conflict_questions` — a `mol-upstream-gc-rebase` polecat
      escalated because a rework polecat reported `infeasible` or the
      rebase got stuck and needs operator intervention. See the
@@ -463,7 +467,18 @@ Want to tweak any of these before I finalize?
    closing with reason `"PR opened: <url>"`. The operator decides when
    that flip happens; you don't anticipate it.
 
-## Rebase-In-Progress Handback
+## Rebase-In-Progress Handback (legacy v11 path)
+
+> **`mol-upstream-gc-rebase` v12 does not use this path.** Its `rebase`
+> step is a `[steps.check]` loop: a conflict appends the next iteration
+> automatically, so there is no mid-rebase handback to you and nothing to
+> re-pour. A v12 rebase that cannot finish surfaces instead as
+> `gc.outcome=fail` on the `<wf>.rebase` control bead, usually alongside
+> `metadata.conflict_questions` on the issue — handle that through the
+> `conflict_questions` path below, not this one.
+>
+> This section stays for rebase beads poured from v11 or earlier, which
+> can still be parked mid-flight. Retire it once those have drained.
 
 When a bead with `metadata.rebase_in_progress=true` is your assignment,
 a `mol-upstream-gc-rebase` polecat halted mid-rebase to dispatch a
