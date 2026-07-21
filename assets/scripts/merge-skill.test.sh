@@ -23,6 +23,11 @@
 #   (11) metadata.merge_hold=true on the anchor -> merge HELD even when the PR is
 #        fully CLEAN and every gate is green (operator gate; before the fix such a
 #        CLEAN held PR squash-merged with no operator signal)
+#   (12) TWO open anchors claim the same PR (a rework bead leaked into the anchor
+#        class, tk-ynz4b): one carries the codex gate (red), the duplicate has an
+#        EMPTY check_set + CLEAN PR -> before the fix the gateless duplicate
+#        merged the PR, bypassing codex; now EVERY anchor of a multi-anchor PR is
+#        HELD until the duplicate is closed/demoted
 #   (INV) `gh pr merge` is reached for EXACTLY the fully-validated PRs — no
 #         other anchor is merged.
 #   (5c) convergence: a merged+closed anchor leaves the gating set, so a second
@@ -63,6 +68,8 @@ bead-BEHIND|309|main|codex|green@HEAD309
 bead-CAPCHILD|310|main|codex|green@HEAD310
 bead-NOGATE|311|main||
 bead-HOLD|312|main|codex|green@HEAD312|true
+bead-DUPGATED|313|main|codex|
+bead-DUPFREE|313|main||
 A
 
 # PR states (gh pr view source):
@@ -79,6 +86,9 @@ A
 #   310 OPEN, check green@head, CLEAN, open child past former cap -> HELD
 #   311 OPEN, empty check_set (no gate), CLEAN    -> MERGED (the bug fix)
 #   312 OPEN, check green@head, CLEAN BUT merge_hold=true -> HELD (operator gate)
+#   313 OPEN, CLEAN, claimed by TWO anchors (bead-DUPGATED codex-red +
+#       bead-DUPFREE gateless) -> HELD via both (one-anchor-per-PR, tk-ynz4b);
+#       pre-fix the gateless duplicate merged it, bypassing the codex gate
 cat > "$TMP/prs" <<'P'
 301|OPEN|false|main|HEAD301|CLEAN|MERGEABLE|a301c0ffee123456
 302|OPEN|false|main|HEAD302|CLEAN|MERGEABLE|
@@ -92,6 +102,7 @@ cat > "$TMP/prs" <<'P'
 310|OPEN|false|main|HEAD310|CLEAN|MERGEABLE|
 311|OPEN|false|main|HEAD311|CLEAN|MERGEABLE|b311c0ffee654321
 312|OPEN|false|main|HEAD312|CLEAN|MERGEABLE|
+313|OPEN|false|main|HEAD313|CLEAN|MERGEABLE|
 P
 
 # Open rework/review children referencing a PR (gc bd list pr_number= source):
@@ -239,8 +250,10 @@ has '^bead-NOGATE$' "$TMP/closed" && ok "(1b) no-gate anchor closed (record)" \
 has '^bead-NOGATE$' "$TMP/mergedrec" && ok "(1b) merge_result=merged recorded on no-gate anchor" \
                                      || bad "(1b) no-gate merge_result recorded"
 
-# (2)-(12) every other anchor is HELD or skipped — NOT merged.
-for n in 302 303 304 305 306 307 308 309 310 312; do
+# (2)-(12) every other anchor is HELD or skipped — NOT merged. 313 is the
+# multi-anchor PR: its gateless duplicate anchor (bead-DUPFREE) is CLEAN and
+# would have merged pre-fix.
+for n in 302 303 304 305 306 307 308 309 310 312 313; do
   has "^$n$" "$TMP/merged" && bad "($n) anchor must NOT be merged" \
                           || ok "($n) anchor not merged"
 done
@@ -265,6 +278,12 @@ printf '%s\n' "$OUT1" | grep -q "PR#310 has open rework/review bead child-310" \
 printf '%s\n' "$OUT1" | grep -q "PR#312 merge_hold set (operator gate)" \
   && ok "(11) merge_hold=true -> held, reason names the operator gate" \
   || bad "(11) merge_hold hold reason (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPGATED)" \
+  && ok "(12) multi-anchor PR -> gated anchor held with the one-anchor-per-PR reason" \
+  || bad "(12) multi-anchor gated-anchor hold (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPFREE)" \
+  && ok "(12) multi-anchor PR -> gateless duplicate ALSO held (pre-fix it merged, bypassing codex)" \
+  || bad "(12) multi-anchor gateless-duplicate hold (got: $OUT1)"
 
 # (9) already-merged anchor is NOT closed by the skill (the observer records it).
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \
