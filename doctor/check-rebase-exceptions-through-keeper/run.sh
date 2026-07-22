@@ -42,11 +42,20 @@ OVERLAY="$dir/packs/gascity-keeper/template-fragments/refinery-rebase-handling.t
 violations=()
 
 # Executable abort sites in the rebase formula that set metadata.aborted_at
-# via `gc bd update`. Today: workspace-setup, check, install, push.
+# via `gc bd update`. Today: workspace-setup, install, push.
 # (rebase-mismatch is described in prose, not an executable `gc bd update`
 # command, so it is not counted here.) Add/remove an abort site -> bump this
 # and confirm the new site routes through $REQUESTING_KEEPER.
-EXPECTED_ABORT_SITES=4
+#
+# It is 3, not 4: the fourth handback (aborted_at=rebase-loop-exhausted) is no
+# longer an inline formula command. PR #198 replaced the hand-rolled
+# conflict/re-pour loop with the native [steps.check] ralph loop, moving that
+# handback into the step's exit condition
+# (packs/gascity-keeper/assets/scripts/rebase-check.sh), which still reassigns
+# the work bead to the requesting keeper and nudges it. Section B scans only the
+# formula TOML, so that site is deliberately not counted here — do not "restore"
+# the 4.
+EXPECTED_ABORT_SITES=3
 
 # ---- A. rebase formula: no direct assignee to notify_recipient ----
 if [ ! -f "$REBASE" ]; then
