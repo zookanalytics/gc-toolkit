@@ -159,10 +159,12 @@ a NEW session with a different ID — the old one never comes back.
 
 1. Build the assignee→state liveness map ONCE per cycle (before the
    per-bead loop), then resolve each bead's assignee against it. Resolve by
-   exact identifier lookup — do NOT extract a session ID with a regex or
-   fixed prefix list: rig prefixes are configuration-derived, and assignees
-   may be a session bead ID, session name, alias, concrete agent name, or
-   configured named identity.
+   exact identifier lookup FIRST, with exactly ONE narrow fallback: when the
+   exact lookup misses, retry on the identity's last `/`-separated segment
+   (the lookup snippet below implements it). Do not go further — no regex
+   session-ID extraction, no fixed prefix list: rig prefixes are
+   configuration-derived, and assignees may be a session bead ID, session
+   name, alias, concrete agent name, or configured named identity.
 
    Two schema facts this recipe depends on (verified live, gc-3tn8g):
    - `gc session list --json` returns an OBJECT `{sessions:[...], ...}`, not
@@ -214,9 +216,37 @@ a NEW session with a different ID — the old one never comes back.
    fi
    ```
 
-   Resolve each bead's assignee against the prebuilt map:
+   Resolve each bead's assignee against the prebuilt map. An exact-match-only
+   lookup false-orphans live sessions, because a bead's assignee and its
+   session's registered identity routinely disagree in nothing but the
+   `<rig>/` prefix — and both shapes occur live (tk-opfsi):
+
+       bead assignee  gascity/gc-toolkit.gc-z0vi2  vs  alias  gc-toolkit.gc-z0vi2
+       bead assignee  gc-toolkit.furiosa           vs  alias  gc-toolkit/gc-toolkit.furiosa
+
+   So compare on the last path segment when — and only when — the exact
+   lookup misses. The markers let the regression test extract and exercise
+   this exact snippet (assets/scripts/liveness-lookup.test.sh).
    ```bash
+   # >>> liveness-lookup
+   # Exact lookup first: authoritative whenever the assignee is a literal map key.
    STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '.[$a] // "absent"')
+   # Identity-normalizing fallback. Stripping the prefix can make two sessions in
+   # different cities collide on one bare identity (gc-toolkit/gc-toolkit.furiosa
+   # and gascity/gc-toolkit.furiosa both bare to gc-toolkit.furiosa), so resolve a
+   # collision toward LIFE: any matching session that is not closed/archived wins.
+   # Only when EVERY candidate owner is dead does the fallback report a dead state.
+   # The retry can therefore turn `absent` into a live state, but can never
+   # manufacture an orphan — the fail-safe direction.
+   if [ "$STATE" = "absent" ]; then
+     STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '
+       def bare: sub("^.*/"; "");
+       [ to_entries[] | select((.key | bare) == ($a | bare)) | .value ] as $matches
+       | if ($matches | length) == 0 then "absent"
+         else ([ $matches[] | select(. != "closed" and . != "archived") ] | first) // $matches[0]
+         end')
+   fi
+   # <<< liveness-lookup
    ```
 
 2. An `absent` lookup (assignee not in the map) is orphaned only for
@@ -229,9 +259,12 @@ a NEW session with a different ID — the old one never comes back.
    - `creating`, `asleep`, `drained`, `suspended`, `draining`, or
      `quarantined` → **not orphaned** (controller or operator state still owns
      the session)
-   - `archived`, `closed`, or `absent` after the exact lookup → **orphaned
-     bead** for pool/ephemeral work — the owning session is gone and will never
-     come back, regardless of whether the pool template still exists
+   - `archived`, `closed`, or `absent` after BOTH the exact lookup and the
+     normalizing retry → **orphaned bead** for pool/ephemeral work — the owning
+     session is gone and will never come back, regardless of whether the pool
+     template still exists. Never classify on the exact lookup alone: a
+     rig-qualified assignee whose session registered the bare alias resolves
+     `absent` there while its owner is active (tk-opfsi).
 
 **Important**: Beads assigned to the refinery, witness, or other
 infrastructure agents (not pool instances) should be skipped — those
