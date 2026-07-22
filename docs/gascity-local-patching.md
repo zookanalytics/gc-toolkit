@@ -221,20 +221,42 @@ do this work. The polecat runs the survey + rebase + test + install +
 push chain autonomously. When the rebase halts on a kept commit because
 upstream shifted the surrounding code, the polecat does NOT auto-resolve
 in favor of upstream (that silently drops your patch's work) and does
-NOT abort wholesale (that defeats agent dispatch). Instead it dispatches
-a focused rework polecat with fresh context that re-implements the
-commit's *intent* on the new upstream layer.
+NOT abort wholesale (that defeats agent dispatch). Instead it reworks
+the commit's *intent* onto the new upstream layer.
 
-The rework polecat self-classifies its work:
+The rebase step is a **check loop** (`[steps.check]`), so a conflict is
+not a failure — it is the next unit of work. Each pass is its own
+iteration bead (`<wf>.rebase.iteration.N`) with its own agent session, so
+every conflict is met with fresh context, and `rebase-check.sh` is the
+exit condition: it keeps appending iterations until the rebase is
+finished, the worktree is clean, and the quality gate is green at the
+live HEAD. The fresh context comes from the runtime recycling the
+previous iteration's session, which it only does for a pool target — so
+sling this formula at a pool, never at a named agent. (This replaces the
+v11 rework-polecat dispatch; `mol-upstream-gc-rebase-rework` is kept for
+manual dispatch but this formula no longer slings it.)
+
+The iteration classifies each conflicted commit:
 - **mechanical** — the intent transfers cleanly, only anchors shifted.
-  Rebase continues with the rework commit replacing the conflicted apply.
+  Resolve the markers and keep the commit.
 - **dropped-absorbed** — upstream already provides the behavior; the
-  commit is skipped.
-- **judgment-required** — the rework required a design call. A second
-  polecat reviews the rework before the rebase continues; if rejected,
-  a fresh rework is dispatched with the rejection reason in context.
-- **infeasible** — the rework couldn't be done from the polecat's
-  context. The keeper hands the bead back for operator intervention.
+  whole commit is skipped, bundled extras included.
+- **judgment-required** — the intent applies but the shape must change.
+  The iteration makes the call itself and records its reasoning in the
+  audit entry; there is no review polecat to route it to.
+- **infeasible** — it cannot be ported without guessing. The iteration
+  records the open question in `metadata.conflict_questions` and leaves
+  the rebase where it is; it never fabricates a resolution and never
+  skips a commit it did not judge absorbed.
+
+The keeper handback for an unfinished rebase happens once, at the end of
+the loop, and the exit condition performs it — not an iteration. When the
+loop exhausts its attempt budget it stamps
+`aborted_at=rebase-loop-exhausted` on the rebase bead, reassigns it to
+`metadata.requesting_keeper`, appends the failure tail (last verdict,
+worktree, backup ref, recorded questions) to the bead notes, and nudges
+the keeper. Any `conflict_questions` ride the same bead, so the operator
+conversation the keeper opens has them in hand.
 
 The keeper's completion mail surfaces a per-conflict audit log so the
 operator can see which kept commits required rework and how each was
