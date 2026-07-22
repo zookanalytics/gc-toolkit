@@ -278,12 +278,37 @@ if [ -n "$SCRIPTS_DIR" ]; then
   #      rather than collapsing it to empty, "gateless by choice" is distinguishable
   #      here from "never normalized". --default carries the RENDERED {{check_set}}
   #      so the script never hand-substitutes from raw TOML (the tk-4na1b footgun).
+  # The heal args carry rendered templates ({{check_set}}, {{binding_prefix}}); they
+  # are collected HERE, above the marker, so the heal-gates-merge block below stays
+  # template-free and the regression can extract and execute it verbatim
+  # (check-set-heal.test.sh, Run 6).
+  CHECK_SET_HEAL_ARGS=(
+    --default "{{check_set}}"
+    --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
+    --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+  )
+  # >>> heal-gates-merge
+  # The heal pass GATES the merge skill for this pass. check-set-heal.sh exits
+  # HEAL_UNSAFE_RC when a required check_set stamp did NOT persist — the anchor is
+  # then still ungated (empty check_set), which merge-skill.sh reads as "no gates"
+  # and would land un-reviewed in this SAME pass. On that signal we HOLD merge-skill
+  # for the pass (the next idle wake re-heals; once the stamp sticks the anchor gates
+  # normally). Holding a merge one pass is the acceptable failure; an un-reviewed
+  # merge is not (tk-i48ca / review tk-z4u2e finding #1). HEAL_UNSAFE_RC MUST match
+  # check-set-heal.sh's UNSAFE_RC. (pre-open-resolve runs between the two passes and
+  # is intentionally NOT gated — it only OPENS PRs, never merges, so it is not the
+  # merge hazard.)
+  HEAL_UNSAFE_RC=3
+  MERGE_SKILL_HELD=0
   if [ -x "$SCRIPTS_DIR/check-set-heal.sh" ]; then
-    "$SCRIPTS_DIR/check-set-heal.sh" \
-      --default "{{check_set}}" \
-      --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex" \
-      --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
-      || echo "check-set-heal: pass failed (non-fatal); retries next idle wake" >&2
+    heal_rc=0
+    "$SCRIPTS_DIR/check-set-heal.sh" "${CHECK_SET_HEAL_ARGS[@]}" || heal_rc=$?
+    if [ "$heal_rc" = "$HEAL_UNSAFE_RC" ]; then
+      MERGE_SKILL_HELD=1
+      echo "check-set-heal: UNSAFE (rc=$heal_rc) — a required check_set stamp did not persist; HOLDING merge-skill this pass so an ungated anchor cannot merge un-reviewed (retries next idle wake)" >&2
+    elif [ "$heal_rc" != 0 ]; then
+      echo "check-set-heal: pass failed (non-fatal, rc=$heal_rc); retries next idle wake" >&2
+    fi
   fi
   # (a-pre) Pre-open PR-create resolver (pre-open codex gate, tk-6d0vb.1.8): for
   #      each anchor parked in pre_open_gate whose codex signoff is green at the
@@ -303,12 +328,15 @@ if [ -n "$SCRIPTS_DIR" ]; then
   #      backstop. -x guard: importer rigs that have not yet synced this script
   #      degrade to the observer-only passes (a ready PR simply waits for the
   #      synced pack rather than landing via the retired auto-merge path).
-  if [ -x "$SCRIPTS_DIR/merge-skill.sh" ]; then
+  if [ "$MERGE_SKILL_HELD" = 1 ]; then
+    echo "merge-skill: HELD this pass — check-set-heal reported an unsafe failure (a stamp did not persist, leaving an anchor ungated); retries next idle wake" >&2
+  elif [ -x "$SCRIPTS_DIR/merge-skill.sh" ]; then
     "$SCRIPTS_DIR/merge-skill.sh" \
       || echo "merge-skill: pass failed (non-fatal); retries next idle wake" >&2
   else
     echo "merge-skill: merge-skill.sh not found in $SCRIPTS_DIR; ready PRs wait for a synced pack (auto-merge retired)" >&2
   fi
+  # <<< heal-gates-merge
   # (a1) Close-on-land OBSERVER (detect-only): close gating anchors whose PR
   #      merged (the convergent record + backstop for a skill that died between
   #      merging and recording), flag out-of-band-closed / retargeted PRs to

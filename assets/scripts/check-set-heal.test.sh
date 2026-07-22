@@ -27,16 +27,24 @@
 #   (ORDER)  the stamp is applied BEFORE the dispatch (fail-closed): the PR cannot
 #            be left ungated-but-dispatched.
 #   (STAMPFAIL) a stamp that does NOT persist is NOT counted healed and does NOT
-#            dispatch — the anchor stays ungated and is retried, flagged once.
+#            dispatch — the anchor stays ungated and is retried, flagged once, and
+#            the pass EXITS UNSAFE_RC (3) so the formula holds merge-skill.
 #   (CONV)   a healed anchor (check_set_healed recorded, gate now satisfiable via
 #            the dispatched review) is not re-stamped and not re-dispatched.
 #   (RETRY)  a healed anchor whose dispatch FAILED last pass (healed recorded, gate
 #            still unsatisfiable, nothing in flight) re-dispatches — the stamp did
 #            not hide it from the satisfiability retry.
+#   (GATE)   the REAL formula wiring (heal-gates-merge, extracted from
+#            mol-refinery-patrol.toml): a stamp-failing heal (rc=UNSAFE_RC) HOLDS
+#            the merge-skill stub (no merge attempted); a clean heal lets it run.
+#            This is the review tk-z4u2e finding #1 regression — a failed stamp used
+#            to fall through to merge-skill in the SAME pass and merge un-reviewed.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/check-set-heal.sh"
+ROOT="$(cd "$HERE/../.." && pwd)"
+TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -197,10 +205,12 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_REVIEWS="$TMP/reviews" \
        FAKE_STAMPFAIL="$TMP/stampfail" FAKE_SEQ="$TMP/seq"
 
 # --- Run 1. -------------------------------------------------------------------
+RC1=0
 OUT1="$(bash "$SCRIPT" \
   --default 'codex' \
   --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
-  --fix-pool 'gc-toolkit/gc-toolkit.polecat')"
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat')" || RC1=$?
+eq "$RC1" "0" "(EXIT) a pass with no failed stamp exits 0 (merge-skill not held)"
 
 # (EMPTY) empty check_set -> stamped codex.
 grep -q '^bead-EMPTY	codex$' "$TMP/stamped" \
@@ -330,16 +340,20 @@ bead-FAIL|pull_request|EMPTY|410|polecat/feat-fail|main||
 A
 : > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
 : > "$TMP/flagged"; : > "$TMP/deps"; echo 'bead-FAIL' > "$TMP/stampfail"
+RC4=0
 OUT4="$(bash "$SCRIPT" \
   --default 'codex' \
   --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
-  --fix-pool 'gc-toolkit/gc-toolkit.polecat')"
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat')" || RC4=$?
 grep -q '	anchor_bead	bead-FAIL$' "$TMP/revmeta" && bad "(STAMPFAIL) a failed stamp must NOT dispatch a signoff" \
                                                     || ok "(STAMPFAIL) failed stamp -> no signoff dispatched (fail-closed)"
 has '^bead-FAIL$' "$TMP/flagged" && ok "(STAMPFAIL) failed stamp flags the anchor once" \
                                  || bad "(STAMPFAIL) failed stamp must flag the anchor"
 printf '%s\n' "$OUT4" | grep -q '0 healed' \
   && ok "(STAMPFAIL) a non-persisting stamp is NOT counted healed" || bad "(STAMPFAIL) must report 0 healed (got: $OUT4)"
+# The unsafe exit: a still-ungated anchor must make the pass exit UNSAFE_RC (3) so
+# the formula holds merge-skill this pass (review tk-z4u2e finding #1).
+eq "$RC4" "3" "(STAMPFAIL) a failed stamp makes the pass exit UNSAFE rc=3"
 
 # --- Run 5: a gateless-BY-CONFIG rig (--default none) heals to the sentinel, NOT
 #     codex, and dispatches NOTHING — the repair restores declared intent.
@@ -354,6 +368,71 @@ grep -q '^bead-CFGNONE	none$' "$TMP/stamped" \
   || bad "(CFGNONE) --default none must stamp the sentinel (got: $(cat "$TMP/stamped"))"
 grep -q '	anchor_bead	bead-CFGNONE$' "$TMP/revmeta" && bad "(CFGNONE) a gateless rig must NOT dispatch a signoff" \
                                                        || ok "(CFGNONE) gateless-by-config -> no signoff dispatched"
+
+# --- Run 6: FORMULA GATING (heal-gates-merge). The finding this rework closes
+#     (review tk-z4u2e #1): a stamp that did not persist used to exit 0, so the
+#     formula ran merge-skill.sh in the SAME pass and the still-ungated anchor
+#     merged un-reviewed. Extract the REAL gating snippet from the formula and
+#     drive the REAL check-set-heal.sh into it with a merge-skill STUB — a
+#     stamp-failing heal must HOLD the merge; a clean heal must let it run.
+GATE="$(awk '
+  /# >>> heal-gates-merge/ {f=1; next}
+  /# <<< heal-gates-merge/ {f=0}
+  f' "$TOML")"
+[ -n "$GATE" ] \
+  && ok "(GATE) heal-gates-merge snippet extracted from the formula" \
+  || bad "(GATE) heal-gates-merge markers missing or renamed in the formula"
+# Template-free so it executes directly (the {{...}} args are hoisted ABOVE the
+# markers in the formula).
+printf '%s' "$GATE" | grep -q '{{' \
+  && bad "(GATE) extracted snippet still contains a {{template}} — hoist the args above the markers" \
+  || ok "(GATE) heal-gates-merge snippet is template-free (executable verbatim)"
+
+# Stub SCRIPTS_DIR: the REAL heal (symlinked) + a merge-skill STUB that records if
+# it ran + a no-op pre-open-resolve. SCRIPTS_DIR must NOT be the real assets dir, or
+# the real merge-skill.sh would run.
+GSD="$TMP/scripts"; mkdir -p "$GSD"
+ln -sf "$SCRIPT" "$GSD/check-set-heal.sh"
+printf '#!/usr/bin/env bash\necho ran >> "$MERGE_SENTINEL"\nexit 0\n' > "$GSD/merge-skill.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/pre-open-resolve.sh"
+chmod +x "$GSD/merge-skill.sh" "$GSD/pre-open-resolve.sh"
+export MERGE_SENTINEL="$TMP/merge-ran"
+
+# Build the runner: the env prologue IS expanded ($GSD resolves) but the extracted
+# snippet is written via `printf %s` so its $? / ${...} survive verbatim (an
+# unquoted heredoc would command-substitute them at build time).
+{
+  printf 'set -u\n'
+  printf 'SCRIPTS_DIR=%q\n' "$GSD"
+  printf "CHECK_SET_HEAL_ARGS=( --default codex --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' --fix-pool 'gc-toolkit/gc-toolkit.polecat' )\n"
+  printf '%s\n' "$GATE"
+  printf 'echo "MERGE_SKILL_HELD=$MERGE_SKILL_HELD"\n'
+} > "$TMP/gaterun.sh"
+
+# 6a: stamp FAILS -> real heal exits UNSAFE -> merge-skill is HELD (never runs).
+cat > "$TMP/anchors" <<'A'
+bead-GATEFAIL|pull_request|EMPTY|420|polecat/feat-gatefail|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; echo 'bead-GATEFAIL' > "$TMP/stampfail"
+: > "$MERGE_SENTINEL"
+GATEOUT="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
+[ -s "$MERGE_SENTINEL" ] && bad "(GATE-FAIL) merge-skill RAN despite an unsafe heal — ungated merge NOT prevented" \
+                         || ok "(GATE-FAIL) an unsafe heal HELD merge-skill (no merge attempted)"
+printf '%s\n' "$GATEOUT" | grep -q 'MERGE_SKILL_HELD=1' \
+  && ok "(GATE-FAIL) the formula recorded MERGE_SKILL_HELD=1" \
+  || bad "(GATE-FAIL) the formula did not set MERGE_SKILL_HELD (got: $GATEOUT)"
+
+# 6b: stamp SUCCEEDS -> real heal exits 0 -> merge-skill RUNS.
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"
+: > "$MERGE_SENTINEL"
+GATEOUT2="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
+[ -s "$MERGE_SENTINEL" ] && ok "(GATE-OK) a clean heal lets merge-skill run" \
+                         || bad "(GATE-OK) merge-skill did NOT run after a clean heal (got: $GATEOUT2)"
+printf '%s\n' "$GATEOUT2" | grep -q 'MERGE_SKILL_HELD=0' \
+  && ok "(GATE-OK) the formula recorded MERGE_SKILL_HELD=0" \
+  || bad "(GATE-OK) the formula MERGE_SKILL_HELD should be 0 (got: $GATEOUT2)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

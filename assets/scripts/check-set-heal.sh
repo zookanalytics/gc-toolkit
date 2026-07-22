@@ -75,6 +75,18 @@
 # skips the anchor and retries next idle pass.
 set -uo pipefail
 
+# EXIT-CODE CONTRACT with the refinery formula (mol-refinery-patrol.toml,
+# heal-gates-merge). Almost every failure here is best-effort and exits 0: the
+# anchor is left HELD (gate armed, no green marker) and retried next idle pass,
+# which merge-skill.sh already treats safely. The ONE exception is a stamp that did
+# NOT persist — that leaves the anchor UNGATED (empty check_set), which
+# merge-skill.sh reads as "no gates" and would land it un-reviewed IN THE SAME
+# PASS. On that condition this pass exits UNSAFE_RC, and the formula HOLDS
+# merge-skill.sh for the pass. The formula's HEAL_UNSAFE_RC must equal this value;
+# the regression drives the real script to this exit and asserts the merge is held
+# (tk-i48ca / review tk-z4u2e finding #1).
+readonly UNSAFE_RC=3
+
 # The declared check-set default, passed in by the formula as the RENDERED
 # {{check_set}} — never hand-substituted from raw TOML here (that hand-substitution
 # is the tk-4na1b bug this whole mechanism exists to contain). The literal fallback
@@ -175,7 +187,7 @@ $PART"; fi
 done
 [ -n "$ROWS" ] || { echo "check-set-heal: no gating anchors"; exit 0; }
 
-healed=0; dispatched=0; normal=0; optout=0; skipped=0
+healed=0; dispatched=0; normal=0; optout=0; skipped=0; unsafe=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -235,6 +247,11 @@ while IFS= read -r row; do
       if [ -z "$flagged" ]; then
         gc bd update "$id" --set-metadata check_set_heal_flagged=1 >/dev/null 2>&1 || true
       fi
+      # This anchor is still ungated THIS pass: merge-skill.sh would read its empty
+      # check_set as "no gates" and land it un-reviewed. Remember it so the pass
+      # exits UNSAFE_RC and the formula holds the merge skill for this pass
+      # (tk-i48ca / review tk-z4u2e finding #1).
+      unsafe=$((unsafe + 1))
       skipped=$((skipped + 1)); continue
     fi
     healed=$((healed + 1))
@@ -339,4 +356,15 @@ while IFS= read -r row; do
 done <<< "$ROWS"
 
 echo "check-set-heal: $healed healed, $dispatched signoffs dispatched, $normal already normalized, $optout explicit opt-out, $skipped skipped"
+
+# Fail-closed to the formula. If any anchor's stamp did not persist it is still
+# ungated, and merge-skill.sh would read its empty check_set as "no gates" and
+# land it un-reviewed this pass. Exit UNSAFE_RC so the formula HOLDS merge-skill
+# for the pass; the next idle wake re-heals and, once the stamp sticks, the anchor
+# gates normally. Delaying a merge one pass is the acceptable failure; an
+# un-reviewed merge is not (tk-i48ca / review tk-z4u2e finding #1).
+if [ "$unsafe" -gt 0 ]; then
+  echo "check-set-heal: UNSAFE — $unsafe anchor(s) still ungated after a stamp that did not persist; exiting rc=$UNSAFE_RC so the refinery holds merge-skill this pass" >&2
+  exit "$UNSAFE_RC"
+fi
 exit 0
