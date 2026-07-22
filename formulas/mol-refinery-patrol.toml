@@ -580,12 +580,27 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
      ```
    - Delete branch **only when no PR depends on it**: `$BRANCH` is the head of
      any open PR the bead anchored, and deleting it destroys that PR — closing
-     it as un-merged and stranding the review history:
+     it as un-merged and stranding the review history. Re-read the bead here
+     rather than reusing `$MR_STATE` from the block above: these snippets are
+     not guaranteed to run in one shell, and an unset variable would read as
+     "direct mode" and delete a live PR's branch. Fail CLOSED — anything that
+     looks like a PR, or any read you could not complete, keeps the branch:
      ```bash
-     if [ -z "$MR_STATE" ]; then
-       git push origin --delete $BRANCH
+     BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+       # bd reports failures on stderr and leaves stdout EMPTY, so an unreadable
+       # bead is indistinguishable from a metadata-less one. Validate the SHAPE,
+       # and on a failed read keep the branch — a wrongly-kept branch is swept
+       # later, a wrongly-deleted one takes an open PR with it.
+       echo "could not read $WORK (bd unavailable?) — leaving $BRANCH untouched"
      else
-       echo "mr-mode anchor: leaving $BRANCH (it is PR #$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.pr_number // "?"')'s head)"
+       PR_STATE=$(printf '%s' "$BEAD_JSON" \
+         | jq -r '.[0].metadata | (.merge_result // "") + ((.pr_number // "") | tostring) + (.existing_pr // "")')
+       if [ -z "$PR_STATE" ]; then
+         git push origin --delete $BRANCH
+       else
+         echo "mr-mode anchor ($PR_STATE): leaving $BRANCH — it is an open PR's head branch"
+       fi
      fi
      ```
    - Clean up (leaves worktree detached so other worktrees can hold $TARGET): `git checkout "$TARGET" && git branch -D temp && git switch --detach HEAD`
