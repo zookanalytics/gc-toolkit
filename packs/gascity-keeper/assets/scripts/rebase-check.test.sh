@@ -20,6 +20,11 @@
 # early tells the operator a healthy loop failed, and a missing one strands the
 # rebase with no pending item anywhere.
 #
+# Section 7b pins how the work bead is resolved, which wedged every rebase once:
+# resolution must not need `gc` (its import closure is cold in the condition env),
+# older roots must still resolve through the convoy, and a resolution failure must
+# report the error it hit rather than a membership claim it never tested.
+#
 # EXECUTES the real shipped script against stub `bd` / `gc` binaries and a real
 # temporary git repo. No live city, Dolt, network, or worktrees.
 set -uo pipefail
@@ -48,7 +53,12 @@ case "$1" in
 show)
   case "$2" in
   "$ROOT_ID")
-    printf '[{"id":"%s","metadata":{"gc.input_convoy_id":"%s"}}]' "$ROOT_ID" "$CONVOY_ID"
+    # gc.var.issue is the work bead, stamped on every root the current formula
+    # pours; ROOT_ISSUE_VAR="" models a root poured before it existed, which
+    # still has to resolve through the convoy.
+    printf '[{"id":"%s","metadata":{"gc.input_convoy_id":"%s"' "$ROOT_ID" "$CONVOY_ID"
+    [ -n "$ROOT_ISSUE_VAR" ] && printf ',"gc.var.issue":"%s"' "$ROOT_ISSUE_VAR"
+    printf '}}]'
     ;;
   "$ISSUE_ID")
     printf '[{"id":"%s","metadata":{' "$ISSUE_ID"
@@ -107,6 +117,13 @@ cat > "$TMP/bin/gc" <<'GC'
 # gc convoy status <convoy> --json | gc session nudge <target> <message>
 . "$STATE"
 if [ "$1" = "convoy" ] && [ "$2" = "status" ]; then
+  if [ "$CONVOY_FAILS" = "1" ]; then
+    # The live failure: under the condition env's redirected HOME the city
+    # import cache is cold, so this subcommand dies before it ever looks at
+    # the convoy. Stderr, non-zero exit, no JSON.
+    echo "city import compound-engineering ... locked but not cached at /nope; run 'gc import install'" >&2
+    exit 1
+  fi
   if [ "$CONVOY_MEMBERS" = "1" ]; then
     printf '{"children":[{"id":"%s"}]}' "$ISSUE_ID"
   else
@@ -150,7 +167,9 @@ write_state() {
 ROOT_ID="${ROOT_ID-wisp-1}"
 CONVOY_ID="${CONVOY_ID-convoy-1}"
 CONVOY_MEMBERS="${CONVOY_MEMBERS-1}"
+CONVOY_FAILS="${CONVOY_FAILS-0}"
 ISSUE_ID="${ISSUE_ID-gc-issue}"
+ROOT_ISSUE_VAR="${ROOT_ISSUE_VAR-${ISSUE_ID-gc-issue}}"
 MD_WORK_DIR="${MD_WORK_DIR-$WT}"
 MD_ONTO="${MD_ONTO-$UPSTREAM_SHA}"
 MD_GATE="${MD_GATE-$HEAD_SHA}"
@@ -195,8 +214,23 @@ refute_call() {
   else ok "$1"; fi
 }
 
+# Assertions over what the last run_case reported to the operator. A failure
+# path that names the wrong cause is its own defect: this loop's failures are
+# read by a human hours later, with nothing but this text to go on.
+assert_out() {
+  if grep -qF -- "$2" "$TMP/out" 2>/dev/null; then ok "$1"; else
+    bad "$1"; sed 's/^/       /' "$TMP/out" 2>/dev/null
+  fi
+}
+refute_out() {
+  if grep -qF -- "$2" "$TMP/out" 2>/dev/null; then
+    bad "$1"; sed 's/^/       /' "$TMP/out"
+  else ok "$1"; fi
+}
+
 reset_env() {
-  unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_WORK_DIR MD_ONTO MD_GATE
+  unset ROOT_ID CONVOY_ID CONVOY_MEMBERS CONVOY_FAILS ISSUE_ID ROOT_ISSUE_VAR
+  unset MD_WORK_DIR MD_ONTO MD_GATE
   unset MD_KEEPER MD_NOTIFY MD_ABORTED_AT MD_BACKUP MD_MAX_ATTEMPTS MD_SUBJECT_MAX MD_QUESTIONS
   unset UPDATE_FAILS ITERATION
 }
@@ -249,8 +283,33 @@ run_case "FAIL when the recorded work_dir is missing from disk" 1
 reset_env; MD_WORK_DIR="$TMP"; write_state
 run_case "FAIL when the recorded work_dir is not a git worktree" 1
 
-reset_env; CONVOY_MEMBERS=0; write_state
-run_case "FAIL when the convoy does not have exactly one tracked member" 1
+# --- 7b. resolving the work bead from the root -------------------------------
+# The root carries the work bead id as gc.var.issue, so `bd` alone resolves it.
+# This is load-bearing: `gc convoy status` loads the city import closure, which
+# is cold under the condition env's redirected HOME, and when that call died the
+# loop could never see a green gate — it burned every attempt on a rebase that
+# was already finished, then handed back "without reaching a green gate".
+reset_env; CONVOY_FAILS=1; write_state
+run_case "PASS from root gc.var.issue while gc convoy status is unusable" 0
+
+# Roots poured before the var existed still resolve, through the convoy.
+reset_env; ROOT_ISSUE_VAR=""; write_state
+run_case "PASS via the convoy fallback when the root has no gc.var.issue" 0
+
+# When that fallback is the thing that breaks, say so. Reporting a membership
+# count the code never measured is what made this expensive to diagnose.
+reset_env; ROOT_ISSUE_VAR=""; CONVOY_FAILS=1; write_state
+run_case "FAIL when the convoy fallback cannot query the convoy" 1
+assert_out "an unqueryable convoy reports the underlying error" "locked but not cached"
+refute_out "an unqueryable convoy claims no membership count" "tracked members, expected"
+
+reset_env; ROOT_ISSUE_VAR=""; CONVOY_MEMBERS=0; write_state
+run_case "FAIL when the convoy fallback finds no tracked member" 1
+assert_out "a queried convoy reports the count it measured" "has 0 tracked members"
+
+reset_env; ROOT_ISSUE_VAR=""; CONVOY_ID=""; write_state
+run_case "FAIL when the root carries neither gc.var.issue nor a convoy id" 1
+assert_out "an unresolvable root names both missing pointers" "neither gc.var.issue nor an input convoy id"
 
 # --- 8. HEAD exactly at the upstream tip (empty kept set) --------------------
 # A rebase that drops every divergent commit is legitimate: --is-ancestor is
@@ -326,7 +385,7 @@ run_case "FAIL is preserved when the handback write is refused" 1
 
 # Failing before the work bead is resolved leaves nothing to stamp — the loop
 # still reports FAIL rather than erroring out mid-handback.
-reset_env; CONVOY_MEMBERS=0; ITERATION=25; write_state
+reset_env; ROOT_ISSUE_VAR=""; CONVOY_MEMBERS=0; ITERATION=25; write_state
 run_case "FAIL on the last attempt before the work bead resolves" 1
 refute_call "no handback without a resolved work bead" "bd update"
 

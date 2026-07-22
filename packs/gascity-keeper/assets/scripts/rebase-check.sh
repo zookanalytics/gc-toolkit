@@ -22,7 +22,10 @@
 #   3. PATH is the sandboxed condition PATH (bd, gc, dolt, jq plus
 #      /usr/local/bin:/usr/bin:/bin) and HOME is redirected to the city root.
 #      `go` is not guaranteed to be on it, and the Go build/module caches under
-#      the redirected HOME would be cold.
+#      the redirected HOME would be cold. So is the city import cache, so any
+#      `gc` subcommand that loads the import closure (`gc convoy status`, for
+#      one) can die there with "locked but not cached" while working fine
+#      interactively. Prefer `bd`, which reads the store without that closure.
 #
 # So the iteration agent runs the gate in its own session — real HOME, real
 # toolchain, no dispatcher held open — and stamps the result on the work bead.
@@ -211,14 +214,50 @@ if [ -z "$ROOT" ]; then
 fi
 [ -n "$ROOT" ] || fail "could not resolve the molecule root bead"
 
-# --- 2. Root -> input convoy -> the single tracked member (the work bead) -----
-CONVOY=$(bd show "$ROOT" --json 2>/dev/null |
-	jq -r '.[0].metadata."gc.input_convoy_id" // .[0].metadata."gc.var.convoy_id" // empty')
-[ -n "$CONVOY" ] || fail "root $ROOT carries no input convoy id"
+# --- 2. Root -> the work bead ------------------------------------------------
+# Every mol-upstream-gc-rebase dispatch is poured with the work bead as its
+# `issue` var, so the root already carries the answer as gc.var.issue and the
+# resolution is one `bd show` against the store.
+#
+# This used to hop root -> gc.input_convoy_id -> `gc convoy status` -> the
+# single tracked member. That call loads the city import closure, which is cold
+# under the condition env's redirected HOME (see constraint 3 in the header), so
+# it died on every iteration of a well-formed loop — the gate could never be
+# recognised as green and the loop spun to max_attempts. The convoy hop survives
+# only as a fallback for roots poured before `issue` was stamped.
+ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null) || fail "could not read root bead $ROOT"
+ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // empty')
 
-ISSUE=$(gc convoy status "$CONVOY" --json 2>/dev/null |
-	jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$ISSUE" ] || fail "convoy $CONVOY does not have exactly one tracked member"
+if [ -z "$ISSUE" ]; then
+	note "root $ROOT carries no gc.var.issue; falling back to the convoy hop"
+	CONVOY=$(printf '%s' "$ROOT_JSON" |
+		jq -r '.[0].metadata."gc.input_convoy_id" // .[0].metadata."gc.var.convoy_id" // empty')
+	[ -n "$CONVOY" ] || fail "root $ROOT carries neither gc.var.issue nor an input convoy id"
+
+	# Keep stderr out of the JSON — `gc` writes deprecation warnings there — but
+	# do not discard it either. Swallowing it is what let an import-cache miss be
+	# reported as a membership claim this code had never actually tested, sending
+	# six iterations of debugging at a convoy that was always well-formed.
+	CONVOY_ERR=$(mktemp 2>/dev/null) || CONVOY_ERR="${TMPDIR:-/tmp}/rebase-check-convoy.$$"
+	CONVOY_JSON=$(gc convoy status "$CONVOY" --json 2>"$CONVOY_ERR")
+	CONVOY_RC=$?
+	CONVOY_STDERR=$(tr '\n' ' ' <"$CONVOY_ERR" 2>/dev/null)
+	rm -f "$CONVOY_ERR"
+	[ "$CONVOY_RC" -eq 0 ] ||
+		fail "could not query convoy $CONVOY (gc convoy status exited $CONVOY_RC): ${CONVOY_STDERR:-no error output}"
+
+	MEMBERS=$(printf '%s' "$CONVOY_JSON" | jq -r '(.children // []) | length' 2>/dev/null)
+	case "$MEMBERS" in
+	'' | *[!0-9]*)
+		fail "could not parse the convoy $CONVOY member list: ${CONVOY_STDERR:-unparseable JSON}"
+		;;
+	esac
+	[ "$MEMBERS" -eq 1 ] ||
+		fail "convoy $CONVOY has $MEMBERS tracked members, expected exactly 1"
+
+	ISSUE=$(printf '%s' "$CONVOY_JSON" | jq -r '.children[0].id // empty')
+	[ -n "$ISSUE" ] || fail "the single tracked member of convoy $CONVOY has no id"
+fi
 
 # --- 3. The rebase worktree, as recorded by workspace-setup ------------------
 ISSUE_JSON=$(bd show "$ISSUE" --json 2>/dev/null) || fail "could not read work bead $ISSUE"
