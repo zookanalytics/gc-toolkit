@@ -410,6 +410,42 @@ gc bd update $WORK \
   --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET)" \
   --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 ```
+3b. **If the bead is an mr-mode gating anchor, ALSO clear `merge_result`.**
+A bead carrying `merge_result` is a gating ANCHOR with a live PR, not a plain
+work bead, and the direct-mode rejection above is not sufficient for it:
+```bash
+# >>> mr-aware-rejection
+MR_STATE=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.merge_result // empty')
+if [ -n "$MR_STATE" ]; then
+  PR_URL=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.pr_url // empty')
+  gc bd update $WORK --unset-metadata merge_result \
+    ${PR_URL:+--set-metadata existing_pr="$PR_URL"}
+fi
+# <<< mr-aware-rejection
+```
+Left set, the anchor stays inside `merge-skill.sh`'s scan
+(`--status=open --metadata-field merge_result=pull_request`) for the whole time
+a polecat owns the rework — and this pool-rejection path files no rework CHILD,
+so the skill's in-flight-rework hold (which keys on a child carrying
+`pr_number`) never engages. The moment the polecat's push flips the PR to
+`CLEAN` the skill lands it. A non-empty `check_set` softens that to a stall
+(the moved head makes every `check.<name>=green@<old-head>` marker stale), but
+an empty check_set merges outright, and in BOTH cases the human approval does
+not re-fire: GitHub dismisses a stale review only under
+`dismiss_stale_reviews_on_push`, which these rigs' rulesets do not set. A
+conflict resolution is new code that no gate has seen. Cleared, the anchor
+leaves the scan; the hand-back re-enters merge-push, one-anchor-per-PR resolves
+`$WORK` as its own anchor again, and the full check set runs fresh against the
+new head.
+
+Keep `branch` and `pr_number`, and carry `pr_url` over to `existing_pr` so the
+hand-back reuses the SAME PR instead of opening a duplicate.
+
+This is the hand-run counterpart of `reconcile-merged-prs.sh`'s stale-base arm,
+which KEEPS the marker deliberately — that arm files a rework child (so the
+hold does engage) and its remedy is a mechanical rebase onto a rewritten base.
+Here there is no child and the remedy is an authored resolution.
+
 4. Do NOT delete the branch (new polecat needs it for conflict resolution).
 5. Clean up temp branch (leaves worktree detached so other worktrees can hold {{target_branch}}): `git checkout {{target_branch}} && git branch -D temp && git switch --detach HEAD`
 6. Pour next patrol iteration before burning:
@@ -502,7 +538,27 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
        --set-metadata rejection_reason="<failure summary>" \
        --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
      ```
-   - Delete branch: `git push origin --delete $BRANCH`
+   - **If the bead is an mr-mode gating anchor, ALSO clear `merge_result`** —
+     the same mr-aware rejection the rebase step performs, for the same reason
+     (a live PR left in `merge-skill.sh`'s scan lands the un-gated rework):
+     ```bash
+     MR_STATE=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.merge_result // empty')
+     if [ -n "$MR_STATE" ]; then
+       PR_URL=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.pr_url // empty')
+       gc bd update $WORK --unset-metadata merge_result \
+         ${PR_URL:+--set-metadata existing_pr="$PR_URL"}
+     fi
+     ```
+   - Delete branch **only when no PR depends on it**: `$BRANCH` is the head of
+     any open PR the bead anchored, and deleting it destroys that PR — closing
+     it as un-merged and stranding the review history:
+     ```bash
+     if [ -z "$MR_STATE" ]; then
+       git push origin --delete $BRANCH
+     else
+       echo "mr-mode anchor: leaving $BRANCH (it is PR #$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.pr_number // "?"')'s head)"
+     fi
+     ```
    - Clean up (leaves worktree detached so other worktrees can hold $TARGET): `git checkout "$TARGET" && git branch -D temp && git switch --detach HEAD`
    - Pour next patrol iteration before burning:
      ```bash
