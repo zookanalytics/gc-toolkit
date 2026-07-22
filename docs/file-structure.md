@@ -39,6 +39,28 @@ document's own content, held by its [`## Scope`](#the-scope-section).
 | "I need to file a new \<thing\>." | If it's durable and one-of-a-kind: central. If it's tied to a piece of work: local under that work's bead-ID. |
 | "Loading context for task X." | Bead-graph from the task's bead (via `bd dep`/`bd show`) + central docs. |
 
+## Repo or bead store: analysis commits to the repo
+
+The two tiers below decide where a file goes. They assume there is a
+file. The prior question — should this analysis be a committed file at
+all, or just content on the bead? — has one answer: **agent-written
+analysis commits to the repo.**
+
+The record belongs with the artifact it explains. A clone is
+self-contained: whoever holds the repo holds the reasoning for why the
+code looks the way it does. Left in the bead store alone, that reasoning
+needs a live bead server, credentials, and the right city to reach, and
+`git blame` → commit → bead — the lineage path central docs
+[depend on](#inside-docs) — has nothing to land on.
+
+Beads are **operational state**: routing, status, assignment — per-city,
+and disposable once the work completes. The repo is the **durable
+artifact**, the thing that gets cloned, forked, or handed to another
+operator. So the bead carries the index and the verdict; the repo
+carries the body. That is the same
+[read-when-linked-to](#two-tiers-central-authoritative-local-historical)
+model `specs/` already runs on.
+
 ## Two tiers: central authoritative, local historical
 
 *Mnemonic: central is what's true; local is what was thought.*
