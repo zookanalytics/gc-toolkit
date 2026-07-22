@@ -68,12 +68,36 @@ done
 # lifecycle states than `pull_request`: if the steps are dead at pull_request they
 # are dead afterwards too. A closed anchor is the safest case of all — the work
 # bead itself is finished.
+#
+# The three merge_result values above are all stamped BY THE REFINERY, which is a
+# beat behind the polecat's own hand-off. That leaves a window those predicates
+# miss (tk-yxlqb): between the polecat's done sequence (push, reassign the anchor
+# to the refinery) and the refinery's first stamp, the anchor reads
+#
+#     status=open   merge_result=<absent>   assignee=<rig>/<prefix>refinery
+#
+# — which looks "still live" while the molecule is already dead, so the husk keeps
+# burning polecats for the whole window. Observed on tk-2l13a: ~17 minutes, two
+# sessions consumed re-deriving "already done". A periodic pass that happens to run
+# mid-window leaves the husk armed until the next cycle, so the window is not
+# self-healing. The assignee closes it exactly: an anchor handed to the refinery is
+# by definition past polecat work, stamped or not.
+#
+# Matching is on the assignee's final dotted component, after dropping the optional
+# `<rig>/` qualifier — the live shapes are `<rig>/gc-toolkit.refinery` and
+# `<rig>/gastown.refinery`, and a bare `refinery` is the un-prefixed binding. The
+# match is deliberately anchored rather than a loose `*refinery*` substring: a false
+# positive here quiesces a LIVE molecule (see the fail-closed note below), so only
+# an assignee that IS a refinery may satisfy it.
 is_terminal_anchor() {
   case "$1" in                       # $1 = anchor status
     closed) return 0 ;;
   esac
   case "$2" in                       # $2 = anchor metadata.merge_result
     pre_open_gate|pull_request|merged) return 0 ;;
+  esac
+  case "${3##*/}" in                 # $3 = anchor assignee, minus any <rig>/ prefix
+    refinery|*.refinery) return 0 ;;
   esac
   return 1
 }
@@ -129,19 +153,24 @@ while IFS= read -r root; do
   fi
 
   ainfo=$(gc bd show "$anchor" --json 2>/dev/null \
-    | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")"' 2>/dev/null)
-  if [ -z "$ainfo" ] || [ "$ainfo" = "|" ]; then
+    | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")|\(.assignee // "")"' 2>/dev/null)
+  astatus=""; amerge=""; aassignee=""
+  IFS='|' read -r astatus amerge aassignee <<< "$ainfo"
+  # Every real bead carries a status, so an empty one means the READ failed (bead
+  # gone, jq error, Dolt hiccup) rather than "an anchor with no status". Fail
+  # closed on it, same as an unresolved anchor.
+  if [ -z "$astatus" ]; then
     echo "quiesce-completed-workflows: root $root — anchor $anchor unreadable; skipped" >&2
     unresolved=$((unresolved + 1)); continue
   fi
-  astatus=${ainfo%%|*}; amerge=${ainfo##*|}
 
-  if ! is_terminal_anchor "$astatus" "$amerge"; then
-    echo "quiesce-completed-workflows: root $root — anchor $anchor still live (status=$astatus merge_result=${amerge:-none}); left alone"
+  adesc="status=$astatus merge_result=${amerge:-none} assignee=${aassignee:-none}"
+  if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee"; then
+    echo "quiesce-completed-workflows: root $root — anchor $anchor still live ($adesc); left alone"
     roots_live=$((roots_live + 1)); continue
   fi
 
-  echo "quiesce-completed-workflows: root $root — anchor $anchor DONE (status=$astatus merge_result=${amerge:-none}); quiescing steps"
+  echo "quiesce-completed-workflows: root $root — anchor $anchor DONE ($adesc); quiescing steps"
   roots_done=$((roots_done + 1))
 
   while IFS= read -r row; do
