@@ -14,7 +14,7 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 
 **Agents make their edges visible.** Looking smart and being smart are different. Legible agents show which.
 
-**Decisions have a home.** Documentation is the system's memory. What's written survives; what isn't, doesn't.
+**Decisions have a home.** Documentation is the system's memory, and its home is the repo: durable work products materialize as committed files, while the bead store carries operational state. What's committed survives; what lives only in a bead comment doesn't.
 
 **The pack borrows before it invents.** Most coordination problems aren't new, and many AI-era patterns are already published. gc-toolkit aggregates and cites; reinvention is the fallback when nothing fits.
 
