@@ -44,9 +44,11 @@
 # intact and the whole op is safe to re-run.
 #
 # Side effects: `up`/`link` mutate bead metadata AND ground the work bead
-# (assignee=session_name), `unlink` clears them, `backfill` grounds every
-# already-linked host in one pass, and `up` creates or wakes a live session.
-# `resolve`/`lineage` are read-only.
+# (assignee=session_name), `unlink` clears the links and ungrounds — but only
+# its OWN grounding (a newer non-host assignee is preserved), `backfill` grounds
+# every already-linked host in one pass (skipping any bead a non-host owner
+# already holds), and `up` creates or wakes a live session. `resolve`/`lineage`
+# are read-only.
 
 set -euo pipefail
 
@@ -71,11 +73,16 @@ Commands:
                                        exposed for fixtures and recovery). Idempotent.
   unlink <bead-id> [session-bead-id]   Remove the links + unground the work bead
                                        (clear its assignee) so it can be stopped.
+                                       Clears the assignee ONLY while it is still
+                                       the host's own session name — a newer
+                                       non-host owner is preserved.
   backfill                             Ground every already-linked host in one
                                        pass (set assignee=session_name from the
                                        reverse link). One-time migration for hosts
                                        linked before grounding shipped; new/resumed
-                                       hosts ground automatically via 'up'. Idempotent.
+                                       hosts ground automatically via 'up'. Skips a
+                                       bead already assigned to a non-host owner.
+                                       Idempotent.
   lineage <bead-id>                    Print the work bead's host lineage. Read-only.
   help                                 Show this help.
 
@@ -266,24 +273,48 @@ cmd_unlink() {
     [ -n "$work" ] || { usage; die "unlink needs <bead-id>"; }
     require_bead "$work"
 
-    # Read the forward cache BEFORE clearing it: it names one session to unbind
-    # and may be the ONLY pointer left if that session has dropped out of
-    # `gc session list` and isn't bd-listable.
-    local cached; cached="$(meta_get "$work" host_session)"
+    # Snapshot the work bead ONCE, before any clear, for three fields:
+    #   - host_session (forward cache): names one session to unbind and may be
+    #     the ONLY pointer left if that session dropped out of `gc session list`
+    #     and isn't bd-listable.
+    #   - host_session_name (the grounding owner) + the CURRENT assignee: read up
+    #     front so ungrounding can be made CONDITIONAL — the metadata clear below
+    #     wipes host_session_name, so it must be captured first.
+    local obj cached host_name cur_assignee
+    obj="$(bead_json "$work")"
+    cached="$(printf '%s' "$obj" | jq -r '.metadata.host_session // empty' 2>/dev/null || true)"
+    host_name="$(printf '%s' "$obj" | jq -r '.metadata.host_session_name // empty' 2>/dev/null || true)"
+    cur_assignee="$(printf '%s' "$obj" | jq -r '.assignee // empty' 2>/dev/null || true)"
 
-    # Clear the forward cache AND unground the host on the work bead (the
-    # optional accelerator + the wake reason), in one write. Ungrounding
-    # (tk-z130v.3): clear the work bead's `assignee` (`--assignee=` empty, the
-    # same clear gc-helm.sh's `takeaway --release` performs) so the host loses
-    # its assigned-work wake reason and can actually be stopped. Without this a
-    # re-bind or cleanup leaves the old session grounded and un-drainable — it
-    # revives ~20s after every drain. Teardown must clear the wake reason FIRST,
-    # then drain.
-    gc bd update "$work" \
-        --assignee= \
-        --unset-metadata host_session \
-        --unset-metadata host_session_name \
-        --unset-metadata host_session_epoch >/dev/null 2>&1 || true
+    # Clear the forward cache on the work bead — and unground IN THE SAME WRITE,
+    # but ONLY our own grounding (tk-z130v.3). The grounding set the work bead's
+    # `assignee` to THIS host's session name; teardown clears it (`--assignee=`
+    # empty, the same clear gc-helm.sh's `takeaway --release` performs) so the
+    # host loses its assigned-work wake reason and can actually be stopped — else
+    # it revives ~20s after every drain. Clear it ONLY when the current assignee
+    # is STILL this host's session name. A newer NON-host assignee — a real
+    # agent/operator that took the bead after it was grounded — must be PRESERVED;
+    # blindly clearing it would strip a live assignment and strand that owner's
+    # work. This is exactly the contract the witness filter keys on
+    # (host-bead-skip.test.sh): assignee == host_session_name ⇒ grounded (ours to
+    # clear); != ⇒ a real assignee (keep). An absent host_name (nothing cached)
+    # is treated as "not ours" — preserve. Teardown must clear the wake reason
+    # FIRST (before drain), but only the wake reason WE set.
+    if [ -n "$host_name" ] && [ "$cur_assignee" = "$host_name" ]; then
+        gc bd update "$work" \
+            --assignee= \
+            --unset-metadata host_session \
+            --unset-metadata host_session_name \
+            --unset-metadata host_session_epoch >/dev/null 2>&1 || true
+    else
+        gc bd update "$work" \
+            --unset-metadata host_session \
+            --unset-metadata host_session_name \
+            --unset-metadata host_session_epoch >/dev/null 2>&1 || true
+        if [ -n "$cur_assignee" ] && [ "$cur_assignee" != "$host_name" ]; then
+            log "unlink: preserving non-host assignee '$cur_assignee' on $work (grounded name '${host_name:-<none>}')"
+        fi
+    fi
 
     # Clear the reverse link — the SOURCE OF TRUTH — on every session bead bound
     # to this work bead. Do NOT depend on the forward cache to locate it: if the
@@ -349,7 +380,7 @@ rig_db_for_bead() {
 }
 
 cmd_backfill() {
-    local sids grounded=0 sid work name db
+    local sids grounded=0 skipped=0 sid work name db cur
     sids="$( { gc bd list --has-metadata-key hosts_bead --json 2>/dev/null \
                    | jq -r '.[]?.id // empty' 2>/dev/null || true
                gc session list --state all --json 2>/dev/null \
@@ -361,6 +392,22 @@ cmd_backfill() {
         work="$(meta_get "$sid" hosts_bead)"; [ -n "$work" ] || continue
         name="$(meta_get "$sid" session_name)"; [ -n "$name" ] || continue
         db="$(rig_db_for_bead "$work")"
+        # Preserve a non-host assignee. backfill grounds an UNGROUNDED host (empty
+        # assignee) or re-affirms one already grounded to this host (assignee ==
+        # name, idempotent). If the work bead is assigned to a DIFFERENT owner, a
+        # real agent took it after linking — grounding would clobber that live
+        # assignment (the same host_session_name != assignee case the witness
+        # filter preserves, host-bead-skip.test.sh). Skip and log instead of
+        # overwriting. Read the current assignee from the work bead's OWN rig
+        # ledger (same --db pin as the ground write) so a city-wide pass reads the
+        # right ledger cross-rig.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        cur="$(gc bd show "$work" ${db:+--db "$db"} --json 2>/dev/null | jq -r '.[0].assignee // empty' 2>/dev/null || true)"
+        if [ -n "$cur" ] && [ "$cur" != "$name" ]; then
+            log "skip: $work already assigned to '$cur' (not host '$name') — preserving non-host assignee"
+            skipped=$((skipped + 1))
+            continue
+        fi
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         if gc bd update "$work" ${db:+--db "$db"} --assignee "$name" >/dev/null 2>&1; then
             log "grounded: $work -> $name (host $sid)"
@@ -369,7 +416,7 @@ cmd_backfill() {
             log "skip: could not ground $work (host $sid)"
         fi
     done <<<"$sids"
-    log "backfill: grounded $grounded host bead(s)"
+    log "backfill: grounded $grounded host bead(s), preserved $skipped non-host assignee(s)"
     printf '%s\n' "$grounded"
 }
 

@@ -181,6 +181,51 @@ rm -rf "$BACKFILL_SHIM"; BACKFILL_SHIM=""
     && ok "backfill re-grounded WORK from the reverse link (assignee == session_name)" \
     || bad "backfill did not ground WORK: assignee='$(assignee_of "$WORK")'"
 
+hdr "Preserve a non-host assignee — unlink/backfill must not clobber a real owner (tk-5bygy)"
+# Grounding sets WORK.assignee = the host's session_name. If a REAL agent later
+# takes the bead (assignee != host_session_name — the exact case the witness
+# filter KEEPS; host-bead-skip.test.sh:66), neither unlink NOR backfill may strip
+# that assignment: unlink clears ONLY its own grounding, backfill skips a bead a
+# non-host owner already holds. Otherwise ungrounding a stale host would strand a
+# live owner's work.
+OTHER="someone-else-fixture-$$"                                # synthetic non-host owner (matches no real session)
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                # ensure grounded + linked
+gc bd update "$WORK" --assignee "$OTHER" >/dev/null 2>&1       # a real agent takes the bead
+[ "$(assignee_of "$WORK")" = "$OTHER" ] \
+    && ok "precondition: WORK reassigned to a non-host owner ($OTHER)" \
+    || bad "precondition: could not reassign WORK (got '$(assignee_of "$WORK")')"
+# (a) unlink preserves the non-host assignee while still tearing down the links.
+"$TOOL" unlink "$WORK" >/dev/null
+[ "$(assignee_of "$WORK")" = "$OTHER" ] \
+    && ok "unlink PRESERVED the non-host assignee (did not clear $OTHER)" \
+    || bad "unlink clobbered a non-host assignee: assignee='$(assignee_of "$WORK")' (want $OTHER)"
+[ -z "$(meta "$WORK" host_session)" ] && [ -z "$(meta "$SESS" hosts_bead)" ] \
+    && ok "unlink still cleared the links (teardown intact despite the preserved assignee)" \
+    || bad "unlink left a dangling link (cache=$(meta "$WORK" host_session) reverse=$(meta "$SESS" hosts_bead))"
+# (b) backfill skips a host bead a non-host agent already owns.
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                # re-link (re-grounds to session_name)
+gc bd update "$WORK" --assignee "$OTHER" >/dev/null 2>&1       # a real agent takes it again
+BACKFILL_SHIM="$(mktemp -d)"
+REAL_GC="$(command -v gc)"
+cat >"$BACKFILL_SHIM/gc" <<SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[]}'   # hide real hosts; backfill sees only stand-ins
+    exit 0
+fi
+exec "$REAL_GC" "\$@"
+SHIM
+chmod +x "$BACKFILL_SHIM/gc"
+PATH="$BACKFILL_SHIM:$PATH" "$TOOL" backfill >/dev/null 2>&1 || true
+rm -rf "$BACKFILL_SHIM"; BACKFILL_SHIM=""
+[ "$(assignee_of "$WORK")" = "$OTHER" ] \
+    && ok "backfill SKIPPED the bead a non-host agent owns ($OTHER preserved)" \
+    || bad "backfill clobbered a non-host assignee: assignee='$(assignee_of "$WORK")' (want $OTHER)"
+# Restore the grounded binding for the sections below (they expect WORK linked to
+# SESS at epoch 2 and grounded to its session_name).
+gc bd update "$WORK" --assignee= >/dev/null 2>&1             # drop the non-host owner
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null              # re-ground to the host
+
 hdr "Resolve contract — session-list path requires hosts_bead; alias is a prefilter (codex PR#98 / tk-mv7qu)"
 # Regression guard for the codex finding on PR#98: in the `gc session list`
 # search path, alias==<bead> is a PREFILTER ONLY — resolution requires the
