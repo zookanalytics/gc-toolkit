@@ -17,6 +17,9 @@
 #       host_session       = <session-bead-id>       (stable; survives drain)
 #       host_session_name  = <session_name>          (the wake handle)
 #       host_session_epoch = <continuation_epoch>    (incarnation marker)
+#   grounding (the assigned-work wake reason; tk-z130v.3) — on the WORK bead:
+#       assignee           = <session_name>          (revives the host after an
+#                                                      involuntary drain)
 #   lineage (the 1:0..N / transcript-replay hook) — on the WORK bead:
 #       gc.session_lineage = <JSON array of {session,name,epoch,at}>
 #
@@ -40,8 +43,10 @@
 # every write is idempotent — a partial failure leaves the source of truth
 # intact and the whole op is safe to re-run.
 #
-# Side effects: `up`/`link`/`unlink` mutate bead metadata (and `up` creates
-# or wakes a live session). `resolve`/`lineage` are read-only.
+# Side effects: `up`/`link` mutate bead metadata AND ground the work bead
+# (assignee=session_name), `unlink` clears them, `backfill` grounds every
+# already-linked host in one pass, and `up` creates or wakes a live session.
+# `resolve`/`lineage` are read-only.
 
 set -euo pipefail
 
@@ -60,10 +65,17 @@ Commands:
                                        the durable dual-link (the default verb).
   resolve <bead-id>                    Print the bead's host session(s). Read-only.
   link <bead-id> <session-bead-id> [name] [epoch]
-                                       Write the dual-link + append lineage. The
-                                       atomic binding step (used by 'up'; exposed
-                                       for fixtures and recovery). Idempotent.
-  unlink <bead-id> [session-bead-id]   Remove the links (cleanup / re-bind).
+                                       Write the dual-link, ground the work bead
+                                       (assignee=session_name), + append lineage.
+                                       The atomic binding step (used by 'up';
+                                       exposed for fixtures and recovery). Idempotent.
+  unlink <bead-id> [session-bead-id]   Remove the links + unground the work bead
+                                       (clear its assignee) so it can be stopped.
+  backfill                             Ground every already-linked host in one
+                                       pass (set assignee=session_name from the
+                                       reverse link). One-time migration for hosts
+                                       linked before grounding shipped; new/resumed
+                                       hosts ground automatically via 'up'. Idempotent.
   lineage <bead-id>                    Print the work bead's host lineage. Read-only.
   help                                 Show this help.
 
@@ -188,6 +200,28 @@ cmd_link() {
         --set-metadata "host_session_name=$name" \
         --set-metadata "host_session_epoch=$epoch" >/dev/null
 
+    # 2b) Ground the host (tk-z130v.3): set the work bead's `assignee` to the
+    # host's session NAME. That assignment is the "assigned-work wake reason" —
+    # gascity core's compute_awake_set revives a session that is the assignee of
+    # a bead with awake-demand (in_progress, or open+Ready) with NO Drained gate,
+    # so a bead-host brought back by the reconciler after an INVOLUNTARY
+    # config-drift drain keeps its conversation instead of dying. This is the
+    # grounding, not any fork exemption.
+    #
+    # Use the session NAME, never the session bead id: a bead id flips
+    # `gc bd update --assignee` to the HQ store ("no issue found"), and the
+    # awake-set matches on the name. `assignee=session_name` is also an already
+    # established convention (see assets/scripts/gc-helm.sh "a child bead's
+    # assignee is its OWNING session — the session_name"), and the witness
+    # liveness map keys on session_name, so a drained/asleep grounded host still
+    # resolves live, not orphaned (formulas/mol-witness-patrol.toml
+    # recover-orphaned-beads).
+    #
+    # Guard on a non-empty name: an empty --assignee would CLEAR the assignee and
+    # unground the host. Idempotent — a re-link writes the same value, so
+    # re-binding the same session does not thrash the assignment.
+    [ -n "$name" ] && gc bd update "$work" --assignee "$name" >/dev/null
+
     # 3) Lineage append (idempotent on session+epoch) — on the work bead.
     local lineage entry
     lineage="$(meta_get "$work" gc.session_lineage)"
@@ -237,8 +271,16 @@ cmd_unlink() {
     # `gc session list` and isn't bd-listable.
     local cached; cached="$(meta_get "$work" host_session)"
 
-    # Clear the forward cache on the work bead (the optional accelerator).
+    # Clear the forward cache AND unground the host on the work bead (the
+    # optional accelerator + the wake reason), in one write. Ungrounding
+    # (tk-z130v.3): clear the work bead's `assignee` (`--assignee=` empty, the
+    # same clear gc-helm.sh's `takeaway --release` performs) so the host loses
+    # its assigned-work wake reason and can actually be stopped. Without this a
+    # re-bind or cleanup leaves the old session grounded and un-drainable — it
+    # revives ~20s after every drain. Teardown must clear the wake reason FIRST,
+    # then drain.
     gc bd update "$work" \
+        --assignee= \
         --unset-metadata host_session \
         --unset-metadata host_session_name \
         --unset-metadata host_session_epoch >/dev/null 2>&1 || true
@@ -271,6 +313,64 @@ cmd_lineage() {
     local lineage; lineage="$(meta_get "$work" gc.session_lineage)"
     [ -n "$lineage" ] || lineage="[]"
     printf '%s\n' "$lineage" | jq '.' 2>/dev/null || printf '%s\n' "$lineage"
+}
+
+# ---- backfill (one-time grounding migration) -------------------------------
+
+# Ground every host that was linked BEFORE grounding shipped: for each hosted
+# work bead, set its `assignee` to the host session's name (tk-z130v.3). New and
+# resumed hosts ground automatically via cmd_link, so this only catches up the
+# already-live ones — run once after deploy. It matters because the tk-z130v.4
+# exemption drop is gated on all live hosts being grounded first. Idempotent:
+# re-running writes the same assignee, so a second pass is a safe no-op-in-effect.
+#
+# Enumerate the reverse link (hosts_bead, on the SESSION bead) across BOTH
+# surfaces, the same split as candidate_session_ids: listable beads via
+# `gc bd list --has-metadata-key hosts_bead` (real session beads are filtered out
+# of `bd list`) and real session beads via `gc session list` (bead-host
+# template). For each, ground work=hosts_bead with the session's session_name —
+# never the session bead id (a bead id flips `--assignee` to the HQ store). The
+# hosts span rigs (bead-host scope is "city"), so pin each ground write to the
+# work bead's OWN rig ledger (rig_db_for_bead) — the same rig-pinning gc-helm.sh
+# uses — so a city-wide pass lands every assignee in the right ledger.
+
+# rig_db_for_bead <bead-id> — the .beads dir of the rig owning the bead, keyed by
+# id prefix (chars before the first '-'); empty if unresolved (then the write
+# falls back to the ambient bd context). Mirrors gc-helm.sh's rig_path_for_bead.
+# Cached — `gc rig list` runs at most once per process.
+_RIGS_JSON=""
+rig_db_for_bead() {
+    [ -n "$_RIGS_JSON" ] || _RIGS_JSON="$(gc rig list --json 2>/dev/null \
+        | jq -c '[.rigs[]? | {prefix, path}]' 2>/dev/null || printf '[]')"
+    local path
+    path="$(printf '%s' "$_RIGS_JSON" | jq -r --arg p "${1%%-*}" \
+        '.[] | select(.prefix==$p) | .path' 2>/dev/null | head -n1)"
+    [ -n "$path" ] && [ -d "$path/.beads" ] && printf '%s' "$path/.beads"
+}
+
+cmd_backfill() {
+    local sids grounded=0 sid work name db
+    sids="$( { gc bd list --has-metadata-key hosts_bead --json 2>/dev/null \
+                   | jq -r '.[]?.id // empty' 2>/dev/null || true
+               gc session list --state all --json 2>/dev/null \
+                   | jq -r '(.sessions // .)[]? | select((.template // "") | test("bead-host")) | .id' \
+                   2>/dev/null || true
+             } | awk 'NF && !seen[$0]++' )"
+    while IFS= read -r sid; do
+        [ -n "$sid" ] || continue
+        work="$(meta_get "$sid" hosts_bead)"; [ -n "$work" ] || continue
+        name="$(meta_get "$sid" session_name)"; [ -n "$name" ] || continue
+        db="$(rig_db_for_bead "$work")"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        if gc bd update "$work" ${db:+--db "$db"} --assignee "$name" >/dev/null 2>&1; then
+            log "grounded: $work -> $name (host $sid)"
+            grounded=$((grounded + 1))
+        else
+            log "skip: could not ground $work (host $sid)"
+        fi
+    done <<<"$sids"
+    log "backfill: grounded $grounded host bead(s)"
+    printf '%s\n' "$grounded"
 }
 
 # ---- resolve (reverse search; enumerate-and-confirm) -----------------------
@@ -412,6 +512,7 @@ main() {
         resolve)  shift; cmd_resolve "$@" ;;
         link)     shift; cmd_link "$@" ;;
         unlink)   shift; cmd_unlink "$@" ;;
+        backfill) shift; cmd_backfill "$@" ;;
         lineage)  shift; cmd_lineage "$@" ;;
         -h|--help|help|'') usage ;;
         -*) usage; die "unknown option: $cmd" ;;

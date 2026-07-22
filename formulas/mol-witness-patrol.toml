@@ -144,6 +144,33 @@ open/unassigned before witness observes it; that requires a separate
 worktree-salvage scan keyed by `metadata.work_dir`. Bound Gastown polecat
 assignees use the shape `<rig>/{{binding_prefix}}<polecat-suffix>`.
 
+That same filter ALSO drops grounded **bead-hosts**. A bead-host grounds itself
+by setting its work bead's `assignee` to its own session NAME (gc-bead-host.sh
+`link`; tk-z130v.3), so the reconciler revives it across drains — which makes a
+host bead read as assigned here, and its `drained`/`asleep` states already
+classify as not-orphaned below. But a bead-host is NOT pool/ephemeral work: its
+lifecycle is owned by the bead-host tooling (gc-bead-host.sh link/unlink,
+gc-helm `takeaway --release`), never orphan-recovery-to-pool. Recognize it
+structurally — its assignee IS its own host session,
+`metadata.host_session_name == assignee` — and drop it in the SAME pass that
+skips unassigned beads. This closes the dead-host edge too: a host whose session
+went `archived`/`closed`/`absent` is NOT reopened into the pool; it re-grounds
+on its next `gc-bead-host.sh up`, or is cleared by close/release. Fail-safe: the
+filter can only DECLINE to orphan, never invent one. The markers let the
+regression test extract and exercise this exact filter
+(assets/scripts/host-bead-skip.test.sh):
+```bash
+# >>> host-bead-skip
+# Keep only beads that are ASSIGNED and are NOT a grounded bead-host (a bead
+# whose metadata.host_session_name equals its assignee). Reads the bead-list
+# array on stdin, writes the surviving array on stdout — apply it to the
+# combined in_progress + open listing before the per-bead liveness loop.
+jq -c '[ .[]
+         | select((.assignee // "") != "")
+         | select((.metadata.host_session_name // "") != (.assignee // "")) ]'
+# <<< host-bead-skip
+```
+
 Get the full session roster for liveness checks:
 ```bash
 gc session list --state=all --json

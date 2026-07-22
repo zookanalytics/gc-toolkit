@@ -438,6 +438,13 @@ quiesce_release_molecule_steps() (
 # call `takeaway … --release` as their single closing step, replacing a takeaway
 # stamp followed by a separate release `gc bd update`.
 #
+# That empty `--assignee` is ALSO what UNGROUNDS a bead-host (tk-z130v.3):
+# clearing the work bead's assignee removes the assigned-work wake reason, so a
+# grounded host stops reviving after a drain. `release` is therefore the
+# operator-facing "done with this bead" path that leaves the host stoppable — a
+# plain `drain-ack` then sticks instead of bouncing back ~20s later. It mirrors
+# gc-bead-host.sh's `unlink`, which clears the same assignee on teardown/re-bind.
+#
 # When the released bead is the ANCHOR of a mol-polecat-work molecule, --release
 # ALSO quiesces that molecule's step beads (quiesce_release_molecule_steps,
 # above) so the park doesn't leave affine/routed steps that re-spawn a polecat

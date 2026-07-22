@@ -40,12 +40,15 @@ note() { printf '  ---- %s\n' "$*"; }
 hdr()  { printf '\n== %s ==\n' "$*"; }
 
 meta() { gc bd show "$1" --json 2>/dev/null | jq -r --arg k "$2" '.[0].metadata[$k] // empty'; }
+# assignee is a top-level bead field (not metadata) — grounding writes it there.
+assignee_of() { gc bd show "$1" --json 2>/dev/null | jq -r '.[0].assignee // empty'; }
 
 WORK=""; SESS=""; SHIM_DIR=""
-W2=""; DEAD=""; OLD=""; NEW=""; RECREATE_SHIM=""
+W2=""; DEAD=""; OLD=""; NEW=""; RECREATE_SHIM=""; BACKFILL_SHIM=""
 cleanup() {
     [ -n "$SHIM_DIR" ] && rm -rf "$SHIM_DIR" || true
     [ -n "$RECREATE_SHIM" ] && rm -rf "$RECREATE_SHIM" || true
+    [ -n "$BACKFILL_SHIM" ] && rm -rf "$BACKFILL_SHIM" || true
     [ "$KEEP" = "1" ] && { note "--keep: leaving WORK=$WORK SESS=$SESS W2=$W2 DEAD=$DEAD OLD=$OLD NEW=$NEW open"; return; }
     for b in "$WORK" "$SESS" "$W2" "$DEAD" "$OLD" "$NEW"; do
         [ -n "$b" ] && gc bd close "$b" --reason "binding fixture teardown" >/dev/null 2>&1 || true
@@ -80,6 +83,12 @@ hdr "Assertion 1 — create + dual-link resolves both ways"
 [ "$(meta "$WORK" host_session_epoch)" = "1" ] \
     && ok "forward cache carries continuation_epoch (the incarnation marker)" \
     || bad "host_session_epoch=$(meta "$WORK" host_session_epoch)"
+# Grounding (tk-z130v.3): link ALSO sets the work bead's `assignee` to the
+# session NAME — the assigned-work wake reason that makes the reconciler revive
+# the host after an involuntary drain (compute_awake_set has no Drained gate).
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "grounding: WORK.assignee == session_name (host revives across a drain)" \
+    || bad "grounding missing: WORK.assignee=$(assignee_of "$WORK") (want bead-host--$WORK)"
 
 hdr "Assertion 4 — reverse-resolvable: the search finds the bead's host(s)"
 # (a) The design's intended mechanism, ListByMetadata hosts_bead=<bead>,
@@ -130,12 +139,47 @@ LEN2="$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
 [ "$(meta "$WORK" host_session_epoch)" = "2" ] \
     && ok "forward cache epoch updated to the new incarnation (2)" \
     || bad "host_session_epoch=$(meta "$WORK" host_session_epoch) (want 2)"
+# Grounding is idempotent: a re-bind (even at a new epoch) re-writes the same
+# assignee=session_name, so it never thrashes the assignment.
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "grounding idempotent across re-bind (WORK.assignee still == session_name)" \
+    || bad "re-bind changed grounding: WORK.assignee=$(assignee_of "$WORK")"
 # Re-binding the SAME session+epoch must NOT grow the lineage (idempotent).
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 LEN3="$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
 [ "$LEN3" = "2" ] \
     && ok "re-bind at the same epoch is idempotent (lineage stays 2)" \
     || bad "lineage grew on idempotent re-bind = $LEN3 (want 2)"
+
+hdr "Backfill — grounds an already-linked host that predates grounding (tk-z130v.3)"
+# A host linked BEFORE grounding shipped is linked (SESS.hosts_bead set) but its
+# work bead has no assignee. `backfill` enumerates the reverse link and grounds
+# each hosted work bead from its session's session_name. Shim `gc session list`
+# to EMPTY so backfill only touches this fixture's listable stand-in (found via
+# `gc bd list --has-metadata-key hosts_bead`) and never real live hosts — the
+# same hermetic discipline the resolve-contract section uses (a polecat must not
+# mutate real sessions).
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                 # ensure linked
+gc bd update "$WORK" --assignee= >/dev/null 2>&1               # simulate pre-grounding (ungrounded)
+[ -z "$(assignee_of "$WORK")" ] \
+    && ok "precondition: WORK linked but ungrounded (assignee empty)" \
+    || bad "precondition: could not clear assignee (got '$(assignee_of "$WORK")')"
+BACKFILL_SHIM="$(mktemp -d)"
+REAL_GC="$(command -v gc)"
+cat >"$BACKFILL_SHIM/gc" <<SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[]}'   # hide real hosts; backfill sees only stand-ins
+    exit 0
+fi
+exec "$REAL_GC" "\$@"
+SHIM
+chmod +x "$BACKFILL_SHIM/gc"
+PATH="$BACKFILL_SHIM:$PATH" "$TOOL" backfill >/dev/null 2>&1 || true
+rm -rf "$BACKFILL_SHIM"; BACKFILL_SHIM=""
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "backfill re-grounded WORK from the reverse link (assignee == session_name)" \
+    || bad "backfill did not ground WORK: assignee='$(assignee_of "$WORK")'"
 
 hdr "Resolve contract — session-list path requires hosts_bead; alias is a prefilter (codex PR#98 / tk-mv7qu)"
 # Regression guard for the codex finding on PR#98: in the `gc session list`
@@ -223,11 +267,16 @@ printf '%s' "$DEFOUT" | grep -q "unknown command" \
     && bad "unknown option --frobnicate did not error" \
     || ok "unknown option still rejected (only bare ids default to 'up')"
 
-hdr "Teardown sanity — unlink clears links, preserves lineage"
+hdr "Teardown sanity — unlink clears links + ungrounds, preserves lineage"
 "$TOOL" unlink "$WORK" >/dev/null
 [ -z "$(meta "$WORK" host_session)" ] && [ -z "$(meta "$SESS" hosts_bead)" ] \
     && ok "unlink cleared both links" \
     || bad "unlink left a dangling link"
+# Ungrounding (tk-z130v.3): unlink clears the work bead's assignee too, so the
+# host loses its wake reason and a drain can actually stop it (no ~20s revive).
+[ -z "$(assignee_of "$WORK")" ] \
+    && ok "unlink ungrounded WORK (assignee cleared — host now stoppable)" \
+    || bad "unlink left WORK grounded: assignee=$(assignee_of "$WORK")"
 [ "$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)" = "2" ] \
     && ok "lineage preserved through unlink (durable record)" \
     || bad "unlink dropped the lineage"
