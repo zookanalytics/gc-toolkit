@@ -119,8 +119,9 @@ An `until` loop **runs exactly one iteration**. The compiler validates the
 condition and writes a `loop:` label on the first body step, but **nothing in
 the current runtime consumes it** — neither the v1 cook path nor the v2 control
 dispatcher (formula-spec-v2, *Loops* and *Accepted But Inert*). For
-orchestrator-driven re-execution, use a v2 `check` step (*Runtime → Check*).
-gc-toolkit's patrols re-run by **self-pouring the next cycle**, not by `until`.
+orchestrator-driven re-execution, use a v2 `check` step (*Runtime → Check*) —
+and route its iterations to a pool (§5). gc-toolkit's patrols re-run by
+**self-pouring the next cycle**, not by `until`.
 
 Treat the whole *Accepted But Inert* section as "parses, but no behavior" — do
 not design around it:
@@ -135,7 +136,66 @@ not design around it:
 (Also note `until` does not use the `{{var}} == value` step-condition syntax —
 it uses the runtime condition grammar, e.g. `probe.status == 'complete'`.)
 
-## 5. Don't shadow base-pack artifact names
+## 5. `[steps.check]` is fresh-context per iteration **only if pool-routed**
+
+The reason to reach for a check step over an in-session loop is that each
+iteration starts in a **fresh context**. That property is **conditional on how
+the iterations are routed** — a requirement the spec never states
+(formula-spec-v2, *Runtime → Check* documents the run/check machinery only) and
+one that **fails silently** when unmet. So: **route a check loop's iterations to
+a pool** — sling the formula at a pool target, or set the step's
+`gc.run_target` to one. A `check` step cannot carry its own `assignee` (the
+compiler forbids combining the two), so routing is the only lever you have.
+
+The mechanism is a source-level contract, not a documented one — re-check it
+against the fork tip before relying on the details:
+
+- The predicate is `beadUsesMetadataPoolRouteWithConfig`
+  (`internal/dispatch/control.go`): true when the attempt's routed target
+  (`gc.execution_routed_to`, else `gc.routed_to`) resolves to a **multi-session**
+  agent — one whose config supports instance expansion, i.e. a pool — or the bead
+  still carries a legacy `pool:` label.
+- A check loop's control bead is `gc.kind = ralph` (upstream display text
+  externalizes "ralph" as **check loop**). On a failed iteration the control
+  handler clones the next one through `retryPreservedAssigneeWithConfig`
+  (`internal/dispatch/ralph.go`): **pool-routed → assignee `""`**, session
+  affinity cleared and pool labels stripped, so a *different* pooled worker
+  claims it; **otherwise → the prior assignee is preserved** and the same session
+  takes iteration N+1 with iteration N still in its context window.
+- **Nothing errors or warns on the named-agent path**, and nothing validates it
+  at compile time — the misconfiguration is invisible both when you author the
+  formula and when it runs. It surfaces only as a loop that gets slower and less
+  coherent each iteration.
+
+Because the failure is silent, make pool routing an **acceptance criterion** of
+any check-loop formula rather than a preference, and verify it on the first
+failed iteration:
+
+```bash
+# Iteration beads carry ref <step>.iteration.N. Compare consecutive ones:
+# iteration N+1 must NOT come back with iteration N's assignee.
+gc bd show <iteration-N-bead> --json   | jq -r '.[0].assignee'
+gc bd show <iteration-N+1-bead> --json | jq -r '.[0].assignee'
+```
+
+Two adjacent facts worth keeping straight:
+
+- **`[steps.retry]` is a different path with a different failure mode.** Its
+  `retry-eval` control (`internal/dispatch/retry.go`) gates an explicit *session
+  recycle* on the same predicate, and there the pooled path fails **loudly** — a
+  missing `RecycleSession` callback or a pooled subject with an empty assignee
+  are hard errors — recording `gc.retry_session_recycled = true` on success. Do
+  not look for that marker on a check loop: the ralph path never sets it, and
+  each clone strips it.
+- **Loop state is crash-safe either way.** A dispatcher restart mid-append
+  re-attaches to the iteration beads already created instead of cloning a second
+  set (ralph resolves an existing partial attempt first; `[steps.retry]` walks an
+  explicit `gc.retry_state` of `spawning` → `spawned`). That is the durable
+  property this pack's hand-rolled re-pour loops never had, and why
+  `mol-upstream-gc-rebase` — gc-toolkit's first check-loop adoption — replaced
+  its file-a-rework-bead-and-re-pour loop with a native one.
+
+## 6. Don't shadow base-pack artifact names
 
 Pack artifacts resolve by **layer**: a higher-priority layer (your pack) with a
 formula, prompt fragment, or asset of the **same name** as one in a base pack
@@ -154,7 +214,7 @@ artifact**, so future upstream fixes to it are masked.
   shadow). Preserve that: check the basename against the base packs before
   adding any formula, fragment, or script.
 
-## 6. `pack.toml` authoring traps
+## 7. `pack.toml` authoring traps
 
 Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
 
@@ -187,7 +247,7 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
   | `[pack].includes` | `[imports.<binding>]` |
   | `[agents]`, `[defaults.rig.imports]`, `[[patches.rigs]]`, `[[patches.providers]]` | city-level only (`city.toml`), not `pack.toml` |
 
-## 7. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
+## 8. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
 
 Gas City expands `{{...}}` through **two different engines**, and writing the
 prompt form in a formula silently no-ops the formula. Know which surface you
