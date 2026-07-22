@@ -1,0 +1,1 @@
+description = "A declared merge gate is never silently dropped — flags a rig whose resolved check_set is explicitly empty against a non-empty formula default (warn), and a LIVE gating anchor stamped check_set=\"\" (error). Detect only; unset/legacy anchors and landed PRs are out of scope (tk-4na1b)"
