@@ -54,7 +54,8 @@
 #     signoff_head) + protected-branch auto-promote +
 #     integration-branch INFO local deltas.
 #   - formulas/mol-witness-patrol.toml — base + cycle-recycle +
-#     snake_case session-list jq + .work_dir metadata local deltas.
+#     snake_case session-list jq + .work_dir metadata + completed-workflow
+#     quiesce step (tk-p9ji9) local deltas.
 #
 # The allowlist is intentionally narrow. Adding a new entry means the
 # rig is taking on the maintenance cost of re-reconciling that artifact
