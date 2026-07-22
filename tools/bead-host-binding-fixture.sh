@@ -44,11 +44,12 @@ meta() { gc bd show "$1" --json 2>/dev/null | jq -r --arg k "$2" '.[0].metadata[
 assignee_of() { gc bd show "$1" --json 2>/dev/null | jq -r '.[0].assignee // empty'; }
 
 WORK=""; SESS=""; SHIM_DIR=""
-W2=""; DEAD=""; OLD=""; NEW=""; RECREATE_SHIM=""; BACKFILL_SHIM=""
+W2=""; DEAD=""; OLD=""; NEW=""; RECREATE_SHIM=""; BACKFILL_SHIM=""; MISSING_SHIM=""
 cleanup() {
     [ -n "$SHIM_DIR" ] && rm -rf "$SHIM_DIR" || true
     [ -n "$RECREATE_SHIM" ] && rm -rf "$RECREATE_SHIM" || true
     [ -n "$BACKFILL_SHIM" ] && rm -rf "$BACKFILL_SHIM" || true
+    [ -n "$MISSING_SHIM" ] && rm -rf "$MISSING_SHIM" || true
     [ "$KEEP" = "1" ] && { note "--keep: leaving WORK=$WORK SESS=$SESS W2=$W2 DEAD=$DEAD OLD=$OLD NEW=$NEW open"; return; }
     for b in "$WORK" "$SESS" "$W2" "$DEAD" "$OLD" "$NEW"; do
         [ -n "$b" ] && gc bd close "$b" --reason "binding fixture teardown" >/dev/null 2>&1 || true
@@ -225,6 +226,71 @@ rm -rf "$BACKFILL_SHIM"; BACKFILL_SHIM=""
 # SESS at epoch 2 and grounded to its session_name).
 gc bd update "$WORK" --assignee= >/dev/null 2>&1             # drop the non-host owner
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null              # re-ground to the host
+
+hdr "Backfill missing-prefix — an unresolvable rig prefix must not abort the pass (codex REQUEST_CHANGES @9fd8e47; tk-0gnq9)"
+# Regression guard for the pre-open codex finding on rework 9fd8e47: rig_db_for_bead
+# is contracted to emit an EMPTY path (caller then falls back to the ambient bd
+# context) when a hosted bead's id-prefix is absent from `gc rig list`. But its
+# final `&& printf` chain leaked exit 1 as the function's status, so under
+# `set -euo pipefail` the caller's `db="$(rig_db_for_bead "$work")"` ABORTED
+# cmd_backfill on the FIRST unresolvable host — before grounding any later live
+# host. Because the one-time migration gates the tk-z130v.4 exemption drop, one
+# stale cross-rig hosted-bead prefix would silently strand every host after it.
+#
+# Fully-shimmed gc so NO real ledger is touched and the enumeration ORDER is pinned:
+# two bead-host sessions whose hosted beads (zz-1, zz-2) both have prefixes absent
+# from a stubbed-empty `gc rig list`. Assert the pass reaches BOTH — grounds zz-2
+# despite zz-1 being unresolvable — and exits 0 (no set -e abort). Against the
+# buggy commit this shim records ZERO grounding writes (abort at the first host).
+MISSING_SHIM="$(mktemp -d)"
+MISSING_LOG="$MISSING_SHIM/updated.log"
+: >"$MISSING_LOG"
+cat >"$MISSING_SHIM/gc" <<SHIM
+#!/usr/bin/env bash
+# Faked gc for the missing-prefix backfill path — answers only the calls
+# cmd_backfill makes and logs each grounding write; never delegates to real gc.
+if [ "\${1:-}" = "bd" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '[]'; exit 0                        # no listable stand-ins
+fi
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[{"id":"s-fix1","template":"agents/bead-host"},{"id":"s-fix2","template":"agents/bead-host"}]}'
+    exit 0
+fi
+if [ "\${1:-}" = "rig" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"rigs":[]}'; exit 0               # nothing resolves -> every prefix unresolved
+fi
+if [ "\${1:-}" = "bd" ] && [ "\${2:-}" = "show" ]; then
+    case "\${3:-}" in
+        s-fix1) printf '%s\n' '[{"id":"s-fix1","metadata":{"hosts_bead":"zz-1","session_name":"bead-host--zz-1"}}]';;
+        s-fix2) printf '%s\n' '[{"id":"s-fix2","metadata":{"hosts_bead":"zz-2","session_name":"bead-host--zz-2"}}]';;
+        *)      printf '%s\n' '[{"assignee":null}]';;  # hosted work bead: ungrounded (eligible)
+    esac
+    exit 0
+fi
+if [ "\${1:-}" = "bd" ] && [ "\${2:-}" = "update" ]; then
+    w="\${3:-}"; shift 3 2>/dev/null || true; a=""
+    while [ "\$#" -gt 0 ]; do
+        if [ "\$1" = "--assignee" ]; then a="\${2:-}"; break; fi
+        shift
+    done
+    printf '%s %s\n' "\$w" "\$a" >>"$MISSING_LOG"       # record the grounding write
+    exit 0
+fi
+exit 0
+SHIM
+chmod +x "$MISSING_SHIM/gc"
+MISSING_RC=0
+PATH="$MISSING_SHIM:$PATH" "$TOOL" backfill >/dev/null 2>&1 || MISSING_RC=$?
+[ "$MISSING_RC" = "0" ] \
+    && ok "backfill exited 0 despite an unresolvable-prefix host — no set -e abort" \
+    || bad "backfill aborted on an unresolvable-prefix host (exit $MISSING_RC) — rig_db_for_bead leaked non-zero"
+grep -q '^zz-1 bead-host--zz-1$' "$MISSING_LOG" \
+    && ok "backfill grounded the unresolvable-prefix host zz-1 (ambient-bd fallback, not an abort)" \
+    || bad "backfill did not ground zz-1 (writes: $(tr '\n' ';' <"$MISSING_LOG"))"
+grep -q '^zz-2 bead-host--zz-2$' "$MISSING_LOG" \
+    && ok "backfill continued past the unresolvable host and grounded the LATER host zz-2" \
+    || bad "backfill stopped before the later host zz-2 (writes: $(tr '\n' ';' <"$MISSING_LOG"))"
+rm -rf "$MISSING_SHIM"; MISSING_SHIM=""
 
 hdr "Resolve contract — session-list path requires hosts_bead; alias is a prefilter (codex PR#98 / tk-mv7qu)"
 # Regression guard for the codex finding on PR#98: in the `gc session list`

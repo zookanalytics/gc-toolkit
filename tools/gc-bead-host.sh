@@ -412,7 +412,16 @@ rig_db_for_bead() {
     local path
     path="$(printf '%s' "$_RIGS_JSON" | jq -r --arg p "${1%%-*}" \
         '.[] | select(.prefix==$p) | .path' 2>/dev/null | head -n1)"
-    [ -n "$path" ] && [ -d "$path/.beads" ] && printf '%s' "$path/.beads"
+    # Emit the ledger path only when the prefix resolves to a real .beads dir.
+    # An unresolved prefix is NOT an error — the contract is "empty output, caller
+    # falls back to the ambient bd context." Use an `if` (not a trailing `&&`
+    # chain) so the function returns 0 on the unresolved path: as the last command,
+    # a short-circuited `[ -n "$path" ] && ...` leaks exit 1, and under `set -e` a
+    # caller's `db="$(rig_db_for_bead "$work")"` would then abort the whole pass on
+    # the FIRST unresolvable hosted-bead prefix (cmd_backfill, tk-0gnq9).
+    if [ -n "$path" ] && [ -d "$path/.beads" ]; then
+        printf '%s' "$path/.beads"
+    fi
 }
 
 cmd_backfill() {
