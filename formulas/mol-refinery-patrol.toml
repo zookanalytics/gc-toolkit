@@ -92,7 +92,7 @@ description = "After a successful direct merge, attempt to fast-forward the rig'
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. Empty declares no gates (the merge is then governed only by CI + approval + no-open-child). Replaces the retired review_gate string + signoff_head side-channel."
+description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. To run a rig GATELESS, set the explicit sentinel 'none' (or 'off'): the merge-push step normalizes it to the empty value merge-skill.sh reads as 'no gates' (merge then governed only by CI + approval + no-open-child). An EMPTY value is NOT an opt-out — it is treated as absent and recovers this default, because {{check_set}} is hand-substituted from raw TOML on the --root-only patrol path and a mis-substitution would otherwise silently un-gate every PR (tk-4na1b). Replaces the retired review_gate string + signoff_head side-channel."
 default = "codex"
 
 [[steps]]
@@ -1027,8 +1027,32 @@ ISSUE_PRIORITY=$(printf '%s' "$WORK_JSON" | jq -r '.[0].priority // empty')
 # recognized — matching the fail-closed site below and the merge skill (tk-aj4ua).
 # PRE_OPEN: codex gate AND no PR yet (first handoff). An existing_pr rework stays
 # on the post-open path (its PR is already open; codex reworks run on it).
+#
+# tk-4na1b: an EMPTY value must never out-rank the non-empty formula default.
+# `{{check_set}}` is hand-substituted from the raw TOML on this --root-only patrol
+# path (the wisp stamps no gc.var.*, so the declared default = "codex" never
+# reaches the substitution as a value), and an empty check_set declares NO gates —
+# the PR then lands on CI + approval alone, with no review ever dispatched. Recover
+# the declared default here, mirroring the MERGE_STRATEGY:-direct idiom above. This
+# normalization must run BEFORE the membership test: stamping a gate that was never
+# dispatched would hold the merge forever on a marker nothing can stamp.
+# A genuinely gateless rig opts out EXPLICITLY via the `none`/`off` sentinel, which
+# normalizes back to the empty value merge-skill.sh reads as "no gates" —
+# merge-skill.sh's empty-means-ungated behavior is deliberately UNCHANGED (#163/#182).
+# The render is kept OUTSIDE the check-set-normalize markers so the extracted
+# snippet stays template-free — the regression test drives CHECK_SET through the
+# env (assets/scripts/check-set-normalize.test.sh).
+CHECK_SET="{{check_set}}"
+# >>> check-set-normalize
+_cs_canon="$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')"
+case "$_cs_canon" in
+  '')       CHECK_SET="codex" ;;
+  none|off) CHECK_SET="" ;;
+esac
+unset _cs_canon
+# <<< check-set-normalize
 CODEX_GATE=0
-if printf '%s' "{{check_set}}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
+if printf '%s' "$CHECK_SET" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
   CODEX_GATE=1
 fi
 # PRE_OPEN also requires gh: the pre-open PR-create resolver (pre-open-resolve.sh)
@@ -1377,7 +1401,18 @@ fi
 # Capture the rendered check-set for the codex fail-closed check below. Kept
 # OUTSIDE the signoff-anchor-failclosed markers so the extracted snippet stays
 # template-free — the regression test drives CHECK_SET through the env.
+# Re-applies the same tk-4na1b empty-never-beats-the-default normalization as the
+# CODEX_GATE site above (empty -> declared default; `none`/`off` -> explicit
+# no-gates), so this block stays self-sufficient if it is run on its own: a raw
+# re-render here would otherwise clobber the normalized value and hand the stamp
+# sites below an empty, ungated check_set.
 CHECK_SET="{{check_set}}"
+_cs_canon="$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')"
+case "$_cs_canon" in
+  '')       CHECK_SET="codex" ;;
+  none|off) CHECK_SET="" ;;
+esac
+unset _cs_canon
 
 # Fail-closed (finding fix #2; finding fix #3 adds the codex-id guard inside the
 # markers below): do NOT detach the anchor into gating unless the durable
@@ -1466,7 +1501,7 @@ elif [ "$PRE_OPEN" = 1 ]; then
     --assignee="" \
     --set-metadata merge_result=pre_open_gate \
     --set-metadata merged_target="$TARGET" \
-    --set-metadata check_set="{{check_set}}" \
+    --set-metadata check_set="$CHECK_SET" \
     --set-metadata gc.routed_to="" \
     --unset-metadata rejection_reason
 else
@@ -1478,7 +1513,7 @@ else
     --set-metadata pr_url="$PR_URL" \
     --set-metadata pr_number="$PR_NUMBER" \
     --set-metadata merged_target="$TARGET" \
-    --set-metadata check_set="{{check_set}}" \
+    --set-metadata check_set="$CHECK_SET" \
     --set-metadata gc.routed_to="" \
     --unset-metadata rejection_reason
 fi
