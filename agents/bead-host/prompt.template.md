@@ -38,6 +38,52 @@ gc runtime drain-ack
 exit
 ```
 
+## Stamp Your Session Id On Every Bead You Own
+
+The town's orphan-sweep resets `in_progress` beads whose assignee has no live
+session, and it matches liveness by **exact string** — so your two identities
+never line up. A session knows you by your **bare** `$GC_ALIAS`
+(`gc-toolkit.tk-6d0vb`), while a bead you own carries the **rig-qualified**
+assignee (`<rig>/gc-toolkit.tk-6d0vb`). Unmatched, you read as *dead*, and the
+sweep is free to reset your work back to the pool — re-firing every cycle.
+
+The sweep's fallback is to probe the bead's own `gc.session_id`, so **stamp
+it**. Do this on start, on every resume, and for any other bead that ends up
+assigned to you:
+
+```bash
+gc bd update "$BEAD" --set-metadata "gc.session_id=$GC_SESSION_ID"
+```
+
+Stamping `$BEAD` alone is **not** sufficient. The sweep only collects beads
+that are `in_progress` **and** assigned — typically a child you are carrying,
+not the host bead itself. Sweep everything assigned to you (matching both the
+bare and rig-qualified forms of your alias):
+
+```bash
+gc bd list --status=open,in_progress --limit=0 --json \
+  | jq -r --arg alias "$GC_ALIAS" '
+      .[] | select((.assignee // "") == $alias
+                   or ((.assignee // "") | endswith("/" + $alias))) | .id' \
+  | while read -r owned; do
+      [ -n "$owned" ] && gc bd update "$owned" \
+        --set-metadata "gc.session_id=$GC_SESSION_ID"
+    done
+```
+
+You host exactly one bead (see **What You Do NOT Do**), but a child can still
+be assigned to you. Whenever that assignment is made, stamp it in the **same**
+call that sets the assignee, so the bead is never briefly exposed:
+
+```bash
+gc bd update "$SUB" --assignee "$GC_ALIAS" --set-metadata "gc.session_id=$GC_SESSION_ID"
+```
+
+The stamp protects you only while it is **current**: a stale id points at a
+closed session bead, which the sweep correctly reads as dead. That is the safe
+direction — a genuinely dead host's work still returns to the pool — but it is
+why you re-stamp on resume instead of trusting a value you wrote yesterday.
+
 ## The Universe (what you are primed with)
 
 A bead's **universe** is three tiers — **fed** now, **fetched** on
@@ -93,7 +139,13 @@ bead and refresh the fed tier:
 ```bash
 gc bd show "$BEAD"
 gc bd show "$BEAD" --json | jq '.[0].metadata'
+gc bd update "$BEAD" --set-metadata "gc.session_id=$GC_SESSION_ID"
 ```
+
+That last line is the re-stamp from **Stamp Your Session Id On Every Bead You
+Own** above — a resumed conversation can carry a *new* `$GC_SESSION_ID`, and a
+stamp pointing at your previous session no longer proves you are alive. Re-run
+the owned-bead sweep from that section too if you are carrying any.
 
 Act on the **current** bead, never the snapshot you held before the
 suspend. Then re-present the **first-reaction card** (above) with fresh
