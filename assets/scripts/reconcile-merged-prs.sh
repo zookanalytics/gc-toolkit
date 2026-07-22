@@ -90,7 +90,14 @@ command -v gh >/dev/null 2>&1 || exit 0
 # neutralising a child by BLOCKING it (the standard operator move) made that child
 # invisible here and the arm filed a second one on the very next pass, dispatching
 # a concurrent force-push onto a branch a human had just frozen (tk-gajop).
-LIVE_STATUSES="open,in_progress,blocked,deferred"
+#
+# This is the COMPLEMENT of `closed` over `bd statuses`, enumerated rather than
+# expressed as a negation because --status takes a positive list. Any status
+# omitted here is a branch owner this probe cannot see, and an invisible owner is
+# a second force-push: `hooked` (a child sitting on an agent's hook) and `pinned`
+# are just as branch-owning as `blocked`. Re-derive this list if `bd statuses`
+# ever grows a new non-closed status.
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # Every non-closed bead whose metadata <field> equals <value>, as compact rows:
 # the id, whether it is an anchor (merge_result set) rather than a rework child,
@@ -99,15 +106,44 @@ LIVE_STATUSES="open,in_progress,blocked,deferred"
 #
 # Returns NON-ZERO on a failed ledger read, which the caller must treat as "I
 # cannot tell" and NOT as "nobody holds this branch" — the same ""-vs-"[]"
-# distinction the anchorless scan fails closed on. Empty output means the call
-# failed; a genuinely empty result is the literal "[]".
+# distinction the anchorless scan fails closed on. A genuinely empty result is
+# the literal "[]" and returns zero with no rows.
+#
+# The guards below answer four DIFFERENT questions, because the failure they
+# share is silent: a probe that reports "no rows" when it actually failed reads
+# as "nobody holds this branch" and dispatches the force-push. Non-empty stdout
+# alone does NOT mean success — `gc ... --json` reports its own failures as a
+# non-empty JSON *object* on stdout (`{"error": ...}`, exit 1), which survives an
+# emptiness test, yields zero rows through the projection below, and so fails
+# OPEN in the one direction that is unrecoverable.
+#
+# (1), (3) and (4) are each mutation-pinned by a shape only that guard rejects —
+# see the (23) table in the test suite. Delete one and exactly one case goes red.
 probe_beads() {
-  local raw
+  local raw rc out
   raw=$(gc bd list --metadata-field "$1=$2" \
     --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)
+  rc=$?
+  # (1) The command's own verdict, checked even when it wrote to stdout.
+  [ "$rc" -eq 0 ] || return 1
+  # (2) No output at all — a broken `gc bd list`, as distinct from "[]". Strictly
+  #     an early-out: (3) also rejects empty input (`jq -e` exits non-zero on it),
+  #     so no test pins this line alone. Kept because it states the ""-vs-"[]"
+  #     contract this helper is built on, in the one place a reader looks for it,
+  #     without spawning jq to say it.
   [ -n "$raw" ] || return 1
-  printf '%s' "$raw" \
-    | jq -c '.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null
+  # (3) The payload must be the ARRAY of beads we asked for. Rejects an error
+  #     object that arrived with a ZERO exit status — and, more sharply, an object
+  #     whose values are bead-shaped: `.[]` iterates those happily, so (4) sees a
+  #     clean projection and only this guard can tell it was never a bead list.
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  # (4) The projection's own status. Captured into a variable first: emitted
+  #     straight to stdout, jq's failure would be the function's LAST status and
+  #     still be discarded by the callers' `probe=$(...)` capture.
+  out=$(printf '%s' "$raw" \
+    | jq -c '.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null) \
+    || return 1
+  [ -n "$out" ] && printf '%s\n' "$out"
   return 0
 }
 

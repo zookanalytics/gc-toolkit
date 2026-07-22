@@ -74,6 +74,8 @@ mkdir -p "$TMP/bin"
 #   bead-O open, CONFLICTING, rebase_hold=true         -> (17) HELD, no force-push
 #   bead-P open, CONFLICTING, BLOCKED child rebase_hold-> (18) HELD, no force-push
 #   bead-Q open, CONFLICTING, blocked child same BRANCH-> (19) no second child
+#   bead-R open, CONFLICTING, HOOKED child same BRANCH -> (21) no second child
+#   bead-S open, CONFLICTING, PINNED child same BRANCH -> (22) no second child
 cat > "$TMP/anchors" <<'A'
 bead-A|201|main
 bead-B|202|main
@@ -89,6 +91,8 @@ bead-N|214|main|true|
 bead-O|215|main||true
 bead-P|216|main||
 bead-Q|217|main||
+bead-R|218|main||
+bead-S|219|main||
 A
 
 # PR states (gh pr view source):
@@ -107,6 +111,8 @@ A
 #   215 open, CONFLICTING/DIRTY, anchor rebase_hold=true -> held, NO rebase filed
 #   216 open, CONFLICTING/DIRTY, blocked child holds it  -> held, NO rebase filed
 #   217 open, CONFLICTING/DIRTY, blocked child on branch -> skipped, NO 2nd child
+#   218 open, CONFLICTING/DIRTY, HOOKED child on branch  -> skipped, NO 2nd child
+#   219 open, CONFLICTING/DIRTY, PINNED child on branch  -> skipped, NO 2nd child
 cat > "$TMP/prs" <<'P'
 201|MERGED|2026-06-23T01:00:00Z|false|abc12345def67890|main|polecat/bead-A|head201|MERGEABLE|CLEAN
 202|CLOSED||false||main|polecat/bead-B|head202|UNKNOWN|UNKNOWN
@@ -122,6 +128,8 @@ cat > "$TMP/prs" <<'P'
 215|OPEN||false||main|polecat/bead-O|head215|CONFLICTING|DIRTY
 216|OPEN||false||main|polecat/bead-P|head216|CONFLICTING|DIRTY
 217|OPEN||false||main|polecat/bead-Q|head217|CONFLICTING|DIRTY
+218|OPEN||false||main|polecat/bead-R|head218|CONFLICTING|DIRTY
+219|OPEN||false||main|polecat/bead-S|head219|CONFLICTING|DIRTY
 P
 
 # Open PRs as `gh pr list` sees them (the anchorless scan's PR -> BEAD side):
@@ -186,11 +194,24 @@ printf '%s\n' \
 #                                              branch dimension. Keyed by PR alone
 #                                              it is missed; a force-push would
 #                                              race it on the shared branch.
+#   child-R   PR#998, HOOKED, names branch polecat/bead-R -> case (21): `hooked`
+#                                              is a built-in wip status ("attached
+#                                              to an agent's hook") — a child in it
+#                                              is being worked RIGHT NOW, the most
+#                                              dangerous moment to force-push under.
+#   child-S   PR#997, PINNED, names branch polecat/bead-S -> case (22): the other
+#                                              non-closed status the probe used to
+#                                              omit. No rebase_hold on either: the
+#                                              STATUS LIST alone must make them
+#                                              visible, with no operator marker to
+#                                              fall back on.
 printf '%s\n' \
   '211	child-K' \
   '7	child-tiny' \
   '216	child-P	polecat/bead-P	blocked	true' \
   '999	child-Q	polecat/bead-Q	blocked	-' \
+  '998	child-R	polecat/bead-R	hooked	-' \
+  '997	child-S	polecat/bead-S	pinned	-' \
   > "$TMP/children"
 
 FIX_POOL="test-rig/gc-toolkit.polecat"
@@ -315,6 +336,38 @@ case "$2" in
         # FAKE_PROBE_FAIL models a failed ledger read: empty output, NOT "[]",
         # exactly as a broken `gc bd list` behaves. The arm must fail CLOSED.
         [ -n "${FAKE_PROBE_FAIL:-}" ] && exit 0
+        # FAKE_PROBE_SHAPE models the failure family an emptiness test cannot see:
+        # a read that FAILED but still put something on stdout. Each shape defeats
+        # a different guard, so each is asserted separately below — a guard no test
+        # pins is a guard a later edit can delete silently, which is how the
+        # `hooked` gap got in.
+        #   error-rc1 — the observed shape, transcribed from the real thing
+        #               (`gc bd list --metadata-field malformed --status open
+        #               --json`): a JSON error OBJECT plus exit 1.
+        #   error-rc0 — the same object arriving with a ZERO exit. Isolates the
+        #               payload-shape guard: the exit-status guard cannot see this.
+        #   array-rc1 — a well-formed, EMPTY array with a non-zero exit (the read
+        #               died after emitting). Isolates the exit-status guard: the
+        #               payload-shape guard cannot see this, and "[]" is precisely
+        #               the value that legitimately means "nobody holds it".
+        #   bad-array — an array of non-objects: passes the shape guard, then blows
+        #               up the projection. Isolates the jq-status guard.
+        #   object-map— the nastiest shape, and the only one the projection cannot
+        #               catch: an OBJECT whose values are bead-shaped, e.g. a
+        #               `--json` envelope keyed by id rather than a list. `.[]`
+        #               happily iterates an object's values, so the projection
+        #               SUCCEEDS and emits a well-formed row; only "is the payload
+        #               an array?" rejects it. The row is a foreign ANCHOR
+        #               (merge_result set, no rebase_hold) precisely so it passes
+        #               both the frozen and in-flight filters — i.e. so the arm
+        #               would DISPATCH on it, and the test cannot pass by accident.
+        case "${FAKE_PROBE_SHAPE:-}" in
+          error-rc1)  printf '{\n  "error": "invalid --metadata-field: expected key=value, got \\"malformed\\"",\n  "schema_version": 1\n}\n'; exit 1 ;;
+          error-rc0)  printf '{\n  "error": "invalid --metadata-field: expected key=value, got \\"malformed\\"",\n  "schema_version": 1\n}\n'; exit 0 ;;
+          array-rc1)  printf '[]\n'; exit 1 ;;
+          bad-array)  printf '[1, 2]\n'; exit 0 ;;
+          object-map) printf '{"other-anchor": {"id": "other-anchor", "metadata": {"merge_result": "pull_request"}}}\n'; exit 0 ;;
+        esac
         key=""; val=""; sts=""; prev=""
         for a in "$@"; do
           case "$a" in
@@ -563,6 +616,18 @@ printf '%s\n' "$OUT1" | grep -q "child-P holds branch 'polecat/bead-P' with reba
 eq "$(grep -c 'Rebase PR#217' "$TMP/created")" "0" \
    "(19) live child on the same BRANCH under another PR -> no second rebase child"
 
+# (21)(22) EVERY non-closed status owns the branch, not just the ones an operator
+# reaches for. `closed` is the only status in the `done` category; the probe's
+# status list is a hand-maintained complement of it, so any status left out is an
+# invisible branch owner and therefore a second force-push. `hooked` is the sharp
+# case — it means a child is attached to an agent's hook, i.e. being worked right
+# now — and neither child below carries rebase_hold, so nothing but the status
+# list can save them.
+eq "$(grep -c 'Rebase PR#218' "$TMP/created")" "0" \
+   "(21) HOOKED child on the same branch -> no second rebase child (no force-push race)"
+eq "$(grep -c 'Rebase PR#219' "$TMP/created")" "0" \
+   "(22) PINNED child on the same branch -> no second rebase child"
+
 # --- (12)(13)(14) anchorless open PRs: the PR -> BEAD direction. --------------
 # (12) closed bead + open PR: the close-on-publish blind spot. Reported and
 # escalated exactly once, bounded by a marker on the closed bead.
@@ -752,6 +817,33 @@ eq "$(grep -c 'Rebase PR#217' "$TMP/created")" "0" \
 printf '%s\n' "$OUT7" | grep -q '0 stale-base rebases routed' \
   && ok "(20) failed probe routes no rebases at all" \
   || bad "(20) failed probe must route zero rebases (got: $OUT7)"
+
+# --- (23) a probe that FAILS WITH OUTPUT must also fail CLOSED. ---------------
+# Case (20) covers the failure that is easy to spot: no output at all. These are
+# the ones that are not. `gc ... --json` reports its own errors as a non-empty
+# JSON object on stdout, so "did anything come back?" answers YES for a read that
+# wholly failed; the object then yields zero rows through the projection and the
+# arm concludes the branch is unowned.
+#
+# Each shape below defeats every guard except one, so each pins a DIFFERENT guard
+# and none of them can be deleted without a red test. Same fixtures as (20) —
+# PR#216 and PR#217 are held ONLY by beads the probe would have to return — so any
+# shape that reads as "empty" force-pushes over exactly the freeze an operator
+# just set. `[]` with a zero exit is NOT in this list: that is the legitimate
+# "nobody holds it" answer, and cases (9)-(11) already cover it.
+for shape in error-rc1 error-rc0 array-rc1 bad-array object-map; do
+  CREATED_BEFORE8="$(wc -l < "$TMP/created" | tr -d ' ')"
+  OUT8="$(FAKE_PROBE_SHAPE="$shape" bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>/dev/null)"
+  eq "$(wc -l < "$TMP/created" | tr -d ' ')" "$CREATED_BEFORE8" \
+     "(23/$shape) unreadable probe files NO rebase child (fail closed)"
+  eq "$(grep -c 'Rebase PR#216' "$TMP/created")" "0" \
+     "(23/$shape) still no child for the branch a keeper froze"
+  eq "$(grep -c 'Rebase PR#217' "$TMP/created")" "0" \
+     "(23/$shape) still no child for the shared-branch PR"
+  printf '%s\n' "$OUT8" | grep -q '0 stale-base rebases routed' \
+    && ok "(23/$shape) routes no rebases at all" \
+    || bad "(23/$shape) must route zero rebases (got: $OUT8)"
+done
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
