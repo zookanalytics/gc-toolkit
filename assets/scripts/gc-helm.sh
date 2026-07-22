@@ -315,6 +315,114 @@ cmd_clear() {
     echo "cleared $bead from the Helm"
 }
 
+# ── Release helper: quiesce a parked molecule's step beads ───────────
+# `takeaway --release` parks a work bead — which is the ANCHOR of a
+# mol-polecat-work molecule. The release bundle (in cmd_takeaway below) clears
+# the ANCHOR's own route, but the molecule's STEP beads keep their own pins:
+# gc.routed_to (the pool-offer lever), an assignee (the assigned-work hand-back
+# lever), and gc.session_affinity=require. Any of these re-attracts a fresh
+# polecat onto the parked husk, where it re-derives "nothing to do" and drains —
+# one burned session per scale_check tick (tk-xypcy). The witness has been
+# clearing these by hand; this folds that cleanup into the park itself. (Sibling
+# tk-p9ji9 handles the completed-but-not-parked shape from the witness patrol:
+# same reverse walk, different trigger, no terminal-state gate here because the
+# operator's park IS the "this workflow is done" signal.)
+#
+# The anchor carries no pointer to its molecule, so we discover the linkage the
+# way the formula resolves an anchor, walked in reverse: enumerate the live
+# mol-polecat-work STEP beads, group by gc.root_bead_id, resolve each root's
+# anchor (root -> gc.input_convoy_id -> the convoy's single tracked member), and
+# quiesce ONLY the steps whose root resolves to THIS parked anchor.
+#
+# Guards (mirroring the sibling quiesce pass):
+#   * FAIL CLOSED — a root whose anchor is unresolved, or resolves to a
+#     different bead, is skipped untouched (never drain another, possibly-live,
+#     molecule's steps out from under a running polecat).
+#   * NEVER close a step or rewrite its status. Closing load-context unblocks
+#     workspace-setup and walks a polecat forward onto an already green-gated,
+#     PR'd branch; any push there stales the anchor's check.<gate> marker and
+#     blocks the PR. There is deliberately no close/status-write path here.
+#   * NEVER de-route the workflow-finalize step — its control-dispatcher route
+#     is the molecule's only finalize path.
+#   * All present re-attracting keys cleared in ONE update per step: a split
+#     update would briefly leave the step open+unassigned+routed (the exact
+#     pool-offer shape), racing a fresh polecat into the husk.
+#
+# The body is a subshell (`() ( … )`) with `set +e`, so it stays best-effort:
+# no tool failure here can abort the park (the caller runs under `set -e`), and
+# the `_`-locals never leak. $1 = parked anchor bead id. $2 = rig .beads db path
+# (may be empty -> ambient BEADS_DIR).
+# >>> quiesce-release-molecule-steps
+quiesce_release_molecule_steps() (
+    set +e
+    _anchor="$1"; _db="$2"
+
+    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+    _steps=$(gc bd list --status=open,in_progress ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
+    [ -n "$_steps" ] && [ "$_steps" != "[]" ] || exit 0
+
+    # One compact JSON row per live mol-polecat-work step bead.
+    _rows=$(printf '%s' "$_steps" | jq -c '
+        .[]
+        | select((.metadata["gc.step_ref"] // "") | startswith("mol-polecat-work."))
+        | { id,
+            step:     (.metadata["gc.step_ref"] // ""),
+            root:     (.metadata["gc.root_bead_id"] // ""),
+            routed:   (.metadata["gc.routed_to"] // ""),
+            assignee: (.assignee // ""),
+            affinity: (.metadata["gc.session_affinity"] // "") }' 2>/dev/null || true)
+    [ -n "$_rows" ] || exit 0
+
+    _roots=$(printf '%s\n' "$_rows" | jq -r -s 'map(.root) | map(select(. != "")) | unique | .[]' 2>/dev/null || true)
+    [ -n "$_roots" ] || exit 0
+
+    printf '%s\n' "$_roots" | while IFS= read -r _root; do
+        [ -n "$_root" ] || continue
+
+        # Resolve this root's anchor: root -> input convoy -> its single member.
+        _convoy=$(gc bd show "$_root" ${_db:+--db "$_db"} --json 2>/dev/null \
+            | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null || true)
+        [ -n "$_convoy" ] || continue
+        _ranchor=$(gc convoy status "$_convoy" --json 2>/dev/null \
+            | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null || true)
+
+        # FAIL CLOSED: act only on the molecule whose anchor IS the parked bead.
+        [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
+
+        printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null | while IFS= read -r _row; do
+            [ -n "$_row" ] || continue
+            _sid=$(printf '%s'      "$_row" | jq -r '.id // empty' 2>/dev/null || true)
+            _step=$(printf '%s'     "$_row" | jq -r '.step // empty' 2>/dev/null || true)
+            _routed=$(printf '%s'   "$_row" | jq -r '.routed // empty' 2>/dev/null || true)
+            _who=$(printf '%s'      "$_row" | jq -r '.assignee // empty' 2>/dev/null || true)
+            _affinity=$(printf '%s' "$_row" | jq -r '.affinity // empty' 2>/dev/null || true)
+            [ -n "$_sid" ] || continue
+
+            # Never de-route the finalize step (control-dispatcher escape path);
+            # guard by step id AND by route in case one is renamed.
+            case "$_step" in *.workflow-finalize) continue ;; esac
+            case "$_routed" in *control-dispatcher*) continue ;; esac
+
+            # Idempotent: already quiet -> nothing left to clear.
+            [ -n "$_routed" ] || [ -n "$_who" ] || [ -n "$_affinity" ] || continue
+
+            # Only the keys actually present are touched, all in ONE update.
+            set --
+            [ -n "$_routed" ]   && set -- "$@" --unset-metadata gc.routed_to
+            [ -n "$_who" ]      && set -- "$@" --assignee ""
+            [ -n "$_affinity" ] && set -- "$@" --unset-metadata gc.session_affinity
+            # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
+            if gc bd update "$_sid" ${_db:+--db "$_db"} "$@" >/dev/null 2>&1; then
+                echo "$PROG: takeaway: quiesced husk step $_sid ($_step) of parked $_anchor"
+            else
+                echo "$PROG: takeaway: could not quiesce step $_sid (retries via witness patrol)" >&2
+            fi
+        done
+    done
+    exit 0
+)
+# <<< quiesce-release-molecule-steps
+
 # ── Verb: takeaway ───────────────────────────────────────────────────
 # Write the board-visible takeaway headline — the thin writer the bead-host
 # and proactive worker call instead of inlining the `gc bd update
@@ -329,6 +437,11 @@ cmd_clear() {
 # gc.routed_to) in one Dolt write. The proactive worker / mol-first-reaction
 # call `takeaway … --release` as their single closing step, replacing a takeaway
 # stamp followed by a separate release `gc bd update`.
+#
+# When the released bead is the ANCHOR of a mol-polecat-work molecule, --release
+# ALSO quiesces that molecule's step beads (quiesce_release_molecule_steps,
+# above) so the park doesn't leave affine/routed steps that re-spawn a polecat
+# onto the parked husk (tk-xypcy).
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; npos=0
     while [ $# -gt 0 ]; do
@@ -378,6 +491,14 @@ cmd_takeaway() {
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
     bust_cache
+    # On --release the anchor's own route was cleared above, but if this bead is
+    # the anchor of a mol-polecat-work molecule its STEP beads keep their own
+    # re-attracting pins (gc.routed_to / assignee / gc.session_affinity) and
+    # would re-spawn a polecat onto the parked husk. Quiesce them in the same
+    # park (tk-xypcy). Best-effort by construction — never fails the park.
+    if [ -n "$release" ]; then
+        quiesce_release_molecule_steps "$bead" "$db"
+    fi
     echo "takeaway set on $bead (by $by)${release:+ [released]}: $text"
 }
 
