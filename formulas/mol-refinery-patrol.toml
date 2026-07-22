@@ -171,6 +171,35 @@ If NO work found: sleep, reconcile in-flight PRs and convoys, then re-check.
 sleep {{event_timeout}}
 ```
 
+`sleep {{event_timeout}}` states a **cadence contract**, not an implementation.
+Some agent harnesses block a foreground `sleep` outright (the Claude Code
+harness answers "use Monitor with an until-loop"), so the literal line above
+cannot run inline there and the idle loop has to be driven out-of-band. That is
+a supported way to satisfy this step — but only under these invariants, each of
+which has already been violated in production and rediscovered independently by
+three rigs' refineries as private memory notes:
+
+- **Run ALL the reconcile passes below, in order, on every tick.** A
+  hand-rolled "watch for new work" loop that omits them looks fine while the
+  queue is empty and then silently never lands an anchor parked later in the
+  session — the merge skill only ever fires from this pass. Idle is exactly
+  when anchors are waiting.
+- **Prefer a driver that cannot terminate itself.** A polling loop with an
+  iteration backstop exits on its own schedule, and each self-exit has to be
+  noticed and re-armed; the re-arm is where the loop gets lost. Something
+  persistent has no backstop to trip.
+- **Namespace anything per-rig.** Co-tenant refineries for different rigs run
+  this same formula on one host — an un-namespaced helper path or dedup file
+  collides, and killing "the" poll by name kills another rig's.
+- **Steady state must be silent.** Emit only on real transitions (a merge, new
+  work, an anchor-set change, mail, a tool/query failure). `merge held` and
+  `0 escalated, 0 retargeted` are the *normal* readings of an approval-gated
+  queue; wiring a notification to them produces a per-tick firehose that gets
+  the driver shut off as noise.
+
+Whatever drives the cadence, this step is not satisfied until the passes below
+have run.
+
 **2. Reconcile state (best-effort, every idle wake).** Three convergent
 passes run here on the idle cadence: (a-pre) pre-open PR-create — open the PR for
 each anchor parked in `pre_open_gate` whose codex signoff is green at the branch
