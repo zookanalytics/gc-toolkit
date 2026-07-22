@@ -28,6 +28,7 @@ defines the routing contract; it is not a command tutorial.
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
+| `fa487632b` — `sling: clear stale assignee on bare pool re-pour (re-land gc-q40pm)` (merged 2026-07-11) | gastownhall/gascity | Guard and clear in `internal/sling/sling_core.go` — `preflight` block at `:158`, `clearStaleOpenAssigneeForPoolRoute` at `:1617`, `clearStaleOpenAssigneeInStore` (the `status=open` gate) at `:1660`; companion idempotency change `settledAssignee` in `internal/sling/sling_attachment.go:463`; upstream's own prose at `engdocs/architecture/dispatch.md:180`. Verified current at gascity/main `7bba3de3b`. | 2026-07-22 |
 
 ## The maintainer's ruling
 
@@ -62,22 +63,53 @@ The three lanes below are the resulting model.
   polecat pool.
 - **Sets:** `metadata.gc.routed_to=<target>`. For a **pool target**
   (an agent that supports instance expansion) it leaves `assignee`
-  empty. For a **singleton target** (a named session — no instance
-  expansion) it *also* stamps `assignee=<target>`, because the
-  singleton's hook skips the Tier 3 routed-pool query and would
-  otherwise never surface the bead. That singleton stamp automates the
-  ruling's own "assign the named-session identity directly" step, so it
-  refines rather than contradicts the "no `assignee` by default"
-  decision quoted above.
+  empty — and on an existing **open** bead it *clears* a stale one to
+  get there (see **Also clears** below). For a **singleton target** (a
+  named session — no instance expansion) it *also* stamps
+  `assignee=<target>`, because the singleton's hook skips the Tier 3
+  routed-pool query and would otherwise never surface the bead. That
+  singleton stamp automates the ruling's own "assign the named-session
+  identity directly" step, so it refines rather than contradicts the
+  "no `assignee` by default" decision quoted above.
+- **Also clears (pool targets, open beads):** a stale `assignee`. Pool
+  demand is *ready + unassigned + routed* — the shared predicate behind
+  both reconciler spawn (`scale_check`) and worker claim (`work_query`
+  Tier 3) — so a re-pour that only rewrote `gc.routed_to` to the value
+  it already held was invisible to both and stalled the chain silently
+  (`gc-q40pm`). A bare pool sling therefore normalizes the bead back
+  into that shape, warning `cleared stale assignee "<who>" on open bead
+  <id> for pool re-dispatch`. The normalization is **scoped**, and each
+  condition is load-bearing:
+  - **`status=open` only.** `in_progress` marks a live claim, which
+    sling must not strip; releasing dead claims belongs to the
+    controller's `releaseOrphanedPoolAssignments`. Clearing an
+    `in_progress` assignee is Lane 3's job.
+  - **Pool targets only** (`SupportsInstanceExpansion()`). A singleton
+    target keeps the stamp rule above instead.
+  - **Skipped for `--dry-run`, formula pours, and agents with a custom
+    `sling_query`** — the last own their routing contract outright.
+    "Formula pour" here means the `--formula` shape specifically
+    (`gc sling <target> <formula> --formula`, which instantiates a
+    formula and routes its root). Attaching a molecule to an
+    ordinary bead sling with `--on <mol>` is **not** excluded — that
+    is a normal bead route and the clear still applies.
+
+  Companion change: a routed-*and*-assigned pool bead is no longer
+  treated as an already-settled idempotent no-op. It falls through
+  (warning `bead <id> routed to "<target>" but assigned to "<who>"`)
+  so the normalization above actually runs.
 - **CLI example:**
   ```bash
-  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde    # pool: gc.routed_to only
+  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde    # pool: gc.routed_to only (clears a stale assignee if open)
   gc sling gc-toolkit/gc-toolkit.mechanik tk-abcde   # singleton: gc.routed_to + assignee
   ```
-- **Does NOT:** set `assignee` **for pool targets** — the reconciler
-  picks an available worker from the pool by matching `gc.routed_to`.
-  (Singleton targets are the exception just described: sling stamps
-  the assignee so the named session's own hook surfaces the work.)
+- **Does NOT:** *stamp* an `assignee` **for pool targets** — the
+  reconciler picks an available worker from the pool by matching
+  `gc.routed_to`. (Singleton targets are the exception just described:
+  sling stamps the assignee so the named session's own hook surfaces
+  the work.) Note that *not stamping* and *not writing* are different
+  claims: for a pool target sling may still **clear** the field, per
+  the bullet above.
 - **Cross-store boundary:** sling routes only *within a single bead
   store*. It refuses to route a bead that lives in one rig's `.beads`
   store to a target (pool or agent) in a *different* rig's store —
@@ -113,11 +145,27 @@ The three lanes below are the resulting model.
   step so the bead is never momentarily double-stamped. Added in
   PR #1841 (merged 2026-05-12) to make this transition atomic from
   the caller's perspective.
-- **Sets:** `metadata.gc.routed_to=<target>` and clears the prior
-  `assignee`. For a **pool target** the assignee stays empty after
-  the clear. For a **singleton target** the Lane 1 singleton stamp
-  still runs *after* the clear, so the net effect is "prior assignee
-  cleared, `assignee=<target>` set."
+
+  **This is no longer the only way to clear.** Since gascity
+  `fa487632b` a bare Lane 1 sling to a pool already clears a stale
+  assignee on an **open** bead, so `--reassign` is not required for
+  that case. It stays the lane for everything the bare-sling
+  normalization deliberately excludes:
+  - **`in_progress` beads** — the live-claim case a bare sling will
+    not touch. This is the important one, and it is not just about the
+    assignee: `--reassign` also resets `status` back to `open` in the
+    same update, which is what actually makes the bead claimable again
+    (`IsReadyCandidate` requires `status=open`, so clearing the
+    assignee alone would leave it routed-but-unclaimable —
+    gastownhall/gascity#3231).
+  - **Singleton targets, `--formula` pours, and custom-`sling_query`
+    agents** — all outside the normalization's scope.
+- **Sets:** `metadata.gc.routed_to=<target>`, clears the prior
+  `assignee`, and resets an `in_progress` `status` back to `open`
+  (assignee and status in one store write). For a **pool target** the
+  assignee stays empty after the clear. For a **singleton target** the
+  Lane 1 singleton stamp still runs *after* the clear, so the net
+  effect is "prior assignee cleared, `assignee=<target>` set."
 - **CLI example:**
   ```bash
   gc sling gc-toolkit/gc-toolkit.polecat tk-abcde --reassign   # pool: clear, then gc.routed_to only
@@ -152,10 +200,11 @@ feed this resolution, and the plural takes precedence:
   `default_sling_targets` is empty.
 
 Whichever field resolves, the target's field contract is exactly
-Lane 1's — a **pool target** gets `metadata.gc.routed_to=<target>` and no
-`assignee`; a **singleton target** additionally gets `assignee=<target>`
-from the same singleton-stamp rule. Resolution only chooses *which*
-target Lane 1 receives; it introduces no new field behavior.
+Lane 1's — a **pool target** gets `metadata.gc.routed_to=<target>`, no
+stamped `assignee`, and the same stale-assignee clear on an open bead; a
+**singleton target** additionally gets `assignee=<target>` from the same
+singleton-stamp rule. Resolution only chooses *which* target Lane 1
+receives; it introduces no new field behavior.
 
 The typical configuration points a rig's `default_sling_target` at that
 rig's own polecat pool in `city.toml` — e.g. `default_sling_target =
