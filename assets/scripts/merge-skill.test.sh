@@ -70,6 +70,7 @@ bead-NOGATE|311|main||
 bead-HOLD|312|main|codex|green@HEAD312|true
 bead-DUPGATED|313|main|codex|
 bead-DUPFREE|313|main||
+bead-OPTOUT|314|main|none|
 A
 
 # PR states (gh pr view source):
@@ -89,6 +90,11 @@ A
 #   313 OPEN, CLEAN, claimed by TWO anchors (bead-DUPGATED codex-red +
 #       bead-DUPFREE gateless) -> HELD via both (one-anchor-per-PR, tk-ynz4b);
 #       pre-fix the gateless duplicate merged it, bypassing the codex gate
+#   314 OPEN, CLEAN, check_set="none" (the EXPLICIT opt-out sentinel, tk-i48ca)
+#       -> MERGED. The sentinel is now STAMPED on the anchor instead of being
+#       collapsed to "", so it arrives here as a gate NAME; if the gate-splitting
+#       did not drop it, a gateless rig would hold forever on `check.none` — a
+#       marker no reviewer can stamp.
 cat > "$TMP/prs" <<'P'
 301|OPEN|false|main|HEAD301|CLEAN|MERGEABLE|a301c0ffee123456
 302|OPEN|false|main|HEAD302|CLEAN|MERGEABLE|
@@ -103,6 +109,7 @@ cat > "$TMP/prs" <<'P'
 311|OPEN|false|main|HEAD311|CLEAN|MERGEABLE|b311c0ffee654321
 312|OPEN|false|main|HEAD312|CLEAN|MERGEABLE|
 313|OPEN|false|main|HEAD313|CLEAN|MERGEABLE|
+314|OPEN|false|main|HEAD314|CLEAN|MERGEABLE|e314f00d5add1e00
 P
 
 # Open rework/review children referencing a PR (gc bd list pr_number= source):
@@ -250,6 +257,17 @@ has '^bead-NOGATE$' "$TMP/closed" && ok "(1b) no-gate anchor closed (record)" \
 has '^bead-NOGATE$' "$TMP/mergedrec" && ok "(1b) merge_result=merged recorded on no-gate anchor" \
                                      || bad "(1b) no-gate merge_result recorded"
 
+# (1c) THE OPT-OUT SENTINEL (tk-i48ca): check_set="none" is a gateless rig saying
+# so EXPLICITLY. It reaches this script as a gate NAME (the formula now stamps the
+# sentinel instead of collapsing it to ""), so the gate-splitting must DROP it —
+# otherwise the anchor holds forever on `check.none`, a marker no reviewer can
+# stamp. Stamping the sentinel is what lets an EMPTY check_set stay a reliable
+# "this bead never ran normalization" signal for check-set-heal.sh.
+has '^314$' "$TMP/merged" && ok "(1c) opt-out PR (check_set='none') -> merged (sentinel read as no-gates)" \
+                          || bad "(1c) opt-out sentinel must merge, not hold on a 'check.none' marker"
+has '^bead-OPTOUT$' "$TMP/closed" && ok "(1c) opt-out anchor closed (record)" \
+                                  || bad "(1c) opt-out anchor closed"
+
 # (2)-(12) every other anchor is HELD or skipped — NOT merged. 313 is the
 # multi-anchor PR: its gateless duplicate anchor (bead-DUPFREE) is CLEAN and
 # would have merged pre-fix.
@@ -289,13 +307,13 @@ printf '%s\n' "$OUT1" | grep -q "PR#313 has multiple open gating anchors (one-an
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \
                                   || ok "(9) already-merged anchor left for the observer"
 
-# (INV) exactly two PRs were merged: the fully-validated gated head (301) and the
-# no-gate PR (311). No held/skipped anchor leaked through.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "2" "(INV) exactly two PRs merged (gated head 301 + no-gate 311)"
+# (INV) exactly three PRs were merged: the fully-validated gated head (301), the
+# no-gate PR (311), and the explicit opt-out (314). No held/skipped anchor leaked.
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "3" "(INV) exactly three PRs merged (gated head 301 + no-gate 311 + opt-out 314)"
 
 # Summary counters.
-printf '%s\n' "$OUT1" | grep -q "2 merged" \
-  && ok "run 1 summary reports 2 merged" || bad "run 1 summary merged count (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "3 merged" \
+  && ok "run 1 summary reports 3 merged" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard: only gh-supported --json fields. ----------------------
 gh pr view 301 --json merged >/dev/null 2>&1 \

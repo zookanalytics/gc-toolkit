@@ -15,12 +15,23 @@
 # the `MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"` idiom already in the same step.
 #
 # THE ESCAPE HATCH: a genuinely gateless rig must still be able to opt out, so it
-# does so EXPLICITLY via the `none`/`off` sentinel, which normalizes back to the
-# empty value merge-skill.sh reads as "no gates". merge-skill.sh's
+# does so EXPLICITLY via the `none`/`off` sentinel, which normalizes to the
+# CANONICAL `none` that merge-skill.sh reads as "no gates". merge-skill.sh's
 # empty-means-ungated behavior is deliberately UNCHANGED (#163/#182): the former
 # code held merges unconditionally on a missing signoff_head and stranded
 # human-approved CLEAN PRs forever. This fix stays strictly UPSTREAM of the merge
 # loop — it fixes what gets STAMPED, never how the stamp is READ.
+#
+# tk-i48ca AMENDED THE SENTINEL'S NORMALIZED FORM: `none`/`off` used to collapse to
+# the EMPTY string. That made "gateless by choice" and "never normalized" the same
+# value on the anchor, so nothing downstream could distinguish them — and a
+# hand-RECOVERED bead, which bypasses this formula entirely and therefore arrives
+# with an empty check_set, was indistinguishable from a deliberate opt-out and
+# merged with no codex review. The sentinel is now STAMPED as `none`, so every
+# formula-normalized anchor carries a NON-EMPTY check_set and an empty one is an
+# unambiguous "never normalized" signal that check-set-heal.sh repairs at the
+# refinery boundary. merge-skill.sh reads `none`/`off` as no-gates so the opt-out
+# still lands; its empty read is untouched (guards O + P below).
 #
 # This test EXECUTES the real normalization extracted verbatim from the formula
 # (between the `check-set-normalize` markers), so it cannot drift from the
@@ -89,11 +100,20 @@ check 'lint'        'lint'  "(D) a non-codex single gate passes through unchange
 check 'lint, codex' 'lint, codex' "(E) multi-gate list preserved verbatim (spacing intact)"
 
 # The explicit opt-out: a genuinely gateless rig says so with a sentinel, which
-# normalizes to the empty value merge-skill.sh reads as "no gates".
-check 'none'        ''      "(F) sentinel 'none' opts out explicitly -> ungated"
-check 'off'         ''      "(G) sentinel 'off' opts out explicitly -> ungated"
-check 'NONE'        ''      "(H) sentinel is case-insensitive"
-check '  none  '    ''      "(I) sentinel tolerates surrounding whitespace"
+# normalizes to the CANONICAL `none` — STAMPED on the anchor, never collapsed to
+# empty (tk-i48ca), so the opt-out survives as data that downstream can tell apart
+# from a never-normalized recovery bead. merge-skill.sh reads it as "no gates".
+check 'none'        'none'  "(F) sentinel 'none' opts out explicitly -> canonical 'none'"
+check 'off'         'none'  "(G) sentinel 'off' canonicalizes to 'none'"
+check 'NONE'        'none'  "(H) sentinel is case-insensitive"
+check '  none  '    'none'  "(I) sentinel tolerates surrounding whitespace"
+
+# The whole point of stamping the sentinel: an opt-out must never render as the
+# empty value a bypassed/recovered anchor also carries, or the two are the same
+# state again and check-set-heal.sh cannot safely repair either.
+[ -n "$(norm 'none')" ] \
+  && ok "(F2) the opt-out is a NON-EMPTY stamp (distinguishable from 'never normalized')" \
+  || bad "(F2) opt-out normalized to empty — indistinguishable from a bypassed anchor (tk-i48ca)"
 
 # --- Static guards: the normalized value must actually be USED. --------------
 # A normalization that runs but is then bypassed by a re-render is a no-op. The
@@ -136,6 +156,15 @@ grep -q '^default = "codex"' "$TOML" \
 grep -q 'EMPTY' "$SKILL" && grep -q 'declares NO gates' "$SKILL" \
   && ok "(O) merge-skill.sh still documents empty check_set as 'no gates' (unchanged)" \
   || bad "(O) merge-skill.sh's empty-means-ungated contract was altered — out of scope"
+
+# --- Static guard: the merge skill MUST honour the sentinel. -----------------
+# The stamped `none` reaches merge-skill.sh as a gate NAME. If the gate-splitting
+# does not drop it, a gateless rig holds forever on `check.none` — a marker no
+# reviewer can ever stamp. Moving the opt-out from "" to `none` is only safe
+# because the merge skill drops it; this guard is that dependency, asserted.
+grep -q '"none" and .* != "off"' "$SKILL" \
+  && ok "(P) merge-skill.sh drops the none/off sentinel from the enforced gate list" \
+  || bad "(P) merge-skill.sh must treat the none/off sentinel as no-gates, else a gateless rig holds on check.none"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
