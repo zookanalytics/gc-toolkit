@@ -268,6 +268,19 @@ whatever step stamps its marker; the merge skill is unchanged. This replaces the
 retired `signoff_head` field (a single conflated marker) and the `review_gate`
 string var: the per-gate marker model is the composable check-set made concrete.
 
+**A dropped gate is silent, so a doctor check watches for it (tk-4na1b).**
+"Empty declares no gates" is load-bearing at merge time and invisible everywhere
+else: `merge-skill.sh` reads the stamped bead metadata and never consults the
+formula, so an anchor stamped `check_set=""` lands ungated even though
+`mol-refinery-patrol.toml` declares `default = "codex"` — which is how
+shutupandlisten merged 11 PRs with no automated review before anyone noticed.
+`doctor/check-merge-gate-drop/` turns that into a signal: it errors on a **live**
+gating anchor stamped explicitly empty against a non-empty declared default, and
+warns when a rig's *resolved* `check_set` is explicitly empty (a `--var` at a pour
+site, or rig `formula_vars`). It is detect-only and never treats an **unset**
+`check_set` as a drop — unset is the pre-#182 legacy state, and holding on it is
+the stranding bug that "empty declares no gates" exists to fix.
+
 **The pre-open subset: members that run before the PR opens (gc-toolkit,
 tk-6d0vb.1.8).** Some check-set members can be produced *early* — against the
 branch, before the PR exists — instead of post-open. These form the **pre-open
