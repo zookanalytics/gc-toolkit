@@ -28,6 +28,8 @@ monitors the WORK layer:
 2. **Refinery queue health** — work beads assigned to refinery, staleness.
 3. **Polecat health** — detect stuck polecats, file warrants for dog pool.
 4. **Help mail** — triage HELP/escalation requests from polecats.
+5. **Completed-workflow quiesce** — retire the dead step beads of finished
+   mol-polecat-work molecules so the pool stops re-offering them (tk-p9ji9).
 
 Gate checks and convoy/swarm completion are town-wide concerns handled by
 the deacon, not the per-rig witness.
@@ -58,7 +60,7 @@ the worktree. This makes the work schedulable again.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 11
+version = 12
 
 [vars]
 [vars.binding_prefix]
@@ -499,14 +501,100 @@ Recommendation: <what should happen>"
 ```
 
 **Exit criteria:** Queue health assessed; nudge sent or escalation
-filed if needed. Continue to `check-polecat-health` — do NOT exit the
-wisp here. The `next-iteration` step is the only place that pours the
+filed if needed. Continue to `quiesce-completed-workflows` — do NOT exit
+the wisp here. The `next-iteration` step is the only place that pours the
 next wisp and burns this one."""
+
+[[steps]]
+id = "quiesce-completed-workflows"
+title = "Quiesce completed workflows"
+needs = ["check-refinery"]
+description = """
+Retire the dead step beads of `mol-polecat-work` molecules whose inline
+execution has already finished, so the pool stops re-offering them (tk-p9ji9).
+
+**The failure this prevents.** mol-polecat-work materializes 7 step beads, but
+the polecat runs them INLINE in one session and no step closes its own bead.
+The graph is chained, so while `load-context` stays open it is the ONLY ready
+step — and it still carries `gc.routed_to=<rig>/{{binding_prefix}}polecat`.
+Open + ready + routed is exactly the pool's offer predicate, so every idle
+polecat gets handed the same dead step, forever. Each one burns a wisp to
+re-derive "already done, nothing to do" and drain. The molecule cannot finalize
+itself either: under close-on-land its anchor stays OPEN until the refinery
+lands the PR, so the churn runs for the whole human-approval wait — measured at
+~1 wisp / 4-5 min, i.e. ~200 wisps overnight on a single anchor.
+
+This step is the containment the witness previously performed BY HAND, molecule
+by molecule (ten of them by 2026-07-22), now automated.
+
+**Two re-offer shapes, two different levers.** Clearing `gc.routed_to` fixes
+only the first — verified live: the pool work query returns open, UNASSIGNED,
+routed, ready beads only, so an assigned step never rides the pool path.
+
+| Shape | State | Lever |
+|---|---|---|
+| unassigned | assignee empty + `gc.routed_to` set | clear `gc.routed_to` |
+| assigned | assignee=`<polecat session>` + `gc.session_affinity=require` | clear `gc.routed_to` **and** the assignee |
+
+For the assigned shape the bead is already invisible to the pool; it is handed
+back on the ASSIGNED-work path, which is keyed on the assignee. Clearing only
+`gc.routed_to` there is a no-op — that is why the by-hand sweeps kept leaving a
+residual of sessions still holding their in_progress step.
+
+**DANGER — never "fix" this by closing the step bead.** Closing `load-context`
+unblocks `workspace-setup` and walks the next polecat forward onto a branch that
+is ALREADY green-gated and PR'd; any push there moves the head, stales the
+anchor's `check.<gate>=green@<oid>` marker, and BLOCKS the open PR from merging.
+The script has no close path at all, and its regression test asserts that.
+Clearing the routing is the safe lever; closing is not.
+
+Quiescing is containment, not finalization — the molecule is left stranded but
+quiet. Finalizing the step graph at submit-and-exit time is the durable upstream
+fix (gascity core / gastown formula) and is deliberately out of scope here.
+
+```bash
+# Resolve the pack scripts the same way mol-refinery-patrol does: from agent-env
+# paths, so the idle loop runs the CURRENT script even when a worktree copy lags.
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" \
+            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \
+            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/quiesce-completed-workflows.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# Best-effort, like every other patrol pass: a failed pass is retried next cycle
+# and must never abort the wisp. The -x guard means a rig that has not synced
+# this script simply keeps the old by-hand behavior.
+if [ -n "$SCRIPTS_DIR" ]; then
+  "$SCRIPTS_DIR/quiesce-completed-workflows.sh" \
+    || echo "quiesce-completed-workflows: pass failed (non-fatal); retries next cycle" >&2
+fi
+```
+
+Run it with `--dry-run` first if you want to see the selection without writing.
+
+**What it touches, and what it must not.** For each molecule it resolves the
+anchor the way the formula itself does (root -> `gc.input_convoy_id` -> the
+convoy's single tracked member) and acts only when that anchor is DONE:
+`merge_result` of `pre_open_gate`, `pull_request`, or `merged`, or the anchor is
+closed. It never writes to the anchor, never rewrites `status`, and never
+touches the `workflow-finalize` step — that one keeps its control-dispatcher
+route because it is the molecule's only escape path. An anchor it cannot resolve
+is SKIPPED, deliberately: quiescing a live molecule would strip the assignee off
+steps a running polecat still has to claim, draining it mid-implementation. An
+un-quiesced husk only wastes wisps, which is much the cheaper failure.
+
+Regression test: `assets/scripts/quiesce-completed-workflows.test.sh` (hermetic,
+stubs `gc`; covers both shapes, the single-update atomicity, the no-close rule,
+the finalize-route exemption, fail-closed, and idempotence).
+
+**Exit criteria:** Completed-workflow husks quiesced, or none found. Continue to
+`check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is
+the only place that pours the next wisp and burns this one."""
 
 [[steps]]
 id = "check-polecat-health"
 title = "Check polecat work progress"
-needs = ["check-refinery"]
+needs = ["quiesce-completed-workflows"]
 description = """
 Detect polecats that are alive but not making progress on their work.
 
