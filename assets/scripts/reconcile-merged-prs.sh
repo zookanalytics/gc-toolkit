@@ -83,6 +83,44 @@ done
 # there is nothing to do.
 command -v gh >/dev/null 2>&1 || exit 0
 
+# Statuses that still mean "a live bead owns this rework". `closed` is the ONLY
+# status that releases a branch; every other one — `blocked` and `deferred` above
+# all, which is exactly how an operator parks a runaway child — still owns it.
+# The conflict arm's pre-dispatch probe used to ask for open,in_progress only, so
+# neutralising a child by BLOCKING it (the standard operator move) made that child
+# invisible here and the arm filed a second one on the very next pass, dispatching
+# a concurrent force-push onto a branch a human had just frozen (tk-gajop).
+LIVE_STATUSES="open,in_progress,blocked,deferred"
+
+# Every non-closed bead whose metadata <field> equals <value>, as compact rows:
+# the id, whether it is an anchor (merge_result set) rather than a rework child,
+# and its rebase_hold marker. --limit=0 so the probe sees the whole set, not a
+# page of it: a truncated page could hide the one held child that must veto.
+#
+# Returns NON-ZERO on a failed ledger read, which the caller must treat as "I
+# cannot tell" and NOT as "nobody holds this branch" — the same ""-vs-"[]"
+# distinction the anchorless scan fails closed on. Empty output means the call
+# failed; a genuinely empty result is the literal "[]".
+probe_beads() {
+  local raw
+  raw=$(gc bd list --metadata-field "$1=$2" \
+    --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" \
+    | jq -c '.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null
+  return 0
+}
+
+# Truthy in the operators' sense: set, and not one of the explicit "off" spellings.
+# Mirrors merge-skill.sh's reading of merge_hold exactly, so a marker that holds a
+# merge there cannot fail to hold a force-push here.
+is_held() {
+  case "${1:-}" in
+    ""|false|False|FALSE|0|null) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # Open gating anchors in this rig's ledger.
 ANCHORS=$(gc bd list --status=open \
   --metadata-field merge_result=pull_request \
@@ -94,7 +132,7 @@ ANCHORS=$(gc bd list --status=open \
 ROWS=""
 if [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ]; then
   ROWS=$(printf '%s' "$ANCHORS" \
-    | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // "")}' 2>/dev/null)
+    | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null)
 fi
 # No anchors is NOT an early exit: the anchorless pass below walks PR -> BEAD and
 # is at its MOST relevant here (zero live anchors + open PRs is precisely the
@@ -103,12 +141,14 @@ fi
 # matters. Only the per-anchor loop is skipped.
 [ -n "$ROWS" ] || echo "reconcile-merged-prs: no gating anchors"
 
-closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; skipped=0
+closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; rebase_held=0; skipped=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   num=$(printf '%s' "$row" | jq -r '.pr // empty')
   target=$(printf '%s' "$row" | jq -r '.target // empty')
+  hold=$(printf '%s' "$row" | jq -r '.hold // empty')
+  rhold=$(printf '%s' "$row" | jq -r '.rhold // empty')
   if [ -z "$id" ] || [ -z "$num" ]; then
     skipped=$((skipped + 1)); continue
   fi
@@ -283,6 +323,29 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
     prior=$(printf '%s' "$row" | jq -r '.staled // empty')
     pool=$(printf '%s' "$row" | jq -r '.fixpool // empty')
     [ -n "$pool" ] || pool="$FIX_POOL_DEFAULT"
+
+    # --- Operator gates, checked before anything is dispatched. ---------------
+    # This arm is the most dangerous in the file: it does not merge, it DISPATCHES
+    # A FORCE-PUSH (`--force-with-lease` onto the PR's head branch) to a live pool,
+    # claimable within minutes. So it must honor every marker that would hold the
+    # far gentler merge — anything less and the two scripts disagree about whether
+    # an anchor is actionable, which is exactly what happened: merge-skill.sh
+    # correctly refused to merge a merge_hold anchor, and seconds later, in the
+    # SAME reconcile pass, this arm used that same anchor to dispatch a rebase
+    # (tk-gajop).
+    #
+    # merge_hold is the operator's "do not land this yet"; rebase_hold is the
+    # narrower "do not rebase/force-push this branch". Either one vetoes: a hold
+    # on landing is necessarily a hold on rewriting the branch underneath it.
+    if is_held "$hold"; then
+      echo "reconcile-merged-prs: $id — PR#$num conflicted (stale base) but merge_hold set (operator gate); no rebase dispatched"
+      rebase_held=$((rebase_held + 1)); continue
+    fi
+    if is_held "$rhold"; then
+      echo "reconcile-merged-prs: $id — PR#$num conflicted (stale base) but rebase_hold set (operator gate); no rebase dispatched"
+      rebase_held=$((rebase_held + 1)); continue
+    fi
+
     # The head this pass would route. An unreadable head degrades to the literal
     # "unknown" rather than to "" — an empty marker would never match on the next
     # pass and the arm would re-file on every wake.
@@ -291,15 +354,64 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
     if [ "$prior" = "$head_key" ]; then
       skipped=$((skipped + 1)); continue
     fi
-    # Someone is already reworking this PR (a signoff REQUEST_CHANGES child, or
-    # our own from an earlier head). Adding a second rework child would race it.
-    # Same query the merge skill's in-flight hold uses: referencing beads that
-    # carry no merge_result are the open rework/review set. --limit=0 so the
-    # check sees every child, not a page of them.
-    inflight=$(gc bd list \
-      --metadata-field pr_number="$num" \
-      --status open,in_progress --limit=0 --json 2>/dev/null \
-      | jq -r --arg anchor "$id" '[.[] | select(.id != $anchor) | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
+
+    # The branch a rebase child would rewrite. Resolved HERE, before the probes,
+    # because the branch — not the anchor and not the PR — is what a force-push
+    # actually endangers, so it is the right key to ask "is anyone already on
+    # this?". `head_ref` is the PR's live head branch and is authoritative over
+    # the anchor's recorded branch; the emptiness check stays below with the rest
+    # of the filing preconditions.
+    fix_branch="$head_ref"
+    [ -n "$fix_branch" ] || fix_branch=$(printf '%s' "$row" | jq -r '.branch // empty')
+
+    # --- Who else is already on this branch? ----------------------------------
+    # Probe BOTH dimensions and union them; neither subsumes the other:
+    #   pr_number — a rework child of THIS PR, including one filed by a different
+    #               anchor. The stale_base_head marker above cannot catch that: it
+    #               is keyed per-ANCHOR, so a PR carrying two anchors (the tk-ynz4b
+    #               double-anchor trap) files one child per anchor, each blind to
+    #               the other.
+    #   branch    — anything naming the same branch under a different PR number,
+    #               which is the unit a force-push actually collides on.
+    # FAIL CLOSED on an unreadable probe. A failed ledger read is
+    # indistinguishable from "no bead holds this branch", and reading it the
+    # optimistic way dispatches a force-push precisely when we cannot verify a
+    # freeze — the worst possible time. A deferred rebase costs one pass; a
+    # force-push onto a branch a keeper had frozen is not recoverable by retry.
+    if ! probe=$(probe_beads pr_number "$num"); then
+      echo "reconcile-merged-prs: $id — PR#$num conflicted but the rework probe failed; no rebase dispatched (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    if [ -n "$fix_branch" ]; then
+      if ! branch_probe=$(probe_beads branch "$fix_branch"); then
+        echo "reconcile-merged-prs: $id — PR#$num conflicted but the branch probe on '$fix_branch' failed; no rebase dispatched (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      probe=$(printf '%s\n%s' "$probe" "$branch_probe")
+    fi
+
+    # An operator freeze ANYWHERE on this branch — on an existing child, or on a
+    # sibling bead naming it — vetoes the dispatch. rebase_hold=true is precisely
+    # the marker a keeper sets on a runaway rebase child to stop it being redone;
+    # re-dispatching past it re-creates the race the keeper just contained.
+    frozen=$(printf '%s\n' "$probe" \
+      | jq -r 'select((.rhold // "") as $h | ($h | ascii_downcase) as $l
+               | $h != "" and $l != "false" and $l != "0" and $l != "null") | .id' 2>/dev/null \
+      | head -1)
+    if [ -n "$frozen" ]; then
+      echo "reconcile-merged-prs: $id — PR#$num conflicted (stale base) but $frozen holds branch '${fix_branch:-?}' with rebase_hold (operator gate); no rebase dispatched"
+      rebase_held=$((rebase_held + 1)); continue
+    fi
+
+    # Someone is already reworking this PR or this branch (a signoff
+    # REQUEST_CHANGES child, an operator-parked one, or our own from an earlier
+    # head). A second rework child would race it — two live children on one branch
+    # is a concurrent force-push hazard on its own, independent of any freeze.
+    # Beads carrying merge_result are anchors, not rework children, and are
+    # excluded; the anchor under consideration is excluded by id.
+    inflight=$(printf '%s\n' "$probe" \
+      | jq -r --arg anchor "$id" 'select(.id != $anchor) | select(.mres == "") | .id' 2>/dev/null \
+      | head -1)
     if [ -n "$inflight" ]; then
       skipped=$((skipped + 1)); continue
     fi
@@ -325,12 +437,10 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       echo "reconcile-merged-prs: $id flagged — PR#$num conflicted (stale base) and no fix pool; routed to human + escalated"
       continue
     fi
-    # `head_ref` is the PR's live head branch — authoritative over the anchor's
-    # recorded branch — and is what the rework must resume (existing_pr makes the
-    # patrol rework THAT PR rather than open a second one). With neither, the
-    # child would have nothing to check out: skip rather than file a dud.
-    fix_branch="$head_ref"
-    [ -n "$fix_branch" ] || fix_branch=$(printf '%s' "$row" | jq -r '.branch // empty')
+    # `fix_branch` (resolved above, before the probes) is what the rework must
+    # resume — existing_pr makes the patrol rework THAT PR rather than open a
+    # second one. With no branch or no URL the child would have nothing to check
+    # out: skip rather than file a dud.
     if [ -z "$fix_branch" ] || [ -z "$pr_url" ]; then
       echo "reconcile-merged-prs: $id — PR#$num conflicted but head branch/url unreadable; skip (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
@@ -508,5 +618,5 @@ polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; th
   fi
 fi
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $anchorless anchorless open PRs, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $anchorless anchorless open PRs, $skipped skipped"
 exit 0
