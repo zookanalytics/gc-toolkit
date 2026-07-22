@@ -28,7 +28,7 @@ defines the routing contract; it is not a command tutorial.
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
-| `fa487632b` — `sling: clear stale assignee on bare pool re-pour (re-land gc-q40pm)` (merged 2026-07-11) | gastownhall/gascity | Guard and clear in `internal/sling/sling_core.go` — `preflight` block at `:158`, `clearStaleOpenAssigneeForPoolRoute` at `:1617`, `clearStaleOpenAssigneeInStore` (the `status=open` gate) at `:1660`; companion idempotency change `settledAssignee` in `internal/sling/sling_attachment.go:463`; upstream's own prose at `engdocs/architecture/dispatch.md:180`. Verified current at gascity/main `7bba3de3b`. | 2026-07-22 |
+| `fa487632b` — `sling: clear stale assignee on bare pool re-pour (re-land gc-q40pm) (gc-yey06) (#88)` — **fork-local; not in canonical gascity** | zookanalytics/gascity (fork) | **Not in `gastownhall/gascity`:** `fa487632b` is not an ancestor of `upstream/main`, and `clearStaleOpenAssigneeForPoolRoute` appears nowhere in it — so Lane 1's clear describes the fork this city runs, not canonical gascity. Landed on the fork as `zookanalytics/gascity#88`; author date 2026-07-11, committer date 2026-07-22 (the fork rebases `main`, so this SHA churns — identify the change by subject, not by SHA). Guard and clear in `internal/sling/sling_core.go` — `preflight` block at `:158`, `clearStaleOpenAssigneeForPoolRoute` at `:1617`, `clearStaleOpenAssigneeInStore` (the `status=open` gate) at `:1660`; companion idempotency change `settledAssignee` in `internal/sling/sling_attachment.go:463`; the fork's own prose at `engdocs/architecture/dispatch.md:180` (upstream's copy of that file carries no such passage). All verified current at `zookanalytics/gascity` `origin/main` `7bba3de3b`. | 2026-07-22 |
 
 ## The maintainer's ruling
 
@@ -71,7 +71,9 @@ The three lanes below are the resulting model.
   singleton stamp automates the ruling's own "assign the named-session
   identity directly" step, so it refines rather than contradicts the
   "no `assignee` by default" decision quoted above.
-- **Also clears (pool targets, open beads):** a stale `assignee`. Pool
+- **Also clears (pool targets, open beads):** a stale `assignee` — on
+  the fork this city runs; the change is not in canonical
+  `gastownhall/gascity` (see Provenance). Pool
   demand is *ready + unassigned + routed* — the shared predicate behind
   both reconciler spawn (`scale_check`) and worker claim (`work_query`
   Tier 3) — so a re-pour that only rewrote `gc.routed_to` to the value
@@ -146,11 +148,12 @@ The three lanes below are the resulting model.
   PR #1841 (merged 2026-05-12) to make this transition atomic from
   the caller's perspective.
 
-  **This is no longer the only way to clear.** Since gascity
-  `fa487632b` a bare Lane 1 sling to a pool already clears a stale
-  assignee on an **open** bead, so `--reassign` is not required for
-  that case. It stays the lane for everything the bare-sling
-  normalization deliberately excludes:
+  **This is no longer the only way to clear** — on the fork this city
+  runs. Since `fa487632b` (`zookanalytics/gascity`; the change is not in
+  canonical `gastownhall/gascity` — see Provenance) a bare Lane 1 sling
+  to a pool already clears a stale assignee on an **open** bead, so
+  `--reassign` is not required for that case. It stays the lane for
+  everything the bare-sling normalization deliberately excludes:
   - **`in_progress` beads** — the live-claim case a bare sling will
     not touch. This is the important one, and it is not just about the
     assignee: `--reassign` also resets `status` back to `open` in the
