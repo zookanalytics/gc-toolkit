@@ -277,30 +277,84 @@ cmd_unlink() {
     #   - host_session (forward cache): names one session to unbind and may be
     #     the ONLY pointer left if that session dropped out of `gc session list`
     #     and isn't bd-listable.
-    #   - host_session_name (the grounding owner) + the CURRENT assignee: read up
-    #     front so ungrounding can be made CONDITIONAL — the metadata clear below
-    #     wipes host_session_name, so it must be captured first.
+    #   - host_session_name (one grounding-owner signal, the forward cache) + the
+    #     CURRENT assignee: read up front so ungrounding can be made CONDITIONAL —
+    #     the metadata clear below wipes host_session_name, so it must be captured
+    #     first. The reverse link and the explicit session arg supply the other
+    #     grounding-owner names (see the decision below).
     local obj cached host_name cur_assignee
     obj="$(bead_json "$work")"
     cached="$(printf '%s' "$obj" | jq -r '.metadata.host_session // empty' 2>/dev/null || true)"
     host_name="$(printf '%s' "$obj" | jq -r '.metadata.host_session_name // empty' 2>/dev/null || true)"
     cur_assignee="$(printf '%s' "$obj" | jq -r '.assignee // empty' 2>/dev/null || true)"
 
-    # Clear the forward cache on the work bead — and unground IN THE SAME WRITE,
-    # but ONLY our own grounding (tk-z130v.3). The grounding set the work bead's
-    # `assignee` to THIS host's session name; teardown clears it (`--assignee=`
-    # empty, the same clear gc-helm.sh's `takeaway --release` performs) so the
-    # host loses its assigned-work wake reason and can actually be stopped — else
-    # it revives ~20s after every drain. Clear it ONLY when the current assignee
-    # is STILL this host's session name. A newer NON-host assignee — a real
-    # agent/operator that took the bead after it was grounded — must be PRESERVED;
-    # blindly clearing it would strip a live assignment and strand that owner's
-    # work. This is exactly the contract the witness filter keys on
-    # (host-bead-skip.test.sh): assignee == host_session_name ⇒ grounded (ours to
-    # clear); != ⇒ a real assignee (keep). An absent host_name (nothing cached)
-    # is treated as "not ours" — preserve. Teardown must clear the wake reason
-    # FIRST (before drain), but only the wake reason WE set.
-    if [ -n "$host_name" ] && [ "$cur_assignee" = "$host_name" ]; then
+    # Decide whether the work bead's `assignee` is OUR grounding (clear it on
+    # teardown) or a real non-host owner (preserve it). The grounding set
+    # `assignee` to a host's session NAME; whose name that is must NOT be decided
+    # from the forward cache `host_session_name` alone. That cache is an OPTIONAL
+    # accelerator (see the binding header) and may be absent — a partial link, a
+    # manually cleared cache, the "perf cache only" case. Deciding from it alone
+    # left `assignee=<session_name>` behind on the no-forward-cache path, so the
+    # host kept its assigned-work wake reason and revived ~20s after every drain
+    # (tk-v369i). Derive the grounding-owner name from the authoritative sources
+    # instead: the reverse link (source of truth, on the session bead, matched in
+    # the clear loop below) and the explicit session arg (the caller names the
+    # exact host being torn down); the forward cache, when present, is just one
+    # more signal.
+    #
+    # Ours to clear iff the current assignee equals a grounding-owner name. A newer
+    # NON-host assignee — a real agent/operator that took the bead after it was
+    # grounded — matches none of them and is PRESERVED; blindly clearing it would
+    # strip a live assignment and strand that owner's work. This is exactly the
+    # contract the witness filter keys on (host-bead-skip.test.sh): assignee == a
+    # host's session_name ⇒ grounded (ours to clear); otherwise ⇒ a real assignee
+    # (keep).
+    local is_grounding=""
+    if [ -n "$cur_assignee" ] && [ -n "$host_name" ] && [ "$cur_assignee" = "$host_name" ]; then
+        is_grounding=1   # forward cache (optional) confirms it — the fast path
+    fi
+
+    # Clear the reverse link — the SOURCE OF TRUTH — on every session bead bound
+    # to this work bead, and match the assignee against each bound host's
+    # session_name as we go. Do NOT depend on the forward cache to LOCATE the
+    # reverse link either: if the cache is missing, a left-behind hosts_bead would
+    # let `resolve` keep returning the host and `up` re-wake it. Candidates,
+    # deduped: the explicit session arg, the cache we read up front, and the
+    # authoritative reverse search. Every candidate is confirmed by id (it STILL
+    # points here) before we clear it or trust its name, so a stale cache or shared
+    # alias can neither unbind another work's host nor authorize clearing a real
+    # assignee.
+    local candidates seen=" " cleared="" s="" sn=""
+    candidates="$(printf '%s\n' "$sess" "$cached"; candidate_session_ids "$work")"
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        case "$seen" in *" $s "*) continue ;; esac
+        seen="$seen$s "
+        [ "$(meta_get "$s" hosts_bead)" = "$work" ] || continue
+        if [ -z "$is_grounding" ] && [ -n "$cur_assignee" ]; then
+            sn="$(meta_get "$s" session_name)"
+            if [ -n "$sn" ] && [ "$cur_assignee" = "$sn" ]; then is_grounding=1; fi
+        fi
+        gc bd update "$s" --unset-metadata hosts_bead >/dev/null 2>&1 || true
+        cleared="${cleared:+$cleared,}$s"
+    done <<<"$candidates"
+
+    # The explicit session arg names the exact host being torn down (e.g. `up`'s
+    # stale-binding cleanup passes the dead session id). Trust its session_name as
+    # a grounding-owner name even when the reverse link was already cleared, so the
+    # partial-teardown case still ungrounds. meta_get is empty for a dead/unknown
+    # session bead — a safe no-op.
+    if [ -z "$is_grounding" ] && [ -n "$cur_assignee" ] && [ -n "$sess" ]; then
+        sn="$(meta_get "$sess" session_name)"
+        if [ -n "$sn" ] && [ "$cur_assignee" = "$sn" ]; then is_grounding=1; fi
+    fi
+
+    # Clear the forward cache on the work bead — and unground IN THE SAME WRITE
+    # when the assignee is ours. Teardown must clear the wake reason (`--assignee=`
+    # empty, the same clear gc-helm.sh's `takeaway --release` performs) so the host
+    # loses its assigned-work wake reason and can actually be stopped — but only
+    # the wake reason WE set.
+    if [ -n "$is_grounding" ]; then
         gc bd update "$work" \
             --assignee= \
             --unset-metadata host_session \
@@ -311,29 +365,11 @@ cmd_unlink() {
             --unset-metadata host_session \
             --unset-metadata host_session_name \
             --unset-metadata host_session_epoch >/dev/null 2>&1 || true
-        if [ -n "$cur_assignee" ] && [ "$cur_assignee" != "$host_name" ]; then
+        if [ -n "$cur_assignee" ]; then
             log "unlink: preserving non-host assignee '$cur_assignee' on $work (grounded name '${host_name:-<none>}')"
         fi
     fi
 
-    # Clear the reverse link — the SOURCE OF TRUTH — on every session bead bound
-    # to this work bead. Do NOT depend on the forward cache to locate it: if the
-    # cache is missing, a left-behind hosts_bead would let `resolve` keep
-    # returning the host and `up` re-wake it. Candidates, deduped: the explicit
-    # session arg, the cache we just read, and the authoritative reverse search.
-    # Every candidate is cleared only while it STILL points here (confirmed by
-    # id), so a stale cache or shared alias can't unbind another work's host.
-    local candidates
-    candidates="$(printf '%s\n' "$sess" "$cached"; candidate_session_ids "$work")"
-    local seen=" " cleared="" s
-    while IFS= read -r s; do
-        [ -n "$s" ] || continue
-        case "$seen" in *" $s "*) continue ;; esac
-        seen="$seen$s "
-        [ "$(meta_get "$s" hosts_bead)" = "$work" ] || continue
-        gc bd update "$s" --unset-metadata hosts_bead >/dev/null 2>&1 || true
-        cleared="${cleared:+$cleared,}$s"
-    done <<<"$candidates"
     log "unlinked: $work (cleared -> ${cleared:-<none>}); lineage preserved"
 }
 

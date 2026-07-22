@@ -272,7 +272,7 @@ fi
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 rm -rf "$SHIM_DIR"; SHIM_DIR=""
 
-hdr "Unlink without the forward cache — reverse link still cleared (codex PR#98 blocking)"
+hdr "Unlink without the forward cache — reverse link cleared + ungrounded (codex PR#98 blocking; tk-v369i)"
 # Regression guard for the SECOND codex finding on PR#98: `unlink <work>` must
 # clear the source-of-truth reverse link even when the optional forward cache
 # (host_session on the work bead) is absent — a partial `link`, a manually
@@ -283,6 +283,13 @@ hdr "Unlink without the forward cache — reverse link still cleared (codex PR#9
 # shim/live session needed: SESS is a listable stand-in, so unlink's reverse
 # search finds it via `gc bd list --metadata-field hosts_bead=WORK` (the same
 # enumerate-and-confirm covers real session beads via `gc session list`).
+#
+# The SAME no-forward-cache path must ALSO unground the work bead (tk-v369i):
+# grounding set assignee = the host's session_name, so with the forward cache
+# gone the ungrounding decision must fall back to that reverse-link session_name.
+# The pre-tk-v369i bug decided ungrounding from host_session_name ALONE, so this
+# path left assignee=<session_name> behind and the host revived ~20s after every
+# drain. Assert both: reverse link cleared AND assignee cleared.
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                    # ensure bound
 gc bd update "$WORK" --unset-metadata host_session \
                      --unset-metadata host_session_name \
@@ -290,10 +297,23 @@ gc bd update "$WORK" --unset-metadata host_session \
 [ -z "$(meta "$WORK" host_session)" ] && [ "$(meta "$SESS" hosts_bead)" = "$WORK" ] \
     && ok "precondition: forward cache cleared, reverse link still intact" \
     || bad "precondition not met (cache=$(meta "$WORK" host_session) reverse=$(meta "$SESS" hosts_bead))"
+# Grounding is in place going in — assignee == the host's session_name — so the
+# post-unlink check below proves unlink CLEARED a set wake reason (not that it was
+# never grounded).
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "precondition: WORK grounded (assignee == session_name) with the forward cache gone" \
+    || bad "precondition: WORK not grounded going in (assignee=$(assignee_of "$WORK"), want bead-host--$WORK)"
 "$TOOL" unlink "$WORK" >/dev/null
 [ -z "$(meta "$SESS" hosts_bead)" ] \
     && ok "unlink cleared SESS.hosts_bead with NO forward cache (reverse = source of truth)" \
     || bad "unlink left SESS.hosts_bead=$(meta "$SESS" hosts_bead) — reverse link not cleared"
+# The grounding assignee must be cleared too (tk-v369i): with the forward cache
+# gone, unlink must still derive the host's session_name from the reverse link
+# (the source of truth) and unground. Leaving assignee=<session_name> keeps the
+# host's assigned-work wake reason alive so it revives ~20s after every drain.
+[ -z "$(assignee_of "$WORK")" ] \
+    && ok "unlink ungrounded WORK with NO forward cache (assignee cleared via reverse-link session_name)" \
+    || bad "unlink left WORK grounded without a forward cache: assignee=$(assignee_of "$WORK") (want cleared)"
 # Restore the binding for the teardown-sanity section below.
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 
