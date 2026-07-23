@@ -21,8 +21,9 @@ max_active_sessions = 2
 # The "<pack>//<subpath>" form resolves against the imported gastown pack's
 # cache dir (resolvePackQualifiedAgentPaths, gascity
 # internal/config/compose.go); an unknown pack fails config load rather than
-# silently falling back to the default agent prompt. inject_fragments mirrors
-# the polecat patch in pack.toml so this pool gets identical convoy and
-# non-impl-done guidance.
+# silently falling back to the default agent prompt. inject_fragments must be
+# kept in sync by hand with the polecat patch's inject_fragments_append in
+# pack.toml — there is no automatic propagation — so this pool gets identical
+# convoy, non-impl-done, and file-work-records guidance.
 prompt_template = "gastown//agents/polecat/prompt.template.md"
-inject_fragments = ["polecat-convoys", "polecat-non-impl-done"]
+inject_fragments = ["polecat-convoys", "polecat-non-impl-done", "file-work-records"]
