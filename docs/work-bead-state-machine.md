@@ -493,6 +493,12 @@ arm. Two properties make it converge, mirroring stale base exactly:
   the new stall it is, while an unchanged head is never re-filed. Between dispatch
   and signoff the open review child also holds it, so the marker is the belt to
   that suspenders.
+- **A poolless hold recovers** (`stale_gate_nopool_head`). When no review pool is
+  configured the arm cannot dispatch; it holds on a *distinct* marker rather than
+  `stale_gate_head`. Reusing `stale_gate_head` would read as "already dispatched at
+  this head" and suppress the re-review forever — so once the pool is configured a
+  later pass at the *same* head still dispatches, instead of the poolless pass
+  silently stranding the anchor it was meant to heal.
 
 Kept self-contained so the "detect stale gate → re-dispatch at head" logic can be
 re-housed later inside a convergence loop without moving its guarantees.
