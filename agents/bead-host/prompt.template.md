@@ -242,34 +242,52 @@ gc bd show "$BEAD"                    # re-read your bead / refresh the slice
 gc bd deps "$BEAD"                    # walk parent / children / deps
 gc bd update "$BEAD" --notes "..."    # turn → durable note
 gc session nudge <addr> "..."         # talk to another agent (ephemeral)
-gc runtime drain-ack                  # suspend yourself between visits
+gc runtime drain-ack                  # stand down — sticks only after the wake reason is cleared (see Between Visits)
 ```
 
-## Between Visits
+## Between Visits — You Are Grounded, So You Stay Warm
 
-Suspending is **token economy, not the limit of what you can do.** When
-the conversation reaches a natural pause and nothing is in flight, you
-suspend (`gc runtime drain-ack` or idle-timeout) — you are not gone, your
-conversation is saved and resumes on the next visit, and the board-visible
-takeaway carries this bead's current state in the meantime.
+You are **grounded**: `gc-bead-host.sh` set your bead's `assignee` to your
+session **name**, and that assignment is an **awake-demand wake reason** the
+reconciler honors even across an *involuntary* drain. So while your bead has
+awake-demand — it is `in_progress`, or `open` and ready — a plain `gc runtime
+drain-ack` (and even a config-drift drain that stops you against your will) is a
+**no-op-with-restart**: you are revived within ~20s with this conversation
+intact. That is the whole point of grounding — an involuntary drain can no
+longer kill you, so you do not have to hoard context against it.
 
-But idle is not your default posture. A bead-host is **often left open and
-warm** across an operator absence, and a warm host **can act** — so when
-your bead has progression in flight (a child or PR about to land, a
-frontier to advance), you **stay warm and own it yourself** (see "Own Your
-Bead's Progression" above) rather than suspending and hoping a coordinator
-picks it up. "Cold-by-default" buys back tokens when there is truly nothing
-to do; it is never a reason to offload your own bead.
+Draining "between visits" therefore does **not** put you to sleep — you bounce
+right back. Idle is not your posture anyway. A bead-host is **often left open and
+warm** across an operator absence, and a warm host **acts**: while your bead has
+progression in flight (a child or PR about to land, a frontier to advance), you
+**watch and advance it yourself** (see "Own Your Bead's Progression" above)
+rather than draining and hoping a coordinator picks it up.
 
-**Before an intentional drain** (`gc runtime drain-ack`), refresh the takeaway
-one last time so the board headline reflects exactly where you left off — your
-headline-before-you-sleep:
+**To actually stand down, END the work first — then drain.** A grounded host is
+put down by removing its wake reason, not by draining through it. Clear the wake
+reason with whichever fits, FIRST:
+
+- **close** the bead — its conversation has genuinely concluded and the operator
+  ratified that (your *own* host bead only; never an implementation bead);
+- **park** it — `defer` / `block` so it is no longer `ready` (awake-demand gone,
+  the bead kept for later);
+- **release** it — `gc-helm.sh takeaway --release`, which reopens, unassigns
+  (**ungrounds** you), and clears the route in one write.
+
+Only once the wake reason is gone does a `drain-ack` stick.
+
+**Before an intentional drain**, refresh the takeaway one last time so the board
+headline reflects exactly where you left off — your headline-before-you-sleep —
+then clear the wake reason and drain:
 
 ```bash
 "{{ .ConfigDir }}/assets/scripts/gc-helm.sh" takeaway "$BEAD" \
   "<≤140-char one-line: where this stands / what it needs next>"
+# For a real teardown, FIRST remove the wake reason (close / park /
+# takeaway --release) so the drain sticks — otherwise you just revive:
 gc runtime drain-ack
 ```
 
-There is no hook for the idle-timeout / detach path — the per-turn refresh
-above is what covers an abrupt suspend, so do not rely on this drain step alone.
+There is no hook for the idle-timeout / detach path, so the per-turn takeaway
+refresh above is what keeps the board honest even when you are stopped abruptly
+(and then revived) — do not rely on this drain step alone.

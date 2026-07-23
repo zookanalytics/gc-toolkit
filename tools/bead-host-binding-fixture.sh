@@ -40,12 +40,16 @@ note() { printf '  ---- %s\n' "$*"; }
 hdr()  { printf '\n== %s ==\n' "$*"; }
 
 meta() { gc bd show "$1" --json 2>/dev/null | jq -r --arg k "$2" '.[0].metadata[$k] // empty'; }
+# assignee is a top-level bead field (not metadata) — grounding writes it there.
+assignee_of() { gc bd show "$1" --json 2>/dev/null | jq -r '.[0].assignee // empty'; }
 
 WORK=""; SESS=""; SHIM_DIR=""
-W2=""; DEAD=""; OLD=""; NEW=""; RECREATE_SHIM=""
+W2=""; DEAD=""; OLD=""; NEW=""; RECREATE_SHIM=""; BACKFILL_SHIM=""; MISSING_SHIM=""
 cleanup() {
     [ -n "$SHIM_DIR" ] && rm -rf "$SHIM_DIR" || true
     [ -n "$RECREATE_SHIM" ] && rm -rf "$RECREATE_SHIM" || true
+    [ -n "$BACKFILL_SHIM" ] && rm -rf "$BACKFILL_SHIM" || true
+    [ -n "$MISSING_SHIM" ] && rm -rf "$MISSING_SHIM" || true
     [ "$KEEP" = "1" ] && { note "--keep: leaving WORK=$WORK SESS=$SESS W2=$W2 DEAD=$DEAD OLD=$OLD NEW=$NEW open"; return; }
     for b in "$WORK" "$SESS" "$W2" "$DEAD" "$OLD" "$NEW"; do
         [ -n "$b" ] && gc bd close "$b" --reason "binding fixture teardown" >/dev/null 2>&1 || true
@@ -80,6 +84,12 @@ hdr "Assertion 1 — create + dual-link resolves both ways"
 [ "$(meta "$WORK" host_session_epoch)" = "1" ] \
     && ok "forward cache carries continuation_epoch (the incarnation marker)" \
     || bad "host_session_epoch=$(meta "$WORK" host_session_epoch)"
+# Grounding (tk-z130v.3): link ALSO sets the work bead's `assignee` to the
+# session NAME — the assigned-work wake reason that makes the reconciler revive
+# the host after an involuntary drain (compute_awake_set has no Drained gate).
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "grounding: WORK.assignee == session_name (host revives across a drain)" \
+    || bad "grounding missing: WORK.assignee=$(assignee_of "$WORK") (want bead-host--$WORK)"
 
 hdr "Assertion 4 — reverse-resolvable: the search finds the bead's host(s)"
 # (a) The design's intended mechanism, ListByMetadata hosts_bead=<bead>,
@@ -130,12 +140,157 @@ LEN2="$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
 [ "$(meta "$WORK" host_session_epoch)" = "2" ] \
     && ok "forward cache epoch updated to the new incarnation (2)" \
     || bad "host_session_epoch=$(meta "$WORK" host_session_epoch) (want 2)"
+# Grounding is idempotent: a re-bind (even at a new epoch) re-writes the same
+# assignee=session_name, so it never thrashes the assignment.
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "grounding idempotent across re-bind (WORK.assignee still == session_name)" \
+    || bad "re-bind changed grounding: WORK.assignee=$(assignee_of "$WORK")"
 # Re-binding the SAME session+epoch must NOT grow the lineage (idempotent).
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 LEN3="$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
 [ "$LEN3" = "2" ] \
     && ok "re-bind at the same epoch is idempotent (lineage stays 2)" \
     || bad "lineage grew on idempotent re-bind = $LEN3 (want 2)"
+
+hdr "Backfill — grounds an already-linked host that predates grounding (tk-z130v.3)"
+# A host linked BEFORE grounding shipped is linked (SESS.hosts_bead set) but its
+# work bead has no assignee. `backfill` enumerates the reverse link and grounds
+# each hosted work bead from its session's session_name. Shim `gc session list`
+# to EMPTY so backfill only touches this fixture's listable stand-in (found via
+# `gc bd list --has-metadata-key hosts_bead`) and never real live hosts — the
+# same hermetic discipline the resolve-contract section uses (a polecat must not
+# mutate real sessions).
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                 # ensure linked
+gc bd update "$WORK" --assignee= >/dev/null 2>&1               # simulate pre-grounding (ungrounded)
+[ -z "$(assignee_of "$WORK")" ] \
+    && ok "precondition: WORK linked but ungrounded (assignee empty)" \
+    || bad "precondition: could not clear assignee (got '$(assignee_of "$WORK")')"
+BACKFILL_SHIM="$(mktemp -d)"
+REAL_GC="$(command -v gc)"
+cat >"$BACKFILL_SHIM/gc" <<SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[]}'   # hide real hosts; backfill sees only stand-ins
+    exit 0
+fi
+exec "$REAL_GC" "\$@"
+SHIM
+chmod +x "$BACKFILL_SHIM/gc"
+PATH="$BACKFILL_SHIM:$PATH" "$TOOL" backfill >/dev/null 2>&1 || true
+rm -rf "$BACKFILL_SHIM"; BACKFILL_SHIM=""
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "backfill re-grounded WORK from the reverse link (assignee == session_name)" \
+    || bad "backfill did not ground WORK: assignee='$(assignee_of "$WORK")'"
+
+hdr "Preserve a non-host assignee — unlink/backfill must not clobber a real owner (tk-5bygy)"
+# Grounding sets WORK.assignee = the host's session_name. If a REAL agent later
+# takes the bead (assignee != host_session_name — the exact case the witness
+# filter KEEPS; host-bead-skip.test.sh:66), neither unlink NOR backfill may strip
+# that assignment: unlink clears ONLY its own grounding, backfill skips a bead a
+# non-host owner already holds. Otherwise ungrounding a stale host would strand a
+# live owner's work.
+OTHER="someone-else-fixture-$$"                                # synthetic non-host owner (matches no real session)
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                # ensure grounded + linked
+gc bd update "$WORK" --assignee "$OTHER" >/dev/null 2>&1       # a real agent takes the bead
+[ "$(assignee_of "$WORK")" = "$OTHER" ] \
+    && ok "precondition: WORK reassigned to a non-host owner ($OTHER)" \
+    || bad "precondition: could not reassign WORK (got '$(assignee_of "$WORK")')"
+# (a) unlink preserves the non-host assignee while still tearing down the links.
+"$TOOL" unlink "$WORK" >/dev/null
+[ "$(assignee_of "$WORK")" = "$OTHER" ] \
+    && ok "unlink PRESERVED the non-host assignee (did not clear $OTHER)" \
+    || bad "unlink clobbered a non-host assignee: assignee='$(assignee_of "$WORK")' (want $OTHER)"
+[ -z "$(meta "$WORK" host_session)" ] && [ -z "$(meta "$SESS" hosts_bead)" ] \
+    && ok "unlink still cleared the links (teardown intact despite the preserved assignee)" \
+    || bad "unlink left a dangling link (cache=$(meta "$WORK" host_session) reverse=$(meta "$SESS" hosts_bead))"
+# (b) backfill skips a host bead a non-host agent already owns.
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                # re-link (re-grounds to session_name)
+gc bd update "$WORK" --assignee "$OTHER" >/dev/null 2>&1       # a real agent takes it again
+BACKFILL_SHIM="$(mktemp -d)"
+REAL_GC="$(command -v gc)"
+cat >"$BACKFILL_SHIM/gc" <<SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[]}'   # hide real hosts; backfill sees only stand-ins
+    exit 0
+fi
+exec "$REAL_GC" "\$@"
+SHIM
+chmod +x "$BACKFILL_SHIM/gc"
+PATH="$BACKFILL_SHIM:$PATH" "$TOOL" backfill >/dev/null 2>&1 || true
+rm -rf "$BACKFILL_SHIM"; BACKFILL_SHIM=""
+[ "$(assignee_of "$WORK")" = "$OTHER" ] \
+    && ok "backfill SKIPPED the bead a non-host agent owns ($OTHER preserved)" \
+    || bad "backfill clobbered a non-host assignee: assignee='$(assignee_of "$WORK")' (want $OTHER)"
+# Restore the grounded binding for the sections below (they expect WORK linked to
+# SESS at epoch 2 and grounded to its session_name).
+gc bd update "$WORK" --assignee= >/dev/null 2>&1             # drop the non-host owner
+"$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null              # re-ground to the host
+
+hdr "Backfill missing-prefix — an unresolvable rig prefix must not abort the pass (codex REQUEST_CHANGES @9fd8e47; tk-0gnq9)"
+# Regression guard for the pre-open codex finding on rework 9fd8e47: rig_db_for_bead
+# is contracted to emit an EMPTY path (caller then falls back to the ambient bd
+# context) when a hosted bead's id-prefix is absent from `gc rig list`. But its
+# final `&& printf` chain leaked exit 1 as the function's status, so under
+# `set -euo pipefail` the caller's `db="$(rig_db_for_bead "$work")"` ABORTED
+# cmd_backfill on the FIRST unresolvable host — before grounding any later live
+# host. Because the one-time migration gates the tk-z130v.4 exemption drop, one
+# stale cross-rig hosted-bead prefix would silently strand every host after it.
+#
+# Fully-shimmed gc so NO real ledger is touched and the enumeration ORDER is pinned:
+# two bead-host sessions whose hosted beads (zz-1, zz-2) both have prefixes absent
+# from a stubbed-empty `gc rig list`. Assert the pass reaches BOTH — grounds zz-2
+# despite zz-1 being unresolvable — and exits 0 (no set -e abort). Against the
+# buggy commit this shim records ZERO grounding writes (abort at the first host).
+MISSING_SHIM="$(mktemp -d)"
+MISSING_LOG="$MISSING_SHIM/updated.log"
+: >"$MISSING_LOG"
+cat >"$MISSING_SHIM/gc" <<SHIM
+#!/usr/bin/env bash
+# Faked gc for the missing-prefix backfill path — answers only the calls
+# cmd_backfill makes and logs each grounding write; never delegates to real gc.
+if [ "\${1:-}" = "bd" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '[]'; exit 0                        # no listable stand-ins
+fi
+if [ "\${1:-}" = "session" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"sessions":[{"id":"s-fix1","template":"agents/bead-host"},{"id":"s-fix2","template":"agents/bead-host"}]}'
+    exit 0
+fi
+if [ "\${1:-}" = "rig" ] && [ "\${2:-}" = "list" ]; then
+    printf '%s\n' '{"rigs":[]}'; exit 0               # nothing resolves -> every prefix unresolved
+fi
+if [ "\${1:-}" = "bd" ] && [ "\${2:-}" = "show" ]; then
+    case "\${3:-}" in
+        s-fix1) printf '%s\n' '[{"id":"s-fix1","metadata":{"hosts_bead":"zz-1","session_name":"bead-host--zz-1"}}]';;
+        s-fix2) printf '%s\n' '[{"id":"s-fix2","metadata":{"hosts_bead":"zz-2","session_name":"bead-host--zz-2"}}]';;
+        *)      printf '%s\n' '[{"assignee":null}]';;  # hosted work bead: ungrounded (eligible)
+    esac
+    exit 0
+fi
+if [ "\${1:-}" = "bd" ] && [ "\${2:-}" = "update" ]; then
+    w="\${3:-}"; shift 3 2>/dev/null || true; a=""
+    while [ "\$#" -gt 0 ]; do
+        if [ "\$1" = "--assignee" ]; then a="\${2:-}"; break; fi
+        shift
+    done
+    printf '%s %s\n' "\$w" "\$a" >>"$MISSING_LOG"       # record the grounding write
+    exit 0
+fi
+exit 0
+SHIM
+chmod +x "$MISSING_SHIM/gc"
+MISSING_RC=0
+PATH="$MISSING_SHIM:$PATH" "$TOOL" backfill >/dev/null 2>&1 || MISSING_RC=$?
+[ "$MISSING_RC" = "0" ] \
+    && ok "backfill exited 0 despite an unresolvable-prefix host — no set -e abort" \
+    || bad "backfill aborted on an unresolvable-prefix host (exit $MISSING_RC) — rig_db_for_bead leaked non-zero"
+grep -q '^zz-1 bead-host--zz-1$' "$MISSING_LOG" \
+    && ok "backfill grounded the unresolvable-prefix host zz-1 (ambient-bd fallback, not an abort)" \
+    || bad "backfill did not ground zz-1 (writes: $(tr '\n' ';' <"$MISSING_LOG"))"
+grep -q '^zz-2 bead-host--zz-2$' "$MISSING_LOG" \
+    && ok "backfill continued past the unresolvable host and grounded the LATER host zz-2" \
+    || bad "backfill stopped before the later host zz-2 (writes: $(tr '\n' ';' <"$MISSING_LOG"))"
+rm -rf "$MISSING_SHIM"; MISSING_SHIM=""
 
 hdr "Resolve contract — session-list path requires hosts_bead; alias is a prefilter (codex PR#98 / tk-mv7qu)"
 # Regression guard for the codex finding on PR#98: in the `gc session list`
@@ -183,7 +338,7 @@ fi
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 rm -rf "$SHIM_DIR"; SHIM_DIR=""
 
-hdr "Unlink without the forward cache — reverse link still cleared (codex PR#98 blocking)"
+hdr "Unlink without the forward cache — reverse link cleared + ungrounded (codex PR#98 blocking; tk-v369i)"
 # Regression guard for the SECOND codex finding on PR#98: `unlink <work>` must
 # clear the source-of-truth reverse link even when the optional forward cache
 # (host_session on the work bead) is absent — a partial `link`, a manually
@@ -194,6 +349,13 @@ hdr "Unlink without the forward cache — reverse link still cleared (codex PR#9
 # shim/live session needed: SESS is a listable stand-in, so unlink's reverse
 # search finds it via `gc bd list --metadata-field hosts_bead=WORK` (the same
 # enumerate-and-confirm covers real session beads via `gc session list`).
+#
+# The SAME no-forward-cache path must ALSO unground the work bead (tk-v369i):
+# grounding set assignee = the host's session_name, so with the forward cache
+# gone the ungrounding decision must fall back to that reverse-link session_name.
+# The pre-tk-v369i bug decided ungrounding from host_session_name ALONE, so this
+# path left assignee=<session_name> behind and the host revived ~20s after every
+# drain. Assert both: reverse link cleared AND assignee cleared.
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null                    # ensure bound
 gc bd update "$WORK" --unset-metadata host_session \
                      --unset-metadata host_session_name \
@@ -201,10 +363,23 @@ gc bd update "$WORK" --unset-metadata host_session \
 [ -z "$(meta "$WORK" host_session)" ] && [ "$(meta "$SESS" hosts_bead)" = "$WORK" ] \
     && ok "precondition: forward cache cleared, reverse link still intact" \
     || bad "precondition not met (cache=$(meta "$WORK" host_session) reverse=$(meta "$SESS" hosts_bead))"
+# Grounding is in place going in — assignee == the host's session_name — so the
+# post-unlink check below proves unlink CLEARED a set wake reason (not that it was
+# never grounded).
+[ "$(assignee_of "$WORK")" = "bead-host--$WORK" ] \
+    && ok "precondition: WORK grounded (assignee == session_name) with the forward cache gone" \
+    || bad "precondition: WORK not grounded going in (assignee=$(assignee_of "$WORK"), want bead-host--$WORK)"
 "$TOOL" unlink "$WORK" >/dev/null
 [ -z "$(meta "$SESS" hosts_bead)" ] \
     && ok "unlink cleared SESS.hosts_bead with NO forward cache (reverse = source of truth)" \
     || bad "unlink left SESS.hosts_bead=$(meta "$SESS" hosts_bead) — reverse link not cleared"
+# The grounding assignee must be cleared too (tk-v369i): with the forward cache
+# gone, unlink must still derive the host's session_name from the reverse link
+# (the source of truth) and unground. Leaving assignee=<session_name> keeps the
+# host's assigned-work wake reason alive so it revives ~20s after every drain.
+[ -z "$(assignee_of "$WORK")" ] \
+    && ok "unlink ungrounded WORK with NO forward cache (assignee cleared via reverse-link session_name)" \
+    || bad "unlink left WORK grounded without a forward cache: assignee=$(assignee_of "$WORK") (want cleared)"
 # Restore the binding for the teardown-sanity section below.
 "$TOOL" link "$WORK" "$SESS" "" "2" >/dev/null
 
@@ -223,11 +398,16 @@ printf '%s' "$DEFOUT" | grep -q "unknown command" \
     && bad "unknown option --frobnicate did not error" \
     || ok "unknown option still rejected (only bare ids default to 'up')"
 
-hdr "Teardown sanity — unlink clears links, preserves lineage"
+hdr "Teardown sanity — unlink clears links + ungrounds, preserves lineage"
 "$TOOL" unlink "$WORK" >/dev/null
 [ -z "$(meta "$WORK" host_session)" ] && [ -z "$(meta "$SESS" hosts_bead)" ] \
     && ok "unlink cleared both links" \
     || bad "unlink left a dangling link"
+# Ungrounding (tk-z130v.3): unlink clears the work bead's assignee too, so the
+# host loses its wake reason and a drain can actually stop it (no ~20s revive).
+[ -z "$(assignee_of "$WORK")" ] \
+    && ok "unlink ungrounded WORK (assignee cleared — host now stoppable)" \
+    || bad "unlink left WORK grounded: assignee=$(assignee_of "$WORK")"
 [ "$("$TOOL" lineage "$WORK" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)" = "2" ] \
     && ok "lineage preserved through unlink (durable record)" \
     || bad "unlink dropped the lineage"

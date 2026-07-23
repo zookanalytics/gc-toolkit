@@ -16,11 +16,19 @@
 #                          resumable) — it does not die. Matches the
 #                          proven mayor-thread resume config.
 #
-# Cold-by-default: a host suspends between visits and resumes on demand
-# rather than staying warm (design "Cold-by-default"). Reconstruction is
-# cheap — sub-second slice rebuild, seconds to resume the runtime (spike
-# §3) — so we lean on suspend/resume instead of holding a context window
-# against the fragile shared Dolt for a ~500-token saving.
+# Warm-while-live (grounding; tk-z130v.3): tools/gc-bead-host.sh sets the
+# work bead's assignee to this session's name, and that assignment is an
+# awake-demand wake reason the reconciler honors across drains. So while the
+# hosted bead has awake-demand (in_progress, or open+Ready) the host stays
+# warm: a drain — a `drain-ack`, an idle_timeout suspend, or an INVOLUNTARY
+# config-drift drain — is a no-op-with-restart; the reconciler revives it
+# (~20s) with the conversation intact (wake_mode=resume). It is put down by
+# ENDING the work (close / park / `gc-helm.sh takeaway --release`), which
+# clears the wake reason FIRST; only then does a drain stick. This supersedes
+# the original cold-by-default "suspend between visits for a ~500-token
+# saving" posture: grounding trades that saving to survive an involuntary
+# drain — the whole point of a durable host — and reconstruction stays cheap
+# (sub-second slice rebuild, seconds to resume) if a resume is ever needed.
 #
 # Purely interactive: a bead-host never claims pool work and is never a
 # sling target. work_query returns empty JSON so the reconciler never
