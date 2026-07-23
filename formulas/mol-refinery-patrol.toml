@@ -171,34 +171,27 @@ If NO work found: sleep, reconcile in-flight PRs and convoys, then re-check.
 sleep {{event_timeout}}
 ```
 
-`sleep {{event_timeout}}` states a **cadence contract**, not an implementation.
-Some agent harnesses block a foreground `sleep` outright (the Claude Code
-harness answers "use Monitor with an until-loop"), so the literal line above
-cannot run inline there and the idle loop has to be driven out-of-band. That is
-a supported way to satisfy this step — but only under these invariants, each of
-which has already been violated in production and rediscovered independently by
-three rigs' refineries as private memory notes:
+`sleep {{event_timeout}}` is a **cadence contract**, not an implementation. A
+harness that blocks foreground `sleep` (Claude Code answers "use Monitor with an
+until-loop") drives this idle loop out-of-band instead — supported, under four
+invariants:
 
-- **Run ALL the reconcile passes below, in order, on every tick.** A
-  hand-rolled "watch for new work" loop that omits them looks fine while the
-  queue is empty and then silently never lands an anchor parked later in the
-  session — the merge skill only ever fires from this pass. Idle is exactly
-  when anchors are waiting.
-- **Prefer a driver that cannot terminate itself.** A polling loop with an
-  iteration backstop exits on its own schedule, and each self-exit has to be
-  noticed and re-armed; the re-arm is where the loop gets lost. Something
-  persistent has no backstop to trip.
-- **Namespace anything per-rig.** Co-tenant refineries for different rigs run
-  this same formula on one host — an un-namespaced helper path or dedup file
-  collides, and killing "the" poll by name kills another rig's.
-- **Steady state must be silent.** Emit only on real transitions (a merge, new
-  work, an anchor-set change, mail, a tool/query failure). `merge held` and
-  `0 escalated, 0 retargeted` are the *normal* readings of an approval-gated
-  queue; wiring a notification to them produces a per-tick firehose that gets
-  the driver shut off as noise.
+- **Run every reconcile pass below, in order, on every tick.** The merge skill
+  fires only from this pass, so a loop that skips the passes looks fine on an
+  empty queue and then never lands an anchor parked mid-session. Idle is exactly
+  when anchors wait.
+- **Use a driver that cannot terminate itself.** A polling loop with an
+  iteration backstop exits on its own and must be re-armed each time; the re-arm
+  is where it gets lost. A persistent driver has no backstop to trip.
+- **Namespace anything per-rig.** Co-tenant rig refineries run this one formula
+  on one host, so an un-namespaced helper path or dedup file collides — and
+  killing "the" poll by name kills another rig's.
+- **Stay silent in steady state.** Emit only on a real transition (merge, new
+  work, anchor-set change, mail, tool failure). `merge held` and `0 escalated, 0
+  retargeted` are the normal readings of an approval-gated queue; notifying on
+  them firehoses the driver into being shut off as noise.
 
-Whatever drives the cadence, this step is not satisfied until the passes below
-have run.
+Whatever drives the cadence, this step is not satisfied until those passes have run.
 
 **2. Reconcile state (best-effort, every idle wake).** Three convergent
 passes run here on the idle cadence: (a-pre) pre-open PR-create — open the PR for
@@ -452,28 +445,17 @@ if [ -n "$MR_STATE" ]; then
 fi
 # <<< mr-aware-rejection
 ```
-Left set, the anchor stays inside `merge-skill.sh`'s scan
-(`--status=open --metadata-field merge_result=pull_request`) for the whole time
-a polecat owns the rework — and this pool-rejection path files no rework CHILD,
-so the skill's in-flight-rework hold (which keys on a child carrying
-`pr_number`) never engages. The moment the polecat's push flips the PR to
-`CLEAN` the skill lands it. A non-empty `check_set` softens that to a stall
-(the moved head makes every `check.<name>=green@<old-head>` marker stale), but
-an empty check_set merges outright, and in BOTH cases the human approval does
-not re-fire: GitHub dismisses a stale review only under
-`dismiss_stale_reviews_on_push`, which these rigs' rulesets do not set. A
-conflict resolution is new code that no gate has seen. Cleared, the anchor
-leaves the scan; the hand-back re-enters merge-push, one-anchor-per-PR resolves
-`$WORK` as its own anchor again, and the full check set runs fresh against the
-new head.
+Left set, the anchor stays in `merge-skill.sh`'s scan
+(`--status=open --metadata-field merge_result=pull_request`) while the polecat
+reworks, and this path files no rework child to engage the skill's in-flight
+hold — so the skill lands the un-gated rework the moment the push goes `CLEAN`.
+(An empty `check_set` merges outright; a non-empty one only stalls, on the
+now-stale `check.<name>=green@<old-head>`; neither re-fires the human approval —
+these rulesets leave `dismiss_stale_reviews_on_push` off.) Clearing it drops the
+anchor from the scan, so the hand-back re-gates `$WORK` fresh against the new head.
 
 Keep `branch` and `pr_number`, and carry `pr_url` over to `existing_pr` so the
 hand-back reuses the SAME PR instead of opening a duplicate.
-
-This is the hand-run counterpart of `reconcile-merged-prs.sh`'s stale-base arm,
-which KEEPS the marker deliberately — that arm files a rework child (so the
-hold does engage) and its remedy is a mechanical rebase onto a rewritten base.
-Here there is no child and the remedy is an authored resolution.
 
 4. Do NOT delete the branch (new polecat needs it for conflict resolution).
 5. Clean up temp branch (leaves worktree detached so other worktrees can hold {{target_branch}}): `git checkout {{target_branch}} && git branch -D temp && git switch --detach HEAD`
@@ -578,20 +560,17 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
          ${PR_URL:+--set-metadata existing_pr="$PR_URL"}
      fi
      ```
-   - Delete branch **only when no PR depends on it**: `$BRANCH` is the head of
-     any open PR the bead anchored, and deleting it destroys that PR — closing
-     it as un-merged and stranding the review history. Re-read the bead here
-     rather than reusing `$MR_STATE` from the block above: these snippets are
-     not guaranteed to run in one shell, and an unset variable would read as
-     "direct mode" and delete a live PR's branch. Fail CLOSED — anything that
-     looks like a PR, or any read you could not complete, keeps the branch:
+   - Delete the branch **only when no PR depends on it.** `$BRANCH` is the
+     anchored PR's head; deleting it strands that PR un-merged. Re-read the bead
+     here — don't reuse `$MR_STATE` from the block above (these snippets may run
+     in separate shells, and an unset var reads as direct-mode and deletes a live
+     branch). Fail CLOSED: anything PR-shaped, or any read you couldn't
+     complete, keeps the branch:
      ```bash
      BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
      if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-       # bd reports failures on stderr and leaves stdout EMPTY, so an unreadable
-       # bead is indistinguishable from a metadata-less one. Validate the SHAPE,
-       # and on a failed read keep the branch — a wrongly-kept branch is swept
-       # later, a wrongly-deleted one takes an open PR with it.
+       # bd fails open — errors to stderr, empty stdout — so validate the SHAPE.
+       # A wrongly-kept branch is swept later; a wrongly-deleted one strands a PR.
        echo "could not read $WORK (bd unavailable?) — leaving $BRANCH untouched"
      else
        PR_STATE=$(printf '%s' "$BEAD_JSON" \
