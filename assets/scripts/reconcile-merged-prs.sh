@@ -568,7 +568,19 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
     checkset=$(printf '%s' "$row" | jq -r '.checkset // empty')
     codexmark=$(printf '%s' "$row" | jq -r '.codexmark // empty')
     stalegate=$(printf '%s' "$row" | jq -r '.stalegate // empty')
+    # fix_target_pool is where a REQUEST_CHANGES rework off this re-review routes.
+    # Prefer the anchor's own override; fall back to the patrol's --fix-pool default.
+    # Normal gating anchors carry NO fix_target_pool of their own (only the review
+    # bead is stamped with one, by the regular codex dispatch) — so without this
+    # fallback the re-review child is filed with an EMPTY fix pool, and its signoff
+    # completion path (template-fragments/polecat-non-impl-done.template.md, which
+    # gates every action on a non-empty fix_target_pool) can neither stamp
+    # check.codex on COMMENT nor file a rework child on REQUEST_CHANGES. The review
+    # then closes while the anchor keeps the stale check.codex=green@<old> +
+    # stale_gate_head, re-creating the exact indefinite hold this arm exists to heal.
+    # Symmetric with the CONFLICTING arm's fallback (`[ -n "$pool" ] || pool="$FIX_POOL_DEFAULT"`).
     fixpool=$(printf '%s' "$row" | jq -r '.fixpool // empty')
+    [ -n "$fixpool" ] || fixpool="$FIX_POOL_DEFAULT"
 
     # `codex` must be a declared check-set member (trimmed, whole-token — the same
     # split merge-skill.sh / check-set-heal.sh use, so a spaced "lint, codex" is
@@ -643,10 +655,11 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # Mirror the merge-push / check-set-heal.sh review shape so the codex signoff's
       # done-sequence finds exactly the fields it expects (task_kind=review,
       # check_name, pr_url/pr_number for the post-open review, anchor_bead the durable
-      # link). fix_target_pool is where a REQUEST_CHANGES rework routes (the FIX pool,
-      # not the review pool). gc.routed_to is written LAST — it is what makes the bead
-      # claimable, and a codex polecat that claimed a half-stamped review would have
-      # no anchor_bead to stamp the gate on.
+      # link). fix_target_pool (resolved above: the anchor's own override, else the
+      # patrol's --fix-pool default) is where a REQUEST_CHANGES rework routes — the
+      # FIX pool, not the review pool. gc.routed_to is written LAST — it is what makes
+      # the bead claimable, and a codex polecat that claimed a half-stamped review
+      # would have no anchor_bead to stamp the gate on.
       gc bd update "$REVIEW_BEAD" \
         --set-metadata task_kind=review \
         --set-metadata check_name=codex \

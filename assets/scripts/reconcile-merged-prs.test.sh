@@ -911,6 +911,18 @@ grep -q 'anchor_bead=bead-T' "$TMP/updates" \
 grep -q 'pr_number=220' "$TMP/updates" \
   && ok "(24) re-review child names the PR (post-open review)" \
   || bad "(24) re-review child names the PR"
+# The re-review MUST carry fix_target_pool or its signoff completion path can do
+# NOTHING with the verdict — no check.codex stamp on COMMENT, no rework child on
+# REQUEST_CHANGES (template-fragments/polecat-non-impl-done.template.md gates every
+# action on a non-empty fix_target_pool). bead-T carries no fix_target_pool of its
+# own (normal gating anchors don't), so the arm must fall back to the patrol's
+# --fix-pool value. Without the fallback the anchor keeps its stale marker and sits
+# in the exact indefinite hold this arm heals (tk-awrlk finding #1). Together with
+# the pr_number/anchor_bead/blocks-dep assertions above, this proves the child
+# carries the COMPLETE metadata set a REQUEST_CHANGES rework needs to route.
+grep -q "fix_target_pool=$FIX_POOL" "$TMP/updates" \
+  && ok "(24) re-review child carries fix_target_pool (falls back to the --fix-pool default)" \
+  || bad "(24) re-review child carries fix_target_pool=$FIX_POOL (got: $(grep 'fix_target_pool' "$TMP/updates" || echo none))"
 grep -q -- '--blocks bead-T' "$TMP/deps" \
   && ok "(24) re-review child gates the anchor via a BLOCKS dep" \
   || bad "(24) re-review child blocks-dep on the anchor (got: $(cat "$TMP/deps"))"
