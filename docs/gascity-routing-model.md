@@ -1,9 +1,9 @@
 ---
 name: Gas City routing model
-description: How `gc sling`, direct assignee, and `gc sling --reassign` differ — and which fields each lane is supposed to set, per the PR #1736 ruling.
+description: How `gc sling`, direct assignee, `gc sling --reassign`, and the `--on <formula>` attach differ — and which fields each lane is supposed to set, per the PR #1736 ruling.
 ---
 
-# Gas City routing model: sling vs assignee vs `--reassign`
+# Gas City routing model: sling vs assignee vs `--reassign` vs `--on`
 
 ## Scope
 
@@ -28,6 +28,8 @@ defines the routing contract; it is not a command tutorial.
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
+| Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | Attach routes the source and leaves the wisp root unrouted: `rigs/gascity/internal/sling/sling_core.go:482` (`molecule_id` on source) and the rationale comment at `:488-497`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4105`, asserting source `gc.routed_to=mayor` at `:4129` and wisp-root `gc.routed_to` empty at `:4151`). Standalone launch routes the root instead: `slingFormula` finalizes on `mResult.RootID` (`sling_core.go:373`). Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:303-305` with its rationale at `:296-302`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns before routing: `sling_core.go:477-481` → `doStartGraphWorkflow` (`:645-683`). Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
+| Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 
 ## The maintainer's ruling
 
@@ -49,9 +51,12 @@ And, verbatim, the decision list at the end of the same comment:
 >   bad hygiene and can become stale-route confusion later, even if the
 >   current direct-assignee path still works.
 
-The three lanes below are the resulting model.
+The lanes below are the resulting model. Lanes 1–3 are the ruling's
+direct subject; Lane 4 (the formula attach) is the fourth delivery path
+that the ruling did not address but that the same field contract has to
+answer for.
 
-## The three lanes
+## The four lanes
 
 ### Lane 1 — `gc sling <target> <bead>`: queue / template routing
 
@@ -137,6 +142,102 @@ contract: when `assignee` is already empty, `--reassign` is a no-op
 on the assignee field — no error, no spurious update. Callers that
 don't know the bead's prior state can pass `--reassign`
 unconditionally and trust the routing call to be safe.
+
+**One exception — a standalone formula launch.** The reassign reopen is
+gated by `shouldReopenForReassign(opts) = opts.Reassign &&
+!opts.IsFormula && !opts.DryRun`
+(`rigs/gascity/internal/sling/sling_core.go:303`), so on a **standalone formula
+launch** (`gc sling <target> <formula>`, Lane 4's second shape)
+`--reassign` is a *guaranteed* no-op — not merely idempotent. That is
+deliberate, and the guard's own comment
+(`internal/sling/sling_core.go:296-302`) gives the reason: reassign
+reopens `opts.BeadOrFormula`, which on a launch holds the *formula
+name* rather than a bead ID, so honoring it would clear an unrelated
+bead that happens to share the name, or fail the launch outright.
+Passing `--reassign` unconditionally is still *safe* there; just don't
+expect it to clear anything.
+
+This exception does **not** extend to `--on`: an attach sets
+`BeadOrFormula` to the real bead ID and leaves `IsFormula` false
+(`internal/sling/sling.go:326`), so `--reassign` behaves exactly as it
+does in Lane 3.
+
+### Lane 4 — `gc sling <target> <bead> --on <formula>`: formula attach
+
+- **When to use:** the bead needs a multi-step workflow (a *wisp*)
+  driving it rather than a bare hand-off — the standard dispatch shape
+  for `mol-polecat-work` and the doc-keeper audit formulas. `--on` and
+  `--formula` are mutually exclusive
+  (`rigs/gascity/cmd/gc/cmd_sling.go:158`); `--on` attaches a wisp to an **existing**
+  bead, whereas `--formula` launches a formula that has no source bead.
+- **Sets (classic, non-graph formula):** `metadata.molecule_id=<wisp-root>`
+  on the **source bead**, then routes that **source bead** through
+  exactly Lane 1's field contract (`gc.routed_to=<target>`, plus the
+  singleton assignee stamp where the target is a named session). The
+  **wisp root is deliberately left unrouted** so it is never
+  independently claimed.
+- **Sets (graph.v2 formula):** *neither routing field, on either bead.*
+  The graph launch path returns before the Lane 1 routing call
+  (`internal/sling/sling_core.go:477-481` → `doStartGraphWorkflow`,
+  `:645`), so the source bead gets `workflow_id` and **no
+  `gc.routed_to` and no `assignee`**; the workflow root is promoted to
+  `in_progress` in the **graph store** carrying `gc.source_bead_id`, and
+  the per-step routing is stamped on the compiled recipe's steps
+  (`internal/dispatch/control.go:1110`) rather than on the work bead.
+- **CLI example:**
+  ```bash
+  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde --on mol-polecat-work
+  ```
+- **Does NOT:** route the wisp root. This is the inverse of the
+  standalone-launch shape below, and it is load-bearing rather than
+  incidental — `TestOnFormulaAttachesAndRoutes`
+  (`cmd/gc/cmd_sling_test.go:4105`) asserts both halves: the source bead
+  ends with `gc.routed_to=<target>`, and the wisp root ends with
+  `gc.routed_to` **empty**. The source comment is blunt about why
+  (`internal/sling/sling_core.go:488-497`): the source "is the claimable
+  unit of work, while the wisp root is deliberately left unrouted…
+  Do not 'fix' this to wispRootID — it would orphan the work"
+  (gastownhall/gascity#2848).
+
+#### Reading a graph.v2 attach correctly — the duplicate-wisp trap
+
+A work bead dispatched under a **graph.v2** formula shows `gc.routed_to`
+absent *and* `assignee` null **while it is fully dispatched**. Per the
+paragraph above that is the designed shape, not a stranded bead — so
+"no routing fields" is not evidence that dispatch failed. Re-slinging on
+that misreading pours a **second** wisp against the same bead, and the
+two workers converge on one shared worktree.
+
+To check whether such a bead is really dispatched, look at
+`metadata.workflow_id` (graph.v2) or `metadata.molecule_id` (classic
+attach) and resolve the wisp root it names — not the bead's own routing
+fields.
+
+#### Adjacent — standalone formula launch (`gc sling <target> <formula>`)
+
+The other half of the `IsFormula` split, and the shape most often
+confused with `--on`. Here there is no source bead, so the **wisp root
+itself is the routed bead** — `slingFormula` finalizes on
+`mResult.RootID` (`rigs/gascity/internal/sling/sling_core.go:373`), giving the root
+`gc.routed_to=<target>` under Lane 1's contract. A wisp root carrying
+`gc.routed_to`, with a title matching the formula name, is therefore
+normal for a launch and wrong for an attach. Its graph.v2 variant
+behaves like Lane 4's: the root is promoted in the graph store and no
+`gc.routed_to` is written (`internal/sling/sling_core.go:363-368`).
+
+#### Why assignee residue silently strands a routed bead
+
+Pool demand does not count "routed" — it counts **routed *and*
+unassigned**. The demand probe is
+`bd ready --metadata-field "gc.routed_to=$target" --unassigned
+--exclude-type=epic` (`rigs/gascity/internal/config/workquery.go:41-43`), and the jq
+form applies the same `assignee == ""` filter
+(`workquery.go:586`). So a bead that is correctly routed but still
+carries a stale `assignee` is **invisible to `scale_check`**, and a
+scale-from-zero pool never wakes for it. Nothing errors; the work just
+sits. This is the field-contract reason Lane 3 exists — clearing the
+assignee is not cosmetic tidying, it is what makes the bead countable
+as demand.
 
 ### Adjacent — targetless sling resolution (`default_sling_target` / `default_sling_targets`)
 
