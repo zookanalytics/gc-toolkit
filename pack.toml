@@ -15,7 +15,7 @@
 # overlays on top of base prompts. Each gc-toolkit-specific doctrine
 # (heartbeat-no-consent-ui, layered-startup-discovery-{deacon,refinery,witness},
 # convoy-integration-branch-mayor, polecat-convoys, polecat-non-impl-done,
-# operator-next-step-trailing) lives in template-fragments/ and is named
+# file-work-records, operator-next-step-trailing) lives in template-fragments/ and is named
 # explicitly in inject_fragments_append below; the base prompt template is
 # reused verbatim from gastown. No whole-file prompt mirrors.
 #
@@ -84,7 +84,7 @@ inject_fragments_append = [
 
 [[patches.agent]]
 name = "polecat"
-inject_fragments_append = ["polecat-convoys", "polecat-non-impl-done"]
+inject_fragments_append = ["polecat-convoys", "polecat-non-impl-done", "file-work-records"]
 
 [[patches.agent]]
 name = "refinery"

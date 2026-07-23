@@ -8,7 +8,7 @@
 
 Pool of polecat workers backed by the Codex CLI provider (`provider = "codex"`) instead of the default Claude provider. Distinct `work_dir` keeps codex worktrees out of the default polecats/ tree. Otherwise mirrors the imported gastown `polecat` shape (rig-scoped, ephemeral, pre-start `worktree-setup.sh`).
 
-The prompt is shared with gastown's polecat by reference (`prompt_template` points at the materialized gastown template), and `inject_fragments` mirrors the polecat patch in `pack.toml`. This keeps the two pools behaviourally aligned automatically — guidance added to the gastown polecat prompt (or to the gc-toolkit polecat patch) flows to both pools without a copy-paste step.
+The prompt is shared with gastown's polecat by reference (`prompt_template` points at the materialized gastown template), so changes to the gastown polecat prompt flow to both pools automatically. `inject_fragments`, by contrast, must be mirrored BY HAND against the polecat patch's `inject_fragments_append` in `pack.toml` — there is no automatic propagation — so a fragment added to the polecat patch (e.g. `file-work-records`) must also be added here or this pool silently misses it.
 
 ## Why we built this
 
