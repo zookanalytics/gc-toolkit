@@ -175,6 +175,32 @@ is_held() {
   esac
 }
 
+# Route a stale-gate re-review to the codex pool and, ONLY once that route is
+# confirmed to have PERSISTED, arm the one-per-head guard (stale_gate_head) on the
+# anchor. The route write is what makes the review claimable — a codex polecat
+# cannot heal the gate from an unrouted bead — so it is the step that must succeed
+# before the head is recorded "dispatched". Stamping stale_gate_head after an
+# UNVERIFIED best-effort route was the tk-3xy37 finding: a dropped route write left
+# the review unrouted (inert) yet marked the head dispatched, so the one-per-head
+# guard skipped it forever and the merge sat held behind a bead nothing could claim
+# — the exact silent hold this arm exists to heal. Read gc.routed_to back; on a miss
+# return 1 and stamp NOTHING, so a later pass re-enters the arm (guard unstamped) and
+# repairs the same bead via the in-flight probe. Returns 0 armed, 1 not persisted.
+arm_stale_gate() {
+  local bead="$1" anchor="$2" head="$3" stale="$4" pool="$5" num="$6" got
+  # An empty pool can never make a bead claimable; never "arm" on one (the callers
+  # already gate on a non-empty pool, but fail closed here too).
+  [ -n "$pool" ] || return 1
+  gc bd update "$bead" --set-metadata gc.routed_to="$pool" >/dev/null 2>&1
+  got=$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+  [ "$got" = "$pool" ] || return 1
+  gc bd update "$anchor" \
+    --set-metadata stale_gate_head="${head:-unknown}" \
+    --set-metadata blocked_reason="PR#$num check.codex stale (green@$stale, live head ${head:-?}); re-review $bead routed to $pool" >/dev/null 2>&1
+  gc session wake "$pool" >/dev/null 2>&1 || true
+  return 0
+}
+
 # Open gating anchors in this rig's ledger.
 ANCHORS=$(gc bd list --status=open \
   --metadata-field merge_result=pull_request \
@@ -651,6 +677,30 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         | jq -r --arg anchor "$id" 'select(.id != $anchor) | select(.mres == "") | .id' 2>/dev/null \
         | head -1)
       if [ -n "$inflight" ]; then
+        # Normally a healthy in-flight review/rework already re-raises the gate, so
+        # skip to avoid a twin (test 26). BUT a re-review left UNROUTED by a failed
+        # route write (arm_stale_gate below) is inert — unclaimable by the codex pool
+        # — while it still trips this probe, so the gate would sit held forever behind
+        # a bead nothing can action. If the in-flight bead is exactly that (a codex
+        # review anchored to THIS anchor with no gc.routed_to) and a review pool is
+        # configured, re-route it (repair) rather than skip: heal the head an earlier
+        # pass failed to arm. Anything else — routed, a rework child, or anchored
+        # elsewhere — is left untouched, so twin-avoidance is unchanged for it.
+        if_json=$(gc bd show "$inflight" --json 2>/dev/null)
+        if_kind=$(printf '%s' "$if_json" | jq -r '.[0].metadata.task_kind // ""' 2>/dev/null)
+        if_anchor=$(printf '%s' "$if_json" | jq -r '.[0].metadata.anchor_bead // ""' 2>/dev/null)
+        if_routed=$(printf '%s' "$if_json" | jq -r '.[0].metadata["gc.routed_to"] // ""' 2>/dev/null)
+        if [ -n "$REVIEW_POOL_DEFAULT" ] && [ "$if_kind" = "review" ] \
+             && [ "$if_anchor" = "$id" ] && [ -z "$if_routed" ]; then
+          if arm_stale_gate "$inflight" "$id" "$head_oid" "$stale_oid" "$REVIEW_POOL_DEFAULT" "$num"; then
+            regated=$((regated + 1))
+            echo "reconcile-merged-prs: $id — PR#$num re-review $inflight was left unrouted by an earlier failed route write; re-routed to $REVIEW_POOL_DEFAULT (stale-gate repair)"
+          else
+            echo "reconcile-merged-prs: $id — PR#$num re-review $inflight repair route still not persisting; retry next pass" >&2
+            skipped=$((skipped + 1))
+          fi
+          continue
+        fi
         skipped=$((skipped + 1)); continue
       fi
       if [ -z "$REVIEW_POOL_DEFAULT" ]; then
@@ -707,15 +757,19 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         echo "reconcile-merged-prs: WARN re-review $REVIEW_BEAD did not record anchor_bead=$id; leaving unrouted (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
-      gc bd update "$REVIEW_BEAD" --set-metadata gc.routed_to="$REVIEW_POOL_DEFAULT" >/dev/null 2>&1
-      # Stamp the head guard AFTER a successful route so a mid-dispatch failure
-      # retries cleanly next pass rather than being suppressed by the marker.
-      gc bd update "$id" \
-        --set-metadata stale_gate_head="${head_oid:-unknown}" \
-        --set-metadata blocked_reason="PR#$num check.codex stale (green@$stale_oid, live head ${head_oid:-?}); re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT" >/dev/null 2>&1
-      gc session wake "$REVIEW_POOL_DEFAULT" >/dev/null 2>&1 || true
-      regated=$((regated + 1))
-      echo "reconcile-merged-prs: $id — PR#$num check.codex green@$stale_oid stale (live head ${head_oid:-?}); filed re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT"
+      # Route the review and arm the one-per-head guard ONLY if the route PERSISTS.
+      # A dropped route write must NOT stamp stale_gate_head: that would mark the head
+      # "dispatched" while the review sits unrouted and unclaimable, and the
+      # one-per-head guard would then skip it forever — the tk-3xy37 finding. On a
+      # miss, leave the guard unstamped and skip; the next pass re-enters (guard
+      # unstamped) and the in-flight probe above re-routes this same bead.
+      if arm_stale_gate "$REVIEW_BEAD" "$id" "$head_oid" "$stale_oid" "$REVIEW_POOL_DEFAULT" "$num"; then
+        regated=$((regated + 1))
+        echo "reconcile-merged-prs: $id — PR#$num check.codex green@$stale_oid stale (live head ${head_oid:-?}); filed re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT"
+      else
+        echo "reconcile-merged-prs: WARN re-review $REVIEW_BEAD route write did not persist gc.routed_to=$REVIEW_POOL_DEFAULT; leaving un-armed (retry/repair next pass)" >&2
+        skipped=$((skipped + 1))
+      fi
       continue
     fi
   fi

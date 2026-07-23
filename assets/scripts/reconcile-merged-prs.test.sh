@@ -481,6 +481,14 @@ case "$2" in
     printf '%s\t%s\n' "$id" "$reason" >> "$FAKE_CLOSELOG" ;;
   update)
     id="$3"
+    # Inject a transient route-write loss: while FAKE_ROUTE_FAIL is set, a write that
+    # routes to that pool (gc.routed_to=<pool>) does NOT persist — nothing is appended
+    # to the log — and the command reports failure. Models the ledger dropping the
+    # stale-gate route step so the verify-before-arm path (arm_stale_gate) and the
+    # next-pass in-flight repair can be exercised. Scoped to the one run that sets it.
+    if [ -n "${FAKE_ROUTE_FAIL:-}" ] && printf '%s' "$*" | grep -q "gc.routed_to=$FAKE_ROUTE_FAIL"; then
+      exit 1
+    fi
     printf '%s\t%s\n' "$id" "$*" >> "$FAKE_UPDATES"
     case "$*" in
       *merge_result=abandoned*)  printf '%s\n' "$id" >> "$FAKE_ABANDONED" ;;
@@ -517,14 +525,21 @@ case "$2" in
   dep)
     printf '%s\n' "$*" >> "$FAKE_DEPS" ;;
   show)
-    # Reconstruct the metadata a later read would see, from the update log. Only
-    # the field the scripts read back matters here — anchor_bead, the stale-gate /
-    # check-set-heal "did the link persist before routing?" verification. Modeled
-    # by replaying the last anchor_bead= this bead was updated with.
+    # Reconstruct the metadata a later read would see, from the update log. The
+    # fields the scripts read back: anchor_bead (the stale-gate / check-set-heal
+    # "did the link persist before routing?" verification), plus task_kind and
+    # gc.routed_to (the stale-gate REPAIR probe — "is this stranded in-flight bead an
+    # unrouted codex review for this anchor?"). Modeled by replaying the LAST value
+    # each field was updated with. A write the shim dropped (FAKE_ROUTE_FAIL) never
+    # lands in the log, so its read-back is empty here — exactly what a transient
+    # ledger loss looks like to arm_stale_gate's verify.
     sid="$3"
-    ab=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "$FAKE_UPDATES" 2>/dev/null \
-           | grep -o 'anchor_bead=[^ ]*' | tail -1 | sed 's/anchor_bead=//')
-    printf '[{"id":"%s","metadata":{"anchor_bead":"%s"}}]\n' "$sid" "$ab" ;;
+    slog=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "$FAKE_UPDATES" 2>/dev/null)
+    ab=$(printf '%s\n' "$slog" | grep -o 'anchor_bead=[^ ]*' | tail -1 | sed 's/anchor_bead=//')
+    tk=$(printf '%s\n' "$slog" | grep -o 'task_kind=[^ ]*' | tail -1 | sed 's/task_kind=//')
+    rt=$(printf '%s\n' "$slog" | grep -o 'gc.routed_to=[^ ]*' | tail -1 | sed 's/gc.routed_to=//')
+    printf '[{"id":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s"}}]\n' \
+      "$sid" "$ab" "$tk" "$rt" ;;
 esac
 exit 0
 GC
@@ -1035,6 +1050,56 @@ printf '%s\n' "$W_UPD2" | grep -q 'check.codex=green' \
 printf '%s\n' "$OUT11" | grep -q '1 stale-gate re-reviews routed' \
   && ok "(29) run 11 summary reports the recovered re-review routed" \
   || bad "(29) run 11 summary stale-gate routed count (got: $OUT11)"
+
+# --- Run 12: a DROPPED route write must not falsely arm the head; a later pass
+# repairs the stranded review (tk-3xy37 finding). -----------------------------
+# The stale-gate route write (gc.routed_to -> review pool) is what makes the
+# re-review CLAIMABLE. Before this fix it was an unchecked best-effort write, yet
+# the arm stamped stale_gate_head and counted the dispatch unconditionally: a
+# transient loss left the review UNROUTED (inert) while the one-per-head guard
+# marked the head done, so every later pass skipped it at that guard and the merge
+# sat held behind a bead nothing could claim — the exact silent hold this arm
+# exists to heal. The fix arms the head ONLY after reading gc.routed_to back, and
+# the in-flight probe re-routes an unrouted review for the anchor on a later pass.
+printf '%s\n' 'bead-X|224|main|||codex|green@old224' > "$TMP/anchors"
+printf '%s\n' '224|OPEN||false||main|polecat/bead-X|head224|MERGEABLE|BLOCKED' > "$TMP/prs"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
+
+# Pass A: the route write to the review pool is dropped in flight.
+OUT12A="$(FAKE_ROUTE_FAIL="$REVIEW_POOL" bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
+eq "$(grep -c 'Review PR#224' "$TMP/created")" "1" \
+   "(30) route write dropped -> the re-review bead is still filed"
+grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
+  && bad "(30) dropped route must NOT persist gc.routed_to (it was lost in flight)" \
+  || ok "(30) dropped route leaves the re-review UNROUTED"
+grep -q 'stale_gate_head=head224' "$TMP/updates" \
+  && bad "(30) must NOT arm stale_gate_head when the route did not persist (would suppress the retry)" \
+  || ok "(30) head guard NOT armed on a dropped route (so a later pass re-enters)"
+printf '%s\n' "$OUT12A" | grep -q '0 stale-gate re-reviews routed' \
+  && ok "(30) dropped route -> summary counts routed=0, not a false dispatch" \
+  || bad "(30) run 12A summary must report 0 routed (got: $OUT12A)"
+
+# Pass B: the transient loss clears. The arm re-enters (head unarmed) and the
+# in-flight probe re-routes the SAME stranded review — no twin, no new bead.
+OUT12B="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
+eq "$(grep -c 'Review PR#224' "$TMP/created")" "1" \
+   "(31) repair pass re-routes the SAME review -> no twin re-review bead"
+grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
+  && ok "(31) repair pass routes the stranded re-review to the review pool" \
+  || bad "(31) repair pass must route the stranded re-review (got: $(cat "$TMP/updates"))"
+grep -q 'stale_gate_head=head224' "$TMP/updates" \
+  && ok "(31) repair pass NOW arms stale_gate_head at the live head" \
+  || bad "(31) repair pass must arm stale_gate_head=head224"
+printf '%s\n' "$OUT12B" | grep -q 'stale-gate repair' \
+  && ok "(31) repair pass logs the stale-gate route repair" \
+  || bad "(31) repair pass must log the repair (got: $OUT12B)"
+printf '%s\n' "$OUT12B" | grep -q '1 stale-gate re-reviews routed' \
+  && ok "(31) repair pass -> summary reports the recovered re-review routed" \
+  || bad "(31) run 12B summary stale-gate routed count (got: $OUT12B)"
+grep -qx "$REVIEW_POOL" "$TMP/wakes" \
+  && ok "(31) repair pass wakes the review pool" \
+  || bad "(31) repair pass wakes the review pool"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
