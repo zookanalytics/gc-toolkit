@@ -1,6 +1,6 @@
 ---
 name: Gas City routing model
-description: How `gc sling`, direct assignee, `gc sling --reassign`, and the `--on <formula>` attach differ — and which fields each lane is supposed to set, per the PR #1736 ruling.
+description: How `gc sling`, direct assignee, `gc sling --reassign`, and the `--on <formula>` attach differ — which fields each lane is supposed to set, per the PR #1736 ruling, and the claim predicate that reads those fields back.
 ---
 
 # Gas City routing model: sling vs assignee vs `--reassign` vs `--on`
@@ -10,7 +10,10 @@ description: How `gc sling`, direct assignee, `gc sling --reassign`, and the `--
 **Mandate.** How work is routed to agents: how a bead reaches the worker
 that will act on it, and — the doc's distinctive charge — which routing
 field each delivery path is responsible for setting. It is the authority
-on that field-level contract.
+on that field-level contract. That contract has a **read side** — the
+claim predicate that decides which beads a worker is offered — and it is
+documented here too: the fields mean only what the predicate makes them
+mean.
 
 **Boundaries.** This doc covers *how* work moves between agents, not
 *who* the agents are — that's [gascity-agents.md](gascity-agents.md). It
@@ -30,6 +33,7 @@ defines the routing contract; it is not a command tutorial.
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
 | Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | Attach routes the source and leaves the wisp root unrouted: `rigs/gascity/internal/sling/sling_core.go:482` (`molecule_id` on source) and the rationale comment at `:488-497`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4105`, asserting source `gc.routed_to=mayor` at `:4129` and wisp-root `gc.routed_to` empty at `:4151`). Standalone launch routes the root instead: `slingFormula` finalizes on `mResult.RootID` (`sling_core.go:373`). Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:303-305` with its rationale at `:296-302`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns before routing: `sling_core.go:477-481` → `doStartGraphWorkflow` (`:645-683`). Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 | Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
+| Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tier loops `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…`, and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
 
 ## The maintainer's ruling
 
@@ -324,6 +328,110 @@ key alongside it — don't conflate the two when you see
 stored bead is inert authoring provenance; `gc doctor --fix`
 backfills `gc.routed_to` for any pre-migration workflow root that
 still carries only the old field.
+
+## The read side: the claim predicate
+
+The three lanes above are the **write** side — which field each delivery
+path sets. This is the **read** side: the predicate that decides which
+beads a worker is actually offered. It belongs in this doc because the
+routing fields mean only what this predicate makes them mean.
+
+`gc hook` "finds routed work using the agent's `work_query` config"
+(`gc hook --help`). The built-in query runs in tiers, and the tiers map
+onto the lanes:
+
+- **Tiers 1–2 — assignee match** (the read side of **Lane 2**).
+  `bd ready … --assignee=<candidate> --exclude-type=epic`, run for each
+  of `$GC_SESSION_ID`, `$GC_SESSION_NAME`, `$GC_ALIAS` in order until one
+  matches. A named session finds its own work here, by `assignee` —
+  never by `gc.routed_to`.
+- **Tier 3 — routed pool** (the read side of **Lanes 1 and 3**).
+  `bd ready --metadata-field "gc.routed_to=$target" --unassigned
+  --exclude-type=epic`. A pool worker finds work here, and only here.
+
+`bd ready` supplies the rest: it shows "open issues with no active
+blockers" and "excludes in_progress, blocked, deferred, and hooked
+issues" (`gc bd ready --help`). Spelled out, a bead is offered to a
+**pool** worker when **all** of the following hold:
+
+| Term | Requirement |
+| --- | --- |
+| status | `open` — `in_progress`, `blocked`, `deferred`, `hooked` are excluded |
+| blockers | no active blocker (dependency-aware `GetReadyWork` semantics) |
+| `gc.routed_to` | equals the pool target |
+| `assignee` | empty (`--unassigned`) |
+| type | not `epic` (`--exclude-type=epic`) |
+
+### Offer and demand are one predicate, read two ways
+
+The same predicate backs both halves of the pool loop. They differ in
+the *shape* of the answer, not in the terms:
+
+- **Offer** (`work_query`) returns the matching beads as a sorted,
+  limited list — what `gc hook` hands a live worker.
+- **Demand** (`scale_check`) runs the identical filter at `--limit 0`
+  and counts the rows — what the pool reconciler scales on.
+
+So "is this bead claimable?" and "does this bead create pool demand?"
+have the same answer by construction — do not model them as two
+predicates that happen to agree.
+[work-bead-state-machine.md](work-bead-state-machine.md) relies on
+exactly this when it detaches a gating bead from both queues in one
+move (`assignee=""` **and** `gc.routed_to=""`).
+
+### Metadata is not enforcement
+
+Exactly one metadata key participates in the predicate: `gc.routed_to`,
+matched via `--metadata-field`. No other key is read, and nothing scans
+for a key whose *name* merely sounds like a hold.
+
+The consequence is the non-obvious part. A bespoke park flag —
+`rebase_hold=true`, `hold_reason="waiting on the rebase"`, and friends —
+is **documentation, not enforcement**. A bead carrying one is still
+`open`, still routed, still unassigned; it is therefore still offered,
+and a hooked worker can still claim it. The metadata *explains* a hold.
+It never *imposes* one.
+
+The failure mode is silent and asymmetric, which is why it is worth
+stating here rather than leaving implicit: stamping the flag produces no
+error, so the agent that stamped it believes the bead is parked. The
+only party who learns otherwise is the next worker — by claiming the
+bead and starting the very work the flag was meant to prevent.
+
+### How to actually hold a bead
+
+Remove it from the predicate. The terms are a conjunction, so falsifying
+any one is sufficient — but pick a term that covers the tier you care
+about:
+
+- **`gc.routed_to=""`** drops the bead out of Tier 3, so it is neither
+  offered to the pool nor counted as demand. It does **not** cover
+  Tiers 1–2: an `assignee` left behind still surfaces the bead to that
+  named session, so clear `assignee` too.
+- **Status off `open`** (`blocked`, or `deferred` for a timed park)
+  drops the bead out of `bd ready` itself, and therefore out of *every*
+  tier at once.
+
+Two combinations are idiomatic, and they differ in intent:
+
+- **`assignee=""` + `gc.routed_to=""`, status still `open`** — detached
+  from both queues while still counting as unlanded work. This is the
+  gating pattern in
+  [work-bead-state-machine.md](work-bead-state-machine.md).
+- **Clear `gc.routed_to` *and* set `status=blocked`** — the
+  belt-and-braces park, for when the bead should not read as ready work
+  at all.
+
+Keep the explanatory metadata either way: a `hold_reason` is genuinely
+useful *alongside* a real hold. It is only dangerous as a *substitute*
+for one.
+
+There is also a recognized label convention worth preferring over an
+invented key — `hold:<value>` labels, which `gc doctor` checks against
+the routing fields (`hold-label-routed-to`,
+`hold-label-conventions:<scope>`). That those checks exist at all makes
+the same point: the label records the intent, the routing fields do the
+work, and the two have to be changed together.
 
 ## Note: upstream tutorial wording
 
