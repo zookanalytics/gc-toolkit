@@ -163,12 +163,24 @@ while IFS= read -r row; do
   # lands once CLEAN. `hold_gate` is the first gate not green at the live head
   # (empty string when all are), computed in jq so a dynamic marker key
   # (check.<name>) needs no bash-array gymnastics.
+  #
+  # The `none`/`off` SENTINEL is read as no-gates too (tk-i48ca). A gateless rig
+  # used to express that as the empty string, which is why empty had to mean
+  # ungated — but empty is ALSO what a hand-recovered anchor carries when it never
+  # ran the formula's normalization, so the two were indistinguishable and a
+  # recovered bead merged with no codex review. The formula now stamps the literal
+  # `none` for a deliberate opt-out, so the reading here must honour it or a
+  # gateless rig would hold forever on a gate named "none" that nothing can stamp.
+  # Empty is deliberately still ungated HERE (#163/#182 unchanged — this script is
+  # not the fail-closed point); check-set-heal.sh normalizes an empty check_set
+  # upstream, on the pass that runs immediately before this one.
   hold_gate=$(printf '%s' "$row" | jq -r --arg head "$head_oid" '
     . as $row
     | (($row.checkset // "")
         | split(",")
         | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
-        | map(select(length > 0))) as $gates
+        | map(select(length > 0))
+        | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off"))) as $gates
     | (first( $gates[] | select( (($row.meta["check." + .]) // "") != ("green@" + $head) ) )) // ""
   ' 2>/dev/null)
   if [ -n "$hold_gate" ]; then

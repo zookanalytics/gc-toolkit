@@ -92,7 +92,7 @@ description = "After a successful direct merge, attempt to fast-forward the rig'
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. To run a rig GATELESS, set the explicit sentinel 'none' (or 'off'): the merge-push step normalizes it to the empty value merge-skill.sh reads as 'no gates' (merge then governed only by CI + approval + no-open-child). An EMPTY value is NOT an opt-out — it is treated as absent and recovers this default, because {{check_set}} is hand-substituted from raw TOML on the --root-only patrol path and a mis-substitution would otherwise silently un-gate every PR (tk-4na1b). Replaces the retired review_gate string + signoff_head side-channel."
+description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. To run a rig GATELESS, set the explicit sentinel 'none' (or 'off'): the merge-push step normalizes it to the canonical 'none', which is STAMPED on the anchor and which merge-skill.sh reads as 'no gates' (merge then governed only by CI + approval + no-open-child). An EMPTY value is NOT an opt-out — it is treated as absent and recovers this default, because {{check_set}} is hand-substituted from raw TOML on the --root-only patrol path and a mis-substitution would otherwise silently un-gate every PR (tk-4na1b). The sentinel is stamped rather than collapsed to empty so that 'gateless by choice' and 'never normalized' are DISTINCT on the anchor: a hand-recovered bead bypasses this formula entirely and arrives carrying an empty check_set, which check-set-heal.sh repairs at the refinery boundary before the merge skill can read it as ungated (tk-i48ca). Replaces the retired review_gate string + signoff_head side-channel."
 default = "codex"
 
 [[steps]]
@@ -188,6 +188,23 @@ Pass (a) — close-on-land, in two roles. mr-mode keeps the anchor (a convoy
 graduating, or any mr-mode bead) OPEN as the PR's gating bead (merge-push step
 4); this pass is what later lands and closes it.
 
+(a-norm) CHECK-SET NORMALIZATION at the refinery boundary (`check-set-heal.sh`,
+tk-i48ca) — runs BEFORE the merge skill. The merge-push step normalizes
+`check_set` for every bead that flows through it, but a hand-RECOVERED bead (a
+salvage hand-off, or any bead reconstructed outside this formula) never runs that
+step and arrives with an EMPTY check_set — which merge-skill.sh reads as "declares
+no gates", landing the PR with no codex review. This pass stamps the declared
+default on any gating anchor whose check_set is absent/empty, then dispatches the
+missing codex signoff (or reuses an in-flight one) so the gate it just armed is
+satisfiable rather than a permanent hold. Only the explicit `none`/`off` sentinel
+is an opt-out; because the merge-push step now STAMPS that sentinel instead of
+collapsing it to empty, "gateless by choice" and "never normalized" are distinct
+states on the anchor. Stamp-then-dispatch, on purpose: a stamp that lands without
+its dispatch leaves the merge HELD and retried, whereas a dispatch that lands
+without its stamp leaves the PR mergeable un-reviewed. Idempotent — a healed
+anchor carries `check_set_healed`, which keeps it under the satisfiability check
+until something can actually raise its gate.
+
 (a0) The MERGE SKILL (`merge-skill.sh`) — the single writer of merged-truth. For
 each open gating anchor whose PR is open+ready it runs validate -> merge ->
 record: validate the live base == the anchor's `merged_target`, every gate in the
@@ -249,6 +266,50 @@ done
 if [ -n "$SCRIPTS_DIR" ]; then
   # All passes are best-effort: a failed pass is retried next idle wake and
   # never blocks find-work.
+  # (a-norm) Check-set normalization at the REFINERY BOUNDARY (tk-i48ca). A
+  #      hand-RECOVERED anchor never ran the merge-push step, so its check_set was
+  #      never normalized: it arrives empty, and merge-skill.sh reads empty as "no
+  #      gates" — the PR would land with NO codex review. This pass stamps the
+  #      declared default on any gating anchor whose check_set is absent/empty and
+  #      dispatches the missing signoff so the armed gate is satisfiable. Runs
+  #      FIRST, before the merge skill enumerates anchors, so a bypassed anchor is
+  #      gated before it can be merged. Only the explicit `none`/`off` sentinel is
+  #      an opt-out (tk-4na1b) — and because the formula now STAMPS that sentinel
+  #      rather than collapsing it to empty, "gateless by choice" is distinguishable
+  #      here from "never normalized". --default carries the RENDERED {{check_set}}
+  #      so the script never hand-substitutes from raw TOML (the tk-4na1b footgun).
+  # The heal args carry rendered templates ({{check_set}}, {{binding_prefix}}); they
+  # are collected HERE, above the marker, so the heal-gates-merge block below stays
+  # template-free and the regression can extract and execute it verbatim
+  # (check-set-heal.test.sh, Run 6).
+  CHECK_SET_HEAL_ARGS=(
+    --default "{{check_set}}"
+    --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
+    --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+  )
+  # >>> heal-gates-merge
+  # The heal pass GATES the merge skill for this pass. check-set-heal.sh exits
+  # HEAL_UNSAFE_RC when a required check_set stamp did NOT persist — the anchor is
+  # then still ungated (empty check_set), which merge-skill.sh reads as "no gates"
+  # and would land un-reviewed in this SAME pass. On that signal we HOLD merge-skill
+  # for the pass (the next idle wake re-heals; once the stamp sticks the anchor gates
+  # normally). Holding a merge one pass is the acceptable failure; an un-reviewed
+  # merge is not (tk-i48ca / review tk-z4u2e finding #1). HEAL_UNSAFE_RC MUST match
+  # check-set-heal.sh's UNSAFE_RC. (pre-open-resolve runs between the two passes and
+  # is intentionally NOT gated — it only OPENS PRs, never merges, so it is not the
+  # merge hazard.)
+  HEAL_UNSAFE_RC=3
+  MERGE_SKILL_HELD=0
+  if [ -x "$SCRIPTS_DIR/check-set-heal.sh" ]; then
+    heal_rc=0
+    "$SCRIPTS_DIR/check-set-heal.sh" "${CHECK_SET_HEAL_ARGS[@]}" || heal_rc=$?
+    if [ "$heal_rc" = "$HEAL_UNSAFE_RC" ]; then
+      MERGE_SKILL_HELD=1
+      echo "check-set-heal: UNSAFE (rc=$heal_rc) — a required check_set stamp did not persist; HOLDING merge-skill this pass so an ungated anchor cannot merge un-reviewed (retries next idle wake)" >&2
+    elif [ "$heal_rc" != 0 ]; then
+      echo "check-set-heal: pass failed (non-fatal, rc=$heal_rc); retries next idle wake" >&2
+    fi
+  fi
   # (a-pre) Pre-open PR-create resolver (pre-open codex gate, tk-6d0vb.1.8): for
   #      each anchor parked in pre_open_gate whose codex signoff is green at the
   #      branch head, OPEN the non-draft PR and flip it to pull_request so the
@@ -267,12 +328,15 @@ if [ -n "$SCRIPTS_DIR" ]; then
   #      backstop. -x guard: importer rigs that have not yet synced this script
   #      degrade to the observer-only passes (a ready PR simply waits for the
   #      synced pack rather than landing via the retired auto-merge path).
-  if [ -x "$SCRIPTS_DIR/merge-skill.sh" ]; then
+  if [ "$MERGE_SKILL_HELD" = 1 ]; then
+    echo "merge-skill: HELD this pass — check-set-heal reported an unsafe failure (a stamp did not persist, leaving an anchor ungated); retries next idle wake" >&2
+  elif [ -x "$SCRIPTS_DIR/merge-skill.sh" ]; then
     "$SCRIPTS_DIR/merge-skill.sh" \
       || echo "merge-skill: pass failed (non-fatal); retries next idle wake" >&2
   else
     echo "merge-skill: merge-skill.sh not found in $SCRIPTS_DIR; ready PRs wait for a synced pack (auto-merge retired)" >&2
   fi
+  # <<< heal-gates-merge
   # (a1) Close-on-land OBSERVER (detect-only): close gating anchors whose PR
   #      merged (the convergent record + backstop for a skill that died between
   #      merging and recording), flag out-of-band-closed / retargeted PRs to
@@ -1037,8 +1101,20 @@ ISSUE_PRIORITY=$(printf '%s' "$WORK_JSON" | jq -r '.[0].priority // empty')
 # normalization must run BEFORE the membership test: stamping a gate that was never
 # dispatched would hold the merge forever on a marker nothing can stamp.
 # A genuinely gateless rig opts out EXPLICITLY via the `none`/`off` sentinel, which
-# normalizes back to the empty value merge-skill.sh reads as "no gates" —
-# merge-skill.sh's empty-means-ungated behavior is deliberately UNCHANGED (#163/#182).
+# normalizes to the CANONICAL `none` — a value that is STAMPED on the anchor, not
+# collapsed to empty (tk-i48ca). merge-skill.sh reads `none`/`off` as "no gates"
+# exactly as it reads empty, so a gateless rig still lands on CI + approval alone;
+# its empty-means-ungated behavior is deliberately UNCHANGED (#163/#182).
+#
+# tk-i48ca — WHY THE SENTINEL MUST SURVIVE AS DATA. Collapsing `none` to "" made
+# "deliberately gateless" and "never normalized" the SAME value on the anchor, so
+# nothing downstream could tell them apart. A hand-RECOVERED bead (furiosa salvage,
+# or any bead reconstructed outside this formula) reaches the refinery having never
+# run this normalization, carrying check_set="" — indistinguishable from an opt-out,
+# and merge-skill.sh lands it with NO codex review. Stamping the sentinel makes every
+# formula-normalized anchor carry a NON-EMPTY check_set, so an empty one at the
+# refinery boundary is an unambiguous "this never ran normalization" signal that
+# check-set-heal.sh can safely repair.
 # The render is kept OUTSIDE the check-set-normalize markers so the extracted
 # snippet stays template-free — the regression test drives CHECK_SET through the
 # env (assets/scripts/check-set-normalize.test.sh).
@@ -1047,7 +1123,7 @@ CHECK_SET="{{check_set}}"
 _cs_canon="$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')"
 case "$_cs_canon" in
   '')       CHECK_SET="codex" ;;
-  none|off) CHECK_SET="" ;;
+  none|off) CHECK_SET="none" ;;
 esac
 unset _cs_canon
 # <<< check-set-normalize
@@ -1402,15 +1478,17 @@ fi
 # OUTSIDE the signoff-anchor-failclosed markers so the extracted snippet stays
 # template-free — the regression test drives CHECK_SET through the env.
 # Re-applies the same tk-4na1b empty-never-beats-the-default normalization as the
-# CODEX_GATE site above (empty -> declared default; `none`/`off` -> explicit
-# no-gates), so this block stays self-sufficient if it is run on its own: a raw
-# re-render here would otherwise clobber the normalized value and hand the stamp
-# sites below an empty, ungated check_set.
+# CODEX_GATE site above (empty -> declared default; `none`/`off` -> the canonical
+# `none` sentinel, which merge-skill.sh reads as no-gates), so this block stays
+# self-sufficient if it is run on its own: a raw re-render here would otherwise
+# clobber the normalized value and hand the stamp sites below an empty check_set —
+# which is not merely ungated but INDISTINGUISHABLE from a never-normalized
+# recovery bead (tk-i48ca).
 CHECK_SET="{{check_set}}"
 _cs_canon="$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')"
 case "$_cs_canon" in
   '')       CHECK_SET="codex" ;;
-  none|off) CHECK_SET="" ;;
+  none|off) CHECK_SET="none" ;;
 esac
 unset _cs_canon
 
