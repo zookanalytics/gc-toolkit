@@ -424,25 +424,33 @@ If rebase FAILED (conflicts):
 ```bash
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 ```
-3. Put the work bead back in the pool with rejection metadata:
+3. Put the work bead back in the pool with rejection metadata. Derive mr-shape
+from ONE shape-validated read taken BEFORE the repool, and fold the anchor's
+`merge_result` clear into the SAME update. A bead carrying `merge_result` is a
+gating ANCHOR with a live PR, not a plain work bead; `gc bd` fails OPEN (errors to
+stderr, empty stdout), so an unreadable read must NOT fall through to a plain
+direct-mode repool. Fail CLOSED: if the bead is unreadable, do NOT repool — leave
+it with the refinery and stop, so a later iteration retries the reject with a
+readable bead.
 ```bash
+# >>> mr-aware-rejection
+# Read + SHAPE-validate ONCE before repooling; the repool and the merge_result
+# clear derive from the same read (bd fails open, so an unread bead != non-mr).
+BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+MR_STATE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
+PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 gc bd update $WORK \
   --status=open \
   --assignee="" \
   --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET)" \
-  --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
-```
-3b. **If the bead is an mr-mode gating anchor, ALSO clear `merge_result`.**
-A bead carrying `merge_result` is a gating ANCHOR with a live PR, not a plain
-work bead, and the direct-mode rejection above is not sufficient for it:
-```bash
-# >>> mr-aware-rejection
-MR_STATE=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.merge_result // empty')
-if [ -n "$MR_STATE" ]; then
-  PR_URL=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.pr_url // empty')
-  gc bd update $WORK --unset-metadata merge_result \
-    ${PR_URL:+--set-metadata existing_pr="$PR_URL"}
-fi
+  --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
+  ${MR_STATE:+--unset-metadata merge_result} \
+  ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
 # <<< mr-aware-rejection
 ```
 Left set, the anchor stays in `merge-skill.sh`'s scan
@@ -541,24 +549,32 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
      ```bash
      gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
      ```
-   - Put the work bead back in the pool with rejection metadata:
+   - Put the work bead back in the pool with rejection metadata — the same
+     mr-aware, fail-closed repool the rebase step performs: ONE shape-validated
+     read BEFORE the repool, the `merge_result` clear folded into the SAME update,
+     and fail CLOSED (do not repool; leave it with the refinery, drain-ack + exit)
+     when the bead is unreadable — so an unvalidated read never leaves the anchor
+     routed to the polecat with `merge_result` still set:
      ```bash
+     # >>> mr-aware-rejection
+     # Read + SHAPE-validate ONCE before repooling; the repool and the merge_result
+     # clear derive from the same read (bd fails open, so an unread bead != non-mr).
+     BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+       echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
+       gc runtime drain-ack
+       exit 1
+     fi
+     MR_STATE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
+     PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
      gc bd update $WORK \
        --status=open \
        --assignee="" \
        --set-metadata rejection_reason="<failure summary>" \
-       --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
-     ```
-   - **If the bead is an mr-mode gating anchor, ALSO clear `merge_result`** —
-     the same mr-aware rejection the rebase step performs, for the same reason
-     (a live PR left in `merge-skill.sh`'s scan lands the un-gated rework):
-     ```bash
-     MR_STATE=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.merge_result // empty')
-     if [ -n "$MR_STATE" ]; then
-       PR_URL=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.pr_url // empty')
-       gc bd update $WORK --unset-metadata merge_result \
-         ${PR_URL:+--set-metadata existing_pr="$PR_URL"}
-     fi
+       --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
+       ${MR_STATE:+--unset-metadata merge_result} \
+       ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
+     # <<< mr-aware-rejection
      ```
    - Delete the branch **only when no PR depends on it.** `$BRANCH` is the
      anchored PR's head; deleting it strands that PR un-merged. Re-read the bead
