@@ -569,7 +569,7 @@ pick up `gc sling`-routed work. Route work to manual sessions
 via `bd update --assignee` instead.
 
 Source: `Agent.EffectiveWorkQuery()` in
-`rigs/gascity/internal/config/config.go`:
+`rigs/gascity/internal/config/workquery.go`:
 
 ```go
 // Tier 3: ready unassigned routed to this config (shared routed queue).
@@ -870,7 +870,8 @@ Signals that this doc needs a refresh:
 - A new `[[named_session]]` `mode` or `scope` value lands
   upstream (`internal/config/config.go:NamedSession`).
 - A new tier or condition appears in `Agent.EffectiveWorkQuery()`
-  (currently three tiers; Tier 3 gated by `$GC_SESSION_ORIGIN`).
+  (`internal/config/workquery.go`; currently three tiers; Tier 3
+  gated by `$GC_SESSION_ORIGIN`).
 - A new variant emerges — e.g., something that is neither
   `[[named_session]]`, pool, nor operator-spawned thread.
 - A new gc-toolkit auto-memory entry documents a *by-design* sharp
@@ -885,9 +886,19 @@ To audit drift against upstream, diff `NamedSession` and
 
 ```bash
 git -C rigs/gascity log --since='<last refresh>' \
-  -p -- internal/config/config.go \
+  -p -- internal/config/config.go internal/config/workquery.go \
   | grep -E '^\+.*NamedSession|^\+.*WorkQuery'
 ```
+
+The two halves live in **different files**: `NamedSession` in
+`internal/config/config.go`, the work-query shell codegen —
+including `Agent.EffectiveWorkQuery()` — in
+`internal/config/workquery.go`, where upstream moved it out of
+`config.go`. Both paths must stay in the pathspec, and if either
+symbol moves again the pathspec has to be widened *before* the
+next audit is trusted: a pathspec that misses the file a symbol
+now lives in fails **silently**, because an empty result is
+indistinguishable from "upstream didn't change."
 
 The footguns above are *by-design* sharp edges, not defects: each
 documents a contract that holds on purpose (see the watch-don't-fix
