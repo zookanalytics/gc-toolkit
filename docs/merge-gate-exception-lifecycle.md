@@ -137,12 +137,24 @@ Three invariants keep this honest and align it with the shipped core:
   precisely what makes it an exception).
 
 - **Findings map to child work-beads, deduped by finding identity (R7, R10,
-  R23).** Each finding the contract accepts becomes one child of the convoy
-  carrying `metadata.pr_number=<convoy PR>` (so it actually holds the merge,
-  matching how the merge path finds blocking children) and a stable
-  `finding_key` (skill name + normalized locus/message). Re-evaluating a gate
-  that already has a work-bead (open or closed) for a `finding_key` creates no
-  duplicate — idempotency is by `finding_key`, not by evaluation count.
+  R23).** Each finding the contract accepts becomes one child of the gating
+  anchor, linked parent-child so the open child holds the gate (an anchor cannot
+  complete while a child is open — property 4), and carrying a stable
+  `finding_key` (skill name + normalized locus/message). The child's routing
+  fields follow the gate's phase, matching the refinery's existing pre-open vs.
+  post-open split:
+  - **pre-open** (no PR yet — the gate decides whether the PR *opens*): the child
+    carries `anchor_bead` + `branch` + `target` and **no `pr_number`**, exactly
+    as the pre-open review/rework path keys its children today.
+  - **post-open** (the PR is published — the gate decides whether it *merges*):
+    the child carries `pr_number`/`existing_pr` (plus `branch`/`target`) so the
+    merge path finds it as a blocking child of that PR.
+
+  Either way the merge-holding interlock is the open parent-child link, not the
+  `pr_number`; `pr_number` is only the post-open locator, absent by design
+  pre-open. Re-evaluating a gate that already has a work-bead (open or closed)
+  for a `finding_key` creates no duplicate — idempotency is by `finding_key`,
+  not by evaluation count.
 
 - **The marker verb generalizes `green`, so the merge skill is untouched.** The
   shipped merge condition ("every gate is `green@<live-head>`") already rejects
@@ -160,7 +172,8 @@ primitive converge):
 
 - `check.<name>.attempts=<n>@<sha>` — remediation rounds spent on this head for
   this gate. Incremented when a fixable gate re-spawns after its child closed
-  still-unresolved. Bounded by `<n> ≥ MAX_ATTEMPTS` (R11).
+  still-unresolved; the gate converts to exception once `<n> ≥ MAX_ATTEMPTS`
+  (R11) and never re-spawns past that bound.
 - The gate-bead dispatch carries a **deadline**; the observer reads liveness +
   time to detect a worker that crashed or ran past it (R12), needing no counter
   of its own — "stuck is detectable only from outside."
@@ -175,11 +188,14 @@ of `stale_base_head`, one-per-head).
 The arm runs on the observer's idle cadence, once per gate that is not already
 resolved OK. It converts two distinct situations into the same terminal verdict:
 
-- **R11 — bounded remediation exhaustion.** A gate that is still `fixable` after
-  its remediation child closed *unresolved*, or after `attempts ≥ MAX_ATTEMPTS`,
-  **converts to exception rather than re-spawning.** Re-spawning forever is the
-  non-convergent failure this rule rules out; the bounded count is what forces
-  convergence to a terminal state.
+- **R11 — bounded remediation exhaustion.** When a remediation child closes
+  *unresolved*, the gate increments `attempts` and re-spawns a fresh child while
+  `attempts < MAX_ATTEMPTS`; only once `attempts ≥ MAX_ATTEMPTS` does it
+  **convert to exception rather than re-spawning again.** The unresolved close
+  advances the counter — it is not a trigger on its own — so the single R11
+  transition out of `fixable` is the bound check `attempts ≥ MAX_ATTEMPTS`.
+  Re-spawning forever is the non-convergent failure this rule rules out; the
+  bounded count is what forces convergence to a terminal state.
 
 - **R12 — infrastructure failure.** A check-skill that **crashes, times out
   under a bounded deadline, or emits output the contract cannot map** is an
@@ -222,7 +238,7 @@ stateDiagram-v2
 
     Fixable --> OK: children closed, re-eval passes
     Fixable --> Fixable: children closed unresolved, attempts under bound
-    Fixable --> Exception: attempts exhausted or child closed unresolved — R11
+    Fixable --> Exception: attempts reach MAX_ATTEMPTS — R11
 
     OK --> Unevaluated: head moves (green marker now stale)
     Fixable --> Unevaluated: head moves (re-arm)
@@ -240,7 +256,7 @@ head-bound evaluation.
 | Req | Where satisfied |
 |---|---|
 | R5 — gate yields OK / fixable-failure / exception | The verdict output-contract table; the marker verbs `green` / `fixable` / `exception`. |
-| R7 — fixable spawns child work-beads; re-eval after they close | Findings → `pr_number`-tagged children; `Fixable → OK/Fixable/Exception` transitions. |
+| R7 — fixable spawns child work-beads; re-eval after they close | Findings → anchor-linked children (pre-open: `anchor_bead`/`branch`/`target`, no `pr_number`; post-open: `pr_number`/`existing_pr`); `Fixable → OK/Fixable/Exception` transitions. |
 | R8 — exception holds the convoy OPEN and notifies the operator | Exception arm steps 2–3; the convoy stays gating; escalate-once-per-head. |
 | R9 — a gate is always a check (record); work is transient remediation | Verdict is the `check.<name>` marker; remediation is child beads; exception is a marker value, never a work-bead. |
 | R10 — re-evaluation is idempotent, dedup by finding identity | `finding_key` dedup; head-bound markers/counters make re-evaluation a pure read. |
@@ -250,11 +266,11 @@ head-bound evaluation.
 
 ## Acceptance examples
 
-- **AE-WS4-1 (fixable → OK).** A gate maps to one finding; a `pr_number`-tagged
-  child is filed; a worker fixes and closes it; the next idle re-evaluation maps
-  to pass and stamps `check.<name>=green@<head>`; the merge skill (unchanged)
-  lands the PR. Re-evaluating before the fix creates no duplicate child
-  (`finding_key`).
+- **AE-WS4-1 (fixable → OK, post-open).** A gate maps to one finding; a
+  `pr_number`-tagged child (the post-open shape) is filed; a worker fixes and
+  closes it; the next idle re-evaluation maps to pass and stamps
+  `check.<name>=green@<head>`; the merge skill (unchanged) lands the PR.
+  Re-evaluating before the fix creates no duplicate child (`finding_key`).
 
 - **AE-WS4-2 (bounded exhaustion → exception, R11).** A gate is still fixable
   after `MAX_ATTEMPTS` remediation rounds on the same head. The arm stamps
