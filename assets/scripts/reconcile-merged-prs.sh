@@ -25,6 +25,13 @@
 #   PR open, CONFLICTING -> stale base: the PR cannot merge and never will on its
 #                          own. File a rework child to rebase the branch and route
 #                          it to the fix pool. The anchor stays gating.
+#   PR open, gate STALE -> the check-set is green@<oid> at a head that has since
+#                          MOVED (a direct push to the PR branch filed no rework
+#                          bead), so merge-skill.sh holds forever (green@<oid> !=
+#                          live head) with nothing re-dispatching the review. File
+#                          a codex RE-REVIEW child at the live head, routed to the
+#                          review pool; the anchor stays gating. One re-review per
+#                          head (stale_gate_head). Symmetric with CONFLICTING.
 #   PR open, draft      -> skip (drafts are retired, so the refinery creates no
 #                          draft PR; a stray draft is left untouched).
 #
@@ -69,10 +76,19 @@ set -uo pipefail
 # with metadata.fix_target_pool. Unresolvable -> that arm escalates to human
 # instead of filing an unroutable child.
 FIX_POOL_DEFAULT=""
+# Pool the stale-GATE arm routes its codex RE-REVIEW children to (the codex pool,
+# e.g. <rig>/<rig>.polecat-codex — the SAME source as check-set-heal.sh's
+# --review-pool). Unset -> that arm cannot dispatch and leaves the anchor HELD
+# (it never hand-stamps the gate green), retrying once a pool is configured.
+REVIEW_POOL_DEFAULT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool)
       FIX_POOL_DEFAULT="${2:-}"
+      if [ $# -ge 2 ]; then shift 2; else shift; fi
+      ;;
+    --review-pool)
+      REVIEW_POOL_DEFAULT="${2:-}"
       if [ $# -ge 2 ]; then shift 2; else shift; fi
       ;;
     *) shift ;;
@@ -168,7 +184,7 @@ ANCHORS=$(gc bd list --status=open \
 ROWS=""
 if [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ]; then
   ROWS=$(printf '%s' "$ANCHORS" \
-    | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null)
+    | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), stalegate: (.metadata.stale_gate_head // ""), codexmark: (.metadata["check.codex"] // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null)
 fi
 # No anchors is NOT an early exit: the anchorless pass below walks PR -> BEAD and
 # is at its MOST relevant here (zero live anchors + open PRs is precisely the
@@ -177,7 +193,7 @@ fi
 # matters. Only the per-anchor loop is skipped.
 [ -n "$ROWS" ] || echo "reconcile-merged-prs: no gating anchors"
 
-closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; rebase_held=0; skipped=0
+closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; rebase_held=0; regated=0; gate_held=0; skipped=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -515,6 +531,155 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
     continue
   fi
 
+  # --- PR open, STALE GATE: check-set green at a head that MOVED. -----------
+  # The symmetric twin of the CONFLICTING arm above. A gating anchor whose codex
+  # marker went green (check.codex=green@<oid>) and whose PR head then advanced
+  # PAST <oid> through a path that filed NO rework bead — a direct push to the PR
+  # branch, an operator fixup — sits in a SILENT indefinite hold: merge-skill.sh
+  # correctly refuses (its stale-head guard: green@<oid> != live head), but before
+  # this arm NOTHING re-dispatched the review, so the anchor was indistinguishable
+  # from a healthy PR awaiting approval (WS4 GAP1, su-PR#31 class). check-set-heal.sh
+  # heals the DISJOINT empty-check_set case and EXPLICITLY punts on stale-green
+  # ("re-gates through the normal rework path") — the exact assumption this bug
+  # disproves for the no-rework-bead path, so the two passes are complementary.
+  #
+  # The remedy is ALWAYS a real review at the live head, NEVER a hand-stamped
+  # check.codex=green: stamping green here would certify an UNREVIEWED commit (the
+  # tk-4na1b failure mode with a human author). So this files a codex RE-REVIEW
+  # CHILD at the live head, routed to the review pool, anchored to the gating anchor
+  # (one anchor per PR); the child's COMMENT signoff re-stamps
+  # check.codex=green@<live-head> and the merge proceeds. The anchor KEEPS
+  # merge_result=pull_request — like the CONFLICTING arm, unlike retarget/abandon —
+  # because the PR still exists and still gates; the open review child holds the
+  # merge meanwhile, and on hand-back the merge-push one-anchor-per-PR arm closes it
+  # as landed-on-branch rather than minting a second anchor.
+  #
+  # Bound: ONE re-review per head, via stale_gate_head=<head at detection> (the
+  # exact shape of stale_base_head). Re-arms only when the head moves again. Between
+  # dispatch and signoff the open review child ALSO holds it (the in-flight probe),
+  # so the marker is the belt to that suspenders — it still bounds the arm if a
+  # review closes without re-stamping (e.g. REQUEST_CHANGES routes a rework instead).
+  #
+  # Only `codex` is dispatchable (the sole check-set member this city can raise —
+  # mirrors check-set-heal.sh); a non-codex stale gate is left to whatever raises it.
+  # Kept self-contained so it ports if this self-heal is later re-housed inside a
+  # convergence loop (the tk-zgse0 WS4 direction).
+  if [ "$state" = "OPEN" ] && [ "$is_draft" != "true" ]; then
+    checkset=$(printf '%s' "$row" | jq -r '.checkset // empty')
+    codexmark=$(printf '%s' "$row" | jq -r '.codexmark // empty')
+    stalegate=$(printf '%s' "$row" | jq -r '.stalegate // empty')
+    fixpool=$(printf '%s' "$row" | jq -r '.fixpool // empty')
+
+    # `codex` must be a declared check-set member (trimmed, whole-token — the same
+    # split merge-skill.sh / check-set-heal.sh use, so a spaced "lint, codex" is
+    # recognized identically). none/off is not a member, so a gateless rig never
+    # enters this arm.
+    is_codex_member=""
+    printf '%s' "$checkset" | tr ',' '\n' \
+      | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex && is_codex_member=1
+
+    # Stale-green? The marker must be green at a NON-EMPTY oid that is NOT the live
+    # head. An empty/absent marker is "never reviewed" (check-set-heal's / the normal
+    # dispatch's job, not this bug); green@<live-head> is current (merges normally).
+    # Only green@<other-oid> is the head-moved stall this arm heals.
+    stale_oid=""
+    case "$codexmark" in
+      green@*)
+        oid="${codexmark#green@}"
+        if [ -n "$oid" ] && [ -n "$head_oid" ] && [ "$oid" != "$head_oid" ]; then
+          stale_oid="$oid"
+        fi ;;
+    esac
+
+    if [ -n "$is_codex_member" ] && [ -n "$stale_oid" ]; then
+      # Operator hold: merge_hold is "do not land this yet". Re-dispatching a review
+      # is pipeline work toward landing, so honor the same gate the merge honors
+      # (symmetric with the CONFLICTING arm honoring it before a rebase). When the
+      # operator releases the hold, the next pass heals the gate.
+      if is_held "$hold"; then
+        echo "reconcile-merged-prs: $id — PR#$num check.codex stale (green@$stale_oid != live head ${head_oid:-?}) but merge_hold set (operator gate); no re-review dispatched"
+        gate_held=$((gate_held + 1)); continue
+      fi
+      # One re-review per head: already routed at this exact head -> nothing new.
+      gate_key="${head_oid:-unknown}"
+      if [ "$stalegate" = "$gate_key" ]; then
+        skipped=$((skipped + 1)); continue
+      fi
+      # An open rework/review child already re-raises the gate — the SAME in-flight
+      # set merge-skill.sh holds the merge on (pr_number, non-anchor). FAIL CLOSED
+      # on an unreadable probe: a twin review is a lesser harm than the CONFLICTING
+      # arm's force-push, but the guard errs to "someone's on it" the same way.
+      if ! gate_probe=$(probe_beads pr_number "$num"); then
+        echo "reconcile-merged-prs: $id — PR#$num check.codex stale but the in-flight probe failed; no re-review dispatched (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      inflight=$(printf '%s\n' "$gate_probe" \
+        | jq -r --arg anchor "$id" 'select(.id != $anchor) | select(.mres == "") | .id' 2>/dev/null \
+        | head -1)
+      if [ -n "$inflight" ]; then
+        skipped=$((skipped + 1)); continue
+      fi
+      if [ -z "$REVIEW_POOL_DEFAULT" ]; then
+        # No review pool: cannot dispatch. Do NOT hand-stamp the gate green (that
+        # certifies an unreviewed commit). Stamp the head guard so we do not
+        # busy-loop, surface it, and leave the anchor gating — the merge stays HELD
+        # on the stale marker, the safe side.
+        gc bd update "$id" \
+          --set-metadata stale_gate_head="${head_oid:-unknown}" \
+          --set-metadata blocked_reason="PR#$num check.codex green@$stale_oid is stale (live head ${head_oid:-?}); no review pool configured to re-dispatch the signoff" >/dev/null 2>&1
+        echo "reconcile-merged-prs: $id — PR#$num check.codex stale (green@$stale_oid, live head ${head_oid:-?}) but no --review-pool; cannot re-dispatch (merge stays held)" >&2
+        gate_held=$((gate_held + 1)); continue
+      fi
+      # Need a PR url to point the review at (num is non-empty by the loop head).
+      if [ -z "$pr_url" ]; then
+        echo "reconcile-merged-prs: $id — PR#$num check.codex stale but PR url unreadable; skip (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      REVIEW_BEAD=$(gc bd create "Review PR#$num: re-review at live head (stale-gate self-heal)" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+      if [ -z "$REVIEW_BEAD" ]; then
+        echo "reconcile-merged-prs: $id could not file re-review bead for PR#$num; retry next pass" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      # Mirror the merge-push / check-set-heal.sh review shape so the codex signoff's
+      # done-sequence finds exactly the fields it expects (task_kind=review,
+      # check_name, pr_url/pr_number for the post-open review, anchor_bead the durable
+      # link). fix_target_pool is where a REQUEST_CHANGES rework routes (the FIX pool,
+      # not the review pool). gc.routed_to is written LAST — it is what makes the bead
+      # claimable, and a codex polecat that claimed a half-stamped review would have
+      # no anchor_bead to stamp the gate on.
+      gc bd update "$REVIEW_BEAD" \
+        --set-metadata task_kind=review \
+        --set-metadata check_name=codex \
+        --set-metadata pr_url="$pr_url" \
+        --set-metadata pr_number="$num" \
+        --set-metadata anchor_bead="$id" \
+        --set-metadata review_note="Stale-gate self-heal: check.codex was green@$stale_oid; the PR head moved to ${head_oid:-?} with no rework bead filed. Re-review the live head." >/dev/null 2>&1
+      [ -n "$fixpool" ] && gc bd update "$REVIEW_BEAD" --set-metadata fix_target_pool="$fixpool" >/dev/null 2>&1
+      # The review BLOCKS the anchor (anchor_bead is the durable fallback the signoff
+      # resolves through when the edge is missing). Best-effort.
+      gc bd dep "$REVIEW_BEAD" --blocks "$id" >/dev/null 2>&1 \
+        || echo "reconcile-merged-prs: WARN could not attach re-review $REVIEW_BEAD as a gate-dep of $id (anchor_bead fallback persists the link)" >&2
+      # Verify the anchor link persisted BEFORE routing: without it the review cannot
+      # stamp check.codex on this anchor and the armed gate never clears. Unrouted, the
+      # bead is inert and the next pass's in-flight probe reuses it rather than a twin.
+      RECORDED_ANCHOR=$(gc bd show "$REVIEW_BEAD" --json 2>/dev/null | jq -r '.[0].metadata.anchor_bead // empty')
+      if [ "$RECORDED_ANCHOR" != "$id" ]; then
+        echo "reconcile-merged-prs: WARN re-review $REVIEW_BEAD did not record anchor_bead=$id; leaving unrouted (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      gc bd update "$REVIEW_BEAD" --set-metadata gc.routed_to="$REVIEW_POOL_DEFAULT" >/dev/null 2>&1
+      # Stamp the head guard AFTER a successful route so a mid-dispatch failure
+      # retries cleanly next pass rather than being suppressed by the marker.
+      gc bd update "$id" \
+        --set-metadata stale_gate_head="${head_oid:-unknown}" \
+        --set-metadata blocked_reason="PR#$num check.codex stale (green@$stale_oid, live head ${head_oid:-?}); re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT" >/dev/null 2>&1
+      gc session wake "$REVIEW_POOL_DEFAULT" >/dev/null 2>&1 || true
+      regated=$((regated + 1))
+      echo "reconcile-merged-prs: $id — PR#$num check.codex green@$stale_oid stale (live head ${head_oid:-?}); filed re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT"
+      continue
+    fi
+  fi
+
   # --- PR open: DETECT-ONLY. The merge skill (merge-skill.sh) is the single
   # writer that lands a ready PR (validate -> merge -> record); the observer has
   # NO merge authority and never runs `gh pr merge`. A non-draft open PR is left
@@ -654,5 +819,5 @@ polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; th
   fi
 fi
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $anchorless anchorless open PRs, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $anchorless anchorless open PRs, $skipped skipped"
 exit 0

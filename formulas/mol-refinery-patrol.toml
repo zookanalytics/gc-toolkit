@@ -340,13 +340,17 @@ if [ -n "$SCRIPTS_DIR" ]; then
   # (a1) Close-on-land OBSERVER (detect-only): close gating anchors whose PR
   #      merged (the convergent record + backstop for a skill that died between
   #      merging and recording), flag out-of-band-closed / retargeted PRs to
-  #      human, and route a rebase for a PR left CONFLICTING by a rewritten base.
+  #      human, route a rebase for a PR left CONFLICTING by a rewritten base, and
+  #      re-dispatch a codex review for a PR whose gate went STALE when its head
+  #      moved past the reviewed commit with no rework bead filed (WS4 GAP1).
   #      NO merge authority — it never runs `gh pr merge`. --fix-pool is the pool
-  #      that stale-base rebases are routed to: the script cannot render
-  #      {{binding_prefix}} itself, and without a pool it escalates to human
-  #      instead of routing.
+  #      stale-base rebases route to; --review-pool is the codex pool stale-gate
+  #      re-reviews route to (same source as check-set-heal.sh's --review-pool).
+  #      The script cannot render {{binding_prefix}} itself, and without a pool the
+  #      matching arm escalates to human / holds instead of routing.
   "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
     --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
+    --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex" \
     || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
   # (b) Convoy graduation: assign each OWNED integration convoy whose members
   #     are all closed (== all merged) to the refinery for an integration->main

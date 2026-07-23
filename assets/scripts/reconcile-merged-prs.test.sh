@@ -43,6 +43,17 @@
 #       so a second pass does not re-close, re-escalate, or re-flag them; the
 #       stale-base anchor STAYS in the set (by design) and is held from re-filing
 #       by its stale_base_head marker instead.
+#   (24) PR open, ready, but check.codex=green@<stale> (the head MOVED past the
+#        reviewed commit with no rework bead filed) -> a codex RE-REVIEW child is
+#        filed at the LIVE head + routed to the review pool, the anchor STAYS
+#        gating (merge_result untouched, never a hand-stamped green), bounded to
+#        one re-review per head via stale_gate_head. (WS4 GAP1, su-PR#31 class.)
+#   (25) check.codex green AT the live head -> not stale, no re-review.
+#   (26) stale gate but a review/rework child already open for the PR -> no twin.
+#   (27) stale_gate_head bounds it: unchanged head -> no re-fire; re-arms when the
+#        head moves again.
+#   (28) no --review-pool -> HELD: never hand-stamp check.codex green (would
+#        certify an unreviewed commit); stamp the head guard and leave gating.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -173,7 +184,7 @@ printf '%s\n' \
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mailbody"
 : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
 : > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
-: > "$TMP/staled"
+: > "$TMP/staled"; : > "$TMP/gatehead"
 
 # Rework/review children referencing a PR (the merge skill's in-flight set; the
 # conflict arm reuses that query so it never races a rework already in flight).
@@ -379,7 +390,7 @@ case "$2" in
         done
         visible() { printf '%s' ",$sts," | grep -q ",$1,"; }
         out=""
-        while IFS='|' read -r id pr target mhold rhold; do
+        while IFS='|' read -r id pr target mhold rhold cset cmark; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
@@ -412,14 +423,15 @@ case "$2" in
         printf '[%s]\n' "$out" ;;
       *"merge_result=pull_request"*)
         out=""
-        while IFS='|' read -r id pr target mhold rhold; do
+        while IFS='|' read -r id pr target mhold rhold cset cmark; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_RETARGETED" 2>/dev/null && continue
           staled=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_STALED" 2>/dev/null | tail -1)
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","merge_hold":"%s","rebase_hold":"%s"}}' \
-                  "$id" "$pr" "$target" "$id" "$staled" "$mhold" "$rhold")
+          gatehead=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATEHEAD" 2>/dev/null | tail -1)
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s"}}' \
+                  "$id" "$pr" "$target" "$id" "$staled" "$gatehead" "$cset" "$cmark" "$mhold" "$rhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -433,7 +445,7 @@ case "$2" in
         # the fail-closed guard can be exercised.
         [ -n "${FAKE_LIVE_FAIL:-}" ] && exit 0
         out=""
-        while IFS='|' read -r id pr target mhold rhold; do
+        while IFS='|' read -r id pr target mhold rhold cset cmark; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
@@ -477,6 +489,7 @@ case "$2" in
     for a in "$@"; do
       case "$a" in
         stale_base_head=*) printf '%s\t%s\n' "$id" "${a#stale_base_head=}" >> "$FAKE_STALED" ;;
+        stale_gate_head=*) printf '%s\t%s\n' "$id" "${a#stale_gate_head=}" >> "$FAKE_GATEHEAD" ;;
         pr_number=*)       child_pr="${a#pr_number=}" ;;
         branch=*)          child_branch="${a#branch=}" ;;
         anchorless_flagged=*)
@@ -496,6 +509,15 @@ case "$2" in
     fi ;;
   dep)
     printf '%s\n' "$*" >> "$FAKE_DEPS" ;;
+  show)
+    # Reconstruct the metadata a later read would see, from the update log. Only
+    # the field the scripts read back matters here — anchor_bead, the stale-gate /
+    # check-set-heal "did the link persist before routing?" verification. Modeled
+    # by replaying the last anchor_bead= this bead was updated with.
+    sid="$3"
+    ab=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "$FAKE_UPDATES" 2>/dev/null \
+           | grep -o 'anchor_bead=[^ ]*' | tail -1 | sed 's/anchor_bead=//')
+    printf '[{"id":"%s","metadata":{"anchor_bead":"%s"}}]\n' "$sid" "$ab" ;;
 esac
 exit 0
 GC
@@ -508,6 +530,7 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_AUTOMERGE="$TMP/automerge" FAKE_MAIL="$TMP/mail" FAKE_CLOSELOG="$TMP/closelog" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
        FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
+       FAKE_GATEHEAD="$TMP/gatehead" \
        FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody"
 
 # --- Run 1: the disposition matrix. ------------------------------------------
@@ -844,6 +867,118 @@ for shape in error-rc1 error-rc0 array-rc1 bad-array object-map; do
     && ok "(23/$shape) routes no rebases at all" \
     || bad "(23/$shape) must route zero rebases (got: $OUT8)"
 done
+
+# --- Run 8: stale-gate self-heal (WS4 GAP1, su-PR#31 class). ------------------
+# A gating anchor whose codex marker is green@<oid> at a head that has since MOVED
+# (a direct push to the PR branch filed no rework bead) sits in a SILENT
+# indefinite hold: merge-skill.sh refuses (green@old != live head) but nothing
+# re-dispatches the review. The new arm files a codex RE-REVIEW child at the LIVE
+# head, routes it to the review (codex) pool, keeps the anchor gating, and bounds
+# itself to one re-review per head. Symmetric with the stale-BASE rebase arm.
+REVIEW_POOL="test-rig/gc-toolkit.polecat-codex"
+# anchors: id|pr|target|merge_hold|rebase_hold|check_set|check.codex-marker
+#   bead-T 220 codex green@old220, live head head220 -> STALE -> re-review filed
+#   bead-U 221 codex green@head221 == live head       -> current, nothing
+#   bead-V 222 codex green@old222 STALE but a review child already open -> no twin
+printf '%s\n' \
+  'bead-T|220|main|||codex|green@old220' \
+  'bead-U|221|main|||codex|green@head221' \
+  'bead-V|222|main|||codex|green@old222' \
+  > "$TMP/anchors"
+# All open, ready, non-conflicting: the stale gate is the ONLY thing holding them.
+printf '%s\n' \
+  '220|OPEN||false||main|polecat/bead-T|head220|MERGEABLE|BLOCKED' \
+  '221|OPEN||false||main|polecat/bead-U|head221|MERGEABLE|BLOCKED' \
+  '222|OPEN||false||main|polecat/bead-V|head222|MERGEABLE|BLOCKED' \
+  > "$TMP/prs"
+printf '222\tchild-V\n' > "$TMP/children"       # bead-V already has an open review child
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/gatehead"; : > "$TMP/openprs"
+OUT8="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
+
+# (24) moved head: green@stale + no child -> ONE re-review child at the live head.
+eq "$(grep -c 'Review PR#220' "$TMP/created")" "1" \
+   "(24) stale codex gate (head moved) -> one re-review child filed"
+grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
+  && ok "(24) re-review child routed to the review (codex) pool" \
+  || bad "(24) re-review child routed to the review pool (got: $(cat "$TMP/updates"))"
+grep -q 'task_kind=review' "$TMP/updates" \
+  && ok "(24) re-review child is task_kind=review" \
+  || bad "(24) re-review child is task_kind=review"
+grep -q 'anchor_bead=bead-T' "$TMP/updates" \
+  && ok "(24) re-review child anchored to the gating anchor (anchor_bead)" \
+  || bad "(24) re-review child carries anchor_bead=bead-T"
+grep -q 'pr_number=220' "$TMP/updates" \
+  && ok "(24) re-review child names the PR (post-open review)" \
+  || bad "(24) re-review child names the PR"
+grep -q -- '--blocks bead-T' "$TMP/deps" \
+  && ok "(24) re-review child gates the anchor via a BLOCKS dep" \
+  || bad "(24) re-review child blocks-dep on the anchor (got: $(cat "$TMP/deps"))"
+grep -qx "$REVIEW_POOL" "$TMP/wakes" && ok "(24) review pool woken" \
+                                     || bad "(24) review pool woken"
+T_UPD=$(grep '^bead-T' "$TMP/updates" || true)
+printf '%s\n' "$T_UPD" | grep -q 'stale_gate_head=head220' \
+  && ok "(24) anchor marked stale_gate_head at the live head" \
+  || bad "(24) anchor marked stale_gate_head (got: $T_UPD)"
+printf '%s\n' "$T_UPD" | grep -q 'merge_result=' \
+  && bad "(24) anchor must KEEP merge_result=pull_request (stays gating)" \
+  || ok "(24) anchor keeps merge_result=pull_request (unlike retarget/abandon)"
+has '^bead-T$' "$TMP/closed" && bad "(24) stale-gate anchor must NOT be closed" \
+                             || ok "(24) stale-gate anchor not closed"
+# The remedy is a REAL review, NEVER a hand-stamped green (that certifies an
+# unreviewed commit — the tk-4na1b failure mode).
+printf '%s\n' "$T_UPD" | grep -q 'check.codex=green' \
+  && bad "(24) must NEVER hand-stamp check.codex green (certifies an unreviewed commit)" \
+  || ok "(24) never hand-stamps check.codex green (dispatches a real review)"
+
+# (25) current-green: marker == live head -> not stale, no re-review.
+eq "$(grep -c 'Review PR#221' "$TMP/created")" "0" \
+   "(25) codex green AT the live head -> no re-review (not stale)"
+# (26) an open review child already re-raises the gate -> no twin.
+eq "$(grep -c 'Review PR#222' "$TMP/created")" "0" \
+   "(26) stale gate but a review child already open -> no second re-review"
+
+printf '%s\n' "$OUT8" | grep -q '1 stale-gate re-reviews routed' \
+  && ok "(24) run 8 summary reports 1 stale-gate re-review routed" \
+  || bad "(24) run 8 summary stale-gate count (got: $OUT8)"
+
+# --- Run 9: stale_gate_head bounds it (unchanged head), re-arms when head moves. -
+# Close bead-T's review child (as the patrol does on hand-back) so the in-flight
+# guard no longer applies — stale_gate_head alone must hold the arm at an
+# unchanged head, then re-fire once the head advances again.
+awk -F'\t' '$1 != "220"' "$TMP/children" > "$TMP/children.next"
+mv "$TMP/children.next" "$TMP/children"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null
+eq "$(grep -c 'Review PR#220' "$TMP/created")" "1" \
+   "(27) unchanged head, child closed -> stale_gate_head alone bounds it to one re-review"
+# A new direct push moved the head; the gate is stale against a NEW head -> re-arm.
+sed 's/^220|\(.*\)|head220|/220|\1|head220b|/' "$TMP/prs" > "$TMP/prs.next"
+mv "$TMP/prs.next" "$TMP/prs"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null
+eq "$(grep -c 'Review PR#220' "$TMP/created")" "2" \
+   "(27) head moved again and gate still stale -> arm re-fires for the new head"
+
+# --- Run 10: no --review-pool -> HOLD, never hand-stamp green. ----------------
+# Without a review pool the arm cannot dispatch. It must NOT stamp check.codex
+# green itself (that certifies an unreviewed commit — the tk-4na1b failure mode);
+# it stamps the head guard, surfaces the block, and leaves the anchor gating so
+# the merge stays HELD on the stale marker.
+printf '%s\n' 'bead-W|223|main|||codex|green@old223' > "$TMP/anchors"
+printf '%s\n' '223|OPEN||false||main|polecat/bead-W|head223|MERGEABLE|BLOCKED' > "$TMP/prs"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/gatehead"; : > "$TMP/openprs"
+OUT10="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
+eq "$(grep -c 'Review PR#223' "$TMP/created")" "0" \
+   "(28) no review pool -> no re-review child filed"
+W_UPD=$(grep '^bead-W' "$TMP/updates" || true)
+printf '%s\n' "$W_UPD" | grep -q 'check.codex=green' \
+  && bad "(28) no pool must NEVER hand-stamp check.codex green" \
+  || ok "(28) no pool never hand-stamps check.codex green (holds instead)"
+printf '%s\n' "$W_UPD" | grep -q 'stale_gate_head=head223' \
+  && ok "(28) no pool -> head guard stamped so it does not busy-loop" \
+  || bad "(28) no pool -> head guard stamped (got: $W_UPD)"
+printf '%s\n' "$OUT10" | grep -q '1 stale-gate re-reviews held' \
+  && ok "(28) no pool -> counted as a held re-review" \
+  || bad "(28) no pool -> held count (got: $OUT10)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
