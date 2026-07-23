@@ -11,8 +11,14 @@
 #   (ATOMIC) both keys are cleared in ONE `gc bd update`, never two — a two-call
 #            sequence briefly leaves the bead open+unassigned+routed, the exact
 #            pool-offer shape, racing a fresh polecat into the husk
+#   (HANDOFF) anchor in the refinery-handoff WINDOW — status=open, merge_result
+#            not yet stamped, assignee=<rig>/<prefix>refinery — also counts as
+#            done (tk-yxlqb); the polecat is past its work whether or not the
+#            refinery has stamped merge_result yet
 #   (LIVE)   anchor NOT terminal -> molecule untouched (a running polecat still
-#            needs its assignee to claim the next step)
+#            needs its assignee to claim the next step), INCLUDING an anchor that
+#            is assigned — to a polecat, not a refinery: the handoff predicate
+#            matches the refinery specifically, not "has an assignee"
 #   (NOCLOSE) no step bead is ever closed, and `status` is never rewritten — the
 #            DANGER clause: closing load-context walks a polecat onto an already
 #            green-gated branch and stales check.<gate>, blocking the open PR
@@ -41,8 +47,11 @@ mkdir -p "$TMP/bin"
 #
 # root-DONE  : anchor parked in the merge gate (merge_result=pull_request).
 #              Carries BOTH re-offer shapes plus its finalize step.
-# root-LIVE  : anchor still open, no merge_result -> a live molecule, hands off.
+# root-LIVE  : anchor still open, no merge_result, assigned to the POLECAT that is
+#              still working it -> a live molecule, hands off.
 # root-CLOSED: anchor CLOSED (landed) -> also done.
+# root-HANDOFF: anchor open + UNSTAMPED but already assigned to the refinery — the
+#              handoff window (tk-yxlqb) -> done.
 # root-ORPHAN: root has no input convoy -> anchor unresolvable -> fail closed.
 # root-QUIET : already quiesced by an earlier pass -> counted, not re-updated.
 cat > "$TMP/steps" <<'S'
@@ -51,6 +60,7 @@ s-affine|mol-polecat-work.load-context|root-DONE|gc-toolkit/gc-toolkit.polecat|g
 s-final|mol-polecat-work.workflow-finalize|root-DONE|gc-toolkit/core.control-dispatcher||open
 s-live|mol-polecat-work.load-context|root-LIVE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-busy|in_progress
 s-closed|mol-polecat-work.implement|root-CLOSED|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-gone|open
+s-handoff|mol-polecat-work.load-context|root-HANDOFF|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-drained|in_progress
 s-orphan|mol-polecat-work.implement|root-ORPHAN|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-x|open
 s-quiet|mol-polecat-work.implement|root-QUIET|||open
 S
@@ -60,6 +70,7 @@ cat > "$TMP/roots" <<'R'
 root-DONE|convoy-DONE
 root-LIVE|convoy-LIVE
 root-CLOSED|convoy-CLOSED
+root-HANDOFF|convoy-HANDOFF
 root-QUIET|convoy-QUIET
 R
 
@@ -68,15 +79,21 @@ cat > "$TMP/convoys" <<'C'
 convoy-DONE|anchor-DONE
 convoy-LIVE|anchor-LIVE
 convoy-CLOSED|anchor-CLOSED
+convoy-HANDOFF|anchor-HANDOFF
 convoy-QUIET|anchor-QUIET
 C
 
-# Anchors: anchor_id|status|merge_result
+# Anchors: anchor_id|status|merge_result|assignee
+#
+# anchor-LIVE and anchor-HANDOFF are the same shape except for WHO holds them
+# (status=open, merge_result unstamped) — that is the whole discrimination the
+# handoff predicate has to make, so the fixture pins both sides of it.
 cat > "$TMP/anchors" <<'A'
-anchor-DONE|open|pull_request
-anchor-LIVE|open|
-anchor-CLOSED|closed|
-anchor-QUIET|open|pre_open_gate
+anchor-DONE|open|pull_request|
+anchor-LIVE|open||gc-toolkit__polecat-lx-busy
+anchor-CLOSED|closed||
+anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery
+anchor-QUIET|open|pre_open_gate|
 A
 
 : > "$TMP/updates"     # one line per `gc bd update` invocation (the full argv)
@@ -110,7 +127,9 @@ case "$1 ${2:-}" in
     arow=$(awk -F'|' -v a="$id" '$1==a{print; exit}' "$FAKE_ANCHORS")
     if [ -n "$arow" ]; then
       st=$(printf '%s' "$arow" | cut -d'|' -f2); mr=$(printf '%s' "$arow" | cut -d'|' -f3)
-      jq -n --arg s "$st" --arg m "$mr" '[{status:$s, metadata:{merge_result:$m}}]'
+      as=$(printf '%s' "$arow" | cut -d'|' -f4)
+      jq -n --arg s "$st" --arg m "$mr" --arg a "$as" \
+        '[{status:$s, assignee:$a, metadata:{merge_result:$m}}]'
     elif [ -n "$convoy" ]; then
       jq -n --arg c "$convoy" '[{metadata:{"gc.input_convoy_id":$c}}]'
     else printf '[{"metadata":{}}]\n'; fi ;;
@@ -171,17 +190,35 @@ grep 'bd update s-affine' "$TMP/updates" | grep -q -- '--unset-metadata gc.route
   && grep 'bd update s-affine' "$TMP/updates" | grep -q -- '--assignee' \
   && ok "(ATOMIC) the single update carries BOTH flags" || bad "(ATOMIC) one update carries both flags"
 
-# (LIVE) a molecule whose anchor is still live is left completely alone.
+# (LIVE) a molecule whose anchor is still live is left completely alone. This is
+# also the discrimination that keeps (HANDOFF) safe: anchor-LIVE has the SAME
+# shape as anchor-HANDOFF (open, merge_result unstamped) and differs only in being
+# assigned to a POLECAT. A loose "the anchor has an assignee" predicate would pass
+# here and drain the polecat still working it.
 grep -q '^s-live' "$TMP/cleared" \
-  && bad "(LIVE) must NOT touch a live molecule's steps" \
-  || ok "(LIVE) live anchor -> steps untouched (running polecat keeps its assignee)"
+  && bad "(LIVE) must NOT touch a live molecule's steps — a polecat-assigned anchor is not a refinery handoff" \
+  || ok "(LIVE) live anchor assigned to a POLECAT -> steps untouched (not mistaken for a refinery handoff)"
 printf '%s\n' "$OUT1" | grep -q 'anchor anchor-LIVE still live' \
   && ok "(LIVE) summary explains why the live root was skipped" || bad "(LIVE) live-skip reason"
+printf '%s\n' "$OUT1" | grep -q 'anchor-LIVE still live.*assignee=gc-toolkit__polecat-lx-busy' \
+  && ok "(LIVE) skip line records the assignee that was inspected" || bad "(LIVE) skip line records assignee"
 
 # (CLOSED) a closed anchor counts as done.
 grep -q '^s-closed	routed+assignee$' "$TMP/cleared" \
   && ok "(CLOSED) closed anchor -> steps quiesced (landed is strictly past pull_request)" \
   || bad "(CLOSED) closed anchor treated as done"
+
+# (HANDOFF) the refinery-handoff window (tk-yxlqb): the polecat pushed and
+# reassigned the anchor, but the refinery has not stamped merge_result yet. The
+# status/merge_result predicates all miss this shape, so without the assignee
+# predicate the husk keeps being re-offered for the whole window — ~17 min and two
+# burned polecat sessions, observed on tk-2l13a.
+grep -q '^s-handoff	routed+assignee$' "$TMP/cleared" \
+  && ok "(HANDOFF) anchor handed to the refinery -> steps quiesced though merge_result is unstamped" \
+  || bad "(HANDOFF) refinery-assigned anchor must count as done (got: $(grep '^s-handoff' "$TMP/cleared" || echo none))"
+printf '%s\n' "$OUT1" | grep -q 'anchor anchor-HANDOFF DONE' \
+  && ok "(HANDOFF) summary reports the handoff anchor as DONE" \
+  || bad "(HANDOFF) summary reports the handoff anchor DONE"
 
 # (FINAL) the finalize step keeps its control-dispatcher route.
 grep -q '^s-final' "$TMP/cleared" \
@@ -217,7 +254,7 @@ grep -q '^s-quiet' "$TMP/cleared" \
   && bad "(QUIET) already-quiet step must not be re-updated" \
   || ok "(QUIET) already-quiet step skipped (idempotent)"
 
-printf '%s\n' "$OUT1" | grep -q '3 steps quiesced across 3 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved' \
+printf '%s\n' "$OUT1" | grep -q '4 steps quiesced across 4 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved' \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 
 # --- Run 2: convergence — a swept molecule stays swept. -----------------------
