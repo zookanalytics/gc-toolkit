@@ -62,8 +62,22 @@ Before dispatching the executor, verify:
 1. Playwright MCP server is available (test with `browser_snapshot`)
 2. The app is accessible (the executor subagent will navigate to the start URL as its first action)
 3. ImageMagick 7 is installed (`magick --version` — required for text overlays)
+4. The video assembler is present in the consuming repo. This skill ships
+   only the capture workflow (this file); it does **not** vendor the
+   assembler, which is an app-repo artifact needing a Node toolchain this
+   pack does not carry. Confirm the app provides it *before* capturing
+   frames:
+   - `scripts/assembleDemoVideo.ts` exists (or the repo documents an
+     equivalent packaged assembler — see "Video assembly" below), and
+   - its toolchain is runnable: `pnpm` (or `npx`) + `tsx` and the
+     `ffmpeg-static` dependency the assembler loads, plus the `magick`
+     binary from check 3. `command -v pnpm tsx` is enough to confirm the
+     runtime.
 
-If any check fails, report the issue and stop.
+If any check fails, report the issue and stop. Checking the assembler here —
+**before** the executor spends a long capture session — is deliberate: it
+turns "captured 9 frames, then `pnpm: not found` at assembly" into an
+up-front, actionable failure.
 
 ### Dispatch Executor Subagent
 
@@ -208,11 +222,23 @@ After the subagent returns, **review the results before assembling**:
 2. Check for any frames with `"proof": "failed"`:
    - If failed frames exist, report them to the caller **before** assembling
    - The caller decides: re-run with an updated script, accept the gaps, or skip the video
-3. If all proofs passed (or caller accepted gaps), assemble:
+3. If all proofs passed (or caller accepted gaps), assemble the video with
+   the consuming repo's assembler (see the Prerequisites Check — this skill
+   does not ship it):
    ```bash
+   # Guard: the assembler is an app-repo artifact, not part of this pack.
+   if [ ! -f scripts/assembleDemoVideo.ts ]; then
+     echo "Video assembler scripts/assembleDemoVideo.ts not found in this repo." >&2
+     echo "Frames are already captured under .captures/<timestamp> — nothing is lost." >&2
+     echo "Provide the assembler (or an equivalent packaged assembler) and re-run assembly; capture need not repeat." >&2
+     exit 1
+   fi
    pnpm tsx scripts/assembleDemoVideo.ts .captures/<timestamp>
    ```
-   To disable audio narration, pass `--no-narrate`.
+   To disable audio narration, pass `--no-narrate`. If your repo packages the
+   assembler under a different entry point (an installed binary or a
+   different path), invoke that instead — the only contract is that it reads
+   the `.captures/<timestamp>` manifest plus screenshots and emits the MP4.
 
 ### Audio Narration (automatic)
 

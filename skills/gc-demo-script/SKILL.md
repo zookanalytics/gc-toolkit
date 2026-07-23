@@ -259,8 +259,23 @@ Keep each heading under 80 characters.
 - "SplitPaneLayout toggles display: none"
 
 Below each bold heading, write a short action description for the executor
-(one or two sentences), optionally followed by `_Expect:_` and what
-success looks like.
+(one or two sentences). Then, for **every** step, write the two REQUIRED
+lines that `demo:capture` consumes to score the frame (see
+`skills/demo-capture/SKILL.md` §"Demo Script Format" — the executor treats
+`_Prove:_` as the contract and marks the frame an error if it isn't met):
+
+- `_Prove:_ <criterion>` — what the captured frame must **visibly**
+  demonstrate to pass. Make it concrete and observable (a value on screen, a
+  state change, a highlighted diff), never "the page loads".
+- `_Fail if:_ <condition>` — the condition(s) that mean the frame failed its
+  purpose even though the page rendered (e.g. "only additions, no modified
+  lines", "empty list", "spinner still visible").
+
+Draw both from the same evidence you use for Scrutiny (Step C4): the bead
+notes' "tested" claims, its "fragile"/"silent bug" language, and the
+design-leg beads' risk sections. A step with a vague or unachievable
+`_Prove:_` yields a superficial demo — without a sharp criterion the
+executor can only screenshot a page, not prove a feature.
 
 ### Step C4: Add Scrutiny items
 
@@ -291,10 +306,13 @@ Use this template (matches `demo:capture`'s expected format exactly):
 
 1. **<user-facing narration heading>**
    <action description for the executor>
-   _Expect: <what success looks like>_
+   _Prove:_ <what the frame must visibly demonstrate to pass>
+   _Fail if:_ <condition that means the frame failed its purpose>
 
 2. **<next heading>**
-   <action>
+   <action description for the executor>
+   _Prove:_ <criterion>
+   _Fail if:_ <condition>
 
 ...
 
@@ -315,12 +333,24 @@ If any fails, fix inline and re-check (up to 2 rewrite attempts).
    - `**Auth:**` line
    - `## Steps` section with numbered items
    - Each step has a bold-heading narration line
+   - Each step has a `_Prove:_` line and a `_Fail if:_` line
 
-2. **Step count** — between 5 and 12 inclusive.
+2. **Proof/fail contract** — **every** step MUST carry both a `_Prove:_`
+   line and a `_Fail if:_` line. This is the field `demo:capture` evaluates
+   per frame; a step missing either cannot be scored and produces a
+   superficial or failing frame. For each step confirm:
+   - a `_Prove:_ <criterion>` line is present and names something visibly
+     observable (reject "page loads" / "no errors")
+   - a `_Fail if:_ <condition>` line is present and names a concrete failure
+     state
+   If any step is missing a field, add it (drawing from the bead notes and
+   design-leg risk sections as in Step C3) and re-validate.
+
+3. **Step count** — between 5 and 12 inclusive.
    If outside, adjust (collapse similar steps or split overly dense
    ones) and re-validate.
 
-3. **Jargon scan** — scan ALL bold narration headings for these forbidden
+4. **Jargon scan** — scan ALL bold narration headings for these forbidden
    terms (case-insensitive):
 
    ```text
@@ -332,7 +362,7 @@ If any fails, fix inline and re-check (up to 2 rewrite attempts).
    If any are found, rewrite the headings in user-facing language and
    re-validate.
 
-4. **Start URL plausibility** — the URL should start with `/` and look
+5. **Start URL plausibility** — the URL should start with `/` and look
    like a real route (match a path you saw in `src/app/`).
    If the URL is obviously fabricated, fall back to `/` and note it in
    the summary.
