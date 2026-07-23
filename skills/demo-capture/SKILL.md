@@ -69,10 +69,13 @@ Before dispatching the executor, verify:
    frames:
    - `scripts/assembleDemoVideo.ts` exists (or the repo documents an
      equivalent packaged assembler — see "Video assembly" below), and
-   - its toolchain is runnable: `pnpm` (or `npx`) + `tsx` and the
-     `ffmpeg-static` dependency the assembler loads, plus the `magick`
-     binary from check 3. `command -v pnpm tsx` is enough to confirm the
-     runtime.
+   - its toolchain is runnable: `pnpm` (or `npx`) plus a `tsx` the
+     project can resolve, the `ffmpeg-static` dependency the assembler
+     loads, and the `magick` binary from check 3. `tsx` is normally a
+     project dev-dependency, not a global binary, so confirm it through
+     the project runner — `command -v pnpm` **and then** `pnpm exec tsx
+     --version` (or `npx tsx --version`) — not `command -v tsx`, which
+     fails whenever `tsx` is installed locally rather than globally.
 
 If any check fails, report the issue and stop. Checking the assembler here —
 **before** the executor spends a long capture session — is deliberate: it
@@ -233,7 +236,7 @@ After the subagent returns, **review the results before assembling**:
      echo "Provide the assembler (or an equivalent packaged assembler) and re-run assembly; capture need not repeat." >&2
      exit 1
    fi
-   pnpm tsx scripts/assembleDemoVideo.ts .captures/<timestamp>
+   pnpm exec tsx scripts/assembleDemoVideo.ts .captures/<timestamp>
    ```
    To disable audio narration, pass `--no-narrate`. If your repo packages the
    assembler under a different entry point (an installed binary or a

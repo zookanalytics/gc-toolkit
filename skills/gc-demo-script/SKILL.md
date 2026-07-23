@@ -84,7 +84,9 @@ From the JSON, extract and keep in working memory:
 - `metadata.branch` — the implementation branch
 - `metadata.target` — the target branch (usually `main`)
 - `metadata.pr_number`, `metadata.pr_url` — PR location (if any)
-- `metadata.worktree` — the polecat's worktree path
+- `metadata.work_dir` — the polecat's worktree path (the gc-toolkit
+  contract; older/other beads may record it as `metadata.worktree`, so
+  prefer `work_dir` and fall back to `worktree`)
 - `parent` — the convoy/molecule wrapping this work
 
 ### Step A2: Read the parent molecule (if any)
@@ -105,16 +107,26 @@ mattered, and how it fits with other beads.
 
 Scan the work bead's `description` and `notes` for bead IDs referenced in
 prose (e.g., "per sl-so9 §6", "sl-9hi G2.1").
-Extract them with a regex and read each one:
+Extract candidate IDs with a regex, validate each against the ledger, and
+read the real ones:
 
 ```bash
+# Bead IDs are <prefix>-<suffix>. Rig prefixes vary by consuming rig
+# (lx, gc, tk, sl, su, mr, gx, …), so match the bead-id SHAPE — a short
+# lowercase prefix + '-' + alphanumeric suffix — instead of a fixed
+# prefix list, then VALIDATE each candidate with `bd show` before
+# reading it. Validation drops the false positives the broader regex
+# necessarily lets through (e.g. "utf-8", "sha-256").
 bd show "$BEAD" --json \
   | jq -r '.[0].description, (.[0].notes // "")' \
-  | grep -oE '\b(lx|gc|tk|sl|su)-[a-z0-9]+\b' \
+  | grep -oE '\b[a-z]{2,4}-[a-z0-9]+\b' \
   | sort -u \
-  | grep -v "^$BEAD$"
-# Then for each sibling ID found:
-bd show "$SIBLING"
+  | grep -v "^$BEAD$" \
+  | while read -r SIBLING; do
+      RESOLVED=$(bd show "$SIBLING" --json 2>/dev/null)
+      [ -n "$RESOLVED" ] && [ "$RESOLVED" != "[]" ] || continue  # skip non-beads
+      bd show "$SIBLING"
+    done
 ```
 
 Design-leg beads (typically produced by `mol-review-leg` wisps) contain
