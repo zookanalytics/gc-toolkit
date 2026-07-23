@@ -168,6 +168,9 @@ dispatch
                        |- a check needs work          -> rework: a NEW child filed against it
                        |- base rewritten (CONFLICTING) -> rebase: a NEW child filed against it,
                        |                                  routed to the fix pool; stays gating
+                       |- head moved off green@<oid>   -> stale gate: a codex RE-REVIEW child
+                       |   (no rework bead filed)          filed at the live head, routed to the
+                       |                                  review pool; stays gating
                        \- PR abandoned                -> the PR is closed and the convoy closed
                                                          (or escalated, if closed out-of-band)
 ```
@@ -180,6 +183,7 @@ dispatch
 | **pre-open gating** | **open** | **—** | **—** | `branch`, `merged_target`, `merge_result=pre_open_gate` (pre-open subset — currently `{codex}` — runs before the PR opens) |
 | **gating** | **open** | **—** | **—** | `pr_url`, `pr_number`, `merge_result=pull_request` |
 | **gating, stale base** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_base_head`, `blocked_reason`, and an open rebase child |
+| **gating, stale gate** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_gate_head`, `blocked_reason`, and an open codex re-review child (the head moved off the reviewed `green@<oid>`) |
 | closed (landed) | closed | — | — | `merged_sha` (committed output) / close reason (ephemeral) |
 | abandoned | closed / open | — | — / `human` | PR closed unmerged: refinery-closed, or escalated if out-of-band |
 | **anchorless** | **closed** | **—** | **—** | Not a state close-on-land creates: bead closed while its PR is still OPEN, so every bead-side scan is blind to it. Found by the PR → bead pass and marked `anchorless_flagged`; disposition is an operator call |
@@ -457,6 +461,47 @@ never the anchor reopened. Two properties make it converge:
 
 This is still observation, not merge authority: the observer routes work and
 records why, and the merge skill remains the single writer of merged-truth.
+
+## Stale gate: the review we re-dispatch, not leave hanging
+
+The symmetric twin of stale base. A gating anchor whose check-set went green —
+`check.<name>=green@<oid>` — and whose PR head then advanced **past** `<oid>`
+through a path that files **no rework bead** (a direct push to the PR branch, an
+operator fixup) sits in a **silent indefinite hold**. The merge skill correctly
+refuses (its stale-head guard: `green@<oid>` must equal the *live* head), but with
+nothing re-dispatching the review the anchor is indistinguishable from a healthy
+PR awaiting approval — it never merges, never rejects, never escalates. The
+in-band re-gate paths do not reach it: `find-work` skips `assignee=""` anchors,
+the auto-re-dispatch arm fires only on a polecat rework hand-back, and
+`check-set-heal.sh` heals only an *empty* check-set and explicitly assumes a
+green-at-a-stale-head marker "re-gates through the normal rework path" — the exact
+assumption the no-rework-bead push disproves.
+
+The observer therefore files a **codex re-review child** of the anchor at the LIVE
+head and routes it to the review pool, the same shape as the stale-base rebase
+arm. Two properties make it converge, mirroring stale base exactly:
+
+- **The anchor stays gating** (`merge_result=pull_request` intact) and the gate is
+  re-earned by a **real review**, never a hand-stamped `green` — stamping green
+  here would certify an *unreviewed* commit. The open review child holds the merge
+  meanwhile; its COMMENT signoff re-stamps `check.<name>=green@<live-head>` and the
+  merge proceeds, and on hand-back the one-anchor-per-PR arm keeps it a single
+  anchor. A `REQUEST_CHANGES` instead files a rework child, which clears the marker
+  through the normal path.
+- **One re-review per head** (`stale_gate_head=<head at detection>`). The arm
+  re-arms only when the head moves again, so a later push off the *new* head is
+  the new stall it is, while an unchanged head is never re-filed. Between dispatch
+  and signoff the open review child also holds it, so the marker is the belt to
+  that suspenders.
+- **A poolless hold recovers** (`stale_gate_nopool_head`). When no review pool is
+  configured the arm cannot dispatch; it holds on a *distinct* marker rather than
+  `stale_gate_head`. Reusing `stale_gate_head` would read as "already dispatched at
+  this head" and suppress the re-review forever — so once the pool is configured a
+  later pass at the *same* head still dispatches, instead of the poolless pass
+  silently stranding the anchor it was meant to heal.
+
+Kept self-contained so the "detect stale gate → re-dispatch at head" logic can be
+re-housed later inside a convergence loop without moving its guarantees.
 
 ## Anchorless PRs: reconciling from the other side
 
