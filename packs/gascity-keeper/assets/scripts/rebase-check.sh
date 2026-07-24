@@ -38,6 +38,28 @@
 # (stamped by the workspace-setup step), and every git call is pinned to it
 # with `git -C`.
 #
+# ## Why resolution is bd-only
+#
+# Every bead lookup here goes through `bd`, never `gc`. `bd` talks to the bead
+# store directly; most `gc` subcommands first load the full city config,
+# including the pack import closure. In the condition env that closure can be
+# cold, and then the `gc` call dies before doing anything:
+#
+#     city import <pack> ... locked but not cached at <path>;
+#     run 'gc import install'
+#
+# This script used to resolve the convoy's tracked member with
+# `gc convoy status`. When that died, the member came back empty and the script
+# failed at step 2 on EVERY iteration — the exit condition went blind to an
+# already-green gate and the loop burned its whole budget (observed: gc-c05nr,
+# rebase complete and gate-green at 89e2e699f, attempts 2-7 all failing
+# identically on a cold `compound-engineering` import). It also silently
+# suppressed the exhaustion handback below, which is gated on a resolved
+# `$ISSUE` — so the loop ran out of attempts and stranded the rebase with no
+# `aborted_at` and nothing on anyone's hook, the exact failure this script's
+# handback exists to prevent. Keeping resolution on `bd` keeps the exit
+# condition and the handback working in a minimal env. (tk-9l9ka)
+#
 # ## Why this script writes to the work bead on the LAST failing attempt
 #
 # Exhaustion is otherwise invisible to the humans who own this workflow. When
@@ -211,14 +233,72 @@ if [ -z "$ROOT" ]; then
 fi
 [ -n "$ROOT" ] || fail "could not resolve the molecule root bead"
 
-# --- 2. Root -> input convoy -> the single tracked member (the work bead) -----
-CONVOY=$(bd show "$ROOT" --json 2>/dev/null |
+# --- 2. Root -> the single tracked member (the work bead) --------------------
+# Resolved with `bd` only — see "Why resolution is bd-only" above.
+#
+# Two independent bd-only sources, cross-checked whenever both are readable:
+#
+#   gc.var.issue on the root — the work bead id, stamped at instantiation.
+#   the convoy's direct dependants — the tracked membership itself, which is
+#   what carries the "exactly one member" invariant this check has always had.
+#
+# Membership is authoritative when it can be read, because it is the invariant;
+# gc.var.issue is the resilient fallback and the cross-check against it.
+ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null)
+[ -n "$ROOT_JSON" ] || fail "could not read root bead $ROOT"
+
+CONVOY=$(printf '%s' "$ROOT_JSON" |
 	jq -r '.[0].metadata."gc.input_convoy_id" // .[0].metadata."gc.var.convoy_id" // empty')
 [ -n "$CONVOY" ] || fail "root $ROOT carries no input convoy id"
 
-ISSUE=$(gc convoy status "$CONVOY" --json 2>/dev/null |
-	jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$ISSUE" ] || fail "convoy $CONVOY does not have exactly one tracked member"
+ROOT_ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // empty')
+
+# The convoy's tracked members are its direct children in the dep graph (depth 1
+# under the convoy itself). Empty output means the query failed outright, which
+# is a different thing from a convoy that genuinely has no members: the first
+# falls back to gc.var.issue, the second is a hard fail.
+MEMBER_JSON=$(bd dep tree "$CONVOY" --json 2>/dev/null)
+MEMBER=""
+MEMBER_COUNT=""
+if [ -n "$MEMBER_JSON" ]; then
+	MEMBER_COUNT=$(printf '%s' "$MEMBER_JSON" | jq --arg convoy "$CONVOY" '
+		[ .[] | select((.depth // 0) == 1 and (.parent_id // "") == $convoy) ]
+		| length' 2>/dev/null)
+	MEMBER=$(printf '%s' "$MEMBER_JSON" | jq -r --arg convoy "$CONVOY" '
+		first(.[] | select((.depth // 0) == 1 and (.parent_id // "") == $convoy) | .id)
+		// empty' 2>/dev/null)
+fi
+
+case "$MEMBER_COUNT" in
+'' | *[!0-9]*)
+	# Membership unreadable. gc.var.issue is the only source left; it is stamped
+	# by molecule instantiation and is enough to proceed, but say so out loud —
+	# the "exactly one member" invariant went unverified this iteration.
+	[ -n "$ROOT_ISSUE" ] ||
+		fail "could not read convoy $CONVOY membership, and root $ROOT carries no gc.var.issue"
+	ISSUE="$ROOT_ISSUE"
+	note "WARN: could not read convoy $CONVOY membership; proceeding on root gc.var.issue=$ISSUE (membership unverified)"
+	;;
+1)
+	ISSUE="$MEMBER"
+	# Both sources readable and disagreeing means the molecule is wired wrong.
+	# Certifying a gate against the wrong bead is exactly the false pass this
+	# script exists to prevent, so refuse rather than pick a side.
+	if [ -n "$ROOT_ISSUE" ] && [ "$ROOT_ISSUE" != "$ISSUE" ]; then
+		fail "root $ROOT gc.var.issue=$ROOT_ISSUE disagrees with convoy $CONVOY member $ISSUE"
+	fi
+	;;
+0)
+	if [ -n "$ROOT_ISSUE" ]; then
+		fail "convoy $CONVOY has no tracked members, but root $ROOT points at gc.var.issue=$ROOT_ISSUE; the convoy is malformed"
+	fi
+	fail "convoy $CONVOY does not have exactly one tracked member (found 0)"
+	;;
+*)
+	fail "convoy $CONVOY does not have exactly one tracked member (found $MEMBER_COUNT)"
+	;;
+esac
+[ -n "$ISSUE" ] || fail "could not resolve the work bead from root $ROOT / convoy $CONVOY"
 
 # --- 3. The rebase worktree, as recorded by workspace-setup ------------------
 ISSUE_JSON=$(bd show "$ISSUE" --json 2>/dev/null) || fail "could not read work bead $ISSUE"

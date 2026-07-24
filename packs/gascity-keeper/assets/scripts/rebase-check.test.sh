@@ -42,13 +42,37 @@ mkdir -p "$TMP/bin"
 
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
-# bd show <id> --json | bd list … --json | bd update <id> …
+# bd show <id> --json | bd dep tree <id> --json | bd list … --json | bd update <id> …
 . "$STATE"
 case "$1" in
+dep)
+  # bd dep tree <convoy> --json — the convoy plus its direct members, in the
+  # shape the real command emits (depth 0 for the convoy itself, depth 1 with
+  # parent_id set for each tracked member).
+  if [ "$2" = "tree" ]; then
+    [ "$DEP_TREE_FAILS" = "1" ] && { echo "stub: dep tree unavailable" >&2; exit 1; }
+    printf '[{"id":"%s","depth":0,"parent_id":"","issue_type":"convoy"}' "$CONVOY_ID"
+    i=1
+    while [ "$i" -le "$CONVOY_MEMBERS" ]; do
+      if [ "$i" = "1" ]; then
+        member="$ISSUE_ID"
+      else
+        member="$ISSUE_ID-extra$i"
+      fi
+      printf ',{"id":"%s","depth":1,"parent_id":"%s","issue_type":"task"}' "$member" "$CONVOY_ID"
+      i=$((i + 1))
+    done
+    printf ']'
+    exit 0
+  fi
+  exit 1
+  ;;
 show)
   case "$2" in
   "$ROOT_ID")
-    printf '[{"id":"%s","metadata":{"gc.input_convoy_id":"%s"}}]' "$ROOT_ID" "$CONVOY_ID"
+    printf '[{"id":"%s","metadata":{"gc.input_convoy_id":"%s"' "$ROOT_ID" "$CONVOY_ID"
+    [ -n "$MD_ROOT_ISSUE" ] && printf ',"gc.var.issue":"%s"' "$MD_ROOT_ISSUE"
+    printf '}}]'
     ;;
   "$ISSUE_ID")
     printf '[{"id":"%s","metadata":{' "$ISSUE_ID"
@@ -104,15 +128,23 @@ BD
 
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
-# gc convoy status <convoy> --json | gc session nudge <target> <message>
+# gc session nudge <target> <message>
+#
+# GC_COLD=1 models the ralph condition env with a cold import cache: every gc
+# invocation dies on the import closure before doing any work. The checker must
+# still reach a correct verdict, so no bead resolution may depend on gc.
 . "$STATE"
-if [ "$1" = "convoy" ] && [ "$2" = "status" ]; then
-  if [ "$CONVOY_MEMBERS" = "1" ]; then
-    printf '{"children":[{"id":"%s"}]}' "$ISSUE_ID"
-  else
-    printf '{"children":[]}'
-  fi
-  exit 0
+if [ "$GC_COLD" = "1" ]; then
+  printf 'gc %s\n' "$1" >> "$CALLS"
+  echo "city import compound-engineering ... locked but not cached at /nonexistent; run 'gc import install'" >&2
+  exit 1
+fi
+if [ "$1" = "convoy" ]; then
+  # Resolution must be bd-only (tk-9l9ka). Record the call so a regression that
+  # reintroduces the dependency is visible, and fail the way a cold cache would.
+  printf 'gc convoy %s\n' "$2" >> "$CALLS"
+  echo "stub: rebase-check.sh must not shell out to gc convoy" >&2
+  exit 1
 fi
 if [ "$1" = "session" ] && [ "$2" = "nudge" ]; then
   printf 'gc session nudge %s\n' "$3" >> "$CALLS"
@@ -146,11 +178,17 @@ echo kept > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm "kept commit"
 HEAD_SHA=$(git -C "$WT" rev-parse HEAD)
 
 write_state() {
+  # MD_ROOT_ISSUE defaults to the convoy's member, mirroring a real molecule
+  # root (verified on gc-wjkmo: gc.var.issue == the single member gc-c05nr).
+  local issue_id="${ISSUE_ID-gc-issue}"
   cat > "$STATE" <<EOF
 ROOT_ID="${ROOT_ID-wisp-1}"
 CONVOY_ID="${CONVOY_ID-convoy-1}"
 CONVOY_MEMBERS="${CONVOY_MEMBERS-1}"
-ISSUE_ID="${ISSUE_ID-gc-issue}"
+ISSUE_ID="$issue_id"
+MD_ROOT_ISSUE="${MD_ROOT_ISSUE-$issue_id}"
+DEP_TREE_FAILS="${DEP_TREE_FAILS-0}"
+GC_COLD="${GC_COLD-0}"
 MD_WORK_DIR="${MD_WORK_DIR-$WT}"
 MD_ONTO="${MD_ONTO-$UPSTREAM_SHA}"
 MD_GATE="${MD_GATE-$HEAD_SHA}"
@@ -198,7 +236,7 @@ refute_call() {
 reset_env() {
   unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_WORK_DIR MD_ONTO MD_GATE
   unset MD_KEEPER MD_NOTIFY MD_ABORTED_AT MD_BACKUP MD_MAX_ATTEMPTS MD_SUBJECT_MAX MD_QUESTIONS
-  unset UPDATE_FAILS ITERATION
+  unset UPDATE_FAILS ITERATION MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
 }
 
 # --- 1. happy path -----------------------------------------------------------
@@ -251,6 +289,11 @@ run_case "FAIL when the recorded work_dir is not a git worktree" 1
 
 reset_env; CONVOY_MEMBERS=0; write_state
 run_case "FAIL when the convoy does not have exactly one tracked member" 1
+
+# A convoy that gained a second member is just as malformed as an empty one:
+# there is then no single work bead whose gate this script could certify.
+reset_env; CONVOY_MEMBERS=2; write_state
+run_case "FAIL when the convoy has more than one tracked member" 1
 
 # --- 8. HEAD exactly at the upstream tip (empty kept set) --------------------
 # A rebase that drops every divergent commit is legitimate: --is-ancestor is
@@ -329,6 +372,51 @@ run_case "FAIL is preserved when the handback write is refused" 1
 reset_env; CONVOY_MEMBERS=0; ITERATION=25; write_state
 run_case "FAIL on the last attempt before the work bead resolves" 1
 refute_call "no handback without a resolved work bead" "bd update"
+
+# --- 10. bd-only work-bead resolution (tk-9l9ka) -----------------------------
+# The regression this section guards: resolution used to go through
+# `gc convoy status`, which loads the city import closure. With any import cold
+# in the condition env that call dies, the work bead came back empty, and the
+# script failed here on every iteration — blind to an already-green gate, and
+# with the exhaustion handback suppressed because it is gated on a resolved
+# work bead. Nothing about deciding "is this rebase done" needs gc.
+
+# The headline case: a green gate must still be certified when gc is unusable.
+reset_env; GC_COLD=1; write_state
+run_case "PASS with a green gate when every gc call dies on a cold import cache" 0
+refute_call "resolution never shells out to gc convoy" "gc convoy"
+
+# The same env must still produce correct FAILs, not just correct PASSes — a
+# checker that ignored gc by always passing would satisfy the case above.
+reset_env; GC_COLD=1; MD_GATE="$UPSTREAM_SHA"; write_state
+run_case "FAIL on a stale gate stamp with a cold import cache" 1
+
+# The bug's worst consequence: an exhausted loop that stranded the rebase with
+# no aborted_at and nothing on anyone's hook. The handback needs the work bead,
+# so it only works once resolution stops depending on gc.
+reset_env; GC_COLD=1; MD_GATE=""; ITERATION=25; write_state
+run_case "FAIL on the last attempt with a cold import cache" 1
+assert_call "exhaustion handback still fires when gc is unusable" "aborted_at=rebase-loop-exhausted"
+assert_call "cold-cache handback still routes to the keeper" "--assignee gascity/gascity-keeper.keeper"
+
+# Fallback: membership unreadable (bd hiccup, not a malformed convoy) falls back
+# to the work bead id the root carries.
+reset_env; DEP_TREE_FAILS=1; write_state
+run_case "PASS via the root's gc.var.issue when convoy membership is unreadable" 0
+
+reset_env; DEP_TREE_FAILS=1; MD_ROOT_ISSUE=""; write_state
+run_case "FAIL when membership is unreadable and the root has no gc.var.issue" 1
+
+# Cross-check: two readable sources that disagree mean the molecule is wired
+# wrong. Certifying a gate against the wrong bead is the false pass this whole
+# script exists to prevent, so it must refuse rather than pick a side.
+reset_env; MD_ROOT_ISSUE="gc-some-other-bead"; write_state
+run_case "FAIL when the root's gc.var.issue disagrees with convoy membership" 1
+
+# A root with no gc.var.issue at all (older molecule) still resolves from
+# membership alone.
+reset_env; MD_ROOT_ISSUE=""; write_state
+run_case "PASS from convoy membership alone when the root has no gc.var.issue" 0
 
 echo
 echo "passed: $PASS  failed: $FAIL"
