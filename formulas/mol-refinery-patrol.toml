@@ -171,6 +171,28 @@ If NO work found: sleep, reconcile in-flight PRs and convoys, then re-check.
 sleep {{event_timeout}}
 ```
 
+`sleep {{event_timeout}}` is a **cadence contract**, not an implementation. A
+harness that blocks foreground `sleep` (Claude Code answers "use Monitor with an
+until-loop") drives this idle loop out-of-band instead — supported, under four
+invariants:
+
+- **Run every reconcile pass below, in order, on every tick.** The merge skill
+  fires only from this pass, so a loop that skips the passes looks fine on an
+  empty queue and then never lands an anchor parked mid-session. Idle is exactly
+  when anchors wait.
+- **Use a driver that cannot terminate itself.** A polling loop with an
+  iteration backstop exits on its own and must be re-armed each time; the re-arm
+  is where it gets lost. A persistent driver has no backstop to trip.
+- **Namespace anything per-rig.** Co-tenant rig refineries run this one formula
+  on one host, so an un-namespaced helper path or dedup file collides — and
+  killing "the" poll by name kills another rig's.
+- **Stay silent in steady state.** Emit only on a real transition (merge, new
+  work, anchor-set change, mail, tool failure). `merge held` and `0 escalated, 0
+  retargeted` are the normal readings of an approval-gated queue; notifying on
+  them firehoses the driver into being shut off as noise.
+
+Whatever drives the cadence, this step is not satisfied until those passes have run.
+
 **2. Reconcile state (best-effort, every idle wake).** Three convergent
 passes run here on the idle cadence: (a-pre) pre-open PR-create — open the PR for
 each anchor parked in `pre_open_gate` whose codex signoff is green at the branch
@@ -402,14 +424,47 @@ If rebase FAILED (conflicts):
 ```bash
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 ```
-3. Put the work bead back in the pool with rejection metadata:
+3. Put the work bead back in the pool with rejection metadata. Derive mr-shape
+from ONE shape-validated read taken BEFORE the repool, and fold the anchor's
+`merge_result` clear into the SAME update. A bead carrying `merge_result` is a
+gating ANCHOR with a live PR, not a plain work bead; `gc bd` fails OPEN (errors to
+stderr, empty stdout), so an unreadable read must NOT fall through to a plain
+direct-mode repool. Fail CLOSED: if the bead is unreadable, do NOT repool — leave
+it with the refinery and stop, so a later iteration retries the reject with a
+readable bead.
 ```bash
+# >>> mr-aware-rejection
+# Read + SHAPE-validate ONCE before repooling; the repool and the merge_result
+# clear derive from the same read (bd fails open, so an unread bead != non-mr).
+BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+MR_STATE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
+PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 gc bd update $WORK \
   --status=open \
   --assignee="" \
   --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET)" \
-  --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+  --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
+  ${MR_STATE:+--unset-metadata merge_result} \
+  ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
+# <<< mr-aware-rejection
 ```
+Left set, the anchor stays in `merge-skill.sh`'s scan
+(`--status=open --metadata-field merge_result=pull_request`) while the polecat
+reworks, and this path files no rework child to engage the skill's in-flight
+hold — so the skill lands the un-gated rework the moment the push goes `CLEAN`.
+(An empty `check_set` merges outright; a non-empty one only stalls, on the
+now-stale `check.<name>=green@<old-head>`; neither re-fires the human approval —
+these rulesets leave `dismiss_stale_reviews_on_push` off.) Clearing it drops the
+anchor from the scan, so the hand-back re-gates `$WORK` fresh against the new head.
+
+Keep `branch` and `pr_number`, and carry `pr_url` over to `existing_pr` so the
+hand-back reuses the SAME PR instead of opening a duplicate.
+
 4. Do NOT delete the branch (new polecat needs it for conflict resolution).
 5. Clean up temp branch (leaves worktree detached so other worktrees can hold {{target_branch}}): `git checkout {{target_branch}} && git branch -D temp && git switch --detach HEAD`
 6. Pour next patrol iteration before burning:
@@ -494,15 +549,55 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
      ```bash
      gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
      ```
-   - Put the work bead back in the pool with rejection metadata:
+   - Put the work bead back in the pool with rejection metadata — the same
+     mr-aware, fail-closed repool the rebase step performs: ONE shape-validated
+     read BEFORE the repool, the `merge_result` clear folded into the SAME update,
+     and fail CLOSED (do not repool; leave it with the refinery, drain-ack + exit)
+     when the bead is unreadable — so an unvalidated read never leaves the anchor
+     routed to the polecat with `merge_result` still set:
      ```bash
+     # >>> mr-aware-rejection
+     # Read + SHAPE-validate ONCE before repooling; the repool and the merge_result
+     # clear derive from the same read (bd fails open, so an unread bead != non-mr).
+     BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+       echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
+       gc runtime drain-ack
+       exit 1
+     fi
+     MR_STATE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
+     PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
      gc bd update $WORK \
        --status=open \
        --assignee="" \
        --set-metadata rejection_reason="<failure summary>" \
-       --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+       --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
+       ${MR_STATE:+--unset-metadata merge_result} \
+       ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
+     # <<< mr-aware-rejection
      ```
-   - Delete branch: `git push origin --delete $BRANCH`
+   - Delete the branch **only when no PR depends on it.** `$BRANCH` is the
+     anchored PR's head; deleting it strands that PR un-merged. Re-read the bead
+     here — don't reuse `$MR_STATE` from the block above (these snippets may run
+     in separate shells, and an unset var reads as direct-mode and deletes a live
+     branch). Fail CLOSED: anything PR-shaped, or any read you couldn't
+     complete, keeps the branch:
+     ```bash
+     BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+       # bd fails open — errors to stderr, empty stdout — so validate the SHAPE.
+       # A wrongly-kept branch is swept later; a wrongly-deleted one strands a PR.
+       echo "could not read $WORK (bd unavailable?) — leaving $BRANCH untouched"
+     else
+       PR_STATE=$(printf '%s' "$BEAD_JSON" \
+         | jq -r '.[0].metadata | (.merge_result // "") + ((.pr_number // "") | tostring) + (.existing_pr // "")')
+       if [ -z "$PR_STATE" ]; then
+         git push origin --delete $BRANCH
+       else
+         echo "mr-mode anchor ($PR_STATE): leaving $BRANCH — it is an open PR's head branch"
+       fi
+     fi
+     ```
    - Clean up (leaves worktree detached so other worktrees can hold $TARGET): `git checkout "$TARGET" && git branch -D temp && git switch --detach HEAD`
    - Pour next patrol iteration before burning:
      ```bash
