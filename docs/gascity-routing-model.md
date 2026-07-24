@@ -241,7 +241,7 @@ as demand.
 
 ### Adjacent — targetless sling resolution (`default_sling_target` / `default_sling_targets`)
 
-All three lanes above name an explicit target. `gc sling <bead>` with
+All four lanes above name an explicit target. `gc sling <bead>` with
 **no target argument** is also valid: `gc` resolves the target from the
 bead's rig config and routes it through **Lane 1**. Two config fields
 feed this resolution, and the plural takes precedence:
@@ -339,4 +339,4 @@ upstream on its own schedule. Per the gc-toolkit
 local doc is authoritative inside gc-toolkit until upstream catches
 up. The upstream `docs/reference/cli.md` already covers the
 mechanical `--reassign` flag (one table row at `cli.md:2789`); it
-does not cover the broader three-lane model.
+does not cover the broader four-lane model.
