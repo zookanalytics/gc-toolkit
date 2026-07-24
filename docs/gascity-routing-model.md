@@ -33,7 +33,7 @@ defines the routing contract; it is not a command tutorial.
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
 | Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | Attach routes the source and leaves the wisp root unrouted: `rigs/gascity/internal/sling/sling_core.go:482` (`molecule_id` on source) and the rationale comment at `:488-497`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4105`, asserting source `gc.routed_to=mayor` at `:4129` and wisp-root `gc.routed_to` empty at `:4151`). Standalone launch routes the root instead: `slingFormula` finalizes on `mResult.RootID` (`sling_core.go:373`). Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:303-305` with its rationale at `:296-302`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns before routing: `sling_core.go:477-481` → `doStartGraphWorkflow` (`:645-683`). Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 | Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
-| Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tier loops `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…`, and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
+| Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tiers loop `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd list --status=in_progress --assignee=<candidate>` (in-progress recovery) then `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…` (ready assigned), and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
 
 ## The maintainer's ruling
 
@@ -340,14 +340,23 @@ routing fields mean only what this predicate makes them mean.
 (`gc hook --help`). The built-in query runs in tiers, and the tiers map
 onto the lanes:
 
-- **Tiers 1–2 — assignee match** (the read side of **Lane 2**).
-  `bd ready … --assignee=<candidate> --exclude-type=epic`, run for each
-  of `$GC_SESSION_ID`, `$GC_SESSION_NAME`, `$GC_ALIAS` in order until one
-  matches. A named session finds its own work here, by `assignee` —
-  never by `gc.routed_to`.
+- **Tier 1 — in-progress recovery** (the read side of **Lane 2**).
+  `bd list --status=in_progress --assignee=<candidate>`. The
+  crash-recovery tier: it resumes work the session had already claimed and
+  was mid-flight on when it died. It is deliberately **not** a `bd ready`
+  query — `bd ready` excludes `in_progress` (see below), so in-flight work
+  is invisible to it and has to be recovered with a plain `bd list`.
+- **Tier 2 — ready assigned work** (also the read side of **Lane 2**).
+  `bd ready --assignee=<candidate> --exclude-type=epic`. Pre-assigned work
+  (`bd update --assignee <me>`) that is ready but not yet started.
 - **Tier 3 — routed pool** (the read side of **Lanes 1 and 3**).
   `bd ready --metadata-field "gc.routed_to=$target" --unassigned
   --exclude-type=epic`. A pool worker finds work here, and only here.
+
+Tiers 1 and 2 both run for each of `$GC_SESSION_ID`, `$GC_SESSION_NAME`,
+`$GC_ALIAS` in order, first non-empty result winning, and both match on
+`assignee` — never on `gc.routed_to`. A named session finds its own work
+through them; the pool finds its work only through Tier 3.
 
 `bd ready` supplies the rest: it shows "open issues with no active
 blockers" and "excludes in_progress, blocked, deferred, and hooked
@@ -405,12 +414,15 @@ any one is sufficient — but pick a term that covers the tier you care
 about:
 
 - **`gc.routed_to=""`** drops the bead out of Tier 3, so it is neither
-  offered to the pool nor counted as demand. It does **not** cover
-  Tiers 1–2: an `assignee` left behind still surfaces the bead to that
-  named session, so clear `assignee` too.
+  offered to the pool nor counted as demand. It does **not** cover the
+  assignee tiers (1 and 2): an `assignee` left behind still surfaces the
+  bead to that named session, so clear `assignee` too.
 - **Status off `open`** (`blocked`, or `deferred` for a timed park)
-  drops the bead out of `bd ready` itself, and therefore out of *every*
-  tier at once.
+  removes the bead from `bd ready`, which backs **Tiers 2 and 3** — so it
+  is no longer offered as ready work to its assignee or to the pool.
+  Tier 1 is a separate `bd list --status=in_progress` query, not `bd
+  ready`; it matches only work a session already had in flight, so a bead
+  parked before it is claimed was never in Tier 1 to begin with.
 
 Two combinations are idiomatic, and they differ in intent:
 
