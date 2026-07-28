@@ -128,9 +128,13 @@ bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
 # failure: gc.outcome=fail + gc.failure_class=transient|hard + gc.failure_reason
 ```
 
-Mirror the canonical bodies in the base `core` pack —
-`formulas/mol-do-work.toml` and `assets/prompts/graph-worker.md` — which carry
-this pass / transient / hard idiom verbatim.
+Mirror the canonical bodies in the base `core` pack, which split the idiom
+across two files: `assets/prompts/graph-worker.md` carries the full outcome set
+verbatim — pass, plus `gc.outcome=fail` with `gc.failure_class=transient|hard`
+and a `gc.failure_reason`; `formulas/mol-do-work.toml` carries only the
+`gc.outcome=pass` + `--status=closed` closure and the terminal
+close-then-drain-ack ordering below (its `drain` step), and never names a
+failure class at all.
 
 **`gc runtime drain-ack` is a session verb, not a step verb.** It tells the
 reconciler this session is finished; it closes no bead. So a step body that
@@ -138,8 +142,9 @@ drain-acks while still holding its open, assigned step bead is *stranding work*,
 and the reconciler reads it exactly that way: it emits
 `session.drain_acked_with_assigned_work`, and once the episode ages past the
 confirmation grace it **unassigns and reopens the stranded bead** so the pool can
-reclaim it (`recordDrainAckAssignedWorkEvent` / `repairStrandedPoolWorkerBead`,
-`cmd/gc/session_reconciler.go`). The step returns to the pool, a fresh worker
+reclaim it (`recordDrainAckAssignedWorkEvent` in
+`cmd/gc/session_reconciler.go`, `repairStrandedPoolWorkerBead` in
+`cmd/gc/session_beads.go`). The step returns to the pool, a fresh worker
 claims it, and the workflow respawn-loops at its entry step indefinitely. It
 presents as a routing or pool bug; it is a missing `--status=closed`.
 
