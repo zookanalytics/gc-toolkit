@@ -40,6 +40,16 @@
 #        bead-shaped (pins the array type check — the projection SUCCEEDS on it).
 #        Fail-closed is per convoy: the ungated convoys in the same pass still
 #        graduate.
+#   (14) FAIL CLOSED on the convoy bead's OWN read, five ways — the same fail-open
+#        shape as (13), one bead up. Gate (a) lives in that bead's metadata, so a
+#        `gc bd show` that fails WITH OUTPUT yields empty markers and reads as
+#        "nobody gated this convoy". Each shape pins a different guard: a JSON
+#        error object with a non-zero exit (the observed shape), a clean
+#        marker-free array with a non-zero exit (pins the exit-status check), a
+#        bare `null` (the projection SUCCEEDS on it, emitting an unheld row, so
+#        only the payload-shape guard can reject it), an array of non-objects
+#        (pins the projection's status), and `[]` (pins the `length > 0` half of
+#        the shape guard: an absent bead has no metadata to clear the gate with).
 #   (15) truthiness: an explicit off-spelling (merge_hold=false) does NOT hold
 #   (16) marker TYPE: a hold stored as a JSON boolean rather than a string still
 #        holds — `ascii_downcase` aborts the jq program on a boolean, and that
@@ -78,6 +88,11 @@ mkdir -p "$TMP/bin"
 #   tk-boolhold  owned, integration/*, 2/2  -> sibling hold is a JSON boolean
 #   tk-boolfree  owned, integration/*, 2/2  -> sibling hold is boolean false (off)
 #   tk-offspell  owned, integration/*, 2/2  -> GRADUATE (merge_hold=false is off)
+#   tk-showfail  owned, integration/*, 2/2  -> bead show error object -> fail closed
+#   tk-showrc    owned, integration/*, 2/2  -> bead show clean array + exit 1 -> closed
+#   tk-shownull  owned, integration/*, 2/2  -> bead show 'null' -> fail closed
+#   tk-showbad   owned, integration/*, 2/2  -> bead show [1,2] -> fail closed
+#   tk-showgone  owned, integration/*, 2/2  -> bead show '[]' (absent) -> fail closed
 cat > "$TMP/convoys" <<'C'
 tk-ready|true|integration/ready|3|3
 tk-half|true|integration/half|1|2
@@ -97,6 +112,11 @@ tk-probemap|true|integration/probemap|2|2
 tk-boolhold|true|integration/boolhold|2|2
 tk-boolfree|true|integration/boolfree|2|2
 tk-offspell|true|integration/offspell|2|2
+tk-showfail|true|integration/showfail|2|2
+tk-showrc|true|integration/showrc|2|2
+tk-shownull|true|integration/shownull|2|2
+tk-showbad|true|integration/showbad|2|2
+tk-showgone|true|integration/showgone|2|2
 C
 
 # This rig's convoy ledger (rig-scoped `gc bd list --type=convoy`): all tk-* but
@@ -120,6 +140,11 @@ tk-probemap
 tk-boolhold
 tk-boolfree
 tk-offspell
+tk-showfail
+tk-showrc
+tk-shownull
+tk-showbad
+tk-showgone
 R
 
 # Per-convoy bead metadata (gc bd show source): id|branch|merge_hold|rebase_hold
@@ -253,6 +278,36 @@ case "$2" in
     printf '[%s]\n' "$out" ;;
   show)
     id="$3"
+    # Injected bead-read failures, mirroring the branch-probe injections above.
+    # Gate (a) is read out of THIS payload, so a `gc bd show` that fails while
+    # writing to stdout yields empty markers and reads as an ungated convoy. As
+    # with the probe, each shape defeats every guard but one. (A well-formed
+    # non-empty array with a ZERO exit is NOT here: that is the legitimate answer
+    # every other convoy in this fixture already exercises.)
+    case "$id" in
+      # The observed shape, as `gc bd show` really reports a bad id: a JSON error
+      # OBJECT plus a non-zero exit.
+      tk-showfail) printf '{"error":"bead not found","schema_version":1}\n'; exit 1 ;;
+      # A well-formed, marker-free array with a NON-ZERO exit — the read died
+      # after emitting. Isolates the exit-status guard: the payload is exactly
+      # what an ungated convoy legitimately looks like, so nothing else rejects
+      # it. (An empty-output variant would be caught by the emptiness guard
+      # instead, leaving the rc check unpinned.)
+      tk-showrc)   printf '[{"id":"tk-showrc","metadata":{}}]\n'; exit 1 ;;
+      # A bare `null` with a zero exit — the only shape here that the projection
+      # cannot catch: `null | .[0].metadata.merge_hold // ""` is "" all the way
+      # down, so the projection SUCCEEDS and emits a clean unheld row, i.e. reads
+      # as an ungated convoy. Only the payload-shape guard rejects it.
+      tk-shownull) printf 'null\n'; exit 0 ;;
+      # An array of non-objects: passes the type guard, then blows up the
+      # projection. Isolates the jq-status guard.
+      tk-showbad)  printf '[1, 2]\n'; exit 0 ;;
+      # `[]` with a zero exit — the bead is not there at all. Unlike the branch
+      # probe, where "[]" legitimately means "nobody holds this branch", an absent
+      # convoy bead carries no metadata that could clear gate (a). Pins the
+      # `length > 0` half of the type guard.
+      tk-showgone) printf '[]\n'; exit 0 ;;
+    esac
     row=$(grep "^$id|" "$FAKE_META" 2>/dev/null | head -1)
     branch=$(printf '%s' "$row" | cut -d'|' -f2)
     hold=$(printf '%s' "$row" | cut -d'|' -f3)
@@ -347,6 +402,20 @@ printf '%s\n' "$OUT1" | grep -q "branch probe on 'integration/probefail' failed"
   || bad "(13) failed probe report (got: $OUT1)"
 # Fail-closed is PER CONVOY, not a pass-wide abort: the ungated convoys in the
 # same run still graduated (asserted by the count below).
+
+assigned tk-showfail && bad "(14/error-obj) fail closed: error-object bead read must NOT graduate" \
+                     || ok "(14/error-obj) fail closed: JSON error object from bd show -> not graduated"
+assigned tk-showrc   && bad "(14/array-rc1) fail closed: non-zero bead read must NOT graduate" \
+                     || ok "(14/array-rc1) fail closed: clean array with non-zero exit -> not graduated"
+assigned tk-shownull && bad "(14/null) fail closed: 'null' payload must NOT graduate" \
+                     || ok "(14/null) fail closed: bare 'null' (projects to an unheld row) -> not graduated"
+assigned tk-showbad  && bad "(14/bad-array) fail closed: unprojectable bead read must NOT graduate" \
+                     || ok "(14/bad-array) fail closed: array of non-objects -> not graduated"
+assigned tk-showgone && bad "(14/absent) fail closed: absent convoy bead must NOT graduate" \
+                     || ok "(14/absent) fail closed: '[]' (bead not there) -> not graduated"
+printf '%s\n' "$OUT1" | grep -q "tk-showfail — convoy bead read failed" \
+  && ok "(14) failed bead read is reported, not swallowed" \
+  || bad "(14) failed bead read report (got: $OUT1)"
 
 assigned tk-offspell && ok "(15) merge_hold=false is an OFF spelling -> graduated" \
                      || bad "(15) merge_hold=false must not hold graduation"
