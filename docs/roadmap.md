@@ -1,10 +1,35 @@
+---
+name: Roadmap — where gc-toolkit is going
+description: The living planning document — the position gc-toolkit holds toward Gas City and GasTown, a verified snapshot of what the pack is today, the primitives every addition is measured against, the directions currently in flight, and what is settled versus open. Read it to find where we are and what the next concrete step is.
+---
+
 # gc-toolkit roadmap
 
 A living planning document. Primary purpose: **a new conversation about
-gc-toolkit can open this file and quickly find where we are and what the
-next concrete step is.** Secondary purpose: describe the pack to external
-adopters. What's currently true and what's coming; reasons for abandoned
-approaches belong in `docs/adr/`, not here.
+gc-toolkit can open this file and quickly find where we are and what the next
+concrete step is.** Secondary purpose: describe the pack's direction to
+external adopters.
+
+This document carries what is currently true and what is coming. The reasoning
+behind an approach we tried and dropped is *work record*, not current truth: it
+belongs in `specs/<bead-id>/` alongside the bead that retired it, per
+[file-structure.md](file-structure.md). This doc links to those records rather
+than carrying them, and keeps no obituaries.
+
+## Scope
+
+**Mandate.** Where gc-toolkit is going — the position it takes toward its
+substrate and its neighbours, the primitives every addition is measured
+against, the directions currently in flight, and enough of a verified snapshot
+of what exists today to make "next" legible.
+
+**Boundaries.** Direction, not construction. *How* the pack is built and how
+its pieces cohere is [architecture.md](architecture.md); *why* it exists and
+what it believes is [foundation.md](foundation.md); where documents are filed
+is [file-structure.md](file-structure.md); the pitch and the wiring are
+[`../README.md`](../README.md) and [install.md](install.md). It is also not a
+bead tracker — the bead graph is the live queue, and this doc names only
+direction durable enough to outlive the beads that carry it.
 
 ## Thesis
 
@@ -12,275 +37,284 @@ gc-toolkit takes an idea to implementation with the fewest human steps, and
 makes the human steps that do exist high-bandwidth — the human sees what
 matters, engages where judgment is needed, and skims the rest.
 
-Every addition to the pack — formula, agent, convention, channel — should
-either reduce human steps or make a remaining human step more efficient for
-the human. If it does neither, it doesn't belong.
+Every addition to the pack — formula, agent, skill, convention, channel —
+should either reduce human steps or make a remaining human step more efficient
+for the human. If it does neither, it doesn't belong.
 
-gc-toolkit augments the `gastown` example pack; it does not replace it.
-Overrides are welcome where our opinions differ. Forks of gastown itself
-belong nowhere.
+### Gas City is the substrate
+
+gc-toolkit is built *on* Gas City and leans on its primitives heavily. The
+corollary is a hard one: **the pack must not depend on modifications carried in
+a fork of Gas City.** Where a fork dependency exists today, removing it is
+live work rather than an accepted fixture, and where a primitive is genuinely
+missing the answer is an upstream contribution — the process for a city that
+must carry local source patches, and for driving them back upstream, is
+[gascity-local-patching.md](gascity-local-patching.md).
+
+### GasTown is an example pack, not an upstream to augment
+
+GasTown is one worked example of operating a Gas City. gc-toolkit takes from it
+what is genuinely useful and is otherwise independent; **copying is actively
+avoided**.
+
+The reasoning: the core Gas City concepts are good, but GasTown's operating
+model — specifically its attention and helm model — diverges from ours
+materially enough that gc-toolkit is realistically **an independent
+implementation of its own approach on top of Gas City**, not an augmentation
+layer over GasTown.
+
+Today the pack still imports the gastown pack wholesale at a pinned sha and
+expresses its divergences as additive fragment-append patches (see
+[architecture.md](architecture.md), *Composition substrate*). That import is an
+inherited starting position, not a commitment: it survives exactly as long as
+it is cheaper than the alternative. Proving the pack can actually leave it is
+an explicit thread of the bead-universe arc below.
 
 ## What the pack is today
 
-- One agent: `mechanik`, a city-scoped structural engineer for the pack
-  itself — owns formulas, agent configs, dispatch patterns, conventions.
-- An **agent brief** under `docs/` — the canonical reference material an
-  agent working in or on Gas City loads as context. Today two docs:
-  one index into upstream docs (`gascity-reference.md`) plus one
-  gc-toolkit-specific process doc (`gascity-local-patching.md`). See
-  `gascity-reference.md` for the bar applied before adding new entries.
-  Operational doctrine lives in `template-fragments/` and is injected
-  into agent prompts, not the brief, with two homes: broadly applicable
-  doctrine (today: `upstream-engagement`) ships in core gc-toolkit, while
-  gascity-rig-specific doctrine (`rebase-conventions`,
-  `polecat-patterns`, `refinery-rebase-handling`) ships in the opt-in
-  `packs/gascity-keeper/` sub-pack and is wired into the gascity rig's
-  polecat and refinery via `[[rigs.patches]]` in city.toml.
-- No formulas yet. No other agents yet.
+Verified against the tree, by listing each directory. Members are named rather
+than counted, so that a claim here goes stale *visibly* — a name that no longer
+resolves is a diff, a count that no longer holds is silent.
 
-This roadmap describes what fills out from here.
+**Agents** (`agents/`) — the native roster. `mechanik`, the city-scoped
+structural engineer that owns formulas, agent configs, dispatch patterns and
+conventions; `bead-host`, the resident one-bead conversation, operator-spawned
+and resumed rather than destroyed; `proactive`, the rig pool that runs the
+cheap first reaction ahead of the operator; `polecat-codex`, the codex-provider
+worker pool that executes the review signoff; and `mechanik-thread` /
+`mayor-thread`, operator-spawned focus threads over the canonical roles.
+`_polecat-gemini` is staged-inert — the underscore prefix disables discovery,
+pending a gemini CLI command-substitution workaround (`PROVENANCE.md`). `dog`
+is deliberately not vendored (`DOG-NOTE.md`); the imported gastown pack owns
+that pool, along with `boot`, `deacon`, `mayor`, `polecat`, `refinery` and
+`witness`. Of those, `deacon`, `mayor`, `polecat`, `refinery` and `witness` are
+patched in place where our opinions differ.
+
+**Formulas** (`formulas/`) — six. Three resident patrol loops
+(`mol-deacon-patrol`, `mol-refinery-patrol`, `mol-witness-patrol`); two
+doc-cohesion audits (`mol-doc-keeper-drift-audit`,
+`mol-doc-keeper-memory-audit`) that run as formula-roles on the polecat pool
+rather than behind a standing doc-keeper agent; and `mol-first-reaction`, the
+pre-read that warms a bead before the human arrives. Scheduled entry points for
+the audits and for checkout reconciliation live in `orders/`.
+
+**Prompt composition** — `template-fragments/` holds the additive doctrine
+fragments named by `pack.toml`'s `[[patches.agent]]` entries; `overlays/`
+ships the `cycle-recycle` Claude `Stop` hook staged into the patrol agents.
+No whole-file prompt mirrors.
+
+**Skills** (`skills/`) — `filing-documentation`, `handoff`, `session-title`,
+and the demo pair `gc-demo-script` / `demo-capture`.
+
+**Machinery** — `assets/scripts/` carries the delivery path (`merge-skill.sh`,
+`pre-open-resolve.sh`, the `reconcile-*.sh` family) and the Helm attention
+board (`gc-helm.sh`), each with tests alongside; `services/helm/` is the Go
+service growing up as that board's successor; `tools/` holds command entry
+points and test fixtures; `doctor/` holds the anti-regression check suite, each
+check a hard-won fix locked into the pack files.
+
+**Sub-packs** (`packs/`) — `gascity-keeper` is the one, opt-in and imported
+only by rigs that carry a Gas City fork: the `keeper` agent, the
+`mol-upstream-gc-*` formula family, and the rebase-handling fragments.
+
+**Docs** (`docs/`) — the central, authoritative tier, in two groups. The pack's
+own record: [foundation.md](foundation.md),
+[architecture.md](architecture.md), this roadmap,
+[file-structure.md](file-structure.md), [install.md](install.md),
+[work-bead-state-machine.md](work-bead-state-machine.md),
+[rig-checkout-reconciler.md](rig-checkout-reconciler.md). And the **agent
+brief** — the `gascity-*` docs an agent working in or on Gas City loads as
+context: [gascity-reference.md](gascity-reference.md) indexes upstream
+documentation and holds the bar for adding a new one;
+[gascity-agents.md](gascity-agents.md),
+[gascity-packs.md](gascity-packs.md),
+[gascity-routing-model.md](gascity-routing-model.md) and
+[gascity-local-patching.md](gascity-local-patching.md) carry what upstream does
+not.
 
 ## Guiding primitives
 
-These are the ideas every addition should be consistent with.
+The operating model the pack *runs on* — one substrate, two laws — is
+[architecture.md](architecture.md)'s subject. What follows is the planning
+filter: what an addition is checked against before it earns a place.
 
 ### Branded context channels
 
 Every user-facing surface — agent name, document path, bead type, subject
-prefix — must carry a recognizable brand. When the user sees a branded
+prefix — must carry a recognizable brand. When the operator sees a branded
 agent name or opens a file like `architecture.md`, the brand pre-loads the
-mental model: they know the scope, the shape of the conversation, what
+mental model: they know the scope, the shape of the conversation, and what
 context to bring.
 
-Branded surfaces are what make engagement high-bandwidth. The user skips
-to the actual question fast because the surface itself told them the rest.
-General text has no such association and forces re-orientation every time.
+Branded surfaces are what make engagement high-bandwidth. The operator skips to
+the actual question fast because the surface itself told them the rest. General
+text has no such association and forces re-orientation every time.
 
 **Rule of thumb**: before adding a new surface, state its brand in one
 sentence. If you can't, don't add it.
 
-### Three hats (for any specialist agent)
+### Three hats, but earn the agent
 
-Any agent dedicated to a domain — the architect explored this pattern
-(since retired from core; see below), others possibly later — is expected
-to wear three hats within that domain:
+A specialist domain still decomposes into three responsibilities: **partner**
+(reactive — answers when asked, records what lands), **active** (seeks out —
+patrols for drift between what is described and what is true, and promotes
+decisions found in passing into durable records), and **library** (keeps the
+data — knows what artifacts exist and retrieves the relevant ones fast).
 
-1. **Partner** — reactive. There for you. Answers questions, consults
-   when invited, records decisions as they land.
-2. **Active** — seeks out. Patrols for drift between what's described and
-   what's actually true. Catches domain decisions hiding in non-domain
-   conversations and promotes them to durable records. "Nobody asked" is
-   not a suitable excuse. Being smart about this is part of the job —
-   no spammy drift alerts.
-3. **Library** — keeps the data. Knows what artifacts exist, where they
-   live, and how to retrieve the relevant ones fast. Extensible via tool
-   configuration — a specialist can use purpose-built tools as they prove
-   their keep.
+What has changed is the realization. The hats do not imply a standing agent.
+The default is a **skill or a formula-role**, loaded transiently; a standing
+agent is earned only by a job that genuinely cannot be done between
+invocations. Shipped practice settled this: the doc-cohesion audits wear the
+active and library hats as scheduled formula-roles on the polecat pool with no
+standing owner, and the personas work takes the same shape by design.
 
-Continuous responsibilities (hat 2, hat 3) can only live in a dedicated
-agent — a formula-only role can't patrol or maintain an index between
-invocations. That's why specialist work in gc-toolkit would pick dedicated
-agents over formula roles when the three-hat pattern applies.
+### Merge-strategy agnosticism, with a known asymmetry
 
-### Consult beads — retired from core (2026-06-10)
+gc-toolkit does not force a merge strategy. `direct`, `mr` and `pr` are all
+supported, the default is a formula variable rather than a constant, and a
+`direct` push rejected by a protected branch auto-promotes to a pull request.
+A consuming rig picks its strategy; the pack adapts.
 
-Agent-to-human dialogue travels on **consult beads**. One bead per
-conversation. The bead holds the back-and-forth until resolved, then
-moves forward like any other unit of work.
+The honest qualification: the **merge gate is PR-shaped**. The check-set — and
+therefore the codex signoff — is defined for `mr`-mode pull requests, while
+`direct` mode fast-forwards to the target and closes. A rig on `direct` is
+consequently ungated. That asymmetry is recorded as open below, not papered
+over.
 
-The metaphor is a Slack conversation: a topic, a thread, a resolution.
-Research side-quests spawn sub-beads; the parent goes on hold until the
-children return with answers.
-
-Distinct faces — architect consult vs. other specialist consult — come
-from metadata and presentation, not from separate bead types.
-
-Consult beads need a discoverability surface so they don't sit silent.
-The surface is the consult bead itself: filed with the `consult` label
-as a dependency of the bead whose work it blocks, so closing a consult
-unblocks the parent. An open consult in the queue is the notification;
-a city may wire a watcher or notification channel over consult-labeled
-beads, but bead state is the durable record.
-
-> **Retired from core (2026-06-10):** consult beads were the architect's
-> engagement model. An earlier iteration also shipped a dedicated
-> city-level `concierge` agent that pushed on consult creation and
-> spawned a `consult-host` tmux session per consult. None of the pieces —
-> the producer (architect), the surfacer (concierge), or the host
-> (consult-host) — was ever deployed in a running city; all have been
-> removed from core. The model above is kept as a record of the idea, not
-> a current mechanism. See `specs/tk-fi68i/consult-retirement.md`.
-
-### Merge-strategy agnosticism
-
-gc-toolkit's opinions apply whether a rig uses `direct`, `mr`, `pr`, or
-any future merge strategy. Nothing in the pack should assume a particular
-strategy. When a consuming rig picks a strategy, it picks it — gc-toolkit
-adapts.
+*(The consult-bead engagement model, and the `concierge` / `consult-host`
+cluster built to surface it, are retired from core and removed. The record of
+what was tried and why it was dropped is `specs/tk-fi68i/consult-retirement.md`.)*
 
 ## What we're building
 
-### The architect — explored, retired from core (2026-06-10)
+The live directions, each rooted in an open epic. The epic is the queue; the
+entry here is the direction, and it stays only while the direction does.
 
-> **Retired from core (2026-06-10):** the architect was the first
-> specialist agent the pack explored, but — like the `concierge` /
-> `consult-host` cluster that was to surface its consults — it was never
-> deployed in any running city. The operator's call on PR #106: the core
-> idea may be worth revisiting later, but having it committed into core
-> caused more confusion than it solved. The agent (`agents/architect/`)
-> has been removed; the vision below is kept as a record of the idea, not
-> a commitment to build. With the architect (the consult *producer*) gone
-> alongside the surfacer and host, the consult-bead engagement model is
-> retired from core as a whole. See
-> `specs/tk-fi68i/consult-retirement.md`.
+### Bead-Universe, post-v1 — `tk-6d0vb`
 
-The vision was a dedicated conversational agent that wears the three hats
-(above) for a rig's architecture — the first specialist the pack explored.
+v1 built the operating model and proved it by dogfooding: the resident
+one-bead host, the fed-and-fetched bead universe, the attention board, and
+proactive-as-a-formula. The successor arc proves it at depth and resolves what
+v1 deferred — mayor and mechanik re-engagement under resident hosts, selective
+proactivity and its budget, cross-host visibility, and the self-improvement
+audit loop. It also carries the leaveability thread of the thesis above:
+replacing fixed-crew and pool machinery with host topology wherever that
+actually earns itself.
 
-**Partner**: consults during `mol-idea-to-plan`. Answers architecture
-questions on demand. Records decisions as ADRs.
+### Personas — `tk-ae96t`
 
-**Active**: watches for drift between `architecture.md` and the actual
-code. Catches architectural foundation decisions that get answered as
-one-off planning answers and promotes them into ADRs so they're durable.
+Give every LLM role a portable, reusable definition and bind it to work through
+Gas City. A persona **is a skill**: a tight always-on identity plus advisory
+owns and processes, loaded transiently by default. This is the concrete form of
+*earn the agent* above, and it is where the architect returns — not as the
+standing conversational agent that was explored and removed, but as an identity
+skill plus method-skills invocable from a formula step. The model doc and the
+first definitions are in flight, not landed.
 
-**Library**: maintains a per-rig `architecture.md` (living) and a
-`docs/adr/NNNN-<slug>.md` log (immutable once accepted). Knows what
-architectural surface the rig has. Extensible via tool configuration as
-specific code-comprehension tools prove themselves.
+### Attention Canvas — `tk-eemvf`
 
-**First job on any rig**: first-pass ingestion. Read the repo, pull in
-whatever architectural signal exists (docs, READMEs, recent commits,
-critical code paths), produce a draft `architecture.md` and an initial
-ADR set, then come back to the user with a consult: *here's what I
-inferred; confirm or correct*. That first consultation is also the first
-real test of the engagement model.
+A pack-local web dashboard that renders the attention board as a spatial,
+in-canvas console: each anchor holds a durable place, so the operator carries
+many topics and switches cheaply because the environment reinstates the context
+and only the delta needs reading. Settled: web rather than native, one
+persistent canvas rather than OS windows, pack-local rather than a fork of the
+core dashboard, and a surface that is *pulled* rather than one that interrupts.
+This is also where the older "visual design candidates" idea landed a real
+home: exploration runs as interactive prototypes whose oracle is the operator's
+perceptual reaction, and implementation enters through a handoff bundle.
 
-### Review legs
+### Self-improvement loop — `tk-190fp`
 
-"Partner passes" that sit between polecat-done and refinery-handoff.
-Each one runs a short formula, produces structured output (approved /
-suggested-change-applied / suggested-change-for-human), and only the
-third bubbles to the human.
+Skills are hand-authored and static today, so agents re-derive the same
+procedures instead of crystallizing them; memory captures facts, not reusable
+procedure. The direction is a loop that distils recurring procedure into a
+skill. The hard part is not authoring — it is governance, since an
+auto-created skill becomes an auto-loaded instruction, and every change here
+must still ride bead → PR → review like any other.
 
-Gastown already ships `mol-review-leg` as a reusable primitive — gc-toolkit
-composes specialists on top of it.
+### Further review passes
 
-Configuration: some legs are pack defaults (available when a rig
-imports gc-toolkit); others are opt-in per rig. A rig without UX
-concerns shouldn't get a UX review leg.
-
-The word *gate* is deliberately avoided. These are partners engaging in
-the work, not walls it has to break through.
-
-### Visual design surfaces
-
-Future. Text is a poor medium for some design questions — "tabs vs
-drawer," comparing layouts, evaluating visual tradeoffs. Planning
-workflow should eventually be able to produce 2-4 visual candidates per
-design question so the human can compare them.
-
-This is not a Phase 1 commitment. It's noted here so the surface gets
-invented intentionally when we get to it, rather than bolted on.
+The merge gate's codex signoff is the first review pass and it ships. The
+original idea was broader: specialist passes that produce structured output and
+bubble only the cases needing a human. GasTown ships `mol-review-leg` as a
+reusable primitive to compose on. What is undrawn is the configuration shape —
+which passes are pack defaults and which are per-rig opt-in — so no second
+pass has been built.
 
 ## Decisions
 
 ### Settled
 
-- **Architect is a dedicated agent** *(retired from core 2026-06-10)*, not
-  a role inside a planning formula. Reason: the Active and Library hats
-  require persistence between invocations. The agent was never deployed
-  and has been removed; kept as a record. See *The architect* above and
-  `specs/tk-fi68i/consult-retirement.md`.
-- **Engagement travels on consult beads** *(retired from core 2026-06-10)*,
-  one bead per conversation, sub-beads for research side-quests. Metadata
-  and presentation give distinct faces. The consult model retired from
-  core along with the architect; see *Consult beads* above.
-- **Merge-strategy agnostic**: gc-toolkit does not default or force a
-  merge strategy. Consuming rigs choose.
-- **Review legs, not gates**: the language matters. Passes are partners,
-  not walls.
-- **Pack is publishable and public**: all artifacts reference only public
-  projects. No private rig names appear in pack artifacts.
-- **Architect reads from rig-stored artifacts** *(retired from core
-  2026-06-10)*: everything the architect reasoned about would be stored in
-  the consuming rig. Architect was to be either opinionated about paths or
-  discover and track them (design choice was left open; both were
-  acceptable). Pack-level architect would carry no rig-specific knowledge.
-  See *The architect* above.
-- **Consult model, end to end (retired from core 2026-06-10)**: the
-  surfacing channel was to be the bead queue — consults filed with the
-  `consult` label as dependencies of the parent bead, discoverable as open
-  beads. An earlier decision shipped a dedicated city-level `concierge`
-  agent (push on creation + triage conversation) that spawned a
-  `consult-host` tmux session per consult, plus a `gastown.mayor` overlay
-  fragment for bidirectional awareness. None of it — producer (architect),
-  surfacer (concierge), or host (consult-host) — was ever deployed; all
-  have been removed from core. See `specs/tk-fi68i/consult-retirement.md`.
+- **Gas City is the substrate, and the pack does not depend on a fork of it.**
+  Fork dependencies are debt to remove, not a supported configuration.
+- **GasTown is an example pack, not an upstream to augment.** Take what is
+  useful; avoid copying; stay independent. This supersedes the earlier
+  "gc-toolkit augments gastown" thesis.
+- **Specialist work is a skill or formula-role by default.** A standing agent
+  must earn itself with a job that cannot be done between invocations.
+- **Two tiers of filing, and no third.** `docs/` is what is true now;
+  `specs/<bead-id>/` is what was thought. There is no `docs/adr/` tier —
+  retired reasoning lives with the bead that retired it.
+- **The city never approves its own pull request.** Automated review is a gate
+  that records evidence; approval is external and human.
+- **The pack does not force a merge strategy**, with the PR-shaped-gate
+  asymmetry noted above.
+- **The pack is publishable and public.** All artifacts reference only public
+  projects; no private rig names appear in pack artifacts.
+- **"Gate" is the settled word for the merge check-set.** An earlier decision
+  preferred "legs, not gates" on the grounds that passes are partners rather
+  than walls. The merge check-set is genuinely a gate — it holds a merge on
+  recorded evidence — and the shipped vocabulary says so. The partner framing
+  survives where it is accurate: for the specialist passes above, which advise
+  rather than hold.
 
 ### Open
 
-- **Architect: opinionated paths vs. discovery** *(moot — architect
-  retired from core 2026-06-10)*: the architect would either expect
-  artifacts at known paths or learn where they live per-rig. Both were
-  acceptable; the choice is moot now that the agent is retired.
-- **Review leg configuration shape**: which legs are pack-default vs
-  per-rig opt-in, and where that configuration lives, is not yet drawn.
-- **Architect tool-configuration interface** *(moot — architect retired
-  from core 2026-06-10)*: the `[tools]` extensibility was noted but never
-  designed. No OSS codebase-comprehension tool was committed to.
-- **Planning formula override scope** *(moot — architect retired from core
-  2026-06-10)*: `mol-idea-to-plan` would have needed extension points for
-  the architect to attach to. Whether that meant overriding gastown's
-  formula or a pre/post-step extension mechanism was left open — moot
-  without the architect.
-- **Sub-bead ergonomics** *(moot — consult model retired from core
-  2026-06-10)*: the Slack-conversation metaphor worked if creating,
-  tracking, and resolving sub-beads felt natural. Moot now that the
-  consult model is retired from core.
+- **Who owns intake.** Both laws of the operating model presume a bead already
+  exists; the moment a new thing *becomes* one sits outside them, and no native
+  agent owns it. Named as a deliberate gap in
+  [architecture.md](architecture.md), not yet a plan.
+- **Gating for non-PR strategies.** Whether `direct`-mode rigs get a gate, or
+  whether the gate stays a PR-only guarantee that `direct` rigs knowingly opt
+  out of.
+- **Governance for generated skills.** What may create a skill, what review it
+  passes, and how an auto-loaded instruction is prevented from shadowing a base
+  prompt (`tk-190fp`).
+- **Re-engagement under resident hosts.** What the mayor and mechanik roles
+  become once each bead can hold its own conversation (`tk-6d0vb`).
+- **Selective proactivity and its budget.** Which beads earn proactive work and
+  how much, driven by the attention ranking rather than by a flat rule
+  (`tk-6d0vb`).
+- **Review-pass configuration shape.** Which passes are pack defaults versus
+  per-rig opt-in, and where that configuration lives.
 
 ## Near-term
 
 The next durable artifacts, in rough order. Not a contract.
 
-> **Retired from core (2026-06-10):** items 1–5 below described the
-> architect build-out (the A/B ingestion experiment, the
-> `agents/architect/` agent, its ingest and patrol formulas) and the
-> consult-bead surfacing channel. The architect and the consult model are
-> retired from core — kept as a record of the plan, not a current
-> commitment. See *The architect* above and
-> `specs/tk-fi68i/consult-retirement.md`. Review legs (item 6) remain a
-> live direction, independent of the architect.
+1. Land the personas model doc and the first persona definitions, so *earn the
+   agent* has a worked example rather than a principle (`tk-ae96t`).
+2. Close the gating asymmetry, or record `direct` as knowingly ungated — the
+   check-set should not be silently absent for a whole class of rig.
+3. Take the leaveability thread far enough to answer it: name what the pack
+   still takes from the imported roster that it could not readily replace
+   (`tk-6d0vb`).
+4. Answer intake — decide which surface owns the moment a thing becomes a
+   bead, since every other flow starts there.
+5. Attention Canvas exploration through to a handoff bundle, so the
+   implementation loop has something concrete to enter with (`tk-eemvf`).
+6. Design the self-improvement loop's governance before any generation is
+   built (`tk-190fp`).
 
-1. **First-pass ingestion A/B experiment (before the architect exists).**
-   Run two or more polecats on a pilot rig, each using a different
-   ingestion strategy, and compare the outputs. This is the pattern the
-   Anthropic skill-creator uses to develop new skills
-   (https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md).
-   The outputs teach us what a good `architecture.md` + initial ADR set
-   looks like on a real codebase, which then crystallizes into the
-   architect's prompt and formulas. Doing this first (before the agent)
-   trades "pure build" for "learn by doing" and is likely faster.
-2. `agents/architect/` — agent.toml, prompt template. Three-hat scope.
-   Informed by what the A/B experiment taught us.
-3. Architect's first formula: `mol-architect-ingest`, crystallizing the
-   best of the A/B experiment outputs.
-4. Architect's patrol formula (Active hat) for drift and
-   question-promotion.
-5. Consult-bead surfacing channel — **retired from core (2026-06-10).** A
-   `concierge` agent (v1 push surfacing) plus a session-per-consult v2
-   (direct tmux attach) were built but never deployed; the cluster has
-   been removed. With the architect (the only consult producer) also
-   retired, the consult model is gone from core entirely. See
-   `specs/tk-fi68i/consult-retirement.md`.
-6. First review-leg specialist: likely a planning/consistency leg that
-   runs when a polecat finishes work against the plan it was given.
-   (Review legs do not depend on the architect.)
+## Keeping this document honest
 
-## Changelog
+This roadmap goes stale in one predictable way: a claim about what exists
+outlives the tree. Two habits hold it:
 
-Significant roadmap shifts — redirections, abandoned approaches, moved
-primitives — belong in `docs/adr/` rather than in this document's
-history. The roadmap describes what gc-toolkit currently is and is
-becoming; learnings about what we chose *not* to do live alongside
-the decisions themselves.
+- **Verify the snapshot by listing, not by memory.** Anything in *What the pack
+  is today* is a directory listing away from being checked, and the section is
+  refreshed in the change that moves the roster — not in a later cleanup pass.
+- **Retire, don't accumulate.** A direction that ends leaves this document; the
+  record of why it ended goes to `specs/<bead-id>/` with its bead, and the
+  reader follows a link rather than reading past an obituary. Significant
+  shifts are legible through git history on this file.
