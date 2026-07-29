@@ -1,6 +1,6 @@
 ---
 name: Requirements — docs/architecture.md (gc-toolkit 30k-ft guide)
-description: The brief and scoping decisions for tk-d6imi — why docs/architecture.md exists, its altitude, its distinct subject vs the other central docs, and the organizing spine it must follow — plus the operator redirect at PR #225 review that superseded that spine with the one-substrate / two-laws operating model.
+description: The brief and scoping decisions for tk-d6imi — why docs/architecture.md exists, its altitude, and its distinct subject vs the other central docs — plus the two PR #225 review rounds: the round-1 redirect to a one-substrate model, then the round-2 premise-level rewrite to the belief → primitive spine (architecture derives from foundation.md and operationalizes it on Gas City primitives), three engagement modes, and the Gas City-substrate / GasTown-independent position.
 ---
 
 # Requirements — write `docs/architecture.md` (gc-toolkit)
@@ -112,6 +112,14 @@ and reuse its pattern; that's how "what gets built next" stays coherent.
 as written; this section records what changed and why. Rework bead `tk-pqjla`,
 a child of `tk-d6imi`, landed on the same PR (#225) — not a new deliverable.*
 
+> **Superseded in framing by the round-2 review** (see
+> [Round 2](#round-2--operator-review-of-pr-225-tk-wpows) below). The
+> "one substrate / two laws / two localities" model this section ratified was
+> itself rejected at the next review as a premise-level miss — laws should not
+> be authored in architecture.md, and grounding runs to `foundation.md`, not the
+> state machine. This section is preserved as history; the ratified model is now
+> **belief → primitive**. Read Round 2 for what stands.
+
 ### What the operator rejected
 
 The first draft satisfied the brief above and still missed the point. In the
@@ -212,4 +220,171 @@ Supersedes the checklist above where they conflict; the rest still applies.
       "degenerate one-child convoy"), not paraphrased into new terms.
 - [ ] No front door is invented or asserted.
 - [ ] ~3 pages; same links and the `tk-q4xaj` epic reference retained.
+- [ ] Lands on PR #225 as added commits — no second PR, no second anchor.
+
+---
+
+## Round 2 — operator review of PR #225 (tk-wpows)
+
+*Amendment, 2026-07-29. Everything above is preserved as written; this section
+records the second review round and what it changed. Rework bead `tk-wpows`, a
+child of `tk-d6imi`, landed on the same PR (#225) — a premise-level rewrite, not
+a new deliverable. Source of truth: 27 operator inline comments on PR #225 at
+`ce42c8d`, and the design decisions recorded in the `tk-d6imi` bead notes.*
+
+### What the operator rejected (round 2)
+
+The round-1 rewrite led with "one substrate, two laws / two localities." The
+operator rejected the framing at the premise level — an edit pass would not fix
+it:
+
+- **"Law" is the wrong unit.** architecture.md invented laws and derived them
+  from `work-bead-state-machine.md` — the least-reviewed doc in the set. Both
+  moves rejected: do not author laws in architecture.md, and do not ground in the
+  state machine.
+- **Dependency inversion.** `work-bead-state-machine.md` and other
+  implementation docs are **downstream** of architecture.md, not upstream.
+  architecture.md takes its influence from `foundation.md`; the state machine
+  takes its influence from architecture.md.
+- **The Attention/Delivery flow taxonomy** split by machinery and hid where
+  human conversation enters. Replaced by three engagement modes keyed on how
+  much conversation a bead needs.
+- **Intake-as-a-hole.** Arguing about what does not exist is not architecture.
+  Replaced by naming the *surfaces* and being honest about what is temporary.
+
+### The ratified spine — belief → primitive
+
+Operator-ratified, chosen explicitly over a flat list of rules:
+
+> **foundation.md holds the beliefs. architecture.md shows how those beliefs are
+> operationalized on Gas City primitives. work-bead-state-machine.md and other
+> implementation docs are downstream of architecture.md.**
+
+The unit of the doc is **belief → primitive**, not "law." For each foundation
+belief, architecture.md shows which Gas City primitive(s) operationalize it.
+Vocabulary is defined before motion — the primitives first, so the flows can be
+written in terms already established. The five primitives, each traced to a
+belief and grounded in a real definition-site verified at the branch tip:
+
+| Primitive | Belief it operationalizes | Grounded in |
+|---|---|---|
+| bead | Decisions have a home | `work-bead-state-machine.md` ("everything is owned / locality of truth") |
+| molecule | Agents earn every interaction | `docs/gascity-packs.md`; `formulas/mol-*` |
+| check | Agents make their edges visible | `work-bead-state-machine.md` ("the check-set: one class of gate") |
+| skill | The pack borrows before it invents | `foundation.md` Boundaries ("pack-local … skills"); `skills/` |
+| board | Human attention is the budget | `assets/scripts/gc-helm.sh`; `services/helm/` |
+
+Molecules and checks are **Gas City primitives** — the means by which foundation
+is made tangible — **not** beliefs. They must not be added to foundation.md
+(confirmed: neither foundation.md nor roadmap.md names molecules or checks). The
+belief *Agents improve* deliberately maps to no single primitive; it is carried
+across the map, and the doc says so rather than inventing a primitive for it.
+
+### The three engagement modes
+
+Replace Flow 1 / Flow 2 entirely. The axis is how much human conversation a bead
+needs to reach done:
+
+1. **Automated to resolution** — filed → landed with no human in the loop; a
+   first-class, supported path, not an aspiration; most such beads create code.
+2. **Needs conversation to move at all** — the bead is the locus of the
+   conversation; the operator arrives warmed and framed.
+3. **A human joins an existing artifact** — a bead or a PR; the conversation
+   attaches via the bead, since everything gets a bead (or one is created).
+
+### Law-vs-implementation — enforcement stripped from the model
+
+The most-repeated correction: the draft encoded enforcement as law. Each is
+demoted to implementation (the map), not the model:
+
+- **codex has no place in architecture.md** — one check among many, may be gone
+  tomorrow. CHECKS are the architectural item; codex is a replaceable instance,
+  named in the model nowhere and in the map only as a replaceable
+  review-executor (`agents/polecat-codex`, `agents/_polecat-gemini`).
+- the **merge-gate** is implementation; architectural is only that gates exist
+  and that things can be asserted true through the workflow.
+- **human approval** is not architectural — it is a check only a human can
+  currently resolve.
+- **convoys** are too specific for the model's altitude.
+- **"the board catches unowned artifacts"** is enforcement. The boundary is kept
+  (an unowned artifact is a defined exception — part of the rule's own edge) but
+  the mechanism moved to the board primitive / map.
+
+### Intake as surfaces, not a hole
+
+Resolved by the operator: the mayor allows bead creation today and any
+conversation can create a bead; the "named hole / open design gap" framing is
+rejected. architecture.md defines the surfaces — have a conversation about X,
+start a new conversation, ensure work Y progresses, create a new unit of work —
+and, where today's architecture is temporary-but-workable (starting a brand-new
+conversation), says so under "What is not well defined today." No front door is
+invented.
+
+### Skills — the dropped thread restored
+
+Skills were absent from round 1. Leveraging skills and the agent ecosystem is
+core to gc-toolkit. This is a dropped thread, not new invention: foundation.md's
+Boundaries already names "pack-local … skills." architecture.md gives skills a
+primitive entry grounded there and in the shipped `skills/`
+(`filing-documentation`, `handoff`, `session-title`, `demo-capture`,
+`gc-demo-script`).
+
+### Gas City vs GasTown — and the second file
+
+- **Gas City is the substrate.** Leverage its primitives heavily; do not depend
+  on any Gas City *fork* modification; actively remove such dependencies.
+- **GasTown is an example pack, not an upstream we augment.** Take what is
+  genuinely reusable (reusable molecules above all); otherwise independent;
+  avoid copying. gc-toolkit is realistically an independent implementation of its
+  own approach on top of Gas City — GasTown's attention/helm model diverges
+  materially.
+- The wholesale-import + bare-name fragment-append pattern is **not** encoded as
+  the architecture; it is transitional and being reduced.
+- **Second file, this PR:** `docs/foundation.md` Boundaries corrected, because
+  architecture.md now derives from it and the old sentence conflated Gas City
+  with Gastown and called the pack an augmentation of both. The edit is minimal
+  and surgical — the Boundaries premise only; "pack-local … skills" preserved
+  intact as the skills-section anchor.
+
+### Structural consequences
+
+- New outline: `## Scope` (durable Mandate that names the *category*, not the two
+  laws, per `file-structure.md`) → `## What we operationalize with` (the five
+  primitives, each traced to a belief) → `## How work moves` (three engagement
+  modes + a mermaid diagram) → `## What is not well defined today` (intake
+  surfaces, the molecule/check interlock, the composition transition) →
+  `## The map` (verified definition-sites, rewritten framing, composition
+  rewritten to the independent-implementation position) → `## The consistency
+  map` (forward lever re-anchored on belief → primitive).
+- The ASCII diagram was replaced with a mermaid diagram of the three modes and
+  where conversation enters.
+- The two praised paragraphs were preserved in character: the owned-convoy
+  close-on-land pattern (Delivery) and the engine-health layer where gastown's
+  imported agents come straight in.
+- Every "Defined in" definition-site was re-verified against files at the branch
+  tip.
+- Out of scope, own beads: the `docs/roadmap.md` rewrite (`tk-zf4vm`), and the
+  gastown import-strategy decision. `roadmap.md` is stale and being rewritten
+  separately, so it is no longer cited as an anchor here.
+
+### Amended acceptance criteria (round 2)
+
+Supersede the round-1 checklist where they conflict.
+
+- [ ] Derives from foundation.md; no invented laws; `work-bead-state-machine.md`
+      linked as downstream, not restated.
+- [ ] `## What we operationalize with` names bead / molecule / check / skill /
+      board, each traced to a foundation belief and grounded in a real
+      definition-site.
+- [ ] `## How work moves` carries the three engagement modes and a mermaid
+      diagram.
+- [ ] codex is named nowhere in the model; checks are the architectural item;
+      merge-gate / approval / convoys demoted to implementation.
+- [ ] Skills have a primitive-level section grounded in foundation.md.
+- [ ] Intake framed as surfaces with an honest "not well defined today" note; no
+      front door invented.
+- [ ] Composition states the Gas City-substrate / GasTown-independent position;
+      the import pattern is not encoded as the architecture.
+- [ ] `docs/foundation.md` Boundaries corrected, minimal and surgical.
+- [ ] Durable Mandate that names the category, not the two laws.
 - [ ] Lands on PR #225 as added commits — no second PR, no second anchor.

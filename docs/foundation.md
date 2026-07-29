@@ -20,7 +20,7 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 
 ## Boundaries
 
-gc-toolkit will not fork or replace Gas City or Gastown. It augments them with pack-local opinions, patches, agents, skills, and conventions.
+gc-toolkit is built on Gas City, the runtime, and does not depend on a *fork* of it — it leans on Gas City's primitives and works to remove any fork dependency. It does not augment Gastown: that is an example pack, not an upstream, so gc-toolkit borrows what is genuinely reusable and is otherwise an independent implementation of its own approach, adding pack-local opinions, patches, agents, skills, and conventions.
 
 gc-toolkit will not add process for its own sake. Review legs are partners, not walls; consults are for judgment, not ritual; metrics must trigger corrective action or they are noise.
 
