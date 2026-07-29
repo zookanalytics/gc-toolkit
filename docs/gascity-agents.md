@@ -564,13 +564,27 @@ or not the operator configured it: the **control-dispatcher**. Its
 own `description` is "Deterministic compiler-v2 workflow control
 worker", and the core `pack.toml` header calls it "the scope-local
 control-dispatcher lane that handles formulas v2 control beads". It
-executes the *control* beads of a graph.v2 workflow — the `gc.kind`
-values (`workflow-finalize`, `check`, `fanout`, `drain`,
-`retry-eval`, `scope-check`) that the core `graph-worker` prompt
-tells ordinary workers they should never receive.
+executes the *control* beads of a graph.v2 workflow — the eight
+`gc.kind` values (`retry`, `ralph`, `check`, `retry-eval`, `fanout`,
+`drain`, `scope-check`, `workflow-finalize`) that ordinary workers
+never execute themselves.
+
+Take that list as exactly eight when triaging. It is
+`beadmeta.ControlKinds`, whose behavior owner is the `ProcessControl`
+switch in `internal/dispatch/runtime.go` — one case per member,
+unknown kinds hard-error, and a lockstep test keeps the two in sync.
+The core `graph-worker` prompt splits the same set across *two*
+bullets: six kinds as "handled by the core-pack `control-dispatcher`
+lane", and `retry`/`ralph` separately as "logical controller beads"
+a worker "should not execute directly". Reading only the first
+bullet under-counts the dispatcher's vocabulary by two — and a
+routed `retry` or `ralph` bead misreads as an orphan for exactly the
+same reason a `workflow-finalize` one does
+([footgun below](#a-dispatcher-routed-control-bead-is-not-an-orphan)).
 
 Source of record:
-`internal/bootstrap/packs/core/agents/control-dispatcher/agent.toml`.
+`internal/bootstrap/packs/core/agents/control-dispatcher/agent.toml`;
+kind vocabulary in `internal/beadmeta/kindsets.go`.
 
 ### It is not an LLM agent
 
