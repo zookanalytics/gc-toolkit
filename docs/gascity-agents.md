@@ -41,6 +41,7 @@ prompt-template authoring or any single agent's role behavior.
 | **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, boot, witness, mechanik (gc-toolkit) |
 | **Patrol (overlay)** | named singleton + patrol-cycle prompt (4-tier startup, pour-before-burn) | yes — runs as the underlying named singleton | yes, as underlying named | no — Tier 3 skipped; patrol wisps are produced, not consumed via routed queue | deacon, witness, refinery |
 | **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
+| **Deterministic worker (no prompt loop)** | `prompt_mode = "none"` + `start_command` + `max_active_sessions`; no `[[named_session]]` | in effect — capped at `max_active_sessions = 1` | yes, demand-scaled from zero | yes — but through its own serve-loop query, not the hook tiers | control-dispatcher (bundled core pack) |
 | **Thread (operator-spawned)** | agent with `work_query = "printf '[]'"` + `sling_query` that exits non-zero | no, N instances | never (work query is a stub) | no | mayor-thread, mechanik-thread |
 | **Manual** | `gc session new <template>` | no — just a session_origin | no — operator initiates | depends on the agent's variant | any template invoked this way |
 
@@ -550,6 +551,89 @@ directly with `bd update --assignee <patrol-qualified-name>`
   `mode = "on_demand"`): merge queue processor; patrol cycle pours
   per merge-queue iteration.
 
+## Variant E — Deterministic workers (no prompt loop)
+
+A deterministic worker is an agent template carrying
+`prompt_mode = "none"` and a `start_command`. The controller
+materializes and scales it exactly as it does a pool worker, but the
+session it starts runs a program, not a prompt loop — there is no
+model behind it and no `gc hook`.
+
+The bundled **core** pack ships one, so *every* city has one whether
+or not the operator configured it: the **control-dispatcher**. Its
+own `description` is "Deterministic compiler-v2 workflow control
+worker", and the core `pack.toml` header calls it "the scope-local
+control-dispatcher lane that handles formulas v2 control beads". It
+executes the *control* beads of a graph.v2 workflow — the `gc.kind`
+values (`workflow-finalize`, `check`, `fanout`, `drain`,
+`retry-eval`, `scope-check`) that the core `graph-worker` prompt
+tells ordinary workers they should never receive.
+
+Source of record:
+`internal/bootstrap/packs/core/agents/control-dispatcher/agent.toml`.
+
+### It is not an LLM agent
+
+Everything else about this variant follows from this one fact:
+
+```toml
+# core pack: agents/control-dispatcher/agent.toml
+# (start_command trace-log preamble elided)
+description = "Deterministic compiler-v2 workflow control worker"
+start_command = "sh -c '…; exec \"${GC_BIN:-gc}\" convoy control --serve --follow {{.Agent}}'"
+prompt_mode = "none"
+process_names = ["gc"]
+max_active_sessions = 1
+```
+
+`prompt_mode = "none"` means no prompt is ever delivered
+(`prompt_mode` is one of `arg`, `flag`, `none`). The `start_command`
+`exec`s `gc convoy control --serve --follow <agent>` and
+`process_names = ["gc"]` names what that pane actually runs: a
+long-lived Go serve loop. It is *providerless* too —
+`ApplyAgentDefaults` skips control-dispatcher agents when it fans out
+the city's default `provider`, `default_sling_formula`, and
+`upstream`, on the stated grounds that they are "infrastructure, not
+work agents" (`rigs/gascity/internal/config/config.go`).
+
+### Identity and scope
+
+Declared with `max_active_sessions`, **not** `[[named_session]]`, so
+it is pool-managed like [Variant B](#variant-b--pool-workers) — but
+capped at a single instance (`max_active_sessions = 1`, and no
+`min_active_sessions`, so it scales from zero on demand).
+"Singleton" for this variant is an effect of that cap, not the
+named-session contract.
+
+Its `agent.toml` deliberately leaves `scope` **empty**, so the same
+template expands at *both* city and rig scope — one dispatcher per
+bead store that can own a workflow graph. QualifiedName then follows
+the ordinary rule: `<rig>/core.control-dispatcher` for a rig
+expansion, `core.control-dispatcher` for the city one. Selection is
+exact-`Dir` (`PreferredDeterministicControlDispatcher`) and never
+substitutes the city dispatcher for a rig scope, because the two read
+different stores.
+
+### Work routing visibility
+
+It **does** consume routed work. Control beads reach it carrying
+`gc.routed_to=<scope>/core.control-dispatcher` with `assignee` empty
+— the same Lane 1 shape `gc sling` writes. (`gc.run_target` on a
+formula step body is the compile-time precursor the stampers resolve
+*into* `gc.routed_to`; it is how a recipe names a target for the
+check and control-dispatch steps, where `assignee` can't be used. See
+the `gc.run_target` section of
+[gascity-routing-model.md](gascity-routing-model.md).)
+
+What it does not use is the three-tier
+[`Agent.EffectiveWorkQuery()`](#work-routing) the rest of this doc
+describes. A worker with no prompt loop never runs `gc hook`; the
+serve loop issues its own **control-ready** query, scanning both
+`gc.run_target` and `gc.routed_to` routes `--unassigned` plus a set
+of assignee candidates (including the legacy `workflow-control`
+alias). Built in `cmd/gc/dispatch_runtime.go`; shape pinned by
+`cmd/gc/dispatch_control_ready_test.go`.
+
 ## session_origin: ephemeral vs. manual vs. named
 
 `session_origin` is metadata the runtime stamps on each session
@@ -567,6 +651,14 @@ The Tier 3 gating is the practical effect to know:
 manual session against a pool template, its hook runs but won't
 pick up `gc sling`-routed work. Route work to manual sessions
 via `bd update --assignee` instead.
+
+Read that rule — and the `Routed work?` column in the
+[variants table](#variants-at-a-glance) — as scoped to what a
+*prompt-driven* session sees through `gc hook`. It is not "any
+non-`ephemeral` lane can never receive routed work": a
+[deterministic worker](#variant-e--deterministic-workers-no-prompt-loop)
+has no hook at all, and its serve loop consumes `gc.routed_to` work
+through a query of its own that this gate never touches.
 
 Source: `Agent.EffectiveWorkQuery()` in
 `rigs/gascity/internal/config/config.go`:
@@ -619,6 +711,11 @@ variant (and either errors or is a no-op). Patrol agents
 to named singletons (their underlying variant); see
 [Variant D — Patrol agents](#variant-d--patrol-agents-overlay) for
 the cycle-level mechanics that the matrix does not capture.
+Deterministic workers (Variant E) are not a column either: they
+address like the pool instances they are, except that the commands
+which speak to a *prompt loop* — `nudge`, `peek` — have nothing to
+speak to; see
+[the inert-liveness footgun](#a-deterministic-workers-liveness-signals-are-structurally-inert).
 
 | Command | Named singleton | Pool worker | Thread |
 |---|---|---|---|
@@ -789,6 +886,46 @@ worktree before discovering it lost the race.
 different polecat than the one you're running in. Verify peer
 state before re-implementing — they may already be working on
 it.
+
+### A dispatcher-routed control bead is not an orphan
+
+A `Finalize workflow` bead — or any graph.v2 control bead — routed to
+`<scope>/core.control-dispatcher` has no interactive session that
+answers for it, so an orphan or ownership scan that resolves owners
+by session liveness resolves it to **absent**. That is not evidence
+of an orphan. It is dispatcher-gated work in a normal state, usually
+still blocked behind its own open step chain, and the
+[deterministic worker](#variant-e--deterministic-workers-no-prompt-loop)
+takes it when that chain clears.
+
+Recovering, reassigning, or closing such a bead is wrong, and closing
+is the one that does real damage: a parked v2 control or step bead is
+what holds its pre-routed downstream work back, so closing it
+releases that work early — before the step it was gating finished.
+Treat dispatcher-routed beads the way an orphan scan already treats
+refinery and witness beads: infrastructure, skip.
+
+### A deterministic worker's liveness signals are structurally inert
+
+A `prompt_mode = "none"` session reads `state=active running=true`
+while its `last_active` sits hours or days stale, and
+`gc session peek` returns nothing meaningful. Neither is a symptom.
+`last_active` tracks *pane output*, and a serve loop that does its
+work in short-lived child processes never writes to the pane, so
+nothing advances either signal after spawn. `gc session nudge` is
+structurally a no-op for the same reason — no prompt loop consumes
+the text, so it accumulates unsubmitted in the pane, where it reads
+convincingly like a wedged agent sitting on a pending prompt.
+
+Judge liveness from the **process**: the `gc convoy control --serve`
+daemon is alive and its full argv is that serve command. Read the
+argv, not the process's command name — that is just `gc`, forever,
+by design; a deterministic worker is not a `claude`-backed session
+and must never be benchmarked against one. Child count is not a
+signal either, since the polls it forks are short-lived and zero
+children at any given instant is normal. Never judge from
+`last_active` or `peek`, and never file a stuck-agent warrant on
+them.
 
 ## The gascity-keeper front-door
 
