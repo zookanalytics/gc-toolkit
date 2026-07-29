@@ -141,12 +141,14 @@ document honest about aspiration versus fact.
   specific piece of work toward done, or create a new unit of work to track or
   discuss. Creating a bead works today — the mayor can, and in practice any
   conversation can. What is thin is the *front door* for starting a brand-new
-  conversation: the pack ships no native intake agent, and every native role is
-  a post-bead role (a host is only ever spawned at an existing bead and
-  explicitly refuses to be a sling target; a first reaction is dispatched *at* a
-  bead). This is workable today and named here as an area to sharpen — a
-  present-tense fact, not a shortfall to apologize for, and not a front door this
-  document will invent.
+  conversation: the pack ships no native intake agent. `mechanik` is
+  operator-facing and can file and dispatch beads, but only as the steward of
+  gc-toolkit itself — a narrow domain, not a general intake surface; and the
+  native attention roles are post-bead (a host is only ever spawned at an
+  existing bead and explicitly refuses to be a sling target; a first reaction is
+  dispatched *at* a bead). This is workable today and named here as an area to
+  sharpen — a present-tense fact, not a shortfall to apologize for, and not a
+  front door this document will invent.
 
 - **The molecule/check interlock is mostly unrealized.** The primitives exist
   and the merge machinery already enforces a check-set, but the richer loop — a
