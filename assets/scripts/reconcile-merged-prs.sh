@@ -42,6 +42,15 @@
 #                          escalate once. DETECT + SURFACE ONLY — never merge,
 #                          close, or reopen it; disposition is an operator call.
 #
+#   Open PR, live bead but no gating metadata -> UNOWNED: something names the PR
+#                          (so it is not anchorless) but nothing will land it —
+#                          no merge_result, no branch/target, no merge_strategy.
+#                          Reported on its own line, NOT escalated: the naming
+#                          bead is live, so this is a routing gap an operator can
+#                          close, not a stranded PR. Kept distinct on purpose —
+#                          folding it into "tracked" would make the scan quieter
+#                          without making it truer.
+#
 #   ANY state, retargeted (live base != anchor merged_target) -> never close as
 #                          landed (the work would land on the wrong branch), and
 #                          the merge skill independently refuses to merge it;
@@ -117,30 +126,74 @@ command -v gh >/dev/null 2>&1 || exit 0
 # ever grows a new non-closed status.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-# Every non-closed bead whose metadata <field> equals <value>, as compact rows:
-# the id, whether it is an anchor (merge_result set) rather than a rework child,
-# and its rebase_hold marker. --limit=0 so the probe sees the whole set, not a
-# page of it: a truncated page could hide the one held child that must veto.
+# --- Which metadata keys name a pull request? --------------------------------
+# `pr_number` is the key the refinery stamps, but it is NOT the only key a live
+# bead names its PR with. The fork-sync flow records `fork_pr` / `fork_pr_url`
+# and no pr_number at all — gascity's gc-qin3c names PR#100 exactly that way. A
+# scan keyed on pr_number alone cannot see such a bead in EITHER direction: its
+# PR reads as ANCHORLESS on every single pass (a false finding no action can
+# clear, re-triaged from scratch every wake), and the in-flight probes below
+# cannot see it holding a branch either.
 #
-# Returns NON-ZERO on a failed ledger read, which the caller must treat as "I
-# cannot tell" and NOT as "nobody holds this branch" — the same ""-vs-"[]"
-# distinction the anchorless scan fails closed on. A genuinely empty result is
-# the literal "[]" and returns zero with no rows.
+# ONE jq `def`, shared by BOTH directions of the reconcile — the BEAD -> PR
+# probes (pr_bead_query) and the PR -> BEAD tracked set (the anchorless scan) —
+# so a bead visible to one is visible to the other BY CONSTRUCTION. Widening a
+# single direction is the specific hazard: teaching only the tracked set flips a
+# fork-keyed PR from "anchorless" to tracked-but-unprobeable, which is quieter
+# without being truer. Add a key here and every path learns it at once.
 #
-# The guards below answer four DIFFERENT questions, because the failure they
-# share is silent: a probe that reports "no rows" when it actually failed reads
-# as "nobody holds this branch" and dispatches the force-push. Non-empty stdout
+# Numbers only: a key holding "" or a non-numeric value is dropped rather than
+# matched, so an empty pr_number can never join the tracked set. The URL is
+# reduced to its number, so matching inherits the same single-repo scoping the
+# pr_number path has always assumed (this reconciler's `gh` calls are repo-scoped
+# by construction).
+PR_NUM_JQ='
+def pr_nums:
+  ( [ (.metadata.pr_number // empty), (.metadata.fork_pr // empty) ] | map(tostring) )
+  + ( (.metadata.fork_pr_url // "") | tostring | [ scan("/pull/([0-9]+)") | .[0] ] )
+  | map(select(test("^[0-9]+$"))) | unique;
+'
+
+# Does this bead carry metadata any automated path can ACT on? merge_result marks
+# a gating anchor (this pass and the merge skill both enumerate from it);
+# branch/target/merge_strategy are the rework-child shape a polecat and the
+# refinery land. A bead naming a PR with NONE of them tracks the PR without
+# owning it — see the UNOWNED arm in the anchorless scan.
+GATING_JQ='
+def gating:
+  [ (.metadata.merge_result // ""), (.metadata.merge_strategy // ""),
+    (.metadata.branch // ""), (.metadata.target // "") ]
+  | map(select(. != "")) | length > 0;
+'
+
+# The compact row every branch-ownership probe yields: the id, whether the bead
+# is an anchor (merge_result set) rather than a rework child, and its
+# rebase_hold marker.
+PROBE_ROW_JQ='.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // "")}'
+
+# One guarded ledger read -> the matching beads as a JSON array on stdout.
+# --limit=0 so a probe sees the whole set, not a page of it: a truncated page
+# could hide the one held child that must veto.
+#
+# Returns NON-ZERO on a failed read, which every caller must treat as "I cannot
+# tell" and NOT as "nobody holds this branch" — the same ""-vs-"[]" distinction
+# the anchorless scan fails closed on. A genuinely empty result is the literal
+# "[]" and returns zero.
+#
+# The guards answer DIFFERENT questions, because the failure they share is
+# silent: a probe that reports "no rows" when it actually failed reads as
+# "nobody holds this branch" and dispatches the force-push. Non-empty stdout
 # alone does NOT mean success — `gc ... --json` reports its own failures as a
 # non-empty JSON *object* on stdout (`{"error": ...}`, exit 1), which survives an
-# emptiness test, yields zero rows through the projection below, and so fails
-# OPEN in the one direction that is unrecoverable.
+# emptiness test, yields zero rows through the projection, and so fails OPEN in
+# the one direction that is unrecoverable.
 #
-# (1), (3) and (4) are each mutation-pinned by a shape only that guard rejects —
-# see the (23) table in the test suite. Delete one and exactly one case goes red.
-probe_beads() {
-  local raw rc out
-  raw=$(gc bd list --metadata-field "$1=$2" \
-    --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)
+# (1), (3) and the projection guard (4) in probe_rows are each mutation-pinned by
+# a shape only that guard rejects — see the (23) table in the test suite. Delete
+# one and exactly one case goes red.
+pr_bead_read() {
+  local raw rc
+  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null)
   rc=$?
   # (1) The command's own verdict, checked even when it wrote to stdout.
   [ "$rc" -eq 0 ] || return 1
@@ -155,14 +208,64 @@ probe_beads() {
   #     whose values are bead-shaped: `.[]` iterates those happily, so (4) sees a
   #     clean projection and only this guard can tell it was never a bead list.
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$raw"
+}
+
+# Every bead in <statuses> that names PR #<num>, under ANY key pr_nums knows, as
+# ONE id-deduped JSON array.
+#
+# Three KEYED reads unioned, rather than one unkeyed sweep of the ledger:
+# --metadata-field filters server-side, and the URL arm is bounded by
+# --has-metadata-key fork_pr_url (a handful of beads city-wide) instead of paging
+# the whole store once per anchor. fork_pr_url holds a URL and not a number, so
+# it cannot be matched by an exact --metadata-field filter at all — the number is
+# parsed out with the SAME pr_nums the tracked set uses.
+#
+# Fails closed AS A UNIT: if any one read is unreadable the whole query returns
+# non-zero. A partial answer is worse than none here, because the callers read
+# "no rows" as "nobody holds this branch" and dispatch a force-push onto it. The
+# cost of that choice is that a ledger that cannot answer ANY of the three reads
+# defers the conflict/stale-gate arms entirely rather than acting on a partial
+# view — one deferred pass, announced in the log, against an unrecoverable
+# force-push. Same trade the single-read probe already made.
+pr_bead_query() {
+  local statuses="$1" num="$2" acc part
+  acc=$(pr_bead_read --metadata-field "pr_number=$num" --status "$statuses") || return 1
+  part=$(pr_bead_read --metadata-field "fork_pr=$num" --status "$statuses") || return 1
+  acc=$(printf '%s\n%s' "$acc" "$part" | jq -sc 'add' 2>/dev/null) || return 1
+  part=$(pr_bead_read --has-metadata-key fork_pr_url --status "$statuses") || return 1
+  part=$(printf '%s' "$part" \
+    | jq -c --arg n "$num" "$PR_NUM_JQ"'[ .[] | select(pr_nums | index($n)) ]' 2>/dev/null) || return 1
+  printf '%s\n%s' "$acc" "$part" | jq -sc 'add | unique_by(.id)' 2>/dev/null
+}
+
+# Project a bead array into the compact probe rows the ownership guards read.
+probe_rows() {
+  local out
   # (4) The projection's own status. Captured into a variable first: emitted
   #     straight to stdout, jq's failure would be the function's LAST status and
   #     still be discarded by the callers' `probe=$(...)` capture.
-  out=$(printf '%s' "$raw" \
-    | jq -c '.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null) \
-    || return 1
+  out=$(printf '%s' "$1" | jq -c "$PROBE_ROW_JQ" 2>/dev/null) || return 1
   [ -n "$out" ] && printf '%s\n' "$out"
   return 0
+}
+
+# Every non-closed bead whose metadata <field> equals <value> — the `branch`
+# dimension, an exact match on a single key.
+probe_beads() {
+  local raw
+  raw=$(pr_bead_read --metadata-field "$1=$2" --status "$LIVE_STATUSES") || return 1
+  probe_rows "$raw"
+}
+
+# Every non-closed bead naming PR #<num> — the PR dimension, across every key a
+# bead can name a PR with. Keyed on pr_number alone this missed fork_pr-keyed
+# beads entirely, so a rework already in flight under that keying was invisible
+# and the arm dispatched a second force-push over it.
+probe_beads_pr() {
+  local raw
+  raw=$(pr_bead_query "$LIVE_STATUSES" "$1") || return 1
+  probe_rows "$raw"
 }
 
 # Truthy in the operators' sense: set, and not one of the explicit "off" spellings.
@@ -446,11 +549,12 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
 
     # --- Who else is already on this branch? ----------------------------------
     # Probe BOTH dimensions and union them; neither subsumes the other:
-    #   pr_number — a rework child of THIS PR, including one filed by a different
-    #               anchor. The stale_base_head marker above cannot catch that: it
-    #               is keyed per-ANCHOR, so a PR carrying two anchors (the tk-ynz4b
-    #               double-anchor trap) files one child per anchor, each blind to
-    #               the other.
+    #   PR number — a rework child of THIS PR, under ANY key that names a PR
+    #               (pr_number, fork_pr, fork_pr_url), including one filed by a
+    #               different anchor. The stale_base_head marker above cannot catch
+    #               that: it is keyed per-ANCHOR, so a PR carrying two anchors (the
+    #               tk-ynz4b double-anchor trap) files one child per anchor, each
+    #               blind to the other.
     #   branch    — anything naming the same branch under a different PR number,
     #               which is the unit a force-push actually collides on.
     # FAIL CLOSED on an unreadable probe. A failed ledger read is
@@ -458,7 +562,7 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
     # optimistic way dispatches a force-push precisely when we cannot verify a
     # freeze — the worst possible time. A deferred rebase costs one pass; a
     # force-push onto a branch a keeper had frozen is not recoverable by retry.
-    if ! probe=$(probe_beads pr_number "$num"); then
+    if ! probe=$(probe_beads_pr "$num"); then
       echo "reconcile-merged-prs: $id — PR#$num conflicted but the rework probe failed; no rebase dispatched (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
@@ -669,7 +773,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # set merge-skill.sh holds the merge on (pr_number, non-anchor). FAIL CLOSED
       # on an unreadable probe: a twin review is a lesser harm than the CONFLICTING
       # arm's force-push, but the guard errs to "someone's on it" the same way.
-      if ! gate_probe=$(probe_beads pr_number "$num"); then
+      if ! gate_probe=$(probe_beads_pr "$num"); then
         echo "reconcile-merged-prs: $id — PR#$num check.codex stale but the in-flight probe failed; no re-review dispatched (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
@@ -807,7 +911,7 @@ done <<< "$ROWS"
 # live bead points at. DETECT + SURFACE ONLY — never merge, close, or reopen
 # one. Disposition (land it, close it, rework it) needs context this pass does
 # not have and stays an operator call; see docs/work-bead-state-machine.md.
-anchorless=0
+anchorless=0; unowned=0
 PR_LIST=$(gh pr list --state open --limit 200 \
   --json number,url,isDraft,headRefName,baseRefName 2>/dev/null)
 if [ -z "$PR_LIST" ]; then
@@ -827,24 +931,75 @@ elif [ "$PR_LIST" != "[]" ]; then
     # different string, and does fall through to the scan below.
     echo "reconcile-merged-prs: live-bead read failed; anchorless scan skipped (retry next pass)" >&2
   else
+    # Every PR number a live bead names, under any key (pr_nums), NOT pr_number
+    # alone: a fork_pr-keyed bead is live and does name its PR, so its PR is not
+    # anchorless and must never be reported as such.
     TRACKED=$(printf '%s' "$LIVE" \
-      | jq -r '[.[] | .metadata.pr_number // empty | tostring] | unique | .[]' 2>/dev/null)
+      | jq -r "$PR_NUM_JQ"'[ .[] | pr_nums ] | add // [] | unique | .[]' 2>/dev/null)
+    # Tracked is not the same fact as OWNED, and collapsing them is how widening
+    # the key set turns a false finding into false silence. A PR whose only live
+    # beads carry no gating metadata has something naming it and nothing that will
+    # land it — gc-qin3c/PR#100 is exactly that: fork_pr set, no merge_result, no
+    # branch, no target, no merge_strategy, assignee=operator. Keep it visible on
+    # its own (non-escalating) line rather than letting it drop into the silence
+    # reserved for PRs an automated path is actually driving.
+    OWNERS=$(printf '%s' "$LIVE" | jq -c "$PR_NUM_JQ$GATING_JQ"'
+      [ .[] | . as $b | pr_nums[] | { n: ., g: ($b | gating),
+          who: (($b.id // "?")
+                + (if (($b.assignee // "") | tostring) == "" then ""
+                   else " (" + (($b.assignee) | tostring) + ")" end)) } ]
+      | group_by(.n)
+      | map({ key: .[0].n,
+              value: { gated: (map(.g) | any), who: (map(.who) | unique | join(", ")) } })
+      | from_entries' 2>/dev/null)
+    # A failed ownership build must never turn every tracked PR into an UNOWNED
+    # line, so an absent entry reads as owned below — i.e. falls back to the
+    # pre-existing "tracked is enough" silence.
+    [ -n "$OWNERS" ] || OWNERS='{}'
     PR_ROWS=$(printf '%s' "$PR_LIST" \
       | jq -r '.[] | [(.number|tostring), .url, (.isDraft|tostring), .headRefName, .baseRefName] | join("|")' 2>/dev/null)
     while IFS='|' read -r pnum purl pdraft phead pbase; do
       [ -n "${pnum:-}" ] || continue
-      # Tracked by a live bead -> not a finding. Exact-match so PR#7 is never
-      # satisfied by PR#77.
-      printf '%s\n' "$TRACKED" | grep -qxF "$pnum" && continue
+      draft_note=""
+      [ "$pdraft" = "true" ] && draft_note=" (draft)"
+
+      # Tracked by a live bead -> not an ANCHORLESS finding. Exact-match so PR#7
+      # is never satisfied by PR#77.
+      if printf '%s\n' "$TRACKED" | grep -qxF "$pnum"; then
+        # Owned by something that can act on it -> genuinely fine, stay silent.
+        # `has($n)`, NOT `.[$n].gated // true`: jq's `//` treats FALSE as empty,
+        # so the alternative form rewrites every ungated PR to gated=true and
+        # silently disables this whole arm. The default belongs to the missing
+        # key (an unbuilt map reads as owned), never to a present `false`.
+        gated=$(printf '%s' "$OWNERS" \
+          | jq -r --arg n "$pnum" 'if has($n) then .[$n].gated else true end' 2>/dev/null)
+        [ "$gated" = "true" ] && continue
+        # Tracked but UNOWNED. Distinct from anchorless (a bead does name it, so
+        # an operator has somewhere to start) and NOT escalated (the naming bead
+        # is live, so this is a routing gap, not a stranded PR), but it is not
+        # "fine" either: no automated path will land it.
+        who=$(printf '%s' "$OWNERS" | jq -r --arg n "$pnum" '.[$n].who // ""' 2>/dev/null)
+        unowned=$((unowned + 1))
+        echo "reconcile-merged-prs: UNOWNED PR#$pnum$draft_note ($phead -> $pbase) — named by live bead(s) ${who:-?}, none carrying gating metadata (no merge_result/merge_strategy/branch/target); tracked, but no automated path will land it"
+        continue
+      fi
 
       # Resolve the bead that DID name this PR, if one still exists. A closed one
       # is the high-confidence signature (a Gas City PR whose anchor closed out
       # from under it) AND the only durable place to bound the escalation.
       # --limit=0 (all), not a page: the pick below is "oldest carrying
       # merge_result", so a truncated page could hide the very bead we want.
-      # The pr_number filter keeps the result to a handful either way.
-      dead=$(gc bd list --status closed --metadata-field pr_number="$pnum" \
-               --limit=0 --json 2>/dev/null)
+      # Keyed the same widened way as TRACKED — a closed fork_pr-keyed anchor must
+      # resolve here too, or the PR reports as "no bead in any state" (the
+      # non-escalating arm) when a perfectly good bead names it.
+      if ! dead=$(pr_bead_query closed "$pnum"); then
+        # Cannot tell who owned it. It IS untracked by any live bead, so it stays
+        # a finding, but the escalation has nothing durable to bound it with —
+        # report and retry next pass rather than mail unbounded.
+        anchorless=$((anchorless + 1))
+        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — closed-bead resolution failed; not escalating (retry next pass)" >&2
+        continue
+      fi
       # Several closed beads routinely name one PR — the anchor that opened it,
       # its review beads, and any "address findings" rework children. Pick the
       # bead that OPENED the PR, since that is the one an operator reopens to
@@ -864,8 +1019,6 @@ elif [ "$PR_LIST" != "[]" ]; then
       dead_all=$(printf '%s' "$dead" \
         | jq -r '[sort_by(.created_at // "") | .[].id] | join(", ")' 2>/dev/null)
       anchorless=$((anchorless + 1))
-      draft_note=""
-      [ "$pdraft" = "true" ] && draft_note=" (draft)"
 
       if [ -z "$dead_id" ]; then
         # No bead names this PR in any state. It may never have been Gas City's
@@ -913,5 +1066,5 @@ polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; th
   fi
 fi
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $anchorless anchorless open PRs, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
 exit 0

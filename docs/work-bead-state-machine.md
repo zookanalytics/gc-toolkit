@@ -507,7 +507,7 @@ re-housed later inside a convergence loop without moving its guarantees.
 
 Every automated path in close-on-land starts from the **bead**: the merge skill,
 the merge observer, and the refinery patrol all enumerate gating anchors and read
-each one's `pr_number`. That is sound while the bead outlives the PR — which the
+the PR each one names. That is sound while the bead outlives the PR — which the
 close-on-land model guarantees, since the anchor closes only on land.
 
 It fails in the one state the model is designed to prevent but cannot retroact:
@@ -520,8 +520,8 @@ weeks — surfaced only when a human cross-checked `gh pr list` against the ledg
 by hand.
 
 So the observer also reconciles **PR → bead**: enumerate open PRs, subtract every
-PR number any *live* bead references, and report the remainder. Two rules keep it
-honest:
+PR number any *live* bead references, and report the remainder. Three rules keep
+it honest:
 
 - **Detect and surface only.** It never merges, closes, or reopens an anchorless
   PR. Disposition — land it, close it as abandoned, or reopen the bead for
@@ -535,6 +535,24 @@ honest:
   ledger read is empty rather than `[]`, and the scan fails **closed** on it —
   treating "I could not read the ledger" as "nothing is tracked" would flag every
   open PR at once.
+- **Tracked is not owned.** A live bead naming a PR is enough to prove the PR is
+  not *anchorless*, but not enough to prove anything will land it. A bead
+  carrying none of `merge_result`, `merge_strategy`, `branch` or `target` tracks
+  its PR without owning it, and is reported on a separate **unowned** line —
+  never escalated (the bead is live, so this is a routing gap an operator can
+  close, not a stranded PR) and never folded into the silence reserved for PRs an
+  automated path is actually driving. Collapsing the two would make the scan
+  quieter without making it truer.
+
+**"PR number" means every key that names one.** `pr_number` is what the refinery
+stamps, but it is not the only key in use: the fork-sync flow records `fork_pr` /
+`fork_pr_url` and no `pr_number` at all. Every PR-keyed lookup — the tracked set,
+the in-flight rework probes, and the closed-bead resolution — reads the same
+widened key set, so a bead visible to one is visible to all of them. Widening a
+single lookup is worse than widening none: it flips such a PR from *anchorless*
+to tracked-but-unprobeable, which reads as resolved while the in-flight probes
+still cannot see the bead holding the branch. Matching is on the number alone, so
+it inherits the same single-repo scoping the `pr_number` path has always assumed.
 
 Note the asymmetry with the rest of this document: the other dispositions fix a
 bead whose PR misbehaved, while this one surfaces a PR whose bead is already
