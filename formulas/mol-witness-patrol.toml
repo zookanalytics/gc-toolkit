@@ -4,6 +4,13 @@ Witness patrol loop. Poured as a root-only wisp on startup:
   gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
+Those are TWO writes, and the gap between them is load-bearing: a wisp
+poured but not assigned belongs to nobody, so it never reaches a hook and
+no assignee-scoped query can ever find it again. Guard the assign wherever
+you pour (see `next-iteration`), and reconcile by TITLE rather than by
+assignee so an orphan from an interrupted pour is still collectable
+(tk-fj56a).
+
 Each wisp is ONE iteration: check for work, patrol, pour the next
 iteration. On crash, re-read the formula steps and determine where
 you left off from context (bead state, mail state, last action).
@@ -717,11 +724,35 @@ description = """
 
 End of patrol cycle. Pour the next iteration, then wait or exit.
 
-**1. Pour next iteration BEFORE burning:**
+**1. Pour next iteration BEFORE burning — and GUARD the assign:**
+
+The pour and the assign are two separate writes. If the assign fails and
+you burn anyway, the next wisp is left with NO assignee: it never lands on
+your hook, so the loop is DROPPED, and because it is invisible to every
+assignee-scoped query it also leaks forever, one row per interrupted cycle
+(tk-fj56a; one found live at ~3.5h old, 2026-07-28). So on any failure,
+roll the pour back and do NOT proceed to step 3 — a surviving current wisp
+is recoverable, a dropped loop is not. The startup reconcile is the
+backstop, not the fix: it now scans by TITLE rather than assignee, so it
+can collect a stray this rollback misses.
+
 ```bash
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --json | jq -r '.new_epic_id')
-gc bd update "$NEXT" --assignee=$GC_AGENT
+# >>> patrol-wisp-pour
+NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --json | jq -r '.new_epic_id // empty')
+if [ -z "$NEXT" ]; then
+  echo "Could not pour next witness wisp; NOT burning this one."
+  exit 1
+fi
+if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
+  echo "Could not assign poured wisp $NEXT; rolling it back and NOT burning this one."
+  gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile will collect it."
+  exit 1
+fi
+# <<< patrol-wisp-pour
 ```
+
+If either guard fires, stay on the current wisp and retry the pour on the
+next cycle. Skip steps 2 and 3.
 
 **2. Wait before next cycle:**
 ```bash
@@ -730,12 +761,17 @@ sleep {{event_timeout}}
 
 Previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. Fixed sleep gives predictable idle cost.
 
-**3. Burn this wisp:**
+**3. Burn this wisp — only if step 1 succeeded:**
 ```bash
 gc bd mol burn <this-wisp-id> --force
 ```
 
+Burning is conditional on the next wisp existing AND being assigned to
+you. Never burn to "clean up" after a failed pour: that trades one
+recoverable wisp for a stopped patrol loop.
+
 The new wisp is ready. Re-read formula steps to start
 the next patrol cycle.
 
-**Exit criteria:** Next wisp poured, this wisp burned."""
+**Exit criteria:** Next wisp poured and assigned, this wisp burned. Or:
+the pour/assign guard fired, this wisp still alive, retry next cycle."""
