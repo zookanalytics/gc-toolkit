@@ -59,6 +59,21 @@
 #        re-review is dispatched, not suppressed by the head guard. Regression for
 #        tk-v2b0k finding #1 (no-pool marker must not block a later configured
 #        dispatch at the same head).
+#   (32)-(36) a bead can name its PR under keys other than pr_number (fork_pr,
+#        fork_pr_url), and every PR-keyed lookup must read all of them:
+#   (32) a fork_pr-keyed rework child already in flight is SEEN by the conflict
+#        arm's probe -> no second rebase child (no force-push over it). The half
+#        of the widening that is easy to skip and expensive to miss.
+#   (33) a fork_pr / fork_pr_url-keyed LIVE bead makes its PR tracked -> no
+#        false ANCHORLESS finding repeating every patrol wake (gc-qin3c/PR#100).
+#   (34) tracked is NOT owned: a live bead with no merge_result / merge_strategy /
+#        branch / target gets its own UNOWNED line, never escalated and never
+#        folded into silence — widening alone would just trade a false finding
+#        for false quiet.
+#   (35) a fork-keyed bead that DOES carry gating metadata is owned -> silent.
+#   (36) the CLOSED-bead resolution is widened the same way, so a fork_pr-keyed
+#        closed anchor resolves and escalates instead of degrading into the
+#        non-escalating "no bead in any state" branch.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,6 +124,7 @@ bead-P|216|main||
 bead-Q|217|main||
 bead-R|218|main||
 bead-S|219|main||
+bead-Z|230|main||
 A
 
 # PR states (gh pr view source):
@@ -146,6 +162,7 @@ cat > "$TMP/prs" <<'P'
 217|OPEN||false||main|polecat/bead-Q|head217|CONFLICTING|DIRTY
 218|OPEN||false||main|polecat/bead-R|head218|CONFLICTING|DIRTY
 219|OPEN||false||main|polecat/bead-S|head219|CONFLICTING|DIRTY
+230|OPEN||false||main|polecat/bead-Z|head230|CONFLICTING|DIRTY
 P
 
 # Open PRs as `gh pr list` sees them (the anchorless scan's PR -> BEAD side):
@@ -158,6 +175,11 @@ P
 #   304 bead closed, marker ALREADY set          -> flagged, not re-escalated
 #   77  no bead, but a live bead references PR#7 -> flagged (exact match, not
 #                                                   swallowed by the "7" prefix)
+#   401 live bead keyed ONLY by fork_pr, no gating metadata     -> UNOWNED
+#   402 live bead keyed ONLY by fork_pr_url, no gating metadata -> UNOWNED
+#   403 live bead keyed ONLY by fork_pr, WITH merge_result      -> silent (owned)
+#   404 live bead keyed by pr_number, no gating metadata        -> UNOWNED
+#   405 closed anchor keyed ONLY by fork_pr, open PR            -> ANCHORLESS
 cat > "$TMP/openprs" <<'O'
 203|false|polecat/bead-C|main
 211|false|polecat/bead-K|main
@@ -166,7 +188,27 @@ cat > "$TMP/openprs" <<'O'
 303|true|polecat/dead-3|main
 304|false|polecat/dead-4|main
 77|false|polecat/dead-x|main
+401|false|fork/sync-401|main
+402|false|fork/sync-402|main
+403|false|fork/sync-403|main
+404|false|polecat/plain-404|main
+405|false|fork/sync-405|main
 O
+
+# Live beads outside the refinery's own flow — the fixtures for the widened key
+# set and the tracked-vs-OWNED split. Transcribed from the real shape: gascity
+# gc-qin3c names PR#100 as fork_pr/fork_pr_url with NO pr_number, no
+# merge_result, no branch, no target, no merge_strategy, assignee=operator.
+# Keyed on pr_number alone every one of these PRs reported ANCHORLESS forever;
+# widened but collapsed into "tracked", the ungated ones would go SILENT — which
+# is quieter without being truer, since nothing will land them either way.
+#   key<TAB>pr<TAB>id<TAB>assignee<TAB>gating
+printf '%s\n' \
+  'fork_pr	401	live-fork	operator	-' \
+  'fork_pr_url	402	live-forkurl	operator	-' \
+  'fork_pr	403	live-forkgated	refinery	yes' \
+  'pr_number	404	live-plain	operator	-' \
+  > "$TMP/livex"
 
 # Closed beads that still name a PR (the anchorless arm's bead resolution):
 #   pr<TAB>bead-id<TAB>anchorless_flagged-marker<TAB>merge_result<TAB>created_at
@@ -178,12 +220,19 @@ O
 # PR. Both the rework child and the anchor carry merge_result, and the anchor is
 # listed LAST, so only "oldest bead carrying merge_result" resolves it correctly.
 # dead-4 is pre-flagged, so it must be reported but NOT re-escalated.
+#
+# The 6th column is the metadata key the closed bead names its PR with (default
+# pr_number). dead-5 names PR#405 only as fork_pr: keyed on pr_number alone the
+# resolution finds nothing, the arm falls into the "no bead in any state" branch
+# — which by design does NOT escalate — and a genuinely stranded PR is downgraded
+# to a log line forever.
 printf '%s\n' \
-  '301	review-1	-	-	2026-01-02T00:00:00Z' \
-  '301	rework-1	-	pull_request	2026-01-03T00:00:00Z' \
-  '301	dead-1	-	pull_request	2026-01-01T00:00:00Z' \
-  '303	dead-3	-	pull_request	2026-01-01T00:00:00Z' \
-  '304	dead-4	304	pull_request	2026-01-01T00:00:00Z' \
+  '301	review-1	-	-	2026-01-02T00:00:00Z	-' \
+  '301	rework-1	-	pull_request	2026-01-03T00:00:00Z	-' \
+  '301	dead-1	-	pull_request	2026-01-01T00:00:00Z	-' \
+  '303	dead-3	-	pull_request	2026-01-01T00:00:00Z	-' \
+  '304	dead-4	304	pull_request	2026-01-01T00:00:00Z	-' \
+  '405	dead-5	-	pull_request	2026-01-01T00:00:00Z	fork_pr' \
   > "$TMP/dead"
 
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mailbody"
@@ -221,6 +270,13 @@ printf '%s\n' \
 #                                              STATUS LIST alone must make them
 #                                              visible, with no operator marker to
 #                                              fall back on.
+#   child-Z   PR#230, open, names it as fork_pr (6th column) and carries NO
+#                                              branch -> case (32): the PR
+#                                              dimension is the ONLY thing that
+#                                              can see it. Keyed on pr_number
+#                                              alone the probe misses it and the
+#                                              arm force-pushes over a rework
+#                                              already in flight.
 printf '%s\n' \
   '211	child-K' \
   '7	child-tiny' \
@@ -228,6 +284,7 @@ printf '%s\n' \
   '999	child-Q	polecat/bead-Q	blocked	-' \
   '998	child-R	polecat/bead-R	hooked	-' \
   '997	child-S	polecat/bead-S	pinned	-' \
+  '230	child-Z	-	open	-	fork_pr' \
   > "$TMP/children"
 
 FIX_POOL="test-rig/gc-toolkit.polecat"
@@ -328,19 +385,40 @@ case "$2" in
         # "who used to own this PR". Must be matched BEFORE the generic
         # pr_number= arm below, which would otherwise swallow it and return the
         # live children instead.
-        num=""
-        for a in "$@"; do case "$a" in pr_number=*) num="${a#pr_number=}" ;; esac; done
+        #
+        # The arm is keyed the same THREE ways the script asks (pr_number=,
+        # fork_pr=, --has-metadata-key fork_pr_url), because it now issues one
+        # read per key and unions them. A closed bead's key lives in $FAKE_DEAD's
+        # 6th column (default pr_number), so a closed anchor keyed only by
+        # fork_pr resolves exactly as the real ledger would.
+        qkey="pr_number"; num=""
+        for a in "$@"; do
+          case "$a" in
+            pr_number=*) qkey="pr_number"; num="${a#pr_number=}" ;;
+            fork_pr=*)   qkey="fork_pr";   num="${a#fork_pr=}" ;;
+            fork_pr_url) qkey="fork_pr_url" ;;
+          esac
+        done
         out=""
-        while IFS="$(printf '\t')" read -r pr bid flagged mres created; do
-          [ "$pr" = "$num" ] || continue
+        while IFS="$(printf '\t')" read -r pr bid flagged mres created dkey; do
+          [ -n "$bid" ] || continue
+          [ -n "$dkey" ] && [ "$dkey" != "-" ] || dkey="pr_number"
+          [ "$dkey" = "$qkey" ] || continue
+          # The URL arm asks for every bead HOLDING the key, not a value match —
+          # the script parses the number out of the URL itself.
+          [ "$qkey" = "fork_pr_url" ] || [ "$pr" = "$num" ] || continue
           [ "$flagged" = "-" ] && flagged=""
           [ "$mres" = "-" ] && mres=""
-          obj=$(printf '{"id":"%s","created_at":"%s","metadata":{"pr_number":"%s","anchorless_flagged":"%s","merge_result":"%s"}}' \
-                  "$bid" "$created" "$pr" "$flagged" "$mres")
+          case "$dkey" in
+            fork_pr_url) keyjson=$(printf '"fork_pr_url":"https://github.com/acme/repo/pull/%s"' "$pr") ;;
+            *)           keyjson=$(printf '"%s":"%s"' "$dkey" "$pr") ;;
+          esac
+          obj=$(printf '{"id":"%s","created_at":"%s","metadata":{%s,"anchorless_flagged":"%s","merge_result":"%s"}}' \
+                  "$bid" "$created" "$keyjson" "$flagged" "$mres")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_DEAD"
         printf '[%s]\n' "$out" ;;
-      *"--metadata-field branch="*|*"--metadata-field pr_number="*)
+      *"--metadata-field branch="*|*"--metadata-field pr_number="*|*"--metadata-field fork_pr="*|*"--has-metadata-key fork_pr_url"*)
         # The conflict arm's pre-dispatch probe, keyed on pr_number OR branch.
         # Returns anchors AND rework children (the real ledger does not
         # distinguish them — merge_result does, and the arm filters on it), and
@@ -384,16 +462,31 @@ case "$2" in
           bad-array)  printf '[1, 2]\n'; exit 0 ;;
           object-map) printf '{"other-anchor": {"id": "other-anchor", "metadata": {"merge_result": "pull_request"}}}\n'; exit 0 ;;
         esac
+        # The PR dimension is asked THREE ways now (one read per key that can name
+        # a PR), so the stub keys on each of them. The URL arm is a
+        # --has-metadata-key query with no value to match — it returns every bead
+        # HOLDING fork_pr_url and the script parses the number out itself, which is
+        # exactly why it cannot be an exact --metadata-field filter.
         key=""; val=""; sts=""; prev=""
         for a in "$@"; do
           case "$a" in
-            pr_number=*) key="pr";     val="${a#pr_number=}" ;;
-            branch=*)    key="branch"; val="${a#branch=}" ;;
+            pr_number=*)  key="pr_number";   val="${a#pr_number=}" ;;
+            fork_pr=*)    key="fork_pr";     val="${a#fork_pr=}" ;;
+            fork_pr_url)  key="fork_pr_url" ;;
+            branch=*)     key="branch";      val="${a#branch=}" ;;
           esac
           [ "$prev" = "--status" ] && sts="$a"
           prev="$a"
         done
         visible() { printf '%s' ",$sts," | grep -q ",$1,"; }
+        # A bead's PR key -> the metadata object that names it. fork_pr_url holds a
+        # URL, so the number only reaches the script through the parse.
+        keyjson_for() {
+          case "$1" in
+            fork_pr_url) printf '"fork_pr_url":"https://github.com/acme/repo/pull/%s"' "$2" ;;
+            *)           printf '"%s":"%s"' "$1" "$2" ;;
+          esac
+        }
         out=""
         while IFS='|' read -r id pr target mhold rhold cset cmark; do
           [ -n "$id" ] || continue
@@ -401,8 +494,9 @@ case "$2" in
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_RETARGETED" 2>/dev/null && continue
           case "$key" in
-            pr)     [ "$pr" = "$val" ] || continue ;;
-            branch) [ "polecat/$id" = "$val" ] || continue ;;
+            pr_number) [ "$pr" = "$val" ] || continue ;;
+            branch)    [ "polecat/$id" = "$val" ] || continue ;;
+            *)         continue ;;   # gating anchors are always pr_number-keyed
           esac
           visible open || continue
           # Anchors carry merge_result — that is what marks them as NOT a rework
@@ -411,18 +505,22 @@ case "$2" in
                   "$id" "$pr" "$id" "$rhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
-        while IFS="$(printf '\t')" read -r pr cid cbranch cstatus crhold; do
+        while IFS="$(printf '\t')" read -r pr cid cbranch cstatus crhold ckey; do
           [ -n "$cid" ] || continue
           [ -n "$cstatus" ] && [ "$cstatus" != "-" ] || cstatus="open"
           [ "$cbranch" = "-" ] && cbranch=""
           [ "$crhold" = "-" ] && crhold=""
+          # 6th column: which key this child names its PR with (default pr_number).
+          [ -n "$ckey" ] && [ "$ckey" != "-" ] || ckey="pr_number"
           case "$key" in
-            pr)     [ "$pr" = "$val" ] || continue ;;
-            branch) [ -n "$cbranch" ] && [ "$cbranch" = "$val" ] || continue ;;
+            pr_number|fork_pr) [ "$ckey" = "$key" ] && [ "$pr" = "$val" ] || continue ;;
+            fork_pr_url)       [ "$ckey" = "fork_pr_url" ] || continue ;;
+            branch)            [ -n "$cbranch" ] && [ "$cbranch" = "$val" ] || continue ;;
+            *)                 continue ;;
           esac
           visible "$cstatus" || continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","branch":"%s","rebase_hold":"%s"}}' \
-                  "$cid" "$pr" "$cbranch" "$crhold")
+          obj=$(printf '{"id":"%s","metadata":{%s,"branch":"%s","rebase_hold":"%s"}}' \
+                  "$cid" "$(keyjson_for "$ckey" "$pr")" "$cbranch" "$crhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_CHILDREN"
         printf '[%s]\n' "$out" ;;
@@ -450,20 +548,48 @@ case "$2" in
         # FAKE_LIVE_FAIL models a failed ledger read (empty output, NOT "[]") so
         # the fail-closed guard can be exercised.
         [ -n "${FAKE_LIVE_FAIL:-}" ] && exit 0
+        # Beads are emitted with the metadata that decides OWNERSHIP, not just the
+        # PR key: gating anchors are in this set BECAUSE they carry
+        # merge_result=pull_request, and rework children carry branch/target. That
+        # is what separates "a live bead names this PR" (tracked) from "something
+        # will actually land it" (owned) — the distinction the UNOWNED arm reads.
+        keyjson_for() {
+          case "$1" in
+            fork_pr_url) printf '"fork_pr_url":"https://github.com/acme/repo/pull/%s"' "$2" ;;
+            *)           printf '"%s":"%s"' "$1" "$2" ;;
+          esac
+        }
         out=""
         while IFS='|' read -r id pr target mhold rhold cset cmark; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_RETARGETED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s"}}' "$id" "$pr")
+          obj=$(printf '{"id":"%s","assignee":"refinery","metadata":{"pr_number":"%s","merge_result":"pull_request","branch":"polecat/%s"}}' \
+                  "$id" "$pr" "$id")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
-        while IFS="$(printf '\t')" read -r pr cid cbranch cstatus crhold; do
+        while IFS="$(printf '\t')" read -r pr cid cbranch cstatus crhold ckey; do
           [ -n "$cid" ] || continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s"}}' "$cid" "$pr")
+          [ -n "$cbranch" ] && [ "$cbranch" != "-" ] || cbranch="polecat/$cid"
+          [ -n "$ckey" ] && [ "$ckey" != "-" ] || ckey="pr_number"
+          obj=$(printf '{"id":"%s","assignee":"","metadata":{%s,"branch":"%s","target":"main"}}' \
+                  "$cid" "$(keyjson_for "$ckey" "$pr")" "$cbranch")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_CHILDREN"
+        # Live beads that name a PR but are NOT part of the refinery's own flow:
+        # non-canonical keying and/or no gating metadata at all. Modeled only in
+        # this (PR -> BEAD) direction, which is the one they change.
+        #   key<TAB>pr<TAB>id<TAB>assignee<TAB>gating("yes" = carries merge_result)
+        while IFS="$(printf '\t')" read -r lkey lval lid lassignee lgating; do
+          [ -n "$lid" ] || continue
+          [ "$lassignee" = "-" ] && lassignee=""
+          gjson=""
+          [ "$lgating" = "yes" ] && gjson=',"merge_result":"pull_request"'
+          obj=$(printf '{"id":"%s","assignee":"%s","metadata":{%s%s}}' \
+                  "$lid" "$lassignee" "$(keyjson_for "$lkey" "$lval")" "$gjson")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "${FAKE_LIVEX:-/dev/null}"
         printf '[%s]\n' "$out" ;;
       *) printf '[]\n' ;;
     esac ;;
@@ -553,7 +679,8 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
        FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
-       FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody"
+       FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody" \
+       FAKE_LIVEX="$TMP/livex"
 
 # --- Run 1: the disposition matrix. ------------------------------------------
 OUT1="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
@@ -735,9 +862,85 @@ printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#302' \
 eq "$(grep -c 'anchorless open PR#302' "$TMP/mail")" "0" \
    "(14) unboundable (no-bead) finding is reported but never escalated"
 
-printf '%s\n' "$OUT1" | grep -q '5 anchorless open PRs' \
-  && ok "run 1 summary reports 5 anchorless open PRs" \
+printf '%s\n' "$OUT1" | grep -q '6 anchorless open PRs' \
+  && ok "run 1 summary reports 6 anchorless open PRs" \
   || bad "run 1 summary anchorless count (got: $OUT1)"
+
+# --- (32)-(36) a bead can name its PR under keys other than pr_number. ---------
+# reconcile built every PR-keyed lookup from metadata.pr_number ALONE, so a live
+# bead naming its PR as fork_pr / fork_pr_url was invisible to all of them. The
+# observed case is gascity gc-qin3c / PR#100: open, live, naming the PR — and
+# reported ANCHORLESS on every single refinery cycle, re-triaged from scratch
+# each wake with nothing any pass could do to clear it.
+
+# (32) The BEAD -> PR direction: the in-flight probe. child-Z is open on PR#230
+# under fork_pr and carries no branch, so the branch dimension cannot see it
+# either — the widened PR key is the only thing standing between a conflicted PR
+# and a second force-push onto a rework already in flight. This is the half of
+# the widening that is easy to skip and expensive to miss.
+eq "$(grep -c 'Rebase PR#230' "$TMP/created")" "0" \
+   "(32) fork_pr-keyed rework child in flight -> no second rebase child (probe sees it)"
+
+# (33) The PR -> BEAD direction: a fork_pr-keyed live bead makes its PR tracked,
+# so it is no longer reported as anchorless...
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#401' \
+  && bad "(33) PR named by a live fork_pr-keyed bead must not be reported anchorless" \
+  || ok "(33) fork_pr-keyed live bead makes its PR tracked (no false anchorless)"
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#402' \
+  && bad "(33) PR named by a live fork_pr_url-keyed bead must not be reported anchorless" \
+  || ok "(33) fork_pr_url-keyed live bead makes its PR tracked (number parsed from the URL)"
+eq "$(grep -c 'anchorless open PR#401' "$TMP/mail")" "0" \
+   "(33) fork_pr-keyed tracked PR is never escalated"
+
+# (34) ...but tracked is NOT owned. Widening the key set alone would convert
+# PR#401 from a noisy false finding into SILENCE, which is the exact downside the
+# cheap alternative (hand-stamping pr_number) was rejected for. A live bead with
+# no merge_result, no branch, no target and no merge_strategy tracks the PR
+# without owning it: nothing will land it either way, so it keeps its own line.
+printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#401' \
+  && ok "(34) tracked-but-ungated PR reported as UNOWNED, not silently dropped" \
+  || bad "(34) tracked-but-ungated PR reported as UNOWNED (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#401.*live-fork (operator)' \
+  && ok "(34) UNOWNED line names the live bead and its assignee" \
+  || bad "(34) UNOWNED line names the bead + assignee (got: $(printf '%s\n' "$OUT1" | grep 'PR#401' || true))"
+printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#402' \
+  && ok "(34) fork_pr_url-keyed ungated PR also reported as UNOWNED" \
+  || bad "(34) fork_pr_url-keyed ungated PR reported as UNOWNED (got: $OUT1)"
+# The rule is about gating metadata, not about the fork keys: a plain
+# pr_number-keyed bead with nothing to act on is just as unowned.
+printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#404' \
+  && ok "(34) pr_number-keyed bead with no gating metadata is UNOWNED too (not a fork-only rule)" \
+  || bad "(34) ungated pr_number-keyed bead is UNOWNED (got: $OUT1)"
+# Non-escalating: the naming bead is LIVE, so this is a routing gap an operator
+# can close, not a stranded PR. Mailing it would repeat every wake.
+eq "$(grep -c 'PR#401' "$TMP/mail")" "0" \
+   "(34) UNOWNED is reported but never escalated (a live bead still names it)"
+
+# (35) A bead that DOES carry gating metadata is owned, whatever key it used to
+# name the PR — so it stays silent. Without this the UNOWNED arm would just be
+# the anchorless arm under a new name.
+printf '%s\n' "$OUT1" | grep -q 'PR#403' \
+  && bad "(35) fork_pr-keyed bead WITH gating metadata must be silent (owned)" \
+  || ok "(35) fork_pr-keyed bead with gating metadata -> owned, no line at all"
+printf '%s\n' "$OUT1" | grep -q '3 unowned open PRs' \
+  && ok "(34) run 1 summary reports 3 unowned open PRs" \
+  || bad "(34) run 1 summary unowned count (got: $OUT1)"
+
+# (36) The CLOSED-bead resolution is widened the same way. dead-5 named PR#405
+# only as fork_pr: keyed on pr_number alone it resolves to nothing, the arm falls
+# into the "no bead in any state" branch — which by design does NOT escalate —
+# and a genuinely stranded PR is silently downgraded to a log line forever.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#405' \
+  && ok "(36) open PR whose closed anchor is fork_pr-keyed is still anchorless" \
+  || bad "(36) fork_pr-keyed closed anchor -> anchorless (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#405.*anchor dead-5 is CLOSED' \
+  && ok "(36) fork_pr-keyed closed anchor is RESOLVED, not reported as 'no bead in any state'" \
+  || bad "(36) fork_pr-keyed closed anchor resolved to dead-5 (got: $(printf '%s\n' "$OUT1" | grep 'PR#405' || true))"
+eq "$(grep -c 'anchorless open PR#405' "$TMP/mail")" "1" \
+   "(36) resolved fork_pr-keyed anchor escalates once (the unwidened path could not)"
+grep '^dead-5' "$TMP/updates" | grep -q 'anchorless_flagged=405' \
+  && ok "(36) escalation bounded by a marker on the fork_pr-keyed closed bead" \
+  || bad "(36) anchorless_flagged marker on dead-5 (got: $(grep dead-5 "$TMP/updates" || true))"
 
 # (INV) NO MERGE AUTHORITY: the observer must never call `gh pr merge` for ANY
 # anchor — the seam that the auto-merge retirement turns on. $FAKE_AUTOMERGE
