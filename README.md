@@ -5,7 +5,7 @@ runtime — custom agents, formulas, and planning workflows for getting work don
 while spending human attention sparingly.
 
 gc-toolkit is built directly on Gas City's primitives (beads, molecules, checks,
-skills, boards); it does not depend on a *fork* of the runtime. It is **not** an
+skills, roles, routing); it does not depend on a *fork* of the runtime. It is **not** an
 extension of [gastown](https://github.com/gastownhall/gastown) — gastown is an
 example pack for Gas City, not an upstream. gc-toolkit borrows what is genuinely
 reusable from it (reusable molecules above all) and is otherwise an independent
@@ -36,7 +36,7 @@ opinions rather than cloned directly.
 ### Docs
 
 - `docs/foundation.md` — guiding beliefs and operating discipline behind gc-toolkit
-- `docs/architecture.md` — the 30,000-ft guide to how those beliefs are built on Gas City's primitives, and where each capability is defined
+- `docs/architecture.md` — the 30,000-ft guide to how those beliefs are composed from Gas City's primitives, and the consistency test that keeps new work grounded
 - `docs/install.md` — wiring gc-toolkit into a city (imports, sub-packs, patches, verification)
 - `docs/roadmap.md` — the shape of the pack's evolution: what's true now and what's next
 - `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`
