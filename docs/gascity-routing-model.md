@@ -331,9 +331,9 @@ still carries only the old field.
 
 ## The read side: the claim predicate
 
-The three lanes above are the **write** side — which field each delivery
-path sets. This is the **read** side: the predicate that decides which
-beads a worker is actually offered. It belongs in this doc because the
+The four lanes above are the **write** side — which field (if any) each
+delivery path sets. This is the **read** side: the predicate that decides
+which beads a worker is actually offered. It belongs in this doc because the
 routing fields mean only what this predicate makes them mean.
 
 `gc hook` "finds routed work using the agent's `work_query` config"
@@ -349,9 +349,17 @@ onto the lanes:
 - **Tier 2 — ready assigned work** (also the read side of **Lane 2**).
   `bd ready --assignee=<candidate> --exclude-type=epic`. Pre-assigned work
   (`bd update --assignee <me>`) that is ready but not yet started.
-- **Tier 3 — routed pool** (the read side of **Lanes 1 and 3**).
+- **Tier 3 — routed pool** (the read side of **Lanes 1 and 3**, and of
+  **Lane 4's classic formula shapes** — the `--on` attach routes the
+  *source* bead and the standalone launch routes the *wisp root*, both
+  through Lane 1's `gc.routed_to` contract, so each is claimed here like
+  any other routed bead).
   `bd ready --metadata-field "gc.routed_to=$target" --unassigned
-  --exclude-type=epic`. A pool worker finds work here, and only here.
+  --exclude-type=epic`. A pool worker finds work here, and only here. The
+  **graph.v2** variants are the exception: they write **no** `gc.routed_to`
+  on either the work bead or the wisp root, so a bead under a graph.v2
+  workflow is dispatched through the graph store and is deliberately absent
+  from Tier 3 (see "the duplicate-wisp trap" above).
 
 Tiers 1 and 2 both run for each of `$GC_SESSION_ID`, `$GC_SESSION_NAME`,
 `$GC_ALIAS` in order, first non-empty result winning, and both match on
