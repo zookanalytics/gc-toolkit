@@ -113,14 +113,91 @@ Migrating to v2 is upstream's recommended remedy; the `phase="vapor"` alternativ
 named in the same error text is the legacy path, not a v2 option
 (formula-spec-v2, *Conformance → Differences from v1*).
 
-## 4. `until` loops (and friends) do not re-execute — "Accepted But Inert"
+## 4. A v2 step advances by **closing its own step bead**, not by `drain-ack`
+
+§3 gets you onto the v2 compiler; it does not say what the resulting step
+*bodies* must then do. That is where a v1 author's habits break, because the
+correct v1 ending is the incorrect v2 ending.
+
+**Every step body closes `$GC_BEAD_ID` on its way out.** Materialized step beads
+are ordinary beads wired together by `blocks` edges, so closing one is precisely
+what makes its dependents Ready. Nothing else advances the graph:
+
+```bash
+bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+# failure: gc.outcome=fail + gc.failure_class=transient|hard + gc.failure_reason
+```
+
+Mirror the canonical bodies in the base `core` pack, which split the idiom
+across two files: `assets/prompts/graph-worker.md` carries the full outcome set
+verbatim — pass, plus `gc.outcome=fail` with `gc.failure_class=transient|hard`
+and a `gc.failure_reason`; `formulas/mol-do-work.toml` carries only the
+`gc.outcome=pass` + `--status=closed` closure and the terminal
+close-then-drain-ack ordering below (its `drain` step), and never names a
+failure class at all.
+
+**`gc runtime drain-ack` is a session verb, not a step verb.** It tells the
+reconciler this session is finished; it closes no bead. So a step body that
+drain-acks while still holding its open, assigned step bead is *stranding work*,
+and the reconciler reads it exactly that way: it emits
+`session.drain_acked_with_assigned_work`, and once the episode ages past the
+confirmation grace it **unassigns and reopens the stranded bead** so the pool can
+reclaim it (`recordDrainAckAssignedWorkEvent` in
+`cmd/gc/session_reconciler.go`, `repairStrandedPoolWorkerBead` in
+`cmd/gc/session_beads.go`). The step returns to the pool, a fresh worker
+claims it, and the workflow respawn-loops at its entry step indefinitely. It
+presents as a routing or pool bug; it is a missing `--status=closed`.
+
+**Terminal steps close, then drain-ack** — in that order.
+
+**The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
+drain-ack without closing anything, so the habit transfers and silently breaks.
+A root-only in-session wisp runs every formula step in one worker session and
+therefore materializes no step beads and no `workflow-finalize` bead at all; its
+root is reaped off the *work issue's* closure instead, by walking
+`gc.input_convoy_id` back to the tracking convoy
+(`collectInputConvoyWorkflowRoots`, `cmd/gc/wisp_autoclose.go`). A materialized
+graph has no such backstop — each step bead is a gate only its own body opens.
+
+**`workflow-finalize` is dispatcher-processed, not self-firing.** The
+`gc.kind = workflow-finalize` bead is a control bead: it sits inert until a `gc
+convoy control --serve` loop picks it up and runs `processWorkflowFinalize`,
+which closes the workflow root first and the finalize bead second
+(`internal/dispatch/runtime.go`). No serve loop ticking → the root never closes,
+however correct the graph is. **A Ready finalize bead with no dispatcher running
+is an operational hold, not a wiring bug** — diagnose it as such before editing
+the formula. Do not take `gc agent list` as evidence either way: it derives
+status purely from config, so `active` means *configured and not suspended*
+(`cmd/gc/cmd_agent.go`), never *serving*.
+
+The evidence that settles it is a ready-query. `gc sling` creates the finalize
+bead **unassigned**, routed by `gc.routed_to = control-dispatcher` (the bare
+`config.ControlDispatcherAgentName`), so an assignee-only query misses it — the
+serve loop's own ready query tries both arms:
+
+```bash
+# routed arm — how a sling-created finalize bead is actually picked up
+bd ready --metadata-field "gc.routed_to=control-dispatcher" --unassigned --json
+# assignee arm — only for a control bead carrying an explicit assignee
+bd ready --assignee=<rig>--control-dispatcher --json
+```
+
+If the finalize bead comes back in that Ready set, the wiring is fine and the
+workflow is purely dispatcher-gated: start the loop.
+
+The mechanics above are source- and pack-level contracts rather than
+spec-documented ones, so re-check them against the fork tip before relying on
+the details (same caveat as §6). Verified against fork `origin/main` at
+`c0571088c`.
+
+## 5. `until` loops (and friends) do not re-execute — "Accepted But Inert"
 
 An `until` loop **runs exactly one iteration**. The compiler validates the
 condition and writes a `loop:` label on the first body step, but **nothing in
 the current runtime consumes it** — neither the v1 cook path nor the v2 control
 dispatcher (formula-spec-v2, *Loops* and *Accepted But Inert*). For
 orchestrator-driven re-execution, use a v2 `check` step (*Runtime → Check*) —
-and route its iterations to a pool (§5). gc-toolkit's patrols re-run by
+and route its iterations to a pool (§6). gc-toolkit's patrols re-run by
 **self-pouring the next cycle**, not by `until`.
 
 Treat the whole *Accepted But Inert* section as "parses, but no behavior" — do
@@ -136,7 +213,7 @@ not design around it:
 (Also note `until` does not use the `{{var}} == value` step-condition syntax —
 it uses the runtime condition grammar, e.g. `probe.status == 'complete'`.)
 
-## 5. `[steps.check]` is fresh-context per iteration **only if pool-routed**
+## 6. `[steps.check]` is fresh-context per iteration **only if pool-routed**
 
 The reason to reach for a check step over an in-session loop is that each
 iteration starts in a **fresh context**. That property is **conditional on how
@@ -195,7 +272,7 @@ Two adjacent facts worth keeping straight:
   `mol-upstream-gc-rebase` — gc-toolkit's first check-loop adoption — replaced
   its file-a-rework-bead-and-re-pour loop with a native one.
 
-## 6. Don't shadow base-pack artifact names
+## 7. Don't shadow base-pack artifact names
 
 Pack artifacts resolve by **layer**: a higher-priority layer (your pack) with a
 formula, prompt fragment, or asset of the **same name** as one in a base pack
@@ -214,7 +291,7 @@ artifact**, so future upstream fixes to it are masked.
   shadow). Preserve that: check the basename against the base packs before
   adding any formula, fragment, or script.
 
-## 7. `pack.toml` authoring traps
+## 8. `pack.toml` authoring traps
 
 Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
 
@@ -247,7 +324,7 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
   | `[pack].includes` | `[imports.<binding>]` |
   | `[agents]`, `[defaults.rig.imports]`, `[[patches.rigs]]`, `[[patches.providers]]` | city-level only (`city.toml`), not `pack.toml` |
 
-## 8. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
+## 9. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
 
 Gas City expands `{{...}}` through **two different engines**, and writing the
 prompt form in a formula silently no-ops the formula. Know which surface you
