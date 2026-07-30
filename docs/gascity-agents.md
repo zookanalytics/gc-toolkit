@@ -66,8 +66,12 @@ each accept a *different* one of these forms.
    gc-toolkit / gc-toolkit . polecat
    │           │           └─ Template     (TOML: `template = "..."`)
    │           └─ BindingName              (TOML: `[rigs.imports.<key>]`)
-   └─ Dir / Scope                          (TOML: `scope = "city"|"rig"`)
+   └─ Dir / Scope                          (TOML: `scope = "city"|"rig"`, or omitted)
 ```
+
+`scope` is a *three*-state axis, not two: `"city"`, `"rig"`, or
+**omitted**. Omitted is not a synonym for either one — see
+[Scope is tri-state](#scope-is-tri-state-omitted-is-not-city) below.
 
 | String | Source | Where it appears |
 |---|---|---|
@@ -79,6 +83,47 @@ each accept a *different* one of these forms.
 Source for the computation: `NamedSession.QualifiedName()` in
 `rigs/gascity/internal/config/config.go`, around the
 `NamedSession` struct definition.
+
+### Scope is tri-state: omitted is not city
+
+`scope` on a pack-defined `[[named_session]]` or on an `agent.toml`
+takes three states, and the config loader accepts all three
+(`validateNamedSessions` and the agent-scope enum both allow
+`"city"`, `"rig"`, **or empty**):
+
+| `scope` | Instantiated |
+|---|---|
+| `"city"` | city expansion only — one identity per city, `Dir` is `""` |
+| `"rig"` | rig expansion only — one identity per rig, `Dir` is the rig name |
+| *omitted* | **unscoped — both contexts**: kept at city scope *and* stamped out once per rig |
+
+Omitting `scope` is not a shorthand for `"city"`. An unscoped entry
+in a **city-level** pack (city-root `includes = [...]`, or
+`[imports.<binding>]`) materializes twice over: `filterNamedSessionsByScope`
+keeps it in the city expansion (`Dir` empty), and
+`expandCityImportedNamedSessionsForRigs` *also* stamps a copy with
+`Dir = <rig>` for every rig — it skips only `scope = "city"`. So one
+stanza yields both `<binding>.<template>` and
+`<rig>/<binding>.<template>` for each rig. `expandCityImportedAgentsForRigs`
+and `filterAgentsByScope` do exactly the same for `agent.toml` scope.
+All four live in `rigs/gascity/internal/config/pack.go`.
+
+Two qualifiers on the fan-out:
+
+- It is skipped for any rig that declares the same import binding
+  itself (`rigDeclaresImportBinding`) — that rig gets the session
+  through its own import instead of a stamped copy.
+- It applies to *city-level* packs only. In a **rig-level** pack
+  (a rig's own `includes = [...]`, or `[rigs.imports.<binding>]`)
+  an unscoped entry is kept by rig expansion alone, so there it
+  does behave like `scope = "rig"`.
+
+The JSON-schema tag is `jsonschema:"enum=city,enum=rig"` — it
+enumerates only the two explicit values, so neither the generated
+schema nor `docs/reference/config.md`'s enum column reveals the
+third state. Read the `Scope` field doc comments in
+`internal/config/config.go` instead. If you want one identity, say
+which one: write `scope` explicitly.
 
 ### Worked example — the gc-toolkit polecat
 
@@ -158,7 +203,7 @@ city config. Validated in `validateNamedSessions`
 [[named_session]]
 template = "<agent-name>"  # required; references an agent template
 name = "<override>"        # optional; overrides public identity
-scope = "city" | "rig"     # default: "city"
+scope = "city" | "rig"     # optional; omit = unscoped (BOTH contexts), not "city"
 mode = "on_demand" | "always"  # default: "on_demand"
 ```
 
@@ -173,6 +218,12 @@ expansion:
 - **City-scoped** (`scope = "city"`): Dir is `""`, so QualifiedName
   is just `<binding>.<identity>` (e.g., `gc-toolkit.mechanik`,
   `gc-toolkit.mayor`).
+- **Unscoped** (`scope` omitted): you get *both* of the above from
+  the one stanza — a city identity `<binding>.<identity>` plus a
+  `<rig>/<binding>.<identity>` per rig. "At most one canonical
+  session" then holds per resulting identity, not once overall — an
+  unscoped stanza reserves N+1 identities, not one. See
+  [Scope is tri-state](#scope-is-tri-state-omitted-is-not-city).
 
 `NamedSession.QualifiedName()` only prepends `Dir + "/"` when `Dir`
 is non-empty; everywhere you address a city-scoped singleton (nudge,
