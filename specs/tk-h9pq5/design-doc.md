@@ -303,18 +303,24 @@ reviewer, with the one honest gap flagged.
    filter is fail-safe (it can only decline to orphan, never invent one), so the added clause is
    low-risk. **Resolution: extend the existing structural-skip filter; do not build a new reaper.**
 
-2. **Session legibility — can the role title its session by subject?** ⚠ **Partial — flagged as a
-   dependency, not proven machinery.** The bead assumed `gc session rename` "exists (used by
-   `tools/gc-bead-host.sh`)"; verification shows bead-host actually gets legibility from **alias =
-   bead-id** set at `gc session new` (`gc-bead-host.sh` L161), **not** from `gc session rename`. A
-   **pool-spawned** role has no operator-chosen alias — the reconciler names it anonymously — so v2
-   *does* need a self-titling step, and `gc session rename` could not be confirmed from the code read.
-   **Resolution + open dependency:** the cleanest fix is for the role to **rename its own session to
-   the subject bead's id/title on claim**; before Phase 1, confirm `gc session rename` exists and is
-   callable by a pool session. **Fallbacks if it does not:** (a) have the reconciler set the spawned
-   session's alias from the routed bead's `gc.continuation_group`, or (b) accept anonymous tmux names
-   and rely on the board (which resolves subject→group) for legibility. This is the one v2 assumption
-   that rests on an unconfirmed capability; Phase 1's gate must exercise it explicitly.
+2. **Session legibility — can the role title its session by subject?** ⚠ **Partial — the *command* is
+   proven; the *integration* is not.** `gc session rename` **exists and is a shipped pattern**:
+   `gc session rename <session> <title>` is a live subcommand, `tools/gc-bead-host.sh:564` calls it on
+   the host-resume path, and `template-fragments/canonical-self-rename.template.md` already instructs a
+   canonical session to self-title via `gc session rename "$GC_SESSION_ID" "<focus>"`. So the capability
+   is not in doubt. What bead-host relied on for *initial* legibility is a different mechanism, though:
+   **alias = bead-id** set at `gc session new` (`gc-bead-host.sh` L161) — an operator/tool choosing the
+   name at creation. A **pool-spawned** role has no such chosen alias — the reconciler names it
+   anonymously — so v2 needs the role to **self-title on claim**, which is genuinely new relative to
+   bead-host. **The unproven dependency is therefore the integration, not the command:** that a
+   *pool-spawned* session (anonymously named, able to choose its own alias only after it claims) can
+   successfully rename itself to the subject on claim. **Resolution:** the role renames its own session
+   to the subject bead's id/title on claim, reusing the established `$GC_SESSION_ID` self-rename shape;
+   before Phase 1, confirm that shape works for a pool-spawned session specifically. **Fallbacks if it
+   does not:** (a) have the reconciler set the spawned session's alias from the routed bead's
+   `gc.continuation_group`, or (b) accept anonymous tmux names and rely on the board (which resolves
+   subject→group) for legibility. This is the one v2 assumption whose *integration* is unproven; Phase
+   1's gate must exercise it explicitly.
 
 3. **Queue vs. live under memory pressure — deferred.** Whether pending turns queue rather than each
    going live is a LATER idea, per the operator; it is a **non-goal** here. Note only that
@@ -335,9 +341,11 @@ reviewer, with the one honest gap flagged.
 
 ## Risks and Mitigations
 
-- **[Flagged] Self-titling rests on an unconfirmed `gc session rename`.** (Q2.) *Mitigation:* confirm
-  the capability in Phase 0/1; two concrete fallbacks (reconciler-set alias; board-only legibility)
-  exist, so the design does not hard-depend on it.
+- **[Flagged] Self-titling rests on the unproven *pool-session* self-rename integration.** (Q2.) The
+  `gc session rename` command itself is proven (bead-host L564; the canonical-self-rename template);
+  what is unproven is that a *pool-spawned* session can self-title on claim. *Mitigation:* confirm the
+  integration in Phase 0/1; two concrete fallbacks (reconciler-set alias; board-only legibility) exist,
+  so the design does not hard-depend on it.
 - **Cold reconstitution quality depends on record discipline.** If turns don't write good outcomes to
   the subject, a cold resume reconstitutes from a thin record. *Mitigation:* the role's *Record* step
   is mandatory and gated (Phase 1 asserts a turn writes a subject-bead outcome before it closes); this
@@ -360,10 +368,11 @@ reviewer, with the one honest gap flagged.
 Sequenced assembly-first; each phase independently shippable and gated. No phase requires a schema
 migration.
 
-**Phase 0 — Confirm the one unproven dependency (gates Q2).** Verify `gc session rename` exists and is
-callable by a pool-spawned session; if not, pick a fallback (reconciler-set alias or board-only
-legibility). ~hours, zero new config. **Outcome:** the self-titling mechanism is chosen before Phase 1
-builds on it.
+**Phase 0 — Confirm the one unproven dependency (gates Q2).** The `gc session rename` command already
+exists (bead-host L564; the canonical-self-rename template); verify the *integration* — that a
+**pool-spawned** session can rename itself to the subject on claim; if it cannot, pick a fallback
+(reconciler-set alias or board-only legibility). ~hours, zero new config. **Outcome:** the self-titling
+mechanism is chosen before Phase 1 builds on it.
 
 **Phase 1 — The role + the turn (the spine).** `agents/conversation/agent.toml` (`run-operator` shape,
 hold-not-close) + `prompt.template.md`; the turn-filing convention; the dedicated conversation pool.
@@ -398,8 +407,9 @@ merge gate and impl-bead closer; measurement = intent only, no meter.
 
 Genuinely open after the resolutions above — best answered by the running system:
 
-1. **Does `gc session rename` support pool-session self-titling?** The one unconfirmed dependency
-   (Q2); Phase 0 settles it.
+1. **Can a pool-spawned session self-title on claim?** `gc session rename` exists and is a shipped
+   pattern; the one unproven dependency (Q2) is whether an anonymously-named pool session can rename
+   itself to the subject on claim. Phase 0 settles it.
 2. **How are the mayor and mechanik engaged once coordination distributes to node-conversations?**
    The operator's standing live question (carried from v1's Open Questions). v2's provisional bet:
    the canonical mayor and `mechanik-thread` stay as root/strategy conversations (both already ship as
