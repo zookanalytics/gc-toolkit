@@ -85,6 +85,19 @@ Source for the computation: `NamedSession.QualifiedName()` in
 `rigs/gascity/internal/config/config.go`, around the
 `NamedSession` struct definition.
 
+**Two of these are per-session; two are not.** `$GC_SESSION_ID`
+(the session bead ID) and the runtime session name identify *this
+session*. Template and QualifiedName identify the *agent* — and
+the session's alias (the QualifiedName for a named singleton, the
+per-instance alias for a pool worker), exported as both
+`$GC_ALIAS` and `$GC_AGENT` (`internal/session/lifecycle.go`,
+`RuntimeEnvWithSessionContext`), is the identity that `gc sling`,
+`bd update --assignee`, `gc.routed_to`, and `gc mail send` all
+address. That split is why duplicate sessions are a
+*work-ownership* problem and not merely a cosmetic one: bead
+ownership keys on the agent, not the session — see [duplicate
+named-session via manual spawn](#duplicate-named-session-via-manual-spawn).
+
 ### Scope is tri-state: omitted is not city
 
 `scope` on a pack-defined `[[named_session]]` or on an `agent.toml`
@@ -837,12 +850,55 @@ creation-time validation in the manual path at
 when this would become worth fixing structurally; until then,
 the contract is documented here.
 
+**Work ownership — there is no per-session bead ownership.** This
+is the consequence that makes duplicates expensive rather than
+merely untidy. A bead's `assignee` is a single identity string,
+and for a named singleton that string is the *agent* identity —
+its QualifiedName (see [the four strings](#the-four-strings)) — so
+every live session of that agent that resolves it sees the same
+bead. The hook's own sweep makes the split explicit: of `$GC_SESSION_ID`,
+`$GC_SESSION_NAME`, `$GC_ALIAS` ([work routing](#work-routing)
+Tier 1 / Tier 2, `internal/config/workquery.go`), only the first
+two are per-session.
+
+Concretely, once one agent has more than one live session:
+
+- A handback or crash-recovery sweep — `bd list
+  --status=in_progress --assignee=$GC_AGENT`, the idiom the patrol
+  [startup discovery](#startup-discovery-4-tier) and most role
+  prompts use — returns the **same** bead in **every** session.
+  Each will try to drive and finalize it, and `bd` tells neither
+  that a sibling is on it.
+- **Deferred reminders route agent-wide, not to the session that
+  set them.** Observed with duplicate keeper sessions: a queued
+  `DONE` reminder for work one session owned fired into the
+  canonical session's stream.
+- `bd update --claim` does not close the gap. It is an atomic
+  transition, not a lock — the same limitation as the
+  [pool-instance race](#pool-instance-race-on-simultaneous-claim)
+  below.
+
+**Closing the bead is the de-facto mutex** — there is no other
+one. Do the finalize promptly and close; a second session then
+reads `status=closed` and stops. Two corollaries:
+
+- **Re-read immediately before writing.** A top-of-session read
+  goes stale the moment a sibling writes the same bead. Re-read
+  for existing notes and finalize metadata, and append rather than
+  replace, so you do not clobber a sibling's work.
+- **Do not try to de-conflict with a nudge.** A nudge is
+  best-effort and lands at the receiver's next boundary — possibly
+  after the write it was meant to prevent.
+
 **Detection.** `gc session list` shows both. The canonical alias
 will be one; the manual one will have an `…-adhoc-<id>` suffix.
 
 **Recovery.** `gc session close <one-of-them>` collapses to a
 single live instance. Pick the one whose work-in-flight is less
-important to preserve.
+important to preserve; absent that signal, converge on the
+**canonical** — it is the stable identity, and long-running work
+is safest on the session that will not be recycled out from under
+it.
 
 **Avoidance.** Before `gc session new <named-template>`, check
 `gc session list` for a live instance of the same template.
