@@ -31,6 +31,28 @@
 # bead closes (merge to main) and drops off `gc convoy list`. Best-effort: any
 # tool error skips that convoy and is retried next idle pass.
 #
+# OPERATOR GATES: graduation is not a passive label — it makes the convoy bead
+# actionable mr-mode work, so the very next refinery pass REBASES the integration
+# branch onto the target and opens a PR. That is exactly the developer/conflict
+# work an operator holds a graduation to prevent, so this pass honors the same
+# hold markers the merge and rebase paths do (merge-skill.sh, reconcile-merged-
+# prs.sh). Two vetoes, both fail-closed:
+#
+#   (a) the convoy bead itself carries merge_hold or rebase_hold — the operator
+#       gated THIS graduation;
+#   (b) any LIVE bead names the same integration branch in metadata.branch — a
+#       held graduation/rebase bead (veto: operator gate) or an unheld one (veto:
+#       something already owns graduating this branch, and a second assignment
+#       would duplicate its PR).
+#
+# (b) is keyed on the BRANCH, not on the convoy bead, because the branch is what
+# a graduation actually acts on: the operator's hold commonly lives on a SEPARATE
+# rebase bead naming the branch, which a convoy-bead-only check cannot see. The
+# observed failure (gc-8g41r, 2026-06-30) was exactly this — held rebase bead
+# gc-1g2p1 carried merge_hold=operator-gated-graduation for integration/input-
+# area-state with PR#60 open and CONFLICTING, and this pass auto-graduated the
+# convoy anyway because it read neither the marker nor the sibling bead.
+#
 # The refinery patrol runs this on each idle wake, folded into the find-work
 # step's sleep loop AFTER reconcile-merged-prs.sh — so the wake that closes a
 # convoy's last merged child immediately graduates the now-complete convoy.
@@ -55,6 +77,102 @@ if [ -z "${GC_AGENT:-}" ]; then
   echo "reconcile-graduated-convoys: GC_AGENT unset; skip" >&2
   exit 0
 fi
+
+# Every non-closed status, enumerated. A bead an operator NEUTRALISED by BLOCKING
+# it is still the owner of its branch and its hold is still binding, so reading
+# only `open` here would make the standard operator move invisible and graduate
+# straight past it — "treating not-open as gone" is the core error of this bead
+# class (tk-gajop). This is the COMPLEMENT of `closed` over `bd statuses`, spelled
+# positively because --status takes a positive list; `hooked` and `pinned` are as
+# branch-owning as `blocked`. Re-derive if `bd statuses` grows a new status.
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+
+# Truthy in the operators' sense: set, and not one of the explicit "off"
+# spellings. Mirrors merge-skill.sh's reading of merge_hold exactly, so a marker
+# that holds a merge there cannot fail to hold a graduation here.
+is_held() {
+  case "${1:-}" in
+    ""|false|False|FALSE|0|null) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Every live bead whose metadata.branch names <branch>, as compact rows of the id
+# and its two hold markers. --limit=0 so the probe sees the whole set, not a page
+# of it: a truncated page could hide the one held bead that must veto.
+#
+# Returns NON-ZERO on a failed ledger read, which the caller MUST treat as "I
+# cannot tell" and NOT as "nobody holds this branch". Non-empty stdout alone does
+# not mean success — `gc ... --json` reports its own failures as a non-empty JSON
+# *object* on stdout (`{"error": ...}`), which survives an emptiness test, yields
+# zero rows through the projection, and so fails OPEN in the one direction that
+# auto-lands past an operator gate. A genuinely empty result is the literal "[]",
+# which returns zero with no rows.
+probe_branch_beads() {
+  local raw rc out
+  raw=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "branch=$1" \
+    --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)
+  rc=$?
+  # (1) The command's own verdict, checked even when it wrote to stdout.
+  [ "$rc" -eq 0 ] || return 1
+  # (2) No output at all — a broken `gc bd list`, as distinct from "[]". Strictly
+  #     an early-out: (3) also rejects empty input (`jq -e` exits non-zero on it),
+  #     so no test pins this line alone. Kept because it states the ""-vs-"[]"
+  #     contract this helper is built on, where a reader looks for it.
+  [ -n "$raw" ] || return 1
+  # (3) The payload must be the ARRAY of beads we asked for. Rejects an error
+  #     object that arrived with a ZERO exit status.
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  # (4) The projection's own status, captured first: emitted straight to stdout,
+  #     jq's failure would be discarded by the caller's `probe=$(...)` capture.
+  out=$(printf '%s' "$raw" \
+    | jq -c '.[] | {id, hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null) \
+    || return 1
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return 0
+}
+
+# The convoy bead's OWN gate fields — merge_hold, rebase_hold, branch — as one
+# compact object. Same fail-closed contract as probe_branch_beads, for the same
+# reason one level up: gate (a) lives in this bead's metadata, and `gc bd show
+# --json` reports its own failures as a non-empty JSON *object* on stdout
+# (`{"error": ...}`). That object survives an emptiness test, yields EMPTY values
+# through a suppressed `.[0].metadata...` read, and so is indistinguishable from
+# a convoy nobody gated — the one direction that graduates past an operator gate.
+#
+# Returns NON-ZERO on any read the caller cannot trust, which it MUST treat as "I
+# cannot tell" and NOT as "no marker set". `[]` is non-zero too: a bead that is
+# not there carries no metadata to clear the gate with, so it is a skip.
+probe_convoy_meta() {
+  local raw rc out
+  raw=$(gc bd show "$1" ${GC_RIG:+--rig="$GC_RIG"} --json 2>/dev/null)
+  rc=$?
+  # (1) The command's own verdict, checked even when it wrote to stdout.
+  [ "$rc" -eq 0 ] || return 1
+  # (2) No output at all — a broken `gc bd show`, as distinct from "[]". Strictly
+  #     an early-out: (3) also rejects empty input (`jq -e` exits non-zero on it),
+  #     so no test pins this line alone. Kept because it states the ""-vs-"[]"
+  #     contract this helper is built on, where a reader looks for it.
+  [ -n "$raw" ] || return 1
+  # (3) The payload must be the NON-EMPTY ARRAY of beads we asked for. `length > 0`
+  #     is the load-bearing half: it rejects a bare `null` and the `[]` of a bead
+  #     that is not there — payloads the `.[0]` projection below would otherwise
+  #     turn into a clean UNHELD row, the fail-open answer. `type == "array"`
+  #     restates the contract for a reader; unlike probe_branch_beads — whose `.[]`
+  #     iterates an OBJECT's values happily, making its type check load-bearing —
+  #     `.[0]` errors on every non-array, so (4) already covers this half.
+  printf '%s' "$raw" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || return 1
+  # (4) The projection's own status, captured first: emitted straight to stdout,
+  #     jq's failure would be discarded by the caller's `cmeta=$(...)` capture.
+  #     Folding all three fields into ONE validated read is what lets the gate
+  #     checks below index a known-good object instead of re-running a suppressed
+  #     jq per field, where each failure would silently read as "off"/"unset".
+  out=$(printf '%s' "$raw" \
+    | jq -c '.[0] | {hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // ""), branch: (.metadata.branch // "")}' 2>/dev/null) \
+    || return 1
+  printf '%s\n' "$out"
+  return 0
+}
 
 # Owned-ness + member completion come ONLY from `gc convoy list` (ConvoyFields,
 # not bead metadata). City-wide by construction — scoped to this rig below.
@@ -81,7 +199,7 @@ CANDS=$(printf '%s' "$CONVOYS" | jq -r '
 RIG_CONVOYS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --type=convoy --status=open \
   --limit=200 --json 2>/dev/null | jq -r '.[].id' 2>/dev/null)
 
-graduated=0; skipped=0
+graduated=0; skipped=0; held=0
 while IFS="$(printf '\t')" read -r cid ctarget; do
   [ -n "${cid:-}" ] || continue
 
@@ -90,15 +208,81 @@ while IFS="$(printf '\t')" read -r cid ctarget; do
   # dot in a regex match would be a wildcard and could cross-match another id.
   printf '%s\n' "$RIG_CONVOYS" | grep -qxF "$cid" || { skipped=$((skipped + 1)); continue; }
 
+  # One validated read serves both gate (a) and the idempotency check. FAIL
+  # CLOSED on anything untrustworthy — an unreadable convoy bead is one whose
+  # merge_hold/rebase_hold we cannot see, AND one that may be mid-gating
+  # (assignee cleared, branch still set); assigning on either is the
+  # unrecoverable direction, while skipping costs one idle pass.
+  if ! cmeta=$(probe_convoy_meta "$cid"); then
+    echo "reconcile-graduated-convoys: $cid — convoy bead read failed; not graduated (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+
+  # Operator gate (a): the marker is on the convoy bead itself. Checked FIRST —
+  # it is the cheapest gate (metadata already in hand) and the highest priority
+  # (an intentional operator block, independent of every other condition), and
+  # naming it in the log is what makes a deliberately-held convoy diagnosable
+  # rather than indistinguishable from an idempotency skip. merge_hold is "do not
+  # land this yet"; rebase_hold is the narrower "do not rebase/force-push this
+  # branch". Either vetoes: graduation causes BOTH — the refinery rebases the
+  # integration branch and then lands it.
+  if is_held "$(printf '%s' "$cmeta" | jq -r '.hold' 2>/dev/null)"; then
+    echo "reconcile-graduated-convoys: $cid — merge_hold set on the convoy (operator gate); not graduated"
+    held=$((held + 1)); continue
+  fi
+  if is_held "$(printf '%s' "$cmeta" | jq -r '.rhold' 2>/dev/null)"; then
+    echo "reconcile-graduated-convoys: $cid — rebase_hold set on the convoy (operator gate); not graduated"
+    held=$((held + 1)); continue
+  fi
+
   # Idempotency: a convoy already set up for graduation carries metadata.branch
-  # (set below, retained through gating). Its presence means "already
-  # initiated" — never re-assign. A failed/empty show SKIPS (retry next pass)
-  # rather than falling through to assign — never risk re-grabbing a convoy
-  # that is mid-gating (assignee cleared, branch still set) on a transient read.
-  CMETA=$(gc bd show "$cid" ${GC_RIG:+--rig="$GC_RIG"} --json 2>/dev/null)
-  if [ -z "$CMETA" ] || [ "$CMETA" = "[]" ]; then skipped=$((skipped + 1)); continue; fi
-  existing_branch=$(printf '%s' "$CMETA" | jq -r '.[0].metadata.branch // ""' 2>/dev/null)
+  # (set below, retained through gating). Its presence means "already initiated"
+  # — never re-assign, or a convoy mid-gating (assignee cleared, branch still
+  # set) gets re-grabbed and duplicates its PR.
+  existing_branch=$(printf '%s' "$cmeta" | jq -r '.branch' 2>/dev/null)
   if [ -n "$existing_branch" ]; then skipped=$((skipped + 1)); continue; fi
+
+  # Operator gate (b): who else is already on this integration branch? The hold
+  # commonly lives on a SEPARATE bead — the operator files/holds a graduation or
+  # rebase bead for the branch (gc-1g2p1) rather than annotating the convoy — and
+  # that bead is invisible to every check above. FAIL CLOSED on an unreadable
+  # probe: a failed ledger read is indistinguishable from "nobody holds this
+  # branch", and reading it optimistically graduates precisely when we cannot
+  # verify a freeze. A deferred graduation costs one idle pass; an unapproved
+  # rebase of a branch a keeper froze is not recoverable by retry.
+  if ! probe=$(probe_branch_beads "$ctarget"); then
+    echo "reconcile-graduated-convoys: $cid — branch probe on '$ctarget' failed; not graduated (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+
+  # A hold ANYWHERE on this branch is the operator's freeze on the work this
+  # graduation would set in motion.
+  #
+  # `tostring` before the comparison because a marker is not always a STRING: a
+  # writer that stores JSON (`merge_hold: true`) yields a boolean, and
+  # `ascii_downcase` on a boolean ABORTS the jq program — whose error this call
+  # deliberately discards, so the veto would evaporate into an empty `frozen` and
+  # graduate straight past the gate. jq's `//` already folds a boolean `false`
+  # (and null) to "", the off answer, so only the truthy side needs the cast.
+  frozen=$(printf '%s\n' "$probe" \
+    | jq -r 'select([(.hold // ""), (.rhold // "")] | map(tostring | ascii_downcase)
+             | any(. != "" and . != "false" and . != "0" and . != "null")) | .id' 2>/dev/null \
+    | head -1)
+  if [ -n "$frozen" ]; then
+    echo "reconcile-graduated-convoys: $cid — $frozen holds branch '$ctarget' with merge_hold/rebase_hold (operator gate); not graduated"
+    held=$((held + 1)); continue
+  fi
+
+  # Unheld, but something live already names this branch: a graduation is already
+  # in flight for it (a prior anchor whose convoy marker was cleared, a rework
+  # child of its PR, a hand-filed graduation bead). Assigning a second one races
+  # it and duplicates its PR. Keyed on the branch, so it catches an owner this
+  # convoy's own metadata never mentions; the convoy itself is excluded by id.
+  inflight=$(printf '%s\n' "$probe" | jq -r --arg cid "$cid" 'select(.id != $cid) | .id' 2>/dev/null | head -1)
+  if [ -n "$inflight" ]; then
+    echo "reconcile-graduated-convoys: $cid — $inflight already owns branch '$ctarget'; not graduated (would duplicate its PR)"
+    skipped=$((skipped + 1)); continue
+  fi
 
   # Assign the convoy bead to the refinery as an ordinary mr-mode work bead:
   #   branch         = the integration branch to merge (source)
@@ -121,5 +305,5 @@ while IFS="$(printf '\t')" read -r cid ctarget; do
   fi
 done <<< "$CANDS"
 
-echo "reconcile-graduated-convoys: $graduated graduating, $skipped skipped"
+echo "reconcile-graduated-convoys: $graduated graduating, $skipped skipped, $held held"
 exit 0
