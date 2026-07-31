@@ -34,7 +34,7 @@ defines the routing contract; it is not a command tutorial.
 | Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | Attach routes the source and leaves the wisp root unrouted: `rigs/gascity/internal/sling/sling_core.go:482` (`molecule_id` on source) and the rationale comment at `:488-497`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4105`, asserting source `gc.routed_to=mayor` at `:4129` and wisp-root `gc.routed_to` empty at `:4151`). Standalone launch routes the root instead: `slingFormula` finalizes on `mResult.RootID` (`sling_core.go:373`). Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:303-305` with its rationale at `:296-302`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns before routing: `sling_core.go:477-481` → `doStartGraphWorkflow` (`:645-683`). Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 | Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 | Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tiers loop `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd list --status=in_progress --assignee=<candidate>` (in-progress recovery) then `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…` (ready assigned), and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
-| Instance-suffixed `gc.routed_to` normalized on the **demand read side only** | gastownhall/gascity | `17130b324` — "Normalize routed work instance names in demand matching (#4596)". Read side: `controllerDemandRouteTarget` (`rigs/gascity/cmd/gc/build_desired_state.go:1718`, rationale comment at `:1707-1717`), reached from `defaultScaleCheckCountsAndDemand` (`:1474`) only when the pool configures no custom `scale_check` (`:446`, `:491`, `:567`); helper `agentutil.NormalizePoolRouteTarget` (`rigs/gascity/internal/agentutil/resolve.go:228`); coverage `TestDefaultScaleCheckCountsAndDemandNormalizesInstanceSuffixedRouteTarget` and `…LeavesUnmatchedInstanceSuffixAlone` (`cmd/gc/build_desired_state_test.go`). Offer side deliberately unchanged and exact-match: `bdReadyPoolDemandShell` (`rigs/gascity/internal/config/workquery.go:41`) with `$target` from `poolDemandTarget()` (`:157`), and `hookClaimMatchesRoute`'s raw `==` (`rigs/gascity/cmd/gc/cmd_hook_claim.go:1205`) over base-name route targets (`cmd/gc/cmd_hook.go:468`, `:685`). Write-side half `032c1fbcd` (#3963) centralizes the collapse in `agentutil.RoutedToIdentity` (`resolve.go:204`), applied by sling at `cmd/gc/cmd_sling.go:766` and `internal/config/workquery.go:532`. Assigned-work companion `738f44732` (#4597): `cmd/gc/assigned_work_scope.go:156`, `cmd/gc/pool_desired_state.go:178`. Read in the `rigs/gascity` fork at `390624b0e`, whose adopted upstream base is `e6135a435` (#4847). | 2026-07-31 |
+| Instance-suffixed `gc.routed_to` normalized on the **demand read side only** | gastownhall/gascity | `17130b324` — "Normalize routed work instance names in demand matching (#4596)". Read side: `controllerDemandRouteTarget` (`rigs/gascity/cmd/gc/build_desired_state.go:1718`, rationale comment at `:1707-1717`), reached from `defaultScaleCheckCountsAndDemand` (`:1474`, invoked at `:735`) for every template in `defaultScaleTargets` — which is *not* only the no-custom-`scale_check` pools (`:446`, `:491`, `:567`): a custom-`scale_check` pool also gets this probe while cold (`isCold` at `:476`; append + `coldWakeTemplates` at `:633-637`), its contribution clamped to 1 (`:757-759`) and merged as a maximum against the custom count (`:766-768`); helper `agentutil.NormalizePoolRouteTarget` (`rigs/gascity/internal/agentutil/resolve.go:228`); coverage `TestDefaultScaleCheckCountsAndDemandNormalizesInstanceSuffixedRouteTarget` and `…LeavesUnmatchedInstanceSuffixAlone` (`cmd/gc/build_desired_state_test.go`). Offer side deliberately unchanged and exact-match: `bdReadyPoolDemandShell` (`rigs/gascity/internal/config/workquery.go:41`) with `$target` from `poolDemandTarget()` (`:157`), and `hookClaimMatchesRoute`'s raw `==` (`rigs/gascity/cmd/gc/cmd_hook_claim.go:1205`) over base-name route targets (`cmd/gc/cmd_hook.go:468`, `:685`). Write side, two distinct helpers: `032c1fbcd` (#3963) centralizes the **agent-derived** route identity as `agentutil.RoutedToIdentity` (`resolve.go:204`, collapse to `PoolName`), which the default sling query inlines rather than calls (`internal/config/workquery.go:532-536` — `internal/config` cannot import `agentutil`, which imports `config`); the **explicit-target-string** collapse is the separate `agentutil.NormalizePoolRouteTarget` (`resolve.go:228`), applied by sling's built-in routing path at `cmd/gc/cmd_sling.go:766`. Assigned-work companion `738f44732` (#4597): `cmd/gc/assigned_work_scope.go:156`, `cmd/gc/pool_desired_state.go:178`. Read in the `rigs/gascity` fork at `390624b0e`, whose adopted upstream base is `e6135a435` (#4847). | 2026-07-31 |
 
 ## The maintainer's ruling
 
@@ -431,7 +431,10 @@ claimable.
 #### Where they diverge: an instance-suffixed `gc.routed_to`
 
 A route stamped with a live pool **slot** suffix — `<rig>/<pool>-1`
-rather than `<rig>/<pool>` — is **counted as demand but never offered**.
+rather than `<rig>/<pool>` — is **never offered**. Whether it is still
+counted as *demand* depends on the pool's `scale_check` configuration —
+and on the common ones it is, so the pool scales for a bead no worker
+can claim.
 
 The offer side has no normalization anywhere along its path:
 
@@ -445,14 +448,14 @@ The offer side has no normalization anywhere along its path:
   that are all base names (`cmd/gc/cmd_hook.go:468`, whose primary comes
   from `agentutil.RoutedToIdentity` at `cmd_hook.go:685`).
 
-The demand side does normalize, in one specific and common
-configuration. For a pool that configures **no custom `scale_check`**
+The demand side does normalize, but only on the controller's in-process
+probe. For a pool that configures **no custom `scale_check`**
 (gated on `!hasCustomScaleCheck`, `cmd/gc/build_desired_state.go:446`,
 `:491`, `:567`), the controller does not run the shell probe at all — it
 counts demand in-process in `defaultScaleCheckCountsAndDemand`
-(`build_desired_state.go:1474`), matching each ready bead through
-`controllerDemandRouteTarget` (`:1718`), which passes every routed-to
-candidate through `agentutil.NormalizePoolRouteTarget`
+(`build_desired_state.go:1474`, invoked at `:735`), matching each ready
+bead through `controllerDemandRouteTarget` (`:1718`), which passes every
+routed-to candidate through `agentutil.NormalizePoolRouteTarget`
 (`rigs/gascity/internal/agentutil/resolve.go:228`) before the
 template-membership check. That collapses `<base>-N` to `<base>` for a
 configured multi-session agent when `N` is a valid slot (≥1, and within
@@ -463,8 +466,20 @@ deliberately, and its comment says so outright: such a candidate,
 other writer, such as a direct `bd update --set-metadata` — still counts
 as demand for the base template."
 
-The two configurations therefore fail differently, and neither yields a
-claim:
+A custom `scale_check` does **not** displace that in-process probe
+entirely. While such a pool is **cold** — `isCold`, meaning zero running
+sessions *and* `min_active_sessions == 0` (`build_desired_state.go:476`)
+— the controller appends the same default probe target for every active
+store and marks the template in `coldWakeTemplates` (`:633-637`), so the
+normalizing in-process count runs for it too. That contribution is then
+clamped to 1 in the merge (`:757-759`) and folded in as a *maximum*
+against the custom check's own count (`:766-768`). The code comment at
+`:626-632` states the intent directly: the cold probe is a wake assist
+that can only wake a sleeping pool, never override the authoritative
+custom count while the pool is awake. (It is also gated on a real store
+and on the pool not being a store-scoped control dispatcher.)
+
+So there are three configurations, and none of them yields a claim:
 
 - **Default `scale_check` (the normalizing path).** The bead counts as
   demand for the base template, so pool desired-size grows and a
@@ -473,16 +488,37 @@ claim:
   The bead is unchanged by the failed cycle: still `open`, unassigned,
   still routed, so it counts as demand again on the next reconcile. The
   pool wakes for work it structurally cannot be handed.
-- **Custom `scale_check` (the shell path).** No normalization runs, so
-  the bead is invisible to *both* halves. Symmetric, but silently
-  dropped: nothing wakes and nothing errors.
+- **Custom `scale_check`, pool cold.** The cold-wake default probe
+  normalizes the route, so demand is `max(<custom count>, 1)` and the
+  pool wakes — one slot, however many such beads are queued. The woken
+  worker still cannot claim the bead, for the same exact-match reason.
+  Once it drains the pool is cold again and the probe re-fires: the same
+  wake-for-unclaimable-work loop as above, throttled to one slot per
+  cycle.
+- **Custom `scale_check`, pool warm or `min_active_sessions > 0`.** The
+  pool is never `isCold`, so no default probe runs for it and the custom
+  check is the only counter. That check is caller-owned shell; unless it
+  normalizes the suffix itself, the bead is invisible to *both* halves —
+  symmetric, but silently dropped: nothing scales and nothing errors.
 
-**Who writes a suffixed route.** Not `gc sling`: both its built-in
-routing path (`cmd/gc/cmd_sling.go:766`) and the default sling query
-(`workquery.go:532`) collapse the target to the base pool identity
-before stamping, and #3963 centralized that collapse in
-`agentutil.RoutedToIdentity` (`resolve.go:204`). A suffixed value
-reaches a bead only from some *other* writer — a direct
+**Who writes a suffixed route.** Not `gc sling`: both of its write paths
+collapse to the base pool identity before stamping, but through two
+*different* helpers taking two different inputs, and the distinction
+matters when tracing a stray route back to its writer.
+
+- Given an explicit **target string**, the built-in routing path calls
+  `agentutil.NormalizePoolRouteTarget` (`cmd/gc/cmd_sling.go:766`),
+  which strips a valid `-N` slot suffix off a caller-supplied
+  `<rig>/<pool>-2` (`resolve.go:228`).
+- Given an **agent**, the route collapses to that agent's `PoolName`,
+  which on a pool-instance copy is its base template's qualified name.
+  #3963 centralized that rule as `agentutil.RoutedToIdentity`
+  (`resolve.go:204`); the default sling query inlines it rather than
+  calling it (`workquery.go:532-536`), because `internal/config` cannot
+  import `agentutil` — `agentutil` already imports `config`, and its
+  package comment says it was split out for exactly that reason.
+
+A suffixed value reaches a bead only from some *other* writer — a direct
 `bd update --set-metadata gc.routed_to=<pool>-1`, or a graph/formula
 path that stamps a resolved instance name.
 
