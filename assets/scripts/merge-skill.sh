@@ -109,6 +109,15 @@ bead_read_array() {
 #                           cycle (live shape: tk-274uj "Depends on tk-h9pq5").
 #   - down / parent-child = this anchor's own PARENT (an epic or convoy), which
 #                           stays open by construction until the anchor closes.
+#
+# Each holder is tagged with the PROVENANCE that found it, in the synthesized
+# `_via` field ("pr_number" or "dep"; a bead seen by both is "dep", the stronger
+# claim). The caller needs it because the two sources justify DIFFERENT filters:
+# the merge_result exclusion exists only to drop a duplicate ANCHOR that the
+# pr_number probe swept up, and applying it to a dependency edge deletes a real
+# holder — an upstream PR / pre-open anchor filed as an explicit merge-ordering
+# `blocks` carries merge_result by definition, so the exclusion made the gate
+# fail OPEN on exactly the edge that was added to close it (tk-je0rk).
 probe_holders() {
   local anchor="$1" num="$2" by_pr children blockers
   by_pr=$(bead_read_array gc bd list --metadata-field pr_number="$num" \
@@ -117,8 +126,18 @@ probe_holders() {
     --direction=up -t parent-child --json) || return 1
   blockers=$(bead_read_array gc bd dep list "$anchor" \
     --direction=down -t blocks --json) || return 1
+  # group_by(.id) rather than unique_by(.id): dedup must MERGE provenance, not
+  # pick whichever copy sorted first. A bead reachable both ways is a dependency
+  # holder — take the union, so a dep-linked bead that also stamps pr_number is
+  # never demoted to the excludable pr_number class.
   printf '%s\n%s\n%s' "$by_pr" "$children" "$blockers" \
-    | jq -sc 'add | unique_by(.id)' 2>/dev/null
+    | jq -sc '
+        [ (.[0][] | . + {_via: "pr_number"}),
+          (.[1][] | . + {_via: "dep"}),
+          (.[2][] | . + {_via: "dep"}) ]
+        | group_by(.id)
+        | map(.[0] + {_via: (if (map(._via) | index("dep")) then "dep" else "pr_number" end)})
+      ' 2>/dev/null
 }
 
 # Open gating anchors in this rig's ledger.
@@ -259,13 +278,21 @@ while IFS= read -r row; do
   # An open rework/review child holds the merge (docs/work-bead-state-machine.md:
   # an anchor lands only when ALL its children are closed). probe_holders resolves
   # that set from pr_number AND from the anchor's own dependency edges — see its
-  # header for why one key alone is fail-open. The anchor carries merge_result;
-  # rework children and review beads do not — so excluding the anchor's own id
-  # plus any merge_result-carrying bead leaves exactly the in-flight rework/review
-  # set (a SECOND merge_result-carrying anchor is the DUP_PRS guard's business
-  # above, not a child's). --limit=0 (unbounded) on the pr_number probe: the gate
-  # must see EVERY referencing bead, not a page of them, or a child past the cap
-  # could let a PR merge while rework is still open.
+  # header for why one key alone is fail-open. --limit=0 (unbounded) on the
+  # pr_number probe: the gate must see EVERY referencing bead, not a page of them,
+  # or a child past the cap could let a PR merge while rework is still open.
+  #
+  # The merge_result exclusion is scoped to `_via == "pr_number"` holders ON
+  # PURPOSE (tk-je0rk). It exists for ONE job: the pr_number probe sweeps up every
+  # bead naming this PR, including a DUPLICATE gating anchor, and a second anchor
+  # is the DUP_PRS guard's business above, not a child's. Applied to the whole
+  # holder set it also deleted every dependency-edge holder that carries
+  # merge_result — and an upstream PR or pre-open anchor filed as an explicit
+  # merge-ordering `blocks` carries one BY DEFINITION. So the blocker vanished,
+  # and a CLEAN downstream PR merged straight past the anchor it was ordered
+  # behind: the same fail-OPEN shape on the very edge added to close it. A holder
+  # reached by a dependency edge holds regardless of merge_result; only the
+  # anchor's own id is excluded unconditionally, since nothing holds itself.
   #
   # FAIL CLOSED on an unreadable probe. An empty result from a BROKEN query is
   # indistinguishable from "no children", and that read merges past open rework —
@@ -282,13 +309,18 @@ while IFS= read -r row; do
   # The holder's STATUS rides along in the hold reason. It is no longer always
   # "open" — a `blocked` child holds too, and that is the one an operator has to
   # go unstick by hand rather than wait out, so the log must not call it open.
+  # A merge_result-carrying holder also names it, because the two hold for
+  # opposite operator actions: a rework child is something to go finish, while an
+  # upstream gating anchor is something to WAIT for. Without the marker the log
+  # sends an operator hunting for rework that does not exist.
   inflight=$(printf '%s' "$holders" | jq -r --arg anchor "$id" --arg live "$LIVE_STATUSES" '
     ($live | split(",")) as $live_statuses
     | [ .[]
         | select((.id // "") != "" and .id != $anchor)
         | select(((.status // "open") | ascii_downcase) as $s | $live_statuses | index($s))
-        | select(((.metadata.merge_result // "") | tostring) == "")
-        | "\(.id) (\(.status // "open"))" ]
+        | ((.metadata.merge_result // "") | tostring) as $mr
+        | select((._via // "pr_number") == "dep" or $mr == "")
+        | "\(.id) (\(.status // "open")\(if $mr == "" then "" else ", merge_result=" + $mr end))" ]
     | .[0] // empty' 2>/dev/null)
   if [ -n "$inflight" ]; then
     echo "merge-skill: PR#$num has unclosed rework/review bead $inflight; merge held (anchor $id)"

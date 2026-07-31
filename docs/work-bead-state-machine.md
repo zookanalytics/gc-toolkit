@@ -365,6 +365,20 @@ invariant is "all children **closed**"; a `blocked` child is the strongest case
 of all, and an unreadable probe holds too, because "no children found" and "could
 not look" are the same silence.
 
+**Which source found a holder decides which filters may drop it.** Resolving by
+`pr_number` sweeps up *every* bead naming the PR — including a duplicate gating
+anchor, which is the one-anchor-per-PR guard's business below and not a child's,
+so a `merge_result`-carrying bead from that source is discarded. A holder reached
+by a **dependency edge** is never discarded that way: it was named as a holder
+explicitly, and the shape you would delete is precisely the one that carries
+`merge_result` by definition — an upstream PR or pre-open anchor filed as an
+explicit merge-ordering `blocks`. Dropping it lets a green downstream PR merge
+straight past the anchor it was ordered behind: the same fail-open as keying on
+`pr_number` alone, reintroduced one layer down on the very edge added to close it
+(tk-je0rk). A bead reachable both ways counts as a dependency holder — the
+stronger claim wins, so no dep-linked bead is demoted into the discardable class
+by also stamping a PR number.
+
 **A rework child never becomes a second anchor — one gating anchor per PR
 (tk-ynz4b).** When a rework child hands its fix back through the refinery, its
 commits are already on the convoy branch, which *is* that child's landing
