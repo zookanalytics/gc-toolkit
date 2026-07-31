@@ -835,7 +835,29 @@ which speak to a *prompt loop* — `nudge`, `peek` — have nothing to
 speak to; see
 [the inert-liveness footgun](#a-deterministic-workers-liveness-signals-are-structurally-inert).
 
-| Command | Named singleton | Pool worker | Thread |
+The **Thread** column means an ordinary operator-spawned `-adhoc-<id>`
+instance. A [bead-host](#bead-host--a-per-bead-thread-wisp-backed) is
+thread-shaped by configuration but does **not** address like that column,
+so read it as excluded there:
+
+- **Spelling.** A host's alias *is* the bead id
+  (`gc-toolkit.tk-d6imi`) with no `-adhoc-` suffix, and its runtime
+  session name is `s-lx-wisp-<id>`. Wherever the Thread column says
+  "adhoc alias" or "adhoc session name", substitute those two forms.
+- **`gc session new` is not how a host is born.** It is created on
+  demand by `tools/gc-bead-host.sh <bead-id>` (or the Helm picker over
+  the same tool), which also writes the durable bead↔session link that a
+  bare spawn would skip.
+- **`bd update --assignee` on a hosted bead is grounding, not
+  addressing.** The host writes its *own runtime session name* there
+  because that assignment is an awake-demand wake reason.
+- **Drain and kill do not stick while the bead has awake-demand.** For a
+  `wake_mode = "resume"` host the reconciler revives it with the
+  conversation intact, so a drain is a no-op-with-restart. A host is put
+  down by ending the work — close or park the bead, or
+  `gc-helm.sh takeaway --release` — which clears the wake reason first.
+
+| Command | Named singleton | Pool worker | Thread (`-adhoc-`) |
 |---|---|---|---|
 | `gc session nudge <addr>` | QualifiedName | session-id or instance name | session name (e.g., `…-adhoc-<id>`) |
 | `gc session new <template>` | QualifiedName — spawns a `manual`-origin session *alongside* the canonical, see [singleton footgun](#duplicate-named-session-via-manual-spawn) | QualifiedName — spawns an extra instance | QualifiedName + optional name |
@@ -1119,9 +1141,32 @@ orphaned for pool/ephemeral identities, and the skip rule exempts only
 ephemeral work identity, so it falls through to source-delete + reopen —
 yanking a bead out from under a live owner mid-work.
 
-**Rule: an `absent` assignee is a lead, not a verdict. Before
-classifying one as orphaned, retry the lookup with the rig prefix
-stripped (`${ASSIGNEE#*/}`).** A hit means a live bead-host.
+**Rule: an `absent` assignee is a lead, not a verdict.** Before
+classifying one as orphaned, resolve it the way the shipped witness
+recipe does — *exact first, then last segment, live wins*:
+
+1. **The exact lookup stays authoritative.** A literal map-key hit
+   stands even when a normalized retry would answer differently. That
+   is how a genuinely dead session still gets recovered.
+2. **On a miss, retry once on the last `/`-separated segment of *both*
+   sides** — `${ASSIGNEE##*/}` as shell shorthand (`##`, not `#`: the
+   part to drop runs to the **last** slash, not the first), compared as
+   a whole segment and never as a suffix, so `toolkit.furiosa` does not
+   alias onto `gc-toolkit.furiosa`. Both sides, because both directions
+   are live in one city at once: a bead-host's bare alias against a
+   rig-qualified assignee, and a pool worker's rig-qualified alias
+   against a bare assignee.
+3. **A collision resolves toward life.** Baring the prefixes can collapse
+   two cities' sessions onto one identity, so any candidate that is not
+   `closed`/`archived` wins; only when *every* candidate is dead does the
+   retry report a dead state. The retry can therefore turn `absent` into
+   a live state but can never manufacture an orphan.
+
+A step-2 hit means a live bead-host, not an orphan. The lookup ships in
+`formulas/mol-witness-patrol.toml` between the `liveness-lookup` markers,
+and `assets/scripts/liveness-lookup.test.sh` executes that snippet
+extracted verbatim from the formula rather than a transcription of it —
+so the rule above and the running code cannot drift apart silently.
 
 Two things narrow the exposure without closing it:
 
