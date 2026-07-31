@@ -55,6 +55,20 @@
 #        that reached its own PR/pre-open gate) -> merge HELD too. Same rule:
 #        provenance decides, and a dependency edge holds regardless of
 #        merge_result — only pr_number-swept duplicates are excludable.
+#   (22) a holder probe returns a well-formed ARRAY holding a MALFORMED element
+#        (metadata is a string) -> merge HELD (tk-qoyly). The old top-level-only
+#        shape check passed this array through; the holder filter then aborted on
+#        `.metadata.merge_result`, emptied, and read as "no children".
+#   (23) every element passes the shape check but one carries a NON-STRING status,
+#        which aborts the holder FILTER (ascii_downcase on a number) -> merge HELD.
+#        The companion to (22) at the other guard: (22) is caught at the probe
+#        boundary, this one only by the filter's own fail-closed branch, so the two
+#        cases pin both layers independently.
+#   (24) ONE holder returned by BOTH the pr_number probe AND a dependency probe,
+#        carrying merge_result -> merge HELD. The provenance-MERGE positive
+#        control: dedup must union `_via` (group_by), not keep whichever copy
+#        sorted first (unique_by). Demoting such a holder to the pr_number class
+#        would re-apply the merge_result exclusion and delete a real holder.
 #   (INV) `gh pr merge` is reached for EXACTLY the fully-validated PRs — no
 #         other anchor is merged.
 #   (5c) convergence: a merged+closed anchor leaves the gating set, so a second
@@ -107,6 +121,9 @@ bead-CLOSEDCHILD|320|main|codex|green@HEAD320
 bead-PROBEFAIL|321|main|codex|green@HEAD321
 bead-BLOCKEDBYPR|322|main|codex|green@HEAD322
 bead-KIDANCHOR|323|main|codex|green@HEAD323
+bead-BADSHAPE|324|main|codex|green@HEAD324
+bead-BADSTATUS|325|main|codex|green@HEAD325
+bead-BOTHSRC|326|main|codex|green@HEAD326
 A
 
 # PR states (gh pr view source):
@@ -167,6 +184,9 @@ cat > "$TMP/prs" <<'P'
 321|OPEN|false|main|HEAD321|CLEAN|MERGEABLE|
 322|OPEN|false|main|HEAD322|CLEAN|MERGEABLE|
 323|OPEN|false|main|HEAD323|CLEAN|MERGEABLE|
+324|OPEN|false|main|HEAD324|CLEAN|MERGEABLE|
+325|OPEN|false|main|HEAD325|CLEAN|MERGEABLE|
+326|OPEN|false|main|HEAD326|CLEAN|MERGEABLE|
 P
 
 # Rework/review children referencing a PR by their OWN pr_number metadata
@@ -177,9 +197,15 @@ P
 # jq-excluded decoys. PR 317's child is `blocked`, NOT open — the stub honours the
 # requested --status list, so it is returned only because the skill now asks for
 # every live status instead of open,in_progress.
+# PR 326's child is the BOTH-SOURCE holder: it stamps pr_number (so this probe
+# returns it, carrying merge_result=pull_request — the excludable shape) AND it is
+# a parent-child dep of the anchor (so the dep probe returns it too). Provenance
+# must UNION to "dep" and hold; demote it to "pr_number" and the merge_result
+# exclusion deletes a live rework child.
 cat > "$TMP/children" <<'C'
 305|child-305||
 317|prblocked-317||blocked
+326|bothsrc-326|pull_request|
 C
 for i in $(seq -w 1 24); do
   printf '310|decoy-%s|pull_request|\n' "$i" >> "$TMP/children"
@@ -210,10 +236,30 @@ bead-DOWNSTREAM|down|parent-child|epic-319|open|
 bead-CLOSEDCHILD|up|parent-child|closedchild-320|closed|
 bead-BLOCKEDBYPR|down|blocks|upstream-322|open|pull_request
 bead-KIDANCHOR|up|parent-child|kidanchor-323|open|pre_open_gate
+bead-BOTHSRC|up|parent-child|bothsrc-326|open|pull_request
 D
 
 # Anchors whose dep probe ERRORS (exit 1) — the fail-closed case.
 printf 'bead-PROBEFAIL\n' > "$TMP/depfail"
+
+# Anchors whose dep probe returns a well-formed ARRAY with a zero exit status but
+# a payload the reader cannot use (tk-qoyly). These are NOT probe failures — the
+# command succeeds and `type == "array"` holds, so the old top-level-only check
+# waved them through. They exercise the two fail-closed layers separately:
+#
+#   bead-BADSHAPE  — element metadata is a STRING. Caught at the probe boundary
+#                    by bead_read_array's per-element shape check.
+#   bead-BADSTATUS — element is structurally fine (string id, object metadata) so
+#                    it PASSES that check, but its status is a NUMBER, which
+#                    aborts the holder filter's ascii_downcase. Only the filter's
+#                    own fail-closed branch can catch this one.
+#
+# Both must end in a HELD merge. Read as "no children" (the pre-fix behaviour),
+# both would merge past their holder.
+cat > "$TMP/depraw" <<'R'
+bead-BADSHAPE|[{"id":"badshape-324","status":"open","metadata":"oops"}]
+bead-BADSTATUS|[{"id":"badstatus-325","status":7,"metadata":{}}]
+R
 
 : > "$TMP/closed"; : > "$TMP/merged"; : > "$TMP/mergedrec"; : > "$TMP/closelog"
 
@@ -330,6 +376,12 @@ case "$2" in
     if grep -qx "$aid" "$FAKE_DEPFAIL" 2>/dev/null; then
       echo "gc: dep list failed for $aid" >&2; exit 1
     fi
+    # A probe that SUCCEEDS (exit 0, valid JSON array) but whose payload the
+    # reader cannot use. Emitted verbatim so the test controls the exact shape.
+    if [ -f "$FAKE_DEPRAW" ]; then
+      raw=$(sed -n "s/^${aid}|//p" "$FAKE_DEPRAW")
+      if [ -n "$raw" ]; then printf '%s\n' "$raw"; exit 0; fi
+    fi
     out=""
     if [ -f "$FAKE_DEPS" ]; then
       while IFS='|' read -r danchor ddir dtype did dstatus dmr; do
@@ -361,7 +413,7 @@ chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/children" \
-       FAKE_DEPS="$TMP/deps" FAKE_DEPFAIL="$TMP/depfail" \
+       FAKE_DEPS="$TMP/deps" FAKE_DEPFAIL="$TMP/depfail" FAKE_DEPRAW="$TMP/depraw" \
        FAKE_CLOSED="$TMP/closed" FAKE_MERGED="$TMP/merged" \
        FAKE_MERGEDREC="$TMP/mergedrec" FAKE_CLOSELOG="$TMP/closelog"
 
@@ -415,7 +467,7 @@ has '^320$' "$TMP/merged" && ok "(18) closed dep-linked child -> merged" \
 # would have merged pre-fix. 315-318 and 321 are the tk-lgjvg child-resolution
 # cases: every one is CLEAN with its codex gate green at the live head, so the
 # ONLY thing standing between them and a merge is the child gate.
-for n in 302 303 304 305 306 307 308 309 310 312 313 315 316 317 318 321 322 323; do
+for n in 302 303 304 305 306 307 308 309 310 312 313 315 316 317 318 321 322 323 324 325 326; do
   has "^$n$" "$TMP/merged" && bad "($n) anchor must NOT be merged" \
                           || ok "($n) anchor not merged"
 done
@@ -499,6 +551,31 @@ grep -q "PR#322 has unclosed rework/review bead upstream-322 (open, merge_result
 grep -q "PR#323 has unclosed rework/review bead kidanchor-323 (open, merge_result=pre_open_gate)" <<< "$OUT1" \
   && ok "(21) live merge_result=pre_open_gate dep child -> held, reason names the marker" \
   || bad "(21) a gating dep-linked child must hold the merge (got: $OUT1)"
+
+# (22)-(23) tk-qoyly: a probe can SUCCEED and still be unreadable. Both anchors
+# below get exit 0 and a valid top-level JSON array, so neither is a probe
+# "failure" in the (19) sense — and both would have merged past their holder,
+# because an aborted jq is byte-identical to "no children" once stderr is
+# suppressed. The two land in DIFFERENT fail-closed branches on purpose: (22) is
+# rejected at the probe boundary by the per-element shape check, while (23) is
+# structurally valid and survives to abort the holder filter itself. Asserting
+# each on its own message is what keeps the two guards independently pinned — a
+# single "is it held" assertion would stay green if either layer were deleted.
+grep -q "PR#324 in-flight rework/review probe failed; merge held" <<< "$OUT1" \
+  && ok "(22) malformed holder element (metadata not an object) -> held at the probe boundary" \
+  || bad "(22) a malformed holder element must fail CLOSED (got: $OUT1)"
+grep -q "PR#325 in-flight holder filter unreadable; merge held" <<< "$OUT1" \
+  && ok "(23) shape-valid holder that aborts the filter (non-string status) -> held by the filter guard" \
+  || bad "(23) a holder filter that ERRORS must fail CLOSED, not read as empty (got: $OUT1)"
+
+# (24) THE PROVENANCE-MERGE POSITIVE CONTROL. bothsrc-326 is returned by BOTH
+# probes and carries merge_result=pull_request — the exact shape the pr_number
+# exclusion drops. Dedup must UNION provenance (group_by) so the dep sighting
+# wins and the holder survives; a unique_by(.id) that kept the first-sorted copy
+# would class it pr_number, apply the exclusion, and merge past a live child.
+grep -q "PR#326 has unclosed rework/review bead bothsrc-326 (open, merge_result=pull_request)" <<< "$OUT1" \
+  && ok "(24) holder seen by BOTH pr_number and dep probes -> held (provenance unions to 'dep')" \
+  || bad "(24) a both-source holder must not be demoted into the excludable pr_number class (got: $OUT1)"
 
 # (9) already-merged anchor is NOT closed by the skill (the observer records it).
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \

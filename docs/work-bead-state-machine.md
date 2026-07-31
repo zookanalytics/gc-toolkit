@@ -363,7 +363,13 @@ merge, and a `parent-child` **parent** is the epic above it — holding on eithe
 would deadlock a healthy anchor forever. Any status but closed holds, since the
 invariant is "all children **closed**"; a `blocked` child is the strongest case
 of all, and an unreadable probe holds too, because "no children found" and "could
-not look" are the same silence.
+not look" are the same silence. A probe can also *succeed* and still be
+unreadable: one malformed element inside an otherwise well-formed array aborts
+the filter that reads the array, and an aborted filter returns byte-for-byte what
+an empty one returns. So the check is not "did the query exit 0" but "could every
+holder in the answer actually be read" — at the probe boundary and again at the
+filter, since a payload valid enough to survive the first can still break the
+second (tk-qoyly).
 
 **Which source found a holder decides which filters may drop it.** Resolving by
 `pr_number` sweeps up *every* bead naming the PR — including a duplicate gating

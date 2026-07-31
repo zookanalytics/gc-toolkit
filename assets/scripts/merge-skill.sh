@@ -66,18 +66,61 @@ command -v gh >/dev/null 2>&1 || exit 0
 # or one will route work the other has already merged past.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
+# Per-probe wall-clock bound. This skill runs inside mol-refinery-patrol's
+# find-work loop, which applies no timeout of its own, so an unbounded `gc bd`
+# against a wedged Dolt hangs the PATROL — every anchor behind it, not just this
+# one. A hung probe is the same thing as an unreadable one (both mean "the holder
+# set is unknown"), and the gate already fails CLOSED on unreadable, so bounding
+# converts a stall into the held/retry path it belongs in. Same idiom and same
+# env-override shape as doctor/check-merge-gate-drop/run.sh's run_bounded.
+PROBE_BOUND="${MERGE_SKILL_PROBE_TIMEOUT:-30}"
+
+# Every probe runs with stdin CLOSED. The anchor loop below reads its work list
+# from a here-string on fd 0; a probe child that inherited and consumed it would
+# silently truncate the anchor sweep — anchors would vanish from the run rather
+# than fail, which reads as "nothing to merge".
+run_bounded() {
+  if command -v timeout >/dev/null 2>&1; then
+    # timeout exits 124 on expiry — a non-zero rc, so it lands in the same
+    # fail-closed branch as any other broken probe. No special case needed.
+    timeout "$PROBE_BOUND" "$@" </dev/null
+  else
+    # No coreutils timeout (some macOS hosts). Degrade to an unbounded call
+    # rather than dropping the probe: a skipped probe fails closed and would
+    # hold EVERY merge forever on such a host.
+    "$@" </dev/null
+  fi
+}
+
 # Read a `gc bd`-family JSON array, or fail. Mirrors reconcile-merged-prs.sh's
 # pr_bead_read: the command's own exit status, then a non-empty payload, then the
 # payload's SHAPE. The shape check is what separates "no results" (`[]`) from an
 # error object that arrived with a zero exit status — `.[]` iterates an object's
 # values happily, so without it a malformed read projects cleanly to "no children".
+#
+# The shape check has TWO layers, and the per-ELEMENT one is not belt-and-braces
+# (tk-qoyly). The holder filter downstream indexes `.metadata.merge_result` on
+# every element; one element whose metadata is a string (schema drift, a probe
+# that returned a mixed payload) makes that jq abort — and an aborted filter
+# yields an EMPTY holder list, which reads as "no children" and merges past every
+# real holder that was in the array. So an array that cannot be read
+# element-for-element is an UNREADABLE probe, not an empty one. Required per
+# element: an object, a usable non-empty string id, and metadata that is an
+# object or absent.
 bead_read_array() {
   local raw rc
-  raw=$("$@" 2>/dev/null)
+  raw=$(run_bounded "$@" 2>/dev/null)
   rc=$?
   [ "$rc" -eq 0 ] || return 1
   [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$raw" | jq -e '
+      type == "array"
+      and all(.[];
+            type == "object"
+            and ((.id | type) == "string")
+            and ((.id | length) > 0)
+            and (((.metadata | type) as $t | $t == "object" or $t == "null")))
+    ' >/dev/null 2>&1 || return 1
   printf '%s' "$raw"
 }
 
@@ -140,8 +183,13 @@ probe_holders() {
       ' 2>/dev/null
 }
 
-# Open gating anchors in this rig's ledger.
-ANCHORS=$(gc bd list --status=open \
+# Open gating anchors in this rig's ledger. Bounded for the same reason as the
+# holder probes, and FIRST in line: this read runs before any of them, so leaving
+# it unbounded would hang the patrol here and the probe bounds would never be
+# reached. Its failure semantics are unchanged — a timeout empties ANCHORS, which
+# takes the existing "no gating anchors" exit. That degrades to merging NOTHING
+# this pass, never to merging something unvalidated.
+ANCHORS=$(run_bounded gc bd list --status=open \
   --metadata-field merge_result=pull_request \
   --limit=200 --json 2>/dev/null)
 [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ] \
@@ -313,7 +361,17 @@ while IFS= read -r row; do
   # opposite operator actions: a rework child is something to go finish, while an
   # upstream gating anchor is something to WAIT for. Without the marker the log
   # sends an operator hunting for rework that does not exist.
-  inflight=$(printf '%s' "$holders" | jq -r --arg anchor "$id" --arg live "$LIVE_STATUSES" '
+  #
+  # FAIL CLOSED on a filter that ERRORS, distinctly from one that finds nothing
+  # (tk-qoyly). This jq indexes and downcases fields it did not validate, so any
+  # element shape it cannot handle — a non-string status, a metadata value that
+  # is not an object — aborts it. With stderr suppressed an abort is
+  # byte-identical to "no holders": empty output, and the anchor sails on to
+  # `gh pr merge`. That is the SAME fail-open class the dependency probes were
+  # widened to close, arrived at one layer further down, so it gets the same
+  # answer — hold and retry. `if !` (not `$?` after the assignment) because the
+  # command substitution's status is the only place the abort is visible.
+  if ! inflight=$(printf '%s' "$holders" | jq -r --arg anchor "$id" --arg live "$LIVE_STATUSES" '
     ($live | split(",")) as $live_statuses
     | [ .[]
         | select((.id // "") != "" and .id != $anchor)
@@ -321,7 +379,10 @@ while IFS= read -r row; do
         | ((.metadata.merge_result // "") | tostring) as $mr
         | select((._via // "pr_number") == "dep" or $mr == "")
         | "\(.id) (\(.status // "open")\(if $mr == "" then "" else ", merge_result=" + $mr end))" ]
-    | .[0] // empty' 2>/dev/null)
+    | .[0] // empty' 2>/dev/null); then
+    echo "merge-skill: PR#$num in-flight holder filter unreadable; merge held (anchor $id, retry next pass)"
+    held=$((held + 1)); continue
+  fi
   if [ -n "$inflight" ]; then
     echo "merge-skill: PR#$num has unclosed rework/review bead $inflight; merge held (anchor $id)"
     held=$((held + 1)); continue
