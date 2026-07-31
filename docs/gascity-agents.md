@@ -43,6 +43,7 @@ prompt-template authoring or any single agent's role behavior.
 | **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
 | **Deterministic worker (no prompt loop)** | `prompt_mode = "none"` + `start_command` + `max_active_sessions`; no `[[named_session]]` | in effect — capped at `max_active_sessions = 1` | yes, demand-scaled from zero | yes — but through its own serve-loop query, not the hook tiers | control-dispatcher (bundled core pack) |
 | **Thread (operator-spawned)** | agent with `work_query = "printf '[]'"` + `sling_query` that exits non-zero | no, N instances | never (work query is a stub) | no | mayor-thread, mechanik-thread |
+| **Bead-host (per-bead thread)** | thread stubs + `wake_mode = "resume"` and a long `idle_timeout`; alias *is* the bead id | yes — one per work bead, by alias uniqueness | never; created on demand by `tools/gc-bead-host.sh` | no — it *grounds* itself as the bead's `assignee` instead | bead-host |
 | **Manual** | `gc session new <template>` | no — just a session_origin | no — operator initiates | depends on the agent's variant | any template invoked this way |
 
 "Singleton" here means **at most one canonical session per scope**.
@@ -507,6 +508,45 @@ addressing footgun](#gc-session-new-requires-the-fully-qualified-form).
 
 `gc sling <thread-qualified-name> <bead>` is explicitly rejected
 by the thread's `sling_query` stub.
+
+### Bead-host — a per-bead thread (wisp-backed)
+
+The **bead-host** (`agents/bead-host/agent.toml`) is the resident
+conversation for exactly one work bead. It is a thread by configuration —
+the same never-matching-predicate pair, `work_query = "printf '[]'"` plus
+a `sling_query` that exits non-zero — so it is operator-spawned only and
+never a sling target. Three things separate it from `mayor-thread`:
+
+- **The alias *is* the bead id.** A host's identity is
+  `<binding>.<bead-id>` (`gc-toolkit.tk-d6imi`, `gc-toolkit.su-lou`);
+  alias uniqueness is what buys the 1:1 host↔bead binding for free.
+  Contrast the `-adhoc-<id>` suffix an ordinary thread instance gets.
+- **`wake_mode = "resume"`, `idle_timeout = "8h"`.** On idle it
+  *suspends* with the conversation intact rather than dying — the
+  mayor-thread mechanism, held far longer.
+- **Wisp-backed runtime session.** The controller names it
+  `s-lx-wisp-<id>` — distinctly wisp-shaped, where every other session's
+  runtime name is built from its workspace and template
+  (`gc-toolkit__polecat-<id>`, `gc-toolkit__mayor`).
+
+Hosts are created on demand by `tools/gc-bead-host.sh <bead-id>` (or the
+Helm picker, a thin front door over the same tool) — a capability, not a
+deployment. Any bead *can* get a host; few do. The bead↔session link is
+metadata-only: `hosts_bead` on the session bead is the source of truth,
+`host_session` / `host_session_name` on the work bead are caches.
+
+A host **grounds** itself by writing its own runtime session name into
+the hosted bead's `assignee` (`gc-bead-host.sh link`), because that
+assignment is an awake-demand wake reason the reconciler honors across
+drains. So a hosted bead reads as *assigned* — to a session name, not to
+a configured agent identity.
+
+Note the scope: `bead-host` declares `scope = "city"`, so its `Dir` is
+empty and `QualifiedName()` returns the identity unprefixed — a host's
+alias is **bare even when the bead it hosts belongs to a rig**. That
+asymmetry against every rig-qualified session is a footgun in its own
+right; see [the bare-alias
+footgun](#a-bead-hosts-bare-alias-never-matches-a-rig-qualified-assignee).
 
 ## Variant D — Patrol agents (overlay)
 
@@ -1047,6 +1087,56 @@ signal either, since the polls it forks are short-lived and zero
 children at any given instant is normal. Never judge from
 `last_active` or `peek`, and never file a stuck-agent warrant on
 them.
+
+### A bead-host's bare alias never matches a rig-qualified assignee
+
+**Memory:** `reference-polecat-liveness.md` (§ "Bead-host aliases are
+BARE; their bead assignees are RIG-QUALIFIED").
+
+A [bead-host](#bead-host--a-per-bead-thread-wisp-backed) is city-scoped,
+so its `Dir` is empty and `QualifiedName()` returns the identity with no
+rig prefix: the alias is **bare** (`gc-toolkit.gc-z0vi2`) even when the
+bead it hosts belongs to a rig. Every rig-bound session on the other side
+— pool instance, rig-scoped singleton — is **rig-qualified**
+(`gc-toolkit/gc-toolkit.nux`), because there `Dir` is non-empty and
+`QualifiedName()` prepends it. Both halves are that one function
+behaving as documented; the asymmetry is the *scope*, not a defect, and
+there is nothing to fix.
+
+It costs any scan that resolves a bead's owner by exact lookup into a
+session map keyed on `id, name, session_name, alias, agent_name`. When
+the bead's `assignee` was written rig-qualified, no key in that map
+matches and a live owner resolves to **absent**:
+
+```
+assignee "gascity/gc-toolkit.gc-z0vi2" -> absent
+alias    "gc-toolkit.gc-z0vi2"         -> active  (session s-lx-wisp-q5qbl)
+```
+
+Nothing downstream catches it: "absent after exact lookup" classifies as
+orphaned for pool/ephemeral identities, and the skip rule exempts only
+*configured infra* identities (refinery, witness). A bead-host is an
+ephemeral work identity, so it falls through to source-delete + reopen —
+yanking a bead out from under a live owner mid-work.
+
+**Rule: an `absent` assignee is a lead, not a verdict. Before
+classifying one as orphaned, retry the lookup with the rig prefix
+stripped (`${ASSIGNEE#*/}`).** A hit means a live bead-host.
+
+Two things narrow the exposure without closing it:
+
+- **Bare does not imply bead-host.** City-scoped singletons
+  (`gc-toolkit.mayor`, `gc-toolkit.deacon`) carry bare aliases too — but
+  *their* assignees are written bare as well, so the exact lookup hits.
+  The hazard is the mismatch between the two sides, not bareness.
+- **A grounded host is recognizable without any liveness lookup.**
+  `gc-bead-host.sh link` writes the host's runtime session name into
+  `assignee` and caches it as `metadata.host_session_name`, so the
+  equality `metadata.host_session_name == assignee` identifies the bead
+  structurally; `mol-witness-patrol.toml` skips on exactly that
+  (regression-tested by `assets/scripts/host-bead-skip.test.sh`). That
+  is the cheap first pass. The prefix-strip retry is what still catches a
+  host whose assignee was written in some other form.
 
 ## The gascity-keeper front-door
 
