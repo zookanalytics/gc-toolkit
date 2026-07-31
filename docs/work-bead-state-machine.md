@@ -349,6 +349,22 @@ The signoff gate **attaches as a dependency of the open convoy** — the gate's
 bead BLOCKS the convoy (`gc bd dep <gate> --blocks <convoy>`). The dependency
 graph then shows directly which bead owns which PR and what it waits on.
 
+**A child is recognized by that dependency, not only by `pr_number`.** The hold
+resolves the child set two independent ways, because neither alone sees every
+child: the PR number a bead stamps on *itself*, and the anchor's own dependency
+edges — its `parent-child` **dependents** (the rework children) and the beads
+that **block** it (the signoff gates). A rework child carries the *branch* while
+the anchor carries PR *identity*, and the pre-open rework arm has no PR number to
+stamp at all — it files before a PR exists — so a hold keyed on `pr_number` alone
+looks straight past an open rework child and merges over it (tk-lgjvg, on PR#233).
+Those two edges are also the *only* two that mean "holds this anchor," and the
+directions matter: a `blocks` **dependent** is downstream work waiting *for* this
+merge, and a `parent-child` **parent** is the epic above it — holding on either
+would deadlock a healthy anchor forever. Any status but closed holds, since the
+invariant is "all children **closed**"; a `blocked` child is the strongest case
+of all, and an unreadable probe holds too, because "no children found" and "could
+not look" are the same silence.
+
 **A rework child never becomes a second anchor — one gating anchor per PR
 (tk-ynz4b).** When a rework child hands its fix back through the refinery, its
 commits are already on the convoy branch, which *is* that child's landing

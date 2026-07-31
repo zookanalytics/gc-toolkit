@@ -28,6 +28,24 @@
 #        EMPTY check_set + CLEAN PR -> before the fix the gateless duplicate
 #        merged the PR, bypassing codex; now EVERY anchor of a multi-anchor PR is
 #        HELD until the duplicate is closed/demoted
+#   (13) DEPENDENCY-LINKED rework child with NO pr_number of its own -> merge HELD
+#        (tk-lgjvg: the gate resolved children by pr_number alone, so a child that
+#        carries only branch/source_review_bead was invisible and the gate PASSED)
+#   (14) dependency-linked child in status `blocked` -> merge HELD (the live
+#        tk-h9pq5/PR#233 shape: the child was blocked + routed to human. The
+#        invariant is "all children CLOSED", so every non-closed status holds)
+#   (15) pr_number-carrying child in status `blocked` -> merge HELD (the probe asks
+#        for every LIVE_STATUSES value, not just open,in_progress)
+#   (16) open REVIEW bead attached as a `blocks` dependency OF the anchor (how a
+#        signoff gate attaches) -> merge HELD
+#   (17) open DOWNSTREAM dependent (up/blocks) + open EPIC PARENT (down/parent-
+#        child) -> MERGED. Both are the wrong end of their edge; holding on either
+#        deadlocks a healthy anchor forever, which is why both dep probes are
+#        direction- AND type-filtered.
+#   (18) CLOSED dependency-linked child -> MERGED (a closed child holds nothing)
+#   (19) the child probe ERRORS -> merge HELD (fail closed: an empty result from a
+#        broken query is indistinguishable from "no children", and reading it as
+#        "no children" merges past open rework)
 #   (INV) `gh pr merge` is reached for EXACTLY the fully-validated PRs — no
 #         other anchor is merged.
 #   (5c) convergence: a merged+closed anchor leaves the gating set, so a second
@@ -71,6 +89,13 @@ bead-HOLD|312|main|codex|green@HEAD312|true
 bead-DUPGATED|313|main|codex|
 bead-DUPFREE|313|main||
 bead-OPTOUT|314|main|none|
+bead-DEPCHILD|315|main|codex|green@HEAD315
+bead-BLOCKEDKID|316|main|codex|green@HEAD316
+bead-PRBLOCKED|317|main|codex|green@HEAD317
+bead-BLOCKGATE|318|main|codex|green@HEAD318
+bead-DOWNSTREAM|319|main|codex|green@HEAD319
+bead-CLOSEDCHILD|320|main|codex|green@HEAD320
+bead-PROBEFAIL|321|main|codex|green@HEAD321
 A
 
 # PR states (gh pr view source):
@@ -95,6 +120,14 @@ A
 #       collapsed to "", so it arrives here as a gate NAME; if the gate-splitting
 #       did not drop it, a gateless rig would hold forever on `check.none` — a
 #       marker no reviewer can stamp.
+#   315 OPEN, CLEAN, gate green — open dep-linked child, NO pr_number  -> HELD
+#   316 OPEN, CLEAN, gate green — dep-linked child in status `blocked` -> HELD
+#   317 OPEN, CLEAN, gate green — pr_number child in status `blocked`  -> HELD
+#   318 OPEN, CLEAN, gate green — open review bead BLOCKING the anchor -> HELD
+#   319 OPEN, CLEAN, gate green — only wrong-end edges (downstream dependent,
+#       epic parent)                                                   -> MERGED
+#   320 OPEN, CLEAN, gate green — dep-linked child already CLOSED      -> MERGED
+#   321 OPEN, CLEAN, gate green — the child probe errors               -> HELD
 cat > "$TMP/prs" <<'P'
 301|OPEN|false|main|HEAD301|CLEAN|MERGEABLE|a301c0ffee123456
 302|OPEN|false|main|HEAD302|CLEAN|MERGEABLE|
@@ -110,19 +143,51 @@ cat > "$TMP/prs" <<'P'
 312|OPEN|false|main|HEAD312|CLEAN|MERGEABLE|
 313|OPEN|false|main|HEAD313|CLEAN|MERGEABLE|
 314|OPEN|false|main|HEAD314|CLEAN|MERGEABLE|e314f00d5add1e00
+315|OPEN|false|main|HEAD315|CLEAN|MERGEABLE|
+316|OPEN|false|main|HEAD316|CLEAN|MERGEABLE|
+317|OPEN|false|main|HEAD317|CLEAN|MERGEABLE|
+318|OPEN|false|main|HEAD318|CLEAN|MERGEABLE|
+319|OPEN|false|main|HEAD319|CLEAN|MERGEABLE|f319c0ffee333333
+320|OPEN|false|main|HEAD320|CLEAN|MERGEABLE|a320c0ffee444444
+321|OPEN|false|main|HEAD321|CLEAN|MERGEABLE|
 P
 
-# Open rework/review children referencing a PR (gc bd list pr_number= source):
-# pr_number|child_id|merge_result. PR 305 has an open rework child (no
-# merge_result -> the skill must count it and HOLD). PR 310's real child sits
-# PAST the former --limit cap behind 24 jq-excluded decoys.
+# Rework/review children referencing a PR by their OWN pr_number metadata
+# (gc bd list pr_number= source):
+#   pr_number|child_id|merge_result|status     (empty status reads as `open`)
+# PR 305 has an open rework child (no merge_result -> the skill must count it and
+# HOLD). PR 310's real child sits PAST the former --limit cap behind 24
+# jq-excluded decoys. PR 317's child is `blocked`, NOT open — the stub honours the
+# requested --status list, so it is returned only because the skill now asks for
+# every live status instead of open,in_progress.
 cat > "$TMP/children" <<'C'
-305|child-305|
+305|child-305||
+317|prblocked-317||blocked
 C
 for i in $(seq -w 1 24); do
-  printf '310|decoy-%s|pull_request\n' "$i" >> "$TMP/children"
+  printf '310|decoy-%s|pull_request|\n' "$i" >> "$TMP/children"
 done
-printf '310|child-310|\n' >> "$TMP/children"
+printf '310|child-310||\n' >> "$TMP/children"
+
+# Dependency edges (gc bd dep list source), the resolution path tk-lgjvg adds:
+#   anchor|direction|type|bead_id|status|merge_result
+# `direction` is the flag the skill passes (up = dependents of the anchor,
+# down = what the anchor depends on), so a row is returned ONLY to the exact
+# direction+type walk that asks for it. The two wrong-end rows on bead-DOWNSTREAM
+# are the deadlock guards: an `up|blocks` dependent WAITS for this merge and a
+# `down|parent-child` parent stays open until the anchor closes, so a gate that
+# held on either would never land a healthy anchor.
+cat > "$TMP/deps" <<'D'
+bead-DEPCHILD|up|parent-child|depchild-315|open|
+bead-BLOCKEDKID|up|parent-child|blockedkid-316|blocked|
+bead-BLOCKGATE|down|blocks|review-318|open|
+bead-DOWNSTREAM|up|blocks|downstream-319|open|
+bead-DOWNSTREAM|down|parent-child|epic-319|open|
+bead-CLOSEDCHILD|up|parent-child|closedchild-320|closed|
+D
+
+# Anchors whose dep probe ERRORS (exit 1) — the fail-closed case.
+printf 'bead-PROBEFAIL\n' > "$TMP/depfail"
 
 : > "$TMP/closed"; : > "$TMP/merged"; : > "$TMP/mergedrec"; : > "$TMP/closelog"
 
@@ -162,11 +227,14 @@ exit 0
 GH
 chmod +x "$TMP/bin/gh"
 
-# --- gc stub: bd list / bd close / bd update. --------------------------------
+# --- gc stub: bd list / bd dep list / bd close / bd update. ------------------
 # Two list shapes: the gating-anchor scan (merge_result=pull_request, excluding
 # already-closed anchors so convergence holds) and the referencing-bead scan
-# (pr_number=N, --status open,in_progress) that returns the anchor (which the
-# skill EXCLUDES) plus any open rework/review children (which HOLD the merge).
+# (pr_number=N, honouring the requested --status list) that returns the anchor
+# (which the skill EXCLUDES) plus any live rework/review children (which HOLD the
+# merge). `bd dep list` serves the two dependency walks, each answering ONLY the
+# direction+type it was asked for — a stub that ignored the flags could not tell
+# a rework child from the epic parent or the downstream dependent.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 emit_rows() {
@@ -193,26 +261,62 @@ case "$2" in
         emit_rows "$out" "$lim" ;;
       *"pr_number="*)
         prnum=$(printf '%s' "$*" | sed -n 's/.*pr_number=\([0-9][0-9]*\).*/\1/p')
+        # The status filter the caller asked for. A child whose status is not in
+        # the list is invisible, exactly as the real `gc bd list --status` behaves.
+        want=$(printf '%s' "$*" | sed -n 's/.*--status[= ]\([a-z_,]*\).*/\1/p')
+        [ -n "$want" ] || want="open"
         out=""
         while IFS='|' read -r id pr target checkset checkcodex merge_hold; do
           [ -n "$id" ] || continue
           [ "$pr" = "$prnum" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merge_result":"pull_request"}}' "$id" "$pr")
+          obj=$(printf '{"id":"%s","status":"open","metadata":{"pr_number":"%s","merge_result":"pull_request"}}' "$id" "$pr")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         if [ -f "$FAKE_CHILDREN" ]; then
-          while IFS='|' read -r cpr cid cmr; do
+          while IFS='|' read -r cpr cid cmr cstatus; do
             [ -n "$cpr" ] || continue
             [ "$cpr" = "$prnum" ] || continue
             grep -qx "$cid" "$FAKE_CLOSED" 2>/dev/null && continue
-            obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merge_result":"%s"}}' "$cid" "$cpr" "$cmr")
+            [ -n "$cstatus" ] || cstatus="open"
+            printf '%s' ",$want," | grep -q ",$cstatus," || continue
+            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"%s"}}' "$cid" "$cstatus" "$cpr" "$cmr")
             if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
           done < "$FAKE_CHILDREN"
         fi
         emit_rows "$out" "$lim" ;;
       *) printf '[]\n' ;;
     esac ;;
+  dep)
+    [ "$3" = "list" ] || { printf '[]\n'; exit 0; }
+    aid="$4"; shift 4
+    dir="down"; typ=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --direction=*) dir="${1#--direction=}"; shift ;;
+        --direction) dir="$2"; shift 2 ;;
+        -t|--type) typ="$2"; shift 2 ;;
+        --type=*) typ="${1#--type=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    # A wedged/unreadable probe: non-zero exit with no usable payload.
+    if grep -qx "$aid" "$FAKE_DEPFAIL" 2>/dev/null; then
+      echo "gc: dep list failed for $aid" >&2; exit 1
+    fi
+    out=""
+    if [ -f "$FAKE_DEPS" ]; then
+      while IFS='|' read -r danchor ddir dtype did dstatus dmr; do
+        [ -n "$danchor" ] || continue
+        [ "$danchor" = "$aid" ] || continue
+        [ "$ddir" = "$dir" ] || continue
+        [ -z "$typ" ] || [ "$dtype" = "$typ" ] || continue
+        grep -qx "$did" "$FAKE_CLOSED" 2>/dev/null && continue
+        obj=$(printf '{"id":"%s","status":"%s","dependency_type":"%s","metadata":{"merge_result":"%s"}}' "$did" "$dstatus" "$dtype" "$dmr")
+        if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+      done < "$FAKE_DEPS"
+    fi
+    printf '[%s]\n' "$out" ;;
   close)
     id="$3"; shift 3
     reason=""
@@ -231,6 +335,7 @@ chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/children" \
+       FAKE_DEPS="$TMP/deps" FAKE_DEPFAIL="$TMP/depfail" \
        FAKE_CLOSED="$TMP/closed" FAKE_MERGED="$TMP/merged" \
        FAKE_MERGEDREC="$TMP/mergedrec" FAKE_CLOSELOG="$TMP/closelog"
 
@@ -268,10 +373,23 @@ has '^314$' "$TMP/merged" && ok "(1c) opt-out PR (check_set='none') -> merged (s
 has '^bead-OPTOUT$' "$TMP/closed" && ok "(1c) opt-out anchor closed (record)" \
                                   || bad "(1c) opt-out anchor closed"
 
-# (2)-(12) every other anchor is HELD or skipped — NOT merged. 313 is the
+# (17) THE ANTI-DEADLOCK GUARD: bead-DOWNSTREAM's only edges point the WRONG way
+# — an `up|blocks` dependent waiting for this merge, and a `down|parent-child`
+# epic parent that stays open until the anchor closes. Neither is a child. A gate
+# that walked those directions would hold a healthy anchor forever.
+has '^319$' "$TMP/merged" && ok "(17) wrong-end edges (downstream dependent + epic parent) -> merged, not deadlocked" \
+                          || bad "(17) wrong-end edges must NOT hold the merge"
+# (18) a CLOSED dependency-linked child holds nothing — the invariant is "all
+# children CLOSED", and this one is.
+has '^320$' "$TMP/merged" && ok "(18) closed dep-linked child -> merged" \
+                          || bad "(18) closed dep-linked child must not hold"
+
+# (2)-(19) every other anchor is HELD or skipped — NOT merged. 313 is the
 # multi-anchor PR: its gateless duplicate anchor (bead-DUPFREE) is CLEAN and
-# would have merged pre-fix.
-for n in 302 303 304 305 306 307 308 309 310 312 313; do
+# would have merged pre-fix. 315-318 and 321 are the tk-lgjvg child-resolution
+# cases: every one is CLEAN with its codex gate green at the live head, so the
+# ONLY thing standing between them and a merge is the child gate.
+for n in 302 303 304 305 306 307 308 309 310 312 313 315 316 317 318 321; do
   has "^$n$" "$TMP/merged" && bad "($n) anchor must NOT be merged" \
                           || ok "($n) anchor not merged"
 done
@@ -286,11 +404,11 @@ printf '%s\n' "$OUT1" | grep -q "PR#304 not mergeable yet (mergeStateStatus='BLO
   && ok "(4) BLOCKED -> held, reason names mergeStateStatus" || bad "(4) BLOCKED hold (got: $OUT1)"
 printf '%s\n' "$OUT1" | grep -q "PR#309 not mergeable yet (mergeStateStatus='BEHIND'" \
   && ok "(5) BEHIND -> held" || bad "(5) BEHIND hold (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "PR#305 has open rework/review bead child-305" \
+printf '%s\n' "$OUT1" | grep -q "PR#305 has unclosed rework/review bead child-305 (open)" \
   && ok "(6) open rework child -> held, reason names the child" || bad "(6) child hold (got: $OUT1)"
 printf '%s\n' "$OUT1" | grep -q "PR#306 base 'integration/foo' != target 'main' (retargeted)" \
   && ok "(7) retargeted -> held, reason names the base mismatch" || bad "(7) retarget hold (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "PR#310 has open rework/review bead child-310" \
+printf '%s\n' "$OUT1" | grep -q "PR#310 has unclosed rework/review bead child-310 (open)" \
   && ok "(10) open child past former cap -> held (unbounded scan found it)" \
   || bad "(10) past-cap child hold (got: $OUT1)"
 printf '%s\n' "$OUT1" | grep -q "PR#312 merge_hold set (operator gate)" \
@@ -303,17 +421,37 @@ printf '%s\n' "$OUT1" | grep -q "PR#313 has multiple open gating anchors (one-an
   && ok "(12) multi-anchor PR -> gateless duplicate ALSO held (pre-fix it merged, bypassing codex)" \
   || bad "(12) multi-anchor gateless-duplicate hold (got: $OUT1)"
 
+# (13)-(16),(19) tk-lgjvg: the child gate resolves holders by DEPENDENCY as well
+# as by pr_number, over every live status, and fails CLOSED when it cannot look.
+printf '%s\n' "$OUT1" | grep -q "PR#315 has unclosed rework/review bead depchild-315 (open)" \
+  && ok "(13) dep-linked child with NO pr_number -> held (the fail-open defect)" \
+  || bad "(13) dep-linked child must hold the merge (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#316 has unclosed rework/review bead blockedkid-316 (blocked)" \
+  && ok "(14) dep-linked child in status 'blocked' -> held (all children CLOSED, not just open)" \
+  || bad "(14) blocked dep-linked child must hold (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#317 has unclosed rework/review bead prblocked-317 (blocked)" \
+  && ok "(15) pr_number child in status 'blocked' -> held (probe asks for every live status)" \
+  || bad "(15) blocked pr_number child must hold (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#318 has unclosed rework/review bead review-318 (open)" \
+  && ok "(16) review bead attached as a 'blocks' dep of the anchor -> held" \
+  || bad "(16) blocking review bead must hold (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#321 in-flight rework/review probe failed; merge held" \
+  && ok "(19) unreadable child probe -> held (fail closed, not merged past)" \
+  || bad "(19) probe failure must fail CLOSED (got: $OUT1)"
+
 # (9) already-merged anchor is NOT closed by the skill (the observer records it).
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \
                                   || ok "(9) already-merged anchor left for the observer"
 
-# (INV) exactly three PRs were merged: the fully-validated gated head (301), the
-# no-gate PR (311), and the explicit opt-out (314). No held/skipped anchor leaked.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "3" "(INV) exactly three PRs merged (gated head 301 + no-gate 311 + opt-out 314)"
+# (INV) exactly five PRs were merged: the fully-validated gated head (301), the
+# no-gate PR (311), the explicit opt-out (314), and the two whose only children
+# cannot hold — wrong-end edges (319) and an already-closed child (320). No
+# held/skipped anchor leaked.
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "5" "(INV) exactly five PRs merged (301 + 311 + 314 + 319 + 320)"
 
 # Summary counters.
-printf '%s\n' "$OUT1" | grep -q "3 merged" \
-  && ok "run 1 summary reports 3 merged" || bad "run 1 summary merged count (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "5 merged" \
+  && ok "run 1 summary reports 5 merged" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard: only gh-supported --json fields. ----------------------
 gh pr view 301 --json merged >/dev/null 2>&1 \
@@ -330,6 +468,7 @@ gh pr view 301 --json mergeCommit >/dev/null 2>&1 \
 bash "$SCRIPT" >/dev/null
 eq "$(grep -c '^301$' "$TMP/merged")" "1" "(5c) merged gated anchor not re-merged on second pass"
 eq "$(grep -c '^311$' "$TMP/merged")" "1" "(5c) merged no-gate anchor not re-merged on second pass"
+eq "$(grep -c '^319$' "$TMP/merged")" "1" "(5c) wrong-end-edge anchor not re-merged on second pass"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
