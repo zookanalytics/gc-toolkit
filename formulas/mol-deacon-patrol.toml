@@ -46,7 +46,7 @@ between patrol cycles.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-deacon-patrol"
-version = 15
+version = 16
 
 [vars]
 [vars.binding_prefix]
@@ -276,8 +276,8 @@ description = """
 Run `gc dolt health --json` to inspect the Dolt data plane and flag anomalies.
 
 This step surfaces problems that individual patrol steps won't catch:
-commit bloat (compactor dog may have failed), stale backups (backup dog
-may have failed), orphan databases, and zombie Dolt server processes.
+commit bloat (compactor dog may have failed), unrestorable backups (backup
+dog may have failed), orphan databases, and zombie Dolt server processes.
 
 **Step 1: Run the health check**
 ```bash
@@ -287,7 +287,12 @@ gc dolt health --json
 Parse the JSON output (HealthReport schema):
 - `server`: running, reachable, pid, port, latency_ms
 - `databases[]`: name, commits, open_beads
-- `backups`: dolt_freshness, dolt_age_seconds, dolt_stale
+- `backups`: dolt_freshness, dolt_age_seconds, dolt_stale — **never
+  sufficient on its own.** Absent backup data renders as
+  `"dolt_freshness": "", "dolt_age_sec": 0, "dolt_stale": false`, so a
+  TOTAL backup failure is indistinguishable from a fresh backup and
+  `dolt_stale` can only ever fire on a *partial* one. Verify backups by
+  manifest mtime on disk (Step 2a); treat these fields as advisory.
 - `processes`: zombie_count, zombie_pids
 - `orphans[]`: name, size
 
@@ -303,9 +308,76 @@ are wedged (the latter is what first prompted this check to exist).
 | `server.reachable == false` | — | Dolt server is down or unresponsive (CRITICAL) |
 | `server.latency_ms > 5000` | 5 s | Server may be overloaded |
 | `databases[].commits > 50000` | 50 k | Compactor dog may have stalled |
-| `backups.dolt_stale == true` | >30 min | Backup dog may have failed |
+| backup manifest mtime — see **Step 2a** | newest file must be the manifest; manifest <12 h old | Backup dog may have failed. Do NOT key this off `backups.dolt_stale` — it reads false-clean through a total outage |
 | `processes.zombie_count > 0` | any | Zombie Dolt servers detected |
 | `orphans` non-empty | any | Advisory only — NEVER act on this count directly; verify with `gc dolt-cleanup` (hyphen, dry-run) first |
+
+**Step 2a: Verify backups by manifest mtime (never by `dolt_stale`)**
+
+A backup is restorable only up to its committed **manifest**. Dolt writes
+chunk `.darc` files first and commits the `manifest` last, so a healthy
+database's newest file IS its manifest. If a `.darc` is newer, the run
+uploaded data but never committed it — nothing after the manifest
+timestamp is restorable, however new the chunks look. Directory mtime and
+directory size both lie here: they move with the chunk writes.
+
+The markers below let the regression test extract and exercise this exact
+snippet (assets/scripts/dolt-backup-manifest-check.test.sh), so the shipped
+rule cannot drift from the tested one.
+
+```bash
+# >>> backup-manifest-check
+BACKUP_ROOT="${GC_CITY_PATH:-$GC_CITY}/.dolt-backup"
+[ -d "$BACKUP_ROOT" ] || echo "WARN: no backup root at $BACKUP_ROOT"
+NOW=$(date +%s)
+for db in "$BACKUP_ROOT"/*/; do
+    name=$(basename "$db")
+    newest=$(find "$db" -type f -printf '%T@ %f\\n' 2>/dev/null \\
+                 | sort -n | tail -1 | cut -d' ' -f2-)
+    mtime=$(stat -c %Y "$db/manifest" 2>/dev/null || echo 0)
+    if [ "$mtime" -eq 0 ]; then
+        echo "FLAG $name: no manifest — nothing restorable"
+        continue
+    fi
+    age_h=$(( (NOW - mtime) / 3600 ))
+    if [ "$newest" != "manifest" ]; then
+        echo "FLAG $name: newest file is '$newest', not the manifest —" \\
+             "uploaded but never committed; not restorable past ${age_h}h ago"
+    elif [ "$age_h" -gt 12 ]; then
+        echo "FLAG $name: manifest is ${age_h}h old (>12h = 2x backup cadence)"
+    else
+        echo "OK $name: manifest is newest, ${age_h}h old"
+    fi
+done
+# <<< backup-manifest-check
+```
+
+Flag when EITHER holds:
+- the newest file in a backup dir is **not** the manifest, or
+- the manifest is older than **12 h** — 2x the 6 h cadence (backup runs at
+  21:00 / 03:00 / 09:00 / 15:00Z).
+
+**Do not flag on sync duration.** A large database is slow but healthy as
+long as its manifest is newest and recent — lx is ~3 GB and needs ~95 s to
+sync. The failure this catches is "uploaded but never committed"
+(`.darc` newer than manifest), not "slow".
+
+**Step 2b: Read the backup dog's failure mail (live second channel)**
+
+The backup dog reports per-database sync failures by mail to the `human`
+mailbox, which no agent drains — during the outage that prompted this
+step, several such mails sat unread while the patrol logged OK. This step
+is that channel's reader:
+
+```bash
+gc mail inbox human | grep -E 'Dolt backup: [0-9]+/[0-9]+ databases failed to sync'
+```
+
+A hit names the failing databases in its body and should corroborate
+Step 2a; a hit with a clean Step 2a (or the reverse) means one of the two
+channels is lying — investigate rather than picking the happier one.
+**List only.** Do NOT `gc mail read` or `gc mail archive` these — that is
+the operator's inbox, and draining it here hides the outage from them.
 
 **Step 3: React to alerts**
 
@@ -325,11 +397,20 @@ nudge the dog pool:
 gc session nudge dog/ "Compactor needed: <db_name> has <count> commits"
 ```
 
-**Stale backups:**
-The backup dog (`mol-dog-backup`) may have failed. Same pattern — log and
-nudge if order hasn't self-healed:
+**Unrestorable backup (any Step 2a flag, or a Step 2b mail):**
+The backup dog (`mol-dog-backup`) may have failed. A manifest that is not
+the newest file is a FAILED backup, not a slow one — the database cannot
+be restored past the manifest timestamp. Same pattern — log and nudge if
+order hasn't self-healed:
 ```bash
-gc session nudge dog/ "Backup needed: dolt backup is <age> old"
+gc session nudge dog/ "Backup needed: <db> manifest <age> old / not newest"
+```
+If the same database is still flagged on the next rotation, the dog's own
+retries are not clearing it. Escalate — unattended, this is silent data
+loss on a ledger nobody can restore:
+```bash
+gc mail send mayor/ -s "ESCALATION: <db> has no restorable backup [HIGH]" \\
+  -m "Manifest <age>h old; newest file <file>. Backup dog retries not clearing."
 ```
 
 **Zombie processes:**
@@ -360,9 +441,12 @@ Reclaim confirmed orphans only via human-approved
 `rm -rf` an open database and corrupt NBS, #1549).
 
 **If everything is healthy:**
-Log `Dolt health: OK` and move on.
+Log `Dolt health: OK` and move on. "Healthy" requires Step 2a clean for
+every database — a green `gc dolt health` alone does not earn it, which is
+exactly how two rotations logged OK through a total backup outage.
 
-**Exit criteria:** Health check run, alerts handled or escalated."""
+**Exit criteria:** Health check run, backup manifests verified (Step 2a),
+alerts handled or escalated."""
 
 [[steps]]
 id = "system-health"

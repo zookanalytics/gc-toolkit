@@ -48,7 +48,14 @@
 #     {{.ConfigDir}}/assets/scripts/worktree-setup.sh, and ConfigDir does not
 #     fall through to imported packs. Preserve this delta when reconciling.
 #   - formulas/mol-deacon-patrol.toml — base + cycle-recycle + gc doctor
-#     --json local deltas (validated 2026-05-27).
+#     --json local deltas (validated 2026-05-27), plus the dolt-health
+#     manifest-mtime backup verification (tk-hef7t, 2026-08-01): the base
+#     keys its backup verdict off `backups.dolt_stale`, which renders absent
+#     backup data as `dolt_stale=false` and so reads false-clean straight
+#     through a TOTAL backup outage. The mirror verifies manifest mtime on
+#     disk instead (Step 2a) and reads the backup dog's failure mail as a
+#     second channel (Step 2b). Preserve both when reconciling — do not
+#     restore a `dolt_stale`-keyed threshold row.
 #   - formulas/mol-refinery-patrol.toml — base + default_merge_strategy +
 #     auto_ff_rig_main + check_set (merge-gate check-set, retires review_gate +
 #     signoff_head) + protected-branch auto-promote +
