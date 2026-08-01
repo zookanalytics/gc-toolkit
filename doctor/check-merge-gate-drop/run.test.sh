@@ -12,7 +12,7 @@
 #   (3)  pre_open_gate anchor stamped "" -> ERROR too (both gating shapes)
 #   (4)  UNSET check_set on a live pull_request anchor -> NOT flagged
 #        (absent is the legacy-permissive norm; flagging it would strand ~325
-#        anchors and regress the merge-skill.sh:244-251 fix)
+#        anchors and regress merge-skill.sh's no-gate `hold_gate` fix)
 #   (5)  merge_result=merged anchor stamped "" -> NOT flagged (landed work is
 #        out of scope: past PRs are reviewed manually)
 #   (6)  bead stamped "" with NO merge_result -> NOT flagged (direct-merge

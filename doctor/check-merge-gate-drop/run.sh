@@ -7,8 +7,14 @@
 # But the default only has effect at STAMP time — merge-skill.sh reads raw bead
 # metadata and never consults the formula:
 #
-#   merge-skill.sh:154      (.metadata.check_set // "")  — unset collapses to ""
-#   merge-skill.sh:244-260  an EMPTY check_set declares NO gates, BY DESIGN
+#   merge-skill.sh, the ROWS projection:  (.metadata.check_set // "")
+#       — an unset check_set collapses to ""
+#   merge-skill.sh, the `hold_gate` check-set gate:  an EMPTY check_set declares
+#       NO gates, BY DESIGN
+#
+# (Cited by SYMBOL, not line number, on purpose: this file has already chased
+# merge-skill.sh's line numbers across two reworks and the citations were stale
+# both times. Grep the names.)
 #
 # So an anchor stamped check_set="" is UNGATED, and nothing anywhere says the
 # rig meant to run a `codex` gate. shutupandlisten landed 11 anchors that way
@@ -38,8 +44,8 @@
 # WHAT IS NOT FLAGGED — deliberately:
 #
 #   - An UNSET/absent check_set, at either arm. Absent is the pre-#182 legacy
-#     state and the city-wide norm (~325 anchors). merge-skill.sh:244-251
-#     documents that landing a no-gate anchor is itself a fix — the former code
+#     state and the city-wide norm (~325 anchors). merge-skill.sh's `hold_gate`
+#     gate documents that landing a no-gate anchor is itself a fix — the former code
 #     held on a missing marker and stranded human-approved CLEAN PRs forever.
 #     Flagging absent would re-litigate that. EXPLICIT "" only, at every layer.
 #   - A rig whose declared default is ITSELF empty. The signal is DIVERGENCE

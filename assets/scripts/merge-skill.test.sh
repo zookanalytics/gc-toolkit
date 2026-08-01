@@ -69,6 +69,15 @@
 #        control: dedup must union `_via` (group_by), not keep whichever copy
 #        sorted first (unique_by). Demoting such a holder to the pr_number class
 #        would re-apply the merge_result exclusion and delete a real holder.
+#   (25) a holder probe emits TWO JSON documents, `{}` then a valid array, with a
+#        zero exit status -> merge HELD (tk-wkrcy). `jq -e` over a raw STREAM
+#        reports only the LAST document's result, so this passed the old check;
+#        probe_holders then reads the three payloads positionally out of one
+#        slurped stream, and the extra leading document shifted the anchor's real
+#        `blocks` blocker off the end. The PR merged past its merge-ordering block.
+#   (26) TWO well-formed EMPTY arrays in one payload (`[]` then `[]`) -> merge
+#        HELD. Nothing is malformed at all here; the document COUNT is the entire
+#        defect, so this case pins the count check on its own.
 #   (INV) `gh pr merge` is reached for EXACTLY the fully-validated PRs — no
 #         other anchor is merged.
 #   (5c) convergence: a merged+closed anchor leaves the gating set, so a second
@@ -124,6 +133,8 @@ bead-KIDANCHOR|323|main|codex|green@HEAD323
 bead-BADSHAPE|324|main|codex|green@HEAD324
 bead-BADSTATUS|325|main|codex|green@HEAD325
 bead-BOTHSRC|326|main|codex|green@HEAD326
+bead-MULTIDOC|327|main|codex|green@HEAD327
+bead-MULTIEMPTY|328|main|codex|green@HEAD328
 A
 
 # PR states (gh pr view source):
@@ -187,6 +198,8 @@ cat > "$TMP/prs" <<'P'
 324|OPEN|false|main|HEAD324|CLEAN|MERGEABLE|
 325|OPEN|false|main|HEAD325|CLEAN|MERGEABLE|
 326|OPEN|false|main|HEAD326|CLEAN|MERGEABLE|
+327|OPEN|false|main|HEAD327|CLEAN|MERGEABLE|
+328|OPEN|false|main|HEAD328|CLEAN|MERGEABLE|
 P
 
 # Rework/review children referencing a PR by their OWN pr_number metadata
@@ -237,28 +250,47 @@ bead-CLOSEDCHILD|up|parent-child|closedchild-320|closed|
 bead-BLOCKEDBYPR|down|blocks|upstream-322|open|pull_request
 bead-KIDANCHOR|up|parent-child|kidanchor-323|open|pre_open_gate
 bead-BOTHSRC|up|parent-child|bothsrc-326|open|pull_request
+bead-MULTIDOC|down|blocks|blocker-327|open|pull_request
+bead-MULTIEMPTY|down|blocks|blocker-328|open|pull_request
 D
 
 # Anchors whose dep probe ERRORS (exit 1) — the fail-closed case.
 printf 'bead-PROBEFAIL\n' > "$TMP/depfail"
 
-# Anchors whose dep probe returns a well-formed ARRAY with a zero exit status but
-# a payload the reader cannot use (tk-qoyly). These are NOT probe failures — the
-# command succeeds and `type == "array"` holds, so the old top-level-only check
-# waved them through. They exercise the two fail-closed layers separately:
+# Anchors whose dep probe returns a payload with a ZERO exit status that the
+# reader still cannot use. These are NOT probe failures — the command succeeds,
+# so the old checks waved them through. Format:
 #
-#   bead-BADSHAPE  — element metadata is a STRING. Caught at the probe boundary
-#                    by bead_read_array's per-element shape check.
-#   bead-BADSTATUS — element is structurally fine (string id, object metadata) so
-#                    it PASSES that check, but its status is a NUMBER, which
-#                    aborts the holder filter's ascii_downcase. Only the filter's
-#                    own fail-closed branch can catch this one.
+#   anchor|direction|raw_payload      (direction = the walk this payload answers)
 #
-# Both must end in a HELD merge. Read as "no children" (the pre-fix behaviour),
-# both would merge past their holder.
+# Keyed by DIRECTION, not anchor alone, so a fixture can poison ONE walk and leave
+# the other returning a real holder through $TMP/deps. That separation is what
+# makes the multi-document cases below provable: the dropped blocker has to come
+# from a walk the poisoned payload did not also supply.
+#
+#   bead-BADSHAPE   — element metadata is a STRING. Caught at the probe boundary
+#                     by bead_read_array's per-element shape check.
+#   bead-BADSTATUS  — element is structurally fine (string id, object metadata) so
+#                     it PASSES that check, but its status is a NUMBER, which
+#                     aborts the holder filter's ascii_downcase. Only the filter's
+#                     own fail-closed branch can catch this one.
+#   bead-MULTIDOC   — TWO JSON documents, `{}` then a valid array (tk-wkrcy). Every
+#                     document is well-formed and the LAST one is a valid holder
+#                     array, which is precisely why `jq -e` on the raw stream
+#                     passed it: -e reports the last output only.
+#   bead-MULTIEMPTY — TWO documents that are BOTH valid arrays, `[]` then `[]`. The
+#                     variant with nothing malformed anywhere — the only defect is
+#                     the COUNT, so it pins the document-count check specifically
+#                     rather than any shape check.
+#
+# All four must end in a HELD merge.
 cat > "$TMP/depraw" <<'R'
-bead-BADSHAPE|[{"id":"badshape-324","status":"open","metadata":"oops"}]
-bead-BADSTATUS|[{"id":"badstatus-325","status":7,"metadata":{}}]
+bead-BADSHAPE|up|[{"id":"badshape-324","status":"open","metadata":"oops"}]
+bead-BADSHAPE|down|[{"id":"badshape-324","status":"open","metadata":"oops"}]
+bead-BADSTATUS|up|[{"id":"badstatus-325","status":7,"metadata":{}}]
+bead-BADSTATUS|down|[{"id":"badstatus-325","status":7,"metadata":{}}]
+bead-MULTIDOC|up|{} []
+bead-MULTIEMPTY|up|[] []
 R
 
 : > "$TMP/closed"; : > "$TMP/merged"; : > "$TMP/mergedrec"; : > "$TMP/closelog"
@@ -376,10 +408,12 @@ case "$2" in
     if grep -qx "$aid" "$FAKE_DEPFAIL" 2>/dev/null; then
       echo "gc: dep list failed for $aid" >&2; exit 1
     fi
-    # A probe that SUCCEEDS (exit 0, valid JSON array) but whose payload the
-    # reader cannot use. Emitted verbatim so the test controls the exact shape.
+    # A probe that SUCCEEDS (exit 0) but whose payload the reader cannot use.
+    # Emitted verbatim — including a MULTI-DOCUMENT stream — so the test controls
+    # the exact bytes. Keyed on anchor AND direction so one walk can be poisoned
+    # while the other still answers from $TMP/deps.
     if [ -f "$FAKE_DEPRAW" ]; then
-      raw=$(sed -n "s/^${aid}|//p" "$FAKE_DEPRAW")
+      raw=$(sed -n "s/^${aid}|${dir}|//p" "$FAKE_DEPRAW")
       if [ -n "$raw" ]; then printf '%s\n' "$raw"; exit 0; fi
     fi
     out=""
@@ -576,6 +610,38 @@ grep -q "PR#325 in-flight holder filter unreadable; merge held" <<< "$OUT1" \
 grep -q "PR#326 has unclosed rework/review bead bothsrc-326 (open, merge_result=pull_request)" <<< "$OUT1" \
   && ok "(24) holder seen by BOTH pr_number and dep probes -> held (provenance unions to 'dep')" \
   || bad "(24) a both-source holder must not be demoted into the excludable pr_number class (got: $OUT1)"
+
+# (25)-(26) tk-wkrcy: a probe payload can be MORE THAN ONE JSON document and still
+# clear a `jq -e` run over the raw stream, because -e reports the exit status of
+# the LAST output only. That is not a cosmetic mis-validation. probe_holders reads
+# the three payloads POSITIONALLY out of one slurped stream (.[0]/.[1]/.[2]), so
+# an extra leading document shifts every later probe down a slot and the third one
+# falls off the end entirely.
+#
+# Both anchors here are otherwise PERFECT merge candidates — CLEAN, base==target,
+# check.codex green at the live head, no pr_number child — and each has ONE real
+# holder, an open `blocks` blocker carrying merge_result=pull_request, delivered
+# through the `down` walk that the poisoned payload does NOT supply. Pre-fix that
+# blocker landed at .[3], was never read, and the PR squash-merged straight past
+# its merge-ordering block. Verified directly against the pre-fix jq: by_pr `[]` +
+# children `{} []` + blockers `[blocker-327]` slurps to four documents and the
+# holder projection returns `[]`.
+#
+# The two payloads split the guard from the shape checks. (25) leads with `{}`,
+# the realistic pollution shape (a stray object on stdout ahead of the real
+# answer). (26) is `[]` then `[]` — every document individually valid and
+# array-shaped, so NOTHING but the document COUNT is wrong; it stays green only
+# while the count check itself is present.
+grep -q "PR#327 in-flight rework/review probe failed; merge held" <<< "$OUT1" \
+  && ok "(25) multi-document probe payload ('{}' then '[]') -> held (count check, blocker not shifted away)" \
+  || bad "(25) a multi-document probe must fail CLOSED, not drop the later probe (got: $OUT1)"
+grep -q "PR#328 in-flight rework/review probe failed; merge held" <<< "$OUT1" \
+  && ok "(26) two well-formed arrays in one payload ('[]' then '[]') -> held (only the count is wrong)" \
+  || bad "(26) document COUNT alone must fail CLOSED (got: $OUT1)"
+has '^327$' "$TMP/merged" && bad "(25) PR#327 must NOT be merged past its blocker" \
+                          || ok "(25) PR#327 never reached gh pr merge"
+has '^328$' "$TMP/merged" && bad "(26) PR#328 must NOT be merged past its blocker" \
+                          || ok "(26) PR#328 never reached gh pr merge"
 
 # (9) already-merged anchor is NOT closed by the skill (the observer records it).
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \

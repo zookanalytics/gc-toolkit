@@ -369,7 +369,11 @@ the filter that reads the array, and an aborted filter returns byte-for-byte wha
 an empty one returns. So the check is not "did the query exit 0" but "could every
 holder in the answer actually be read" — at the probe boundary and again at the
 filter, since a payload valid enough to survive the first can still break the
-second (tk-qoyly).
+second (tk-qoyly). One answer also has to be *one* answer: a probe that emits more
+than one JSON document is unreadable even when every document is individually
+well-formed, because the three probes are read out of a single stream by position
+— an extra document shifts the later probes down a slot and the last one falls off
+the end unread, silently deleting a whole class of holder (tk-wkrcy).
 
 **Which source found a holder decides which filters may drop it.** Resolving by
 `pr_number` sweeps up *every* bead naming the PR — including a duplicate gating

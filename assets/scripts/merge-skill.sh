@@ -98,30 +98,56 @@ run_bounded() {
 # error object that arrived with a zero exit status — `.[]` iterates an object's
 # values happily, so without it a malformed read projects cleanly to "no children".
 #
-# The shape check has TWO layers, and the per-ELEMENT one is not belt-and-braces
-# (tk-qoyly). The holder filter downstream indexes `.metadata.merge_result` on
-# every element; one element whose metadata is a string (schema drift, a probe
-# that returned a mixed payload) makes that jq abort — and an aborted filter
-# yields an EMPTY holder list, which reads as "no children" and merges past every
-# real holder that was in the array. So an array that cannot be read
-# element-for-element is an UNREADABLE probe, not an empty one. Required per
-# element: an object, a usable non-empty string id, and metadata that is an
-# object or absent.
+# The shape check has THREE layers, and none is belt-and-braces.
+#
+#   DOCUMENT COUNT (tk-wkrcy). The payload must be EXACTLY ONE JSON document.
+#   `jq -e` is not a validator of a raw STREAM: it evaluates the program once per
+#   document and its exit status reflects only the LAST output, so a probe that
+#   emits `{}` (a stray progress/error object, an interleaved warning — city.toml
+#   stderr pollution of --json output is a known shape) followed by a valid array
+#   PASSED the old top-level check. Downstream that is worse than an outright
+#   failure: probe_holders slurps all three probe payloads into ONE stream and
+#   reads them POSITIONALLY as .[0]/.[1]/.[2], so one extra leading document
+#   shifts every later probe down a slot — the blockers array lands at .[3] and is
+#   silently dropped, and a real merge-ordering blocker stops holding the merge.
+#   That is a fail-OPEN shape reachable with a zero exit status, which is why the
+#   count is enforced HERE and the canonical single document is what we emit:
+#   every caller then gets one document per probe by construction, never a stream
+#   whose length it has to trust.
+#
+#   TOP-LEVEL SHAPE. `.[]` iterates an object's values happily, so without it a
+#   malformed read (an error object that arrived with a zero exit status)
+#   projects cleanly to "no children".
+#
+#   PER-ELEMENT SHAPE (tk-qoyly). The holder filter downstream indexes
+#   `.metadata.merge_result` on every element; one element whose metadata is a
+#   string (schema drift, a probe that returned a mixed payload) makes that jq
+#   abort — and an aborted filter yields an EMPTY holder list, which reads as "no
+#   children" and merges past every real holder that was in the array. So an array
+#   that cannot be read element-for-element is an UNREADABLE probe, not an empty
+#   one. Required per element: an object, a usable non-empty string id, and
+#   metadata that is an object or absent.
 bead_read_array() {
-  local raw rc
+  local raw rc out
   raw=$(run_bounded "$@" 2>/dev/null)
   rc=$?
   [ "$rc" -eq 0 ] || return 1
   [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -e '
-      type == "array"
-      and all(.[];
-            type == "object"
-            and ((.id | type) == "string")
-            and ((.id | length) > 0)
-            and (((.metadata | type) as $t | $t == "object" or $t == "null")))
-    ' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw"
+  # -s slurps the whole stream into an array of documents, which is what makes
+  # the count observable at all; each `error(...)` aborts jq with a non-zero exit
+  # and no stdout, landing in the same fail-closed branch as a broken probe.
+  out=$(printf '%s' "$raw" | jq -sc '
+      if length != 1 then error("probe emitted \(length) JSON documents, want exactly 1") else .[0] end
+      | if type == "array" then . else error("probe payload is not an array") end
+      | if all(.[];
+               type == "object"
+               and ((.id | type) == "string")
+               and ((.id | length) > 0)
+               and (((.metadata | type) as $t | $t == "object" or $t == "null")))
+        then . else error("probe payload holds an unreadable element") end
+    ' 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
 }
 
 # Every bead that HOLDS the merge of anchor $1 (PR #$2), as one JSON array.
@@ -169,15 +195,22 @@ probe_holders() {
     --direction=up -t parent-child --json) || return 1
   blockers=$(bead_read_array gc bd dep list "$anchor" \
     --direction=down -t blocks --json) || return 1
+  # The three payloads are read POSITIONALLY, so the slurped stream must be
+  # exactly three documents. bead_read_array already guarantees one canonical
+  # document each (tk-wkrcy); this restates that as a hard assertion at the point
+  # the positions are actually consumed, so any future drift is a fail-CLOSED
+  # error instead of a silent slot shift that drops a probe off the end.
+  #
   # group_by(.id) rather than unique_by(.id): dedup must MERGE provenance, not
   # pick whichever copy sorted first. A bead reachable both ways is a dependency
   # holder — take the union, so a dep-linked bead that also stamps pr_number is
   # never demoted to the excludable pr_number class.
   printf '%s\n%s\n%s' "$by_pr" "$children" "$blockers" \
     | jq -sc '
-        [ (.[0][] | . + {_via: "pr_number"}),
-          (.[1][] | . + {_via: "dep"}),
-          (.[2][] | . + {_via: "dep"}) ]
+        if length != 3 then error("probe stream is \(length) documents, want exactly 3") else . end
+        | [ (.[0][] | . + {_via: "pr_number"}),
+            (.[1][] | . + {_via: "dep"}),
+            (.[2][] | . + {_via: "dep"}) ]
         | group_by(.id)
         | map(.[0] + {_via: (if (map(._via) | index("dep")) then "dep" else "pr_number" end)})
       ' 2>/dev/null
