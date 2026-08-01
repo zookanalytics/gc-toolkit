@@ -56,6 +56,21 @@
 #     disk instead (Step 2a) and reads the backup dog's failure mail as a
 #     second channel (Step 2b). Preserve both when reconciling — do not
 #     restore a `dolt_stale`-keyed threshold row.
+#     Step 2a carries four load-bearing arms; a reconciliation that drops any
+#     one of them restores a false-clean path, so preserve all four:
+#       * the scan is driven by `databases[].name` (EXPECTED_DBS), NOT by a
+#         walk of $BACKUP_ROOT/*/ — a database with no backup dir at all is
+#         invisible to a dir-walk and would emit no verdict;
+#       * missing/empty $BACKUP_ROOT and an empty database list are explicit
+#         FLAG-ROOT findings that NAME the affected databases;
+#       * the RECHECK grace window keeps a normal in-flight sync from
+#         flagging, but is bypassed once the manifest is itself stale (a
+#         run in flight cannot explain a 40 h-old manifest);
+#       * backup dirs with no live database are INFO/advisory, never a
+#         verdict.
+#     assets/scripts/dolt-backup-manifest-check.test.sh executes the shipped
+#     Step 2a snippet and asserts over the shipped step text; run it after any
+#     reconciliation of this formula.
 #   - formulas/mol-refinery-patrol.toml — base + default_merge_strategy +
 #     auto_ff_rig_main + check_set (merge-gate check-set, retires review_gate +
 #     signoff_head) + protected-branch auto-promote +
