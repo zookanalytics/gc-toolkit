@@ -19,6 +19,9 @@
 #            `gc bd` rejects --force in its bead-ID safety pre-check
 #   (GUARD)  when the assignee clear is REFUSED, the route clear still lands — the
 #            whole point of splitting; a refusal must not roll back the safe half
+#   (ROUTEFAIL) the inverse: when the ROUTE clear is refused, the assignee clear is
+#            SKIPPED, not attempted — clearing it while gc.routed_to survives makes
+#            the open+unassigned+routed pool-offer shape the step's resting state
 #   (EXIT)   a failed step update makes the pass exit NON-ZERO; exit 0 over failed
 #            writes is what hid this bug for a day
 #   (LIVE)   anchor NOT terminal -> molecule untouched (a running polecat still
@@ -144,6 +147,16 @@ case "$1 ${2:-}" in
     case "$*" in
       *--force*) echo "gc bd: cannot safely verify bead IDs (unrecognized flag in args)" >&2
                  exit 1 ;;
+    esac
+    # Store-level refusal of the route clear — a wedged write, a transient error.
+    # FAKE_GC_REFUSE_ROUTE lists ids whose --unset-metadata gc.routed_to call
+    # fails, so the test can drive the route-first FAILURE path (tk-d553m). No
+    # claim is involved in this half, so nothing but an injected fault reaches it.
+    case "$*" in
+      *"--unset-metadata gc.routed_to"*)
+        case " ${FAKE_GC_REFUSE_ROUTE:-} " in
+          *" $id "*) echo "gc bd: update failed for $id: store write refused" >&2; exit 1 ;;
+        esac ;;
     esac
     cur=$(state_get "$id"); routed="${cur%%|*}"; assignee="${cur##*|}"
     # bd's claim guard, modeled on the gc path too: reassigning a bead that is
@@ -360,6 +373,62 @@ printf '%s\n' "$OUT3" | grep -q '2 steps quiesced across 3 completed workflow(s)
 [ "$RC3" -ne 0 ] \
   && ok "(EXIT) a failed step update makes the pass exit non-zero (exit 0 is what hid this)" \
   || bad "(EXIT) pass must exit non-zero when a step update failed (got rc=$RC3)"
+
+# --- Run 4: the ROUTE clear is refused. ---------------------------------------
+# The inverse of run 3, and the reason the assignee clear is GATED on route
+# success (tk-d553m). Route-first ordering only rules out the pool-offer shape
+# while the route clear LANDS. If it fails and the forced assignee clear runs
+# anyway, the step comes to rest open + UNASSIGNED + still-routed — that shape as
+# a durable state rather than a momentary window, and strictly worse than the
+# assigned+routed husk the pass found. So the assignee half must be SKIPPED, the
+# step left exactly as it was, and the pass must still say it failed.
+: > "$TMP/cleared"; : > "$TMP/updates"; : > "$TMP/state"
+RC4=0
+OUT4="$(FAKE_GC_REFUSE_ROUTE="s-affine s-pool" bash "$SCRIPT" 2>"$TMP/err4")" || RC4=$?
+ERR4="$(cat "$TMP/err4")"
+
+# The gating assertion: no assignee call may be ISSUED at all for a step whose
+# route is still set — not merely refused downstream by the claim guard.
+grep -q '^bd update s-affine' "$TMP/updates" \
+  && bad "(ROUTEFAIL) forced assignee clear must be SKIPPED when the route clear failed (it would leave the step open+unassigned+routed)" \
+  || ok "(ROUTEFAIL) route-clear failure skips the forced assignee clear entirely"
+grep -q '^s-affine	assignee$' "$TMP/cleared" \
+  && bad "(ROUTEFAIL) the assignee must stay intact while gc.routed_to survives" \
+  || ok "(ROUTEFAIL) assignee left intact — step stays assigned+routed, as it was found"
+grep -q '^s-affine	routed$' "$TMP/cleared" \
+  && bad "(ROUTEFAIL) a refused route clear must not be recorded as applied" \
+  || ok "(ROUTEFAIL) refused route clear leaves gc.routed_to set"
+
+printf '%s\n' "$ERR4" | grep -q 's-affine route clear failed' \
+  && ok "(ROUTEFAIL) the failed route half is reported on stderr, naming the key" \
+  || bad "(ROUTEFAIL) route failure reported on stderr (got: $ERR4)"
+printf '%s\n' "$ERR4" | grep -q 's-affine assignee clear skipped' \
+  && ok "(ROUTEFAIL) the skipped assignee half is reported, and says why" \
+  || bad "(ROUTEFAIL) skip reason reported on stderr (got: $ERR4)"
+printf '%s\n' "$ERR4" | grep -q 's-affine assignee clear failed' \
+  && bad "(ROUTEFAIL) a SKIPPED assignee clear must not be reported as a failed one" \
+  || ok "(ROUTEFAIL) skipped is reported as skipped, never as an attempted-and-failed clear"
+
+# The route-only shape has no assignee to skip, but a refused clear must still be
+# counted failed rather than silently passed over.
+grep -q '^s-pool	routed$' "$TMP/cleared" \
+  && bad "(ROUTEFAIL) a refused route clear on the pool shape must not be recorded as applied" \
+  || ok "(ROUTEFAIL) route-only step -> refused clear leaves gc.routed_to set"
+grep -q '^bd update s-pool' "$TMP/updates" \
+  && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
+  || ok "(ROUTEFAIL) route-only step issues no assignee call"
+
+printf '%s\n' "$OUT4" | grep -q '1 steps quiesced across 3 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 2 failed' \
+  && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
+  || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
+[ "$RC4" -ne 0 ] \
+  && ok "(ROUTEFAIL) a failed route clear makes the pass exit non-zero" \
+  || bad "(ROUTEFAIL) pass must exit non-zero when the route clear failed (got rc=$RC4)"
+
+# The unaffected root still sweeps: one failing step must not strand its siblings.
+grep -q '^s-closed	routed$' "$TMP/cleared" && grep -q '^s-closed	assignee$' "$TMP/cleared" \
+  && ok "(ROUTEFAIL) a route failure under one root leaves other roots fully swept" \
+  || bad "(ROUTEFAIL) unaffected root must still quiesce (got: $(grep '^s-closed' "$TMP/cleared" || echo none))"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

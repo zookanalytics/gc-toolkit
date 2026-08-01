@@ -46,6 +46,13 @@
 #   invisible to the pool, and the assigned hand-back it still rides is simply the
 #   state the bead was already in. The window exposes nothing new.
 #
+#   AND THE ASSIGNEE HALF IS GATED ON IT (tk-d553m). Order alone only rules out
+#   the pool-offer shape while the route clear SUCCEEDS. If it is refused and the
+#   assignee clear runs anyway, that shape stops being a window and becomes the
+#   step's resting state — strictly worse than the assigned+routed husk we found.
+#   So a failed route clear skips the assignee clear: the step is left untouched
+#   and counted failed, and the next patrol retries it whole.
+#
 #   WHY --force ON THE ASSIGNEE. We only reach this point when is_terminal_anchor()
 #   says the anchor is DONE — i.e. the step graph is SPENT. A REQUEST_CHANGES
 #   verdict dispatches rework as a STANDALONE bead (no `gc.step_ref`) sourced from
@@ -149,8 +156,11 @@ BD_BIN=$(command -v bd 2>/dev/null || true)
 
 # Batched per ROOT, deliberately: a rig with several husks is ~6 `gc bd update`
 # calls per root, and sweeping every bead in one flat pass has blown a 2-minute
-# tool timeout in practice. Per-root batching also makes a partial pass coherent —
-# a molecule is either quiesced or untouched, never half-swept.
+# tool timeout in practice. Per-root batching also keeps a partial pass coherent to
+# read: one anchor verdict, then that root's step lines. It does NOT make a root
+# atomic — a single step can land its route clear and still be refused the assignee
+# clear, which counts as failed (not quiesced) so the next patrol resumes from
+# whichever key is still set.
 while IFS= read -r root; do
   [ -n "${root:-}" ] || continue
 
@@ -224,22 +234,35 @@ while IFS= read -r root; do
     # Each half is tracked separately: a step whose route cleared but whose
     # assignee did not is a PARTIAL clear, and counts as a failure, not a success.
     step_ok=1
+    route_ok=1
 
-    # Pool channel. No claim is involved, so this half always lands.
+    # Pool channel. No claim is involved, so this half needs no --force — but it
+    # can still be refused by the store (a wedged write, a transient error), and
+    # the half below is gated on whether it landed.
     if [ -n "$routed" ]; then
       if ! gc bd update "$sid" --unset-metadata gc.routed_to >/dev/null 2>&1; then
         echo "quiesce-completed-workflows: $sid route clear failed; retries next patrol" >&2
-        step_ok=0
+        step_ok=0; route_ok=0
       fi
     fi
 
     # Affine hand-back channel. Needs --force past the claim guard, hence bare bd.
-    if [ -n "$who" ]; then
+    # GATED ON THE ROUTE CLEAR (tk-d553m): route-first is only a safety barrier
+    # while the assignee clear cannot outlive a route that survived. Clear the
+    # assignee on a step whose gc.routed_to is still set and the result is open +
+    # unassigned + routed — the pool-offer shape the ordering exists to prevent,
+    # and now a durable state rather than a momentary window. So a refused route
+    # clear skips this half entirely: the step is left exactly as it was, already
+    # counted failed above, and the next patrol retries both keys from a shape it
+    # understands.
+    if [ -n "$who" ] && [ "$route_ok" -eq 1 ]; then
       if [ -z "$BD_BIN" ] \
          || ! "$BD_BIN" update "$sid" --assignee "" --force >/dev/null 2>&1; then
         echo "quiesce-completed-workflows: $sid assignee clear failed; retries next patrol" >&2
         step_ok=0
       fi
+    elif [ -n "$who" ]; then
+      echo "quiesce-completed-workflows: $sid assignee clear skipped (route clear failed; clearing it now would leave the step open+unassigned+routed); retries next patrol" >&2
     fi
 
     if [ "$step_ok" -eq 1 ]; then
