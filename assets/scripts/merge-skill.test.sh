@@ -336,6 +336,10 @@ bead-FORKKEYED||main|codex|green@HEAD380|||||380
 bead-FORKURL||main|codex|green@HEAD381||||||https://github.com/acme/repo/pull/381
 bead-FORKFOREIGN||main|codex|green@HEAD382||||||https://otherhost/acme/repo/pull/382
 bead-TWOKEYS|383|main|codex|green@HEAD383|||||384
+bead-FINALDISMISS|385|main|codex|green@HEAD385
+bead-FINALRETARGET|386|main|codex|green@HEAD386
+bead-FINALURL|387|main|codex|green@HEAD387
+bead-FINALBRANCH|388|main|codex|green@HEAD388
 A
 
 # (39) The long-check_set anchor, appended programmatically because its check_set
@@ -393,12 +397,35 @@ AF
 #   377 the anchor was retargeted onto another PR
 #   379 UNCHANGED — the control: the terminal re-read must not hold a merge that is
 #       still authorized, or it would just be a second way to never merge.
+#
+# 385-388 are the four fields the terminal re-read did NOT ask about before review
+# tk-78ty5 finding #2, and they are here because NONE of them move the head — so
+# `--match-head-commit` passes on every one and the merge fires against a bead that
+# no longer authorizes it. Each row is IDENTICAL to its first-read shape except for
+# the single field under test:
+#   385 signoff_dismissed APPEARS — the signoff retracted the city's own blocking
+#       review after the approval gate already decided this PR needed no external
+#       approval. The marker exists to ARM that requirement; arriving late means it
+#       armed nothing.
+#   386 merged_target repointed to integration/foo while the PR's live base is
+#       still main — a SAME-HEAD retarget, invisible to the head-match, landing the
+#       merge on a branch no gate in this pass looked at.
+#   387 pr_url backfilled to ANOTHER repository's #387. First read carries no
+#       pr_url at all (the pr_number-only shape), so the identity gate had nothing
+#       to compare and passed by absence; the repair is what makes it comparable.
+#   388 branch repaired to somebody else's. The PR is opened from
+#       polecat/bead-FINALBRANCH, so first read (no branch recorded) passed the
+#       head-branch gate by absence and the terminal read must catch the conflict.
 cat > "$TMP/anchors-final" <<'AN'
 bead-FINALHOLD|374|main|codex|green@HEAD374|true
 bead-FINALGATE|375|main|codex|green@MOVED375
 bead-FINALCLOSED|376|main|codex|green@HEAD376|||||||closed
 bead-FINALPR|377|main|codex|green@HEAD377
 bead-FINALOK|379|main|codex|green@HEAD379
+bead-FINALDISMISS|385|main|codex|green@HEAD385||950@HEAD385
+bead-FINALRETARGET|386|integration/foo|codex|green@HEAD386
+bead-FINALURL|387|main|codex|green@HEAD387|||https://github.com/acme/OTHER/pull/387
+bead-FINALBRANCH|388|main|codex|green@HEAD388||||polecat/somebody-else
 AN
 
 # 377's terminal read must claim a DIFFERENT PR than the one validated. Appended
@@ -614,6 +641,10 @@ cat > "$TMP/prs" <<'P'
 382|OPEN|false|main|HEAD382|CLEAN|MERGEABLE|a382c0ffee000019
 383|OPEN|false|main|HEAD383|CLEAN|MERGEABLE|a383c0ffee000020
 384|OPEN|false|main|HEAD384|CLEAN|MERGEABLE|a384c0ffee000021
+385|OPEN|false|main|HEAD385|CLEAN|MERGEABLE|a385c0ffee000022
+386|OPEN|false|main|HEAD386|CLEAN|MERGEABLE|a386c0ffee000023
+387|OPEN|false|main|HEAD387|CLEAN|MERGEABLE|a387c0ffee000024
+388|OPEN|false|main|HEAD388|CLEAN|MERGEABLE|a388c0ffee000025||polecat/bead-FINALBRANCH|acme/repo|false
 P
 
 # PR review history (the REST `pulls/N/reviews` source — the approval gate's real
@@ -1874,6 +1905,43 @@ has '^379$' "$TMP/merged" \
   && ok "(TR6) an anchor still authorizing its merge at the terminal read MERGES" \
   || bad "(TR6) the terminal re-read must not hold a merge that is still authorized"
 
+# -----------------------------------------------------------------------------
+# THE REST OF THE ANCHOR-LOCAL AUTHORIZATION SET (review tk-78ty5 finding #2).
+# -----------------------------------------------------------------------------
+# TR1-TR5 cover the five fields the first version of this gate re-read. These four
+# cover the ones it did NOT, and they are not a different KIND of hazard — each is
+# a bead-local fact that authorizes the merge, written inside the same window, and
+# invisible to `--match-head-commit` for the same reason: none of them move the
+# head. A gate that re-reads five of nine authorizing fields is a gate with four
+# holes in it.
+has '^385$' "$TMP/merged" \
+  && bad "(TR7) a signoff_dismissed arriving after the approval gate must NOT merge" \
+  || ok "(TR7) signoff_dismissed written between the approval gate and the merge -> held"
+hasin "$OUT1" "anchor bead-FINALDISMISS changed between validation and the merge — signoff_dismissed changed after the approval gate ran ('unset' -> '950@HEAD385')" \
+  && ok "(TR7) the hold names the marker and both values" \
+  || bad "(TR7) hold reason must name signoff_dismissed and what it changed from/to"
+
+has '^386$' "$TMP/merged" \
+  && bad "(TR8) a SAME-HEAD retarget must NOT merge (it lands on the wrong branch)" \
+  || ok "(TR8) merged_target repointed between validation and merge -> held"
+hasin "$OUT1" "anchor bead-FINALRETARGET changed between validation and the merge — anchor was retargeted after validation (merged_target='integration/foo', PR base 'main')" \
+  && ok "(TR8) the hold names the new target and the live base" \
+  || bad "(TR8) hold reason must name both branches"
+
+has '^387$' "$TMP/merged" \
+  && bad "(TR9) a pr_url naming another repository must NOT merge this PR" \
+  || ok "(TR9) pr_url repaired to a foreign PR between validation and merge -> held"
+hasin "$OUT1" "anchor bead-FINALURL changed between validation and the merge — anchor now records pr_url 'https://github.com/acme/OTHER/pull/387'" \
+  && ok "(TR9) the hold names the URL the bead now claims" \
+  || bad "(TR9) hold reason must name the conflicting pr_url"
+
+has '^388$' "$TMP/merged" \
+  && bad "(TR10) a branch naming different work must NOT merge" \
+  || ok "(TR10) branch repaired to another branch between validation and merge -> held"
+hasin "$OUT1" "anchor bead-FINALBRANCH changed between validation and the merge — anchor now records branch 'polecat/somebody-else' but PR#388 is opened from 'polecat/bead-FINALBRANCH'" \
+  && ok "(TR10) the hold names both branches" \
+  || bad "(TR10) hold reason must name the bead's branch and the PR's"
+
 # =============================================================================
 # FORK-KEYED ANCHOR IDENTITY (review tk-tbacg finding #2).
 # =============================================================================
@@ -2007,7 +2075,7 @@ has '^350$' "$TMP/merged-alw" \
 # here can say which.
 has '^363$' "$TMP/merged" && bad "(ID3) an anchor whose pr_url names another PR must NOT be merged" \
                           || ok "(ID3) pr_url/live-URL mismatch -> merge held"
-printf '%s\n' "$OUT1" | grep -q "anchor bead-URLMISMATCH records pr_url 'https://github.com/acme/OTHER/pull/363'" \
+hasin "$OUT1" "anchor bead-URLMISMATCH records pr_url 'https://github.com/acme/OTHER/pull/363'" \
   && ok "(ID3) the hold reason names both pull requests for an operator" \
   || bad "(ID3) hold reason must name the recorded pr_url (got: $OUT1)"
 
@@ -2024,7 +2092,7 @@ printf '%s\n' "$OUT1" | grep -q "anchor bead-URLMISMATCH records pr_url 'https:/
 has '^364$' "$TMP/merged" \
   && ok "(XREPO-DUP) a foreign same-numbered anchor is not a duplicate -> our PR#364 still merges" \
   || bad "(XREPO-DUP) PR#364 must merge; a foreign anchor must not make it multi-anchor (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "PR#364 has multiple open gating anchors" \
+hasin "$OUT1" "PR#364 has multiple open gating anchors" \
   && bad "(XREPO-DUP) must NOT report a one-anchor-per-PR violation across repositories" \
   || ok "(XREPO-DUP) no false one-anchor-per-PR hold across repositories"
 # ...and the foreign anchor is still refused, by the identity check that owns that
@@ -2034,7 +2102,7 @@ has '^bead-XDUPFOREIGN$' "$TMP/closed" \
   || ok "(XREPO-DUP) the foreign anchor is still refused by the pr_url identity check"
 # The SAME-repository duplicate must still be held: the qualification only rules out
 # a positive disagreement, it does not weaken the guard where it applies (313).
-printf '%s\n' "$OUT1" | grep -q "PR#313 has multiple open gating anchors" \
+hasin "$OUT1" "PR#313 has multiple open gating anchors" \
   && ok "(XREPO-DUP) a same-repository duplicate is still held (guard not weakened)" \
   || bad "(XREPO-DUP) same-repository duplicates must still hold"
 
@@ -2047,7 +2115,7 @@ has '^365$' "$TMP/merged" \
 has '^366$' "$TMP/merged" \
   && bad "(XREPO-CHILD) a same-repository open child MUST still hold PR#366" \
   || ok "(XREPO-CHILD) a same-repository open child still holds the merge"
-printf '%s\n' "$OUT1" | grep -q "PR#366 has unclosed rework/review bead child-same-366 (open)" \
+hasin "$OUT1" "PR#366 has unclosed rework/review bead child-same-366 (open)" \
   && ok "(XREPO-CHILD) the hold names the same-repository child" \
   || bad "(XREPO-CHILD) hold reason must name child-same-366 (got: $OUT1)"
 
@@ -2084,7 +2152,7 @@ hasin "$ERR1" "PR#367 referencing-bead read FAILED" \
 has '^368$' "$TMP/merged" \
   && bad "(HD1) a PR opened from a FORK must never be merged under our anchor" \
   || ok "(HD1) fork head -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#368 is opened from FORK 'mallory/repo'" \
+hasin "$OUT1" "PR#368 is opened from FORK 'mallory/repo'" \
   && ok "(HD1) the hold names the fork and this checkout's repository" \
   || bad "(HD1) hold reason must name the fork (got: $OUT1)"
 has '^bead-FORK$' "$TMP/closed" \
@@ -2097,7 +2165,7 @@ has '^bead-FORK$' "$TMP/closed" \
 has '^369$' "$TMP/merged" \
   && bad "(HD2) a self-contradicting head identity must never merge" \
   || ok "(HD2) headRepository/isCrossRepository disagreement -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#369 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
+hasin "$OUT1" "PR#369 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
   && ok "(HD2) the hold names both halves of the contradiction" \
   || bad "(HD2) hold reason must name the contradiction (got: $OUT1)"
 
@@ -2106,7 +2174,7 @@ printf '%s\n' "$OUT1" | grep -q "PR#369 reports head repository 'acme/repo' (thi
 has '^370$' "$TMP/merged" \
   && bad "(HD3) an unreadable head identity must HOLD, never merge" \
   || ok "(HD3) null headRepository/headRepositoryOwner -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#370 head identity is unreadable" \
+hasin "$OUT1" "PR#370 head identity is unreadable" \
   && ok "(HD3) the hold names the unreadable identity" \
   || bad "(HD3) hold reason must name the unreadable head (got: $OUT1)"
 
@@ -2115,7 +2183,7 @@ printf '%s\n' "$OUT1" | grep -q "PR#370 head identity is unreadable" \
 has '^371$' "$TMP/merged" \
   && bad "(HD4) a PR opened from a branch the anchor does not record must not merge" \
   || ok "(HD4) head branch != anchor's recorded branch -> merge held"
-printf '%s\n' "$OUT1" | grep -q "anchor bead-BRANCHMISMATCH records branch 'polecat/bead-BRANCHMISMATCH' but PR#371 is opened from 'polecat/somebody-else'" \
+hasin "$OUT1" "anchor bead-BRANCHMISMATCH records branch 'polecat/bead-BRANCHMISMATCH' but PR#371 is opened from 'polecat/somebody-else'" \
   && ok "(HD4) the hold names both branches" \
   || bad "(HD4) hold reason must name both branches (got: $OUT1)"
 
@@ -2142,7 +2210,7 @@ has '^bead-HEADOK$' "$TMP/closed" \
 has '^373$' "$TMP/merged" \
   && bad "(XREPO-DEP) a dependency-edge blocker must hold regardless of merge_result AND of the repository its pr_url names" \
   || ok "(XREPO-DEP) cross-repository dep-edge blocker -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#373 has unclosed rework/review bead upstream-373 (open, merge_result=pull_request)" \
+hasin "$OUT1" "PR#373 has unclosed rework/review bead upstream-373 (open, merge_result=pull_request)" \
   && ok "(XREPO-DEP) the hold names the cross-repository blocker" \
   || bad "(XREPO-DEP) hold reason must name upstream-373 (got: $OUT1)"
 
@@ -2225,7 +2293,7 @@ has '^301$' "$TMP/merged" \
 has '^bead-CLEAN$' "$TMP/closed" \
   && bad "(ID2) no anchor may be closed off a stranger's pull request" \
   || ok "(ID2) no anchor closed on the foreign PR"
-printf '%s\n' "$OUTID2" | grep -q "answered from 'github.com/stranger/repo', not this checkout's 'github.com/acme/repo'" \
+hasin "$OUTID2" "answered from 'github.com/stranger/repo', not this checkout's 'github.com/acme/repo'" \
   && ok "(ID2) the hold reason names the repository that answered" \
   || bad "(ID2) must name the foreign repository (got: $OUTID2)"
 

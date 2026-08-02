@@ -35,6 +35,15 @@
 #             the PR mergeable (mergeStateStatus=CLEAN folds CI + base-current +
 #             no-conflict — and approval too, but ONLY on a repo that requires
 #             reviews; see the approval gate).
+#   merge:    the anchor is re-read ONE more time, immediately before `gh pr
+#             merge`, and the ENTIRE anchor-local authorization set is recomputed
+#             from it — status, merge_result, PR number, merge_hold, every
+#             check.<gate> marker, signoff_dismissed, merged_target, pr_url and
+#             branch. `--match-head-commit` binds the merge to the validated
+#             COMMIT, but none of those fields move the head, so a mid-pass write
+#             to any of them (a late dismissal arming the approval requirement, a
+#             same-head retarget, an identity repair) would otherwise sail
+#             straight through it. Any mismatch, or an unreadable re-read, HOLDS.
 #   record:   close the anchor "Merged to <target> at <sha>" and stamp
 #             merge_result=merged + merged_sha — synchronous, because the skill
 #             that merged is the one that knows it merged. If the record half
@@ -558,6 +567,18 @@ url_repo_q() {
     | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\([^/][^/]*\)/\([^/][^/]*/[^/][^/]*\)/pull/[0-9].*#\1/\2#p'
 }
 
+# A pull-request URL reduced to its canonical `<...>/pull/<n>` form: whitespace
+# stripped, a `/files` or `#discussion_r...` suffix and any trailing slash
+# trimmed. ONE definition for every URL comparison here — the live PR url, the
+# anchor's recorded pr_url at validation, and the same field re-read immediately
+# before the merge — so a cosmetic difference is never read as a different pull
+# request, and the three sites cannot drift apart. Mirrors the identical
+# normalization reconcile-merged-prs.sh applies on both sides of its comparison.
+canon_pr_url() {
+  printf '%s' "${1:-}" \
+    | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
+}
+
 # The same question, asked in jq of a bead's own metadata, for the two HOLD guards
 # below. Both used to key on the bare PR NUMBER, and a number names a different
 # pull request in every other repository this ledger spans — so a foreign bead
@@ -681,8 +702,7 @@ while IFS= read -r row; do
   head_oid=$(printf '%s' "$PR_JSON" | jq -r '.headRefOid // ""')
   merge_state=$(printf '%s' "$PR_JSON" | jq -r '.mergeStateStatus // ""')
   mergeable=$(printf '%s' "$PR_JSON" | jq -r '.mergeable // ""')
-  live_url=$(printf '%s' "$PR_JSON" | jq -r '.url // ""' \
-    | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
+  live_url=$(canon_pr_url "$(printf '%s' "$PR_JSON" | jq -r '.url // ""')")
   # `<owner>/<repo>` of the branch the PR is opened FROM, assembled defensively: gh
   # returns both as objects that are NULL when the head repository has been deleted,
   # and a half-resolved "owner/" would compare unequal by luck rather than by design.
@@ -717,8 +737,7 @@ while IFS= read -r row; do
   # an anchor with no pr_url is governed by the pinned read and the repository
   # check above.
   if [ -n "$prurl" ]; then
-    want_url=$(printf '%s' "$prurl" | tr -d '[:space:]' \
-      | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
+    want_url=$(canon_pr_url "$prurl")
     if [ "$want_url" != "$live_url" ]; then
       echo "merge-skill: PR#$num resolves to '$live_url' but anchor $id records pr_url '$prurl'; the bead and the PR name different pull requests — merge held, operator must repair the metadata"
       held=$((held + 1)); continue
@@ -1345,12 +1364,38 @@ while IFS= read -r row; do
   # does. The bead is the authority, so it gets the same freshness the commit does.
   #
   # Deliberately the LAST gate and deliberately CHEAP: one `gc bd show`, only for an
-  # anchor that already passed everything else (a handful per pass), re-asking only
-  # the questions this bead alone answers — still open, still parked on a published
-  # PR, still naming exactly this PR, not parked by an operator, every declared gate
-  # still green at the head about to be merged. The gates whose evidence lives
-  # OUTSIDE the bead (CI, approval, the child hold) are not re-asked here; their
-  # freshness is the head-match's job and the next pass's.
+  # anchor that already passed everything else (a handful per pass), re-asking
+  # EVERY bead-local fact that authorizes this merge — the whole anchor-local
+  # authorization set, not a subset of it. The gates whose evidence lives OUTSIDE
+  # the bead (CI, the approving review, the child hold) are not re-asked here;
+  # their freshness is the head-match's job and the next pass's.
+  #
+  # "Every bead-local fact" is the correction from review tk-78ty5 finding #2. The
+  # first version re-asked status, merge_result, PR number, merge_hold and the
+  # check-set markers, and stopped there — so four fields that authorize the merge
+  # just as directly were still trusted from a snapshot, and `--match-head-commit`
+  # cannot catch any of them because NONE of them move the head:
+  #
+  #   signoff_dismissed  arms the external-approval requirement. A signoff writing
+  #                      it AFTER the approval gate ran (the gate reads it at
+  #                      ~1130, the retraction stamps it later in the same window)
+  #                      means the city retracted its own block on a PR this pass
+  #                      already decided needed no external approval — the exact
+  #                      fail-open the marker exists to prevent.
+  #   merged_target      a SAME-HEAD retarget. The retarget gate compared the live
+  #                      base to the target read before it; repointing the anchor
+  #                      afterwards lands this head on a branch nobody validated.
+  #   pr_url / branch    identity. Both were read from the pre-PR-read ROWS
+  #                      snapshot — the staler of the two reads — and an identity
+  #                      REPAIR mid-pass (check-set-heal backfilling a certified
+  #                      pr_url, an operator correcting a mis-stamped branch) is
+  #                      precisely the write that makes the earlier comparison
+  #                      wrong. Re-asked against the live PR, not against the
+  #                      snapshot they were first compared to.
+  #
+  # Each is compared to the LIVE PR fact it was validated against ($base, $live_url,
+  # $head_ref), never to the earlier snapshot: the question is "does the bead still
+  # authorize THIS merge", not "did the bead change".
   #
   # Fail-closed in both directions: an unreadable re-read HOLDS (a merge is the one
   # act that cannot be retried away, so "I could not confirm" must not merge), and
@@ -1368,6 +1413,10 @@ while IFS= read -r row; do
     | if ($ns | length) == 1 then $ns[0] else "" end' 2>/dev/null)
   final_hold=$(printf '%s' "$final_row" | jq -r '.meta.merge_hold // ""' 2>/dev/null)
   final_checkset=$(printf '%s' "$final_row" | jq -r '.meta.check_set // ""' 2>/dev/null)
+  final_dismissed=$(printf '%s' "$final_row" | jq -r '.meta.signoff_dismissed // ""' 2>/dev/null)
+  final_target=$(printf '%s' "$final_row" | jq -r '.meta.merged_target // ""' 2>/dev/null)
+  final_prurl=$(printf '%s' "$final_row" | jq -r '.meta.pr_url // ""' 2>/dev/null)
+  final_branch=$(printf '%s' "$final_row" | jq -r '.meta.branch // ""' 2>/dev/null)
   final_reason=""
   if [ "$final_status" != "open" ]; then
     final_reason="anchor is no longer open (status='${final_status:-unknown}')"
@@ -1377,6 +1426,29 @@ while IFS= read -r row; do
     final_reason="anchor now claims '${final_pr:-none}', not PR#$num"
   elif merge_hold_truthy "$final_hold"; then
     final_reason="merge_hold was set after validation (operator gate)"
+  # A signoff_dismissed that appeared (or changed) after the approval gate ran
+  # means the city retracted one of its OWN blocking reviews inside this pass's
+  # window. The approval gate is what that marker arms, and it has already run —
+  # so this merge was authorized against a bead that did not yet carry the
+  # requirement. Hold unconditionally on any change rather than re-deriving
+  # `needs_approval` here: the evidence the requirement needs (the reviews
+  # history) lives outside the bead, this gate is deliberately one ledger read,
+  # and the next pass re-validates the whole approval path against the marker.
+  elif [ "$final_dismissed" != "$dismissed" ]; then
+    final_reason="signoff_dismissed changed after the approval gate ran ('${dismissed:-unset}' -> '${final_dismissed:-unset}') — a review the city retracted mid-pass arms the external-approval requirement, which this pass has already decided"
+  # Same-head retarget: `--match-head-commit` binds the COMMIT, not the branch it
+  # lands ON. Compared against the LIVE base, exactly as the retarget gate above
+  # compares it, so a retarget between the two reads cannot land this head on a
+  # branch no gate in this pass ever looked at.
+  elif [ -n "$final_target" ] && [ -n "$base" ] && [ "$final_target" != "$base" ]; then
+    final_reason="anchor was retargeted after validation (merged_target='$final_target', PR base '$base') — merging now would land on the wrong branch"
+  # Identity, re-asked against the live PR this pass read (not against the ROWS
+  # snapshot the first comparison used). An anchor with no recorded url/branch is
+  # governed by the pinned read and the repository checks, exactly as above.
+  elif [ -n "$final_prurl" ] && [ "$(canon_pr_url "$final_prurl")" != "$live_url" ]; then
+    final_reason="anchor now records pr_url '$final_prurl', which is not the PR#$num just validated ('$live_url')"
+  elif [ -n "$final_branch" ] && [ -n "$head_ref" ] && [ "$final_branch" != "$head_ref" ]; then
+    final_reason="anchor now records branch '$final_branch' but PR#$num is opened from '$head_ref' — the bead and the PR describe different work"
   else
     if ! final_gate=$(checkset_hold_gate "$final_checkset" "$final_row" "$head_oid"); then
       final_gate=""

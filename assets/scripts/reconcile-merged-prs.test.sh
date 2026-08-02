@@ -139,6 +139,22 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 has() { grep -q "$1" "$2" 2>/dev/null; }
+# Assert that PATTERN (a BRE, same as `has`) appears in a CAPTURED STRING.
+#
+# NOT `printf '%s\n' "$OUT" | grep -q PATTERN`. This file runs under `set -euo
+# pipefail`, and `grep -q` exits at its FIRST match — closing the pipe under a
+# `printf` still writing the rest of a large captured output. printf takes
+# SIGPIPE, the pipeline reports 141, and the assertion reads FALSE even though
+# the line IS present. Whether it fires depends on where the match sits relative
+# to the ~64KB pipe buffer, so a suite carrying it fails on output SIZE rather
+# than on behavior — a phantom red against correct code, which is exactly how
+# merge-skill.test.sh went red at 204/1 while the code under test was fine.
+#
+# A here-string is a REDIRECT, not a pipeline: bash hands grep a file it reads to
+# EOF, no upstream writer exists to be signalled, and the exit status is grep's
+# alone. Match semantics are unchanged from the pipelines this replaced. Same
+# helper, same reasoning, as merge-skill.test.sh's.
+hasin() { grep -q "$2" <<< "$1"; }
 
 mkdir -p "$TMP/bin"
 
@@ -396,6 +412,12 @@ for a in "$@"; do
   case "${prev:-}" in --repo|-R) RESOLVED="$a" ;; esac
   prev="$a"
 done
+# The pin the CALLER passed, captured before $FAKE_IGNORE_REPO models a gh that
+# throws it away. What the caller asked for and where the call actually landed are
+# different questions: the identity guards (ID2) measure the second, the pinning
+# assertions (PIN2) measure the FIRST — a script cannot be blamed for a gh that
+# ignores `--repo`, but it is entirely responsible for passing it.
+PIN_ARG="$RESOLVED"
 [ -s "${FAKE_IGNORE_REPO:-/dev/null}" ] && RESOLVED=""
 [ -n "$RESOLVED" ] || RESOLVED="$ghdefault"
 # `--repo` is `[HOST/]OWNER/REPO`; with the host OMITTED gh supplies it from GH_HOST
@@ -433,6 +455,17 @@ if [ "$1" = "api" ]; then
       *)          PATH_ARG="$1"; shift ;;
     esac
   done
+  # WHICH REPOSITORY the REST path names. `repos/{owner}/{repo}/...` is resolved by
+  # gh from its AMBIENT context, so a path carrying the literal placeholders is
+  # recorded here as `{owner}/{repo}` — indistinguishable from any other unpinned
+  # call, and exactly what the assertions below refuse. A pinned path records the
+  # real `<owner>/<repo>` (review tk-78ty5 finding #3).
+  case "$PATH_ARG" in
+    repos/*)
+      apiwhere="${PATH_ARG#repos/}"
+      apiwhere="$(printf '%s' "$apiwhere" | cut -d/ -f1,2)"
+      [ -n "${FAKE_APIWHERE:-}" ] && printf '%s\n' "$apiwhere" >> "$FAKE_APIWHERE" ;;
+  esac
   case "$PATH_ARG" in
     user) printf '%s\n' "${FAKE_SELF_LOGIN-zook-bot}" ;;
     */dismissals)
@@ -475,6 +508,12 @@ fi
 case "$1 $2" in
   "pr view")
     num="$3"; shift 3
+    # WHICH REPOSITORY this read was PINNED to (empty when the caller passed no
+    # `--repo` at all). Recorded for EVERY `gh pr view` — not just the main PR read —
+    # so the assertions below cover the mid-pass head re-read and the auto-merge
+    # probe too, both of which were bare `gh pr view "$num"` before review tk-78ty5
+    # finding #3.
+    [ -n "${FAKE_VIEWWHERE:-}" ] && printf '%s\t%s\n' "$num" "${PIN_ARG:-<unpinned>}" >> "$FAKE_VIEWWHERE"
     fields=""; Q=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -783,7 +822,11 @@ case "$2" in
         # check-set-heal.sh certifies and persists). Empty for almost every
         # fixture — a pr_number-only anchor is the common shape, and is governed
         # by the pinned read plus the repository comparison alone.
-        while IFS='|' read -r id pr target mhold rhold cset cmark prurl; do
+        # Columns 9-10 are `fork_pr` / `fork_pr_url`, the OTHER two keys a bead can
+        # name a PR with. Omitted everywhere but the fork-keyed case: an anchor
+        # wearing them and NO pr_number is exactly the shape the per-anchor loop
+        # used to drop (review tk-78ty5 finding #5).
+        while IFS='|' read -r id pr target mhold rhold cset cmark prurl forkpr forkprurl; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
@@ -791,8 +834,8 @@ case "$2" in
           staled=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_STALED" 2>/dev/null | tail -1)
           gatehead=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATEHEAD" 2>/dev/null | tail -1)
           gatenopool=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATENOPOOL" 2>/dev/null | tail -1)
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s"}}' \
-                  "$id" "$pr" "$prurl" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$cset" "$cmark" "$mhold" "$rhold")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s"}}' \
+                  "$id" "$pr" "$prurl" "$forkpr" "$forkprurl" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$cset" "$cmark" "$mhold" "$rhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -1030,9 +1073,14 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_LIVEX="$TMP/livex" FAKE_BODIES="$TMP/bodies" \
        FAKE_REPOFAIL="$TMP/repofail" \
        FAKE_GH_DEFAULT="$TMP/ghdefault" FAKE_IGNORE_REPO="$TMP/ignorerepo" \
-       FAKE_GH_HOST="$TMP/ghhost"
+       FAKE_GH_HOST="$TMP/ghhost" \
+       FAKE_APIWHERE="$TMP/apiwhere" FAKE_VIEWWHERE="$TMP/viewwhere"
 mkdir -p "$TMP/bodies"
 : > "$TMP/repofail"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/ghhost"
+# WHERE each GitHub call went, recorded for every run in the file: `gh api` by the
+# repository its REST path names, `gh pr view` by the repository the call resolved
+# in. The assertions that read them are at the end (PIN1/PIN2).
+: > "$TMP/apiwhere"; : > "$TMP/viewwhere"
 
 # No PR reviews, no dismissals, and a head that never moves by default: the
 # superseded-review arm is inert for every scenario except Run 13, which supplies
@@ -1078,10 +1126,10 @@ grep -q 'existing_pr=https://github.com/acme/repo/pull/210' "$TMP/updates" \
   && ok "(9) rebase child reworks the EXISTING PR (existing_pr set)" \
   || bad "(9) rebase child must carry existing_pr so no second PR is opened"
 J_UPDATES=$(grep '^bead-J' "$TMP/updates" || true)
-printf '%s\n' "$J_UPDATES" | grep -q 'stale_base_head=head210' \
+hasin "$J_UPDATES" 'stale_base_head=head210' \
   && ok "(9) anchor marked stale_base_head at the detected head" \
   || bad "(9) anchor marked stale_base_head at the detected head (got: $J_UPDATES)"
-printf '%s\n' "$J_UPDATES" | grep -q 'merge_result=' \
+hasin "$J_UPDATES" 'merge_result=' \
   && bad "(9) anchor must KEEP merge_result=pull_request (the merge skill still lands it)" \
   || ok "(9) anchor keeps merge_result=pull_request (stays gating, unlike retarget/abandon)"
 has '^bead-J$' "$TMP/closed" && bad "(9) conflicted anchor must NOT be closed" \
@@ -1114,14 +1162,14 @@ eq "$(grep -c 'Rebase PR#203' "$TMP/created")" "0" \
 # gate on rewriting the branch underneath it.
 eq "$(grep -c 'Rebase PR#214' "$TMP/created")" "0" \
    "(16) anchor merge_hold -> NO rebase child filed (no force-push dispatched)"
-printf '%s\n' "$OUT1" | grep -q "bead-N — PR#214 conflicted (stale base) but merge_hold set" \
+hasin "$OUT1" "bead-N — PR#214 conflicted (stale base) but merge_hold set" \
   && ok "(16) merge_hold hold is announced, naming the operator gate" \
   || bad "(16) merge_hold hold reason (got: $OUT1)"
 
 # (17) rebase_hold on the anchor: the narrower "do not rebase this branch".
 eq "$(grep -c 'Rebase PR#215' "$TMP/created")" "0" \
    "(17) anchor rebase_hold -> NO rebase child filed"
-printf '%s\n' "$OUT1" | grep -q "bead-O — PR#215 conflicted (stale base) but rebase_hold set" \
+hasin "$OUT1" "bead-O — PR#215 conflicted (stale base) but rebase_hold set" \
   && ok "(17) anchor rebase_hold hold is announced" \
   || bad "(17) anchor rebase_hold hold reason (got: $OUT1)"
 
@@ -1133,7 +1181,7 @@ printf '%s\n' "$OUT1" | grep -q "bead-O — PR#215 conflicted (stale base) but r
 # VISIBLE (status list) and its rebase_hold must be READ (the veto).
 eq "$(grep -c 'Rebase PR#216' "$TMP/created")" "0" \
    "(18) BLOCKED child with rebase_hold -> NO second rebase child on its branch"
-printf '%s\n' "$OUT1" | grep -q "child-P holds branch 'polecat/bead-P' with rebase_hold" \
+hasin "$OUT1" "child-P holds branch 'polecat/bead-P' with rebase_hold" \
   && ok "(18) hold reason names the holding child and the branch it protects" \
   || bad "(18) blocked-child rebase_hold hold reason (got: $OUT1)"
 
@@ -1160,7 +1208,7 @@ eq "$(grep -c 'Rebase PR#219' "$TMP/created")" "0" \
 # --- (12)(13)(14) anchorless open PRs: the PR -> BEAD direction. --------------
 # (12) closed bead + open PR: the close-on-publish blind spot. Reported and
 # escalated exactly once, bounded by a marker on the closed bead.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#301' \
+hasin "$OUT1" 'ANCHORLESS PR#301' \
   && ok "(12) open PR whose bead is CLOSED is reported as anchorless" \
   || bad "(12) open PR whose bead is CLOSED is reported as anchorless (got: $OUT1)"
 eq "$(grep -c 'anchorless open PR#301' "$TMP/mail")" "1" \
@@ -1190,36 +1238,36 @@ grep '^dead-1' "$TMP/updates" | grep -q 'status' \
   || ok "(12) anchorless arm never reopens the closed bead (disposition is the operator's)"
 # A draft is still invisible to every automated path, so it is still a finding —
 # labelled so the operator can weight it.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#303 (draft)' \
+hasin "$OUT1" 'ANCHORLESS PR#303 (draft)' \
   && ok "(12) anchorless draft PR reported and labelled as a draft" \
   || bad "(12) anchorless draft PR reported and labelled (got: $OUT1)"
 # Already-escalated: keep reporting (still stranded), do not re-mail.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#304' \
+hasin "$OUT1" 'ANCHORLESS PR#304' \
   && ok "(12) already-flagged anchorless PR still reported each pass" \
   || bad "(12) already-flagged anchorless PR still reported each pass"
 eq "$(grep -c 'anchorless open PR#304' "$TMP/mail")" "0" \
    "(12) already-flagged anchorless PR is not re-escalated"
 
 # (13) a PR any LIVE bead references is tracked by something -> not a finding.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#203' \
+hasin "$OUT1" 'ANCHORLESS PR#203' \
   && bad "(13) PR tracked by a live gating anchor must not be flagged" \
   || ok "(13) PR tracked by a live gating anchor is not flagged"
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#211' \
+hasin "$OUT1" 'ANCHORLESS PR#211' \
   && bad "(13) PR tracked by a live rework child must not be flagged" \
   || ok "(13) PR tracked by a live rework child is not flagged"
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#77' \
+hasin "$OUT1" 'ANCHORLESS PR#77' \
   && ok "(13) tracked-set match is exact — PR#77 not satisfied by tracked PR#7" \
   || bad "(13) tracked-set match is exact — PR#77 not satisfied by tracked PR#7 (got: $OUT1)"
 
 # (14) no bead in any state: report it, but never mail — there is nothing
 # durable to bound the escalation, so mailing would repeat every wake forever.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#302' \
+hasin "$OUT1" 'ANCHORLESS PR#302' \
   && ok "(14) open PR with no bead in any state is reported" \
   || bad "(14) open PR with no bead in any state is reported (got: $OUT1)"
 eq "$(grep -c 'anchorless open PR#302' "$TMP/mail")" "0" \
    "(14) unboundable (no-bead) finding is reported but never escalated"
 
-printf '%s\n' "$OUT1" | grep -q '8 anchorless open PRs' \
+hasin "$OUT1" '8 anchorless open PRs' \
   && ok "run 1 summary reports 8 anchorless open PRs" \
   || bad "run 1 summary anchorless count (got: $OUT1)"
 
@@ -1240,10 +1288,10 @@ eq "$(grep -c 'Rebase PR#230' "$TMP/created")" "0" \
 
 # (33) The PR -> BEAD direction: a fork_pr-keyed live bead makes its PR tracked,
 # so it is no longer reported as anchorless...
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#401' \
+hasin "$OUT1" 'ANCHORLESS PR#401' \
   && bad "(33) PR named by a live fork_pr-keyed bead must not be reported anchorless" \
   || ok "(33) fork_pr-keyed live bead makes its PR tracked (no false anchorless)"
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#402' \
+hasin "$OUT1" 'ANCHORLESS PR#402' \
   && bad "(33) PR named by a live fork_pr_url-keyed bead must not be reported anchorless" \
   || ok "(33) fork_pr_url-keyed live bead makes its PR tracked (number parsed from the URL)"
 eq "$(grep -c 'anchorless open PR#401' "$TMP/mail")" "0" \
@@ -1254,18 +1302,18 @@ eq "$(grep -c 'anchorless open PR#401' "$TMP/mail")" "0" \
 # cheap alternative (hand-stamping pr_number) was rejected for. A live bead with
 # no merge_result, no branch, no target and no merge_strategy tracks the PR
 # without owning it: nothing will land it either way, so it keeps its own line.
-printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#401' \
+hasin "$OUT1" 'UNOWNED PR#401' \
   && ok "(34) tracked-but-ungated PR reported as UNOWNED, not silently dropped" \
   || bad "(34) tracked-but-ungated PR reported as UNOWNED (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#401.*live-fork (operator)' \
+hasin "$OUT1" 'UNOWNED PR#401.*live-fork (operator)' \
   && ok "(34) UNOWNED line names the live bead and its assignee" \
   || bad "(34) UNOWNED line names the bead + assignee (got: $(printf '%s\n' "$OUT1" | grep 'PR#401' || true))"
-printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#402' \
+hasin "$OUT1" 'UNOWNED PR#402' \
   && ok "(34) fork_pr_url-keyed ungated PR also reported as UNOWNED" \
   || bad "(34) fork_pr_url-keyed ungated PR reported as UNOWNED (got: $OUT1)"
 # The rule is about gating metadata, not about the fork keys: a plain
 # pr_number-keyed bead with nothing to act on is just as unowned.
-printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#404' \
+hasin "$OUT1" 'UNOWNED PR#404' \
   && ok "(34) pr_number-keyed bead with no gating metadata is UNOWNED too (not a fork-only rule)" \
   || bad "(34) ungated pr_number-keyed bead is UNOWNED (got: $OUT1)"
 # Non-escalating: the naming bead is LIVE, so this is a routing gap an operator
@@ -1276,10 +1324,10 @@ eq "$(grep -c 'PR#401' "$TMP/mail")" "0" \
 # (35) A bead that DOES carry gating metadata is owned, whatever key it used to
 # name the PR — so it stays silent. Without this the UNOWNED arm would just be
 # the anchorless arm under a new name.
-printf '%s\n' "$OUT1" | grep -q 'PR#403' \
+hasin "$OUT1" 'PR#403' \
   && bad "(35) fork_pr-keyed bead WITH gating metadata must be silent (owned)" \
   || ok "(35) fork_pr-keyed bead with gating metadata -> owned, no line at all"
-printf '%s\n' "$OUT1" | grep -q '3 unowned open PRs' \
+hasin "$OUT1" '3 unowned open PRs' \
   && ok "(34) run 1 summary reports 3 unowned open PRs" \
   || bad "(34) run 1 summary unowned count (got: $OUT1)"
 
@@ -1287,10 +1335,10 @@ printf '%s\n' "$OUT1" | grep -q '3 unowned open PRs' \
 # only as fork_pr: keyed on pr_number alone it resolves to nothing, the arm falls
 # into the "no bead in any state" branch — which by design does NOT escalate —
 # and a genuinely stranded PR is silently downgraded to a log line forever.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#405' \
+hasin "$OUT1" 'ANCHORLESS PR#405' \
   && ok "(36) open PR whose closed anchor is fork_pr-keyed is still anchorless" \
   || bad "(36) fork_pr-keyed closed anchor -> anchorless (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#405.*anchor dead-5 is CLOSED' \
+hasin "$OUT1" 'ANCHORLESS PR#405.*anchor dead-5 is CLOSED' \
   && ok "(36) fork_pr-keyed closed anchor is RESOLVED, not reported as 'no bead in any state'" \
   || bad "(36) fork_pr-keyed closed anchor resolved to dead-5 (got: $(printf '%s\n' "$OUT1" | grep 'PR#405' || true))"
 eq "$(grep -c 'anchorless open PR#405' "$TMP/mail")" "1" \
@@ -1311,13 +1359,13 @@ grep '^dead-5' "$TMP/updates" | grep -q 'anchorless_flagged=405' \
 # names #406, but its pr_url is on another host — a different pull request. Keyed
 # on the bare number our open #406 reads as tracked (or UNOWNED) and its genuinely
 # anchorless state is never reported: silence that looks exactly like health.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#406' \
+hasin "$OUT1" 'ANCHORLESS PR#406' \
   && ok "(37) a foreign same-numbered LIVE bead does not track our PR#406 into silence" \
   || bad "(37) PR#406 must still be reported anchorless (got: $(printf '%s\n' "$OUT1" | grep 'PR#406' || echo '<no line at all>'))"
-printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#406' \
+hasin "$OUT1" 'UNOWNED PR#406' \
   && bad "(37) a foreign bead must not make our PR 'tracked but unowned' either" \
   || ok "(37) the foreign bead does not downgrade the finding to UNOWNED"
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#406.*anchor dead-406 is CLOSED' \
+hasin "$OUT1" 'ANCHORLESS PR#406.*anchor dead-406 is CLOSED' \
   && ok "(37) ...and the SAME-repository closed anchor still resolves normally" \
   || bad "(37) dead-406 must still resolve (got: $(printf '%s\n' "$OUT1" | grep 'PR#406' || true))"
 eq "$(grep -c 'anchorless open PR#406' "$TMP/mail")" "1" \
@@ -1330,10 +1378,10 @@ eq "$(grep -c 'anchorless open PR#406' "$TMP/mail")" "1" \
 # PR it never owned, so the real finding goes quiet from the next pass on.
 # Qualified, nothing resolves and the PR falls to the non-escalating
 # "no bead in any state" arm, which is the honest answer here.
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#407' \
+hasin "$OUT1" 'ANCHORLESS PR#407' \
   && ok "(38) PR#407 is still reported anchorless" \
   || bad "(38) PR#407 must be reported anchorless (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#407.*no bead in any state references it' \
+hasin "$OUT1" 'ANCHORLESS PR#407.*no bead in any state references it' \
   && ok "(38) a foreign closed bead does not resolve as our PR's dead anchor" \
   || bad "(38) PR#407 must fall to the no-bead arm (got: $(printf '%s\n' "$OUT1" | grep 'PR#407' || true))"
 grep '^dead-foreign-407' "$TMP/updates" | grep -q 'anchorless_flagged' \
@@ -1349,13 +1397,13 @@ eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \
    "(INV) observer never runs 'gh pr merge' (detect-only, no merge authority)"
 
 # Summary counters + the absence of any auto-merge wording.
-printf '%s\n' "$OUT1" | grep -q "1 closed, 1 abandoned" \
+hasin "$OUT1" "1 closed, 1 abandoned" \
   && ok "run 1 summary reports 1 closed, 1 abandoned" \
   || bad "run 1 summary (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "2 retargeted" \
+hasin "$OUT1" "2 retargeted" \
   && ok "run 1 summary reports 2 retargeted" \
   || bad "run 1 summary retargeted count (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -qi "auto-merge" \
+grep -qi "auto-merge" <<< "$OUT1" \
   && bad "run 1 summary must not mention auto-merge (it was retired)" \
   || ok "run 1 summary makes no mention of auto-merge"
 
@@ -1365,10 +1413,14 @@ printf '%s\n' "$OUT1" | grep -qi "auto-merge" \
 # above already exercises this end-to-end (the script would skip every anchor on
 # a rejected field); these direct probes document the contract so a reintroduced
 # `merged` fails loudly with an obvious message.
-gh pr view 201 --json merged >/dev/null 2>&1 \
+# FAKE_VIEWWHERE is cleared for these two: they are the TEST calling the stub
+# directly to document its contract, not the script making a call. Recording them
+# would put an <unpinned> row in the ledger that PIN2 reads and blame the script for
+# a probe it never made.
+FAKE_VIEWWHERE='' gh pr view 201 --json merged >/dev/null 2>&1 \
   && bad "(6) gh stub must REJECT unsupported field 'merged' (models real gh)" \
   || ok "(6) unsupported --json field 'merged' rejected (guards the field-shape bug)"
-gh pr view 201 --json state,mergedAt,mergeCommit,isDraft,baseRefName >/dev/null 2>&1 \
+FAKE_VIEWWHERE='' gh pr view 201 --json state,mergedAt,mergeCommit,isDraft,baseRefName >/dev/null 2>&1 \
   && ok "(6) the script's --json field set is accepted by the gh stub" \
   || bad "(6) the script's --json field set must be accepted"
 
@@ -1407,7 +1459,7 @@ eq "$(grep -c 'Rebase PR#213' "$TMP/created")" "0" \
 eq "$(grep -c 'PR#213 conflicted (stale base) with no fix pool' "$TMP/mail")" "1" \
    "(9) no fix pool -> escalated to mayor once"
 M_UPDATES=$(grep '^bead-M' "$TMP/updates" || true)
-printf '%s\n' "$M_UPDATES" | grep -q 'gc.routed_to=human' \
+hasin "$M_UPDATES" 'gc.routed_to=human' \
   && ok "(9) no fix pool -> anchor routed to human" \
   || bad "(9) no fix pool -> anchor routed to human (got: $M_UPDATES)"
 
@@ -1418,10 +1470,10 @@ printf '%s\n' "$M_UPDATES" | grep -q 'gc.routed_to=human' \
 : > "$TMP/anchors"
 printf '305|false|polecat/dead-5|main\n' > "$TMP/openprs"
 OUT5="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
-printf '%s\n' "$OUT5" | grep -q 'no gating anchors' \
+hasin "$OUT5" 'no gating anchors' \
   && ok "(15) empty gating set still reported" \
   || bad "(15) empty gating set still reported (got: $OUT5)"
-printf '%s\n' "$OUT5" | grep -q 'ANCHORLESS PR#305' \
+hasin "$OUT5" 'ANCHORLESS PR#305' \
   && ok "(15) anchorless scan runs even with zero gating anchors" \
   || bad "(15) anchorless scan runs even with zero gating anchors (got: $OUT5)"
 
@@ -1432,12 +1484,12 @@ printf '%s\n' "$OUT5" | grep -q 'ANCHORLESS PR#305' \
 MAIL_BEFORE6=$(wc -l < "$TMP/mail" | tr -d ' ')
 printf '306|false|polecat/dead-6|main\n' > "$TMP/openprs"
 OUT6="$(FAKE_LIVE_FAIL=1 bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>/dev/null)"
-printf '%s\n' "$OUT6" | grep -q 'ANCHORLESS' \
+hasin "$OUT6" 'ANCHORLESS' \
   && bad "(14) failed live-bead read must not flag anything (fail closed)" \
   || ok "(14) failed live-bead read flags nothing (fail closed, no mail storm)"
 eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "$MAIL_BEFORE6" \
    "(14) failed live-bead read escalates nothing"
-printf '%s\n' "$OUT6" | grep -q '0 anchorless open PRs' \
+hasin "$OUT6" '0 anchorless open PRs' \
   && ok "(14) failed live-bead read reports a zero anchorless count" \
   || bad "(14) failed live-bead read reports a zero anchorless count (got: $OUT6)"
 
@@ -1487,7 +1539,7 @@ eq "$(grep -c 'Rebase PR#216' "$TMP/created")" "0" \
    "(20) failed probe -> still no child for the branch a keeper froze"
 eq "$(grep -c 'Rebase PR#217' "$TMP/created")" "0" \
    "(20) failed probe -> still no child for the shared-branch PR"
-printf '%s\n' "$OUT7" | grep -q '0 stale-base rebases routed' \
+hasin "$OUT7" '0 stale-base rebases routed' \
   && ok "(20) failed probe routes no rebases at all" \
   || bad "(20) failed probe must route zero rebases (got: $OUT7)"
 
@@ -1601,17 +1653,17 @@ fi
 grep -qx "$REVIEW_POOL" "$TMP/wakes" && ok "(24) review pool woken" \
                                      || bad "(24) review pool woken"
 T_UPD=$(grep '^bead-T' "$TMP/updates" || true)
-printf '%s\n' "$T_UPD" | grep -q 'stale_gate_head=head220' \
+hasin "$T_UPD" 'stale_gate_head=head220' \
   && ok "(24) anchor marked stale_gate_head at the live head" \
   || bad "(24) anchor marked stale_gate_head (got: $T_UPD)"
-printf '%s\n' "$T_UPD" | grep -q 'merge_result=' \
+hasin "$T_UPD" 'merge_result=' \
   && bad "(24) anchor must KEEP merge_result=pull_request (stays gating)" \
   || ok "(24) anchor keeps merge_result=pull_request (unlike retarget/abandon)"
 has '^bead-T$' "$TMP/closed" && bad "(24) stale-gate anchor must NOT be closed" \
                              || ok "(24) stale-gate anchor not closed"
 # The remedy is a REAL review, NEVER a hand-stamped green (that certifies an
 # unreviewed commit — the tk-4na1b failure mode).
-printf '%s\n' "$T_UPD" | grep -q 'check.codex=green' \
+hasin "$T_UPD" 'check.codex=green' \
   && bad "(24) must NEVER hand-stamp check.codex green (certifies an unreviewed commit)" \
   || ok "(24) never hand-stamps check.codex green (dispatches a real review)"
 
@@ -1622,7 +1674,7 @@ eq "$(grep -c 'Review PR#221' "$TMP/created")" "0" \
 eq "$(grep -c 'Review PR#222' "$TMP/created")" "0" \
    "(26) stale gate but a review child already open -> no second re-review"
 
-printf '%s\n' "$OUT8" | grep -q '1 stale-gate re-reviews routed' \
+hasin "$OUT8" '1 stale-gate re-reviews routed' \
   && ok "(24) run 8 summary reports 1 stale-gate re-review routed" \
   || bad "(24) run 8 summary stale-gate count (got: $OUT8)"
 
@@ -1654,7 +1706,7 @@ OUT10="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
 eq "$(grep -c 'Review PR#223' "$TMP/created")" "0" \
    "(28) no review pool -> no re-review child filed"
 W_UPD=$(grep '^bead-W' "$TMP/updates" || true)
-printf '%s\n' "$W_UPD" | grep -q 'check.codex=green' \
+hasin "$W_UPD" 'check.codex=green' \
   && bad "(28) no pool must NEVER hand-stamp check.codex green" \
   || ok "(28) no pool never hand-stamps check.codex green (holds instead)"
 # The no-pool hold stamps a DISTINCT marker (stale_gate_nopool_head), NOT
@@ -1663,13 +1715,13 @@ printf '%s\n' "$W_UPD" | grep -q 'check.codex=green' \
 # suppress the dispatch even after a review pool is configured (tk-v2b0k finding #1,
 # tested in Run 11 below). The no-pool marker bounds the busy-loop without blocking
 # that later recovery.
-printf '%s\n' "$W_UPD" | grep -q 'stale_gate_nopool_head=head223' \
+hasin "$W_UPD" 'stale_gate_nopool_head=head223' \
   && ok "(28) no pool -> DISTINCT no-pool head guard stamped so it does not busy-loop" \
   || bad "(28) no pool -> stale_gate_nopool_head stamped (got: $W_UPD)"
-printf '%s\n' "$W_UPD" | grep -q 'stale_gate_head=head223' \
+hasin "$W_UPD" 'stale_gate_head=head223' \
   && bad "(28) no pool must NOT stamp stale_gate_head (would suppress a later configured dispatch)" \
   || ok "(28) no pool -> stale_gate_head NOT stamped (reserved for a real dispatch)"
-printf '%s\n' "$OUT10" | grep -q '1 stale-gate re-reviews held' \
+hasin "$OUT10" '1 stale-gate re-reviews held' \
   && ok "(28) no pool -> counted as a held re-review" \
   || bad "(28) no pool -> held count (got: $OUT10)"
 
@@ -1691,13 +1743,13 @@ grep -q 'anchor_bead=bead-W' "$TMP/updates" \
   && ok "(29) recovered re-review anchored to bead-W" \
   || bad "(29) recovered re-review carries anchor_bead=bead-W"
 W_UPD2=$(grep '^bead-W' "$TMP/updates" || true)
-printf '%s\n' "$W_UPD2" | grep -q 'stale_gate_head=head223' \
+hasin "$W_UPD2" 'stale_gate_head=head223' \
   && ok "(29) recovered dispatch stamps the real stale_gate_head guard at the live head" \
   || bad "(29) recovered dispatch stamps stale_gate_head=head223 (got: $W_UPD2)"
-printf '%s\n' "$W_UPD2" | grep -q 'check.codex=green' \
+hasin "$W_UPD2" 'check.codex=green' \
   && bad "(29) recovered dispatch must NEVER hand-stamp check.codex green" \
   || ok "(29) recovered dispatch never hand-stamps green (files a real review)"
-printf '%s\n' "$OUT11" | grep -q '1 stale-gate re-reviews routed' \
+hasin "$OUT11" '1 stale-gate re-reviews routed' \
   && ok "(29) run 11 summary reports the recovered re-review routed" \
   || bad "(29) run 11 summary stale-gate routed count (got: $OUT11)"
 
@@ -1726,7 +1778,7 @@ grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
 grep -q 'stale_gate_head=head224' "$TMP/updates" \
   && bad "(30) must NOT arm stale_gate_head when the route did not persist (would suppress the retry)" \
   || ok "(30) head guard NOT armed on a dropped route (so a later pass re-enters)"
-printf '%s\n' "$OUT12A" | grep -q '0 stale-gate re-reviews routed' \
+hasin "$OUT12A" '0 stale-gate re-reviews routed' \
   && ok "(30) dropped route -> summary counts routed=0, not a false dispatch" \
   || bad "(30) run 12A summary must report 0 routed (got: $OUT12A)"
 
@@ -1741,10 +1793,10 @@ grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
 grep -q 'stale_gate_head=head224' "$TMP/updates" \
   && ok "(31) repair pass NOW arms stale_gate_head at the live head" \
   || bad "(31) repair pass must arm stale_gate_head=head224"
-printf '%s\n' "$OUT12B" | grep -q 'stale-gate repair' \
+hasin "$OUT12B" 'stale-gate repair' \
   && ok "(31) repair pass logs the stale-gate route repair" \
   || bad "(31) repair pass must log the repair (got: $OUT12B)"
-printf '%s\n' "$OUT12B" | grep -q '1 stale-gate re-reviews routed' \
+hasin "$OUT12B" '1 stale-gate re-reviews routed' \
   && ok "(31) repair pass -> summary reports the recovered re-review routed" \
   || bad "(31) run 12B summary stale-gate routed count (got: $OUT12B)"
 grep -qx "$REVIEW_POOL" "$TMP/wakes" \
@@ -1783,7 +1835,7 @@ grep -q "review_pool=$REVIEW_POOL" "$TMP/updates" \
 grep -q 'stale_gate_head=head225' "$TMP/updates" \
   && bad "(58) must NOT arm stale_gate_head when review_pool did not persist (a claim then makes the review unroutable forever)" \
   || ok "(58) head guard NOT armed on a lost durable route copy"
-printf '%s\n' "$OUT12C" | grep -q '0 stale-gate re-reviews routed' \
+hasin "$OUT12C" '0 stale-gate re-reviews routed' \
   && ok "(58) dropped review_pool -> summary counts routed=0, not a false dispatch" \
   || bad "(58) run 12b pass A summary must report 0 routed (got: $OUT12C)"
 
@@ -1801,10 +1853,10 @@ grep -q "review_pool=$REVIEW_POOL" "$TMP/updates" \
 grep -q 'stale_gate_head=head225' "$TMP/updates" \
   && ok "(59) repair pass NOW arms stale_gate_head at the live head" \
   || bad "(59) repair pass must arm stale_gate_head=head225"
-printf '%s\n' "$OUT12D" | grep -q 'stale-gate repair' \
+hasin "$OUT12D" 'stale-gate repair' \
   && ok "(59) repair pass logs the stale-gate route repair" \
   || bad "(59) repair pass must log the repair (got: $OUT12D)"
-printf '%s\n' "$OUT12D" | grep -q '1 stale-gate re-reviews routed' \
+hasin "$OUT12D" '1 stale-gate re-reviews routed' \
   && ok "(59) repair pass -> summary reports the recovered re-review routed" \
   || bad "(59) run 12b pass B summary stale-gate routed count (got: $OUT12D)"
 
@@ -1838,7 +1890,7 @@ grep -q 'gc.routed_to=rig/rig.wrong-pool' "$TMP/updates" \
 grep -q 'stale_gate_head=head226' "$TMP/updates" \
   && bad "(60) must NOT arm stale_gate_head on a route offered to the wrong pool" \
   || ok "(60) head guard NOT armed on a split route"
-printf '%s\n' "$OUT12E" | grep -q '0 stale-gate re-reviews routed' \
+hasin "$OUT12E" '0 stale-gate re-reviews routed' \
   && ok "(60) split route -> summary counts routed=0, not a false dispatch" \
   || bad "(60) run 12c pass A summary must report 0 routed (got: $OUT12E)"
 
@@ -1855,10 +1907,10 @@ grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
 grep -q 'stale_gate_head=head226' "$TMP/updates" \
   && ok "(61) repair pass NOW arms stale_gate_head at the live head" \
   || bad "(61) repair pass must arm stale_gate_head=head226"
-printf '%s\n' "$OUT12F" | grep -q 'stale-gate repair' \
+hasin "$OUT12F" 'stale-gate repair' \
   && ok "(61) repair pass logs the stale-gate route repair" \
   || bad "(61) repair pass must log the repair (got: $OUT12F)"
-printf '%s\n' "$OUT12F" | grep -q '1 stale-gate re-reviews routed' \
+hasin "$OUT12F" '1 stale-gate re-reviews routed' \
   && ok "(61) repair pass -> summary reports the recovered re-review routed" \
   || bad "(61) run 12c pass B summary stale-gate routed count (got: $OUT12F)"
 
@@ -1978,7 +2030,7 @@ grep -qx '9001' "$TMP/dismissed" \
 grep -q 'signoff_dismissed=9001@head240' "$TMP/updates" \
   && ok "(39) signoff_dismissed recorded on the anchor (arms merge-skill's approval gate)" \
   || bad "(39) signoff_dismissed marker (got: $(cat "$TMP/updates"))"
-printf '%s\n' "$OUT13" | grep -q 'retracted superseded self-review 9001' \
+hasin "$OUT13" 'retracted superseded self-review 9001' \
   && ok "(39) retraction is reported, naming the review" \
   || bad "(39) retraction log line (got: $OUT13)"
 # The retraction is the ONLY action: the anchor stays gating for the merge skill.
@@ -2009,7 +2061,7 @@ grep -qx '9301' "$TMP/dismissed" \
 grep -qx '9401' "$TMP/dismissed" \
   && bad "(43) merge_hold must suppress the retraction" \
   || ok "(43) merge_hold=true -> no retraction (operator gate honored)"
-printf '%s\n' "$OUT13" | grep -q 'PR#244 blocked by a superseded self-review but merge_hold set' \
+hasin "$OUT13" 'PR#244 blocked by a superseded self-review but merge_hold set' \
   && ok "(43) the held retraction is reported with the operator-gate reason" \
   || bad "(43) merge_hold hold reason (got: $OUT13)"
 
@@ -2021,7 +2073,7 @@ printf '%s\n' "$OUT13" | grep -q 'PR#244 blocked by a superseded self-review but
 grep -qx '9501' "$TMP/dismissed" \
   && bad "(46) auto-merge armed: dismissal would trigger an immediate server-side merge" \
   || ok "(46) native auto-merge armed -> no retraction (fail-closed)"
-printf '%s\n' "$ERR13" | grep -q 'PR#245 blocked by a superseded self-review, but native auto-merge is ARMED' \
+hasin "$ERR13" 'PR#245 blocked by a superseded self-review, but native auto-merge is ARMED' \
   && ok "(46) the auto-merge hold is reported, naming the reason" \
   || bad "(46) auto-merge hold reason (got: $ERR13)"
 
@@ -2041,7 +2093,7 @@ grep -qx '9602' "$TMP/dismissed" \
 grep -qx '9701' "$TMP/dismissed" \
   && bad "(48) head moved mid-pass: the review may block the NEW head, must not be dismissed" \
   || ok "(48) head moved mid-pass -> no retraction (re-read before the irreversible call)"
-printf '%s\n' "$ERR13" | grep -q 'PR#247 head moved (head247 -> newhead247) mid-pass' \
+hasin "$ERR13" 'PR#247 head moved (head247 -> newhead247) mid-pass' \
   && ok "(48) the mid-pass head move is reported" \
   || bad "(48) head-move hold reason (got: $ERR13)"
 
@@ -2053,7 +2105,7 @@ printf '%s\n' "$ERR13" | grep -q 'PR#247 head moved (head247 -> newhead247) mid-
 grep -qx '9801' "$TMP/dismissed" \
   && bad "(49) a FAILED auto-merge probe must not be read as 'disarmed'" \
   || ok "(49) auto-merge probe fails -> no retraction (unreadable counts as armed)"
-printf '%s\n' "$ERR13" | grep -q "PR#248 blocked by a superseded self-review, but its native auto-merge state is UNREADABLE" \
+hasin "$ERR13" "PR#248 blocked by a superseded self-review, but its native auto-merge state is UNREADABLE" \
   && ok "(49) the unreadable probe is reported as the reason, distinct from ARMED" \
   || bad "(49) unreadable-probe hold reason (got: $ERR13)"
 
@@ -2064,7 +2116,7 @@ printf '%s\n' "$ERR13" | grep -q "PR#248 blocked by a superseded self-review, bu
 grep -qx '9901' "$TMP/dismissed" \
   && bad "(50) a MALFORMED auto-merge payload must not be read as 'disarmed'" \
   || ok "(50) malformed auto-merge payload -> no retraction (fail-closed)"
-printf '%s\n' "$ERR13" | grep -q 'PR#249 blocked by a superseded self-review, but its native auto-merge state is UNREADABLE' \
+hasin "$ERR13" 'PR#249 blocked by a superseded self-review, but its native auto-merge state is UNREADABLE' \
   && ok "(50) the malformed probe is reported with the same unreadable reason" \
   || bad "(50) malformed-probe hold reason (got: $ERR13)"
 
@@ -2075,7 +2127,7 @@ printf '%s\n' "$ERR13" | grep -q 'PR#249 blocked by a superseded self-review, bu
 grep -qx '9911' "$TMP/dismissed" \
   && bad "(51) auto-merge armed mid-pass: the dismissal would merge server-side" \
   || ok "(51) auto-merge armed after the up-front probe -> no retraction"
-printf '%s\n' "$ERR13" | grep -q "PR#250 native auto-merge state is 'armed' immediately before dismissing review 9911" \
+hasin "$ERR13" "PR#250 native auto-merge state is 'armed' immediately before dismissing review 9911" \
   && ok "(51) the mid-pass arming is reported, naming the review left in place" \
   || bad "(51) mid-pass auto-merge hold reason (got: $ERR13)"
 
@@ -2087,7 +2139,7 @@ printf '%s\n' "$ERR13" | grep -q "PR#250 native auto-merge state is 'armed' imme
 grep -qx '9921' "$TMP/dismissed" \
   && bad "(52) dismissal ran on a signoff_dismissed write that did not persist" \
   || ok "(52) non-durable signoff_dismissed -> no retraction (read-back guard)"
-printf '%s\n' "$ERR13" | grep -q "could not record signoff_dismissed durably (read back '', want '9921@head251')" \
+hasin "$ERR13" "could not record signoff_dismissed durably (read back '', want '9921@head251')" \
   && ok "(52) the read-back names the pairing marker it expected and did not find" \
   || bad "(52) non-durable marker hold reason (got: $ERR13)"
 
@@ -2100,7 +2152,7 @@ printf '%s\n' "$ERR13" | grep -q "could not record signoff_dismissed durably (re
 grep -qx '9931' "$TMP/dismissed" \
   && bad "(53) merge_hold set mid-pass: the dismissal must not run on a held anchor" \
   || ok "(53) merge_hold appears after enumeration -> no retraction (anchor re-read)"
-printf '%s\n' "$ERR13" | grep -q "bead-MH — anchor changed mid-pass (status='open' merge_hold='true'" \
+hasin "$ERR13" "bead-MH — anchor changed mid-pass (status='open' merge_hold='true'" \
   && ok "(53) the mid-pass hold is reported, naming the fields that changed" \
   || bad "(53) mid-pass hold reason (got: $ERR13)"
 # (53b) the same for the gate itself: a re-gate that moved check.codex off the
@@ -2109,7 +2161,7 @@ printf '%s\n' "$ERR13" | grep -q "bead-MH — anchor changed mid-pass (status='o
 grep -qx '9941' "$TMP/dismissed" \
   && bad "(53b) check.codex moved off the live head: the PR is no longer gate-green" \
   || ok "(53b) check.codex re-gated mid-pass -> no retraction"
-printf '%s\n' "$ERR13" | grep -q "bead-GC — anchor changed mid-pass .*check.codex='green@stale253'" \
+hasin "$ERR13" "bead-GC — anchor changed mid-pass .*check.codex='green@stale253'" \
   && ok "(53b) the re-gated marker is named in the hold" \
   || bad "(53b) re-gated marker hold reason (got: $ERR13)"
 # (53c) and for the anchor's claim on the PR: un-parked (merge_result cleared), it
@@ -2122,7 +2174,7 @@ grep -qx '9951' "$TMP/dismissed" \
 grep -qx '9961' "$TMP/dismissed" \
   && bad "(53d) an unreadable anchor must not be read as 'nothing changed'" \
   || ok "(53d) anchor metadata unreadable -> no retraction (fail-closed)"
-printf '%s\n' "$ERR13" | grep -q "bead-SF — anchor metadata UNREADABLE immediately before dismissing review 9961" \
+hasin "$ERR13" "bead-SF — anchor metadata UNREADABLE immediately before dismissing review 9961" \
   && ok "(53d) the unreadable anchor is reported as the reason" \
   || bad "(53d) unreadable-anchor hold reason (got: $ERR13)"
 
@@ -2137,16 +2189,16 @@ printf '%s\n' "$ERR13" | grep -q "bead-SF — anchor metadata UNREADABLE immedia
 grep -qx '9971' "$TMP/dismissed" \
   && bad "(53e) a review found in a TRUNCATED history must not be retracted" \
   || ok "(53e) paginated reviews read fails part way -> no retraction (fail-closed)"
-printf '%s\n' "$ERR13" | grep -q "bead-RF — PR#256 reviews history read FAILED" \
+hasin "$ERR13" "bead-RF — PR#256 reviews history read FAILED" \
   && ok "(53e) the failed history read is reported, not swallowed" \
   || bad "(53e) failed reviews read must warn (got: $ERR13)"
 
 # Retractions report on their OWN counters — folding them into the stale-gate
 # re-review counters would misreport that arm's throughput.
-printf '%s\n' "$OUT13" | grep -q '2 superseded reviews retracted, 12 retractions held' \
+hasin "$OUT13" '2 superseded reviews retracted, 12 retractions held' \
   && ok "(43) summary counts retractions separately from stale-gate re-reviews" \
   || bad "(43) summary retraction counters (got: $OUT13)"
-printf '%s\n' "$OUT13" | grep -q '0 stale-gate re-reviews routed' \
+hasin "$OUT13" '0 stale-gate re-reviews routed' \
   && ok "(43) a retraction is NOT counted as a stale-gate re-review" \
   || bad "(43) retraction must not inflate the stale-gate counter (got: $OUT13)"
 
@@ -2247,10 +2299,10 @@ grep -q 'signoff_dismissed=9981@head261' "$TMP/updates" \
   || bad "(55) signoff_dismissed marker (got: $(cat "$TMP/updates"))"
 # Both counters move in the SAME pass: the membership test they share read the
 # long check_set correctly for each arm, not just for whichever ran first.
-printf '%s\n' "$OUT14" | grep -q '1 stale-gate re-reviews routed' \
+hasin "$OUT14" '1 stale-gate re-reviews routed' \
   && ok "(55) summary counts the stale-gate re-review under a long check_set" \
   || bad "(55) run 14 summary stale-gate count (got: $OUT14)"
-printf '%s\n' "$OUT14" | grep -q '1 superseded reviews retracted' \
+hasin "$OUT14" '1 superseded reviews retracted' \
   && ok "(55) summary counts the retraction under a long check_set" \
   || bad "(55) run 14 summary retraction count (got: $OUT14)"
 
@@ -2284,10 +2336,10 @@ CS_SITE=$(grep -n 'is_codex_member=""' "$SCRIPT" | head -1 | cut -d: -f1)
   && ok "(57) the codex-membership site is present" \
   || bad "(57) could not locate the codex-membership site in $SCRIPT"
 CS_BLOCK=$(sed -n "$CS_SITE,$((CS_SITE + 4))p" "$SCRIPT")
-printf '%s\n' "$CS_BLOCK" | grep -q 'grep -q' \
+hasin "$CS_BLOCK" 'grep -q' \
   && bad "(57) codex membership must NOT be decided by a grep pipeline (pipefail/SIGPIPE misread)" \
   || ok "(57) codex membership is matched in-shell, not through a grep pipeline"
-printf '%s\n' "$CS_BLOCK" | grep -q '",codex,"' \
+hasin "$CS_BLOCK" '",codex,"' \
   && ok "(57) and it is a comma-wrapped whole-token match" \
   || bad "(57) codex membership must be a comma-wrapped whole-token match"
 
@@ -2385,7 +2437,7 @@ OUTID1="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
   && ok "(ID1) gh default drifted to a stranger -> the pinned read still finds OUR PR#501 and closes the anchor" \
   || bad "(ID1) the pinned read must survive a moved gh default (got: $OUTID1)"
-printf '%s\n' "$OUTID1" | grep -q '0 foreign-PR identity holds' \
+hasin "$OUTID1" '0 foreign-PR identity holds' \
   && ok "(ID1) a honoured pin holds nothing on identity" \
   || bad "(ID1) no identity holds expected (got: $OUTID1)"
 
@@ -2418,10 +2470,10 @@ eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "0" \
 eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" \
    "(ID2) foreign PR -> NO metadata written to any local bead"
 eq "$(wc -l < "$TMP/wakes" | tr -d ' ')" "0" "(ID2) foreign PR -> no pool woken"
-printf '%s\n' "$OUTID2" | grep -q "answered from 'github.com/stranger/repo', not this checkout's 'github.com/acme/repo'" \
+hasin "$OUTID2" "answered from 'github.com/stranger/repo', not this checkout's 'github.com/acme/repo'" \
   && ok "(ID2) the refusal names the repository that answered" \
   || bad "(ID2) must name the foreign repository (got: $OUTID2)"
-printf '%s\n' "$OUTID2" | grep -q '5 foreign-PR identity holds' \
+hasin "$OUTID2" '5 foreign-PR identity holds' \
   && ok "(ID2) the summary counts all five refusals" \
   || bad "(ID2) summary identity-hold count (got: $OUTID2)"
 
@@ -2436,7 +2488,7 @@ OUTID2B="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
   && ok "(ID2b) GH_HOST drifted -> the host-qualified pin still reads OUR PR#501" \
   || bad "(ID2b) a host-qualified pin must survive GH_HOST drift (got: $OUTID2B)"
-printf '%s\n' "$OUTID2B" | grep -q '0 foreign-PR identity holds' \
+hasin "$OUTID2B" '0 foreign-PR identity holds' \
   && ok "(ID2b) host-qualified pin -> no identity holds" \
   || bad "(ID2b) no identity holds expected (got: $OUTID2B)"
 
@@ -2455,7 +2507,7 @@ OUTID3="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
   && bad "(ID3) an anchor whose pr_url names another PR must NOT be closed" \
   || ok "(ID3) pr_url/live-URL mismatch -> no state recorded"
-printf '%s\n' "$OUTID3" | grep -q "anchor id-CLOSE records pr_url 'https://github.com/acme/OTHER/pull/501'" \
+hasin "$OUTID3" "anchor id-CLOSE records pr_url 'https://github.com/acme/OTHER/pull/501'" \
   && ok "(ID3) the refusal names both pull requests for an operator" \
   || bad "(ID3) refusal must name the recorded pr_url (got: $OUTID3)"
 
@@ -2482,7 +2534,7 @@ reset_identity
 printf '%s\n' '601|false|polecat/dead-6|main' > "$TMP/openprs"
 printf '%s\n' '601	dead-6	-	pull_request	2026-01-01T00:00:00Z	-' > "$TMP/dead"
 OUTID5A="$(IDRUN)"                       # control: ours -> reported + escalated
-printf '%s\n' "$OUTID5A" | grep -q 'ANCHORLESS PR#601' \
+hasin "$OUTID5A" 'ANCHORLESS PR#601' \
   && ok "(ID5) control: an open PR of OURS with a closed anchor IS reported anchorless" \
   || bad "(ID5) control: anchorless finding expected (got: $OUTID5A)"
 eq "$(grep -c 'anchorless open PR#601' "$TMP/mail")" "1" "(ID5) control: the anchorless finding escalates once"
@@ -2492,7 +2544,7 @@ printf '%s\n' '601|false|polecat/dead-6|main' > "$TMP/openprs"
 printf '%s\n' '601	dead-6	-	pull_request	2026-01-01T00:00:00Z	-' > "$TMP/dead"
 echo 'stranger/repo' > "$TMP/ghdefault"; echo 1 > "$TMP/ignorerepo"
 OUTID5B="$(IDRUN 2>"$TMP/errid5")"
-printf '%s\n' "$OUTID5B" | grep -q 'ANCHORLESS' \
+hasin "$OUTID5B" 'ANCHORLESS' \
   && bad "(ID5) a foreign repository's open PR must NEVER be reported anchorless against a local bead" \
   || ok "(ID5) foreign PR list -> no anchorless finding"
 eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "0" "(ID5) foreign PR list -> nothing escalated"
@@ -2542,7 +2594,7 @@ eq "$(grep -c 'Rebase PR#504' "$TMP/created")" "0" \
 eq "$(grep -c 'Review PR#505' "$TMP/created")" "0" \
    "(HD1) fork head -> NO re-review child dispatched (stale-gate arm)"
 eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "0" "(HD1) fork head -> nothing escalated"
-printf '%s\n' "$OUTHD1" | grep -q "PR#501 is opened from FORK 'mallory/repo'" \
+hasin "$OUTHD1" "PR#501 is opened from FORK 'mallory/repo'" \
   && ok "(HD1) the refusal names the fork and this checkout's repository" \
   || bad "(HD1) refusal must name the fork (got: $OUTHD1)"
 
@@ -2556,7 +2608,7 @@ OUTHD2="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
   && bad "(HD2) a self-contradicting head identity must record no state" \
   || ok "(HD2) headRepository/isCrossRepository disagreement -> no state recorded"
-printf '%s\n' "$OUTHD2" | grep -q "PR#501 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
+hasin "$OUTHD2" "PR#501 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
   && ok "(HD2) the refusal names both halves of the contradiction" \
   || bad "(HD2) refusal must name the contradiction (got: $OUTHD2)"
 
@@ -2570,7 +2622,7 @@ OUTHD3="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
   && bad "(HD3) an unreadable head identity must record no state" \
   || ok "(HD3) null headRepository/headRepositoryOwner -> no state recorded"
-printf '%s\n' "$OUTHD3" | grep -q "PR#501 head identity is unreadable" \
+hasin "$OUTHD3" "PR#501 head identity is unreadable" \
   && ok "(HD3) the refusal names the unreadable identity" \
   || bad "(HD3) refusal must name the unreadable head (got: $OUTHD3)"
 
@@ -2585,9 +2637,88 @@ printf '%s\n' \
 OUTHD4="$(IDRUN)"
 eq "$(grep -c 'Rebase PR#504' "$TMP/created")" "0" \
    "(HD4) head branch != anchor's recorded branch -> NO rebase child dispatched"
-printf '%s\n' "$OUTHD4" | grep -q "anchor id-CONF records branch 'polecat/id-CONF' but PR#504 is opened from 'polecat/somebody-else'" \
+hasin "$OUTHD4" "anchor id-CONF records branch 'polecat/id-CONF' but PR#504 is opened from 'polecat/somebody-else'" \
   && ok "(HD4) the refusal names both branches" \
   || bad "(HD4) refusal must name both branches (got: $OUTHD4)"
+
+# --- FORK-KEYED GATING ANCHORS (review tk-78ty5 finding #5). ------------------
+# The ownership probes and the anchorless scan already read every key a bead names
+# a PR with (pr_number, fork_pr, fork_pr_url); merge-skill.sh reads all three for an
+# anchor's OWN identity too. The per-anchor loop here read `pr_number` ALONE, so an
+# anchor keyed only by fork_pr — the shape the fork-sync flow stamps, which sets no
+# pr_number at all — produced an empty `pr` and was dropped by the loop's own
+# empty-number skip. Every per-anchor arm was therefore blind to it: merged
+# externally, closed out-of-band, retargeted, conflicted, stale-gated — none of it
+# reconciled. Meanwhile the anchorless scan counted its PR owned and said nothing,
+# and merge-skill.sh treated it as live. The two passes disagreed about who owns the
+# PR, and the quieter answer won.
+reset_identity
+: > "$TMP/dismissed"
+#          id|pr|target|mhold|rhold|cset|cmark|prurl|fork_pr
+printf '%s\n' 'id-FORKKEY||main||||||507' > "$TMP/anchors"
+printf '%s\n' \
+  '507|MERGED|2026-07-01T00:00:00Z|false|5075075075075075|main|polecat/id-FORKKEY|head507|MERGEABLE|CLEAN' \
+  > "$TMP/prs"
+OUTFK="$(IDRUN)"
+has '^id-FORKKEY$' "$TMP/closed" \
+  && ok "(FK-ANCHOR) a fork_pr-keyed gating anchor enters the per-anchor loop and its merged PR closes it" \
+  || bad "(FK-ANCHOR) fork_pr-keyed anchor must reconcile (pre-fix: empty pr -> skipped by every arm, and silent) (got: $OUTFK)"
+
+# ...and the same anchor keyed by a fork_pr_url naming ANOTHER repository does NOT.
+# `in_repo` keeps the fail-closed `?` wildcard for a bare number that names no
+# repository, but a URL that positively names somewhere else is somebody else's pull
+# request — reconciling our anchor against THEIR #507 is the cross-repository write
+# the identity guards exist to stop, arriving through the key set instead of through
+# the read.
+reset_identity
+#          id|pr|target|mhold|rhold|cset|cmark|prurl|fork_pr|fork_pr_url
+printf '%s\n' 'id-FORKFOREIGN||main|||||||https://otherhost/acme/repo/pull/507' > "$TMP/anchors"
+printf '%s\n' \
+  '507|MERGED|2026-07-01T00:00:00Z|false|5075075075075075|main|polecat/id-FORKFOREIGN|head507|MERGEABLE|CLEAN' \
+  > "$TMP/prs"
+OUTFKF="$(IDRUN)"
+has '^id-FORKFOREIGN$' "$TMP/closed" \
+  && bad "(FK-FOREIGN) a fork_pr_url naming another repository must NOT close a local anchor (got: $OUTFKF)" \
+  || ok "(FK-FOREIGN) fork_pr_url pointing elsewhere -> anchor not reconciled against our same-numbered PR"
+
+# --- EVERY GitHub CALL IS PINNED (review tk-78ty5 finding #3). ----------------
+# The identity guards above compare the ANSWER (the returned url) after the fact.
+# That works for the read arms, but the retraction arm also WRITES to GitHub — it
+# DISMISSES a review — and a write has no answer to compare: by the time a wrong
+# repository is detectable, the review there is already dismissed. So the calls in
+# that arm have to be pinned by CONSTRUCTION.
+#
+# They were not. The PR read carried `--repo`, but the reviews history and the
+# dismissal were REST paths written `repos/{owner}/{repo}/...`, and gh expands
+# those placeholders from its AMBIENT repository — the cwd's remote, or $GH_REPO.
+# The mid-pass head re-read and the auto-merge probe were bare `gh pr view "$num"`
+# for the same reason. Under a drifted context that reads a SAME-NUMBERED PR
+# somewhere else and dismisses a review THERE, while stamping signoff_dismissed on
+# OUR anchor — the city's block removed in one repository and the requirement that
+# was supposed to replace it recorded in another.
+#
+# (PIN1) is what catches the placeholder form specifically: an unpinned REST path
+# records the LITERAL `{owner}/{repo}` here, so it can never be mistaken for the
+# origin-derived name. (PIN2) covers every `gh pr view` in the pass — the main read,
+# the mid-pass head re-read, and the auto-merge probe — across every run in this
+# file, including the drift runs (ID1, ID2, ID2b, ID5) where an unpinned call
+# resolves somewhere else by construction.
+#
+# Both read the recorders accumulated by EVERY run above, so they measure the whole
+# file rather than one staged scenario.
+eq "$(cut -d/ -f1,2 "$TMP/apiwhere" | sort -u | tr '\n' ' ')" "acme/repo " \
+   "(PIN1) every gh api REST path named the origin-derived repository (never the ambient {owner}/{repo})"
+eq "$(cut -f2 "$TMP/viewwhere" | sort -u | tr '\n' ' ')" "github.com/acme/repo " \
+   "(PIN2) every gh pr view passed --repo <origin> — main read, mid-pass head re-read and auto-merge probe alike (never <unpinned>)"
+# Positive control for both: a recorder that stayed EMPTY would satisfy the two
+# assertions above vacuously (`sort -u` of nothing is nothing), so prove the calls
+# were actually made and actually recorded.
+[ "$(wc -l < "$TMP/apiwhere" | tr -d ' ')" -gt 0 ] \
+  && ok "(PIN-CTL) the gh api recorder is non-empty (PIN1 is not vacuous)" \
+  || bad "(PIN-CTL) no gh api call was recorded — PIN1 proves nothing"
+[ "$(wc -l < "$TMP/viewwhere" | tr -d ' ')" -gt 0 ] \
+  && ok "(PIN-CTL) the gh pr view recorder is non-empty (PIN2 is not vacuous)" \
+  || bad "(PIN-CTL) no gh pr view call was recorded — PIN2 proves nothing"
 
 # (ID-INV) the observer never merges anything, identity drift or not.
 eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \

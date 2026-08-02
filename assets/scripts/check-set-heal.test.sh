@@ -75,6 +75,22 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 has() { grep -q "$1" "$2" 2>/dev/null; }
+# Assert that PATTERN (a BRE, same as `has`) appears in a CAPTURED STRING.
+#
+# NOT `printf '%s\n' "$OUT" | grep -q PATTERN`. This file runs under `set -euo
+# pipefail`, and `grep -q` exits at its FIRST match — closing the pipe under a
+# `printf` still writing the rest of a large captured output. printf takes
+# SIGPIPE, the pipeline reports 141, and the assertion reads FALSE even though
+# the line IS present. Whether it fires depends on where the match sits relative
+# to the ~64KB pipe buffer, so a suite carrying it fails on output SIZE rather
+# than on behavior — a phantom red against correct code, which is exactly how
+# merge-skill.test.sh went red at 204/1 while the code under test was fine.
+#
+# A here-string is a REDIRECT, not a pipeline: bash hands grep a file it reads to
+# EOF, no upstream writer exists to be signalled, and the exit status is grep's
+# alone. Match semantics are unchanged from the pipelines this replaced. Same
+# helper, same reasoning, as merge-skill.test.sh's.
+hasin() { grep -q "$2" <<< "$1"; }
 
 mkdir -p "$TMP/bin"
 
@@ -442,9 +458,9 @@ fi
 
 # Summary: 6 healed (EMPTY, ABSENT, SEP, GREEN, INFLGT, PREOPEN), and the opt-outs
 # / normal untouched.
-printf '%s\n' "$OUT1" | grep -q '6 healed' \
+hasin "$OUT1" '6 healed' \
   && ok "run 1 summary reports 6 healed" || bad "run 1 summary healed count (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q '2 explicit opt-out' \
+hasin "$OUT1" '2 explicit opt-out' \
   && ok "run 1 summary reports 2 explicit opt-out" || bad "run 1 summary opt-out count (got: $OUT1)"
 
 # --- Run 2: convergence. Healed anchors are not re-stamped; dispatched gates are
@@ -457,7 +473,7 @@ OUT2="$(bash "$SCRIPT" \
   --fix-pool 'gc-toolkit/gc-toolkit.polecat')"
 STAMPS_AFTER=$(wc -l < "$TMP/stamped")
 eq "$STAMPS_BEFORE" "$STAMPS_AFTER" "(CONV) no anchor re-stamped on the second pass"
-printf '%s\n' "$OUT2" | grep -q '0 healed' \
+hasin "$OUT2" '0 healed' \
   && ok "(CONV) run 2 heals nothing (all already normalized)" || bad "(CONV) run 2 must heal 0 (got: $OUT2)"
 # The run-1 dispatched reviews are now in flight (recorded in FAKE_REVMETA and
 # resolvable by anchor_bead), so run 2 dispatches no twins for them.
@@ -499,7 +515,7 @@ grep -q '	anchor_bead	bead-FAIL$' "$TMP/revmeta" && bad "(STAMPFAIL) a failed st
                                                     || ok "(STAMPFAIL) failed stamp -> no signoff dispatched (fail-closed)"
 has '^bead-FAIL$' "$TMP/flagged" && ok "(STAMPFAIL) failed stamp flags the anchor once" \
                                  || bad "(STAMPFAIL) failed stamp must flag the anchor"
-printf '%s\n' "$OUT4" | grep -q '0 healed' \
+hasin "$OUT4" '0 healed' \
   && ok "(STAMPFAIL) a non-persisting stamp is NOT counted healed" || bad "(STAMPFAIL) must report 0 healed (got: $OUT4)"
 # The unsafe exit: a still-ungated anchor must make the pass exit UNSAFE_RC (3) so
 # the formula holds merge-skill this pass (review tk-z4u2e finding #1).
@@ -528,10 +544,10 @@ OUT4B="$(bash "$SCRIPT" \
 grep -q '^bead-HALF	codex$' "$TMP/stamped" \
   && ok "(HEALPARTIAL) the gate half of the stamp did land" \
   || bad "(HEALPARTIAL) fixture must land check_set (got: $(cat "$TMP/stamped"))"
-printf '%s\n' "$OUT4B" | grep -q '0 healed' \
+hasin "$OUT4B" '0 healed' \
   && ok "(HEALPARTIAL) a half-landed stamp is NOT counted healed" \
   || bad "(HEALPARTIAL) must report 0 healed (got: $OUT4B)"
-printf '%s\n' "$OUT4B" | grep -q 'check_set_healed did NOT' \
+hasin "$OUT4B" 'check_set_healed did NOT' \
   && ok "(HEALPARTIAL) the dropped retry mark is reported, not silent" \
   || bad "(HEALPARTIAL) the partial write must warn (got: $OUT4B)"
 # THE POINT: the gate is made satisfiable in THIS pass rather than deferred, because
@@ -559,10 +575,10 @@ OUT4C="$(bash "$SCRIPT" \
   --default 'codex' \
   --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
   --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)"
-printf '%s\n' "$OUT4C" | grep -q '0 signoffs dispatched' \
+hasin "$OUT4C" '0 signoffs dispatched' \
   && ok "(HEALDEFER) an anchor whose healed mark was lost is never re-dispatched by a later pass" \
   || bad "(HEALDEFER) fixture must show the deferral is a dead end (got: $OUT4C)"
-printf '%s\n' "$OUT4C" | grep -q '1 already normalized' \
+hasin "$OUT4C" '1 already normalized' \
   && ok "(HEALDEFER) it is classified 'already normalized' — invisible to the retry" \
   || bad "(HEALDEFER) lost-mark anchor must classify as normalized (got: $OUT4C)"
 
@@ -582,15 +598,15 @@ OUT4D="$(FAKE_DROPKEY='gc.routed_to' bash "$SCRIPT" \
   --default 'codex' \
   --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
   --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)" || RC4D=$?
-printf '%s\n' "$OUT4D" | grep -q '0 signoffs dispatched' \
+hasin "$OUT4D" '0 signoffs dispatched' \
   && ok "(HEALPARTIAL+ROUTE) an unroutable signoff is still NOT counted dispatched" \
   || bad "(HEALPARTIAL+ROUTE) unrouted dispatch must not count (got: $OUT4D)"
-printf '%s\n' "$OUT4D" | grep -q 'did not durably route' \
+hasin "$OUT4D" 'did not durably route' \
   && ok "(HEALPARTIAL+ROUTE) the route failure is reported" \
   || bad "(HEALPARTIAL+ROUTE) unrouted dispatch must warn (got: $OUT4D)"
 [ -s "$TMP/closed" ] && ok "(HEALPARTIAL+ROUTE) the unclaimable review is closed (no dedup poison)" \
                      || bad "(HEALPARTIAL+ROUTE) an unclaimable review must be closed"
-printf '%s\n' "$OUT4D" | grep -q 'repair by hand: gc bd update bead-HALFR --set-metadata check_set_healed=codex' \
+hasin "$OUT4D" 'repair by hand: gc bd update bead-HALFR --set-metadata check_set_healed=codex' \
   && ok "(HEALPARTIAL+ROUTE) the operator gets the exact repair for the lost mark" \
   || bad "(HEALPARTIAL+ROUTE) the compound failure must name its by-hand repair (got: $OUT4D)"
 eq "$RC4D" "0" "(HEALPARTIAL+ROUTE) the anchor is held, not UNSAFE — the gate is armed"
@@ -608,7 +624,7 @@ OUT4E="$(bash "$SCRIPT" \
 grep -q '	anchor_bead	bead-HALFR$' "$TMP/revmeta" \
   && ok "(HEALPARTIAL+ROUTE) the next pass DOES retry it — the flag keeps a mark-less anchor visible" \
   || bad "(HEALPARTIAL+ROUTE) a flagged anchor must not fall out of the retry (got: $OUT4E)"
-printf '%s\n' "$OUT4E" | grep -q '1 signoffs dispatched' \
+hasin "$OUT4E" '1 signoffs dispatched' \
   && ok "(HEALPARTIAL+ROUTE) and the retry lands the signoff once the route write recovers" \
   || bad "(HEALPARTIAL+ROUTE) the recovered pass must dispatch (got: $OUT4E)"
 eq "$(grep -c '^bead-HALFR	' "$TMP/stamped")" "1" \
@@ -638,10 +654,10 @@ OUT4F="$(bash "$SCRIPT" \
   --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)" || RC4F=$?
 eq "$(grep -c '^bead-NOMARK$' "$TMP/flagtries")" "2" \
   "(NOMARK) the flag is READ BACK and repaired once when the first write does not stick"
-printf '%s\n' "$OUT4F" | grep -q 'NO durable retry mark persisted' \
+hasin "$OUT4F" 'NO durable retry mark persisted' \
   && ok "(NOMARK) both marks lost is reported — the anchor is invisible to later passes" \
   || bad "(NOMARK) a lost fallback mark must warn (got: $OUT4F)"
-printf '%s\n' "$OUT4F" | grep -q 'Repair by hand: gc bd update bead-NOMARK --set-metadata check_set_healed=codex' \
+hasin "$OUT4F" 'Repair by hand: gc bd update bead-NOMARK --set-metadata check_set_healed=codex' \
   && ok "(NOMARK) the operator is handed the exact by-hand repair" \
   || bad "(NOMARK) the both-marks-lost warning must name the repair (got: $OUT4F)"
 # The gate still gets made satisfiable IN THIS PASS — with no retry mark at all,
@@ -667,10 +683,10 @@ OUT4G="$(FAKE_DROPKEY='gc.routed_to' bash "$SCRIPT" \
   --default 'codex' \
   --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
   --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)"
-printf '%s\n' "$OUT4G" | grep -q 'did not durably route.*NO durable retry mark persisted' \
+hasin "$OUT4G" 'did not durably route.*NO durable retry mark persisted' \
   && ok "(NOMARK+ROUTE) the route failure stops promising a next pass that cannot come" \
   || bad "(NOMARK+ROUTE) the dispatch failure must carry the no-retry note (got: $OUT4G)"
-printf '%s\n' "$OUT4G" | grep -q 'did not durably route.*retrying next pass' \
+hasin "$OUT4G" 'did not durably route.*retrying next pass' \
   && bad "(NOMARK+ROUTE) a mark-less anchor must NOT be told it retries next pass (got: $OUT4G)" \
   || ok "(NOMARK+ROUTE) no false 'retrying next pass' on an anchor nothing will revisit"
 : > "$TMP/healfail"; : > "$TMP/flagfail"; : > "$TMP/flagged"
@@ -759,7 +775,7 @@ route_run_reuse() { # <drop-key> <claimed?> -> OUT
 
 # (ROUTE-OK) both writes land -> counted as a dispatch, nothing closed.
 OUT5B="$(route_run '' '')"
-printf '%s\n' "$OUT5B" | grep -q '1 signoffs dispatched' \
+hasin "$OUT5B" '1 signoffs dispatched' \
   && ok "(ROUTE-OK) a durably-routed signoff is counted as dispatched" \
   || bad "(ROUTE-OK) a good route must count as dispatched (got: $OUT5B)"
 [ -s "$TMP/closed" ] && bad "(ROUTE-OK) a durably-routed review must NOT be closed" \
@@ -768,10 +784,10 @@ printf '%s\n' "$OUT5B" | grep -q '1 signoffs dispatched' \
 # (ROUTE-DROP) gc.routed_to does not persist -> NOT counted, review closed so the
 # next pass mints a claimable one instead of deduping onto this corpse.
 OUT5C="$(route_run 'gc.routed_to' '')"
-printf '%s\n' "$OUT5C" | grep -q '0 signoffs dispatched' \
+hasin "$OUT5C" '0 signoffs dispatched' \
   && ok "(ROUTE-DROP) a signoff whose route did not persist is NOT counted dispatched" \
   || bad "(ROUTE-DROP) an unrouted signoff must not count (got: $OUT5C)"
-printf '%s\n' "$OUT5C" | grep -q 'did not durably route' \
+hasin "$OUT5C" 'did not durably route' \
   && ok "(ROUTE-DROP) the failure is reported, not silent" \
   || bad "(ROUTE-DROP) an unrouted signoff must warn (got: $OUT5C)"
 [ -s "$TMP/closed" ] && ok "(ROUTE-DROP) the unclaimable review is closed (next pass re-mints)" \
@@ -782,7 +798,7 @@ printf '%s\n' "$OUT5C" | grep -q 'did not durably route' \
 # a signoff can restore the route from when it must re-offer the review, and
 # gc.routed_to is consumed by the very claim that would need it. Must NOT count.
 OUT5D="$(route_run 'review_pool' '')"
-printf '%s\n' "$OUT5D" | grep -q '0 signoffs dispatched' \
+hasin "$OUT5D" '0 signoffs dispatched' \
   && ok "(ROUTE-DURABLE) a missing review_pool is NOT counted dispatched (route is unrestorable)" \
   || bad "(ROUTE-DURABLE) a missing durable route copy must not count (got: $OUT5D)"
 [ -s "$TMP/closed" ] && ok "(ROUTE-DURABLE) the review with no durable route is closed" \
@@ -801,15 +817,15 @@ OUT5DC="$(route_run 'review_pool' '1')"
 [ -s "$TMP/closed" ] \
   && bad "(ROUTE-DURABLE-CLAIMED) a CLAIMED review must never be closed, whatever the route reads (closed: $(cat "$TMP/closed"))" \
   || ok "(ROUTE-DURABLE-CLAIMED) a claimed review with a dropped durable route is LEFT OPEN, not force-closed"
-printf '%s\n' "$OUT5DC" | grep -q 'CLAIMED by' \
+hasin "$OUT5DC" 'CLAIMED by' \
   && ok "(ROUTE-DURABLE-CLAIMED) the unverifiable-but-claimed route is reported, not silent" \
   || bad "(ROUTE-DURABLE-CLAIMED) a claimed review with a bad route must warn (got: $OUT5DC)"
-printf '%s\n' "$OUT5DC" | grep -q '0 signoffs dispatched' \
+hasin "$OUT5DC" '0 signoffs dispatched' \
   && ok "(ROUTE-DURABLE-CLAIMED) it is still NOT counted dispatched (the route never verified)" \
   || bad "(ROUTE-DURABLE-CLAIMED) an unverified route must not count (got: $OUT5DC)"
 # The next pass must find it and REUSE it rather than mint a twin — which is the
 # whole reason leaving a claimed review open is safe.
-printf '%s\n' "$(route_run_reuse 'review_pool' '1')" | grep -q '0 signoffs dispatched' \
+hasin "$(route_run_reuse 'review_pool' '1')" '0 signoffs dispatched' \
   && ok "(ROUTE-DURABLE-CLAIMED) the next pass reuses the in-flight review instead of minting a twin" \
   || bad "(ROUTE-DURABLE-CLAIMED) a left-open claimed review must dedup the next pass"
 
@@ -818,7 +834,7 @@ printf '%s\n' "$(route_run_reuse 'review_pool' '1')" | grep -q '0 signoffs dispa
 # healthy dispatch, not a lost route — re-routing it would offer a claimed review
 # to a second pool, and closing it would yank it from its reviewer.
 OUT5E="$(route_run '' '1')"
-printf '%s\n' "$OUT5E" | grep -q '1 signoffs dispatched' \
+hasin "$OUT5E" '1 signoffs dispatched' \
   && ok "(ROUTE-CLAIMED) a review claimed the instant it routed still counts as dispatched" \
   || bad "(ROUTE-CLAIMED) a consumed gc.routed_to with an assignee must read as routed (got: $OUT5E)"
 [ -s "$TMP/closed" ] && bad "(ROUTE-CLAIMED) a CLAIMED review must never be closed" \
@@ -835,10 +851,10 @@ printf '%s\n' "$OUT5E" | grep -q '1 signoffs dispatched' \
 # exist; a mismatch is unverified, which sends it down the repair-then-close path
 # so the next pass mints a review that is actually offered to A.
 OUT5G="$(route_run '' '' 'gc-toolkit/gc-toolkit.polecat-OTHER')"
-printf '%s\n' "$OUT5G" | grep -q '0 signoffs dispatched' \
+hasin "$OUT5G" '0 signoffs dispatched' \
   && ok "(ROUTE-SPLIT) review_pool=A with a live gc.routed_to=B is NOT counted dispatched" \
   || bad "(ROUTE-SPLIT) a route offered to a different pool must not count (got: $OUT5G)"
-printf '%s\n' "$OUT5G" | grep -q 'did not durably route' \
+hasin "$OUT5G" 'did not durably route' \
   && ok "(ROUTE-SPLIT) the split route is reported, not silent" \
   || bad "(ROUTE-SPLIT) a split route must warn (got: $OUT5G)"
 [ -s "$TMP/closed" ] \
@@ -869,7 +885,7 @@ OUT5F="$(bash "$SCRIPT" \
   --default 'codex' \
   --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
   --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)"
-printf '%s\n' "$OUT5F" | grep -q '1 signoffs dispatched' \
+hasin "$OUT5F" '1 signoffs dispatched' \
   && ok "(LONGCS) a long check_set naming codex still dispatches a signoff (no SIGPIPE miss)" \
   || bad "(LONGCS) long check_set must be recognized as naming codex (got: $OUT5F)"
 grep -q '	anchor_bead	bead-LONGCS$' "$TMP/revmeta" \
@@ -891,7 +907,7 @@ GATE="$(awk '
   || bad "(GATE) heal-gates-merge markers missing or renamed in the formula"
 # Template-free so it executes directly (the {{...}} args are hoisted ABOVE the
 # markers in the formula).
-printf '%s' "$GATE" | grep -q '{{' \
+hasin "$GATE" '{{' \
   && bad "(GATE) extracted snippet still contains a {{template}} — hoist the args above the markers" \
   || ok "(GATE) heal-gates-merge snippet is template-free (executable verbatim)"
 
@@ -926,7 +942,7 @@ A
 GATEOUT="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
 [ -s "$MERGE_SENTINEL" ] && bad "(GATE-FAIL) merge-skill RAN despite an unsafe heal — ungated merge NOT prevented" \
                          || ok "(GATE-FAIL) an unsafe heal HELD merge-skill (no merge attempted)"
-printf '%s\n' "$GATEOUT" | grep -q 'MERGE_SKILL_HELD=1' \
+hasin "$GATEOUT" 'MERGE_SKILL_HELD=1' \
   && ok "(GATE-FAIL) the formula recorded MERGE_SKILL_HELD=1" \
   || bad "(GATE-FAIL) the formula did not set MERGE_SKILL_HELD (got: $GATEOUT)"
 
@@ -937,7 +953,7 @@ printf '%s\n' "$GATEOUT" | grep -q 'MERGE_SKILL_HELD=1' \
 GATEOUT2="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
 [ -s "$MERGE_SENTINEL" ] && ok "(GATE-OK) a clean heal lets merge-skill run" \
                          || bad "(GATE-OK) merge-skill did NOT run after a clean heal (got: $GATEOUT2)"
-printf '%s\n' "$GATEOUT2" | grep -q 'MERGE_SKILL_HELD=0' \
+hasin "$GATEOUT2" 'MERGE_SKILL_HELD=0' \
   && ok "(GATE-OK) the formula recorded MERGE_SKILL_HELD=0" \
   || bad "(GATE-OK) the formula MERGE_SKILL_HELD should be 0 (got: $GATEOUT2)"
 
@@ -974,7 +990,7 @@ POOL_C='gc-toolkit/gc-toolkit.polecat-codex'
 # gc.routed_to, no assignee, no durable copy. Believing it holds the gate forever.
 OUT5H="$(reuse_run 'rev-inert|bead-REUSE|431
 ' '')"
-printf '%s\n' "$OUT5H" | grep -q 'INERT in-flight signoff rev-inert' \
+hasin "$OUT5H" 'INERT in-flight signoff rev-inert' \
   && ok "(REUSE-INERT) an unreachable in-flight signoff is DETECTED, not believed" \
   || bad "(REUSE-INERT) reusing a signoff nobody can claim must be caught (got: $OUT5H)"
 grep -q "^rev-inert	gc.routed_to	$POOL_C$" "$TMP/revmeta" \
@@ -1010,7 +1026,7 @@ rev-claimed	assignee	gc-toolkit__polecat-codex-lx-1
 grep -q "^rev-claimed	review_pool	$POOL_C$" "$TMP/revmeta" \
   && ok "(REUSE-CLAIMED-DURABLE) a claimed review's missing durable route copy is restored" \
   || bad "(REUSE-CLAIMED-DURABLE) the durable copy must be repaired (revmeta: $(cat "$TMP/revmeta"))"
-printf '%s\n' "$OUT5J" | grep -q '0 signoffs dispatched' \
+hasin "$OUT5J" '0 signoffs dispatched' \
   && ok "(REUSE-CLAIMED-DURABLE) a claimed review still counts as in flight — no twin is minted" \
   || bad "(REUSE-CLAIMED-DURABLE) repairing the durable copy must not mint a second review (got: $OUT5J)"
 [ -s "$TMP/closed" ] \
@@ -1023,10 +1039,10 @@ printf '%s\n' "$OUT5J" | grep -q '0 signoffs dispatched' \
 # duplicate dispatch the dedup exists to prevent. Hold, warn, retry next pass.
 OUT5K="$(reuse_run 'rev-dark|bead-REUSE|431
 ' '' 'rev-dark')"
-printf '%s\n' "$OUT5K" | grep -q 'route could not be VERIFIED' \
+hasin "$OUT5K" 'route could not be VERIFIED' \
   && ok "(REUSE-UNREADABLE) an unreadable in-flight signoff is reported, not believed" \
   || bad "(REUSE-UNREADABLE) an unreadable reuse must warn (got: $OUT5K)"
-printf '%s\n' "$OUT5K" | grep -q '0 signoffs dispatched' \
+hasin "$OUT5K" '0 signoffs dispatched' \
   && ok "(REUSE-UNREADABLE) and no twin signoff is minted for it" \
   || bad "(REUSE-UNREADABLE) an unreadable reuse must not mint a replacement (got: $OUT5K)"
 [ -s "$TMP/closed" ] \

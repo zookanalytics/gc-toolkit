@@ -459,7 +459,7 @@ is_held() {
 # and an armed auto-merge merges before merge-skill.sh can enforce anything.
 automerge_state() {
   local raw
-  raw=$(gh pr view "$1" --json autoMergeRequest 2>/dev/null) \
+  raw=$(gh pr view "$1" --repo "$ORIGIN_REPO_Q" --json autoMergeRequest 2>/dev/null) \
     || { printf 'unknown\n'; return; }
   printf '%s' "$raw" \
     | jq -e 'type == "object" and has("autoMergeRequest")' >/dev/null 2>&1 \
@@ -543,10 +543,56 @@ ANCHORS=$(gc bd list --status=open \
 # One compact JSON row per anchor. Built into a variable (not piped into the
 # loop) so the loop runs in THIS shell and the counters below survive the
 # pipe/subshell boundary.
+# The anchor's own PR number comes from EVERY key a bead names a PR with, restricted
+# to this repository — the same `pr_refs | in_repo` rule the ownership probes above
+# use, and the same rule merge-skill.sh's `pr_nums_here` applies to an anchor's own
+# identity (review tk-78ty5 finding #5).
+#
+# Read from `pr_number` ALONE, as this did, a gating anchor keyed only by
+# `fork_pr`/`fork_pr_url` — what the fork-sync flow stamps, and it stamps no
+# pr_number at all — yields an empty `pr` and is dropped by the loop's own
+# `[ -z "$num" ] && skipped` guard. So a live fork-keyed anchor that was merged
+# externally, retargeted, left conflicted, or stale-gated never entered ANY of the
+# per-anchor arms: not the merged-close, not the abandon escalation, not the rebase
+# dispatch, not the stale-gate re-review. It was invisible here while merge-skill.sh
+# — which already reads the widened key set — treated it as a live, mergeable
+# anchor, and while the anchorless scan below counted its PR owned and stayed quiet.
+# A PR nothing reconciles and nothing reports, from the two passes disagreeing about
+# which beads own which PRs.
+#
+# EXACTLY ONE in-repo number or nothing, which is merge-skill.sh's rule for the same
+# question: zero says the bead names no PR here, several says it names more than one
+# and neither answers "which PR does this anchor gate". Both fall through the
+# existing empty-`pr` skip, so an ambiguous anchor is passed over rather than
+# reconciled against a number picked arbitrarily.
+#
+# NOTE the asymmetry with `pr_refs | in_repo` above, which is deliberate and is why
+# this is a SEPARATE definition rather than a reuse. `pr_refs` qualifies a bead's
+# pr_number by that bead's OWN pr_url, which is right when asking "does some OTHER
+# bead's claim collide with this PR" — a foreign bead's number belongs to its own
+# repository. Asked of an anchor about ITSELF it is wrong: an anchor whose pr_url
+# disagrees with its pr_number would resolve to NO number and be skipped in silence,
+# when that disagreement is exactly the operator-facing finding the identity arm
+# below exists to report ("anchor X records pr_url ... which is not PR#N"). So a
+# bare pr_number/fork_pr is kept unconditionally and only a number scanned out of
+# `fork_pr_url` — the one key that carries a repository in its own value — is
+# repo-filtered. Byte-for-byte merge-skill.sh's `pr_nums_here`; these scripts are
+# standalone by design, so it is duplicated rather than sourced. Keep them in step.
+PR_SELF_JQ='
+def pr_nums_here($o):
+  ( [ (.metadata.pr_number // empty), (.metadata.fork_pr // empty) ] | map(tostring) )
+  + ( ((.metadata.fork_pr_url // "") | tostring)
+      | [ capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<r>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
+      | .[0]
+      | if . == null then []
+        elif ($o == "" or (.h + "/" + .r) == $o) then [ .n ]
+        else [] end )
+  | map(select(test("^[0-9]+$"))) | unique;
+'
 ROWS=""
 if [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ]; then
   ROWS=$(printf '%s' "$ANCHORS" \
-    | jq -c '.[] | {id, pr: (.metadata.pr_number // ""), prurl: (.metadata.pr_url // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), stalegate: (.metadata.stale_gate_head // ""), stalegatenopool: (.metadata.stale_gate_nopool_head // ""), codexmark: (.metadata["check.codex"] // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null)
+    | jq -c --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'.[] | (pr_nums_here($o)) as $ns | {id, pr: (if ($ns | length) == 1 then $ns[0] else "" end), prurl: (.metadata.pr_url // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), stalegate: (.metadata.stale_gate_head // ""), stalegatenopool: (.metadata.stale_gate_nopool_head // ""), codexmark: (.metadata["check.codex"] // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null)
 fi
 # No anchors is NOT an early exit: the anchorless pass below walks PR -> BEAD and
 # is at its MOST relevant here (zero live anchors + open PRs is precisely the
@@ -1343,11 +1389,11 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # `// empty` filter, and guessing wrong here is a server-side merge.
       automerge=$(automerge_state "$num")
       if [ "$automerge" = "armed" ]; then
-        echo "reconcile-merged-prs: WARN $id — PR#$num blocked by a superseded self-review, but native auto-merge is ARMED; NOT retracting (the dismissal would trigger an immediate server-side merge past the approval requirement). Disarm auto-merge (gh pr merge --disable-auto $num) or land it deliberately." >&2
+        echo "reconcile-merged-prs: WARN $id — PR#$num blocked by a superseded self-review, but native auto-merge is ARMED; NOT retracting (the dismissal would trigger an immediate server-side merge past the approval requirement). Disarm auto-merge (gh pr merge --disable-auto --repo $ORIGIN_REPO_Q $num) or land it deliberately." >&2
         retract_held=$((retract_held + 1)); continue
       fi
       if [ "$automerge" != "disarmed" ]; then
-        echo "reconcile-merged-prs: WARN $id — PR#$num blocked by a superseded self-review, but its native auto-merge state is UNREADABLE (the autoMergeRequest probe failed or returned a malformed payload); NOT retracting. An unreadable probe cannot prove auto-merge is off, and a wrong guess merges server-side past the approval requirement — so it counts as armed. Retry once 'gh pr view $num --json autoMergeRequest' answers." >&2
+        echo "reconcile-merged-prs: WARN $id — PR#$num blocked by a superseded self-review, but its native auto-merge state is UNREADABLE (the autoMergeRequest probe failed or returned a malformed payload); NOT retracting. An unreadable probe cannot prove auto-merge is off, and a wrong guess merges server-side past the approval requirement — so it counts as armed. Retry once 'gh pr view $num --repo $ORIGIN_REPO_Q --json autoMergeRequest' answers." >&2
         retract_held=$((retract_held + 1)); continue
       fi
       # Paginated, explicitly: GitHub pages this endpoint (30/page by default),
@@ -1367,7 +1413,17 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # as "nothing to retract" and strands the PR permanently and invisibly.
       # ANY failure skips the retraction and says so; the arm is convergent, so the
       # next pass re-enters it once the history reads.
-      reviews_raw=$(gh api --paginate "repos/{owner}/{repo}/pulls/$num/reviews?per_page=100" \
+      # PINNED to the origin repository, like the PR read above and unlike the
+      # `{owner}/{repo}` placeholder this used to carry (review tk-78ty5 finding
+      # #3). Those placeholders resolve from gh's AMBIENT repo context — the
+      # current directory's remote, or $GH_REPO — which is NOT guaranteed to be
+      # the repository this pass derived $num from. Under a drifted context the
+      # arm reads a SAME-NUMBERED PR in another repository, and then the write
+      # half below dismisses a review there while stamping signoff_dismissed on
+      # OUR anchor: a block removed in one repository, the requirement that
+      # replaces it recorded in another. Every GitHub call in this arm is pinned
+      # for that reason; the identity of the PR must not depend on cwd.
+      reviews_raw=$(gh api --paginate "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100" \
         --jq '.[]' 2>/dev/null); reviews_rc=$?
       if [ "$reviews_rc" -ne 0 ]; then
         echo "reconcile-merged-prs: WARN $id — PR#$num reviews history read FAILED (gh rc=$reviews_rc); NOT retracting any superseded self-review (a partial page set cannot be told apart from a complete one and the dismissal is irreversible); retry next pass" >&2
@@ -1390,7 +1446,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
           # may be a FRESH block on the NEW head, not a superseded one — the
           # commit_id filter cannot tell them apart once head_oid is stale. Bail
           # out of the whole retraction; next pass re-reads a settled state.
-          live_head=$(gh pr view "$num" --json headRefOid -q .headRefOid 2>/dev/null)
+          live_head=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null)
           if [ "$live_head" != "$head_oid" ]; then
             echo "reconcile-merged-prs: WARN $id — PR#$num head moved ($head_oid -> ${live_head:-unknown}) mid-pass; NOT retracting review $rid (it may block the new head)" >&2
             retract_held=$((retract_held + 1)); break
@@ -1459,7 +1515,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
           paired=$(gc bd show "$id" --json 2>/dev/null \
             | jq -r '.[0].metadata.signoff_dismissed // empty' 2>/dev/null)
           if [ "$paired" = "$rid@$head_oid" ]; then
-            if gh api -X PUT "repos/{owner}/{repo}/pulls/$num/reviews/$rid/dismissals" \
+            if gh api -X PUT "repos/$ORIGIN_REPO/pulls/$num/reviews/$rid/dismissals" \
                  -f message="Superseded: this review is pinned to a commit that is no longer the head, and the codex gate is green at the live head $head_oid. Approval remains external." \
                  -f event=DISMISS >/dev/null 2>&1; then
               retracted=$((retracted + 1))

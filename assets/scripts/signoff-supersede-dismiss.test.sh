@@ -107,11 +107,24 @@ mkdir -p "$TMP/bin"
 #   gh api -X PUT .../reviews/<id>/dismissals  -> RECORDS the dismissal (the seam)
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
+# WHICH REPOSITORY each call was aimed at. A PR number names a different pull
+# request in every repository, so a call that leaves the repository to gh's ambient
+# context (the cwd's remote, $GH_REPO) is aimed at whatever that happens to be —
+# and this snippet DISMISSES reviews, which cannot be undone once aimed wrong.
+# `gh pr view` carries it as `--repo`; `gh api` carries it in the REST path, where
+# an unpinned call reads the LITERAL `{owner}/{repo}` placeholders. Both are
+# recorded so the assertions can demand a repository derived from the BEAD
+# (review tk-78ty5 finding #4).
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  want=""
+  want=""; pin=""
   while [ $# -gt 0 ]; do
-    case "$1" in --json) want="$2"; shift 2 ;; *) shift ;; esac
+    case "$1" in
+      --json)     want="$2"; shift 2 ;;
+      --repo|-R)  pin="$2"; shift 2 ;;
+      *)          shift ;;
+    esac
   done
+  [ -n "${FAKE_VIEWPIN:-}" ] && printf '%s\n' "${pin:-<unpinned>}" >> "$FAKE_VIEWPIN"
   if [ "$want" = "autoMergeRequest" ]; then
     # The probe is READ three-valued (armed/disarmed/unknown), so the stub can
     # produce all three shapes plus the mid-step arming window:
@@ -169,6 +182,12 @@ while [ $# -gt 0 ]; do
     *)  PATH_ARG="$1"; shift ;;
   esac
 done
+case "$PATH_ARG" in
+  repos/*)
+    apipin="${PATH_ARG#repos/}"
+    apipin="$(printf '%s' "$apipin" | cut -d/ -f1,2)"
+    [ -n "${FAKE_APIPIN:-}" ] && printf '%s\n' "$apipin" >> "$FAKE_APIPIN" ;;
+esac
 case "$PATH_ARG" in
   user)
     printf '%s\n' "${FAKE_LOGIN:-}" ;;
@@ -401,6 +420,7 @@ run() {
   : > "$TMP/dismissed"; : > "$TMP/marked"; : > "$TMP/checks"; printf '0' > "$TMP/headreads"
   printf '0' > "$TMP/amreads"; : > "$TMP/updates"; : > "$TMP/unrecorded"
   printf '0' > "$TMP/anchorshows"; : > "$TMP/claim"; : > "$TMP/route"; : > "$TMP/pool"
+  : > "$TMP/viewpin"; : > "$TMP/apipin"
   cat > "$TMP/reviews" <<< "$1"
   PATH="$TMP/bin:$PATH" \
   FAKE_REVIEWS="$TMP/reviews" FAKE_DISMISSED="$TMP/dismissed" FAKE_MARKED="$TMP/marked" \
@@ -432,10 +452,17 @@ run() {
   FAKE_AUTOMERGE_FAILS="${FAKE_AUTOMERGE_FAILS:-}" \
   FAKE_AUTOMERGE_MALFORMED="${FAKE_AUTOMERGE_MALFORMED:-}" \
   FAKE_AUTOMERGE_AFTER="${FAKE_AUTOMERGE_AFTER:-}" \
+  FAKE_VIEWPIN="$TMP/viewpin" FAKE_APIPIN="$TMP/apipin" \
   ANCHOR="anchor-1" CHECK_NAME="codex" \
   PR_NUMBER="$4" REVIEW_BRANCH="$5" REVIEWED_OID="$2" REVIEW_HANDLE="" \
+  PR_REPO_Q="${PR_REPO_Q-github.com/acme/repo}" PR_REPO="${PR_REPO-acme/repo}" \
     bash "$TMP/run.sh" 2>"$TMP/err"
 }
+# Every `--repo` pin the snippet passed, and every repository its REST paths named,
+# deduplicated. "github.com/acme/repo" / "acme/repo" is the bead-derived answer;
+# "<unpinned>" or "{owner}/{repo}" is a call that left the repository to gh.
+view_pins() { sort -u "$TMP/viewpin" | tr '\n' ' ' | sed 's/ $//'; }
+api_pins()  { sort -u "$TMP/apipin"  | tr '\n' ' ' | sed 's/ $//'; }
 dismissed_ids() { cut -f1 "$TMP/dismissed" | sort | tr '\n' ' ' | sed 's/ $//'; }
 
 # (A) THE BUG: our own CHANGES_REQUESTED pinned to the DEAD commit A, while the
@@ -990,6 +1017,71 @@ grep -q 'did NOT persist' "$TMP/err" \
 grep -q 'set-metadata review_pool=rig/rig.polecat-codex' "$TMP/err" \
   && ok "(W8) and the repair command names review_pool, not just the live route" \
   || bad "(W8) repair command must restore the durable copy (got: $(cat "$TMP/err"))"
+
+# =============================================================================
+# EVERY GitHub CALL IS PINNED TO THE BEAD'S REPOSITORY (review tk-78ty5 finding #4)
+# =============================================================================
+# A PR number names a different pull request in every repository. This block reads
+# a review history, re-reads a head, probes auto-merge, and then DISMISSES a review
+# — and it used to leave the repository to gh entirely: `repos/{owner}/{repo}/...`
+# REST paths, which gh expands from its ambient context, and bare
+# `gh pr view "$PR_NUMBER"`. A polecat runs this in a worktree it was handed, so
+# "whatever repository gh currently thinks it is in" is not a fact about the PR
+# under review. Drifted, the arm reads a stranger's #N, finds a superseded review
+# THERE, dismisses it, and stamps signoff_dismissed on OUR anchor — our PR still
+# blocked, someone else's review retracted, and the approval requirement recorded
+# against the wrong one. Unlike a read, that write cannot be compared after the
+# fact: it has to be aimed correctly by construction.
+
+# (P1) THE PIN. Same passing case as (A), asserted on WHERE every call went.
+run '900|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "900" "(P1) control: the retraction still fires (the pin does not disable the arm)"
+eq "$(view_pins)" "github.com/acme/repo" \
+   "(P1) every gh pr view passed --repo from the bead — head re-read and auto-merge probe alike (never <unpinned>)"
+eq "$(api_pins)" "acme/repo" \
+   "(P1) every gh api REST path named the bead's repository (never the ambient {owner}/{repo})"
+
+# (P2) NO REPOSITORY, NO CALLS. The bead records no parseable pr_url, so nothing
+# can be pinned. The arm must refuse rather than fall back to gh's ambient context:
+# an unstamped gate just re-gates next pass, but a dismissal aimed at the wrong
+# repository is irreversible. This is the fail-closed direction the whole block is
+# built on, applied to its own precondition.
+PR_REPO_Q="" PR_REPO="" run '901|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "" "(P2) unpinnable PR -> NOTHING dismissed"
+eq "$(wc -l < "$TMP/viewpin" | tr -d ' ')" "0" "(P2) unpinnable PR -> no gh pr view attempted"
+grep -q 'records no parseable pr_url' "$TMP/err" \
+  && ok "(P2) the refusal names the missing pr_url and says how to repair it" \
+  || bad "(P2) an unpinnable PR must warn (got: $(cat "$TMP/err"))"
+
+# (P3) THE DERIVATION ITSELF, extracted from the template and run against the same
+# gc stub the real done sequence uses. (P1)/(P2) prove the snippet HONOURS
+# PR_REPO_Q; this proves the block that PRODUCES it turns a bead's pr_url into the
+# host-qualified `--repo` form and the hostless REST form — and that a value which
+# is not a pull-request URL yields EMPTY, which is what routes (P2).
+REPOPIN="$(awk '
+  /# >>> signoff-repo-pin/ {f=1; next}
+  /# <<< signoff-repo-pin/ {f=0}
+  f' "$TEMPLATE")"
+[ -n "$REPOPIN" ] \
+  && ok "(P3) repo-pin block extracted between signoff-repo-pin markers" \
+  || bad "(P3) repo-pin extraction EMPTY — markers missing from $TEMPLATE"
+# `gc bd show` answers with the pr_url under test; the block reads nothing else.
+pin_derive() {
+  printf '#!/usr/bin/env bash\nprintf %s\n' \
+    "'[{\"metadata\":{\"pr_url\":\"$1\"}}]\n'" > "$TMP/bin/gc"
+  chmod +x "$TMP/bin/gc"
+  { printf '%s\n' "$REPOPIN"
+    printf 'printf "%%s|%%s\\n" "$PR_REPO_Q" "$PR_REPO"\n'; } > "$TMP/pin.sh"
+  PATH="$TMP/bin:$PATH" REVIEW_BEAD="review-1" bash "$TMP/pin.sh" 2>/dev/null
+}
+eq "$(pin_derive 'https://github.com/zookanalytics/gc-toolkit/pull/246')" \
+   "github.com/zookanalytics/gc-toolkit|zookanalytics/gc-toolkit" \
+   "(P3) a pr_url yields the host-qualified pin AND the hostless REST form"
+eq "$(pin_derive 'https://ghe.example.com/acme/repo/pull/7')" \
+   "ghe.example.com/acme/repo|acme/repo" \
+   "(P3) the HOST is carried, not assumed — a hostless pin would name another host's acme/repo"
+eq "$(pin_derive '')" "|" "(P3) no pr_url -> empty pin (routes the fail-closed refusal)"
+eq "$(pin_derive 'not-a-url')" "|" "(P3) an unparseable pr_url -> empty pin, never a guess"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
