@@ -407,7 +407,15 @@ else
         # the manifest -- and the seed then carries a fresh manifest all the way
         # to OK, hiding a strictly newer chunk behind an unreadable directory.
         # An unread directory is UNPROVEN, never clean.
-        scan_out=$(find "$db" -type f 2>/dev/null); scan_rc=$?
+        # Seed the status and capture with `||` rather than reading `$?` after a
+        # bare assignment: the failing scan is EXPECTED here, and under `set -e`
+        # a command substitution that exits non-zero aborts the assignment's
+        # whole shell before `scan_rc` is ever set -- the arm below would then
+        # never run and the snippet would emit no verdict at all. `||` marks the
+        # failure as handled, so the check survives a strict-shell paste (same
+        # reason as the `|| true` on the re-run below).
+        scan_rc=0
+        scan_out=$(find "$db" -type f 2>/dev/null) || scan_rc=$?
         scan_fail=""
         if [ "$scan_rc" -ne 0 ]; then
             # Re-run only on this path, to name the cause in the verdict Step 3

@@ -539,6 +539,51 @@ else
     bad "scan-failure verdict drops the find error: $(printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' || true)"
 fi
 
+# --- ...and the scan-failure arm must survive a strict shell ----------------
+# Every assertion above runs the snippet under a plain `bash`. The arm they
+# pin is reached only if `scan_rc` is actually assigned, and reading it from
+# `$?` after a bare `scan_out=$(find ...)` does NOT survive `set -e`: the
+# failing substitution is itself the assignment's exit status, so errexit
+# aborts the shell before the next statement runs. The entire
+# unreadable-directory arm then vanishes — no RECHECK, no FLAG, no output at
+# all — and the false-clean it exists to kill comes back as a silent abort.
+# This snippet is documentation as much as code and gets pasted into strict
+# shells; the step already guards its OTHER expected-failure call with
+# `|| true` for exactly this reason. So re-run the same shimmed fixtures under
+# `bash -euo pipefail` (a superset of `-e -o pipefail`) and demand identical
+# verdicts.
+#
+# These assertions are self-guarding against a dead PATH shim: an unshimmed
+# run enumerates for real and reads OK, which is not what they accept.
+#
+# The capture uses the very `|| rc=$?` shape the snippet itself must use —
+# this script runs under `set -e` too, so reading the status any other way
+# would abort the suite on a regression instead of reporting it.
+STRICT_RC=0
+STRICT_OUT="$(PATH="$TMP/failbin:$PATH" GC_CITY_PATH="$SCAN_ROOT" GC_CITY="$SCAN_ROOT" \
+    EXPECTED_DBS="scan_fresh scan_stale scan_empty" \
+    bash -euo pipefail "$TMP/check.sh" 2>&1)" || STRICT_RC=$?
+
+if [ "$STRICT_RC" -eq 0 ]; then
+    ok "snippet exits clean under 'bash -euo pipefail' with a failing find"
+else
+    bad "snippet aborted under 'bash -euo pipefail' (rc=$STRICT_RC); got: $STRICT_OUT"
+fi
+
+strict_expect() {
+    local db="$1" want="$2" line
+    line="$(grep -E "^(OK|FLAG|RECHECK|INFO) $db:" <<< "$STRICT_OUT" | head -1 || true)"
+    case "$line" in
+        "$want "*) ok "strict shell: $db -> $want ($line)" ;;
+        "")        bad "strict shell: $db emitted no verdict; got: $STRICT_OUT" ;;
+        *)         bad "strict shell: $db expected $want, got: $line" ;;
+    esac
+}
+
+strict_expect scan_fresh RECHECK
+strict_expect scan_stale FLAG
+strict_expect scan_empty RECHECK
+
 # --- Root-level terminal findings -------------------------------------------
 # A missing or empty backup root means NO database has a restorable backup. It
 # must be an explicit, named finding — not an unmatched glob falling through the
