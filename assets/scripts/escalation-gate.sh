@@ -96,6 +96,20 @@
 # why it is not a `gc`-level compare-and-set, and why every way it can fail
 # resolves toward sending rather than toward silence.
 #
+# ...BUT A HELD LOCK IS NOT A VERDICT. The mutex ORDERS decisions; it never makes
+# one. Treating "a peer holds it" as "therefore suppress" reintroduces the mute
+# from a new direction: the peer's situation is not necessarily ours. If the
+# holder is re-reporting an unchanged `--state` while WE carry a changed one, the
+# holder correctly suppresses and we — deciding nothing — send nothing, so a
+# genuinely new head oid or a flipped review decision is dropped entirely.
+# Sequentially that same pair mails immediately, which is the contract: suppress
+# repetition, never news. So a live lock is WAITED ON (bounded), and then the
+# ordinary read/compare/stamp runs for OUR state. Waiting cannot deadlock the
+# patrol: the wait is bounded, and on timeout we proceed unserialized like any
+# other lock failure. Stamp-first is what makes that safe — a holder that got as
+# far as mailing has already written the stamp we are about to read, so the
+# unserialized path still converges on suppress when suppression is right.
+#
 # GENERALIZES BUT IS NOT YET WIRED ELSEWHERE. Nothing here is witness-specific —
 # the su refinery's two escalations in the same incident are the same defect from
 # the opposite direction, and `--kind refinery` would cover them. That change is
@@ -129,6 +143,9 @@ env:
   GC_ESCALATION_GATE_LOCKDIR  directory holding the per-anchor+kind mutex
                               (default /tmp/gc-escalation-gate). Set it to
                               isolate a test run from the live locks.
+  GC_ESCALATION_GATE_LOCK_WAIT  seconds to wait for a live holder of that mutex
+                              before proceeding unserialized (default 30). A
+                              held lock delays this decision; it never makes it.
 
 exit: 0 mailed or suppressed (both correct) · 1 not gated, nothing sent · 2 usage
 USAGE
@@ -266,14 +283,18 @@ NOW=$(date +%s)
 # never a suppressed escalation, never a forgotten one.
 #
 # HOW IT FAILS MATTERS MORE THAN THAT IT LOCKS. Every failure resolves toward
-# sending, never toward silence:
+# DECIDING — and therefore, when the state warrants it, toward sending. None
+# resolves toward silence, and none skips the decision:
 #
 #   HELD, FRESH    a peer is in the critical section for this same anchor+kind
-#                  right now. Suppress and print the verdict — which is exactly
-#                  what serialization would have produced anyway: the peer either
-#                  mails (so we would have found its fresh stamp and suppressed) or
-#                  suppresses (because a fresh stamp already exists, so we would
-#                  have suppressed too). Same outcome, no duplicate.
+#                  right now. WAIT for it, up to LOCK_WAIT, then decide normally.
+#                  We must not adopt the peer's verdict as our own: it is deciding
+#                  about the state IT observed, and if ours differs, ours is news
+#                  (see "A HELD LOCK IS NOT A VERDICT" in the header).
+#   HELD, TOO LONG the holder is still alive but slower than LOCK_WAIT (a wedged
+#                  Dolt write). Proceed UNSERIALIZED with a warning rather than
+#                  hang the patrol pass. Stamp-first keeps this honest: if the
+#                  holder already mailed, we read its stamp and suppress anyway.
 #   HELD, STALE    the holder died mid-section. Break the lock and proceed: a
 #                  crashed peer must never mute an anchor forever.
 #   CANNOT LOCK    the lock root is unwritable. Proceed UNSERIALIZED with a
@@ -282,6 +303,20 @@ NOW=$(date +%s)
 LOCK_TTL=300
 LOCK_ROOT="${GC_ESCALATION_GATE_LOCKDIR:-/tmp/gc-escalation-gate}"
 LOCK_DIR=""
+# How long to wait for a LIVE holder before giving up on serialization. Sized for
+# the critical section it guards — one `gc bd show`, one `gc bd update`, one
+# `gc mail send`, each of which the ops guidance already treats as able to take
+# seconds against a loaded Dolt. Past that the holder is wedged rather than busy,
+# and a patrol pass that blocks on it is worse than an unserialized decision.
+DEFAULT_LOCK_WAIT=30
+LOCK_WAIT="${GC_ESCALATION_GATE_LOCK_WAIT:-$DEFAULT_LOCK_WAIT}"
+case "$LOCK_WAIT" in
+  ''|*[!0-9]*)
+    # Never fatal: a mistyped env var must not stop an escalation, and this knob
+    # only tunes how long we try to be tidy about ordering.
+    echo "escalation-gate: GC_ESCALATION_GATE_LOCK_WAIT must be a whole number of seconds (got '$LOCK_WAIT'); using ${DEFAULT_LOCK_WAIT}s" >&2
+    LOCK_WAIT="$DEFAULT_LOCK_WAIT" ;;
+esac
 
 release_lock() {
   # Only ever removes a lock THIS process took: LOCK_DIR is set solely on a
@@ -308,51 +343,72 @@ lock_started() {
 }
 
 take_lock() {
-  # 0 = proceed (we hold it, or locking is unavailable); 1 = a live peer holds it.
+  # ALWAYS returns 0 — the caller decides either way. The only question this
+  # answers is whether the decision that follows is serialized against a peer, and
+  # the two unserialized outcomes each say so on stderr. There is deliberately no
+  # "return 1 = suppress": a lock is not a verdict, and the version that let it be
+  # one dropped changed-state escalations on the floor.
   if ! mkdir -p "$LOCK_ROOT" 2>/dev/null; then
     echo "escalation-gate: cannot create lock dir $LOCK_ROOT; proceeding UNSERIALIZED — a duplicate escalation is better than a suppressed one" >&2
     return 0
   fi
-  local dir key started age
+  local dir key started age now deadline stale
   # The key lands in a path, so reduce it to the same character set the metadata
   # key already constrains --kind to. ANCHOR is a bead id; a stray character in it
   # must not escape the lock root.
   key=$(printf '%s.%s' "$ANCHOR" "$KIND" | tr -c 'A-Za-z0-9._-' '-')
   dir="$LOCK_ROOT/$key.lock"
-  if mkdir "$dir" 2>/dev/null; then
-    LOCK_DIR="$dir"
-    printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
-    return 0
-  fi
-  started=$(lock_started "$dir")
-  if [ -n "$started" ]; then
-    age=$(( NOW - started ))
-    [ "$age" -lt 0 ] && age=0
-    [ "$age" -lt "$LOCK_TTL" ] && return 1
-  fi
-  # Stale, or an age we cannot read at all. Break it. An unreadable age is only
-  # possible on a platform with no `stat` in the microseconds before `at` is
-  # written, and breaking there is no worse than having no lock; leaving it would
-  # wedge the anchor permanently, which is the mute.
-  rm -f "$dir/at" 2>/dev/null
-  rmdir "$dir" 2>/dev/null
-  if mkdir "$dir" 2>/dev/null; then
-    LOCK_DIR="$dir"
-    printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
-    return 0
-  fi
-  # Another process broke it first and is now inside. Treat as held.
-  return 1
+  deadline=$(( NOW + LOCK_WAIT ))
+  # Terminates unconditionally: every iteration either acquires, or re-checks a
+  # clock that advances past `deadline`. LOCK_WAIT=0 makes this exactly one pass.
+  while : ; do
+    if mkdir "$dir" 2>/dev/null; then
+      LOCK_DIR="$dir"
+      printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
+      return 0
+    fi
+    now=$(date +%s)
+    # A clock we cannot read must not become an unbounded wait: `[ "" -ge N ]` is
+    # an error, not a false, so the deadline test below would never fire and this
+    # loop would spin forever. A patrol pass that hangs is worse than the storm
+    # this script replaces (see the header), so treat it as "time is up".
+    case "$now" in ''|*[!0-9]*) now="$deadline" ;; esac
+    started=$(lock_started "$dir")
+    stale=0
+    if [ -z "$started" ]; then
+      # An age we cannot read at all — only possible on a platform with no `stat`
+      # in the microseconds before `at` is written. Breaking is no worse than
+      # having no lock; leaving it would wedge the anchor permanently, the mute.
+      stale=1
+    else
+      age=$(( now - started ))
+      [ "$age" -lt 0 ] && age=0
+      [ "$age" -ge "$LOCK_TTL" ] && stale=1
+    fi
+    if [ "$stale" = "1" ]; then
+      rm -f "$dir/at" 2>/dev/null
+      rmdir "$dir" 2>/dev/null
+      if mkdir "$dir" 2>/dev/null; then
+        LOCK_DIR="$dir"
+        printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
+        return 0
+      fi
+      # Another process broke it first and is now inside — a live holder again.
+      # Fall through to the wait.
+    fi
+    if [ "$now" -ge "$deadline" ]; then
+      echo "escalation-gate: $ANCHOR [$KIND] a peer has held the lock for over ${LOCK_WAIT}s; proceeding UNSERIALIZED — deciding late is recoverable, skipping the decision is not" >&2
+      return 0
+    fi
+    sleep 1
+  done
 }
 
 # --dry-run writes nothing and sends nothing, so it has no critical section to
 # protect — and taking the lock would let a probe suppress a real escalation.
 if [ "$DRY_RUN" != "1" ]; then
   trap release_lock EXIT
-  if ! take_lock; then
-    echo "escalation-gate: $ANCHOR [$KIND] SUPPRESSED — a concurrent escalation for this anchor is already in flight: $SUBJECT"
-    exit 0
-  fi
+  take_lock
 fi
 
 # COMPARE ON A DIGEST, DISPLAY THE LABEL.
