@@ -36,7 +36,8 @@
 # (u) nor by the next cycle — an unconfirmed delivery paces the backoff without
 # being counted as one the agent received; (v) the week-old state cleanup prunes
 # only this order's own state files, leaving anything nested, differently named,
-# or lacking its header alone however old it is; (w) a sweep resumes after the
+# or lacking its marker alone however old it is, ages them from their own record
+# rather than from mtime, and needs no `find`/`stat`; (w) a sweep resumes after the
 # session the last one stopped at, so a prefix of unreadable sessions cannot
 # consume the budget ahead of the same parked session every cycle; (x) an
 # escalation whose bound expired after the mail was accepted is not sent twice,
@@ -67,7 +68,15 @@
 # would have claimed, and the episode is not swallowed by a directory at its
 # path; (al) the per-call bound holds even against a call that IGNORES SIGTERM,
 # and a host that can only bound softly says so — without leaking the warning
-# into the status surface.
+# into the status surface; (am) a file this order did not WRITE is not its state
+# in any direction — not read as an episode, not reported as a park, not
+# enumerated, not deleted, not pruned — while its own files still are, because
+# ownership is CLAIMED with a marker rather than guessed from a header; (an) a
+# timestamp from the future is corrupt rather than a record, so a bad clock
+# cannot hold a park inside backoff forever, hide a long park from the
+# escalation, or make a stopped order look freshly swept; (ao) only the two
+# values that MEAN escalated suppress the escalation mail — a persisted
+# `escalated=0` says the opposite and is not allowed to act like it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,6 +97,16 @@ state_field() { grep -c "^$2=$3\$" "$TMP/state/$1" 2>/dev/null || true; }
 # read as an empty script. Rewriting through a temp file is the only form both
 # accept, and this suite is meant to be runnable wherever the order runs.
 sedi() { sed "$1" "$2" > "$2.sedi" && mv "$2.sedi" "$2"; }
+
+# Every file the order writes opens with an ownership marker, and every path that
+# reads one requires it (run 32): a state-shaped file without the marker is
+# somebody ELSE's file, by design. So a fixture standing in for state the order
+# itself wrote has to carry the claim, and one standing in for a foreign file
+# must not. Read out of the script rather than duplicated here, so the fixtures
+# cannot quietly drift from the format under test.
+MAGIC="$(grep -m1 '^STATE_MAGIC=' "$SCRIPT" | cut -d= -f2- | tr -d "'\"")"
+[ -n "$MAGIC" ] || { echo "FAIL - could not read STATE_MAGIC out of $SCRIPT"; exit 1; }
+mkstate() { { printf '%s\n' "$MAGIC"; cat; } > "$1"; }
 
 mkdir -p "$TMP/panes" "$TMP/state" "$TMP/bin"
 : > "$TMP/nudges"; : > "$TMP/mail"; : > "$TMP/mailbody"
@@ -331,7 +350,7 @@ eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" "escalation is not repeated eve
 # --- Run 6: a truncated state file must not abort the sweep. ----------------
 cp "$TMP/panes/lx-codex" "$TMP/panes/lx-claude"
 rm -f "$TMP/state/lx-claude"
-printf 'first_seen=\nattempts=x' > "$TMP/state/lx-codex"
+printf 'first_seen=\nattempts=x' | mkstate "$TMP/state/lx-codex"
 : > "$TMP/nudges"
 bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-codex)"  "1" "corrupt state file is treated as a fresh episode"
@@ -401,7 +420,7 @@ PANE
 # Old enough to escalate on this pass; attempts already advanced, so the body
 # has a real counter to report.
 printf 'first_seen=%s\nlast_nudge=0\nattempts=3\nescalated=\n' "$(( $(date +%s) - 9000 ))" \
-    > "$TMP/state/lx-inject"
+    | mkstate "$TMP/state/lx-inject"
 bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-inject)" "1" "the injected pane is still a real park and is nudged"
 eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" "the long park escalates"
@@ -505,7 +524,7 @@ JSON
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"
 printf 'first_seen=%s\nlast_nudge=%s\nattempts=3\nescalated=1\n' \
-    "$(( $(date +%s) - 9000 ))" "$(date +%s)" > "$TMP/state/lx-codex"
+    "$(( $(date +%s) - 9000 ))" "$(date +%s)" | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_FAIL_PEEK=lx-codex bash "$SCRIPT" > "$TMP/out12"
 [ -f "$TMP/state/lx-codex" ] \
     && ok "a failed peek preserves the episode state file" \
@@ -525,7 +544,7 @@ grep -q "unreadable" "$TMP/out12" && ok "summary reports the unreadable pane" \
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"
 printf 'first_seen=%s\nlast_nudge=%s\nattempts=1\nescalated=\n' \
-    "$(( $(date +%s) - 300 ))" "$(( $(date +%s) - 10 ))" > "$TMP/state/lx-codex"
+    "$(( $(date +%s) - 300 ))" "$(( $(date +%s) - 10 ))" | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_BACKOFF_BASE=oops bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-codex)" "0" \
     "malformed QUOTA_PARK_BACKOFF_BASE falls back to the default (backoff still applies)"
@@ -533,7 +552,7 @@ eq "$(nudges_for lx-codex)" "0" \
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"; : > "$TMP/mail"
 printf 'first_seen=%s\nlast_nudge=0\nattempts=3\nescalated=\n' "$(( $(date +%s) - 9000 ))" \
-    > "$TMP/state/lx-codex"
+    | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_ESCALATE_AFTER=nope bash "$SCRIPT" > /dev/null
 eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" \
     "malformed QUOTA_PARK_ESCALATE_AFTER falls back (does not silently disable escalation)"
@@ -554,7 +573,7 @@ rm -f "$TMP/state"/*
 : > "$TMP/nudges"
 printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=1\nunconfirmed=0\nescalated=\n' \
     "$(( $(date +%s) - 300 ))" "$(( $(date +%s) - 10 ))" "$(( $(date +%s) - 10 ))" \
-    > "$TMP/state/lx-codex"
+    | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_BACKOFF_BASE=0 bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-codex)" "0" \
     "QUOTA_PARK_BACKOFF_BASE=0 falls back (a zero window would nudge every 3m sweep)"
@@ -563,7 +582,7 @@ rm -f "$TMP/state"/*
 : > "$TMP/nudges"
 printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=4\nunconfirmed=0\nescalated=\n' \
     "$(( $(date +%s) - 3000 ))" "$(( $(date +%s) - 30 ))" "$(( $(date +%s) - 30 ))" \
-    > "$TMP/state/lx-codex"
+    | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_BACKOFF_CAP=0 bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-codex)" "0" \
     "QUOTA_PARK_BACKOFF_CAP=0 falls back (a zero cap clamps every backoff to zero)"
@@ -586,7 +605,7 @@ eq "$(nudges_for lx-codex)" "1" \
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"; : > "$TMP/mail"
 printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=3\nunconfirmed=0\nescalated=\n' \
-    "$(( $(date +%s) - 9000 ))" > "$TMP/state/lx-codex"
+    "$(( $(date +%s) - 9000 ))" | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_ESCALATE_AFTER=0 bash "$SCRIPT" > /dev/null
 eq "$(grep -c '^mail ' "$TMP/mail" || true)" "0" \
     "QUOTA_PARK_ESCALATE_AFTER=0 still disables escalation (zero is reserved here)"
@@ -663,9 +682,9 @@ fi
 rm -rf "$TMP/state"; mkdir -p "$TMP/state/nested"
 : > "$TMP/nudges"
 printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nescalated=\n' \
-    > "$TMP/state/lx-gone"
+    | mkstate "$TMP/state/lx-gone"
 printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nescalated=\n' \
-    > "$TMP/state/nested/lx-nested"
+    | mkstate "$TMP/state/nested/lx-nested"
 printf '{"unrelated":"component state"}\n' > "$TMP/state/other-component.json"
 : > "$TMP/state/.hidden-marker"
 # A fixed date, not `date -d '8 days ago'`: -d is GNU-only and -v is BSD-only,
@@ -688,6 +707,43 @@ FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
 [ -f "$TMP/state/lx-codex" ] \
     && ok "a state file this sweep just wrote is not pruned" \
     || bad "a state file this sweep just wrote is not pruned"
+
+# The prune walks a glob and ages each file from the record inside it, so the
+# whole path is POSIX shell: `find -maxdepth`/`-print0` are GNU/BSD extensions
+# and `stat` spells mtime differently on each, and this order degrades carefully
+# everywhere else (it probes for `timeout -k` rather than assuming it). Aging
+# from the record is also the more honest measure — mtime says when the file was
+# last written, `last_seen` says when a sweep last confirmed the park.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nlast_seen=1\n' \
+    | mkstate "$TMP/state/lx-ancient"
+printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nlast_seen=%s\n' \
+    "$(date +%s)" | mkstate "$TMP/state/lx-recent"
+# This order's own abandoned temp files: a pass killed between `mktemp` and the
+# rename. They carry the writing pass's timestamp in the name, which is how they
+# age without a `stat` — and the reason a temp file a CONCURRENT pass is writing
+# right now is not removed out from under its rename.
+: > "$TMP/state/.qpn-tmp.1.AbCdEf"
+INFLIGHT_TMP="$TMP/state/.qpn-tmp.$(date +%s).GhIjKl"
+: > "$INFLIGHT_TMP"
+: > "$TMP/state/.qpn-tmp.notatime.MnOpQr"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+[ -f "$TMP/state/lx-ancient" ] \
+    && bad "a state file whose last sighting is ancient is pruned" \
+    || ok "a state file whose last sighting is ancient is pruned"
+[ -f "$TMP/state/lx-recent" ] \
+    && ok "one confirmed recently is kept, whatever its mtime" \
+    || bad "one confirmed recently is kept, whatever its mtime"
+[ -f "$TMP/state/.qpn-tmp.1.AbCdEf" ] \
+    && bad "an abandoned temp file from an old pass is collected" \
+    || ok "an abandoned temp file from an old pass is collected"
+[ -f "$INFLIGHT_TMP" ] \
+    && ok "a temp file a concurrent pass may still be writing is left alone" \
+    || bad "a temp file a concurrent pass may still be writing is left alone"
+[ -f "$TMP/state/.qpn-tmp.notatime.MnOpQr" ] \
+    && ok "a temp name with no readable stamp is left for a later pass, not guessed at" \
+    || bad "a temp name with no readable stamp is left for a later pass, not guessed at"
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 
 # --- Run 16: a slow PREFIX must not starve the sessions behind it. ----------
@@ -758,7 +814,7 @@ else
     : > "$TMP/nudges"; : > "$TMP/mail"
     long_park_state() {
         printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=3\nunconfirmed=0\nescalated=\n' \
-            "$(( $(date +%s) - 9000 ))" > "$TMP/state/lx-codex"
+            "$(( $(date +%s) - 9000 ))" | mkstate "$TMP/state/lx-codex"
     }
     slow_mail_sweep() {
         FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_MAIL=1 \
@@ -1005,7 +1061,7 @@ fi
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 : > "$TMP/nudges"; : > "$TMP/mail"
 printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=3\nunconfirmed=0\nescalated=unconfirmed\n' \
-    "$(( $(date +%s) - 9000 ))" "$(date +%s)" "$(date +%s)" > "$TMP/state/lx-codex"
+    "$(( $(date +%s) - 9000 ))" "$(date +%s)" "$(date +%s)" | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
 bash "$SCRIPT" --status lx-codex > "$TMP/status22"
 grep -q ' escalated=1 ' "$TMP/status22" \
@@ -1066,7 +1122,7 @@ rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 : > "$TMP/nudges"
 FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
 printf 'first_seen=1\nlast_seen=%s\nattempts=1\nescalated=1\ndetector_class=possessive-limit\n' \
-    "$(date +%s)" > "$TMP/planted-episode"
+    "$(date +%s)" | mkstate "$TMP/planted-episode"
 ln -s "$TMP/planted-episode" "$TMP/state/lx-clean"
 bash "$SCRIPT" --status lx-clean > "$TMP/status23"
 grep -q 'quota_park=yes' "$TMP/status23" \
@@ -1256,7 +1312,7 @@ grep -q '^session=lx-clean quota_park=no ' "$TMP/status28" \
 # And the other direction, so the fix is not simply "never delete": OUR file,
 # with our header, at a clean session's path still ends the episode.
 printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nescalated=\n' \
-    > "$TMP/state/lx-clean"
+    | mkstate "$TMP/state/lx-clean"
 bash "$SCRIPT" > /dev/null
 [ -f "$TMP/state/lx-clean" ] \
     && bad "this order's own episode file is still cleared when the pane goes clean" \
@@ -1288,9 +1344,15 @@ bash "$SCRIPT" --status lx-codex > "$TMP/status29"
 grep -q '^session=lx-codex quota_park=no ' "$TMP/status29" \
     && bad "a nudged park whose state did not persist must not report quota_park=no" \
     || ok "a nudged park whose state did not persist does not report quota_park=no"
-grep -q '^session=lx-codex quota_park=unknown .*reason=not-swept$' "$TMP/status29" \
-    && ok "it reports unknown/not-swept — a gap, in the vocabulary the patrols have" \
-    || bad "it reports unknown/not-swept ($(tail -1 "$TMP/status29"))"
+# `unknown` is the load-bearing half; the reason names WHICH gap. Here the
+# directory is still sitting at the state path, so the honest answer is
+# `foreign-state` — something is there that this order did not write. A write
+# that failed for any other reason (no temp file, unwritable dir) leaves no
+# entry at all and still reports `not-swept`, which is the vouch-withheld path
+# run 21 covers.
+grep -q '^session=lx-codex quota_park=unknown .*reason=foreign-state$' "$TMP/status29" \
+    && ok "it reports unknown/foreign-state — a gap, in the vocabulary the patrols have" \
+    || bad "it reports unknown/foreign-state ($(tail -1 "$TMP/status29"))"
 
 # --- Run 30: the call bound holds even when the call ignores SIGTERM. -------
 # Runs 8-9 hang with `sleep`, which dies politely, so they exercise a bound that
@@ -1383,7 +1445,10 @@ for consumer in "$DEACON" "$WITNESS"; do
             || bad "consumer contract: $name distinguishes reason=$r"
     done
 done
-for r in no-recent-sweep not-swept stale-episode unsafe-session-id; do
+# The doc documents every reason the surface can emit. The consumers above are
+# only required to distinguish the two that change what a patrol DOES; the rest
+# are documented so a human reading a status line can look one up.
+for r in no-recent-sweep not-swept stale-episode unsafe-session-id foreign-state; do
     grep -qF "$r" "$DOC" \
         && ok "consumer contract: the doc documents reason=$r" \
         || bad "consumer contract: the doc documents reason=$r"
@@ -1400,6 +1465,144 @@ while read -r var; do
         bad "consumer contract: the doc documents $var"
     fi
 done < <(grep -oE '\bQUOTA_PARK_[A-Z_]+' "$SCRIPT" | sort -u)
+
+# --- Run 32: a file this order did not write is not this order's state. -----
+# Ownership used to be inferred from SHAPE — a `first_seen=` header, a
+# session-id-shaped name — and both directions of that guess were reproduced.
+# Reading it: a foreign file carrying the fields the surface reads answers
+# `quota_park=yes` for a session this order never classified, which is a warrant
+# suppressed on somebody else's file. Deleting it: the same weak test gated
+# `owned_state_rm` and the week-old prune, so a file merely shaped like state was
+# destroyed by a routine sweep — against the branch's own "deletes only files it
+# wrote" contract. The marker makes the claim explicit and versioned, and every
+# path applies it: read, report, enumerate, delete, prune.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+bash "$SCRIPT" > /dev/null          # a real pass, so the heartbeat is genuinely fresh
+
+# The repro, verbatim: every field the surface reads, at a session-id path,
+# under that fresh heartbeat.
+printf 'first_seen=%s\nlast_seen=%s\nattempts=1\nunconfirmed=0\nescalated=1\ndetector_class=possessive-limit\n' \
+    "$(( $(date +%s) - 600 ))" "$(date +%s)" > "$TMP/state/lx-foreign"
+bash "$SCRIPT" --status lx-foreign > "$TMP/status32"
+grep -q 'quota_park=yes' "$TMP/status32" \
+    && bad "a foreign file with plausible fields must not report a park" \
+    || ok "a foreign file with plausible fields does not report a park"
+grep -q '^session=lx-foreign quota_park=unknown .*reason=foreign-state$' "$TMP/status32" \
+    && ok "it answers unknown/foreign-state: something is there, and it is not ours" \
+    || bad "it answers unknown/foreign-state ($(tail -1 "$TMP/status32"))"
+bash "$SCRIPT" --status > "$TMP/status32-all"
+grep -q '^session=lx-foreign ' "$TMP/status32-all" \
+    && bad "a foreign file must not be enumerated as an episode this order tracks" \
+    || ok "a foreign file is not enumerated as an episode this order tracks"
+
+# The delete direction. `lx-clean`'s pane is clean, so the every-3-minutes
+# removal path runs against its state path on every pass; the week-old prune runs
+# on every pass too, and this file's record claims 1970.
+printf 'first_seen=1\nlast_seen=1\nattempts=1\n' > "$TMP/state/lx-clean"
+bash "$SCRIPT" > /dev/null
+[ -s "$TMP/state/lx-clean" ] \
+    && ok "a header-shaped foreign file survives the clean-pane removal path" \
+    || bad "a header-shaped foreign file survives the clean-pane removal path"
+[ -s "$TMP/state/lx-foreign" ] \
+    && ok "and one at a vanished session's path survives the prune, however old" \
+    || bad "and one at a vanished session's path survives the prune, however old"
+
+# The positive control, so the fix is not simply "never delete": the same file
+# WITH the marker is ours, and a clean pane still ends that episode.
+printf 'first_seen=1\nlast_seen=1\nattempts=1\n' | mkstate "$TMP/state/lx-clean"
+bash "$SCRIPT" > /dev/null
+[ -f "$TMP/state/lx-clean" ] \
+    && bad "a marked file at a clean session's path is still cleared" \
+    || ok "a marked file at a clean session's path is still cleared"
+
+# The other half of the repro: it needs a FRESH heartbeat to be given a verdict
+# at all, and the heartbeat is this order's file too.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+printf 'last_run=%s\n' "$(date +%s)" > "$TMP/state/.heartbeat"
+printf 'first_seen=%s\nlast_seen=%s\ndetector_class=possessive-limit\n' \
+    "$(( $(date +%s) - 600 ))" "$(date +%s)" > "$TMP/state/lx-foreign"
+bash "$SCRIPT" --status lx-foreign > "$TMP/status32-hb"
+grep -q '^heartbeat_fresh=0$' "$TMP/status32-hb" \
+    && ok "a planted heartbeat does not make a sweep that never ran look fresh" \
+    || bad "a planted heartbeat does not make a sweep that never ran look fresh"
+
+# --- Run 33: a timestamp from the future is corrupt, not a record. ----------
+# Every timestamp here is stamped from the running pass's own clock, so one
+# AHEAD of that clock cannot be a record of anything this order did — and each
+# of them defeats a guard by arithmetic alone, in the direction that stops
+# recovery. Being an integer was never the whole contract.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"; : > "$TMP/nudges"
+FUTURE=$(( $(date +%s) + 31536000 ))     # a year out: a typo'd year, a bad clock
+
+# last_try: `NOW - last_try` stays negative, so the backoff window never elapses
+# and the parked session is never nudged again — for as long as the wall clock
+# takes to catch up, which for a typo'd year is never.
+printf 'first_seen=%s\nlast_nudge=0\nlast_try=%s\nattempts=1\nunconfirmed=0\nescalated=\n' \
+    "$(( $(date +%s) - 600 ))" "$FUTURE" | mkstate "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "1" "a future last_try does not hold a park inside backoff forever"
+
+# first_seen: `age` stays negative, so ESCALATE_AFTER is never reached and no
+# human is ever told — and the surface publishes the negative age as `age_s`.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"; : > "$TMP/nudges"
+printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nescalated=\n' \
+    "$FUTURE" | mkstate "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+grep -q "^first_seen=$FUTURE\$" "$TMP/state/lx-codex" \
+    && bad "a future first_seen is not carried forward into the episode" \
+    || ok "a future first_seen is not carried forward into the episode"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" --status lx-codex > "$TMP/status33"
+grep -qE 'age_s=-[0-9]' "$TMP/status33" \
+    && bad "the surface must not publish a negative age ($(tail -1 "$TMP/status33"))" \
+    || ok "the surface does not publish a negative age"
+
+# last_run: a heartbeat dated forward reads as fresh forever, and a fresh
+# heartbeat is the precondition for every verdict — a stopped order would go on
+# vouching for the whole city.
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+sedi "s/^last_run=.*/last_run=$FUTURE/" "$TMP/state/.heartbeat"
+bash "$SCRIPT" --status lx-codex > "$TMP/status33-hb"
+grep -q '^heartbeat_fresh=0$' "$TMP/status33-hb" \
+    && ok "a future-dated heartbeat is not read as a fresh sweep" \
+    || bad "a future-dated heartbeat is not read as a fresh sweep"
+
+# And a coverage stamp, where a future value would manufacture the one verdict
+# that has to be earned: `no` requires a sighting this order could have made.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+bash "$SCRIPT" > /dev/null
+sedi "s/^lx-clean .*/lx-clean $FUTURE/" "$TMP/state/.sweep-coverage"
+bash "$SCRIPT" --status lx-clean > "$TMP/status33-cov"
+grep -q '^session=lx-clean quota_park=no ' "$TMP/status33-cov" \
+    && bad "a future coverage stamp must not earn a clean verdict" \
+    || ok "a future coverage stamp does not earn a clean verdict"
+
+# --- Run 34: only the two values that mean "escalated" suppress the mail. ----
+# The escalation test is `[ -z "$escalated" ]`, so ANY non-empty value read back
+# out of the state file reads as "already mailed" and suppresses the escalation
+# for the rest of the episode — silently, and for exactly the multi-hour park the
+# escalation exists to report. A persisted `escalated=0` is the sharp case: it
+# says NOT escalated and did the opposite. Normalized on the way in to the same
+# closed set the surface publishes on the way out.
+for flag in 0 maybe " "; do
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state"; : > "$TMP/mail"; : > "$TMP/nudges"
+    printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=3\nunconfirmed=0\nescalated=%s\n' \
+        "$(( $(date +%s) - 9000 ))" "$flag" | mkstate "$TMP/state/lx-codex"
+    FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+    eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" \
+        "escalated='$flag' does not mean escalated — the human is still mailed"
+    eq "$(grep -c '^escalated=1$' "$TMP/state/lx-codex" || true)" "1" \
+        "escalated='$flag' is normalized to the value the consumers define"
+done
+# The negative control: the two values that DO mean escalated still suppress it.
+for flag in 1 unconfirmed; do
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state"; : > "$TMP/mail"; : > "$TMP/nudges"
+    printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=3\nunconfirmed=0\nescalated=%s\n' \
+        "$(( $(date +%s) - 9000 ))" "$flag" | mkstate "$TMP/state/lx-codex"
+    FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+    eq "$(grep -c '^mail ' "$TMP/mail" || true)" "0" \
+        "escalated=$flag still suppresses the resend for this episode"
+done
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -123,14 +123,49 @@ review with an unrelated regular file at `$STATE_DIR/lx-clean`, destroyed by one
 clean sweep. The week-old prune below already had a narrow ownership test;
 what it did not have was the every-three-minutes paths using it. Now all three
 share one: directly in `STATE_DIR`, a regular file and not a symlink, named like
-the ids we write (`safe_id`), carrying a state file's own `first_seen=` header.
+the ids we write (`safe_id`), carrying this order's own marker as its first line.
 Anything failing one of them is somebody else's and is left alone.
+
+**Ownership is claimed, not guessed.** That test used to end at a `first_seen=`
+header, which is a *shape* — and a shape is something a foreign file can happen
+to have. Both directions of the guess were reproduced. Reading: a file at a
+session-id path carrying plausible `first_seen`/`last_seen`/`detector_class`
+fields made `--status` answer `quota_park=yes` for an episode this order never
+created — a warrant deferred on evidence it did not produce. Deleting: the same
+weak test gated the removal paths, so a file merely shaped like state was
+unlinked by a routine sweep, against the very contract above. So every file this
+order writes now opens with `#quota-park-nudge-state-v1`, and every path that
+reads one requires it: no marker, not ours, in every direction — read, report,
+enumerate, delete, prune. The version suffix is what will let a future format
+change be told apart from a foreign file rather than parsed as an older one of
+ours.
+
+It is an ownership *label*, not an authenticator, and the boundary is worth
+stating plainly: it closes the collision class — another component's state, a
+stray name, a hand-edited leftover, a shared or mis-set `QUOTA_PARK_STATE_DIR`
+— which is the class that has actually been hit here. It cannot stop something
+that can write to `STATE_DIR` from writing the marker too, and nothing at this
+layer can, since such a writer runs as the same user this order does. An accident
+can no longer forge ownership; a forgery now has to be deliberate.
 
 That refusal has a price, and it is the right one to pay: a foreign file at a
 live session's path keeps `--status` answering `unknown` for that session rather
 than `no`, because there is a file there this order cannot read as an episode.
-The patrols then apply their own judgment, which is the safe direction and the
-honest one.
+It answers with `reason=foreign-state`, which says exactly that, and the patrols
+then apply their own judgment — the safe direction and the honest one.
+
+**A timestamp from the future is corrupt, not a record.** Every timestamp
+persisted here is stamped from the running pass's own clock, so one *ahead* of
+that clock cannot be a record of anything this order did — a bad clock, a
+truncated write, a hand edit. "Is an integer" was never the whole contract,
+because each such field defeats a different guard by arithmetic alone and always
+in the direction that stops recovery: a future `last_try` keeps `NOW - last_try`
+negative so the backoff window never elapses and the parked session is never
+nudged again; a future `first_seen` keeps `age` negative so `ESCALATE_AFTER` is
+never reached and no human is told; a future `last_run` makes every later
+`--status` read a stopped order as a freshly-swept one. Each is treated as
+invalid and falls back to the default a *missing* field gets — start of episode,
+never nudged, no heartbeat — which is the direction that recovers.
 
 **Only a successful peek may end an episode.** Ending one deletes the state
 file, which is what resets the backoff and the once-per-episode escalation flag.
@@ -233,6 +268,7 @@ on a pass having run, and `reason` names the gap:
 | `not-swept` | A pass ran but has no usable record of this session: deferred by `SWEEP_BUDGET`, an unreadable pane, an id it refused, attached, not in the active list, or a verdict it could not persist | No — ordinary partial coverage |
 | `stale-episode` | An episode exists but nothing has confirmed it since `last_seen` | No |
 | `unsafe-session-id` | An id this order will not name a file with, so it holds no state for it | No |
+| `foreign-state` | Something is at that session's state path that this order did not write, so there is no episode to read — and no clean verdict to give either, since it will not remove a file it does not own | No |
 
 The `no` case is the one that has to be *earned*. A pass that runs out of
 `SWEEP_BUDGET` defers its whole tail without peeking it and still writes a fresh
@@ -422,17 +458,29 @@ The week-old cleanup of the state directory is deliberately narrow for the same
 its default lives inside the shared city runtime tree, so a bare recursive
 `find -delete` there is this order unlinking week-old files it has never heard
 of. It prunes only files directly in the directory (never a nested tree), named
-like the session ids it writes, and carrying its own `first_seen=` header —
-anything else is somebody else's file, whatever its age.
+like the session ids it writes, and carrying its own marker line — anything else
+is somebody else's file, whatever its age.
+
+It walks a glob rather than `find`, and ages each file from the record inside it
+(`last_seen`, falling back to `first_seen`) rather than from mtime, so the whole
+path is POSIX shell: `find -maxdepth`/`-print0` are GNU/BSD extensions and `stat`
+spells mtime differently on each, and this order degrades carefully everywhere
+else — it *probes* for `timeout -k` rather than assuming it. A glob never
+descends, so the depth guard comes free. Aging from the record is also the truer
+measure: mtime says when the file was last written, `last_seen` says when a sweep
+last confirmed the park.
 
 The order's own non-episode files live there as well: `.sweep-cursor` (where the
 next pass starts), `.heartbeat` (that a pass ran, and what it saw) and
 `.sweep-coverage` (which sessions it classified). Every name begins with a dot,
 which `safe_id` rejects — so no session can be given a state file that collides
-with one, the prune never considers them, and `--status` never reports one as a
-parked session. The same is true of the `.qpn-tmp.*` files the atomic writes go
-through; a pass killed between the `mktemp` and the rename leaves one behind, and
-the week-old prune collects them by name.
+with one, the prune never considers them as episodes, and `--status` never
+reports one as a parked session. The same is true of the `.qpn-tmp.<pass>.*`
+files the atomic writes go through; a pass killed between the `mktemp` and the
+rename leaves one behind, and the week-old prune collects them by name. Each
+carries the writing pass's timestamp in its name, which is how they are aged
+without a `stat` — and the reason a temp file a *concurrent* pass is still
+writing is never removed out from under its rename.
 
 Regression suite: `assets/scripts/quota-park-nudge.test.sh` (hermetic — fake
 `gc`, canned panes, no city). It also parses `orders/quota-park-nudge.toml` and

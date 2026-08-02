@@ -179,6 +179,9 @@ done
     coverage, not an outage; normal warrant path, no alarm.
   - `reason=stale-episode` — it saw a park here once and nothing has confirmed
     it since. Normal warrant path.
+  - `reason=unsafe-session-id` / `reason=foreign-state` — it holds no usable
+    state for that session: an id it will not name a file with, or something at
+    that path it did not write. Normal warrant path, no alarm.
 - `escalated=1` on a session you already deferred once — nudging has not
   brought it back and a human has been mailed. Do not keep deferring in
   silence: escalate to the mayor.

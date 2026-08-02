@@ -159,22 +159,89 @@ COVERAGE_FILE="$STATE_DIR/.sweep-coverage"
 
 NOW="$(date +%s)"
 
+# The first line of every file this order writes, and the test every path that
+# reads one applies before treating the file as its own.
+#
+# Ownership used to be inferred from SHAPE — a `first_seen=` header, a
+# session-id-shaped name — and a shape is a guess, not a claim. A file that
+# happens to look like ours is then read as ours, in both directions, and both
+# were reproduced during review. Reading: a foreign file carrying plausible
+# `first_seen`/`last_seen`/`detector_class` fields makes `--status` answer
+# `quota_park=yes` for a session this order never classified — a warrant
+# suppressed on evidence it did not produce. Deleting: the same weak test is
+# what `owned_state_rm` and the week-old prune gate on, so a foreign file shaped
+# like state is destroyed by a routine sweep, which is the "deletes only files it
+# wrote" contract resting on a header anybody might have written.
+#
+# So the claim is made explicit and versioned instead. A file whose first line is
+# not exactly this is not this order's, whatever it looks like inside: not read
+# as an episode, not deleted, not pruned, not reported on. The version suffix is
+# what will let a future format change be told apart from a foreign file rather
+# than parsed as an older one of ours.
+#
+# What this is and is not. It is an ownership LABEL, not an authenticator, and it
+# closes the collision class: an unrelated component's state, a stray name, a
+# hand-edited leftover, a mis-set or shared QUOTA_PARK_STATE_DIR — every case
+# that has actually been hit here. It cannot stop something that can WRITE to
+# STATE_DIR from writing the marker too, and nothing at this layer can: such a
+# writer runs as the same user this order does. The honest boundary is that an
+# accident can no longer forge ownership and a forgery has to be deliberate.
+STATE_MAGIC='#quota-park-nudge-state-v1'
+
+# True for a file this order wrote: a regular file — never a symlink, directory,
+# or FIFO — whose first line is the marker. Every read, delete, prune and report
+# path goes through here, so no two of them can drift in what "ours" means.
+owned_file() {
+    local first=""
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    IFS= read -r first < "$1" 2>/dev/null || return 1
+    [ "$first" = "$STATE_MAGIC" ]
+}
+
 # Read one key out of a state file. Never `source` it — the file is keyed by a
 # session id and lives in a shared runtime dir.
 #
-# Never through a symlink either. STATE_DIR is shared (and an override), so an
-# entry planted there would otherwise have this order reading a file of somebody
-# else's choosing and parsing it as its own episode state. A planted link reads
-# as "no state", and the next write replaces the link itself rather than
-# following it — see write_atomic.
+# Only ever out of a file this order owns. STATE_DIR is shared (and an override),
+# so anything else there is somebody else's, and parsing it as episode state is
+# how a planted or coincidental file gets to drive this order's own decisions:
+# the backoff window, the once-per-episode escalation flag, the verdict
+# `--status` publishes. A file that fails `owned_file` — including a planted
+# symlink — reads as "no state", and the next write replaces the entry itself
+# rather than following it (see write_atomic).
 state_get() {
-    [ -f "$1" ] && [ ! -L "$1" ] || return 0
+    owned_file "$1" || return 0
     grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- || true
 }
 
 # True for a bare non-empty integer — everything read back out of a state file
 # is fed to arithmetic, and `$(( ))` on garbage is fatal under `set -e`.
 num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
+
+# True for a timestamp this order could have written: an integer, and not in the
+# FUTURE. Every timestamp persisted here is stamped from the running pass's own
+# clock, so one ahead of that clock is not a record of something that happened —
+# it is a corrupt field, a clock that went backwards, or a planted one. Being an
+# integer was never the whole contract, because each of these defeats a guard by
+# arithmetic alone, silently, and in the direction that stops recovery:
+#   last_try    a future value keeps `NOW - last_try` negative, so the backoff
+#               window never elapses and the parked session is never nudged
+#               again — recovery off for that session until the wall clock
+#               catches up, which for a typo'd year is never.
+#   first_seen  keeps `age` negative, so ESCALATE_AFTER is never reached and no
+#               human is told about a park that outlasts it. `--status` also
+#               publishes the negative age as `age_s`.
+#   last_run    a future heartbeat makes every subsequent `--status` read a
+#               stopped order as a fresh one, which is warrant suppression on a
+#               sweep that never ran.
+# Invalid falls back to the same default a missing field gets — start of
+# episode, never nudged, no heartbeat — which is the direction that recovers.
+#
+# The one cost lands on a host that can only bound calls softly (BOUND_MODE=1),
+# where a pass can overrun into the next one: the older pass reads the newer
+# pass's record as future-dated, discards it, and re-nudges a session that was
+# just handled. That is one extra resume message on a host already warned about,
+# and being early is the trade this order makes everywhere else too.
+ts_valid() { num "${1:-}" && [ "$1" -le "$NOW" ]; }
 
 # Replace a file in STATE_DIR with what arrives on stdin, atomically, and never
 # by writing THROUGH whatever is already at the path.
@@ -192,7 +259,9 @@ num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 # followed). The temp name is dot-prefixed and distinctive: `safe_id` rejects a
 # leading dot, so a temp file left by a killed pass can never be read back as an
 # episode, reported as a parked session, or pruned as one — the prune below
-# collects them by name instead.
+# collects them by name instead, and reads the pass's timestamp out of that name
+# so it can age them without asking the filesystem (`stat` spells mtime
+# differently on GNU and BSD; `find -mtime` was the portability gap this closes).
 #
 # A DIRECTORY at the destination is the one type that must be refused rather
 # than replaced, and refusing it is what makes the failure visible at all: `mv
@@ -206,12 +275,21 @@ num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 write_atomic() {
     local dest="$1" tmp
     [ -d "$dest" ] && return 1
-    tmp="$(mktemp "$STATE_DIR/.qpn-tmp.XXXXXX" 2>/dev/null)" || return 1
+    tmp="$(mktemp "$STATE_DIR/.qpn-tmp.$NOW.XXXXXX" 2>/dev/null)" || return 1
     if cat > "$tmp" 2>/dev/null && mv -f "$tmp" "$dest" 2>/dev/null; then
         return 0
     fi
     rm -f "$tmp"
     return 1
+}
+
+# Write a file this order OWNS: the marker line, then stdin, atomically. Every
+# persisted file goes through here — episode state, cursor, heartbeat, coverage —
+# so none of them can be written without the claim that lets it be read back, and
+# a file that predates the marker (or was planted to look like one) is replaced
+# rather than merged with.
+write_owned() {
+    { printf '%s\n' "$STATE_MAGIC"; cat; } | write_atomic "$1"
 }
 
 # One writer for an episode's state file, so the two paths that persist it —
@@ -226,7 +304,7 @@ write_atomic() {
 # file is never older than the sweep that last looked.
 write_state() {
     printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=%s\nunconfirmed=%s\nescalated=%s\nlast_seen=%s\ndetector_class=%s\n' \
-        "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" | write_atomic "$1"
+        "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" | write_owned "$1"
 }
 
 # True for a session id safe to use as a filename AND as a command argument. The
@@ -257,7 +335,7 @@ safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | -* | *..*) return 1 ;
 # the week-old prune already documents has to hold on the every-3-minutes paths
 # too, and this is that test in one place so the three callers cannot drift:
 # directly in STATE_DIR, a regular file and not a symlink, named like the ids we
-# write (`safe_id`), and carrying a state file's own `first_seen=` header.
+# write (`safe_id`), and carrying this order's own marker line (`owned_file`).
 #
 # Anything failing one of them is somebody else's file and is left alone. That
 # is deliberately not free: a foreign file at a live session's path keeps
@@ -265,18 +343,20 @@ safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | -* | *..*) return 1 ;
 # there this order cannot read as an episode. Unknown is the safe direction —
 # the patrols fall back to their own judgment — and it is the honest one.
 #
-# Reads line 1 directly rather than through `head | grep`: under `pipefail` a
-# matching `grep -q` can close the pipe first, and the SIGPIPE'd `head` then
-# fails the pipeline, which would read as "not our file" on exactly the files
-# this is meant to remove.
+# The ownership test is `owned_file`'s marker, not the `first_seen=` header this
+# used to accept. A header is a shape, and shape is guessable: an unrelated
+# file that opens with that line — another component's key/value state, an
+# editor backup of one of ours — was deleted by a routine sweep on the strength
+# of it. See STATE_MAGIC.
 owned_state_rm() {
-    local path="$1" base header
-    [ -f "$path" ] && [ ! -L "$path" ] || return 0
+    local path="$1" base
+    owned_file "$path" || return 0
+    # Directly in STATE_DIR, which the doc above has always claimed and only the
+    # callers enforced. Stated here it is also the prune's depth guard: nothing
+    # below the top level is ever a candidate, whatever it is named or carries.
+    [ "${path%/*}" = "$STATE_DIR" ] || return 0
     base="${path##*/}"
     safe_id "$base" || return 0
-    header=""
-    IFS= read -r header < "$path" 2>/dev/null || true
-    case "$header" in first_seen=*) ;; *) return 0 ;; esac
     rm -f "$path"
 }
 
@@ -285,9 +365,9 @@ owned_state_rm() {
 # Prints an age in seconds, or fails if there is no record. See write_coverage.
 covered_age() {
     local ts
-    [ -f "$COVERAGE_FILE" ] && [ ! -L "$COVERAGE_FILE" ] || return 1
+    owned_file "$COVERAGE_FILE" || return 1
     ts="$(awk -v id="$1" '$1 == id { print $2; exit }' "$COVERAGE_FILE" 2>/dev/null)" || return 1
-    num "$ts" || return 1
+    ts_valid "$ts" || return 1
     echo $((NOW - ts))
 }
 
@@ -447,6 +527,9 @@ num_min "$STALE_AFTER"    1 || STALE_AFTER=600
 #                                id it refused, attached, or not in the list
 #               stale-episode    an episode nothing has confirmed lately
 #               unsafe-session-id  an id this order will not name a file with
+#               foreign-state    something is at that session's state path that
+#                                this order did not write, so there is no episode
+#                                to read and no clean path to report either
 #
 # The `no` case is the one that has to be earned rather than inferred: a pass
 # that runs out of SWEEP_BUDGET defers its whole tail without peeking it and
@@ -456,8 +539,12 @@ status_line() {
     local id="$1" path="$STATE_DIR/$1"
     local first_seen last_seen attempts unconfirmed escalated dclass verdict age seen_age human
     local cov_age reason=-
-    first_seen="$(state_get "$path" first_seen)";   num "$first_seen"  || first_seen=0
-    last_seen="$(state_get "$path" last_seen)";     num "$last_seen"   || last_seen=0
+    # Timestamps are validated as timestamps, not merely as integers: a
+    # future-dated `last_seen` would otherwise pass `num`, make `seen_age`
+    # negative, and publish a park nothing has confirmed as a live one. See
+    # ts_valid.
+    first_seen="$(state_get "$path" first_seen)";   ts_valid "$first_seen" || first_seen=0
+    last_seen="$(state_get "$path" last_seen)";     ts_valid "$last_seen"  || last_seen=0
     attempts="$(state_get "$path" attempts)";       num "$attempts"    || attempts=0
     unconfirmed="$(state_get "$path" unconfirmed)"; num "$unconfirmed" || unconfirmed=0
     # A 0/1 flag on the way out, and `unconfirmed` maps to 1. The third state is
@@ -486,7 +573,26 @@ status_line() {
 
     if [ "$HB_FRESH" != "1" ]; then
         verdict=unknown; reason=no-recent-sweep   # no recent pass: no evidence at all
-    elif [ ! -f "$path" ] || [ -L "$path" ]; then
+    elif [ -e "$path" ] || [ -L "$path" ]; then
+        if owned_file "$path"; then
+            if [ "$seen_age" -lt 0 ] || [ "$seen_age" -ge "$STALE_AFTER" ]; then
+                verdict=unknown; reason=stale-episode  # an episode nothing has confirmed lately
+            else
+                verdict=yes
+            fi
+        else
+            # Something is at this session's state path and it is not ours: a
+            # foreign file, a directory, a planted symlink. It is NOT an episode
+            # — reading one out of it is how a file this order never wrote gets
+            # to answer `quota_park=yes` and suppress a warrant — and it is not
+            # the clean "no episode here" case either, because this order cannot
+            # remove it to complete that verdict (owned_state_rm leaves it, by
+            # design). Its own reason, rather than the `stale-episode` this used
+            # to fall through to, which says an episode exists and nothing has
+            # confirmed it lately — neither half of which is true here.
+            verdict=unknown; reason=foreign-state
+        fi
+    else
         # No episode for this session. That is only evidence of "not parked" if
         # this order actually LOOKED at the session recently, and a fresh
         # heartbeat does not say that: a pass that runs out of SWEEP_BUDGET
@@ -508,10 +614,6 @@ status_line() {
         else
             verdict=unknown; reason=not-swept
         fi
-    elif [ "$seen_age" -lt 0 ] || [ "$seen_age" -ge "$STALE_AFTER" ]; then
-        verdict=unknown; reason=stale-episode  # an episode nothing has confirmed lately
-    else
-        verdict=yes
     fi
     printf 'session=%s quota_park=%s detector_class=%s age_s=%s parked_for=%s attempts=%s unconfirmed=%s escalated=%s last_seen_age=%s reason=%s\n' \
         "$id" "$verdict" "$dclass" "$age" "$human" "$attempts" "$unconfirmed" "$escalated" "$seen_age" "$reason"
@@ -519,7 +621,10 @@ status_line() {
 
 status_report() {
     local want="${1:-}" hb path base
-    hb="$(state_get "$HEARTBEAT_FILE" last_run)"; num "$hb" || hb=0
+    # ts_valid, not num: a heartbeat dated in the future would otherwise read as
+    # fresh forever, and a fresh heartbeat is the precondition for every verdict
+    # below — a stopped order would go on vouching for the whole city.
+    hb="$(state_get "$HEARTBEAT_FILE" last_run)"; ts_valid "$hb" || hb=0
     HB_AGE=-1; [ "$hb" -gt 0 ] && HB_AGE=$((NOW - hb))
     HB_FRESH=0
     if [ "$hb" -gt 0 ] && [ "$HB_AGE" -lt "$STALE_AFTER" ]; then HB_FRESH=1; fi
@@ -535,11 +640,13 @@ status_report() {
         status_line "$want"
         return 0
     fi
-    # No id: every episode this order is currently tracking. Same filter the
-    # prune uses, so a foreign file dropped in the directory is not reported as a
-    # parked session.
+    # No id: every episode this order is currently tracking. Same ownership test
+    # the prune and the removal paths use, so a foreign file dropped in the
+    # directory is not listed as a parked session — asked about BY id it answers
+    # `unknown`/`foreign-state`, but it is not one of this order's episodes and
+    # does not belong in an enumeration of them.
     for path in "$STATE_DIR"/*; do
-        [ -f "$path" ] || continue
+        owned_file "$path" || continue
         base="${path##*/}"
         safe_id "$base" || continue
         status_line "$base"
@@ -702,7 +809,7 @@ write_state_vouched() {
 # is exactly what a patrol reads as `unknown`.
 write_heartbeat() {
     printf 'last_run=%s\nchecked=%s\nparked=%s\nnudged=%s\ndeferred=%s\n' \
-        "$NOW" "$checked" "$parked" "$nudged" "$skipped" | write_atomic "$HEARTBEAT_FILE" || true
+        "$NOW" "$checked" "$parked" "$nudged" "$skipped" | write_owned "$HEARTBEAT_FILE" || true
 }
 
 # WHICH sessions a pass classified, which is a different fact from that a pass
@@ -719,13 +826,16 @@ write_heartbeat() {
 # same reasons as the heartbeat.
 write_coverage() {
     local cutoff=$((NOW - STALE_AFTER)) prior=""
-    if [ -f "$COVERAGE_FILE" ] && [ ! -L "$COVERAGE_FILE" ]; then
+    if owned_file "$COVERAGE_FILE"; then
         prior="$(cat "$COVERAGE_FILE" 2>/dev/null || true)"
     fi
+    # The marker line carried in from `prior` is dropped by the same filter that
+    # drops any other malformed record (it is one field, not two) and written
+    # back fresh by write_owned.
     printf '%s%s\n' "$covered_now" "$prior" \
         | awk -v cutoff="$cutoff" \
             'NF == 2 && $2 ~ /^[0-9]+$/ && $2 + 0 >= cutoff + 0 && !seen[$1]++ { print $1, $2 }' \
-        | write_atomic "$COVERAGE_FILE" || true
+        | write_owned "$COVERAGE_FILE" || true
 }
 
 # Only sessions the controller believes are alive. Keyed on `.state`, NEVER on
@@ -863,11 +973,14 @@ while IFS=$'\t' read -r id alias; do
     # anything about what was on the screen.
     dclass="$(detector_class "$pane")"
 
-    # Missing or non-numeric reads back as "start of episode" — a truncated
-    # state file (crash mid-write) must not abort the sweep for every session
-    # after this one, and losing an episode's counters only costs one nudge.
-    first_seen="$(state_get "$state" first_seen)"; num "$first_seen" || first_seen="$NOW"
-    last_nudge="$(state_get "$state" last_nudge)"; num "$last_nudge" || last_nudge=0
+    # Missing, non-numeric, or dated in the FUTURE reads back as "start of
+    # episode" — a truncated state file (crash mid-write) must not abort the
+    # sweep for every session after this one, and losing an episode's counters
+    # only costs one nudge. A future timestamp is invalid for the reason
+    # ts_valid gives: it cannot be a record of anything this order did, and each
+    # of these fields defeats a different guard while it stands.
+    first_seen="$(state_get "$state" first_seen)"; ts_valid "$first_seen" || first_seen="$NOW"
+    last_nudge="$(state_get "$state" last_nudge)"; ts_valid "$last_nudge" || last_nudge=0
     attempts="$(state_get "$state" attempts)";     num "$attempts"   || attempts=0
     # Deliveries we could not confirm, kept apart from the ones we could: see
     # the nudge branches below. Absent from a state file an older version wrote,
@@ -876,8 +989,18 @@ while IFS=$'\t' read -r id alias; do
     # Pacing keys on the last delivery ATTEMPT, not the last confirmed one.
     # Falls back to last_nudge so a state file from before this field existed
     # still paces on its confirmed nudge instead of reading as never-tried.
-    last_try="$(state_get "$state" last_try)"; num "$last_try" || last_try="$last_nudge"
+    last_try="$(state_get "$state" last_try)"; ts_valid "$last_try" || last_try="$last_nudge"
+    # Normalized to the same closed set on the way IN that status_line applies on
+    # the way out, because the escalation test below is `[ -z "$escalated" ]`:
+    # only `1` (a mail we saw sent) and `unconfirmed` (one whose bound expired
+    # mid-send) mean "already escalated", and ANY other non-empty value would
+    # read as escalated and suppress the mail for the rest of the episode. A
+    # persisted `escalated=0` is the obvious case — it says NOT escalated and
+    # means the opposite — but so does any leftover from a hand edit or a
+    # version that spelled the field differently. Suppressed silently, and for
+    # exactly the multi-hour park the escalation exists to report.
     escalated="$(state_get "$state" escalated)"
+    case "$escalated" in 1 | unconfirmed) ;; *) escalated="" ;; esac
     age=$((NOW - first_seen))
     tries=$((attempts + unconfirmed))
 
@@ -997,7 +1120,7 @@ done <<< "$sessions"
 # far it got, and a heartbeat written earlier would claim a pass that had not
 # finished.
 if [ -n "$last_attempted" ]; then
-    printf 'session=%s\n' "$last_attempted" | write_atomic "$CURSOR_FILE" || true
+    printf 'session=%s\n' "$last_attempted" | write_owned "$CURSOR_FILE" || true
 fi
 write_coverage
 write_heartbeat
@@ -1011,27 +1134,67 @@ write_heartbeat
 # -mtime +7 -delete` is a city-scoped order deleting week-old files it has never
 # heard of, and a mis-set or shared QUOTA_PARK_STATE_DIR is all it takes to
 # point that at somebody else's state. The ownership test is `owned_state_rm`'s
-# — a regular non-symlink file, named like the session ids we write, carrying a
-# state file's own `first_seen=` header — and it is the same one the two
-# every-cycle removal paths use, so no path can drift into deleting more than
-# the others. Here it is narrowed once more by age and by depth: `-maxdepth 1`,
-# so a nested tree is never touched whatever its age. Anything failing one of
-# those is somebody else's file and is left alone — including this order's OWN
-# `.sweep-cursor` and `.heartbeat`, whose leading dot puts them outside safe_id
-# on purpose. `-print0` because a name is not trusted to be one line — split on
-# newlines, a hostile name becomes two paths and the second is a relative one.
+# — a regular non-symlink file, directly in STATE_DIR, named like the session ids
+# we write, carrying this order's own marker line — and it is the same one the
+# two every-cycle removal paths use, so no path can drift into deleting more
+# than the others. Anything failing it is somebody else's file and is left alone,
+# including this order's OWN `.sweep-cursor` and `.heartbeat`, whose leading dot
+# puts them outside safe_id on purpose.
+#
+# Iterated with a glob rather than `find`, and aged from the record rather than
+# from mtime, so the whole thing is POSIX shell. `find -maxdepth`/`-print0` are
+# GNU/BSD extensions and `stat` spells mtime differently on each — this order
+# degrades carefully everywhere else (BOUND_MODE probes for `timeout -k` rather
+# than assuming it), and the cleanup path had no reason to be the one piece that
+# needs GNU. The two globs cover the dotted names too, since `*` alone skips
+# them; `owned_state_rm`'s STATE_DIR check is the depth guard `-maxdepth 1` was,
+# and a glob never descends anyway. A hostile filename is just one more element
+# here — there is no line-splitting to be confused by, which is what `-print0`
+# was defending.
+PRUNE_AFTER=604800   # 7 days, in seconds
+
+# Age of an episode file this order owns, from the record inside it: the last
+# time a sweep confirmed the session parked, or failing that when the episode
+# began. A file of ours with neither is one no sweep can have written — every
+# write is atomic and complete — so it is corrupt or hand-made, and reported as
+# ancient to be collected rather than left to sit forever.
+owned_state_age() {
+    local ts
+    ts="$(state_get "$1" last_seen)"
+    ts_valid "$ts" || ts="$(state_get "$1" first_seen)"
+    ts_valid "$ts" || { echo $((PRUNE_AFTER + 1)); return 0; }
+    echo $((NOW - ts))
+}
+
 prune_stale_state() {
-    local path base
-    while IFS= read -r -d '' path; do
+    local path base stamp
+    for path in "$STATE_DIR"/* "$STATE_DIR"/.*; do
+        # An unmatched glob arrives as its own literal pattern, and `.` / `..`
+        # arrive from the second one; -f drops all three.
+        [ -f "$path" ] && [ ! -L "$path" ] || continue
         base="${path##*/}"
         # This order's own abandoned temp files — a pass killed between `mktemp`
         # and the rename in write_atomic. Unmistakably ours by name, so they are
         # collected here rather than accumulating in the runtime directory
         # forever; `safe_id` would otherwise skip them for their leading dot,
-        # which is the same property that keeps them out of `--status`.
-        case "$base" in .qpn-tmp.*) rm -f "$path"; continue ;; esac
+        # which is the same property that keeps them out of `--status`. The name
+        # carries the pass's own timestamp, so they age without a `stat`: a temp
+        # file a CONCURRENT pass is writing right now must not be removed out
+        # from under its rename, and one whose stamp is unreadable is left for a
+        # later pass rather than guessed at.
+        case "$base" in
+            .qpn-tmp.*)
+                stamp="${base#.qpn-tmp.}"; stamp="${stamp%%.*}"
+                if ts_valid "$stamp" && [ "$((NOW - stamp))" -gt "$PRUNE_AFTER" ]; then
+                    rm -f "$path"
+                fi
+                continue
+                ;;
+        esac
+        owned_file "$path" || continue
+        [ "$(owned_state_age "$path")" -gt "$PRUNE_AFTER" ] || continue
         owned_state_rm "$path"
-    done < <(find "$STATE_DIR" -maxdepth 1 -type f -mtime +7 -print0 2>/dev/null || true)
+    done
 }
 prune_stale_state
 
