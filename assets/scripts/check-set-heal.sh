@@ -62,8 +62,11 @@
 # anchor link persisted. A dispatch that fails is retried next idle pass (the
 # lookup dedups), and the anchor stays held meanwhile.
 #
-# Idempotent + convergent: a healed anchor carries a non-empty check_set, so the
-# next pass classifies it "already normalized" and does nothing.
+# Idempotent + convergent: a healed anchor carries a non-empty check_set, so it is
+# never re-stamped. It does stay VISIBLE to the satisfiability retry (via
+# check_set_healed, or check_set_heal_flagged if that mark was lost), which is what
+# lets a failed dispatch be retried — but once its gate is satisfiable, every later
+# pass reads it as already normalized and does nothing.
 #
 # Enumerated by BEAD (like merge-skill.sh / pre-open-resolve.sh), across BOTH
 # gating sub-states: `pull_request` is where the un-gated merge happens, and
@@ -116,10 +119,13 @@ set -uo pipefail
 #      merge this exit code exists for (review tk-thvbq finding #1).
 #
 # A merge_result stamp that fails is NOT this condition — an invisible anchor cannot
-# be merged either — so it exits 0 and retries. On UNSAFE_RC the formula HOLDS
-# merge-skill.sh for the pass. The formula's HEAL_UNSAFE_RC must equal this value;
-# the regressions drive the real script to this exit for both causes and assert the
-# merge is held.
+# be merged either — so it exits 0 and retries. A LOST check_set_healed mark is
+# likewise NOT this case: the gate is armed, so the merge is already held, and
+# holding every OTHER anchor's merge over it would be collateral. That half is
+# repaired in-pass instead (review tk-nwi06 finding #1). On UNSAFE_RC the formula
+# HOLDS merge-skill.sh for the pass. The formula's HEAL_UNSAFE_RC must equal this
+# value; the regressions drive the real script to this exit for every cause and
+# assert the merge is held.
 readonly UNSAFE_RC=3
 
 # The declared check-set default, passed in by the formula as the RENDERED
@@ -198,13 +204,86 @@ case "$(cs_canon "$DEFAULT_CHECK_SET")" in
   none|off) DEFAULT_CHECK_SET="none" ;;
 esac
 
-# Is `codex` a member of the healed set? Split on comma, trim, whole-line match —
-# the SAME normalization merge-skill.sh enforces and the formula dispatches on, so
-# a spaced "lint, codex" is recognized here too and dispatch never diverges from
-# enforcement (tk-aj4ua).
+# Is `codex` a member of the healed set? Whole-token match against the
+# comma-wrapped list — the SAME normalization merge-skill.sh enforces and the
+# formula dispatches on, so a spaced "lint, codex" is recognized here too and
+# dispatch never diverges from enforcement (tk-aj4ua).
+#
+# Matched IN-SHELL, never through a `... | grep -qxF codex` pipeline (tk-tmefn).
+# `set -o pipefail` is on and `grep -q` exits at its FIRST match: that closes the
+# pipe under the `tr`/`sed` still writing the gates that FOLLOW `codex` in the
+# list, they take SIGPIPE, and the pipeline reports 141 — so a check_set that DOES
+# name codex reads as one that does not, decided by nothing but how many gates
+# happen to come after it. A rig passes on a short check_set and silently loses
+# the gate when it grows. merge-skill.sh removed this same class from its
+# `approval` detector and its trusted-approver allowlist; this is the same fix,
+# here. Whitespace is stripped outright rather than trimmed per token — a gate
+# name cannot contain any, so all of it is padding — and the comma wrapping makes
+# it a whole-token test, so `codex` matches while `precodex` does not.
 has_codex() {
-  printf '%s' "${1:-}" | tr ',' '\n' \
-    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex
+  case ",$(printf '%s' "${1:-}" | tr -d '[:space:]')," in
+    *",codex,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- durable-route verification (tk-tmefn) ----------------------------------
+# A dispatch counts only once the route it wrote can be READ BACK. Both halves
+# are needed and they answer different questions:
+#   review_pool   the DURABLE copy of the route. Never consumed, so it is what a
+#                 signoff restores the route from when it must put the review
+#                 back to be re-offered; without it the release is open,
+#                 unassigned and in NO pool (offered to nobody, gate owed
+#                 forever).
+#   gc.routed_to  the LIVE offer. A claim consumes it, so an empty value is only
+#                 a fault when nobody has claimed the bead either.
+# `read_route` emits "review_pool|gc.routed_to|assignee", or nothing at all when
+# the bead cannot be read — the caller must treat those two as different answers
+# ("bad route" vs "no answer"), because only one of them justifies discarding the
+# review bead.
+read_route() { # <bead-id>
+  gc bd show "$1" --json 2>/dev/null \
+    | jq -r '.[0] | [(.metadata.review_pool // ""),
+                     (.metadata["gc.routed_to"] // ""),
+                     (.assignee // "")] | join("|")' 2>/dev/null
+}
+
+# The anchor's fallback retry mark, read back from the bead. Same reason the two
+# check_set halves are re-read after their stamp: this one is written by an
+# equally best-effort update, and it is the ONLY thing keeping an anchor whose
+# check_set_healed was lost visible to later passes.
+read_flag() { # <anchor-id>
+  gc bd show "$1" --json 2>/dev/null \
+    | jq -r '.[0].metadata.check_set_heal_flagged // empty' 2>/dev/null
+}
+
+# Is that triple a route this pool can actually be reached through? 0 = yes.
+# An empty triple (unreadable bead) is NOT ok — unverified is not verified.
+#
+# The live half is a MATCH against this pool, not a mere non-emptiness test
+# (tk-bdfww). `gc.routed_to` is what a hook actually offers the bead through, and
+# the two fields are written in one batched update that can persist one and lose
+# the other (the same partial-write this whole read-back exists to catch). A
+# review left carrying an OLDER gc.routed_to=B while review_pool=A persisted is
+# reachable — by pool B, which is not the pool being dispatched to: pre-fix that
+# read as verified, so the dispatch was counted, pool A was woken with nothing to
+# claim, and pool B was offered a review minted for A. Both pools are wrong and
+# the gate is owed either way. A mismatched non-empty route is therefore
+# UNVERIFIED, which routes it into the repair-then-remint path below — where a
+# genuine partial write is re-stamped and heals on the second read.
+#
+# An assignee is the one exception, and it is not a relaxation: a claim CONSUMES
+# gc.routed_to, so a codex polecat that picked the review up between the write and
+# this read legitimately leaves it empty (or, mid-claim, stale). The bead is held
+# by a worker in the pool; there is nothing to re-offer and re-routing it would
+# hand a claimed review to a second pool. Claimed is reachable.
+route_ok() { # <route-state> <pool>
+  local state="${1:-}" pool="${2:-}" r_pool r_routed r_assignee
+  [ -n "$state" ] || return 1
+  IFS='|' read -r r_pool r_routed r_assignee <<< "$state"
+  [ "$r_pool" = "$pool" ] || return 1
+  [ -n "$r_assignee" ] || [ "$r_routed" = "$pool" ] || return 1
+  return 0
 }
 
 # ONE guarded ledger read -> the matching beads as a JSON array on stdout, or a
@@ -1512,6 +1591,15 @@ while IFS= read -r row; do
   # so without this the very first successful stamp would hide the anchor from
   # every later pass — and a dispatch that failed after the stamp would strand the
   # armed gate forever with nothing to raise it.
+  #
+  # check_set_heal_flagged keeps it flowing for the SAME reason, from the other
+  # side: it is stamped whenever a heal did not fully land, and the shape it exists
+  # for is the one where check_set_healed is what failed to persist. Without this
+  # arm that anchor is armed, unmarked and INVISIBLE — the two fields are written
+  # separately and a repair that depends on the field that was just lost is no
+  # repair at all. Two independent marks, either of which keeps the retry alive
+  # (review tk-nwi06 finding #1).
+  flagged=$(printf '%s' "$row" | jq -r '.flagged // empty')
   needs_stamp=0
   case "$canon" in
     '')
@@ -1519,15 +1607,20 @@ while IFS= read -r row; do
     none|off)
       optout=$((optout + 1)); continue ;;   # EXPLICIT opt-out — leave it alone
     *)
-      [ -n "$healedmark" ] || { normal=$((normal + 1)); continue; } ;;
+      [ -n "$healedmark" ] || [ -n "$flagged" ] \
+        || { normal=$((normal + 1)); continue; } ;;
   esac
 
   state=$(printf '%s' "$row" | jq -r '.state // empty')   # num/prurl/branch read above
   target=$(printf '%s' "$row" | jq -r '.target // empty')
   title=$(printf '%s' "$row" | jq -r '.title // empty')
   marker=$(printf '%s' "$row" | jq -r '.codex // empty')
-  flagged=$(printf '%s' "$row" | jq -r '.flagged // empty')
   [ -n "$target" ] || target="main"
+
+  # What a dispatch failure below can honestly promise. The default holds while a
+  # durable retry mark is on the bead; the half-landed-stamp arm rewrites it when
+  # neither mark persisted, because then there IS no next pass for this anchor.
+  RETRY_NOTE="merge stays HELD, retrying next pass"
 
   # --- stamp FIRST (fail closed) ------------------------------------------
   # check_set_healed is the durable audit trail: it distinguishes an anchor whose
@@ -1544,9 +1637,29 @@ while IFS= read -r row; do
       --set-metadata check_set_healed="$DEFAULT_CHECK_SET" \
       --append-notes "check-set-heal: check_set was absent/empty (bead reached the refinery without formula normalization — recovery path); stamped the declared default '$DEFAULT_CHECK_SET' so the merge cannot land ungated (tk-i48ca)." \
       >/dev/null 2>&1
-    RECORDED=$(gc bd show "$id" --json 2>/dev/null | jq -r '.[0].metadata.check_set // empty')
+    # Read BOTH halves back. They go out in ONE update but persist independently,
+    # and they do DIFFERENT jobs: check_set ARMS the gate (without it the anchor
+    # merges ungated), check_set_healed is what keeps this anchor flowing through
+    # the satisfiability retry above (:320-345). Verifying only check_set accepts a
+    # HALF-landed write — gate armed, retry mark gone — and that shape is a
+    # PERMANENT strand, not a deferred pass: check_set now reads normal, so every
+    # later pass classifies the anchor "already normalized" and skips it, leaving it
+    # codex-gated with no review left to raise check.codex. So both are read back,
+    # and each half's failure is handled as the different failure it is
+    # (review tk-nwi06 finding #1).
+    STAMP_ROW=$(gc bd show "$id" --json 2>/dev/null)
+    RECORDED=$(printf '%s' "$STAMP_ROW" | jq -r '.[0].metadata.check_set // empty' 2>/dev/null)
+    RECORDED_HEALED=$(printf '%s' "$STAMP_ROW" | jq -r '.[0].metadata.check_set_healed // empty' 2>/dev/null)
+    if [ "$RECORDED" = "$DEFAULT_CHECK_SET" ] && [ "$RECORDED_HEALED" != "$DEFAULT_CHECK_SET" ]; then
+      # PARTIAL WRITE: the gate landed, the retry mark did not. One repair attempt
+      # on just the missing half — a transient write failure is the common case and
+      # heals here, and re-stamping a value that is already correct is harmless.
+      gc bd update "$id" --set-metadata check_set_healed="$DEFAULT_CHECK_SET" >/dev/null 2>&1
+      RECORDED_HEALED=$(gc bd show "$id" --json 2>/dev/null \
+        | jq -r '.[0].metadata.check_set_healed // empty' 2>/dev/null)
+    fi
     if [ "$RECORDED" != "$DEFAULT_CHECK_SET" ]; then
-      # The ledger write did not stick. Do NOT count it as healed; the anchor is
+      # The GATE did not stick. Do NOT count it as healed; the anchor is
       # still ungated and the merge skill may land it this pass. Flag ONCE so the
       # noise is bounded, and let the next idle pass retry the whole heal.
       echo "check-set-heal: WARN $id check_set stamp did NOT persist (have '${RECORDED:-<empty>}', want '$DEFAULT_CHECK_SET'); anchor is still UNGATED — retrying next pass" >&2
@@ -1562,7 +1675,50 @@ while IFS= read -r row; do
 "
       skipped=$((skipped + 1)); continue
     fi
-    healed=$((healed + 1))
+    if [ "$RECORDED_HEALED" != "$DEFAULT_CHECK_SET" ]; then
+      # The gate IS armed, so the merge is HELD (a gate with no green marker cannot
+      # land) — this is NOT the ungated hazard and must not raise UNSAFE_RC and stop
+      # every other anchor's merge. What is missing is only the mark that brings
+      # this anchor back here on a later pass, and its absence is exactly what makes
+      # "retrying next pass" UNTRUE: check_set now reads normal, so the classifier
+      # above routes the anchor to `normal` and skips it, forever.
+      #
+      # So do NOT defer. Fall through and make the gate satisfiable NOW — dispatching
+      # this pass is precisely what the next pass would have done had the mark
+      # landed, and it is the only pass that will ever get the chance. Not counted as
+      # healed: the heal is not fully recorded, and reporting one would claim an
+      # audit trail that is not on the bead.
+      echo "check-set-heal: WARN $id check_set='$DEFAULT_CHECK_SET' landed but check_set_healed did NOT (have '${RECORDED_HEALED:-<empty>}'); the merge is HELD, but later passes will read this anchor as already-normalized and skip it — making the gate satisfiable THIS pass instead of deferring. If the dispatch below also fails, repair by hand: gc bd update $id --set-metadata check_set_healed=$DEFAULT_CHECK_SET" >&2
+      # check_set_heal_flagged is the FALLBACK retry mark: with check_set_healed
+      # gone it is the only thing that brings this anchor back through the
+      # classifier (:320-345). It is written by the same kind of best-effort
+      # `gc bd update` that just dropped check_set_healed, so writing it and
+      # assuming it landed rebuilds the very hole this arm exists to cover — a
+      # dropped write here leaves the anchor armed, unmarked and INVISIBLE to
+      # every later pass. So READ IT BACK, with one repair attempt, exactly as
+      # the two stamps above are (review tk-y5r1e finding #2).
+      if [ -z "$flagged" ]; then
+        gc bd update "$id" --set-metadata check_set_heal_flagged=1 >/dev/null 2>&1 || true
+        flagged=$(read_flag "$id")
+        if [ -z "$flagged" ]; then
+          gc bd update "$id" --set-metadata check_set_heal_flagged=1 >/dev/null 2>&1 || true
+          flagged=$(read_flag "$id")
+        fi
+      fi
+      if [ -z "$flagged" ]; then
+        # NEITHER durable mark persisted. The gate is armed (merge held — still not
+        # the ungated hazard, so no UNSAFE_RC), but nothing on the bead will bring
+        # this anchor back here: the classifier reads check_set as normal, finds no
+        # healed mark and no flag, and skips it on every later pass. So this pass's
+        # dispatch below is the ONLY one this anchor will ever get, and if it fails
+        # there is no retry to fall back on. Say exactly that — downstream failures
+        # stop promising a next pass that will never come.
+        RETRY_NOTE="NO durable retry mark persisted (check_set_healed and check_set_heal_flagged both dropped) — later passes will read this anchor as already-normalized and SKIP it, so nothing will retry. Repair by hand: gc bd update $id --set-metadata check_set_healed=$DEFAULT_CHECK_SET"
+        echo "check-set-heal: WARN $id $RETRY_NOTE" >&2
+      fi
+    else
+      healed=$((healed + 1))
+    fi
     EFFECTIVE="$DEFAULT_CHECK_SET"
   fi
 
@@ -1648,7 +1804,7 @@ while IFS= read -r row; do
     REVIEW_BEAD=$(create_review_bead "Review branch $branch -> $target: $title")
   fi
   if [ -z "$REVIEW_BEAD" ]; then
-    echo "check-set-heal: WARN $id could not create the signoff bead; merge stays HELD, retrying next pass" >&2
+    echo "check-set-heal: WARN $id could not create the signoff bead; $RETRY_NOTE" >&2
     continue
   fi
 
@@ -1686,25 +1842,107 @@ while IFS= read -r row; do
   RECORDED_ANCHOR=$(gc bd show "$REVIEW_BEAD" --json 2>/dev/null \
     | jq -r '.[0].metadata.anchor_bead // empty')
   if [ "$RECORDED_ANCHOR" != "$id" ]; then
-    echo "check-set-heal: WARN review $REVIEW_BEAD did not record anchor_bead=$id; signoff cannot stamp the gate — merge stays HELD, retrying next pass" >&2
+    echo "check-set-heal: WARN review $REVIEW_BEAD did not record anchor_bead=$id; signoff cannot stamp the gate — $RETRY_NOTE" >&2
     continue
   fi
 
-  # VERIFY THE ROUTE, exactly as every other load-bearing write here is verified
-  # (review tk-5nxyg finding #3). This is the write that makes the review claimable,
-  # and the ONLY one whose loss is invisible afterwards: the bead exists, reads
-  # in-flight to the next pass's dedup, and is claimable by nobody. Counting it as
-  # dispatched would report a signoff that can never arrive while the merge is held on
-  # its verdict. Unverified, the next pass repairs it; unreported, nothing would know
-  # there was anything to repair.
-  gc bd update "$REVIEW_BEAD" --set-metadata gc.routed_to="$REVIEW_POOL" >/dev/null 2>&1
-  RECORDED_ROUTE=$(gc bd show "$REVIEW_BEAD" --json 2>/dev/null \
-    | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
-  if [ "$RECORDED_ROUTE" != "$REVIEW_POOL" ]; then
-    echo "check-set-heal: WARN review $REVIEW_BEAD for $id did not record gc.routed_to='$REVIEW_POOL' (have '${RECORDED_ROUTE:-<empty>}'); no polecat can claim it — merge stays HELD, the next pass re-routes it" >&2
+  # review_pool is the DURABLE copy of the route, stamped with it — the same pair
+  # the other two dispatch sites write (mol-refinery-patrol.toml merge-push,
+  # reconcile-merged-prs.sh arm_stale_gate). gc.routed_to is working state that a
+  # claim consumes, so when a signoff ends with the gate UNRECORDED and has to put
+  # the review back in a pool to be re-offered, this is the only field left that
+  # says which pool that was. Without it the review is released open, unassigned
+  # and UNROUTED — offered to nobody, gate owed forever
+  # (template-fragments/polecat-non-impl-done.template.md).
+  gc bd update "$REVIEW_BEAD" \
+    --set-metadata gc.routed_to="$REVIEW_POOL" \
+    --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1
+
+  # READ THE ROUTE BACK before counting this as a dispatch (tk-tmefn). The write
+  # above was best-effort — its status is discarded, and a `gc bd update` can
+  # report success on a write that did not land. Counting a dispatch that never
+  # routed is not a lost pass, it is a PERMANENT strand: the review bead exists and
+  # is open, so the next pass's `inflight_for` dedup reuses it and never mints a
+  # replacement, while no pool can ever claim it. The gate stays armed, the anchor
+  # stays held, and nothing retries — the one shape this script exists to avoid,
+  # rebuilt out of its own repair.
+  #
+  # The predicate is deliberately not "gc.routed_to is set". That field is WORKING
+  # state a claim CONSUMES, so a codex polecat that claimed the review between the
+  # write and this read leaves it legitimately empty — re-routing then would offer
+  # a claimed review to a second pool. What must hold is:
+  #   review_pool == the pool  — the DURABLE copy, never consumed, and the only
+  #                              field the signoff can restore the route from when
+  #                              it has to put the review back to be re-offered;
+  #   routed OR claimed        — the bead is reachable: still offered to the pool,
+  #                              or already picked up by it.
+  route_state=$(read_route "$REVIEW_BEAD")
+  if ! route_ok "$route_state" "$REVIEW_POOL"; then
+    # One repair attempt, then re-read. A transient write failure is the common
+    # case and heals here. This also re-covers the unreadable case: a read that
+    # returned nothing is not proof of a bad route, but re-stamping is harmless
+    # (the values are the ones we intended) and the second read may succeed.
+    gc bd update "$REVIEW_BEAD" \
+      --set-metadata gc.routed_to="$REVIEW_POOL" \
+      --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1
+    route_state=$(read_route "$REVIEW_BEAD")
+  fi
+  if ! route_ok "$route_state" "$REVIEW_POOL"; then
+    IFS='|' read -r got_pool got_routed got_assignee <<< "${route_state:-||}"
+    # Not counted as dispatched either way: the anchor stays held on its armed
+    # gate, which is the safe side, and the next pass retries.
+    #
+    # An UNREADABLE bead (empty route_state — `gc bd show` or jq failed) is NOT
+    # the same as one read as unrouted, and must not be closed: the route may be
+    # perfectly fine, and a polecat may already hold the bead. Closing a claimed
+    # review out from under its reviewer is a worse failure than the strand.
+    # Leave it; the next pass re-reads and either reuses it (dedup) or repairs it.
+    if [ -z "$route_state" ]; then
+      echo "check-set-heal: WARN $id signoff $REVIEW_BEAD route to $REVIEW_POOL could not be VERIFIED (bead unreadable); dispatch NOT counted, $RETRY_NOTE" >&2
+      continue
+    fi
+    # CLAIMED — never close it. `route_ok` rejects the triple on the FIRST half it
+    # tests (review_pool == this pool), so a persistently dropped durable copy
+    # lands here even when the live half is fine and a codex polecat has already
+    # picked the review up. The close below reads "claimed by nobody" from the fact
+    # that route_ok failed, but that inference only holds for the unrouted shape:
+    # here the read itself shows an assignee. Closing on it would force-close an
+    # IN-FLIGHT review (the `--force` retry exists precisely to defeat the
+    # ownership check that would otherwise stop it) and erase the only live signoff
+    # for an armed gate — the anchor then holds forever on a marker nothing is left
+    # to stamp. A claimed review is not dedup poison either: the next pass's
+    # `inflight_for` reuses it, which is the correct outcome, because its reviewer
+    # is the thing that will raise the gate (review tk-y5r1e finding #1).
+    if [ -n "$got_assignee" ]; then
+      # Restore the durable copy ONLY when it is absent — that is the dropped-write
+      # shape, and the value is the one this pass intended. A non-empty but
+      # different review_pool is somebody's deliberate re-route, so leave it. Never
+      # touch gc.routed_to on a claimed bead: the claim consumed it, and re-offering
+      # a held review is how a second pool gets handed the same work.
+      if [ -z "$got_pool" ]; then
+        gc bd update "$REVIEW_BEAD" --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1 || true
+      fi
+      echo "check-set-heal: WARN $id signoff $REVIEW_BEAD route did not verify (review_pool='$got_pool', gc.routed_to='$got_routed') but it is CLAIMED by '$got_assignee' — leaving it OPEN and in flight (closing a claimed review would erase the only signoff for the armed gate); dispatch NOT counted, $RETRY_NOTE" >&2
+      continue
+    fi
+    # Read fine, unclaimed, and genuinely unroutable. LEAVE NOTHING that poisons
+    # the next pass's dedup: close the review bead we just minted. It is inert —
+    # created this pass, claimed by nobody (the read just showed no assignee),
+    # carrying no work — so closing it discards nothing, and it is the only way the
+    # next pass gets to mint a review that CAN be claimed.
+    CLOSE_REASON="unroutable signoff: route to $REVIEW_POOL did not persist (review_pool='$got_pool', gc.routed_to='$got_routed', assignee='$got_assignee'); re-minted next pass"
+    # `--force` on the retry: `gc bd close` can refuse a bead whose recorded actor
+    # does not match the closing session's identity, and this bead's actor is
+    # whatever minted it a moment ago. A refusal on that ground would leave the
+    # unclaimable review OPEN — exactly the dedup poison this close exists to
+    # remove — so the ownership check is the one thing worth overriding here.
+    # Still best-effort: a failure warns and the next pass retries.
+    gc bd close "$REVIEW_BEAD" --reason "$CLOSE_REASON" >/dev/null 2>&1 \
+      || gc bd close "$REVIEW_BEAD" --reason "$CLOSE_REASON" --force >/dev/null 2>&1 \
+      || echo "check-set-heal: WARN could not close unroutable review $REVIEW_BEAD; it may block the next pass's dedup — close it by hand" >&2
+    echo "check-set-heal: WARN $id signoff $REVIEW_BEAD did not durably route to $REVIEW_POOL (review_pool='$got_pool', gc.routed_to='$got_routed', assignee='$got_assignee'); dispatch NOT counted, $RETRY_NOTE" >&2
     continue
   fi
-
   gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
   gc session nudge "$REVIEW_POOL" "Review bead $REVIEW_BEAD for recovered anchor $id" >/dev/null 2>&1 || true
   dispatched=$((dispatched + 1))

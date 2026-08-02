@@ -59,6 +59,20 @@
 #        re-review is dispatched, not suppressed by the head guard. Regression for
 #        tk-v2b0k finding #1 (no-pool marker must not block a later configured
 #        dispatch at the same head).
+#   (30)-(31) a DROPPED route write must not arm the head guard; a later pass
+#        repairs the stranded review instead of stranding it forever (tk-3xy37).
+#   (58)-(59) the same, for the DURABLE half: a batched route write that persists
+#        gc.routed_to and silently loses review_pool must not arm either, and the
+#        repair path must cover that shape too — a routed review with no durable
+#        copy is one claim away from being unroutable, and the repair predicate
+#        has to match what the arming predicate rejects or the arm never
+#        converges (tk-bdfww).
+#   (60)-(61) the same, for the LIVE half pointing at the WRONG pool: review_pool
+#        correct but gc.routed_to naming ANOTHER pool with nobody claiming. The
+#        arm rejects that split route; the unrouted-only repair predicate skipped
+#        it as "already routed", so the pass spun forever — head never armed,
+#        route never healed. The repair predicate is now the exact NEGATION of the
+#        arming one, so the two cannot disagree (tk-5niup).
 #   (32)-(36) a bead can name its PR under keys other than pr_number (fork_pr,
 #        fork_pr_url), and every PR-keyed lookup must read all of them:
 #   (32) a fork_pr-keyed rework child already in flight is SEEN by the conflict
@@ -74,6 +88,45 @@
 #   (36) the CLOSED-bead resolution is widened the same way, so a fork_pr-keyed
 #        closed anchor resolves and escalates instead of degrading into the
 #        non-escalating "no bead in any state" branch.
+#   (39)-(45) the superseded-review self-heal (tk-5niup) — the INVERSE of the
+#        stale gate: the marker is green AT the live head and it is GITHUB that
+#        lags, because a COMMENT review never supersedes the same reviewer's
+#        earlier CHANGES_REQUESTED. The PR stays BLOCKED on a dead commit forever
+#        and the stale-gate arm cannot reach it (the marker is current):
+#   (39) our own superseded CHANGES_REQUESTED -> RETRACTED, signoff_dismissed
+#        recorded on the anchor, and NO re-review filed (the gate is green).
+#   (40) the OPERATOR's CHANGES_REQUESTED at an equally dead commit -> left
+#        standing. Only the author guard saves it; a "is it stale" filter would
+#        erase a human veto.
+#   (41) our own CHANGES_REQUESTED AT the live head -> left standing (blocked and
+#        passed the same commit is a contradiction, not a supersede).
+#   (42) reviewDecision=APPROVED -> the arm does not fire.
+#   (43) merge_hold=true -> retraction HELD (operator gate), same as the rebase
+#        and stale-gate arms.
+#   (44) convergence: a healed PR is not re-retracted on the next pass.
+#   (45) unresolvable acting login -> nothing retracted (fail-closed: we cannot
+#        tell our reviews from a human's).
+#   (49) the auto-merge probe FAILS -> nothing retracted (an unreadable probe is
+#        indistinguishable from "disarmed" through a `// empty` filter, so it
+#        counts as armed)
+#   (50) the auto-merge payload is MALFORMED / missing the key -> same
+#   (51) auto-merge armed AFTER the up-front probe -> nothing retracted (the
+#        re-probe immediately before the irreversible call)
+#   (52) signoff_dismissed reports success but is NOT durable -> nothing
+#        retracted (the marker is read back, not trusted on its exit status)
+#   (53) the ANCHOR is re-read immediately before the dismissal, because the row
+#        the arm decided from predates the PR read: merge_hold set mid-pass (53),
+#        check.codex re-gated off the live head (53b), the anchor un-parked from
+#        the PR (53c) and an unreadable anchor (53d) each hold the retraction
+#   (46) native auto-merge ARMED -> nothing retracted. The dismissal would not
+#        permit a merge, it would PERFORM one server-side, before merge-skill.sh
+#        ever applies the approval requirement this arm records.
+#   (47) the superseded review sits on PAGE 2 of the reviews history -> still
+#        found and retracted (the read is paginated); unpaginated it is missed and
+#        the PR stays stranded.
+#   (48) the head MOVES between the reviews listing and the dismissal -> nothing
+#        retracted: against a stale head the review may be a FRESH block on the
+#        new head, indistinguishable by commit from a superseded one.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -356,13 +409,82 @@ case "$RESOLVED" in
          [ -n "$ghhost" ] || ghhost="github.com"
          RESOLVED="$ghhost/$RESOLVED" ;;
 esac
+
+# `gh api` arms, for the superseded-review self-heal (tk-5niup):
+#   user                       -> the acting login ($FAKE_SELF_LOGIN)
+#   .../pulls/N/reviews        -> $FAKE_REVIEWS rows:
+#                                 pr|id|login|state|commit_id|page. `page` models
+#                                 GitHub's paging: a row on page >1 is served ONLY
+#                                 to a caller that passed --paginate, so an
+#                                 unpaginated read sees page 1 and nothing else.
+#   -X PUT .../reviews/<id>/dismissals -> RECORDS the retraction (the seam: it
+#                                 must fire for exactly the superseded self-reviews)
+# --jq FILTER is applied with real jq, as gh does.
+if [ "$1" = "api" ]; then
+  shift
+  METHOD=GET; PATH_ARG=""; PAGINATE=""; JQF=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -X)         METHOD="$2"; shift 2 ;;
+      -f)         shift 2 ;;
+      -q)         shift 2 ;;
+      --jq)       JQF="$2"; shift 2 ;;
+      --paginate) PAGINATE=1; shift ;;
+      *)          PATH_ARG="$1"; shift ;;
+    esac
+  done
+  case "$PATH_ARG" in
+    user) printf '%s\n' "${FAKE_SELF_LOGIN-zook-bot}" ;;
+    */dismissals)
+      [ "$METHOD" = "PUT" ] || exit 1
+      rid="${PATH_ARG%/dismissals}"; rid="${rid##*/}"
+      printf '%s\n' "$rid" >> "$FAKE_DISMISSED" ;;
+    */reviews*)
+      prnum="${PATH_ARG%%\?*}"; prnum="${prnum%/reviews}"; prnum="${prnum##*/}"
+      # $FAKE_REVIEWS_FAIL stages a PAGINATED read that DIES PART WAY: `gh
+      # --paginate` writes each page as it arrives, so the pages already fetched
+      # are still on stdout when the call fails. The output alone is a well-formed
+      # history — just not the WHOLE one — so only the exit status can reveal that
+      # the tail is missing.
+      failnow=""
+      if [ -n "${FAKE_REVIEWS_FAIL:-}" ] \
+         && printf '%s\n' "$FAKE_REVIEWS_FAIL" | tr ',' '\n' | grep -qxF "$prnum"; then
+        failnow=1
+      fi
+      out=""
+      if [ -f "${FAKE_REVIEWS:-}" ]; then
+        while IFS='|' read -r rpr rid rlogin rstate rcommit rpage; do
+          [ -n "$rpr" ] || continue
+          [ "$rpr" = "$prnum" ] || continue
+          if [ -n "$failnow" ]; then
+            # A read that died after page 1 never delivers page 2.
+            [ "${rpage:-1}" = "1" ] || continue
+          else
+            [ -n "$PAGINATE" ] || [ "${rpage:-1}" = "1" ] || continue
+          fi
+          obj=$(printf '{"id":%s,"user":{"login":"%s"},"state":"%s","commit_id":"%s"}' "$rid" "$rlogin" "$rstate" "$rcommit")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_REVIEWS"
+      fi
+      if [ -n "$JQF" ]; then printf '[%s]\n' "$out" | jq -r "$JQF"
+      else printf '[%s]\n' "$out"; fi
+      [ -z "$failnow" ] || exit 1 ;;
+  esac
+  exit 0
+fi
 case "$1 $2" in
   "pr view")
     num="$3"; shift 3
-    fields=""
-    while [ $# -gt 0 ]; do case "$1" in --json) fields="$2"; shift 2 ;; *) shift ;; esac; done
+    fields=""; Q=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --json)   fields="$2"; shift 2 ;;
+        -q|--jq)  Q="$2"; shift 2 ;;
+        *)        shift ;;
+      esac
+    done
     # Supported `gh pr view --json` fields (subset; notably NOT `merged`).
-    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus "
+    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus reviewDecision autoMergeRequest "
     OIFS="$IFS"; IFS=','
     for f in $fields; do
       case "$SUPPORTED" in
@@ -371,27 +493,73 @@ case "$1 $2" in
       esac
     done
     IFS="$OIFS"
-    # Columns 11-12 are the HEAD identity: which repository the PR is opened FROM,
-    # and GitHub's own cross-repository flag. Both are OMITTED on every pre-existing
-    # row and default to THIS repository / not-cross — the shape those cases were
-    # written against — so only the head-identity cases below vary them. A headrepo
-    # of `-` emits NULL objects, which is what gh returns for a deleted head repo (an
-    # omitted column cannot mean that: it has to keep meaning "ours").
-    while IFS='|' read -r pr state mergedat isdraft oid base head headoid mergeable mergestate headrepo cross; do
+    # A single-field `--json headRefOid` read is the retraction arm's LIVE-head
+    # re-read, taken immediately before each dismissal. $FAKE_HEADMOVE (pr|newoid)
+    # makes that one read report a DIFFERENT head than the pass's snapshot —
+    # modelling a head that moves mid-pass, where a review the listing called
+    # superseded may in fact be a fresh block on the new head.
+    # The auto-merge probe is read THREE-valued (armed/disarmed/unknown), so the
+    # stub can serve the two shapes the PR fixture cannot express plus the
+    # mid-pass arming window. All three are keyed by PR number, so one run can
+    # hold an unreadable probe on one anchor while the others retract normally:
+    #   $FAKE_AM_FAIL=<pr>       the probe FAILS (non-zero, no output)
+    #   $FAKE_AM_MALFORMED=<pr>  a payload without a readable autoMergeRequest key
+    #   $FAKE_AM_ARM_AFTER=<pr>  disarmed on the first read, armed from the second
+    #                            on — auto-merge armed between the up-front probe
+    #                            and the dismissal.
+    if [ "$fields" = "autoMergeRequest" ]; then
+      [ "${FAKE_AM_FAIL:-}" = "$num" ] && exit 1
+      if [ "${FAKE_AM_MALFORMED:-}" = "$num" ]; then
+        printf 'not json at all\n'; exit 0
+      fi
+      if [ "${FAKE_AM_ARM_AFTER:-}" = "$num" ]; then
+        a=0
+        [ -f "${FAKE_AM_READS:-/dev/null}" ] && a=$(cat "$FAKE_AM_READS")
+        a=$((a + 1))
+        [ -n "${FAKE_AM_READS:-}" ] && printf '%s' "$a" > "$FAKE_AM_READS"
+        if [ "$a" -ge 2 ]; then
+          OBJ='{"autoMergeRequest":{"enabledBy":{"login":"johnzook"}}}'
+        else
+          OBJ='{"autoMergeRequest":null}'
+        fi
+        if [ -n "$Q" ]; then printf '%s\n' "$OBJ" | jq -r "$Q"; else printf '%s\n' "$OBJ"; fi
+        exit 0
+      fi
+    fi
+    if [ "$fields" = "headRefOid" ] && [ -f "${FAKE_HEADMOVE:-}" ]; then
+      while IFS='|' read -r mpr moid; do
+        [ "$mpr" = "$num" ] || continue
+        if [ -n "$Q" ]; then jq -n --arg ho "$moid" '{headRefOid:$ho}' | jq -r "$Q"
+        else jq -n --arg ho "$moid" '{headRefOid:$ho}'; fi
+        exit 0
+      done < "$FAKE_HEADMOVE"
+    fi
+    # Trailing columns are OPTIONAL and positional: 11-12 carry the review state
+    # (reviewDecision, auto-merge enabler) the retraction arm reads, 13-14 the HEAD
+    # identity (which repository the PR is opened FROM, and GitHub's own
+    # cross-repository flag). All four are OMITTED on every pre-existing row and
+    # default to none / THIS repository / not-cross — the shape those cases were
+    # written against — so only the cases below vary them. A headrepo of `-` emits
+    # NULL objects, which is what gh returns for a deleted head repo (an omitted
+    # column cannot mean that: it has to keep meaning "ours").
+    while IFS='|' read -r pr state mergedat isdraft oid base head headoid mergeable mergestate revdec automerge headrepo cross; do
       [ "$pr" = "$num" ] || continue
       [ -n "$headrepo" ] || headrepo="acme/repo"
       [ -n "$cross" ]    || cross="false"
-      jq -n --arg s "$state" --arg ma "$mergedat" --argjson d "$isdraft" \
+      OBJ=$(jq -n --arg s "$state" --arg ma "$mergedat" --argjson d "$isdraft" \
             --arg o "$oid" --arg b "$base" --arg h "$head" --arg ho "$headoid" \
-            --arg m "$mergeable" --arg ms "$mergestate" --arg n "$num" \
-            --arg rq "$RESOLVED" --arg hrepo "$headrepo" --argjson x "$cross" \
+            --arg m "$mergeable" --arg ms "$mergestate" --arg n "$num" --arg rd "$revdec" \
+            --arg am "$automerge" --arg rq "$RESOLVED" --arg hrepo "$headrepo" --argjson x "$cross" \
         '{state:$s, mergedAt:(if $ma=="" then null else $ma end), isDraft:$d,
           mergeCommit:(if $o=="" then null else {oid:$o} end), baseRefName:$b,
           headRefName:$h, headRefOid:$ho, mergeable:$m, mergeStateStatus:$ms,
+          reviewDecision:$rd,
+          autoMergeRequest:(if $am=="" then null else {enabledBy:{login:$am}} end),
           headRepositoryOwner:(if $hrepo=="-" then null else {login:($hrepo | split("/")[0])} end),
           headRepository:(if $hrepo=="-" then null else {name:($hrepo | split("/")[1])} end),
           isCrossRepository:$x,
-          url:("https://" + $rq + "/pull/" + $n)}'
+          url:("https://" + $rq + "/pull/" + $n)}')
+      if [ -n "$Q" ]; then printf '%s\n' "$OBJ" | jq -r "$Q"; else printf '%s\n' "$OBJ"; fi
       exit 0
     done < "$FAKE_PRS"
     exit 0 ;;
@@ -728,7 +896,34 @@ case "$2" in
     if [ -n "${FAKE_ROUTE_FAIL:-}" ] && printf '%s' "$*" | grep -q "gc.routed_to=$FAKE_ROUTE_FAIL"; then
       exit 1
     fi
-    printf '%s\t%s\n' "$id" "$*" >> "$FAKE_UPDATES"
+    # A signoff_dismissed write on FAKE_MARK_NOT_DURABLE's bead reports SUCCESS
+    # and stores nothing — the failure an exit-status check cannot see, and the
+    # reason that write is read back. Scoped to one bead so the other anchors in
+    # the same run still retract normally.
+    if [ -n "${FAKE_MARK_NOT_DURABLE:-}" ] && [ "$id" = "$FAKE_MARK_NOT_DURABLE" ] \
+       && printf '%s' "$*" | grep -q 'signoff_dismissed='; then
+      exit 0
+    fi
+    # Inject a PARTIAL route write: the batched update carries both halves of the
+    # route (gc.routed_to + review_pool), and while FAKE_POOL_FAIL is set only the
+    # DURABLE half is dropped — the live gc.routed_to lands and the call reports
+    # SUCCESS. That is the shape an exit status cannot see and the single-field
+    # read-back could not see either: the route looks verified on the evidence of
+    # the field that persisted. Scoped to the one run that sets it.
+    upd_args="$*"
+    if [ -n "${FAKE_POOL_FAIL:-}" ]; then
+      upd_args="${upd_args//--set-metadata review_pool=$FAKE_POOL_FAIL/}"
+    fi
+    # Inject a SPLIT route: the batched update lands, the DURABLE half is stored as
+    # written, but the LIVE half persists pointing at a DIFFERENT pool
+    # ($FAKE_ROUTE_WRONG). Models a stale/clobbered gc.routed_to surviving a route
+    # write — the shape where the field is populated (so an "is it empty?" repair
+    # test skips it) yet names a pool that will never stamp this gate. Scoped to
+    # the one run that sets it. Requires FAKE_ROUTE_WRONG_TO to name the wrong pool.
+    if [ -n "${FAKE_ROUTE_WRONG:-}" ]; then
+      upd_args="${upd_args//--set-metadata gc.routed_to=$FAKE_ROUTE_WRONG/--set-metadata gc.routed_to=${FAKE_ROUTE_WRONG_TO:-rig/rig.wrong-pool}}"
+    fi
+    printf '%s\t%s\n' "$id" "$upd_args" >> "$FAKE_UPDATES"
     case "$*" in
       *merge_result=abandoned*)  printf '%s\n' "$id" >> "$FAKE_ABANDONED" ;;
       *merge_result=retargeted*) printf '%s\n' "$id" >> "$FAKE_RETARGETED" ;;
@@ -773,12 +968,49 @@ case "$2" in
     # lands in the log, so its read-back is empty here — exactly what a transient
     # ledger loss looks like to arm_stale_gate's verify.
     sid="$3"
+    # An id in $FAKE_SHOW_FAIL answers with NOTHING — the unreadable-bead case the
+    # pre-dismissal re-read must treat as unsafe rather than as "no hold set".
+    case " ${FAKE_SHOW_FAIL:-} " in *" $sid "*) exit 0 ;; esac
     slog=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "$FAKE_UPDATES" 2>/dev/null)
     ab=$(printf '%s\n' "$slog" | grep -o 'anchor_bead=[^ ]*' | tail -1 | sed 's/anchor_bead=//')
     tk=$(printf '%s\n' "$slog" | grep -o 'task_kind=[^ ]*' | tail -1 | sed 's/task_kind=//')
     rt=$(printf '%s\n' "$slog" | grep -o 'gc.routed_to=[^ ]*' | tail -1 | sed 's/gc.routed_to=//')
-    printf '[{"id":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s"}}]\n' \
-      "$sid" "$ab" "$tk" "$rt" ;;
+    # review_pool — the DURABLE half of the route, replayed the same way. It is
+    # read back alongside gc.routed_to before the stale-gate head guard is armed
+    # (arm_stale_gate, tk-bdfww): the two go out in ONE batched write, so a write
+    # that persists only the live half must be visible here as review_pool="" for
+    # that partial-write case to be testable at all. A write the shim stripped
+    # (FAKE_POOL_FAIL) never lands in the log, so it reads back empty.
+    rp=$(printf '%s\n' "$slog" | grep -o 'review_pool=[^ ]*' | tail -1 | sed 's/review_pool=//')
+    # signoff_dismissed joins the replay for the retraction arm's read-back ("is
+    # the pairing marker really recorded before I drop the GitHub block?"). A
+    # write the shim dropped never reaches the log, so it reads back empty here —
+    # exactly what a non-durable ledger write looks like to that guard.
+    sd=$(printf '%s\n' "$slog" | grep -o 'signoff_dismissed=[^ ]*' | tail -1 | sed 's/signoff_dismissed=//')
+    # A GATING ANCHOR also answers with its live gating state — status, pr_number,
+    # merge_result, check.codex, merge_hold — because the retraction arm re-reads
+    # the anchor immediately before the irreversible dismissal and requires it to
+    # still be the anchor it decided about. $FAKE_ANCHORS_FRESH OVERRIDES
+    # $FAKE_ANCHORS for these reads only: that is the mid-pass write seam (the
+    # enumeration snapshot and the live bead disagreeing), with two extra columns
+    # for status and merge_result, where `-` means the field is EMPTY on the live
+    # bead. A non-anchor id (a review bead) matches no row and answers as before.
+    s_status="open"; s_result="pull_request"; s_pr=""; s_mark=""; s_hold=""; s_found=""
+    for asrc in "${FAKE_ANCHORS_FRESH:-}" "$FAKE_ANCHORS"; do
+      [ -n "$asrc" ] && [ -f "$asrc" ] || continue
+      [ -n "$s_found" ] && break
+      while IFS='|' read -r aid apr atarget ahold arhold acset amark astatus aresult; do
+        [ "$aid" = "$sid" ] || continue
+        s_pr="$apr"; s_mark="$amark"; s_hold="$ahold"; s_found=1
+        [ -n "$astatus" ] && s_status="$astatus"
+        [ -n "$aresult" ] && s_result="$aresult"
+        [ "$s_status" = "-" ] && s_status=""
+        [ "$s_result" = "-" ] && s_result=""
+        break
+      done < "$asrc"
+    done
+    printf '[{"id":"%s","status":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s","review_pool":"%s","signoff_dismissed":"%s","pr_number":"%s","merge_result":"%s","check.codex":"%s","merge_hold":"%s"}}]\n' \
+      "$sid" "$s_status" "$ab" "$tk" "$rt" "$rp" "$sd" "$s_pr" "$s_result" "$s_mark" "$s_hold" ;;
 esac
 exit 0
 GC
@@ -792,6 +1024,8 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
        FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
+       FAKE_REVIEWS="$TMP/reviews" FAKE_DISMISSED="$TMP/dismissed" \
+       FAKE_HEADMOVE="$TMP/headmove" FAKE_AM_READS="$TMP/amreads" \
        FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody" \
        FAKE_LIVEX="$TMP/livex" FAKE_BODIES="$TMP/bodies" \
        FAKE_REPOFAIL="$TMP/repofail" \
@@ -799,6 +1033,11 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_GH_HOST="$TMP/ghhost"
 mkdir -p "$TMP/bodies"
 : > "$TMP/repofail"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/ghhost"
+
+# No PR reviews, no dismissals, and a head that never moves by default: the
+# superseded-review arm is inert for every scenario except Run 13, which supplies
+# its own fixtures.
+: > "$TMP/reviews"; : > "$TMP/dismissed"; : > "$TMP/headmove"
 
 # --- Run 1: the disposition matrix. ------------------------------------------
 OUT1="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
@@ -1512,6 +1751,546 @@ grep -qx "$REVIEW_POOL" "$TMP/wakes" \
   && ok "(31) repair pass wakes the review pool" \
   || bad "(31) repair pass wakes the review pool"
 
+# --- Run 12b: the DURABLE half of the route is what a dropped write loses last,
+# and it must not be assumed from the live half (tk-bdfww). -------------------
+# gc.routed_to and review_pool go out in ONE batched update. Reading back only
+# gc.routed_to declares the route durable on the evidence of the field that is
+# NOT the durable one: a write that persists the live half and silently drops
+# review_pool passes that check, so the arm stamps stale_gate_head, the
+# one-per-head guard closes behind it, and the review is left with no durable
+# route copy. The damage lands one step later — a codex polecat claims the
+# review, which CONSUMES gc.routed_to, and a signoff that ends WITHOUT stamping
+# the gate then has to put the review back in a pool with nothing left to say
+# which pool that was (template-fragments/polecat-non-impl-done.template.md).
+# The bead is released open, unassigned and unrouted — offered to nobody, gate
+# owed forever — and the head is already marked dispatched, so no later pass
+# re-enters. Same terminal strand as tk-3xy37, reached through the other field.
+printf '%s\n' 'bead-XP|225|main|||codex|green@old225' > "$TMP/anchors"
+printf '%s\n' '225|OPEN||false||main|polecat/bead-XP|head225|MERGEABLE|BLOCKED' > "$TMP/prs"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
+
+# Pass A: the live half lands, the durable half is dropped, the call SUCCEEDS.
+OUT12C="$(FAKE_POOL_FAIL="$REVIEW_POOL" bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
+eq "$(grep -c 'Review PR#225' "$TMP/created")" "1" \
+   "(58) dropped review_pool -> the re-review bead is still filed"
+grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
+  && ok "(58) the LIVE half of the route did persist (only the durable copy was lost)" \
+  || bad "(58) fixture must persist gc.routed_to (got: $(cat "$TMP/updates"))"
+grep -q "review_pool=$REVIEW_POOL" "$TMP/updates" \
+  && bad "(58) fixture must drop review_pool (the partial write being modeled)" \
+  || ok "(58) the DURABLE half was dropped in flight"
+grep -q 'stale_gate_head=head225' "$TMP/updates" \
+  && bad "(58) must NOT arm stale_gate_head when review_pool did not persist (a claim then makes the review unroutable forever)" \
+  || ok "(58) head guard NOT armed on a lost durable route copy"
+printf '%s\n' "$OUT12C" | grep -q '0 stale-gate re-reviews routed' \
+  && ok "(58) dropped review_pool -> summary counts routed=0, not a false dispatch" \
+  || bad "(58) run 12b pass A summary must report 0 routed (got: $OUT12C)"
+
+# Pass B: the loss clears. The repair path must ALSO cover this shape — the bead
+# is ROUTED, so the unrouted-only repair predicate skipped it at the twin guard
+# while the arm kept refusing to arm: the pass would spin forever, never healing
+# review_pool and never arming the head. Repair predicate and arming predicate
+# have to agree.
+OUT12D="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
+eq "$(grep -c 'Review PR#225' "$TMP/created")" "1" \
+   "(59) repair pass reuses the SAME review -> no twin re-review bead"
+grep -q "review_pool=$REVIEW_POOL" "$TMP/updates" \
+  && ok "(59) repair pass restores the durable review_pool copy" \
+  || bad "(59) repair pass must restore review_pool (got: $(cat "$TMP/updates"))"
+grep -q 'stale_gate_head=head225' "$TMP/updates" \
+  && ok "(59) repair pass NOW arms stale_gate_head at the live head" \
+  || bad "(59) repair pass must arm stale_gate_head=head225"
+printf '%s\n' "$OUT12D" | grep -q 'stale-gate repair' \
+  && ok "(59) repair pass logs the stale-gate route repair" \
+  || bad "(59) repair pass must log the repair (got: $OUT12D)"
+printf '%s\n' "$OUT12D" | grep -q '1 stale-gate re-reviews routed' \
+  && ok "(59) repair pass -> summary reports the recovered re-review routed" \
+  || bad "(59) run 12b pass B summary stale-gate routed count (got: $OUT12D)"
+
+# --- Run 12c: the SPLIT route — the live half persists pointing at the WRONG
+# pool (tk-5niup). ------------------------------------------------------------
+# arm_stale_gate refuses to arm unless review_pool matches AND the review is
+# either claimed or LIVE-routed to that same pool. The repair predicate only
+# asked whether gc.routed_to was EMPTY, so it did not cover the shape where the
+# field is populated with a DIFFERENT pool and nobody has claimed the bead — the
+# arm rejects it, the twin guard skips it as "already routed", and the two
+# disagree forever: the head is never armed, the route is never healed, and the
+# merge sits held behind a re-review the codex pool is never offered. Same
+# terminal spin as run 12b, reached through the live half instead of the durable
+# one. The repair predicate has to be the exact negation of the arming one.
+printf '%s\n' 'bead-XW|226|main|||codex|green@old226' > "$TMP/anchors"
+printf '%s\n' '226|OPEN||false||main|polecat/bead-XW|head226|MERGEABLE|BLOCKED' > "$TMP/prs"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
+
+# Pass A: the durable half lands, the live half persists as a DIFFERENT pool.
+OUT12E="$(FAKE_ROUTE_WRONG="$REVIEW_POOL" FAKE_ROUTE_WRONG_TO='rig/rig.wrong-pool' \
+  bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
+eq "$(grep -c 'Review PR#226' "$TMP/created")" "1" \
+   "(60) split route -> the re-review bead is still filed"
+grep -q "review_pool=$REVIEW_POOL" "$TMP/updates" \
+  && ok "(60) the DURABLE half persisted (only the live route is wrong)" \
+  || bad "(60) fixture must persist review_pool (got: $(cat "$TMP/updates"))"
+grep -q 'gc.routed_to=rig/rig.wrong-pool' "$TMP/updates" \
+  && ok "(60) the LIVE half persisted pointing at another pool (the split being modeled)" \
+  || bad "(60) fixture must persist the wrong live route (got: $(cat "$TMP/updates"))"
+grep -q 'stale_gate_head=head226' "$TMP/updates" \
+  && bad "(60) must NOT arm stale_gate_head on a route offered to the wrong pool" \
+  || ok "(60) head guard NOT armed on a split route"
+printf '%s\n' "$OUT12E" | grep -q '0 stale-gate re-reviews routed' \
+  && ok "(60) split route -> summary counts routed=0, not a false dispatch" \
+  || bad "(60) run 12c pass A summary must report 0 routed (got: $OUT12E)"
+
+# Pass B: the injection clears. The repair path must cover this shape too — the
+# bead IS routed (just not to us) and unclaimed, so the unrouted-only predicate
+# skipped it at the twin guard while the arm kept refusing: the spin run 12b
+# closed for the durable half, reached through the live one.
+OUT12F="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
+eq "$(grep -c 'Review PR#226' "$TMP/created")" "1" \
+   "(61) repair pass reuses the SAME review -> no twin re-review bead"
+grep -q "gc.routed_to=$REVIEW_POOL" "$TMP/updates" \
+  && ok "(61) repair pass re-routes the misrouted re-review to the review pool" \
+  || bad "(61) repair pass must re-route a misrouted review (got: $(cat "$TMP/updates"))"
+grep -q 'stale_gate_head=head226' "$TMP/updates" \
+  && ok "(61) repair pass NOW arms stale_gate_head at the live head" \
+  || bad "(61) repair pass must arm stale_gate_head=head226"
+printf '%s\n' "$OUT12F" | grep -q 'stale-gate repair' \
+  && ok "(61) repair pass logs the stale-gate route repair" \
+  || bad "(61) repair pass must log the repair (got: $OUT12F)"
+printf '%s\n' "$OUT12F" | grep -q '1 stale-gate re-reviews routed' \
+  && ok "(61) repair pass -> summary reports the recovered re-review routed" \
+  || bad "(61) run 12c pass B summary stale-gate routed count (got: $OUT12F)"
+
+# --- Run 13: superseded-review self-heal (tk-5niup). --------------------------
+# The INVERSE of the stale-gate arm: the bead marker is green AT the live head,
+# and it is GITHUB that lags — our own CHANGES_REQUESTED from an earlier round is
+# still standing, pinned to a commit that no longer exists. A COMMENT review does
+# not supersede the same reviewer's earlier CHANGES_REQUESTED, so reviewDecision
+# stays CHANGES_REQUESTED and mergeStateStatus stays BLOCKED forever while the
+# gate reads green; merge-skill.sh requires CLEAN, so the PR strands with NO
+# in-band path out (the stale-gate arm cannot fire — the marker is current).
+# anchors: id|pr|target|merge_hold|rebase_hold|check_set|check.codex-marker
+#   bead-W 240 green@head240, OUR stale CHANGES_REQUESTED  -> RETRACTED + marker
+#   bead-X 241 green@head241, the OPERATOR's CHANGES_REQUESTED -> left standing
+#   bead-Y 242 green@head242, OUR CHANGES_REQUESTED AT the live head -> stands
+#   bead-Z2 243 green@head243, reviewDecision APPROVED      -> nothing to do
+#   bead-W2 244 green@head244, our stale CR BUT merge_hold  -> operator gate wins
+#   bead-AM 245 green@head245, our stale CR BUT native auto-merge ARMED -> HELD
+#   bead-P2 246 green@head246, our stale CR only on reviews PAGE 2 -> RETRACTED
+#   bead-HM 247 green@head247, our stale CR but the head MOVES mid-pass -> HELD
+printf '%s\n' \
+  'bead-W|240|main|||codex|green@head240' \
+  'bead-X|241|main|||codex|green@head241' \
+  'bead-Y|242|main|||codex|green@head242' \
+  'bead-Z2|243|main|||codex|green@head243' \
+  'bead-W2|244|main|true||codex|green@head244' \
+  'bead-AM|245|main|||codex|green@head245' \
+  'bead-P2|246|main|||codex|green@head246' \
+  'bead-HM|247|main|||codex|green@head247' \
+  'bead-AF|248|main|||codex|green@head248' \
+  'bead-AB|249|main|||codex|green@head249' \
+  'bead-AA|250|main|||codex|green@head250' \
+  'bead-ND|251|main|||codex|green@head251' \
+  'bead-MH|252|main|||codex|green@head252' \
+  'bead-GC|253|main|||codex|green@head253' \
+  'bead-UP|254|main|||codex|green@head254' \
+  'bead-SF|255|main|||codex|green@head255' \
+  'bead-RF|256|main|||codex|green@head256' \
+  > "$TMP/anchors"
+# The anchor as a LATER `gc bd show` reads it — the mid-pass write the ROWS
+# snapshot missed. Same columns plus status (8) and merge_result (9), where `-`
+# means the field is EMPTY on the live bead. Only listed anchors differ.
+#   bead-MH 252 an operator sets merge_hold after the pass enumerated
+#   bead-GC 253 a re-gate moves check.codex off the live head
+#   bead-UP 254 the anchor is un-parked from its PR (merge_result cleared)
+printf '%s\n' \
+  'bead-MH|252|main|true||codex|green@head252' \
+  'bead-GC|253|main|||codex|green@stale253' \
+  'bead-UP|254|main|||codex|green@head254|open|-' \
+  > "$TMP/anchors-fresh"
+# All open + BLOCKED (the standing review is what blocks them), except 243.
+# The last column is autoMergeRequest's enabling account ("" = not armed).
+printf '%s\n' \
+  '240|OPEN||false||main|polecat/bead-W|head240|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '241|OPEN||false||main|polecat/bead-X|head241|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '242|OPEN||false||main|polecat/bead-Y|head242|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '243|OPEN||false||main|polecat/bead-Z2|head243|MERGEABLE|CLEAN|APPROVED|' \
+  '244|OPEN||false||main|polecat/bead-W2|head244|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '245|OPEN||false||main|polecat/bead-AM|head245|MERGEABLE|BLOCKED|CHANGES_REQUESTED|johnzook' \
+  '246|OPEN||false||main|polecat/bead-P2|head246|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '247|OPEN||false||main|polecat/bead-HM|head247|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '248|OPEN||false||main|polecat/bead-AF|head248|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '249|OPEN||false||main|polecat/bead-AB|head249|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '250|OPEN||false||main|polecat/bead-AA|head250|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '251|OPEN||false||main|polecat/bead-ND|head251|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '252|OPEN||false||main|polecat/bead-MH|head252|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '253|OPEN||false||main|polecat/bead-GC|head253|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '254|OPEN||false||main|polecat/bead-UP|head254|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '255|OPEN||false||main|polecat/bead-SF|head255|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  '256|OPEN||false||main|polecat/bead-RF|head256|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  > "$TMP/prs"
+# reviews: pr|id|login|state|commit_id|page ("page" >1 is served only to a
+# --paginate caller, as GitHub does).
+printf '%s\n' \
+  '240|9001|zook-bot|CHANGES_REQUESTED|deadcommit240|1' \
+  '240|9002|zook-bot|COMMENTED|head240|1' \
+  '241|9101|johnzook|CHANGES_REQUESTED|deadcommit241|1' \
+  '242|9201|zook-bot|CHANGES_REQUESTED|head242|1' \
+  '243|9301|johnzook|APPROVED|head243|1' \
+  '244|9401|zook-bot|CHANGES_REQUESTED|deadcommit244|1' \
+  '245|9501|zook-bot|CHANGES_REQUESTED|deadcommit245|1' \
+  '246|9601|zook-bot|COMMENTED|head246|1' \
+  '246|9602|zook-bot|CHANGES_REQUESTED|deadcommit246|2' \
+  '247|9701|zook-bot|CHANGES_REQUESTED|deadcommit247|1' \
+  '248|9801|zook-bot|CHANGES_REQUESTED|deadcommit248|1' \
+  '249|9901|zook-bot|CHANGES_REQUESTED|deadcommit249|1' \
+  '250|9911|zook-bot|CHANGES_REQUESTED|deadcommit250|1' \
+  '251|9921|zook-bot|CHANGES_REQUESTED|deadcommit251|1' \
+  '252|9931|zook-bot|CHANGES_REQUESTED|deadcommit252|1' \
+  '253|9941|zook-bot|CHANGES_REQUESTED|deadcommit253|1' \
+  '254|9951|zook-bot|CHANGES_REQUESTED|deadcommit254|1' \
+  '255|9961|zook-bot|CHANGES_REQUESTED|deadcommit255|1' \
+  '256|9971|zook-bot|CHANGES_REQUESTED|deadcommit256|1' \
+  '256|9972|zook-bot|CHANGES_REQUESTED|deadcommit256b|2' \
+  > "$TMP/reviews"
+# PR 247's head moves between the pass's snapshot and the dismissal call.
+printf '%s\n' '247|newhead247' > "$TMP/headmove"
+printf '0' > "$TMP/amreads"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"; : > "$TMP/dismissed"
+# Both streams are asserted below, and they carry different things on purpose:
+# a HELD retraction with a routine, expected cause (merge_hold — an operator
+# deliberately gated the PR) reports on stdout alongside the summary counters,
+# while an ANOMALY a human should look at (auto-merge armed, the head moving
+# mid-pass) is a WARN on stderr, as everywhere else in this script. Capturing
+# only stdout would silently pass any assertion about the WARNs.
+OUT13="$(FAKE_AM_FAIL=248 FAKE_AM_MALFORMED=249 FAKE_AM_ARM_AFTER=250 \
+         FAKE_MARK_NOT_DURABLE=bead-ND \
+         FAKE_ANCHORS_FRESH="$TMP/anchors-fresh" FAKE_SHOW_FAIL=bead-SF FAKE_REVIEWS_FAIL=256 \
+         bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>"$TMP/err13")"
+ERR13="$(cat "$TMP/err13")"
+
+# (39) THE HEAL: our superseded review is retracted, so GitHub can leave BLOCKED.
+grep -qx '9001' "$TMP/dismissed" \
+  && ok "(39) superseded self-review retracted (PR was BLOCKED on a dead commit)" \
+  || bad "(39) superseded self-review must be dismissed (got: $(cat "$TMP/dismissed"))"
+grep -q 'signoff_dismissed=9001@head240' "$TMP/updates" \
+  && ok "(39) signoff_dismissed recorded on the anchor (arms merge-skill's approval gate)" \
+  || bad "(39) signoff_dismissed marker (got: $(cat "$TMP/updates"))"
+printf '%s\n' "$OUT13" | grep -q 'retracted superseded self-review 9001' \
+  && ok "(39) retraction is reported, naming the review" \
+  || bad "(39) retraction log line (got: $OUT13)"
+# The retraction is the ONLY action: the anchor stays gating for the merge skill.
+grep -q 'Review PR#240' "$TMP/created" \
+  && bad "(39) heal must not file a re-review (the gate is already green at head)" \
+  || ok "(39) no re-review filed — the gate is current, only GitHub was stale"
+
+# (40) SAFETY: the operator's CHANGES_REQUESTED is a veto. It is superseded by the
+# same test (a dead commit) and would be dismissed by any "is it stale" filter —
+# only the AUTHOR check saves it.
+grep -qx '9101' "$TMP/dismissed" \
+  && bad "(40) the operator's review must NEVER be dismissed" \
+  || ok "(40) operator CHANGES_REQUESTED left standing (author guard holds)"
+
+# (41) our own CHANGES_REQUESTED at the LIVE head is a contradiction, not a
+# supersede: both blocked and passed the same commit -> the block stands.
+grep -qx '9201' "$TMP/dismissed" \
+  && bad "(41) a self-review AT the reviewed head must not be dismissed" \
+  || ok "(41) self-review at the live head left standing (not superseded)"
+
+# (42) nothing to reconcile when GitHub already agrees.
+grep -qx '9301' "$TMP/dismissed" \
+  && bad "(42) an APPROVED review must never be touched" \
+  || ok "(42) reviewDecision=APPROVED -> arm does not fire"
+
+# (43) merge_hold is an operator gate; retraction is pipeline work toward landing,
+# so it honors the hold exactly as the rebase and stale-gate arms do.
+grep -qx '9401' "$TMP/dismissed" \
+  && bad "(43) merge_hold must suppress the retraction" \
+  || ok "(43) merge_hold=true -> no retraction (operator gate honored)"
+printf '%s\n' "$OUT13" | grep -q 'PR#244 blocked by a superseded self-review but merge_hold set' \
+  && ok "(43) the held retraction is reported with the operator-gate reason" \
+  || bad "(43) merge_hold hold reason (got: $OUT13)"
+
+# (46) NATIVE AUTO-MERGE. Dismissing the last block on a PR with `gh pr merge
+# --auto` armed does not permit a merge, it PERFORMS one — server-side, at once,
+# before merge-skill.sh ever reads the signoff_dismissed marker this arm records.
+# That marker binds our own skill, never GitHub, so the only safe move is to
+# leave the block standing.
+grep -qx '9501' "$TMP/dismissed" \
+  && bad "(46) auto-merge armed: dismissal would trigger an immediate server-side merge" \
+  || ok "(46) native auto-merge armed -> no retraction (fail-closed)"
+printf '%s\n' "$ERR13" | grep -q 'PR#245 blocked by a superseded self-review, but native auto-merge is ARMED' \
+  && ok "(46) the auto-merge hold is reported, naming the reason" \
+  || bad "(46) auto-merge hold reason (got: $ERR13)"
+
+# (47) PAGINATION. 246's superseded review sits on page 2 of the reviews history.
+# Unpaginated, the arm sees only the COMMENTED review on page 1, retracts nothing,
+# and the PR stays stranded in exactly the state this arm exists to heal — and a
+# PR that has taken a changes round is precisely the PR whose reviews run long.
+grep -qx '9602' "$TMP/dismissed" \
+  && ok "(47) superseded review on page 2 is found and retracted (read is paginated)" \
+  || bad "(47) unpaginated reviews read misses the standing block (got: $(cat "$TMP/dismissed"))"
+
+# (48) HEAD MOVED MID-PASS. The reviews listing is a snapshot; between it and the
+# dismissal the head can advance and a FRESH block can be posted on the new head.
+# Against the pass's stale head_oid the commit_id filter cannot tell that fresh
+# block from a superseded one, so the live-head re-read immediately before the
+# dismissal is what keeps this from retracting a live veto.
+grep -qx '9701' "$TMP/dismissed" \
+  && bad "(48) head moved mid-pass: the review may block the NEW head, must not be dismissed" \
+  || ok "(48) head moved mid-pass -> no retraction (re-read before the irreversible call)"
+printf '%s\n' "$ERR13" | grep -q 'PR#247 head moved (head247 -> newhead247) mid-pass' \
+  && ok "(48) the mid-pass head move is reported" \
+  || bad "(48) head-move hold reason (got: $ERR13)"
+
+# (49) AUTO-MERGE PROBE FAILED. Read through `.autoMergeRequest // empty`, an API
+# error, an auth failure and a rate limit all produce the SAME empty string a
+# genuinely disarmed PR does — so the guard that exists to stop a server-side
+# merge would clear itself on an answer it never received. Unreadable counts as
+# armed: this is the one field where guessing wrong merges unreviewed work.
+grep -qx '9801' "$TMP/dismissed" \
+  && bad "(49) a FAILED auto-merge probe must not be read as 'disarmed'" \
+  || ok "(49) auto-merge probe fails -> no retraction (unreadable counts as armed)"
+printf '%s\n' "$ERR13" | grep -q "PR#248 blocked by a superseded self-review, but its native auto-merge state is UNREADABLE" \
+  && ok "(49) the unreadable probe is reported as the reason, distinct from ARMED" \
+  || bad "(49) unreadable-probe hold reason (got: $ERR13)"
+
+# (50) The same fail-open shape from a MALFORMED payload rather than a failed
+# call: a truncated body, or valid JSON that simply lacks the key (a schema
+# change, a `gh` too old to know the field). The guard demands the key be PRESENT
+# in a parseable object, so this is unknown -> held, not "disarmed" -> dismissed.
+grep -qx '9901' "$TMP/dismissed" \
+  && bad "(50) a MALFORMED auto-merge payload must not be read as 'disarmed'" \
+  || ok "(50) malformed auto-merge payload -> no retraction (fail-closed)"
+printf '%s\n' "$ERR13" | grep -q 'PR#249 blocked by a superseded self-review, but its native auto-merge state is UNREADABLE' \
+  && ok "(50) the malformed probe is reported with the same unreadable reason" \
+  || bad "(50) malformed-probe hold reason (got: $ERR13)"
+
+# (51) TOCTOU: the up-front probe answered "disarmed" honestly, then an operator
+# armed auto-merge before the dismissal landed. A one-time probe cannot see that
+# window — the re-probe immediately before the irreversible call, in the same
+# place and for the same reason as the live-head re-read, can.
+grep -qx '9911' "$TMP/dismissed" \
+  && bad "(51) auto-merge armed mid-pass: the dismissal would merge server-side" \
+  || ok "(51) auto-merge armed after the up-front probe -> no retraction"
+printf '%s\n' "$ERR13" | grep -q "PR#250 native auto-merge state is 'armed' immediately before dismissing review 9911" \
+  && ok "(51) the mid-pass arming is reported, naming the review left in place" \
+  || bad "(51) mid-pass auto-merge hold reason (got: $ERR13)"
+
+# (52) NON-DURABLE PAIRING MARKER. `gc bd update` reports success and stores
+# nothing. Pre-fix the exit status said "recorded", the dismissal ran, and the PR
+# lost its GitHub block while merge-skill.sh saw no signoff_dismissed and so
+# demanded no external approval — block and requirement gone together, the one
+# combination that lands unreviewed work. Only reading the marker back sees it.
+grep -qx '9921' "$TMP/dismissed" \
+  && bad "(52) dismissal ran on a signoff_dismissed write that did not persist" \
+  || ok "(52) non-durable signoff_dismissed -> no retraction (read-back guard)"
+printf '%s\n' "$ERR13" | grep -q "could not record signoff_dismissed durably (read back '', want '9921@head251')" \
+  && ok "(52) the read-back names the pairing marker it expected and did not find" \
+  || bad "(52) non-durable marker hold reason (got: $ERR13)"
+
+# (53) THE ANCHOR IS RE-READ TOO. The head and auto-merge re-checks above cover
+# GitHub's side of the window; every BEAD-side fact this arm acts on still came
+# from the ROWS snapshot taken before the PR was even read. An operator parking
+# the anchor inside that window would have the last GitHub-side block removed from
+# the PR they just held — merge-triggering work in defiance of the gate that
+# exists to stop it.
+grep -qx '9931' "$TMP/dismissed" \
+  && bad "(53) merge_hold set mid-pass: the dismissal must not run on a held anchor" \
+  || ok "(53) merge_hold appears after enumeration -> no retraction (anchor re-read)"
+printf '%s\n' "$ERR13" | grep -q "bead-MH — anchor changed mid-pass (status='open' merge_hold='true'" \
+  && ok "(53) the mid-pass hold is reported, naming the fields that changed" \
+  || bad "(53) mid-pass hold reason (got: $ERR13)"
+# (53b) the same for the gate itself: a re-gate that moved check.codex off the
+# live head means the commit this arm is unblocking is no longer validated —
+# retracting would leave an unreviewed head with nothing blocking it.
+grep -qx '9941' "$TMP/dismissed" \
+  && bad "(53b) check.codex moved off the live head: the PR is no longer gate-green" \
+  || ok "(53b) check.codex re-gated mid-pass -> no retraction"
+printf '%s\n' "$ERR13" | grep -q "bead-GC — anchor changed mid-pass .*check.codex='green@stale253'" \
+  && ok "(53b) the re-gated marker is named in the hold" \
+  || bad "(53b) re-gated marker hold reason (got: $ERR13)"
+# (53c) and for the anchor's claim on the PR: un-parked (merge_result cleared), it
+# no longer speaks for this PR at all, so it cannot authorize dropping its block.
+grep -qx '9951' "$TMP/dismissed" \
+  && bad "(53c) an un-parked anchor must not authorize a dismissal on its former PR" \
+  || ok "(53c) merge_result cleared mid-pass -> no retraction"
+# (53d) unreadable is unsafe, exactly as for the auto-merge probe: a read we never
+# got cannot prove the anchor is unheld, still parked, and still green.
+grep -qx '9961' "$TMP/dismissed" \
+  && bad "(53d) an unreadable anchor must not be read as 'nothing changed'" \
+  || ok "(53d) anchor metadata unreadable -> no retraction (fail-closed)"
+printf '%s\n' "$ERR13" | grep -q "bead-SF — anchor metadata UNREADABLE immediately before dismissing review 9961" \
+  && ok "(53d) the unreadable anchor is reported as the reason" \
+  || bad "(53d) unreadable-anchor hold reason (got: $ERR13)"
+
+# (53e) PARTIAL REVIEW HISTORY. `gh --paginate` streams the pages it did get and
+# THEN fails, so the pages already on stdout parse perfectly — a well-formed
+# history that is simply not the whole one. Fused into a single `gh | jq`
+# assignment tested only for emptiness, that truncation was invisible, and this
+# arm retracted from it as though it had read everything; a read that failed
+# OUTRIGHT was equally invisible, rendering as "nothing to retract" and stranding
+# the PR silently. PR#256's page 1 carries a stale self-CR that would otherwise be
+# dismissed, and the read dies before page 2.
+grep -qx '9971' "$TMP/dismissed" \
+  && bad "(53e) a review found in a TRUNCATED history must not be retracted" \
+  || ok "(53e) paginated reviews read fails part way -> no retraction (fail-closed)"
+printf '%s\n' "$ERR13" | grep -q "bead-RF — PR#256 reviews history read FAILED" \
+  && ok "(53e) the failed history read is reported, not swallowed" \
+  || bad "(53e) failed reviews read must warn (got: $ERR13)"
+
+# Retractions report on their OWN counters — folding them into the stale-gate
+# re-review counters would misreport that arm's throughput.
+printf '%s\n' "$OUT13" | grep -q '2 superseded reviews retracted, 12 retractions held' \
+  && ok "(43) summary counts retractions separately from stale-gate re-reviews" \
+  || bad "(43) summary retraction counters (got: $OUT13)"
+printf '%s\n' "$OUT13" | grep -q '0 stale-gate re-reviews routed' \
+  && ok "(43) a retraction is NOT counted as a stale-gate re-review" \
+  || bad "(43) retraction must not inflate the stale-gate counter (got: $OUT13)"
+
+# (44) CONVERGENCE: once dismissed the review is no longer CHANGES_REQUESTED, so a
+# second pass retracts nothing — the arm cannot loop on the same PR.
+#
+# Model the heal faithfully: EVERY review the pass actually dismissed comes back
+# DISMISSED (that is what GitHub reports afterwards) and the PR it unblocked comes
+# back CLEAN/APPROVED. Flipping only one PR's review by hand would leave the other
+# healed PR still reading CHANGES_REQUESTED, so the second pass would re-retract
+# it and the case would measure a stale fixture rather than convergence. Driving
+# it off "$TMP/dismissed" also keeps this correct as retraction fixtures are added.
+HEALED_IDS="$(sort -u "$TMP/dismissed")"
+for rid in $HEALED_IDS; do
+  pr=$(awk -F'|' -v r="$rid" '$2==r{print $1; exit}' "$TMP/reviews")
+  awk -F'|' -v r="$rid" 'BEGIN{OFS="|"} $2==r{$4="DISMISSED"} {print}' \
+    "$TMP/reviews" > "$TMP/reviews.next" && mv "$TMP/reviews.next" "$TMP/reviews"
+  [ -n "$pr" ] || continue
+  awk -F'|' -v p="$pr" 'BEGIN{OFS="|"} $1==p && $10=="BLOCKED"{$10="CLEAN"; $11="APPROVED"} {print}' \
+    "$TMP/prs" > "$TMP/prs.next" && mv "$TMP/prs.next" "$TMP/prs"
+done
+: > "$TMP/dismissed"
+# The injected faults are carried into this pass DELIBERATELY. They are what the
+# held anchors are held ON: drop them and 248-255 stop being held, retract on this
+# pass, and the case measures "a transient fault cleared" instead of "a healed PR
+# is not re-retracted". (That those anchors DO retract once the fault clears is
+# the intended behaviour — a hold here is never terminal — it is just not what
+# this assertion is for.) That includes the mid-pass anchor states: without
+# FAKE_ANCHORS_FRESH/FAKE_SHOW_FAIL, 252-255 would simply be healthy anchors here.
+# stderr is dropped: 245 (auto-merge), 247 (head move) and 248-251 are still
+# legitimately held on this pass and re-emit their WARNs, which the cases above
+# already assert.
+FAKE_AM_FAIL=248 FAKE_AM_MALFORMED=249 FAKE_AM_ARM_AFTER=250 \
+  FAKE_MARK_NOT_DURABLE=bead-ND \
+  FAKE_ANCHORS_FRESH="$TMP/anchors-fresh" FAKE_SHOW_FAIL=bead-SF FAKE_REVIEWS_FAIL=256 \
+  bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null 2>&1
+eq "$(wc -l < "$TMP/dismissed" | tr -d ' ')" "0" \
+   "(44) converges: a healed PR is not re-retracted on the next pass"
+
+# (45) FAIL-CLOSED: with no resolvable acting login the arm cannot tell our
+# reviews from a human's, so it retracts nothing at all.
+: > "$TMP/dismissed"
+printf '%s\n' '241|9101|johnzook|CHANGES_REQUESTED|deadcommit241' \
+              '244|9401|zook-bot|CHANGES_REQUESTED|deadcommit244' > "$TMP/reviews"
+FAKE_SELF_LOGIN="" bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null
+eq "$(wc -l < "$TMP/dismissed" | tr -d ' ')" "0" \
+   "(45) unresolvable acting login -> nothing retracted (cannot distinguish ours)"
+
+# --- Run 14: LONG, SPACED check_set (tk-gzz54). -------------------------------
+# BOTH arms above are gated on the same `codex is a declared check-set member`
+# test, so anything that makes that test misread takes out stale-gate re-review
+# AND the superseded-review self-heal at once, leaving those PRs blocked with no
+# in-band path out. Every case so far declares the single-token check_set
+# "codex", which exercises neither risk in that test:
+#   * a NATURAL spaced list ("lint, codex, ...") must still match — the untrimmed
+#     literal-substring form this membership test used to have would miss it;
+#   * `codex` must be matched WHOLE-TOKEN, so a neighbouring gate whose name
+#     merely contains it ("codex-lite") is not mistaken for the gate itself;
+#   * and the test must survive a check_set with MANY gates listed after `codex`.
+#     That last one is why the pipeline form was replaced: `set -o pipefail` is on
+#     and `grep -q` exits at the first match, so with trailing gates still being
+#     written the upstream `tr`/`sed` can take SIGPIPE and the pipeline reports
+#     141 — the membership flag never gets set and both arms silently skip. It is
+#     timing-dependent, so no test can reliably PROVOKE it; the static guard below
+#     asserts the form instead, and these cases pin the behaviour that form must
+#     preserve.
+LONG_CS='lint, codex-lite, codex, typecheck, security, docs, coverage, shellcheck'
+# anchors: id|pr|target|merge_hold|rebase_hold|check_set|check.codex-marker
+#   bead-LC1 260 long check_set, marker green@old260 (head moved) -> STALE-GATE
+#   bead-LC2 261 long check_set, marker green@head261 + our dead CR -> SUPERSEDED
+printf '%s\n' \
+  "bead-LC1|260|main|||$LONG_CS|green@old260" \
+  "bead-LC2|261|main|||$LONG_CS|green@head261" \
+  > "$TMP/anchors"
+printf '%s\n' \
+  '260|OPEN||false||main|polecat/bead-LC1|head260|MERGEABLE|BLOCKED||' \
+  '261|OPEN||false||main|polecat/bead-LC2|head261|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
+  > "$TMP/prs"
+printf '%s\n' '261|9981|zook-bot|CHANGES_REQUESTED|deadcommit261|1' > "$TMP/reviews"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"; : > "$TMP/dismissed"
+: > "$TMP/children"; : > "$TMP/headmove"; printf '0' > "$TMP/amreads"
+OUT14="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>/dev/null)"
+
+# (54) stale-gate arm still fires when `codex` is one member of a long list.
+eq "$(grep -c 'Review PR#260' "$TMP/created")" "1" \
+   "(54) long spaced check_set -> stale gate still re-reviewed (codex recognized)"
+grep -q 'stale_gate_head=head260' "$TMP/updates" \
+  && ok "(54) and the one-per-head guard is armed on the anchor" \
+  || bad "(54) stale_gate_head must be armed (got: $(cat "$TMP/updates"))"
+
+# (55) superseded-review arm still fires on the same shape of check_set.
+grep -qx '9981' "$TMP/dismissed" \
+  && ok "(55) long spaced check_set -> superseded self-review still retracted" \
+  || bad "(55) superseded review must be dismissed (got: $(cat "$TMP/dismissed"))"
+grep -q 'signoff_dismissed=9981@head261' "$TMP/updates" \
+  && ok "(55) and the pairing marker is recorded on the anchor" \
+  || bad "(55) signoff_dismissed marker (got: $(cat "$TMP/updates"))"
+# Both counters move in the SAME pass: the membership test they share read the
+# long check_set correctly for each arm, not just for whichever ran first.
+printf '%s\n' "$OUT14" | grep -q '1 stale-gate re-reviews routed' \
+  && ok "(55) summary counts the stale-gate re-review under a long check_set" \
+  || bad "(55) run 14 summary stale-gate count (got: $OUT14)"
+printf '%s\n' "$OUT14" | grep -q '1 superseded reviews retracted' \
+  && ok "(55) summary counts the retraction under a long check_set" \
+  || bad "(55) run 14 summary retraction count (got: $OUT14)"
+
+# (56) WHOLE-TOKEN: `codex-lite` sits in the same list and must not be what
+# matched. A gateless rig is the mirror image of the same requirement — its
+# `none` sentinel names no gate, so neither arm may fire on it.
+printf '%s\n' \
+  'bead-LC3|262|main|||lint, codex-lite, typecheck|green@old262' \
+  'bead-LC4|263|main|||none|green@old263' \
+  > "$TMP/anchors"
+printf '%s\n' \
+  '262|OPEN||false||main|polecat/bead-LC3|head262|MERGEABLE|BLOCKED||' \
+  '263|OPEN||false||main|polecat/bead-LC4|head263|MERGEABLE|BLOCKED||' \
+  > "$TMP/prs"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/gatehead"; : > "$TMP/dismissed"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null 2>&1
+eq "$(grep -c 'Review PR#262' "$TMP/created")" "0" \
+   "(56) 'codex-lite' is a different gate -> no re-review (whole-token match)"
+eq "$(grep -c 'Review PR#263' "$TMP/created")" "0" \
+   "(56) the none sentinel names no gate -> gateless rig never enters the arm"
+
+# (57) STATIC GUARD: the membership test must stay in-shell. A `grep -q` pipeline
+# reintroduces the pipefail/SIGPIPE misread that (54)/(55) cannot provoke on
+# demand — the same regression merge-skill.sh's approval and trusted-approver
+# tests are written this way to prevent.
+# Anchored on the `is_codex_member=""` initialiser rather than on a mention of the
+# flag: the rationale comment above the test quotes `grep -q` while explaining why
+# it is gone, so a looser anchor would read the prose and fail on the fixed code.
+CS_SITE=$(grep -n 'is_codex_member=""' "$SCRIPT" | head -1 | cut -d: -f1)
+[ -n "$CS_SITE" ] \
+  && ok "(57) the codex-membership site is present" \
+  || bad "(57) could not locate the codex-membership site in $SCRIPT"
+CS_BLOCK=$(sed -n "$CS_SITE,$((CS_SITE + 4))p" "$SCRIPT")
+printf '%s\n' "$CS_BLOCK" | grep -q 'grep -q' \
+  && bad "(57) codex membership must NOT be decided by a grep pipeline (pipefail/SIGPIPE misread)" \
+  || ok "(57) codex membership is matched in-shell, not through a grep pipeline"
+printf '%s\n' "$CS_BLOCK" | grep -q '",codex,"' \
+  && ok "(57) and it is a comma-wrapped whole-token match" \
+  || bad "(57) codex membership must be a comma-wrapped whole-token match"
+
 # --- Run 13: REPOFAIL. The origin repository cannot be resolved. ---------------
 # Every PR here is named by NUMBER, and a number resolves in whatever repository
 # gh considers current. This pass has no merge authority, but it CLOSES anchors as
@@ -1742,11 +2521,11 @@ grep -q "did not name 'github.com/acme/repo' and were IGNORED" "$TMP/errid5" \
 # re-review child, no escalation mail.
 reset_identity
 printf '%s\n' \
-  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|mallory/repo|true' \
-  '502|CLOSED||false||main|polecat/id-ABAND|head502|UNKNOWN|UNKNOWN|mallory/repo|true' \
-  '503|OPEN||false||main|polecat/id-RETGT|head503|MERGEABLE|BLOCKED|mallory/repo|true' \
-  '504|OPEN||false||main|polecat/id-CONF|head504|CONFLICTING|DIRTY|mallory/repo|true' \
-  '505|OPEN||false||main|polecat/id-GATE|head505|MERGEABLE|BLOCKED|mallory/repo|true' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|||mallory/repo|true' \
+  '502|CLOSED||false||main|polecat/id-ABAND|head502|UNKNOWN|UNKNOWN|||mallory/repo|true' \
+  '503|OPEN||false||main|polecat/id-RETGT|head503|MERGEABLE|BLOCKED|||mallory/repo|true' \
+  '504|OPEN||false||main|polecat/id-CONF|head504|CONFLICTING|DIRTY|||mallory/repo|true' \
+  '505|OPEN||false||main|polecat/id-GATE|head505|MERGEABLE|BLOCKED|||mallory/repo|true' \
   > "$TMP/prs"
 OUTHD1="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
@@ -1771,7 +2550,7 @@ printf '%s\n' "$OUTHD1" | grep -q "PR#501 is opened from FORK 'mallory/repo'" \
 # A self-contradicting identity is unestablished, not a tie to break.
 reset_identity
 printf '%s\n' \
-  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|acme/repo|true' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|||acme/repo|true' \
   > "$TMP/prs"
 OUTHD2="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
@@ -1785,7 +2564,7 @@ printf '%s\n' "$OUTHD2" | grep -q "PR#501 reports head repository 'acme/repo' (t
 # schema shift). "I cannot tell whether this is a fork" must record nothing.
 reset_identity
 printf '%s\n' \
-  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|-|false' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|||-|false' \
   > "$TMP/prs"
 OUTHD3="$(IDRUN)"
 has '^id-CLOSE$' "$TMP/closed" \
@@ -1801,7 +2580,7 @@ printf '%s\n' "$OUTHD3" | grep -q "PR#501 head identity is unreadable" \
 # mismatch force-pushes a rebase onto a branch the anchor never recorded.
 reset_identity
 printf '%s\n' \
-  '504|OPEN||false||main|polecat/somebody-else|head504|CONFLICTING|DIRTY|acme/repo|false' \
+  '504|OPEN||false||main|polecat/somebody-else|head504|CONFLICTING|DIRTY|||acme/repo|false' \
   > "$TMP/prs"
 OUTHD4="$(IDRUN)"
 eq "$(grep -c 'Rebase PR#504' "$TMP/created")" "0" \

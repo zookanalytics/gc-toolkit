@@ -120,7 +120,12 @@ check '  none  '    'none'  "(I) sentinel tolerates surrounding whitespace"
 # membership test decides whether a codex review is dispatched AT ALL, so it must
 # read $CHECK_SET — stamping a gate that was never dispatched would hold the
 # merge forever on a marker nothing can stamp.
-grep -q 'if printf .%s. "\$CHECK_SET" | tr .,. ' "$TOML" \
+# The proxy is the membership test's exact in-shell shape (tk-tmefn replaced the
+# former `... | tr ',' '\n' | ... | grep -qxF codex` pipeline, which reports 141
+# on a long check_set under pipefail and reads a declared codex gate as ABSENT).
+# What is being guarded is unchanged: the test must read the normalized
+# $CHECK_SET, never a raw {{check_set}} re-render.
+grep -qF "printf '%s' \"\$CHECK_SET\" | tr -d '[:space:]'),\" in" "$TOML" \
   && ok "(J) CODEX_GATE membership test reads the normalized \$CHECK_SET" \
   || bad "(J) membership test must read \$CHECK_SET, not a raw {{check_set}} re-render"
 

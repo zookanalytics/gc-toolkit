@@ -29,6 +29,28 @@
 #   (STAMPFAIL) a stamp that does NOT persist is NOT counted healed and does NOT
 #            dispatch — the anchor stays ungated and is retried, flagged once, and
 #            the pass EXITS UNSAFE_RC (3) so the formula holds merge-skill.
+#   (HEALPARTIAL) the HALF-landed stamp: check_set persists, check_set_healed is
+#            dropped. Not counted healed, warned, flagged — but the signoff IS
+#            dispatched in the SAME pass, and the pass does NOT exit UNSAFE_RC
+#            (the gate is armed, so this anchor's merge is already held and the
+#            others must not be held with it).
+#   (HEALDEFER) the state that deferral would leave — check_set normalized,
+#            check_set_healed absent — reads as "already normalized" and is never
+#            re-dispatched. This is WHY (HEALPARTIAL) dispatches in-pass.
+#   (HEALPARTIAL+ROUTE) the compound case from review tk-nwi06 finding #1: the mark
+#            drops AND the route write fails. The unclaimable review is closed and
+#            the operator is given the by-hand repair for the mark.
+#   (NOMARK) review tk-y5r1e finding #2: check_set_healed drops AND the fallback
+#            check_set_heal_flagged write also drops. The flag is READ BACK and
+#            repaired once; when neither mark is durable the pass says so and stops
+#            promising a next pass — and still dispatches in-pass, which is now the
+#            only pass this anchor will ever get. (NOMARK+ROUTE) is that compounded
+#            with a failed route write.
+#   (ROUTE-DURABLE-CLAIMED) review tk-y5r1e finding #1: review_pool is persistently
+#            dropped while a codex polecat HOLDS the review. route_ok rejects the
+#            triple on the durable half before the assignee exception applies, and
+#            the failure path used to force-close an in-flight review — erasing the
+#            only signoff for an armed gate. Claimed is left OPEN and uncounted.
 #   (CONV)   a healed anchor (check_set_healed recorded, gate now satisfiable via
 #            the dispatched review) is not re-stamped and not re-dispatched.
 #   (RETRY)  a healed anchor whose dispatch FAILED last pass (healed recorded, gate
@@ -104,7 +126,9 @@ cs_for() {
   awk -F'|' -v i="$id" '$1==i{print $3; exit}' "$FAKE_ANCHORS"
 }
 healed_for() {
-  awk -F'\t' -v i="$1" '$1==i{print $2; exit}' "$FAKE_HEALED" 2>/dev/null
+  # LAST write wins, like the route reads below: the script may re-stamp this field
+  # after a partial write, and the read-back must see the repair, not the first try.
+  awk -F'\t' -v i="$1" '$1==i{v=$2} END{print v}' "$FAKE_HEALED" 2>/dev/null
 }
 
 case "$2" in
@@ -127,10 +151,16 @@ case "$2" in
           # Live check_set_healed overlay.
           h=$(healed_for "$id"); [ -n "$h" ] || h="$healed"
           hfield=""; [ -n "$h" ] && hfield=$(printf ',"check_set_healed":"%s"' "$h")
+          # check_set_heal_flagged is STATEFUL too: it is the second mark that keeps
+          # a partially-healed anchor flowing through the satisfiability retry, so a
+          # pass has to see what an earlier pass flagged.
+          flfield=""
+          grep -qx "$id" "$FAKE_FLAGGED" 2>/dev/null \
+            && flfield=',"check_set_heal_flagged":"1"'
           cxfield=""; [ -n "$codex" ] && cxfield=$(printf ',"check.codex":"%s"' "$codex")
           prfield=""; [ -n "$pr" ] && prfield=$(printf ',"pr_number":"%s","pr_url":"https://x/pull/%s"' "$pr" "$pr")
-          obj=$(printf '{"id":"%s","title":"impl %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"%s"%s%s%s%s}}' \
-            "$id" "$id" "$mr" "$branch" "$target" "$csfield" "$cxfield" "$hfield" "$prfield")
+          obj=$(printf '{"id":"%s","title":"impl %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"%s"%s%s%s%s%s}}' \
+            "$id" "$id" "$mr" "$branch" "$target" "$csfield" "$cxfield" "$hfield" "$flfield" "$prfield")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -153,10 +183,44 @@ case "$2" in
   show)
     id="$3"
     cs=$(cs_for "$id"); [ "$cs" = "EMPTY" ] || [ "$cs" = "__ABSENT__" ] && cs=""
+    # check_set_healed as the STAMP READ-BACK sees it. Modelled separately from
+    # check_set because the two persist independently: the script writes them in one
+    # call and verifies each, so the half-landed write (gate armed, retry mark lost)
+    # has to be representable here or the regression cannot stage it.
+    hl=$(healed_for "$id")
+    [ -n "$hl" ] || hl=$(awk -F'|' -v i="$id" '$1==i{print $8; exit}' "$FAKE_ANCHORS" 2>/dev/null)
+    # The FALLBACK retry mark, as the read-back sees it. Modelled here for the same
+    # reason check_set_healed is: the script now re-reads it after writing it, so a
+    # dropped flag write has to be representable or the regression cannot stage the
+    # both-marks-lost case.
+    fl=""
+    grep -qx "$id" "$FAKE_FLAGGED" 2>/dev/null && fl="1"
     # anchor_bead recorded on a review this run?
     ab=$(awk -F'\t' -v i="$id" '$1==i && $2=="anchor_bead"{print $3; exit}' "$FAKE_REVMETA" 2>/dev/null)
-    jq -n --arg cs "$cs" --arg ab "$ab" \
-      '[{metadata: ({} + (if $cs=="" then {} else {check_set:$cs} end) + (if $ab=="" then {} else {anchor_bead:$ab} end))}]' ;;
+    # The ROUTE the dispatch wrote, as the read-back sees it. LAST write wins, so
+    # the script's one repair attempt is visible here.
+    rp=$(awk -F'\t' -v i="$id" '$1==i && $2=="review_pool"{v=$3} END{print v}' "$FAKE_REVMETA" 2>/dev/null)
+    rt=$(awk -F'\t' -v i="$id" '$1==i && $2=="gc.routed_to"{v=$3} END{print v}' "$FAKE_REVMETA" 2>/dev/null)
+    as=""
+    # $FAKE_CLAIMED models a pool polecat claiming the review the INSTANT it was
+    # routed: gc.routed_to is CONSUMED (a claim eats it) and an assignee appears.
+    # The read-back must read that as reachable, not as a lost route — re-routing
+    # a claimed review would offer it to a second pool.
+    if [ -n "${FAKE_CLAIMED:-}" ] && [ -n "$rt" ]; then as="$rt"; rt=""; fi
+    jq -n --arg cs "$cs" --arg hl "$hl" --arg ab "$ab" --arg rp "$rp" --arg rt "$rt" --arg as "$as" \
+          --arg fl "$fl" \
+      '[{assignee: (if $as=="" then null else $as end),
+         metadata: ({} + (if $cs=="" then {} else {check_set:$cs} end)
+                       + (if $hl=="" then {} else {check_set_healed:$hl} end)
+                       + (if $fl=="" then {} else {check_set_heal_flagged:$fl} end)
+                       + (if $ab=="" then {} else {anchor_bead:$ab} end)
+                       + (if $rp=="" then {} else {review_pool:$rp} end)
+                       + (if $rt=="" then {} else {"gc.routed_to":$rt} end))}]' ;;
+  close)
+    # gc bd close <id> --reason "..." — the script closes a review it minted but
+    # could not durably route, so the next pass's dedup does not reuse an
+    # unclaimable bead.
+    printf '%s\n' "$3" >> "$FAKE_CLOSED" ;;
   create)
     # gc bd create "<title>" -t task [--body-file -] --json
     n=$(cat "$FAKE_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$FAKE_SEQ"
@@ -180,15 +244,47 @@ case "$2" in
     fi
     if printf '%s' "$*" | grep -q 'check_set_healed='; then
       val=$(printf '%s' "$*" | sed -n 's/.*--set-metadata check_set_healed=\([^ ]*\).*/\1/p')
-      printf '%s\t%s\n' "$id" "$val" >> "$FAKE_HEALED"
+      # $FAKE_HEALFAIL is the PARTIAL-write injection, and it is deliberately
+      # independent of $FAKE_STAMPFAIL: the two fields go out in one update but
+      # persist separately, so the interesting failure is the asymmetric one —
+      # check_set lands, check_set_healed is silently dropped. Listing an id here
+      # discards EVERY write of this field, including the script's repair attempt.
+      if ! grep -qx "$id" "$FAKE_HEALFAIL" 2>/dev/null; then
+        printf '%s\t%s\n' "$id" "$val" >> "$FAKE_HEALED"
+      fi
     fi
     if printf '%s' "$*" | grep -q 'check_set_heal_flagged='; then
-      printf '%s\n' "$id" >> "$FAKE_FLAGGED"
+      # Every ATTEMPT is recorded, whether or not it persists: the flag is now read
+      # back and repaired once, and counting attempts is how the regression proves
+      # the repair actually happens instead of the script trusting one blind write.
+      printf '%s\n' "$id" >> "${FAKE_FLAGTRIES:-/dev/null}"
+      # $FAKE_FLAGFAIL is the same shape as $FAKE_HEALFAIL, aimed at the FALLBACK
+      # mark: listing an id discards every write of check_set_heal_flagged. Staged
+      # together with $FAKE_HEALFAIL it is the compound case where NEITHER durable
+      # retry mark survives, and the anchor would silently fall out of every later
+      # pass (review tk-y5r1e finding #2).
+      if ! grep -qx "$id" "${FAKE_FLAGFAIL:-/dev/null}" 2>/dev/null; then
+        printf '%s\n' "$id" >> "$FAKE_FLAGGED"
+      fi
     fi
     # Record review metadata (anchor_bead, routing, task_kind, review_branch).
-    for k in anchor_bead gc.routed_to task_kind review_branch pr_number fix_target_pool; do
+    # $FAKE_DROPKEY names ONE key whose write is silently DISCARDED — the
+    # "update returned success but nothing landed" transient that the route
+    # read-back exists to catch. Dropping `gc.routed_to` and `review_pool`
+    # separately is what distinguishes an unclaimable review from one whose
+    # signoff can no longer restore its route.
+    for k in anchor_bead gc.routed_to review_pool task_kind review_branch pr_number fix_target_pool; do
+      [ "$k" = "${FAKE_DROPKEY:-}" ] && continue
       if printf '%s' "$*" | grep -q -- "--set-metadata $k="; then
         v=$(printf '%s' "$*" | sed -n "s/.*--set-metadata $k=\\([^ ]*\\).*/\\1/p")
+        # $FAKE_STALE_ROUTE models a SPLIT route: the batched update persists
+        # review_pool for THIS pool while gc.routed_to keeps an OLDER pool's
+        # value. Not a dropped write — a write whose live half never took — so
+        # the read-back sees a perfectly non-empty gc.routed_to that offers the
+        # review to somebody else entirely.
+        if [ "$k" = "gc.routed_to" ] && [ -n "${FAKE_STALE_ROUTE:-}" ]; then
+          v="$FAKE_STALE_ROUTE"
+        fi
         printf '%s\t%s\t%s\n' "$id" "$k" "$v" >> "$FAKE_REVMETA"
       fi
     done ;;
@@ -202,14 +298,17 @@ GC
 chmod +x "$TMP/bin/gc"
 
 : > "$TMP/stamped"; : > "$TMP/healed"; : > "$TMP/flagged"; : > "$TMP/revmeta"
-: > "$TMP/deps"; : > "$TMP/stampfail"; echo 0 > "$TMP/seq"
+: > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/healfail"; : > "$TMP/closed"
+: > "$TMP/flagfail"; : > "$TMP/flagtries"; echo 0 > "$TMP/seq"
 mkdir -p "$TMP/bodies"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_REVIEWS="$TMP/reviews" \
        FAKE_STAMPED="$TMP/stamped" FAKE_HEALED="$TMP/healed" \
        FAKE_FLAGGED="$TMP/flagged" FAKE_REVMETA="$TMP/revmeta" FAKE_DEPS="$TMP/deps" \
-       FAKE_STAMPFAIL="$TMP/stampfail" FAKE_SEQ="$TMP/seq" FAKE_BODIES="$TMP/bodies"
+       FAKE_STAMPFAIL="$TMP/stampfail" FAKE_HEALFAIL="$TMP/healfail" \
+       FAKE_FLAGFAIL="$TMP/flagfail" FAKE_FLAGTRIES="$TMP/flagtries" \
+       FAKE_SEQ="$TMP/seq" FAKE_CLOSED="$TMP/closed" FAKE_BODIES="$TMP/bodies"
 
 # --- Run 1. -------------------------------------------------------------------
 RC1=0
@@ -396,6 +495,176 @@ printf '%s\n' "$OUT4" | grep -q '0 healed' \
 # the formula holds merge-skill this pass (review tk-z4u2e finding #1).
 eq "$RC4" "3" "(STAMPFAIL) a failed stamp makes the pass exit UNSAFE rc=3"
 
+# --- Run 4b: HEALPARTIAL (review tk-nwi06 finding #1). check_set and
+#     check_set_healed go out in ONE update and persist SEPARATELY, so the write can
+#     land by halves. The asymmetric half is the dangerous one: the GATE lands
+#     (merge held — safe) while the retry mark is dropped. Pre-fix the read-back
+#     only looked at check_set, so this read as a clean heal; and because check_set
+#     now reads normal while check_set_healed is absent, the classifier sends the
+#     anchor to `normal` on EVERY later pass. A dispatch that then failed left the
+#     anchor codex-gated with nothing able to raise check.codex, and no pass would
+#     ever look at it again — permanent, silent.
+cat > "$TMP/anchors" <<'A'
+bead-HALF|pull_request|EMPTY|412|polecat/feat-half|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/closed"
+echo 'bead-HALF' > "$TMP/healfail"
+RC4B=0
+OUT4B="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)" || RC4B=$?
+grep -q '^bead-HALF	codex$' "$TMP/stamped" \
+  && ok "(HEALPARTIAL) the gate half of the stamp did land" \
+  || bad "(HEALPARTIAL) fixture must land check_set (got: $(cat "$TMP/stamped"))"
+printf '%s\n' "$OUT4B" | grep -q '0 healed' \
+  && ok "(HEALPARTIAL) a half-landed stamp is NOT counted healed" \
+  || bad "(HEALPARTIAL) must report 0 healed (got: $OUT4B)"
+printf '%s\n' "$OUT4B" | grep -q 'check_set_healed did NOT' \
+  && ok "(HEALPARTIAL) the dropped retry mark is reported, not silent" \
+  || bad "(HEALPARTIAL) the partial write must warn (got: $OUT4B)"
+# THE POINT: the gate is made satisfiable in THIS pass rather than deferred, because
+# there is no later pass that will revisit this anchor (see HEALDEFER below).
+grep -q '	anchor_bead	bead-HALF$' "$TMP/revmeta" \
+  && ok "(HEALPARTIAL) the signoff is dispatched THIS pass, not deferred to one that never comes" \
+  || bad "(HEALPARTIAL) a half-stamped anchor must still get a satisfiable gate (got: $(cat "$TMP/revmeta"))"
+has '^bead-HALF$' "$TMP/flagged" && ok "(HEALPARTIAL) the partial write flags the anchor once" \
+                                 || bad "(HEALPARTIAL) a partial write must flag the anchor"
+# NOT unsafe: the gate IS armed, so merge-skill holds this PR on its own. Exiting
+# UNSAFE_RC here would hold every OTHER anchor's merge for the pass as collateral.
+eq "$RC4B" "0" "(HEALPARTIAL) an armed-but-unmarked anchor does NOT force the UNSAFE exit"
+
+# --- Run 4c: HEALDEFER. The state a deferred partial write leaves behind —
+#     check_set normalized, check_set_healed absent — proving the deferral this
+#     script must not do. Nothing here is broken-looking: the anchor reads
+#     "already normalized" and is skipped, while its codex gate has no marker and
+#     no review. This is why 4b dispatches in-pass instead of trusting "next pass".
+cat > "$TMP/anchors" <<'A'
+bead-DEFER|pull_request|codex|413|polecat/feat-defer|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/healfail"
+OUT4C="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)"
+printf '%s\n' "$OUT4C" | grep -q '0 signoffs dispatched' \
+  && ok "(HEALDEFER) an anchor whose healed mark was lost is never re-dispatched by a later pass" \
+  || bad "(HEALDEFER) fixture must show the deferral is a dead end (got: $OUT4C)"
+printf '%s\n' "$OUT4C" | grep -q '1 already normalized' \
+  && ok "(HEALDEFER) it is classified 'already normalized' — invisible to the retry" \
+  || bad "(HEALDEFER) lost-mark anchor must classify as normalized (got: $OUT4C)"
+
+# --- Run 4d: the finding's exact compound case — check_set persists,
+#     check_set_healed drops, AND the route write fails. Both guards must hold at
+#     once: the dispatch is not counted (the review is unclaimable and gets closed
+#     so the next pass can re-mint), and the operator is handed the by-hand repair
+#     for the mark, because for THIS anchor there is no next pass.
+cat > "$TMP/anchors" <<'A'
+bead-HALFR|pull_request|EMPTY|414|polecat/feat-halfr|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/closed"
+echo 'bead-HALFR' > "$TMP/healfail"
+RC4D=0
+OUT4D="$(FAKE_DROPKEY='gc.routed_to' bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)" || RC4D=$?
+printf '%s\n' "$OUT4D" | grep -q '0 signoffs dispatched' \
+  && ok "(HEALPARTIAL+ROUTE) an unroutable signoff is still NOT counted dispatched" \
+  || bad "(HEALPARTIAL+ROUTE) unrouted dispatch must not count (got: $OUT4D)"
+printf '%s\n' "$OUT4D" | grep -q 'did not durably route' \
+  && ok "(HEALPARTIAL+ROUTE) the route failure is reported" \
+  || bad "(HEALPARTIAL+ROUTE) unrouted dispatch must warn (got: $OUT4D)"
+[ -s "$TMP/closed" ] && ok "(HEALPARTIAL+ROUTE) the unclaimable review is closed (no dedup poison)" \
+                     || bad "(HEALPARTIAL+ROUTE) an unclaimable review must be closed"
+printf '%s\n' "$OUT4D" | grep -q 'repair by hand: gc bd update bead-HALFR --set-metadata check_set_healed=codex' \
+  && ok "(HEALPARTIAL+ROUTE) the operator gets the exact repair for the lost mark" \
+  || bad "(HEALPARTIAL+ROUTE) the compound failure must name its by-hand repair (got: $OUT4D)"
+eq "$RC4D" "0" "(HEALPARTIAL+ROUTE) the anchor is held, not UNSAFE — the gate is armed"
+# ...and the anchor is NOT lost. Everything durable from run 4d is carried into the
+# next pass — check_set landed, check_set_healed still cannot be written, the flag
+# did land — and the only thing repaired is the route. The flag is the second mark
+# that keeps this anchor visible: without it, check_set reads normal, the healed
+# mark is absent, and the classifier drops it forever (see HEALDEFER). The minted
+# review was CLOSED as unclaimable last pass, so the in-flight state is cleared too.
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/deps"; : > "$TMP/closed"
+OUT4E="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)"
+grep -q '	anchor_bead	bead-HALFR$' "$TMP/revmeta" \
+  && ok "(HEALPARTIAL+ROUTE) the next pass DOES retry it — the flag keeps a mark-less anchor visible" \
+  || bad "(HEALPARTIAL+ROUTE) a flagged anchor must not fall out of the retry (got: $OUT4E)"
+printf '%s\n' "$OUT4E" | grep -q '1 signoffs dispatched' \
+  && ok "(HEALPARTIAL+ROUTE) and the retry lands the signoff once the route write recovers" \
+  || bad "(HEALPARTIAL+ROUTE) the recovered pass must dispatch (got: $OUT4E)"
+eq "$(grep -c '^bead-HALFR	' "$TMP/stamped")" "1" \
+  "(HEALPARTIAL+ROUTE) the already-armed gate is not re-stamped on the retry"
+: > "$TMP/healfail"; : > "$TMP/flagged"
+
+# --- Run 4f: BOTH MARKS LOST (review tk-y5r1e finding #2). check_set_heal_flagged
+#     is the fallback that keeps a mark-less anchor visible (that is exactly what
+#     run 4e proves), and it was written by the same best-effort update that just
+#     dropped check_set_healed — and then trusted. So the shape the fallback exists
+#     for is the one where it is ALSO lost: gate armed, both retry marks gone,
+#     anchor invisible to every later pass. Pre-fix, nothing here even noticed. The
+#     flag is now read back and repaired once, and when it still will not stick the
+#     pass says so instead of promising a retry that cannot happen.
+cat > "$TMP/anchors" <<'A'
+bead-NOMARK|pull_request|EMPTY|415|polecat/feat-nomark|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/closed"
+: > "$TMP/flagtries"
+echo 'bead-NOMARK' > "$TMP/healfail"
+echo 'bead-NOMARK' > "$TMP/flagfail"
+RC4F=0
+OUT4F="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)" || RC4F=$?
+eq "$(grep -c '^bead-NOMARK$' "$TMP/flagtries")" "2" \
+  "(NOMARK) the flag is READ BACK and repaired once when the first write does not stick"
+printf '%s\n' "$OUT4F" | grep -q 'NO durable retry mark persisted' \
+  && ok "(NOMARK) both marks lost is reported — the anchor is invisible to later passes" \
+  || bad "(NOMARK) a lost fallback mark must warn (got: $OUT4F)"
+printf '%s\n' "$OUT4F" | grep -q 'Repair by hand: gc bd update bead-NOMARK --set-metadata check_set_healed=codex' \
+  && ok "(NOMARK) the operator is handed the exact by-hand repair" \
+  || bad "(NOMARK) the both-marks-lost warning must name the repair (got: $OUT4F)"
+# The gate still gets made satisfiable IN THIS PASS — with no retry mark at all,
+# this pass is the only one that will ever look at this anchor.
+grep -q '	anchor_bead	bead-NOMARK$' "$TMP/revmeta" \
+  && ok "(NOMARK) the signoff is still dispatched in-pass (the only pass this anchor gets)" \
+  || bad "(NOMARK) a mark-less anchor must still get a satisfiable gate (got: $(cat "$TMP/revmeta"))"
+eq "$RC4F" "0" "(NOMARK) an armed gate with no retry mark is held, not UNSAFE"
+
+# --- Run 4g: BOTH MARKS LOST *and* the route write fails. The compound of 4d and
+#     4f: the dispatch cannot be counted, and there is no retry mark to bring the
+#     anchor back. The failure message must not promise "retrying next pass" — that
+#     promise is what would send an operator away from an anchor nothing will ever
+#     revisit. It carries the no-retry note instead.
+cat > "$TMP/anchors" <<'A'
+bead-NOMARKR|pull_request|EMPTY|416|polecat/feat-nomarkr|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/closed"
+echo 'bead-NOMARKR' > "$TMP/healfail"
+echo 'bead-NOMARKR' > "$TMP/flagfail"
+OUT4G="$(FAKE_DROPKEY='gc.routed_to' bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)"
+printf '%s\n' "$OUT4G" | grep -q 'did not durably route.*NO durable retry mark persisted' \
+  && ok "(NOMARK+ROUTE) the route failure stops promising a next pass that cannot come" \
+  || bad "(NOMARK+ROUTE) the dispatch failure must carry the no-retry note (got: $OUT4G)"
+printf '%s\n' "$OUT4G" | grep -q 'did not durably route.*retrying next pass' \
+  && bad "(NOMARK+ROUTE) a mark-less anchor must NOT be told it retries next pass (got: $OUT4G)" \
+  || ok "(NOMARK+ROUTE) no false 'retrying next pass' on an anchor nothing will revisit"
+: > "$TMP/healfail"; : > "$TMP/flagfail"; : > "$TMP/flagged"
+
 # --- Run 5: a gateless-BY-CONFIG rig (--default none) heals to the sentinel, NOT
 #     codex, and dispatches NOTHING — the repair restores declared intent.
 cat > "$TMP/anchors" <<'A'
@@ -410,7 +679,7 @@ grep -q '^bead-CFGNONE	none$' "$TMP/stamped" \
 grep -q '	anchor_bead	bead-CFGNONE$' "$TMP/revmeta" && bad "(CFGNONE) a gateless rig must NOT dispatch a signoff" \
                                                        || ok "(CFGNONE) gateless-by-config -> no signoff dispatched"
 
-# --- Run 5b: FAIL-SOFT method (tk-jufvl). If review-dispatch-body.sh cannot be
+# --- Run 5a: FAIL-SOFT method (tk-jufvl). If review-dispatch-body.sh cannot be
 #     found — an older pack checkout, a partial deploy — the dispatch must STILL
 #     happen. An un-dispatched signoff leaves the armed gate unsatisfiable and
 #     holds the merge forever, which is strictly worse than a title-only bead. So
@@ -440,6 +709,162 @@ grep -q '	gc.routed_to	gc-toolkit/gc-toolkit.polecat-codex$' "$TMP/revmeta" \
 grep -q 'TITLE-ONLY' "$SOFT_ERR" \
   && ok "(FAILSOFT) WARNs loudly that the dispatch carries no method" \
   || bad "(FAILSOFT) missing emitter must WARN (got: $(cat "$SOFT_ERR"))"
+
+# --- Run 5b: THE ROUTE READ-BACK (tk-tmefn). The dispatch wrote gc.routed_to and
+#     review_pool best-effort — status discarded — and then counted the signoff as
+#     dispatched and woke the pool. If either write is dropped, the review bead
+#     still exists and is still OPEN, so the NEXT pass's inflight_for dedup reuses
+#     it instead of minting a replacement, while no pool can ever claim it. The
+#     gate stays armed, the anchor stays held, and nothing retries: a permanent
+#     strand built out of the repair itself. The route is now READ BACK, repaired
+#     once, and — if it still will not stick — the unclaimable review is CLOSED so
+#     the next pass can mint one that works.
+#
+#     The two fields are dropped SEPARATELY because they fail differently:
+#     gc.routed_to missing = nobody is offered the review at all; review_pool
+#     missing = it is offered now, but a signoff that has to put the review BACK
+#     in a pool has no record of which pool that was. A third shape (ROUTE-SPLIT,
+#     tk-bdfww) has NEITHER field empty and is still wrong: the durable copy names
+#     this pool while the live offer still names an older one.
+route_run() { # <drop-key> <claimed?> [stale-route-pool] -> OUT
+  cat > "$TMP/anchors" <<'A'
+bead-ROUTE|pull_request|EMPTY|430|polecat/feat-route|main||
+A
+  : > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+  : > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/closed"
+  FAKE_DROPKEY="$1" FAKE_CLAIMED="$2" FAKE_STALE_ROUTE="${3:-}" bash "$SCRIPT" \
+    --default 'codex' \
+    --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+    --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1
+}
+# A SECOND pass over exactly the state the previous route_run left — nothing reset.
+# That is what makes the dedup assertions real: a review this pass left open is
+# still there to be found (or not) by the next one.
+route_run_reuse() { # <drop-key> <claimed?> -> OUT
+  FAKE_DROPKEY="$1" FAKE_CLAIMED="$2" bash "$SCRIPT" \
+    --default 'codex' \
+    --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+    --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1
+}
+
+# (ROUTE-OK) both writes land -> counted as a dispatch, nothing closed.
+OUT5B="$(route_run '' '')"
+printf '%s\n' "$OUT5B" | grep -q '1 signoffs dispatched' \
+  && ok "(ROUTE-OK) a durably-routed signoff is counted as dispatched" \
+  || bad "(ROUTE-OK) a good route must count as dispatched (got: $OUT5B)"
+[ -s "$TMP/closed" ] && bad "(ROUTE-OK) a durably-routed review must NOT be closed" \
+                     || ok "(ROUTE-OK) a durably-routed review is left open for the pool"
+
+# (ROUTE-DROP) gc.routed_to does not persist -> NOT counted, review closed so the
+# next pass mints a claimable one instead of deduping onto this corpse.
+OUT5C="$(route_run 'gc.routed_to' '')"
+printf '%s\n' "$OUT5C" | grep -q '0 signoffs dispatched' \
+  && ok "(ROUTE-DROP) a signoff whose route did not persist is NOT counted dispatched" \
+  || bad "(ROUTE-DROP) an unrouted signoff must not count (got: $OUT5C)"
+printf '%s\n' "$OUT5C" | grep -q 'did not durably route' \
+  && ok "(ROUTE-DROP) the failure is reported, not silent" \
+  || bad "(ROUTE-DROP) an unrouted signoff must warn (got: $OUT5C)"
+[ -s "$TMP/closed" ] && ok "(ROUTE-DROP) the unclaimable review is closed (next pass re-mints)" \
+                     || bad "(ROUTE-DROP) an unclaimable review must be closed or it poisons dedup"
+
+# (ROUTE-DURABLE) review_pool does not persist, gc.routed_to does. The review IS
+# claimable right now, so this looks fine — but the durable copy is the only thing
+# a signoff can restore the route from when it must re-offer the review, and
+# gc.routed_to is consumed by the very claim that would need it. Must NOT count.
+OUT5D="$(route_run 'review_pool' '')"
+printf '%s\n' "$OUT5D" | grep -q '0 signoffs dispatched' \
+  && ok "(ROUTE-DURABLE) a missing review_pool is NOT counted dispatched (route is unrestorable)" \
+  || bad "(ROUTE-DURABLE) a missing durable route copy must not count (got: $OUT5D)"
+[ -s "$TMP/closed" ] && ok "(ROUTE-DURABLE) the review with no durable route is closed" \
+                     || bad "(ROUTE-DURABLE) a review with no durable route must be closed"
+
+# (ROUTE-DURABLE-CLAIMED) THE FORCE-CLOSE HAZARD (review tk-y5r1e finding #1). Same
+# persistently-dropped review_pool as ROUTE-DURABLE, except a codex polecat has
+# ALREADY CLAIMED the review. route_ok tests the durable copy FIRST, so it rejects
+# this triple before the assignee exception can apply — and the failure path used to
+# read that rejection as "claimed by nobody" and close the bead, `--force` on the
+# retry specifically to beat the ownership check that would have stopped it. That
+# force-closes an in-flight review and erases the only live signoff for an armed
+# gate: the anchor then waits forever on a check.codex nothing is left to stamp.
+# Uncounted is right; closed is not.
+OUT5DC="$(route_run 'review_pool' '1')"
+[ -s "$TMP/closed" ] \
+  && bad "(ROUTE-DURABLE-CLAIMED) a CLAIMED review must never be closed, whatever the route reads (closed: $(cat "$TMP/closed"))" \
+  || ok "(ROUTE-DURABLE-CLAIMED) a claimed review with a dropped durable route is LEFT OPEN, not force-closed"
+printf '%s\n' "$OUT5DC" | grep -q 'CLAIMED by' \
+  && ok "(ROUTE-DURABLE-CLAIMED) the unverifiable-but-claimed route is reported, not silent" \
+  || bad "(ROUTE-DURABLE-CLAIMED) a claimed review with a bad route must warn (got: $OUT5DC)"
+printf '%s\n' "$OUT5DC" | grep -q '0 signoffs dispatched' \
+  && ok "(ROUTE-DURABLE-CLAIMED) it is still NOT counted dispatched (the route never verified)" \
+  || bad "(ROUTE-DURABLE-CLAIMED) an unverified route must not count (got: $OUT5DC)"
+# The next pass must find it and REUSE it rather than mint a twin — which is the
+# whole reason leaving a claimed review open is safe.
+printf '%s\n' "$(route_run_reuse 'review_pool' '1')" | grep -q '0 signoffs dispatched' \
+  && ok "(ROUTE-DURABLE-CLAIMED) the next pass reuses the in-flight review instead of minting a twin" \
+  || bad "(ROUTE-DURABLE-CLAIMED) a left-open claimed review must dedup the next pass"
+
+# (ROUTE-CLAIMED) NOT over-firing. A codex polecat claiming the review between the
+# write and the read-back CONSUMES gc.routed_to and takes the assignee. That is a
+# healthy dispatch, not a lost route — re-routing it would offer a claimed review
+# to a second pool, and closing it would yank it from its reviewer.
+OUT5E="$(route_run '' '1')"
+printf '%s\n' "$OUT5E" | grep -q '1 signoffs dispatched' \
+  && ok "(ROUTE-CLAIMED) a review claimed the instant it routed still counts as dispatched" \
+  || bad "(ROUTE-CLAIMED) a consumed gc.routed_to with an assignee must read as routed (got: $OUT5E)"
+[ -s "$TMP/closed" ] && bad "(ROUTE-CLAIMED) a CLAIMED review must never be closed" \
+                     || ok "(ROUTE-CLAIMED) a claimed review is left alone"
+
+# (ROUTE-SPLIT) THE THIRD WAY A BATCHED ROUTE WRITE HALF-LANDS (tk-bdfww):
+# review_pool persists for THIS pool while gc.routed_to keeps an OLDER pool's
+# value. Neither field is empty, so a read-back that only asks "is the live route
+# non-empty?" declares it verified — and it is exactly backwards: the durable copy
+# says pool A, the live offer says pool B. The dispatch is counted, pool A is woken
+# with nothing to claim, and the review that A's gate depends on sits in B's queue.
+# Whichever pool eventually takes it, the anchor's gate is owed by a bead nobody
+# routed there. The live half must MATCH the pool being dispatched to, not merely
+# exist; a mismatch is unverified, which sends it down the repair-then-close path
+# so the next pass mints a review that is actually offered to A.
+OUT5G="$(route_run '' '' 'gc-toolkit/gc-toolkit.polecat-OTHER')"
+printf '%s\n' "$OUT5G" | grep -q '0 signoffs dispatched' \
+  && ok "(ROUTE-SPLIT) review_pool=A with a live gc.routed_to=B is NOT counted dispatched" \
+  || bad "(ROUTE-SPLIT) a route offered to a different pool must not count (got: $OUT5G)"
+printf '%s\n' "$OUT5G" | grep -q 'did not durably route' \
+  && ok "(ROUTE-SPLIT) the split route is reported, not silent" \
+  || bad "(ROUTE-SPLIT) a split route must warn (got: $OUT5G)"
+[ -s "$TMP/closed" ] \
+  && ok "(ROUTE-SPLIT) the misrouted review is closed (next pass mints one offered to this pool)" \
+  || bad "(ROUTE-SPLIT) a review offered to another pool must be closed or it poisons dedup"
+
+# --- Run 5f: LONG CHECK_SET (tk-tmefn). `has_codex` piped printf|tr|sed into
+#     `grep -qxF codex` under `set -o pipefail`. grep -q exits at its FIRST match,
+#     closing the pipe under sed while sed still has the gates AFTER `codex` to
+#     write; sed takes SIGPIPE and the pipeline reports 141. `! has_codex` then
+#     reads TRUE for a check_set that plainly names codex, and this anchor is
+#     skipped — no signoff dispatched for a gate that IS armed, so the anchor is
+#     held forever on a check.codex nothing was sent to stamp. Measured 10/10
+#     misses at 10k gates, which is why the fixture is that wide: the bug class is
+#     what is being pinned, and the in-shell fix makes length irrelevant.
+#     `codex` is placed FIRST so there is a long tail left to SIGPIPE on.
+LONGCS="codex"
+for _i in $(seq 1 10000); do LONGCS="$LONGCS,gate$_i"; done
+#     Shaped like the (RETRY) anchor — check_set_healed recorded, no marker,
+#     nothing in flight — so it reaches the satisfiability check where has_codex
+#     decides. Without the healed mark an already-normalized anchor is counted
+#     "normal" and returns before has_codex ever runs, and the case would pass
+#     vacuously against the broken pipeline.
+printf 'bead-LONGCS|pull_request|%s|431|polecat/feat-longcs|main||%s\n' "$LONGCS" "$LONGCS" > "$TMP/anchors"
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/closed"
+OUT5F="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1)"
+printf '%s\n' "$OUT5F" | grep -q '1 signoffs dispatched' \
+  && ok "(LONGCS) a long check_set naming codex still dispatches a signoff (no SIGPIPE miss)" \
+  || bad "(LONGCS) long check_set must be recognized as naming codex (got: $OUT5F)"
+grep -q '	anchor_bead	bead-LONGCS$' "$TMP/revmeta" \
+  && ok "(LONGCS) the dispatched signoff is linked to the long-check_set anchor" \
+  || bad "(LONGCS) long-check_set anchor must get a linked signoff"
 
 # --- Run 6: FORMULA GATING (heal-gates-merge). The finding this rework closes
 #     (review tk-z4u2e #1): a stamp that did not persist used to exit 0, so the

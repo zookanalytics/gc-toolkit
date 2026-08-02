@@ -248,7 +248,12 @@ own **ephemeral** unit (there is nothing to merge) and hands a keepable artifact
 to the refinery like any other PR, but it never closes a unit that merges. The
 **merge skill** is the **single writer of merged-truth**: once the check-set
 clears it validates, performs the merge, and records that the bead landed —
-synchronous, because the agent that merged is the one that knows it merged. The
+synchronous, because the agent that merged is the one that knows it merged. It
+validates against a **fresh read of the anchor** (the enumeration snapshot
+predates the PR read, and the signoff path writes the anchor concurrently) and
+pins the merge to the **exact head it validated** (`--match-head-commit`), so
+neither a mid-pass metadata write nor a mid-pass push can land something no gate
+in that pass ever looked at. The
 **observer** is the backstop for what no one knows: it detects desync (a merge
 skill that died mid-merge, an out-of-band merge, an unowned artifact) and
 surfaces it, but it **never writes merged-truth**. The **refinery** is the agent
@@ -269,7 +274,7 @@ For a bead landing to `main`:
 |---|---|---|
 | **signoff** | the signoff gate (a review step) | a `check.<name>=green@<head>` marker on the anchor |
 | **CI** | the rig's CI on the PR | required checks green |
-| **approval** | a human (or delegated) approver | an approving PR review |
+| **approval** | a human (or delegated) approver | an approving PR review at the live head, by an account that is neither the city's nor untrusted (below) |
 | **title/description current** | the head-bound marker | every gate marker is `green@<live-head>` |
 | **merged** | the merge itself | `merged_sha` exists |
 
@@ -341,6 +346,123 @@ codex-named — so growing the subset needs no undoing of the shipped gate (PR #
 > a separate implementation bead; nothing in the shipped pre-open gate (PR #186)
 > blocks the path.
 
+**`approval` is checked explicitly, because `CLEAN` only folds it sometimes
+(tk-5niup).** `merge-skill.sh`'s terminal gate is GitHub's composite
+`mergeStateStatus=CLEAN`, whose comment long read as "mergeable, required checks
+green, **and approved**". That last clause holds only where the repo's ruleset
+*requires* a review — there, no approval means `REVIEW_REQUIRED` and `BLOCKED`.
+On a repo with **no** review requirement and no CI, `CLEAN` is true with **zero**
+approving reviews, and the merge lands unreviewed work. So `approval` is a real,
+separately-evaluated member: satisfied by an `APPROVED` review from an account
+**other than the one the city acts as** — the city posts COMMENT signoffs and
+never approves (#185), so a self-approval must never count — **and attached to
+the PR's live head**. Head-binding is not optional here: it is the same
+`green@<head>` rule the marker members follow, and without it the sequence
+"human approves head A → work is pushed → the city dismisses its own block" ends
+in a merge of a commit nobody approved, on any repo that keeps stale approvals
+effective. That means the evidence is read from the paginated REST reviews
+history, where each verdict carries its `commit_id`; `gh pr view --json
+latestReviews` cannot serve it, because it reports the latest verdict per
+reviewer with **no commit** — an approval of a dead head reads exactly like an
+approval of the live one. Effective verdict is the **latest state-bearing review
+per reviewer, computed before any verdict filtering**: `COMMENTED`/`PENDING` are
+excluded outright — they carry no verdict and supersede nothing (the city's own
+signoffs live there) — while `DISMISSED` *does* take part, because a retracted
+review must **shadow** that reviewer's older rows. Filtering the terminal states
+first is what lets a dismissal resurrect the `APPROVED` that preceded it, an
+approval explicitly taken back satisfying the gate. Effectiveness is per
+reviewer, but the *hold* is not: a standing `CHANGES_REQUESTED` from **any**
+external reviewer vetoes the merge — one human's approval does not answer
+another's unresolved objection, and on an unprotected repo `CLEAN` reads straight
+through the objection. The veto is deliberately **not** head-bound (unlike the
+approval): an objection stays live until its author supersedes it or it is
+dismissed, and a new commit does not resolve it.
+
+**The veto is not part of this member.** It is evaluated for *every* merge
+candidate whose review history was read — whatever `check_set` names, marker or
+not, and whether or not the anchor carries `signoff_dismissed`. `approval` asks
+whether a human said **yes** where GitHub does not require one; the veto asks
+whether a human said **no**, and nothing about a rig declining to declare
+`approval` makes another reviewer's objection stop counting. Scoped inside the
+approval gate (where it was first written), the ordinary anchor — `check_set`
+`codex`, marker green at the live head, `CLEAN` because the repo is unprotected —
+never consulted it at all and merged straight past an open changes-request
+(tk-bdfww).
+
+Unlike the other members `approval` is evidenced by
+GitHub review state rather than a `check.<name>` marker, so the marker loop drops
+the name the same way it drops the `none`/`off` sentinel; leaving it in would
+hold the anchor forever on a `check.approval` no reviewer can stamp. It is
+required when either:
+
+- the anchor **names `approval` in `check_set`** — the explicit opt-in a rig on
+  an unprotected repo should declare; or
+- the anchor carries **`signoff_dismissed`** — the city retracted its own
+  blocking review on that PR (below), so part of the PR's `CLEAN` is *our* doing
+  and can no longer stand in for approval. Sticky on presence, not head-match: a
+  dismissal is permanent, so a later head must not silently drop the requirement.
+  Combined with head-binding this is deliberately strict — once the city has
+  retracted a block on a PR, every subsequent head of that PR needs its own
+  external approval. That is the intended shape: the thing we traded away was a
+  standing GitHub-side block, and the replacement has to be at least as current
+  as what it replaced.
+- the PR's **review history shows a review authored by the city that is now
+  `DISMISSED`** (tk-tmefn) — the same fact as `signoff_dismissed`, read from the
+  side that cannot be bypassed. The marker records only the dismissals the city
+  performed *in-band*; an operator who clears the stale city
+  `CHANGES_REQUESTED` by hand on github.com leaves no marker at all, and on an
+  unprotected repo that hand-clearing is precisely what turns the PR `CLEAN`. So
+  the requirement follows the *retraction*, not the bookkeeping. GitHub only
+  permits dismissing a state-bearing review and the city never approves, so a
+  `DISMISSED` review under the city's login can only be a `CHANGES_REQUESTED` of
+  ours that someone took back. Sticky, like the marker arm.
+
+  Reading it costs one paginated reviews call per merge candidate, and makes an
+  unreadable review history a hold where it previously was not: an unreadable
+  history cannot show that no block of ours was retracted. Where the acting login
+  itself cannot be resolved, no dismissal can be *attributed*, so the arm widens
+  to "was anything dismissed on this PR at all" — over-broad, but scoped to PRs
+  whose review state someone has already been editing, so a `gh api user` blip
+  cannot stall a queue of PRs that carry no dismissals.
+
+The default `check_set` is unchanged, so this adds no new hold to a rig whose
+ruleset already requires review — there, approval was always the thing turning
+`BLOCKED` into `CLEAN`. A rig on an unprotected repo that wants the guarantee
+adds `approval` to its `check_set`.
+
+**The approver must be TRUSTED, not merely external (tk-pkgym).** "An account
+other than the city's" is a self-approval guard, not an approval *policy*: any
+GitHub account can submit an `APPROVED` review, and this member matters precisely
+where the repo enforces nothing server-side — so on an unprotected repo a
+read-only collaborator, an unrelated bot, or a throwaway account would otherwise
+land the PR. Every non-self `APPROVED` at the live head is therefore a
+**candidate**, and the gate is satisfied by the first candidate that passes the
+trusted-approver policy:
+
+- `MERGE_TRUSTED_APPROVERS` (comma-separated logins), when set, **is** the
+  policy — an explicit operator allowlist, evaluated with no API call. It
+  *replaces* the probe rather than widening it: an unlisted account is untrusted
+  even with write access.
+- otherwise the approver must hold **write-level permission** on the repo
+  (`admin`/`maintain`/`write`, read from
+  `repos/{owner}/{repo}/collaborators/<login>/permission`). `author_association`
+  is deliberately not used: `COLLABORATOR` covers a read-only collaborator.
+
+Anything else — including a permission probe that cannot be **read** — is
+untrusted and holds the merge, the same fail-closed reading every other gate
+gets. The hold names both remedies, so a token that may not read collaborator
+permissions is a configuration fix (set the allowlist), not a permanent stall.
+
+**Residual race, by construction.** Every gate here is validated client-side and
+then the merge is issued; review state can still change at the same head in that
+window (an approval dismissed, a `CHANGES_REQUESTED` posted) and the merge would
+still go through. `--match-head-commit` closes the *commit* half of this — a new
+push cannot slip an unvalidated head into the squash — but there is no equivalent
+binding for review state. Only server-side branch protection is atomic with the
+merge. Where this local gate is the whole policy, that window is the accepted
+residual risk; a rig that cannot accept it should require reviews in the repo's
+ruleset, which makes GitHub itself refuse the merge.
+
 **`title/description current` is load-bearing.** Approval and CI can be
 **stale**: an approval given on an earlier diff, with a title and body that no
 longer describe what will land, can still read as green. Approval alone is
@@ -349,6 +471,114 @@ validated** (`green@<sha>`), so the merge skill merges only while every gate is
 green at the *live* head — a later commit moves the head, the marker no longer
 matches `green@<live-head>`, and the gate re-gates. A stale approval therefore
 cannot carry an out-of-date PR onto the target.
+
+## Review state: the GitHub side must not diverge from the bead side
+
+A signoff writes its verdict in **two places** — the `check.<name>` marker on the
+anchor and a review on the PR — and both are gates. Keeping them consistent is
+not bookkeeping; when they disagree the PR becomes structurally unmergeable in a
+way no amount of re-gating fixes (tk-5niup).
+
+The loop that exposed it: codex reviews at head A, requests changes (a GitHub
+`CHANGES_REQUESTED` review) and files a rework child; the rework lands and the
+head advances to B; the re-gate at B finds everything resolved, posts a `COMMENT`
+review and stamps `check.codex=green@B`. **A `COMMENT` review does not supersede
+the same reviewer's earlier `CHANGES_REQUESTED`**, so GitHub keeps
+`reviewDecision=CHANGES_REQUESTED` and `mergeStateStatus=BLOCKED` — pinned to a
+commit that no longer exists — while the bead reads green. `merge-skill.sh`
+requires `CLEAN`, so every PR that takes a changes round strands forever.
+
+**The re-gate therefore retracts its own superseded review in the same step that
+stamps green** (the `signoff-supersede-dismiss` snippet in
+`template-fragments/polecat-non-impl-done.template.md`). Seven guards make the
+retraction honest, and each one is the difference between reconciling and
+erasing:
+
+- **Our own reviews only.** A human's `CHANGES_REQUESTED` is a veto, never ours
+  to clear.
+- **Superseded commits only** — a review pinned to a commit other than the one
+  just signed off. A `CHANGES_REQUESTED` at the *reviewed* commit means we both
+  blocked and passed the same head; that contradiction holds, it does not resolve.
+- **Only while the reviewed commit is still the live head** — re-read
+  *immediately before each dismissal*, not once before listing the reviews. If
+  the head moved after the signoff, removing the block would unblock an
+  *unreviewed* commit — the same stale-head hazard `green@<oid>` exists to
+  prevent. Checking only at listing time leaves a window in which a **fresh**
+  block posted on the **new** head is indistinguishable, by commit, from a
+  superseded one, and the retraction erases a live veto.
+- **Record before retracting, and confirm the record.** Dismissal removes a
+  GitHub-side merge block, so it is **merge-triggering** wherever `CLEAN` folds no
+  approval; it is paired with `signoff_dismissed` on the anchor, which arms the
+  explicit `approval` member above. The marker is written **first** and the
+  dismissal runs only if it stuck: marker-then-dismiss can only over-hold, while
+  dismiss-then-marker would drop both the block and the requirement if the write
+  failed. "Stuck" means **read back off the anchor**, not "the write exited 0" — a
+  `gc bd update` can report success and still not be durable, and an exit status
+  cannot tell the two apart. Both markers on this path — the gate stamp and the
+  pairing marker — are verified that way, for the same reason.
+
+  The marker is the *pairing*, not the requirement itself. It cannot be: it is
+  written only by this in-band path, so an operator dismissing the same review by
+  hand produces the identical GitHub state with no marker anywhere. That is why
+  the `approval` member's third arm reads the dismissal out of the review history
+  directly (above) — the marker makes the in-band case cheap to see, the history
+  makes *every* case impossible to miss.
+- **Only on a confirmed-green gate.** The `check.<name>=green@<oid>` stamp that
+  the retraction is trading for is itself best-effort — it is read back and the
+  retraction is skipped unless the anchor really carries it. A dismissal against
+  an unrecorded gate gives up the block for nothing. An unrecorded gate also
+  **keeps the review bead open**: the review is flagged `signoff_retry` and
+  re-routed to its own pool instead of being closed. Closing it would leave the
+  anchor held with no marker *and* no open child — `check-set-heal.sh` repairs an
+  empty `check_set`, not a missing marker under a normal one, so nothing would
+  ever raise the gate again and the PR would strand silently.
+- **Never while the anchor carries `merge_hold`.** Retraction is pipeline work on
+  a PR an operator has deliberately parked, and merge-triggering work at that:
+  dropping the last GitHub-side block is exactly what the hold forbids. The
+  observer's retraction arm already skips a held anchor; the re-gate runs in the
+  same anchor state and makes the same call. The gate marker is still stamped —
+  recording a signoff is not merge-triggering — and the next re-gate retracts
+  once the hold lifts.
+- **Never while native auto-merge is armed — or unreadable.** With `gh pr merge
+  --auto` set, clearing the last block does not *permit* the merge, it *performs*
+  it — server-side, immediately, before `merge-skill.sh` reads `signoff_dismissed`
+  at all. The approval requirement binds our own skill, never GitHub, so this case
+  fails closed: the block stays up and an operator disarms auto-merge or lands it
+  deliberately. The probe is therefore read **three-valued** — armed / disarmed /
+  unknown — and only a definite *disarmed* clears the guard. Read through a
+  `.autoMergeRequest // empty` filter, an API error, an auth failure, a rate limit
+  and a malformed payload all produce the same empty string a genuinely disarmed
+  PR does, so a probe that *failed* would clear the one guard whose entire job is
+  to stop a server-side merge. Like the live-head check, it is re-probed
+  *immediately before each dismissal*: auto-merge can be armed inside the window
+  the up-front probe cannot see.
+
+The reviews history is read **paginated** (`--paginate`, explicit `per_page`)
+everywhere it is read. GitHub pages the endpoint at 30, and a PR that took a
+changes round — the only kind either path acts on — is exactly the PR whose
+reviews spill past page one. Unpaginated, the re-gate can `last` an *older*
+review of its own and stamp the gate at the wrong commit, and the retraction can
+miss the standing block entirely and leave the PR stranded in the state it exists
+to heal.
+
+Retracting *without* that pairing is the trap on the other side of this bug. The
+stale review can be the **only** thing holding an unprotected repo's PR
+non-`CLEAN`; clear it alone and the refinery squash-merges on its next idle pass.
+Fail-closed in both directions is the rule: never strand a green PR, and never let
+a cleanup action become an unreviewed merge.
+
+**The observer converges what is already stranded.** Retracting at re-gate time
+stops *new* strands, but an anchor stranded before it was in place has a marker
+green at the live head — so the stale-gate arm above never fires, nothing
+re-dispatches a review, and there is no in-band path out. The observer therefore
+carries the **inverse** of the stale-gate arm: where that one sees a marker
+lagging the head, this one sees the head's marker current and **GitHub** lagging
+(`reviewDecision=CHANGES_REQUESTED` against a green gate). It performs the same
+guarded retraction with the same pairing marker, honors `merge_hold` like every
+other arm, and converges by construction — once dismissed the decision is no
+longer `CHANGES_REQUESTED`, so the arm does not re-enter. The two arms are
+symmetric halves of one rule: **whichever side is stale, re-earn it on that side —
+never paper over the difference by stamping the other.**
 
 ## Rework is a new child
 
@@ -533,6 +763,15 @@ never the anchor reopened. Two properties make it converge:
   merge meanwhile (an anchor lands only when all its children are closed), and on
   hand-back the one-anchor-per-PR arm closes the child as landed-on-branch rather
   than minting a second anchor.
+
+  "Closed" here means **`closed`, and nothing else**: a child in `blocked`,
+  `deferred`, `hooked` or `pinned` owes exactly as much work as an `open` one, so
+  the merge skill reads every non-closed status — and reads every key a bead names
+  a PR with (`pr_number`, `fork_pr`, `fork_pr_url`), the same set the observer
+  uses, so a child visible to one is visible to the other by construction. A
+  ledger read the skill cannot complete HOLDS the merge rather than reading as "no
+  child": an unreadable ledger and an empty one are indistinguishable through a
+  projection, and only one of them is safe to merge on.
 - **One rebase per head** (`stale_base_head=<head at detection>`). The arm re-arms
   only when the head moves, so a later rewrite that conflicts the *new* head is
   treated as the new stall it is, while an unchanged head is never re-filed.

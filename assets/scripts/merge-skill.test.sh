@@ -78,8 +78,87 @@
 #   (26) TWO well-formed EMPTY arrays in one payload (`[]` then `[]`) -> merge
 #        HELD. Nothing is malformed at all here; the document COUNT is the entire
 #        defect, so this case pins the count check on its own.
+#   (27) metadata.signoff_dismissed set (the city retracted its OWN blocking
+#        review at the re-gate — tk-5niup) + every gate green + CLEAN, but NO
+#        external approving review -> merge HELD. This is the fail-OPEN trap:
+#        the dismissal is what made the PR CLEAN, and on a repo with no review
+#        requirement CLEAN folds no approval at all, so pre-fix the skill
+#        squash-merged unverified work on its next idle pass.
+#   (27b) same, WITH an external approving review -> MERGED (the requirement is
+#        satisfiable, not a permanent hold)
+#   (27c) same, but the only APPROVED review is by the acting account itself ->
+#        merge HELD (a self-approval is not approval; the city never approves)
+#   (28) check_set names `approval` (the explicit opt-in for a rig on an
+#        unprotected repo) with no approving review -> merge HELD, and held on
+#        the APPROVAL gate — not on a `check.approval` marker no reviewer can
+#        ever stamp (the none/off-sentinel trap, applied to approval)
+#   (28b) check_set names `approval` and an external approval exists -> MERGED
+#   (29) the approval is real and external but pinned to an OLDER commit -> merge
+#        HELD. The stale-approval hole: `latestReviews` reports a verdict with no
+#        commit, so an approval of a dead head satisfied the gate and, once the
+#        city dismissed its own block, unapproved work merged. Approval is
+#        head-bound now, like every check.<name>=green@<head> marker.
+#   (30) the only approval sits on PAGE 2 of the reviews history -> MERGED. The
+#        stub serves page 2 only to a --paginate caller, as GitHub does, so an
+#        unpaginated read would strand a PR every human on it has approved.
+#   (30b) approved on page 1, the SAME reviewer's later CHANGES_REQUESTED on page
+#        2 -> merge HELD. The dangerous half of the pagination bug: truncated, a
+#        retracted approval reads as the effective verdict.
+#   (31) the anchor's metadata changes AFTER the enumeration snapshot and BEFORE
+#        the gates run (signoff_dismissed 19, merge_hold 19b, check.<gate> 19c) ->
+#        the gates read the FRESH bead, so the mid-pass write is honored this
+#        pass; an unreadable re-read (19d) skips the anchor, fail-closed
+#   (32) approval effectiveness per reviewer: a later DISMISSED shadows that
+#        reviewer's earlier APPROVED (32), another reviewer's standing
+#        CHANGES_REQUESTED vetoes an approval (32b), and a veto the same reviewer
+#        superseded with an APPROVED does NOT hold (32c)
+#   (33) the merge is bound to the validated head (--match-head-commit), and a
+#        head that moved between validation and merge is REFUSED, not landed
+#   (34) the fresh re-read must still BE the gating anchor: pr_number cleared
+#        (34), the anchor closed (34b), or merge_result cleared (34c) mid-pass ->
+#        skipped. An EMPTY fresh pr_number used to pass the mismatch guard and
+#        merge against the stale snapshot's PR
+#   (35) a paginated reviews read that FAILS after page 1 -> merge held. The
+#        pages already streamed parse fine, so only the exit status reveals that
+#        the missing tail held a superseding CHANGES_REQUESTED
+#   (36) the approver must be TRUSTED, not merely non-self: a read-only
+#        collaborator (36) or an account with no resolvable permission (36b) is
+#        held; a trusted approval alongside an untrusted one still merges (36c);
+#        MERGE_TRUSTED_APPROVERS replaces the permission probe as the policy
+#        (24d), exhaustively (24e), and independently of the list's length (24f)
+#   (37) the in-flight-child gate FAILS CLOSED on a ledger it cannot read: a
+#        non-zero `gc bd list` (37) and an error OBJECT served at exit 0 (37b)
+#        both HOLD, where before each looked exactly like "no child". It also
+#        sees every non-closed owner — a `blocked` child (37c) — and every key a
+#        bead names a PR with, including fork_pr (25d)
+#   (38) a duplicate gating anchor that appears only in the LIVE ledger, after
+#        the enumeration snapshot -> merge HELD. The one-anchor-per-PR guard is
+#        recomputed live; from the snapshot it could not see the duplicate, and a
+#        duplicate carries merge_result so the child hold could not either
+#   (39) a long check_set naming `approval` still arms the approval gate. The
+#        detector piped jq into `grep -q`, which exits at the first match and
+#        SIGPIPEs jq under pipefail, so `approval` read as absent and a CLEAN
+#        unprotected-repo PR merged unapproved
+#   (40) a city CHANGES_REQUESTED dismissed BY HAND on github.com — no
+#        signoff_dismissed marker, `approval` not in check_set, codex green at
+#        the live head, CLEAN — still requires an external approval. The
+#        requirement was armed only from bead-side markers, which record only
+#        the dismissals the city performed itself, so a manual cleanup merged
+#        unapproved work. (40c) it must not over-hold: the same PR WITH a
+#        trusted approval lands. (28d) the dismissal is found on page 2 too.
+#        (28e) with no resolvable self-login the arm falls back to any dismissal
+#   (41) an ORDINARY codex-only anchor — check_set `codex`, check.codex green at
+#        the live head, no `approval` member, no signoff_dismissed, nothing
+#        dismissed in the history — with a standing external CHANGES_REQUESTED
+#        -> merge HELD. The veto was enforced only inside the armed approval
+#        branch, so this anchor never consulted it and, CLEAN through the
+#        objection on an unprotected repo, squash-merged past a human's explicit
+#        "not this". (41b) it must not over-hold: the same shape with the veto
+#        SUPERSEDED by that reviewer's own later APPROVED lands, which also pins
+#        the veto to each reviewer's LATEST verdict rather than to any
+#        CHANGES_REQUESTED anywhere in the history
 #   (INV) `gh pr merge` is reached for EXACTLY the fully-validated PRs — no
-#         other anchor is merged.
+#         other anchor is merged, and every attempt is head-matched.
 #   (5c) convergence: a merged+closed anchor leaves the gating set, so a second
 #        pass does not re-merge it.
 #   (FS) field-shape guard: the skill requests only gh-supported --json fields.
@@ -133,21 +212,42 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 has() { grep -q "$1" "$2" 2>/dev/null; }
+# Assert that PATTERN (a BRE, same as `has`) appears in a CAPTURED STRING.
+#
+# NOT `printf '%s\n' "$OUT" | grep -q PATTERN`, which is what every assertion
+# here used to be (tk-tmefn). This file runs under `set -euo pipefail`, and
+# `grep -q` exits at its FIRST match — closing the pipe under a `printf` still
+# writing the rest of a large captured output. printf takes SIGPIPE, the
+# pipeline reports 141, and the assertion reads FALSE even though the line IS
+# present; `set -e` then aborts the whole run mid-file. Whether it fires depends
+# on where the match sits relative to the ~64KB pipe buffer, so the suite failed
+# intermittently on output SIZE rather than on behavior — a phantom red against
+# correct code. This branch removes that exact class from merge-skill.sh and
+# check-set-heal.sh; a harness that still carries it cannot be trusted to judge
+# the fix.
+#
+# A here-string is a REDIRECT, not a pipeline: bash hands grep a file it reads to
+# EOF, no upstream writer exists to be signalled, and the exit status is grep's
+# alone. Match semantics are unchanged from the pipelines this replaced.
+hasin() { grep -q "$2" <<< "$1"; }
 
 mkdir -p "$TMP/bin"
 
 # Gating anchors (gc bd list source):
-#   id|pr_number|merged_target|check_set|check.codex|merge_hold|pr_url|branch
+#   id|pr_number|merged_target|check_set|check.codex|merge_hold|signoff_dismissed|pr_url|branch
 # The 5th column is the anchor's per-gate marker value for check.codex; a
 # "green@<oid>" value means "the codex gate passed at commit <oid>". bead-NOGATE
 # has an empty check_set (declares no gates) and no marker. The 6th column is
 # metadata.merge_hold (an operator gate); rows that omit it read as "" (no hold),
-# so only bead-HOLD carries it. The 7th is metadata.pr_url — ABSENT on most rows on
+# so only bead-HOLD carries it. The 7th is metadata.signoff_dismissed (tk-5niup):
+# set when the re-gate retracted the city's OWN blocking review, which arms the
+# explicit approval gate for that anchor no matter what check_set says.
+# so only bead-HOLD carries it. The 8th is metadata.pr_url — ABSENT on most rows on
 # purpose: a pr_number-only anchor is exactly the shape check-set-heal.sh's recovery
 # produces before it backfills the certified URL, so the pinned read is the only
 # thing standing between these anchors and a foreign same-numbered PR.
 #
-# The 8th is metadata.branch, and it is absent on every legacy row for the same
+# The 9th is metadata.branch, and it is absent on every legacy row for the same
 # reason: a recovered anchor records no branch, so the head-BRANCH comparison must
 # not fire on it (only the two repository halves govern such a row). Only the head
 # identity cases below carry one.
@@ -181,22 +281,112 @@ bead-BADSTATUS|325|main|codex|green@HEAD325
 bead-BOTHSRC|326|main|codex|green@HEAD326
 bead-MULTIDOC|327|main|codex|green@HEAD327
 bead-MULTIEMPTY|328|main|codex|green@HEAD328
-bead-URLMISMATCH|330|main|codex|green@HEAD330||https://github.com/acme/OTHER/pull/330
-bead-XDUPOK|331|main|codex|green@HEAD331
-bead-XDUPFOREIGN|331|main|codex|green@HEAD331||https://otherhost/acme/repo/pull/331
-bead-XCHILDFOREIGN|332|main|codex|green@HEAD332
-bead-XCHILDSAME|333|main|codex|green@HEAD333
-bead-XCHILDFAIL|334|main|codex|green@HEAD334
-bead-DEPFOREIGN|340|main|codex|green@HEAD340
-bead-FORK|335|main|codex|green@HEAD335|||polecat/bead-FORK
-bead-SELFCONTRA|336|main|codex|green@HEAD336|||polecat/bead-SELFCONTRA
-bead-NOHEAD|337|main|codex|green@HEAD337|||polecat/bead-NOHEAD
-bead-BRANCHMISMATCH|338|main|codex|green@HEAD338|||polecat/bead-BRANCHMISMATCH
-bead-HEADOK|339|main|codex|green@HEAD339|||polecat/bead-HEADOK
+bead-DISMISSED|329|main|codex|green@HEAD329||900@HEAD329
+bead-DISMISSED-OK|330|main|codex|green@HEAD330||901@HEAD330
+bead-SELFAPPROVE|331|main|codex|green@HEAD331||902@HEAD331
+bead-APPROVALSET|332|main|codex,approval|green@HEAD332
+bead-APPROVALSET-OK|333|main|codex,approval|green@HEAD333
+bead-STALEAPPROVE|334|main|codex|green@HEAD334||903@HEAD334
+bead-PAGE2|335|main|codex,approval|green@HEAD335
+bead-LATERCR|336|main|codex,approval|green@HEAD336
+bead-RACEDISMISS|337|main|codex|green@HEAD337
+bead-RACEHOLD|338|main|codex|green@HEAD338
+bead-RACEGATE|339|main|codex|green@HEAD339
+bead-SHOWFAIL|340|main|codex|green@HEAD340
+bead-DISMISSSHADOW|341|main|codex,approval|green@HEAD341
+bead-VETO|342|main|codex,approval|green@HEAD342
+bead-CRAPPROVE|343|main|codex,approval|green@HEAD343
+bead-HEADMOVE|344|main|codex|green@HEAD344
+bead-RACENOPR|345|main|codex|green@HEAD345
+bead-RACECLOSED|346|main|codex|green@HEAD346
+bead-RACEUNPARK|347|main|codex|green@HEAD347
+bead-APIFAIL|348|main|codex,approval|green@HEAD348
+bead-UNTRUSTED|349|main|codex,approval|green@HEAD349
+bead-BOTAPPROVE|350|main|codex,approval|green@HEAD350
+bead-MIXEDAPPROVE|351|main|codex,approval|green@HEAD351
+bead-QUERYFAIL|352|main|codex|green@HEAD352
+bead-PROBEOBJ|353|main|codex|green@HEAD353
+bead-BLOCKEDCHILD|354|main|codex|green@HEAD354
+bead-FORKCHILD|355|main|codex|green@HEAD355
+bead-LIVEDUP|356|main|codex|green@HEAD356
+bead-HANDDISMISS|358|main|codex|green@HEAD358
+bead-HANDDISMISS-OK|359|main|codex|green@HEAD359
+bead-HANDDISMISS-P2|360|main|codex|green@HEAD360
+bead-CODEXVETO|361|main|codex|green@HEAD361
+bead-CODEXVETO-OK|362|main|codex|green@HEAD362
+bead-URLMISMATCH|363|main|codex|green@HEAD363|||https://github.com/acme/OTHER/pull/363
+bead-XDUPOK|364|main|codex|green@HEAD364
+bead-XDUPFOREIGN|364|main|codex|green@HEAD364|||https://otherhost/acme/repo/pull/364
+bead-XCHILDFOREIGN|365|main|codex|green@HEAD365
+bead-XCHILDSAME|366|main|codex|green@HEAD366
+bead-XCHILDFAIL|367|main|codex|green@HEAD367
+bead-DEPFOREIGN|373|main|codex|green@HEAD373
+bead-FORK|368|main|codex|green@HEAD368||||polecat/bead-FORK
+bead-SELFCONTRA|369|main|codex|green@HEAD369||||polecat/bead-SELFCONTRA
+bead-NOHEAD|370|main|codex|green@HEAD370||||polecat/bead-NOHEAD
+bead-BRANCHMISMATCH|371|main|codex|green@HEAD371||||polecat/bead-BRANCHMISMATCH
+bead-HEADOK|372|main|codex|green@HEAD372||||polecat/bead-HEADOK
 A
 
+# (39) The long-check_set anchor, appended programmatically because its check_set
+# is thousands of gates wide. Length is the whole point: the pre-fix detector
+# piped jq into `grep -qxF approval`, and `grep -q` exits at its FIRST match —
+# closing the pipe under jq while jq is still writing the gates that FOLLOW
+# `approval`. jq then takes SIGPIPE, the pipeline reports 141 under `set -o
+# pipefail`, and the trailing `&& needs_approval=1` never runs. Below ~64KB of jq
+# output (the pipe buffer) jq writes once and exits before grep does, so the race
+# is invisible; past it the miss is reliable — measured 4/10 at 2k gates, 10/10 at
+# 10k. This fixture therefore uses a length that makes the failure DETERMINISTIC
+# rather than one that looks like a plausible rig config: the bug class is what is
+# being pinned, and the fix (in-shell matching, no pipeline) makes length
+# irrelevant. Every gate is spelled `codex` so the one marker the stub serves
+# satisfies them all and the pass actually reaches the approval gate.
+LONGSET="approval"
+for _i in $(seq 1 10000); do LONGSET="$LONGSET,codex"; done
+printf 'bead-LONGSET|357|main|%s|green@HEAD357\n' "$LONGSET" >> "$TMP/anchors"
+
+# The anchor state as a LATER `gc bd show` reads it — same columns plus an
+# optional 8th (status) and 9th (merge_result), and it OVERRIDES $TMP/anchors for
+# the per-anchor metadata re-read the skill performs after the PR-state read.
+# This is the concurrency seam: the signoff path writes the anchor (stamps
+# check.<gate>, records signoff_dismissed, then dismisses the GitHub review) WHILE
+# the skill is mid-pass, so the enumeration snapshot and the live bead disagree.
+# Only anchors listed here differ from their snapshot row. A `-` in columns 8/9
+# means the field is EMPTY on the live bead (an omitted column keeps the normal
+# open + merge_result=pull_request gating shape).
+#   337 signoff_dismissed appears only in the fresh read -> approval now required
+#   338 merge_hold appears only in the fresh read        -> operator gate now set
+#   339 check.codex went STALE in the fresh read         -> gate re-gated
+#   345 pr_number CLEARED in the fresh read              -> anchor no longer claims the PR
+#   346 the anchor CLOSED mid-pass                       -> no longer a gating anchor
+#   347 merge_result cleared (un-parked mid-pass)        -> no longer PR-parked
+cat > "$TMP/anchors-fresh" <<'AF'
+bead-RACEDISMISS|337|main|codex|green@HEAD337||904@HEAD337
+bead-RACEHOLD|338|main|codex|green@HEAD338|true
+bead-RACEGATE|339|main|codex|green@OLD339
+bead-RACENOPR||main|codex|green@HEAD345
+bead-RACECLOSED|346|main|codex|green@HEAD346|||closed
+bead-RACEUNPARK|347|main|codex|green@HEAD347|||open|-
+AF
+
+# Anchors whose `gc bd show` FAILS outright (empty output), to prove the re-read
+# is fail-closed: an anchor whose live metadata cannot be read is skipped, never
+# validated against the stale snapshot the race is about.
+SHOWFAIL_IDS="bead-SHOWFAIL"
+
+# PRs whose head MOVED after validation, as `--match-head-commit` sees it:
+# pr|actual_head. The gh stub refuses a merge whose --match-head-commit does not
+# equal the actual head, exactly as GitHub does.
+cat > "$TMP/headmove" <<'HM'
+344|NEWHEAD344
+HM
+
 # PR states (gh pr view source):
-#   pr|state|isDraft|baseRefName|headRefOid|mergeStateStatus|mergeable|mergeOid
+#   pr|state|isDraft|baseRefName|headRefOid|mergeStateStatus|mergeable|mergeOid|reviewDecision
+# reviewDecision appears in the approval gate's hold message only. The approval
+# EVIDENCE lives in $TMP/reviews below, because it must carry the commit each
+# verdict was attached to — `gh pr view --json latestReviews` carries none, which
+# is exactly why the gate cannot be built on it (tk-5niup).
 #   301 OPEN, base==target, check.codex green@head, CLEAN -> MERGED + recorded
 #   302 OPEN, check.codex green@old-head (stale)  -> HELD
 #   303 OPEN, codex in check_set but no marker    -> HELD
@@ -229,13 +419,65 @@ A
 #       merge_result=pull_request (an upstream PR ordered ahead)       -> HELD
 #   323 OPEN, CLEAN, gate green — parent-child child carrying
 #       merge_result=pre_open_gate                                     -> HELD
-#   335 OPEN, CLEAN, every gate green — but opened from FORK mallory/repo's branch
+#   329 OPEN, gate green, CLEAN, anchor carries signoff_dismissed, NO approving
+#       review -> HELD (tk-5niup: the dismissal is what made it CLEAN)
+#   330 same as 329 but johnzook APPROVED at the live head -> MERGED
+#   331 same as 329 but the ACTING account approved -> HELD (self-approval)
+#   332 OPEN, gate green, CLEAN, check_set="codex,approval", no approval -> HELD
+#   333 same as 332 but johnzook APPROVED at the live head -> MERGED
+#   334 same as 330 but the approval is pinned to an OLDER commit -> HELD
+#   335 approval exists only on PAGE 2 of the reviews history -> MERGED
+#   336 approval on page 1, the SAME reviewer's later CHANGES_REQUESTED on page
+#       2 -> HELD (the later verdict is the effective one)
+#   337 CLEAN, gate green, snapshot has NO signoff_dismissed but the live bead
+#       does -> HELD (the mid-pass dismissal race; pre-fix it merged unapproved)
+#   338 CLEAN, gate green, merge_hold appears only in the live bead -> HELD
+#   339 CLEAN, snapshot marker green@head but the live bead's went stale -> HELD
+#   340 CLEAN, gate green, but `gc bd show` FAILS for its anchor -> skipped
+#   341 CLEAN, external APPROVED at the head then that review DISMISSED -> HELD
+#   342 CLEAN, one external APPROVED at the head, ANOTHER external reviewer's
+#       latest is CHANGES_REQUESTED -> HELD (an approval is not a veto override)
+#   343 CLEAN, external CHANGES_REQUESTED then the SAME reviewer APPROVED at the
+#       head -> MERGED (the guard holds vetoes, it does not over-hold)
+#   344 CLEAN, every gate green, but the head MOVED before the merge call ->
+#       HELD (GitHub refuses the --match-head-commit merge)
+#   358 THE tk-tmefn HOLE: check_set is plain `codex` (NOT approval), the anchor
+#       carries NO signoff_dismissed, check.codex is green at the live head, and
+#       the PR is CLEAN — but the city's own CHANGES_REQUESTED was dismissed BY
+#       HAND on github.com. Nothing bead-side records that, and CLEAN is only
+#       true because WE were the block that someone lifted, so pre-fix this
+#       merged with no approval owed to anyone. -> HELD. The later self COMMENT
+#       (11:00, after the 10:00 dismissal) is the shadowing case: a
+#       latest-review-per-author reading would let it hide the dismissal, which
+#       is why the arm counts the WHOLE history
+#   359 same hand-dismissal as 358 but johnzook (admin) APPROVED at the live head
+#       -> MERGED. The arm must not over-hold: a dismissal makes an approval
+#       REQUIRED, not impossible
+#   360 same hand-dismissal as 358 with the DISMISSED row on PAGE 2 -> HELD. The
+#       tail is where a dismissal hides from an unpaginated read, and missing it
+#       fails OPEN
+#   361 THE tk-bdfww HOLE: the most ORDINARY anchor there is — check_set plain
+#       `codex`, check.codex green at the live head, no `approval` member, no
+#       signoff_dismissed, nothing dismissed in the history, no open child — and
+#       one external human's standing CHANGES_REQUESTED. The veto was read only
+#       inside the armed approval branch, which this anchor never enters, so
+#       nothing looked at the objection; the repo is unprotected, so CLEAN is
+#       true straight through it, and the pass squash-merged past a human's
+#       explicit "not this". -> HELD, on the veto
+#   362 same shape as 361 but the objection is SUPERSEDED by that same
+#       reviewer's later APPROVED -> MERGED. The veto is each reviewer's LATEST
+#       verdict, not "a CHANGES_REQUESTED appears somewhere in the history"; a
+#       hoisted check written the naive way would strand every PR that ever took
+#       a review round, which is a worse bug than the one being closed. Note the
+#       gate here is codex ALONE — the approval is not required, it is only what
+#       withdraws the objection
+#   368 OPEN, CLEAN, every gate green — but opened from FORK mallory/repo's branch
 #       of the SAME NAME -> HELD (HD1). Pre-fix this squash-merged a stranger's head.
-#   336 OPEN, CLEAN, head repository ours BUT isCrossRepository=true -> HELD (HD2)
-#   337 OPEN, CLEAN, headRepository/headRepositoryOwner null -> HELD (HD3)
-#   338 OPEN, CLEAN, ours, but opened from 'polecat/somebody-else' while the anchor
+#   369 OPEN, CLEAN, head repository ours BUT isCrossRepository=true -> HELD (HD2)
+#   370 OPEN, CLEAN, headRepository/headRepositoryOwner null -> HELD (HD3)
+#   371 OPEN, CLEAN, ours, but opened from 'polecat/somebody-else' while the anchor
 #       records 'polecat/bead-BRANCHMISMATCH' -> HELD (HD4)
-#   339 OPEN, CLEAN, ours, head branch == the anchor's recorded branch -> MERGED (HD5)
+#   372 OPEN, CLEAN, ours, head branch == the anchor's recorded branch -> MERGED (HD5)
 #
 # Columns 9-11 (headRefName|headRepo|isCrossRepository) are the head identity. They
 # are OMITTED on every legacy row and default to "ours" in the stub — so those rows
@@ -270,50 +512,163 @@ cat > "$TMP/prs" <<'P'
 326|OPEN|false|main|HEAD326|CLEAN|MERGEABLE|
 327|OPEN|false|main|HEAD327|CLEAN|MERGEABLE|
 328|OPEN|false|main|HEAD328|CLEAN|MERGEABLE|
-330|OPEN|false|main|HEAD330|CLEAN|MERGEABLE|
-331|OPEN|false|main|HEAD331|CLEAN|MERGEABLE|a331c0ffee111111
-332|OPEN|false|main|HEAD332|CLEAN|MERGEABLE|a332c0ffee222222
-333|OPEN|false|main|HEAD333|CLEAN|MERGEABLE|
-334|OPEN|false|main|HEAD334|CLEAN|MERGEABLE|
-335|OPEN|false|main|HEAD335|CLEAN|MERGEABLE|f335c0ffee000001|polecat/bead-FORK|mallory/repo|true
-336|OPEN|false|main|HEAD336|CLEAN|MERGEABLE|f336c0ffee000002|polecat/bead-SELFCONTRA|acme/repo|true
-337|OPEN|false|main|HEAD337|CLEAN|MERGEABLE|f337c0ffee000003|polecat/bead-NOHEAD|-|false
-338|OPEN|false|main|HEAD338|CLEAN|MERGEABLE|f338c0ffee000004|polecat/somebody-else|acme/repo|false
-339|OPEN|false|main|HEAD339|CLEAN|MERGEABLE|a339c0ffee000005|polecat/bead-HEADOK|acme/repo|false
-340|OPEN|false|main|HEAD340|CLEAN|MERGEABLE|
+329|OPEN|false|main|HEAD329|CLEAN|MERGEABLE||
+330|OPEN|false|main|HEAD330|CLEAN|MERGEABLE|f330c0ffee111111|APPROVED
+331|OPEN|false|main|HEAD331|CLEAN|MERGEABLE||
+332|OPEN|false|main|HEAD332|CLEAN|MERGEABLE||
+333|OPEN|false|main|HEAD333|CLEAN|MERGEABLE|a333c0ffee222222|APPROVED
+334|OPEN|false|main|HEAD334|CLEAN|MERGEABLE||APPROVED
+335|OPEN|false|main|HEAD335|CLEAN|MERGEABLE|c335c0ffee333333|APPROVED
+336|OPEN|false|main|HEAD336|CLEAN|MERGEABLE||CHANGES_REQUESTED
+337|OPEN|false|main|HEAD337|CLEAN|MERGEABLE||
+338|OPEN|false|main|HEAD338|CLEAN|MERGEABLE||
+339|OPEN|false|main|HEAD339|CLEAN|MERGEABLE||
+340|OPEN|false|main|HEAD340|CLEAN|MERGEABLE||
+341|OPEN|false|main|HEAD341|CLEAN|MERGEABLE||APPROVED
+342|OPEN|false|main|HEAD342|CLEAN|MERGEABLE||CHANGES_REQUESTED
+343|OPEN|false|main|HEAD343|CLEAN|MERGEABLE|b343c0ffee444444|APPROVED
+344|OPEN|false|main|HEAD344|CLEAN|MERGEABLE|c344c0ffee555555|
+345|OPEN|false|main|HEAD345|CLEAN|MERGEABLE|d345c0ffee666666|
+346|OPEN|false|main|HEAD346|CLEAN|MERGEABLE|e346c0ffee777777|
+347|OPEN|false|main|HEAD347|CLEAN|MERGEABLE|f347c0ffee888888|
+348|OPEN|false|main|HEAD348|CLEAN|MERGEABLE|a348c0ffee999999|APPROVED
+349|OPEN|false|main|HEAD349|CLEAN|MERGEABLE|b349c0ffeeaaaaaa|APPROVED
+350|OPEN|false|main|HEAD350|CLEAN|MERGEABLE|c350c0ffeebbbbbb|APPROVED
+351|OPEN|false|main|HEAD351|CLEAN|MERGEABLE|d351c0ffeecccccc|APPROVED
+352|OPEN|false|main|HEAD352|CLEAN|MERGEABLE|a352c0ffeeddddd1|
+353|OPEN|false|main|HEAD353|CLEAN|MERGEABLE|b353c0ffeeddddd2|
+354|OPEN|false|main|HEAD354|CLEAN|MERGEABLE|c354c0ffeeddddd3|
+355|OPEN|false|main|HEAD355|CLEAN|MERGEABLE|d355c0ffeeddddd4|
+356|OPEN|false|main|HEAD356|CLEAN|MERGEABLE|e356c0ffeeddddd5|
+357|OPEN|false|main|HEAD357|CLEAN|MERGEABLE|f357c0ffeeddddd6|
+358|OPEN|false|main|HEAD358|CLEAN|MERGEABLE|a358c0ffeeddddd7|
+359|OPEN|false|main|HEAD359|CLEAN|MERGEABLE|b359c0ffeeddddd8|APPROVED
+360|OPEN|false|main|HEAD360|CLEAN|MERGEABLE|c360c0ffeeddddd9|
+361|OPEN|false|main|HEAD361|CLEAN|MERGEABLE|d361c0ffeedddd10|CHANGES_REQUESTED
+362|OPEN|false|main|HEAD362|CLEAN|MERGEABLE|e362c0ffeedddd11|APPROVED
+363|OPEN|false|main|HEAD363|CLEAN|MERGEABLE|
+364|OPEN|false|main|HEAD364|CLEAN|MERGEABLE|a364c0ffee111111
+365|OPEN|false|main|HEAD365|CLEAN|MERGEABLE|a365c0ffee222222
+366|OPEN|false|main|HEAD366|CLEAN|MERGEABLE|
+367|OPEN|false|main|HEAD367|CLEAN|MERGEABLE|
+368|OPEN|false|main|HEAD368|CLEAN|MERGEABLE|f368c0ffee000001||polecat/bead-FORK|mallory/repo|true
+369|OPEN|false|main|HEAD369|CLEAN|MERGEABLE|f369c0ffee000002||polecat/bead-SELFCONTRA|acme/repo|true
+370|OPEN|false|main|HEAD370|CLEAN|MERGEABLE|f370c0ffee000003||polecat/bead-NOHEAD|-|false
+371|OPEN|false|main|HEAD371|CLEAN|MERGEABLE|f371c0ffee000004||polecat/somebody-else|acme/repo|false
+372|OPEN|false|main|HEAD372|CLEAN|MERGEABLE|a372c0ffee000005||polecat/bead-HEADOK|acme/repo|false
+373|OPEN|false|main|HEAD373|CLEAN|MERGEABLE|
 P
 
-# Rework/review children referencing a PR by their OWN pr_number metadata
-# (gc bd list pr_number= source):
-#   pr_number|child_id|merge_result|status     (empty status reads as `open`)
-# PR 305 has an open rework child (no merge_result -> the skill must count it and
-# HOLD). PR 310's real child sits PAST the former --limit cap behind 24
-# jq-excluded decoys. PR 317's child is `blocked`, NOT open — the stub honours the
-# requested --status list, so it is returned only because the skill now asks for
-# every live status instead of open,in_progress.
-# PR 326's child is the BOTH-SOURCE holder: it stamps pr_number (so this probe
-# returns it, carrying merge_result=pull_request — the excludable shape) AND it is
-# a parent-child dep of the anchor (so the dep probe returns it too). Provenance
-# must UNION to "dep" and hold; demote it to "pr_number" and the merge_result
-# exclusion deletes a live rework child.
-cat > "$TMP/children" 
-# The 5th column is the child's OWN pr_url, and it is what makes the child-hold
-# guard an identity question rather than a number match. Omitted on rows that
-# predate it ON PURPOSE: a child with no recorded URL cannot be placed in any
-# repository, so it stays the `?` wildcard and holds exactly as it always did
-# (case (6)/305 pins that legacy shape). child-foreign-332 names ANOTHER HOST's
-# repository — somebody else's rework, which can never land ours — and must not
-# hold; child-same-333 names this one and must.
+# PR review history (the REST `pulls/N/reviews` source — the approval gate's real
+# evidence, because each row carries the COMMIT its verdict was attached to):
+#   pr|review_id|login|state|commit_id|submitted_at|page
+# `page` models GitHub's paging: a row on page >1 is returned ONLY when the caller
+# passes --paginate. That is the seam for the pagination regression — an
+# unpaginated read sees page 1 and nothing else, exactly as against real GitHub.
+# zook-bot is the acting account (FAKE_SELF_LOGIN); johnzook is an external human.
+cat > "$TMP/reviews" <<'R'
+330|8000|zook-bot|COMMENTED|HEAD330|2026-07-30T09:00:00Z|1
+330|8001|johnzook|APPROVED|HEAD330|2026-07-30T10:00:00Z|1
+331|8101|zook-bot|APPROVED|HEAD331|2026-07-30T10:00:00Z|1
+333|8201|johnzook|APPROVED|HEAD333|2026-07-30T10:00:00Z|1
+334|8301|johnzook|APPROVED|OLDHEAD334|2026-07-29T10:00:00Z|1
+335|8401|zook-bot|COMMENTED|HEAD335|2026-07-30T09:00:00Z|1
+335|8402|johnzook|APPROVED|HEAD335|2026-07-30T10:00:00Z|2
+336|8501|johnzook|APPROVED|HEAD336|2026-07-30T10:00:00Z|1
+336|8502|johnzook|CHANGES_REQUESTED|HEAD336|2026-07-30T11:00:00Z|2
+341|8601|johnzook|APPROVED|HEAD341|2026-07-30T10:00:00Z|1
+341|8602|johnzook|DISMISSED|HEAD341|2026-07-30T11:00:00Z|1
+342|8701|johnzook|APPROVED|HEAD342|2026-07-30T10:00:00Z|1
+342|8702|otherhuman|CHANGES_REQUESTED|HEAD342|2026-07-30T11:00:00Z|1
+343|8801|johnzook|CHANGES_REQUESTED|HEAD343|2026-07-30T10:00:00Z|1
+343|8802|johnzook|APPROVED|HEAD343|2026-07-30T11:00:00Z|1
+348|8901|johnzook|APPROVED|HEAD348|2026-07-30T10:00:00Z|1
+348|8902|johnzook|CHANGES_REQUESTED|HEAD348|2026-07-30T11:00:00Z|2
+349|9001|readonlyhuman|APPROVED|HEAD349|2026-07-30T10:00:00Z|1
+350|9101|driveby-bot|APPROVED|HEAD350|2026-07-30T10:00:00Z|1
+351|9201|readonlyhuman|APPROVED|HEAD351|2026-07-30T10:00:00Z|1
+351|9202|johnzook|APPROVED|HEAD351|2026-07-30T11:00:00Z|1
+358|9301|zook-bot|DISMISSED|HEAD358|2026-07-30T10:00:00Z|1
+358|9302|zook-bot|COMMENTED|HEAD358|2026-07-30T11:00:00Z|1
+359|9401|zook-bot|DISMISSED|HEAD359|2026-07-30T10:00:00Z|1
+359|9402|johnzook|APPROVED|HEAD359|2026-07-30T11:00:00Z|1
+360|9501|zook-bot|COMMENTED|HEAD360|2026-07-30T09:00:00Z|1
+360|9502|zook-bot|DISMISSED|HEAD360|2026-07-30T10:00:00Z|2
+361|9601|zook-bot|COMMENTED|HEAD361|2026-07-30T09:00:00Z|1
+361|9602|otherhuman|CHANGES_REQUESTED|HEAD361|2026-07-30T10:00:00Z|1
+362|9701|otherhuman|CHANGES_REQUESTED|HEAD362|2026-07-30T10:00:00Z|1
+362|9702|otherhuman|APPROVED|HEAD362|2026-07-30T11:00:00Z|1
+R
+
+# Repo permission per login (the `collaborators/<login>/permission` source — the
+# default trusted-approver policy). login|permission. A login with NO row makes
+# the probe FAIL, exactly as GitHub 404s for a non-collaborator (driveby-bot) or
+# 403s for a token that cannot read the endpoint — and unreadable is untrusted.
+# readonlyhuman is a real collaborator with READ access: a login the old non-self
+# test accepted and the policy must not.
+cat > "$TMP/perms" <<'PM'
+johnzook|admin
+otherhuman|write
+readonlyhuman|read
+PM
+
+# PRs whose paginated reviews read DIES PART WAY (comma-separated). The pages
+# already fetched are still streamed and the call exits non-zero: a truncated but
+# perfectly parseable history, which is only detectable from the exit status.
+APIFAIL_PRS="348"
+
+# Open rework/review children referencing a PR (gc bd list pr_number= source):
+# pr_number|child_id|merge_result|status|pr_url. The 5th column is the child's
+# OWN pr_url, and it is what makes the child-hold guard an identity question
+# rather than a number match. Omitted on rows that predate it ON PURPOSE: a child
+# with no recorded URL cannot be placed in any repository, so it stays the `?`
+# wildcard and holds exactly as it always did (case (6)/305 pins that legacy
+# shape). child-foreign-365 names ANOTHER HOST's repository — somebody else's
+# rework, which can never land ours — and must not hold; child-same-366 names
+# this one and must.
+# PR 305 has an open rework child (no
+# merge_result -> the skill must count it and HOLD). PR 310's real child sits
+# PAST the former --limit cap behind 24 jq-excluded decoys. PR 354's child is
+# `blocked`, not open: it owes exactly as much work, and a gate keyed on
+# open,in_progress alone could not see it at all.
 cat > "$TMP/children" <<'C'
-305|child-305|||
-317|prblocked-317||blocked|
-326|bothsrc-326|pull_request||
-305|child-305|||
-332|child-foreign-332|||https://otherhost/acme/repo/pull/332
-333|child-same-333|||https://github.com/acme/repo/pull/333
+305|child-305||open
+317|prblocked-317||blocked
+326|bothsrc-326|pre_open_gate|
+354|child-354||blocked
+365|child-foreign-365|||https://otherhost/acme/repo/pull/365
+366|child-same-366|||https://github.com/acme/repo/pull/366
 C
+
+# Children that name their PR with `fork_pr` and carry NO pr_number — the
+# fork-sync keying. Invisible to a pr_number-only probe, which is why the gate
+# reads every key the reconciler does. fork_pr|child_id|merge_result|status.
+cat > "$TMP/forkchildren" <<'FC'
+355|forkchild-355||open
+FC
+
+# A duplicate gating anchor that exists ONLY in the live ledger and NOT in the
+# enumeration snapshot: created or reclassified mid-pass, after ROWS was captured.
+# The pre-fix one-anchor-per-PR guard was computed once from that snapshot, so it
+# could not see this anchor at all — and, because a duplicate carries
+# merge_result, the in-flight-child hold excludes it too. id|pr_number|status.
+cat > "$TMP/live-anchors" <<'LA'
+dup-LIVEDUP|356|open
+LA
+
+# PRs whose in-flight-child ledger read is UNREADABLE, in the two ways that are
+# not "empty": a non-zero exit (FAKE_QUERYFAIL) and an error OBJECT served with a
+# zero exit (FAKE_PROBEOBJ). Both project to zero rows, so pre-fix both read as
+# "no child holds this PR" and the merge went ahead.
+QUERYFAIL_PRS="352"
+PROBEOBJ_PRS="353"
+# The padding rows are `merged`, not `pull_request`: they must be excluded from
+# the CHILD projection (any non-empty merge_result is) without joining the OPEN
+# GATING ANCHOR set, which `pull_request` would — 24 sibling anchors on one PR is
+# a one-anchor-per-PR violation, and that guard would then hold PR#310 before the
+# child gate this case is about ever ran.
 for i in $(seq -w 1 24); do
-  printf '310|decoy-%s|pull_request|\n' "$i" >> "$TMP/children"
+  printf '310|decoy-%s|merged\n' "$i" >> "$TMP/children"
 done
 printf '310|child-310||\n' >> "$TMP/children"
 
@@ -450,12 +805,85 @@ case "$RESOLVED" in
          [ -n "$ghhost" ] || ghhost="github.com"
          RESOLVED="$ghhost/$RESOLVED" ;;
 esac
+
+# `gh api` arms:
+#   user                      -> the acting account ($FAKE_SELF_LOGIN), which the
+#                                approval gate excludes so the city can never
+#                                satisfy its own approval requirement.
+#   .../pulls/N/reviews       -> $FAKE_REVIEWS rows for PR N. Models GitHub's
+#                                PAGING: rows on page >1 are served ONLY when the
+#                                caller passes --paginate, so an unpaginated read
+#                                sees page 1 alone — the real failure mode.
+# --jq FILTER is applied with real jq, as gh does.
+if [ "$1" = "api" ]; then
+  shift
+  PAGINATE=""; JQF=""; PATH_ARG=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --paginate) PAGINATE=1; shift ;;
+      --jq)       JQF="$2"; shift 2 ;;
+      -q)         shift 2 ;;
+      -X|-f)      shift 2 ;;
+      *)          PATH_ARG="$1"; shift ;;
+    esac
+  done
+  case "$PATH_ARG" in
+    user) printf '%s\n' "${FAKE_SELF_LOGIN-zook-bot}" ;;
+    */collaborators/*/permission*)
+      # The default trusted-approver policy's probe. A login with no row in
+      # $FAKE_PERMS fails the call (GitHub 404s a non-collaborator, and 403s a
+      # token that may not read collaborator permissions) — the unreadable case
+      # the policy must treat as untrusted.
+      plogin="${PATH_ARG%%\?*}"; plogin="${plogin%/permission}"; plogin="${plogin##*/}"
+      perm=""
+      if [ -n "${FAKE_PERMS:-}" ] && [ -f "$FAKE_PERMS" ]; then
+        while IFS='|' read -r wlogin wperm; do
+          [ "$wlogin" = "$plogin" ] || continue
+          perm="$wperm"; break
+        done < "$FAKE_PERMS"
+      fi
+      [ -n "$perm" ] || exit 1
+      pobj=$(printf '{"permission":"%s"}' "$perm")
+      if [ -n "$JQF" ]; then printf '%s\n' "$pobj" | jq -r "$JQF"
+      else printf '%s\n' "$pobj"; fi ;;
+    */reviews*)
+      prnum="${PATH_ARG%%\?*}"; prnum="${prnum%/reviews}"; prnum="${prnum##*/}"
+      # $FAKE_APIFAIL stages a PAGINATED read that dies part way: `gh --paginate`
+      # writes each page as it arrives, so the pages already fetched are still on
+      # stdout when the call fails. The output alone is a well-formed history —
+      # just not the WHOLE one — so only the exit status can tell the caller that
+      # the tail (where a superseding CHANGES_REQUESTED lives) is missing.
+      failnow=""
+      if [ -n "${FAKE_APIFAIL:-}" ] \
+         && printf '%s\n' "$FAKE_APIFAIL" | tr ',' '\n' | grep -qxF "$prnum"; then
+        failnow=1
+      fi
+      out=""
+      while IFS='|' read -r rpr rid rlogin rstate rcommit rsub rpage; do
+        [ -n "$rpr" ] || continue
+        [ "$rpr" = "$prnum" ] || continue
+        if [ -n "$failnow" ]; then
+          # A read that died after page 1 never delivers page 2, --paginate or not.
+          [ "${rpage:-1}" = "1" ] || continue
+        else
+          [ -n "$PAGINATE" ] || [ "${rpage:-1}" = "1" ] || continue
+        fi
+        obj=$(printf '{"id":%s,"user":{"login":"%s"},"state":"%s","commit_id":"%s","submitted_at":"%s"}' \
+                "$rid" "$rlogin" "$rstate" "$rcommit" "$rsub")
+        if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+      done < "$FAKE_REVIEWS"
+      if [ -n "$JQF" ]; then printf '[%s]\n' "$out" | jq -r "$JQF"
+      else printf '[%s]\n' "$out"; fi
+      [ -z "$failnow" ] || exit 1 ;;
+  esac
+  exit 0
+fi
 case "$1 $2" in
   "pr view")
     num="$3"; shift 3
     fields=""
     while [ $# -gt 0 ]; do case "$1" in --json) fields="$2"; shift 2 ;; *) shift ;; esac; done
-    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus "
+    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus reviewDecision "
     OIFS="$IFS"; IFS=','
     for f in $fields; do
       case "$SUPPORTED" in
@@ -479,46 +907,76 @@ case "$1 $2" in
           url:("https://" + $h + "/" + $r + "/pull/" + $n)}'
       exit 0
     fi
-    # Columns 9-11 are the head identity. Legacy rows omit them, so they default to
-    # THIS repository's branch for this PR — the shape every pre-existing case was
-    # written against — and only the head-identity rows vary them. A headrepo of `-`
-    # emits NULL objects, which is what gh returns for a deleted head repository (an
-    # omitted column cannot mean that: it has to keep meaning "ours").
-    while IFS='|' read -r pr state isdraft base headoid mss mergeable oid headref headrepo cross; do
+    # Trailing columns are OPTIONAL and positional: 9 is reviewDecision, 10-12 the
+    # head identity (branch, head repository, GitHub's cross-repository flag). All
+    # are OMITTED on every legacy row and default to none / THIS repository's branch
+    # for this PR — the shape every pre-existing case was written against — so only
+    # the cases that turn on them vary them. A headrepo of `-` emits NULL objects,
+    # which is what gh returns for a deleted head repository (an omitted column
+    # cannot mean that: it has to keep meaning "ours").
+    while IFS='|' read -r pr state isdraft base headoid mss mergeable oid rd headref headrepo cross; do
       [ "$pr" = "$num" ] || continue
       [ -n "$headref" ]  || headref="polecat/pr-$num"
       [ -n "$cross" ]    || cross="false"
       [ -n "$headrepo" ] || headrepo="acme/repo"
       jq -n --arg s "$state" --argjson d "$isdraft" --arg b "$base" \
             --arg h "$headoid" --arg m "$mss" --arg mg "$mergeable" --arg o "$oid" \
-            --arg n "$num" --arg hr "$headref" --arg hrepo "$headrepo" \
+            --arg n "$num" --arg rd "$rd" --arg hr "$headref" --arg hrepo "$headrepo" \
             --argjson x "$cross" \
         '{state:$s, isDraft:$d, baseRefName:$b, headRefOid:$h, headRefName:$hr,
           headRepositoryOwner:(if $hrepo=="-" then null else {login:($hrepo | split("/")[0])} end),
           headRepository:(if $hrepo=="-" then null else {name:($hrepo | split("/")[1])} end),
-          isCrossRepository:$x,
+          isCrossRepository:$x, reviewDecision:$rd,
           mergeStateStatus:$m, mergeable:$mg, mergeCommit:(if $o=="" then null else {oid:$o} end), url:("https://github.com/acme/repo/pull/" + $n)}'
       exit 0
     done < "$FAKE_PRS"
     exit 0 ;;
   "pr merge")
-    printf '%s\n' "$3" >> "$FAKE_MERGED"
+    num="$3"; shift 3
+    match=""
+    while [ $# -gt 0 ]; do
+      case "$1" in --match-head-commit) match="$2"; shift 2 ;; *) shift ;; esac
+    done
+    # Every merge attempt is logged with the head it bound itself to, so a test
+    # can assert the flag was passed at all — not just that a merge happened.
+    printf '%s\t%s\n' "$num" "$match" >> "${FAKE_MERGEARGS:-/dev/null}"
+    # GitHub refuses a --match-head-commit merge whose commit is no longer the
+    # PR's head. $FAKE_HEADMOVE stages that: a listed PR's REAL head differs from
+    # what validation saw, so the merge must be rejected rather than land a
+    # commit no gate in this pass validated.
+    if [ -n "${FAKE_HEADMOVE:-}" ] && [ -f "$FAKE_HEADMOVE" ]; then
+      while IFS='|' read -r hpr hnew; do
+        [ "$hpr" = "$num" ] || continue
+        if [ "$match" != "$hnew" ]; then
+          echo "Pull request is not mergeable: head has changed (expected ${match:-none}, actual $hnew)" >&2
+          exit 1
+        fi
+      done < "$FAKE_HEADMOVE"
+    fi
+    printf '%s\n' "$num" >> "$FAKE_MERGED"
     # WHERE the merge landed, not just which number: a merge performed in the
-    # wrong repository is the failure these identity tests exist to catch.
-    printf '%s\t%s\n' "$3" "$RESOLVED" >> "$FAKE_MERGEDWHERE" ;;
+    # wrong repository is the failure the identity tests exist to catch.
+    printf '%s\t%s\n' "$num" "$RESOLVED" >> "$FAKE_MERGEDWHERE" ;;
 esac
 exit 0
 GH
 chmod +x "$TMP/bin/gh"
 
-# --- gc stub: bd list / bd dep list / bd close / bd update. ------------------
+# --- gc stub: bd list / bd dep list / bd show / bd close / bd update. --------
 # Two list shapes: the gating-anchor scan (merge_result=pull_request, excluding
 # already-closed anchors so convergence holds) and the referencing-bead scan
-# (pr_number=N, honouring the requested --status list) that returns the anchor
-# (which the skill EXCLUDES) plus any live rework/review children (which HOLD the
-# merge). `bd dep list` serves the two dependency walks, each answering ONLY the
-# direction+type it was asked for — a stub that ignored the flags could not tell
-# a rework child from the epic parent or the downstream dependent.
+# (pr_number=N, fork_pr=N and fork_pr_url, honouring the requested --status list)
+# that returns the anchor (which the skill EXCLUDES) plus any live rework/review
+# children (which HOLD the merge). `bd dep list` serves the two dependency walks,
+# each answering ONLY the direction+type it was asked for — a stub that ignored
+# the flags could not tell a rework child from the epic parent or the downstream
+# dependent.
+#
+# `bd show <id>` serves the anchor's LIVE metadata for the per-anchor re-read the
+# skill performs after the PR-state read. It answers from $FAKE_ANCHORS_FRESH
+# when that file carries a row for the id (the mid-pass write the enumeration
+# snapshot missed) and from $FAKE_ANCHORS otherwise, and it returns NOTHING for
+# an id in $FAKE_SHOWFAIL — the unreadable-metadata case.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 emit_rows() {
@@ -531,24 +989,69 @@ emit_rows() {
 }
 [ "$1" = "bd" ] || exit 0
 case "$2" in
+  show)
+    want="$3"
+    case " ${FAKE_SHOWFAIL:-} " in *" $want "*) exit 0 ;; esac
+    src="$FAKE_ANCHORS"
+    if [ -n "${FAKE_ANCHORS_FRESH:-}" ] && [ -f "$FAKE_ANCHORS_FRESH" ] \
+       && grep -q "^$want|" "$FAKE_ANCHORS_FRESH"; then
+      src="$FAKE_ANCHORS_FRESH"
+    fi
+    while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed status result; do
+      [ "$id" = "$want" ] || continue
+      # Columns 8/9 (status, merge_result) exist only in the FRESH file, and only
+      # for the cases that stage a mid-pass identity change. Absent -> the normal
+      # gating-anchor shape the enumeration selected; the literal `-` means the
+      # field is EMPTY on the live bead (the cleared-metadata case).
+      [ -n "$status" ] || status="open"
+      [ -n "$result" ] || result="pull_request"
+      [ "$status" = "-" ] && status=""
+      [ "$result" = "-" ] && result=""
+      printf '[{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","signoff_dismissed":"%s","merge_result":"%s"}}]\n' \
+        "$id" "$status" "$pr" "$target" "$checkset" "$checkcodex" "$merge_hold" "$dismissed" "$result"
+      exit 0
+    done < "$src"
+    printf '[]\n' ;;
   list)
     lim=$(printf '%s' "$*" | sed -n 's/.*--limit=\([0-9][0-9]*\).*/\1/p')
+    # The --status filter is HONORED, not ignored: a probe that asks for a subset
+    # of the non-closed statuses must genuinely be unable to see beads outside it.
+    # Ignoring it would make an open,in_progress-only gate look like it covers
+    # `blocked`/`hooked` children when it cannot, hiding the very gap case (37c)
+    # exists to pin.
+    want_status=$(printf '%s' "$*" | sed -n 's/.*--status[ =]\([a-z_,]*\).*/\1/p')
+    status_ok() {
+      [ -n "$want_status" ] || return 0
+      case ",$want_status," in *",$1,"*) return 0 ;; esac
+      return 1
+    }
     case "$*" in
       *"merge_result=pull_request"*)
         out=""
-        while IFS='|' read -r id pr target checkset checkcodex merge_hold prurl branch; do
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed prurl branch; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","branch":"%s"}}' "$id" "$pr" "$prurl" "$target" "$checkset" "$checkcodex" "$merge_hold" "$branch")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","signoff_dismissed":"%s","branch":"%s"}}' "$id" "$pr" "$prurl" "$target" "$checkset" "$checkcodex" "$merge_hold" "$dismissed" "$branch")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         emit_rows "$out" "$lim" ;;
       *"pr_number="*)
         prnum=$(printf '%s' "$*" | sed -n 's/.*pr_number=\([0-9][0-9]*\).*/\1/p')
-        # The status filter the caller asked for. A child whose status is not in
-        # the list is invisible, exactly as the real `gc bd list --status` behaves.
-        want=$(printf '%s' "$*" | sed -n 's/.*--status[= ]\([a-z_,]*\).*/\1/p')
-        [ -n "$want" ] || want="open"
+        # $FAKE_QUERYFAIL / $FAKE_PROBEOBJ stage the two ways this read can be
+        # UNREADABLE without being empty — the pair the guarded probe exists for.
+        # QUERYFAIL: a non-zero exit (a transient ledger error), with output, so
+        # only the status reveals it. PROBEOBJ: `gc ... --json` reporting its own
+        # failure as a JSON *object* on stdout with a ZERO status — non-empty,
+        # parseable, and projecting to zero rows, so every guard except the
+        # array-shape one waves it through as "no child holds this PR".
+        if [ -n "${FAKE_QUERYFAIL:-}" ] \
+           && printf '%s\n' "$FAKE_QUERYFAIL" | tr ',' '\n' | grep -qxF "$prnum"; then
+          printf '[]\n'; exit 1
+        fi
+        if [ -n "${FAKE_PROBEOBJ:-}" ] \
+           && printf '%s\n' "$FAKE_PROBEOBJ" | tr ',' '\n' | grep -qxF "$prnum"; then
+          printf '{"error":"ledger unavailable"}\n'; exit 0
+        fi
         # A FAILED child lookup, scoped to one PR so every other case is unaffected.
         # $FAKE_CHILD_FAIL holds "<pr><TAB><shape>" rows. Each shape defeats a
         # different guard, so a guard that is deleted fails exactly one case:
@@ -565,23 +1068,59 @@ case "$2" in
           array-rc1) printf '[]\n'; exit 1 ;;
         esac
         out=""
-        while IFS='|' read -r id pr target checkset checkcodex merge_hold; do
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed; do
           [ -n "$id" ] || continue
           [ "$pr" = "$prnum" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
+          status_ok open || continue
           obj=$(printf '{"id":"%s","status":"open","metadata":{"pr_number":"%s","merge_result":"pull_request"}}' "$id" "$pr")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
+        # Anchors visible ONLY to this live read and NOT to the enumeration
+        # snapshot: a duplicate gating anchor created or reclassified mid-pass.
+        # id|pr|status.
+        if [ -n "${FAKE_LIVE_ANCHORS:-}" ] && [ -f "$FAKE_LIVE_ANCHORS" ]; then
+          while IFS='|' read -r lid lpr lstatus; do
+            [ -n "$lid" ] || continue
+            [ "$lpr" = "$prnum" ] || continue
+            grep -qx "$lid" "$FAKE_CLOSED" 2>/dev/null && continue
+            status_ok "${lstatus:-open}" || continue
+            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"pull_request"}}' \
+                    "$lid" "${lstatus:-open}" "$lpr")
+            if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+          done < "$FAKE_LIVE_ANCHORS"
+        fi
         if [ -f "$FAKE_CHILDREN" ]; then
+          # 4th column: the child's STATUS. Absent -> open. The gate reads every
+          # non-closed status, so a `blocked`/`hooked` child holds the merge too.
+          # 5th: the child's own pr_url (empty = the `?` wildcard).
           while IFS='|' read -r cpr cid cmr cstatus cprurl; do
             [ -n "$cpr" ] || continue
             [ "$cpr" = "$prnum" ] || continue
             grep -qx "$cid" "$FAKE_CLOSED" 2>/dev/null && continue
-            [ -n "$cstatus" ] || cstatus="open"
-            printf '%s' ",$want," | grep -q ",$cstatus," || continue
-            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"%s","pr_url":"%s"}}' "$cid" "$cstatus" "$cpr" "$cmr" "$cprurl")
+            status_ok "${cstatus:-open}" || continue
+            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"%s","pr_url":"%s"}}' \
+                    "$cid" "${cstatus:-open}" "$cpr" "$cmr" "$cprurl")
             if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
           done < "$FAKE_CHILDREN"
+        fi
+        emit_rows "$out" "$lim" ;;
+      *"fork_pr="*)
+        # The fork-sync keying: a live bead that names its PR as `fork_pr` and
+        # carries no pr_number at all. Invisible to a pr_number-only gate.
+        # fork_pr|child_id|merge_result|status.
+        fnum=$(printf '%s' "$*" | sed -n 's/.*fork_pr=\([0-9][0-9]*\).*/\1/p')
+        out=""
+        if [ -n "${FAKE_FORKCHILDREN:-}" ] && [ -f "$FAKE_FORKCHILDREN" ]; then
+          while IFS='|' read -r fpr fid fmr fstatus; do
+            [ -n "$fpr" ] || continue
+            [ "$fpr" = "$fnum" ] || continue
+            grep -qx "$fid" "$FAKE_CLOSED" 2>/dev/null && continue
+            status_ok "${fstatus:-open}" || continue
+            obj=$(printf '{"id":"%s","status":"%s","metadata":{"fork_pr":"%s","merge_result":"%s"}}' \
+                    "$fid" "${fstatus:-open}" "$fpr" "$fmr")
+            if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+          done < "$FAKE_FORKCHILDREN"
         fi
         emit_rows "$out" "$lim" ;;
       *) printf '[]\n' ;;
@@ -640,9 +1179,16 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+: > "$TMP/mergeargs"
+
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/children" \
        FAKE_DEPS="$TMP/deps" FAKE_DEPFAIL="$TMP/depfail" FAKE_DEPRAW="$TMP/depraw" \
+       FAKE_REVIEWS="$TMP/reviews" FAKE_PERMS="$TMP/perms" FAKE_APIFAIL="$APIFAIL_PRS" \
+       FAKE_ANCHORS_FRESH="$TMP/anchors-fresh" FAKE_SHOWFAIL="$SHOWFAIL_IDS" \
+       FAKE_HEADMOVE="$TMP/headmove" FAKE_MERGEARGS="$TMP/mergeargs" \
+       FAKE_FORKCHILDREN="$TMP/forkchildren" FAKE_LIVE_ANCHORS="$TMP/live-anchors" \
+       FAKE_QUERYFAIL="$QUERYFAIL_PRS" FAKE_PROBEOBJ="$PROBEOBJ_PRS" \
        FAKE_CLOSED="$TMP/closed" FAKE_MERGED="$TMP/merged" \
        FAKE_MERGEDREC="$TMP/mergedrec" FAKE_CLOSELOG="$TMP/closelog" \
        FAKE_MERGEDWHERE="$TMP/mergedwhere" FAKE_GH_DEFAULT="$TMP/ghdefault" \
@@ -650,7 +1196,10 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/child
        FAKE_GH_HOST="$TMP/ghhost" FAKE_CHILD_FAIL="$TMP/childfail"
 
 # --- Run 1: validate -> merge -> record for the one ready PR, hold the rest. --
-OUT1="$(bash "$SCRIPT")"
+# stdout carries the per-anchor hold/merge decisions; the tool-error paths (an
+# unreadable anchor re-read, a refused merge) report on stderr, so capture both.
+OUT1="$(bash "$SCRIPT" 2>"$TMP/err1")"
+ERR1="$(cat "$TMP/err1")"
 
 # (1) ready PR -> merged + recorded + closed.
 has '^301$' "$TMP/merged" && ok "(1) ready PR -> 'gh pr merge --squash' performed" \
@@ -696,63 +1245,226 @@ has '^320$' "$TMP/merged" && ok "(18) closed dep-linked child -> merged" \
 
 # (2)-(19) every other anchor is HELD or skipped — NOT merged. 313 is the
 # multi-anchor PR: its gateless duplicate anchor (bead-DUPFREE) is CLEAN and
-# would have merged pre-fix. 315-318 and 321 are the tk-lgjvg child-resolution
-# cases: every one is CLEAN with its codex gate green at the live head, so the
-# ONLY thing standing between them and a merge is the child gate.
-for n in 302 303 304 305 306 307 308 309 310 312 313 315 316 317 318 321 322 323 324 325 326; do
+# would have merged pre-fix. 315-318 and 321-328 are the tk-lgjvg/tk-je0rk
+# child-resolution anchors and 329+ the tk-5niup approval/veto anchors: every
+# one is CLEAN with its codex gate green at the live head, so the ONLY thing
+# standing between them and a merge is the gate each case is about.
+for n in 302 303 304 305 306 307 308 309 310 312 313 315 316 317 318 321 \
+         322 323 324 325 326 329 331 332 334 336 337 338 339 340 341 342 \
+         344 345 346 347 348 349 350 358 360 361; do
   has "^$n$" "$TMP/merged" && bad "($n) anchor must NOT be merged" \
                           || ok "($n) anchor not merged"
 done
 
 # Hold reasons name the specific gate that blocked each PR.
-#
-# These assert with `grep -q PATTERN <<< "$OUT1"`, NOT `printf … | grep -q …`.
-# Do not "tidy" them back into a pipe. Under this file's `set -o pipefail`, the
-# piped form reports a FALSE FAILURE on a string that is genuinely present:
-# `grep -q` exits 0 the instant it matches, closing the pipe while `printf` is
-# still writing, so printf dies of SIGPIPE (141) and pipefail promotes that to
-# the pipeline's status — the `&&`/`||` then takes the `bad` branch even though
-# the match succeeded. It is a RACE on how much printf flushed before grep quit,
-# so it hides while the payload is small and widens as the payload grows.
-#
-# Measured on this suite's real $OUT1 (2552 B): the piped form produced 14 false
-# failures in 3000 tries (~0.5%), the here-string form 0 in 3000. At 18 piped
-# assertions per run that is roughly a 1-in-12 chance of a spurious FAIL per
-# execution — which is exactly the "ANOMALY" recorded in tk-lgjvg's notes: a lone
-# "(14) blocked dep-linked child must hold" failure whose own diagnostic dump
-# CONTAINED the asserted substring, written off as unreproducible after 16 clean
-# reruns. It was never a flaky assertion; it was this. (Anchors 322/323 lengthen
-# $OUT1 slightly and so nudge the odds up, but the defect predates them.)
-#
-# A here-string is not a pipeline, so there is no SIGPIPE and no pipefail
-# interaction. The same pattern is still live in ~10 other pack test files and in
-# reconcile-graduated-convoys.sh:209 (shipped, where it can silently skip a
-# convoy) — tracked as tk-zfjg9, deliberately not swept here.
-grep -q "PR#302 check 'codex' not green at live head" <<< "$OUT1" \
+hasin "$OUT1" "PR#302 check 'codex' not green at live head" \
   && ok "(2) stale check.codex (green@old-head) -> held, reason names the gate" \
   || bad "(2) stale check hold reason (got: $OUT1)"
-grep -q "PR#303 check 'codex' not green at live head" <<< "$OUT1" \
+hasin "$OUT1" "PR#303 check 'codex' not green at live head" \
   && ok "(3) missing check.codex (codex in check_set) -> held" || bad "(3) missing check hold (got: $OUT1)"
-grep -q "PR#304 not mergeable yet (mergeStateStatus='BLOCKED'" <<< "$OUT1" \
+hasin "$OUT1" "PR#304 not mergeable yet (mergeStateStatus='BLOCKED'" \
   && ok "(4) BLOCKED -> held, reason names mergeStateStatus" || bad "(4) BLOCKED hold (got: $OUT1)"
-grep -q "PR#309 not mergeable yet (mergeStateStatus='BEHIND'" <<< "$OUT1" \
+hasin "$OUT1" "PR#309 not mergeable yet (mergeStateStatus='BEHIND'" \
   && ok "(5) BEHIND -> held" || bad "(5) BEHIND hold (got: $OUT1)"
-grep -q "PR#305 has unclosed rework/review bead child-305 (open)" <<< "$OUT1" \
+hasin "$OUT1" "PR#305 has unclosed rework/review bead child-305 (open)" \
   && ok "(6) open rework child -> held, reason names the child" || bad "(6) child hold (got: $OUT1)"
-grep -q "PR#306 base 'integration/foo' != target 'main' (retargeted)" <<< "$OUT1" \
+hasin "$OUT1" "PR#306 base 'integration/foo' != target 'main' (retargeted)" \
   && ok "(7) retargeted -> held, reason names the base mismatch" || bad "(7) retarget hold (got: $OUT1)"
-grep -q "PR#310 has unclosed rework/review bead child-310 (open)" <<< "$OUT1" \
+hasin "$OUT1" "PR#310 has unclosed rework/review bead child-310 (open)" \
   && ok "(10) open child past former cap -> held (unbounded scan found it)" \
   || bad "(10) past-cap child hold (got: $OUT1)"
-grep -q "PR#312 merge_hold set (operator gate)" <<< "$OUT1" \
+hasin "$OUT1" "PR#312 merge_hold set (operator gate)" \
   && ok "(11) merge_hold=true -> held, reason names the operator gate" \
   || bad "(11) merge_hold hold reason (got: $OUT1)"
-grep -q "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPGATED)" <<< "$OUT1" \
+hasin "$OUT1" "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPGATED)" \
   && ok "(12) multi-anchor PR -> gated anchor held with the one-anchor-per-PR reason" \
   || bad "(12) multi-anchor gated-anchor hold (got: $OUT1)"
-grep -q "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPFREE)" <<< "$OUT1" \
+hasin "$OUT1" "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPFREE)" \
   && ok "(12) multi-anchor PR -> gateless duplicate ALSO held (pre-fix it merged, bypassing codex)" \
   || bad "(12) multi-anchor gateless-duplicate hold (got: $OUT1)"
+
+# (27) THE FAIL-OPEN TRAP (tk-5niup). The re-gate retracted the city's own
+# blocking review, which is what turned this PR CLEAN; on a repo with no review
+# requirement CLEAN folds NO approval, so pre-fix the skill squash-merged
+# unverified work the moment the block came off. signoff_dismissed arms an
+# explicit approval requirement that CLEAN cannot satisfy on its own.
+hasin "$OUT1" "PR#329 no external approving review at the live head HEAD329 (signoff_dismissed=900@HEAD329" \
+  && ok "(27) dismissed-own-review + CLEAN + no approval -> held, reason names signoff_dismissed" \
+  || bad "(27) signoff_dismissed approval hold (got: $OUT1)"
+# (27b) and it is satisfiable — a real external approval lands the same shape.
+has '^330$' "$TMP/merged" && ok "(27b) dismissed-own-review WITH an external approval -> merged" \
+                          || bad "(27b) approved dismissed-review PR must merge (got: $OUT1)"
+# (27c) a self-approval is not approval: the city posts COMMENT signoffs and
+# never approves, so an APPROVED review under the acting login must not count —
+# otherwise the gate could be satisfied by the same actor that removed the block.
+hasin "$OUT1" "PR#331 no external approving review" \
+  && ok "(27c) APPROVED by the acting account itself -> still held (self-approval rejected)" \
+  || bad "(27c) self-approval must not satisfy the gate (got: $OUT1)"
+# (28) the explicit opt-in: `approval` named in check_set. It must hold on the
+# APPROVAL gate, NOT on a missing `check.approval` marker — approval is evidenced
+# by GitHub review state, and a marker gate would strand the anchor forever the
+# way an undropped none/off sentinel would.
+hasin "$OUT1" "PR#332 no external approving review at the live head HEAD332 (check_set names approval" \
+  && ok "(28) check_set names approval, none given -> held on the approval gate" \
+  || bad "(28) check_set approval hold (got: $OUT1)"
+hasin "$OUT1" "PR#332 check 'approval' not green at live head" \
+  && bad "(28) approval must NOT be treated as a check.<name> marker gate (nothing can stamp it)" \
+  || ok "(28) approval dropped from the marker loop (no unstampable check.approval hold)"
+has '^333$' "$TMP/merged" && ok "(28b) check_set names approval + external approval -> merged" \
+                          || bad "(28b) approval-gated PR with an approval must merge (got: $OUT1)"
+
+# (29) THE STALE-APPROVAL HOLE. johnzook approved OLDHEAD334; the head has since
+# moved to HEAD334 and the city dismissed its own block. Pre-fix the gate read
+# `latestReviews`, which reports the verdict but NOT the commit — so an approval
+# of a dead commit satisfied it and the PR merged work nobody approved. The
+# approval is head-bound now, exactly like check.<name>=green@<head>.
+hasin "$OUT1" "PR#334 no external approving review at the live head HEAD334" \
+  && ok "(29) approval pinned to an OLD commit -> held (approval is head-bound)" \
+  || bad "(29) stale approval must not satisfy the gate (got: $OUT1)"
+has '^334$' "$TMP/merged" && bad "(29) stale-approval PR must NOT be merged" \
+                          || ok "(29) stale-approval PR not merged"
+
+# (30) PAGINATION. 335's only approval sits on page 2 of the reviews history; the
+# stub serves page 2 ONLY to a caller that passed --paginate, exactly as GitHub
+# does. An unpaginated read sees just the city's own COMMENTED review and holds
+# forever — a PR that can never merge no matter how many humans approve it.
+has '^335$' "$TMP/merged" \
+  && ok "(30) approval on page 2 is found (reviews read is paginated)" \
+  || bad "(30) unpaginated reviews read misses the approval and strands the PR (got: $OUT1)"
+
+# (30b) the DANGEROUS half of the same bug: 336's reviewer approved on page 1 and
+# then requested changes on page 2. Truncated at page 1, the retracted approval
+# reads as the effective verdict and the PR merges over a standing objection. The
+# effective verdict is the LATEST verdict-bearing review per reviewer.
+#
+# The hold now names the VETO rather than the missing approval (tk-bdfww: a
+# standing CHANGES_REQUESTED holds every candidate, so it is reached before the
+# approval-specific branch). Same proof either way, and a strictly stronger one:
+# reaching the veto at all requires the page-2 CHANGES_REQUESTED to have been read
+# AND to have superseded the page-1 APPROVED — had the tail been missed, `.veto`
+# would be empty and the earlier approval would have satisfied the gate.
+hasin "$OUT1" "PR#336 external reviewer 'johnzook' has a standing CHANGES_REQUESTED" \
+  && ok "(30b) a later CHANGES_REQUESTED supersedes the same reviewer's earlier APPROVED" \
+  || bad "(30b) superseded approval must not satisfy the gate (got: $OUT1)"
+has '^336$' "$TMP/merged" && bad "(30b) PR with a standing CHANGES_REQUESTED must NOT be merged" \
+                          || ok "(30b) later-CHANGES_REQUESTED PR not merged"
+
+# (31) THE STALE-SNAPSHOT RACE. The anchor rows are enumerated BEFORE each PR is
+# read, and the signoff path writes the anchor concurrently: stamp check.<gate>,
+# record signoff_dismissed, dismiss the GitHub review that was keeping the PR
+# non-CLEAN. A pass that captured the row mid-sequence sees a CLEAN PR and a
+# snapshot with NO signoff_dismissed — so it computes needs_approval from state
+# that is already false and merges past the external approval the dismissal
+# exists to require. The fix re-reads the anchor after the PR read.
+hasin "$OUT1" "PR#337 no external approving review at the live head HEAD337 (signoff_dismissed=904@HEAD337" \
+  && ok "(31) signoff_dismissed recorded mid-pass -> approval gate armed from the FRESH read" \
+  || bad "(31) stale-snapshot signoff_dismissed must arm the approval gate (got: $OUT1)"
+# (31b) the same staleness for the operator gate: merge_hold set while the pass
+# is in flight must hold this pass, not the next one.
+hasin "$OUT1" "PR#338 merge_hold set (operator gate)" \
+  && ok "(31b) merge_hold set mid-pass -> honored from the FRESH read" \
+  || bad "(31b) stale-snapshot merge_hold must hold the merge (got: $OUT1)"
+# (31c) and for the per-gate marker: a re-gate that cleared/moved check.codex
+# while the pass was in flight must re-gate, not merge on the snapshot's green.
+hasin "$OUT1" "PR#339 check 'codex' not green at live head (have 'green@OLD339'" \
+  && ok "(31c) check.<gate> changed mid-pass -> re-gated from the FRESH read" \
+  || bad "(31c) stale-snapshot check marker must re-gate (got: $OUT1)"
+# (19d) FAIL-CLOSED: an anchor whose live metadata cannot be read is skipped, not
+# validated against the snapshot the race is about.
+hasin "$ERR1" "anchor bead-SHOWFAIL metadata re-read failed" \
+  && ok "(19d) unreadable anchor metadata -> skipped (never falls back to the stale row)" \
+  || bad "(19d) unreadable re-read must skip the anchor (got: $ERR1)"
+
+# (32) DISMISSED SHADOWS AN OLDER APPROVAL. johnzook approved at the live head and
+# that approval was then retracted (its own row becomes DISMISSED). Filtering the
+# terminal states BEFORE grouping dropped the DISMISSED row, so the older APPROVED
+# resurfaced as the reviewer's effective verdict and satisfied the gate — an
+# approval explicitly taken back landing the PR.
+hasin "$OUT1" "PR#341 no external approving review at the live head HEAD341" \
+  && ok "(32) a later DISMISSED shadows the same reviewer's earlier APPROVED" \
+  || bad "(32) dismissed approval must not be resurrected (got: $OUT1)"
+# (32b) one approval does not answer ANOTHER reviewer's standing objection. On an
+# unprotected repo mergeStateStatus is CLEAN straight through a CHANGES_REQUESTED,
+# so accepting any single APPROVED merged past a live veto.
+hasin "$OUT1" "PR#342 external reviewer 'otherhuman' has a standing CHANGES_REQUESTED" \
+  && ok "(32b) another reviewer's standing CHANGES_REQUESTED vetoes the merge" \
+  || bad "(32b) standing changes-request must veto the merge (got: $OUT1)"
+# (32c) and the veto is not an over-hold: a reviewer who requested changes and
+# then approved the head has no standing objection left, so the PR lands.
+has '^343$' "$TMP/merged" \
+  && ok "(32c) CHANGES_REQUESTED superseded by the SAME reviewer's APPROVED -> merged" \
+  || bad "(32c) superseded veto must not hold the merge forever (got: $OUT1)"
+
+# (33) HEAD-MATCHED MERGE. Every gate above is bound to the head validated in this
+# pass; the merge call was not, so a push between validation and merge squashed a
+# commit nothing had looked at. The merge now passes --match-head-commit.
+grep -q '^301	HEAD301$' "$TMP/mergeargs" \
+  && ok "(33) merge is head-matched (--match-head-commit at the validated head)" \
+  || bad "(33) merge must pass --match-head-commit (got: $(cat "$TMP/mergeargs"))"
+# (33b) and the binding is load-bearing: PR 344's head moved after validation, so
+# GitHub refuses the merge and the anchor is held for the next pass rather than
+# landing an unvalidated head.
+hasin "$ERR1" "PR#344 merge attempt failed" \
+  && ok "(33b) head moved after validation -> merge REFUSED and held" \
+  || bad "(33b) head-mismatch merge must fail and hold (got: $ERR1)"
+has '^bead-HEADMOVE$' "$TMP/closed" \
+  && bad "(33b) a refused merge must NOT close the anchor" \
+  || ok "(33b) refused merge leaves the anchor OPEN for the next pass"
+
+# (34) THE FRESH READ MUST STILL BE THE ANCHOR. Re-reading the bead and then
+# validating it anyway is only half a guard: what made "$id gates PR#$num" true
+# was the enumeration's own filter (open + merge_result=pull_request + this
+# pr_number), and the re-read exists precisely because the anchor may have moved
+# since. An anchor whose pr_number was CLEARED mid-pass no longer claims any PR —
+# but the empty value slipped through the `-n` mismatch guard, so every gate below
+# went on validating the snapshot's PR#$num and the merge landed on a claim the
+# live bead no longer makes.
+hasin "$ERR1" "anchor bead-RACENOPR no longer records a pr_number" \
+  && ok "(34) pr_number cleared mid-pass -> skipped (empty is unusable, not 'unchanged')" \
+  || bad "(34) empty fresh pr_number must skip the anchor (got: $ERR1)"
+# (34b) the same for an anchor that CLOSED mid-pass: it left the gating set, so
+# nothing about it may be validated, let alone merged.
+hasin "$ERR1" "anchor bead-RACECLOSED is no longer open (status='closed')" \
+  && ok "(34b) anchor closed mid-pass -> skipped (no longer a gating anchor)" \
+  || bad "(34b) closed anchor must skip (got: $ERR1)"
+# (34c) and for one un-parked from its PR (merge_result cleared): the bead is no
+# longer parked on a published PR, so it cannot speak for the merge either.
+hasin "$ERR1" "anchor bead-RACEUNPARK no longer parked on a published PR" \
+  && ok "(34c) merge_result cleared mid-pass -> skipped (not PR-parked any more)" \
+  || bad "(34c) un-parked anchor must skip (got: $ERR1)"
+
+# (35) FAIL CLOSED ON A PARTIAL REVIEW HISTORY. `gh api --paginate` streams each
+# page as it arrives, so a call that dies at page 2 still leaves page 1 on stdout:
+# a parseable, complete-LOOKING history. PR 348's page 1 holds johnzook's APPROVED
+# and page 2 the same reviewer's later CHANGES_REQUESTED — so read without its
+# exit status, the truncation converts a vetoed PR into an approved one. This is
+# case (30b) arriving through the error path instead of the paging one.
+hasin "$OUT1" "PR#348 reviews history read FAILED" \
+  && ok "(35) a paginated reviews read that FAILS part way -> merge held (partial history is not evidence)" \
+  || bad "(35) partial reviews read must hold the merge (got: $OUT1)"
+
+# (36) TRUSTED APPROVER, not merely a non-self one. On an unprotected repo this
+# gate is the whole approval policy, and any GitHub account can submit an APPROVED
+# review — so "the login is not ours" would let a read-only collaborator land the
+# PR. readonlyhuman is a real collaborator whose permission is `read`.
+hasin "$OUT1" "PR#349 approved at the live head HEAD349 by 'readonlyhuman', but no approver satisfies the trusted-approver policy" \
+  && ok "(36) approval by a read-only account -> held, naming the untrusted approver and the policy" \
+  || bad "(36) untrusted approval must hold the merge (got: $OUT1)"
+hasin "$OUT1" "PR#349 .*MERGE_TRUSTED_APPROVERS" \
+  && ok "(36) the hold names the remedy (grant write access or allowlist)" \
+  || bad "(36) untrusted-approval hold must name a remedy (got: $OUT1)"
+# (36b) an account the permission probe cannot resolve at all (a drive-by bot,
+# 404) is untrusted for the same reason an unreadable probe is: we cannot show it
+# may write here.
+hasin "$OUT1" "PR#350 approved at the live head HEAD350 by 'driveby-bot'" \
+  && ok "(36b) approval by an account with no resolvable permission -> held (unreadable is untrusted)" \
+  || bad "(36b) unresolvable approver must hold the merge (got: $OUT1)"
+# (36c) and the policy filters CANDIDATES rather than stopping at the first one:
+# PR 351 was approved by both readonlyhuman (untrusted) and johnzook (admin), so
+# the trusted approval still satisfies the gate.
+has '^351$' "$TMP/merged" \
+  && ok "(36c) an untrusted approval alongside a trusted one -> merged (candidates are filtered, not first-wins)" \
+  || bad "(36c) a trusted approval must still satisfy the gate (got: $OUT1)"
 
 # (13)-(16),(19) tk-lgjvg: the child gate resolves holders by DEPENDENCY as well
 # as by pr_number, over every live status, and fails CLOSED when it cannot look.
@@ -801,11 +1513,11 @@ grep -q "PR#325 in-flight holder filter unreadable; merge held" <<< "$OUT1" \
   || bad "(23) a holder filter that ERRORS must fail CLOSED, not read as empty (got: $OUT1)"
 
 # (24) THE PROVENANCE-MERGE POSITIVE CONTROL. bothsrc-326 is returned by BOTH
-# probes and carries merge_result=pull_request — the exact shape the pr_number
+# probes and carries merge_result=pre_open_gate — the exact shape the pr_number
 # exclusion drops. Dedup must UNION provenance (group_by) so the dep sighting
 # wins and the holder survives; a unique_by(.id) that kept the first-sorted copy
 # would class it pr_number, apply the exclusion, and merge past a live child.
-grep -q "PR#326 has unclosed rework/review bead bothsrc-326 (open, merge_result=pull_request)" <<< "$OUT1" \
+grep -q "PR#326 has unclosed rework/review bead bothsrc-326 (open, merge_result=pre_open_gate)" <<< "$OUT1" \
   && ok "(24) holder seen by BOTH pr_number and dep probes -> held (provenance unions to 'dep')" \
   || bad "(24) a both-source holder must not be demoted into the excludable pr_number class (got: $OUT1)"
 
@@ -845,14 +1557,258 @@ has '^328$' "$TMP/merged" && bad "(26) PR#328 must NOT be merged past its blocke
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \
                                   || ok "(9) already-merged anchor left for the observer"
 
+# (37) THE FAIL-OPEN CHILD PROBE. The in-flight-child gate is what makes "an
+#      anchor lands only when ALL its children are closed" true, and it used to
+#      decide from a bare `gc bd list | jq` tested only for non-emptiness. A read
+#      that FAILED produced the same empty answer as "no child", and the pass
+#      walked straight on to CLEAN and `gh pr merge` — an unreadable ledger
+#      merging past an open rework child. Now the read's status is checked.
+#      An unreadable ledger is a TOOL error, so the hold is reported on stderr
+#      alongside the failed PR read and the failed anchor re-read, not on the
+#      stdout decision stream.
+hasin "$ERR1" "PR#352 referencing-bead read FAILED" \
+  && ok "(37) unreadable child probe (non-zero exit) -> merge HELD, and the hold says why" \
+  || bad "(37) failed child probe must hold (got: $ERR1)"
+has '^352$' "$TMP/merged" && bad "(37) a PR whose child probe FAILED must not merge" \
+                          || ok "(37) PR with a failed child probe not merged"
+# (37b) The sharper shape: `gc ... --json` reporting its own failure as a JSON
+#       OBJECT on stdout with a ZERO exit status. Non-empty and parseable, so an
+#       emptiness test AND an exit-status test both wave it through; only the
+#       array-shape guard rejects it.
+hasin "$ERR1" "PR#353 referencing-bead read FAILED" \
+  && ok "(37b) child probe returning an error OBJECT at exit 0 -> merge HELD (array-shape guard)" \
+  || bad "(37b) error-object child probe must hold (got: $ERR1)"
+has '^353$' "$TMP/merged" && bad "(37b) a PR whose child probe returned an error object must not merge" \
+                          || ok "(37b) PR with an error-object child probe not merged"
+# (37c) A child parked in `blocked` owes exactly as much work as an open one — it
+#       is just not on a hook. Keyed on open,in_progress alone it was invisible.
+hasin "$OUT1" "PR#354 has unclosed rework/review bead child-354 (blocked)" \
+  && ok "(37c) a BLOCKED child holds the merge (the gate reads every non-closed status)" \
+  || bad "(37c) blocked child must hold (got: $OUT1)"
+has '^354$' "$TMP/merged" && bad "(37c) a PR with a blocked child must not merge" \
+                          || ok "(37c) PR with a blocked child not merged"
+# (25d) A child that names its PR with `fork_pr` and no pr_number at all. The
+#       reconciler already reads all three PR keys; keyed on pr_number alone this
+#       gate could not see such a child holding the PR.
+hasin "$OUT1" "PR#355 has unclosed rework/review bead forkchild-355 (open)" \
+  && ok "(25d) a fork_pr-keyed child holds the merge (PR keys match the reconciler's)" \
+  || bad "(25d) fork_pr-keyed child must hold (got: $OUT1)"
+has '^355$' "$TMP/merged" && bad "(25d) a PR with a fork_pr-keyed child must not merge" \
+                          || ok "(25d) PR with a fork_pr-keyed child not merged"
+
+# (38) DUPLICATE ANCHOR APPEARING MID-PASS. The one-anchor-per-PR guard used to be
+#      precomputed once from the enumeration snapshot, before any PR was read, so
+#      a second gating anchor created or reclassified after that snapshot was not
+#      in the set — and, carrying merge_result, it was excluded from the child
+#      hold too. This pass would then validate and merge PR#356 under the current
+#      anchor's gates alone while a stronger duplicate gate existed. The guard is
+#      computed from the LIVE ledger now, in the same place and for the same
+#      reason the anchor itself is re-read.
+hasin "$OUT1" "PR#356 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-LIVEDUP)" \
+  && ok "(38) duplicate anchor visible only in the LIVE ledger -> merge HELD (stale snapshot missed it)" \
+  || bad "(38) live duplicate anchor must hold (got: $OUT1)"
+has '^356$' "$TMP/merged" && bad "(38) a PR with a mid-pass duplicate anchor must not merge" \
+                          || ok "(38) PR with a live duplicate anchor not merged"
+
+# (39) THE APPROVAL DETECTOR'S OWN PIPELINE. `approval` was matched by piping jq
+#      into `grep -qxF approval` under `set -o pipefail`. `grep -q` exits at the
+#      FIRST match, closing the pipe under jq while it still has gates to write;
+#      jq takes SIGPIPE, the pipeline reports 141, and the trailing
+#      `&& needs_approval=1` never runs — so a check_set that DOES name approval
+#      reads as one that does not. On this CLEAN, unprotected-repo PR with zero
+#      approving reviews, that merged unapproved work. See the fixture note above
+#      for why the check_set is thousands of gates wide: it makes the race
+#      deterministic. The fix drops the pipeline, so length stops mattering.
+hasin "$OUT1" "PR#357 no external approving review at the live head" \
+  && ok "(39) long check_set naming approval -> HELD on the APPROVAL gate (no SIGPIPE miss)" \
+  || bad "(39) long check_set must still arm the approval gate (got: $OUT1)"
+has '^357$' "$TMP/merged" && bad "(39) an approval-armed PR must not merge on a long check_set" \
+                          || ok "(39) long-check_set approval-armed PR not merged"
+
+# (40) THE MANUAL-DISMISSAL HOLE (tk-tmefn). The approval requirement used to be
+#      armed by exactly two bead-side facts: `approval` in check_set, or the
+#      anchor's signoff_dismissed marker. Both describe dismissals the CITY
+#      performed IN-BAND. An operator who clears the stale city
+#      CHANGES_REQUESTED by hand on github.com writes neither — and on an
+#      unprotected repo with no CI, that hand-clearing is exactly what turns
+#      mergeStateStatus CLEAN. So the PR presented as: codex gate green at the
+#      live head, no open child, no marker, CLEAN — and merged, with the only
+#      review anyone ever posted having been a block that was silently taken
+#      back. The gate now reads the DISMISSAL ITSELF out of the reviews history,
+#      which is the side that cannot be bypassed by omitting a marker.
+hasin "$OUT1" "PR#358 no external approving review at the live head HEAD358 (a review authored by 'zook-bot' was DISMISSED on this PR (1x)" \
+  && ok "(40) hand-dismissed self CHANGES_REQUESTED, no marker -> HELD, reason names the dismissal" \
+  || bad "(40) a manually dismissed city block must arm the approval gate (got: $OUT1)"
+has '^358$' "$TMP/merged" && bad "(40) a PR CLEAN only because our own block was hand-dismissed must NOT merge" \
+                          || ok "(40) hand-dismissed PR not merged"
+# (40b) The arm counts the WHOLE history, not the latest review per author: the
+#       city posts a COMMENT every signoff round, and fixture 358's comment is
+#       NEWER than the dismissal. Grouping by author and taking the latest would
+#       let that comment shadow the dismissal away and re-open the hole — the
+#       same shape as the DISMISSED-shadows-APPROVED case (341) inverted.
+#       Covered by (40): its hold proves the later COMMENT did not shadow it.
+#
+# (40c) NOT over-holding. A dismissal makes an external approval REQUIRED, not
+#       impossible — 359 is 358 plus a trusted admin approval at the live head,
+#       and it must land. Without this the fix would strand every PR the city
+#       ever blocked, which is a worse bug than the one it closes.
+has '^359$' "$TMP/merged" \
+  && ok "(40c) hand-dismissed PR WITH a trusted approval at the live head -> merged" \
+  || bad "(40c) the dismissal arm must require an approval, not forbid the merge"
+has '^bead-HANDDISMISS-OK$' "$TMP/closed" \
+  && ok "(40c) approved hand-dismissed anchor closed (record)" \
+  || bad "(40c) approved hand-dismissed anchor closed"
+# (28d) PAGINATED. A dismissal in the tail is invisible to an unpaginated read,
+#       and missing it fails OPEN (the PR merges unapproved) — the same reason
+#       the approval read itself is paginated. 360's DISMISSED row is on page 2.
+hasin "$OUT1" "PR#360 no external approving review at the live head HEAD360 (a review authored by 'zook-bot' was DISMISSED on this PR (1x)" \
+  && ok "(28d) self dismissal on PAGE 2 still arms the gate (paginated read)" \
+  || bad "(28d) a page-2 dismissal must not be missed (got: $OUT1)"
+has '^360$' "$TMP/merged" && bad "(28d) a PR whose page-2 dismissal was missed must not merge" \
+                          || ok "(28d) page-2 hand-dismissed PR not merged"
+
+# (41) THE VETO IS NOT PART OF THE APPROVAL GATE (tk-bdfww). 361 is the ordinary
+#      case, and that is the point: check_set is plain `codex`, the marker is
+#      green at the live head, there is no `approval` member, no
+#      signoff_dismissed, and nothing dismissed anywhere in the history — so the
+#      approval branch is never armed. The veto lived INSIDE that branch, so this
+#      anchor never looked at the one review anyone posted: an external human's
+#      standing CHANGES_REQUESTED. The repo is unprotected, mergeStateStatus is
+#      CLEAN straight through an open objection, and the pass squash-merged past
+#      it. Nothing else on the PR was wrong, which is why it went unnoticed —
+#      every gate that WAS consulted was green. Whether a rig declares `approval`
+#      says nothing about whether another human's "not this" still counts.
+hasin "$OUT1" "PR#361 external reviewer 'otherhuman' has a standing CHANGES_REQUESTED" \
+  && ok "(41) codex-only CLEAN anchor with an external CHANGES_REQUESTED -> held on the veto" \
+  || bad "(41) a standing changes-request must veto a codex-only merge (got: $OUT1)"
+hasin "$OUT1" "PR#361 external reviewer 'otherhuman' has a standing CHANGES_REQUESTED — a latest changes-request vetoes the merge regardless of the check-set" \
+  && ok "(41) the hold reason says the veto is check-set independent" \
+  || bad "(41) veto hold reason (got: $OUT1)"
+has '^361$' "$TMP/merged" \
+  && bad "(41) a PR with a live human objection must NOT merge on a codex-only check_set" \
+  || ok "(41) codex-only vetoed PR not merged"
+# (41b) NOT over-holding, and the reason it cannot be written as "any
+#       CHANGES_REQUESTED in the history": 362 is 361 with that same reviewer's
+#       later APPROVED. The objection is withdrawn, so the merge proceeds — on
+#       the codex gate alone, since check_set never named `approval` and the
+#       approval here is not a gate being satisfied, only a veto being lifted. A
+#       naive hoist that scanned the raw history instead of each reviewer's
+#       LATEST verdict would strand every PR that ever took a review round.
+has '^362$' "$TMP/merged" \
+  && ok "(41b) veto superseded by the same reviewer's later APPROVED -> merged (codex gate alone)" \
+  || bad "(41b) a withdrawn objection must not hold the merge forever (got: $OUT1)"
+has '^bead-CODEXVETO-OK$' "$TMP/closed" \
+  && ok "(41b) superseded-veto anchor closed (record)" \
+  || bad "(41b) superseded-veto anchor closed"
+
+# (INV) exactly twelve PRs were merged: the fully-validated gated head (301), the
+# no-gate PR (311), the explicit opt-out (314), the two approval-satisfied PRs
+# (330, 333), the page-2 approval (335), the superseded-veto PR (343), the
+# mixed trusted/untrusted approval (351), the hand-dismissed PR that DID
+# collect a trusted approval (359), and the codex-only PR whose objection was
+# withdrawn (362). No held/skipped anchor leaked.
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "12" "(INV) exactly twelve PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362)"
+# Every merge that was PERFORMED bound itself to the head it validated — no
+# unbound `gh pr merge` slipped through on any path.
+eq "$(awk -F'\t' '$2 == "" {c++} END {print c+0}' "$TMP/mergeargs")" "0" \
+   "(INV) every merge attempt passed --match-head-commit"
+
+# Summary counters.
+hasin "$OUT1" "12 merged" \
+  && ok "run 1 summary reports 12 merged" || bad "run 1 summary merged count (got: $OUT1)"
+
+# --- Field-shape guard for the approval gate's own reads. ---------------------
+gh pr view 301 --json reviewDecision >/dev/null 2>&1 \
+  && ok "(FS) reviewDecision is an accepted gh field" \
+  || bad "(FS) the approval gate's --json field must be accepted"
+# latestReviews is deliberately NOT read: it carries no commit per verdict, so it
+# cannot head-bind an approval (tk-5niup). The stub drops it from the supported
+# set so a future edit reaching for it fails loudly instead of silently
+# reintroducing the stale-approval hole.
+gh pr view 301 --json latestReviews >/dev/null 2>&1 \
+  && bad "(FS) latestReviews must not be reintroduced (it cannot head-bind an approval)" \
+  || ok "(FS) latestReviews stays out of the approval gate's reads"
+
+# --- Unresolvable acting login -> approval gate HOLDS (fail-closed). ----------
+# If we cannot tell which account is ours, we cannot exclude a self-approval, so
+# an approval-armed anchor must hold rather than count an unattributable one.
+# Run against ISOLATED ledger files so it cannot perturb the convergence run.
+: > "$TMP/merged-nl"; : > "$TMP/closed-nl"
+OUT_NL="$(FAKE_SELF_LOGIN="" FAKE_CLOSED="$TMP/closed-nl" FAKE_MERGED="$TMP/merged-nl" \
+          FAKE_MERGEDREC="$TMP/mergedrec-nl" FAKE_CLOSELOG="$TMP/closelog-nl" bash "$SCRIPT")"
+hasin "$OUT_NL" "PR#330 approval required but the acting login is unresolved" \
+  && ok "(15d) unresolvable acting login -> approval-armed anchor held, not merged" \
+  || bad "(15d) unresolved login must hold the approval gate (got: $OUT_NL)"
+has '^330$' "$TMP/merged-nl" && bad "(15d) approval-armed PR must NOT merge with an unresolved login" \
+                             || ok "(15d) approval-armed PR not merged with an unresolved login"
+has '^301$' "$TMP/merged-nl" \
+  && ok "(15d) an un-armed anchor still merges (the hold is scoped to approval-armed anchors)" \
+  || bad "(15d) unresolved login must not hold anchors that never armed the gate"
+# (28e) The dismissal arm with NO resolvable login. A dismissal cannot be
+# ATTRIBUTED without knowing our own account, so the arm falls back to "was
+# anything dismissed on this PR at all" — over-broad on purpose, and only on PRs
+# whose review state someone has already been editing. 358's dismissal is still
+# seen, so the hole does not re-open just because `gh api user` blipped; 301,
+# which has no reviews at all, is untouched (asserted directly above), so the
+# fallback cannot stall the whole queue.
+has '^358$' "$TMP/merged-nl" \
+  && bad "(28e) an unattributable dismissal must still arm the gate with no self-login" \
+  || ok "(28e) unresolved login -> any dismissal arms the gate (hand-dismissed PR still held)"
+
+# --- Allowlist mode: MERGE_TRUSTED_APPROVERS IS the policy. -------------------
+# (24d) The escape hatch the untrusted hold names, and the reason it exists: a
+# token that cannot read collaborator permissions would otherwise hold every PR
+# forever. With the operator's allowlist set, the listed account satisfies the
+# gate WITHOUT a permission probe — so readonlyhuman, held above, now lands PR
+# 349. Isolated ledger files again so the convergence run is untouched.
+: > "$TMP/merged-al"; : > "$TMP/closed-al"
+OUT_AL="$(MERGE_TRUSTED_APPROVERS="readonlyhuman, someone-else" \
+          FAKE_CLOSED="$TMP/closed-al" FAKE_MERGED="$TMP/merged-al" \
+          FAKE_MERGEDREC="$TMP/mergedrec-al" FAKE_CLOSELOG="$TMP/closelog-al" bash "$SCRIPT")"
+has '^349$' "$TMP/merged-al" \
+  && ok "(24d) MERGE_TRUSTED_APPROVERS lists the approver -> merged (allowlist is the policy)" \
+  || bad "(24d) an allowlisted approver must satisfy the gate (got: $OUT_AL)"
+# (24e) and the allowlist REPLACES the permission probe rather than widening it:
+# an account that is not listed is untrusted even with write access on the repo,
+# so PR 350's bot and PR 351's johnzook-only path both stay held.
+has '^350$' "$TMP/merged-al" \
+  && bad "(24e) an unlisted account must NOT satisfy the allowlist policy" \
+  || ok "(24e) allowlist mode holds an unlisted approver (the allowlist is exhaustive)"
+hasin "$OUT_AL" "PR#350 .*trusted-approver policy (the MERGE_TRUSTED_APPROVERS allowlist)" \
+  && ok "(24e) the hold names the ACTIVE policy (allowlist, not the permission probe)" \
+  || bad "(24e) allowlist-mode hold must name the allowlist policy (got: $OUT_AL)"
+# (24f) The allowlist decision must not depend on the LENGTH of the allowlist.
+# Matching it by piping the list into `grep -qx` looks equivalent, but `grep -q`
+# exits at the first match, and with `set -o pipefail` on, an upstream filter that
+# is still writing then dies of SIGPIPE and the pipeline reports 141 — reading a
+# TRUSTED approver as untrusted. The match is early here and the tail is far past
+# a 64KiB pipe buffer, which is exactly the shape that trips it; the same
+# allowlist, same approver, same expected merge as (24d).
+#
+# ~88KiB of filler is deliberate: comfortably past the 64KiB pipe capacity that
+# makes an upstream writer block (and so take the SIGPIPE), while staying under
+# the 128KiB per-string cap the kernel puts on one environment entry — overshoot
+# that and the run dies with "Argument list too long" instead of testing anything.
+: > "$TMP/merged-alw"; : > "$TMP/closed-alw"
+AL_LONG="readonlyhuman,$(awk 'BEGIN{for(i=0;i<4000;i++)printf "filler-account-%06d,",i}')someone-else"
+OUT_ALW="$(MERGE_TRUSTED_APPROVERS="$AL_LONG" \
+           FAKE_CLOSED="$TMP/closed-alw" FAKE_MERGED="$TMP/merged-alw" \
+           FAKE_MERGEDREC="$TMP/mergedrec-alw" FAKE_CLOSELOG="$TMP/closelog-alw" bash "$SCRIPT")"
+has '^349$' "$TMP/merged-alw" \
+  && ok "(24f) an early match in a >64KiB allowlist still merges (no SIGPIPE/pipefail misread)" \
+  || bad "(24f) allowlist match must not depend on list length (got: $OUT_ALW)"
+has '^350$' "$TMP/merged-alw" \
+  && bad "(24f) a long allowlist must still be exhaustive for unlisted accounts" \
+  || ok "(24f) a long allowlist stays exhaustive (unlisted approver still held)"
+
 # (ID3) the anchor's own certified pr_url names a DIFFERENT pull request from the
-# one that answered. Everything else about PR#330 is merge-ready (OPEN, non-draft,
+# one that answered. Everything else about PR#363 is merge-ready (OPEN, non-draft,
 # base==target, codex green@head, CLEAN), so the identity check is the only thing
 # that can stop it — and it must, because one of the two names is wrong and nothing
 # here can say which.
-has '^330$' "$TMP/merged" && bad "(ID3) an anchor whose pr_url names another PR must NOT be merged" \
+has '^363$' "$TMP/merged" && bad "(ID3) an anchor whose pr_url names another PR must NOT be merged" \
                           || ok "(ID3) pr_url/live-URL mismatch -> merge held"
-printf '%s\n' "$OUT1" | grep -q "anchor bead-URLMISMATCH records pr_url 'https://github.com/acme/OTHER/pull/330'" \
+printf '%s\n' "$OUT1" | grep -q "anchor bead-URLMISMATCH records pr_url 'https://github.com/acme/OTHER/pull/363'" \
   && ok "(ID3) the hold reason names both pull requests for an operator" \
   || bad "(ID3) hold reason must name the recorded pr_url (got: $OUT1)"
 
@@ -861,15 +1817,15 @@ printf '%s\n' "$OUT1" | grep -q "anchor bead-URLMISMATCH records pr_url 'https:/
 # indefinite hold on a ready PR that no repair in THIS repository could release
 # (review tk-thvbq finding #4).
 #
-# (XREPO-DUP) PR#331 is claimed by our bead-XDUPOK (pr_number-only, so it keys on
+# (XREPO-DUP) PR#364 is claimed by our bead-XDUPOK (pr_number-only, so it keys on
 # origin) and by bead-XDUPFOREIGN, whose pr_url names ANOTHER HOST's acme/repo.
-# Keyed on "331" alone that is a one-anchor-per-PR violation and BOTH are held
+# Keyed on "364" alone that is a one-anchor-per-PR violation and BOTH are held
 # forever; keyed on repository+number the foreign anchor is a different pull
 # request and ours merges.
-has '^331$' "$TMP/merged" \
-  && ok "(XREPO-DUP) a foreign same-numbered anchor is not a duplicate -> our PR#331 still merges" \
-  || bad "(XREPO-DUP) PR#331 must merge; a foreign anchor must not make it multi-anchor (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "PR#331 has multiple open gating anchors" \
+has '^364$' "$TMP/merged" \
+  && ok "(XREPO-DUP) a foreign same-numbered anchor is not a duplicate -> our PR#364 still merges" \
+  || bad "(XREPO-DUP) PR#364 must merge; a foreign anchor must not make it multi-anchor (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#364 has multiple open gating anchors" \
   && bad "(XREPO-DUP) must NOT report a one-anchor-per-PR violation across repositories" \
   || ok "(XREPO-DUP) no false one-anchor-per-PR hold across repositories"
 # ...and the foreign anchor is still refused, by the identity check that owns that
@@ -883,20 +1839,20 @@ printf '%s\n' "$OUT1" | grep -q "PR#313 has multiple open gating anchors" \
   && ok "(XREPO-DUP) a same-repository duplicate is still held (guard not weakened)" \
   || bad "(XREPO-DUP) same-repository duplicates must still hold"
 
-# (XREPO-CHILD) PR#332's only open child names another host's repository — it is
-# somebody else's rework and can never land ours, so it must not hold. PR#333's
+# (XREPO-CHILD) PR#365's only open child names another host's repository — it is
+# somebody else's rework and can never land ours, so it must not hold. PR#366's
 # child names THIS repository and must. The unqualified guard held both.
-has '^332$' "$TMP/merged" \
-  && ok "(XREPO-CHILD) a foreign same-numbered child does not hold -> PR#332 merges" \
-  || bad "(XREPO-CHILD) PR#332 must merge; a foreign child cannot hold it (got: $OUT1)"
-has '^333$' "$TMP/merged" \
-  && bad "(XREPO-CHILD) a same-repository open child MUST still hold PR#333" \
+has '^365$' "$TMP/merged" \
+  && ok "(XREPO-CHILD) a foreign same-numbered child does not hold -> PR#365 merges" \
+  || bad "(XREPO-CHILD) PR#365 must merge; a foreign child cannot hold it (got: $OUT1)"
+has '^366$' "$TMP/merged" \
+  && bad "(XREPO-CHILD) a same-repository open child MUST still hold PR#366" \
   || ok "(XREPO-CHILD) a same-repository open child still holds the merge"
-printf '%s\n' "$OUT1" | grep -q "PR#333 has unclosed rework/review bead child-same-333 (open)" \
+printf '%s\n' "$OUT1" | grep -q "PR#366 has unclosed rework/review bead child-same-366 (open)" \
   && ok "(XREPO-CHILD) the hold names the same-repository child" \
-  || bad "(XREPO-CHILD) hold reason must name child-same-333 (got: $OUT1)"
+  || bad "(XREPO-CHILD) hold reason must name child-same-366 (got: $OUT1)"
 
-# (CHILDFAIL) the child lookup FAILED (error object + exit 1). PR#334 has no child
+# (CHILDFAIL) the child lookup FAILED (error object + exit 1). PR#367 has no child
 # at all and is otherwise fully mergeable, so an unguarded read merges it. "I could
 # not tell" must hold instead: this is the one script whose mistake — merging past
 # an open rework — cannot be retried away.
@@ -905,10 +1861,10 @@ printf '%s\n' "$OUT1" | grep -q "PR#333 has unclosed rework/review bead child-sa
 # distinguishes this case from (21)/PR#321: that one fails a DEPENDENCY probe. Since
 # tk-lgjvg the holder set is the union of three reads, so each leg needs its own
 # case — a guard restored on the dep probes alone would still merge this one.
-has '^334$' "$TMP/merged" \
+has '^367$' "$TMP/merged" \
   && bad "(CHILDFAIL) an unreadable child lookup must HOLD, never merge (rework in flight cannot be ruled out)" \
   || ok "(CHILDFAIL) unreadable open-child lookup -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#334 in-flight rework/review probe failed" \
+printf '%s\n' "$OUT1" | grep -q "PR#367 in-flight rework/review probe failed" \
   && ok "(CHILDFAIL) the hold reason names the failed lookup" \
   || bad "(CHILDFAIL) hold reason must name the failed lookup (got: $OUT1)"
 
@@ -919,10 +1875,10 @@ printf '%s\n' "$OUT1" | grep -q "PR#334 in-flight rework/review probe failed" \
 
 # (HD1) FORK: the branch NAME matches, the branch does not. Pre-fix this squash-merged
 # mallory/repo's head onto main under our anchor's gates.
-has '^335$' "$TMP/merged" \
+has '^368$' "$TMP/merged" \
   && bad "(HD1) a PR opened from a FORK must never be merged under our anchor" \
   || ok "(HD1) fork head -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#335 is opened from FORK 'mallory/repo'" \
+printf '%s\n' "$OUT1" | grep -q "PR#368 is opened from FORK 'mallory/repo'" \
   && ok "(HD1) the hold names the fork and this checkout's repository" \
   || bad "(HD1) hold reason must name the fork (got: $OUT1)"
 has '^bead-FORK$' "$TMP/closed" \
@@ -932,40 +1888,40 @@ has '^bead-FORK$' "$TMP/closed" \
 # (HD2) SELFCONTRA: headRepository says ours, isCrossRepository says otherwise. An
 # identity that contradicts itself has not been established — it is not a tie to
 # break in the merge's favour.
-has '^336$' "$TMP/merged" \
+has '^369$' "$TMP/merged" \
   && bad "(HD2) a self-contradicting head identity must never merge" \
   || ok "(HD2) headRepository/isCrossRepository disagreement -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#336 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
+printf '%s\n' "$OUT1" | grep -q "PR#369 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
   && ok "(HD2) the hold names both halves of the contradiction" \
   || bad "(HD2) hold reason must name the contradiction (got: $OUT1)"
 
 # (HD3) NOHEAD: gh returns null head repository objects (deleted head repo, schema
 # shift). "I cannot tell whether this is a fork" must hold, not merge.
-has '^337$' "$TMP/merged" \
+has '^370$' "$TMP/merged" \
   && bad "(HD3) an unreadable head identity must HOLD, never merge" \
   || ok "(HD3) null headRepository/headRepositoryOwner -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#337 head identity is unreadable" \
+printf '%s\n' "$OUT1" | grep -q "PR#370 head identity is unreadable" \
   && ok "(HD3) the hold names the unreadable identity" \
   || bad "(HD3) hold reason must name the unreadable head (got: $OUT1)"
 
 # (HD4) BRANCHMISMATCH: right repository, right head repository, WRONG branch. The
 # anchor and the PR describe different work.
-has '^338$' "$TMP/merged" \
+has '^371$' "$TMP/merged" \
   && bad "(HD4) a PR opened from a branch the anchor does not record must not merge" \
   || ok "(HD4) head branch != anchor's recorded branch -> merge held"
-printf '%s\n' "$OUT1" | grep -q "anchor bead-BRANCHMISMATCH records branch 'polecat/bead-BRANCHMISMATCH' but PR#338 is opened from 'polecat/somebody-else'" \
+printf '%s\n' "$OUT1" | grep -q "anchor bead-BRANCHMISMATCH records branch 'polecat/bead-BRANCHMISMATCH' but PR#371 is opened from 'polecat/somebody-else'" \
   && ok "(HD4) the hold names both branches" \
   || bad "(HD4) hold reason must name both branches (got: $OUT1)"
 
 # (HD5) HEADOK — THE POSITIVE CONTROL. Without it every assertion above could pass
 # by the head checks rejecting everything, including legitimate merges.
-has '^339$' "$TMP/merged" \
+has '^372$' "$TMP/merged" \
   && ok "(HD5) a fully-certified head (ours, non-cross, anchor's branch) still MERGES" \
   || bad "(HD5) the head checks must not block a legitimate merge"
 has '^bead-HEADOK$' "$TMP/closed" \
   && ok "(HD5) the certified anchor closed (record)" || bad "(HD5) certified anchor closed"
 
-# (XREPO-DEP) THE SCOPING GUARD for the two fixes' intersection. PR#340's only
+# (XREPO-DEP) THE SCOPING GUARD for the two fixes' intersection. PR#373's only
 # holder is reached by a `blocks` DEPENDENCY EDGE, and it carries BOTH excludable
 # marks at once: merge_result=pull_request AND a pr_url naming another host's
 # repository. That is the real shape of a cross-repository merge-ordering block —
@@ -977,22 +1933,22 @@ has '^bead-HEADOK$' "$TMP/closed" \
 # undo the pr_number probe's over-broad sweep; neither says anything true about a
 # bead found by an explicit edge in this ledger. Without this case the identity
 # filter could be widened to the dep set and every suite above would still pass.
-has '^340$' "$TMP/merged" \
+has '^373$' "$TMP/merged" \
   && bad "(XREPO-DEP) a dependency-edge blocker must hold regardless of merge_result AND of the repository its pr_url names" \
   || ok "(XREPO-DEP) cross-repository dep-edge blocker -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#340 has unclosed rework/review bead upstream-340 (open, merge_result=pull_request)" \
+printf '%s\n' "$OUT1" | grep -q "PR#373 has unclosed rework/review bead upstream-373 (open, merge_result=pull_request)" \
   && ok "(XREPO-DEP) the hold names the cross-repository blocker" \
-  || bad "(XREPO-DEP) hold reason must name upstream-340 (got: $OUT1)"
+  || bad "(XREPO-DEP) hold reason must name upstream-373 (got: $OUT1)"
 
 # (INV) exactly eight PRs were merged, and the two fixes' merge sets are disjoint:
 #   tk-lgjvg's — the fully-validated gated head (301), the no-gate PR (311), the
 #     explicit opt-out (314), and the two whose only children cannot hold: wrong-end
 #     edges (319) and an already-closed child (320);
-#   this branch's — the two whose only blockers are FOREIGN beads (331, 332) and the
-#     certified head (339).
+#   this branch's — the two whose only blockers are FOREIGN beads (364, 365) and the
+#     certified head (372).
 # No held/skipped anchor leaked: not one of the dependency-edge holders, and not one
 # of the four head-identity cases.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "8" "(INV) exactly eight PRs merged (301 + 311 + 314 + dep-edge 319, 320 + cross-repo 331, 332 + head-certified 339)"
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "8" "(INV) exactly eight PRs merged (301 + 311 + 314 + dep-edge 319, 320 + cross-repo 364, 365 + head-certified 372)"
 # ...and all of them landed in THIS checkout's repository, not wherever gh pointed.
 eq "$(cut -f2 "$TMP/mergedwhere" | sort -u | tr '\n' ' ')" "github.com/acme/repo " \
    "(INV) every merge landed in the origin-derived repository"

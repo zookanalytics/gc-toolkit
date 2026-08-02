@@ -34,6 +34,24 @@
 #                          head (stale_gate_head); a poolless hold uses a distinct
 #                          stale_gate_nopool_head so a pool configured later still
 #                          dispatches. Symmetric with CONFLICTING.
+#   PR open, gate GREEN
+#   but GitHub RED     -> the INVERSE of the stale gate (tk-5niup): the marker is
+#                          green at the LIVE head, and it is GitHub that lags —
+#                          our own CHANGES_REQUESTED from an earlier round still
+#                          stands, pinned to a dead commit, because a COMMENT
+#                          review never supersedes the same reviewer's earlier
+#                          one. reviewDecision stays CHANGES_REQUESTED and the PR
+#                          stays BLOCKED forever, and the stale-gate arm cannot
+#                          reach it (the marker is current). Retract OUR OWN
+#                          superseded review — never a human's — and record
+#                          signoff_dismissed so merge-skill.sh requires a real
+#                          external approval, since removing the block is
+#                          merge-triggering where CLEAN folds none — and where
+#                          native auto-merge is already ARMED it is merge-
+#                          triggering SERVER-side, past any requirement this
+#                          script can record, so that case retracts nothing at
+#                          all. Converges: once dismissed the decision is no
+#                          longer CHANGES_REQUESTED, so the arm does not re-enter.
 #   PR open, draft      -> skip (drafts are retired, so the refinery creates no
 #                          draft PR; a stray draft is left untouched).
 #
@@ -429,6 +447,30 @@ is_held() {
   esac
 }
 
+# Native auto-merge state for a PR, as a THREE-valued answer: armed / disarmed /
+# unknown. The distinction carries the whole guard. A bare
+# `gh pr view --json autoMergeRequest | jq -r '.autoMergeRequest // empty'`
+# collapses an API error, an auth failure, a rate-limit, and a jq parse error into
+# the SAME empty string a genuinely disarmed PR produces — so a read that FAILED
+# is indistinguishable from a definite "no", and the caller fails OPEN on the one
+# field whose entire job is to stop a server-side merge. Answer "unknown" unless
+# the payload is a parseable object that actually CARRIES the key; callers treat
+# anything but "disarmed" as armed, because dismissing a review is irreversible
+# and an armed auto-merge merges before merge-skill.sh can enforce anything.
+automerge_state() {
+  local raw
+  raw=$(gh pr view "$1" --json autoMergeRequest 2>/dev/null) \
+    || { printf 'unknown\n'; return; }
+  printf '%s' "$raw" \
+    | jq -e 'type == "object" and has("autoMergeRequest")' >/dev/null 2>&1 \
+    || { printf 'unknown\n'; return; }
+  if printf '%s' "$raw" | jq -e '.autoMergeRequest != null' >/dev/null 2>&1; then
+    printf 'armed\n'
+  else
+    printf 'disarmed\n'
+  fi
+}
+
 # Route a stale-gate re-review to the codex pool and, ONLY once that route is
 # confirmed to have PERSISTED, arm the one-per-head guard (stale_gate_head) on the
 # anchor. The route write is what makes the review claimable — a codex polecat
@@ -437,17 +479,55 @@ is_held() {
 # UNVERIFIED best-effort route was the tk-3xy37 finding: a dropped route write left
 # the review unrouted (inert) yet marked the head dispatched, so the one-per-head
 # guard skipped it forever and the merge sat held behind a bead nothing could claim
-# — the exact silent hold this arm exists to heal. Read gc.routed_to back; on a miss
-# return 1 and stamp NOTHING, so a later pass re-enters the arm (guard unstamped) and
-# repairs the same bead via the in-flight probe. Returns 0 armed, 1 not persisted.
+# — the exact silent hold this arm exists to heal. Read the WHOLE route triple back
+# — review_pool (durable), gc.routed_to (live), assignee (claimed) — and require the
+# DURABLE copy as well as the live one (tk-bdfww); on a miss return 1 and stamp
+# NOTHING, so a later pass re-enters the arm (guard unstamped) and repairs the same
+# bead via the in-flight probe. Returns 0 armed, 1 not persisted.
 arm_stale_gate() {
   local bead="$1" anchor="$2" head="$3" stale="$4" pool="$5" num="$6" got
+  local got_pool got_routed got_assignee
   # An empty pool can never make a bead claimable; never "arm" on one (the callers
   # already gate on a non-empty pool, but fail closed here too).
   [ -n "$pool" ] || return 1
-  gc bd update "$bead" --set-metadata gc.routed_to="$pool" >/dev/null 2>&1
-  got=$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
-  [ "$got" = "$pool" ] || return 1
+  # review_pool is the DURABLE copy of the route, stamped with it. gc.routed_to is
+  # working state — a claim consumes it, a re-route rewrites it — so by the time the
+  # signoff's retry-release path needs to put an un-stamped review BACK in a pool
+  # (template-fragments/polecat-non-impl-done.template.md), the live route may be
+  # gone and there is nothing to restore it to. An open, unassigned, UNROUTED review
+  # is offered to nobody: the gate is owed forever and the PR sits held. This field
+  # is what that path falls back to.
+  #
+  # So it is READ BACK too, not just written (tk-bdfww). Both fields go out in ONE
+  # batched update, and a partial write that persists gc.routed_to while losing
+  # review_pool is exactly the shape this read-back exists to catch — verifying
+  # only the live half declared the route durable on the evidence of the field
+  # that ISN'T. The damage is deferred rather than absent: the arm stamps
+  # stale_gate_head, the one-per-head guard closes behind it, a codex polecat
+  # claims the review and CONSUMES gc.routed_to, and then a signoff that ends
+  # without stamping the gate has to put the review back — with no review_pool
+  # left to reconstruct the route from. The bead is released open, unassigned and
+  # unrouted, offered to nobody, and the head is already marked dispatched so
+  # nothing re-enters this arm. That is the same terminal strand tk-3xy37 closed
+  # on the live half, reached through the durable one.
+  #
+  # The live half stays a match-or-claimed test, identical to check-set-heal.sh's
+  # route_ok: a claim CONSUMES gc.routed_to, so a polecat that picked the review
+  # up between the write and this read legitimately leaves it empty, and that bead
+  # is reachable — re-routing it would hand a claimed review to a second pool.
+  # Returning 1 stamps NOTHING, so a later pass re-enters this arm (guard
+  # unstamped) and repairs the same bead through the in-flight probe.
+  gc bd update "$bead" \
+    --set-metadata gc.routed_to="$pool" \
+    --set-metadata review_pool="$pool" >/dev/null 2>&1
+  got=$(gc bd show "$bead" --json 2>/dev/null \
+    | jq -r '.[0] | [(.metadata.review_pool // ""),
+                     (.metadata["gc.routed_to"] // ""),
+                     (.assignee // "")] | join("|")' 2>/dev/null)
+  [ -n "$got" ] || return 1
+  IFS='|' read -r got_pool got_routed got_assignee <<< "$got"
+  [ "$got_pool" = "$pool" ] || return 1
+  [ -n "$got_assignee" ] || [ "$got_routed" = "$pool" ] || return 1
   gc bd update "$anchor" \
     --set-metadata stale_gate_head="${head:-unknown}" \
     --set-metadata blocked_reason="PR#$num check.codex stale (green@$stale, live head ${head:-?}); re-review $bead routed to $pool" >/dev/null 2>&1
@@ -475,7 +555,17 @@ fi
 # matters. Only the per-anchor loop is skipped.
 [ -n "$ROWS" ] || echo "reconcile-merged-prs: no gating anchors"
 
+# The account this pass acts as. The superseded-review arm retracts ONLY reviews
+# authored by it — an operator's CHANGES_REQUESTED is a veto and is never ours to
+# clear. Unresolvable => the arm cannot tell ours from theirs and does not run,
+# which leaves the PR blocked (the safe side).
+SELF_LOGIN=$(gh api user -q .login 2>/dev/null)
+
 closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; rebase_held=0; regated=0; gate_held=0; identity_held=0; skipped=0
+# Superseded-review retractions (tk-5niup) get their OWN counters: a retraction
+# is not a re-review, so folding it into regated/gate_held would misreport the
+# stale-gate arm's throughput in the summary line.
+retracted=0; retract_held=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -494,7 +584,7 @@ while IFS= read -r row; do
   # and close-on-land never closes anything. A non-null `mergedAt` (state also
   # reaches MERGED) is the authoritative merge signal. The test's gh stub
   # rejects unsupported fields to guard against reintroducing this.
-  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json state,mergedAt,mergeCommit,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,url 2>/dev/null)
+  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json state,mergedAt,mergeCommit,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,reviewDecision,url 2>/dev/null)
   if [ -z "$PR_JSON" ]; then
     echo "reconcile-merged-prs: PR#$num view failed; skip $id (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
@@ -521,6 +611,10 @@ while IFS= read -r row; do
   abranch=$(printf '%s' "$row" | jq -r '.branch // empty')
   mergeable=$(printf '%s' "$PR_JSON" | jq -r '.mergeable // ""')
   merge_state=$(printf '%s' "$PR_JSON" | jq -r '.mergeStateStatus // ""')
+  # Cheap discriminator for the superseded-review arm below: only a PR whose
+  # review decision is CHANGES_REQUESTED can be blocked by a standing review, so
+  # this one extra field spares every other anchor the reviews-API round trip.
+  review_decision=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
   pr_url=$(printf '%s' "$PR_JSON" | jq -r '.url // ""')
 
   # --- identity: is the PR that answered really THIS anchor's PR? -------------
@@ -624,16 +718,34 @@ while IFS= read -r row; do
        && [ -n "$recorded_target" ] && [ -n "$base" ] && [ "$recorded_target" != "$base" ]; then
     # Build --unset-metadata flags for each gate the anchor declared in check_set.
     # The markers are dynamic keys (check.<name>), so they cannot be a single
-    # static flag; empty check_set yields no flags. Intentionally word-split on use.
-    UNSET_CHECKS=$(printf '%s' "$row" | jq -r '
+    # static flag; an empty check_set yields no flags at all.
+    #
+    # An ARRAY, read one jq line per element — not a space-joined string expanded
+    # unquoted (tk-bdfww, the security review's deferred item). check_set is
+    # operator-supplied text that reaches this line verbatim, and an unquoted
+    # expansion is subject to PATHNAME EXPANSION as well as word splitting: a gate
+    # named `check-*` would expand against the reconciler's cwd, so the flags
+    # actually sent would depend on which files happen to sit next to the script —
+    # unsetting markers nobody named, or silently unsetting none of them. Reading
+    # NUL-free lines into an array makes each element exactly one jq output token,
+    # whatever it contains.
+    UNSET_CHECKS=()
+    while IFS= read -r _uc; do
+      [ -n "$_uc" ] || continue
+      UNSET_CHECKS+=("$_uc")
+    done < <(printf '%s' "$row" | jq -r '
       ((.checkset // "") | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
-       | map("--unset-metadata", "check." + .) | .[])' 2>/dev/null | tr '\n' ' ')
+       | map("--unset-metadata", "check." + .) | .[])' 2>/dev/null)
+    # `${arr[@]+"${arr[@]}"}` — an EMPTY array expands to nothing here rather than
+    # tripping `set -u` (line 101). Bash 4.4+ treats a bare "${arr[@]}" as empty
+    # under -u, but 3.2 (the system bash on macOS, where this pack also runs) does
+    # not, and a gateless anchor is the common case — it must not abort the pass.
     gc bd update "$id" \
       --assignee="" \
       --set-metadata merge_result=retargeted \
       --set-metadata gc.routed_to=human \
       --set-metadata blocked_reason="PR#$num retargeted: base '$base' != expected target '$recorded_target'" \
-      $UNSET_CHECKS >/dev/null 2>&1
+      ${UNSET_CHECKS[@]+"${UNSET_CHECKS[@]}"} >/dev/null 2>&1
     retargeted=$((retargeted + 1))
     if gc mail send mayor/ -s "ESCALATION: PR#$num retargeted ($base != $recorded_target) for $id" \
          -m "Gating anchor $id expects PR#$num to land on '$recorded_target' (merged_target,
@@ -965,13 +1077,33 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
     fixpool=$(printf '%s' "$row" | jq -r '.fixpool // empty')
     [ -n "$fixpool" ] || fixpool="$FIX_POOL_DEFAULT"
 
-    # `codex` must be a declared check-set member (trimmed, whole-token — the same
-    # split merge-skill.sh / check-set-heal.sh use, so a spaced "lint, codex" is
-    # recognized identically). none/off is not a member, so a gateless rig never
-    # enters this arm.
+    # `codex` must be a declared check-set member (whitespace-insensitive,
+    # whole-token — so a spaced "lint, codex" is recognized exactly as
+    # merge-skill.sh / check-set-heal.sh recognize it). none/off is not a member,
+    # so a gateless rig never enters this arm.
+    #
+    # Matched in-shell rather than through a `... | grep -qxF codex` pipeline, for
+    # the same reason merge-skill.sh's trusted-approver and `approval` tests are:
+    # `set -o pipefail` is on (line 101) and `grep -q` exits at the FIRST match,
+    # closing the pipe under `tr`/`sed`, which can then take SIGPIPE and make the
+    # whole pipeline report 141 — so `&& is_codex_member=1` never runs. A check_set
+    # that DOES name `codex` reads as one that does not, decided by nothing but how
+    # many gates happen to be listed AFTER it. Both arms below key off this flag, so
+    # a rig would silently lose stale-gate re-review AND the superseded-review
+    # self-heal as its check_set grows, leaving those PRs blocked indefinitely.
+    #
+    # Whitespace is stripped outright (a gate name cannot contain any) and the comma
+    # wrapping makes it a whole-token match, so `codex` matches while `pre-codex`
+    # does not. Deliberately NOT case-folded: merge-skill.sh's gate enumeration
+    # keeps each gate's original case in its marker key (`"check." + .`), so a
+    # `CODEX` gate is satisfied only by `check.CODEX`. Folding here would dispatch a
+    # re-review whose lowercase `check.codex` stamp could never satisfy that gate —
+    # a false positive that re-reviews forever. Case-sensitive matches both the
+    # previous behaviour and what the merge actually enforces.
     is_codex_member=""
-    printf '%s' "$checkset" | tr ',' '\n' \
-      | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex && is_codex_member=1
+    case ",$(printf '%s' "$checkset" | tr -d '[:space:]')," in
+      *",codex,"*) is_codex_member=1 ;;
+    esac
 
     # Stale-green? The marker must be green at a NON-EMPTY oid that is NOT the live
     # head. An empty/absent marker is "never reviewed" (check-set-heal's / the normal
@@ -1028,19 +1160,48 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         # route write (arm_stale_gate below) is inert — unclaimable by the codex pool
         # — while it still trips this probe, so the gate would sit held forever behind
         # a bead nothing can action. If the in-flight bead is exactly that (a codex
-        # review anchored to THIS anchor with no gc.routed_to) and a review pool is
-        # configured, re-route it (repair) rather than skip: heal the head an earlier
-        # pass failed to arm. Anything else — routed, a rework child, or anchored
-        # elsewhere — is left untouched, so twin-avoidance is unchanged for it.
+        # review anchored to THIS anchor whose route this pass's arm would refuse)
+        # and a review pool is configured, re-route it (repair) rather than skip:
+        # heal the head an earlier pass failed to arm. Anything else — properly
+        # routed, a rework child, or anchored elsewhere — is left untouched, so
+        # twin-avoidance is unchanged for it.
+        #
+        # A MISSING DURABLE COPY is the same kind of half-written route and is
+        # repaired here too (tk-bdfww). arm_stale_gate now refuses to arm on one,
+        # so without this the two disagree: the head guard stays unstamped, every
+        # later pass re-enters, finds this same bead ROUTED, skips at the twin
+        # guard, and review_pool is never restored — the arm spins without ever
+        # converging, and the review is one claim away from being unroutable
+        # (a claim CONSUMES gc.routed_to, leaving nothing to re-offer it from).
+        # The repair predicate must therefore cover exactly what the arming
+        # predicate rejects.
         if_json=$(gc bd show "$inflight" --json 2>/dev/null)
         if_kind=$(printf '%s' "$if_json" | jq -r '.[0].metadata.task_kind // ""' 2>/dev/null)
         if_anchor=$(printf '%s' "$if_json" | jq -r '.[0].metadata.anchor_bead // ""' 2>/dev/null)
         if_routed=$(printf '%s' "$if_json" | jq -r '.[0].metadata["gc.routed_to"] // ""' 2>/dev/null)
+        if_pool=$(printf '%s' "$if_json" | jq -r '.[0].metadata.review_pool // ""' 2>/dev/null)
+        # The ASSIGNEE is read for the same reason arm_stale_gate reads it: a claim
+        # CONSUMES gc.routed_to, so "no live route" means unclaimable only while the
+        # bead is also unclaimed. Without it the two predicates cannot agree.
+        if_assignee=$(printf '%s' "$if_json" | jq -r '.[0].assignee // ""' 2>/dev/null)
+        # Repair exactly what arm_stale_gate REFUSES to arm on — the negation of its
+        # accept condition (pool matches AND (claimed OR live route matches)), so the
+        # two can never disagree (tk-5niup). The old form tested `-z "$if_routed"`,
+        # i.e. only an EMPTY live route, which left the SPLIT route uncovered:
+        # review_pool=<review pool> with gc.routed_to=<some other pool> and nobody
+        # claiming. The arm rejects that (the review is offered to a pool that will
+        # never stamp check.codex), the repair skipped it at the twin guard, and the
+        # pass spun forever — head never armed, route never healed, merge held behind
+        # a bead the codex pool is never offered. Stating it as the negation also
+        # stops the inverse over-fire: a CLAIMED review with a spent gc.routed_to is
+        # reachable, and re-routing it would hand a claimed review to a second pool.
         if [ -n "$REVIEW_POOL_DEFAULT" ] && [ "$if_kind" = "review" ] \
-             && [ "$if_anchor" = "$id" ] && [ -z "$if_routed" ]; then
+             && [ "$if_anchor" = "$id" ] \
+             && { [ "$if_pool" != "$REVIEW_POOL_DEFAULT" ] \
+                  || { [ -z "$if_assignee" ] && [ "$if_routed" != "$REVIEW_POOL_DEFAULT" ]; }; }; then
           if arm_stale_gate "$inflight" "$id" "$head_oid" "$stale_oid" "$REVIEW_POOL_DEFAULT" "$num"; then
             regated=$((regated + 1))
-            echo "reconcile-merged-prs: $id — PR#$num re-review $inflight was left unrouted by an earlier failed route write; re-routed to $REVIEW_POOL_DEFAULT (stale-gate repair)"
+            echo "reconcile-merged-prs: $id — PR#$num re-review $inflight was left unrouted, misrouted, or without its durable review_pool copy by an earlier failed route write; re-routed to $REVIEW_POOL_DEFAULT (stale-gate repair)"
           else
             echo "reconcile-merged-prs: $id — PR#$num re-review $inflight repair route still not persisting; retry next pass" >&2
             skipped=$((skipped + 1))
@@ -1118,10 +1279,202 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         regated=$((regated + 1))
         echo "reconcile-merged-prs: $id — PR#$num check.codex green@$stale_oid stale (live head ${head_oid:-?}); filed re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT"
       else
-        echo "reconcile-merged-prs: WARN re-review $REVIEW_BEAD route write did not persist gc.routed_to=$REVIEW_POOL_DEFAULT; leaving un-armed (retry/repair next pass)" >&2
+        echo "reconcile-merged-prs: WARN re-review $REVIEW_BEAD route write did not persist the full route (gc.routed_to + review_pool = $REVIEW_POOL_DEFAULT); leaving un-armed (retry/repair next pass)" >&2
         skipped=$((skipped + 1))
       fi
       continue
+    fi
+
+    # --- Superseded-review self-heal: the gate is CURRENT but GitHub is still
+    # RED (tk-5niup). The exact inverse of the stale-gate arm above: there the
+    # bead marker lagged the head; here the marker is green AT the live head and
+    # it is the GITHUB side that lags — our own CHANGES_REQUESTED from an earlier
+    # round is still standing, pinned to a commit that no longer exists. A
+    # COMMENT review does not supersede the same reviewer's earlier
+    # CHANGES_REQUESTED, so reviewDecision stays CHANGES_REQUESTED and
+    # mergeStateStatus stays BLOCKED forever; merge-skill.sh requires CLEAN, so
+    # the PR can never land no matter how many green re-gates run.
+    #
+    # The re-gate itself now retracts its own superseded review in the step that
+    # stamps green (template-fragments/polecat-non-impl-done.template.md), which
+    # stops NEW strands. This arm is the convergence half: an anchor already
+    # stranded before that shipped has a green marker at the live head, so the
+    # stale-gate arm never fires and nothing re-dispatches a review — it would
+    # sit BLOCKED forever with no in-band path out.
+    #
+    # KEEP IN SYNC with that step. The two implement the same guard sequence
+    # against the same irreversible act (retracting our own block), from opposite
+    # ends — one at re-gate time, one as the backstop — so a guard added or
+    # tightened in either belongs in both. They are deliberately not extracted
+    # into a shared script: one is a bash script, the other is instruction text a
+    # polecat executes, and the pair is covered by two separate regression suites
+    # (reconcile-merged-prs.test.sh here, signoff-supersede-dismiss.test.sh there).
+    #
+    # Same guards as the re-gate, for the same reasons: our own reviews only (an
+    # operator's CHANGES_REQUESTED is a veto, never ours to clear), superseded
+    # commits only, gate green at the LIVE head, native auto-merge provably OFF
+    # (an unreadable probe counts as armed), and the pairing marker recorded AND
+    # READ BACK before the dismissal (a dismissal without a durable marker would
+    # drop both the block and the approval requirement). The head, the auto-merge
+    # state AND the anchor itself are re-read immediately before each irreversible
+    # call, since all three can change inside the pass — the anchor row this arm
+    # decided from is a snapshot taken before the PR was even read, so a mid-pass
+    # merge_hold, a cleared check.codex, or an un-parked anchor would otherwise go
+    # unseen. Converges by construction:
+    # once dismissed, reviewDecision is no longer CHANGES_REQUESTED and the arm
+    # does not re-enter.
+    if [ -n "$is_codex_member" ] && [ -z "$stale_oid" ] \
+       && [ "$codexmark" = "green@$head_oid" ] && [ -n "$head_oid" ] \
+       && [ "$review_decision" = "CHANGES_REQUESTED" ] && [ -n "$SELF_LOGIN" ]; then
+      if is_held "$hold"; then
+        echo "reconcile-merged-prs: $id — PR#$num blocked by a superseded self-review but merge_hold set (operator gate); no retraction"
+        retract_held=$((retract_held + 1)); continue
+      fi
+      # Native auto-merge turns this dismissal from merge-ENABLING into merge-
+      # TRIGGERING. If an operator (or a legacy pass) armed `gh pr merge --auto`,
+      # GitHub merges the moment the last block clears — server-side, before
+      # merge-skill.sh ever runs, so the signoff_dismissed approval requirement
+      # recorded below cannot hold it: that requirement is enforced only by our
+      # own skill. Fail CLOSED — leave the block standing and say why. Disarming
+      # auto-merge for the operator would silently undo a deliberate choice, and
+      # merging unreviewed work is exactly what this whole arm exists to prevent.
+      # A probe we cannot READ counts as armed (automerge_state answers "unknown"):
+      # an API/auth/parse failure looks exactly like "disarmed" through a
+      # `// empty` filter, and guessing wrong here is a server-side merge.
+      automerge=$(automerge_state "$num")
+      if [ "$automerge" = "armed" ]; then
+        echo "reconcile-merged-prs: WARN $id — PR#$num blocked by a superseded self-review, but native auto-merge is ARMED; NOT retracting (the dismissal would trigger an immediate server-side merge past the approval requirement). Disarm auto-merge (gh pr merge --disable-auto $num) or land it deliberately." >&2
+        retract_held=$((retract_held + 1)); continue
+      fi
+      if [ "$automerge" != "disarmed" ]; then
+        echo "reconcile-merged-prs: WARN $id — PR#$num blocked by a superseded self-review, but its native auto-merge state is UNREADABLE (the autoMergeRequest probe failed or returned a malformed payload); NOT retracting. An unreadable probe cannot prove auto-merge is off, and a wrong guess merges server-side past the approval requirement — so it counts as armed. Retry once 'gh pr view $num --json autoMergeRequest' answers." >&2
+        retract_held=$((retract_held + 1)); continue
+      fi
+      # Paginated, explicitly: GitHub pages this endpoint (30/page by default),
+      # and a PR that has taken review rounds runs past one page — exactly the PRs
+      # this arm exists for. An unpaginated read silently misses the superseded
+      # review and the PR stays stranded, recreating the liveness bug being fixed.
+      #
+      # FETCH and REDUCE are SEPARATE steps, each with its own status check — the
+      # same split merge-skill.sh makes for reviews_raw/reviews_rc, and the same
+      # one the re-gate template makes on its half of this retraction. Fused into
+      # one assignment tested only for emptiness, a read that fails PART WAY
+      # THROUGH is indistinguishable from a complete one: `gh --paginate` streams
+      # the pages it did get, jq reduces them without complaint, and the result is
+      # a well-formed answer computed from a TRUNCATED history that this arm then
+      # dismisses from as though it had seen all of it. The same silence covers a
+      # read that fails OUTRIGHT — an expired token, a rate limit — which renders
+      # as "nothing to retract" and strands the PR permanently and invisibly.
+      # ANY failure skips the retraction and says so; the arm is convergent, so the
+      # next pass re-enters it once the history reads.
+      reviews_raw=$(gh api --paginate "repos/{owner}/{repo}/pulls/$num/reviews?per_page=100" \
+        --jq '.[]' 2>/dev/null); reviews_rc=$?
+      if [ "$reviews_rc" -ne 0 ]; then
+        echo "reconcile-merged-prs: WARN $id — PR#$num reviews history read FAILED (gh rc=$reviews_rc); NOT retracting any superseded self-review (a partial page set cannot be told apart from a complete one and the dismissal is irreversible); retry next pass" >&2
+        retract_held=$((retract_held + 1)); continue
+      fi
+      SUPERSEDED=$(printf '%s' "$reviews_raw" \
+        | jq -r --arg h "$SELF_LOGIN" --arg oid "$head_oid" \
+            'select((.user.login // "") == $h)
+             | select(.state == "CHANGES_REQUESTED")
+             | select((.commit_id // "") != $oid) | .id' 2>/dev/null); reduce_rc=$?
+      if [ "$reduce_rc" -ne 0 ]; then
+        echo "reconcile-merged-prs: WARN $id — PR#$num reviews history is UNREADABLE (reduce rc=$reduce_rc); NOT retracting any superseded self-review; retry next pass" >&2
+        retract_held=$((retract_held + 1)); continue
+      fi
+      if [ -n "$SUPERSEDED" ]; then
+        while IFS= read -r rid; do
+          [ -n "$rid" ] || continue
+          # Re-read the live head immediately before the irreversible call. The
+          # listing above is a snapshot: if the head moved since, a review in it
+          # may be a FRESH block on the NEW head, not a superseded one — the
+          # commit_id filter cannot tell them apart once head_oid is stale. Bail
+          # out of the whole retraction; next pass re-reads a settled state.
+          live_head=$(gh pr view "$num" --json headRefOid -q .headRefOid 2>/dev/null)
+          if [ "$live_head" != "$head_oid" ]; then
+            echo "reconcile-merged-prs: WARN $id — PR#$num head moved ($head_oid -> ${live_head:-unknown}) mid-pass; NOT retracting review $rid (it may block the new head)" >&2
+            retract_held=$((retract_held + 1)); break
+          fi
+          # Re-probe auto-merge here too, after the head re-read and immediately
+          # before the irreversible call. The up-front probe is a snapshot: an
+          # operator can arm `gh pr merge --auto` in the window between it and this
+          # dismissal, and then the dismissal merges the PR server-side. Same
+          # fail-closed reading — anything but a definite "disarmed" holds. Break
+          # rather than continue: the state is PR-wide, so if it is unsafe for this
+          # review it is unsafe for every later one on the same PR.
+          am_now=$(automerge_state "$num")
+          if [ "$am_now" != "disarmed" ]; then
+            echo "reconcile-merged-prs: WARN $id — PR#$num native auto-merge state is '$am_now' immediately before dismissing review $rid; NOT retracting (an armed — or unreadable, hence assumed armed — auto-merge merges server-side past the approval requirement)" >&2
+            retract_held=$((retract_held + 1)); break
+          fi
+          # Re-read the ANCHOR too, in the same place and for the same reason. The
+          # two facts re-checked above are GitHub's; every bead-side fact this arm
+          # is acting on still comes from the ROWS snapshot taken at the top of the
+          # pass — before the PR reads, before the reviews listing. Inside that
+          # window an operator can park the anchor (merge_hold), a re-gate can
+          # clear check.codex, a resolver can un-park or retarget the anchor off
+          # this PR. Each of those makes the retraction wrong in a way the GitHub
+          # re-checks cannot see, and the retraction is irreversible: it removes
+          # the last block on a PR nothing else is holding.
+          #
+          # Require the anchor to still BE what the arm decided about: open, not
+          # held, parked on THIS PR, gate still green at the live head. Unreadable
+          # is unsafe — same reading as the auto-merge probe, since a read we never
+          # got proves none of it. Break rather than continue: every condition here
+          # is anchor- or PR-wide, so what stops this review stops the rest.
+          fresh=$(gc bd show "$id" --json 2>/dev/null \
+            | tr -d '\000-\010\013\014\016-\037' \
+            | jq -c '.[0] | select(. != null) | select(.metadata != null)
+                     | {status: (.status // ""),
+                        hold: ((.metadata.merge_hold // "") | tostring),
+                        result: (.metadata.merge_result // ""),
+                        pr: (.metadata.pr_number // ""),
+                        mark: (.metadata["check.codex"] // "")}' 2>/dev/null)
+          if [ -z "$fresh" ]; then
+            echo "reconcile-merged-prs: WARN $id — anchor metadata UNREADABLE immediately before dismissing review $rid on PR#$num; NOT retracting (an unreadable anchor cannot prove the PR is still gated by it, unheld, and green at the live head)" >&2
+            retract_held=$((retract_held + 1)); break
+          fi
+          f_status=$(printf '%s' "$fresh" | jq -r '.status' 2>/dev/null \
+            | tr '[:upper:]' '[:lower:]')
+          f_hold=$(printf '%s' "$fresh" | jq -r '.hold' 2>/dev/null)
+          f_result=$(printf '%s' "$fresh" | jq -r '.result' 2>/dev/null)
+          f_pr=$(printf '%s' "$fresh" | jq -r '.pr' 2>/dev/null)
+          f_mark=$(printf '%s' "$fresh" | jq -r '.mark' 2>/dev/null)
+          if [ "$f_status" != "open" ] || is_held "$f_hold" \
+             || [ "$f_result" != "pull_request" ] || [ "$f_pr" != "$num" ] \
+             || [ "$f_mark" != "green@$head_oid" ]; then
+            echo "reconcile-merged-prs: WARN $id — anchor changed mid-pass (status='$f_status' merge_hold='$f_hold' merge_result='$f_result' pr_number='$f_pr' check.codex='$f_mark'; want open + unheld + pull_request + PR#$num + green@$head_oid); NOT retracting review $rid (the block would come off a PR this anchor no longer gates as validated)" >&2
+            retract_held=$((retract_held + 1)); break
+          fi
+          # Record the pairing marker, then READ IT BACK before trading the GitHub
+          # block away for it. `gc bd update` reporting success is not proof the
+          # write is durable — the same reason arm_stale_gate verifies its route
+          # rather than trusting an exit status (tk-3xy37) — and this marker is the
+          # ONLY thing standing in for the block about to be removed: merge-skill.sh
+          # demands a real external approving review because signoff_dismissed is
+          # PRESENT. Dismiss on an unverified write and both the block and the
+          # requirement are gone at once, the one combination that can land
+          # unreviewed work. A miss just holds; the next pass re-enters this arm.
+          gc bd update "$id" --set-metadata signoff_dismissed="$rid@$head_oid" >/dev/null 2>&1
+          paired=$(gc bd show "$id" --json 2>/dev/null \
+            | jq -r '.[0].metadata.signoff_dismissed // empty' 2>/dev/null)
+          if [ "$paired" = "$rid@$head_oid" ]; then
+            if gh api -X PUT "repos/{owner}/{repo}/pulls/$num/reviews/$rid/dismissals" \
+                 -f message="Superseded: this review is pinned to a commit that is no longer the head, and the codex gate is green at the live head $head_oid. Approval remains external." \
+                 -f event=DISMISS >/dev/null 2>&1; then
+              retracted=$((retracted + 1))
+              echo "reconcile-merged-prs: $id — PR#$num retracted superseded self-review $rid (gate green@$head_oid, GitHub was BLOCKED on a dead commit); approval now required explicitly"
+            else
+              echo "reconcile-merged-prs: WARN $id could not dismiss superseded review $rid on PR#$num; PR stays blocked (retry next pass)" >&2
+              retract_held=$((retract_held + 1))
+            fi
+          else
+            echo "reconcile-merged-prs: WARN $id could not record signoff_dismissed durably (read back '${paired:-}', want '$rid@$head_oid'); NOT dismissing review $rid (dismissing without a durable marker would drop the approval requirement)" >&2
+            retract_held=$((retract_held + 1))
+          fi
+        done <<< "$SUPERSEDED"
+        continue
+      fi
     fi
   fi
 
@@ -1178,7 +1531,13 @@ elif [ "$PR_LIST" != "[]" ]; then
   # emitting a well-formed array announces that only in its exit status. Both
   # survive an emptiness test; a genuinely empty ledger returns "[]" and does fall
   # through to the scan below (review tk-thvbq finding #3).
-  if ! LIVE=$(pr_bead_read --status open,in_progress,blocked); then
+  #
+  # $LIVE_STATUSES, not a hand-written subset. "Live" has ONE definition in this
+  # script and every other lookup uses it; a shorter list here does not narrow a
+  # scan, it manufactures findings — a PR whose anchor is parked `deferred`,
+  # `hooked` or `pinned` is tracked by a bead that this query would not return, so
+  # the PR reads as anchorless and gets reported as one (review tk-y5r1e P2).
+  if ! LIVE=$(pr_bead_read --status "$LIVE_STATUSES"); then
     echo "reconcile-merged-prs: live-bead read failed; anchorless scan skipped (retry next pass)" >&2
   else
     # Every PR number a live bead names, under any key (pr_refs), NOT pr_number
@@ -1341,5 +1700,5 @@ polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; th
   fi
 fi
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $identity_held foreign-PR identity holds, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $retracted superseded reviews retracted, $retract_held retractions held, $identity_held foreign-PR identity holds, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
 exit 0

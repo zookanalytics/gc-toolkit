@@ -168,9 +168,21 @@ grep -qF 'git rev-parse "origin/$REVIEW_BRANCH"' "$TEMPLATE" \
 #     dispatch keys off a precomputed CODEX_GATE, so the two normalizing sites are
 #     the step-2 gate DECISION and the fail-closed site. Static guards on the raw
 #     formula so a regression to the brittle literal grep is caught. -------------
-grep -qF ',codex,' "$TOML" \
-  && bad "(F) brittle literal ',codex,' membership grep still present -> a spaced 'lint, codex' would strand the PR" \
-  || ok "(F) no brittle literal ',codex,' membership grep in the formula"
+#     The proxy changed with tk-tmefn. It used to be "the literal ,codex, must
+#     not appear", because the pre-tk-aj4ua bug was `case ",$CHECK_SET," in
+#     *",codex,"*)` applied to the RAW value, which a natural-form "lint, codex"
+#     slips past. The correct in-shell match now uses exactly that string — with
+#     the whitespace STRIPPED FIRST — so the string is no longer the tell. What
+#     is guarded instead is the property itself: no site wraps an unnormalized
+#     value, and every whole-token match is paired with a normalization.
+grep -qF ',$CHECK_SET,' "$TOML" \
+  && bad "(F) RAW \",\$CHECK_SET,\" membership test -> a spaced 'lint, codex' would strand the PR" \
+  || ok "(F) no membership test wraps a raw, unnormalized check_set"
+FC_NORM=$(grep -cF "tr -d '[:space:]')," "$TOML" || true)
+FC_TOK=$(grep -cF '*",codex,"*' "$TOML" || true)
+{ [ "${FC_TOK:-0}" -ge 2 ] && [ "${FC_NORM:-0}" = "${FC_TOK:-0}" ]; } \
+  && ok "(F2) every codex-membership site strips whitespace before the whole-token match ($FC_TOK sites)" \
+  || bad "(F2) each codex-membership site must normalize before matching (tokens=$FC_TOK normalized=$FC_NORM)"
 NORM_COUNT=$(grep -cF "grep -qxF codex" "$TOML" || true)
 eq "$NORM_COUNT" "2" \
    "(G) both codex-membership sites (step-2 gate decision + fail-closed) use the normalized whole-line match"
