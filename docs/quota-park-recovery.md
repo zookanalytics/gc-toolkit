@@ -37,9 +37,18 @@ when all of these hold:
   gone idle with the banner quoted in its own report.
 
 A parked session is nudged (`--delivery immediate`, falling back to the plain
-form), then re-nudged on a doubling backoff from 2m to a 15m cap, for as long
-as it stays parked. A pane that goes busy or clean ends the episode; the next
-block starts again from the first attempt.
+form for an older `gc` that rejects the flag), then re-nudged on a doubling
+backoff from 2m to a 15m cap, for as long as it stays parked. A pane that goes
+busy or clean ends the episode; the next block starts again from the first
+attempt.
+
+The fallback fires only for that flag-rejection case — a fast usage error —
+never for a call that hit its bound. A timeout means the runtime may have taken
+the nudge and simply not answered in time; retrying there puts two resume
+messages into one pane and leaves the attempt counter below what the agent
+actually received. A timed-out nudge is recorded as failed and the next cycle
+retries it under the backoff, which is the right pacing for a session that is
+still blocked anyway.
 
 Two selection rules are load-bearing enough to state on their own:
 
@@ -60,10 +69,40 @@ to the next cycle rather than overlapping it — reported in the summary line, n
 silently. Same `run_bounded` idiom as `assets/scripts/merge-skill.sh`; hosts
 without coreutils `timeout` degrade to unbounded calls rather than lose recovery.
 
+**Only a successful peek may end an episode.** Ending one deletes the state
+file, which is what resets the backoff and the once-per-episode escalation flag.
+A peek that errored or hit its bound proves nothing about the pane, so reading
+it as "clean" would let a transient runtime failure — during precisely the kind
+of incident this order runs in — make a six-hour park look freshly detected and
+start nudging again from attempt 1. An unreadable pane leaves the episode intact
+and is counted in the summary line.
+
+**The session list is untrusted input.** An alias is mutable and an agent can
+set its own, so both fields get handled as data rather than as structure. The
+list is read as `@tsv`, which escapes tab, newline, carriage return and
+backslash inside a field — interpolated instead, a newline in an alias forges a
+*second record*, and the "id" of that record went straight into
+`$STATE_DIR/$id`. The id is then validated as a bare token (`safe_id`): no
+separator, no dot-segment, nothing that resolves out of the state directory. The
+two are complementary — the encoding stops a field from becoming a record, the
+validation stops a record from becoming a path — and a session whose id fails
+validation is skipped entirely and counted, never peeked or nudged on a guess.
+The alias is allowlisted and truncated (`sanitize_display`) before it is logged
+or mailed, for the same reason the pane is excluded from the escalation below:
+keeping the pane out while pasting the alias in raw just moves the hole into a
+shorter field.
+
 **Nudging is the only action.** The session is alive and correct — killing it
 discards live context and a fresh agent hits the same block. This never files a
-warrant, and the deacon and witness patrols carry the same rule (seven warrants
-were filed against two quota-parked agents on 2026-08-02). If a park outlasts
+warrant, and neither do the patrols: the exception is stated ahead of *every*
+path that can warrant a session, not once per formula. That is
+`check-polecat-health` in `mol-witness-patrol`, and `health-scan`,
+`queue-starvation-check` and `utility-agent-health` in `mol-deacon-patrol` —
+each step is read immediately before it is acted on, so a rule stated only in
+the first one does not reach the other two. Queue starvation is the easiest of
+them to get wrong: a quota-parked agent holds open beads with `bead.updated_at`
+frozen for hours, which is the starvation signature exactly. Seven warrants were
+filed against two quota-parked agents on 2026-08-02. If a park outlasts
 `QUOTA_PARK_ESCALATE_AFTER` (2h), one mail goes to the mayor — once per
 episode, not once per cycle.
 
@@ -130,8 +169,20 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_SWEEP_BUDGET` | `120` | seconds per pass before the rest defers; `0` disables |
 | `QUOTA_PARK_STATE_DIR` | `$GC_CITY/.gc/runtime/quota-park` | per-session episode state |
 
+Every numeric knob above is validated once, up front, and falls back to its
+default if it is not a bare integer. A garbage value fails differently in each
+place it lands and announces itself in none of them: a bad backoff bypasses
+backoff (`[: oops: integer expression expected` reads as "window elapsed", so
+every cycle nudges), a bad `ESCALATE_AFTER` reads as *disabled* and no human is
+ever told, and a bad `PEEK_LINES`/`TAIL_LINES` makes `tail -n` error out so **no
+session is ever detected as parked at all**. A typo in a tuning knob must not be
+able to switch off city-wide recovery quietly.
+
 Regression suite: `assets/scripts/quota-park-nudge.test.sh` (hermetic — fake
-`gc`, canned panes, no city).
+`gc`, canned panes, no city). It also parses `orders/quota-park-nudge.toml` and
+asserts the wiring the sweep depends on: `trigger`, `interval`, `scope = "city"`
+and a live `exec` path. A rig-scoped order or a broken exec path fails just as
+silently as a broken detector, and no other test in the pack reads that file.
 
 ## Why an order and not the controller
 

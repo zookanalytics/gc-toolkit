@@ -140,6 +140,27 @@ state_get() {
 # is fed to arithmetic, and `$(( ))` on garbage is fatal under `set -e`.
 num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 
+# True for a session id safe to use as a filename. The id names a state file in
+# a shared runtime directory and is pasted into the operator instruction in the
+# escalation mail, so it must be a bare token: no separator, no dot-segment,
+# nothing that can leave STATE_DIR. Runtime ids look like `lx-gsnfk`; an id that
+# does not is not one, and a session we cannot name safely is one we skip rather
+# than guess at. (`.*` rejects a leading dot, `*..*` any dot-segment, and `/` is
+# absent from the allowed set — together that is every route out of the dir.)
+safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | *..*) return 1 ;; *) return 0 ;; esac }
+
+# Bound and flatten a display field before it is logged or mailed. Session
+# alias/session_name are mutable and agent-reachable, and they reach durable
+# mayor mail — the same channel detector_class exists to keep pane text out of.
+# Keeping the pane out while interpolating the alias raw just moves the hole one
+# field over: an alias is enough room for a line of forged operator context.
+# Allowlist to printable identifier characters, then truncate.
+sanitize_display() {
+    local s
+    s="$(printf '%s' "${1:-}" | LC_ALL=C tr -c 'A-Za-z0-9._@:/ -' '?')"
+    printf '%s' "${s:0:64}"
+}
+
 # Seconds to wait after the Nth nudge: BASE doubled per attempt, capped.
 backoff_for() {
     local n="$1" delay="$BACKOFF_BASE"
@@ -173,7 +194,11 @@ banner_candidates() {
 # therefore launders attacker-reachable text into that channel, which is what
 # the earlier version of this escalation did by mailing the last 8 lines. The
 # body now carries only alias, id, age, attempts, and this label — every one of
-# them from the session list or this script's own state file.
+# them from the session list or this script's own state file, and the two that
+# come from the session list are constrained before they are interpolated: the
+# id by safe_id, the alias by sanitize_display. Session display metadata is
+# mutable too, so keeping the pane out while pasting the alias raw would only
+# move the hole into a shorter field.
 #
 # Deliberately coarse, and independent of DEFAULT_MATCH's exact alternatives:
 # the label has to survive that pattern being extended or overridden, and
@@ -196,12 +221,28 @@ detector_class() {
     fi
 }
 
-# Both bounds are fed to `[ -gt ]` and to `timeout` itself, so a non-numeric
-# override (a stray "15s", an empty string from a templated env) would abort the
-# sweep under `set -e` — i.e. a typo in a tuning knob would silently disable
-# quota recovery city-wide. Fall back to the default instead.
-num "$CALL_TIMEOUT" || CALL_TIMEOUT=15
-num "$SWEEP_BUDGET" || SWEEP_BUDGET=120
+# Every numeric knob is fed to `$(( ))`, to `[ -gt ]`, to `tail -n`, or to
+# `timeout` itself, so a non-numeric override (a stray "15s", an empty string
+# from a templated env) breaks quota recovery city-wide from a single typo in a
+# tuning knob. Fall back to the default instead — validated here, in one place
+# ahead of the sweep, because the failure is silent in a different way for each
+# knob and none of them announce it:
+#   BACKOFF_BASE/_CAP   -> `[: oops: integer expression expected` inside
+#                          backoff_for, whose non-zero rc reads as "window
+#                          elapsed" — backoff bypassed, every cycle nudges.
+#   ESCALATE_AFTER      -> the `-gt 0` guard errors, i.e. reads as disabled: no
+#                          human is ever told about a park that outlasts it.
+#   PEEK_LINES/TAIL_LINES -> `tail -n x` errors, banner_candidates yields
+#                          nothing, and NO session is ever detected as parked.
+# An earlier version validated only the two bounds below, which is how
+# QUOTA_PARK_BACKOFF_BASE=oops reached the arithmetic at all.
+num "$CALL_TIMEOUT"   || CALL_TIMEOUT=15
+num "$SWEEP_BUDGET"   || SWEEP_BUDGET=120
+num "$BACKOFF_BASE"   || BACKOFF_BASE=120
+num "$BACKOFF_CAP"    || BACKOFF_CAP=900
+num "$ESCALATE_AFTER" || ESCALATE_AFTER=7200
+num "$PEEK_LINES"     || PEEK_LINES=20
+num "$TAIL_LINES"     || TAIL_LINES=12
 
 # Every `gc` call goes through here. Two things it guarantees:
 #
@@ -238,29 +279,58 @@ sweep_expired() {
 # (assets/scripts/gc-helm.sh, with a running:null case in
 # tools/helm-surface-fixture.sh). `attached` is skipped: a human is looking at
 # that pane and can act, and injecting keys under their cursor is rude.
+#
+# `@tsv`, not an interpolated "\(.id)\t\(.alias)": jq escapes tab, newline,
+# carriage return and backslash inside @tsv fields, so one session is always
+# exactly one record. Interpolated, they pass through raw and mutable session
+# metadata can forge a row — an alias holding a newline followed by
+# `../escaped-state` produced a second row whose "id" was that path, and the
+# state file built from it was written outside STATE_DIR. Encoding here and
+# validating with safe_id below are the two halves of that fix: the encoding
+# stops a field from becoming a record, the validation stops a record from
+# becoming a path.
 sessions=$(run_bounded gc session list --json 2>/dev/null \
     | jq -r '.sessions[]? | select(.state == "active" and (.attached // false) == false)
-             | "\(.id)\t\(.alias // .session_name // .id)"' 2>/dev/null) || exit 0
+             | [.id, (.alias // .session_name // .id)] | @tsv' 2>/dev/null) || exit 0
 [ -n "$sessions" ] || { echo "quota-park-nudge: 0 checked, 0 parked, 0 nudged"; exit 0; }
 
-checked=0; parked=0; nudged=0; skipped=0
+checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0
 
 while IFS=$'\t' read -r id alias; do
     [ -n "${id:-}" ] || continue
+    # An id we cannot safely use as a filename is one we do not touch at all —
+    # not peeked, not nudged, no state written. Counted, not silent: a session
+    # this order refuses to inspect is a gap in city-wide coverage.
+    if ! safe_id "$id"; then rejected=$((rejected + 1)); continue; fi
     # Out of budget: leave the rest for the next cycle (3m away) rather than
     # overlapping it. Counted so the summary says so instead of silently
     # reporting a short sweep as a complete one.
     if sweep_expired; then skipped=$((skipped + 1)); continue; fi
+    # Everything downstream that prints, logs, or mails the alias uses this
+    # bounded form; the raw field is not referenced again.
+    alias="$(sanitize_display "${alias:-$id}")"
     state="$STATE_DIR/$id"
     checked=$((checked + 1))
 
-    pane=$(run_bounded gc session peek "$id" --lines "$PEEK_LINES" 2>/dev/null) || pane=""
+    # A peek that fails, times out, or returns nothing tells us nothing about
+    # the pane — and the not-parked branch below DELETES the episode state. Read
+    # as "clean", a transient runtime failure resets the backoff and the
+    # once-per-episode escalation flag, so a block that has run for six hours
+    # looks freshly detected on the next cycle and starts nudging from attempt 1
+    # again. Only a successful peek may end an episode. Leave the state alone
+    # and try again in 3m.
+    peek_rc=0
+    pane=$(run_bounded gc session peek "$id" --lines "$PEEK_LINES" 2>/dev/null) || peek_rc=$?
+    if [ "$peek_rc" -ne 0 ] || [ -z "$pane" ]; then
+        unreadable=$((unreadable + 1))
+        echo "quota-park-nudge: pane unreadable for $alias ($id) (peek rc=$peek_rc) — episode state kept"
+        continue
+    fi
 
     # Parked = a bare provider banner at the bottom of an idle pane. Busy,
-    # quiet, unreadable, cited, or scrolled-up all mean not parked. Clearing
-    # the state file is what ends an episode: a recovered agent starts the
-    # next block from attempt 1.
-    if [ -z "$pane" ] || printf '%s\n' "$pane" | grep -qEi -- "$BUSY_RE" \
+    # cited, or scrolled-up all mean not parked. Clearing the state file is what
+    # ends an episode: a recovered agent starts the next block from attempt 1.
+    if printf '%s\n' "$pane" | grep -qEi -- "$BUSY_RE" \
         || ! banner_candidates "$pane" | grep -qEi -- "$MATCH_RE"; then
         rm -f "$state"
         continue
@@ -294,16 +364,28 @@ while IFS=$'\t' read -r id alias; do
     msg="Provider block may have cleared after $(duration "$age") — resume: re-check your hook (gc hook --claim --json) or continue your patrol loop. If still blocked, ignore this; it repeats until you are back."
     # `--delivery immediate` because the default (wait-idle) hands the message
     # to the runtime's idle detector — the same layer that already believes a
-    # parked session is fine. We read the pane; we know it is idle. Fall back
-    # to the plain form so an older gc without the flag still recovers.
-    if run_bounded gc session nudge --delivery immediate "$id" "$msg" >/dev/null 2>&1 \
-        || run_bounded gc session nudge "$id" "$msg" >/dev/null 2>&1; then
+    # parked session is fine. We read the pane; we know it is idle.
+    nudge_rc=0
+    run_bounded gc session nudge --delivery immediate "$id" "$msg" >/dev/null 2>&1 || nudge_rc=$?
+    # Fall back to the plain form ONLY for the case the fallback exists for: an
+    # older gc that rejects the flag, which fails fast with a usage error. A
+    # bound that expired (`timeout` exits 124) or a signalled call (>=128) is
+    # NOT that case — the runtime may already have accepted the first nudge and
+    # simply not answered in time, so retrying delivers two resume messages into
+    # one pane and leaves `attempts` undercounting what the agent received.
+    # There, record a failed nudge and let the next cycle retry under the
+    # backoff, which is the pacing we want for a still-blocked session anyway.
+    if [ "$nudge_rc" -ne 0 ] && [ "$nudge_rc" -ne 124 ] && [ "$nudge_rc" -lt 128 ]; then
+        nudge_rc=0
+        run_bounded gc session nudge "$id" "$msg" >/dev/null 2>&1 || nudge_rc=$?
+    fi
+    if [ "$nudge_rc" -eq 0 ]; then
         nudged=$((nudged + 1))
         last_nudge="$NOW"
         attempts=$((attempts + 1))
         echo "quota-park-nudge: nudged $alias ($id), parked $(duration "$age"), attempt $attempts"
     else
-        echo "quota-park-nudge: nudge FAILED for $alias ($id), parked $(duration "$age")"
+        echo "quota-park-nudge: nudge FAILED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age")"
     fi
 
     if [ "$ESCALATE_AFTER" -gt 0 ] && [ "$escalated" != "1" ] && [ "$age" -ge "$ESCALATE_AFTER" ]; then
@@ -336,6 +418,12 @@ done <<< "$sessions"
 # were closed or renamed while parked.
 find "$STATE_DIR" -type f -mtime +7 -delete 2>/dev/null || true
 
+# Everything the sweep could not conclude is named in the summary rather than
+# folded into "checked" — a short sweep must not read as a complete one.
+unread=""
+[ "$unreadable" -gt 0 ] && unread=", $unreadable unreadable"
+unsafe=""
+[ "$rejected" -gt 0 ] && unsafe=", $rejected rejected (unsafe session id)"
 deferred=""
 [ "$skipped" -gt 0 ] && deferred=", $skipped deferred (sweep budget ${SWEEP_BUDGET}s)"
-echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$deferred"
+echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$unread$unsafe$deferred"

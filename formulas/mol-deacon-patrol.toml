@@ -217,6 +217,19 @@ is exactly why an LLM does it, not Go code. Consider:
   assignment time; if it's hours old, the session picked it up but
   never acted.
 
+**Quota-parked is NOT starvation.** Before flagging, peek the pane
+(`gc session peek <session>`). An agent showing a provider limit banner
+("hit your session limit" / "hit your usage limit") at an idle prompt
+produces exactly this signature — open beads, `bead.updated_at` frozen for
+hours — and it is not stuck: its turn ended inside the block, so it has no
+pending work and no timer until the window reopens. Do **not** escalate it to
+a warrant. The shutdown dance discards a healthy session holding live context
+and the fresh one hits the same block; seven warrants were filed against two
+such agents on 2026-08-02 (bead tk-al95k). The `quota-park-nudge` order
+already polls every session's pane city-wide every 3m and nudges the parked
+ones until the window actually reopens — a queue frozen behind a quota block
+is already being handled. See docs/quota-park-recovery.md.
+
 **Step 3: For flagged sessions, nudge first, then warrant:**
 
 ```bash
@@ -265,6 +278,16 @@ Consider the nature of the work — a shutdown dance with 240s timeouts
 will naturally take longer than a quick dep propagation.
 
 No hardcoded thresholds. Use judgment.
+
+**Quota-parked is NOT stuck.** Peek the pane before warranting
+(`gc session peek <session>`). A provider limit banner ("hit your session
+limit" / "hit your usage limit") at an idle prompt means the turn ended inside
+a quota block: the dog is alive and correct, and its bead and wisp timestamps
+freeze for exactly that reason. Do **not** file a warrant — it sends a second
+dog to run the shutdown dance on a healthy session, and the replacement hits
+the same block. The `quota-park-nudge` order polls city-wide every 3m and
+nudges parked sessions until the window reopens (bead tk-al95k,
+docs/quota-park-recovery.md).
 
 **Step 3: For stuck utility agents, file a warrant:**
 ```bash

@@ -24,7 +24,15 @@
 # carrying the reset clause ("API rate limit will reset at ...") is likewise not
 # a park — the clause only counts behind the possessive subject; (p) the
 # escalation mail carries no pane text, so prompt-injection content on a parked
-# pane cannot reach the mayor's durable mail.
+# pane cannot reach the mayor's durable mail; (q) hostile session metadata — a
+# newline-forged record, a path-shaped id — cannot write state outside the state
+# directory or reach the log raw; (r) a peek that FAILS preserves the episode
+# instead of ending it, so a transient runtime error cannot reset backoff and
+# the escalation flag; (s) a malformed numeric override falls back to its
+# default rather than silently disabling backoff, escalation, or detection
+# itself; (t) a nudge that times out after the runtime accepted it is not
+# re-sent by the older-gc fallback; (u) the order file parses and still carries
+# the wiring the sweep depends on (cooldown/3m/city + a live exec path).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -148,10 +156,24 @@ case "$1 $2" in
   # long past the bound, hiding the very thing this fixture tests.
   "session peek")
     [ "${FAKE_HANG_PEEK:-}" = "$3" ] && exec sleep 30
+    # A peek that ERRORS, as opposed to one that hangs: a transient runtime
+    # failure. The caller learns nothing about the pane either way.
+    [ "${FAKE_FAIL_PEEK:-}" = "$3" ] && exit 7
     [ -f "$FAKE_PANES/$3" ] && cat "$FAKE_PANES/$3" ;;
   "session nudge")
     shift 2
-    [ "$1" = "--delivery" ] && { [ "${FAKE_NO_DELIVERY_FLAG:-0}" = "1" ] && exit 2; shift 2; }
+    if [ "$1" = "--delivery" ]; then
+      [ "${FAKE_NO_DELIVERY_FLAG:-0}" = "1" ] && exit 2
+      # Accept the message, THEN hang: the runtime took the nudge but the
+      # caller's bound expires before it hears so. This is the window in which
+      # a blind fallback delivers the same nudge twice.
+      if [ "${FAKE_SLOW_DELIVERY:-0}" = "1" ]; then
+        printf 'nudge %s\n' "$3" >> "$FAKE_NUDGES"
+        printf 'msg %s\n' "$4" >> "$FAKE_NUDGES"
+        exec sleep 30
+      fi
+      shift 2
+    fi
     printf 'nudge %s\n' "$1" >> "$FAKE_NUDGES"
     printf 'msg %s\n' "$2" >> "$FAKE_NUDGES" ;;
   # Recipient to one file (escalation is counted by line), every argument to
@@ -320,6 +342,180 @@ grep -qE -- "Detector class: (possessive-limit|named-provider-limit|usage-credit
     "$TMP/mailbody" \
     && ok "escalation mail reports a detector class from the closed set" \
     || bad "escalation mail reports a detector class from the closed set"
+
+# --- Run 11: hostile session metadata cannot escape the state directory. ----
+# The session list is not trustworthy input: an alias is mutable and an agent
+# can set its own. Two shapes, both reproduced against the interpolated
+# "\(.id)\t\(.alias)" this replaced:
+#   - a NEWLINE in the alias forged a second record whose "id" field was
+#     `../escaped-state`, and `$STATE_DIR/$id` then wrote outside STATE_DIR;
+#   - an id that is itself a path escapes the same way with no forgery at all.
+# @tsv stops a field from becoming a record; safe_id stops a record from
+# becoming a path. Both are needed — either alone leaves one of these open.
+LONG_ALIAS="$(printf 'a%.0s' $(seq 200))"
+cat > "$TMP/sessions-hostile.json" <<JSON
+{"sessions":[
+ {"id":"lx-newline","alias":"gc-toolkit.evil\\n../escaped-state\\tgc-toolkit.forged","state":"active","running":true,"attached":false},
+ {"id":"../escaped-state","alias":"gc-toolkit.traversal","state":"active","running":true,"attached":false},
+ {"id":"lx-longalias","alias":"$LONG_ALIAS","state":"active","running":true,"attached":false},
+ {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false}
+]}
+JSON
+cp "$TMP/panes/lx-codex" "$TMP/panes/lx-newline"
+cp "$TMP/panes/lx-codex" "$TMP/panes/lx-longalias"
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+# A sentinel at exactly the path the hostile records resolve to
+# (`$STATE_DIR/../escaped-state`). The escape shows up as an UNLINK before it
+# ever shows up as a create: a forged session has no pane, so the sweep takes
+# the not-parked branch and `rm -f`s the state path it computed. An arbitrary
+# unlink inside the city runtime directory is the primitive to close, so assert
+# in both directions — the sentinel survives, and nothing new appears beside it.
+: > "$TMP/escaped-state"
+FAKE_SESSIONS="$TMP/sessions-hostile.json" bash "$SCRIPT" > "$TMP/out11"
+
+[ -f "$TMP/escaped-state" ] \
+    && ok "hostile session metadata cannot unlink a path outside STATE_DIR" \
+    || bad "hostile session metadata reached outside STATE_DIR (sentinel was unlinked)"
+[ -s "$TMP/escaped-state" ] \
+    && bad "hostile session metadata wrote state outside STATE_DIR" \
+    || ok "hostile session metadata cannot write state outside STATE_DIR"
+[ -f "$TMP/state/lx-newline" ] \
+    && ok "the newline-alias session is still swept under its real id" \
+    || bad "the newline-alias session is still swept under its real id"
+eq "$(nudges_for lx-codex)" "1" "a hostile row does not strand the rest of the sweep"
+eq "$(nudges_for ../escaped-state)" "0" "a path-shaped session id is never peeked or nudged"
+grep -q "1 rejected (unsafe session id)" "$TMP/out11" \
+    && ok "summary reports the rejected session id" \
+    || bad "summary reports the rejected session id ($(tail -1 "$TMP/out11"))"
+
+# The alias is display metadata that reaches durable mayor mail, so it gets the
+# same treatment the pane does: flattened and bounded before interpolation. Not
+# *scrubbed of scary substrings* — the alias never becomes a path (safe_id and
+# @tsv cover that above), so `../escaped-state` sitting inside it is inert text.
+# What must not survive is structure: a character that can end a line or a field
+# in the log or the mail body, and an unbounded length that pushes the real
+# content off the end. A backslash is the tell for both — it is outside the
+# allowlist, and it is what jq's own @tsv escaping emits for the newline and tab
+# this alias carries.
+grep -qF '\' "$TMP/out11" \
+    && bad "session metadata reaches the log with escape structure intact" \
+    || ok "session metadata is flattened before it is logged"
+if grep -qE 'a{64}' "$TMP/out11" && ! grep -qE 'a{65}' "$TMP/out11"; then
+    ok "an oversized alias is length-bounded before it is logged"
+else
+    bad "an oversized alias is length-bounded before it is logged"
+fi
+
+# --- Runs 12-14 use a one-session list: these assert per-session behaviour and
+# a full sweep only adds panes that earlier runs have already mutated.
+cat > "$TMP/sessions-one.json" <<'JSON'
+{"sessions":[
+ {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false}
+]}
+JSON
+
+# --- Run 12: a failed peek must NOT end the episode. ------------------------
+# The not-parked branch deletes the state file, and a peek that errored proves
+# nothing about the pane. Treated as clean, a transient runtime failure resets
+# backoff and the once-per-episode escalation flag — a six-hour park reads as
+# freshly detected and starts nudging from attempt 1 again, which is precisely
+# the failure the state file exists to prevent.
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+printf 'first_seen=%s\nlast_nudge=%s\nattempts=3\nescalated=1\n' \
+    "$(( $(date +%s) - 9000 ))" "$(date +%s)" > "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_FAIL_PEEK=lx-codex bash "$SCRIPT" > "$TMP/out12"
+[ -f "$TMP/state/lx-codex" ] \
+    && ok "a failed peek preserves the episode state file" \
+    || bad "a failed peek preserves the episode state file"
+eq "$(grep -c '^attempts=3$' "$TMP/state/lx-codex" || true)" "1" \
+    "a failed peek preserves the attempt count (no backoff reset)"
+eq "$(grep -c '^escalated=1$' "$TMP/state/lx-codex" || true)" "1" \
+    "a failed peek preserves the escalated flag (no duplicate mail next cycle)"
+eq "$(nudges_for lx-codex)" "0" "a session whose pane could not be read is not nudged blind"
+grep -q "unreadable" "$TMP/out12" && ok "summary reports the unreadable pane" \
+    || bad "summary reports the unreadable pane ($(tail -1 "$TMP/out12"))"
+
+# --- Run 13: malformed numeric overrides fall back, they do not disable. ----
+# Every one of these knobs reaches arithmetic, `[ -gt ]`, or `tail -n`. A
+# garbage value fails differently in each place and announces itself in none of
+# them, so each is asserted through the behaviour it would silently break.
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+printf 'first_seen=%s\nlast_nudge=%s\nattempts=1\nescalated=\n' \
+    "$(( $(date +%s) - 300 ))" "$(( $(date +%s) - 10 ))" > "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_BACKOFF_BASE=oops bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "0" \
+    "malformed QUOTA_PARK_BACKOFF_BASE falls back to the default (backoff still applies)"
+
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"; : > "$TMP/mail"
+printf 'first_seen=%s\nlast_nudge=0\nattempts=3\nescalated=\n' "$(( $(date +%s) - 9000 ))" \
+    > "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_ESCALATE_AFTER=nope bash "$SCRIPT" > /dev/null
+eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" \
+    "malformed QUOTA_PARK_ESCALATE_AFTER falls back (does not silently disable escalation)"
+
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_TAIL_LINES=x bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "1" \
+    "malformed QUOTA_PARK_TAIL_LINES falls back (detection is not silently switched off)"
+
+# --- Run 14: a nudge that times out AFTER delivery is not re-sent. ----------
+# `--delivery immediate` can be accepted by the runtime and still exceed the
+# call bound. Falling back on any non-zero rc then delivers the same resume
+# message twice into one pane, and `attempts` undercounts what the agent got.
+# The fallback exists for an older gc that rejects the flag — a fast usage
+# error — so it must not fire on 124.
+if ! command -v timeout >/dev/null 2>&1; then
+    echo "skip - nudge-fallback bounding test (no coreutils timeout on this host)"
+else
+    rm -f "$TMP/state"/*
+    : > "$TMP/nudges"
+    FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_DELIVERY=1 \
+        QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+        timeout 20 bash "$SCRIPT" > /dev/null || true
+    eq "$(nudges_for lx-codex)" "1" \
+        "a nudge that times out after delivery is not duplicated by the fallback"
+fi
+
+# --- Run 15: the order wiring itself. ---------------------------------------
+# The runs above prove the detector; none of them prove the order that runs it.
+# A file that does not parse, or that loses `scope = "city"` (rig-scoped: most
+# of the city stops being swept) or its `exec` path (nothing runs at all), fails
+# exactly as silently as a broken detector and no other test in the pack reads
+# this file.
+ORDER_ROOT="$(cd "$HERE/../.." && pwd)"
+ORDER_TOML="$ORDER_ROOT/orders/quota-park-nudge.toml"
+if ! python3 -c 'import tomllib' >/dev/null 2>&1; then
+    echo "skip - order wiring tests (no python3 tomllib on this host)"
+elif python3 - "$ORDER_TOML" > "$TMP/order.env" 2>"$TMP/order.err" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as fh:
+    order = tomllib.load(fh).get("order", {})
+for key in ("trigger", "interval", "scope", "exec", "description"):
+    print("%s=%s" % (key, order.get(key, "")))
+PY
+then
+    ok "order wiring: orders/quota-park-nudge.toml parses as TOML"
+    ord_get() { grep -m1 "^$1=" "$TMP/order.env" | cut -d= -f2-; }
+    eq "$(ord_get trigger)"  "cooldown" "order wiring: trigger=cooldown"
+    eq "$(ord_get interval)" "3m"       "order wiring: interval=3m"
+    eq "$(ord_get scope)"    "city"     "order wiring: scope=city (sweeps every session, not one rig)"
+    eq "$(ord_get exec)" '$PACK_DIR/assets/scripts/quota-park-nudge.sh' \
+        "order wiring: exec points at the sweep script"
+    EXEC_REL="$(ord_get exec)"; EXEC_REL="${EXEC_REL#\$PACK_DIR/}"
+    [ -x "$ORDER_ROOT/$EXEC_REL" ] \
+        && ok "order wiring: the exec path exists and is executable" \
+        || bad "order wiring: the exec path exists and is executable ($EXEC_REL)"
+    [ -n "$(ord_get description)" ] \
+        && ok "order wiring: the order carries a description" \
+        || bad "order wiring: the order carries a description"
+else
+    bad "order wiring: orders/quota-park-nudge.toml parses as TOML ($(tail -1 "$TMP/order.err"))"
+fi
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
