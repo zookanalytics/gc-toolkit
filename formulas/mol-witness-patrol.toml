@@ -69,7 +69,7 @@ the worktree. This makes the work schedulable again.
 Read a step's description immediately before acting on that step — not
 all of them at once. Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 15
+version = 16
 
 [vars]
 [vars.binding_prefix]
@@ -711,6 +711,15 @@ wisp freshness. Consider:
 There are no hardcoded thresholds. Consider the nature of the work, the
 time elapsed, and whether the agent shows any signs of activity. This is
 judgment work — exactly why an LLM does it, not Go code.
+
+**Quota-parked is NOT stuck.** A polecat showing a provider limit banner
+("hit your session limit" / "hit your usage limit") at an idle prompt is
+alive and correct — its turn ended inside the block and nothing drives it
+until the window reopens. Do **not** file a warrant: the shutdown dance
+discards a healthy session with live context, and a fresh polecat hits the
+same block. The `quota-park-nudge` order already polls for that signature
+city-wide and nudges until the window actually reopens (bead tk-al95k,
+docs/quota-park-recovery.md).
 
 **Step 3: For stuck polecats, file a warrant:**
 

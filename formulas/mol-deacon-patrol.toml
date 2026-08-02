@@ -46,7 +46,7 @@ between patrol cycles.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-deacon-patrol"
-version = 17
+version = 18
 
 [vars]
 [vars.binding_prefix]
@@ -145,6 +145,17 @@ Check refinery patrol wisp freshness + queue state:
 **No hardcoded thresholds.** Read wisp timestamps, queue state, and
 the nature of the current work. Make a judgment call about whether
 something is stuck. This is exactly why an LLM does it, not Go code.
+
+**Quota-parked is NOT stuck.** An agent showing a provider limit banner
+("hit your session limit" / "hit your usage limit") at an idle prompt is
+alive and correct: its turn ended inside the block, so it has no pending
+work and no timer to drive it until the window reopens. Do **not** file a
+warrant — a shutdown dance discards a healthy session holding live context,
+and a fresh agent hits the same block. Seven warrants were filed against two
+such agents on 2026-08-02 (bead tk-al95k). Recovery is mechanical and already
+running: the `quota-park-nudge` order polls every session's pane city-wide
+every 3m and nudges the parked ones until the window actually reopens. Leave
+them to it. See docs/quota-park-recovery.md.
 
 **For stuck coordination agents, file a warrant:**
 ```bash
