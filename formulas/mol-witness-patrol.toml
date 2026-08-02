@@ -69,7 +69,7 @@ the worktree. This makes the work schedulable again.
 Read a step's description immediately before acting on that step — not
 all of them at once. Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 14
+version = 15
 
 [vars]
 [vars.binding_prefix]
@@ -77,8 +77,8 @@ description = "Import binding prefix for gastown agent identities, including tra
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep (the harness blocks that, which drops all pacing)."
-default = "60"
+description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep (the harness blocks that, which drops all pacing). This value sets patrol frequency, which is the dominant cost term once a cycle is cheap — raise it rather than trimming steps if patrol cost needs to come down."
+default = "180"
 
 [[steps]]
 id = "check-inbox"
