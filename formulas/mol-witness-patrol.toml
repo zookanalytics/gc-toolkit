@@ -92,9 +92,11 @@ done
 BODY="Observation: <what you found>
 Recommendation: <what should happen>"
 if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead-id>" --state "<what is HOLDING it>" --cooldown "{{escalation_cooldown}}" --subject "<subject>" --body "$BODY"
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead-id>" --state "<what is HOLDING it>" --cooldown "{{escalation_cooldown}}" --subject "<subject>" --body "$BODY"; then
+    echo "witness: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+  fi
 else
-  gc mail send mayor/ -s "<subject>" -m "$BODY"
+  gc mail send mayor/ -s "<subject>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
 fi
 # <<< escalation-wiring-discipline
 ```
@@ -110,7 +112,15 @@ empty one expands to `/escalation-gate.sh` — which fails and sends
 nothing. Only the gc-toolkit rig has its own `assets/scripts`; the other
 three resolve through the `GC_CITY_PATH` candidate.
 
-Two things that are easy to get wrong:
+A non-zero exit from the gate is NOT fatal and NOT a licence to mail
+anyway. It refuses in exactly one situation — it could not bound the
+escalation (unreadable anchor, unwritable stamp) — and mailing past that
+is the unbounded storm. Log it, keep patrolling, let the next cycle
+retry. That is why the call above is wrapped in `if ! ...; then echo`
+rather than run bare: this is a best-effort pass and must reach its
+later checks.
+
+Things that are easy to get wrong:
 
 - **Do not reword your way past it.** Those five PR #35 mails had five
   different subjects — "stranded on human approval", "Codex-green but
@@ -124,6 +134,12 @@ Two things that are easy to get wrong:
   `mergeStateStatus` — whatever would make you say "this is genuinely
   different now". That fingerprint is what lets real news through
   immediately, so a lazy `--state` is what turns the gate into a mute.
+- **Sanitize any `gc bd show --json` you build `--state` from:**
+  `gc bd show <bead> --json 2>/dev/null | tr -d '[:cntrl:]'`. jq rejects
+  every unescaped control character — including a plain tab, which prose
+  notes do contain — and a failed parse leaves `--state` EMPTY, which the
+  gate reads as "no state tracked" and suppresses real news for a whole
+  cooldown. A lost parse must not look like a lost fingerprint.
 - **Never put a timestamp in `--state` — least of all the anchor's own
   `updated_at`.** The gate stamps `escalated.<kind>` ON THE ANCHOR before
   it mails, and that write bumps the anchor's `updated_at`. A fingerprint
@@ -143,9 +159,25 @@ failing the send.
 does not capture. Using it every cycle is the storm again.
 
 Suppressed escalations still print a verdict line — the item is still
-stuck, and your log still says so. Not every escalation has a bead to key
-on (the `recover-orphaned-beads` empty-liveness-map fail-safe is
-rig-global); those stay un-gated for now.
+stuck, and your log still says so.
+
+**The rule is enforced, not merely documented.**
+`witness-escalation-wiring.test.sh` scans this file for every
+`gc mail send` and fails on any that is neither inside a gated
+`escalation-wiring-*` block nor on this exception list. Exactly two are
+exempt, both because there is no bead to key a stamp on:
+
+- the `check-inbox` forward of a polecat HELP mail — it is about an
+  AGENT, not a bead, and the message that triggers it is archived once
+  handled, so it cannot re-fire every cycle the way a live condition
+  does;
+- the `recover-orphaned-beads` empty-liveness-map fail-safe — rig-global,
+  no anchor exists at all.
+
+Every other escalation in this formula (`SALVAGE_REFUSED`,
+`ORPHAN_CLOSED`, `ORPHAN_RECOVERED`, `QUEUE_HEALTH`) is bead-scoped and
+gated. Adding a third bare bead-scoped mail fails that test — gate it
+instead, or the storm comes back through the new one.
 
 Regression test: `assets/scripts/escalation-gate.test.sh` (hermetic; stubs
 `gc`, covers the five-subject drift case, state-change and cooldown
@@ -162,7 +194,7 @@ Keep the markers when editing these blocks.
 Read a step's description immediately before acting on that step — not
 all of them at once. Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 16
+version = 17
 
 [vars]
 [vars.binding_prefix]
@@ -453,14 +485,33 @@ Case A is unaffected: it queries `origin` from the rig root and never touches
 it would resolve `origin` from the **town** repo and answer for the wrong
 remote — reporting the branch missing and falling through to Case C's writes.
 
-Escalate the refusal (work_dir was recorded but is unusable — worth a look):
+Escalate the refusal (work_dir was recorded but is unusable — worth a
+look). This is ABOUT A BEAD, so it goes through the gate like every other
+bead-scoped escalation — see "Escalation discipline" above:
 ```bash
-gc mail send mayor/ -s "SALVAGE_REFUSED: <bead> husk work_dir" -m "Bead <bead> recorded work_dir=$WORKTREE, but it is not its own git worktree root.
+# >>> escalation-wiring-salvage-refused
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# The husk is what holds this: the same work_dir resolving to the same wrong root
+# is the same news. A re-orphan under a different work_dir or branch is not, and
+# gets through immediately.
+STATE="salvage-refused/${WORKTREE:-none}/${ACTUAL_ROOT:-none}/${BRANCH:-none}"
+BODY="Bead <bead> recorded work_dir=$WORKTREE, but it is not its own git worktree root.
 git toplevel: ${ACTUAL_ROOT:-<none>}
 Expected root: $EXPECTED_ROOT
 Observation: worktree git data is gone (husk). Salvage add/commit/push was REFUSED — running it would have committed and pushed the enclosing (town) repo's working tree to origin/main.
 Action: treated as Case E (nothing to salvage); bead returned to pool.
 Branch: ${BRANCH:-none}"
+if [ -n "$SCRIPTS_DIR" ]; then
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "SALVAGE_REFUSED: <bead> husk work_dir" --body "$BODY"; then
+    echo "witness: escalation-gate did not send SALVAGE_REFUSED (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "SALVAGE_REFUSED: <bead> husk work_dir" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
+# <<< escalation-wiring-salvage-refused
 ```
 
 Check the bead and worktree state, then act:
@@ -557,11 +608,27 @@ git merge-base --is-ancestor origin/$BRANCH origin/main
 ```
 
 If the work is already on main:
-- **Close the bead** (work is done, don't re-dispatch):
+- **Close the bead** (work is done, don't re-dispatch). Bead-scoped, so it
+  goes through the gate — and the gate call comes BEFORE the close,
+  because the gate stamps `escalated.<kind>` on this same bead and that
+  write should land while the bead is still open:
 ```bash
+# >>> escalation-wiring-orphan-closed
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+STATE="orphan-closed/${BRANCH:-none}"
+BODY="Branch ${BRANCH:-none} already on main. Closing instead of resetting."
+if [ -n "$SCRIPTS_DIR" ]; then
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ORPHAN_CLOSED: <bead> already merged" --body "$BODY"; then
+    echo "witness: escalation-gate did not send ORPHAN_CLOSED (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "ORPHAN_CLOSED: <bead> already merged" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
 gc bd close <bead>
-gc mail send mayor/ -s "ORPHAN_CLOSED: <bead> already merged" \
-  -m "Branch $BRANCH already on main. Closed instead of resetting."
+# <<< escalation-wiring-orphan-closed
 ```
 - Clean up worktree and skip to Step 4.
 
@@ -609,14 +676,31 @@ recovery is unexpected or concerning — use your judgment:
 | Work salvaged from worktree (data was at risk) | Log + mail mayor. Work was nearly lost. |
 | Same bead recovered before (check `metadata.recovered`) | Log + mail mayor. Possible crash loop. |
 
-When you do mail:
+When you do mail — bead-scoped, so through the gate:
 ```bash
-gc mail send mayor/ -s "ORPHAN_RECOVERED: <bead>" \
-  -m "Bead <bead> was assigned to <agent> which is no longer active.
+# >>> escalation-wiring-orphan-recovered
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# The orphaned SESSION is in the fingerprint deliberately. A second recovery of
+# the same bead under a DIFFERENT session is a crash loop — the row above that
+# says to mail on it — so it must get through at once. Re-running this pass over
+# the same recovery is not news, and is suppressed.
+STATE="orphan-recovered/<agent>/${BRANCH:-none}"
+BODY="Bead <bead> was assigned to <agent> which is no longer active.
 Recovery: <what was done — branch pushed / metadata set / work salvaged / nothing to salvage>
-Branch: <branch name or 'none'>
+Branch: ${BRANCH:-none}
 Status: Reset to open pool for re-dispatch.
 Concern: <why this one warrants attention>"
+if [ -n "$SCRIPTS_DIR" ]; then
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ORPHAN_RECOVERED: <bead>" --body "$BODY"; then
+    echo "witness: escalation-gate did not send ORPHAN_RECOVERED (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "ORPHAN_RECOVERED: <bead>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
+# <<< escalation-wiring-orphan-recovered
 ```
 
 Mark recovered beads so spawn storm detection can track patterns:
@@ -855,8 +939,15 @@ SCRIPTS_DIR=""
 for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
   if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
 done
-ROW=$(gc bd show <bead> --json)
-PR=$(printf '%s' "$ROW" | jq -r '.[0].metadata.pr_number // empty')
+# `tr -d` strips control characters BEFORE jq. bd emits them from prose notes and
+# jq rejects EVERY unescaped one — a plain tab included — so an unsanitized read
+# fails BOTH jq calls below and leaves STATE empty. The gate reads an empty
+# --state as "no state tracked" and then suppresses real news for a full cooldown:
+# a lost parse must never look like a lost fingerprint. The character CLASS, not a
+# numeric-escape range, on purpose: this block lives in a TOML multi-line string,
+# which would eat the backslashes and ship something other than what you read here.
+ROW=$(gc bd show <bead> --json 2>/dev/null | tr -d '[:cntrl:]')
+PR=$(printf '%s' "$ROW" | jq -r '.[0].metadata.pr_number // empty' 2>/dev/null)
 STATE=""
 [ -n "$PR" ] && STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
 [ -z "$STATE" ] && STATE=$(printf '%s' "$ROW" | jq -r '.[0] | [
@@ -865,14 +956,16 @@ STATE=""
   (.metadata.branch // "-"),
   (.metadata.target // "-"),
   ((.metadata | to_entries | map(select(.key | startswith("check."))) | sort_by(.key) | map(.key + "=" + (.value | tostring)) | join(",")) as $c | if $c == "" then "-" else $c end)
-] | join("/")')
+] | join("/")' 2>/dev/null)
 BODY="Work bead IDs: <ids>
 Observation: <what you found>
 Recommendation: <what should happen>"
 if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"; then
+    echo "witness: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+  fi
 else
-  gc mail send mayor/ -s "QUEUE_HEALTH: <summary>" -m "$BODY"
+  gc mail send mayor/ -s "QUEUE_HEALTH: <summary>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
 fi
 # <<< escalation-wiring-refinery
 ```
@@ -900,6 +993,12 @@ mails).
 `--cooldown "{{escalation_cooldown}}"` is already on the call, so the
 Config value above is honored without further action; an unrendered var
 degrades to the script's own default rather than failing the send.
+
+The gate call is wrapped in `if ! ...; then echo` because this pass is
+best-effort and must reach the steps after it. A non-zero exit means the
+gate could not BOUND the escalation (unreadable anchor, unwritable
+stamp) — log it and carry on. Do not mail directly instead: that is the
+unbounded storm, and the next cycle retries the gated send anyway.
 
 One escalation per anchor — do not also send a queue-wide summary that
 names the same anchors, which is the same mail wearing a different hat.
