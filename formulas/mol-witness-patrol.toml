@@ -11,6 +11,12 @@ you pour (see `next-iteration`), and reconcile by TITLE rather than by
 assignee so an orphan from an interrupted pour is still collectable
 (tk-fj56a).
 
+A `--root-only` pour materializes no formula defaults, so this bootstrap is
+where any NON-DEFAULT var (`event_timeout`, `escalation_cooldown`) has to be
+set — add it as another `--var` here. From then on `next-iteration` forwards
+every declared var to the wisp it pours, which is what keeps the setting
+alive past the first cycle.
+
 Each wisp is ONE iteration: check for work, patrol, pour the next
 iteration. On crash, re-read the formula steps and determine where
 you left off from context (bead state, mail state, last action).
@@ -168,13 +174,18 @@ Things that are easy to get wrong:
   containing it therefore differs on the very next cycle *because the gate
   ran*, so an unchanged item re-mails forever: the storm, now with a
   dedup step in front of it. Fingerprint only inputs the gate does not
-  itself write — `status`, `merge_result`, `branch`/`target`, the
-  `check.<gate>` markers, the PR's own fields.
+  itself write — `status`, `merge_result`, `branch`, the landing target
+  (`merged_target // target`, the pre-open order), the `check.<gate>`
+  markers, the PR's own fields.
 
-`--cooldown "{{escalation_cooldown}}"` is passed on every gated call, so
-the configured value is honored end to end. Leave it in place: on a
-`--root-only` pour it reaches the script unrendered, and the script
-recognizes that shape and falls back to its own 24h default rather than
+`--cooldown "{{escalation_cooldown}}"` is passed on every gated call, and
+`next-iteration` forwards the var to the wisp it pours — both halves are
+needed for a configured value to be honored end to end. The call alone
+only honors it for one cycle: a `--root-only` pour materializes no
+defaults, so a value the pour drops arrives unrendered at the next wisp
+and every later cycle silently runs the script's own 24h default instead.
+Where the var was never set at all it still arrives unrendered, and the
+script recognizes that shape and falls back to that default rather than
 failing the send.
 
 `--force` is for a situation that truly worsened in a way the fingerprint
@@ -839,7 +850,7 @@ STATE=""
   (.status // "-"),
   (.metadata.merge_result // "-"),
   (.metadata.branch // "-"),
-  (.metadata.target // "-"),
+  (.metadata.merged_target // .metadata.target // "-"),
   ((.metadata | to_entries | map(select(.key | startswith("check."))) | sort_by(.key) | map(.key + "=" + (.value | tostring)) | join(",")) as $c | if $c == "" then "-" else $c end)
 ] | join("/")' 2>/dev/null)
 BODY="Work bead IDs: <ids>
@@ -860,11 +871,22 @@ a PR-backed anchor: a new commit, an approval, or a mergeability change
 are exactly the events worth re-mailing about, and nothing else is.
 
 For an anchor with no PR — a pre-open gate is the common one — the bead's
-own `status`, `merge_result`, `branch`/`target` and `check.<gate>`
-markers serve the same purpose. The bead fingerprint is also the fallback
-when `gh pr view` fails or returns nothing, so a GitHub hiccup degrades
-to a coarser fingerprint rather than to an EMPTY one, which would read as
-"no state tracked" and mute real news until the cooldown.
+own `status`, `merge_result`, `branch`, landing target and `check.<gate>`
+markers serve the same purpose.
+
+Read that landing target as `merged_target // target`, the same order
+`pre-open-resolve.sh` uses. A `pre_open_gate` anchor records where it
+intends to land in `merged_target`; `target` is the polecat-era field and
+may be absent, or stale after a retarget. Reading `target` alone collapses
+that component to `-` on an anchor that never had one, and misses a
+retarget entirely — in both cases the fingerprint stops distinguishing two
+genuinely different situations and the gate holds real news for a full
+cooldown.
+
+The bead fingerprint is also the fallback when `gh pr view` fails or
+returns nothing, so a GitHub hiccup degrades to a coarser fingerprint
+rather than to an EMPTY one, which would read as "no state tracked" and
+mute real news until the cooldown.
 
 **`updated_at` is deliberately NOT in that fingerprint.** The gate stamps
 `escalated.<kind>` on this same anchor before mailing, so including
@@ -876,8 +898,10 @@ that advances `updated_at` on every write, and fails if the second cycle
 mails).
 
 `--cooldown "{{escalation_cooldown}}"` is already on the call, so the
-Config value above is honored without further action; an unrendered var
-degrades to the script's own default rather than failing the send.
+Config value above reaches the gate; an unrendered var degrades to the
+script's own default rather than failing the send. Carrying that value
+past THIS cycle is `next-iteration`'s job — it forwards the var on the
+pour, because a `--root-only` wisp materializes no defaults.
 
 The gate call is wrapped in `if ! ...; then echo` because this pass is
 best-effort and must reach the steps after it. A non-zero exit means the
@@ -1081,7 +1105,7 @@ can collect a stray this rollback misses.
 
 ```bash
 # >>> patrol-wisp-pour
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var escalation_cooldown='{{escalation_cooldown}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
   exit 1
@@ -1096,6 +1120,24 @@ fi
 
 If either guard fires, stay on the current wisp and retry the pour on the
 next cycle. Skip steps 2 and 3.
+
+**Forward EVERY declared var, not just `binding_prefix`.** A `--root-only`
+pour materializes no formula defaults, so a var that is not passed on this
+line reaches the next wisp unrendered and the loop silently reverts to
+whatever fallback the consumer happens to have — the script's built-in 24h
+for `escalation_cooldown`, nothing at all for `event_timeout`. Each wisp is
+one iteration of the SAME loop, so a configured value that survives only
+the first cycle is not configured at all: this pour is the only thing
+carrying it forward. Passing an unrendered `{{var}}` through is harmless —
+it arrives exactly as unrendered as it would have been — so forward them
+unconditionally rather than trying to detect which ones were set.
+`witness-escalation-wiring.test.sh` enumerates `[vars.*]` from this file and
+fails if any declared var is missing from this line, so a var added later
+cannot quietly stop propagating.
+
+Keep the pour on ONE line. This is a TOML triple-quoted string: a trailing
+backslash continuation is eaten before the witness ever sees it, and the
+wrapped remainder ships as separate commands.
 
 **2. Wait before next cycle:**
 ```bash
