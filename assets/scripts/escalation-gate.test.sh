@@ -28,6 +28,13 @@
 #              escalated" while the mayor was never told...
 #   (RETRY)    ...and the very next run therefore still mails
 #   (RESTORE)  rollback restores a PREVIOUS stamp value rather than unsetting it
+#   (ROLLBACKRACE) ...but only while the stamp is still the one THIS run wrote. A
+#              peer that mailed and stamped in between must keep its record, or
+#              the rollback erases the evidence of a delivered escalation
+#   (ROLLBACKFAIL) and when the rollback itself fails, SAY SO: the stamp remains
+#              and the anchor will be suppressed for a cooldown, so a log line
+#              claiming "rolled back, next cycle retries" is the opposite of the
+#              state an operator is in
 #   (NOANCHOR) unreadable anchor -> nowhere to bound the escalation -> no mail
 #   (CORRUPT)  a malformed prior stamp -> re-escalates and rewrites it well-formed
 #              (treating it as "recent" would mute the anchor forever)
@@ -45,17 +52,35 @@
 #              send section runs under an anchor+kind mutex
 #   (LOCKWAIT) a peer holding the lock is WAITED for, not guessed at, so the
 #              mutex actually serializes rather than merely detecting contention
-#   (HELD)     THE REGRESSION: a live lock used to end this run at SUPPRESSED
+#   (HELD)     THE REGRESSION: a held lock used to end this run at SUPPRESSED
 #              before it read the anchor or its own --state. A lock orders
-#              decisions; it cannot make one on a peer's behalf, so a holder that
-#              outlasts the bounded wait sends us down the unserialized path —
-#              which still reads, compares and decides
+#              decisions; it cannot make one on a peer's behalf, so an
+#              UNVERIFIABLE holder that outlasts the bounded wait sends us down
+#              the unserialized path — which still reads, compares and decides.
+#              (A holder we CAN verify as live defers instead — see DUPFIRST)
 #   (NEWS)     ...and why that mattered: peer suppressing an unchanged "old" while
 #              this run carries "new" produced ZERO mail between them. A changed
 #              state must escalate through a peer's lock
 #   (NEWSPARALLEL) the same, genuinely concurrent, with different --state values
 #   (STALEBREAK) a lock left behind by a killed holder is broken, not obeyed — a
 #              dead peer must never mute an anchor forever
+#   (LOCKOWNER) the lock records WHO holds it, which is what the four cases below
+#              turn on; they build their fixtures from the real owner line
+#   (DUPFIRST) THE REGRESSION: "proceed unserialized when the wait expires" fails
+#              against a live holder blocked BEFORE its first stamp — both runs
+#              read no prior stamp and both mail the same first escalation. A
+#              live holder must make this run DEFER
+#   (FORCEDEFER) ...but --force still goes out past a live holder: an operator's
+#              escape hatch a background wisp can close by holding a lock is none
+#   (LIVETTL)  and its other half: a live holder that is merely SLOW is older than
+#              LOCK_TTL too, so an age-only stale break stole its lock and put two
+#              runs inside one section
+#   (MAXHOLD)  ...bounded by the backstop, or a recycled pid would mute the anchor
+#              forever, which is worse than the duplicate a wrong break can cost
+#   (RELEASEOWNER) why a wrongly broken lock COMPOUNDED: release remembered only
+#              the path, so the old holder deleted its successor's lock on the
+#              way out and let a third run in behind it
+#   (DEADBREAK) a verifiably dead owner is broken at once instead of waited out
 #   (RELEASE)  the lock is released on every exit path, including the failures
 #   (DRYLOCK)  --dry-run takes no lock, so a probe cannot suppress a real send
 #   (LOCKFREE) an unusable lock root proceeds UNSERIALIZED with a warning: a
@@ -107,7 +132,18 @@ LOCK="$GC_ESCALATION_GATE_LOCKDIR/su-lou.10.8.witness.lock"
 #                 reproduce bd's real control-character corruption)
 #   missing       if present, `gc bd show` fails (unreadable anchor)
 #   refuse_update if present, every `gc bd update` fails
+#   refuse_rollback if present, only the SECOND `gc bd update` of a run fails —
+#                 the stamp lands, the mail fails, the undo cannot be written
 #   fail_mail     if present, every `gc mail send` fails
+#   wedge_show    if present, `gc bd show` blocks for the seconds it contains —
+#                 a holder stuck INSIDE the critical section, before it has read
+#   wedge_update  if present, the FIRST `gc bd update` blocks for the seconds it
+#                 contains — a holder stuck after reading "no prior stamp" and
+#                 before that stamp lands, which is the window a peer's
+#                 unserialized decision duplicates (DUPFIRST)
+#   stamp_race    if present, `gc mail send` replaces the metadata with the rows
+#                 it contains and then fails — a peer that escalated between our
+#                 stamp and our rollback
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 S="$GATE_STATE"
@@ -119,6 +155,10 @@ if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then
   # (PARALLEL). Without this the winner can finish before the loser even starts,
   # and the race the mutex exists for is never exercised.
   [ -f "$S/slow_show" ] && sleep 1
+  # ...and widen it far enough to outlast a peer's whole bounded wait, which is
+  # the shape the lock cases below need: a holder that is demonstrably ALIVE and
+  # has NOT yet stamped when the peer's patience runs out.
+  [ -f "$S/wedge_show" ] && sleep "$(cat "$S/wedge_show")"
   if [ -f "$S/raw_show" ]; then cat "$S/raw_show"; exit 0; fi
   id="$3"
   meta='{}'
@@ -132,6 +172,19 @@ fi
 
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
   [ -f "$S/refuse_update" ] && exit 1
+  # Refuse only the ROLLBACK write. `calls` already carries this invocation, so
+  # the run's first update counts 1 (allowed) and the rollback counts 2.
+  if [ -f "$S/refuse_rollback" ]; then
+    n=$(grep -c '^bd update' "$S/calls" 2>/dev/null)
+    [ "${n:-0}" -gt 1 ] && exit 1
+  fi
+  # Wedge only the FIRST update — the holder's stamp. A peer that gets past the
+  # lock reads the anchor while this write is still in flight, which is why it
+  # sees no prior stamp and decides "first escalation" too.
+  if [ -f "$S/wedge_update" ]; then
+    n=$(grep -c '^bd update' "$S/calls" 2>/dev/null)
+    [ "${n:-0}" -le 1 ] && sleep "$(cat "$S/wedge_update")"
+  fi
   id="$3"; shift 3
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -153,6 +206,9 @@ if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
 fi
 
 if [ "${1:-}" = "mail" ] && [ "${2:-}" = "send" ]; then
+  # A peer that mailed and stamped in the window between our stamp and our
+  # rollback: its rows replace the metadata, and our own send still fails.
+  if [ -f "$S/stamp_race" ]; then cat "$S/stamp_race" > "$S/meta"; exit 1; fi
   [ -f "$S/fail_mail" ] && exit 1
   exit 0
 fi
@@ -191,6 +247,29 @@ seed_prior() { # <state> <epoch> — a prior stamp for <state>, aged to <epoch>
   local token; token=$(token_for "$1")
   reset
   printf 'su-lou.10.8|escalated.witness|%s@%s\n' "$token" "$2" > "$GATE_STATE/meta"
+}
+
+# A backgrounded gate run is "inside the critical section" once its lock carries
+# an owner. The lock cases poll for that rather than sleeping a guessed interval,
+# so they assert on an observed state instead of on a scheduler. Fractional sleeps
+# are honored by GNU and BSD sleep but are not POSIX, so a platform that refuses
+# them polls in whole seconds rather than spinning through the budget instantly.
+if sleep 0.2 2>/dev/null; then TICK=0.2; TICKS=40; else TICK=1; TICKS=8; fi
+wait_for() { # <command...> — poll until it succeeds; non-zero if it never does
+  local i=0
+  while [ "$i" -lt "$TICKS" ]; do
+    "$@" && return 0
+    sleep "$TICK"
+    i=$((i + 1))
+  done
+  return 1
+}
+lock_held()      { [ -s "$LOCK/owner" ]; }        # a run is inside the section
+stamp_inflight() { [ "$(updates)" -ge 1 ]; }      # ...and its stamp write is in flight
+wait_for_lock()  { wait_for lock_held; }
+backdate() { # <path> <epoch> — age a lock without touching who owns it
+  touch -d "@$2" "$1" 2>/dev/null \
+    || touch -t "$(date -r "$2" +%Y%m%d%H%M 2>/dev/null)" "$1" 2>/dev/null
 }
 
 NOW=$(date +%s)
@@ -303,6 +382,55 @@ touch "$GATE_STATE/fail_mail"
 run "PR #35 stranded" --state "new111" >/dev/null 2>&1
 eq "$(stamp_of su-lou.10.8 witness)" "old000@$((NOW - 90000))" "RESTORE: a failed send restores the PREVIOUS stamp, not an empty one"
 
+# --- ROLLBACKRACE -------------------------------------------------------------
+# THE REGRESSION (pre-open signoff round 2 on tk-z4aka). A failed send restored
+# $PRIOR unconditionally. On any unserialized path a peer can have mailed AND
+# stamped between our write and our rollback — restoring over that erases the
+# record of a mail already in the mayor's inbox, and the anchor then reads as
+# never escalated. Roll back only while the stamp is still the one this run wrote.
+reset
+printf 'su-lou.10.8|escalated.witness|peer000@%s\n' "$NOW" > "$GATE_STATE/stamp_race"
+out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+rm -f "$GATE_STATE/stamp_race"
+eq "$rc" "1" "ROLLBACKRACE: exits 1 — this run sent nothing"
+eq "$(stamp_of su-lou.10.8 witness)" "peer000@$NOW" \
+   "ROLLBACKRACE: the peer's newer stamp survives the rollback"
+case "$out" in
+  *"not rolling back"*) ok "ROLLBACKRACE: says it left the peer's record alone" ;;
+  *)                    bad "ROLLBACKRACE: explains itself (got '$out')" ;;
+esac
+
+# --- ROLLBACKFAIL ---------------------------------------------------------------
+# The send failed AND the rollback write failed. The old code printed "stamp
+# rolled back so the next cycle retries" either way — the one line an operator
+# reads, saying the opposite of what happened: the stamp survives, so the anchor
+# goes quiet for a full cooldown. Report the true state, and name the key to clear.
+reset
+touch "$GATE_STATE/fail_mail" "$GATE_STATE/refuse_rollback"
+out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+rm -f "$GATE_STATE/fail_mail" "$GATE_STATE/refuse_rollback"
+eq "$rc" "1" "ROLLBACKFAIL: exits 1"
+[ -n "$(stamp_of su-lou.10.8 witness)" ] \
+  && ok "ROLLBACKFAIL: the stamp it could not roll back is still on the anchor" \
+  || bad "ROLLBACKFAIL: expected the un-rolled-back stamp to remain"
+case "$out" in
+  *"rolled back so the next cycle retries"*)
+    bad "ROLLBACKFAIL: claimed a rollback that never landed" ;;
+  *REMAINS*)
+    ok "ROLLBACKFAIL: says the stamp REMAINS instead" ;;
+  *)
+    bad "ROLLBACKFAIL: reports the true state (got '$out')" ;;
+esac
+case "$out" in
+  *"--unset-metadata escalated.witness"*) ok "ROLLBACKFAIL: names the key to clear" ;;
+  *)                                      bad "ROLLBACKFAIL: names the key to clear (got '$out')" ;;
+esac
+# ...and the suppression it warns about is real, which is why the warning has to
+# be the honest one: the next cycle finds the stamp of a mail nobody received.
+: > "$GATE_STATE/calls"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+eq "$(mails)" "0" "ROLLBACKFAIL: the next cycle really is suppressed, as warned"
+
 # --- NOANCHOR -----------------------------------------------------------------
 reset
 touch "$GATE_STATE/missing"
@@ -406,8 +534,9 @@ esac
 # a completed decision: any peer in the critical section for this anchor+kind made
 # this run exit SUPPRESSED before it ever read the anchor or looked at its OWN
 # --state. But the holder is deciding about the state IT observed. A lock orders
-# decisions; it cannot make one on someone else's behalf. So a holder that outlasts
-# the bounded wait sends us down the unserialized path — which still reads, still
+# decisions; it cannot make one on someone else's behalf. So an UNVERIFIABLE holder
+# (no owner file — this fixture, and any lock from a pre-ownership version) that
+# outlasts the bounded wait sends us down the unserialized path — which still reads, still
 # compares, and still decides — rather than down a silent exit.
 reset
 mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
@@ -426,6 +555,11 @@ rm -rf "$LOCK"
 # changed"); under the old lock branch we exited SUPPRESSED and the pair sent zero
 # mail between them. That is the gate hiding news, which is the one failure it
 # exists to prevent, and it is silent.
+#
+# The fixture lock carries no owner, so its holder is UNVERIFIABLE and this stays
+# the unserialized path (DUPFIRST covers the verifiably-live one). That is the
+# right shape here: with nothing to verify, the gate keeps its bias toward
+# sending rather than deferring to a lock that may belong to nobody.
 seed_prior "old" "$NOW"
 mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
 out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 head moved" --state "new" 2>&1); rc=$?
@@ -468,6 +602,162 @@ touch -t 202001010000 "$LOCK" 2>/dev/null   # the dir mtime is the primary age s
 run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "STALEBREAK: a lock from a dead holder does not mute the anchor"
 [ -d "$LOCK" ] && bad "STALEBREAK: the broken lock was not released" || ok "STALEBREAK: and is released again on exit"
+
+# --- LOCKOWNER ------------------------------------------------------------------
+# The cases below build variants of a lock owner (a dead pid, a successor). Take
+# the line the gate ACTUALLY writes rather than re-typing its format here: a test
+# that reproduces a format seeds whatever the format used to be, so it keeps
+# passing through exactly the change it should have caught.
+#
+# The probe is held open just long enough to read its lock and then allowed to
+# FINISH. Killing it instead is what a first draft did, and `kill $!` on a
+# backgrounded shell function may only reap the subshell — the gate child then
+# survives as an orphan and mails into whatever case's log comes next, which
+# reads as a duplicate escalation produced by the code under test.
+reset
+printf '1\n' > "$GATE_STATE/wedge_show"
+run "owner probe" --state "abc123" >/dev/null 2>&1 &
+probe=$!
+REAL_OWNER=""
+wait_for_lock && REAL_OWNER=$(cat "$LOCK/owner" 2>/dev/null)
+wait "$probe" 2>/dev/null
+rm -f "$GATE_STATE/wedge_show"; rm -rf "$LOCK"
+[ -n "$REAL_OWNER" ] && ok "LOCKOWNER: the gate records an owner in the lock it takes" \
+  || bad "LOCKOWNER: no owner appeared in the lock — the ownership cases cannot run"
+
+# --- DUPFIRST -------------------------------------------------------------------
+# THE REGRESSION (pre-open signoff round 2 on tk-z4aka). The bounded wait used to
+# end in "proceed UNSERIALIZED" whoever held the lock, reasoning that stamp-first
+# makes that safe: a holder that got as far as mailing has already written the
+# stamp we would read. The holder it misses is the one blocked BEFORE its first
+# stamp — a wedged `gc bd show`, which is exactly the condition that outlasts the
+# wait. Both runs then read the same empty prior state, both decide "first
+# escalation", and both mail: the lost update the mutex exists to prevent,
+# arriving through the mutex's own timeout. A verifiably LIVE holder must make
+# this run DEFER — decide nothing, send nothing, retry next cycle.
+#
+# The wedge is on the STAMP WRITE, not the read: that is the window the finding
+# names. Wedging the read instead makes the holder re-read AFTER the peer has
+# stamped, which is the case stamp-first already converges — the fixture would
+# then pass against the very code it is meant to catch. Verified by reproducing
+# both against the pre-fix script: wedged read sends 1 mail, wedged stamp sends 2.
+reset
+printf '5\n' > "$GATE_STATE/wedge_update"
+run "PR #35 stranded on human approval" --state "abc123" >/dev/null 2>&1 &
+holder=$!
+wait_for_lock || bad "DUPFIRST: the holder never took the lock"
+wait_for stamp_inflight || bad "DUPFIRST: the holder never reached its stamp write"
+eq "$(stamp_of su-lou.10.8 witness)" "" \
+   "DUPFIRST: the holder is mid-stamp — the anchor still records nothing"
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "ESCALATION: PR #35 Codex-green but stranded" --state "abc123" 2>&1); rc=$?
+eq "$(mails)" "0" "DUPFIRST: does not mail past a live holder that may not have stamped"
+eq "$rc" "1" "DUPFIRST: defers instead — nothing sent, next cycle retries"
+case "$out" in *"NOT SENT"*) ok "DUPFIRST: says NOT SENT" ;; *) bad "DUPFIRST: says NOT SENT (got '$out')" ;; esac
+[ -s "$LOCK/owner" ] && ok "DUPFIRST: leaves the holder's lock alone" || bad "DUPFIRST: disturbed the holder's lock"
+wait "$holder"
+rm -f "$GATE_STATE/wedge_update"
+eq "$(mails)" "1" "DUPFIRST: the holder's own escalation still goes out — exactly one"
+
+# --- FORCEDEFER -------------------------------------------------------------------
+# The deferral is the right default for a patrol wisp — it comes back in minutes.
+# It must not swallow the operator's escape hatch, though: --force means a human
+# decided this goes out now, and an escape hatch a background wisp can close by
+# holding a lock is not one.
+reset
+printf '5\n' > "$GATE_STATE/wedge_update"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+holder=$!
+wait_for_lock || bad "FORCEDEFER: the holder never took the lock"
+wait_for stamp_inflight || bad "FORCEDEFER: the holder never reached its stamp write"
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "OPERATOR: send it now" --state "abc123" --force 2>&1); rc=$?
+eq "$rc" "0" "FORCEDEFER: --force is not deferred by a live holder"
+eq "$(mails)" "1" "FORCEDEFER: the operator's escalation goes out"
+case "$out" in *UNSERIALIZED*) ok "FORCEDEFER: and says it went unserialized" ;; *) bad "FORCEDEFER: warns (got '$out')" ;; esac
+wait "$holder"
+rm -f "$GATE_STATE/wedge_update"
+
+# --- LIVETTL --------------------------------------------------------------------
+# THE OTHER HALF. The stale branch broke any lock older than LOCK_TTL on AGE
+# ALONE, so a holder that is merely slow — the wedged write again — had its lock
+# deleted and retaken while it was still inside the section. Age guesses at
+# abandonment; ownership answers it. A lock whose owner is alive is not breakable.
+reset
+printf '5\n' > "$GATE_STATE/wedge_show"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+holder=$!
+wait_for_lock || bad "LIVETTL: the holder never took the lock"
+rm -f "$GATE_STATE/wedge_show"
+HELD_BY=$(cat "$LOCK/owner" 2>/dev/null)
+# Age it past LOCK_TTL (300s) but under the LOCK_MAX_HOLD backstop, without
+# touching who owns it.
+printf '%s\n' "$((NOW - 600))" > "$LOCK/at"; backdate "$LOCK" "$((NOW - 600))"
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+eq "$(cat "$LOCK/owner" 2>/dev/null)" "$HELD_BY" \
+   "LIVETTL: a live owner's lock is not broken on age alone"
+eq "$(mails)" "0" "LIVETTL: and no peer decides inside the holder's section"
+eq "$rc" "1" "LIVETTL: it defers"
+wait "$holder"
+eq "$(mails)" "1" "LIVETTL: the holder finishes its own escalation — exactly one"
+
+# --- MAXHOLD --------------------------------------------------------------------
+# ...and the escape hatch, because "never break a live owner" would mute the
+# anchor forever if the pid were recycled after a crash, or the holder wedged for
+# good. Past LOCK_MAX_HOLD — an hour, far beyond any real critical section — the
+# lock is broken anyway. A permanent mute is the failure this script exists to
+# prevent; a duplicate is not.
+reset
+printf '5\n' > "$GATE_STATE/wedge_show"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+holder=$!
+wait_for_lock || bad "MAXHOLD: the holder never took the lock"
+rm -f "$GATE_STATE/wedge_show"
+printf '%s\n' "$((NOW - 7200))" > "$LOCK/at"; backdate "$LOCK" "$((NOW - 7200))"
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+eq "$rc" "0" "MAXHOLD: a lock held past the backstop does not defer forever"
+eq "$(mails)" "1" "MAXHOLD: the escalation gets out"
+# The broken-past holder then reads the stamp this run left and suppresses — the
+# stamp-first convergence that keeps a broken lock costing at most a duplicate.
+wait "$holder"
+eq "$(mails)" "1" "MAXHOLD: and the holder converges on suppress rather than mailing again"
+
+# --- RELEASEOWNER -----------------------------------------------------------------
+# What made a wrongly broken lock COMPOUND instead of merely costing a duplicate:
+# release remembered only the PATH. The original holder, exiting after its lock
+# had been broken and retaken, deleted its SUCCESSOR's lock and let a third
+# invocation in behind it. Release must check the lock is still ours.
+reset
+printf '3\n' > "$GATE_STATE/wedge_show"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+holder=$!
+wait_for_lock || bad "RELEASEOWNER: the holder never took the lock"
+rm -f "$GATE_STATE/wedge_show"
+# Someone breaks the holder's lock and takes it: same path, different owner.
+SUCCESSOR=$(printf '%s\n' "$REAL_OWNER" | awk '{$3 = "successor"; print}')
+rm -rf "$LOCK"; mkdir -p "$LOCK"; printf '%s\n' "$SUCCESSOR" > "$LOCK/owner"
+wait "$holder"
+eq "$(cat "$LOCK/owner" 2>/dev/null)" "$SUCCESSOR" \
+   "RELEASEOWNER: the holder leaves a lock that is no longer its own"
+rm -rf "$LOCK"
+
+# --- DEADBREAK --------------------------------------------------------------------
+# A pid that no longer exists is not a guess the way an age is, so a crashed
+# holder's lock is broken AT ONCE rather than waited out to the TTL — 300s of a
+# patrol pass spent on a holder that is never coming back is its own small mute.
+reset
+( exit 0 ) & DEAD_PID=$!
+wait "$DEAD_PID" 2>/dev/null
+mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
+# The owner the gate itself writes, with a pid that is gone — only the field the
+# case is about is changed.
+printf '%s\n' "$REAL_OWNER" | awk -v p="$DEAD_PID" '{$2 = p; print}' > "$LOCK/owner"
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+eq "$rc" "0" "DEADBREAK: exits 0"
+eq "$(mails)" "1" "DEADBREAK: a fresh lock from a dead holder does not mute the anchor"
+case "$out" in
+  *UNSERIALIZED*) bad "DEADBREAK: gave up on the lock instead of breaking a dead one" ;;
+  *)              ok  "DEADBREAK: broke it and took the lock properly" ;;
+esac
+[ -d "$LOCK" ] && bad "DEADBREAK: the broken lock was not released" || ok "DEADBREAK: and released it again"
 
 # --- RELEASE ------------------------------------------------------------------
 reset

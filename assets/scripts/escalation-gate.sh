@@ -76,13 +76,22 @@
 # escalation. A failed stamp therefore sends nothing and exits non-zero; the next
 # cycle retries the whole thing.
 #
-# ...BUT A FAILED MAIL ROLLS THE STAMP BACK. Stamp-first has one failure mode
-# worth closing: if the stamp lands and the mail then fails, the situation is
-# recorded as "already escalated" while the mayor was never told, and the gate
-# would suppress it for a whole cooldown. So a failed send restores the previous
-# stamp value (or unsets it when there was none). The bound still holds — one
-# ATTEMPT per cycle, and a persistently failing `gc mail send` is delivering
-# nothing to storm with.
+# ...BUT A FAILED MAIL ROLLS THE STAMP BACK — ITS OWN STAMP, AND ONLY WHILE IT IS
+# STILL THERE. Stamp-first has one failure mode worth closing: if the stamp lands
+# and the mail then fails, the situation is recorded as "already escalated" while
+# the mayor was never told, and the gate would suppress it for a whole cooldown.
+# So a failed send restores the previous stamp value (or unsets it when there was
+# none). The bound still holds — one ATTEMPT per cycle, and a persistently failing
+# `gc mail send` is delivering nothing to storm with.
+#
+# Two details make that rollback safe rather than merely well-meant. It re-reads
+# the anchor first and writes only while the stamp is still the one THIS run
+# wrote: on any unserialized path a peer can have mailed and stamped in between,
+# and restoring over that erases the record of a mail already in the mayor's
+# inbox. And when the rollback write itself fails, the log says so — the stamp
+# REMAINS and the next cycle really will suppress. Claiming a rollback that did
+# not happen is worse than the suppression, because the one line an operator
+# would act on says the opposite of the state they are in.
 #
 # SUPPRESSION IS ON THE MAIL, NOT ON THE OBSERVATION. Every invocation prints its
 # verdict on stdout, suppressed ones included, so the patrol log still shows the
@@ -104,11 +113,41 @@
 # genuinely new head oid or a flipped review decision is dropped entirely.
 # Sequentially that same pair mails immediately, which is the contract: suppress
 # repetition, never news. So a live lock is WAITED ON (bounded), and then the
-# ordinary read/compare/stamp runs for OUR state. Waiting cannot deadlock the
-# patrol: the wait is bounded, and on timeout we proceed unserialized like any
-# other lock failure. Stamp-first is what makes that safe — a holder that got as
-# far as mailing has already written the stamp we are about to read, so the
-# unserialized path still converges on suppress when suppression is right.
+# ordinary read/compare/stamp runs for OUR state.
+#
+# ...AND A TIMED-OUT WAIT IS NOT A LICENSE TO SKIP THE SERIALIZATION. That wait
+# first shipped ending in "proceed UNSERIALIZED", whoever held the lock, reasoning
+# that stamp-first makes the unserialized path converge: a holder that got as far
+# as mailing has already written the stamp we are about to read. The holder that
+# reasoning misses is the one blocked BEFORE its first stamp — a wedged `gc bd
+# show` or `gc bd update`, which is precisely the condition that outlasts the
+# wait. Both invocations then read the same empty prior state, both decide "first
+# escalation", and both mail: the lost update the mutex exists to prevent,
+# arriving through the mutex's own timeout. So the expiry arm turns on WHO holds
+# it (see WHO HOLDS THE LOCK below): a verifiably LIVE holder makes us DEFER —
+# decide nothing, send nothing, exit 1, let the next cycle re-derive and retry.
+# Every other case (dead holder, unverifiable holder, unusable lock root) still
+# proceeds, biased toward sending. Deferring is a one-cycle delay while a peer is
+# escalating this very anchor and kind right now; it is not the mute, because it
+# records nothing and the next cycle decides freshly against live state.
+#
+# WHO HOLDS THE LOCK, NOT JUST HOW OLD IT IS. Breaking a lock on age alone steals
+# it from a holder that is slow rather than gone — and then two invocations are
+# inside the section, which is the same duplicate by another route. Worse, the
+# original holder's release remembered only a PATH, so on the way out it deleted
+# its SUCCESSOR's lock and let a third invocation in behind it. So the lock
+# records an owner (`<host> <pid> <nonce>`) and:
+#
+#   RELEASE  removes the lock only while the owner file still names US. A lock
+#            that was broken and retaken belongs to someone else.
+#   BREAK    a DEAD owner is broken at once, at any age — a crashed peer must
+#            never mute an anchor, and a pid that no longer exists is not a guess
+#            the way an age is. An owner we cannot verify (no owner file, another
+#            host, an unparseable line) keeps the old age rule, LOCK_TTL. A LIVE
+#            owner is not broken at all — until LOCK_MAX_HOLD, the backstop for a
+#            pid recycled after a crash or a holder wedged past any plausible
+#            critical section, where muting the anchor forever is the worse
+#            failure.
 #
 # GENERALIZES BUT IS NOT YET WIRED ELSEWHERE. Nothing here is witness-specific —
 # the su refinery's two escalations in the same incident are the same defect from
@@ -143,9 +182,11 @@ env:
   GC_ESCALATION_GATE_LOCKDIR  directory holding the per-anchor+kind mutex
                               (default /tmp/gc-escalation-gate). Set it to
                               isolate a test run from the live locks.
-  GC_ESCALATION_GATE_LOCK_WAIT  seconds to wait for a live holder of that mutex
-                              before proceeding unserialized (default 30). A
-                              held lock delays this decision; it never makes it.
+  GC_ESCALATION_GATE_LOCK_WAIT  seconds to wait for a holder of that mutex
+                              (default 30). A held lock delays this decision; it
+                              never makes it. Past the wait: a verifiably LIVE
+                              holder defers this cycle (nothing sent, exit 1),
+                              anything else proceeds unserialized.
 
 exit: 0 mailed or suppressed (both correct) · 1 not gated, nothing sent · 2 usage
 USAGE
@@ -291,23 +332,45 @@ NOW=$(date +%s)
 #                  We must not adopt the peer's verdict as our own: it is deciding
 #                  about the state IT observed, and if ours differs, ours is news
 #                  (see "A HELD LOCK IS NOT A VERDICT" in the header).
-#   HELD, TOO LONG the holder is still alive but slower than LOCK_WAIT (a wedged
-#                  Dolt write). Proceed UNSERIALIZED with a warning rather than
-#                  hang the patrol pass. Stamp-first keeps this honest: if the
-#                  holder already mailed, we read its stamp and suppress anyway.
-#   HELD, STALE    the holder died mid-section. Break the lock and proceed: a
-#                  crashed peer must never mute an anchor forever.
+#   HELD, LIVE,    the holder answers as alive but is slower than LOCK_WAIT (a
+#   TOO LONG       wedged Dolt write). DEFER: it may not have stamped yet, so
+#                  deciding now duplicates its mail — the one outcome this script
+#                  exists to prevent. Nothing is written, nothing is sent, exit 1,
+#                  and the next patrol cycle re-derives and retries. Except under
+#                  --force, which proceeds unserialized: an operator's escape
+#                  hatch that a patrol wisp can close by holding a lock is not
+#                  one, and the operator is the one asking for the send.
+#   HELD, DEAD     the holder died mid-section. Break the lock and proceed at any
+#                  age: a crashed peer must never mute an anchor forever.
+#   HELD, UNKNOWN  no owner file, another host, an unparseable owner line. Nothing
+#                  to verify, so age governs: break past LOCK_TTL, otherwise wait
+#                  and then proceed UNSERIALIZED with a warning.
 #   CANNOT LOCK    the lock root is unwritable. Proceed UNSERIALIZED with a
 #                  warning — the race costs a duplicate mail, and refusing would
 #                  cost silence, which this script exists to prevent.
 LOCK_TTL=300
+# The backstop above the TTL, and the ONLY path that breaks a lock whose owner
+# answers as live. No legitimate critical section — one `gc bd show`, one `gc bd
+# update`, one `gc mail send` — runs for an hour, so an hour-old live owner is
+# either a pid recycled after its holder crashed or a holder wedged for good.
+# Both would mute this anchor+kind forever, which beats the duplicate a wrong
+# break can cost.
+LOCK_MAX_HOLD=3600
 LOCK_ROOT="${GC_ESCALATION_GATE_LOCKDIR:-/tmp/gc-escalation-gate}"
 LOCK_DIR=""
-# How long to wait for a LIVE holder before giving up on serialization. Sized for
-# the critical section it guards — one `gc bd show`, one `gc bd update`, one
+# Identifies THIS invocation inside the lock it takes: `<host> <pid> <nonce>`.
+# host+pid is what makes the holder's liveness checkable by a peer; the nonce
+# keeps the token unique even against a recycled pid, so the ownership comparison
+# in release_lock cannot match a lock that is no longer ours.
+LOCK_HOST=$(uname -n 2>/dev/null) || LOCK_HOST=""
+[ -n "$LOCK_HOST" ] || LOCK_HOST="unknown-host"
+LOCK_TOKEN="$LOCK_HOST $$ $NOW.${RANDOM:-0}"
+# How long to wait for a holder before giving up on serialization. Sized for the
+# critical section it guards — one `gc bd show`, one `gc bd update`, one
 # `gc mail send`, each of which the ops guidance already treats as able to take
 # seconds against a loaded Dolt. Past that the holder is wedged rather than busy,
-# and a patrol pass that blocks on it is worse than an unserialized decision.
+# and a patrol pass that blocks on it is worse than either available answer: a
+# deferral (live holder) or an unserialized decision (anyone else).
 DEFAULT_LOCK_WAIT=30
 LOCK_WAIT="${GC_ESCALATION_GATE_LOCK_WAIT:-$DEFAULT_LOCK_WAIT}"
 case "$LOCK_WAIT" in
@@ -318,13 +381,78 @@ case "$LOCK_WAIT" in
     LOCK_WAIT="$DEFAULT_LOCK_WAIT" ;;
 esac
 
+lock_owner() {
+  # The owner line of the lock at $1, or empty when there is none. `head -1` so a
+  # truncated or double-written file cannot produce a multi-line value that no
+  # comparison could ever match.
+  head -1 "$1/owner" 2>/dev/null
+}
+
+lock_liveness() {
+  # live | dead | unknown, for the owner line in $1. "unknown" is not a failure —
+  # it is the honest answer for a lock this script did not write, or one written
+  # on another host, and it routes to the age rule the way the pre-ownership
+  # version always did.
+  local host pid
+  host=""; pid=""
+  read -r host pid _ <<EOF
+${1:-}
+EOF
+  case "$pid" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+  [ "$host" = "$LOCK_HOST" ] || { printf 'unknown'; return 0; }
+  # `kill -0` answers "signalable", which is not the same question: a process
+  # owned by another user answers EPERM exactly as a dead one answers ESRCH, and
+  # reading a live holder as dead is how its lock gets stolen. `ps -p` separates
+  # the two, and both spellings work on Linux and macOS.
+  if kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; then
+    printf 'live'
+  else
+    printf 'dead'
+  fi
+}
+
+acquire_lock() {
+  # Record ownership in the lock directory we just created. The owner file goes
+  # first: it is what a peer needs before it can decide whether breaking is safe,
+  # and what release_lock compares against. `at` is only the age fallback for a
+  # platform with no usable `stat`.
+  LOCK_DIR="$1"
+  printf '%s\n' "$LOCK_TOKEN" > "$1/owner" 2>/dev/null
+  printf '%s\n' "$NOW" > "$1/at" 2>/dev/null
+}
+
+break_lock() {
+  # Remove the lock at $1, but only while its owner is still the $2 we classified.
+  # If it changed, another invocation already broke and retook it and we would be
+  # stealing a FRESH lock — the exact theft the ownership check exists to stop.
+  # This narrows the window rather than closing it (rmdir/mkdir is not atomic);
+  # the ownership check in release_lock is what keeps a lost race from cascading,
+  # because whoever ends up outside the section cannot delete the lock of whoever
+  # is inside it.
+  [ "$(lock_owner "$1")" = "$2" ] || return 1
+  rm -f "$1/owner" "$1/at" 2>/dev/null
+  rmdir "$1" 2>/dev/null
+}
+
 release_lock() {
-  # Only ever removes a lock THIS process took: LOCK_DIR is set solely on a
-  # successful acquire, so a suppressed run cannot delete the peer's lock.
+  # Only ever removes a lock THIS process still owns. LOCK_DIR is set solely on a
+  # successful acquire, so a suppressed run cannot delete the peer's lock — and
+  # the owner file is re-read here because the lock may have been broken and
+  # retaken while we held it (a stale-break race, or the LOCK_MAX_HOLD backstop
+  # firing against us). Removing it then would delete the SUCCESSOR's lock and put
+  # a third invocation inside the section behind us: that is what turned a wrongly
+  # broken lock from one duplicate into a cascade.
   [ -n "$LOCK_DIR" ] || return 0
-  rm -f "$LOCK_DIR/at" 2>/dev/null
-  rmdir "$LOCK_DIR" 2>/dev/null
+  local dir cur
+  dir="$LOCK_DIR"
   LOCK_DIR=""
+  cur=$(lock_owner "$dir")
+  if [ "$cur" = "$LOCK_TOKEN" ]; then
+    rm -f "$dir/owner" "$dir/at" 2>/dev/null
+    rmdir "$dir" 2>/dev/null
+  else
+    echo "escalation-gate: $ANCHOR [$KIND] the lock $dir is no longer ours (owner now '$cur'); leaving it to its current holder" >&2
+  fi
 }
 
 lock_started() {
@@ -343,16 +471,21 @@ lock_started() {
 }
 
 take_lock() {
-  # ALWAYS returns 0 — the caller decides either way. The only question this
-  # answers is whether the decision that follows is serialized against a peer, and
-  # the two unserialized outcomes each say so on stderr. There is deliberately no
-  # "return 1 = suppress": a lock is not a verdict, and the version that let it be
-  # one dropped changed-state escalations on the floor.
+  # 0 = PROCEED to the decision, serialized (we hold the lock) or unserialized
+  # (nobody verifiable is inside, and the two unserialized outcomes each say so on
+  # stderr). 1 = DEFER, and ONLY for a verifiably live holder past the wait: it may
+  # not have stamped yet, so deciding now can duplicate its mail.
+  #
+  # There is deliberately still no "return 1 = suppress". A deferral is not a
+  # verdict either — nothing is read, compared or recorded, and the next cycle
+  # decides freshly. The version that let a held lock mean "suppress" dropped
+  # changed-state escalations on the floor; this one drops nothing, it only
+  # declines to guess while a peer is demonstrably mid-decision.
   if ! mkdir -p "$LOCK_ROOT" 2>/dev/null; then
     echo "escalation-gate: cannot create lock dir $LOCK_ROOT; proceeding UNSERIALIZED — a duplicate escalation is better than a suppressed one" >&2
     return 0
   fi
-  local dir key started age now deadline stale
+  local dir key started age now deadline owner liveness breakable
   # The key lands in a path, so reduce it to the same character set the metadata
   # key already constrains --kind to. ANCHOR is a bead id; a stray character in it
   # must not escape the lock root.
@@ -363,8 +496,7 @@ take_lock() {
   # clock that advances past `deadline`. LOCK_WAIT=0 makes this exactly one pass.
   while : ; do
     if mkdir "$dir" 2>/dev/null; then
-      LOCK_DIR="$dir"
-      printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
+      acquire_lock "$dir"
       return 0
     fi
     now=$(date +%s)
@@ -374,29 +506,51 @@ take_lock() {
     # this script replaces (see the header), so treat it as "time is up".
     case "$now" in ''|*[!0-9]*) now="$deadline" ;; esac
     started=$(lock_started "$dir")
-    stale=0
-    if [ -z "$started" ]; then
-      # An age we cannot read at all — only possible on a platform with no `stat`
-      # in the microseconds before `at` is written. Breaking is no worse than
-      # having no lock; leaving it would wedge the anchor permanently, the mute.
-      stale=1
-    else
+    age=0
+    if [ -n "$started" ]; then
       age=$(( now - started ))
       [ "$age" -lt 0 ] && age=0
-      [ "$age" -ge "$LOCK_TTL" ] && stale=1
     fi
-    if [ "$stale" = "1" ]; then
-      rm -f "$dir/at" 2>/dev/null
-      rmdir "$dir" 2>/dev/null
+    owner=$(lock_owner "$dir")
+    liveness=$(lock_liveness "$owner")
+    breakable=0
+    case "$liveness" in
+      dead)
+        # A pid that no longer exists is not a guess the way an age is, so a
+        # crashed holder is broken at once rather than waited out to the TTL.
+        breakable=1 ;;
+      live)
+        # NOT on age alone — that is how a slow-but-live holder loses its lock to
+        # a peer that then decides inside its section. Only the backstop.
+        [ -n "$started" ] && [ "$age" -ge "$LOCK_MAX_HOLD" ] && breakable=1 ;;
+      *)
+        # Unverifiable owner: a lock from a pre-ownership version, one written on
+        # another host, or the microseconds between `mkdir` and the owner write.
+        # Age is all there is, so the original TTL rule stands — including for an
+        # age we cannot read either, which is the same call the earlier version
+        # made: breaking is no worse than having no lock, while leaving it would
+        # wedge the anchor permanently, the mute.
+        { [ -z "$started" ] || [ "$age" -ge "$LOCK_TTL" ]; } && breakable=1 ;;
+    esac
+    if [ "$breakable" = "1" ] && break_lock "$dir" "$owner"; then
       if mkdir "$dir" 2>/dev/null; then
-        LOCK_DIR="$dir"
-        printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
+        acquire_lock "$dir"
         return 0
       fi
-      # Another process broke it first and is now inside — a live holder again.
-      # Fall through to the wait.
+      # Another process took it in the gap — a live holder again. Fall through to
+      # the wait.
     fi
     if [ "$now" -ge "$deadline" ]; then
+      if [ "$liveness" = "live" ]; then
+        # --force is the operator's escape hatch, and an escape hatch that a
+        # patrol wisp can close by holding a lock is not one. A deferral is the
+        # right default for an automatic caller — it runs again in minutes — but
+        # the operator typing this is the one asking for the send, so they get the
+        # unserialized path and the duplicate it may cost.
+        [ "$FORCE" != "1" ] && return 1
+        echo "escalation-gate: $ANCHOR [$KIND] --force: proceeding UNSERIALIZED past a live holder rather than deferring an operator's send" >&2
+        return 0
+      fi
       echo "escalation-gate: $ANCHOR [$KIND] a peer has held the lock for over ${LOCK_WAIT}s; proceeding UNSERIALIZED — deciding late is recoverable, skipping the decision is not" >&2
       return 0
     fi
@@ -408,7 +562,18 @@ take_lock() {
 # protect — and taking the lock would let a probe suppress a real escalation.
 if [ "$DRY_RUN" != "1" ]; then
   trap release_lock EXIT
-  take_lock
+  if ! take_lock; then
+    # A live peer is inside the section for this same anchor+kind and has been
+    # there longer than the wait. It may not have stamped yet, so deciding now is
+    # how both invocations mail the same first escalation. Send nothing, record
+    # nothing, and let the next cycle decide against whatever the peer leaves
+    # behind. Exit 1 is the same "not gated, nothing sent" the callers already
+    # handle (mol-witness-patrol logs it and retries next cycle; the one-shot
+    # blocks treat their notice as best-effort, which is the right weight for a
+    # notice a peer is concurrently escalating anyway).
+    echo "escalation-gate: $ANCHOR [$KIND] NOT SENT — a live peer has held the anchor+kind lock for over ${LOCK_WAIT}s and may not have stamped yet; deciding now could duplicate its escalation. Next cycle retries: $SUBJECT" >&2
+    exit 1
+  fi
 fi
 
 # COMPARE ON A DIGEST, DISPLAY THE LABEL.
@@ -534,7 +699,8 @@ fi
 
 # Stamp FIRST. Recording that we escalated is what bounds the next cycle, so a
 # stamp we cannot write is a mail we must not send.
-if ! gc bd update "$ANCHOR_ID" --set-metadata "$KEY=$STATE_TOKEN@$NOW" >/dev/null 2>&1; then
+STAMP="$STATE_TOKEN@$NOW"
+if ! gc bd update "$ANCHOR_ID" --set-metadata "$KEY=$STAMP" >/dev/null 2>&1; then
   echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — could not stamp $KEY; escalating unbounded is worse than escalating late, retry next cycle: $SUBJECT" >&2
   exit 1
 fi
@@ -546,12 +712,36 @@ fi
 
 # The send failed after the stamp landed. Undo the stamp, or the situation reads
 # as "already escalated" for a full cooldown while the mayor was never told.
-if [ -n "$PRIOR" ]; then
-  gc bd update "$ANCHOR_ID" --set-metadata "$KEY=$PRIOR" >/dev/null 2>&1 \
-    || echo "escalation-gate: $ANCHOR_ID [$KIND] could not restore prior stamp '$PRIOR'; next escalation may be suppressed until the cooldown elapses" >&2
+#
+# ROLL BACK OUR OWN STAMP, NOT WHATEVER IS THERE NOW. Every unserialized path (an
+# unusable lock root, an unverifiable holder past LOCK_WAIT) leaves room for a
+# peer to have mailed and stamped between our write and this line. Restoring
+# $PRIOR over that erases the record of a mail already delivered, and the anchor
+# then reads as un-escalated while the mayor has it in the inbox. So re-read, and
+# write only while the value is still the one we wrote. When the re-read itself
+# fails we roll back anyway: an unconfirmed rollback risks a duplicate, and the
+# whole script chooses a duplicate over silence.
+ROLLBACK="skipped"
+CUR_ROW=$(gc bd show "$ANCHOR_ID" --json 2>/dev/null | tr -d '[:cntrl:]')
+CUR_ID=$(printf '%s' "$CUR_ROW" | jq -r '.[0].id // empty' 2>/dev/null)
+CUR_STAMP=$(printf '%s' "$CUR_ROW" | jq -r --arg k "$KEY" '.[0].metadata[$k] // empty' 2>/dev/null)
+if [ -n "$CUR_ID" ] && [ "$CUR_STAMP" != "$STAMP" ]; then
+  echo "escalation-gate: $ANCHOR_ID [$KIND] not rolling back: $KEY is now '$CUR_STAMP', not the '$STAMP' this run wrote — a peer escalated in between and its record must stand" >&2
+elif [ -n "$PRIOR" ]; then
+  gc bd update "$ANCHOR_ID" --set-metadata "$KEY=$PRIOR" >/dev/null 2>&1 && ROLLBACK="done" || ROLLBACK="failed"
 else
-  gc bd update "$ANCHOR_ID" --unset-metadata "$KEY" >/dev/null 2>&1 \
-    || echo "escalation-gate: $ANCHOR_ID [$KIND] could not unset the stamp it just wrote; next escalation may be suppressed until the cooldown elapses" >&2
+  gc bd update "$ANCHOR_ID" --unset-metadata "$KEY" >/dev/null 2>&1 && ROLLBACK="done" || ROLLBACK="failed"
 fi
-echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed; stamp rolled back so the next cycle retries: $SUBJECT" >&2
+
+# Report what actually happened. The single line an operator reads has to match
+# the state they are in: claiming a rollback that did not land tells them the next
+# cycle retries when it will in fact suppress for a whole cooldown.
+case "$ROLLBACK" in
+  done)
+    echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed; stamp rolled back so the next cycle retries: $SUBJECT" >&2 ;;
+  failed)
+    echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed AND the stamp could not be rolled back; '$KEY=$STAMP' REMAINS on $ANCHOR_ID, so this situation will be SUPPRESSED until the ${COOLDOWN}s cooldown elapses. To retry sooner: gc bd update $ANCHOR_ID --unset-metadata $KEY — $SUBJECT" >&2 ;;
+  *)
+    echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed; a peer's newer stamp was left in place, so the next cycle decides against ITS record rather than ours: $SUBJECT" >&2 ;;
+esac
 exit 1
