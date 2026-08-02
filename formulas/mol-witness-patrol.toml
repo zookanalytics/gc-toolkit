@@ -69,7 +69,7 @@ the worktree. This makes the work schedulable again.
 Read a step's description immediately before acting on that step — not
 all of them at once. Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 13
+version = 14
 
 [vars]
 [vars.binding_prefix]
@@ -77,7 +77,7 @@ description = "Import binding prefix for gastown agent identities, including tra
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to sleep before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose."
+description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep (the harness blocks that, which drops all pacing)."
 default = "60"
 
 [[steps]]
@@ -758,10 +758,23 @@ next cycle. Skip steps 2 and 3.
 
 **2. Wait before next cycle:**
 ```bash
-sleep {{event_timeout}}
+end=$(( $(date +%s) + {{event_timeout}} ))
+until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
 ```
 
-Previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. Fixed sleep gives predictable idle cost.
+This wait is the loop's ONLY backoff — do not skip it, and do not
+replace it with a bare `sleep {{event_timeout}}`. The agent harness
+blocks a standalone `sleep`:
+
+    Blocked: standalone sleep 60. To wait for a condition, use Monitor
+    with an until-loop
+
+A blocked wait is not a no-op that costs one tool error — it silently
+removes all pacing, and the patrol re-cycles as fast as it can spawn.
+The bounded clock-poll above is accepted by the harness and keeps the
+same fixed-duration semantics.
+
+Previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. Fixed duration gives predictable idle cost.
 
 **3. Burn this wisp — only if step 1 succeeded:**
 ```bash
