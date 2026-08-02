@@ -38,7 +38,6 @@ opinions rather than cloned directly.
 - `docs/foundation.md` — guiding beliefs and operating discipline behind gc-toolkit
 - `docs/architecture.md` — the 30,000-ft guide to how those beliefs are composed from Gas City's primitives, and the consistency test that keeps new work grounded
 - `docs/install.md` — wiring gc-toolkit into a city (imports, sub-packs, patches, verification)
-- `docs/roadmap.md` — the shape of the pack's evolution: what's true now and what's next
 - `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`
 - `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
 - `docs/file-structure.md` — conventions for where docs and specs live in this pack

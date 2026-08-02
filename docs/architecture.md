@@ -134,6 +134,30 @@ work and never for an epic directly, so a conversation about a large initiative 
 always carried by turn-children of it: a constraint core imposes, not a style
 choice.)
 
+**Every surface a conversation presents is branded.** A conversation reaches the
+operator through surfaces — the name of the role that holds it, the path of the
+document it points at, the type of the bead it files, the subject line of the
+turn — and each one is a chance to pre-load the mental model before any content
+is read. A recognizable brand states the scope, the shape of the exchange, and
+what to bring to it, so the operator arrives at the actual question instead of
+re-orienting first; a generic surface forces that re-orientation every time.
+This is *Agents earn every interaction* applied to the packaging rather than the
+content, and it carries a bar: state a new surface's brand in one sentence, or
+do not add the surface.
+
+**A domain earns a standing agent by needing all three hats.** Roles are cheap
+and disposable by design — an agent exists when routed work summons it and
+drains when the work is done — so a *resident* agent dedicated to one domain has
+to justify the exception. The test is whether the domain needs three things at
+once: a **partner** that answers when asked and records decisions as they land;
+an **active** watch that patrols for drift between what is written and what is
+true, and promotes decisions made in passing into durable records before anyone
+asks; and a **library** that knows what artifacts exist, where they live, and
+how to retrieve the relevant ones fast. Only the first survives as a molecule —
+patrolling and indexing are continuous, and nothing continuous can live in a
+role that exists only between claim and drain. One hat is a molecule; all three
+have earned an agent.
+
 **Status.** The shipped realization (epic `tk-q4xaj`, closed) is a resident
 single-bead host plus an attention board. The continuation-group model above is
 the ratified *direction* (`tk-h9pq5`, in design), chosen because it is built from
@@ -185,6 +209,18 @@ flowchart TD
     conv -->|"operator decides"| auto
     auto --> landed([landed · the bead closes])
 ```
+
+**How a bead finally lands is the rig's choice, and the pack's opinions do not
+depend on it.** That last step — a fast-forward onto the target, a merge
+request, a pull request, whatever a runtime adds next — is configured per rig,
+and nothing here should read as assuming one. What that agnosticism does *not*
+claim is that the strategies are interchangeable: they gate differently. A
+merge-request path routes landing through the check set; a direct path
+fast-forwards onto the target, where there is no set to be green. So the pack
+stays strategy-neutral in its opinions and is deliberately non-neutral wherever
+a check has to hold — code an agent produces on its own initiative is pinned to
+the gated path rather than left to the rig's default. Agnosticism is
+portability of the pack's opinions, not equivalence of the paths.
 
 ## The molecule-check interlock
 
