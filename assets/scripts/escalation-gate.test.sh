@@ -31,10 +31,25 @@
 #   (ROLLBACKRACE) ...but only while the stamp is still the one THIS run wrote. A
 #              peer that mailed and stamped in between must keep its record, or
 #              the rollback erases the evidence of a delivered escalation
-#   (ROLLBACKFAIL) and when the rollback itself fails, SAY SO: the stamp remains
-#              and the anchor will be suppressed for a cooldown, so a log line
-#              claiming "rolled back, next cycle retries" is the opposite of the
-#              state an operator is in
+#   (ROLLBACKFAIL) and when the rollback itself fails, SAY SO: the stamp remains,
+#              so a log line claiming "rolled back, next cycle retries" is the
+#              opposite of the state an operator is in
+#   (PENDING)  ...and the stamp that remains must not read as a delivered notice.
+#              Stamp-first means every stamp precedes its mail, so it records its
+#              own delivery state: pending until `gc mail send` returns 0. An
+#              unconfirmed stamp re-escalates inside the cooldown — otherwise
+#              ORPHAN_CLOSED reads the suppression as "the mayor was told" and
+#              spends its one-shot close on a notice nobody received
+#   (FUTURE)   a stamp dated ahead of now has a NEGATIVE age, which is below every
+#              cooldown, so it suppresses until that date arrives — a stamp from
+#              next month mutes the anchor for a month. Corrupt, not recent
+#   (SKEW)     ...but seconds of clock skew between two hosts is ordinary, and
+#              re-escalating on that would be the storm sourced from the clocks
+#   (ACQUIREFAIL) `mkdir` succeeding does not mean a file can be created inside.
+#              An ignored owner-write failure left this run believing it held a
+#              lock that named NOBODY — classified "unknown", governed by age, so
+#              a peer proceeded unserialized into the same section, and
+#              release_lock could not remove it either
 #   (NOANCHOR) unreadable anchor -> nowhere to bound the escalation -> no mail
 #   (CORRUPT)  a malformed prior stamp -> re-escalates and rewrites it well-formed
 #              (treating it as "recent" would mute the anchor forever)
@@ -248,6 +263,11 @@ seed_prior() { # <state> <epoch> — a prior stamp for <state>, aged to <epoch>
   reset
   printf 'su-lou.10.8|escalated.witness|%s@%s\n' "$token" "$2" > "$GATE_STATE/meta"
 }
+seed_pending() { # <state> <epoch> — the same, but delivery was never confirmed
+  local token; token=$(token_for "$1")
+  reset
+  printf 'su-lou.10.8|escalated.witness|%s@%s.pending\n' "$token" "$2" > "$GATE_STATE/meta"
+}
 
 # A backgrounded gate run is "inside the critical section" once its lock carries
 # an owner. The lock cases poll for that rather than sleeping a guessed interval,
@@ -425,11 +445,34 @@ case "$out" in
   *"--unset-metadata escalated.witness"*) ok "ROLLBACKFAIL: names the key to clear" ;;
   *)                                      bad "ROLLBACKFAIL: names the key to clear (got '$out')" ;;
 esac
-# ...and the suppression it warns about is real, which is why the warning has to
-# be the honest one: the next cycle finds the stamp of a mail nobody received.
+# THE PRE-OPEN SIGNOFF ROUND 3 FINDING. The stamp that survives is the record of a
+# mail NOBODY RECEIVED, and it used to be indistinguishable from a delivered one:
+# the next cycle suppressed on it for a full cooldown, and ORPHAN_CLOSED — which
+# reads a suppression as "the mayor was told on an earlier cycle" — closed the bead
+# on that non-notice. Neither the mail nor the undo can be repaired here (the write
+# is what is failing), so the stamp carries its own delivery state and this one
+# stayed `.pending`.
+case "$(stamp_of su-lou.10.8 witness)" in
+  *.pending) ok "ROLLBACKFAIL: the surviving stamp is marked pending, not delivered" ;;
+  *)         bad "ROLLBACKFAIL: the surviving stamp must be pending (got '$(stamp_of su-lou.10.8 witness)')" ;;
+esac
+case "$out" in
+  *"SUPPRESSED until"*) bad "ROLLBACKFAIL: still warns of a suppression the pending stamp prevents" ;;
+  *"RE-ESCALATES"*)     ok  "ROLLBACKFAIL: says the next cycle re-escalates instead" ;;
+  *)                    bad "ROLLBACKFAIL: reports what the next cycle will do (got '$out')" ;;
+esac
+: > "$GATE_STATE/calls"
+out=$(run "PR #35 stranded" --state "abc123" 2>&1)
+eq "$(mails)" "1" "ROLLBACKFAIL: the next cycle RE-ESCALATES rather than suppressing on an undelivered stamp"
+case "$out" in
+  *pending*) ok "ROLLBACKFAIL: and says why it did not suppress" ;;
+  *)         bad "ROLLBACKFAIL: names the pending stamp as its reason (got '$out')" ;;
+esac
+# ...and that re-send converges: it is delivered, so the stamp is promoted and the
+# cycle after it goes quiet. Re-escalating forever would be the storm.
 : > "$GATE_STATE/calls"
 run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
-eq "$(mails)" "0" "ROLLBACKFAIL: the next cycle really is suppressed, as warned"
+eq "$(mails)" "0" "ROLLBACKFAIL: the delivered re-send converges — the cycle after it is suppressed"
 
 # --- NOANCHOR -----------------------------------------------------------------
 reset
@@ -446,12 +489,99 @@ eq "$(mails)" "1" "CORRUPT: a malformed stamp re-escalates rather than muting fo
 eq "$(stamp_of su-lou.10.8 witness)" "$TOKEN_ABC@$(stamp_of su-lou.10.8 witness | sed 's/.*@//')" \
    "CORRUPT: and is rewritten well-formed, so it converges after one mail"
 
+# --- PENDING ------------------------------------------------------------------
+# A stamp is written BEFORE the mail, so between those two writes it records an
+# escalation that may never have gone out. If the send fails the stamp is rolled
+# back — unless that write fails too (ROLLBACKFAIL), and then a stamp for a mail
+# nobody received is what every later cycle reads. Suppressing on it is not just a
+# lost mail: ORPHAN_CLOSED reads a suppression as "the mayor was told" and spends
+# its one-shot `gc bd close` on it. So the stamp records its own delivery state,
+# and an unconfirmed one re-escalates INSIDE the cooldown.
+seed_pending "abc123" "$NOW"
+out=$(run "PR #35 stranded" --state "abc123" 2>&1)
+eq "$(mails)" "1" "PENDING: an undelivered prior stamp re-escalates inside the cooldown"
+case "$out" in
+  *pending*) ok "PENDING: and names the unconfirmed delivery as the reason" ;;
+  *)         bad "PENDING: names its reason (got '$out')" ;;
+esac
+case "$(stamp_of su-lou.10.8 witness)" in
+  *.pending) bad "PENDING: the delivered re-send left the stamp pending" ;;
+  *)         ok  "PENDING: a delivered re-send promotes the stamp out of pending" ;;
+esac
+# The control: the SAME state and epoch, delivered, is suppressed. Without this the
+# case above would pass just as well if pending had been ignored and something else
+# were forcing the mail.
+seed_prior "abc123" "$NOW"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+eq "$(mails)" "0" "PENDING: a DELIVERED stamp of the same age still suppresses"
+
+# ...and the promotion is a second write that lands AFTER the mail, never before:
+# promoting first would record a delivery that had not happened yet, which is the
+# whole defect wearing the fix's clothes.
+reset
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+mail_at=$(grep -n '^mail send' "$GATE_STATE/calls" | head -1 | cut -d: -f1)
+promote_at=$(grep -n '^bd update' "$GATE_STATE/calls" | tail -1 | cut -d: -f1)
+eq "$(updates)" "2" "PENDING: one escalation writes twice — the pending stamp and its promotion"
+[ -n "$mail_at" ] && [ "$promote_at" -gt "$mail_at" ] \
+  && ok "PENDING: the promotion follows the mail it records" \
+  || bad "PENDING: promotion must follow the mail (mail@${mail_at:-none} promote@${promote_at:-none})"
+
+# A mail that lands while the promotion fails: the notice IS out, so the worst
+# available outcome is one duplicate — never a lost notice, and it converges as
+# soon as a write succeeds.
+reset
+touch "$GATE_STATE/refuse_rollback"   # refuses the run's SECOND update: the promotion
+out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+rm -f "$GATE_STATE/refuse_rollback"
+eq "$rc" "0" "PENDING: a failed promotion does not turn a delivered mail into a failure"
+eq "$(mails)" "1" "PENDING: the mail went out"
+case "$out" in
+  *"DELIVERED but"*) ok "PENDING: says the mail landed but the stamp did not promote" ;;
+  *)                 bad "PENDING: reports the failed promotion (got '$out')" ;;
+esac
+: > "$GATE_STATE/calls"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+eq "$(mails)" "1" "PENDING: the next cycle re-sends once rather than trusting an unconfirmed stamp"
+: > "$GATE_STATE/calls"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+eq "$(mails)" "0" "PENDING: and then converges — the duplicate is bounded at one"
+
+# --- FUTURE / SKEW ------------------------------------------------------------
+# A stamp dated ahead of now yields a NEGATIVE age, which is smaller than any
+# cooldown — so an unchanged situation reads as "escalated recently" on every cycle
+# until that timestamp actually arrives. A stamp from next month mutes the anchor
+# for a month. Treat a future epoch as corrupt: re-escalate once and rewrite it.
+seed_prior "abc123" "$((NOW + 2592000))"
+out=$(run "PR #35 stranded" --state "abc123" 2>&1)
+eq "$(mails)" "1" "FUTURE: a stamp dated a month ahead re-escalates instead of muting until then"
+case "$out" in
+  *FUTURE*) ok "FUTURE: says the stamp was in the future" ;;
+  *)        bad "FUTURE: explains itself (got '$out')" ;;
+esac
+case "$(stamp_of su-lou.10.8 witness)" in
+  *"@$((NOW + 2592000))"*) bad "FUTURE: the future stamp survived — the next cycle mutes again" ;;
+  *)                       ok  "FUTURE: and is rewritten, so it converges after one mail" ;;
+esac
+: > "$GATE_STATE/calls"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+eq "$(mails)" "0" "FUTURE: the rewritten stamp suppresses normally"
+
+# The other direction: stamps are written by whichever host ran the gate, so a few
+# seconds of clock skew between two of them is ordinary. Treating THAT as corrupt
+# would re-escalate every cycle for as long as the skew lasts — the storm again,
+# sourced from the clocks. Inside the grace it still suppresses.
+seed_prior "abc123" "$((NOW + 60))"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+eq "$(mails)" "0" "SKEW: a stamp seconds ahead is clock skew, not corruption — still suppressed"
+
 # --- FORCE --------------------------------------------------------------------
 reset
 printf 'su-lou.10.8|escalated.witness|%s@%s\n' "$TOKEN_ABC" "$NOW" > "$GATE_STATE/meta"
 run "PR #35 stranded" --state "abc123" --force >/dev/null 2>&1
 eq "$(mails)" "1" "FORCE: bypasses an in-cooldown suppression"
-eq "$(updates)" "1" "FORCE: still stamps"
+# Two writes, one escalation: the pending stamp and its promotion to delivered.
+eq "$(updates)" "2" "FORCE: still stamps"
 
 # --- DRY ----------------------------------------------------------------------
 reset
@@ -504,7 +634,16 @@ b=$!
 wait "$a"; wait "$b"
 rm -f "$GATE_STATE/slow_show"
 eq "$(mails)" "1" "PARALLEL: two simultaneous first escalations send exactly ONE mail"
-eq "$(updates)" "1" "PARALLEL: and stamp exactly once"
+# One ESCALATION, which is two writes: the pending stamp that licenses the mail
+# and the promotion that records it delivered (see PENDING below). The loser of
+# the race writes neither — it suppresses on the winner's stamp — so a third write
+# here would mean both runs entered the section.
+eq "$(updates)" "2" "PARALLEL: and one escalation's worth of writes, not two"
+case "$(stamp_of su-lou.10.8 witness)" in
+  *.pending) bad "PARALLEL: the surviving stamp is still pending — the delivered promotion was lost" ;;
+  '')        bad "PARALLEL: no stamp survived the race" ;;
+  *)         ok  "PARALLEL: the surviving stamp records a DELIVERED escalation" ;;
+esac
 # The serialization must not wedge the anchor: real news on the next cycle still
 # gets through.
 : > "$GATE_STATE/calls"
@@ -784,6 +923,48 @@ out=$(GC_ESCALATION_GATE_LOCKDIR=/dev/null/nope run "PR #35 stranded" --state "a
 eq "$rc" "0" "LOCKFREE: an unusable lock root is not fatal"
 eq "$(mails)" "1" "LOCKFREE: the escalation is still delivered"
 case "$out" in *UNSERIALIZED*) ok "LOCKFREE: warns that it proceeded unserialized" ;; *) bad "LOCKFREE: warns (got '$out')" ;; esac
+
+# --- ACQUIREFAIL --------------------------------------------------------------
+# `mkdir` succeeding says the NAME was free; it says nothing about whether a file
+# can be created inside (a full filesystem, a lock root whose mode denies it). The
+# owner write's failure used to be ignored, which produced the worst of both
+# states: this run believed it held the lock, and the lock it left named nobody.
+# An ownerless lock is classified "unknown", and unknown is governed by AGE — so a
+# peer inside LOCK_TTL waited out LOCK_WAIT and proceeded UNSERIALIZED into the
+# section this run thought it had to itself, and both mailed the same first
+# escalation. release_lock could not clean it up either (an absent owner never
+# matches LOCK_TOKEN), so it degraded every run for that anchor+kind until the TTL.
+# Verify the owner write, and when it cannot be made, hold nothing and say so.
+NOWRITE="$TMP/nowrite"
+rm -rf "$NOWRITE"; mkdir -p "$NOWRITE/probe"; chmod 0222 "$NOWRITE/probe"
+if (: > "$NOWRITE/probe/x") 2>/dev/null; then
+  # Root ignores the mode bits, so the fixture cannot produce the failure and the
+  # assertions below would pass without exercising anything. Say so out loud.
+  ok "ACQUIREFAIL: SKIPPED — this user can write into a mode-0222 directory (running as root?)"
+else
+  reset
+  # umask 0555 makes the gate's own `mkdir` produce a directory with no search
+  # permission, so the owner write inside it fails while the mkdir succeeded —
+  # exactly the split this case is about. The lock ROOT is created beforehand,
+  # under the normal umask, or the gate would take the unusable-root path instead.
+  ACQFAIL_ROOT="$NOWRITE/locks"; mkdir -p "$ACQFAIL_ROOT"
+  out=$( (umask 0555; GC_ESCALATION_GATE_LOCKDIR="$ACQFAIL_ROOT" \
+          run "PR #35 stranded" --state "abc123" 2>&1) ); rc=$?
+  eq "$rc" "0" "ACQUIREFAIL: a lock it cannot own is not fatal"
+  eq "$(mails)" "1" "ACQUIREFAIL: the escalation is still delivered"
+  case "$out" in
+    *UNSERIALIZED*) ok "ACQUIREFAIL: warns that it proceeded unserialized" ;;
+    *)              bad "ACQUIREFAIL: warns (got '$out')" ;;
+  esac
+  case "$out" in
+    *ownership*) ok "ACQUIREFAIL: names the ownership write as what failed" ;;
+    *)           bad "ACQUIREFAIL: names what failed (got '$out')" ;;
+  esac
+  [ ! -d "$ACQFAIL_ROOT/su-lou.10.8.witness.lock" ] \
+    && ok "ACQUIREFAIL: leaves no ownerless lock behind for peers to wait out" \
+    || bad "ACQUIREFAIL: an ownerless lock survives at $ACQFAIL_ROOT/su-lou.10.8.witness.lock"
+fi
+chmod 0755 "$NOWRITE/probe" 2>/dev/null; rm -rf "$NOWRITE"
 
 # --- UNSUBSTITUTED ------------------------------------------------------------
 # mol-witness-patrol is poured --root-only with only binding_prefix as a --var,

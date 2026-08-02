@@ -1,8 +1,18 @@
 description = """
 Witness patrol loop. Poured as a root-only wisp on startup:
 
-  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}'
+  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var escalation_cooldown='{{escalation_cooldown}}'
   gc bd update $WISP --assignee=$GC_AGENT
+
+Pass EVERY declared var on that pour, not just binding_prefix. `--root-only`
+materializes no defaults, so a var the pour omits reaches the wisp
+unrendered and the cycle runs on whatever fallback its consumer happens to
+have. The startup and crash-recovery pours live in the witness agent
+template (`template-fragments/layered-startup-discovery.template.md`,
+markers `patrol-wisp-vars` / `patrol-wisp-fallback`), which reads the
+defaults back out of this file via `gc formula show --json` rather than
+retyping them; `next-iteration` forwards them for every cycle after the
+first.
 
 Those are TWO writes, and the gap between them is load-bearing: a wisp
 poured but not assigned belongs to nobody, so it never reaches a hook and
@@ -168,6 +178,18 @@ Things that are easy to get wrong:
   notes do contain — and a failed parse leaves `--state` EMPTY, which the
   gate reads as "no state tracked" and suppresses real news for a whole
   cooldown. A lost parse must not look like a lost fingerprint.
+- **Never pass an EMPTY `--state` when you meant to track state, and never
+  substitute a differently-shaped one on the same `--kind`.** Both are the
+  same mistake at different depths. Empty is a real fingerprint meaning
+  "no state tracked", so it gets stamped durably and the cooldown alone
+  governs from then on. A substitute (the bead's fields standing in for a
+  PR's, because `gh pr view` failed) compares unequal in BOTH directions,
+  so the item mails when the outage starts and again when it ends — a flap
+  through the cooldown, driven by an outage rather than by news. When the
+  fingerprint you meant to build is unavailable, send that observation on
+  its own channel — `--kind witness-degraded`, with a value naming what is
+  unavailable and nothing that varies while it is — and leave the real
+  channel's stamp alone. Step `check-refinery` does this; copy that shape.
 - **Never put a timestamp in `--state` — least of all the anchor's own
   `updated_at`.** The gate stamps `escalated.<kind>` ON THE ANCHOR before
   it mails, and that write bumps the anchor's `updated_at`. A fingerprint
@@ -666,7 +688,20 @@ If the work is already on main:
   it stays assigned to the dead agent, so it is re-detected rather than
   re-dispatched, and the next pass retries both the notice and the close.
   Note a SUPPRESSED verdict still exits 0 and still means "the mayor was
-  told" (on an earlier cycle, for this same state), so it closes normally:
+  told" (on an earlier cycle, for this same state), so it closes normally.
+
+  **That reading is only sound because the gate records DELIVERY, not just
+  the attempt.** A stamp is written before its mail — that ordering is what
+  bounds the storm — so between the two writes it records an escalation
+  that may never go out, and if the send fails AND the rollback fails (same
+  `gc bd update` path, so one broken store breaks both) the stamp survives
+  for a mail nobody received. This block would then read the next cycle's
+  suppression as "the mayor was told" and spend its one-shot close on a
+  non-notice: bead closed, orphan condition gone, mayor never told, nothing
+  left to re-derive it. So the stamp carries `.pending` until `gc mail send`
+  returns 0, and the gate re-escalates on a pending stamp instead of
+  suppressing. If you ever gate another irreversible transition on a
+  suppression, that is the property you are relying on:
 ```bash
 # >>> escalation-wiring-orphan-closed
 SCRIPTS_DIR=""
@@ -1016,20 +1051,41 @@ done
 # which would eat the backslashes and ship something other than what you read here.
 ROW=$(gc bd show <bead> --json 2>/dev/null | tr -d '[:cntrl:]')
 PR=$(printf '%s' "$ROW" | jq -r '.[0].metadata.pr_number // empty' 2>/dev/null)
-STATE=""
-[ -n "$PR" ] && STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
-[ -z "$STATE" ] && STATE=$(printf '%s' "$ROW" | jq -r '.[0] | [
-  (.status // "-"),
-  (.metadata.merge_result // "-"),
-  (.metadata.branch // "-"),
-  (.metadata.merged_target // .metadata.target // "-"),
-  ((.metadata | to_entries | map(select(.key | startswith("check."))) | sort_by(.key) | map(.key + "=" + (.value | tostring)) | join(",")) as $c | if $c == "" then "-" else $c end)
-] | join("/")' 2>/dev/null)
+# ONE CHANNEL, ONE SHAPE OF FINGERPRINT. A PR-backed anchor is fingerprinted from
+# the PR; an anchor with no PR from the bead. They are NOT substitutes for each
+# other: sending the bead one on the PR one's channel compares unequal in both
+# directions, so a `gh` outage mails when it starts AND again when it ends —
+# a flap through the cooldown driven by GitHub's availability, not by news. And a
+# fingerprint that came out EMPTY is worse still: the gate reads empty as "no state
+# tracked", stamps it durably, and then holds every real change for a full
+# cooldown. So a degraded read moves to its OWN kind, where it dedups against its
+# own history and leaves the real channel's stamp — and the cooldown riding on it —
+# untouched.
+KIND=witness
+if [ -n "$PR" ]; then
+  STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
+else
+  STATE=$(printf '%s' "$ROW" | jq -r '.[0] | [
+    (.status // "-"),
+    (.metadata.merge_result // "-"),
+    (.metadata.branch // "-"),
+    (.metadata.merged_target // .metadata.target // "-"),
+    ((.metadata | to_entries | map(select(.key | startswith("check."))) | sort_by(.key) | map(.key + "=" + (.value | tostring)) | join(",")) as $c | if $c == "" then "-" else $c end)
+  ] | join("/")' 2>/dev/null)
+fi
+if [ -z "$STATE" ]; then
+  # The fingerprint we meant to build is unavailable. Name WHAT is unavailable, and
+  # nothing that varies while it is: a constant degraded fingerprint mails once and
+  # then rides its own cooldown for as long as the outage lasts, instead of
+  # chattering on whatever incidental field still happens to be readable.
+  KIND=witness-degraded
+  if [ -n "$PR" ]; then STATE="unavailable/gh/pr-$PR"; else STATE="unavailable/bead/<bead>"; fi
+fi
 BODY="Work bead IDs: <ids>
 Observation: <what you found>
 Recommendation: <what should happen>"
 if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"; then
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --kind "$KIND" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"; then
     echo "witness: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
   fi
 else
@@ -1055,10 +1111,34 @@ retarget entirely — in both cases the fingerprint stops distinguishing two
 genuinely different situations and the gate holds real news for a full
 cooldown.
 
-The bead fingerprint is also the fallback when `gh pr view` fails or
-returns nothing, so a GitHub hiccup degrades to a coarser fingerprint
-rather than to an EMPTY one, which would read as "no state tracked" and
-mute real news until the cooldown.
+**The two fingerprints are not substitutes for each other.** The bead
+fingerprint used to double as the fallback when `gh pr view` failed, on
+the reasoning that a coarser fingerprint beats an EMPTY one (empty reads
+as "no state tracked" and mutes real news until the cooldown). Both halves
+are true and the conclusion still did not follow: the gate compares each
+`--state` against the last one sent on the same `--kind`, so an unchanged
+PR compares unequal when the substitute appears AND unequal again when the
+real one comes back. One `gh` hiccup therefore bought two mails and reset
+the cooldown twice, on a PR that never moved — a flap driven by GitHub's
+availability rather than by any news, which is the storm arriving through
+the mechanism built to stop it.
+
+So a fingerprint that cannot be built the usual way moves to its own
+channel, `--kind witness-degraded`, and says only what is unavailable
+(`unavailable/gh/pr-<n>`). That value is CONSTANT for as long as the
+outage lasts, so the degraded channel mails once and then rides its own
+cooldown; the real channel's stamp is never overwritten, so when `gh`
+recovers the comparison is against the last PR fingerprint actually
+observed and an unchanged PR stays quiet. The cost is bounded at one extra
+mail per cooldown while an outage lasts, and the witness still hears that
+it has gone partly blind — which is itself worth one mail.
+
+**Never call the gate with an empty `--state` from here.** Empty is a
+legitimate fingerprint meaning "no state tracked", and the gate stamps it
+durably: a step that MEANT to track state and failed would mark the anchor
+stateless and suppress every real change until the cooldown. Both arms
+above therefore end in a non-empty value by construction — a real
+fingerprint, or a degraded one on the degraded channel.
 
 **`updated_at` is deliberately NOT in that fingerprint.** The gate stamps
 `escalated.<kind>` on this same anchor before mailing, so including
