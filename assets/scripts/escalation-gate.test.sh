@@ -13,6 +13,10 @@
 #              subject every cycle
 #   (CHANGED)  a different state fingerprint -> mails again immediately; the gate
 #              hides repetition, never news
+#   (COLLIDE)  two DIFFERENT raw states that render to the same display-safe
+#              label ("abc/123" and "abc 123") must still compare as different.
+#              A lossy token would suppress them as identical — the mute the
+#              state fingerprint exists to prevent, wearing the gate's badge
 #   (COOLDOWN) unchanged state older than --cooldown -> mails again, so an item
 #              stuck for days resurfaces instead of going silent forever
 #   (ORDER)    the stamp is written BEFORE the mail — the ability to record the
@@ -34,6 +38,9 @@
 #              read — a lost parse would look like a lost stamp and mail EVERY
 #              cycle, which is the original bug
 #   (USAGE)    missing required arguments -> exit 2, nothing sent
+#   (KINDSAFE) --kind becomes the metadata KEY `escalated.<kind>`, so a value
+#              carrying '=' or whitespace would write a key nothing can read
+#              back — the channel would stop deduplicating silently
 #   (ARGEND)   THE HANG: a value-taking option LAST in argv used to leave argv
 #              untouched (`shift 2` fails without `set -e`) and spin the parse
 #              loop forever. Every such option must exit 2 instead — a patrol
@@ -130,15 +137,43 @@ mails()   { count_calls '^mail send'; }
 updates() { count_calls '^bd update'; }
 run() { "$SCRIPT" --anchor su-lou.10.8 --subject "$1" --body "b" "${@:2}"; }
 
+# The stamp value is `<token>@<epoch>`. Cases that seed a PRIOR stamp need the
+# token the gate would have written for a given --state — derived by RUNNING the
+# gate once, never by re-implementing its token format here. A test that
+# recomputes the format seeds whatever the format used to be, so it keeps passing
+# through exactly the change it should have caught.
+token_for() { # <state> -> token
+  reset
+  run "token probe" --state "$1" >/dev/null 2>&1
+  local cur; cur=$(stamp_of su-lou.10.8 witness)
+  printf '%s' "${cur%@*}"
+}
+seed_prior() { # <state> <epoch> — a prior stamp for <state>, aged to <epoch>
+  local token; token=$(token_for "$1")
+  reset
+  printf 'su-lou.10.8|escalated.witness|%s@%s\n' "$token" "$2" > "$GATE_STATE/meta"
+}
+
 NOW=$(date +%s)
+TOKEN_ABC=$(token_for "abc123")
 
 # --- FIRST --------------------------------------------------------------------
 reset
 out=$(run "PR #35 stranded" --state "abc123/APPROVED/BLOCKED" 2>&1); rc=$?
 eq "$rc" "0" "FIRST: exits 0"
 eq "$(mails)" "1" "FIRST: mails once"
-eq "$(stamp_of su-lou.10.8 witness)" "abc123-APPROVED-BLOCKED@$(stamp_of su-lou.10.8 witness | sed 's/.*@//')" \
-   "FIRST: stamp is <sanitized-state>@<epoch>"
+stamp=$(stamp_of su-lou.10.8 witness)
+case "$stamp" in
+  abc123-APPROVED-BLOCKED.*@*) ok "FIRST: stamp is <readable-label>.<digest>@<epoch>" ;;
+  *) bad "FIRST: stamp is <readable-label>.<digest>@<epoch> (got '$stamp')" ;;
+esac
+# The label is decoration; the digest is what the comparison turns on, and it is
+# taken over the RAW --state — not over the label it was rendered into.
+if command -v sha256sum >/dev/null 2>&1; then
+  want=$(printf '%s' "abc123/APPROVED/BLOCKED" | sha256sum | awk '{print $1}' | cut -c1-16)
+  got=${stamp%@*}; got=${got##*.}
+  eq "$got" "$want" "FIRST: the deciding half is a digest of the raw --state"
+fi
 case "$out" in *ESCALATED*) ok "FIRST: reports ESCALATED" ;; *) bad "FIRST: reports ESCALATED (got '$out')" ;; esac
 
 # --- SUPPRESS -----------------------------------------------------------------
@@ -169,14 +204,28 @@ eq "$(mails)" "1" "DRIFT: five reframings of one situation produce exactly ONE m
 run "PR #35 head moved" --state "def456/APPROVED/BLOCKED" >/dev/null 2>&1
 eq "$(mails)" "1" "CHANGED: a new state fingerprint re-escalates at once"
 
-# --- COOLDOWN -----------------------------------------------------------------
+# --- COLLIDE ------------------------------------------------------------------
+# Two DIFFERENT situations whose display-safe renderings are identical: '/' and
+# ' ' both collapse to '-', so a token built from that rendering compares them
+# EQUAL and suppresses the second. The gate would then be hiding news, which is
+# the one thing it must never do — and silently, which is worse than the storm.
 reset
-printf 'su-lou.10.8|escalated.witness|abc123@%s\n' "$((NOW - 90000))" > "$GATE_STATE/meta"
+run "PR #35 stranded" --state "abc/123" >/dev/null 2>&1
+: > "$GATE_STATE/calls"
+run "PR #35 moved on" --state "abc 123" >/dev/null 2>&1
+eq "$(mails)" "1" "COLLIDE: states that RENDER alike but differ raw still re-escalate"
+# ...while a genuinely identical state is still suppressed, so the fix did not
+# simply make every comparison unequal.
+: > "$GATE_STATE/calls"
+run "PR #35 still there" --state "abc 123" >/dev/null 2>&1
+eq "$(mails)" "0" "COLLIDE: an identical raw state is still suppressed"
+
+# --- COOLDOWN -----------------------------------------------------------------
+seed_prior "abc123" "$((NOW - 90000))"
 run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "COOLDOWN: unchanged but older than 24h re-escalates"
 
-reset
-printf 'su-lou.10.8|escalated.witness|abc123@%s\n' "$((NOW - 90000))" > "$GATE_STATE/meta"
+seed_prior "abc123" "$((NOW - 90000))"
 run "PR #35 stranded" --state "abc123" --cooldown 172800 >/dev/null 2>&1
 eq "$(mails)" "0" "COOLDOWN: a longer --cooldown still suppresses it"
 
@@ -227,12 +276,12 @@ reset
 printf 'su-lou.10.8|escalated.witness|garbage-no-epoch\n' > "$GATE_STATE/meta"
 run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "CORRUPT: a malformed stamp re-escalates rather than muting forever"
-eq "$(stamp_of su-lou.10.8 witness)" "abc123@$(stamp_of su-lou.10.8 witness | sed 's/.*@//')" \
+eq "$(stamp_of su-lou.10.8 witness)" "$TOKEN_ABC@$(stamp_of su-lou.10.8 witness | sed 's/.*@//')" \
    "CORRUPT: and is rewritten well-formed, so it converges after one mail"
 
 # --- FORCE --------------------------------------------------------------------
 reset
-printf 'su-lou.10.8|escalated.witness|abc123@%s\n' "$NOW" > "$GATE_STATE/meta"
+printf 'su-lou.10.8|escalated.witness|%s@%s\n' "$TOKEN_ABC" "$NOW" > "$GATE_STATE/meta"
 run "PR #35 stranded" --state "abc123" --force >/dev/null 2>&1
 eq "$(mails)" "1" "FORCE: bypasses an in-cooldown suppression"
 eq "$(updates)" "1" "FORCE: still stamps"
@@ -260,8 +309,8 @@ eq "$(mails)" "1" "KIND: a different channel escalates independently"
 # every cycle — the original bug wearing a disguise. `tr -d` must strip them
 # before jq sees them.
 reset
-printf '[{"id":"su-lou.10.8","metadata":{"escalated.witness":"abc123@%s"},"notes":"line\001two\002three"}]' "$NOW" \
-  > "$GATE_STATE/raw_show"
+printf '[{"id":"su-lou.10.8","metadata":{"escalated.witness":"%s@%s"},"notes":"line\001two\002three"}]' \
+  "$TOKEN_ABC" "$NOW" > "$GATE_STATE/raw_show"
 out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
 eq "$rc" "0" "CTRL: survives control characters in the bead payload"
 eq "$(mails)" "0" "CTRL: still sees the prior stamp and suppresses"
@@ -284,6 +333,25 @@ reset
 "$SCRIPT" --anchor a --subject s >/dev/null 2>&1; eq "$?" "2" "USAGE: --body is required"
 "$SCRIPT" --anchor a --subject s --body b --cooldown soon >/dev/null 2>&1; eq "$?" "2" "USAGE: --cooldown must be numeric"
 eq "$(mails)" "0" "USAGE: nothing is ever sent on a usage error"
+
+# --- KINDSAFE -----------------------------------------------------------------
+# --kind becomes the metadata KEY `escalated.<kind>`, written as
+# `--set-metadata "<key>=<value>"`. A kind with '=' splits the pair at the wrong
+# place and one with whitespace lands a key no reader addresses — either way the
+# stamp cannot be read back, every cycle looks like a first escalation, and the
+# storm returns silently. Reject it as a usage error, before anything is sent.
+reset
+"$SCRIPT" --anchor su-lou.10.8 --subject s --body b --state abc --kind "witness queue" >/dev/null 2>&1
+eq "$?" "2" "KINDSAFE: whitespace in --kind is a usage error"
+"$SCRIPT" --anchor su-lou.10.8 --subject s --body b --state abc --kind "a=b" >/dev/null 2>&1
+eq "$?" "2" "KINDSAFE: '=' in --kind is a usage error"
+eq "$(mails)" "0" "KINDSAFE: nothing is sent on a malformed channel"
+eq "$(updates)" "0" "KINDSAFE: and nothing is stamped under an unreadable key"
+# The shapes real callers use must keep working.
+reset
+"$SCRIPT" --anchor su-lou.10.8 --subject s --body b --state abc --kind refinery.queue >/dev/null 2>&1
+eq "$?" "0" "KINDSAFE: a dotted channel name is still valid"
+eq "$(mails)" "1" "KINDSAFE: and is delivered"
 
 # --- ARGEND (the hang) --------------------------------------------------------
 # A value-taking option at the END of argv had no $2, so `shift 2` failed and —
