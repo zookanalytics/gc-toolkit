@@ -41,7 +41,7 @@ set -euo pipefail
 # park ends with the banner: below it there is only TUI chrome (prompt box,
 # status line), 6-8 lines in both CLIs. Anything further up is history — an
 # agent that *mentioned* a limit and kept working. The wider capture is what
-# the busy check and the escalation excerpt read.
+# the busy check reads.
 PEEK_LINES="${QUOTA_PARK_PEEK_LINES:-20}"
 TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 
@@ -63,10 +63,19 @@ TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 # session that is working fine. A provider we have not met goes in
 # $QUOTA_PARK_MATCH (or extends this list) rather than back into a bare form.
 #
+# The reset-clause alternative carries the same possessive anchor for the same
+# reason, and it is the second time that lesson has been paid for: the bare
+# `limit will reset at` it replaces survived the round that tightened the other
+# subject-less alternative, and matched `Error: API rate limit will reset at
+# 18:00 UTC.` on an idle pane — a working session, nudged every cycle. A
+# provider saying it says "your … limit will reset at"; a tool error does not.
+# Nothing here reads the time itself (rule 2 above) — the clause is only ever
+# evidence that the line is a banner.
+#
 # Held in a plain variable first: an ERE interval like {0,24} inside a
 # ${VAR:-default} would close the expansion at its own brace and silently ship
 # a truncated pattern.
-DEFAULT_MATCH='(hit|reached|exceeded) your [a-z0-9 -]{0,24}limit|(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit (reached|exceeded)|/usage-credits|limit will reset at'
+DEFAULT_MATCH='(hit|reached|exceeded) your [a-z0-9 -]{0,24}limit|(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit (reached|exceeded)|/usage-credits|your [a-z0-9 -]{0,24}limit will reset'
 MATCH_RE="${QUOTA_PARK_MATCH:-$DEFAULT_MATCH}"
 
 # Busy markers — an agent mid-turn is not parked, whatever its pane text says.
@@ -147,6 +156,46 @@ duration() {
     if [ "$s" -lt 3600 ]; then echo "$((s / 60))m"; else echo "$((s / 3600))h$(( (s % 3600) / 60 ))m"; fi
 }
 
+# The lines of a pane a banner may legitimately sit on: the tail window, minus
+# citations. Both the park test and the detector class read the same set — a
+# second copy of this filter chain would drift out of agreement with the test
+# that decides whether a session is parked at all.
+banner_candidates() {
+    printf '%s\n' "$1" | tail -n "$TAIL_LINES" | grep -vE -- "$CITATION_RE" || true
+}
+
+# Which family of banner matched, as a label from a CLOSED set. This is the
+# only thing the escalation mail says about what was on screen.
+#
+# The pane is untrusted. It holds whatever the agent printed, and an agent can
+# print text shaped like an operator directive; mail is durable and the mayor
+# reads it as an authenticated channel. An excerpt of the pane in the body
+# therefore launders attacker-reachable text into that channel, which is what
+# the earlier version of this escalation did by mailing the last 8 lines. The
+# body now carries only alias, id, age, attempts, and this label — every one of
+# them from the session list or this script's own state file.
+#
+# Deliberately coarse, and independent of DEFAULT_MATCH's exact alternatives:
+# the label has to survive that pattern being extended or overridden, and
+# falling through to the generic form costs a human nothing. What it must never
+# do is emit a byte of pane text. Classified over only the lines that actually
+# matched, so an unrelated line in the tail cannot pick the label.
+detector_class() {
+    local lines
+    lines="$(banner_candidates "$1" | grep -Ei -- "$MATCH_RE" || true)"
+    if [ -n "${QUOTA_PARK_MATCH:-}" ]; then
+        echo "custom-match"
+    elif printf '%s\n' "$lines" | grep -qEi -- 'your [a-z0-9 -]{0,24}limit'; then
+        echo "possessive-limit"
+    elif printf '%s\n' "$lines" | grep -qEi -- '(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit'; then
+        echo "named-provider-limit"
+    elif printf '%s\n' "$lines" | grep -qEi -- '/usage-credits'; then
+        echo "usage-credits"
+    else
+        echo "provider-limit"
+    fi
+}
+
 # Both bounds are fed to `[ -gt ]` and to `timeout` itself, so a non-numeric
 # override (a stray "15s", an empty string from a templated env) would abort the
 # sweep under `set -e` — i.e. a typo in a tuning knob would silently disable
@@ -212,8 +261,7 @@ while IFS=$'\t' read -r id alias; do
     # the state file is what ends an episode: a recovered agent starts the
     # next block from attempt 1.
     if [ -z "$pane" ] || printf '%s\n' "$pane" | grep -qEi -- "$BUSY_RE" \
-        || ! printf '%s\n' "$pane" | tail -n "$TAIL_LINES" \
-            | grep -vE -- "$CITATION_RE" | grep -qEi -- "$MATCH_RE"; then
+        || ! banner_candidates "$pane" | grep -qEi -- "$MATCH_RE"; then
         rm -f "$state"
         continue
     fi
@@ -259,8 +307,13 @@ while IFS=$'\t' read -r id alias; do
     fi
 
     if [ "$ESCALATE_AFTER" -gt 0 ] && [ "$escalated" != "1" ] && [ "$age" -ge "$ESCALATE_AFTER" ]; then
+        # No pane text in the body — see detector_class. The label stands in for
+        # the excerpt the earlier version mailed: it says which banner family
+        # matched without quoting a pane the agent controls.
         run_bounded gc mail send "$ESCALATE_TO" -s "Quota-parked: $alias for $(duration "$age") [HIGH]" \
             -m "$alias ($id) has shown a provider limit banner for $(duration "$age") and has not resumed after $attempts nudge(s).
+
+Detector class: $(detector_class "$pane")
 
 The session is alive and correct — do NOT file a warrant or kill it; a fresh
 agent hits the same block and the parked one recovers by itself once the
@@ -268,8 +321,8 @@ window reopens. quota-park-nudge keeps retrying on a $((BACKOFF_CAP / 60))m cade
 no action is needed unless the block is unexpected (wrong account, wrong
 plan, a provider outage misreported as a quota block).
 
-Pane tail:
-$(printf '%s\n' "$pane" | tail -8)" >/dev/null 2>&1 \
+The pane itself is deliberately not quoted here: it is untrusted agent output
+and this mail is a durable artifact. Read it directly with: gc session peek $id" >/dev/null 2>&1 \
             && escalated=1 \
             || echo "quota-park-nudge: escalation mail FAILED for $alias ($id)"
     fi

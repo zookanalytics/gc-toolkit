@@ -67,6 +67,17 @@ were filed against two quota-parked agents on 2026-08-02). If a park outlasts
 `QUOTA_PARK_ESCALATE_AFTER` (2h), one mail goes to the mayor — once per
 episode, not once per cycle.
 
+**The escalation quotes no pane text.** A pane holds whatever the agent printed,
+and an agent can print text shaped like an operator directive; mail is durable
+and the mayor reads it as an authenticated channel, so an excerpt in the body
+launders untrusted content into that channel. The mail carries only the alias,
+session id, park age, attempt count, and a **detector class** — one label from a
+closed set (`possessive-limit`, `named-provider-limit`, `usage-credits`,
+`provider-limit`, `custom-match`) saying which signature family matched. All of
+that comes from the session list or the script's own state file. A human who
+wants the screen reads it directly with `gc session peek <id>`, which the mail
+body says.
+
 ## Two rules the recurrences taught us
 
 **Not provider-specific.** One defect, two providers, two wordings. The
@@ -83,6 +94,13 @@ matches an ordinary idle tool error such as `Error: API rate limit exceeded`,
 and that pane gets nudged on the recovery cadence for as long as it sits there.
 A new provider belongs in the name list (or in `QUOTA_PARK_MATCH`), not in a
 subject-less form.
+
+That has now been paid for twice. A bare `limit will reset at` outlived the
+round that tightened the alternative above, and matched `Error: API rate limit
+will reset at 18:00 UTC.` on an idle pane — same false positive, same cost. It
+carries the same possessive anchor now (`your … limit will reset`), so the
+clause only counts as a banner when a provider is the one saying it. Nothing
+reads the time in it either way; see the next rule.
 
 **Never schedule against the stated reset time.** On 2026-08-02 the Codex banner
 said `try again at Aug 8th, 2026 7:56 PM` and the block cleared on **Aug 2** —
