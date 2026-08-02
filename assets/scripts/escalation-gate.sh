@@ -88,6 +88,14 @@
 # verdict on stdout, suppressed ones included, so the patrol log still shows the
 # item is stuck. Silence would trade a mail storm for a blind spot.
 #
+# AT MOST ONCE MEANS AT MOST ONCE CONCURRENTLY TOO. Read prior stamp -> decide ->
+# stamp -> mail is a lost update waiting to happen: two cycles for the same
+# anchor+kind (a patrol overlapping its own next pass, a patrol plus a hand-run
+# gate) can both read "no prior stamp" before either writes, and both mail. So the
+# section runs under a mutex keyed on anchor+kind — see TAKE THE LOCK below for
+# why it is not a `gc`-level compare-and-set, and why every way it can fail
+# resolves toward sending rather than toward silence.
+#
 # GENERALIZES BUT IS NOT YET WIRED ELSEWHERE. Nothing here is witness-specific —
 # the su refinery's two escalations in the same incident are the same defect from
 # the opposite direction, and `--kind refinery` would cover them. That change is
@@ -116,6 +124,11 @@ usage: escalation-gate.sh --anchor <bead-id> --subject <s> --body <b>
   --to        recipient, default "mayor/"
   --force     bypass the gate but still stamp (operator escape hatch)
   --dry-run   print the verdict; write nothing, send nothing
+
+env:
+  GC_ESCALATION_GATE_LOCKDIR  directory holding the per-anchor+kind mutex
+                              (default /tmp/gc-escalation-gate). Set it to
+                              isolate a test run from the live locks.
 
 exit: 0 mailed or suppressed (both correct) · 1 not gated, nothing sent · 2 usage
 USAGE
@@ -228,6 +241,120 @@ esac
 KEY="escalated.$KIND"
 NOW=$(date +%s)
 
+# TAKE THE LOCK.
+#
+# Everything from here to the mail is one critical section — read the prior stamp,
+# decide, stamp, send, roll back on failure — and without serialization two
+# concurrent invocations for the same anchor+kind both read "no prior stamp", both
+# decide "first escalation", and both mail. That is an ordinary lost update, and it
+# breaks the at-most-once property this whole script is for.
+#
+# WHY NOT A gc-LEVEL COMPARE-AND-SET. `gc bd update` does have conditional writes,
+# but only `--if-assignee` and `--if-status` (write nothing, exit 13 on mismatch),
+# and both guard a FIELD. The stamp is a METADATA key; there is no --if-metadata,
+# so "write this stamp only if the one I read is still there" is not expressible.
+# Hence a mutex.
+#
+# WHY mkdir. It is atomic on every POSIX filesystem and needs nothing installed —
+# `flock` is not on stock macOS, and a second code path is a second thing to get
+# wrong. The lock is per anchor+kind, so unrelated anchors never contend.
+#
+# THIS IS NOT THE /tmp MARKER THE HEADER REJECTS. That one was dedup STATE, which
+# fails in both directions: it outlives a session recycle (suppressing a needed
+# escalation) and dies on reboot (letting the storm back). This is a MUTEX. It
+# lives for exactly one invocation, and losing it costs only the serialization —
+# never a suppressed escalation, never a forgotten one.
+#
+# HOW IT FAILS MATTERS MORE THAN THAT IT LOCKS. Every failure resolves toward
+# sending, never toward silence:
+#
+#   HELD, FRESH    a peer is in the critical section for this same anchor+kind
+#                  right now. Suppress and print the verdict — which is exactly
+#                  what serialization would have produced anyway: the peer either
+#                  mails (so we would have found its fresh stamp and suppressed) or
+#                  suppresses (because a fresh stamp already exists, so we would
+#                  have suppressed too). Same outcome, no duplicate.
+#   HELD, STALE    the holder died mid-section. Break the lock and proceed: a
+#                  crashed peer must never mute an anchor forever.
+#   CANNOT LOCK    the lock root is unwritable. Proceed UNSERIALIZED with a
+#                  warning — the race costs a duplicate mail, and refusing would
+#                  cost silence, which this script exists to prevent.
+LOCK_TTL=300
+LOCK_ROOT="${GC_ESCALATION_GATE_LOCKDIR:-/tmp/gc-escalation-gate}"
+LOCK_DIR=""
+
+release_lock() {
+  # Only ever removes a lock THIS process took: LOCK_DIR is set solely on a
+  # successful acquire, so a suppressed run cannot delete the peer's lock.
+  [ -n "$LOCK_DIR" ] || return 0
+  rm -f "$LOCK_DIR/at" 2>/dev/null
+  rmdir "$LOCK_DIR" 2>/dev/null
+  LOCK_DIR=""
+}
+
+lock_started() {
+  # Epoch the lock was taken, or empty when that cannot be established. The
+  # directory's own mtime is the primary source because mkdir sets it atomically
+  # with the acquisition itself — there is no window where the lock exists but its
+  # age does not. The `at` file is the fallback for a platform with neither stat
+  # flavor. GNU first, BSD/macOS second.
+  local at
+  at=$(stat -c %Y "$1" 2>/dev/null) || at=$(stat -f %m "$1" 2>/dev/null) || at=""
+  [ -n "$at" ] || at=$(cat "$1/at" 2>/dev/null)
+  case "$at" in
+    ''|*[!0-9]*) printf '' ;;
+    *)           printf '%s' "$at" ;;
+  esac
+}
+
+take_lock() {
+  # 0 = proceed (we hold it, or locking is unavailable); 1 = a live peer holds it.
+  if ! mkdir -p "$LOCK_ROOT" 2>/dev/null; then
+    echo "escalation-gate: cannot create lock dir $LOCK_ROOT; proceeding UNSERIALIZED — a duplicate escalation is better than a suppressed one" >&2
+    return 0
+  fi
+  local dir key started age
+  # The key lands in a path, so reduce it to the same character set the metadata
+  # key already constrains --kind to. ANCHOR is a bead id; a stray character in it
+  # must not escape the lock root.
+  key=$(printf '%s.%s' "$ANCHOR" "$KIND" | tr -c 'A-Za-z0-9._-' '-')
+  dir="$LOCK_ROOT/$key.lock"
+  if mkdir "$dir" 2>/dev/null; then
+    LOCK_DIR="$dir"
+    printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
+    return 0
+  fi
+  started=$(lock_started "$dir")
+  if [ -n "$started" ]; then
+    age=$(( NOW - started ))
+    [ "$age" -lt 0 ] && age=0
+    [ "$age" -lt "$LOCK_TTL" ] && return 1
+  fi
+  # Stale, or an age we cannot read at all. Break it. An unreadable age is only
+  # possible on a platform with no `stat` in the microseconds before `at` is
+  # written, and breaking there is no worse than having no lock; leaving it would
+  # wedge the anchor permanently, which is the mute.
+  rm -f "$dir/at" 2>/dev/null
+  rmdir "$dir" 2>/dev/null
+  if mkdir "$dir" 2>/dev/null; then
+    LOCK_DIR="$dir"
+    printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
+    return 0
+  fi
+  # Another process broke it first and is now inside. Treat as held.
+  return 1
+}
+
+# --dry-run writes nothing and sends nothing, so it has no critical section to
+# protect — and taking the lock would let a probe suppress a real escalation.
+if [ "$DRY_RUN" != "1" ]; then
+  trap release_lock EXIT
+  if ! take_lock; then
+    echo "escalation-gate: $ANCHOR [$KIND] SUPPRESSED — a concurrent escalation for this anchor is already in flight: $SUBJECT"
+    exit 0
+  fi
+fi
+
 # COMPARE ON A DIGEST, DISPLAY THE LABEL.
 #
 # The fingerprint shares one metadata value with the epoch, so the token must not
@@ -284,11 +411,22 @@ iso_of() {
 }
 
 # Read the anchor. `tr -d` strips control characters BEFORE jq: bead notes carry
-# raw newlines and escapes from prose, and one of those kills the parse, empties
-# the read, and would silently downgrade this to "no prior stamp" — i.e. mail
-# every cycle, the exact bug. Losing the parse must never look like losing the
-# stamp.
-ROW=$(gc bd show "$ANCHOR" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037')
+# raw escapes from prose, and one of those kills the parse, empties the read, and
+# would silently downgrade this to "no prior stamp" — i.e. mail every cycle, the
+# exact bug. Losing the parse must never look like losing the stamp.
+#
+# The class is EVERY control character, not the usual `\000-\010\013\014\016-\037`
+# range that spares tab/LF/CR. jq rejects every unescaped C0 byte inside a string
+# with the same "control characters from U+0000 through U+001F must be escaped"
+# parse error — a raw tab in a note is as fatal as a raw \001, and prose is where
+# tabs come from. Deleting them is safe in the other direction too: control bytes
+# are never significant JSON syntax, and the whitespace between tokens that
+# pretty-printing adds is optional, so a stripped payload parses identically.
+#
+# `[:cntrl:]` rather than a `\NNN` range so this line is byte-identical to the
+# copy in mol-witness-patrol.toml, where a backslash would be eaten by the TOML
+# """ string and ship something other than what the wiring test exercises.
+ROW=$(gc bd show "$ANCHOR" --json 2>/dev/null | tr -d '[:cntrl:]')
 ANCHOR_ID=$(printf '%s' "$ROW" | jq -r '.[0].id // empty' 2>/dev/null)
 if [ -z "$ANCHOR_ID" ]; then
   # No anchor means nowhere to record that we escalated, and an escalation we

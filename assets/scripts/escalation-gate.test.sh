@@ -36,7 +36,24 @@
 #   (KIND)     a different --kind is an independent channel
 #   (CTRL)     control characters in the bead's notes must not break the metadata
 #              read — a lost parse would look like a lost stamp and mail EVERY
-#              cycle, which is the original bug
+#              cycle, which is the original bug. Covers a raw TAB and CR as well
+#              as \001: jq rejects the WHOLE C0 range, and prose notes are exactly
+#              where a tab comes from
+#   (PARALLEL) THE RACE: two simultaneous FIRST escalations for one anchor both
+#              read "no prior stamp" before either writes, and both mail. At most
+#              once has to hold under concurrency too, so the read/decide/stamp/
+#              send section runs under an anchor+kind mutex
+#   (HELD)     the deterministic half of PARALLEL: a peer's live lock suppresses
+#              this run instead of duplicating its mail
+#   (STALEBREAK) a lock left behind by a killed holder is broken, not obeyed — a
+#              dead peer must never mute an anchor forever
+#   (RELEASE)  the lock is released on every exit path, including the failures
+#   (DRYLOCK)  --dry-run takes no lock, so a probe cannot suppress a real send
+#   (LOCKFREE) an unusable lock root proceeds UNSERIALIZED with a warning: a
+#              duplicate mail is recoverable, silence is not
+#   (OPTDRIFT) structural: every option the parse loop handles is in
+#              require_value's known-option list, or `--body --newopt` silently
+#              eats the new flag as a value
 #   (USAGE)    missing required arguments -> exit 2, nothing sent
 #   (KINDSAFE) --kind becomes the metadata KEY `escalated.<kind>`, so a value
 #              carrying '=' or whitespace would write a key nothing can read
@@ -63,6 +80,11 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 mkdir -p "$TMP/bin"
 export GATE_STATE="$TMP/state"
 export PATH="$TMP/bin:$PATH"
+# Keep the anchor+kind mutex inside this run's tmpdir. Sharing the real
+# /tmp/gc-escalation-gate would let two concurrent test runs — or a live witness
+# patrolling the same anchor id — suppress each other's cases.
+export GC_ESCALATION_GATE_LOCKDIR="$TMP/locks"
+LOCK="$GC_ESCALATION_GATE_LOCKDIR/su-lou.10.8.witness.lock"
 
 # --- Stub `gc` ----------------------------------------------------------------
 # Backed by a state dir so each case can seed metadata and force failures:
@@ -80,6 +102,10 @@ printf '%s\n' "$*" >> "$S/calls"
 
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then
   [ -f "$S/missing" ] && exit 1
+  # Widen the critical section so two concurrent runs genuinely overlap inside it
+  # (PARALLEL). Without this the winner can finish before the loser even starts,
+  # and the race the mutex exists for is never exercised.
+  [ -f "$S/slow_show" ] && sleep 1
   if [ -f "$S/raw_show" ]; then cat "$S/raw_show"; exit 0; fi
   id="$3"
   meta='{}'
@@ -308,12 +334,93 @@ eq "$(mails)" "1" "KIND: a different channel escalates independently"
 # and kills jq. If that read silently returned "no stamp", the gate would mail
 # every cycle — the original bug wearing a disguise. `tr -d` must strip them
 # before jq sees them.
+#
+# Every C0 byte is covered, not just the exotic ones: jq answers "control
+# characters from U+0000 through U+001F must be escaped" for a raw TAB and CR
+# exactly as it does for \001, and a tab is the one a human actually types into a
+# note. A sanitation class that spares tab/LF/CR leaves the common case broken.
+for ctl in '\001' '\011' '\015'; do
+  reset
+  printf "[{\"id\":\"su-lou.10.8\",\"metadata\":{\"escalated.witness\":\"%s@%s\"},\"notes\":\"line${ctl}two\"}]" \
+    "$TOKEN_ABC" "$NOW" > "$GATE_STATE/raw_show"
+  out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+  eq "$rc" "0" "CTRL($ctl): survives the control character in the bead payload"
+  eq "$(mails)" "0" "CTRL($ctl): still sees the prior stamp and suppresses"
+done
+
+# --- PARALLEL (the race) ------------------------------------------------------
+# Two patrols reach the same anchor at once — a cycle overlapping its own next
+# pass, or a patrol plus a hand-run gate. Read prior stamp -> decide -> stamp ->
+# mail is a lost update: both read "no prior stamp", both decide "first
+# escalation", both mail. At most once must hold under concurrency, not just in
+# sequence, so the section runs under an anchor+kind mutex.
 reset
-printf '[{"id":"su-lou.10.8","metadata":{"escalated.witness":"%s@%s"},"notes":"line\001two\002three"}]' \
-  "$TOKEN_ABC" "$NOW" > "$GATE_STATE/raw_show"
+touch "$GATE_STATE/slow_show"
+run "PR #35 stranded on human approval" --state "abc123" >/dev/null 2>&1 &
+a=$!
+run "ESCALATION: PR #35 Codex-green but stranded" --state "abc123" >/dev/null 2>&1 &
+b=$!
+wait "$a"; wait "$b"
+rm -f "$GATE_STATE/slow_show"
+eq "$(mails)" "1" "PARALLEL: two simultaneous first escalations send exactly ONE mail"
+eq "$(updates)" "1" "PARALLEL: and stamp exactly once"
+# The serialization must not wedge the anchor: real news on the next cycle still
+# gets through.
+: > "$GATE_STATE/calls"
+run "PR #35 head moved" --state "def456" >/dev/null 2>&1
+eq "$(mails)" "1" "PARALLEL: the next genuine change still escalates"
+
+# --- HELD ---------------------------------------------------------------------
+# The deterministic half of PARALLEL: a peer holds the lock and is inside the
+# critical section. Suppressing is the same outcome serialization would produce —
+# the peer either mails (we would have found its fresh stamp) or suppresses
+# (a fresh stamp already existed) — so a duplicate is never the right answer.
+reset
+mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
 out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
-eq "$rc" "0" "CTRL: survives control characters in the bead payload"
-eq "$(mails)" "0" "CTRL: still sees the prior stamp and suppresses"
+eq "$rc" "0" "HELD: exits 0 (suppression is a correct outcome)"
+eq "$(mails)" "0" "HELD: does not duplicate a peer's in-flight escalation"
+eq "$(updates)" "0" "HELD: and stamps nothing"
+case "$out" in *SUPPRESSED*) ok "HELD: still prints a verdict" ;; *) bad "HELD: prints verdict (got '$out')" ;; esac
+[ -d "$LOCK" ] && ok "HELD: leaves the peer's lock alone" || bad "HELD: deleted a lock it did not take"
+rm -rf "$LOCK"
+
+# --- STALEBREAK ---------------------------------------------------------------
+# A holder killed mid-section leaves the lock behind. Obeying it would mute the
+# anchor forever — the silent failure this whole script is written against — so a
+# lock older than the TTL is broken and taken.
+reset
+mkdir -p "$LOCK"; printf '%s\n' "$((NOW - 3600))" > "$LOCK/at"
+touch -t 202001010000 "$LOCK" 2>/dev/null   # the dir mtime is the primary age source
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+eq "$(mails)" "1" "STALEBREAK: a lock from a dead holder does not mute the anchor"
+[ -d "$LOCK" ] && bad "STALEBREAK: the broken lock was not released" || ok "STALEBREAK: and is released again on exit"
+
+# --- RELEASE ------------------------------------------------------------------
+reset
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+[ -d "$LOCK" ] && bad "RELEASE: a normal run left its lock behind" || ok "RELEASE: the lock is released on exit"
+# ...including the failure paths, or one unreadable anchor wedges it until the TTL.
+reset
+touch "$GATE_STATE/missing"
+run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+[ -d "$LOCK" ] && bad "RELEASE: a non-zero exit left its lock behind" || ok "RELEASE: released even when the run exits 1"
+
+# --- DRYLOCK ------------------------------------------------------------------
+# A probe must not be able to suppress a real escalation, so --dry-run takes no
+# lock at all (it writes nothing and sends nothing, so it has no section to guard).
+reset
+run "PR #35 stranded" --state "abc123" --dry-run >/dev/null 2>&1
+[ -d "$LOCK" ] && bad "DRYLOCK: --dry-run took a lock" || ok "DRYLOCK: --dry-run takes no lock"
+
+# --- LOCKFREE -----------------------------------------------------------------
+# The lock root cannot be created. Refusing to send would be a mute; the race it
+# leaves open costs at most a duplicate mail. Proceed, and say so.
+reset
+out=$(GC_ESCALATION_GATE_LOCKDIR=/dev/null/nope run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+eq "$rc" "0" "LOCKFREE: an unusable lock root is not fatal"
+eq "$(mails)" "1" "LOCKFREE: the escalation is still delivered"
+case "$out" in *UNSERIALIZED*) ok "LOCKFREE: warns that it proceeded unserialized" ;; *) bad "LOCKFREE: warns (got '$out')" ;; esac
 
 # --- UNSUBSTITUTED ------------------------------------------------------------
 # mol-witness-patrol is poured --root-only with only binding_prefix as a --var,
@@ -417,6 +524,23 @@ eq "${UNGUARDED:-0}" "0" "ARGSHAPE: every 'shift 2' arm calls require_value on t
 GUARDED=$(grep -c 'require_value "\$@"' "$SCRIPT" 2>/dev/null)
 [ "${GUARDED:-0}" -ge 7 ] && ok "ARGSHAPE: all seven value-taking options are guarded" \
   || bad "ARGSHAPE: expected >=7 guarded options, found '${GUARDED:-0}'"
+
+# --- OPTDRIFT -----------------------------------------------------------------
+# require_value rejects a value that is EXACTLY one of our own options, which is
+# what makes `--body --dry-run` a usage error instead of a body of "--dry-run".
+# That list is maintained by hand, so it drifts: add `--verbose` to the parse loop
+# and forget the list, and `--body --verbose` silently stores "--verbose" as the
+# body again. Assert the two agree rather than trusting them to.
+LOOP_OPTS=$(sed -n '/^while \[ \$# -gt 0 \]; do/,/^done$/p' "$SCRIPT" \
+  | grep -oE '\-\-[a-z-]+\)' | sed 's/)$//' | sort -u)
+KNOWN_OPTS=$(sed -n '/^require_value()/,/^}$/p' "$SCRIPT" \
+  | grep -oE '\-\-[a-z-]+' | sort -u)
+# Guard the extraction itself: an empty side would make the comparison below pass
+# vacuously, which is how a structural test rots into decoration.
+[ -n "$LOOP_OPTS" ] && ok "OPTDRIFT: located the parse loop" || bad "OPTDRIFT: parse loop extraction was EMPTY"
+[ -n "$KNOWN_OPTS" ] && ok "OPTDRIFT: located require_value's known-option list" || bad "OPTDRIFT: known-option extraction was EMPTY"
+DRIFTED=$(comm -23 <(printf '%s\n' "$LOOP_OPTS") <(printf '%s\n' "$KNOWN_OPTS") | tr '\n' ' ' | sed 's/ *$//')
+eq "$DRIFTED" "" "OPTDRIFT: every option the parser handles is in require_value's known list"
 
 echo
 echo "escalation-gate.test: $PASS passed, $FAIL failed"
