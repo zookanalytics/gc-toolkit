@@ -15,8 +15,9 @@ Each wisp is ONE iteration: check for work, patrol, pour the next
 iteration. On crash, re-read the formula steps and determine where
 you left off from context (bead state, mail state, last action).
 
-Formula steps are NOT materialized as child beads. Read the step
-descriptions below and work through them in order.
+Formula steps are NOT materialized as child beads. Work through them in
+order, reading each step's description as you reach it — one step at a
+time, not the whole formula up front.
 
 The loop mechanism: EVERY step is one leg of the same wisp. Never exit
 the wisp from an intermediate step — either continue to the next step
@@ -65,9 +66,10 @@ the worktree. This makes the work schedulable again.
 - Convoy/swarm completion (deacon handles cross-rig)
 - Kill stuck agents directly (files warrant, dog pool runs shutdown dance)
 
-Read each step's description before acting — Config values override defaults."""
+Read a step's description immediately before acting on that step — not
+all of them at once. Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 12
+version = 13
 
 [vars]
 [vars.binding_prefix]
@@ -770,8 +772,28 @@ Burning is conditional on the next wisp existing AND being assigned to
 you. Never burn to "clean up" after a failed pour: that trades one
 recoverable wisp for a stopped patrol loop.
 
-The new wisp is ready. Re-read formula steps to start
-the next patrol cycle.
+The new wisp is ready. Do NOT re-read the whole formula to start the
+next cycle. `gc formula show mol-witness-patrol --json` is ~42KB
+(~11k tokens); an idle cycle uses under 10% of it, and 4 witnesses
+re-reading it every cycle costs ~12M tokens/day.
+
+Read the plain form (~6KB) for step order and Config values:
+
+```bash
+gc formula show mol-witness-patrol
+```
+
+Then pull a single step's description only when you are about to run
+that step — substitute the step id you need:
+
+```bash
+gc formula show mol-witness-patrol --json 2>/dev/null \
+  | jq -r '.steps[] | select(.id | endswith(".check-inbox")) | .description'
+```
+
+The invariant that must survive the cheaper read: every step is one leg
+of THIS wisp. Never exit the wisp from an intermediate step — continue
+to the next step, or jump to next-iteration to pour and burn.
 
 **Exit criteria:** Next wisp poured and assigned, this wisp burned. Or:
 the pour/assign guard fired, this wisp still alive, retry next cycle."""
