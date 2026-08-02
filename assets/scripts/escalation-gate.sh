@@ -63,7 +63,11 @@
 # The stamp folds both into one value, exactly as `check.<gate>=green@<oid>`
 # folds "passed" and "at which commit":
 #
-#     escalated.<kind> = <state-fingerprint>@<epoch-seconds>
+#     escalated.<kind> = <readable-label>.<digest-of-raw-state>@<epoch-seconds>
+#
+# The label is there to read; the DIGEST is what decides. See "COMPARE ON A
+# DIGEST" below — a display-safe rendering of the fingerprint is lossy, and a
+# lossy comparison suppresses exactly the news the gate must let through.
 #
 # STAMP FIRST, MAIL SECOND — and the ability to stamp is the LICENSE to mail.
 # This is the same convergence rule reconcile-merged-prs.sh uses for its
@@ -154,8 +158,10 @@ require_value() {
 }
 
 # Keep this in step with `[vars.escalation_cooldown] default` in
-# mol-witness-patrol.toml. The script's own default is the real floor: the
-# formula may omit --cooldown entirely, so this is what actually governs.
+# mol-witness-patrol.toml. The formula's marked snippets DO pass
+# `--cooldown {{escalation_cooldown}}`, so a rendered override is honored — but
+# that var reaches the script unsubstituted on a `--root-only` pour (handled
+# below), so this default is still what actually governs in the common case.
 DEFAULT_COOLDOWN=86400
 
 ANCHOR=""; SUBJECT=""; BODY=""; STATE=""; KIND="witness"
@@ -186,10 +192,21 @@ if [ -z "$ANCHOR" ] || [ -z "$SUBJECT" ] || [ -z "$BODY" ]; then
   usage
   exit 2
 fi
-if [ -z "$KIND" ]; then
-  echo "escalation-gate: --kind must not be empty" >&2
-  exit 2
-fi
+# The kind becomes part of the metadata KEY (`escalated.<kind>`), written as
+# `--set-metadata "<key>=<value>"`. A kind carrying '=' would split the pair at
+# the wrong place; whitespace or a metacharacter would land a key no reader can
+# address — either way the channel silently stops deduplicating and the storm is
+# back. Constrain it to the character set bead metadata keys already use. This is
+# a usage error like a bad --cooldown: it is caught before anything is sent, and
+# the marked formula snippets do not pass --kind at all.
+case "$KIND" in
+  '')
+    echo "escalation-gate: --kind must not be empty" >&2
+    exit 2 ;;
+  *[!A-Za-z0-9._-]*)
+    echo "escalation-gate: --kind must contain only [A-Za-z0-9._-] (got '$KIND')" >&2
+    exit 2 ;;
+esac
 case "$COOLDOWN" in
   '{{'*'}}')
     # An unsubstituted formula var. This one specific case must NOT be fatal:
@@ -211,13 +228,52 @@ esac
 KEY="escalated.$KIND"
 NOW=$(date +%s)
 
-# The fingerprint shares one metadata value with the epoch, so it must not
-# contain the '@' separator. Collapse everything outside a conservative set to
-# '-'; that is lossy for display but never ambiguous for comparison, which is the
-# only thing the value is used for. Empty --state becomes '-' — a legitimate
-# fingerprint meaning "no state tracked", so cooldown alone governs.
-STATE_TOKEN=$(printf '%s' "$STATE" | tr -c 'A-Za-z0-9._:-' '-' | tr -s '-')
-[ -z "$STATE_TOKEN" ] && STATE_TOKEN="-"
+# COMPARE ON A DIGEST, DISPLAY THE LABEL.
+#
+# The fingerprint shares one metadata value with the epoch, so the token must not
+# contain the '@' separator, and it has to survive a round trip through bead
+# metadata — which rules out a verbatim `--state`. The obvious fix, collapsing
+# everything outside a conservative set to '-', is LOSSY, and lossy is the one
+# thing this comparison cannot be: `abc/123` and `abc 123` both render `abc-123`,
+# so a genuinely changed situation compares EQUAL to the one before it and is
+# suppressed for a full cooldown. That is the gate becoming a mute — precisely
+# the failure the state fingerprint exists to prevent, and worse than the storm
+# because it is silent.
+#
+# So the token carries both: a sanitized LABEL for the log line (`state changed
+# (X -> Y)` is unreadable as two hashes), and a digest of the RAW `--state` that
+# actually decides. The comparison therefore turns on the raw value, never on
+# what the label collapsed. The label is truncated because it is decoration;
+# uniqueness never depends on it.
+#
+# Empty --state stays exactly '-' — a legitimate fingerprint meaning "no state
+# tracked", so cooldown alone governs. Keeping that value byte-identical also
+# means anchors tracking no state are not re-escalated for the format change
+# alone. An anchor that DOES carry an old-format stamp reads as "state changed"
+# once, mails once, and is stamped in the new format — converged after a single
+# cycle, which is the same way a corrupt stamp is handled below.
+state_digest() {
+  # sha256, then the same value under BSD/macOS, then openssl; `cksum` is the
+  # POSIX last resort (32-bit, weaker, still far better than the collapse above).
+  # Only the first 16 hex chars are kept — 64 bits over the handful of distinct
+  # fingerprints one anchor ever has.
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | awk '{print $1}' | cut -c1-16
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 | awk '{print $1}' | cut -c1-16
+  elif command -v openssl >/dev/null 2>&1; then
+    printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}' | cut -c1-16
+  else
+    printf '%s' "$1" | cksum | awk '{print $1 "-" $2}'
+  fi
+}
+
+if [ -z "$STATE" ]; then
+  STATE_TOKEN="-"
+else
+  STATE_LABEL=$(printf '%s' "$STATE" | tr -c 'A-Za-z0-9._:-' '-' | tr -s '-' | cut -c1-64)
+  STATE_TOKEN="$STATE_LABEL.$(state_digest "$STATE")"
+fi
 
 iso_of() {
   # GNU first, BSD/macOS second, raw epoch as the last resort — this only ever
@@ -248,8 +304,8 @@ REASON="first escalation for this anchor"
 if [ "$FORCE" = "1" ]; then
   REASON="forced (--force)"
 elif [ -n "$PRIOR" ]; then
-  # `<token>@<epoch>`; the token cannot contain '@' (sanitized above), so the
-  # last '@' is unambiguously the separator.
+  # `<token>@<epoch>`; neither the sanitized label nor the digest can contain
+  # '@' (see above), so the last '@' is unambiguously the separator.
   PRIOR_TOKEN="${PRIOR%@*}"
   PRIOR_EPOCH="${PRIOR##*@}"
   case "$PRIOR_EPOCH" in
