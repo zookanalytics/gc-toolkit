@@ -105,6 +105,46 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# The METHOD carried by every signoff this pass dispatches (tk-jufvl). A review
+# bead created with a title and nothing else names no method, so the reviewing
+# polecat picks its own by catalog description-match — the drift that ran a
+# 6-persona fan-out at ~4.7M tokens per review. review-dispatch-body.sh is the
+# ONE source of that prose, shared with reconcile-merged-prs.sh's stale-gate
+# re-review so the two dispatches cannot say different things.
+#
+# FAIL-SOFT. A missing or failing emitter must never block a dispatch: an
+# un-dispatched signoff leaves the armed gate unsatisfiable and HOLDS the merge
+# forever, which is strictly worse than a title-only bead. So a body that cannot
+# be produced degrades to today's behaviour, loudly.
+# Resolved through a symlink on purpose: this city DOES symlink shared assets
+# across rigs (all four rigs' mol-refinery-patrol.toml is one gc-toolkit file), so
+# a symlinked deploy of this script whose real directory we failed to resolve
+# would find no emitter, take the fail-soft path, and silently dispatch title-only
+# reviews everywhere — this fix regressing invisibly behind one stderr line.
+# readlink -f is coreutils; where it is absent the plain dirname still works for
+# the normal non-symlinked deploy.
+_cshself="${BASH_SOURCE[0]}"
+_cshreal="$(readlink -f "$_cshself" 2>/dev/null || true)"
+[ -n "$_cshreal" ] && _cshself="$_cshreal"
+REVIEW_BODY_EMITTER="$(cd "$(dirname "$_cshself")" && pwd)/review-dispatch-body.sh"
+
+# create_review_bead <title> — mint the signoff bead carrying the method, echo its
+# id (empty on failure, exactly as the bare `gc bd create` it replaces).
+create_review_bead() {
+  local title="$1" body=""
+  if [ -x "$REVIEW_BODY_EMITTER" ]; then
+    body=$("$REVIEW_BODY_EMITTER" 2>/dev/null) || body=""
+  fi
+  if [ -z "$body" ]; then
+    echo "check-set-heal: WARN review method unavailable ($REVIEW_BODY_EMITTER); dispatching a TITLE-ONLY review — the reviewer will have to pick its own method (tk-jufvl)" >&2
+    gc bd create "$title" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null
+    return
+  fi
+  printf '%s' "$body" \
+    | gc bd create "$title" -t task --body-file - --json 2>/dev/null \
+    | jq -r '.id // empty' 2>/dev/null
+}
+
 # Canonical form used for every check_set decision: lowercase, with whitespace and
 # separators removed. Mirrors the formula's `_cs_canon`, so "  NONE  ", "none" and
 # "off" all collapse to a sentinel, and "", "   ", ",,," all collapse to empty (a
@@ -299,11 +339,13 @@ while IFS= read -r row; do
   # Dispatch the signoff, mirroring the merge-push step's shape so the reviewer's
   # done-sequence finds exactly the fields it expects: pre-open reviews the BRANCH
   # compare-range (review_branch/review_base, no PR yet), post-open reviews the PR.
+  # The bead carries the review METHOD in its body (create_review_bead) — the title
+  # says WHAT to review, the metadata says WHERE, and the body says HOW (tk-jufvl).
   REVIEW_BEAD=""
   if [ -n "$num" ]; then
-    REVIEW_BEAD=$(gc bd create "Review PR#$num: $title" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+    REVIEW_BEAD=$(create_review_bead "Review PR#$num: $title")
   else
-    REVIEW_BEAD=$(gc bd create "Review branch $branch -> $target: $title" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+    REVIEW_BEAD=$(create_review_bead "Review branch $branch -> $target: $title")
   fi
   if [ -z "$REVIEW_BEAD" ]; then
     echo "check-set-heal: WARN $id could not create the signoff bead; merge stays HELD, retrying next pass" >&2
