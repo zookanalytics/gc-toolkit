@@ -66,6 +66,75 @@ the worktree. This makes the work schedulable again.
 - Convoy/swarm completion (deacon handles cross-rig)
 - Kill stuck agents directly (files warrant, dog pool runs shutdown dance)
 
+## Escalation discipline — read this before ANY `gc mail send`
+
+This applies to every step, not just the one that documents an escalation
+command.
+
+You re-derive your triggers from live state each cycle, so a condition
+that was true last cycle is usually still true now. Mailing on each is
+how ONE stuck PR produced FIVE witness escalations in 2h53m (2026-07-27,
+PR #35 / anchor su-lou.10.8; the su refinery added two more). The cost is
+not the volume: repeated escalations train the recipient to ignore
+escalation mail, which is the one signal that is supposed to be rare, and
+each `gc mail send` is a permanent bead plus a Dolt commit for as long as
+the item stays stuck.
+
+**Any escalation that is ABOUT A BEAD goes through the gate instead of
+straight to `gc mail send`:**
+
+```bash
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+BODY="Observation: <what you found>
+Recommendation: <what should happen>"
+if [ -n "$SCRIPTS_DIR" ]; then
+  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead-id>" --state "<what is HOLDING it>" --subject "<subject>" --body "$BODY"
+else
+  gc mail send mayor/ -s "<subject>" -m "$BODY"
+fi
+```
+
+It mails the first time, then stays quiet until `--state` changes or the
+cooldown elapses. It suppresses REPETITION, never news. A rig that has
+not synced the script falls back to mailing directly — the old behavior,
+not a dropped escalation.
+
+Keep the resolution loop in the SAME shell as the send. Each tool call is
+a fresh shell, so a `SCRIPTS_DIR` you resolved earlier is gone, and an
+empty one expands to `/escalation-gate.sh` — which fails and sends
+nothing. Only the gc-toolkit rig has its own `assets/scripts`; the other
+three resolve through the `GC_CITY_PATH` candidate.
+
+Two things that are easy to get wrong:
+
+- **Do not reword your way past it.** Those five PR #35 mails had five
+  different subjects — "stranded on human approval", "Codex-green but
+  stranded", "fully gate-green", "approval-gated ~88h", "stranded 3d".
+  One situation, five framings, because you compose the subject fresh
+  each cycle from whatever you just observed. The gate keys on the ANCHOR
+  and the channel, never on the message, exactly so rephrasing cannot
+  reopen the storm. Reaching for `gc mail send` directly because "this
+  framing is new" IS the bug.
+- **Put the real hold inputs in `--state`.** Head oid, `reviewDecision`,
+  `mergeStateStatus` — whatever would make you say "this is genuinely
+  different now". That fingerprint is what lets real news through
+  immediately, so a lazy `--state` is what turns the gate into a mute.
+
+`--force` is for a situation that truly worsened in a way the fingerprint
+does not capture. Using it every cycle is the storm again.
+
+Suppressed escalations still print a verdict line — the item is still
+stuck, and your log still says so. Not every escalation has a bead to key
+on (the `recover-orphaned-beads` empty-liveness-map fail-safe is
+rig-global); those stay un-gated for now.
+
+Regression test: `assets/scripts/escalation-gate.test.sh` (hermetic; stubs
+`gc`, covers the five-subject drift case, state-change and cooldown
+re-opening, stamp-before-mail, and the refuse-to-send-when-unbounded rule).
+
 Read a step's description immediately before acting on that step — not
 all of them at once. Config values override defaults."""
 formula = "mol-witness-patrol"
@@ -79,6 +148,10 @@ default = ""
 [vars.event_timeout]
 description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep (the harness blocks that, which drops all pacing). This value sets patrol frequency, which is the dominant cost term once a cycle is cheap — raise it rather than trimming steps if patrol cost needs to come down."
 default = "180"
+
+[vars.escalation_cooldown]
+description = "Seconds before an UNCHANGED situation may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h: at the 180s patrol interval that is a 480x reduction on a stuck item, while still resurfacing it daily so it cannot fall silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier."
+default = "86400"
 
 [[steps]]
 id = "check-inbox"
@@ -733,13 +806,55 @@ wisp is stale, the refinery may be stuck.
 gc session nudge <rig>/{{binding_prefix}}refinery "Work beads waiting for merge. Please check queue."
 ```
 
-**Step 4: Escalate if needed:**
+**Step 4: Escalate if needed — through the gate.**
+
+**Config: escalation_cooldown = {{escalation_cooldown}}**
+
+This is the step the escalation storm came from (see "Escalation
+discipline" above): a stuck PR keeps satisfying the trigger, so every
+cycle re-derived it and mailed again. Escalate PER ANCHOR, through
+`escalation-gate.sh`, never with a bare `gc mail send`.
+
+Build `--state` from the inputs that are actually HOLDING the item, so
+that a real change gets through at once while a still-stuck item stays
+quiet:
+
+Resolve the script here, in the same shell that sends — each tool call is a
+fresh shell, so a `SCRIPTS_DIR` exported while reading an earlier section is
+GONE by the time you run this. An empty `$SCRIPTS_DIR` would expand to
+`/escalation-gate.sh`, fail, and send nothing at all — a silent mute, which
+is worse than the storm.
+
 ```bash
-gc mail send mayor/ -s "QUEUE_HEALTH: <summary>" \
-  -m "Work bead IDs: <ids>
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+PR=$(gc bd show <bead> --json | jq -r '.[0].metadata.pr_number // empty')
+if [ -n "$PR" ]; then
+  STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
+else
+  STATE=$(gc bd show <bead> --json | jq -r '.[0] | [(.status // "-"), (.metadata.merge_result // "-"), (.updated_at // "-")] | join("/")')
+fi
+BODY="Work bead IDs: <ids>
 Observation: <what you found>
 Recommendation: <what should happen>"
+if [ -n "$SCRIPTS_DIR" ]; then
+  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"
+else
+  gc mail send mayor/ -s "QUEUE_HEALTH: <summary>" -m "$BODY"
+fi
 ```
+
+`headRefOid/reviewDecision/mergeStateStatus` is the right fingerprint for
+a PR-backed anchor: a new commit, an approval, or a mergeability change
+are exactly the events worth re-mailing about, and nothing else is. For a
+bead with no PR, its own status/merge_result/updated_at serve the same
+purpose. Omit `--cooldown` unless the Config value above shows a number
+different from the script's own default.
+
+One escalation per anchor — do not also send a queue-wide summary that
+names the same anchors, which is the same mail wearing a different hat.
 
 **Exit criteria:** Queue health assessed; nudge sent or escalation
 filed if needed. Continue to `quiesce-completed-workflows` — do NOT exit
