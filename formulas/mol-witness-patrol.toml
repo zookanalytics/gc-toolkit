@@ -610,6 +610,20 @@ back on the ASSIGNED-work path, which is keyed on the assignee. Clearing only
 `gc.routed_to` there is a no-op — that is why the by-hand sweeps kept leaving a
 residual of sessions still holding their in_progress step.
 
+**The two clears are SEPARATE calls, route first, and the assignee clear passes
+`--force` (tk-z27pw).** Batched into one `gc bd update`, bd's claim guard refuses
+`--assignee ""` on a step still held in_progress and rolls the WHOLE update back —
+so `gc.routed_to` was never cleared either, the step stayed fully re-offerable,
+and the pass logged `update failed; retries next patrol` every cycle forever while
+still exiting 0. Route-first is what keeps splitting safe: the intermediate state
+is open + assigned + unrouted (invisible to the pool), never open + unassigned +
+routed (the pool-offer shape, which would race a fresh polecat into the husk).
+`--force` is legitimate here because the anchor is already terminal, so the step
+graph is spent — rework is dispatched as a STANDALONE bead with no `gc.step_ref`
+and never re-walks these steps, so no holder can ever resume one. That clear runs
+through bare `bd`, because `gc bd` rejects `--force` in its bead-ID safety
+pre-check and exits 1.
+
 **DANGER — never "fix" this by closing the step bead.** Closing `load-context`
 unblocks `workspace-setup` and walks the next polecat forward onto a branch that
 is ALREADY green-gated and PR'd; any push there moves the head, stales the
@@ -633,6 +647,12 @@ done
 # Best-effort, like every other patrol pass: a failed pass is retried next cycle
 # and must never abort the wisp. The -x guard means a rig that has not synced
 # this script simply keeps the old by-hand behavior.
+#
+# The pass exits NON-ZERO when any step update failed (tk-z27pw) — it still
+# attempts every root first, so a non-zero exit is a verdict, not an abort. The
+# `||` below is what keeps that non-fatal. A recurring failure here means some
+# step could not be quiesced; read the stderr lines, which name the bead and
+# which half (route or assignee) was refused.
 if [ -n "$SCRIPTS_DIR" ]; then
   "$SCRIPTS_DIR/quiesce-completed-workflows.sh" \
     || echo "quiesce-completed-workflows: pass failed (non-fatal); retries next cycle" >&2
@@ -653,8 +673,10 @@ steps a running polecat still has to claim, draining it mid-implementation. An
 un-quiesced husk only wastes wisps, which is much the cheaper failure.
 
 Regression test: `assets/scripts/quiesce-completed-workflows.test.sh` (hermetic,
-stubs `gc`; covers both shapes, the single-update atomicity, the no-close rule,
-the finalize-route exemption, fail-closed, and idempotence).
+stubs `gc` and `bd`, including bd's claim guard; covers both shapes, the split
+calls and their route-first order, the `--force` assignee clear, the no-close
+rule, the finalize-route exemption, fail-closed, idempotence, and that a refused
+assignee clear neither rolls back the route clear nor exits 0).
 
 **Exit criteria:** Completed-workflow husks quiesced, or none found. Continue to
 `check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is

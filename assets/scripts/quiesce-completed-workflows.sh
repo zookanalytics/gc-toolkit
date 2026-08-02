@@ -27,10 +27,47 @@
 #                        ASSIGNED-work path, keyed on the assignee. Clearing
 #                        gc.routed_to here is a NO-OP; the assignee must go too.
 #
-# Both keys are cleared in ONE `gc bd update`. Order matters and a two-call
-# sequence is unsafe: clearing the assignee first would briefly leave the bead
-# open + unassigned + routed — the exact pool-offer shape — racing a fresh
-# polecat into the husk we are trying to retire.
+# The two keys are cleared in TWO SEPARATE calls, ROUTE FIRST, then the assignee
+# (tk-z27pw). Every part of that shape is load-bearing:
+#
+#   WHY NOT ONE CALL. bd's claim guard refuses `--assignee ""` on an in_progress
+#   step still held by a live session. Batched into a single `gc bd update`, that
+#   rejection rolls the WHOLE update back — so `gc.routed_to` is not cleared
+#   either, even though unsetting routing alone needs no claim at all. The step
+#   stays fully re-offerable, the pass logs "update failed; retries next patrol"
+#   every cycle forever, and (before this fix) still exited 0. Splitting the calls
+#   means the half that can always land, always lands.
+#
+#   WHY ROUTE FIRST. The race the single-call design guarded against is real, but
+#   it is an ORDER hazard, not a call-count one: clearing the assignee first leaves
+#   the bead briefly open + unassigned + routed — the exact pool-offer shape —
+#   racing a fresh polecat into the husk we are retiring. Clearing the route first
+#   inverts that. The intermediate state is open + assigned + unrouted, which is
+#   invisible to the pool, and the assigned hand-back it still rides is simply the
+#   state the bead was already in. The window exposes nothing new.
+#
+#   AND THE ASSIGNEE HALF IS GATED ON IT (tk-d553m). Order alone only rules out
+#   the pool-offer shape while the route clear SUCCEEDS. If it is refused and the
+#   assignee clear runs anyway, that shape stops being a window and becomes the
+#   step's resting state — strictly worse than the assigned+routed husk we found.
+#   So a failed route clear skips the assignee clear: the step is left untouched
+#   and counted failed, and the next patrol retries it whole.
+#
+#   WHY --force ON THE ASSIGNEE. We only reach this point when is_terminal_anchor()
+#   says the anchor is DONE — i.e. the step graph is SPENT. A REQUEST_CHANGES
+#   verdict dispatches rework as a STANDALONE bead (no `gc.step_ref`) sourced from
+#   the review bead; it never re-walks the molecule's step graph. So no holder can
+#   resume a step of a terminal molecule: the claim is abandoned in exactly the
+#   sense --force is reserved for, even while the holding session is alive and
+#   looks busy (it is busy re-deriving "already done"). That terminal-anchor check
+#   IS the gate on --force — never use it where that gate has not already passed.
+#
+#   WHY BARE `bd` FOR THAT ONE CALL. `gc bd` rejects --force in its bead-ID safety
+#   pre-check ("cannot safely verify bead IDs (unrecognized flag in args)") and
+#   exits 1, so through the wrapper the clear can never land at all. Bare `bd` is
+#   the same binary on the same store — it honors the BEADS_DIR the agent env
+#   already pins. The pre-check the wrapper adds guards substring resolution of a
+#   PARTIAL id; every id here comes verbatim from `gc bd list`, so it is exact.
 #
 # WHAT THIS PASS NEVER DOES — closing a step bead is the footgun this bug exists
 # to prevent. Closing load-context unblocks workspace-setup and walks the next
@@ -46,8 +83,16 @@
 # step graph at submit-and-exit time is the durable upstream fix (gascity core /
 # gastown formula) and is deliberately out of scope here.
 #
-# NOT set -e: best-effort, must never abort the witness patrol. Any tool error
-# skips that root and retries next patrol cycle.
+# NOT set -e: best-effort, must never abort the witness patrol mid-pass. Any tool
+# error skips that root and retries next patrol cycle.
+#
+# But the pass EXITS NON-ZERO when any step update failed (tk-z27pw). Every root
+# is still attempted first — the exit code is a verdict on the whole pass, not an
+# abort. A blanket exit 0 over failed writes is what hid this bug for a day: the
+# script printed "-> cleared" for three steps, then "0 steps quiesced", and still
+# reported success. The patrol's call site already treats a non-zero exit as
+# non-fatal ("pass failed (non-fatal); retries next cycle"), so telling the truth
+# costs the patrol nothing.
 set -uo pipefail
 
 DRY_RUN=0
@@ -101,12 +146,21 @@ ROOTS=$(printf '%s\n' "$ROWS" | jq -r -s 'map(.root) | map(select(. != "")) | un
 [ -n "$ROOTS" ] \
   || { echo "quiesce-completed-workflows: no resolvable workflow roots"; exit 0; }
 
-quiesced=0; roots_done=0; roots_live=0; already=0; unresolved=0
+quiesced=0; roots_done=0; roots_live=0; already=0; unresolved=0; failed=0
+
+# The assignee half needs `bd ... --force`, which `gc bd` refuses (see header).
+# Resolve the binary once, so a rig without `bd` on PATH says so plainly instead
+# of surfacing as N opaque per-step failures.
+BD_BIN=$(command -v bd 2>/dev/null || true)
+[ -n "$BD_BIN" ] || echo "quiesce-completed-workflows: bd not on PATH; assigned-shape steps cannot be cleared (gc bd refuses --force)" >&2
 
 # Batched per ROOT, deliberately: a rig with several husks is ~6 `gc bd update`
 # calls per root, and sweeping every bead in one flat pass has blown a 2-minute
-# tool timeout in practice. Per-root batching also makes a partial pass coherent —
-# a molecule is either quiesced or untouched, never half-swept.
+# tool timeout in practice. Per-root batching also keeps a partial pass coherent to
+# read: one anchor verdict, then that root's step lines. It does NOT make a root
+# atomic — a single step can land its route clear and still be refused the assignee
+# clear, which counts as failed (not quiesced) so the next patrol resumes from
+# whichever key is still set.
 while IFS= read -r root; do
   [ -n "${root:-}" ] || continue
 
@@ -166,27 +220,65 @@ while IFS= read -r root; do
     fi
 
     # Snapshot the prior values into the patrol log — this action is meant to be
-    # reversible by hand, so the log has to say what was there.
-    echo "  $sid ($step): routed='${routed:-none}' assignee='${who:-none}' -> cleared"
+    # reversible by hand, so the log has to say what was there. It says "clearing",
+    # not "cleared": the writes below can still be refused, and a line that claims
+    # the past tense before the fact is half of what made this pass lie.
+    echo "  $sid ($step): routed='${routed:-none}' assignee='${who:-none}' -> clearing"
     if [ "$DRY_RUN" -eq 1 ]; then
       quiesced=$((quiesced + 1)); continue
     fi
 
-    # Both keys in ONE update (see the header note on the two-call race). Only the
-    # keys actually present are touched, so sibling metadata stays intact and the
-    # bead's status is never rewritten.
-    UPDATE_ARGS=("$sid")
-    [ -n "$routed" ] && UPDATE_ARGS+=(--unset-metadata gc.routed_to)
-    [ -n "$who" ]    && UPDATE_ARGS+=(--assignee "")
-    if gc bd update "${UPDATE_ARGS[@]}" >/dev/null 2>&1; then
+    # TWO calls, route first — see the header on order, on --force, and on why a
+    # single batched update cannot work. Only the keys actually present are
+    # touched, so sibling metadata stays intact and status is never rewritten.
+    # Each half is tracked separately: a step whose route cleared but whose
+    # assignee did not is a PARTIAL clear, and counts as a failure, not a success.
+    step_ok=1
+    route_ok=1
+
+    # Pool channel. No claim is involved, so this half needs no --force — but it
+    # can still be refused by the store (a wedged write, a transient error), and
+    # the half below is gated on whether it landed.
+    if [ -n "$routed" ]; then
+      if ! gc bd update "$sid" --unset-metadata gc.routed_to >/dev/null 2>&1; then
+        echo "quiesce-completed-workflows: $sid route clear failed; retries next patrol" >&2
+        step_ok=0; route_ok=0
+      fi
+    fi
+
+    # Affine hand-back channel. Needs --force past the claim guard, hence bare bd.
+    # GATED ON THE ROUTE CLEAR (tk-d553m): route-first is only a safety barrier
+    # while the assignee clear cannot outlive a route that survived. Clear the
+    # assignee on a step whose gc.routed_to is still set and the result is open +
+    # unassigned + routed — the pool-offer shape the ordering exists to prevent,
+    # and now a durable state rather than a momentary window. So a refused route
+    # clear skips this half entirely: the step is left exactly as it was, already
+    # counted failed above, and the next patrol retries both keys from a shape it
+    # understands.
+    if [ -n "$who" ] && [ "$route_ok" -eq 1 ]; then
+      if [ -z "$BD_BIN" ] \
+         || ! "$BD_BIN" update "$sid" --assignee "" --force >/dev/null 2>&1; then
+        echo "quiesce-completed-workflows: $sid assignee clear failed; retries next patrol" >&2
+        step_ok=0
+      fi
+    elif [ -n "$who" ]; then
+      echo "quiesce-completed-workflows: $sid assignee clear skipped (route clear failed; clearing it now would leave the step open+unassigned+routed); retries next patrol" >&2
+    fi
+
+    if [ "$step_ok" -eq 1 ]; then
       quiesced=$((quiesced + 1))
     else
-      echo "quiesce-completed-workflows: $sid update failed; retries next patrol" >&2
+      failed=$((failed + 1))
     fi
   done <<< "$(printf '%s\n' "$ROWS" | jq -c --arg r "$root" 'select(.root == $r)' 2>/dev/null)"
 done <<< "$ROOTS"
 
 MODE=""
 [ "$DRY_RUN" -eq 1 ] && MODE="(dry-run) "
-echo "quiesce-completed-workflows: ${MODE}${quiesced} steps quiesced across $roots_done completed workflow(s); $roots_live still live, $already already quiet, $unresolved unresolved"
+echo "quiesce-completed-workflows: ${MODE}${quiesced} steps quiesced across $roots_done completed workflow(s); $roots_live still live, $already already quiet, $unresolved unresolved, $failed failed"
+
+# Failed WRITES make the pass dishonest if swallowed; an unresolved anchor does
+# not — that one is a deliberate fail-closed skip, already reported, and correct.
+# So only $failed decides the exit code.
+[ "$failed" -eq 0 ] || exit 1
 exit 0
