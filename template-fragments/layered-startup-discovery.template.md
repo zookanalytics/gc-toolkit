@@ -216,12 +216,43 @@ for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do  # burn any surplus
 done
 # <<< patrol-wisp-reconcile
 
+# >>> patrol-wisp-vars
+# Forward the formula's declared vars on every pour below. A --root-only pour
+# materializes NO defaults: each `[vars.x] default` reaches the wisp unrendered, so
+# a var this command omits is a var the whole cycle runs without — the patrol then
+# runs on whatever fallback each consumer happens to have (escalation-gate.sh has
+# one for the cooldown; the pacing loop does not). The loop's own `next-iteration`
+# pour forwards them, but it only runs at the END of a cycle, so a startup or
+# recovery pour that drops them loses the setting for the cycles before that.
+#
+# The values come from the formula's OWN declarations, never from numbers retyped
+# here: a literal would freeze every witness at whatever the default was the day
+# this fragment was written, which is the same drop wearing a plausible-looking
+# fix. Enumerated rather than named one by one, so a var declared later cannot
+# quietly stop propagating. binding_prefix is skipped — it is agent identity,
+# passed below from the rendered template, not a formula default.
+#
+# Every failure degrades to today's behaviour (pour without the extra vars), so
+# this can only improve on it: an absent `gc formula show`, an unparseable payload,
+# or a default carrying anything but plain word characters — that last one is
+# skipped rather than word-split into the command line.
+PATROL_VARS=""
+PATROL_FORMULA=$(gc formula show mol-witness-patrol --json 2>/dev/null)
+for v in $(printf '%s' "$PATROL_FORMULA" | jq -r '.vars[]?.name // empty' 2>/dev/null); do
+  [ "$v" = "binding_prefix" ] && continue
+  d=$(printf '%s' "$PATROL_FORMULA" | jq -r --arg v "$v" '.vars[]? | select(.name == $v) | .default // empty' 2>/dev/null)
+  [ -n "$d" ] || continue
+  case "$d" in *[!A-Za-z0-9._:/-]*) continue ;; esac
+  PATROL_VARS="$PATROL_VARS --var $v=$d"
+done
+# <<< patrol-wisp-vars
+
 # Step 2: Already have a wisp? Resume it. Otherwise check mail, then pour ONE.
 if [ -n "$WISP" ]; then
   echo "Resuming patrol wisp $WISP"
 else
   gc mail inbox
-  WISP=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id')
 fi
 
 # Adopt the wisp you are about to execute: CLAIM it (--assignee) and mark it
@@ -251,6 +282,18 @@ surplus is invisible and gets leaked instead of burned.
 
 ```bash
 # >>> patrol-wisp-fallback
+# Same var materialization as Step 2 — this block is run standalone (crash
+# recovery), so it cannot inherit PATROL_VARS from a shell that is long gone, and
+# a recovery pour that drops the vars loses them for every cycle after it.
+PATROL_VARS=""
+PATROL_FORMULA=$(gc formula show mol-witness-patrol --json 2>/dev/null)
+for v in $(printf '%s' "$PATROL_FORMULA" | jq -r '.vars[]?.name // empty' 2>/dev/null); do
+  [ "$v" = "binding_prefix" ] && continue
+  d=$(printf '%s' "$PATROL_FORMULA" | jq -r --arg v "$v" '.vars[]? | select(.name == $v) | .default // empty' 2>/dev/null)
+  [ -n "$d" ] || continue
+  case "$d" in *[!A-Za-z0-9._:/-]*) continue ;; esac
+  PATROL_VARS="$PATROL_VARS --var $v=$d"
+done
 CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   # Title-filtered and assignee-blind like Step 1 — this id is burned below, so
@@ -282,7 +325,7 @@ if [ -n "$QUEUED_WISP" ] && ! gc bd update "$QUEUED_WISP" --assignee="$GC_AGENT"
   QUEUED_WISP=""
 fi
 if [ -n "$CURRENT_WISP" ] && [ -z "$QUEUED_WISP" ]; then
-  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id // empty')
+  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id // empty')
   if [ -z "$NEXT" ]; then
     echo "Could not pour next witness wisp; not burning."
     exit 1
@@ -299,7 +342,7 @@ if [ -n "$CURRENT_WISP" ] && [ -z "$QUEUED_WISP" ]; then
 elif [ -n "$CURRENT_WISP" ]; then
   gc bd mol burn "$CURRENT_WISP" --force
 elif [ -z "$QUEUED_WISP" ]; then
-  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id // empty')
+  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id // empty')
   if [ -z "$NEXT" ]; then
     echo "Could not bootstrap next witness wisp."
     exit 1

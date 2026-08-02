@@ -107,7 +107,20 @@ S="$STUB_LOG"
 [ -f "$S/meta" ]   || : > "$S/meta"
 [ -f "$S/writes" ] || printf '0\n' > "$S/writes"
 
+if [ "${1:-}" = "formula" ] && [ "${2:-}" = "show" ]; then
+  # The [vars.*] declarations the startup pour materializes (FRAGMENT below).
+  # Unset models a lookup that returns nothing — a `gc` too old for the flag, a
+  # formula not installed — which must degrade to a pour without the extra vars.
+  printf '%s\n' "${STUB_FORMULA_JSON-}"
+  exit 0
+fi
+
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then
+  # A payload no jq filter can parse: bd printing a diagnostic instead of JSON, or
+  # a truncated read. Distinct from STUB_CTRL, which the wiring's `tr -d` cleans —
+  # this one survives sanitizing, so the caller's own state build genuinely fails
+  # and the never-empty-state guard is what has to hold (STATEGUARD).
+  if [ -n "${STUB_BAD_JSON:-}" ]; then printf 'gc: unexpected error\n'; exit 0; fi
   w=$(cat "$S/writes")
   # `${STUB_TARGET-main}` (not `:-`) so a case can set it to "" to model a
   # pre_open_gate anchor that carries NO `target` at all — the shape that made
@@ -353,9 +366,13 @@ eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/-/-" \
 
 # --- GHFAIL / GHEMPTY: a PR-backed anchor whose gh lookup yields nothing ------
 # `gh pr view` fails (rate limit, auth, deleted PR) or prints an empty
-# fingerprint. Passing that through as an EMPTY --state would read as "no state
-# tracked" and mute real news until the cooldown, so it must fall back to the
-# bead's own inputs.
+# fingerprint. Two different things must NOT happen. Passing that through as an
+# EMPTY --state would read as "no state tracked" and mute real news until the
+# cooldown. And substituting the BEAD fingerprint on the same channel — what this
+# block used to do — makes the outage itself mail twice (GHFLAP below). So the
+# degraded observation goes on its own --kind, carrying a value that names what is
+# unavailable and nothing that varies while it is: constant for the whole outage,
+# so it mails once and then rides its own cooldown.
 for ghcase in fail empty; do
   reset
   make_gate "$TMP/rig/assets/scripts"
@@ -366,10 +383,67 @@ for ghcase in fail empty; do
     make_gh 0
     PR_NUMBER=35 GH_FINGERPRINT="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
   fi
-  eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/main/-" \
-     "GH${ghcase}: an unusable PR fingerprint degrades to the bead's, never to empty"
+  eq "$(gate_arg --state)" "unavailable/gh/pr-35" \
+     "GH${ghcase}: names what is unavailable — not the bead fingerprint, which is not comparable to a PR one"
+  eq "$(gate_arg --kind)" "witness-degraded" \
+     "GH${ghcase}: on its own channel, so the PR channel's stamp and cooldown survive the outage"
+  [ -n "$(gate_arg --state)" ] && ok "GH${ghcase}: and is never EMPTY, which the gate would stamp as 'no state tracked'" \
+    || bad "GH${ghcase}: --state must never be empty"
 done
 make_gh 0   # restore
+
+# --- GHFLAP: an outage must not mail on the way in AND on the way out ---------
+# THE REGRESSION (pre-open signoff round 3 on tk-z4aka). The bead fingerprint used
+# to stand in for the PR one on the SAME channel whenever `gh pr view` failed. The
+# gate compares each --state against the last one sent on that kind, so an
+# unchanged PR compared unequal when the substitute appeared AND unequal again
+# when the real one came back: one hiccup, two mails, cooldown reset twice, on a
+# PR that never moved. Run the REAL gate across a healthy/down/down/healthy
+# sequence and count.
+mkdir -p "$TMP/realrig/assets/scripts"
+cp "$HERE/escalation-gate.sh" "$TMP/realrig/assets/scripts/escalation-gate.sh"
+chmod +x "$TMP/realrig/assets/scripts/escalation-gate.sh"
+stub_meta() { grep "^$1|" "$STUB_LOG/meta" 2>/dev/null | head -1 | cut -d'|' -f2-; }
+flap_cycle() { PR_NUMBER=35 GC_RIG_ROOT="$TMP/realrig" GC_CITY_PATH="" \
+                 bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1; }
+reset
+make_gh 0; flap_cycle
+eq "$(count mail)" "1" "GHFLAP: cycle 1 escalates on the healthy PR fingerprint"
+make_gh 1; flap_cycle
+eq "$(count mail)" "2" "GHFLAP: cycle 2 reports the outage once, on the degraded channel"
+flap_cycle
+eq "$(count mail)" "2" "GHFLAP: a second cycle of the same outage is suppressed — the degraded value is constant"
+make_gh 0; flap_cycle
+eq "$(count mail)" "2" "GHFLAP: gh recovering on an UNCHANGED PR is not news — no mail on the way out"
+case "$(stub_meta escalated.witness)" in
+  oid123-APPROVED-BLOCKED*) ok "GHFLAP: the PR channel's stamp still holds the last PR fingerprint actually observed" ;;
+  *) bad "GHFLAP: the outage overwrote the PR channel's stamp (got '$(stub_meta escalated.witness)')" ;;
+esac
+[ -n "$(stub_meta escalated.witness-degraded)" ] \
+  && ok "GHFLAP: and the outage was recorded on its own key" \
+  || bad "GHFLAP: no escalated.witness-degraded stamp — the degraded channel did not dedup"
+# ...and the dedup is not a mute: a PR that genuinely moves during all this still
+# escalates on the very next cycle.
+PR_NUMBER=35 GH_FINGERPRINT="oidNEW/APPROVED/BLOCKED" GC_RIG_ROOT="$TMP/realrig" GC_CITY_PATH="" \
+  bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(count mail)" "3" "GHFLAP: a real head change after the outage still escalates immediately"
+
+# --- STATEGUARD: the block must never hand the gate an EMPTY --state ----------
+# The gate treats empty as the legitimate fingerprint "no state tracked" and
+# stamps it durably, so a caller that MEANT to track state and failed marks the
+# anchor stateless: every real change then waits out a full cooldown. The failure
+# does not need gh — an unparseable `gc bd show` empties the bead branch too.
+reset
+make_gate "$TMP/rig/assets/scripts"
+PR_NUMBER="" STUB_BAD_JSON=1 GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
+  bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+[ -n "$(gate_arg --state)" ] \
+  && ok "STATEGUARD: an unparseable bead read still produces a non-empty --state" \
+  || bad "STATEGUARD: --state came out EMPTY, which the gate stamps as 'no state tracked'"
+eq "$(gate_arg --kind)" "witness-degraded" \
+   "STATEGUARD: and it is sent on the degraded channel, not stamped over the normal one"
+has '--kind "$KIND"' "$(extract escalation-wiring-refinery)" \
+    "STATEGUARD: the gate call carries the channel the block selected"
 
 # --- GHCALL: the wiring must ask gh for the right three fields ----------------
 # A stub that only echoes proves the gate received SOME fingerprint. It does not
@@ -498,6 +572,105 @@ for v in $DECLARED_VARS; do
     *) bad "PROPAGATE: the pour drops $v — a --root-only wisp materializes no defaults, so a configured $v dies after this cycle (want --var $v='{{$v}}')" ;;
   esac
 done
+
+# --- FRAGMENT: the pours BEFORE the loop must carry the vars too --------------
+# PROPAGATE covers the loop's own `next-iteration` pour, and that is the last
+# command of a cycle — so it says nothing about the pour that STARTS the witness.
+# Those live in the agent template (`patrol-wisp-vars` / `patrol-wisp-fallback`),
+# and while they passed only binding_prefix the declared vars were already lost by
+# the time the loop began forwarding them: every cycle up to the first
+# next-iteration ran on whatever fallback each consumer happened to have, and a
+# crash-recovery pour dropped them again. Same defect as PROPAGATE, one file over,
+# which is exactly why this check had to leave the formula.
+FRAG="$ROOT/template-fragments/layered-startup-discovery.template.md"
+[ -f "$FRAG" ] && ok "FRAGMENT: located the startup template" \
+  || bad "FRAGMENT: $FRAG is missing — the startup pours cannot be checked"
+frag_extract() { awk -v m="$1" '
+    $0 ~ ("# >>> " m "$") {f=1; next}
+    $0 ~ ("# <<< " m "$") {f=0}
+    f' "$FRAG"; }
+
+POUR_LINES=$(grep -c 'mol wisp mol-witness-patrol --root-only' "$FRAG" 2>/dev/null)
+VAR_LINES=$(grep 'mol wisp mol-witness-patrol --root-only' "$FRAG" 2>/dev/null | grep -c 'PATROL_VARS')
+[ "${POUR_LINES:-0}" -ge 3 ] \
+  && ok "FRAGMENT: found the startup and fallback pours ($POUR_LINES of them)" \
+  || bad "FRAGMENT: expected at least 3 witness pours in the template, found ${POUR_LINES:-0}"
+eq "${VAR_LINES:-0}" "${POUR_LINES:-0}" \
+   "FRAGMENT: every witness pour forwards the materialized vars"
+
+VARS_BLOCK=$(frag_extract patrol-wisp-vars)
+[ -n "$VARS_BLOCK" ] && ok "patrol-wisp-vars: extracted between markers" \
+  || bad "patrol-wisp-vars: extraction EMPTY — markers missing from $FRAG"
+printf '%s\n' "$VARS_BLOCK" > "$TMP/patrol-wisp-vars.sh"
+bash -n "$TMP/patrol-wisp-vars.sh" \
+  && ok "patrol-wisp-vars: extracted block is valid bash" \
+  || bad "patrol-wisp-vars: extracted block failed bash -n"
+# Enumerated, not named: a var declared later must propagate without anyone
+# remembering to edit this template.
+has '.vars[]?.name' "$VARS_BLOCK" \
+    "FRAGMENT: enumerates the formula's declared vars instead of listing names"
+
+# Behavioural, against the REAL declared vars and their REAL defaults — so a var
+# added to the formula tomorrow is covered by this assertion the day it lands.
+toml_default() { awk -v v="$1" '$0 == "[vars." v "]" {f=1; next} f && /^default = /{sub(/^default = /, ""); gsub(/"/, ""); print; exit} f && /^\[/{exit}' "$TOML"; }
+FORMULA_JSON=$(for v in $DECLARED_VARS; do printf '%s\t%s\n' "$v" "$(toml_default "$v")"; done \
+  | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t")) | {vars: map({name: .[0], default: (.[1] // "")})}')
+{ printf '%s\n' "$VARS_BLOCK"; printf 'printf "%%s" "$PATROL_VARS"\n'; } > "$TMP/vars-probe.sh"
+GOT_VARS=$(STUB_FORMULA_JSON="$FORMULA_JSON" bash "$TMP/vars-probe.sh" 2>/dev/null)
+for v in $DECLARED_VARS; do
+  d=$(toml_default "$v")
+  if [ "$v" = "binding_prefix" ]; then
+    # Agent identity, rendered into the pour from the template's own data. The
+    # materialization must not override it with a formula default.
+    case "$GOT_VARS" in
+      *"--var binding_prefix="*) bad "FRAGMENT: materializes binding_prefix, overriding the rendered identity" ;;
+      *)                         ok  "FRAGMENT: leaves binding_prefix to the rendered template" ;;
+    esac
+    continue
+  fi
+  case "$GOT_VARS" in
+    *"--var $v=$d"*) ok "FRAGMENT: the startup pour materializes $v=$d from the formula's own declaration" ;;
+    *) bad "FRAGMENT: the startup pour drops $v — a --root-only pour materializes no defaults, so the witness runs without it until next-iteration (got '$GOT_VARS')" ;;
+  esac
+done
+# The value must come from the formula, not from a number retyped in the template:
+# a literal freezes every witness at whatever the default was the day it was typed.
+case "$VARS_BLOCK" in
+  *86400*|*'=180'*) bad "FRAGMENT: a default is hardcoded in the template — it will drift from [vars.*]" ;;
+  *)                ok  "FRAGMENT: no default is hardcoded; the values come from gc formula show" ;;
+esac
+# A lookup that returns nothing degrades to today's pour rather than emitting a
+# broken command line — the failure mode has to be "no worse than before".
+GOT_NONE=$(STUB_FORMULA_JSON="" bash "$TMP/vars-probe.sh" 2>/dev/null)
+eq "$GOT_NONE" "" "FRAGMENT: an unavailable formula lookup pours without the extra vars, as it did before"
+# ...and a default carrying shell metacharacters is skipped, not word-split into
+# the pour. The values are read from a file this template does not control.
+GOT_HOSTILE=$(STUB_FORMULA_JSON='{"vars":[{"name":"event_timeout","default":"180"},{"name":"hostile","default":"a b; touch pwned"}]}' \
+  bash "$TMP/vars-probe.sh" 2>/dev/null)
+case "$GOT_HOSTILE" in
+  *hostile*) bad "FRAGMENT: a default with shell metacharacters reached the pour ('$GOT_HOSTILE')" ;;
+  *)         ok  "FRAGMENT: a default that is not a plain word is skipped, not word-split into the command" ;;
+esac
+has "--var event_timeout=180" "$GOT_HOSTILE" \
+    "FRAGMENT: and the well-formed vars alongside it still propagate"
+
+# The crash-recovery block is run STANDALONE — a fresh shell, no Step 2 above it —
+# so it cannot inherit PATROL_VARS and must materialize them itself. Referencing
+# the variable without building it expands to nothing and silently pours bare,
+# which is the drop this whole section is about, now only on the recovery path.
+FB_BLOCK=$(frag_extract patrol-wisp-fallback)
+[ -n "$FB_BLOCK" ] && ok "patrol-wisp-fallback: extracted between markers" \
+  || bad "patrol-wisp-fallback: extraction EMPTY — markers missing from $FRAG"
+printf '%s\n' "$FB_BLOCK" > "$TMP/patrol-wisp-fallback.sh"
+bash -n "$TMP/patrol-wisp-fallback.sh" \
+  && ok "patrol-wisp-fallback: extracted block is valid bash" \
+  || bad "patrol-wisp-fallback: extracted block failed bash -n"
+case "$FB_BLOCK" in
+  *'PATROL_VARS='*'gc formula show mol-witness-patrol'*)
+    ok "FRAGMENT: the crash-recovery block materializes the vars itself before pouring" ;;
+  *)
+    bad "FRAGMENT: the crash-recovery block references PATROL_VARS without building it — standalone, that expands to nothing" ;;
+esac
 
 # --- SELFREOPEN: the gate's own stamp must not reopen the fingerprint ---------
 # THE P1 REGRESSION. This runs the REAL gate, not the recording stub, twice over

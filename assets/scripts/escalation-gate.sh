@@ -60,6 +60,26 @@
 #                   (default 24h) so an item stuck for days still resurfaces
 #                   periodically instead of falling silent forever.
 #
+# ONE CHANNEL, ONE SHAPE OF FINGERPRINT. Every `--state` sent on a given `--kind`
+# is compared against the last one sent on that same kind, so they have to be
+# built the same way every cycle. A caller whose usual inputs go missing — a
+# `gh pr view` that fails on a rate limit — must NOT substitute a different-shaped
+# fingerprint on the normal channel: the substitute compares unequal to the real
+# one in BOTH directions, so the item mails when the outage starts and mails again
+# when it ends, a flap that walks straight through the cooldown and is driven by
+# GitHub's availability rather than by any news. Send the degraded observation on
+# its OWN kind (mol-witness-patrol uses `witness-degraded`), where it dedups
+# against its own history and leaves the real channel's stamp — and the cooldown
+# riding on it — untouched.
+#
+# A `--state` that could not be built at all is the same defect one step further
+# on: empty means "no state tracked" here, a legitimate fingerprint that suppresses
+# on the cooldown alone, so a caller that MEANT to track state and failed would
+# durably stamp the anchor as stateless and mute every real change until the
+# cooldown. Callers with a fingerprint to build must pass a non-empty one or move
+# to the degraded kind; they must never hand this script an empty `--state` by
+# accident.
+#
 # The stamp folds both into one value, exactly as `check.<gate>=green@<oid>`
 # folds "passed" and "at which commit":
 #
@@ -67,7 +87,9 @@
 #
 # The label is there to read; the DIGEST is what decides. See "COMPARE ON A
 # DIGEST" below — a display-safe rendering of the fingerprint is lossy, and a
-# lossy comparison suppresses exactly the news the gate must let through.
+# lossy comparison suppresses exactly the news the gate must let through. A
+# `.pending` suffix on the epoch is the third thing the value carries: delivery
+# unconfirmed, see the rollback section below.
 #
 # STAMP FIRST, MAIL SECOND — and the ability to stamp is the LICENSE to mail.
 # This is the same convergence rule reconcile-merged-prs.sh uses for its
@@ -89,9 +111,37 @@
 # wrote: on any unserialized path a peer can have mailed and stamped in between,
 # and restoring over that erases the record of a mail already in the mayor's
 # inbox. And when the rollback write itself fails, the log says so — the stamp
-# REMAINS and the next cycle really will suppress. Claiming a rollback that did
-# not happen is worse than the suppression, because the one line an operator
-# would act on says the opposite of the state they are in.
+# REMAINS. Claiming a rollback that did not happen is worse than the state it
+# hides, because the one line an operator would act on says the opposite of the
+# state they are in.
+#
+# ...AND WHEN NEITHER THE MAIL NOR THE ROLLBACK LANDS, THE STAMP ITSELF SAYS SO.
+# The rollback closes the common failure; it cannot close its own. Both it and the
+# stamp are the same `gc bd update` path, so the store that refused one refuses the
+# other, and what survives is a stamp for a mail nobody received. Every later cycle
+# then reads it as "already escalated" — and that is worse than a suppressed mail:
+# mol-witness-patrol's ORPHAN_CLOSED treats a SUPPRESSED verdict as "the mayor was
+# told on an earlier cycle" and spends its one-shot `gc bd close` on it. The bead
+# is closed, the orphan condition that would have re-derived the notice is gone,
+# and nobody was ever told.
+#
+# That stamp cannot be repaired at failure time — the write is precisely what is
+# failing — so it carries its delivery state from the moment it is written:
+#
+#     escalated.<kind> = <token>@<epoch>.pending   stamped, delivery UNCONFIRMED
+#     escalated.<kind> = <token>@<epoch>           stamped AND delivered
+#
+# Pending is what stamp-first writes (it is still the license to mail); a
+# `gc mail send` that returns 0 promotes it to delivered. A pending stamp read on
+# a later cycle RE-ESCALATES instead of suppressing, so "suppressed" now means a
+# notice that was actually delivered — the property the one-shot close paths were
+# already assuming. The cost is two writes per DELIVERED escalation, which is at
+# most once per cooldown per anchor+kind, against a `gc mail send` that is itself a
+# bead plus a Dolt commit.
+#
+# The residual case is a mail that lands while the promotion fails. The next cycle
+# re-sends it once: the duplicate this script chooses over silence everywhere else,
+# and it converges as soon as one write succeeds.
 #
 # SUPPRESSION IS ON THE MAIL, NOT ON THE OBSERVATION. Every invocation prints its
 # verdict on stdout, suppressed ones included, so the patrol log still shows the
@@ -172,7 +222,9 @@ usage: escalation-gate.sh --anchor <bead-id> --subject <s> --body <b>
               reviewDecision, mergeStateStatus. A change re-escalates at once.
               Omitted means "no state tracked": only the cooldown re-opens.
   --kind      escalation channel, default "witness". Names the sending ROLE, not
-              the topic — see the header. One anchor + kind = one escalation.
+              the topic — see the header. One anchor + kind = one escalation. A
+              fingerprint the caller could not build the usual way belongs on its
+              own kind (e.g. "witness-degraded"), never on the normal one.
   --cooldown  seconds before an UNCHANGED situation may re-mail (default 86400)
   --to        recipient, default "mayor/"
   --force     bypass the gate but still stamp (operator escape hatch)
@@ -412,13 +464,45 @@ EOF
 }
 
 acquire_lock() {
-  # Record ownership in the lock directory we just created. The owner file goes
-  # first: it is what a peer needs before it can decide whether breaking is safe,
-  # and what release_lock compares against. `at` is only the age fallback for a
-  # platform with no usable `stat`.
-  LOCK_DIR="$1"
-  printf '%s\n' "$LOCK_TOKEN" > "$1/owner" 2>/dev/null
-  printf '%s\n' "$NOW" > "$1/at" 2>/dev/null
+  # Record ownership in the lock directory we just created, and VERIFY it landed.
+  # 0 = we hold a lock that provably names us; 1 = we do not, and the directory
+  # has been torn back down rather than left behind ownerless.
+  #
+  # THE OWNER WRITE IS PART OF THE ACQUISITION, NOT A DECORATION ON IT. `mkdir`
+  # succeeding says the name was free; it says nothing about whether a file can be
+  # created inside (a full filesystem, a lock root whose mode denies it, a
+  # read-only remount between the two calls). Ignoring that failure produced the
+  # WORST of both states: this run believed it held the lock, while the lock it
+  # left had no owner — so `lock_liveness` classified it "unknown" for every peer,
+  # and unknown is governed by AGE. A peer inside LOCK_TTL therefore waits out
+  # LOCK_WAIT and proceeds UNSERIALIZED, straight into the section we think we are
+  # alone in, and both runs mail the same first escalation. release_lock could not
+  # clean up either: it compares the owner file against LOCK_TOKEN and an absent
+  # owner never matches, so the ownerless lock sat there for the full TTL,
+  # degrading every invocation for that anchor+kind behind it.
+  #
+  # So the owner file is written and READ BACK — the readback is what proves the
+  # write reached the filesystem rather than a full disk's buffer — and a failure
+  # of either drops us to the honest answer: we do not hold a lock. take_lock then
+  # proceeds UNSERIALIZED with a warning, exactly as it does for a lock root it
+  # cannot create at all, and the directory is torn back down so a peer does not
+  # wait it out. (If even that removal fails, the leftover is no worse than what
+  # this branch used to leave — an unverifiable lock, broken on the age rule —
+  # except that nobody is now inside the section believing they own it.) `at` stays
+  # best-effort: it is only the age fallback for a platform with no usable `stat`,
+  # and an unreadable age is already handled.
+  local dir readback
+  dir="$1"
+  printf '%s\n' "$LOCK_TOKEN" > "$dir/owner" 2>/dev/null
+  readback=$(lock_owner "$dir")
+  if [ "$readback" != "$LOCK_TOKEN" ]; then
+    rm -f "$dir/owner" "$dir/at" 2>/dev/null
+    rmdir "$dir" 2>/dev/null
+    return 1
+  fi
+  printf '%s\n' "$NOW" > "$dir/at" 2>/dev/null
+  LOCK_DIR="$dir"
+  return 0
 }
 
 break_lock() {
@@ -496,7 +580,10 @@ take_lock() {
   # clock that advances past `deadline`. LOCK_WAIT=0 makes this exactly one pass.
   while : ; do
     if mkdir "$dir" 2>/dev/null; then
-      acquire_lock "$dir"
+      if acquire_lock "$dir"; then
+        return 0
+      fi
+      echo "escalation-gate: $ANCHOR [$KIND] took $dir but could not record ownership in it; proceeding UNSERIALIZED — a lock nobody can verify serializes nothing, and a duplicate escalation is better than a suppressed one" >&2
       return 0
     fi
     now=$(date +%s)
@@ -534,7 +621,10 @@ take_lock() {
     esac
     if [ "$breakable" = "1" ] && break_lock "$dir" "$owner"; then
       if mkdir "$dir" 2>/dev/null; then
-        acquire_lock "$dir"
+        if acquire_lock "$dir"; then
+          return 0
+        fi
+        echo "escalation-gate: $ANCHOR [$KIND] retook $dir but could not record ownership in it; proceeding UNSERIALIZED — a lock nobody can verify serializes nothing, and a duplicate escalation is better than a suppressed one" >&2
         return 0
       fi
       # Another process took it in the gap — a live holder again. Fall through to
@@ -658,15 +748,28 @@ fi
 
 PRIOR=$(printf '%s' "$ROW" | jq -r --arg k "$KEY" '.[0].metadata[$k] // empty' 2>/dev/null)
 
+# How far ahead of us a prior stamp may be dated and still be believed. Stamps are
+# written by whichever host ran the gate, so seconds of clock skew between two of
+# them is ordinary: treating ANY future epoch as corrupt would re-escalate every
+# cycle for as long as the skew lasts, which is the storm again, sourced from the
+# clocks instead of from the triggers. Past this much the value cannot be explained
+# by skew, and believing it mutes the anchor until that date actually arrives.
+CLOCK_SKEW_GRACE=300
+
 DECISION="mail"
 REASON="first escalation for this anchor"
 if [ "$FORCE" = "1" ]; then
   REASON="forced (--force)"
 elif [ -n "$PRIOR" ]; then
-  # `<token>@<epoch>`; neither the sanitized label nor the digest can contain
-  # '@' (see above), so the last '@' is unambiguously the separator.
+  # `<token>@<epoch>` or `<token>@<epoch>.pending`; neither the sanitized label nor
+  # the digest can contain '@' (see above), so the last '@' is unambiguously the
+  # separator.
   PRIOR_TOKEN="${PRIOR%@*}"
   PRIOR_EPOCH="${PRIOR##*@}"
+  PRIOR_PENDING=0
+  case "$PRIOR_EPOCH" in
+    *.pending) PRIOR_PENDING=1; PRIOR_EPOCH="${PRIOR_EPOCH%.pending}" ;;
+  esac
   case "$PRIOR_EPOCH" in
     ''|*[!0-9]*)
       # A corrupt stamp cannot bound anything, and treating it as "recent" would
@@ -675,13 +778,34 @@ elif [ -n "$PRIOR" ]; then
       REASON="prior stamp unreadable ('$PRIOR'); re-escalating and rewriting it" ;;
     *)
       AGE=$(( NOW - PRIOR_EPOCH ))
-      if [ "$PRIOR_TOKEN" != "$STATE_TOKEN" ]; then
+      if [ "$PRIOR_PENDING" = "1" ]; then
+        # Stamped, but the mail was never confirmed delivered — and the rollback
+        # that should have removed this stamp failed too, or we would not be
+        # reading it. Suppressing on it would suppress on a notice nobody
+        # received, and would let a one-shot caller (ORPHAN_CLOSED) spend its
+        # close on that non-notice. Re-escalate regardless of the cooldown: the
+        # cooldown bounds repetition of a DELIVERED escalation, and there was
+        # none. A send that works promotes the stamp and the anchor goes quiet.
+        REASON="prior stamp from $(iso_of "$PRIOR_EPOCH") is pending (stamped, delivery never confirmed); re-escalating"
+      elif [ "$AGE" -lt $(( -CLOCK_SKEW_GRACE )) ]; then
+        # Dated further ahead than clock skew explains. Left alone it reads as
+        # "recent" on every cycle from now until that timestamp passes, muting the
+        # anchor for however long that is. Treat it as corrupt — same call, and
+        # same convergence, as an unparseable one.
+        REASON="prior stamp is dated $(iso_of "$PRIOR_EPOCH"), ${AGE#-}s in the FUTURE (beyond the ${CLOCK_SKEW_GRACE}s skew grace); treating it as corrupt, re-escalating and rewriting it"
+      elif [ "$PRIOR_TOKEN" != "$STATE_TOKEN" ]; then
         REASON="state changed since $(iso_of "$PRIOR_EPOCH") ($PRIOR_TOKEN -> $STATE_TOKEN)"
-      elif [ "$AGE" -ge "$COOLDOWN" ]; then
-        REASON="unchanged, but cooldown elapsed (${AGE}s >= ${COOLDOWN}s)"
       else
-        DECISION="suppress"
-        REASON="unchanged since $(iso_of "$PRIOR_EPOCH") (${AGE}s ago, cooldown ${COOLDOWN}s)"
+        # Inside the grace, a stamp from the near future is just a skewed clock;
+        # read it as "stamped now" rather than letting a negative age race past
+        # the cooldown comparison in either direction.
+        [ "$AGE" -lt 0 ] && AGE=0
+        if [ "$AGE" -ge "$COOLDOWN" ]; then
+          REASON="unchanged, but cooldown elapsed (${AGE}s >= ${COOLDOWN}s)"
+        else
+          DECISION="suppress"
+          REASON="unchanged since $(iso_of "$PRIOR_EPOCH") (${AGE}s ago, cooldown ${COOLDOWN}s)"
+        fi
       fi ;;
   esac
 fi
@@ -697,15 +821,29 @@ if [ "$DRY_RUN" = "1" ]; then
   exit 0
 fi
 
-# Stamp FIRST. Recording that we escalated is what bounds the next cycle, so a
-# stamp we cannot write is a mail we must not send.
-STAMP="$STATE_TOKEN@$NOW"
+# Stamp FIRST, and stamp it PENDING. Recording that we escalated is what bounds the
+# next cycle, so a stamp we cannot write is a mail we must not send — but until the
+# send returns, "escalated" is a claim this run cannot make. The pending stamp says
+# both things at once: bounded (a peer reading it will not storm) and unconfirmed
+# (a later cycle reading it will not suppress on it). Only a delivered mail
+# promotes it. See the header for why the promotion cannot instead be a repair
+# attempted at failure time.
+STAMP="$STATE_TOKEN@$NOW.pending"
+STAMP_DELIVERED="$STATE_TOKEN@$NOW"
 if ! gc bd update "$ANCHOR_ID" --set-metadata "$KEY=$STAMP" >/dev/null 2>&1; then
   echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — could not stamp $KEY; escalating unbounded is worse than escalating late, retry next cycle: $SUBJECT" >&2
   exit 1
 fi
 
 if gc mail send "$TO" -s "$SUBJECT" -m "$BODY" >/dev/null 2>&1; then
+  # Delivered — promote the stamp out of pending. This write is what earns the
+  # suppression a later cycle will make on it, and what lets the one-shot callers
+  # read SUPPRESSED as "the mayor was told". If it fails the mail is still out and
+  # the stamp still says pending, so the next cycle re-sends this once: a duplicate
+  # rather than a lost notice, converging as soon as one write lands.
+  if ! gc bd update "$ANCHOR_ID" --set-metadata "$KEY=$STAMP_DELIVERED" >/dev/null 2>&1; then
+    echo "escalation-gate: $ANCHOR_ID [$KIND] mail DELIVERED but $KEY could not be promoted from pending to delivered; the next cycle re-sends this once rather than suppressing on an unconfirmed notice: $SUBJECT" >&2
+  fi
   echo "escalation-gate: $ANCHOR_ID [$KIND] ESCALATED to $TO — $REASON: $SUBJECT"
   exit 0
 fi
@@ -740,7 +878,7 @@ case "$ROLLBACK" in
   done)
     echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed; stamp rolled back so the next cycle retries: $SUBJECT" >&2 ;;
   failed)
-    echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed AND the stamp could not be rolled back; '$KEY=$STAMP' REMAINS on $ANCHOR_ID, so this situation will be SUPPRESSED until the ${COOLDOWN}s cooldown elapses. To retry sooner: gc bd update $ANCHOR_ID --unset-metadata $KEY — $SUBJECT" >&2 ;;
+    echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed AND the stamp could not be rolled back; '$KEY=$STAMP' REMAINS on $ANCHOR_ID. It is marked pending, so the next cycle RE-ESCALATES on it rather than suppressing for the ${COOLDOWN}s cooldown — the notice is delayed, not lost. To clear it by hand: gc bd update $ANCHOR_ID --unset-metadata $KEY — $SUBJECT" >&2 ;;
   *)
     echo "escalation-gate: $ANCHOR_ID [$KIND] NOT SENT — gc mail send failed; a peer's newer stamp was left in place, so the next cycle decides against ITS record rather than ours: $SUBJECT" >&2 ;;
 esac
