@@ -9,10 +9,10 @@ patrol wisps only go stale, which reads the same as "busy".
 
 Twice observed, two different providers:
 
-| Date | Provider | Parked | Dead time *after* the block expired |
+| Date | Provider | Parked | Cost |
 |---|---|---|---|
-| 2026-07-22 | Claude session limit | both rig witnesses | 1h26m (no orphan recovery in either rig) |
-| 2026-08-02 | Codex usage limit | two review polecats | ~7h30m (holding the gc-toolkit merge queue) |
+| 2026-07-22 | Claude session limit | both rig witnesses | 1h26m still parked *after* the window reopened; no orphan recovery in either rig meanwhile |
+| 2026-08-02 | Codex usage limit | two review polecats | ~7h30m holding the gc-toolkit merge queue; cleared only when the mayor nudged by hand |
 
 Both times every agent resumed within 20s of a single `gc session nudge`.
 Bug: `tk-al95k`.
@@ -57,12 +57,18 @@ layout, and never on the apostrophe — both render `You've` with a typographic
 `'` a C-locale `.` will not match. `QUOTA_PARK_MATCH` overrides it for a
 provider we have not met.
 
-**Never trust the stated reset time.** On 2026-08-02 the Codex banner said
-`try again at Aug 8th, 2026 7:56 PM`. The limit reset on **Aug 2**. A fix that
-slept until the parsed deadline would have kept those agents parked six extra
-days — strictly worse than the bug. So the script never parses the reset clause:
-it polls and retries, and recovery tracks the actual reset. The cost of being
-early is one no-op nudge.
+**Never schedule against the stated reset time.** On 2026-08-02 the Codex banner
+said `try again at Aug 8th, 2026 7:56 PM` and the block cleared on **Aug 2** —
+not because the banner lied (it was probably right about the natural window) but
+because the operator triggered a manual reset out of band. That is the general
+case: quota returns by routes no banner predicts. A fix that slept until the
+parsed deadline would have missed it by six days, which is worse than the bug it
+fixes; a fix that dismissed banner times as garbage would be wrong in the other
+direction. So the banner time is treated as a lower bound worth knowing and
+never as an authority — the script does not read the reset clause at all, it
+polls. Being early costs one no-op nudge; being late costs a day of throughput.
+(Bead `tk-al95k`, mayor correction 2026-08-02T16:35Z, which supersedes the
+"the stated reset time is not trustworthy" framing in the note above it.)
 
 ## Tuning
 

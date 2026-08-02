@@ -18,11 +18,14 @@
 #   1. Not provider-specific. One defect, two providers — the signature set
 #      covers both wordings and is overridable ($QUOTA_PARK_MATCH) for a
 #      provider we have not met yet.
-#   2. Never trust the stated reset time. The Codex banner said "Aug 8th"; the
-#      limit actually reset on Aug 2. Sleeping until the parsed deadline would
-#      have kept those agents parked six extra days. We poll and retry on a
-#      backoff instead, so recovery tracks the ACTUAL reset, not the claimed
-#      one — the cost of being early is one no-op nudge.
+#   2. Do not gate recovery on the stated reset time. Quota can come back by a
+#      route no banner predicts: on 2026-08-02 the Codex banner said "Aug 8th"
+#      and was probably right about the natural window, but the operator
+#      triggered a manual reset on Aug 2 — sleeping until the parsed deadline
+#      would have kept those agents parked six extra days (bead correction,
+#      mayor, 2026-08-02T16:35Z). The banner time is a lower bound worth
+#      knowing, never an authority, so this polls instead of scheduling. Being
+#      early costs one no-op nudge; being late costs a day of throughput.
 #
 # A nudge is the only action taken. Killing a quota-parked agent is wrong: the
 # session is alive and correct, a fresh one hits the same block, and the
@@ -44,8 +47,8 @@ TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 
 # Provider quota banners. Anchored on the durable phrase, not the apostrophe
 # (Claude and Codex both render "You've" with a typographic ' that a C-locale
-# `.` will not match) and not on the reset clause (whose format differs per
-# provider and, per rule 2, lies anyway).
+# `.` will not match) and not on the reset clause (per-provider format, and
+# per rule 2 nothing here acts on it).
 #   Claude: "You've hit your session limit · resets 10:10am (UTC)"
 #           "/usage-credits to finish what you're working on."
 #   Codex:  "You've hit your usage limit... try again at Aug 8th, 2026 7:56 PM"
