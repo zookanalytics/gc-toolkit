@@ -35,6 +35,7 @@ defines the routing contract; it is not a command tutorial.
 | Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 | Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tiers loop `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd list --status=in_progress --assignee=<candidate>` (in-progress recovery) then `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…` (ready assigned), and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
 | Instance-suffixed `gc.routed_to` normalized on the **demand read side only** | gastownhall/gascity | `17130b324` — "Normalize routed work instance names in demand matching (#4596)". Read side: `controllerDemandRouteTarget` (`rigs/gascity/cmd/gc/build_desired_state.go:1718`, rationale comment at `:1707-1717`), reached from `defaultScaleCheckCountsAndDemand` (`:1474`, invoked at `:735`) for every template in `defaultScaleTargets` — which is *not* only the no-custom-`scale_check` pools (`:446`, `:491`, `:567`): a custom-`scale_check` pool also gets this probe while cold (`isCold` at `:476`; append + `coldWakeTemplates` at `:633-637`), its contribution clamped to 1 (`:757-759`) and merged as a maximum against the custom count (`:766-768`); helper `agentutil.NormalizePoolRouteTarget` (`rigs/gascity/internal/agentutil/resolve.go:228`); coverage `TestDefaultScaleCheckCountsAndDemandNormalizesInstanceSuffixedRouteTarget` and `…LeavesUnmatchedInstanceSuffixAlone` (`cmd/gc/build_desired_state_test.go`). Offer side deliberately unchanged and exact-match: `bdReadyPoolDemandShell` (`rigs/gascity/internal/config/workquery.go:41`) with `$target` from `poolDemandTarget()` (`:157`), and `hookClaimMatchesRoute`'s raw `==` (`rigs/gascity/cmd/gc/cmd_hook_claim.go:1205`) over base-name route targets (`cmd/gc/cmd_hook.go:468`, `:685`). Write side, two distinct helpers: `032c1fbcd` (#3963) centralizes the **agent-derived** route identity as `agentutil.RoutedToIdentity` (`resolve.go:204`, collapse to `PoolName`), which the default sling query inlines rather than calls (`internal/config/workquery.go:532-536` — `internal/config` cannot import `agentutil`, which imports `config`); the **explicit-target-string** collapse is the separate `agentutil.NormalizePoolRouteTarget` (`resolve.go:228`), applied by sling's built-in routing path at `cmd/gc/cmd_sling.go:766`. Assigned-work companion `738f44732` (#4597): `cmd/gc/assigned_work_scope.go:156`, `cmd/gc/pool_desired_state.go:178`. Read in the `rigs/gascity` fork at `390624b0e`, whose adopted upstream base is `e6135a435` (#4847). | 2026-07-31 |
+| `default_sling_formula` — a default formula on the target silently converts a bare `gc sling <target> <bead>` from Lane 1 into a Lane 4 attach | gastownhall/gascity + this city's config | Formula-branch predicate at `rigs/gascity/cmd/gc/cmd_sling.go:978` — taken when `IsFormula` is set, **or** `OnFormula` is non-empty, **or** `NoFormula` is unset and `Target.EffectiveDefaultSlingFormula()` is non-empty; the plain-routing predicate `missingBeadForceApplies` (`:1183`) carries the same condition inverted. Opt-out `--no-formula` ("suppress default formula (route raw bead)") at `:153`, mutually exclusive with `--formula` and `--on` at `:159-160`. Resolver `EffectiveDefaultSlingFormula` (own → inherited → empty) at `internal/config/config.go:3581`. Default-formula and `--on` share one attach pipeline, `attachFormulaToBead` — contract comment "graph-vs-legacy behavior is byte-identical across both entry points" — at `internal/sling/sling_core.go:479-497`. JSON `routed` is computed independently of any routing write at `cmd/gc/cmd_sling.go:1138`; payload keys at `:1090-1106`; `workflow_id` sourced from `result.WorkflowID` (`internal/sling/sling_core.go:730`, source-bead stamp at `:752`). `mol-polecat-work` is graph.v2 via `[requires] formula_compiler = ">=2.0.0"` (`.beads/formulas/mol-polecat-work.toml:48-49`), matching `graphV2Requirement` / `UsesGraphCompiler` (`internal/formula/requirements.go:14-16`, `:299`). City scope: `default_sling_formula = "mol-polecat-work"` in this city's `city.toml`, resolved onto every agent in `gc config show`. Stamp-don't-sling counterexample in this repo: `assets/scripts/check-set-heal.sh:355-357` (rationale comment) and `:393` (the direct `gc.routed_to` stamp); the script contains no `gc sling` call. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 
 ## The maintainer's ruling
 
@@ -79,6 +80,18 @@ answer for.
   ruling's own "assign the named-session identity directly" step, so it
   refines rather than contradicts the "no `assignee` by default"
   decision quoted above.
+- **Conditional on the target carrying no `default_sling_formula`.**
+  The field contract above is Lane 1's only while that field is unset.
+  A target that carries a default formula — including one that merely
+  *inherits* it from city scope — silently turns a bare
+  `gc sling <target> <bead>`, with no `--formula` and no `--on`, into a
+  **Lane 4 formula attach**, and under a graph.v2 default formula that
+  writes *neither* routing field. `--no-formula` is the opt-out that
+  restores the shape above. This is not a corner case in a city that
+  sets the field at city scope: see
+  ["When a bare sling is silently Lane 4"](#when-a-bare-sling-is-silently-lane-4--default_sling_formula),
+  which also covers why it is fatal for a bead that must be claimed
+  directly.
 - **Writes the *base* pool name, always.** Sling a pool **slot** —
   `gc sling gc-toolkit/gc-toolkit.polecat-2 tk-abcde` — and the stamped
   value is still the base `gc-toolkit/gc-toolkit.polecat`. A slot suffix
@@ -230,6 +243,82 @@ To check whether such a bead is really dispatched, look at
 attach) and resolve the wisp root it names — not the bead's own routing
 fields.
 
+#### When a bare sling is silently Lane 4 — `default_sling_formula`
+
+Lane 4 is not entered only by typing `--on`. A target may carry
+`default_sling_formula`, and when it does, a bare
+`gc sling <target> <bead>` — no `--formula`, no `--on` — is **not Lane 1
+at all**. The formula branch is taken whenever
+
+```go
+opts.IsFormula || opts.OnFormula != "" ||
+    (!opts.NoFormula && opts.Target.EffectiveDefaultSlingFormula() != "")
+```
+
+(`rigs/gascity/cmd/gc/cmd_sling.go:978`); the plain-routing predicate
+`missingBeadForceApplies` (`:1183`) carries the same condition inverted.
+From there the default-formula path and `--on` converge on one function,
+`attachFormulaToBead`, whose contract comment states that
+"graph-vs-legacy behavior is byte-identical across both entry points"
+(`rigs/gascity/internal/sling/sling_core.go:479-497`). There is no
+weaker "default formula" variant of Lane 4 — there is only Lane 4.
+
+The field resolves permissively. `EffectiveDefaultSlingFormula`
+(`rigs/gascity/internal/config/config.go:3581`) reads the agent's own
+`default_sling_formula`, then the **inherited** value, then empty — so
+an agent need not declare the field to be governed by it. This city sets
+`default_sling_formula = "mol-polecat-work"` at **city scope** in
+`city.toml`, which resolves onto every agent in `gc config show`. Here,
+therefore, a bare `gc sling <target> <bead>` is **Lane 4 for every
+target**. And `mol-polecat-work` is graph.v2 — it declares `[requires]
+formula_compiler = ">=2.0.0"`, exactly the `graphV2Requirement` constant
+that `UsesGraphCompiler` tests
+(`rigs/gascity/internal/formula/requirements.go:14-16`, `:299`) — so
+Lane 4's graph.v2 bullet applies in full: **neither routing field is
+written on the bead.**
+
+**Why this is fatal for a directly-claimed bead.** Most work beads do
+not care: a graph.v2 wisp drives them, and the trap above is precisely
+that their empty routing fields are correct. But a bead whose own
+`gc.routed_to` *is* the offer predicate — a hand-filed codex review or
+re-gate bead, which no wisp drives and which the pool must claim
+directly — is destroyed by this, and silently. The sling reports
+success:
+
+```json
+{"schema_version":"1","success":true,"routed":true,"workflow_id":"..."}
+```
+
+`routed: true` is not a claim that a routing field was written. It is
+computed as `result.Routed > 0 || (!result.Idempotent &&
+result.BeadID != "" && !result.DryRun)`
+(`rigs/gascity/cmd/gc/cmd_sling.go:1138`), so it reports true on the
+graph.v2 path that wrote no routing field at all. Exit code is 0,
+nothing warns, and the bead ends with `gc.routed_to` empty — matching no
+offer predicate, since [the read side](#the-read-side-the-claim-predicate)
+is exact-match on that key. The bead sits forever.
+
+**The rule: stamp it, don't sling it.** A bead that must be offered
+directly gets `gc.routed_to` written directly —
+`gc bd update <bead> --set-metadata gc.routed_to=<pool>` — and is never
+slung. The generated path does exactly that and calls `gc sling` nowhere:
+`check-set-heal.sh` stamps the review bead's other fields first and
+writes `gc.routed_to` last, in its own call, for the reason its comment
+gives — "`gc.routed_to` is what makes the bead claimable"
+(`assets/scripts/check-set-heal.sh:355-357`, stamp at `:393`). Where a
+sling is wanted anyway, `--no-formula` ("suppress default formula (route
+raw bead)", `rigs/gascity/cmd/gc/cmd_sling.go:153`; mutually exclusive
+with `--formula` and `--on` at `:159-160`) restores Lane 1's contract on
+a target that carries a default.
+
+**Read this together with the duplicate-wisp trap.** That subsection
+teaches that absent routing fields are the *designed* shape for a
+graph.v2 work bead. This is its other half: the same absence on a bead
+meant to be claimed **directly** is always a bug. The two are told apart
+by the same field — `metadata.workflow_id` / `metadata.molecule_id`. A
+directly-offered bead should carry neither; if one is there, the bead
+was slung when it should have been stamped.
+
 #### Adjacent — standalone formula launch (`gc sling <target> <formula>`)
 
 The other half of the `IsFormula` split, and the shape most often
@@ -274,6 +363,16 @@ Lane 1's — a **pool target** gets `metadata.gc.routed_to=<target>` and no
 `assignee`; a **singleton target** additionally gets `assignee=<target>`
 from the same singleton-stamp rule. Resolution only chooses *which*
 target Lane 1 receives; it introduces no new field behavior.
+
+**But the resolved target still decides the lane.** "Routes it through
+Lane 1" above is shorthand for "routes it through whatever lane the
+resolved target implies." A similarly named but otherwise unrelated
+field — `default_sling_formula`, resolved off the *target*, not off this
+step — sends the dispatch down **Lane 4** instead, writing no routing
+field at all when that formula is graph.v2. The two
+`default_sling_target*` fields choose which *target*;
+`default_sling_formula` on that target chooses which *lane*. See
+["When a bare sling is silently Lane 4"](#when-a-bare-sling-is-silently-lane-4--default_sling_formula).
 
 The typical configuration points a rig's `default_sling_target` at that
 rig's own polecat pool in `city.toml` — e.g. `default_sling_target =
