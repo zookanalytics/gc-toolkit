@@ -3,10 +3,12 @@
 # ephemeral-aware.
 #
 #   refinery + deacon — tiers 2 and 3 present (see below)
-#   refinery + deacon + witness — every wisp reconcile query is
+#   refinery + deacon + witness + boot — every wisp query is
 #                                 ephemeral-aware (--include-infra)
 #   witness — every wisp reconcile query is scoped to mol-witness-patrol
 #             roots (see below)
+#   boot — the deacon-wisp read is scoped to mol-deacon-patrol roots
+#          (see below)
 #
 # Tier-1 (in-progress wisp) was the historical query and is preserved.
 # Tier-2 catches routed work beads with metadata.branch — these arrive when a
@@ -112,8 +114,10 @@ check_block() {
     # Formula scoping: molecule roots are formula-specific, so a reconcile that
     # picks a survivor and BURNS the rest must filter on the patrol title first
     # — otherwise an unrelated molecule root assigned to the same agent is
-    # adopted as the patrol wisp or destroyed as "surplus". Asserted only for
-    # blocks whose reconcile burns (witness); the deacon/refinery tier-1 resume
+    # adopted as the patrol wisp or destroyed as "surplus". Asserted for the
+    # witness (whose reconcile burns) and for boot (whose read must land on the
+    # deacon's patrol wisp, not on whatever molecule the deacon happens to hold
+    # — the crowding failure tk-jd4b8 fixed). The deacon/refinery tier-1 resume
     # query feeds no burn, so it is intentionally unscoped there, and their
     # tier-3 adoption already filters on title.
     if [ -n "$patrol_title" ]; then
@@ -131,9 +135,20 @@ check_block() {
 check_block "layered-startup-discovery-refinery" "refinery" tiers
 check_block "layered-startup-discovery-deacon" "deacon" tiers
 check_block "layered-startup-discovery-witness" "witness" "" "mol-witness-patrol"
+# Boot READS the deacon's wisp (freshness signal) rather than reconciling its
+# own, so tiers 2 and 3 do not apply — but the ephemeral-awareness and
+# title-scoping assertions do, and for boot they are the whole point of the
+# block (tk-jd4b8). The wisp read is a dedicated --type=molecule query filtered
+# to mol-deacon-patrol precisely so a busy deacon's other in-progress rows
+# cannot crowd the wisp out of a capped result; asserting the title here is what
+# stops that query drifting back to the broad untyped form that made the signal
+# dead in the first place. The block's second, deliberately untyped "what else
+# is the deacon holding" query is not scored by either assertion — both key on
+# --type=molecule.
+check_block "layered-startup-discovery-boot" "boot" "" "mol-deacon-patrol"
 
 if [ ${#violations[@]} -eq 0 ]; then
-    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol"
+    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot wisp read is scoped to mol-deacon-patrol"
     exit 0
 fi
 
