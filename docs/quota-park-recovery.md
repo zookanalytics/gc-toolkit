@@ -76,8 +76,23 @@ wedged during the very incidents this order recovers from. Unbounded, one hung
 capped at `QUOTA_PARK_CALL_TIMEOUT` (a wedged one is skipped, not fatal) and the
 pass as a whole at `QUOTA_PARK_SWEEP_BUDGET`, after which the remainder defers
 to the next cycle rather than overlapping it — reported in the summary line, not
-silently. Same `run_bounded` idiom as `assets/scripts/merge-skill.sh`; hosts
-without coreutils `timeout` degrade to unbounded calls rather than lose recovery.
+silently. Same `run_bounded` idiom as `assets/scripts/merge-skill.sh`.
+
+**And the bound is a hard one where the host allows it.** `timeout N` sends
+SIGTERM and then *waits*: a child free to ignore the signal runs as long as it
+likes, which `timeout 1 bash -c 'trap "" TERM; sleep 4'` demonstrates in four
+seconds. A `gc` call wedged in the runtime or in Dolt is precisely the process
+least likely to service a signal promptly, so the bound most relied on to keep
+one hung call from stranding the sweep is the one likeliest to be ignored — by
+the very call that provoked it. `timeout -k` adds the SIGKILL nothing can
+ignore, `QUOTA_PARK_KILL_AFTER` (5s) is the grace between them, and expiry stays
+a non-zero rc either way — 124 for the timeout, 128+n where the kill lands first
+— which the nudge and escalation paths already treat as the ambiguous case it
+is. A host whose `timeout(1)` predates `-k` keeps the soft bound and **says so
+once per pass**: recovery still runs, but a call that ignores SIGTERM can hold
+the sweep past its budget, and a short pass must not be mistaken for a full one.
+A host with no `timeout` at all degrades to unbounded calls rather than lose
+recovery — dropping every probe would disable the order outright.
 
 **And the next pass starts where the last one stopped.** Bounding the pass is
 only half the problem; the other half is *which* sessions the budget gets spent
@@ -98,6 +113,24 @@ the last record is the identity — so on a healthy city the order is simply the
 list order, unchanged. The regression asserts both halves: with the cursor
 removed between passes the park behind the prefix is never reached, with it kept
 the rotation walks past and reaches it.
+
+**This order deletes only files it wrote.** Ending an episode removes a file in
+a directory this order does not own: `QUOTA_PARK_STATE_DIR` defaults inside the
+shared city runtime dir and is an override besides, and a session id is not a
+rare shape for a filename. A bare `rm -f "$STATE_DIR/<id>"` is therefore not
+"end the episode" but "delete whatever is at that name" — reproduced during
+review with an unrelated regular file at `$STATE_DIR/lx-clean`, destroyed by one
+clean sweep. The week-old prune below already had a narrow ownership test;
+what it did not have was the every-three-minutes paths using it. Now all three
+share one: directly in `STATE_DIR`, a regular file and not a symlink, named like
+the ids we write (`safe_id`), carrying a state file's own `first_seen=` header.
+Anything failing one of them is somebody else's and is left alone.
+
+That refusal has a price, and it is the right one to pay: a foreign file at a
+live session's path keeps `--status` answering `unknown` for that session rather
+than `no`, because there is a file there this order cannot read as an episode.
+The patrols then apply their own judgment, which is the safe direction and the
+honest one.
 
 **Only a successful peek may end an episode.** Ending one deletes the state
 file, which is what resets the backoff and the once-per-episode escalation flag.
@@ -197,7 +230,7 @@ on a pass having run, and `reason` names the gap:
 |---|---|---|
 | `-` | A verdict was given (`yes` or `no`) | — |
 | `no-recent-sweep` | `.heartbeat` is stale: no pass lately at all | **Yes** — say so in the patrol log |
-| `not-swept` | A pass ran but never reached this session: deferred by `SWEEP_BUDGET`, an unreadable pane, an id it refused, attached, or not in the active list | No — ordinary partial coverage |
+| `not-swept` | A pass ran but has no usable record of this session: deferred by `SWEEP_BUDGET`, an unreadable pane, an id it refused, attached, not in the active list, or a verdict it could not persist | No — ordinary partial coverage |
 | `stale-episode` | An episode exists but nothing has confirmed it since `last_seen` | No |
 | `unsafe-session-id` | An id this order will not name a file with, so it holds no state for it | No |
 
@@ -211,6 +244,27 @@ the surface built to prevent it. Hence a third file beside the heartbeat:
 `.sweep-coverage`, one `<session-id> <timestamp>` line per session the sweep
 actually classified, merged across passes and aged out at `STALE_AFTER`. `no`
 requires a line there; anything else is `unknown` with `reason=not-swept`.
+
+A coverage line means more than "the pane was read": it means the verdict is
+still there to be read back. For a parked session the state file *is* the
+verdict — `--status` answers `yes` out of it — so a line written at peek time
+claims more than the pass can show. Reproduced during review with a directory at
+`$STATE_DIR/<id>`: the sweep detected the park, nudged it, could not persist the
+episode, and the surface then reported `quota_park=no reason=-` for a session it
+had just nudged. So the vouch waits on the write: a clean or excluded session is
+vouched for when its file is gone (that *is* the verdict), a parked one only
+once its episode is written. A write that fails withholds the vouch, and the
+session reports `unknown` / `not-swept` — a gap, named in the vocabulary the
+patrols already have rather than a new value none of them define. It is counted
+and logged in the summary line too; a sweep that could not record what it found
+must not read as one that found nothing.
+
+Making that failure *visible* was half the fix. `mv file dir` does not replace
+the directory, it moves the file inside it, so a directory at a session's state
+path swallowed the episode while the write reported success. The atomic writer
+now refuses a directory destination (real or symlinked) — the one type `mv`
+redirects into rather than replaces, which is why a planted symlink or FIFO is
+still safely destroyed rather than followed.
 
 `escalated` is a **0/1** field. The state file carries a third value —
 `unconfirmed`, for a mail whose bound expired mid-send — but that is internal
@@ -313,6 +367,7 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_ESCALATE_AFTER` / `_TO` | `7200` / `mayor/` | one mail per long park; `0` disables |
 | `QUOTA_PARK_EXCLUDE` | — | ERE of aliases never nudged |
 | `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call; `0` disables the bound |
+| `QUOTA_PARK_KILL_AFTER` | `5` | seconds after that before SIGKILL, for a call that ignores SIGTERM; must be ≥ 1 (`timeout -k 0` is accepted and would silently restore the soft bound) |
 | `QUOTA_PARK_SWEEP_BUDGET` | `120` | seconds per pass before the rest defers; `0` disables |
 | `QUOTA_PARK_STALE_AFTER` | `600` | how long `--status` treats a sweep and a sighting as evidence; must be ≥ 1 |
 | `QUOTA_PARK_STATE_DIR` | `$GC_CITY/.gc/runtime/quota-park` | per-session episode state |

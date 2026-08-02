@@ -131,6 +131,17 @@ EXCLUDE_RE="${QUOTA_PARK_EXCLUDE:-}"
 CALL_TIMEOUT="${QUOTA_PARK_CALL_TIMEOUT:-15}"
 SWEEP_BUDGET="${QUOTA_PARK_SWEEP_BUDGET:-120}"
 
+# How long after CALL_TIMEOUT a call that ignored the timeout's SIGTERM gets
+# before SIGKILL. `timeout N` on its own is a SOFT bound: it signals, then waits
+# for a child that is free to ignore the signal — verified with `timeout 1 bash
+# -c 'trap "" TERM; sleep 5'`, which ran the full 5s. A hung `gc` is exactly the
+# process least likely to be in a state to handle a signal politely, so the
+# bound that is supposed to keep one wedged call from stranding the sweep is
+# precisely the one that can fail to. `timeout -k` adds the hard half; hosts
+# whose timeout(1) lacks it say so once per pass (see BOUND_MODE below) rather
+# than pretending to a bound they do not have.
+KILL_AFTER="${QUOTA_PARK_KILL_AFTER:-5}"
+
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
 DEFAULT_STATE_DIR="${DEFAULT_STATE_DIR:-${TMPDIR:-/tmp}/gc}/quota-park"
@@ -182,8 +193,19 @@ num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 # leading dot, so a temp file left by a killed pass can never be read back as an
 # episode, reported as a parked session, or pruned as one — the prune below
 # collects them by name instead.
+#
+# A DIRECTORY at the destination is the one type that must be refused rather
+# than replaced, and refusing it is what makes the failure visible at all: `mv
+# file dir` does not replace the directory, it moves the file INSIDE it (so does
+# `mv file symlink-to-dir` — hence `-d`, which follows the link). Left to `mv`,
+# a directory at a parked session's state path therefore SWALLOWS the episode
+# while reporting success: the state lands at `$STATE_DIR/<id>/.qpn-tmp.XXXXXX`
+# where nothing reads it, `--status` finds no episode, and the session that was
+# just nudged is published as clean. Reproduced during review. A refusal here is
+# what lets the caller withhold coverage and say so.
 write_atomic() {
     local dest="$1" tmp
+    [ -d "$dest" ] && return 1
     tmp="$(mktemp "$STATE_DIR/.qpn-tmp.XXXXXX" 2>/dev/null)" || return 1
     if cat > "$tmp" 2>/dev/null && mv -f "$tmp" "$dest" 2>/dev/null; then
         return 0
@@ -223,6 +245,40 @@ write_state() {
 # session. What that runs is the receiving CLI's business, not ours; refusing to
 # hand it over is.
 safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | -* | *..*) return 1 ;; *) return 0 ;; esac }
+
+# Delete an episode state file — but only one this order actually wrote.
+#
+# Every path that ends an episode deletes a file in a directory this order does
+# not own: STATE_DIR defaults inside the shared city runtime dir and is an
+# override besides, and a session id is not a rare shape for a filename. A plain
+# `rm -f "$STATE_DIR/$id"` therefore deletes whatever happens to sit at that
+# name — reproduced during review with an unrelated regular file at
+# `$STATE_DIR/lx-clean`, destroyed by a clean sweep. The narrow ownership model
+# the week-old prune already documents has to hold on the every-3-minutes paths
+# too, and this is that test in one place so the three callers cannot drift:
+# directly in STATE_DIR, a regular file and not a symlink, named like the ids we
+# write (`safe_id`), and carrying a state file's own `first_seen=` header.
+#
+# Anything failing one of them is somebody else's file and is left alone. That
+# is deliberately not free: a foreign file at a live session's path keeps
+# `--status` answering `unknown` for it rather than `no`, since there is a file
+# there this order cannot read as an episode. Unknown is the safe direction —
+# the patrols fall back to their own judgment — and it is the honest one.
+#
+# Reads line 1 directly rather than through `head | grep`: under `pipefail` a
+# matching `grep -q` can close the pipe first, and the SIGPIPE'd `head` then
+# fails the pipeline, which would read as "not our file" on exactly the files
+# this is meant to remove.
+owned_state_rm() {
+    local path="$1" base header
+    [ -f "$path" ] && [ ! -L "$path" ] || return 0
+    base="${path##*/}"
+    safe_id "$base" || return 0
+    header=""
+    IFS= read -r header < "$path" 2>/dev/null || true
+    case "$header" in first_seen=*) ;; *) return 0 ;; esac
+    rm -f "$path"
+}
 
 # How long ago this order last CLASSIFIED a session — reached a verdict on its
 # pane — as opposed to merely having run a pass in which that session existed.
@@ -338,6 +394,12 @@ detector_class() {
 num_min() { num "${1:-}" && [ "$1" -ge "$2" ]; }
 num_min "$CALL_TIMEOUT"   0 || CALL_TIMEOUT=15
 num_min "$SWEEP_BUDGET"   0 || SWEEP_BUDGET=120
+# Floor 1, same rule as the other knobs that do not document zero as an off
+# switch. `timeout -k 0` is accepted rather than rejected — it simply disables
+# the kill escalation — so a zero here silently restores the soft bound this
+# knob exists to close, on the one path where a wedged call strands the sweep.
+# Turning the bound off entirely is CALL_TIMEOUT=0's job, and it says so.
+num_min "$KILL_AFTER"     1 || KILL_AFTER=5
 num_min "$ESCALATE_AFTER" 0 || ESCALATE_AFTER=7200
 num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120
 num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
@@ -533,24 +595,59 @@ if [ -n "$EXCLUDE_RE" ] && ! valid_ere "$EXCLUDE_RE"; then
     EXCLUDE_RE=""
 fi
 
+# What kind of bound this host can actually enforce, resolved once:
+#   2  hard — `timeout -k`: SIGTERM at CALL_TIMEOUT, SIGKILL KILL_AFTER later
+#   1  soft — `timeout` only: SIGTERM, then wait for a child free to ignore it
+#   0  none — no timeout(1) at all (some macOS hosts)
+#
+# Probed rather than assumed: `-k` is GNU/uutils/busybox, but this order runs
+# wherever the pack does and an unsupported flag would fail EVERY bounded call
+# with a usage error — every pane unreadable, recovery silently off. `true` is
+# the cheapest possible probe and the bounds are 1s it never reaches.
+BOUND_MODE=0
+if command -v timeout >/dev/null 2>&1; then
+    if timeout -k 1 1 true >/dev/null 2>&1; then BOUND_MODE=2; else BOUND_MODE=1; fi
+fi
+
 # Every `gc` call goes through here. Two things it guarantees:
 #
-#   1. A bound (CALL_TIMEOUT). `timeout` exits 124 on expiry — a non-zero rc, so
-#      a wedged call lands in the caller's existing failure branch (empty pane,
-#      failed nudge) instead of hanging the sweep. Same idiom and env-override
-#      shape as merge-skill.sh's run_bounded. No coreutils `timeout` (some macOS
-#      hosts) degrades to an unbounded call rather than dropping the probe:
+#   1. A bound (CALL_TIMEOUT), and where the host allows it, a HARD one. Plain
+#      `timeout` sends SIGTERM and then waits — indefinitely, if the child
+#      ignores it (`timeout 1 bash -c 'trap "" TERM; sleep 4'` runs the full 4s).
+#      A `gc` call wedged in the runtime or in Dolt is the process least likely
+#      to service a signal promptly, so the bound most relied on to stop one
+#      wedged call stranding the sweep is the one likeliest to be ignored. `-k`
+#      adds the SIGKILL nothing can ignore. Either way expiry is a non-zero rc —
+#      124 for the timeout, 128+n where the kill lands first (137 on the hosts
+#      tested) — so a wedged call falls into the caller's existing failure branch
+#      (empty pane, failed nudge). Both are already handled as the ambiguous
+#      case by the nudge and escalation branches below, which is what they are:
+#      the call may have been accepted before it stopped answering. Same idiom
+#      and env-override shape as merge-skill.sh's run_bounded. No coreutils
+#      `timeout` degrades to an unbounded call rather than dropping the probe:
 #      skipping every call would silently disable recovery on such a host.
 #   2. stdin CLOSED. The session loop below reads its work list from a
 #      here-string on fd 0; a child that inherited and consumed it would
 #      truncate the sweep — sessions would vanish from the run rather than fail.
 run_bounded() {
-    if [ "$CALL_TIMEOUT" -gt 0 ] && command -v timeout >/dev/null 2>&1; then
-        timeout "$CALL_TIMEOUT" "$@" </dev/null
-    else
+    if [ "$CALL_TIMEOUT" -le 0 ] || [ "$BOUND_MODE" -eq 0 ]; then
         "$@" </dev/null
+    elif [ "$BOUND_MODE" -eq 2 ]; then
+        timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@" </dev/null
+    else
+        timeout "$CALL_TIMEOUT" "$@" </dev/null
     fi
 }
+
+# Said out loud, once per pass, on a host that can only bound softly: the sweep
+# still runs and still recovers agents, but a `gc` call that ignores SIGTERM can
+# hold it past its budget, and the summary line's numbers are then a floor
+# rather than a full pass. An operator reading a short sweep deserves to know
+# which of the two it was. Deliberately after the `--status` exit above: the
+# patrols read that surface every cycle and this is not their problem.
+if [ "$CALL_TIMEOUT" -gt 0 ] && [ "$BOUND_MODE" -eq 1 ]; then
+    echo "quota-park-nudge: this host's timeout(1) has no -k — call bounds are SIGTERM-only, so a gc call that ignores it is effectively unbounded"
+fi
 
 # True once the pass has run longer than SWEEP_BUDGET (0 = no budget). Checked
 # per session so a slow sweep stops at a session boundary, with its state files
@@ -561,8 +658,40 @@ sweep_expired() {
 }
 
 checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0; unconfirmed_now=0
+state_failed=0
 last_attempted=""
 covered_now=""
+
+# Vouch for one session: this pass reached it, classified it, and its verdict is
+# readable back out of the state directory. That last clause is the whole point
+# — see write_state_vouched.
+vouch() { covered_now="$covered_now$1 $NOW"$'\n'; }
+
+# Persist an episode, and vouch for the session only if the write landed.
+#
+# Coverage used to be recorded as soon as the pane was read, which conflates two
+# different facts: that this pass CLASSIFIED a session, and that the
+# classification is still there to be read. For a parked session the state file
+# IS the verdict — `--status` answers `yes` out of it — so a write that fails
+# leaves a session that was detected, nudged, and then published as `no`, on the
+# strength of a coverage line saying we looked. Reproduced during review with a
+# directory at `$STATE_DIR/<id>`: swept, nudged, `quota_park=no reason=-`. A
+# parked agent reported clean is precisely the answer that sends a patrol down
+# the warrant path this order exists to hold back.
+#
+# So a failed write withholds the vouch instead, and `--status` falls to
+# `unknown` / `not-swept` — the same answer any other uninspected session gets,
+# in a vocabulary the patrols already handle. Counted and logged, because
+# silently uncovering a session looks identical to never having reached it.
+write_state_vouched() {
+    if write_state "$@"; then
+        vouch "$id"
+        return 0
+    fi
+    state_failed=$((state_failed + 1))
+    echo "quota-park-nudge: state write FAILED for $alias ($id) — not vouched for; --status reports unknown until it succeeds"
+    return 1
+}
 
 # That a pass RAN, and what it saw. This is what makes the status surface
 # refusable: warrant suppression in the patrols is conditional on a recent sweep,
@@ -690,18 +819,21 @@ while IFS=$'\t' read -r id alias; do
     fi
 
     # The pane was read, so this session gets a verdict below whichever branch it
-    # takes — and this pass can therefore vouch for it. Recorded for `--status`,
-    # which may only answer `no` for a session it can show was actually looked
-    # at; see write_coverage. Deliberately AFTER the unreadable branch: a peek
-    # that failed classified nothing.
-    covered_now="$covered_now$id $NOW"$'\n'
+    # takes. Whether this pass may VOUCH for it — the record `--status` needs
+    # before it answers `no` — is decided per branch: for a clean or excluded
+    # session the verdict is "no episode" and removing the file completes it, so
+    # the vouch goes with the removal; for a parked one the verdict lives IN the
+    # state file, so it waits on that write landing (write_state_vouched).
+    # Nothing is vouched before the unreadable branch above: a peek that failed
+    # classified nothing.
 
     # Parked = a bare provider banner at the bottom of an idle pane. Busy,
     # cited, or scrolled-up all mean not parked. Clearing the state file is what
     # ends an episode: a recovered agent starts the next block from attempt 1.
     if printf '%s\n' "$pane" | grep -qEi -- "$BUSY_RE" \
         || ! banner_candidates "$pane" | grep -qEi -- "$MATCH_RE"; then
-        rm -f "$state"
+        owned_state_rm "$state"
+        vouch "$id"
         continue
     fi
 
@@ -719,7 +851,8 @@ while IFS=$'\t' read -r id alias; do
         # a patrol deferring its warrant to a recovery that is switched off for
         # exactly that session — and `unknown` afterwards. Neither is the
         # contract above. `no` is, and that needs the file gone.
-        rm -f "$state"
+        owned_state_rm "$state"
+        vouch "$id"
         echo "quota-park-nudge: $alias parked (excluded, not nudged)"
         continue
     fi
@@ -752,7 +885,7 @@ while IFS=$'\t' read -r id alias; do
         # Still blocked, still inside the backoff window — say nothing, wait. The
         # sighting is still recorded: a session nobody nudges this cycle is one
         # this pass nonetheless confirmed parked, and `--status` reads last_seen.
-        write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated" "$NOW" "$dclass"
+        write_state_vouched "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated" "$NOW" "$dclass" || true
         continue
     fi
 
@@ -856,7 +989,7 @@ and this mail is a durable artifact. Read it directly with: gc session peek $id"
         fi
     fi
 
-    write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated" "$NOW" "$dclass"
+    write_state_vouched "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated" "$NOW" "$dclass" || true
 done <<< "$sessions"
 
 # Where the next pass starts, and the record that this one ran. Written together,
@@ -877,23 +1010,18 @@ write_heartbeat
 # inside the shared city runtime directory: a broad `find "$STATE_DIR" -type f
 # -mtime +7 -delete` is a city-scoped order deleting week-old files it has never
 # heard of, and a mis-set or shared QUOTA_PARK_STATE_DIR is all it takes to
-# point that at somebody else's state. Three predicates keep it to our own
-# files: DIRECTLY in STATE_DIR (`-maxdepth 1`, so a nested tree is never
-# touched, whatever its age); named like the session ids we write (`safe_id`,
-# the same test that decides which ids may name a file at all); and carrying a
-# state file's own `first_seen=` header on line 1. Anything failing one of them
-# is somebody else's file and is left alone — including this order's OWN
+# point that at somebody else's state. The ownership test is `owned_state_rm`'s
+# — a regular non-symlink file, named like the session ids we write, carrying a
+# state file's own `first_seen=` header — and it is the same one the two
+# every-cycle removal paths use, so no path can drift into deleting more than
+# the others. Here it is narrowed once more by age and by depth: `-maxdepth 1`,
+# so a nested tree is never touched whatever its age. Anything failing one of
+# those is somebody else's file and is left alone — including this order's OWN
 # `.sweep-cursor` and `.heartbeat`, whose leading dot puts them outside safe_id
-# on purpose. `-print0` because a name is not
-# trusted to be one line — split on newlines, a hostile name becomes two paths
-# and the second is a relative one.
-#
-# The header test reads line 1 directly rather than through `head | grep`: under
-# `pipefail` a `grep -q` that matches can close the pipe first, and the SIGPIPE'd
-# `head` then fails the whole pipeline — which would read as "not our file" and
-# skip the delete on exactly the files this is meant to prune.
+# on purpose. `-print0` because a name is not trusted to be one line — split on
+# newlines, a hostile name becomes two paths and the second is a relative one.
 prune_stale_state() {
-    local path base header
+    local path base
     while IFS= read -r -d '' path; do
         base="${path##*/}"
         # This order's own abandoned temp files — a pass killed between `mktemp`
@@ -902,11 +1030,7 @@ prune_stale_state() {
         # forever; `safe_id` would otherwise skip them for their leading dot,
         # which is the same property that keeps them out of `--status`.
         case "$base" in .qpn-tmp.*) rm -f "$path"; continue ;; esac
-        safe_id "$base" || continue
-        header=""
-        IFS= read -r header < "$path" 2>/dev/null || true
-        case "$header" in first_seen=*) ;; *) continue ;; esac
-        rm -f "$path"
+        owned_state_rm "$path"
     done < <(find "$STATE_DIR" -maxdepth 1 -type f -mtime +7 -print0 2>/dev/null || true)
 }
 prune_stale_state
@@ -921,4 +1045,10 @@ deferred=""
 [ "$skipped" -gt 0 ] && deferred=", $skipped deferred (sweep budget ${SWEEP_BUDGET}s)"
 unconf=""
 [ "$unconfirmed_now" -gt 0 ] && unconf=", $unconfirmed_now unconfirmed (bound expired mid-delivery)"
-echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$unconf$unread$unsafe$deferred"
+# A session detected and acted on whose verdict did not persist. Named here for
+# the same reason as the rest: it is coverage this pass did not achieve, and a
+# sweep that could not record what it found must not read as one that found
+# nothing.
+statefail=""
+[ "$state_failed" -gt 0 ] && statefail=", $state_failed state write failed (not vouched for)"
+echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$unconf$unread$unsafe$deferred$statefail"

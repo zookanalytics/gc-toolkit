@@ -59,7 +59,15 @@
 # (ag) excluding an alias mid-episode clears the state that episode left behind;
 # (ah) a session list that FAILED does not refresh the heartbeat, so a wedged
 # order stops vouching for anything; (ai) every value the surface emits is one
-# the two patrol formulas and the doc actually define.
+# the two patrol formulas and the doc actually define; (aj) ending an episode
+# removes only a file this order wrote, so an unrelated file at a session-id-
+# shaped path survives a clean sweep and an exclusion alike — while its own file
+# is still cleared; (ak) a parked session whose episode could not be persisted
+# reports `unknown`, never the clean `no` a coverage line written at peek time
+# would have claimed, and the episode is not swallowed by a directory at its
+# path; (al) the per-call bound holds even against a call that IGNORES SIGTERM,
+# and a host that can only bound softly says so — without leaking the warning
+# into the status surface.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -201,6 +209,19 @@ case "$1 $2" in
     # behind it, and that needs several. Glob, unquoted on purpose; the default
     # matches no session id anyone would issue.
     case "$3" in ${FAKE_HANG_GLOB:-__nothing__}) exec sleep 30 ;; esac
+    # A call that hangs AND IGNORES SIGTERM. `sleep` dies politely on the
+    # signal, so the hangs above are stopped by a plain `timeout` and say
+    # nothing about what happens when the child does not cooperate — which is
+    # the state a wedged `gc` is actually in. `trap '' TERM` is inherited as
+    # SIG_IGN by the sleeps below, so only SIGKILL ends this. 8s: long enough
+    # that a regression to a SIGTERM-only bound blows past the assertion, short
+    # enough not to make the suite slow.
+    if [ "${FAKE_TERMPROOF_PEEK:-}" = "$3" ]; then
+      trap '' TERM
+      end=$(( $(date +%s) + 8 ))
+      while [ "$(date +%s)" -lt "$end" ]; do sleep 0.2 || true; done
+      exit 0
+    fi
     # A peek that ERRORS, as opposed to one that hangs: a transient runtime
     # failure. The caller learns nothing about the pane either way.
     [ "${FAKE_FAIL_PEEK:-}" = "$3" ] && exit 7
@@ -1204,7 +1225,132 @@ grep -q '^session=lx-codex quota_park=unknown .*reason=no-recent-sweep$' "$TMP/s
     && ok "an order that could not list sessions vouches for nothing" \
     || bad "an order that could not list sessions vouches for nothing ($(tail -1 "$TMP/status27"))"
 
-# --- Run 28: the surface and its consumers speak the same language. ---------
+# --- Run 28: ending an episode removes only this order's OWN state file. ----
+# The week-old prune (run 15) is careful about ownership. The paths that run
+# every three minutes were not: a clean pane and an excluded alias each ended
+# their episode with a bare `rm -f "$STATE_DIR/<id>"`, which is not "end the
+# episode" but "delete whatever is at that name" — in a directory this order
+# does not own, since STATE_DIR defaults inside the shared city runtime dir and
+# is an override besides. A session id is not a rare shape for a filename. That
+# is the prune's blast radius on a fuse 3360× shorter, and it was reproduced
+# during review: an unrelated regular file at $STATE_DIR/lx-clean, destroyed by
+# one clean sweep. Same ownership test as the prune, now shared by all three.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+printf '{"unrelated":"component state"}\n' > "$TMP/state/lx-clean"
+printf '{"unrelated":"component state"}\n' > "$TMP/state/lx-codex"
+QUOTA_PARK_EXCLUDE='ripley' bash "$SCRIPT" > "$TMP/out28"
+[ -s "$TMP/state/lx-clean" ] \
+    && ok "a clean pane leaves an unrelated file at a session-id-shaped path alone" \
+    || bad "a clean pane leaves an unrelated file at a session-id-shaped path alone"
+[ -s "$TMP/state/lx-codex" ] \
+    && ok "an excluded alias leaves an unrelated file at its path alone too" \
+    || bad "an excluded alias leaves an unrelated file at its path alone too"
+# The cost of that refusal, stated so it stays deliberate: a file this order
+# cannot read as an episode is one it cannot answer `no` for either. Unknown is
+# the safe direction — the patrols apply their own judgment — and the honest one.
+bash "$SCRIPT" --status lx-clean > "$TMP/status28"
+grep -q '^session=lx-clean quota_park=no ' "$TMP/status28" \
+    && bad "a foreign file at a session's path must not be answered for as clean" \
+    || ok "a foreign file at a session's path is not answered for as clean"
+# And the other direction, so the fix is not simply "never delete": OUR file,
+# with our header, at a clean session's path still ends the episode.
+printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nescalated=\n' \
+    > "$TMP/state/lx-clean"
+bash "$SCRIPT" > /dev/null
+[ -f "$TMP/state/lx-clean" ] \
+    && bad "this order's own episode file is still cleared when the pane goes clean" \
+    || ok "this order's own episode file is still cleared when the pane goes clean"
+
+# --- Run 29: a verdict that did not persist is not published as clean. ------
+# For a parked session the state file IS the verdict — `--status` answers `yes`
+# out of it — so coverage recorded at peek time claims more than the pass can
+# show. Reproduced during review with a directory at $STATE_DIR/<id>: the sweep
+# detected the park, nudged it, failed to persist the episode, and `--status`
+# then reported `quota_park=no reason=-`. A parked agent published as clean is
+# exactly the answer that sends a patrol down the warrant path this order exists
+# to hold back, arriving through the surface built to prevent it.
+#
+# The failure had to be made visible before it could be handled: `mv file dir`
+# does not replace the directory, it moves the file INSIDE it, so the write
+# reported success while the episode landed where nothing reads it.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state/lx-codex"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > "$TMP/out29"
+eq "$(nudges_for lx-codex)" "1" "the park is still detected and still nudged"
+[ -z "$(ls -A "$TMP/state/lx-codex" 2>/dev/null)" ] \
+    && ok "the episode is not silently swallowed into a directory at its path" \
+    || bad "the episode is not silently swallowed into a directory at its path"
+grep -q "state write failed" "$TMP/out29" \
+    && ok "the summary names the state write it could not make" \
+    || bad "the summary names the state write it could not make ($(tail -1 "$TMP/out29"))"
+bash "$SCRIPT" --status lx-codex > "$TMP/status29"
+grep -q '^session=lx-codex quota_park=no ' "$TMP/status29" \
+    && bad "a nudged park whose state did not persist must not report quota_park=no" \
+    || ok "a nudged park whose state did not persist does not report quota_park=no"
+grep -q '^session=lx-codex quota_park=unknown .*reason=not-swept$' "$TMP/status29" \
+    && ok "it reports unknown/not-swept — a gap, in the vocabulary the patrols have" \
+    || bad "it reports unknown/not-swept ($(tail -1 "$TMP/status29"))"
+
+# --- Run 30: the call bound holds even when the call ignores SIGTERM. -------
+# Runs 8-9 hang with `sleep`, which dies politely, so they exercise a bound that
+# the child cooperates with. A wedged `gc` is under no such obligation, and
+# plain `timeout` sends SIGTERM and then waits — verified with `timeout 1 bash
+# -c 'trap "" TERM; sleep 4'`, which ran the full 4s. The bound most relied on
+# to stop one wedged call stranding the sweep is therefore the one likeliest to
+# be ignored, by exactly the process that provoked it. `timeout -k` adds the
+# SIGKILL that cannot be.
+if ! command -v timeout >/dev/null 2>&1 || ! timeout -k 1 1 true >/dev/null 2>&1; then
+    echo "skip - hard-bound test (this host's timeout(1) has no -k)"
+else
+cat > "$TMP/sessions-termproof.json" <<'JSON'
+{"sessions":[
+ {"id":"lx-termproof","alias":"gc-toolkit.termproof","state":"active","running":true,"attached":false},
+ {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false}
+]}
+JSON
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+START=$(date +%s)
+FAKE_SESSIONS="$TMP/sessions-termproof.json" FAKE_TERMPROOF_PEEK=lx-termproof \
+    QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_KILL_AFTER=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+    timeout 30 bash "$SCRIPT" > "$TMP/out30" || true
+ELAPSED=$(( $(date +%s) - START ))
+[ "$ELAPSED" -lt 6 ] \
+    && ok "a gc call that ignores SIGTERM is killed at the bound (${ELAPSED}s)" \
+    || bad "a gc call that ignores SIGTERM is killed at the bound (took ${ELAPSED}s; the fake ignores TERM for 8s)"
+eq "$(nudges_for lx-codex)" "1" "and the parked session behind it is still reached"
+
+# A host whose timeout(1) has no -k keeps the soft bound rather than losing the
+# call — but it says so, once per pass. Silently degrading is what would make a
+# sweep that a wedged call held past its budget indistinguishable from a healthy
+# short one. The shim is a timeout that rejects -k the way an older coreutils
+# does, in a PATH entry ahead of the real thing.
+REAL_TIMEOUT="$(command -v timeout)"
+mkdir -p "$TMP/nokill"
+cat > "$TMP/nokill/timeout" <<TO
+#!/usr/bin/env bash
+[ "\$1" = "-k" ] && { echo "timeout: invalid option -- 'k'" >&2; exit 125; }
+exec "$REAL_TIMEOUT" "\$@"
+TO
+chmod +x "$TMP/nokill/timeout"
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+PATH="$TMP/nokill:$PATH" FAKE_SESSIONS="$TMP/sessions-one.json" \
+    "$REAL_TIMEOUT" 30 bash "$SCRIPT" > "$TMP/out30b" || true
+grep -q "no -k" "$TMP/out30b" \
+    && ok "a host that can only bound softly says so" \
+    || bad "a host that can only bound softly says so ($(head -1 "$TMP/out30b"))"
+eq "$(nudges_for lx-codex)" "1" "and still recovers the session (degraded, not disabled)"
+# The warning belongs to the sweep, not to the surface the patrols read every
+# cycle — and it must never land among the closed fields they parse.
+PATH="$TMP/nokill:$PATH" bash "$SCRIPT" --status lx-codex > "$TMP/status30b"
+grep -q "no -k" "$TMP/status30b" \
+    && bad "the status surface must not carry the soft-bound warning" \
+    || ok "the status surface does not carry the soft-bound warning"
+fi
+
+# --- Run 31: the surface and its consumers speak the same language. ---------
 # Every field here is read by a patrol formula that this pack ships, and the
 # whole point of a closed-field surface is defeated if it emits a value no
 # consumer defines. The two are edited in different files by different agents, so
