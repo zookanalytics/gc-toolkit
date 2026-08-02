@@ -1,3 +1,101 @@
+{{ define "layered-startup-discovery-boot" }}
+## Triage Queries — Ephemeral-Aware Deacon-Wisp Read
+
+This supersedes the deacon-wisp query in `### Step 2: Observe deacon state`
+and the `Check deacon work` row of the `## Command Quick-Reference` table
+above. Both sites run the same query today and both omit the same flag, so
+correcting only Step 2 would leave the quick-reference row teaching the broken
+form. Nothing else in Step 2 changes — the pane peek and the mail count are
+right as written; only the `gc bd list` call is wrong.
+
+Patrol wisps are EPHEMERAL: they live in `<store>.wisps`, not `.issues`.
+`gc bd list` reads `.issues` by default, so a query without `--include-infra`
+comes back `[]` even while the deacon holds a live in-progress patrol wisp.
+`gc hook`, `gc bd show`, and `gc bd mol burn` route by id and DO see wisps,
+which is why the blindness is invisible from every other angle but real — the
+same mechanism the deacon, refinery, and witness startup overlays already
+correct (tk-1waw2).
+
+The consequence is specific to boot: your entire wisp-freshness signal is
+dead. The two triage rows keyed on wisp staleness — "Idle, young wisp ->
+Backoff wait" and "Very stale wisp, errors visible -> Clearly stuck" — can
+never fire, because the query they read from is empty on every wake regardless
+of how the deacon is doing. You fall back to judging on pane output alone,
+which is exactly the ambiguous evidence the wisp timestamps exist to
+disambiguate (reported and reproduced in lx-ody8m).
+
+Corrected Step 2 observation block:
+
+```bash
+# Recent pane output — is the deacon actively working?
+{{ cmd }} session peek {{ .BindingPrefix }}deacon --lines 30
+
+# Deacon's current patrol wisp — how fresh is it?
+# --include-infra is REQUIRED: the wisp is ephemeral, so without it this comes
+# back [] on every wake and the triage rows keyed on staleness never fire.
+# --type=molecule plus the title match keep the result to patrol wisps, and
+# --limit=0 lifts the row cap so nothing else the deacon holds can crowd the
+# wisp out. Read `updated_at` on the row you get back — that timestamp IS the
+# freshness signal.
+gc bd list --assignee={{ .BindingPrefix }}deacon --status=in_progress \
+  --type=molecule --include-infra --limit=0 --json \
+  | jq '[.[] | select(.title == "mol-deacon-patrol")]'
+
+# Separately: what else is the deacon holding? Broad and capped on purpose.
+# This answers "how loaded is it", never the freshness question above.
+gc bd list --assignee={{ .BindingPrefix }}deacon --status=in_progress \
+  --include-infra --json --limit=5
+
+# Does the deacon have unread mail? (may explain idle state)
+gc mail count {{ .BindingPrefix }}deacon 2>/dev/null
+```
+
+Keep those two `gc bd list` calls apart. They answer different questions, and
+folding them back into one capped list is what re-opens this bug from the other
+side: `--include-infra` widens what is *visible*, but a deacon holding more than
+five in-progress rows can still push the wisp out of a `--limit=5` result, and
+the staleness rows go dead again — silently, and only under load, which is the
+worst version of it. The wisp query is typed, title-matched and uncapped so the
+wisp is in the result set or genuinely absent; the broad query stays capped
+because a plate-size read does not need every row.
+
+Corrected quick-reference rows — one row becomes two, for the same reason:
+
+| Want to... | Correct command |
+|------------|----------------|
+| Check deacon work | `gc bd list --assignee={{ .BindingPrefix }}deacon --status=in_progress --include-infra --json` |
+| Check the deacon patrol wisp | `gc bd list --assignee={{ .BindingPrefix }}deacon --status=in_progress --type=molecule --include-infra --title=mol-deacon-patrol --limit=0 --json` |
+
+The wisp row uses bd's own `--title` filter (case-insensitive substring) instead
+of the exact `jq` match above, because a quick-reference cell has to stay a
+single command: a `|` inside a table cell needs escaping, and an escaped pipe is
+copied out broken. Substring matching is safe here because you only read the
+answer — nothing is adopted or burned on it, unlike the witness's own wisp
+reconcile, which matches the title exactly for precisely that reason. The patrol
+wisp comes back with `issue_type` `molecule` and title `mol-deacon-patrol`.
+
+### Empty is not a verdict
+
+With the flag in place an empty result is still not evidence that the deacon
+is stuck, and it is never evidence that the store is degraded:
+
+- The query is scoped to `--assignee`, and pouring a wisp and assigning it are
+  two separate writes. A session that died between them leaves a wisp with NO
+  assignee, invisible to this query — the mechanism tk-fj56a fixed for
+  `mol-witness-patrol`. Nothing collects that orphan on the deacon side today:
+  the deacon's own startup discovery is `--assignee`-scoped at both its
+  in-progress tier and its open-wisp tier, so it is blind to exactly the row
+  this query is blind to (tk-9m8k7). Widening this query off `--assignee`
+  would not help you either — a stale orphan sitting beside a healthy assigned
+  wisp is what would then feed the "very stale wisp" row a false positive. So
+  treat an empty result as "no signal", not as "no wisp exists".
+- A deacon between patrol cycles legitimately holds no wisp at all.
+
+For those cases fall back to pane output and mail, exactly as the triage table
+already prescribes for the rows that do not mention a wisp. Do not file a
+warrant on an empty wisp query alone.
+{{ end }}
+
 {{ define "layered-startup-discovery-deacon" }}
 ## Startup Protocol — Layered Discovery
 

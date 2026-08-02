@@ -13,7 +13,7 @@
 # polecat, refinery, witness) is imported and divergences are
 # expressed as bare-name [[patches.agent]] — pure fragment-append
 # overlays on top of base prompts. Each gc-toolkit-specific doctrine
-# (heartbeat-no-consent-ui, layered-startup-discovery-{deacon,refinery,witness},
+# (heartbeat-no-consent-ui, layered-startup-discovery-{boot,deacon,refinery,witness},
 # convoy-integration-branch-mayor, polecat-convoys, polecat-non-impl-done,
 # file-work-records, operator-next-step-trailing) lives in template-fragments/ and is named
 # explicitly in inject_fragments_append below; the base prompt template is
@@ -59,6 +59,18 @@ version = "sha:33d3a430a67d1782ad364556cb566bdb01d0afe3"
 session_live = [
     "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
     "{{.ConfigDir}}/assets/scripts/tmux-status-line-override.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
+]
+
+[[patches.agent]]
+name = "boot"
+inject_fragments_append = [
+    # Base boot reads the deacon's patrol wisp with `gc bd list ... --json` and
+    # no --include-infra, at two sites: the Step 2 triage query and the
+    # "Check deacon work" quick-reference row. Wisps are ephemeral
+    # (<store>.wisps), so both return empty on every wake and the triage rows
+    # keyed on wisp staleness can never fire (lx-ody8m). This fragment
+    # supersedes both sites.
+    "layered-startup-discovery-boot",
 ]
 
 [[patches.agent]]

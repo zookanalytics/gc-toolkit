@@ -3,10 +3,12 @@
 # ephemeral-aware.
 #
 #   refinery + deacon — tiers 2 and 3 present (see below)
-#   refinery + deacon + witness — every wisp reconcile query is
+#   refinery + deacon + witness + boot — every wisp query is
 #                                 ephemeral-aware (--include-infra)
 #   witness — every wisp reconcile query is scoped to mol-witness-patrol
 #             roots (see below)
+#   boot — the deacon-wisp read is scoped to mol-deacon-patrol roots
+#          (see below)
 #
 # Tier-1 (in-progress wisp) was the historical query and is preserved.
 # Tier-2 catches routed work beads with metadata.branch — these arrive when a
@@ -37,6 +39,17 @@
 # to the same agent. Only the witness block burns surplus during startup, so
 # only it is held to this.
 #
+# Both of those assertions are NEGATIVE: they score the queries a block
+# already has. A block that simply LOST its wisp query scores zero of each and
+# passes — the doctor would keep reporting boot's read as ephemeral-aware and
+# title-scoped after the read it describes stopped existing (caught reviewing
+# tk-jd4b8: deleting the fenced boot query still exited 0). The required-query
+# assertion (tk-vl2nu) closes that by asserting POSITIVELY that the boot block
+# still carries the dedicated patrol-wisp read, at both call sites the fragment
+# supersedes — the fenced Step 2 command and the Command Quick-Reference table
+# row. The row needs an assertion of its own because every check above scores
+# fenced code only and skips it by construction.
+#
 # Post-tk-kdu2v5 the doctrine lives in a single shared fragment file
 # (template-fragments/layered-startup-discovery.template.md) with named
 # blocks consumed by deacon, refinery, and witness via
@@ -60,6 +73,61 @@ if [ ! -f "$fragment" ]; then
     exit 2
 fi
 
+# extract_block <define-name> — the fragment region between
+# `{{ define "<name>" }}` and its closing `{{ end }}`.
+extract_block() {
+    awk -v name="$1" '
+        $0 ~ "\\{\\{ *define \"" name "\" *\\}\\}" { capture = 1; next }
+        capture && /\{\{ *end *\}\}/ { capture = 0 }
+        capture { print }
+    ' "$fragment"
+}
+
+# fenced_code <block> — the block's fenced code lines, with backslash
+# continuations spliced so a query wrapped across lines is judged as one
+# command. Prose is dropped: it names the same flags while explaining why
+# they are there, and must not be scored as a query.
+fenced_code() {
+    printf '%s\n' "$1" \
+        | awk '
+            /^[[:space:]]*```/ { in_fence = !in_fence; next }
+            in_fence { print }
+        ' \
+        | sed -e :a -e '/\\$/N; s/\\\n[[:space:]]*/ /; ta'
+}
+
+# table_rows <block> — the block's Markdown table rows. These live OUTSIDE
+# the fences, so every fenced_code assertion skips them; a quick-reference
+# row that teaches a broken command is invisible without this.
+table_rows() {
+    printf '%s\n' "$1" \
+        | awk '
+            /^[[:space:]]*```/ { in_fence = !in_fence; next }
+            !in_fence && /^[[:space:]]*\|/ { print }
+        '
+}
+
+# check_required_query <label> <site> <text> <token>...
+# Positive assertion: <text> must contain at least one line carrying EVERY
+# token. This is what fails closed when a required query is deleted outright
+# rather than degraded — the flag assertions in check_block only score
+# commands that are already `--type=molecule`, so a vanished query scores
+# clean on all of them.
+check_required_query() {
+    local label="$1"
+    local site="$2"
+    local matches="$3"
+    shift 3
+    local token
+    for token in "$@"; do
+        matches=$(printf '%s\n' "$matches" | grep -F -- "$token" || true)
+        if [ -z "$matches" ]; then
+            violations+=("$label: $site is missing the required patrol-wisp query (no single command carries all of: $*)")
+            return
+        fi
+    done
+}
+
 # check_block <define-name> <label> [require_tiers] [patrol_title]
 # require_tiers=tiers → also assert the tier-2 and tier-3 queries.
 # patrol_title=<formula>  → also assert every molecule-root query is scoped to
@@ -69,13 +137,8 @@ check_block() {
     local label="$2"
     local require_tiers="${3:-}"
     local patrol_title="${4:-}"
-    # Extract the block content between `{{ define "block_name" }}` and `{{ end }}`.
     local block
-    block=$(awk -v name="$block_name" '
-        $0 ~ "\\{\\{ *define \"" name "\" *\\}\\}" { capture = 1; next }
-        capture && /\{\{ *end *\}\}/ { capture = 0 }
-        capture { print }
-    ' "$fragment")
+    block=$(extract_block "$block_name")
 
     if [ -z "$block" ]; then
         violations+=("$label: missing {{ define \"$block_name\" }} block in template-fragments/layered-startup-discovery.template.md")
@@ -96,12 +159,8 @@ check_block() {
     # the surrounding prose names the same flags while explaining why, and
     # must not read as a violation. Splice backslash continuations so a query
     # wrapped across lines is judged as one command.
-    local code joined offenders
-    code=$(printf '%s\n' "$block" | awk '
-        /^[[:space:]]*```/ { in_fence = !in_fence; next }
-        in_fence { print }
-    ')
-    joined=$(printf '%s\n' "$code" | sed -e :a -e '/\\$/N; s/\\\n[[:space:]]*/ /; ta')
+    local joined offenders
+    joined=$(fenced_code "$block")
     offenders=$(printf '%s\n' "$joined" \
         | grep -- "gc bd list" \
         | grep -- "--type=molecule" \
@@ -112,8 +171,10 @@ check_block() {
     # Formula scoping: molecule roots are formula-specific, so a reconcile that
     # picks a survivor and BURNS the rest must filter on the patrol title first
     # — otherwise an unrelated molecule root assigned to the same agent is
-    # adopted as the patrol wisp or destroyed as "surplus". Asserted only for
-    # blocks whose reconcile burns (witness); the deacon/refinery tier-1 resume
+    # adopted as the patrol wisp or destroyed as "surplus". Asserted for the
+    # witness (whose reconcile burns) and for boot (whose read must land on the
+    # deacon's patrol wisp, not on whatever molecule the deacon happens to hold
+    # — the crowding failure tk-jd4b8 fixed). The deacon/refinery tier-1 resume
     # query feeds no burn, so it is intentionally unscoped there, and their
     # tier-3 adoption already filters on title.
     if [ -n "$patrol_title" ]; then
@@ -131,9 +192,53 @@ check_block() {
 check_block "layered-startup-discovery-refinery" "refinery" tiers
 check_block "layered-startup-discovery-deacon" "deacon" tiers
 check_block "layered-startup-discovery-witness" "witness" "" "mol-witness-patrol"
+# Boot READS the deacon's wisp (freshness signal) rather than reconciling its
+# own, so tiers 2 and 3 do not apply — but the ephemeral-awareness and
+# title-scoping assertions do, and for boot they are the whole point of the
+# block (tk-jd4b8). The wisp read is a dedicated --type=molecule query filtered
+# to mol-deacon-patrol precisely so a busy deacon's other in-progress rows
+# cannot crowd the wisp out of a capped result; asserting the title here is what
+# stops that query drifting back to the broad untyped form that made the signal
+# dead in the first place. The block's second, deliberately untyped "what else
+# is the deacon holding" query is not scored by either assertion — both key on
+# --type=molecule.
+check_block "layered-startup-discovery-boot" "boot" "" "mol-deacon-patrol"
+
+# ...and assert POSITIVELY that boot's dedicated read still exists. The two
+# assertions in check_block are both negative — they score the wisp queries a
+# block has — so deleting boot's query passes them vacuously, and the whole
+# point of this block is that the query exists. Both call sites the fragment
+# supersedes get their own assertion: the Step 2 command inside the fence, and
+# the Command Quick-Reference row, which is a table cell and so is skipped by
+# every fence-scoped check.
+#
+# Every token below is load-bearing; the query is only correct with all of them:
+#
+#   --limit=0    a capped read lets a busy deacon's other in-progress rows crowd
+#                the wisp out and takes the freshness signal dead again,
+#                silently and only under load.
+#   --assignee=  the read answers "how fresh is THE DEACON's wisp". Widening it
+#                off --assignee does not recover the orphan case it looks like
+#                it would (a wisp poured but never assigned): it instead lets a
+#                stale orphan sitting beside a healthy assigned wisp feed the
+#                "very stale wisp -> clearly stuck" triage row a false positive.
+#                The block's own "Empty is not a verdict" prose says so; without
+#                this token the doctor lets the query drift off it anyway.
+#   --json       both sites are machine-read — the fenced command pipes into
+#                `jq`, and the quick-reference row is copied out to be parsed.
+#                Human-format output silently breaks that pipe.
+boot_block=$(extract_block "layered-startup-discovery-boot")
+if [ -n "$boot_block" ]; then
+    check_required_query "boot" "Step 2 wisp read" "$(fenced_code "$boot_block")" \
+        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" "--status=in_progress" \
+        "--type=molecule" "--include-infra" "--limit=0" "--json" "mol-deacon-patrol"
+    check_required_query "boot" "Command Quick-Reference wisp row" "$(table_rows "$boot_block")" \
+        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" "--status=in_progress" \
+        "--type=molecule" "--include-infra" "--limit=0" "--json" "mol-deacon-patrol"
+fi
 
 if [ ${#violations[@]} -eq 0 ]; then
-    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol"
+    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot carries the dedicated mol-deacon-patrol wisp read at both superseded sites"
     exit 0
 fi
 
