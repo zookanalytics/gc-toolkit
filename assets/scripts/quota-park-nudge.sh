@@ -68,7 +68,10 @@ BUSY_RE="${QUOTA_PARK_BUSY:-$DEFAULT_BUSY}"
 # on screen. Providers print their banner bare — never inside quotes, never
 # under a blockquote marker — so dropping such lines costs nothing and takes
 # out the whole class of agents that *write about* a quota block.
-CITATION_RE='^[[:space:]]*[>▎│┃|]|["“”]'
+# Alternation, not a bracket expression: a multibyte character inside [...] is
+# a byte set under a C locale, and the order's env is not guaranteed to be
+# UTF-8. Spelled out this way each marker matches as an exact sequence in both.
+CITATION_RE='^[[:space:]]*(>|\||▎|│|┃)|"|“|”'
 
 # Retry pacing. First detection nudges immediately (an early reset is the case
 # we are optimizing for); subsequent attempts back off to the cap so a genuine
