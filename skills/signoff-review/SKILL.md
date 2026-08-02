@@ -41,8 +41,8 @@ the code.
 BEAD=<work-bead>          # the review bead you claimed
 M=$(gc bd show "$BEAD" --json | jq -c '.[0].metadata')
 BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
-BASE=$(printf   '%s' "$M" | jq -r '.review_base // "main"')
-PR=$(printf     '%s' "$M" | jq -r '.pr_number // empty')
+BASE=$(printf   '%s' "$M" | jq -r '.review_base   // empty')
+PR=$(printf     '%s' "$M" | jq -r '.pr_number     // empty')
 ```
 
 Two shapes, discriminated by which of those is set:
@@ -55,15 +55,28 @@ Two shapes, discriminated by which of those is set:
 Either way, pin the exact commit before you read anything:
 
 ```bash
-# POST-OPEN: derive the range from the PR itself.
 if [ -n "$PR" ]; then
+  # POST-OPEN: the PR is authoritative for both ends of the range.
   BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
   BASE=$(gh pr view "$PR" --json baseRefName -q .baseRefName)
+elif [ -z "$BASE" ]; then
+  # PRE-OPEN, no review_base — a malformed or older review bead. Resolve
+  # the anchor's landing target; do not assume main.
+  ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
+  [ -n "$ANCHOR" ] && BASE=$(gc bd show "$ANCHOR" --json | jq -r '.[0].metadata.target // empty')
+  [ -n "$BASE" ] || { echo "no review_base, no anchor target: refusing to guess a base" >&2; exit 1; }
 fi
 
 git fetch origin "$BASE" "$BRANCH"
 REVIEWED_OID=$(git rev-parse "origin/$BRANCH")
 ```
+
+Never fall back to `main`. A convoy child lands on
+`integration/<convoy-id>`, and diffing it against `main` shows you
+every commit the integration branch already carries — a diff the branch
+never made, reviewed as if it had. If neither `review_base` nor the
+anchor's `target` resolves, the bead is malformed: escalate it rather
+than pick a base for it.
 
 The diff you read, the tests you run, and the OID you stamp are all that
 one commit. The head can advance while you review; a verdict recorded
@@ -158,7 +171,9 @@ COMMENT *is* the pass. It is never an approval — the city does not
 approve PRs; approval is external and human. Never run
 `gh pr review --approve`.
 
-Record it in this shape:
+Record it in this shape, as `VERDICT_BODY`. Keep the bare word in
+`VERDICT` (`COMMENT` or `REQUEST_CHANGES`) as well — the done sequence
+switches on that word, and the body is what gets posted or noted.
 
 ```
 VERDICT: <COMMENT|REQUEST_CHANGES>
@@ -178,15 +193,56 @@ than an implied "I read everything".
 
 ## 7. Hand the verdict off
 
-Where the verdict goes, and what it stamps, is the **non-impl done
-sequence** in your prompt — not this skill. In short:
+Two things are yours: the **verdict**, and the **`REVIEWED_OID` you
+pinned in step 1**. Never approve, and never re-derive the head.
 
-- **PRE-OPEN** — record the verdict in the review bead's notes and
-  stamp `reviewed_oid`; the refinery replays it when it opens the PR.
-- **POST-OPEN** — post it with `gh pr review --comment` (pass) or
-  `gh pr review --request-changes`.
+**POST-OPEN — re-check the head before you post.** GitHub attaches a
+review to whatever head is live when you submit it, and the done
+sequence stamps the gate at that attached commit. If the head advanced
+while you were reading, posting now certifies a commit you never read:
 
-The done sequence then stamps `check.<check_name>=green@<reviewed_oid>`
-on the anchor for a pass, or files a rework child for changes, and
-closes the review bead. Follow it exactly, and stamp the OID you pinned
-in step 1 — never a freshly re-derived head.
+```bash
+HEAD_NOW=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+if [ "$HEAD_NOW" != "$REVIEWED_OID" ]; then
+  echo "head moved $REVIEWED_OID -> $HEAD_NOW: post nothing, stamp nothing" >&2
+  exit 1
+fi
+
+gh pr review "$PR" --comment         --body "$VERDICT_BODY"   # pass
+gh pr review "$PR" --request-changes --body "$VERDICT_BODY"   # changes
+```
+
+A moved head is not a finding and not a failure — it is a different
+commit. Re-pin `REVIEWED_OID` at the new head, redo steps 2–6, and post
+against that. What you must not do is post the verdict you already have.
+
+The window between that check and the submission is narrow, not zero, so
+confirm where the review actually landed — GitHub records it on the
+review itself:
+
+```bash
+ME=$(gh api user -q .login)
+gh api "repos/{owner}/{repo}/pulls/$PR/reviews" \
+  | jq -r --arg me "$ME" \
+      '[.[] | select(.user.login == $me)] | sort_by(.submitted_at) | last | .commit_id'
+```
+
+If that is not `REVIEWED_OID`, your verdict attached to a commit you did
+not read. Say so, and re-review at the new head — do not hand that OID
+on as though you had reviewed it.
+
+**PRE-OPEN — nothing to post.** There is no PR. Record the verdict in
+the review bead's notes, and stamp the commit you pinned:
+
+```bash
+gc bd update "$BEAD" --set-metadata reviewed_oid="$REVIEWED_OID" \
+  --notes "$VERDICT_BODY"
+```
+
+The refinery replays those notes when it opens the PR.
+
+Everything past this point — which marker lands on the anchor, how a
+rework child is filed, when the review bead closes — belongs to the
+**non-impl done sequence** in your prompt. That is its source of truth;
+this skill does not restate it. Follow it exactly, and hand it the OID
+you pinned.
