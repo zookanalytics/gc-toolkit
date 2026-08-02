@@ -14,7 +14,13 @@
 # itself match the detector, so a recovered agent cannot re-trigger forever;
 # (j) an idle agent that *quoted* the banner in a report is not nudged — the
 # live false positive this script hit on its first real run; (k) a banner
-# scrolled up out of the tail window is history, not a park.
+# scrolled up out of the tail window is history, not a park; (l) a parked
+# session with `running: null` IS recovered — that is a live session mid
+# controller churn, and gating on `.running == true` would skip it; (m) an
+# ordinary "API rate limit exceeded" tool error is not a provider quota banner
+# and is never nudged; (n) one wedged `gc` call cannot strand the sessions
+# behind it in the sweep, and a sweep that runs past its budget defers the
+# remainder to the next cycle instead of overlapping it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,15 +37,20 @@ nudges_for() { grep -c "^nudge $1\$" "$TMP/nudges" 2>/dev/null || true; }
 mkdir -p "$TMP/panes" "$TMP/state" "$TMP/bin"
 : > "$TMP/nudges"; : > "$TMP/mail"
 
-# --- Session list: five sessions, one of them attached. ----------------------
+# --- Session list. One attached; one with `running: null`, which is what an
+# active session looks like during controller churn (same shape the helm's
+# owner-liveness fixture pins, tools/helm-surface-fixture.sh) — it must be
+# treated as live, or the parked agents we most need to reach are invisible.
 cat > "$TMP/sessions.json" <<'JSON'
 {"sessions":[
  {"id":"lx-claude","alias":"gc-toolkit/gc-toolkit.witness","state":"active","running":true,"attached":false},
  {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false},
+ {"id":"lx-churn","alias":"gc-toolkit/gc-toolkit.hicks","state":"active","running":null,"attached":false},
  {"id":"lx-busy","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active","running":true,"attached":false},
  {"id":"lx-clean","alias":"gc-toolkit/gc-toolkit.refinery","state":"active","running":true,"attached":false},
  {"id":"lx-quoting","alias":"gc-toolkit.su-uzy9","state":"active","running":true,"attached":false},
  {"id":"lx-scrolled","alias":"gc-toolkit.mechanik","state":"active","running":true,"attached":false},
+ {"id":"lx-apierr","alias":"gc-toolkit.deacon","state":"active","running":true,"attached":false},
  {"id":"lx-attached","alias":"gc-toolkit.mayor","state":"active","running":true,"attached":true}
 ]}
 JSON
@@ -85,6 +96,22 @@ cat > "$TMP/panes/lx-quoting" <<'PANE'
   zook@ai-development:~/loomington ctx:22% wk:39%
   ⏵⏵ bypass permissions on (shift+tab to cycle)
 PANE
+# A live session mid controller churn (`running: null`), parked on the Claude
+# banner in its other rendering — "Claude usage limit reached", no possessive.
+cat > "$TMP/panes/lx-churn" <<'PANE'
+  ⎿  Claude usage limit reached · resets 3pm
+     /usage-credits to finish what you're working on.
+
+❯
+PANE
+# NOT a provider quota park: an ordinary tool/API error on an otherwise idle
+# pane. Nudging this session would be noise against an agent that is fine.
+cat > "$TMP/panes/lx-apierr" <<'PANE'
+  ⎿  Error: API rate limit exceeded for installation. Retry after 60s.
+  Retrying the fetch with backoff.
+
+❯
+PANE
 # Same banner, unquoted, but scrolled up past the tail window — history from a
 # block the agent already recovered from, not a park.
 {
@@ -99,7 +126,12 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
   "session list") cat "$FAKE_SESSIONS" ;;
-  "session peek") [ -f "$FAKE_PANES/$3" ] && cat "$FAKE_PANES/$3" ;;
+  # `exec` so the sleep REPLACES this process: timeout signals its direct child,
+  # and an orphaned sleep would hold the caller's command-substitution pipe open
+  # long past the bound, hiding the very thing this fixture tests.
+  "session peek")
+    [ "${FAKE_HANG_PEEK:-}" = "$3" ] && exec sleep 30
+    [ -f "$FAKE_PANES/$3" ] && cat "$FAKE_PANES/$3" ;;
   "session nudge")
     shift 2
     [ "$1" = "--delivery" ] && { [ "${FAKE_NO_DELIVERY_FLAG:-0}" = "1" ] && exit 2; shift 2; }
@@ -121,18 +153,24 @@ export QUOTA_PARK_ESCALATE_AFTER=7200
 bash "$SCRIPT" > "$TMP/out1"
 eq "$(nudges_for lx-claude)"   "1" "Claude session-limit park is nudged"
 eq "$(nudges_for lx-codex)"    "1" "Codex usage-limit park is nudged (not provider-specific)"
+eq "$(nudges_for lx-churn)"    "1" "parked session with running:null is nudged (liveness is .state)"
 eq "$(nudges_for lx-busy)"     "0" "busy pane quoting the banner is NOT nudged"
 eq "$(nudges_for lx-clean)"    "0" "clean pane is not nudged"
 eq "$(nudges_for lx-quoting)"  "0" "idle agent quoting the banner in a report is NOT nudged"
 eq "$(nudges_for lx-scrolled)" "0" "banner scrolled past the tail window is history, not a park"
+eq "$(nudges_for lx-apierr)"   "0" "plain API rate-limit error is NOT a provider quota park"
 eq "$(nudges_for lx-attached)" "0" "attached session is skipped (human is watching)"
-grep -q "2 parked, 2 nudged" "$TMP/out1" && ok "summary counts parked and nudged" \
+grep -q "3 parked, 3 nudged" "$TMP/out1" && ok "summary counts parked and nudged" \
     || bad "summary counts parked and nudged ($(tail -1 "$TMP/out1"))"
 
 # (i) The nudge text must not match the detector — otherwise our own message
-# keeps the episode alive after the agent is back.
+# keeps the episode alive after the agent is back. Read the pattern out of the
+# script rather than restating it: a copy here drifts silently, and the drift
+# would land on exactly the assertion meant to catch a self-matching nudge.
 MSG=$(grep -m1 '^msg ' "$TMP/nudges" | cut -d' ' -f2-)
-MATCH_RE="(hit|reached|exceeded) your [a-z0-9 -]{0,24}limit|(session|usage|rate) limit (reached|exceeded)|/usage-credits|limit will reset at"
+MATCH_RE=$(grep -m1 '^DEFAULT_MATCH=' "$SCRIPT" | cut -d"'" -f2)
+[ -n "$MATCH_RE" ] && ok "detector pattern read from the script" \
+    || bad "detector pattern read from the script (DEFAULT_MATCH not found)"
 printf '%s\n' "$MSG" | grep -qEi -- "$MATCH_RE" \
     && bad "nudge text must not match the quota detector" \
     || ok "nudge text does not match the quota detector"
@@ -179,6 +217,43 @@ rm -f "$TMP/state/lx-claude"
 : > "$TMP/nudges"
 FAKE_NO_DELIVERY_FLAG=1 bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-claude)" "1" "falls back to plain nudge when --delivery is unsupported"
+
+# --- Runs 8-9: call bounding. Both drive a peek that never returns, so each
+# run is itself capped: a regression that removes the bound then FAILS these
+# assertions instead of hanging the suite (and CI behind it) for 30s a run.
+# Skipped where the script's own bound cannot exist — with no coreutils
+# `timeout` it degrades to unbounded calls by design, so there is nothing here
+# to assert.
+if ! command -v timeout >/dev/null 2>&1; then
+    echo "skip - call-bounding tests (no coreutils timeout on this host)"
+else
+
+# --- Run 8: a wedged gc call must not strand the sessions behind it. --------
+# lx-claude is first in the session list, and its peek never returns. Without a
+# per-call bound the sweep blocks there and every later session — including the
+# parked ones this order exists to recover — is never inspected.
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+started=$(date +%s)
+FAKE_HANG_PEEK=lx-claude QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+    timeout 20 bash "$SCRIPT" > "$TMP/out8" || true
+elapsed=$(( $(date +%s) - started ))
+eq "$(nudges_for lx-codex)"  "1" "a wedged peek does not strand later sessions in the sweep"
+eq "$(nudges_for lx-churn)"  "1" "sweep continues past the wedged session to the end of the list"
+eq "$(nudges_for lx-claude)" "0" "the wedged session itself is skipped, not nudged blind"
+[ "$elapsed" -lt 15 ] && ok "bounded sweep finishes promptly (${elapsed}s)" \
+    || bad "bounded sweep finishes promptly (took ${elapsed}s)"
+
+# --- Run 9: past the sweep budget, the remainder defers to the next cycle. --
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+FAKE_HANG_PEEK=lx-claude QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=1 \
+    timeout 20 bash "$SCRIPT" > "$TMP/out9" || true
+eq "$(nudges_for lx-codex)" "0" "sessions past the sweep budget are deferred, not swept"
+grep -q "deferred (sweep budget" "$TMP/out9" && ok "summary reports the deferred remainder" \
+    || bad "summary reports the deferred remainder ($(tail -1 "$TMP/out9"))"
+
+fi
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

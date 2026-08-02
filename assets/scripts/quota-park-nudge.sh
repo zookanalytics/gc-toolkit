@@ -2,10 +2,10 @@
 # quota-park-nudge — resume agents parked at a provider quota banner.
 #
 # Bug tk-al95k. When a provider quota window closes mid-turn, the agent's turn
-# ENDS inside the block: the session stays alive (`state=active`, `running=true`
-# — the controller's liveness view sees nothing wrong), sits at an idle prompt
-# under the limit banner, and has no pending work and no timer of its own to
-# drive it when the window reopens. Observed twice — Claude session limits
+# ENDS inside the block: the session stays alive (`state=active` — the
+# controller's liveness view sees nothing wrong), sits at an idle prompt under
+# the limit banner, and has no pending work and no timer of its own to drive it
+# when the window reopens. Observed twice — Claude session limits
 # (2026-07-22: 1h26m of dead time *after* the block expired, two rig witnesses,
 # so per-rig orphan recovery was down in both) and Codex usage limits
 # (2026-08-02: ~7h30m, two review polecats holding the gc-toolkit merge queue).
@@ -50,13 +50,23 @@ TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 # `.` will not match) and not on the reset clause (per-provider format, and
 # per rule 2 nothing here acts on it).
 #   Claude: "You've hit your session limit · resets 10:10am (UTC)"
+#           "Claude usage limit reached · resets 3pm"
 #           "/usage-credits to finish what you're working on."
 #   Codex:  "You've hit your usage limit... try again at Aug 8th, 2026 7:56 PM"
+#
+# Every alternative is anchored to something only a PROVIDER says: the
+# user-possessive "your … limit", or a named provider/plan in front of it. The
+# subject is load-bearing — an earlier draft carried a bare
+# `(session|usage|rate) limit (reached|exceeded)`, which mechanically matches an
+# ordinary idle tool error like "Error: API rate limit exceeded". That pane is
+# not a quota park, and nudging it on the recovery cadence is noise against a
+# session that is working fine. A provider we have not met goes in
+# $QUOTA_PARK_MATCH (or extends this list) rather than back into a bare form.
 #
 # Held in a plain variable first: an ERE interval like {0,24} inside a
 # ${VAR:-default} would close the expansion at its own brace and silently ship
 # a truncated pattern.
-DEFAULT_MATCH='(hit|reached|exceeded) your [a-z0-9 -]{0,24}limit|(session|usage|rate) limit (reached|exceeded)|/usage-credits|limit will reset at'
+DEFAULT_MATCH='(hit|reached|exceeded) your [a-z0-9 -]{0,24}limit|(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit (reached|exceeded)|/usage-credits|limit will reset at'
 MATCH_RE="${QUOTA_PARK_MATCH:-$DEFAULT_MATCH}"
 
 # Busy markers — an agent mid-turn is not parked, whatever its pane text says.
@@ -89,6 +99,18 @@ ESCALATE_TO="${QUOTA_PARK_ESCALATE_TO:-mayor/}"
 
 # Aliases never nudged (ERE, matched against the session alias). Escape hatch.
 EXCLUDE_RE="${QUOTA_PARK_EXCLUDE:-}"
+
+# Wall-clock bounds. The order runner applies no timeout of its own, and every
+# probe here goes through the runtime (and, for the escalation, Dolt) — the two
+# layers most likely to be wedged during the incidents this order exists to
+# recover from. Unbounded, one hung `gc session peek` strands every session
+# BEHIND it in the sweep: the parked agents we most need to reach are exactly
+# the ones we would never inspect. CALL_TIMEOUT bounds each call so a wedged
+# one is skipped rather than fatal; SWEEP_BUDGET bounds the whole pass so a
+# city-sized session list of slow calls cannot overrun the next 3m cycle. 0
+# disables either bound.
+CALL_TIMEOUT="${QUOTA_PARK_CALL_TIMEOUT:-15}"
+SWEEP_BUDGET="${QUOTA_PARK_SWEEP_BUDGET:-120}"
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
@@ -125,22 +147,65 @@ duration() {
     if [ "$s" -lt 3600 ]; then echo "$((s / 60))m"; else echo "$((s / 3600))h$(( (s % 3600) / 60 ))m"; fi
 }
 
-# Only sessions the controller believes are alive. `attached` is skipped: a
-# human is looking at that pane and can act, and injecting keys under their
-# cursor is rude.
-sessions=$(gc session list --json 2>/dev/null \
-    | jq -r '.sessions[]? | select(.running == true and .state == "active" and (.attached // false) == false)
+# Both bounds are fed to `[ -gt ]` and to `timeout` itself, so a non-numeric
+# override (a stray "15s", an empty string from a templated env) would abort the
+# sweep under `set -e` — i.e. a typo in a tuning knob would silently disable
+# quota recovery city-wide. Fall back to the default instead.
+num "$CALL_TIMEOUT" || CALL_TIMEOUT=15
+num "$SWEEP_BUDGET" || SWEEP_BUDGET=120
+
+# Every `gc` call goes through here. Two things it guarantees:
+#
+#   1. A bound (CALL_TIMEOUT). `timeout` exits 124 on expiry — a non-zero rc, so
+#      a wedged call lands in the caller's existing failure branch (empty pane,
+#      failed nudge) instead of hanging the sweep. Same idiom and env-override
+#      shape as merge-skill.sh's run_bounded. No coreutils `timeout` (some macOS
+#      hosts) degrades to an unbounded call rather than dropping the probe:
+#      skipping every call would silently disable recovery on such a host.
+#   2. stdin CLOSED. The session loop below reads its work list from a
+#      here-string on fd 0; a child that inherited and consumed it would
+#      truncate the sweep — sessions would vanish from the run rather than fail.
+run_bounded() {
+    if [ "$CALL_TIMEOUT" -gt 0 ] && command -v timeout >/dev/null 2>&1; then
+        timeout "$CALL_TIMEOUT" "$@" </dev/null
+    else
+        "$@" </dev/null
+    fi
+}
+
+# True once the pass has run longer than SWEEP_BUDGET (0 = no budget). Checked
+# per session so a slow sweep stops at a session boundary, with its state files
+# consistent, instead of overrunning into the next cycle.
+sweep_expired() {
+    [ "$SWEEP_BUDGET" -gt 0 ] || return 1
+    [ "$(( $(date +%s) - NOW ))" -ge "$SWEEP_BUDGET" ]
+}
+
+# Only sessions the controller believes are alive. Keyed on `.state`, NEVER on
+# `.running`: running is null for an active session during controller churn, so
+# a `.running == true` filter drops exactly the live sessions it is meant to
+# select — and a quota-parked one in that state would never be peeked at all.
+# The same rule is already load-bearing in the helm's owner-liveness join
+# (assets/scripts/gc-helm.sh, with a running:null case in
+# tools/helm-surface-fixture.sh). `attached` is skipped: a human is looking at
+# that pane and can act, and injecting keys under their cursor is rude.
+sessions=$(run_bounded gc session list --json 2>/dev/null \
+    | jq -r '.sessions[]? | select(.state == "active" and (.attached // false) == false)
              | "\(.id)\t\(.alias // .session_name // .id)"' 2>/dev/null) || exit 0
 [ -n "$sessions" ] || { echo "quota-park-nudge: 0 checked, 0 parked, 0 nudged"; exit 0; }
 
-checked=0; parked=0; nudged=0
+checked=0; parked=0; nudged=0; skipped=0
 
 while IFS=$'\t' read -r id alias; do
     [ -n "${id:-}" ] || continue
+    # Out of budget: leave the rest for the next cycle (3m away) rather than
+    # overlapping it. Counted so the summary says so instead of silently
+    # reporting a short sweep as a complete one.
+    if sweep_expired; then skipped=$((skipped + 1)); continue; fi
     state="$STATE_DIR/$id"
     checked=$((checked + 1))
 
-    pane=$(gc session peek "$id" --lines "$PEEK_LINES" 2>/dev/null) || pane=""
+    pane=$(run_bounded gc session peek "$id" --lines "$PEEK_LINES" 2>/dev/null) || pane=""
 
     # Parked = a bare provider banner at the bottom of an idle pane. Busy,
     # quiet, unreadable, cited, or scrolled-up all mean not parked. Clearing
@@ -183,8 +248,8 @@ while IFS=$'\t' read -r id alias; do
     # to the runtime's idle detector — the same layer that already believes a
     # parked session is fine. We read the pane; we know it is idle. Fall back
     # to the plain form so an older gc without the flag still recovers.
-    if gc session nudge --delivery immediate "$id" "$msg" >/dev/null 2>&1 \
-        || gc session nudge "$id" "$msg" >/dev/null 2>&1; then
+    if run_bounded gc session nudge --delivery immediate "$id" "$msg" >/dev/null 2>&1 \
+        || run_bounded gc session nudge "$id" "$msg" >/dev/null 2>&1; then
         nudged=$((nudged + 1))
         last_nudge="$NOW"
         attempts=$((attempts + 1))
@@ -194,7 +259,7 @@ while IFS=$'\t' read -r id alias; do
     fi
 
     if [ "$ESCALATE_AFTER" -gt 0 ] && [ "$escalated" != "1" ] && [ "$age" -ge "$ESCALATE_AFTER" ]; then
-        gc mail send "$ESCALATE_TO" -s "Quota-parked: $alias for $(duration "$age") [HIGH]" \
+        run_bounded gc mail send "$ESCALATE_TO" -s "Quota-parked: $alias for $(duration "$age") [HIGH]" \
             -m "$alias ($id) has shown a provider limit banner for $(duration "$age") and has not resumed after $attempts nudge(s).
 
 The session is alive and correct — do NOT file a warrant or kill it; a fresh
@@ -218,4 +283,6 @@ done <<< "$sessions"
 # were closed or renamed while parked.
 find "$STATE_DIR" -type f -mtime +7 -delete 2>/dev/null || true
 
-echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged"
+deferred=""
+[ "$skipped" -gt 0 ] && deferred=", $skipped deferred (sweep budget ${SWEEP_BUDGET}s)"
+echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$deferred"
