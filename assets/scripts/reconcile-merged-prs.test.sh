@@ -598,6 +598,12 @@ case "$2" in
     n=$(( $(wc -l < "$FAKE_CREATED") + 1 ))
     cid="fix-$n"
     printf '%s\t%s\n' "$cid" "$3" >> "$FAKE_CREATED"
+    # Capture the dispatched BODY (tk-jufvl). The stale-gate re-review carries the
+    # review METHOD on stdin via --body-file -; recording it per-bead is what lets
+    # the assertions prove the re-review names a method instead of a bare title.
+    if printf '%s' "$*" | grep -q -- '--body-file -'; then
+      cat > "$FAKE_BODIES/$cid" 2>/dev/null || true
+    fi
     printf '{"id":"%s"}\n' "$cid" ;;
   close)
     id="$3"; shift 3
@@ -680,7 +686,8 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
        FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody" \
-       FAKE_LIVEX="$TMP/livex"
+       FAKE_LIVEX="$TMP/livex" FAKE_BODIES="$TMP/bodies"
+mkdir -p "$TMP/bodies"
 
 # --- Run 1: the disposition matrix. ------------------------------------------
 OUT1="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
@@ -1151,6 +1158,28 @@ grep -q "fix_target_pool=$FIX_POOL" "$TMP/updates" \
 grep -q -- '--blocks bead-T' "$TMP/deps" \
   && ok "(24) re-review child gates the anchor via a BLOCKS dep" \
   || bad "(24) re-review child blocks-dep on the anchor (got: $(cat "$TMP/deps"))"
+# (24-METHOD) The re-review carries the review METHOD in its body (tk-jufvl), from
+# the SAME emitter check-set-heal.sh uses — a re-review that described the job
+# differently from the first-round review would be the divergence that fix
+# removes. A title-only bead sends the reviewer back to catalog-matching, which is
+# what ran the ~4.7M-token persona fan-out per review.
+REREVIEW_ID=$(awk -F'\t' '$2 ~ /Review PR#220/{print $1; exit}' "$TMP/created")
+if [ -n "$REREVIEW_ID" ] && [ -f "$TMP/bodies/$REREVIEW_ID" ]; then
+  ok "(24-METHOD) the re-review was created with a body"
+  grep -qF 'signoff-review' "$TMP/bodies/$REREVIEW_ID" \
+    && ok "(24-METHOD) the re-review body names the signoff-review method" \
+    || bad "(24-METHOD) the re-review body must name the method"
+  grep -qF 'Do NOT spawn' "$TMP/bodies/$REREVIEW_ID" \
+    && ok "(24-METHOD) the re-review body forbids subagent/persona fan-out" \
+    || bad "(24-METHOD) the re-review body must forbid fan-out"
+  # The stale-gate context reaches the BODY too, not just review_note metadata:
+  # which head went stale is what tells the reviewer where to look.
+  grep -qF 'Stale-gate self-heal' "$TMP/bodies/$REREVIEW_ID" \
+    && ok "(24-METHOD) the dispatch note (which head went stale) reaches the body" \
+    || bad "(24-METHOD) the stale-gate note must reach the body"
+else
+  bad "(24-METHOD) no body captured for the re-review (got created: $(cat "$TMP/created"))"
+fi
 grep -qx "$REVIEW_POOL" "$TMP/wakes" && ok "(24) review pool woken" \
                                      || bad "(24) review pool woken"
 T_UPD=$(grep '^bead-T' "$TMP/updates" || true)

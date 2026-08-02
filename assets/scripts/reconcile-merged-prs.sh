@@ -110,6 +110,39 @@ done
 # there is nothing to do.
 command -v gh >/dev/null 2>&1 || exit 0
 
+# The METHOD carried by the stale-gate re-review this pass may dispatch
+# (tk-jufvl). Shares review-dispatch-body.sh with check-set-heal.sh rather than
+# keeping a second hand-maintained copy of the prose: a re-review that described
+# the job differently from the first-round review would be exactly the divergence
+# this fix exists to remove. FAIL-SOFT for the same reason as there — an
+# un-dispatched re-review leaves the stale marker in place and the merge HELD, so
+# a body that cannot be produced degrades to a title-only bead, loudly.
+# Resolved through a symlink for the same reason as check-set-heal.sh: a
+# symlinked deploy that could not find the emitter would degrade every re-review
+# to a title-only bead behind one stderr line.
+_rmpself="${BASH_SOURCE[0]}"
+_rmpreal="$(readlink -f "$_rmpself" 2>/dev/null || true)"
+[ -n "$_rmpreal" ] && _rmpself="$_rmpreal"
+REVIEW_BODY_EMITTER="$(cd "$(dirname "$_rmpself")" && pwd)/review-dispatch-body.sh"
+
+# create_review_bead <title> [note] — mint the re-review carrying the method, echo
+# its id (empty on failure, exactly as the bare `gc bd create` it replaces). The
+# note is the dispatch-specific context (which head went stale, and why).
+create_review_bead() {
+  local title="$1" note="${2:-}" body=""
+  if [ -x "$REVIEW_BODY_EMITTER" ]; then
+    body=$("$REVIEW_BODY_EMITTER" ${note:+--note "$note"} 2>/dev/null) || body=""
+  fi
+  if [ -z "$body" ]; then
+    echo "reconcile-merged-prs: WARN review method unavailable ($REVIEW_BODY_EMITTER); dispatching a TITLE-ONLY re-review — the reviewer will have to pick its own method (tk-jufvl)" >&2
+    gc bd create "$title" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null
+    return
+  fi
+  printf '%s' "$body" \
+    | gc bd create "$title" -t task --body-file - --json 2>/dev/null \
+    | jq -r '.id // empty' 2>/dev/null
+}
+
 # Statuses that still mean "a live bead owns this rework". `closed` is the ONLY
 # status that releases a branch; every other one — `blocked` and `deferred` above
 # all, which is exactly how an operator parks a runaway child — still owns it.
@@ -828,7 +861,12 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         echo "reconcile-merged-prs: $id — PR#$num check.codex stale but PR url unreadable; skip (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
-      REVIEW_BEAD=$(gc bd create "Review PR#$num: re-review at live head (stale-gate self-heal)" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+      # The stale-gate context is BOTH the bead body's dispatch note and the
+      # review_note metadata below — one string, so the reviewer reads the same
+      # reason wherever they look. The body additionally carries the review METHOD
+      # (create_review_bead): title says WHAT, metadata says WHERE, body says HOW.
+      STALE_NOTE="Stale-gate self-heal: check.codex was green@$stale_oid; the PR head moved to ${head_oid:-?} with no rework bead filed. Re-review the live head."
+      REVIEW_BEAD=$(create_review_bead "Review PR#$num: re-review at live head (stale-gate self-heal)" "$STALE_NOTE")
       if [ -z "$REVIEW_BEAD" ]; then
         echo "reconcile-merged-prs: $id could not file re-review bead for PR#$num; retry next pass" >&2
         skipped=$((skipped + 1)); continue
@@ -847,7 +885,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         --set-metadata pr_url="$pr_url" \
         --set-metadata pr_number="$num" \
         --set-metadata anchor_bead="$id" \
-        --set-metadata review_note="Stale-gate self-heal: check.codex was green@$stale_oid; the PR head moved to ${head_oid:-?} with no rework bead filed. Re-review the live head." >/dev/null 2>&1
+        --set-metadata review_note="$STALE_NOTE" >/dev/null 2>&1
       [ -n "$fixpool" ] && gc bd update "$REVIEW_BEAD" --set-metadata fix_target_pool="$fixpool" >/dev/null 2>&1
       # The review BLOCKS the anchor (anchor_bead is the durable fallback the signoff
       # resolves through when the edge is missing). Best-effort.

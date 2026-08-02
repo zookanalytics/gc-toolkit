@@ -158,8 +158,14 @@ case "$2" in
     jq -n --arg cs "$cs" --arg ab "$ab" \
       '[{metadata: ({} + (if $cs=="" then {} else {check_set:$cs} end) + (if $ab=="" then {} else {anchor_bead:$ab} end))}]' ;;
   create)
-    # gc bd create "<title>" -t task --json
+    # gc bd create "<title>" -t task [--body-file -] --json
     n=$(cat "$FAKE_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$FAKE_SEQ"
+    # Capture the dispatched BODY (tk-jufvl). The review method arrives on stdin
+    # via --body-file -; recording it per-bead is what lets the assertions below
+    # prove the dispatch names a method instead of shipping a bare title.
+    if printf '%s' "$*" | grep -q -- '--body-file -'; then
+      cat > "$FAKE_BODIES/rev-new-$n" 2>/dev/null || true
+    fi
     printf '{"id":"rev-new-%s"}\n' "$n" ;;
   update)
     id="$3"
@@ -197,12 +203,13 @@ chmod +x "$TMP/bin/gc"
 
 : > "$TMP/stamped"; : > "$TMP/healed"; : > "$TMP/flagged"; : > "$TMP/revmeta"
 : > "$TMP/deps"; : > "$TMP/stampfail"; echo 0 > "$TMP/seq"
+mkdir -p "$TMP/bodies"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_REVIEWS="$TMP/reviews" \
        FAKE_STAMPED="$TMP/stamped" FAKE_HEALED="$TMP/healed" \
        FAKE_FLAGGED="$TMP/flagged" FAKE_REVMETA="$TMP/revmeta" FAKE_DEPS="$TMP/deps" \
-       FAKE_STAMPFAIL="$TMP/stampfail" FAKE_SEQ="$TMP/seq"
+       FAKE_STAMPFAIL="$TMP/stampfail" FAKE_SEQ="$TMP/seq" FAKE_BODIES="$TMP/bodies"
 
 # --- Run 1. -------------------------------------------------------------------
 RC1=0
@@ -290,6 +297,40 @@ grep -q '	bead-EMPTY$' "$TMP/deps" \
   && ok "(BLOCKS) dispatched review BLOCKS its anchor (gate-as-dep)" \
   || bad "(BLOCKS) review must BLOCK the anchor"
 
+# (METHOD) EVERY dispatched signoff carries the review METHOD in its body
+# (tk-jufvl). A title-only review bead names no method, so the reviewing polecat
+# matches one out of its own skill catalog — the drift that ran a 6-persona
+# fan-out at ~4.7M tokens per review. The body is what closes that vacuum, and it
+# must be on every dispatch, PRE-OPEN as well as post-open.
+DISPATCH_COUNT=$(awk -F'\t' '$2=="anchor_bead"{print $1}' "$TMP/revmeta" | sort -u | wc -l | tr -d ' ')
+BODY_COUNT=$(find "$TMP/bodies" -type f | wc -l | tr -d ' ')
+eq "$BODY_COUNT" "$DISPATCH_COUNT" "(METHOD) every dispatched signoff was created with a body"
+method_ok=1; nofanout_ok=1; gate_ok=1
+for b in "$TMP"/bodies/*; do
+  [ -f "$b" ] || continue
+  grep -qF 'signoff-review' "$b" || method_ok=0
+  grep -qF 'Do NOT spawn' "$b" || nofanout_ok=0
+  grep -qF 'green@' "$b" || gate_ok=0
+done
+[ "$BODY_COUNT" -gt 0 ] && [ "$method_ok" = 1 ] \
+  && ok "(METHOD) every dispatched body names the signoff-review method" \
+  || bad "(METHOD) a dispatched review body did not name the method"
+[ "$BODY_COUNT" -gt 0 ] && [ "$nofanout_ok" = 1 ] \
+  && ok "(METHOD) every dispatched body forbids subagent/persona fan-out" \
+  || bad "(METHOD) a dispatched review body did not forbid fan-out"
+[ "$BODY_COUNT" -gt 0 ] && [ "$gate_ok" = 1 ] \
+  && ok "(METHOD) every dispatched body states the green@<oid> gate contract" \
+  || bad "(METHOD) a dispatched review body did not state the gate contract"
+# The PRE-OPEN dispatch specifically (it is the arm with no PR to fall back on).
+PREOPEN_REV=$(awk -F'\t' '$2=="anchor_bead" && $3=="bead-PREOPEN"{print $1; exit}' "$TMP/revmeta")
+if [ -n "$PREOPEN_REV" ] && [ -f "$TMP/bodies/$PREOPEN_REV" ]; then
+  grep -qF 'signoff-review' "$TMP/bodies/$PREOPEN_REV" \
+    && ok "(METHOD) the PRE-OPEN branch review also carries the method" \
+    || bad "(METHOD) the PRE-OPEN branch review must carry the method"
+else
+  bad "(METHOD) no body captured for the PRE-OPEN dispatch"
+fi
+
 # Summary: 6 healed (EMPTY, ABSENT, SEP, GREEN, INFLGT, PREOPEN), and the opt-outs
 # / normal untouched.
 printf '%s\n' "$OUT1" | grep -q '6 healed' \
@@ -368,6 +409,37 @@ grep -q '^bead-CFGNONE	none$' "$TMP/stamped" \
   || bad "(CFGNONE) --default none must stamp the sentinel (got: $(cat "$TMP/stamped"))"
 grep -q '	anchor_bead	bead-CFGNONE$' "$TMP/revmeta" && bad "(CFGNONE) a gateless rig must NOT dispatch a signoff" \
                                                        || ok "(CFGNONE) gateless-by-config -> no signoff dispatched"
+
+# --- Run 5b: FAIL-SOFT method (tk-jufvl). If review-dispatch-body.sh cannot be
+#     found — an older pack checkout, a partial deploy — the dispatch must STILL
+#     happen. An un-dispatched signoff leaves the armed gate unsatisfiable and
+#     holds the merge forever, which is strictly worse than a title-only bead. So
+#     the missing emitter degrades to today's behaviour and WARNs; it never
+#     aborts the heal. Proven against the REAL script copied into a directory
+#     with no emitter beside it (no test-only env hook in the product code).
+SOFT="$TMP/soft"; mkdir -p "$SOFT"
+cp "$SCRIPT" "$SOFT/check-set-heal.sh"; chmod +x "$SOFT/check-set-heal.sh"
+cat > "$TMP/anchors" <<'A'
+bead-SOFT|pull_request|EMPTY|412|polecat/feat-soft|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"
+rm -f "$TMP"/bodies/*
+RC5B=0
+SOFT_ERR="$TMP/soft.err"
+bash "$SOFT/check-set-heal.sh" --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' >/dev/null 2>"$SOFT_ERR" || RC5B=$?
+eq "$RC5B" "0" "(FAILSOFT) a missing method emitter does not fail the heal pass"
+grep -q '	anchor_bead	bead-SOFT$' "$TMP/revmeta" \
+  && ok "(FAILSOFT) the signoff is STILL dispatched without the emitter (gate stays satisfiable)" \
+  || bad "(FAILSOFT) a missing emitter must not suppress the dispatch"
+grep -q '	gc.routed_to	gc-toolkit/gc-toolkit.polecat-codex$' "$TMP/revmeta" \
+  && ok "(FAILSOFT) the title-only fallback review is still routed" \
+  || bad "(FAILSOFT) fallback review must still be routed"
+grep -q 'TITLE-ONLY' "$SOFT_ERR" \
+  && ok "(FAILSOFT) WARNs loudly that the dispatch carries no method" \
+  || bad "(FAILSOFT) missing emitter must WARN (got: $(cat "$SOFT_ERR"))"
 
 # --- Run 6: FORMULA GATING (heal-gates-merge). The finding this rework closes
 #     (review tk-z4u2e #1): a stamp that did not persist used to exit 0, so the
