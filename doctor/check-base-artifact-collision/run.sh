@@ -56,8 +56,8 @@
 #     disk instead (Step 2a) and reads the backup dog's failure mail as a
 #     second channel (Step 2b). Preserve both when reconciling — do not
 #     restore a `dolt_stale`-keyed threshold row.
-#     Step 2a carries four load-bearing arms; a reconciliation that drops any
-#     one of them restores a false-clean path, so preserve all four:
+#     Step 2a carries six load-bearing arms; a reconciliation that drops any
+#     one of them restores a false-clean path, so preserve all six:
 #       * the scan is driven by `databases[].name` (EXPECTED_DBS), NOT by a
 #         walk of $BACKUP_ROOT/*/ — a database with no backup dir at all is
 #         invisible to a dir-walk and would emit no verdict;
@@ -67,7 +67,15 @@
 #         flagging, but is bypassed once the manifest is itself stale (a
 #         run in flight cannot explain a 40 h-old manifest);
 #       * backup dirs with no live database are INFO/advisory, never a
-#         verdict.
+#         verdict;
+#       * the loop seeds `newest` with the manifest so an equal-second
+#         manifest/chunk mtime tie resolves to the manifest (tk-40mlc) —
+#         `stat` reports whole seconds and Dolt commits the manifest LAST, so
+#         a tie is a fast healthy sync; only a STRICTLY newer file is torn;
+#       * the directory scan's exit status is captured and checked, and an
+#         enumeration that fails (or returns nothing while the manifest is
+#         readable) is RECHECK/FLAG, never OK — the seed above makes an
+#         unreadable directory with a fresh manifest look healthy otherwise.
 #     assets/scripts/dolt-backup-manifest-check.test.sh executes the shipped
 #     Step 2a snippet and asserts over the shipped step text; run it after any
 #     reconciliation of this formula.

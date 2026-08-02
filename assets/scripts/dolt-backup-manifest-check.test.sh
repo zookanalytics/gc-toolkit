@@ -124,6 +124,36 @@ else
     bad "snippet does not drive the scan from an expected-database list"
 fi
 
+# --- Step 3 alert templates must be FLAG-class-neutral ----------------------
+# Step 2a FLAGs for five distinct reasons — no backup directory, no manifest, a
+# strictly newer file, a stale manifest, a directory that could not be read —
+# and only ONE of them has a "newer file" to name. A Step 3 template that
+# demands that field renders an empty or invented value for the other four, so
+# the operator gets an alert about a file that does not exist. Each Step 2a
+# verdict is already a complete one-line reason: the templates carry it
+# verbatim, and these assertions keep the class-specific field from creeping
+# back. Asserted over the shipped step TEXT, because the templates are prose —
+# no snippet marker fences them.
+ALERT_LINES="$(grep -E 'Backup needed:|Backup dog retries not clearing' <<< "$STEP" || true)"
+if [ -z "$ALERT_LINES" ]; then
+    bad "could not find the Step 3 backup alert templates in the dolt-health step"
+else
+    ok "found the Step 3 backup alert templates"
+
+    if grep -qE 'newer file <' <<< "$ALERT_LINES"; then
+        bad "Step 3 backup alert demands a 'newer file' most FLAG classes lack: $ALERT_LINES"
+    else
+        ok "Step 3 backup alerts demand no class-specific 'newer file' field"
+    fi
+
+    # Both of them — the dog nudge and the mayor escalation.
+    if [ "$(grep -c 'verbatim' <<< "$ALERT_LINES" || true)" -ge 2 ]; then
+        ok "both Step 3 backup alerts carry the Step 2a verdict line verbatim"
+    else
+        bad "Step 3 backup alerts do not both carry the verdict line: $ALERT_LINES"
+    fi
+fi
+
 # --- Fixtures ---------------------------------------------------------------
 # Build synthetic backup dirs with controlled mtimes. `age <h>` -> touch stamp.
 BACKUP_ROOT="$TMP/.dolt-backup"
@@ -340,6 +370,19 @@ else
     bad "missing-dir verdict is not actionable: $(verdict missing_backup_dir)"
 fi
 
+# Generalised: Step 3's templates quote the Step 2a line VERBATIM rather than
+# rebuilding it from class-specific fields, so every finding line has to be
+# self-describing. A bare `FLAG <db>:` would render an alert that names a
+# database and no reason at all — the failure mode the reason-neutral templates
+# exist to prevent, seen from the producing end.
+BARE="$(printf '%s\n' "$OUT" | grep -E '^(FLAG|RECHECK|FLAG-ROOT)' \
+    | grep -vE '^[A-Z-]+ ?[^:]*: .+' || true)"
+if [ -n "$BARE" ]; then
+    bad "finding lines carry no reason for Step 3 to quote: $BARE"
+else
+    ok "every finding line carries a reason Step 3 can quote verbatim"
+fi
+
 # No verdict may ever name a literal '*' — that is an unmatched glob leaking
 # through as a database name, and it gives the deacon nothing to act on.
 if printf '%s\n' "$OUT" | grep -qE '^(OK|FLAG|RECHECK|INFO) \*'; then
@@ -402,6 +445,99 @@ case "$FORCED_VERDICT" in
     "")     bad "forced-order tie produced no verdict; got: $FORCED_OUT" ;;
     *)      bad "forced-order tie did not read OK: $FORCED_VERDICT" ;;
 esac
+
+# --- A failed or empty directory scan is never OK ---------------------------
+# The manifest seed that makes a tie read OK also makes a FAILED scan read OK,
+# unless the scan's exit status is checked: `done < <(find ...)` throws that
+# status away, so a directory the patrol cannot enumerate leaves `newest` on the
+# seeded manifest, and a fresh manifest walks straight to "OK: manifest is
+# newest". That hides a strictly newer chunk behind a permissions or I/O error —
+# the same false-clean class the whole check exists to kill, reintroduced by its
+# own fix. Shim `find` to fail for two fixtures, and to succeed while listing
+# nothing for a third, then pin all three verdicts. Against pre-fix code every
+# one of them reads OK.
+SCAN_ROOT="$TMP/scanfail"
+SCAN_FIRED="$SCAN_ROOT/find-shim-calls"
+mkdir -p "$SCAN_ROOT/.dolt-backup" "$TMP/failbin"
+for d in scan_fresh scan_stale scan_empty; do
+    mkdir -p "$SCAN_ROOT/.dolt-backup/$d"
+    : > "$SCAN_ROOT/.dolt-backup/$d/manifest"
+done
+# The manifests are READABLE, and fresh everywhere except scan_stale. Freshness
+# is precisely what used to carry a failed scan to OK, so it is the state under
+# test; scan_stale pins the other half of the rule (already stale -> FLAG, not
+# an indeterminate the patrol could sit on).
+touch -t "$(epoch_stamp "$(( $(date +%s) - 3600 ))")"      "$SCAN_ROOT/.dolt-backup/scan_fresh/manifest"
+touch -t "$(epoch_stamp "$(( $(date +%s) - 3600 ))")"      "$SCAN_ROOT/.dolt-backup/scan_empty/manifest"
+touch -t "$(epoch_stamp "$(( $(date +%s) - 40 * 3600 ))")" "$SCAN_ROOT/.dolt-backup/scan_stale/manifest"
+
+# Same shape as the forced-order shim: paths baked in at write time, `\$` kept
+# literal for the shim's own parameters, everything else delegated to real find.
+cat > "$TMP/failbin/find" <<EOF
+#!/usr/bin/env bash
+# \$1 is the snippet's search root: 'find "\$db" -type f'.
+case "\$1" in
+    */scan_empty)
+        printf '%s\n' "\$1" >> "$SCAN_FIRED"
+        exit 0 ;;                    # enumerated nothing, reported no error
+    */scan_fresh|*/scan_stale)
+        printf '%s\n' "\$1" >> "$SCAN_FIRED"
+        echo "find: '\$1': Permission denied" >&2
+        exit 1 ;;
+esac
+exec "$REAL_FIND" "\$@"
+EOF
+chmod +x "$TMP/failbin/find"
+
+SCAN_OUT="$(PATH="$TMP/failbin:$PATH" GC_CITY_PATH="$SCAN_ROOT" GC_CITY="$SCAN_ROOT" \
+    EXPECTED_DBS="scan_fresh scan_stale scan_empty" bash "$TMP/check.sh" 2>&1)"
+
+scan_expect() {
+    local db="$1" want="$2" line
+    line="$(printf '%s\n' "$SCAN_OUT" | grep -E "^(OK|FLAG|RECHECK|INFO) $db:" | head -1 || true)"
+    case "$line" in
+        "$want "*) ok "$db -> $want ($line)" ;;
+        "")        bad "$db -> no verdict emitted; got: $SCAN_OUT" ;;
+        *)         bad "$db -> expected $want, got: $line" ;;
+    esac
+}
+
+# Vacuity guard, as for the forced-order case: if the snippet stopped shelling
+# out to `find`, or the PATH prefix were ignored, these fixtures would quietly
+# enumerate for real and assert nothing.
+for d in scan_fresh scan_stale scan_empty; do
+    if grep -q "/$d\$" "$SCAN_FIRED" 2>/dev/null; then
+        ok "scan shim was exercised for $d"
+    else
+        bad "scan shim never fired for $d — the scan was NOT forced; got: $SCAN_OUT"
+    fi
+done
+
+scan_expect scan_fresh RECHECK  # unreadable dir + fresh manifest = unproven
+scan_expect scan_stale FLAG     # unreadable dir + 40 h manifest = a finding now
+scan_expect scan_empty RECHECK  # exit 0 but listed nothing, manifest readable
+
+# The headline invariant, stated as itself: an unreadable backup directory must
+# never produce a clean verdict, whatever the manifest looks like.
+if printf '%s\n' "$SCAN_OUT" | grep -qE '^OK '; then
+    bad "an unenumerable backup directory read as OK: $(printf '%s\n' "$SCAN_OUT" | grep -E '^OK ')"
+else
+    ok "no unenumerable backup directory read as OK"
+fi
+
+# The verdict has to say the SCAN failed, not merely that something is wrong:
+# Step 3 quotes this line verbatim, and "fix the directory read" is a different
+# action from "re-run the backup dog".
+if printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' | grep -q 'scan failed'; then
+    ok "scan-failure verdict names the scan as the cause"
+else
+    bad "scan-failure verdict does not name the scan: $(printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' || true)"
+fi
+if printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' | grep -q 'Permission denied'; then
+    ok "scan-failure verdict carries the underlying find error"
+else
+    bad "scan-failure verdict drops the find error: $(printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' || true)"
+fi
 
 # --- Root-level terminal findings -------------------------------------------
 # A missing or empty backup root means NO database has a restorable backup. It
