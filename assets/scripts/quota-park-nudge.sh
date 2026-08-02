@@ -140,6 +140,15 @@ state_get() {
 # is fed to arithmetic, and `$(( ))` on garbage is fatal under `set -e`.
 num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 
+# One writer for an episode's state file, so the two paths that persist it —
+# inside the backoff window, and after a delivery attempt — cannot drift in
+# which counters they carry. Positional: path, first_seen, last_nudge, last_try,
+# attempts, unconfirmed, escalated.
+write_state() {
+    printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=%s\nunconfirmed=%s\nescalated=%s\n' \
+        "$2" "$3" "$4" "$5" "$6" "$7" > "$1"
+}
+
 # True for a session id safe to use as a filename. The id names a state file in
 # a shared runtime directory and is pasted into the operator instruction in the
 # escalation mail, so it must be a bare token: no separator, no dot-segment,
@@ -236,13 +245,26 @@ detector_class() {
 #                          nothing, and NO session is ever detected as parked.
 # An earlier version validated only the two bounds below, which is how
 # QUOTA_PARK_BACKOFF_BASE=oops reached the arithmetic at all.
-num "$CALL_TIMEOUT"   || CALL_TIMEOUT=15
-num "$SWEEP_BUDGET"   || SWEEP_BUDGET=120
-num "$BACKOFF_BASE"   || BACKOFF_BASE=120
-num "$BACKOFF_CAP"    || BACKOFF_CAP=900
-num "$ESCALATE_AFTER" || ESCALATE_AFTER=7200
-num "$PEEK_LINES"     || PEEK_LINES=20
-num "$TAIL_LINES"     || TAIL_LINES=12
+#
+# Each knob also carries a FLOOR, because "is an integer" was never the whole
+# contract: zero is a perfectly good integer that quietly defeats recovery
+# everywhere it is not documented as an off switch. `TAIL_LINES=0` makes
+# `tail -n 0` print nothing, so no session is ever detected as parked;
+# `PEEK_LINES=0` empties every pane, which the sweep reads as unreadable;
+# `BACKOFF_BASE=0` or `BACKOFF_CAP=0` collapses the retry window to zero and
+# nudges every parked pane on every 3m sweep, forever. Zero is reserved as
+# "disable" for exactly the three knobs the docs say it is — CALL_TIMEOUT
+# (unbounded calls), SWEEP_BUDGET (no per-pass budget), ESCALATE_AFTER (never
+# mail a human) — and those keep floor 0. Everywhere else it is a typo with the
+# same blast radius as "oops", and is treated the same way.
+num_min() { num "${1:-}" && [ "$1" -ge "$2" ]; }
+num_min "$CALL_TIMEOUT"   0 || CALL_TIMEOUT=15
+num_min "$SWEEP_BUDGET"   0 || SWEEP_BUDGET=120
+num_min "$ESCALATE_AFTER" 0 || ESCALATE_AFTER=7200
+num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120
+num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
+num_min "$PEEK_LINES"     1 || PEEK_LINES=20
+num_min "$TAIL_LINES"     1 || TAIL_LINES=12
 
 # Every `gc` call goes through here. Two things it guarantees:
 #
@@ -294,7 +316,7 @@ sessions=$(run_bounded gc session list --json 2>/dev/null \
              | [.id, (.alias // .session_name // .id)] | @tsv' 2>/dev/null) || exit 0
 [ -n "$sessions" ] || { echo "quota-park-nudge: 0 checked, 0 parked, 0 nudged"; exit 0; }
 
-checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0
+checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0; unconfirmed_now=0
 
 while IFS=$'\t' read -r id alias; do
     [ -n "${id:-}" ] || continue
@@ -348,13 +370,21 @@ while IFS=$'\t' read -r id alias; do
     first_seen="$(state_get "$state" first_seen)"; num "$first_seen" || first_seen="$NOW"
     last_nudge="$(state_get "$state" last_nudge)"; num "$last_nudge" || last_nudge=0
     attempts="$(state_get "$state" attempts)";     num "$attempts"   || attempts=0
+    # Deliveries we could not confirm, kept apart from the ones we could: see
+    # the nudge branches below. Absent from a state file an older version wrote,
+    # which reads as zero — the same as a fresh episode.
+    unconfirmed="$(state_get "$state" unconfirmed)"; num "$unconfirmed" || unconfirmed=0
+    # Pacing keys on the last delivery ATTEMPT, not the last confirmed one.
+    # Falls back to last_nudge so a state file from before this field existed
+    # still paces on its confirmed nudge instead of reading as never-tried.
+    last_try="$(state_get "$state" last_try)"; num "$last_try" || last_try="$last_nudge"
     escalated="$(state_get "$state" escalated)"
     age=$((NOW - first_seen))
+    tries=$((attempts + unconfirmed))
 
-    if [ "$attempts" -gt 0 ] && [ $((NOW - last_nudge)) -lt "$(backoff_for "$attempts")" ]; then
+    if [ "$tries" -gt 0 ] && [ $((NOW - last_try)) -lt "$(backoff_for "$tries")" ]; then
         # Still blocked, still inside the backoff window — say nothing, wait.
-        printf 'first_seen=%s\nlast_nudge=%s\nattempts=%s\nescalated=%s\n' \
-            "$first_seen" "$last_nudge" "$attempts" "$escalated" > "$state"
+        write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated"
         continue
     fi
 
@@ -381,19 +411,39 @@ while IFS=$'\t' read -r id alias; do
     fi
     if [ "$nudge_rc" -eq 0 ]; then
         nudged=$((nudged + 1))
-        last_nudge="$NOW"
+        last_nudge="$NOW"; last_try="$NOW"
         attempts=$((attempts + 1))
-        echo "quota-park-nudge: nudged $alias ($id), parked $(duration "$age"), attempt $attempts"
+        echo "quota-park-nudge: nudged $alias ($id), parked $(duration "$age"), attempt $((attempts + unconfirmed))"
+    elif [ "$nudge_rc" -eq 124 ] || [ "$nudge_rc" -ge 128 ]; then
+        # AMBIGUOUS, and paced as an attempt anyway. The bound expired (or the
+        # call was signalled) on a nudge the runtime may already have accepted —
+        # the same window the fallback above refuses to retry into. Refusing the
+        # immediate retry but leaving the counters untouched only moves the
+        # duplicate one cycle out: `attempts` stays 0, the backoff test below
+        # reads the session as never nudged, and the next 3m pass sends a second
+        # resume message into the same pane. So an unconfirmed delivery advances
+        # the pacing (last_try, and the doubling exponent via `tries`) while
+        # never claiming a delivery we did not see land — `attempts`, the count
+        # the escalation reports to a human, still means "confirmed".
+        unconfirmed=$((unconfirmed + 1))
+        last_try="$NOW"
+        unconfirmed_now=$((unconfirmed_now + 1))
+        echo "quota-park-nudge: nudge UNCONFIRMED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age"), paced as attempt $((attempts + unconfirmed))"
     else
+        # A fast rejection: nothing was delivered, so nothing is paced. The next
+        # cycle retries in 3m, which is what we want for a transient runtime
+        # error — unlike the ambiguous case, a retry here cannot duplicate.
         echo "quota-park-nudge: nudge FAILED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age")"
     fi
 
+    unconf_note=""
+    [ "$unconfirmed" -gt 0 ] && unconf_note=" (plus $unconfirmed unconfirmed)"
     if [ "$ESCALATE_AFTER" -gt 0 ] && [ "$escalated" != "1" ] && [ "$age" -ge "$ESCALATE_AFTER" ]; then
         # No pane text in the body — see detector_class. The label stands in for
         # the excerpt the earlier version mailed: it says which banner family
         # matched without quoting a pane the agent controls.
         run_bounded gc mail send "$ESCALATE_TO" -s "Quota-parked: $alias for $(duration "$age") [HIGH]" \
-            -m "$alias ($id) has shown a provider limit banner for $(duration "$age") and has not resumed after $attempts nudge(s).
+            -m "$alias ($id) has shown a provider limit banner for $(duration "$age") and has not resumed after $attempts nudge(s)$unconf_note.
 
 Detector class: $(detector_class "$pane")
 
@@ -409,14 +459,42 @@ and this mail is a durable artifact. Read it directly with: gc session peek $id"
             || echo "quota-park-nudge: escalation mail FAILED for $alias ($id)"
     fi
 
-    printf 'first_seen=%s\nlast_nudge=%s\nattempts=%s\nescalated=%s\n' \
-        "$first_seen" "$last_nudge" "$attempts" "$escalated" > "$state"
+    write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated"
 done <<< "$sessions"
 
 # A recovered agent's state file is removed above, the moment its pane goes
 # clean. This only sweeps files no cycle has touched in a week — sessions that
 # were closed or renamed while parked.
-find "$STATE_DIR" -type f -mtime +7 -delete 2>/dev/null || true
+#
+# Narrow on purpose, because STATE_DIR is an override and its default sits
+# inside the shared city runtime directory: a broad `find "$STATE_DIR" -type f
+# -mtime +7 -delete` is a city-scoped order deleting week-old files it has never
+# heard of, and a mis-set or shared QUOTA_PARK_STATE_DIR is all it takes to
+# point that at somebody else's state. Three predicates keep it to our own
+# files: DIRECTLY in STATE_DIR (`-maxdepth 1`, so a nested tree is never
+# touched, whatever its age); named like the session ids we write (`safe_id`,
+# the same test that decides which ids may name a file at all); and carrying a
+# state file's own `first_seen=` header on line 1. Anything failing one of them
+# is somebody else's file and is left alone. `-print0` because a name is not
+# trusted to be one line — split on newlines, a hostile name becomes two paths
+# and the second is a relative one.
+#
+# The header test reads line 1 directly rather than through `head | grep`: under
+# `pipefail` a `grep -q` that matches can close the pipe first, and the SIGPIPE'd
+# `head` then fails the whole pipeline — which would read as "not our file" and
+# skip the delete on exactly the files this is meant to prune.
+prune_stale_state() {
+    local path base header
+    while IFS= read -r -d '' path; do
+        base="${path##*/}"
+        safe_id "$base" || continue
+        header=""
+        IFS= read -r header < "$path" 2>/dev/null || true
+        case "$header" in first_seen=*) ;; *) continue ;; esac
+        rm -f "$path"
+    done < <(find "$STATE_DIR" -maxdepth 1 -type f -mtime +7 -print0 2>/dev/null || true)
+}
+prune_stale_state
 
 # Everything the sweep could not conclude is named in the summary rather than
 # folded into "checked" — a short sweep must not read as a complete one.
@@ -426,4 +504,6 @@ unsafe=""
 [ "$rejected" -gt 0 ] && unsafe=", $rejected rejected (unsafe session id)"
 deferred=""
 [ "$skipped" -gt 0 ] && deferred=", $skipped deferred (sweep budget ${SWEEP_BUDGET}s)"
-echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$unread$unsafe$deferred"
+unconf=""
+[ "$unconfirmed_now" -gt 0 ] && unconf=", $unconfirmed_now unconfirmed (bound expired mid-delivery)"
+echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$unconf$unread$unsafe$deferred"

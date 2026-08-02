@@ -46,9 +46,19 @@ The fallback fires only for that flag-rejection case — a fast usage error —
 never for a call that hit its bound. A timeout means the runtime may have taken
 the nudge and simply not answered in time; retrying there puts two resume
 messages into one pane and leaves the attempt counter below what the agent
-actually received. A timed-out nudge is recorded as failed and the next cycle
-retries it under the backoff, which is the right pacing for a session that is
-still blocked anyway.
+actually received.
+
+Refusing that immediate retry is only half of it, because the same ambiguity
+outlives the cycle. A nudge whose bound expired is recorded as **unconfirmed**:
+it advances the retry pacing (`last_try`, and the doubling exponent) without
+being counted as a delivery in `attempts`, the figure the escalation reports to
+a human. Left out of both, as an earlier version did, the next 3m pass reads
+`attempts=0`, treats a session it may well have just nudged as never nudged,
+skips the backoff and sends the second resume message anyway — the duplicate
+simply arrives one cycle later. Paced, not muted: once the window elapses the
+retry does go out, since an unconfirmed nudge may equally well never have
+landed. A fast rejection is different and is *not* paced — nothing was
+delivered, so the next cycle retries in 3m and cannot duplicate.
 
 Two selection rules are load-bearing enough to state on their own:
 
@@ -160,9 +170,9 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 |---|---|---|
 | `QUOTA_PARK_MATCH` | see script | ERE for provider limit banners |
 | `QUOTA_PARK_BUSY` | `esc to interrupt…` | ERE proving the agent is mid-turn |
-| `QUOTA_PARK_PEEK_LINES` | `20` | pane lines captured |
-| `QUOTA_PARK_TAIL_LINES` | `12` | how far up the banner may sit |
-| `QUOTA_PARK_BACKOFF_BASE` / `_CAP` | `120` / `900` | seconds between retries |
+| `QUOTA_PARK_PEEK_LINES` | `20` | pane lines captured; must be ≥ 1 |
+| `QUOTA_PARK_TAIL_LINES` | `12` | how far up the banner may sit; must be ≥ 1 |
+| `QUOTA_PARK_BACKOFF_BASE` / `_CAP` | `120` / `900` | seconds between retries; must be ≥ 1 |
 | `QUOTA_PARK_ESCALATE_AFTER` / `_TO` | `7200` / `mayor/` | one mail per long park; `0` disables |
 | `QUOTA_PARK_EXCLUDE` | — | ERE of aliases never nudged |
 | `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call; `0` disables the bound |
@@ -170,13 +180,32 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_STATE_DIR` | `$GC_CITY/.gc/runtime/quota-park` | per-session episode state |
 
 Every numeric knob above is validated once, up front, and falls back to its
-default if it is not a bare integer. A garbage value fails differently in each
-place it lands and announces itself in none of them: a bad backoff bypasses
-backoff (`[: oops: integer expression expected` reads as "window elapsed", so
-every cycle nudges), a bad `ESCALATE_AFTER` reads as *disabled* and no human is
-ever told, and a bad `PEEK_LINES`/`TAIL_LINES` makes `tail -n` error out so **no
-session is ever detected as parked at all**. A typo in a tuning knob must not be
-able to switch off city-wide recovery quietly.
+default if it is not a bare integer **at or above its floor**. A garbage value
+fails differently in each place it lands and announces itself in none of them: a
+bad backoff bypasses backoff (`[: oops: integer expression expected` reads as
+"window elapsed", so every cycle nudges), a bad `ESCALATE_AFTER` reads as
+*disabled* and no human is ever told, and a bad `PEEK_LINES`/`TAIL_LINES` makes
+`tail -n` error out so **no session is ever detected as parked at all**. A typo
+in a tuning knob must not be able to switch off city-wide recovery quietly.
+
+The floor is why `0` is not simply "an integer, therefore fine". Zero is the
+documented off switch for exactly three knobs — `CALL_TIMEOUT` (unbounded
+calls), `SWEEP_BUDGET` (no per-pass budget) and `ESCALATE_AFTER` (never mail a
+human) — and those keep a floor of `0`. Everywhere else zero is a typo that
+disables recovery while looking deliberate: `TAIL_LINES=0` makes `tail -n 0`
+print nothing, so nothing is ever detected as parked; `PEEK_LINES=0` empties
+every capture, which reads as an unreadable pane; `BACKOFF_BASE=0` or
+`BACKOFF_CAP=0` collapses the retry window and nudges every parked pane on every
+sweep, forever. Those knobs have a floor of `1` and fall back exactly as they do
+for `oops`.
+
+The week-old cleanup of the state directory is deliberately narrow for the same
+"this is a city-scoped order" reason: `QUOTA_PARK_STATE_DIR` is an override and
+its default lives inside the shared city runtime tree, so a bare recursive
+`find -delete` there is this order unlinking week-old files it has never heard
+of. It prunes only files directly in the directory (never a nested tree), named
+like the session ids it writes, and carrying its own `first_seen=` header —
+anything else is somebody else's file, whatever its age.
 
 Regression suite: `assets/scripts/quota-park-nudge.test.sh` (hermetic — fake
 `gc`, canned panes, no city). It also parses `orders/quota-park-nudge.toml` and

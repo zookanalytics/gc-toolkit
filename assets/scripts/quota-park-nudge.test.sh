@@ -28,11 +28,17 @@
 # newline-forged record, a path-shaped id — cannot write state outside the state
 # directory or reach the log raw; (r) a peek that FAILS preserves the episode
 # instead of ending it, so a transient runtime error cannot reset backoff and
-# the escalation flag; (s) a malformed numeric override falls back to its
-# default rather than silently disabling backoff, escalation, or detection
-# itself; (t) a nudge that times out after the runtime accepted it is not
-# re-sent by the older-gc fallback; (u) the order file parses and still carries
-# the wiring the sweep depends on (cooldown/3m/city + a live exec path).
+# the escalation flag; (s) a malformed numeric override — including a `0` for a
+# knob that does not document zero as an off switch — falls back to its default
+# rather than silently disabling backoff, escalation, or detection itself, while
+# the three knobs that DO reserve zero still honour it; (t) a nudge that times
+# out after the runtime accepted it is not re-sent by the older-gc fallback;
+# (u) nor by the next cycle — an unconfirmed delivery paces the backoff without
+# being counted as one the agent received; (v) the week-old state cleanup prunes
+# only this order's own state files, leaving anything nested, differently named,
+# or lacking its header alone however old it is; (w) the order file parses and
+# still carries the wiring the sweep depends on (cooldown/3m/city + a live exec
+# path).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +51,14 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 nudges_for() { grep -c "^nudge $1\$" "$TMP/nudges" 2>/dev/null || true; }
+state_field() { grep -c "^$2=$3\$" "$TMP/state/$1" 2>/dev/null || true; }
+
+# In-place edit, portably. `sed -i` takes no argument on GNU and a mandatory
+# suffix argument on BSD/macOS, and the two spellings are mutually exclusive:
+# `sed -i` there consumes the next word as the suffix, and `sed -i ''` on GNU is
+# read as an empty script. Rewriting through a temp file is the only form both
+# accept, and this suite is meant to be runnable wherever the order runs.
+sedi() { sed "$1" "$2" > "$2.sedi" && mv "$2.sedi" "$2"; }
 
 mkdir -p "$TMP/panes" "$TMP/state" "$TMP/bin"
 : > "$TMP/nudges"; : > "$TMP/mail"; : > "$TMP/mailbody"
@@ -159,7 +173,11 @@ case "$1 $2" in
     # A peek that ERRORS, as opposed to one that hangs: a transient runtime
     # failure. The caller learns nothing about the pane either way.
     [ "${FAKE_FAIL_PEEK:-}" = "$3" ] && exit 7
-    [ -f "$FAKE_PANES/$3" ] && cat "$FAKE_PANES/$3" ;;
+    # Honour `--lines N` the way the real peek does — the LAST N lines. Ignoring
+    # it would make PEEK_LINES unobservable here, and the knob's failure mode
+    # (`--lines 0` returns an empty pane, so nothing is ever detected as parked)
+    # is exactly what the zero-value regression below has to be able to see.
+    [ -f "$FAKE_PANES/$3" ] && tail -n "${5:-20}" "$FAKE_PANES/$3" ;;
   "session nudge")
     shift 2
     if [ "$1" = "--delivery" ]; then
@@ -226,7 +244,11 @@ eq "$(nudges_for lx-claude)" "1" "no re-nudge inside the backoff window"
 
 # --- Run 3: backoff window elapsed -> nudge again (poll, don't trust the
 #            banner's stated reset — here it claims Aug 8th). ----------------
-sed -i "s/^last_nudge=.*/last_nudge=$(( $(date +%s) - 200 ))/" "$TMP/state/lx-claude"
+# Rewind both stamps: `last_nudge` is the last CONFIRMED delivery and `last_try`
+# is the last delivery attempt, and it is the latter the backoff window is
+# measured from (an unconfirmed nudge paces too — run 14).
+BACK=$(( $(date +%s) - 200 ))
+sedi "s/^last_nudge=.*/last_nudge=$BACK/;s/^last_try=.*/last_try=$BACK/" "$TMP/state/lx-claude"
 bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-claude)" "2" "re-nudges after the backoff window elapses"
 eq "$(grep -c '^attempts=2$' "$TMP/state/lx-claude" || true)" "1" "attempt count advances"
@@ -239,11 +261,11 @@ bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-claude)" "2" "recovered session is not nudged again"
 
 # --- Run 5: a long park escalates exactly once. -----------------------------
-sed -i "s/^first_seen=.*/first_seen=$(( $(date +%s) - 9000 ))/;s/^last_nudge=.*/last_nudge=0/" \
+sedi "s/^first_seen=.*/first_seen=$(( $(date +%s) - 9000 ))/;s/^last_nudge=.*/last_nudge=0/;s/^last_try=.*/last_try=0/" \
     "$TMP/state/lx-codex"
 bash "$SCRIPT" > /dev/null
 eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" "long park escalates to a human once"
-sed -i "s/^last_nudge=.*/last_nudge=0/" "$TMP/state/lx-codex"
+sedi "s/^last_nudge=.*/last_nudge=0/;s/^last_try=.*/last_try=0/" "$TMP/state/lx-codex"
 bash "$SCRIPT" > /dev/null
 eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" "escalation is not repeated every cycle"
 
@@ -463,6 +485,64 @@ FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_TAIL_LINES=x bash "$SCRIPT" > 
 eq "$(nudges_for lx-codex)" "1" \
     "malformed QUOTA_PARK_TAIL_LINES falls back (detection is not silently switched off)"
 
+# --- Run 13b: ZERO is not a valid value for most of these knobs. ------------
+# `0` passes an is-it-an-integer test and then disables recovery just as
+# thoroughly as garbage does, which is worse than garbage because it looks
+# deliberate. It is an off switch for exactly the three knobs documented as
+# having one; everywhere else it falls back to the default like any other
+# out-of-range value. Each case below is the silent failure that knob buys.
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=1\nunconfirmed=0\nescalated=\n' \
+    "$(( $(date +%s) - 300 ))" "$(( $(date +%s) - 10 ))" "$(( $(date +%s) - 10 ))" \
+    > "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_BACKOFF_BASE=0 bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "0" \
+    "QUOTA_PARK_BACKOFF_BASE=0 falls back (a zero window would nudge every 3m sweep)"
+
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=4\nunconfirmed=0\nescalated=\n' \
+    "$(( $(date +%s) - 3000 ))" "$(( $(date +%s) - 30 ))" "$(( $(date +%s) - 30 ))" \
+    > "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_BACKOFF_CAP=0 bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "0" \
+    "QUOTA_PARK_BACKOFF_CAP=0 falls back (a zero cap clamps every backoff to zero)"
+
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_TAIL_LINES=0 bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "1" \
+    "QUOTA_PARK_TAIL_LINES=0 falls back (tail -n 0 would detect no park anywhere)"
+
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_PEEK_LINES=0 bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "1" \
+    "QUOTA_PARK_PEEK_LINES=0 falls back (a zero-line capture reads as an unreadable pane)"
+
+# The other side of the same rule: where zero IS documented as the off switch it
+# must keep working, or tightening the validation just breaks three knobs the
+# other way.
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"; : > "$TMP/mail"
+printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=3\nunconfirmed=0\nescalated=\n' \
+    "$(( $(date +%s) - 9000 ))" > "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_ESCALATE_AFTER=0 bash "$SCRIPT" > /dev/null
+eq "$(grep -c '^mail ' "$TMP/mail" || true)" "0" \
+    "QUOTA_PARK_ESCALATE_AFTER=0 still disables escalation (zero is reserved here)"
+eq "$(nudges_for lx-codex)" "1" "escalation disabled does not stop the nudging"
+
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_CALL_TIMEOUT=0 QUOTA_PARK_SWEEP_BUDGET=0 \
+    bash "$SCRIPT" > "$TMP/out13z"
+eq "$(nudges_for lx-codex)" "1" \
+    "QUOTA_PARK_CALL_TIMEOUT=0 / _SWEEP_BUDGET=0 still mean unbounded (zero is reserved here)"
+grep -q "deferred (sweep budget" "$TMP/out13z" \
+    && bad "a zero sweep budget must not defer the sweep" \
+    || ok "a zero sweep budget defers nothing"
+
 # --- Run 14: a nudge that times out AFTER delivery is not re-sent. ----------
 # `--delivery immediate` can be accepted by the runtime and still exceed the
 # call bound. Falling back on any non-zero rc then delivers the same resume
@@ -474,14 +554,84 @@ if ! command -v timeout >/dev/null 2>&1; then
 else
     rm -f "$TMP/state"/*
     : > "$TMP/nudges"
-    FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_DELIVERY=1 \
-        QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
-        timeout 20 bash "$SCRIPT" > /dev/null || true
+    slow_sweep() {
+        FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_DELIVERY=1 \
+            QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+            timeout 20 bash "$SCRIPT" > /dev/null || true
+    }
+    slow_sweep
     eq "$(nudges_for lx-codex)" "1" \
         "a nudge that times out after delivery is not duplicated by the fallback"
+
+    # An unconfirmed delivery is not a confirmed one, and the state file must say
+    # so in both directions: it advances `unconfirmed`, never `attempts` — the
+    # count the escalation mail reports to a human as nudges the agent received.
+    eq "$(state_field lx-codex unconfirmed 1)" "1" \
+        "a timed-out nudge is recorded as an unconfirmed delivery"
+    eq "$(state_field lx-codex attempts 0)" "1" \
+        "a timed-out nudge does not claim a confirmed delivery"
+
+    # --- Run 14b: and the NEXT cycle must respect the backoff. --------------
+    # This is where refusing the immediate retry stops being enough. The runtime
+    # may well have taken that nudge; if the timeout leaves the counters alone,
+    # the next 3m pass sees attempts=0, reads the session as never nudged, skips
+    # the backoff entirely and sends a second resume message into the same pane
+    # — the duplicate the no-fallback rule exists to prevent, arriving one cycle
+    # later. Pacing therefore keys on the last delivery ATTEMPT, confirmed or not.
+    slow_sweep
+    eq "$(nudges_for lx-codex)" "1" \
+        "a second cycle does not re-nudge inside the backoff window after a timed-out nudge"
+
+    # Paced, not muted: once that window elapses the retry goes out, because an
+    # unconfirmed nudge may equally well never have been delivered.
+    BACK=$(( $(date +%s) - 200 ))
+    sedi "s/^last_try=.*/last_try=$BACK/" "$TMP/state/lx-codex"
+    slow_sweep
+    eq "$(nudges_for lx-codex)" "2" \
+        "the retry does go out once the backoff window elapses"
+    eq "$(state_field lx-codex unconfirmed 2)" "1" "unconfirmed deliveries accumulate"
 fi
 
-# --- Run 15: the order wiring itself. ---------------------------------------
+# --- Run 15: stale-state cleanup only ever prunes this order's own files. ---
+# The week-old sweep exists for state files whose session was closed or renamed
+# while parked. STATE_DIR is an override, though, and its default sits inside
+# the shared city runtime directory — so a `find "$STATE_DIR" -type f -mtime +7
+# -delete` is a city-scoped order deleting week-old files it has never heard of,
+# and one mis-set or shared QUOTA_PARK_STATE_DIR is all it takes to aim that at
+# another component's state. Everything old but not ours must survive: a nested
+# tree (never ours — we write flat), a file whose name is not a session id, and
+# a file that merely lives here without our header.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state/nested"
+: > "$TMP/nudges"
+printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nescalated=\n' \
+    > "$TMP/state/lx-gone"
+printf 'first_seen=1\nlast_nudge=0\nlast_try=0\nattempts=1\nunconfirmed=0\nescalated=\n' \
+    > "$TMP/state/nested/lx-nested"
+printf '{"unrelated":"component state"}\n' > "$TMP/state/other-component.json"
+: > "$TMP/state/.hidden-marker"
+# A fixed date, not `date -d '8 days ago'`: -d is GNU-only and -v is BSD-only,
+# and any 2020 timestamp is comfortably past -mtime +7 whenever this runs.
+touch -t 202001010000 "$TMP/state/lx-gone" "$TMP/state/nested/lx-nested" \
+    "$TMP/state/other-component.json" "$TMP/state/.hidden-marker"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+[ -f "$TMP/state/lx-gone" ] \
+    && bad "a week-old state file for a vanished session is pruned" \
+    || ok "a week-old state file for a vanished session is pruned"
+[ -f "$TMP/state/nested/lx-nested" ] \
+    && ok "an old file in a nested directory survives the prune" \
+    || bad "an old file in a nested directory survives the prune"
+[ -s "$TMP/state/other-component.json" ] \
+    && ok "an old file without this order's state header survives the prune" \
+    || bad "an old file without this order's state header survives the prune"
+[ -f "$TMP/state/.hidden-marker" ] \
+    && ok "an old file whose name is not a session id survives the prune" \
+    || bad "an old file whose name is not a session id survives the prune"
+[ -f "$TMP/state/lx-codex" ] \
+    && ok "a state file this sweep just wrote is not pruned" \
+    || bad "a state file this sweep just wrote is not pruned"
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+
+# --- Run 16: the order wiring itself. ---------------------------------------
 # The runs above prove the detector; none of them prove the order that runs it.
 # A file that does not parse, or that loses `scope = "city"` (rig-scoped: most
 # of the city stops being swept) or its `exec` path (nothing runs at all), fails
