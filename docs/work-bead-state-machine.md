@@ -250,10 +250,16 @@ to the refinery like any other PR, but it never closes a unit that merges. The
 clears it validates, performs the merge, and records that the bead landed —
 synchronous, because the agent that merged is the one that knows it merged. It
 validates against a **fresh read of the anchor** (the enumeration snapshot
-predates the PR read, and the signoff path writes the anchor concurrently) and
-pins the merge to the **exact head it validated** (`--match-head-commit`), so
-neither a mid-pass metadata write nor a mid-pass push can land something no gate
-in that pass ever looked at. The
+predates the PR read, and the signoff path writes the anchor concurrently), it
+**re-reads the anchor once more immediately before merging** — the bead is the
+authority for the merge, and the window between the last gate and `gh pr merge`
+is made of round-trips another writer can act inside (park it with `merge_hold`,
+clear or advance a `check.<gate>` on a re-gate, close it, retarget it) all
+without moving the head — and it pins the merge to the **exact head it
+validated** (`--match-head-commit`), so neither a mid-pass metadata write nor a
+mid-pass push can land something no gate in that pass ever looked at. An
+unreadable re-read holds: a merge is the one act the pass cannot retract, so "I
+could not re-confirm" must never merge. The
 **observer** is the backstop for what no one knows: it detects desync (a merge
 skill that died mid-merge, an out-of-band merge, an unowned artifact) and
 surfaces it, but it **never writes merged-truth**. The **refinery** is the agent
@@ -1096,6 +1102,23 @@ normalized" while having nothing that can ever raise its gate. Treating
 `merge_result_healed` as a reason to keep checking — alongside `check_set_healed` —
 is what stops the repair from trading an invisible PR for a permanently stuck one.
 
+**A signoff already in flight is a claim about reachability, and the heal checks
+it.** The dispatch is skipped when a review for the anchor already exists — that
+dedup is what stops one gate collecting two claimable reviews. But "exists" is
+not "can be claimed": the route (`gc.routed_to`, plus the durable `review_pool`
+copy a signoff restores it from) is written best-effort, and the read-back that
+verifies it can itself come back unreadable, in which case the dispatch
+deliberately leaves the review **open** rather than close a bead a polecat may
+already hold. Believed on the next pass, that open-but-unreachable review covers
+the gate forever: the anchor is held, no replacement is minted, and nothing
+escalates because the dispatch counter already recorded a signoff. So the heal
+**validates the route of the review it is about to reuse**, and repairs only what
+is absent — re-offering an inert one through the pool its own durable copy names
+(an operator's re-route is preserved), restoring a missing durable copy on a
+claimed one, and never touching the live route of a bead somebody holds. What it
+cannot verify it does not count: an unreadable review is neither reused nor
+replaced, which leaves the merge held and the question open for the next pass.
+
 The same recovery shape hid a second way: `su-uzy9.1` was assigned to
 `shutupandlisten/refinery` while the canonical identity was
 `shutupandlisten/gc-toolkit.refinery`, which hid it from find-work's *assignee*
@@ -1148,11 +1171,17 @@ it honest:
 **"PR number" means every key that names one.** `pr_number` is what the refinery
 stamps, but it is not the only key in use: the fork-sync flow records `fork_pr` /
 `fork_pr_url` and no `pr_number` at all. Every PR-keyed lookup — the tracked set,
-the in-flight rework probes, and the closed-bead resolution — reads the same
-widened key set, so a bead visible to one is visible to all of them. Widening a
-single lookup is worse than widening none: it flips such a PR from *anchorless*
-to tracked-but-unprobeable, which reads as resolved while the in-flight probes
-still cannot see the bead holding the branch.
+the in-flight rework probes, the closed-bead resolution, **and the merge skill's
+read of an anchor's own identity** — reads the same widened key set, so a bead
+visible to one is visible to all of them. Widening a single lookup is worse than
+widening none: it flips such a PR from *anchorless* to tracked-but-unprobeable,
+which reads as resolved while the in-flight probes still cannot see the bead
+holding the branch. The merge skill's half of that is the sharpest case — while
+it read `pr_number` alone, a live `merge_result=pull_request` anchor keyed only
+by `fork_pr` was skipped as "names no PR" every pass, and the observer counted it
+*owned* and stayed silent: a PR nothing lands and nothing reports. An anchor
+whose keys name *several different* numbers is held instead, never guessed:
+picking one means picking a pull request, and a wrong pick lands the wrong work.
 
 **And a number is not an identity.** Every key above holds a pull *number*, which
 is unique only within a repository, while the PRs it is matched against come from a

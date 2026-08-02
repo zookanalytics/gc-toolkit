@@ -182,6 +182,12 @@ case "$2" in
     esac ;;
   show)
     id="$3"
+    # A bead whose `gc bd show` answers NOTHING — the unreadable read, as distinct
+    # from a bead that reads cleanly and says something bad. The route read-back and
+    # the REUSE validation both have to tell those apart: unreadable is not proof of
+    # a broken route, and acting on it (closing the bead, re-routing it, or counting
+    # it as sufficient) is how a live signoff gets erased or duplicated.
+    case " ${FAKE_REVSHOWFAIL:-} " in *" $id "*) exit 0 ;; esac
     cs=$(cs_for "$id"); [ "$cs" = "EMPTY" ] || [ "$cs" = "__ABSENT__" ] && cs=""
     # check_set_healed as the STAMP READ-BACK sees it. Modelled separately from
     # check_set because the two persist independently: the script writes them in one
@@ -207,6 +213,10 @@ case "$2" in
     # The read-back must read that as reachable, not as a lost route — re-routing
     # a claimed review would offer it to a second pool.
     if [ -n "${FAKE_CLAIMED:-}" ] && [ -n "$rt" ]; then as="$rt"; rt=""; fi
+    # A review that arrived at this pass ALREADY claimed (staged directly in
+    # $FAKE_REVMETA rather than claimed mid-run), for the reuse cases: the pass finds
+    # an in-flight review a polecat is holding and must never re-offer it.
+    [ -n "$as" ] || as=$(awk -F'\t' -v i="$id" '$1==i && $2=="assignee"{v=$3} END{print v}' "$FAKE_REVMETA" 2>/dev/null)
     jq -n --arg cs "$cs" --arg hl "$hl" --arg ab "$ab" --arg rp "$rp" --arg rt "$rt" --arg as "$as" \
           --arg fl "$fl" \
       '[{assignee: (if $as=="" then null else $as end),
@@ -930,6 +940,98 @@ GATEOUT2="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
 printf '%s\n' "$GATEOUT2" | grep -q 'MERGE_SKILL_HELD=0' \
   && ok "(GATE-OK) the formula recorded MERGE_SKILL_HELD=0" \
   || bad "(GATE-OK) the formula MERGE_SKILL_HELD should be 0 (got: $GATEOUT2)"
+
+# --- Run 5c: REUSING an in-flight signoff is a claim about REACHABILITY, and it
+#     has to be checked (review tk-tbacg P2). ------------------------------------
+# `inflight_for` answers "a review for this anchor already exists", and the pass
+# then skips the dispatch on that answer alone. `repair_review_routing` covers ONE
+# unreachable shape — open + unclaimed + `gc.routed_to` empty + task_kind=review +
+# anchor_bead — and everything outside it fell through to "already in flight, no
+# dispatch" and was believed forever.
+#
+# That is exactly what the route read-back leaves behind on its unreadable arm: the
+# route write is lost AND the verification read fails, so the dispatch declines to
+# close the bead (closing a possibly-claimed review is the worse error) and leaves
+# it open. Every later pass finds it, counts the gate as covered by a review nobody
+# can claim, and never mints a replacement — the armed gate holds the merge forever
+# while the dispatch counter says a signoff went out.
+reuse_run() { # <reviews-fixture> <revmeta-fixture> [revshowfail] -> OUT
+  cat > "$TMP/anchors" <<'A'
+bead-REUSE|pull_request|EMPTY|431|polecat/feat-reuse|main||
+A
+  : > "$TMP/stamped"; : > "$TMP/healed"; : > "$TMP/flagged"; : > "$TMP/deps"
+  : > "$TMP/stampfail"; : > "$TMP/closed"
+  printf '%s' "$1" > "$TMP/reviews"
+  printf '%s' "$2" > "$TMP/revmeta"
+  FAKE_REVSHOWFAIL="${3:-}" bash "$SCRIPT" \
+    --default 'codex' \
+    --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+    --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1
+}
+POOL_C='gc-toolkit/gc-toolkit.polecat-codex'
+
+# (REUSE-INERT) the review exists, is open, and is offered to NOBODY: no
+# gc.routed_to, no assignee, no durable copy. Believing it holds the gate forever.
+OUT5H="$(reuse_run 'rev-inert|bead-REUSE|431
+' '')"
+printf '%s\n' "$OUT5H" | grep -q 'INERT in-flight signoff rev-inert' \
+  && ok "(REUSE-INERT) an unreachable in-flight signoff is DETECTED, not believed" \
+  || bad "(REUSE-INERT) reusing a signoff nobody can claim must be caught (got: $OUT5H)"
+grep -q "^rev-inert	gc.routed_to	$POOL_C$" "$TMP/revmeta" \
+  && ok "(REUSE-INERT) it is re-routed to the review pool rather than left inert" \
+  || bad "(REUSE-INERT) the reused review must be re-offered to a pool (revmeta: $(cat "$TMP/revmeta"))"
+grep -q "^rev-inert	review_pool	$POOL_C$" "$TMP/revmeta" \
+  && ok "(REUSE-INERT) and its DURABLE route copy is written with it" \
+  || bad "(REUSE-INERT) the durable copy must be restored alongside the live route"
+[ -s "$TMP/closed" ] \
+  && bad "(REUSE-INERT) an existing review must be repaired, never closed out from under its anchor" \
+  || ok "(REUSE-INERT) the review is repaired in place, not closed"
+
+# (REUSE-INERT-OPERATOR) the same inert review, but its durable copy names a
+# DIFFERENT pool — an operator's deliberate re-route. The repair must re-offer it
+# through THAT pool, not silently drag it back to this pass's default. Reachability
+# is what reuse needs; which pool is the operator's call.
+OUT5I="$(reuse_run 'rev-elsewhere|bead-REUSE|431
+' 'rev-elsewhere	review_pool	other-rig/other.polecat-codex
+')"
+grep -q '^rev-elsewhere	gc.routed_to	other-rig/other.polecat-codex$' "$TMP/revmeta" \
+  && ok "(REUSE-INERT-OPERATOR) an inert review is re-offered through the pool its durable copy names" \
+  || bad "(REUSE-INERT-OPERATOR) the operator's pool must win over this pass's default (got: $OUT5I)"
+
+# (REUSE-CLAIMED-DURABLE) the review is CLAIMED — reachable, and none of this
+# pass's business to re-offer — but its durable copy is missing. It is fine now and
+# strands later: a signoff that ends without stamping the gate has to put the review
+# back in a pool, and review_pool is the only field left that says which one. Repair
+# the durable half; never touch the live half of a claimed bead.
+OUT5J="$(reuse_run 'rev-claimed|bead-REUSE|431
+' 'rev-claimed	gc.routed_to	'"$POOL_C"'
+rev-claimed	assignee	gc-toolkit__polecat-codex-lx-1
+')"
+grep -q "^rev-claimed	review_pool	$POOL_C$" "$TMP/revmeta" \
+  && ok "(REUSE-CLAIMED-DURABLE) a claimed review's missing durable route copy is restored" \
+  || bad "(REUSE-CLAIMED-DURABLE) the durable copy must be repaired (revmeta: $(cat "$TMP/revmeta"))"
+printf '%s\n' "$OUT5J" | grep -q '0 signoffs dispatched' \
+  && ok "(REUSE-CLAIMED-DURABLE) a claimed review still counts as in flight — no twin is minted" \
+  || bad "(REUSE-CLAIMED-DURABLE) repairing the durable copy must not mint a second review (got: $OUT5J)"
+[ -s "$TMP/closed" ] \
+  && bad "(REUSE-CLAIMED-DURABLE) a CLAIMED review must never be closed" \
+  || ok "(REUSE-CLAIMED-DURABLE) the claimed review is left with its reviewer"
+
+# (REUSE-UNREADABLE) the reused review cannot be READ at all. Unverified is not
+# verified: it must not be counted as covering the gate, and it must not be replaced
+# either — a twin for an anchor that may already have a live signoff is the
+# duplicate dispatch the dedup exists to prevent. Hold, warn, retry next pass.
+OUT5K="$(reuse_run 'rev-dark|bead-REUSE|431
+' '' 'rev-dark')"
+printf '%s\n' "$OUT5K" | grep -q 'route could not be VERIFIED' \
+  && ok "(REUSE-UNREADABLE) an unreadable in-flight signoff is reported, not believed" \
+  || bad "(REUSE-UNREADABLE) an unreadable reuse must warn (got: $OUT5K)"
+printf '%s\n' "$OUT5K" | grep -q '0 signoffs dispatched' \
+  && ok "(REUSE-UNREADABLE) and no twin signoff is minted for it" \
+  || bad "(REUSE-UNREADABLE) an unreadable reuse must not mint a replacement (got: $OUT5K)"
+[ -s "$TMP/closed" ] \
+  && bad "(REUSE-UNREADABLE) an unreadable review must never be closed" \
+  || ok "(REUSE-UNREADABLE) the unreadable review is left exactly as it was"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

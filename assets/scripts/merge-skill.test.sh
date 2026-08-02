@@ -234,7 +234,7 @@ hasin() { grep -q "$2" <<< "$1"; }
 mkdir -p "$TMP/bin"
 
 # Gating anchors (gc bd list source):
-#   id|pr_number|merged_target|check_set|check.codex|merge_hold|signoff_dismissed|pr_url|branch
+#   id|pr_number|merged_target|check_set|check.codex|merge_hold|signoff_dismissed|pr_url|branch|fork_pr|fork_pr_url
 # The 5th column is the anchor's per-gate marker value for check.codex; a
 # "green@<oid>" value means "the codex gate passed at commit <oid>". bead-NOGATE
 # has an empty check_set (declares no gates) and no marker. The 6th column is
@@ -326,6 +326,16 @@ bead-SELFCONTRA|369|main|codex|green@HEAD369||||polecat/bead-SELFCONTRA
 bead-NOHEAD|370|main|codex|green@HEAD370||||polecat/bead-NOHEAD
 bead-BRANCHMISMATCH|371|main|codex|green@HEAD371||||polecat/bead-BRANCHMISMATCH
 bead-HEADOK|372|main|codex|green@HEAD372||||polecat/bead-HEADOK
+bead-FINALHOLD|374|main|codex|green@HEAD374
+bead-FINALGATE|375|main|codex|green@HEAD375
+bead-FINALCLOSED|376|main|codex|green@HEAD376
+bead-FINALPR|377|main|codex|green@HEAD377
+bead-FINALFAIL|378|main|codex|green@HEAD378
+bead-FINALOK|379|main|codex|green@HEAD379
+bead-FORKKEYED||main|codex|green@HEAD380|||||380
+bead-FORKURL||main|codex|green@HEAD381||||||https://github.com/acme/repo/pull/381
+bead-FORKFOREIGN||main|codex|green@HEAD382||||||https://otherhost/acme/repo/pull/382
+bead-TWOKEYS|383|main|codex|green@HEAD383|||||384
 A
 
 # (39) The long-check_set anchor, appended programmatically because its check_set
@@ -365,9 +375,45 @@ bead-RACEDISMISS|337|main|codex|green@HEAD337||904@HEAD337
 bead-RACEHOLD|338|main|codex|green@HEAD338|true
 bead-RACEGATE|339|main|codex|green@OLD339
 bead-RACENOPR||main|codex|green@HEAD345
-bead-RACECLOSED|346|main|codex|green@HEAD346|||closed
-bead-RACEUNPARK|347|main|codex|green@HEAD347|||open|-
+bead-RACECLOSED|346|main|codex|green@HEAD346|||||||closed
+bead-RACEUNPARK|347|main|codex|green@HEAD347|||||||open|-
 AF
+
+# THE ANCHOR AS IT IS THE INSTANT BEFORE `gh pr merge` — served from the SECOND
+# `gc bd show` of that id onwards (review tk-tbacg finding #1). Same columns as
+# $TMP/anchors-fresh. Every row here passed EVERY gate on the first read: the PR is
+# OPEN, non-draft, CLEAN, the codex marker is green at the live head, no child holds
+# it. What changed is only what another writer did in the window between the last
+# gate and the merge call — a window made of the PR read, the referencing-bead
+# query, the holder probes and the reviews history, every one a network or ledger
+# round-trip. `--match-head-commit` cannot see any of it: the head never moved.
+#   374 merge_hold set (an operator parked the anchor mid-pass)
+#   375 check.codex advanced to a DIFFERENT head (a re-gate landed)
+#   376 the anchor was closed
+#   377 the anchor was retargeted onto another PR
+#   379 UNCHANGED — the control: the terminal re-read must not hold a merge that is
+#       still authorized, or it would just be a second way to never merge.
+cat > "$TMP/anchors-final" <<'AN'
+bead-FINALHOLD|374|main|codex|green@HEAD374|true
+bead-FINALGATE|375|main|codex|green@MOVED375
+bead-FINALCLOSED|376|main|codex|green@HEAD376|||||||closed
+bead-FINALPR|377|main|codex|green@HEAD377
+bead-FINALOK|379|main|codex|green@HEAD379
+AN
+
+# 377's terminal read must claim a DIFFERENT PR than the one validated. Appended
+# rather than written inline because the row it needs (pr_number=999) would
+# otherwise be indistinguishable from a typo in the table above.
+printf 'bead-FINALPR|999|main|codex|green@HEAD377\n' > "$TMP/anchors-final.tmp"
+grep -v '^bead-FINALPR|' "$TMP/anchors-final" > "$TMP/anchors-final.keep"
+cat "$TMP/anchors-final.keep" "$TMP/anchors-final.tmp" > "$TMP/anchors-final"
+
+# An anchor whose SECOND `gc bd show` fails while the first succeeded: the terminal
+# re-read is the unreadable one. A merge that cannot re-confirm its authorization is
+# the one act this pass can never retract, so it must HOLD rather than proceed on
+# metadata read a dozen round-trips ago.
+SHOWFAIL_FINAL_IDS="bead-FINALFAIL"
+mkdir -p "$TMP/showcount"
 
 # Anchors whose `gc bd show` FAILS outright (empty output), to prove the re-read
 # is fail-closed: an anchor whose live metadata cannot be read is skipped, never
@@ -557,6 +603,17 @@ cat > "$TMP/prs" <<'P'
 371|OPEN|false|main|HEAD371|CLEAN|MERGEABLE|f371c0ffee000004||polecat/somebody-else|acme/repo|false
 372|OPEN|false|main|HEAD372|CLEAN|MERGEABLE|a372c0ffee000005||polecat/bead-HEADOK|acme/repo|false
 373|OPEN|false|main|HEAD373|CLEAN|MERGEABLE|
+374|OPEN|false|main|HEAD374|CLEAN|MERGEABLE|a374c0ffee000011
+375|OPEN|false|main|HEAD375|CLEAN|MERGEABLE|a375c0ffee000012
+376|OPEN|false|main|HEAD376|CLEAN|MERGEABLE|a376c0ffee000013
+377|OPEN|false|main|HEAD377|CLEAN|MERGEABLE|a377c0ffee000014
+378|OPEN|false|main|HEAD378|CLEAN|MERGEABLE|a378c0ffee000015
+379|OPEN|false|main|HEAD379|CLEAN|MERGEABLE|a379c0ffee000016
+380|OPEN|false|main|HEAD380|CLEAN|MERGEABLE|a380c0ffee000017
+381|OPEN|false|main|HEAD381|CLEAN|MERGEABLE|a381c0ffee000018
+382|OPEN|false|main|HEAD382|CLEAN|MERGEABLE|a382c0ffee000019
+383|OPEN|false|main|HEAD383|CLEAN|MERGEABLE|a383c0ffee000020
+384|OPEN|false|main|HEAD384|CLEAN|MERGEABLE|a384c0ffee000021
 P
 
 # PR review history (the REST `pulls/N/reviews` source — the approval gate's real
@@ -699,7 +756,7 @@ bead-KIDANCHOR|up|parent-child|kidanchor-323|open|pre_open_gate
 bead-BOTHSRC|up|parent-child|bothsrc-326|open|pull_request
 bead-MULTIDOC|down|blocks|blocker-327|open|pull_request
 bead-MULTIEMPTY|down|blocks|blocker-328|open|pull_request
-bead-DEPFOREIGN|down|blocks|upstream-340|open|pull_request|https://otherhost/acme/repo/pull/999
+bead-DEPFOREIGN|down|blocks|upstream-373|open|pull_request|https://otherhost/acme/repo/pull/999
 D
 
 # Anchors whose dep probe ERRORS (exit 1) — the fail-closed case.
@@ -745,10 +802,10 @@ R
 : > "$TMP/mergedwhere"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/repofail"
 : > "$TMP/ghhost"
 
-# PR#334 has NO child at all: the only thing that can hold it is the guarded read
+# PR#367 has NO child at all: the only thing that can hold it is the guarded read
 # refusing to answer, so a missing guard merges it and the case cannot pass by
 # accident.
-printf '334\terror-rc1\n' > "$TMP/childfail"
+printf '367\terror-rc1\n' > "$TMP/childfail"
 
 # --- git stub. ----------------------------------------------------------------
 # `git remote get-url origin` -> what this checkout pushes to, and the ONLY source
@@ -992,12 +1049,35 @@ case "$2" in
   show)
     want="$3"
     case " ${FAKE_SHOWFAIL:-} " in *" $want "*) exit 0 ;; esac
+    # HOW MANY TIMES this anchor has been shown in the current run of the script.
+    # The pass re-reads an anchor TWICE on the merge path — once before the gates
+    # and once immediately before `gh pr merge` — and the whole point of the second
+    # read is that the bead can change in between, so the stub has to be able to
+    # answer the two reads DIFFERENTLY.
+    SHOWN=0
+    if [ -n "${FAKE_SHOWCOUNT:-}" ] && [ -d "$FAKE_SHOWCOUNT" ]; then
+      [ -f "$FAKE_SHOWCOUNT/$want" ] && SHOWN=$(cat "$FAKE_SHOWCOUNT/$want")
+      SHOWN=$((SHOWN + 1))
+      printf '%s' "$SHOWN" > "$FAKE_SHOWCOUNT/$want"
+    fi
+    # An anchor whose SECOND read fails: the terminal re-read is unreadable while
+    # everything before it was fine. Distinct from $FAKE_SHOWFAIL, which fails
+    # every read and so never reaches the merge path at all.
+    if [ "$SHOWN" -ge 2 ]; then
+      case " ${FAKE_SHOWFAIL_FINAL:-} " in *" $want "*) exit 0 ;; esac
+    fi
     src="$FAKE_ANCHORS"
     if [ -n "${FAKE_ANCHORS_FRESH:-}" ] && [ -f "$FAKE_ANCHORS_FRESH" ] \
        && grep -q "^$want|" "$FAKE_ANCHORS_FRESH"; then
       src="$FAKE_ANCHORS_FRESH"
     fi
-    while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed status result; do
+    # $FAKE_ANCHORS_FINAL is served from the SECOND read on: the state another
+    # writer left behind AFTER every gate validated and BEFORE the merge fired.
+    if [ "$SHOWN" -ge 2 ] && [ -n "${FAKE_ANCHORS_FINAL:-}" ] && [ -f "$FAKE_ANCHORS_FINAL" ] \
+       && grep -q "^$want|" "$FAKE_ANCHORS_FINAL"; then
+      src="$FAKE_ANCHORS_FINAL"
+    fi
+    while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed prurl branch forkpr forkprurl status result; do
       [ "$id" = "$want" ] || continue
       # Columns 8/9 (status, merge_result) exist only in the FRESH file, and only
       # for the cases that stage a mid-pass identity change. Absent -> the normal
@@ -1007,8 +1087,8 @@ case "$2" in
       [ -n "$result" ] || result="pull_request"
       [ "$status" = "-" ] && status=""
       [ "$result" = "-" ] && result=""
-      printf '[{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","signoff_dismissed":"%s","merge_result":"%s"}}]\n' \
-        "$id" "$status" "$pr" "$target" "$checkset" "$checkcodex" "$merge_hold" "$dismissed" "$result"
+      printf '[{"id":"%s","status":"%s","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","signoff_dismissed":"%s","branch":"%s","merge_result":"%s"}}]\n' \
+        "$id" "$status" "$pr" "$prurl" "$forkpr" "$forkprurl" "$target" "$checkset" "$checkcodex" "$merge_hold" "$dismissed" "$branch" "$result"
       exit 0
     done < "$src"
     printf '[]\n' ;;
@@ -1028,10 +1108,10 @@ case "$2" in
     case "$*" in
       *"merge_result=pull_request"*)
         out=""
-        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed prurl branch; do
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed prurl branch forkpr forkprurl; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","signoff_dismissed":"%s","branch":"%s"}}' "$id" "$pr" "$prurl" "$target" "$checkset" "$checkcodex" "$merge_hold" "$dismissed" "$branch")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","signoff_dismissed":"%s","branch":"%s"}}' "$id" "$pr" "$prurl" "$forkpr" "$forkprurl" "$target" "$checkset" "$checkcodex" "$merge_hold" "$dismissed" "$branch")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         emit_rows "$out" "$lim" ;;
@@ -1068,12 +1148,15 @@ case "$2" in
           array-rc1) printf '[]\n'; exit 1 ;;
         esac
         out=""
-        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed; do
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed prurl branch forkpr forkprurl; do
           [ -n "$id" ] || continue
           [ "$pr" = "$prnum" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           status_ok open || continue
-          obj=$(printf '{"id":"%s","status":"open","metadata":{"pr_number":"%s","merge_result":"pull_request"}}' "$id" "$pr")
+          # pr_url rides along: it is what places this anchor in a REPOSITORY, and
+          # without it a foreign same-numbered anchor reads as the `?` wildcard and
+          # makes an ordinary PR look multi-anchored.
+          obj=$(printf '{"id":"%s","status":"open","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merge_result":"pull_request"}}' "$id" "$pr" "$prurl" "$forkpr" "$forkprurl")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         # Anchors visible ONLY to this live read and NOT to the enumeration
@@ -1122,6 +1205,31 @@ case "$2" in
             if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
           done < "$FAKE_FORKCHILDREN"
         fi
+        # ...and ANCHORS whose own identity is fork-keyed. The anchor reads its own
+        # number through the same key set every probe uses, so a `fork_pr`-only
+        # anchor has to be reachable here or it is invisible to its own PR.
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed prurl branch forkpr forkprurl; do
+          [ -n "$id" ] || continue
+          [ "$forkpr" = "$fnum" ] || continue
+          grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
+          status_ok open || continue
+          obj=$(printf '{"id":"%s","status":"open","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merge_result":"pull_request"}}' "$id" "$pr" "$prurl" "$forkpr" "$forkprurl")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_ANCHORS"
+        emit_rows "$out" "$lim" ;;
+      *"--has-metadata-key fork_pr_url"*)
+        # The URL-keyed half of the same set: every bead carrying a fork_pr_url at
+        # all, which the caller then filters by number. Bounded in production by the
+        # key being rare; here it is just the anchors that record one.
+        out=""
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold dismissed prurl branch forkpr forkprurl; do
+          [ -n "$id" ] || continue
+          [ -n "$forkprurl" ] || continue
+          grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
+          status_ok open || continue
+          obj=$(printf '{"id":"%s","status":"open","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merge_result":"pull_request"}}' "$id" "$pr" "$prurl" "$forkpr" "$forkprurl")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_ANCHORS"
         emit_rows "$out" "$lim" ;;
       *) printf '[]\n' ;;
     esac ;;
@@ -1193,7 +1301,9 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/child
        FAKE_MERGEDREC="$TMP/mergedrec" FAKE_CLOSELOG="$TMP/closelog" \
        FAKE_MERGEDWHERE="$TMP/mergedwhere" FAKE_GH_DEFAULT="$TMP/ghdefault" \
        FAKE_IGNORE_REPO="$TMP/ignorerepo" FAKE_REPOFAIL="$TMP/repofail" \
-       FAKE_GH_HOST="$TMP/ghhost" FAKE_CHILD_FAIL="$TMP/childfail"
+       FAKE_GH_HOST="$TMP/ghhost" FAKE_CHILD_FAIL="$TMP/childfail" \
+       FAKE_ANCHORS_FINAL="$TMP/anchors-final" FAKE_SHOWCOUNT="$TMP/showcount" \
+       FAKE_SHOWFAIL_FINAL="$SHOWFAIL_FINAL_IDS"
 
 # --- Run 1: validate -> merge -> record for the one ready PR, hold the rest. --
 # stdout carries the per-anchor hold/merge decisions; the tool-error paths (an
@@ -1419,7 +1529,7 @@ has '^bead-HEADMOVE$' "$TMP/closed" \
 # but the empty value slipped through the `-n` mismatch guard, so every gate below
 # went on validating the snapshot's PR#$num and the merge landed on a claim the
 # live bead no longer makes.
-hasin "$ERR1" "anchor bead-RACENOPR no longer records a pr_number" \
+hasin "$ERR1" "anchor bead-RACENOPR no longer names exactly one PR in this repository" \
   && ok "(34) pr_number cleared mid-pass -> skipped (empty is unusable, not 'unchanged')" \
   || bad "(34) empty fresh pr_number must skip the anchor (got: $ERR1)"
 # (34b) the same for an anchor that CLOSED mid-pass: it left the gating set, so
@@ -1707,15 +1817,104 @@ has '^bead-CODEXVETO-OK$' "$TMP/closed" \
 # mixed trusted/untrusted approval (351), the hand-dismissed PR that DID
 # collect a trusted approval (359), and the codex-only PR whose objection was
 # withdrawn (362). No held/skipped anchor leaked.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "12" "(INV) exactly twelve PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362)"
+# =============================================================================
+# THE TERMINAL ANCHOR RE-READ (review tk-tbacg finding #1).
+# =============================================================================
+# `--match-head-commit` binds the merge to the validated COMMIT; nothing bound it
+# to the validated BEAD. Between the last gate and `gh pr merge` sit the PR read,
+# the referencing-bead query, the holder probes and the reviews history — every one
+# a round-trip another writer can act inside. Each case below passes EVERY gate on
+# the first anchor read and then changes the bead WITHOUT moving the PR head, so
+# the head-match cannot see it and only a re-read of the bead can.
+#
+# These run against RUN 1 above ($TMP/anchors-final is served from each anchor's
+# SECOND `gc bd show` on).
+has '^374$' "$TMP/merged" \
+  && bad "(TR1) merge_hold set after validation must NOT merge" \
+  || ok "(TR1) merge_hold set between validation and merge -> held"
+hasin "$OUT1" "anchor bead-FINALHOLD changed between validation and the merge — merge_hold was set after validation" \
+  && ok "(TR1) the hold names the anchor and what changed" \
+  || bad "(TR1) hold reason must name the anchor and the merge_hold change"
+
+has '^375$' "$TMP/merged" \
+  && bad "(TR2) a gate that moved off the validated head must NOT merge" \
+  || ok "(TR2) check.codex re-gated between validation and merge -> held"
+hasin "$OUT1" "anchor bead-FINALGATE changed between validation and the merge — check 'codex' is no longer green at HEAD375" \
+  && ok "(TR2) the hold names the gate and the head it is no longer green at" \
+  || bad "(TR2) hold reason must name the gate and the head"
+
+has '^376$' "$TMP/merged" \
+  && bad "(TR3) an anchor closed after validation must NOT merge" \
+  || ok "(TR3) anchor closed between validation and merge -> held"
+hasin "$OUT1" "anchor bead-FINALCLOSED changed between validation and the merge — anchor is no longer open" \
+  && ok "(TR3) the hold names the closure" \
+  || bad "(TR3) hold reason must name the closure"
+
+has '^377$' "$TMP/merged" \
+  && bad "(TR4) an anchor retargeted onto another PR must NOT merge this one" \
+  || ok "(TR4) anchor retargeted between validation and merge -> held"
+hasin "$OUT1" "anchor bead-FINALPR changed between validation and the merge — anchor now claims '999', not PR#377" \
+  && ok "(TR4) the hold names both pull requests" \
+  || bad "(TR4) hold reason must name both PR numbers"
+
+# UNREADABLE, not merely changed. A merge is the one act this pass cannot retract,
+# so "I could not re-confirm the authorization" has to hold exactly as a positive
+# mismatch does — the same fail-closed rule the earlier re-read follows.
+has '^378$' "$TMP/merged" \
+  && bad "(TR5) an unreadable terminal re-read must NOT merge" \
+  || ok "(TR5) terminal re-read unreadable -> held"
+hasin "$OUT1" "anchor bead-FINALFAIL could not be re-read immediately before the merge" \
+  && ok "(TR5) the hold says the bead could not be re-read" \
+  || bad "(TR5) hold reason must say the anchor could not be re-read"
+
+# THE CONTROL. A gate that never lets anything through is not a gate. 379's bead is
+# in the final file UNCHANGED, so the terminal read confirms exactly what the first
+# one validated and the merge proceeds.
+has '^379$' "$TMP/merged" \
+  && ok "(TR6) an anchor still authorizing its merge at the terminal read MERGES" \
+  || bad "(TR6) the terminal re-read must not hold a merge that is still authorized"
+
+# =============================================================================
+# FORK-KEYED ANCHOR IDENTITY (review tk-tbacg finding #2).
+# =============================================================================
+# The holder probe and reconcile-merged-prs.sh's ownership set both read every
+# PR-naming key (pr_number, fork_pr, fork_pr_url). The anchor's own identity read
+# pr_number ALONE, so a live `merge_result=pull_request` anchor keyed only by
+# fork_pr was skipped here every pass while reconcile counted it owned and stayed
+# silent — a PR that nothing lands and nothing reports.
+has '^380$' "$TMP/merged" \
+  && ok "(FK1) an anchor keyed only by fork_pr is mergeable" \
+  || bad "(FK1) fork_pr-keyed anchor must merge (pre-fix: skipped forever, and never reported)"
+has '^381$' "$TMP/merged" \
+  && ok "(FK2) an anchor keyed only by fork_pr_url is mergeable" \
+  || bad "(FK2) fork_pr_url-keyed anchor must merge"
+
+# ...but only for a URL that names THIS repository. A number scanned out of a
+# foreign fork_pr_url is about somebody else's pull request; acting on it would
+# merge a stranger's PR number in origin. Same `in_repo` rule reconcile applies.
+has '^382$' "$TMP/merged" \
+  && bad "(FK3) a fork_pr_url naming ANOTHER repository must not make its number ours" \
+  || ok "(FK3) foreign fork_pr_url -> not a merge candidate here"
+
+# Several keys DISAGREEING is not a number to pick from. Merging then means
+# guessing which pull request the bead means, and a wrong guess lands the wrong PR.
+has '^384$' "$TMP/merged" && bad "(FK4) an ambiguous anchor must not merge the fork_pr number" || ok "(FK4) ambiguous anchor did not merge its fork_pr number"
+has '^383$' "$TMP/merged" \
+  && bad "(FK4) an anchor naming two different PR numbers must not merge either" \
+  || ok "(FK4) pr_number and fork_pr disagreeing -> merge held, not guessed"
+hasin "$OUT1" "anchor bead-TWOKEYS names more than one PR number in this repository (383, 384)" \
+  && ok "(FK4) the hold names every number the anchor claims" \
+  || bad "(FK4) hold reason must list the conflicting numbers"
+
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "18" "(INV) exactly eighteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381)"
 # Every merge that was PERFORMED bound itself to the head it validated — no
 # unbound `gh pr merge` slipped through on any path.
 eq "$(awk -F'\t' '$2 == "" {c++} END {print c+0}' "$TMP/mergeargs")" "0" \
    "(INV) every merge attempt passed --match-head-commit"
 
 # Summary counters.
-hasin "$OUT1" "12 merged" \
-  && ok "run 1 summary reports 12 merged" || bad "run 1 summary merged count (got: $OUT1)"
+hasin "$OUT1" "18 merged" \
+  && ok "run 1 summary reports 18 merged" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard for the approval gate's own reads. ---------------------
 gh pr view 301 --json reviewDecision >/dev/null 2>&1 \
@@ -1864,7 +2063,14 @@ printf '%s\n' "$OUT1" | grep -q "PR#366 has unclosed rework/review bead child-sa
 has '^367$' "$TMP/merged" \
   && bad "(CHILDFAIL) an unreadable child lookup must HOLD, never merge (rework in flight cannot be ruled out)" \
   || ok "(CHILDFAIL) unreadable open-child lookup -> merge held"
-printf '%s\n' "$OUT1" | grep -q "PR#367 in-flight rework/review probe failed" \
+# The referencing-bead read is now taken ONCE per anchor and feeds both the
+# duplicate-anchor gate and the child hold, so an unreadable ledger is reported
+# where it is read — naming both things it can no longer rule out — rather than
+# later, from the holder probe alone. On STDERR, with the failed PR read and the
+# failed anchor re-read: an unreadable ledger is a TOOL error, not a gate saying
+# no, and the two streams are how an operator tells "the machine could not look"
+# from "the machine looked and held" (cases 37/37b pin the same split).
+hasin "$ERR1" "PR#367 referencing-bead read FAILED" \
   && ok "(CHILDFAIL) the hold reason names the failed lookup" \
   || bad "(CHILDFAIL) hold reason must name the failed lookup (got: $OUT1)"
 
@@ -1948,14 +2154,14 @@ printf '%s\n' "$OUT1" | grep -q "PR#373 has unclosed rework/review bead upstream
 #     certified head (372).
 # No held/skipped anchor leaked: not one of the dependency-edge holders, and not one
 # of the four head-identity cases.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "8" "(INV) exactly eight PRs merged (301 + 311 + 314 + dep-edge 319, 320 + cross-repo 364, 365 + head-certified 372)"
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "18" "(INV) exactly eighteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381)"
 # ...and all of them landed in THIS checkout's repository, not wherever gh pointed.
 eq "$(cut -f2 "$TMP/mergedwhere" | sort -u | tr '\n' ' ')" "github.com/acme/repo " \
    "(INV) every merge landed in the origin-derived repository"
 
 # Summary counters.
-printf '%s\n' "$OUT1" | grep -q "8 merged" \
-  && ok "run 1 summary reports 8 merged" || bad "run 1 summary merged count (got: $OUT1)"
+hasin "$OUT1" "18 merged" \
+  && ok "run 1 summary reports 18 merged (identity view of the same run)" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard: only gh-supported --json fields. ----------------------
 gh pr view 301 --json merged >/dev/null 2>&1 \

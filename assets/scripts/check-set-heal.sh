@@ -1779,6 +1779,75 @@ while IFS= read -r row; do
       echo "check-set-heal: $id had a STRANDED signoff $EXISTING_REVIEW (open, unclaimed, UNROUTED — its routing write was lost); re-routed to $REVIEW_POOL rather than counting it in flight"
       continue
     fi
+    # VALIDATE THE REUSED ROUTE — do not merely believe the lookup (review tk-tbacg
+    # P2). `repair_review_routing` answers exactly one shape: open + unclaimed +
+    # `gc.routed_to` EMPTY. Every other unreachable shape fell straight through to
+    # "already in flight, no dispatch" and was counted as sufficient forever.
+    #
+    # The shape that motivates this is the one the dispatch itself can leave behind:
+    # the route write is lost AND its read-back is unreadable, so the dispatch
+    # declines to close the bead (closing a possibly-claimed review is worse) and
+    # leaves it open. Next pass `inflight_for` finds it, and if ANY of the route
+    # fields half-persisted, the repair predicate does not match — an inert review
+    # holds the gate, no replacement is ever minted, and the merge is held forever
+    # with nothing to escalate: the dispatch counter already said a signoff went out.
+    #
+    # The predicate here is deliberately WEAKER than the dispatch's `route_ok`, which
+    # requires this exact pool. Reuse only needs REACHABILITY — routed anywhere, or
+    # claimed by anyone — so an operator's deliberate re-route to another pool is
+    # honoured rather than flagged every pass. What is repaired is only what is
+    # ABSENT: the durable copy that a later signoff restores the route from when it
+    # has to put the review back to be re-offered, and (when the durable copy names a
+    # pool but nothing offers the bead) the live half. A CLAIMED review is never
+    # re-routed — the claim consumed `gc.routed_to`, and re-offering it hands one
+    # review to a second pool.
+    if [ -n "$REVIEW_POOL" ]; then
+      REUSE_STATE=$(read_route "$EXISTING_REVIEW")
+      if [ -z "$REUSE_STATE" ]; then
+        # Unreadable is not verified. Not counted as in flight and NOT dispatched
+        # against either: the gate stays armed (merge HELD, the safe side) and the
+        # next pass re-reads. Minting a twin on an unreadable bead is the duplicate
+        # dispatch the dedup exists to prevent.
+        echo "check-set-heal: WARN $id reuses in-flight signoff $EXISTING_REVIEW but its route could not be VERIFIED (bead unreadable); merge stays HELD, $RETRY_NOTE" >&2
+        skipped=$((skipped + 1))
+        continue
+      fi
+      IFS='|' read -r REUSE_POOL REUSE_ROUTED REUSE_ASSIGNEE <<< "$REUSE_STATE"
+      if [ -z "$REUSE_ASSIGNEE" ] && [ -z "$REUSE_ROUTED" ]; then
+        # Not claimed and not offered: inert. Re-offer it through the pool its own
+        # durable copy names when it has one (an operator's re-route is preserved),
+        # otherwise this pass's pool.
+        REUSE_TARGET="${REUSE_POOL:-$REVIEW_POOL}"
+        gc bd update "$EXISTING_REVIEW" \
+          --set-metadata gc.routed_to="$REUSE_TARGET" \
+          --set-metadata review_pool="$REUSE_TARGET" >/dev/null 2>&1
+        REUSE_STATE=$(read_route "$EXISTING_REVIEW")
+        IFS='|' read -r REUSE_POOL REUSE_ROUTED REUSE_ASSIGNEE <<< "${REUSE_STATE:-||}"
+        if [ -z "$REUSE_ASSIGNEE" ] && [ -z "$REUSE_ROUTED" ]; then
+          echo "check-set-heal: WARN $id in-flight signoff $EXISTING_REVIEW is UNROUTABLE (no pool can claim it, re-route to '$REUSE_TARGET' did not persist); merge stays HELD, $RETRY_NOTE" >&2
+          skipped=$((skipped + 1))
+          continue
+        fi
+        gc session wake "$REUSE_TARGET" >/dev/null 2>&1 || true
+        gc session nudge "$REUSE_TARGET" "Review bead $EXISTING_REVIEW for anchor $id" >/dev/null 2>&1 || true
+        dispatched=$((dispatched + 1))
+        echo "check-set-heal: $id had an INERT in-flight signoff $EXISTING_REVIEW (open, unclaimed, offered to nobody); re-routed to $REUSE_TARGET rather than counting it in flight"
+        continue
+      fi
+      # Reachable. Repair the DURABLE copy if it is the half that was lost — the
+      # review is claimable now, but a signoff that ends without stamping the gate
+      # has to put it back in a pool, and review_pool is the only field left that
+      # says which pool that was.
+      if [ -z "$REUSE_POOL" ]; then
+        gc bd update "$EXISTING_REVIEW" \
+          --set-metadata review_pool="${REUSE_ROUTED:-$REVIEW_POOL}" >/dev/null 2>&1
+        if [ "$(read_route "$EXISTING_REVIEW" | cut -d'|' -f1)" = "" ]; then
+          echo "check-set-heal: WARN $id in-flight signoff $EXISTING_REVIEW is reachable but its DURABLE route copy (review_pool) is missing and could not be restored; a signoff that cannot stamp the gate will have no pool to return it to" >&2
+        else
+          echo "check-set-heal: $id in-flight signoff $EXISTING_REVIEW was missing its durable route copy; restored review_pool='${REUSE_ROUTED:-$REVIEW_POOL}'"
+        fi
+      fi
+    fi
     [ "$needs_stamp" = 1 ] && echo "check-set-heal: $id already has in-flight $EXISTING_REVIEW; gate will be raised by it, no dispatch"
     [ "$needs_stamp" = 1 ] || normal=$((normal + 1))
     continue

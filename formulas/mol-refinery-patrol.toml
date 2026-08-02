@@ -221,7 +221,9 @@ gating set read EMPTY, and PR#37 sat open 6 days with zero escalations. This pha
 enumerates on a predicate that SURVIVES the damage — beads the refinery already
 canonicalized a PR onto (`pr_url`/`pr_number`) that carry no `merge_result` — and
 restores `merge_result=pull_request`, backfilling `pr_number` (merge-skill.sh skips
-an anchor without one) and `pr_url` from the certified PR, and `merged_target` (what
+an anchor that names no PR under ANY of pr_number/fork_pr/fork_pr_url, and HOLDS one
+whose keys name several different numbers) and `pr_url` from the certified PR, and
+`merged_target` (what
 the retarget check compares) from the anchor's own recorded `target`/`merged_target` —
 falling back to the certified PR's live base ONLY when no recorded intent survived.
 Preferring the record is the point: taking the live base would silently BLESS a
@@ -270,9 +272,13 @@ head and from a TRUSTED non-city approver — the `MERGE_TRUSTED_APPROVERS`
 allowlist when set, otherwise admin/maintain/write repo permission — see
 `[vars.check_set]`), and `mergeStateStatus == CLEAN`
 (CI + base-current + no-conflict, plus approval only where the repo requires a
-review); then an EXPLICIT `gh pr merge --squash --match-head-commit <validated
-head>` (NOT auto-merge, and pinned to the commit the gates validated so a
-mid-pass push cannot land an unvalidated head); then
+review); then ONE MORE READ of the anchor, immediately before the merge, because
+every gate above ran against metadata read several round-trips earlier and another
+writer can park it (`merge_hold`), re-gate a `check.<name>`, close it or retarget
+it in that window without ever moving the head — an unreadable re-read holds, since
+a merge is the one act this pass cannot retract; then an EXPLICIT `gh pr merge
+--squash --match-head-commit <validated head>` (NOT auto-merge, and pinned to the
+commit the gates validated so a mid-pass push cannot land an unvalidated head); then
 close the bead `"Merged to <target> at <sha>"` + stamp `merge_result=merged`. The
 refinery is the single writer — it does not delegate the landing to GitHub
 auto-merge and poll. This RETIRES `gh pr merge --auto` as the main-PR path.

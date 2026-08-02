@@ -313,6 +313,33 @@ def pr_nums:
   | map(select(test("^[0-9]+$"))) | unique;
 '
 
+# The SAME key set, asked of the anchor about ITSELF rather than about other beads,
+# and restricted to numbers that could name a PR in THIS repository (tk-tbacg #2).
+#
+# The anchor's own identity used to be `metadata.pr_number` alone, while the holder
+# probe above and reconcile-merged-prs.sh's ownership set both read every key. A live
+# `merge_result=pull_request` anchor keyed only by fork_pr/fork_pr_url was therefore
+# UNMERGEABLE here (empty number -> skipped every pass) and SILENT there (reconcile
+# counts it owned, so it is never reported anchorless): a PR that nothing lands and
+# nothing reports. Reading the same keys is what makes the two passes agree about
+# which beads own which PR.
+#
+# `in-repo` is the reconcile rule (`pr_refs | in_repo`): a bare number names no
+# repository, so it is kept (the `?` fail-closed wildcard); a fork_pr_url that
+# positively names ANOTHER repository is dropped, because that number is about
+# somebody else's pull request and this pass reads and merges only in origin.
+PR_SELF_JQ='
+def pr_nums_here($o):
+  ( [ (.metadata.pr_number // empty), (.metadata.fork_pr // empty) ] | map(tostring) )
+  + ( ((.metadata.fork_pr_url // "") | tostring)
+      | [ capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<r>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
+      | .[0]
+      | if . == null then []
+        elif ($o == "" or (.h + "/" + .r) == $o) then [ .n ]
+        else [] end )
+  | map(select(test("^[0-9]+$"))) | unique;
+'
+
 # One guarded ledger read -> the matching beads as a JSON array on stdout.
 # --limit=0 so a probe sees the WHOLE set, not a page of it: a child past the cap
 # could let a PR merge while its rework is still open.
@@ -331,6 +358,57 @@ def pr_nums:
 # rows, and so fails OPEN — the one direction that merges past owed work.
 pr_bead_read() {
   bead_read_array gc bd list "$@" --limit=0 --json
+}
+
+# The anchor's LIVE metadata, guarded, as `{status, meta}` — or EMPTY, which every
+# caller must read as unreadable and never as an all-default row.
+#
+# One reader for BOTH re-reads (the pre-validation one and the terminal one
+# immediately before `gh pr merge`, tk-tbacg #1). Two readers would be two notions
+# of "readable": control characters in bead notes can make `--json` unparseable, and
+# `select(...)` rather than `// {}` is what keeps a missing row or missing metadata
+# EMPTY instead of an all-default row that validates. A terminal check that read the
+# bead more loosely than the earlier one would be a weaker gate wearing the same name.
+anchor_row() { # <anchor-id>
+  gc bd show "$1" --json 2>/dev/null \
+    | tr -d '\000-\010\013\014\016-\037' \
+    | jq -c '.[0] | select(. != null) | select(.metadata != null)
+             | {status: (.status // ""), meta: .metadata}' 2>/dev/null
+}
+
+# Is metadata.merge_hold truthy? Operators set `true`; unset/empty/false/0/null do
+# not hold. One definition, asked by the validate gate and again terminally.
+merge_hold_truthy() { # <merge_hold value>
+  case "${1:-}" in
+    ""|false|False|FALSE|0|null) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# The first check-set gate NOT green at <head>, or empty when every gate is green.
+# `$2` is the anchor row (`{status, meta}`), `$1` the declared check_set.
+#
+# NON-ZERO when the markers could not be read at all, which callers MUST hold on.
+# An unreadable row and an all-green one are the same empty string on stdout, and
+# reading the first as the second is a fail-OPEN: every declared gate would be
+# treated as satisfied by a jq that never ran. `jq -e` is what separates them — no
+# valid output is a non-zero exit — so "I could not check the gates" can never be
+# mistaken for "the gates are green".
+#
+# The `none`/`off` sentinel and `approval` are dropped for the reasons stated at the
+# gate site: the first is a deliberate no-gates opt-out, the second is satisfied by
+# GitHub's review state rather than by a check.<name> marker, so leaving either in
+# would hold the anchor forever on a marker nothing can ever stamp.
+checkset_hold_gate() { # <check_set> <anchor-row-json> <head-oid>
+  printf '%s' "${2:-}" | jq -re --arg cs "${1:-}" --arg head "${3:-}" '
+    (.meta // {}) as $meta
+    | (($cs // "")
+        | split(",")
+        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+        | map(select(length > 0))
+        | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
+    | (first( $gates[] | select( (($meta["check." + .]) // "") != ("green@" + $head) ) )) // ""
+  ' 2>/dev/null
 }
 
 # Every bead in <statuses> that names PR #<num> under ANY key pr_nums knows, as
@@ -533,7 +611,7 @@ ANCHORS=$(run_bounded gc bd list --status=open \
 # and so the only repository this anchor can turn out to be about. Same resolution
 # order as check-set-heal.sh's candidate rows.
 ROWS=$(printf '%s' "$ANCHORS" \
-  | jq -c --arg o "$ORIGIN_REPO_Q" "$REPO_JQ"'.[] | (((.metadata.pr_url // "") | tostring) | repo_of) as $r | {id, pr: (.metadata.pr_number // ""), prurl: (.metadata.pr_url // ""), repo: (if $r == "?" then $o else $r end), branch: (.metadata.branch // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), hold: (.metadata.merge_hold // ""), dismissed: (.metadata.signoff_dismissed // ""), meta: (.metadata // {})}' 2>/dev/null)
+  | jq -c --arg o "$ORIGIN_REPO_Q" "$REPO_JQ$PR_SELF_JQ"'.[] | (((.metadata.pr_url // "") | tostring) | repo_of) as $r | (pr_nums_here($o)) as $ns | {id, prs: $ns, pr: (if ($ns | length) == 1 then $ns[0] else "" end), prurl: (.metadata.pr_url // ""), repo: (if $r == "?" then $o else $r end), branch: (.metadata.branch // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), hold: (.metadata.merge_hold // ""), dismissed: (.metadata.signoff_dismissed // ""), meta: (.metadata // {})}' 2>/dev/null)
 [ -n "$ROWS" ] || { echo "merge-skill: no gating anchors"; exit 0; }
 
 # NO duplicate-anchor precompute here, deliberately. The one-anchor-per-PR guard
@@ -557,7 +635,25 @@ while IFS= read -r row; do
   target=$(printf '%s' "$row" | jq -r '.target // empty')
   hold=$(printf '%s' "$row" | jq -r '.hold // empty')
   dismissed=$(printf '%s' "$row" | jq -r '.dismissed // empty')
-  if [ -z "$id" ] || [ -z "$num" ]; then
+  if [ -z "$id" ]; then
+    skipped=$((skipped + 1)); continue
+  fi
+  # ONE number, or none of this anchor's business. `pr` is set only when the widened
+  # key set resolved to exactly one in-repo number (see PR_SELF_JQ), so the two
+  # failure shapes are distinguished HERE rather than collapsed into one skip:
+  #   0 keys  the anchor names no PR in this repository at all — not a merge
+  #           candidate; skipped exactly as a pr_number-less anchor always was.
+  #   >1 keys the anchor names DIFFERENT numbers under different keys (a fork_pr
+  #           left over from an earlier PR beside a fresh pr_number, say). Merging
+  #           then means PICKING one, and a wrong pick lands the wrong pull
+  #           request — the one mistake this script cannot retry away. HELD, so an
+  #           operator repairs the metadata; never guessed.
+  nprs=$(printf '%s' "$row" | jq -r '(.prs // []) | length' 2>/dev/null)
+  if [ "${nprs:-0}" -gt 1 ]; then
+    echo "merge-skill: anchor $id names more than one PR number in this repository ($(printf '%s' "$row" | jq -r '(.prs // []) | join(", ")' 2>/dev/null)); merge held — operator must repair the metadata so exactly one PR is claimed"
+    held=$((held + 1)); continue
+  fi
+  if [ -z "$num" ]; then
     skipped=$((skipped + 1)); continue
   fi
 
@@ -692,16 +788,21 @@ while IFS= read -r row; do
   # notes can make `--json` unparseable, so strip them before jq. `select(...)`
   # (not `// {}`) keeps a missing row or missing metadata EMPTY, so those stay
   # the unreadable case rather than becoming an all-default row that validates.
-  fresh_row=$(gc bd show "$id" --json 2>/dev/null \
-    | tr -d '\000-\010\013\014\016-\037' \
-    | jq -c '.[0] | select(. != null) | select(.metadata != null)
-             | {status: (.status // ""), meta: .metadata}' 2>/dev/null)
+  fresh_row=$(anchor_row "$id")
   if [ -z "$fresh_row" ]; then
     echo "merge-skill: anchor $id metadata re-read failed; skip (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   fresh_status=$(printf '%s' "$fresh_row" | jq -r '.status | ascii_downcase' 2>/dev/null)
-  fresh_pr=$(printf '%s' "$fresh_row" | jq -r '.meta.pr_number // ""' 2>/dev/null)
+  # The SAME widened key set the enumeration resolved this anchor's number from
+  # (tk-tbacg #2) — asking pr_number alone here would re-open the gap one layer
+  # down: a fork_pr-keyed anchor would enumerate with a number and then fail its
+  # own re-read as "no longer records a pr_number". Zero or several is a mismatch
+  # for the same reason it is above: neither answers "does this bead still claim
+  # exactly PR#$num".
+  fresh_pr=$(printf '%s' "$fresh_row" | jq -r --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'
+    {metadata: .meta} | (pr_nums_here($o)) as $ns
+    | if ($ns | length) == 1 then $ns[0] else "" end' 2>/dev/null)
   fresh_result=$(printf '%s' "$fresh_row" | jq -r '.meta.merge_result // ""' 2>/dev/null)
   # The fresh row must still BE the gating anchor the enumeration selected — open,
   # parked on a published PR, and claiming exactly the PR just read. Re-reading and
@@ -723,7 +824,7 @@ while IFS= read -r row; do
     skipped=$((skipped + 1)); continue
   fi
   if [ -z "$fresh_pr" ]; then
-    echo "merge-skill: anchor $id no longer records a pr_number (the PR#$num just read came from the stale snapshot); skip $id (retry next pass)" >&2
+    echo "merge-skill: anchor $id no longer names exactly one PR in this repository (the PR#$num just read came from the stale snapshot); skip $id (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   if [ "$fresh_pr" != "$num" ]; then
@@ -756,12 +857,10 @@ while IFS= read -r row; do
   # fully-CLEAN held PR would squash-merge to the target with no operator signal.
   # Truthy = set and not empty/false/0 (operators set merge_hold=true); an unset
   # or explicitly-false marker does not hold.
-  case "$hold" in
-    ""|false|False|FALSE|0|null) : ;;
-    *)
-      echo "merge-skill: PR#$num merge_hold set (operator gate); merge held for operator (anchor $id)"
-      held=$((held + 1)); continue ;;
-  esac
+  if merge_hold_truthy "$hold"; then
+    echo "merge-skill: PR#$num merge_hold set (operator gate); merge held for operator (anchor $id)"
+    held=$((held + 1)); continue
+  fi
   # --- every live bead that names this PR, read ONCE and guarded ------------
   # TWO merge-deciding gates are answered from this single read: the
   # one-anchor-per-PR guard immediately below and the in-flight-child hold further
@@ -869,15 +968,10 @@ while IFS= read -r row; do
   # hold the anchor forever on a `check.approval` nothing can ever stamp — the
   # identical trap the none/off sentinel drop exists to avoid. Its gate runs
   # below, after the in-flight-child hold.
-  hold_gate=$(printf '%s' "$row" | jq -r --arg head "$head_oid" '
-    . as $row
-    | (($row.checkset // "")
-        | split(",")
-        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
-        | map(select(length > 0))
-        | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
-    | (first( $gates[] | select( (($row.meta["check." + .]) // "") != ("green@" + $head) ) )) // ""
-  ' 2>/dev/null)
+  if ! hold_gate=$(checkset_hold_gate "$checkset" "$row" "$head_oid"); then
+    echo "merge-skill: PR#$num check-set markers unreadable on anchor $id; merge held (retry next pass)"
+    held=$((held + 1)); continue
+  fi
   if [ -n "$hold_gate" ]; then
     have=$(printf '%s' "$row" | jq -r --arg k "check.$hold_gate" '.meta[$k] // "none"' 2>/dev/null)
     echo "merge-skill: PR#$num check '$hold_gate' not green at live head (have '$have', want 'green@$head_oid'); merge held (anchor $id)"
@@ -1238,6 +1332,66 @@ while IFS= read -r row; do
     echo "merge-skill: PR#$num live head unresolved (headRefOid empty); cannot head-match the merge; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
+
+  # --- the LAST thing before the merge: re-read the anchor (tk-tbacg #1) ------
+  # `--match-head-commit` binds the merge to the validated COMMIT. Nothing bound it
+  # to the validated BEAD. Every gate above ran against metadata read earlier in this
+  # pass, and the window between them and this call is wide — the PR read, the
+  # referencing-bead query, the holder probes, the reviews history, each an
+  # unbounded network or ledger round-trip. Inside it another writer can park the
+  # anchor (`merge_hold`), clear or advance a `check.<gate>` marker on a re-gate,
+  # close the anchor, or retarget it off this PR, all WITHOUT moving the PR head —
+  # so the head-match sails through and the bead that authorized the merge no longer
+  # does. The bead is the authority, so it gets the same freshness the commit does.
+  #
+  # Deliberately the LAST gate and deliberately CHEAP: one `gc bd show`, only for an
+  # anchor that already passed everything else (a handful per pass), re-asking only
+  # the questions this bead alone answers — still open, still parked on a published
+  # PR, still naming exactly this PR, not parked by an operator, every declared gate
+  # still green at the head about to be merged. The gates whose evidence lives
+  # OUTSIDE the bead (CI, approval, the child hold) are not re-asked here; their
+  # freshness is the head-match's job and the next pass's.
+  #
+  # Fail-closed in both directions: an unreadable re-read HOLDS (a merge is the one
+  # act that cannot be retried away, so "I could not confirm" must not merge), and
+  # any mismatch holds with the reason named. The next pass re-enumerates and
+  # merges once the anchor really does authorize it.
+  final_row=$(anchor_row "$id")
+  if [ -z "$final_row" ]; then
+    echo "merge-skill: PR#$num anchor $id could not be re-read immediately before the merge; merge held (retry next pass) — an unreadable bead cannot authorize a merge"
+    held=$((held + 1)); continue
+  fi
+  final_status=$(printf '%s' "$final_row" | jq -r '.status | ascii_downcase' 2>/dev/null)
+  final_result=$(printf '%s' "$final_row" | jq -r '.meta.merge_result // ""' 2>/dev/null)
+  final_pr=$(printf '%s' "$final_row" | jq -r --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'
+    {metadata: .meta} | (pr_nums_here($o)) as $ns
+    | if ($ns | length) == 1 then $ns[0] else "" end' 2>/dev/null)
+  final_hold=$(printf '%s' "$final_row" | jq -r '.meta.merge_hold // ""' 2>/dev/null)
+  final_checkset=$(printf '%s' "$final_row" | jq -r '.meta.check_set // ""' 2>/dev/null)
+  final_reason=""
+  if [ "$final_status" != "open" ]; then
+    final_reason="anchor is no longer open (status='${final_status:-unknown}')"
+  elif [ "$final_result" != "pull_request" ]; then
+    final_reason="anchor no longer parked on a published PR (merge_result='${final_result:-unset}')"
+  elif [ "$final_pr" != "$num" ]; then
+    final_reason="anchor now claims '${final_pr:-none}', not PR#$num"
+  elif merge_hold_truthy "$final_hold"; then
+    final_reason="merge_hold was set after validation (operator gate)"
+  else
+    if ! final_gate=$(checkset_hold_gate "$final_checkset" "$final_row" "$head_oid"); then
+      final_gate=""
+      final_reason="its check-set markers could not be read"
+    fi
+    if [ -n "$final_gate" ]; then
+      final_have=$(printf '%s' "$final_row" | jq -r --arg k "check.$final_gate" '.meta[$k] // "none"' 2>/dev/null)
+      final_reason="check '$final_gate' is no longer green at $head_oid (have '$final_have')"
+    fi
+  fi
+  if [ -n "$final_reason" ]; then
+    echo "merge-skill: PR#$num anchor $id changed between validation and the merge — $final_reason; merge held (retry next pass)"
+    held=$((held + 1)); continue
+  fi
+
   MERGE_ERR=$(gh pr merge "$num" --repo "$ORIGIN_REPO_Q" --squash \
     --match-head-commit "$head_oid" 2>&1); merge_rc=$?
   if [ "$merge_rc" -ne 0 ]; then
