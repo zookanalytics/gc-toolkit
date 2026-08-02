@@ -43,8 +43,17 @@
 #              read "no prior stamp" before either writes, and both mail. At most
 #              once has to hold under concurrency too, so the read/decide/stamp/
 #              send section runs under an anchor+kind mutex
-#   (HELD)     the deterministic half of PARALLEL: a peer's live lock suppresses
-#              this run instead of duplicating its mail
+#   (LOCKWAIT) a peer holding the lock is WAITED for, not guessed at, so the
+#              mutex actually serializes rather than merely detecting contention
+#   (HELD)     THE REGRESSION: a live lock used to end this run at SUPPRESSED
+#              before it read the anchor or its own --state. A lock orders
+#              decisions; it cannot make one on a peer's behalf, so a holder that
+#              outlasts the bounded wait sends us down the unserialized path —
+#              which still reads, compares and decides
+#   (NEWS)     ...and why that mattered: peer suppressing an unchanged "old" while
+#              this run carries "new" produced ZERO mail between them. A changed
+#              state must escalate through a peer's lock
+#   (NEWSPARALLEL) the same, genuinely concurrent, with different --state values
 #   (STALEBREAK) a lock left behind by a killed holder is broken, not obeyed — a
 #              dead peer must never mute an anchor forever
 #   (RELEASE)  the lock is released on every exit path, including the failures
@@ -62,6 +71,10 @@
 #              untouched (`shift 2` fails without `set -e`) and spin the parse
 #              loop forever. Every such option must exit 2 instead — a patrol
 #              pass that hangs is worse than the storm this script replaces
+#   (WATCHDOG) the time bound ARGEND runs under must not need GNU `timeout`, and
+#              its portable fallback is exercised on every platform: on the one
+#              where `timeout` is absent, an unbounded fallback would make THIS
+#              TEST the hang it exists to catch, and a hung suite reports nothing
 #   (ARGFLAG)  `--body --dry-run` must not store the flag as the body
 #   (ARGSHAPE) structural: every value-taking arm calls require_value, so a
 #              future option cannot reintroduce the hang uncovered
@@ -370,20 +383,80 @@ eq "$(updates)" "1" "PARALLEL: and stamp exactly once"
 run "PR #35 head moved" --state "def456" >/dev/null 2>&1
 eq "$(mails)" "1" "PARALLEL: the next genuine change still escalates"
 
-# --- HELD ---------------------------------------------------------------------
-# The deterministic half of PARALLEL: a peer holds the lock and is inside the
-# critical section. Suppressing is the same outcome serialization would produce —
-# the peer either mails (we would have found its fresh stamp) or suppresses
-# (a fresh stamp already existed) — so a duplicate is never the right answer.
+# --- LOCKWAIT -----------------------------------------------------------------
+# A peer holds the lock and then releases it. The run must WAIT for its turn and
+# then decide normally — serialization is the point of the mutex, so giving up on
+# it the moment there is contention would make the lock decorative.
 reset
 mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
+( sleep 2; rm -f "$LOCK/at"; rmdir "$LOCK" 2>/dev/null ) &
+releaser=$!
 out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
-eq "$rc" "0" "HELD: exits 0 (suppression is a correct outcome)"
-eq "$(mails)" "0" "HELD: does not duplicate a peer's in-flight escalation"
-eq "$(updates)" "0" "HELD: and stamps nothing"
-case "$out" in *SUPPRESSED*) ok "HELD: still prints a verdict" ;; *) bad "HELD: prints verdict (got '$out')" ;; esac
+wait "$releaser" 2>/dev/null
+eq "$rc" "0" "LOCKWAIT: exits 0"
+eq "$(mails)" "1" "LOCKWAIT: waits for the holder, then decides normally"
+case "$out" in
+  *UNSERIALIZED*) bad "LOCKWAIT: gave up on the lock instead of waiting for it" ;;
+  *)              ok  "LOCKWAIT: took the lock rather than proceeding unserialized" ;;
+esac
+[ -d "$LOCK" ] && bad "LOCKWAIT: left the lock it waited for behind" || ok "LOCKWAIT: releases it again"
+
+# --- HELD ---------------------------------------------------------------------
+# THE REGRESSION (pre-open signoff on tk-z4aka). A held lock used to be treated as
+# a completed decision: any peer in the critical section for this anchor+kind made
+# this run exit SUPPRESSED before it ever read the anchor or looked at its OWN
+# --state. But the holder is deciding about the state IT observed. A lock orders
+# decisions; it cannot make one on someone else's behalf. So a holder that outlasts
+# the bounded wait sends us down the unserialized path — which still reads, still
+# compares, and still decides — rather than down a silent exit.
+reset
+mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+eq "$rc" "0" "HELD: exits 0"
+eq "$(mails)" "1" "HELD: a peer's lock delays this decision, it does not make it"
+case "$out" in *UNSERIALIZED*) ok "HELD: says it proceeded unserialized" ;; *) bad "HELD: warns (got '$out')" ;; esac
 [ -d "$LOCK" ] && ok "HELD: leaves the peer's lock alone" || bad "HELD: deleted a lock it did not take"
 rm -rf "$LOCK"
+
+# --- NEWS ---------------------------------------------------------------------
+# The same regression at its sharpest, and the reason it is a P2 rather than a
+# missed optimization. A prior stamp for "old" exists and a peer holds the lock —
+# the peer is re-reporting that unchanged "old", so it correctly suppresses and
+# mails nothing. We carry "new". Sequentially we would mail AT ONCE ("state
+# changed"); under the old lock branch we exited SUPPRESSED and the pair sent zero
+# mail between them. That is the gate hiding news, which is the one failure it
+# exists to prevent, and it is silent.
+seed_prior "old" "$NOW"
+mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 head moved" --state "new" 2>&1); rc=$?
+eq "$rc" "0" "NEWS: exits 0"
+eq "$(mails)" "1" "NEWS: a CHANGED state is not suppressed by a peer's lock"
+case "$out" in *"state changed"*) ok "NEWS: and reports why it escalated" ;; *) bad "NEWS: reports the state change (got '$out')" ;; esac
+rm -rf "$LOCK"
+
+# --- NEWSPARALLEL -------------------------------------------------------------
+# The concurrent form of NEWS: two invocations for one anchor+kind carrying
+# DIFFERENT --state values, overlapping for real. The changed one must get out.
+#
+# The TOTAL is deliberately not pinned. If the "old" run wins the lock it
+# suppresses and exactly one mail (the news) is sent; if the "new" run wins, the
+# "old" run then reads a stamp that no longer matches ITS observation and mails
+# too. Two is not a bug — going backwards is a state change like any other, and
+# the gate cannot know direction. Asserting a total here would be asserting a
+# scheduling order.
+seed_prior "old" "$NOW"
+touch "$GATE_STATE/slow_show"
+run "PR #35 still stranded" --state "old" >/dev/null 2>&1 &
+a=$!
+run "PR #35 head moved" --state "new" >/dev/null 2>&1 &
+b=$!
+wait "$a"; wait "$b"
+rm -f "$GATE_STATE/slow_show"
+grep -q 'head moved' "$GATE_STATE/calls" \
+  && ok "NEWSPARALLEL: the changed state still escalates under contention" \
+  || bad "NEWSPARALLEL: the changed-state escalation was lost to the peer's lock"
+[ "$(mails)" -ge 1 ] && ok "NEWSPARALLEL: at least one mail went out" \
+  || bad "NEWSPARALLEL: the pair sent nothing at all (got '$(mails)')"
 
 # --- STALEBREAK ---------------------------------------------------------------
 # A holder killed mid-section leaves the lock behind. Obeying it would mute the
@@ -466,12 +539,53 @@ eq "$(mails)" "1" "KINDSAFE: and is delivered"
 # Run every case under a hard time bound: a hanging test is a worse failure than
 # a failing one, and timeout's 124 must be reported as its own thing rather than
 # folded into the exit-2 expectation.
+#
+# The bound must not itself depend on GNU coreutils. `timeout` is absent on stock
+# macOS, and a fallback that just runs the command is no bound at all: on the very
+# platform where a regression might land unreviewed, THIS TEST becomes the hang it
+# was written to catch — and a hung suite reports nothing, so the defect reads as
+# "not run" rather than "failed". The fallback is therefore a real watchdog, built
+# only from bash job control and signals.
 TIMEOUT_BIN="$(command -v timeout 2>/dev/null || true)"
-[ -n "$TIMEOUT_BIN" ] || echo "warn - 'timeout' not found; ARGEND cases run unbounded" >&2
-bounded() { # -> exit code, or 124 if it hung
-  if [ -n "$TIMEOUT_BIN" ]; then "$TIMEOUT_BIN" 5 "$SCRIPT" "$@" >/dev/null 2>&1
-  else "$SCRIPT" "$@" >/dev/null 2>&1; fi
+
+watchdog_run() { # <cmd> [args...] -> exit code, or 124 if it hung
+  "$@" >/dev/null 2>&1 &
+  local pid=$! rc=0 watchdog
+  # Poll in 1s steps and re-check liveness before killing, so the watchdog exits
+  # on its own once the run finishes — it never outlives the case it guards, and
+  # it cannot signal a pid that has already been reaped and reused.
+  ( for _ in 1 2 3 4 5; do sleep 1; kill -0 "$pid" 2>/dev/null || exit 0; done
+    kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  watchdog=$!
+  wait "$pid"; rc=$?
+  kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
+  # SIGKILL surfaces as 128+9; report it as the same 124 `timeout` would, since
+  # the gate itself only ever exits 0, 1 or 2.
+  [ "$rc" -eq 137 ] && rc=124
+  return "$rc"
 }
+
+bounded() { # -> exit code, or 124 if it hung
+  if [ -n "$TIMEOUT_BIN" ]; then
+    "$TIMEOUT_BIN" 5 "$SCRIPT" "$@" >/dev/null 2>&1
+    return $?
+  fi
+  watchdog_run "$SCRIPT" "$@"
+}
+
+# --- WATCHDOG -----------------------------------------------------------------
+# Exercise the timeout-free fallback ON EVERY PLATFORM, not only where `timeout`
+# happens to be missing. Otherwise the branch that matters on macOS is only ever
+# run on macOS — and a bound nobody exercises is a bound nobody can trust.
+WD="$TMP/wd"; mkdir -p "$WD"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$WD/hang"; chmod +x "$WD/hang"
+printf '#!/usr/bin/env bash\nexit 2\n'   > "$WD/quick"; chmod +x "$WD/quick"
+# stderr is dropped because bash announces the SIGKILL ("Killed") as it reaps the
+# job — expected here, and noise in the middle of the results.
+watchdog_run "$WD/hang" 2>/dev/null
+eq "$?" "124" "WATCHDOG: the timeout-free fallback kills a hang and reports it as 124"
+watchdog_run "$WD/quick"
+eq "$?" "2" "WATCHDOG: and passes a normal exit status through untouched"
 
 reset
 for opt in --anchor --subject --body --state --kind --cooldown --to; do
