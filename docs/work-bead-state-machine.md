@@ -349,6 +349,46 @@ The signoff gate **attaches as a dependency of the open convoy** — the gate's
 bead BLOCKS the convoy (`gc bd dep <gate> --blocks <convoy>`). The dependency
 graph then shows directly which bead owns which PR and what it waits on.
 
+**A child is recognized by that dependency, not only by `pr_number`.** The hold
+resolves the child set two independent ways, because neither alone sees every
+child: the PR number a bead stamps on *itself*, and the anchor's own dependency
+edges — its `parent-child` **dependents** (the rework children) and the beads
+that **block** it (the signoff gates). A rework child carries the *branch* while
+the anchor carries PR *identity*, and the pre-open rework arm has no PR number to
+stamp at all — it files before a PR exists — so a hold keyed on `pr_number` alone
+looks straight past an open rework child and merges over it (tk-lgjvg, on PR#233).
+Those two edges are also the *only* two that mean "holds this anchor," and the
+directions matter: a `blocks` **dependent** is downstream work waiting *for* this
+merge, and a `parent-child` **parent** is the epic above it — holding on either
+would deadlock a healthy anchor forever. Any status but closed holds, since the
+invariant is "all children **closed**"; a `blocked` child is the strongest case
+of all, and an unreadable probe holds too, because "no children found" and "could
+not look" are the same silence. A probe can also *succeed* and still be
+unreadable: one malformed element inside an otherwise well-formed array aborts
+the filter that reads the array, and an aborted filter returns byte-for-byte what
+an empty one returns. So the check is not "did the query exit 0" but "could every
+holder in the answer actually be read" — at the probe boundary and again at the
+filter, since a payload valid enough to survive the first can still break the
+second (tk-qoyly). One answer also has to be *one* answer: a probe that emits more
+than one JSON document is unreadable even when every document is individually
+well-formed, because the three probes are read out of a single stream by position
+— an extra document shifts the later probes down a slot and the last one falls off
+the end unread, silently deleting a whole class of holder (tk-wkrcy).
+
+**Which source found a holder decides which filters may drop it.** Resolving by
+`pr_number` sweeps up *every* bead naming the PR — including a duplicate gating
+anchor, which is the one-anchor-per-PR guard's business below and not a child's,
+so a `merge_result`-carrying bead from that source is discarded. A holder reached
+by a **dependency edge** is never discarded that way: it was named as a holder
+explicitly, and the shape you would delete is precisely the one that carries
+`merge_result` by definition — an upstream PR or pre-open anchor filed as an
+explicit merge-ordering `blocks`. Dropping it lets a green downstream PR merge
+straight past the anchor it was ordered behind: the same fail-open as keying on
+`pr_number` alone, reintroduced one layer down on the very edge added to close it
+(tk-je0rk). A bead reachable both ways counts as a dependency holder — the
+stronger claim wins, so no dep-linked bead is demoted into the discardable class
+by also stamping a PR number.
+
 **A rework child never becomes a second anchor — one gating anchor per PR
 (tk-ynz4b).** When a rework child hands its fix back through the refinery, its
 commits are already on the convoy branch, which *is* that child's landing

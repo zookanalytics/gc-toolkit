@@ -19,9 +19,12 @@
 #             the PR's live base == the anchor's merged_target (no retarget),
 #             every gate the anchor declares in check_set is green AT THE LIVE
 #             HEAD (per-gate marker check.<name>=green@<head>, so a stale approval
-#             or a post-review commit re-gates instead of merging), no open
-#             rework/review child references the PR (an open child holds the
-#             merge — an anchor lands only when ALL its children are closed), and
+#             or a post-review commit re-gates instead of merging), no unclosed
+#             rework/review child holds the anchor — resolved BOTH by pr_number and
+#             through the anchor's own dependency edges, because a rework child
+#             carries the branch while the ANCHOR carries PR identity (an unclosed
+#             child holds the merge — an anchor lands only when ALL its children
+#             are closed), and
 #             GitHub reports the PR mergeable with its required check-set green
 #             (mergeStateStatus=CLEAN folds CI + approval + base-current +
 #             no-conflict into one signal).
@@ -53,8 +56,173 @@ set -uo pipefail
 # gh, so an un-merged anchor simply waits).
 command -v gh >/dev/null 2>&1 || exit 0
 
-# Open gating anchors in this rig's ledger.
-ANCHORS=$(gc bd list --status=open \
+# Statuses a bead can hold that are NOT "finished". The child gate's invariant is
+# "an anchor lands only when ALL its children are CLOSED" — so every non-closed
+# status holds, not just open/in_progress. A `blocked` child in particular is the
+# strongest reason to hold (something is stuck on it) and was the live shape in
+# tk-lgjvg: the rework child was blocked + routed to human while its anchor merged
+# past it. Same value and same name as reconcile-merged-prs.sh's LIVE_STATUSES, on
+# purpose — the observer and the merge skill must agree on what "still live" means
+# or one will route work the other has already merged past.
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+
+# Per-probe wall-clock bound. This skill runs inside mol-refinery-patrol's
+# find-work loop, which applies no timeout of its own, so an unbounded `gc bd`
+# against a wedged Dolt hangs the PATROL — every anchor behind it, not just this
+# one. A hung probe is the same thing as an unreadable one (both mean "the holder
+# set is unknown"), and the gate already fails CLOSED on unreadable, so bounding
+# converts a stall into the held/retry path it belongs in. Same idiom and same
+# env-override shape as doctor/check-merge-gate-drop/run.sh's run_bounded.
+PROBE_BOUND="${MERGE_SKILL_PROBE_TIMEOUT:-30}"
+
+# Every probe runs with stdin CLOSED. The anchor loop below reads its work list
+# from a here-string on fd 0; a probe child that inherited and consumed it would
+# silently truncate the anchor sweep — anchors would vanish from the run rather
+# than fail, which reads as "nothing to merge".
+run_bounded() {
+  if command -v timeout >/dev/null 2>&1; then
+    # timeout exits 124 on expiry — a non-zero rc, so it lands in the same
+    # fail-closed branch as any other broken probe. No special case needed.
+    timeout "$PROBE_BOUND" "$@" </dev/null
+  else
+    # No coreutils timeout (some macOS hosts). Degrade to an unbounded call
+    # rather than dropping the probe: a skipped probe fails closed and would
+    # hold EVERY merge forever on such a host.
+    "$@" </dev/null
+  fi
+}
+
+# Read a `gc bd`-family JSON array, or fail. Mirrors reconcile-merged-prs.sh's
+# pr_bead_read: the command's own exit status, then a non-empty payload, then the
+# payload's SHAPE. The shape check is what separates "no results" (`[]`) from an
+# error object that arrived with a zero exit status — `.[]` iterates an object's
+# values happily, so without it a malformed read projects cleanly to "no children".
+#
+# The shape check has THREE layers, and none is belt-and-braces.
+#
+#   DOCUMENT COUNT (tk-wkrcy). The payload must be EXACTLY ONE JSON document.
+#   `jq -e` is not a validator of a raw STREAM: it evaluates the program once per
+#   document and its exit status reflects only the LAST output, so a probe that
+#   emits `{}` (a stray progress/error object, an interleaved warning — city.toml
+#   stderr pollution of --json output is a known shape) followed by a valid array
+#   PASSED the old top-level check. Downstream that is worse than an outright
+#   failure: probe_holders slurps all three probe payloads into ONE stream and
+#   reads them POSITIONALLY as .[0]/.[1]/.[2], so one extra leading document
+#   shifts every later probe down a slot — the blockers array lands at .[3] and is
+#   silently dropped, and a real merge-ordering blocker stops holding the merge.
+#   That is a fail-OPEN shape reachable with a zero exit status, which is why the
+#   count is enforced HERE and the canonical single document is what we emit:
+#   every caller then gets one document per probe by construction, never a stream
+#   whose length it has to trust.
+#
+#   TOP-LEVEL SHAPE. `.[]` iterates an object's values happily, so without it a
+#   malformed read (an error object that arrived with a zero exit status)
+#   projects cleanly to "no children".
+#
+#   PER-ELEMENT SHAPE (tk-qoyly). The holder filter downstream indexes
+#   `.metadata.merge_result` on every element; one element whose metadata is a
+#   string (schema drift, a probe that returned a mixed payload) makes that jq
+#   abort — and an aborted filter yields an EMPTY holder list, which reads as "no
+#   children" and merges past every real holder that was in the array. So an array
+#   that cannot be read element-for-element is an UNREADABLE probe, not an empty
+#   one. Required per element: an object, a usable non-empty string id, and
+#   metadata that is an object or absent.
+bead_read_array() {
+  local raw rc out
+  raw=$(run_bounded "$@" 2>/dev/null)
+  rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  [ -n "$raw" ] || return 1
+  # -s slurps the whole stream into an array of documents, which is what makes
+  # the count observable at all; each `error(...)` aborts jq with a non-zero exit
+  # and no stdout, landing in the same fail-closed branch as a broken probe.
+  out=$(printf '%s' "$raw" | jq -sc '
+      if length != 1 then error("probe emitted \(length) JSON documents, want exactly 1") else .[0] end
+      | if type == "array" then . else error("probe payload is not an array") end
+      | if all(.[];
+               type == "object"
+               and ((.id | type) == "string")
+               and ((.id | length) > 0)
+               and (((.metadata | type) as $t | $t == "object" or $t == "null")))
+        then . else error("probe payload holds an unreadable element") end
+    ' 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
+}
+
+# Every bead that HOLDS the merge of anchor $1 (PR #$2), as one JSON array.
+# Returns non-zero if ANY probe is unreadable, so the caller can fail closed.
+#
+# Three sources, because no single one sees every holder:
+#
+#   1. pr_number=<num> — beads naming the PR in their OWN metadata. This is what
+#      the observer's rebase and re-review children stamp
+#      (reconcile-merged-prs.sh), and it is the ONLY source this gate used before
+#      tk-lgjvg.
+#   2. dep up / parent-child — the anchor's CHILDREN. A rework child filed by the
+#      signoff gate carries branch + source_review_bead but NOT pr_number: the
+#      ANCHOR is the bead that owns PR identity, and the PRE-OPEN rework arm
+#      cannot stamp a number at all because no PR exists yet when it files. Keyed
+#      on pr_number alone such a child is invisible and the gate PASSES — the
+#      fail-OPEN defect this function exists to close (live case: anchor tk-h9pq5
+#      / PR#233 merged past its open rework child tk-t88hg).
+#   3. dep down / blocks — the beads that BLOCK the anchor. That is precisely how
+#      a signoff gate attaches ("the gate's bead BLOCKS the convoy",
+#      docs/work-bead-state-machine.md) and how an operator files an explicit
+#      merge-ordering block.
+#
+# The two walks deliberately NOT taken are the reason both dep probes are type-
+# filtered; either one would deadlock a healthy anchor forever:
+#   - up / blocks         = DOWNSTREAM beads waiting for this one to LAND. They
+#                           are unblocked BY the merge, so holding on them is a
+#                           cycle (live shape: tk-274uj "Depends on tk-h9pq5").
+#   - down / parent-child = this anchor's own PARENT (an epic or convoy), which
+#                           stays open by construction until the anchor closes.
+#
+# Each holder is tagged with the PROVENANCE that found it, in the synthesized
+# `_via` field ("pr_number" or "dep"; a bead seen by both is "dep", the stronger
+# claim). The caller needs it because the two sources justify DIFFERENT filters:
+# the merge_result exclusion exists only to drop a duplicate ANCHOR that the
+# pr_number probe swept up, and applying it to a dependency edge deletes a real
+# holder — an upstream PR / pre-open anchor filed as an explicit merge-ordering
+# `blocks` carries merge_result by definition, so the exclusion made the gate
+# fail OPEN on exactly the edge that was added to close it (tk-je0rk).
+probe_holders() {
+  local anchor="$1" num="$2" by_pr children blockers
+  by_pr=$(bead_read_array gc bd list --metadata-field pr_number="$num" \
+    --status "$LIVE_STATUSES" --limit=0 --json) || return 1
+  children=$(bead_read_array gc bd dep list "$anchor" \
+    --direction=up -t parent-child --json) || return 1
+  blockers=$(bead_read_array gc bd dep list "$anchor" \
+    --direction=down -t blocks --json) || return 1
+  # The three payloads are read POSITIONALLY, so the slurped stream must be
+  # exactly three documents. bead_read_array already guarantees one canonical
+  # document each (tk-wkrcy); this restates that as a hard assertion at the point
+  # the positions are actually consumed, so any future drift is a fail-CLOSED
+  # error instead of a silent slot shift that drops a probe off the end.
+  #
+  # group_by(.id) rather than unique_by(.id): dedup must MERGE provenance, not
+  # pick whichever copy sorted first. A bead reachable both ways is a dependency
+  # holder — take the union, so a dep-linked bead that also stamps pr_number is
+  # never demoted to the excludable pr_number class.
+  printf '%s\n%s\n%s' "$by_pr" "$children" "$blockers" \
+    | jq -sc '
+        if length != 3 then error("probe stream is \(length) documents, want exactly 3") else . end
+        | [ (.[0][] | . + {_via: "pr_number"}),
+            (.[1][] | . + {_via: "dep"}),
+            (.[2][] | . + {_via: "dep"}) ]
+        | group_by(.id)
+        | map(.[0] + {_via: (if (map(._via) | index("dep")) then "dep" else "pr_number" end)})
+      ' 2>/dev/null
+}
+
+# Open gating anchors in this rig's ledger. Bounded for the same reason as the
+# holder probes, and FIRST in line: this read runs before any of them, so leaving
+# it unbounded would hang the patrol here and the probe bounds would never be
+# reached. Its failure semantics are unchanged — a timeout empties ANCHORS, which
+# takes the existing "no gating anchors" exit. That degrades to merging NOTHING
+# this pass, never to merging something unvalidated.
+ANCHORS=$(run_bounded gc bd list --status=open \
   --metadata-field merge_result=pull_request \
   --limit=200 --json 2>/dev/null)
 [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ] \
@@ -189,18 +357,67 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
   # An open rework/review child holds the merge (docs/work-bead-state-machine.md:
-  # an anchor lands only when ALL its children are closed). The anchor carries
-  # merge_result; rework children and review beads do not — so excluding the
-  # anchor's own id plus any merge_result-carrying bead leaves exactly the
-  # in-flight rework/review set. --limit=0 (unbounded): the gate must see EVERY
-  # referencing bead, not a page of them, or a child past the cap could let a PR
-  # merge while rework is still open.
-  inflight=$(gc bd list \
-    --metadata-field pr_number="$num" \
-    --status open,in_progress --limit=0 --json 2>/dev/null \
-    | jq -r --arg anchor "$id" '[.[] | select(.id != $anchor) | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
+  # an anchor lands only when ALL its children are closed). probe_holders resolves
+  # that set from pr_number AND from the anchor's own dependency edges — see its
+  # header for why one key alone is fail-open. --limit=0 (unbounded) on the
+  # pr_number probe: the gate must see EVERY referencing bead, not a page of them,
+  # or a child past the cap could let a PR merge while rework is still open.
+  #
+  # The merge_result exclusion is scoped to `_via == "pr_number"` holders ON
+  # PURPOSE (tk-je0rk). It exists for ONE job: the pr_number probe sweeps up every
+  # bead naming this PR, including a DUPLICATE gating anchor, and a second anchor
+  # is the DUP_PRS guard's business above, not a child's. Applied to the whole
+  # holder set it also deleted every dependency-edge holder that carries
+  # merge_result — and an upstream PR or pre-open anchor filed as an explicit
+  # merge-ordering `blocks` carries one BY DEFINITION. So the blocker vanished,
+  # and a CLEAN downstream PR merged straight past the anchor it was ordered
+  # behind: the same fail-OPEN shape on the very edge added to close it. A holder
+  # reached by a dependency edge holds regardless of merge_result; only the
+  # anchor's own id is excluded unconditionally, since nothing holds itself.
+  #
+  # FAIL CLOSED on an unreadable probe. An empty result from a BROKEN query is
+  # indistinguishable from "no children", and that read merges past open rework —
+  # the same fail-open shape, arrived at through a tool error instead of a narrow
+  # predicate. Counted as HELD, not skipped: this is the gate deciding not to
+  # merge, not the anchor being unevaluable. A held merge is recoverable on the
+  # next idle pass; a merge past open rework is not.
+  # Reported on stdout with the other hold reasons, not stderr: the outcome is a
+  # gate HOLD the patrol log must show alongside its peers, not a skipped anchor.
+  if ! holders=$(probe_holders "$id" "$num"); then
+    echo "merge-skill: PR#$num in-flight rework/review probe failed; merge held (anchor $id, retry next pass)"
+    held=$((held + 1)); continue
+  fi
+  # The holder's STATUS rides along in the hold reason. It is no longer always
+  # "open" — a `blocked` child holds too, and that is the one an operator has to
+  # go unstick by hand rather than wait out, so the log must not call it open.
+  # A merge_result-carrying holder also names it, because the two hold for
+  # opposite operator actions: a rework child is something to go finish, while an
+  # upstream gating anchor is something to WAIT for. Without the marker the log
+  # sends an operator hunting for rework that does not exist.
+  #
+  # FAIL CLOSED on a filter that ERRORS, distinctly from one that finds nothing
+  # (tk-qoyly). This jq indexes and downcases fields it did not validate, so any
+  # element shape it cannot handle — a non-string status, a metadata value that
+  # is not an object — aborts it. With stderr suppressed an abort is
+  # byte-identical to "no holders": empty output, and the anchor sails on to
+  # `gh pr merge`. That is the SAME fail-open class the dependency probes were
+  # widened to close, arrived at one layer further down, so it gets the same
+  # answer — hold and retry. `if !` (not `$?` after the assignment) because the
+  # command substitution's status is the only place the abort is visible.
+  if ! inflight=$(printf '%s' "$holders" | jq -r --arg anchor "$id" --arg live "$LIVE_STATUSES" '
+    ($live | split(",")) as $live_statuses
+    | [ .[]
+        | select((.id // "") != "" and .id != $anchor)
+        | select(((.status // "open") | ascii_downcase) as $s | $live_statuses | index($s))
+        | ((.metadata.merge_result // "") | tostring) as $mr
+        | select((._via // "pr_number") == "dep" or $mr == "")
+        | "\(.id) (\(.status // "open")\(if $mr == "" then "" else ", merge_result=" + $mr end))" ]
+    | .[0] // empty' 2>/dev/null); then
+    echo "merge-skill: PR#$num in-flight holder filter unreadable; merge held (anchor $id, retry next pass)"
+    held=$((held + 1)); continue
+  fi
   if [ -n "$inflight" ]; then
-    echo "merge-skill: PR#$num has open rework/review bead $inflight; merge held (anchor $id)"
+    echo "merge-skill: PR#$num has unclosed rework/review bead $inflight; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
   # CI + approval + base-current + no-conflict: GitHub's composite
