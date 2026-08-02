@@ -733,11 +733,17 @@ done
 - `quota_park=yes` — confirmed parked within the last few minutes and being
   nudged. **Defer** the warrant this cycle and say so in your log. A bounded
   defer, not a standing suppression.
-- `quota_park=no` — not parked, or excluded from recovery by the operator.
-  Normal warrant path.
-- `quota_park=unknown` — the order has not swept recently, never ran, or could
-  not read that pane. It vouches for nothing: normal warrant path, and note
-  that quota-park recovery looks down.
+- `quota_park=no` — the order looked at that session recently and it is not
+  parked (or the operator excluded it from recovery). Normal warrant path.
+- `quota_park=unknown` — it vouches for nothing about this session, and
+  `reason=` says which kind of nothing:
+  - `reason=no-recent-sweep` — no pass at all lately. Quota-park recovery
+    itself looks down; normal warrant path, and say so in your log.
+  - `reason=not-swept` — a pass ran but never reached this session (deferred by
+    the sweep budget, an unreadable pane, an id it refused). Ordinary partial
+    coverage, not an outage; normal warrant path, no alarm.
+  - `reason=stale-episode` — it saw a park here once and nothing has confirmed
+    it since. Normal warrant path.
 - `escalated=1` on a session you already deferred once — nudging has not
   brought it back and a human has been mailed. Escalate to the mayor rather
   than deferring again in silence.

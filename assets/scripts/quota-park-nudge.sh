@@ -137,25 +137,60 @@ DEFAULT_STATE_DIR="${DEFAULT_STATE_DIR:-${TMPDIR:-/tmp}/gc}/quota-park"
 STATE_DIR="${QUOTA_PARK_STATE_DIR:-$DEFAULT_STATE_DIR}"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 
-# This order's two files that are NOT episode state: where the last pass stopped,
-# and that a pass ran at all. Both names start with a dot, which `safe_id`
-# rejects — so no session can ever be given a state file that collides with one,
-# and the week-old prune below (safe_id AND a state header) never touches them.
+# This order's files that are NOT episode state: where the last pass stopped,
+# that a pass ran at all, and which sessions it actually classified. Every name
+# starts with a dot, which `safe_id` rejects — so no session can ever be given a
+# state file that collides with one, and the week-old prune below (safe_id AND a
+# state header) never touches them.
 CURSOR_FILE="$STATE_DIR/.sweep-cursor"
 HEARTBEAT_FILE="$STATE_DIR/.heartbeat"
+COVERAGE_FILE="$STATE_DIR/.sweep-coverage"
 
 NOW="$(date +%s)"
 
 # Read one key out of a state file. Never `source` it — the file is keyed by a
 # session id and lives in a shared runtime dir.
+#
+# Never through a symlink either. STATE_DIR is shared (and an override), so an
+# entry planted there would otherwise have this order reading a file of somebody
+# else's choosing and parsing it as its own episode state. A planted link reads
+# as "no state", and the next write replaces the link itself rather than
+# following it — see write_atomic.
 state_get() {
-    [ -f "$1" ] || return 0
+    [ -f "$1" ] && [ ! -L "$1" ] || return 0
     grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- || true
 }
 
 # True for a bare non-empty integer — everything read back out of a state file
 # is fed to arithmetic, and `$(( ))` on garbage is fatal under `set -e`.
 num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
+
+# Replace a file in STATE_DIR with what arrives on stdin, atomically, and never
+# by writing THROUGH whatever is already at the path.
+#
+# A plain `>` follows an existing symlink or FIFO. STATE_DIR is a shared runtime
+# directory whose location is an override, and every path under it is named by a
+# session id, so an entry planted there — by anything that can create a file
+# beside our state — would have this order writing wherever it points, as the
+# order's user, on every 3m sweep. A FIFO is worse than a wrong file: with no
+# reader the open blocks, and the sweep hangs where it is meant to be bounded.
+#
+# `mktemp` creates the temp file O_EXCL (so the write itself cannot be
+# redirected) and rename(2) replaces the destination ENTRY whatever type it is
+# (so the replace cannot be either, and a planted link is destroyed rather than
+# followed). The temp name is dot-prefixed and distinctive: `safe_id` rejects a
+# leading dot, so a temp file left by a killed pass can never be read back as an
+# episode, reported as a parked session, or pruned as one — the prune below
+# collects them by name instead.
+write_atomic() {
+    local dest="$1" tmp
+    tmp="$(mktemp "$STATE_DIR/.qpn-tmp.XXXXXX" 2>/dev/null)" || return 1
+    if cat > "$tmp" 2>/dev/null && mv -f "$tmp" "$dest" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
 
 # One writer for an episode's state file, so the two paths that persist it —
 # inside the backoff window, and after a delivery attempt — cannot drift in
@@ -169,17 +204,36 @@ num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 # file is never older than the sweep that last looked.
 write_state() {
     printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=%s\nunconfirmed=%s\nescalated=%s\nlast_seen=%s\ndetector_class=%s\n' \
-        "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" > "$1"
+        "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" | write_atomic "$1"
 }
 
-# True for a session id safe to use as a filename. The id names a state file in
-# a shared runtime directory and is pasted into the operator instruction in the
-# escalation mail, so it must be a bare token: no separator, no dot-segment,
-# nothing that can leave STATE_DIR. Runtime ids look like `lx-gsnfk`; an id that
-# does not is not one, and a session we cannot name safely is one we skip rather
-# than guess at. (`.*` rejects a leading dot, `*..*` any dot-segment, and `/` is
-# absent from the allowed set — together that is every route out of the dir.)
-safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | *..*) return 1 ;; *) return 0 ;; esac }
+# True for a session id safe to use as a filename AND as a command argument. The
+# id names a state file in a shared runtime directory, is pasted into the
+# operator instruction in the escalation mail, and is passed to `gc session
+# peek` / `gc session nudge`, so it must be a bare token: no separator, no
+# dot-segment, nothing that can leave STATE_DIR, and nothing that can be read as
+# an option. Runtime ids look like `lx-gsnfk`; an id that does not is not one,
+# and a session we cannot name safely is one we skip rather than guess at.
+# (`.*` rejects a leading dot, `*..*` any dot-segment, and `/` is absent from the
+# allowed set — together that is every route out of the dir.)
+#
+# `-*` is the argument half, and quoting does not cover it: a shell-quoted
+# argument is still parsed as an option by the command that receives it, so an
+# id like `-n` or `--help` reaches `gc session nudge` as a flag rather than as a
+# session. What that runs is the receiving CLI's business, not ours; refusing to
+# hand it over is.
+safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | -* | *..*) return 1 ;; *) return 0 ;; esac }
+
+# How long ago this order last CLASSIFIED a session — reached a verdict on its
+# pane — as opposed to merely having run a pass in which that session existed.
+# Prints an age in seconds, or fails if there is no record. See write_coverage.
+covered_age() {
+    local ts
+    [ -f "$COVERAGE_FILE" ] && [ ! -L "$COVERAGE_FILE" ] || return 1
+    ts="$(awk -v id="$1" '$1 == id { print $2; exit }' "$COVERAGE_FILE" 2>/dev/null)" || return 1
+    num "$ts" || return 1
+    echo $((NOW - ts))
+}
 
 # Bound and flatten a display field before it is logged or mailed. Session
 # alias/session_name are mutable and agent-reachable, and they reach durable
@@ -307,9 +361,9 @@ num_min "$STALE_AFTER"    1 || STALE_AFTER=600
 #
 # So the classification stays here, in a non-LLM helper, and reaches the patrols
 # only as CLOSED fields: a yes/no/unknown, a label from detector_class's fixed
-# set, and integers out of this script's own state files. Not one byte of pane
-# text is emitted. A patrol never sees the screen and so cannot be talked into
-# anything by it.
+# set, a `reason` from a fixed set, and integers out of this script's own state
+# files. Not one byte of pane text is emitted. A patrol never sees the screen and
+# so cannot be talked into anything by it.
 #
 # `unknown` is the field that keeps this honest, and it is deliberately NOT
 # folded into `no`. Everything reported here is evidence this order produced; if
@@ -319,19 +373,43 @@ num_min "$STALE_AFTER"    1 || STALE_AFTER=600
 # warrants city-wide on the strength of a stopped clock. `unknown` says which
 # one it is, and the patrol prose sends it down the normal warrant path.
 #
-# Consequently the answer is conditional on a RECENT sweep (the heartbeat) and
-# on a recent sighting of that particular session (`last_seen`), not merely on a
-# state file existing. An episode nobody has been able to confirm since the pane
-# went unreadable is `unknown` too.
+# Consequently EVERY answer is conditional on evidence about THAT session, never
+# merely on a pass having run:
+#   yes     — an episode whose last sighting is within STALE_AFTER
+#   no      — no episode, AND this order classified that session within
+#             STALE_AFTER (the per-session coverage record, `.sweep-coverage`)
+#   unknown — anything else, with `reason` saying which:
+#               no-recent-sweep  the heartbeat is stale: no pass lately at all
+#               not-swept        a pass ran but never reached this session —
+#                                deferred by the budget, an unreadable pane, an
+#                                id it refused, attached, or not in the list
+#               stale-episode    an episode nothing has confirmed lately
+#               unsafe-session-id  an id this order will not name a file with
+#
+# The `no` case is the one that has to be earned rather than inferred: a pass
+# that runs out of SWEEP_BUDGET defers its whole tail without peeking it and
+# still writes a fresh heartbeat, so "a sweep ran recently and there is no
+# episode" is not the same statement as "that session is not parked".
 status_line() {
     local id="$1" path="$STATE_DIR/$1"
     local first_seen last_seen attempts unconfirmed escalated dclass verdict age seen_age human
+    local cov_age reason=-
     first_seen="$(state_get "$path" first_seen)";   num "$first_seen"  || first_seen=0
     last_seen="$(state_get "$path" last_seen)";     num "$last_seen"   || last_seen=0
     attempts="$(state_get "$path" attempts)";       num "$attempts"    || attempts=0
     unconfirmed="$(state_get "$path" unconfirmed)"; num "$unconfirmed" || unconfirmed=0
+    # A 0/1 flag on the way out, and `unconfirmed` maps to 1. The third state is
+    # real but it is this script's own bookkeeping: an escalation whose bound
+    # expired must not be resent, and from that moment on this script BEHAVES as
+    # though the human was mailed. The consumers — mol-deacon-patrol,
+    # mol-witness-patrol, docs/quota-park-recovery.md — define only `escalated=1`
+    # ("a human has been mailed; stop deferring in silence"), and nothing anywhere
+    # defines `unconfirmed`. Publishing a value no consumer handles is how a park
+    # that outlasts ESCALATE_AFTER keeps getting deferred down an undefined path
+    # forever, so the surface answers in the vocabulary its readers have. The
+    # distinction stays where it is acted on, in the state file.
     escalated="$(state_get "$path" escalated)"
-    case "$escalated" in 1 | unconfirmed) ;; *) escalated=0 ;; esac
+    case "$escalated" in 1 | unconfirmed) escalated=1 ;; *) escalated=0 ;; esac
     # Constrained to the closed set on the way OUT as well as on the way in: a
     # state file written by an older version, or edited by hand, must not be able
     # to put arbitrary text on a line a patrol agent reads.
@@ -345,16 +423,36 @@ status_line() {
     human="-";   [ "$age" -ge 0 ] && human="$(duration "$age")"
 
     if [ "$HB_FRESH" != "1" ]; then
-        verdict=unknown                     # no recent sweep: no evidence either way
-    elif [ ! -f "$path" ]; then
-        verdict=no                          # swept recently, no episode: not parked
+        verdict=unknown; reason=no-recent-sweep   # no recent pass: no evidence at all
+    elif [ ! -f "$path" ] || [ -L "$path" ]; then
+        # No episode for this session. That is only evidence of "not parked" if
+        # this order actually LOOKED at the session recently, and a fresh
+        # heartbeat does not say that: a pass that runs out of SWEEP_BUDGET
+        # defers its whole tail WITHOUT peeking it and still writes a heartbeat
+        # at the end. Read off the heartbeat alone, every deferred session
+        # answers `no` — a verdict about a pane nobody read, handed to a patrol
+        # as grounds to take the normal warrant path against a session this order
+        # never inspected. Which is the failure it exists to prevent, arriving
+        # through the surface that was meant to prevent it.
+        #
+        # So the not-parked answer is conditional on a per-session sighting, the
+        # same way the parked answer is conditional on `last_seen`. One record
+        # covers every way a session goes uninspected: budget-deferred, an
+        # unreadable pane, an id the sweep refused, a session that is attached or
+        # simply not in the active list.
+        cov_age="$(covered_age "$id")" || cov_age=-1
+        if [ "$cov_age" -ge 0 ] && [ "$cov_age" -lt "$STALE_AFTER" ]; then
+            verdict=no                      # looked at it recently, no episode
+        else
+            verdict=unknown; reason=not-swept
+        fi
     elif [ "$seen_age" -lt 0 ] || [ "$seen_age" -ge "$STALE_AFTER" ]; then
-        verdict=unknown                     # an episode nothing has confirmed lately
+        verdict=unknown; reason=stale-episode  # an episode nothing has confirmed lately
     else
         verdict=yes
     fi
-    printf 'session=%s quota_park=%s detector_class=%s age_s=%s parked_for=%s attempts=%s unconfirmed=%s escalated=%s last_seen_age=%s\n' \
-        "$id" "$verdict" "$dclass" "$age" "$human" "$attempts" "$unconfirmed" "$escalated" "$seen_age"
+    printf 'session=%s quota_park=%s detector_class=%s age_s=%s parked_for=%s attempts=%s unconfirmed=%s escalated=%s last_seen_age=%s reason=%s\n' \
+        "$id" "$verdict" "$dclass" "$age" "$human" "$attempts" "$unconfirmed" "$escalated" "$seen_age" "$reason"
 }
 
 status_report() {
@@ -393,6 +491,48 @@ if [ "${1:-}" = "--status" ]; then
     exit 0
 fi
 
+# --- Pattern overrides, validated before the sweep uses them ----------------
+#
+# The numeric knobs above are validated for the same reason these are, but a bad
+# ERE fails in a nastier direction: `grep` answers a malformed pattern with rc 2,
+# and every test below reads a non-zero rc as "did not match". So
+# `QUOTA_PARK_MATCH='('` does not disable the detector loudly — it reports every
+# pane in the city as CLEAN, which deletes the episode state of every session
+# genuinely parked and leaves `--status` answering `no` for all of them. One
+# malformed character in a tuning knob, and quota recovery is silently off
+# city-wide while the summary line reports a healthy sweep. (Reproduced during
+# review: `QUOTA_PARK_MATCH='('` → `0 parked`, `quota_park=no` on a parked pane.)
+#
+# The other two fail the same way in their own direction: a malformed BUSY
+# pattern matches nothing, so every busy pane reads as idle and gets nudged
+# mid-turn; a malformed EXCLUDE pattern matches nothing, so the operator's escape
+# hatch is silently ignored. Each falls back to its own default and says so — the
+# fallback is chosen so that recovery keeps working, never so that a typo can
+# switch it off. That is also why an unusable EXCLUDE falls back to "no
+# exclusions" rather than to "exclude everything": the cost of the first is one
+# unwanted nudge per backoff window on one session, the cost of the second is the
+# whole city unrecovered.
+valid_ere() {
+    local rc=0
+    printf '' | grep -Eq -- "${1:-}" >/dev/null 2>&1 || rc=$?
+    [ "$rc" -le 1 ]
+}
+if ! valid_ere "$MATCH_RE"; then
+    echo "quota-park-nudge: QUOTA_PARK_MATCH is not a valid ERE — using the default detector"
+    MATCH_RE="$DEFAULT_MATCH"
+    # detector_class labels a match `custom-match` from the presence of the
+    # override; having fallen back, we are not using one.
+    unset QUOTA_PARK_MATCH
+fi
+if ! valid_ere "$BUSY_RE"; then
+    echo "quota-park-nudge: QUOTA_PARK_BUSY is not a valid ERE — using the default busy markers"
+    BUSY_RE="$DEFAULT_BUSY"
+fi
+if [ -n "$EXCLUDE_RE" ] && ! valid_ere "$EXCLUDE_RE"; then
+    echo "quota-park-nudge: QUOTA_PARK_EXCLUDE is not a valid ERE — no aliases are excluded this pass"
+    EXCLUDE_RE=""
+fi
+
 # Every `gc` call goes through here. Two things it guarantees:
 #
 #   1. A bound (CALL_TIMEOUT). `timeout` exits 124 on expiry — a non-zero rc, so
@@ -422,6 +562,7 @@ sweep_expired() {
 
 checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0; unconfirmed_now=0
 last_attempted=""
+covered_now=""
 
 # That a pass RAN, and what it saw. This is what makes the status surface
 # refusable: warrant suppression in the patrols is conditional on a recent sweep,
@@ -432,7 +573,30 @@ last_attempted=""
 # is exactly what a patrol reads as `unknown`.
 write_heartbeat() {
     printf 'last_run=%s\nchecked=%s\nparked=%s\nnudged=%s\ndeferred=%s\n' \
-        "$NOW" "$checked" "$parked" "$nudged" "$skipped" > "$HEARTBEAT_FILE" 2>/dev/null || true
+        "$NOW" "$checked" "$parked" "$nudged" "$skipped" | write_atomic "$HEARTBEAT_FILE" || true
+}
+
+# WHICH sessions a pass classified, which is a different fact from that a pass
+# ran, and the one `--status` needs before it may answer `no` for a session with
+# no episode. A pass is not a census: the sweep is round-robin under a budget, so
+# a session can be deferred, unreadable, refused, attached, or absent from the
+# list — uninspected, every one of them, on a pass that completes and writes a
+# perfectly fresh heartbeat.
+#
+# Merged rather than overwritten, because a classification stays evidence for
+# STALE_AFTER: this pass's records go in first so they win the dedup, and
+# anything past the cutoff is dropped, which keeps the file bounded by the number
+# of live sessions instead of growing forever. Atomic and dot-prefixed for the
+# same reasons as the heartbeat.
+write_coverage() {
+    local cutoff=$((NOW - STALE_AFTER)) prior=""
+    if [ -f "$COVERAGE_FILE" ] && [ ! -L "$COVERAGE_FILE" ]; then
+        prior="$(cat "$COVERAGE_FILE" 2>/dev/null || true)"
+    fi
+    printf '%s%s\n' "$covered_now" "$prior" \
+        | awk -v cutoff="$cutoff" \
+            'NF == 2 && $2 ~ /^[0-9]+$/ && $2 + 0 >= cutoff + 0 && !seen[$1]++ { print $1, $2 }' \
+        | write_atomic "$COVERAGE_FILE" || true
 }
 
 # Only sessions the controller believes are alive. Keyed on `.state`, NEVER on
@@ -525,6 +689,13 @@ while IFS=$'\t' read -r id alias; do
         continue
     fi
 
+    # The pane was read, so this session gets a verdict below whichever branch it
+    # takes — and this pass can therefore vouch for it. Recorded for `--status`,
+    # which may only answer `no` for a session it can show was actually looked
+    # at; see write_coverage. Deliberately AFTER the unreadable branch: a peek
+    # that failed classified nothing.
+    covered_now="$covered_now$id $NOW"$'\n'
+
     # Parked = a bare provider banner at the bottom of an idle pane. Busy,
     # cited, or scrolled-up all mean not parked. Clearing the state file is what
     # ends an episode: a recovered agent starts the next block from attempt 1.
@@ -541,6 +712,14 @@ while IFS=$'\t' read -r id alias; do
     # switched off for this session. Counted as parked in the summary, because it
     # is — the escape hatch suppresses the action, not the observation.
     if [ -n "$EXCLUDE_RE" ] && printf '%s' "$alias" | grep -qEi -- "$EXCLUDE_RE"; then
+        # Any episode from BEFORE the exclusion goes with it. An alias can be
+        # added to QUOTA_PARK_EXCLUDE while a park is already being tracked, and
+        # a state file left behind then keeps answering for a session this order
+        # has stopped acting on: `yes` while the last sighting is still fresh —
+        # a patrol deferring its warrant to a recovery that is switched off for
+        # exactly that session — and `unknown` afterwards. Neither is the
+        # contract above. `no` is, and that needs the file gone.
+        rm -f "$state"
         echo "quota-park-nudge: $alias parked (excluded, not nudged)"
         continue
     fi
@@ -685,8 +864,9 @@ done <<< "$sessions"
 # far it got, and a heartbeat written earlier would claim a pass that had not
 # finished.
 if [ -n "$last_attempted" ]; then
-    printf 'session=%s\n' "$last_attempted" > "$CURSOR_FILE" 2>/dev/null || true
+    printf 'session=%s\n' "$last_attempted" | write_atomic "$CURSOR_FILE" || true
 fi
+write_coverage
 write_heartbeat
 
 # A recovered agent's state file is removed above, the moment its pane goes
@@ -716,6 +896,12 @@ prune_stale_state() {
     local path base header
     while IFS= read -r -d '' path; do
         base="${path##*/}"
+        # This order's own abandoned temp files — a pass killed between `mktemp`
+        # and the rename in write_atomic. Unmistakably ours by name, so they are
+        # collected here rather than accumulating in the runtime directory
+        # forever; `safe_id` would otherwise skip them for their leading dot,
+        # which is the same property that keeps them out of `--status`.
+        case "$base" in .qpn-tmp.*) rm -f "$path"; continue ;; esac
         safe_id "$base" || continue
         header=""
         IFS= read -r header < "$path" 2>/dev/null || true

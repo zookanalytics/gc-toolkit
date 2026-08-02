@@ -117,6 +117,13 @@ separator, no dot-segment, nothing that resolves out of the state directory. The
 two are complementary — the encoding stops a field from becoming a record, the
 validation stops a record from becoming a path — and a session whose id fails
 validation is skipped entirely and counted, never peeked or nudged on a guess.
+
+`safe_id` also rejects a **leading hyphen**, which is the argument half of the
+same problem: the id is not only a filename, it is passed to `gc session peek`
+and `gc session nudge`, and a shell-quoted argument is still parsed as an
+*option* by the command that receives it. An id of `-n` or `--help` arrives there
+as a flag rather than as a session. What that would run is the receiving CLI's
+business; refusing to hand it over is ours.
 The alias is allowlisted and truncated (`sanitize_display`) before it is logged
 or mailed, for the same reason the pane is excluded from the escalation below:
 keeping the pane out while pasting the alias in raw just moves the hole into a
@@ -160,33 +167,59 @@ $ quota-park-nudge.sh --status lx-gsnfk
 heartbeat_age=48
 heartbeat_fresh=1
 stale_after=600
-session=lx-gsnfk quota_park=yes detector_class=possessive-limit age_s=8400 parked_for=2h20m attempts=5 unconfirmed=0 escalated=1 last_seen_age=48
+session=lx-gsnfk quota_park=yes detector_class=possessive-limit age_s=8400 parked_for=2h20m attempts=5 unconfirmed=0 escalated=1 last_seen_age=48 reason=-
 ```
 
 Every value is an integer this script computed, a label from `detector_class`'s
-fixed set, or one of `yes`/`no`/`unknown` — nothing that originates on a screen.
-Omit the session id to list every episode currently tracked. It is read-only: no
-peek, no nudge, no prune.
+fixed set, a `reason` from a fixed set, or one of `yes`/`no`/`unknown` — nothing
+that originates on a screen. Omit the session id to list every episode currently
+tracked. It is read-only: no peek, no nudge, no prune.
 
 The verdict a patrol acts on:
 
 | `quota_park` | Meaning | Patrol action |
 |---|---|---|
 | `yes` | Confirmed parked within `STALE_AFTER`, and being nudged | **Defer** the warrant this cycle, logged. A bounded defer, not a standing suppression |
-| `no` | Swept recently, no live episode (or excluded from recovery) | Normal warrant path |
-| `unknown` | No recent sweep, or no recent sighting of that session | Normal warrant path, and note that recovery looks down |
+| `no` | This order **classified that session** within `STALE_AFTER` and found no park (or it is excluded from recovery) | Normal warrant path |
+| `unknown` | No verdict to give; `reason` says which kind of nothing | Normal warrant path — see below |
 
 `unknown` is the field that keeps this honest, and it is deliberately not folded
 into `no`. Everything reported here is evidence *this order produced*; if the
 order is disabled, wedged before it could list sessions, or absent from the host,
 there is no evidence at all. Read as "not parked" that silence is right by
 accident; read as "parked" it would suppress warrants city-wide on the strength
-of a stopped clock. That is why suppression is conditional on two freshness
-tests, not on a state file existing: `.heartbeat` (a pass actually completed —
-written at the end of the sweep, so every early exit leaves the old one to go
-stale) and the episode's own `last_seen` (this order confirmed *that* session
-parked recently, so an episode kept alive across an unreadable pane reports
-`unknown` rather than `yes`).
+of a stopped clock.
+
+So every answer is conditional on evidence about **that session**, never merely
+on a pass having run, and `reason` names the gap:
+
+| `reason` | Meaning | Is recovery down? |
+|---|---|---|
+| `-` | A verdict was given (`yes` or `no`) | — |
+| `no-recent-sweep` | `.heartbeat` is stale: no pass lately at all | **Yes** — say so in the patrol log |
+| `not-swept` | A pass ran but never reached this session: deferred by `SWEEP_BUDGET`, an unreadable pane, an id it refused, attached, or not in the active list | No — ordinary partial coverage |
+| `stale-episode` | An episode exists but nothing has confirmed it since `last_seen` | No |
+| `unsafe-session-id` | An id this order will not name a file with, so it holds no state for it | No |
+
+The `no` case is the one that has to be *earned*. A pass that runs out of
+`SWEEP_BUDGET` defers its whole tail without peeking it and still writes a fresh
+heartbeat at the end, so "a sweep ran recently and there is no episode" is not
+the same statement as "that session is not parked" — answered off the heartbeat
+alone, every deferred session reports `no`, which is a verdict about a pane
+nobody read. That is the failure this order exists to prevent, arriving through
+the surface built to prevent it. Hence a third file beside the heartbeat:
+`.sweep-coverage`, one `<session-id> <timestamp>` line per session the sweep
+actually classified, merged across passes and aged out at `STALE_AFTER`. `no`
+requires a line there; anything else is `unknown` with `reason=not-swept`.
+
+`escalated` is a **0/1** field. The state file carries a third value —
+`unconfirmed`, for a mail whose bound expired mid-send — but that is internal
+bookkeeping for the resend suppression, and from the moment it is recorded this
+script behaves as though the human was mailed, so the surface reports `1`. The
+patrols and this doc define only `0` and `1`; publishing a value no consumer
+handles is how a park that outlasted `ESCALATE_AFTER` keeps getting deferred down
+an undefined path. The regression suite asserts that agreement in both
+directions — every value the surface emits is one the patrol formulas handle.
 
 The defer is bounded at the far end too. `escalated=1` means the park outlasted
 `ESCALATE_AFTER` and a human has already been mailed; a session still parked
@@ -195,9 +228,13 @@ mayor instead of deferring again in silence.
 
 `QUOTA_PARK_EXCLUDE` suppresses the *action*, not the observation. An excluded
 alias is still counted as parked in the summary line, but it is not nudged and
-gets no episode state — so `--status` reports it as `no` and the patrols apply
+holds no episode state — so `--status` reports it as `no` and the patrols apply
 their own judgment rather than deferring to a recovery that was switched off for
-that session.
+that session. "Holds no state" includes state from *before* the exclusion: an
+alias can be added to the pattern while a park is already tracked, and a file
+left behind would keep answering `yes` for a session this order has stopped
+acting on, which is the deferral the exclusion was meant to end. So the episode
+is cleared as the exclusion takes effect.
 
 **The escalation quotes no pane text.** A pane holds whatever the agent printed,
 and an agent can print text shaped like an operator directive; mail is durable
@@ -300,6 +337,31 @@ every capture, which reads as an unreadable pane; `BACKOFF_BASE=0` or
 sweep, forever. Those knobs have a floor of `1` and fall back exactly as they do
 for `oops`.
 
+The three pattern knobs are validated the same way and for a sharper reason:
+`grep` answers a malformed ERE with rc 2, and every test in the sweep reads a
+non-zero rc as *did not match*. So `QUOTA_PARK_MATCH='('` does not switch the
+detector off loudly — it reports every pane in the city as clean, deletes the
+episode state of every session actually parked, and leaves `--status` answering
+`no` for all of them, while the summary line reports a healthy sweep. Each
+pattern is therefore checked once, ahead of the sweep, and falls back with a line
+in the log: `MATCH` to the default detector (and it stops being labelled
+`custom-match`), `BUSY` to the default busy markers, and `EXCLUDE` to *no
+exclusions*. That last direction is deliberate — an unusable exclusion costs one
+unwanted nudge per backoff window on one session, whereas treating it as matching
+everything would leave the whole city unrecovered from a typo.
+
+**State files are replaced, never written through.** A plain `>` follows an
+existing symlink or FIFO. `QUOTA_PARK_STATE_DIR` is a shared runtime directory
+whose location is an override, and every path under it is named by a session id,
+so an entry planted beside our state would have this order writing wherever it
+points — as the order's user, on every 3m sweep — and a FIFO would block the
+open, hanging a sweep that is otherwise carefully bounded. Every write (episode
+state, `.heartbeat`, `.sweep-cursor`, `.sweep-coverage`) goes to a `mktemp` file
+created `O_EXCL` and is then `rename(2)`d into place, which replaces the
+directory entry whatever type it is. Reads refuse to follow a symlink for the
+same reason, so a planted link reads as *no state* and is destroyed by the next
+write rather than being parsed as this order's own record.
+
 The week-old cleanup of the state directory is deliberately narrow for the same
 "this is a city-scoped order" reason: `QUOTA_PARK_STATE_DIR` is an override and
 its default lives inside the shared city runtime tree, so a bare recursive
@@ -308,11 +370,14 @@ of. It prunes only files directly in the directory (never a nested tree), named
 like the session ids it writes, and carrying its own `first_seen=` header —
 anything else is somebody else's file, whatever its age.
 
-The order's own two non-episode files live there as well: `.sweep-cursor` (where
-the next pass starts) and `.heartbeat` (that a pass ran, and what it saw). Both
-names begin with a dot, which `safe_id` rejects — so no session can be given a
-state file that collides with one, the prune never considers them, and
-`--status` never reports one as a parked session.
+The order's own non-episode files live there as well: `.sweep-cursor` (where the
+next pass starts), `.heartbeat` (that a pass ran, and what it saw) and
+`.sweep-coverage` (which sessions it classified). Every name begins with a dot,
+which `safe_id` rejects — so no session can be given a state file that collides
+with one, the prune never considers them, and `--status` never reports one as a
+parked session. The same is true of the `.qpn-tmp.*` files the atomic writes go
+through; a pass killed between the `mktemp` and the rename leaves one behind, and
+the week-old prune collects them by name.
 
 Regression suite: `assets/scripts/quota-park-nudge.test.sh` (hermetic — fake
 `gc`, canned panes, no city). It also parses `orders/quota-park-nudge.toml` and

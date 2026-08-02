@@ -45,7 +45,21 @@
 # patrols in closed fields only — never pane text — and answers `unknown` rather
 # than a verdict when this order has not swept recently; (aa) the order file
 # parses and still carries the wiring the sweep depends on (cooldown/3m/city + a
-# live exec path).
+# live exec path); (ab) a session a completed pass never REACHED — deferred by
+# the budget, or peeked unsuccessfully — reports `unknown`, not the `no` a fresh
+# heartbeat alone would imply, while a session the same pass did classify still
+# reports `no`; (ac) an escalation whose bound expired is published as
+# `escalated=1`, the only value the patrols define, while the state file keeps
+# the three-state flag that suppresses the resend; (ad) state writes replace a
+# planted symlink or FIFO instead of following it — for every destination, and
+# without hanging on the FIFO — and a planted link is not read back as an
+# episode; (ae) a malformed pattern override falls back to its default instead of
+# reporting the whole city as clean; (af) an option-shaped session id (`-n`,
+# `--help`) is refused rather than passed to a `gc` subcommand as a flag;
+# (ag) excluding an alias mid-episode clears the state that episode left behind;
+# (ah) a session list that FAILED does not refresh the heartbeat, so a wedged
+# order stops vouching for anything; (ai) every value the surface emits is one
+# the two patrol formulas and the doc actually define.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -171,7 +185,12 @@ cp "$TMP/panes/lx-claude" "$TMP/panes/lx-attached"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "session list") cat "$FAKE_SESSIONS" ;;
+  # A session list that FAILS, as opposed to one that comes back empty. The
+  # script may not treat the two alike: an empty list is a complete pass over
+  # nothing, a failed one is no pass at all.
+  "session list")
+    [ "${FAKE_FAIL_LIST:-0}" = "1" ] && exit 3
+    cat "$FAKE_SESSIONS" ;;
   # `exec` so the sleep REPLACES this process: timeout signals its direct child,
   # and an orphaned sleep would hold the caller's command-substitution pipe open
   # long past the bound, hiding the very thing this fixture tests.
@@ -892,6 +911,349 @@ then
 else
     bad "order wiring: orders/quota-park-nudge.toml parses as TOML ($(tail -1 "$TMP/order.err"))"
 fi
+
+# --- Run 21: a session the pass never reached must not be reported as clean. -
+# The budget defers the tail of a pass WITHOUT peeking it, and the pass still
+# finishes and writes a fresh heartbeat. Answered off the heartbeat alone, every
+# deferred session reads as "swept recently, no episode" — `quota_park=no`, a
+# verdict about a pane nobody looked at, handed to a patrol as grounds to warrant
+# a session this order never inspected. That is the failure this order exists to
+# prevent, arriving through the surface built to prevent it.
+#
+# `no` therefore requires a per-session sighting, not merely a recent pass. The
+# same record covers the other way a session goes uninspected on a completed
+# pass: a peek that hung or errored.
+if ! command -v timeout >/dev/null 2>&1; then
+    echo "skip - deferred-coverage tests (no coreutils timeout on this host)"
+else
+cat > "$TMP/sessions-deferred.json" <<'JSON'
+{"sessions":[
+ {"id":"lx-clean","alias":"gc-toolkit/gc-toolkit.refinery","state":"active","running":true,"attached":false},
+ {"id":"lx-hang1","alias":"gc-toolkit.hang1","state":"active","running":true,"attached":false},
+ {"id":"lx-hang2","alias":"gc-toolkit.hang2","state":"active","running":true,"attached":false},
+ {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false}
+]}
+JSON
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+# lx-clean is swept first and is fast; the two 1s hangs then burn the whole
+# budget; so lx-codex — parked, and the one session here that needs recovering —
+# is deferred. Two hangs against a 2s budget rather than one against 1s: the
+# budget is measured from a whole-second stamp taken before the session list, so
+# a single-second budget can elapse before the FIRST session is reached and defer
+# the entire pass, including the clean session this asserts on.
+FAKE_SESSIONS="$TMP/sessions-deferred.json" FAKE_HANG_GLOB='lx-hang*' \
+    QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=2 \
+    timeout 30 bash "$SCRIPT" > "$TMP/out21" || true
+grep -q "deferred (sweep budget" "$TMP/out21" \
+    && ok "the pass really did defer part of the list" \
+    || bad "the pass really did defer part of the list ($(tail -1 "$TMP/out21"))"
+
+bash "$SCRIPT" --status lx-codex > "$TMP/status21-deferred"
+grep -q '^heartbeat_fresh=1$' "$TMP/status21-deferred" \
+    && ok "a partial pass still writes a heartbeat (so the fix cannot be the stale-heartbeat path)" \
+    || bad "a partial pass still writes a heartbeat"
+grep -q '^session=lx-codex quota_park=unknown .*reason=not-swept$' "$TMP/status21-deferred" \
+    && ok "a budget-deferred session reports unknown/not-swept, not no" \
+    || bad "a budget-deferred session reports unknown/not-swept ($(tail -1 "$TMP/status21-deferred"))"
+
+# The other half of the same rule: a session the pass DID classify still answers
+# `no`. Without this the fix is just "always unknown", which suppresses nothing
+# and tells a patrol that recovery is down on every partial pass.
+bash "$SCRIPT" --status lx-clean > "$TMP/status21-clean"
+grep -q '^session=lx-clean quota_park=no ' "$TMP/status21-clean" \
+    && ok "a session the same pass did classify still reports no" \
+    || bad "a session the same pass did classify still reports no ($(tail -1 "$TMP/status21-clean"))"
+
+# An unreadable pane is the same kind of gap: the pass reached the session and
+# still learned nothing about it.
+bash "$SCRIPT" --status lx-hang1 > "$TMP/status21-hang"
+grep -q '^session=lx-hang1 quota_park=unknown .*reason=not-swept$' "$TMP/status21-hang" \
+    && ok "a session whose peek hung reports unknown/not-swept, not no" \
+    || bad "a session whose peek hung reports unknown/not-swept ($(tail -1 "$TMP/status21-hang"))"
+fi
+
+# --- Run 22: the escalation flag is published in the consumers' vocabulary. --
+# The state file carries three states — `1`, `unconfirmed`, empty — because the
+# resend suppression needs the middle one (run 17). The patrols and the doc
+# define only `escalated=1`, and nothing anywhere defines `unconfirmed`, so
+# publishing it puts a park that outlasted ESCALATE_AFTER onto a path no consumer
+# has: the patrols never see the "stop deferring in silence" signal and defer
+# again, in silence, indefinitely. From the moment it records `unconfirmed` this
+# script BEHAVES as though the mail was delivered, so the surface says so too.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"; : > "$TMP/mail"
+printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=3\nunconfirmed=0\nescalated=unconfirmed\n' \
+    "$(( $(date +%s) - 9000 ))" "$(date +%s)" "$(date +%s)" > "$TMP/state/lx-codex"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+bash "$SCRIPT" --status lx-codex > "$TMP/status22"
+grep -q ' escalated=1 ' "$TMP/status22" \
+    && ok "an unconfirmed escalation is published as escalated=1" \
+    || bad "an unconfirmed escalation is published as escalated=1 ($(tail -1 "$TMP/status22"))"
+grep -q 'escalated=unconfirmed' "$TMP/status22" \
+    && bad "the status surface must not emit escalated=unconfirmed (no consumer defines it)" \
+    || ok "the status surface does not emit escalated=unconfirmed"
+eq "$(state_field lx-codex escalated unconfirmed)" "1" \
+    "the state file keeps the three-state flag (the resend suppression still works)"
+eq "$(grep -c '^mail ' "$TMP/mail" || true)" "0" \
+    "and the unconfirmed escalation is still not resent"
+
+# The whole surface, not just this line: `escalated` is a 0/1 field everywhere.
+bash "$SCRIPT" --status > "$TMP/status22all"
+if grep -oE 'escalated=[^ ]*' "$TMP/status22all" | grep -qvE '^escalated=[01]$'; then
+    bad "every escalated= field is 0 or 1"
+else
+    ok "every escalated= field is 0 or 1"
+fi
+
+# --- Run 23: state writes never follow what is already at the path. ---------
+# `>` writes THROUGH an existing symlink or FIFO. STATE_DIR is a shared runtime
+# directory whose location is an override, and every path under it is named by a
+# session id, so an entry planted beside our state would have this order writing
+# wherever it points — as the order's user, on every 3m sweep. A FIFO is worse
+# than a wrong destination: with no reader the open blocks, and the sweep hangs
+# where it is meant to be bounded.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+rm -f "$TMP/outside-state" "$TMP/outside-hb" "$TMP/outside-cursor" "$TMP/outside-cov"
+: > "$TMP/outside-state"
+ln -s "$TMP/outside-state"  "$TMP/state/lx-codex"
+ln -s "$TMP/outside-hb"     "$TMP/state/.heartbeat"
+ln -s "$TMP/outside-cursor" "$TMP/state/.sweep-cursor"
+ln -s "$TMP/outside-cov"    "$TMP/state/.sweep-coverage"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+[ -s "$TMP/outside-state" ] \
+    && bad "episode state must not be written through a planted symlink" \
+    || ok "episode state is not written through a planted symlink"
+for f in outside-hb outside-cursor outside-cov; do
+    [ -e "$TMP/$f" ] \
+        && bad "a planted symlink target must not be created ($f)" \
+        || ok "a planted symlink target is not created ($f)"
+done
+for f in lx-codex .heartbeat .sweep-cursor .sweep-coverage; do
+    if [ -f "$TMP/state/$f" ] && [ ! -L "$TMP/state/$f" ]; then
+        ok "the planted symlink was replaced by a regular file ($f)"
+    else
+        bad "the planted symlink was replaced by a regular file ($f)"
+    fi
+done
+
+# The read side of the same rule: a planted link must not be able to manufacture
+# an episode either — a `yes` for a session this order never saw would suppress a
+# warrant on somebody else's file contents.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+printf 'first_seen=1\nlast_seen=%s\nattempts=1\nescalated=1\ndetector_class=possessive-limit\n' \
+    "$(date +%s)" > "$TMP/planted-episode"
+ln -s "$TMP/planted-episode" "$TMP/state/lx-clean"
+bash "$SCRIPT" --status lx-clean > "$TMP/status23"
+grep -q 'quota_park=yes' "$TMP/status23" \
+    && bad "a symlinked state file must not be read back as a live episode" \
+    || ok "a symlinked state file is not read back as a live episode"
+
+# A FIFO, where following the path costs more than a wrong destination: the open
+# blocks, so a regression hangs the sweep instead of merely misplacing a write.
+# Bounded, so that failure shows up as a failed assertion and not as a dead suite.
+if ! command -v timeout >/dev/null 2>&1 || ! command -v mkfifo >/dev/null 2>&1; then
+    echo "skip - FIFO state test (no coreutils timeout / mkfifo on this host)"
+else
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+    : > "$TMP/nudges"
+    mkfifo "$TMP/state/lx-codex"
+    fifo_rc=0
+    FAKE_SESSIONS="$TMP/sessions-one.json" timeout 20 bash "$SCRIPT" > /dev/null || fifo_rc=$?
+    eq "$fifo_rc" "0" "a FIFO planted at a state path does not hang the sweep"
+    [ -p "$TMP/state/lx-codex" ] \
+        && bad "a planted FIFO is replaced, not written into" \
+        || ok "a planted FIFO is replaced, not written into"
+    eq "$(nudges_for lx-codex)" "1" "and the session behind it is still recovered"
+fi
+
+# --- Run 24: a malformed pattern override falls back, it does not disable. ---
+# grep answers a bad ERE with rc 2, and every test in the sweep reads a non-zero
+# rc as "did not match". So QUOTA_PARK_MATCH='(' does not fail loudly — it
+# reports every pane in the city as clean, deletes the episode state of every
+# session actually parked, and leaves `--status` answering `no` for all of them.
+# One malformed character in a tuning knob, and recovery is off city-wide while
+# the summary line reports a healthy sweep.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_MATCH='(' bash "$SCRIPT" > "$TMP/out24"
+eq "$(nudges_for lx-codex)" "1" \
+    "a malformed QUOTA_PARK_MATCH falls back to the default detector (the park is still found)"
+grep -q "1 parked" "$TMP/out24" \
+    && ok "a malformed detector override does not report the city as clean" \
+    || bad "a malformed detector override does not report the city as clean ($(tail -1 "$TMP/out24"))"
+grep -q "QUOTA_PARK_MATCH is not a valid ERE" "$TMP/out24" \
+    && ok "the fallback is announced in the log" || bad "the fallback is announced in the log"
+bash "$SCRIPT" --status lx-codex > "$TMP/status24"
+grep -q '^session=lx-codex quota_park=yes ' "$TMP/status24" \
+    && ok "and the status surface still reports the park (not a clean 'no')" \
+    || bad "the status surface still reports the park ($(tail -1 "$TMP/status24"))"
+grep -q 'detector_class=custom-match' "$TMP/status24" \
+    && bad "a rejected override must not still be labelled custom-match" \
+    || ok "a rejected override is not labelled custom-match"
+
+# The busy pattern fails in the opposite direction: matching nothing, every busy
+# pane reads as idle and gets nudged mid-turn. This pane carries a bare banner
+# AND a busy marker, so only the busy test can hold the nudge back.
+cat > "$TMP/panes/lx-busybare" <<'PANE'
+  ⎿  You’ve hit your session limit · resets 10:10am (UTC)
+• Working (13s • esc to interrupt) · 1 background terminal running
+PANE
+cat > "$TMP/sessions-busybare.json" <<'JSON'
+{"sessions":[
+ {"id":"lx-busybare","alias":"gc-toolkit.busybare","state":"active","running":true,"attached":false}
+]}
+JSON
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-busybare.json" QUOTA_PARK_BUSY='(' bash "$SCRIPT" > "$TMP/out24b"
+eq "$(nudges_for lx-busybare)" "0" \
+    "a malformed QUOTA_PARK_BUSY falls back (a working agent is not nudged mid-turn)"
+grep -q "QUOTA_PARK_BUSY is not a valid ERE" "$TMP/out24b" \
+    && ok "the busy-pattern fallback is announced in the log" \
+    || bad "the busy-pattern fallback is announced in the log"
+
+# And the exclusion, whose failure is quiet in the other direction: it already
+# fails open, so what changes is that the operator is told their escape hatch is
+# not in force rather than left to discover it from the nudges.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_EXCLUDE='(' bash "$SCRIPT" > "$TMP/out24c"
+eq "$(nudges_for lx-codex)" "1" \
+    "a malformed QUOTA_PARK_EXCLUDE does not disable recovery (it excludes nothing)"
+grep -q "QUOTA_PARK_EXCLUDE is not a valid ERE" "$TMP/out24c" \
+    && ok "an unusable exclusion is announced rather than silently ignored" \
+    || bad "an unusable exclusion is announced rather than silently ignored"
+
+# --- Run 25: an option-shaped session id is not a session id. ---------------
+# Quoting does not help here: a shell-quoted argument is still parsed as an
+# OPTION by the command that receives it, so an id like `-n` or `--help` reaches
+# `gc session peek` / `gc session nudge` as a flag. What that runs is the
+# receiving CLI's business; not handing it over is ours.
+cat > "$TMP/sessions-optid.json" <<'JSON'
+{"sessions":[
+ {"id":"-n","alias":"gc-toolkit.dashn","state":"active","running":true,"attached":false},
+ {"id":"--help","alias":"gc-toolkit.dashhelp","state":"active","running":true,"attached":false},
+ {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false}
+]}
+JSON
+# Give them panes that WOULD be detected as parked, so only the id check can stop
+# them from being peeked and nudged.
+cp "$TMP/panes/lx-codex" "$TMP/panes/-n"
+cp "$TMP/panes/lx-codex" "$TMP/panes/--help"
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-optid.json" bash "$SCRIPT" > "$TMP/out25"
+eq "$(nudges_for '-n')"     "0" "an option-shaped session id (-n) is never nudged"
+eq "$(nudges_for '--help')" "0" "an option-shaped session id (--help) is never nudged"
+if [ -e "$TMP/state/-n" ] || [ -e "$TMP/state/--help" ]; then
+    bad "an option-shaped session id writes no state"
+else
+    ok "an option-shaped session id writes no state"
+fi
+eq "$(nudges_for lx-codex)" "1" "a rejected id does not strand the rest of the sweep"
+grep -q "2 rejected (unsafe session id)" "$TMP/out25" \
+    && ok "the summary counts the rejected option-shaped ids" \
+    || bad "the summary counts the rejected option-shaped ids ($(tail -1 "$TMP/out25"))"
+bash "$SCRIPT" --status -n > "$TMP/status25"
+grep -q '^session=- quota_park=unknown .*reason=unsafe-session-id' "$TMP/status25" \
+    && ok "--status refuses an option-shaped id too" \
+    || bad "--status refuses an option-shaped id ($(tail -1 "$TMP/status25"))"
+
+# --- Run 26: excluding an alias mid-episode clears the state it left behind. -
+# QUOTA_PARK_EXCLUDE can be set while a park is already tracked. The episode file
+# left in place then keeps answering for a session this order has stopped acting
+# on — `yes` while the sighting is fresh, so a patrol defers its warrant to a
+# recovery that is switched off for exactly that session.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+[ -f "$TMP/state/lx-codex" ] \
+    && ok "precondition: the episode exists before the exclusion" \
+    || bad "precondition: the episode exists before the exclusion"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_EXCLUDE='ripley' bash "$SCRIPT" > "$TMP/out26"
+[ -f "$TMP/state/lx-codex" ] \
+    && bad "excluding an alias clears the episode it had already opened" \
+    || ok "excluding an alias clears the episode it had already opened"
+bash "$SCRIPT" --status lx-codex > "$TMP/status26"
+grep -q '^session=lx-codex quota_park=no ' "$TMP/status26" \
+    && ok "a newly excluded session reports no, as the exclusion contract says" \
+    || bad "a newly excluded session reports no ($(tail -1 "$TMP/status26"))"
+
+# --- Run 27: a FAILED session list must not refresh the heartbeat. ----------
+# The heartbeat is what lets `--status` answer at all, so it has to mean "a pass
+# actually completed". If a list that failed still stamped it, an order wedged at
+# its very first call would keep vouching for the whole city on a clock that
+# stopped — which is the one thing `unknown` exists to prevent.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+STALE_HB=$(( $(date +%s) - 5000 ))
+sedi "s/^last_run=.*/last_run=$STALE_HB/" "$TMP/state/.heartbeat"
+FAKE_FAIL_LIST=1 FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > "$TMP/out27" || true
+eq "$(grep -c "^last_run=$STALE_HB\$" "$TMP/state/.heartbeat" || true)" "1" \
+    "a failed session list leaves the previous heartbeat to go stale"
+bash "$SCRIPT" --status lx-codex > "$TMP/status27"
+grep -q '^heartbeat_fresh=0$' "$TMP/status27" \
+    && ok "and the surface reports the heartbeat as stale" \
+    || bad "and the surface reports the heartbeat as stale"
+grep -q '^session=lx-codex quota_park=unknown .*reason=no-recent-sweep$' "$TMP/status27" \
+    && ok "an order that could not list sessions vouches for nothing" \
+    || bad "an order that could not list sessions vouches for nothing ($(tail -1 "$TMP/status27"))"
+
+# --- Run 28: the surface and its consumers speak the same language. ---------
+# Every field here is read by a patrol formula that this pack ships, and the
+# whole point of a closed-field surface is defeated if it emits a value no
+# consumer defines. The two are edited in different files by different agents, so
+# the agreement is asserted rather than assumed.
+DEACON="$ORDER_ROOT/formulas/mol-deacon-patrol.toml"
+WITNESS="$ORDER_ROOT/formulas/mol-witness-patrol.toml"
+DOC="$ORDER_ROOT/docs/quota-park-recovery.md"
+for consumer in "$DEACON" "$WITNESS"; do
+    name="$(basename "$consumer")"
+    grep -q -- '--status' "$consumer" \
+        && ok "consumer contract: $name asks the order for a verdict" \
+        || bad "consumer contract: $name asks the order for a verdict"
+    for verdict in yes no unknown; do
+        grep -qF "quota_park=$verdict" "$consumer" \
+            && ok "consumer contract: $name handles quota_park=$verdict" \
+            || bad "consumer contract: $name handles quota_park=$verdict"
+    done
+    grep -qF 'escalated=1' "$consumer" \
+        && ok "consumer contract: $name handles escalated=1" \
+        || bad "consumer contract: $name handles escalated=1"
+    grep -qF 'escalated=unconfirmed' "$consumer" \
+        && bad "consumer contract: $name must not be written against an unpublished value" \
+        || ok "consumer contract: $name is not written against escalated=unconfirmed"
+    # The two `unknown` shapes a patrol must tell apart: an order that is not
+    # running (recovery is down — say so) versus one that simply has not reached
+    # this session yet (ordinary partial coverage — do not raise the alarm).
+    for r in no-recent-sweep not-swept; do
+        grep -qF "reason=$r" "$consumer" \
+            && ok "consumer contract: $name distinguishes reason=$r" \
+            || bad "consumer contract: $name distinguishes reason=$r"
+    done
+done
+for r in no-recent-sweep not-swept stale-episode unsafe-session-id; do
+    grep -qF "$r" "$DOC" \
+        && ok "consumer contract: the doc documents reason=$r" \
+        || bad "consumer contract: the doc documents reason=$r"
+done
+# Every tuning knob the script reads is in the doc's table. Two are documented
+# under a shared row (`QUOTA_PARK_BACKOFF_BASE` / `_CAP`), so a bare suffix
+# counts — loose enough to accept that row, tight enough that a knob added
+# without a doc line fails here.
+while read -r var; do
+    [ -n "$var" ] || continue
+    if grep -qF "$var" "$DOC" || grep -qF "_${var##*_}" "$DOC"; then
+        ok "consumer contract: the doc documents $var"
+    else
+        bad "consumer contract: the doc documents $var"
+    fi
+done < <(grep -oE '\bQUOTA_PARK_[A-Z_]+' "$SCRIPT" | sort -u)
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
