@@ -84,6 +84,7 @@ the item stays stuck.
 straight to `gc mail send`:**
 
 ```bash
+# >>> escalation-wiring-discipline
 SCRIPTS_DIR=""
 for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
   if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
@@ -95,6 +96,7 @@ if [ -n "$SCRIPTS_DIR" ]; then
 else
   gc mail send mayor/ -s "<subject>" -m "$BODY"
 fi
+# <<< escalation-wiring-discipline
 ```
 
 It mails the first time, then stays quiet until `--state` changes or the
@@ -134,6 +136,14 @@ rig-global); those stay un-gated for now.
 Regression test: `assets/scripts/escalation-gate.test.sh` (hermetic; stubs
 `gc`, covers the five-subject drift case, state-change and cooldown
 re-opening, stamp-before-mail, and the refuse-to-send-when-unbounded rule).
+
+The WIRING above is covered too, by
+`assets/scripts/witness-escalation-wiring.test.sh`: it runs the block
+between the `escalation-wiring-*` markers verbatim against stubs, so
+dropping `--anchor`/`--state`, hoisting the `SCRIPTS_DIR` resolution out
+of the sending shell, or swapping the gated call back to a bare
+`gc mail send` fails a test rather than quietly reopening the storm.
+Keep the markers when editing these blocks.
 
 Read a step's description immediately before acting on that step — not
 all of them at once. Config values override defaults."""
@@ -654,6 +664,7 @@ GONE by the time you run this. An empty `$SCRIPTS_DIR` would expand to
 is worse than the storm.
 
 ```bash
+# >>> escalation-wiring-refinery
 SCRIPTS_DIR=""
 for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
   if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
@@ -672,6 +683,7 @@ if [ -n "$SCRIPTS_DIR" ]; then
 else
   gc mail send mayor/ -s "QUEUE_HEALTH: <summary>" -m "$BODY"
 fi
+# <<< escalation-wiring-refinery
 ```
 
 `headRefOid/reviewDecision/mergeStateStatus` is the right fingerprint for

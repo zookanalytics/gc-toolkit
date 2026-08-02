@@ -34,6 +34,13 @@
 #              read — a lost parse would look like a lost stamp and mail EVERY
 #              cycle, which is the original bug
 #   (USAGE)    missing required arguments -> exit 2, nothing sent
+#   (ARGEND)   THE HANG: a value-taking option LAST in argv used to leave argv
+#              untouched (`shift 2` fails without `set -e`) and spin the parse
+#              loop forever. Every such option must exit 2 instead — a patrol
+#              pass that hangs is worse than the storm this script replaces
+#   (ARGFLAG)  `--body --dry-run` must not store the flag as the body
+#   (ARGSHAPE) structural: every value-taking arm calls require_value, so a
+#              future option cannot reintroduce the hang uncovered
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -277,6 +284,71 @@ reset
 "$SCRIPT" --anchor a --subject s >/dev/null 2>&1; eq "$?" "2" "USAGE: --body is required"
 "$SCRIPT" --anchor a --subject s --body b --cooldown soon >/dev/null 2>&1; eq "$?" "2" "USAGE: --cooldown must be numeric"
 eq "$(mails)" "0" "USAGE: nothing is ever sent on a usage error"
+
+# --- ARGEND (the hang) --------------------------------------------------------
+# A value-taking option at the END of argv had no $2, so `shift 2` failed and —
+# with no `set -e` — left argv unchanged and spun `while [ $# -gt 0 ]` forever.
+# Run every case under a hard time bound: a hanging test is a worse failure than
+# a failing one, and timeout's 124 must be reported as its own thing rather than
+# folded into the exit-2 expectation.
+TIMEOUT_BIN="$(command -v timeout 2>/dev/null || true)"
+[ -n "$TIMEOUT_BIN" ] || echo "warn - 'timeout' not found; ARGEND cases run unbounded" >&2
+bounded() { # -> exit code, or 124 if it hung
+  if [ -n "$TIMEOUT_BIN" ]; then "$TIMEOUT_BIN" 5 "$SCRIPT" "$@" >/dev/null 2>&1
+  else "$SCRIPT" "$@" >/dev/null 2>&1; fi
+}
+
+reset
+for opt in --anchor --subject --body --state --kind --cooldown --to; do
+  # The option is last: valid arguments before it, nothing after.
+  bounded --anchor su-lou.10.8 --subject s --body b "$opt"; rc=$?
+  case "$rc" in
+    2)   ok "ARGEND: $opt with no value exits 2" ;;
+    124) bad "ARGEND: $opt with no value HUNG (timed out)" ;;
+    *)   bad "ARGEND: $opt with no value exits 2 (got '$rc')" ;;
+  esac
+done
+# ...and the option alone, so it is also the FIRST argument — the shape the
+# review reproduced (`timeout 2 escalation-gate.sh --anchor` exited 124).
+for opt in --anchor --subject --body --state --kind --cooldown --to; do
+  bounded "$opt"; rc=$?
+  case "$rc" in
+    2)   ok "ARGEND: bare $opt exits 2" ;;
+    124) bad "ARGEND: bare $opt HUNG (timed out)" ;;
+    *)   bad "ARGEND: bare $opt exits 2 (got '$rc')" ;;
+  esac
+done
+eq "$(mails)" "0" "ARGEND: nothing is ever sent"
+eq "$(updates)" "0" "ARGEND: nothing is ever stamped"
+
+# --- ARGFLAG ------------------------------------------------------------------
+# A missing value followed by another option was consumed as data: `--body
+# --dry-run` mailed a body of "--dry-run" and swallowed the flag.
+reset
+bounded --anchor su-lou.10.8 --subject s --body --dry-run; rc=$?
+eq "$rc" "2" "ARGFLAG: --body --dry-run is a usage error, not a body of '--dry-run'"
+bounded --anchor --subject s --body b; rc=$?
+eq "$rc" "2" "ARGFLAG: --anchor followed by another option is a usage error"
+eq "$(mails)" "0" "ARGFLAG: nothing is sent"
+eq "$(updates)" "0" "ARGFLAG: nothing is stamped"
+# A value that merely STARTS with a dash is legitimate prose and must still work,
+# or the guard becomes the silent mute it exists to prevent.
+reset
+bounded --anchor su-lou.10.8 --subject "-- urgent: PR #35 stranded" --body "-> see thread" --state abc123
+eq "$?" "0" "ARGFLAG: a dash-leading subject/body is still a valid value"
+eq "$(mails)" "1" "ARGFLAG: and is still delivered"
+
+# --- ARGSHAPE -----------------------------------------------------------------
+# Runtime cases can only cover options that exist today. The hang comes back the
+# moment someone adds `--foo) FOO="$2"; shift 2 ;;`, so assert the shape itself:
+# every `shift 2` in the parser is on a line that first calls require_value.
+# Comment lines discuss `shift 2` at length (that is where the bug is explained),
+# so drop them first — `<line>:<optional indent>#` — and check only real code.
+UNGUARDED=$(grep -n 'shift 2' "$SCRIPT" | grep -v '^[0-9]*:[[:space:]]*#' | grep -vc 'require_value' 2>/dev/null)
+eq "${UNGUARDED:-0}" "0" "ARGSHAPE: every 'shift 2' arm calls require_value on the same line"
+GUARDED=$(grep -c 'require_value "\$@"' "$SCRIPT" 2>/dev/null)
+[ "${GUARDED:-0}" -ge 7 ] && ok "ARGSHAPE: all seven value-taking options are guarded" \
+  || bad "ARGSHAPE: expected >=7 guarded options, found '${GUARDED:-0}'"
 
 echo
 echo "escalation-gate.test: $PASS passed, $FAIL failed"

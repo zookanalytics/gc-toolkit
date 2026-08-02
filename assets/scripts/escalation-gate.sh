@@ -117,6 +117,42 @@ exit: 0 mailed or suppressed (both correct) · 1 not gated, nothing sent · 2 us
 USAGE
 }
 
+# WHY VALUE-TAKING OPTIONS ARE VALIDATED BEFORE THE SHIFT. The obvious arm,
+# `OPT="${2:-}"; shift 2`, fails in two ways:
+#
+#   HANGS ON A MISSING VALUE. With the option last in argv there is no $2, so
+#   `shift 2` FAILS and leaves argv untouched — and the `while [ $# -gt 0 ]` loop
+#   below then spins forever. `set -e` would have aborted; this script
+#   deliberately runs without it (see the header) so nothing stops it. A patrol
+#   pass that hangs is strictly worse than the mail storm this script replaces.
+#
+#   EATS THE NEXT OPTION. `--body --dry-run` silently stores "--dry-run" as the
+#   body and swallows the flag, so the run mails a nonsense body instead of
+#   reporting a usage error.
+#
+# Only an EXACT match against one of our own options is rejected. A value that
+# merely begins with '-' is legitimate — a subject or body may open with a dash —
+# and rejecting those would fail closed on a real escalation, the silent mute
+# this script must never become.
+#
+# This is a function, not a subshell, so `exit 2` exits the script: a usage error
+# stamps nothing and sends nothing.
+require_value() {
+  # Called as `require_value "$@"` from inside the arm, so $1 is the option and
+  # $2 its candidate value (absent when the option ends argv).
+  if [ "$#" -lt 2 ]; then
+    echo "escalation-gate: $1 requires a value" >&2
+    usage
+    exit 2
+  fi
+  case "$2" in
+    --anchor|--subject|--body|--state|--kind|--cooldown|--to|--force|--dry-run|-h|--help)
+      echo "escalation-gate: $1 requires a value, but the next argument is the option '$2'" >&2
+      usage
+      exit 2 ;;
+  esac
+}
+
 # Keep this in step with `[vars.escalation_cooldown] default` in
 # mol-witness-patrol.toml. The script's own default is the real floor: the
 # formula may omit --cooldown entirely, so this is what actually governs.
@@ -125,15 +161,19 @@ DEFAULT_COOLDOWN=86400
 ANCHOR=""; SUBJECT=""; BODY=""; STATE=""; KIND="witness"
 COOLDOWN="$DEFAULT_COOLDOWN"; TO="mayor/"; FORCE=0; DRY_RUN=0
 
+# Every value-taking arm calls `require_value "$@"` FIRST, on the same line, so
+# the `shift 2` that follows can never fail (see require_value above). Keep that
+# shape when adding an option — `escalation-gate.test.sh` asserts it structurally,
+# because no runtime test can cover an option that does not exist yet.
 while [ $# -gt 0 ]; do
   case "$1" in
-    --anchor)   ANCHOR="${2:-}"; shift 2 ;;
-    --subject)  SUBJECT="${2:-}"; shift 2 ;;
-    --body)     BODY="${2:-}"; shift 2 ;;
-    --state)    STATE="${2:-}"; shift 2 ;;
-    --kind)     KIND="${2:-}"; shift 2 ;;
-    --cooldown) COOLDOWN="${2:-}"; shift 2 ;;
-    --to)       TO="${2:-}"; shift 2 ;;
+    --anchor)   require_value "$@"; ANCHOR="$2";   shift 2 ;;
+    --subject)  require_value "$@"; SUBJECT="$2";  shift 2 ;;
+    --body)     require_value "$@"; BODY="$2";     shift 2 ;;
+    --state)    require_value "$@"; STATE="$2";    shift 2 ;;
+    --kind)     require_value "$@"; KIND="$2";     shift 2 ;;
+    --cooldown) require_value "$@"; COOLDOWN="$2"; shift 2 ;;
+    --to)       require_value "$@"; TO="$2";       shift 2 ;;
     --force)    FORCE=1; shift ;;
     --dry-run)  DRY_RUN=1; shift ;;
     -h|--help)  usage; exit 2 ;;
