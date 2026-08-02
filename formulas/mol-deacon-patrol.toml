@@ -46,7 +46,7 @@ between patrol cycles.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-deacon-patrol"
-version = 15
+version = 17
 
 [vars]
 [vars.binding_prefix]
@@ -276,18 +276,28 @@ description = """
 Run `gc dolt health --json` to inspect the Dolt data plane and flag anomalies.
 
 This step surfaces problems that individual patrol steps won't catch:
-commit bloat (compactor dog may have failed), stale backups (backup dog
-may have failed), orphan databases, and zombie Dolt server processes.
+commit bloat (compactor dog may have failed), unrestorable backups (backup
+dog may have failed), orphan databases, and zombie Dolt server processes.
 
 **Step 1: Run the health check**
+
+Keep the report — Step 2a needs its `databases[]` list, and re-probing
+costs another 5 s per database against a data plane this step exists to
+watch:
 ```bash
-gc dolt health --json
+HEALTH_JSON=$(gc dolt health --json)
+printf '%s' "$HEALTH_JSON" | jq .
 ```
 
 Parse the JSON output (HealthReport schema):
 - `server`: running, reachable, pid, port, latency_ms
 - `databases[]`: name, commits, open_beads
-- `backups`: dolt_freshness, dolt_age_seconds, dolt_stale
+- `backups`: dolt_freshness, dolt_age_seconds, dolt_stale — **never
+  sufficient on its own.** Absent backup data renders as
+  `"dolt_freshness": "", "dolt_age_sec": 0, "dolt_stale": false`, so a
+  TOTAL backup failure is indistinguishable from a fresh backup and
+  `dolt_stale` can only ever fire on a *partial* one. Verify backups by
+  manifest mtime on disk (Step 2a); treat these fields as advisory.
 - `processes`: zombie_count, zombie_pids
 - `orphans[]`: name, size
 
@@ -303,9 +313,166 @@ are wedged (the latter is what first prompted this check to exist).
 | `server.reachable == false` | — | Dolt server is down or unresponsive (CRITICAL) |
 | `server.latency_ms > 5000` | 5 s | Server may be overloaded |
 | `databases[].commits > 50000` | 50 k | Compactor dog may have stalled |
-| `backups.dolt_stale == true` | >30 min | Backup dog may have failed |
+| backup restorability — see **Step 2a** | every live database has a backup dir whose newest file is its manifest, <12 h old | Backup dog may have failed. Do NOT key this off `backups.dolt_stale` — it reads false-clean through a total outage |
 | `processes.zombie_count > 0` | any | Zombie Dolt servers detected |
 | `orphans` non-empty | any | Advisory only — NEVER act on this count directly; verify with `gc dolt-cleanup` (hyphen, dry-run) first |
+
+**Step 2a: Verify backups by manifest mtime (never by `dolt_stale`)**
+
+A backup is restorable only up to its committed **manifest**. Dolt writes
+chunk `.darc` files first and commits the `manifest` last, so a healthy
+database's newest file IS its manifest. If a `.darc` is newer, the run
+uploaded data but never committed it — nothing after the manifest
+timestamp is restorable, however new the chunks look. Directory mtime and
+directory size both lie here: they move with the chunk writes.
+
+**Drive the scan from the live database list, not from the backup dirs.**
+A database whose backup directory is *missing entirely* is the worst case
+and is invisible to a walk of `$BACKUP_ROOT/*/` — that walk can only judge
+backups that already exist, so it would emit no verdict for the one
+database with no backup at all and still let you conclude "clean". The
+expected set is `databases[].name` from the Step 1 report; a backup dir
+with no matching live database is advisory only (a dropped or renamed db).
+
+The markers below let the regression test extract and exercise this exact
+snippet (assets/scripts/dolt-backup-manifest-check.test.sh), so the shipped
+rule cannot drift from the tested one.
+
+```bash
+# >>> backup-manifest-check
+BACKUP_ROOT="${GC_CITY_PATH:-$GC_CITY}/.dolt-backup"
+# Expected databases come from the Step 1 health report: reuse $HEALTH_JSON
+# if you still have it, otherwise probe again. Lazy by design — set
+# EXPECTED_DBS to run this snippet against a fixture (the test does) and
+# neither the probe nor jq is invoked.
+: "${EXPECTED_DBS:=$(printf '%s' "${HEALTH_JSON:-$(gc dolt health --json)}" | jq -r '.databases[].name')}"
+# In-flight grace: mid-sync the newest file IS a chunk, because the manifest
+# is committed last. Only call that a failure once the writes have stopped
+# advancing for GRACE_SEC — or once the manifest is already stale, which no
+# healthy in-flight run can explain.
+GRACE_SEC="${GRACE_SEC:-900}"
+STALE_H="${STALE_H:-12}"
+NOW=$(date +%s)
+# Portable mtime: GNU (-c), BSD/macOS (-f), 0 when the file is absent.
+mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+# One-line form of the list, so a root-level finding can name every affected
+# database on a single line. The unquoted expansion is the point: it collapses
+# the newline-separated list.
+# shellcheck disable=SC2086,SC2116
+DB_NAMES="$(echo $EXPECTED_DBS)"
+
+if [ -z "$EXPECTED_DBS" ]; then
+    echo "FLAG-ROOT: health report listed no databases - cannot verify any backup"
+elif [ ! -d "$BACKUP_ROOT" ]; then
+    echo "FLAG-ROOT: no backup root at $BACKUP_ROOT - NO restorable backup for: $DB_NAMES"
+elif [ -z "$(ls -A "$BACKUP_ROOT" 2>/dev/null)" ]; then
+    echo "FLAG-ROOT: backup root $BACKUP_ROOT is empty - NO restorable backup for: $DB_NAMES"
+else
+    for name in $EXPECTED_DBS; do
+        db="$BACKUP_ROOT/$name"
+        if [ ! -d "$db" ]; then
+            echo "FLAG $name: no backup directory at $db - never backed up"
+            continue
+        fi
+        m_t=$(mtime_of "$db/manifest")
+        newest=""; newest_t=0
+        while IFS= read -r f; do
+            t=$(mtime_of "$f")
+            if [ "$t" -gt "$newest_t" ]; then newest_t="$t"; newest="${f##*/}"; fi
+        done < <(find "$db" -type f 2>/dev/null)
+        since=$(( NOW - newest_t ))
+        age_h=$(( (NOW - m_t) / 3600 ))
+        if [ "$m_t" -eq 0 ]; then
+            if [ "$newest_t" -gt 0 ] && [ "$since" -le "$GRACE_SEC" ]; then
+                echo "RECHECK $name: no manifest yet, '$newest' written ${since}s ago - first commit may be in flight"
+            else
+                echo "FLAG $name: no manifest - nothing restorable"
+            fi
+        elif [ "$newest" != "manifest" ]; then
+            if [ "$since" -le "$GRACE_SEC" ] && [ "$age_h" -le "$STALE_H" ]; then
+                echo "RECHECK $name: newest file is '$newest' written ${since}s ago, manifest ${age_h}h old - sync may be in flight"
+            else
+                echo "FLAG $name: newest file is '$newest', not the manifest - uploaded but never committed; not restorable past ${age_h}h ago"
+            fi
+        elif [ "$age_h" -gt "$STALE_H" ]; then
+            echo "FLAG $name: manifest is ${age_h}h old (>${STALE_H}h = 2x backup cadence)"
+        else
+            echo "OK $name: manifest is newest, ${age_h}h old"
+        fi
+    done
+    for d in "$BACKUP_ROOT"/*/; do
+        [ -d "$d" ] || continue
+        extra="${d%/}"; extra="${extra##*/}"
+        case " $DB_NAMES " in
+            *" $extra "*) ;;
+            *) echo "INFO $extra: backup dir with no live database (advisory)" ;;
+        esac
+    done
+fi
+# <<< backup-manifest-check
+```
+
+Every expected database gets exactly one verdict:
+
+| Verdict | Meaning |
+|---------|---------|
+| `OK` | manifest is the newest file and within the staleness threshold |
+| `FLAG` | not restorable — act on it (Step 3) |
+| `RECHECK` | indeterminate, a sync may be in flight — **not** clean |
+| `FLAG-ROOT` | no root, empty root, or no database list: nothing is verified |
+| `INFO` | extra backup dir, no live database — advisory, never a verdict |
+
+Flag a database when ANY holds:
+- it has **no backup directory**, or
+- it has **no manifest** (and nothing is being written right now), or
+- the newest file in its backup dir is **not** the manifest, or
+- the manifest is older than **12 h** — 2x the 6 h cadence (backup runs at
+  21:00 / 03:00 / 09:00 / 15:00Z).
+
+**Missing and empty roots are findings, not warnings.** A missing or empty
+`$BACKUP_ROOT` means *no* database has a restorable backup — the most
+severe state this check can find. It names the affected databases so Step 3
+has something concrete to nudge and escalate with; never let it degrade
+into an unnamed warning.
+
+**The in-flight grace, and why it cannot hide a real failure.** During a
+normal sync the newest file is a `.darc` until the run commits, so a scan
+that fires the instant it sees a chunk newer than the manifest would flag
+every healthy run in progress. `RECHECK` covers that window, and it closes
+two ways so a broken sync cannot camp in it:
+- **Writes stop advancing.** A live sync keeps writing; a dead one freezes.
+  Once the newest file is older than `GRACE_SEC` (15 min), it is a FLAG.
+  Re-running Step 2a is the whole re-check — no state to carry.
+- **The manifest is already stale.** A run in flight cannot explain a
+  manifest older than 12 h. That combination is a sync that keeps writing
+  and never commits, so it flags immediately regardless of the grace
+  window. This is exactly the lx shape: fresh chunks every rotation, a
+  manifest 40 h behind.
+
+A `RECHECK` is not a pass. Re-run Step 2a before concluding the step, and
+treat a database that is still `RECHECK` after the grace window as `FLAG`.
+
+**Do not flag on sync duration.** A large database is slow but healthy as
+long as its manifest is newest and recent — lx is ~3 GB and needs ~95 s to
+sync. The failure this catches is "uploaded but never committed"
+(`.darc` newer than manifest), not "slow".
+
+**Step 2b: Read the backup dog's failure mail (live second channel)**
+
+The backup dog reports per-database sync failures by mail to the `human`
+mailbox, which no agent drains — during the outage that prompted this
+step, several such mails sat unread while the patrol logged OK. This step
+is that channel's reader:
+
+```bash
+gc mail inbox human | grep -E 'Dolt backup: [0-9]+/[0-9]+ databases failed to sync'
+```
+
+A hit names the failing databases in its body and should corroborate
+Step 2a; a hit with a clean Step 2a (or the reverse) means one of the two
+channels is lying — investigate rather than picking the happier one.
+**List only.** Do NOT `gc mail read` or `gc mail archive` these — that is
+the operator's inbox, and draining it here hides the outage from them.
 
 **Step 3: React to alerts**
 
@@ -325,12 +492,43 @@ nudge the dog pool:
 gc session nudge dog/ "Compactor needed: <db_name> has <count> commits"
 ```
 
-**Stale backups:**
-The backup dog (`mol-dog-backup`) may have failed. Same pattern — log and
-nudge if order hasn't self-healed:
+**Unrestorable backup (any Step 2a `FLAG`, or a Step 2b mail):**
+The backup dog (`mol-dog-backup`) may have failed. A manifest that is not
+the newest file is a FAILED backup, not a slow one — the database cannot
+be restored past the manifest timestamp. Same pattern — log and nudge if
+order hasn't self-healed:
 ```bash
-gc session nudge dog/ "Backup needed: dolt backup is <age> old"
+gc session nudge dog/ "Backup needed: <db> manifest <age> old / not newest"
 ```
+If the same database is still flagged on the next rotation, the dog's own
+retries are not clearing it. Escalate — unattended, this is silent data
+loss on a ledger nobody can restore:
+```bash
+gc mail send mayor/ -s "ESCALATION: <db> has no restorable backup [HIGH]" \\
+  -m "Manifest <age>h old; newest file <file>. Backup dog retries not clearing."
+```
+"Still flagged on the next rotation" is answered by your own escalation
+trail, not by memory: that mail is the durable record. Before escalating,
+check whether this database was already escalated:
+```bash
+gc mail inbox mayor/ | grep -F "no restorable backup"
+```
+A prior hit for the same database means the retries have had a full cycle
+and have not cleared it — escalate again and say so.
+
+**No backup root, or an empty one (`FLAG-ROOT`):** the most severe state
+this step can report — *no* database has a restorable backup, so the whole
+Step 2a verdict set is missing rather than clean. Escalate immediately with
+the database names the verdict lists; do not nudge the dog and move on:
+```bash
+gc mail send mayor/ -s "ESCALATION: no Dolt backups exist at all [CRITICAL]" \\
+  -m "Backup root <path> missing/empty. NO restorable backup for: <db names>."
+```
+
+**Indeterminate (`RECHECK`):** a sync may be in flight. Re-run the Step 2a
+snippet; a live sync advances its newest file, a dead one does not. If the
+database is still `RECHECK` after the grace window, treat it as a `FLAG`
+above. Never count a `RECHECK` toward "healthy".
 
 **Zombie processes:**
 Kill zombie Dolt servers not on the expected port:
@@ -360,9 +558,16 @@ Reclaim confirmed orphans only via human-approved
 `rm -rf` an open database and corrupt NBS, #1549).
 
 **If everything is healthy:**
-Log `Dolt health: OK` and move on.
+Log `Dolt health: OK` and move on. "Healthy" requires an explicit `OK`
+verdict from Step 2a for **every** database in `databases[]` — no `FLAG`,
+no `FLAG-ROOT`, and no outstanding `RECHECK`. A green `gc dolt health`
+alone does not earn it, and neither does "nothing was flagged": a database
+with no backup directory produces no verdict from a dir-walk at all, which
+is how a total outage reads clean. Count the verdicts against the expected
+list before you write OK.
 
-**Exit criteria:** Health check run, alerts handled or escalated."""
+**Exit criteria:** Health check run, every database in `databases[]`
+carrying a Step 2a verdict, alerts handled or escalated."""
 
 [[steps]]
 id = "system-health"
