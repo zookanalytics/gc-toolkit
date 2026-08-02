@@ -14,6 +14,12 @@
 #     fails, and NOTHING is sent — silent mute, worse than the storm
 #   - replacing the gated call with a bare `gc mail send` -> the original bug,
 #     verbatim
+#   - putting the anchor's own `updated_at` in the fingerprint -> the gate stamps
+#     that same anchor before mailing, so its own write makes the next cycle look
+#     changed and the item re-mails forever (SELFREOPEN below runs the wiring
+#     twice against a stub that advances updated_at on every write)
+#   - dropping `--cooldown` -> the configured escalation_cooldown is inert and
+#     only the script's built-in default is ever in force
 #
 # So this executes the wiring EXTRACTED VERBATIM from the formula (between the
 # `escalation-wiring-*` markers) against stubs, and asserts what reaches the
@@ -58,17 +64,57 @@ GATE
 
 # `gc bd show` returns the anchor; PR_NUMBER (exported per case) decides whether
 # it is PR-backed, which is what selects the STATE fingerprint branch.
+#
+# The stub is STATE-BACKED, and metadata writes ADVANCE `updated_at`. That is not
+# incidental realism: a real `gc bd update` touches the bead it writes, and the
+# gate stamps the anchor before mailing, so the anchor's modification time is
+# downstream of the gate itself. A stub with a frozen timestamp cannot see the
+# P1 self-reopen bug at all — the second cycle would look unchanged for the wrong
+# reason and the test would pass over the defect.
+#
+# `$STUB_LOG/meta` holds the anchor's mutable metadata as `<key>|<value>` lines;
+# a case may seed it before the run. `$STUB_LOG/writes` counts writes and is what
+# updated_at is derived from.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+S="$STUB_LOG"
+[ -f "$S/meta" ]   || : > "$S/meta"
+[ -f "$S/writes" ] || printf '0\n' > "$S/writes"
+
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then
-  jq -nc --arg id "$3" --arg pr "${PR_NUMBER:-}" '
-    [{ id: $id,
-       status: "open",
-       updated_at: "2026-07-27T04:00:00Z",
-       metadata: ({ merge_result: "pre_open_gate" }
-                  + (if $pr == "" then {} else { pr_number: $pr } end)) }]'
+  w=$(cat "$S/writes")
+  meta=$(jq -nc --arg pr "${PR_NUMBER:-}" '
+    { merge_result: "pre_open_gate", branch: "polecat/su-lou.10.8", target: "main" }
+    + (if $pr == "" then {} else { pr_number: $pr } end)')
+  while IFS='|' read -r k v; do
+    [ -n "$k" ] || continue
+    meta=$(printf '%s' "$meta" | jq -c --arg k "$k" --arg v "$v" '. + {($k): $v}')
+  done < "$S/meta"
+  jq -nc --arg id "$3" --arg ts "$(printf '2026-07-27T04:%02d:00Z' "$w")" --argjson meta "$meta" \
+    '[{ id: $id, status: "open", updated_at: $ts, metadata: $meta }]'
   exit 0
 fi
+
+if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
+  shift 3
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --set-metadata)
+        kv="$2"; k="${kv%%=*}"; v="${kv#*=}"
+        grep -v "^$k|" "$S/meta" > "$S/meta.new" 2>/dev/null || true; mv "$S/meta.new" "$S/meta"
+        printf '%s|%s\n' "$k" "$v" >> "$S/meta"
+        shift 2 ;;
+      --unset-metadata)
+        grep -v "^$2|" "$S/meta" > "$S/meta.new" 2>/dev/null || true; mv "$S/meta.new" "$S/meta"
+        shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  printf '%s\n' "$(( $(cat "$S/writes") + 1 ))" > "$S/writes"   # the self-touch
+  echo "update" >> "$S/calls"
+  exit 0
+fi
+
 if [ "${1:-}" = "mail" ] && [ "${2:-}" = "send" ]; then
   # Drop the "mail send" subcommand so element 0 is the recipient.
   for a in "${@:3}"; do printf '%s' "$a" | jq -Rs .; done | jq -s . > "$STUB_LOG/mail-args.json"
@@ -174,8 +220,83 @@ eq "$(count mail)" "0" "CITYPATH: sends no bare mail"
 reset
 make_gate "$TMP/rig/assets/scripts"
 PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
-eq "$(gate_arg --state)" "open/pre_open_gate/2026-07-27T04:00:00Z" \
-   "NOPR: --state falls back to status/merge_result/updated_at"
+eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/main/-" \
+   "NOPR: --state falls back to the bead's own hold inputs"
+case "$(gate_arg --state)" in
+  *2026-07-27T*) bad "NOPR: fingerprint must not contain updated_at (the gate's own write bumps it)" ;;
+  *)             ok  "NOPR: fingerprint contains no timestamp" ;;
+esac
+
+# --- CHECKMARK: the gate markers are part of the non-PR fingerprint -----------
+# For a pre-open anchor, `check.<gate>` flipping IS the news. Leaving it out
+# would hold a genuinely changed situation for a full cooldown.
+reset
+make_gate "$TMP/rig/assets/scripts"
+printf 'check.codex|green@oid9\n' > "$STUB_LOG/meta"
+PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/main/check.codex=green@oid9" \
+   "CHECKMARK: a check.<gate> marker is part of the fingerprint"
+
+# --- GHFAIL / GHEMPTY: a PR-backed anchor whose gh lookup yields nothing ------
+# `gh pr view` fails (rate limit, auth, deleted PR) or prints an empty
+# fingerprint. Passing that through as an EMPTY --state would read as "no state
+# tracked" and mute real news until the cooldown, so it must fall back to the
+# bead's own inputs.
+for ghcase in fail empty; do
+  reset
+  make_gate "$TMP/rig/assets/scripts"
+  if [ "$ghcase" = "fail" ]; then printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/bin/gh"
+  else printf '#!/usr/bin/env bash\necho ""\n' > "$TMP/bin/gh"; fi
+  chmod +x "$TMP/bin/gh"
+  PR_NUMBER=35 GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+  eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/main/-" \
+     "GH${ghcase}: an unusable PR fingerprint degrades to the bead's, never to empty"
+done
+printf '#!/usr/bin/env bash\necho "oid123/APPROVED/BLOCKED"\n' > "$TMP/bin/gh"   # restore
+chmod +x "$TMP/bin/gh"
+
+# --- COOLDOWN: the configured value must actually reach the gate --------------
+# `[vars.escalation_cooldown]` documents an override and the step renders it as
+# Config. If the invocation does not pass it, the variable is decoration and only
+# the script's built-in default is ever in force.
+reset
+make_gate "$TMP/rig/assets/scripts"
+PR_NUMBER=35 GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(gate_arg --cooldown)" '{{escalation_cooldown}}' "COOLDOWN: the refinery wiring passes --cooldown"
+reset
+make_gate "$TMP/rig/assets/scripts"
+GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-discipline.sh" >/dev/null 2>&1
+eq "$(gate_arg --cooldown)" '{{escalation_cooldown}}' "COOLDOWN: the discipline wiring passes --cooldown too"
+
+# A NON-DEFAULT rendered value, which is the case the variable exists for.
+sed 's/{{escalation_cooldown}}/300/g' "$TMP/escalation-wiring-refinery.sh" > "$TMP/refinery-rendered.sh"
+reset
+make_gate "$TMP/rig/assets/scripts"
+PR_NUMBER=35 GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/refinery-rendered.sh" >/dev/null 2>&1
+eq "$(gate_arg --cooldown)" "300" "COOLDOWN: a rendered non-default value reaches the gate unchanged"
+
+# --- SELFREOPEN: the gate's own stamp must not reopen the fingerprint ---------
+# THE P1 REGRESSION. This runs the REAL gate, not the recording stub, twice over
+# an unchanged non-PR anchor. The gate stamps `escalated.witness` on that anchor
+# before mailing, and the `gc` stub advances `updated_at` on every write — so any
+# fingerprint built from the anchor's modification time differs on cycle 2
+# BECAUSE THE GATE RAN, and the item re-mails every patrol forever.
+#
+# It also exercises the unrendered `--cooldown {{escalation_cooldown}}` the
+# --root-only pour actually ships: cycle 1 must still deliver.
+mkdir -p "$TMP/realrig/assets/scripts"
+cp "$HERE/escalation-gate.sh" "$TMP/realrig/assets/scripts/escalation-gate.sh"
+chmod +x "$TMP/realrig/assets/scripts/escalation-gate.sh"
+reset
+PR_NUMBER="" GC_RIG_ROOT="$TMP/realrig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(count mail)" "1" "SELFREOPEN: cycle 1 escalates (an unrendered --cooldown still delivers)"
+PR_NUMBER="" GC_RIG_ROOT="$TMP/realrig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(count mail)" "1" "SELFREOPEN: cycle 2 over an unchanged anchor is SUPPRESSED, not re-mailed"
+
+# ...and a genuine change still gets through on the very next cycle.
+printf 'check.codex|green@oid9\n' >> "$STUB_LOG/meta"
+PR_NUMBER="" GC_RIG_ROOT="$TMP/realrig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(count mail)" "2" "SELFREOPEN: a real state change still escalates immediately — dedup, not mute"
 
 # --- FALLBACK: an unsynced rig mails directly, it does not go silent ----------
 reset

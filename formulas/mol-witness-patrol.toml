@@ -92,7 +92,7 @@ done
 BODY="Observation: <what you found>
 Recommendation: <what should happen>"
 if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead-id>" --state "<what is HOLDING it>" --subject "<subject>" --body "$BODY"
+  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead-id>" --state "<what is HOLDING it>" --cooldown "{{escalation_cooldown}}" --subject "<subject>" --body "$BODY"
 else
   gc mail send mayor/ -s "<subject>" -m "$BODY"
 fi
@@ -124,6 +124,20 @@ Two things that are easy to get wrong:
   `mergeStateStatus` — whatever would make you say "this is genuinely
   different now". That fingerprint is what lets real news through
   immediately, so a lazy `--state` is what turns the gate into a mute.
+- **Never put a timestamp in `--state` — least of all the anchor's own
+  `updated_at`.** The gate stamps `escalated.<kind>` ON THE ANCHOR before
+  it mails, and that write bumps the anchor's `updated_at`. A fingerprint
+  containing it therefore differs on the very next cycle *because the gate
+  ran*, so an unchanged item re-mails forever: the storm, now with a
+  dedup step in front of it. Fingerprint only inputs the gate does not
+  itself write — `status`, `merge_result`, `branch`/`target`, the
+  `check.<gate>` markers, the PR's own fields.
+
+`--cooldown "{{escalation_cooldown}}"` is passed on every gated call, so
+the configured value is honored end to end. Leave it in place: on a
+`--root-only` pour it reaches the script unrendered, and the script
+recognizes that shape and falls back to its own 24h default rather than
+failing the send.
 
 `--force` is for a situation that truly worsened in a way the fingerprint
 does not capture. Using it every cycle is the storm again.
@@ -669,17 +683,22 @@ SCRIPTS_DIR=""
 for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
   if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
 done
-PR=$(gc bd show <bead> --json | jq -r '.[0].metadata.pr_number // empty')
-if [ -n "$PR" ]; then
-  STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
-else
-  STATE=$(gc bd show <bead> --json | jq -r '.[0] | [(.status // "-"), (.metadata.merge_result // "-"), (.updated_at // "-")] | join("/")')
-fi
+ROW=$(gc bd show <bead> --json)
+PR=$(printf '%s' "$ROW" | jq -r '.[0].metadata.pr_number // empty')
+STATE=""
+[ -n "$PR" ] && STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
+[ -z "$STATE" ] && STATE=$(printf '%s' "$ROW" | jq -r '.[0] | [
+  (.status // "-"),
+  (.metadata.merge_result // "-"),
+  (.metadata.branch // "-"),
+  (.metadata.target // "-"),
+  ((.metadata | to_entries | map(select(.key | startswith("check."))) | sort_by(.key) | map(.key + "=" + (.value | tostring)) | join(",")) as $c | if $c == "" then "-" else $c end)
+] | join("/")')
 BODY="Work bead IDs: <ids>
 Observation: <what you found>
 Recommendation: <what should happen>"
 if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"
+  "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"
 else
   gc mail send mayor/ -s "QUEUE_HEALTH: <summary>" -m "$BODY"
 fi
@@ -688,10 +707,27 @@ fi
 
 `headRefOid/reviewDecision/mergeStateStatus` is the right fingerprint for
 a PR-backed anchor: a new commit, an approval, or a mergeability change
-are exactly the events worth re-mailing about, and nothing else is. For a
-bead with no PR, its own status/merge_result/updated_at serve the same
-purpose. Omit `--cooldown` unless the Config value above shows a number
-different from the script's own default.
+are exactly the events worth re-mailing about, and nothing else is.
+
+For an anchor with no PR — a pre-open gate is the common one — the bead's
+own `status`, `merge_result`, `branch`/`target` and `check.<gate>`
+markers serve the same purpose. The bead fingerprint is also the fallback
+when `gh pr view` fails or returns nothing, so a GitHub hiccup degrades
+to a coarser fingerprint rather than to an EMPTY one, which would read as
+"no state tracked" and mute real news until the cooldown.
+
+**`updated_at` is deliberately NOT in that fingerprint.** The gate stamps
+`escalated.<kind>` on this same anchor before mailing, so including
+`updated_at` makes every next cycle look changed *because the gate itself
+wrote* — the item re-mails forever and the dedup buys nothing. Only
+inputs the gate does not write belong in `--state`
+(`witness-escalation-wiring.test.sh` runs the block twice against a stub
+that advances `updated_at` on every write, and fails if the second cycle
+mails).
+
+`--cooldown "{{escalation_cooldown}}"` is already on the call, so the
+Config value above is honored without further action; an unrendered var
+degrades to the script's own default rather than failing the send.
 
 One escalation per anchor — do not also send a queue-wide summary that
 names the same anchors, which is the same mail wearing a different hat.
