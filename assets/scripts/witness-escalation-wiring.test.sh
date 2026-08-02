@@ -26,6 +26,12 @@
 #   - calling the gate bare instead of `if ! ...; then echo` -> a gate that
 #     refuses (it could not BOUND the escalation) takes the best-effort patrol
 #     block down with it (GATEFAIL below)
+#   - performing a one-shot recovery's irreversible transition after a gate
+#     refusal -> the transition CLEARS the condition that would have re-derived
+#     the escalation, so "next cycle retries" becomes impossible and the notice is
+#     lost silently. ORPHAN_CLOSED must withhold its `gc bd close`; the two whose
+#     transition cannot be withheld must say BEST-EFFORT instead of promising a
+#     retry (ONESHOT below)
 #   - adding a bead-scoped `gc mail send` anywhere else in the formula -> that new
 #     one storms, and the gated ones look like the exception (ALLOWLIST below)
 #
@@ -145,7 +151,9 @@ if [ "${1:-}" = "mail" ] && [ "${2:-}" = "send" ]; then
   # Drop the "mail send" subcommand so element 0 is the recipient.
   for a in "${@:3}"; do printf '%s' "$a" | jq -Rs .; done | jq -s . > "$STUB_LOG/mail-args.json"
   echo "mail" >> "$STUB_LOG/calls"
-  exit 0
+  # STUB_MAIL_RC models a failing send, which is what the unsynced-rig fallback
+  # arm of a one-shot recovery block has to survive without spending its trigger.
+  exit "${STUB_MAIL_RC:-0}"
 fi
 exit 0
 GC
@@ -485,6 +493,71 @@ if [ -n "$gate_at" ] && [ -n "$close_at" ] && [ "$gate_at" -lt "$close_at" ]; th
 else
   bad "RECOVERY(orphan-closed): gate must precede close (gate@${gate_at:-none} close@${close_at:-none})"
 fi
+
+# --- ONESHOT: a refused gate must not spend a one-shot recovery ---------------
+# GATEFAIL above covers the RE-DERIVED escalations, where "next cycle retries" is
+# true because the patrol re-derives the same condition. The orphan-recovery
+# notices are one-shot: the same pass performs the transition that CLEARS the
+# condition, so if that transition runs after a refusal, the retry the message
+# promises can never happen and the mayor is never told.
+#
+# ORPHAN_CLOSED is the one whose transition the block owns, so the block must
+# withhold it. Closing the bead is what makes it stop being an orphan.
+reset
+make_gate "$TMP/rig/assets/scripts" 1
+GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-orphan-closed.sh" >/dev/null 2>&1
+rc=$?
+eq "$rc" "0" "ONESHOT(orphan-closed): the block still exits 0 when the gate refuses"
+eq "$(count gate)" "1" "ONESHOT(orphan-closed): the gate was called"
+eq "$(count mail)" "0" "ONESHOT(orphan-closed): no bare mail behind the refusal"
+eq "$(count close)" "0" \
+   "ONESHOT(orphan-closed): the bead stays OPEN — closing it would spend the retry the refusal just promised"
+
+# The same must hold for the unsynced-rig fallback arm: a failed bare mail is the
+# same lost notice, so it must not close the bead either.
+reset
+STUB_MAIL_RC=1 GC_RIG_ROOT="$TMP/absent" GC_CITY_PATH="$TMP/absent" \
+  bash "$TMP/escalation-wiring-orphan-closed.sh" >/dev/null 2>&1
+eq "$(count mail)" "1" "ONESHOT(orphan-closed): the fallback mail was attempted"
+eq "$(count close)" "0" "ONESHOT(orphan-closed): a FAILED fallback mail does not close the bead either"
+
+# ...and the positive control, or the guard above would pass by never closing at
+# all. A gate that accepts — or that SUPPRESSES, which also exits 0 and also means
+# the mayor was told, on an earlier cycle for this same state — closes normally.
+reset
+make_gate "$TMP/rig/assets/scripts" 0
+GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-orphan-closed.sh" >/dev/null 2>&1
+eq "$(count close)" "1" "ONESHOT(orphan-closed): a gate that accepts still closes the bead"
+reset
+STUB_MAIL_RC=0 GC_RIG_ROOT="$TMP/absent" GC_CITY_PATH="$TMP/absent" \
+  bash "$TMP/escalation-wiring-orphan-closed.sh" >/dev/null 2>&1
+eq "$(count close)" "1" "ONESHOT(orphan-closed): so does a successful fallback mail"
+
+# SALVAGE_REFUSED and ORPHAN_RECOVERED cannot withhold their transition — the
+# recovery is load-bearing and the notice is advisory, so blocking a husk's
+# recovery on a mail failure would strand real work. They are therefore genuinely
+# best-effort, and the requirement is that they SAY so: a refusal message that
+# promises a retry which cannot happen reads as handled in the patrol log, which
+# is how the lost notification stays invisible.
+for marker in escalation-wiring-salvage-refused escalation-wiring-orphan-recovered; do
+  short="${marker#escalation-wiring-}"
+  reset
+  make_gate "$TMP/rig/assets/scripts" 1
+  err=$(GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/$marker.sh" 2>&1 >/dev/null)
+  rc=$?
+  eq "$rc" "0" "ONESHOT($short): survives a refusing gate"
+  eq "$(count mail)" "0" "ONESHOT($short): and does not fall back to a bare mail"
+  has "BEST-EFFORT" "$err" "ONESHOT($short): the refusal says the notice is best-effort"
+  case "$err" in
+    *"Next cycle retries"*)
+      bad "ONESHOT($short): still promises a retry the recovery makes impossible" ;;
+    *)
+      ok "ONESHOT($short): makes no retry promise it cannot keep" ;;
+  esac
+  # The state transition these two cannot withhold is elsewhere in the step, so
+  # the block itself must not have quietly grown a close.
+  eq "$(count close)" "0" "ONESHOT($short): the block performs no close of its own"
+done
 
 # --- ALLOWLIST: no NEW ungated bead-scoped mail may appear in the formula ------
 # The discipline section states the rule; this enforces it. Every `gc mail send`

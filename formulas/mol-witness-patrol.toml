@@ -120,6 +120,28 @@ retry. That is why the call above is wrapped in `if ! ...; then echo`
 rather than run bare: this is a best-effort pass and must reach its
 later checks.
 
+**"Next cycle retries" is only true while the TRIGGER survives the pass.**
+The gate is re-invoked next cycle because the patrol re-derives the same
+condition — a stuck PR is still stuck, a queue is still backed up. That
+holds for every RE-DERIVED escalation (`QUEUE_HEALTH`, the example above).
+It does NOT hold for a ONE-SHOT recovery notice, where the same pass then
+performs the state transition that clears the condition: close the orphan,
+or return it to the pool, and nothing re-detects it, so a refused send is
+lost for good rather than retried. When you write a new gated block, ask
+which kind it is:
+
+- **The transition is yours to withhold** — do that. `ORPHAN_CLOSED` gates
+  its `gc bd close` on the notice getting out, so a refusal leaves the
+  bead open and the next cycle genuinely retries both.
+- **The transition must happen regardless** (recovery is load-bearing and
+  the mail is advisory) — then say BEST-EFFORT, and do not print a retry
+  promise the code cannot keep. `SALVAGE_REFUSED` and `ORPHAN_RECOVERED`
+  are this kind: blocking a husk's recovery on a mail failure would strand
+  real work to protect a message.
+
+A refusal message that promises a retry which cannot happen is worse than
+one that admits the loss — it reads as handled in the patrol log.
+
 Things that are easy to get wrong:
 
 - **Do not reword your way past it.** Those five PR #35 mails had five
@@ -194,7 +216,7 @@ Keep the markers when editing these blocks.
 Read a step's description immediately before acting on that step — not
 all of them at once. Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 17
+version = 18
 
 [vars]
 [vars.binding_prefix]
@@ -498,7 +520,17 @@ remote — reporting the branch missing and falling through to Case C's writes.
 
 Escalate the refusal (work_dir was recorded but is unusable — worth a
 look). This is ABOUT A BEAD, so it goes through the gate like every other
-bead-scoped escalation — see "Escalation discipline" above:
+bead-scoped escalation — see "Escalation discipline" above.
+
+**This notice is BEST-EFFORT, unlike ORPHAN_CLOSED's.** Recovery continues
+to Step 3 either way, and Step 3 returns the bead to the pool — which
+clears the orphan condition that produced this pass. There is therefore no
+next cycle to retry a refused send on. That is the right trade here and
+not an oversight: recovery is load-bearing and the notice is advisory, so
+blocking a husk's recovery on a mail failure would strand real work to
+protect a message. Say so rather than promising a retry that cannot
+happen — the refusal is still on the patrol's stderr, and the recovery
+itself is logged as an event in Step 4:
 ```bash
 # >>> escalation-wiring-salvage-refused
 SCRIPTS_DIR=""
@@ -517,10 +549,10 @@ Action: treated as Case E (nothing to salvage); bead returned to pool.
 Branch: ${BRANCH:-none}"
 if [ -n "$SCRIPTS_DIR" ]; then
   if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "SALVAGE_REFUSED: <bead> husk work_dir" --body "$BODY"; then
-    echo "witness: escalation-gate did not send SALVAGE_REFUSED (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    echo "witness: escalation-gate did not send SALVAGE_REFUSED (see its stderr); NOT falling back to a bare mail. This notice is BEST-EFFORT and is NOT retried: recovery continues below and returns the bead to the pool, which clears the orphan condition that produced it." >&2
   fi
 else
-  gc mail send mayor/ -s "SALVAGE_REFUSED: <bead> husk work_dir" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
+  gc mail send mayor/ -s "SALVAGE_REFUSED: <bead> husk work_dir" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; best-effort notice, not retried (recovery clears the orphan condition below)." >&2
 fi
 # <<< escalation-wiring-salvage-refused
 ```
@@ -622,7 +654,19 @@ If the work is already on main:
 - **Close the bead** (work is done, don't re-dispatch). Bead-scoped, so it
   goes through the gate — and the gate call comes BEFORE the close,
   because the gate stamps `escalated.<kind>` on this same bead and that
-  write should land while the bead is still open:
+  write should land while the bead is still open.
+
+  **The close is what CONSUMES this one-shot, so it waits on the notice.**
+  An open bead assigned to a dead agent is the only thing that brings this
+  pass back next cycle. Close it after a gate refusal and "next cycle
+  retries" is a promise the code just made impossible: the bead is no
+  longer an orphan, nothing re-derives the condition, and the mayor is
+  never told the work landed. So the close runs only once the notice is
+  out. Leaving the bead open one more cycle is cheap and self-correcting —
+  it stays assigned to the dead agent, so it is re-detected rather than
+  re-dispatched, and the next pass retries both the notice and the close.
+  Note a SUPPRESSED verdict still exits 0 and still means "the mayor was
+  told" (on an earlier cycle, for this same state), so it closes normally:
 ```bash
 # >>> escalation-wiring-orphan-closed
 SCRIPTS_DIR=""
@@ -631,14 +675,23 @@ for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2
 done
 STATE="orphan-closed/${BRANCH:-none}"
 BODY="Branch ${BRANCH:-none} already on main. Closing instead of resetting."
+NOTIFIED=0
 if [ -n "$SCRIPTS_DIR" ]; then
   if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ORPHAN_CLOSED: <bead> already merged" --body "$BODY"; then
-    echo "witness: escalation-gate did not send ORPHAN_CLOSED (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    echo "witness: escalation-gate did not send ORPHAN_CLOSED (see its stderr); NOT falling back to a bare mail, and NOT closing the bead — an open orphan is what brings this pass back. Next cycle retries both." >&2
+  else
+    NOTIFIED=1
   fi
 else
-  gc mail send mayor/ -s "ORPHAN_CLOSED: <bead> already merged" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
+  if gc mail send mayor/ -s "ORPHAN_CLOSED: <bead> already merged" -m "$BODY"; then
+    NOTIFIED=1
+  else
+    echo "witness: fallback 'gc mail send' failed; leaving <bead> open so next cycle retries the notice and the close together." >&2
+  fi
 fi
-gc bd close <bead>
+if [ "$NOTIFIED" = "1" ]; then
+  gc bd close <bead>
+fi
 # <<< escalation-wiring-orphan-closed
 ```
 - Clean up worktree and skip to Step 4.
@@ -673,7 +726,11 @@ recovery is unexpected or concerning — use your judgment:
 | Work salvaged from worktree (data was at risk) | Log + mail mayor. Work was nearly lost. |
 | Same bead recovered before (check `metadata.recovered`) | Log + mail mayor. Possible crash loop. |
 
-When you do mail — bead-scoped, so through the gate:
+When you do mail — bead-scoped, so through the gate. **Best-effort, like
+SALVAGE_REFUSED and unlike ORPHAN_CLOSED:** Step 3b has already returned
+the bead to the pool by the time this runs, so the orphan condition is
+already spent and a refused send has no next cycle to retry it. The
+recovery is what matters and it has happened; the notice is advisory:
 ```bash
 # >>> escalation-wiring-orphan-recovered
 SCRIPTS_DIR=""
@@ -692,10 +749,10 @@ Status: Reset to open pool for re-dispatch.
 Concern: <why this one warrants attention>"
 if [ -n "$SCRIPTS_DIR" ]; then
   if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ORPHAN_RECOVERED: <bead>" --body "$BODY"; then
-    echo "witness: escalation-gate did not send ORPHAN_RECOVERED (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    echo "witness: escalation-gate did not send ORPHAN_RECOVERED (see its stderr); NOT falling back to a bare mail. This notice is BEST-EFFORT and is NOT retried: the bead was already returned to the pool in Step 3b, so the orphan condition that produced it is spent." >&2
   fi
 else
-  gc mail send mayor/ -s "ORPHAN_RECOVERED: <bead>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
+  gc mail send mayor/ -s "ORPHAN_RECOVERED: <bead>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; best-effort notice, not retried (the bead is already back in the pool)." >&2
 fi
 # <<< escalation-wiring-orphan-recovered
 ```
