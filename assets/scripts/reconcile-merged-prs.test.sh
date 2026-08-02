@@ -180,6 +180,10 @@ P
 #   403 live bead keyed ONLY by fork_pr, WITH merge_result      -> silent (owned)
 #   404 live bead keyed by pr_number, no gating metadata        -> UNOWNED
 #   405 closed anchor keyed ONLY by fork_pr, open PR            -> ANCHORLESS
+#   406 a FOREIGN live bead names #406 + our own closed anchor  -> ANCHORLESS
+#       (the foreign bead must not track it into silence)
+#   407 only a FOREIGN closed bead names #407                   -> ANCHORLESS,
+#       NOT escalated and the foreign bead NOT flagged
 cat > "$TMP/openprs" <<'O'
 203|false|polecat/bead-C|main
 211|false|polecat/bead-K|main
@@ -193,6 +197,8 @@ cat > "$TMP/openprs" <<'O'
 403|false|fork/sync-403|main
 404|false|polecat/plain-404|main
 405|false|fork/sync-405|main
+406|false|polecat/dead-406|main
+407|false|somebody/manual-407|main
 O
 
 # Live beads outside the refinery's own flow — the fixtures for the widened key
@@ -202,12 +208,20 @@ O
 # Keyed on pr_number alone every one of these PRs reported ANCHORLESS forever;
 # widened but collapsed into "tracked", the ungated ones would go SILENT — which
 # is quieter without being truer, since nothing will land them either way.
-#   key<TAB>pr<TAB>id<TAB>assignee<TAB>gating
+#   key<TAB>pr<TAB>id<TAB>assignee<TAB>gating<TAB>pr_url
+#
+# The 6th column is the bead's OWN pr_url, and it is what makes the tracked set an
+# identity question rather than a number match. Omitted on the fork/plain rows ON
+# PURPOSE — a bead that records no URL cannot be placed in any repository, stays the
+# `?` wildcard, and tracks its PR exactly as it always did. live-foreign-406 records
+# a URL on ANOTHER HOST: it is a real, live bead, but it names a DIFFERENT pull
+# request, so it must not track our open #406 into silence (review tk-thvbq #2).
 printf '%s\n' \
-  'fork_pr	401	live-fork	operator	-' \
-  'fork_pr_url	402	live-forkurl	operator	-' \
-  'fork_pr	403	live-forkgated	refinery	yes' \
-  'pr_number	404	live-plain	operator	-' \
+  'fork_pr	401	live-fork	operator	-	-' \
+  'fork_pr_url	402	live-forkurl	operator	-	-' \
+  'fork_pr	403	live-forkgated	refinery	yes	-' \
+  'pr_number	404	live-plain	operator	-	-' \
+  'pr_number	406	live-foreign-406	operator	-	https://otherhost/acme/repo/pull/406' \
   > "$TMP/livex"
 
 # Closed beads that still name a PR (the anchorless arm's bead resolution):
@@ -226,13 +240,21 @@ printf '%s\n' \
 # resolution finds nothing, the arm falls into the "no bead in any state" branch
 # — which by design does NOT escalate — and a genuinely stranded PR is downgraded
 # to a log line forever.
+#
+# The 7th column is the closed bead's OWN pr_url ("-" = none, the common shape).
+# dead-foreign-407 records another HOST's URL: keyed on the bare number it resolves
+# as the dead anchor of OUR #407 and receives the anchorless_flagged stamp plus a
+# mail naming it — a write onto a stranger's bead, which also bounds the escalation
+# for a PR it never owned (review tk-thvbq finding #2).
 printf '%s\n' \
-  '301	review-1	-	-	2026-01-02T00:00:00Z	-' \
-  '301	rework-1	-	pull_request	2026-01-03T00:00:00Z	-' \
-  '301	dead-1	-	pull_request	2026-01-01T00:00:00Z	-' \
-  '303	dead-3	-	pull_request	2026-01-01T00:00:00Z	-' \
-  '304	dead-4	304	pull_request	2026-01-01T00:00:00Z	-' \
-  '405	dead-5	-	pull_request	2026-01-01T00:00:00Z	fork_pr' \
+  '301	review-1	-	-	2026-01-02T00:00:00Z	-	-' \
+  '301	rework-1	-	pull_request	2026-01-03T00:00:00Z	-	-' \
+  '301	dead-1	-	pull_request	2026-01-01T00:00:00Z	-	-' \
+  '303	dead-3	-	pull_request	2026-01-01T00:00:00Z	-	-' \
+  '304	dead-4	304	pull_request	2026-01-01T00:00:00Z	-	-' \
+  '405	dead-5	-	pull_request	2026-01-01T00:00:00Z	fork_pr	-' \
+  '406	dead-406	-	pull_request	2026-01-01T00:00:00Z	-	-' \
+  '407	dead-foreign-407	-	pull_request	2026-01-01T00:00:00Z	-	https://otherhost/acme/repo/pull/407' \
   > "$TMP/dead"
 
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mailbody"
@@ -300,15 +322,47 @@ FIX_POOL="test-rig/gc-toolkit.polecat"
 # The `pr merge` arm records to $FAKE_AUTOMERGE. The observer must NEVER reach it
 # (it has no merge authority): the INV assertion below proves that file stays
 # empty across the whole run. The merge skill's own test exercises real merges.
+#
+# BOTH READS FOLLOW gh's CURRENT REPOSITORY UNLESS `--repo` PINS THEM. $FAKE_GH_DEFAULT
+# moves that default exactly as `gh repo set-default`, GH_REPO or a different cwd
+# would; `acme/repo` when unset. $FAKE_IGNORE_REPO models a gh that ignores the pin
+# entirely (a redirect after a repository transfer or rename, an older gh, a
+# wrapper), so the returned URL is the only thing left to catch it. $FAKE_GH_HOST
+# models GH_HOST, which fills the host of a HOSTLESS `--repo` pin.
+#
+# Every emitted `url` names the repository the call ACTUALLY resolved in, not a
+# hardcoded one — that is what makes the identity cases below meaningful, and it is
+# byte-identical to the old fixed string whenever the pin is honoured (the default),
+# so every pre-existing case is unaffected.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
+ghdefault=$(cat "${FAKE_GH_DEFAULT:-/dev/null}" 2>/dev/null)
+[ -n "$ghdefault" ] || ghdefault="acme/repo"
+RESOLVED=""
+for a in "$@"; do
+  case "${prev:-}" in --repo|-R) RESOLVED="$a" ;; esac
+  prev="$a"
+done
+[ -s "${FAKE_IGNORE_REPO:-/dev/null}" ] && RESOLVED=""
+[ -n "$RESOLVED" ] || RESOLVED="$ghdefault"
+# `--repo` is `[HOST/]OWNER/REPO`; with the host OMITTED gh supplies it from GH_HOST
+# (`gh help environment`). So `<owner>/<repo>` does not name a repository, it names
+# one PER HOST: a hostless pin under a drifted GH_HOST reads THAT host's acme/repo —
+# same owner, same repo, same number, different pull request. Only a host-qualified
+# pin closes it, which is why the resolved name below keeps its host.
+case "$RESOLVED" in
+  */*/*) : ;;
+  *)     ghhost=$(cat "${FAKE_GH_HOST:-/dev/null}" 2>/dev/null)
+         [ -n "$ghhost" ] || ghhost="github.com"
+         RESOLVED="$ghhost/$RESOLVED" ;;
+esac
 case "$1 $2" in
   "pr view")
     num="$3"; shift 3
     fields=""
     while [ $# -gt 0 ]; do case "$1" in --json) fields="$2"; shift 2 ;; *) shift ;; esac; done
     # Supported `gh pr view --json` fields (subset; notably NOT `merged`).
-    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid url title body author additions deletions mergeable mergeStateStatus "
+    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus "
     OIFS="$IFS"; IFS=','
     for f in $fields; do
       case "$SUPPORTED" in
@@ -317,15 +371,27 @@ case "$1 $2" in
       esac
     done
     IFS="$OIFS"
-    while IFS='|' read -r pr state mergedat isdraft oid base head headoid mergeable mergestate; do
+    # Columns 11-12 are the HEAD identity: which repository the PR is opened FROM,
+    # and GitHub's own cross-repository flag. Both are OMITTED on every pre-existing
+    # row and default to THIS repository / not-cross — the shape those cases were
+    # written against — so only the head-identity cases below vary them. A headrepo
+    # of `-` emits NULL objects, which is what gh returns for a deleted head repo (an
+    # omitted column cannot mean that: it has to keep meaning "ours").
+    while IFS='|' read -r pr state mergedat isdraft oid base head headoid mergeable mergestate headrepo cross; do
       [ "$pr" = "$num" ] || continue
+      [ -n "$headrepo" ] || headrepo="acme/repo"
+      [ -n "$cross" ]    || cross="false"
       jq -n --arg s "$state" --arg ma "$mergedat" --argjson d "$isdraft" \
             --arg o "$oid" --arg b "$base" --arg h "$head" --arg ho "$headoid" \
             --arg m "$mergeable" --arg ms "$mergestate" --arg n "$num" \
+            --arg rq "$RESOLVED" --arg hrepo "$headrepo" --argjson x "$cross" \
         '{state:$s, mergedAt:(if $ma=="" then null else $ma end), isDraft:$d,
           mergeCommit:(if $o=="" then null else {oid:$o} end), baseRefName:$b,
           headRefName:$h, headRefOid:$ho, mergeable:$m, mergeStateStatus:$ms,
-          url:("https://github.com/acme/repo/pull/" + $n)}'
+          headRepositoryOwner:(if $hrepo=="-" then null else {login:($hrepo | split("/")[0])} end),
+          headRepository:(if $hrepo=="-" then null else {name:($hrepo | split("/")[1])} end),
+          isCrossRepository:$x,
+          url:("https://" + $rq + "/pull/" + $n)}'
       exit 0
     done < "$FAKE_PRS"
     exit 0 ;;
@@ -335,7 +401,8 @@ case "$1 $2" in
     while IFS='|' read -r pr isdraft head base; do
       [ -n "$pr" ] || continue
       obj=$(jq -n --arg n "$pr" --argjson d "$isdraft" --arg h "$head" --arg b "$base" \
-        '{number:($n|tonumber), url:("https://github.com/acme/repo/pull/" + $n),
+        --arg rq "$RESOLVED" \
+        '{number:($n|tonumber), url:("https://" + $rq + "/pull/" + $n),
           isDraft:$d, headRefName:$h, baseRefName:$b}')
       if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
     done < "$FAKE_OPENPRS"
@@ -347,6 +414,23 @@ esac
 exit 0
 GH
 chmod +x "$TMP/bin/gh"
+
+# --- git stub. ----------------------------------------------------------------
+# `git remote get-url origin` -> what this checkout pushes to, and the ONLY source
+# of the repository every `gh pr view` / `gh pr list` below is pinned to. Never
+# `gh`: gh's current repository is movable, and a bare PR NUMBER read in the wrong
+# one lets this pass close a live anchor against a stranger's merge (review
+# tk-sdqwh finding #2). $FAKE_REPOFAIL makes it unanswerable, as a checkout with
+# no origin remote would.
+cat > "$TMP/bin/git" <<'GIT'
+#!/usr/bin/env bash
+if [ "$1" = "remote" ] && [ "$2" = "get-url" ] && [ "$3" = "origin" ]; then
+  [ -s "$FAKE_REPOFAIL" ] && exit 1
+  printf 'https://github.com/acme/repo.git\n'; exit 0
+fi
+exit 0
+GIT
+chmod +x "$TMP/bin/git"
 
 # --- gc stub: bd list / create / close / update / dep + session + mail. -------
 # bd list reflects state: a closed, flagged (abandoned), or retargeted anchor
@@ -400,7 +484,7 @@ case "$2" in
           esac
         done
         out=""
-        while IFS="$(printf '\t')" read -r pr bid flagged mres created dkey; do
+        while IFS="$(printf '\t')" read -r pr bid flagged mres created dkey dprurl; do
           [ -n "$bid" ] || continue
           [ -n "$dkey" ] && [ "$dkey" != "-" ] || dkey="pr_number"
           [ "$dkey" = "$qkey" ] || continue
@@ -409,12 +493,13 @@ case "$2" in
           [ "$qkey" = "fork_pr_url" ] || [ "$pr" = "$num" ] || continue
           [ "$flagged" = "-" ] && flagged=""
           [ "$mres" = "-" ] && mres=""
+          [ "$dprurl" = "-" ] && dprurl=""
           case "$dkey" in
             fork_pr_url) keyjson=$(printf '"fork_pr_url":"https://github.com/acme/repo/pull/%s"' "$pr") ;;
             *)           keyjson=$(printf '"%s":"%s"' "$dkey" "$pr") ;;
           esac
-          obj=$(printf '{"id":"%s","created_at":"%s","metadata":{%s,"anchorless_flagged":"%s","merge_result":"%s"}}' \
-                  "$bid" "$created" "$keyjson" "$flagged" "$mres")
+          obj=$(printf '{"id":"%s","created_at":"%s","metadata":{%s,"pr_url":"%s","anchorless_flagged":"%s","merge_result":"%s"}}' \
+                  "$bid" "$created" "$keyjson" "$dprurl" "$flagged" "$mres")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_DEAD"
         printf '[%s]\n' "$out" ;;
@@ -526,7 +611,11 @@ case "$2" in
         printf '[%s]\n' "$out" ;;
       *"merge_result=pull_request"*)
         out=""
-        while IFS='|' read -r id pr target mhold rhold cset cmark; do
+        # The 8th column is the anchor's RECORDED pr_url (the identity
+        # check-set-heal.sh certifies and persists). Empty for almost every
+        # fixture — a pr_number-only anchor is the common shape, and is governed
+        # by the pinned read plus the repository comparison alone.
+        while IFS='|' read -r id pr target mhold rhold cset cmark prurl; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
           grep -qx "$id" "$FAKE_ABANDONED" 2>/dev/null && continue
@@ -534,8 +623,8 @@ case "$2" in
           staled=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_STALED" 2>/dev/null | tail -1)
           gatehead=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATEHEAD" 2>/dev/null | tail -1)
           gatenopool=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATENOPOOL" 2>/dev/null | tail -1)
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s"}}' \
-                  "$id" "$pr" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$cset" "$cmark" "$mhold" "$rhold")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s"}}' \
+                  "$id" "$pr" "$prurl" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$cset" "$cmark" "$mhold" "$rhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -548,6 +637,22 @@ case "$2" in
         # FAKE_LIVE_FAIL models a failed ledger read (empty output, NOT "[]") so
         # the fail-closed guard can be exercised.
         [ -n "${FAKE_LIVE_FAIL:-}" ] && exit 0
+        # ...and FAKE_LIVE_SHAPE models the failures an EMPTINESS test cannot see —
+        # the same family the keyed probes already pin, on the live-bead read that
+        # decides which PRs are tracked. Each defeats a different guard:
+        #   error-rc1 — a JSON error OBJECT plus exit 1 (the observed shape).
+        #   error-rc0 — the same object with a ZERO exit; only the payload-shape
+        #               guard sees it. Note `.[]` iterates an object's values
+        #               happily, so an unguarded read builds a TRACKED set out of
+        #               error text and silences real findings.
+        #   array-rc1 — a well-formed EMPTY array with a non-zero exit; only the
+        #               exit-status guard sees it, and "[]" is exactly the value
+        #               that legitimately means "no live bead names anything".
+        case "${FAKE_LIVE_SHAPE:-}" in
+          error-rc1) printf '{"error":"ledger unavailable","schema_version":1}\n'; exit 1 ;;
+          error-rc0) printf '{"error":"ledger unavailable","schema_version":1}\n'; exit 0 ;;
+          array-rc1) printf '[]\n'; exit 1 ;;
+        esac
         # Beads are emitted with the metadata that decides OWNERSHIP, not just the
         # PR key: gating anchors are in this set BECAUSE they carry
         # merge_result=pull_request, and rework children carry branch/target. That
@@ -581,13 +686,15 @@ case "$2" in
         # non-canonical keying and/or no gating metadata at all. Modeled only in
         # this (PR -> BEAD) direction, which is the one they change.
         #   key<TAB>pr<TAB>id<TAB>assignee<TAB>gating("yes" = carries merge_result)
-        while IFS="$(printf '\t')" read -r lkey lval lid lassignee lgating; do
+        while IFS="$(printf '\t')" read -r lkey lval lid lassignee lgating lprurl; do
           [ -n "$lid" ] || continue
           [ "$lassignee" = "-" ] && lassignee=""
           gjson=""
           [ "$lgating" = "yes" ] && gjson=',"merge_result":"pull_request"'
-          obj=$(printf '{"id":"%s","assignee":"%s","metadata":{%s%s}}' \
-                  "$lid" "$lassignee" "$(keyjson_for "$lkey" "$lval")" "$gjson")
+          ujson=""
+          [ -n "$lprurl" ] && [ "$lprurl" != "-" ] && ujson=$(printf ',"pr_url":"%s"' "$lprurl")
+          obj=$(printf '{"id":"%s","assignee":"%s","metadata":{%s%s%s}}' \
+                  "$lid" "$lassignee" "$(keyjson_for "$lkey" "$lval")" "$gjson" "$ujson")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "${FAKE_LIVEX:-/dev/null}"
         printf '[%s]\n' "$out" ;;
@@ -686,8 +793,12 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
        FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody" \
-       FAKE_LIVEX="$TMP/livex" FAKE_BODIES="$TMP/bodies"
+       FAKE_LIVEX="$TMP/livex" FAKE_BODIES="$TMP/bodies" \
+       FAKE_REPOFAIL="$TMP/repofail" \
+       FAKE_GH_DEFAULT="$TMP/ghdefault" FAKE_IGNORE_REPO="$TMP/ignorerepo" \
+       FAKE_GH_HOST="$TMP/ghhost"
 mkdir -p "$TMP/bodies"
+: > "$TMP/repofail"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/ghhost"
 
 # --- Run 1: the disposition matrix. ------------------------------------------
 OUT1="$(bash "$SCRIPT" --fix-pool "$FIX_POOL")"
@@ -869,8 +980,8 @@ printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#302' \
 eq "$(grep -c 'anchorless open PR#302' "$TMP/mail")" "0" \
    "(14) unboundable (no-bead) finding is reported but never escalated"
 
-printf '%s\n' "$OUT1" | grep -q '6 anchorless open PRs' \
-  && ok "run 1 summary reports 6 anchorless open PRs" \
+printf '%s\n' "$OUT1" | grep -q '8 anchorless open PRs' \
+  && ok "run 1 summary reports 8 anchorless open PRs" \
   || bad "run 1 summary anchorless count (got: $OUT1)"
 
 # --- (32)-(36) a bead can name its PR under keys other than pr_number. ---------
@@ -948,6 +1059,49 @@ eq "$(grep -c 'anchorless open PR#405' "$TMP/mail")" "1" \
 grep '^dead-5' "$TMP/updates" | grep -q 'anchorless_flagged=405' \
   && ok "(36) escalation bounded by a marker on the fork_pr-keyed closed bead" \
   || bad "(36) anchorless_flagged marker on dead-5 (got: $(grep dead-5 "$TMP/updates" || true))"
+
+# --- (37)(38) A PR NUMBER IS NOT AN IDENTITY. ---------------------------------
+# Every lookup above widened the KEYS a bead may name its PR with. This is the
+# other half: the numbers those keys hold are unique only within a repository,
+# while `gh pr list` here is pinned to $ORIGIN_REPO_Q — so the tracked set and the
+# closed-bead resolution were comparing THIS repository's pull requests against
+# EVERY repository's beads. Both directions break, and in opposite ways
+# (review tk-thvbq finding #2).
+
+# (37) A FOREIGN LIVE bead silences a real finding. live-foreign-406 is open and
+# names #406, but its pr_url is on another host — a different pull request. Keyed
+# on the bare number our open #406 reads as tracked (or UNOWNED) and its genuinely
+# anchorless state is never reported: silence that looks exactly like health.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#406' \
+  && ok "(37) a foreign same-numbered LIVE bead does not track our PR#406 into silence" \
+  || bad "(37) PR#406 must still be reported anchorless (got: $(printf '%s\n' "$OUT1" | grep 'PR#406' || echo '<no line at all>'))"
+printf '%s\n' "$OUT1" | grep -q 'UNOWNED PR#406' \
+  && bad "(37) a foreign bead must not make our PR 'tracked but unowned' either" \
+  || ok "(37) the foreign bead does not downgrade the finding to UNOWNED"
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#406.*anchor dead-406 is CLOSED' \
+  && ok "(37) ...and the SAME-repository closed anchor still resolves normally" \
+  || bad "(37) dead-406 must still resolve (got: $(printf '%s\n' "$OUT1" | grep 'PR#406' || true))"
+eq "$(grep -c 'anchorless open PR#406' "$TMP/mail")" "1" \
+   "(37) the real finding escalates once, as it would with no foreign bead present"
+
+# (38) A FOREIGN CLOSED bead RECEIVES A WRITE it should never see. Keyed on the
+# bare number, dead-foreign-407 resolves as the dead anchor of OUR #407: it gets
+# the anchorless_flagged stamp (a write onto a stranger's bead) and is named in a
+# mail as the bead to reopen — and, worse, that stamp BOUNDS the escalation for a
+# PR it never owned, so the real finding goes quiet from the next pass on.
+# Qualified, nothing resolves and the PR falls to the non-escalating
+# "no bead in any state" arm, which is the honest answer here.
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#407' \
+  && ok "(38) PR#407 is still reported anchorless" \
+  || bad "(38) PR#407 must be reported anchorless (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q 'ANCHORLESS PR#407.*no bead in any state references it' \
+  && ok "(38) a foreign closed bead does not resolve as our PR's dead anchor" \
+  || bad "(38) PR#407 must fall to the no-bead arm (got: $(printf '%s\n' "$OUT1" | grep 'PR#407' || true))"
+grep '^dead-foreign-407' "$TMP/updates" | grep -q 'anchorless_flagged' \
+  && bad "(38) a foreign closed bead must NEVER be stamped anchorless_flagged for our PR" \
+  || ok "(38) no metadata written to the foreign closed bead"
+eq "$(grep -c 'anchorless open PR#407' "$TMP/mail")" "0" \
+   "(38) nothing escalated naming a stranger's bead (and no false bound on the finding)"
 
 # (INV) NO MERGE AUTHORITY: the observer must never call `gh pr merge` for ANY
 # anchor — the seam that the auto-merge retirement turns on. $FAKE_AUTOMERGE
@@ -1047,6 +1201,31 @@ eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "$MAIL_BEFORE6" \
 printf '%s\n' "$OUT6" | grep -q '0 anchorless open PRs' \
   && ok "(14) failed live-bead read reports a zero anchorless count" \
   || bad "(14) failed live-bead read reports a zero anchorless count (got: $OUT6)"
+
+# --- (39) ...and "failed" is more shapes than "empty". ------------------------
+# The emptiness test above catches only the read that wrote NOTHING. `gc bd list
+# --json` reports its own failures as a non-empty error OBJECT on stdout, and a
+# read that dies after emitting announces that only in its exit status — both
+# survive an emptiness test, and both then build a TRACKED set out of a payload
+# that is not a bead list. The consequence is the same mail storm this arm fails
+# closed against, reached by a route the original guard could not see
+# (review tk-thvbq finding #3). Each shape is asserted separately: a guard no case
+# pins is a guard a later edit can delete silently.
+for shape in error-rc1 error-rc0 array-rc1; do
+  MAIL_BEFORE=$(wc -l < "$TMP/mail" | tr -d ' ')
+  UPD_BEFORE=$(wc -l < "$TMP/updates" | tr -d ' ')
+  OUT_S="$(FAKE_LIVE_SHAPE="$shape" bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>"$TMP/err39")"
+  printf '%s\n' "$OUT_S" | grep -q 'ANCHORLESS' \
+    && bad "(39/$shape) an unreadable live-bead read must flag nothing (fail closed)" \
+    || ok "(39/$shape) unreadable live-bead read ($shape) flags nothing"
+  eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "$MAIL_BEFORE" \
+     "(39/$shape) unreadable live-bead read escalates nothing"
+  eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "$UPD_BEFORE" \
+     "(39/$shape) unreadable live-bead read writes no bead metadata"
+  grep -q 'live-bead read failed; anchorless scan skipped' "$TMP/err39" \
+    && ok "(39/$shape) the skipped scan is reported, never silent" \
+    || bad "(39/$shape) must report the skipped scan (err: $(cat "$TMP/err39"))"
+done
 
 # --- (20) an unreadable rework probe must fail CLOSED. -----------------------
 # The probe is the only thing standing between a conflicted PR and a dispatched
@@ -1332,6 +1511,308 @@ printf '%s\n' "$OUT12B" | grep -q '1 stale-gate re-reviews routed' \
 grep -qx "$REVIEW_POOL" "$TMP/wakes" \
   && ok "(31) repair pass wakes the review pool" \
   || bad "(31) repair pass wakes the review pool"
+
+# --- Run 13: REPOFAIL. The origin repository cannot be resolved. ---------------
+# Every PR here is named by NUMBER, and a number resolves in whatever repository
+# gh considers current. This pass has no merge authority, but it CLOSES anchors as
+# landed and escalates out-of-band closes — terminal writes, made off those reads.
+# With no origin to pin them to, it must record NOTHING and retry next wake
+# (review tk-sdqwh finding #2).
+: > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/mail"; : > "$TMP/created"
+echo 1 > "$TMP/repofail"
+RC13=0
+bash "$SCRIPT" --fix-pool "$FIX_POOL" >"$TMP/out13" 2>"$TMP/err13" || RC13=$?
+: > "$TMP/repofail"
+eq "$RC13" "0" "(REPOFAIL) the refusal is a clean skip, never an abort of the patrol loop"
+eq "$(wc -l < "$TMP/closed" | tr -d ' ')" "0" "(REPOFAIL) unresolvable origin -> no anchor closed"
+eq "$(wc -l < "$TMP/abandoned" | tr -d ' ')" "0" "(REPOFAIL) unresolvable origin -> nothing flagged abandoned"
+eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "0" "(REPOFAIL) unresolvable origin -> nothing escalated"
+grep -q "cannot resolve this checkout's origin repository" "$TMP/err13" \
+  && ok "(REPOFAIL) the refusal is reported for an operator" \
+  || bad "(REPOFAIL) must warn that the origin is unresolvable (err: $(cat "$TMP/err13"))"
+
+# --- PR IDENTITY: a same-numbered pull request from ANOTHER repository. --------
+# REPOFAIL above covers the case where the expectation cannot be formed at all.
+# These cover the case where it CAN — the read is pinned to it — and the answer
+# comes back from somewhere else anyway: a gh that ignores `--repo` (a redirect
+# after a repository transfer or rename, an older gh, a wrapper), a drifted
+# GH_HOST under a hostless pin, or an anchor whose own recorded pr_url names a
+# different pull request.
+#
+# merge-skill.sh added this post-read guard because a wrong MERGE cannot be
+# retried away. This pass has no merge authority, but it closes anchors as landed,
+# flags them abandoned/retargeted, mails escalations, and dispatches rework and
+# re-review children — all terminal, all written off the same read. Acting on a
+# stranger's PR closes a live bead against someone else's merge AND strands the
+# real PR in the anchorless blind spot this very script exists to close
+# (review tk-vdlbo P1).
+#
+# ONE fixture set exercises EVERY mutating arm at once, so the assertions are not
+# vacuous: run identically with the pin HONOURED (ID-BASE) each anchor performs
+# its mutation, and with the pin IGNORED (ID2) none of them may.
+#   id-CLOSE 501 MERGED to main                  -> would CLOSE
+#   id-ABAND 502 CLOSED unmerged                 -> would flag abandoned + mail
+#   id-RETGT 503 OPEN, base main != integration/foo -> would flag retargeted + mail
+#   id-CONF  504 OPEN CONFLICTING/DIRTY          -> would file a rebase child + wake
+#   id-GATE  505 OPEN, codex green@old505 stale  -> would file a re-review + wake
+reset_identity() {
+  : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mail"
+  : > "$TMP/mailbody"; : > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"
+  : > "$TMP/wakes"; : > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"
+  : > "$TMP/closelog"; : > "$TMP/children"; : > "$TMP/openprs"; : > "$TMP/livex"
+  : > "$TMP/dead"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/ghhost"
+  # id|pr|merged_target|merge_hold|rebase_hold|check_set|check.codex|pr_url
+  printf '%s\n' \
+    'id-CLOSE|501|main' \
+    'id-ABAND|502|main' \
+    'id-RETGT|503|integration/foo' \
+    'id-CONF|504|main' \
+    'id-GATE|505|main|||codex|green@old505' \
+    > "$TMP/anchors"
+  printf '%s\n' \
+    '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN' \
+    '502|CLOSED||false||main|polecat/id-ABAND|head502|UNKNOWN|UNKNOWN' \
+    '503|OPEN||false||main|polecat/id-RETGT|head503|MERGEABLE|BLOCKED' \
+    '504|OPEN||false||main|polecat/id-CONF|head504|CONFLICTING|DIRTY' \
+    '505|OPEN||false||main|polecat/id-GATE|head505|MERGEABLE|BLOCKED' \
+    > "$TMP/prs"
+}
+IDRUN() { bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL"; }
+
+# (ID-BASE) POSITIVE CONTROL. Pin honoured, nothing drifted: every arm fires. A
+# guard whose "must not happen" cases pass because the fixture never triggered
+# them is worth nothing, so prove the triggers first.
+reset_identity
+OUTIDB="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed"       && ok "(ID-BASE) control: merged PR closes its anchor" \
+                                     || bad "(ID-BASE) control: merged PR must close its anchor (got: $OUTIDB)"
+has '^id-ABAND$' "$TMP/abandoned"    && ok "(ID-BASE) control: closed-unmerged PR flags its anchor abandoned" \
+                                     || bad "(ID-BASE) control: abandoned flag (got: $OUTIDB)"
+has '^id-RETGT$' "$TMP/retargeted"   && ok "(ID-BASE) control: retargeted PR flags its anchor" \
+                                     || bad "(ID-BASE) control: retarget flag (got: $OUTIDB)"
+grep -q 'Rebase PR#504' "$TMP/created" && ok "(ID-BASE) control: conflicting PR files a rebase child" \
+                                       || bad "(ID-BASE) control: rebase child (got: $(cat "$TMP/created"))"
+grep -q 'Review PR#505' "$TMP/created" && ok "(ID-BASE) control: stale codex gate files a re-review child" \
+                                       || bad "(ID-BASE) control: re-review child (got: $(cat "$TMP/created"))"
+eq "$(grep -c . "$TMP/mail")" "2" "(ID-BASE) control: the two escalating arms mail (abandon + retarget)"
+
+# (ID1) DRIFT: gh's default repository is moved to a stranger's. Both reads are
+# PINNED to the origin-derived repository, so the drift changes nothing — the right
+# PRs answer and every arm still fires. This is what keeps ID2 honest: it proves the
+# refusal there comes from the URL comparison, not from the drift alone.
+reset_identity
+echo 'stranger/repo' > "$TMP/ghdefault"
+OUTID1="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed" \
+  && ok "(ID1) gh default drifted to a stranger -> the pinned read still finds OUR PR#501 and closes the anchor" \
+  || bad "(ID1) the pinned read must survive a moved gh default (got: $OUTID1)"
+printf '%s\n' "$OUTID1" | grep -q '0 foreign-PR identity holds' \
+  && ok "(ID1) a honoured pin holds nothing on identity" \
+  || bad "(ID1) no identity holds expected (got: $OUTID1)"
+
+# (ID2) IGNOREPIN: the same drift against a gh that does NOT honour `--repo`. Every
+# returned PR is a stranger's same-numbered one — and it is otherwise INDISTINGUISH-
+# ABLE from ours: same number, same state, same base, same head. Pinning alone is no
+# defence; only comparing the returned URL is, which is why the comparison is kept
+# after the pin rather than trusted away as a tautology.
+reset_identity
+echo 'stranger/repo' > "$TMP/ghdefault"
+echo 1 > "$TMP/ignorerepo"
+OUTID2="$(IDRUN 2>"$TMP/errid2")"
+has '^id-CLOSE$' "$TMP/closed" \
+  && bad "(ID2) a foreign same-numbered PR must NEVER close a local anchor" \
+  || ok "(ID2) foreign PR -> anchor NOT closed"
+has '^id-ABAND$' "$TMP/abandoned" \
+  && bad "(ID2) a foreign closed PR must NEVER flag a local anchor abandoned" \
+  || ok "(ID2) foreign PR -> anchor NOT flagged abandoned"
+has '^id-RETGT$' "$TMP/retargeted" \
+  && bad "(ID2) a foreign PR's base must NEVER retarget-flag a local anchor" \
+  || ok "(ID2) foreign PR -> anchor NOT flagged retargeted"
+eq "$(grep -c 'Rebase PR#504' "$TMP/created")" "0" \
+   "(ID2) foreign PR -> NO rebase child dispatched (no force-push routed off a stranger's conflict)"
+eq "$(grep -c 'Review PR#505' "$TMP/created")" "0" \
+   "(ID2) foreign PR -> NO stale-gate re-review dispatched"
+eq "$(wc -l < "$TMP/gatehead" | tr -d ' ')" "0" \
+   "(ID2) foreign PR -> stale_gate_head never armed"
+eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "0" \
+   "(ID2) foreign PR -> nothing escalated to the mayor"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" \
+   "(ID2) foreign PR -> NO metadata written to any local bead"
+eq "$(wc -l < "$TMP/wakes" | tr -d ' ')" "0" "(ID2) foreign PR -> no pool woken"
+printf '%s\n' "$OUTID2" | grep -q "answered from 'github.com/stranger/repo', not this checkout's 'github.com/acme/repo'" \
+  && ok "(ID2) the refusal names the repository that answered" \
+  || bad "(ID2) must name the foreign repository (got: $OUTID2)"
+printf '%s\n' "$OUTID2" | grep -q '5 foreign-PR identity holds' \
+  && ok "(ID2) the summary counts all five refusals" \
+  || bad "(ID2) summary identity-hold count (got: $OUTID2)"
+
+# (ID2b) HOSTDRIFT: GH_HOST points at another GitHub host. `<owner>/<repo>` does not
+# name a repository — it names one per host — and `--repo` fills an omitted host from
+# GH_HOST, so a HOSTLESS pin would resolve to THAT host's acme/repo: same owner, same
+# repo, same number, different pull request. The pin is host-qualified and the
+# comparison keeps the host, so the drift is a no-op.
+reset_identity
+echo 'ghe.example.com' > "$TMP/ghhost"
+OUTID2B="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed" \
+  && ok "(ID2b) GH_HOST drifted -> the host-qualified pin still reads OUR PR#501" \
+  || bad "(ID2b) a host-qualified pin must survive GH_HOST drift (got: $OUTID2B)"
+printf '%s\n' "$OUTID2B" | grep -q '0 foreign-PR identity holds' \
+  && ok "(ID2b) host-qualified pin -> no identity holds" \
+  || bad "(ID2b) no identity holds expected (got: $OUTID2B)"
+
+# (ID3) URL MISMATCH: the pin is honoured and OUR PR#501 answers, but the anchor's
+# OWN recorded pr_url — the identity check-set-heal.sh certified and persisted —
+# names a different pull request. One of the two names is wrong and nothing here can
+# say which, so the anchor must not be closed off either.
+reset_identity
+printf '%s\n' \
+  'id-CLOSE|501|main|||||https://github.com/acme/OTHER/pull/501' \
+  > "$TMP/anchors"
+printf '%s\n' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN' \
+  > "$TMP/prs"
+OUTID3="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed" \
+  && bad "(ID3) an anchor whose pr_url names another PR must NOT be closed" \
+  || ok "(ID3) pr_url/live-URL mismatch -> no state recorded"
+printf '%s\n' "$OUTID3" | grep -q "anchor id-CLOSE records pr_url 'https://github.com/acme/OTHER/pull/501'" \
+  && ok "(ID3) the refusal names both pull requests for an operator" \
+  || bad "(ID3) refusal must name the recorded pr_url (got: $OUTID3)"
+
+# (ID3b) the SAME anchor with a matching pr_url still closes. Without this, ID3
+# would also pass if the guard simply refused every anchor carrying a pr_url.
+reset_identity
+printf '%s\n' \
+  'id-CLOSE|501|main|||||https://github.com/acme/repo/pull/501/files' \
+  > "$TMP/anchors"
+printf '%s\n' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN' \
+  > "$TMP/prs"
+OUTID3B="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed" \
+  && ok "(ID3b) a matching pr_url still closes — and a '/files' suffix is normalized away, not read as a different PR" \
+  || bad "(ID3b) matching pr_url must not be refused (got: $OUTID3B)"
+
+# (ID5) the ANCHORLESS scan reads the same class of answer from `gh pr list`, and
+# acts on it: it stamps anchorless_flagged on a LOCAL closed bead and mails an
+# escalation about it. An ignored pin there would resolve strangers' pull requests
+# onto this rig's beads, one escalation per number that happens to collide.
+reset_identity
+: > "$TMP/anchors"; : > "$TMP/prs"
+printf '%s\n' '601|false|polecat/dead-6|main' > "$TMP/openprs"
+printf '%s\n' '601	dead-6	-	pull_request	2026-01-01T00:00:00Z	-' > "$TMP/dead"
+OUTID5A="$(IDRUN)"                       # control: ours -> reported + escalated
+printf '%s\n' "$OUTID5A" | grep -q 'ANCHORLESS PR#601' \
+  && ok "(ID5) control: an open PR of OURS with a closed anchor IS reported anchorless" \
+  || bad "(ID5) control: anchorless finding expected (got: $OUTID5A)"
+eq "$(grep -c 'anchorless open PR#601' "$TMP/mail")" "1" "(ID5) control: the anchorless finding escalates once"
+reset_identity
+: > "$TMP/anchors"; : > "$TMP/prs"
+printf '%s\n' '601|false|polecat/dead-6|main' > "$TMP/openprs"
+printf '%s\n' '601	dead-6	-	pull_request	2026-01-01T00:00:00Z	-' > "$TMP/dead"
+echo 'stranger/repo' > "$TMP/ghdefault"; echo 1 > "$TMP/ignorerepo"
+OUTID5B="$(IDRUN 2>"$TMP/errid5")"
+printf '%s\n' "$OUTID5B" | grep -q 'ANCHORLESS' \
+  && bad "(ID5) a foreign repository's open PR must NEVER be reported anchorless against a local bead" \
+  || ok "(ID5) foreign PR list -> no anchorless finding"
+eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "0" "(ID5) foreign PR list -> nothing escalated"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(ID5) foreign PR list -> no local bead flagged"
+grep -q "did not name 'github.com/acme/repo' and were IGNORED" "$TMP/errid5" \
+  && ok "(ID5) the ignored rows are reported, never silently dropped" \
+  || bad "(ID5) must warn that the PR list was foreign (err: $(cat "$TMP/errid5"))"
+
+# --- HEAD IDENTITY (review tk-pka2d finding #3). ------------------------------
+# Everything above certifies where a pull request LIVES. A PR opened INTO this
+# repository FROM a fork lives here too — our host, our owner, our repo, our number,
+# one of OUR urls — so it passes every check above while its HEAD is a stranger's.
+# That matters more here than almost anywhere, because EVERY arm of this pass writes
+# terminal state off the object: it closes anchors as landed, escalates out-of-band
+# closes, flags retargets, and dispatches a rebase child whose `fix_branch` is taken
+# from the PR's own `headRefName` and force-pushed. Against a fork's head, that is a
+# rebase dispatched onto a branch this rig does not own.
+#
+# reset_identity's fixture triggers ALL FIVE arms (close, abandon, retarget, rebase,
+# stale-gate re-review) and ID-BASE above already proved each one fires when the head
+# is ours. So the fork cases below only have to change the head — every refusal is
+# then measured against a positive control that is known to act.
+
+# (HD1) FORK: every PR is opened from `mallory/repo`'s branch of the same name.
+# NOTHING durable may happen: no close, no abandon, no retarget, no rebase child, no
+# re-review child, no escalation mail.
+reset_identity
+printf '%s\n' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|mallory/repo|true' \
+  '502|CLOSED||false||main|polecat/id-ABAND|head502|UNKNOWN|UNKNOWN|mallory/repo|true' \
+  '503|OPEN||false||main|polecat/id-RETGT|head503|MERGEABLE|BLOCKED|mallory/repo|true' \
+  '504|OPEN||false||main|polecat/id-CONF|head504|CONFLICTING|DIRTY|mallory/repo|true' \
+  '505|OPEN||false||main|polecat/id-GATE|head505|MERGEABLE|BLOCKED|mallory/repo|true' \
+  > "$TMP/prs"
+OUTHD1="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed" \
+  && bad "(HD1) a fork's MERGED PR must never close our anchor as landed" \
+  || ok "(HD1) fork head -> merged-close refused"
+has '^id-ABAND$' "$TMP/abandoned" \
+  && bad "(HD1) a fork's CLOSED PR must never abandon our anchor" \
+  || ok "(HD1) fork head -> abandoned-close refused"
+has '^id-RETGT$' "$TMP/retargeted" \
+  && bad "(HD1) a fork's PR must never flag our anchor as retargeted" \
+  || ok "(HD1) fork head -> retarget flag refused"
+eq "$(grep -c 'Rebase PR#504' "$TMP/created")" "0" \
+   "(HD1) fork head -> NO rebase child dispatched (stale-base arm)"
+eq "$(grep -c 'Review PR#505' "$TMP/created")" "0" \
+   "(HD1) fork head -> NO re-review child dispatched (stale-gate arm)"
+eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "0" "(HD1) fork head -> nothing escalated"
+printf '%s\n' "$OUTHD1" | grep -q "PR#501 is opened from FORK 'mallory/repo'" \
+  && ok "(HD1) the refusal names the fork and this checkout's repository" \
+  || bad "(HD1) refusal must name the fork (got: $OUTHD1)"
+
+# (HD2) SELFCONTRA: the head repository IS ours and isCrossRepository says otherwise.
+# A self-contradicting identity is unestablished, not a tie to break.
+reset_identity
+printf '%s\n' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|acme/repo|true' \
+  > "$TMP/prs"
+OUTHD2="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed" \
+  && bad "(HD2) a self-contradicting head identity must record no state" \
+  || ok "(HD2) headRepository/isCrossRepository disagreement -> no state recorded"
+printf '%s\n' "$OUTHD2" | grep -q "PR#501 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
+  && ok "(HD2) the refusal names both halves of the contradiction" \
+  || bad "(HD2) refusal must name the contradiction (got: $OUTHD2)"
+
+# (HD3) NOHEAD: gh returns null head repository objects (a deleted head repository, a
+# schema shift). "I cannot tell whether this is a fork" must record nothing.
+reset_identity
+printf '%s\n' \
+  '501|MERGED|2026-07-01T00:00:00Z|false|5015015015015015|main|polecat/id-CLOSE|head501|MERGEABLE|CLEAN|-|false' \
+  > "$TMP/prs"
+OUTHD3="$(IDRUN)"
+has '^id-CLOSE$' "$TMP/closed" \
+  && bad "(HD3) an unreadable head identity must record no state" \
+  || ok "(HD3) null headRepository/headRepositoryOwner -> no state recorded"
+printf '%s\n' "$OUTHD3" | grep -q "PR#501 head identity is unreadable" \
+  && ok "(HD3) the refusal names the unreadable identity" \
+  || bad "(HD3) refusal must name the unreadable head (got: $OUTHD3)"
+
+# (HD4) BRANCHMISMATCH: our repository, our head repository, WRONG branch — the
+# anchor and the pull request describe different work. The rebase arm is the one that
+# makes this concrete: `fix_branch` comes from the PR's headRefName, so an unchecked
+# mismatch force-pushes a rebase onto a branch the anchor never recorded.
+reset_identity
+printf '%s\n' \
+  '504|OPEN||false||main|polecat/somebody-else|head504|CONFLICTING|DIRTY|acme/repo|false' \
+  > "$TMP/prs"
+OUTHD4="$(IDRUN)"
+eq "$(grep -c 'Rebase PR#504' "$TMP/created")" "0" \
+   "(HD4) head branch != anchor's recorded branch -> NO rebase child dispatched"
+printf '%s\n' "$OUTHD4" | grep -q "anchor id-CONF records branch 'polecat/id-CONF' but PR#504 is opened from 'polecat/somebody-else'" \
+  && ok "(HD4) the refusal names both branches" \
+  || bad "(HD4) refusal must name both branches (got: $OUTHD4)"
+
+# (ID-INV) the observer never merges anything, identity drift or not.
+eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \
+   "(ID-INV) the observer reached no merge path across every identity run"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

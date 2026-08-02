@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for pre-open-resolve.sh (the pre-open codex gate's PR-create pass,
-# tk-6d0vb.1.8). Stubs `gh` (branch head, existing-PR lookup, the real pr create)
-# and `gc` (bead-ledger list/show/update) on PATH. No live city, Dolt, network, or
-# real pull requests.
+# tk-6d0vb.1.8). Stubs `gh` (branch head, existing-PR lookup, the real pr create),
+# `git` (the origin remote the reads are pinned to) and `gc` (bead-ledger
+# list/show/update) on PATH. No live city, Dolt, network, or real pull requests.
 #
 # The pass opens the PR for each pre_open_gate anchor once codex is green at the
 # branch head, then flips it to pull_request → the unchanged merge gate. Covered:
@@ -15,10 +15,57 @@
 #            to pull_request (record the existing pr), NEVER a second `gh pr create`
 #            — this is the orphan-convoy convergence.
 #   (INV)    `gh pr create` is reached for EXACTLY the one green no-PR anchor.
+#   (URL)    both arms stamp the canonical pull-request URL as the anchor's identity.
 #   (CONV)   convergence: a flipped anchor leaves the pre_open_gate set, so a
 #            second pass neither re-creates nor re-flips it.
-#   (FS)     the pass gates codex-only (the branch may carry other pending checks);
-#            a green codex marker alone opens the PR.
+#
+# REPOSITORY IDENTITY (review tk-jc66l). A branch name does not name a repository,
+# and every fork of this repo can carry the same `polecat/<bead>`. Uncertified, a
+# foreign same-branch PR flips this anchor OUT of pre_open_gate — the only state
+# that retries PR-open — onto a stranger's pr_url/pr_number, so the real PR is
+# never opened by anything. Covered:
+#   (ID1) gh's current repository is MOVED (`gh repo set-default`/GH_REPO): every
+#         read and the create are pinned to the origin-derived repository, so the
+#         right branch answers and the PR is opened in the right repository.
+#   (ID2) GH_HOST is moved under a hostless pin: `<owner>/<repo>` names one
+#         repository PER HOST, so the pins are host-qualified (`--repo
+#         <host>/<owner>/<repo>`, `gh api --hostname`) and the drift changes nothing.
+#   (ID3) a gh that IGNORES the pin (a wrapper, a redirect after a transfer/rename):
+#         a foreign same-branch PR must NOT flip the anchor, and a foreign branch-head
+#         answer must NOT open a PR. Nothing stamped; the anchor stays pre_open_gate.
+#   (ID4) `gh pr create` answers with a PR in another repository: the returned URL is
+#         certified BEFORE it becomes this anchor's identity — nothing stamped.
+#   (ID5) this checkout's origin cannot be resolved at all -> NOTHING is opened,
+#         flipped or stamped this pass (fail closed: an opened PR cannot be retried
+#         away).
+#
+# HEAD IDENTITY (review tk-j0q41). Pinning a read to the origin repository says where
+# the ANSWER came from, never which branch — in which repository — the pull request is
+# opened FROM. A FORK'S PR INTO THIS REPOSITORY HAS ONE OF OUR URLS AND ONE OF THEIR
+# BRANCHES, so the url check passes on it; and `--head` filters on the branch NAME
+# alone, so it is listed next to ours with nothing but arrival order between them.
+# Covered:
+#   (FK1) a same-base fork PR reusing the branch name is NOT this anchor's PR: it is
+#         refused by name, and the anchor is not flipped onto it.
+#   (FK2) ...and a name collision is not a licence to open one either — nothing is
+#         created for that branch; the anchor stays pre_open_gate for an operator.
+#   (FK3) a fork row arriving BEFORE a valid same-repo row does not win: every row is
+#         certified and the branch's own OPEN pull request is the one selected.
+#   (FK4) a same-repo, same-head PR targeting a DIFFERENT base is not this anchor's
+#         either — the anchor lands somewhere else than that pull request does.
+#   (FK5) a NULL head repository (gh's answer for a deleted fork) is UNREADABLE, not
+#         "not ours": nothing is flipped and nothing is created.
+#   (FK6) a create that answers with a fork-head pull request is caught by reading the
+#         created PR back BY NUMBER and certifying it — nothing is stamped.
+#   (FK7) no pull request is ever resolved by BRANCH NAME (`gh pr view <branch>`):
+#         that lookup is the gap itself, and the create-race discovery uses the same
+#         certified scan instead.
+#   (RACE) a create race (a concurrent open) is still discovered — via that scan — and
+#         the discovered PR is flipped onto only because it certified.
+#   (READ) a FAILED `gh pr list` is not an empty one: "I could not see it" must not
+#         become "no PR exists", which would open a twin.
+#   (TRUNC) a full page of branch-name matches may be truncated, so "no pull request
+#         of ours" cannot be concluded from it — refuse rather than open a twin.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,16 +101,32 @@ polecat/feat-c|HEADC
 polecat/feat-d|HEADD
 H
 
-# Existing OPEN PRs by branch (gh pr list --head <branch>): only feat-d has one.
+# PULL REQUESTS, in the shape `gh pr list --json`/`gh pr view --json` answers:
+#   branch|number|url|state|baseRefName|headRefName|<headRepoOwner>/<headRepoName>
+# The last field is the half a same-repo URL cannot answer, and the half a fork
+# differs in. `-` models gh's NULL head repository (the fork was deleted); an EMPTY
+# field models a partial or schema-shifted response. Both must read as
+# UNCERTIFIABLE, never as "not ours".
+#
+# Existing PRs by branch (gh pr list --head <branch>): only feat-d has one.
 cat > "$TMP/existpr" <<'E'
-polecat/feat-d|404|https://github.com/o/r/pull/404
+polecat/feat-d|404|https://github.com/acme/repo/pull/404|OPEN|main|polecat/feat-d|acme/repo
 E
 
-# What `gh pr create --head <branch>` produces (branch|number|url): only feat-a
-# reaches create (it is the sole green, no-PR anchor).
+# What `gh pr create --head <branch>` produces, and what reading that PR back by
+# number then answers: only feat-a reaches create (the sole green, no-PR anchor).
 cat > "$TMP/newpr" <<'N'
-polecat/feat-a|501|https://github.com/o/r/pull/501
+polecat/feat-a|501|https://github.com/acme/repo/pull/501|OPEN|main|polecat/feat-a|acme/repo
 N
+
+# A concurrent open: `gh pr create` finds the branch already has a PR, so it emits
+# nothing — and the row appears in the existing-PR list from then on.
+: > "$TMP/racepr"
+
+# Branches for which a FOREIGN repository has a same-named branch with an open PR.
+# Only consulted when an invocation resolved somewhere other than the origin
+# repository — i.e. when a pin was ignored (ID3).
+: > "$TMP/foreignpr"
 
 # Review beads carrying the codex verdict (anchor_id|review_id) + notes.
 cat > "$TMP/reviews" <<'R'
@@ -74,54 +137,209 @@ rev-green|Codex signoff: LGTM (pre-open).
 NT
 
 : > "$TMP/created"; : > "$TMP/fliplog"; : > "$TMP/flipped"; : > "$TMP/comments"
+: > "$TMP/meta"; : > "$TMP/drop"
+: > "$TMP/createdwhere"; : > "$TMP/flipurl"; : > "$TMP/commentwhere"
+: > "$TMP/viewbyname"
+# Identity knobs, all clear for the baseline runs.
+: > "$TMP/ghdefault"; : > "$TMP/ghhost"; : > "$TMP/ignorerepo"
+: > "$TMP/ignorerepocreate"; : > "$TMP/repofail"; : > "$TMP/listfail"
+
+# --- git stub. ----------------------------------------------------------------
+# `git remote get-url origin` -> what this checkout pushes to, and the ONLY source
+# of the repository every read and the create are pinned to. Deliberately NOT
+# `gh`: gh's idea of the current repository is movable, and moving it must not
+# move the expectation. $FAKE_REPOFAIL makes it unanswerable, as a checkout with
+# no origin remote would (ID5).
+cat > "$TMP/bin/git" <<'GIT'
+#!/usr/bin/env bash
+if [ "$1" = "remote" ] && [ "$2" = "get-url" ] && [ "$3" = "origin" ]; then
+  [ -s "$FAKE_REPOFAIL" ] && exit 1
+  printf 'https://github.com/acme/repo.git\n'; exit 0
+fi
+exit 0
+GIT
+chmod +x "$TMP/bin/git"
 
 # --- gh stub: api (branch head), pr list/create/view/comment. -----------------
+# EVERY SUBCOMMAND RESOLVES IN gh's CURRENT REPOSITORY UNLESS A PIN OVERRIDES IT.
+# $FAKE_GH_DEFAULT moves that default exactly as `gh repo set-default`, GH_REPO or
+# a different cwd would (`acme/repo` when unset), and $FAKE_GH_HOST moves the host
+# a HOSTLESS `--repo o/r` is filled from (`gh help environment`) — the two ways a
+# stranger's same-branch PR gets served to this pass. $FAKE_IGNORE_REPO models a
+# gh that ignores the pins entirely, so the returned URL is the only thing left to
+# catch it; $FAKE_IGNORE_REPO_CREATE narrows that to `pr create` alone (a redirect
+# on the write path), which is the case the stamp-time certification exists for.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
-cmd="$1"; sub="${2:-}"
-if [ "$cmd" = "api" ]; then
-  # gh api "repos/{owner}/{repo}/commits/<branch>" --jq .sha  -> emit the head oid
-  path="$2"
+ghdefault=$(cat "$FAKE_GH_DEFAULT" 2>/dev/null)
+[ -n "$ghdefault" ] || ghdefault="acme/repo"
+ghhost=$(cat "$FAKE_GH_HOST" 2>/dev/null)
+[ -n "$ghhost" ] || ghhost="github.com"
+
+# Host-qualify a `[HOST/]OWNER/REPO`, filling the host from GH_HOST when omitted.
+qualify() {
+  case "$1" in
+    */*/*) printf '%s' "$1" ;;
+    *)     printf '%s/%s' "$ghhost" "$1" ;;
+  esac
+}
+
+# Fixture rows on stdin -> the JSON array `--json` answers with. The head-repository
+# object is what gh really returns: a nested owner/name pair that is NULL when the
+# head repository is gone, which is why the script assembles it defensively.
+rows_json() {
+  jq -R -s --arg origin "acme/repo" '
+    [ split("\n")[] | select(length > 0) | split("|")
+      | (.[6] // "") as $hr
+      | { number: (if ((.[1] // "") | length) > 0 then (.[1] | tonumber) else null end),
+          url: (.[2] // ""), state: (.[3] // ""),
+          baseRefName: (.[4] // ""), headRefName: (.[5] // ""),
+          headRefOid: (.[7] // ""),
+          isCrossRepository: ($hr != $origin) }
+        + ( if $hr == "" or $hr == "-"
+            then { headRepositoryOwner: null, headRepository: null }
+            else { headRepositoryOwner: { login: ($hr | split("/")[0]) },
+                   headRepository:      { name:  ($hr | split("/")[1]) } } end ) ]'
+}
+
+if [ "$1" = "api" ]; then
+  # gh api [--hostname H] repos/<owner>/<repo>/commits/<branch>
+  # `repos/{owner}/{repo}/...` is a PLACEHOLDER path gh fills from its CURRENT
+  # repository — the unpinned form. An explicit `repos/o/r/...` path plus
+  # `--hostname` is the pin.
+  shift; hostpin=""; path=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --hostname) hostpin="$2"; shift 2 ;;
+      --jq|-q|-H|-f|-F) shift 2 ;;
+      -*) shift ;;
+      *) [ -n "$path" ] || path="$1"; shift ;;
+    esac
+  done
+  case "$path" in
+    'repos/{owner}/{repo}/'*) apirepo="$ghdefault" ;;
+    repos/*) apirepo=$(printf '%s' "$path" | sed -n 's#^repos/\([^/][^/]*/[^/][^/]*\)/.*#\1#p') ;;
+    *)       apirepo="$ghdefault" ;;
+  esac
+  apihost="$hostpin"; [ -n "$apihost" ] || apihost="$ghhost"
+  if [ -s "$FAKE_IGNORE_REPO" ]; then apirepo="$ghdefault"; apihost="$ghhost"; fi
   branch=$(printf '%s' "$path" | sed 's#^repos/[^/]*/[^/]*/commits/##')
-  awk -F'|' -v b="$branch" '$1==b{print $2; exit}' "$FAKE_HEADS"
+  sha=$(awk -F'|' -v b="$branch" '$1==b{print $2; exit}' "$FAKE_HEADS")
+  [ -n "$sha" ] || exit 1
+  # A foreign repository answers for ITS branch of the same name. Deliberately the
+  # SAME sha as ours: nothing but the repository the commit lives in distinguishes
+  # the answer, so only the html_url certification can catch it.
+  jq -n --arg s "$sha" --arg r "$apirepo" --arg h "$apihost" \
+    '{sha:$s, html_url:("https://" + $h + "/" + $r + "/commit/" + $s)}'
   exit 0
 fi
+
+# Which repository this invocation actually resolves in: the `--repo` pin when
+# honoured, else gh's movable default.
+cmd="$1"; sub="${2:-}"
+RESOLVED=""; prev=""
+for a in "$@"; do
+  case "$prev" in --repo|-R) RESOLVED="$a" ;; esac
+  prev="$a"
+done
+[ -s "$FAKE_IGNORE_REPO" ] && RESOLVED=""
+if [ "$cmd $sub" = "pr create" ] && [ -s "$FAKE_IGNORE_REPO_CREATE" ]; then RESOLVED=""; fi
+[ -n "$RESOLVED" ] || RESOLVED="$ghdefault"
+RESOLVED=$(qualify "$RESOLVED")
+
 case "$cmd $sub" in
-  "pr list")   # --head <branch> --state open --json number,url --limit 1
+  "pr list")   # --head <branch> --state all --repo R --json <fields> --limit N
     head=""; shift 2
     while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; esac; done
-    row=$(awk -F'|' -v b="$head" '$1==b{print; exit}' "$FAKE_EXISTPR")
-    if [ -n "$row" ]; then
-      num=$(printf '%s' "$row" | cut -d'|' -f2); url=$(printf '%s' "$row" | cut -d'|' -f3)
-      jq -n --arg n "$num" --arg u "$url" '[{number:($n|tonumber), url:$u}]'
+    # A read that FAILS. Its stdout is empty and its exit status is non-zero — the
+    # difference between "nothing is open from this branch" and "I could not ask".
+    [ -s "$FAKE_LISTFAIL" ] && exit 1
+    if [ "$RESOLVED" = "github.com/acme/repo" ]; then
+      awk -F'|' -v b="$head" '$1==b{print}' "$FAKE_EXISTPR" | rows_json
+    elif grep -qxF "$head" "$FAKE_FOREIGNPR" 2>/dev/null; then
+      # THE HAZARD: a stranger's repository carries a branch of the same name with
+      # an open PR. Same shape as ours, different repository.
+      printf '%s|777|https://%s/%s/pull/777|OPEN|main|%s|%s\n' \
+        "$head" "${RESOLVED%%/*}" "${RESOLVED#*/}" "$head" "${RESOLVED#*/}" | rows_json
     else printf '[]\n'; fi ;;
-  "pr create") # --base X --head <branch> --title T --body-file F
+  "pr create") # --repo R --base X --head <branch> --title T --body-file F
     head=""; shift 2
     while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; esac; done
     row=$(awk -F'|' -v b="$head" '$1==b{print; exit}' "$FAKE_NEWPR")
-    if [ -n "$row" ]; then
-      printf '%s\n' "$head" >> "$FAKE_CREATED"
+    if [ -z "$row" ]; then
+      # A CONCURRENT OPEN. Real `gh pr create` fails here ("a pull request already
+      # exists"), and the PR is visible to the next list from then on.
+      racerow=$(awk -F'|' -v b="$head" '$1==b{print; exit}' "$FAKE_RACEPR")
+      [ -n "$racerow" ] && printf '%s\n' "$racerow" >> "$FAKE_EXISTPR"
+      exit 1
+    fi
+    printf '%s\n' "$head" >> "$FAKE_CREATED"
+    # WHERE the PR was opened, not just for which branch: a PR opened in the
+    # wrong repository is the failure these identity tests exist to catch.
+    printf '%s\t%s\n' "$head" "$RESOLVED" >> "$FAKE_CREATEDWHERE"
+    if [ "$RESOLVED" = "github.com/acme/repo" ]; then
       printf '%s\n' "$(printf '%s' "$row" | cut -d'|' -f3)"   # the new PR url
+    else
+      printf 'https://%s/%s/pull/%s\n' "${RESOLVED%%/*}" "${RESOLVED#*/}" \
+        "$(printf '%s' "$row" | cut -d'|' -f2)"
     fi ;;
-  "pr view")   # <arg> --json <field> -q <expr>   (arg = branch for url, url for number)
+  "pr view")   # <number> --repo R --json <fields>   (reading a created PR back)
     arg="$3"; shift 3
-    field=""
-    while [ $# -gt 0 ]; do case "$1" in --json) field="$2"; shift 2 ;; *) shift ;; esac; done
-    case "$field" in
-      url)    awk -F'|' -v b="$arg" '$1==b{print $3; exit}' "$FAKE_NEWPR" "$FAKE_EXISTPR" ;;
-      number) awk -F'|' -v u="$arg" '$3==u{print $2; exit}' "$FAKE_NEWPR" "$FAKE_EXISTPR" ;;
-    esac ;;
-  "pr comment") # <num> --body ...
-    printf '%s\n' "$3" >> "$FAKE_COMMENTS" ;;
+    # BY NUMBER ONLY. Resolving a pull request by BRANCH NAME is the identity gap
+    # this pass closed — `gh pr view <branch>` picks whatever is open from a branch
+    # of that name, fork or not. Record any relapse and fail the call.
+    case "$arg" in
+      ''|*[!0-9]*) printf '%s\n' "$arg" >> "$FAKE_VIEWBYNAME"; exit 1 ;;
+    esac
+    row=$(awk -F'|' -v n="$arg" '$2==n{print; exit}' "$FAKE_NEWPR" "$FAKE_EXISTPR")
+    [ -n "$row" ] || exit 1
+    if [ "$RESOLVED" != "github.com/acme/repo" ]; then
+      # Answered from somewhere else: a stranger's pull request of the same number.
+      row=$(printf '%s|%s|https://%s/%s/pull/%s|OPEN|main|%s|%s' \
+        "$(printf '%s' "$row" | cut -d'|' -f1)" "$arg" \
+        "${RESOLVED%%/*}" "${RESOLVED#*/}" "$arg" \
+        "$(printf '%s' "$row" | cut -d'|' -f6)" "${RESOLVED#*/}")
+    fi
+    # headRefOid — the commit the pull request is actually OPEN AT, which is what the
+    # create path certifies against the reviewed head. Column 8 when a fixture states
+    # it; otherwise the branch's live head, so every pre-existing row keeps meaning
+    # "opened at exactly the head that was just certified" and only the drift case
+    # below has to say anything.
+    if [ -z "$(printf '%s' "$row" | cut -d'|' -f8)" ]; then
+      row="$row|$(awk -F'|' -v b="$(printf '%s' "$row" | cut -d'|' -f1)" \
+                    '$1==b{print $2; exit}' "$FAKE_HEADS")"
+    fi
+    printf '%s\n' "$row" | rows_json | jq -c '.[0]' ;;
+  "pr comment") # <num> --repo R --body ...
+    printf '%s\n' "$3" >> "$FAKE_COMMENTS"
+    printf '%s\t%s\n' "$3" "$RESOLVED" >> "$FAKE_COMMENTWHERE" ;;
 esac
 exit 0
 GH
 chmod +x "$TMP/bin/gh"
 
-# --- gc stub: bd list (anchors + review lookup), bd show (notes), bd update. ---
+# --- gc stub: bd list (anchors + review lookup), bd show (notes + metadata),
+#     bd update (a real per-key ledger). ------------------------------------------
+#
+# THE LEDGER IS MODELLED, not just the command line. What is under test at the flip
+# is an ORDER of writes and a RE-READ (review tk-pka2d finding #1), and a stub that
+# only records "an update mentioning merge_result happened" cannot express either:
+# it would report a flip for a write that never persisted, and `gc bd show` would
+# have no metadata to verify against. So writes land in a `<id>\t<key>\t<value>`
+# store (last write wins) and `bd show` reads that store back.
+#
+# $FAKE_DROP is the partial write itself: a `<id>\t<key>` row makes writes of that
+# key for that bead vanish while `gc bd update` still exits 0 — exactly what a
+# `gc bd update` that persisted some of its --set-metadata flags and not others
+# looks like from the caller's side.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 [ "$1" = "bd" ] || exit 0
+
+meta_get() {
+  awk -F'\t' -v i="$1" -v k="$2" '$1==i && $2==k{v=$3} END{printf "%s", v}' "$FAKE_META" 2>/dev/null
+}
+
 case "$2" in
   list)
     case "$*" in
@@ -129,7 +347,10 @@ case "$2" in
         out=""
         while IFS='|' read -r id branch target codexmark; do
           [ -n "$id" ] || continue
-          grep -qx "$id" "$FAKE_FLIPPED" 2>/dev/null && continue   # convergence
+          # Convergence is a LEDGER fact: an anchor whose merge_result actually
+          # PERSISTED as pull_request has left this scan. One whose flip did not
+          # persist is still in it — which is the whole point of splitting the write.
+          [ "$(meta_get "$id" merge_result)" = "pull_request" ] && continue
           obj=$(printf '{"id":"%s","title":"impl %s","description":"desc %s","metadata":{"branch":"%s","merged_target":"%s","check.codex":"%s","merge_result":"pre_open_gate"}}' \
             "$id" "$id" "$id" "$branch" "$target" "$codexmark")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
@@ -142,17 +363,37 @@ case "$2" in
       *) printf '[]\n' ;;
     esac ;;
   show)
+    # Serves BOTH readers: the review bead's verdict notes, and the anchor's
+    # metadata (what the flip verifies its own writes against).
     rid="$3"
     notes=$(awk -F'|' -v r="$rid" '$1==r{print $2; exit}' "$FAKE_NOTES" 2>/dev/null)
-    jq -n --arg n "$notes" '[{notes:$n}]' ;;
+    awk -F'\t' -v i="$rid" '$1==i{print $2"\t"$3}' "$FAKE_META" 2>/dev/null \
+      | jq -R -s --arg n "$notes" '
+          [ split("\n")[] | select(length > 0) | split("\t")
+            | {key: .[0], value: (.[1] // "")} ] | from_entries
+          | [{notes: $n, metadata: .}]' ;;
   update)
-    id="$3"
-    case "$*" in
-      *merge_result=pull_request*)
-        prnum=$(printf '%s' "$*" | sed -n 's/.*pr_number=\([0-9][0-9]*\).*/\1/p')
-        printf '%s\t%s\n' "$id" "$prnum" >> "$FAKE_FLIPLOG"
-        printf '%s\n' "$id" >> "$FAKE_FLIPPED" ;;
-    esac ;;
+    id="$3"; shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --set-metadata)
+          k="${2%%=*}"; v="${2#*=}"
+          if grep -qxF "$(printf '%s\t%s' "$id" "$k")" "$FAKE_DROP" 2>/dev/null; then
+            shift 2; continue      # the write vanishes; the command still succeeds
+          fi
+          printf '%s\t%s\t%s\n' "$id" "$k" "$v" >> "$FAKE_META"
+          # A flip is recorded only when the VISIBILITY SWITCH itself persisted, and
+          # it reports the identity fields as the ledger then holds them — so a flip
+          # stamped without them could not pass the pr_number/pr_url assertions.
+          if [ "$k" = "merge_result" ] && [ "$v" = "pull_request" ]; then
+            printf '%s\t%s\n' "$id" "$(meta_get "$id" pr_number)" >> "$FAKE_FLIPLOG"
+            printf '%s\t%s\n' "$id" "$(meta_get "$id" pr_url)" >> "$FAKE_FLIPURL"
+            printf '%s\n' "$id" >> "$FAKE_FLIPPED"
+          fi
+          shift 2 ;;
+        *) shift ;;
+      esac
+    done ;;
 esac
 exit 0
 GC
@@ -162,7 +403,14 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_HEADS="$TMP/heads" FAKE_EXISTPR="$TMP/existpr" \
        FAKE_NEWPR="$TMP/newpr" FAKE_REVIEWS="$TMP/reviews" FAKE_NOTES="$TMP/notes" \
        FAKE_CREATED="$TMP/created" FAKE_FLIPLOG="$TMP/fliplog" FAKE_FLIPPED="$TMP/flipped" \
-       FAKE_COMMENTS="$TMP/comments"
+       FAKE_COMMENTS="$TMP/comments" FAKE_CREATEDWHERE="$TMP/createdwhere" \
+       FAKE_FLIPURL="$TMP/flipurl" FAKE_COMMENTWHERE="$TMP/commentwhere" \
+       FAKE_FOREIGNPR="$TMP/foreignpr" FAKE_RACEPR="$TMP/racepr" \
+       FAKE_VIEWBYNAME="$TMP/viewbyname" FAKE_LISTFAIL="$TMP/listfail" \
+       FAKE_GH_DEFAULT="$TMP/ghdefault" FAKE_GH_HOST="$TMP/ghhost" \
+       FAKE_IGNORE_REPO="$TMP/ignorerepo" \
+       FAKE_IGNORE_REPO_CREATE="$TMP/ignorerepocreate" FAKE_REPOFAIL="$TMP/repofail" \
+       FAKE_META="$TMP/meta" FAKE_DROP="$TMP/drop"
 
 # --- Run 1. -------------------------------------------------------------------
 OUT1="$(bash "$SCRIPT")"
@@ -208,15 +456,441 @@ grep -qF 'gh pr list --head "$branch" --state all' "$SCRIPT" \
 # (INV) exactly one `gh pr create` this pass — only the green no-PR anchor.
 eq "$(wc -l < "$TMP/created" | tr -d ' ')" "1" "(INV) exactly one PR created (the green no-PR anchor)"
 
+# (URL) the identity stamped on the anchor is the canonical pull-request URL, in
+# BOTH arms — it is what every later pass re-derives the repository from.
+grep -q '^bead-GREEN	https://github.com/acme/repo/pull/501$' "$TMP/flipurl" \
+  && ok "(URL) the opened PR is stamped with its canonical URL" \
+  || bad "(URL) opened-PR pr_url (got: $(cat "$TMP/flipurl"))"
+grep -q '^bead-HASPR	https://github.com/acme/repo/pull/404$' "$TMP/flipurl" \
+  && ok "(URL) the discovered PR is stamped with its canonical URL" \
+  || bad "(URL) existing-PR pr_url (got: $(cat "$TMP/flipurl"))"
+
 # Summary counters: 1 opened, 1 flipped, 2 held.
 printf '%s\n' "$OUT1" | grep -q "1 opened, 1 flipped, 2 held" \
   && ok "run 1 summary reports 1 opened, 1 flipped, 2 held" || bad "run 1 summary (got: $OUT1)"
 
 # --- Run 2: convergence. Flipped anchors left the pre_open_gate set. -----------
-OUT2="$(bash "$SCRIPT")"
+bash "$SCRIPT" >/dev/null
 eq "$(wc -l < "$TMP/created" | tr -d ' ')" "1" "(CONV) green anchor not re-created on second pass"
 eq "$(grep -c '^bead-GREEN	' "$TMP/fliplog")" "1" "(CONV) green anchor not re-flipped on second pass"
 eq "$(grep -c '^bead-HASPR	' "$TMP/fliplog")" "1" "(CONV) has-PR anchor not re-flipped on second pass"
+
+# ==============================================================================
+# REPOSITORY IDENTITY (review tk-jc66l).
+#
+# A fresh two-anchor scenario, replayed under each way gh's idea of "this
+# repository" can drift:
+#   bead-IDG / polecat/feat-id  : no PR here -> should OPEN one (909)
+#   bead-IDH / polecat/feat-idh : a PR here (808) -> should FLIP onto it
+# A stranger's repository carries `polecat/feat-idh` with an open PR too, so an
+# unpinned or uncertified lookup has something wrong to find.
+# ==============================================================================
+id_reset() {
+  cat > "$TMP/anchors" <<'A'
+bead-IDG|polecat/feat-id|main|green@HEADID
+bead-IDH|polecat/feat-idh|main|green@HEADIDH
+A
+  cat > "$TMP/heads" <<'H'
+polecat/feat-id|HEADID
+polecat/feat-idh|HEADIDH
+H
+  cat > "$TMP/existpr" <<'E'
+polecat/feat-idh|808|https://github.com/acme/repo/pull/808|OPEN|main|polecat/feat-idh|acme/repo
+E
+  cat > "$TMP/newpr" <<'N'
+polecat/feat-id|909|https://github.com/acme/repo/pull/909|OPEN|main|polecat/feat-id|acme/repo
+N
+  printf 'polecat/feat-idh\n' > "$TMP/foreignpr"
+  : > "$TMP/racepr"
+  : > "$TMP/created"; : > "$TMP/createdwhere"; : > "$TMP/fliplog"
+  : > "$TMP/flipurl"; : > "$TMP/flipped"; : > "$TMP/comments"; : > "$TMP/commentwhere"
+  : > "$TMP/meta"; : > "$TMP/drop"
+  : > "$TMP/viewbyname"
+  : > "$TMP/ghdefault"; : > "$TMP/ghhost"; : > "$TMP/ignorerepo"
+  : > "$TMP/ignorerepocreate"; : > "$TMP/repofail"; : > "$TMP/listfail"
+}
+
+# --- (ID1) gh's current repository is MOVED. ----------------------------------
+# `gh repo set-default evil/repo` / GH_REPO. Every read and the create are pinned
+# to the ORIGIN-derived repository, so the drift changes nothing: the right branch
+# head answers, the right existing PR is found, and the new PR is opened here.
+id_reset
+printf 'evil/repo\n' > "$TMP/ghdefault"
+bash "$SCRIPT" >"$TMP/outid1" 2>"$TMP/errid1"
+grep -q '^polecat/feat-id	github.com/acme/repo$' "$TMP/createdwhere" \
+  && ok "(ID1) moved gh default -> the PR is still opened in the ORIGIN repository" \
+  || bad "(ID1) PR must be opened in github.com/acme/repo (got: $(cat "$TMP/createdwhere"))"
+grep -q '^bead-IDG	909$' "$TMP/fliplog" \
+  && ok "(ID1) the opened PR's own number is stamped (909, not the stranger's)" \
+  || bad "(ID1) flip pr_number (got: $(cat "$TMP/fliplog"))"
+grep -q '^bead-IDH	808$' "$TMP/fliplog" \
+  && ok "(ID1) the existing-PR lookup found OUR PR#808, not the foreign same-branch PR#777" \
+  || bad "(ID1) existing-PR flip (got: $(cat "$TMP/fliplog"))"
+grep -q '	github.com/acme/repo$' "$TMP/commentwhere" \
+  && ok "(ID1) the codex verdict is commented on the ORIGIN repository's PR" \
+  || bad "(ID1) comment repository (got: $(cat "$TMP/commentwhere"))"
+
+# --- (ID2) GH_HOST drift under a hostless pin. --------------------------------
+# `<owner>/<repo>` names one repository PER HOST, and gh fills the host of a
+# hostless `--repo` from GH_HOST. The pins here are host-qualified (and `gh api`
+# gets `--hostname`), so a moved GH_HOST cannot re-host them.
+id_reset
+printf 'ghe.evil.example\n' > "$TMP/ghhost"
+bash "$SCRIPT" >"$TMP/outid2" 2>"$TMP/errid2"
+grep -q '^polecat/feat-id	github.com/acme/repo$' "$TMP/createdwhere" \
+  && ok "(ID2) moved GH_HOST -> the PR is still opened on github.com, not the drifted host" \
+  || bad "(ID2) PR must be opened in github.com/acme/repo (got: $(cat "$TMP/createdwhere"))"
+grep -q '^bead-IDH	808$' "$TMP/fliplog" \
+  && ok "(ID2) moved GH_HOST -> the existing-PR lookup still answers from github.com/acme/repo" \
+  || bad "(ID2) existing-PR flip under host drift (got: $(cat "$TMP/fliplog"))"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "1" "(ID2) exactly one PR opened under host drift"
+
+# --- (ID3) a gh that IGNORES the pin. -----------------------------------------
+# A wrapper, or a redirect after a repository transfer/rename. The pins are gone,
+# so the returned URL is the only thing left to catch it — and it must, in BOTH
+# arms: the foreign same-branch PR must not flip the anchor, and the foreign
+# branch-head answer must not open a PR. Nothing stamped; both anchors stay
+# pre_open_gate, which is the only state that retries PR-open.
+id_reset
+printf 'evil/repo\n' > "$TMP/ghdefault"
+printf '1\n' > "$TMP/ignorerepo"
+bash "$SCRIPT" >"$TMP/outid3" 2>"$TMP/errid3"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" "(ID3) ignored pin -> NO anchor flipped out of pre_open_gate"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" "(ID3) ignored pin -> NO PR opened"
+grep -q "another repository's pull request" "$TMP/errid3" \
+  && ok "(ID3) the foreign same-branch PR is refused by name (not flipped)" \
+  || bad "(ID3) must refuse the foreign same-branch PR (err: $(cat "$TMP/errid3"))"
+grep -q "head answered from 'github.com/evil/repo'" "$TMP/errid3" \
+  && ok "(ID3) the foreign branch-head answer is refused by name (no PR opened at it)" \
+  || bad "(ID3) must refuse the foreign branch-head answer (err: $(cat "$TMP/errid3"))"
+
+# --- (ID4) `gh pr create` answers with a PR in another repository. ------------
+# The pins are honoured everywhere else, so the head is certified and create IS
+# reached — and it answers with a stranger's URL. Certifying the answer BEFORE it
+# becomes this anchor's identity is the whole point: nothing is stamped.
+id_reset
+printf 'evil/repo\n' > "$TMP/ghdefault"
+printf '1\n' > "$TMP/ignorerepocreate"
+bash "$SCRIPT" >"$TMP/outid4" 2>"$TMP/errid4"
+grep -q '^bead-IDG	' "$TMP/fliplog" \
+  && bad "(ID4) a foreign create answer must NOT be stamped as this anchor's PR" \
+  || ok "(ID4) foreign create answer -> pr_url/pr_number NOT stamped"
+grep -q "NOTHING stamped, anchor stays pre_open_gate" "$TMP/errid4" \
+  && ok "(ID4) the refusal says what was not done, and that the anchor can still retry" \
+  || bad "(ID4) refusal message (err: $(cat "$TMP/errid4"))"
+# The other anchor is untouched by this: its PR already exists here, and the
+# existing-PR arm never reaches create.
+grep -q '^bead-IDH	808$' "$TMP/fliplog" \
+  && ok "(ID4) the create-path refusal does not disturb the existing-PR arm" \
+  || bad "(ID4) existing-PR arm should still flip (got: $(cat "$TMP/fliplog"))"
+
+# --- (ID5) unresolvable origin. -----------------------------------------------
+# No origin remote, or one this script cannot parse. Every branch below would be
+# resolved — and a PR CREATED — in a repository it cannot name, and an opened PR
+# is a published artifact no retry can take back. Fail closed.
+id_reset
+printf '1\n' > "$TMP/repofail"
+bash "$SCRIPT" >"$TMP/outid5" 2>"$TMP/errid5"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" "(ID5) unresolvable origin -> no PR opened this pass"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" "(ID5) unresolvable origin -> no anchor flipped this pass"
+grep -q "cannot resolve this checkout's origin repository" "$TMP/errid5" \
+  && ok "(ID5) unresolvable origin is announced, not silent" \
+  || bad "(ID5) must warn that the origin is unresolvable (err: $(cat "$TMP/errid5"))"
+
+# ==============================================================================
+# HEAD IDENTITY — THE FORK GAP (review tk-j0q41).
+#
+# Everything above certifies WHERE THE ANSWER CAME FROM. None of it asks where the
+# pull request is opened FROM. A fork's PR into this repository is served by the
+# pinned read, carries one of OUR urls, and is matched by `--head` on the branch
+# NAME — so every check above passes on it while its head is a stranger's.
+#
+#   bead-FORK  : only a fork's PR is open from a branch of this name
+#   bead-ORDER : the fork's PR is listed FIRST, ours (open 808, closed 700) after
+#   bead-BASE  : our repository, our branch — but it targets a different base
+#   bead-NULLR : the head repository is NULL (a deleted fork) -> unreadable
+#   bead-ADOPT : no PR here; the create answers with a FORK-HEAD pull request
+# ==============================================================================
+fk_reset() {
+  cat > "$TMP/anchors" <<'A'
+bead-FORK|polecat/feat-fork|main|green@HEADFK
+bead-ORDER|polecat/feat-order|main|green@HEADOR
+bead-BASE|polecat/feat-base|main|green@HEADBS
+bead-NULLR|polecat/feat-nullr|main|green@HEADNR
+bead-ADOPT|polecat/feat-adopt|main|green@HEADAD
+A
+  cat > "$TMP/heads" <<'H'
+polecat/feat-fork|HEADFK
+polecat/feat-order|HEADOR
+polecat/feat-base|HEADBS
+polecat/feat-nullr|HEADNR
+polecat/feat-adopt|HEADAD
+H
+  # The fork rows come FIRST on purpose: `--limit 1` would have taken them.
+  cat > "$TMP/existpr" <<'E'
+polecat/feat-fork|777|https://github.com/acme/repo/pull/777|OPEN|main|polecat/feat-fork|forker/repo
+polecat/feat-order|778|https://github.com/acme/repo/pull/778|OPEN|main|polecat/feat-order|forker/repo
+polecat/feat-order|700|https://github.com/acme/repo/pull/700|CLOSED|main|polecat/feat-order|acme/repo
+polecat/feat-order|808|https://github.com/acme/repo/pull/808|OPEN|main|polecat/feat-order|acme/repo
+polecat/feat-base|505|https://github.com/acme/repo/pull/505|OPEN|integration/other|polecat/feat-base|acme/repo
+polecat/feat-nullr|606|https://github.com/acme/repo/pull/606|OPEN|main|polecat/feat-nullr|-
+E
+  # `gh pr create` answers with a real url in this repository — but the pull request
+  # it names is opened from a FORK's branch.
+  cat > "$TMP/newpr" <<'N'
+polecat/feat-adopt|909|https://github.com/acme/repo/pull/909|OPEN|main|polecat/feat-adopt|forker/repo
+N
+  : > "$TMP/foreignpr"; : > "$TMP/racepr"
+  : > "$TMP/created"; : > "$TMP/createdwhere"; : > "$TMP/fliplog"
+  : > "$TMP/flipurl"; : > "$TMP/flipped"; : > "$TMP/comments"; : > "$TMP/commentwhere"
+  : > "$TMP/meta"; : > "$TMP/drop"
+  : > "$TMP/viewbyname"
+  : > "$TMP/ghdefault"; : > "$TMP/ghhost"; : > "$TMP/ignorerepo"
+  : > "$TMP/ignorerepocreate"; : > "$TMP/repofail"; : > "$TMP/listfail"
+}
+
+fk_reset
+bash "$SCRIPT" >"$TMP/outfk" 2>"$TMP/errfk"
+
+# (FK1) a fork's same-named branch is not this anchor's work.
+grep -q '^bead-FORK	' "$TMP/fliplog" \
+  && bad "(FK1) a fork's same-branch PR must NOT flip the anchor" \
+  || ok "(FK1) same-base fork PR reusing the branch name -> NOT flipped"
+grep -q "in FORK 'forker/repo'" "$TMP/errfk" \
+  && ok "(FK1) the fork is refused by name, so an operator can see which half failed" \
+  || bad "(FK1) refusal must name the fork (err: $(cat "$TMP/errfk"))"
+
+# (FK2) ...and the collision is not a licence to open one either.
+has '^polecat/feat-fork$' "$TMP/created" \
+  && bad "(FK2) a name collision must NOT be resolved by opening a PR into it" \
+  || ok "(FK2) fork-only branch -> nothing created; the anchor waits for an operator"
+grep -q "NONE of them is this anchor's" "$TMP/errfk" \
+  && ok "(FK2) the refusal distinguishes 'nothing of ours matched' from 'nothing matched'" \
+  || bad "(FK2) must refuse a name collision explicitly (err: $(cat "$TMP/errfk"))"
+
+# (FK3) a fork row arriving FIRST does not win, and OPEN outranks CLOSED.
+grep -q '^bead-ORDER	808$' "$TMP/fliplog" \
+  && ok "(FK3) fork row listed first -> the branch's own OPEN PR (808) is selected anyway" \
+  || bad "(FK3) must select the certified same-repo OPEN PR (got: $(cat "$TMP/fliplog"))"
+grep -q '^bead-ORDER	https://github.com/acme/repo/pull/808$' "$TMP/flipurl" \
+  && ok "(FK3) the stamped identity is the certified row's canonical URL" \
+  || bad "(FK3) stamped pr_url (got: $(cat "$TMP/flipurl"))"
+
+# (FK4) our repository, our branch name — landing somewhere else.
+grep -q '^bead-BASE	' "$TMP/fliplog" \
+  && bad "(FK4) a PR targeting a different base must NOT be flipped onto" \
+  || ok "(FK4) same-repo PR with a different base -> NOT flipped"
+grep -q "targets 'integration/other'" "$TMP/errfk" \
+  && ok "(FK4) the base mismatch is refused by name" \
+  || bad "(FK4) refusal must name the base (err: $(cat "$TMP/errfk"))"
+
+# (FK5) "I cannot tell" is not "not ours" — and it is certainly not "open one".
+grep -q '^bead-NULLR	' "$TMP/fliplog" \
+  && bad "(FK5) an unreadable row must NOT be flipped onto" \
+  || ok "(FK5) NULL head repository -> NOT flipped"
+has '^polecat/feat-nullr$' "$TMP/created" \
+  && bad "(FK5) an unreadable row must NOT fall through to opening a twin" \
+  || ok "(FK5) NULL head repository -> nothing created (unreadable ≠ absent)"
+grep -q "identity is unreadable" "$TMP/errfk" \
+  && ok "(FK5) the unreadable row is announced, not silently skipped" \
+  || bad "(FK5) must warn that the row is unreadable (err: $(cat "$TMP/errfk"))"
+
+# (FK6) certify the CREATED pull request too, by reading it back BY NUMBER.
+has '^polecat/feat-adopt$' "$TMP/created" \
+  && ok "(FK6) the no-PR green anchor does reach 'gh pr create'" \
+  || bad "(FK6) create should be reached for bead-ADOPT"
+grep -q '^bead-ADOPT	' "$TMP/fliplog" \
+  && bad "(FK6) a fork-head create answer must NOT be stamped as this anchor's PR" \
+  || ok "(FK6) create answered with a FORK-HEAD PR -> certified on read-back, nothing stamped"
+grep -q '^909$' "$TMP/comments" \
+  && bad "(FK6) an uncertified PR must not be commented on either" \
+  || ok "(FK6) no codex verdict is replayed onto an uncertified pull request"
+
+# (FK7) no pull request is ever resolved by BRANCH NAME.
+eq "$(wc -l < "$TMP/viewbyname" | tr -d ' ')" "0" \
+  "(FK7) 'gh pr view <branch>' is never used — a branch name does not identify a PR"
+
+# --- (RACE) a concurrent open is still discovered — and still certified. -------
+# `gh pr create` loses the race and emits nothing; the PR is visible to the next
+# list. Discovery runs the SAME certified scan, so the race-winner is adopted only
+# if it is really ours.
+fk_reset
+cat > "$TMP/anchors" <<'A'
+bead-RACE|polecat/feat-race|main|green@HEADRC
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-race|HEADRC
+H
+: > "$TMP/existpr"
+: > "$TMP/newpr"
+cat > "$TMP/racepr" <<'P'
+polecat/feat-race|611|https://github.com/acme/repo/pull/611|OPEN|main|polecat/feat-race|acme/repo
+P
+bash "$SCRIPT" >"$TMP/outrace" 2>"$TMP/errrace"
+grep -q '^bead-RACE	611$' "$TMP/fliplog" \
+  && ok "(RACE) create race -> the concurrently-opened PR#611 is discovered and flipped onto" \
+  || bad "(RACE) race discovery (got: $(cat "$TMP/fliplog"))"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" "(RACE) the losing create opened nothing"
+eq "$(wc -l < "$TMP/viewbyname" | tr -d ' ')" "0" \
+  "(RACE) the race is discovered by the certified scan, never by 'gh pr view <branch>'"
+
+# --- (READ) a failed list read is not an empty one. ----------------------------
+# `gh pr list` fails outright. Read as "no PR exists", this pass would open a
+# SECOND pull request for a branch that may already have one.
+fk_reset
+cat > "$TMP/anchors" <<'A'
+bead-READ|polecat/feat-read|main|green@HEADRD
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-read|HEADRD
+H
+cat > "$TMP/newpr" <<'N'
+polecat/feat-read|612|https://github.com/acme/repo/pull/612|OPEN|main|polecat/feat-read|acme/repo
+N
+printf '1\n' > "$TMP/listfail"
+bash "$SCRIPT" >"$TMP/outread" 2>"$TMP/errread"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" "(READ) failed pull-request read -> NO PR opened (no twin)"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" "(READ) failed pull-request read -> nothing flipped"
+grep -q "could not read this repository's pull requests" "$TMP/errread" \
+  && ok "(READ) the failed read is announced as a refusal, not treated as an empty answer" \
+  || bad "(READ) must warn that the read failed (err: $(cat "$TMP/errread"))"
+
+# --- (TRUNC) a full page is not a complete answer. -----------------------------
+# The branch matches as many pull requests as this pass reads in one page, so the
+# list may be cut short of the row that says a PR of ours already exists.
+fk_reset
+cat > "$TMP/anchors" <<'A'
+bead-TRUNC|polecat/feat-trunc|main|green@HEADTR
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-trunc|HEADTR
+H
+: > "$TMP/existpr"
+for i in $(seq 1 100); do
+  printf 'polecat/feat-trunc|%s|https://github.com/acme/repo/pull/%s|CLOSED|main|polecat/feat-trunc|forker%s/repo\n' \
+    "$((3000 + i))" "$((3000 + i))" "$i" >> "$TMP/existpr"
+done
+cat > "$TMP/newpr" <<'N'
+polecat/feat-trunc|613|https://github.com/acme/repo/pull/613|OPEN|main|polecat/feat-trunc|acme/repo
+N
+bash "$SCRIPT" >"$TMP/outtrunc" 2>"$TMP/errtrunc"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" "(TRUNC) a possibly-truncated page -> NO PR opened"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" "(TRUNC) a possibly-truncated page -> nothing flipped"
+grep -q "the list may be truncated" "$TMP/errtrunc" \
+  && ok "(TRUNC) the truncation risk is announced, not silently concluded away" \
+  || bad "(TRUNC) must warn that the list may be truncated (err: $(cat "$TMP/errtrunc"))"
+
+# --- PARTIAL WRITE at the visibility flip (review tk-pka2d finding #1). --------
+# `merge_result=pull_request` is the VISIBILITY SWITCH: pre_open_gate is the only
+# sub-state that opens (or re-adopts) a PR, and pull_request is the one merge-skill
+# and the merged-close observer act on. Written in ONE `gc bd update` with
+# pr_url/pr_number/merged_target, a write that persisted the switch and dropped a
+# dependent field left an anchor that had LEFT the only state that would ever open
+# its PR and ENTERED the states that act on a pr_url/pr_number it does not have —
+# where both passes skip it on an empty number and nothing routes it back.
+#
+# $FAKE_DROP makes one key's write vanish while `gc bd update` still succeeds, which
+# is what a partial write looks like from this script's side.
+pw_reset() {
+  cat > "$TMP/anchors" <<'A'
+bead-PW|polecat/feat-pw|main|green@HEADPW
+A
+  cat > "$TMP/heads" <<'H'
+polecat/feat-pw|HEADPW
+H
+  : > "$TMP/existpr"
+  cat > "$TMP/newpr" <<'N'
+polecat/feat-pw|701|https://github.com/acme/repo/pull/701|OPEN|main|polecat/feat-pw|acme/repo
+N
+  : > "$TMP/foreignpr"; : > "$TMP/racepr"; : > "$TMP/reviews"; : > "$TMP/notes"
+  : > "$TMP/created"; : > "$TMP/createdwhere"; : > "$TMP/fliplog"
+  : > "$TMP/flipurl"; : > "$TMP/flipped"; : > "$TMP/comments"; : > "$TMP/commentwhere"
+  : > "$TMP/meta"; : > "$TMP/drop"
+  : > "$TMP/viewbyname"
+  : > "$TMP/ghdefault"; : > "$TMP/ghhost"; : > "$TMP/ignorerepo"
+  : > "$TMP/ignorerepocreate"; : > "$TMP/repofail"; : > "$TMP/listfail"
+}
+
+# (PW0) POSITIVE CONTROL. Nothing dropped: the anchor opens its PR and flips, and
+# the flip is recorded WITH the identity fields already in the ledger — which is the
+# ordering assertion. If the switch were still written first (or together), the
+# ledger would hold no pr_number at the moment merge_result landed.
+pw_reset
+bash "$SCRIPT" >"$TMP/outpw0" 2>"$TMP/errpw0"
+grep -q '^bead-PW	701$' "$TMP/fliplog" \
+  && ok "(PW0) control: the flip persists, and pr_number is ALREADY in the ledger when it does" \
+  || bad "(PW0) control: flip must record pr_number 701 (got: $(cat "$TMP/fliplog"))"
+grep -q '^bead-PW	https://github.com/acme/repo/pull/701$' "$TMP/flipurl" \
+  && ok "(PW0) control: pr_url is already in the ledger at the flip too" \
+  || bad "(PW0) control: flip must record pr_url (got: $(cat "$TMP/flipurl"))"
+
+# (PW1) A DEPENDENT FIELD IS DROPPED. pr_url does not persist. The switch must NOT
+# be thrown: an anchor visible to the merge and observer passes with no PR identity
+# for them to act on is the invisible-anchor failure from the other side, and
+# nothing would route it back.
+pw_reset
+printf 'bead-PW\tpr_url\n' > "$TMP/drop"
+bash "$SCRIPT" >"$TMP/outpw1" 2>"$TMP/errpw1"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+   "(PW1) a dropped pr_url -> merge_result is NOT flipped"
+grep -q '^bead-PW	merge_result	pull_request$' "$TMP/meta" \
+  && bad "(PW1) merge_result must not reach the ledger when its dependent fields did not" \
+  || ok "(PW1) the anchor stays pre_open_gate (the state that re-adopts the PR next pass)"
+grep -q "identity fields did NOT persist" "$TMP/errpw1" \
+  && ok "(PW1) the refusal names the fields that did not persist" \
+  || bad "(PW1) must report the failed identity write (err: $(cat "$TMP/errpw1"))"
+
+# (PW1b) ...and the PR it DID open is not lost or twinned. The anchor is still
+# pre_open_gate, so the next pass takes the existing-PR arm, certifies that same PR
+# and adopts it — one create across both passes, never two.
+printf '%s\n' 'polecat/feat-pw|701|https://github.com/acme/repo/pull/701|OPEN|main|polecat/feat-pw|acme/repo' \
+  > "$TMP/existpr"
+: > "$TMP/drop"
+bash "$SCRIPT" >"$TMP/outpw1b" 2>"$TMP/errpw1b"
+eq "$(grep -c '^polecat/feat-pw$' "$TMP/created")" "1" \
+   "(PW1b) the retry re-adopts the PR it already opened — never a twin create"
+grep -q '^bead-PW	701$' "$TMP/fliplog" \
+  && ok "(PW1b) the retry completes the flip onto that same PR" \
+  || bad "(PW1b) retry must flip onto PR#701 (got: $(cat "$TMP/fliplog"))"
+
+# (PW2) THE SWITCH ITSELF IS DROPPED. The identity fields persisted; merge_result did
+# not. This is the SAFE half of the split — the anchor keeps a correct identity and
+# stays where the next pass can finish the job — but it must still be REPORTED, not
+# counted as a success.
+pw_reset
+printf 'bead-PW\tmerge_result\n' > "$TMP/drop"
+bash "$SCRIPT" >"$TMP/outpw2" 2>"$TMP/errpw2"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" "(PW2) a dropped merge_result -> no flip recorded"
+grep -q '^bead-PW	pr_url	https://github.com/acme/repo/pull/701$' "$TMP/meta" \
+  && ok "(PW2) the identity fields still persisted (the safe half of the split)" \
+  || bad "(PW2) identity fields should persist even when the switch does not"
+grep -q "merge_result is still" "$TMP/errpw2" \
+  && ok "(PW2) the un-thrown switch is reported for an operator" \
+  || bad "(PW2) must report that merge_result did not persist (err: $(cat "$TMP/errpw2"))"
+printf '%s\n' "$(cat "$TMP/outpw2")" | grep -q "0 opened" \
+  && ok "(PW2) the pass does not count an incomplete flip as opened" \
+  || bad "(PW2) summary must not report it as opened (got: $(cat "$TMP/outpw2"))"
+
+# --- The created PR must be born at the REVIEWED head (review tk-pka2d, residual
+#     risk). `--head` names a MUTABLE ref: the codex gate compares check.codex to the
+#     branch head read moments earlier, but `gh pr create` opens the PR at whatever
+#     that ref points to WHEN IT RUNS. A recovery polecat or an operator fixup landing
+#     in that window publishes a NON-DRAFT PR at an UNREVIEWED commit — and this pass's
+#     whole contract is that a PR is codex-green at birth.
+pw_reset
+# The create answers with a PR whose head is HEADPW2 — the branch moved after the
+# gate read HEADPW. Column 8 is the head the pull request is actually open at.
+cat > "$TMP/newpr" <<'N'
+polecat/feat-pw|702|https://github.com/acme/repo/pull/702|OPEN|main|polecat/feat-pw|acme/repo|HEADPW2
+N
+bash "$SCRIPT" >"$TMP/outoid" 2>"$TMP/erroid"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+   "(OIDDRIFT) a PR opened past the reviewed head -> nothing stamped"
+eq "$(wc -l < "$TMP/comments" | tr -d ' ')" "0" \
+   "(OIDDRIFT) ...and no 'codex signed off at <commit>' comment is posted about it"
+grep -q "not the reviewed 'HEADPW'" "$TMP/erroid" \
+  && ok "(OIDDRIFT) the refusal names both the opened head and the reviewed one" \
+  || bad "(OIDDRIFT) must name the head drift (err: $(cat "$TMP/erroid"))"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

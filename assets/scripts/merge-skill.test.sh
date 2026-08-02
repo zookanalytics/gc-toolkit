@@ -83,6 +83,44 @@
 #   (5c) convergence: a merged+closed anchor leaves the gating set, so a second
 #        pass does not re-merge it.
 #   (FS) field-shape guard: the skill requests only gh-supported --json fields.
+#
+# PR IDENTITY (review tk-sdqwh finding #2). A bead names its PR by NUMBER, and a
+# number names a different pull request in every other repository. check-set-heal.sh
+# certifies that identity before it exposes a recovered anchor — but in ANOTHER
+# process, whose gh repository context this one does not inherit, and the anchors it
+# recovers are pr_number-only until it backfills the certified pr_url. So the full
+# path is exercised HERE, after recovery, with the gh default/host drifted:
+#   (ID1) DRIFT: gh's default repo is moved to a stranger's. The read is PINNED with
+#         `--repo` to the origin-derived repository, so the right PR still answers
+#         and still merges — the drift is a no-op, which is the whole point.
+#   (ID2) IGNOREPIN: a gh that does NOT honour `--repo` (a redirect after a transfer
+#         or rename, an older gh, a wrapper) serves the foreign same-numbered PR
+#         anyway. Pinning alone is then no defence: the returned URL must be
+#         COMPARED against the expectation, and the merge HELD.
+#   (ID2b) HOSTDRIFT: GH_HOST points at another GitHub host, where the same
+#         `<owner>/<repo>` is a DIFFERENT repository. The pin is host-qualified, so
+#         the read still lands on ours.
+#   (ID3) URLMISMATCH: the anchor's own certified pr_url names a different pull
+#         request from the one that answered -> merge HELD.
+#   (ID4) REPOFAIL: this checkout's origin cannot be resolved at all -> NOTHING is
+#         merged this pass (fail closed; a wrong merge cannot be retried away).
+#
+# HEAD IDENTITY (review tk-pka2d finding #2). Everything above certifies where the
+# pull request LIVES. A PR opened INTO this repository FROM a fork lives here too:
+# our host, our owner, our repo, our number, one of OUR urls — so every check above
+# passes on it, and the skill would squash-merge a stranger's head onto the target
+# under our anchor's gates. The head is the half a same-repo URL cannot answer:
+#   (HD1) FORK: same branch NAME, head repository `mallory/repo` -> merge HELD.
+#   (HD2) SELFCONTRA: head repository is ours AND isCrossRepository=true — the two
+#         halves of the identity contradict each other -> merge HELD (unestablished,
+#         not a tie to break).
+#   (HD3) NOHEAD: headRepository/headRepositoryOwner are null (a deleted head repo, a
+#         schema shift) -> merge HELD; unreadable must not land.
+#   (HD4) BRANCHMISMATCH: right repository, right head repository, but the PR is
+#         opened from a branch the anchor does not record -> merge HELD.
+#   (HD5) HEADOK: the positive control — anchor branch == PR head branch, head
+#         repository ours, isCrossRepository=false, CLEAN -> MERGED. Without it the
+#         four holds above could all pass by the checks rejecting everything.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,12 +137,20 @@ has() { grep -q "$1" "$2" 2>/dev/null; }
 mkdir -p "$TMP/bin"
 
 # Gating anchors (gc bd list source):
-#   id|pr_number|merged_target|check_set|check.codex|merge_hold
+#   id|pr_number|merged_target|check_set|check.codex|merge_hold|pr_url|branch
 # The 5th column is the anchor's per-gate marker value for check.codex; a
 # "green@<oid>" value means "the codex gate passed at commit <oid>". bead-NOGATE
 # has an empty check_set (declares no gates) and no marker. The 6th column is
 # metadata.merge_hold (an operator gate); rows that omit it read as "" (no hold),
-# so only bead-HOLD carries it.
+# so only bead-HOLD carries it. The 7th is metadata.pr_url — ABSENT on most rows on
+# purpose: a pr_number-only anchor is exactly the shape check-set-heal.sh's recovery
+# produces before it backfills the certified URL, so the pinned read is the only
+# thing standing between these anchors and a foreign same-numbered PR.
+#
+# The 8th is metadata.branch, and it is absent on every legacy row for the same
+# reason: a recovered anchor records no branch, so the head-BRANCH comparison must
+# not fire on it (only the two repository halves govern such a row). Only the head
+# identity cases below carry one.
 cat > "$TMP/anchors" <<'A'
 bead-CLEAN|301|main|codex|green@HEAD301
 bead-STALE|302|main|codex|green@STALE302
@@ -135,6 +181,18 @@ bead-BADSTATUS|325|main|codex|green@HEAD325
 bead-BOTHSRC|326|main|codex|green@HEAD326
 bead-MULTIDOC|327|main|codex|green@HEAD327
 bead-MULTIEMPTY|328|main|codex|green@HEAD328
+bead-URLMISMATCH|330|main|codex|green@HEAD330||https://github.com/acme/OTHER/pull/330
+bead-XDUPOK|331|main|codex|green@HEAD331
+bead-XDUPFOREIGN|331|main|codex|green@HEAD331||https://otherhost/acme/repo/pull/331
+bead-XCHILDFOREIGN|332|main|codex|green@HEAD332
+bead-XCHILDSAME|333|main|codex|green@HEAD333
+bead-XCHILDFAIL|334|main|codex|green@HEAD334
+bead-DEPFOREIGN|340|main|codex|green@HEAD340
+bead-FORK|335|main|codex|green@HEAD335|||polecat/bead-FORK
+bead-SELFCONTRA|336|main|codex|green@HEAD336|||polecat/bead-SELFCONTRA
+bead-NOHEAD|337|main|codex|green@HEAD337|||polecat/bead-NOHEAD
+bead-BRANCHMISMATCH|338|main|codex|green@HEAD338|||polecat/bead-BRANCHMISMATCH
+bead-HEADOK|339|main|codex|green@HEAD339|||polecat/bead-HEADOK
 A
 
 # PR states (gh pr view source):
@@ -171,6 +229,18 @@ A
 #       merge_result=pull_request (an upstream PR ordered ahead)       -> HELD
 #   323 OPEN, CLEAN, gate green — parent-child child carrying
 #       merge_result=pre_open_gate                                     -> HELD
+#   335 OPEN, CLEAN, every gate green — but opened from FORK mallory/repo's branch
+#       of the SAME NAME -> HELD (HD1). Pre-fix this squash-merged a stranger's head.
+#   336 OPEN, CLEAN, head repository ours BUT isCrossRepository=true -> HELD (HD2)
+#   337 OPEN, CLEAN, headRepository/headRepositoryOwner null -> HELD (HD3)
+#   338 OPEN, CLEAN, ours, but opened from 'polecat/somebody-else' while the anchor
+#       records 'polecat/bead-BRANCHMISMATCH' -> HELD (HD4)
+#   339 OPEN, CLEAN, ours, head branch == the anchor's recorded branch -> MERGED (HD5)
+#
+# Columns 9-11 (headRefName|headRepo|isCrossRepository) are the head identity. They
+# are OMITTED on every legacy row and default to "ours" in the stub — so those rows
+# keep exercising what they were written to exercise, and only the cases below turn
+# the head into the variable.
 cat > "$TMP/prs" <<'P'
 301|OPEN|false|main|HEAD301|CLEAN|MERGEABLE|a301c0ffee123456
 302|OPEN|false|main|HEAD302|CLEAN|MERGEABLE|
@@ -200,6 +270,17 @@ cat > "$TMP/prs" <<'P'
 326|OPEN|false|main|HEAD326|CLEAN|MERGEABLE|
 327|OPEN|false|main|HEAD327|CLEAN|MERGEABLE|
 328|OPEN|false|main|HEAD328|CLEAN|MERGEABLE|
+330|OPEN|false|main|HEAD330|CLEAN|MERGEABLE|
+331|OPEN|false|main|HEAD331|CLEAN|MERGEABLE|a331c0ffee111111
+332|OPEN|false|main|HEAD332|CLEAN|MERGEABLE|a332c0ffee222222
+333|OPEN|false|main|HEAD333|CLEAN|MERGEABLE|
+334|OPEN|false|main|HEAD334|CLEAN|MERGEABLE|
+335|OPEN|false|main|HEAD335|CLEAN|MERGEABLE|f335c0ffee000001|polecat/bead-FORK|mallory/repo|true
+336|OPEN|false|main|HEAD336|CLEAN|MERGEABLE|f336c0ffee000002|polecat/bead-SELFCONTRA|acme/repo|true
+337|OPEN|false|main|HEAD337|CLEAN|MERGEABLE|f337c0ffee000003|polecat/bead-NOHEAD|-|false
+338|OPEN|false|main|HEAD338|CLEAN|MERGEABLE|f338c0ffee000004|polecat/somebody-else|acme/repo|false
+339|OPEN|false|main|HEAD339|CLEAN|MERGEABLE|a339c0ffee000005|polecat/bead-HEADOK|acme/repo|false
+340|OPEN|false|main|HEAD340|CLEAN|MERGEABLE|
 P
 
 # Rework/review children referencing a PR by their OWN pr_number metadata
@@ -215,10 +296,21 @@ P
 # a parent-child dep of the anchor (so the dep probe returns it too). Provenance
 # must UNION to "dep" and hold; demote it to "pr_number" and the merge_result
 # exclusion deletes a live rework child.
+cat > "$TMP/children" 
+# The 5th column is the child's OWN pr_url, and it is what makes the child-hold
+# guard an identity question rather than a number match. Omitted on rows that
+# predate it ON PURPOSE: a child with no recorded URL cannot be placed in any
+# repository, so it stays the `?` wildcard and holds exactly as it always did
+# (case (6)/305 pins that legacy shape). child-foreign-332 names ANOTHER HOST's
+# repository — somebody else's rework, which can never land ours — and must not
+# hold; child-same-333 names this one and must.
 cat > "$TMP/children" <<'C'
-305|child-305||
-317|prblocked-317||blocked
-326|bothsrc-326|pull_request|
+305|child-305|||
+317|prblocked-317||blocked|
+326|bothsrc-326|pull_request||
+305|child-305|||
+332|child-foreign-332|||https://otherhost/acme/repo/pull/332
+333|child-same-333|||https://github.com/acme/repo/pull/333
 C
 for i in $(seq -w 1 24); do
   printf '310|decoy-%s|pull_request|\n' "$i" >> "$TMP/children"
@@ -252,6 +344,7 @@ bead-KIDANCHOR|up|parent-child|kidanchor-323|open|pre_open_gate
 bead-BOTHSRC|up|parent-child|bothsrc-326|open|pull_request
 bead-MULTIDOC|down|blocks|blocker-327|open|pull_request
 bead-MULTIEMPTY|down|blocks|blocker-328|open|pull_request
+bead-DEPFOREIGN|down|blocks|upstream-340|open|pull_request|https://otherhost/acme/repo/pull/999
 D
 
 # Anchors whose dep probe ERRORS (exit 1) — the fail-closed case.
@@ -294,20 +387,75 @@ bead-MULTIEMPTY|up|[] []
 R
 
 : > "$TMP/closed"; : > "$TMP/merged"; : > "$TMP/mergedrec"; : > "$TMP/closelog"
+: > "$TMP/mergedwhere"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/repofail"
+: > "$TMP/ghhost"
+
+# PR#334 has NO child at all: the only thing that can hold it is the guarded read
+# refusing to answer, so a missing guard merges it and the case cannot pass by
+# accident.
+printf '334\terror-rc1\n' > "$TMP/childfail"
+
+# --- git stub. ----------------------------------------------------------------
+# `git remote get-url origin` -> what this checkout pushes to, and the ONLY source
+# of the repository every read and the merge are pinned to. Deliberately NOT `gh`:
+# gh's idea of the current repository is movable, and moving it must not move the
+# expectation. $FAKE_REPOFAIL makes it unanswerable, as a checkout with no origin
+# remote would (ID4).
+cat > "$TMP/bin/git" <<'GIT'
+#!/usr/bin/env bash
+if [ "$1" = "remote" ] && [ "$2" = "get-url" ] && [ "$3" = "origin" ]; then
+  [ -s "$FAKE_REPOFAIL" ] && exit 1
+  printf 'https://github.com/acme/repo.git\n'; exit 0
+fi
+exit 0
+GIT
+chmod +x "$TMP/bin/git"
 
 # --- gh stub: pr view (emit state JSON), pr merge (record the merge). ---------
 # `pr view` validates requested --json fields against a supported set (NOT
 # `merged`) and emits a full object; the skill reads the subset it asked for.
 # `pr merge` records the merged PR number — this is the seam: it must be reached
 # for EXACTLY the one fully-validated anchor.
+#
+# THE READ AND THE MERGE FOLLOW gh's CURRENT REPOSITORY UNLESS `--repo` PINS THEM.
+# $FAKE_GH_DEFAULT moves that default exactly as `gh repo set-default`, GH_REPO or a
+# different cwd would; `acme/repo` when unset. With it moved, a bare
+# `gh pr view <n>` / `gh pr merge <n>` answers for ANOTHER repository's
+# same-numbered pull request — OPEN, based on main, CLEAN — indistinguishable from
+# ours on every field except the repository, and a merge performed there lands a
+# stranger's code. $FAKE_IGNORE_REPO models a gh that ignores the pin entirely, so
+# the returned URL is the only thing left to catch it.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
+ghdefault=$(cat "$FAKE_GH_DEFAULT" 2>/dev/null)
+[ -n "$ghdefault" ] || ghdefault="acme/repo"
+# Which repository this invocation actually resolves in: the pin when honoured,
+# else gh's movable default. `--repo` takes [HOST/]OWNER/REPO.
+RESOLVED=""
+for a in "$@"; do
+  case "${prev:-}" in --repo|-R) RESOLVED="$a" ;; esac
+  prev="$a"
+done
+[ -s "$FAKE_IGNORE_REPO" ] && RESOLVED=""
+[ -n "$RESOLVED" ] || RESOLVED="$ghdefault"
+# `--repo` is `[HOST/]OWNER/REPO`, and with the host OMITTED gh supplies it from
+# GH_HOST (`gh help environment`) — modelled by $FAKE_GH_HOST, github.com when
+# unset. So `<owner>/<repo>` does not name a repository, it names one PER HOST: a
+# hostless pin under a drifted GH_HOST reads THAT host's acme/repo, whose PR
+# matches ours on owner, repo and number alike. Only a HOST-QUALIFIED pin closes
+# it, which is why the resolved name below keeps its host.
+case "$RESOLVED" in
+  */*/*) : ;;
+  *)     ghhost=$(cat "$FAKE_GH_HOST" 2>/dev/null)
+         [ -n "$ghhost" ] || ghhost="github.com"
+         RESOLVED="$ghhost/$RESOLVED" ;;
+esac
 case "$1 $2" in
   "pr view")
     num="$3"; shift 3
     fields=""
     while [ $# -gt 0 ]; do case "$1" in --json) fields="$2"; shift 2 ;; *) shift ;; esac; done
-    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid url title body author additions deletions mergeable mergeStateStatus "
+    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus "
     OIFS="$IFS"; IFS=','
     for f in $fields; do
       case "$SUPPORTED" in
@@ -316,16 +464,48 @@ case "$1 $2" in
       esac
     done
     IFS="$OIFS"
-    while IFS='|' read -r pr state isdraft base headoid mss mergeable oid; do
+    if [ "$RESOLVED" != "github.com/acme/repo" ]; then
+      # A foreign repository's PR of the same number — foreign by owner/repo, by
+      # HOST, or by both. Deliberately CLEAN, OPEN and non-draft: nothing but the
+      # URL distinguishes it from ours.
+      jq -n --arg n "$num" --arg r "${RESOLVED#*/}" --arg h "${RESOLVED%%/*}" \
+        '{state:"OPEN", isDraft:false, baseRefName:"main", headRefOid:("HEAD" + $n),
+          headRefName:("polecat/foreign-" + $n),
+          headRepositoryOwner:{login:($r | split("/")[0])},
+          headRepository:{name:($r | split("/")[1])},
+          isCrossRepository:false,
+          mergeStateStatus:"CLEAN", mergeable:"MERGEABLE",
+          mergeCommit:{oid:("f0re19n" + $n)},
+          url:("https://" + $h + "/" + $r + "/pull/" + $n)}'
+      exit 0
+    fi
+    # Columns 9-11 are the head identity. Legacy rows omit them, so they default to
+    # THIS repository's branch for this PR — the shape every pre-existing case was
+    # written against — and only the head-identity rows vary them. A headrepo of `-`
+    # emits NULL objects, which is what gh returns for a deleted head repository (an
+    # omitted column cannot mean that: it has to keep meaning "ours").
+    while IFS='|' read -r pr state isdraft base headoid mss mergeable oid headref headrepo cross; do
       [ "$pr" = "$num" ] || continue
+      [ -n "$headref" ]  || headref="polecat/pr-$num"
+      [ -n "$cross" ]    || cross="false"
+      [ -n "$headrepo" ] || headrepo="acme/repo"
       jq -n --arg s "$state" --argjson d "$isdraft" --arg b "$base" \
             --arg h "$headoid" --arg m "$mss" --arg mg "$mergeable" --arg o "$oid" \
-        '{state:$s, isDraft:$d, baseRefName:$b, headRefOid:$h, mergeStateStatus:$m, mergeable:$mg, mergeCommit:(if $o=="" then null else {oid:$o} end)}'
+            --arg n "$num" --arg hr "$headref" --arg hrepo "$headrepo" \
+            --argjson x "$cross" \
+        '{state:$s, isDraft:$d, baseRefName:$b, headRefOid:$h, headRefName:$hr,
+          headRepositoryOwner:(if $hrepo=="-" then null else {login:($hrepo | split("/")[0])} end),
+          headRepository:(if $hrepo=="-" then null else {name:($hrepo | split("/")[1])} end),
+          isCrossRepository:$x,
+          mergeStateStatus:$m, mergeable:$mg, mergeCommit:(if $o=="" then null else {oid:$o} end), url:("https://github.com/acme/repo/pull/" + $n)}'
       exit 0
     done < "$FAKE_PRS"
     exit 0 ;;
   "pr merge")
-    printf '%s\n' "$3" >> "$FAKE_MERGED" ;;
+    printf '%s\n' "$3" >> "$FAKE_MERGED"
+    # WHERE the merge landed, not just which number: a merge performed in the
+    # wrong repository is the failure these identity tests exist to catch.
+    printf '%s\t%s\n' "$3" "$RESOLVED" >> "$FAKE_MERGEDWHERE" ;;
 esac
 exit 0
 GH
@@ -356,10 +536,10 @@ case "$2" in
     case "$*" in
       *"merge_result=pull_request"*)
         out=""
-        while IFS='|' read -r id pr target checkset checkcodex merge_hold; do
+        while IFS='|' read -r id pr target checkset checkcodex merge_hold prurl branch; do
           [ -n "$id" ] || continue
           grep -qx "$id" "$FAKE_CLOSED" 2>/dev/null && continue
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s"}}' "$id" "$pr" "$target" "$checkset" "$checkcodex" "$merge_hold")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","merged_target":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","branch":"%s"}}' "$id" "$pr" "$prurl" "$target" "$checkset" "$checkcodex" "$merge_hold" "$branch")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         emit_rows "$out" "$lim" ;;
@@ -369,6 +549,21 @@ case "$2" in
         # the list is invisible, exactly as the real `gc bd list --status` behaves.
         want=$(printf '%s' "$*" | sed -n 's/.*--status[= ]\([a-z_,]*\).*/\1/p')
         [ -n "$want" ] || want="open"
+        # A FAILED child lookup, scoped to one PR so every other case is unaffected.
+        # $FAKE_CHILD_FAIL holds "<pr><TAB><shape>" rows. Each shape defeats a
+        # different guard, so a guard that is deleted fails exactly one case:
+        #   error-rc1 — the observed shape: a JSON error OBJECT plus exit 1.
+        #   error-rc0 — the same object with a ZERO exit; only the payload-shape
+        #               guard can see it.
+        #   array-rc1 — a well-formed EMPTY array with a non-zero exit; only the
+        #               exit-status guard can see it, and "[]" is precisely the
+        #               value that legitimately means "no child holds this PR".
+        cfail=$(awk -F'\t' -v n="$prnum" '$1==n{print $2}' "${FAKE_CHILD_FAIL:-/dev/null}" 2>/dev/null | tail -1)
+        case "$cfail" in
+          error-rc1) printf '{"error":"ledger unavailable"}\n'; exit 1 ;;
+          error-rc0) printf '{"error":"ledger unavailable"}\n'; exit 0 ;;
+          array-rc1) printf '[]\n'; exit 1 ;;
+        esac
         out=""
         while IFS='|' read -r id pr target checkset checkcodex merge_hold; do
           [ -n "$id" ] || continue
@@ -378,13 +573,13 @@ case "$2" in
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         if [ -f "$FAKE_CHILDREN" ]; then
-          while IFS='|' read -r cpr cid cmr cstatus; do
+          while IFS='|' read -r cpr cid cmr cstatus cprurl; do
             [ -n "$cpr" ] || continue
             [ "$cpr" = "$prnum" ] || continue
             grep -qx "$cid" "$FAKE_CLOSED" 2>/dev/null && continue
             [ -n "$cstatus" ] || cstatus="open"
             printf '%s' ",$want," | grep -q ",$cstatus," || continue
-            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"%s"}}' "$cid" "$cstatus" "$cpr" "$cmr")
+            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"%s","pr_url":"%s"}}' "$cid" "$cstatus" "$cpr" "$cmr" "$cprurl")
             if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
           done < "$FAKE_CHILDREN"
         fi
@@ -418,13 +613,13 @@ case "$2" in
     fi
     out=""
     if [ -f "$FAKE_DEPS" ]; then
-      while IFS='|' read -r danchor ddir dtype did dstatus dmr; do
+      while IFS='|' read -r danchor ddir dtype did dstatus dmr dprurl; do
         [ -n "$danchor" ] || continue
         [ "$danchor" = "$aid" ] || continue
         [ "$ddir" = "$dir" ] || continue
         [ -z "$typ" ] || [ "$dtype" = "$typ" ] || continue
         grep -qx "$did" "$FAKE_CLOSED" 2>/dev/null && continue
-        obj=$(printf '{"id":"%s","status":"%s","dependency_type":"%s","metadata":{"merge_result":"%s"}}' "$did" "$dstatus" "$dtype" "$dmr")
+        obj=$(printf '{"id":"%s","status":"%s","dependency_type":"%s","metadata":{"merge_result":"%s","pr_url":"%s"}}' "$did" "$dstatus" "$dtype" "$dmr" "$dprurl")
         if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
       done < "$FAKE_DEPS"
     fi
@@ -449,7 +644,10 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/children" \
        FAKE_DEPS="$TMP/deps" FAKE_DEPFAIL="$TMP/depfail" FAKE_DEPRAW="$TMP/depraw" \
        FAKE_CLOSED="$TMP/closed" FAKE_MERGED="$TMP/merged" \
-       FAKE_MERGEDREC="$TMP/mergedrec" FAKE_CLOSELOG="$TMP/closelog"
+       FAKE_MERGEDREC="$TMP/mergedrec" FAKE_CLOSELOG="$TMP/closelog" \
+       FAKE_MERGEDWHERE="$TMP/mergedwhere" FAKE_GH_DEFAULT="$TMP/ghdefault" \
+       FAKE_IGNORE_REPO="$TMP/ignorerepo" FAKE_REPOFAIL="$TMP/repofail" \
+       FAKE_GH_HOST="$TMP/ghhost" FAKE_CHILD_FAIL="$TMP/childfail"
 
 # --- Run 1: validate -> merge -> record for the one ready PR, hold the rest. --
 OUT1="$(bash "$SCRIPT")"
@@ -647,21 +845,167 @@ has '^328$' "$TMP/merged" && bad "(26) PR#328 must NOT be merged past its blocke
 has '^bead-MERGED$' "$TMP/closed" && bad "(9) already-merged anchor must NOT be closed by the skill" \
                                   || ok "(9) already-merged anchor left for the observer"
 
-# (INV) exactly five PRs were merged: the fully-validated gated head (301), the
-# no-gate PR (311), the explicit opt-out (314), and the two whose only children
-# cannot hold — wrong-end edges (319) and an already-closed child (320). No
-# held/skipped anchor leaked.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "5" "(INV) exactly five PRs merged (301 + 311 + 314 + 319 + 320)"
+# (ID3) the anchor's own certified pr_url names a DIFFERENT pull request from the
+# one that answered. Everything else about PR#330 is merge-ready (OPEN, non-draft,
+# base==target, codex green@head, CLEAN), so the identity check is the only thing
+# that can stop it — and it must, because one of the two names is wrong and nothing
+# here can say which.
+has '^330$' "$TMP/merged" && bad "(ID3) an anchor whose pr_url names another PR must NOT be merged" \
+                          || ok "(ID3) pr_url/live-URL mismatch -> merge held"
+printf '%s\n' "$OUT1" | grep -q "anchor bead-URLMISMATCH records pr_url 'https://github.com/acme/OTHER/pull/330'" \
+  && ok "(ID3) the hold reason names both pull requests for an operator" \
+  || bad "(ID3) hold reason must name the recorded pr_url (got: $OUT1)"
+
+# (XREPO) BOTH hold guards are keyed on REPOSITORY + number, not the bare number.
+# Each fails toward holding, so the bug they had was not a wrong merge — it was an
+# indefinite hold on a ready PR that no repair in THIS repository could release
+# (review tk-thvbq finding #4).
+#
+# (XREPO-DUP) PR#331 is claimed by our bead-XDUPOK (pr_number-only, so it keys on
+# origin) and by bead-XDUPFOREIGN, whose pr_url names ANOTHER HOST's acme/repo.
+# Keyed on "331" alone that is a one-anchor-per-PR violation and BOTH are held
+# forever; keyed on repository+number the foreign anchor is a different pull
+# request and ours merges.
+has '^331$' "$TMP/merged" \
+  && ok "(XREPO-DUP) a foreign same-numbered anchor is not a duplicate -> our PR#331 still merges" \
+  || bad "(XREPO-DUP) PR#331 must merge; a foreign anchor must not make it multi-anchor (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "PR#331 has multiple open gating anchors" \
+  && bad "(XREPO-DUP) must NOT report a one-anchor-per-PR violation across repositories" \
+  || ok "(XREPO-DUP) no false one-anchor-per-PR hold across repositories"
+# ...and the foreign anchor is still refused, by the identity check that owns that
+# job — the dup guard getting out of its way must not let it merge.
+has '^bead-XDUPFOREIGN$' "$TMP/closed" \
+  && bad "(XREPO-DUP) the foreign anchor must never be closed off our PR" \
+  || ok "(XREPO-DUP) the foreign anchor is still refused by the pr_url identity check"
+# The SAME-repository duplicate must still be held: the qualification only rules out
+# a positive disagreement, it does not weaken the guard where it applies (313).
+printf '%s\n' "$OUT1" | grep -q "PR#313 has multiple open gating anchors" \
+  && ok "(XREPO-DUP) a same-repository duplicate is still held (guard not weakened)" \
+  || bad "(XREPO-DUP) same-repository duplicates must still hold"
+
+# (XREPO-CHILD) PR#332's only open child names another host's repository — it is
+# somebody else's rework and can never land ours, so it must not hold. PR#333's
+# child names THIS repository and must. The unqualified guard held both.
+has '^332$' "$TMP/merged" \
+  && ok "(XREPO-CHILD) a foreign same-numbered child does not hold -> PR#332 merges" \
+  || bad "(XREPO-CHILD) PR#332 must merge; a foreign child cannot hold it (got: $OUT1)"
+has '^333$' "$TMP/merged" \
+  && bad "(XREPO-CHILD) a same-repository open child MUST still hold PR#333" \
+  || ok "(XREPO-CHILD) a same-repository open child still holds the merge"
+printf '%s\n' "$OUT1" | grep -q "PR#333 has unclosed rework/review bead child-same-333 (open)" \
+  && ok "(XREPO-CHILD) the hold names the same-repository child" \
+  || bad "(XREPO-CHILD) hold reason must name child-same-333 (got: $OUT1)"
+
+# (CHILDFAIL) the child lookup FAILED (error object + exit 1). PR#334 has no child
+# at all and is otherwise fully mergeable, so an unguarded read merges it. "I could
+# not tell" must hold instead: this is the one script whose mistake — merging past
+# an open rework — cannot be retried away.
+#
+# The failure is injected into the PR_NUMBER probe specifically, which is what
+# distinguishes this case from (21)/PR#321: that one fails a DEPENDENCY probe. Since
+# tk-lgjvg the holder set is the union of three reads, so each leg needs its own
+# case — a guard restored on the dep probes alone would still merge this one.
+has '^334$' "$TMP/merged" \
+  && bad "(CHILDFAIL) an unreadable child lookup must HOLD, never merge (rework in flight cannot be ruled out)" \
+  || ok "(CHILDFAIL) unreadable open-child lookup -> merge held"
+printf '%s\n' "$OUT1" | grep -q "PR#334 in-flight rework/review probe failed" \
+  && ok "(CHILDFAIL) the hold reason names the failed lookup" \
+  || bad "(CHILDFAIL) hold reason must name the failed lookup (got: $OUT1)"
+
+# --- HEAD IDENTITY (review tk-pka2d finding #2). ------------------------------
+# Every case here is a PR in OUR repository, OPEN, non-draft, CLEAN, based on main,
+# with check.codex green at its live head — indistinguishable from a ready merge on
+# every field the script checked before this fix. Only the HEAD differs.
+
+# (HD1) FORK: the branch NAME matches, the branch does not. Pre-fix this squash-merged
+# mallory/repo's head onto main under our anchor's gates.
+has '^335$' "$TMP/merged" \
+  && bad "(HD1) a PR opened from a FORK must never be merged under our anchor" \
+  || ok "(HD1) fork head -> merge held"
+printf '%s\n' "$OUT1" | grep -q "PR#335 is opened from FORK 'mallory/repo'" \
+  && ok "(HD1) the hold names the fork and this checkout's repository" \
+  || bad "(HD1) hold reason must name the fork (got: $OUT1)"
+has '^bead-FORK$' "$TMP/closed" \
+  && bad "(HD1) the fork's anchor must NOT be closed" \
+  || ok "(HD1) no anchor closed on the fork PR"
+
+# (HD2) SELFCONTRA: headRepository says ours, isCrossRepository says otherwise. An
+# identity that contradicts itself has not been established — it is not a tie to
+# break in the merge's favour.
+has '^336$' "$TMP/merged" \
+  && bad "(HD2) a self-contradicting head identity must never merge" \
+  || ok "(HD2) headRepository/isCrossRepository disagreement -> merge held"
+printf '%s\n' "$OUT1" | grep -q "PR#336 reports head repository 'acme/repo' (this checkout's own) and cross-repository='true'" \
+  && ok "(HD2) the hold names both halves of the contradiction" \
+  || bad "(HD2) hold reason must name the contradiction (got: $OUT1)"
+
+# (HD3) NOHEAD: gh returns null head repository objects (deleted head repo, schema
+# shift). "I cannot tell whether this is a fork" must hold, not merge.
+has '^337$' "$TMP/merged" \
+  && bad "(HD3) an unreadable head identity must HOLD, never merge" \
+  || ok "(HD3) null headRepository/headRepositoryOwner -> merge held"
+printf '%s\n' "$OUT1" | grep -q "PR#337 head identity is unreadable" \
+  && ok "(HD3) the hold names the unreadable identity" \
+  || bad "(HD3) hold reason must name the unreadable head (got: $OUT1)"
+
+# (HD4) BRANCHMISMATCH: right repository, right head repository, WRONG branch. The
+# anchor and the PR describe different work.
+has '^338$' "$TMP/merged" \
+  && bad "(HD4) a PR opened from a branch the anchor does not record must not merge" \
+  || ok "(HD4) head branch != anchor's recorded branch -> merge held"
+printf '%s\n' "$OUT1" | grep -q "anchor bead-BRANCHMISMATCH records branch 'polecat/bead-BRANCHMISMATCH' but PR#338 is opened from 'polecat/somebody-else'" \
+  && ok "(HD4) the hold names both branches" \
+  || bad "(HD4) hold reason must name both branches (got: $OUT1)"
+
+# (HD5) HEADOK — THE POSITIVE CONTROL. Without it every assertion above could pass
+# by the head checks rejecting everything, including legitimate merges.
+has '^339$' "$TMP/merged" \
+  && ok "(HD5) a fully-certified head (ours, non-cross, anchor's branch) still MERGES" \
+  || bad "(HD5) the head checks must not block a legitimate merge"
+has '^bead-HEADOK$' "$TMP/closed" \
+  && ok "(HD5) the certified anchor closed (record)" || bad "(HD5) certified anchor closed"
+
+# (XREPO-DEP) THE SCOPING GUARD for the two fixes' intersection. PR#340's only
+# holder is reached by a `blocks` DEPENDENCY EDGE, and it carries BOTH excludable
+# marks at once: merge_result=pull_request AND a pr_url naming another host's
+# repository. That is the real shape of a cross-repository merge-ordering block —
+# an operator saying "land the other repo's PR first" — and it must HOLD.
+#
+# Each exclusion deletes it if scoped to the whole holder set instead of to
+# `_via == "pr_number"`, so this one case fails if EITHER scope regresses:
+# merge_result (tk-je0rk) or repository identity (tk-9m8q4). Both exist only to
+# undo the pr_number probe's over-broad sweep; neither says anything true about a
+# bead found by an explicit edge in this ledger. Without this case the identity
+# filter could be widened to the dep set and every suite above would still pass.
+has '^340$' "$TMP/merged" \
+  && bad "(XREPO-DEP) a dependency-edge blocker must hold regardless of merge_result AND of the repository its pr_url names" \
+  || ok "(XREPO-DEP) cross-repository dep-edge blocker -> merge held"
+printf '%s\n' "$OUT1" | grep -q "PR#340 has unclosed rework/review bead upstream-340 (open, merge_result=pull_request)" \
+  && ok "(XREPO-DEP) the hold names the cross-repository blocker" \
+  || bad "(XREPO-DEP) hold reason must name upstream-340 (got: $OUT1)"
+
+# (INV) exactly eight PRs were merged, and the two fixes' merge sets are disjoint:
+#   tk-lgjvg's — the fully-validated gated head (301), the no-gate PR (311), the
+#     explicit opt-out (314), and the two whose only children cannot hold: wrong-end
+#     edges (319) and an already-closed child (320);
+#   this branch's — the two whose only blockers are FOREIGN beads (331, 332) and the
+#     certified head (339).
+# No held/skipped anchor leaked: not one of the dependency-edge holders, and not one
+# of the four head-identity cases.
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "8" "(INV) exactly eight PRs merged (301 + 311 + 314 + dep-edge 319, 320 + cross-repo 331, 332 + head-certified 339)"
+# ...and all of them landed in THIS checkout's repository, not wherever gh pointed.
+eq "$(cut -f2 "$TMP/mergedwhere" | sort -u | tr '\n' ' ')" "github.com/acme/repo " \
+   "(INV) every merge landed in the origin-derived repository"
 
 # Summary counters.
-grep -q "5 merged" <<< "$OUT1" \
-  && ok "run 1 summary reports 5 merged" || bad "run 1 summary merged count (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q "8 merged" \
+  && ok "run 1 summary reports 8 merged" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard: only gh-supported --json fields. ----------------------
 gh pr view 301 --json merged >/dev/null 2>&1 \
   && bad "(FS) gh stub must REJECT unsupported field 'merged'" \
   || ok "(FS) unsupported --json field 'merged' rejected (guards the field-shape bug)"
-gh pr view 301 --json state,isDraft,baseRefName,headRefOid,mergeStateStatus,mergeable >/dev/null 2>&1 \
+gh pr view 301 --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,url >/dev/null 2>&1 \
   && ok "(FS) the skill's validate --json field set is accepted" \
   || bad "(FS) the skill's --json field set must be accepted"
 gh pr view 301 --json mergeCommit >/dev/null 2>&1 \
@@ -673,6 +1017,82 @@ bash "$SCRIPT" >/dev/null
 eq "$(grep -c '^301$' "$TMP/merged")" "1" "(5c) merged gated anchor not re-merged on second pass"
 eq "$(grep -c '^311$' "$TMP/merged")" "1" "(5c) merged no-gate anchor not re-merged on second pass"
 eq "$(grep -c '^319$' "$TMP/merged")" "1" "(5c) wrong-end-edge anchor not re-merged on second pass"
+
+# --- PR IDENTITY: the full path, with gh's repository drifted after recovery. ---
+# The state these runs model is the one check-set-heal.sh's phase 0 produces and
+# then hands on: an anchor restored to visibility, carrying a PR NUMBER, now read
+# and merged by THIS script in a process that never saw that certification.
+reset_ids() {
+  : > "$TMP/closed"; : > "$TMP/merged"; : > "$TMP/mergedrec"; : > "$TMP/closelog"
+  : > "$TMP/mergedwhere"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/repofail"
+  : > "$TMP/ghhost"
+  # One ready pr_number-only anchor: nothing but the repository the read resolves
+  # in decides which pull request "PR#301" means.
+  cat > "$TMP/anchors" <<'A'
+bead-CLEAN|301|main|codex|green@HEAD301
+A
+}
+
+# (ID1) DRIFT: gh's default repository is moved to a stranger's. The read and the
+# merge are PINNED to the origin-derived repository, so the drift changes nothing —
+# the right PR answers, and the merge lands in acme/repo.
+reset_ids
+echo 'stranger/repo' > "$TMP/ghdefault"
+OUTID1="$(bash "$SCRIPT")"
+has '^301$' "$TMP/merged" \
+  && ok "(ID1) gh default drifted to a stranger -> the pinned read still finds OUR PR#301 and merges it" \
+  || bad "(ID1) pinned read must survive a moved gh default (got: $OUTID1)"
+eq "$(cut -f2 "$TMP/mergedwhere" | sort -u)" "github.com/acme/repo" \
+   "(ID1) the merge landed in the origin repository, not gh's default"
+has '^bead-CLEAN$' "$TMP/closed" && ok "(ID1) the anchor is closed on the real merge" \
+                                 || bad "(ID1) anchor closed"
+
+# (ID2) IGNOREPIN: the same drift, against a gh that does NOT honour `--repo` — a
+# redirect after a repository transfer or rename, an older gh, a wrapper. The
+# foreign same-numbered PR comes back OPEN, non-draft, base main, CLEAN: every gate
+# below the identity check passes on it. Pinning alone is no defence here; only
+# COMPARING the returned URL against the expectation is, which is why the
+# comparison is kept after the pin rather than trusted away as a tautology.
+reset_ids
+echo 'stranger/repo' > "$TMP/ghdefault"
+: > "$TMP/ignorerepo"; echo 1 > "$TMP/ignorerepo"
+OUTID2="$(bash "$SCRIPT")"
+has '^301$' "$TMP/merged" \
+  && bad "(ID2) a foreign same-numbered PR must NEVER be merged (a wrong merge cannot be retried away)" \
+  || ok "(ID2) gh ignores the pin -> the foreign PR is caught by the URL comparison, merge held"
+has '^bead-CLEAN$' "$TMP/closed" \
+  && bad "(ID2) no anchor may be closed off a stranger's pull request" \
+  || ok "(ID2) no anchor closed on the foreign PR"
+printf '%s\n' "$OUTID2" | grep -q "answered from 'github.com/stranger/repo', not this checkout's 'github.com/acme/repo'" \
+  && ok "(ID2) the hold reason names the repository that answered" \
+  || bad "(ID2) must name the foreign repository (got: $OUTID2)"
+
+# (ID2b) HOSTDRIFT: GH_HOST points at another GitHub host. `<owner>/<repo>` does not
+# name a repository — it names one per host — and `--repo` fills an omitted host from
+# GH_HOST, so a HOSTLESS pin resolves to that host's acme/repo: same owner, same repo,
+# same number, different pull request. The pin must therefore be host-qualified, and
+# the comparison must keep the host, or this drift walks straight through both.
+reset_ids
+echo 'ghe.example.com' > "$TMP/ghhost"
+OUTID2B="$(bash "$SCRIPT")"
+has '^301$' "$TMP/merged" \
+  && ok "(ID2b) GH_HOST drifted -> the host-qualified pin still reads OUR PR#301" \
+  || bad "(ID2b) a host-qualified pin must survive GH_HOST drift (got: $OUTID2B)"
+eq "$(cut -f2 "$TMP/mergedwhere" | sort -u)" "github.com/acme/repo" \
+   "(ID2b) the merge landed on THIS host's repository, not GH_HOST's"
+
+# (ID4) REPOFAIL: this checkout's origin cannot be resolved at all. Every PR number
+# would then be read — and merged — wherever gh happens to point, so the pass must
+# merge NOTHING. Fail closed: a deferred merge costs one idle wake, a wrong merge
+# cannot be retried away.
+reset_ids
+echo 1 > "$TMP/repofail"
+bash "$SCRIPT" >/dev/null 2>"$TMP/errid4"
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "0" "(ID4) unresolvable origin -> nothing merged this pass"
+eq "$(wc -l < "$TMP/closed" | tr -d ' ')" "0" "(ID4) unresolvable origin -> no anchor closed"
+grep -q "cannot resolve this checkout's origin repository" "$TMP/errid4" \
+  && ok "(ID4) the refusal is reported for an operator" \
+  || bad "(ID4) must warn that the origin is unresolvable (err: $(cat "$TMP/errid4"))"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

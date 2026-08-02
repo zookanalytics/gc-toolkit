@@ -210,6 +210,36 @@ Pass (a) — close-on-land, in two roles. mr-mode keeps the anchor (a convoy
 graduating, or any mr-mode bead) OPEN as the PR's gating bead (merge-push step
 4); this pass is what later lands and closes it.
 
+(a-norm0) MERGE_RESULT RECOVERY, the first half of `check-set-heal.sh` (tk-wsxd0)
+— runs before everything else in this loop. Every pass below, and the check-set
+normalization that follows, enumerates gating anchors on the `merge_result`
+metadata field. So an anchor missing `merge_result` ENTIRELY is not merely
+un-healed: it is INVISIBLE to all of them at once, and there is no pass that can
+see it. The failure is silent and unbounded — shutupandlisten's hand-recovered
+anchor su-uzy9.1 carried `branch` + `pr_url` but no `merge_result`, the rig-wide
+gating set read EMPTY, and PR#37 sat open 6 days with zero escalations. This phase
+enumerates on a predicate that SURVIVES the damage — beads the refinery already
+canonicalized a PR onto (`pr_url`/`pr_number`) that carry no `merge_result` — and
+restores `merge_result=pull_request`, backfilling `pr_number` (merge-skill.sh skips
+an anchor without one) and `pr_url` from the certified PR, and `merged_target` (what
+the retarget check compares) from the anchor's own recorded `target`/`merged_target` —
+falling back to the certified PR's live base ONLY when no recorded intent survived.
+Preferring the record is the point: taking the live base would silently BLESS a
+retarget made while the anchor was invisible, which is exactly the window one could
+have slipped through. The `pr_url` backfill is what makes the certification DURABLE:
+certification happens in this pass's process, while merge-skill.sh and the observer
+act on the anchor in others, and a recovered anchor is `pr_number`-only until the URL
+lands — a bare number being exactly the identifier that names a different pull request
+in every other repository. It refuses to guess: a rework/review child, a PR already claimed by
+another open anchor, two candidates naming one PR, live polecat WIP, and the
+pre-open state (a branch with no PR is indistinguishable from ordinary in-flight
+work) are all excluded — stamping a child would silently cancel the in-flight-rework
+hold merge-skill.sh derives from its empty `merge_result`. Running first is what
+lets a recovered anchor be GATED by (a-norm) below on the SAME pass. It also flags
+— never rewrites — a gating anchor assigned to a non-canonical refinery identity,
+the second half of PR#37's invisibility (it hid the bead from find-work's assignee
+filter while the missing `merge_result` hid it from every bead-keyed pass).
+
 (a-norm) CHECK-SET NORMALIZATION at the refinery boundary (`check-set-heal.sh`,
 tk-i48ca) — runs BEFORE the merge skill. The merge-push step normalizes
 `check_set` for every bead that flows through it, but a hand-RECOVERED bead (a
@@ -239,6 +269,14 @@ close the bead `"Merged to <target> at <sha>"` + stamp `merge_result=merged`. Th
 refinery is the single writer — it does not delegate the landing to GitHub
 auto-merge and poll. This RETIRES `gh pr merge --auto` as the main-PR path.
 
+Every read and the merge itself are PINNED with `--repo` to the repository the
+`origin` remote names, and the URL that comes back is compared against it: a bead
+names its PR by NUMBER, `gh` resolves a number in whatever repository it considers
+current (`gh repo set-default`, GH_REPO, GH_HOST, cwd), and this is the one pass
+whose mistake cannot be retried away. Unresolvable origin merges NOTHING. The same
+pin applies to (a1) below, which writes terminal state (closes, escalations) off the
+same reads.
+
 (a1) The detect-only OBSERVER (`reconcile-merged-prs.sh`) — runs AFTER the skill,
 with NO merge authority. For each open gating anchor (`merge_result=pull_request`)
 it reads the PR: merged -> close the bead `"Merged to <target> at <sha>"`
@@ -253,8 +291,10 @@ from under every open PR) -> file a rebase child of the anchor and route it to
 `--fix-pool`, once per head (`stale_base_head`). The conflict arm is the one
 disposition that KEEPS `merge_result=pull_request`: the remedy is mechanical, so
 the anchor stays gating and the merge skill lands it as soon as the rebase clears
-the conflict — no human re-engagement. Enumerated by bead so each PR resolves
-in-repo. Convergent + cheap — one `gh pr view` per anchor, anchors are few. See
+the conflict — no human re-engagement. Enumerated by bead, with every PR read PINNED
+with `--repo` to the origin remote's repository (an unresolvable origin skips the
+pass), so each PR resolves in-repo rather than wherever gh happens to point.
+Convergent + cheap — one `gh pr view` per anchor, anchors are few. See
 docs/work-bead-state-machine.md.
 
 Pass (b) — convoy graduation (`reconcile-graduated-convoys.sh`, gated on
@@ -304,22 +344,42 @@ if [ -n "$SCRIPTS_DIR" ]; then
   # are collected HERE, above the marker, so the heal-gates-merge block below stays
   # template-free and the regression can extract and execute it verbatim
   # (check-set-heal.test.sh, Run 6).
+  # --refinery carries the CANONICAL refinery identity — the same string the
+  # merge-push handoff assigns. The heal's phase 0 (tk-wsxd0) uses it to flag a
+  # gating anchor assigned to a NON-canonical identity: that was the second half of
+  # PR#37's 6-day invisibility (assignee "shutupandlisten/refinery" vs canonical
+  # "shutupandlisten/gc-toolkit.refinery" hid it from find-work's assignee filter
+  # while the missing merge_result hid it from every bead-keyed pass). Flag only,
+  # never rewrite — the identity is an operator call.
   CHECK_SET_HEAL_ARGS=(
     --default "{{check_set}}"
     --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
     --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+    --refinery "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
   )
   # >>> heal-gates-merge
   # The heal pass GATES the merge skill for this pass. check-set-heal.sh exits
-  # HEAL_UNSAFE_RC when a required check_set stamp did NOT persist — the anchor is
-  # then still ungated (empty check_set), which merge-skill.sh reads as "no gates"
-  # and would land un-reviewed in this SAME pass. On that signal we HOLD merge-skill
-  # for the pass (the next idle wake re-heals; once the stamp sticks the anchor gates
-  # normally). Holding a merge one pass is the acceptable failure; an un-reviewed
-  # merge is not (tk-i48ca / review tk-z4u2e finding #1). HEAL_UNSAFE_RC MUST match
+  # HEAL_UNSAFE_RC for exactly one condition, stated as an exposure rather than as a
+  # particular write: an anchor is VISIBLE to merge-skill.sh this pass while its
+  # check_set is still empty, which merge-skill.sh reads as "declares no gates" and
+  # would land un-reviewed in this SAME pass. Two distinct failures produce it:
+  #   1. a required check_set stamp did NOT persist on an already-visible anchor
+  #      (tk-i48ca / review tk-z4u2e finding #1); or
+  #   2. the heal's phase 0 RESTORED merge_result on an anchor — making it visible to
+  #      merge-skill for the first time — and phase 1 then did not gate it, either
+  #      because the gating enumeration came back empty or because the anchor was not
+  #      reached in it (tk-zl932 / review tk-ej3wq finding #2). Phase 0 created that
+  #      exposure, so phase 0 holds the merge for it.
+  # On either signal we HOLD merge-skill for the pass (the next idle wake re-heals;
+  # once the anchor is gated it merges normally). Holding a merge one pass is the
+  # acceptable failure; an un-reviewed merge is not. HEAL_UNSAFE_RC MUST match
   # check-set-heal.sh's UNSAFE_RC. (pre-open-resolve runs between the two passes and
   # is intentionally NOT gated — it only OPENS PRs, never merges, so it is not the
   # merge hazard.)
+  # NOT in this contract, deliberately: a merge_result restore that did not persist,
+  # and a phase-0 dependent (pr_number/merged_target/the recovery markers) that did
+  # not persist. Both leave the anchor INVISIBLE, which merge-skill cannot merge
+  # either — a stall, not an exposure — so the heal exits 0 and retries next wake.
   HEAL_UNSAFE_RC=3
   MERGE_SKILL_HELD=0
   if [ -x "$SCRIPTS_DIR/check-set-heal.sh" ]; then
@@ -327,7 +387,7 @@ if [ -n "$SCRIPTS_DIR" ]; then
     "$SCRIPTS_DIR/check-set-heal.sh" "${CHECK_SET_HEAL_ARGS[@]}" || heal_rc=$?
     if [ "$heal_rc" = "$HEAL_UNSAFE_RC" ]; then
       MERGE_SKILL_HELD=1
-      echo "check-set-heal: UNSAFE (rc=$heal_rc) — a required check_set stamp did not persist; HOLDING merge-skill this pass so an ungated anchor cannot merge un-reviewed (retries next idle wake)" >&2
+      echo "check-set-heal: UNSAFE (rc=$heal_rc) — an anchor is VISIBLE to merge-skill but NOT gated (a check_set stamp did not persist, or a merge_result restored this pass was not gated in it); HOLDING merge-skill this pass so an ungated anchor cannot merge un-reviewed (retries next idle wake)" >&2
     elif [ "$heal_rc" != 0 ]; then
       echo "check-set-heal: pass failed (non-fatal, rc=$heal_rc); retries next idle wake" >&2
     fi
@@ -351,7 +411,7 @@ if [ -n "$SCRIPTS_DIR" ]; then
   #      degrade to the observer-only passes (a ready PR simply waits for the
   #      synced pack rather than landing via the retired auto-merge path).
   if [ "$MERGE_SKILL_HELD" = 1 ]; then
-    echo "merge-skill: HELD this pass — check-set-heal reported an unsafe failure (a stamp did not persist, leaving an anchor ungated); retries next idle wake" >&2
+    echo "merge-skill: HELD this pass — check-set-heal reported an unsafe failure (an anchor is visible to merge-skill but ungated: a check_set stamp did not persist, or an anchor it restored to visibility was not gated this pass); retries next idle wake" >&2
   elif [ -x "$SCRIPTS_DIR/merge-skill.sh" ]; then
     "$SCRIPTS_DIR/merge-skill.sh" \
       || echo "merge-skill: pass failed (non-fatal); retries next idle wake" >&2
