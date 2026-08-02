@@ -20,6 +20,14 @@
 #     twice against a stub that advances updated_at on every write)
 #   - dropping `--cooldown` -> the configured escalation_cooldown is inert and
 #     only the script's built-in default is ever in force
+#   - dropping a var from the `next-iteration` pour -> each wisp is ONE iteration
+#     and the next is poured `--root-only`, which materializes no formula
+#     defaults, so an unforwarded var arrives unrendered and every cycle after the
+#     first silently runs the consumer's own fallback (PROPAGATE below)
+#   - fingerprinting `target` instead of `merged_target // target` -> a
+#     `pre_open_gate` anchor records its landing target in `merged_target`, so the
+#     component collapses to a constant on exactly the anchor kind this fallback
+#     exists for, and a retarget waits out the cooldown (MERGEDTARGET below)
 #   - reading `gc bd show --json` without stripping control characters -> jq
 #     fails, STATE is empty, and the gate reads that as "no state tracked": every
 #     real change is then held for a full cooldown (CTRLJSON below)
@@ -101,8 +109,12 @@ S="$STUB_LOG"
 
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then
   w=$(cat "$S/writes")
-  meta=$(jq -nc --arg pr "${PR_NUMBER:-}" '
-    { merge_result: "pre_open_gate", branch: "polecat/su-lou.10.8", target: "main" }
+  # `${STUB_TARGET-main}` (not `:-`) so a case can set it to "" to model a
+  # pre_open_gate anchor that carries NO `target` at all — the shape that made
+  # reading `target` alone collapse the landing-target component to "-".
+  meta=$(jq -nc --arg pr "${PR_NUMBER:-}" --arg tgt "${STUB_TARGET-main}" '
+    { merge_result: "pre_open_gate", branch: "polecat/su-lou.10.8" }
+    + (if $tgt == "" then {} else { target: $tgt } end)
     + (if $pr == "" then {} else { pr_number: $pr } end)')
   while IFS='|' read -r k v; do
     [ -n "$k" ] || continue
@@ -290,7 +302,7 @@ reset
 make_gate "$TMP/rig/assets/scripts"
 PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
 eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/main/-" \
-   "NOPR: --state falls back to the bead's own hold inputs"
+   "NOPR: --state falls back to the bead's own hold inputs (landing target via target, merged_target absent)"
 case "$(gate_arg --state)" in
   *2026-07-27T*) bad "NOPR: fingerprint must not contain updated_at (the gate's own write bumps it)" ;;
   *)             ok  "NOPR: fingerprint contains no timestamp" ;;
@@ -305,6 +317,39 @@ printf 'check.codex|green@oid9\n' > "$STUB_LOG/meta"
 PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
 eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/main/check.codex=green@oid9" \
    "CHECKMARK: a check.<gate> marker is part of the fingerprint"
+
+# --- MERGEDTARGET: the landing target is `merged_target // target` ------------
+# A `pre_open_gate` anchor records where it intends to land in `merged_target`
+# (that is the field pre-open-resolve.sh reads, in this same order); `target` is
+# the polecat-era field and may be absent or stale after a retarget. Reading
+# `target` alone therefore collapses this component to a constant on exactly the
+# anchor kind this fallback exists for, so a retarget — a real change in where
+# the work is trying to go — would wait out the whole cooldown.
+reset
+make_gate "$TMP/rig/assets/scripts"
+printf 'merged_target|integration/su-lou\n' > "$STUB_LOG/meta"
+PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/integration/su-lou/-" \
+   "MERGEDTARGET: merged_target wins over target (a retarget is news)"
+
+# Same anchor with NO `target` at all: the pre-open shape that the old reader
+# turned into "-". merged_target must still supply the component.
+reset
+make_gate "$TMP/rig/assets/scripts"
+printf 'merged_target|integration/su-lou\n' > "$STUB_LOG/meta"
+PR_NUMBER="" STUB_TARGET="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
+  bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/integration/su-lou/-" \
+   "MERGEDTARGET: an anchor with merged_target but no target still fingerprints it"
+
+# Neither field: the placeholder must hold the slot, so the component count stays
+# fixed and the remaining fields cannot shift into each other's positions.
+reset
+make_gate "$TMP/rig/assets/scripts"
+PR_NUMBER="" STUB_TARGET="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
+  bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
+eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/-/-" \
+   "MERGEDTARGET: neither field present degrades to the placeholder, not to empty"
 
 # --- GHFAIL / GHEMPTY: a PR-backed anchor whose gh lookup yields nothing ------
 # `gh pr view` fails (rate limit, auth, deleted PR) or prints an empty
@@ -409,6 +454,50 @@ reset
 make_gate "$TMP/rig/assets/scripts"
 PR_NUMBER=35 GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/refinery-rendered.sh" >/dev/null 2>&1
 eq "$(gate_arg --cooldown)" "300" "COOLDOWN: a rendered non-default value reaches the gate unchanged"
+
+# --- PROPAGATE: the loop's own pour must carry every var to the next wisp ------
+# Passing --cooldown only makes the configured value good for ONE cycle. Each
+# wisp is one iteration, and `next-iteration` pours the next one `--root-only` —
+# which materializes no formula defaults — so a var that is not on that command
+# arrives unrendered at the next wisp and every later cycle silently runs the
+# consumer's own fallback instead (86400 for escalation_cooldown). A setting that
+# survives only the first cycle is not a setting, and nothing about it looks
+# broken from the outside: the gate still runs, still dedups, just on the wrong
+# number. Enumerating [vars.*] rather than listing names here means a var added
+# later cannot quietly stop propagating.
+POUR="$(extract patrol-wisp-pour)"
+[ -n "$POUR" ] && ok "patrol-wisp-pour: extracted between markers" \
+  || bad "patrol-wisp-pour: extraction EMPTY — markers missing from $TOML"
+printf '%s\n' "$POUR" > "$TMP/patrol-wisp-pour.sh"
+bash -n "$TMP/patrol-wisp-pour.sh" \
+  && ok "patrol-wisp-pour: extracted block is valid bash" \
+  || bad "patrol-wisp-pour: extracted block failed bash -n"
+# Same escape ban as the gated blocks, and here it bites hardest: the pour is one
+# long line that invites a backslash wrap, and a TOML """ string eats exactly that
+# continuation — the witness would then run a truncated pour plus a stray fragment.
+case "$POUR" in
+  *\\*) bad "patrol-wisp-pour: contains a backslash — TOML \"\"\" transforms it, so what ships differs from what this test runs. Keep the pour on one line." ;;
+  *)    ok "patrol-wisp-pour: escape-free, so the extracted block is what actually ships" ;;
+esac
+has "mol wisp mol-witness-patrol --root-only" "$POUR" "PROPAGATE: pours the next iteration root-only"
+
+DECLARED_VARS=$(awk -F'.' '/^\[vars\.[a-z_]+\]$/ {n=$2; sub(/\]$/, "", n); print n}' "$TOML")
+[ -n "$DECLARED_VARS" ] \
+  && ok "PROPAGATE: read the formula's [vars.*] declarations" \
+  || bad "PROPAGATE: found no [vars.*] in $TOML — the per-var checks below would be vacuous"
+case "$DECLARED_VARS" in
+  *escalation_cooldown*) ok "PROPAGATE: escalation_cooldown is a declared var" ;;
+  *)                     bad "PROPAGATE: escalation_cooldown is no longer declared in $TOML" ;;
+esac
+for v in $DECLARED_VARS; do
+  # The value must be the placeholder, not a literal: hardcoding the default here
+  # would freeze every downstream cycle at that number no matter what the bootstrap
+  # set, which is the same bug wearing a plausible-looking fix.
+  case "$POUR" in
+    *"--var $v='{{$v}}'"*) ok "PROPAGATE: the pour forwards $v to the next wisp" ;;
+    *) bad "PROPAGATE: the pour drops $v — a --root-only wisp materializes no defaults, so a configured $v dies after this cycle (want --var $v='{{$v}}')" ;;
+  esac
+done
 
 # --- SELFREOPEN: the gate's own stamp must not reopen the fingerprint ---------
 # THE P1 REGRESSION. This runs the REAL gate, not the recording stub, twice over
@@ -581,7 +670,19 @@ done <<EOF
 $(awk '
   /^# >>> escalation-wiring-/ {inblock=1}
   /^# <<< escalation-wiring-/ {inblock=0; next}
-  /^[[:space:]]*gc mail send/ {printf "%d\t%d\t%s\n", NR, inblock, $0}
+  # Match the call ANYWHERE on the line, not just at its start. A send is just as
+  # ungated when it is a conditional or a chained clause — `if gc mail send ...`
+  # is already in this formula — and an anchored scan reports those as clean.
+  # Prose quotes commands in backticks and this section is full of it, so strip
+  # backtick-quoted spans from a COPY of the line first (the report still shows the
+  # original). A prose mention outside backticks would false-positive, which is the
+  # right way to be wrong here: it is loud and one allowlist entry fixes it, while
+  # a missed call is a silent storm channel.
+  {
+    code = $0
+    gsub(/`[^`]*`/, "", code)
+    if (code ~ /gc mail send/) printf "%d\t%d\t%s\n", NR, inblock, $0
+  }
 ' "$TOML")
 EOF
 [ "$UNGATED" -eq 0 ] && ok "ALLOWLIST: every bead-scoped 'gc mail send' goes through the gate"
