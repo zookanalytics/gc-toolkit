@@ -313,7 +313,7 @@ are wedged (the latter is what first prompted this check to exist).
 | `server.reachable == false` | — | Dolt server is down or unresponsive (CRITICAL) |
 | `server.latency_ms > 5000` | 5 s | Server may be overloaded |
 | `databases[].commits > 50000` | 50 k | Compactor dog may have stalled |
-| backup restorability — see **Step 2a** | every live database has a backup dir whose newest file is its manifest, <12 h old | Backup dog may have failed. Do NOT key this off `backups.dolt_stale` — it reads false-clean through a total outage |
+| backup restorability — see **Step 2a** | every live database has a readable backup dir with no file newer than its manifest, <12 h old | Backup dog may have failed. Do NOT key this off `backups.dolt_stale` — it reads false-clean through a total outage |
 | `processes.zombie_count > 0` | any | Zombie Dolt servers detected |
 | `orphans` non-empty | any | Advisory only — NEVER act on this count directly; verify with `gc dolt-cleanup` (hyphen, dry-run) first |
 
@@ -325,6 +325,16 @@ database's newest file IS its manifest. If a `.darc` is newer, the run
 uploaded data but never committed it — nothing after the manifest
 timestamp is restorable, however new the chunks look. Directory mtime and
 directory size both lie here: they move with the chunk writes.
+
+**On an mtime tie the manifest wins.** `stat` reports whole seconds, so a
+manifest committed milliseconds after the final chunk is indistinguishable
+from one written in the same instant. Since Dolt commits the manifest last,
+a same-second tie means the commit landed in the same second as the last
+chunk — the signature of a *fast* sync, not a torn one. Breaking that tie
+the other way false-FLAGs a healthy backup, and does so more often as a
+database gets smaller and faster: the check would degrade exactly as
+backups improve. Only a `.darc` **strictly** newer than the manifest is a
+finding.
 
 **Drive the scan from the live database list, not from the backup dirs.**
 A database whose backup directory is *missing entirely* is the worst case
@@ -375,14 +385,68 @@ else
             continue
         fi
         m_t=$(mtime_of "$db/manifest")
-        newest=""; newest_t=0
+        # Seed the scan WITH the manifest so an mtime tie resolves to it.
+        # mtime_of reads whole seconds, so a manifest committed milliseconds
+        # after the last chunk ties with it; paired with the strictly-greater
+        # test below, the tie used to be broken by `find` traversal order
+        # (directory/inode order, not time order) and a chunk yielded first
+        # won -- a healthy backup read as uncommitted. Dolt commits the
+        # manifest LAST, so a tie means the commit landed in the same second
+        # as the final chunk: a fast, healthy sync, and it gets MORE likely
+        # as a database gets smaller. Seeding encodes that invariant --
+        # on a tie, the manifest wins. Only a chunk STRICTLY newer than the
+        # manifest displaces it, which is the torn-backup signature this
+        # check exists to catch. With no manifest, m_t is 0, so the seed is
+        # inert and the no-manifest arms below behave exactly as before.
+        newest="manifest"; newest_t=$m_t
+        # ...but a seed is only safe once the directory has actually been READ.
+        # Capture the scan instead of streaming it in from a process
+        # substitution: `done < <(find ...)` throws the exit status away, so a
+        # directory the patrol cannot enumerate (permissions, I/O error, a find
+        # that dies) is indistinguishable from one holding nothing newer than
+        # the manifest -- and the seed then carries a fresh manifest all the way
+        # to OK, hiding a strictly newer chunk behind an unreadable directory.
+        # An unread directory is UNPROVEN, never clean.
+        # Seed the status and capture with `||` rather than reading `$?` after a
+        # bare assignment: the failing scan is EXPECTED here, and under `set -e`
+        # a command substitution that exits non-zero aborts the assignment's
+        # whole shell before `scan_rc` is ever set -- the arm below would then
+        # never run and the snippet would emit no verdict at all. `||` marks the
+        # failure as handled, so the check survives a strict-shell paste (same
+        # reason as the `|| true` on the re-run below).
+        scan_rc=0
+        scan_out=$(find "$db" -type f 2>/dev/null) || scan_rc=$?
+        scan_fail=""
+        if [ "$scan_rc" -ne 0 ]; then
+            # Re-run only on this path, to name the cause in the verdict Step 3
+            # carries. `|| true` so a paste of this snippet under `set -e -o
+            # pipefail` is not aborted by the (expected) non-zero find.
+            scan_why=$(find "$db" -type f 2>&1 >/dev/null | sed -n 1p || true)
+            scan_fail="find exited $scan_rc${scan_why:+: $scan_why}"
+        elif [ "$m_t" -gt 0 ] && [ -z "$scan_out" ]; then
+            # The manifest is readable but the scan listed nothing at all, not
+            # even the manifest: the enumeration came back empty without
+            # reporting failure. Also unproven.
+            scan_fail="find listed no files though $db/manifest is readable"
+        fi
         while IFS= read -r f; do
+            [ -n "$f" ] || continue
             t=$(mtime_of "$f")
             if [ "$t" -gt "$newest_t" ]; then newest_t="$t"; newest="${f##*/}"; fi
-        done < <(find "$db" -type f 2>/dev/null)
+        done <<< "$scan_out"
         since=$(( NOW - newest_t ))
         age_h=$(( (NOW - m_t) / 3600 ))
-        if [ "$m_t" -eq 0 ]; then
+        if [ -n "$scan_fail" ]; then
+            # Indeterminate by default; a missing or already-stale manifest
+            # makes it a finding outright, since nothing here can clear it.
+            if [ "$m_t" -eq 0 ]; then
+                echo "FLAG $name: backup directory scan failed ($scan_fail) and there is no manifest - nothing verifiably restorable"
+            elif [ "$age_h" -gt "$STALE_H" ]; then
+                echo "FLAG $name: backup directory scan failed ($scan_fail) and the manifest is ${age_h}h old (>${STALE_H}h = 2x backup cadence)"
+            else
+                echo "RECHECK $name: backup directory scan failed ($scan_fail) - cannot rule out a file newer than the ${age_h}h-old manifest"
+            fi
+        elif [ "$m_t" -eq 0 ]; then
             if [ "$newest_t" -gt 0 ] && [ "$since" -le "$GRACE_SEC" ]; then
                 echo "RECHECK $name: no manifest yet, '$newest' written ${since}s ago - first commit may be in flight"
             else
@@ -416,18 +480,32 @@ Every expected database gets exactly one verdict:
 
 | Verdict | Meaning |
 |---------|---------|
-| `OK` | manifest is the newest file and within the staleness threshold |
+| `OK` | the backup dir was read, no file in it is newer than the manifest (a tie counts as the manifest), and the manifest is within the staleness threshold |
 | `FLAG` | not restorable — act on it (Step 3) |
-| `RECHECK` | indeterminate, a sync may be in flight — **not** clean |
+| `RECHECK` | indeterminate — a sync may be in flight, or the backup dir could not be read — **not** clean |
 | `FLAG-ROOT` | no root, empty root, or no database list: nothing is verified |
 | `INFO` | extra backup dir, no live database — advisory, never a verdict |
 
 Flag a database when ANY holds:
 - it has **no backup directory**, or
 - it has **no manifest** (and nothing is being written right now), or
-- the newest file in its backup dir is **not** the manifest, or
+- a file in its backup dir is **strictly newer** than the manifest (an
+  equal-second tie is not — the manifest is committed last), or
 - the manifest is older than **12 h** — 2x the 6 h cadence (backup runs at
-  21:00 / 03:00 / 09:00 / 15:00Z).
+  21:00 / 03:00 / 09:00 / 15:00Z), or
+- its backup dir **could not be enumerated** *and* the manifest is missing
+  or already stale — an unreadable directory with a fresh manifest is a
+  `RECHECK` instead, never an `OK`.
+
+**An unreadable backup directory is not a clean one.** The scan decides
+"nothing is newer than the manifest" by *reading* the directory; if that
+read fails, the answer is unknown, not "nothing". The manifest seed above
+makes this failure especially dangerous — a readable, fresh manifest would
+otherwise carry an unreadable directory to `OK` and hide a torn backup
+behind a permissions or I/O error. So the scan's exit status is checked,
+and an enumeration that fails (or that returns nothing while the manifest
+is readable) produces `RECHECK`/`FLAG` with the scan error attached, never
+a verdict about newness it never established.
 
 **Missing and empty roots are findings, not warnings.** A missing or empty
 `$BACKUP_ROOT` means *no* database has a restorable backup — the most
@@ -493,19 +571,29 @@ gc session nudge dog/ "Compactor needed: <db_name> has <count> commits"
 ```
 
 **Unrestorable backup (any Step 2a `FLAG`, or a Step 2b mail):**
-The backup dog (`mol-dog-backup`) may have failed. A manifest that is not
-the newest file is a FAILED backup, not a slow one — the database cannot
-be restored past the manifest timestamp. Same pattern — log and nudge if
-order hasn't self-healed:
+The backup dog (`mol-dog-backup`) may have failed. A file **strictly** newer
+than the manifest is a FAILED backup, not a slow one — the database cannot
+be restored past the manifest timestamp. An equal-second tie is not a
+finding: Dolt commits the manifest last, so Step 2a resolves a tie to the
+manifest.
+
+**Carry the Step 2a line, do not re-describe it.** A `FLAG` has several
+classes — no backup directory, no manifest, a strictly newer file, a stale
+manifest, a directory that could not be read — and only one of them has a
+"newer file" to report. A template that demands one produces an alert with
+an empty or invented field for every other class. Each Step 2a verdict is
+already a complete one-line reason, so paste it verbatim and let it say
+which failure this is. Same pattern — log and nudge if order hasn't
+self-healed:
 ```bash
-gc session nudge dog/ "Backup needed: <db> manifest <age> old / not newest"
+gc session nudge dog/ "Backup needed: <the Step 2a FLAG line, verbatim>"
 ```
 If the same database is still flagged on the next rotation, the dog's own
 retries are not clearing it. Escalate — unattended, this is silent data
 loss on a ledger nobody can restore:
 ```bash
 gc mail send mayor/ -s "ESCALATION: <db> has no restorable backup [HIGH]" \\
-  -m "Manifest <age>h old; newest file <file>. Backup dog retries not clearing."
+  -m "<the Step 2a FLAG line, verbatim>. Backup dog retries not clearing."
 ```
 "Still flagged on the next rotation" is answered by your own escalation
 trail, not by memory: that mail is the durable record. Before escalating,
@@ -528,7 +616,10 @@ gc mail send mayor/ -s "ESCALATION: no Dolt backups exist at all [CRITICAL]" \\
 **Indeterminate (`RECHECK`):** a sync may be in flight. Re-run the Step 2a
 snippet; a live sync advances its newest file, a dead one does not. If the
 database is still `RECHECK` after the grace window, treat it as a `FLAG`
-above. Never count a `RECHECK` toward "healthy".
+above. Never count a `RECHECK` toward "healthy". A `RECHECK` whose reason is
+a failed directory scan will not clear by waiting — the re-run reads the
+same unreadable directory. Fix the read (permissions, mount, disk) or
+escalate it as a `FLAG`; the one thing it never becomes is an `OK`.
 
 **Zombie processes:**
 Kill zombie Dolt servers not on the expected port:
