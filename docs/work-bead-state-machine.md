@@ -219,7 +219,28 @@ pre-open subset is the only part of the check-set that moves ahead of
 PR-creation; the rest — CI, approval — stay post-open, gated at merge by the same
 check-set the merge skill already enforces. Which members run pre-open is fixed in
 code today; making that membership data-driven is a recorded, not-yet-built
-extension (see [the check-set](#the-check-set-one-class-of-gate)).
+extension (see [the check-set](#the-check-set-one-class-of-gate)). Because this is
+the pass that *mints* the PR from a **branch name**, every read it makes and the
+create itself are pinned to this checkout's origin repository and certified before
+anything is stamped — see
+[the invisible anchor](#the-invisible-anchor-repairing-the-field-every-pass-enumerates-on).
+
+**The flip out of `pre_open_gate` is ordered, not atomic.** `merge_result` is not
+one field among four here: it is the **visibility switch**. `pre_open_gate` is the
+only sub-state that opens or re-adopts a PR, and `pull_request` is the one the merge
+skill and the observer act on — so a single `gc bd update` carrying the switch
+*and* `pr_url`/`pr_number`/`merged_target` can, if it persists partially, leave an
+anchor that has left the only state that would ever open its PR and entered the
+states that act on an identity it does not have. Both passes then skip it on an
+empty number, and nothing routes it back: the invisible anchor again, reached from
+the other side. The identity fields are therefore written **first**, **verified by
+re-read** (a `gc bd update` that returns is not a ledger that holds it — the same
+rule the `check_set` stamp follows), and only then is the switch thrown. Every
+failure direction leaves the bead in `pre_open_gate`, which is the idempotent one:
+the next pass finds the PR through the existing-PR arm, re-certifies it, and retries
+the whole sequence. For the same reason the created PR is certified to be **at the
+reviewed commit** — `--head` names a mutable ref, and a branch that moved between
+the gate and the create would publish a non-draft PR at a commit codex never saw.
 
 **The movers.** The **worker** builds (`open → in_progress → hands off`) and
 reworks; the machine names a role, not a specific agent. The worker closes its
@@ -389,6 +410,23 @@ straight past the anchor it was ordered behind: the same fail-open as keying on
 stronger claim wins, so no dep-linked bead is demoted into the discardable class
 by also stamping a PR number.
 
+The same rule governs the **repository** filter, and for the same reason
+(tk-9m8q4). A PR *number* names a different pull request in every other
+repository the ledger spans, so the `pr_number` sweep is the one — and the only
+one — that can return a stranger: a foreign rework child carrying `#<n>` reads as
+rework in flight on *our* `#<n>` and holds a ready PR indefinitely. That hold is
+released by certifying the holder's own `pr_url` against the anchor's repository.
+A holder reached by a **dependency edge** is never repository-filtered: it was
+named by an explicit edge in *this* ledger, so it holds by virtue of the edge and
+not by naming a number — and the shape you would delete is a legitimate
+cross-repository merge-ordering block, which is exactly why an operator files one
+by hand. So both exclusions are scoped to `_via == "pr_number"`, because both
+exist only to undo that probe's over-broad sweep and neither says anything true
+about a bead found by an edge. **A dependency edge is a claim; a PR number is a
+coincidence until certified — only the coincidence is filtered.** Certification is
+fail-closed either way: a holder whose `pr_url` cannot be parsed into a repository
+stays the `?` wildcard and keeps its veto, so no legacy row loses its hold.
+
 **A rework child never becomes a second anchor — one gating anchor per PR
 (tk-ynz4b).** When a rework child hands its fix back through the refinery, its
 commits are already on the convoy branch, which *is* that child's landing
@@ -543,6 +581,290 @@ arm. Two properties make it converge, mirroring stale base exactly:
 Kept self-contained so the "detect stale gate → re-dispatch at head" logic can be
 re-housed later inside a convergence loop without moving its guarantees.
 
+## The invisible anchor: repairing the field every pass enumerates on
+
+Every disposition above is reached by enumerating gating anchors on
+`merge_result`. That makes the field load-bearing in a way the others are not: an
+anchor missing `merge_result` **entirely** is not merely un-gated or un-healed, it
+is *unseeable* — by the merge skill, the pre-open resolver, the observer, and the
+check-set heal that exists to repair bypassed anchors, all at once. There is no
+pass left to notice. The failure is silent and unbounded: the machine reports a
+clean queue while a PR rots. shutupandlisten's hand-recovered `su-uzy9.1` carried
+`branch` and `pr_url` but no `merge_result`; the rig-wide gating set read empty and
+PR#37 sat open for six days with zero escalations.
+
+Note what did *not* catch it. The anchorless scan below walks PR → bead, and a live
+bead did name PR#37 — carrying `branch`, so it read as *owned* rather than landing
+on the unowned line. Both directions of the loop reported nothing, correctly, and
+the PR was still stranded. Enumerating on the damaged field and enumerating on the
+undamaged one are not the same coverage.
+
+So the repair (`check-set-heal.sh` phase 0, ahead of the check-set normalization in
+the same script) is keyed on a predicate that **survives the damage**: open beads
+carrying `pr_url`/`pr_number` — which the refinery stamps only *after* it validates
+a PR, so their presence is durable evidence the bead is past the polecat stage —
+that carry no `merge_result`. It restores `merge_result=pull_request` and backfills
+`pr_number` (the merge skill skips an anchor without one, so restoring visibility
+without it yields an anchor that is seen and still never merges) from the certified
+PR, and `merged_target` (what the retarget check compares against) from the anchor's
+own recorded `target`/`merged_target`, falling back to the certified PR's live base
+only when no recorded intent survived the damage. The recorded value wins on purpose:
+adopting the live base would silently bless a retarget performed while the anchor was
+invisible — precisely the window in which one could go unnoticed.
+
+**The backfills land before the visibility, not with it.** `merge_result` is not
+one field among several here — it is the *switch* that exposes the bead to every
+pass above, and the other fields are what those passes then depend on. A partial
+write that lands the switch and drops a dependent is not self-correcting: the bead
+now *has* a `merge_result`, so it is no longer a candidate for this phase and
+nothing will restore what went missing. The sharpest case is `merged_target`,
+because the merge skill's retarget check is written as *"if a target is recorded
+and it differs from the live base, hold"* — an empty `merged_target` does not fail
+that check, it **skips** it, and the anchor merges onto whatever base the PR now
+points at with no validation at all. So the dependents (`pr_number`,
+`merged_target`, and the recovery markers `merge_result_healed` /
+`merge_result_pr_state`) are written and verified **first**, and visibility is
+flipped only once they are durable. A dependent that will not stick leaves the bead
+invisible and retried on the next pass — the stall we already had, rather than a
+new and permanent exposure.
+
+Four rules keep it from inventing anchors:
+
+- **Never enroll a child.** The merge skill's in-flight-rework hold counts exactly
+  "open, references the PR, no `merge_result`" — the absence *is* the hold. Stamping
+  a rework or review child would silently release it and land a PR mid-rework. So
+  `anchor_bead`, `task_kind`, `source_review_bead`, `source_anchor_bead`, a
+  non-empty `gc.routed_to`, a polecat assignee, or a PR already claimed by another
+  open `merge_result`-carrying bead all disqualify a candidate. The last of these is
+  one-anchor-per-PR read from the other end, and it must fail *closed*: an
+  unreadable ledger returns the same empty answer as "no incumbent", so the lookup
+  is only believed when it actually returned a result. It also has to ask the
+  question on **both** identity surfaces — `pr_number` *and* a normalized `pr_url` —
+  because `pr_number` is one of the fields this very phase backfills, so an
+  incumbent that kept `merge_result` and `pr_url` but lost its number is a shape the
+  recovery itself produces. A number-keyed lookup cannot see one, and the candidate
+  would then be stamped *with* a number and become the only anchor the merge skill
+  can see (it skips anchors without one) while the real anchor stays stranded.
+  Both surfaces are keyed on **repository *and* number**, because a pull number is
+  unique only within a repository and this city's ledger spans rigs with different
+  ones — keyed on the bare number, another repository's `#745` reads as the owner of
+  ours and refuses a real repair before the identity certification that would have
+  caught the confusion ever runs. Qualifying one surface is not enough: the two are
+  asked in sequence, so a foreign incumbent carrying *both* a `pr_url` and a
+  `pr_number` was still refused by the number-keyed half. An incumbent whose
+  repository cannot be named at all (no `pr_url`) is treated as matching, which keeps
+  the guard fail-closed — the repository key narrows the guard, it must not become a
+  way around it.
+  Routing alone is not enough
+  to exclude a child, because `gc.routed_to` is **cleared when a polecat claims
+  it** — between the claim and the hand-back, a stale-base rebase child (which
+  carries `branch`, `pr_url`, `pr_number` and no `merge_result`) wears the anchor
+  shape exactly, and only `source_anchor_bead` still marks it.
+- **Refuse ambiguity.** Two surviving candidates naming one PR means nothing here
+  can tell which is the anchor; both are skipped and reported. A wrong anchor is
+  worse than a visible stall. This one is a property of the *whole* candidate set,
+  not of any single bead, which is why an unreadable candidate scan skips the entire
+  phase for that pass: a scan that failed and a scan that found nothing return the
+  same empty answer, and recovering from a half-built set can promote one side of a
+  duplicate it never saw. Two rivals for one PR both lack `merge_result`, so neither
+  reads as an incumbent — the one-anchor guard cannot catch what the scan dropped.
+- **Certify the PR, not just its number.** `gh pr view <n>` resolves the number in
+  the *current* repo, so a `pr_url` pointing at another repository's `#37` would
+  silently bind this anchor to the local `#37` — and then gate and merge it. The
+  metadata that named the PR is damaged by construction; that is why
+  `merge_result` is missing at all. So the PR's own identity is checked against the
+  bead before anything is stamped: the URL must be the same pull request, the PR and
+  the branch it is opened *from* must both live in this checkout's own repository,
+  and the head branch must be the bead's `branch`. The repository half is not
+  implied by the rest — a branch name is owned by nobody, so a pull request opened
+  from a **fork** that reuses the bead's branch name satisfies a `headRefName`
+  comparison exactly, which is the same check the post-open validation in
+  `mol-refinery-patrol` already makes against `headRepositoryOwner`/`headRepository`.
+  A mismatch, an unreadable identity, or an origin repository this checkout cannot
+  resolve at all (nothing to compare against means "matches" would only mean
+  "unchecked") fails closed and waits for an operator to repair the metadata.
+  That repository is named **host-qualified** — `<host>/<owner>/<repo>` — on both the
+  read and the comparison. `<owner>/<repo>` does not name a repository; it names one
+  *per host*, and `gh pr view --repo` accepts `[HOST/]OWNER/REPO` and supplies the
+  host from `GH_HOST` when it is omitted. A hostless `--repo` therefore pins nothing:
+  under a `GH_HOST` pointing at another GitHub host it reads that host's
+  `<owner>/<repo>`, whose PR matches ours on owner, repo, head branch *and* head
+  repository. Pinning the read and comparing the answer are two halves of one check —
+  the comparison keeps the host so that a `gh` which ignored the flag (a transfer
+  redirect, an older client) still shows up as a mismatch.
+  A certification is only true in the process that performed it, so the certified
+  URL is **persisted**: `pr_url` is backfilled from it alongside `pr_number`, as one
+  more dependent of visibility. Without that, recovery hands the merge skill and the
+  observer an anchor identified by *number alone* — the identifier this whole check
+  exists to distrust — and they run later, in processes that never saw the
+  certification and whose `gh` context is not this one's. Those passes pin their own
+  reads to the origin remote's repository for the same reason and compare what comes
+  back against the anchor's recorded URL; an origin they cannot resolve merges and
+  records **nothing**, since a wrong merge cannot be retried away.
+  The **pre-open resolver** asks the same question one step earlier in the lifecycle,
+  where the anchor has no `pr_url` to compare against yet — it is the pass that
+  *mints* one. There the identifier is a **branch name**, which names a repository
+  even less than a number does: every fork of this repo can carry the same
+  `polecat/<bead>`. So its existing-PR lookup, its branch-head read (`gh api`, pinned
+  by explicit path plus `--hostname`, since there is no `--repo`), the create, and
+  the verdict comment are all pinned to the origin-derived repository, and every
+  answer is certified before it is stamped. Its stakes are the mirror of the merge
+  skill's: `pre_open_gate` is the **only** state that retries PR-open, so an
+  uncertified foreign same-branch PR does not merely mis-gate the anchor — it moves
+  it out of that state onto a stranger's `pr_url`/`pr_number`, after which the
+  hardened merge and reconcile passes correctly hold or skip and *nothing* ever opens
+  the real PR. An unresolvable origin therefore opens nothing at all: a PR opened in
+  the wrong repository is a published artifact no retry can take back.
+  **And the repository a PR lives in is not the repository it comes from.** Pinning
+  the read answers where the *answer* came from; a pull request opened **into** this
+  repository **from a fork** is served by that pinned read and carries one of our own
+  URLs, so the URL half certifies it while its head is a stranger's. `--head` filters
+  on the branch **name** alone, so it is listed beside ours with nothing but arrival
+  order between them — and taking the first row made that order decide which pull
+  request an anchor binds to. So every candidate, whether found by the existing-PR
+  lookup, discovered after a create race, or just created, is certified on all four
+  halves of its identity — URL repository, head branch, **head repository**, and base
+  — and the branch's pull request is *chosen* from the certified rows (a live `OPEN`
+  ahead of a `MERGED` one, and both ahead of a dead `CLOSED` one) rather than taken
+  off the top of the list. Certifying the *created* PR means reading it back **by
+  number**, never by branch name: resolving a pull request by a name nobody owns is
+  the gap itself, so the create-race discovery re-runs the same certified scan instead
+  of `gh pr view <branch>`.
+  Three answers, not two, because the dispositions differ. Nothing open from a branch
+  of this name is the only one on which a PR is opened. A read that **failed**, a full
+  page that may be **truncated**, an unreadable row, or a name collision in which
+  *none* of the matches is this anchor's are all refusals: "I could not see it" and
+  "it is not there" differ by exactly one twin pull request, and so do "nothing is
+  open from this branch" and "the only things open from a branch of this name are
+  somebody else's". A name collision is a state an operator looks at, not one to open
+  a pull request into.
+  **Every pass that acts on a pull request asks the head question, not just the one
+  that mints it.** A fork's PR into this repository is served by the merge skill's
+  and the observer's pinned reads too, and passes their URL comparison for the same
+  reason — the URL is ours. So both certify the head as well: the head repository is
+  this checkout's own, GitHub's own `isCrossRepository` agrees with that comparison
+  (a row claiming both is self-contradicting, and an identity that contradicts itself
+  is *unestablished* rather than a tie to break), and the head branch is the one the
+  anchor records — checked only when the anchor has one, since a `pr_number`-only
+  anchor, the shape recovery produces before backfill, has nothing to disagree with.
+  An unreadable head holds rather than lands. The stakes differ by pass and both are
+  terminal: the merge skill would squash a stranger's head onto the target under our
+  anchor's gates, and the observer would close, escalate, retarget, or dispatch a
+  **rebase** whose branch it takes from the PR's own `headRefName` and force-pushes —
+  against a fork's head, a rebase onto a branch this rig does not own.
+  In the observer that comparison covers **both** directions of its reconcile, not
+  just the anchor reads: the anchorless scan enumerates open PRs with `gh pr list`
+  and then stamps `anchorless_flagged` on a local closed bead and mails an escalation
+  about it, so a list answered for another repository would bind strangers' pull
+  requests to this rig's beads one colliding number at a time. Rows whose URL does not
+  name this checkout's repository are dropped and *counted* — a wholly foreign list
+  reports nothing rather than a storm of false findings, and says so on stderr, because
+  "0 anchorless" would otherwise read as a clean scan.
+- **Restore visibility, not verdicts.** The phase confirms the PR exists and reads
+  its base; it never merges, closes, or reopens. A PR already merged or closed gets
+  its `merge_result` back so the observer can record or escalate it, but no gate is
+  armed — arming one would dispatch a signoff for a PR nobody can merge. That
+  decision is *persisted* (`merge_result_pr_state`), because the observer may not
+  dispose of the restored bead before the next wake and a pass-local skip would
+  forget by then. It is also **re-checked live** before it is honoured: a closed PR
+  can be reopened, and a record trusted blindly would suppress a legitimate gate
+  forever. That re-check **re-certifies the PR's identity**, exactly as the recovery
+  did — it does not merely ask a number for its state. The recovery certified the PR
+  on the pass that restored the bead, while the re-check runs on every later pass,
+  where the repository `gh` resolves a number in is not guaranteed to be the same
+  one; an uncertifiable probe is therefore treated like an unreadable one, so another
+  repository's same-numbered PR can neither refresh the record nor drop the anchor
+  into gating.
+  The re-check is owed to the **same** pass too, not only to later ones. Reading the
+  PR closed and skipping on that basis is one claim; leaving the anchor ungated after
+  the same pass has already restored its `merge_result` is a stronger one, because
+  the merge skill runs afterwards *within that pass* and reads an empty `check_set`
+  as "declares no gates". A PR reopened in that window is open, visible and
+  un-reviewed. So both arms — the one that recovered the anchor here and the one
+  reading a persisted verdict — ask the same certified question, and an answer of
+  `OPEN` falls through to normal gating rather than the inert skip.
+  What an *unreadable* answer costs turns on the **exposure**, never on which pass
+  created it. A recovered non-OPEN anchor whose live state cannot be certified and
+  whose canonical `check_set` is **empty** holds the merge skill (`UNSAFE_RC`)
+  whether this pass restored it or an earlier one did: it is equally visible and
+  equally ungated either way, the recorded non-OPEN state is a *memory of a past
+  read* rather than a gate, and the merge skill runs later in this same patrol pass
+  in its own `gh` context — able, quite possibly, to read the PR this pass could not,
+  and to read the empty `check_set` as "declares no gates". Keying that hold on
+  provenance was the earlier rule, and it left a PR recorded closed three passes ago
+  and reopened since as an open, visible, ungated anchor that any pass could land.
+  A **gated** anchor is the deferral: a non-empty `check_set` holds the merge on its
+  own unmet marker no matter what this pass could not read, so it warns and retries —
+  which is what keeps one anchor's silence from stalling the whole rig's queue.
+
+Pre-open anchors are deliberately **out of scope**: a branch with no PR is
+indistinguishable from ordinary in-flight polecat work, so there is no
+damage-surviving evidence to key on and the phase does not guess.
+
+Unlike a `check_set` stamp that fails to persist, a failed `merge_result` repair
+does **not** hold the merge pass. An ungated anchor is one the merge skill can see
+and land un-reviewed; an invisible one it cannot land at all. The first is a
+correctness hazard worth stopping the rig for, the second is the stall we already
+had — so this phase warns, flags once, and retries. A *successful* repair inverts
+that reasoning, which is the subtlety worth stating plainly: restoring
+`merge_result` **exposes** the anchor to the merge skill, so from that instant the
+usual "delay is safe" argument no longer applies to it. If the recovery lands and
+the gating that was supposed to follow does not, this pass has created the very
+ungated-merge window it exists to close. So a recovered open-PR anchor that is
+still ungated when the pass ends holds the merge (`UNSAFE_RC`) exactly as a failed
+`check_set` stamp does — including the case where the phase-1 enumeration comes
+back *empty*, which after a recovery is a contradiction rather than a quiet
+"nothing to do".
+
+An enumeration that could not be **read** holds the merge on the same grounds, and
+without waiting for a recovery to turn it into a contradiction. Those two are
+*known* exposures; this one is an *unverifiable* one. The merge skill runs
+immediately afterwards on the standing guarantee that this pass normalized every
+visible anchor's `check_set` — empty is ungated *there* by design, and this is the
+boundary that repairs it — so a pass that could not read the gating set cannot make
+that guarantee about **any** anchor, including one that arrived hand-recovered and
+empty since the last pass. It is also the shape that hides best: a partial read (one
+`merge_result` state enumerated, the other unreadable) looks exactly like a complete
+one, and the empty-enumeration guard never fires on it. Reading a failed ledger
+query as an answer at all is the general form of that mistake, and it is not
+specific to this scan — `gc bd list --json` reports its own failures as a non-empty
+error *object* on stdout, and a query that dies after emitting announces that only
+in its exit status, so both survive the "is it an array?" test that every guard here
+used to rely on. Each ledger read is therefore taken through one helper that
+requires a zero exit *and* an array payload, and every caller treats a refusal as
+"I cannot tell" rather than as "there is nothing there".
+
+The same inversion is why that enumeration is **unbounded**, and why each recovered
+anchor's *reach* is verified rather than inferred. A cap was defensible while every
+anchor enumerated was already visible: one past it was merely deferred to a later
+pass. A recovered anchor is not — it is visible to the merge skill *now*, and the
+only enumeration that will ever dispatch its signoff is the one in this pass, so a
+page boundary leaves a live anchor with an armed gate nothing was dispatched to
+raise. A non-empty `check_set` does not close that gap either: it proves the anchor
+is *gated*, not that phase 1 ever saw it, and the two come apart on exactly the
+shape the damage most often produces — an anchor that came back still carrying
+`codex`. Dropped from the enumeration, it passes a gatedness-only check in silence.
+So reach and gatedness are two questions: unreached *and* ungated is the
+ungated-merge condition and holds the whole pass; unreached but gated is held by its
+own armed gate, so it is reported and left to the next pass, which the durable
+`merge_result_healed` marker carries it into.
+
+That handoff is also why a recovered anchor keeps flowing through the
+satisfiability check even when its `check_set` already reads normal. The damage
+that dropped `merge_result` need not have dropped `check_set` too: an anchor can
+come back carrying `codex` and no `check.codex` marker, which looks "already
+normalized" while having nothing that can ever raise its gate. Treating
+`merge_result_healed` as a reason to keep checking — alongside `check_set_healed` —
+is what stops the repair from trading an invisible PR for a permanently stuck one.
+
+The same recovery shape hid a second way: `su-uzy9.1` was assigned to
+`shutupandlisten/refinery` while the canonical identity was
+`shutupandlisten/gc-toolkit.refinery`, which hid it from find-work's *assignee*
+filter at the same time the missing `merge_result` hid it from every bead-keyed
+pass. A gating anchor whose assignee is not the canonical refinery identity is
+therefore **flagged** (`assignee_noncanonical`, bounded to the offending value) and
+never rewritten — the identity is a routing decision an operator owns.
+
 ## Anchorless PRs: reconciling from the other side
 
 Every automated path in close-on-land starts from the **bead**: the merge skill,
@@ -591,8 +913,29 @@ the in-flight rework probes, and the closed-bead resolution — reads the same
 widened key set, so a bead visible to one is visible to all of them. Widening a
 single lookup is worse than widening none: it flips such a PR from *anchorless*
 to tracked-but-unprobeable, which reads as resolved while the in-flight probes
-still cannot see the bead holding the branch. Matching is on the number alone, so
-it inherits the same single-repo scoping the `pr_number` path has always assumed.
+still cannot see the bead holding the branch.
+
+**And a number is not an identity.** Every key above holds a pull *number*, which
+is unique only within a repository, while the PRs it is matched against come from a
+`gh pr list` pinned to this checkout's origin — so matching on the number alone
+compares this repository's pull requests against every repository's beads. Both
+directions break, in opposite ways: a foreign *live* bead naming `#n` puts this
+repo's open `#n` into the tracked set and its genuinely anchorless state is never
+reported, while a foreign *closed* bead naming `#n` resolves as the dead anchor of
+ours — receiving the `anchorless_flagged` stamp, being named in the escalation, and
+bounding that escalation for a PR it never owned. So each reference carries the
+repository its key names, host-qualified: `pr_number` is placed by the bead's own
+`pr_url`, `fork_pr` by its `fork_pr_url`, and a `fork_pr_url` reference by itself.
+A key that names no URL at all — the `pr_number`-only shape almost every legacy
+bead and every freshly recovered anchor wears — is the `?` wildcard and matches any
+repository, the same fail-closed convention the recovery phase's incumbent guards
+use: qualification only ever rules out a *positive, parsed* disagreement, so it
+never turns today's silence into a new finding and never widens what may be
+written. The merge skill's own hold guards (duplicate-anchor, open-child) are keyed
+the same way and for the same reason, though they fail toward *holding* rather than
+merging: there, an unqualified number means a stranger's same-numbered bead can
+hold a ready PR indefinitely, with nothing an operator can repair in this
+repository to release it.
 
 Note the asymmetry with the rest of this document: the other dispositions fix a
 bead whose PR misbehaved, while this one surfaces a PR whose bead is already
