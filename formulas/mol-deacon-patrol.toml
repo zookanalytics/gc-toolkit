@@ -517,19 +517,20 @@ gc session nudge dog/ "Compactor needed: <db_name> has <count> commits"
 ```
 
 **Unrestorable backup (any Step 2a `FLAG`, or a Step 2b mail):**
-The backup dog (`mol-dog-backup`) may have failed. A manifest that is not
-the newest file is a FAILED backup, not a slow one — the database cannot
-be restored past the manifest timestamp. Same pattern — log and nudge if
-order hasn't self-healed:
+The backup dog (`mol-dog-backup`) may have failed. A file **strictly** newer
+than the manifest is a FAILED backup, not a slow one — the database cannot
+be restored past the manifest timestamp. An equal-second tie is not a
+finding: Dolt commits the manifest last, so Step 2a resolves a tie to the
+manifest. Same pattern — log and nudge if order hasn't self-healed:
 ```bash
-gc session nudge dog/ "Backup needed: <db> manifest <age> old / not newest"
+gc session nudge dog/ "Backup needed: <db> manifest <age> old / newer file <file>"
 ```
 If the same database is still flagged on the next rotation, the dog's own
 retries are not clearing it. Escalate — unattended, this is silent data
 loss on a ledger nobody can restore:
 ```bash
 gc mail send mayor/ -s "ESCALATION: <db> has no restorable backup [HIGH]" \\
-  -m "Manifest <age>h old; newest file <file>. Backup dog retries not clearing."
+  -m "Manifest <age>h old; newer file <file>. Backup dog retries not clearing."
 ```
 "Still flagged on the next rotation" is answered by your own escalation
 trail, not by memory: that mail is the durable record. Before escalating,
