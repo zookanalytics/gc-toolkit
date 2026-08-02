@@ -361,6 +361,46 @@ slot index assigned by the controller during desired-state
 expansion. Instances are ephemeral — they can die and be
 respawned at a different N within the same template.
 
+**Slot identities recur in every rig the binding serves.** A pool
+binding imported into several rigs is stamped out once per rig (see
+[Scope is tri-state](#scope-is-tri-state-omitted-is-not-city)), and
+each rig's expansion allocates the same slot identities.
+
+The **fully qualified** instance name does tell those apart — its
+`<dir>` segment is the rig, as in `gc-toolkit/gc-toolkit.polecat-1`.
+What recurs is everything *after* that segment: the agent base
+(`{{.AgentBase}}`) and the `-<N>` slot suffix carry no rig, so the
+bare `gc-toolkit.polecat-1` names a *different* live session in every
+rig the pool serves.
+
+That distinction matters because the rig-free part is what most
+surfaces show you. The worktree path is templated
+`work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"` — only
+the `{{.Rig}}` segment varies — so an equivalent path exists under
+every rig the slot has served, and those directories persist after
+the work moves on. A worktree under rig R is therefore evidence that
+the slot *once* served R, not that it is serving R **now**.
+
+So a pool worker's **rig-free slot identity does not identify which
+rig's store its work bead lives in**, and neither does the mere
+existence of its worktree under a given rig. Only a **live**
+session's `work_dir` names the rig it is currently serving. This cuts
+both ways:
+
+- **Benign direction.** A pool session reading `active` while *this*
+  rig's store shows zero assigned or in-progress work is almost always
+  serving another rig, with its work bead and worktree in that rig's
+  store. Not a spawn storm, not a stuck worker — confirm by peeking
+  which rig that live session's `work_dir` names.
+- **Dangerous direction.** A liveness check that enumerates only one
+  rig's sessions and matches them against a rig-free base returns "no
+  owner" for a slot that is alive in another rig. That false-clean is
+  what green-lights a destructive worktree prune. Build the liveness
+  map **unscoped across all rigs** before calling any worktree
+  ownerless, and key worktree cleanup on the live **`work_dir` path**,
+  re-verified immediately before removal — never on "the identity is
+  dead".
+
 ### Lifecycle
 
 - **Spawn.** Controller's reconciler reads `scale_check` (if
