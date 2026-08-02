@@ -398,10 +398,11 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # LIVE_STATUSES; `open` is dropped from it because plain-open is the one status that
 # carries no actor of its own.
 ACTING_JQ_DEF='def acting($live):
-  ((.metadata // {})) as $m
+  . as $b
+  | (($b.metadata // {})) as $m
   | (($live | split(",")) | map(select(. != "open"))) as $owning
   | ((($m.task_kind // "") | tostring) == "review")
-    or (($owning | index((((.status // "") | tostring) | ascii_downcase))) != null)
+    or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
     or ((($m["gc.routed_to"] // "") | tostring) != "");
 '
 
@@ -461,16 +462,19 @@ inflight_for() { # <anchor-id> <pr-number> <branch> <anchor-repo-q>
   # the dispatch, whereas returning a stranded sibling would re-route a SECOND
   # claimable review for one anchor.
   #
-  # `acting` applies here too, not only to the broad surfaces (tk-t46nq). Naming this
-  # anchor settles IDENTITY, never agency: a child that names it and is handed back
-  # plain-`open` and unrouted is as inert as one found by branch, and trusting the exact
-  # surface outright would hold this gate on it forever. The stranded-signoff case is
-  # unaffected — a review is acting by kind, whatever its route — so it is still
-  # returned here and repaired at the call site.
+  # `acting` is deliberately NOT applied to this surface — only to the broad ones
+  # below. The asymmetry is about which mistake each surface can make. `anchor_bead`
+  # is written by exactly one thing, the signoff dispatch, so a bead carrying it is a
+  # review; the park this filter exists to prevent (a handed-back rework child) is
+  # matched by BRANCH, and rework children never carry anchor_bead. Filtering here
+  # would buy nothing and risk the opposite failure: a review whose task_kind write
+  # was lost reads as inert, so every pass mints ANOTHER review for the same anchor —
+  # an unbounded twin storm on the exact surface, in spent codex quota, where the
+  # broad-surface mistake costs one held anchor that the "already has in-flight" line
+  # names on every pass.
   raw=$(bd_list_read --metadata-field anchor_bead="$aid" --status="$LIVE_STATUSES") || return 2
   found=$(printf '%s' "$raw" \
-    | jq -r --arg a "$aid" --arg live "$LIVE_STATUSES" "$ACTING_JQ_DEF"'[.[]
-        | select(.id != $a) | select(acting($live))]
+    | jq -r --arg a "$aid" '[.[] | select(.id != $a)]
         | sort_by(if ((((.metadata // {})["gc.routed_to"] // "") | tostring) != "")
                      or ((((.assignee // "") | tostring) | gsub("[[:space:]]"; "")) != "")
                   then 0 else 1 end)
@@ -1741,6 +1745,27 @@ while IFS= read -r row; do
   # still the branch head. REGATE_WHY, once set, is both the decision to dispatch
   # and the reason string the reviewer is handed. See the header for the full
   # ownership split against reconcile-merged-prs.sh (tk-t46nq).
+  #
+  # A marker is WELL-FORMED only as `green@<oid>` with a non-empty hexadecimal oid.
+  # That is not pedantry about spelling: merge-skill.sh clears the merge by STRING
+  # EQUALITY against `green@<live head>`, so `green`, `red`, `green@` or any other
+  # shape can never equal it — the gate is unmeetable for as long as the value
+  # stands. Nor does anything else repair it: reconcile-merged-prs.sh's stale-gate
+  # arm matches `green@<non-empty oid>` too, so a malformed marker is invisible to it
+  # in either sub-state. Treated as merely "present", such an anchor took the
+  # satisfiable exit below and parked with no marker anything could raise — a held
+  # merge, no dispatch, no escalation. So a malformed marker is UNSATISFIED and
+  # re-gates in BOTH sub-states, which also cannot twin reconcile's arm precisely
+  # because that arm never acts on this shape (review tk-s8zx3 finding #2).
+  marker_wellformed=0
+  case "$marker" in
+    green@*)
+      case "${marker#green@}" in
+        ''|*[!0-9a-fA-F]*) ;;             # empty, or not a bare hex oid
+        *) marker_wellformed=1 ;;
+      esac ;;
+  esac
+
   REGATE_WHY=""
   if [ -z "$marker" ]; then
     # ABSENT. Never reviewed, or CLEARED by a REQUEST_CHANGES signoff whose rework
@@ -1748,20 +1773,22 @@ while IFS= read -r row; do
     # explicitly punts the absent case to this pass, and pre-open-resolve.sh can
     # only hold. Dispatch in BOTH sub-states — no live head needed to classify it.
     REGATE_WHY="check.codex is absent (never reviewed, or cleared by a REQUEST_CHANGES signoff whose rework has landed)"
+  elif [ "$marker_wellformed" != 1 ]; then
+    # MALFORMED. No live head needed either: whatever the head is, this value cannot
+    # equal `green@<head>`, so the gate is unmeetable until a real signoff replaces
+    # it. Both sub-states, for the reason above.
+    REGATE_WHY="check.codex is '$marker', which is not the green@<oid> form the merge gate compares against, so no head can ever satisfy it"
   elif [ "$state" = "pre_open_gate" ]; then
     # PRESENT on a pre-open anchor. Only a live-head read can tell current from
     # stale, and this pass is the ONLY one that can: reconcile-merged-prs.sh
     # enumerates merge_result=pull_request, so a pre-open anchor is invisible to
     # its stale-gate arm. Fail soft — an unreadable head leaves the marker treated
     # as satisfiable, exactly as before gh entered this script.
-    case "$marker" in
-      green@*)
-        REVIEWED_OID="${marker#green@}"
-        HEAD_OID=$(live_head_for "$branch")
-        if [ -n "$REVIEWED_OID" ] && [ -n "$HEAD_OID" ] && [ "$REVIEWED_OID" != "$HEAD_OID" ]; then
-          REGATE_WHY="check.codex is green@$REVIEWED_OID but branch '$branch' has advanced to $HEAD_OID, so the marker certifies a commit that is no longer the head"
-        fi ;;
-    esac
+    REVIEWED_OID="${marker#green@}"
+    HEAD_OID=$(live_head_for "$branch")
+    if [ -n "$HEAD_OID" ] && [ "$REVIEWED_OID" != "$HEAD_OID" ]; then
+      REGATE_WHY="check.codex is green@$REVIEWED_OID but branch '$branch' has advanced to $HEAD_OID, so the marker certifies a commit that is no longer the head"
+    fi
   fi
   # A marker that is green at the live head — or a stale POST-OPEN one, which
   # belongs to reconcile-merged-prs.sh's stale-gate arm and its merge_hold /
