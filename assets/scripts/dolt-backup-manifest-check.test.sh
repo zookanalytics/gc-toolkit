@@ -25,6 +25,11 @@
 # backup dirs, and separately asserts over the shipped dolt-health step TEXT
 # that the retired `dolt_stale` threshold row has not come back anywhere in the
 # step — the snippet markers only cover the snippet.
+#
+# One case runs the snippet with `find` shimmed on PATH to force directory
+# traversal order (see "Deterministic forced-order tie"), because the mtime-tie
+# rule the snippet encodes is precisely a rule about not depending on that
+# order — and a fixture that merely hopes for the unlucky order proves nothing.
 # No live city, Dolt, network, or backups.
 set -euo pipefail
 
@@ -87,16 +92,25 @@ else
 fi
 
 # Belt and braces: the exact retired row shape, anywhere in the step.
+#
+# Both checks below feed $STEP to grep by HERE-STRING, not by `printf | grep`.
+# $STEP is ~16 KB and `grep -q` exits the instant it matches, so the writer can
+# still be mid-write when the read end closes: it takes SIGPIPE and the
+# pipeline returns 141. Under this script's `set -o pipefail` that reads as
+# "assertion failed" — measured at ~1% per call, which is a passing suite that
+# randomly reports a lost dolt_stale explanation. A here-string is fully
+# written before grep starts, so there is no early-close race at all. (The
+# BAD_ROWS scan above is safe as written: awk always drains its input.)
 # shellcheck disable=SC2016  # backticks are regex literals (the markdown row
 # quotes the field as `backups.dolt_stale`), not command substitution.
-if printf '%s\n' "$STEP" | grep -qE '`?backups\.dolt_stale`? *== *true'; then
+if grep -qE '`?backups\.dolt_stale`? *== *true' <<< "$STEP"; then
     bad "the retired 'backups.dolt_stale == true' threshold row is back in the step"
 else
     ok "the retired 'backups.dolt_stale == true' row is absent from the step"
 fi
 
 # ...but the explanation must survive, or the trap gets re-derived by hand.
-if printf '%s\n' "$STEP" | grep -q 'dolt_stale'; then
+if grep -q 'dolt_stale' <<< "$STEP"; then
     ok "step still explains why dolt_stale is insufficient"
 else
     bad "step no longer mentions dolt_stale at all — the explanation was lost"
@@ -119,13 +133,17 @@ age() {
     date -d "@$e" '+%Y%m%d%H%M.%S' 2>/dev/null || date -r "$e" '+%Y%m%d%H%M.%S'
 }
 mkdb() { mkdir -p "$BACKUP_ROOT/$1"; }
+# Portable epoch -> `touch -t` stamp. Split out of stamp_epoch because the
+# forced-order fixture further down lives under its own backup root and has to
+# stamp by absolute path.
+epoch_stamp() { date -d "@$1" '+%Y%m%d%H%M.%S' 2>/dev/null || date -r "$1" '+%Y%m%d%H%M.%S'; }
 # Stamp from an explicit epoch. `age` re-reads the clock per call and only
 # takes whole hours, so it can express neither "these two files share a
 # second" nor "this chunk is one second newer" — both of which the tie
 # fixtures below need to pin exactly.
 stamp_epoch() {
     local s
-    s="$(date -d "@$2" '+%Y%m%d%H%M.%S' 2>/dev/null || date -r "$2" '+%Y%m%d%H%M.%S')"
+    s="$(epoch_stamp "$2")"
     touch -t "$s" "$BACKUP_ROOT/$1"
 }
 stamp() { touch -t "$(age "$2")" "$BACKUP_ROOT/$1"; }
@@ -197,10 +215,12 @@ mkdb nomanifest_inflight
 #
 # Two fixtures, differing in creation order and chunk name, because the
 # pre-fix loop broke a tie by `find` traversal order — whichever file the
-# directory happened to yield first won. Traversal order is not portably
-# controllable (creation order on tmpfs, name-hash on ext4), so one fixture
-# could pass buggy code by luck; two independent draws make that unlikely.
-# Under the tie rule both are deterministic regardless of traversal order.
+# directory happened to yield first won. These two are NATURAL-order draws:
+# they take whatever order the host filesystem hands back (creation order on
+# tmpfs, name-hash on ext4), so on an unlucky host both could yield `manifest`
+# first and let pre-fix code pass. They are coverage, not proof — the proof is
+# the forced-order case below ("Deterministic forced-order tie"), which shims
+# `find` to pin the order and so fails against pre-fix code on every host.
 TIE_EPOCH=$(( $(date +%s) - 2 * 3600 ))
 
 mkdb tie_chunk_first
@@ -327,6 +347,61 @@ if printf '%s\n' "$OUT" | grep -qE '^(OK|FLAG|RECHECK|INFO) \*'; then
 else
     ok "no verdict names the unmatched glob '*'"
 fi
+
+# --- Deterministic forced-order tie -----------------------------------------
+# `tie_chunk_first` / `tie_manifest_first` are draws at a variable the test
+# cannot set: `find` traversal order. Pin it instead. Shim `find` so that for
+# one fixture it emits the tied chunk BEFORE the manifest — the exact order
+# under which the pre-fix loop left `newest` pointing at a chunk and false-
+# FLAGged a healthy backup — and delegate every other call to the real find.
+# Under that forced order the shipped snippet must still read OK. That holds on
+# every host, which is what makes this the case a revert of the tie fix cannot
+# get past.
+REAL_FIND="$(command -v find || true)"
+[ -n "$REAL_FIND" ] || { echo "FAIL - no find(1) on PATH; cannot force traversal order"; exit 1; }
+
+FORCED_ROOT="$TMP/forced"
+FORCED_DB="$FORCED_ROOT/.dolt-backup/tie_forced"
+FIRED="$FORCED_ROOT/find-shim-fired"
+mkdir -p "$FORCED_DB" "$TMP/findbin"
+: > "$FORCED_DB/manifest"
+: > "$FORCED_DB/nnnn.darc"
+touch -t "$(epoch_stamp "$TIE_EPOCH")" "$FORCED_DB/manifest" "$FORCED_DB/nnnn.darc"
+
+# Paths are baked in at write time (unquoted heredoc, `\$` escaped where the
+# shim's own positional parameters are meant), so the shim needs no environment
+# — it only has to recognise the one directory whose order it forces.
+cat > "$TMP/findbin/find" <<EOF
+#!/usr/bin/env bash
+# \$1 is the snippet's search root: 'find "\$db" -type f'.
+if [ "\$1" = "$FORCED_DB" ]; then
+    : > "$FIRED"
+    printf '%s\n' "$FORCED_DB/nnnn.darc" "$FORCED_DB/manifest"
+    exit 0
+fi
+exec "$REAL_FIND" "\$@"
+EOF
+chmod +x "$TMP/findbin/find"
+
+FORCED_OUT="$(PATH="$TMP/findbin:$PATH" GC_CITY_PATH="$FORCED_ROOT" GC_CITY="$FORCED_ROOT" \
+    EXPECTED_DBS="tie_forced" bash "$TMP/check.sh" 2>&1)"
+
+# The shim must actually have run, or the case is vacuous: if the snippet
+# stopped shelling out to `find`, or the PATH prefix were ignored, the fixture
+# would silently fall back to natural order and become a coin flip again.
+if [ -f "$FIRED" ]; then
+    ok "forced-order find shim was exercised (tie order really was forced)"
+else
+    bad "forced-order find shim never fired — tie order was NOT forced; got: $FORCED_OUT"
+fi
+
+FORCED_VERDICT="$(printf '%s\n' "$FORCED_OUT" \
+    | grep -E '^(OK|FLAG|RECHECK|INFO) tie_forced:' | head -1 || true)"
+case "$FORCED_VERDICT" in
+    "OK "*) ok "tie survives a forced chunk-before-manifest traversal ($FORCED_VERDICT)" ;;
+    "")     bad "forced-order tie produced no verdict; got: $FORCED_OUT" ;;
+    *)      bad "forced-order tie did not read OK: $FORCED_VERDICT" ;;
+esac
 
 # --- Root-level terminal findings -------------------------------------------
 # A missing or empty backup root means NO database has a restorable backup. It
