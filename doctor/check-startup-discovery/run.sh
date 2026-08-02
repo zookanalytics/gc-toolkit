@@ -210,17 +210,31 @@ check_block "layered-startup-discovery-boot" "boot" "" "mol-deacon-patrol"
 # point of this block is that the query exists. Both call sites the fragment
 # supersedes get their own assertion: the Step 2 command inside the fence, and
 # the Command Quick-Reference row, which is a table cell and so is skipped by
-# every fence-scoped check. --limit=0 is part of the contract, not a detail: a
-# capped read lets a busy deacon's other in-progress rows crowd the wisp out
-# and takes the freshness signal dead again, silently and only under load.
+# every fence-scoped check.
+#
+# Every token below is load-bearing; the query is only correct with all of them:
+#
+#   --limit=0    a capped read lets a busy deacon's other in-progress rows crowd
+#                the wisp out and takes the freshness signal dead again,
+#                silently and only under load.
+#   --assignee=  the read answers "how fresh is THE DEACON's wisp". Widening it
+#                off --assignee does not recover the orphan case it looks like
+#                it would (a wisp poured but never assigned): it instead lets a
+#                stale orphan sitting beside a healthy assigned wisp feed the
+#                "very stale wisp -> clearly stuck" triage row a false positive.
+#                The block's own "Empty is not a verdict" prose says so; without
+#                this token the doctor lets the query drift off it anyway.
+#   --json       both sites are machine-read — the fenced command pipes into
+#                `jq`, and the quick-reference row is copied out to be parsed.
+#                Human-format output silently breaks that pipe.
 boot_block=$(extract_block "layered-startup-discovery-boot")
 if [ -n "$boot_block" ]; then
     check_required_query "boot" "Step 2 wisp read" "$(fenced_code "$boot_block")" \
-        "gc bd list" "--status=in_progress" "--type=molecule" \
-        "--include-infra" "--limit=0" "mol-deacon-patrol"
+        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" "--status=in_progress" \
+        "--type=molecule" "--include-infra" "--limit=0" "--json" "mol-deacon-patrol"
     check_required_query "boot" "Command Quick-Reference wisp row" "$(table_rows "$boot_block")" \
-        "gc bd list" "--status=in_progress" "--type=molecule" \
-        "--include-infra" "--limit=0" "mol-deacon-patrol"
+        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" "--status=in_progress" \
+        "--type=molecule" "--include-infra" "--limit=0" "--json" "mol-deacon-patrol"
 fi
 
 if [ ${#violations[@]} -eq 0 ]; then
