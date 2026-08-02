@@ -31,7 +31,7 @@ defines the routing contract; it is not a command tutorial.
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
-| Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | **Classic** attach routes the source and leaves the wisp root unrouted — the graph.v2 attach does **not**, it routes its workflow root (see the graph.v2 clause later in this row): `rigs/gascity/internal/sling/sling_core.go:563` (`molecule_id` on source) and the rationale comment at `:569-578`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4178`, which attaches the *classic* `code-review` formula), asserting source `gc.routed_to=mayor` at `:4202` and wisp-root `gc.routed_to` empty at `:4224`. Standalone launch routes the root instead: `slingFormula` finalizes on `mResult.RootID` (`sling_core.go:373`). Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:303-305` with its rationale at `:296-302`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns *before* all of that classic routing and routes its **workflow root** instead: `sling_core.go:558` → `doStartGraphWorkflow` (`:726`), with the root's `gc.routed_to` stamped at `internal/graphroute/graphroute.go:569`. Line references re-verified in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
+| Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | **Classic** attach routes the source and leaves the wisp root unrouted — the graph.v2 attach does **not**, it routes its workflow root (see the graph.v2 clause later in this row): `rigs/gascity/internal/sling/sling_core.go:563` (`molecule_id` on source) and the rationale comment at `:569-578`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4178`, which attaches the *classic* `code-review` formula), asserting source `gc.routed_to=mayor` at `:4202` and wisp-root `gc.routed_to` empty at `:4224`. Standalone launch routes the root instead: `slingFormula` (`sling_core.go:366`) finalizes on `mResult.RootID` at `:405`, and its own graph branch (`:395`) hands off to `doStartGraphWorkflow` at `:396` before ever reaching that finalize. Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:335` (called at `:138`) with its rationale at `:328-334`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns *before* all of that classic routing and routes its **workflow root** instead: the `isGraph` branch of `attachFormulaToBead` (`sling_core.go:479`) spans `:487-533` and calls `doStartGraphWorkflow` (`:516`, defined at `:726`), with the root's `gc.routed_to` stamped at `internal/graphroute/graphroute.go:569`. Line references re-verified in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 | Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 | Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tiers loop `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd list --status=in_progress --assignee=<candidate>` (in-progress recovery) then `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…` (ready assigned), and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
 | Instance-suffixed `gc.routed_to` normalized on the **demand read side only** | gastownhall/gascity | `17130b324` — "Normalize routed work instance names in demand matching (#4596)". Read side: `controllerDemandRouteTarget` (`rigs/gascity/cmd/gc/build_desired_state.go:1718`, rationale comment at `:1707-1717`), reached from `defaultScaleCheckCountsAndDemand` (`:1474`, invoked at `:735`) for every template in `defaultScaleTargets` — which is *not* only the no-custom-`scale_check` pools (`:446`, `:491`, `:567`): a custom-`scale_check` pool also gets this probe while cold (`isCold` at `:476`; append + `coldWakeTemplates` at `:633-637`), its contribution clamped to 1 (`:757-759`) and merged as a maximum against the custom count (`:766-768`); helper `agentutil.NormalizePoolRouteTarget` (`rigs/gascity/internal/agentutil/resolve.go:228`); coverage `TestDefaultScaleCheckCountsAndDemandNormalizesInstanceSuffixedRouteTarget` and `…LeavesUnmatchedInstanceSuffixAlone` (`cmd/gc/build_desired_state_test.go`). Offer side deliberately unchanged and exact-match: `bdReadyPoolDemandShell` (`rigs/gascity/internal/config/workquery.go:41`) with `$target` from `poolDemandTarget()` (`:157`), and `hookClaimMatchesRoute`'s raw `==` (`rigs/gascity/cmd/gc/cmd_hook_claim.go:1205`) over base-name route targets (`cmd/gc/cmd_hook.go:468`, `:685`). Write side, two distinct helpers: `032c1fbcd` (#3963) centralizes the **agent-derived** route identity as `agentutil.RoutedToIdentity` (`resolve.go:204`, collapse to `PoolName`), which the default sling query inlines rather than calls (`internal/config/workquery.go:532-536` — `internal/config` cannot import `agentutil`, which imports `config`); the **explicit-target-string** collapse is the separate `agentutil.NormalizePoolRouteTarget` (`resolve.go:228`), applied by sling's built-in routing path at `cmd/gc/cmd_sling.go:766`. Assigned-work companion `738f44732` (#4597): `cmd/gc/assigned_work_scope.go:156`, `cmd/gc/pool_desired_state.go:178`. Read in the `rigs/gascity` fork at `390624b0e`, whose adopted upstream base is `e6135a435` (#4847). | 2026-07-31 |
@@ -209,14 +209,15 @@ does in Lane 3.
   independently claimed.
 - **Sets (graph.v2 formula):** *neither routing field on the **source
   bead** — but the workflow root is routed.* The graph launch path
-  returns before the Lane 1 routing call
-  (`internal/sling/sling_core.go:477-481` → `doStartGraphWorkflow`,
-  `:645`), so the source bead ends with **no `gc.routed_to` and no
-  `assignee`**. The pour then mints a workflow root, promotes it to
-  `in_progress` in the **graph store**, and the graph decorator stamps
-  `gc.routed_to=<target>` on that root — it is the record the claim
-  path reads (`internal/graphroute/graphroute.go:562-570`, #2763 /
-  ga-eld2x). Per-step routing is stamped on the compiled recipe's steps
+  returns before the Lane 1 routing call — the `isGraph` branch of
+  `attachFormulaToBead` (`internal/sling/sling_core.go:487-533`) calls
+  `doStartGraphWorkflow` at `:516` and returns at `:533` — so the source
+  bead ends with **no `gc.routed_to` and no `assignee`**. The pour then
+  mints a workflow root, promotes it to `in_progress` in the **graph
+  store** (`PromoteWorkflowLaunchBead`, `sling_core.go:738`), and the
+  graph decorator stamps `gc.routed_to=<target>` on that root — it is
+  the record the claim path reads
+  (`internal/graphroute/graphroute.go:562-570`, #2763 / ga-eld2x). Per-step routing is stamped on the compiled recipe's steps
   (`internal/dispatch/control.go:1110`) rather than on the work bead.
   The `workflow_id`/`gc.source_bead_id` pointer pair is written only
   when the pour carries a source bead (`sling_core.go:741-755`); the
@@ -233,11 +234,15 @@ does in Lane 3.
   **not** the graph.v2 one; under graph.v2 the workflow root *is*
   routed, as that bullet says. The scoping is
   structural rather than editorial: the attach path takes a graph.v2
-  early return (`internal/sling/sling_core.go:558` →
-  `doStartGraphWorkflow`), so everything below it — the `molecule_id`
-  stamp, the source-bead routing, and the unrouted wisp root — is reached
-  only by a classic formula. For that classic path it is load-bearing
-  rather than incidental: `TestOnFormulaAttachesAndRoutes`
+  early return (`internal/sling/sling_core.go:487`, calling
+  `doStartGraphWorkflow` at `:516` and returning at `:533`), so the whole
+  legacy region that begins at `:535` — the `molecule_id` stamp (`:563`),
+  the source-bead `finalize` (`:579`), and the unrouted wisp root — is
+  reached only by a classic formula. (`:558`, inside that legacy region,
+  is a second and narrower guard: it catches a wisp that materialized as
+  a graph workflow even though the formula did not compile as one. It is
+  not the branch that scopes this bullet.) For that classic path it is
+  load-bearing rather than incidental: `TestOnFormulaAttachesAndRoutes`
   (`cmd/gc/cmd_sling_test.go:4178`), which attaches the *classic*
   `code-review` formula, asserts both halves — the source bead ends with
   `gc.routed_to=<target>`, and the wisp root ends with `gc.routed_to`
@@ -534,15 +539,27 @@ onto the lanes:
   `bd ready --metadata-field "gc.routed_to=$target" --unassigned
   --exclude-type=epic`. A pool worker finds work here, and only here. The
   **graph.v2** variants are the exception, but a narrower one than "nothing
-  is routed": the **work bead** is genuinely absent from Tier 3, because the
-  pour leaves it unrouted. The **workflow root** is not — it carries
-  `gc.routed_to=<target>`, the delivery key this filter matches
-  (`internal/graphroute/graphroute.go:562-570`). What keeps the root out of a
-  plain ready-queue read is its *state*, not its routing: the pour promotes it
-  to `in_progress`, which `bd ready` excludes, and the compiler gives it a
-  `blocks` edge to its own `workflow-finalize` control bead
-  (`internal/formula/compile.go:672-699`) so it completes last. Its steps and
-  control beads carry their own routes — live, or withheld in
+  is routed" — and the difference is best read as *which term of the
+  filter* each record fails. The **work bead** fails the **routing** term
+  outright: the pour leaves it unrouted, so no state it could ever be in
+  makes it match. The **workflow root** is the opposite case — it carries
+  `gc.routed_to=<target>` (`internal/graphroute/graphroute.go:562-570`),
+  so it satisfies the routing term. It is the routed record of the
+  dispatch, and a pool worker claiming a graph.v2 dispatch claims it here.
+  But satisfying that one term is not the same as being returned by the
+  query: Tier 3 is a `bd ready` read, so it applies every other term in
+  the table below too, and the root is subject to all of them. It is
+  offered while it is open, unblocked and unassigned; it drops out once
+  the pour promotes it to `in_progress` in the graph store
+  (`PromoteWorkflowLaunchBead`, `internal/sling/sling_core.go:738`), a
+  status `bd ready` excludes, or while it is held by the `blocks`
+  dependency the compiler gives it **on** its own `workflow-finalize`
+  control bead (`internal/formula/compile.go:672-699`: the root is the
+  dependent, so it stays blocked until finalize closes and therefore
+  completes last). So "the root is routed" and "a Tier 3 read returns the
+  root right now" are separate claims — the first is settled, the second
+  is a question about status and blockers, never about routing. Its steps
+  and control beads carry their own routes — live, or withheld in
   `gc.deferred_routed_to` until activation (see "the duplicate-wisp trap"
   above).
 
@@ -906,22 +923,41 @@ The operational contract that follows:
   #    gc.source_bead_id (both are written only when the pour carries a
   #    source bead — internal/sling/sling_core.go:741-755). The durable
   #    link is the synthetic one-item input convoy that `tracks` the
-  #    bead (internal/graphv2/invocation.go:415-445, whose TrackItem
+  #    bead (internal/graphv2/invocation.go:415-446, whose TrackItem
   #    adds convoy --tracks--> bead at internal/convoy/membership.go:36),
   #    named on the root as gc.input_convoy_id. The root lookup below is
   #    the same two-key match the pour's own test asserts
   #    (cmd/gc/cmd_sling_test.go:4481).
-  CONVOY=$(gc bd dep list <work-bead> --direction=up -t tracks --json \
-    | jq -r '[.[] | select((.issue_type // .type) == "convoy")] | .[0].id // empty')
-  ROOTS=$(gc bd list --metadata-field "gc.input_convoy_id=$CONVOY" \
-      --metadata-field "gc.kind=workflow" --status "$LIVE" \
-      --json --limit 0 | jq -r '.[].id')
-  # Legacy source-workflow roots do have the pointer — fall back to it
-  # whenever the convoy path found nothing (the bead may be tracked by a
-  # real convoy and still be running under a legacy-shape workflow).
-  [ -z "$ROOTS" ] && ROOTS=$(gc bd show <work-bead> --json \
-    | jq -r '.[0].metadata.workflow_id // empty')
+  #
+  #    Collect EVERY tracking convoy, never just the first. The pour mints
+  #    a fresh one unconditionally — CreateSingleItemInputConvoy calls
+  #    store.Create with no reuse lookup (invocation.go:428) and closes it
+  #    only on its own failure paths (sling_core.go:494, :531) — so a
+  #    re-poured bead ends up tracked by one convoy per pour, each naming a
+  #    different root. Selecting `.[0]` is the same multi-root collapse the
+  #    note below warns about, one step earlier and harder to see: a root
+  #    dropped here never reaches the clear in step 2 OR the verify in
+  #    step 3, so the verify prints nothing and reads as contained.
+  CONVOYS=$(gc bd dep list <work-bead> --direction=up -t tracks --json \
+    | jq -r '.[] | select((.issue_type // .type) == "convoy") | .id')
+  ROOTS=$(for convoy in $CONVOYS; do
+      gc bd list --metadata-field "gc.input_convoy_id=$convoy" \
+        --metadata-field "gc.kind=workflow" --status "$LIVE" \
+        --json --limit 0 | jq -r '.[].id'
+    done)
+  # Legacy source-workflow roots carry the pointer instead — UNION it in
+  # rather than consulting it only when the convoy path came back empty. A
+  # bead can be tracked by a real convoy AND still be running under a
+  # legacy-shape workflow, and either lookup alone leaves the other root
+  # routed. Filter it through the same non-closed rule step 0 uses, so a
+  # long-since-closed legacy root cannot rejoin the set and report itself
+  # as "not contained" forever.
+  LEGACY=$(gc bd show <work-bead> --json | jq -r '.[0].metadata.workflow_id // empty')
+  [ -n "$LEGACY" ] && ROOTS=$(printf '%s\n%s\n' "$ROOTS" \
+    "$(gc bd show "$LEGACY" --json \
+       | jq -r '.[0] | select((.status // "") != "closed") | .id')")
   ROOTS=$(printf '%s\n' "$ROOTS" | awk 'NF' | sort -u)
+  # Only the UNION being empty means there is nothing to contain.
   [ -z "$ROOTS" ] && { echo "STOP: no workflow root resolved — nothing is contained" >&2; exit 1; }
   # A re-pour leaves more than one live root. EVERY one of them is a
   # separate routed record with its own descendant tree, so all of them
@@ -957,8 +993,21 @@ The operational contract that follows:
   #    skipping it — only a bead you actually read can be called
   #    contained. Verifying a NARROWER set than you cleared is the same
   #    bug as clearing a narrower set than exists: both print empty.
+  #
+  #    Decide readability in the SHELL, before jq. `gc bd show … | jq …`
+  #    cannot report an unreadable bead by itself: when the show fails or
+  #    prints nothing, jq receives no input, emits no row and exits 0 — the
+  #    unreadable branch inside the filter never runs, and the bead reads as
+  #    contained precisely because it could not be read. Only a non-empty
+  #    document reaches jq below; the in-filter branch still covers the
+  #    valid-JSON `[]` (bead genuinely absent).
   for id in $IDS; do
-    gc bd show "$id" --json | jq -r --arg id "$id" '
+    if ! shown=$(gc bd show "$id" --json 2>/dev/null) \
+       || [ -z "$(printf '%s' "$shown" | tr -d '[:space:]')" ]; then
+      printf '%s\tUNREADABLE\t-\t-\n' "$id"
+      continue
+    fi
+    printf '%s' "$shown" | jq -r --arg id "$id" '
       (if type == "array" and length > 0 then .[0] else {id: $id, unreadable: true} end)
       | select((.unreadable // false)
           or (.assignee // "") != ""
@@ -967,8 +1016,13 @@ The operational contract that follows:
           or (.metadata["gc.execution_routed_to"] // "") != ""
           or (.metadata["gc.deferred_execution_routed_to"] // "") != ""
           or (.metadata["gc.deferred_assignee"] // "") != "")
-      | "\(.id)\t\(.assignee // "-")\t\(.metadata["gc.routed_to"] // "-")\t\(.metadata["gc.deferred_assignee"] // "-")"'
+      | "\(.id)\t\(.assignee // "-")\t\(.metadata["gc.routed_to"] // "-")\t\(.metadata["gc.deferred_assignee"] // "-")"' \
+      || printf '%s\tUNREADABLE\t-\t-\n' "$id"
   done
+  # That trailing `||` covers the third failure mode: output that arrives
+  # but jq cannot parse (a raw control character in a bead's notes is the
+  # usual cause). An UNREADABLE row is a false alarm you re-run; a silently
+  # skipped bead is a containment claim you never earned.
   # Empty output = contained. Any row is still routed, still carries
   # withheld delivery, is already claimed (assignee — see "De-routing
   # does not recall work a worker already holds" below), or is
