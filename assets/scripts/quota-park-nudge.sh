@@ -33,6 +33,10 @@
 # the deacon/witness patrols, which is where seven were filed against two live
 # agents during the 2026-08-02 recurrence).
 #
+# Those patrols hold their warrant back on THIS script's verdict, never on the
+# pane: `--status` below is the closed-field surface they read, and the reason
+# a banner an agent printed itself cannot switch off its own recovery.
+#
 # Runs as an exec order (no LLM, no agent, no wisp).
 # See docs/quota-park-recovery.md.
 set -euo pipefail
@@ -106,6 +110,12 @@ BACKOFF_CAP="${QUOTA_PARK_BACKOFF_CAP:-900}"
 ESCALATE_AFTER="${QUOTA_PARK_ESCALATE_AFTER:-7200}"
 ESCALATE_TO="${QUOTA_PARK_ESCALATE_TO:-mayor/}"
 
+# How long this order's own findings stay authoritative. The sweep runs every
+# 3m, so ten minutes is three missed cycles — past that, neither the heartbeat
+# nor an episode record is treated as evidence any more. Only the `--status`
+# surface reads this; the sweep itself has no use for it.
+STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-600}"
+
 # Aliases never nudged (ERE, matched against the session alias). Escape hatch.
 EXCLUDE_RE="${QUOTA_PARK_EXCLUDE:-}"
 
@@ -127,6 +137,13 @@ DEFAULT_STATE_DIR="${DEFAULT_STATE_DIR:-${TMPDIR:-/tmp}/gc}/quota-park"
 STATE_DIR="${QUOTA_PARK_STATE_DIR:-$DEFAULT_STATE_DIR}"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 
+# This order's two files that are NOT episode state: where the last pass stopped,
+# and that a pass ran at all. Both names start with a dot, which `safe_id`
+# rejects — so no session can ever be given a state file that collides with one,
+# and the week-old prune below (safe_id AND a state header) never touches them.
+CURSOR_FILE="$STATE_DIR/.sweep-cursor"
+HEARTBEAT_FILE="$STATE_DIR/.heartbeat"
+
 NOW="$(date +%s)"
 
 # Read one key out of a state file. Never `source` it — the file is keyed by a
@@ -143,10 +160,16 @@ num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 # One writer for an episode's state file, so the two paths that persist it —
 # inside the backoff window, and after a delivery attempt — cannot drift in
 # which counters they carry. Positional: path, first_seen, last_nudge, last_try,
-# attempts, unconfirmed, escalated.
+# attempts, unconfirmed, escalated, last_seen, detector_class.
+#
+# The last two are what make this file readable as a CLASSIFICATION and not only
+# as a retry ledger: `--status` answers the patrols out of them, and a record
+# nothing has confirmed since `last_seen` is reported as unknown rather than as a
+# park. Both are written on every pass that saw the session parked, so a state
+# file is never older than the sweep that last looked.
 write_state() {
-    printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=%s\nunconfirmed=%s\nescalated=%s\n' \
-        "$2" "$3" "$4" "$5" "$6" "$7" > "$1"
+    printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=%s\nunconfirmed=%s\nescalated=%s\nlast_seen=%s\ndetector_class=%s\n' \
+        "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" > "$1"
 }
 
 # True for a session id safe to use as a filename. The id names a state file in
@@ -194,8 +217,9 @@ banner_candidates() {
     printf '%s\n' "$1" | tail -n "$TAIL_LINES" | grep -vE -- "$CITATION_RE" || true
 }
 
-# Which family of banner matched, as a label from a CLOSED set. This is the
-# only thing the escalation mail says about what was on screen.
+# Which family of banner matched, as a label from a CLOSED set. This is the only
+# thing the escalation mail — or the `--status` surface the patrols read — says
+# about what was on screen.
 #
 # The pane is untrusted. It holds whatever the agent printed, and an agent can
 # print text shaped like an operator directive; mail is durable and the mayor
@@ -265,6 +289,109 @@ num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120
 num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
 num_min "$PEEK_LINES"     1 || PEEK_LINES=20
 num_min "$TAIL_LINES"     1 || TAIL_LINES=12
+num_min "$STALE_AFTER"    1 || STALE_AFTER=600
+
+# --- The status surface -----------------------------------------------------
+#
+#   quota-park-nudge.sh --status [<session-id>]
+#
+# What the patrols read INSTEAD of peeking a pane, and the reason this order can
+# be allowed to hold a warrant back at all.
+#
+# The pane is agent-controlled output. A patrol step that says "peek the pane,
+# and if you see a limit banner do not file a warrant" hands every agent an off
+# switch for its own stuck-session recovery: print a provider-shaped line, sit
+# idle, and the path that would have recovered the work stands down. The agents
+# most likely to do that are the wedged and the compromised ones — precisely the
+# two the warrant exists for. Pane text cannot be the thing that suppresses it.
+#
+# So the classification stays here, in a non-LLM helper, and reaches the patrols
+# only as CLOSED fields: a yes/no/unknown, a label from detector_class's fixed
+# set, and integers out of this script's own state files. Not one byte of pane
+# text is emitted. A patrol never sees the screen and so cannot be talked into
+# anything by it.
+#
+# `unknown` is the field that keeps this honest, and it is deliberately NOT
+# folded into `no`. Everything reported here is evidence this order produced; if
+# the order is not running — disabled, wedged before it could list sessions, no
+# jq, a host without the pack — there is no evidence at all. Read as "not
+# parked" that silence is right by accident; read as "parked" it would suppress
+# warrants city-wide on the strength of a stopped clock. `unknown` says which
+# one it is, and the patrol prose sends it down the normal warrant path.
+#
+# Consequently the answer is conditional on a RECENT sweep (the heartbeat) and
+# on a recent sighting of that particular session (`last_seen`), not merely on a
+# state file existing. An episode nobody has been able to confirm since the pane
+# went unreadable is `unknown` too.
+status_line() {
+    local id="$1" path="$STATE_DIR/$1"
+    local first_seen last_seen attempts unconfirmed escalated dclass verdict age seen_age human
+    first_seen="$(state_get "$path" first_seen)";   num "$first_seen"  || first_seen=0
+    last_seen="$(state_get "$path" last_seen)";     num "$last_seen"   || last_seen=0
+    attempts="$(state_get "$path" attempts)";       num "$attempts"    || attempts=0
+    unconfirmed="$(state_get "$path" unconfirmed)"; num "$unconfirmed" || unconfirmed=0
+    escalated="$(state_get "$path" escalated)"
+    case "$escalated" in 1 | unconfirmed) ;; *) escalated=0 ;; esac
+    # Constrained to the closed set on the way OUT as well as on the way in: a
+    # state file written by an older version, or edited by hand, must not be able
+    # to put arbitrary text on a line a patrol agent reads.
+    dclass="$(state_get "$path" detector_class)"
+    case "$dclass" in
+        possessive-limit | named-provider-limit | usage-credits | provider-limit | custom-match) ;;
+        *) dclass=unknown ;;
+    esac
+    age=-1;      [ "$first_seen" -gt 0 ] && age=$((NOW - first_seen))
+    seen_age=-1; [ "$last_seen"  -gt 0 ] && seen_age=$((NOW - last_seen))
+    human="-";   [ "$age" -ge 0 ] && human="$(duration "$age")"
+
+    if [ "$HB_FRESH" != "1" ]; then
+        verdict=unknown                     # no recent sweep: no evidence either way
+    elif [ ! -f "$path" ]; then
+        verdict=no                          # swept recently, no episode: not parked
+    elif [ "$seen_age" -lt 0 ] || [ "$seen_age" -ge "$STALE_AFTER" ]; then
+        verdict=unknown                     # an episode nothing has confirmed lately
+    else
+        verdict=yes
+    fi
+    printf 'session=%s quota_park=%s detector_class=%s age_s=%s parked_for=%s attempts=%s unconfirmed=%s escalated=%s last_seen_age=%s\n' \
+        "$id" "$verdict" "$dclass" "$age" "$human" "$attempts" "$unconfirmed" "$escalated" "$seen_age"
+}
+
+status_report() {
+    local want="${1:-}" hb path base
+    hb="$(state_get "$HEARTBEAT_FILE" last_run)"; num "$hb" || hb=0
+    HB_AGE=-1; [ "$hb" -gt 0 ] && HB_AGE=$((NOW - hb))
+    HB_FRESH=0
+    if [ "$hb" -gt 0 ] && [ "$HB_AGE" -lt "$STALE_AFTER" ]; then HB_FRESH=1; fi
+    printf 'heartbeat_age=%s\nheartbeat_fresh=%s\nstale_after=%s\n' "$HB_AGE" "$HB_FRESH" "$STALE_AFTER"
+    if [ -n "$want" ]; then
+        # An id this order would refuse to write state for is one it will not read
+        # state for either — same test, same reason, and the caller gets the same
+        # `unknown` it gets for anything else this order cannot speak to.
+        if ! safe_id "$want"; then
+            echo "session=- quota_park=unknown detector_class=unknown reason=unsafe-session-id"
+            return 0
+        fi
+        status_line "$want"
+        return 0
+    fi
+    # No id: every episode this order is currently tracking. Same filter the
+    # prune uses, so a foreign file dropped in the directory is not reported as a
+    # parked session.
+    for path in "$STATE_DIR"/*; do
+        [ -f "$path" ] || continue
+        base="${path##*/}"
+        safe_id "$base" || continue
+        status_line "$base"
+    done
+}
+
+# Only `--status` is special; anything else falls through to a normal sweep,
+# which is what the order runner invokes with no arguments at all.
+if [ "${1:-}" = "--status" ]; then
+    status_report "${2:-}"
+    exit 0
+fi
 
 # Every `gc` call goes through here. Two things it guarantees:
 #
@@ -293,6 +420,21 @@ sweep_expired() {
     [ "$(( $(date +%s) - NOW ))" -ge "$SWEEP_BUDGET" ]
 }
 
+checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0; unconfirmed_now=0
+last_attempted=""
+
+# That a pass RAN, and what it saw. This is what makes the status surface
+# refusable: warrant suppression in the patrols is conditional on a recent sweep,
+# so an order that is disabled, wedged, or absent from a host cannot hold a
+# warrant back by leaving old evidence lying around. Written only where a pass
+# actually completed — every early exit below (a session list that failed, no
+# jq, an unwritable state dir) leaves the previous heartbeat to go stale, which
+# is exactly what a patrol reads as `unknown`.
+write_heartbeat() {
+    printf 'last_run=%s\nchecked=%s\nparked=%s\nnudged=%s\ndeferred=%s\n' \
+        "$NOW" "$checked" "$parked" "$nudged" "$skipped" > "$HEARTBEAT_FILE" 2>/dev/null || true
+}
+
 # Only sessions the controller believes are alive. Keyed on `.state`, NEVER on
 # `.running`: running is null for an active session during controller churn, so
 # a `.running == true` filter drops exactly the live sessions it is meant to
@@ -314,9 +456,39 @@ sweep_expired() {
 sessions=$(run_bounded gc session list --json 2>/dev/null \
     | jq -r '.sessions[]? | select(.state == "active" and (.attached // false) == false)
              | [.id, (.alias // .session_name // .id)] | @tsv' 2>/dev/null) || exit 0
-[ -n "$sessions" ] || { echo "quota-park-nudge: 0 checked, 0 parked, 0 nudged"; exit 0; }
+# An empty list is a complete pass over nothing, not a failure: the list came
+# back and parsed, there was simply nothing sweepable in it. It gets a heartbeat
+# — every session then reports `no` (no episode), which is true.
+[ -n "$sessions" ] || { write_heartbeat; echo "quota-park-nudge: 0 checked, 0 parked, 0 nudged"; exit 0; }
 
-checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0; unconfirmed_now=0
+# Where to start. `gc session list` returns a stable order and every peek that
+# hangs costs a whole CALL_TIMEOUT out of SWEEP_BUDGET, so a fixed starting point
+# means a prefix of slow sessions is paid for FIRST on every pass — eight of them
+# at the defaults (8 × 15s = the 120s budget) and the sweep never reaches the
+# rest. Not once: every cycle, the same prefix, the same deferral. The sessions
+# behind it are then never inspected at all, which is the one outcome this order
+# exists to prevent — a genuinely parked agent going unrecovered while the city
+# logs a healthy 3m sweep over it.
+#
+# So the cursor records the last session a pass attempted and the next pass
+# resumes AFTER it, round-robin. An unreadable prefix ends up at the back of the
+# next pass's order and cannot consume it twice. A pass that gets through the
+# whole list leaves the cursor on the final record, and rotating past the last
+# record is the identity — the steady state is the plain order, unchanged.
+cursor="$(state_get "$CURSOR_FILE" session)"
+safe_id "$cursor" || cursor=""
+if [ -n "$cursor" ]; then
+    # Matched against the id FIELD, never as a substring: ids can be prefixes of
+    # one another and the alias column holds arbitrary text. `-v` is safe here
+    # because safe_id has already excluded the backslash that awk's own variable
+    # assignment would otherwise re-interpret.
+    cursor_at="$(printf '%s\n' "$sessions" | awk -F'\t' -v c="$cursor" '$1 == c { print NR; exit }')"
+    session_count="$(printf '%s\n' "$sessions" | awk 'END { print NR }')"
+    if num "$cursor_at" && num "$session_count" && [ "$cursor_at" -lt "$session_count" ]; then
+        sessions="$(printf '%s\n' "$sessions" | tail -n +"$((cursor_at + 1))"
+                    printf '%s\n' "$sessions" | head -n "$cursor_at")"
+    fi
+fi
 
 while IFS=$'\t' read -r id alias; do
     [ -n "${id:-}" ] || continue
@@ -328,6 +500,10 @@ while IFS=$'\t' read -r id alias; do
     # overlapping it. Counted so the summary says so instead of silently
     # reporting a short sweep as a complete one.
     if sweep_expired; then skipped=$((skipped + 1)); continue; fi
+    # Attempted, as far as the cursor is concerned, from here — before the peek,
+    # not after it. The peek is the call that hangs, and a session whose peek ate
+    # the rest of the budget is precisely the one the next pass must start after.
+    last_attempted="$id"
     # Everything downstream that prints, logs, or mails the alias uses this
     # bounded form; the raw field is not referenced again.
     alias="$(sanitize_display "${alias:-$id}")"
@@ -359,10 +535,21 @@ while IFS=$'\t' read -r id alias; do
     fi
 
     parked=$((parked + 1))
+    # An excluded alias is one this order does not act on AT ALL: no nudge, and no
+    # state file either, so `--status` reports it as `no` and the patrols fall
+    # back to their own judgment instead of deferring to a recovery that was
+    # switched off for this session. Counted as parked in the summary, because it
+    # is — the escape hatch suppresses the action, not the observation.
     if [ -n "$EXCLUDE_RE" ] && printf '%s' "$alias" | grep -qEi -- "$EXCLUDE_RE"; then
         echo "quota-park-nudge: $alias parked (excluded, not nudged)"
         continue
     fi
+
+    # Classified once per parked session, from the closed set, and persisted with
+    # the episode: this is what the status surface hands a patrol, and — with the
+    # escalation mail — the only thing anywhere outside this script that says
+    # anything about what was on the screen.
+    dclass="$(detector_class "$pane")"
 
     # Missing or non-numeric reads back as "start of episode" — a truncated
     # state file (crash mid-write) must not abort the sweep for every session
@@ -383,8 +570,10 @@ while IFS=$'\t' read -r id alias; do
     tries=$((attempts + unconfirmed))
 
     if [ "$tries" -gt 0 ] && [ $((NOW - last_try)) -lt "$(backoff_for "$tries")" ]; then
-        # Still blocked, still inside the backoff window — say nothing, wait.
-        write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated"
+        # Still blocked, still inside the backoff window — say nothing, wait. The
+        # sighting is still recorded: a session nobody nudges this cycle is one
+        # this pass nonetheless confirmed parked, and `--status` reads last_seen.
+        write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated" "$NOW" "$dclass"
         continue
     fi
 
@@ -438,29 +627,67 @@ while IFS=$'\t' read -r id alias; do
 
     unconf_note=""
     [ "$unconfirmed" -gt 0 ] && unconf_note=" (plus $unconfirmed unconfirmed)"
-    if [ "$ESCALATE_AFTER" -gt 0 ] && [ "$escalated" != "1" ] && [ "$age" -ge "$ESCALATE_AFTER" ]; then
+    # Any escalation marker at all suppresses the next one — `1` for a delivery we
+    # saw complete, `unconfirmed` for one whose bound expired mid-send. Not
+    # `!= "1"`: that reads an unconfirmed escalation as never sent and mails the
+    # mayor again for the same park.
+    if [ "$ESCALATE_AFTER" -gt 0 ] && [ -z "$escalated" ] && [ "$age" -ge "$ESCALATE_AFTER" ]; then
         # No pane text in the body — see detector_class. The label stands in for
         # the excerpt the earlier version mailed: it says which banner family
         # matched without quoting a pane the agent controls.
-        run_bounded gc mail send "$ESCALATE_TO" -s "Quota-parked: $alias for $(duration "$age") [HIGH]" \
+        mail_rc=0
+        run_bounded gc mail send "$ESCALATE_TO" -s "Possible quota park: $alias for $(duration "$age") [HIGH]" \
             -m "$alias ($id) has shown a provider limit banner for $(duration "$age") and has not resumed after $attempts nudge(s)$unconf_note.
 
-Detector class: $(detector_class "$pane")
+Detector class: $dclass
 
-The session is alive and correct — do NOT file a warrant or kill it; a fresh
-agent hits the same block and the parked one recovers by itself once the
-window reopens. quota-park-nudge keeps retrying on a $((BACKOFF_CAP / 60))m cadence, so
-no action is needed unless the block is unexpected (wrong account, wrong
-plan, a provider outage misreported as a quota block).
+This is a POSSIBLE quota park, not a proven one. The only evidence is a pattern
+match on that session's own pane, which is agent-controlled output: a wedged —
+or prompt-injected — agent can print a provider-shaped line and sit idle, and it
+looks exactly like this from here. Treat it as a reason to CHECK, never as proof
+that the session is healthy.
+
+If it is a real park, the session is alive and correct and nudging is the whole
+treatment: killing it discards live context and a fresh agent hits the same
+block. quota-park-nudge keeps retrying on a $((BACKOFF_CAP / 60))m cadence, so no action is
+needed unless the block itself is unexpected (wrong account, wrong plan, a
+provider outage misreported as a quota block). If it is NOT a real park, the
+normal stuck-session path applies and nothing in this mail should hold it back.
 
 The pane itself is deliberately not quoted here: it is untrusted agent output
-and this mail is a durable artifact. Read it directly with: gc session peek $id" >/dev/null 2>&1 \
-            && escalated=1 \
-            || echo "quota-park-nudge: escalation mail FAILED for $alias ($id)"
+and this mail is a durable artifact. Read it directly with: gc session peek $id" >/dev/null 2>&1 || mail_rc=$?
+        if [ "$mail_rc" -eq 0 ]; then
+            escalated=1
+        elif [ "$mail_rc" -eq 124 ] || [ "$mail_rc" -ge 128 ]; then
+            # AMBIGUOUS, and recorded as sent — the same rule the nudge branch
+            # above follows, for the same reason and one layer deeper. `gc mail
+            # send` writes durable mail through Dolt, so a bound that expires
+            # after the write is committed leaves a mail in the mayor's inbox that
+            # this script never heard about. Left empty, the next eligible pass
+            # sends a second one for the same episode, and it does that during
+            # exactly the slow-runtime incident this order is meant to tolerate.
+            # `unconfirmed` says both things at once: something may well have been
+            # delivered, and we did not see it land.
+            escalated=unconfirmed
+            echo "quota-park-nudge: escalation mail UNCONFIRMED (rc=$mail_rc) for $alias ($id) — not resent this episode"
+        else
+            # A fast rejection, delivered nothing. Retried next cycle, and it
+            # cannot duplicate — again mirroring the nudge branch.
+            echo "quota-park-nudge: escalation mail FAILED (rc=$mail_rc) for $alias ($id) — retries next cycle"
+        fi
     fi
 
-    write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated"
+    write_state "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated" "$NOW" "$dclass"
 done <<< "$sessions"
+
+# Where the next pass starts, and the record that this one ran. Written together,
+# after the sweep: the cursor is only meaningful once the loop has decided how
+# far it got, and a heartbeat written earlier would claim a pass that had not
+# finished.
+if [ -n "$last_attempted" ]; then
+    printf 'session=%s\n' "$last_attempted" > "$CURSOR_FILE" 2>/dev/null || true
+fi
+write_heartbeat
 
 # A recovered agent's state file is removed above, the moment its pane goes
 # clean. This only sweeps files no cycle has touched in a week — sessions that
@@ -475,7 +702,9 @@ done <<< "$sessions"
 # touched, whatever its age); named like the session ids we write (`safe_id`,
 # the same test that decides which ids may name a file at all); and carrying a
 # state file's own `first_seen=` header on line 1. Anything failing one of them
-# is somebody else's file and is left alone. `-print0` because a name is not
+# is somebody else's file and is left alone — including this order's OWN
+# `.sweep-cursor` and `.heartbeat`, whose leading dot puts them outside safe_id
+# on purpose. `-print0` because a name is not
 # trusted to be one line — split on newlines, a hostile name becomes two paths
 # and the second is a relative one.
 #

@@ -36,9 +36,16 @@
 # (u) nor by the next cycle — an unconfirmed delivery paces the backoff without
 # being counted as one the agent received; (v) the week-old state cleanup prunes
 # only this order's own state files, leaving anything nested, differently named,
-# or lacking its header alone however old it is; (w) the order file parses and
-# still carries the wiring the sweep depends on (cooldown/3m/city + a live exec
-# path).
+# or lacking its header alone however old it is; (w) a sweep resumes after the
+# session the last one stopped at, so a prefix of unreadable sessions cannot
+# consume the budget ahead of the same parked session every cycle; (x) an
+# escalation whose bound expired after the mail was accepted is not sent twice,
+# while a fast rejection still retries; (y) an excluded alias is counted as
+# parked but neither nudged nor recorded; (z) the `--status` surface answers the
+# patrols in closed fields only — never pane text — and answers `unknown` rather
+# than a verdict when this order has not swept recently; (aa) the order file
+# parses and still carries the wiring the sweep depends on (cooldown/3m/city + a
+# live exec path).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -170,6 +177,11 @@ case "$1 $2" in
   # long past the bound, hiding the very thing this fixture tests.
   "session peek")
     [ "${FAKE_HANG_PEEK:-}" = "$3" ] && exec sleep 30
+    # A whole CLASS of sessions that hang, not just one: a single wedged peek
+    # tests the per-call bound, but a wedged PREFIX is what starves the sessions
+    # behind it, and that needs several. Glob, unquoted on purpose; the default
+    # matches no session id anyone would issue.
+    case "$3" in ${FAKE_HANG_GLOB:-__nothing__}) exec sleep 30 ;; esac
     # A peek that ERRORS, as opposed to one that hangs: a transient runtime
     # failure. The caller learns nothing about the pane either way.
     [ "${FAKE_FAIL_PEEK:-}" = "$3" ] && exit 7
@@ -197,8 +209,15 @@ case "$1 $2" in
   # Recipient to one file (escalation is counted by line), every argument to
   # another — subject and body included, so a test can assert on what the mail
   # actually carries and not merely that one was sent.
-  "mail send") printf 'mail %s\n' "$3" >> "$FAKE_MAIL"
-               printf '%s\n' "$@" >> "$FAKE_MAIL_BODY" ;;
+  "mail send")
+    # A fast pre-delivery rejection: nothing was written, so nothing is recorded.
+    [ "${FAKE_FAIL_MAIL:-0}" = "1" ] && exit 9
+    printf 'mail %s\n' "$3" >> "$FAKE_MAIL"
+    printf '%s\n' "$@" >> "$FAKE_MAIL_BODY"
+    # Accept the mail, THEN hang — the durable write is already committed when
+    # the caller's bound expires. This is the window in which a script that only
+    # believes rc 0 sends the mayor a second copy next cycle.
+    [ "${FAKE_SLOW_MAIL:-0}" = "1" ] && exec sleep 30 ;;
 esac
 exit 0
 GC
@@ -631,7 +650,214 @@ FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
     || bad "a state file this sweep just wrote is not pruned"
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 
-# --- Run 16: the order wiring itself. ---------------------------------------
+# --- Run 16: a slow PREFIX must not starve the sessions behind it. ----------
+# The per-call bound (run 8) keeps one wedged peek from stranding the sweep
+# within a pass. It does nothing about the pass-to-pass shape of the problem: the
+# session list comes back in a stable order and every hung peek costs a whole
+# CALL_TIMEOUT out of SWEEP_BUDGET, so a fixed starting point pays for the same
+# unreadable prefix first, every single cycle, and defers the same tail every
+# single cycle. A genuinely parked agent behind that prefix is then never
+# inspected at all — while the summary line reports a healthy sweep over it.
+#
+# Asserted in both directions, because only the pair proves the cursor is what
+# fixes it: with the cursor removed between passes (the pre-fix behaviour) the
+# parked session is never reached however many passes run; with it kept, the
+# rotation walks past the prefix and reaches it.
+if ! command -v timeout >/dev/null 2>&1; then
+    echo "skip - sweep-fairness tests (no coreutils timeout on this host)"
+else
+cat > "$TMP/sessions-prefix.json" <<'JSON'
+{"sessions":[
+ {"id":"lx-hang1","alias":"gc-toolkit.hang1","state":"active","running":true,"attached":false},
+ {"id":"lx-hang2","alias":"gc-toolkit.hang2","state":"active","running":true,"attached":false},
+ {"id":"lx-hang3","alias":"gc-toolkit.hang3","state":"active","running":true,"attached":false},
+ {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false}
+]}
+JSON
+# Three 1s hangs against a 2s budget: the prefix alone always overruns the pass,
+# so lx-codex is reachable only by starting somewhere other than the top.
+prefix_sweep() {
+    FAKE_SESSIONS="$TMP/sessions-prefix.json" FAKE_HANG_GLOB='lx-hang*' \
+        QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=2 \
+        timeout 30 bash "$SCRIPT" > "$TMP/out16" || true
+}
+
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+for _ in 1 2 3 4; do rm -f "$TMP/state/.sweep-cursor"; prefix_sweep; done
+eq "$(nudges_for lx-codex)" "0" \
+    "control: without a cursor the same prefix is re-swept every pass and the park behind it is never reached"
+
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+for _ in 1 2 3 4; do prefix_sweep; done
+eq "$(nudges_for lx-codex)" "1" \
+    "the sweep cursor rotates past an unreadable prefix and reaches the park behind it"
+eq "$(nudges_for lx-hang1)" "0" "the hung sessions themselves are still never nudged blind"
+[ -f "$TMP/state/.sweep-cursor" ] \
+    && ok "the sweep persists a cursor" || bad "the sweep persists a cursor"
+# The cursor is one of this order's own files, and it must never be mistaken for
+# an episode: `safe_id` rejects a leading dot, which is why the name has one.
+bash "$SCRIPT" --status > "$TMP/status16"
+grep -q '^session=\.sweep-cursor' "$TMP/status16" \
+    && bad "the cursor file must not be reported as a parked session" \
+    || ok "the cursor file is not reported as a parked session"
+fi
+
+# --- Run 17: an escalation whose bound expired is not sent twice. -----------
+# `gc mail send` writes durable mail through Dolt — the layer most likely to be
+# slow during the incident this order runs in. A bound that expires AFTER that
+# write leaves a mail in the mayor's inbox this script never heard about, and a
+# script that only believes rc 0 then sends a second one for the same episode on
+# the next eligible pass. Same ambiguity as an unconfirmed nudge (run 14), one
+# layer deeper, and the same rule: pace it as sent, and say so.
+if ! command -v timeout >/dev/null 2>&1; then
+    echo "skip - escalation-bounding tests (no coreutils timeout on this host)"
+else
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+    : > "$TMP/nudges"; : > "$TMP/mail"
+    long_park_state() {
+        printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=3\nunconfirmed=0\nescalated=\n' \
+            "$(( $(date +%s) - 9000 ))" > "$TMP/state/lx-codex"
+    }
+    slow_mail_sweep() {
+        FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_MAIL=1 \
+            QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+            timeout 30 bash "$SCRIPT" > /dev/null || true
+    }
+    long_park_state
+    slow_mail_sweep
+    eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" \
+        "the escalation is accepted before the bound expires"
+    eq "$(state_field lx-codex escalated unconfirmed)" "1" \
+        "an escalation whose bound expired is recorded as unconfirmed, not as never sent"
+
+    # Next cycle, still parked, still past ESCALATE_AFTER: the once-per-episode
+    # contract has to hold across the ambiguity, not just across a clean send.
+    sedi "s/^last_nudge=.*/last_nudge=0/;s/^last_try=.*/last_try=0/" "$TMP/state/lx-codex"
+    slow_mail_sweep
+    eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" \
+        "an unconfirmed escalation is not resent on the next cycle"
+
+    # The other half of the rule: a FAST rejection delivered nothing, so it is
+    # left open and retried. Reading every non-zero rc as "sent" would lose the
+    # escalation entirely for a park nobody was ever told about.
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+    : > "$TMP/mail"
+    long_park_state
+    FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_FAIL_MAIL=1 bash "$SCRIPT" > "$TMP/out17"
+    eq "$(grep -c '^mail ' "$TMP/mail" || true)" "0" "a fast mail rejection delivers nothing"
+    eq "$(grep -c '^escalated=$' "$TMP/state/lx-codex" || true)" "1" \
+        "a fast mail rejection leaves the escalation open (it cannot duplicate)"
+    grep -q "escalation mail FAILED" "$TMP/out17" \
+        && ok "a fast mail rejection is logged as a failure" \
+        || bad "a fast mail rejection is logged as a failure"
+    sedi "s/^last_nudge=.*/last_nudge=0/;s/^last_try=.*/last_try=0/" "$TMP/state/lx-codex"
+    FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
+    eq "$(grep -c '^mail ' "$TMP/mail" || true)" "1" \
+        "the escalation left open by a fast rejection is retried next cycle"
+fi
+
+# --- Run 18: the exclusion escape hatch. ------------------------------------
+# QUOTA_PARK_EXCLUDE suppresses the ACTION, not the observation: the session is
+# still counted as parked in the summary, but it is not nudged and it gets no
+# episode state — so the status surface reports it as `no` and the patrols fall
+# back to their own judgment rather than deferring to a recovery that was
+# switched off for this session.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_EXCLUDE='ripley' bash "$SCRIPT" > "$TMP/out18"
+eq "$(nudges_for lx-codex)" "0" "an excluded alias is not nudged"
+[ -f "$TMP/state/lx-codex" ] \
+    && bad "an excluded alias writes no episode state" \
+    || ok "an excluded alias writes no episode state"
+grep -q "1 parked, 0 nudged" "$TMP/out18" \
+    && ok "an excluded session is still counted as parked" \
+    || bad "an excluded session is still counted as parked ($(tail -1 "$TMP/out18"))"
+grep -q "excluded, not nudged" "$TMP/out18" \
+    && ok "the log names the exclusion" || bad "the log names the exclusion"
+bash "$SCRIPT" --status lx-codex > "$TMP/status18"
+grep -q '^session=lx-codex quota_park=no ' "$TMP/status18" \
+    && ok "an excluded session reports quota_park=no (patrols use their own judgment)" \
+    || bad "an excluded session reports quota_park=no ($(tail -1 "$TMP/status18"))"
+
+# --- Run 19: the status surface the patrols read instead of the pane. -------
+# Warrant suppression used to be stated as prose: *peek the pane, and if you see
+# a limit banner do not file a warrant*. That hands every agent an off switch for
+# its own stuck-session recovery — print a provider-shaped line, idle, and the
+# path that would have recovered the work stands down. The agents likeliest to do
+# it are the wedged and the compromised ones, which is precisely who the warrant
+# is for. So the classification stays in this script and reaches a patrol only as
+# closed fields: yes/no/unknown, a label from the fixed detector set, and
+# integers. No pane text, ever.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+bash "$SCRIPT" > /dev/null
+NUDGES_BEFORE="$(grep -c '^nudge ' "$TMP/nudges" || true)"
+bash "$SCRIPT" --status > "$TMP/status-all"
+eq "$(grep -c '^nudge ' "$TMP/nudges" || true)" "$NUDGES_BEFORE" \
+    "--status is read-only (it nudges nothing)"
+grep -q '^heartbeat_fresh=1$' "$TMP/status-all" \
+    && ok "a sweep that just ran reports a fresh heartbeat" \
+    || bad "a sweep that just ran reports a fresh heartbeat"
+grep -qE '^session=lx-inject quota_park=yes detector_class=(possessive-limit|named-provider-limit|usage-credits|provider-limit|custom-match) ' \
+    "$TMP/status-all" \
+    && ok "a parked session reports quota_park=yes with a closed detector class" \
+    || bad "a parked session reports quota_park=yes with a closed detector class"
+
+# lx-inject's pane (run 10) carries prompt-injection text and a canary. None of
+# it may reach a surface a patrol agent reads and acts on.
+for probe in "OPERATOR MESSAGE" "gc bd delete" "canary-AKIAIOSFODNN7EXAMPLE-canary" \
+             "hit your usage limit" "Try again at"; do
+    grep -qF -- "$probe" "$TMP/status-all" \
+        && bad "the status surface must not carry pane text ('$probe' leaked)" \
+        || ok "the status surface does not carry pane text ('$probe')"
+done
+
+# A session with no episode: swept, not parked.
+bash "$SCRIPT" --status lx-clean > "$TMP/status-clean"
+grep -q '^session=lx-clean quota_park=no ' "$TMP/status-clean" \
+    && ok "a session with no episode reports quota_park=no" \
+    || bad "a session with no episode reports quota_park=no ($(tail -1 "$TMP/status-clean"))"
+
+# An id this order would refuse to write state for is one it will not answer for.
+bash "$SCRIPT" --status '../escaped-state' > "$TMP/status-unsafe"
+grep -q '^session=- quota_park=unknown .*reason=unsafe-session-id' "$TMP/status-unsafe" \
+    && ok "an unsafe session id reports unknown, not a verdict" \
+    || bad "an unsafe session id reports unknown ($(tail -1 "$TMP/status-unsafe"))"
+
+# An episode nothing has confirmed lately — the pane went unreadable and the
+# sweep has been keeping the state file alive — is NOT a live park. Reported as
+# unknown, so a patrol does not stand down on a sighting hours old.
+sedi "s/^last_seen=.*/last_seen=$(( $(date +%s) - 5000 ))/" "$TMP/state/lx-inject"
+bash "$SCRIPT" --status lx-inject > "$TMP/status-stale-seen"
+grep -q '^session=lx-inject quota_park=unknown ' "$TMP/status-stale-seen" \
+    && ok "an episode nobody has confirmed lately reports unknown, not yes" \
+    || bad "an episode nobody has confirmed lately reports unknown ($(tail -1 "$TMP/status-stale-seen"))"
+
+# And the fallback that matters most: if the ORDER is not running, it has no
+# evidence and says so. A stale heartbeat must not read as "not parked" (right by
+# accident) or as "parked" (warrants suppressed city-wide by a stopped clock).
+bash "$SCRIPT" > /dev/null
+sedi "s/^last_run=.*/last_run=$(( $(date +%s) - 5000 ))/" "$TMP/state/.heartbeat"
+bash "$SCRIPT" --status lx-inject > "$TMP/status-stale-hb"
+grep -q '^heartbeat_fresh=0$' "$TMP/status-stale-hb" \
+    && ok "a sweep that has not run lately reports a stale heartbeat" \
+    || bad "a sweep that has not run lately reports a stale heartbeat"
+grep -q '^session=lx-inject quota_park=unknown ' "$TMP/status-stale-hb" \
+    && ok "a stale heartbeat reports unknown even for a live episode (suppression needs a fresh sweep)" \
+    || bad "a stale heartbeat reports unknown ($(tail -1 "$TMP/status-stale-hb"))"
+
+rm -f "$TMP/state/.heartbeat"
+bash "$SCRIPT" --status lx-inject > "$TMP/status-no-hb"
+grep -q '^heartbeat_age=-1$' "$TMP/status-no-hb" \
+    && ok "a missing heartbeat is reported as such, not as age 0" \
+    || bad "a missing heartbeat is reported as such"
+grep -q '^session=lx-inject quota_park=unknown ' "$TMP/status-no-hb" \
+    && ok "an order that has never run reports unknown" \
+    || bad "an order that has never run reports unknown"
+
+# --- Run 20: the order wiring itself. ---------------------------------------
 # The runs above prove the detector; none of them prove the order that runs it.
 # A file that does not parse, or that loses `scope = "city"` (rig-scoped: most
 # of the city stops being swept) or its `exec` path (nothing runs at all), fails
