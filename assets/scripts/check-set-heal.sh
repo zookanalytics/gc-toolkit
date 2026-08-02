@@ -56,14 +56,68 @@
 # NOT STRANDING THE GATE. Arming `codex` on an anchor with no review bead would
 # hold the merge forever on a marker nothing can stamp — trading a silent-bypass
 # bug for a silent-strand bug. So after stamping, this pass ensures the gate is
-# SATISFIABLE: it reuses an in-flight review, respects an already-green marker,
-# and otherwise dispatches a codex signoff exactly as the merge-push step does
-# (task_kind=review + check_name + anchor_bead + a BLOCKS edge), then verifies the
-# anchor link persisted. A dispatch that fails is retried next idle pass (the
-# lookup dedups), and the anchor stays held meanwhile.
+# SATISFIABLE: it reuses an in-flight review, respects a marker that is green AT
+# THE LIVE HEAD, and otherwise dispatches a codex signoff exactly as the merge-push
+# step does (task_kind=review + check_name + anchor_bead + a BLOCKS edge), then
+# verifies BOTH writes the dispatch actually depends on. The anchor link, because
+# without it the signoff cannot find the gate to stamp; and the ROUTE, because
+# without it no pool can claim the bead. Neither may be a fire-and-forget write:
+# an unrouted-but-created review is INERT yet still counts as in flight, so it
+# suppresses its own replacement on every later pass and holds the gate forever
+# (tk-3xy37, found in the sibling stale-gate arm). So the route is written last,
+# read back, and reported only if it stuck — and a review found unrouted on a later
+# pass is REPAIRED (re-routed) rather than skipped. A dispatch that fails is retried
+# next idle pass (the lookup dedups), and the anchor stays held meanwhile.
 #
-# Idempotent + convergent: a healed anchor carries a non-empty check_set, so the
-# next pass classifies it "already normalized" and does nothing.
+# THE SECOND JOB: SATISFIABILITY ON *EVERY* GATING ANCHOR (tk-t46nq). The
+# satisfiability sweep above used to run ONLY on anchors this pass had just healed
+# (or healed on an earlier pass, via the check_set_healed flag). An anchor whose
+# check_set was normalized normally by the formula was classified "already
+# normalized" and skipped BEFORE its marker was ever examined — so an armed gate
+# with nothing to raise it was invisible here.
+#
+# That is not a hypothetical hole; it is where a PRE-OPEN rework hand-back parks.
+# A REQUEST_CHANGES signoff CLEARS check.codex by design and files a rework child;
+# when that child lands and is handed back, the anchor carries a perfectly normal
+# `check_set=codex`, NO marker, and no in-flight review. Every automated pass then
+# looked away: this one called it already-normalized, `pre-open-resolve.sh`
+# correctly HELD ("codex not green at live head") but has no dispatch authority,
+# and `merge-skill.sh` never sees a pre-open anchor at all (no PR yet). The
+# re-dispatch fell to whichever refinery session happened to notice the hand-back —
+# four hand-dispatches inside one patrol on 2026-08-01 (anchors tk-hef7t, tk-5niup,
+# tk-wsxd0), i.e. once per REVIEW ROUND, not once per anchor. So the classification
+# no longer short-circuits: EVERY anchor with a real gate list is checked for
+# satisfiability, and BOTH repair markers (`check_set_healed`, and phase 0's
+# `merge_result_healed`) revert to being purely an audit trail.
+#
+# SATISFIABLE MEANS GREEN AT THE LIVE HEAD, not merely "a marker exists".
+# check.codex=green@<oid> clears the merge only while <oid> is still the branch
+# head, so the marker-vs-head test is the one test that subsumes both readings:
+#
+#   green@<live head>   satisfiable — nothing to do.
+#   ABSENT              never reviewed, or CLEARED by a REQUEST_CHANGES signoff.
+#                       Nothing else owns this: reconcile-merged-prs.sh explicitly
+#                       punts the absent case here, pre-open-resolve.sh only holds.
+#                       -> DISPATCH, in BOTH sub-states.
+#   green@<other oid>   the head moved past the reviewed commit.
+#                       pre_open_gate -> DISPATCH (ours alone: reconcile enumerates
+#                         only merge_result=pull_request, so no other pass can even
+#                         see a pre-open anchor).
+#                       pull_request  -> LEAVE IT. reconcile-merged-prs.sh's
+#                         stale-gate arm owns that case and carries guards this pass
+#                         does not (merge_hold, one-re-review-per-head). Dispatching
+#                         here too would race it for a twin review.
+#
+# Reading the live head needs gh, PINNED to this checkout's origin repository the
+# same way `certify_pr_identity` pins its PR read (see `live_head_for`). It is
+# OPTIONAL: where gh is absent, the origin cannot be named, or the ref will not
+# resolve, a PRESENT marker is treated as satisfiable exactly as before, so a no-gh
+# rig keeps its prior behaviour. An ABSENT marker needs no head to classify and still
+# dispatches.
+#
+# Idempotent + convergent: the dispatched review is itself in-flight, so the next
+# pass reuses it instead of minting a twin, and the anchor reclassifies as
+# satisfiable the moment the signoff stamps the marker at the live head.
 #
 # Enumerated by BEAD (like merge-skill.sh / pre-open-resolve.sh), across BOTH
 # gating sub-states: `pull_request` is where the un-gated merge happens, and
@@ -165,12 +219,19 @@ _cshreal="$(readlink -f "$_cshself" 2>/dev/null || true)"
 [ -n "$_cshreal" ] && _cshself="$_cshreal"
 REVIEW_BODY_EMITTER="$(cd "$(dirname "$_cshself")" && pwd)/review-dispatch-body.sh"
 
-# create_review_bead <title> — mint the signoff bead carrying the method, echo its
-# id (empty on failure, exactly as the bare `gc bd create` it replaces).
+# create_review_bead <title> [note] — mint the signoff bead carrying the method,
+# echo its id (empty on failure, exactly as the bare `gc bd create` it replaces).
+#
+# The NOTE is the dispatch-specific context (WHY this signoff was woken). It rides
+# in the BODY, not only in `review_note` metadata: a re-gate after a rework
+# hand-back reads exactly like a duplicate of the signoff that already ran, and the
+# reviewer should not have to go read metadata to find out otherwise. Same shape
+# reconcile-merged-prs.sh's stale-gate re-review already dispatches with, so the two
+# re-gate paths hand the reviewer the same thing.
 create_review_bead() {
-  local title="$1" body=""
+  local title="$1" note="${2:-}" body=""
   if [ -x "$REVIEW_BODY_EMITTER" ]; then
-    body=$("$REVIEW_BODY_EMITTER" 2>/dev/null) || body=""
+    body=$("$REVIEW_BODY_EMITTER" ${note:+--note "$note"} 2>/dev/null) || body=""
   fi
   if [ -z "$body" ]; then
     echo "check-set-heal: WARN review method unavailable ($REVIEW_BODY_EMITTER); dispatching a TITLE-ONLY review — the reviewer will have to pick its own method (tk-jufvl)" >&2
@@ -244,6 +305,22 @@ bd_list_read() {
   printf '%s' "$raw"
 }
 
+# Statuses that still mean "a live bead owns this branch". `closed` is the ONLY
+# status that releases one; every other status still owns it. Identical list, and
+# identical reasoning, to reconcile-merged-prs.sh's LIVE_STATUSES — a probe that
+# asks for open,in_progress alone cannot see a child an operator PARKED by blocking
+# or deferring it (the standard way to neutralise a runaway child), nor one sitting
+# on an agent's hook, nor a pinned one. There an invisible owner meant a second
+# force-push (tk-gajop); here it means a codex review dispatched against a branch
+# that is frozen, hooked, or otherwise owned by rework that has not resolved — a
+# review of a commit that is not final, and spent codex quota.
+#
+# This is the COMPLEMENT of `closed` over `bd statuses`, enumerated rather than
+# negated because --status takes a positive list. Re-derive it if `bd statuses`
+# ever grows a new non-closed status. The comma form is deliberate: a repeated
+# --status flag keeps only the LAST value.
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+
 # Is anything already in flight against this anchor that would RAISE or re-raise
 # its gate? A signoff review, or a rework child whose landing re-dispatches one.
 # Dispatching past either would mint a twin review; the reviewer dedup upstream
@@ -282,13 +359,60 @@ bd_list_read() {
 # unresolved still counts as in flight: `?` (an unnameable repository) matches
 # everything, exactly as it does in phase 0's incumbent guards, so the dedup keeps its
 # safety and only a positive disagreement clears the way.
+#
+# ...and the same "a delay is only safe while it is BOUNDED" reasoning disqualifies a
+# second class of match, on IDENTITY-CORRECT beads: one that is about this anchor but
+# will never ACT on it (tk-t46nq). Counting a bead nothing will action is not a pass of
+# patience either, it is the same permanent suppression reached from the other side —
+# and it is precisely how the pre-open rework hand-back parked. The rework child is
+# handed back still OPEN (assignee=<rig>/<rig>.refinery, gc.routed_to CLEARED), so the
+# branch probe matched it on every pass and skipped the dispatch forever, waiting on a
+# re-dispatch that only that same dispatch could produce. An assignee is NOT liveness
+# here: the hand-back is exactly an assigned, unrouted, plain-`open` bead.
+#
+# So on top of the identity rules a candidate must also be ACTING:
+#
+#   task_kind=review        a signoff, open or claimed — its completion stamps the
+#                           marker. (Includes one left UNROUTED by a lost route write:
+#                           inert, but `repair_review_routing` at the call site
+#                           re-routes exactly that bead, and reusing it beats minting
+#                           a twin. An UNATTRIBUTABLE one is rejected by the identity
+#                           rules above, which is where that case belongs — nothing
+#                           can route it, so nothing can make it act.)
+#   any live status other   `in_progress` is an agent working it right now — a rework
+#   than plain `open`       mid-flight, whose branch is about to move. `blocked` /
+#                           `deferred` is a child an operator PARKED, `hooked` one on
+#                           an agent's hook, `pinned` one held deliberately. All still
+#                           OWN the branch, so reviewing under them diffs a commit that
+#                           is not final. (The probes ask for LIVE_STATUSES for exactly
+#                           this reason: a status not asked for is an owner unseen.)
+#   gc.routed_to non-empty  pool-routed and claimable — a dispatched rework waiting
+#                           for a polecat.
+#
+# Anything else — status exactly `open`, unrouted, not a review — is inert with respect
+# to this gate: the handed-back rework child, or a detached sibling anchor on the same
+# branch. Neither will ever stamp check.<gate> on THIS anchor.
+
+# The ACTING half, as a jq function so the exact and broad surfaces cannot drift on it
+# (the same reason the identity predicate below is one variable). $live is
+# LIVE_STATUSES; `open` is dropped from it because plain-open is the one status that
+# carries no actor of its own.
+ACTING_JQ_DEF='def acting($live):
+  ((.metadata // {})) as $m
+  | (($live | split(",")) | map(select(. != "open"))) as $owning
+  | ((($m.task_kind // "") | tostring) == "review")
+    or (($owning | index((((.status // "") | tostring) | ascii_downcase))) != null)
+    or ((($m["gc.routed_to"] // "") | tostring) != "");
+'
 
 # The validation predicate, as a jq filter over a `gc bd list` array. Kept in one
 # variable because both broad lookups must apply exactly the same rule — two copies
 # would be two chances to drift, on a decision whose failure mode is silent.
-#   $a = this anchor's id, $r = the repository its PR lives in (`?` when unnameable)
-INFLIGHT_OK_JQ='[.[]
+#   $a = this anchor's id, $r = the repository its PR lives in (`?` when unnameable),
+#   $live = LIVE_STATUSES (for `acting`)
+INFLIGHT_OK_JQ="$ACTING_JQ_DEF"'[.[]
   | select(.id != $a)
+  | select(acting($live))
   | ((.metadata // {})) as $m
   | ((($m.anchor_bead // "") | tostring)) as $ab
   | ((($m.task_kind // "") | tostring)) as $tk
@@ -336,9 +460,17 @@ inflight_for() { # <anchor-id> <pr-number> <branch> <anchor-repo-q>
   # is routed or claimed: that one can already raise the gate, and returning it holds
   # the dispatch, whereas returning a stranded sibling would re-route a SECOND
   # claimable review for one anchor.
-  raw=$(bd_list_read --metadata-field anchor_bead="$aid" --status=open,in_progress) || return 2
+  #
+  # `acting` applies here too, not only to the broad surfaces (tk-t46nq). Naming this
+  # anchor settles IDENTITY, never agency: a child that names it and is handed back
+  # plain-`open` and unrouted is as inert as one found by branch, and trusting the exact
+  # surface outright would hold this gate on it forever. The stranded-signoff case is
+  # unaffected — a review is acting by kind, whatever its route — so it is still
+  # returned here and repaired at the call site.
+  raw=$(bd_list_read --metadata-field anchor_bead="$aid" --status="$LIVE_STATUSES") || return 2
   found=$(printf '%s' "$raw" \
-    | jq -r --arg a "$aid" '[.[] | select(.id != $a)]
+    | jq -r --arg a "$aid" --arg live "$LIVE_STATUSES" "$ACTING_JQ_DEF"'[.[]
+        | select(.id != $a) | select(acting($live))]
         | sort_by(if ((((.metadata // {})["gc.routed_to"] // "") | tostring) != "")
                      or ((((.assignee // "") | tostring) | gsub("[[:space:]]"; "")) != "")
                   then 0 else 1 end)
@@ -349,14 +481,16 @@ inflight_for() { # <anchor-id> <pr-number> <branch> <anchor-repo-q>
   # `INFLIGHT_OK_JQ`; a rejected row does not end the search, and no survivor in
   # either surface means nothing is in flight and a fresh signoff is dispatched.
   if [ -n "$pnum" ]; then
-    raw=$(bd_list_read --metadata-field pr_number="$pnum" --status=open,in_progress) || return 2
+    raw=$(bd_list_read --metadata-field pr_number="$pnum" --status="$LIVE_STATUSES") || return 2
     found=$(printf '%s' "$raw" \
-      | jq -r --arg a "$aid" --arg r "$arepo" "$INFLIGHT_OK_JQ" 2>/dev/null) || return 2
+      | jq -r --arg a "$aid" --arg r "$arepo" --arg live "$LIVE_STATUSES" \
+          "$INFLIGHT_OK_JQ" 2>/dev/null) || return 2
   fi
   if [ -z "$found" ] && [ -n "$br" ]; then
-    raw=$(bd_list_read --metadata-field branch="$br" --status=open,in_progress) || return 2
+    raw=$(bd_list_read --metadata-field branch="$br" --status="$LIVE_STATUSES") || return 2
     found=$(printf '%s' "$raw" \
-      | jq -r --arg a "$aid" --arg r "$arepo" "$INFLIGHT_OK_JQ" 2>/dev/null) || return 2
+      | jq -r --arg a "$aid" --arg r "$arepo" --arg live "$LIVE_STATUSES" \
+          "$INFLIGHT_OK_JQ" 2>/dev/null) || return 2
   fi
   printf '%s' "$found"
   return 0
@@ -511,6 +645,31 @@ resolve_origin_repo_q() {
 url_repo_q() {
   printf '%s' "${1:-}" \
     | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\([^/][^/]*\)/\([^/][^/]*/[^/][^/]*\)/pull/[0-9].*#\1/\2#p'
+}
+
+# The LIVE HEAD of a branch, for the marker-vs-head test that decides satisfiability
+# (tk-t46nq). Echoes empty when the head cannot be established, and EVERY caller reads
+# empty as "cannot evaluate" — falling back to treating a present marker as satisfiable,
+# which is the behaviour before this script read heads at all. A rig without gh is
+# therefore never regressed into dispatching reviews it cannot justify.
+#
+# PINNED TO ORIGIN, for the same reason `certify_pr_identity` pins its read (review
+# tk-5nxyg finding #1, tk-47bij finding #1). A bare `repos/{owner}/{repo}` resolves in
+# whatever repository gh considers CURRENT — moved by `gh repo set-default`, GH_REPO or
+# the cwd — so a branch name that exists in THAT repository would answer for ours, and a
+# foreign head that differs from our marker's oid would re-gate a PR that never moved,
+# spending a codex review on a question nobody asked. The host is carried too: `<o>/<r>`
+# names one repository PER HOST. An unresolvable origin is an UNANSWERED question, not a
+# licence to ask an unpinned one — it returns empty and the caller falls back.
+HAVE_GH=0
+command -v gh >/dev/null 2>&1 && HAVE_GH=1
+live_head_for() { # <branch>
+  local br="${1:-}" repo=""
+  [ "$HAVE_GH" = 1 ] && [ -n "$br" ] || return 0
+  repo=$(resolve_origin_repo)
+  [ -n "$repo" ] || return 0
+  gh api "repos/$repo/commits/$br" ${ORIGIN_HOST:+--hostname "$ORIGIN_HOST"} \
+    --jq '.sha' 2>/dev/null
 }
 
 # certify_pr_identity <bead-id> <pr-number> <bead-pr-url> <bead-branch> <action>
@@ -1279,6 +1438,7 @@ for MR_STATE in pull_request pre_open_gate; do
       healed:   ($m.check_set_healed // ""),
       mrhealed: ($m.merge_result_healed // ""),
       mrstate:  ($m.merge_result_pr_state // ""),
+      hold:     ($m.merge_hold // ""),
       flagged:  ($m.check_set_heal_flagged // ""),
       assignee: ((.assignee // "") | tostring),
       aflag:    (($m.assignee_noncanonical // "") | tostring)
@@ -1317,7 +1477,7 @@ if [ -z "$ROWS" ]; then
   echo "check-set-heal: no gating anchors"; exit 0
 fi
 
-healed=0; dispatched=0; normal=0; optout=0; skipped=0; unsafe=0
+healed=0; dispatched=0; regated=0; normal=0; optout=0; skipped=0; unsafe=0
 UNSAFE_IDS=""   # anchors already counted ungated, so the post-loop sweep cannot double-count one
 SEEN_IDS=""     # anchors phase 1 actually REACHED, so the sweep below can verify reach
                 # rather than infer it from a non-empty check_set (tk-47bij finding #3)
@@ -1492,40 +1652,38 @@ while IFS= read -r row; do
 
   # checkset/canon were read above the inert arm, which needs `canon` to tell an
   # ungated exposure from a gated one.
-  #
-  # An anchor stays in the satisfiability path if EITHER repair marker is present.
-  # check_set_healed covers a gate repaired here; merge_result_healed covers one
-  # PHASE 0 made visible — whose check_set may ALREADY read normal, because the
-  # damage that dropped merge_result need not have dropped check_set too (the
-  # `codex` survived, the visibility did not). Without this second marker such an
-  # anchor takes the "already normalized" exit below and is skipped forever: no
-  # signoff is ever dispatched, while merge-skill.sh holds indefinitely on a
-  # check.codex marker nothing exists to stamp. That trades an invisible PR for a
-  # permanently stuck one (tk-zl932 / review tk-ej3wq finding #1).
-  healedmark=$(printf '%s' "$row" | jq -r '.healed // empty')
-  [ -n "$healedmark" ] || healedmark=$(printf '%s' "$row" | jq -r '.mrhealed // empty')
 
   # --- classify -----------------------------------------------------------
-  # A PREVIOUSLY healed anchor (check_set_healed recorded) keeps flowing into the
-  # satisfiability check below even though its check_set now reads normal. That is
-  # what makes "retry next pass" true: the stamp is what reclassifies the anchor,
-  # so without this the very first successful stamp would hide the anchor from
-  # every later pass — and a dispatch that failed after the stamp would strand the
-  # armed gate forever with nothing to raise it.
+  # Only the explicit opt-out short-circuits. EVERY anchor that names a real gate
+  # flows into the satisfiability check below, whether this pass healed its
+  # check_set, an earlier pass healed it, phase 0 restored its visibility, or the
+  # formula normalized it normally (tk-t46nq). Gating on a repair marker — as this
+  # did — made the sweep reachable only through the repair paths, so a normally
+  # normalized anchor whose marker was absent or stale was never examined at all;
+  # that is where a pre-open rework hand-back parks.
+  #
+  # THIS SUBSUMES THE TWO-MARKER RULE (tk-zl932 / review tk-ej3wq finding #1). The
+  # classify used to admit an anchor carrying check_set_healed (a gate repaired here)
+  # OR merge_result_healed (one phase 0 made visible, whose check_set may already read
+  # normal because the damage that dropped merge_result need not have dropped
+  # check_set). Both were ways of keeping a REPAIRED anchor flowing past an
+  # "already normalized" exit that no longer exists — every anchor flows now, so that
+  # exposure cannot recur under any marker, present, absent or dropped. Both markers
+  # stay stamped as the durable audit trail of a repaired bypass; neither decides who
+  # gets checked.
   needs_stamp=0
   case "$canon" in
     '')
       needs_stamp=1 ;;                      # never normalized -> heal
     none|off)
       optout=$((optout + 1)); continue ;;   # EXPLICIT opt-out — leave it alone
-    *)
-      [ -n "$healedmark" ] || { normal=$((normal + 1)); continue; } ;;
   esac
 
   state=$(printf '%s' "$row" | jq -r '.state // empty')   # num/prurl/branch read above
   target=$(printf '%s' "$row" | jq -r '.target // empty')
   title=$(printf '%s' "$row" | jq -r '.title // empty')
   marker=$(printf '%s' "$row" | jq -r '.codex // empty')
+  hold=$(printf '%s' "$row" | jq -r '.hold // empty')
   flagged=$(printf '%s' "$row" | jq -r '.flagged // empty')
   [ -n "$target" ] || target="main"
 
@@ -1533,9 +1691,9 @@ while IFS= read -r row; do
   # check_set_healed is the durable audit trail: it distinguishes an anchor whose
   # gate was repaired at the boundary from one the formula stamped normally, so
   # the bypass stays VISIBLE after the repair rather than being silently papered
-  # over. It is ALSO the flag that keeps this anchor flowing through the
-  # satisfiability check on later passes. Verified by re-read — a stamp that did
-  # not persist must not be reported as a heal, and must not stop the retry.
+  # over. It no longer decides who reaches the satisfiability check — every anchor
+  # does (tk-t46nq) — so it is now audit trail only. Verified by re-read: a stamp
+  # that did not persist must not be reported as a heal, and must not stop the retry.
   EFFECTIVE="$checkset"
   if [ "$needs_stamp" = 1 ]; then
     echo "check-set-heal: $id ($state${num:+ PR#$num}) has NO normalized check_set (bypassed the formula — recovery path); applying declared default '$DEFAULT_CHECK_SET'"
@@ -1578,17 +1736,68 @@ while IFS= read -r row; do
     continue
   fi
 
-  # Already green: a review ran for this anchor at some point and stamped the
-  # marker — the gate is satisfiable (green at the live head merges; green at a
-  # stale head re-gates through the normal rework path). Nothing to dispatch.
-  if [ -n "$marker" ]; then
+  # Is the gate SATISFIABLE — i.e. green AT THE LIVE HEAD? A marker alone is not
+  # satisfiability: check.codex=green@<oid> clears the merge only while <oid> is
+  # still the branch head. REGATE_WHY, once set, is both the decision to dispatch
+  # and the reason string the reviewer is handed. See the header for the full
+  # ownership split against reconcile-merged-prs.sh (tk-t46nq).
+  REGATE_WHY=""
+  if [ -z "$marker" ]; then
+    # ABSENT. Never reviewed, or CLEARED by a REQUEST_CHANGES signoff whose rework
+    # has since landed. Nothing else re-raises this: reconcile-merged-prs.sh
+    # explicitly punts the absent case to this pass, and pre-open-resolve.sh can
+    # only hold. Dispatch in BOTH sub-states — no live head needed to classify it.
+    REGATE_WHY="check.codex is absent (never reviewed, or cleared by a REQUEST_CHANGES signoff whose rework has landed)"
+  elif [ "$state" = "pre_open_gate" ]; then
+    # PRESENT on a pre-open anchor. Only a live-head read can tell current from
+    # stale, and this pass is the ONLY one that can: reconcile-merged-prs.sh
+    # enumerates merge_result=pull_request, so a pre-open anchor is invisible to
+    # its stale-gate arm. Fail soft — an unreadable head leaves the marker treated
+    # as satisfiable, exactly as before gh entered this script.
+    case "$marker" in
+      green@*)
+        REVIEWED_OID="${marker#green@}"
+        HEAD_OID=$(live_head_for "$branch")
+        if [ -n "$REVIEWED_OID" ] && [ -n "$HEAD_OID" ] && [ "$REVIEWED_OID" != "$HEAD_OID" ]; then
+          REGATE_WHY="check.codex is green@$REVIEWED_OID but branch '$branch' has advanced to $HEAD_OID, so the marker certifies a commit that is no longer the head"
+        fi ;;
+    esac
+  fi
+  # A marker that is green at the live head — or a stale POST-OPEN one, which
+  # belongs to reconcile-merged-prs.sh's stale-gate arm and its merge_hold /
+  # one-re-review-per-head guards — needs nothing from this pass.
+  if [ -z "$REGATE_WHY" ]; then
     [ "$needs_stamp" = 1 ] && echo "check-set-heal: $id already carries check.codex='$marker'; gate is satisfiable, no dispatch"
     [ "$needs_stamp" = 1 ] || normal=$((normal + 1))
     continue
   fi
 
-  # Reuse whatever is already in flight rather than dispatching a twin: an open
-  # signoff review, or a rework child whose hand-back re-dispatches the review.
+  # Operator hold, on the RE-GATE path only. merge_hold means "do not land this
+  # yet", and a re-gate is pipeline work toward landing — so honor the same gate
+  # reconcile-merged-prs.sh's stale-gate arm honors, and for the same reason
+  # (a review burned on a PR nobody intends to land is spent codex quota). The
+  # anchor cannot merge meanwhile: its gate is armed with no green marker.
+  #
+  # The HEAL path deliberately ignores the hold. There the anchor's check_set is
+  # EMPTY, which merge-skill.sh reads as "no gates" — so it would merge un-reviewed
+  # the moment the hold is lifted, and arming it is fail-closed work that must not
+  # wait on an operator. Held-and-gated is safe; held-and-ungated is the tk-i48ca
+  # bypass wearing a delay.
+  case "$hold" in
+    ""|false|False|FALSE|0|null) ;;
+    *)
+      if [ "$needs_stamp" != 1 ]; then
+        echo "check-set-heal: $id ($state${num:+ PR#$num}) needs a re-gate ($REGATE_WHY) but merge_hold is set (operator gate); no signoff dispatched"
+        normal=$((normal + 1)); continue
+      fi ;;
+  esac
+
+  # Reuse whatever is ACTING on this anchor rather than dispatching a twin: an open
+  # signoff review, or a rework still being worked. A rework already handed BACK is
+  # deliberately not counted (see `acting` in inflight_for) — waiting on it is what
+  # parked the anchor in the first place. Stays quiet on the re-gate path: an
+  # in-flight review is the normal healthy wait, and logging it every idle pass would
+  # bury the real dispatches.
   # A review found UNCLAIMED AND UNROUTED is not in flight but stranded, and is
   # re-routed here instead of being counted as in flight forever (finding #3).
   #
@@ -1641,11 +1850,20 @@ while IFS= read -r row; do
   # compare-range (review_branch/review_base, no PR yet), post-open reviews the PR.
   # The bead carries the review METHOD in its body (create_review_bead) — the title
   # says WHAT to review, the metadata says WHERE, and the body says HOW (tk-jufvl).
+  #
+  # REGATE_WHY rides along in BOTH places reconcile-merged-prs.sh's stale-gate arm
+  # puts it — the bead BODY (create_review_bead's note argument) and the
+  # review_note metadata — so the reviewer is told WHY it was woken wherever it
+  # looks. A re-gate after a rework hand-back reads very differently from a first
+  # review, and without the reason the bead looks like a duplicate of the signoff
+  # that already ran. REGATE_WHY is non-empty by construction here: the
+  # satisfiability test above `continue`s on an empty one, so it is both the
+  # decision to dispatch and the reason handed over.
   REVIEW_BEAD=""
   if [ -n "$num" ]; then
-    REVIEW_BEAD=$(create_review_bead "Review PR#$num: $title")
+    REVIEW_BEAD=$(create_review_bead "Review PR#$num: $title" "$REGATE_WHY")
   else
-    REVIEW_BEAD=$(create_review_bead "Review branch $branch -> $target: $title")
+    REVIEW_BEAD=$(create_review_bead "Review branch $branch -> $target: $title" "$REGATE_WHY")
   fi
   if [ -z "$REVIEW_BEAD" ]; then
     echo "check-set-heal: WARN $id could not create the signoff bead; merge stays HELD, retrying next pass" >&2
@@ -1673,6 +1891,7 @@ while IFS= read -r row; do
   if [ -n "$FIX_POOL" ]; then
     gc bd update "$REVIEW_BEAD" --set-metadata fix_target_pool="$FIX_POOL" >/dev/null 2>&1
   fi
+  gc bd update "$REVIEW_BEAD" --set-metadata review_note="$REGATE_WHY" >/dev/null 2>&1
 
   # Gate-as-dep: the review BLOCKS the anchor. Best-effort (anchor_bead is the
   # durable fallback the signoff resolves through when the edge is missing).
@@ -1706,9 +1925,18 @@ while IFS= read -r row; do
   fi
 
   gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
-  gc session nudge "$REVIEW_POOL" "Review bead $REVIEW_BEAD for recovered anchor $id" >/dev/null 2>&1 || true
+  gc session nudge "$REVIEW_POOL" "Review bead $REVIEW_BEAD for anchor $id" >/dev/null 2>&1 || true
   dispatched=$((dispatched + 1))
-  echo "check-set-heal: $id dispatched signoff $REVIEW_BEAD to $REVIEW_POOL (gate '$DEFAULT_CHECK_SET' is now satisfiable)"
+  # Separate the two dispatch reasons in the counters and the log. A heal-path
+  # dispatch means a bead bypassed normalization (tk-i48ca); a RE-GATE means a
+  # normally-gated anchor had nothing left to raise its gate (tk-t46nq) — which,
+  # unlike a heal, is expected to recur once per review round on a reworked branch.
+  if [ "$needs_stamp" = 1 ]; then
+    echo "check-set-heal: $id dispatched signoff $REVIEW_BEAD to $REVIEW_POOL (gate '$DEFAULT_CHECK_SET' is now satisfiable)"
+  else
+    regated=$((regated + 1))
+    echo "check-set-heal: $id ($state${num:+ PR#$num}) re-gated — $REGATE_WHY; dispatched signoff $REVIEW_BEAD to $REVIEW_POOL"
+  fi
 done <<< "$ROWS"
 
 # Phase 0 made these anchors visible to merge-skill.sh; phase 1 was supposed to gate
@@ -1746,16 +1974,22 @@ if [ -n "$RECOVERED_OPEN" ]; then
       # Gated, so merge-skill HOLDS it — this is not the ungated-merge condition
       # UNSAFE_RC names, and holding the whole queue for it would trade one anchor's
       # deferral for every anchor's. But it is silent otherwise: nothing was
-      # dispatched to raise the armed gate. Say so, and let the durable
-      # merge_result_healed marker carry it back into the satisfiability path next
-      # pass, where the now-unbounded enumeration reaches it.
+      # dispatched to raise the armed gate. Say so, and let the next pass pick it up:
+      # the enumeration is unbounded, and since tk-t46nq every anchor it returns
+      # reaches the satisfiability check regardless of any repair marker.
       echo "check-set-heal: WARN $rid was restored to visibility this pass but the gating enumeration never reached it; its check_set '$RCS' HOLDS the merge, but no signoff was dispatched to raise that gate — retrying next pass" >&2
       skipped=$((skipped + 1))
     fi
   done <<< "$RECOVERED_OPEN"
 fi
 
-echo "check-set-heal: $healed healed, $dispatched signoffs dispatched, $normal already normalized, $optout explicit opt-out, $skipped skipped, $recovered merge_result restored, $noncanon non-canonical assignee"
+# `$regated of them re-gated` splits the ONE number an operator reads most often. A
+# heal-path dispatch means a bead bypassed normalization (tk-i48ca) — rare, and a
+# defect somewhere upstream. A RE-GATE means a normally-gated anchor had nothing left
+# to raise its gate (tk-t46nq), which is expected to recur once per review round on a
+# reworked branch. Summed into one counter they are indistinguishable, and a healthy
+# rework loop reads as a rising tide of bypasses.
+echo "check-set-heal: $healed healed, $dispatched signoffs dispatched ($regated of them re-gated), $normal already normalized, $optout explicit opt-out, $skipped skipped, $recovered merge_result restored, $noncanon non-canonical assignee"
 
 # Fail-closed to the formula. Either an anchor's check_set stamp did not persist, or
 # one this pass made VISIBLE was never gated — in both cases merge-skill.sh would

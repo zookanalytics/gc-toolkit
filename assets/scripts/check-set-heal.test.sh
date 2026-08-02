@@ -34,6 +34,13 @@
 #   (RETRY)  a healed anchor whose dispatch FAILED last pass (healed recorded, gate
 #            still unsatisfiable, nothing in flight) re-dispatches — the stamp did
 #            not hide it from the satisfiability retry.
+#   (LIVEOWN) a branch owned by a blocked / deferred / hooked / pinned child ->
+#            NO dispatch (only `closed` releases a branch); an OPEN unrouted
+#            non-review child is still inert -> DISPATCH.
+#   (NOTE)   each re-gate's review_note is non-empty and carries THAT dispatch's
+#            reason, and the same reason reaches the review BODY.
+#   (ROUTEFAIL/REPAIR) a dropped gc.routed_to write is not counted as dispatched
+#            and leaves the bead unrouted; the next pass re-routes the SAME bead.
 #   (GATE)   the REAL formula wiring (heal-gates-merge, extracted from
 #            mol-refinery-patrol.toml): a stamp-failing heal (rc=UNSAFE_RC) HOLDS
 #            the merge-skill stub (no merge attempted); a clean heal lets it run.
@@ -113,7 +120,7 @@ case "$2" in
       *"merge_result=pull_request"*|*"merge_result=pre_open_gate"*)
         want=$(printf '%s' "$*" | sed -n 's/.*merge_result=\([a-z_]*\).*/\1/p')
         out=""
-        while IFS='|' read -r id mr cs pr branch target codex healed; do
+        while IFS='|' read -r id mr cs pr branch target codex healed hold; do
           [ -n "$id" ] || continue
           [ "$mr" = "$want" ] || continue
           # Live check_set: stamped overlay wins.
@@ -129,34 +136,78 @@ case "$2" in
           hfield=""; [ -n "$h" ] && hfield=$(printf ',"check_set_healed":"%s"' "$h")
           cxfield=""; [ -n "$codex" ] && cxfield=$(printf ',"check.codex":"%s"' "$codex")
           prfield=""; [ -n "$pr" ] && prfield=$(printf ',"pr_number":"%s","pr_url":"https://x/pull/%s"' "$pr" "$pr")
-          obj=$(printf '{"id":"%s","title":"impl %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"%s"%s%s%s%s}}' \
-            "$id" "$id" "$mr" "$branch" "$target" "$csfield" "$cxfield" "$hfield" "$prfield")
+          hdfield=""; [ -n "$hold" ] && hdfield=$(printf ',"merge_hold":"%s"' "$hold")
+          obj=$(printf '{"id":"%s","title":"impl %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"%s"%s%s%s%s%s}}' \
+            "$id" "$id" "$mr" "$branch" "$target" "$csfield" "$cxfield" "$hfield" "$prfield" "$hdfield")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
+      # The in-flight probes. These emit REALISTIC bead rows — id + status +
+      # metadata — not a bare {"id":...}: inflight_for now decides whether a
+      # candidate will actually ACT on the gate (task_kind=review, or
+      # in_progress, or pool-routed), so a row without those fields no longer
+      # resembles the bead it stands for (tk-t46nq). Everything reachable through
+      # the pr_number / anchor_bead probes IS a signoff review, so both emit
+      # task_kind=review.
       *"pr_number="*)
         pnum=$(printf '%s' "$*" | sed -n 's/.*pr_number=\([0-9][0-9]*\).*/\1/p')
         rid=$(awk -F'|' -v p="$pnum" '$3==p{print $1; exit}' "$FAKE_REVIEWS" 2>/dev/null)
-        if [ -n "$rid" ]; then printf '[{"id":"%s"}]\n' "$rid"; else printf '[]\n'; fi ;;
+        if [ -n "$rid" ]; then
+          printf '[{"id":"%s","status":"open","metadata":{"task_kind":"review"}}]\n' "$rid"
+        else printf '[]\n'; fi ;;
       *"anchor_bead="*)
         aid=$(printf '%s' "$*" | sed -n 's/.*anchor_bead=\([^ ]*\).*/\1/p')
         rid=$(awk -F'|' -v a="$aid" '$2==a{print $1; exit}' "$FAKE_REVIEWS" 2>/dev/null)
         # Also honour a review minted THIS run (recorded in FAKE_REVMETA).
         [ -n "$rid" ] || rid=$(awk -F'\t' -v a="$aid" '$2=="anchor_bead" && $3==a{print $1; exit}' "$FAKE_REVMETA" 2>/dev/null)
-        if [ -n "$rid" ]; then printf '[{"id":"%s"}]\n' "$rid"; else printf '[]\n'; fi ;;
+        if [ -n "$rid" ]; then
+          printf '[{"id":"%s","status":"open","metadata":{"task_kind":"review"}}]\n' "$rid"
+        else printf '[]\n'; fi ;;
+      # Branch-keyed probe: the rework children (and any sibling bead) that live on
+      # an anchor's branch. Backed by $FAKE_BRANCHBEADS so a fixture can express
+      # the exact discriminator this bug turns on — a rework still being WORKED vs
+      # one already handed BACK.  id|branch|status|task_kind|gc.routed_to
+      #
+      # The --status list the caller asked for is HONOURED here, exactly as the real
+      # `bd list` honours it. That is what makes the live-owner fixtures a real
+      # regression: a probe that asks only for open,in_progress cannot see a
+      # blocked/deferred/hooked/pinned branch owner at all, so the pass would
+      # dispatch a review against a branch someone else still owns. A stub that
+      # returned every row regardless of status would let the un-widened query pass.
       *"branch="*)
         br=$(printf '%s' "$*" | sed -n 's/.*branch=\([^ ]*\).*/\1/p')
-        # No standalone branch-keyed reviews in fixtures; return empty.
-        printf '[]\n' ;;
+        want_st=$(printf '%s' "$*" | sed -n 's/.*--status=\([^ ]*\).*/\1/p')
+        out=""
+        while IFS='|' read -r bid bbr bst btk brt; do
+          [ -n "$bid" ] || continue
+          [ "$bbr" = "$br" ] || continue
+          if [ -n "$want_st" ]; then
+            case ",$want_st," in *",$bst,"*) ;; *) continue ;; esac
+          fi
+          tkf=""; [ -n "$btk" ] && tkf=$(printf ',"task_kind":"%s"' "$btk")
+          obj=$(printf '{"id":"%s","status":"%s","metadata":{"branch":"%s","gc.routed_to":"%s"%s}}' \
+            "$bid" "$bst" "$bbr" "$brt" "$tkf")
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_BRANCHBEADS"
+        printf '[%s]\n' "$out" ;;
       *) printf '[]\n' ;;
     esac ;;
   show)
     id="$3"
-    cs=$(cs_for "$id"); [ "$cs" = "EMPTY" ] || [ "$cs" = "__ABSENT__" ] && cs=""
-    # anchor_bead recorded on a review this run?
-    ab=$(awk -F'\t' -v i="$id" '$1==i && $2=="anchor_bead"{print $3; exit}' "$FAKE_REVMETA" 2>/dev/null)
-    jq -n --arg cs "$cs" --arg ab "$ab" \
-      '[{metadata: ({} + (if $cs=="" then {} else {check_set:$cs} end) + (if $ab=="" then {} else {anchor_bead:$ab} end))}]' ;;
+    cs=$(cs_for "$id")
+    case "$cs" in EMPTY|__ABSENT__) cs="" ;; esac
+    # EVERY metadata key recorded for this id, last write wins — not just
+    # anchor_bead. route_review()'s read-back and the repair arm's unrouted-review
+    # test both read gc.routed_to / task_kind back through `bd show`, so a stub that
+    # only echoed anchor_bead would make the route read-back a tautology (always
+    # empty -> every route "fails") and the repair arm untestable.
+    awk -F'\t' -v i="$id" '$1==i{v[$2]=$3} END{for (k in v) printf "%s\t%s\n", k, v[k]}' \
+      "$FAKE_REVMETA" 2>/dev/null \
+      | jq -R -s --arg cs "$cs" '
+          [ split("\n")[] | select(length > 0) | split("\t")
+            | {key: .[0], value: (.[1] // "")} ] | from_entries
+          | (if $cs == "" then . else . + {check_set: $cs} end)
+          | [{metadata: .}]' ;;
   create)
     # gc bd create "<title>" -t task [--body-file -] --json
     n=$(cat "$FAKE_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$FAKE_SEQ"
@@ -185,12 +236,28 @@ case "$2" in
     if printf '%s' "$*" | grep -q 'check_set_heal_flagged='; then
       printf '%s\n' "$id" >> "$FAKE_FLAGGED"
     fi
-    # Record review metadata (anchor_bead, routing, task_kind, review_branch).
-    for k in anchor_bead gc.routed_to task_kind review_branch pr_number fix_target_pool; do
-      if printf '%s' "$*" | grep -q -- "--set-metadata $k="; then
-        v=$(printf '%s' "$*" | sed -n "s/.*--set-metadata $k=\\([^ ]*\\).*/\\1/p")
-        printf '%s\t%s\t%s\n' "$id" "$k" "$v" >> "$FAKE_REVMETA"
+    # Record review metadata (anchor_bead, routing, task_kind, review_branch,
+    # review_note, ...) by walking the ARGUMENT VECTOR rather than "$*". A value
+    # containing spaces — review_note carries a whole sentence — used to be
+    # truncated at the first word by the old `sed` capture, so an assertion could
+    # only prove that SOME review_note key was written, never that the reason
+    # survived. The full value is recorded here so the fixtures can assert content.
+    prev=""
+    for arg in "$@"; do
+      if [ "$prev" = "--set-metadata" ]; then
+        k=${arg%%=*}; v=${arg#*=}
+        case "$k" in
+          anchor_bead|gc.routed_to|task_kind|check_name|review_branch|review_base|pr_number|pr_url|fix_target_pool|review_note)
+            # Injected route-write failure ($FAKE_ROUTEFAIL non-empty): drop the
+            # write, so the ledger never records the route and the script's
+            # read-back sees the miss — the tk-3xy37 shape.
+            if [ "$k" = "gc.routed_to" ] && grep -qs . "$FAKE_ROUTEFAIL"; then
+              prev="$arg"; continue
+            fi
+            printf '%s\t%s\t%s\n' "$id" "$k" "$v" >> "$FAKE_REVMETA" ;;
+        esac
       fi
+      prev="$arg"
     done ;;
   dep)
     # gc bd dep <review> --blocks <anchor>
@@ -201,15 +268,34 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+# --- gh stub. -----------------------------------------------------------------
+# Only `gh api repos/{owner}/{repo}/commits/<branch> --jq .sha` is used, to read a
+# branch's LIVE head for the marker-vs-head test (tk-t46nq). Backed by $FAKE_HEADS
+# (branch<TAB>sha); a branch with no entry exits non-zero and prints nothing —
+# which is exactly the "head unresolvable / no gh" fail-soft path.
+cat > "$TMP/bin/gh" <<'GH'
+#!/usr/bin/env bash
+[ "$1" = "api" ] || exit 0
+ref=$(printf '%s' "$2" | sed -n 's|.*/commits/\(.*\)$|\1|p')
+[ -n "$ref" ] || exit 1
+sha=$(awk -F'\t' -v b="$ref" '$1==b{print $2; exit}' "$FAKE_HEADS" 2>/dev/null)
+[ -n "$sha" ] || exit 1
+printf '%s\n' "$sha"
+GH
+chmod +x "$TMP/bin/gh"
+
 : > "$TMP/stamped"; : > "$TMP/healed"; : > "$TMP/flagged"; : > "$TMP/revmeta"
 : > "$TMP/deps"; : > "$TMP/stampfail"; echo 0 > "$TMP/seq"
+: > "$TMP/branchbeads"; : > "$TMP/heads"; : > "$TMP/routefail"
 mkdir -p "$TMP/bodies"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors" FAKE_REVIEWS="$TMP/reviews" \
        FAKE_STAMPED="$TMP/stamped" FAKE_HEALED="$TMP/healed" \
        FAKE_FLAGGED="$TMP/flagged" FAKE_REVMETA="$TMP/revmeta" FAKE_DEPS="$TMP/deps" \
-       FAKE_STAMPFAIL="$TMP/stampfail" FAKE_SEQ="$TMP/seq" FAKE_BODIES="$TMP/bodies"
+       FAKE_STAMPFAIL="$TMP/stampfail" FAKE_SEQ="$TMP/seq" FAKE_BODIES="$TMP/bodies" \
+       FAKE_BRANCHBEADS="$TMP/branchbeads" FAKE_HEADS="$TMP/heads" \
+       FAKE_ROUTEFAIL="$TMP/routefail"
 
 # --- Run 1. -------------------------------------------------------------------
 RC1=0
@@ -505,6 +591,280 @@ GATEOUT2="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
 printf '%s\n' "$GATEOUT2" | grep -q 'MERGE_SKILL_HELD=0' \
   && ok "(GATE-OK) the formula recorded MERGE_SKILL_HELD=0" \
   || bad "(GATE-OK) the formula MERGE_SKILL_HELD should be 0 (got: $GATEOUT2)"
+
+# --- Run 7: RE-GATE an ALREADY-NORMALIZED anchor (tk-t46nq). ------------------
+# The bug: the satisfiability sweep was reachable only through the heal path, so
+# an anchor the formula normalized normally (check_set=codex, no
+# check_set_healed) was counted "already normalized" and its marker was never
+# examined. A REQUEST_CHANGES signoff CLEARS check.codex and files a rework
+# child; when that child lands and is handed back, the anchor holds a normal
+# check_set, NO marker, and nothing in flight — and every automated pass looked
+# away (this one skipped it; pre-open-resolve.sh can only HOLD; merge-skill.sh
+# never sees a pre-open anchor). It parked until a human hand-dispatched the
+# re-gate: four times inside one patrol on 2026-08-01.
+#
+# Fixtures, all with a NORMAL check_set (no healed mark) so every one of them
+# would have been skipped outright before this fix:
+#   RG-PRE   pre_open_gate, marker ABSENT, nothing in flight  -> DISPATCH (branch)
+#   RG-POST  pull_request,  marker ABSENT, nothing in flight  -> DISPATCH (PR)
+#   RG-BACK  pre_open_gate, marker ABSENT, rework child HANDED BACK (open,
+#            unrouted, sitting on the anchor's branch)        -> DISPATCH
+#   RG-WORK  pre_open_gate, marker ABSENT, rework child STILL BEING WORKED
+#            (in_progress on the branch)                      -> NO dispatch
+#   RG-POOL  pre_open_gate, marker ABSENT, rework child pool-ROUTED, unclaimed
+#                                                             -> NO dispatch
+#   RG-STALE pre_open_gate, green@OLD but the branch moved     -> DISPATCH
+#   RG-FRESH pre_open_gate, green@<live head>                  -> NO dispatch
+#   RG-PSTAL pull_request,  green@OLD, head moved -> NO dispatch (that is
+#            reconcile-merged-prs.sh's stale-gate arm, which carries merge_hold
+#            and one-re-review-per-head guards this pass does not)
+#   RG-NOGH  pre_open_gate, green@OLD but the head will NOT resolve -> NO
+#            dispatch (fail soft: a marker stays satisfiable without a head)
+#   RG-HOLD  pre_open_gate, marker ABSENT, but merge_hold set -> NO dispatch
+#            (operator gate; a re-gate is work toward landing, so it honours the
+#            same hold reconcile-merged-prs.sh's stale-gate arm honours)
+cat > "$TMP/anchors" <<'A'
+RG-PRE|pre_open_gate|codex||polecat/rg-pre|main||
+RG-POST|pull_request|codex|420|polecat/rg-post|main||
+RG-BACK|pre_open_gate|codex||polecat/rg-back|main||
+RG-WORK|pre_open_gate|codex||polecat/rg-work|main||
+RG-POOL|pre_open_gate|codex||polecat/rg-pool|main||
+RG-STALE|pre_open_gate|codex||polecat/rg-stale|main|green@OLDSHA|
+RG-FRESH|pre_open_gate|codex||polecat/rg-fresh|main|green@FRESHSHA|
+RG-PSTAL|pull_request|codex|421|polecat/rg-pstal|main|green@OLDSHA|
+RG-NOGH|pre_open_gate|codex||polecat/rg-nogh|main|green@OLDSHA|
+RG-HOLD|pre_open_gate|codex||polecat/rg-hold|main|||1
+RG-HEALHOLD|pre_open_gate|EMPTY||polecat/rg-healhold|main|||1
+A
+# The branch-resident beads. RG-BACK's child is the exact hand-back shape the
+# refinery leaves behind: still OPEN, gc.routed_to cleared, assigned back to the
+# refinery — inert, because the only thing that would re-raise the gate is the
+# dispatch this pass is deciding whether to make.
+cat > "$TMP/branchbeads" <<'B'
+rework-back|polecat/rg-back|open||
+rework-work|polecat/rg-work|in_progress||
+rework-pool|polecat/rg-pool|open||gc-toolkit/gc-toolkit.polecat
+B
+# Live heads. RG-STALE/RG-PSTAL moved past OLDSHA; RG-FRESH is still at its
+# reviewed commit; RG-NOGH is deliberately absent so the stub exits non-zero.
+printf 'polecat/rg-stale\tNEWSHA\npolecat/rg-fresh\tFRESHSHA\npolecat/rg-pstal\tNEWSHA\n' > "$TMP/heads"
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; rm -f "$TMP"/bodies/*
+OUT7="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat')"
+
+dispatched_for() { grep -q "	anchor_bead	$1\$" "$TMP/revmeta"; }
+
+dispatched_for RG-PRE \
+  && ok "(REGATE) already-normalized PRE-OPEN anchor with no marker re-dispatches the signoff" \
+  || bad "(REGATE) pre-open anchor with an absent marker must re-dispatch (got: $(cat "$TMP/revmeta"))"
+dispatched_for RG-POST \
+  && ok "(REGATE) already-normalized POST-OPEN anchor with no marker re-dispatches the signoff" \
+  || bad "(REGATE) post-open anchor with an absent marker must re-dispatch"
+# The core regression: a handed-back rework child must NOT suppress the dispatch.
+dispatched_for RG-BACK \
+  && ok "(HANDBACK) a rework child already handed back does NOT count as in-flight — re-gate dispatched" \
+  || bad "(HANDBACK) handed-back rework child wrongly suppressed the re-gate — the tk-t46nq park"
+dispatched_for RG-WORK \
+  && bad "(INFLIGHT) a rework still in_progress must suppress the dispatch (its branch is about to move)" \
+  || ok "(INFLIGHT) rework still being worked -> no dispatch"
+dispatched_for RG-POOL \
+  && bad "(INFLIGHT) a pool-routed unclaimed rework must suppress the dispatch" \
+  || ok "(INFLIGHT) pool-routed rework awaiting a claim -> no dispatch"
+# Marker-vs-live-head, and the ownership split with reconcile-merged-prs.sh.
+dispatched_for RG-STALE \
+  && ok "(STALE) pre-open marker green at a head that MOVED re-dispatches (no other pass can see it)" \
+  || bad "(STALE) stale pre-open marker must re-dispatch"
+dispatched_for RG-FRESH \
+  && bad "(FRESH) a marker green at the LIVE head must NOT dispatch" \
+  || ok "(FRESH) marker green at the live head -> gate satisfiable, no dispatch"
+dispatched_for RG-PSTAL \
+  && bad "(SPLIT) a stale POST-OPEN marker belongs to reconcile-merged-prs.sh — dispatching here twins it" \
+  || ok "(SPLIT) stale post-open marker left to reconcile's stale-gate arm (no twin)"
+dispatched_for RG-NOGH \
+  && bad "(HEADFAIL) an unresolvable head must fail SOFT — a present marker stays satisfiable" \
+  || ok "(HEADFAIL) unresolvable branch head -> present marker treated as satisfiable (no dispatch)"
+# The operator hold, and the deliberate asymmetry between the two paths.
+dispatched_for RG-HOLD \
+  && bad "(HOLD) a re-gate must honour merge_hold (a review on a held PR is spent quota)" \
+  || ok "(HOLD) merge_hold suppresses the re-gate (operator gate)"
+dispatched_for RG-HEALHOLD \
+  && ok "(HOLD) merge_hold does NOT suppress the HEAL path — an ungated anchor must be armed regardless" \
+  || bad "(HOLD) a held-but-UNGATED anchor must still heal+dispatch: it would merge un-reviewed once the hold lifts"
+grep -q '^RG-HEALHOLD	codex$' "$TMP/stamped" \
+  && ok "(HOLD) the held ungated anchor is still stamped (fail-closed beats the hold)" \
+  || bad "(HOLD) held ungated anchor must still be stamped"
+# The re-gate path never stamps check_set. RG-HEALHOLD is the only anchor here
+# with an un-normalized check_set, so it is the only heal — every other fixture
+# arrives already normalized and must leave with its check_set untouched.
+printf '%s\n' "$OUT7" | grep -q '1 healed' \
+  && ok "(REGATE) only the un-normalized anchor heals; re-gates stamp no check_set" \
+  || bad "(REGATE) exactly 1 heal expected on the re-gate pass (got: $OUT7)"
+STAMPED7=$(cut -f1 "$TMP/stamped" | sort -u | tr '\n' ' ')
+eq "$STAMPED7" "RG-HEALHOLD " "(REGATE) no already-normalized anchor was re-stamped"
+# The counters separate a re-gate from a heal-path dispatch.
+printf '%s\n' "$OUT7" | grep -q '4 re-gated' \
+  && ok "(REGATE) the summary counts 4 re-gates distinctly from heals" \
+  || bad "(REGATE) summary must report 4 re-gated (got: $OUT7)"
+# The reviewer is told WHY it was woken — without it a re-gate reads as a
+# duplicate of the signoff that already ran. Asserted PER RE-GATED REVIEW and on
+# the note's CONTENT: an unscoped `grep review_note` over the whole fixture set
+# proves nothing, because it passes as long as ANY one dispatch wrote the key —
+# every true re-gate could have lost its reason and the assertion would still be
+# green. Scope to a known re-gate (RG-PRE, the absent-marker case; RG-STALE, the
+# moved-head case) and require the reason itself.
+note_for() { # <anchor> -> the review_note recorded on the review dispatched for it
+  local rev
+  rev=$(awk -F'\t' -v a="$1" '$2=="anchor_bead" && $3==a{print $1; exit}' "$TMP/revmeta")
+  [ -n "$rev" ] || return 0
+  awk -F'\t' -v r="$rev" '$1==r && $2=="review_note"{print $3; exit}' "$TMP/revmeta"
+}
+RGPRE_NOTE="$(note_for RG-PRE)"
+RGSTALE_NOTE="$(note_for RG-STALE)"
+[ -n "$RGPRE_NOTE" ] \
+  && ok "(NOTE) the absent-marker re-gate records a NON-EMPTY review_note" \
+  || bad "(NOTE) RG-PRE's re-gate must record a non-empty review_note"
+printf '%s' "$RGPRE_NOTE" | grep -q 'absent' \
+  && ok "(NOTE) the absent-marker re-gate's note states the marker was absent" \
+  || bad "(NOTE) RG-PRE note must say the marker was absent (got: '$RGPRE_NOTE')"
+[ -n "$RGSTALE_NOTE" ] \
+  && ok "(NOTE) the stale-marker re-gate records a NON-EMPTY review_note" \
+  || bad "(NOTE) RG-STALE's re-gate must record a non-empty review_note"
+printf '%s' "$RGSTALE_NOTE" | grep -q 'OLDSHA' && printf '%s' "$RGSTALE_NOTE" | grep -q 'NEWSHA' \
+  && ok "(NOTE) the stale-marker re-gate's note names the reviewed OID and the live head" \
+  || bad "(NOTE) RG-STALE note must name both shas (got: '$RGSTALE_NOTE')"
+# ...and the same reason reaches the bead BODY, not only its metadata. The body is
+# what a reviewer actually reads; a reason parked in metadata alone leaves the
+# re-gate looking like a duplicate of the signoff that already ran.
+RGSTALE_REV=$(awk -F'\t' '$2=="anchor_bead" && $3=="RG-STALE"{print $1; exit}' "$TMP/revmeta")
+if [ -n "$RGSTALE_REV" ] && [ -f "$TMP/bodies/$RGSTALE_REV" ]; then
+  grep -qF 'Context from the dispatch' "$TMP/bodies/$RGSTALE_REV" \
+    && grep -qF 'NEWSHA' "$TMP/bodies/$RGSTALE_REV" \
+    && ok "(NOTE) the re-gate reason is carried in the review BODY as well as metadata" \
+    || bad "(NOTE) the re-gate body must carry the dispatch reason"
+else
+  bad "(NOTE) no body captured for the RG-STALE re-gate"
+fi
+# A re-gate is still a real signoff: pre-open reviews the BRANCH, post-open the PR.
+grep -q '	review_branch	polecat/rg-pre$' "$TMP/revmeta" \
+  && ok "(REGATE) the pre-open re-gate reviews the BRANCH compare-range" \
+  || bad "(REGATE) pre-open re-gate must carry review_branch"
+RGPOST_REV=$(awk -F'\t' '$2=="anchor_bead" && $3=="RG-POST"{print $1; exit}' "$TMP/revmeta")
+grep -q "^$RGPOST_REV	pr_number	420\$" "$TMP/revmeta" \
+  && ok "(REGATE) the post-open re-gate reviews the PR" \
+  || bad "(REGATE) post-open re-gate must carry pr_number"
+
+# --- Run 8: the re-gate converges. The review dispatched in run 7 is now in
+#     flight, so a second pass must not twin it — the same convergence run 2
+#     proves for the heal path.
+cp "$TMP/revmeta" "$TMP/revmeta.r7"
+bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' >/dev/null
+NEW_REGATE=$(comm -13 <(sort -u "$TMP/revmeta.r7") <(sort -u "$TMP/revmeta") | grep -c 'anchor_bead' || true)
+eq "$NEW_REGATE" "0" "(REGATE-CONV) the dispatched re-gate is in flight -> no twin on the next pass"
+
+# --- Run 9: LIVE BRANCH OWNERS. ----------------------------------------------
+# `closed` is the only status that releases a branch. A child an operator PARKED
+# (blocked/deferred), one sitting on an agent's hook, or a pinned one still OWNS
+# the branch — reconcile-merged-prs.sh enumerates exactly that set (LIVE_STATUSES)
+# before it force-pushes, for the same reason. The re-gate sweep's in-flight probe
+# asked only for open,in_progress, so every one of these owners was INVISIBLE to
+# it: the pass would dispatch a codex signoff against a branch that is frozen, on
+# a hook, or otherwise owned by unresolved rework — reviewing a commit that is not
+# final and spending codex quota to do it.
+#
+# LO-FREE is the control: the handed-back rework shape (status exactly `open`,
+# unrouted, not a review) is the ONE live-status bead that is genuinely inert, and
+# it must STILL dispatch. Widening the status set must not re-break tk-t46nq.
+cat > "$TMP/anchors" <<'A'
+LO-BLOCK|pre_open_gate|codex||polecat/lo-block|main||
+LO-DEFER|pre_open_gate|codex||polecat/lo-defer|main||
+LO-HOOK|pre_open_gate|codex||polecat/lo-hook|main||
+LO-PIN|pre_open_gate|codex||polecat/lo-pin|main||
+LO-FREE|pre_open_gate|codex||polecat/lo-free|main||
+A
+cat > "$TMP/branchbeads" <<'B'
+rework-block|polecat/lo-block|blocked||
+rework-defer|polecat/lo-defer|deferred||
+rework-hook|polecat/lo-hook|hooked||
+rework-pin|polecat/lo-pin|pinned||
+rework-free|polecat/lo-free|open||
+B
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/heads"
+rm -f "$TMP"/bodies/*
+bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' >/dev/null
+for owner in BLOCK:blocked DEFER:deferred HOOK:hooked PIN:pinned; do
+  a="LO-${owner%%:*}"; st="${owner##*:}"
+  dispatched_for "$a" \
+    && bad "(LIVEOWN) a $st rework child still owns the branch — no signoff may be dispatched over it" \
+    || ok "(LIVEOWN) $st branch owner suppresses the re-gate (branch is not free)"
+done
+dispatched_for LO-FREE \
+  && ok "(LIVEOWN) an OPEN unrouted non-review child is still inert — the re-gate dispatches (tk-t46nq intact)" \
+  || bad "(LIVEOWN) widening the status set must NOT re-suppress the handed-back rework case"
+
+# --- Run 10: ROUTE PERSISTENCE + REPAIR. -------------------------------------
+# gc.routed_to is what makes a review claimable. Writing it best-effort — without
+# reading it back — is the one failure that strands the gate FOREVER: the review is
+# created (so the in-flight probe counts it, being a task_kind=review) but no pool
+# can claim it, so every later pass suppresses its own dispatch and waits on a bead
+# nothing can action. Nothing else owns the pre-open re-gate, so nothing recovers
+# it. This is the tk-3xy37 finding, whose repair contract reconcile-merged-prs.sh
+# already carries (arm_stale_gate + the unrouted-review repair arm).
+#
+# 10a: the route write is DROPPED. The dispatch must NOT be reported, and the bead
+#      must be left unrouted rather than counted as sent.
+cat > "$TMP/anchors" <<'A'
+RT-PRE|pre_open_gate|codex||polecat/rt-pre|main||
+A
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/branchbeads"
+rm -f "$TMP"/bodies/*
+echo 'ALL' > "$TMP/routefail"
+RT_ERR="$TMP/rt.err"; RC10=0
+OUT10="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>"$RT_ERR")" || RC10=$?
+eq "$RC10" "0" "(ROUTEFAIL) a failed route is best-effort (rc=0): the anchor is gated, not ungated"
+dispatched_for RT-PRE \
+  && ok "(ROUTEFAIL) the review bead itself was still created and anchored" \
+  || bad "(ROUTEFAIL) the review should exist (only its route failed)"
+grep -q '	gc.routed_to	' "$TMP/revmeta" \
+  && bad "(ROUTEFAIL) the route did not persist — nothing may record it as routed" \
+  || ok "(ROUTEFAIL) no route recorded (the write was dropped)"
+printf '%s\n' "$OUT10" | grep -q '0 signoffs dispatched' \
+  && ok "(ROUTEFAIL) an unrouted review is NOT counted as dispatched" \
+  || bad "(ROUTEFAIL) must report 0 dispatched (got: $OUT10)"
+grep -q 'route write did not persist' "$RT_ERR" \
+  && ok "(ROUTEFAIL) WARNs that the route did not persist" \
+  || bad "(ROUTEFAIL) must WARN on a dropped route (got: $(cat "$RT_ERR"))"
+
+# 10b: the next pass REPAIRS it — re-routes the SAME bead, never a twin. Without
+#      the repair arm the in-flight probe would find this inert review and skip
+#      forever, which is precisely the silent hold.
+: > "$TMP/routefail"
+cp "$TMP/revmeta" "$TMP/revmeta.r10a"
+OUT10B="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat')"
+grep -q '	gc.routed_to	gc-toolkit/gc-toolkit.polecat-codex$' "$TMP/revmeta" \
+  && ok "(REPAIR) the unrouted signoff is re-routed on the next pass" \
+  || bad "(REPAIR) an unrouted signoff must be repaired (got: $(cat "$TMP/revmeta"))"
+RT_REVS=$(awk -F'\t' '$2=="anchor_bead" && $3=="RT-PRE"{print $1}' "$TMP/revmeta" | sort -u | wc -l | tr -d ' ')
+eq "$RT_REVS" "1" "(REPAIR) the repair re-routes the SAME review — no twin dispatched"
+printf '%s\n' "$OUT10B" | grep -q '1 route repaired' \
+  && ok "(REPAIR) the summary counts the route repair distinctly from a dispatch" \
+  || bad "(REPAIR) must report 1 route repaired (got: $OUT10B)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

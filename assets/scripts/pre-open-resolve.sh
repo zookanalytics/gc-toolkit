@@ -35,6 +35,21 @@
 #                                      stale — a rework's review re-stamps the new
 #                                      head; convergent, retried next idle pass).
 #
+# WHO RE-DISPATCHES THE REVIEW THE HOLD IS WAITING ON (tk-t46nq). Not this pass —
+# it has no dispatch authority by design, and holding is the whole of its job. For
+# a long time nothing else owned it either on the pre-open path, so a HOLD logged
+# every idle pass ("codex not green at live head (have 'none', ...)") could mean
+# either "the reviewer is working" or "no reviewer exists and none is coming", with
+# no way to tell them apart from here. That second reading is a park, and it is
+# where a rework hand-back landed: a REQUEST_CHANGES signoff CLEARS check.codex, so
+# once its rework lands the anchor holds a normal check_set, NO marker, and nothing
+# in flight. check-set-heal.sh (which runs just BEFORE this pass in the same idle
+# loop) now owns that: its satisfiability sweep re-dispatches the signoff for an
+# absent marker, and for one green at a head this branch has moved past. So a HOLD
+# here is genuinely transient — the re-gate is either in flight or will be armed by
+# the next heal pass. Do NOT add a dispatch here: two dispatchers on one anchor
+# would race for a twin review.
+#
 # The gate here is codex-only, by design: pre-open moves ONLY the codex member
 # ahead of PR-creation (CI + approval stay post-open). The FULL check-set is still
 # enforced at merge time by merge-skill.sh, unchanged.
