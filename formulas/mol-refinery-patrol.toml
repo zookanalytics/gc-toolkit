@@ -1580,7 +1580,35 @@ if [ "$CODEX_GATE" = 1 ]; then
       | jq -r '.[0].id // empty')
   fi
 
-  if [ -z "$EXISTING_REVIEW" ]; then
+  # CONVERGENCE CAP, refinery half (tk-uqfk1). The polecat half declines to file
+  # a rework child past the cap (template-fragments/polecat-non-impl-done.template.md,
+  # signoff-round-cap). This is the same check on the OTHER side of the loop: the
+  # two halves are independent, so a rig running a stale prompt fragment still
+  # cannot mint round N+1 here. Identical count — rework children of the anchor,
+  # which carry source_review_bead, every status, since a closed child is a
+  # completed round. A first dispatch counts 0 and is never capped.
+  ROUNDS=0
+  if [ -n "$GATING_ANCHOR" ]; then
+    ROUNDS=$(gc bd dep list "$GATING_ANCHOR" --direction=up -t parent-child --json 2>/dev/null \
+      | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
+  fi
+  if [ -n "$GATING_ANCHOR" ] && [ "${ROUNDS:-0}" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+    # Do NOT mint a review bead and do NOT wake the codex pool. Leave the anchor
+    # OPEN and held: with no open rework child the merge skill still will not
+    # land it, so this parks for a human rather than merging past an owed gate.
+    gc bd update "$GATING_ANCHOR" \
+      --set-metadata gc.routed_to=human \
+      --set-metadata blocked_reason="signoff did not converge after $ROUNDS rework rounds (cap ${GC_MAX_REVIEW_ROUNDS:-3}); findings are in the review beads under this anchor" \
+      --unset-metadata "check.codex" >/dev/null 2>&1 || true
+    gc mail send mayor/ -s "ESCALATION: signoff not converging on $GATING_ANCHOR ($ROUNDS rounds)" \
+      -m "Target: ${BRANCH:-PR#$PR_NUMBER}
+Rounds spent: $ROUNDS (cap ${GC_MAX_REVIEW_ROUNDS:-3})
+
+The refinery declined to dispatch another codex review. No review bead was
+created and no pool was woken. The anchor is OPEN, held, and routed to human:
+land as-is, split the remaining findings into follow-up beads, or abandon." >/dev/null 2>&1 || true
+    echo "refinery: $GATING_ANCHOR — signoff round cap reached ($ROUNDS >= ${GC_MAX_REVIEW_ROUNDS:-3}); routed to human, no re-dispatch"
+  elif [ -z "$EXISTING_REVIEW" ]; then
     REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
     # anchor_bead is the DURABLE anchor pointer: it is set atomically with the
     # review's routing fields here, so it is as reliable as the review's own
