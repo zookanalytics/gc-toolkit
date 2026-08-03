@@ -747,6 +747,16 @@ done
   - `reason=unsafe-session-id` / `reason=foreign-state` — it holds no usable
     state for that session: an id it will not name a file with, or something at
     that path it did not write. Normal warrant path, no alarm.
+  - `reason=state-dir-unavailable` — its state directory cannot be created or
+    written, so it holds no evidence about any session and can record none.
+    Quota-park recovery itself looks down; normal warrant path, and say so in
+    your log.
+- **No output, or output you cannot parse** — the helper was not found (`QPN`
+  empty), is not executable, or printed nothing: the `[ -n "$QPN" ] && …` above
+  yields an empty string in each case. That is `unknown`, never `no` and never
+  `yes`. Normal warrant path, and log it as *recovery status unavailable* — the
+  same as `reason=no-recent-sweep`, because it means the same thing: there is no
+  recovery to defer to.
 - `escalated=1` on a session you already deferred once — nudging has not
   brought it back and a human has been mailed. Escalate to the mayor rather
   than deferring again in silence.

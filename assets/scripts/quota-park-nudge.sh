@@ -41,11 +41,15 @@
 # See docs/quota-park-recovery.md.
 set -euo pipefail
 
-# Lines of pane to capture, and how many of those may hold the banner. A real
+# Lines of pane to capture, and how many of those are the CURRENT screen. A real
 # park ends with the banner: below it there is only TUI chrome (prompt box,
 # status line), 6-8 lines in both CLIs. Anything further up is history — an
-# agent that *mentioned* a limit and kept working. The wider capture is what
-# the busy check reads.
+# agent that *mentioned* a limit and kept working, or a working indicator from a
+# turn that has already ended. Every classification — banner, citation, busy —
+# reads the tail window and nothing above it (see pane_tail). The capture stays
+# wider than that window on purpose: it is the outer bound on what one peek
+# costs, and it leaves TAIL_LINES room to be raised on a host with taller chrome
+# without also having to raise PEEK_LINES.
 PEEK_LINES="${QUOTA_PARK_PEEK_LINES:-20}"
 TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 
@@ -76,10 +80,36 @@ TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 # Nothing here reads the time itself (rule 2 above) — the clause is only ever
 # evidence that the line is a banner.
 #
-# Held in a plain variable first: an ERE interval like {0,24} inside a
+# The possessive is not enough on its own, which is the THIRD time this class
+# has been paid for: a tool error says "You have exceeded your API rate limit"
+# and "Your API rate limit will reset at 18:00 UTC" — both possessive, both
+# idle, neither a quota park, and both matched the bounded-gap form this
+# replaces (reproduced during review). So the NOUN the limit is named with
+# carries the anchor too: a provider block is on a session/usage/weekly/plan
+# (etc.) limit, a tool error is on a *rate* limit. The gap between "your" and
+# that noun is counted in WORDS rather than characters, which also gives the
+# noun a left word boundary for free — a character run lets a whitelisted noun
+# match the tail of an unrelated word.
+#
+# The named-provider alternative takes the same noun list, for the same reason
+# in its own direction: `Error: OpenAI API rate limit exceeded` carries a
+# provider name in front of an ordinary rate-limit error. The noun is optional
+# there and only there, because the plan-period subjects (`weekly limit
+# reached`) name the quota in the subject itself.
+#
+# The cost of the narrowing is a provider that says only "You've hit your
+# limit", with no noun at all: that goes in $QUOTA_PARK_MATCH, or adds its noun
+# to the three lists below. That is the deliberate trade — an unmatched banner
+# costs one un-nudged park, a matched tool error costs a working session nudged
+# on the recovery cadence forever.
+#
+# Held in a plain variable first: an ERE interval like {0,3} inside a
 # ${VAR:-default} would close the expansion at its own brace and silently ship
-# a truncated pattern.
-DEFAULT_MATCH='(hit|reached|exceeded) your [a-z0-9 -]{0,24}limit|(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit (reached|exceeded)|/usage-credits|your [a-z0-9 -]{0,24}limit will reset'
+# a truncated pattern. Kept as ONE single-quoted literal rather than composed
+# from a noun variable, because the suite reads this line out of the script to
+# assert the nudge text cannot match it; a composed pattern would extract as
+# an unexpanded `$VAR` and that assertion would pass vacuously.
+DEFAULT_MATCH='(hit|reached|exceeded) your ([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? limit|(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) (([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? )?limit (reached|exceeded)|/usage-credits|your ([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? limit will reset'
 MATCH_RE="${QUOTA_PARK_MATCH:-$DEFAULT_MATCH}"
 
 # Busy markers — an agent mid-turn is not parked, whatever its pane text says.
@@ -97,7 +127,23 @@ BUSY_RE="${QUOTA_PARK_BUSY:-$DEFAULT_BUSY}"
 # Alternation, not a bracket expression: a multibyte character inside [...] is
 # a byte set under a C locale, and the order's env is not guaranteed to be
 # UTF-8. Spelled out this way each marker matches as an exact sequence in both.
-CITATION_RE='^[[:space:]]*(>|\||▎|│|┃)|"|“|”'
+#
+# The two halves are anchored differently on purpose. A double quote is a
+# citation marker ANYWHERE on the line: providers never print one, so its mere
+# presence is proof the line is a report about a banner. The single quote,
+# smart single quotes and the backtick cannot be treated that way — the
+# apostrophe inside "You've" and "you're" is the same character, and rejecting
+# it unanchored would drop every real Claude and Codex banner and switch this
+# order off entirely. So they count only as an OPENING DELIMITER: at the start
+# of the line, after leading whitespace and any blockquote marker. Found by
+# review: `'You've hit your usage limit'` and the backtick-quoted form both
+# survived the double-quote-only filter and read as parks, which is the same
+# live false positive quoting was added for, in a different set of quotes.
+# The typographic single quotes below are pattern DATA, not quoting: they are
+# what a terminal renders a report's quotes as, and matching them is the whole
+# point of this line. shellcheck reads them as a mistyped ASCII quote.
+# shellcheck disable=SC1112
+CITATION_RE='^[[:space:]]*(>|\||▎|│|┃)*[[:space:]]*('\''|‘|’|`)|^[[:space:]]*(>|\||▎|│|┃)|"|“|”'
 
 # Retry pacing. First detection nudges immediately (an early reset is the case
 # we are optimizing for); subsequent attempts back off to the cap so a genuine
@@ -146,7 +192,26 @@ CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
 DEFAULT_STATE_DIR="${DEFAULT_STATE_DIR:-${TMPDIR:-/tmp}/gc}/quota-park"
 STATE_DIR="${QUOTA_PARK_STATE_DIR:-$DEFAULT_STATE_DIR}"
-mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
+# Recorded, NOT exited on. Every file this order reads or writes lives here, so
+# a state dir it cannot create or write is the end of the sweep — but it is not
+# the end of the `--status` contract, and the two used to be the same line: a
+# bare `mkdir -p … || exit 0` ran before the `--status` branch below, so an
+# unwritable or uncreatable state dir made the surface exit 0 with NO OUTPUT AT
+# ALL. Reproduced during review with QUOTA_PARK_STATE_DIR pointed under a
+# regular file. A patrol parsing that silence finds no `quota_park=` field to
+# read; the closed-field surface exists precisely so there is always one, and
+# `unknown` is the answer for "this order can vouch for nothing" — a broken
+# state dir is the purest case of it. So the failure becomes a REASON the
+# surface can name (state-dir-unavailable) rather than an absence the caller
+# has to invent a default for.
+#
+# `-w` as well as the mkdir, because `mkdir -p` succeeds on a directory that
+# already exists and says nothing about whether we may write in it: an existing
+# but unwritable state dir fails every state write later, one silent file at a
+# time, having reported a clean start.
+STATE_DIR_OK=1
+mkdir -p "$STATE_DIR" 2>/dev/null || STATE_DIR_OK=0
+{ [ -d "$STATE_DIR" ] && [ -w "$STATE_DIR" ]; } || STATE_DIR_OK=0
 
 # This order's files that are NOT episode state: where the last pass stopped,
 # that a pass ran at all, and which sessions it actually classified. Every name
@@ -399,12 +464,29 @@ duration() {
     if [ "$s" -lt 3600 ]; then echo "$((s / 60))m"; else echo "$((s / 3600))h$(( (s % 3600) / 60 ))m"; fi
 }
 
+# The CURRENT region of a pane: its tail window. Everything that classifies a
+# pane reads this and nothing above it — the busy test directly, the banner test
+# and the detector class through banner_candidates below.
+#
+# One function because the two tests have to agree on which lines are "now".
+# They did not: the busy marker was matched against the whole capture while the
+# banner was matched against the tail, so a pane holding an old `esc to
+# interrupt` up in its scrollback and a live quota banner at the bottom read as
+# BUSY — not parked, episode deleted, and `--status` vouching `no` for a session
+# that is genuinely blocked (reproduced during review). Scrollback is history for
+# the busy marker exactly as it is for the banner: both CLIs print their working
+# indicator in the live status line at the bottom of the screen, so a copy
+# further up is the record of a turn that has already ended.
+pane_tail() {
+    printf '%s\n' "$1" | tail -n "$TAIL_LINES"
+}
+
 # The lines of a pane a banner may legitimately sit on: the tail window, minus
 # citations. Both the park test and the detector class read the same set — a
 # second copy of this filter chain would drift out of agreement with the test
 # that decides whether a session is parked at all.
 banner_candidates() {
-    printf '%s\n' "$1" | tail -n "$TAIL_LINES" | grep -vE -- "$CITATION_RE" || true
+    pane_tail "$1" | grep -vE -- "$CITATION_RE" || true
 }
 
 # Which family of banner matched, as a label from a CLOSED set. This is the only
@@ -530,11 +612,26 @@ num_min "$STALE_AFTER"    1 || STALE_AFTER=600
 #               foreign-state    something is at that session's state path that
 #                                this order did not write, so there is no episode
 #                                to read and no clean path to report either
+#               state-dir-unavailable  the state directory could not be created
+#                                or cannot be written, so this order holds no
+#                                evidence about ANY session and cannot record any
 #
 # The `no` case is the one that has to be earned rather than inferred: a pass
 # that runs out of SWEEP_BUDGET defers its whole tail without peeking it and
 # still writes a fresh heartbeat, so "a sweep ran recently and there is no
 # episode" is not the same statement as "that session is not parked".
+
+# A full closed-field line for a session this order can say nothing about, every
+# field at its no-evidence value. The surface has to answer in the SAME shape
+# whether or not it has state to read: a consumer that greps one field out of a
+# status line must not have to handle a short line as a special case, and a
+# short line is how a missing field silently becomes whatever default the reader
+# assumed. `-` for the id where there is not even a session to name.
+status_unknown() {
+    printf 'session=%s quota_park=unknown detector_class=unknown age_s=-1 parked_for=- attempts=0 unconfirmed=0 escalated=0 last_seen_age=-1 reason=%s\n' \
+        "$1" "$2"
+}
+
 status_line() {
     local id="$1" path="$STATE_DIR/$1"
     local first_seen last_seen attempts unconfirmed escalated dclass verdict age seen_age human
@@ -621,6 +718,30 @@ status_line() {
 
 status_report() {
     local want="${1:-}" hb path base
+    # Nothing to read and nothing to enumerate: the heartbeat, the coverage
+    # record and every episode live in a directory this pass could not create or
+    # cannot write. Answered in the surface's own vocabulary rather than by
+    # exiting silently — see STATE_DIR_OK above. The header is still printed, so
+    # the shape a consumer parses does not change with the failure, and the
+    # enumerating form (no id) gets the same single `session=-` line: an empty
+    # enumeration would say "no episodes are being tracked", which is a claim
+    # about the city, not about this order's ability to look.
+    #
+    # The id is still validated before it is echoed. This branch runs BEFORE the
+    # `safe_id` gate further down, and the requested id is caller-supplied: a
+    # patrol passes whatever the session list gave it, and session metadata is
+    # mutable. An id this order would refuse to name a file with is one it will
+    # not put on the surface either, whatever else has failed — the closed-field
+    # contract does not lapse because the state dir did.
+    if [ "$STATE_DIR_OK" != "1" ]; then
+        printf 'heartbeat_age=-1\nheartbeat_fresh=0\nstale_after=%s\n' "$STALE_AFTER"
+        if [ -n "$want" ] && safe_id "$want"; then
+            status_unknown "$want" state-dir-unavailable
+        else
+            status_unknown - state-dir-unavailable
+        fi
+        return 0
+    fi
     # ts_valid, not num: a heartbeat dated in the future would otherwise read as
     # fresh forever, and a fresh heartbeat is the precondition for every verdict
     # below — a stopped order would go on vouching for the whole city.
@@ -634,7 +755,7 @@ status_report() {
         # state for either — same test, same reason, and the caller gets the same
         # `unknown` it gets for anything else this order cannot speak to.
         if ! safe_id "$want"; then
-            echo "session=- quota_park=unknown detector_class=unknown reason=unsafe-session-id"
+            status_unknown - unsafe-session-id
             return 0
         fi
         status_line "$want"
@@ -657,6 +778,19 @@ status_report() {
 # which is what the order runner invokes with no arguments at all.
 if [ "${1:-}" = "--status" ]; then
     status_report "${2:-}"
+    exit 0
+fi
+
+# The sweep, unlike the surface above, genuinely cannot proceed without the
+# state directory: with nowhere to write an episode every park would be
+# re-detected as new, nudged on every cycle, and escalated forever. It stops —
+# but it stops LOUDLY, in the order runner's log, which is the half the silent
+# `|| exit 0` never had. Still exit 0: the pass had nothing to do, which is not
+# the same as the order crashing, and a non-zero rc here would read as one.
+# The path is bounded through sanitize_display like every other value this
+# script prints, since it arrives from the environment.
+if [ "$STATE_DIR_OK" != "1" ]; then
+    echo "quota-park-nudge: state dir unavailable ($(sanitize_display "$STATE_DIR")) — no sweep this pass; --status reports unknown/state-dir-unavailable"
     exit 0
 fi
 
@@ -940,7 +1074,12 @@ while IFS=$'\t' read -r id alias; do
     # Parked = a bare provider banner at the bottom of an idle pane. Busy,
     # cited, or scrolled-up all mean not parked. Clearing the state file is what
     # ends an episode: a recovered agent starts the next block from attempt 1.
-    if printf '%s\n' "$pane" | grep -qEi -- "$BUSY_RE" \
+    #
+    # Both halves read the same current region (pane_tail): a busy marker up in
+    # the scrollback is a finished turn, not a running one, and letting it veto
+    # a live banner below it is how a genuinely parked session gets vouched for
+    # as clean.
+    if pane_tail "$pane" | grep -qEi -- "$BUSY_RE" \
         || ! banner_candidates "$pane" | grep -qEi -- "$MATCH_RE"; then
         owned_state_rm "$state"
         vouch "$id"

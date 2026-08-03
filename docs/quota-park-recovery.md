@@ -27,14 +27,28 @@ when all of these hold:
 
 - a provider limit banner matches in the last 12 lines (`QUOTA_PARK_TAIL_LINES`)
   — below a real banner there is only prompt chrome, so a match further up is
-  history, not a park;
-- no busy marker anywhere in the capture (`esc to interrupt`, which both CLIs
-  print while working);
-- the matching line is not a **citation** — quoted, or under a `>`/`▎`
-  blockquote marker. Providers print their banner bare; an agent writing *about*
-  a quota block does not. This is not hypothetical: the script's first live run
-  flagged a bead-host that had reported the Codex outage to the operator and
-  gone idle with the banner quoted in its own report.
+  history, not a park. The banner is recognised by its SUBJECT and its NOUN,
+  never by the word "limit": a provider blocks you on *your session/usage/weekly
+  (etc.) limit*, or names itself in front of one (*Claude usage limit reached*).
+  An ordinary tool error blocks you on a **rate** limit, and says so just as
+  possessively — `You have exceeded your API rate limit`, `Your API rate limit
+  will reset at 18:00 UTC`. Both of those are idle panes on working sessions,
+  and both matched an earlier, looser form of this pattern;
+- no busy marker in that same tail window (`esc to interrupt`, which both CLIs
+  print while working). The window is shared with the banner test on purpose:
+  both CLIs print the working indicator in the live status line at the bottom of
+  the screen, so a copy further up is a turn that has already ended. Matched over
+  the whole capture instead, a stale marker in the scrollback vetoes a live
+  banner below it and a genuinely parked session is vouched for as clean;
+- the matching line is not a **citation** — under a `>`/`▎` blockquote marker,
+  double-quoted anywhere, or opening with a single quote, a smart quote or a
+  backtick. Providers print their banner bare; an agent writing *about* a quota
+  block does not. This is not hypothetical: the script's first live run flagged a
+  bead-host that had reported the Codex outage to the operator and gone idle with
+  the banner quoted in its own report. The single quote counts only as an
+  *opening delimiter*, at the start of the line — the apostrophe in the
+  provider's own "You've" is the same character, so rejecting it anywhere on the
+  line would drop every real banner and switch this order off.
 
 A parked session is nudged (`--delivery immediate`, falling back to the plain
 form for an older `gc` that rejects the flag), then re-nudged on a doubling
@@ -269,6 +283,31 @@ on a pass having run, and `reason` names the gap:
 | `stale-episode` | An episode exists but nothing has confirmed it since `last_seen` | No |
 | `unsafe-session-id` | An id this order will not name a file with, so it holds no state for it | No |
 | `foreign-state` | Something is at that session's state path that this order did not write, so there is no episode to read — and no clean verdict to give either, since it will not remove a file it does not own | No |
+| `state-dir-unavailable` | `QUOTA_PARK_STATE_DIR` could not be created, or cannot be written: no heartbeat, no coverage record, no episodes — this order holds no evidence about **any** session and can record none | **Yes** — say so in the patrol log |
+
+Every one of those is a *line*, not a silence, and the last one is where that
+distinction was bought. The state directory is created at the top of the script,
+and it used to be created with `mkdir -p "$STATE_DIR" || exit 0` — ahead of the
+`--status` branch, so a state dir the order could not create or write made the
+surface exit 0 having printed **nothing at all**. A patrol greps that output for
+`quota_park=` and finds no field; a missing field is read as whatever default the
+reader assumed, on the one path where this order knows nothing about anything.
+The sweep genuinely cannot run without the directory — with nowhere to write an
+episode, every park is re-detected as new, nudged on every cycle and escalated
+past its backoff — so it still stops, but it stops *loudly*, in the order
+runner's log, and the surface answers `unknown` / `state-dir-unavailable` in the
+vocabulary its readers already have. `-w` is checked as well as the `mkdir`,
+because `mkdir -p` succeeds on a directory that already exists and says nothing
+about whether anything may be written in it.
+
+**A patrol that gets no output at all is in the same position, and answers the
+same way.** The helper may be absent from the host, non-executable, or return
+nothing; the discovery snippet in both patrol formulas is `[ -n "$QPN" ] && "$QPN"
+--status <id>`, which yields an empty string in every one of those cases. Empty
+or unparseable output is `unknown` — never `no`, never `yes`. Take the normal
+warrant path and log it as *recovery status unavailable*, the same as
+`reason=no-recent-sweep`: quota-park recovery itself is what is missing, and that
+is worth a line in the log rather than a silent fallthrough.
 
 The `no` case is the one that has to be *earned*. A pass that runs out of
 `SWEEP_BUDGET` defers its whole tail without peeking it and still writes a fresh

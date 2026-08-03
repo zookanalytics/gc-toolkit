@@ -76,7 +76,18 @@
 # cannot hold a park inside backoff forever, hide a long park from the
 # escalation, or make a stopped order look freshly swept; (ao) only the two
 # values that MEAN escalated suppress the escalation mail — a persisted
-# `escalated=0` says the opposite and is not allowed to act like it.
+# `escalated=0` says the opposite and is not allowed to act like it; (ap) an
+# ordinary rate-limit error is not a park even when it is POSSESSIVE ("you have
+# exceeded your API rate limit", "your API rate limit will reset at ...") — the
+# quota noun carries the anchor, not the word "your"; (aq) a banner report quoted
+# with single quotes, smart single quotes or backticks is a citation like the
+# double-quoted one, while the apostrophe inside the provider's own "You've" is
+# not; (ar) a busy marker up in the scrollback does not veto a live banner below
+# it — both tests read the same current tail; (as) a state directory that cannot
+# be created or written is answered as `unknown`/`state-dir-unavailable` in full
+# closed fields rather than by exiting silently, and the sweep it does stop says
+# so in the log and nudges nothing; (at) every reason the script emits is one the
+# doc documents, and both patrols state what to do with no helper output at all.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -127,6 +138,12 @@ cat > "$TMP/sessions.json" <<'JSON'
  {"id":"lx-apierr","alias":"gc-toolkit.deacon","state":"active","running":true,"attached":false},
  {"id":"lx-attached","alias":"gc-toolkit.mayor","state":"active","running":true,"attached":true},
  {"id":"lx-resetphrase","alias":"gc-toolkit.boot","state":"active","running":true,"attached":false},
+ {"id":"lx-posserr","alias":"gc-toolkit.su-ap01","state":"active","running":true,"attached":false},
+ {"id":"lx-possreset","alias":"gc-toolkit.su-ap02","state":"active","running":true,"attached":false},
+ {"id":"lx-singlequote","alias":"gc-toolkit.su-cq01","state":"active","running":true,"attached":false},
+ {"id":"lx-smartquote","alias":"gc-toolkit.su-cq02","state":"active","running":true,"attached":false},
+ {"id":"lx-tickquote","alias":"gc-toolkit.su-cq03","state":"active","running":true,"attached":false},
+ {"id":"lx-stalebusy","alias":"gc-toolkit/gc-toolkit.vasquez","state":"active","running":true,"attached":false},
  {"id":"lx-inject","alias":"gc-toolkit/gc-toolkit.newt","state":"active","running":true,"attached":false}
 ]}
 JSON
@@ -199,6 +216,58 @@ cat > "$TMP/panes/lx-resetphrase" <<'PANE'
 
 ❯
 PANE
+# The same class again, and the two panes that got past the possessive form:
+# ordinary API rate-limit text is possessive too. "You have exceeded your API
+# rate limit" and "Your API rate limit will reset at ..." are what a tool error
+# says on an idle pane; nudging either one is noise against a working session,
+# every cycle, forever. The discriminator is the NOUN — a provider blocks a
+# session/usage/weekly limit, a tool errors on a *rate* limit.
+cat > "$TMP/panes/lx-posserr" <<'PANE'
+  ⎿  Error: You have exceeded your API rate limit. Retry after 60s.
+  Backing off and retrying the fetch.
+
+❯
+PANE
+cat > "$TMP/panes/lx-possreset" <<'PANE'
+  ⎿  Error: Your API rate limit will reset at 18:00 UTC.
+  Waiting it out; nothing else to do here.
+
+❯
+PANE
+# Citations again, in the quotes the double-quote filter never covered. All
+# three are the same live false positive as lx-quoting — an idle agent that
+# wrote ABOUT the banner — reported in a different set of delimiters. The
+# apostrophe inside the provider's own "You've" is the same character as the
+# straight single quote, so only an OPENING delimiter may count: these panes
+# fail if the filter is loosened to reject the apostrophe anywhere on the line,
+# because that would drop the real banners in lx-claude and lx-codex too.
+cat > "$TMP/panes/lx-singlequote" <<'PANE'
+  Codex is blocked. The pane reads:
+
+  'You've hit your usage limit. Try again at Aug 8th, 2026 7:56 PM'
+
+  Mailed the mayor. Nothing further from me until credits are added.
+
+❯
+PANE
+cat > "$TMP/panes/lx-smartquote" <<'PANE'
+  Reporting the outage as asked. The banner is:
+
+  ‘You’ve hit your usage limit. Try again at Aug 8th, 2026 7:56 PM’
+
+  I am idle until someone tops up the plan.
+
+❯
+PANE
+cat > "$TMP/panes/lx-tickquote" <<'PANE'
+  For the bead notes, the exact text was:
+
+  `You've hit your usage limit. Try again at Aug 8th, 2026 7:56 PM`
+
+  Standing by.
+
+❯
+PANE
 # Same banner, unquoted, but scrolled up past the tail window — history from a
 # block the agent already recovered from, not a park.
 {
@@ -206,6 +275,27 @@ PANE
     for _ in $(seq 14); do printf '  ...output after recovering...\n'; done
     printf '❯\n'
 } > "$TMP/panes/lx-scrolled"
+# The inverse of lx-scrolled, and the one the split windows got wrong: the BUSY
+# marker is the stale half. A turn ended (its working indicator is still up in
+# the scrollback), the next one hit the wall, and the live banner is at the
+# bottom. 14 lines, so the marker on line 2 is inside the 20-line capture but
+# above the 12-line tail: read over the whole capture it vetoes the banner below
+# it and this genuinely parked session reports clean.
+{
+    cat <<'PANE'
+  Rebasing the branch onto origin/main.
+• Working (13s • esc to interrupt) · 1 background terminal running
+PANE
+    for _ in $(seq 6); do printf '  ...output from the turn that finished...\n'; done
+    cat <<'PANE'
+  ⎿  You’ve hit your usage limit. Try again at Aug 8th, 2026 7:56 PM.
+
+❯
+───────────────────────────────────────────
+  zook@ai-development:~/loomington ctx:22% wk:39%
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+PANE
+} > "$TMP/panes/lx-stalebusy"
 cp "$TMP/panes/lx-claude" "$TMP/panes/lx-attached"
 
 # --- Fake gc: only the surface the script touches. --------------------------
@@ -300,8 +390,17 @@ eq "$(nudges_for lx-scrolled)" "0" "banner scrolled past the tail window is hist
 eq "$(nudges_for lx-apierr)"   "0" "plain API rate-limit error is NOT a provider quota park"
 eq "$(nudges_for lx-resetphrase)" "0" \
     "idle 'rate limit will reset at' error is NOT a park (reset clause needs the possessive subject)"
+eq "$(nudges_for lx-posserr)" "0" \
+    "possessive 'exceeded your API rate limit' is NOT a park (the noun is the anchor, not 'your')"
+eq "$(nudges_for lx-possreset)" "0" \
+    "possessive 'Your API rate limit will reset at' is NOT a park either"
+eq "$(nudges_for lx-singlequote)" "0" "a single-quoted banner report is a citation, not a park"
+eq "$(nudges_for lx-smartquote)" "0" "a smart-single-quoted banner report is a citation, not a park"
+eq "$(nudges_for lx-tickquote)" "0" "a backtick-quoted banner report is a citation, not a park"
+eq "$(nudges_for lx-stalebusy)" "1" \
+    "a busy marker in the scrollback does not veto a live banner below it"
 eq "$(nudges_for lx-attached)" "0" "attached session is skipped (human is watching)"
-grep -q "3 parked, 3 nudged" "$TMP/out1" && ok "summary counts parked and nudged" \
+grep -q "4 parked, 4 nudged" "$TMP/out1" && ok "summary counts parked and nudged" \
     || bad "summary counts parked and nudged ($(tail -1 "$TMP/out1"))"
 
 # (i) The nudge text must not match the detector — otherwise our own message
@@ -1439,20 +1538,51 @@ for consumer in "$DEACON" "$WITNESS"; do
     # The two `unknown` shapes a patrol must tell apart: an order that is not
     # running (recovery is down — say so) versus one that simply has not reached
     # this session yet (ordinary partial coverage — do not raise the alarm).
-    for r in no-recent-sweep not-swept; do
+    # `state-dir-unavailable` joins them: it is the third way recovery can be
+    # DOWN rather than merely incomplete, and a patrol that cannot tell it from
+    # ordinary partial coverage logs an outage as routine.
+    for r in no-recent-sweep not-swept state-dir-unavailable; do
         grep -qF "reason=$r" "$consumer" \
             && ok "consumer contract: $name distinguishes reason=$r" \
             || bad "consumer contract: $name distinguishes reason=$r"
     done
+    # The case with no `reason=` at all, because there is no line: the helper is
+    # absent from the host, not executable, or silent, and the discovery snippet
+    # these formulas ship (`[ -n "$QPN" ] && …`) yields an empty string for each.
+    # Unstated, that falls through to whatever the reading agent assumes — and
+    # the only safe assumption is the one the surface would have given: unknown.
+    grep -qF 'recovery status unavailable' "$consumer" \
+        && ok "consumer contract: $name handles absent/failed helper output" \
+        || bad "consumer contract: $name handles absent/failed helper output"
 done
 # The doc documents every reason the surface can emit. The consumers above are
 # only required to distinguish the two that change what a patrol DOES; the rest
 # are documented so a human reading a status line can look one up.
-for r in no-recent-sweep not-swept stale-episode unsafe-session-id foreign-state; do
+for r in no-recent-sweep not-swept stale-episode unsafe-session-id foreign-state \
+         state-dir-unavailable; do
     grep -qF "$r" "$DOC" \
         && ok "consumer contract: the doc documents reason=$r" \
         || bad "consumer contract: the doc documents reason=$r"
 done
+# Every reason the script can actually PRINT is in that list. The list above is
+# hand-maintained and the script is not, so a reason added to one and not the
+# other is exactly the drift this run exists to catch — a value on a patrol's
+# screen that no consumer and no doc defines. Both spellings are collected: the
+# `reason=<value>` assignments the verdict branches use, and the reason argument
+# of `status_unknown`, which is how the answers that precede any state read are
+# emitted. Scanning only the first spelling would silently stop covering a whole
+# class of reasons the moment one moved into the helper.
+while read -r r; do
+    [ -n "$r" ] || continue
+    case "$r" in
+        no-recent-sweep | not-swept | stale-episode | unsafe-session-id | \
+        foreign-state | state-dir-unavailable)
+            ok "consumer contract: reason=$r is one the doc check covers" ;;
+        *) bad "consumer contract: reason=$r is emitted but not covered above" ;;
+    esac
+done < <({ grep -oE 'reason=[a-z-]+' "$SCRIPT" | cut -d= -f2
+           grep -oE 'status_unknown [^ ]+ [a-z-]+' "$SCRIPT" | awk '{print $3}'
+         } | grep -v '^-$' | sort -u)
 # Every tuning knob the script reads is in the doc's table. Two are documented
 # under a shared row (`QUOTA_PARK_BACKOFF_BASE` / `_CAP`), so a bare suffix
 # counts — loose enough to accept that row, tight enough that a knob added
@@ -1603,6 +1733,92 @@ for flag in 1 unconfirmed; do
     eq "$(grep -c '^mail ' "$TMP/mail" || true)" "0" \
         "escalated=$flag still suppresses the resend for this episode"
 done
+
+# --- Run 35: a state dir it cannot use is an ANSWER, not silence. -----------
+# Every file this order reads or writes lives in the state dir, so one it cannot
+# create or write ends the sweep. It used to end `--status` too, and in the worst
+# possible way: `mkdir -p "$STATE_DIR" || exit 0` ran ahead of the `--status`
+# branch, so the surface exited 0 having printed NOTHING AT ALL. A patrol parses
+# that for `quota_park=` and finds no field — and a missing field is read as
+# whatever default the reader assumed, on the one path where this order knows
+# nothing about anything. The closed-field contract exists to make that
+# impossible: there is always a verdict, and for a broken state dir the honest
+# one is `unknown` with a reason that names it.
+#
+# Both shapes are covered, because they fail at different calls: a path that
+# CANNOT BE CREATED (a component of it is a regular file — mkdir fails), and one
+# that exists but is NOT WRITABLE (mkdir succeeds and says nothing, then every
+# state write fails one silent file at a time).
+: > "$TMP/not-a-dir"
+UNWRITABLE="$TMP/unwritable-state"
+rm -rf "$UNWRITABLE"; mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
+# `chmod 500` does not stop root, and a suite running as root would assert the
+# opposite of what it means to. Probed rather than assumed.
+if : > "$UNWRITABLE/.probe" 2>/dev/null; then
+    rm -f "$UNWRITABLE/.probe"
+    echo "skip - unwritable-state-dir test (this user can write it anyway)"
+    BROKEN_DIRS=("$TMP/not-a-dir/child")
+else
+    BROKEN_DIRS=("$TMP/not-a-dir/child" "$UNWRITABLE")
+fi
+for broken in "${BROKEN_DIRS[@]}"; do
+    what="uncreatable"; [ "$broken" = "$UNWRITABLE" ] && what="unwritable"
+    out="$TMP/status35-$what"
+    QUOTA_PARK_STATE_DIR="$broken" bash "$SCRIPT" --status lx-codex > "$out" 2>&1 \
+        && ok "--status still exits 0 with an $what state dir" \
+        || bad "--status still exits 0 with an $what state dir"
+    [ -s "$out" ] \
+        && ok "--status with an $what state dir answers at all (it used to print nothing)" \
+        || bad "--status with an $what state dir answers at all"
+    grep -q '^session=lx-codex quota_park=unknown .*reason=state-dir-unavailable$' "$out" \
+        && ok "an $what state dir reports unknown/state-dir-unavailable, not silence" \
+        || bad "an $what state dir reports unknown/state-dir-unavailable ($(tail -1 "$out"))"
+    # Closed fields means ALL of them: a consumer greps one field out of a status
+    # line and must not have to handle a short line as a special case.
+    missing=""
+    for f in session quota_park detector_class age_s parked_for attempts unconfirmed \
+             escalated last_seen_age reason; do
+        grep -qE "(^|[[:space:]])$f=" "$out" || missing="$missing $f"
+    done
+    [ -z "$missing" ] \
+        && ok "the $what state-dir line carries every field a status line carries" \
+        || bad "the $what state-dir line is missing:$missing"
+    grep -q '^heartbeat_fresh=0$' "$out" \
+        && ok "an $what state dir reports no fresh heartbeat" \
+        || bad "an $what state dir reports no fresh heartbeat"
+    # A broken state dir does not suspend the rest of the contract: this branch
+    # answers ahead of the `safe_id` gate, and the id it is asked about comes
+    # from a session list whose metadata is mutable. An id this order would not
+    # name a file with is one it does not put on the surface either.
+    QUOTA_PARK_STATE_DIR="$broken" bash "$SCRIPT" --status '../escaped-state' > "$out-unsafe" 2>&1 || true
+    grep -q '^session=- quota_park=unknown ' "$out-unsafe" \
+        && ok "an unsafe id is still refused with an $what state dir" \
+        || bad "an unsafe id is still refused with an $what state dir ($(tail -1 "$out-unsafe"))"
+    grep -qF 'escaped-state' "$out-unsafe" \
+        && bad "an unsafe id must not be echoed onto the surface ($what state dir)" \
+        || ok "an unsafe id is not echoed onto the surface ($what state dir)"
+    # The enumerating form has the same duty. An empty enumeration would say "no
+    # episodes are being tracked" — a claim about the city, when the truth is
+    # that this order cannot look.
+    QUOTA_PARK_STATE_DIR="$broken" bash "$SCRIPT" --status > "$out-all" 2>&1 || true
+    grep -q 'quota_park=unknown .*reason=state-dir-unavailable$' "$out-all" \
+        && ok "the enumerating form says so too with an $what state dir" \
+        || bad "the enumerating form says so too with an $what state dir"
+    # And the sweep: it genuinely cannot run, but it stops LOUDLY — the half the
+    # silent `|| exit 0` never had. It must also not act on panes it cannot
+    # record a verdict for: with nowhere to write an episode, every park would be
+    # re-detected as new and nudged on every cycle, ignoring the backoff.
+    NUDGES_BEFORE="$(grep -c '^nudge ' "$TMP/nudges" || true)"
+    QUOTA_PARK_STATE_DIR="$broken" bash "$SCRIPT" > "$out-sweep" 2>&1 \
+        && ok "the sweep exits 0 with an $what state dir (nothing to do is not a crash)" \
+        || bad "the sweep exits 0 with an $what state dir"
+    grep -q "state dir unavailable" "$out-sweep" \
+        && ok "the sweep says why it did nothing with an $what state dir" \
+        || bad "the sweep says why it did nothing with an $what state dir ($(tail -1 "$out-sweep"))"
+    eq "$(grep -c '^nudge ' "$TMP/nudges" || true)" "$NUDGES_BEFORE" \
+        "the $what state-dir sweep nudges nothing (it could not record a verdict)"
+done
+chmod 700 "$UNWRITABLE" 2>/dev/null || true
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

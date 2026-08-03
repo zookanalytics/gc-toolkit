@@ -182,6 +182,16 @@ done
   - `reason=unsafe-session-id` / `reason=foreign-state` — it holds no usable
     state for that session: an id it will not name a file with, or something at
     that path it did not write. Normal warrant path, no alarm.
+  - `reason=state-dir-unavailable` — its state directory cannot be created or
+    written, so it holds no evidence about any session and can record none.
+    Quota-park recovery itself looks down; normal warrant path, and say so in
+    your log.
+- **No output, or output you cannot parse** — the helper was not found (`QPN`
+  empty), is not executable, or printed nothing: the `[ -n "$QPN" ] && …` above
+  yields an empty string in each case. That is `unknown`, never `no` and never
+  `yes`. Normal warrant path, and log it as *recovery status unavailable* — the
+  same as `reason=no-recent-sweep`, because it means the same thing: there is no
+  recovery to defer to.
 - `escalated=1` on a session you already deferred once — nudging has not
   brought it back and a human has been mailed. Do not keep deferring in
   silence: escalate to the mayor.
@@ -279,7 +289,12 @@ park → normal path. `quota_park=unknown` → it vouches for nothing here →
 normal path, and read `reason=`: `reason=no-recent-sweep` means quota-park
 recovery itself looks down (note that), while `reason=not-swept` (budget
 deferred it, or the pane was unreadable) and `reason=stale-episode` are
-ordinary partial coverage and need no alarm. `escalated=1` on a session you
+ordinary partial coverage and need no alarm. `reason=state-dir-unavailable` —
+it cannot create or write its state directory, so it holds no evidence about
+anything: normal path, and note it like `no-recent-sweep`. No output at all
+(helper absent, not executable, or silent — the `[ -n "$QPN" ]` guard above
+yields an empty string) is `unknown` too, never `no`: normal path, logged as
+*recovery status unavailable*. `escalated=1` on a session you
 already deferred → nudging has not recovered it; escalate to the mayor rather
 than deferring again in silence.
 
@@ -356,8 +371,12 @@ done
 `reason=`: `reason=no-recent-sweep` means quota-park recovery itself looks
 down (note that), while `reason=not-swept` (the budget deferred this session,
 or its pane was unreadable) and `reason=stale-episode` are ordinary partial
-coverage. `escalated=1` on a session you already deferred → escalate to the
-mayor instead of deferring again.
+coverage. `reason=state-dir-unavailable` — it cannot create or write its state
+directory and holds no evidence about anything: normal path, noted like
+`no-recent-sweep`. No output at all (helper absent, not executable, or silent)
+is `unknown` too, never `no`: normal path, logged as
+*recovery status unavailable*. `escalated=1` on a session you already deferred
+→ escalate to the mayor instead of deferring again.
 
 Warranting a real park sends a second dog to run the shutdown dance on a
 healthy session, and the replacement hits the same block (bead tk-al95k,
