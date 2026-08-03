@@ -47,6 +47,13 @@
 #            re-gate: one whose anchor_bead write was lost (unrouted, unclaimed,
 #            unattributable) and one that names ANOTHER anchor. A review naming
 #            this anchor still suppresses it — no twins.
+#   (PINNED) the live-head read carries BOTH halves of the origin pin — the `o/r`
+#            path and the `--hostname` host — asserted on the argv gh was called
+#            with, so a host word that expands to nothing fails by name.
+#   (TERMINAL) a post-open anchor whose PR is MERGED or CLOSED is NOT re-gated
+#            (that is reconcile-merged-prs.sh's to dispose of); an OPEN one still
+#            is, an UNREADABLE state dispatches anyway (fail soft), and a pre-open
+#            anchor is untouched by the guard and costs no PR read.
 #   (ROUTEFAIL/REPAIR) a dropped gc.routed_to write is not counted as dispatched
 #            and leaves the bead unrouted; the next pass re-routes the SAME bead.
 #   (GATE)   the REAL formula wiring (heal-gates-merge, extracted from
@@ -164,7 +171,14 @@ case "$2" in
           h=$(healed_for "$id"); [ -n "$h" ] || h="$healed"
           hfield=""; [ -n "$h" ] && hfield=$(printf ',"check_set_healed":"%s"' "$h")
           cxfield=""; [ -n "$codex" ] && cxfield=$(printf ',"check.codex":"%s"' "$codex")
-          prfield=""; [ -n "$pr" ] && prfield=$(printf ',"pr_number":"%s","pr_url":"https://x/pull/%s"' "$pr" "$pr")
+          # The pr_url is the one the git stub's origin implies — `github.com/o/r` —
+          # not a placeholder host. certify_pr_identity compares the bead's recorded
+          # URL against the live one and REFUSES on a mismatch, and it now sits on the
+          # dispatch path (the terminal-PR guard, review tk-w9ttd finding #2). A
+          # fixture whose pr_url could never match would make every certification fail
+          # for the wrong reason, so the fail-soft arm would be the only one any test
+          # ever reached.
+          prfield=""; [ -n "$pr" ] && prfield=$(printf ',"pr_number":"%s","pr_url":"https://github.com/o/r/pull/%s"' "$pr" "$pr")
           hdfield=""; [ -n "$hold" ] && hdfield=$(printf ',"merge_hold":"%s"' "$hold")
           obj=$(printf '{"id":"%s","title":"impl %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"%s"%s%s%s%s%s}}' \
             "$id" "$id" "$mr" "$branch" "$target" "$csfield" "$cxfield" "$hfield" "$prfield" "$hdfield")
@@ -196,7 +210,19 @@ case "$2" in
       # Branch-keyed probe: the rework children (and any sibling bead) that live on
       # an anchor's branch. Backed by $FAKE_BRANCHBEADS so a fixture can express
       # the exact discriminator this bug turns on — a rework still being WORKED vs
-      # one already handed BACK.  id|branch|status|task_kind|gc.routed_to
+      # one already handed BACK.
+      #   id|branch|status|task_kind|gc.routed_to|assignee
+      #
+      # ASSIGNEE IS A REAL COLUMN, and the handed-back fixtures fill it with the
+      # refinery identity the refinery actually leaves there (review tk-w9ttd testing
+      # gap). A hand-back is OPEN, unrouted and ASSIGNED BACK — three facts, of which
+      # only the first two were modelled, so the row stood for a bead that does not
+      # exist. That mattered in one direction: `acting()` deliberately does NOT read
+      # assignee (a hand-back is assigned to the refinery precisely because the
+      # refinery is DONE with it), and with the column blank a later change that
+      # started treating assignee as liveness would suppress every re-gate in
+      # production while this suite stayed green — the tk-t46nq park, re-introduced
+      # invisibly. With the real value present, that change fails (HANDBACK) here.
       #
       # The --status list the caller asked for is HONOURED here, exactly as the real
       # `bd list` honours it. That is what makes the live-owner fixtures a real
@@ -208,15 +234,15 @@ case "$2" in
         br=$(printf '%s' "$*" | sed -n 's/.*branch=\([^ ]*\).*/\1/p')
         want_st=$(printf '%s' "$*" | sed -n 's/.*--status=\([^ ]*\).*/\1/p')
         out=""
-        while IFS='|' read -r bid bbr bst btk brt; do
+        while IFS='|' read -r bid bbr bst btk brt basg; do
           [ -n "$bid" ] || continue
           [ "$bbr" = "$br" ] || continue
           if [ -n "$want_st" ]; then
             case ",$want_st," in *",$bst,"*) ;; *) continue ;; esac
           fi
           tkf=""; [ -n "$btk" ] && tkf=$(printf ',"task_kind":"%s"' "$btk")
-          obj=$(printf '{"id":"%s","status":"%s","metadata":{"branch":"%s","gc.routed_to":"%s"%s}}' \
-            "$bid" "$bst" "$bbr" "$brt" "$tkf")
+          obj=$(printf '{"id":"%s","status":"%s","assignee":"%s","metadata":{"branch":"%s","gc.routed_to":"%s"%s}}' \
+            "$bid" "$bst" "${basg:-}" "$bbr" "$brt" "$tkf")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_BRANCHBEADS"
         printf '[%s]\n' "$out" ;;
@@ -325,19 +351,61 @@ GIT
 chmod +x "$TMP/bin/git"
 
 # --- gh stub. -----------------------------------------------------------------
-# Only `gh api repos/<owner>/<repo>/commits/<branch> --jq .sha` is used, to read a
-# branch's LIVE head for the marker-vs-head test (tk-t46nq). Backed by $FAKE_HEADS
-# (branch<TAB>sha); a branch with no entry exits non-zero and prints nothing —
-# which is exactly the "head unresolvable / no gh" fail-soft path.
+# Two reads are stubbed:
 #
-# The REPOSITORY in the path is checked, not ignored: a read that is not pinned to
-# the origin-derived `o/r` answers for a repository that is not ours, and the head it
-# returns would re-gate a branch that never moved. The stub refuses those, so a
-# regression that drops the pin fails the (PINNED) case rather than passing on a
-# coincidence. Arguments are scanned rather than positional — `--hostname` and
-# `--jq` may sit on either side of the path.
+#   gh api repos/<owner>/<repo>/commits/<branch> --jq .sha  — a branch's LIVE head,
+#     for the marker-vs-head test (tk-t46nq). Backed by $FAKE_HEADS (branch<TAB>sha);
+#     a branch with no entry exits non-zero and prints nothing, which is exactly the
+#     "head unresolvable / no gh" fail-soft path.
+#
+#   gh pr view <n> --repo <host/owner/repo> --json ...     — the PR identity+state
+#     `certify_pr_identity` certifies, which the terminal-PR guard on the dispatch
+#     path now depends on (review tk-w9ttd finding #2). Backed by $FAKE_PRS
+#     (number<TAB>state<TAB>headRefName); a number with no entry FAILS the view,
+#     which is the unreadable-state fixture.
+#
+# Both reads are checked for their PIN, not just their subject. A read that is not
+# pinned to the origin-derived repository answers for a repository that is not ours,
+# and the head or state it returns would gate the wrong work.
+#
+# THE HOST HALF OF THE PIN IS ENFORCED HERE, not only the `o/r` half (review tk-w9ttd
+# finding #1). `o/r` names one repository PER HOST, so a stub that accepted the path
+# and ignored `--hostname` would pass a script that dropped the host word entirely —
+# which is precisely the regression this file must catch, and precisely the one it
+# used to miss. `${ORIGIN_HOST:+--hostname ...}` deletes itself SILENTLY when the
+# variable is empty, so nothing but this check stands between a lost host pin and a
+# green suite. Arguments are scanned rather than positional — `--hostname`, `--repo`
+# and `--jq` may sit on either side of the subject.
+#
+# Every invocation is logged to $FAKE_GHLOG so a test can assert on the pin DIRECTLY,
+# by argv, rather than only through the behaviour a refusal happens to produce.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_GHLOG" 2>/dev/null || true
+
+# Scan for the pinning flags wherever they sit.
+host=""; repo_flag=""; prev=""
+for a in "$@"; do
+  case "$prev" in
+    --hostname) host="$a" ;;
+    --repo)     repo_flag="$a" ;;
+  esac
+  prev="$a"
+done
+
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  num="$3"
+  # HOST-QUALIFIED `--repo`, the form certify_pr_identity pins with.
+  [ "$repo_flag" = "github.com/o/r" ] || exit 1
+  row=$(awk -F'\t' -v n="$num" '$1==n{print; exit}' "$FAKE_PRS" 2>/dev/null)
+  [ -n "$row" ] || exit 1
+  st=$(printf '%s' "$row" | cut -f2)
+  hd=$(printf '%s' "$row" | cut -f3)
+  printf '{"state":"%s","baseRefName":"main","url":"https://github.com/o/r/pull/%s","headRefName":"%s","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"}}\n' \
+    "$st" "$num" "$hd"
+  exit 0
+fi
+
 [ "$1" = "api" ] || exit 0
 shift
 path=""
@@ -347,6 +415,7 @@ done
 [ -n "$path" ] || exit 1
 repo=$(printf '%s' "$path" | sed -n 's|^repos/\(.*\)/commits/.*$|\1|p')
 [ "$repo" = "o/r" ] || exit 1
+[ "$host" = "github.com" ] || exit 1
 ref=$(printf '%s' "$path" | sed -n 's|.*/commits/\(.*\)$|\1|p')
 [ -n "$ref" ] || exit 1
 sha=$(awk -F'\t' -v b="$ref" '$1==b{print $2; exit}' "$FAKE_HEADS" 2>/dev/null)
@@ -358,7 +427,7 @@ chmod +x "$TMP/bin/gh"
 : > "$TMP/stamped"; : > "$TMP/healed"; : > "$TMP/flagged"; : > "$TMP/revmeta"
 : > "$TMP/deps"; : > "$TMP/stampfail"; echo 0 > "$TMP/seq"
 : > "$TMP/branchbeads"; : > "$TMP/heads"; : > "$TMP/routefail"
-: > "$TMP/noorigin"; : > "$TMP/revstate"
+: > "$TMP/noorigin"; : > "$TMP/revstate"; : > "$TMP/prs"; : > "$TMP/ghlog"
 mkdir -p "$TMP/bodies"
 
 export PATH="$TMP/bin:$PATH"
@@ -368,7 +437,7 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_REVIEWS="$TMP/reviews" \
        FAKE_STAMPFAIL="$TMP/stampfail" FAKE_SEQ="$TMP/seq" FAKE_BODIES="$TMP/bodies" \
        FAKE_BRANCHBEADS="$TMP/branchbeads" FAKE_HEADS="$TMP/heads" \
        FAKE_ROUTEFAIL="$TMP/routefail" FAKE_NOORIGIN="$TMP/noorigin" \
-       FAKE_REVSTATE="$TMP/revstate"
+       FAKE_REVSTATE="$TMP/revstate" FAKE_PRS="$TMP/prs" FAKE_GHLOG="$TMP/ghlog"
 
 # --- Run 1. -------------------------------------------------------------------
 RC1=0
@@ -710,13 +779,15 @@ RG-HOLD|pre_open_gate|codex||polecat/rg-hold|main|||1
 RG-HEALHOLD|pre_open_gate|EMPTY||polecat/rg-healhold|main|||1
 A
 # The branch-resident beads. RG-BACK's child is the exact hand-back shape the
-# refinery leaves behind: still OPEN, gc.routed_to cleared, assigned back to the
+# refinery leaves behind: still OPEN, gc.routed_to cleared, and ASSIGNED BACK to the
 # refinery — inert, because the only thing that would re-raise the gate is the
-# dispatch this pass is deciding whether to make.
+# dispatch this pass is deciding whether to make. The assignee is spelled out rather
+# than left blank: it is the field most likely to be mistaken for liveness later, and
+# a blank one would let that mistake pass this suite (see the branch probe above).
 cat > "$TMP/branchbeads" <<'B'
-rework-back|polecat/rg-back|open||
-rework-work|polecat/rg-work|in_progress||
-rework-pool|polecat/rg-pool|open||gc-toolkit/gc-toolkit.polecat
+rework-back|polecat/rg-back|open|||gc-toolkit/gc-toolkit.refinery
+rework-work|polecat/rg-work|in_progress|||gc-toolkit__polecat-lx-88888
+rework-pool|polecat/rg-pool|open||gc-toolkit/gc-toolkit.polecat|
 B
 # Live heads. RG-STALE/RG-PSTAL moved past a11a11a; RG-FRESH is still at its
 # reviewed commit; RG-NOGH is deliberately absent so the stub exits non-zero.
@@ -759,6 +830,30 @@ dispatched_for RG-PSTAL \
 dispatched_for RG-NOGH \
   && bad "(HEADFAIL) an unresolvable head must fail SOFT — a present marker stays satisfiable" \
   || ok "(HEADFAIL) unresolvable branch head -> present marker treated as satisfiable (no dispatch)"
+# THE HOST PIN, asserted on the ARGV of the head read itself (review tk-w9ttd
+# finding #1). The behavioural consequence is already covered — the gh stub refuses a
+# read that arrives without `--hostname github.com`, so a dropped pin also fails
+# (STALE) — but that failure reads as "the stale marker did not re-gate" and points at
+# the wrong code. This names the defect directly. It is a REGRESSION, not a
+# refinement: `live_head_for` resolved the repo through a command substitution, so
+# ORIGIN_HOST was set in a subshell, read back empty in the parent, and
+# `${ORIGIN_HOST:+--hostname "$ORIGIN_HOST"}` expanded to NOTHING — the read fell back
+# to gh's default host (GH_HOST, or github.com) with no error anywhere.
+# `|| true`: this file runs under `set -euo pipefail`, so a grep that matches NOTHING
+# fails the pipeline (pipefail) and the assignment aborts the WHOLE suite — turning
+# "this assertion failed" into "the remaining assertions never ran", which is the one
+# failure mode a regression suite must not have. No match is a legitimate outcome here;
+# it is exactly what a regression looks like, and it must be REPORTED.
+GH_HEAD_READ=$(grep 'commits/polecat/rg-stale' "$TMP/ghlog" 2>/dev/null | head -1 || true)
+[ -n "$GH_HEAD_READ" ] \
+  && ok "(PINNED) the marker-vs-head test actually read the branch head through gh" \
+  || bad "(PINNED) no gh head read was recorded for RG-STALE"
+printf '%s' "$GH_HEAD_READ" | grep -q -- '--hostname github.com' \
+  && ok "(PINNED) the head read carries the origin HOST pin, not just the o/r path" \
+  || bad "(PINNED) live_head_for must pass --hostname from the ORIGIN it resolved; a hostless read answers on whatever host GH_HOST names (got: '$GH_HEAD_READ')"
+printf '%s' "$GH_HEAD_READ" | grep -q 'repos/o/r/commits/' \
+  && ok "(PINNED) the head read is pinned to the origin-derived repository" \
+  || bad "(PINNED) head read must name repos/o/r (got: '$GH_HEAD_READ')"
 # The operator hold, and the deliberate asymmetry between the two paths.
 dispatched_for RG-HOLD \
   && bad "(HOLD) a re-gate must honour merge_hold (a review on a held PR is spent quota)" \
@@ -860,12 +955,15 @@ LO-HOOK|pre_open_gate|codex||polecat/lo-hook|main||
 LO-PIN|pre_open_gate|codex||polecat/lo-pin|main||
 LO-FREE|pre_open_gate|codex||polecat/lo-free|main||
 A
+# LO-FREE's child carries the refinery assignee for the same reason RG-BACK's does:
+# it is the hand-back control, and a blank assignee would make it agree with the
+# suppressed cases by accident rather than by rule.
 cat > "$TMP/branchbeads" <<'B'
-rework-block|polecat/lo-block|blocked||
-rework-defer|polecat/lo-defer|deferred||
-rework-hook|polecat/lo-hook|hooked||
-rework-pin|polecat/lo-pin|pinned||
-rework-free|polecat/lo-free|open||
+rework-block|polecat/lo-block|blocked|||
+rework-defer|polecat/lo-defer|deferred|||
+rework-hook|polecat/lo-hook|hooked|||
+rework-pin|polecat/lo-pin|pinned|||
+rework-free|polecat/lo-free|open|||gc-toolkit/gc-toolkit.refinery
 B
 : > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
 : > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/stampfail"; : > "$TMP/heads"
@@ -1042,6 +1140,96 @@ dispatched_for DEAD-LIVE \
 printf '%s\n' "$OUT12" | grep -q '2 of them re-gated' \
   && ok "(DEADREV) exactly the two unactionable reviews are re-gated past" \
   || bad "(DEADREV) expected 2 re-gates (got: $OUT12)"
+
+# --- Run 13: TERMINAL PRs are not re-gated (review tk-w9ttd finding #2). ------
+# This pass runs BEFORE reconcile-merged-prs.sh in the same patrol, and the widened
+# satisfiability sweep reaches post-open anchors it never used to examine. An ABSENT
+# marker is the NORMAL shape behind a MERGED PR — the signoff that cleared it has
+# nothing left to re-stamp — so without a state check the sweep dispatches a codex
+# review, in real quota, for a pull request nobody can merge, and routes an inert
+# review child into the codex pool ahead of the observer that was about to close the
+# anchor. Same for a PR an operator CLOSED out of band, which needs an escalation,
+# not a reviewer.
+#
+#   TP-MERGED  pull_request, marker ABSENT, PR MERGED   -> NO dispatch
+#   TP-CLOSED  pull_request, marker ABSENT, PR CLOSED   -> NO dispatch
+#   TP-MALF    pull_request, marker MALFORMED, PR MERGED -> NO dispatch (the
+#              malformed arm reaches the same guard; it is the marker that is
+#              unmeetable, but the PR is what makes the review pointless)
+#   TP-OPEN    pull_request, marker ABSENT, PR OPEN     -> DISPATCH (the control:
+#              the guard must not suppress the case tk-t46nq exists to fix)
+#   TP-UNREAD  pull_request, marker ABSENT, PR state UNREADABLE -> DISPATCH. The
+#              guard fails SOFT in the dispatch direction on purpose: one wasted
+#              review that reconcile disposes of the same pass is cheaper than
+#              re-creating the park, and a gh-less rig must behave exactly as it did
+#              before the guard existed.
+#   TP-PRE     pre_open_gate, marker ABSENT             -> DISPATCH (no PR to be
+#              terminal; the guard must not touch the pre-open path at all)
+cat > "$TMP/anchors" <<'A'
+TP-MERGED|pull_request|codex|450|polecat/tp-merged|main||
+TP-CLOSED|pull_request|codex|451|polecat/tp-closed|main||
+TP-MALF|pull_request|codex|452|polecat/tp-malf|main|green@|
+TP-OPEN|pull_request|codex|453|polecat/tp-open|main||
+TP-UNREAD|pull_request|codex|454|polecat/tp-unread|main||
+TP-PRE|pre_open_gate|codex||polecat/tp-pre|main||
+A
+# number<TAB>state<TAB>headRefName. TP-UNREAD is deliberately ABSENT so the view
+# fails — the unreadable-state fixture. The head refs match each anchor's branch
+# because certify_pr_identity refuses a PR opened from another branch, and a
+# certification that failed for THAT reason would take the fail-soft arm and prove
+# nothing about the states below.
+printf '450\tMERGED\tpolecat/tp-merged\n451\tCLOSED\tpolecat/tp-closed\n452\tMERGED\tpolecat/tp-malf\n453\tOPEN\tpolecat/tp-open\n' > "$TMP/prs"
+: > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
+: > "$TMP/flagged"; : > "$TMP/deps"; : > "$TMP/heads"; : > "$TMP/branchbeads"
+: > "$TMP/ghlog"; rm -f "$TMP"/bodies/*
+OUT13="$(bash "$SCRIPT" \
+  --default 'codex' \
+  --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
+  --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>"$TMP/err13")"
+dispatched_for TP-MERGED \
+  && bad "(TERMINAL) a MERGED PR must not be re-gated — the review lands on work nobody can merge, ahead of the observer that closes the anchor" \
+  || ok "(TERMINAL) merged PR -> no signoff dispatched (reconcile-merged-prs.sh disposes of it)"
+dispatched_for TP-CLOSED \
+  && bad "(TERMINAL) a CLOSED PR must not be re-gated — it needs an escalation, not a reviewer" \
+  || ok "(TERMINAL) closed PR -> no signoff dispatched"
+dispatched_for TP-MALF \
+  && bad "(TERMINAL) the malformed-marker arm must reach the terminal guard too" \
+  || ok "(TERMINAL) malformed marker on a merged PR -> still no dispatch"
+dispatched_for TP-OPEN \
+  && ok "(TERMINAL) control: an OPEN PR with an absent marker still re-gates" \
+  || bad "(TERMINAL) the guard must NOT suppress an open PR — that is the tk-t46nq park"
+dispatched_for TP-UNREAD \
+  && ok "(TERMINAL) an unreadable PR state fails SOFT — the signoff is dispatched anyway" \
+  || bad "(TERMINAL) suppressing on an unreadable state re-creates the park this sweep ends"
+dispatched_for TP-PRE \
+  && ok "(TERMINAL) a pre-open anchor has no PR to be terminal — re-gate unaffected" \
+  || bad "(TERMINAL) the terminal-PR guard must not touch the pre-open path"
+printf '%s\n' "$OUT13" | grep -q '3 of them re-gated' \
+  && ok "(TERMINAL) exactly the three non-terminal anchors re-gate" \
+  || bad "(TERMINAL) expected 3 re-gates (got: $OUT13)"
+# The operator is TOLD why the anchor was passed over, and who owns it now — a
+# silent skip on a gating anchor is indistinguishable from the park.
+printf '%s\n' "$OUT13" | grep -q 'TP-MERGED (PR#450) needs a re-gate.*MERGED' \
+  && ok "(TERMINAL) the skip names the anchor, the PR and its terminal state" \
+  || bad "(TERMINAL) the skip must be logged with the PR state (got: $OUT13)"
+printf '%s\n' "$OUT13" | grep -q 'reconcile-merged-prs.sh' \
+  && ok "(TERMINAL) the skip names the pass that owns the disposition" \
+  || bad "(TERMINAL) the skip must say which pass disposes of the anchor"
+grep -q 'TP-UNREAD.*dispatching the signoff anyway' "$TMP/err13" \
+  && ok "(TERMINAL) the fail-soft dispatch says what it did about the unreadable state" \
+  || bad "(TERMINAL) an unreadable state must warn AND say the signoff went out anyway (got: $(cat "$TMP/err13"))"
+# The state read is PINNED, exactly as the head read is: `gh pr view <n> --repo
+# <host>/<owner>/<repo>`. Unpinned, the number answers in whatever repository gh
+# considers current, and a FOREIGN closed PR would suppress a signoff this anchor
+# genuinely needs — a park caused by the very guard meant to prevent waste.
+GH_PR_READ=$(grep '^pr view 450' "$TMP/ghlog" 2>/dev/null | head -1 || true)   # see (PINNED)
+printf '%s' "$GH_PR_READ" | grep -q -- '--repo github.com/o/r' \
+  && ok "(TERMINAL) the PR state read is pinned host-qualified to this checkout's origin" \
+  || bad "(TERMINAL) certify_pr_identity must pin the state read (got: '$GH_PR_READ')"
+# A pre-open anchor must not cost a PR read at all — it has no PR.
+grep -q 'pr view.*polecat/tp-pre' "$TMP/ghlog" 2>/dev/null \
+  && bad "(TERMINAL) a pre-open anchor must not trigger a PR state read" \
+  || ok "(TERMINAL) no PR read is made for the pre-open anchor"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

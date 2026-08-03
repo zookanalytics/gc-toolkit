@@ -581,6 +581,20 @@ passes split the marker states, disjointly, so exactly one of them ever dispatch
 | `green@<other oid>` (head moved) | `check-set-heal.sh` — the observer cannot see a pre-open anchor at all, since it enumerates `merge_result=pull_request` | **the observer** (this section) — it carries `merge_hold` and one-re-review-per-head guards the heal pass does not |
 | malformed (`green`, `red`, `green@`, `green@<not-an-oid>`) | `check-set-heal.sh` | `check-set-heal.sh` |
 
+Both `pull_request` cells carry one exception: an anchor whose PR has already
+reached a **terminal** state — MERGED, or CLOSED out of band — is *not* re-gated,
+whatever its marker says. `check-set-heal.sh` certifies the PR still OPEN before
+dispatching a post-open re-gate and skips the rest. An absent marker is the normal
+shape behind a merged PR (the signoff that cleared it has nothing left to
+re-stamp), and this pass runs *before* the observer in the same patrol, so without
+the check it would spend a codex review on a pull request nobody can merge and
+route an inert review child ahead of the observer that was about to close the
+anchor — or escalate an out-of-band close. Disposing of a terminal PR is the
+observer's job, not a reviewer's. The check fails **soft**: an unreadable state
+dispatches anyway, because suppressing on one would re-create the pre-open park
+this sweep exists to end, and a rig without `gh` behaves exactly as it did before.
+A reopened PR is picked up on the next pass, since the state is re-read each time.
+
 The malformed row is not pedantry about spelling. The merge skill clears a gate by
 **string equality** against `green@<live head>`, so any other shape is unmeetable
 for as long as it stands, and the observer's stale-gate arm matches

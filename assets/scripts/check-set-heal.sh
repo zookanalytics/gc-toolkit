@@ -115,6 +115,17 @@
 # rig keeps its prior behaviour. An ABSENT marker needs no head to classify and still
 # dispatches.
 #
+# ...but "unsatisfied" is not yet "dispatch". A POST-OPEN anchor whose PR has already
+# reached a TERMINAL state — MERGED, or CLOSED out of band — is skipped, whatever its
+# marker says (review tk-w9ttd finding #2). An absent marker is the NORMAL shape behind
+# a merged PR, and this pass now reaches those anchors for the first time while running
+# BEFORE reconcile-merged-prs.sh, which owns that disposition (close the bead behind a
+# merged PR, escalate a closed one). Without the skip the sweep spends a codex review on
+# a pull request nobody can merge and routes an inert review child ahead of the observer
+# about to dispose of the anchor. The state is CERTIFIED, not read by number, and the
+# skip fails SOFT — an unreadable state dispatches, because suppressing on one would
+# re-create the very park this sweep exists to end.
+#
 # Idempotent + convergent: the dispatched review is itself in-flight, so the next
 # pass reuses it instead of minting a twin, and the anchor reclassifies as
 # satisfiable the moment the signoff stamps the marker at the live head.
@@ -668,11 +679,27 @@ url_repo_q() {
 HAVE_GH=0
 command -v gh >/dev/null 2>&1 && HAVE_GH=1
 live_head_for() { # <branch>
-  local br="${1:-}" repo=""
+  local br="${1:-}"
   [ "$HAVE_GH" = 1 ] && [ -n "$br" ] || return 0
-  repo=$(resolve_origin_repo)
-  [ -n "$repo" ] || return 0
-  gh api "repos/$repo/commits/$br" ${ORIGIN_HOST:+--hostname "$ORIGIN_HOST"} \
+  # RESOLVED IN THIS SHELL, never as `repo=$(resolve_origin_repo)` — the rule
+  # `resolve_origin_repo_q` documents, and it bites HARDER here (review tk-w9ttd
+  # finding #1). A command substitution runs the resolver in a subshell, so ORIGIN_HOST
+  # is set on a copy of this shell and reads back EMPTY in the line below — which
+  # deletes the `--hostname` word SILENTLY, because `${ORIGIN_HOST:+...}` expands an
+  # unset host to nothing at all rather than to an error. The read then lands on gh's
+  # default host (GH_HOST, or github.com), which is precisely the movable source this
+  # function was pinned against: under GH_HOST drift `o/r` on THAT host answers, and a
+  # foreign head either re-gates a branch that never moved or — worse — matches by
+  # coincidence and certifies a marker at a commit that is not ours. The `repo` local
+  # is gone with it: two names for one resolved value is how the pair came apart.
+  #
+  # This function must not depend on a CALLER having resolved first, either. Its only
+  # call site reads it through a command substitution, so the resolve, the memo and the
+  # gh read all live in the same subshell; nothing a parent resolved would reach it, and
+  # nothing it resolves survives the call. Self-contained is the only shape that works.
+  resolve_origin_repo >/dev/null
+  [ -n "$ORIGIN_REPO" ] || return 0
+  gh api "repos/$ORIGIN_REPO/commits/$br" ${ORIGIN_HOST:+--hostname "$ORIGIN_HOST"} \
     --jq '.sha' 2>/dev/null
 }
 
@@ -1582,6 +1609,10 @@ while IFS= read -r row; do
   # just as wrongly. Certification failure is treated exactly like an unreadable state:
   # keep the recorded verdict, arm nothing, retry next pass.
   recovered_now=0
+  # Set only where a LIVE, CERTIFIED read has just shown this anchor's PR to be OPEN,
+  # so the terminal-PR guard on the dispatch path below does not re-ask a question this
+  # pass already answered. Cleared per row: a stale 1 would skip the guard entirely.
+  pr_state_open=0
   if [ -n "$RECOVERED_INERT" ] && printf '%s' "$RECOVERED_INERT" | grep -qxF "$id"; then
     recovered_now=1
   fi
@@ -1652,6 +1683,7 @@ while IFS= read -r row; do
     # open anchor, on this pass, before merge-skill runs.
     echo "check-set-heal: $id was recovered with a $mrstate PR that is OPEN again; refreshing the record and gating it normally"
     gc bd update "$id" --set-metadata merge_result_pr_state=OPEN >/dev/null 2>&1 || true
+    pr_state_open=1
   fi
 
   # checkset/canon were read above the inert arm, which needs `canon` to tell an
@@ -1818,6 +1850,46 @@ while IFS= read -r row; do
         normal=$((normal + 1)); continue
       fi ;;
   esac
+
+  # A POST-OPEN anchor whose PR has already reached a TERMINAL state — MERGED, or
+  # CLOSED out of band — is not waiting on a signoff (review tk-w9ttd finding #2). It is
+  # waiting on reconcile-merged-prs.sh, which runs LATER in this same patrol pass and
+  # owns exactly that disposition: close the bead behind a merged PR, escalate a closed
+  # one. This pass runs FIRST, and the widened satisfiability sweep reaches these anchors
+  # for the first time — an absent marker is the normal shape behind a MERGED PR, since
+  # the signoff that cleared it has nothing left to re-stamp — so without this guard the
+  # sweep dispatches a codex review, in real quota, for a pull request no one can merge,
+  # and routes an inert review child into the codex pool ahead of the observer that was
+  # about to dispose of the anchor.
+  #
+  # CERTIFIED, not merely read by number: `gh pr view <n> --json state` in a moved
+  # repository context answers for a different pull request, and a foreign CLOSED one
+  # would suppress a signoff this anchor genuinely needs. Same read, same pinning, same
+  # identity checks as every other PR question this script asks.
+  #
+  # FAIL SOFT, in the DISPATCH direction, which is the opposite of the fail-closed
+  # instinct and deliberate: the cost of dispatching for a terminal PR is one wasted
+  # review that reconcile disposes of on the same pass, while the cost of SUPPRESSING on
+  # an unreadable state is the tk-t46nq park itself — an armed gate with no marker, no
+  # in-flight review, and nothing that will ever re-ask. A gh-less rig therefore behaves
+  # exactly as it did before this guard existed, and asks nothing it cannot answer.
+  #
+  # A REOPENED PR is picked up on the next pass, not lost: the state is re-read every
+  # pass, so a suppression here lasts only as long as the terminal state does.
+  if [ "$state" = "pull_request" ] && [ -n "$num" ] && [ "$pr_state_open" != 1 ] \
+     && [ "$HAVE_GH" = 1 ]; then
+    if certify_pr_identity "$id" "$num" "$prurl" "$branch" "confirming the PR is still open"; then
+      if [ "$CERT_STATE" != "OPEN" ]; then
+        echo "check-set-heal: $id (PR#$num) needs a re-gate ($REGATE_WHY) but its PR is $CERT_STATE; no signoff dispatched — a $CERT_STATE PR is reconcile-merged-prs.sh's to dispose of, and a review on one is spent codex quota"
+        skipped=$((skipped + 1)); continue
+      fi
+    else
+      # certify_pr_identity has already said WHY it could not answer. Say what was done
+      # about it, because its own wording ("retrying next pass") describes the callers
+      # that defer, and this one does not.
+      echo "check-set-heal: WARN $id (PR#$num) could not be confirmed still OPEN before re-gating; dispatching the signoff anyway (suppressing on an unreadable state is the park this sweep exists to end) — if the PR is in fact terminal, reconcile-merged-prs.sh disposes of the anchor this same pass" >&2
+    fi
+  fi
 
   # Reuse whatever is ACTING on this anchor rather than dispatching a twin: an open
   # signoff review, or a rework still being worked. A rework already handed BACK is
