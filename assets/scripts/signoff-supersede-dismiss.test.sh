@@ -73,6 +73,14 @@
 #       merge_result=pull_request (V8), moved to another pr_number (V9), or had
 #       check.<gate> moved off / cleared from the reviewed head (V10) each stops
 #       the retraction. Checking merge_hold alone let all four dismiss anyway
+#   (V12-V14) and it resolves the anchor's PR the WIDE way, under every key a bead
+#       names one with: a fork_pr-keyed (V12) or fork_pr_url-keyed (V13) anchor is
+#       retracted for, where reading pr_number alone left it BLOCKED forever — while
+#       a fork_pr_url naming another repository still holds (V14)
+#   (V15-V17) the rest of that identity, mutated mid-step: a retarget (V15), a
+#       pr_url moved to another PR (V16, with the cosmetic-difference control) and a
+#       branch corrected off this PR (V17) each stop the retraction. None of the
+#       three moves the head, so the head re-read cannot see them
 #   (V11) the paginated reviews read is checked for FAILURE: a read that dies part
 #       way streams a parseable but TRUNCATED history, and one that fails outright
 #       looks like "nothing to retract" — both dismissed/stranded silently before
@@ -159,11 +167,24 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   [ -f "${FAKE_HEAD_READS:-/dev/null}" ] && n=$(cat "$FAKE_HEAD_READS")
   n=$((n + 1))
   [ -n "${FAKE_HEAD_READS:-}" ] && printf '%s' "$n" > "$FAKE_HEAD_READS"
+  livehead="${FAKE_HEAD:-}"
   if [ "$n" -ge 2 ] && [ -n "${FAKE_HEAD_AFTER:-}" ]; then
-    printf '%s\n' "$FAKE_HEAD_AFTER"
-  else
-    printf '%s\n' "${FAKE_HEAD:-}"
+    livehead="$FAKE_HEAD_AFTER"
   fi
+  # The pre-dismissal guard reads the PR's IDENTITY in the same round trip as its
+  # head — `--json headRefOid,baseRefName,headRefName,url`, answered as one object
+  # — so every comparison speaks about the same observation. The single-field
+  # `-q .headRefOid` shape is still served bare, as gh does.
+  case ",${want}," in
+    *,baseRefName,*|*,headRefName,*|*,url,*)
+      jq -nc --arg h "$livehead" \
+             --arg b "${FAKE_PRVIEW_BASE-main}" \
+             --arg r "${FAKE_PRVIEW_REF-polecat/tk-5niup}" \
+             --arg u "${FAKE_PRVIEW_URL-https://github.com/acme/repo/pull/37}" \
+        '{headRefOid: $h, baseRefName: $b, headRefName: $r, url: $u}' ;;
+    *)
+      printf '%s\n' "$livehead" ;;
+  esac
   exit 0
 fi
 [ "$1" = "api" ] || exit 0
@@ -178,10 +199,16 @@ while [ $# -gt 0 ]; do
     -f) ARGS+=("$2"); shift 2 ;;
     -q) shift 2 ;;
     --jq) shift 2 ;;
+    --hostname) APIHOST="$2"; shift 2 ;;
     --paginate) PAGINATE=1; shift ;;
     *)  PATH_ARG="$1"; shift ;;
   esac
 done
+# THE HOST IS THE OTHER HALF OF THE REPOSITORY. A REST path carries `<owner>/<repo>`
+# and no host at all, so `gh api` takes the host as `--hostname` and, when it is
+# omitted, supplies it from $GH_HOST — meaning a repo-pinned path is still only
+# HALF pinned. Recorded separately from the path so an assertion can demand both.
+[ -n "${FAKE_APIHOST:-}" ] && printf '%s\n' "${APIHOST:-<unpinned>}" >> "$FAKE_APIHOST"
 case "$PATH_ARG" in
   repos/*)
     apipin="${PATH_ARG#repos/}"
@@ -311,6 +338,32 @@ if [ "$2" = "show" ]; then
   if [ -n "${FAKE_CHECK_MOVED_FROM:-}" ] && [ "$ashow" -ge "$FAKE_CHECK_MOVED_FROM" ]; then
     chk="${FAKE_CHECK_MOVED_LATE:-}"
   fi
+  # WHICH KEY the anchor names its PR under. `pr_number` is what the refinery
+  # stamps, but the fork-sync flow stamps `fork_pr`/`fork_pr_url` and NO pr_number
+  # at all — a shape the guard must resolve identically or the dismissal never
+  # runs for a fork-keyed anchor. `fork_pr_url` carries its repository in its own
+  # value, so it is emitted host-qualified against $PR_REPO_Q.
+  a_key="${FAKE_ANCHOR_PR_KEY:-pr_number}"
+  # The rest of the anchor's IDENTITY. Absent by default (an anchor that records
+  # none of these is governed by the pinned read alone), and each independently
+  # movable from a chosen call ordinal like the fields above:
+  #   $FAKE_ANCHOR_TARGET / _FROM / _LATE  -> merged_target, a mid-step RETARGET
+  #   $FAKE_ANCHOR_PRURL  / _FROM / _LATE  -> pr_url, a mid-step identity repair
+  #   $FAKE_ANCHOR_BRANCH / _FROM / _LATE  -> branch, a mid-step branch correction
+  # None of the three moves the PR head, so the head re-read cannot catch them —
+  # which is exactly why the guard has to ask.
+  a_target="${FAKE_ANCHOR_TARGET:-}"
+  if [ -n "${FAKE_ANCHOR_TARGET_FROM:-}" ] && [ "$ashow" -ge "$FAKE_ANCHOR_TARGET_FROM" ]; then
+    a_target="${FAKE_ANCHOR_TARGET_LATE:-}"
+  fi
+  a_prurl="${FAKE_ANCHOR_PRURL:-}"
+  if [ -n "${FAKE_ANCHOR_PRURL_FROM:-}" ] && [ "$ashow" -ge "$FAKE_ANCHOR_PRURL_FROM" ]; then
+    a_prurl="${FAKE_ANCHOR_PRURL_LATE:-}"
+  fi
+  a_branch="${FAKE_ANCHOR_BRANCH:-}"
+  if [ -n "${FAKE_ANCHOR_BRANCH_FROM:-}" ] && [ "$ashow" -ge "$FAKE_ANCHOR_BRANCH_FROM" ]; then
+    a_branch="${FAKE_ANCHOR_BRANCH_LATE:-}"
+  fi
   sep=""
   printf '[{"status":"%s","metadata":{' "$a_status"
   if [ -n "$chk" ]; then printf '"check.%s":"%s"' "${CHECK_NAME:-codex}" "$chk"; sep=","; fi
@@ -318,7 +371,18 @@ if [ "$2" = "show" ]; then
   # The operator gate, served only when a case stages it ($FAKE_MERGE_HOLD).
   if [ -n "$hold" ]; then printf '%s"merge_hold":"%s"' "$sep" "$hold"; sep=","; fi
   if [ -n "$a_result" ]; then printf '%s"merge_result":"%s"' "$sep" "$a_result"; sep=","; fi
-  [ -n "$a_pr" ] && printf '%s"pr_number":"%s"' "$sep" "$a_pr"
+  if [ -n "$a_target" ]; then printf '%s"merged_target":"%s"' "$sep" "$a_target"; sep=","; fi
+  if [ -n "$a_prurl" ]; then printf '%s"pr_url":"%s"' "$sep" "$a_prurl"; sep=","; fi
+  if [ -n "$a_branch" ]; then printf '%s"branch":"%s"' "$sep" "$a_branch"; sep=","; fi
+  if [ -n "$a_pr" ]; then
+    case "$a_key" in
+      fork_pr_url) printf '%s"fork_pr_url":"https://%s/pull/%s"' \
+                     "$sep" \
+                     "${FAKE_ANCHOR_FORK_REPO:-${PR_REPO_Q:-github.com/acme/repo}}" \
+                     "$a_pr" ;;
+      *)           printf '%s"%s":"%s"' "$sep" "$a_key" "$a_pr" ;;
+    esac
+  fi
   printf '}}]\n'
   exit 0
 fi
@@ -420,7 +484,7 @@ run() {
   : > "$TMP/dismissed"; : > "$TMP/marked"; : > "$TMP/checks"; printf '0' > "$TMP/headreads"
   printf '0' > "$TMP/amreads"; : > "$TMP/updates"; : > "$TMP/unrecorded"
   printf '0' > "$TMP/anchorshows"; : > "$TMP/claim"; : > "$TMP/route"; : > "$TMP/pool"
-  : > "$TMP/viewpin"; : > "$TMP/apipin"
+  : > "$TMP/viewpin"; : > "$TMP/apipin"; : > "$TMP/apihost"
   cat > "$TMP/reviews" <<< "$1"
   PATH="$TMP/bin:$PATH" \
   FAKE_REVIEWS="$TMP/reviews" FAKE_DISMISSED="$TMP/dismissed" FAKE_MARKED="$TMP/marked" \
@@ -452,10 +516,25 @@ run() {
   FAKE_AUTOMERGE_FAILS="${FAKE_AUTOMERGE_FAILS:-}" \
   FAKE_AUTOMERGE_MALFORMED="${FAKE_AUTOMERGE_MALFORMED:-}" \
   FAKE_AUTOMERGE_AFTER="${FAKE_AUTOMERGE_AFTER:-}" \
-  FAKE_VIEWPIN="$TMP/viewpin" FAKE_APIPIN="$TMP/apipin" \
+  FAKE_VIEWPIN="$TMP/viewpin" FAKE_APIPIN="$TMP/apipin" FAKE_APIHOST="$TMP/apihost" \
+  FAKE_PRVIEW_BASE="${FAKE_PRVIEW_BASE-main}" \
+  FAKE_PRVIEW_REF="${FAKE_PRVIEW_REF-polecat/tk-5niup}" \
+  FAKE_PRVIEW_URL="${FAKE_PRVIEW_URL-https://github.com/acme/repo/pull/37}" \
+  FAKE_ANCHOR_PR_KEY="${FAKE_ANCHOR_PR_KEY-pr_number}" \
+  FAKE_ANCHOR_FORK_REPO="${FAKE_ANCHOR_FORK_REPO-}" \
+  FAKE_ANCHOR_TARGET="${FAKE_ANCHOR_TARGET-}" \
+  FAKE_ANCHOR_TARGET_FROM="${FAKE_ANCHOR_TARGET_FROM-}" \
+  FAKE_ANCHOR_TARGET_LATE="${FAKE_ANCHOR_TARGET_LATE-}" \
+  FAKE_ANCHOR_PRURL="${FAKE_ANCHOR_PRURL-}" \
+  FAKE_ANCHOR_PRURL_FROM="${FAKE_ANCHOR_PRURL_FROM-}" \
+  FAKE_ANCHOR_PRURL_LATE="${FAKE_ANCHOR_PRURL_LATE-}" \
+  FAKE_ANCHOR_BRANCH="${FAKE_ANCHOR_BRANCH-}" \
+  FAKE_ANCHOR_BRANCH_FROM="${FAKE_ANCHOR_BRANCH_FROM-}" \
+  FAKE_ANCHOR_BRANCH_LATE="${FAKE_ANCHOR_BRANCH_LATE-}" \
   ANCHOR="anchor-1" CHECK_NAME="codex" \
   PR_NUMBER="$4" REVIEW_BRANCH="$5" REVIEWED_OID="$2" REVIEW_HANDLE="" \
   PR_REPO_Q="${PR_REPO_Q-github.com/acme/repo}" PR_REPO="${PR_REPO-acme/repo}" \
+  PR_HOST="${PR_HOST-github.com}" \
     bash "$TMP/run.sh" 2>"$TMP/err"
 }
 # Every `--repo` pin the snippet passed, and every repository its REST paths named,
@@ -815,6 +894,83 @@ grep -q 'reviews history read FAILED' "$TMP/err" \
 eq "$(cat "$TMP/checks")" "green@liveheadB" \
    "(V11) the gate marker is still stamped (recording the signoff does not depend on the retraction)"
 
+# (V12-V14) THE FORK-KEYED ANCHOR (review tk-5knqi finding #2). The guard added by
+# (V7)-(V10) re-read the anchor's PR as `metadata.pr_number` alone — but that is
+# only one of the keys a bead names its PR with. The fork-sync flow stamps
+# `fork_pr`/`fork_pr_url` and NO pr_number at all, and every OTHER path here reads
+# the widened set. So a fork-keyed anchor resolved fine everywhere up to this
+# guard, which then read pr_number='' and could not tell it apart from "the anchor
+# moved off this PR": the retraction never ran. That is not a deferral — this arm
+# is the only in-band way out for such a PR (its gate is green at the live head, so
+# no re-gate is ever dispatched), so it stayed BLOCKED on a dead commit forever.
+# The narrow read regressed exactly the fork-keyed path the rest of the pass had
+# just widened, in its last guard.
+FAKE_ANCHOR_PR_KEY=fork_pr \
+  run '940|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "940" "(V12) fork_pr-keyed anchor -> the superseded review IS retracted"
+eq "$(cut -f2 "$TMP/marked" | tail -1)" "940@liveheadB" \
+   "(V12) and the pairing marker is still recorded on it"
+
+FAKE_ANCHOR_PR_KEY=fork_pr_url \
+  run '941|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "941" \
+   "(V13) fork_pr_url-keyed anchor -> retracted too (the number is parsed out of the url)"
+
+# ...and the widening stays FAIL-CLOSED. A `fork_pr_url` that positively names
+# ANOTHER repository is about somebody else's pull request, so it yields no number
+# here and the guard holds — the widened read must not become a way to satisfy the
+# identity check with a PR in a repository this step never read.
+FAKE_ANCHOR_PR_KEY=fork_pr_url FAKE_ANCHOR_FORK_REPO="github.com/other/repo" \
+  run '942|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "" "(V14) a fork_pr_url naming ANOTHER repository -> SKIPPED"
+grep -q "pr_number=''" "$TMP/err" \
+  && ok "(V14) and the reason reports the anchor as naming no PR here" \
+  || bad "(V14) foreign fork_pr_url must warn (got: $(cat "$TMP/err"))"
+
+# (V15-V17) THE REST OF THE IDENTITY, mutated mid-step. merged_target, pr_url and
+# branch authorize the dismissal as directly as the gate marker does, and NONE of
+# them moves the PR head — so the head re-read immediately above cannot catch any
+# of them. Each is staged from call ordinal 3, the per-dismissal re-read, so the
+# arm decides on the old value and the guard sees the new one. Same set, same
+# reasoning, as merge-skill.sh's terminal re-read before `gh pr merge`.
+FAKE_ANCHOR_TARGET_FROM=3 FAKE_ANCHOR_TARGET_LATE="release/2.0" \
+  run '943|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "" "(V15) anchor retargeted mid-step -> SKIPPED"
+grep -q "retargeted mid-step (merged_target='release/2.0', PR base 'main')" "$TMP/err" \
+  && ok "(V15) the retarget is named against the PR's live base" \
+  || bad "(V15) mid-step retarget must warn (got: $(cat "$TMP/err"))"
+
+FAKE_ANCHOR_PRURL_FROM=3 FAKE_ANCHOR_PRURL_LATE="https://github.com/acme/repo/pull/99" \
+  run '944|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "" "(V16) anchor's pr_url moved to another PR mid-step -> SKIPPED"
+grep -q "records pr_url 'https://github.com/acme/repo/pull/99'" "$TMP/err" \
+  && ok "(V16) the disagreeing url is named against the PR just read" \
+  || bad "(V16) mid-step pr_url move must warn (got: $(cat "$TMP/err"))"
+
+# ...but a COSMETIC difference is not a different pull request. Both sides are
+# canonicalized, so a `/files` suffix and a trailing slash still match — otherwise
+# the guard would hold every anchor whose recorded url merely reads differently.
+FAKE_ANCHOR_PRURL="https://github.com/acme/repo/pull/37/files" \
+  run '945|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "945" \
+   "(V16) a cosmetically-different url for the SAME PR still dismisses"
+
+FAKE_ANCHOR_BRANCH_FROM=3 FAKE_ANCHOR_BRANCH_LATE="polecat/somebody-else" \
+  run '946|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "" "(V17) anchor's branch corrected off this PR mid-step -> SKIPPED"
+grep -q "records branch 'polecat/somebody-else' but PR#37 is opened from 'polecat/tk-5niup'" "$TMP/err" \
+  && ok "(V17) the branch disagreement is named against the PR's live head ref" \
+  || bad "(V17) mid-step branch change must warn (got: $(cat "$TMP/err"))"
+
+# ...and an anchor that records NONE of the three is governed by the pinned read
+# alone: silence is not a disagreement, or the guard would hold every legacy anchor
+# that never carried these fields. (A) already proves that path, asserted here as
+# the explicit control for this trio.
+FAKE_ANCHOR_TARGET="" FAKE_ANCHOR_PRURL="" FAKE_ANCHOR_BRANCH="" \
+  run '947|zook-bot|CHANGES_REQUESTED|deadcommitA' 'liveheadB' 'liveheadB' '37' ''
+eq "$(dismissed_ids)" "947" \
+   "(V15-V17 control) an anchor recording no target/url/branch still dismisses"
+
 # --- The NO-ANCHOR arm (the `else` of `if [ -n "$ANCHOR" ]`). -----------------
 # It sits OUTSIDE the supersede-dismiss markers — that snippet is the body of the
 # anchor-RESOLVED branch — so it carries its own markers and is extracted and run
@@ -1040,6 +1196,15 @@ eq "$(view_pins)" "github.com/acme/repo" \
    "(P1) every gh pr view passed --repo from the bead — head re-read and auto-merge probe alike (never <unpinned>)"
 eq "$(api_pins)" "acme/repo" \
    "(P1) every gh api REST path named the bead's repository (never the ambient {owner}/{repo})"
+# ...AND ITS HOST. A REST path carries `<owner>/<repo>` and nothing else, so a
+# repo-pinned `gh api` is still only HALF pinned: gh fills the host from $GH_HOST,
+# and `acme/repo` names one repository PER HOST. Another host's acme/repo has a
+# #37, its own review ids, and its own history — so the arm could read a stranger's
+# reviews and PUT a dismissal there while our PR stays blocked, with every
+# assertion above still passing. `--hostname` from the bead's own pr_url is what
+# closes it (review tk-5knqi finding #1).
+eq "$(sort -u "$TMP/apihost" | tr '\n' ' ' | sed 's/ $//')" "github.com" \
+   "(P1) every gh api call carried --hostname from the bead (never <unpinned>, which would fall back to \$GH_HOST)"
 
 # (P2) NO REPOSITORY, NO CALLS. The bead records no parseable pr_url, so nothing
 # can be pinned. The arm must refuse rather than fall back to gh's ambient context:
@@ -1071,17 +1236,21 @@ pin_derive() {
     "'[{\"metadata\":{\"pr_url\":\"$1\"}}]\n'" > "$TMP/bin/gc"
   chmod +x "$TMP/bin/gc"
   { printf '%s\n' "$REPOPIN"
-    printf 'printf "%%s|%%s\\n" "$PR_REPO_Q" "$PR_REPO"\n'; } > "$TMP/pin.sh"
+    printf 'printf "%%s|%%s|%%s\\n" "$PR_REPO_Q" "$PR_REPO" "$PR_HOST"\n'; } > "$TMP/pin.sh"
   PATH="$TMP/bin:$PATH" REVIEW_BEAD="review-1" bash "$TMP/pin.sh" 2>/dev/null
 }
+# THREE forms, because three different callers need three different shapes:
+# `gh pr view --repo` takes the host-qualified name, a REST path takes the hostless
+# one, and `gh api --hostname` takes the host on its own. All split from the SAME
+# parse, so no two of them can name different places.
 eq "$(pin_derive 'https://github.com/zookanalytics/gc-toolkit/pull/246')" \
-   "github.com/zookanalytics/gc-toolkit|zookanalytics/gc-toolkit" \
-   "(P3) a pr_url yields the host-qualified pin AND the hostless REST form"
+   "github.com/zookanalytics/gc-toolkit|zookanalytics/gc-toolkit|github.com" \
+   "(P3) a pr_url yields the host-qualified pin, the hostless REST form AND the host"
 eq "$(pin_derive 'https://ghe.example.com/acme/repo/pull/7')" \
-   "ghe.example.com/acme/repo|acme/repo" \
+   "ghe.example.com/acme/repo|acme/repo|ghe.example.com" \
    "(P3) the HOST is carried, not assumed — a hostless pin would name another host's acme/repo"
-eq "$(pin_derive '')" "|" "(P3) no pr_url -> empty pin (routes the fail-closed refusal)"
-eq "$(pin_derive 'not-a-url')" "|" "(P3) an unparseable pr_url -> empty pin, never a guess"
+eq "$(pin_derive '')" "||" "(P3) no pr_url -> empty pin (routes the fail-closed refusal)"
+eq "$(pin_derive 'not-a-url')" "||" "(P3) an unparseable pr_url -> empty pin, never a guess"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

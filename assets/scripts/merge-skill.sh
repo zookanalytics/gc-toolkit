@@ -158,13 +158,6 @@ set -uo pipefail
 # gh, so an un-merged anchor simply waits).
 command -v gh >/dev/null 2>&1 || exit 0
 
-# The account this skill acts as. Used ONLY to exclude our own reviews from the
-# approval gate below — the city posts COMMENT signoffs and never approves, so an
-# APPROVED review under this login would be a self-approval and must not count.
-# Resolved once per pass. If it cannot be resolved, the approval gate holds
-# rather than counting an unattributable approval (fail-closed).
-SELF_LOGIN=$(gh api user -q .login 2>/dev/null)
-
 # The trusted-approver policy (see the header). An operator allowlist, when set,
 # IS the policy; otherwise trust is write-level repo permission. Empty/unset =
 # permission-probe policy, which is the default on every rig that has not
@@ -202,7 +195,17 @@ approver_trusted() {
   # read-only collaborator, so it would trust an account with no write access.
   # A failed call (404 for a non-collaborator, 403 for a token that cannot read
   # collaborator permissions, a rate limit) returns 1: unreadable is untrusted.
-  perm=$(gh api "repos/{owner}/{repo}/collaborators/$login/permission" \
+  #
+  # PINNED to the origin repository, like every other GitHub read here and unlike
+  # the `{owner}/{repo}` placeholder this used to carry (review tk-5knqi finding
+  # #1). That placeholder is resolved from gh's AMBIENT context — `gh repo
+  # set-default`, $GH_REPO, $GH_HOST, the cwd — which is not this checkout's
+  # origin, and the question being asked is "may this account write to the
+  # repository we are about to merge in". Answered against a repository the
+  # operator happens to be pointing at, a login with write access THERE and none
+  # here satisfies the approval gate for a PR it cannot touch: the merge is then
+  # authorized by a permission that does not exist where it is spent.
+  perm=$(gh_api_origin "repos/$ORIGIN_REPO/collaborators/$login/permission" \
            --jq '.permission' 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] || return 1
   case "$perm" in
@@ -559,6 +562,37 @@ fi
 # the two can never disagree about which repository this checkout pushes to. Mirrors
 # check-set-heal.sh's ORIGIN_REPO / pre-open-resolve.sh's.
 ORIGIN_REPO="${ORIGIN_REPO_Q#*/}"
+
+# And the HOST half, split off the same qualified name so the two can never name
+# different places. `gh api` takes no `[HOST/]OWNER/REPO` — a REST path carries
+# `<owner>/<repo>` only — so the host is a SEPARATE flag, and omitting it hands
+# that half of the identity back to $GH_HOST (`gh help environment`), which is
+# the very source `--repo` is pinned to keep out. `<owner>/<repo>` names one
+# repository PER HOST: the same path under a drifted GH_HOST reads another
+# host's identically-named repository, whose PR #<n> exists too.
+ORIGIN_HOST="${ORIGIN_REPO_Q%%/*}"
+
+# Every `gh api` call in this script goes through here, so no REST read can be
+# re-hosted underneath the `--repo` pins the PR reads already carry (review
+# tk-5knqi finding #1). The caller supplies the `repos/$ORIGIN_REPO/...` path;
+# this supplies the host. Mirrors pre-open-resolve.sh's `gh api --hostname
+# "$ORIGIN_HOST" "repos/$ORIGIN_REPO/..."` calls, which is the reference shape.
+gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
+
+# The account this skill acts as. Used ONLY to exclude our own reviews from the
+# approval gate below — the city posts COMMENT signoffs and never approves, so an
+# APPROVED review under this login would be a self-approval and must not count.
+# Resolved once per pass. If it cannot be resolved, the approval gate holds
+# rather than counting an unattributable approval (fail-closed).
+#
+# Resolved HERE rather than at the top of the pass because it is host-scoped:
+# `gh api user` answers for whatever host is in play, and an account name is only
+# meaningful against the host whose reviews it is compared with. Pinned to the
+# origin host, the exclusion asks about the same account GitHub will attribute
+# our reviews to; unpinned under a drifted $GH_HOST it names a DIFFERENT account,
+# and an exclusion keyed on the wrong name stops excluding what it exists to
+# exclude.
+SELF_LOGIN=$(gh_api_origin user -q .login 2>/dev/null)
 
 # The repository a pull-request URL names, host-qualified — one definition for
 # both places identity is compared. Mirrors check-set-heal.sh's url_repo_q.
@@ -1188,7 +1222,15 @@ while IFS= read -r row; do
   # a truncated read can silently un-arm the third arm as well. `set -uo pipefail`
   # is on but `set -e` is deliberately off, so nothing aborts by itself: the exit
   # status must be read explicitly, and ANY failure holds the merge.
-  reviews_raw=$(gh api --paginate "repos/{owner}/{repo}/pulls/$num/reviews?per_page=100" \
+  # PINNED to the origin repository AND its host, like the `gh pr view --repo`
+  # read that produced $num and unlike the `{owner}/{repo}` placeholder this used
+  # to carry (review tk-5knqi finding #1). Unpinned, gh resolves the path in its
+  # ambient repository, so the approval gate below decides THIS merge from
+  # ANOTHER repository's review history: a same-numbered PR approved there
+  # satisfies the gate here, and a standing CHANGES_REQUESTED here is invisible
+  # because the veto lives in a history that was never read. Both directions
+  # merge work no reviewer of this repository ever cleared.
+  reviews_raw=$(gh_api_origin --paginate "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100" \
     --jq '.[]' 2>/dev/null); reviews_rc=$?
   if [ "$reviews_rc" -ne 0 ]; then
     echo "merge-skill: PR#$num reviews history read FAILED (gh rc=$reviews_rc; a partial page set can hide a later CHANGES_REQUESTED, or a dismissal of our own blocking review); merge held (anchor $id)"

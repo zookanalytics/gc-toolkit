@@ -217,6 +217,20 @@ fi
 # pre-open-resolve.sh's.
 ORIGIN_REPO="${ORIGIN_REPO_Q#*/}"
 
+# And the HOST half. `gh api` takes a REST path, which carries `<owner>/<repo>`
+# and no host at all, so the host must travel as a separate `--hostname` flag;
+# omit it and that half of the identity falls back to $GH_HOST (`gh help
+# environment`) — the movable source `--repo` is pinned to keep out. The reviews
+# read and the DISMISSAL below are `gh api` calls on a repo-pinned path, so
+# without this they are only half pinned: another host's identically-named
+# repository has a PR #<n> too, and the dismissal is irreversible. Mirrors
+# merge-skill.sh's ORIGIN_HOST and pre-open-resolve.sh's (review tk-5knqi #1).
+ORIGIN_HOST="${ORIGIN_REPO_Q%%/*}"
+
+# Every `gh api` call in this script goes through here, so no REST read or write
+# can be re-hosted underneath the `--repo` pins the PR reads carry.
+gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
+
 # The repository a pull-request URL names, host-qualified — ONE definition for
 # every place identity is compared here (the per-anchor read and the anchorless
 # scan's PR list). Mirrors merge-skill.sh's url_repo_q and check-set-heal.sh's;
@@ -236,6 +250,25 @@ url_repo_q() {
 pr_url_canon() {
   printf '%s' "${1:-}" | tr -d '[:space:]' \
     | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
+}
+
+# Is <needle> one WHOLE line of the newline-separated <haystack>? An empty needle
+# is never a member (it would otherwise match the delimiters themselves).
+#
+# Matched IN-SHELL, never through a `printf '%s\n' "$hay" | grep -qxF "$needle"`
+# pipeline, for the same reason the check-set membership test above is: `set -o
+# pipefail` is on and `grep -q` exits at the FIRST match, closing the pipe under
+# `printf`, which can then take SIGPIPE and make the whole pipeline report 141. The
+# `if` then reads a MATCH as a miss — decided by nothing but how many lines happen
+# to follow the one that matched. On the anchorless scan below that inverts the
+# arm's entire question: a PR that IS tracked by a live bead is reported ANCHORLESS
+# and escalated to the mayor, the one finding this pass sends mail about.
+list_has_line() { # <haystack> <needle>
+  [ -n "${2:-}" ] || return 1
+  case $'\n'"${1:-}"$'\n' in
+    *$'\n'"$2"$'\n'*) return 0 ;;
+  esac
+  return 1
 }
 
 # Statuses that still mean "a live bead owns this rework". `closed` is the ONLY
@@ -605,7 +638,11 @@ fi
 # authored by it — an operator's CHANGES_REQUESTED is a veto and is never ours to
 # clear. Unresolvable => the arm cannot tell ours from theirs and does not run,
 # which leaves the PR blocked (the safe side).
-SELF_LOGIN=$(gh api user -q .login 2>/dev/null)
+#
+# Pinned to the origin HOST: an account name is host-scoped, so unpinned under a
+# drifted $GH_HOST this names a different host's account, and "ours" would then be
+# decided by a name GitHub never attributed these reviews to.
+SELF_LOGIN=$(gh_api_origin user -q .login 2>/dev/null)
 
 closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; rebase_held=0; regated=0; gate_held=0; identity_held=0; skipped=0
 # Superseded-review retractions (tk-5niup) get their OWN counters: a retraction
@@ -1423,7 +1460,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # OUR anchor: a block removed in one repository, the requirement that
       # replaces it recorded in another. Every GitHub call in this arm is pinned
       # for that reason; the identity of the PR must not depend on cwd.
-      reviews_raw=$(gh api --paginate "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100" \
+      reviews_raw=$(gh_api_origin --paginate "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100" \
         --jq '.[]' 2>/dev/null); reviews_rc=$?
       if [ "$reviews_rc" -ne 0 ]; then
         echo "reconcile-merged-prs: WARN $id — PR#$num reviews history read FAILED (gh rc=$reviews_rc); NOT retracting any superseded self-review (a partial page set cannot be told apart from a complete one and the dismissal is irreversible); retry next pass" >&2
@@ -1474,17 +1511,50 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
           # the last block on a PR nothing else is holding.
           #
           # Require the anchor to still BE what the arm decided about: open, not
-          # held, parked on THIS PR, gate still green at the live head. Unreadable
-          # is unsafe — same reading as the auto-merge probe, since a read we never
-          # got proves none of it. Break rather than continue: every condition here
-          # is anchor- or PR-wide, so what stops this review stops the rest.
+          # held, parked on THIS PR, gate still green at the live head, and still
+          # describing THIS pull request. Unreadable is unsafe — same reading as
+          # the auto-merge probe, since a read we never got proves none of it.
+          # Break rather than continue: every condition here is anchor- or PR-wide,
+          # so what stops this review stops the rest.
+          #
+          # The PR number is resolved with `pr_nums_here` — the SAME widened,
+          # in-repo identity the ROWS projection above used to pick `$num` in the
+          # first place, and the same rule merge-skill.sh's terminal re-read
+          # applies (review tk-5knqi finding #2). Read from `pr_number` ALONE, as
+          # this did, the guard contradicts the arm that reached it: an anchor
+          # keyed only by `fork_pr`/`fork_pr_url` — the fork-sync shape, which
+          # stamps no pr_number at all — resolves a perfectly good `$num` up top,
+          # takes every guard, and then fails HERE with pr_number='' read as
+          # "the anchor moved off this PR". The retraction never runs, and it is
+          # the one arm that can un-strand such a PR: its gate is green at the
+          # live head, so the stale-gate arm never fires and nothing re-dispatches
+          # a review. Exactly the fork-keyed path the rest of this pass widened,
+          # reintroduced in its last guard.
+          #
+          # EXACTLY ONE in-repo number or nothing, as everywhere else: several
+          # numbers do not answer "which PR does this anchor gate", and an
+          # ambiguous anchor must hold rather than have one picked for it.
+          #
+          # The identity fields (`merged_target`, `pr_url`, `branch`) are re-asked
+          # too, against the LIVE PR facts this pass read — not against the ROWS
+          # snapshot they were first compared to. They authorize the dismissal as
+          # directly as the gate marker does, and NONE of them moves the head, so
+          # the head re-read above cannot catch a mid-pass retarget or an identity
+          # repair (check-set-heal backfilling a certified pr_url, an operator
+          # correcting a mis-stamped branch). Same set, same reasoning, as the
+          # merge skill's terminal re-read.
           fresh=$(gc bd show "$id" --json 2>/dev/null \
             | tr -d '\000-\010\013\014\016-\037' \
-            | jq -c '.[0] | select(. != null) | select(.metadata != null)
+            | jq -c --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'
+                     .[0] | select(. != null) | select(.metadata != null)
+                     | (pr_nums_here($o)) as $ns
                      | {status: (.status // ""),
                         hold: ((.metadata.merge_hold // "") | tostring),
                         result: (.metadata.merge_result // ""),
-                        pr: (.metadata.pr_number // ""),
+                        pr: (if ($ns | length) == 1 then $ns[0] else "" end),
+                        target: (.metadata.merged_target // ""),
+                        prurl: (.metadata.pr_url // ""),
+                        branch: (.metadata.branch // ""),
                         mark: (.metadata["check.codex"] // "")}' 2>/dev/null)
           if [ -z "$fresh" ]; then
             echo "reconcile-merged-prs: WARN $id — anchor metadata UNREADABLE immediately before dismissing review $rid on PR#$num; NOT retracting (an unreadable anchor cannot prove the PR is still gated by it, unheld, and green at the live head)" >&2
@@ -1496,10 +1566,31 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
           f_result=$(printf '%s' "$fresh" | jq -r '.result' 2>/dev/null)
           f_pr=$(printf '%s' "$fresh" | jq -r '.pr' 2>/dev/null)
           f_mark=$(printf '%s' "$fresh" | jq -r '.mark' 2>/dev/null)
+          f_target=$(printf '%s' "$fresh" | jq -r '.target' 2>/dev/null)
+          f_prurl=$(printf '%s' "$fresh" | jq -r '.prurl' 2>/dev/null)
+          f_branch=$(printf '%s' "$fresh" | jq -r '.branch' 2>/dev/null)
           if [ "$f_status" != "open" ] || is_held "$f_hold" \
              || [ "$f_result" != "pull_request" ] || [ "$f_pr" != "$num" ] \
              || [ "$f_mark" != "green@$head_oid" ]; then
             echo "reconcile-merged-prs: WARN $id — anchor changed mid-pass (status='$f_status' merge_hold='$f_hold' merge_result='$f_result' pr_number='$f_pr' check.codex='$f_mark'; want open + unheld + pull_request + PR#$num + green@$head_oid); NOT retracting review $rid (the block would come off a PR this anchor no longer gates as validated)" >&2
+            retract_held=$((retract_held + 1)); break
+          fi
+          # Identity, compared to the LIVE PR. An anchor recording NOTHING for a
+          # field is governed by the pinned read alone, exactly as the identity arm
+          # earlier in this loop treats an absent value: silence is not a
+          # disagreement. A recorded value that DISAGREES is, and it means the bead
+          # and the PR describe different work — so the block stays on.
+          f_reason=""
+          if [ -n "$f_target" ] && [ -n "$base" ] && [ "$f_target" != "$base" ]; then
+            f_reason="anchor was retargeted mid-pass (merged_target='$f_target', PR base '$base')"
+          elif [ -n "$f_prurl" ] && [ -n "$pr_url" ] \
+               && [ "$(pr_url_canon "$f_prurl")" != "$(pr_url_canon "$pr_url")" ]; then
+            f_reason="anchor now records pr_url '$f_prurl', which is not the PR#$num this pass read ('$pr_url')"
+          elif [ -n "$f_branch" ] && [ -n "$head_ref" ] && [ "$f_branch" != "$head_ref" ]; then
+            f_reason="anchor now records branch '$f_branch' but PR#$num is opened from '$head_ref'"
+          fi
+          if [ -n "$f_reason" ]; then
+            echo "reconcile-merged-prs: WARN $id — $f_reason; NOT retracting review $rid (the bead and the PR no longer describe the same work)" >&2
             retract_held=$((retract_held + 1)); break
           fi
           # Record the pairing marker, then READ IT BACK before trading the GitHub
@@ -1515,7 +1606,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
           paired=$(gc bd show "$id" --json 2>/dev/null \
             | jq -r '.[0].metadata.signoff_dismissed // empty' 2>/dev/null)
           if [ "$paired" = "$rid@$head_oid" ]; then
-            if gh api -X PUT "repos/$ORIGIN_REPO/pulls/$num/reviews/$rid/dismissals" \
+            if gh_api_origin -X PUT "repos/$ORIGIN_REPO/pulls/$num/reviews/$rid/dismissals" \
                  -f message="Superseded: this review is pinned to a commit that is no longer the head, and the codex gate is green at the live head $head_oid. Approval remains external." \
                  -f event=DISMISS >/dev/null 2>&1; then
               retracted=$((retracted + 1))
@@ -1651,7 +1742,7 @@ elif [ "$PR_LIST" != "[]" ]; then
 
       # Tracked by a live bead -> not an ANCHORLESS finding. Exact-match so PR#7
       # is never satisfied by PR#77.
-      if printf '%s\n' "$TRACKED" | grep -qxF "$pnum"; then
+      if list_has_line "$TRACKED" "$pnum"; then
         # Owned by something that can act on it -> genuinely fine, stay silent.
         # `has($n)`, NOT `.[$n].gated // true`: jq's `//` treats FALSE as empty,
         # so the alternative form rewrites every ungated PR to gated=true and

@@ -183,6 +183,16 @@
 #         request from the one that answered -> merge HELD.
 #   (ID4) REPOFAIL: this checkout's origin cannot be resolved at all -> NOTHING is
 #         merged this pass (fail closed; a wrong merge cannot be retried away).
+#   (ID6-ID8) THE REST PATHS, which `--repo` does not reach: `gh api` takes the
+#         repository in the path and the host in `--hostname`, and the approval gate
+#         reads BOTH a review history and a collaborator permission that way. Left
+#         ambient, a veto on OUR PR goes unseen (ID6), an approval that exists only
+#         in gh's current repository satisfies the gate (ID7), and write access held
+#         only THERE makes an approver trusted HERE (ID8). All three MERGE pre-fix.
+#         (ID9) is the control: undrifted, the same fixtures still merge.
+#   (SYNC) the `pr_nums_here` identity resolver is duplicated across two scripts and
+#         the signoff template by design; the copies are asserted identical, because
+#         one of them drifting narrow is exactly what tk-5knqi finding #2 was.
 #
 # HEAD IDENTITY (review tk-pka2d finding #2). Everything above certifies where the
 # pull request LIVES. A PR opened INTO this repository FROM a fork lives here too:
@@ -905,18 +915,49 @@ esac
 # --jq FILTER is applied with real jq, as gh does.
 if [ "$1" = "api" ]; then
   shift
-  PAGINATE=""; JQF=""; PATH_ARG=""
+  PAGINATE=""; JQF=""; PATH_ARG=""; APIHOST=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --paginate) PAGINATE=1; shift ;;
       --jq)       JQF="$2"; shift 2 ;;
+      --hostname) APIHOST="$2"; shift 2 ;;
       -q)         shift 2 ;;
       -X|-f)      shift 2 ;;
       *)          PATH_ARG="$1"; shift ;;
     esac
   done
+  # WHICH REPOSITORY — AND HOST — THIS REST CALL RESOLVES IN. `gh api` takes no
+  # `--repo`: the repository lives in the path and the HOST in `--hostname`, and
+  # each half falls back to gh's ambient context when omitted — the path to gh's
+  # current repository (`gh repo set-default`, $GH_REPO, the cwd), the host to
+  # $GH_HOST. So a `repos/{owner}/{repo}/...` path is unpinned in BOTH halves and a
+  # `repos/acme/repo/...` path with no `--hostname` is unpinned in one, which is
+  # enough: `acme/repo` names one repository per host.
+  #
+  # A call that lands anywhere but github.com/acme/repo is answered from FOREIGN
+  # fixtures below — a different review history, different collaborator
+  # permissions, a different acting account. That is the whole point: the ambient
+  # repository is not a neutral place to ask an approval question, because its
+  # answers are perfectly well-formed and about somebody else's pull request
+  # (review tk-5knqi finding #1).
+  arepo=""
   case "$PATH_ARG" in
-    user) printf '%s\n' "${FAKE_SELF_LOGIN-zook-bot}" ;;
+    repos/*) arepo="${PATH_ARG#repos/}"; arepo="$(printf '%s' "$arepo" | cut -d/ -f1,2)" ;;
+  esac
+  case "$arepo" in ""|'{owner}/{repo}') arepo="$ghdefault" ;; esac
+  ahost="$APIHOST"
+  if [ -z "$ahost" ]; then
+    ahost=$(cat "$FAKE_GH_HOST" 2>/dev/null); [ -n "$ahost" ] || ahost="github.com"
+  fi
+  FOREIGN=""
+  [ "$ahost/$arepo" = "github.com/acme/repo" ] || FOREIGN=1
+  case "$PATH_ARG" in
+    user)
+      # An account name is host-scoped: the same token is a DIFFERENT login on a
+      # different host, and a self-exclusion keyed on the wrong name stops
+      # excluding what it exists to exclude.
+      if [ -n "$FOREIGN" ]; then printf '%s\n' "${FAKE_SELF_LOGIN_FOREIGN-other-host-bot}"
+      else printf '%s\n' "${FAKE_SELF_LOGIN-zook-bot}"; fi ;;
     */collaborators/*/permission*)
       # The default trusted-approver policy's probe. A login with no row in
       # $FAKE_PERMS fails the call (GitHub 404s a non-collaborator, and 403s a
@@ -924,11 +965,16 @@ if [ "$1" = "api" ]; then
       # the policy must treat as untrusted.
       plogin="${PATH_ARG%%\?*}"; plogin="${plogin%/permission}"; plogin="${plogin##*/}"
       perm=""
-      if [ -n "${FAKE_PERMS:-}" ] && [ -f "$FAKE_PERMS" ]; then
+      # A COLLABORATOR ROW IS PER REPOSITORY. Asked of the ambient one, "may this
+      # account write here" is answered about a repository the merge will never
+      # touch — and a yes there is indistinguishable from a yes here.
+      permsrc="${FAKE_PERMS:-}"
+      [ -n "$FOREIGN" ] && permsrc="${FAKE_PERMS_FOREIGN:-}"
+      if [ -n "$permsrc" ] && [ -f "$permsrc" ]; then
         while IFS='|' read -r wlogin wperm; do
           [ "$wlogin" = "$plogin" ] || continue
           perm="$wperm"; break
-        done < "$FAKE_PERMS"
+        done < "$permsrc"
       fi
       [ -n "$perm" ] || exit 1
       pobj=$(printf '{"permission":"%s"}' "$perm")
@@ -946,6 +992,14 @@ if [ "$1" = "api" ]; then
          && printf '%s\n' "$FAKE_APIFAIL" | tr ',' '\n' | grep -qxF "$prnum"; then
         failnow=1
       fi
+      # THE REVIEW HISTORY IS PER REPOSITORY TOO, and it is the evidence the veto
+      # and approval gates are decided from. Read from the ambient repository, a
+      # same-numbered PR approved THERE satisfies the gate here, and a standing
+      # CHANGES_REQUESTED here is invisible because the veto lives in a history
+      # that was never read — both directions merge work no reviewer of this
+      # repository ever cleared.
+      revsrc="$FAKE_REVIEWS"
+      [ -n "$FOREIGN" ] && revsrc="${FAKE_REVIEWS_FOREIGN:-/dev/null}"
       out=""
       while IFS='|' read -r rpr rid rlogin rstate rcommit rsub rpage; do
         [ -n "$rpr" ] || continue
@@ -959,7 +1013,7 @@ if [ "$1" = "api" ]; then
         obj=$(printf '{"id":%s,"user":{"login":"%s"},"state":"%s","commit_id":"%s","submitted_at":"%s"}' \
                 "$rid" "$rlogin" "$rstate" "$rcommit" "$rsub")
         if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
-      done < "$FAKE_REVIEWS"
+      done < "$revsrc"
       if [ -n "$JQF" ]; then printf '[%s]\n' "$out" | jq -r "$JQF"
       else printf '[%s]\n' "$out"; fi
       [ -z "$failnow" ] || exit 1 ;;
@@ -2310,6 +2364,138 @@ has '^301$' "$TMP/merged" \
   || bad "(ID2b) a host-qualified pin must survive GH_HOST drift (got: $OUTID2B)"
 eq "$(cut -f2 "$TMP/mergedwhere" | sort -u)" "github.com/acme/repo" \
    "(ID2b) the merge landed on THIS host's repository, not GH_HOST's"
+
+# =============================================================================
+# (ID6-ID8) THE REST-PATH HALF OF THE SAME QUESTION (review tk-5knqi finding #1)
+# =============================================================================
+# ID1/ID2/ID2b cover the PR READS, which `gh pr view --repo <host>/<owner>/<repo>`
+# pins. But the approval gate does not decide from the PR read alone: it reads the
+# REVIEW HISTORY and a COLLABORATOR PERMISSION through `gh api`, which takes no
+# `--repo` — the repository lives in the REST path and the host in `--hostname`,
+# and each half omitted falls back to gh's ambient context. Those two calls carried
+# `repos/{owner}/{repo}/...`, unpinned in BOTH halves, so the evidence that
+# authorizes a merge here could come from wherever gh happened to point. The three
+# cases below are the three ways that goes wrong, and each one MERGES pre-fix.
+#
+# The foreign fixtures are deliberately plausible: an approving review from a
+# real-looking account, a write-level collaborator row. Nothing about the ANSWER
+# says it is about another repository — only where the question was asked does.
+
+# (ID6) THE MISSED VETO. Our PR#301 carries a standing CHANGES_REQUESTED from an
+# operator; the ambient repository's #301 does not. Read there, the veto simply
+# does not exist, and the pass merges past a human's explicit block.
+reset_ids
+: > "$TMP/perms"; printf 'johnzook|write\n' > "$TMP/perms"
+printf '301|7001|johnzook|CHANGES_REQUESTED|HEAD301|2026-01-01T00:00:00Z|1\n' > "$TMP/reviews"
+: > "$TMP/reviews-foreign"          # the ambient repository's #301: no veto at all
+echo 'stranger/repo' > "$TMP/ghdefault"
+OUTID6="$(FAKE_REVIEWS_FOREIGN="$TMP/reviews-foreign" bash "$SCRIPT")"
+has '^301$' "$TMP/merged" \
+  && bad "(ID6) a veto on OUR PR must hold the merge even when the ambient repository shows none" \
+  || ok "(ID6) gh default drifted -> the reviews read is still ours, so the standing veto holds the merge"
+hasin "$OUTID6" "PR#301 external reviewer 'johnzook' has a standing CHANGES_REQUESTED" \
+  && ok "(ID6) the hold names the veto it found in OUR repository's history" \
+  || bad "(ID6) must report the veto (got: $OUTID6)"
+
+# (ID7) THE BORROWED APPROVAL. The anchor declares the `approval` gate, so a real
+# external APPROVED review is required. Ours has none; the ambient repository's
+# same-numbered PR has one, from an account with write access there. Read there,
+# the requirement is satisfied by a review of a pull request this merge will never
+# touch.
+reset_ids
+cat > "$TMP/anchors" <<'A'
+bead-CLEAN|301|main|codex,approval|green@HEAD301
+A
+: > "$TMP/perms"                    # here: no collaborator rows at all
+: > "$TMP/reviews"                  # here: nobody approved #301
+# There: an approving review AND the write access that makes it trusted. Both
+# halves of the evidence are borrowed, so an unpinned pass merges.
+printf 'outsider|write\n' > "$TMP/perms-foreign"
+printf '301|7002|outsider|APPROVED|HEAD301|2026-01-01T00:00:00Z|1\n' > "$TMP/reviews-foreign"
+echo 'stranger/repo' > "$TMP/ghdefault"
+OUTID7="$(FAKE_REVIEWS_FOREIGN="$TMP/reviews-foreign" FAKE_PERMS_FOREIGN="$TMP/perms-foreign" \
+          bash "$SCRIPT")"
+has '^301$' "$TMP/merged" \
+  && bad "(ID7) an approval that exists only in the ambient repository must NOT satisfy this merge's approval gate" \
+  || ok "(ID7) gh default drifted -> the approval gate reads OUR history and holds, unapproved"
+hasin "$OUTID7" "PR#301 no external approving review at the live head" \
+  && ok "(ID7) the hold says OUR PR is unapproved, not that somebody else's is approved" \
+  || bad "(ID7) must report the unapproved hold (got: $OUTID7)"
+
+# (ID8) THE BORROWED PERMISSION. The approving review IS ours this time — the
+# reviews read is pinned and finds it — but the approver holds write access only in
+# the AMBIENT repository, and none here. The trusted-approver probe is a second,
+# separate `gh api` call, so pinning the reviews read alone does not close this:
+# "may this account write to the repository we are about to merge in" has to be
+# asked OF that repository.
+reset_ids
+cat > "$TMP/anchors" <<'A'
+bead-CLEAN|301|main|codex,approval|green@HEAD301
+A
+: > "$TMP/perms"                    # no collaborator row here — not a writer
+printf 'outsider|write\n' > "$TMP/perms-foreign"
+# The SAME approving review in both repositories, so the reviews read cannot be
+# what decides this case: an unpinned pass and a pinned one both find the approval,
+# and only the permission probe tells them apart. That isolates the second call —
+# pinning the history alone would leave this hole open.
+printf '301|7003|outsider|APPROVED|HEAD301|2026-01-01T00:00:00Z|1\n' > "$TMP/reviews"
+cp "$TMP/reviews" "$TMP/reviews-foreign"
+echo 'stranger/repo' > "$TMP/ghdefault"
+OUTID8="$(FAKE_PERMS_FOREIGN="$TMP/perms-foreign" FAKE_REVIEWS_FOREIGN="$TMP/reviews-foreign" \
+          bash "$SCRIPT")"
+has '^301$' "$TMP/merged" \
+  && bad "(ID8) write access in ANOTHER repository must not make an approver trusted here" \
+  || ok "(ID8) gh default drifted -> the permission probe asks OUR repository and the approval is untrusted"
+hasin "$OUTID8" "no approver satisfies the trusted-approver policy" \
+  && ok "(ID8) the hold names the trusted-approver policy" \
+  || bad "(ID8) must report the untrusted approver (got: $OUTID8)"
+
+# (ID9) NOT over-pinning: with gh's context UNDRIFTED, the very same fixtures merge.
+# Otherwise ID6-ID8 could all be passing because the approval path is broken
+# outright rather than because it is pinned.
+reset_ids
+cat > "$TMP/anchors" <<'A'
+bead-CLEAN|301|main|codex,approval|green@HEAD301
+A
+printf 'outsider|write\n' > "$TMP/perms"
+printf '301|7004|outsider|APPROVED|HEAD301|2026-01-01T00:00:00Z|1\n' > "$TMP/reviews"
+OUTID9="$(bash "$SCRIPT")"
+has '^301$' "$TMP/merged" \
+  && ok "(ID9) control: an approval in OUR repository, by a writer here, still merges" \
+  || bad "(ID9) the pinned approval path must still merge a genuinely approved PR (got: $OUTID9)"
+
+# =============================================================================
+# (SYNC) THE DUPLICATED IDENTITY RESOLVER MUST NOT DRIFT
+# =============================================================================
+# `pr_nums_here` — which PR a bead names, under every key, restricted to this
+# repository — exists in THREE places: this script, reconcile-merged-prs.sh, and
+# the signoff template's pre-dismissal guard. They are duplicated on purpose (each
+# script is standalone, and the third is instruction text a polecat executes, so
+# there is nothing to source), and every one of those files says "keep them in
+# step" in prose. Prose is not a mechanism: tk-5knqi finding #2 was precisely one
+# of the three drifting to `pr_number` alone, which stranded fork-keyed anchors in
+# the arm that was supposed to un-strand them, while the other two kept working.
+#
+# So the invariant is checked rather than asked for. Whitespace-normalized, because
+# the template's copy is indented inside a jq program; everything else must match
+# character for character.
+extract_pnh() { # <file> -> the pr_nums_here definition, whitespace-normalized
+  sed -n '/^ *def pr_nums_here(\$o):/,/unique;/p' "$1" \
+    | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//'
+}
+PNH_MS=$(extract_pnh "$SCRIPT")
+PNH_RC=$(extract_pnh "$(dirname "$SCRIPT")/reconcile-merged-prs.sh")
+PNH_TM=$(extract_pnh "$(dirname "$SCRIPT")/../../template-fragments/polecat-non-impl-done.template.md")
+[ -n "$PNH_MS" ] \
+  && ok "(SYNC) pr_nums_here found in merge-skill.sh (the reference copy)" \
+  || bad "(SYNC) pr_nums_here not found in $SCRIPT"
+eq "$PNH_RC" "$PNH_MS" "(SYNC) reconcile-merged-prs.sh's copy is identical"
+eq "$PNH_TM" "$PNH_MS" "(SYNC) the signoff template's copy is identical"
+# ...and it really does read all three keys, so three identical copies of a
+# NARROWED definition cannot pass this check quietly.
+hasin "$PNH_MS" 'pr_number' && hasin "$PNH_MS" 'fork_pr' && hasin "$PNH_MS" 'fork_pr_url' \
+  && ok "(SYNC) and the shared definition names all three PR keys" \
+  || bad "(SYNC) pr_nums_here must read pr_number, fork_pr and fork_pr_url (got: $PNH_MS)"
 
 # (ID4) REPOFAIL: this checkout's origin cannot be resolved at all. Every PR number
 # would then be read — and merged — wherever gh happens to point, so the pass must

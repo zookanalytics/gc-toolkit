@@ -78,12 +78,14 @@ reached GitHub.
 #      the bot actor happens to hold GitHub approve permission. BEFORE
 #      posting, check whether an earlier attempt already submitted a
 #      review under your handle — don't double-post:
-#        gh api repos/<owner>/<repo>/pulls/<num>/reviews \
+#        gh api --hostname <host> repos/<owner>/<repo>/pulls/<num>/reviews \
 #          | jq '.[] | select(.user.login == "<your-handle>") | .submitted_at'
-#      A recent submission means skip the post step. Take <owner>/<repo> from
-#      the review bead's own metadata.pr_url — NOT from whatever repository gh
-#      happens to be pointed at. Every GitHub call in this fragment is pinned
-#      that way; see the PR_REPO derivation in the signoff-gate section.
+#      A recent submission means skip the post step. Take <host> and
+#      <owner>/<repo> from the review bead's own metadata.pr_url — NOT from
+#      whatever repository gh happens to be pointed at, and not from $GH_HOST,
+#      which supplies the host for any `gh api` call that omits `--hostname`.
+#      Every GitHub call in this fragment is pinned that way; see the
+#      PR_REPO/PR_HOST derivation in the signoff-gate section.
 #    - PRE-OPEN review tasks (`metadata.review_branch` set, NO `pr_number` —
 #      the pre-open codex gate, tk-6d0vb.1.8): there is NO PR yet. Review the
 #      BRANCH compare-range instead of a PR, and record the verdict in THIS
@@ -215,11 +217,20 @@ PR_NUMBER=$(gc bd show "$REVIEW_BEAD" --json | jq -r '.[0].metadata.pr_number //
 # want. Empty means the bead names no parseable PR url, and every GitHub call below
 # is skipped rather than run unpinned: an unstamped gate just re-gates next pass,
 # but a dismissal in the wrong repository cannot be undone.
+#
+# `PR_HOST` is the third form, and it is NOT optional: `gh api` takes a REST path,
+# which carries `<owner>/<repo>` and no host, so `repos/$PR_REPO/...` pins only
+# HALF the identity and gh fills the other half from $GH_HOST. `<owner>/<repo>`
+# names one repository PER HOST — another host's identically-named repository has
+# a PR #<n>, its own reviews, and its own review ids — so a half-pinned dismissal
+# is still a dismissal in a repository nobody named (review tk-5knqi finding #1).
+# Every `gh api` call below carries `--hostname "$PR_HOST"` for that reason.
 # >>> signoff-repo-pin
 PR_URL=$(gc bd show "$REVIEW_BEAD" --json | jq -r '.[0].metadata.pr_url // empty')
 PR_REPO_Q=$(printf '%s' "$PR_URL" \
   | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\([^/][^/]*\)/\([^/][^/]*/[^/][^/]*\)/pull/[0-9].*#\1/\2#p')
 PR_REPO="${PR_REPO_Q#*/}"
+PR_HOST="${PR_REPO_Q%%/*}"
 # <<< signoff-repo-pin
 # Which check-set gate this review satisfies — the per-gate marker key is
 # check.<CHECK_NAME>. The dispatch stamps check_name=codex; default to codex for
@@ -416,11 +427,15 @@ if [ -n "$FIX_POOL" ]; then
           # rounds the review you just submitted is on the LAST page — an
           # unpaginated read would silently `last` an OLDER review of yours and
           # stamp the gate green at a commit you did not just review.
-          REVIEW_HANDLE=$(gh api user -q .login 2>/dev/null)
-          # PINNED to the bead's own repository (see PR_REPO above). Unpinned, this
-          # reads a same-numbered PR wherever gh happens to point and stamps THAT
-          # PR's head onto our anchor as gate-green.
-          REVIEWED_OID=$(gh api --paginate "repos/$PR_REPO/pulls/$PR_NUMBER/reviews?per_page=100" --jq '.[]' 2>/dev/null \
+          # Pinned to the bead's own HOST: an account name is host-scoped, so an
+          # unpinned `gh api user` under a drifted $GH_HOST names a different
+          # host's account, and the filter below would then look for reviews by a
+          # handle that never wrote any.
+          REVIEW_HANDLE=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
+          # PINNED to the bead's own repository AND host (see PR_REPO/PR_HOST
+          # above). Unpinned, this reads a same-numbered PR wherever gh happens to
+          # point and stamps THAT PR's head onto our anchor as gate-green.
+          REVIEWED_OID=$(gh api --hostname "$PR_HOST" --paginate "repos/$PR_REPO/pulls/$PR_NUMBER/reviews?per_page=100" --jq '.[]' 2>/dev/null \
             | jq -rs --arg h "$REVIEW_HANDLE" \
                 '[.[] | select(.user.login == $h)] | sort_by(.submitted_at) | last | .commit_id // empty' 2>/dev/null)
         fi
@@ -581,7 +596,7 @@ if [ -n "$FIX_POOL" ]; then
         fi
         if [ -z "$REVIEW_BRANCH" ] && [ -n "$PR_NUMBER" ] && [ -n "$REVIEWED_OID" ] \
            && [ -n "$GATE_STAMPED" ] && [ -z "$ANCHOR_HOLD" ] && [ -n "$PR_REPO_Q" ]; then
-          [ -n "${REVIEW_HANDLE:-}" ] || REVIEW_HANDLE=$(gh api user -q .login 2>/dev/null)
+          [ -n "${REVIEW_HANDLE:-}" ] || REVIEW_HANDLE=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
           LIVE_HEAD=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null)
           # Guard 5: native auto-merge. If `gh pr merge --auto` is armed on this
           # PR, dropping the last block does not merely ALLOW the merge — GitHub
@@ -640,7 +655,7 @@ if [ -n "$FIX_POOL" ]; then
             # distinguishes it from a PR with nothing to retract. ANY failure skips
             # the retraction and says so: the gate marker is already stamped, so the
             # next re-gate reads a settled history and retracts then.
-            REVIEWS_RAW=$(gh api --paginate "repos/$PR_REPO/pulls/$PR_NUMBER/reviews?per_page=100" \
+            REVIEWS_RAW=$(gh api --hostname "$PR_HOST" --paginate "repos/$PR_REPO/pulls/$PR_NUMBER/reviews?per_page=100" \
               --jq '.[]' 2>/dev/null); REVIEWS_RC=$?
             STALE_REVIEWS=""
             if [ "$REVIEWS_RC" -ne 0 ]; then
@@ -663,7 +678,17 @@ if [ -n "$FIX_POOL" ]; then
               # may be a FRESH block on the NEW head rather than a superseded one,
               # and the commit_id filter cannot tell them apart once REVIEWED_OID
               # is stale. Abandon the retraction — a later re-gate re-reads.
-              NOW_HEAD=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null)
+              # ONE read, four fields: the head this guard has always compared, and
+              # the base/branch/url the anchor's identity is checked against below.
+              # Folding them into the existing round trip keeps the added guard
+              # free, and — more importantly — makes every comparison speak about
+              # the SAME observation of the PR.
+              NOW_PR=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" \
+                --json headRefOid,baseRefName,headRefName,url 2>/dev/null)
+              NOW_HEAD=$(printf '%s' "$NOW_PR" | jq -r '.headRefOid // ""' 2>/dev/null)
+              NOW_BASE=$(printf '%s' "$NOW_PR" | jq -r '.baseRefName // ""' 2>/dev/null)
+              NOW_REF=$(printf '%s' "$NOW_PR" | jq -r '.headRefName // ""' 2>/dev/null)
+              NOW_URL=$(printf '%s' "$NOW_PR" | jq -r '.url // ""' 2>/dev/null)
               if [ "$NOW_HEAD" != "$REVIEWED_OID" ]; then
                 echo "WARN: PR#$PR_NUMBER head moved ($REVIEWED_OID -> ${NOW_HEAD:-unknown}) mid-step; NOT dismissing review $RID (it may block the new head)" >&2
                 break
@@ -706,14 +731,42 @@ if [ -n "$FIX_POOL" ]; then
               # that would satisfy every condition below. Break rather than
               # continue: every condition here is anchor- or PR-wide, so what
               # stops this review stops every later one on the same PR.
+              # The PR number comes from EVERY key a bead names a PR with, not
+              # `pr_number` alone — the same `pr_nums_here` rule merge-skill.sh and
+              # reconcile-merged-prs.sh resolve an anchor's own identity by. An
+              # anchor keyed only by `fork_pr`/`fork_pr_url` (the fork-sync shape,
+              # which stamps no pr_number at all) reads as pr='' under the narrow
+              # rule, which this guard cannot tell apart from "the anchor moved off
+              # this PR" — so the retraction never runs and the PR stays blocked on
+              # a dead commit forever, which is the exact strand this whole step
+              # exists to clear (review tk-5knqi finding #2). EXACTLY ONE number or
+              # nothing: several do not answer which PR the anchor gates, and an
+              # ambiguous anchor must hold rather than have one picked for it. A
+              # `fork_pr_url` naming ANOTHER repository is dropped ($repo is this
+              # PR's own, from the bead's pr_url); a bare number names no
+              # repository and is kept, the same fail-closed wildcard the scripts
+              # use.
               ANCHOR_NOW=$(gc bd show "$ANCHOR" --json 2>/dev/null \
                 | tr -d '\000-\010\013\014\016-\037' \
-                | jq -c --arg gate "check.$CHECK_NAME" \
-                    '.[0] | select(. != null) | select(.metadata != null)
+                | jq -c --arg gate "check.$CHECK_NAME" --arg repo "$PR_REPO_Q" '
+                     def pr_nums_here($o):
+                       ( [ (.metadata.pr_number // empty), (.metadata.fork_pr // empty) ] | map(tostring) )
+                       + ( ((.metadata.fork_pr_url // "") | tostring)
+                           | [ capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<r>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
+                           | .[0]
+                           | if . == null then []
+                             elif ($o == "" or (.h + "/" + .r) == $o) then [ .n ]
+                             else [] end )
+                       | map(select(test("^[0-9]+$"))) | unique;
+                     .[0] | select(. != null) | select(.metadata != null)
+                     | (pr_nums_here($repo)) as $ns
                      | {status: ((.status // "") | ascii_downcase),
                         hold: ((.metadata.merge_hold // "") | tostring),
                         result: (.metadata.merge_result // ""),
-                        pr: ((.metadata.pr_number // "") | tostring),
+                        pr: (if ($ns | length) == 1 then $ns[0] else "" end),
+                        target: (.metadata.merged_target // ""),
+                        prurl: (.metadata.pr_url // ""),
+                        branch: (.metadata.branch // ""),
                         mark: (.metadata[$gate] // "")}' 2>/dev/null)
               if [ -z "$ANCHOR_NOW" ]; then
                 echo "WARN: anchor $ANCHOR metadata is UNREADABLE immediately before dismissing review $RID; NOT dismissing (an unreadable anchor cannot prove it is still open, unheld, parked on PR#$PR_NUMBER and green at the reviewed head, and a wrong guess drops the last block on a PR nothing else holds)" >&2
@@ -724,6 +777,9 @@ if [ -n "$FIX_POOL" ]; then
               A_RESULT=$(printf '%s' "$ANCHOR_NOW" | jq -r '.result' 2>/dev/null)
               A_PR=$(printf '%s' "$ANCHOR_NOW" | jq -r '.pr' 2>/dev/null)
               A_MARK=$(printf '%s' "$ANCHOR_NOW" | jq -r '.mark' 2>/dev/null)
+              A_TARGET=$(printf '%s' "$ANCHOR_NOW" | jq -r '.target' 2>/dev/null)
+              A_PRURL=$(printf '%s' "$ANCHOR_NOW" | jq -r '.prurl' 2>/dev/null)
+              A_BRANCH=$(printf '%s' "$ANCHOR_NOW" | jq -r '.branch' 2>/dev/null)
               # Truthiness matches merge-skill.sh's reading of merge_hold: set and
               # not empty/false/0 holds, so a stale `merge_hold=false` never
               # freezes the re-gate.
@@ -741,6 +797,28 @@ if [ -n "$FIX_POOL" ]; then
                 echo "WARN: anchor $ANCHOR changed mid-step (status='$A_STATUS' merge_result='$A_RESULT' pr_number='$A_PR' check.$CHECK_NAME='$A_MARK'; want open + pull_request + PR#$PR_NUMBER + green@$REVIEWED_OID); NOT dismissing review $RID — the block would come off a PR this anchor no longer gates as validated" >&2
                 break
               fi
+              # The rest of the anchor's identity, compared against the LIVE PR
+              # read above rather than against anything read earlier in this step.
+              # merged_target, pr_url and branch authorize the dismissal as
+              # directly as the gate marker does, and NONE of them moves the head —
+              # so the head re-read cannot catch a mid-step retarget, an identity
+              # repair (check-set-heal backfilling a certified pr_url), or a
+              # corrected branch. A field the anchor does not record is governed by
+              # the pinned read alone; only a value that DISAGREES is a mismatch.
+              A_REASON=""
+              if [ -n "$A_TARGET" ] && [ -n "$NOW_BASE" ] && [ "$A_TARGET" != "$NOW_BASE" ]; then
+                A_REASON="anchor was retargeted mid-step (merged_target='$A_TARGET', PR base '$NOW_BASE')"
+              elif [ -n "$A_PRURL" ] && [ -n "$NOW_URL" ] \
+                   && [ "$(printf '%s' "$A_PRURL" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')" \
+                        != "$(printf '%s' "$NOW_URL" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')" ]; then
+                A_REASON="anchor now records pr_url '$A_PRURL', which is not the PR#$PR_NUMBER just read ('$NOW_URL')"
+              elif [ -n "$A_BRANCH" ] && [ -n "$NOW_REF" ] && [ "$A_BRANCH" != "$NOW_REF" ]; then
+                A_REASON="anchor now records branch '$A_BRANCH' but PR#$PR_NUMBER is opened from '$NOW_REF'"
+              fi
+              if [ -n "$A_REASON" ]; then
+                echo "WARN: $A_REASON; NOT dismissing review $RID — the bead and the PR no longer describe the same work" >&2
+                break
+              fi
               # Record the pairing marker, then READ IT BACK before trading the
               # GitHub block away for it. `gc bd update` reporting success is not
               # proof the write is durable — the same reason guard 0 reads
@@ -755,7 +833,7 @@ if [ -n "$FIX_POOL" ]; then
               PAIRED=$(gc bd show "$ANCHOR" --json 2>/dev/null \
                 | jq -r '.[0].metadata.signoff_dismissed // empty' 2>/dev/null)
               if [ "$PAIRED" = "$RID@$REVIEWED_OID" ]; then
-                gh api -X PUT "repos/$PR_REPO/pulls/$PR_NUMBER/reviews/$RID/dismissals" \
+                gh api --hostname "$PR_HOST" -X PUT "repos/$PR_REPO/pulls/$PR_NUMBER/reviews/$RID/dismissals" \
                   -f message="Superseded by the re-gate at $REVIEWED_OID: the findings this review raised were addressed and the $CHECK_NAME gate is green at the live head. Approval remains external." \
                   -f event=DISMISS >/dev/null 2>&1 \
                   || echo "WARN: could not dismiss superseded review $RID on PR#$PR_NUMBER; PR stays blocked, retry next re-gate" >&2
