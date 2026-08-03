@@ -245,7 +245,54 @@ if [ -n "$FIX_POOL" ]; then
       # (pre-open) until the rework lands. The anchor's merge_result marker is LEFT
       # INTACT; the PR (or the pre_open_gate) still exists, so the anchor's state
       # must keep saying so. See docs/work-bead-state-machine.md.
-      if [ -n "$REVIEW_BRANCH" ]; then
+      #
+      # CONVERGENCE CAP (tk-uqfk1). Filing the child below also wakes a FRESH
+      # full-context polecat, and its hand-back makes the refinery mint a fresh
+      # codex review and wake a FRESH codex session — both pools are
+      # wake_mode="fresh", so every round pays two cold contexts. The loop is
+      # otherwise unbounded by construction ("however many rework rounds it
+      # takes", docs/work-bead-state-machine.md); one PR reached 15 rounds.
+      # Count the rounds already spent off the anchor's own children — one child
+      # per round, by construction — and past the cap escalate INSTEAD of filing.
+      # Not filing is the fail-safe: the merge hold derives from OPEN children
+      # (assets/scripts/merge-skill.sh), so an anchor with zero children stays
+      # held and parks for a human, with nothing left to spawn. Filing a child
+      # nobody re-reviews is what produces a silent indefinite hold instead.
+      # Count every status — a closed child is a COMPLETED round.
+      # The markers let the regression test extract and exercise this exact
+      # snippet (assets/scripts/signoff-round-cap.test.sh).
+      # >>> signoff-round-cap
+      ROUNDS=0
+      if [ -n "$ANCHOR" ]; then
+        ROUNDS=$(gc bd dep list "$ANCHOR" --direction=up -t parent-child --json 2>/dev/null \
+          | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
+      fi
+      # No anchor means no reliable round history — never cap on a guess, since
+      # capping wrongly parks live work for a human.
+      CAP_HIT=0
+      if [ -n "$ANCHOR" ] && [ "${ROUNDS:-0}" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+        CAP_HIT=1
+      fi
+      # <<< signoff-round-cap
+      # Guards the tail below: empty means no child was filed this round.
+      FIX_BEAD=""
+      if [ "$CAP_HIT" = 1 ]; then
+        # Clear the gate marker (the head is not gate-validated) and hand the
+        # anchor to a human. Escalate ONCE: gc.routed_to=human is the marker that
+        # makes a later pass skip this arm rather than re-mail every cycle.
+        gc bd update "$ANCHOR" \
+          --set-metadata gc.routed_to=human \
+          --set-metadata blocked_reason="signoff did not converge after $ROUNDS rework rounds (cap ${GC_MAX_REVIEW_ROUNDS:-3}); findings are in the review beads under this anchor" \
+          --unset-metadata "check.$CHECK_NAME" >/dev/null 2>&1 || true
+        gc mail send mayor/ -s "ESCALATION: signoff not converging on $ANCHOR ($ROUNDS rounds)" \
+          -m "Target: ${REVIEW_BRANCH:-PR#$PR_NUMBER}
+Rounds spent: $ROUNDS (cap ${GC_MAX_REVIEW_ROUNDS:-3})
+Findings still open this round: <one line each>
+
+No rework child was filed and no pool was woken. The anchor is held with zero
+open children, so nothing will re-dispatch it. It needs a human decision: land
+as-is, split the remaining findings into follow-up beads, or abandon." || true
+      elif [ -n "$REVIEW_BRANCH" ]; then
         # PRE-OPEN: no PR yet. The child resumes the BRANCH; NO existing_pr /
         # pr_number. When it hands back, the refinery re-dispatches codex on the
         # (new) branch head via the pre-open path — the PR still never opens until
@@ -278,16 +325,20 @@ if [ -n "$FIX_POOL" ]; then
       fi
       # Attach as a child of the anchor (visibility + completion interlock).
       # Best-effort: a failed edge must not strand the rework, so warn only.
-      if [ -n "$ANCHOR" ]; then
+      # All three actions below are guarded on FIX_BEAD: the cap arm above files
+      # no child, and it already cleared the gate marker and routed the anchor to
+      # a human. Waking the fix pool there would spawn the session the cap exists
+      # to prevent.
+      if [ -n "$FIX_BEAD" ] && [ -n "$ANCHOR" ]; then
         gc bd dep add "$FIX_BEAD" "$ANCHOR" --type=parent-child \
           || echo "WARN: could not link rework $FIX_BEAD under anchor $ANCHOR" >&2
         # The head is no longer gate-validated — clear the gate marker to re-gate
         # (pre-open: so pre-open-resolve.sh will not open a PR on unreviewed work).
         gc bd update "$ANCHOR" --unset-metadata "check.$CHECK_NAME" >/dev/null 2>&1 || true
-      else
+      elif [ -n "$FIX_BEAD" ]; then
         echo "WARN: no gating anchor resolved for review <work-bead>; rework $FIX_BEAD filed unlinked" >&2
       fi
-      gc session wake "$FIX_POOL" || true
+      [ -n "$FIX_BEAD" ] && { gc session wake "$FIX_POOL" || true; }
       ;;
   esac
 fi
