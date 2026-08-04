@@ -1685,7 +1685,10 @@ OUT5I7="$(run_heal 2>"$TMP/err5i7")" || RC5I7=$?
 grep -q '^rev-new-1	gc.routed_to	' "$TMP/revmeta" \
   && bad "(DROPROUTE) the fixture must actually drop the routing write" \
   || ok "(DROPROUTE) pass 1: the routing write is lost"
-grep -q 'did not record gc.routed_to' "$TMP/err5i7" \
+# The route read-back reports BOTH halves it verified (review_pool, gc.routed_to)
+# and the assignee that would have excused an empty live half, because "the route
+# did not stick" is acted on differently depending on which half is missing.
+grep -q 'did not durably route' "$TMP/err5i7" \
   && ok "(DROPROUTE) pass 1: the unclaimable review is reported, not assumed dispatched" \
   || bad "(DROPROUTE) pass 1 must verify the route it just wrote (err: $(cat "$TMP/err5i7"))"
 printf '%s\n' "$OUT5I7" | grep -q '0 signoffs dispatched' \

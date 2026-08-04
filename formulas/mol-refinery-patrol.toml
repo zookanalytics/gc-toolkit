@@ -92,7 +92,7 @@ description = "After a successful direct merge, attempt to fast-forward the rig'
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. To run a rig GATELESS, set the explicit sentinel 'none' (or 'off'): the merge-push step normalizes it to the canonical 'none', which is STAMPED on the anchor and which merge-skill.sh reads as 'no gates' (merge then governed only by CI + approval + no-open-child). An EMPTY value is NOT an opt-out — it is treated as absent and recovers this default, because {{check_set}} is hand-substituted from raw TOML on the --root-only patrol path and a mis-substitution would otherwise silently un-gate every PR (tk-4na1b). The sentinel is stamped rather than collapsed to empty so that 'gateless by choice' and 'never normalized' are DISTINCT on the anchor: a hand-recovered bead bypasses this formula entirely and arrives carrying an empty check_set, which check-set-heal.sh repairs at the refinery boundary before the merge skill can read it as ungated (tk-i48ca). Replaces the retired review_gate string + signoff_head side-channel."
+description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. 'approval' is the one member evidenced by GitHub review state instead of a stamped marker (merge-skill.sh drops it from the marker loop, the way it drops the 'none' sentinel, since nothing can stamp check.approval). It requires an APPROVED latest-review that is ALL THREE of: (a) attached to the PR's LIVE head — an approval of an earlier commit re-gates exactly like a stale check.<name>=green@<old-sha>, so any push after the approval re-arms the gate; (b) from an account other than the one the city acts as (the city posts COMMENT signoffs and never approves its own PRs); and (c) from a TRUSTED approver, which is a stronger bar than merely non-self — on a public repo any account can submit an APPROVED review, and this gate matters precisely where GitHub enforces nothing server-side. Trust has two policies: when MERGE_TRUSTED_APPROVERS is set in the refinery's environment (comma-separated logins) that allowlist IS the policy and no permission probe runs; otherwise the approver must hold admin/maintain/write permission on the repo (read from repos/{owner}/{repo}/collaborators/<login>/permission). Anything else HOLDS the merge, fail-closed — including a permission probe that cannot be READ, since unreadable is indistinguishable from 'no access' and guessing lands unreviewed work. Separately from this member — and from check_set entirely — a standing CHANGES_REQUESTED from ANY non-self reviewer vetoes the merge on EVERY PR, whoever approved: one reviewer's approval does not answer another's unresolved objection, and a rig that never declares 'approval' is not a rig where a human's 'not this' stops counting (tk-bdfww). Unlike the approval the veto is not head-bound — an objection stands until its author supersedes it or it is dismissed. If the refinery's token cannot read collaborator permissions, set MERGE_TRUSTED_APPROVERS rather than leaving the gate permanently held. Declare 'approval' on a rig whose repo does NOT require reviews — there mergeStateStatus=CLEAN is true with zero approvals, so without it merge-skill.sh will land unreviewed work (tk-5niup). It is also armed automatically, whatever check_set says, on an anchor carrying signoff_dismissed (the re-gate retracted the city's own blocking review, so CLEAN is partly our own doing). To run a rig GATELESS, set the explicit sentinel 'none' (or 'off'): the merge-push step normalizes it to the canonical 'none', which is STAMPED on the anchor and which merge-skill.sh reads as 'no gates' (merge then governed only by CI + no-open-child + whatever mergeStateStatus=CLEAN folds on that repo). An EMPTY value is NOT an opt-out — it is treated as absent and recovers this default, because {{check_set}} is hand-substituted from raw TOML on the --root-only patrol path and a mis-substitution would otherwise silently un-gate every PR (tk-4na1b). The sentinel is stamped rather than collapsed to empty so that 'gateless by choice' and 'never normalized' are DISTINCT on the anchor: a hand-recovered bead bypasses this formula entirely and arrives carrying an empty check_set, which check-set-heal.sh repairs at the refinery boundary before the merge skill can read it as ungated (tk-i48ca). Replaces the retired review_gate string + signoff_head side-channel."
 default = "codex"
 
 [[steps]]
@@ -221,7 +221,9 @@ gating set read EMPTY, and PR#37 sat open 6 days with zero escalations. This pha
 enumerates on a predicate that SURVIVES the damage — beads the refinery already
 canonicalized a PR onto (`pr_url`/`pr_number`) that carry no `merge_result` — and
 restores `merge_result=pull_request`, backfilling `pr_number` (merge-skill.sh skips
-an anchor without one) and `pr_url` from the certified PR, and `merged_target` (what
+an anchor that names no PR under ANY of pr_number/fork_pr/fork_pr_url, and HOLDS one
+whose keys name several different numbers) and `pr_url` from the certified PR, and
+`merged_target` (what
 the retarget check compares) from the anchor's own recorded `target`/`merged_target` —
 falling back to the certified PR's live base ONLY when no recorded intent survived.
 Preferring the record is the point: taking the live base would silently BLESS a
@@ -263,11 +265,30 @@ record: validate the live base == the anchor's `merged_target`, every gate in th
 anchor's `check_set` is green at the live head (per-gate marker
 check.<name>=green@<head>, so a stale approval or a post-review commit re-gates
 instead of merging early), no open rework
-child holds the PR, and `mergeStateStatus == CLEAN` (CI + approval + base-current
-+ no-conflict); then an EXPLICIT `gh pr merge --squash` (NOT auto-merge); then
+child holds the PR, the `approval` member is satisfied by a real EXTERNAL
+approving review wherever the anchor requires it (named in `check_set`, or armed
+automatically by `signoff_dismissed` — tk-5niup; the review must be at the LIVE
+head and from a TRUSTED non-city approver — the `MERGE_TRUSTED_APPROVERS`
+allowlist when set, otherwise admin/maintain/write repo permission — see
+`[vars.check_set]`), and `mergeStateStatus == CLEAN`
+(CI + base-current + no-conflict, plus approval only where the repo requires a
+review); then ONE MORE READ of the anchor, immediately before the merge, because
+every gate above ran against metadata read several round-trips earlier and another
+writer can park it (`merge_hold`), re-gate a `check.<name>`, close it or retarget
+it in that window without ever moving the head — an unreadable re-read holds, since
+a merge is the one act this pass cannot retract; then an EXPLICIT `gh pr merge
+--squash --match-head-commit <validated head>` (NOT auto-merge, and pinned to the
+commit the gates validated so a mid-pass push cannot land an unvalidated head); then
 close the bead `"Merged to <target> at <sha>"` + stamp `merge_result=merged`. The
 refinery is the single writer — it does not delegate the landing to GitHub
 auto-merge and poll. This RETIRES `gh pr merge --auto` as the main-PR path.
+
+Its `approval` member and the observer's superseded-review arm are two halves of
+one fix (tk-5niup): a COMMENT re-gate never supersedes an earlier
+CHANGES_REQUESTED, so a changes-round PR stays BLOCKED on a dead commit while the
+bead reads green; retracting our own superseded review is what reconciles them,
+and the explicit approval requirement is what keeps that retraction from becoming
+an unreviewed merge on a repo that requires no review.
 
 Every read and the merge itself are PINNED with `--repo` to the repository the
 `origin` remote names, and the URL that comes back is compared against it: a bead
@@ -1286,10 +1307,27 @@ case "$_cs_canon" in
 esac
 unset _cs_canon
 # <<< check-set-normalize
+# Membership decided IN-SHELL, never through a `... | grep -qxF codex` pipeline
+# (tk-tmefn). `grep -q` exits at its FIRST match, closing the pipe under the
+# `tr`/`sed` still writing the gates that FOLLOW `codex`; they take SIGPIPE and
+# the pipeline's LAST status is 141. Under `set -o pipefail` that 141 becomes the
+# pipeline's status, and a check_set that DOES name codex reads as one that does
+# not — decided by nothing but how many gates happen to come after it, so a rig
+# passes on a short check_set and silently drops PRE_OPEN (the PR then opens
+# BEFORE codex has reviewed it) once the list grows.
+#
+# This step's block sets `-e`, NOT `-o pipefail`, so the trap is LATENT here
+# rather than live: the pipeline's status is grep's 0 and the membership reads
+# correctly today. It is fixed anyway because the identical construct WAS live in
+# check-set-heal.sh and merge-skill.sh (both `set -o pipefail`), a single
+# `set -o pipefail` added to this preamble is all it would take to arm it, and
+# the in-shell form is not worse in any dimension. Whitespace is stripped
+# outright — a gate name cannot contain any — and the comma wrapping makes it a
+# whole-token test.
 CODEX_GATE=0
-if printf '%s' "$CHECK_SET" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex; then
-  CODEX_GATE=1
-fi
+case ",$(printf '%s' "$CHECK_SET" | tr -d '[:space:]')," in
+  *",codex,"*) CODEX_GATE=1 ;;
+esac
 # PRE_OPEN also requires gh: the pre-open PR-create resolver (pre-open-resolve.sh)
 # opens the PR via gh, so a no-gh (REST-fallback) rig must stay on the post-open
 # path or its PR would never open. merge-skill/observer already require gh, so
@@ -1621,6 +1659,16 @@ land as-is, split the remaining findings into follow-up beads, or abandon." >/de
     # stamps review_branch/review_base (the compare-range the reviewer diffs,
     # and the template's pre-open discriminator); POST-OPEN stamps
     # pr_url/pr_number.
+    #
+    # review_pool is the DURABLE copy of the review's own route, stamped
+    # atomically with it for the same reason anchor_bead is stamped alongside
+    # the blocks edge: gc.routed_to is WORKING state (a claim consumes it, a
+    # re-route rewrites it), so the completion path cannot rely on it still
+    # being there. When a signoff ends with the gate unrecorded it must put the
+    # review BACK in a pool to be re-offered; with no route to restore, the bead
+    # is open, unassigned and in NO pool — offered to nobody, so the gate is
+    # owed forever and the PR (or the pre-open branch) sits held. This is the
+    # field that path falls back to.
     if [ "$PRE_OPEN" = 1 ]; then
       gc bd update "$REVIEW_BEAD" \
         --set-metadata task_kind=review \
@@ -1629,6 +1677,7 @@ land as-is, split the remaining findings into follow-up beads, or abandon." >/de
         --set-metadata review_base="$TARGET" \
         --set-metadata fix_target_pool="$FIX_POOL" \
         --set-metadata anchor_bead="$GATING_ANCHOR" \
+        --set-metadata review_pool="$CODEX_POOL" \
         --set-metadata gc.routed_to="$CODEX_POOL"
     else
       gc bd update "$REVIEW_BEAD" \
@@ -1638,6 +1687,7 @@ land as-is, split the remaining findings into follow-up beads, or abandon." >/de
         --set-metadata pr_number="$PR_NUMBER" \
         --set-metadata fix_target_pool="$FIX_POOL" \
         --set-metadata anchor_bead="$GATING_ANCHOR" \
+        --set-metadata review_pool="$CODEX_POOL" \
         --set-metadata gc.routed_to="$CODEX_POOL"
     fi
     # Gate-as-dep (close-on-land): the review bead BLOCKS the open anchor —
@@ -1703,10 +1753,20 @@ unset _cs_canon
 # retries (idempotent: the EXISTING_REVIEW guard heals on retry). Non-codex gates
 # legitimately have no review bead, so this fires ONLY when codex review is a
 # required check-set member.
-# Membership normalized identically to the dispatch site above (split on comma,
-# trim, drop empties) so a spaced "lint, codex" is recognized here too — matching
-# merge-skill.sh enforcement so dispatch and fail-closed never diverge (tk-aj4ua).
-if printf '%s' "${CHECK_SET:-}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qxF codex && [ -z "${REVIEW_FOR_GATE:-}" ]; then
+# Membership normalized identically to the CODEX_GATE site above (whole-token
+# match against the comma-wrapped list, whitespace stripped) so a spaced
+# "lint, codex" is recognized here too — matching merge-skill.sh enforcement so
+# dispatch and fail-closed never diverge (tk-aj4ua). Decided IN-SHELL for the
+# reason given there (tk-tmefn): a `... | grep -qxF codex` pipeline reports 141 on
+# a long check_set once `pipefail` is on, which HERE would skip the guard entirely
+# and detach the anchor with NO review bead — the exact stranding this fail-closed
+# check exists to prevent. Latent today (this block sets `-e` only), fixed anyway
+# so the two sites cannot diverge and so enabling pipefail stays safe.
+_fc_codex=0
+case ",$(printf '%s' "${CHECK_SET:-}" | tr -d '[:space:]')," in
+  *",codex,"*) _fc_codex=1 ;;
+esac
+if [ "$_fc_codex" = 1 ] && [ -z "${REVIEW_FOR_GATE:-}" ]; then
   echo "Codex review gate required but no review id (create/lookup failed); leaving $WORK assigned to refinery for retry." >&2
   gc runtime drain-ack
   exit 1
@@ -1715,6 +1775,45 @@ fi
 # above): $WORK on a first handoff, the existing anchor on a rework hand-back
 # (tk-ynz4b). Default to $WORK so the extracted snippet runs standalone.
 FC_ANCHOR="${GATING_ANCHOR:-$WORK}"
+# The review's ROUTE, read back the same way the anchor link is (tk-tmefn).
+#   review_pool   the DURABLE copy of the route. Never consumed, and the only
+#                 field the signoff can restore the route from when it must put
+#                 the review BACK to be re-offered.
+#   gc.routed_to  the LIVE offer, which a claim CONSUMES — so an empty value is a
+#                 fault only when nobody has claimed the bead either. A codex
+#                 polecat that claimed the review between the dispatch and this
+#                 read leaves it legitimately empty, and re-routing then would
+#                 offer a claimed review to a second pool. A non-empty value
+#                 naming a DIFFERENT pool is a fault in its own right (tk-5niup):
+#                 it is a route to somebody who will never stamp this gate.
+# An unreadable bead answers neither, and unverified is not verified: it takes
+# the same fail-closed defer as a bad route.
+fc_read_route() { # <bead-id> -> "review_pool|gc.routed_to|assignee" (empty if unreadable)
+  gc bd show "$1" --json 2>/dev/null \
+    | jq -r '.[0] | [(.metadata.review_pool // ""),
+                     (.metadata["gc.routed_to"] // ""),
+                     (.assignee // "")] | join("|")' 2>/dev/null
+}
+fc_route_ok() { # <route-state> <pool>
+  local state="${1:-}" pool="${2:-}" p r a
+  [ -n "$state" ] || return 1
+  IFS='|' read -r p r a <<< "$state"
+  [ "$p" = "$pool" ] || return 1
+  # The live half must BE the pool, not merely be non-empty (tk-5niup). A
+  # gc.routed_to naming a DIFFERENT pool is not a route to $pool: the review is
+  # offered to a pool that will never stamp THIS gate, so no codex polecat is
+  # guaranteed to claim it — yet the anchor is detached into pre_open_gate /
+  # pull_request all the same. That is the identical unclaimable strand an empty
+  # route produces, only harder to see because the field looks populated, and it
+  # is precisely the route-persistence class this gate exists to close.
+  # Match-or-claimed, identical to arm_stale_gate (reconcile-merged-prs.sh) and
+  # check-set-heal.sh's route_ok, so the formula gate and the scripts cannot
+  # diverge on what "routed" means: an assignee means the review is ALREADY
+  # claimed (the claim consumed gc.routed_to, so empty is legitimate then);
+  # unclaimed, the live offer has to name $pool.
+  [ -n "$a" ] || [ "$r" = "$pool" ] || return 1
+  return 0
+}
 if [ -n "${REVIEW_FOR_GATE:-}" ]; then
   gc bd update "$REVIEW_FOR_GATE" --set-metadata anchor_bead="$FC_ANCHOR" >/dev/null 2>&1 || true
   RECORDED_ANCHOR=$(gc bd show "$REVIEW_FOR_GATE" --json 2>/dev/null \
@@ -1723,6 +1822,32 @@ if [ -n "${REVIEW_FOR_GATE:-}" ]; then
     echo "Anchor linkage (anchor_bead) not durably recorded on review $REVIEW_FOR_GATE; leaving $WORK assigned to refinery for retry." >&2
     gc runtime drain-ack
     exit 1
+  fi
+  # A recorded anchor is only half the link: the review must also be REACHABLE by
+  # the pool that has to claim it. The dispatch above wrote the route best-effort
+  # — its status discarded, and a `gc bd update` can report success on a write
+  # that did not land — and nothing read it back. A dispatch counted without a
+  # route is not a lost pass but a PERMANENT strand: the review bead is open, so
+  # the next patrol's EXISTING_REVIEW dedup reuses it rather than minting a
+  # replacement, while no pool can ever claim it. The gate stays armed and unmet,
+  # the PR (or the pre-open branch) is held, and nothing retries. Repaired once —
+  # a transient write is the common case — then re-verified; still bad leaves
+  # $WORK with the refinery for the next patrol, exactly like the anchor-link
+  # failure above. Skipped entirely when no pool is in scope (a non-codex gate
+  # dispatches no review, so there is no route to owe).
+  if [ -n "${CODEX_POOL:-}" ]; then
+    FC_ROUTE=$(fc_read_route "$REVIEW_FOR_GATE")
+    if ! fc_route_ok "$FC_ROUTE" "$CODEX_POOL"; then
+      gc bd update "$REVIEW_FOR_GATE" \
+        --set-metadata review_pool="$CODEX_POOL" \
+        --set-metadata gc.routed_to="$CODEX_POOL" >/dev/null 2>&1 || true
+      FC_ROUTE=$(fc_read_route "$REVIEW_FOR_GATE")
+    fi
+    if ! fc_route_ok "$FC_ROUTE" "$CODEX_POOL"; then
+      echo "Review $REVIEW_FOR_GATE is not durably routed to $CODEX_POOL (got '$FC_ROUTE'); leaving $WORK assigned to refinery for retry." >&2
+      gc runtime drain-ack
+      exit 1
+    fi
   fi
 fi
 # <<< signoff-anchor-failclosed
