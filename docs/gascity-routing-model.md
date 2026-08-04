@@ -17,7 +17,10 @@ mean.
 
 **Boundaries.** This doc covers *how* work moves between agents, not
 *who* the agents are — that's [gascity-agents.md](gascity-agents.md). It
-defines the routing contract; it is not a command tutorial.
+defines the routing contract; it is not a command tutorial, and it is
+not an incident procedure — recovering a dispatch that was already
+poured is
+[gascity-dispatch-containment.md](gascity-dispatch-containment.md).
 
 ## Provenance
 
@@ -31,11 +34,12 @@ defines the routing contract; it is not a command tutorial.
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
-| Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | Attach routes the source and leaves the wisp root unrouted: `rigs/gascity/internal/sling/sling_core.go:482` (`molecule_id` on source) and the rationale comment at `:488-497`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4105`, asserting source `gc.routed_to=mayor` at `:4129` and wisp-root `gc.routed_to` empty at `:4151`). Standalone launch routes the root instead: `slingFormula` finalizes on `mResult.RootID` (`sling_core.go:373`). Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:303-305` with its rationale at `:296-302`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns before routing: `sling_core.go:477-481` → `doStartGraphWorkflow` (`:645-683`). Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
+| Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | **Classic** attach routes the source and leaves the wisp root unrouted — the graph.v2 attach does **not**, it routes its workflow root (see the graph.v2 clause later in this row): `rigs/gascity/internal/sling/sling_core.go:563` (`molecule_id` on source) and the rationale comment at `:569-578`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4178`, which attaches the *classic* `code-review` formula), asserting source `gc.routed_to=mayor` at `:4202` and wisp-root `gc.routed_to` empty at `:4224`. Standalone launch routes the root instead: `slingFormula` (`sling_core.go:366`) finalizes on `mResult.RootID` at `:405`, and its own graph branch (`:395`) hands off to `doStartGraphWorkflow` at `:396` before ever reaching that finalize. Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:335` (called at `:138`) with its rationale at `:328-334`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns *before* all of that classic routing and routes its **workflow root** instead: the `isGraph` branch of `attachFormulaToBead` (`sling_core.go:479`) spans `:487-533` and calls `doStartGraphWorkflow` (`:516`, defined at `:726`), with the root's `gc.routed_to` stamped at `internal/graphroute/graphroute.go:569`. Line references re-verified in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 | Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
 | Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tiers loop `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd list --status=in_progress --assignee=<candidate>` (in-progress recovery) then `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…` (ready assigned), and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
 | Instance-suffixed `gc.routed_to` normalized on the **demand read side only** | gastownhall/gascity | `17130b324` — "Normalize routed work instance names in demand matching (#4596)". Read side: `controllerDemandRouteTarget` (`rigs/gascity/cmd/gc/build_desired_state.go:1718`, rationale comment at `:1707-1717`), reached from `defaultScaleCheckCountsAndDemand` (`:1474`, invoked at `:735`) for every template in `defaultScaleTargets` — which is *not* only the no-custom-`scale_check` pools (`:446`, `:491`, `:567`): a custom-`scale_check` pool also gets this probe while cold (`isCold` at `:476`; append + `coldWakeTemplates` at `:633-637`), its contribution clamped to 1 (`:757-759`) and merged as a maximum against the custom count (`:766-768`); helper `agentutil.NormalizePoolRouteTarget` (`rigs/gascity/internal/agentutil/resolve.go:228`); coverage `TestDefaultScaleCheckCountsAndDemandNormalizesInstanceSuffixedRouteTarget` and `…LeavesUnmatchedInstanceSuffixAlone` (`cmd/gc/build_desired_state_test.go`). Offer side deliberately unchanged and exact-match: `bdReadyPoolDemandShell` (`rigs/gascity/internal/config/workquery.go:41`) with `$target` from `poolDemandTarget()` (`:157`), and `hookClaimMatchesRoute`'s raw `==` (`rigs/gascity/cmd/gc/cmd_hook_claim.go:1205`) over base-name route targets (`cmd/gc/cmd_hook.go:468`, `:685`). Write side, two distinct helpers: `032c1fbcd` (#3963) centralizes the **agent-derived** route identity as `agentutil.RoutedToIdentity` (`resolve.go:204`, collapse to `PoolName`), which the default sling query inlines rather than calls (`internal/config/workquery.go:532-536` — `internal/config` cannot import `agentutil`, which imports `config`); the **explicit-target-string** collapse is the separate `agentutil.NormalizePoolRouteTarget` (`resolve.go:228`), applied by sling's built-in routing path at `cmd/gc/cmd_sling.go:766`. Assigned-work companion `738f44732` (#4597): `cmd/gc/assigned_work_scope.go:156`, `cmd/gc/pool_desired_state.go:178`. Read in the `rigs/gascity` fork at `390624b0e`, whose adopted upstream base is `e6135a435` (#4847). | 2026-07-31 |
 | `default_sling_formula` — a default formula on the target silently converts a bare `gc sling <target> <bead>` from Lane 1 into a Lane 4 attach | gastownhall/gascity + this city's config | Formula-branch predicate at `rigs/gascity/cmd/gc/cmd_sling.go:978` — taken when `IsFormula` is set, **or** `OnFormula` is non-empty, **or** `NoFormula` is unset and `Target.EffectiveDefaultSlingFormula()` is non-empty; the plain-routing predicate `missingBeadForceApplies` (`:1183`) carries the same condition inverted. Opt-out `--no-formula` ("suppress default formula (route raw bead)") at `:153`, mutually exclusive with `--formula` and `--on` at `:159-160`. Resolver `EffectiveDefaultSlingFormula` (own → inherited → empty) at `internal/config/config.go:3581`. Default-formula and `--on` share one attach pipeline, `attachFormulaToBead` — contract comment "graph-vs-legacy behavior is byte-identical across both entry points" — at `internal/sling/sling_core.go:479-497`. JSON `routed` is computed independently of any routing write at `cmd/gc/cmd_sling.go:1138`; payload keys at `:1090-1106`; `workflow_id` sourced from `result.WorkflowID` (`internal/sling/sling_core.go:730`, source-bead stamp at `:752`). `mol-polecat-work` is graph.v2 via `[requires] formula_compiler = ">=2.0.0"`, matching `graphV2Requirement` / `UsesGraphCompiler` (`internal/formula/requirements.go:14-16`, `:299`). That formula is **imported, not repo-local** — no path under this rig's `formulas/` resolves it, so cite the resolution contract rather than a local file: `gc formula show mol-polecat-work --json` reports the formula plus the `search_paths` it resolved through, and for this formula that is the imported gastown pack's `gastown/formulas/mol-polecat-work.toml:48-49` (materialized in the local pack cache under `~/.gc/cache/repos/<hash>/`). Its stable source is that pack at the fork's adopted pin `sha:33d3a430a67d1782ad364556cb566bdb01d0afe3` — recorded in `rigs/gascity/examples/gastown/packs.lock:5-6`, as `PublicGastownPackVersion` (`internal/config/public_packs.go:11`), and as the `go.mod` pseudo-version `v0.3.1-0.20260617013242-33d3a430a67d` (trailing 12 hex == the pin); the module copy at `$(go env GOMODCACHE)/github.com/gastownhall/gascity-packs@<pseudo-version>/gastown/formulas/mol-polecat-work.toml` is byte-identical to the cached one (`cmp`, 2026-08-02). City scope: `default_sling_formula = "mol-polecat-work"` in this city's `city.toml`, resolved onto every agent in `gc config show`. Stamp-don't-sling counterexample in this repo: `assets/scripts/check-set-heal.sh:355-357` (rationale comment) and `:393` (the direct `gc.routed_to` stamp); the script contains no `gc sling` call. Applies to a **targetless** `gc sling <bead>` too, and by the same predicate: `inferSling1ArgTarget` resolves only a target *string* (`cmd/gc/cmd_sling.go:244-252`), which the shared path turns into an agent (`:433`) and stores as `opts.Target` (`:463-464`) — the same field an explicit target fills — before the `:978` branch is reached, so the resolved default target decides the lane exactly as a typed one would. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
+| A `blocks` dep between **work** beads does not gate a formula dispatch | gascity source + live city | Blocking dependency types are exactly `blocks`/`waits-for`/`conditional-blocks` (`readyBlockingDependencyTypes`, `rigs/gascity/internal/beads/beads.go:433`, read via `IsReadyBlockingDependencyType` at `:441`); `step` is separately a `readyExcludeTypes` member (`:424`, "non-root formula steps; parent molecule is the actionable unit", #1039) — but graph.v2 workflows deliberately skip that coercion so their steps stay independently claimable (`internal/molecule/graph_apply.go:206-212`). The routed record under graph.v2 is the **workflow root**, not the work bead (though what a pool worker actually claims are the Ready-visible *step* beads — the pour promotes the root to `in_progress`, `cmd/gc/cmd_sling_test.go:4494`, and the compiler blocks it on `workflow-finalize`): the root persists `gc.routed_to` (#2763 / ga-eld2x — `internal/graphroute/graphroute.go:562-570`, pinned by `TestDecorateGraphWorkflowRecipe_RootStampsRoutedToForClaim` at `internal/graphroute/graphroute_test.go:412` and `cmd/gc/cmd_sling_test.go:4497-4501`) and keeps an executable type instead of the `Ready()`-excluded `molecule` when `gc.kind` is `workflow`/`wisp` (`graph_apply.go:166-170` via `preserveExecutableRootType`, `internal/molecule/molecule.go:1333-1340`). The work bead itself is left unrouted; under the current convoy-first attach it is linked only by membership in the synthetic input convoy the pour mints (`internal/graphv2/invocation.go:415-445`, tracked via `TrackItem`'s `convoy --tracks--> bead` edge, `internal/convoy/membership.go:36`), which the root names in `gc.input_convoy_id` (`internal/sling/sling.go:1520-1534`) — the `workflow_id`/`gc.source_bead_id` pointer pair is written only when the pour carries a source bead (`internal/sling/sling_core.go:741-755`, `graphroute.go:576-577`), and `cmd/gc/cmd_sling_test.go:4460` and `:4506` pin both as empty for a convoy-first attach. The root's own `blocks` edge is formula-internal — root → `workflow-finalize` (`internal/formula/compile.go:672-699`), never to the work bead's blockers. By contrast a *classic* attached wisp routes the source bead and leaves the wisp root unrouted (`sling_core.go:569-578`). graph.v2 stamps `gc.root_bead_id` on every non-root node (`graph_apply.go:219-223`) and connects each step to the root with a deliberately non-blocking `tracks` edge — rationale comment and emit at `:288-313`. Withheld delivery is parked at pour in `gc.deferred_routed_to`, `gc.deferred_execution_routed_to`, and — only for a node that has an assignee — `gc.deferred_assignee` (`deferGraphNodeRouting`, `graph_apply.go:320-329`), each promoted into its live counterpart (`gc.routed_to`, `gc.execution_routed_to`, `assignee`) on activation (`cmd/gc/convergence_store.go:213-240`, `internal/molecule/molecule.go:1399-1406`). The hook's in-progress tier applies the same blocking-type set to the candidate's *own* dependency rows (`internal/config/workquery.go:199-201`, "would strand every molecule step"), pinned by `TestInProgressTierIgnoresNonBlockingDependencyTypes` (`internal/config/workquery_inprogress_blocked_test.go:117`). Negative finding on the write side: no blocker check anywhere on the sling path — the dep walk it does run is cycle detection only (`internal/sling/sling_core.go:114` → `DetectCycle`, `internal/sling/cycle.go:36`); no non-test file in `internal/sling/` reads blocker state (`blocked` occurs there only in `*_test.go` fixtures), and its sole occurrence in `cmd/gc/cmd_sling.go` is the cross-rig routing guard (`:2115`). Behavioral confirmation 2026-08-02 in signal-loom: four beads, two `blocks` deps between them, `gc bd blocked` correct, all four slung molecules poured and claimed within ~2 min. Live confirmation of root routing 2026-08-02 in gc-toolkit: every open `gc.kind=workflow` root is `issue_type=task` carrying `gc.routed_to=gc-toolkit/gc-toolkit.polecat`, with its steps linked by `gc.root_bead_id` and the `workflow-finalize` control bead separately routed to `gc-toolkit/core.control-dispatcher`. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 
 ## The maintainer's ruling
 
@@ -206,28 +210,64 @@ does in Lane 3.
   singleton assignee stamp where the target is a named session). The
   **wisp root is deliberately left unrouted** so it is never
   independently claimed.
-- **Sets (graph.v2 formula):** *neither routing field, on either bead.*
-  The graph launch path returns before the Lane 1 routing call
-  (`internal/sling/sling_core.go:477-481` → `doStartGraphWorkflow`,
-  `:645`), so the source bead gets `workflow_id` and **no
-  `gc.routed_to` and no `assignee`**; the workflow root is promoted to
-  `in_progress` in the **graph store** carrying `gc.source_bead_id`, and
-  the per-step routing is stamped on the compiled recipe's steps
+- **Sets (graph.v2 formula):** *neither routing field on the **source
+  bead** — but the workflow root is routed.* The graph launch path
+  returns before the Lane 1 routing call — the `isGraph` branch of
+  `attachFormulaToBead` (`internal/sling/sling_core.go:487-533`) calls
+  `doStartGraphWorkflow` at `:516` and returns at `:533` — so the source
+  bead ends with **no `gc.routed_to` and no `assignee`**. The pour then
+  mints a workflow root, promotes it to `in_progress` in the **graph
+  store** (`PromoteWorkflowLaunchBead`, `sling_core.go:738`), and the
+  graph decorator stamps `gc.routed_to=<target>` on that root — it is
+  the record the claim path reads
+  (`internal/graphroute/graphroute.go:562-570`, #2763 / ga-eld2x). Per-step routing is stamped on the compiled recipe's steps
   (`internal/dispatch/control.go:1110`) rather than on the work bead.
+  The `workflow_id`/`gc.source_bead_id` pointer pair is written only
+  when the pour carries a source bead (`sling_core.go:741-755`); the
+  current convoy-first attach links through a synthetic input convoy
+  instead. See ["A `blocks` dep between work beads does not hold a
+  graph.v2 dispatch"](#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch)
+  for the three records and how to walk between them.
 - **CLI example:**
   ```bash
   gc sling gc-toolkit/gc-toolkit.polecat tk-abcde --on mol-polecat-work
   ```
-- **Does NOT:** route the wisp root. This is the inverse of the
-  standalone-launch shape below, and it is load-bearing rather than
-  incidental — `TestOnFormulaAttachesAndRoutes`
-  (`cmd/gc/cmd_sling_test.go:4105`) asserts both halves: the source bead
-  ends with `gc.routed_to=<target>`, and the wisp root ends with
-  `gc.routed_to` **empty**. The source comment is blunt about why
-  (`internal/sling/sling_core.go:488-497`): the source "is the claimable
+- **Does NOT — *classic attach only*:** route the wisp root. This bullet
+  qualifies the **"Sets (classic, non-graph formula)"** bullet above,
+  **not** the graph.v2 one; under graph.v2 the workflow root *is*
+  routed, as that bullet says. The scoping is
+  structural rather than editorial: the attach path takes a graph.v2
+  early return (`internal/sling/sling_core.go:487`, calling
+  `doStartGraphWorkflow` at `:516` and returning at `:533`), so the whole
+  legacy region that begins at `:535` — the `molecule_id` stamp (`:563`),
+  the source-bead `finalize` (`:579`), and the unrouted wisp root — is
+  reached only by a classic formula. (`:558`, inside that legacy region,
+  is a second and narrower guard: it catches a wisp that materialized as
+  a graph workflow even though the formula did not compile as one. It is
+  not the branch that scopes this bullet.) For that classic path it is
+  load-bearing rather than incidental: `TestOnFormulaAttachesAndRoutes`
+  (`cmd/gc/cmd_sling_test.go:4178`), which attaches the *classic*
+  `code-review` formula, asserts both halves — the source bead ends with
+  `gc.routed_to=<target>`, and the wisp root ends with `gc.routed_to`
+  **empty**. The source comment is blunt about why
+  (`internal/sling/sling_core.go:569-578`): the source "is the claimable
   unit of work, while the wisp root is deliberately left unrouted…
   Do not 'fix' this to wispRootID — it would orphan the work"
   (gastownhall/gascity#2848).
+
+  That comment carries an aside worth disarming, because read out of
+  context it looks like it contradicts the graph.v2 bullet:
+  `ApplyGraphRouting` "stamps no routing on an attached recipe
+  (graphroute: sourceBeadID != "" early-return)". That early return is
+  **also** classic-scoped — it sits inside the
+  `!IsCompiledGraphWorkflow(recipe)` branch
+  (`internal/graphroute/graphroute.go:625-628`). A *compiled* graph.v2
+  recipe never reaches it; it falls through to
+  `DecorateGraphWorkflowRecipe`, which stamps
+  `gc.routed_to` on the root precisely so it is claimable
+  (`graphroute.go:569`, whose own comment notes that without it a
+  pool-routed root is "spawned-for by scale_check but never claimed by
+  the worker, then idle-reaped" — #2763 / ga-eld2x).
 
 #### Reading a graph.v2 attach correctly — the duplicate-wisp trap
 
@@ -238,10 +278,16 @@ paragraph above that is the designed shape, not a stranded bead — so
 that misreading pours a **second** wisp against the same bead, and the
 two workers converge on one shared worktree.
 
-To check whether such a bead is really dispatched, look at
-`metadata.workflow_id` (graph.v2) or `metadata.molecule_id` (classic
-attach) and resolve the wisp root it names — not the bead's own routing
-fields.
+To check whether such a bead is really dispatched, resolve the root it
+belongs to — not the bead's own routing fields. A classic attach names
+its wisp root in `metadata.molecule_id`. A graph.v2 bead names nothing:
+`metadata.workflow_id` is written only for the legacy source-workflow
+shape and is empty under the current convoy-first attach, so an absent
+`workflow_id` is not evidence either. Walk the `tracks` edge up to the
+synthetic input convoy and find the root that names it in
+`gc.input_convoy_id` — the lookup is spelled out in the containment
+recipe under "A `blocks` dep between work beads does not hold a graph.v2
+dispatch".
 
 #### When a bare sling is silently Lane 4 — `default_sling_formula`
 
@@ -325,11 +371,14 @@ The other half of the `IsFormula` split, and the shape most often
 confused with `--on`. Here there is no source bead, so the **wisp root
 itself is the routed bead** — `slingFormula` finalizes on
 `mResult.RootID` (`rigs/gascity/internal/sling/sling_core.go:373`), giving the root
-`gc.routed_to=<target>` under Lane 1's contract. A wisp root carrying
-`gc.routed_to`, with a title matching the formula name, is therefore
-normal for a launch and wrong for an attach. Its graph.v2 variant
-behaves like Lane 4's: the root is promoted in the graph store and no
-`gc.routed_to` is written (`internal/sling/sling_core.go:363-368`).
+`gc.routed_to=<target>` under Lane 1's contract. A *classic* wisp root
+carrying `gc.routed_to`, with a title matching the formula name, is
+therefore normal for a launch and wrong for an attach — but that tell
+does not extend to graph.v2, whose root is routed either way. Its
+graph.v2 variant behaves like Lane 4's: the sling path's own routing
+call is skipped (`internal/sling/sling_core.go:363-368`) and the graph
+decorator stamps `gc.routed_to` on the root instead
+(`internal/graphroute/graphroute.go:562-570`).
 
 #### Why assignee residue silently strands a routed bead
 
@@ -492,10 +541,48 @@ onto the lanes:
   any other routed bead).
   `bd ready --metadata-field "gc.routed_to=$target" --unassigned
   --exclude-type=epic`. A pool worker finds work here, and only here. The
-  **graph.v2** variants are the exception: they write **no** `gc.routed_to`
-  on either the work bead or the wisp root, so a bead under a graph.v2
-  workflow is dispatched through the graph store and is deliberately absent
-  from Tier 3 (see "the duplicate-wisp trap" above).
+  **graph.v2** variants are the exception, but a narrower one than "nothing
+  is routed" — and the difference is best read as *which term of the
+  filter* each record fails. The **work bead** fails the **routing** term
+  outright: the pour leaves it unrouted, so no state it could ever be in
+  makes it match. The **workflow root** is the opposite case — it carries
+  `gc.routed_to=<target>` (`internal/graphroute/graphroute.go:562-570`),
+  so it satisfies the routing term. It is the **routed record** of the
+  dispatch — the record delivery is addressed to, and the one containment
+  has to de-route. What it is *not* is the record a pool worker takes.
+  Satisfying that one term is not the same as being returned by the
+  query: Tier 3 is a `bd ready` read, so it applies every other term in
+  the table below too, and under a compiled graph.v2 workflow the root
+  fails two of them from the moment the pour returns. The pour promotes
+  it to `in_progress` in the graph store (`PromoteWorkflowLaunchBead`,
+  `internal/sling/sling_core.go:738`, whose post-pour status the pour's
+  own test asserts at `cmd/gc/cmd_sling_test.go:4494`), a status `bd
+  ready` excludes — and the compiler has already given it a `blocks`
+  dependency **on** its own `workflow-finalize` control bead
+  (`addWorkflowRootDeps`, `internal/formula/compile.go:672-699`: the root
+  is the dependent, so it stays blocked until finalize closes and
+  therefore completes last). Either one alone is disqualifying.
+
+  What wakes the pool, and what the pool claims, is the **step** beads.
+  graph.v2 skips the #1039 coercion to the `Ready()`-excluded `step`
+  type, so compiled steps stay Ready-visible and independently routable
+  (`internal/molecule/graph_apply.go:206-212`), and they carry their own
+  routes — live, or withheld in `gc.deferred_routed_to` until activation
+  (see "the duplicate-wisp trap" above). That is the same mechanism
+  [gascity-packs.md](gascity-packs.md) describes from the
+  formula-authoring side: a v2 workflow "materializes independently
+  routable, Ready-visible *step* beads that wake the pool without vapor;
+  the workflow root itself depends on `workflow-finalize` and stays
+  blocked — **not** Ready-visible — while the workflow runs." The two
+  docs state one model, not two. So read "the root is routed" as a claim
+  about the **write** side alone; "a Tier 3 read returns the root right
+  now" is a separate question about status and blockers, and for a
+  compiled graph.v2 workflow the answer is no. (The one shape where the
+  root gets no such blocker is the self-contradictory root-only-under-v2
+  recipe gascity-packs.md §3 covers: it materializes no
+  `workflow-finalize` bead for `addWorkflowRootDeps` to point at — the
+  same missing piece that leaves its root unable to self-close through
+  the engine.)
 
 Tiers 1 and 2 both run for each of `$GC_SESSION_ID`, `$GC_SESSION_NAME`,
 `$GC_ALIAS` in order, first non-empty result winning, and both match on
@@ -514,6 +601,12 @@ issues" (`gc bd ready --help`). Spelled out, a bead is offered to a
 | `gc.routed_to` | equals the pool target — **exact string match** on this offer side (the demand side normalizes an instance suffix; see below) |
 | `assignee` | empty (`--unassigned`) |
 | type | not `epic` (`--exclude-type=epic`) |
+
+The `blockers` row carries a scope limit worth reading before you rely
+on it. It is dependency-aware about **the bead the predicate reads** —
+which, under a formula dispatch, is not the bead a human thinks of as
+the work. "A `blocks` dep between work beads does not hold a graph.v2
+dispatch" below covers that case.
 
 ### Offer and demand are one predicate, read two ways — for a base-name route
 
@@ -682,6 +775,170 @@ error, so the agent that stamped it believes the bead is parked. The
 only party who learns otherwise is the next worker — by claiming the
 bead and starting the very work the flag was meant to prevent.
 
+### A `blocks` dep between work beads does not hold a graph.v2 dispatch
+
+A dependency edge is the other thing that looks like enforcement and
+is not — not because the read side ignores dependencies, but because
+under a formula dispatch it is reading a **different bead**.
+
+Which bead the predicate reads depends on the lane:
+
+- **Lanes 1–3, and Lane 4's classic attach.** The routed claimable unit
+  *is* the work bead, so its blockers do gate it: `bd ready` will not
+  offer a bead with an open `blocks` dep, and the demand probe will not
+  count it. The `blockers` row means exactly what it says. For a classic
+  attached wisp this is explicit: the source bead carries `gc.routed_to`
+  *and* `molecule_id` and "is the claimable unit of work, while the wisp
+  root is deliberately left unrouted"
+  (`internal/sling/sling_core.go:569-578`, whose comment ends "Do not
+  'fix' this to wispRootID — it would orphan the work").
+- **graph.v2 (Lane 4's graph variant and the graph standalone launch).**
+  Here the work bead is not routed at all: the **workflow root** is the
+  routed record of the dispatch, and its Ready-visible **step** beads are
+  what a pool worker actually claims (Tier 3 above). Three records are
+  easy to conflate, and they carry different fields:
+
+  | Record | Routed? | How it links |
+  |---|---|---|
+  | **source / work bead** — the bead you slung `--on` | **No.** The pour stamps no `gc.routed_to` on it | membership in a synthetic **input convoy** that `tracks` it; the `workflow_id` back-pointer is written only for the legacy source-workflow shape (`internal/sling/sling_core.go:741-755`) |
+  | **workflow root** — minted by the pour | **Yes** — `gc.routed_to=<pool>` | `gc.input_convoy_id=<input convoy>` (`internal/sling/sling.go:1520-1534`); the root-only `gc.source_bead_id` back-pointer likewise exists only in the legacy shape (`internal/graphroute/graphroute.go:576-577`) |
+  | **compiled step and control beads** | Sometimes — a control bead such as `workflow-finalize` carries its own `gc.routed_to`; a step's may instead be withheld in `gc.deferred_routed_to` | `gc.root_bead_id=<root>` (`internal/molecule/graph_apply.go:219-223`) plus one upward `tracks` edge to the root (`:288-313`) |
+
+  The root being routed is not incidental, and it is the record most
+  often misremembered as unrouted: #2763 / ga-eld2x made the root
+  persist `gc.routed_to` — "the sole canonical delivery key the worker
+  claim path reads" — precisely so that a pool-routed root is claimable
+  rather than spawned-for and then idle-reaped
+  (`internal/graphroute/graphroute.go:562-570`, pinned by
+  `TestDecorateGraphWorkflowRecipe_RootStampsRoutedToForClaim`,
+  `internal/graphroute/graphroute_test.go:412`, and by
+  `cmd/gc/cmd_sling_test.go:4497-4501`). Its type is preserved rather
+  than coerced to the `Ready()`-excluded `molecule` type whenever the
+  root is `gc.kind=workflow` or `wisp`
+  (`internal/molecule/graph_apply.go:166-170`, via
+  `preserveExecutableRootType`, `internal/molecule/molecule.go:1333-1340`),
+  so the `Ready()` *type* filter does not exclude it — its `in_progress`
+  status and its own `blocks` edge to `workflow-finalize` still do, which
+  is why a routed root is not something you will find sitting in a plain
+  `bd ready` listing (see Tier 3 above). Its steps stay claimable for the
+  same reason the root's type survives: graph.v2 skips the #1039 coercion
+  to the excluded `step` type (`graph_apply.go:206-212`).
+
+  What none of the three carries is an edge to the work bead's
+  blockers. The root is *freshly minted*, so the `blocks` deps it has
+  are the formula's own: the compiler emits root `--blocks-->`
+  `workflow-finalize` so the root completes last (`addWorkflowRootDeps`,
+  `internal/formula/compile.go:672-699`). None of them reaches the work
+  bead, and a step's only upward edge is `tracks`, to that root. The
+  links that *do* reach the work bead — `gc.input_convoy_id`, and in the
+  legacy shape `gc.source_bead_id` / `workflow_id` — are metadata
+  pointers, and no readiness query follows a metadata pointer. A
+  `blocks` edge added between two *work* beads is therefore never on a
+  path the read side walks.
+
+Two independent reasons it cannot gate, either of which is sufficient:
+
+- **`tracks` is not a readiness-blocking type.** The blocking set is
+  exactly `blocks`, `waits-for`, `conditional-blocks`
+  (`readyBlockingDependencyTypes`, `internal/beads/beads.go:433`, read
+  through `IsReadyBlockingDependencyType` at `:441`); `parent-child` and
+  `tracks` never block. The step→root edge is that way *on purpose* —
+  the comment introducing it asks for "a non-blocking dependency" so a
+  cascade delete still discovers the workflow "without making the
+  workflow root a readiness blocker." The hook's in-progress tier
+  applies the same type set to a candidate's own dependency rows
+  (`internal/config/workquery.go:199-201`), and its rationale is blunt
+  about the stakes: treating those edges as blockers "would strand every
+  molecule step, since each carries a tracks/parent-child edge to its
+  root" (pinned by `TestInProgressTierIgnoresNonBlockingDependencyTypes`,
+  `internal/config/workquery_inprogress_blocked_test.go:117`).
+- **Even a blocking type would be on the wrong bead.** Neither record
+  the read side can return carries the work bead's deps. The routed
+  record is the workflow root, whose dependency rows are the formula's
+  own (root `--blocks-->` `workflow-finalize`), never the work bead's;
+  the step beads the pool claims carry the formula's `blocks` edges to
+  their siblings and a `tracks` edge up to that root, never to the work
+  bead. A step's edges reach that root, not the work bead. The work
+  bead is reachable only through metadata pointers — the root's
+  `gc.input_convoy_id` to the convoy that tracks it, or in the legacy
+  source-workflow shape `gc.source_bead_id` and the bead's own
+  `workflow_id` — and no readiness query walks metadata pointers.
+
+`tracks` records membership and ownership; it does not gate. That is the
+same distinction that governs convoy membership edges, and it is why
+"the dep graph says these are ordered" and "the delivery path will honor
+that order" are separate claims.
+
+**Nor does the write side hold it.** Nothing on the sling path checks
+whether a bead is blocked before pouring. Sling *does* walk the dep
+graph — but only to reject a cycle (`internal/sling/sling_core.go:114`
+→ `DetectCycle`), never to look for an open blocker; no non-test file in
+`internal/sling/` reads blocker state at all (the word "blocked" occurs
+there only inside `*_test.go` fixtures), and that word's only occurrence
+in `cmd/gc/cmd_sling.go` is the cross-rig routing guard (`:2115`). Sling a
+blocked bead and the molecule pours immediately, routes the workflow
+root, and a worker claims it.
+
+**Observed** (2026-08-02, signal-loom). Four test-coverage beads were
+filed with two `blocks` deps between them. `gc bd blocked` listed the
+two blocked beads correctly — the dep graph itself was right. All four
+were then slung; all four molecules poured and were claimed within about
+two minutes, the two blocked ones included.
+
+**What is test-pinned, and what is not.** The rule above is assembled
+from constituent upstream tests plus that one live observation. No
+upstream test exercises the whole path end to end, and the difference
+matters if you are deciding how much weight this section carries:
+
+- **Pinned upstream.** The blocking-type set
+  (`readyBlockingDependencyTypes`, `internal/beads/beads.go:433`) and the
+  hook's use of it
+  (`TestInProgressTierIgnoresNonBlockingDependencyTypes`,
+  `internal/config/workquery_inprogress_blocked_test.go:117`); the root's
+  routing stamp
+  (`TestDecorateGraphWorkflowRecipe_RootStampsRoutedToForClaim`,
+  `internal/graphroute/graphroute_test.go:412`); and the pour's own
+  shape — input-convoy two-key root lookup, root `in_progress`, root
+  `gc.routed_to` (`cmd/gc/cmd_sling_test.go:4481-4501`).
+- **Not pinned.** Nothing under `internal/sling/` or in
+  `cmd/gc/cmd_sling_test.go` slings a *blocked* work bead and asserts
+  that the pour and the claim happen anyway; the only `blocks` deps in
+  sling's own tests are cycle-detection fixtures
+  (`internal/sling/cycle_test.go:23`). The end-to-end step rests on the
+  code path — sling reads no blocker state, as above — plus the single
+  observation.
+- **What would settle it.** An upstream test that files a `blocks` dep
+  between two work beads, slings the blocked one, and asserts the
+  workflow root is created and routed and its steps come back Ready.
+  Until that exists, treat this as an operational rule backed by a
+  verified mechanism and one reproduction, not as pinned behavior: the
+  mechanism is safe to reason from, but a future upstream change could
+  break it without turning any test red.
+
+The operational contract that follows:
+
+- **Sling only beads `gc bd blocked` does not list.** Sequencing lives
+  in the *order you dispatch*, not in the dep graph. Filing the deps and
+  then slinging everything at once dispatches the whole set.
+- **If a blocked bead was already slung, you are racing the pool.**
+  Containment means clearing delivery on *every* record the pour created
+  — every workflow root and all of their descendants, and on each of
+  them the withheld `gc.deferred_*` twin as well as the live key — not
+  just the one you can see. Never force-close a record to contain it: a
+  force-closed step leaves an orphaned husk that re-runs as duplicate
+  work. The procedure — resolving the roots, the five delivery keys, and
+  how to read the verify — is
+  [gascity-dispatch-containment.md](gascity-dispatch-containment.md).
+- **De-routing does not recall work a worker already holds.** Once the
+  `assignee` is stamped, delivery has happened; clearing the routing
+  fields only affects the next offer. This is "Metadata is not
+  enforcement" again, one step later in the lifecycle.
+- **The durable mitigation is the work bead's `notes`.** A "do not start
+  until `<bead>` lands" line is what a worker actually reads, precisely
+  because the dep graph is not consulted on the records the pour delivers
+  — the routed root or the steps claimed off it — and the work bead's own
+  deps are two metadata pointers away from all of them.
+
 ### How to actually hold a bead
 
 Remove it from the predicate. The terms are a conjunction, so falsifying
@@ -698,6 +955,11 @@ about:
   Tier 1 is a separate `bd list --status=in_progress` query, not `bd
   ready`; it matches only work a session already had in flight, so a bead
   parked before it is claimed was never in Tier 1 to begin with.
+- **An open `blocks` dep** falsifies the `blockers` term — but only
+  where the work bead is itself the routed claimable unit. It holds
+  nothing under a graph.v2 formula dispatch, where the routed bead is
+  the workflow root the pour just minted (previous section). Hold that
+  case by not slinging until the blocker closes.
 
 Two combinations are idiomatic, and they differ in intent:
 
