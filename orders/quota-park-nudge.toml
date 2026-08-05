@@ -1,0 +1,27 @@
+# quota-park-nudge — resume agents parked at a provider quota banner.
+#
+# An agent whose turn ended inside a provider quota block sits at an idle
+# prompt with the limit banner on screen. The controller's liveness view reads
+# it as healthy (state=active), and nothing wakes it when the window reopens —
+# 1h26m of dead time on 2026-07-22 (Claude session limit, two rig witnesses) and
+# ~7h30m on 2026-08-02 (Codex usage limit, two review polecats holding the merge
+# queue). Both recovered from one `gc session nudge`.
+#
+# Every 3m, city-wide: peek each live session's pane, nudge the ones showing a
+# limit banner, back off per session up to 15m. Each gc call is bounded (15s) and
+# the pass as a whole to 120s — under this interval, so a wedged runtime call can
+# neither strand the sessions behind it nor overlap the next cycle. Deliberately
+# does NOT schedule against the banner's stated reset time: quota also returns by
+# routes no banner predicts — on 2026-08-02 an operator triggered a manual reset
+# six days before the Aug 8 figure the banner gave — so a deadline-driven fix
+# would have slept through it.
+#
+# Ships ENABLED: the only action is a nudge, which is a no-op for an agent that
+# is still blocked or already busy. It never kills, never files a warrant.
+# Bug tk-al95k; see docs/quota-park-recovery.md.
+[order]
+description = "Nudge sessions parked at a provider quota banner until the window reopens"
+trigger = "cooldown"
+interval = "3m"
+exec = "$PACK_DIR/assets/scripts/quota-park-nudge.sh"
+scope = "city"
