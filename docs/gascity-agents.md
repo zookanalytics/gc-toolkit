@@ -402,6 +402,29 @@ both ways:
   re-verified immediately before removal — never on "the identity is
   dead".
 
+**The runtime session name is not rig-qualified either, so counting by
+it conflates rigs.** The slot alias above is one recurring string; the
+**runtime session name** — `$GC_SESSION_NAME`, and the `session_name`
+field of `gc session list` — is a second, and it carries the **pack**
+prefix rather than the rig. Every polecat is named
+`gc-toolkit__polecat-<id>` (see [the four strings](#the-four-strings))
+whether it serves the `gc-toolkit` rig or the `shutupandlisten` rig; the
+`gc-toolkit__` segment names the pack it came from, not the rig it
+works. The trap is that the rig-scoped **singletons** *are* rig-qualified
+in their runtime name (`gascity--gc-toolkit__refinery`), so name-based
+reasoning looks safe right up until it meets a pool.
+
+The consequence here is **aggregation**, distinct from the liveness and
+work-store cut above: tallying live sessions **by name** collapses every
+rig's instances of a pool into one bucket and inflates the per-pool
+count. Reading two polecats in `gc-toolkit` and two in `shutupandlisten`
+— each rig exactly at a cap of 2 — as "4 in gc-toolkit, over cap" is the
+near-miss this avoids. Aggregate on **`template`** instead: it *is*
+rig-qualified (`gc-toolkit/gc-toolkit.polecat` vs
+`shutupandlisten/gc-toolkit.polecat`), so it keeps the per-pool buckets
+`gc session list` reports distinct. Both fields ride in the same record —
+count the `template`, never the `session_name`.
+
 ### Lifecycle
 
 - **Spawn.** Controller's reconciler reads `scale_check` (if
