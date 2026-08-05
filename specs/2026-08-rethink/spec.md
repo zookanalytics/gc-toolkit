@@ -200,11 +200,17 @@ deliverable, not an aspiration:
 | **`outrider`** | Meets a newly filed bead before the operator does: reads its universe, writes the first-reaction card, flags it onto the board, and drains. | Small pool (explicit `scope="rig"`, `max_active_sessions=2`) executing `mol-nx-first-reaction`; carries the default-disabled gate + city-wide shed clamp doctrine in both `work_query` and `scale_check` (census §7). Kept separate from `converse` (tk-h9pq5 open question 4): an outrider run is autonomous and must never hold a slot waiting for an operator. |
 | **`thread-ops`** | An operator-spawned parallel line of judgment — it acts and dispatches on the operator's behalf but owns no inbox, no patrol cadence, and no system-of-record identity. | Thread shape carried exactly from the existing thread agents (`work_query = "printf '[]'"`, failing `sling_query`, `wake_mode=resume`, `min_active_sessions=0`, explicit `scope="city"`). The thread *contract* is one shared fragment; each thread role is a thin `agent.toml` + role prompt, because `[env] RoleName` is static per agent.toml — there is no spawn-time parameterization (correcting an earlier draft's "one generic template"). gc-next ships exactly one thread role initially: `thread-ops`, whose role prompt is the fresh-authored operations/strategy line (the root/strategy conversation tk-h9pq5 OQ2 keeps); further thread roles are thin additions. |
 
-Codex/Gemini provider-diversity pools (`polecat-codex`, `_polecat-gemini`) are
-**not re-authored in staging** — they are wright-shaped variants whose value
-is provider diversity in the *operational* city; a `wright-codex` variant is a
-named cutover-stage addition once wright itself has shaken out. Recorded so
-the capability is a decision, not a loss (census §7).
+**`wright-codex`** ships in staging (**amended per operator ruling,
+decisions.md #4** — cross-provider validation is a strong requirement and
+the direction is more of it, not less; the earlier draft deferred this to a
+cutover-stage decision): a wright backed by the Codex provider, sharing the
+wright prompt by reference, carrying `nx-signoff-gate`, capped at 2. Every
+signoff-gate review the lander dispatches routes to it, preserving the
+independence the live polecat-codex gives the pre-open gate today. The
+operator's standing target — roughly a third of token spend validating work
+through other agents — is recorded as the direction for future check-set
+members. `_polecat-gemini` stays retired (disabled today); a Gemini wright
+variant is a natural later leg under the same target.
 
 ## 5. The formulas
 
@@ -250,13 +256,13 @@ re-litigation; this section only binds its design to gc-next names.
   files-or-attaches a turn (warm attach if a group member is live, else file
   and let demand spawn), and `takeaway --release` maps to
   stop-routing-and-drain. **Amended after phase-3 review (D2):** the rewire
-  is *specified* in the staged tree as the `nx-helm.sh` port row's diff
-  (PORTS.md) rather than shipped as executable bash — shipping a diverged
-  copy of the helm family while the live pack still runs it was judged the
-  worse trade (divergence cost during the overlap, not the collision rule,
-  which the `nx-` rename already satisfies). The port bead lands the
-  executable rewire at intake, **before stage 2 runs its gate**; the gate
-  itself is unchanged.
+  is **shipped as executable bash** in the staged tree: `nx-helm.sh` is a
+  full copy of the live helm script with `cmd_open` rewired to
+  file-or-attach a turn and `--release` re-meaning ending the conversation
+  (**re-amended per operator ruling, decisions.md #7**: the live helm is
+  frozen while this path is explored, so the divergence cost that
+  motivated the earlier port-row compromise is gone). The Go sidecar
+  remains a port row (roster-agnostic, unchanged).
 - **Subjects never park `in_progress` under a hold.** The reaper-skip clause
   covers *turns* (`task_kind=conversation`); the subject bead needs no
   sibling shield because holding is the turn's job — the subject stays `open`
@@ -369,7 +375,11 @@ provider-diversity intent is the cutover-stage `wright-codex` decision, §4).
   The keeper resident stays `on_demand` and is argued under O7 in its
   pack.toml header: the fork domain needs the partner hat conversationally,
   holds fork state worth a warm session, and is opt-in to exactly one rig —
-  the exception is scoped, recorded, and cheap.
+  the exception is scoped, recorded, and cheap. **Operator lean on the
+  record (decisions.md #9): keeping a resident here "seems weird with the
+  rest of the approach"** — the keeper's residency is re-argued (or retired
+  onto chains and conversation turns) as a cutover-era bead rather than
+  silently perpetuated.
 
 The boundary rule, restated once: **rig-specific capability never enters the
 core pack.** Anything true only for a fork-bearing rig lives in the keeper;
@@ -377,8 +387,21 @@ anything true for every importer lives in core.
 
 ## 9. Cutover stages
 
-*(Non-goal: no big-bang. Each stage is reversible; each is a future bead, not
-branch work.)*
+**Strategy ruling (operator, decisions.md #8): the primary path is
+all-or-nothing** — stand up a **fresh city** importing gc-next (city-level
+where needed, which dissolves D6 at creation), copy the critical beads
+over, run the same rigs, and shut the current city down once the new one
+holds. Under that path, stages 1–3 below run unchanged as the *staging
+city's* shakeout, and stages 4–5 collapse into one migration event: the
+fresh city never runs the old composition, so the per-rig flip, the
+overlap-window ownership rules, and the `nx-` renames become insurance
+rather than choreography (the renames still happen at root takeover; they
+are just uncontended). The staged per-rig flip below remains documented as
+the conservative fallback if all-or-nothing is judged too sharp when the
+moment comes. The operator reads the final PR before any trigger is
+pulled.
+
+*(Each stage is reversible; each is a future bead, not branch work.)*
 
 0. **Intake** — re-key `specs/2026-08-rethink/` to the tracking bead; further
    changes ride Delivery (ends the bootstrap exception).
@@ -419,7 +442,7 @@ branch work.)*
 | Outcome | Phase-3 review accepts |
 |---|---|
 | O1 | `packs/gc-next/pack.toml` with zero example-pack imports; §2's table realized; the collision audit script and its clean run. |
-| O2 | The four §6 artifacts: `agents/converse/`, the turn-filing convention doc'd in its prompt + `mol-nx-turn`, the reaper-skip clause in `mol-nx-patrol-health`, and the Helm rewire **specified as the `nx-helm.sh` port diff** (amended per D2; the executable rewire lands with the port bead before stage 2's gate). |
+| O2 | The four §6 artifacts: `agents/converse/`, the turn-filing convention doc'd in its prompt + `mol-nx-turn`, the reaper-skip clause in `mol-nx-patrol-health`, and the Helm rewire **shipped in `nx-helm.sh`** (re-amended per decisions.md #7). |
 | O3 | `mol-nx-work` + `mol-nx-patrol-land` conforming to the state machine doc; mr-mode + non-empty `check_set` defaults for agent-initiated work. |
 | O4 | The interlock line present in every formula header (§5). |
 | O5 | Every census row (§7) resolvable to a file/section in the staged tree, or its retirement rationale present in this spec. |

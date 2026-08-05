@@ -23,6 +23,26 @@ obeys are [`docs/architecture.md`](../../docs/architecture.md).
 | `converse` | Holds a subject bead's conversation for the operator: rebuilds the slice, preps, holds, writes the outcome to the subject, closes only the turn. |
 | `outrider` | Meets a newly filed bead before the operator does: reads its universe, writes the first-reaction card, flags it onto the board, and drains. |
 | `thread-ops` | An operator-spawned parallel line of judgment — it acts and dispatches on the operator's behalf but owns no inbox, no patrol cadence, and no system-of-record identity. |
+| `wright-codex` | The cross-provider validation pool: a wright on the Codex provider; every signoff-gate review routes here, so work one model built is validated by a different one. |
+
+> **Operator note (decisions.md #9):** these role names are provisional —
+> review them at PR time; they are cheap to change now and expensive after
+> cutover.
+
+## Seeding work (the front doors)
+
+There is no always-present agent, so seeding is explicit — three existing
+mechanisms, no bespoke intake surface:
+
+1. **File work directly.** `gc bd create` a bead and route it —
+   `gc sling <rig>/gc-next.wright <bead>` for a one-shot, or pour
+   `mol-nx-work` for the full gated workflow. Demand spawns the worker.
+2. **Start a conversation.** Run `mol-nx-turn` against any bead (or pick
+   its row on the board — `nx-helm.sh open`): a turn is filed, a converse
+   session spawns, preps, and holds for you.
+3. **Think out loud.** `gc session new gc-next.thread-ops` gives you the
+   operations thread: describe what you want, and it files/dispatches the
+   beads on your behalf.
 
 ## Installing (staging)
 

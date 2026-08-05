@@ -29,14 +29,14 @@ implementation (per the spec's own rule: deviations are recorded back).
   a single-consumer fragment adds a resolution layer without reuse; the
   doctrine-reaches-role obligation is what the matrix binds. The census
   stands: nothing is dropped.
-- **D2 — Helm rewire depth** (amended into the spec after phase-3 review
-  judged the first rationale unsound). The rewire ships as the `nx-helm.sh`
-  port row's specified diff, not as executable bash; the honest reason is
-  **divergence cost** — a diverged copy of a script family the live pack
-  still runs, maintained through the whole overlap window — not the
-  collision rule (the `nx-` rename satisfies that). Spec §6 and the §10 O2
-  proxy now say exactly this, and the port bead is sequenced **before**
-  stage 2's gate.
+- **D2 — Helm rewire depth** — **RESOLVED by operator ruling
+  (decisions.md #7)** after two rounds: phase-3 review judged the first
+  port-row rationale unsound; the operator then ruled the live helm frozen
+  during this path, which removes the divergence cost entirely. `nx-helm.sh`
+  now ships as a full copy with the rewire implemented (`cmd_open` →
+  file-or-attach a turn; `--release` → end the conversation). Spec §6 and
+  the §10 O2 proxy re-amended to match. Only the Go sidecar remains a port
+  (D5).
 - **D3 — recycle directive mechanics.** The spec said the hook's action
   "changes to record-then-drain." A Stop hook cannot write a subject-bead
   outcome itself (only the role knows what to record), so the shipped hook

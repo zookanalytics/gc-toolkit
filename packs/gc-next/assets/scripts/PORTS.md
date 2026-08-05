@@ -14,7 +14,8 @@ work (stage 0+) that rides Delivery; port beads are filed at intake.
 | `assets/scripts/check-set-heal.sh` | `assets/scripts/nx-check-set-heal.sh` | Unchanged (anchor repair; backfills before visibility). |
 | `assets/scripts/reconcile-graduated-convoys.sh` | `assets/scripts/nx-graduate-convoys.sh` | Unchanged. |
 | `assets/scripts/quiesce-completed-workflows.sh` | `assets/scripts/nx-quiesce-workflows.sh` | Unchanged (tk-p9ji9). |
-| `assets/scripts/gc-helm.sh` (+ `services/helm/`) | `assets/scripts/nx-helm.sh` (+ `services/helm/`) | **Pick-a-row rewired**: files-or-attaches a turn (tk-h9pq5 §6 of the spec) instead of resume-or-create a host; `takeaway --release` maps to stop-routing-and-drain. The Go sidecar carries with its board sourcing unchanged. |
+| `assets/scripts/gc-helm.sh` | `assets/scripts/nx-helm.sh` — **SHIPPED** (decisions.md #7: the live helm is frozen, so a full copy carries no divergence cost): board/flag/clear/takeaway/react verbatim; `cmd_open` rewired to file-or-attach a turn; `--release` re-meant as ending the conversation. | — |
+| `services/helm/` (the Go sidecar) | `services/helm/` | Port row (roster-agnostic, unchanged); arrives at stage 5. |
 | `assets/scripts/gc-bd-watch.sh` | `assets/scripts/nx-bd-watch.sh` | Unchanged. |
 | `tools/gc-bd-universe.sh` | `assets/scripts/nx-bd-universe.sh` | Unchanged (the fed slice + untrusted-data fencing); moves under `assets/scripts/` per pack-spec layout. |
 | `tools/gc-proactive.sh` | `assets/scripts/nx-outride.sh` | Pool/env names re-pointed (`GC_NX_OUTRIDER_*`); mirrors the agent.toml gate + clamp + board-rank logic (keep in lockstep — gate-asserted by the carried fixture). |
