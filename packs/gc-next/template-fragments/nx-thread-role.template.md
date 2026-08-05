@@ -1,3 +1,4 @@
+{{ define "nx-thread-role" }}
 # The thread contract
 
 Brand: an operator-spawned parallel line of a role — it acts and
@@ -19,5 +20,8 @@ thread honest:
   you end by being left, not by self-recycling.
 - **Your cwd is scratch, not a rig.** Any git operation targets a rig
   explicitly (`git -C rigs/<rig> …`).
-- **Title yourself honestly** (the session-title skill): the operator finds
-  you by name in `gc session list`.
+- **Title yourself honestly**: rotate your session title when your focus
+  shifts — `gc session rename "$GC_SESSION_ID" "<current focus>"` (the
+  self-rename shape) — so the operator finds you by name in
+  `gc session list`.
+{{ end }}

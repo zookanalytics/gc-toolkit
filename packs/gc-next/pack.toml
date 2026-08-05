@@ -49,4 +49,11 @@ name = "converse"
 # prompt honors (assets/overlays/nx-cycle-recycle/; census §7 — gate
 # re-keyed and action changed from the live overlay, invariants carried
 # verbatim).
+#
+# STAGE-1 VERIFICATION: every live precedent patches an IMPORTED agent;
+# whether a patch resolves an agent declared in this same layer is
+# undocumented. If it does not, the overlay silently never stages —
+# check-nx-cycle-recycle-hook (doctor PORTS) exists to catch exactly
+# that, and the fallback is overlay_dir on the agent.toml if that field
+# is valid there.
 overlay_dir = "assets/overlays/nx-cycle-recycle"

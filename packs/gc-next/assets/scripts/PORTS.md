@@ -23,7 +23,21 @@ work (stage 0+) that rides Delivery; port beads are filed at intake.
 | `assets/scripts/worktree-setup.sh` | `assets/scripts/nx-worktree-setup.sh` | **Shipped now** (minimal provisioning; the live script's extra hardening folds in at port). |
 | tmux status-line chain (`tmux-status-line-override.sh`, `gc-toolkit-status-line.sh`, `tmux-bindings.sh`) | `assets/scripts/nx-status-line.sh` | **Shipped now**, single-layer + staging-gated (spec §2); bindings fold in at port. |
 
+**Doctrine port (not a script):**
+`template-fragments/polecat-non-impl-done.template.md` — the census's
+largest single carry — is realized in two shipped summaries (the
+done-sequence in the wright prompt; the gate rules in
+`nx-signoff-gate`, appended to every wright) plus **this port row** for
+the full machinery (pre-open branch review vars, host/repo pinning, the
+supersede-dismiss sequence with its seven guards). The wright prompt's
+"read it at template-fragments/…" pointer is valid until stage 5; the
+port bead re-homes the full text before that pointer breaks.
+
 **Not ported** (retired, with rationale — spec §7): `tools/gc-bead-host.sh`
 and the two bead-host fixtures (superseded by continuation-group
 conversations, tk-h9pq5 Q4; zero live instances);
-`tools/upstream-gc-sync.sh` (moves to the keeper sub-pack, not here).
+`tools/upstream-gc-sync.sh` (moves to the keeper sub-pack, not here);
+`nx-patrol-anchor.sh` (existed briefly in this tree — replaced by the
+`mol-nx-patrol-anchor` formula order after review B4: order-exec env and
+store resolution for `gc bd` writes are undocumented, while the
+order→pool wisp path is proven).

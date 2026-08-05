@@ -19,8 +19,10 @@ Claim via `gc hook --claim --json`; the claim carries a
 3. **Flag, don't close.** Set the board flag (`gc.attention`); a flag is
    the natural precursor to a turn — pick-a-row files one. Never close or
    advance the subject's lifecycle.
-4. **Drain.** Close your own run bead (`gc.outcome=pass`) and drain-ack,
-   in that order.
+4. **Drain.** `gc runtime drain-ack` — and nothing else: under a v1
+   attach your claimed bead IS the subject, which stays open for the
+   human; never `gc bd close` anything here (the root-only v1 wisp is
+   reaped off the work issue's lifecycle, not by you).
 
 If your reaction produces code (rare, discouraged), it takes the gated
 path, never direct.

@@ -30,9 +30,10 @@ collect() { # collect <dir> <pattern> -> sorted basenames (no extension)
 }
 
 # Known base-layer basenames (gastown import + builtin packs), pinned:
-BASE_KNOWN="mol-polecat-work mol-polecat-base mol-review-leg mol-dog-backup
-mol-dog-compactor mol-shutdown-dance mol-do-work graph-worker tmux-theme
-status-line boot deacon mayor polecat refinery witness dog"
+BASE_KNOWN="mol-polecat-work mol-polecat-base mol-review-leg mol-review-quorum
+mol-dog-backup mol-dog-compactor mol-shutdown-dance mol-do-work mol-first-reaction
+graph-worker tmux-theme status-line worktree-setup propulsion
+boot deacon mayor polecat refinery witness dog"
 
 check_set() { # check_set <label> <nx-list> <live-list>
   label="$1"; nx_list="$2"; live_list="$3"
@@ -46,14 +47,14 @@ check_set() { # check_set <label> <nx-list> <live-list>
 NX_FORMULAS=$(collect "$NX/formulas" "*.toml")
 NX_AGENTS=$(for d in "$NX"/agents/*/; do [ -d "$d" ] && basename "$d"; done | sort -u)
 NX_FRAGMENTS=$(collect "$NX/template-fragments" "*.template.md")
-NX_SCRIPTS=$(collect "$NX/assets/scripts" "*.sh")
+NX_SCRIPTS=$( { collect "$NX/assets/scripts" "*.sh"; collect "$NX/assets/overlays" "*.sh" 5; } | sort -u)
 NX_DOCTOR=$(for d in "$NX"/doctor/*/; do [ -d "$d" ] && basename "$d"; done | sort -u)
 NX_ORDERS=$(collect "$NX/orders" "*.toml")
 
 LIVE_FORMULAS=$(collect "$ROOT/formulas" "*.toml")
 LIVE_AGENTS=$(for d in "$ROOT"/agents/*/; do [ -d "$d" ] && basename "$d"; done | sort -u)
 LIVE_FRAGMENTS=$(collect "$ROOT/template-fragments" "*.template.md")
-LIVE_SCRIPTS=$( { collect "$ROOT/assets/scripts" "*.sh"; collect "$ROOT/tools" "*.sh"; } | sort -u)
+LIVE_SCRIPTS=$( { collect "$ROOT/assets/scripts" "*.sh"; collect "$ROOT/tools" "*.sh"; collect "$ROOT/overlays" "*.sh" 5; } | sort -u)
 LIVE_DOCTOR=$(for d in "$ROOT"/doctor/*/; do [ -d "$d" ] && basename "$d"; done | sort -u)
 LIVE_ORDERS=$(collect "$ROOT/orders" "*.toml")
 KEEPER_FRAGMENTS=$(collect "$ROOT/packs/gascity-keeper/template-fragments" "*.template.md")

@@ -37,8 +37,11 @@ shape, freshness-stamp what you found, then flag {{issue}} onto the board
 
 [[steps]]
 id = "advance-and-drain"
-title = "Close own run; drain"
+title = "Drain"
 description = """
-Close your run bead (gc.outcome=pass), then `gc runtime drain-ack` — in
-that order. One reaction, then gone.
+`gc runtime drain-ack`. Nothing to close: under a v1 `--on` attach the
+claimed bead IS {{issue}}, which stays open for the human (rule 3), and a
+root-only v1 wisp correctly drain-acks without closing anything — its
+root is reaped off the work issue's lifecycle, not by you (packs.md §4).
+Never run `gc bd close` here. One reaction, then gone.
 """

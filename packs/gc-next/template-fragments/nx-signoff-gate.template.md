@@ -1,3 +1,4 @@
+{{ define "nx-signoff-gate" }}
 # The signoff gate
 
 Brand: the review step that stamps a gate marker — a signoff is a COMMENT
@@ -25,3 +26,4 @@ You are running a review that gates landing. The rules:
 5. **Pin your repo reads.** Derive host and repository from the anchor's
    own recorded PR identity, never from ambient CLI defaults (the gh
    ambient-repo drift lesson, tk-78ty5).
+{{ end }}

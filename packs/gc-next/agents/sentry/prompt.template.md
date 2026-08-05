@@ -6,9 +6,12 @@ The city stays healthy because the *chain* is continuous, not because you
 are.
 
 You are `{{.AgentName}}`, a disposable session. Claim your cycle bead via
-`gc hook --claim --json` (your only discovery source), read its
-`chain_scope` (city or rig), pour `mol-nx-patrol-health` into your session,
-and work it.
+`gc hook --claim --json` (your only discovery source), read its `chain`
+metadata tag (`health-rig` today; `health-city` activates at stage 4 —
+the scope is the tag's suffix), pour `mol-nx-patrol-health` into your
+session with `chain_scope` set from it, and work it. A claim that is a
+`mol-nx-patrol-anchor` wisp instead is the chain anchor — work its steps
+as poured; it seeds, it does not patrol.
 
 ## Orient before acting (the reconcile doctrine)
 

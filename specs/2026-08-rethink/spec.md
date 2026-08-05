@@ -172,21 +172,30 @@ deliverable, not an aspiration:
   path.** A fresh import has no cycle bead, and a failed file ends a chain
   silently — the current formulas' own guarded "could not pour; not burning"
   paths prove files fail. gc-next therefore ships a **chain-anchor order**
-  (`orders/nx-patrol-anchor.toml`): on schedule, for each configured chain
-  (land, health-city, health-per-rig), if no open cycle bead exists, file one
-  — idempotent, so a live chain is untouched. Orders fire on schedule
-  regardless of roster state, which is what makes the anchor the one piece of
-  continuity that does not itself ride a chain.
+  (`orders/nx-patrol-anchor.toml`): on schedule, for each rig chain (land,
+  health-rig), if no open cycle bead exists, file one — idempotent, so a
+  live chain is untouched. Orders fire on schedule regardless of roster
+  state, which is what makes the anchor the one piece of continuity that
+  does not itself ride a chain. **Amended after phase-3 review (B4/D6):**
+  the anchor fires a v2 formula (`mol-nx-patrol-anchor`) at the sentry pool
+  — the proven order→pool wisp path — rather than an exec script, because
+  order-exec env and store resolution for `gc bd` writes are undocumented;
+  and the **health-city chain is a stage-4 activation**, not a staging
+  deliverable: the both-contexts scope expansion this section previously
+  assumed applies to city-level packs only, so the town half needs
+  city-level import wiring that is a cutover decision, and the live pack's
+  patrols keep owning town health through the overlap window.
 - **Chain liveness is a doctor check** (`check-nx-patrol-chain-liveness`):
-  errors when a chain has no open cycle bead and warns when the newest cycle
-  bead is stale beyond the anchor interval. "Chain survives a killed file" is
-  a stage-3 cutover gate (§9).
+  errors when a rig chain has no open cycle bead and warns when the newest
+  cycle bead is older than **twice** the anchor interval, doubled, or the
+  ledger is unreadable. "Chain survives a killed file" is a stage-3 cutover
+  gate (§9).
 
 | Agent | Brand (one sentence, O8) | Variant & shape |
 |---|---|---|
 | **`wright`** | Builds one bead's output on its own branch and hands off to gating; it never lands, never closes a unit that merges. | Pool worker; explicit `scope="rig"`, `wake_mode=fresh`, `max_active_sessions=4`. Claim via standard hook tiers. Prompt authored fresh; fragments per the injection matrix (§7). |
 | **`lander`** | The single writer of merged-truth: drives every gating anchor through its check-set and performs the merge, and is the only thing that targets the protected boundary. | **Demand-scaled, capped at one**: pool-shaped config, explicit `scope="rig"`, `max_active_sessions=1`, scale-from-zero on routed demand. The cap governs **controller-managed desired state only** — a manual `gc session new` can still mint a second instance, and the drain-ack-with-assigned-work repair can overlap teardown with a fresh claim — so the cap is an operational convenience, **not** the correctness boundary: the actual single-writer guarantee stays where the state machine puts it, in the merge skill's validate-merge-record sequence and close-on-land (§3 rule 5). A prompt clause and a doctor check ban manual spawns against lander. Runs `mol-nx-patrol-land` cycles (v1 self-pour, §5). |
-| **`sentry`** | Runs one health-patrol cycle — orphans, queues, sessions, stores — files what it finds, executes bounded repairs, files the next cycle, and drains. | Pool worker; **deliberately unscoped** (`scope` omitted — the tri-state's both-contexts expansion, chosen on purpose and commented in the agent.toml): the city expansion runs the town chain (city store: orphan sweeps, store health — work a rig-scoped agent cannot reach, since sling refuses cross-store routes), and each rig expansion runs that rig's chain. `max_active_sessions=2`, `wake_mode=fresh`. Runs `mol-nx-patrol-health` (v1, §5) with steps gated on a `chain_scope` var; executes bounded runtime-state repairs (§2 dog disposition). |
+| **`sentry`** | Runs one health-patrol cycle — orphans, queues, sessions, stores — files what it finds, executes bounded repairs, files the next cycle, and drains. | Pool worker; explicit `scope="rig"` (**amended after phase-3 review, B3**: the tri-state both-contexts expansion this row previously relied on applies to city-level packs only, so under this pack's rig-level import an unscoped sentry is rig-only regardless). Each rig expansion runs that rig's chain; the **town chain is a stage-4 activation** requiring city-level import wiring (D6), with the live pack's patrols owning town health until then. `max_active_sessions=2`, `wake_mode=fresh`. Runs `mol-nx-patrol-health` (v1, §5) with steps gated on a `chain_scope` var; executes bounded runtime-state repairs (§2 dog disposition). |
 | **`converse`** | Holds a subject bead's conversation for the operator: rebuilds the slice, preps, holds, writes the outcome to the subject, closes only the turn. | Pool worker per tk-h9pq5 §Key-Components-3: `run-operator` shape with the hold-not-close clause; explicit `scope="rig"` (beads and continuation groups are rig-scoped); `max_active_sessions=2`; claims turns via `gc.routed_to`, continuity via `gc.continuation_group` vacuum. Carries the recycle guard: at the context threshold it writes the turn outcome to the subject and lets the session die (turn boundaries are the release valve). |
 | **`outrider`** | Meets a newly filed bead before the operator does: reads its universe, writes the first-reaction card, flags it onto the board, and drains. | Small pool (explicit `scope="rig"`, `max_active_sessions=2`) executing `mol-nx-first-reaction`; carries the default-disabled gate + city-wide shed clamp doctrine in both `work_query` and `scale_check` (census §7). Kept separate from `converse` (tk-h9pq5 open question 4): an outrider run is autonomous and must never hold a slot waiting for an operator. |
 | **`thread-ops`** | An operator-spawned parallel line of judgment — it acts and dispatches on the operator's behalf but owns no inbox, no patrol cadence, and no system-of-record identity. | Thread shape carried exactly from the existing thread agents (`work_query = "printf '[]'"`, failing `sling_query`, `wake_mode=resume`, `min_active_sessions=0`, explicit `scope="city"`). The thread *contract* is one shared fragment; each thread role is a thin `agent.toml` + role prompt, because `[env] RoleName` is static per agent.toml — there is no spawn-time parameterization (correcting an earlier draft's "one generic template"). gc-next ships exactly one thread role initially: `thread-ops`, whose role prompt is the fresh-authored operations/strategy line (the root/strategy conversation tk-h9pq5 OQ2 keeps); further thread roles are thin additions. |
@@ -237,12 +246,17 @@ re-litigation; this section only binds its design to gc-next names.
   where `task_kind == "conversation"` — the sibling clause tk-h9pq5 Q1
   specifies, carried into the new patrol with its fail-safe (decline-only)
   property and a regression fixture.
-- **Attention surface:** the Helm board is carried and the rewire is
-  **implemented in the staged tree** (it is a bash-script change in gc-next's
-  carried `gc-helm` script, not runtime-gated authoring): pick-a-row
+- **Attention surface:** the Helm board is carried; pick-a-row
   files-or-attaches a turn (warm attach if a group member is live, else file
-  and let demand spawn). `takeaway --release` maps to stop-routing-and-drain.
-  Validated at stage 2 (§9).
+  and let demand spawn), and `takeaway --release` maps to
+  stop-routing-and-drain. **Amended after phase-3 review (D2):** the rewire
+  is *specified* in the staged tree as the `nx-helm.sh` port row's diff
+  (PORTS.md) rather than shipped as executable bash — shipping a diverged
+  copy of the helm family while the live pack still runs it was judged the
+  worse trade (divergence cost during the overlap, not the collision rule,
+  which the `nx-` rename already satisfies). The port bead lands the
+  executable rewire at intake, **before stage 2 runs its gate**; the gate
+  itself is unchanged.
 - **Subjects never park `in_progress` under a hold.** The reaper-skip clause
   covers *turns* (`task_kind=conversation`); the subject bead needs no
   sibling shield because holding is the turn's job — the subject stays `open`
@@ -273,7 +287,7 @@ wins):
 | `operator-next-step-trailing` | `converse`, `thread-ops` |
 | `polecat-convoys` | `wright` |
 | `polecat-non-impl-done` — done-sequence half | `wright` |
-| `polecat-non-impl-done` — signoff-gate half | the review-step fragment `mol-nx-work` dispatches, and `lander`'s gating doctrine |
+| `polecat-non-impl-done` — signoff-gate half | `nx-signoff-gate`, appended to every `wright` (review beads run on that pool), and `lander`'s gating doctrine |
 | `thread-role` (the thread contract) | every `thread-*` role |
 | `upstream-engagement` | keeper (sub-pack) |
 | `watch-dispatched-work` | `thread-ops`, keeper; referenced by dispatching formulas |
@@ -405,7 +419,7 @@ branch work.)*
 | Outcome | Phase-3 review accepts |
 |---|---|
 | O1 | `packs/gc-next/pack.toml` with zero example-pack imports; §2's table realized; the collision audit script and its clean run. |
-| O2 | The four §6 artifacts: `agents/converse/`, the turn-filing convention doc'd in its prompt + `mol-nx-turn`, the reaper-skip clause in `mol-nx-patrol-health`, and the Helm rewire **implemented** in the carried helm script (runtime validation is stage 2). |
+| O2 | The four §6 artifacts: `agents/converse/`, the turn-filing convention doc'd in its prompt + `mol-nx-turn`, the reaper-skip clause in `mol-nx-patrol-health`, and the Helm rewire **specified as the `nx-helm.sh` port diff** (amended per D2; the executable rewire lands with the port bead before stage 2's gate). |
 | O3 | `mol-nx-work` + `mol-nx-patrol-land` conforming to the state machine doc; mr-mode + non-empty `check_set` defaults for agent-initiated work. |
 | O4 | The interlock line present in every formula header (§5). |
 | O5 | Every census row (§7) resolvable to a file/section in the staged tree, or its retirement rationale present in this spec. |

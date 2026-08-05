@@ -6,15 +6,22 @@
 # <pool-template>` spawns an extra instance beside it, and Tier-1/2 claim
 # queries match the shared identity strings, so a duplicate co-owns any
 # assigned gating anchor (docs/gascity-agents.md, the duplicate-session
-# work-ownership footgun; spec §4 S1). Detect only.
-set -euo pipefail
+# work-ownership footgun; spec §4). Detect only.
+set -uo pipefail
 
+# Bucket by the rig-qualified TEMPLATE string, the documented aggregation
+# key (docs/gascity-agents.md: counting by session name conflates rigs;
+# template carries the rig qualifier for rig-scoped pools). A trailing
+# instance suffix (-N) is stripped so pool slots of one template bucket
+# together.
 DUPES=$(gc session list --json 2>/dev/null \
   | jq -r '[(.sessions // [])[]
             | select(.state == "active")
-            | select((.template // .name // "") | test("(^|[./])lander($|-[0-9]+$)"))]
-           | group_by(.rig // "city") | map(select(length > 1))
-           | .[] | "\(.[0].rig // "city"): \(length) live lander sessions"' 2>/dev/null) || {
+            | (.template // .name // "") as $t
+            | select($t | test("(^|[./])lander(-[0-9]+)?$"))
+            | ($t | sub("-[0-9]+$"; ""))]
+           | group_by(.) | map(select(length > 1))
+           | .[] | "\(.[0]): \(length) live lander sessions"' 2>/dev/null) || {
   echo "WARN: session list unreadable — cannot certify lander singleton"
   exit 1
 }

@@ -15,6 +15,15 @@ running; a Ready finalize bead with no dispatcher is an operational hold,
 not a wiring bug. Observing the serve loop process a finalize bead is a
 stage-3 cutover gate (spec §9).
 
+STAGE-1 ACCEPTANCE TEST (recorded here because the failure would be
+silent): the bare `gc.run_target = "gc-next.wright"` below relies on the
+pour-time stamper resolving the hint into the rig-qualified
+`gc.routed_to` the exact-match read side needs. The imported
+mol-polecat-work proves the mechanism in the live city, but the
+resolution semantics for a bare name are not documented in this repo —
+so stage 1 must verify that a materialized build step is actually
+claimed by a wright, before anything depends on this formula.
+
 Interlock (O4): implemented — the build step ends by declaring the bead's
 check_set and handing to gating; the review dispatched against the branch
 stamps its own gate marker (check.<name>=green@<sha>), so the step that

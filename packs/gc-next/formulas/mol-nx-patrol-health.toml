@@ -6,9 +6,13 @@ stores; file what you find, repair what is bounded, file the next cycle.
 Consistency trace: Agents improve -> molecule + routing -> Engine health.
 
 Contract: v1 (packs.md §1) — a self-continued patrol worked in one
-session. Steps gate on {{chain_scope}}: the city chain runs the town half
-(city store — unreachable from rig scope, since sling refuses cross-store
-routes), each rig chain runs the rig half.
+session. Steps gate on {{chain_scope}}: each rig chain runs the rig half.
+STAGING SCOPE (deviation D6, implementation-notes.md): only the rig
+chains are live during staging — the town half (city store) stays owned
+by the live pack's patrols through the overlap window, and the city
+chain activates at cutover stage 4 with the city-level import wiring it
+requires. The city steps ship here, gated, so activation is wiring, not
+authoring.
 
 Doctrine carried per the census (spec §7): the Idle Town Principle and
 warrant caps (from mol-deacon-patrol), the orphan re-offer lever table and
@@ -38,6 +42,10 @@ required = true
 description = "Max bounded runtime-state repairs executed in-cycle; excess is filed for the next cycle"
 default = "3"
 
+[vars.binding_prefix]
+description = "Import binding prefix with trailing dot; the rig-qualified pool names below need it (exact-match read side, docs/gascity-routing-model.md)"
+default = "gc-next."
+
 [[steps]]
 id = "orient"
 title = "Prime and reconcile (ephemeral-aware)"
@@ -56,8 +64,11 @@ id = "file-next-cycle"
 title = "File the next cycle bead FIRST"
 description = """
 ```bash
-NEXT=$(gc bd create --title "patrol-health cycle ({{chain_scope}})" --json | jq -r '.[0].id')
-gc bd update "$NEXT" --set-metadata gc.routed_to=gc-next.sentry,task_kind=patrol-cycle,chain=health-{{chain_scope}}
+POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}sentry"
+NEXT=$(gc bd create -t task --title "patrol-health cycle ({{chain_scope}})" --json | jq -r '.id // .[0].id')
+gc bd update "$NEXT" --set-metadata "gc.routed_to=$POOL" \
+  --set-metadata "task_kind=patrol-cycle" \
+  --set-metadata "chain=health-{{chain_scope}}"
 ```
 
 Stamp-don't-sling (docs/gascity-routing-model.md). On failure: record
@@ -99,8 +110,8 @@ title = "Bounded repairs; file the rest"
 description = """
 Execute at most {{repair_cap}} runtime-state repairs in-cycle (requeue,
 clear stale claim, nudge a parked session). Anything producing a committed
-output is filed as an ordinary bead routed to gc-next.wright and rides
-Delivery. Make each failure legible on its finding bead before any
+output is filed as an ordinary bead routed to
+`${GC_RIG:+$GC_RIG/}{{binding_prefix}}wright` and rides Delivery. Make each failure legible on its finding bead before any
 restart-shaped remedy (the no-cheap-restart boundary). Never invoke a
 consent UI or hold for an operator — judgment goes to a turn on the
 subject bead (mol-nx-turn), not to this session.

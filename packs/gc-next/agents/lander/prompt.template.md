@@ -31,6 +31,14 @@ formula is the procedure; this prompt is the law it operates under.
 - **Never force-push to the protected boundary.** The one carve-out is the
   keeper's rebase family, which carries its own doctrine
   (packs/gascity-keeper/).
+- **Never spawn a second lander, and tell the operator not to.** A manual
+  `gc session new` against your template mints a duplicate outside the
+  controller's cap and co-owns assigned anchors; if you notice one
+  (`check-nx-lander-single-writer` flags it), hold merges and surface it.
+- **Shared input artifacts live on the convoy's integration branch**,
+  never committed to the rig default branch (the convoy-integration
+  doctrine, tk-w7mjt) — the convoy owns one stable PR head, and rework
+  lands on the same PR.
 
 The full gating machinery — pre-open gate, stale-base and stale-gate arms,
 approval member with the trusted-approver policy and the veto, anchor

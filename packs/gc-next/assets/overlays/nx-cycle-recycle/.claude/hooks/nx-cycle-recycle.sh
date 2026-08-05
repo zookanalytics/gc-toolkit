@@ -38,17 +38,26 @@ esac
 
 THRESHOLD="${GC_NX_RECYCLE_TOKENS:-200000}"
 
-# --- 2. Measure context (same supervisor probe as the source) ------------
+# --- 2. Measure context (the source hook's supervisor probe, verbatim
+# shape: resolve the city name, then the per-agent endpoint) --------------
 API_URL="${GC_API_URL:-http://127.0.0.1:8372}"
 SESSION="${GC_SESSION_NAME:-}"
 [ -n "$SESSION" ] || exit 0
-TOKENS=$(curl -fsS --max-time 5 "$API_URL/sessions/$SESSION/usage" 2>/dev/null \
+CITY="$(gc cities --json 2>/dev/null | jq -r --arg p "${GC_CITY:-}" '.cities[] | select(.path == $p) | .name' 2>/dev/null)"
+[ -n "$CITY" ] || exit 0              # cannot resolve city -> skip; PreCompact is the net
+TOKENS=$(curl -fsS --max-time 5 "$API_URL/v0/city/$CITY/agent/$AGENT" 2>/dev/null \
   | jq -r '.input_tokens // empty' 2>/dev/null) || TOKENS=""
 [ -n "$TOKENS" ] || exit 0            # unknown -> skip; PreCompact is the net
 [ "$TOKENS" -ge "$THRESHOLD" ] 2>/dev/null || exit 0
 
-# --- 3. Defer while an operator is attached ------------------------------
-ATTACHED=$(tmux list-clients -t "$SESSION" 2>/dev/null | wc -l | tr -d ' ')
+# --- 3. Defer while an operator is attached (uncertain -> DEFER, the
+# source invariant: only a probe that definitely says "no clients"
+# proceeds) ---------------------------------------------------------------
+if ! CLIENTS=$(tmux list-clients -t "$SESSION" 2>/dev/null); then
+  echo "nx-cycle-recycle: over threshold ($TOKENS) but attachment unknown; deferring" >&2
+  exit 0
+fi
+ATTACHED=$(printf '%s' "$CLIENTS" | grep -c . || true)
 if [ "${ATTACHED:-0}" -gt 0 ]; then
   echo "nx-cycle-recycle: over threshold ($TOKENS) but operator attached; deferring" >&2
   exit 0

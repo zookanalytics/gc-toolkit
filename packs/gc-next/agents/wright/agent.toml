@@ -18,6 +18,12 @@ idle_timeout = "2h"
 min_active_sessions = 0
 max_active_sessions = 4
 
+# The signoff-gate doctrine rides every wright session: review beads the
+# lander dispatches run on this pool, and the gate rules (COMMENT-never-
+# APPROVE, head-pinned markers, repo pinning) must reach them (spec §7
+# injection matrix, signoff-gate half).
+append_fragments = ["nx-signoff-gate"]
+
 # Agent-initiated code takes the gated path, never direct (spec §3.5;
 # the state machine's mr-mode). Mirrors the outrider invariant.
 [env]
