@@ -57,6 +57,27 @@ changed on the branch because of it (or why nothing did).
 10. **Stage-1 verification list — deferred to PR time** / staging, as
     listed in implementation-notes.md.
 
+## Addendum — 2026-08-05 follow-up observations (operator, still reading)
+
+- **Outrider flagging.** The operator questions "flags it onto the board"
+  — reading the architecture as moving away from proactive flagging. The
+  ratified design (tk-h9pq5) keeps the flag as the *cheap* raise-hand (a
+  board row costs no session or slot; a turn spawns a holding converse),
+  but its OQ4 leaves turn-vs-flag open. Candidate reconciliation, not yet
+  ruled: **graduated proactivity** — outrider flags by default and files
+  a proactive turn only when its card's "Decision needed" is concrete,
+  which is exactly architecture's event-driven trigger ("an event drives
+  a formula, which decides an engagement is warranted"). Decide at PR
+  time.
+- **Seeding UX.** Front door #3 (thread-ops) is what the operator will
+  actually use; #2 (conversation against a bead) is solid; **#1 (file
+  work directly) will not happen without a material helper — a single
+  command or UI.** Direction recorded: the README should lead with
+  thread-ops, and a one-command seed helper (`nx-seed "<what I want>"` →
+  files the bead, routes it, optionally opens the conversation) is a
+  wanted early bead, without violating the no-bespoke-intake non-goal's
+  spirit (it is a wrapper over front door #1, not a new surface class).
+
 ## PR-time review checklist (operator)
 
 - [ ] Role names: wright / lander / sentry / converse / outrider /
