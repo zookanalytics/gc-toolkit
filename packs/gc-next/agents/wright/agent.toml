@@ -1,0 +1,24 @@
+# wright — builds one bead's output on its own branch and hands off to
+# gating; it never lands, never closes a unit that merges. (Brand, O8.)
+#
+# Consistency trace (spec §11): Human attention is the budget ->
+# bead + molecule + routing -> composes like Delivery.
+#
+# The impl pool. Claims routed work via the standard hook tiers; under
+# mol-nx-work it claims materialized v2 step beads and closes its own
+# step (gc.outcome idiom) before drain-ack. Explicit scope (spec §4;
+# the tri-state trap is docs/gascity-agents.md).
+
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/wright/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/nx-worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+nudge = "Run gc hook; wright demand is routed implementation work. Claim, build on your branch, hand off to gating, drain."
+idle_timeout = "2h"
+min_active_sessions = 0
+max_active_sessions = 4
+
+# Agent-initiated code takes the gated path, never direct (spec §3.5;
+# the state machine's mr-mode). Mirrors the outrider invariant.
+[env]
+GC_DEFAULT_MERGE_STRATEGY = "mr"

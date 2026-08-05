@@ -1,0 +1,79 @@
+description = """
+mol-nx-work — the implementation workflow: build one bead's output, hand it
+to gating. (Brand, O8.) The native successor of the imported
+mol-polecat-work (spec §2); at cutover stage 4 the city's
+default_sling_formula repoints here.
+
+Consistency trace: Human attention is the budget -> bead + molecule +
+routing -> Delivery.
+
+Contract: graph.v2 — the steps are independently-routable materialized step
+beads routed to the wright pool, and the engine closes the workflow root
+through workflow-finalize. OPERATIONAL DEPENDENCY (packs.md §4): the
+workflow root closes only while a `gc convoy control --serve` loop is
+running; a Ready finalize bead with no dispatcher is an operational hold,
+not a wiring bug. Observing the serve loop process a finalize bead is a
+stage-3 cutover gate (spec §9).
+
+Interlock (O4): implemented — the build step ends by declaring the bead's
+check_set and handing to gating; the review dispatched against the branch
+stamps its own gate marker (check.<name>=green@<sha>), so the step that
+satisfies a gate is the step that signs it off. Unrun-check-runs-itself is
+the lander's stale-gate arm (mol-nx-patrol-land).
+"""
+formula = "mol-nx-work"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+[vars.issue]
+description = "The work bead this run builds"
+required = true
+
+[vars.check_set]
+description = "Comma-separated gate names the produced output must clear before landing; empty string is an explicit no-gates declaration (watched by the merge-gate-drop doctor check). Agent-initiated code must be non-empty."
+default = "signoff"
+
+[[steps]]
+id = "build"
+title = "Build the bead's output on its own branch"
+metadata = { "gc.run_target" = "gc-next.wright" }
+description = """
+Claim is this step bead; the work bead is {{issue}}. Prime (`gc prime`,
+`gc bd prime`), read {{issue}} and its metadata, resolve the landing target
+(`metadata.target` — under an owned convoy this is the integration branch,
+not the default branch), and build on your own branch per the wright
+contract.
+
+Ephemeral output (a finding, a decision): write it to {{issue}}'s notes and
+close {{issue}} — nothing merges. Committed output: push your branch, stamp
+`branch`/`target` on {{issue}}, declare its gates
+(`check_set={{check_set}}`), and hand it to gating per the rig's landing
+config. Never close {{issue}} yourself when its output merges — close-on-
+land belongs to the lander.
+
+Then advance the graph by closing THIS step bead (a graph.v2 step advances
+by closing its own bead; drain-ack alone strands it):
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+# failure: gc.outcome=fail + gc.failure_class=transient|hard + gc.failure_reason
+```
+"""
+
+[[steps]]
+id = "drain"
+title = "Close out and release the session"
+needs = ["build"]
+metadata = { "gc.run_target" = "gc-next.wright" }
+description = """
+Verify the hand-off is recorded ({{issue}} carries branch/target/check_set,
+or is closed for the ephemeral case). Then close this step and drain — in
+that order:
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+gc runtime drain-ack
+```
+"""

@@ -1,0 +1,21 @@
+# sentry — runs one health-patrol cycle: orphans, queues, sessions,
+# stores; files what it finds, executes bounded repairs, files the next
+# cycle, and drains. (Brand, O8.)
+#
+# Consistency trace (spec §11): Agents improve -> molecule + routing ->
+# composes like Engine health.
+#
+# DELIBERATELY UNSCOPED (spec §4): omitting `scope` is the tri-state's
+# both-contexts expansion (docs/gascity-agents.md — "omitted is not
+# city"), chosen on purpose here. The city expansion runs the town
+# chain (city-store health, unreachable from any rig-scoped agent
+# because sling refuses cross-store routes); each rig expansion runs
+# that rig's chain. The patrol formula gates its steps on the cycle
+# bead's chain_scope var.
+
+wake_mode = "fresh"
+work_dir = ".gc/agents/nx-sentry/{{.AgentBase}}"
+nudge = "Run gc hook; sentry demand is a patrol-health cycle bead. Work the cycle, file the next one, drain."
+idle_timeout = "1h"
+min_active_sessions = 0
+max_active_sessions = 2

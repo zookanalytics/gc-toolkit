@@ -1,0 +1,26 @@
+# nx-patrol-anchor — the chain anchor: re-seed any patrol chain that has
+# no open cycle bead. (Brand, O8: the one piece of patrol continuity that
+# does not itself ride a chain.)
+#
+# gc-next's patrols are self-continuing chains of routed cycle beads on
+# disposable pool sessions (spec §4). Every chain needs a first link (a
+# fresh import has none) and a repair path (a failed in-cycle file ends
+# the chain silently). Orders fire on schedule regardless of roster
+# state, which is exactly the property the anchor needs; `gc order` is
+# durable because the order file IS the registration.
+#
+# IDEMPOTENT: the script files a cycle bead only for a chain with no
+# open one — a live chain is untouched, so anchor and chain never race.
+# Detection lives in doctor/check-nx-patrol-chain-liveness; this is the
+# repair half. "Chain survives a killed file" is a stage-3 cutover gate.
+#
+# rig scope: instantiates in each importing rig's store, where that
+# rig's land + health-rig chains live. The health-city chain is seeded
+# by the same script running under the city expansion of the order
+# (scope defaults per importer wiring; see spec §4 sentry scoping).
+[order]
+description = "Re-seed any patrol chain (land, health-rig, health-city) that has no open cycle bead"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/nx-patrol-anchor.sh"
+scope = "rig"

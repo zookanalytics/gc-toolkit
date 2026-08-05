@@ -1,0 +1,11 @@
+# nx-doc-memory-audit — periodic brief-completeness scan (spec §7;
+# carried from the live doc-keeper memory order). Fires
+# mol-nx-doc-memory on a 24h cooldown at the wright pool. Same scoping
+# and vapor rules as nx-doc-drift-audit.toml.
+[order]
+description = "doc memory audit: promote durable structural learnings missing from a brief"
+formula = "mol-nx-doc-memory"
+trigger = "cooldown"
+interval = "24h"
+pool = "gc-next.wright"
+scope = "rig"

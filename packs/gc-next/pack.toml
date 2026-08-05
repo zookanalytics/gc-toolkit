@@ -1,0 +1,52 @@
+# gc-next — the ground-up recomposition of gc-toolkit, staged.
+#
+# Brand: the gc-toolkit core pack rebuilt on bare Gas City primitives —
+# native roster, no example-pack import, conversations as continuation
+# groups, patrols as self-continuing chains on disposable sessions.
+#
+# This pack is the Phase-3 implementation of specs/2026-08-rethink/
+# (outcome.md -> spec.md -> this tree). It is imported only by rigs that
+# opt in during staging; nothing in the live gc-toolkit pack loads it.
+# At cutover stage 5 (spec §9) its contents move to the repo root and
+# take the gc-toolkit name; the nx- prefixes exist for the overlap
+# window's non-collision rule (spec §1) and rename away then.
+#
+# O7 (specs/2026-08-rethink/outcome.md): the roster below carries ZERO
+# [[named_session]] entries, deliberately. Patrol continuity lives in
+# chains of routed cycle beads anchored by orders/nx-patrol-anchor.toml
+# (spec §4), not in resident singletons; the one on_demand resident in
+# this repo remains the keeper, argued in packs/gascity-keeper/. Every
+# agent here spawns on routed demand or by explicit operator action.
+#
+# O1: no [imports] table. This pack composes Gas City as shipped plus
+# its own native content; borrowed doctrine is cited at the point of
+# use, never inherited by import.
+
+[pack]
+name = "gc-next"
+schema = 2
+
+[global]
+# One writer of the status bar, no base theme to override (spec §2).
+# Gated: inert unless the operator sets GC_NX_STATUS=1, so a city
+# loading both gc-toolkit and gc-next during the staging overlap never
+# has two writers of status-right (spec §1). The gate is removed at
+# cutover stage 5.
+session_live = [
+    "{{.ConfigDir}}/assets/scripts/nx-status-line.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
+]
+
+# The one patch below targets this pack's OWN converse agent (patches
+# modify existing agents; converse exists in this layer) to stage the
+# recycle overlay into its work dir. There is no imported roster to
+# patch; divergence of opinion in gc-next is expressed by editing
+# gc-next.
+
+[[patches.agent]]
+name = "converse"
+# Deterministic record-then-drain at the context threshold: the staged
+# Stop hook self-gates to the converse role and sets the directive the
+# prompt honors (assets/overlays/nx-cycle-recycle/; census §7 — gate
+# re-keyed and action changed from the live overlay, invariants carried
+# verbatim).
+overlay_dir = "assets/overlays/nx-cycle-recycle"

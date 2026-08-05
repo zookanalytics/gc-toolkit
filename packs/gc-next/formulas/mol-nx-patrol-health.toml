@@ -1,0 +1,116 @@
+description = """
+mol-nx-patrol-health — one sentry cycle: orphans, queues, sessions,
+stores; file what you find, repair what is bounded, file the next cycle.
+(Brand, O8.)
+
+Consistency trace: Agents improve -> molecule + routing -> Engine health.
+
+Contract: v1 (packs.md §1) — a self-continued patrol worked in one
+session. Steps gate on {{chain_scope}}: the city chain runs the town half
+(city store — unreachable from rig scope, since sling refuses cross-store
+routes), each rig chain runs the rig half.
+
+Doctrine carried per the census (spec §7): the Idle Town Principle and
+warrant caps (from mol-deacon-patrol), the orphan re-offer lever table and
+never-exit-mid-step #1884 (from mol-witness-patrol), the reconcile half of
+layered-startup-discovery (lx-ody8m, tk-1waw2, #1833, tk-fj56a), the
+conversation reaper-skip (tk-h9pq5 Q1), and the heartbeat no-consent-UI
+invariant as step doctrine. Full mechanics: the two source patrol formulas
+in this repo remain readable until cutover stage 5.
+
+Interlock (O4, recorded note): the health checks this cycle performs
+(orphan scan, queue starvation) become self-running checks when the
+interlock lands; today the cycle files what it finds.
+"""
+formula = "mol-nx-patrol-health"
+version = 1
+
+[vars]
+[vars.chain_bead]
+description = "The cycle bead this run claimed (the chain link)"
+required = true
+
+[vars.chain_scope]
+description = "Which half this cycle runs: 'city' (town store health) or 'rig' (this rig's work health)"
+required = true
+
+[vars.repair_cap]
+description = "Max bounded runtime-state repairs executed in-cycle; excess is filed for the next cycle"
+default = "3"
+
+[[steps]]
+id = "orient"
+title = "Prime and reconcile (ephemeral-aware)"
+description = """
+`gc prime`; `gc bd prime`. Reconcile what exists before creating anything:
+wisps/infra beads live in `<store>.wisps`, so every wisp query carries
+`--include-infra` (lx-ody8m; tk-1waw2) or it reads `[]` and acts on a
+fiction. Identify as `$GC_AGENT`, never `$GC_ALIAS` (#1833). Adopt orphan
+work title-scoped, not assignee-scoped (tk-fj56a). The Idle Town
+Principle: an empty cycle in a quiet city is a healthy finding — do not
+manufacture work.
+"""
+
+[[steps]]
+id = "file-next-cycle"
+title = "File the next cycle bead FIRST"
+description = """
+```bash
+NEXT=$(gc bd create --title "patrol-health cycle ({{chain_scope}})" --json | jq -r '.[0].id')
+gc bd update "$NEXT" --set-metadata gc.routed_to=gc-next.sentry,task_kind=patrol-cycle,chain=health-{{chain_scope}}
+```
+
+Stamp-don't-sling (docs/gascity-routing-model.md). On failure: record
+loudly on {{chain_bead}}, continue the cycle (never exit mid-step, #1884);
+the nx-patrol-anchor order is the backstop.
+"""
+
+[[steps]]
+id = "work-health"
+title = "Orphaned and stranded work (rig scope)"
+condition = "{{chain_scope}} == rig"
+description = """
+The core job: unlanded work must live on an open, reachable bead.
+Recover orphans per the re-offer lever table (carried from
+mol-witness-patrol): an unassigned bead re-offers by keeping/stamping
+`gc.routed_to`; an assigned-but-dead one is unassigned first
+(open + unassigned + routed = pool demand). SKIP deliberately-held
+conversation shapes: any bead with `task_kind=conversation` is a held
+turn, not an orphan (tk-h9pq5 Q1 — the fail-safe, decline-only filter;
+regression fixture per PORTS.md). Check the landing queue (gating anchors
+with no live lander chain) and pool starvation (routed demand older than
+the spawn horizon).
+"""
+
+[[steps]]
+id = "town-health"
+title = "Town health (city scope)"
+condition = "{{chain_scope}} == city"
+description = """
+City-store housekeeping (the carried town half): orphan process cleanup,
+store health (dolt liveness), utility-session health, city-wide queue
+scan. File per-rig findings INTO the affected rig's own store as routed
+beads (never cross-store sling — re-file in the destination store).
+"""
+
+[[steps]]
+id = "repair-or-file"
+title = "Bounded repairs; file the rest"
+description = """
+Execute at most {{repair_cap}} runtime-state repairs in-cycle (requeue,
+clear stale claim, nudge a parked session). Anything producing a committed
+output is filed as an ordinary bead routed to gc-next.wright and rides
+Delivery. Make each failure legible on its finding bead before any
+restart-shaped remedy (the no-cheap-restart boundary). Never invoke a
+consent UI or hold for an operator — judgment goes to a turn on the
+subject bead (mol-nx-turn), not to this session.
+"""
+
+[[steps]]
+id = "close-cycle"
+title = "Close the cycle"
+description = """
+Verify the next-cycle bead exists (create now if the earlier file failed).
+Record the cycle summary on {{chain_bead}}; close it (gc.outcome=pass);
+then `gc runtime drain-ack`.
+"""

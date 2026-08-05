@@ -1,0 +1,1 @@
+description = "Every patrol chain (land, health-city, health-rig) has exactly one open cycle bead and it is not stale — errors on a dead chain (no open cycle bead), warns on a stale one (older than twice the anchor interval) or a doubled one (two open links means two claimants will race). Detect only; the nx-patrol-anchor order is the repair path (spec §4)"

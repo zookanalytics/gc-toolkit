@@ -1,0 +1,46 @@
+description = """
+mol-nx-turn — "I want to talk about this": file one conversation turn on a
+subject bead, routed to the converse pool. (Brand, O8.) The operator-driven
+trigger of the one entry point — all three triggers (formula-driven,
+event-driven, operator-driven) collapse into filing a turn
+(specs/tk-h9pq5/design-doc.md, Key Components §5; architecture.md "How work
+moves").
+
+Consistency trace: attention budget + earn every interaction -> bead
+(continuation group) + role + routing -> Attention & conversation.
+
+Contract: v1, one step — the one-step formula architecture names. Run by
+whoever wants the conversation (operator shell, thread-ops, a formula
+step); the step files the turn and exits. Pool demand does the spawning.
+
+Interlock (O4, recorded note): files no gated work; nothing to sign off.
+"""
+formula = "mol-nx-turn"
+version = 1
+
+[vars]
+[vars.subject]
+description = "The subject bead the conversation is about — its id IS the conversation's identity"
+required = true
+
+[vars.visit]
+description = "The visit prompt: what this turn needs from the operator (decision, review, catch-up)"
+required = true
+
+[[steps]]
+id = "file-turn"
+title = "File the turn bead in the subject's continuation group"
+description = """
+```bash
+TURN=$(gc bd create --title "turn: {{subject}} — {{visit}}" --json | jq -r '.[0].id')
+gc bd update "$TURN" --set-metadata gc.routed_to=gc-next.converse,gc.continuation_group={{subject}},task_kind=conversation
+gc bd dep add "$TURN" {{subject}} --type=parent-child
+```
+
+The turn's body is the visit prompt; append detail to the bead description
+if {{visit}} alone under-specifies the visit. Stamp-don't-sling
+(docs/gascity-routing-model.md). Warm, the live group session vacuums the
+turn; cold, pool demand spawns one. `task_kind=conversation` is the
+structural tell the health patrol's reaper-skip keys on — without it a
+held turn reads as an orphan.
+"""

@@ -1,0 +1,109 @@
+description = """
+mol-nx-patrol-land — one lander cycle: drive every gating anchor toward
+landed, then file the next cycle. (Brand, O8.)
+
+Consistency trace: edges visible (checks) + attention budget -> check +
+bead + routing -> Delivery.
+
+Contract: v1, deliberately (packs.md §1; spec §3.4) — a self-continued
+patrol is data one agent works through in its own session; no step needs
+independent routing (review dispatches are slings *within* a step). The
+live pack's mol-refinery-patrol declares the v2 compiler while pouring
+root-only — the self-contradictory shape packs.md §3 documents — and this
+formula corrects rather than reproduces that mis-build.
+
+Doctrine carried from mol-refinery-patrol per the census (spec §7):
+close-on-land (open until VERIFIED merge), the GATING/pre-open sub-states,
+per-gate `check.<name>=green@<sha>` markers with head re-gating, the
+approval member (trusted-approver policy, head-bound approvals, the
+non-head-bound veto), stale-base and stale-gate arms, anchor repair, convoy
+graduation. The full mechanics ride the ported script family
+(assets/scripts/PORTS.md); docs/work-bead-state-machine.md is the single
+authority where any port and this text disagree.
+
+Interlock (O4): the merge step is a check-discharger by construction;
+unrun-check-runs-itself is partially realized by the stale-gate re-dispatch
+arm; checks that run themselves fully are deferred (recorded note).
+"""
+formula = "mol-nx-patrol-land"
+version = 1
+
+[vars]
+[vars.chain_bead]
+description = "The cycle bead this run claimed (the chain link)"
+required = true
+
+[[steps]]
+id = "orient"
+title = "Prime, reconcile, adopt in-flight work"
+description = """
+`gc prime`; `gc bd prime`. Reconcile before acting (the carried
+startup-discovery doctrine): find anchors and hand-offs already in flight —
+gating anchors are DETACHED from both work queues by design
+(assignee="" and gc.routed_to=""), so enumerate them on `merge_result`,
+never on assignment. Identify as `$GC_AGENT`. An empty pass is a finding,
+not a failure.
+"""
+
+[[steps]]
+id = "file-next-cycle"
+title = "File the next cycle bead FIRST (pour-before-burn descendant)"
+description = """
+Continuity precedes work: create the next cycle bead now, so a failure
+later in this cycle cannot break the chain.
+
+```bash
+NEXT=$(gc bd create --title "patrol-land cycle" --json | jq -r '.[0].id')
+gc bd update "$NEXT" --set-metadata gc.routed_to=gc-next.lander,task_kind=patrol-cycle,chain=land
+```
+
+Stamp-don't-sling: a bare `gc sling` in a city carrying a
+default_sling_formula is silently a Lane-4 attach that stamps no routing
+field (docs/gascity-routing-model.md). If the create fails, record it
+loudly on {{chain_bead}} and continue — the nx-patrol-anchor order re-seeds
+a dead chain, and check-nx-patrol-chain-liveness flags it. Never exit from
+an intermediate step (#1884).
+"""
+
+[[steps]]
+id = "hand-offs"
+title = "Take hand-offs to gating"
+description = """
+For each bead handed off (open, assigned to the lander, carrying branch +
+target): mr-mode with a pre-open gate member → push the branch, dispatch
+the pre-open review AGAINST THE BRANCH (a sling within this step, routed to
+the review pool), park the anchor in pre-open gating
+(merge_result=pre_open_gate, detached from both queues). Otherwise → open
+the PR and park in ordinary gating (merge_result=pull_request). Identity
+fields are written first and verified by re-read; the visibility switch is
+thrown last (the ordered flip — state machine doc).
+"""
+
+[[steps]]
+id = "gate-and-merge"
+title = "Resolve gates; merge what is green; converge what is stuck"
+description = """
+Run the ported gating passes over every anchor (scripts per PORTS.md):
+pre-open-resolve (open PRs whose pre-open members are green@head), the
+merge pass (every check_set member green at the LIVE head, approval where
+required, the veto always, in-flight rework holds, then validate → merge
+pinned to the validated head → record, synchronously), the stale-base arm
+(file a rebase child, stay gating), the stale-gate arm (file a re-review
+child at the live head — the interlock's unrun-check-runs-itself,
+realized), and anchor repair (backfills before visibility). Close-on-land:
+`closed` is written only from a verified merged_sha. Rejections file rework
+children routed to gc-next.wright — rework is a NEW child, never a
+reopened bead.
+"""
+
+[[steps]]
+id = "graduate-and-close"
+title = "Graduate completed convoys; close the cycle"
+description = """
+A convoy whose children are all closed graduates through the same machine
+one level up: assign it here with its branch and target=main. Then verify
+the next-cycle bead from `file-next-cycle` exists (create it now if that
+step failed), record the cycle summary on {{chain_bead}}, close
+{{chain_bead}} (gc.outcome=pass), and drain — close first, then
+`gc runtime drain-ack`.
+"""

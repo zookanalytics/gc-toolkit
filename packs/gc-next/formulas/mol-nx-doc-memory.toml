@@ -1,0 +1,63 @@
+description = """
+mol-nx-doc-memory — keep each agent brief COMPLETE: scan accumulated
+session memory for durable structural learnings inside a brief's mandate
+and file promotion beads for the ones missing. Two gates (nature: durable
++ structural; scope: inside a brief's `## Scope`); the expected outcome of
+a healthy run is that nothing promotes. (Brand, O8.) Carried from
+mol-doc-keeper-memory-audit per the census (spec §7), re-routed to the
+wright pool.
+
+Consistency trace: Decisions have a home + Agents improve -> molecule +
+routing -> Doc & knowledge cohesion.
+
+Contract: graph.v2 — same shape and vapor warning as mol-nx-doc-drift.
+
+Interlock (O4, recorded note): as mol-nx-doc-drift.
+"""
+formula = "mol-nx-doc-memory"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+[vars.binding_prefix]
+description = "Import binding prefix with trailing dot for the wright pool. Order-dispatch does not inject routing vars; this default is the runtime value."
+default = "gc-next."
+
+[vars.audit_max_beads_per_run]
+description = "Cap on promotion beads filed per run."
+default = "3"
+
+[[steps]]
+id = "load-context"
+title = "Prime; load the briefs' scopes and the memory corpus"
+description = """
+`gc prime`; `gc bd prime`; read each brief's `## Scope`. Close this step
+(gc.outcome=pass, --status=closed) to advance.
+"""
+
+[[steps]]
+id = "scan-and-classify"
+title = "Scan memory; apply the two gates; file promotions"
+needs = ["load-context"]
+description = """
+Carried from the live audit (formulas/mol-doc-keeper-memory-audit.toml
+until stage 5): scan the memory corpus for candidate learnings, apply the
+nature gate (durable + structural, not incidental) then the scope gate
+(inside exactly which brief's mandate), dedup, and file at most
+{{audit_max_beads_per_run}} promotion beads
+(task_kind=doc-update, merge_strategy=mr) routed to
+${GC_RIG:+$GC_RIG/}{{binding_prefix}}wright. Nothing promoting is the
+healthy result. Close this step.
+"""
+
+[[steps]]
+id = "drain"
+title = "Close and release"
+needs = ["scan-and-classify"]
+description = """
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+gc runtime drain-ack
+```
+"""
