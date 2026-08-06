@@ -127,6 +127,17 @@ output always pays the gate; the non-impl done-sequence applies only to
 outputs that produce no commit); `research` → ephemeral — lands in the
 bead's own notes and closes when recorded.
 
+**Handles are machine-internal, always** (operator ruling, decisions.md
+#14): they exist only in the plan block and the manifest. Every
+operator-facing surface — the ratification turn's diff, flags, notes the
+operator is expected to read — speaks in **story titles and purposes**
+("drop the *RSS export* story; do *schema migration* before *API
+endpoint*"), and the diff is framed at the level of what needs a
+decision, not a re-statement of the tree. The operator redirects in
+natural phrasing; **converse translates to handles** when it writes the
+revised plan block. A turn body that asks the operator to track labeled
+list items is a defect.
+
 Local `id` handles are **stable across revisions** — that is what lets a
 rev-3 plan block say "s2 now also needs s7" and the reconciler know which
 live bead `s2` is (the manifest maps handle → bead id at creation).
