@@ -13,13 +13,16 @@ changed on the branch because of it (or why nothing did).
    and side-tracked all the time; fine with seeing what happens without."
    No change.
 4. **Cross-provider validation — strong requirement, direction is MORE.**
-   Target on the record: roughly **a third of token spend goes to other
-   agents validating work**. Change: `agents/wright-codex/` ships in
-   staging (was a stage-6 decision bead); every signoff-gate review routes
-   to it, so the pre-open gate keeps the provider independence the live
-   pack has today. The one-third target is a standing direction for future
-   check-set members (a second reviewer, adversarial legs), not a quota
-   any single pool must hit.
+   The principle on the record: **multi-provider validation is valuable**,
+   and the lean is toward more of it. The operator's "roughly a third of
+   token spend validating work" figure is **general guidance / context**
+   (clarified 2026-08-06), not a firm requirement — aspirational
+   calibration for how much validation feels right, never a quota, and
+   nothing measures or enforces it. Change: `agents/wright-codex/` ships
+   in staging (was a stage-6 decision bead); every signoff-gate review
+   routes to it, so the pre-open gate keeps the provider independence the
+   live pack has today. Future check-set members (a second reviewer,
+   adversarial legs) ride the same principle.
 5. **Dog drop — ratified**, on the same worth-exploring grounds as 2; the
    plan for how warrants ride wright/sentry stands.
 6. **Health-city deferral (D6) — acknowledged**; revisit only if the

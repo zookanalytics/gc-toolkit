@@ -207,10 +207,11 @@ cutover-stage decision): a wright backed by the Codex provider, sharing the
 wright prompt by reference, carrying `nx-signoff-gate`, capped at 2. Every
 signoff-gate review the lander dispatches routes to it, preserving the
 independence the live polecat-codex gives the pre-open gate today. The
-operator's standing target — roughly a third of token spend validating work
-through other agents — is recorded as the direction for future check-set
+operator's guidance — multi-provider validation is valuable, on the order
+of a third of token spend, as calibration rather than quota
+(decisions.md #4) — is recorded as the direction for future check-set
 members. `_polecat-gemini` stays retired (disabled today); a Gemini wright
-variant is a natural later leg under the same target.
+variant is a natural later leg under the same principle.
 
 ## 5. The formulas
 

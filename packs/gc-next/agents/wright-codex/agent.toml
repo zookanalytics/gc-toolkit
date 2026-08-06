@@ -7,8 +7,9 @@
 # routing -> composes like Delivery.
 #
 # OPERATOR RULING (2026-08-05, decisions.md #4): cross-provider review
-# is a strong requirement — the direction is MORE external validation
-# (target: roughly a third of token spend validating work), not less. So
+# is a strong requirement — multi-provider validation is valuable and
+# the direction is MORE of it, not less (the "about a third of tokens
+# validating" figure is guidance, not a quota). So
 # this pool ships in staging rather than deferring to cutover: without
 # it, review beads would run on the same pool that built the work, and
 # the pre-open gate would lose the independence the live pack's
