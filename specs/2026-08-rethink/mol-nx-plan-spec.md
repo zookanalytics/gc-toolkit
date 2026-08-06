@@ -125,7 +125,14 @@ split: `task` → code path, `check_set="signoff"`; `doc` → **keepable
 artifact** — lands through a PR with the same check-set (a committed
 output always pays the gate; the non-impl done-sequence applies only to
 outputs that produce no commit); `research` → ephemeral — lands in the
-bead's own notes and closes when recorded.
+bead's own notes and closes when recorded; `decision` → **a human
+question as a graph node** (decisions.md #17): filed as a bead whose
+work is a *turn* — routed to the converse pool, not to wright — that
+closes when the decision is recorded on it, releasing whatever `needs`
+it. This is the state machine's explore → *choose* → implement fan-in,
+available in any plan: stories that depend on a decision simply list it
+in `needs`, and Ready-visibility holds them until the operator has
+answered.
 
 **Handles are machine-internal, always** (operator ruling, decisions.md
 #14): they exist only in the plan block and the manifest. Every

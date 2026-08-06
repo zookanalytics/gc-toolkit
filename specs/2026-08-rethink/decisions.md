@@ -126,6 +126,50 @@ changed on the branch because of it (or why nothing did).
     lead with framed diffs, first-reaction cards precede board picks.
     Not a new mechanism; recorded so no future surface ships without it.
 
+## Addendum — 2026-08-06, the liveness invariant (operator ratified)
+
+16. **The liveness invariant** (zero-cruft policy, adapted): every open
+    bead either creates demand (routed or assigned) or is blocked —
+    transitively, through its blocker graph — by an open bead that does.
+    A chain that terminates in an unrouted, unassigned, unblocked bead
+    is cruft, and cruft gets exactly one disposition: route it, block it
+    on a real name, or decision-close it (safe because the record
+    survives closure and `mol-nx-plan` re-plans can resurrect scope
+    deliberately). "Tabled/delayed" without a wake condition is an
+    unclosed decision — a deliberate amendment to the state machine's
+    "first-class honest open states" language, made on the record per
+    the consistency test. The machine recommends dispositions but never
+    closes on its own.
+    **Named bead: `nx-liveness`** — and its taxonomy answer: it is a
+    *bead* (design + implementation work), not an agent, mol, or skill.
+    It ships as (a) the state-machine doc amendment, (b) a sweep arm in
+    `mol-nx-patrol-health` (molecule steps — the invariant is a bd
+    query, so enforcement is patrol work; no three-hats case for an
+    agent), (c) a batched **disposition turn** the sweep files (cards
+    with recommendations, titles not IDs, one conversation → N calls),
+    and (d) a doctor check asserting the sweep runs. A skill would be
+    wrong (nothing invokes this on demand; it is standing doctrine) and
+    an agent would be wrong (nothing here needs residency).
+
+17. **A human question is a bead, its canonical form is a turn, and
+    question-beads block dependents.** Ratifying the operator's
+    synthesis: Gas City already holds all three pieces — the escalation
+    lane parks a bead for a human (`gc.routed_to=human`), architecture
+    says a human approval "is just a check nothing non-human can yet
+    satisfy," and a check is a blocking dependency. gc-next unifies
+    them: **any bead needing human input gets a turn** (a turn IS a
+    routed bead, so it creates demand — converse preps and holds it,
+    which is what makes the wait live rather than parked); a bare
+    `gc.routed_to=human` bead has no claim contract driving it and is
+    exactly the unnamed wait the liveness sweep hunts, so the sweep
+    normalizes strays into turns (the raw lane survives only as the
+    observer's low-level escape hatch). And because questions are
+    beads, **wiring them as blockers is the sanctioned pattern** — the
+    signoff gate already blocks its convoy, the plan's ratification
+    turn already blocks its reconcile step; the state machine's
+    explore → *choose* → implement example is this shape. Folded into
+    `mol-nx-plan`: a story may be `kind: decision`.
+
 ## PR-time review checklist (operator)
 
 - [ ] Role names: wright / lander / sentry / converse / outrider /
