@@ -97,11 +97,14 @@ Recorded here so the staging rig's first import tests them explicitly:
 From the `mol-nx-plan` spec review (mol-nx-plan-spec.md, stage-1
 additions):
 
-6. The exact dep CLI shape for a runtime blocks edge.
+6. ~~The exact dep CLI shape for a runtime blocks edge~~ — **answered
+   from source** (decisions.md #18): `bd dep <blocker> --blocks
+   <blocked>`; run-once confirmation only.
 7. Sibling-step addressing from a step body (`gc.root_bead_id` +
    `gc.step_ref`, exactly-one-match scoping).
-8. Runtime **removal** of a blocks edge (re-wire depends on it; no
-   shipped formula removes a dependency edge).
+8. ~~Runtime removal of a blocks edge~~ — **answered from source**:
+   `bd dep remove <id> <depends-on-id>` exists; run-once confirmation
+   only.
 9. Engine behavior on a step closed with `gc.outcome=fail` (closing
    releases dependents; nothing documented halts the graph — the spec's
    no-op cascade rules assume this and must see it confirmed).

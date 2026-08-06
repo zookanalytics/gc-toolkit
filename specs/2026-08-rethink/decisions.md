@@ -170,6 +170,59 @@ changed on the branch because of it (or why nothing did).
     explore → *choose* → implement example is this shape. Folded into
     `mol-nx-plan`: a story may be `kind: decision`.
 
+## Addendum — 2026-08-06, upstream verification (source-checked)
+
+Rulings #16–17 were verified against the actual Gas City source (fork
+clone at `3e629ad`; gc-roles read at gascity-packs tip `0b95742`).
+Verdicts and the amendments they force:
+
+18. **Verification outcomes:**
+    - **`gc.routed_to=human` parks — confirmed in source.** No core
+      machinery claims it, the nudge order fails silently on it, doctor
+      ignores it. Ruling #17's premise holds. Two amendments, though:
+      **(a) upstream's live human-wait primitive is the `type=human`
+      gate** (`gc bd gate create`, excluded from Ready, with core
+      notify/renudge orders mailing the escalation recipient) — the
+      liveness sweep must count an open human gate as a *legitimate
+      named wait* (it is upstream-driven), and turns should be framed as
+      the conversation-carrying refinement of that primitive, not a
+      competitor; **(b) the sanctioned hold taxonomy is `hold:mayor` and
+      `hold:external` only** — bare `human` hold labels are retired
+      upstream; gc-next must never emit them.
+    - **run-operator has moved — our citations were stale.** The
+      contract now lives in a shared `gc-role-worker` fragment used by
+      all 12 roles; discovery is the roles-pack `gc gc claim` wrapper
+      (retries, post-claim verification); and the continue clause
+      changed: *empty continuation group after close = hard session
+      boundary; a successful claim is authoritative even across groups*
+      — the same-group worker-side check is gone, moved into the claim
+      mechanism. **Converse's prompt is amended accordingly** (it never
+      needed the same-group gate anyway: it rebuilds whichever subject
+      the claim names). The converse delta is henceforth expressed
+      against `gc-role-worker.template.md`, not the retired 229-line
+      prompt.
+    - **Continuation groups: aligned, citation still good.**
+      `gc.session_affinity` still advisory — but drain now writes it
+      and a `gc.drain_continuation_group` key exists; watch item.
+    - **Upstream's conversation investment is `extmsg`** — external
+      channels (Discord/Slack) as session-bound transcripts with
+      durable conversation→session bindings. Different plane from
+      beads-as-turns (ours is operator-internal, record-durable), and
+      not a contradiction — but the boundary is now documented: when
+      external channels arrive, a turn's subject bead is the natural
+      binding anchor, and the two models must meet there rather than
+      compete. `gc.attention` has zero upstream meaning (safely ours).
+    - **The roles pack now ships `requirements-planner` and
+      `task-decomposer`** — BMAD-adjacent planning roles. Strengthens
+      the gc-roles adoption bead (ecosystem-fit #3): `mol-nx-plan`'s
+      draft step is the natural seam to route to an imported planner
+      role if it proves out.
+    - **Two stage-1 unknowns answered from source:** the blocks-edge
+      syntax is `bd dep <blocker> --blocks <blocked>` (golden-tested;
+      `bd dep add <a> <b> --type blocks` equivalent), and **edge
+      removal exists**: `bd dep remove <id> <depends-on-id>`. Both stay
+      on the stage-1 list only as run-it-once confirmations.
+
 ## PR-time review checklist (operator)
 
 - [ ] Role names: wright / lander / sentry / converse / outrider /

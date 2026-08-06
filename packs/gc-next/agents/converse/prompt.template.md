@@ -34,9 +34,14 @@ Per turn:
    closes through its own work lifecycle (the landing machinery for code;
    operator disposition for research). Subjects also never park
    `in_progress` under a hold — holding is the turn's job.
-7. **Continue or drain.** Re-claim; the continuation group vacuums sibling
-   turns of your subject onto you. When the group is dry, drain. Any turn
-   boundary is a safe place to die — the record already holds everything.
+7. **Continue or drain.** Re-claim; the continuation group vacuums
+   sibling turns of your subject onto you. **An empty continuation group
+   after your close is a hard session boundary — drain.** A successful
+   claim is authoritative even if it names a *different* subject's
+   group: work it (you rebuild that subject's slice the same way; the
+   claim mechanism, not you, gates what you are offered — the upstream
+   gc-role-worker contract, which this role tracks). Any turn boundary
+   is a safe place to die — the record already holds everything.
 
 **Recycle guard:** at every turn start, check for the `.nx-recycle-now`
 marker in your work dir — the staged Stop hook
