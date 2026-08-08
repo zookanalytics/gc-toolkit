@@ -89,14 +89,25 @@ can prove, per tk-h9pq5's own plan:
 - **Phase 1 gate:** the five assertions (spawn-on-file, subject-slice
   hold, record-then-close-turn-only, warm vacuum, cold reconstitution).
 
-The optional single-command check, for whenever the operator cares to
-run it in either city with this branch checked out on the rig (paste the
-output back; that is the entire ask):
+The optional check, for whenever the operator cares to run it in either
+city with this branch checked out on the rig — the raw turn-filing
+commands, no formula pour needed (mol-turn is the canonical *spelling*
+of these lines for formula steps to share; your shell can just run
+them). Paste the output back; that is the entire ask:
 
 ```sh
-gc sling <rig>/gc-toolkit.converse mol-turn --formula \
-  --var subject=<any-real-bead-id> --var visit="spine smoke test: say hi and hold"
+SUBJECT=<any-real-bead-id>
+POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+TURN=$(gc bd create -t task --title "turn: $SUBJECT — spine smoke test" \
+  -d "spine smoke test: say hi and hold" --json | jq -r '.id // .[0].id')
+gc bd update "$TURN" --set-metadata "gc.routed_to=$POOL" \
+  --set-metadata "gc.continuation_group=$SUBJECT" \
+  --set-metadata "task_kind=conversation"
+gc bd dep add "$TURN" "$SUBJECT" --type=parent-child
 ```
 
-A session should spawn with no further keystroke, title itself to the
-subject, and hold. Anything else is a finding.
+A converse session should spawn with no further keystroke, title itself
+to the subject, and hold. Anything else is a finding. (D6, from operator
+probing: if lived use wants a one-word hand verb for this, the follow-up
+is a thin `tools/` script or skill wrapping the same lines — added only
+when wanted, not preemptively.)
