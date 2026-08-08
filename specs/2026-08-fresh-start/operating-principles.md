@@ -71,9 +71,42 @@ scales badly if each idea holds its own conversation — a hundred parked
 ideas must not become a hundred board rows. The scalable degradation is
 a *batched* prioritization conversation: one recurring triage subject
 whose turns sweep the held-idea pool ("these five look ripe — promote,
-park, or kill"), so the backlog costs one conversation, not N. The
-board's ranking handles the rest. Proposed as the P3-conformant shape
-for held ideas; awaiting reaction.
+park, or kill"), so the backlog costs one conversation, not N.
+
+**RESOLVED — OPERATOR POSITION (2026-08-08): batched triage subjects,
+scoped, plural, on common patterns only.** The operator endorsed the
+batched shape and sharpened it into the clean form of the mayor's triage
+hat: *"something whose charge is the big picture and engaged to triage
+broadly"* — but never as a single resident agent, whose known failure
+mode is unbounded context growth and forced serialization (*"if you're
+mid-conversation about one set of triage, then need something on a
+different set … forced through a single agent, you end up forced to
+resolve the one conversation first"*). Instead: **a triage conversation
+is an ordinary subject bead scoped by its body** — "triage: all P1s of
+this rig," "triage: held low-priority ideas" — living until its job is
+done, several coexisting, each with its own continuation group, turns,
+and context. The operator's constraint: *"just make sure we stick to
+common patterns here."*
+
+The design consequence, verified against what exists: **zero new
+machinery.** The chassis is converse; the *scope is the lens*, carried
+in the triage subject's own body (each turn's prep = enumerate the
+scope, rank ripeness, frame promote/park/kill) — the one-chassis,
+lens-from-the-bead pattern working as designed. Context cleanliness is
+structural, not disciplinary: per-subject continuation groups mean
+parallel triage conversations never share a session, and turn
+boundaries shed context — the exact anti-mayor. Recurrence rides the
+standard trigger shape (an order drives a formula; the formula files a
+turn only if the scope has ripe candidates and no open triage turn
+exists — a turn is a board row, never a ping), and lands with the P3
+sweep increment. One convention to hold: scopes should be near-disjoint
+by construction so a held bead has one obvious triage home.
+
+This also answers the standing open question from the conversation
+design (tk-h9pq5 OQ2, "how is the mayor engaged once coordination
+distributes"): the mayor's triage hat decomposes into scoped triage
+subjects; what remains of the mayor role is dispatch-of-the-unhosted,
+which the P2 intake default covers mechanically.
 
 ## P4 — Conversations recommend the applicable mol (OPERATOR IDEA)
 
