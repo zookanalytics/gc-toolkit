@@ -1,0 +1,16 @@
+# nx-doc-drift-audit — periodic brief-truth scan (spec §7; carried from
+# the live doc-keeper drift order). Fires mol-nx-doc-drift on a 24h
+# cooldown at the wright pool. Enablement IS the pack being imported.
+#
+# rig scope + BARE pool (the carried lesson from the live order): a
+# formula order instantiates its wisp in the store resolved from
+# (scope, pool); a bare pool qualifies within each importing rig to that
+# rig's own wright pool, always self-consistent. The v2 workflow root is
+# Ready-visible without vapor — do not add phase="vapor" (tk-crcl5).
+[order]
+description = "doc drift audit: judge each brief against its ## Scope; file doc-update beads"
+formula = "mol-nx-doc-drift"
+trigger = "cooldown"
+interval = "24h"
+pool = "gc-next.wright"
+scope = "rig"

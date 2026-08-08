@@ -1,0 +1,52 @@
+# outrider — meets a newly filed bead before the operator does: reads
+# its universe, writes the first-reaction card, flags it onto the
+# board, and drains. (Brand, O8.)
+#
+# Consistency trace (spec §11): earn every interaction -> molecule +
+# routing -> composes like Attention & conversation.
+#
+# Deliberately separate from converse (tk-h9pq5 OQ4, resolved in spec
+# §4): an outrider run is autonomous and must never hold a slot
+# waiting for an operator. Carries the proactive pool's two shed
+# doctrines (default-disabled gate + city-wide clamp) in BOTH
+# work_query and scale_check — the spawn predicate bypassed a
+# work_query-only gate once (PR #105 / tk-8j2g1); both must stay in
+# sync. First to shed under session pressure.
+
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/outrider/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/nx-worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+nudge = "Run gc hook; outrider demand is routed first-reaction work. If the city is at the session cap you'll find nothing — drain."
+idle_timeout = "2h"
+min_active_sessions = 0
+max_active_sessions = 2
+
+# Default-disabled gate first and gc-free; then the city-wide shed
+# clamp; then standard routed demand ranked by board weight. The
+# binding key is `gc-next` (README install stanza).
+work_query = '''
+case "${GC_NX_OUTRIDER_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '[]'; exit 0 ;; esac
+target="{{.Rig}}/gc-next.outrider"
+active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
+if [ "${active:-0}" -ge "${GC_NX_OUTRIDER_CITY_CAP:-20}" ]; then printf '[]'; exit 0; fi
+r=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
+if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
+'''
+
+# The reconciler's spawn predicate mirrors the same gate and clamp in
+# count form (0 = no demand = no spawn). Keep in lockstep with
+# work_query above.
+scale_check = '''
+case "${GC_NX_OUTRIDER_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '0'; exit 0 ;; esac
+target="{{.Rig}}/gc-next.outrider"
+active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
+if [ "${active:-0}" -ge "${GC_NX_OUTRIDER_CITY_CAP:-20}" ]; then printf '0'; exit 0; fi
+n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --limit 0 2>/dev/null | jq 'length' 2>/dev/null)
+if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
+'''
+
+# A first reaction is notes-only by default; if it produces code, that
+# output takes the gated path, never direct.
+[env]
+GC_DEFAULT_MERGE_STRATEGY = "mr"

@@ -1,0 +1,29 @@
+# thread-ops — an operator-spawned parallel line of judgment: it acts
+# and dispatches on the operator's behalf but owns no inbox, no patrol
+# cadence, and no system-of-record identity. (Brand, O8.)
+#
+# Consistency trace (spec §11): attention budget -> role + routing ->
+# composes like Attention & conversation (the root/strategy line
+# tk-h9pq5 OQ2 keeps).
+#
+# The thread shape, carried exactly from the live pack's thread agents:
+# never-matching predicates make it operator-spawned only. The thread
+# CONTRACT is the shared nx-thread-role fragment; this file is the one
+# thin per-role agent.toml gc-next ships initially — further thread
+# roles are additions of the same shape (spec §4; RoleName is static
+# per agent.toml, there is no spawn-time parameterization).
+
+scope = "city"
+wake_mode = "resume"
+min_active_sessions = 0
+work_dir = ".gc/agents/nx-thread-ops/{{.AgentBase}}"
+nudge = "Operator nudge — return to the focus thread. Routed work belongs to the pools; check mail only if the operator left a direct message."
+
+append_fragments = ["nx-thread-role"]
+
+# Never-matching predicates: threads are operator-spawned only.
+work_query = "printf '[]'"
+sling_query = "echo 'thread-ops is operator-spawned only; not a sling target' >&2; exit 1"
+
+[env]
+RoleName = "ops"

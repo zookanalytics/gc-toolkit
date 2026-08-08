@@ -1,0 +1,69 @@
+description = """
+mol-nx-doc-drift — keep each agent brief TRUE: judge every brief's claims
+against upstream movement within its `## Scope`, and file one change-unit
+doc-update bead per drift found. Read-only; produces beads, never edits.
+(Brand, O8.) Carried from mol-doc-keeper-drift-audit per the census
+(spec §7), re-routed to the wright pool.
+
+Consistency trace: Decisions have a home -> molecule + routing -> Doc &
+knowledge cohesion.
+
+Contract: graph.v2 — order-poured at a scale-from-zero pool; the compiled
+workflow root is Ready-visible without vapor (do not add `phase="vapor"`:
+root-only creates no workflow-finalize and the root never self-closes —
+the tk-crcl5 lesson).
+
+Interlock (O4, recorded note): the filed doc-update beads ride
+mol-nx-work, whose interlock position applies; the audit itself gates
+nothing.
+"""
+formula = "mol-nx-doc-drift"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+[vars.binding_prefix]
+description = "Import binding prefix with trailing dot for the wright pool the filed beads route to. Order-dispatch does not inject routing vars, so this default is the runtime value."
+default = "gc-next."
+
+[vars.audit_max_beads_per_run]
+description = "Cap on doc-update beads filed per run; excess drift waits for the next run."
+default = "5"
+
+[[steps]]
+id = "prime"
+title = "Prime and orient (read-only run)"
+description = """
+`gc prime`; `gc bd prime`. Then close this step to advance the graph:
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
+"""
+
+[[steps]]
+id = "audit-and-file"
+title = "Judge each brief against its ## Scope; file change-unit beads"
+needs = ["prime"]
+description = """
+One idempotent pass, carried from the live audit (read it at
+formulas/mol-doc-keeper-drift-audit.toml until stage 5): glob the briefs,
+read each `## Scope`, judge claims against how the tracked repos moved,
+dedup against live beads/PRs, file at most {{audit_max_beads_per_run}}
+change-unit beads (task_kind=doc-update, target=main, merge_strategy=mr)
+routed to ${GC_RIG:+$GC_RIG/}{{binding_prefix}}wright, citing triggering
+commits as provenance. A clean run files nothing. Close this step
+(gc.outcome=pass, --status=closed).
+"""
+
+[[steps]]
+id = "drain"
+title = "Close and release"
+needs = ["audit-and-file"]
+description = """
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+gc runtime drain-ack
+```
+"""

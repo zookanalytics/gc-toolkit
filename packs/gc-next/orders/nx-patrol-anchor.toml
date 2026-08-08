@@ -1,0 +1,29 @@
+# nx-patrol-anchor — the chain anchor: re-seed any patrol chain that has
+# no open cycle bead. (Brand, O8: the one piece of patrol continuity
+# that does not itself ride a chain.)
+#
+# gc-next's patrols are self-continuing chains of routed cycle beads on
+# disposable pool sessions (spec §4). Every chain needs a first link (a
+# fresh import has none) and a repair path (a failed in-cycle file ends
+# the chain silently). Orders fire on schedule regardless of roster
+# state — the property the anchor needs; `gc order` is durable because
+# the order file IS the registration.
+#
+# Fires mol-nx-patrol-anchor (graph.v2 → Ready-visible root, no vapor)
+# at the sentry pool: the proven order→pool mechanism the live
+# doc-keeper orders use, chosen over an exec script because order-exec
+# env and store resolution for `gc bd` writes are undocumented (phase-3
+# review, B4). rig scope + BARE pool per the live order precedent: the
+# wisp lands in each importing rig's own store, where that rig's chains
+# live. The health-city chain is a stage-4 activation (deviation D6).
+#
+# The formula is idempotent (live chains untouched), so the hourly
+# cadence costs one short-lived sentry session per rig per hour at
+# worst, and nothing when demand keeps the pool warm.
+[order]
+description = "Re-seed any patrol chain (land, health-rig) that has no open cycle bead"
+formula = "mol-nx-patrol-anchor"
+trigger = "cooldown"
+interval = "1h"
+pool = "gc-next.sentry"
+scope = "rig"

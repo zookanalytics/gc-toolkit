@@ -1,0 +1,41 @@
+# wright-codex — the cross-provider validation pool: a wright backed by
+# the Codex CLI provider, and the pool every signoff-gate review routes
+# to, so work one model built is validated by a different one. (Brand,
+# O8.)
+#
+# Consistency trace (spec §11): edges visible (checks) -> check + role +
+# routing -> composes like Delivery.
+#
+# OPERATOR RULING (2026-08-05, decisions.md #4): cross-provider review
+# is a strong requirement — multi-provider validation is valuable and
+# the direction is MORE of it, not less (the "about a third of tokens
+# validating" figure is guidance, not a quota). So
+# this pool ships in staging rather than deferring to cutover: without
+# it, review beads would run on the same pool that built the work, and
+# the pre-open gate would lose the independence the live pack's
+# polecat-codex gives it today.
+#
+# Shape mirrors the live polecat-codex: same role prompt shared by
+# reference, provider switched to codex, distinct worktree tree, small
+# cap while shaking out. The signoff-gate fragment rides every session
+# (it is the reviewing pool). Keep the fragment list in sync with
+# agents/wright/agent.toml by hand — there is no automatic propagation.
+
+scope = "rig"
+provider = "codex"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/wright-codex/{{.AgentBase}}"
+nudge = "Run gc hook; wright-codex demand is routed review and validation work (and overflow builds). Claim, run the gate honestly, drain."
+pre_start = ["{{.ConfigDir}}/assets/scripts/nx-worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+min_active_sessions = 0
+max_active_sessions = 2
+
+# Share the wright prompt by reference (pack-local path, same mechanism
+# mechanik-thread uses for its canonical's prompt); divergence is
+# limited to provider, work_dir, and cap.
+prompt_template = "agents/wright/prompt.template.md"
+append_fragments = ["nx-signoff-gate"]
+
+[env]
+GC_DEFAULT_MERGE_STRATEGY = "mr"

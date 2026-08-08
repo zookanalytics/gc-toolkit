@@ -1,0 +1,26 @@
+# lander — the single writer of merged-truth: drives every gating anchor
+# through its check-set and performs the merge, and is the only thing
+# that targets the protected boundary. (Brand, O8.)
+#
+# Consistency trace (spec §11): edges visible (checks) + attention
+# budget -> check + bead + routing -> composes like Delivery.
+#
+# Demand-scaled, capped at one (spec §4). The cap governs
+# controller-managed desired state ONLY — it is an operational
+# convenience, not the correctness boundary. The single-writer
+# guarantee lives in the merge skill's validate-merge-record sequence
+# and close-on-land (docs/work-bead-state-machine.md), which hold even
+# if a second session exists. NEVER spawn this template manually
+# (`gc session new` mints an instance outside the controller's math and
+# co-owns assigned anchors — the duplicate-session footgun,
+# docs/gascity-agents.md); doctor/check-nx-lander-single-writer flags
+# manual spawns.
+
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/lander/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/nx-worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+nudge = "Run gc hook; lander demand is a patrol-land cycle bead or a hand-off. Work the cycle, file the next one, drain."
+idle_timeout = "2h"
+min_active_sessions = 0
+max_active_sessions = 1

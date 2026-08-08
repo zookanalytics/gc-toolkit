@@ -1,0 +1,82 @@
+description = """
+mol-nx-patrol-anchor — re-seed any patrol chain in this store that has no
+open cycle bead. (Brand, O8: the one piece of patrol continuity that does
+not itself ride a chain.) Idempotent: a live chain is untouched, so
+anchor and chain never race. Detection is
+doctor/check-nx-patrol-chain-liveness; this is the repair half. Fired by
+orders/nx-patrol-anchor.toml.
+
+Consistency trace: Agents improve -> molecule + routing -> Engine health.
+
+Contract: graph.v2, deliberately — this runs off an ORDER at a
+scale-from-zero pool, and the proven order-fire path is a v2 workflow
+whose compiled root is Ready-visible without vapor (the mechanism the
+live doc-keeper orders pin down; do not add phase="vapor" — tk-crcl5).
+An exec-order script was rejected in review: order-exec env
+(GC_RIG, store resolution) is undocumented for `gc bd` writes, while a
+pooled worker's store context is the established one.
+
+Interlock (O4, recorded note): seeds cycle beads; gates nothing itself.
+"""
+formula = "mol-nx-patrol-anchor"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+[vars.binding_prefix]
+description = "Import binding prefix with trailing dot; order-dispatch injects no routing vars, so this default is the runtime value"
+default = "gc-next."
+
+[[steps]]
+id = "seed"
+title = "Re-seed dead chains in this store"
+description = """
+For each chain expected in this rig store — `land` (lander) and
+`health-rig` (sentry); the `health-city` chain is a stage-4 activation
+(deviation D6) — check for an open cycle bead and file one only if none
+exists:
+
+```bash
+seed_chain() { # seed_chain <chain-tag> <pool-template> <title>
+  chain="$1"; pool="${GC_RIG:+$GC_RIG/}{{binding_prefix}}$2"; title="$3"
+  n=$(gc bd list --status=open --json 2>/dev/null \
+    | jq --arg c "$chain" '[.[]? | select(.metadata["task_kind"] == "patrol-cycle" and .metadata["chain"] == $c)] | length' 2>/dev/null)
+  if [ -z "$n" ]; then
+    echo "anchor: ledger unreadable for chain '$chain'; not seeding (cannot certify dead)" >&2
+    return 0
+  fi
+  if [ "$n" -eq 0 ]; then
+    B=$(gc bd create -t task --title "$title" --json | jq -r '.id // .[0].id')
+    if [ -n "$B" ] && [ "$B" != "null" ]; then
+      gc bd update "$B" --set-metadata "gc.routed_to=$pool" \
+        --set-metadata "task_kind=patrol-cycle" \
+        --set-metadata "chain=$chain" \
+        && echo "anchor: re-seeded chain '$chain' as $B"
+    else
+      echo "anchor: could not create cycle bead for chain '$chain'" >&2
+    fi
+  fi
+}
+seed_chain "land"       "lander" "patrol-land cycle"
+seed_chain "health-rig" "sentry" "patrol-health cycle (rig)"
+```
+
+One key per --set-metadata flag; the pool is the rig-qualified
+exact-match form (docs/gascity-routing-model.md). Then close this step:
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
+"""
+
+[[steps]]
+id = "drain"
+title = "Close and release"
+needs = ["seed"]
+description = """
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+gc runtime drain-ack
+```
+"""

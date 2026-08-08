@@ -1,0 +1,23 @@
+# converse — holds a subject bead's conversation for the operator:
+# rebuilds the slice, preps, holds, writes the outcome to the subject,
+# closes only the turn. (Brand, O8.)
+#
+# Consistency trace (spec §11): attention budget + earn every
+# interaction -> bead (continuation group) + role + routing ->
+# composes like Attention & conversation.
+#
+# The tk-h9pq5 conversation role (specs/tk-h9pq5/design-doc.md, Key
+# Components §3): run-operator's shape with the execute/close clause
+# replaced by hold-not-close. A dedicated small pool so a held turn
+# never occupies an impl slot. Beads and continuation groups are
+# rig-scoped, so the role is too (explicit, spec §4).
+
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/agents/nx-converse/{{.AgentBase}}"
+nudge = "Run gc hook; converse demand is a routed turn bead. Rebuild the subject's slice, prep, hold for the operator."
+# A held turn is a live conversation: idle long, don't die under the
+# operator. Turn boundaries — not timeouts — are the release valve.
+idle_timeout = "8h"
+min_active_sessions = 0
+max_active_sessions = 2
