@@ -1,0 +1,25 @@
+# converse — the conversation role: holds a subject bead's conversation
+# for the operator. Rebuilds the subject's slice, does the reachable
+# prep, holds, writes the outcome to the subject, closes only the turn.
+#
+# The tk-h9pq5 conversation role (specs/tk-h9pq5/design-doc.md, Key
+# Components §3): the role-worker claim contract with the execute/close
+# clause replaced by hold-not-close. A dedicated small pool so a held
+# turn never occupies an impl slot (sibling of agents/proactive, same
+# dedicated-and-small reasoning). Beads and continuation groups are
+# rig-scoped, so the role is rig-scoped too.
+#
+# Demand is the default routed-pool predicate: turn beads stamped
+# gc.routed_to=<rig>/gc-toolkit.converse (filed by mol-turn or by a
+# formula step). Deliberately no work_query override — converse has no
+# enable-gate and no shed-clamp; a filed turn IS the demand, and two
+# slots bound the concurrent holds.
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/agents/converse/{{.AgentBase}}"
+nudge = "Run gc hook --claim --json; converse demand is a routed turn bead. Rebuild the subject's slice, prep, hold for the operator."
+# A held turn is a live conversation: idle long, don't die under the
+# operator. Turn boundaries — not timeouts — are the release valve.
+idle_timeout = "8h"
+min_active_sessions = 0
+max_active_sessions = 2
