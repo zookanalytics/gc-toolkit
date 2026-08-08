@@ -41,6 +41,7 @@ M=$(gc bd show "$BEAD" --json | jq -c '.[0].metadata')
 BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
 BASE=$(printf   '%s' "$M" | jq -r '.review_base   // empty')
 PR=$(printf     '%s' "$M" | jq -r '.pr_number     // empty')
+PR_URL=$(printf '%s' "$M" | jq -r '.pr_url        // empty')
 ```
 
 Two shapes, discriminated by which of those is set:
@@ -54,9 +55,17 @@ Either way, pin the exact commit before you read anything:
 
 ```bash
 if [ -n "$PR" ]; then
-  # POST-OPEN: the PR is authoritative for both ends of the range.
-  BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
-  BASE=$(gh pr view "$PR" --json baseRefName -q .baseRefName)
+  # POST-OPEN: the PR is authoritative for both ends of the range — but a
+  # number names a pull request only inside one repository on one host, so
+  # pin both from the bead's own pr_url before asking gh anything.
+  PR_REPO_Q=$(printf '%s' "$PR_URL" \
+    | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\([^/][^/]*\)/\([^/][^/]*/[^/][^/]*\)/pull/[0-9].*#\1/\2#p')
+  [ -n "$PR_REPO_Q" ] || { echo "post-open review bead has no parseable pr_url: refusing to resolve PR#$PR from ambient gh context" >&2; exit 1; }
+  PR_HOST="${PR_REPO_Q%%/*}"   # <host>         — for gh api --hostname
+  PR_REPO="${PR_REPO_Q#*/}"    # <owner>/<repo> — for gh api REST paths
+
+  BRANCH=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefName -q .headRefName)
+  BASE=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json baseRefName -q .baseRefName)
 elif [ -z "$BASE" ]; then
   # PRE-OPEN, no review_base — a malformed or older review bead. Resolve
   # the anchor's landing target; do not assume main.
@@ -68,6 +77,27 @@ fi
 git fetch origin "$BASE" "$BRANCH"
 REVIEWED_OID=$(git rev-parse "origin/$BRANCH")
 ```
+
+Carry all three forms of that pin for the rest of the review:
+`--repo "$PR_REPO_Q"` on every `gh pr` call, and `--hostname "$PR_HOST"`
+plus an explicit `repos/$PR_REPO/...` path on every `gh api` call.
+`PR_REPO_Q` is host-qualified (`<host>/<owner>/<repo>`) because that is
+what `--repo` wants — a hostless pin gets completed from `$GH_HOST` and
+can name a different host's identically-named repository. A REST path
+carries `<owner>/<repo>` and no host, so `--hostname` is what pins the
+other half.
+
+A bare number is resolved from whatever repository gh infers — your
+worktree's remote, `$GH_REPO`, `$GH_HOST` — and the bead you are holding
+was dispatched by a pass that may have been nowhere near this checkout.
+Every repository has a pull request with the number you were handed. Get
+this wrong and you read one PR's diff,
+post the verdict on a stranger's PR of the same number, and hand the done
+sequence an OID that was never this PR's head — the anchor gets stamped
+from a verdict about the wrong object while the PR you were meant to gate
+stays ungated. So it fails closed: an unparseable `pr_url` on a post-open
+bead is a malformed bead, and refusing costs one re-dispatch, while
+guessing costs a review posted on someone else's work.
 
 Never fall back to `main`. A convoy child lands on
 `integration/<convoy-id>`, and diffing it against `main` shows you
@@ -202,14 +232,14 @@ sequence stamps the gate at that attached commit. If the head advanced
 while you were reading, posting now certifies a commit you never read:
 
 ```bash
-HEAD_NOW=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+HEAD_NOW=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid)
 if [ "$HEAD_NOW" != "$REVIEWED_OID" ]; then
   echo "head moved $REVIEWED_OID -> $HEAD_NOW: post nothing, stamp nothing" >&2
   exit 1
 fi
 
-gh pr review "$PR" --comment         --body "$VERDICT_BODY"   # pass
-gh pr review "$PR" --request-changes --body "$VERDICT_BODY"   # changes
+gh pr review "$PR" --repo "$PR_REPO_Q" --comment         --body "$VERDICT_BODY"   # pass
+gh pr review "$PR" --repo "$PR_REPO_Q" --request-changes --body "$VERDICT_BODY"   # changes
 ```
 
 A moved head is not a finding and not a failure — it is a different
@@ -221,11 +251,20 @@ confirm where the review actually landed — GitHub records it on the
 review itself:
 
 ```bash
-ME=$(gh api user -q .login)
-gh api "repos/{owner}/{repo}/pulls/$PR/reviews" \
-  | jq -r --arg me "$ME" \
+ME=$(gh api --hostname "$PR_HOST" user -q .login)
+gh api --hostname "$PR_HOST" --paginate \
+    "repos/$PR_REPO/pulls/$PR/reviews?per_page=100" --jq '.[]' \
+  | jq -rs --arg me "$ME" \
       '[.[] | select(.user.login == $me)] | sort_by(.submitted_at) | last | .commit_id'
 ```
+
+Both calls are pinned for the same reason the rest are: an account name is
+host-scoped, so an unpinned `gh api user` under a drifted `$GH_HOST` names
+an account that never wrote any of these reviews, and the filter then
+matches nothing. Paginate, too — GitHub pages this endpoint, and a PR that
+has taken a few rounds is exactly the one whose newest review sits past the
+first page, so an unpaginated read `last`s an *older* review of yours and
+reports a mismatch that never happened.
 
 If that is not `REVIEWED_OID`, your verdict attached to a commit you did
 not read. Say so, and re-review at the new head — do not hand that OID
