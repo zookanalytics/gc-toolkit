@@ -13,30 +13,46 @@ detour to fix silently. Paste outputs back in whatever form is cheapest.
 
 Check out `claude/gc-toolkit-fresh-start-ehvljb` in the gc-toolkit rig
 checkout (or merge the PR and pull main — either works; the branch is
-self-contained). Then:
+self-contained). **If the city previously imported this pack under a
+different binding key or subpath** (e.g. `[rigs.imports.gc-next]` →
+`packs/gc-next/`): the pack now lives at the repo root and the binding
+key must be renamed to `gc-toolkit` — repointing `source` alone loads
+but silently mis-wires the orders' bare pool names (validator F-01).
+Also drop any `default_sling_formula` naming a formula this branch
+doesn't ship. Then:
 
 ```sh
+gc import install   # refreshes packs.lock for remote imports (F-04)
 gc doctor
 ```
 
 **Expect:** the new `check-liveness-sweep-wired` passes; no new
-failures. The two new orders (`liveness-sweep`, `triage-recurrence`)
-register on the next `gc` start — they are inert until then.
+failures beyond pre-existing ones. The two new orders register on the
+next `gc` start — and because both formulas are graph.v2, their
+compiled roots are Ready-visible, so a cold scale-from-zero polecat
+pool wakes for them (F-20's fix).
 
 ## 1. Spine smoke (Phase 0/1 evidence — the one that matters most)
 
 Pick any real open bead as `$SUBJECT`, then file a visit with the raw
 canonical lines:
 
+Pick an **unblocked, un-arrested** bead for the smoke (a blocked one
+works too — that's F-06's fix with the tracks edge — but keep the first
+smoke simple). Note the pool is hard-coded rig-qualified: an operator
+shell has no `GC_RIG`, and the `${GC_RIG:+…}` form from the formulas
+expands bare there, which routes nowhere (validator F-05).
+
 ```sh
 SUBJECT=<any-real-open-bead-id>
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+RIG=gc-toolkit                         # your rig name
+POOL="$RIG/gc-toolkit.converse"        # MUST be rig-qualified (F-05)
 VISIT=$(gc bd create -t task --title "visit: $SUBJECT — spine smoke: say hi and hold" \
   -d "Spine smoke test: rebuild this subject's slice, say what you see, and hold." --json | jq -r '.id // .[0].id')
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
   --set-metadata "task_kind=visit"
-gc bd dep add "$VISIT" "$SUBJECT" --type=parent-child
+gc bd dep add "$VISIT" "$SUBJECT" --type=tracks   # tracks, not parent-child (F-06)
 ```
 
 **Expect, in order:** (1) a converse session spawns with no further
@@ -45,11 +61,15 @@ this is tk-h9pq5's one unproven integration, Phase 0); (3) it holds
 `in_progress` with the subject's state summarized and a trailing "Next
 (yours):" line. Say anything to it; **expect** your exchange's outcome
 appended to the subject's notes, `gc.outcome` stamped on the visit, the
-visit closed, and the session draining (empty group = session
-boundary). File a second visit while the session is still alive:
-**expect** it vacuumed onto the same session (warm). After the drain,
-file a third: **expect** a fresh session that answers a question about
-the subject from the record alone (cold).
+visit closed. **Drain nuance (validated, F-10):** the session drains
+only when NO visit is claimable anywhere in the rig — a successful
+cross-group claim is authoritative, so with a visit backlog the session
+re-claims other subjects instead of draining. So: warm continuity =
+file a second visit while any converse session lives and **expect an
+existing session to absorb it and re-title** (F-12, confirmed); cold
+continuity = wait for the pool to empty (or quiesce the visit queue),
+then file another and **expect a fresh session that answers a
+pre-seeded question about the subject from the record alone**.
 
 ## 2. Create one or two triage subjects
 

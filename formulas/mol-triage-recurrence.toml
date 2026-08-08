@@ -5,30 +5,39 @@ exactly when it has something to say. For each open triage-subject bead
 visit IF the scope looks ripe AND no visit is already open —
 no candidates means no visit means no board row: pull-only holds
 (specs/2026-08-fresh-start/liveness-and-triage-spec.md §3;
-operating-principles.md P3 resolution).
+operating-principles.md P3 resolution; validated no-op path F-19).
 
 The deep evaluation (which candidates, what ranking, promote/park/kill
 framing) is NOT this formula's job — it is the converse session's prep
 at visit time; the scope is the lens, the chassis does the work. This
 formula only answers "is a visit warranted right now?"
 
-Contract: v1 — one-shot linear pass, the doc-keeper shape.
+Contract: graph.v2 — the compiled workflow root is Ready-visible, so a
+scale-from-zero pool wakes for it (validator F-20: the v1 shape only
+ran because gc start had warmed the pool). The step closes its own
+step bead with gc.outcome before draining.
 """
 formula = "mol-triage-recurrence"
-version = 1
+
+[requires]
+formula_compiler = ">=2.0.0"
 
 [[steps]]
 id = "evaluate-and-file"
 title = "Per triage subject: skip if a visit is open; file a visit if the scope is ripe"
 description = """
 **1. Find the triage subjects and the open visits (fail-safe like the
-liveness sweep — unreadable listing: note it, file nothing, drain):**
+liveness sweep — unreadable listing: note what broke, close this step
+with `gc.outcome=fail`, nothing filed):**
 
 ```bash
 OPEN=$(mktemp)
 gc bd list --status=open --json --limit=0 > "$OPEN"
-jq -e 'type=="array"' "$OPEN" >/dev/null \
-  || { echo "FAIL-SAFE: listing unreadable — recurrence aborts, nothing filed"; exit 1; }
+if ! jq -e 'type=="array"' "$OPEN" >/dev/null; then
+  echo "FAIL-SAFE: listing unreadable — recurrence aborts, nothing filed"
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  exit 0
+fi
 SUBJECTS=$(jq '[.[] | select((.metadata.task_kind // "") == "triage-subject") | {id, title, scope: (.metadata["triage.scope"] // "")}]' "$OPEN")
 CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // empty)]' "$OPEN")
 ```
@@ -61,10 +70,16 @@ VISIT=$(gc bd create -t task --title "visit: $SUBJECT — triage visit: candidat
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
   --set-metadata "task_kind=visit"
-gc bd dep add "$VISIT" "$SUBJECT" --type=parent-child
+gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
+# tracks, NOT parent-child: parent-child transmits the subject's
+# blocked state to the visit (validator F-06).
 # <<< gate-visit
 ```
 
 Log per subject: skipped-open-visit, skipped-not-ripe, or filed (with
-the visit id). Then drain.
+the visit id). Then close this step:
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
 """

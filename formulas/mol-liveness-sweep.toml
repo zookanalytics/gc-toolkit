@@ -2,30 +2,35 @@ description = """
 mol-liveness-sweep — the P3 enforcement pass: no idle beads. Every open
 bead must be worked, waiting-on-structure, gated, conversing, or
 held-by-design; anything else is an UNNAMED WAIT
-(specs/2026-08-fresh-start/operating-principles.md P3;
-specs/2026-08-fresh-start/liveness-and-triage-spec.md §2, as amended by
-the operator's 2026-08-08 review).
+(specs/2026-08-fresh-start/operating-principles.md P3; spec §2 as
+amended by the operator's review and the 2026-08-08 validator run,
+specs/2026-08-fresh-start/live-adoption-findings.md).
 
-Normalization is BATCHED, not per-bead (operator review: N idle beads
-must cost one conversation, not N): the sweep owns a standing
+Normalization is BATCHED, not per-bead: the sweep owns a standing
 "unnamed waits" triage subject per rig and files ONE visit per pass
-listing every candidate. Per-bead conversations emerge only from that
-sitting's outcomes ("start a visit on X" is a decision the human makes
-inside the batch visit, not something the sweep presumes).
+listing every candidate (validated live: 66 idle beads cost one
+conversation, F-16). Per-bead visits emerge only from that sitting's
+decisions.
 
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
-Fired by orders/liveness-sweep.toml on cooldown; one fire = one pass:
-classify, batch-file, log, drain.
+Fired by orders/liveness-sweep.toml on cooldown.
 
-Contract: v1 — a one-shot linear pass, the doc-keeper shape.
+Contract: graph.v2 — the compiled workflow root is Ready-visible, so a
+scale-from-zero pool wakes for it (validator F-20: a v1 molecule root
+is NOT Ready-visible and the order only fired because gc start had
+warmed the pool). Each step closes its own step bead with gc.outcome
+before the graph advances; the normalize step is fail-closed on the
+classify step's outcome.
 """
 formula = "mol-liveness-sweep"
-version = 1
+
+[requires]
+formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.list_cap]
-description = "Max candidates enumerated in one batch visit, for readability of the sitting"
+description = "Max candidates ENUMERATED INDIVIDUALLY in the batch visit body; candidates beyond the cap are still included, grouped into labelled cohorts (validator F-17 semantics: the cap bounds line-by-line detail, not coverage)"
 default = "20"
 
 [[steps]]
@@ -34,41 +39,43 @@ title = "Classify every open bead; isolate the unnamed waits"
 description = """
 Build the classification from two listings. **Fail-safe first (the
 witness discipline): if either command fails or returns a non-array,
-write a note explaining what broke, file NOTHING, and drain — never
-normalize on partial data.**
+write a note explaining what broke, then close THIS step with
+`gc.outcome=fail` — the normalize step reads that outcome and no-ops.
+Never normalize on partial data.** (Torn reads under concurrent writes
+are a known transient — validator F-26 — so an aborted pass is correct,
+not alarming.)
 
 ```bash
 OPEN=$(mktemp); READY=$(mktemp)
 gc bd list --status=open --json --limit=0 > "$OPEN"
 gc bd ready --unassigned --limit=0 --json > "$READY"
-jq -e 'type=="array"' "$OPEN" >/dev/null && jq -e 'type=="array"' "$READY" >/dev/null \
-  || { echo "FAIL-SAFE: listing unreadable — sweep aborts, nothing filed"; exit 1; }
+if ! jq -e 'type=="array"' "$OPEN" >/dev/null || ! jq -e 'type=="array"' "$READY" >/dev/null; then
+  echo "FAIL-SAFE: listing unreadable — sweep aborts, nothing filed"
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  exit 0
+fi
 ```
 
-The classes — every open bead must be one of these, and the first four
-are named waits or live work; only the fifth is a defect:
+The classes — the first four are named waits or live work; only the
+fifth is a defect:
 
-1. **worked** — assigned, or `gc.routed_to` non-empty (a pool will
-   claim it).
-2. **waiting-on-structure** — open blockers, or open children. This is
-   type-agnostic (no special-casing of epics): a parent whose children
-   are still open is waiting on them by construction. `gc bd ready`
-   already excludes blocker-blocked beads and gates; children require
-   the check below.
+1. **worked** — assigned, or `gc.routed_to` non-empty.
+2. **waiting-on-structure** — open blockers, open children, **or
+   carried by an open parent through a `tracks` edge** (convoys carry
+   members with `tracks`; validator F-18 showed a third of the first
+   census was this class misfiled as idle). `gc bd ready` already
+   excludes blocker-blocked beads and gates; children and tracks need
+   the per-candidate check below.
 3. **conversing** — it IS a visit (`task_kind=visit`), or an open visit
    exists in its continuation group.
-4. **held-by-design** — `task_kind=triage-subject` (waits on its own
-   visits).
+4. **held-by-design** — `task_kind=triage-subject`.
 5. **unnamed** — none of the above: the defect this sweep exists for.
 
-Mechanically: start from the ready set (unassigned, unblocked,
-ungated), drop routed / visit / triage-subject / in-an-open-group
-beads with the jq below — then, for each survivor **that has
-children** (epics prominently included), confirm the children's state
-with `gc bd show <id>` : open children → class 2, drop it; all
-children closed or none → keep. An epic whose children have all closed
-is a first-class unnamed wait — it needs a "what comes next?"
-exploration, and this is exactly how it surfaces.
+Mechanically: start from the ready set, apply the jq below, then for
+each survivor check its dependency edges with `gc bd show <id>` — open
+children (parent-child) or an open `tracks` parent → class 2, drop it;
+an epic whose children have ALL closed → keep it, called out as a
+"what comes next?" candidate.
 
 ```bash
 CANDIDATES=$(jq -n --slurpfile open "$OPEN" --slurpfile ready "$READY" '
@@ -82,17 +89,29 @@ CANDIDATES=$(jq -n --slurpfile open "$OPEN" --slurpfile ready "$READY" '
       | select(.id as $id | ($convgroups | index($id)) | not)
     ] | map({id, title, type})')
 printf '%s\n' "$CANDIDATES"
-# now apply the children check per candidate (class 2 drop) before step 2
+# apply the edge check (children + tracks) per candidate before step 2
 ```
 
-Record in your notes: the counts per class, the surviving unnamed ids,
-and any candidate you dropped via the children check.
+Record in your notes: counts per class as a funnel (the validator's
+census showed its work this way and it read well), the surviving ids,
+and what the edge check dropped. Then close this step:
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
 """
 
 [[steps]]
 id = "normalize"
 title = "One batch visit on the sweep's triage subject (never per-bead)"
+needs = ["classify"]
 description = """
+**0. Fail-closed:** read the classify step's `gc.outcome`. If it is not
+`pass`, log "classify failed — normalizing nothing" and close this step
+with `gc.outcome=fail`. (A closed-failed predecessor releases this step
+to run — reading its outcome is the guard; the graph has no other
+brake.)
+
 **1. Resolve the sweep's standing triage subject** (one per rig; create
 on first run, idempotent — search `$OPEN` for it first):
 
@@ -109,29 +128,35 @@ fi
 
 **2. Skip if its visit is already open** — if `$SWEEP_SUBJECT` appears
 in the open-visit continuation groups from the classify step, log
-"batch visit already open; N candidates await it" and drain. The human
-closes the visit by working through it; the next pass picks up what
-remains. Self-limiting: the backlog never costs more than one
-conversation.
+"batch visit already open; N candidates await it", close this step
+(`gc.outcome=pass`), done. Self-limiting: the backlog never costs more
+than one conversation.
 
-**3. Otherwise, if any unnamed waits survived, file ONE visit** listing
-up to {{list_cap}} of them (one line each: `id — title — why it reads
-idle`, the epic what-comes-next candidates called out as such; put the
-list in the `-d` body):
+**3. Otherwise, if any unnamed waits survived, file ONE visit**:
+enumerate up to {{list_cap}} individually (one line each: `id — title —
+why it reads idle`, epic what-comes-next candidates called out); group
+any remainder into labelled cohorts with every id still listed; put it
+all in the `-d` body.
 
 ```bash
 # >>> gate-visit
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
 VISIT=$(gc bd create -t task --title "visit: $SWEEP_SUBJECT — unnamed waits: N candidates to disposition" \
-  -d "<the candidate list, one line per bead, built from the classify step>" --json | jq -r '.id // .[0].id')
+  -d "<the candidate list built from the classify step>" --json | jq -r '.id // .[0].id')
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SWEEP_SUBJECT" \
   --set-metadata "task_kind=visit"
-gc bd dep add "$VISIT" "$SWEEP_SUBJECT" --type=parent-child
+gc bd dep add "$VISIT" "$SWEEP_SUBJECT" --type=tracks
+# tracks, NOT parent-child: a parent-child edge transmits the subject's
+# blocked/arrested state to the visit, making it unclaimable on exactly
+# the beads that most need conversation (validator F-06).
 # <<< gate-visit
 ```
 
 Zero unnamed waits → file nothing (an empty board is success). Log the
-outcome either way: filed (visit id + candidate count), skipped-open,
-or clean. Then drain — the pass is complete.
+outcome either way, then close this step:
+
+```bash
+[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+```
 """

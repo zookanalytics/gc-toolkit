@@ -169,7 +169,9 @@ VISIT=$(gc bd create -t task --title "visit: {{issue}} — first reaction ready:
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group={{issue}}" \
   --set-metadata "task_kind=visit"
-gc bd dep add "$VISIT" "{{issue}}" --type=parent-child
+gc bd dep add "$VISIT" "{{issue}}" --type=tracks
+# tracks, NOT parent-child: parent-child transmits the subject's
+# blocked state to the visit (validator F-06).
 # <<< gate-visit
 ```
 

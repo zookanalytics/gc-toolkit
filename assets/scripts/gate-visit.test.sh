@@ -12,7 +12,8 @@
 #     silently forever on the exact-string read side)
 #   - the three metadata stamps ride one --set-metadata flag each
 #     (comma-joined pairs become one garbage value)
-#   - the visit is wired parent-child to its subject
+#   - the visit is wired to its subject with a tracks edge (parent-child
+#     would transmit the subject's blocked state to the visit — F-06)
 #   - the visit title carries the "visit: " brand
 # Hermetic: reads the repo only; no gc, no city.
 
@@ -62,8 +63,10 @@ for f in "$FDIR"/*.toml; do
             && ok "$name: continuation_group stamp, own flag" || bad "$name: continuation_group stamp, own flag" "stamp absent or malformed"
         printf '%s' "$block" | grep -qF -- '--set-metadata "task_kind=visit"' \
             && ok "$name: task_kind stamp, own flag" || bad "$name: task_kind stamp, own flag" "stamp absent or malformed"
+        printf '%s' "$block" | grep -q -- '--type=tracks' \
+            && ok "$name: tracks edge (non-blocking lineage)" || bad "$name: tracks edge (non-blocking lineage)" "dep add --type=tracks missing"
         printf '%s' "$block" | grep -q -- '--type=parent-child' \
-            && ok "$name: parent-child edge" || bad "$name: parent-child edge" "dep add missing"
+            && bad "$name: no parent-child edge" "parent-child transmits the subject's block (F-06)" || ok "$name: no parent-child edge"
         rm -f "$tmp"
     done <<EOF2
 $blocks
