@@ -43,23 +43,28 @@ Your contract:
 > particular come through in a smart, intelligent, scaleable way, with
 > what I feel like are solid ideas in architecture.md."
 
-Unpacked, with statuses:
+Unpacked, with statuses — and note the statuses carefully, because the
+prior agent got them wrong once even while writing this guide:
 
-- **RULING — the vehicle is gc-toolkit itself, evolved in place.** No
-  parallel pack, no second roster. Changes are edits to the pack the
-  operator already runs.
-- **RULING — batch size is the discipline.** Foundation says the pack is
-  self-hosting; honor that. The work is a *sequence of small,
-  independently-landable changes*, each one a PR the operator can
-  actually read, riding normal delivery. The prior attempt built a
-  cathedral in one session — twice over, counting the giant branch. Do
-  not run a big-bang process of any kind.
-- **RULING — same concept keeps its name.** Where a role or artifact is
-  the same concept as what it replaces, keep the name and defend the
-  evolved concept in architecture.md. A rename must be justifiable in one
-  sentence stating the *conceptual* difference; if the sentence can't be
-  written, the rename doesn't survive. (Shape changes — residency, caps,
-  contract tightenings — are not concept changes.)
+- **OPERATOR POSITION — the vehicle.** A fresh pack is not banned; the
+  operator's actual words were that it "seems stupid with the current
+  approach." The judgment is contingent: an in-place gc-toolkit branch is
+  the default because nothing so far has justified a second pack — but if
+  you find a reason a fresh pack genuinely earns its keep, make that case;
+  it will be heard.
+- **OPERATOR POSITION — names: same *thing* keeps its name.** Not "same
+  concept" — same thing. If something is genuinely rewritten, a new name
+  is fine; the operator just wants to know *why* and for the rename to be
+  deliberate rather than reflexive. State the reason at the point of
+  renaming; that's the whole rule.
+- **PRIOR AGENT'S DIAGNOSIS — position to test, not an operator ruling:
+  batch size.** The operator never asked for small landable deliverables.
+  The prior agent's analysis of its own failure is that building
+  everything before the operator lived with anything was the root
+  mistake, and that smaller increments through the city's own delivery
+  would have surfaced the operator's real reactions earlier. Weigh this,
+  argue with it, and settle the working rhythm *with the operator* —
+  don't inherit it as law.
 - **PREFERENCE — a mayor with a purpose is fine.** Zero standing agents
   is *one option*, not a target. Notably, upstream's own conventions
   assume a mayor seat (the sanctioned hold taxonomy is `hold:mayor`;
@@ -192,14 +197,16 @@ these (all caught in review, all real):
    parallel-vs-in-place vehicle finding) — it is the sharpest statement
    of what they want and how they judge.
 3. Open a conversation, not a plan: bring your read of the first seam
-   (§2), your doubts about it, and one genuine question. Do not produce
-   an outcome document. Do not produce a phase structure. Propose the
-   first *small* change, argue about it like a partner, and land it
-   through the city's own delivery.
+   (§2), your doubts about it, and one genuine question — including how
+   the operator wants to work (increment size, review rhythm, vehicle),
+   which is theirs to set, not this guide's. The prior agent's
+   recommendation is to start small and let each change be lived with;
+   treat that as one voice in the conversation.
 
 The prior attempt's last, honest summary: the ideas mostly survived
 review; the process didn't. The census, the conversation model, and the
-chain protocol are worth mining. The grand unified rewrite — in any
-vehicle — is not worth repeating. Realize foundation.md the way
-foundation.md itself says work should happen: bead-sized, reviewed,
-landed, and compounding.
+chain protocol are worth mining. What the next attempt should look like —
+increment size, rhythm, even vehicle — is the operator's to shape in
+conversation with you; the prior agent's one earned conviction is that
+the operator's reaction to built things is the most valuable review
+there is, so arrange the work to get it early and often.
