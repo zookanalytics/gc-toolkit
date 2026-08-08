@@ -42,24 +42,50 @@ done
 # --- 2. anchors past the cap --------------------------------------------------
 # Rework children carry source_review_bead; one child per round by construction.
 # Past the cap the anchor must be routed to human, NOT carrying a fresh child.
+#
+# Every bead read below is PINNED to its rig with `gc bd --rig="$r"`. Bare `bd`
+# does NOT follow cwd here, so `cd "$CITY/rigs/$r"` does not scope it: BEADS_DIR
+# is set in every agent environment (a polecat runs with
+# BEADS_DIR=<its own rig>/.beads) and pins bd to THAT rig's store regardless of
+# where the script cd's. Under the old form all four iterations re-read the
+# running agent's rig and printed its anchors under each of the other rigs'
+# names. That is the worst failure mode a watch script has: it does not go
+# quiet, it reports confidently about rigs it never read.
 echo
 echo "-- anchors at/over cap (should be routed to human, not spawning) --"
 found=0
+unread=0
 for r in "${RIGS[@]}"; do
-  cd "$CITY/rigs/$r" 2>/dev/null || continue
-  for a in $(bd list --status=open --json 2>/dev/null | sed -n '/^[[{]/,$p' \
+  # An unreadable rig must never render as "no anchors at cap". `gc bd` exits
+  # non-zero and prints nothing for an unknown rig, and a read that fails any
+  # other way (dolt down, schema-migration write-block) is indistinguishable
+  # from a clean rig once jq reduces it to a length. Report it instead.
+  open_raw=$(gc bd --rig="$r" list --status=open --json --limit=0 2>/dev/null \
+             | sed -n '/^[[{]/,$p')
+  if [ -z "$open_raw" ]; then
+    echo "   $r: *** BEAD READ FAILED — rig NOT checked (do not read this as clean) ***"
+    unread=1
+    continue
+  fi
+  for a in $(printf '%s' "$open_raw" \
              | jq -r '.[] | select(.metadata.merge_result != null) | .id' 2>/dev/null); do
-    n=$(bd dep list "$a" --direction=up -t parent-child --json 2>/dev/null \
+    # ONE dep read per anchor, reused for both counts below, so "rounds spent"
+    # and "children since the cap landed" always speak about the same
+    # observation of the anchor rather than two reads straddling a write.
+    kids=$(gc bd --rig="$r" dep list "$a" --direction=up -t parent-child --json 2>/dev/null \
+           | sed -n '/^[[{]/,$p')
+    n=$(printf '%s' "$kids" \
         | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
     if [ "${n:-0}" -ge "$CAP" ]; then
-      routed=$(bd show "$a" --json 2>/dev/null | sed -n '/^[[{]/,$p' | jq -r '.[0].metadata."gc.routed_to" // "none"' 2>/dev/null)
+      routed=$(gc bd --rig="$r" show "$a" --json 2>/dev/null | sed -n '/^[[{]/,$p' \
+               | jq -r '.[0].metadata."gc.routed_to" // "none"' 2>/dev/null)
       # Three distinct states — do NOT collapse them. An anchor that accumulated
       # its rounds BEFORE the cap existed has not been through the cap yet, and
       # reads identically to one the cap failed on. Even an OPEN rework child is
       # innocent if it was minted before the cap landed. The only real failure is
       # a rework child created AFTER GC_CAP_LANDED_AT, which means something
       # spawned round N+1 with the cap in force.
-      newer=$(bd dep list "$a" --direction=up -t parent-child --json 2>/dev/null \
+      newer=$(printf '%s' "$kids" \
         | jq --arg t "$CAP_LANDED" \
              '[.[] | select(.metadata.source_review_bead != null)
                    | select(.created_at > $t)] | length' 2>/dev/null || echo 0)
@@ -76,20 +102,37 @@ for r in "${RIGS[@]}"; do
     fi
   done
 done
-[ "$found" -eq 0 ] && echo "   none"
+if [ "$found" -eq 0 ]; then
+  # "none" is a claim about the rigs that were actually read. Never let a rig
+  # that failed to read hide behind it.
+  [ "$unread" -eq 0 ] && echo "   none" \
+                      || echo "   none among the rigs that could be read"
+fi
 
 # --- 3. codex reviews minted (Copilot budget) ---------------------------------
 echo
 echo "-- codex review beads (Copilot burn) --"
 tot=0
+tot_unread=0
 for r in "${RIGS[@]}"; do
-  cd "$CITY/rigs/$r" 2>/dev/null || continue
-  o=$(bd list --status=open,in_progress --json 2>/dev/null | sed -n '/^[[{]/,$p' \
+  # Pinned per rig for the same reason as section 2 — and a failed read is
+  # reported rather than counted, because "0 in flight" is exactly what a rig
+  # comfortably under budget looks like.
+  rev_raw=$(gc bd --rig="$r" list --status=open,in_progress --json --limit=0 2>/dev/null \
+            | sed -n '/^[[{]/,$p')
+  if [ -z "$rev_raw" ]; then
+    echo "   $r: *** BEAD READ FAILED — not counted (0 would read as under budget) ***"
+    tot_unread=1
+    continue
+  fi
+  o=$(printf '%s' "$rev_raw" \
       | jq '[.[] | select(.metadata.task_kind == "review")] | length' 2>/dev/null || echo 0)
   echo "   $r: $o in flight"
   tot=$((tot + ${o:-0}))
 done
 echo "   TOTAL in flight: $tot   (pool ceiling is 2/rig = 8 concurrent)"
+[ "$tot_unread" -eq 1 ] \
+  && echo "   (TOTAL is a LOWER BOUND — at least one rig could not be read)"
 
 # --- 4. live polecat sessions (Claude burn rate) ------------------------------
 # Count by TEMPLATE, never by session_name. Polecat session names carry the PACK
@@ -127,6 +170,9 @@ grep 'poolDesired.*polecat' "${HOME}/.gc/supervisor.log" 2>/dev/null | tail -8 |
 echo
 echo "=== thresholds ==="
 echo "  ANY 'NOT LOADED' or 'BEHIND'      -> stop; the cap is not protecting you"
+echo "  ANY 'BEAD READ FAILED'            -> that rig was NOT checked; its sections"
+echo "                                       above say nothing about it. Fix the read"
+echo "                                       before trusting a clean run."
 echo "  ANY 'SPAWNED PAST CAP'            -> cap is broken; suspend and investigate"
 echo "  'pre-cap backlog' entries         -> expected once each; must become"
 echo "                                       'cap fired, escalated', and must not recur"
