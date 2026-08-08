@@ -27,7 +27,6 @@ import "time"
 type Severity string
 
 const (
-	SevFlagged  Severity = "FLAGGED"  // operator-flagged (gc.attention=1)
 	SevHigh     Severity = "HIGH"     // stranded: open work, none in progress, no live host
 	SevElevated Severity = "ELEVATED" // a human-gated decision (or, with staleness, an aged NORMAL)
 	SevNormal   Severity = "NORMAL"   // healthy in-flight work
@@ -39,8 +38,6 @@ const (
 // staleness terms.
 func (s Severity) rank() int {
 	switch s {
-	case SevFlagged:
-		return 4
 	case SevHigh:
 		return 3
 	case SevElevated:
@@ -97,13 +94,12 @@ type Child struct {
 type Anchor struct {
 	ID       string  `json:"id"`
 	Title    string  `json:"title"`
-	Kind     string  `json:"kind"`   // epic | decision | flagged | convoy
+	Kind     string  `json:"kind"`   // epic | decision | convoy
 	Source   string  `json:"source"` // same string as Kind; drives derivation branches
 	Rig      string  `json:"rig"`
 	Prefix   string  `json:"prefix"`
 	Priority *int    `json:"priority,omitempty"`
 	Children []Child `json:"children,omitempty"`
-	Reason   string  `json:"reason,omitempty"` // flagged anchors: gc.attention_reason
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the

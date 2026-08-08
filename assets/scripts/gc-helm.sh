@@ -9,27 +9,19 @@
 # Usage:
 #   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
 #   gc-helm open  <bead-id>                 land in the bead (resume-or-create its host)
-#   gc-helm flag  <bead-id> --reason "..."  raise this bead onto the board
-#   gc-helm clear <bead-id>                 lower it again (the handled row leaves)
 #   gc-helm takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline
 #
 # Phase 3 of the Bead-Universe Operating Model (epic tk-q4xaj; bead
 # tk-qkags; design Key Component 4, Phase 3). The board (the default
-# verb) is the evolved read-only ranking from PR #83; `open`/`flag`/
-# `clear` are the new verbs that close the board→land→accept/redirect→
-# leave loop:
+# verb) is the evolved read-only ranking from PR #83; `open` is the
+# new verb that closes the board→land→accept/redirect loop:
 #
-#   flag  → a bead's LLM (or the operator) raises its own bead onto the
-#           board by setting `gc.attention` — escalation inversion, the
-#           dual of mailing the mayor.
-#   board → the operator glances the ranked rows (now with a 4th anchor
-#           kind — flagged beads — a liveness glyph, a row cap, and a
-#           cache so the ~12s gather is paid once, not every glance).
+#   board → the operator glances the ranked rows (with a liveness
+#           glyph, a row cap, and a cache so the ~12s gather is paid
+#           once, not every glance).
 #   open  → pick a row; the bead's resident host is resumed (hot) or
 #           materialized (cold) and the operator lands in the
 #           conversation, already primed with the bead's universe.
-#   clear → the operator ratifies/redirects and the handled row leaves
-#           the board (a shrinking queue).
 #
 # `open` is a thin front door over tools/gc-bead-host.sh (the Phase 1
 # spawn-or-resume + durable bead<->session link) followed by
@@ -37,7 +29,7 @@
 # lifecycle — it assembles the proven primitives.
 #
 # ── What is an anchor ────────────────────────────────────────────────
-# FIVE kinds of OPEN top-level anchors are collected, cross-rig:
+# FOUR kinds of OPEN top-level anchors are collected, cross-rig:
 #   1. epic       — every open `epic`-type bead (per-rig durable anchor).
 #   2. convoy     — OWNED convoys that are NOT under an epic (floating
 #                   "epic-improvisers"). MACHINE convoys are transient and
@@ -51,10 +43,6 @@
 #                   old `owned==true` filter hid exactly this case).
 #   4. decision   — every open `decision`-type bead (human-gated; only a
 #                   human can move it).
-#   5. flagged    — any open bead with `metadata.gc.attention=1` (set by
-#                   `gc-helm flag`): a bead's LLM, or the operator,
-#                   has explicitly raised it. Flagged rows float to the
-#                   very top (their own FLAGGED band) — a hand was raised.
 #
 # Beads live in separate per-rig Dolt databases (lo/tk/sl/gc/su/…), so
 # the board enumerates `gc rig list` and queries each rig's `.beads`
@@ -72,7 +60,7 @@
 #                      is kept ONLY as a cross-check: any disagreement
 #                      with the resolved set is surfaced as
 #                      `progress_mismatch` in the JSON output. Decisions
-#                      and flagged beads carry no frontier (N/M = —).
+#                      carry no frontier (N/M = —).
 #   • open/in-progress/assigned — counts over the open frontier.
 #   • stranded       — decomposed (M>0) with open children, ZERO LIVE
 #                      in-progress, AND no live host: work exists but
@@ -114,7 +102,6 @@
 # Each anchor gets a SEVERITY band, then rows sort by band, then by a
 # weight PROXY, then by staleness:
 #
-#   FLAGGED   a bead explicitly raised onto the board (hand-raised).
 #   HIGH      stranded frontier (decomposed, open, no LIVE in-progress, and
 #             no live host — incl. a frontier whose only in-progress
 #             children have dead owners), OR an unowned non-machine convoy
@@ -141,7 +128,7 @@
 # (one-line summary), `needs` (short hint), and `live` (host state).
 # `--json` is the stable contract for downstream tooling (the tmux
 # board picker reads it). The array is additive-only — new fields
-# (`live`, `host_session_name`, kind "flagged", severity "FLAGGED";
+# (`live`, `host_session_name`;
 # `in_progress_live`, `in_progress_dead`, `dead_owner`, `dead_owner_heads`,
 # `owned`, kind "unowned") were added without changing or removing any
 # existing field.
@@ -151,8 +138,8 @@
 # join is a single fast `gc session list`. So the EXPENSIVE GATHER is
 # cached (default TTL GC_HELM_CACHE_TTL=45s) while liveness +
 # ranking are recomputed every glance — a glance is sub-second on a warm
-# cache and the host state is never stale. `--refresh` (or `flag`/
-# `clear`/`open`, which bust the cache) forces a fresh gather. Rows are
+# cache and the host state is never stale. `--refresh` (or `open`,
+# which busts the cache) forces a fresh gather. Rows are
 # CAPPED at GC_HELM_MAX_ROWS (default 50) by default so the board
 # can never balloon to "every bead"; `--limit=N` overrides with an
 # explicit N, and `--limit=0` means ALL (uncapped) for tooling.
@@ -189,15 +176,13 @@ usage() {
 Usage:
   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
   gc-helm open  <bead-id>                 land in the bead (resume-or-create its host)
-  gc-helm flag  <bead-id> --reason "..."  raise this bead onto the board
-  gc-helm clear <bead-id>                 lower it again (the handled row leaves)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive] [--release]  set the board-visible takeaway headline
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
-(epics, floating owned convoys, decisions, and flagged beads) by how much
-they need a human's attention. open/flag/clear close the
-board→land→accept/redirect→leave loop; react slings a proactive first
+(epics, floating owned convoys, and decisions) by how much
+they need a human's attention. open closes the
+board→land→accept/redirect loop; react slings a proactive first
 reaction (via tools/gc-proactive.sh, on the codex-gated mr path) so a
 takeaway-less row self-heals to an explanatory NEEDS on the next render.
 takeaway writes that NEEDS headline directly — the thin writer the host and
@@ -265,54 +250,6 @@ rig_path_for_bead() {
 rig_name_for_bead() {
     enumerate_rigs
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
-}
-
-# ── Verb: flag ───────────────────────────────────────────────────────
-# Raise a bead onto the board. `gc.attention=1` is the stable, exact-
-# match-listable sentinel the board's 4th-anchor query filters on; the
-# human-facing detail rides alongside in gc.attention_reason /
-# gc.attention_at so the board can show WHY and HOW FRESH.
-cmd_flag() {
-    bead=""; reason=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --reason=*) reason="${1#--reason=}"; shift ;;
-            --reason) shift; [ $# -gt 0 ] || { echo "$PROG: --reason requires a value" >&2; exit 2; }; reason="$1"; shift ;;
-            -h|--help) usage; exit 0 ;;
-            -*) echo "$PROG: flag: unknown flag '$1'" >&2; exit 2 ;;
-            *) [ -z "$bead" ] || { echo "$PROG: flag takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
-        esac
-    done
-    [ -n "$bead" ] || { echo "$PROG: flag needs <bead-id>" >&2; usage; exit 2; }
-    [ -n "$reason" ] || { echo "$PROG: flag needs --reason \"...\" (why this needs a human)" >&2; exit 2; }
-
-    path=$(rig_path_for_bead "$bead")
-    db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    gc bd update "$bead" ${db:+--db "$db"} \
-        --set-metadata "gc.attention=1" \
-        --set-metadata "gc.attention_reason=$reason" \
-        --set-metadata "gc.attention_at=$(iso_now)" >/dev/null 2>&1 \
-        || { echo "$PROG: flag: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
-    bust_cache
-    echo "flagged $bead onto the Helm: $reason"
-}
-
-# ── Verb: clear ──────────────────────────────────────────────────────
-# Lower a bead again — the handled row leaves the board (shrinking queue).
-cmd_clear() {
-    bead="${1:-}"
-    case "$bead" in -h|--help) usage; exit 0 ;; "") echo "$PROG: clear needs <bead-id>" >&2; usage; exit 2 ;; esac
-    path=$(rig_path_for_bead "$bead")
-    db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    gc bd update "$bead" ${db:+--db "$db"} \
-        --unset-metadata "gc.attention" \
-        --unset-metadata "gc.attention_reason" \
-        --unset-metadata "gc.attention_at" >/dev/null 2>&1 \
-        || { echo "$PROG: clear: could not update '$bead'" >&2; exit 4; }
-    bust_cache
-    echo "cleared $bead from the Helm"
 }
 
 # ── Release helper: quiesce a parked molecule's step beads ───────────
@@ -427,7 +364,7 @@ quiesce_release_molecule_steps() (
 # Write the board-visible takeaway headline — the thin writer the bead-host
 # and proactive worker call instead of inlining the `gc bd update
 # --set-metadata gc.takeaway=… gc.takeaway_at=… gc.takeaway_by=…` triple.
-# Mirrors flag/clear: resolve the bead's rig db, stamp the three fields in ONE
+# Resolve the bead's rig db, stamp the three fields in ONE
 # update, then bust the cache so the next board glance reflects the new
 # headline (an improvement over the old inline form, which never busted it).
 #
@@ -478,7 +415,7 @@ cmd_takeaway() {
     text="${text# }"; text="${text% }"
     [ -n "$text" ] || { echo "$PROG: takeaway needs \"<text>\" (the ≤140-char one-line headline)" >&2; usage; exit 2; }
 
-    # Provenance: host (default) or proactive; free-form like flag's --reason.
+    # Provenance: host (default) or proactive; free-form.
     [ -n "$by" ] || by="host"
 
     path=$(rig_path_for_bead "$bead")
@@ -607,7 +544,7 @@ cmd_react() {
         || { echo "$PROG: react: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)" >&2; exit 4; }
 
     # Pin bd at the bead's rig so the sling's demand/route resolve in the
-    # right per-rig ledger even cross-rig (parity with open/flag/clear).
+    # right per-rig ledger even cross-rig (parity with open).
     path=$(rig_path_for_bead "$bead")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
 
@@ -747,7 +684,7 @@ cmd_board() {
 
     # ── Compute facts, rank, render (single jq pass) ──────────────────
     RENDER='
-def sevrank: {"FLAGGED":4,"HIGH":3,"ELEVATED":2,"NORMAL":1,"LOW":0}[.];
+def sevrank: {"HIGH":3,"ELEVATED":2,"NORMAL":1,"LOW":0}[.];
 def prio_w($p): (if $p==null then 1 else ([0, 4 - $p] | max) end);
 def epoch($s): ($s | if . == null or . == "" then null
                      else (sub("\\.[0-9]+";"") | sub("Z$";"") )
@@ -786,7 +723,7 @@ def owner_live($assignee):
     | (epoch($a.updated_at)) as $upd
     | (if $upd==null then 0 else ((($now - $upd) / 86400) | floor) end) as $stale
     | ($prefixes - [$a.prefix]) as $others
-    | (if ($a.source=="decision" or $a.source=="flagged") then []
+    | (if $a.source=="decision" then []
        else ( [ ($a.description // "")
                 | scan("(?:" + ($others|join("|")) + ")-[a-z0-9]{3,8}") ]
               | map(select(. as $r | ($rignames | index($r)) == null and $r != $a.id))
@@ -802,8 +739,7 @@ def owner_live($assignee):
     # "0 in-progress" is NOT stranded when someone is home. Stranded/HIGH
     # is reserved for a decomposed anchor with open children, zero
     # in-progress, AND no live host.
-    | (if $a.source=="flagged" then "FLAGGED"
-       elif $a.source=="unowned" then "HIGH"
+    | (if $a.source=="unowned" then "HIGH"
        elif $a.source=="decision" then "ELEVATED"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
@@ -814,8 +750,7 @@ def owner_live($assignee):
     | ($m + prio_w($a.priority) + ([$xrefs|length, '"$XREF_CAP"'] | min)) as $weight
     # one-line frontier summary
     | (if $inprog_dead>0 then " · \($inprog_dead) stuck (dead owner)" else "" end) as $deadsfx
-    | (if $a.source=="flagged" then ("flagged: " + (($a.reason // "needs a human")[0:26]))
-       elif $a.source=="unowned" then "unowned convoy — no owning bead"
+    | (if $a.source=="unowned" then "unowned convoy — no owning bead"
        elif $a.source=="decision" then "human-gated decision"
        elif $m==0 then "empty — no children"
        elif $open==0 then "all \($m) closed · 0 open"
@@ -836,7 +771,6 @@ def owner_live($assignee):
     # cannot emit a raw/truncated bead-id.
     | (if ($takeaway|length) > 0 then $takeaway
        elif $a.source=="unowned" then "unowned — assign an owning bead"
-       elif $a.source=="flagged" then ("open & ratify" + (if $live=="cold" then "" else " (" + $live + ")" end))
        elif $a.source=="decision" then "operator decision"
        elif $m==0 then ("no children, " + $hostnote + " — " + (if $live=="cold" then "needs an owner" else "decompose or assign" end))
        elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
@@ -853,7 +787,7 @@ def owner_live($assignee):
         in_progress_live:$inprog_live, in_progress_dead:$inprog_dead, dead_owner:($inprog_dead>0),
         owned:(if ($a|has("owned")) then $a.owned else null end),
         stranded:($m>0 and $open>0 and $inprog_live==0 and $live=="cold"),
-        empty:($m==0 and $a.source!="decision" and $a.source!="flagged" and $a.source!="unowned"),
+        empty:($m==0 and $a.source!="decision" and $a.source!="unowned"),
         complete:($m>0 and $open==0),
         progress_mismatch:$pmismatch,
         stale_days:$stale, priority:$a.priority, cross_rig_refs:$xrefs,
@@ -861,15 +795,14 @@ def owner_live($assignee):
         takeaway:(if ($takeaway|length)>0 then $takeaway else null end),
         takeaway_at:(($a.takeaway_at // "") | if .=="" then null else . end),
         takeaway_by:(($a.takeaway_by // "") | if .=="" then null else . end),
-        reason:($a.reason // null), flagged_at:($a.flagged_at // null),
         updated_at:$a.updated_at, frontier:$frontier, needs:$needs,
         rank_score: (($sev|sevrank)*1000000 + $weight*1000 + ([$stale,999]|min))
       }
   )
 | sort_by(-.rank_score)
-# A bead can be matched by two gathers at once — e.g. an epic that was
-# also flagged (gc.attention=1). Dedup by id, keeping the FIRST (highest-
-# ranked) row, so a flagged epic shows once, in its FLAGGED band.
+# A bead can be matched by two gathers at once. Dedup by id, keeping the
+# FIRST (highest-ranked) row, so a doubly-matched anchor shows once, in
+# its higher band.
 | reduce .[] as $r ({ids:[], out:[]};
     if (.ids | index($r.id)) then .
     else {ids:(.ids + [$r.id]), out:(.out + [$r])} end) | .out
@@ -911,12 +844,12 @@ def glyph: {"hot":"●","warm":"◐","cold":"·"}[.] // "·";
 ( (" "|rpad(2)) + ("SEV"|rpad(9)) + ("ID"|rpad(11)) + ("RIG"|rpad(13)) + ("KIND"|rpad(9)) + ("N/M"|rpad(7)) + ("FRONTIER"|rpad(36)) + "NEEDS" ),
 ( ("─"*1|rpad(2)) + ("─"*8|rpad(9)) + ("─"*10|rpad(11)) + ("─"*12|rpad(13)) + ("─"*8|rpad(9)) + ("─"*6|rpad(7)) + ("─"*35|rpad(36)) + ("─"*16) ),
 ( .[] | ((.live|glyph)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad(11)) + ((.rig)|rpad(13)) + ((.kind)|rpad(9))
-        + ((if (.kind=="decision" or .kind=="flagged") then "—" else "\(.n_closed)/\(.m_total)" end)|rpad(7))
+        + ((if .kind=="decision" then "—" else "\(.n_closed)/\(.m_total)" end)|rpad(7))
         + ((.frontier)|rpad(36)) + (.needs) )
 '
-    printf '\nLegend: FLAGGED=hand-raised · HIGH=stranded/unowned · ELEVATED=decision/stale/stuck · NORMAL=active · LOW=empty/complete\n'
+    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/stale/stuck · NORMAL=active · LOW=empty/complete\n'
     printf 'Liveness: ● hot (open attaches) · ◐ warm (open resumes) · · cold (open materializes)\n'
-    printf 'open <id> to land · flag <id> --reason to raise · clear <id> to lower · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
+    printf 'open <id> to land · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
 }
 
 # ── Anchor gather (the cached, Dolt-heavy part) ──────────────────────
@@ -953,20 +886,6 @@ gather_anchors() {
             '.[] | {id, title:(.title//""), kind:"decision", source:"decision", rig:$rig, prefix:$prefix,
                     priority:(.priority//3), updated_at:(.updated_at//""), description:(.description//""),
                     progress:null, children:[],
-                    takeaway:(.metadata["gc.takeaway"] // ""),
-                    takeaway_at:(.metadata["gc.takeaway_at"] // ""),
-                    takeaway_by:(.metadata["gc.takeaway_by"] // "")}' >> "$ANCHORS"
-
-        # Flagged: any open/in-progress/blocked bead a host or operator raised
-        # by setting the gc.attention=1 sentinel. The reason/at ride alongside.
-        flagged=$(as_array "$(gcq bd list --db "$beads" --metadata-field "gc.attention=1" --status open,in_progress,blocked --json)")
-        printf '%s' "$flagged" | jq -c \
-            --arg rig "$name" --arg prefix "$prefix" \
-            '.[] | {id, title:(.title//""), kind:"flagged", source:"flagged", rig:$rig, prefix:$prefix,
-                    priority:(.priority//3), updated_at:(.updated_at//""),
-                    description:(.description//""), progress:null, children:[],
-                    reason:(.metadata["gc.attention_reason"] // ""),
-                    flagged_at:(.metadata["gc.attention_at"] // ""),
                     takeaway:(.metadata["gc.takeaway"] // ""),
                     takeaway_at:(.metadata["gc.takeaway_at"] // ""),
                     takeaway_by:(.metadata["gc.takeaway_by"] // "")}' >> "$ANCHORS"
@@ -1024,12 +943,10 @@ gather_anchors() {
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
-    flag)          shift; cmd_flag "$@" ;;
-    clear|unflag)  shift; cmd_clear "$@" ;;
     react)         shift; cmd_react "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     board)         shift; cmd_board "$@" ;;
     -h|--help|help) usage; exit 0 ;;
     ''|-*)         cmd_board "$@" ;;          # no verb, or a board flag → board (back-compat)
-    *)             echo "$PROG: unknown verb '$1' (try: board, open, flag, clear, react, takeaway, help)" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '$1' (try: board, open, react, takeaway, help)" >&2; usage; exit 2 ;;
 esac

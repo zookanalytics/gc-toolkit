@@ -18,9 +18,8 @@ GET /helm   -> { generated_at, total, tiles:[ {id,rig,kind,title,severity,
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 ```
 
-Tiles are ranked `rank_score` descending and deduplicated by id. Four anchor
-kinds are gathered: **epic**, **decision**, **flagged** (`gc.attention=1`), and
-**convoy** (owned, floating).
+Tiles are ranked `rank_score` descending and deduplicated by id. Three anchor
+kinds are gathered: **epic**, **decision**, and **convoy** (owned, floating).
 
 ## Architecture
 
@@ -42,9 +41,8 @@ future contract-compliant backend (the in-process beads library, or a sanctioned
 new endpoint) can swap in without touching the model or serving code.
 
 Endpoints consumed (all under `/v0/city/<city>/`): `/rigs`, `/beads?type=epic`,
-`/beads/graph/{id}` (all-status child roll-up), `/beads?type=decision`, `/beads`
-(paged scan, filtered to `gc.attention=1` in process), `/convoys` +
-`/convoy/{id}`, `/sessions?view=full` (liveness). Cross-rig `partial` /
+`/beads/graph/{id}` (all-status child roll-up), `/beads?type=decision`,
+`/convoys` + `/convoy/{id}`, `/sessions?view=full` (liveness). Cross-rig `partial` /
 `partial_errors` are propagated to the board envelope; a 503 (total outage)
 surfaces as a 502 from `/helm`.
 
@@ -128,9 +126,6 @@ access, unit tests over the model and a mock supervisor.
 - **owned-convoy filter** — `/convoys` omits the `owned` flag, so floating +
   non-`sling-` title approximates ownership; true `owned==true` filtering needs a
   richer convoy source.
-- **flagged scan cost** — no server-side metadata filter exists, so flagged
-  anchors require a paged full-bead scan (bounded; logged if truncated). A
-  sanctioned `?metadata=` filter or the beads library would remove this.
 - **event-invalidation** — the cache is TTL-only; the supervisor SSE
   `/v0/events/stream` can later replace polling.
 

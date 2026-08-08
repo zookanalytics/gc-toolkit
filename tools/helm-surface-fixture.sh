@@ -2,15 +2,13 @@
 # helm-surface-fixture.sh — the automatable assertions for the Phase 3
 # attention surface (epic tk-q4xaj; bead tk-qkags; design Phase 3).
 #
-# Phase 3's SHIP gate is the operator-judged capstone (board → pick a flagged
+# Phase 3's SHIP gate is the operator-judged capstone (board → pick a
 # bead → land in its resumed universe → it answers a pre-seeded reach-requiring
 # question). That end-to-end demo is human-in-the-loop by design and is NOT
 # what this fixture replaces. What this fixture locks down is the deterministic
 # machinery underneath it, so a regression in the board's new behavior is caught
 # automatically:
 #
-#   • the 4th anchor kind — a flagged bead (gc.attention=1) is admitted, lands
-#     in its own FLAGGED band, and floats above every other anchor;
 #   • the liveness glyph — the pack-namespaced-alias → bead-id join over
 #     `gc session list` (bead-host sessions only) resolves hot/warm/cold,
 #     and a live host keeps a decomposed anchor out of the stranded band;
@@ -18,15 +16,15 @@
 #     out for tooling;
 #   • the --json contract — additive only (new `live` field present; existing
 #     fields intact);
-#   • verb dispatch + validation — board/open/flag/clear routing and the
+#   • verb dispatch + validation — board/open/react/takeaway routing and the
 #     fail-closed arg checks.
 #
 # HERMETIC BY DESIGN. The board's render/rank/glyph path is driven through the
 # tool's GC_HELM_FIXTURE hook (canned anchors.ndjson + sessions.json +
 # rigs.json under a temp dir), so these assertions write NOTHING to Dolt and
 # need no live city. A best-effort read-only smoke at the end proves the real
-# gather+contract on the live city; an OPT-IN flag→clear round-trip
-# (GC_HELM_FLAG_SMOKE_BEAD=<id>) exercises the live write path on a bead
+# gather+contract on the live city; an OPT-IN takeaway round-trip
+# (GC_HELM_SMOKE_BEAD=<id>) exercises the live write path on a bead
 # the operator chooses — the fixture never invents or closes a bead of its own.
 #
 # Run:   tools/helm-surface-fixture.sh
@@ -56,8 +54,8 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 B() { GC_HELM_FIXTURE="$FXDIR" "$TOOL" "$@"; }
 
 # ---------------------------------------------------------------------------
-# Seed: 1 rig, and four anchors — a flagged bead with a HOT host, a stranded
-# epic, a decision, and a second flagged bead with a WARM (suspended) host.
+# Seed: 1 rig, and four anchors — an epic with a HOT host, a stranded
+# epic, a decision, and a second epic with a WARM (suspended) host.
 # Distinct ids make the ordering + glyph assertions unambiguous.
 # ---------------------------------------------------------------------------
 cat > "$FXDIR/rigs.json" <<'JSON'
@@ -66,38 +64,38 @@ cat > "$FXDIR/rigs.json" <<'JSON'
 JSON
 
 cat > "$FXDIR/anchors.ndjson" <<'JSON'
-{"id":"tk-flaghot","title":"CI mystery","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":3,"updated_at":"2026-06-07T03:00:00Z","description":"","progress":null,"children":[],"reason":"CI red, cause unknown","flagged_at":"2026-06-07T03:00:00Z"}
+{"id":"tk-hosthot","title":"CI mystery","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":3,"updated_at":"2026-06-07T03:00:00Z","description":"","progress":null,"children":[{"id":"tk-hh1","status":"open","assignee":""}]}
 {"id":"tk-epic","title":"Big epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"references sl-zzz9","progress":null,"children":[{"id":"tk-a","status":"open","assignee":""},{"id":"tk-b","status":"closed","assignee":""}]}
 {"id":"sl-dec","title":"Pick a path","kind":"decision","source":"decision","rig":"signal-loom","prefix":"sl","priority":1,"updated_at":"2026-06-05T00:00:00Z","description":"","progress":null,"children":[]}
-{"id":"tk-flagwarm","title":"Stale spec","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[],"reason":"needs a re-read","flagged_at":"2026-06-06T00:00:00Z"}
+{"id":"tk-hostwarm","title":"Stale spec","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-hw1","status":"open","assignee":""}]}
 JSON
 
 # Sessions model the real shape: a bead-host alias is pack-namespaced
 # (<pack>.<bead-id>) and carries the bead-host template, so the board's
 # liveness join strips the leading "<pack>." and joins only bead-host
-# sessions. tk-flaghot has an ACTIVE host (hot); tk-flagwarm a SUSPENDED one
+# sessions. tk-hosthot has an ACTIVE host (hot); tk-hostwarm a SUSPENDED one
 # (warm); everything else cold. The refinery (non-bead-host template, aliased
 # with slashes) must NOT perturb the join.
 cat > "$FXDIR/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-1","alias":"gc-toolkit.tk-flaghot","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":false},
-  {"id":"lx-2","alias":"gc-toolkit.tk-flagwarm","template":"gc-toolkit.bead-host","state":"suspended","running":false,"attached":false},
+  {"id":"lx-1","alias":"gc-toolkit.tk-hosthot","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":false},
+  {"id":"lx-2","alias":"gc-toolkit.tk-hostwarm","template":"gc-toolkit.bead-host","state":"suspended","running":false,"attached":false},
   {"id":"lx-9","alias":"gc-toolkit/gc-toolkit.refinery","template":"gc-toolkit.refinery","state":"active","running":true}
 ]}
 JSON
 
-echo "── hermetic: 4th anchor (flagged) + FLAGGED band ──"
+echo "── hermetic: anchor kinds + severity bands ──"
 J="$(B --json)"
 eq   "board returns a JSON array"            "array"  "$(printf '%s' "$J" | jq -r 'type')"
 eq   "all four anchors admitted"             "4"      "$(printf '%s' "$J" | jq 'length')"
-eq   "flagged kind present"                  "2"      "$(printf '%s' "$J" | jq '[.[]|select(.kind=="flagged")]|length')"
-eq   "top row is a flagged bead"             "FLAGGED" "$(printf '%s' "$J" | jq -r '.[0].severity')"
-eq   "flagged floats above the stranded epic" "true"  "$(printf '%s' "$J" | jq -r '(.[0].rank_score) > (.[]|select(.kind=="epic").rank_score)')"
-has  "flagged frontier carries the reason"   "CI red" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flaghot").frontier')"
+eq   "epic kind present"                     "3"      "$(printf '%s' "$J" | jq '[.[]|select(.kind=="epic")]|length')"
+eq   "top row is the stranded epic (HIGH)"   "HIGH"   "$(printf '%s' "$J" | jq -r '.[0].severity')"
+eq   "the stranded epic floats above the decision" "true" "$(printf '%s' "$J" | jq -r '(.[]|select(.id=="tk-epic").rank_score) > (.[]|select(.id=="sl-dec").rank_score)')"
+has  "decision frontier is human-gated"      "human-gated" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="sl-dec").frontier')"
 
 echo "── hermetic: liveness glyph join (pack-namespaced alias → bead-id) ──"
-eq   "hot host resolves hot"   "hot"  "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flaghot").live')"
-eq   "suspended host is warm"  "warm" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flagwarm").live')"
+eq   "hot host resolves hot"   "hot"  "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-hosthot").live')"
+eq   "suspended host is warm"  "warm" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-hostwarm").live')"
 eq   "no host is cold"         "cold" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").live')"
 eq   "live field is on every row (additive contract)" "4" "$(printf '%s' "$J" | jq '[.[]|select(.live!=null)]|length')"
 has  "hot glyph in human table"   "●" "$(B)"
@@ -216,7 +214,7 @@ eq  "unowned: floats above the owned convoy"   "true"    "$(printf '%s' "$UOJ" |
 eq  "owned convoy: kind is convoy"             "convoy"  "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").kind')"
 eq  "owned convoy: owned field is true"        "true"    "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").owned')"
 has "owned convoy: complete reads graduate"    "graduate" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").needs')"
-absent "owned convoy: not flagged unowned"     "unowned convoy" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").frontier')"
+absent "owned convoy: not marked unowned"      "unowned convoy" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").frontier')"
 rm -rf "$UO"
 
 echo "── hermetic: --json contract stays additive (existing + new fields intact) ──"
@@ -278,11 +276,11 @@ echo "── hermetic: dedup (a bead matched by two gathers shows once) ──"
 DUP="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$DUP/rigs.json"; printf '{}' > "$DUP/sessions.json"
 cat > "$DUP/anchors.ndjson" <<'JSON'
 {"id":"tk-dup","title":"Dual","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-a","status":"open","assignee":""}]}
-{"id":"tk-dup","title":"Dual","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[],"reason":"look here","flagged_at":"2026-06-07T00:00:00Z"}
+{"id":"tk-dup","title":"Dual","kind":"convoy","source":"convoy","owned":true,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-b","status":"closed","assignee":""}]}
 JSON
 DUPJ="$(GC_HELM_FIXTURE="$DUP" "$TOOL" --json)"
-eq   "flagged-epic dedups to a single row" "1"       "$(printf '%s' "$DUPJ" | jq 'length')"
-eq   "the surviving row is the FLAGGED one" "flagged" "$(printf '%s' "$DUPJ" | jq -r '.[0].kind')"
+eq   "doubly-gathered bead dedups to a single row" "1"    "$(printf '%s' "$DUPJ" | jq 'length')"
+eq   "the surviving row is the higher-ranked one"  "epic" "$(printf '%s' "$DUPJ" | jq -r '.[0].kind')"
 rm -rf "$DUP"
 
 echo "── hermetic: empty board ──"
@@ -293,13 +291,9 @@ rm -rf "$EMPTY"
 
 echo "── hermetic: verb dispatch + fail-closed validation ──"
 has  "help lists the open verb"  "open"  "$("$TOOL" help 2>&1 || true)"
-has  "help lists the flag verb"  "flag"  "$("$TOOL" help 2>&1 || true)"
-ec=0; "$TOOL" flag 2>/dev/null || ec=$?;            eq "flag with no bead errors (exit 2)"        "2" "$ec"
-ec=0; "$TOOL" flag tk-x 2>/dev/null || ec=$?;       eq "flag with no --reason errors (exit 2)"    "2" "$ec"
 ec=0; "$TOOL" open 2>/dev/null || ec=$?;            eq "open with no bead errors (exit 2)"        "2" "$ec"
-ec=0; "$TOOL" clear 2>/dev/null || ec=$?;           eq "clear with no bead errors (exit 2)"       "2" "$ec"
 ec=0; "$TOOL" bogus-verb 2>/dev/null || ec=$?;      eq "unknown verb errors (exit 2)"             "2" "$ec"
-# takeaway: a thin metadata-writer verb (like flag/clear), but bead-id AND text
+# takeaway: a thin metadata-writer verb; bead-id AND text
 # are BOTH required — missing either fails closed (exit 2). Whitespace-only text
 # counts as missing (it collapses to empty before the check).
 ec=0; "$TOOL" takeaway 2>/dev/null || ec=$?;        eq "takeaway with no bead errors (exit 2)"    "2" "$ec"
@@ -413,24 +407,14 @@ else
     printf '  skip  live board smoke (no reachable city)\n'
 fi
 
-# Opt-in: a full flag→board→clear + takeaway + takeaway --release round-trip on
+# Opt-in: a takeaway + takeaway --release round-trip on
 # an operator-chosen bead. The fixture never invents or closes a bead — it writes
-# only to the bead the operator named, and every leg self-cleans (clear undoes
-# flag; the unset undoes takeaway; the --release leg captures and restores the
+# only to the bead the operator named, and every leg self-cleans (the unset
+# undoes takeaway; the --release leg captures and restores the
 # bead's prior lifecycle fields and unsets the marker it set).
-if [ -n "${GC_HELM_FLAG_SMOKE_BEAD:-}" ]; then
-    echo "── live (opt-in): flag/clear + takeaway + takeaway --release round-trip on $GC_HELM_FLAG_SMOKE_BEAD ──"
-    bead="$GC_HELM_FLAG_SMOKE_BEAD"
-    "$TOOL" flag "$bead" --reason "helm-surface-fixture smoke" >/dev/null 2>&1 \
-        && ok "flag $bead" || bad "flag $bead" "exit 0" "non-zero"
-    eq "bead now carries gc.attention=1" "1" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.attention"] // ""')"
-    has "flagged bead appears on the live board" "$bead" \
-        "$("$TOOL" --json --refresh --timeout=8 2>/dev/null | jq -r '.[]|select(.kind=="flagged").id' || true)"
-    "$TOOL" clear "$bead" >/dev/null 2>&1 \
-        && ok "clear $bead" || bad "clear $bead" "exit 0" "non-zero"
-    eq "bead no longer carries gc.attention" "" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.attention"] // ""')"
+if [ -n "${GC_HELM_SMOKE_BEAD:-}" ]; then
+    echo "── live (opt-in): takeaway + takeaway --release round-trip on $GC_HELM_SMOKE_BEAD ──"
+    bead="$GC_HELM_SMOKE_BEAD"
     # takeaway: write the headline, read back the THREE metadata fields, then
     # unset them (the clean-up leg — takeaway has no inverse verb).
     "$TOOL" takeaway "$bead" "helm-surface-fixture smoke takeaway" --by host >/dev/null 2>&1 \
@@ -474,7 +458,7 @@ if [ -n "${GC_HELM_FLAG_SMOKE_BEAD:-}" ]; then
         --unset-metadata gc.proactive_reaction >/dev/null 2>&1 \
         && ok "restore lifecycle + unset the release smoke (cleanup)" || bad "restore the release smoke" "exit 0" "non-zero"
 else
-    printf '  skip  live flag→clear + takeaway round-trip (set GC_HELM_FLAG_SMOKE_BEAD=<id> to run)\n'
+    printf '  skip  live takeaway round-trip (set GC_HELM_SMOKE_BEAD=<id> to run)\n'
 fi
 
 echo ""

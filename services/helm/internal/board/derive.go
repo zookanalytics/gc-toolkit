@@ -8,7 +8,7 @@ import (
 
 // rankSeverityMultiplier and rankWeightMultiplier keep the three rank_score
 // terms in non-overlapping decimal lanes, exactly as gc-helm.sh does:
-// severity (0-4) * 1e6 dominates, weight (capped < 1000) * 1e3 is the middle
+// severity (0-3) * 1e6 dominates, weight (capped < 1000) * 1e3 is the middle
 // term, and the staleness tiebreaker (capped at 999) occupies the units. The
 // caps below preserve that invariant.
 const (
@@ -57,8 +57,6 @@ func counts(children []Child) (mTotal, nClosed, open, inProgress int) {
 func severity(src string, mTotal, open, inProgress int, live Liveness) Severity {
 	var sev0 Severity
 	switch {
-	case src == "flagged":
-		sev0 = SevFlagged
 	case src == "decision":
 		sev0 = SevElevated
 	case mTotal == 0:
@@ -86,26 +84,10 @@ func rankScore(sev Severity, mTotal int, priority *int) int {
 		min(staleDays, rankTermCap)
 }
 
-// truncRunes returns the first n runes of s (gc-helm.sh slices reason[0:26]
-// by codepoint, not byte).
-func truncRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n])
-}
-
 // frontier is the one-line human summary (lines 630-637). Display-only; it does
 // not feed rank_score.
 func frontier(a Anchor, mTotal, open, inProgress int, live Liveness) string {
 	switch {
-	case a.Source == "flagged":
-		reason := a.Reason
-		if reason == "" {
-			reason = "needs a human"
-		}
-		return "flagged: " + truncRunes(reason, 26)
 	case a.Source == "decision":
 		return "human-gated decision"
 	case mTotal == 0:
@@ -135,11 +117,6 @@ func needs(a Anchor, mTotal, open, inProgress int, live Liveness) string {
 		hostnote = "host asleep"
 	}
 	switch {
-	case a.Source == "flagged":
-		if live == LiveCold {
-			return "open & ratify"
-		}
-		return "open & ratify (" + string(live) + ")"
 	case a.Source == "decision":
 		return "operator decision"
 	case mTotal == 0:
@@ -196,9 +173,9 @@ func computeTile(a Anchor, sessions map[string]HostSession) Tile {
 }
 
 // BuildBoard derives every tile, ranks by rank_score descending, and
-// deduplicates by id keeping the highest-ranked occurrence (so a bead matched by
-// two gathers — e.g. an epic that is also flagged — appears once, in its higher
-// band). Ties break by id ascending for deterministic output. now stamps
+// deduplicates by id keeping the highest-ranked occurrence (so a bead matched
+// by two gathers appears once, in its higher band). Ties break by id ascending
+// for deterministic output. now stamps
 // GeneratedAt. partial/partialErrors propagate cross-rig degradation.
 func BuildBoard(anchors []Anchor, sessions map[string]HostSession, now time.Time, partial bool, partialErrors []string) Board {
 	tiles := make([]Tile, 0, len(anchors))

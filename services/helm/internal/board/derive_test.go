@@ -23,22 +23,26 @@ func tileByID(b Board, id string) (Tile, bool) {
 }
 
 // TestFourAnchorBoard reproduces the primary golden case from
-// tools/helm-surface-fixture.sh (lines 63-104): one hot-hosted flagged
-// bead, a stranded epic, a decision, and a warm-hosted flagged bead. The
-// assertions mirror the fixture's eq/has checks exactly.
+// tools/helm-surface-fixture.sh (lines 63-104): one hot-hosted epic, a
+// stranded epic, a decision, and a warm-hosted epic. The assertions mirror
+// the fixture's eq/has checks exactly.
 func TestFourAnchorBoard(t *testing.T) {
 	anchors := []Anchor{
-		{ID: "tk-flaghot", Title: "CI mystery", Kind: "flagged", Source: "flagged", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Reason: "CI red, cause unknown"},
+		{ID: "tk-hosthot", Title: "CI mystery", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Children: []Child{
+			{ID: "tk-hh1", Status: "open"},
+		}},
 		{ID: "tk-epic", Title: "Big epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "tk-a", Status: "open"}, {ID: "tk-b", Status: "closed"},
 		}},
 		{ID: "sl-dec", Title: "Pick a path", Kind: "decision", Source: "decision", Rig: "signal-loom", Prefix: "sl", Priority: ptr(1)},
-		{ID: "tk-flagwarm", Title: "Stale spec", Kind: "flagged", Source: "flagged", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(4), Reason: "needs a re-read"},
+		{ID: "tk-hostwarm", Title: "Stale spec", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(4), Children: []Child{
+			{ID: "tk-hw1", Status: "open"},
+		}},
 	}
 	// Bead-host sessions: alias <pack>.<bead-id>, keyed by bead-id by the source.
 	sessions := map[string]HostSession{
-		"tk-flaghot":  {State: "active", Running: true},
-		"tk-flagwarm": {State: "suspended", Running: false},
+		"tk-hosthot":  {State: "active", Running: true},
+		"tk-hostwarm": {State: "suspended", Running: false},
 	}
 
 	b := BuildBoard(anchors, sessions, fixtureNow, false, nil)
@@ -46,30 +50,21 @@ func TestFourAnchorBoard(t *testing.T) {
 	if got := len(b.Tiles); got != 4 {
 		t.Fatalf("all four anchors admitted: want 4, got %d", got)
 	}
-	if got := b.Tiles[0].Severity; got != SevFlagged {
-		t.Errorf("top row is a flagged bead: want FLAGGED, got %s", got)
+	if got := b.Tiles[0].Severity; got != SevHigh {
+		t.Errorf("top row is the stranded epic: want HIGH, got %s", got)
 	}
-	// flagged floats above the stranded epic.
+	// the stranded epic floats above the decision.
 	epic, _ := tileByID(b, "tk-epic")
-	if !(b.Tiles[0].RankScore > epic.RankScore) {
-		t.Errorf("flagged must outrank the epic: top=%d epic=%d", b.Tiles[0].RankScore, epic.RankScore)
-	}
-	// flagged kind count.
-	flaggedCount := 0
-	for _, tl := range b.Tiles {
-		if tl.Kind == "flagged" {
-			flaggedCount++
-		}
-	}
-	if flaggedCount != 2 {
-		t.Errorf("flagged kind present: want 2, got %d", flaggedCount)
+	dec, _ := tileByID(b, "sl-dec")
+	if !(epic.RankScore > dec.RankScore) {
+		t.Errorf("stranded epic must outrank the decision: epic=%d decision=%d", epic.RankScore, dec.RankScore)
 	}
 
 	// Liveness join.
-	if fh, _ := tileByID(b, "tk-flaghot"); fh.Live != LiveHot {
+	if fh, _ := tileByID(b, "tk-hosthot"); fh.Live != LiveHot {
 		t.Errorf("hot host resolves hot: got %s", fh.Live)
 	}
-	if fw, _ := tileByID(b, "tk-flagwarm"); fw.Live != LiveWarm {
+	if fw, _ := tileByID(b, "tk-hostwarm"); fw.Live != LiveWarm {
 		t.Errorf("suspended host is warm: got %s", fw.Live)
 	}
 	if e, _ := tileByID(b, "tk-epic"); e.Live != LiveCold {
@@ -81,13 +76,13 @@ func TestFourAnchorBoard(t *testing.T) {
 		t.Errorf("stranded epic is HIGH: got %s", epic.Severity)
 	}
 	// Decision is ELEVATED.
-	if d, _ := tileByID(b, "sl-dec"); d.Severity != SevElevated {
-		t.Errorf("decision is ELEVATED: got %s", d.Severity)
+	if dec.Severity != SevElevated {
+		t.Errorf("decision is ELEVATED: got %s", dec.Severity)
 	}
 
-	// frontier carries the flagged reason.
-	if fh, _ := tileByID(b, "tk-flaghot"); !strings.Contains(fh.Frontier, "CI red") {
-		t.Errorf("flagged frontier carries the reason: got %q", fh.Frontier)
+	// frontier reflects the hot host (in conversation, not stranded).
+	if fh, _ := tileByID(b, "tk-hosthot"); !strings.Contains(fh.Frontier, "in conversation") {
+		t.Errorf("hot-hosted frontier reads in-conversation: got %q", fh.Frontier)
 	}
 
 	// Counts on the epic.
@@ -141,22 +136,23 @@ func TestLiveHostSparesStranded(t *testing.T) {
 	}
 }
 
-// TestDedupKeepsHigherBand verifies that an id gathered twice (e.g. an epic that
-// is also flagged) survives once, in its higher (FLAGGED) band — the
-// sort-then-dedup contract from gc-helm.sh lines 675-681.
+// TestDedupKeepsHigherBand verifies that an id gathered twice survives once,
+// in its higher band — the sort-then-dedup contract from gc-helm.sh.
 func TestDedupKeepsHigherBand(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-dup", Title: "as epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "c1", Status: "open"},
 		}},
-		{ID: "tk-dup", Title: "as flagged", Kind: "flagged", Source: "flagged", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Reason: "boom"},
+		{ID: "tk-dup", Title: "as convoy", Kind: "convoy", Source: "convoy", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
+			{ID: "c2", Status: "closed"},
+		}},
 	}
 	b := BuildBoard(anchors, nil, fixtureNow, false, nil)
 	if len(b.Tiles) != 1 {
 		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
 	}
-	if b.Tiles[0].Severity != SevFlagged {
-		t.Errorf("dedup keeps the higher (FLAGGED) band: got %s", b.Tiles[0].Severity)
+	if b.Tiles[0].Severity != SevHigh {
+		t.Errorf("dedup keeps the higher (HIGH, stranded-epic) band: got %s", b.Tiles[0].Severity)
 	}
 }
 

@@ -20,16 +20,6 @@ import (
 // unreadable and no override env is set.
 const defaultSupervisorPort = 8372
 
-// flaggedScanPageSize and flaggedScanMaxPages bound the in-process flagged scan.
-// The supervisor API has no server-side metadata filter, so flagged anchors
-// (gc.attention=1) require paging the full bead list and filtering locally; the
-// cap keeps one gather bounded. If the cap is hit the scan is logged as
-// truncated by the caller.
-const (
-	flaggedScanPageSize = 500
-	flaggedScanMaxPages = 40
-)
-
 // SupervisorSource reads bead/session state from the supervisor loopback HTTP
 // API. It satisfies [Source].
 type SupervisorSource struct {
@@ -141,12 +131,11 @@ func discoverCity() string {
 // apiBead mirrors the supervisor's bead JSON. Only the fields the gather needs
 // are decoded; notably the API omits updated_at/assignee (see README "Deferred").
 type apiBead struct {
-	ID       string            `json:"id"`
-	Title    string            `json:"title"`
-	Status   string            `json:"status"`
-	Priority *int              `json:"priority"`
-	Parent   string            `json:"parent"` // convoy parent==null floating filter
-	Metadata map[string]string `json:"metadata"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Priority *int   `json:"priority"`
+	Parent   string `json:"parent"` // convoy parent==null floating filter
 }
 
 type listEnvelope struct {
@@ -280,7 +269,6 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 
 	s.gatherEpics(ctx, g)
 	s.gatherDecisions(ctx, g)
-	s.gatherFlagged(ctx, g)
 	s.gatherConvoys(ctx, g)
 	sessions := s.gatherSessions(ctx, g)
 
@@ -365,60 +353,6 @@ func (s *SupervisorSource) gatherDecisions(ctx context.Context, g *gatherState) 
 			Prefix:   prefix,
 			Priority: d.Priority,
 		})
-	}
-}
-
-// gatherFlagged scans the bead list and admits anchors carrying gc.attention=1.
-// The supervisor exposes no server-side metadata filter, so the filter runs in
-// process over a paged scan bounded by flaggedScanMaxPages.
-func (s *SupervisorSource) gatherFlagged(ctx context.Context, g *gatherState) {
-	cursor := ""
-	for page := 0; page < flaggedScanMaxPages; page++ {
-		q := url.Values{}
-		q.Set("limit", fmt.Sprintf("%d", flaggedScanPageSize))
-		if cursor != "" {
-			q.Set("cursor", cursor)
-		}
-		var env listEnvelope
-		if err := s.getJSON(ctx, "/beads?"+q.Encode(), &env); err != nil {
-			g.note(true, []string{"flagged scan: " + err.Error()})
-			return
-		}
-		g.note(env.Partial, env.PartialErrors)
-		g.ok()
-		for _, b := range env.Items {
-			if b.Metadata["gc.attention"] != "1" {
-				continue
-			}
-			if !flaggedStatus(b.Status) {
-				continue
-			}
-			rig, prefix := g.rigOf(b.ID)
-			g.anchors = append(g.anchors, board.Anchor{
-				ID:       b.ID,
-				Title:    b.Title,
-				Kind:     "flagged",
-				Source:   "flagged",
-				Rig:      rig,
-				Prefix:   prefix,
-				Priority: b.Priority,
-				Reason:   b.Metadata["gc.attention_reason"],
-			})
-		}
-		if env.NextCursor == "" {
-			return
-		}
-		cursor = env.NextCursor
-	}
-	g.note(true, []string{fmt.Sprintf("flagged scan: truncated at %d pages", flaggedScanMaxPages)})
-}
-
-func flaggedStatus(status string) bool {
-	switch status {
-	case "open", "in_progress", "blocked":
-		return true
-	default:
-		return false
 	}
 }
 
