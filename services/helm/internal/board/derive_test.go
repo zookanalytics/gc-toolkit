@@ -23,35 +23,30 @@ func tileByID(b Board, id string) (Tile, bool) {
 }
 
 // TestFourAnchorBoard reproduces the primary golden case from
-// tools/helm-surface-fixture.sh (lines 63-104): one hot-hosted epic, a
-// stranded epic, a decision, and a warm-hosted epic. The assertions mirror
-// the fixture's eq/has checks exactly.
+// tools/helm-surface-fixture.sh: three epics (two stranded, one with a
+// closed child) and a decision. The assertions mirror the fixture's
+// eq/has checks for the fields this port carries.
 func TestFourAnchorBoard(t *testing.T) {
 	anchors := []Anchor{
-		{ID: "tk-hosthot", Title: "CI mystery", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Children: []Child{
+		{ID: "tk-one", Title: "CI mystery", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Children: []Child{
 			{ID: "tk-hh1", Status: "open"},
 		}},
 		{ID: "tk-epic", Title: "Big epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "tk-a", Status: "open"}, {ID: "tk-b", Status: "closed"},
 		}},
 		{ID: "sl-dec", Title: "Pick a path", Kind: "decision", Source: "decision", Rig: "signal-loom", Prefix: "sl", Priority: ptr(1)},
-		{ID: "tk-hostwarm", Title: "Stale spec", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(4), Children: []Child{
+		{ID: "tk-two", Title: "Stale spec", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(4), Children: []Child{
 			{ID: "tk-hw1", Status: "open"},
 		}},
 	}
-	// Bead-host sessions: alias <pack>.<bead-id>, keyed by bead-id by the source.
-	sessions := map[string]HostSession{
-		"tk-hosthot":  {State: "active", Running: true},
-		"tk-hostwarm": {State: "suspended", Running: false},
-	}
 
-	b := BuildBoard(anchors, sessions, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil)
 
 	if got := len(b.Tiles); got != 4 {
 		t.Fatalf("all four anchors admitted: want 4, got %d", got)
 	}
 	if got := b.Tiles[0].Severity; got != SevHigh {
-		t.Errorf("top row is the stranded epic: want HIGH, got %s", got)
+		t.Errorf("top row is a stranded epic: want HIGH, got %s", got)
 	}
 	// the stranded epic floats above the decision.
 	epic, _ := tileByID(b, "tk-epic")
@@ -60,79 +55,21 @@ func TestFourAnchorBoard(t *testing.T) {
 		t.Errorf("stranded epic must outrank the decision: epic=%d decision=%d", epic.RankScore, dec.RankScore)
 	}
 
-	// Liveness join.
-	if fh, _ := tileByID(b, "tk-hosthot"); fh.Live != LiveHot {
-		t.Errorf("hot host resolves hot: got %s", fh.Live)
-	}
-	if fw, _ := tileByID(b, "tk-hostwarm"); fw.Live != LiveWarm {
-		t.Errorf("suspended host is warm: got %s", fw.Live)
-	}
-	if e, _ := tileByID(b, "tk-epic"); e.Live != LiveCold {
-		t.Errorf("no host is cold: got %s", e.Live)
-	}
-
-	// Severity of the stranded epic: open work, none in progress, no host.
+	// Severity of the stranded epic: open work, none in progress.
 	if epic.Severity != SevHigh {
 		t.Errorf("stranded epic is HIGH: got %s", epic.Severity)
+	}
+	if !strings.Contains(epic.Frontier, "stranded") {
+		t.Errorf("stranded epic frontier says stranded: got %q", epic.Frontier)
 	}
 	// Decision is ELEVATED.
 	if dec.Severity != SevElevated {
 		t.Errorf("decision is ELEVATED: got %s", dec.Severity)
 	}
 
-	// frontier reflects the hot host (in conversation, not stranded).
-	if fh, _ := tileByID(b, "tk-hosthot"); !strings.Contains(fh.Frontier, "in conversation") {
-		t.Errorf("hot-hosted frontier reads in-conversation: got %q", fh.Frontier)
-	}
-
 	// Counts on the epic.
 	if epic.MTotal != 2 || epic.NClosed != 1 || epic.Open != 1 || epic.InProgress != 0 {
 		t.Errorf("epic counts: m=%d closed=%d open=%d inprog=%d", epic.MTotal, epic.NClosed, epic.Open, epic.InProgress)
-	}
-}
-
-// TestLiveHostSparesStranded reproduces the lines 106-136 golden case: two
-// sibling epics with the identical stranded shape (open children, zero
-// in-progress); the one with a HOT host stays NORMAL (in conversation), the
-// unhosted one stays HIGH (stranded).
-func TestLiveHostSparesStranded(t *testing.T) {
-	anchors := []Anchor{
-		{ID: "tk-hosted", Title: "Hosted epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
-			{ID: "tk-h1", Status: "open"}, {ID: "tk-h2", Status: "open"},
-		}},
-		{ID: "tk-lonely", Title: "Unhosted epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
-			{ID: "tk-l1", Status: "open"}, {ID: "tk-l2", Status: "open"},
-		}},
-	}
-	sessions := map[string]HostSession{
-		"tk-hosted": {State: "active", Running: true},
-	}
-
-	b := BuildBoard(anchors, sessions, fixtureNow, false, nil)
-
-	hosted, _ := tileByID(b, "tk-hosted")
-	if hosted.Live != LiveHot {
-		t.Errorf("hosted epic resolves hot: got %s", hosted.Live)
-	}
-	if hosted.Severity != SevNormal {
-		t.Errorf("hosted epic is NORMAL, not HIGH: got %s", hosted.Severity)
-	}
-	if !strings.Contains(hosted.Frontier, "in conversation") {
-		t.Errorf("hosted epic frontier reads in-conversation: got %q", hosted.Frontier)
-	}
-	if !strings.Contains(hosted.Needs, "open to join") {
-		t.Errorf("hosted epic needs is open-to-join: got %q", hosted.Needs)
-	}
-
-	lonely, _ := tileByID(b, "tk-lonely")
-	if lonely.Live != LiveCold {
-		t.Errorf("unhosted sibling stays cold: got %s", lonely.Live)
-	}
-	if lonely.Severity != SevHigh {
-		t.Errorf("unhosted sibling stays HIGH: got %s", lonely.Severity)
-	}
-	if !strings.Contains(lonely.Frontier, "stranded") {
-		t.Errorf("unhosted sibling frontier says stranded: got %q", lonely.Frontier)
 	}
 }
 
@@ -147,7 +84,7 @@ func TestDedupKeepsHigherBand(t *testing.T) {
 			{ID: "c2", Status: "closed"},
 		}},
 	}
-	b := BuildBoard(anchors, nil, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil)
 	if len(b.Tiles) != 1 {
 		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
 	}
@@ -165,7 +102,7 @@ func TestLowSeverity(t *testing.T) {
 			{ID: "d1", Status: "closed"}, {ID: "d2", Status: "closed"},
 		}},
 	}
-	b := BuildBoard(anchors, nil, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil)
 	if e, _ := tileByID(b, "tk-empty"); e.Severity != SevLow {
 		t.Errorf("empty epic is LOW: got %s", e.Severity)
 	}
@@ -187,14 +124,14 @@ func TestRankLanesNonOverlapping(t *testing.T) {
 }
 
 // TestInProgressNotStranded confirms an epic with an in-progress child is NORMAL
-// even with no host (the default branch of severity).
+// (the default branch of severity).
 func TestInProgressNotStranded(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-busy", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "b1", Status: "in_progress"}, {ID: "b2", Status: "open"},
 		}},
 	}
-	b := BuildBoard(anchors, nil, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil)
 	tl := b.Tiles[0]
 	if tl.Severity != SevNormal {
 		t.Errorf("epic with in-progress work is NORMAL: got %s", tl.Severity)

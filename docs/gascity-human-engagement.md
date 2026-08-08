@@ -47,8 +47,9 @@ are dated; an undated claim is a bug.
 When Gas City ships a primitive that covers something the pack built
 bespoke, the pack re-derives its machinery on the primitive and retires
 the bespoke part. This has already happened once at full scale: the
-shipped resident bead-host binding (epic `tk-q4xaj`) is superseded by the
-conversation-as-continuation-group design (`tk-h9pq5`) precisely because
+formerly shipped resident per-bead host binding (epic `tk-q4xaj`) is retired —
+the conversation-as-continuation-group design (`tk-h9pq5`, the visit/converse
+spine) replaced it entirely, precisely because
 `gc.continuation_group` became a live core primitive that carries the
 whole binding for free. Expect it to happen again; that is what riding an
 ecosystem means.

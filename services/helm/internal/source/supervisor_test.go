@@ -45,11 +45,6 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 			],"total":4}`)
 		case path == base+"/convoy/tk-cv":
 			writeJSON(w, `{"convoy":{"id":"tk-cv","status":"open"},"children":[{"id":"cv1","status":"open"},{"id":"cv2","status":"in_progress"}],"progress":{"total":2,"closed":0}}`)
-		case path == base+"/sessions":
-			writeJSON(w, `{"items":[
-				{"id":"lx-1","alias":"gc-toolkit.tk-epic","template":"gc-toolkit.bead-host","state":"active","running":true},
-				{"id":"lx-2","alias":"gc-toolkit/gc-toolkit.refinery","template":"gc-toolkit.refinery","state":"active","running":true}
-			]}`)
 		default:
 			http.Error(w, "unexpected path: "+path+"?"+r.URL.RawQuery, http.StatusNotFound)
 		}
@@ -119,14 +114,6 @@ func TestGatherMapsAllKinds(t *testing.T) {
 	if ok, _, _, _, _ := anchorByID(res, "tk-inputcv"); ok {
 		t.Error("input convoy machine wrapper must be filtered out")
 	}
-
-	// Sessions: bead-host alias stripped to bead-id; refinery (non-bead-host) skipped.
-	if h, ok := res.Sessions["tk-epic"]; !ok || h.State != "active" || !h.Running {
-		t.Errorf("tk-epic liveness wrong: %+v ok=%v", h, ok)
-	}
-	if _, ok := res.Sessions["refinery"]; ok {
-		t.Error("non-bead-host session must not be joined")
-	}
 }
 
 func TestGatherDegradesOnPartialFailure(t *testing.T) {
@@ -163,20 +150,6 @@ func TestGatherErrorsOnTotalOutage(t *testing.T) {
 	t.Cleanup(srv.Close)
 	if _, err := newTestSource(t, srv).Gather(context.Background()); err == nil {
 		t.Error("expected an error when every fetch fails (total outage)")
-	}
-}
-
-func TestAliasBeadID(t *testing.T) {
-	cases := map[string]string{
-		"gc-toolkit.tk-hosted":           "tk-hosted",
-		"signal-loom.sl-abc":             "sl-abc",
-		"gc-toolkit/gc-toolkit.refinery": "refinery",
-		"nodot":                          "nodot",
-	}
-	for in, want := range cases {
-		if got := aliasBeadID(in); got != want {
-			t.Errorf("aliasBeadID(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 

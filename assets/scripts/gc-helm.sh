@@ -1,6 +1,6 @@
 #!/bin/sh
 # gc-helm.sh — the cross-rig human-attention board plus the pick-a-row
-# launcher that lands you in a bead's conversation. The operator reaches it
+# verb that files a visit on a bead. The operator reaches it
 # via the prefix+b tmux board picker (tmux-pick-helm.sh) or by running
 # this script directly; it is NOT a registered gc subcommand. Pack commands
 # bind under the pack name (`gc <pack> <cmd>`), so there is no top-level
@@ -8,25 +8,21 @@
 #
 # Usage:
 #   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
-#   gc-helm open  <bead-id>                 land in the bead (resume-or-create its host)
+#   gc-helm open  <bead-id>                 file a visit on the bead (converse holds it)
 #   gc-helm takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline
 #
-# Phase 3 of the Bead-Universe Operating Model (epic tk-q4xaj; bead
-# tk-qkags; design Key Component 4, Phase 3). The board (the default
-# verb) is the evolved read-only ranking from PR #83; `open` is the
-# new verb that closes the board→land→accept/redirect loop:
-#
-#   board → the operator glances the ranked rows (with a liveness
-#           glyph, a row cap, and a cache so the ~12s gather is paid
-#           once, not every glance).
-#   open  → pick a row; the bead's resident host is resumed (hot) or
-#           materialized (cold) and the operator lands in the
-#           conversation, already primed with the bead's universe.
-#
-# `open` is a thin front door over tools/gc-bead-host.sh (the Phase 1
-# spawn-or-resume + durable bead<->session link) followed by
-# `gc session attach` (the Phase-0/1 resume mechanism). It owns no new
-# lifecycle — it assembles the proven primitives.
+#   board → the operator glances the ranked rows (with a held glyph,
+#           a row cap, and a cache so the ~12s gather is paid once,
+#           not every glance).
+#   open  → pick a row; a VISIT is filed on the bead — a small child
+#           bead in the subject's continuation group, routed to the
+#           rig-qualified converse pool (the canonical gate-visit
+#           lines, formulas/mol-visit.toml). Pool demand spawns a
+#           converse session that rebuilds the subject's slice and
+#           holds for the operator (cold), or the live group session
+#           vacuums the visit (warm). One open visit per subject: if
+#           one already exists, open prints its id instead of filing
+#           a second.
 #
 # ── What is an anchor ────────────────────────────────────────────────
 # FOUR kinds of OPEN top-level anchors are collected, cross-rig:
@@ -63,9 +59,9 @@
 #                      carry no frontier (N/M = —).
 #   • open/in-progress/assigned — counts over the open frontier.
 #   • stranded       — decomposed (M>0) with open children, ZERO LIVE
-#                      in-progress, AND no live host: work exists but
-#                      nothing is moving. A live host counts as moving —
-#                      the bead is worked via a resident 1:1 conversation,
+#                      in-progress, AND no open visit: work exists but
+#                      nothing is moving. An open visit counts as moving —
+#                      the bead is worked via its held conversation,
 #                      not via in-progress child polecats. An in-progress
 #                      child whose OWNING session is dead (state
 #                      archived/closed/absent — keyed off .state, never
@@ -80,17 +76,14 @@
 #   • empty          — an epic/convoy with no children (M==0).
 #   • complete       — M>0 but every child closed (0 open): awaiting
 #                      graduation/close.
-#   • live           — host liveness, joined from `gc session list` by the
-#                      bead-id the host's alias encodes. A bead-host alias
-#                      is pack-namespaced (<pack>.<bead-id>), so the leading
-#                      "<pack>." is stripped and only bead-host template
-#                      sessions are joined:
-#                      "hot" (active session — open ATTACHES instantly),
-#                      "warm" (suspended/asleep — open RESUMES the saved
-#                      conversation), or "cold" (no host — open
-#                      MATERIALIZES one). The glance answers "is anyone
-#                      home?" before you pick the row. A live host also
-#                      keeps the anchor out of the stranded/HIGH band.
+#   • held           — visit presence: TRUE when an OPEN visit bead
+#                      (task_kind=visit) carries this anchor's id in
+#                      gc.continuation_group — a conversation about the
+#                      anchor exists (a converse session holds it, or
+#                      pool demand is about to spawn one). The glance
+#                      answers "is a conversation open?" before you pick
+#                      the row. A held anchor also stays out of the
+#                      stranded/HIGH band.
 #   • stale_days     — days since the anchor itself was last updated.
 #   • cross_rig_refs — DETERMINISTIC prose scan of the anchor body for
 #                      bead-ids belonging to OTHER rigs (cross-rig work
@@ -103,14 +96,14 @@
 # weight PROXY, then by staleness:
 #
 #   HIGH      stranded frontier (decomposed, open, no LIVE in-progress, and
-#             no live host — incl. a frontier whose only in-progress
+#             no open visit — incl. a frontier whose only in-progress
 #             children have dead owners), OR an unowned non-machine convoy
 #             (the orphan exception).
 #   ELEVATED  a `decision` (human-gated); an otherwise-NORMAL anchor gone
 #             stale (> STALE_DAYS days); OR a still-moving anchor that has a
 #             dead-owner (stuck) in-progress child to recover.
-#   NORMAL    active frontier (has LIVE in-progress work, OR a live host —
-#             someone is in the conversation).
+#   NORMAL    active frontier (has LIVE in-progress work, OR an open visit —
+#             a conversation is held).
 #   LOW       empty epic (0 children) or complete convoy (all closed).
 #
 #   weight PROXY = M (subtree size)
@@ -125,20 +118,19 @@
 # Default: a human-readable ranked table + one-line legend.
 # `--json`: a ranked JSON array; each element carries every fact above
 # plus the computed `severity`, `weight`, `rank_score`, `frontier`
-# (one-line summary), `needs` (short hint), and `live` (host state).
+# (one-line summary), `needs` (short hint), and `held` (visit presence).
 # `--json` is the stable contract for downstream tooling (the tmux
-# board picker reads it). The array is additive-only — new fields
-# (`live`, `host_session_name`;
-# `in_progress_live`, `in_progress_dead`, `dead_owner`, `dead_owner_heads`,
-# `owned`, kind "unowned") were added without changing or removing any
-# existing field.
+# board picker reads it). The retired v1 `live` (hot/warm/cold) host
+# field is GONE — the visit/converse spine is the only conversation
+# mechanism, and `held` is its one glyph fact.
 #
 # ── Row cap & cache (the board must scale) ───────────────────────────
-# The gather hits every rig's Dolt and costs ~seconds; the liveness
-# join is a single fast `gc session list`. So the EXPENSIVE GATHER is
-# cached (default TTL GC_HELM_CACHE_TTL=45s) while liveness +
-# ranking are recomputed every glance — a glance is sub-second on a warm
-# cache and the host state is never stale. `--refresh` (or `open`,
+# The gather hits every rig's Dolt and costs ~seconds; the visit gather
+# rides in the same pass. So the EXPENSIVE GATHER (anchors + visits) is
+# cached (default TTL GC_HELM_CACHE_TTL=45s) while ranking is recomputed
+# every glance — a glance is sub-second on a warm cache, and both paths
+# that change visit presence here (`open` files one; `takeaway` parks)
+# bust the cache. `--refresh` (or `open`,
 # which busts the cache) forces a fresh gather. Rows are
 # CAPPED at GC_HELM_MAX_ROWS (default 50) by default so the board
 # can never balloon to "every bead"; `--limit=N` overrides with an
@@ -148,13 +140,14 @@
 #   0   board rendered / verb succeeded
 #   2   usage error
 #   3   missing dependency (jq / gc) or could not enumerate rigs
-#   4   verb runtime failure (e.g. bead not found, host spawn failed)
+#   4   verb runtime failure (e.g. bead not found, visit filing failed)
 #
 # Test hook: GC_HELM_FIXTURE=<dir> — when set, the board reads
 # canned data instead of Dolt/sessions: <dir>/anchors.ndjson (one anchor
-# object per line, the gathered shape) and <dir>/sessions.json (the
-# `gc session list --json` shape). Keeps the Phase 3 render/rank/glyph
-# assertions hermetic. Unset in normal use.
+# object per line, the gathered shape), <dir>/visits.json (a JSON array
+# of subject ids with an open visit), and <dir>/sessions.json (the
+# `gc session list --json` shape, for the child-owner liveness map).
+# Keeps the render/rank/glyph assertions hermetic. Unset in normal use.
 
 set -eu
 
@@ -175,14 +168,15 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
-  gc-helm open  <bead-id>                 land in the bead (resume-or-create its host)
+  gc-helm open  <bead-id>                 file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive] [--release]  set the board-visible takeaway headline
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, and decisions) by how much
-they need a human's attention. open closes the
-board→land→accept/redirect loop; react slings a proactive first
+they need a human's attention. open files a visit in the picked bead's
+continuation group (pool demand spawns/vacuums a converse session —
+attach via the sessions picker); react slings a proactive first
 reaction (via tools/gc-proactive.sh, on the codex-gated mr path) so a
 takeaway-less row self-heals to an explanatory NEEDS on the next render.
 takeaway writes that NEEDS headline directly — the thin writer the host and
@@ -207,16 +201,18 @@ iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # assets/scripts/ and tools/ are siblings under the pack root.
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-BEAD_HOST_TOOL="${GC_BEAD_HOST_TOOL:-$SCRIPT_DIR/../../tools/gc-bead-host.sh}"
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 
 # ── Cache location ───────────────────────────────────────────────────
 # Keyed by city path so distinct cities don't collide. Cache format:
-# line 1 = gather epoch, lines 2.. = anchors ndjson (portable: no stat(1)
-# / find(1) mtime flags, which differ GNU vs BSD).
+# line 1 = gather epoch, line 2 = the visit map (one JSON array of
+# subject ids with an open visit), lines 3.. = anchors ndjson (portable:
+# no stat(1) / find(1) mtime flags, which differ GNU vs BSD). The file
+# name carries the format ("board-"), so a stale v1 "anchors-" cache is
+# simply never read.
 CACHE_DIR="${TMPDIR:-/tmp}/gc-helm-cache.$(id -u 2>/dev/null || echo 0)"
 _city_key=$(printf '%s' "${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-default}}}" | cksum | cut -d' ' -f1)
-CACHE_FILE="$CACHE_DIR/anchors-$_city_key.ndjson"
+CACHE_FILE="$CACHE_DIR/board-$_city_key.ndjson"
 
 bust_cache() { rm -f "$CACHE_FILE" 2>/dev/null || true; }
 
@@ -361,8 +357,8 @@ quiesce_release_molecule_steps() (
 # <<< quiesce-release-molecule-steps
 
 # ── Verb: takeaway ───────────────────────────────────────────────────
-# Write the board-visible takeaway headline — the thin writer the bead-host
-# and proactive worker call instead of inlining the `gc bd update
+# Write the board-visible takeaway headline — the thin writer a converse
+# session and the proactive worker call instead of inlining the `gc bd update
 # --set-metadata gc.takeaway=… gc.takeaway_at=… gc.takeaway_by=…` triple.
 # Resolve the bead's rig db, stamp the three fields in ONE
 # update, then bust the cache so the next board glance reflects the new
@@ -375,12 +371,9 @@ quiesce_release_molecule_steps() (
 # call `takeaway … --release` as their single closing step, replacing a takeaway
 # stamp followed by a separate release `gc bd update`.
 #
-# That empty `--assignee` is ALSO what UNGROUNDS a bead-host (tk-z130v.3):
-# clearing the work bead's assignee removes the assigned-work wake reason, so a
-# grounded host stops reviving after a drain. `release` is therefore the
-# operator-facing "done with this bead" path that leaves the host stoppable — a
-# plain `drain-ack` then sticks instead of bouncing back ~20s later. It mirrors
-# gc-bead-host.sh's `unlink`, which clears the same assignee on teardown/re-bind.
+# That empty `--assignee` also clears any assigned-work wake reason, so
+# `release` is the operator-facing "done with this bead" path: nothing keeps
+# re-attracting a session onto the parked bead afterwards.
 #
 # When the released bead is the ANCHOR of a mol-polecat-work molecule, --release
 # ALSO quiesces that molecule's step beads (quiesce_release_molecule_steps,
@@ -447,70 +440,61 @@ cmd_takeaway() {
 }
 
 # ── Verb: open ───────────────────────────────────────────────────────
-# The pick-a-row launcher. Resume-or-create the bead's host (Phase 1
-# tool), then attach. One keystroke from "I see the row" to "I'm in the
-# advanced conversation." Opening busts the cache so the next board
-# render reflects the now-hot row.
+# The pick-a-row verb. Files a VISIT on the picked bead — the one
+# conversation mechanism (specs/tk-h9pq5): a small child bead in the
+# subject's continuation group, routed to the rig-qualified converse
+# pool via the canonical gate-visit lines (formulas/mol-visit.toml).
+# Pool demand spawns a converse session that rebuilds the subject's
+# slice and holds for the operator (cold), or the live group session
+# vacuums the visit (warm). One open visit per subject: if one already
+# exists, print its id and the attach hint instead of filing a second.
+# Opening busts the cache so the next board render shows the held glyph.
 cmd_open() {
     bead="${1:-}"
     case "$bead" in -h|--help) usage; exit 0 ;; "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
-    [ -x "$BEAD_HOST_TOOL" ] || command -v gc-bead-host.sh >/dev/null 2>&1 \
-        || { echo "$PROG: open: cannot find gc-bead-host.sh (looked at $BEAD_HOST_TOOL)" >&2; exit 4; }
-    tool="$BEAD_HOST_TOOL"; [ -x "$tool" ] || tool="$(command -v gc-bead-host.sh)"
 
-    # Point bd at the bead's rig so spawn-or-resume + the durable link
-    # land in the right per-rig ledger even cross-rig (BEADS_DIR pins bd).
+    # Point bd at the bead's rig so the visit lands in the right per-rig
+    # ledger even cross-rig (BEADS_DIR pins bd), and export the bead's
+    # rig as GC_RIG so the gate-visit POOL line rig-qualifies the
+    # converse pool (the exact-match read side needs the qualified name —
+    # docs/gascity-routing-model.md). The bead's rig is authoritative,
+    # so it overrides any ambient GC_RIG.
     path=$(rig_path_for_bead "$bead")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+    rig=$(rig_name_for_bead "$bead")
+    [ -n "$rig" ] && export GC_RIG="$rig"
 
-    # Spawn-or-resume + write the durable bead<->session link (Phase 1).
-    if ! "$tool" up "$bead"; then
-        echo "$PROG: open: gc-bead-host.sh up '$bead' failed" >&2
-        exit 4
+    # Already held? An open visit in this bead's continuation group IS
+    # the conversation — filing a second would split it. Print the
+    # existing visit and the same attach hint instead.
+    existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
+        | jq -r --arg s "$bead" \
+            '[ .[]? | select((.metadata.task_kind // "") == "visit"
+                            and (.metadata["gc.continuation_group"] // "") == $s)
+               | .id ] | first // empty' 2>/dev/null || true)
+    if [ -n "$existing" ]; then
+        echo "$PROG: visit $existing is already open for $bead — a converse session holds it (or will spawn/vacuum it)."
+        echo "       Attach via the sessions picker."
+        return 0
     fi
+
+    # File the visit — the canonical gate-visit lines (formulas/mol-visit.toml).
+    # >>> gate-visit
+    POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+    VISIT=$(gc bd create -t task --title "visit: $bead — operator pick from the board" \
+        -d "Operator picked $bead off the helm board: rebuild the subject's slice, prep, hold for the operator." \
+        --json | jq -r '.id // .[0].id')
+    [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
+        || { echo "$PROG: open: could not create a visit bead for '$bead' (does it exist?)" >&2; exit 4; }
+    gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
+        --set-metadata "gc.continuation_group=$bead" \
+        --set-metadata "task_kind=visit"
+    gc bd dep add "$VISIT" "$bead" --type=parent-child
+    # <<< gate-visit
     bust_cache
 
-    # Land in it. A bead-host's real tmux session is named by its session_name
-    # (`s-<session-id>`) — NOT the bead id and NOT the (rig-prefixed) alias. `up`
-    # cached that name on the work bead as host_session_name (gc-bead-host.sh's
-    # link step); read it back and switch to THAT. Fall back to the bead id only
-    # if the cache is somehow unresolved.
-    switch_target=$(gc bd show "$bead" --json 2>/dev/null \
-        | jq -r '.[0].metadata.host_session_name // empty' 2>/dev/null || true)
-    [ -n "$switch_target" ] || switch_target="$bead"
-
-    echo "$PROG: host for $bead is up — landing..." >&2
-    # "In a tmux" is NOT "in the GC tmux". Switch the client ONLY when the host
-    # session lives on the tmux server we're attached to right now. On a separate
-    # window (a different tmux server) that session isn't here and never will be:
-    # a switch can't land, the old poll-everywhere path turned that into a 45s
-    # hang, and forcing it would hijack an unrelated client on the other server.
-    #
-    # `up` returned only after the host reached a live/registered state
-    # (gc-bead-host.sh blocks on it), so an IMMEDIATE has-session probe is
-    # authoritative — no poll needed. Use bare tmux (honoring $TMUX, the CURRENT
-    # server), never `-L $GC_TMUX_SOCKET`: the question is "is the host on the
-    # server I'm on now?". Under the board picker's `run-shell`, $TMUX is the GC
-    # city server (GC_TMUX_SOCKET is unset there), so the picker path lands.
-    if [ -n "${TMUX:-}" ]; then
-        if tmux has-session -t "$switch_target" 2>/dev/null; then
-            # Same server (board picker / gc-tmux-shell) — land the client.
-            tmux switch-client -t "$switch_target" || {
-                echo "$PROG: host for $bead is up; could not switch the tmux client." >&2
-                echo "       Switch yourself:  prefix+S  (or: tmux switch-client -t $switch_target)" >&2
-            }
-        else
-            # Different tmux server (separate window) — bring-up done, report and
-            # return promptly. No switch (would hijack), no poll (would hang).
-            echo "$PROG: host for $bead is up (tmux session $switch_target on the gc tmux server)." >&2
-            echo "       Land it:  prefix+S  (or, on the gc tmux: tmux switch-client -t $switch_target)" >&2
-        fi
-    else
-        gc session attach "$bead" || {
-            echo "$PROG: host for $bead is up; could not attach from this context." >&2
-            echo "       Attach it yourself:  gc session attach $bead" >&2
-        }
-    fi
+    echo "$PROG: visit $VISIT filed on $bead (pool $POOL) — a converse session will spawn (cold) or vacuum it (warm)."
+    echo "       Attach via the sessions picker."
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
@@ -604,6 +588,8 @@ cmd_board() {
     trap 'rm -rf "$TMP"' EXIT INT TERM HUP
     ANCHORS="$TMP/anchors.ndjson"
     : > "$ANCHORS"
+    VISITS_FILE="$TMP/visits.json"
+    printf '[]\n' > "$VISITS_FILE"
 
     NOW_EPOCH=$(date -u +%s)
     NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -622,55 +608,52 @@ cmd_board() {
     # ── Gather (cached: the expensive part) ──────────────────────────
     gathered_from_cache=0
     if [ -n "$FIXTURE" ]; then
-        # Hermetic test path: anchors come from the fixture, no Dolt.
+        # Hermetic test path: anchors + visits come from the fixture, no Dolt.
         [ -f "$FIXTURE/anchors.ndjson" ] && cat "$FIXTURE/anchors.ndjson" > "$ANCHORS"
+        [ -f "$FIXTURE/visits.json" ] && cat "$FIXTURE/visits.json" > "$VISITS_FILE"
     elif [ "$REFRESH" -eq 0 ] && [ -f "$CACHE_FILE" ]; then
         ts=$(head -n1 "$CACHE_FILE" 2>/dev/null || echo 0)
         case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
         if [ "$ts" -gt 0 ] && [ $((NOW_EPOCH - ts)) -le "$CACHE_TTL" ] && [ $((NOW_EPOCH - ts)) -ge 0 ]; then
-            tail -n +2 "$CACHE_FILE" > "$ANCHORS" 2>/dev/null || : > "$ANCHORS"
+            sed -n '2p' "$CACHE_FILE" > "$VISITS_FILE" 2>/dev/null || printf '[]\n' > "$VISITS_FILE"
+            tail -n +3 "$CACHE_FILE" > "$ANCHORS" 2>/dev/null || : > "$ANCHORS"
             gathered_from_cache=1
         fi
     fi
 
     if [ -z "$FIXTURE" ] && [ "$gathered_from_cache" -eq 0 ]; then
         gather_anchors    # writes $ANCHORS
+        gather_visits     # writes $VISITS_FILE (one JSON array line)
         # Persist the gather under one timestamp (portable mtime).
         mkdir -p "$CACHE_DIR" 2>/dev/null || true
         if [ -d "$CACHE_DIR" ]; then
-            { printf '%s\n' "$NOW_EPOCH"; cat "$ANCHORS"; } > "$CACHE_FILE.tmp.$$" 2>/dev/null \
+            { printf '%s\n' "$NOW_EPOCH"; cat "$VISITS_FILE"; cat "$ANCHORS"; } > "$CACHE_FILE.tmp.$$" 2>/dev/null \
                 && mv "$CACHE_FILE.tmp.$$" "$CACHE_FILE" 2>/dev/null || rm -f "$CACHE_FILE.tmp.$$" 2>/dev/null || true
         fi
     fi
 
-    # ── Liveness join (always fresh: one cheap session-list call) ─────
-    # A bead-host's session alias is pack-namespaced — <pack>.<bead-id>
-    # (e.g. gc-toolkit.tk-q4xaj) — so key the map by the bead-id the alias
-    # encodes: strip the leading "<pack>." segment, restricted to bead-host
-    # template sessions. This mirrors gc-bead-host.sh's own reverse-
-    # resolution (template ~ "bead-host"); a foreign session (the refinery,
-    # a crew) is excluded and never marks an anchor live. An alias with no
-    # dot is used as-is (sub leaves a non-matching string unchanged). Map
-    # bead-id -> host state.
+    # ── Visit map (held glyph): subject ids with an open visit ────────
+    # An anchor is HELD when an open visit bead (task_kind=visit) names
+    # it in gc.continuation_group — the conversation exists (a converse
+    # session holds it, or pool demand is about to spawn one). Gathered
+    # with the anchors (gather_visits) and cached alongside them; both
+    # verbs that change visit presence bust the cache.
+    VISITS=$(cat "$VISITS_FILE" 2>/dev/null || printf '[]')
+    printf '%s' "$VISITS" | jq -e 'type=="array"' >/dev/null 2>&1 || VISITS='[]'
+
+    # ── Session list (for the child-owner liveness map below) ─────────
     if [ -n "$FIXTURE" ]; then
         sess_raw=$([ -f "$FIXTURE/sessions.json" ] && cat "$FIXTURE/sessions.json" || printf '{}')
     else
         sess_raw=$(gcq session list --state all --json)
     fi
-    SESS_MAP=$(printf '%s' "$sess_raw" | jq -c '
-        [ (.sessions // . // [])[]?
-          | select((.alias // "") != "")
-          | select((.template // "") | test("bead-host"))
-          | {key:((.alias) | sub("^[^.]+\\.";"")),
-             value:{state:(.state//""), running:(.running//false), attached:(.attached//false)}} ]
-        | from_entries' 2>/dev/null || printf '{}')
 
     # ── Owner liveness join (child-owner state; PROBLEM 1) ────────────
     # A child bead's `assignee` is its OWNING session — the session_name a
     # polecat recorded when it claimed the bead (e.g.
     # gc-toolkit__polecat-lx-bj70b), or a routed alias. To tell whether an
     # in-progress child is actually being worked, we need its owner's session
-    # state, so map EVERY session (not just bead-hosts) by BOTH its
+    # state, so map EVERY session by BOTH its
     # session_name AND its alias -> state. The render keys off .state, never
     # .running (which is null for an active session mid-churn and would
     # false-flag a live polecat as a dead owner); an owner is dead when its
@@ -728,22 +711,18 @@ def owner_live($assignee):
                 | scan("(?:" + ($others|join("|")) + ")-[a-z0-9]{3,8}") ]
               | map(select(. as $r | ($rignames | index($r)) == null and $r != $a.id))
               | unique ) end) as $xrefs
-    # host liveness, joined by the bead-id the host alias encodes
-    # (SESS_MAP already stripped the pack prefix, bead-host sessions only)
-    | ($sessmap[$a.id] // null) as $host
-    | (if $host==null then "cold"
-       elif ($host.state=="active" or $host.running==true) then "hot"
-       else "warm" end) as $live
-    # severity band. A live host (hot/warm) is active work via a 1:1
-    # resident conversation, not via in-progress child polecats — so
-    # "0 in-progress" is NOT stranded when someone is home. Stranded/HIGH
-    # is reserved for a decomposed anchor with open children, zero
-    # in-progress, AND no live host.
+    # held: an open visit in this anchor'\''s continuation group exists
+    | (($visits | index($a.id)) != null) as $held
+    # severity band. A held anchor is active work via its conversation,
+    # not via in-progress child polecats — so "0 in-progress" is NOT
+    # stranded when a visit is open. Stranded/HIGH is reserved for a
+    # decomposed anchor with open children, zero in-progress, AND no
+    # open visit.
     | (if $a.source=="unowned" then "HIGH"
        elif $a.source=="decision" then "ELEVATED"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
-       elif ($open>0 and $inprog_live==0 and $live=="cold") then "HIGH"
+       elif ($open>0 and $inprog_live==0 and ($held|not)) then "HIGH"
        elif ($inprog_dead>0) then "ELEVATED"
        else "NORMAL" end) as $sev0
     | (if ($sev0=="NORMAL" and $stale > '"$STALE_DAYS"') then "ELEVATED" else $sev0 end) as $sev
@@ -754,16 +733,14 @@ def owner_live($assignee):
        elif $a.source=="decision" then "human-gated decision"
        elif $m==0 then "empty — no children"
        elif $open==0 then "all \($m) closed · 0 open"
-       elif ($inprog_live==0 and $inprog_dead>0 and $live=="cold") then "\($open) open · \($inprog_dead) stuck (dead owner)"
-       elif ($inprog_live==0 and $live=="hot") then ("\($open) open · in conversation" + $deadsfx)
-       elif ($inprog_live==0 and $live=="warm") then ("\($open) open · host asleep" + $deadsfx)
+       elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "\($open) open · \($inprog_dead) stuck (dead owner)"
+       elif ($inprog_live==0 and $held) then ("\($open) open · in conversation" + $deadsfx)
        elif $inprog_live==0 then "\($open) open · 0 in-progress (stranded)"
        else "\($open) open · \($inprog_live) in-progress" + $deadsfx end) as $frontier
     # The LLM-authored takeaway (host or proactive), if any: the board-visible
     # headline of what this anchor concluded / what it needs. Collapse any
     # internal whitespace (a stray newline would break the table) and trim.
     | (($a.takeaway // "") | gsub("[[:space:]]+";" ") | gsub("^ | $";"")) as $takeaway
-    | (if $live=="hot" then "host live" elif $live=="warm" then "host asleep" else "no host" end) as $hostnote
     # NEEDS is the one-glance answer for a human: the LLM takeaway sentence
     # when one exists, else a TERSE deterministic STATE phrase — never a
     # bead-id list. The mechanical heads/xref ids move to --json only
@@ -772,21 +749,20 @@ def owner_live($assignee):
     | (if ($takeaway|length) > 0 then $takeaway
        elif $a.source=="unowned" then "unowned — assign an owning bead"
        elif $a.source=="decision" then "operator decision"
-       elif $m==0 then ("no children, " + $hostnote + " — " + (if $live=="cold" then "needs an owner" else "decompose or assign" end))
+       elif $m==0 then "no children — decompose or assign"
        elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
-       elif ($inprog_live==0 and $inprog_dead>0 and $live=="cold") then "dead owner — recover or reassign"
-       elif ($inprog_live==0 and $live=="hot") then "open to join"
-       elif ($inprog_live==0 and $live=="warm") then "open to resume"
-       elif $inprog_live==0 then "decomposed, idle — assign or host"
+       elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "dead owner — recover or reassign"
+       elif ($inprog_live==0 and $held) then "open to join"
+       elif $inprog_live==0 then "decomposed, idle — assign or visit"
        else (if $inprog_dead>0 then "in flight — \($inprog_dead) stuck, recover"
-             else ("in flight" + (if $live=="cold" then "" else " (" + $hostnote + ")" end)) end) end) as $needs
+             else ("in flight" + (if $held then " (in conversation)" else "" end)) end) end) as $needs
     | {
         id:$a.id, rig:$a.rig, kind:$a.kind, title:$a.title,
-        severity:$sev, weight:$weight, live:$live,
+        severity:$sev, weight:$weight, held:$held,
         n_closed:$closed, m_total:$m, open:$open, in_progress:$inprog, assigned:$assigned,
         in_progress_live:$inprog_live, in_progress_dead:$inprog_dead, dead_owner:($inprog_dead>0),
         owned:(if ($a|has("owned")) then $a.owned else null end),
-        stranded:($m>0 and $open>0 and $inprog_live==0 and $live=="cold"),
+        stranded:($m>0 and $open>0 and $inprog_live==0 and ($held|not)),
         empty:($m==0 and $a.source!="decision" and $a.source!="unowned"),
         complete:($m>0 and $open==0),
         progress_mismatch:$pmismatch,
@@ -808,7 +784,7 @@ def owner_live($assignee):
     else {ids:(.ids + [$r.id]), out:(.out + [$r])} end) | .out
 '
     FULL=$(jq -c -n --argjson prefixes "$PREFIXES" --argjson rignames "$RIGNAMES" \
-        --argjson now "$NOW_EPOCH" --argjson sessmap "$SESS_MAP" --argjson ownermap "$OWNER_MAP" \
+        --argjson now "$NOW_EPOCH" --argjson visits "$VISITS" --argjson ownermap "$OWNER_MAP" \
         "$RENDER" < "$ANCHORS")
     TOTAL=$(printf '%s' "$FULL" | jq 'length')
     if [ "$EFFLIMIT" -gt 0 ]; then
@@ -840,16 +816,15 @@ def owner_live($assignee):
 
     printf '%s' "$BOARD" | jq -r '
 def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as $g | if $g>0 then (" "*$g) else "" end);
-def glyph: {"hot":"●","warm":"◐","cold":"·"}[.] // "·";
 ( (" "|rpad(2)) + ("SEV"|rpad(9)) + ("ID"|rpad(11)) + ("RIG"|rpad(13)) + ("KIND"|rpad(9)) + ("N/M"|rpad(7)) + ("FRONTIER"|rpad(36)) + "NEEDS" ),
 ( ("─"*1|rpad(2)) + ("─"*8|rpad(9)) + ("─"*10|rpad(11)) + ("─"*12|rpad(13)) + ("─"*8|rpad(9)) + ("─"*6|rpad(7)) + ("─"*35|rpad(36)) + ("─"*16) ),
-( .[] | ((.live|glyph)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad(11)) + ((.rig)|rpad(13)) + ((.kind)|rpad(9))
+( .[] | ((if .held then "●" else " " end)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad(11)) + ((.rig)|rpad(13)) + ((.kind)|rpad(9))
         + ((if .kind=="decision" then "—" else "\(.n_closed)/\(.m_total)" end)|rpad(7))
         + ((.frontier)|rpad(36)) + (.needs) )
 '
     printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/stale/stuck · NORMAL=active · LOW=empty/complete\n'
-    printf 'Liveness: ● hot (open attaches) · ◐ warm (open resumes) · · cold (open materializes)\n'
-    printf 'open <id> to land · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
+    printf 'Held: ● an open visit holds this anchor'\''s conversation (attach via the sessions picker) · blank = none\n'
+    printf 'open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
 }
 
 # ── Anchor gather (the cached, Dolt-heavy part) ──────────────────────
@@ -938,6 +913,26 @@ gather_anchors() {
                 takeaway_by:($b.metadata["gc.takeaway_by"] // ""),
                 children:[($b.dependents // [])[] | {id, status, assignee}]}' >> "$ANCHORS"
     done
+}
+
+# ── Visit gather (rides the cached gather) ───────────────────────────
+# Writes ONE JSON-array line to $VISITS_FILE: the unique subject ids
+# carried by open visit beads (task_kind=visit, gc.continuation_group).
+# Per-rig like the anchor gather; a rig that errors is skipped. Both
+# open AND in_progress count as "open" here — a claimed visit is a held
+# conversation, not a finished one.
+gather_visits() {
+    : > "$TMP/visit-subjects.txt"
+    printf '%s' "$RIGS" | jq -c '.[]' | while IFS= read -r rig; do
+        path=$(printf '%s' "$rig" | jq -r '.path')
+        beads="$path/.beads"
+        [ -d "$beads" ] || continue
+        as_array "$(gcq bd list --db "$beads" --status open,in_progress --json --limit=0)" \
+            | jq -r '.[] | select((.metadata.task_kind // "") == "visit")
+                     | .metadata["gc.continuation_group"] // empty' >> "$TMP/visit-subjects.txt" 2>/dev/null || true
+    done
+    jq -R -s -c 'split("\n") | map(select(length > 0)) | unique' \
+        < "$TMP/visit-subjects.txt" > "$VISITS_FILE" 2>/dev/null || printf '[]\n' > "$VISITS_FILE"
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────

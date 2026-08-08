@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
-# Hermetic test for the witness-patrol GROUNDED-BEAD-HOST SKIP filter (tk-z130v.3).
+# Hermetic test for the witness-patrol ASSIGNED-ONLY SKIP filter.
 #
-# THE GUARDRAIL: gc-bead-host.sh now GROUNDS a bead-host by setting its work
-# bead's `assignee` to its own session NAME, so the reconciler revives the host
-# across an involuntary config-drift drain. That makes a host bead read as
-# "assigned" in mol-witness-patrol's recover-orphaned-beads scan (which today
-# only skips beads with NO assignee). A bead-host is NOT pool/ephemeral work —
-# its lifecycle is owned by the bead-host tooling (gc-bead-host.sh link/unlink,
-# gc-helm takeaway --release) — so orphan recovery must not reclaim it into the
-# polecat pool. The revival scenario is already safe (drained/asleep classify as
-# not-orphaned), but a host whose session went archived/closed/absent would be
-# false-recovered; per the #206/#210 precedent this is closed by CODE, not
-# witness judgment. The fix drops grounded host beads in the same filter that
-# skips unassigned beads, recognizing them structurally:
-# metadata.host_session_name == assignee.
+# THE GUARDRAIL: mol-witness-patrol's recover-orphaned-beads scan considers
+# only beads WITH an assignee — an unassigned bead is already in the pool's
+# court and needs no recovery. Assigned-but-dead beads are exactly the
+# witness's recovery domain: with the v1 per-bead host mechanism retired there is
+# no class of assigned bead that orphan recovery must skip. Visits and their
+# converse sessions need no carve-out either — a visit whose session died
+# mid-hold SHOULD return to the pool (respawn-and-reconstitute-from-the-record
+# is the cold continuity path; specs/2026-08-fresh-start/spine-port.md, D4).
 #
 # This test EXECUTES the real filter extracted verbatim from the formula (between
 # the `host-bead-skip` markers), so it cannot drift from the shipped instruction.
@@ -60,32 +55,29 @@ ids() {
 }
 
 # --- Fixtures. ---------------------------------------------------------------
-# u1  unassigned bead                          -> DROP (skip-unassigned)
-# p1  normal pool polecat, assigned            -> KEEP (a real orphan candidate)
-# h1  grounded bead-host (assignee==host name) -> DROP (owned by bead-host tooling)
-# h2  host bead whose assignee != host name    -> KEEP (assigned to a real agent,
-#     NOT grounded to its own host — the filter is precise, it does not over-skip
-#     every bead that merely carries a host_session_name)
-# n1  assigned bead with NO metadata object    -> KEEP (robust to absent metadata)
+# u1  unassigned bead                 -> DROP (skip-unassigned)
+# p1  pool polecat, assigned          -> KEEP (a real orphan candidate)
+# v1  visit bead, assigned            -> KEEP (a dead-session visit returns to
+#     the pool — cold-restart is the continuity path; no visit carve-out)
+# n1  assigned bead with NO metadata  -> KEEP (robust to absent metadata)
 FIX='[
   {"id":"u1","assignee":"",                              "metadata":{}},
   {"id":"p1","assignee":"gc-toolkit/gc-toolkit.furiosa", "metadata":{}},
-  {"id":"h1","assignee":"s-h1",                          "metadata":{"host_session_name":"s-h1","host_session":"sb-h1"}},
-  {"id":"h2","assignee":"someone-else",                  "metadata":{"host_session_name":"s-h2"}},
+  {"id":"v1","assignee":"gc-toolkit/gc-toolkit.converse","metadata":{"task_kind":"visit","gc.continuation_group":"tk-subj"}},
   {"id":"n1","assignee":"gc-toolkit/gc-toolkit.rictus"}
 ]'
-eq "$(ids "$FIX")" "h2,n1,p1" \
-   "drops unassigned (u1) + grounded host (h1); keeps assigned non-host (p1,n1) and a host assigned elsewhere (h2)"
+eq "$(ids "$FIX")" "n1,p1,v1" \
+   "drops unassigned (u1); keeps every assigned bead incl. a visit (p1,v1,n1)"
 
-# The grounded host is dropped regardless of the session_name FORM — a bare
-# s-<id> or a rig-qualified alias both work, because equality is what matters
-# (not a prefix pattern).
+# The assignee FORM does not matter — bare, rig-qualified, or a raw session
+# name all read as assigned; only emptiness drops a bead.
 FIX2='[
-  {"id":"a","assignee":"gascity/gc-toolkit.gc-z0vi2","metadata":{"host_session_name":"gascity/gc-toolkit.gc-z0vi2"}},
-  {"id":"b","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{}}
+  {"id":"a","assignee":"gascity/gc-toolkit.gc-z0vi2","metadata":{}},
+  {"id":"b","assignee":"gc-toolkit__polecat-lx-fjnq1","metadata":{}},
+  {"id":"c","assignee":"","metadata":{"task_kind":"visit"}}
 ]'
-eq "$(ids "$FIX2")" "b" \
-   "drops a grounded host with a rig-qualified session_name assignee; keeps a normal polecat"
+eq "$(ids "$FIX2")" "a,b" \
+   "keeps any non-empty assignee form; drops the unassigned visit (c)"
 
 # Empty listing -> empty result (never errors).
 eq "$(ids '[]')" "" "empty listing yields empty result"

@@ -13,7 +13,7 @@ real payload. The full model port is a follow-up bead (see *Deferred*, below).
 
 ```
 GET /helm   -> { generated_at, total, tiles:[ {id,rig,kind,title,severity,
-                      live,n_closed,m_total,open,in_progress,frontier,needs,
+                      n_closed,m_total,open,in_progress,frontier,needs,
                       rank_score}, ... ], partial?, partial_errors? }
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 ```
@@ -27,7 +27,7 @@ Three packages, a clean dependency line `board <- source <- server <- cmd`:
 
 | Package | Responsibility |
 |---|---|
-| `internal/board` | The MODEL. Pure, I/O-free: severity, liveness, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
+| `internal/board` | The MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
 | `internal/source` | The data-access **seam**. `Source` interface + `SupervisorSource` (HTTP client against the supervisor API). |
 | `internal/server` | HTTP routes + a server-side TTL cache of the computed board. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
@@ -42,7 +42,7 @@ new endpoint) can swap in without touching the model or serving code.
 
 Endpoints consumed (all under `/v0/city/<city>/`): `/rigs`, `/beads?type=epic`,
 `/beads/graph/{id}` (all-status child roll-up), `/beads?type=decision`,
-`/convoys` + `/convoy/{id}`, `/sessions?view=full` (liveness). Cross-rig `partial` /
+`/convoys` + `/convoy/{id}`. Cross-rig `partial` /
 `partial_errors` are propagated to the board envelope; a 503 (total outage)
 surfaces as a 502 from `/helm`.
 
@@ -122,7 +122,13 @@ access, unit tests over the model and a mock supervisor.
 - **`assigned` / `open_heads`** — the bead API omits `assignee`.
 - **The takeaway-driven NEEDS sentence** — NEEDS uses the deterministic phrase;
   `gc.takeaway` plumbing is deferred.
-- **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans.
+- **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans. (STRANDED
+  itself is already in the severity derivation: open work with none in
+  progress.)
+- **The `held` visit fact** — the bash board's glyph (an open visit bead with
+  `task_kind=visit` whose `gc.continuation_group` names the anchor). The
+  supervisor bead API omits metadata, so visit presence is not derivable over
+  HTTP; the field is dropped, not approximated.
 - **owned-convoy filter** — `/convoys` omits the `owned` flag, so floating +
   non-`sling-` title approximates ownership; true `owned==true` filtering needs a
   richer convoy source.

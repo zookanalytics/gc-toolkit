@@ -44,8 +44,8 @@ when all of these hold:
   double-quoted anywhere, or opening with a single quote, a smart quote or a
   backtick. Providers print their banner bare; an agent writing *about* a quota
   block does not. This is not hypothetical: the script's first live run flagged a
-  bead-host that had reported the Codex outage to the operator and gone idle with
-  the banner quoted in its own report. The single quote counts only as an
+  resident conversation session that had reported the Codex outage to the
+  operator and gone idle with the banner quoted in its own report. The single quote counts only as an
   *opening delimiter*, at the start of the line — the apostrophe in the
   provider's own "You've" is the same character, so rejecting it anywhere on the
   line would drop every real banner and switch this order off.

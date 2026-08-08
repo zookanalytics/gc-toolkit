@@ -20,7 +20,7 @@ import (
 // unreadable and no override env is set.
 const defaultSupervisorPort = 8372
 
-// SupervisorSource reads bead/session state from the supervisor loopback HTTP
+// SupervisorSource reads bead state from the supervisor loopback HTTP
 // API. It satisfies [Source].
 type SupervisorSource struct {
 	baseURL string // e.g. http://127.0.0.1:8372
@@ -163,22 +163,6 @@ type convoyResponse struct {
 	Children []apiBead `json:"children"`
 }
 
-// apiSession mirrors a session row under view=full. We join by the bead-host
-// alias (stripped to the bead-id); active_bead is an alternative key left for a
-// follow-up.
-type apiSession struct {
-	Alias    string `json:"alias"`
-	Template string `json:"template"`
-	State    string `json:"state"`
-	Running  bool   `json:"running"`
-}
-
-type sessionsEnvelope struct {
-	Items         []apiSession `json:"items"`
-	Partial       bool         `json:"partial"`
-	PartialErrors []string     `json:"partial_errors"`
-}
-
 type apiRig struct {
 	Name   string `json:"name"`
 	Prefix string `json:"prefix"`
@@ -247,7 +231,7 @@ func (g *gatherState) rigOf(id string) (rig, prefix string) {
 	return prefix, prefix
 }
 
-// Gather fetches every anchor kind and the liveness map. A failure of one kind
+// Gather fetches every anchor kind. A failure of one kind
 // degrades that kind to empty and records a partial error; only a hard
 // failure of the rig map (needed to resolve every rig) aborts.
 func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
@@ -270,7 +254,6 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 	s.gatherEpics(ctx, g)
 	s.gatherDecisions(ctx, g)
 	s.gatherConvoys(ctx, g)
-	sessions := s.gatherSessions(ctx, g)
 
 	// Every fetch failed — the supervisor is unreachable, not merely degraded.
 	// Error so the server returns 502 instead of a misleading empty board.
@@ -280,7 +263,6 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 
 	return &Result{
 		Anchors:       g.anchors,
-		Sessions:      sessions,
 		Partial:       g.partial,
 		PartialErrors: g.partialErrs,
 	}, nil
@@ -407,39 +389,4 @@ func (s *SupervisorSource) convoyChildren(ctx context.Context, g *gatherState, c
 		children = append(children, board.Child{ID: c.ID, Status: c.Status})
 	}
 	return children
-}
-
-// gatherSessions builds the bead-id→liveness map from bead-host sessions. The
-// alias is <pack>.<bead-id>; the key is the bead-id (everything after the first
-// dot), matching gc-helm.sh's alias strip. Only sessions whose template
-// names a bead-host are joined.
-func (s *SupervisorSource) gatherSessions(ctx context.Context, g *gatherState) map[string]board.HostSession {
-	out := map[string]board.HostSession{}
-	var env sessionsEnvelope
-	if err := s.getJSON(ctx, "/sessions?view=full", &env); err != nil {
-		g.note(true, []string{"sessions: " + err.Error()})
-		return out
-	}
-	g.note(env.Partial, env.PartialErrors)
-	g.ok()
-	for _, sess := range env.Items {
-		if !strings.Contains(sess.Template, "bead-host") {
-			continue
-		}
-		key := aliasBeadID(sess.Alias)
-		if key == "" {
-			continue
-		}
-		out[key] = board.HostSession{State: sess.State, Running: sess.Running}
-	}
-	return out
-}
-
-// aliasBeadID strips the leading "<pack>." from a bead-host alias, returning the
-// bead-id key (gc-helm.sh: sub("^[^.]+\\.";"")).
-func aliasBeadID(alias string) string {
-	if i := strings.IndexByte(alias, '.'); i >= 0 {
-		return alias[i+1:]
-	}
-	return alias
 }

@@ -35,7 +35,6 @@ func newFake() *fakeSource {
 			{ID: "sl-dec", Kind: "decision", Source: "decision", Rig: "signal-loom"},
 			{ID: "tk-epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Children: []board.Child{{ID: "c", Status: "open"}}},
 		},
-		Sessions: map[string]board.HostSession{},
 	}}
 }
 

@@ -2,29 +2,28 @@
 # helm-surface-fixture.sh — the automatable assertions for the Phase 3
 # attention surface (epic tk-q4xaj; bead tk-qkags; design Phase 3).
 #
-# Phase 3's SHIP gate is the operator-judged capstone (board → pick a
-# bead → land in its resumed universe → it answers a pre-seeded reach-requiring
-# question). That end-to-end demo is human-in-the-loop by design and is NOT
+# The operator-judged capstone (board → pick a bead → converse session
+# holds the conversation) is human-in-the-loop by design and is NOT
 # what this fixture replaces. What this fixture locks down is the deterministic
-# machinery underneath it, so a regression in the board's new behavior is caught
+# machinery underneath it, so a regression in the board's behavior is caught
 # automatically:
 #
-#   • the liveness glyph — the pack-namespaced-alias → bead-id join over
-#     `gc session list` (bead-host sessions only) resolves hot/warm/cold,
-#     and a live host keeps a decomposed anchor out of the stranded band;
+#   • the held glyph — visit presence (an open visit bead whose
+#     gc.continuation_group names the anchor) resolves held/not-held,
+#     and a held anchor stays out of the stranded band;
 #   • the row cap — the board never balloons past the cap, and --limit=0 opts
 #     out for tooling;
-#   • the --json contract — additive only (new `live` field present; existing
-#     fields intact);
+#   • the --json contract — every documented field present (the `held`
+#     visit fact replaced the retired v1 `live` host field);
 #   • verb dispatch + validation — board/open/react/takeaway routing and the
 #     fail-closed arg checks.
 #
 # HERMETIC BY DESIGN. The board's render/rank/glyph path is driven through the
-# tool's GC_HELM_FIXTURE hook (canned anchors.ndjson + sessions.json +
-# rigs.json under a temp dir), so these assertions write NOTHING to Dolt and
-# need no live city. A best-effort read-only smoke at the end proves the real
-# gather+contract on the live city; an OPT-IN takeaway round-trip
-# (GC_HELM_SMOKE_BEAD=<id>) exercises the live write path on a bead
+# tool's GC_HELM_FIXTURE hook (canned anchors.ndjson + visits.json +
+# sessions.json + rigs.json under a temp dir), so these assertions write
+# NOTHING to Dolt and need no live city. A best-effort read-only smoke at the
+# end proves the real gather+contract on the live city; an OPT-IN takeaway
+# round-trip (GC_HELM_SMOKE_BEAD=<id>) exercises the live write path on a bead
 # the operator chooses — the fixture never invents or closes a bead of its own.
 #
 # Run:   tools/helm-surface-fixture.sh
@@ -54,8 +53,8 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 B() { GC_HELM_FIXTURE="$FXDIR" "$TOOL" "$@"; }
 
 # ---------------------------------------------------------------------------
-# Seed: 1 rig, and four anchors — an epic with a HOT host, a stranded
-# epic, a decision, and a second epic with a WARM (suspended) host.
+# Seed: 1 rig, and four anchors — an epic with an OPEN VISIT (held), a
+# stranded epic, a decision, and a second epic with no visit.
 # Distinct ids make the ordering + glyph assertions unambiguous.
 # ---------------------------------------------------------------------------
 cat > "$FXDIR/rigs.json" <<'JSON'
@@ -64,22 +63,21 @@ cat > "$FXDIR/rigs.json" <<'JSON'
 JSON
 
 cat > "$FXDIR/anchors.ndjson" <<'JSON'
-{"id":"tk-hosthot","title":"CI mystery","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":3,"updated_at":"2026-06-07T03:00:00Z","description":"","progress":null,"children":[{"id":"tk-hh1","status":"open","assignee":""}]}
+{"id":"tk-held","title":"CI mystery","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":3,"updated_at":"2026-06-07T03:00:00Z","description":"","progress":null,"children":[{"id":"tk-hh1","status":"open","assignee":""}]}
 {"id":"tk-epic","title":"Big epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"references sl-zzz9","progress":null,"children":[{"id":"tk-a","status":"open","assignee":""},{"id":"tk-b","status":"closed","assignee":""}]}
 {"id":"sl-dec","title":"Pick a path","kind":"decision","source":"decision","rig":"signal-loom","prefix":"sl","priority":1,"updated_at":"2026-06-05T00:00:00Z","description":"","progress":null,"children":[]}
-{"id":"tk-hostwarm","title":"Stale spec","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-hw1","status":"open","assignee":""}]}
+{"id":"tk-quiet","title":"Stale spec","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-hw1","status":"open","assignee":""}]}
 JSON
 
-# Sessions model the real shape: a bead-host alias is pack-namespaced
-# (<pack>.<bead-id>) and carries the bead-host template, so the board's
-# liveness join strips the leading "<pack>." and joins only bead-host
-# sessions. tk-hosthot has an ACTIVE host (hot); tk-hostwarm a SUSPENDED one
-# (warm); everything else cold. The refinery (non-bead-host template, aliased
-# with slashes) must NOT perturb the join.
+# Visit presence models the real shape: tk-held has an open visit in its
+# continuation group (held); everything else has none. Sessions feed ONLY
+# the child-owner liveness map now — a session (like the refinery here)
+# must NOT perturb the held glyph.
+cat > "$FXDIR/visits.json" <<'JSON'
+["tk-held"]
+JSON
 cat > "$FXDIR/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-1","alias":"gc-toolkit.tk-hosthot","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":false},
-  {"id":"lx-2","alias":"gc-toolkit.tk-hostwarm","template":"gc-toolkit.bead-host","state":"suspended","running":false,"attached":false},
   {"id":"lx-9","alias":"gc-toolkit/gc-toolkit.refinery","template":"gc-toolkit.refinery","state":"active","running":true}
 ]}
 JSON
@@ -93,21 +91,20 @@ eq   "top row is the stranded epic (HIGH)"   "HIGH"   "$(printf '%s' "$J" | jq -
 eq   "the stranded epic floats above the decision" "true" "$(printf '%s' "$J" | jq -r '(.[]|select(.id=="tk-epic").rank_score) > (.[]|select(.id=="sl-dec").rank_score)')"
 has  "decision frontier is human-gated"      "human-gated" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="sl-dec").frontier')"
 
-echo "── hermetic: liveness glyph join (pack-namespaced alias → bead-id) ──"
-eq   "hot host resolves hot"   "hot"  "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-hosthot").live')"
-eq   "suspended host is warm"  "warm" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-hostwarm").live')"
-eq   "no host is cold"         "cold" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").live')"
-eq   "live field is on every row (additive contract)" "4" "$(printf '%s' "$J" | jq '[.[]|select(.live!=null)]|length')"
-has  "hot glyph in human table"   "●" "$(B)"
-has  "warm glyph in human table"  "◐" "$(B)"
+echo "── hermetic: held glyph (visit presence, not sessions) ──"
+eq   "open visit resolves held"       "true"  "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-held").held')"
+eq   "no visit is not held"           "false" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").held')"
+eq   "no visit is not held (control)" "false" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-quiet").held')"
+eq   "held field is on every row"     "4"     "$(printf '%s' "$J" | jq '[.[]|select(.held!=null)]|length')"
+has  "held glyph in human table"      "●"     "$(B)"
 
-echo "── hermetic: live host ⇒ active, not stranded (tk-q4xaj.2) ──"
+echo "── hermetic: open visit ⇒ active, not stranded ──"
 # A decomposed epic with open children and ZERO in-progress is the classic
-# "stranded/HIGH" shape — UNLESS a live bead-host is resident, in which case
-# it is being worked via a 1:1 conversation, not via child polecats. Two
-# sibling epics with the identical stranded shape: tk-hosted has a HOT host,
-# tk-lonely has none. The fix must spare the hosted one and ONLY the hosted
-# one (liveness-gated, not a blanket suppression).
+# "stranded/HIGH" shape — UNLESS an open visit holds its conversation, in
+# which case it is being worked via that conversation, not via child
+# polecats. Two sibling epics with the identical stranded shape: tk-visited
+# has an open visit, tk-lonely has none. The spare must hit the visited one
+# and ONLY the visited one (visit-gated, not a blanket suppression).
 LIVE="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
 # updated_at must be RECENT, not a hardcoded date: this case asserts NORMAL,
 # and a fixed past date eventually crosses STALE_DAYS and bumps NORMAL→ELEVATED
@@ -116,27 +113,24 @@ LIVE="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
 # carry no other shell metacharacters).
 LIVE_RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat > "$LIVE/anchors.ndjson" <<JSON
-{"id":"tk-hosted","title":"Hosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-h1","status":"open","assignee":""},{"id":"tk-h2","status":"open","assignee":""}]}
-{"id":"tk-lonely","title":"Unhosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-l1","status":"open","assignee":""},{"id":"tk-l2","status":"open","assignee":""}]}
+{"id":"tk-visited","title":"Visited epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-h1","status":"open","assignee":""},{"id":"tk-h2","status":"open","assignee":""}]}
+{"id":"tk-lonely","title":"Unvisited epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-l1","status":"open","assignee":""},{"id":"tk-l2","status":"open","assignee":""}]}
 JSON
-cat > "$LIVE/sessions.json" <<'JSON'
-{"sessions":[
-  {"id":"lx-h","alias":"gc-toolkit.tk-hosted","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":true}
-]}
-JSON
+printf '["tk-visited"]\n' > "$LIVE/visits.json"
+printf '{}' > "$LIVE/sessions.json"
 LIVEJ="$(GC_HELM_FIXTURE="$LIVE" "$TOOL" --json)"
-eq     "hosted epic resolves hot"               "hot"    "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").live')"
-eq     "hosted epic is NORMAL, not HIGH"        "NORMAL" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").severity')"
-eq     "hosted epic is NOT stranded"            "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").stranded')"
-has    "hosted epic frontier reads in-conversation" "in conversation" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
-absent "hosted epic frontier drops (stranded)"  "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
-has    "hosted epic needs is open-to-join"      "open to join" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").needs')"
-has    "hosted epic still shows the hot glyph"  "●" "$(GC_HELM_FIXTURE="$LIVE" "$TOOL")"
-# Control: the unhosted sibling, identical shape but no host, stays HIGH.
-eq     "unhosted sibling stays cold"            "cold"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").live')"
-eq     "unhosted sibling stays HIGH"            "HIGH"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
-eq     "unhosted sibling stays stranded"        "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").stranded')"
-has    "unhosted sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
+eq     "visited epic resolves held"             "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").held')"
+eq     "visited epic is NORMAL, not HIGH"       "NORMAL" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").severity')"
+eq     "visited epic is NOT stranded"           "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").stranded')"
+has    "visited epic frontier reads in-conversation" "in conversation" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").frontier')"
+absent "visited epic frontier drops (stranded)" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").frontier')"
+has    "visited epic needs is open-to-join"     "open to join" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").needs')"
+has    "visited epic still shows the held glyph" "●" "$(GC_HELM_FIXTURE="$LIVE" "$TOOL")"
+# Control: the unvisited sibling, identical shape but no visit, stays HIGH.
+eq     "unvisited sibling is not held"          "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").held')"
+eq     "unvisited sibling stays HIGH"           "HIGH"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
+eq     "unvisited sibling stays stranded"       "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").stranded')"
+has    "unvisited sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
 rm -rf "$LIVE"
 
 echo "── hermetic: dead-owner in-progress is stuck, not moving (PROBLEM 1) ──"
@@ -363,7 +357,7 @@ echo "── contract: operator surface is the runnable script, not a phantom gc
 # root gc help. Pack commands bind under the pack name (`gc <pack> <cmd>`), so
 # no top-level helm subcommand can exist. The runnable surface is THIS
 # script — reached via the prefix+b tmux picker (tmux-pick-helm.sh →
-# gc-helm.sh) or run directly — plus tools/gc-bead-host.sh. These
+# gc-helm.sh) or run directly. These
 # assertions lock the operator-facing docs to that reality.
 
 # (a) the documented script entry actually runs and prints its own usage.
@@ -375,9 +369,9 @@ has  "script -h prints usage"     "Usage:" "$("$TOOL" -h 2>&1 || true)"
 #     script name "gc-helm" (hyphen) is intentionally NOT matched.
 SURFACE_FILES=(
     "$HERE/../assets/scripts/gc-helm.sh"
-    "$HERE/../agents/bead-host/prompt.template.md"
-    "$HERE/../agents/bead-host/agent.toml"
-    "$HERE/../agents/bead-host/PROVENANCE.md"
+    "$HERE/../agents/converse/prompt.template.md"
+    "$HERE/../agents/converse/agent.toml"
+    "$HERE/../agents/converse/PROVENANCE.md"
 )
 phantom=""
 for f in "${SURFACE_FILES[@]}"; do
