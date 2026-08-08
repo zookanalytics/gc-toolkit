@@ -139,6 +139,36 @@ as automation earns trust; they must not harden into permanent process.
   anchors, branded surfaces, visual consistency — is entirely ours, and
   strictly pull. This is where the pack's identity concentrates.
 
+## The gate pattern — how automation earns its pauses
+
+**Operator direction (2026-08-08): maximum automation, with clear
+blocking gate beads at the points where the operator is needed.** The
+settled shape, grounded in the three interaction tiers the runtime
+actually has (blocking edges / pending interactions / mail — blocking is
+the graph's job, asking is the session's job, telling is mail's job):
+
+- **Gates are authored in mols, because a gate is graph data.** A
+  blocking gate = a bead + a `blocks` edge, both filed by a formula
+  step. The authoring rule: *the step that needs the check files the
+  check.* Work that needs no judgment files no gate; gate membership
+  shrinks as automation earns trust (operator ruling on checks, above).
+- **One agent makes gates live: the converse role.** A bare
+  human-routed bead is durably *stuck* (no claim contract drives it);
+  a gate filed as a **turn** is durably *live* — demand spawns the
+  role, it preps and holds with the choice framed, records the answer
+  on the subject, closes the turn, and the cleared edge resumes the
+  pipeline. Tier-2 pending interactions are the wrong tool for
+  pipeline gates: they die with their session, and a multi-session
+  pipeline (build-basic's shape) has no session alive long enough to
+  hold the question.
+- **No new base pack.** The pattern is additive — metadata, edges, one
+  role, formula steps. It does not depend on what executes between
+  gates, so the gastown-roster question stays a separate, gradual,
+  argued-per-role track.
+- **The merge boundary is the same pattern.** A PR held for human
+  review is a gate bead blocking the land step — the check-set's human
+  member expressed as a turn, one shape everywhere.
+
 ## Increment path (try before deciding)
 
 Each step is one lived experiment, cheap to reverse, ordered by
