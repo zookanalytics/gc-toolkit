@@ -208,18 +208,43 @@ the alert model rather than duplicating them.
 
 ## What upstream does not ship (the pack's actual seam)
 
-Verified absent as of 2026-08-06 — this is the genuinely native ground,
-and it is deliberately small:
+Revised 2026-08-08 after the build-factory trial and operator probing —
+this is the genuinely native ground, and it is deliberately small. A
+definition first, because everything below uses it:
 
-- **A hold-for-operator conversation role.** All upstream roles execute
-  and close; none preps, holds for a human, records to a subject, and
-  closes only its turn.
-- **Turns as beads** — the durable, board-legible conversation spine
-  under a subject bead.
-- **The attention board's semantics** — ranking what needs a human now,
-  derived from the work tree's real state.
-- **A decomposition formula** — nothing upstream files a ratified *tree*
-  from a brief (the planner roles plan; they do not file structure).
+> **A turn** is one visit's worth of conversation, stored as a bead: a
+> small child of the subject whose body is the visit prompt ("ratify
+> this plan", "review posted — decision needed"), whose metadata routes
+> it to the converse pool and names the subject's continuation group,
+> whose `gc.outcome` records what the visit decided, and which closes
+> when the visit is done (the subject never closes this way). The
+> sequence of turns under a subject is the conversation's durable
+> spine — board-legible, cold-reconstructable, no provider transcript
+> required.
+
+- **The hold on the gate.** Upstream has the *wait* (human gates,
+  `blocks` edges — work durably stops). It has no role that services
+  the wait: every upstream role's contract is claim → execute → close;
+  none claims a bead and deliberately sits `in_progress` for a human,
+  having rebuilt the subject's context and framed the choice, then
+  records the answer to the subject and closes only the turn. Gate and
+  hold are two halves of one mechanism: the gate makes the work wait;
+  the hold (the converse role, on a turn) makes the wait worth arriving
+  at instead of a parked bead you cold-start yourself.
+- **The board's judgment — as a lens, never a dependency.** Ranking
+  what deserves the operator's glance, derived from real graph state
+  (open turns, human gates, stranded work), with visual consistency.
+  **Constraint (operator, 2026-08-08): everything works without the
+  board** — work moves entirely on graph state; the board renders it
+  and must never be a mechanism anything depends on.
+- **Ratification and record-residency for filed trees.** Upstream's
+  build factory *does* decompose brief → requirements → plan → tree of
+  beads (corrected after the trial; an earlier revision claimed
+  otherwise). What it lacks is the gate — no edge can wait on a human
+  before the tree lands — and the record-resident plan (files in
+  `plans/`, not rev-pinned on the brief bead, so re-planning re-files
+  instead of diffing). The native ground is the gate on the tree, not
+  the tree-making.
 
 Everything else in the conversation model is assembly of the primitives
 above — which is the point.
