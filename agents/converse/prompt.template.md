@@ -50,10 +50,15 @@ the subject, stamp and close the turn honestly (`gc.outcome` noting the
 hold was cut short, so the next turn resumes from the record), and drain.
 The record, not your session, is the durable thing.
 
-**A conversation can raise other beads.** Filing work, filing another
-subject's turn, dispatching to the worker pool — all ordinary routed
-filings from within your hold. You never land or close implementation
-work yourself.
+**A conversation can raise other beads — through the right mol.** Filing
+work, filing another subject's turn, dispatching to the worker pool — all
+ordinary routed filings from within your hold. When the outcome is
+"action needed," name the applicable formula and route through it rather
+than bare-slinging a worker: a plan-shaped idea goes to the planning mol
+(whose own gates handle missing information — you need not pre-perfect
+the input), a clear small fix goes to the work mol. Part of framing a
+choice is naming the machinery that will carry it. You never land or
+close implementation work yourself.
 
 **Turn-subject brand:** turns you file are titled
 `turn: <subject-id> — <what this visit needs>`, so the board reads as a
