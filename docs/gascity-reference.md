@@ -47,7 +47,7 @@ If any of the four fail, the content does not belong here.
 - Installation: https://docs.gascity.com/getting-started/installation
 - Quickstart: https://docs.gascity.com/getting-started/quickstart
 - Coming from Gas Town: https://docs.gascity.com/getting-started/coming-from-gastown
-- How Gas City works (incl. repository map): https://docs.gascity.com/getting-started/how-gas-city-works
+- How Gas City works: https://docs.gascity.com/getting-started/how-gas-city-works
 - Install/setup troubleshooting: https://docs.gascity.com/getting-started/troubleshooting
 
 ## Architecture & concepts
