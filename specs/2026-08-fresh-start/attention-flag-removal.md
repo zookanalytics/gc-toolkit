@@ -45,6 +45,12 @@ the design predicted.
   dedup).
 - `agents/proactive/PROVENANCE.md`, `docs/gascity-human-engagement.md`,
   `specs/2026-08-fresh-start/gas-city-native.md` — prose updated.
+- **Correction (2026-08-08):** `agents/proactive/prompt.template.md` was
+  missed by the original sweep (validator F-25) — it still instructed the
+  removed `flag` verb, stranding the worker at exit 2 before the
+  `takeaway --release` step. Now converted to file a visit (the
+  gate-visit form with the `tracks` edge, matching
+  `mol-first-reaction`'s advance-and-drain step).
 
 **Deliberately untouched:** `specs/` history (records stay as written,
 including tk-h9pq5's "keep the flag" clause, which this decision

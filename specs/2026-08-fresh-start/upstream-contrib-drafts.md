@@ -1,14 +1,17 @@
 ---
 name: Upstream contribution drafts — build-factory trial findings
-description: Ready-to-file issue drafts for the five upstream defects surfaced by the 2026-08-08 build-factory trial (evidence in build-factory-trial-reactions.md), each with reproduction and a proposed fix. For the operator to file against gastownhall/gascity-packs (or gascity core where noted) at their leisure; bodies are self-contained.
+description: Ready-to-file issue drafts for upstream defects — five surfaced by the 2026-08-08 build-factory trial (evidence in build-factory-trial-reactions.md) and two by the same-day live-adoption validator run (evidence in live-adoption-findings.md), each with reproduction and a proposed fix. For the operator to file against gastownhall/gascity-packs (or gascity core where noted) at their leisure; bodies are self-contained.
 ---
 
 # Upstream contribution drafts
 
-Five defects, all surfaced by one `build-basic` run (2026-08-08, split
+Drafts 1–5: defects surfaced by one `build-basic` run (2026-08-08, split
 city/rig layout, gascity pack 0.4.0 `f69ec02`). Evidence:
 [build-factory-trial-reactions.md](build-factory-trial-reactions.md).
-Ordered by severity. Each body below is self-contained for filing.
+Drafts 6–7: defects surfaced by the 2026-08-08 live-adoption validator
+run. Evidence: [live-adoption-findings.md](live-adoption-findings.md).
+Ordered by severity within each batch. Each body below is self-contained
+for filing.
 
 ## 1. `build-basic`'s artifact gate silently never runs in a split city/rig layout
 
@@ -91,3 +94,49 @@ or prompt bug; misleads audits)
 > **Proposed fix:** declare the dependency (or vendor a minimal
 > frontmatter parser), and make the validator's absence loud in the
 > stages that reference it.
+
+## 6. `prompt_template` `<pack>//<subpath>` fails to resolve under the retired-materialization model and silently renders a 16-line generic stub
+
+**Repo:** gastownhall/gascity · **severity: high** (silent correctness
+failure — an agent runs real work with none of its doctrine)
+
+> **Body draft:** An agent whose `prompt_template` uses the cross-pack
+> `<pack>//<subpath>` form (e.g.
+> `"gastown//agents/polecat/prompt.template.md"`) has the reference
+> resolved against the **pack directory** (`<pack-root>/gastown/…`)
+> rather than the import cache. Under the retired-materialization model
+> that path never exists. Worse, resolution failure does not fail config
+> load — the agent silently renders the 16-line generic stub ("You are
+> an agent in a Gas City workspace. Claim available work and execute
+> it."), so a codex polecat would claim real implementation work with
+> none of its convoy, non-impl-done, or file-work-records doctrine.
+> Evidence (validator F-03): `gc doctor` shows only `config-refs`
+> warnings (`prompt_template … not found`) while rendered prompt sizes
+> tell the real story — the correctly-resolved polecat renders 1540
+> lines, the two cross-pack agents render 16. Survives `gc import
+> install`, so it is not a lock-state problem. **Proposed fix:** resolve
+> `<pack>//<subpath>` against the import cache under the
+> retired-materialization model, and make an unresolvable
+> `prompt_template` **fail config load** rather than fall back to the
+> stub — the fallback converts a wiring error into a silently degraded
+> agent.
+
+## 7. `gc bd ready --json` intermittently emits invalid JSON under concurrent agent writes
+
+**Repo:** gastownhall/gascity · **severity: medium** (transient, but
+each occurrence costs consumers a full pass)
+
+> **Body draft:** Under concurrent agent writes, `gc bd ready --json`
+> intermittently emits invalid JSON — unescaped control characters
+> (`jq: parse error: Invalid string: control characters from U+0000
+> through U+001F must be escaped`). Observed twice within a minute
+> (validator F-26); not reproducible on demand — five consecutive runs
+> afterwards were clean and byte-identical (305558 bytes, 85 items),
+> and the same payload redirected to a file parsed fine, so it is a
+> transient torn read under write pressure, not a poison bead.
+> Consequence: any consumer with a fail-safe (e.g. a
+> `jq -e 'type=="array"'` guard) correctly aborts and files nothing —
+> which on a cooldown-driven cadence means a full pass is silently lost
+> per occurrence. **Proposed fix:** make the JSON emission read from a
+> consistent snapshot (or serialize/escape output atomically) so a
+> concurrent write cannot tear the payload mid-emit.

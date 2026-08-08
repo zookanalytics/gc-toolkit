@@ -9,8 +9,8 @@
 The dedicated, small, mr-only pool that runs slung first reactions — Phase 4
 of the Bead-Universe Operating Model (epic tk-q4xaj; bead tk-3d0uh; design Key
 Components 5-6). A proactive worker takes one bead, gives it a cheap first
-reaction (read the body, write a first-reaction card to the notes, flag it
-onto the Helm), and drains. It makes the human arrive at *advanced*
+reaction (read the body, write a first-reaction card to the notes, file a
+visit on it), and drains. It makes the human arrive at *advanced*
 work — a bead that already moved one step.
 
 ## Why we built this
@@ -61,5 +61,5 @@ converse session opens with and the board's pick-a-row visit lands the human on.
 
 Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — the shed clamp
 halts proactive at the cap; the mr-invariant refuses `direct`; the formula
-writes the card and flags without closing; the slice tool fences reached
+writes the card and files the visit without closing; the slice tool fences reached
 content. Design refs: design-doc.md Key Components 5-6, Phase 4.
