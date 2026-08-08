@@ -1,0 +1,100 @@
+description = """
+mol-liveness-sweep — the P3 enforcement pass: no idle beads. Every open
+bead must be worked, gated, conversing, or held-by-design; anything else
+is an UNNAMED WAIT, and this sweep normalizes it into a conversation
+turn so the graph's every path terminates at live work or a human gate
+(specs/2026-08-fresh-start/operating-principles.md P3;
+specs/2026-08-fresh-start/liveness-and-triage-spec.md §2).
+
+Graph-liveness only: the witness patrol owns SESSION-liveness (dead
+assignees, orphan recovery); this sweep never touches assigned work.
+Fired by orders/liveness-sweep.toml on cooldown; one fire = one pass:
+classify, file capped gate-turns for the unnamed, log, drain.
+
+Contract: v1 — a one-shot linear pass, the doc-keeper shape.
+"""
+formula = "mol-liveness-sweep"
+version = 1
+
+[vars]
+[vars.cap]
+description = "Max gate-turns filed per pass, so a messy store yields a triage-able trickle, not a flood"
+default = "5"
+
+[[steps]]
+id = "classify"
+title = "Classify every open bead; isolate the unnamed waits"
+description = """
+Build the classification from two listings. **Fail-safe first (the
+witness discipline): if either command fails or returns a non-array,
+write a note explaining what broke, file NOTHING, and drain — never
+normalize on partial data.**
+
+```bash
+OPEN=$(mktemp); READY=$(mktemp)
+gc bd list --status=open --json --limit=0 > "$OPEN"
+gc bd ready --unassigned --exclude-type=epic --limit=0 --json > "$READY"
+jq -e 'type=="array"' "$OPEN" >/dev/null && jq -e 'type=="array"' "$READY" >/dev/null \
+  || { echo "FAIL-SAFE: listing unreadable — sweep aborts, nothing filed"; exit 1; }
+```
+
+The classes, and why the ready set is the base: `gc bd ready` already
+excludes blocked beads and gates (gated = named wait) and `--unassigned`
+excludes worked-in-progress; `--exclude-type=epic` defers epic liveness
+to their children (a recorded v1 simplification). From that base, drop:
+
+- **worked-by-demand** — `gc.routed_to` non-empty (a pool will claim it);
+- **conversing** — it IS a turn (`task_kind=conversation`), or an open
+  turn exists in its continuation group;
+- **held-by-design** — `task_kind=triage-subject` (waits on its own
+  triage conversation).
+
+```bash
+UNNAMED=$(jq -n --slurpfile open "$OPEN" --slurpfile ready "$READY" --argjson cap "{{cap}}" '
+  ([($open[0] // [])[]
+     | select((.metadata.task_kind // "") == "conversation")
+     | (.metadata["gc.continuation_group"] // empty)]) as $convgroups
+  | [ ($ready[0] // [])[]
+      | select((.metadata["gc.routed_to"] // "") == "")
+      | select((.metadata.task_kind // "") != "conversation")
+      | select((.metadata.task_kind // "") != "triage-subject")
+      | select(.id as $id | ($convgroups | index($id)) | not)
+    ]
+  | .[0:$cap] | map({id, title})')
+printf '%s\n' "$UNNAMED"
+```
+
+Everything surviving is an unnamed wait — open, unassigned, unrouted,
+unblocked, ungated, turnless, not held by design. Record the count and
+the ids in your notes before moving on.
+"""
+
+[[steps]]
+id = "normalize"
+title = "File one gate-turn per unnamed wait (idempotent, capped)"
+description = """
+For each unnamed bead from the classify step, file exactly one
+conversation turn on it — the canonical gate-turn form. Idempotency is
+already guaranteed by the classify filter (a bead with an open turn in
+its group never reaches this step), and the cap bounds the pass.
+
+Per candidate `$SUBJECT` (with `$TITLE` for the visit text):
+
+```bash
+# >>> gate-turn
+POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+TURN=$(gc bd create -t task --title "turn: $SUBJECT — unnamed wait: route, gate, or park" \
+  -d "Liveness sweep: '$TITLE' ($SUBJECT) is open with no worker, route, gate, or conversation. What is it waiting on? Route it to a pool, gate it on a named check, or park it into a triage scope." --json | jq -r '.id // .[0].id')
+gc bd update "$TURN" --set-metadata "gc.routed_to=$POOL" \
+  --set-metadata "gc.continuation_group=$SUBJECT" \
+  --set-metadata "task_kind=conversation"
+gc bd dep add "$TURN" "$SUBJECT" --type=parent-child
+# <<< gate-turn
+```
+
+No `--blocks` edge: the subject is idle, nothing downstream is waiting
+on the turn — the turn's job is to make the wait NAMED and staffed, not
+to block. Log every filing (subject id → turn id) in your notes; if the
+classify step found more candidates than the cap admitted, say how many
+were left for the next pass. Then drain — the pass is complete.
+"""

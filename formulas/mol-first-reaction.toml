@@ -162,6 +162,7 @@ first reaction's surfacing IS a turn in the subject's group, so the human
 lands in a held conversation with the card already framed; the turn form
 is mol-turn's, spelled inline):
 ```bash
+# >>> gate-turn
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
 TURN=$(gc bd create -t task --title "turn: {{issue}} — first reaction ready: accept or redirect" \
   -d "First reaction ready on {{issue}} — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
@@ -169,6 +170,7 @@ gc bd update "$TURN" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group={{issue}}" \
   --set-metadata "task_kind=conversation"
 gc bd dep add "$TURN" "{{issue}}" --type=parent-child
+# <<< gate-turn
 ```
 
 **2. Stamp the takeaway and release the bead — open, unassigned, NOT closed —

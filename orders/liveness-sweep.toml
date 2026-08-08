@@ -1,0 +1,26 @@
+# liveness-sweep — the P3 order: every open bead is worked, gated,
+# conversing, or held-by-design; unnamed waits get normalized into
+# conversation turns. Fires mol-liveness-sweep on a 6h cooldown — the
+# sweep hunts drift, not emergencies; anything urgent already has a
+# route, a gate, or a turn.
+#
+# Spec: specs/2026-08-rethink is history; the live spec is
+# specs/2026-08-fresh-start/liveness-and-triage-spec.md §2. Principle:
+# operating-principles.md P3 (operator, 2026-08-08).
+#
+# Rig scope + BARE pool, per the doc-keeper order's recorded lesson
+# (orders/doc-keeper-drift-audit.toml): a bare pool qualifies within
+# each importing rig to that rig's own polecat pool, with the wisp in
+# that same rig's store — self-consistent for every importer. The sweep
+# reads only that rig's store, so each importer sweeps itself.
+#
+# The sweep itself is fail-safe (unreadable listings abort the pass,
+# nothing filed) and capped (default 5 filings per pass), so a first
+# run against a messy store produces a triage-able trickle.
+[order]
+description = "liveness sweep: classify open beads; normalize unnamed waits into conversation turns (P3)"
+formula = "mol-liveness-sweep"
+trigger = "cooldown"
+interval = "6h"
+pool = "gc-toolkit.polecat"
+scope = "rig"

@@ -33,12 +33,21 @@ id = "file-turn"
 title = "File the turn bead in the subject's continuation group"
 description = """
 ```bash
+# >>> gate-turn
+# The canonical gate-turn snippet (spec: specs/2026-08-fresh-start/
+# liveness-and-triage-spec.md §1). Consumers copy this block, markers
+# included; assets/scripts/gate-turn.test.sh extracts and checks every
+# copy's load-bearing invariants (rig-qualified pool, one key per
+# --set-metadata flag, parent-child edge, turn title brand).
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}converse"
 TURN=$(gc bd create -t task --title "turn: {{subject}} — {{visit}}" -d "{{visit}}" --json | jq -r '.id // .[0].id')
 gc bd update "$TURN" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group={{subject}}" \
   --set-metadata "task_kind=conversation"
 gc bd dep add "$TURN" {{subject}} --type=parent-child
+# To gate other work on this conversation, add a blocking edge:
+# gc bd dep add "$TURN" --blocks "<blocked-bead-id>"
+# <<< gate-turn
 ```
 
 The turn's body is the visit prompt; extend the `-d` body if {{visit}}
