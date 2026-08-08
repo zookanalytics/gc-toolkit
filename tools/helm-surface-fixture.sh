@@ -16,7 +16,10 @@
 #   • the --json contract — every documented field present (the `held`
 #     visit fact replaced the retired v1 `live` host field);
 #   • verb dispatch + validation — board/open/react/takeaway routing and the
-#     fail-closed arg checks.
+#     fail-closed arg checks;
+#   • the gather-failure contract (F-21/F-22) — a failed gather errors and
+#     is never cached, a legit empty board still is, and a host with no
+#     timeout/gtimeout degrades instead of dying (stub gc + private PATH).
 #
 # HERMETIC BY DESIGN. The board's render/rank/glyph path is driven through the
 # tool's GC_HELM_FIXTURE hook (canned anchors.ndjson + visits.json +
@@ -282,6 +285,79 @@ EMPTY="$(mktemp -d)"; : > "$EMPTY/anchors.ndjson"; cp "$FXDIR/rigs.json" "$EMPTY
 has  "empty board says nothing floats" "Nothing floats" "$(GC_HELM_FIXTURE="$EMPTY" "$TOOL" 2>/dev/null)"
 eq   "empty board --json is []" "0" "$(GC_HELM_FIXTURE="$EMPTY" "$TOOL" --json | jq 'length')"
 rm -rf "$EMPTY"
+
+echo "── hermetic: failed gather → error + NO cache; legit-empty → cached quiet board (F-22) ──"
+# These drive the REAL (non-fixture) gather path through a stub `gc` placed at
+# the front of a private PATH, with TMPDIR + GC_CITY_PATH pointed into the
+# sandbox so the cache lands (or not) somewhere we can assert on hermetically.
+# Nothing touches Dolt, the live city, or the operator's real cache dir.
+
+# (a) Rigs enumerate fine, but EVERY per-rig/convoy query dies (the
+# timeout/wedge/error shape F-21 produced). The board must print the explicit
+# gather-failure line — NOT the quiet empty-board message —, exit non-zero,
+# and write NO cache, so a transient failure can never be served as a false
+# "0 anchors" all-clear for the cache TTL.
+GF="$(mktemp -d)"; mkdir -p "$GF/bin" "$GF/rig/.beads" "$GF/tmp"
+cat > "$GF/bin/gc" <<GCEOF
+#!/bin/sh
+case "\$1 \$2" in
+  "rig list") printf '{"rigs":[{"name":"stubrig","path":"$GF/rig","prefix":"tk"}]}\n' ;;
+  *) exit 1 ;;
+esac
+GCEOF
+chmod +x "$GF/bin/gc"
+ec=0
+FOUT="$(TMPDIR="$GF/tmp" GC_CITY_PATH="$GF/city" PATH="$GF/bin:$PATH" "$TOOL" board 2>&1)" || ec=$?
+eq     "failed gather exits non-zero (3)"             "3"             "$ec"
+has    "failed gather prints the explicit error line" "gather failed" "$FOUT"
+absent "failed gather never reads as a quiet board"   "Nothing floats" "$FOUT"
+eq     "failed gather writes NO cache file"           ""              "$(find "$GF/tmp" -name 'board-*' -type f 2>/dev/null)"
+rm -rf "$GF"
+
+# (b) Control: a legitimately EMPTY board (every query answers, with valid
+# empty JSON) still prints the quiet message, exits 0, and IS cached.
+GE="$(mktemp -d)"; mkdir -p "$GE/bin" "$GE/rig/.beads" "$GE/tmp"
+cat > "$GE/bin/gc" <<GCEOF
+#!/bin/sh
+case "\$1 \$2" in
+  "rig list")     printf '{"rigs":[{"name":"stubrig","path":"$GE/rig","prefix":"tk"}]}\n' ;;
+  "bd list")      printf '[]\n' ;;
+  "convoy list")  printf '{"convoys":[]}\n' ;;
+  "session list") printf '{"sessions":[]}\n' ;;
+  *) printf '[]\n' ;;
+esac
+GCEOF
+chmod +x "$GE/bin/gc"
+ec=0
+EOUT="$(TMPDIR="$GE/tmp" GC_CITY_PATH="$GE/city" PATH="$GE/bin:$PATH" "$TOOL" board 2>&1)" || ec=$?
+eq  "legit empty board exits 0"                   "0"              "$ec"
+has "legit empty board prints the quiet message"  "Nothing floats" "$EOUT"
+eq  "legit empty board IS cached (1 cache file)"  "1"              "$(find "$GE/tmp" -name 'board-*' -type f 2>/dev/null | wc -l | tr -d ' ')"
+EOUT2="$(TMPDIR="$GE/tmp" GC_CITY_PATH="$GE/city" PATH="$GE/bin:$PATH" "$TOOL" board 2>&1 || true)"
+has "second glance serves from the cache"         "cached"         "$EOUT2"
+
+echo "── hermetic: no timeout/gtimeout on PATH → board degrades, does not die (F-21) ──"
+# Stock-macOS shape: neither GNU timeout nor gtimeout exists. Build a minimal
+# command sandbox (symlinks to only the tools the board needs + the stub gc
+# from (b)) and run with PATH set to ONLY that dir — with_timeout must fall
+# through to running the command unbounded instead of the old hard death
+# ("[: : integer expression expected" + jq --argjson garbage).
+NT="$(mktemp -d)"; mkdir -p "$NT/bin" "$NT/tmp"
+for c in jq date mktemp rm cat head tail sed mkdir mv id cksum cut readlink dirname sort tr uniq wc; do
+    p="$(command -v "$c" 2>/dev/null || true)"; [ -n "$p" ] && ln -s "$p" "$NT/bin/$c"
+done
+ln -s "$GE/bin/gc" "$NT/bin/gc"
+if PATH="$NT/bin" command -v timeout >/dev/null 2>&1 || PATH="$NT/bin" command -v gtimeout >/dev/null 2>&1; then
+    printf '  skip  timeout-less PATH case (sandbox unexpectedly resolves a timeout)\n'
+else
+    ec=0
+    NOUT="$(TMPDIR="$NT/tmp" GC_CITY_PATH="$NT/city" PATH="$NT/bin" "$TOOL" board 2>&1)" || ec=$?
+    eq     "no-timeout PATH: board still runs (exit 0)"        "0"                  "$ec"
+    has    "no-timeout PATH: renders the quiet board"          "Nothing floats"     "$NOUT"
+    absent "no-timeout PATH: no integer-expression crash"      "integer expression" "$NOUT"
+    absent "no-timeout PATH: no jq --argjson garbage"          "invalid JSON text"  "$NOUT"
+fi
+rm -rf "$NT" "$GE"
 
 echo "── hermetic: verb dispatch + fail-closed validation ──"
 has  "help lists the open verb"  "open"  "$("$TOOL" help 2>&1 || true)"

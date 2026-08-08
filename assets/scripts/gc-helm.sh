@@ -139,7 +139,9 @@
 # Exit codes:
 #   0   board rendered / verb succeeded
 #   2   usage error
-#   3   missing dependency (jq / gc) or could not enumerate rigs
+#   3   missing dependency (jq / gc), could not enumerate rigs, or the
+#       gather failed (nothing cached — a transient gather failure must
+#       never be served as a "0 anchors" all-clear; F-22)
 #   4   verb runtime failure (e.g. bead not found, visit filing failed)
 #
 # Test hook: GC_HELM_FIXTURE=<dir> — when set, the board reads
@@ -195,6 +197,23 @@ EOF
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 3; }
 command -v gc >/dev/null 2>&1 || { echo "$PROG: gc is required" >&2; exit 3; }
 
+# ── Portable timeout (F-21) ──────────────────────────────────────────
+# GNU `timeout` does not exist on stock macOS, and Homebrew coreutils
+# ships it as `gtimeout`. Resolve once at startup, then route EVERY
+# bounded query through with_timeout: `timeout` if present, else
+# `gtimeout`, else run the command with NO bound — degraded (a wedged
+# Dolt can stall a glance) but working beats a board that is dead on
+# the host. Never call `timeout` directly below.
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_BIN=timeout
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_BIN=gtimeout
+else TIMEOUT_BIN=""
+fi
+# with_timeout <seconds> <cmd> [arg…]
+with_timeout() {
+    _wt_secs="$1"; shift
+    if [ -n "$TIMEOUT_BIN" ]; then "$TIMEOUT_BIN" "$_wt_secs" "$@"; else "$@"; fi
+}
+
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Resolve sibling tools regardless of where the pack is materialized:
@@ -219,15 +238,24 @@ bust_cache() { rm -f "$CACHE_FILE" 2>/dev/null || true; }
 # ── Rig enumeration (shared by board + verb rig resolution) ───────────
 # Sets RIGS (JSON array of {name,path,prefix}). Exits 3 if none.
 RIGS=""
+# Count of rigs in $RIGS, hardened: jq emits NOTHING (exit 0) on empty
+# input, so testing its raw output with `[ … -eq 0 ]` compares an EMPTY
+# string and throws (`[: : integer expression expected`) instead of taking
+# the clean exit-3 path — normalize any non-numeric count to 0 (F-21).
+rigs_count() {
+    _rc=$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)
+    case "$_rc" in ''|*[!0-9]*) _rc=0 ;; esac
+    printf '%s' "$_rc"
+}
 enumerate_rigs() {
     [ -n "$RIGS" ] && return 0
     if [ -n "$FIXTURE" ] && [ -f "$FIXTURE/rigs.json" ]; then
         RIGS=$(jq -c '.' < "$FIXTURE/rigs.json" 2>/dev/null || printf '[]')
-        [ "$(printf '%s' "$RIGS" | jq 'length')" -gt 0 ] && return 0
+        [ "$(rigs_count)" -gt 0 ] && return 0
     fi
-    rigs_raw=$(timeout "${TIMEOUT:-10}" gc rig list --json 2>/dev/null || true)
+    rigs_raw=$(with_timeout "${TIMEOUT:-10}" gc rig list --json 2>/dev/null || true)
     RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null || printf '[]')
-    if [ "$(printf '%s' "$RIGS" | jq 'length')" -eq 0 ]; then
+    if [ "$(rigs_count)" -eq 0 ]; then
         echo "$PROG: could not enumerate rigs (gc rig list returned nothing)" >&2
         exit 3
     fi
@@ -489,7 +517,8 @@ cmd_open() {
     gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
         --set-metadata "gc.continuation_group=$bead" \
         --set-metadata "task_kind=visit"
-    gc bd dep add "$VISIT" "$bead" --type=parent-child
+    # --type=tracks, NOT parent-child: parent-child transmits the subject's blocked state to the visit — F-06
+    gc bd dep add "$VISIT" "$bead" --type=tracks
     # <<< gate-visit
     bust_cache
 
@@ -590,15 +619,23 @@ cmd_board() {
     : > "$ANCHORS"
     VISITS_FILE="$TMP/visits.json"
     printf '[]\n' > "$VISITS_FILE"
+    # F-22: gather-failure marker. The gather loops run in pipeline
+    # subshells, so a shell variable cannot carry "a query died" back up —
+    # a marker FILE can. Any line in it means the gather is NOT trusted:
+    # never cached, never rendered as a (false) quiet board.
+    GATHER_ERR="$TMP/gather-failed"
 
     NOW_EPOCH=$(date -u +%s)
     NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
     # Bounded gc wrapper: never let a slow/wedged Dolt query abort the board.
-    gcq() { timeout "$TIMEOUT" gc "$@" 2>/dev/null || true; }
+    gcq() { with_timeout "$TIMEOUT" gc "$@" 2>/dev/null || true; }
     as_array() {
         if printf '%s' "$1" | jq -e 'type=="array"' >/dev/null 2>&1; then printf '%s' "$1"; else printf '[]'; fi
     }
+    # gather_mark <what>: record that a gather query came back empty/invalid
+    # (the timeout/wedge/error shape) — see GATHER_ERR above (F-22).
+    gather_mark() { printf '%s\n' "$1" >> "$GATHER_ERR" 2>/dev/null || true; }
 
     enumerate_rigs
     PREFIXES=$(printf '%s' "$RIGS" | jq -c '[.[].prefix]')
@@ -624,6 +661,15 @@ cmd_board() {
     if [ -z "$FIXTURE" ] && [ "$gathered_from_cache" -eq 0 ]; then
         gather_anchors    # writes $ANCHORS
         gather_visits     # writes $VISITS_FILE (one JSON array line)
+        # F-22: a failed gather is an ERROR, not an empty board. Caching it
+        # would serve a false "0 anchors" all-clear for the whole TTL — on the
+        # one surface whose job is to tell a human whether anything needs
+        # them. Print an explicit line (distinct from the legitimate quiet-
+        # board message), cache NOTHING, and exit 3.
+        if [ -s "$GATHER_ERR" ]; then
+            echo "$PROG: gather failed ($(sort -u "$GATHER_ERR" | head -n 5 | tr '\n' ' ' | sed 's/ $//')) — board not rendered, nothing cached; retry with --refresh or check gc/Dolt" >&2
+            exit 3
+        fi
         # Persist the gather under one timestamp (portable mtime).
         mkdir -p "$CACHE_DIR" 2>/dev/null || true
         if [ -d "$CACHE_DIR" ]; then
@@ -828,8 +874,11 @@ def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as 
 }
 
 # ── Anchor gather (the cached, Dolt-heavy part) ──────────────────────
-# Appends one anchor object per line to $ANCHORS. Reads only; a rig that
-# errors or is empty is skipped, never aborts the board.
+# Appends one anchor object per line to $ANCHORS. Reads only. A query
+# that comes back EMPTY/INVALID (timeout, wedged Dolt, gc error) is
+# gather_mark'ed so the caller refuses to cache or render the result
+# (F-22); a query that comes back VALID but empty is a legitimately
+# quiet rig and is simply skipped.
 gather_anchors() {
     printf '%s' "$RIGS" | jq -c '.[]' | while IFS= read -r rig; do
         name=$(printf '%s' "$rig" | jq -r '.name')
@@ -839,10 +888,14 @@ gather_anchors() {
         [ -d "$beads" ] || continue
 
         # Epics: roll up children via --parent (all statuses, so closed count is real).
-        epics=$(as_array "$(gcq bd list --db "$beads" --type epic --status open --json)")
+        epics_raw=$(gcq bd list --db "$beads" --type epic --status open --json)
+        printf '%s' "$epics_raw" | jq -e 'type=="array"' >/dev/null 2>&1 || gather_mark "epics@$name"
+        epics=$(as_array "$epics_raw")
         printf '%s' "$epics" | jq -c '.[]' | while IFS= read -r epic; do
             eid=$(printf '%s' "$epic" | jq -r '.id')
-            children=$(as_array "$(gcq bd list --db "$beads" --parent "$eid" --status open,in_progress,closed,blocked,deferred --json)")
+            ch_raw=$(gcq bd list --db "$beads" --parent "$eid" --status open,in_progress,closed,blocked,deferred --json)
+            printf '%s' "$ch_raw" | jq -e 'type=="array"' >/dev/null 2>&1 || gather_mark "children@$eid"
+            children=$(as_array "$ch_raw")
             printf '%s' "$epic" | jq -c \
                 --argjson ch "$children" --arg rig "$name" --arg prefix "$prefix" \
                 '{id, title:(.title//""), kind:"epic", source:"epic", rig:$rig, prefix:$prefix,
@@ -855,7 +908,9 @@ gather_anchors() {
         done
 
         # Decisions: human-gated; no child roll-up needed (rank is elevated regardless).
-        decisions=$(as_array "$(gcq bd list --db "$beads" --type decision --status open --json)")
+        decisions_raw=$(gcq bd list --db "$beads" --type decision --status open --json)
+        printf '%s' "$decisions_raw" | jq -e 'type=="array"' >/dev/null 2>&1 || gather_mark "decisions@$name"
+        decisions=$(as_array "$decisions_raw")
         printf '%s' "$decisions" | jq -c \
             --arg rig "$name" --arg prefix "$prefix" \
             '.[] | {id, title:(.title//""), kind:"decision", source:"decision", rig:$rig, prefix:$prefix,
@@ -877,7 +932,9 @@ gather_anchors() {
     # non-machine convoy is exactly what the observer must catch (PROBLEM 2).
     # (Old behavior `select(.owned==true)` silently hid that exception and let
     # the new `input convoy for …` machine kind through only by accident.)
-    convoys=$(printf '%s' "$(gcq convoy list --json)" | jq -c '
+    convoys_raw=$(gcq convoy list --json)
+    printf '%s' "$convoys_raw" | jq -e 'type=="object" or type=="array"' >/dev/null 2>&1 || gather_mark "convoy-list"
+    convoys=$(printf '%s' "$convoys_raw" | jq -c '
         [ .convoys[]?
           | select((.title // "") | startswith("sling-") | not)
           | select((.title // "") | startswith("input convoy for") | not) ]' 2>/dev/null || printf '[]')
@@ -892,6 +949,9 @@ gather_anchors() {
         [ -d "$beads" ] || continue
 
         show=$(gcq bd show "$cid" --db "$beads" --include-dependents --json)
+        # Empty/invalid reply = the timeout/wedge shape → mark (F-22); a
+        # VALID reply that just isn't a non-empty array is a legit skip.
+        printf '%s' "$show" | jq -e '.' >/dev/null 2>&1 || { gather_mark "show@$cid"; continue; }
         printf '%s' "$show" | jq -e 'type=="array" and length>0' >/dev/null 2>&1 || continue
         parent=$(printf '%s' "$show" | jq -r '.[0].parent // empty')
         [ -z "$parent" ] || continue
@@ -918,7 +978,8 @@ gather_anchors() {
 # ── Visit gather (rides the cached gather) ───────────────────────────
 # Writes ONE JSON-array line to $VISITS_FILE: the unique subject ids
 # carried by open visit beads (task_kind=visit, gc.continuation_group).
-# Per-rig like the anchor gather; a rig that errors is skipped. Both
+# Per-rig like the anchor gather; a rig whose query dies is
+# gather_mark'ed (F-22, see gather_anchors). Both
 # open AND in_progress count as "open" here — a claimed visit is a held
 # conversation, not a finished one.
 gather_visits() {
@@ -927,7 +988,9 @@ gather_visits() {
         path=$(printf '%s' "$rig" | jq -r '.path')
         beads="$path/.beads"
         [ -d "$beads" ] || continue
-        as_array "$(gcq bd list --db "$beads" --status open,in_progress --json --limit=0)" \
+        v_raw=$(gcq bd list --db "$beads" --status open,in_progress --json --limit=0)
+        printf '%s' "$v_raw" | jq -e 'type=="array"' >/dev/null 2>&1 || gather_mark "visits@$path"
+        as_array "$v_raw" \
             | jq -r '.[] | select((.metadata.task_kind // "") == "visit")
                      | .metadata["gc.continuation_group"] // empty' >> "$TMP/visit-subjects.txt" 2>/dev/null || true
     done
