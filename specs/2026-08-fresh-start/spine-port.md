@@ -5,6 +5,15 @@ description: The decisions made porting the quarry's reviewed converse+turn real
 
 # Decision record: conversation-spine port
 
+**TL;DR (added after operator feedback that this document is hard to
+read):** we ported the reviewed converse role and visit-filing formula
+from the quarry, made five decisions doing it — kept the name converse
+(D1), used main's claim/drain commands (D2), dropped the recycle-marker
+dependency (D3), **deliberately skipped the design's reaper-skip clause
+because recovery of a dead-session visit IS the cold-restart path**
+(D4, the one that contradicts tk-h9pq5), and used default pool demand
+(D5). Runtime proof is the live runbook's step 1.
+
 > **Vocabulary addendum (2026-08-08):** after this record was written,
 > the operator renamed the concept — "turn" is now **visit**
 > (`mol-visit.toml`, `visit:` brand, `task_kind=visit`), and

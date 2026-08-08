@@ -12,6 +12,17 @@ description: Implementation spec for the three pieces that realize P3 and the ba
 > `task_kind=conversation` → `task_kind=visit`. This spec is kept as the
 > green-lit record; read its "turn"/"gate-turn" as "visit"/"gate-visit".
 
+> **Sweep addendum (2026-08-08, operator review):** §2's per-bead
+> normalization and epic exclusion are superseded in the implementation:
+> normalization is **batched** (one standing "unnamed waits" triage
+> subject per rig; one visit per pass listing all candidates — N idle
+> beads cost one conversation, not N, per the P3 batching resolution),
+> and the epic special-case is replaced by the type-agnostic
+> **waiting-on-structure** class (open children or blockers = named
+> wait; an epic with all children closed is a first-class unnamed wait
+> needing a "what comes next?" exploration). The per-pass filing cap is
+> superseded by a per-visit listing cap.
+
 Realizes P1–P4 ([operating-principles.md](operating-principles.md)) on
 existing patterns only. Three repo pieces, one city-side list, one
 explicitly deferred design. Vehicle per operator discussion: repo pieces

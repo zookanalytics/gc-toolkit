@@ -66,14 +66,13 @@ hand, which is also a fine first exercise of it).
 ## 3. Watch one liveness-sweep cycle
 
 The order fires within 6h of `gc` start; to force it sooner, run the
-formula's fire path once by hand (or just wait). **Expect:** at most 5
-`visit: <id> — unnamed wait: route, gate, or park` beads on genuinely
-idle beads, each parent-child to its subject, each spawning/queueing a
-converse hold; the sweep's own notes list every filing plus how many
-candidates the cap deferred. **The first pass against the real store is
-a backlog census — expect real mess to surface; that is P3 working, not
-a malfunction.** If the volume reads wrong, say so: the cap and cadence
-are calibration defaults, not decisions.
+formula's fire path once by hand (or just wait). **Expect:** the sweep creates its standing "triage: unnamed waits" subject
+(first run only) and files ONE batch visit listing every genuinely idle
+bead (up to 20 lines), including any all-children-closed epics as
+"what comes next?" candidates; a converse session holds it. **The first pass against the real store is a backlog census — expect a
+long list; that is P3 working, and it costs exactly one conversation.**
+Work the sitting (route / gate / park / kill, or open a visit on one);
+the next pass lists only what remains.
 
 ## 4. Watch one triage-recurrence evaluation
 

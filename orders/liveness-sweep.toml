@@ -1,8 +1,8 @@
 # liveness-sweep — the P3 order: every open bead is worked, gated,
-# conversing, or held-by-design; unnamed waits get normalized into
-# conversation turns. Fires mol-liveness-sweep on a 6h cooldown — the
+# conversing, or held-by-design; unnamed waits get batched into one
+# triage visit. Fires mol-liveness-sweep on a 6h cooldown — the
 # sweep hunts drift, not emergencies; anything urgent already has a
-# route, a gate, or a turn.
+# route, a gate, or a visit.
 #
 # Spec: specs/2026-08-rethink is history; the live spec is
 # specs/2026-08-fresh-start/liveness-and-triage-spec.md §2. Principle:
@@ -15,10 +15,11 @@
 # reads only that rig's store, so each importer sweeps itself.
 #
 # The sweep itself is fail-safe (unreadable listings abort the pass,
-# nothing filed) and capped (default 5 filings per pass), so a first
-# run against a messy store produces a triage-able trickle.
+# nothing filed) and BATCHED: one standing "unnamed waits" triage
+# subject per rig, one visit per pass listing all candidates — a messy
+# store costs one conversation, never one per idle bead.
 [order]
-description = "liveness sweep: classify open beads; normalize unnamed waits into conversation turns (P3)"
+description = "liveness sweep: classify open beads; batch unnamed waits into one triage visit (P3)"
 formula = "mol-liveness-sweep"
 trigger = "cooldown"
 interval = "6h"
