@@ -30,7 +30,7 @@ config" — upstream's own words).
 | Domain | gc-toolkit today (or planned) | Gas City today | Verdict |
 |---|---|---|---|
 | Conversation lifecycle (identity, turns, record) | tk-h9pq5 design: subject bead id = continuation group, hold-not-close converse role, turns as beads (unbuilt) | Continuation groups ship in core and carry the continuity; **extmsg does not track in-city conversations** — it is last-mile transport for external channels (bindings + transcripts live channel-side, nothing touches beads) | **Build ours on continuation groups** (still pure core assembly); extmsg is reach-from-anywhere transport for the same conversations, later, plus the meet-at-the-subject-bead boundary for genuinely external messages |
-| Brief → tree of work | `mol-nx-plan` spec (design-only): plan block, diff-against-live, ratification turn | The `gascity` pack build factory: `requirements-planner` → `design-author` → `review-synthesizer` (approval, incl. interactive mode) → `task-decomposer` → `create-beads` files convoys/beads with dep edges from schema-validated `tasks.md`; methodology packs (bmad, superpowers, …) override the decomposition step | **Adopt**; shelve mol-nx-plan. Re-open only the desired-state-reconcile delta if lived re-planning demands it |
+| Brief → tree of work | `mol-nx-plan` spec (design-only): plan block, diff-against-live, ratification turn | The `gascity` pack build factory: requirements → plan → adversarial review → decompose → beads filed, autonomous per-stage pooled sessions. **Trialed 2026-08-08 (tk-c31ou): tree quality good, review stage caught a would-be destructive bead — but no approval mechanism exists at all** (no graph edge can wait on a human; the review's `changes_required` verdict is structurally advisory), and its plan lives in files, not the record | **ADAPT** ([trial reactions](build-factory-trial-reactions.md)): keep the stages, the pooled sessions, and the adversarial review; graft `mol-nx-plan`'s two core ideas onto the decompose boundary — the **ratification turn** (a real blocking edge) and the **rev-pinned plan in the brief bead's notes** (so re-planning diffs instead of re-files). mol-nx-plan is un-shelved to exactly that extent |
 | Worker/role contract | Hand-authored roles planned; gastown polecat imported+patched | `gc-role-worker` shared fragment, 12 roles, `gc gc claim` discovery, close+outcome discipline, empty-group session boundary | **Adopt** the gascity roles pack; express any variant as a delta on the fragment |
 | Human approval / gating | Head-pinned check-set, merge-skill single writer, pre-open gate, signoff rounds (shipped, battle-tested) | v2 check loops re-run work until a script passes; **no native human-approval construct** ("embedded in agent prompts or external review roles"); `gc converge` gates are legacy | **Keep ours** — this is the pack's sharpest earned value; recompose it as gastown-refinery patches, unchanged in substance |
 | Landing work | Refinery patched from gastown + bespoke close-on-land reconcile | Convoys grew landing machinery: merge strategies (`direct\|mr\|local`), `gc convoy land`, `gc convoy stranded`; merge-queue behavior still explicitly pack territory | **Ride** convoy landing; keep the check-set layer on top |
@@ -80,11 +80,12 @@ A city stood up today, upstream-native:
   4. **Banked lessons** — the doctor checks and trap docs. These survive
      any composition; they are the pack's memory.
 - **Retired or shelved:** bead-host residue (already superseded),
-  mol-nx-plan (superseded by the build factory until lived experience
-  says otherwise), converge-style gating (upstream calls it legacy),
-  most local patrol patches (upstream fixed the underlying bugs). The
-  converse role and turn machinery are **not** on this list: nothing
-  upstream replaces them; they are the focus-1 build.
+  converge-style gating (upstream calls it legacy), most local patrol
+  patches (upstream fixed the underlying bugs). The converse role and
+  turn machinery are **not** on this list: nothing upstream replaces
+  them; they are the focus-1 build. And mol-nx-plan moved off this list
+  after the trial: its ratification-turn + record-resident-plan core is
+  precisely what the factory lacks ([trial verdict](build-factory-trial-reactions.md)).
 
 ## What this pressures, honestly
 

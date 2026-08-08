@@ -81,9 +81,16 @@ gc sling gc.run-operator <bead-id> --on build-basic \
   --var artifact_root=plans/conversation-spine/build
 ```
 
-Defaults that matter (leave them): `interaction_mode=interactive`
-(preserves blocking questions and approval menus), `review_mode=agent`,
-`push=false`, `open_pr=false`.
+Defaults that matter (leave them): `interaction_mode=interactive`,
+`review_mode=agent`, `push=false`, `open_pr=false`.
+
+**Corrected by the run (see
+[build-factory-trial-reactions.md](build-factory-trial-reactions.md) §3):**
+`interaction_mode=interactive` is *model discretion*, not a mechanism —
+`build-basic` ships **no approval gate of any kind**, no graph edge can
+wait on a human, and the run filed 8 beads with nothing asked. Expect
+autonomy, not menus; the judge point below is *your* gate, imposed from
+outside the formula.
 
 **Known trap (F4, from the live run):** a launch warning may claim the
 factory lacks context it actually receives — the input convoy delivers
@@ -95,8 +102,13 @@ safe var is `--var context_path=<dir>`. See
 [build-factory-trial-findings.md](build-factory-trial-findings.md). The step chain is
 prepare → requirements (`gc.requirements-planner`) → plan
 (`gc.design-author`) → plan-review (`gc.review-synthesizer`) → decompose
-(`gc.task-decomposer`) → implement → review → finalize, each artifact
-schema-checked (`gc.build.*.v1`, 3 attempts).
+(`gc.task-decomposer`) → implement → review → finalize. Artifacts are
+*supposed* to be schema-checked (`gc.build.*.v1`, 3 attempts) — **but in
+a split city/rig layout the check never runs** (relative
+`.gc/scripts/…` path resolves against the rig root; every stage
+control-quarantines and proceeds ungated — reactions doc, environment
+finding 1). Assume artifacts are unvalidated unless the scripts were
+installed into the rig root first.
 
 ## The stop-and-judge point
 
