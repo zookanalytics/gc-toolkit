@@ -54,7 +54,7 @@ Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
 (process-scan). NOT a resident loop either way.
 
 The first reaction NEVER closes the target work bead — it advances it (card +
-`gc.attention` flag) and releases it open for the human to accept/redirect.
+a filed conversation turn) and releases it open for the human to accept/redirect.
 The `gc.proactive_reaction` marker stops the scan from re-reacting. The card
 shape (Understanding · Found · Proposal · Decision needed) is the same one the
 bead-host opens with and the board picker lands the human on.

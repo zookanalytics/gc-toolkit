@@ -138,8 +138,13 @@ subject bead is the natural binding anchor — the two models meet at the
 subject bead.** A Slack thread about a piece of work should bind where
 that work's conversation already lives, not beside it.
 
-`gc.attention` has zero upstream meaning (verified 2026-08-06) — the
-board's flag semantics are safely the pack's own.
+`gc.attention` has zero upstream meaning (verified 2026-08-06) — and as
+of the fresh start the pack no longer uses it either: the
+flag-for-attention concept is removed (operator decision, 2026-08-08).
+"An agent believes a human should look at this" has exactly one form —
+file a conversation turn on the subject — so the board derives what is
+pressing from real state (open turns, human gates, stranded work) rather
+than from self-assertions with no lifecycle.
 
 ## How questions reach a human today (source-verified 2026-08-08)
 
@@ -212,7 +217,7 @@ and it is deliberately small:
 - **Turns as beads** — the durable, board-legible conversation spine
   under a subject bead.
 - **The attention board's semantics** — ranking what needs a human now,
-  and a bead raising its own hand (`gc.attention`).
+  derived from the work tree's real state.
 - **A decomposition formula** — nothing upstream files a ratified *tree*
   from a brief (the planner roles plan; they do not file structure).
 

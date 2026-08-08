@@ -297,9 +297,9 @@ scan_candidates() {
     [ -n "$optin" ] || optin='[]'
 
     # (B) movable-forward: any ready, unassigned, non-epic bead. We then drop
-    # the ones already advanced (gc.proactive_reaction set), already
-    # hand-raised (gc.attention set), or already routed somewhere — those are
-    # not "able to be updated" by a fresh first reaction.
+    # the ones already advanced (gc.proactive_reaction set) or already
+    # routed somewhere — those are not "able to be updated" by a fresh
+    # first reaction.
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
     movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
                 --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
@@ -312,7 +312,6 @@ scan_candidates() {
         (.[0] + .[1])
         | map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
-            and ((.metadata["gc.attention"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
           ))

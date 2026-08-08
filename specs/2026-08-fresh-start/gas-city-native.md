@@ -55,9 +55,11 @@ A city stood up today, upstream-native:
   `slack-full` or `slack-mini` (the human channel over extmsg) · `cass`.
 - **gc-toolkit, the pack, shrinks to a thin opinion layer:**
   1. **The attention surface** — the board's semantics: anchor kinds,
-     severity ranking, a bead raising its own hand, and the visual
-     consistency that makes a glance reinstate context (each anchor with
-     a durable place, the Canvas direction). Strictly **pull**: the
+     severity ranking derived from real state (open turns, human gates,
+     stranded work — the `gc.attention` self-flag is removed, operator
+     decision 2026-08-08), and the visual consistency that makes a
+     glance reinstate context (each anchor with a durable place, the
+     Canvas direction). Strictly **pull**: the
      operator glances when they choose; nothing pings them. Ranking,
      curation, and visual consistency are the pack's identity — upstream
      has nothing here, and this is its clearest reason to exist.
