@@ -149,6 +149,7 @@ Topics gc-toolkit has captured locally, where upstream coverage is
 missing, partial, or contradicted by a more recent maintainer ruling.
 Entries here are gc-toolkit-authored prose, not upstream pointers.
 
+- [Gas City and human engagement](gascity-human-engagement.md) — how upstream supports human engagement (extmsg, gates, pending interactions, the dashboard's attention surfaces) and the pack's subject/visit vocabulary and seams, every claim dated.
 - [Gas City agent types](gascity-agents.md) — the agent variants (named singletons, pool workers, threads, patrol overlay), with their identity, lifecycle, addressing, and work-routing contracts.
 - [Gas City routing model: sling vs assignee vs `--reassign`](gascity-routing-model.md) — three-lane routing model per the PR #1736 ruling.
 - [Gas City pack & formula authoring](gascity-packs.md) — non-obvious pack/formula authoring rules for building gc-toolkit on the base packs: choosing a contract, the v2 opt-in, and the `pack.toml` / layering traps.

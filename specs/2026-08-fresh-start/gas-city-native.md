@@ -16,7 +16,7 @@ note answers by mapping every standing gc-toolkit system onto upstream's
 current answer, keeping only what upstream genuinely does not provide. All
 upstream claims verified 2026-08-08 (live docs at docs.gascity.com; pack
 sources at gastownhall/gascity-packs @ main; companion fact ledger:
-[gascity-conversations.md](../../docs/gascity-conversations.md)).
+[gascity-human-engagement.md](../../docs/gascity-human-engagement.md)).
 
 The headline: the push is right. Upstream now covers most of what the pack
 built or planned to build, including two things that were "missing
@@ -67,7 +67,7 @@ A city stood up today, upstream-native:
      reaches a decision writes it to the subject bead; turns are filed as
      beads so the spine is board-legible. Meeting extmsg *at the subject
      bead*, as already recorded in
-     [gascity-conversations.md](../../docs/gascity-conversations.md).
+     [gascity-human-engagement.md](../../docs/gascity-human-engagement.md).
   3. **The merge check-set** — the head-pinned gate machinery and its
      doctor checks, recomposed as refinery configuration. Kept as
      *mechanism*, with membership explicitly **shrinking by design**: a
@@ -213,7 +213,7 @@ reacted to what the step showed.
 ## Sources
 
 - Live docs sweep 2026-08-08 (docs.gascity.com via llms.txt; quotes in
-  [gascity-conversations.md](../../docs/gascity-conversations.md)).
+  [gascity-human-engagement.md](../../docs/gascity-human-engagement.md)).
 - Pack-source survey 2026-08-08: gastownhall/gascity-packs @ main —
   `gascity/` (roles, formulas, schemas, README), `gastown/` (agents,
   formulas, refinery prompt, commit log), `cass/`, `slack-full/`,

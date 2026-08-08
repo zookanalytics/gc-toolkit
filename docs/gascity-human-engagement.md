@@ -1,9 +1,22 @@
 ---
-name: Gas City's conversation direction
-description: Local supplement tracking how Gas City is evolving to support human conversations — the shipping primitives, the live upstream investments, and the trajectory — with the seam gc-toolkit rides at each. Companion to architecture.md's "How agents exist and converse"; every claim carries its verification date.
+name: Gas City and human engagement
+description: Local supplement tracking how Gas City is evolving to support human engagement — the shipping primitives, the live upstream investments, and the trajectory — with the seam gc-toolkit rides at each, and the pack's two-noun vocabulary (subject / visit). Companion to architecture.md's "How agents exist and converse"; every claim carries its verification date.
 ---
 
-# Gas City's conversation direction
+# Gas City and human engagement
+
+**Vocabulary (operator-settled 2026-08-08).** The pack's model has two
+technical nouns. A **subject** is the durable thing a dialogue is about —
+the bead; its id is the continuation-group identity; its notes and visit
+history are the dialogue's record, spanning its whole life (an epic may
+see hundreds of visits). A **visit** is one bounded sitting of that
+dialogue (née "turn" — tk-h9pq5 and older specs use the old word): filed
+as a child bead, held live by the converse role, outcome recorded to the
+subject, closed when the sitting ends; at most one sitting is live per
+subject (the continuation-group vacuum serializes pending visits into
+it). "Conversation" is deliberately **not** a technical term in this
+pack — it reverts to plain speech, which also leaves upstream's extmsg
+"conversation" (an external channel thread) unambiguous.
 
 gc-toolkit's conversation model is a bet on Gas City's own momentum: the
 runtime is steadily growing the primitives a human conversation needs, and
@@ -51,7 +64,7 @@ Each entry: the upstream fact, its verification status, and the seam.
   `3e629ad`, and exercised live by this pack's own pool claims; live docs
   2026-08-08 confirm — "the hook atomically claims one ready bead and
   preassigns continuation siblings", tutorials/06-beads). *Seam:*
-  the subject bead's id **is** the group; turns filed into the group reach
+  the subject bead's id **is** the group; visits filed into the group reach
   a warm session automatically, and a cold session reconstitutes from the
   record. No reverse links, no bespoke binding.
 
@@ -62,7 +75,7 @@ Each entry: the upstream fact, its verification status, and the seam.
   direct stamps must be rig-qualified; and under a `default_sling_formula`
   a bare sling is a formula attach that stamps nothing — stamp-don't-sling
   or `--no-formula` ([gascity-routing-model.md](gascity-routing-model.md)).
-  *Seam:* a turn is ordinary routed work; pool demand spawns the
+  *Seam:* a visit is ordinary routed work; pool demand spawns the
   conversation session with no operator keystroke.
 
 - **The worker-role contract — upstream now owns the idiom.** The
@@ -92,8 +105,8 @@ Each entry: the upstream fact, its verification status, and the seam.
   order fails silently on it (same verification). The sanctioned hold
   taxonomy is `hold:mayor` / `hold:external` only; bare `human` hold
   labels are retired upstream. *Seam:* a human question is a bead whose
-  canonical form is a conversation turn — the turn is the
-  conversation-carrying refinement of the human gate, never a competitor
+  canonical form is a visit — the visit is the
+  dialogue-carrying refinement of the human gate, never a competitor
   to it; an open human gate is a legitimate named wait. The raw
   `routed_to=human` lane is a trap, not a feature.
 
@@ -103,7 +116,7 @@ Each entry: the upstream fact, its verification status, and the seam.
   docs 2026-08-08 confirm both, tutorials/06-beads — "blocked work is
   invisible to work queries"). `bd dep remove` exists in source
   (golden-tested; not covered in the public docs). *Seam:* a
-  decision-needed turn can block its dependents with core edges — "a
+  decision-needed visit can block its dependents with core edges — "a
   human approval is just a check nothing non-human can yet satisfy"
   composes directly, no bespoke gate machinery.
 
@@ -133,7 +146,7 @@ already exercised by the oversight-rig pack's rollup delivery
 This is a **different plane** from gc-toolkit's beads-as-turns — extmsg
 is channel-shaped and session-bound; ours is operator-internal and
 record-durable — and the two are complementary, not competing. The
-boundary, on the record: **when an external channel arrives, the turn's
+boundary, on the record: **when an external channel arrives, the
 subject bead is the natural binding anchor — the two models meet at the
 subject bead.** A Slack thread about a piece of work should bind where
 that work's conversation already lives, not beside it.
@@ -142,8 +155,8 @@ that work's conversation already lives, not beside it.
 of the fresh start the pack no longer uses it either: the
 flag-for-attention concept is removed (operator decision, 2026-08-08).
 "An agent believes a human should look at this" has exactly one form —
-file a conversation turn on the subject — so the board derives what is
-pressing from real state (open turns, human gates, stranded work) rather
+file a visit on the subject — so the board derives what is
+pressing from real state (open visits, human gates, stranded work) rather
 than from self-assertions with no lifecycle.
 
 ## How questions reach a human today (source-verified 2026-08-08)
@@ -184,7 +197,7 @@ maturity — the split matters more than any single fact here:
   sound home today: a gate bead in the graph.
 
 *Seam:* gc-toolkit's conversation model is the missing top of this
-stack, not a competitor to it — a gate filed as a **turn** gives the
+stack, not a competitor to it — a gate filed as a **visit** gives the
 durable tier what the session tier already has (framing, a
 conversation, an owner), and the board gives gates the first-class
 ranked identity `await_type` lacks. Ride the notify/renudge orders and
@@ -212,28 +225,28 @@ Revised 2026-08-08 after the build-factory trial and operator probing —
 this is the genuinely native ground, and it is deliberately small. A
 definition first, because everything below uses it:
 
-> **A turn** is one visit's worth of conversation, stored as a bead: a
-> small child of the subject whose body is the visit prompt ("ratify
-> this plan", "review posted — decision needed"), whose metadata routes
-> it to the converse pool and names the subject's continuation group,
-> whose `gc.outcome` records what the visit decided, and which closes
-> when the visit is done (the subject never closes this way). The
-> sequence of turns under a subject is the conversation's durable
-> spine — board-legible, cold-reconstructable, no provider transcript
-> required.
+> **A visit** is one bounded sitting of a subject's dialogue, stored as
+> a bead: a small child of the subject whose body is the sitting's
+> prompt ("ratify this plan", "review posted — decision needed"), whose
+> metadata routes it to the converse pool and names the subject's
+> continuation group, whose `gc.outcome` records what the sitting
+> decided, and which closes when the sitting ends (the subject never
+> closes this way). The sequence of visits under a subject is the
+> dialogue's durable spine — board-legible, cold-reconstructable, no
+> provider transcript required.
 
 - **The hold on the gate.** Upstream has the *wait* (human gates,
   `blocks` edges — work durably stops). It has no role that services
   the wait: every upstream role's contract is claim → execute → close;
   none claims a bead and deliberately sits `in_progress` for a human,
   having rebuilt the subject's context and framed the choice, then
-  records the answer to the subject and closes only the turn. Gate and
+  records the answer to the subject and closes only the visit. Gate and
   hold are two halves of one mechanism: the gate makes the work wait;
-  the hold (the converse role, on a turn) makes the wait worth arriving
+  the hold (the converse role, on a visit) makes the wait worth arriving
   at instead of a parked bead you cold-start yourself.
 - **The board's judgment — as a lens, never a dependency.** Ranking
   what deserves the operator's glance, derived from real graph state
-  (open turns, human gates, stranded work), with visual consistency.
+  (open visits, human gates, stranded work), with visual consistency.
   **Constraint (operator, 2026-08-08): everything works without the
   board** — work moves entirely on graph state; the board renders it
   and must never be a mechanism anything depends on.

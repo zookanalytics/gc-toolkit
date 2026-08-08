@@ -43,7 +43,7 @@ the design predicted.
 - `tools/gc-proactive.sh` — the scan's `gc.attention` skip clause
   removed (the `gc.proactive_reaction` marker already carries the
   dedup).
-- `agents/proactive/PROVENANCE.md`, `docs/gascity-conversations.md`,
+- `agents/proactive/PROVENANCE.md`, `docs/gascity-human-engagement.md`,
   `specs/2026-08-fresh-start/gas-city-native.md` — prose updated.
 
 **Deliberately untouched:** `specs/` history (records stay as written,

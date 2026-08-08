@@ -1,15 +1,14 @@
 description = """
 mol-liveness-sweep — the P3 enforcement pass: no idle beads. Every open
 bead must be worked, gated, conversing, or held-by-design; anything else
-is an UNNAMED WAIT, and this sweep normalizes it into a conversation
-turn so the graph's every path terminates at live work or a human gate
+is an UNNAMED WAIT, and this sweep normalizes it into a visit so the graph's every path terminates at live work or a human gate
 (specs/2026-08-fresh-start/operating-principles.md P3;
 specs/2026-08-fresh-start/liveness-and-triage-spec.md §2).
 
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
 Fired by orders/liveness-sweep.toml on cooldown; one fire = one pass:
-classify, file capped gate-turns for the unnamed, log, drain.
+classify, file capped gate-visits for the unnamed, log, drain.
 
 Contract: v1 — a one-shot linear pass, the doc-keeper shape.
 """
@@ -18,7 +17,7 @@ version = 1
 
 [vars]
 [vars.cap]
-description = "Max gate-turns filed per pass, so a messy store yields a triage-able trickle, not a flood"
+description = "Max gate-visits filed per pass, so a messy store yields a triage-able trickle, not a flood"
 default = "5"
 
 [[steps]]
@@ -44,19 +43,19 @@ excludes worked-in-progress; `--exclude-type=epic` defers epic liveness
 to their children (a recorded v1 simplification). From that base, drop:
 
 - **worked-by-demand** — `gc.routed_to` non-empty (a pool will claim it);
-- **conversing** — it IS a turn (`task_kind=conversation`), or an open
-  turn exists in its continuation group;
+- **conversing** — it IS a visit (`task_kind=visit`), or an open
+  visit exists in its continuation group;
 - **held-by-design** — `task_kind=triage-subject` (waits on its own
-  triage conversation).
+  triage subject's visits).
 
 ```bash
 UNNAMED=$(jq -n --slurpfile open "$OPEN" --slurpfile ready "$READY" --argjson cap "{{cap}}" '
   ([($open[0] // [])[]
-     | select((.metadata.task_kind // "") == "conversation")
+     | select((.metadata.task_kind // "") == "visit")
      | (.metadata["gc.continuation_group"] // empty)]) as $convgroups
   | [ ($ready[0] // [])[]
       | select((.metadata["gc.routed_to"] // "") == "")
-      | select((.metadata.task_kind // "") != "conversation")
+      | select((.metadata.task_kind // "") != "visit")
       | select((.metadata.task_kind // "") != "triage-subject")
       | select(.id as $id | ($convgroups | index($id)) | not)
     ]
@@ -65,36 +64,36 @@ printf '%s\n' "$UNNAMED"
 ```
 
 Everything surviving is an unnamed wait — open, unassigned, unrouted,
-unblocked, ungated, turnless, not held by design. Record the count and
+unblocked, ungated, visitless, not held by design. Record the count and
 the ids in your notes before moving on.
 """
 
 [[steps]]
 id = "normalize"
-title = "File one gate-turn per unnamed wait (idempotent, capped)"
+title = "File one gate-visit per unnamed wait (idempotent, capped)"
 description = """
 For each unnamed bead from the classify step, file exactly one
-conversation turn on it — the canonical gate-turn form. Idempotency is
-already guaranteed by the classify filter (a bead with an open turn in
+visit on it — the canonical gate-visit form. Idempotency is
+already guaranteed by the classify filter (a bead with an open visit in
 its group never reaches this step), and the cap bounds the pass.
 
 Per candidate `$SUBJECT` (with `$TITLE` for the visit text):
 
 ```bash
-# >>> gate-turn
+# >>> gate-visit
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-TURN=$(gc bd create -t task --title "turn: $SUBJECT — unnamed wait: route, gate, or park" \
+VISIT=$(gc bd create -t task --title "visit: $SUBJECT — unnamed wait: route, gate, or park" \
   -d "Liveness sweep: '$TITLE' ($SUBJECT) is open with no worker, route, gate, or conversation. What is it waiting on? Route it to a pool, gate it on a named check, or park it into a triage scope." --json | jq -r '.id // .[0].id')
-gc bd update "$TURN" --set-metadata "gc.routed_to=$POOL" \
+gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
-  --set-metadata "task_kind=conversation"
-gc bd dep add "$TURN" "$SUBJECT" --type=parent-child
-# <<< gate-turn
+  --set-metadata "task_kind=visit"
+gc bd dep add "$VISIT" "$SUBJECT" --type=parent-child
+# <<< gate-visit
 ```
 
 No `--blocks` edge: the subject is idle, nothing downstream is waiting
-on the turn — the turn's job is to make the wait NAMED and staffed, not
-to block. Log every filing (subject id → turn id) in your notes; if the
+on the visit — the visit's job is to make the wait NAMED and staffed, not
+to block. Log every filing (subject id → visit id) in your notes; if the
 classify step found more candidates than the cap admitted, say how many
 were left for the next pass. Then drain — the pass is complete.
 """

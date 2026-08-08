@@ -16,3 +16,7 @@ argued in `specs/2026-08-fresh-start/spine-port.md`:
   stewardship clause (no dependency on an overlay main does not stage
   for this role).
 - Dispatch example re-pointed from `wright` to the worker pool.
+- The visit concept renamed from the quarry's/tk-h9pq5's "turn"
+  (operator decision, 2026-08-08): a turn in common usage is one message
+  exchange; this thing is one whole sitting — a visit. `task_kind=visit`
+  likewise (was `conversation`). Historical specs keep their vocabulary.
