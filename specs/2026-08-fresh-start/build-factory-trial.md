@@ -83,7 +83,16 @@ gc sling gc.run-operator <bead-id> --on build-basic \
 
 Defaults that matter (leave them): `interaction_mode=interactive`
 (preserves blocking questions and approval menus), `review_mode=agent`,
-`push=false`, `open_pr=false`. The step chain is
+`push=false`, `open_pr=false`.
+
+**Known trap (F4, from the live run):** a launch warning may claim the
+factory lacks context it actually receives — the input convoy delivers
+the brief's referenced material even though the rendered context doesn't
+show it. Do **not** "fix" this with `--var requirements_path=<doc>`:
+that reuses the doc as the requirements artifact and silently skips the
+requirements stage. If you genuinely need to hand it more context, the
+safe var is `--var context_path=<dir>`. See
+[build-factory-trial-findings.md](build-factory-trial-findings.md). The step chain is
 prepare → requirements (`gc.requirements-planner`) → plan
 (`gc.design-author`) → plan-review (`gc.review-synthesizer`) → decompose
 (`gc.task-decomposer`) → implement → review → finalize, each artifact
