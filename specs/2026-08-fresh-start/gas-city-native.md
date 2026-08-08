@@ -29,7 +29,7 @@ config" — upstream's own words).
 
 | Domain | gc-toolkit today (or planned) | Gas City today | Verdict |
 |---|---|---|---|
-| Conversation continuity | tk-h9pq5 design: continuation groups + a hold-not-close converse role + turns as beads (unbuilt) | `extmsg`: conversations bind to a **configured agent**, survive restarts by cold-wake, move between agents via `gc extmsg handoff`; Slack/Discord/LLM-client packs carry the channel | **Ride** the binding + channel; keep only the subject-bead discipline (below) |
+| Conversation lifecycle (identity, turns, record) | tk-h9pq5 design: subject bead id = continuation group, hold-not-close converse role, turns as beads (unbuilt) | Continuation groups ship in core and carry the continuity; **extmsg does not track in-city conversations** — it is last-mile transport for external channels (bindings + transcripts live channel-side, nothing touches beads) | **Build ours on continuation groups** (still pure core assembly); extmsg is reach-from-anywhere transport for the same conversations, later, plus the meet-at-the-subject-bead boundary for genuinely external messages |
 | Brief → tree of work | `mol-nx-plan` spec (design-only): plan block, diff-against-live, ratification turn | The `gascity` pack build factory: `requirements-planner` → `design-author` → `review-synthesizer` (approval, incl. interactive mode) → `task-decomposer` → `create-beads` files convoys/beads with dep edges from schema-validated `tasks.md`; methodology packs (bmad, superpowers, …) override the decomposition step | **Adopt**; shelve mol-nx-plan. Re-open only the desired-state-reconcile delta if lived re-planning demands it |
 | Worker/role contract | Hand-authored roles planned; gastown polecat imported+patched | `gc-role-worker` shared fragment, 12 roles, `gc gc claim` discovery, close+outcome discipline, empty-group session boundary | **Adopt** the gascity roles pack; express any variant as a delta on the fragment |
 | Human approval / gating | Head-pinned check-set, merge-skill single writer, pre-open gate, signoff rounds (shipped, battle-tested) | v2 check loops re-run work until a script passes; **no native human-approval construct** ("embedded in agent prompts or external review roles"); `gc converge` gates are legacy | **Keep ours** — this is the pack's sharpest earned value; recompose it as gastown-refinery patches, unchanged in substance |
@@ -80,9 +80,10 @@ A city stood up today, upstream-native:
      any composition; they are the pack's memory.
 - **Retired or shelved:** bead-host residue (already superseded),
   mol-nx-plan (superseded by the build factory until lived experience
-  says otherwise), the bespoke conversation-role machinery (superseded by
-  extmsg agent bindings), converge-style gating (upstream calls it legacy),
-  most local patrol patches (upstream fixed the underlying bugs).
+  says otherwise), converge-style gating (upstream calls it legacy),
+  most local patrol patches (upstream fixed the underlying bugs). The
+  converse role and turn machinery are **not** on this list: nothing
+  upstream replaces them; they are the focus-1 build.
 
 ## What this pressures, honestly
 
@@ -120,12 +121,14 @@ as automation earns trust; they must not harden into permanent process.
 
 ## Where the 90% lands, by focus area
 
-- **Conversation lifecycle: ~70% upstream.** Binding, continuity,
-  cold-wake, handoff, channels — all upstream. Ours: the subject-bead
-  identity of a conversation and the record discipline. Open frontier:
-  thread-per-bead (extmsg `--kind thread` + `--parent-conversation-id`)
-  as the literal realization of "engage at the level of a bead" — a
-  spike, not machinery.
+- **Conversation lifecycle: the primitive is upstream, the model is
+  ours.** Continuation groups (core) carry continuity; everything that
+  makes it a *conversation about work* — identity = subject bead, turns
+  as beads, outcomes on the record, cold reconstitution — is the
+  tk-h9pq5 build, unreplaced by anything upstream. extmsg contributes
+  transport only: reach the same bead-anchored conversation from any
+  registered client, and anchor genuinely external messages at the
+  subject bead.
 - **Chaining / mol: ~80% upstream.** Build factory, 35 formulas, v2 check
   loops, convoy landing. Ours: the check-set gate layer; possibly a
   desired-state reconcile later.
@@ -144,15 +147,15 @@ reacted to what the step showed.
    `gascity` pack on one rig; no native code). Judge the tree it files
    against what mol-nx-plan would have produced. Focus 2, tested in an
    afternoon.
-2. **Bind one real conversation via extmsg** (slack-mini is the smallest
-   viable channel): agent binding, cold-wake after a session death,
-   one handoff. Judge whether the subject-bead discipline can live as
-   doctrine on top. Focus 1.
-3. **Spike the operator surface as a connected client**: register a
-   generic extmsg LLM-client (no Slack required) and let the board's
-   pick-a-row open a bound conversation through it — the pull surface
-   riding upstream's universal conversation plane. Focus 3, without
-   violating pull-only.
+2. **Build the conversation spine** (tk-h9pq5 Phases 0–1): the converse
+   role as a delta on `gc-role-worker`, the turn-filing convention,
+   continuation-group continuity — lived on one real subject bead
+   through a warm turn, a session death, and a cold reconstitution.
+   Focus 1, the core build.
+3. **(Optional, later) Spike extmsg as reach**: register a generic
+   LLM-client and open the *same* bead-anchored conversation from off
+   the machine — pure transport over the spine from step 2, no second
+   conversation mechanism. Focus 3-adjacent, strictly pull.
 4. **Only then** revisit the roster question (how much of the patched
    gastown import simply un-patches) and the foundation edits above,
    with three lived data points in hand.
