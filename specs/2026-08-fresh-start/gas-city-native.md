@@ -35,7 +35,7 @@ config" — upstream's own words).
 | Human approval / gating | Head-pinned check-set, merge-skill single writer, pre-open gate, signoff rounds (shipped, battle-tested) | v2 check loops re-run work until a script passes; **no native human-approval construct** ("embedded in agent prompts or external review roles"); `gc converge` gates are legacy | **Keep ours** — this is the pack's sharpest earned value; recompose it as gastown-refinery patches, unchanged in substance |
 | Landing work | Refinery patched from gastown + bespoke close-on-land reconcile | Convoys grew landing machinery: merge strategies (`direct\|mr\|local`), `gc convoy land`, `gc convoy stranded`; merge-queue behavior still explicitly pack territory | **Ride** convoy landing; keep the check-set layer on top |
 | Patrols / engine health | deacon/witness/refinery patrols imported+patched; quota nudges; cycle-recycle | Core absorbed housekeeping orders (`beads-health` etc.); gastown patrols remain the default coding-workflow answer, actively maintained upstream (orphan races, witness-death detection — all fixed upstream in the last 8 weeks) | **Ride** gastown's, drop local patches upstream has since fixed; keep only what upstream still lacks (quota-park nudge) |
-| Attention: what needs me now | Helm board (5 anchor kinds, severity ranking, flag/pick), Go sidecar, Canvas plan | **Nothing.** Dashboard is state-only; "the documentation contains no mechanism for agents sending mail or notifications to human operators"; escalation explicitly punted to packs | **Ours.** The genuinely native ground |
+| Attention: what needs me now | Helm board (5 anchor kinds, severity ranking, flag/pick), Go sidecar, Canvas plan | **CORRECTED 2026-08-08 (earlier row said "nothing" — a docs-sweep error):** the dashboard ships a ranked home attention queue (closed alert kinds, a single top "One Mark", needs-you badges with respond/reset/nudge actions) for **live sessions**; core's bootstrap pack mails + renudges on **durable human-gate** creation. What upstream still lacks: any surface identity for gate beads (`await_type` never crosses the API), work-tree anchors (epics/convoys/decisions), and visual consistency | **Ours, narrower and sharper:** first-class ranked identity for durable gates, tree-wide anchor ranking, visual/spatial consistency, and the warmed conversation behind a pick — *feeding upstream's alert model and notify/renudge orders, not duplicating them* |
 | Decisions have a home | Bead as locus; turn outcomes written to subject; work-bead state machine | Beads are durable and survive sessions ("sessions are disposable — the work they did is not"), but nothing makes a *conversation* land its outcome anywhere | **Ours**, as doctrine (fragments), not machinery |
 | Session search / memory | — | `cass` pack (coding-agent session search, skill overlay) | **Adopt**, free |
 | Event intake (GitHub) | Refinery patrol polls PR state; bespoke reconcile scripts | `github` pack: webhook `proxy_process` services (signature-checked, durably persisted), a rules file firing orders on events, addressed comments becoming **source beads** keyed by comment id, plus a 7-day `gh` reconciliation scan; `pr-review` pack: `mol-adopt-pr` (intake → rebase-check → multi-provider review → human gate → finalize) | **Ride** intake; the missing hop is ours — upstream keys *new* source beads by comment identity and has no wiring from an event to the **existing bead owning that PR**, which is exactly the accountability seam (feedback lands on the work's one owner) |
@@ -138,10 +138,15 @@ process.
 - **Chaining / mol: ~80% upstream.** Build factory, 35 formulas, v2 check
   loops, convoy landing. Ours: the check-set gate layer; possibly a
   desired-state reconcile later.
-- **Attention / context-shifting: ~20% upstream.** The channel exists;
-  the judgment of what deserves the operator's glance — ranking,
-  anchors, branded surfaces, visual consistency — is entirely ours, and
-  strictly pull. This is where the pack's identity concentrates.
+- **Attention / context-shifting: more upstream than first graded
+  (corrected 2026-08-08).** Upstream ranks live-session needs (the
+  dashboard attention queue and needs-you badges) and mails+renudges
+  durable gates. Ours is the layer above: giving durable gate beads the
+  first-class ranked identity they lack, anchoring attention to the
+  *work tree* rather than to sessions, visual consistency, and the
+  warmed conversation on arrival — still strictly pull, still where the
+  pack's identity concentrates, but built to feed upstream's surfaces
+  rather than beside them.
 
 ## The gate pattern — a proposal (OPEN)
 

@@ -141,6 +141,50 @@ that work's conversation already lives, not beside it.
 `gc.attention` has zero upstream meaning (verified 2026-08-06) — the
 board's flag semantics are safely the pack's own.
 
+## How questions reach a human today (source-verified 2026-08-08)
+
+Upstream surfaces "a human is needed" at two tiers with sharply different
+maturity — the split matters more than any single fact here:
+
+- **Live-session questions (ephemeral) get first-class treatment.** A
+  runtime-detected prompt becomes a **pending interaction**
+  (`request_id`, `kind`, optional prompt/options), emitted on the
+  per-session SSE stream, aggregated city-wide
+  (`GET /v0/city/{city}/pending`, concurrent probe with partial-failure
+  reporting), answerable via a respond endpoint — and the **dashboard
+  ranks it**: a home-view attention queue with closed alert kinds
+  (`pending-decision`, `run-needs-operator`, `run-thrashing`,
+  `operator-mail`), a single top-ranked "One Mark," and an agents-nav
+  "Needs you (N)" section with reasons (awaiting-input / errored /
+  rate-limited / stalled) and mapped actions (respond / reset / nudge).
+  Upstream is actively building a needs-me surface for *sessions*.
+- **Durable human-gate beads (the graph tier) are reachable but have no
+  surface identity.** Core's built-in gate watcher skips human gates,
+  and `await_type` never crosses the supervisor API — no dashboard or
+  API object represents a gate. What core's bundled bootstrap pack ships
+  instead is **mail + renudge**: an order that mails on human-gate
+  creation (addressee: assignee → `gc.deferred_assignee` →
+  `$GC_ESCALATION_RECIPIENT`, default `"human"`) and a sweep that
+  re-nudges stale open gates hourly. Plus `gc bd gate list` and an
+  indirect projection: a run blocked on a gate shows as "Blocked,
+  awaiting operator," and the gate's mail surfaces as an
+  `operator-mail` alert. Upstream's own notes call gates "beads with
+  metadata" — the primitive is theirs; the *presentation* is not built.
+- **Formula-level questions are prose.** The build-factory schemas make
+  artifact `status: questions|blocked` machine-readable and require an
+  Open Questions section, but individual questions carry no needs-human
+  flag; the worker contract forbids asking after a claim; and
+  `interaction_mode=interactive` names no mechanism for the ask to
+  travel. A question that must survive its session has exactly one
+  sound home today: a gate bead in the graph.
+
+*Seam:* gc-toolkit's conversation model is the missing top of this
+stack, not a competitor to it — a gate filed as a **turn** gives the
+durable tier what the session tier already has (framing, a
+conversation, an owner), and the board gives gates the first-class
+ranked identity `await_type` lacks. Ride the notify/renudge orders and
+the alert model rather than duplicating them.
+
 ## Watch items — moving now, re-verify before building on them
 
 - **`gc.session_affinity`** — still advisory (no routing path reads it),
