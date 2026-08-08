@@ -48,14 +48,17 @@ Each entry: the upstream fact, its verification status, and the seam.
   The hook-claim path reads `gc.continuation_group` and vacuums open,
   unassigned sibling work onto the claiming session
   (`internal/beadmeta/keys.go`; verified from source 2026-08-06, clone
-  `3e629ad`, and exercised live by this pack's own pool claims). *Seam:*
+  `3e629ad`, and exercised live by this pack's own pool claims; live docs
+  2026-08-08 confirm — "the hook atomically claims one ready bead and
+  preassigns continuation siblings", tutorials/06-beads). *Seam:*
   the subject bead's id **is** the group; turns filed into the group reach
   a warm session automatically, and a cold session reconstitutes from the
   record. No reverse links, no bespoke binding.
 
 - **Routing — `gc.routed_to` is the sole persisted key.** `gc.run_target`
-  is a compile-time hint materialized to `gc.routed_to` at pour (upstream
-  #2779; verified 2026-08-06). The read side is **exact string match**, so
+  is compile-time routing intent the router resolves into `gc.routed_to`
+  at dispatch (upstream #2779; verified 2026-08-06; live docs 2026-08-08
+  confirm both key roles verbatim, formula-spec-v2). The read side is **exact string match**, so
   direct stamps must be rig-qualified; and under a `default_sling_formula`
   a bare sling is a formula attach that stamps nothing — stamp-don't-sling
   or `--no-formula` ([gascity-routing-model.md](gascity-routing-model.md)).
@@ -64,7 +67,10 @@ Each entry: the upstream fact, its verification status, and the seam.
 
 - **The worker-role contract — upstream now owns the idiom.** The
   `gc-roles` pack ships a shared `gc-role-worker` contract fragment used
-  by all ~12 roles (verified 2026-08-06, gascity-packs `0b95742`):
+  by all ~12 roles (source-verified 2026-08-06, gascity-packs `0b95742`;
+  **source-only** — the roles pack is absent from the public docs and the
+  registry showcase as of 2026-08-08, so re-verify against the
+  gascity-packs source, not the docs site):
   discovery is claim-only via the `gc gc claim` wrapper; **an empty
   continuation group after close is a hard session boundary; a successful
   claim is authoritative even across groups**. Per-role prompt citations
@@ -79,7 +85,9 @@ Each entry: the upstream fact, its verification status, and the seam.
 - **Human waits — the `type=human` gate, with drivers.** Upstream's live
   human-wait primitive is the `type=human` **gate** (`gc bd gate create`):
   excluded from Ready, with core notify/renudge orders that mail the
-  escalation recipient (verified 2026-08-06). By contrast
+  escalation recipient (source-verified 2026-08-06; **source-only** — the
+  public docs do not cover the human-gate primitive, hold labels, or the
+  renudge orders as of 2026-08-08). By contrast
   `gc.routed_to=human` **parks** — no core machinery claims it, the nudge
   order fails silently on it (same verification). The sanctioned hold
   taxonomy is `hold:mayor` / `hold:external` only; bare `human` hold
@@ -90,9 +98,11 @@ Each entry: the upstream fact, its verification status, and the seam.
   `routed_to=human` lane is a trap, not a feature.
 
 - **Questions gate work natively — blocking dependencies.**
-  `bd dep <blocker> --blocks <blocked>` creates a blocking edge,
-  `bd dep remove` exists, and `bd ready` excludes actively-blocked beads
-  (golden-tested upstream; verified 2026-08-06). *Seam:* a
+  `bd dep <blocker> --blocks <blocked>` creates a blocking edge, and
+  blocked work is invisible to work queries (verified 2026-08-06; live
+  docs 2026-08-08 confirm both, tutorials/06-beads — "blocked work is
+  invisible to work queries"). `bd dep remove` exists in source
+  (golden-tested; not covered in the public docs). *Seam:* a
   decision-needed turn can block its dependents with core edges — "a
   human approval is just a check nothing non-human can yet satisfy"
   composes directly, no bespoke gate machinery.
@@ -101,9 +111,16 @@ Each entry: the upstream fact, its verification status, and the seam.
 
 Gas City's active investment in human conversation is **`extmsg`** —
 external channels (Slack, Discord) bound to sessions as durable
-transcripts, with conversation→session bindings and an
-`/v0/city/…/extmsg/outbound` API (verified 2026-08-06; already exercised
-by the oversight-rig pack's rollup delivery, `specs/tk-3s5uo/`).
+transcripts. It is further along than a casual read suggests (live docs
+2026-08-08): CLI verbs `gc extmsg bind` / `handoff` / `unbind`; an API
+plane with client registration, `POST /v0/extmsg/inbound`, and a
+long-lived SSE reply stream per `(provider, account_id,
+conversation_id)`; and — the telling detail — **the first inbound turn
+implicitly creates the conversation binding**, durable and
+reconnect-safe via sequence-number replay (guides/connected-clients).
+Slack and Discord ship as first-party packs. The outbound path is
+already exercised by the oversight-rig pack's rollup delivery
+(`specs/tk-3s5uo/`).
 
 This is a **different plane** from gc-toolkit's beads-as-turns — extmsg
 is channel-shaped and session-bound; ours is operator-internal and
@@ -153,10 +170,13 @@ above — which is the point.
 ## Refresh procedure
 
 Claims here date from a source-level verification of 2026-08-06 (gascity
-clone `3e629ad`; gascity-packs `0b95742`) unless marked otherwise.
-Re-verify before building on any load-bearing claim: upstream moves fast,
-and the public docs at https://docs.gascity.com/ lag the source — "not in
-the docs" is not "false". Ownership follows
+clone `3e629ad`; gascity-packs `0b95742`), cross-checked against the live
+public docs on 2026-08-08 (site index: https://docs.gascity.com/llms.txt;
+the site publishes no changelog, so recency must be inferred or diffed
+against a docs-source clone). Re-verify before building on any
+load-bearing claim: upstream moves fast, and the public docs lag the
+source — claims marked **source-only** above are real but invisible to a
+docs-site check; "not in the docs" is not "false". Ownership follows
 [gascity-reference.md](gascity-reference.md)'s refresh procedure and bar;
 the doc-keeper drift audit covers this file like any other central doc.
 When a watch item fires or a claim goes stale, update the fact *and* the
