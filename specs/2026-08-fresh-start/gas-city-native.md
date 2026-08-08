@@ -53,21 +53,29 @@ A city stood up today, upstream-native:
   `gastown` (coding roster: polecats, refinery, patrols, mayor) ·
   `slack-full` or `slack-mini` (the human channel over extmsg) · `cass`.
 - **gc-toolkit, the pack, shrinks to a thin opinion layer:**
-  1. **The attention surface** — the board's semantics (anchor kinds,
-     severity ranking, a bead raising its own hand) and an *escalation
-     policy*: rows that cross a threshold reach the operator through the
-     extmsg channel everyone else already uses. Upstream has punted
-     exactly this; it is the pack's clearest reason to exist.
+  1. **The attention surface** — the board's semantics: anchor kinds,
+     severity ranking, a bead raising its own hand, and the visual
+     consistency that makes a glance reinstate context (each anchor with
+     a durable place, the Canvas direction). Strictly **pull**: the
+     operator glances when they choose; nothing pings them. Ranking,
+     curation, and visual consistency are the pack's identity — upstream
+     has nothing here, and this is its clearest reason to exist.
   2. **The record discipline** — doctrine fragments: a conversation that
      reaches a decision writes it to the subject bead; turns are filed as
      beads so the spine is board-legible. Meeting extmsg *at the subject
      bead*, as already recorded in
      [gascity-conversations.md](../../docs/gascity-conversations.md).
   3. **The merge check-set** — the head-pinned gate machinery and its
-     doctor checks, recomposed as refinery configuration. Upstream v2 has
-     no human-approval construct; this layer is where "agent-initiated
-     code is gated by default" lives, and its scripts encode incidents
-     upstream has not had yet.
+     doctor checks, recomposed as refinery configuration. Kept as
+     *mechanism*, with membership explicitly **shrinking by design**: a
+     check is scaffolding that automation retires as it earns trust, and
+     a human approval is only "a check nothing non-human can yet
+     satisfy" — a temporary member, never the point. The codex signoff
+     specifically is compensatory (born of under-using molecules to
+     enforce steps, per the operator), so the direction of travel is
+     upstream's own: verification as check loops *inside* the work's
+     formula, with the gate set thinning toward mode-1
+     automated-to-resolution.
   4. **Banked lessons** — the doctor checks and trap docs. These survive
      any composition; they are the pack's memory.
 - **Retired or shelved:** bead-host residue (already superseded),
@@ -93,18 +101,22 @@ that sometimes the belief upstream of the architecture is what moves.
    fighting the ecosystem this pack claims to ride. **Recommendation:
    reverse it; edit foundation's boundary to name Gas City *and its
    first-party packs* as the substrate.**
-2. **Pull, never interrupt.** The foundation-derived stance has been that
-   the surface never pushes. But the operator's own stated need is
-   triggers that bring a juggled item back — and upstream's channel plane
-   (extmsg → Slack) is push-shaped. The reconciliation is curation, not
-   silence: *the board's ranking decides what earns a push*, so
-   interruptions stay scarce and high-value (foundation's actual point),
-   but they exist. **Recommendation: restate the belief as "attention is
-   spent by the board's ranking, never by an agent directly."**
+2. **Pull, never interrupt — pressured and RESOLVED: it stands.**
+   Upstream's channel plane is push-shaped, and a draft of this note
+   recommended letting the board's ranking push. **Operator ruling
+   (2026-08-08): no proactive operator notification** — "let things
+   surface" holds; ranking, curation, and visual consistency *are* the
+   gc-toolkit identity, and the trigger that brings a juggled item back
+   is the glanceable, visually-stable board, not a ping. The extmsg
+   plane is still valuable here, inverted: as a **pull surface** — a
+   registered LLM-client the operator opens *toward* the city — never as
+   a delivery mechanism aimed at them.
 
-What does *not* move: the merge gate stays gated-by-default (upstream
-offers no opinion here, and ours is earned); decisions still land on
-beads; the refinery remains the single writer of merged truth.
+What does *not* move: decisions still land on beads; the refinery
+remains the single writer of merged truth. And one stance *softens* by
+operator direction (2026-08-08): checks — human approval included — are
+scaffolding on the way to automation, kept composable so members retire
+as automation earns trust; they must not harden into permanent process.
 
 ## Where the 90% lands, by focus area
 
@@ -118,9 +130,9 @@ beads; the refinery remains the single writer of merged truth.
   loops, convoy landing. Ours: the check-set gate layer; possibly a
   desired-state reconcile later.
 - **Attention / context-shifting: ~20% upstream.** The channel exists;
-  the judgment of what needs the operator now — ranking, anchors,
-  branded surfaces, escalation thresholds — is entirely ours. This is
-  where the pack's identity concentrates.
+  the judgment of what deserves the operator's glance — ranking,
+  anchors, branded surfaces, visual consistency — is entirely ours, and
+  strictly pull. This is where the pack's identity concentrates.
 
 ## Increment path (try before deciding)
 
@@ -136,8 +148,11 @@ reacted to what the step showed.
    viable channel): agent binding, cold-wake after a session death,
    one handoff. Judge whether the subject-bead discipline can live as
    doctrine on top. Focus 1.
-3. **Give the board one push path**: a row crossing its threshold
-   publishes to the same channel. Smallest native increment; focus 3.
+3. **Spike the operator surface as a connected client**: register a
+   generic extmsg LLM-client (no Slack required) and let the board's
+   pick-a-row open a bound conversation through it — the pull surface
+   riding upstream's universal conversation plane. Focus 3, without
+   violating pull-only.
 4. **Only then** revisit the roster question (how much of the patched
    gastown import simply un-patches) and the foundation edits above,
    with three lived data points in hand.

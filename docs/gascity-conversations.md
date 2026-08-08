@@ -109,9 +109,17 @@ Each entry: the upstream fact, its verification status, and the seam.
 
 ## Upstream's own conversation investment: `extmsg`
 
-Gas City's active investment in human conversation is **`extmsg`** —
-external channels (Slack, Discord) bound to sessions as durable
-transcripts. It is further along than a casual read suggests (live docs
+Gas City's active investment in human conversation is **`extmsg`** — and
+it is provider-generic, not a chat-platform integration: a conversation
+is a `(provider, account_id, conversation_id)` tuple, any client
+registers via `POST /v0/extmsg/clients` and speaks inbound-POST +
+SSE-reply, and upstream ships a `provider: "llm-client"` for direct LLM
+clients with no chat platform at all (verified 2026-08-08,
+guides/connected-clients). Slack and Discord are adapter packs over that
+same API. Bindings attach a conversation to a **session or a configured
+agent** — agent bindings survive restarts by cold-waking a session — and
+`gc extmsg handoff` rebinds a live conversation to another agent
+("pure transport"; the routing judgment lives in the agent's prompt). It is further along than a casual read suggests (live docs
 2026-08-08): CLI verbs `gc extmsg bind` / `handoff` / `unbind`; an API
 plane with client registration, `POST /v0/extmsg/inbound`, and a
 long-lived SSE reply stream per `(provider, account_id,
