@@ -104,22 +104,26 @@ that sometimes the belief upstream of the architecture is what moves.
    fighting the ecosystem this pack claims to ride. **Recommendation:
    reverse it; edit foundation's boundary to name Gas City *and its
    first-party packs* as the substrate.**
-2. **Pull, never interrupt — pressured and RESOLVED: it stands.**
+2. **Pull, never interrupt — pressured, and the pressure was rejected.**
    Upstream's channel plane is push-shaped, and a draft of this note
-   recommended letting the board's ranking push. **Operator ruling
-   (2026-08-08): no proactive operator notification** — "let things
-   surface" holds; ranking, curation, and visual consistency *are* the
-   gc-toolkit identity, and the trigger that brings a juggled item back
-   is the glanceable, visually-stable board, not a ping. The extmsg
-   plane is still valuable here, inverted: as a **pull surface** — a
-   registered LLM-client the operator opens *toward* the city — never as
-   a delivery mechanism aimed at them.
+   recommended letting the board's ranking push. **OPERATOR POSITION
+   (2026-08-08, their words):** "I am still not a huge fan of the
+   proactive notify operator, it's really against the let things
+   surface of the foundation.md. Ranking, curated, and visual
+   consistency, that's what I would say is more gc-toolkit than
+   anything." This note follows that position: the trigger that brings
+   a juggled item back is the glanceable, visually-stable board, not a
+   ping. The extmsg plane stays valuable inverted, as a **pull
+   surface** — a registered LLM-client the operator opens *toward* the
+   city — never as a delivery mechanism aimed at them.
 
 What does *not* move: decisions still land on beads; the refinery
-remains the single writer of merged truth. And one stance *softens* by
-operator direction (2026-08-08): checks — human approval included — are
-scaffolding on the way to automation, kept composable so members retire
-as automation earns trust; they must not harden into permanent process.
+remains the single writer of merged truth. And one stance softens per
+an **OPERATOR PREFERENCE (2026-08-08):** "I'd like to get away from
+human approval eventually … don't take checks too far as a hard
+requirement" — checks are scaffolding on the way to automation, kept
+composable so members retire as automation earns trust, not permanent
+process.
 
 ## Where the 90% lands, by focus area
 
@@ -139,19 +143,26 @@ as automation earns trust; they must not harden into permanent process.
   anchors, branded surfaces, visual consistency — is entirely ours, and
   strictly pull. This is where the pack's identity concentrates.
 
-## The gate pattern — how automation earns its pauses
+## The gate pattern — a proposal (OPEN)
 
-**Operator direction (2026-08-08): maximum automation, with clear
-blocking gate beads at the points where the operator is needed.** The
-settled shape, grounded in the three interaction tiers the runtime
-actually has (blocking edges / pending interactions / mail — blocking is
-the graph's job, asking is the session's job, telling is mail's job):
+**Status: OPEN — nothing here is ratified.** The operator asked a
+question (2026-08-08): *"Maybe what I'm looking for is as much
+automation as possible with clear points where we use blocking gate
+beads when I'm needed… do I make that happen by writing new mols, new
+agents, or a completely new base pack?"* What follows is the
+**assistant's recommendation** in answer, grounded in the three
+interaction tiers the runtime actually has (blocking edges / pending
+interactions / mail — blocking is the graph's job, asking is the
+session's job, telling is mail's job). It awaits the operator's
+reaction; a previous revision of this section mislabeled it "operator
+direction" and "settled doctrine," which it never was.
 
 - **Gates are authored in mols, because a gate is graph data.** A
   blocking gate = a bead + a `blocks` edge, both filed by a formula
   step. The authoring rule: *the step that needs the check files the
   check.* Work that needs no judgment files no gate; gate membership
-  shrinks as automation earns trust (operator ruling on checks, above).
+  shrinks as automation earns trust (operator preference on checks,
+  above).
 - **One agent makes gates live: the converse role.** A bare
   human-routed bead is durably *stuck* (no claim contract drives it);
   a gate filed as a **turn** is durably *live* — demand spawns the
