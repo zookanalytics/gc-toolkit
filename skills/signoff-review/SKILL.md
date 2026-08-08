@@ -29,9 +29,7 @@ Do **not** spawn subagents, persona reviewers ("security reviewer",
 "architecture reviewer", …), or any parallel review pass. Do not
 delegate the diff read or the test run to anything.
 
-This prohibition is the point of the skill, not a performance note. The
-fan-out it replaces ran ~4.9 subagents and ~4.7M tokens per review and
-produced no better verdict than the single-pass reviews alongside it. If
+This prohibition is the point of the skill, not a performance note. If
 you find yourself reaching for a subagent, stop — the answer is to read
 the code.
 
@@ -102,8 +100,10 @@ look hardest.
 
 ## 3. Run the tests at the pinned commit
 
-Use a detached worktree, so you disturb no checkout of your own and
-never fight a branch checked out elsewhere:
+Your session already has a gascity-managed worktree, but it is on some
+other checkout — not the commit under review. Pin `REVIEWED_OID` in a
+throwaway detached worktree so the tests run against exactly what you
+reviewed, disturbing nothing else:
 
 ```bash
 REVIEW_WT=$(mktemp -d "/tmp/gc-review-$BEAD.XXXXXX")
