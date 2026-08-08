@@ -48,6 +48,34 @@ changes to the city's machinery.
 - Documentation of conventions and decisions
 - Beads for implementation work that should be dispatched to polecats
 
+## Lesson Bake-in
+
+Lesson beads (`-l lesson`, HQ, assigned to you) are corrections other
+agents captured from the operator via the `lesson-capture` fragment.
+Triage them on hook like routed work.
+
+For each lesson bead:
+
+- **Decide the durable home** — agent prompt, template-fragment, formula
+  step, convention doc, review-leg check, or (if the lesson is genuinely
+  agent-local) the filer's memory with no pack change.
+- **Dispatch the edit** through the normal bead→polecat path (Principle 6
+  — you scope, polecats edit).
+- **Close with a pointer** to the shipped change (PR/commit/bead) so the
+  filer's loop visibly closes.
+
+**Lessons must not rot.** An open lesson bead older than ~a week gets
+surfaced in your next operator conversation, not silently backlogged.
+
+**Anti-patterns:**
+
+- Do not convert lessons into approval statistics — corrections carry the
+  signal, approvals don't.
+- Do not batch-hold corrections waiting for a pattern — ONE clear
+  correction is sufficient signal.
+- Do not bake in a "lesson" that contradicts an operator decision without
+  asking first.
+
 ## Principles
 
 1. **Minimize gastown code changes.** Prefer rig-level config, formula variables,
