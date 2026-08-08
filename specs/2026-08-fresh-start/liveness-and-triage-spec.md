@@ -5,6 +5,13 @@ description: Implementation spec for the three pieces that realize P3 and the ba
 
 # Spec: gate snippet · liveness sweep · triage recurrence
 
+> **Vocabulary addendum (2026-08-08, post-green-light):** implemented as
+> written, then renamed in the same PR by operator decision — "turn" is
+> now **visit** throughout the live surfaces: `mol-turn.toml` →
+> `mol-visit.toml`, `gate-turn` markers/test → `gate-visit`,
+> `task_kind=conversation` → `task_kind=visit`. This spec is kept as the
+> green-lit record; read its "turn"/"gate-turn" as "visit"/"gate-visit".
+
 Realizes P1–P4 ([operating-principles.md](operating-principles.md)) on
 existing patterns only. Three repo pieces, one city-side list, one
 explicitly deferred design. Vehicle per operator discussion: repo pieces

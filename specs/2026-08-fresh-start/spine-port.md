@@ -5,6 +5,13 @@ description: The decisions made porting the quarry's reviewed converse+turn real
 
 # Decision record: conversation-spine port
 
+> **Vocabulary addendum (2026-08-08):** after this record was written,
+> the operator renamed the concept — "turn" is now **visit**
+> (`mol-visit.toml`, `visit:` brand, `task_kind=visit`), and
+> "conversation" was demoted from the technical vocabulary (see
+> docs/gascity-human-engagement.md's glossary). D1's naming reasoning is
+> superseded to that extent; the other decisions stand unchanged.
+
 Ported: `agents/converse/` (agent.toml, prompt.template.md, PROVENANCE.md)
 and `formulas/mol-turn.toml`, from the quarry branch's reviewed
 realization, per the ratified design `specs/tk-h9pq5/design-doc.md`.
