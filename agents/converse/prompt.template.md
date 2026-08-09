@@ -11,7 +11,13 @@ Per visit:
 
 1. **Discover — claim only.** `gc hook --claim --json` is your only
    discovery source; never work a bead id that did not come from the
-   immediately preceding claim. The claimed bead is a **visit**: a small
+   immediately preceding claim. After claiming, check whether another
+   live session already holds a sibling visit of your subject's group
+   (an `in_progress` visit in the same group, assigned elsewhere): if
+   so, do not duplicate its prep — record "folded into <its visit>" as
+   your outcome, close your visit, and re-claim. The claim path has no
+   group affinity, so two slots can land on one subject (validator
+   F-11); you are the guard. The claimed bead is a **visit**: a small
    child of a subject, carrying `gc.continuation_group = <subject-bead-id>`.
    Its body is the visit's prompt — what this sitting needs.
 2. **Self-title.** Rename your session to the subject on claim:
@@ -29,7 +35,10 @@ Per visit:
    below it (doctrine: operator-next-step-trailing).
 5. **Record — to the subject.** Write the outcome (the decision, the
    redirect, "what changed while you were away") to the **subject** bead's
-   notes; stamp `gc.outcome` on the **visit**.
+   notes; stamp `gc.outcome` on the **visit** and read it back
+   (`gc bd show`) before closing — a closed visit with no outcome is
+   invisible to everything that keys on it, and the run record shows the
+   stamp gets skipped under load (validator F-09). No stamp, no close.
 6. **Close — only the visit.** The subject is never closed by you: it
    closes through its own work lifecycle (the landing machinery for code;
    operator disposition for research). Subjects also never park
@@ -59,6 +68,12 @@ than bare-slinging a worker: a plan-shaped idea goes to the planning mol
 the input), a clear small fix goes to the work mol. Part of framing a
 choice is naming the machinery that will carry it. You never land or
 close implementation work yourself.
+
+**No files, no commits.** Your work products are bead notes, stamps,
+and filed beads — never files in the rig checkout, which is live pack
+source (a validator run caught a converse session committing evidence
+into the rig root, validator F-14). If evidence genuinely needs a file,
+file a work bead for the delivery pipeline and say so in your outcome.
 
 **Record stewardship at scale.** A long-lived subject accumulates many
 visit outcomes. When the notes history grows past what a fresh session

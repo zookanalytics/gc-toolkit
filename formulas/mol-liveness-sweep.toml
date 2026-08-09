@@ -60,22 +60,30 @@ The classes — the first four are named waits or live work; only the
 fifth is a defect:
 
 1. **worked** — assigned, or `gc.routed_to` non-empty.
-2. **waiting-on-structure** — open blockers, open children, **or
-   carried by an open parent through a `tracks` edge** (convoys carry
-   members with `tracks`; validator F-18 showed a third of the first
-   census was this class misfiled as idle). `gc bd ready` already
-   excludes blocker-blocked beads and gates; children and tracks need
-   the per-candidate check below.
+2. **waiting-on-structure** — open blockers, or a structural edge that
+   explains the wait, **checked in the directions that mean waiting**
+   (validator F-18 both halves; R2-02 measured 45% census noise from a
+   direction-blind rule): (a) it has open children via `parent-child`
+   (a parent waits on its children — the reverse is NOT a wait: a child
+   with an open parent is workable); (b) it has open members via
+   `tracks` (a convoy/container waits on what it carries); (c) it
+   `tracks` an open bead (it hangs off something still alive — spec
+   beads tracking a routed root). `gc bd ready` already excludes
+   blocker-blocked beads and gates; the edge checks need the
+   per-candidate pass below. Note: a fully idle linked cluster still
+   surfaces through its root (the node with no outgoing waits), so one
+   sitting dispositions the cluster.
 3. **conversing** — it IS a visit (`task_kind=visit`), or an open visit
    exists in its continuation group.
 4. **held-by-design** — `task_kind=triage-subject`.
 5. **unnamed** — none of the above: the defect this sweep exists for.
 
 Mechanically: start from the ready set, apply the jq below, then for
-each survivor check its dependency edges with `gc bd show <id>` — open
-children (parent-child) or an open `tracks` parent → class 2, drop it;
-an epic whose children have ALL closed → keep it, called out as a
-"what comes next?" candidate.
+each survivor check its dependency edges with `gc bd show <id>` — any
+of the three class-2 shapes above (open parent-child children; open
+tracks members; tracks an open bead) → class 2, drop it, logging which
+shape; an epic whose children have ALL closed → keep it, called out as
+a "what comes next?" candidate.
 
 ```bash
 CANDIDATES=$(jq -n --slurpfile open "$OPEN" --slurpfile ready "$READY" '
