@@ -50,6 +50,15 @@
 # row. The row needs an assertion of its own because every check above scores
 # fenced code only and skips it by construction.
 #
+# That positive list is paired with an ABSENCE assertion (tk-a6kpx): boot's
+# patrol-wisp query must carry no --status filter at all. Pinning the correct
+# tokens constrains what a query must contain and says nothing about what it may
+# additionally carry, so --status=in_progress — the false-empty PR#260 removed —
+# could drift straight back in beside a fully-satisfied token list. It has in
+# fact returned three times, and this check was itself part of the mechanism:
+# the flag sat in the required list, so the guard pinned the buggy shape and went
+# RED against the corrected fragment. Absence is the only shape that bites.
+#
 # Post-tk-kdu2v5 the doctrine lives in a single shared fragment file
 # (template-fragments/layered-startup-discovery.template.md) with named
 # blocks consumed by deacon, refinery, and witness via
@@ -126,6 +135,33 @@ check_required_query() {
             return
         fi
     done
+}
+
+# check_forbidden_query_token <label> <site> <text> <forbidden> <selector>...
+# The mirror of check_required_query: of the lines in <text> that carry every
+# <selector> token — the patrol-wisp query itself, never the prose or the `#`
+# comments that name the same flags while explaining them — none may carry
+# <forbidden>. A required-token list only constrains what a query must contain,
+# so a flag it never mentions can drift in beside a fully-satisfied list; this
+# is what pins the flag OUT.
+#
+# Silent when no line matches the selectors. That case is a query that is
+# missing rather than wrong, check_required_query already reports it, and
+# faulting it here too would read as two independent defects.
+check_forbidden_query_token() {
+    local label="$1"
+    local site="$2"
+    local matches="$3"
+    local forbidden="$4"
+    shift 4
+    local token
+    for token in "$@"; do
+        matches=$(printf '%s\n' "$matches" | grep -F -- "$token" || true)
+        [ -n "$matches" ] || return 0
+    done
+    if printf '%s\n' "$matches" | grep -qF -- "$forbidden"; then
+        violations+=("$label: $site carries a $forbidden filter, which is forbidden here (a just-poured wisp sits at status=open until the deacon claims it, so any status filter false-empties this read against a healthy deacon)")
+    fi
 }
 
 # check_block <define-name> <label> [require_tiers] [patrol_title]
@@ -227,18 +263,44 @@ check_block "layered-startup-discovery-boot" "boot" "" "mol-deacon-patrol"
 #   --json       both sites are machine-read — the fenced command pipes into
 #                `jq`, and the quick-reference row is copied out to be parsed.
 #                Human-format output silently breaks that pipe.
+#
+# And one token that must be ABSENT, asserted separately below because a
+# required-token list cannot express it:
+#
+#   --status     no status filter, of any value. The deacon burns the previous
+#                wisp BEFORE claiming the next, so its live wisp sits at `open`
+#                for that whole handoff window and a --status=in_progress read
+#                returns [] against a deacon that is patrolling normally —
+#                reproduced live on two separate wisps (tk-qdhnd). The remedy
+#                the triage table invites for [] is destructive (nudge, warrant,
+#                dog pool), so the false negative costs more than the false
+#                positive it looks like it prevents. Pinning only the correct
+#                tokens does not keep the flag out: it reads like a harmless
+#                narrowing and has drifted back in three times — the boot prompt
+#                fragment, the boot-health draft, and tk-p8rgv's edit of that
+#                draft. It was also carried into the required list above
+#                unexamined, alongside the three tokens that were reasoned
+#                about, which left this check pinning the buggy shape (tk-a6kpx).
+#                Status is something boot reads off the row it gets back, never
+#                something it filters on.
 boot_block=$(extract_block "layered-startup-discovery-boot")
 if [ -n "$boot_block" ]; then
-    check_required_query "boot" "Step 2 wisp read" "$(fenced_code "$boot_block")" \
-        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" "--status=in_progress" \
+    boot_fenced=$(fenced_code "$boot_block")
+    boot_rows=$(table_rows "$boot_block")
+    check_required_query "boot" "Step 2 wisp read" "$boot_fenced" \
+        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" \
         "--type=molecule" "--include-infra" "--limit=0" "--json" "mol-deacon-patrol"
-    check_required_query "boot" "Command Quick-Reference wisp row" "$(table_rows "$boot_block")" \
-        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" "--status=in_progress" \
+    check_forbidden_query_token "boot" "Step 2 wisp read" "$boot_fenced" \
+        "--status" "gc bd list" "--type=molecule"
+    check_required_query "boot" "Command Quick-Reference wisp row" "$boot_rows" \
+        "gc bd list" "--assignee={{ .BindingPrefix }}deacon" \
         "--type=molecule" "--include-infra" "--limit=0" "--json" "mol-deacon-patrol"
+    check_forbidden_query_token "boot" "Command Quick-Reference wisp row" "$boot_rows" \
+        "--status" "gc bd list" "--type=molecule"
 fi
 
 if [ ${#violations[@]} -eq 0 ]; then
-    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot carries the dedicated mol-deacon-patrol wisp read at both sites (Step 2 and the quick-reference row)"
+    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot carries the dedicated mol-deacon-patrol wisp read at both sites (Step 2 and the quick-reference row), with no --status filter on either"
     exit 0
 fi
 

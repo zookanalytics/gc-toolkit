@@ -15,6 +15,13 @@
 #                          its own merge synchronously, and THIS path is the
 #                          backstop for a skill that died between merging and
 #                          recording (or a merge that happened out-of-band).
+#                          The close recovers from ONE refusal — the identity
+#                          ENCODING mismatch, where the assignee and the actor are
+#                          the same principal written two ways — by retrying with
+#                          --force; every other refusal fails as before and, if it
+#                          persists, ESCALATES instead of retrying forever behind a
+#                          summary that reads `0 closed ... 1 skipped`. See
+#                          close_anchor() below.
 #   PR closed, unmerged -> out-of-band close (the refinery did not do it; it
 #                          closes its own abandoned PRs + anchors together).
 #                          Flag: merge_result=abandoned, route to human, escalate
@@ -480,6 +487,87 @@ is_held() {
   esac
 }
 
+# --- closing an anchor past the identity-ENCODING refusal. --------------------
+# `bd close` is assignee-gated: it refuses when the bead's assignee string differs
+# from the ACTOR string it derives for the calling process. Those two routinely
+# carry the SAME principal in two renderings — work is routed under the canonical
+# dotted mailbox identity ($GC_AGENT, `<rig>/<pack>.<role>`) while the actor comes
+# from $GC_SESSION_NAME (`<rig>--<pack>__<role>`) — so a refinery closing an anchor
+# it HOLDS is refused, in bd's own words:
+#
+#   cannot close sl-jcr4: assignee is "signal-loom/gc-toolkit.refinery",
+#   actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override
+#
+# Nothing in that is an ownership conflict, and nothing self-heals: every pass
+# takes the identical path and fails identically, so a MERGED PR's anchor can
+# NEVER close. Under close-on-land `closed` means landed, so the wedge manufactures
+# the false record in the DANGEROUS direction — merged work whose bead still reads
+# open, invisible to every "what shipped" query — while this pass reports it as one
+# more routine `skipped`. Observed on signal-loom PR#518: ~40 consecutive failures
+# across 40 minutes, finally closed by hand. It is not rig-specific; any rig whose
+# refinery holds anchors under the dotted identity hits it on EVERY mr-mode merge.
+#
+# The recovery is to retry ONCE with --force, and ONLY when the two strings are
+# provably one principal. Deliberately NOT a blanket --force: the same flag also
+# overrides refusals that are REAL — a genuinely foreign assignee, and open child
+# issues ("close children first or use --force to override") — and each of those
+# surfaces as a failing close too, so forcing on failure alone would paper over
+# exactly what the gate exists for. The retry is therefore gated on parsing the
+# assignee/actor pair OUT of the message and proving the two normalize to the same
+# principal; every other refusal fails exactly as it did before.
+
+# Consecutive failing passes before a wedged close escalates. A close can fail for
+# reasons this override does not cover (a foreign assignee, open children, a Dolt
+# blip), and those must not spin silently either — see the merged arm below.
+# 3 keeps a transient ledger blip quiet while still catching a loop that can never
+# succeed. Env-overridable for an operator who wants it louder or quieter.
+CLOSE_FAIL_ESCALATE="${GC_CLOSE_FAIL_ESCALATE:-3}"
+case "$CLOSE_FAIL_ESCALATE" in ''|*[!0-9]*|0) CLOSE_FAIL_ESCALATE=3 ;; esac
+
+# `<rig>/<pack>.<role>` and `<rig>--<pack>__<role>` are one principal in two
+# encodings. Normalize toward the DASHED form: `/` and `.` are single unambiguous
+# characters, so dotted -> dashed is a total mapping, whereas dashed -> dotted would
+# have to guess whether a `--` inside a name is a separator or part of the name.
+canon_principal() { printf '%s' "${1:-}" | sed -e 's#/#--#g' -e 's#\.#__#g'; }
+
+# Is this close refusal the identity-ENCODING artifact — one principal, two
+# renderings? Non-zero for every OTHER refusal (a foreign assignee, an open-children
+# hold, a ledger error), which is what keeps the retry from degenerating into a
+# blanket --force. Comparing the message's OWN two strings is also the stronger
+# ownership check: it asks bd what it actually compared, instead of trusting this
+# process's $GC_AGENT to describe it.
+close_refusal_is_identity() { # <close output>
+  local msg="${1:-}" a b
+  # bd's format string, verbatim:
+  #   cannot close %s: assignee is %q, actor is %q; reclaim or use --force to override
+  # TWO extractions rather than one emitting a \t: BSD sed (macOS, where this pack
+  # also runs) does not expand \t in a replacement, so a tab-joined pair would come
+  # back as a literal "t" and split wrong.
+  a=$(printf '%s' "$msg" | sed -n 's/.*cannot close [^:]*: assignee is "\([^"]*\)", actor is "\([^"]*\)".*/\1/p' | head -1)
+  b=$(printf '%s' "$msg" | sed -n 's/.*cannot close [^:]*: assignee is "\([^"]*\)", actor is "\([^"]*\)".*/\2/p' | head -1)
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  [ "$(canon_principal "$a")" = "$(canon_principal "$b")" ]
+}
+
+# Close <id> with <reason>, recovering from that one refusal. Returns 0 only when
+# the bead is actually CLOSED. Sets CLOSE_FORCED=1 when the override fired, so the
+# caller counts it and the patrol log names it — an override that HAPPENED must
+# never be indistinguishable from a clean close.
+close_anchor() { # <id> <reason>
+  local id="${1:-}" reason="${2:-}" out
+  CLOSE_FORCED=""
+  out=$(gc bd close "$id" --reason "$reason" 2>&1) && return 0
+  close_refusal_is_identity "$out" || return 1
+  echo "reconcile-merged-prs: $id close refused on an identity-ENCODING mismatch (assignee and actor name the same principal in different renderings); retrying once with --force" >&2
+  out=$(gc bd close "$id" --reason "$reason" --force 2>&1) || {
+    echo "reconcile-merged-prs: $id --force retry ALSO failed after the identity-encoding refusal: $out" >&2
+    return 1
+  }
+  CLOSE_FORCED=1
+  echo "reconcile-merged-prs: $id closed with --force (identity-encoding mismatch overridden)" >&2
+  return 0
+}
+
 # Native auto-merge state for a PR, as a THREE-valued answer: armed / disarmed /
 # unknown. The distinction carries the whole guard. A bare
 # `gh pr view --json autoMergeRequest | jq -r '.autoMergeRequest // empty'`
@@ -625,7 +713,7 @@ def pr_nums_here($o):
 ROWS=""
 if [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ]; then
   ROWS=$(printf '%s' "$ANCHORS" \
-    | jq -c --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'.[] | (pr_nums_here($o)) as $ns | {id, pr: (if ($ns | length) == 1 then $ns[0] else "" end), prurl: (.metadata.pr_url // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), stalegate: (.metadata.stale_gate_head // ""), stalegatenopool: (.metadata.stale_gate_nopool_head // ""), codexmark: (.metadata["check.codex"] // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null)
+    | jq -c --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'.[] | (pr_nums_here($o)) as $ns | {id, pr: (if ($ns | length) == 1 then $ns[0] else "" end), prurl: (.metadata.pr_url // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), stalegate: (.metadata.stale_gate_head // ""), stalegatenopool: (.metadata.stale_gate_nopool_head // ""), codexmark: (.metadata["check.codex"] // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // ""), closefails: (.metadata.close_failures // ""), closeesc: (.metadata.close_escalated // "")}' 2>/dev/null)
 fi
 # No anchors is NOT an early exit: the anchorless pass below walks PR -> BEAD and
 # is at its MOST relevant here (zero live anchors + open PRs is precisely the
@@ -649,6 +737,11 @@ closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; rebase_held=0; rega
 # is not a re-review, so folding it into regated/gate_held would misreport the
 # stale-gate arm's throughput in the summary line.
 retracted=0; retract_held=0
+# Closes that only landed because the identity-ENCODING override fired, and anchors
+# whose close is WEDGED (failing pass after pass) and has been escalated. Both are
+# reported in the summary line: an override that happened, and a retry loop that
+# cannot succeed, must each be visible there rather than folded into `skipped`.
+forced=0; close_stuck=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -852,19 +945,77 @@ anchor's merged_target if the new base is intentional." >/dev/null 2>&1; then
   # metadata write loses no authority, only a forensic field.
   if [ "$merged" = "true" ]; then
     short=$(printf '%.8s' "$merge_oid")
-    if gc bd close "$id" --reason "Merged to $target at ${short:-merge}" >/dev/null 2>&1; then
+    # Consecutive failing passes recorded by the failure arm below, and the marker
+    # that bounds its escalation to one mail per wedged run. A non-numeric or
+    # absent count reads as 0 — the counter is advisory, and a garbled value must
+    # never make the arithmetic below abort the pass.
+    closefails=$(printf '%s' "$row" | jq -r '.closefails // empty' 2>/dev/null)
+    closeesc=$(printf '%s' "$row" | jq -r '.closeesc // empty' 2>/dev/null)
+    case "$closefails" in ''|*[!0-9]*) closefails=0 ;; esac
+    if close_anchor "$id" "Merged to $target at ${short:-merge}"; then
+      [ -z "${CLOSE_FORCED:-}" ] || forced=$((forced + 1))
       # Clear the in-flight blockers too: a landed anchor carrying a stale
-      # blocked_reason / stale_base_head reads as still-stuck to a human.
+      # blocked_reason / stale_base_head reads as still-stuck to a human. The
+      # close-failure counter and its escalation marker go with them — they
+      # describe a wedge that is now over, and a landed anchor still carrying
+      # them would read as stuck to the next human and re-bound a future
+      # escalation that has nothing to do with this run.
       gc bd update "$id" \
         --set-metadata merge_result=merged \
         --set-metadata merged_sha="$merge_oid" \
         --unset-metadata rejection_reason \
         --unset-metadata blocked_reason \
-        --unset-metadata stale_base_head >/dev/null 2>&1 || true
+        --unset-metadata stale_base_head \
+        --unset-metadata close_failures \
+        --unset-metadata close_escalated >/dev/null 2>&1 || true
       closed=$((closed + 1))
       echo "reconcile-merged-prs: closed $id — PR#$num merged to $target at ${short:-?}"
     else
-      echo "reconcile-merged-prs: $id close failed for merged PR#$num; retry next pass" >&2
+      # The close did not stick, so the anchor stays OPEN over a MERGED PR — under
+      # close-on-land that reads as unlanded, which is false, and the summary
+      # counts it as one more routine `skipped`. That is precisely how PR#518
+      # retried ~40 times over 40 minutes with nothing escalating behind a
+      # `0 closed ... 1 skipped` line that looked normal. So COUNT the consecutive
+      # failing passes on the anchor itself — durable across passes, per-anchor,
+      # cleared by the pass that finally closes it — and escalate once at the
+      # threshold. A retry loop that can never succeed must not look like routine
+      # skipping. (The identity-encoding wedge itself is handled by close_anchor's
+      # override; what reaches here is everything that override deliberately does
+      # not cover.)
+      fails=$((closefails + 1))
+      gc bd update "$id" --set-metadata close_failures="$fails" >/dev/null 2>&1 || true
+      echo "reconcile-merged-prs: $id close failed for merged PR#$num ($fails consecutive pass(es)); retry next pass" >&2
+      if [ "$fails" -ge "$CLOSE_FAIL_ESCALATE" ] && [ -z "$closeesc" ]; then
+        if gc mail send mayor/ -s "ESCALATION: $id will not close over merged PR#$num ($fails consecutive passes)" \
+             -m "PR#$num is MERGED to '$target' (${merge_oid:-unknown sha}) but its gating anchor $id
+will not close: \`gc bd close\` has now failed on $fails consecutive reconcile
+passes, and this pass has no override for the reason it is failing.
+
+Under close-on-land \`closed\` means landed, so while this persists the ledger
+says the work is UNLANDED when it has in fact shipped — the false record in the
+dangerous direction, invisible to every \"what shipped\" query.
+
+The one refusal this pass DOES recover from is the identity-encoding mismatch
+(assignee \`<rig>/<pack>.<role>\` vs actor \`<rig>--<pack>__<role>\`), retried with
+--force. Anything else is left alone deliberately: a genuinely foreign assignee
+or an open-children hold must not be forced past. Run the close by hand to see
+the refusal:
+
+    gc bd close $id --reason \"Merged to $target at ${short:-merge}\"
+
+Then either clear what it is complaining about, or close with --force once you
+have confirmed the ownership is real. The counter (close_failures) and this
+escalation marker (close_escalated) clear themselves on the pass that closes
+the anchor." >/dev/null 2>&1; then
+          escalated=$((escalated + 1))
+        fi
+        # Bound the escalation to ONE mail per wedged run: the counter keeps
+        # rising, so without a marker every later pass would re-mail the same
+        # stuck anchor. Cleared alongside close_failures once the close lands.
+        gc bd update "$id" --set-metadata close_escalated="$fails" >/dev/null 2>&1 || true
+        close_stuck=$((close_stuck + 1))
+        echo "reconcile-merged-prs: $id close WEDGED over merged PR#$num after $fails consecutive passes; escalated to mayor" >&2
+      fi
       skipped=$((skipped + 1))
     fi
     continue
@@ -1847,5 +1998,5 @@ polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; th
   fi
 fi
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $retracted superseded reviews retracted, $retract_held retractions held, $identity_held foreign-PR identity holds, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $retracted superseded reviews retracted, $retract_held retractions held, $identity_held foreign-PR identity holds, $forced identity-encoding forced closes, $close_stuck wedged-close escalations, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
 exit 0

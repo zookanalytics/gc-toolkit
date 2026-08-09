@@ -35,6 +35,20 @@
 #   (15) witness block deleted -> ERROR (pre-existing assertion, unaffected)
 #   (16) deacon tier-2 query removed -> ERROR (pre-existing assertion, still
 #        wired after the block/fence extraction was factored into helpers)
+#   (17) --status=in_progress reintroduced into the fenced wisp read -> ERROR,
+#        and the required-query assertion does NOT fire (tk-a6kpx)
+#   (18) --status=in_progress reintroduced into the quick-reference row -> same
+#   (19) --status=open on the fenced read -> ERROR (any status filter, not just
+#        the value that keeps recurring)
+#   (20) the shipped fence's own `#` comment naming --status=in_progress does
+#        not trip the absence assertion
+#
+# Cases 17-19 are the ones the absence assertion exists for, and each asserts
+# that NO required-query violation accompanies it. That is the whole point: the
+# mutated query still carries every required token, so the positive list passes
+# it — which is how the flag drifted back in three times while a green check
+# reported boot's read as correct. A case that only checked the exit code would
+# pass on the wrong assertion and prove nothing.
 #
 # Every boot case mutates the boot block ONLY, through rewrite_boot_command or
 # boot_sed. The strings they rewrite are not boot-unique — the wisp query's flag
@@ -107,8 +121,17 @@ BROAD_FORM='gc bd list --assignee={{ .BindingPrefix }}deacon --status=in_progres
 # whole logical command — rather than sed-ing a flag out of it — is what leaves
 # the sibling broad "what else is the deacon holding" query alone: that query
 # shares its entire first line with the wisp read, verbatim.
-WISP_NO_ASSIGNEE='gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json --title=mol-deacon-patrol'
-WISP_NO_JSON='gc bd list --assignee={{ .BindingPrefix }}deacon --status=in_progress --type=molecule --include-infra --limit=0 --title=mol-deacon-patrol'
+#
+# Neither fixture carries --status: it is forbidden here (tk-a6kpx), so leaving
+# it in would fire the absence assertion alongside the missing-token one and
+# these cases would stop isolating the token they are named for.
+WISP_NO_ASSIGNEE='gc bd list --type=molecule --include-infra --limit=0 --json --title=mol-deacon-patrol'
+WISP_NO_JSON='gc bd list --assignee={{ .BindingPrefix }}deacon --type=molecule --include-infra --limit=0 --title=mol-deacon-patrol'
+# The forbidden filter, put back at each site. The fenced substitution matches
+# the wisp read's flag run only — the quick-reference row orders the same flags
+# differently, and the sibling broad query is untyped — so each case mutates one
+# site and the other stays clean.
+FENCED_FLAGS='--type=molecule --include-infra --limit=0 --json'
 
 # --- (1) the shipped fragment ----------------------------------------------
 D=$(pack shipped)
@@ -247,6 +270,60 @@ rc=$(run_check "$D")
 eq "$rc" "2" "(16) tier-2 query removed -> exit 2"
 has "missing tier-2 routed-work-bead query" "$D/out" \
     "(16) the tier assertions survived factoring extraction into helpers"
+
+# --- (17) --status=in_progress back on the fenced read ---------------------
+# The defect this whole assertion exists for: the deacon burns the previous wisp
+# before claiming the next, so the live wisp is `open` across that window and a
+# status-filtered read returns [] against a healthy deacon.
+D=$(pack fenced-status-back)
+boot_sed "$(frag "$D")" "s/$FENCED_FLAGS/--status=in_progress $FENCED_FLAGS/"
+rc=$(run_check "$D")
+eq "$rc" "2" "(17) --status=in_progress back on the fenced wisp read -> exit 2"
+has "boot: Step 2 wisp read carries a --status filter" "$D/out" \
+    "(17) the absence assertion fires, and fires for boot"
+eq "$(grep -c 'is missing the required patrol-wisp query' "$D/out")" "0" \
+    "(17) the required-token list still passes it — which is why absence must be asserted"
+eq "$(grep -c 'carries a --status filter' "$D/out")" "1" \
+    "(17) only the fenced site is faulted — the quick-reference row is untouched"
+
+# --- (18) --status=in_progress back on the quick-reference row -------------
+D=$(pack quickref-status-back)
+boot_sed "$(frag "$D")" "/$QUICKREF_ROW/s/--type=molecule/--status=in_progress --type=molecule/"
+rc=$(run_check "$D")
+eq "$rc" "2" "(18) --status=in_progress back on the quick-reference row -> exit 2"
+has "boot: Command Quick-Reference wisp row carries a --status filter" "$D/out" \
+    "(18) the row gets its own absence assertion, as it does its own required-query one"
+eq "$(grep -c 'is missing the required patrol-wisp query' "$D/out")" "0" \
+    "(18) the required-token list still passes the row too"
+eq "$(grep -c 'carries a --status filter' "$D/out")" "1" \
+    "(18) only the row is faulted"
+
+# --- (19) a different status value ------------------------------------------
+# The assertion pins the ABSENCE of a status filter, not the one value that has
+# recurred: --status=open false-empties the mirror-image window (a wisp already
+# claimed and cooking), and every other value narrows a read whose answer is
+# meant to be read off the row.
+D=$(pack fenced-status-open)
+boot_sed "$(frag "$D")" "s/$FENCED_FLAGS/--status=open $FENCED_FLAGS/"
+rc=$(run_check "$D")
+eq "$rc" "2" "(19) --status=open on the fenced wisp read -> exit 2"
+has "boot: Step 2 wisp read carries a --status filter" "$D/out" \
+    "(19) any status filter is pinned out, not just --status=in_progress"
+
+# --- (20) the fence's own comment naming the forbidden flag ----------------
+# The shipped fence documents why --status must stay out, naming the flag
+# verbatim inside a `#` comment. The assertion scores only lines carrying the
+# query's own selector tokens, so the comment must not read as a violation —
+# case (1)'s exit 0 is what proves it, and this guards that case from silently
+# ceasing to cover anything if the comment is ever reworded away.
+D=$(pack shipped-comment)
+eq "$(awk '/{{ define "layered-startup-discovery-boot" }}/{c=1} c{print} c&&/{{ end }}/{exit}' "$(frag "$D")" \
+        | awk '/^[[:space:]]*```/ { f = !f; next }
+               f && /^[[:space:]]*#/ && /--status=in_progress/ { n++ }
+               END { print n + 0 }')" "1" \
+    "(20) the shipped fence still carries the comment that names the forbidden flag"
+eq "$(run_check "$D")" "0" \
+    "(20) and a comment naming it does not trip the absence assertion"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

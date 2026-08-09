@@ -49,6 +49,11 @@
 #             that merged is the one that knows it merged. If the record half
 #             dies after a successful merge, the observer's merged-close path
 #             (reconcile-merged-prs.sh) is the convergent backstop next pass.
+#             The close recovers from ONE refusal — the identity ENCODING
+#             mismatch, where the assignee and the actor are the same principal
+#             written two ways — by retrying with --force; every other refusal
+#             falls through to the observer, which counts the consecutive
+#             failures and escalates. See close_anchor() below.
 #
 # The `approval` check-set member (tk-5niup). CLEAN is documented as folding
 # approval, and on a repo whose ruleset requires a review that is true: no
@@ -397,6 +402,78 @@ merge_hold_truthy() { # <merge_hold value>
   esac
 }
 
+# --- closing an anchor past the identity-ENCODING refusal. --------------------
+# `bd close` is assignee-gated: it refuses when the bead's assignee string differs
+# from the ACTOR string it derives for the calling process. Those two routinely
+# carry the SAME principal in two renderings — work is routed under the canonical
+# dotted mailbox identity ($GC_AGENT, `<rig>/<pack>.<role>`) while the actor comes
+# from $GC_SESSION_NAME (`<rig>--<pack>__<role>`) — so a refinery closing an anchor
+# it HOLDS is refused, in bd's own words:
+#
+#   cannot close sl-jcr4: assignee is "signal-loom/gc-toolkit.refinery",
+#   actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override
+#
+# This script closes the anchor IT JUST MERGED, so hitting the wedge here means the
+# PR has landed and the record does not say so — the observer then inherits a merged
+# PR whose anchor it also cannot close (signal-loom PR#518: ~40 consecutive failing
+# passes before a human forced it). Retry ONCE with --force, and ONLY when the two
+# strings are provably one principal.
+#
+# Deliberately NOT a blanket --force: the same flag also overrides refusals that are
+# REAL — a genuinely foreign assignee, and open child issues ("close children first
+# or use --force to override") — so forcing on failure alone would paper over
+# exactly what the gate exists for. Every other refusal falls through to the
+# existing "close failed; observer records next pass" path, which is the correct
+# outcome: the observer retries it, counts the consecutive failures, and escalates.
+#
+# Byte-for-byte the same pair of helpers as reconcile-merged-prs.sh; these scripts
+# are standalone by design, so they are duplicated rather than sourced. Keep them
+# in step.
+
+# `<rig>/<pack>.<role>` and `<rig>--<pack>__<role>` are one principal in two
+# encodings. Normalize toward the DASHED form: `/` and `.` are single unambiguous
+# characters, so dotted -> dashed is a total mapping, whereas dashed -> dotted would
+# have to guess whether a `--` inside a name is a separator or part of the name.
+canon_principal() { printf '%s' "${1:-}" | sed -e 's#/#--#g' -e 's#\.#__#g'; }
+
+# Is this close refusal the identity-ENCODING artifact — one principal, two
+# renderings? Non-zero for every OTHER refusal (a foreign assignee, an open-children
+# hold, a ledger error), which is what keeps the retry from degenerating into a
+# blanket --force. Comparing the message's OWN two strings is also the stronger
+# ownership check: it asks bd what it actually compared, instead of trusting this
+# process's $GC_AGENT to describe it.
+close_refusal_is_identity() { # <close output>
+  local msg="${1:-}" a b
+  # bd's format string, verbatim:
+  #   cannot close %s: assignee is %q, actor is %q; reclaim or use --force to override
+  # TWO extractions rather than one emitting a \t: BSD sed (macOS, where this pack
+  # also runs) does not expand \t in a replacement, so a tab-joined pair would come
+  # back as a literal "t" and split wrong.
+  a=$(printf '%s' "$msg" | sed -n 's/.*cannot close [^:]*: assignee is "\([^"]*\)", actor is "\([^"]*\)".*/\1/p' | head -1)
+  b=$(printf '%s' "$msg" | sed -n 's/.*cannot close [^:]*: assignee is "\([^"]*\)", actor is "\([^"]*\)".*/\2/p' | head -1)
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  [ "$(canon_principal "$a")" = "$(canon_principal "$b")" ]
+}
+
+# Close <id> with <reason>, recovering from that one refusal. Returns 0 only when
+# the bead is actually CLOSED. Sets CLOSE_FORCED=1 when the override fired, so the
+# caller counts it and the merge log names it — an override that HAPPENED must
+# never be indistinguishable from a clean close.
+close_anchor() { # <id> <reason>
+  local id="${1:-}" reason="${2:-}" out
+  CLOSE_FORCED=""
+  out=$(gc bd close "$id" --reason "$reason" 2>&1) && return 0
+  close_refusal_is_identity "$out" || return 1
+  echo "merge-skill: $id close refused on an identity-ENCODING mismatch (assignee and actor name the same principal in different renderings); retrying once with --force" >&2
+  out=$(gc bd close "$id" --reason "$reason" --force 2>&1) || {
+    echo "merge-skill: $id --force retry ALSO failed after the identity-encoding refusal: $out" >&2
+    return 1
+  }
+  CLOSE_FORCED=1
+  echo "merge-skill: $id closed with --force (identity-encoding mismatch overridden)" >&2
+  return 0
+}
+
 # The first check-set gate NOT green at <head>, or empty when every gate is green.
 # `$2` is the anchor row (`{status, meta}`), `$1` the declared check_set.
 #
@@ -679,6 +756,10 @@ ROWS=$(printf '%s' "$ANCHORS" \
 # Same staleness argument as the anchor re-read, applied to the anchor's SIBLINGS.
 
 merged=0; held=0; skipped=0
+# Closes that only landed because the identity-ENCODING override fired. Reported in
+# the summary line: an override that HAPPENED must be visible, not folded into the
+# clean-merge count.
+forced=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -1521,11 +1602,18 @@ while IFS= read -r row; do
   # merge commit, so a failed metadata write loses no authority, only a field.
   merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null | jq -r '.mergeCommit.oid // ""')
   short=$(printf '%.8s' "$merge_oid")
-  if gc bd close "$id" --reason "Merged to $target at ${short:-merge}" >/dev/null 2>&1; then
+  if close_anchor "$id" "Merged to $target at ${short:-merge}"; then
+    [ -z "${CLOSE_FORCED:-}" ] || forced=$((forced + 1))
+    # The observer's close-failure counter travels with the other in-flight
+    # blockers: this anchor has now closed, so a count left behind from an earlier
+    # wedged run would read as stuck and would re-bound a future escalation that
+    # has nothing to do with it.
     gc bd update "$id" \
       --set-metadata merge_result=merged \
       --set-metadata merged_sha="$merge_oid" \
-      --unset-metadata rejection_reason >/dev/null 2>&1 || true
+      --unset-metadata rejection_reason \
+      --unset-metadata close_failures \
+      --unset-metadata close_escalated >/dev/null 2>&1 || true
     merged=$((merged + 1))
     echo "merge-skill: merged + recorded $id — PR#$num squashed to $target at ${short:-?}"
   else
@@ -1534,5 +1622,5 @@ while IFS= read -r row; do
   fi
 done <<< "$ROWS"
 
-echo "merge-skill: $merged merged, $held held, $skipped skipped"
+echo "merge-skill: $merged merged, $held held, $forced identity-encoding forced closes, $skipped skipped"
 exit 0
