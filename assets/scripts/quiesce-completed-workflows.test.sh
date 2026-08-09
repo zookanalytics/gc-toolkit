@@ -42,7 +42,25 @@
 #   (LIVE)   anchor NOT terminal -> molecule untouched (a running polecat still
 #            needs its assignee to claim the next step), INCLUDING an anchor that
 #            is assigned — to a polecat, not a refinery: the handoff predicate
-#            matches the refinery specifically, not "has an assignee"
+#            matches the refinery specifically, not "has an assignee". The polecat
+#            holding it is the molecule's OWN session, which is what separates this
+#            from (RECLAIM)
+#   (RECLAIM) anchor re-pooled after a refinery REJECTION and re-claimed by ANOTHER
+#            polecat session (tk-nv3qr) — in_progress, unstamped, polecat-held, so
+#            no older predicate fires — also counts as done: the new owner works it
+#            as a bare bead and never re-walks this molecule's step graph
+#   (STALE)  the fail-closed half of (RECLAIM): a gc.session_name the anchor is NOT
+#            currently held under is a leftover from an earlier claim, never proof
+#            of a new owner -> left alone
+#   (NOSESS) the other fail-closed half: an anchor holding no session record at all
+#            leaves nothing to compare -> left alone
+#   (CROSS-RECLAIM) / (CROSS-HELD) the INTERSECTION of the park and re-claim
+#            predicates. They were written in parallel against the same function and
+#            both claimed $4, so on their own branches each was only ever exercised
+#            with the other's field absent and the collision was resolved by hand.
+#            Every other fixture populates exactly one of the two fields, so crossing
+#            the argument positions still satisfies all of them; these populate BOTH
+#            and each must still be decided by its OWN clause
 #   (NOCLOSE) no step bead is ever closed, and `status` is never rewritten — the
 #            DANGER clause: closing load-context walks a polecat onto an already
 #            green-gated branch and stales check.<gate>, blocking the open PR
@@ -101,6 +119,21 @@ mkdir -p "$TMP/bin"
 #              passes through this state while a session is still alive.
 # root-ROUTEONLY: anchor routed_to=human but still `open` -> still live; the park
 #              predicate is a conjunction and neither half alone is terminal.
+# root-RECLAIM: anchor re-pooled after a refinery rejection and re-claimed by
+#              ANOTHER polecat session (tk-nv3qr) -> done, this molecule is dead.
+# root-STALE : anchor records a DIFFERENT session, but is not held by it — a
+#              leftover from an earlier claim -> fail closed, left alone.
+# root-NOSESS: anchor held under a session name it does not record -> nothing to
+#              compare -> fail closed, left alone.
+# root-RECLAIMROUTED / root-HELDSESS: the INTERSECTION of the park predicate
+#              (tk-rlm94) and the re-claim predicate (tk-nv3qr). The two clauses were
+#              written in parallel against the same function and both wanted $4, so
+#              they were only ever exercised on branches where the other did not
+#              exist. Each of these carries the OTHER clause's field populated, and
+#              must still be decided by its own: RECLAIMROUTED is a re-claim that
+#              also carries a live pool route (the shape a re-pooled anchor really
+#              has), HELDSESS is a park that also records a session. Cross the
+#              argument positions in the merge and exactly these two flip.
 cat > "$TMP/steps" <<'S'
 s-pool|mol-polecat-work.workspace-setup|root-DONE|gc-toolkit/gc-toolkit.polecat||open
 s-affine|mol-polecat-work.load-context|root-DONE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-dead|in_progress
@@ -117,20 +150,33 @@ s-noroot|mol-scoped-work.implement||gc-toolkit/gc-toolkit.polecat|gc-toolkit__po
 s-held|mol-polecat-work.load-context|root-HELD|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-parked|in_progress
 s-bare|mol-polecat-work.load-context|root-BARE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-esc|in_progress
 s-routeonly|mol-polecat-work.load-context|root-ROUTEONLY|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-open|in_progress
+s-reclaim|mol-polecat-work.load-context|root-RECLAIM|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-old|in_progress
+s-stale|mol-polecat-work.load-context|root-STALE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-here|in_progress
+s-nosess|mol-polecat-work.load-context|root-NOSESS|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-anon|in_progress
+s-reclaimrouted|mol-polecat-work.load-context|root-RECLAIMROUTED|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rrold|in_progress
+s-heldsess|mol-polecat-work.load-context|root-HELDSESS|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-hsmol|in_progress
 S
 
-# Roots: root_id|convoy_id   (root-ORPHAN deliberately absent -> no convoy)
+# Roots: root_id|convoy_id|gc.session_name   (root-ORPHAN deliberately absent -> no
+# convoy). The session is the one the molecule's steps are bound to by
+# gc.session_affinity=require; the older fixtures leave it empty, which is also the
+# shape of a molecule that was never claimed.
 cat > "$TMP/roots" <<'R'
-root-DONE|convoy-DONE
-root-LIVE|convoy-LIVE
-root-CLOSED|convoy-CLOSED
-root-HANDOFF|convoy-HANDOFF
-root-QUIET|convoy-QUIET
-root-SCOPED|convoy-SCOPED
-root-NOREF|convoy-NOREF
-root-HELD|convoy-HELD
-root-BARE|convoy-BARE
-root-ROUTEONLY|convoy-ROUTEONLY
+root-DONE|convoy-DONE|
+root-LIVE|convoy-LIVE|gc-toolkit__polecat-lx-busy
+root-CLOSED|convoy-CLOSED|
+root-HANDOFF|convoy-HANDOFF|
+root-QUIET|convoy-QUIET|
+root-SCOPED|convoy-SCOPED|
+root-NOREF|convoy-NOREF|
+root-HELD|convoy-HELD|
+root-BARE|convoy-BARE|
+root-ROUTEONLY|convoy-ROUTEONLY|
+root-RECLAIM|convoy-RECLAIM|gc-toolkit__polecat-lx-old
+root-STALE|convoy-STALE|gc-toolkit__polecat-lx-here
+root-NOSESS|convoy-NOSESS|gc-toolkit__polecat-lx-anon
+root-RECLAIMROUTED|convoy-RECLAIMROUTED|gc-toolkit__polecat-lx-rrold
+root-HELDSESS|convoy-HELDSESS|gc-toolkit__polecat-lx-hsmol
 R
 
 # Convoys: convoy_id|anchor_id
@@ -145,9 +191,14 @@ convoy-NOREF|anchor-NOREF
 convoy-HELD|anchor-HELD
 convoy-BARE|anchor-BARE
 convoy-ROUTEONLY|anchor-ROUTEONLY
+convoy-RECLAIM|anchor-RECLAIM
+convoy-STALE|anchor-STALE
+convoy-NOSESS|anchor-NOSESS
+convoy-RECLAIMROUTED|anchor-RECLAIMROUTED
+convoy-HELDSESS|anchor-HELDSESS
 C
 
-# Anchors: anchor_id|status|merge_result|assignee|routed_to
+# Anchors: anchor_id|status|merge_result|assignee|routed_to|gc.session_name
 #
 # anchor-LIVE and anchor-HANDOFF are the same shape except for WHO holds them
 # (status=open, merge_result unstamped) — that is the whole discrimination the
@@ -157,17 +208,36 @@ C
 # predicate (tk-rlm94): all three are unstamped and unassigned, and they differ
 # only in the two fields the conjunction reads. HELD has both (blocked + human) and
 # is terminal; each of the others has exactly one and must NOT be.
+#
+# anchor-LIVE, anchor-RECLAIM, anchor-STALE and anchor-NOSESS pin the four corners
+# of the re-claim predicate. All four are held by a POLECAT with no merge_result, so
+# none of them is separable by the older predicates:
+#
+#   LIVE    held by the molecule's OWN session          -> live, hands off
+#   RECLAIM held by a DIFFERENT session, and records it  -> done
+#   STALE   records a different session but is NOT held by it (assignee is an agent
+#           name): the record is a leftover, not a current holder -> fail closed
+#   NOSESS  held by a session name it does not record    -> fail closed
+#
+# The park and re-claim predicates are disjoint on this fixture and the two groups
+# above are how that is held: no park row records a session, and no re-claim row is
+# blocked or routed. anchor-RECLAIMHELD is the deliberate exception — see below.
 cat > "$TMP/anchors" <<'A'
-anchor-DONE|open|pull_request||
-anchor-LIVE|open||gc-toolkit__polecat-lx-busy|
-anchor-CLOSED|closed|||
-anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery|
-anchor-QUIET|open|pre_open_gate||
-anchor-SCOPED|open|pre_open_gate||
-anchor-NOREF|open|pull_request||
-anchor-HELD|blocked|||human
-anchor-BARE|blocked|||
-anchor-ROUTEONLY|open|||human
+anchor-DONE|open|pull_request|||
+anchor-LIVE|open||gc-toolkit__polecat-lx-busy||gc-toolkit__polecat-lx-busy
+anchor-CLOSED|closed||||
+anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery||
+anchor-QUIET|open|pre_open_gate|||
+anchor-SCOPED|open|pre_open_gate|||
+anchor-NOREF|open|pull_request|||
+anchor-HELD|blocked|||human|
+anchor-BARE|blocked||||
+anchor-ROUTEONLY|open|||human|
+anchor-RECLAIM|in_progress||gc-toolkit__polecat-lx-new||gc-toolkit__polecat-lx-new
+anchor-STALE|in_progress||gc-toolkit/gc-toolkit.polecat||gc-toolkit__polecat-lx-ghost
+anchor-NOSESS|in_progress||gc-toolkit__polecat-lx-other||
+anchor-RECLAIMROUTED|in_progress||gc-toolkit__polecat-lx-rr|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rr
+anchor-HELDSESS|blocked|||human|gc-toolkit__polecat-lx-hsanch
 A
 
 : > "$TMP/updates"     # one line per update: "<binary> <argv>"
@@ -210,14 +280,18 @@ case "$1 ${2:-}" in
   "bd show")
     id="$3"
     convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
+    rsess=$(awk -F'|' -v r="$id" '$1==r{print $3; exit}' "$FAKE_ROOTS")
     arow=$(awk -F'|' -v a="$id" '$1==a{print; exit}' "$FAKE_ANCHORS")
     if [ -n "$arow" ]; then
       st=$(printf '%s' "$arow" | cut -d'|' -f2); mr=$(printf '%s' "$arow" | cut -d'|' -f3)
       as=$(printf '%s' "$arow" | cut -d'|' -f4); rt=$(printf '%s' "$arow" | cut -d'|' -f5)
-      jq -n --arg s "$st" --arg m "$mr" --arg a "$as" --arg r "$rt" \
-        '[{status:$s, assignee:$a, metadata:{merge_result:$m, "gc.routed_to":$r}}]'
+      an=$(printf '%s' "$arow" | cut -d'|' -f6)
+      jq -n --arg s "$st" --arg m "$mr" --arg a "$as" --arg r "$rt" --arg n "$an" \
+        '[{status:$s, assignee:$a,
+           metadata:{merge_result:$m, "gc.routed_to":$r, "gc.session_name":$n}}]'
     elif [ -n "$convoy" ]; then
-      jq -n --arg c "$convoy" '[{metadata:{"gc.input_convoy_id":$c}}]'
+      jq -n --arg c "$convoy" --arg n "$rsess" \
+        '[{metadata:{"gc.input_convoy_id":$c, "gc.session_name":$n}}]'
     else printf '[{"metadata":{}}]\n'; fi ;;
   "bd update")
     printf 'gc %s\n' "$*" >> "$FAKE_UPDATES"
@@ -374,6 +448,44 @@ printf '%s\n' "$OUT1" | grep -q 'anchor anchor-LIVE still live' \
   && ok "(LIVE) summary explains why the live root was skipped" || bad "(LIVE) live-skip reason"
 printf '%s\n' "$OUT1" | grep -q 'anchor-LIVE still live.*assignee=gc-toolkit__polecat-lx-busy' \
   && ok "(LIVE) skip line records the assignee that was inspected" || bad "(LIVE) skip line records assignee"
+# anchor-LIVE is held by the molecule's OWN session, which is what separates it from
+# (RECLAIM) below — the two are otherwise the same shape (polecat-held, unstamped).
+printf '%s\n' "$OUT1" | grep -q 'anchor-LIVE still live.*session=gc-toolkit__polecat-lx-busy molecule_session=gc-toolkit__polecat-lx-busy' \
+  && ok "(LIVE) the anchor is held by this molecule's own session -> not a re-claim" \
+  || bad "(LIVE) skip line records both sessions compared"
+
+# (RECLAIM) the fifth re-offer shape (tk-nv3qr). The refinery REJECTED the branch,
+# cleared the handoff and re-pooled the anchor; another polecat session claimed it
+# and works it as a bare bead, never re-walking this molecule's step graph. The
+# anchor is in_progress, unstamped and polecat-held, so none of the four older
+# predicates fires — and these steps are bound to a session that can never advance
+# them again.
+grep -q '^s-reclaim	routed$' "$TMP/cleared" && grep -q '^s-reclaim	assignee$' "$TMP/cleared" \
+  && ok "(RECLAIM) anchor re-claimed by ANOTHER session -> steps quiesced (both keys)" \
+  || bad "(RECLAIM) re-claimed anchor must count as done (got: $(grep '^s-reclaim' "$TMP/cleared" || echo none))"
+printf '%s\n' "$OUT1" | grep -q 'anchor anchor-RECLAIM DONE' \
+  && ok "(RECLAIM) summary reports the re-claimed anchor as DONE" \
+  || bad "(RECLAIM) summary reports the re-claimed anchor DONE"
+printf '%s\n' "$OUT1" | grep -q 'anchor-RECLAIM DONE.*session=gc-toolkit__polecat-lx-new molecule_session=gc-toolkit__polecat-lx-old' \
+  && ok "(RECLAIM) the verdict line names BOTH sessions it compared (the pass is hand-reversible)" \
+  || bad "(RECLAIM) verdict line names both sessions"
+
+# (STALE) fail closed on a session record that is not the CURRENT holder.
+# gc.session_name is stamped at claim time and is not cleared on release, so a bare
+# "recorded session != molecule session" test would fire on a leftover while the
+# molecule's own polecat is still running — draining it mid-implementation. The
+# assignee must EQUAL the recorded session before it may be believed.
+grep -q '^s-stale' "$TMP/cleared" \
+  && bad "(STALE) a stale gc.session_name is not a current holder — must NOT quiesce" \
+  || ok "(STALE) recorded session that does not match the assignee -> left alone (fail closed)"
+printf '%s\n' "$OUT1" | grep -q 'anchor anchor-STALE still live' \
+  && ok "(STALE) summary reports the stale-record root as still live" || bad "(STALE) stale-record skip reason"
+
+# (NOSESS) fail closed when there is nothing to compare: the anchor is held under a
+# session name it never recorded, so the pass declines to guess.
+grep -q '^s-nosess' "$TMP/cleared" \
+  && bad "(NOSESS) an anchor with no recorded session must NOT be quiesced on a guess" \
+  || ok "(NOSESS) anchor records no session -> left alone (fail closed)"
 
 # (CLOSED) a closed anchor counts as done.
 grep -q '^s-closed	routed$' "$TMP/cleared" && grep -q '^s-closed	assignee$' "$TMP/cleared" \
@@ -426,6 +538,39 @@ grep -q '^s-routeonly' "$TMP/cleared" \
 printf '%s\n' "$OUT1" | grep -q 'anchor anchor-ROUTEONLY still live' \
   && ok "(ROUTEONLY) summary reports the route-only anchor as still live" \
   || bad "(ROUTEONLY) route-only anchor reported still live"
+
+# (CROSS) The INTERSECTION of the park predicate (tk-rlm94) and the re-claim
+# predicate (tk-nv3qr). The two were written in parallel against this same
+# function and BOTH claimed $4 — park for gc.routed_to, re-claim for the session
+# pair — so each branch could only ever test its own clause with the other's field
+# absent, and the positional collision was resolved by hand when the second landed.
+# Nothing above pins that resolution: every fixture so far populates exactly one of
+# the two fields, so crossing the arguments still satisfies all of them. These two
+# populate BOTH, and each must still be decided by its OWN clause.
+#
+# (CROSS-RECLAIM) a re-claimed anchor that also carries a live pool route — the
+# shape a re-pooled anchor really has, since the refinery re-routes to the pool on
+# rejection. The route is not `human`, so the park clause must not fire on it, and
+# the route must not be read where the session is expected: cross $4/$5 and the
+# re-claim conjunction compares the assignee against `gc-toolkit/gc-toolkit.polecat`
+# instead of the recorded session, fails, and this husk is left armed.
+grep -q '^s-reclaimrouted	routed$' "$TMP/cleared" && grep -q '^s-reclaimrouted	assignee$' "$TMP/cleared" \
+  && ok "(CROSS-RECLAIM) re-claimed anchor + non-human pool route -> quiesced by the re-claim clause" \
+  || bad "(CROSS-RECLAIM) a live pool route must not shadow the session pair (got: $(grep '^s-reclaimrouted' "$TMP/cleared" || echo none))"
+printf '%s\n' "$OUT1" | grep -q 'anchor-RECLAIMROUTED DONE.*routed_to=gc-toolkit/gc-toolkit.polecat.*session=' \
+  && ok "(CROSS-RECLAIM) the verdict line carries BOTH fields, in their own slots" \
+  || bad "(CROSS-RECLAIM) verdict names route and session separately (got: $(printf '%s\n' "$OUT1" | grep RECLAIMROUTED || echo none))"
+
+# (CROSS-HELD) the mirror: a parked anchor that also RECORDS a session. The park
+# clause must still decide it. The re-claim clause has to stay out of the way on its
+# own terms — the assignee is empty (parking clears it), so its first conjunct fails
+# — and the recorded session must not be read where the route is expected.
+grep -q '^s-heldsess	routed$' "$TMP/cleared" && grep -q '^s-heldsess	assignee$' "$TMP/cleared" \
+  && ok "(CROSS-HELD) parked anchor that also records a session -> quiesced by the park clause" \
+  || bad "(CROSS-HELD) a recorded session must not shadow routed_to (got: $(grep '^s-heldsess' "$TMP/cleared" || echo none))"
+printf '%s\n' "$OUT1" | grep -q 'anchor-HELDSESS DONE.*routed_to=human.*session=gc-toolkit__polecat-lx-hsanch' \
+  && ok "(CROSS-HELD) the verdict line carries BOTH fields, in their own slots" \
+  || bad "(CROSS-HELD) verdict names route and session separately (got: $(printf '%s\n' "$OUT1" | grep HELDSESS || echo none))"
 
 # (FINAL) the finalize step keeps its control-dispatcher route.
 grep -q '^s-final' "$TMP/cleared" \
@@ -498,7 +643,7 @@ grep -q '^s-quiet' "$TMP/cleared" \
   && bad "(QUIET) already-quiet step must not be re-updated" \
   || ok "(QUIET) already-quiet step skipped (idempotent)"
 
-printf '%s\n' "$OUT1" | grep -q '6 steps quiesced across 6 completed workflow(s); 3 still live, 1 already quiet, 1 unresolved, 0 failed' \
+printf '%s\n' "$OUT1" | grep -q '9 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 0 failed' \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 
@@ -537,7 +682,7 @@ printf '%s\n' "$ERR3" | grep -q 's-affine route clear failed' \
 
 # A partial clear is a failure, never a success: the step still rides the affine
 # hand-back, so counting it quiesced would be the same lie in a new place.
-printf '%s\n' "$OUT3" | grep -q '5 steps quiesced across 6 completed workflow(s); 3 still live, 1 already quiet, 1 unresolved, 1 failed' \
+printf '%s\n' "$OUT3" | grep -q '8 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 1 failed' \
   && ok "(EXIT) a partially-cleared step counts as failed, not quiesced" \
   || bad "(EXIT) run 3 summary (got: $(printf '%s' "$OUT3" | tail -1))"
 [ "$RC3" -ne 0 ] \
@@ -588,7 +733,7 @@ grep -q '^bd update s-pool' "$TMP/updates" \
   && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
   || ok "(ROUTEFAIL) route-only step issues no assignee call"
 
-printf '%s\n' "$OUT4" | grep -q '4 steps quiesced across 6 completed workflow(s); 3 still live, 1 already quiet, 1 unresolved, 2 failed' \
+printf '%s\n' "$OUT4" | grep -q '7 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 2 failed' \
   && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
   || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
 [ "$RC4" -ne 0 ] \
