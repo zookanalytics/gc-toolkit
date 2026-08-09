@@ -27,6 +27,8 @@
 #                                      rework filed a child) becomes closeable on
 #                                      merge instead of leaking open. Never opens a
 #                                      second PR for a branch that already has one.
+#   no PR + merge_hold/rebase_hold  -> HOLD (operator gate). Nothing is opened for a
+#                                      held anchor; see the gate in the loop.
 #   no PR + check.codex green@head  -> open the non-draft PR at the reviewed head,
 #                                      replay the codex verdict as a comment, flip
 #                                      to pull_request.
@@ -476,6 +478,21 @@ flip_to_pull_request() {
   return 0
 }
 
+# Truthy in the operators' sense: set, and not one of the explicit "off" spellings.
+# Mirrors merge-skill.sh's merge_hold_truthy exactly, so a marker that holds a merge
+# there cannot fail to hold a PR-OPEN here — which is the stronger claim of the two,
+# because a merge that is deferred can be performed next pass and a pull request that
+# was opened cannot be un-published. Duplicated rather than sourced for the same
+# reason as url_repo_q above (the patrol runs each script independently, and an
+# importer rig may be on an older pack); keep them in step with
+# reconcile-merged-prs.sh's and reconcile-graduated-convoys.sh's is_held.
+is_held() {
+  case "${1:-}" in
+    ""|false|False|FALSE|0|null) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # Open pre-open-gated anchors in this rig's ledger.
 ANCHORS=$(gc bd list --status=open \
   --metadata-field merge_result=pre_open_gate \
@@ -508,7 +525,9 @@ ROWS=$(printf '%s' "$ANCHORS" \
       notes:  (.notes // ""),
       itype:  (.issue_type // "task"),
       prio:   (.priority // ""),
-      codex:  (.metadata["check.codex"] // "")
+      codex:  (.metadata["check.codex"] // ""),
+      hold:   ((.metadata.merge_hold // "") | tostring),
+      rhold:  ((.metadata.rebase_hold // "") | tostring)
     }' 2>/dev/null)
 rows_rc=$?
 # ANCHORS is already known non-empty and not "[]" (the guard above), so a jq that
@@ -589,6 +608,49 @@ while IFS= read -r row; do
   esac
   # rc=1: this repository has no pull request of OURS for this branch. The only
   # answer this pass may open one on.
+
+  # --- Operator hold, checked before anything is published. ---------------------
+  # merge_hold/rebase_hold on the anchor are explicit operator gates, and until
+  # tk-3j0ob this pass honored NEITHER: a hold stopped a held anchor from MERGING
+  # (merge-skill.sh) while the open side walked straight past it and PUBLISHED a
+  # pull request against it. The failure was silent in the worst way — the operator
+  # sees a hold in place and a new PR appear anyway.
+  #
+  # Checked FIRST among the create-path gates, and on fields already in hand: it is
+  # the cheapest gate (no further I/O) and the highest priority (an intentional
+  # operator block, independent of branch and codex state), so a held anchor
+  # short-circuits before the branch-head read — the same ordering merge-skill.sh
+  # gives it among its validate gates.
+  #
+  # DELIBERATELY AFTER the existing-PR arm above, which is not a publishing action:
+  # it adopts a pull request that ALREADY exists and hands the anchor to gates that
+  # honor these same markers themselves (merge-skill.sh holds on merge_hold;
+  # reconcile-merged-prs.sh holds its rebase dispatch on either). Holding the flip
+  # too would buy nothing and would COST the convergence it exists for —
+  # pre_open_gate is invisible to the merged-close observer, which scans only
+  # pull_request, so a held anchor whose sibling PR merged would leak open forever.
+  # The hold belongs on the irreversible half: opening a pull request publishes an
+  # artifact no retry takes back, while a deferred open costs one idle wake.
+  #
+  # Either marker vetoes, for distinct reasons. merge_hold is "do not land this
+  # yet", and opening the PR is what arms the landing. rebase_hold is the narrower
+  # "do not rebase/force-push this branch" — which is exactly the branch this pass
+  # would publish a pull request FROM, and this pass's whole contract is that a PR
+  # is codex-green AT BIRTH: a branch the operator has frozen for rewriting is one
+  # whose reviewed head is expected to move, so the PR would be born green and be
+  # stale moments later, over a comment asserting a signoff at a commit that has
+  # left the branch. Same reading as reconcile-graduated-convoys.sh, which vetoes
+  # on either for the same "publishes something the operator froze" reason.
+  hold=$(printf '%s' "$row" | jq -r '.hold // empty')
+  rhold=$(printf '%s' "$row" | jq -r '.rhold // empty')
+  if is_held "$hold"; then
+    echo "pre-open-resolve: $id branch '$branch' merge_hold set (operator gate); no PR opened"
+    held=$((held + 1)); continue
+  fi
+  if is_held "$rhold"; then
+    echo "pre-open-resolve: $id branch '$branch' rebase_hold set (operator gate); no PR opened"
+    held=$((held + 1)); continue
+  fi
 
   # --- No PR yet: gate on check.codex=green@<live branch head>. -----------------
   # The reviewed OID is the branch head the pre-open signoff validated. Read the

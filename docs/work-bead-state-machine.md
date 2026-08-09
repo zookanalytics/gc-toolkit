@@ -258,7 +258,13 @@ the codex signoff against the **branch** and parks the bead here — detached fr
 both queues exactly like gating — *before* opening the PR. An idle-loop pass
 beside the merge skill (`pre-open-resolve.sh`) opens the non-draft PR only once
 every pre-open member is green at the branch head — today just `check.codex` —
-moving the bead to ordinary `pull_request` gating. A PR that becomes visible is
+moving the bead to ordinary `pull_request` gating. It opens nothing at all while
+the anchor carries an operator `merge_hold` or `rebase_hold`: opening the PR is
+what arms the landing a `merge_hold` defers, and the branch a `rebase_hold`
+freezes is the one the PR would be published from. Adopting a PR the branch
+*already* has is still allowed under either marker — that publishes nothing, and
+holding it would strand the anchor in `pre_open_gate`, which the merged-close
+observer does not scan. A PR that becomes visible is
 thus codex-green at birth, with no draft phase (the pipeline does not use draft PRs). The
 pre-open subset is the only part of the check-set that moves ahead of
 PR-creation; the rest — CI, approval — stay post-open, gated at merge by the same

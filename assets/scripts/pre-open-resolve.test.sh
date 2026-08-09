@@ -19,6 +19,23 @@
 #   (CONV)   convergence: a flipped anchor leaves the pre_open_gate set, so a
 #            second pass neither re-creates nor re-flips it.
 #
+# OPERATOR HOLDS (tk-3j0ob). merge_hold/rebase_hold on the anchor are explicit
+# operator gates. This pass honored neither, so a hold stopped a held anchor from
+# MERGING while the open side PUBLISHED a pull request against it — the operator
+# saw a hold in place and a new PR appear anyway. Covered:
+#   (HOLD0) POSITIVE CONTROL, run first: the explicit "off" spellings (false, 0) do
+#           NOT hold, so an unheld anchor still opens. Without it, a gate that held
+#           unconditionally would pass every case below.
+#   (HOLD1) merge_hold truthy -> nothing opened, nothing flipped, nothing
+#           commented; named in the log and counted HELD, not skipped.
+#   (HOLD2) rebase_hold truthy -> the same, named as rebase_hold specifically.
+#   (HOLD3) ...but a held anchor whose branch ALREADY has a PR is still FLIPPED:
+#           the hold is on publishing, not on adopting a PR that exists. Holding
+#           the flip would leak the anchor open (pre_open_gate is invisible to the
+#           merged-close observer, which scans only pull_request).
+#   (HOLD4) the gate precedes the branch-head read, so an unreadable head cannot
+#           mask an operator's block as a transient skip.
+#
 # REPOSITORY IDENTITY (review tk-jc66l). A branch name does not name a repository,
 # and every fork of this repo can carry the same `polecat/<bead>`. Uncertified, a
 # foreign same-branch PR flips this anchor OUT of pre_open_gate — the only state
@@ -81,7 +98,10 @@ has() { grep -q "$1" "$2" 2>/dev/null; }
 
 mkdir -p "$TMP/bin"
 
-# Pre-open-gated anchors (gc bd list source): id|branch|merged_target|check.codex
+# Pre-open-gated anchors (gc bd list source):
+#   id|branch|merged_target|check.codex[|merge_hold|rebase_hold]
+# The two hold columns are optional — omitted means the marker is unset, which is
+# the shape every anchor filed before tk-3j0ob has.
 #   bead-GREEN : green at the live head            -> open PR + flip
 #   bead-STALE : green at an OLD head (rework moved it) -> held
 #   bead-MISS  : no marker (codex not done)        -> held
@@ -345,14 +365,14 @@ case "$2" in
     case "$*" in
       *"merge_result=pre_open_gate"*)
         out=""
-        while IFS='|' read -r id branch target codexmark; do
+        while IFS='|' read -r id branch target codexmark mhold rhold; do
           [ -n "$id" ] || continue
           # Convergence is a LEDGER fact: an anchor whose merge_result actually
           # PERSISTED as pull_request has left this scan. One whose flip did not
           # persist is still in it — which is the whole point of splitting the write.
           [ "$(meta_get "$id" merge_result)" = "pull_request" ] && continue
-          obj=$(printf '{"id":"%s","title":"impl %s","description":"desc %s","metadata":{"branch":"%s","merged_target":"%s","check.codex":"%s","merge_result":"pre_open_gate"}}' \
-            "$id" "$id" "$id" "$branch" "$target" "$codexmark")
+          obj=$(printf '{"id":"%s","title":"impl %s","description":"desc %s","metadata":{"branch":"%s","merged_target":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s","merge_result":"pre_open_gate"}}' \
+            "$id" "$id" "$id" "$branch" "$target" "$codexmark" "$mhold" "$rhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -942,6 +962,113 @@ grep -q "0 opened, 0 flipped, 0 held, 0 skipped" "$TMP/outdf" \
 grep -qE "could NOT enumerate|ABORTING non-zero" "$TMP/errdf" \
   && ok "(DISKFULL) the enumeration failure is announced on stderr, not silent" \
   || bad "(DISKFULL) must announce the enumeration failure (err: $(cat "$TMP/errdf"))"
+# --- OPERATOR HOLDS (tk-3j0ob). ------------------------------------------------
+# merge_hold/rebase_hold on the anchor are explicit operator gates, honored by
+# merge-skill.sh, reconcile-merged-prs.sh and reconcile-graduated-convoys.sh — and,
+# until this fix, by NEITHER arm of this pass. A hold stopped a held anchor from
+# MERGING while the open side walked straight past it and PUBLISHED a pull request
+# against it, so the operator saw a hold in place and a new PR appear anyway.
+hold_reset() {   # <merge_hold> <rebase_hold>
+  printf 'bead-HOLD|polecat/feat-hold|main|green@HEADHOLD|%s|%s\n' "${1:-}" "${2:-}" \
+    > "$TMP/anchors"
+  cat > "$TMP/heads" <<'H'
+polecat/feat-hold|HEADHOLD
+H
+  : > "$TMP/existpr"
+  cat > "$TMP/newpr" <<'N'
+polecat/feat-hold|801|https://github.com/acme/repo/pull/801|OPEN|main|polecat/feat-hold|acme/repo
+N
+  : > "$TMP/foreignpr"; : > "$TMP/racepr"; : > "$TMP/reviews"; : > "$TMP/notes"
+  : > "$TMP/created"; : > "$TMP/createdwhere"; : > "$TMP/fliplog"
+  : > "$TMP/flipurl"; : > "$TMP/flipped"; : > "$TMP/comments"; : > "$TMP/commentwhere"
+  : > "$TMP/meta"; : > "$TMP/drop"
+  : > "$TMP/viewbyname"
+  : > "$TMP/ghdefault"; : > "$TMP/ghhost"; : > "$TMP/ignorerepo"
+  : > "$TMP/ignorerepocreate"; : > "$TMP/repofail"; : > "$TMP/listfail"
+}
+
+# (HOLD0) POSITIVE CONTROL, run FIRST so the assertions below mean something. The
+# anchor is green, has no PR, and carries the explicit "off" spellings — `false`
+# and `0`, the values an operator's cleared marker actually leaves behind. It must
+# OPEN. A gate that held unconditionally would pass every HOLD case that follows
+# while silently stopping the pass dead for every unheld anchor in the city.
+hold_reset false 0
+bash "$SCRIPT" >"$TMP/outh0" 2>"$TMP/errh0"
+has '^polecat/feat-hold$' "$TMP/created" \
+  && ok "(HOLD0) control: merge_hold=false / rebase_hold=0 do NOT hold — the PR still opens" \
+  || bad "(HOLD0) control: an unheld anchor must still open its PR (err: $(cat "$TMP/errh0"))"
+grep -q '^bead-HOLD	801$' "$TMP/fliplog" \
+  && ok "(HOLD0) control: ...and it still flips to pull_request" \
+  || bad "(HOLD0) control: flip must record pr_number 801 (got: $(cat "$TMP/fliplog"))"
+
+# (HOLD1) merge_hold — "do not land this yet", and opening the PR is what arms the
+# landing. Nothing may be published: not the pull request, not the codex-signoff
+# comment that names a commit as reviewed.
+hold_reset true ""
+OUTH1="$(bash "$SCRIPT" 2>"$TMP/errh1")"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(HOLD1) merge_hold set -> NO pull request is opened"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+   "(HOLD1) ...and the anchor is not flipped out of pre_open_gate"
+eq "$(wc -l < "$TMP/comments" | tr -d ' ')" "0" \
+   "(HOLD1) ...and no codex-signoff comment is published about it"
+printf '%s\n' "$OUTH1" | grep -q "bead-HOLD branch 'polecat/feat-hold' merge_hold set (operator gate)" \
+  && ok "(HOLD1) the refusal names the marker, so a held anchor is diagnosable" \
+  || bad "(HOLD1) must name merge_hold (got: $OUTH1)"
+printf '%s\n' "$OUTH1" | grep -q "0 opened, 0 flipped, 1 held" \
+  && ok "(HOLD1) counted as HELD (an operator gate), not as a skip" \
+  || bad "(HOLD1) summary must count it held (got: $OUTH1)"
+
+# (HOLD2) rebase_hold — the narrower "do not rebase/force-push this branch", which
+# is exactly the branch a PR would be published FROM. This pass's contract is that
+# a PR is codex-green AT BIRTH; a branch frozen for rewriting is one whose reviewed
+# head is expected to move, so the PR would be born green and be stale moments
+# later, over a comment asserting a signoff at a commit that has left the branch.
+hold_reset "" true
+OUTH2="$(bash "$SCRIPT" 2>"$TMP/errh2")"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(HOLD2) rebase_hold set -> NO pull request is opened"
+eq "$(wc -l < "$TMP/comments" | tr -d ' ')" "0" \
+   "(HOLD2) ...and nothing is commented on the branch the operator froze"
+printf '%s\n' "$OUTH2" | grep -q "bead-HOLD branch 'polecat/feat-hold' rebase_hold set (operator gate)" \
+  && ok "(HOLD2) the refusal names rebase_hold specifically, not merge_hold" \
+  || bad "(HOLD2) must name rebase_hold (got: $OUTH2)"
+printf '%s\n' "$OUTH2" | grep -q "0 opened, 0 flipped, 1 held" \
+  && ok "(HOLD2) counted as held" || bad "(HOLD2) summary (got: $OUTH2)"
+
+# (HOLD3) THE HOLD IS ON THE IRREVERSIBLE HALF ONLY. A held anchor whose branch
+# ALREADY has a pull request is still FLIPPED: adopting a PR that exists publishes
+# nothing, and the gates it hands the anchor to honor these same markers themselves
+# (merge-skill.sh holds on merge_hold; reconcile-merged-prs.sh holds its rebase
+# dispatch on either). Holding the flip too would COST the convergence it exists
+# for — pre_open_gate is invisible to the merged-close observer, which scans only
+# pull_request, so a held anchor whose sibling PR merged would leak open forever.
+hold_reset true true
+printf '%s\n' 'polecat/feat-hold|802|https://github.com/acme/repo/pull/802|OPEN|main|polecat/feat-hold|acme/repo' \
+  > "$TMP/existpr"
+bash "$SCRIPT" >"$TMP/outh3" 2>"$TMP/errh3"
+grep -q '^bead-HOLD	802$' "$TMP/fliplog" \
+  && ok "(HOLD3) a held anchor still adopts the PR its branch already has (convergence preserved)" \
+  || bad "(HOLD3) held anchor must still flip onto PR#802 (got: $(cat "$TMP/fliplog"))"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(HOLD3) ...and still opens nothing of its own"
+
+# (HOLD4) THE HOLD PRECEDES THE BRANCH-HEAD READ. With the gate placed after it, a
+# held anchor whose head cannot be read would be reported as a transient "retry
+# next pass" skip — the operator's deliberate block rendered as a read failure, and
+# counted in the wrong bucket. Same ordering merge-skill.sh gives merge_hold among
+# its validate gates: cheapest, and highest priority.
+hold_reset true ""
+: > "$TMP/heads"          # the branch head cannot be resolved at all
+OUTH4="$(bash "$SCRIPT" 2>"$TMP/errh4")"
+printf '%s\n' "$OUTH4" | grep -q "merge_hold set (operator gate)" \
+  && ok "(HOLD4) an unreadable head does not mask the hold — the operator gate is reported" \
+  || bad "(HOLD4) must report the hold (got: $OUTH4 / err: $(cat "$TMP/errh4"))"
+grep -q "head unresolved" "$TMP/errh4" \
+  && bad "(HOLD4) the head read must not be reached for a held anchor" \
+  || ok "(HOLD4) the gate short-circuits before the branch-head read (no I/O for a held anchor)"
+printf '%s\n' "$OUTH4" | grep -q "0 opened, 0 flipped, 1 held" \
+  && ok "(HOLD4) counted as held, not skipped" || bad "(HOLD4) summary (got: $OUTH4)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
