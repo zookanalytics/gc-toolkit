@@ -74,19 +74,30 @@
 # pre-open-resolve.sh on a codex marker no one was dispatched to stamp) is
 # unstuck rather than left waiting forever.
 #
-# TWO PHASES, IN ORDER (phase 0 added by tk-wsxd0):
+# THREE PHASES, IN ORDER (phase 0 added by tk-wsxd0, phase 0a by tk-vnlll). Each
+# answers a question the next one takes for granted:
 #
-#   phase 0  merge_result recovery — can this anchor be SEEN at all?
-#   phase 1  check_set normalization — is what we see GATED? (everything above)
+#   phase 0a  reopen closed-but-not-landed — does this anchor EXIST to be seen?
+#   phase 0   merge_result recovery        — can it be SEEN at all?
+#   phase 1   check_set normalization      — is what we see GATED? (everything above)
 #
 # Phase 1 and every other pass enumerate anchors on the `merge_result` field, so an
 # anchor missing `merge_result` ENTIRELY is invisible to all of them at once — a
 # silent, unbounded stall (shutupandlisten PR#37 sat open 6 days with zero
 # escalations). Phase 0 is the repair that cannot key on the damaged field: it finds
 # beads the refinery already canonicalized a PR onto (`pr_url`/`pr_number`) but that
-# carry no `merge_result`, and restores it. Ordering the phases this way is what
-# makes an anchor recovered in phase 0 also GATED in phase 1, on the same pass,
-# before merge-skill.sh runs. See the phase 0 block for its exclusions.
+# carry no `merge_result`, and restores it.
+#
+# But phase 0 enumerates OPEN beads, so it cannot see an anchor that was CLOSED at
+# PR-creation — and under the close-on-land contract (#163) `closed` means LANDED, so
+# such a bead is a false durable record on top of being unreachable (signal-loom
+# sl-jcr4 / PR#518 sat open four days, fully green and approved, with zero
+# escalations). Phase 0a is the repair one level under that: it reopens the bead, which
+# turns it into precisely the shape phase 0 already handles.
+#
+# Ordering the phases this way is what makes an anchor reopened in phase 0a also
+# RECOVERED in phase 0 and GATED in phase 1, on the same pass, before merge-skill.sh
+# runs. See each phase's block for its exclusions.
 #
 # NOT set -e: best-effort, must never abort the patrol's idle loop. Any tool error
 # skips the anchor and retries next idle pass.
@@ -805,6 +816,364 @@ recovered=0; recover_skipped=0; noncanon=0
 RECOVERED_INERT=""   # ids whose PR is already MERGED/CLOSED — visibility only, no gate
 RECOVERED_OPEN=""    # ids made visible THIS pass whose PR is OPEN — phase 1 MUST gate them
 
+# THIS CHECKOUT'S OWN REPOSITORY, host-qualified — the repository a PR must live in
+# when the bead naming it records no pr_url of its own, and therefore the second half
+# of every "which PR is this?" answer below.
+#
+# Resolved ONCE, UNCONDITIONALLY, for the whole pass. All three arms key identity on it —
+# phase 0a's open-PR enumeration, phase 0's candidate rows, phase 1's in-flight dedup —
+# so it cannot live inside any one's `if`: under `set -u` a later arm would then die on
+# an unbound variable in any pass where an earlier one found nothing, and without `set -u`
+# it would silently degrade to the `?` wildcard and un-qualify the dedup exactly when
+# phase 0 was quiet.
+#
+# `resolve_origin_repo_q` is called here rather than per row because the command
+# substitutions below run in subshells, where the memoization inside
+# `resolve_origin_repo` cannot reach this shell.
+PASS_ORIGIN_REPO_Q=$(resolve_origin_repo_q)
+
+# =============================================================================
+# PHASE 0a — CLOSED-BUT-NOT-LANDED: an anchor CLOSED at PR-CREATION (tk-vnlll).
+# =============================================================================
+# THE THIRD BUG, one level under the second. Phase 0 repairs an anchor whose
+# `merge_result` was lost, but it enumerates `--status=open` — so it cannot see an
+# anchor that was CLOSED. And under the close-on-land contract (#163) `closed` MEANS
+# landed, which makes such a bead a FALSE DURABLE RECORD as well as an unreachable one:
+# merge-skill.sh, pre-open-resolve.sh, the observer and phase 0 itself all enumerate
+# open beads, so a closed anchor is invisible to every one of them AT ONCE. Nothing
+# escalates, because nothing can see it; the ledger reads "landed" while the PR rots.
+#
+# VERIFIED LIVE CASE. signal-loom sl-jcr4 (convoy "ink-weight rendering model") was
+# CLOSED at PR-creation on 2026-08-05 carrying pr_url=.../pull/518 and NO merge_result.
+# PR#518 then sat OPEN for four days with zero escalations while satisfying every
+# non-codex gate — head matching the anchor's gc.work_commit, base main,
+# mergeStateStatus CLEAN, all 11 checks SUCCESS, APPROVED by an admin at the live head.
+# The observer reported it only as "ANCHORLESS — not tracked by any automated path",
+# which is a report, not a repair. The manual fix — reopen, re-stamp merge_result /
+# pr_number / merged_target — let check-set-heal gate it normally and it landed. THIS
+# ARM IS THAT MANUAL FIX, AUTOMATED.
+#
+# THE SIGNATURE IS NARROW ON PURPOSE:
+#
+#   closed + a PR reference + merge_result ABSENT + that PR still OPEN
+#     => closed-but-not-landed: reopen, and let phase 0 re-stamp it below.
+#
+# `merge_result` ABSENT is what separates this from a genuinely landed anchor, which
+# merge-skill.sh closes with `merge_result=merged` (and reconcile-merged-prs.sh with
+# `merged`/`abandoned`/`retargeted`). A closed bead carrying ANY merge_result has a
+# disposition recorded by a pass that knew what it was doing, and is left alone — the
+# fail-closed direction, since resurrecting an anchor an operator or a pass deliberately
+# retired is worse than one more pass of a stall.
+#
+# WHY IT ONLY REOPENS. Reopening is the WHOLE repair: a reopened bead is, by
+# construction, exactly the shape phase 0 below already handles (open, PR-referencing,
+# no merge_result), so it is recovered, gated and dispatched on THIS SAME PASS by code
+# that is already reviewed and tested. Ordering the arms this way is what makes one
+# `--status=open` write converge to a fully gated anchor, and it is why this arm writes
+# nothing else.
+#
+# ORDERED SO A FAILURE IS A RETRY, NOT A STRAND. The reopen is deliberately the FIRST
+# write, not the last. Stamping merge_result first and reopening second would, on a
+# dropped second write, leave a CLOSED bead carrying a merge_result — no longer a
+# candidate for this arm (the signature requires merge_result absent) and still
+# invisible to every open-bead pass: a permanent strand, minted by the repair. Reopening
+# first cannot do that. If everything after it fails, the bead is an ordinary open phase-0
+# candidate and the next pass finishes the job. The exposure that ordering costs is nil:
+# an open bead with NO merge_result is invisible to merge-skill.sh, which enumerates on
+# `merge_result=pull_request`, so nothing can merge it in the meantime.
+#
+# COST. The closed set is LARGE (hundreds of beads per rig carry a pr_url and no
+# merge_result — every anchor closed before merge_result existed), and certifying each
+# against `gh` per pass would be unaffordable. So the discriminator that is both the
+# cheapest and the narrowest runs FIRST: ONE `gh pr list --state open` names every PR
+# that could possibly qualify, and a closed bead whose PR is not in that set is dropped
+# before any per-bead work. On this rig that takes 413 closed candidates to 14, and the
+# child exclusions below take those to 0.
+#
+# WHAT IT WILL NOT REOPEN (each exclusion is a real hazard):
+#   - ANY bead whose PR a LIVE bead already names. This is stronger than phase 0's
+#     one-anchor-per-PR guard and subsumes it: if an open or in-progress bead — anchor,
+#     rework child or review — references the PR, the PR is already tracked and this
+#     closed bead is not the thing to resurrect. Reopening one would mint a second
+#     anchor for a live PR (tk-ynz4b) or reanimate a superseded attempt.
+#   - REWORK/REVIEW CHILDREN, excluded on the same five metadata markers phase 0 uses.
+#     Closed review children are the COMMON closed shape that references a PR (all 14
+#     survivors on this rig were `task_kind=review`), so this exclusion is what keeps
+#     the arm from reopening spent review beads on every live PR.
+#   - AMBIGUITY. Two closed candidates naming the same PR: neither is reopened.
+#   - AN UNCERTIFIED PR. The same `certify_pr_identity` phase 0 uses — repository, URL,
+#     head branch and head repository — because reopening binds this bead to that PR.
+#     The PR must ALSO still be OPEN at certification time, not merely in the list read
+#     moments earlier.
+#   - A BEAD THIS ARM ALREADY REOPENED ONCE. `reopened_not_landed` is stamped on the
+#     reopen, so a bead that is closed AGAIN was re-closed by a live writer after the
+#     repair. Reopening it a second time would be a flap — this pass and that writer
+#     fighting over the bead every idle loop — so it escalates to an operator instead.
+#     That marker is the only thing this arm writes besides the status.
+reopened=0; reopen_skipped=0
+
+# THE LEDGER SIDE FIRST, THE `gh` CALL ONLY IF IT COULD MATTER. The intersection needs
+# both halves, but the order they are read in is not free: the ledger scans are local and
+# cheap, while `gh pr list` is a network round trip. Reading the ledger first means a rig
+# with no closed candidate at all — the steady state — pays nothing, and it keeps this
+# pass from reaching the network on behalf of a question that has no candidates to ask it
+# about. (It is also what keeps the sibling regression suite hermetic: that file stubs
+# `gc` but not `gh`, so an unconditional call here would leave it making real API calls.)
+CLOSED_ARM_OK=1
+[ -n "$PASS_ORIGIN_REPO_Q" ] || CLOSED_ARM_OK=0
+
+CLOSED_RAW=""
+if [ "$CLOSED_ARM_OK" = 1 ]; then
+  for KEY in pr_url pr_number; do
+    # Guarded exactly as the open scans are: a read that DIED after emitting a
+    # well-formed array passes a shape test and reads as a complete scan. Here that
+    # matters for the same whole-set reason — the ambiguity guard below can only see two
+    # closed candidates for one PR if BOTH are in the set.
+    if ! R=$(bd_list_read --status=closed --has-metadata-key "$KEY"); then
+      echo "check-set-heal: WARN the closed '$KEY' scan did not return a readable result; the candidate set would be PARTIAL and the ambiguity guard cannot see a duplicate it never scanned — skipping the closed-but-not-landed arm this pass, retrying next" >&2
+      CLOSED_ARM_OK=0
+      break
+    fi
+    [ "$R" != "[]" ] || continue
+    if [ -z "$CLOSED_RAW" ]; then CLOSED_RAW="$R"; else CLOSED_RAW="$CLOSED_RAW
+$R"; fi
+  done
+fi
+
+# The cheap discriminator, read ONCE and only now: every PR still open in THIS
+# repository. Fail-closed on an unreadable answer — "which PRs are open" is the entire
+# basis for reopening anything, and an empty result from a failed call is
+# indistinguishable from "nothing is open" while meaning the opposite. Skipping costs one
+# pass of a stall that is already days old; guessing reopens anchors whose PRs merged
+# months ago.
+OPEN_PR_NUMS=""
+if [ "$CLOSED_ARM_OK" = 1 ] && [ -n "$CLOSED_RAW" ]; then
+  if ! command -v gh >/dev/null 2>&1; then
+    CLOSED_ARM_OK=0
+  else
+    # --limit is generous rather than absent (gh requires one). A PR past it is a closed
+    # anchor that stays closed — the existing stall, never a new exposure — but it would
+    # be a SILENT one, so a full page is reported rather than assumed complete.
+    PR_LIST_RAW=$(gh pr list --repo "$PASS_ORIGIN_REPO_Q" --state open --limit 1000 \
+      --json number 2>/dev/null)
+    if [ -z "$PR_LIST_RAW" ] \
+       || ! printf '%s' "$PR_LIST_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      echo "check-set-heal: WARN the open-PR enumeration for '$PASS_ORIGIN_REPO_Q' did not return a readable result; a closed anchor can only be reopened against a PR confirmed OPEN, so the closed-but-not-landed arm is skipped this pass, retrying next" >&2
+      CLOSED_ARM_OK=0
+    else
+      OPEN_PR_NUMS=$(printf '%s' "$PR_LIST_RAW" | jq -r '.[].number // empty' 2>/dev/null)
+      if [ "$(printf '%s' "$PR_LIST_RAW" | jq -r 'length' 2>/dev/null)" = "1000" ]; then
+        echo "check-set-heal: WARN the open-PR enumeration returned a FULL page (1000); a closed-but-not-landed anchor whose PR fell past it stays closed and invisible this pass" >&2
+      fi
+    fi
+  fi
+fi
+
+CLOSED_CANDS=""
+if [ "$CLOSED_ARM_OK" = 1 ] && [ -n "$OPEN_PR_NUMS" ]; then
+  if [ -n "$CLOSED_RAW" ]; then
+    # Same exclusions as phase 0's candidate projection, applied to METADATA rather than
+    # the title, plus the open-PR intersection that makes the arm affordable. The PR
+    # number is resolved here (from pr_number, else parsed out of pr_url) because the
+    # intersection needs it before any per-bead work is done.
+    CLOSED_CANDS=$(printf '%s\n' "$CLOSED_RAW" | jq -s -c --arg open "$OPEN_PR_NUMS" \
+      --arg originq "$PASS_ORIGIN_REPO_Q" '
+      ($open | split("\n") | map(select(. != ""))) as $openprs
+      | ((add // []) | unique_by(.id))[]
+      | . as $b | (($b.metadata // {})) as $m
+      | select((($m.merge_result // "") | tostring | ascii_downcase | gsub("[[:space:]]"; "")) == "")
+      | select((($m.branch // "") | tostring) != "")
+      | select((($m.anchor_bead // "") | tostring) == "")
+      | select((($m.task_kind // "") | tostring) == "")
+      | select((($m.source_review_bead // "") | tostring) == "")
+      | select((($m.source_anchor_bead // "") | tostring) == "")
+      # A surviving route, on the same terms phase 0 excludes one. A closed bead that
+      # still carries `gc.routed_to` was routed to a pool when it was closed, and
+      # reopening it hands a pool a claimable, branch-carrying bead — the refinery
+      # orphan scan offers exactly open + branch + no assignee — which re-slings
+      # finished work as if it were new. The anchor shape has NO live route.
+      | select((($m["gc.routed_to"] // "") | tostring) == "")
+      | ((($m.pr_url // "") | tostring)) as $u
+      | (if (($m.pr_number // "") | tostring) != "" then (($m.pr_number) | tostring)
+         else ([$u | capture("/pull/(?<n>[0-9]+)")] | .[0] | if . == null then "" else .n end) end) as $n
+      | select($n != "")
+      | select($openprs | index($n))
+      # WHICH REPOSITORY this candidate names, resolved HERE, inside the one projection
+      # that builds the set — not in a shell loop afterwards. A per-row annotation pass
+      # drops a row whose jq fails, and a dropped row is not merely un-repaired: the
+      # ambiguity guard below is a WHOLE-SET property, so losing one of two candidates
+      # for a PR makes the survivor look unambiguous and PROMOTES it. Same rule the
+      # candidate scans follow, for the same reason (tk-b0e5y / review tk-lgpyg #3).
+      # From the pr_url when it parses, else this checkout own repository; `?` when
+      # neither answers is the fail-closed wildcard that collides with anything.
+      | ([$u | capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<rp>[^/]+/[^/]+)/pull/[0-9]")]
+          | .[0]) as $c
+      | (if $c != null then ($c.h + "/" + $c.rp)
+         elif $originq != "" then $originq
+         else "?" end) as $repo
+      | {
+          id,
+          assignee: (($b.assignee // "") | tostring),
+          prurl:    $u,
+          branch:   (($m.branch // "") | tostring),
+          num:      $n,
+          repo:     $repo,
+          already:  (($m.reopened_not_landed // "") | tostring)
+        }' 2>/dev/null) || {
+      echo "check-set-heal: WARN the closed-candidate projection failed; the candidate set is unreliable — skipping the closed-but-not-landed arm this pass, retrying next" >&2
+      CLOSED_CANDS=""
+    }
+  fi
+fi
+
+# Ambiguity, over the closed set: the same PR named by more than one surviving closed
+# candidate. Keyed on REPOSITORY and number for the reason every other identity surface
+# here is — a pull number is unique only within a repository and this city's ledger spans
+# rigs with different ones, so a candidate for another repository's #745 must not make
+# ours ambiguous. `?` (an unnameable repository) is the fail-closed wildcard and collides
+# with anything.
+CLOSED_DUP=""
+if [ -n "$CLOSED_CANDS" ]; then
+  CLOSED_DUP=$(printf '%s\n' "$CLOSED_CANDS" \
+    | jq -rs '. as $all
+        | [ $all[]
+            | . as $c
+            | select([ $all[]
+                       | select(.id != $c.id)
+                       | select(.num == $c.num)
+                       | select(.repo == "?" or $c.repo == "?" or .repo == $c.repo) ]
+                     | length > 0)
+            | .id ]
+        | .[]' 2>/dev/null) || {
+    echo "check-set-heal: WARN the closed duplicate-candidate check failed; ambiguous candidates cannot be ruled out — skipping the closed-but-not-landed arm this pass, retrying next" >&2
+    CLOSED_CANDS=""
+  }
+fi
+
+if [ -n "$CLOSED_CANDS" ]; then
+  while IFS= read -r crow; do
+    [ -n "${crow:-}" ] || continue
+    xid=$(printf '%s' "$crow" | jq -r '.id // empty')
+    [ -n "$xid" ] || continue
+    xnum=$(printf '%s' "$crow" | jq -r '.num // empty')
+    xurl=$(printf '%s' "$crow" | jq -r '.prurl // empty')
+    xbranch=$(printf '%s' "$crow" | jq -r '.branch // empty')
+    xassignee=$(printf '%s' "$crow" | jq -r '.assignee // empty')
+    xalready=$(printf '%s' "$crow" | jq -r '.already // empty')
+    xrepo=$(printf '%s' "$crow" | jq -r '.repo // empty')
+    [ -n "$xrepo" ] || xrepo="?"
+
+    if [ -n "$CLOSED_DUP" ] && printf '%s\n' "$CLOSED_DUP" | grep -qxF "$xid"; then
+      echo "check-set-heal: WARN PR#$xnum in '$xrepo' has MULTIPLE closed-but-not-landed candidates (including $xid); cannot identify the anchor — skipping all, operator must disambiguate" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+
+    # Already reopened once and CLOSED AGAIN. Something live re-closed it after the
+    # repair, so reopening again would flap the bead every idle pass. Hand it to a human
+    # instead — and say so once per pass rather than fixing it wrong forever.
+    if [ -n "$xalready" ]; then
+      echo "check-set-heal: WARN $xid was already reopened by this arm ($xalready) and has been CLOSED again while PR#$xnum is still open; NOT reopening a second time — a live writer is re-closing it and an operator must find that writer (the PR is stranded meanwhile)" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+
+    # Not a polecat's live work — the same assignee rule phase 0 applies. An empty
+    # assignee is the canonical gating shape; a refinery-ish one is what the live case
+    # wore (sl-jcr4 was assigned signal-loom/gc-toolkit.refinery when it was closed).
+    case "$(printf '%s' "$xassignee" | tr '[:upper:]' '[:lower:]')" in
+      "")         : ;;
+      *refinery*) : ;;
+      *)
+        reopen_skipped=$((reopen_skipped + 1)); continue ;;
+    esac
+
+    # IS THIS PR ALREADY ANCHORED? The same one-anchor-per-PR question phase 0 asks
+    # (tk-ynz4b), asked of both identity surfaces: a LIVE bead carrying a merge_result
+    # for this PR IS the anchor, so this closed bead is a spent predecessor and
+    # reopening it would mint a second anchor for a live PR.
+    #
+    # Keyed on a live merge_result, NOT on "any live bead names the PR". Review and
+    # rework CHILDREN name the PR and carry no merge_result by construction — and a live
+    # child over a CLOSED anchor is the strongest possible evidence that the anchor was
+    # closed by mistake, since the child exists to gate a bead that is no longer there.
+    # Refusing on those would decline to repair exactly the case that most needs it, and
+    # the reopened anchor is what the child was waiting for: merge-skill.sh derives its
+    # in-flight hold from open children, so the PR stays held until the child lands.
+    #
+    # Fail closed on an unreadable ledger: promoting a dead bead over a live one on an
+    # unanswered question is how the second anchor gets minted.
+    if ! LIVE_RAW=$(bd_list_read --status=open,in_progress --has-metadata-key pr_url); then
+      echo "check-set-heal: WARN $xid incumbent-anchor scan by pr_url failed (ledger unreadable); cannot rule out a live anchor already driving PR#$xnum — not reopening, retrying next pass" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+    if ! LIVE_NUM_RAW=$(bd_list_read --metadata-field pr_number="$xnum" --status=open,in_progress); then
+      echo "check-set-heal: WARN $xid incumbent-anchor lookup for PR#$xnum failed (ledger unreadable); cannot rule out a live anchor already driving it — not reopening, retrying next pass" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+    # Repository-qualified on both surfaces, for the reason every identity check here is:
+    # a pull number is unique only within a repository, so another rig's #<n> must not
+    # read as the incumbent for ours. `?` (an unnameable repository) is the fail-closed
+    # wildcard and blocks.
+    LIVE_OWNER=$(printf '%s\n%s' "$LIVE_RAW" "$LIVE_NUM_RAW" | jq -rs --arg n "$xnum" --arg r "$xrepo" '
+        [ (add // [])[]
+          | . as $b | (($b.metadata // {})) as $m
+          | select((($m.merge_result // "") | tostring | ascii_downcase | gsub("[[:space:]]"; "")) != "")
+          | ((($m.pr_url // "") | tostring)) as $u
+          | ([$u | capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<rp>[^/]+/[^/]+)/pull/(?<pn>[0-9]+)")] | .[0]) as $c
+          | (if $c == null then "?" else ($c.h + "/" + $c.rp) end) as $ir
+          | (if $c == null then (($m.pr_number // "") | tostring) else $c.pn end) as $inum
+          | select($inum == $n)
+          | select($ir == "?" or $r == "?" or $ir == $r)
+          | $b.id ] | unique | .[0] // empty' 2>/dev/null)
+    if [ -n "$LIVE_OWNER" ]; then
+      echo "check-set-heal: WARN $xid names PR#$xnum in '$xrepo' but live anchor $LIVE_OWNER already drives it; refusing to reopen a second anchor for one PR (tk-ynz4b)" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+
+    # CERTIFY BEFORE BINDING, exactly as phase 0 does: reopening this bead re-enrols it
+    # as the anchor for PR#<n>, and its metadata is by construction suspect. Repository,
+    # URL, head branch and head repository must all agree.
+    if ! certify_pr_identity "$xid" "$xnum" "$xurl" "$xbranch" "reopening a closed-but-not-landed anchor"; then
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+    # ...and the PR must STILL be open. The listing above is a snapshot taken before any
+    # of the per-bead work; certification is the authoritative, pinned read. A PR that
+    # merged or closed in between is a correctly-closed anchor after all.
+    if [ "$CERT_STATE" != "OPEN" ]; then
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+
+    echo "check-set-heal: $xid is CLOSED while PR#$xnum is still OPEN and it carries NO merge_result — under close-on-land that reads as LANDED, so the bead is a false durable record AND invisible to merge-skill, pre-open-resolve, the observer and phase 0 alike; reopening so the PR is driven again (tk-vnlll)"
+
+    # THE ONLY WRITES: the marker that makes a re-close detectable, then the status.
+    # The marker goes FIRST for the same reason phase 0 writes dependents before
+    # visibility — if it is dropped, the bead stays closed and is retried, whereas a
+    # reopen with no marker cannot tell a flap from a first repair on the next pass.
+    gc bd update "$xid" --set-metadata reopened_not_landed="PR#$xnum" >/dev/null 2>&1
+    GOT_MARK=$(gc bd show "$xid" --json 2>/dev/null \
+      | jq -r '.[0].metadata.reopened_not_landed // empty' 2>/dev/null)
+    if [ "$GOT_MARK" != "PR#$xnum" ]; then
+      echo "check-set-heal: WARN $xid reopen marker did not persist (have '${GOT_MARK:-<empty>}'); NOT reopening — without it a re-close could not be told from a first repair and this arm would flap the bead. Retrying next pass" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+
+    gc bd update "$xid" --status=open \
+      --append-notes "check-set-heal: this bead was CLOSED while PR#$xnum was still OPEN and it carried NO merge_result. Under the close-on-land contract a closed bead means LANDED, so this was both a false durable record and invisible to every pass at once (merge-skill, pre-open-resolve, the observer and the merge_result recovery all enumerate OPEN beads). Reopened so the PR is driven again; the merge_result recovery re-stamps it on this same pass (tk-vnlll)." \
+      >/dev/null 2>&1
+
+    GOT_STATUS=$(gc bd show "$xid" --json 2>/dev/null \
+      | jq -r '.[0].status // empty' 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    if [ "$GOT_STATUS" != "open" ]; then
+      echo "check-set-heal: WARN $xid reopen did NOT persist (status reads '${GOT_STATUS:-<unreadable>}'); PR#$xnum stays invisible — retrying next pass" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+    reopened=$((reopened + 1))
+  done <<< "$CLOSED_CANDS"
+fi
+
+if [ "$reopened" -gt 0 ] || [ "$reopen_skipped" -gt 0 ]; then
+  echo "check-set-heal: closed-but-not-landed — $reopened anchor(s) reopened, $reopen_skipped skipped"
+fi
+
 # --limit=0 (unbounded). A candidate past a cap is an INVISIBLE anchor that stays
 # invisible — exactly the silent, unbounded stall this phase exists to end. Same
 # reasoning as the merge skill's in-flight-rework probe, and the same reasoning that
@@ -881,22 +1250,11 @@ if [ "$RECOVER_SCAN_OK" = 1 ] && [ -n "$RECOVER_RAW" ]; then
   }
 fi
 
-# THIS CHECKOUT'S OWN REPOSITORY, host-qualified — the repository a PR must live in
-# when the bead naming it records no pr_url of its own, and therefore the second half
-# of every "which PR is this?" answer below.
-#
-# Resolved ONCE, UNCONDITIONALLY, for the whole pass. Both phases key identity on it —
-# phase 0's candidate rows, phase 1's in-flight dedup — so it cannot live inside either
-# one's `if`: under `set -u` phase 1 would then die on an unbound variable in any pass
-# that found no candidates, and without `set -u` it would silently degrade to the `?`
-# wildcard and un-qualify the dedup exactly when phase 0 was quiet.
-#
-# `resolve_origin_repo_q` is called here rather than per row because the command
-# substitutions below run in subshells, where the memoization inside
-# `resolve_origin_repo` cannot reach this shell.
-PASS_ORIGIN_REPO_Q=$(resolve_origin_repo_q)
+# $PASS_ORIGIN_REPO_Q — this checkout's own repository, host-qualified — is resolved
+# once, unconditionally, above phase 0a, because all three arms key identity on it. See
+# the comment there for why it cannot live inside any one arm's `if`.
 
-# Pass 0a — resolve each candidate's PR number (backfilling it from pr_url when the
+# Pass 0b — resolve each candidate's PR number (backfilling it from pr_url when the
 # recovery dropped pr_number, as the live case did) and drop the unidentifiable.
 # merge-skill.sh SKIPS any anchor with an empty pr_number, so restoring merge_result
 # without the number would produce a "visible" anchor that still never merges.

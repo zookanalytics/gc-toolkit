@@ -204,6 +204,33 @@
 #   (PRNUMONLY)      the certified pr_url is persisted on a pr_number-only anchor, so
 #                    the identity survives into the processes that act on it
 #                    (review tk-sdqwh finding #2).
+#
+# PHASE 0a — CLOSED-BUT-NOT-LANDED (tk-vnlll). Phase 0 enumerates OPEN beads, so an
+# anchor CLOSED at PR-creation is invisible to it as well as to merge-skill,
+# pre-open-resolve and the observer — and under close-on-land (#163) `closed` MEANS
+# landed, so it is a false durable record too. signal-loom sl-jcr4 / PR#518 sat open
+# four days, fully green and admin-approved, with zero escalations. The arm reopens the
+# bead; phase 0 and phase 1 then repair and gate it on the same pass.
+#   (CLOSEDREOPEN)     the live-case shape is reopened AND re-stamped AND gated AND
+#                      given a signoff, all in one pass — the positive control.
+#   (CLOSEDLANDED)     a genuinely landed anchor (merge_result=merged) is NEVER
+#                      reopened — the negative control the whole signature rests on.
+#   (CLOSEDMERGEDPR)   merge_result absent but the PR already MERGED -> left closed;
+#                      also the cheap open-PR discriminator doing its job.
+#   (CLOSEDCHILD)      a closed review child (task_kind) is not an anchor.
+#   (CLOSEDROUTED)     a surviving gc.routed_to would let a pool re-sling the bead the
+#                      moment it reopens -> left closed.
+#   (CLOSEDINCUMBENT)  a live bead already carries merge_result for the PR -> no second
+#                      anchor (tk-ynz4b), even though certification would have passed.
+#   (CLOSEDAMBIG)      two closed candidates for one PR -> neither reopened.
+#   (CLOSEDHEAD)       the PR is opened from another branch -> certification refuses.
+#   (CLOSEDFLAP)       already reopened once and CLOSED AGAIN -> escalate, never flap.
+#   (CLOSEDSCANFAIL)   an unreadable closed scan skips the arm (whole-set ambiguity).
+#   (CLOSEDPRLISTFAIL) an unreadable open-PR list fails CLOSED.
+#   (CLOSEDMARKFAIL)   a flap marker that does not persist blocks the reopen.
+#   (CLOSEDREOPENFAIL) a reopen that does not persist leaves the bead closed AND
+#                      unstamped — a merge_result on a still-closed bead would be a
+#                      permanent strand minted by the repair itself.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -257,7 +284,32 @@ b-PARTIALID|||https://github.com/o/r/pull/743|743|polecat/feat-partialid|main|||
 b-FORKHEAD|||https://github.com/o/r/pull/744|744|polecat/feat-forkhead|main||||||
 b-URLINC|||https://github.com/o/r/pull/745|745|polecat/feat-urlinc|main||||||
 b-URLINCUMB||pull_request|https://github.com/o/r/pull/745||polecat/feat-urlincumb|main|||||codex||
+b-CLOSEDOK|||https://github.com/o/r/pull/760|760|polecat/feat-closedok|main||||||
 B
+
+# CLOSED beads, and the reopen marker some of them carry. Kept OUT of $TMP/beads (which
+# has no status column) and out of reset_run, so these stay closed for every run in this
+# file: a closed bead is invisible to every OPEN scan, which is exactly why phase 0 alone
+# could never repair one, and it is what keeps the runs above phase 0a unaffected.
+#
+# Only `b-CLOSEDOK` is carried in the MAIN fixture, as a leak canary — it is the one
+# assertion that the status filter really excludes closed beads from the open scans (run
+# 1 still reports exactly 8 anchors restored with it present). The rest of the phase-0a
+# fixture lives in $CLOSED_BEADS, which its own runs write, because every extra bead in
+# the main fixture is paid for on every list call of the two slowest runs.
+#   <id>\t<status>\t<reopened_not_landed>
+cat > "$TMP/status" <<'S'
+b-CLOSEDOK	closed
+b-CLOSEDLANDED	closed
+b-CLOSEDMERGEDPR	closed
+b-CLOSEDREVIEW	closed
+b-CLOSEDCLAIMED	closed
+b-CLOSEDAMBIG1	closed
+b-CLOSEDAMBIG2	closed
+b-CLOSEDHEAD	closed
+b-CLOSEDFLAP	closed	PR#767
+b-CLOSEDROUTED	closed
+S
 
 # $FAKE_FLIP rows are "<num>\t<state>": the PR's state CHANGES to <state> after its
 # FIRST view of this run. That models the one thing a point-in-time certification
@@ -299,6 +351,14 @@ cat > "$TMP/prs" <<'P'
 743|OPEN||polecat/feat-partialid|
 744|OPEN|main|polecat/feat-forkhead||fork-owner/r
 745|OPEN|main|polecat/feat-urlinc|
+760|OPEN|main|polecat/feat-closedok|
+761|OPEN|main|polecat/feat-closedlanded|
+762|MERGED|main|polecat/feat-closedmergedpr|
+763|OPEN|main|polecat/feat-closedreview|
+765|OPEN|main|polecat/feat-ambig-a|
+766|OPEN|main|polecat/somebody-elses-branch|
+767|OPEN|main|polecat/feat-closedflap|
+768|OPEN|main|polecat/feat-closedrouted|
 P
 
 # --- git stub. ------------------------------------------------------------------
@@ -339,6 +399,23 @@ ghdefault=$(cat "$FAKE_GH_DEFAULT" 2>/dev/null)
 if [ "$1" = "repo" ] && [ "$2" = "view" ]; then
   [ -s "$FAKE_REPOFAIL" ] && exit 1
   printf '%s\n' "$ghdefault"; exit 0
+fi
+# `gh pr list --repo <r> --state open --limit <n> --json number` — the cheap
+# discriminator phase 0a reads ONCE to bound the closed-candidate set. Without it the
+# arm would certify every closed bead carrying a pr_url against gh, on every pass
+# (hundreds per rig); with it, only a bead whose PR is still open costs anything.
+#
+# OFF BY DEFAULT ($FAKE_PRLIST_ON). Every run above this file's closed-arm section
+# predates phase 0a and must be unaffected by it, so the default answer is an honest
+# empty open-PR set — which makes the arm skip without a warning, exactly as a repo
+# with no open PRs would. The arm's own runs turn it on. $FAKE_PRLISTFAIL models the
+# call failing outright (auth, rate limit), which must FAIL CLOSED.
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  [ -s "$FAKE_PRLISTFAIL" ] && exit 1
+  [ -s "$FAKE_PRLIST_ON" ] || { printf '[]\n'; exit 0; }
+  awk -F'|' '$2=="OPEN"{print $1}' "$FAKE_PRS" 2>/dev/null \
+    | jq -Rsc 'split("\n") | map(select(. != "")) | map({number: (. | tonumber)})'
+  exit 0
 fi
 [ "$1" = "pr" ] && [ "$2" = "view" ] || exit 0
 num="$3"; shift 3
@@ -456,6 +533,42 @@ purl_for() {
   [ -n "$v" ] && { printf '%s' "$v"; return; }
   awk -F'|' -v i="$1" '$1==i{print $4; exit}' "$FAKE_BEADS"
 }
+# Live STATUS and the reopened_not_landed marker. `open` unless $FAKE_STATUS seeds
+# otherwise (column 2 / column 3), and a write stamped this run overlays the seed —
+# phase 0a reopens with `--status=open`, and the whole point of the arm is that the bead
+# then flows into phase 0 on the SAME pass, so the stub has to model the status changing
+# mid-run rather than per-fixture.
+#
+# Both maps are built ONCE per `gc` invocation and read with shell builtins only.
+# `emit` runs per bead — up to 201 times for one list call, and the status filter walks
+# every id again — so resolving these through `stamp_for` would fork four awks per bead
+# and make the whole suite process-bound. The files are tiny; reading them once costs
+# nothing and the lookups below cost no processes at all.
+declare -A ST_SEED RNL_SEED ST_STAMP RNL_STAMP
+while IFS=$'\t' read -r _i _s _r; do
+  [ -n "${_i:-}" ] || continue
+  [ -n "${_s:-}" ] && ST_SEED["$_i"]="$_s"
+  [ -n "${_r:-}" ] && RNL_SEED["$_i"]="$_r"
+done < "$FAKE_STATUS"
+while IFS=$'\t' read -r _i _k _v; do
+  [ -n "${_i:-}" ] || continue
+  case "${_k:-}" in
+    status)              ST_STAMP["$_i"]="${_v:-}" ;;
+    reopened_not_landed) RNL_STAMP["$_i"]="${_v:-}" ;;
+  esac
+done < "$FAKE_STAMPS"
+# Set a variable rather than print: the callers below are hot loops, and `$(...)` would
+# reintroduce a fork per bead — the exact cost these maps exist to remove.
+STATUS_OUT=""; RNL_OUT=""
+status_set() {
+  STATUS_OUT="${ST_STAMP[$1]:-}"
+  [ -n "$STATUS_OUT" ] || STATUS_OUT="${ST_SEED[$1]:-}"
+  [ -n "$STATUS_OUT" ] || STATUS_OUT="open"
+}
+rnl_set() {
+  RNL_OUT="${RNL_STAMP[$1]:-}"
+  [ -n "$RNL_OUT" ] || RNL_OUT="${RNL_SEED[$1]:-}"
+}
 
 # Emit one bead as a JSON object, with LIVE metadata overlays applied.
 emit() {
@@ -483,13 +596,18 @@ emit() {
   # Pre-seeded durable markers (a run that starts mid-history seeds these directly).
   [ -n "$mrh" ] || mrh=$(awk -F'\t' -v i="$id" '$1==i && $2=="merge_result_healed"{print $3}' "$FAKE_SEED" 2>/dev/null | tail -1)
   [ -n "$mrs" ] || mrs=$(awk -F'\t' -v i="$id" '$1==i && $2=="merge_result_pr_state"{print $3}' "$FAKE_SEED" 2>/dev/null | tail -1)
+  local st rnl
+  status_set "$id"; st="$STATUS_OUT"
+  rnl_set "$id";    rnl="$RNL_OUT"
   jq -nc --arg id "$id" --arg as "$assignee" --arg mr "$mr" --arg pu "$prurl" \
          --arg pn "$prnum" --arg br "$branch" --arg tg "$target" --arg ab "$ab" \
          --arg tk "$tk" --arg sr "$srev" --arg rt "$routed" --arg cs "$cs" \
          --arg anc "$anc" --arg hf "$hflag" --arg pt "$plaintgt" --arg sab "$sab" \
-         --arg mrh "$mrh" --arg mrs "$mrs" '
-    {id: $id, title: ("impl " + $id), assignee: (if $as == "" then null else $as end),
+         --arg mrh "$mrh" --arg mrs "$mrs" --arg st "$st" --arg rnl "$rnl" '
+    {id: $id, title: ("impl " + $id), status: $st,
+     assignee: (if $as == "" then null else $as end),
      metadata: ({}
+       + (if $rnl == "" then {} else {reopened_not_landed: $rnl} end)
        + (if $mr == "" then {} else {merge_result: $mr} end)
        + (if $pu == "" then {} else {pr_url: $pu} end)
        + (if $pn == "" then {} else {pr_number: $pn} end)
@@ -531,6 +649,21 @@ case "$2" in
     # caller downstream (review tk-pka2d, non-blocking note).
     objpayload() { grep -qx "$1" "$FAKE_OBJPAYLOAD" 2>/dev/null; }
     case "$*" in
+      *"--status=closed"*)
+        # The closed-but-not-landed candidate scans (phase 0a). Matched FIRST and by
+        # status, so they can be failed independently of the open scans below — the
+        # generic `--has-metadata-key pr_url` pattern would otherwise swallow them and
+        # $FAKE_SCANFAIL could not tell the two apart.
+        grep -qx closed "$FAKE_SCANFAIL" 2>/dev/null && exit 1
+        rcpayload scan-closed && { printf '[]\n'; exit 1; }
+        objpayload scan-closed && { printf '{"error":"ledger unavailable"}\n'; exit 0; }
+        case "$*" in
+          *"--has-metadata-key pr_url"*)
+            ids=$(awk -F'|' '$4!=""{print $1}' "$FAKE_BEADS") ;;
+          *"--has-metadata-key pr_number"*)
+            ids=$(awk -F'|' '{print $1}' "$FAKE_BEADS" | while read -r i; do
+                    [ -n "$(pr_for "$i")" ] && echo "$i"; done) ;;
+        esac ;;
       *"--status=open,in_progress --has-metadata-key pr_url"*)
         # The incumbent scan by URL (one-anchor-per-PR's other identity surface).
         # Distinguished from the phase-0 candidate scan by its status filter, so each
@@ -593,6 +726,28 @@ case "$2" in
           ids=$(printf '%s\n' $ids | grep -vxF -f "$FAKE_ENUMDROP" || true)
         fi ;;
     esac
+    # `--status=<a,b>` FILTERS, as the real `gc bd list` does. Load-bearing since phase
+    # 0a (tk-vnlll): the fixture now contains CLOSED beads, and without this filter they
+    # would be returned by every OPEN scan — phase 0 would recover them, and every run in
+    # this file would change. It is also what makes the same-pass convergence real rather
+    # than staged: the reopen stamped by phase 0a flips `status_set`, so the phase-0 scan
+    # that runs microseconds later genuinely sees the bead for the first time.
+    want_status=$(printf '%s' "$*" | sed -n 's/.*--status=\([a-z_,]*\).*/\1/p')
+    if [ -n "$want_status" ]; then
+      # Builtin-only, using the maps built once above. This filter walks every id of
+      # every list call in every run — the 201-bead fixture alone makes it thousands of
+      # lookups — so anything that forks per bead dominates the suite's runtime.
+      filtered=""
+      for i in $ids; do
+        [ -n "$i" ] || continue
+        status_set "$i"
+        case ",$want_status," in
+          *",$STATUS_OUT,"*) filtered="$filtered$i
+" ;;
+        esac
+      done
+      ids="$filtered"
+    fi
     # `--limit=N` TRUNCATES, as the real `gc bd list` does; `--limit=0` is unbounded.
     # Modelled because a cap is not cosmetic here: a gating anchor past it is one no
     # pass dispatches a signoff for (tk-47bij finding #3), and a stub that ignores the
@@ -628,10 +783,20 @@ case "$2" in
     printf '{"id":"rev-new-%s"}\n' "$n" ;;
   update)
     id="$3"
+    # `--status=open` — phase 0a reopening a closed-but-not-landed anchor. Recorded as a
+    # `status` stamp so `status_set` reflects it for the REST of this pass, which is what
+    # lets phase 0 pick the bead up in the same run. Injectable through $FAKE_STAMPFAIL
+    # on the (id, status) pair, like every other write here, so a reopen that does not
+    # persist can be tested.
+    if printf '%s' "$*" | grep -q -- "--status=open"; then
+      if ! grep -qx "$(printf '%s\tstatus' "$id")" "$FAKE_STAMPFAIL" 2>/dev/null; then
+        printf '%s\tstatus\topen\n' "$id" >> "$FAKE_STAMPS"
+      fi
+    fi
     for k in merge_result merge_result_healed merge_result_heal_flagged \
              merge_result_pr_state pr_number pr_url merged_target check_set check_set_healed \
              check_set_heal_flagged assignee_noncanonical anchor_bead gc.routed_to \
-             task_kind review_branch; do
+             task_kind review_branch reopened_not_landed; do
       if printf '%s' "$*" | grep -q -- "--set-metadata $k="; then
         v=$(printf '%s' "$*" | sed -n "s/.*--set-metadata $k=\\([^ ]*\\).*/\\1/p")
         # Injected write-loss, per (id, key): never persist this key for this bead.
@@ -659,6 +824,7 @@ chmod +x "$TMP/bin/gc"
 : > "$TMP/ghdefault"; : > "$TMP/foreignhead"; : > "$TMP/ghhost"
 : > "$TMP/ignorerepo"; : > "$TMP/enumdrop"
 : > "$TMP/flip"; : > "$TMP/viewfaillater"; mkdir -p "$TMP/seen"
+: > "$TMP/prliston"; : > "$TMP/prlistfail"
 echo 0 > "$TMP/seq"
 
 export PATH="$TMP/bin:$PATH"
@@ -672,7 +838,9 @@ export FAKE_BEADS="$TMP/beads" FAKE_PRS="$TMP/prs" FAKE_STAMPS="$TMP/stamps" \
        FAKE_GH_HOST="$TMP/ghhost" FAKE_IGNORE_REPO="$TMP/ignorerepo" \
        FAKE_ENUMDROP="$TMP/enumdrop" FAKE_FLIP="$TMP/flip" \
        FAKE_VIEWFAIL_LATER="$TMP/viewfaillater" FAKE_SEEN_DIR="$TMP/seen" \
-       FAKE_RCPAYLOAD="$TMP/rcpayload" FAKE_OBJPAYLOAD="$TMP/objpayload"
+       FAKE_RCPAYLOAD="$TMP/rcpayload" FAKE_OBJPAYLOAD="$TMP/objpayload" \
+       FAKE_STATUS="$TMP/status" FAKE_PRLIST_ON="$TMP/prliston" \
+       FAKE_PRLISTFAIL="$TMP/prlistfail"
 
 stamped() { grep -qx "$(printf '%s\t%s\t%s' "$1" "$2" "$3")" "$TMP/stamps"; }
 recovered() { grep -qx "$(printf '%s\tmerge_result\tpull_request' "$1")" "$TMP/stamps"; }
@@ -703,7 +871,10 @@ run_heal() {
     --fix-pool 'gc-toolkit/gc-toolkit.polecat' \
     --refinery 'gc-toolkit/gc-toolkit.refinery'
 }
-reset_run() { : > "$TMP/stamps"; : > "$TMP/revmeta"; : > "$TMP/deps"
+# Reopened by phase 0a this run: the `--status=open` write lands as a status stamp.
+reopened() { grep -qx "$(printf '%s\tstatus\topen' "$1")" "$TMP/stamps"; }
+reset_run() { : > "$TMP/prliston"; : > "$TMP/prlistfail"
+              : > "$TMP/stamps"; : > "$TMP/revmeta"; : > "$TMP/deps"
               : > "$TMP/stampfail"; : > "$TMP/lookupfail"; : > "$TMP/enumfail"
               : > "$TMP/seed"; : > "$TMP/scanfail"
               : > "$TMP/incscanfail"; : > "$TMP/repofail"; : > "$TMP/rcpayload"; : > "$TMP/objpayload"
@@ -2310,6 +2481,195 @@ eq "$(cat "$TMP/seq")" "0" \
 grep -q 'in-flight signoff lookup failed' "$TMP/err11k" \
   && ok "(OBJPAYLOAD-inflight) the unreadable lookup is warned about" \
   || bad "(OBJPAYLOAD-inflight) must warn on the unreadable in-flight lookup (err: $(cat "$TMP/err11k"))"
+
+# --- Run 12: PHASE 0a — CLOSED-BUT-NOT-LANDED (tk-vnlll). -----------------------
+# Phase 0 repairs an anchor whose merge_result was lost, but it enumerates OPEN beads,
+# so it cannot see one that was CLOSED at PR-creation — and under close-on-land (#163)
+# `closed` MEANS landed, so such a bead is a false durable record as well as an
+# unreachable one. signal-loom sl-jcr4 / PR#518 sat open four days, fully green and
+# admin-approved, with zero escalations, because merge-skill, pre-open-resolve, the
+# observer and phase 0 all enumerate open beads. Phase 0a reopens it, which turns it
+# into exactly the shape phase 0 already handles.
+CLOSED_BEADS='b-CLOSEDOK|||https://github.com/o/r/pull/760|760|polecat/feat-closedok|main||||||
+b-CLOSEDLANDED||merged|https://github.com/o/r/pull/761|761|polecat/feat-closedlanded|main||||||
+b-CLOSEDMERGEDPR|||https://github.com/o/r/pull/762|762|polecat/feat-closedmergedpr|main||||||
+b-CLOSEDREVIEW|||https://github.com/o/r/pull/763|763|polecat/feat-closedreview|main||review||||
+b-CLOSEDCLAIMED|||https://github.com/o/r/pull/708|708|polecat/feat-oneanch|main||||||
+b-INCUMBENT2||pull_request|https://github.com/o/r/pull/708|708|polecat/feat-incumbent|main|||||codex||
+b-CLOSEDAMBIG1|||https://github.com/o/r/pull/765|765|polecat/feat-ambig-a|main||||||
+b-CLOSEDAMBIG2|||https://github.com/o/r/pull/765|765|polecat/feat-ambig-b|main||||||
+b-CLOSEDHEAD|||https://github.com/o/r/pull/766|766|polecat/feat-closedhead|main||||||
+b-CLOSEDFLAP|||https://github.com/o/r/pull/767|767|polecat/feat-closedflap|main||||||
+b-CLOSEDROUTED|||https://github.com/o/r/pull/768|768|polecat/feat-closedrouted|main||||pool/polecat||'
+CLOSED_PRS='708|OPEN|main|polecat/feat-oneanch|
+760|OPEN|main|polecat/feat-closedok|
+761|OPEN|main|polecat/feat-closedlanded|
+762|MERGED|main|polecat/feat-closedmergedpr|
+763|OPEN|main|polecat/feat-closedreview|
+765|OPEN|main|polecat/feat-ambig-a|
+766|OPEN|main|polecat/somebody-elses-branch|
+767|OPEN|main|polecat/feat-closedflap|
+768|OPEN|main|polecat/feat-closedrouted|'
+closed_fixture() {
+  reset_run
+  printf '%s\n' "$CLOSED_BEADS" > "$TMP/beads"
+  printf '%s\n' "$CLOSED_PRS" > "$TMP/prs"
+  : > "$TMP/prliston"; echo 1 > "$TMP/prliston"   # the open-PR discriminator is live
+}
+
+closed_fixture
+RC12=0
+OUT12="$(run_heal 2>"$TMP/err12")" || RC12=$?
+eq "$RC12" "0" "(CLOSEDARM) a reopen-and-gate pass exits 0"
+
+# (CLOSEDREOPEN) THE POSITIVE CONTROL the bead asks for: the live-case shape — closed,
+# pr_url present, merge_result absent, PR still OPEN — is reopened...
+reopened b-CLOSEDOK \
+  && ok "(CLOSEDREOPEN) a closed-but-not-landed anchor is reopened" \
+  || bad "(CLOSEDREOPEN) must reopen b-CLOSEDOK (stamps: $(cat "$TMP/stamps"))"
+stamped b-CLOSEDOK reopened_not_landed "PR#760" \
+  && ok "(CLOSEDREOPEN) the repair leaves a durable marker, so a re-close is detectable" \
+  || bad "(CLOSEDREOPEN) must record reopened_not_landed"
+# ...and then RE-STAMPED and GATED by phases 0 and 1 on the SAME pass — the whole reason
+# the arm only reopens. This is "confirm the normal gate takes over" in one run.
+recovered b-CLOSEDOK \
+  && ok "(CLOSEDREOPEN) the reopened anchor is re-stamped merge_result=pull_request in the SAME pass" \
+  || bad "(CLOSEDREOPEN) reopened anchor must reach phase 0 in the same pass"
+stamped b-CLOSEDOK merge_result_healed pull_request \
+  && ok "(CLOSEDREOPEN) ...with the phase-0 audit marker" \
+  || bad "(CLOSEDREOPEN) must record merge_result_healed"
+stamped b-CLOSEDOK check_set codex \
+  && ok "(CLOSEDREOPEN) ...and is check_set-healed in the SAME pass" \
+  || bad "(CLOSEDREOPEN) reopened anchor must reach phase 1 in the same pass"
+dispatched_for b-CLOSEDOK \
+  && ok "(CLOSEDREOPEN) ...and a codex signoff is dispatched, so the gate is satisfiable" \
+  || bad "(CLOSEDREOPEN) reopened anchor must get a signoff (revmeta: $(cat "$TMP/revmeta"))"
+printf '%s\n' "$OUT12" | grep -q 'CLOSED while PR#760 is still OPEN' \
+  && ok "(CLOSEDREOPEN) the repair explains itself on stdout" \
+  || bad "(CLOSEDREOPEN) must report the reopen (out: $OUT12)"
+
+# (CLOSEDLANDED) THE NEGATIVE CONTROL the bead asks for: a genuinely landed anchor
+# carries merge_result=merged, and must never be reopened. This is the discriminator the
+# whole signature rests on.
+reopened b-CLOSEDLANDED \
+  && bad "(CLOSEDLANDED) a landed anchor (merge_result=merged) must NEVER be reopened" \
+  || ok "(CLOSEDLANDED) a landed anchor (merge_result=merged) is left closed"
+
+# (CLOSEDMERGEDPR) merge_result absent, but the PR itself already MERGED -> not in the
+# open-PR set, so nothing to re-engage. This is also the cheap discriminator doing its
+# job: without it every closed bead carrying a pr_url would be certified against gh on
+# every pass.
+reopened b-CLOSEDMERGEDPR \
+  && bad "(CLOSEDMERGEDPR) a closed bead whose PR already merged must NOT be reopened" \
+  || ok "(CLOSEDMERGEDPR) a closed bead whose PR already merged is left closed"
+
+# (CLOSEDCHILD) closed REVIEW/rework children are the common closed shape that
+# references a PR; reopening them would resurrect spent gate beads on every live PR.
+reopened b-CLOSEDREVIEW \
+  && bad "(CLOSEDCHILD) a closed review child (task_kind) must NOT be reopened" \
+  || ok "(CLOSEDCHILD) a closed review child is not mistaken for an anchor"
+
+# (CLOSEDROUTED) a surviving gc.routed_to means a pool could claim the bead the moment
+# it reopens — the refinery orphan scan offers open + branch + no assignee — which
+# re-slings finished work as new.
+reopened b-CLOSEDROUTED \
+  && bad "(CLOSEDROUTED) a closed bead with a live route must NOT be reopened" \
+  || ok "(CLOSEDROUTED) a closed bead still carrying gc.routed_to is left closed"
+
+# (CLOSEDINCUMBENT) one-anchor-per-PR (tk-ynz4b): a LIVE bead already carries a
+# merge_result for PR#708, so it is the anchor and this closed bead is a spent
+# predecessor. Certification would have passed (the branch matches the PR head), so the
+# incumbent guard is the only thing refusing — which is what this pins.
+reopened b-CLOSEDCLAIMED \
+  && bad "(CLOSEDINCUMBENT) must not reopen a second anchor for a PR a live anchor drives" \
+  || ok "(CLOSEDINCUMBENT) a PR already driven by a live anchor is left alone"
+grep -q 'live anchor b-INCUMBENT2 already drives it' "$TMP/err12" \
+  && ok "(CLOSEDINCUMBENT) the incumbent refusal names the live anchor" \
+  || bad "(CLOSEDINCUMBENT) must name the incumbent (err: $(cat "$TMP/err12"))"
+
+# (CLOSEDAMBIG) two closed candidates for one PR: nothing here can tell which was the
+# anchor, so NEITHER is reopened. Fail closed — a wrong anchor on a live PR is worse
+# than a visible stall.
+{ reopened b-CLOSEDAMBIG1 || reopened b-CLOSEDAMBIG2; } \
+  && bad "(CLOSEDAMBIG) two candidates for one PR -> neither may be reopened" \
+  || ok "(CLOSEDAMBIG) two closed candidates for one PR -> neither is reopened"
+
+# (CLOSEDHEAD) the PR is opened from a branch that is not this bead's. Reopening binds
+# the bead to that PR, so it owes the same certification phase 0 performs.
+reopened b-CLOSEDHEAD \
+  && bad "(CLOSEDHEAD) an uncertified PR must not be bound to a reopened anchor" \
+  || ok "(CLOSEDHEAD) a PR whose head is not this bead's branch is refused"
+
+# (CLOSEDFLAP) already reopened once and CLOSED AGAIN: a live writer is re-closing it,
+# so reopening again would fight that writer every idle pass. Escalate, do not flap.
+reopened b-CLOSEDFLAP \
+  && bad "(CLOSEDFLAP) must not reopen a bead that was already reopened and re-closed" \
+  || ok "(CLOSEDFLAP) a re-closed bead is not reopened a second time"
+grep -q 'has been CLOSED again' "$TMP/err12" \
+  && ok "(CLOSEDFLAP) the flap is escalated to an operator instead" \
+  || bad "(CLOSEDFLAP) must warn about the re-close (err: $(cat "$TMP/err12"))"
+
+# (CLOSEDSCANFAIL) the closed candidate scan is unreadable -> the arm is skipped, not
+# run on a partial set. The ambiguity guard is a whole-set property, so a dropped scan
+# can turn a real duplicate into a promoted anchor.
+closed_fixture
+echo 'closed' > "$TMP/scanfail"
+RC12B=0
+run_heal >/dev/null 2>"$TMP/err12b" || RC12B=$?
+eq "$RC12B" "0" "(CLOSEDSCANFAIL) an unreadable closed scan is a deferral, not UNSAFE"
+reopened b-CLOSEDOK \
+  && bad "(CLOSEDSCANFAIL) must not reopen anything from a partial candidate set" \
+  || ok "(CLOSEDSCANFAIL) an unreadable closed scan skips the arm entirely"
+grep -q 'skipping the closed-but-not-landed arm' "$TMP/err12b" \
+  && ok "(CLOSEDSCANFAIL) the skipped arm is reported" \
+  || bad "(CLOSEDSCANFAIL) must report the skip (err: $(cat "$TMP/err12b"))"
+
+# (CLOSEDPRLISTFAIL) the open-PR enumeration fails. An empty result from a failed call
+# is indistinguishable from "nothing is open" while meaning the opposite, so it must
+# FAIL CLOSED — a closed anchor can only be reopened against a PR confirmed OPEN.
+closed_fixture
+echo 1 > "$TMP/prlistfail"
+RC12C=0
+run_heal >/dev/null 2>"$TMP/err12c" || RC12C=$?
+eq "$RC12C" "0" "(CLOSEDPRLISTFAIL) an unreadable open-PR list is a deferral, not UNSAFE"
+reopened b-CLOSEDOK \
+  && bad "(CLOSEDPRLISTFAIL) must not reopen without a confirmed-open PR set" \
+  || ok "(CLOSEDPRLISTFAIL) an unreadable open-PR enumeration skips the arm"
+grep -q 'open-PR enumeration' "$TMP/err12c" \
+  && ok "(CLOSEDPRLISTFAIL) the unreadable enumeration is reported" \
+  || bad "(CLOSEDPRLISTFAIL) must report it (err: $(cat "$TMP/err12c"))"
+
+# (CLOSEDMARKFAIL) the marker write does not persist -> do NOT reopen. Without a durable
+# marker a later re-close could not be told from a first repair, and the arm would flap
+# the bead against whatever writer keeps closing it.
+closed_fixture
+printf 'b-CLOSEDOK\treopened_not_landed\n' > "$TMP/stampfail"
+RC12D=0
+run_heal >/dev/null 2>"$TMP/err12d" || RC12D=$?
+eq "$RC12D" "0" "(CLOSEDMARKFAIL) a lost marker write is a deferral, not UNSAFE"
+reopened b-CLOSEDOK \
+  && bad "(CLOSEDMARKFAIL) must not reopen when the flap marker did not persist" \
+  || ok "(CLOSEDMARKFAIL) a marker that does not persist blocks the reopen"
+grep -q 'reopen marker did not persist' "$TMP/err12d" \
+  && ok "(CLOSEDMARKFAIL) the lost marker is reported" \
+  || bad "(CLOSEDMARKFAIL) must report it (err: $(cat "$TMP/err12d"))"
+
+# (CLOSEDREOPENFAIL) the reopen itself does not persist. The bead stays CLOSED, so it is
+# invisible to merge-skill exactly as before — the existing stall, never a new exposure —
+# and the next pass retries the same idempotent write. Critically it must NOT be
+# recovered: a merge_result stamped onto a still-closed bead would make it a phase-0
+# non-candidate forever, a permanent strand minted by the repair itself.
+closed_fixture
+printf 'b-CLOSEDOK\tstatus\n' > "$TMP/stampfail"
+RC12E=0
+run_heal >/dev/null 2>"$TMP/err12e" || RC12E=$?
+eq "$RC12E" "0" "(CLOSEDREOPENFAIL) a lost reopen is a deferral, not UNSAFE"
+recovered b-CLOSEDOK \
+  && bad "(CLOSEDREOPENFAIL) a still-closed bead must NOT be stamped merge_result (permanent strand)" \
+  || ok "(CLOSEDREOPENFAIL) a reopen that does not persist leaves the bead closed AND unstamped"
+grep -q 'reopen did NOT persist' "$TMP/err12e" \
+  && ok "(CLOSEDREOPENFAIL) the lost reopen is reported" \
+  || bad "(CLOSEDREOPENFAIL) must report it (err: $(cat "$TMP/err12e"))"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
