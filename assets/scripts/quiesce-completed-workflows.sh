@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # quiesce-completed-workflows — stop the pool (and the affine hand-back) from
-# re-offering the dead step beads of a mol-polecat-work molecule whose inline
-# execution has already finished (tk-p9ji9).
+# re-offering the dead step beads of a graph.v2 molecule whose inline execution
+# has already finished (tk-p9ji9).
 #
-# Background. mol-polecat-work (graph.v2) materializes 7 step beads, but the
-# polecat executes them INLINE in one session and no step closes its own bead.
+# WHICH MOLECULES: every graph.v2 formula, identified by the contract below and
+# not by name (tk-q5r65) — mol-polecat-work, mol-scoped-work, and whatever is
+# poured next. The row filter is the membership test; see it below for why
+# widening it removes no guard.
+#
+# Background. A graph.v2 formula (mol-polecat-work materializes 7 such steps)
+# materializes step beads, but the polecat executes them INLINE in one session
+# and no step closes its own bead.
 # The step graph is chained (load-context blocks workspace-setup blocks ...), so
 # while load-context stays open it is the ONLY ready step — and it still carries
 # `gc.routed_to=<rig>/<prefix>polecat`. Open + ready + routed is exactly the
@@ -151,11 +157,46 @@ STEPS=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null)
 [ -n "$STEPS" ] && [ "$STEPS" != "[]" ] \
   || { echo "quiesce-completed-workflows: no open work beads"; exit 0; }
 
-# One compact row per live mol-polecat-work step bead. Built into a variable (not
-# piped into the loop) so the loop runs in THIS shell and the counters survive.
+# One compact row per live graph.v2 step bead. Built into a variable (not piped
+# into the loop) so the loop runs in THIS shell and the counters survive.
+#
+# SELECTED BY CONTRACT, NOT BY FORMULA NAME (tk-q5r65). This filter used to read
+# `startswith("mol-polecat-work.")`, which made every OTHER graph.v2 formula
+# invisible to the pass — dropped here, before any anchor verdict, so its husks
+# appeared in neither list of the summary and re-offered their never-closed
+# load-context step forever. That is the exact burn this script exists to stop,
+# and the prefix meant it could not see it. Verified live on mol-scoped-work, a
+# CORE pack formula: root tk-917ov's husk kept 28 live steps and consumed ~1
+# fresh full-context polecat per session restart, sub-5-minute cadence, while
+# `--dry-run` reported the root nowhere at all.
+#
+# The header's rationale is stated in CONTRACT terms — graph.v2 materializes step
+# beads, the polecat executes them inline, no step closes its own bead, the chain
+# leaves load-context open and routed — and every graph.v2 formula satisfies it
+# identically. The prefix was an accident of which formula existed when the pass
+# was written.
+#
+# WHAT KEEPS THIS SAFE is not the filter; it is the fail-closed anchor gate below
+# (root -> gc.input_convoy_id -> the convoy's SINGLE tracked member -> readable
+# status -> is_terminal_anchor). That gate already refuses everything it does not
+# understand: no convoy, a convoy with any member count but one, an unreadable
+# anchor, and a live anchor all skip the root untouched. Widening the row filter
+# hands it more candidates to refuse; it removes no guard. A non-graph.v2 bead
+# carries no `gc.step_ref` at all and is never a candidate in the first place, so
+# the predicate below is the whole membership test.
+#
+# The root requirement is BELT-AND-BRACES, and deliberately so. It changes no
+# behavior today: a step with no `gc.root_bead_id` is already excluded from ROOTS
+# by that reduction's own `select(. != "")`, and the per-root row match below can
+# never equal an empty root either. It is stated here so the row set means
+# exactly one thing — "a graph.v2 step that could be anchor-verified" — rather
+# than leaving that to be inferred from two downstream reductions. With the
+# formula name no longer carrying the membership rule, this filter is where the
+# rule should be legible.
 ROWS=$(printf '%s' "$STEPS" | jq -c '
   .[]
-  | select((.metadata["gc.step_ref"] // "") | startswith("mol-polecat-work."))
+  | select((.metadata["gc.step_ref"] // "") != "")
+  | select((.metadata["gc.root_bead_id"] // "") != "")
   | {
       id,
       step:     (.metadata["gc.step_ref"] // ""),
@@ -164,7 +205,7 @@ ROWS=$(printf '%s' "$STEPS" | jq -c '
       assignee: (.assignee // "")
     }' 2>/dev/null)
 [ -n "$ROWS" ] \
-  || { echo "quiesce-completed-workflows: no live mol-polecat-work steps"; exit 0; }
+  || { echo "quiesce-completed-workflows: no live graph.v2 workflow steps"; exit 0; }
 
 ROOTS=$(printf '%s\n' "$ROWS" | jq -r -s 'map(.root) | map(select(. != "")) | unique | .[]' 2>/dev/null)
 [ -n "$ROOTS" ] \
@@ -189,8 +230,12 @@ while IFS= read -r root; do
   [ -n "${root:-}" ] || continue
 
   # Resolve the anchor the way the formula itself does: root -> input convoy ->
-  # its single tracked member. mol-polecat-base requires exactly one member, so
-  # anything else is a shape we do not understand.
+  # its single tracked member. Both mol-polecat-base and mol-scoped-work require
+  # exactly one member (each refuses to run otherwise), so anything else is a
+  # shape we do not understand — and, with the row filter selecting by contract
+  # rather than by formula name, this is also the gate that turns away a graph.v2
+  # formula built on some other anchoring shape. Refusing it costs a husk that
+  # stays noisy; guessing costs a live molecule drained mid-implementation.
   convoy=$(gc bd show "$root" --json 2>/dev/null \
     | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null)
   anchor=""

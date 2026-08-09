@@ -291,9 +291,10 @@ rig_name_for_bead() {
 #
 # The anchor carries no pointer to its molecule, so we discover the linkage the
 # way the formula resolves an anchor, walked in reverse: enumerate the live
-# mol-polecat-work STEP beads, group by gc.root_bead_id, resolve each root's
-# anchor (root -> gc.input_convoy_id -> the convoy's single tracked member), and
-# quiesce ONLY the steps whose root resolves to THIS parked anchor.
+# graph.v2 STEP beads (any formula — selected by contract, see the row filter),
+# group by gc.root_bead_id, resolve each root's anchor (root ->
+# gc.input_convoy_id -> the convoy's single tracked member), and quiesce ONLY
+# the steps whose root resolves to THIS parked anchor.
 #
 # Guards (mirroring the sibling quiesce pass):
 #   * FAIL CLOSED — a root whose anchor is unresolved, or resolves to a
@@ -322,10 +323,25 @@ quiesce_release_molecule_steps() (
     _steps=$(gc bd list --status=open,in_progress ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
     [ -n "$_steps" ] && [ "$_steps" != "[]" ] || exit 0
 
-    # One compact JSON row per live mol-polecat-work step bead.
+    # One compact JSON row per live graph.v2 step bead.
+    #
+    # SELECTED BY CONTRACT, NOT BY FORMULA NAME (tk-q5r65) — the same widening as
+    # the sibling pass, and load-bearing for the same reason: the old
+    # `startswith("mol-polecat-work.")` dropped every other graph.v2 formula's
+    # steps here, before the anchor match below could have any say, so a park on
+    # a mol-scoped-work anchor quiesced nothing and its husk kept burning
+    # polecats. Widening hands the anchor match more candidates to refuse and
+    # removes no guard: the `_ranchor = _anchor` test below is the fail-closed
+    # gate, and a non-graph.v2 bead carries no `gc.step_ref` to be selected by.
+    # The root requirement is belt-and-braces (as in the sibling pass): a step
+    # without one is already excluded by the `_roots` reduction and could never
+    # match the parked anchor anyway. It is stated here so the row set means
+    # exactly "a graph.v2 step that could be anchor-matched", now that the
+    # formula name no longer carries that rule.
     _rows=$(printf '%s' "$_steps" | jq -c '
         .[]
-        | select((.metadata["gc.step_ref"] // "") | startswith("mol-polecat-work."))
+        | select((.metadata["gc.step_ref"] // "") != "")
+        | select((.metadata["gc.root_bead_id"] // "") != "")
         | { id,
             step:     (.metadata["gc.step_ref"] // ""),
             root:     (.metadata["gc.root_bead_id"] // ""),
