@@ -5,8 +5,8 @@
 #
 # "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
 # slung at a bead: a cheap first reaction (read the body → articulate /
-# research → write a first-reaction CARD to the bead notes → flag the bead
-# onto the Helm) so the human arrives at *advanced* work. This
+# research → write a first-reaction CARD to the bead notes → file a visit
+# on the bead) so the human arrives at *advanced* work. This
 # tool is the budget-and-trigger layer around that sling. It owns no new
 # lifecycle — it assembles `gc sling`, `gc bd ready`, `gc session list`, and
 # the Phase-3 Helm (assets/scripts/gc-helm.sh).
@@ -56,7 +56,7 @@
 # path fail closed rather than relying on that default.
 #
 # Side effects: `scan` (without --sling) and `demand` are READ-ONLY.
-# `scan --sling` and `sling` route work via `gc sling` (and may flag a
+# `scan --sling` and `sling` route work via `gc sling` (and may surface a
 # bead). Nothing here closes or merges anything.
 #
 # Tunables (env):
