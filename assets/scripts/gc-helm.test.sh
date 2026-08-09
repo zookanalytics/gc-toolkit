@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic test for gc-helm takeaway --release molecule-step quiescing (tk-xypcy).
+# Hermetic test for gc-helm takeaway --release molecule-step quiescing (tk-xypcy,
+# tk-q5r65).
 #
 # THE BUG (recurring polecat burn): `gc-helm takeaway <anchor> "..." --release`
-# parks a work bead — the ANCHOR of a mol-polecat-work molecule — by clearing
+# parks a work bead — the ANCHOR of a graph.v2 molecule — by clearing
 # the ANCHOR's own route. But the molecule's STEP beads keep their own pins
 # (gc.routed_to, an assignee, gc.session_affinity=require). Those pins
 # independently re-attract the pool / the assigned-work hand-back, so the pool
@@ -10,7 +11,7 @@
 # do" and drains — one burned session per scale_check tick.
 #
 # THE FIX: on --release, after parking the anchor, walk the anchor's molecule
-# (reverse: live mol-polecat-work steps -> gc.root_bead_id -> root's
+# (reverse: live graph.v2 steps -> gc.root_bead_id -> root's
 # gc.input_convoy_id -> convoy's single member) and clear the re-attracting pins
 # on exactly the steps whose root resolves to THIS parked anchor.
 #
@@ -25,7 +26,14 @@
 #   (IDEM)      an already-quiet step is not re-updated
 #   (SCOPE)     a DIFFERENT molecule (anchor != parked bead) is left untouched
 #   (FAILCLOSE) a root whose anchor cannot be resolved is skipped, not quiesced
-#   (FILTER)    a non-mol-polecat-work step under the same root is ignored
+#   (CONTRACT)  a graph.v2 step of ANOTHER formula under the parked root is
+#               quiesced too — selection is by contract, not formula name
+#               (tk-q5r65). This inverts the old (FILTER) case, whose
+#               startswith("mol-polecat-work.") row filter dropped every other
+#               formula's steps before the anchor match could judge them
+#   (NOTV2)     a pinned bead with NO gc.step_ref is never a candidate, even
+#               under the parked root — the membership test is the only gate
+#               it fails
 #   (NOCLOSE)   no step is closed and no step status is rewritten (the DANGER
 #               clause), asserted both dynamically and as a static guard
 set -euo pipefail
@@ -53,7 +61,9 @@ mkdir -p "$TMP/bin"
 #   s-impl   pool    : routed only (already unassigned)      -> clear routed only
 #   s-final  finalize: control-dispatcher route              -> MUST stay routed
 #   s-quiet  quiet   : no pins at all                         -> not re-updated
-#   s-nonmol filter  : a non-mol-polecat-work step_ref        -> ignored entirely
+#   s-nonmol contract: a NON-mol-polecat-work graph.v2 step_ref -> quiesced all
+#                      the same (tk-q5r65; this used to be ignored)
+#   s-noref  not-v2  : pinned, but NO gc.step_ref at all      -> never a candidate
 # Under a DIFFERENT molecule (root-OTHER -> convoy-OTHER -> A-OTHER != parked):
 #   s-other  scope   : affine+routed                          -> MUST stay untouched
 # Under root-ORPHAN (no convoy -> anchor unresolvable):
@@ -65,6 +75,7 @@ cat > "$TMP/steps.json" <<'JSON'
   {"id":"s-final","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/core.control-dispatcher"}},
   {"id":"s-quiet","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.self-review","gc.root_bead_id":"root-PARKED"}},
   {"id":"s-nonmol","assignee":"someone","metadata":{"gc.step_ref":"mol-other-formula.step","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"s-noref","assignee":"someone-else","metadata":{"gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-other","assignee":"gc-toolkit__polecat-lx-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}}
 ]
@@ -166,9 +177,31 @@ printf '%s' "$SI" | grep -q 'gc.session_affinity' \
 [ -z "$(line_for s-quiet)" ] \
   && ok "(IDEM) already-quiet step skipped" || bad "(IDEM) quiet step must not be updated"
 
-# (FILTER) a non-mol-polecat-work step under the parked root is ignored.
-[ -z "$(line_for s-nonmol)" ] \
-  && ok "(FILTER) non-mol-polecat-work step ignored" || bad "(FILTER) non-mol-polecat-work step touched"
+# (CONTRACT) a graph.v2 step from ANOTHER formula, under the parked root, is
+# quiesced exactly like a mol-polecat-work one — steps are selected by the
+# graph.v2 contract, not by formula name (tk-q5r65). This assertion is inverted
+# from what it used to check: the old `startswith("mol-polecat-work.")` row
+# filter dropped such a step here, before the anchor match could have any say,
+# so parking a mol-scoped-work anchor quiesced nothing and its husk kept
+# re-attracting the pool. The anchor match below is still the fail-closed gate;
+# widening the row filter only gives it more candidates to refuse.
+SN="$(line_for s-nonmol)"
+[ -n "$SN" ] \
+  && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the parked anchor IS quiesced" \
+  || bad "(CONTRACT) graph.v2 step of another formula must be quiesced (got: none)"
+printf '%s' "$SN" | grep -q -- '--unset-metadata gc.routed_to' \
+  && ok "(CONTRACT) its route is cleared" || bad "(CONTRACT) route cleared (got: $SN)"
+printf '%s' "$SN" | grep -q -- '--assignee' \
+  && ok "(CONTRACT) its assignee is cleared" || bad "(CONTRACT) assignee cleared (got: $SN)"
+
+# (NOTV2) a bead with NO gc.step_ref is not a graph.v2 step at all, so it is
+# never a candidate — asserted under the SAME parked root, where every other
+# gate would pass. The membership test is the only thing holding it back, which
+# is what keeps the widening a wider net over graph.v2 steps rather than a
+# blanket sweep of every pinned bead under the anchor.
+[ -z "$(line_for s-noref)" ] \
+  && ok "(NOTV2) bead with no gc.step_ref never quiesced (not a graph.v2 step)" \
+  || bad "(NOTV2) a bead without gc.step_ref must never be touched"
 
 # (SCOPE) a different molecule (anchor != parked bead) is left untouched.
 [ -z "$(line_for s-other)" ] \

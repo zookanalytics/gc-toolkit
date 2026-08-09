@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic test for quiesce-completed-workflows.sh (tk-p9ji9, tk-z27pw). Stubs
-# `gc` (bd list/show/update, convoy status) AND `bd` (update) on PATH. No live
-# city, Dolt, or network.
+# Hermetic test for quiesce-completed-workflows.sh (tk-p9ji9, tk-z27pw,
+# tk-q5r65). Stubs `gc` (bd list/show/update, convoy status) AND `bd` (update) on
+# PATH. No live city, Dolt, or network.
 #
-# The pass retires the dead step beads of a mol-polecat-work molecule whose inline
+# The pass retires the dead step beads of a graph.v2 molecule whose inline
 # execution has finished, so the pool stops re-offering them. Covered:
 #   (POOL)   unassigned + routed step under a DONE anchor  -> gc.routed_to cleared
 #   (AFFINE) assigned + routed step under a DONE anchor    -> assignee cleared TOO
@@ -39,6 +39,17 @@
 #            the molecule's only escape path
 #   (CLOSED) a CLOSED anchor also counts as done (strictly later than pull_request)
 #   (FAILSAFE) unresolvable anchor -> skipped, never quiesced
+#   (CONTRACT) steps are selected by the graph.v2 CONTRACT, not by formula name
+#            (tk-q5r65): a mol-scoped-work husk quiesces exactly like a
+#            mol-polecat-work one, and its workflow-finalize step is just as
+#            protected. The old startswith("mol-polecat-work.") row filter
+#            dropped every other formula BEFORE the anchor verdict, so those
+#            husks re-offered forever and showed up in neither summary list
+#   (NOTV2)  a bead with no gc.step_ref is not a graph.v2 step and is never a
+#            candidate — asserted under a TERMINAL anchor, so the membership
+#            test is the only thing holding it back
+#   (NOROOT) a step with no gc.root_bead_id is never touched (nothing could
+#            anchor-verify it)
 #   (IDEM)   a second pass is a no-op; already-quiet steps are not re-updated
 #   (DRY)    --dry-run reports the same selection but issues no update at all
 set -euo pipefail
@@ -67,6 +78,12 @@ mkdir -p "$TMP/bin"
 #              handoff window (tk-yxlqb) -> done.
 # root-ORPHAN: root has no input convoy -> anchor unresolvable -> fail closed.
 # root-QUIET : already quiesced by an earlier pass -> counted, not re-updated.
+# root-SCOPED: a graph.v2 molecule that is NOT mol-polecat-work (mol-scoped-work,
+#              a core pack formula) with a terminal anchor -> quiesced all the
+#              same. The pass selects by CONTRACT, not by formula name (tk-q5r65).
+# root-NOREF : terminal anchor, but its bead carries NO gc.step_ref — not a
+#              graph.v2 step, so it is never a candidate. Its anchor is DONE on
+#              purpose: the membership test is the only thing holding it back.
 cat > "$TMP/steps" <<'S'
 s-pool|mol-polecat-work.workspace-setup|root-DONE|gc-toolkit/gc-toolkit.polecat||open
 s-affine|mol-polecat-work.load-context|root-DONE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-dead|in_progress
@@ -76,6 +93,10 @@ s-closed|mol-polecat-work.implement|root-CLOSED|gc-toolkit/gc-toolkit.polecat|gc
 s-handoff|mol-polecat-work.load-context|root-HANDOFF|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-drained|in_progress
 s-orphan|mol-polecat-work.implement|root-ORPHAN|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-x|open
 s-quiet|mol-polecat-work.implement|root-QUIET|||open
+s-scoped|mol-scoped-work.load-context|root-SCOPED|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-scoped|in_progress
+s-scopedfin|mol-scoped-work.workflow-finalize|root-SCOPED|gc-toolkit/core.control-dispatcher||open
+s-noref||root-NOREF|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-noref|open
+s-noroot|mol-scoped-work.implement||gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-noroot|open
 S
 
 # Roots: root_id|convoy_id   (root-ORPHAN deliberately absent -> no convoy)
@@ -85,6 +106,8 @@ root-LIVE|convoy-LIVE
 root-CLOSED|convoy-CLOSED
 root-HANDOFF|convoy-HANDOFF
 root-QUIET|convoy-QUIET
+root-SCOPED|convoy-SCOPED
+root-NOREF|convoy-NOREF
 R
 
 # Convoys: convoy_id|anchor_id
@@ -94,6 +117,8 @@ convoy-LIVE|anchor-LIVE
 convoy-CLOSED|anchor-CLOSED
 convoy-HANDOFF|anchor-HANDOFF
 convoy-QUIET|anchor-QUIET
+convoy-SCOPED|anchor-SCOPED
+convoy-NOREF|anchor-NOREF
 C
 
 # Anchors: anchor_id|status|merge_result|assignee
@@ -107,6 +132,8 @@ anchor-LIVE|open||gc-toolkit__polecat-lx-busy
 anchor-CLOSED|closed||
 anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery
 anchor-QUIET|open|pre_open_gate|
+anchor-SCOPED|open|pre_open_gate|
+anchor-NOREF|open|pull_request|
 A
 
 : > "$TMP/updates"     # one line per update: "<binary> <argv>"
@@ -336,6 +363,43 @@ grep -q '^s-final' "$TMP/cleared" \
   && bad "(FINAL) must NOT de-route workflow-finalize — it is the escape path" \
   || ok "(FINAL) workflow-finalize keeps its control-dispatcher route"
 
+# (CONTRACT) the row filter selects by CONTRACT, not by formula name (tk-q5r65).
+# mol-scoped-work is the same graph.v2 shape — materialized steps, chained so
+# load-context is the only ready one, executed inline, never closed — but the old
+# startswith("mol-polecat-work.") filter dropped it at the row select, BEFORE any
+# anchor verdict. Its husks therefore appeared in neither list of the summary and
+# re-offered forever: observed on root tk-917ov, 28 live steps burning ~1 fresh
+# full-context polecat per session restart while --dry-run reported it nowhere.
+grep -q '^s-scoped	routed$' "$TMP/cleared" && grep -q '^s-scoped	assignee$' "$TMP/cleared" \
+  && ok "(CONTRACT) a non-mol-polecat-work graph.v2 husk is quiesced too (selected by contract, not by name)" \
+  || bad "(CONTRACT) mol-scoped-work step must be quiesced (got: $(grep '^s-scoped' "$TMP/cleared" || echo none))"
+printf '%s\n' "$OUT1" | grep -q 'anchor anchor-SCOPED DONE' \
+  && ok "(CONTRACT) the mol-scoped-work root reaches an anchor verdict at all (it used to be dropped before one)" \
+  || bad "(CONTRACT) mol-scoped-work root must reach the anchor verdict"
+
+# (CONTRACT) and the finalize guard is formula-agnostic — it matches the step
+# SUFFIX and the route, so widening the filter must not start de-routing another
+# formula's only escape path.
+grep -q '^s-scopedfin' "$TMP/cleared" \
+  && bad "(CONTRACT) must NOT de-route mol-scoped-work's workflow-finalize step" \
+  || ok "(CONTRACT) workflow-finalize keeps its route under any formula, not just mol-polecat-work"
+
+# (NOTV2) a bead with NO gc.step_ref is not a graph.v2 step and is never a
+# candidate — even though root-NOREF's anchor is DONE, so the membership test is
+# the ONLY thing holding it back. This is what makes widening the filter a wider
+# net over graph.v2 steps rather than a blanket sweep of every open bead.
+grep -q '^s-noref' "$TMP/cleared" \
+  && bad "(NOTV2) a bead without gc.step_ref must never be quiesced, terminal anchor or not" \
+  || ok "(NOTV2) no gc.step_ref -> not a graph.v2 step -> never a candidate (its anchor is DONE regardless)"
+
+# (NOROOT) a step_ref with no gc.root_bead_id can never be matched to an anchor,
+# so it is never touched. Note this holds via the ROOTS reduction even without
+# the row filter's explicit root select — the select is belt-and-braces, and this
+# assertion pins the OUTCOME so any future rework of either reduction keeps it.
+grep -q '^s-noroot' "$TMP/cleared" \
+  && bad "(NOROOT) a step with no root bead can never be anchor-verified and must not be touched" \
+  || ok "(NOROOT) step_ref without gc.root_bead_id -> excluded (no anchor could ever gate it)"
+
 # (FAILSAFE) unresolvable anchor -> skipped, not quiesced.
 grep -q '^s-orphan' "$TMP/cleared" \
   && bad "(FAILSAFE) must NOT quiesce a root whose anchor cannot be resolved" \
@@ -365,7 +429,7 @@ grep -q '^s-quiet' "$TMP/cleared" \
   && bad "(QUIET) already-quiet step must not be re-updated" \
   || ok "(QUIET) already-quiet step skipped (idempotent)"
 
-printf '%s\n' "$OUT1" | grep -q '4 steps quiesced across 4 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 0 failed' \
+printf '%s\n' "$OUT1" | grep -q '5 steps quiesced across 5 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 0 failed' \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 
@@ -404,7 +468,7 @@ printf '%s\n' "$ERR3" | grep -q 's-affine route clear failed' \
 
 # A partial clear is a failure, never a success: the step still rides the affine
 # hand-back, so counting it quiesced would be the same lie in a new place.
-printf '%s\n' "$OUT3" | grep -q '3 steps quiesced across 4 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 1 failed' \
+printf '%s\n' "$OUT3" | grep -q '4 steps quiesced across 5 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 1 failed' \
   && ok "(EXIT) a partially-cleared step counts as failed, not quiesced" \
   || bad "(EXIT) run 3 summary (got: $(printf '%s' "$OUT3" | tail -1))"
 [ "$RC3" -ne 0 ] \
@@ -455,7 +519,7 @@ grep -q '^bd update s-pool' "$TMP/updates" \
   && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
   || ok "(ROUTEFAIL) route-only step issues no assignee call"
 
-printf '%s\n' "$OUT4" | grep -q '2 steps quiesced across 4 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 2 failed' \
+printf '%s\n' "$OUT4" | grep -q '3 steps quiesced across 5 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 2 failed' \
   && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
   || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
 [ "$RC4" -ne 0 ] \
