@@ -238,11 +238,11 @@ if [ -n "$boot_block" ]; then
 fi
 
 if [ ${#violations[@]} -eq 0 ]; then
-    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot carries the dedicated mol-deacon-patrol wisp read at both superseded sites"
+    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot carries the dedicated mol-deacon-patrol wisp read at both sites (Step 2 and the quick-reference row)"
     exit 0
 fi
 
-echo "${#violations[@]} startup-discovery gap(s) — see rigs/gc-toolkit/specs/tk-fyzvk for context"
+echo "${#violations[@]} startup-discovery gap(s) — see specs/tk-fyzvk/ for context"
 for v in "${violations[@]}"; do
     echo "$v"
 done

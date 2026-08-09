@@ -38,7 +38,7 @@ description = """
 # liveness-and-triage-spec.md §1). Consumers copy this block, markers
 # included; assets/scripts/gate-visit.test.sh extracts and checks every
 # copy's load-bearing invariants (rig-qualified pool, one key per
-# --set-metadata flag, parent-child edge, visit title brand).
+# --set-metadata flag, tracks edge, visit title brand).
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}converse"
 VISIT=$(gc bd create -t task --title "visit: {{subject}} — {{visit}}" -d "{{visit}}" --json | jq -r '.id // .[0].id')
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
@@ -47,7 +47,7 @@ gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
 gc bd dep add "$VISIT" {{subject}} --type=tracks
 # tracks, NOT parent-child: a parent-child edge transmits the subject's
 # blocked/arrested state to the visit, making it unclaimable on exactly
-# the beads that most need conversation (validator F-06).
+# the beads that most need conversation.
 # To gate other work on this conversation, add a blocking edge:
 # gc bd dep add "$VISIT" --blocks "<blocked-bead-id>"
 # <<< gate-visit

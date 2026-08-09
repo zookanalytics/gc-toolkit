@@ -3,16 +3,15 @@ wake_mode = "resume"
 min_active_sessions = 0
 
 # Cross-reference: render the canonical mayor's prompt under this
-# agent's identity. tk-kdu2v5 retired the whole-file
-# patches/mayor-prompt.template.md overlay — the canonical mayor is now
-# the imported gastown mayor with bare-name [[patches.agent]]
-# fragment-appends and no prompt_template override, letting the base
-# prompt apply verbatim. So point the thread at the same base prompt the
-# canonical renders from, and append the mayor dispatch doctrine
+# agent's identity. The canonical mayor is the imported gastown mayor
+# with bare-name [[patches.agent]] fragment-appends and no
+# prompt_template override, letting the base prompt apply verbatim. So
+# point the thread at the same base prompt the canonical renders from,
+# and append the mayor dispatch doctrine
 # (convoy-integration-branch-mayor) so both surfaces stay in lockstep.
 # (canonical-self-rename is intentionally not appended: it is
-# canonical-identity title hygiene, threads manage their title via the
-# session-title skill, and the pre-tk-kdu2v5 overlay never carried it.)
+# canonical-identity title hygiene; threads manage their title via the
+# session-title skill.)
 # The "<pack>//<subpath>" form resolves against the imported gastown
 # pack's cache dir, same form as polecat-codex. Template variables
 # (.AgentName, .RigName, .WorkDir) bind to the thread's identity, not the

@@ -15,19 +15,16 @@ polecat). Dog is the **utility worker** that all packs use; it stays central.
   max_active_sessions=3 (from gastown's `agents/dog/agent.toml`)
 - Dog ships with the imported gastown pack, which owns the dog pool — no
   city-config edit needed. Required builtin packs are core/bd/dolt only
-  (`cmd/gc/embed_builtin_packs.go:requiredBuiltinPackNames`); the maintenance
-  pack that formerly auto-included dog is retired.
+  (`cmd/gc/embed_builtin_packs.go:requiredBuiltinPackNames`); no builtin
+  pack auto-includes dog.
 
-## Lane C history
+## Why not vendored
 
-We initially tried to vendor `agents/dog/` into gc-toolkit during the 2026-05-05
-cutover. It collided with maintenance.dog on bare-name uniqueness in V2
-`ValidateAgents` (which is binding-blind — see the spike doc empirical
-correction). When we hit that, we recognized dog as appropriately central
-rather than fight the loader. Cleaner outcome: gc-toolkit owns the domain
-roster; the central utility pack owns the housekeeping. The architectural seam
-matches the intent (maintenance provided that dog then; the imported gastown
-pack owns it now).
+Vendoring `agents/dog/` into gc-toolkit collides with the central dog on
+bare-name uniqueness in V2 `ValidateAgents`, which is binding-blind. Dog
+is appropriately central rather than worth fighting the loader over:
+gc-toolkit owns the domain roster; the central utility pack owns the
+housekeeping.
 
 ## When to revisit
 

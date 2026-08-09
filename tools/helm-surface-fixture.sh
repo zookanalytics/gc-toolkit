@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # helm-surface-fixture.sh — the automatable assertions for the Phase 3
-# attention surface (epic tk-q4xaj; bead tk-qkags; design Phase 3).
+# attention surface (specs/bead-universe/design-doc.md, Phase 3).
 #
 # The operator-judged capstone (board → pick a bead → converse session
 # holds the conversation) is human-in-the-loop by design and is NOT
@@ -14,10 +14,10 @@
 #   • the row cap — the board never balloons past the cap, and --limit=0 opts
 #     out for tooling;
 #   • the --json contract — every documented field present (the `held`
-#     visit fact replaced the retired v1 `live` host field);
+#     visit fact is the one conversation glyph; there is no `live` field);
 #   • verb dispatch + validation — board/open/react/takeaway routing and the
 #     fail-closed arg checks;
-#   • the gather-failure contract (F-21/F-22) — a failed gather errors and
+#   • the gather-failure contract — a failed gather errors and
 #     is never cached, a legit empty board still is, and a host with no
 #     timeout/gtimeout degrades instead of dying (stub gc + private PATH).
 #
@@ -224,7 +224,7 @@ for f in id rig kind title severity weight n_closed m_total open in_progress fro
 done
 
 echo "── hermetic: takeaway drives NEEDS (present → sentence; absent → terse, no bead-ids) ──"
-# The feature's core contract (bead tk-q4xaj.3): an anchor's gc.takeaway is the
+# The feature's core contract: an anchor's gc.takeaway is the
 # NEEDS sentence; when absent NEEDS is a TERSE deterministic phrase, never a
 # bead-id list; the mechanical heads/xref ids move to --json (open_heads,
 # cross_rig_refs). A whitespace-laden takeaway is collapsed to one line so it
@@ -286,14 +286,14 @@ has  "empty board says nothing floats" "Nothing floats" "$(GC_HELM_FIXTURE="$EMP
 eq   "empty board --json is []" "0" "$(GC_HELM_FIXTURE="$EMPTY" "$TOOL" --json | jq 'length')"
 rm -rf "$EMPTY"
 
-echo "── hermetic: failed gather → error + NO cache; legit-empty → cached quiet board (F-22) ──"
+echo "── hermetic: failed gather → error + NO cache; legit-empty → cached quiet board ──"
 # These drive the REAL (non-fixture) gather path through a stub `gc` placed at
 # the front of a private PATH, with TMPDIR + GC_CITY_PATH pointed into the
 # sandbox so the cache lands (or not) somewhere we can assert on hermetically.
 # Nothing touches Dolt, the live city, or the operator's real cache dir.
 
 # (a) Rigs enumerate fine, but EVERY per-rig/convoy query dies (the
-# timeout/wedge/error shape F-21 produced). The board must print the explicit
+# timeout/wedge/error shape). The board must print the explicit
 # gather-failure line — NOT the quiet empty-board message —, exit non-zero,
 # and write NO cache, so a transient failure can never be served as a false
 # "0 anchors" all-clear for the cache TTL.
@@ -336,7 +336,7 @@ eq  "legit empty board IS cached (1 cache file)"  "1"              "$(find "$GE/
 EOUT2="$(TMPDIR="$GE/tmp" GC_CITY_PATH="$GE/city" PATH="$GE/bin:$PATH" "$TOOL" board 2>&1 || true)"
 has "second glance serves from the cache"         "cached"         "$EOUT2"
 
-echo "── hermetic: no timeout/gtimeout on PATH → board degrades, does not die (F-21) ──"
+echo "── hermetic: no timeout/gtimeout on PATH → board degrades, does not die ──"
 # Stock-macOS shape: neither GNU timeout nor gtimeout exists. Build a minimal
 # command sandbox (symlinks to only the tools the board needs + the stub gc
 # from (b)) and run with PATH set to ONLY that dir — with_timeout must fall

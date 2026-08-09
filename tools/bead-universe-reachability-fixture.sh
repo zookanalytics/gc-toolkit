@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bead-universe-reachability-fixture.sh — the automatable Phase 2 gate for the
-# Bead-Universe Operating Model (epic tk-q4xaj; bead tk-oqmc7; design Phase 2).
+# Bead-Universe Operating Model (specs/bead-universe/design-doc.md, Phase 2).
 #
 # THE GATE (design Phase 2, "dual metric, automatable"):
 #   A seeded subtree + a fixed list of questions, each with a known ground-truth

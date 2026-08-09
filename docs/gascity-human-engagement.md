@@ -5,13 +5,12 @@ description: Local supplement tracking how Gas City is evolving to support human
 
 # Gas City and human engagement
 
-**Vocabulary (operator-settled 2026-08-08).** The pack's model has two
+**Vocabulary.** The pack's model has two
 technical nouns. A **subject** is the durable thing a dialogue is about —
 the bead; its id is the continuation-group identity; its notes and visit
 history are the dialogue's record, spanning its whole life (an epic may
 see hundreds of visits). A **visit** is one bounded sitting of that
-dialogue (née "turn" — tk-h9pq5 and older specs use the old word): filed
-as a child bead, held live by the converse role, outcome recorded to the
+dialogue: filed as a child bead, held live by the converse role, outcome recorded to the
 subject, closed when the sitting ends; at most one sitting is live per
 subject (the continuation-group vacuum serializes pending visits into
 it). "Conversation" is deliberately **not** a technical term in this
@@ -46,13 +45,12 @@ are dated; an undated claim is a bug.
 
 When Gas City ships a primitive that covers something the pack built
 bespoke, the pack re-derives its machinery on the primitive and retires
-the bespoke part. This has already happened once at full scale: the
-formerly shipped resident per-bead host binding (epic `tk-q4xaj`) is retired —
-the conversation-as-continuation-group design (`tk-h9pq5`, the visit/converse
-spine) replaced it entirely, precisely because
-`gc.continuation_group` became a live core primitive that carries the
-whole binding for free. Expect it to happen again; that is what riding an
-ecosystem means.
+the bespoke part. The conversation model itself is the standing example:
+`gc.continuation_group` is a live core primitive that carries the whole
+subject-visit binding for free, so the visit/converse spine
+(`specs/tk-h9pq5/`) rides it rather than a bespoke per-bead binding.
+Expect the same trade wherever upstream covers bespoke ground; that is
+what riding an ecosystem means.
 
 ## Shipping primitives the conversation model rides
 
@@ -104,8 +102,8 @@ Each entry: the upstream fact, its verification status, and the seam.
   renudge orders as of 2026-08-08). By contrast
   `gc.routed_to=human` **parks** — no core machinery claims it, the nudge
   order fails silently on it (same verification). The sanctioned hold
-  taxonomy is `hold:mayor` / `hold:external` only; bare `human` hold
-  labels are retired upstream. *Seam:* a human question is a bead whose
+  taxonomy is `hold:mayor` / `hold:external` only; a bare `human` hold
+  label has no sanctioned upstream meaning. *Seam:* a human question is a bead whose
   canonical form is a visit — the visit is the
   dialogue-carrying refinement of the human gate, never a competitor
   to it; an open human gate is a legitimate named wait. The raw
@@ -152,9 +150,8 @@ subject bead is the natural binding anchor — the two models meet at the
 subject bead.** A Slack thread about a piece of work should bind where
 that work's conversation already lives, not beside it.
 
-`gc.attention` has zero upstream meaning (verified 2026-08-06) — and as
-of the fresh start the pack no longer uses it either: the
-flag-for-attention concept is removed (operator decision, 2026-08-08).
+`gc.attention` has zero upstream meaning (verified 2026-08-06), and the
+pack does not use it either — there is no flag-for-attention concept.
 "An agent believes a human should look at this" has exactly one form —
 file a visit on the subject — so the board derives what is
 pressing from real state (open visits, human gates, stranded work) rather

@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # Pack doctor check: the P3 liveness machinery is shipped and wired.
 #
-# P3 (operating-principles.md): no idle beads — every open bead is
-# worked, gated, conversing, or held-by-design; the sweep normalizes the
-# rest into visits, and triage recurrence keeps scoped triage
-# conversations alive when warranted. This check guards the wiring so
-# the machinery can't be silently un-shipped: both orders present with
-# the bare-pool + rig-scope shape (the doc-keeper order's recorded
-# lesson — a qualified pool strands the wisp in every importer), both
-# formulas present with their fail-safe aborts and marked gate-visit
-# copies.
+# P3 (specs/2026-08-fresh-start/operating-principles.md): no idle beads
+# — every open bead is worked, gated, conversing, or held-by-design; the
+# sweep normalizes the rest into visits, and triage recurrence keeps
+# scoped triage conversations alive when warranted. This check guards
+# the wiring so the machinery can't be silently un-shipped: both orders
+# present with the bare-pool + rig-scope shape (a qualified pool strands
+# the wisp in every importer), both formulas present with their
+# fail-safe aborts and marked gate-visit copies.
 #
 # Exit codes: 0=OK, 1=Warning, 2=Error
 # stdout: first line=message, rest=details
@@ -29,7 +28,7 @@ check_order() { # name formula
     local pool
     pool="$(grep -E '^pool *= *"' "$f" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
     case "$pool" in
-        */*) errors+=("orders/$1.toml: pool \"$pool\" is rig-qualified — must be BARE (doc-keeper lesson: a qualified pool strands the wisp in every importer)") ;;
+        */*) errors+=("orders/$1.toml: pool \"$pool\" is rig-qualified — must be BARE (a qualified pool strands the wisp in every importer)") ;;
         "")  errors+=("orders/$1.toml: no pool") ;;
     esac
 }

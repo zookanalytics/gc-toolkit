@@ -4,8 +4,8 @@
 # THE GUARDRAIL: mol-witness-patrol's recover-orphaned-beads scan considers
 # only beads WITH an assignee — an unassigned bead is already in the pool's
 # court and needs no recovery. Assigned-but-dead beads are exactly the
-# witness's recovery domain: with the v1 per-bead host mechanism retired there is
-# no class of assigned bead that orphan recovery must skip. Visits and their
+# witness's recovery domain: no class of assigned bead is exempt from
+# orphan recovery. Visits and their
 # converse sessions need no carve-out either — a visit whose session died
 # mid-hold SHOULD return to the pool (respawn-and-reconstitute-from-the-record
 # is the cold continuity path; specs/2026-08-fresh-start/spine-port.md, D4).

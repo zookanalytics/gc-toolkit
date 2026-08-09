@@ -78,9 +78,9 @@ If any of the four fail, the content does not belong here.
 The pack spec is the authoritative reference and the understanding-packs
 guide is the narrative entry point; the shareable-packs guide covers the
 create / import / customize workflow. The design notes in
-`gastownhall/gascity` are deep reference. The standalone migration guide
-was retired upstream — PackV2 migration now lives in `gc doctor` (`gc
-doctor --fix` repairs legacy `pack.toml`) and the shareable-packs guide.
+`gastownhall/gascity` are deep reference. There is no standalone
+migration guide — PackV2 migration lives in `gc doctor` (`gc doctor
+--fix` repairs legacy `pack.toml`) and the shareable-packs guide.
 
 - Pack spec (authoritative `pack.toml` + layout reference): https://docs.gascity.com/reference/specs/pack-spec
 - Understanding packs (pack model, imports, scope, patches, loading order): https://docs.gascity.com/guides/understanding-packs

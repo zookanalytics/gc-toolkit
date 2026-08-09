@@ -2,14 +2,13 @@ description = """
 mol-liveness-sweep — the P3 enforcement pass: no idle beads. Every open
 bead must be worked, waiting-on-structure, gated, conversing, or
 held-by-design; anything else is an UNNAMED WAIT
-(specs/2026-08-fresh-start/operating-principles.md P3; spec §2 as
-amended by the operator's review and the 2026-08-08 validator run,
-specs/2026-08-fresh-start/live-adoption-findings.md).
+(specs/2026-08-fresh-start/operating-principles.md P3;
+specs/2026-08-fresh-start/liveness-and-triage-spec.md §2).
 
 Normalization is BATCHED, not per-bead: the sweep owns a standing
 "unnamed waits" triage subject per rig and files ONE visit per pass
-listing every candidate (validated live: 66 idle beads cost one
-conversation, F-16). Per-bead visits emerge only from that sitting's
+listing every candidate — a large backlog costs one conversation, never
+one per idle bead. Per-bead visits emerge only from that sitting's
 decisions.
 
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
@@ -17,9 +16,8 @@ assignees, orphan recovery); this sweep never touches assigned work.
 Fired by orders/liveness-sweep.toml on cooldown.
 
 Contract: graph.v2 — the compiled workflow root is Ready-visible, so a
-scale-from-zero pool wakes for it (validator F-20: a v1 molecule root
-is NOT Ready-visible and the order only fired because gc start had
-warmed the pool). Each step closes its own step bead with gc.outcome
+scale-from-zero pool wakes for it (a v1 molecule root is NOT
+Ready-visible, so a cold pool would never wake). Each step closes its own step bead with gc.outcome
 before the graph advances; the normalize step is fail-closed on the
 classify step's outcome.
 """
@@ -30,7 +28,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.list_cap]
-description = "Max candidates ENUMERATED INDIVIDUALLY in the batch visit body; candidates beyond the cap are still included, grouped into labelled cohorts (validator F-17 semantics: the cap bounds line-by-line detail, not coverage)"
+description = "Max candidates ENUMERATED INDIVIDUALLY in the batch visit body; candidates beyond the cap are still included, grouped into labelled cohorts (the cap bounds line-by-line detail, not coverage)"
 default = "20"
 
 [[steps]]
@@ -42,8 +40,7 @@ witness discipline): if either command fails or returns a non-array,
 write a note explaining what broke, then close THIS step with
 `gc.outcome=fail` — the normalize step reads that outcome and no-ops.
 Never normalize on partial data.** (Torn reads under concurrent writes
-are a known transient — validator F-26 — so an aborted pass is correct,
-not alarming.)
+are a known transient, so an aborted pass is correct, not alarming.)
 
 ```bash
 OPEN=$(mktemp); READY=$(mktemp)
@@ -61,9 +58,9 @@ fifth is a defect:
 
 1. **worked** — assigned, or `gc.routed_to` non-empty.
 2. **waiting-on-structure** — open blockers, or a structural edge that
-   explains the wait, **checked in the directions that mean waiting**
-   (validator F-18 both halves; R2-02 measured 45% census noise from a
-   direction-blind rule): (a) it has open children via `parent-child`
+   explains the wait, **checked in the directions that mean waiting** —
+   a direction-blind rule floods the census with false waits: (a) it has
+   open children via `parent-child`
    (a parent waits on its children — the reverse is NOT a wait: a child
    with an open parent is workable); (b) it has open members via
    `tracks` (a convoy/container waits on what it carries); (c) it
@@ -100,8 +97,7 @@ printf '%s\n' "$CANDIDATES"
 # apply the edge check (children + tracks) per candidate before step 2
 ```
 
-Record in your notes: counts per class as a funnel (the validator's
-census showed its work this way and it read well), the surviving ids,
+Record in your notes: counts per class as a funnel, the surviving ids,
 and what the edge check dropped. Then close this step:
 
 ```bash
@@ -157,7 +153,7 @@ gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
 gc bd dep add "$VISIT" "$SWEEP_SUBJECT" --type=tracks
 # tracks, NOT parent-child: a parent-child edge transmits the subject's
 # blocked/arrested state to the visit, making it unclaimable on exactly
-# the beads that most need conversation (validator F-06).
+# the beads that most need conversation.
 # <<< gate-visit
 ```
 

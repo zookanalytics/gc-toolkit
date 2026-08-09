@@ -13,7 +13,7 @@
 #   - the three metadata stamps ride one --set-metadata flag each
 #     (comma-joined pairs become one garbage value)
 #   - the visit is wired to its subject with a tracks edge (parent-child
-#     would transmit the subject's blocked state to the visit — F-06)
+#     would transmit the subject's blocked state to the visit)
 #   - the visit title carries the "visit: " brand
 # Hermetic: reads the repo only; no gc, no city.
 
@@ -66,7 +66,7 @@ for f in "$FDIR"/*.toml; do
         printf '%s' "$block" | grep -q -- '--type=tracks' \
             && ok "$name: tracks edge (non-blocking lineage)" || bad "$name: tracks edge (non-blocking lineage)" "dep add --type=tracks missing"
         printf '%s' "$block" | grep -q -- '--type=parent-child' \
-            && bad "$name: no parent-child edge" "parent-child transmits the subject's block (F-06)" || ok "$name: no parent-child edge"
+            && bad "$name: no parent-child edge" "parent-child transmits the subject's block to the visit" || ok "$name: no parent-child edge"
         rm -f "$tmp"
     done <<EOF2
 $blocks

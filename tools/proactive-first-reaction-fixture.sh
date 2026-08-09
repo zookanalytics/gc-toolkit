@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # proactive-first-reaction-fixture.sh — the automatable assertions for the
-# Phase 4 proactive surface (epic tk-q4xaj; bead tk-3d0uh; design Phase 4).
+# Phase 4 proactive surface (specs/bead-universe/design-doc.md, Phase 4).
 #
 # Phase 4's SHIP gate (design Phase 4) is: a slung first reaction writes a
 # verdict card to a bead; the board surfaces it as "advanced"; the human

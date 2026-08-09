@@ -158,12 +158,11 @@ patrolling and indexing are continuous, and nothing continuous can live in a
 role that exists only between claim and drain. One hat is a molecule; all three
 have earned an agent.
 
-**Status.** The host-and-board composition (epic `tk-q4xaj`, closed) is retired
-on this branch. The continuation-group model above (`tk-h9pq5`) is the built
-system: the converse role holds conversations, visits are the filed turns, and
-the board's pick-a-row files a visit on the picked bead. It was chosen because
-it is built from primitives that already ship rather than from a bespoke
-session agent.
+**Status.** The continuation-group model above (design:
+`specs/tk-h9pq5/`) is the built system: the converse role holds
+conversations, visits are the filed turns, and the board's pick-a-row
+files a visit on the picked bead. It is built from primitives that
+already ship rather than from a bespoke session agent.
 
 ## How work moves
 
@@ -267,8 +266,8 @@ composes and which belief it serves — not as an inventory.
 - **Fork & upstream** lets the pack patch the Gas City source on a fork and flow
   changes back as reviewable PRs, with no hand-managed patch queue. The
   architecture is git-native: every commit that diverges from upstream *is* a
-  candidate, so the log is the queue, and it reuses the same worker-to-lander
-  division of labor Delivery uses. It serves *The pack borrows before it invents*,
+  candidate, so the log is the queue, and it reuses the same division of labor
+  Delivery uses: workers produce the change, a single-writer step lands it. It serves *The pack borrows before it invents*,
   living alongside Gas City rather than forking it (see
   [gascity-local-patching.md](gascity-local-patching.md)).
 

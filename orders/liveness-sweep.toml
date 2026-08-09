@@ -4,12 +4,11 @@
 # sweep hunts drift, not emergencies; anything urgent already has a
 # route, a gate, or a visit.
 #
-# Spec: specs/2026-08-rethink is history; the live spec is
-# specs/2026-08-fresh-start/liveness-and-triage-spec.md §2. Principle:
-# operating-principles.md P3 (operator, 2026-08-08).
+# Spec: specs/2026-08-fresh-start/liveness-and-triage-spec.md §2.
+# Principle: specs/2026-08-fresh-start/operating-principles.md P3.
 #
-# Rig scope + BARE pool, per the doc-keeper order's recorded lesson
-# (orders/doc-keeper-drift-audit.toml): a bare pool qualifies within
+# Rig scope + BARE pool, matching orders/doc-keeper-drift-audit.toml:
+# a bare pool qualifies within
 # each importing rig to that rig's own polecat pool, with the wisp in
 # that same rig's store — self-consistent for every importer. The sweep
 # reads only that rig's store, so each importer sweeps itself.

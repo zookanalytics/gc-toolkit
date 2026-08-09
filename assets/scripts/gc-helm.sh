@@ -120,8 +120,8 @@
 # plus the computed `severity`, `weight`, `rank_score`, `frontier`
 # (one-line summary), `needs` (short hint), and `held` (visit presence).
 # `--json` is the stable contract for downstream tooling (the tmux
-# board picker reads it). The retired v1 `live` (hot/warm/cold) host
-# field is GONE — the visit/converse spine is the only conversation
+# board picker reads it). There is no `live` (hot/warm/cold) host
+# field — the visit/converse spine is the only conversation
 # mechanism, and `held` is its one glyph fact.
 #
 # ── Row cap & cache (the board must scale) ───────────────────────────
@@ -141,7 +141,7 @@
 #   2   usage error
 #   3   missing dependency (jq / gc), could not enumerate rigs, or the
 #       gather failed (nothing cached — a transient gather failure must
-#       never be served as a "0 anchors" all-clear; F-22)
+#       never be served as a "0 anchors" all-clear)
 #   4   verb runtime failure (e.g. bead not found, visit filing failed)
 #
 # Test hook: GC_HELM_FIXTURE=<dir> — when set, the board reads
@@ -197,7 +197,7 @@ EOF
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 3; }
 command -v gc >/dev/null 2>&1 || { echo "$PROG: gc is required" >&2; exit 3; }
 
-# ── Portable timeout (F-21) ──────────────────────────────────────────
+# ── Portable timeout ─────────────────────────────────────────────────
 # GNU `timeout` does not exist on stock macOS, and Homebrew coreutils
 # ships it as `gtimeout`. Resolve once at startup, then route EVERY
 # bounded query through with_timeout: `timeout` if present, else
@@ -241,7 +241,7 @@ RIGS=""
 # Count of rigs in $RIGS, hardened: jq emits NOTHING (exit 0) on empty
 # input, so testing its raw output with `[ … -eq 0 ]` compares an EMPTY
 # string and throws (`[: : integer expression expected`) instead of taking
-# the clean exit-3 path — normalize any non-numeric count to 0 (F-21).
+# the clean exit-3 path — normalize any non-numeric count to 0.
 rigs_count() {
     _rc=$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)
     case "$_rc" in ''|*[!0-9]*) _rc=0 ;; esac
@@ -517,7 +517,7 @@ cmd_open() {
     gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
         --set-metadata "gc.continuation_group=$bead" \
         --set-metadata "task_kind=visit"
-    # --type=tracks, NOT parent-child: parent-child transmits the subject's blocked state to the visit — F-06
+    # --type=tracks, NOT parent-child: parent-child transmits the subject's blocked state to the visit, making it unclaimable
     gc bd dep add "$VISIT" "$bead" --type=tracks
     # <<< gate-visit
     bust_cache
@@ -619,7 +619,7 @@ cmd_board() {
     : > "$ANCHORS"
     VISITS_FILE="$TMP/visits.json"
     printf '[]\n' > "$VISITS_FILE"
-    # F-22: gather-failure marker. The gather loops run in pipeline
+    # Gather-failure marker. The gather loops run in pipeline
     # subshells, so a shell variable cannot carry "a query died" back up —
     # a marker FILE can. Any line in it means the gather is NOT trusted:
     # never cached, never rendered as a (false) quiet board.
@@ -634,7 +634,7 @@ cmd_board() {
         if printf '%s' "$1" | jq -e 'type=="array"' >/dev/null 2>&1; then printf '%s' "$1"; else printf '[]'; fi
     }
     # gather_mark <what>: record that a gather query came back empty/invalid
-    # (the timeout/wedge/error shape) — see GATHER_ERR above (F-22).
+    # (the timeout/wedge/error shape) — see GATHER_ERR above.
     gather_mark() { printf '%s\n' "$1" >> "$GATHER_ERR" 2>/dev/null || true; }
 
     enumerate_rigs
@@ -661,7 +661,7 @@ cmd_board() {
     if [ -z "$FIXTURE" ] && [ "$gathered_from_cache" -eq 0 ]; then
         gather_anchors    # writes $ANCHORS
         gather_visits     # writes $VISITS_FILE (one JSON array line)
-        # F-22: a failed gather is an ERROR, not an empty board. Caching it
+        # A failed gather is an ERROR, not an empty board. Caching it
         # would serve a false "0 anchors" all-clear for the whole TTL — on the
         # one surface whose job is to tell a human whether anything needs
         # them. Print an explicit line (distinct from the legitimate quiet-
@@ -876,8 +876,8 @@ def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as 
 # ── Anchor gather (the cached, Dolt-heavy part) ──────────────────────
 # Appends one anchor object per line to $ANCHORS. Reads only. A query
 # that comes back EMPTY/INVALID (timeout, wedged Dolt, gc error) is
-# gather_mark'ed so the caller refuses to cache or render the result
-# (F-22); a query that comes back VALID but empty is a legitimately
+# gather_mark'ed so the caller refuses to cache or render the result;
+# a query that comes back VALID but empty is a legitimately
 # quiet rig and is simply skipped.
 gather_anchors() {
     printf '%s' "$RIGS" | jq -c '.[]' | while IFS= read -r rig; do
@@ -949,7 +949,7 @@ gather_anchors() {
         [ -d "$beads" ] || continue
 
         show=$(gcq bd show "$cid" --db "$beads" --include-dependents --json)
-        # Empty/invalid reply = the timeout/wedge shape → mark (F-22); a
+        # Empty/invalid reply = the timeout/wedge shape → mark; a
         # VALID reply that just isn't a non-empty array is a legit skip.
         printf '%s' "$show" | jq -e '.' >/dev/null 2>&1 || { gather_mark "show@$cid"; continue; }
         printf '%s' "$show" | jq -e 'type=="array" and length>0' >/dev/null 2>&1 || continue
@@ -979,7 +979,7 @@ gather_anchors() {
 # Writes ONE JSON-array line to $VISITS_FILE: the unique subject ids
 # carried by open visit beads (task_kind=visit, gc.continuation_group).
 # Per-rig like the anchor gather; a rig whose query dies is
-# gather_mark'ed (F-22, see gather_anchors). Both
+# gather_mark'ed (see gather_anchors). Both
 # open AND in_progress count as "open" here — a claimed visit is a held
 # conversation, not a finished one.
 gather_visits() {

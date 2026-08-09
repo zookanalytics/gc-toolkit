@@ -83,9 +83,7 @@ old_state() {
 # --- Fixtures, transcribed from live `gc session list --json` output. ---------
 # A city-scoped wisp registers a BARE alias; its beads carry a rig-qualified
 # assignee. A pool polecat registers a RIG-QUALIFIED alias; a bead may carry the
-# bare form. Same city, both directions, at the same time. (The bare-alias
-# shape was first confirmed on the since-retired per-bead host; the scope
-# asymmetry outlives it.)
+# bare form. Same city, both directions, at the same time.
 MAP_CITYWISP='{"lx-wisp-q5qbl":"active","s-lx-wisp-q5qbl":"active","gc-toolkit.gc-z0vi2":"active"}'
 MAP_POOL='{"lx-fjnq1":"active","gc-toolkit__polecat-lx-fjnq1":"active","gc-toolkit/gc-toolkit.furiosa":"active"}'
 

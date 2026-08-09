@@ -1,8 +1,9 @@
 description = """
 Proactive first reaction — a cheap, one-shot reaction slung at a bead.
 
-Phase 4 of the Bead-Universe Operating Model (epic tk-q4xaj; bead
-tk-3d0uh; design Key Components 5-6, Phase 4). Modeled on `mol-review-leg`
+Phase 4 of the Bead-Universe Operating Model
+(specs/bead-universe/design-doc.md — Key Components 5-6, Phase 4).
+Modeled on `mol-review-leg`
 (read the bead, do the work, persist to notes) — but where a review leg
 closes its assignment bead, a first reaction ADVANCES a real work bead and
 hands it back to the human. It never closes the target.
@@ -171,7 +172,7 @@ gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "task_kind=visit"
 gc bd dep add "$VISIT" "{{issue}}" --type=tracks
 # tracks, NOT parent-child: parent-child transmits the subject's
-# blocked state to the visit (validator F-06).
+# blocked state to the visit, making it unclaimable.
 # <<< gate-visit
 ```
 

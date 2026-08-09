@@ -298,7 +298,7 @@ Named singletons run their `gc hook` work query with
 to `ephemeral` (or empty) origins only — named singletons see
 only **Tier 1** (in-progress, crash recovery) and **Tier 2**
 (ready, pre-assigned) work. They still skip Tier 3, but routing
-work to a named singleton no longer requires hand-stamping the
+work to a named singleton does not require hand-stamping the
 assignee: `gc sling <singleton-qualified-name> <bead>` detects
 the singleton target and stamps `assignee=<target>` alongside
 `gc.routed_to`, so the bead surfaces via the singleton's Tier 2
@@ -573,9 +573,8 @@ by the thread's `sling_query` stub.
 
 ### Conversations are visits, not per-bead host threads
 
-The v1 resident per-bead host (a wisp-backed thread whose alias *was* the
-bead id, epic `tk-q4xaj`) is **retired**. A conversation about a bead is
-now ordinary routed work: file a **visit** — a small child bead with
+A conversation about a bead is ordinary routed work — there is no
+per-bead host thread. File a **visit** — a small child bead with
 `task_kind=visit` and `gc.continuation_group=<subject-id>`, routed to the
 rig-qualified `converse` pool (`agents/converse/`; canonical filing lines
 in `formulas/mol-visit.toml`). Pool demand spawns a converse session that
@@ -1140,9 +1139,8 @@ bead it works belongs to a rig. Every rig-bound session on the other side
 (`gc-toolkit/gc-toolkit.nux`), because there `Dir` is non-empty and
 `QualifiedName()` prepends it. Both halves are that one function
 behaving as documented; the asymmetry is the *scope*, not a defect, and
-there is nothing to fix. (The confirmed-firing shape came from the
-retired v1 per-bead host, but the mismatch is a property of scope, and
-both directions remain live in one city.)
+there is nothing to fix. (The mismatch is a property of scope, and both
+directions are live in one city.)
 
 It costs any scan that resolves a bead's owner by exact lookup into a
 session map keyed on `id, name, session_name, alias, agent_name`. When

@@ -7,7 +7,7 @@
 ## Goals
 
 The dedicated, small, mr-only pool that runs slung first reactions — Phase 4
-of the Bead-Universe Operating Model (epic tk-q4xaj; bead tk-3d0uh; design Key
+of the Bead-Universe Operating Model (specs/bead-universe/design-doc.md — Key
 Components 5-6). A proactive worker takes one bead, gives it a cheap first
 reaction (read the body, write a first-reaction card to the notes, file a
 visit on it), and drains. It makes the human arrive at *advanced*

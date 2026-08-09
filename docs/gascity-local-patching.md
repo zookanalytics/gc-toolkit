@@ -232,9 +232,9 @@ exit condition: it keeps appending iterations until the rebase is
 finished, the worktree is clean, and the quality gate is green at the
 live HEAD. The fresh context comes from the runtime recycling the
 previous iteration's session, which it only does for a pool target — so
-sling this formula at a pool, never at a named agent. (This replaces the
-v11 rework-polecat dispatch; `mol-upstream-gc-rebase-rework` is kept for
-manual dispatch but this formula no longer slings it.)
+sling this formula at a pool, never at a named agent.
+(`mol-upstream-gc-rebase-rework` exists for manual dispatch; this
+formula does not sling it.)
 
 The iteration classifies each conflicted commit:
 - **mechanical** — the intent transfers cleanly, only anchors shifted.

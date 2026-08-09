@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gc-bd-universe.sh — emit a bead's "universe slice": the fed/fetchable/out
 # context tiers that prime a converse session. Phase 2 of the Bead-Universe Operating
-# Model (epic tk-q4xaj; bead tk-oqmc7; design Key Component 3, Data Model,
+# Model (specs/bead-universe/design-doc.md — Key Component 3, Data Model,
 # Phase 2).
 #
 # This is the design's `gc bd universe <id> --slice` projection. `gc bd` is a

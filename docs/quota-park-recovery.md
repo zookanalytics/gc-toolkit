@@ -160,7 +160,7 @@ stray name, a hand-edited leftover, a shared or mis-set `QUOTA_PARK_STATE_DIR`
 — which is the class that has actually been hit here. It cannot stop something
 that can write to `STATE_DIR` from writing the marker too, and nothing at this
 layer can, since such a writer runs as the same user this order does. An accident
-can no longer forge ownership; a forgery now has to be deliberate.
+cannot forge ownership; a forgery has to be deliberate.
 
 That refusal has a price, and it is the right one to pay: a foreign file at a
 live session's path keeps `--status` answering `unknown` for that session rather

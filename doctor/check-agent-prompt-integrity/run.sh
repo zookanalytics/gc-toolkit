@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Pack doctor check: no agent silently renders the generic prompt stub.
 #
-# Validator F-03: a `prompt_template` in the `<pack>//<subpath>` cross-pack
-# form is resolved against the PACK directory (`<pack-root>/<pack>/…`), not
-# the import cache. Under the retired-materialization model that path never
-# exists — and gascity's resolver does not fail config load; it silently
+# A `prompt_template` in the `<pack>//<subpath>` cross-pack form is
+# resolved against the PACK directory (`<pack-root>/<pack>/…`), not the
+# import cache. When the referenced pack is not materialized there the
+# path does not exist — and gascity's resolver does not fail config
+# load; it silently
 # falls back to the 16-line generic stub ("You are an agent in a Gas City
 # workspace. Claim available work and execute it."), so e.g. a codex
 # polecat would claim real work with none of its doctrine. A doctor check
@@ -38,7 +39,7 @@ if [ "${#findings[@]}" -eq 0 ]; then
     exit 0
 fi
 
-echo "${#findings[@]} agent(s) carry a cross-pack prompt_template — stub-fallback exposure (validator F-03)"
+echo "${#findings[@]} agent(s) carry a cross-pack prompt_template — stub-fallback exposure"
 printf '%s\n' "${findings[@]}"
 echo "The referenced pack must be import-materialized: gascity resolves <pack>//<subpath> against the pack dir and, when the path is absent, silently renders the 16-line generic stub instead of failing config load."
 echo "Confirm manually per agent: gc agent render <name> | wc -l — expect >100 lines; 16 means the stub."
