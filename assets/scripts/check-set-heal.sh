@@ -905,12 +905,34 @@ PASS_ORIGIN_REPO_Q=$(resolve_origin_repo_q)
 #     head branch and head repository — because reopening binds this bead to that PR.
 #     The PR must ALSO still be OPEN at certification time, not merely in the list read
 #     moments earlier.
-#   - A BEAD THIS ARM ALREADY REOPENED ONCE. `reopened_not_landed` is stamped on the
-#     reopen, so a bead that is closed AGAIN was re-closed by a live writer after the
-#     repair. Reopening it a second time would be a flap — this pass and that writer
-#     fighting over the bead every idle loop — so it escalates to an operator instead.
-#     That marker is the only thing this arm writes besides the status.
-reopened=0; reopen_skipped=0
+#   - A BEAD THIS ARM ALREADY REOPENED AND CONFIRMED OPEN ONCE. `reopened_not_landed` is
+#     stamped on the reopen, so a bead that is closed AGAIN was re-closed by a live
+#     writer after the repair. Reopening it a second time would be a flap — this pass and
+#     that writer fighting over the bead every idle loop — so it is handed to a human
+#     instead, DURABLY (route + reason + one mail), never with a log line alone.
+#
+# THE MARKER IS STAGED, BECAUSE "ALREADY REOPENED" AND "REOPEN NEVER LANDED" LOOK
+# IDENTICAL OTHERWISE (review tk-bb0j0 finding P1). The marker has to be written BEFORE
+# the status flip — a reopen with no marker cannot be told from a first repair next pass
+# — which means a DROPPED status write leaves the marker behind on a bead that was never
+# open. Read as a bare flag, that is indistinguishable from a re-close, so one lost write
+# permanently diverted the bead into the never-reopen branch: every later pass logged to
+# stderr and moved on, and the PR stayed open, untracked and unowned — the very failure
+# this whole arm exists to end, re-minted by its own repair. So the marker records WHICH:
+#
+#   reopened_not_landed=PR#<n>        ATTEMPTED. The status write may never have landed,
+#                                     so the bead may never have been open — RETRY.
+#   reopened_not_landed=PR#<n>@open   CONFIRMED. The status read back `open` after the
+#                                     write, so a later close is a real re-close —
+#                                     ESCALATE, do not flap.
+#
+# The confirmation is written only AFTER the status reads back open, never batched with
+# it: batched, a non-atomic update whose status half was lost would leave a CONFIRMED
+# marker on a bead that never opened, and the next pass would escalate a dropped write to
+# a human as if it were a live writer. Staged this way every failure lands on the safe
+# side — a lost status flip is retried, and the only cost of a lost confirmation is one
+# extra reopen before the escalation fires.
+reopened=0; reopen_skipped=0; reopen_escalated=0
 
 # THE LEDGER SIDE FIRST, THE `gh` CALL ONLY IF IT COULD MATTER. The intersection needs
 # both halves, but the order they are read in is not free: the ledger scans are local and
@@ -1068,14 +1090,6 @@ if [ -n "$CLOSED_CANDS" ]; then
       reopen_skipped=$((reopen_skipped + 1)); continue
     fi
 
-    # Already reopened once and CLOSED AGAIN. Something live re-closed it after the
-    # repair, so reopening again would flap the bead every idle pass. Hand it to a human
-    # instead — and say so once per pass rather than fixing it wrong forever.
-    if [ -n "$xalready" ]; then
-      echo "check-set-heal: WARN $xid was already reopened by this arm ($xalready) and has been CLOSED again while PR#$xnum is still open; NOT reopening a second time — a live writer is re-closing it and an operator must find that writer (the PR is stranded meanwhile)" >&2
-      reopen_skipped=$((reopen_skipped + 1)); continue
-    fi
-
     # Not a polecat's live work — the same assignee rule phase 0 applies. An empty
     # assignee is the canonical gating shape; a refinery-ish one is what the live case
     # wore (sl-jcr4 was assigned signal-loom/gc-toolkit.refinery when it was closed).
@@ -1142,10 +1156,85 @@ if [ -n "$CLOSED_CANDS" ]; then
       reopen_skipped=$((reopen_skipped + 1)); continue
     fi
 
+    # ALREADY REOPENED? The two marker stages mean opposite things (see the header), and
+    # collapsing them is what turned a single lost status write into a permanent strand.
+    #
+    # DELIBERATELY BELOW THE INCUMBENT AND CERTIFICATION GUARDS, unlike every other
+    # skip in this loop. Those two are what make the escalation's claim TRUE: it tells a
+    # human that PR#<n> is open and tracked by nothing, and only the incumbent scan can
+    # say nothing else drives it, only certification can say this bead is really that
+    # PR's anchor, and only certification's pinned read can say the PR did not merge
+    # between the listing and now. Checked earlier, a flap over a PR that was re-anchored
+    # or merged moments ago would page an operator about a PR that is fine — and a false
+    # page costs more than the stderr line this branch replaces. The cost is one extra
+    # `gh` certification for a flapping bead, paid once, since the route it records drops
+    # the bead from the candidate projection on every later pass.
+    case "$xalready" in
+      "") : ;;
+
+      *@open)
+        # CONFIRMED open once, and CLOSED AGAIN. Something live re-closed it after the
+        # repair, so reopening again would flap the bead every idle pass. Hand it to a
+        # human DURABLY — the shape the observer uses for an out-of-band close
+        # (reconcile-merged-prs.sh): route + reason first, then one mail. A stderr line
+        # is not an escalation; it leaves the PR open, untracked and owned by nobody,
+        # which is the original failure wearing a log message.
+        #
+        # THE ROUTE IS ALSO THE ONCE-ONLY GATE. A surviving `gc.routed_to` drops the bead
+        # from this arm's candidate projection above, so once the route is recorded no
+        # later pass reaches here at all — the escalation cannot repeat, and there is no
+        # separate "already escalated" flag to keep in sync. If an operator clears the
+        # route while the PR is still stranded, escalating again is the correct answer,
+        # not spam.
+        #
+        # THE BEAD IS LEFT CLOSED. It is being closed by something live; reopening it is
+        # exactly the flap this branch exists to stop, and the human-owned state (route +
+        # blocked_reason) is what makes it findable meanwhile.
+        gc bd update "$xid" \
+          --set-metadata gc.routed_to=human \
+          --set-metadata blocked_reason="check-set-heal reopened this bead for PR#$xnum and a live writer CLOSED it again; PR#$xnum is still open and tracked by nothing" \
+          >/dev/null 2>&1
+        GOT_ROUTE=$(gc bd show "$xid" --json 2>/dev/null \
+          | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+        if [ "$GOT_ROUTE" != "human" ]; then
+          # No durable record means no escalation. Mailing anyway would notify once and
+          # then repeat every pass (the route is what stops the re-scan), so say what
+          # happened and retry the whole escalation next pass.
+          echo "check-set-heal: WARN $xid was reopened for PR#$xnum and has been CLOSED again, but the human route did NOT persist (have '${GOT_ROUTE:-<empty>}'); NOT mailing — an unrecorded escalation would repeat every pass. Retrying next pass" >&2
+          reopen_skipped=$((reopen_skipped + 1)); continue
+        fi
+        echo "check-set-heal: $xid was reopened for PR#$xnum by this arm and has been CLOSED again by a live writer; NOT reopening a second time (that would flap the bead every idle pass) — routed to human with blocked_reason, PR#$xnum stays open and untracked until an operator finds that writer"
+        gc mail send mayor/ -s "ESCALATION: $xid re-closed while PR#$xnum is still open" \
+          -m "check-set-heal reopened $xid because it was CLOSED while PR#$xnum was still
+open and it carried no merge_result. Something LIVE has closed it again since. This pass
+will not reopen it a second time — that would fight the writer every idle loop — so the
+bead is left CLOSED, routed to human with a blocked_reason.
+
+Nothing tracks PR#$xnum meanwhile: merge-skill.sh, pre-open-resolve.sh, the observer and
+this pass all enumerate OPEN beads, so a closed anchor is invisible to every one of them
+at once, and under close-on-land its closed status also reads as LANDED.
+
+Needed from a human: find what is re-closing $xid and stop it, then clear
+gc.routed_to on the bead so this pass can repair it again — or dispose of PR#$xnum
+deliberately (merge it, close it, or re-anchor it on a fresh bead)." >/dev/null 2>&1 \
+          || echo "check-set-heal: WARN the escalation mail for $xid did not send; the bead is routed to human with blocked_reason recorded, but nobody was notified — PR#$xnum needs a look by hand" >&2
+        reopen_escalated=$((reopen_escalated + 1)); continue ;;
+
+      *)
+        # ATTEMPTED but never confirmed, and the bead is still CLOSED — so nothing
+        # re-closed it, because nothing ever opened it. The previous pass's status write
+        # was dropped and the marker outlived it. This is the RETRY case: fall through
+        # and reopen. Skipping here is what stranded the PR forever.
+        echo "check-set-heal: $xid carries an UNCONFIRMED reopen marker ($xalready) and is still CLOSED — the previous pass's status write never landed, so this is a dropped write, not a re-close; retrying the reopen" >&2
+        ;;
+    esac
+
     echo "check-set-heal: $xid is CLOSED while PR#$xnum is still OPEN and it carries NO merge_result — under close-on-land that reads as LANDED, so the bead is a false durable record AND invisible to merge-skill, pre-open-resolve, the observer and phase 0 alike; reopening so the PR is driven again (tk-vnlll)"
 
-    # THE ONLY WRITES: the marker that makes a re-close detectable, then the status.
-    # The marker goes FIRST for the same reason phase 0 writes dependents before
+    # THE ONLY WRITES: the ATTEMPT marker that makes a re-close detectable, the status,
+    # and then the CONFIRMATION that tells the two apart.
+    #
+    # The attempt marker goes FIRST for the same reason phase 0 writes dependents before
     # visibility — if it is dropped, the bead stays closed and is retried, whereas a
     # reopen with no marker cannot tell a flap from a first repair on the next pass.
     gc bd update "$xid" --set-metadata reopened_not_landed="PR#$xnum" >/dev/null 2>&1
@@ -1163,15 +1252,38 @@ if [ -n "$CLOSED_CANDS" ]; then
     GOT_STATUS=$(gc bd show "$xid" --json 2>/dev/null \
       | jq -r '.[0].status // empty' 2>/dev/null | tr '[:upper:]' '[:lower:]')
     if [ "$GOT_STATUS" != "open" ]; then
-      echo "check-set-heal: WARN $xid reopen did NOT persist (status reads '${GOT_STATUS:-<unreadable>}'); PR#$xnum stays invisible — retrying next pass" >&2
+      # The marker is deliberately left at the ATTEMPT stage here. That is what makes
+      # this a retry: the branch at the top of the loop reads an unconfirmed marker over
+      # a still-closed bead as a dropped write and reopens again, instead of reading it
+      # as a re-close and refusing forever.
+      echo "check-set-heal: WARN $xid reopen did NOT persist (status reads '${GOT_STATUS:-<unreadable>}'); PR#$xnum stays invisible — the reopen marker is left UNCONFIRMED so the next pass retries this write rather than mistaking it for a re-close" >&2
       reopen_skipped=$((reopen_skipped + 1)); continue
     fi
+
+    # CONFIRM the marker, now that the status has actually read back open — never
+    # before, and never batched with the status write. A confirmation stamped on a bead
+    # whose reopen was lost would escalate a dropped write to a human as a live re-close.
+    #
+    # This write is the LAST one for a reason: the repair is already done. If it is lost,
+    # the bead is open (which is the whole repair) and only the flap detector is
+    # degraded — a later re-close would read as a retry and cost ONE extra reopen before
+    # escalating. So retry it once, warn, and never undo a successful reopen over it.
+    gc bd update "$xid" --set-metadata reopened_not_landed="PR#$xnum@open" >/dev/null 2>&1
+    GOT_CONFIRM=$(gc bd show "$xid" --json 2>/dev/null \
+      | jq -r '.[0].metadata.reopened_not_landed // empty' 2>/dev/null)
+    if [ "$GOT_CONFIRM" != "PR#$xnum@open" ]; then
+      gc bd update "$xid" --set-metadata reopened_not_landed="PR#$xnum@open" >/dev/null 2>&1
+      GOT_CONFIRM=$(gc bd show "$xid" --json 2>/dev/null \
+        | jq -r '.[0].metadata.reopened_not_landed // empty' 2>/dev/null)
+    fi
+    [ "$GOT_CONFIRM" = "PR#$xnum@open" ] \
+      || echo "check-set-heal: WARN $xid was reopened for PR#$xnum but its reopen marker is still UNCONFIRMED (have '${GOT_CONFIRM:-<empty>}'); the repair stands, but a later re-close would read as a dropped write and cost one extra reopen before escalating" >&2
     reopened=$((reopened + 1))
   done <<< "$CLOSED_CANDS"
 fi
 
-if [ "$reopened" -gt 0 ] || [ "$reopen_skipped" -gt 0 ]; then
-  echo "check-set-heal: closed-but-not-landed — $reopened anchor(s) reopened, $reopen_skipped skipped"
+if [ "$reopened" -gt 0 ] || [ "$reopen_skipped" -gt 0 ] || [ "$reopen_escalated" -gt 0 ]; then
+  echo "check-set-heal: closed-but-not-landed — $reopened anchor(s) reopened, $reopen_skipped skipped, $reopen_escalated escalated to human"
 fi
 
 # --limit=0 (unbounded). A candidate past a cap is an INVISIBLE anchor that stays

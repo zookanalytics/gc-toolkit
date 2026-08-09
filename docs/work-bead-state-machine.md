@@ -1194,12 +1194,36 @@ guards are specific to reopening:
   exists to gate a bead that is no longer there. Refusing on those would decline to
   repair exactly the case that most needs it, and the reopened anchor is what the
   child was waiting for.
-- **Reopen once, then escalate.** The reopen stamps `reopened_not_landed`. A bead
-  that carries it and is closed *again* was re-closed by a live writer, so reopening
-  it a second time would flap the bead against that writer every idle pass. It is
-  reported for an operator instead. The marker is written and read back *before* the
-  status flip, because without a durable marker a later re-close cannot be told from
-  a first repair.
+- **Reopen once, then escalate — durably.** The reopen stamps `reopened_not_landed`.
+  A bead that carries it *confirmed* and is closed *again* was re-closed by a live
+  writer, so reopening it a second time would flap the bead against that writer every
+  idle pass. It is handed to a human the same way the observer hands over an
+  out-of-band close: `gc.routed_to=human` plus a `blocked_reason` on the bead, then
+  one mail to the mayor. A stderr line is not an escalation — it leaves the PR open,
+  untracked and owned by nobody, which is the original failure wearing a log message.
+  The route doubles as the once-only gate: a bead carrying `gc.routed_to` is excluded
+  from the closed-candidate projection, so no later pass reaches the branch again.
+
+- **The marker is staged, because "already reopened" and "reopen never landed" are
+  otherwise the same value.** The marker has to be written and read back *before* the
+  status flip — without a durable marker a later re-close cannot be told from a first
+  repair — which means a *dropped* status write leaves the marker behind on a bead
+  that was never open. Read as a bare flag, that is indistinguishable from a re-close,
+  so a single lost write diverted the bead into the never-reopen branch permanently:
+  every later pass logged and moved on while the PR stayed invisible. So the marker
+  records which:
+
+  | `reopened_not_landed` | meaning | next pass |
+  |---|---|---|
+  | `PR#<n>` | reopen **attempted**; the status write may never have landed | **retry** the reopen |
+  | `PR#<n>@open` | reopen **confirmed**: the status read back `open` | **escalate**, never flap |
+
+  The confirmation is written only *after* the status reads back open, never batched
+  with it: batched, a non-atomic update whose status half was lost would leave a
+  confirmed marker on a bead that never opened, and the next pass would escalate a
+  dropped write as if it were a live writer. Staged this way every failure lands on
+  the safe side — a lost status flip is retried, and the only cost of a lost
+  confirmation is one extra reopen before the escalation fires.
 
 **What closed it.** Worth separating the repair from its cause. The live mr path
 does not close at PR-creation — all four rigs symlink gc-toolkit's

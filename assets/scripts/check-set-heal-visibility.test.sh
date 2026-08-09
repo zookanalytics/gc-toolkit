@@ -224,7 +224,14 @@
 #                      anchor (tk-ynz4b), even though certification would have passed.
 #   (CLOSEDAMBIG)      two closed candidates for one PR -> neither reopened.
 #   (CLOSEDHEAD)       the PR is opened from another branch -> certification refuses.
-#   (CLOSEDFLAP)       already reopened once and CLOSED AGAIN -> escalate, never flap.
+#   (CLOSEDFLAP)       reopened, CONFIRMED open, and CLOSED AGAIN -> a DURABLE human
+#                      escalation (route + reason + one mail), never a log line alone.
+#   (CLOSEDROUTEFAIL)  the escalation route does not persist -> not mailed either, so an
+#                      unrecorded escalation cannot repeat every pass.
+#   (CLOSEDMAILFAIL)   the mail fails but the human-owned state still lands.
+#   (CLOSEDRETRY)      an UNCONFIRMED marker over a still-closed bead is a DROPPED status
+#                      write, not a re-close -> retry the reopen (review tk-bb0j0 P1).
+#   (CLOSEDCONFIRMORDER) the confirmation is never stamped when the reopen was lost.
 #   (CLOSEDSCANFAIL)   an unreadable closed scan skips the arm (whole-set ambiguity).
 #   (CLOSEDPRLISTFAIL) an unreadable open-PR list fails CLOSED.
 #   (CLOSEDMARKFAIL)   a flap marker that does not persist blocks the reopen.
@@ -307,7 +314,8 @@ b-CLOSEDCLAIMED	closed
 b-CLOSEDAMBIG1	closed
 b-CLOSEDAMBIG2	closed
 b-CLOSEDHEAD	closed
-b-CLOSEDFLAP	closed	PR#767
+b-CLOSEDFLAP	closed	PR#767@open
+b-CLOSEDRETRY	closed	PR#769
 b-CLOSEDROUTED	closed
 S
 
@@ -501,6 +509,15 @@ chmod +x "$TMP/bin/gh"
 # bd show / create / update / dep / session
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+# `gc mail send ...` — the escalation phase 0a sends when a bead it reopened and
+# CONFIRMED open is CLOSED again. Recorded verbatim so a test can pin that the
+# escalation actually goes out and goes out exactly ONCE; $FAKE_MAILFAIL makes the send
+# fail, so the "recorded but nobody notified" warning can be pinned too.
+if [ "$1" = "mail" ]; then
+  [ -s "$FAKE_MAILFAIL" ] && exit 1
+  printf '%s\n' "$*" >> "$FAKE_MAIL"
+  exit 0
+fi
 [ "$1" = "bd" ] || exit 0
 
 # A metadata value written this run overlays the stored one. $FAKE_STAMPS rows are
@@ -580,7 +597,12 @@ emit() {
   ab=$(printf '%s' "$row" | cut -d'|' -f8)
   tk=$(printf '%s' "$row" | cut -d'|' -f9)
   srev=$(printf '%s' "$row" | cut -d'|' -f10)
-  routed=$(printf '%s' "$row" | cut -d'|' -f11)
+  # gc.routed_to is STATEFUL: phase 0a stamps `human` on a bead it escalates, and that
+  # write is both the durable human-owned state and the once-only gate (a routed bead
+  # leaves the closed-candidate projection). The script reads it straight back, so the
+  # stub has to model the write taking effect mid-run rather than per-fixture.
+  routed=$(stamp_for "$id" gc.routed_to)
+  [ -n "$routed" ] || routed=$(printf '%s' "$row" | cut -d'|' -f11)
   sab=$(printf '%s' "$row" | cut -d'|' -f14)
   local plaintgt; plaintgt=$(printf '%s' "$row" | cut -d'|' -f13)
   mr=$(mr_for "$id"); prnum=$(pr_for "$id"); cs=$(cs_for "$id")
@@ -796,7 +818,7 @@ case "$2" in
     for k in merge_result merge_result_healed merge_result_heal_flagged \
              merge_result_pr_state pr_number pr_url merged_target check_set check_set_healed \
              check_set_heal_flagged assignee_noncanonical anchor_bead gc.routed_to \
-             task_kind review_branch reopened_not_landed; do
+             task_kind review_branch reopened_not_landed blocked_reason; do
       if printf '%s' "$*" | grep -q -- "--set-metadata $k="; then
         v=$(printf '%s' "$*" | sed -n "s/.*--set-metadata $k=\\([^ ]*\\).*/\\1/p")
         # Injected write-loss, per (id, key): never persist this key for this bead.
@@ -825,6 +847,7 @@ chmod +x "$TMP/bin/gc"
 : > "$TMP/ignorerepo"; : > "$TMP/enumdrop"
 : > "$TMP/flip"; : > "$TMP/viewfaillater"; mkdir -p "$TMP/seen"
 : > "$TMP/prliston"; : > "$TMP/prlistfail"
+: > "$TMP/mail"; : > "$TMP/mailfail"
 echo 0 > "$TMP/seq"
 
 export PATH="$TMP/bin:$PATH"
@@ -840,7 +863,8 @@ export FAKE_BEADS="$TMP/beads" FAKE_PRS="$TMP/prs" FAKE_STAMPS="$TMP/stamps" \
        FAKE_VIEWFAIL_LATER="$TMP/viewfaillater" FAKE_SEEN_DIR="$TMP/seen" \
        FAKE_RCPAYLOAD="$TMP/rcpayload" FAKE_OBJPAYLOAD="$TMP/objpayload" \
        FAKE_STATUS="$TMP/status" FAKE_PRLIST_ON="$TMP/prliston" \
-       FAKE_PRLISTFAIL="$TMP/prlistfail"
+       FAKE_PRLISTFAIL="$TMP/prlistfail" \
+       FAKE_MAIL="$TMP/mail" FAKE_MAILFAIL="$TMP/mailfail"
 
 stamped() { grep -qx "$(printf '%s\t%s\t%s' "$1" "$2" "$3")" "$TMP/stamps"; }
 recovered() { grep -qx "$(printf '%s\tmerge_result\tpull_request' "$1")" "$TMP/stamps"; }
@@ -881,6 +905,7 @@ reset_run() { : > "$TMP/prliston"; : > "$TMP/prlistfail"
               : > "$TMP/ghdefault"; : > "$TMP/foreignhead"; : > "$TMP/ghhost"
               : > "$TMP/ignorerepo"; : > "$TMP/enumdrop"
               : > "$TMP/flip"; : > "$TMP/viewfaillater"
+              : > "$TMP/mail"; : > "$TMP/mailfail"
               rm -rf "$TMP/seen"; mkdir -p "$TMP/seen"
               echo 0 > "$TMP/seq"; }
 
@@ -2500,7 +2525,8 @@ b-CLOSEDAMBIG1|||https://github.com/o/r/pull/765|765|polecat/feat-ambig-a|main||
 b-CLOSEDAMBIG2|||https://github.com/o/r/pull/765|765|polecat/feat-ambig-b|main||||||
 b-CLOSEDHEAD|||https://github.com/o/r/pull/766|766|polecat/feat-closedhead|main||||||
 b-CLOSEDFLAP|||https://github.com/o/r/pull/767|767|polecat/feat-closedflap|main||||||
-b-CLOSEDROUTED|||https://github.com/o/r/pull/768|768|polecat/feat-closedrouted|main||||pool/polecat||'
+b-CLOSEDROUTED|||https://github.com/o/r/pull/768|768|polecat/feat-closedrouted|main||||pool/polecat||
+b-CLOSEDRETRY|||https://github.com/o/r/pull/769|769|polecat/feat-closedretry|main||||||'
 CLOSED_PRS='708|OPEN|main|polecat/feat-oneanch|
 760|OPEN|main|polecat/feat-closedok|
 761|OPEN|main|polecat/feat-closedlanded|
@@ -2509,7 +2535,8 @@ CLOSED_PRS='708|OPEN|main|polecat/feat-oneanch|
 765|OPEN|main|polecat/feat-ambig-a|
 766|OPEN|main|polecat/somebody-elses-branch|
 767|OPEN|main|polecat/feat-closedflap|
-768|OPEN|main|polecat/feat-closedrouted|'
+768|OPEN|main|polecat/feat-closedrouted|
+769|OPEN|main|polecat/feat-closedretry|'
 closed_fixture() {
   reset_run
   printf '%s\n' "$CLOSED_BEADS" > "$TMP/beads"
@@ -2530,6 +2557,11 @@ reopened b-CLOSEDOK \
 stamped b-CLOSEDOK reopened_not_landed "PR#760" \
   && ok "(CLOSEDREOPEN) the repair leaves a durable marker, so a re-close is detectable" \
   || bad "(CLOSEDREOPEN) must record reopened_not_landed"
+# ...and CONFIRMS it once the status has read back open. The two stages are what let a
+# later pass tell a real re-close from a dropped status write (review tk-bb0j0 P1).
+stamped b-CLOSEDOK reopened_not_landed "PR#760@open" \
+  && ok "(CLOSEDREOPEN) ...and confirms it once the reopen is verified" \
+  || bad "(CLOSEDREOPEN) must confirm the marker after the status reads back open"
 # ...and then RE-STAMPED and GATED by phases 0 and 1 on the SAME pass — the whole reason
 # the arm only reopens. This is "confirm the normal gate takes over" in one run.
 recovered b-CLOSEDOK \
@@ -2600,14 +2632,106 @@ reopened b-CLOSEDHEAD \
   && bad "(CLOSEDHEAD) an uncertified PR must not be bound to a reopened anchor" \
   || ok "(CLOSEDHEAD) a PR whose head is not this bead's branch is refused"
 
-# (CLOSEDFLAP) already reopened once and CLOSED AGAIN: a live writer is re-closing it,
-# so reopening again would fight that writer every idle pass. Escalate, do not flap.
+# (CLOSEDFLAP) reopened once, CONFIRMED open, and CLOSED AGAIN: a live writer is
+# re-closing it, so reopening again would fight that writer every idle pass.
 reopened b-CLOSEDFLAP \
-  && bad "(CLOSEDFLAP) must not reopen a bead that was already reopened and re-closed" \
-  || ok "(CLOSEDFLAP) a re-closed bead is not reopened a second time"
-grep -q 'has been CLOSED again' "$TMP/err12" \
-  && ok "(CLOSEDFLAP) the flap is escalated to an operator instead" \
-  || bad "(CLOSEDFLAP) must warn about the re-close (err: $(cat "$TMP/err12"))"
+  && bad "(CLOSEDFLAP) must not reopen a bead that was reopened, confirmed open and re-closed" \
+  || ok "(CLOSEDFLAP) a confirmed-then-re-closed bead is not reopened a second time"
+printf '%s\n' "$OUT12" | grep -q 'has been CLOSED again by a live writer' \
+  && ok "(CLOSEDFLAP) the flap is reported" \
+  || bad "(CLOSEDFLAP) must report the re-close (out: $OUT12)"
+
+# ...and the refusal is a DURABLE escalation, not a log line. A stderr warning leaves the
+# PR open, untracked and owned by nobody — the original failure wearing a message. The
+# human-owned state is route + reason on the bead, mirroring the observer's out-of-band
+# close (review tk-bb0j0 finding P1).
+stamped b-CLOSEDFLAP gc.routed_to human \
+  && ok "(CLOSEDFLAP) the stranded bead is ROUTED to a human, not just logged" \
+  || bad "(CLOSEDFLAP) must route the re-closed bead to human (stamps: $(cat "$TMP/stamps"))"
+grep -q "$(printf 'b-CLOSEDFLAP\tblocked_reason\t')" "$TMP/stamps" \
+  && ok "(CLOSEDFLAP) ...with a blocked_reason recording why" \
+  || bad "(CLOSEDFLAP) must record a blocked_reason"
+eq "$(grep -c 'ESCALATION: b-CLOSEDFLAP re-closed' "$TMP/mail")" "1" \
+   "(CLOSEDFLAP) ...and escalates to the mayor exactly once"
+# The bead is LEFT CLOSED: it is being closed by something live, and reopening it is the
+# flap. It must also never be stamped merge_result — that would be a phase-0
+# non-candidate forever, a permanent strand minted by the escalation.
+recovered b-CLOSEDFLAP \
+  && bad "(CLOSEDFLAP) an escalated bead must NOT be stamped merge_result while closed" \
+  || ok "(CLOSEDFLAP) the escalated bead is left closed and unstamped"
+
+# (CLOSEDROUTEFAIL) the human route does not persist -> the escalation is NOT recorded,
+# so it must NOT be mailed either: the route is what stops the re-scan, so mailing on a
+# lost write would notify once and then repeat every idle pass forever.
+closed_fixture
+printf 'b-CLOSEDFLAP\tgc.routed_to\n' > "$TMP/stampfail"
+RC12F=0
+run_heal >/dev/null 2>"$TMP/err12f" || RC12F=$?
+eq "$RC12F" "0" "(CLOSEDROUTEFAIL) a lost escalation route is a deferral, not UNSAFE"
+eq "$(grep -c 'ESCALATION: b-CLOSEDFLAP re-closed' "$TMP/mail")" "0" \
+   "(CLOSEDROUTEFAIL) an escalation that was not recorded is not mailed"
+reopened b-CLOSEDFLAP \
+  && bad "(CLOSEDROUTEFAIL) a failed escalation must not fall back to reopening (that is the flap)" \
+  || ok "(CLOSEDROUTEFAIL) a failed escalation still refuses to flap the bead"
+grep -q 'human route did NOT persist' "$TMP/err12f" \
+  && ok "(CLOSEDROUTEFAIL) the lost route is reported" \
+  || bad "(CLOSEDROUTEFAIL) must report it (err: $(cat "$TMP/err12f"))"
+
+# (CLOSEDMAILFAIL) the durable state lands but the mail does not. The bead is owned
+# (route + reason are the record); the missing notification is reported rather than
+# swallowed, and the pass still exits 0.
+closed_fixture
+echo 1 > "$TMP/mailfail"
+RC12G=0
+run_heal >/dev/null 2>"$TMP/err12g" || RC12G=$?
+eq "$RC12G" "0" "(CLOSEDMAILFAIL) an unsent escalation mail is not fatal"
+stamped b-CLOSEDFLAP gc.routed_to human \
+  && ok "(CLOSEDMAILFAIL) the durable human-owned state is recorded even when mail fails" \
+  || bad "(CLOSEDMAILFAIL) must still route to human"
+grep -q 'escalation mail for b-CLOSEDFLAP did not send' "$TMP/err12g" \
+  && ok "(CLOSEDMAILFAIL) the unsent notification is reported" \
+  || bad "(CLOSEDMAILFAIL) must report it (err: $(cat "$TMP/err12g"))"
+
+# (CLOSEDRETRY) THE OTHER HALF OF review tk-bb0j0 finding P1. The marker is written
+# BEFORE the status flip, so a DROPPED status write leaves an unconfirmed marker on a
+# bead that was never open. Read as a bare flag that is indistinguishable from a
+# re-close, and one lost write diverted the bead into the never-reopen branch forever —
+# the exact strand this arm exists to end, re-minted by its own repair. An UNCONFIRMED
+# marker over a still-closed bead must therefore RETRY, not escalate.
+closed_fixture
+RC12H=0
+run_heal >/dev/null 2>"$TMP/err12h" || RC12H=$?
+eq "$RC12H" "0" "(CLOSEDRETRY) a retry pass exits 0"
+reopened b-CLOSEDRETRY \
+  && ok "(CLOSEDRETRY) an UNCONFIRMED marker over a closed bead is retried, not abandoned" \
+  || bad "(CLOSEDRETRY) must retry the dropped reopen (stamps: $(cat "$TMP/stamps"))"
+eq "$(grep -c 'ESCALATION: b-CLOSEDRETRY' "$TMP/mail")" "0" \
+   "(CLOSEDRETRY) a dropped write is not escalated to a human as a live re-close"
+grep -q 'UNCONFIRMED reopen marker' "$TMP/err12h" \
+  && ok "(CLOSEDRETRY) the retry explains itself" \
+  || bad "(CLOSEDRETRY) must report the retry (err: $(cat "$TMP/err12h"))"
+# ...and the retry converges: it CONFIRMS the marker, so the next re-close escalates
+# instead of retrying forever.
+stamped b-CLOSEDRETRY reopened_not_landed "PR#769@open" \
+  && ok "(CLOSEDRETRY) the retry CONFIRMS the marker, so a later re-close escalates" \
+  || bad "(CLOSEDRETRY) must confirm the marker after the status reads back open"
+recovered b-CLOSEDRETRY \
+  && ok "(CLOSEDRETRY) ...and the retried anchor is gated by phase 0 in the SAME pass" \
+  || bad "(CLOSEDRETRY) retried anchor must reach phase 0"
+
+# (CLOSEDCONFIRMORDER) the CONFIRMATION must never be stamped on a bead whose reopen was
+# lost — batched with the status write, a non-atomic update could persist the marker and
+# drop the status, and the next pass would escalate a dropped write to a human as a live
+# re-close. Injecting a lost status write pins that the marker stays UNCONFIRMED.
+closed_fixture
+printf 'b-CLOSEDOK\tstatus\n' > "$TMP/stampfail"
+run_heal >/dev/null 2>"$TMP/err12i" || true
+stamped b-CLOSEDOK reopened_not_landed "PR#760@open" \
+  && bad "(CLOSEDCONFIRMORDER) must NOT confirm the marker when the reopen did not persist" \
+  || ok "(CLOSEDCONFIRMORDER) a lost reopen leaves the marker UNCONFIRMED, so the next pass retries"
+stamped b-CLOSEDOK reopened_not_landed "PR#760" \
+  && ok "(CLOSEDCONFIRMORDER) ...with the attempt marker still recorded" \
+  || bad "(CLOSEDCONFIRMORDER) the attempt marker must survive"
 
 # (CLOSEDSCANFAIL) the closed candidate scan is unreadable -> the arm is skipped, not
 # run on a partial set. The ambiguity guard is a whole-set property, so a dropped scan
