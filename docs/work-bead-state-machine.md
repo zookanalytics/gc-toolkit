@@ -276,6 +276,28 @@ create itself are pinned to this checkout's origin repository and certified befo
 anything is stamped — see
 [the invisible anchor](#the-invisible-anchor-repairing-the-field-every-pass-enumerates-on).
 
+**An existing PR is adopted by disposition, not by existence.** The pass looks the
+branch up across `--state all` — deliberately, since a **merged** sibling PR must
+still flip the anchor onto `pull_request`, the only sub-state
+`reconcile-merged-prs.sh` scans, or an anchor left behind a landed PR is never
+closed by anything. But the three states that lookup returns are not
+interchangeable. **Open** is the live PR the merge gate will act on and **merged**
+is landed work; both are adopted. **Closed-and-not-merged is dead** — it is what a
+deliberate supersede leaves behind after a corrected-scope force-push — and
+adopting it is a strand, not a convergence: the anchor leaves `pre_open_gate`,
+the only state that retries PR-open, carrying a `pr_url` that can never merge,
+while no open PR exists for the work at all. Such a branch instead gets a **fresh
+PR at the reviewed head**, cross-referencing the one it supersedes from both ends.
+Because that replacement is an open — a publish, not an adoption — it is subject to
+the operator holds above like any other: a held anchor whose only PR is dead has
+nothing adopted *and* nothing opened, and waits for the hold to lift.
+The exception is a dead PR closed at **exactly** the head the replacement would be
+opened at: nothing was re-implemented there, so the close was a decision about that
+commit, and re-opening it would repeat every idle pass — that case holds for an
+operator. An unreadable dead-PR head, or a PR state this pass does not model, holds
+for the same reason it refuses elsewhere: adopt and open-past are opposite actions,
+so "I cannot tell which" cannot pick one.
+
 **The flip out of `pre_open_gate` is ordered, not atomic.** `merge_result` is not
 one field among four here: it is the **visibility switch**. `pre_open_gate` is the
 only sub-state that opens or re-adopts a PR, and `pull_request` is the one the merge
