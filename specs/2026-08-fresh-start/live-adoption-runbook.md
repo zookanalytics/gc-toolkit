@@ -76,8 +76,15 @@ pre-seeded question about the subject from the record alone**.
 ```sh
 gc bd create -t task --title "triage: held ideas (gc-toolkit)" \
   -d "Triage scope: open, unassigned, unrouted idea/backlog beads in this rig that no formula owns. Each visit: enumerate the scope, rank ripeness, frame promote / park / kill per candidate."
-gc bd update <id> --set-metadata "task_kind=triage-subject"
+gc bd update <id> --set-metadata "task_kind=triage-subject" \
+  --set-metadata "triage.scope=unrouted"
 ```
+
+`triage.scope` is the machine-readable filter the recurrence formula
+evaluates (defined token schema in `formulas/mol-triage-recurrence.toml`
+step 2: `p<=N`, `label:X`, `kind:X`, `unrouted`); the body prose is for
+the sitting. A subject without recognized tokens is never guessed at —
+it just won't recur automatically.
 
 **Expect:** nothing happens — correct. Triage subjects are inert until
 the recurrence order finds candidates (or you file a visit on one by

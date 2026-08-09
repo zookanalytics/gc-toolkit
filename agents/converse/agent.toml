@@ -1,25 +1,18 @@
-# converse — the conversation role: holds a subject bead's conversation
-# for the operator. Rebuilds the subject's slice, does the reachable
-# prep, holds, writes the outcome to the subject, closes only the visit.
-#
-# The tk-h9pq5 conversation role (specs/tk-h9pq5/design-doc.md, Key
-# Components §3): the role-worker claim contract with the execute/close
-# clause replaced by hold-not-close. A dedicated small pool so a held
-# visit never occupies an impl slot (sibling of agents/proactive, same
-# dedicated-and-small reasoning). Beads and continuation groups are
-# rig-scoped, so the role is rig-scoped too.
-#
-# Demand is the default routed-pool predicate: visit beads stamped
-# gc.routed_to=<rig>/gc-toolkit.converse (filed by mol-visit or by a
-# formula step). Deliberately no work_query override — converse has no
-# enable-gate and no shed-clamp; a filed visit IS the demand, and two
-# slots bound the concurrent holds.
+# converse — holds visits: bounded sittings of a subject bead's dialogue.
+# Design authority: specs/tk-h9pq5/design-doc.md. Demand is the default
+# routed-pool predicate (visit beads stamped gc.routed_to=<rig>/gc-toolkit.converse);
+# no work_query override because a filed visit IS the demand.
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
-nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Rebuild the subject's slice, prep, hold for the operator."
-# A held visit is live engagement: idle long, don't die under the
-# operator. Visit boundaries — not timeouts — are the release valve.
+nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Rebuild the subject's state, prep, hold for the operator."
+# Long idle: a held visit is a live sitting; visit boundaries, not
+# timeouts, end it. Open visits outlive sessions either way — a dead
+# session's visit returns to the pool and a fresh session resumes it
+# from the record.
 idle_timeout = "8h"
 min_active_sessions = 0
-max_active_sessions = 2
+# Bounds concurrently LIVE sittings only (provider memory), not how many
+# visits may be open — open visits queue and hold their place
+# indefinitely at zero session cost.
+max_active_sessions = 6
