@@ -51,7 +51,10 @@ cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
   "session peek") printf '%s\n' "${STUB_PANE:-deacon idle prompt}" ;;
-  "bd list")      printf '%s\n' "$*" >> "$ARGV_LOG"; printf '%s\n' "${STUB_WISPS:-[]}" ;;
+  # `${STUB_WISPS-[]}` deliberately omits the colon: UNSET means "the ordinary
+  # empty list", but an explicitly EMPTY value means "this probe answered
+  # nothing at all", which is the unreadable-read case and a different verdict.
+  "bd list")      printf '%s\n' "$*" >> "$ARGV_LOG"; printf '%s\n' "${STUB_WISPS-[]}" ;;
   "mail send")    shift; printf 'MAIL\n' >> "$MAIL_LOG"; printf '%s\n' "$*" >> "$MAIL_BODY"
                   # The ATTEMPT is recorded above before the outcome below, so a
                   # scenario can tell "never tried" from "tried and refused".
@@ -80,9 +83,14 @@ reset() {
     mkdir -p "$TMP/state"; : > "$TMP/mail"; : > "$TMP/body"; : > "$TMP/argv"
 }
 # One pass against the CURRENT state dir (for tests that vary input per pass).
+# BOOT_HEALTH_DB pins the ledger the wisp query runs against. It is set here for
+# the same reason the script demands it: with no ledger to pin, the probe is
+# unreadable and the script correctly declines to report — so a harness that
+# left it unset would exercise only that refusal and never the detector.
 pass() {
     env BOOT_HEALTH_STATE_DIR="$TMP/state" MAIL_LOG="$TMP/mail" MAIL_BODY="$TMP/body" \
-        ARGV_LOG="$TMP/argv" "$@" bash "$SCRIPT" >/dev/null 2>&1 || true
+        ARGV_LOG="$TMP/argv" BOOT_HEALTH_DB="$TMP/fake.beads" "$@" \
+        bash "$SCRIPT" >/dev/null 2>&1 || true
 }
 run() { # $1=passes, rest=env assignments
     local passes="$1"; shift
@@ -94,7 +102,8 @@ run() { # $1=passes, rest=env assignments
 # is only observable in the script's own output and in `last_report`.
 pass_out() {
     env BOOT_HEALTH_STATE_DIR="$TMP/state" MAIL_LOG="$TMP/mail" MAIL_BODY="$TMP/body" \
-        ARGV_LOG="$TMP/argv" "$@" bash "$SCRIPT" 2>&1 || true
+        ARGV_LOG="$TMP/argv" BOOT_HEALTH_DB="$TMP/fake.beads" "$@" \
+        bash "$SCRIPT" 2>&1 || true
 }
 # grep -c prints 0 AND exits 1 on no match, so take the count from the
 # assignment and let the failure branch supply the value, never both.
@@ -127,6 +136,11 @@ has   "$ARGV" "--type=molecule" "wisp query is typed to molecule"
 has   "$ARGV" "--limit=0"       "wisp query is uncapped (a cap goes dead silently, under load only)"
 hasnt "$ARGV" "--status"        "wisp query carries NO --status filter (tk-qdhnd: hides the poured-but-unclaimed wisp)"
 hasnt "$ARGV" "--all"           "wisp query does NOT include closed rows (a burned wisp must not read as fresh)"
+# The LEDGER, which is the third way this same query false-empties: `gc bd`
+# resolves its store from the invoking rig and ignores BEADS_DIR, so an unpinned
+# query reads the rig ledger while the deacon's wisps live in the town one.
+# Correct flags are not enough if they are aimed at the wrong ledger.
+has   "$ARGV" "--db"            "wisp query PINS the ledger (unpinned reads the rig store, never the town one)"
 
 # --- (c) A STALE wisp reports, and names the status it OBSERVED. -------------
 run 2 STUB_WISPS="$(wisp open 7200)" BOOT_HEALTH_REPORT_AFTER=0
@@ -244,6 +258,45 @@ eq "$(mails)" 1 "unconfirmed: not resent this episode"
 reset
 pass STUB_PANE='' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
 eq "$(mailed)" no "an unreadable pane exits quietly rather than reporting"
+
+# --- (j) An UNREADABLE wisp probe is not evidence of a wedge. ----------------
+# An empty ARRAY is an answer — no wisp is live — and still reports. No JSON at
+# all is not an answer: the call failed, timed out, or was aimed at a ledger
+# that cannot serve it. Those two were previously identical, and both read as
+# "deacon wedged" — which is how a misdirected query becomes a bogus report
+# about a perfectly healthy deacon.
+reset
+pass STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0
+pass STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0
+eq "$(mailed)" no "an unreadable wisp probe does NOT report (no evidence, no verdict)"
+
+reset
+pass STUB_WISPS='error: connection refused' BOOT_HEALTH_REPORT_AFTER=0
+pass STUB_WISPS='error: connection refused' BOOT_HEALTH_REPORT_AFTER=0
+eq "$(mailed)" no "a non-JSON wisp answer does NOT report"
+
+# ...and the distinction is real: the SAME two passes with a well-formed empty
+# array DO report. Without this pair, (j) could pass by never reporting at all.
+reset
+pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+eq "$(mailed)" yes "an EMPTY ARRAY is an answer — no live wisp still reports"
+
+# With no ledger to pin, the probe cannot be read, so the script declines rather
+# than reporting a wedge it never observed. The city vars are cleared too: the
+# ledger falls back to $CITY/.beads, so leaving them set would quietly re-pin it
+# from the ambient environment and this case would never be reached.
+noledger_pass() {
+    env -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT \
+        BOOT_HEALTH_STATE_DIR="$TMP/state" MAIL_LOG="$TMP/mail" MAIL_BODY="$TMP/body" \
+        ARGV_LOG="$TMP/argv" BOOT_HEALTH_DB="" STUB_WISPS='[]' \
+        BOOT_HEALTH_REPORT_AFTER=0 bash "$SCRIPT" >/dev/null 2>&1 || true
+}
+reset
+noledger_pass
+noledger_pass
+eq "$(mailed)" no "no ledger to pin: declines to report rather than guessing"
+eq "$(grep -c -- '--db' "$TMP/argv" || true)" 0 "no ledger to pin: the query is not even attempted"
 
 echo
 echo "boot-health.test.sh: $PASS passed, $FAIL failed"

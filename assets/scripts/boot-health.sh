@@ -53,6 +53,12 @@ BUSY_RE="${BOOT_HEALTH_BUSY:-esc to interrupt|ctrl.{0,2}c to (stop|interrupt)}"
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime/packs/gc-toolkit}"
+
+# WHICH LEDGER the wisp query runs against, pinned explicitly — see step 2.
+# `gc bd` resolves its store from the invoking rig and ignores BEADS_DIR, so an
+# unpinned query reads the RIG ledger while the deacon's patrol wisps live in the
+# TOWN one. Overridable so the hermetic test can pin a fake.
+WISP_DB="${BOOT_HEALTH_DB:-${CITY:+$CITY/.beads}}"
 STATE_DIR="${BOOT_HEALTH_STATE_DIR:-${DEFAULT_STATE_DIR:-${TMPDIR:-/tmp}/gc}/boot-health}"
 STATE="$STATE_DIR/state"
 STATE_MAGIC='#boot-health-state-v2'
@@ -157,8 +163,26 @@ fi
 # `status` is read off the row, never filtered on: `open` (poured, not yet
 # claimed) and `in_progress` (claimed and cooking) are both healthy. `updated_at`
 # is the freshness signal; status is context for the human reading the report.
-WISPS="$(gc_call gc bd list --assignee="$DEACON" --type=molecule --include-infra \
-    --limit=0 --json | sed -n '/^[[{]/,$p')"
+#   * The STORE must be pinned, and that is a third false-empty from a third
+#     direction. `gc bd` resolves its ledger from the invoking RIG and ignores
+#     BEADS_DIR, so an unpinned query reads the rig ledger (tk-*) while the
+#     deacon's patrol wisps live in the town ledger (lx-*) — [] on every pass,
+#     from a query whose flags are all correct. Measured 2026-08-09T06:24Z
+#     against the live city: unpinned -> [], `--db $CITY/.beads` -> lx-wisp-koog
+#     in_progress. Until this was pinned the probe had never once seen a wisp,
+#     and only the pane-changed signal kept the detector from crying wolf.
+WISP_READ_OK=0
+WISPS=""
+if [ -n "$WISP_DB" ]; then
+    WISPS="$(gc_call gc bd list --db "$WISP_DB" --assignee="$DEACON" --type=molecule \
+        --include-infra --limit=0 --json | sed -n '/^[[{]/,$p')"
+    # A well-formed array — even an EMPTY one — is an answer, and an empty answer
+    # is real evidence that no wisp is live. No JSON at all is NOT: the call
+    # failed, timed out, or was misdirected. Telling those apart is the whole
+    # point, because they were previously identical and both read as "wedged".
+    printf '%s' "$WISPS" | jq -e 'type == "array"' >/dev/null 2>&1 && WISP_READ_OK=1
+fi
+
 WISP_AGE=""
 WISP_STATUS=""
 if [ -n "$WISPS" ]; then
@@ -181,6 +205,17 @@ fi
 
 if [ -n "$WISP_AGE" ] && [ "$WISP_AGE" -lt "$WISP_FRESH" ]; then
     clear_state "$NEW_HASH"   # wisp young: cycling normally, whatever its status
+    exit 0
+fi
+
+# The probe could not be READ — no ledger to pin, or no parseable answer from
+# one. That is not evidence about the deacon, and reporting it as coldness is
+# the cry-wolf failure this order exists to avoid: a detector that reports on
+# evidence it never gathered gets ignored, which costs more than no detector.
+# Record the pane so movement is still tracked, and wait for a readable pass.
+if [ "$WISP_READ_OK" -eq 0 ]; then
+    pane_hash="$NEW_HASH"
+    save_state
     exit 0
 fi
 
