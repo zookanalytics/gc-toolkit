@@ -796,10 +796,21 @@ Run `gc doctor --json` for a workspace health check. **Always
 pass `--json`.** The default human output puts a count in the headline
 message (e.g. "1 session model finding(s)") and hides the actionable
 list of findings in `CheckResult.Details` unless `--verbose` is set.
-The `--json` mode is the stable machine-readable contract: every check
-emits `{name, status, message, details[], fix_hint, fix_error,
-fix_attempted, fixed}` regardless of verbosity, plus a `summary`
-object with `{passed, warned, failed, fixed}`. Schema:
+
+**Schema — verified against the live payload (2026-08-09).** Findings
+live in **`.results[]`** — one entry per check, well over a hundred of
+them. Every entry carries
+`{name, status, severity, message}`; `details[]` and `fix_hint` appear
+only when non-empty, so do not index them unconditionally. `status` is
+`ok` / `warning` / `error`, and `severity` (e.g. `blocking`) is what
+separates a blocking finding from an advisory one — pair it with the
+top-level `blocking_failed` count. The counts are **flat top-level
+fields** — `{ok, passed, warned, failed, blocking_failed, fixed}` — NOT
+a nested `summary` object. There is **no `.checks` key**: `jq '.checks[]'`
+returns nothing (or `Cannot iterate over null`) instead of erroring, so
+a stale path reads as "clean" no matter how bad the city is. Trust the
+payload over this paragraph, and re-verify the field names if the drift
+guard below ever fires. Upstream reference:
 `engdocs/contributors/doctor-json.md`.
 
 gc-toolkit local delta: keep `--json` parsing. Base v14 uses a bare
@@ -807,23 +818,107 @@ gc-toolkit local delta: keep `--json` parsing. Base v14 uses a bare
 (needs the structured findings list to decide whether to act or
 escalate).
 
+**Run it ONCE and reuse the payload.** Every invocation re-runs every
+check, and that takes ~4 minutes under normal city load — so bound it at
+300s or more. A 120s bound returns rc 124 and an empty file, which is
+indistinguishable from a wedged data plane and invites a false CRITICAL.
+`gc doctor` exits **1** when findings exist; that is normal, not failure.
+
 ```bash
-gc doctor --json | jq '.checks[] | select(.status != "ok")'
+DOCTOR_JSON=$(timeout 300 gc doctor --json); DOCTOR_RC=$?
 ```
 
-That filter shows only the warning/error checks with their full
-details — the actionable subset.
+**Fail loud on schema drift — never degrade to empty.** Assert the key
+exists before filtering. A missing key means a `gc` upgrade changed the
+contract, and that must break this step visibly: silently, it converts
+the patrol into a duplicate-escalation generator, because an empty
+finding set and an empty dedupe result both read as "nothing to see".
+
+```bash
+if [ "$DOCTOR_RC" != 0 ] && [ "$DOCTOR_RC" != 1 ]; then
+  gc mail send mayor/ -s "DOCTOR: gc doctor --json did not complete [HIGH]" -m "rc=$DOCTOR_RC at a 300s bound (124 = the bound fired), payload empty or partial. NOT reporting clean."
+elif ! printf '%s' "$DOCTOR_JSON" | jq -e 'has("results")' >/dev/null 2>&1; then
+  KEYS=$(printf '%s' "$DOCTOR_JSON" | jq -c 'keys' 2>/dev/null)
+  [ -n "$KEYS" ] || KEYS="unparseable (payload is not JSON)"
+  gc mail send mayor/ -s "DOCTOR: --json schema drift, no .results key [HIGH]" -m "Top-level keys: $KEYS. Findings moved or the payload is not JSON; the findings filter is now blind and this step reports clean regardless of city state."
+fi
+```
+
+Either branch is a **failed** health scan, not a clean one. Do not run
+the findings filter on a payload you could not validate.
+
+**The actionable subset** — only the warning/error checks, with their
+full details:
+
+```bash
+printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.status != "ok")'
+```
+
+**Cross-check every finding against existing beads before escalating —
+city-wide.** This step is what produces the "not tracked by any open
+bead" claim, so the claim is worth exactly as much as the search behind
+it. Two ways that search goes wrong, both observed live (2026-08-09:
+four findings escalated as untracked, two of them already tracked; one
+finding escalated three times in two hours):
+
+- **`gc bd list` cannot do it.** `bd list` has no text query — it filters
+  by status/assignee/label. The text search is `bd search`, which matches
+  titles and IDs; `--desc-contains` adds description text.
+- **Your rig store is not the city.** Your default store is one rig's
+  `.beads`, but doctor findings are city-wide and the tracking bead
+  usually lives in the rig that owns the defect. `census-owner-liveness`
+  was tracked by `gc-ddvrx` in the **gascity** store — unreachable from a
+  gc-toolkit-scoped query no matter how well written.
+
+Search every store, HQ included, for each finding's `name`:
+
+```bash
+FINDING=<the .results[].name you are about to escalate>
+gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do
+  HITS=$(bd --db "$RP/.beads" search "$FINDING" --status open --limit 20 --json 2>/dev/null | jq -r '.[]? | .id + " [" + .status + "] " + .title')
+  if [ -n "$HITS" ]; then echo "== $RP"; echo "$HITS"; fi
+done
+```
+
+**Widen past the check name.** That search is the cheap first pass, not
+the whole dedupe — a tracking bead may describe the same defect in
+different words, so a name miss is not proof of absence. Before calling a
+finding untracked, also search the distinctive nouns from its `.message`
+and `.details[]` (a path, a bead id, a check it cites), and search
+description text as well as titles (`--desc-contains "<term>"`).
+
+An **open** match means the finding is tracked: do not escalate it, note
+it as already-tracked with the bead id. A **closed** match (`--status
+all`) is context rather than suppression — the finding recurred after
+someone closed it, which belongs in the escalation.
+
+**Do not re-escalate what you already escalated.** Your own escalation
+trail is the durable record and it surfaces in the same search: HQ holds
+your prior `DOCTOR: ...` mail beads, which is why the
+`census-owner-liveness` search above also returns `lx-wisp-wu2tl`, an
+earlier escalation of that same finding. If a finding's only matches are
+your own prior escalations, it has already been raised — do not send it
+again unless the finding materially changed, and if you do, say
+"re-reporting, previously escalated as <id>".
 
 **For simple findings:** Act directly (e.g., stale lock files, temp
 directory cleanup, broken worktrees via `gc doctor --fix`).
 
 **For complex findings:** Escalate to mayor. Forward the offending
-check object verbatim (it includes `name`, `message`, `details`, and
-any `fix_hint`) so the mayor sees the same machine-readable context:
+check object verbatim (it includes `name`, `status`, `severity`,
+`message`, and any `details` / `fix_hint`) so the mayor sees the same
+machine-readable context —
+from the payload you already captured, not a fresh 4-minute run:
 ```bash
-finding=$(gc doctor --json | jq '.checks[] | select(.name=="<check>")')
+finding=$(printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.name=="<check>")')
 gc mail send mayor/ -s "DOCTOR: <finding>" -m "$finding"
 ```
+
+State what the dedupe found, not just what the check said: the bead ids
+when there are matches, and "no open bead in any store matches <name> or
+<terms searched>" when there are none. An unqualified "not tracked by any
+open bead" backed by `bd list` is the claim that cost three mayor
+round-trips — if you did not run the city-wide search, do not make it.
 
 Close this step after check."""
 
