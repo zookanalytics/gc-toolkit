@@ -140,6 +140,40 @@ done
 # match is deliberately anchored rather than a loose `*refinery*` substring: a false
 # positive here quiesces a LIVE molecule (see the fail-closed note below), so only
 # an assignee that IS a refinery may satisfy it.
+#
+# AND A FOURTH SHAPE, the longest-lived of them all (tk-rlm94): an anchor PARKED
+# FOR A HUMAN DECISION — a refinery hold, a duplicate disposition, an escalation.
+# It reads
+#
+#     status=blocked   merge_result=<absent>   assignee=<empty>   gc.routed_to=human
+#
+# and all three predicates above miss it, each for its own reason:
+#
+#   - `blocked` is not `closed`;
+#   - merge_result was NEVER stamped, because the refinery held the bead BEFORE
+#     dispatching a review or opening a PR (deliberately: reviewing a branch that
+#     cannot land burns a signoff round). The tk-yxlqb assignee fallback was built
+#     for exactly this "the refinery has not stamped yet" case, but it covers only
+#     the beat BEFORE the stamp, not a hold that never reaches one;
+#   - the assignee is EMPTY, because parking to a human clears it — the `*.refinery`
+#     match needs the refinery to still HOLD the bead, and a held bead has been
+#     handed onward.
+#
+# So the husk stayed armed, and unlike the earlier gaps — windows measured in
+# minutes — this one lasts as long as a human takes to decide. Observed on root
+# tk-i3noh / anchor tk-8d9u9: the same dead load-context step (tk-vgxlu) was
+# re-offered five times in ~40 minutes, one fresh full-context polecat per session
+# restart, each re-deriving "already done, take no action".
+#
+# CONJOINED, never bare `blocked`. That conjunction is what keeps this fail-closed,
+# and the script's own warning is why: a false positive strips the assignee off
+# steps a running polecat still has to claim and drains it mid-implementation. Bare
+# `blocked` is reachable TRANSIENTLY by a live session — the escalation path sets
+# blocked before it drains — whereas `blocked` + routed-to-human is only ever
+# written by a pass that has already routed the work OFF the pool. `human` is
+# matched exactly, the one spelling every writer uses (reconcile-merged-prs.sh,
+# check-set-heal.sh, mol-refinery-patrol.toml); an unrecognized variant simply
+# leaves the husk armed, which is the cheap failure.
 is_terminal_anchor() {
   case "$1" in                       # $1 = anchor status
     closed) return 0 ;;
@@ -149,6 +183,9 @@ is_terminal_anchor() {
   esac
   case "${3##*/}" in                 # $3 = anchor assignee, minus any <rig>/ prefix
     refinery|*.refinery) return 0 ;;
+  esac
+  case "$4" in                       # $4 = anchor metadata["gc.routed_to"]
+    human) [ "$1" = blocked ] && return 0 ;;
   esac
   return 1
 }
@@ -251,10 +288,14 @@ while IFS= read -r root; do
     unresolved=$((unresolved + 1)); continue
   fi
 
+  # ONE read, four fields. `gc.routed_to` rides along in the same call the other
+  # three already come from (tk-rlm94) — the park predicate needs it, and reading
+  # it separately would let the two halves of one verdict describe two different
+  # observations of the anchor.
   ainfo=$(gc bd show "$anchor" --json 2>/dev/null \
-    | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")|\(.assignee // "")"' 2>/dev/null)
-  astatus=""; amerge=""; aassignee=""
-  IFS='|' read -r astatus amerge aassignee <<< "$ainfo"
+    | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")|\(.assignee // "")|\(.metadata["gc.routed_to"] // "")"' 2>/dev/null)
+  astatus=""; amerge=""; aassignee=""; arouted=""
+  IFS='|' read -r astatus amerge aassignee arouted <<< "$ainfo"
   # Every real bead carries a status, so an empty one means the READ failed (bead
   # gone, jq error, Dolt hiccup) rather than "an anchor with no status". Fail
   # closed on it, same as an unresolved anchor.
@@ -263,8 +304,8 @@ while IFS= read -r root; do
     unresolved=$((unresolved + 1)); continue
   fi
 
-  adesc="status=$astatus merge_result=${amerge:-none} assignee=${aassignee:-none}"
-  if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee"; then
+  adesc="status=$astatus merge_result=${amerge:-none} assignee=${aassignee:-none} routed_to=${arouted:-none}"
+  if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee" "$arouted"; then
     echo "quiesce-completed-workflows: root $root — anchor $anchor still live ($adesc); left alone"
     roots_live=$((roots_live + 1)); continue
   fi
