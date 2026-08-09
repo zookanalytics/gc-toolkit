@@ -20,8 +20,16 @@ max_active_sessions = 2
 # Share the polecat prompt by reference instead of carrying a near-duplicate.
 # The "<pack>//<subpath>" form resolves against the imported gastown pack's
 # cache dir (resolvePackQualifiedAgentPaths, gascity
-# internal/config/compose.go); an unknown pack fails config load rather than
-# silently falling back to the default agent prompt. inject_fragments must be
+# internal/config/pack_qualified_path.go, called from compose.go); an unknown
+# OR ambiguous pack name fails config load rather than silently falling back
+# to the default agent prompt. Settled against the resolver in tk-5wdy8 —
+# but note what it does NOT check: the pack NAME is validated, the subpath is
+# joined onto the pack dir with no existence test. A gastown reorganisation
+# that moved this file would leave the reference resolving to a path that is
+# not there, and a non-strict `gc prime` renders the 16-line generic stub for
+# it with exit 0 and an empty stderr. doctor/check-agent-prompt-integrity is
+# the guard for that; it asserts resolution, not spelling.
+# inject_fragments must be
 # kept in sync by hand with the polecat patch's inject_fragments_append in
 # pack.toml — there is no automatic propagation — so this pool gets identical
 # convoy, non-impl-done, and file-work-records guidance.
