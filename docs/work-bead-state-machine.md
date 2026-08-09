@@ -731,6 +731,32 @@ decided "merged" (say a merge skill *and* an independent poll), they could
 the PR. One writer, one backstop that only observes, no place for "did it land"
 to drift.
 
+### When the close itself is refused
+
+Recording a landing means closing the bead, and `bd close` is assignee-gated: it
+compares the bead's **assignee** string to the **actor** string it derives for the
+calling process. Those two routinely carry the *same principal in two renderings*
+— work is routed under the canonical dotted mailbox identity (`$GC_AGENT`,
+`<rig>/<pack>.<role>`) while the actor comes from `$GC_SESSION_NAME`
+(`<rig>--<pack>__<role>`) — so a refinery closing an anchor it **holds** is
+refused. That refusal is an encoding artifact, not an ownership conflict, and
+nothing about it self-heals: every pass takes the identical path and fails
+identically, so the anchor stays **open over a merged PR** — `open` meaning
+unlanded is then false, in the dangerous direction (shipped work invisible to
+every "what shipped" query). Observed on signal-loom PR#518: ~40 consecutive
+failures across 40 minutes, finally closed by hand.
+
+Both writers (`merge-skill.sh`, `reconcile-merged-prs.sh`) therefore retry that
+one refusal **once with `--force`**, gated on parsing the assignee/actor pair out
+of the message and proving the two normalize to a single principal. It is
+deliberately not a blanket `--force`: the same flag also overrides a genuinely
+foreign assignee and an open-children hold, and forcing past either would defeat
+the gate. Every other refusal fails as before — and because it fails *forever*,
+the observer counts the consecutive failing passes on the anchor
+(`close_failures`) and **escalates** at a threshold rather than retrying behind a
+summary line that reads `0 closed ... 1 skipped`. A retry loop that can never
+succeed must not look like routine skipping.
+
 ## Abandonment: we close our own PRs
 
 A PR can end without merging — the approach was wrong, the work was superseded,

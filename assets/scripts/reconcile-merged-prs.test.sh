@@ -854,8 +854,13 @@ case "$2" in
           staled=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_STALED" 2>/dev/null | tail -1)
           gatehead=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATEHEAD" 2>/dev/null | tail -1)
           gatenopool=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATENOPOOL" 2>/dev/null | tail -1)
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s"}}' \
-                  "$id" "$pr" "$prurl" "$forkpr" "$forkprurl" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$cset" "$cmark" "$mhold" "$rhold")
+          # The consecutive close-failure count and its escalation marker, replayed
+          # the same way — this is what makes "N consecutive PASSES" testable at
+          # all: pass 2 has to read what pass 1 wrote.
+          cfails=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSEFAILS" 2>/dev/null | tail -1)
+          cesc=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSEESC" 2>/dev/null | tail -1)
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s","close_failures":"%s","close_escalated":"%s"}}' \
+                  "$id" "$pr" "$prurl" "$forkpr" "$forkprurl" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$cset" "$cmark" "$mhold" "$rhold" "$cfails" "$cesc")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -945,8 +950,33 @@ case "$2" in
     printf '{"id":"%s"}\n' "$cid" ;;
   close)
     id="$3"; shift 3
-    reason=""
-    while [ $# -gt 0 ]; do case "$1" in --reason) reason="$2"; shift 2 ;; *) shift ;; esac; done
+    reason=""; cforce=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --reason) reason="$2"; shift 2 ;;
+        --force)  cforce=1; shift ;;
+        *) shift ;;
+      esac
+    done
+    # Model bd's assignee gate, which is what wedges close-on-land.
+    #
+    # $FAKE_CLOSE_REFUSE holds `id<TAB>message` rows: closing that id WITHOUT
+    # --force fails with that message and records NOTHING, exactly as the real
+    # refusal does; WITH --force it succeeds. That asymmetry is what makes "did
+    # the override actually fire?" observable rather than inferred.
+    #
+    # $FAKE_CLOSE_HARDFAIL rows fail for BOTH forms — the refusals the override
+    # must never paper over (a genuinely foreign assignee, an open-children hold)
+    # and the wedge the consecutive-failure escalation exists for.
+    if [ -z "$cforce" ] && [ -s "${FAKE_CLOSE_REFUSE:-/dev/null}" ]; then
+      cmsg=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSE_REFUSE" 2>/dev/null | head -1)
+      if [ -n "$cmsg" ]; then printf 'Error: %s\n' "$cmsg" >&2; exit 1; fi
+    fi
+    if [ -s "${FAKE_CLOSE_HARDFAIL:-/dev/null}" ]; then
+      cmsg=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSE_HARDFAIL" 2>/dev/null | head -1)
+      if [ -n "$cmsg" ]; then printf 'Error: %s\n' "$cmsg" >&2; exit 1; fi
+    fi
+    [ -z "$cforce" ] || printf '%s\n' "$id" >> "$FAKE_FORCED"
     printf '%s\n' "$id" >> "$FAKE_CLOSED"
     printf '%s\t%s\n' "$id" "$reason" >> "$FAKE_CLOSELOG" ;;
   update)
@@ -986,6 +1016,15 @@ case "$2" in
     if [ -n "${FAKE_ROUTE_WRONG:-}" ]; then
       upd_args="${upd_args//--set-metadata gc.routed_to=$FAKE_ROUTE_WRONG/--set-metadata gc.routed_to=${FAKE_ROUTE_WRONG_TO:-rig/rig.wrong-pool}}"
     fi
+    # An UNSET is two args (`--unset-metadata close_failures`), so it cannot be
+    # matched by the `key=value` loop below. Replay it as an empty value, which is
+    # what a later `tail -1` read of the log must see for the anchor to look clean.
+    case "$*" in
+      *"--unset-metadata close_failures"*)  printf '%s\t\n' "$id" >> "$FAKE_CLOSEFAILS" ;;
+    esac
+    case "$*" in
+      *"--unset-metadata close_escalated"*) printf '%s\t\n' "$id" >> "$FAKE_CLOSEESC" ;;
+    esac
     printf '%s\t%s\n' "$id" "$upd_args" >> "$FAKE_UPDATES"
     case "$*" in
       *merge_result=abandoned*)  printf '%s\n' "$id" >> "$FAKE_ABANDONED" ;;
@@ -999,6 +1038,8 @@ case "$2" in
     child_pr=""; child_branch=""
     for a in "$@"; do
       case "$a" in
+        close_failures=*)  printf '%s\t%s\n' "$id" "${a#close_failures=}" >> "$FAKE_CLOSEFAILS" ;;
+        close_escalated=*) printf '%s\t%s\n' "$id" "${a#close_escalated=}" >> "$FAKE_CLOSEESC" ;;
         stale_base_head=*) printf '%s\t%s\n' "$id" "${a#stale_base_head=}" >> "$FAKE_STALED" ;;
         stale_gate_nopool_head=*) printf '%s\t%s\n' "$id" "${a#stale_gate_nopool_head=}" >> "$FAKE_GATENOPOOL" ;;
         stale_gate_head=*) printf '%s\t%s\n' "$id" "${a#stale_gate_head=}" >> "$FAKE_GATEHEAD" ;;
@@ -1125,8 +1166,15 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_GH_DEFAULT="$TMP/ghdefault" FAKE_IGNORE_REPO="$TMP/ignorerepo" \
        FAKE_GH_HOST="$TMP/ghhost" \
        FAKE_APIWHERE="$TMP/apiwhere" FAKE_VIEWWHERE="$TMP/viewwhere" \
-       FAKE_APIHOST="$TMP/apihost"
+       FAKE_APIHOST="$TMP/apihost" \
+       FAKE_CLOSE_REFUSE="$TMP/closerefuse" FAKE_CLOSE_HARDFAIL="$TMP/closehard" \
+       FAKE_FORCED="$TMP/forced" FAKE_CLOSEFAILS="$TMP/closefails" \
+       FAKE_CLOSEESC="$TMP/closeesc"
 mkdir -p "$TMP/bodies"
+# The close gate is INERT by default: every scenario above this point closes
+# cleanly, and only the identity-encoding runs at the end arm these.
+: > "$TMP/closerefuse"; : > "$TMP/closehard"; : > "$TMP/forced"
+: > "$TMP/closefails"; : > "$TMP/closeesc"
 : > "$TMP/repofail"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/ghhost"
 # WHERE each GitHub call went, recorded for every run in the file: `gh api` by the
 # repository its REST path names, `gh pr view` by the repository the call resolved
@@ -2893,6 +2941,163 @@ eq "$(sort -u "$TMP/apihost" | tr '\n' ' ')" "github.com " \
 # (ID-INV) the observer never merges anything, identity drift or not.
 eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \
    "(ID-INV) the observer reached no merge path across every identity run"
+
+# --- (CL) the close gate: identity-ENCODING override + the wedge escalation. ---
+# `bd close` is assignee-gated and compares the ASSIGNEE string to the ACTOR
+# string. Those two routinely carry the same principal in two renderings —
+# `<rig>/<pack>.<role>` ($GC_AGENT) vs `<rig>--<pack>__<role>` ($GC_SESSION_NAME)
+# — so a refinery closing an anchor it HOLDS is refused, and nothing self-heals:
+# every pass takes the identical path and fails identically, so the anchor never
+# closes over a MERGED PR. Under close-on-land that is the false record in the
+# dangerous direction (merged work whose bead still reads open) and it was nearly
+# invisible: signal-loom PR#518 retried ~40 times behind a `0 closed ... 1 skipped`
+# summary that read normal.
+#
+# Two behaviours, and the second is what keeps the first honest:
+#   (CL1) the ENCODING refusal is retried once with --force and the anchor closes;
+#   (CL2) a refusal that is NOT that — a genuinely foreign assignee, an
+#         open-children hold — is NEVER forced past, because --force there would
+#         paper over exactly what the gate is for;
+#   (CL3) and since (CL2) means some closes still fail forever, a close that keeps
+#         failing ESCALATES at the threshold instead of retrying silently.
+#
+#   cl-ENC   601 MERGED, close refused on the encoding mismatch -> forced, CLOSED
+#   cl-FRGN  602 MERGED, close refused with a FOREIGN assignee  -> NOT closed
+#   cl-KIDS  603 MERGED, close refused for open children        -> NOT closed
+#   cl-OK    604 MERGED, close succeeds outright                -> CLOSED, unforced
+reset_close() {
+  : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mail"
+  : > "$TMP/mailbody"; : > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"
+  : > "$TMP/wakes"; : > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"
+  : > "$TMP/closelog"; : > "$TMP/children"; : > "$TMP/openprs"; : > "$TMP/livex"
+  : > "$TMP/dead"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/ghhost"
+  : > "$TMP/forced"; : > "$TMP/closefails"; : > "$TMP/closeesc"
+  : > "$TMP/closerefuse"; : > "$TMP/closehard"
+  printf '%s\n' \
+    'cl-ENC|601|main' \
+    'cl-FRGN|602|main' \
+    'cl-KIDS|603|main' \
+    'cl-OK|604|main' \
+    > "$TMP/anchors"
+  printf '%s\n' \
+    '601|MERGED|2026-08-09T04:58:00Z|false|6016016016016016|main|polecat/cl-ENC|head601|MERGEABLE|CLEAN' \
+    '602|MERGED|2026-08-09T04:58:00Z|false|6026026026026026|main|polecat/cl-FRGN|head602|MERGEABLE|CLEAN' \
+    '603|MERGED|2026-08-09T04:58:00Z|false|6036036036036036|main|polecat/cl-KIDS|head603|MERGEABLE|CLEAN' \
+    '604|MERGED|2026-08-09T04:58:00Z|false|6046046046046046|main|polecat/cl-OK|head604|MERGEABLE|CLEAN' \
+    > "$TMP/prs"
+  # The refusals, transcribed from bd's own format string:
+  #   cannot close %s: assignee is %q, actor is %q; reclaim or use --force to override
+  # cl-ENC is ONE principal in two encodings; cl-FRGN is two different principals
+  # (polecat vs refinery) wearing the same message shape — which is exactly why
+  # matching the message alone would be a blanket --force.
+  printf 'cl-ENC\tcannot close cl-ENC: assignee is "signal-loom/gc-toolkit.refinery", actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override\n' \
+    > "$TMP/closerefuse"
+  printf 'cl-FRGN\tcannot close cl-FRGN: assignee is "signal-loom/gc-toolkit.polecat", actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override\ncl-KIDS\tcannot close cl-KIDS: 2 open child issue(s); close children first or use --force to override\n' \
+    > "$TMP/closehard"
+}
+CLRUN() { bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL"; }
+
+reset_close
+OUTCL1="$(CLRUN 2>"$TMP/errcl1")"
+
+# (CL1) the wedge itself: refused on encoding, retried with --force, CLOSED.
+has '^cl-ENC$' "$TMP/closed" \
+  && ok "(CL1) identity-ENCODING refusal -> anchor still CLOSES (the PR#518 wedge)" \
+  || bad "(CL1) encoding-refused anchor must close via --force (got: $OUTCL1)"
+has '^cl-ENC$' "$TMP/forced" \
+  && ok "(CL1) ...and it closed via --force, not by the refusal silently passing" \
+  || bad "(CL1) the close must have gone through --force"
+grep -q 'Merged to main at 60160160' "$TMP/closelog" \
+  && ok "(CL1) the forced close carries the same reason as a clean one" \
+  || bad "(CL1) forced close reason (got: $(cat "$TMP/closelog"))"
+# The override must be VISIBLE. A --force that fires silently is indistinguishable
+# from a clean close, which is how an override becomes a habit nobody audits.
+has 'identity-ENCODING mismatch' "$TMP/errcl1" \
+  && ok "(CL1) the retry is logged, so an override that fired is auditable" \
+  || bad "(CL1) the --force retry must be logged (got: $(cat "$TMP/errcl1"))"
+hasin "$OUTCL1" '1 identity-encoding forced closes' \
+  && ok "(CL1) the summary line counts the forced close" \
+  || bad "(CL1) summary must count forced closes (got: $OUTCL1)"
+
+# (CL2) NOT a blanket --force. Both of these refusals are REAL, and both would be
+# overridden by matching on "the close failed" — or even on the message shape, for
+# cl-FRGN, whose message is character-for-character the same form as cl-ENC's.
+has '^cl-FRGN$' "$TMP/closed" \
+  && bad "(CL2) a GENUINELY foreign assignee must never be forced past" \
+  || ok "(CL2) foreign assignee -> NOT closed (the ownership gate still holds)"
+has '^cl-FRGN$' "$TMP/forced" \
+  && bad "(CL2) --force must not be attempted on a foreign assignee" \
+  || ok "(CL2) ...and --force was never even attempted for it"
+has '^cl-KIDS$' "$TMP/closed" \
+  && bad "(CL2) an open-children hold must never be forced past" \
+  || ok "(CL2) open-children refusal -> NOT closed"
+has '^cl-KIDS$' "$TMP/forced" \
+  && bad "(CL2) --force must not be attempted on an open-children hold" \
+  || ok "(CL2) ...and --force was never even attempted for it"
+# Positive control: a clean close still closes, and is NOT counted as forced.
+has '^cl-OK$' "$TMP/closed" \
+  && ok "(CL2-CTL) an unrefused close still closes normally" \
+  || bad "(CL2-CTL) control anchor must close (got: $OUTCL1)"
+has '^cl-OK$' "$TMP/forced" \
+  && bad "(CL2-CTL) an unrefused close must not report as forced" \
+  || ok "(CL2-CTL) ...and it is not counted as a forced close"
+
+# (CL3) the wedge does not spin silently. cl-FRGN and cl-KIDS fail every pass by
+# construction, so they are the standing case for "a retry loop that can never
+# succeed must not look like routine skipping". The count is per-anchor and
+# durable; the escalation fires ONCE at the threshold (default 3).
+eq "$(awk -F'\t' '$1=="cl-FRGN"{print $2}' "$TMP/closefails" | tail -1)" "1" \
+   "(CL3) pass 1 records close_failures=1"
+eq "$(grep -c 'will not close over merged PR#602' "$TMP/mail")" "0" \
+   "(CL3) ...and does NOT escalate yet (one blip is not a wedge)"
+
+OUTCL2="$(CLRUN 2>/dev/null)"
+eq "$(awk -F'\t' '$1=="cl-FRGN"{print $2}' "$TMP/closefails" | tail -1)" "2" \
+   "(CL3) pass 2 counts CONSECUTIVELY (2), reading what pass 1 wrote"
+eq "$(grep -c 'will not close over merged PR#602' "$TMP/mail")" "0" \
+   "(CL3) ...still below the threshold, still quiet"
+
+OUTCL3="$(CLRUN 2>"$TMP/errcl3")"
+eq "$(awk -F'\t' '$1=="cl-FRGN"{print $2}' "$TMP/closefails" | tail -1)" "3" \
+   "(CL3) pass 3 reaches the threshold"
+eq "$(grep -c 'will not close over merged PR#602' "$TMP/mail")" "1" \
+   "(CL3) ...and ESCALATES to mayor — the ~40 silent retries of PR#518 cannot recur"
+eq "$(grep -c 'will not close over merged PR#603' "$TMP/mail")" "1" \
+   "(CL3) each wedged anchor escalates on its own count (cl-KIDS too)"
+hasin "$OUTCL3" '2 wedged-close escalations' \
+  && ok "(CL3) the summary line reports the wedge instead of burying it in 'skipped'" \
+  || bad "(CL3) summary must count wedged-close escalations (got: $OUTCL3)"
+grep -q 'gc bd close cl-FRGN' "$TMP/mailbody" \
+  && ok "(CL3) the escalation hands the operator the command that shows the refusal" \
+  || bad "(CL3) escalation body should name the by-hand close command"
+
+# ONCE, not once per pass: the counter keeps rising, so an unbounded arm would
+# re-mail the same stuck anchor on every wake — the noise that gets escalations
+# muted, which is how the silence returns by another route.
+OUTCL4="$(CLRUN 2>/dev/null)"
+eq "$(awk -F'\t' '$1=="cl-FRGN"{print $2}' "$TMP/closefails" | tail -1)" "4" \
+   "(CL3) pass 4 keeps counting"
+eq "$(grep -c 'will not close over merged PR#602' "$TMP/mail")" "1" \
+   "(CL3) ...but does NOT re-escalate — the marker bounds it to one mail per wedge"
+
+# (CL4) the counter is CLEARED by the pass that finally closes the anchor: a
+# landed anchor still carrying close_failures reads as stuck to the next human,
+# and a stale close_escalated would bound an escalation for a future, unrelated
+# wedge.
+: > "$TMP/closehard"          # the refusal is lifted (children closed / bead reclaimed)
+OUTCL5="$(CLRUN 2>/dev/null)"
+has '^cl-FRGN$' "$TMP/closed" \
+  && ok "(CL4) once the real refusal is lifted, the anchor closes on the next pass" \
+  || bad "(CL4) anchor must close after the refusal is lifted (got: $OUTCL5)"
+eq "$(awk -F'\t' '$1=="cl-FRGN"{print $2}' "$TMP/closefails" | tail -1)" "" \
+   "(CL4) ...and the close-failure counter is cleared with it"
+eq "$(awk -F'\t' '$1=="cl-FRGN"{print $2}' "$TMP/closeesc" | tail -1)" "" \
+   "(CL4) ...as is the escalation marker (a future wedge escalates on its own merit)"
+
+# (CL-INV) none of this reached a merge path. The observer has no merge authority,
+# and an arm that closes beads more aggressively must not acquire one.
+eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \
+   "(CL-INV) the close gate ran no merge for any anchor"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

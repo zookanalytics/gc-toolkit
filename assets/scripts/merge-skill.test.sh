@@ -1358,8 +1358,32 @@ case "$2" in
     printf '[%s]\n' "$out" ;;
   close)
     id="$3"; shift 3
-    reason=""
-    while [ $# -gt 0 ]; do case "$1" in --reason) reason="$2"; shift 2 ;; *) shift ;; esac; done
+    reason=""; cforce=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --reason) reason="$2"; shift 2 ;;
+        --force)  cforce=1; shift ;;
+        *) shift ;;
+      esac
+    done
+    # Model bd's assignee gate — the refusal that wedges the record half.
+    #
+    # $FAKE_CLOSE_REFUSE holds `id<TAB>message` rows: closing that id WITHOUT
+    # --force fails with that message and records NOTHING, exactly as the real
+    # refusal does; WITH --force it succeeds. That asymmetry is what makes "did
+    # the override actually fire?" observable rather than inferred.
+    #
+    # $FAKE_CLOSE_HARDFAIL rows fail for BOTH forms — the refusals the override
+    # must never paper over (a genuinely foreign assignee, an open-children hold).
+    if [ -z "$cforce" ] && [ -s "${FAKE_CLOSE_REFUSE:-/dev/null}" ]; then
+      cmsg=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSE_REFUSE" 2>/dev/null | head -1)
+      if [ -n "$cmsg" ]; then printf 'Error: %s\n' "$cmsg" >&2; exit 1; fi
+    fi
+    if [ -s "${FAKE_CLOSE_HARDFAIL:-/dev/null}" ]; then
+      cmsg=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSE_HARDFAIL" 2>/dev/null | head -1)
+      if [ -n "$cmsg" ]; then printf 'Error: %s\n' "$cmsg" >&2; exit 1; fi
+    fi
+    [ -z "$cforce" ] || printf '%s\n' "$id" >> "$FAKE_FORCED"
     printf '%s\n' "$id" >> "$FAKE_CLOSED"
     printf '%s\t%s\n' "$id" "$reason" >> "$FAKE_CLOSELOG" ;;
   update)
@@ -1388,7 +1412,12 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/child
        FAKE_IGNORE_REPO="$TMP/ignorerepo" FAKE_REPOFAIL="$TMP/repofail" \
        FAKE_GH_HOST="$TMP/ghhost" FAKE_CHILD_FAIL="$TMP/childfail" \
        FAKE_ANCHORS_FINAL="$TMP/anchors-final" FAKE_SHOWCOUNT="$TMP/showcount" \
-       FAKE_SHOWFAIL_FINAL="$SHOWFAIL_FINAL_IDS"
+       FAKE_SHOWFAIL_FINAL="$SHOWFAIL_FINAL_IDS" \
+       FAKE_CLOSE_REFUSE="$TMP/closerefuse" FAKE_CLOSE_HARDFAIL="$TMP/closehard" \
+       FAKE_FORCED="$TMP/forced"
+# The close gate is INERT by default: every scenario above the close-gate runs at
+# the end of this file closes cleanly.
+: > "$TMP/closerefuse"; : > "$TMP/closehard"; : > "$TMP/forced"
 
 # --- Run 1: validate -> merge -> record for the one ready PR, hold the rest. --
 # stdout carries the per-anchor hold/merge decisions; the tool-error paths (an
@@ -2509,6 +2538,101 @@ eq "$(wc -l < "$TMP/closed" | tr -d ' ')" "0" "(ID4) unresolvable origin -> no a
 grep -q "cannot resolve this checkout's origin repository" "$TMP/errid4" \
   && ok "(ID4) the refusal is reported for an operator" \
   || bad "(ID4) must warn that the origin is unresolvable (err: $(cat "$TMP/errid4"))"
+
+# --- (CL) the record half's close gate: identity-ENCODING override. -----------
+# `bd close` is assignee-gated and compares the ASSIGNEE string to the ACTOR
+# string. Those two routinely carry the SAME principal in two renderings —
+# `<rig>/<pack>.<role>` ($GC_AGENT) vs `<rig>--<pack>__<role>` ($GC_SESSION_NAME)
+# — so this script, which closes the anchor IT JUST MERGED, is refused on a bead
+# it holds. That is the worst place to lose the close: the PR has LANDED and the
+# ledger does not say so, and the observer then inherits an anchor it cannot close
+# either (signal-loom PR#518: ~40 consecutive failing passes, forced by hand).
+#
+# Retry once with --force on THAT refusal only. Not a blanket --force: the same
+# flag also overrides a genuinely foreign assignee and an open-children hold, and
+# forcing past either would paper over exactly what the gate is for — those keep
+# falling through to "close failed; observer records next pass", which is correct
+# (the observer counts them and escalates).
+reset_close_ms() {
+  : > "$TMP/closed"; : > "$TMP/merged"; : > "$TMP/mergedrec"; : > "$TMP/closelog"
+  : > "$TMP/mergedwhere"; : > "$TMP/ghdefault"; : > "$TMP/ignorerepo"; : > "$TMP/repofail"
+  : > "$TMP/ghhost"; : > "$TMP/forced"; : > "$TMP/closerefuse"; : > "$TMP/closehard"
+  cat > "$TMP/anchors" <<'A'
+bead-CLEAN|301|main|codex|green@HEAD301
+A
+}
+
+# (CL1) the encoding refusal: the PR merges, the close is refused, and the anchor
+# still ends up CLOSED via the one-shot --force.
+reset_close_ms
+printf 'bead-CLEAN\tcannot close bead-CLEAN: assignee is "signal-loom/gc-toolkit.refinery", actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override\n' \
+  > "$TMP/closerefuse"
+OUTCL1="$(bash "$SCRIPT" 2>"$TMP/errcl1")"
+has '^301$' "$TMP/merged" \
+  && ok "(CL1) the merge itself is unaffected by the close gate" \
+  || bad "(CL1) PR#301 must still merge (got: $OUTCL1)"
+has '^bead-CLEAN$' "$TMP/closed" \
+  && ok "(CL1) identity-ENCODING refusal -> the merged anchor still CLOSES" \
+  || bad "(CL1) encoding-refused anchor must close via --force (got: $OUTCL1)"
+has '^bead-CLEAN$' "$TMP/forced" \
+  && ok "(CL1) ...and it closed via --force, not by the refusal silently passing" \
+  || bad "(CL1) the close must have gone through --force"
+has 'identity-ENCODING mismatch' "$TMP/errcl1" \
+  && ok "(CL1) the retry is logged, so an override that fired is auditable" \
+  || bad "(CL1) the --force retry must be logged (got: $(cat "$TMP/errcl1"))"
+hasin "$OUTCL1" '1 identity-encoding forced closes' \
+  && ok "(CL1) the summary line counts the forced close" \
+  || bad "(CL1) summary must count forced closes (got: $OUTCL1)"
+has '^bead-CLEAN$' "$TMP/mergedrec" \
+  && ok "(CL1) merge_result=merged is still recorded after the forced close" \
+  || bad "(CL1) the record half must complete after a forced close"
+
+# (CL2) NOT a blanket --force. This refusal has the SAME message shape as (CL1)'s
+# and names two DIFFERENT principals (polecat vs refinery) — matching the shape
+# alone, or matching "the close failed", would force past a real ownership gate.
+# The merge still happened, so the anchor is left for the observer, which is the
+# existing documented behaviour for a failed close.
+reset_close_ms
+printf 'bead-CLEAN\tcannot close bead-CLEAN: assignee is "signal-loom/gc-toolkit.polecat", actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override\n' \
+  > "$TMP/closehard"
+OUTCL2="$(bash "$SCRIPT" 2>"$TMP/errcl2")"
+has '^bead-CLEAN$' "$TMP/closed" \
+  && bad "(CL2) a GENUINELY foreign assignee must never be forced past" \
+  || ok "(CL2) foreign assignee -> NOT closed (the ownership gate still holds)"
+has '^bead-CLEAN$' "$TMP/forced" \
+  && bad "(CL2) --force must not be attempted on a foreign assignee" \
+  || ok "(CL2) ...and --force was never even attempted for it"
+has 'MERGED but close failed' "$TMP/errcl2" \
+  && ok "(CL2) it falls through to the existing hand-off: the observer records it next pass" \
+  || bad "(CL2) must report the failed close for the observer (got: $(cat "$TMP/errcl2"))"
+
+# (CL3) an open-children hold — the OTHER refusal that suggests --force in its own
+# text, and the one a message-keyword match would most easily swallow.
+reset_close_ms
+printf 'bead-CLEAN\tcannot close bead-CLEAN: 2 open child issue(s); close children first or use --force to override\n' \
+  > "$TMP/closehard"
+OUTCL3="$(bash "$SCRIPT" 2>/dev/null)"
+has '^bead-CLEAN$' "$TMP/closed" \
+  && bad "(CL3) an open-children hold must never be forced past" \
+  || ok "(CL3) open-children refusal -> NOT closed"
+has '^bead-CLEAN$' "$TMP/forced" \
+  && bad "(CL3) --force must not be attempted on an open-children hold" \
+  || ok "(CL3) ...and --force was never even attempted for it"
+
+# (CL-CTL) positive control: with no refusal armed the same anchor closes cleanly
+# and is NOT reported as forced. Without this, (CL2)/(CL3) could pass because the
+# fixture never closed anything at all.
+reset_close_ms
+OUTCLC="$(bash "$SCRIPT" 2>/dev/null)"
+has '^bead-CLEAN$' "$TMP/closed" \
+  && ok "(CL-CTL) an unrefused close still closes normally" \
+  || bad "(CL-CTL) control anchor must close (got: $OUTCLC)"
+has '^bead-CLEAN$' "$TMP/forced" \
+  && bad "(CL-CTL) an unrefused close must not report as forced" \
+  || ok "(CL-CTL) ...and it is not counted as a forced close"
+hasin "$OUTCLC" '0 identity-encoding forced closes' \
+  && ok "(CL-CTL) ...and the summary says so" \
+  || bad "(CL-CTL) summary must report zero forced closes (got: $OUTCLC)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
