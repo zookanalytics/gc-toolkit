@@ -295,9 +295,19 @@ approving review wherever the anchor requires it (named in `check_set`, or armed
 automatically by `signoff_dismissed` — tk-5niup; the review must be at the LIVE
 head and from a TRUSTED non-city approver — the `MERGE_TRUSTED_APPROVERS`
 allowlist when set, otherwise admin/maintain/write repo permission — see
-`[vars.check_set]`), and `mergeStateStatus == CLEAN`
-(CI + base-current + no-conflict, plus approval only where the repo requires a
-review); then ONE MORE READ of the anchor, immediately before the merge, because
+`[vars.check_set]`), and GitHub reports the PR mergeable — `mergeStateStatus ==
+CLEAN` (CI + base-current + no-conflict, plus approval only where the repo
+requires a review), or `UNSTABLE` with every REQUIRED status check green at the
+validated head. `UNSTABLE` means "a check is red and nothing required is
+blocking" — a failing REQUIRED check is reported as `BLOCKED` instead — so
+treating it as a gate zeroed merge throughput outright on any rig whose CI is red
+but whose checks are not required, which is the shape every rig here is in
+(tk-zuoys). It is resolved against the required contexts protecting the base
+branch (rulesets + classic branch protection, unioned), never against the state
+name: zero required contexts makes the red checks advisory and the PR mergeable,
+a red or missing required context still holds, and protection that cannot be READ
+holds too. Every other state — `BLOCKED`, `BEHIND`, `DIRTY`, `UNKNOWN` — holds as
+before; then ONE MORE READ of the anchor, immediately before the merge, because
 every gate above ran against metadata read several round-trips earlier and another
 writer can park it (`merge_hold`), re-gate a `check.<name>`, close it or retarget
 it in that window without ever moving the head — an unreadable re-read holds, since

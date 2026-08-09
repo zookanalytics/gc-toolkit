@@ -980,6 +980,70 @@ if [ "$1" = "api" ]; then
       pobj=$(printf '{"permission":"%s"}' "$perm")
       if [ -n "$JQF" ]; then printf '%s\n' "$pobj" | jq -r "$JQF"
       else printf '%s\n' "$pobj"; fi ;;
+    */rules/branches/*)
+      # RULESETS — the modern required-check mechanism, and the first of the two
+      # sources the UNSTABLE arm unions. `$FAKE_PROTECTION` is `<branch>|<ruleset
+      # contexts>|<classic contexts>`; a branch with no row is a repository with
+      # no rules at all, which GitHub answers `[]` — a DEFINITE empty, not a
+      # failure. `$FAKE_PROTFAIL` lists branches whose protection cannot be read
+      # (the non-admin 404 / a 5xx), the case that must hold rather than reduce to
+      # "nothing required".
+      #
+      # Pinned through gh_api_origin like every other REST read here, so the
+      # host/repository identity is the reviews arm's story, not this one's.
+      rbranch="${PATH_ARG#*/rules/branches/}"
+      if [ -n "${FAKE_PROTFAIL:-}" ] \
+         && printf '%s\n' "$FAKE_PROTFAIL" | tr ',' '\n' | grep -qxF "$rbranch"; then
+        printf '{"message":"Not Found","status":"404"}\n'; exit 1
+      fi
+      rctx=""
+      if [ -n "${FAKE_PROTECTION:-}" ] && [ -f "$FAKE_PROTECTION" ]; then
+        while IFS='|' read -r pbranch prules pclassic; do
+          [ "$pbranch" = "$rbranch" ] || continue
+          rctx="$prules"; break
+        done < "$FAKE_PROTECTION"
+      fi
+      # A `pull_request` rule always rides along: a branch can be governed by a
+      # ruleset that requires review and NO status check, which is exactly what
+      # both live rigs configure — so "has rules" must never imply "has required
+      # checks".
+      # `%s\n`, not `%s`: `jq -R` reads LINES, and an empty string with no newline
+      # is zero lines, so the program never runs and the arm emits nothing at all
+      # — which the script correctly reads as an unreadable payload rather than as
+      # "no required contexts". A branch that requires nothing is the shape both
+      # live rigs are in, so getting it wrong here would hide the whole fix.
+      robj=$(printf '%s\n' "$rctx" | jq -R -c 'split(",") | map(select(length > 0)) |
+        [ {type: "pull_request", parameters: {required_approving_review_count: 1}} ]
+        + (if length == 0 then []
+           else [ {type: "required_status_checks",
+                   parameters: {required_status_checks: map({context: .})}} ] end)')
+      if [ -n "$JQF" ]; then printf '%s\n' "$robj" | jq -r "$JQF"
+      else printf '%s\n' "$robj"; fi ;;
+    */branches/*)
+      # The BRANCH object — classic branch protection's required_status_checks,
+      # read from `repos/{o}/{r}/branches/{branch}` rather than from
+      # `.../branches/{branch}/protection`, which needs ADMIN. Both `contexts`
+      # (legacy) and `checks[].context` (current) are emitted, since a repository
+      # can report either and the script unions them.
+      bbranch="${PATH_ARG#*/branches/}"
+      if [ -n "${FAKE_PROTFAIL:-}" ] \
+         && printf '%s\n' "$FAKE_PROTFAIL" | tr ',' '\n' | grep -qxF "$bbranch"; then
+        printf '{"message":"Not Found","status":"404"}\n'; exit 1
+      fi
+      cctx=""
+      if [ -n "${FAKE_PROTECTION:-}" ] && [ -f "$FAKE_PROTECTION" ]; then
+        while IFS='|' read -r pbranch prules pclassic; do
+          [ "$pbranch" = "$bbranch" ] || continue
+          cctx="$pclassic"; break
+        done < "$FAKE_PROTECTION"
+      fi
+      bobj=$(printf '%s\n' "$cctx" | jq -R -c --arg b "$bbranch" \
+        'split(",") | map(select(length > 0)) as $c
+         | {name: $b, protected: (($c | length) > 0),
+            protection: {required_status_checks:
+              {contexts: $c, checks: ($c | map({context: ., app_id: null}))}}}')
+      if [ -n "$JQF" ]; then printf '%s\n' "$bobj" | jq -r "$JQF"
+      else printf '%s\n' "$bobj"; fi ;;
     */reviews*)
       prnum="${PATH_ARG%%\?*}"; prnum="${prnum%/reviews}"; prnum="${prnum##*/}"
       # $FAKE_APIFAIL stages a PAGINATED read that dies part way: `gh --paginate`
@@ -1025,7 +1089,7 @@ case "$1 $2" in
     num="$3"; shift 3
     fields=""
     while [ $# -gt 0 ]; do case "$1" in --json) fields="$2"; shift 2 ;; *) shift ;; esac; done
-    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus reviewDecision "
+    SUPPORTED=" number state mergedAt mergeCommit isDraft baseRefName headRefName headRefOid headRepository headRepositoryOwner isCrossRepository url title body author additions deletions mergeable mergeStateStatus reviewDecision statusCheckRollup "
     OIFS="$IFS"; IFS=','
     for f in $fields; do
       case "$SUPPORTED" in
@@ -1034,6 +1098,38 @@ case "$1 $2" in
       esac
     done
     IFS="$OIFS"
+    # The head's check ROLLUP, read only by the UNSTABLE arm's required-check
+    # evaluation. `$FAKE_ROLLUP` is `<pr>|<kind>|<name>|<value>`: kind `status`
+    # emits a StatusContext (context + state), anything else a CheckRun (name +
+    # conclusion), and an EMPTY value emits a CheckRun still running — conclusion
+    # null — which is the shape a required check that has not reported yet takes.
+    # `$FAKE_ROLLUPFAIL` lists PRs whose rollup read FAILS, and only for a call
+    # that actually asks for the field: the main PR read must stay unaffected.
+    case ",$fields," in
+      *,statusCheckRollup,*)
+        if [ -n "${FAKE_ROLLUPFAIL:-}" ] \
+           && printf '%s\n' "$FAKE_ROLLUPFAIL" | tr ',' '\n' | grep -qxF "$num"; then
+          echo "could not read rollup" >&2; exit 1
+        fi ;;
+    esac
+    ROLLUP="[]"
+    if [ -n "${FAKE_ROLLUP:-}" ] && [ -f "$FAKE_ROLLUP" ]; then
+      relems=""
+      while IFS='|' read -r rpr rkind rname rval; do
+        [ "$rpr" = "$num" ] || continue
+        if [ "$rkind" = "status" ]; then
+          robj=$(jq -nc --arg n "$rname" --arg v "$rval" \
+            '{__typename:"StatusContext", context:$n, state:$v}')
+        else
+          robj=$(jq -nc --arg n "$rname" --arg v "$rval" \
+            '{__typename:"CheckRun", name:$n,
+              status:(if $v == "" then "IN_PROGRESS" else "COMPLETED" end),
+              conclusion:(if $v == "" then null else $v end)}')
+        fi
+        if [ -z "$relems" ]; then relems="$robj"; else relems="$relems,$robj"; fi
+      done < "$FAKE_ROLLUP"
+      ROLLUP="[$relems]"
+    fi
     if [ "$RESOLVED" != "github.com/acme/repo" ]; then
       # A foreign repository's PR of the same number — foreign by owner/repo, by
       # HOST, or by both. Deliberately CLEAN, OPEN and non-draft: nothing but the
@@ -1064,8 +1160,9 @@ case "$1 $2" in
       jq -n --arg s "$state" --argjson d "$isdraft" --arg b "$base" \
             --arg h "$headoid" --arg m "$mss" --arg mg "$mergeable" --arg o "$oid" \
             --arg n "$num" --arg rd "$rd" --arg hr "$headref" --arg hrepo "$headrepo" \
-            --argjson x "$cross" \
+            --argjson x "$cross" --argjson scr "$ROLLUP" \
         '{state:$s, isDraft:$d, baseRefName:$b, headRefOid:$h, headRefName:$hr,
+          statusCheckRollup:$scr,
           headRepositoryOwner:(if $hrepo=="-" then null else {login:($hrepo | split("/")[0])} end),
           headRepository:(if $hrepo=="-" then null else {name:($hrepo | split("/")[1])} end),
           isCrossRepository:$x, reviewDecision:$rd,
@@ -1414,7 +1511,14 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" FAKE_CHILDREN="$TMP/child
        FAKE_ANCHORS_FINAL="$TMP/anchors-final" FAKE_SHOWCOUNT="$TMP/showcount" \
        FAKE_SHOWFAIL_FINAL="$SHOWFAIL_FINAL_IDS" \
        FAKE_CLOSE_REFUSE="$TMP/closerefuse" FAKE_CLOSE_HARDFAIL="$TMP/closehard" \
-       FAKE_FORCED="$TMP/forced"
+       FAKE_FORCED="$TMP/forced" \
+       FAKE_PROTECTION="$TMP/protection" FAKE_ROLLUP="$TMP/rollup"
+# Branch protection and check rollups are INERT for every scenario above the
+# required-set run at the end of this file: no branch requires a status check and
+# no PR reports one, which is the shape every pre-existing case was written
+# against (and the shape both live rigs are actually in). $FAKE_PROTFAIL and
+# $FAKE_ROLLUPFAIL are unset — no read fails.
+: > "$TMP/protection"; : > "$TMP/rollup"
 # The close gate is INERT by default: every scenario above the close-gate runs at
 # the end of this file closes cleanly.
 : > "$TMP/closerefuse"; : > "$TMP/closehard"; : > "$TMP/forced"
@@ -2633,6 +2737,176 @@ has '^bead-CLEAN$' "$TMP/forced" \
 hasin "$OUTCLC" '0 identity-encoding forced closes' \
   && ok "(CL-CTL) ...and the summary says so" \
   || bad "(CL-CTL) summary must report zero forced closes (got: $OUTCLC)"
+
+# =============================================================================
+# (RQ) UNSTABLE is decided on the REQUIRED set, not on the composite (tk-zuoys).
+# =============================================================================
+# The bug: the terminal gate held on `mergeStateStatus != CLEAN`, which treats
+# UNSTABLE (advisory checks red, nothing gating) exactly like BLOCKED (a required
+# check or review genuinely gating). On a repository whose CI is red but whose
+# checks are not REQUIRED, no PR can ever reach CLEAN — so refinery throughput
+# for that rig is permanently zero, and the hold is this script's own, not
+# GitHub's. Both live rigs are in exactly that shape: zero required status checks
+# on main (gc-toolkit's main is governed by a ruleset that requires a REVIEW and
+# no check; gascity's has no rules at all).
+#
+# The fix is not "merge unless BLOCKED" — that is the composite over again, and
+# it would land a red REQUIRED check on any repository that grows one. UNSTABLE
+# is resolved against the REQUIRED CONTEXTS for the base branch, evaluated at the
+# validated head, with an unreadable protection API holding.
+#
+# Run against fully ISOLATED fixtures — its own anchors, PRs, ledger files — so
+# the eighteen-merge invariant of the main run is untouched.
+: > "$TMP/merged-rq"; : > "$TMP/closed-rq"
+cat > "$TMP/prs-rq" <<'P'
+401|OPEN|false|main|HEAD401|UNSTABLE|MERGEABLE|a401c0ffee000001
+402|OPEN|false|guarded|HEAD402|UNSTABLE|MERGEABLE|a402c0ffee000002
+403|OPEN|false|guarded|HEAD403|UNSTABLE|MERGEABLE|
+404|OPEN|false|guarded|HEAD404|UNSTABLE|MERGEABLE|
+405|OPEN|false|dark|HEAD405|UNSTABLE|MERGEABLE|
+406|OPEN|false|main|HEAD406|BLOCKED|MERGEABLE|
+407|OPEN|false|guarded|HEAD407|UNSTABLE|MERGEABLE|
+408|OPEN|false|main|HEAD408|UNSTABLE|MERGEABLE|
+409|OPEN|false|guarded|HEAD409|UNSTABLE|MERGEABLE|
+P
+cat > "$TMP/anchors-rq" <<'A'
+bead-RQADVISORY|401|main|codex|green@HEAD401
+bead-RQGREEN|402|guarded|codex|green@HEAD402
+bead-RQRED|403|guarded|codex|green@HEAD403
+bead-RQMISSING|404|guarded|codex|green@HEAD404
+bead-RQDARK|405|dark|codex|green@HEAD405
+bead-RQBLOCKED|406|main|codex|green@HEAD406
+bead-RQPENDING|407|guarded|codex|green@HEAD407
+bead-RQNOAPPROVAL|408|main|codex,approval|green@HEAD408
+bead-RQROLLUPFAIL|409|guarded|codex|green@HEAD409
+A
+# `guarded` requires ci/build via a RULESET and ci/legacy via CLASSIC protection —
+# both sources in one branch, so a fix that reads only one of them fails here.
+# `main` is governed but requires no status check (the live-rig shape); `dark` is
+# listed in $FAKE_PROTFAIL below and cannot be read at all.
+cat > "$TMP/protection-rq" <<'PR'
+guarded|ci/build|ci/legacy
+main||
+PR
+# Advisory checks are red on EVERY PR here — that is what makes them UNSTABLE.
+cat > "$TMP/rollup-rq" <<'R'
+401|check|advisory-lint|FAILURE
+401|check|advisory-e2e|FAILURE
+402|check|ci/build|SUCCESS
+402|status|ci/legacy|SUCCESS
+402|check|advisory-lint|FAILURE
+403|check|ci/build|FAILURE
+403|status|ci/legacy|SUCCESS
+404|check|ci/build|SUCCESS
+404|check|advisory-lint|FAILURE
+407|check|ci/build|
+407|status|ci/legacy|SUCCESS
+408|check|advisory-lint|FAILURE
+409|check|ci/build|SUCCESS
+409|status|ci/legacy|SUCCESS
+R
+OUT_RQ="$(FAKE_ANCHORS="$TMP/anchors-rq" FAKE_PRS="$TMP/prs-rq" \
+          FAKE_PROTECTION="$TMP/protection-rq" FAKE_ROLLUP="$TMP/rollup-rq" \
+          FAKE_PROTFAIL="dark" FAKE_ROLLUPFAIL="409" \
+          FAKE_CLOSED="$TMP/closed-rq" FAKE_MERGED="$TMP/merged-rq" \
+          FAKE_MERGEDREC="$TMP/mergedrec-rq" FAKE_CLOSELOG="$TMP/closelog-rq" \
+          bash "$SCRIPT" 2>/dev/null)"
+
+# (RQ1) THE FIX: red ADVISORY checks with ZERO required contexts -> MERGED. This
+# is gascity PR#105, the PR a plain `gh pr merge --squash` took with no override.
+has '^401$' "$TMP/merged-rq" \
+  && ok "(RQ1) UNSTABLE + zero required contexts -> merged (advisory red gates nothing)" \
+  || bad "(RQ1) advisory-red PR must merge (got: $OUT_RQ)"
+hasin "$OUT_RQ" "PR#401 is UNSTABLE but base 'main' requires NO status checks" \
+  && ok "(RQ1) ...and the decision names the required set it was made from" \
+  || bad "(RQ1) the UNSTABLE decision must be legible (got: $OUT_RQ)"
+
+# (RQ2) red ADVISORY beside GREEN REQUIRED checks -> MERGED, and both sources of
+# required contexts are honoured: ci/build comes from the ruleset, ci/legacy from
+# classic protection. A fix that read only one source would still merge this PR,
+# so (RQ3) below is what actually pins the union.
+has '^402$' "$TMP/merged-rq" \
+  && ok "(RQ2) UNSTABLE + every required check green -> merged" \
+  || bad "(RQ2) required-green PR must merge (got: $OUT_RQ)"
+hasin "$OUT_RQ" "PR#402 is UNSTABLE but every REQUIRED status check on base 'guarded' is green" \
+  && ok "(RQ2) ...and the log names the contexts that were evaluated" \
+  || bad "(RQ2) the required-green decision must name the contexts (got: $OUT_RQ)"
+
+# (RQ3) THE OTHER SIDE OF THE FIX — a red REQUIRED check still HOLDS. Without
+# this the change would have removed a gate rather than repaired one.
+has '^403$' "$TMP/merged-rq" \
+  && bad "(RQ3) a red REQUIRED check must never merge" \
+  || ok "(RQ3) UNSTABLE + red REQUIRED check -> merge held"
+hasin "$OUT_RQ" "PR#403 is UNSTABLE and a REQUIRED status check is not green at head HEAD403: ci/build(RED)" \
+  && ok "(RQ3) ...and the hold names WHICH required check was red" \
+  || bad "(RQ3) the hold must name the failing required context (got: $OUT_RQ)"
+
+# (RQ4) a required context with NO rollup entry at all is MISSING, never green.
+# ci/legacy is required by classic protection and simply absent from 404's
+# rollup — the shape a fix that unioned only the ruleset source would sail past.
+has '^404$' "$TMP/merged-rq" \
+  && bad "(RQ4) a required context absent from the rollup must not count as green" \
+  || ok "(RQ4) UNSTABLE + required check MISSING from the rollup -> merge held"
+hasin "$OUT_RQ" "PR#404 .*ci/legacy(MISSING)" \
+  && ok "(RQ4) ...and the hold names it as MISSING, not as failing" \
+  || bad "(RQ4) a missing required context must be reported as MISSING (got: $OUT_RQ)"
+
+# (RQ5) FAIL CLOSED: protection that cannot be read holds. Unreadable is
+# indistinguishable from "nothing required", and guessing merges a red required
+# check — the one error here that cannot be retried away.
+has '^405$' "$TMP/merged-rq" \
+  && bad "(RQ5) unreadable protection must hold, not merge" \
+  || ok "(RQ5) UNSTABLE + unreadable required set -> merge held (fail closed)"
+hasin "$OUT_RQ" "PR#405 is UNSTABLE and the REQUIRED status-check set for base 'dark' could not be read" \
+  && ok "(RQ5) ...and the hold says the protection read is what failed" \
+  || bad "(RQ5) the unreadable-protection hold must say so (got: $OUT_RQ)"
+
+# (RQ6) BLOCKED is untouched: something is genuinely gating (a required check, a
+# required review), and it holds exactly as it always did.
+has '^406$' "$TMP/merged-rq" \
+  && bad "(RQ6) BLOCKED must still hold" \
+  || ok "(RQ6) BLOCKED -> merge held (the composite still decides every other state)"
+hasin "$OUT_RQ" "PR#406 not mergeable yet (mergeStateStatus='BLOCKED'" \
+  && ok "(RQ6) ...and it holds through the generic composite arm" \
+  || bad "(RQ6) BLOCKED must hold through the composite arm (got: $OUT_RQ)"
+
+# (RQ7) a required check that has not REPORTED yet (a CheckRun with no conclusion)
+# is not green either — pending required work must not be merged past.
+has '^407$' "$TMP/merged-rq" \
+  && bad "(RQ7) a pending required check must not merge" \
+  || ok "(RQ7) UNSTABLE + required check still running -> merge held"
+
+# (RQ8) the approval gate is INDEPENDENT of this change and still runs ahead of
+# it: an approval-armed anchor with no approving review holds even though its red
+# checks are purely advisory. The new arm must not become a way around it.
+has '^408$' "$TMP/merged-rq" \
+  && bad "(RQ8) an approval-armed anchor must not merge without an approval" \
+  || ok "(RQ8) UNSTABLE + approval armed + no approving review -> merge held"
+hasin "$OUT_RQ" "PR#408 no external approving review" \
+  && ok "(RQ8) ...and it is the APPROVAL gate that holds it, not the required-set arm" \
+  || bad "(RQ8) the approval hold must fire before the required-set arm (got: $OUT_RQ)"
+
+# (RQ9) the rollup read is fail-closed too: required contexts exist but the head's
+# check rollup cannot be read, so nothing can be shown green.
+has '^409$' "$TMP/merged-rq" \
+  && bad "(RQ9) an unreadable rollup must hold" \
+  || ok "(RQ9) UNSTABLE + unreadable check rollup -> merge held (fail closed)"
+hasin "$OUT_RQ" "PR#409 .*the head's check rollup is unreadable" \
+  && ok "(RQ9) ...and the hold names the rollup read as the failure" \
+  || bad "(RQ9) the unreadable-rollup hold must say so (got: $OUT_RQ)"
+
+# (RQ-INV) exactly two of the nine merged: the two whose required set is
+# established AND satisfied. A fix that relaxed the gate to "merge unless
+# BLOCKED" would land 403, 404, 405, 407 and 409 as well.
+eq "$(wc -l < "$TMP/merged-rq" | tr -d ' ')" "2" \
+   "(RQ-INV) exactly two UNSTABLE PRs merged (401 advisory-only + 402 required-green)"
+
+# (RQ-FS) statusCheckRollup must be a field gh actually supports — the same
+# field-shape guard the approval gate's reads carry. An unknown field would empty
+# the read and hold every UNSTABLE PR on a repository that does require checks.
+gh pr view 401 --json statusCheckRollup >/dev/null 2>&1 \
+  && ok "(RQ-FS) statusCheckRollup is an accepted gh field" \
+  || bad "(RQ-FS) the required-check evaluation's --json field must be accepted"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
