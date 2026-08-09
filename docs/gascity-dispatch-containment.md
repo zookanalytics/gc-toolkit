@@ -79,7 +79,7 @@ Run the block below as a script rather than pasting it into a live shell
 #    recipe exists precisely because you are racing an active dispatch,
 #    so a record is in scope unless it is terminal. `hooked` and
 #    `blocked` are bd's "wip" category and `pinned` its "frozen" one
-#    (internal/beads/native_dolt_store.go:116-121), and a graph node in
+#    (internal/beads/native_dolt_store.go:125-130), and a graph node in
 #    `hooked` is exactly as live as one in `in_progress`
 #    (cmd/gc/cmd_graph.go:482). Filtering to `open,in_progress` silently
 #    drops a hooked root or step from BOTH the clear and the verify —

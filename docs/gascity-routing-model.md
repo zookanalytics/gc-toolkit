@@ -360,10 +360,17 @@ a target that carries a default.
 **Read this together with the duplicate-wisp trap.** That subsection
 teaches that absent routing fields are the *designed* shape for a
 graph.v2 work bead. This is its other half: the same absence on a bead
-meant to be claimed **directly** is always a bug. The two are told apart
-by the same field — `metadata.workflow_id` / `metadata.molecule_id`. A
-directly-offered bead should carry neither; if one is there, the bead
-was slung when it should have been stamped.
+meant to be claimed **directly** is always a bug. What tells the two
+apart is **not** a metadata field: a convoy-first graph.v2 attach writes
+neither `metadata.workflow_id` nor `metadata.molecule_id`, so the
+accidental sling this section describes leaves no fingerprint in either
+one and a check that reads them comes back clean on exactly the case it
+is meant to catch. Use the lookup that subsection gives instead — walk
+the bead's `tracks` edge up to the synthetic input convoy and find the
+workflow root that names it in `gc.input_convoy_id`. A root that
+resolves means the bead was wrapped in a workflow: the designed shape
+for graph.v2 work, and the bug signature for a bead that was supposed to
+be stamped and offered directly.
 
 #### Adjacent — standalone formula launch (`gc sling <target> <formula>`)
 
