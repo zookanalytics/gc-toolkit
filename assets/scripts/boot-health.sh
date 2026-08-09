@@ -85,6 +85,8 @@ save_state() {
     [ "$STATE_OK" = "1" ] || return 0
     local tmp
     tmp="$(mktemp "$STATE_DIR/.bh-tmp.XXXXXX" 2>/dev/null)" || return 0
+    # shellcheck disable=SC2015  # not if-then-else: the rm is the cleanup path
+    # for EITHER failure (write or install), which is exactly what is wanted.
     {
         printf '%s\n' "$STATE_MAGIC"
         printf 'pane_hash=%s\n'   "$pane_hash"
@@ -116,23 +118,58 @@ if [ -n "$pane_hash" ] && [ "$NEW_HASH" != "$pane_hash" ]; then
 fi
 
 # --- 2. patrol wisp ----------------------------------------------------------
-# --include-infra is load-bearing (lx-ody8m): patrol wisps are issue_type
-# molecule, which `bd list` excludes by default, so without it this query
-# returns [] on every pass even while the deacon holds a live wisp. Verified
-# 2026-08-08: with the flag, lx-wisp-j4mqh; without it, 0 rows. That is the
-# defect that made boot's freshness signal dead for its entire service life.
-WISPS="$(gc_call gc bd list --assignee="$DEACON" --status=in_progress --include-infra --json --limit=5 | sed -n '/^[[{]/,$p')"
+# TWO filters false-empty this query against a perfectly healthy deacon, and it
+# has to survive both. An empty result is this detector's failure mode, so every
+# clause here is chosen to widen, never to narrow.
+#
+#   * --include-infra is REQUIRED (lx-ody8m): patrol wisps are issue_type
+#     molecule, which `bd list` excludes by default, so without it this query
+#     returns [] on every pass even while the deacon holds a live wisp. Verified
+#     2026-08-08: with the flag, lx-wisp-j4mqh; without it, 0 rows. That is the
+#     defect that made boot's freshness signal dead for its entire service life.
+#   * NO --status filter, equally REQUIRED: a just-poured wisp is `open` until
+#     the deacon claims it, and the deacon burns the previous wisp BEFORE
+#     claiming the next, so --status=in_progress reports [] across that window.
+#     Reproduced against the live deacon 2026-08-09, mid-patrol both times:
+#     05:01:45Z lx-wisp-tzmo in_progress; 05:06:25Z lx-wisp-222j OPEN, where
+#     --status=in_progress returned [] and this form returned the row.
+#     Dropping the filter does NOT drag in patrol history: `bd list` already
+#     excludes closed rows unless you pass --all (checked against the live
+#     store — two burned wisps, invisible here, visible with --all), so this
+#     widens to live rows only.
+#
+# --type=molecule plus the title match keep the result to patrol wisps, and
+# --limit=0 lifts the default 50-row cap so nothing else the deacon holds can
+# crowd the wisp out — a capped query goes dead silently, under load only, which
+# is exactly when this detector matters most.
+#
+# `status` is read off the row, never filtered on: `open` (poured, not yet
+# claimed) and `in_progress` (claimed and cooking) are both healthy. `updated_at`
+# is the freshness signal; status is context for the human reading the report.
+WISPS="$(gc_call gc bd list --assignee="$DEACON" --type=molecule --include-infra \
+    --limit=0 --json | sed -n '/^[[{]/,$p')"
 WISP_AGE=""
+WISP_STATUS=""
 if [ -n "$WISPS" ]; then
-    NEWEST="$(printf '%s' "$WISPS" | jq -r '[.[]?.updated_at // empty] | max // empty' 2>/dev/null || true)"
-    if [ -n "$NEWEST" ]; then
-        T="$(date -d "$NEWEST" +%s 2>/dev/null || echo "")"
-        [ -n "$T" ] && WISP_AGE=$((NOW - T))
+    # One row — newest by updated_at — carrying both fields, so the status
+    # reported is the status of the timestamp being judged.
+    WISP_ROW="$(printf '%s' "$WISPS" | jq -r '
+        [ .[]? | select((.title // "") == "mol-deacon-patrol") ]
+        | sort_by(.updated_at // "") | last
+        | if . == null then empty
+          else ((.updated_at // "") + "\t" + (.status // "")) end' 2>/dev/null || true)"
+    if [ -n "$WISP_ROW" ]; then
+        NEWEST="${WISP_ROW%%$'\t'*}"
+        WISP_STATUS="${WISP_ROW#*$'\t'}"
+        if [ -n "$NEWEST" ]; then
+            T="$(date -d "$NEWEST" +%s 2>/dev/null || echo "")"
+            [ -n "$T" ] && WISP_AGE=$((NOW - T))
+        fi
     fi
 fi
 
 if [ -n "$WISP_AGE" ] && [ "$WISP_AGE" -lt "$WISP_FRESH" ]; then
-    clear_state "$NEW_HASH"   # wisp burning: cycling normally
+    clear_state "$NEW_HASH"   # wisp young: cycling normally, whatever its status
     exit 0
 fi
 
@@ -152,8 +189,10 @@ DUE=0
 [ "$last_report" -gt 0 ] && [ $((NOW - last_report)) -ge "$REPORT_EVERY" ] && DUE=1
 [ "$DUE" -eq 1 ] || { save_state; exit 0; }
 
-AGE_TXT="no in_progress patrol wisp"
-[ -n "$WISP_AGE" ] && AGE_TXT="newest patrol wisp $((WISP_AGE / 60))m old"
+# Report what was actually observed. The query constrains no status, so saying
+# "no in_progress wisp" would assert something this pass never asked.
+AGE_TXT="no live patrol wisp"
+[ -n "$WISP_AGE" ] && AGE_TXT="newest patrol wisp $((WISP_AGE / 60))m old (status ${WISP_STATUS:-unknown})"
 
 SUMMARY="$DEACON cold for $((COLD / 60))m — no pane change, $AGE_TXT"
 gc_call gc mail send "$REPORT_TO" -s "BOOT_HEALTH: $SUMMARY" -m "boot-health (exec order, no LLM) has seen $DEACON static for $((COLD / 60)) minutes.
@@ -169,9 +208,12 @@ decision until nudge delivery to always/wake_mode=fresh sessions is trustworthy
 mismatch', which would also disable mol-shutdown-dance's pardon path and let it
 kill a healthy deacon. See lx-llzfk and tk-qdhnd.
 
-To inspect:
+To inspect (the wisp query carries no --status on purpose — a poured-but-
+unclaimed wisp is 'open', and filtering on in_progress reports [] against a
+deacon that is patrolling normally):
   gc session peek $DEACON --lines 50
-  gc bd list --assignee=$DEACON --status=in_progress --include-infra --json"
+  gc bd list --assignee=$DEACON --type=molecule --include-infra --limit=0 --json \\
+    | jq '[.[] | select(.title == \"mol-deacon-patrol\") | {id, status, updated_at}]'"
 
 last_report="$NOW"
 save_state
