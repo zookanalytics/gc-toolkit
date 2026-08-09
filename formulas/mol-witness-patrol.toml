@@ -481,10 +481,24 @@ rm -rf <worktree-path> 2>/dev/null  # Fallback
 git worktree prune
 ```
 
-Close any orphaned workflow subtree, then return the bead to pool:
-```bash
-gc workflow delete-source <bead> --apply && gc workflow reopen-source <bead>
-```
+Return the bead to the pool — **by its kind**:
+
+- **A visit (`metadata.task_kind == "visit"`): release the assignee and
+  nothing else.** A visit is a plain routed bead with no worktree, no
+  branch, and no workflow subtree; its metadata (`gc.routed_to`,
+  `gc.continuation_group`, `task_kind`) IS its identity, and the
+  workflow reset below strips it — a recovered visit with no
+  continuation group mis-files for everything that reads groups.
+  ```bash
+  gc bd update <bead> --assignee="" --status=open
+  ```
+  Verify the metadata survived (`gc bd show <bead> --json` — the three
+  keys above still present) before moving on.
+- **Everything else** (molecule/workflow work): close any orphaned
+  workflow subtree, then reopen the source:
+  ```bash
+  gc workflow delete-source <bead> --apply && gc workflow reopen-source <bead>
+  ```
 
 **Step 4: Assess and notify.**
 

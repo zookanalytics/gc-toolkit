@@ -48,7 +48,8 @@ gc bd list --status=open,in_progress --json --limit=0 > "$LIVE"
 gc bd ready --unassigned --limit=0 --json > "$READY"
 if ! jq -e 'type=="array"' "$LIVE" >/dev/null || ! jq -e 'type=="array"' "$READY" >/dev/null; then
   echo "FAIL-SAFE: listing unreadable — sweep aborts, nothing filed"
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=fail --status=closed
+# use the step bead id from YOUR claim — no env var carries it
   exit 0
 fi
 ```
@@ -104,7 +105,8 @@ Record in your notes: counts per class as a funnel, the surviving ids,
 and what the edge check dropped. Then close this step:
 
 ```bash
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed
+# use the step bead id from YOUR claim — no env var carries it
 ```
 """
 
@@ -167,6 +169,7 @@ Zero unnamed waits → file nothing (an empty board is success). Log the
 outcome either way, then close this step:
 
 ```bash
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed
+# use the step bead id from YOUR claim — no env var carries it
 ```
 """

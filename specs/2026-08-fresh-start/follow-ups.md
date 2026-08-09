@@ -53,3 +53,16 @@ future conversation starts warm.
    Revisit when upstream's affinity read-side lands.
 8. **Upstream contribution filing**: seven ready-to-file drafts in
    `upstream-contrib-drafts.md`.
+9. **Hold-lease semantics for converse** (validator round 3, R3-02). A
+   dead converse session's visit is recovered eventually (witness, or
+   `bd reclaim` post-expiry) but not promptly, and the reconciler's
+   reassign path refuses holders by design. Upstream draft #8 carries
+   the runtime fix; the open pack-side question is whether converse
+   should carry an explicit lease/heartbeat obligation once upstream
+   makes heartbeat touch leases. Decide after upstream responds.
+10. **Startup-nudge delivery and wake-budget throttling** (R3-10/11,
+   environment): sessions parked at an unsubmitted prompt read as an
+   idle pool, and `deferred_by_wake_budget` can hold a pool at one
+   live session below its cap. Both are city-runtime behaviors to
+   watch during active-city adoption, not pack defects.
+

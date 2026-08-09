@@ -140,3 +140,28 @@ each occurrence costs consumers a full pass)
 > per occurrence. **Proposed fix:** make the JSON emission read from a
 > consistent snapshot (or serialize/escape output atomically) so a
 > concurrent write cannot tear the payload mid-emit.
+
+## 8. Reconciler retries reassign on a held pool bead whose lease is already expired; `gc bd heartbeat` is a no-op on lease fields
+
+**Repo:** gastownhall/gascity · **severity: high** (a pool built for
+long holds strands its work for unbounded time)
+
+> **Body draft:** When a pool session dies holding an `in_progress`
+> bead, `releaseOrphanedPoolAssignments` retries
+> `cannot reassign <bead>: held by "<pool-instance>" (in_progress); …
+> pass --force … or use bd reclaim` every cycle, indefinitely — while
+> the bead's lease is already expired, so the `bd reclaim` path it
+> names would succeed immediately (verified live:
+> `gc bd reclaim --id <bead> --older-than 0s` released it instantly
+> after ~14 minutes wedged). Because the bead stays assigned, the pool
+> sees no unassigned demand and spawns nobody. Separately, `gc bd
+> heartbeat` does not touch the lease fields, so a live holder cannot
+> extend its lease and a dead holder's lease expiry is the only signal
+> — which the reassign path then ignores. **Proposed fix:** when the
+> holder's lease is expired, have the reconciler take the reclaim path
+> it already recommends in its own error text (or make reassign treat
+> an expired lease as abandonment); and make `heartbeat` refresh the
+> lease so long-holding sessions are distinguishable from dead ones.
+> Context: a conversation-holding pool (sessions deliberately parked
+> `in_progress` for a human) makes both halves load-bearing.
+

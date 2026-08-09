@@ -42,7 +42,8 @@ gc bd list --status=open --json --limit=0 > "$OPEN"
 gc bd list --status=open,in_progress --json --limit=0 > "$LIVE"
 if ! jq -e 'type=="array"' "$OPEN" >/dev/null || ! jq -e 'type=="array"' "$LIVE" >/dev/null; then
   echo "FAIL-SAFE: listing unreadable — recurrence aborts, nothing filed"
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=fail --status=closed
+# use the step bead id from YOUR claim — no env var carries it
   exit 0
 fi
 SUBJECTS=$(jq '[.[] | select((.metadata.task_kind // "") == "triage-subject") | {id, title, scope: (.metadata["triage.scope"] // "")}]' "$OPEN")
@@ -111,6 +112,7 @@ skipped-no-candidates / skipped-no-machine-scope /
 skipped-owned-by-sweep / filed + visit id), then close this step:
 
 ```bash
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed
+# use the step bead id from YOUR claim — no env var carries it
 ```
 """
