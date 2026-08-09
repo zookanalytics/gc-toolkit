@@ -27,8 +27,19 @@
 #                                      rework filed a child) becomes closeable on
 #                                      merge instead of leaking open. Never opens a
 #                                      second PR for a branch that already has one.
-#   no PR + merge_hold/rebase_hold  -> HOLD (operator gate). Nothing is opened for a
-#                                      held anchor; see the gate in the loop.
+#   branch's PR MERGED              -> same flip: it landed, and only anchors in
+#                                      merge_result=pull_request are scanned by the
+#                                      merged-close observer that closes them.
+#   branch's only PR CLOSED-unmerged-> DEAD. Do NOT adopt it: it can never merge, and
+#                                      adopting it moves the anchor out of the only
+#                                      state that retries PR-open. Fall through to
+#                                      OPEN A FRESH PR at the reviewed head, pointing
+#                                      at the one it supersedes (tk-g0hd2).
+#   nothing to adopt + merge_hold
+#   or rebase_hold                  -> HOLD (operator gate). Nothing is opened for a
+#                                      held anchor; see the gate in the loop. Gates
+#                                      the whole create path, so the superseded
+#                                      fall-through above is held here too.
 #   no PR + check.codex green@head  -> open the non-draft PR at the reviewed head,
 #                                      replay the codex verdict as a comment, flip
 #                                      to pull_request.
@@ -194,7 +205,8 @@ PR_LIST_LIMIT=100
 # THREE answers, because the caller's disposition differs by kind. Collapsing the two
 # failures into one is what makes a fork PR either block us forever or, worse, be
 # mistaken for "no PR exists" when the truth was "I could not read the row":
-#   0  CERTIFIED  -> CERT_NUM / CERT_URL / CERT_STATE / CERT_BASE hold trusted fields
+#   0  CERTIFIED  -> CERT_NUM / CERT_URL / CERT_STATE / CERT_BASE / CERT_MERGED_AT /
+#                    CERT_HEAD_OID hold trusted fields
 #   1  NOT OURS   -> a fully readable row that is definitively somebody else's. The
 #                    caller keeps scanning: our PR may be further down the same list.
 #   2  UNREADABLE -> a field is absent, null, or the row will not parse. "I cannot
@@ -204,10 +216,17 @@ CERT_NUM=""
 CERT_URL=""
 CERT_STATE=""
 CERT_BASE=""
+# The two fields that say what may be DONE with a certified row rather than whether it
+# is ours (tk-g0hd2). Neither is required for certification — an identity is complete
+# without them — so both are read defensively and may be empty; the disposition and the
+# supersede guard below decide what an empty one means in their own terms.
+CERT_MERGED_AT=""
+CERT_HEAD_OID=""
 certify_pr_row() {
   local id="$1" row="$2" wantbranch="$3" wanttarget="$4" wantnum="$5" action="$6"
-  local num url state base head hrepo cross goturl live_repo_q
+  local num url state base head hrepo cross goturl live_repo_q merged_at head_oid
   CERT_NUM=""; CERT_URL=""; CERT_STATE=""; CERT_BASE=""
+  CERT_MERGED_AT=""; CERT_HEAD_OID=""
 
   [ -n "$row" ] && printf '%s' "$row" | jq -e 'type == "object"' >/dev/null 2>&1 || {
     echo "pre-open-resolve: $id branch '$wantbranch' — a pull-request row did not parse as an object; cannot certify it before $action, so NOTHING is done for this branch this pass (retry next pass)" >&2
@@ -234,6 +253,13 @@ certify_pr_row() {
   # comparison catches a wrong repository, this catches a head this script failed to
   # resolve into one. Read as a string so a missing field is empty, not "false".
   cross=$(printf '%s' "$row" | jq -r 'if has("isCrossRepository") then (.isCrossRepository | tostring) else "" end' 2>/dev/null)
+  # DID IT LAND, and AT WHICH COMMIT — the two questions `state` alone leaves open, and
+  # the two the closed-unmerged case turns on (tk-g0hd2). A null `mergedAt` and an
+  # absent one are both read as empty here: what each MEANS is the disposition's
+  # business, not the identity's, so neither can make an otherwise-complete identity
+  # uncertifiable.
+  merged_at=$(printf '%s' "$row" | jq -r '(.mergedAt // "") | tostring' 2>/dev/null)
+  head_oid=$(printf '%s' "$row" | jq -r '(.headRefOid // "") | tostring' 2>/dev/null)
 
   # A partial or schema-shifted response leaves the identity UNCERTIFIED, which is
   # exactly what must not be acted on: `gh` answering is not the same as `gh`
@@ -294,7 +320,51 @@ certify_pr_row() {
   CERT_URL="$goturl"
   CERT_STATE="$state"
   CERT_BASE="$base"
+  CERT_MERGED_AT="$merged_at"
+  CERT_HEAD_OID="$head_oid"
   return 0
+}
+
+# pr_disposition <state> <merged-at>
+#
+# WHAT THE ANCHOR MAY DO with a pull request that has already certified as its own —
+# the question the old "a PR already exists for this branch (ANY state)" reuse never
+# asked (tk-g0hd2). `--state all` is deliberate, but the three states it returns are
+# not interchangeable:
+#
+#   live    OPEN   -> the pull request the merge gate will act on; adopt it.
+#   merged  MERGED -> it landed. Adopt it too, and for a reason of its own: only
+#                     anchors in merge_result=pull_request are scanned by
+#                     reconcile-merged-prs.sh, so an anchor left in pre_open_gate
+#                     behind a merged sibling PR would never be closed by anything.
+#   dead    CLOSED and not merged -> a SUPERSEDED pull request, typically closed by
+#                     hand after a corrected-scope force-push. It can never merge.
+#                     Adopting it is the tk-g0hd2 strand: the anchor leaves
+#                     pre_open_gate — the ONLY state that retries PR-open — carrying
+#                     a pr_url the merge gate can do nothing with, while no open pull
+#                     request exists for the work at all. The caller opens a fresh one.
+#   unknown anything else -> a state this script does not model. Not classified, and
+#                     therefore not acted on: `gh` answering is not `gh` answering the
+#                     question, and the two real dispositions have opposite actions.
+#
+# `state` is authoritative (gh's PullRequestState is exactly OPEN/CLOSED/MERGED).
+# `mergedAt` is a ONE-WAY cross-check on top of it: a non-empty value can only ever
+# promote CLOSED to merged — GitHub's REST shape reports a landed PR as
+# state=closed + merged_at set — and can never demote. That direction is the safe one:
+# a landed PR misread as dead would open a duplicate PR for work that is already in,
+# whereas the reverse cannot happen, since GitHub does not stamp mergedAt on a pull
+# request that was closed unmerged.
+pr_disposition() {
+  case "${1:-}" in
+    OPEN)   printf 'live' ;;
+    MERGED) printf 'merged' ;;
+    CLOSED)
+      case "${2:-}" in
+        ''|null) printf 'dead' ;;
+        *)       printf 'merged' ;;
+      esac ;;
+    *) printf 'unknown' ;;
+  esac
 }
 
 # find_certified_pr <bead-id> <branch> <target> <action>
@@ -305,10 +375,10 @@ certify_pr_row() {
 # row can sort ahead of the real one (review tk-j0q41). Every row is certified and the
 # winner is chosen among those that pass.
 #
-#   0  found      -> CERT_* hold the certified PR
+#   0  found      -> CERT_* hold the certified PR, and it is ADOPTABLE (open, or merged)
 #   1  none       -> the read was complete and clean and NOTHING is opened from a
-#                    branch of this name here. The ONLY answer on which the caller may
-#                    go on to open one.
+#                    branch of this name here. One of the two answers on which the
+#                    caller may go on to open one.
 #   2  refuse     -> the read failed, may be truncated, a row was unreadable, or rows
 #                    matched the name and NOT ONE of them certified. The caller must do
 #                    NOTHING for this branch. "I could not see it" and "it is not
@@ -317,17 +387,30 @@ certify_pr_row() {
 #                    from a branch of this name are somebody else's". A name collision
 #                    is a state an operator must look at, not one to open a pull
 #                    request into.
+#   3  dead only  -> this branch's pull requests are ours and every one of them is
+#                    CLOSED-unmerged (tk-g0hd2). DEAD_NUM / DEAD_URL / DEAD_HEAD hold
+#                    the newest of them, for the supersede pointer and for the guard
+#                    that tells a force-push supersede from an operator's deliberate
+#                    close. The caller may open a fresh pull request — subject to that
+#                    guard — because a dead pull request is not a pull request for
+#                    this work, it is the absence of one plus a headstone.
+DEAD_NUM=""
+DEAD_URL=""
+DEAD_HEAD=""
 find_certified_pr() {
   local id="$1" branch="$2" target="$3" action="$4"
   local json rc n row rank best_rank=99 best_num="" best_url="" best_state="" best_base=""
+  local disp dead_num="" dead_url="" dead_head=""
   CERT_NUM=""; CERT_URL=""; CERT_STATE=""; CERT_BASE=""
+  CERT_MERGED_AT=""; CERT_HEAD_OID=""
+  DEAD_NUM=""; DEAD_URL=""; DEAD_HEAD=""
 
   # --state ALL (not just open): a sibling PR that already MERGED or closed must still
   # flip this anchor onto the pull_request scan the observer watches — otherwise a
   # parent left in pre_open_gate after a pre-open rework, whose sibling PR merged,
   # would strand open forever (reconcile-merged-prs.sh scans only pull_request).
   json=$(gh pr list --head "$branch" --state all --repo "$ORIGIN_REPO_Q" \
-    --json number,url,state,baseRefName,headRefName,headRepository,headRepositoryOwner,isCrossRepository \
+    --json number,url,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository \
     --limit "$PR_LIST_LIMIT" 2>/dev/null)
   rc=$?
   # A FAILED READ IS NOT AN EMPTY ONE. Three guards, because a read that DIED AFTER
@@ -366,13 +449,31 @@ find_certified_pr() {
     esac
     # Rank by what the anchor needs from the PR, not by arrival order. OPEN is the
     # live pull request the merge gate will act on; MERGED is the one the observer
-    # closes the anchor on; a CLOSED-unmerged PR is dead and binds last, so it can
-    # never outrank a real one. Higher number breaks a tie within a rank: the later
+    # closes the anchor on. Higher number breaks a tie within a rank: the later
     # pull request is the current attempt.
-    case "$CERT_STATE" in
-      OPEN)   rank=0 ;;
-      MERGED) rank=1 ;;
-      *)      rank=2 ;;
+    #
+    # A DEAD pull request is not ranked at all — that was the bug (tk-g0hd2). Binding
+    # it last made it lose to any real pull request but still WIN when it was the only
+    # one, which is exactly the case that matters: a branch re-implemented at corrected
+    # scope, its old PR closed unmerged, has no other row for the dead one to lose to.
+    # It is remembered separately, as the headstone it is: never adopted, and offered
+    # to the caller only to point the fresh pull request at.
+    disp=$(pr_disposition "$CERT_STATE" "$CERT_MERGED_AT")
+    case "$disp" in
+      live)   rank=0 ;;
+      merged) rank=1 ;;
+      dead)
+        if [ -z "$dead_num" ] || [ "$CERT_NUM" -gt "$dead_num" ]; then
+          dead_num="$CERT_NUM"; dead_url="$CERT_URL"; dead_head="$CERT_HEAD_OID"
+        fi
+        continue ;;
+      *)
+        # A state this script does not model. Refuse the whole branch rather than
+        # guess: `live` and `dead` have OPPOSITE actions here (adopt it, or open a
+        # second pull request past it), so an unclassifiable row is exactly the kind
+        # of "I cannot tell" the caller must not fall through on.
+        echo "pre-open-resolve: $id branch '$branch' — PR#$CERT_NUM reports state '$CERT_STATE', which is not one of OPEN/CLOSED/MERGED; it cannot be told apart from a live pull request or a dead one — not $action (retry next pass)" >&2
+        return 2 ;;
     esac
     if [ "$rank" -lt "$best_rank" ] \
        || { [ "$rank" -eq "$best_rank" ] && [ "$CERT_NUM" -gt "${best_num:-0}" ]; }; then
@@ -383,6 +484,17 @@ find_certified_pr() {
 
   if [ -z "$best_num" ]; then
     CERT_NUM=""; CERT_URL=""; CERT_STATE=""; CERT_BASE=""
+    CERT_MERGED_AT=""; CERT_HEAD_OID=""
+    # OURS, AND DEAD. Checked BEFORE the name-collision refusal below, because it
+    # answers the same question that refusal exists to leave unanswered: one of these
+    # rows IS this anchor's, it certified on every half of its identity, and it is a
+    # closed-unmerged pull request. There is nothing here for an operator to
+    # disambiguate — the branch's own pull request is dead, and the work needs a live
+    # one (tk-g0hd2).
+    if [ -n "$dead_num" ]; then
+      DEAD_NUM="$dead_num"; DEAD_URL="$dead_url"; DEAD_HEAD="$dead_head"
+      return 3
+    fi
     # NOTHING MATCHED vs NOTHING OF OURS MATCHED. The first is the clean "this branch
     # has no pull request", on which the caller opens one. The second is a NAME
     # COLLISION — every pull request open from a branch of this name belongs to
@@ -514,11 +626,17 @@ while IFS= read -r row; do
   fi
   [ -n "$target" ] || target="main"
 
-  # --- A PR already exists for this branch (any state)? ------------------------
+  # --- A LIVE OR LANDED PR already exists for this branch? ---------------------
   # If a sibling anchor's resolve (or a post-open rework) already opened it, flip
   # THIS anchor to pull_request so it becomes visible to the merge skill + the
   # merged-close observer (never open a twin). The flip stamps NO gate marker, so
   # the merge skill still re-gates before any merge.
+  #
+  # "Already exists" is asked of the pull request's DISPOSITION, not merely of its
+  # existence (tk-g0hd2). A closed-unmerged pull request exists and is useless: it can
+  # never merge, and flipping onto it moves the anchor out of pre_open_gate, the only
+  # state that would ever open the real one. That case falls through to the create
+  # path below instead, carrying the dead PR's number so the fresh one can point at it.
   #
   # Every candidate is CERTIFIED before it can become this anchor's identity, and a
   # refusal is the fail-closed direction: flipping on a foreign pull request would
@@ -526,6 +644,11 @@ while IFS= read -r row; do
   # and stamp a stranger's pr_url/pr_number as its identity, so the real PR would
   # never be opened by anything. Holding leaves the anchor exactly where the next
   # pass can still open it.
+  #
+  # Cleared per anchor: these carry the dead PR from the branch scan down to the
+  # create path, and a value left over from a PREVIOUS anchor would point this
+  # anchor's fresh pull request at a headstone belonging to another branch.
+  SUPERSEDES_NUM=""; SUPERSEDES_URL=""; SUPERSEDES_HEAD=""
   find_certified_pr "$id" "$branch" "$target" \
     "flipped to pull_request, anchor stays pre_open_gate"
   case $? in
@@ -533,7 +656,7 @@ while IFS= read -r row; do
       if flip_to_pull_request "$id" "$CERT_URL" "$CERT_NUM" "$target" \
            "was already open for branch '$branch'"; then
         flipped=$((flipped + 1))
-        echo "pre-open-resolve: $id branch '$branch' already has PR#$CERT_NUM; flipped to pull_request"
+        echo "pre-open-resolve: $id branch '$branch' already has PR#$CERT_NUM ($CERT_STATE); flipped to pull_request"
       else
         skipped=$((skipped + 1))
       fi
@@ -542,9 +665,17 @@ while IFS= read -r row; do
       # "I cannot tell" — never fall through to the create path on it. Every
       # certification failure has already named itself on stderr.
       skipped=$((skipped + 1)); continue ;;
+    3)
+      # OURS, AND DEAD. The branch's own pull request is closed-unmerged, so this
+      # anchor has no pull request in any sense the merge gate can use. Carry the
+      # headstone to the create path: it supplies the "supersedes #N" pointer, and
+      # its head is what tells a re-implemented branch (open a fresh one) from an
+      # operator's deliberate close of exactly this commit (do not).
+      SUPERSEDES_NUM="$DEAD_NUM"; SUPERSEDES_URL="$DEAD_URL"; SUPERSEDES_HEAD="$DEAD_HEAD" ;;
   esac
-  # rc=1: this repository has no pull request of OURS for this branch. The only
-  # answer this pass may open one on.
+  # rc=1: this repository has no pull request of OURS for this branch.
+  # rc=3: it has only a dead one. Both are answers this pass may open a PR on — rc=3
+  # after the supersede guard below has cleared it.
 
   # --- Operator hold, checked before anything is published. ---------------------
   # merge_hold/rebase_hold on the anchor are explicit operator gates, and until
@@ -621,6 +752,40 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
 
+  # --- Superseding a dead PR: A RE-IMPLEMENTED BRANCH, OR AN OPERATOR'S "NO"? ---
+  # Reaching here with a headstone means the branch's only pull request is
+  # closed-unmerged AND codex is green at the live head. Two different situations
+  # produce that, and they are told apart by ONE fact — whether the branch has moved
+  # since the dead pull request was open:
+  #
+  #   dead head != live head  A SUPERSEDE. The branch was force-pushed at corrected
+  #                           scope and re-gated green at a commit the closed pull
+  #                           request never contained. The fresh pull request is a
+  #                           different artifact for different code; open it. This is
+  #                           the tk-g0hd2 incident (old head 82dedec closed as #212,
+  #                           re-implemented at 2d06892, re-gated, hand-opened #217).
+  #   dead head == live head  AN OPERATOR CLOSED EXACTLY THIS WORK. Nothing was
+  #                           re-implemented: the commit under the closed pull request
+  #                           is the commit under the marker. Opening a fresh pull
+  #                           request re-litigates a human's decision — and does it
+  #                           EVERY IDLE PASS, since closing the new one returns the
+  #                           branch to precisely this state. Hold instead; the loop
+  #                           is what makes this guard load-bearing rather than
+  #                           decorative, and a hold costs one line of output.
+  #
+  # An unreadable dead head is the third answer and it is a refusal, not a default:
+  # the two above have opposite actions, so "I cannot tell which" cannot pick one.
+  if [ -n "$SUPERSEDES_NUM" ]; then
+    if [ -z "$SUPERSEDES_HEAD" ]; then
+      echo "pre-open-resolve: $id branch '$branch' has only a CLOSED-unmerged PR ($SUPERSEDES_URL) and its head commit is unreadable; a superseded pull request and one an operator closed on purpose are indistinguishable without it, so NOTHING is opened for this branch this pass (operator must repair)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    if [ "$SUPERSEDES_HEAD" = "$head_oid" ]; then
+      echo "pre-open-resolve: $id branch '$branch' has only a CLOSED-unmerged PR ($SUPERSEDES_URL), closed at the SAME head this pass would open a new one at ($head_oid); the branch was never re-implemented, so that close was a decision about exactly this commit and re-opening it would repeat every pass — NOT opening a replacement (operator must reopen PR#$SUPERSEDES_NUM, or push a corrected head and re-gate)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+  fi
+
   # --- Open the non-draft PR at the reviewed head. -----------------------------
   # Body mirrors merge-push: full description (the "why") + polecat notes (the
   # "what") + a handoff footer. --body-file avoids multi-line quoting hazards.
@@ -645,6 +810,13 @@ while IFS= read -r row; do
     printf -- '- Source branch: `%s`\n' "$branch"
     printf -- '- Target: `%s`\n' "$target"
     printf -- '- Codex signed off pre-open at `%.8s`; PR opened codex-green.\n' "$head_oid"
+    # The pointer, in the body rather than only in a comment: a bare `#N` here is
+    # what makes GitHub render the cross-reference on the superseded pull request,
+    # so the trail exists from both ends even if the comment below fails.
+    if [ -n "$SUPERSEDES_NUM" ]; then
+      printf -- '- Supersedes #%s (closed unmerged at `%.8s`); this branch was re-implemented and re-gated at `%.8s`.\n' \
+        "$SUPERSEDES_NUM" "$SUPERSEDES_HEAD" "$head_oid"
+    fi
   } > "$PR_BODY_FILE"
 
   # PINNED like every read above: the PR must be created in the repository whose
@@ -670,10 +842,11 @@ while IFS= read -r row; do
       "stamped as this anchor's pull request, anchor stays pre_open_gate"
     case $? in
       0) PR_URL="$CERT_URL"; PR_NUMBER="$CERT_NUM" ;;
-      1) # Not a race after all: nothing is open from this branch, so the create
-         # failed for a reason of its own (no commits between base and head, a
+      1|3) # Not a race after all: nothing LIVE is open from this branch (rc=3: only
+         # the same dead pull request the create was meant to supersede), so the
+         # create failed for a reason of its own (no commits between base and head, a
          # permissions or protection rule). Nothing to adopt, nothing to stamp.
-         echo "pre-open-resolve: $id branch '$branch' PR create/discover failed; skip (retry next pass)" >&2
+         echo "pre-open-resolve: $id branch '$branch' PR create/discover failed${SUPERSEDES_NUM:+ (the branch still has only the closed PR#$SUPERSEDES_NUM)}; skip (retry next pass)" >&2
          skipped=$((skipped + 1)); continue ;;
       *) # Something is open from a branch of this name and it could not be certified
          # as ours (the scan has already said which half failed). Adopting it is
@@ -761,6 +934,19 @@ while IFS= read -r row; do
       >/dev/null 2>&1 || true
   fi
 
+  # THE OTHER END OF THE POINTER. The body above cross-references the dead pull
+  # request; this says the same thing where a human actually lands — on the closed
+  # one they were reading when they wondered where the work went. Same best-effort
+  # `gh pr comment` convention, same repository pin, and it fires exactly once: from
+  # the next pass on, the branch has a live pull request, which outranks the
+  # headstone and never reaches the create path again.
+  if [ -n "$SUPERSEDES_NUM" ]; then
+    gh pr comment "$SUPERSEDES_NUM" --repo "$ORIGIN_REPO_Q" \
+      --body "$(printf 'Superseded by #%s: branch `%s` was re-implemented and re-gated at `%.8s` (this pull request was closed unmerged at `%.8s`). Anchor `%s` now tracks #%s.' \
+        "$PR_NUMBER" "$branch" "$head_oid" "$SUPERSEDES_HEAD" "$id" "$PR_NUMBER")" \
+      >/dev/null 2>&1 || true
+  fi
+
   # Flip to the normal gating sub-state. check.codex is already green@head (the PR
   # is born at exactly the reviewed head), so merge-skill.sh merges once CI +
   # approval + CLEAN. Identity fields first, verified, THEN the visibility switch —
@@ -771,7 +957,7 @@ while IFS= read -r row; do
   if flip_to_pull_request "$id" "$PR_URL" "$PR_NUMBER" "$target" \
        "was opened for branch '$branch'"; then
     created=$((created + 1))
-    echo "pre-open-resolve: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (codex-green); flipped to pull_request"
+    echo "pre-open-resolve: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (codex-green)${SUPERSEDES_NUM:+, superseding closed PR#$SUPERSEDES_NUM}; flipped to pull_request"
   else
     # The PR IS open — a published artifact, and the reason the anchor must not be
     # left able to open a second one. It is not lost: the anchor is still
