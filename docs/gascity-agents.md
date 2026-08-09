@@ -251,15 +251,76 @@ The controller's reconciler evaluates desired state every
 
 | Mode | Desired state when no work | Desired state when work appears |
 |---|---|---|
-| `on_demand` | not materialized (sleeping at most) | spawn the canonical session |
+| `on_demand` | not desired that tick — not materialized (sleeping at most) | spawn the canonical session |
 | `always` | spawn and keep alive, regardless of work | spawn and keep alive |
 
-**Sleep policy.** `mode = "always"` is incompatible with
+**What "work appears" means.** `always` consults no predicate: the
+session is marked desired every tick, unconditionally. `on_demand`
+is evaluated instead by a **three-way demand switch**, and the
+session is desired only if one of the arms fires:
+
+1. **Direct named-session demand** — a bead whose `assignee` *is*
+   this identity (Lane 2).
+2. **Routed demand** — routed-but-unassigned demand on the
+   identity's backing template. This is a *wake-only* signal: it
+   rouses the holder, but the singleton's own hook still skips
+   Tier 3, so `gc.routed_to` alone does not make the bead
+   consumable. See [Work routing
+   visibility](#work-routing-visibility) and the [stranding
+   footgun](#stamping-only-gcrouted_to-on-a-named-singleton-strands-the-work).
+3. **The agent's own `work_query`** — the query declared in its
+   `agent.toml` returns work.
+
+When none of the three fires, the switch falls through and the
+session is simply **not desired** that tick — a quiet default, not
+an error or a deferred retry. See `ComputeAwakeSet`
+(`rigs/gascity/cmd/gc/compute_awake_set.go`).
+
+**Corollary: an `on_demand` singleton can be undesirable by
+construction — and that is the supported retirement lever.** An
+agent that declares **no** `work_query` in its `agent.toml`, with
+nothing routed or assigned to it, satisfies none of the three arms.
+It is therefore never desired and never spawns *at all* — the mode
+is not merely "quieter", it is off. That makes flipping `mode` to
+`on_demand` the way to retire an `always` singleton declared in a
+**base pack**: patch it from `city.toml` rather than forking the
+pack that declares it just to delete the stanza.
+
+```toml
+[[patches.named_session]]
+dir = ""                       # "" targets a city-scoped singleton
+name = "<binding>.<identity>"  # the canonical identity to patch
+mode = "on_demand"
+```
+
+The patch targets by identity: `name` is matched against the
+stanza's QualifiedName, so it is the disambiguating key when several
+sessions share a template — and it still matches a stanza declared
+with only a `template`, because an omitted `name` falls back to the
+template. `template` works as a targeting key too, but an ambiguous
+target is a load error rather than a silent partial patch.
+
+Check the premise before relying on it: read the backing agent's
+`agent.toml` for a `work_query` first. A session that declares one
+still wakes on demand, so for that agent the flip changes *when* it
+runs, not *whether* it runs. Reverting is the same patch with
+`mode = "always"`.
+
+**Sleep policy.** There is no throttle knob for an `always`
+singleton — `mode` is the only lever, which is why the corollary
+above matters. `mode = "always"` is incompatible with
 `sleep_after_idle` on the backing agent; the config loader rejects
 the combination at validation time. Always-mode also cannot exceed
 the agent's `max_active_sessions`. Both checks live in
 `validateNamedSessions`
-(`rigs/gascity/internal/config/config.go`).
+(`rigs/gascity/internal/config/config.go`). The runtime closes the
+same door from the other side: the reconciler's idle-sleep branch
+is itself guarded against always-mode named sessions
+(`isAlwaysNamedSession`,
+`rigs/gascity/cmd/gc/compute_awake_set.go`). So `sleep_after_idle`
+and `[session_sleep]` cannot throttle an `always` singleton by any
+route — the loader refuses the pairing, and a session that reached
+the idle path anyway would be exempted there too.
 
 **Termination.** Operator-driven: `gc session close <session-id>`
 both stops the runtime AND closes the session bead atomically.
