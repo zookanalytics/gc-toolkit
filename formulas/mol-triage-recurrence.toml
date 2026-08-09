@@ -8,9 +8,10 @@ curates (examples: "triage: held ideas", "triage: all P1s of this
 rig"). This formula runs on a daily order and, for each triage subject,
 files ONE visit (a routed conversation sitting) IF the subject's scope
 currently has candidates worth a sitting AND no visit for it is already
-open. No candidates, or a visit already open → it files nothing for
-that subject. The result: each triage conversation appears on the
-board exactly when it has material, and never stacks.
+live — open OR held (a held visit is `in_progress`). No candidates, or
+a visit already live → it files nothing for that subject. The result:
+each triage conversation appears on the board exactly when it has
+material, and never stacks.
 
 The triage itself (enumerate candidates, rank, frame promote/park/kill)
 is NOT this formula's job — the converse session does that at visit
@@ -29,39 +30,49 @@ formula_compiler = ">=2.0.0"
 
 [[steps]]
 id = "evaluate-and-file"
-title = "Per triage subject: skip if a visit is open; file a visit if the scope has candidates"
+title = "Per triage subject: skip if a visit is live; file a visit if the scope has candidates"
 description = """
-**1. List the triage subjects and the open visits.** Fail-safe: an
+**1. List the triage subjects and the live visits.** Fail-safe: an
 unreadable listing means close this step with `gc.outcome=fail` and
 file nothing — never evaluate on partial data.
 
 ```bash
-OPEN=$(mktemp)
+OPEN=$(mktemp); LIVE=$(mktemp)
 gc bd list --status=open --json --limit=0 > "$OPEN"
-if ! jq -e 'type=="array"' "$OPEN" >/dev/null; then
+gc bd list --status=open,in_progress --json --limit=0 > "$LIVE"
+if ! jq -e 'type=="array"' "$OPEN" >/dev/null || ! jq -e 'type=="array"' "$LIVE" >/dev/null; then
   echo "FAIL-SAFE: listing unreadable — recurrence aborts, nothing filed"
   [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
   exit 0
 fi
 SUBJECTS=$(jq '[.[] | select((.metadata.task_kind // "") == "triage-subject") | {id, title, scope: (.metadata["triage.scope"] // "")}]' "$OPEN")
-CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // empty)]' "$OPEN")
+CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // empty)]' "$LIVE")
+# $LIVE, not $OPEN, for the visit set: a visit being held is
+# in_progress, not open — and a sitting already live is exactly the
+# case the skip below exists to protect.
 ```
 
 **2. Per subject, in order:**
 
-- **Skip if a visit is open** — the subject's id appears in
-  `$CONVGROUPS`. Log `skipped-open-visit`. Never stack a second visit
-  on one subject.
+- **Skip if a visit is live** — the subject's id appears in
+  `$CONVGROUPS` (open AND held visits, per the listing above). Log
+  `skipped-live-visit`. Never stack a second visit on one subject.
 - **Evaluate the scope with the defined filter schema.** A triage
   subject's machine-readable scope is its `triage.scope` metadata:
   space-separated tokens, each one of exactly these forms —
 
   | token | meaning (applied to the open-bead listing) |
   |---|---|
-  | `p<=N` | `.priority <= N` |
-  | `label:X` | `.labels` contains `X` |
-  | `kind:X` | `.metadata.task_kind == X` |
-  | `unrouted` | `.metadata["gc.routed_to"] == ""` and `.assignee == ""` |
+  | `p<=N` | `(.priority // 99) <= N` |
+  | `label:X` | `(.labels // [])` contains `X` |
+  | `kind:X` | `(.metadata.task_kind // "") == "X"` |
+  | `unrouted` | `(.metadata["gc.routed_to"] // "") == ""` and `(.assignee // "") == ""` |
+
+  The `// <default>` coalescing in every predicate is load-bearing, not
+  style: on a real store `.assignee` is JSON `null` (never `""`) and
+  most beads carry no `gc.routed_to` key at all, so a strict `== ""`
+  comparison matches zero beads. Apply the predicates exactly as
+  written.
 
   Candidates = open beads matching ALL tokens, excluding visits and
   triage subjects themselves. Apply the tokens as jq filters over
@@ -69,6 +80,10 @@ CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metad
   this table is ignored and logged (`unknown-scope-token`); a subject
   with NO recognized tokens is logged `skipped-no-machine-scope` and
   never guessed at — its scope prose is for the sitting, not for you.
+  One reserved value: `unnamed-waits` marks the liveness sweep's
+  standing subject, whose visits mol-liveness-sweep files itself — log
+  `skipped-owned-by-sweep` for that subject and move on; it is
+  expected, not unknown.
 - **File when there are candidates.** One or more candidates → file the
   visit below. Zero → log `skipped-no-candidates`, file nothing.
 
@@ -80,6 +95,8 @@ that subject's id; put the candidate count and ids in the `-d` body):
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
 VISIT=$(gc bd create -t task --title "visit: $SUBJECT — triage: N candidates in scope" \
   -d "<candidate count and ids from the scope filter>" --json | jq -r '.id // .[0].id')
+[ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
+  || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
   --set-metadata "task_kind=visit"
@@ -89,9 +106,9 @@ gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # <<< gate-visit
 ```
 
-**4. Log the per-subject outcomes** (skipped-open-visit /
-skipped-no-candidates / skipped-no-machine-scope / filed + visit id),
-then close this step:
+**4. Log the per-subject outcomes** (skipped-live-visit /
+skipped-no-candidates / skipped-no-machine-scope /
+skipped-owned-by-sweep / filed + visit id), then close this step:
 
 ```bash
 [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed

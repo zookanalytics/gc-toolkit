@@ -69,6 +69,8 @@ exit
    POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
    VISIT=$(gc bd create -t task --title "visit: <id> — first reaction ready: accept or redirect" \
      -d "First reaction ready on <id> — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
+   [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
+     || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
    gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
      --set-metadata "gc.continuation_group=<id>" \
      --set-metadata "task_kind=visit"

@@ -41,6 +41,8 @@ description = """
 # --set-metadata flag, tracks edge, visit title brand).
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}converse"
 VISIT=$(gc bd create -t task --title "visit: {{subject}} — {{visit}}" -d "{{visit}}" --json | jq -r '.id // .[0].id')
+[ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
+  || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group={{subject}}" \
   --set-metadata "task_kind=visit"

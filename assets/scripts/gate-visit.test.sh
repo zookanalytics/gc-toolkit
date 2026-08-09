@@ -15,6 +15,9 @@
 #   - the visit is wired to its subject with a tracks edge (parent-child
 #     would transmit the subject's blocked state to the visit)
 #   - the visit title carries the "visit: " brand
+#   - the create's id is guarded before use (an unguarded empty id
+#     cascades into stamping nothing, and the silent failure is what
+#     tempts agents to rewrite the block instead of re-running it)
 # Hermetic: reads the repo only; no gc, no city.
 
 set -u
@@ -63,6 +66,8 @@ for f in "$FDIR"/*.toml; do
             && ok "$name: continuation_group stamp, own flag" || bad "$name: continuation_group stamp, own flag" "stamp absent or malformed"
         printf '%s' "$block" | grep -qF -- '--set-metadata "task_kind=visit"' \
             && ok "$name: task_kind stamp, own flag" || bad "$name: task_kind stamp, own flag" "stamp absent or malformed"
+        printf '%s' "$block" | grep -qF -- '[ -n "$VISIT" ] && [ "$VISIT" != "null" ]' \
+            && ok "$name: create id guarded before use" || bad "$name: create id guarded before use" 'no `[ -n "$VISIT" ] && [ "$VISIT" != "null" ]` guard after the create'
         printf '%s' "$block" | grep -q -- '--type=tracks' \
             && ok "$name: tracks edge (non-blocking lineage)" || bad "$name: tracks edge (non-blocking lineage)" "dep add --type=tracks missing"
         printf '%s' "$block" | grep -q -- '--type=parent-child' \
