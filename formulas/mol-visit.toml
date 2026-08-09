@@ -1,0 +1,68 @@
+description = """
+mol-visit — "I want to talk about this": file one visit on a
+subject bead, routed to the converse pool. The operator-driven trigger of
+the one entry point — all three triggers (formula-driven, event-driven,
+operator-driven) collapse into filing a visit (specs/tk-h9pq5/design-doc.md,
+Key Components §5; docs/architecture.md "How work moves").
+
+Contract: v1, one step — the one-step formula the architecture names. Run
+by whoever wants the conversation (operator shell, a formula step, another
+conversation); the step files the visit and exits. Pool demand does the
+spawning.
+
+Files no gated work; nothing to sign off.
+"""
+formula = "mol-visit"
+version = 1
+
+[vars]
+[vars.subject]
+description = "The subject bead the conversation is about — its id IS the conversation's identity"
+required = true
+
+[vars.visit]
+description = "The visit prompt: what this visit needs from the operator (decision, review, catch-up). Substituted into a shell command — avoid quote characters, or put the detail in the -d body by hand."
+required = true
+
+[vars.binding_prefix]
+description = "Import binding prefix with trailing dot; combined with the rig qualifier it names the converse pool (the exact-match read side needs the qualified name — docs/gascity-routing-model.md)"
+default = "gc-toolkit."
+
+[[steps]]
+id = "file-visit"
+title = "File the visit bead in the subject's continuation group"
+description = """
+```bash
+# >>> gate-visit
+# The canonical gate-visit snippet (spec: specs/2026-08-fresh-start/
+# liveness-and-triage-spec.md §1). Consumers copy this block, markers
+# included; assets/scripts/gate-visit.test.sh extracts and checks every
+# copy's load-bearing invariants (rig-qualified pool, one key per
+# --set-metadata flag, tracks edge, visit title brand).
+POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}converse"
+VISIT=$(gc bd create -t task --title "visit: {{subject}} — {{visit}}" -d "{{visit}}" --json | jq -r '.id // .[0].id')
+[ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
+  || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
+gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
+  --set-metadata "gc.continuation_group={{subject}}" \
+  --set-metadata "task_kind=visit"
+gc bd dep add "$VISIT" {{subject}} --type=tracks
+# tracks, NOT parent-child: a parent-child edge transmits the subject's
+# blocked/arrested state to the visit, making it unclaimable on exactly
+# the beads that most need conversation.
+# To gate other work on this conversation, add a blocking edge:
+# gc bd dep add "$VISIT" --blocks "<blocked-bead-id>"
+# <<< gate-visit
+```
+
+The visit bead's body is the visit prompt; extend the `-d` body if {{visit}}
+alone under-specifies the visit. Stamp-don't-sling, one key per flag, and
+the POOL must be the rig-qualified exact-match form
+(docs/gascity-routing-model.md). Warm, the live group session vacuums the
+visit; cold, pool demand spawns one. `task_kind=visit` is the
+structural marker that makes a visit legible as engagement (to the
+board and to patrols) — note the witness's orphan recovery deliberately
+does NOT skip on it: a visit whose session died mid-hold SHOULD return to
+the pool, because respawn-and-reconstitute-from-the-record is the cold
+continuity path (specs/2026-08-fresh-start/spine-port.md, decision D4).
+"""

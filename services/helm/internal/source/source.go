@@ -1,6 +1,6 @@
 // Package source is the data-access seam for the Helm service. It defines
 // the [Source] interface — the single boundary through which the service reads
-// bead/session state — and a [SupervisorSource] that satisfies it over the Gas
+// bead state — and a [SupervisorSource] that satisfies it over the Gas
 // City supervisor's loopback HTTP API.
 //
 // DATA-ACCESS CONTRACT (hard constraint). All bead/Dolt access goes through a
@@ -18,12 +18,10 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
-// Result is one gather pass: the raw anchors and the bead-id→liveness map that
-// [board.BuildBoard] consumes, plus cross-rig degradation signals propagated
-// from the underlying API.
+// Result is one gather pass: the raw anchors that [board.BuildBoard] consumes,
+// plus cross-rig degradation signals propagated from the underlying API.
 type Result struct {
 	Anchors       []board.Anchor
-	Sessions      map[string]board.HostSession
 	Partial       bool
 	PartialErrors []string
 }

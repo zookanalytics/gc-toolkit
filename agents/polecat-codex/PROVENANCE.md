@@ -16,4 +16,4 @@ Provider diversity. Some bead workloads benefit from Codex over Claude; rather t
 
 ## Notes
 
-Rig-scoped. Currently inert at city scope per the historical staging note (`project_polecat_codex_staged`) — was waiting on a gastown overlay that's now superseded by Lane C. Should activate cleanly post-cutover; verify in smoke test.
+Rig-scoped: the pool exists only where a rig imports gc-toolkit; it is inert at city scope. Verify activation in a smoke test when wiring a new rig.

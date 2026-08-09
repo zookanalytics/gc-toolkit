@@ -214,7 +214,7 @@ both queues exactly like gating — *before* opening the PR. An idle-loop pass
 beside the merge skill (`pre-open-resolve.sh`) opens the non-draft PR only once
 every pre-open member is green at the branch head — today just `check.codex` —
 moving the bead to ordinary `pull_request` gating. A PR that becomes visible is
-thus codex-green at birth, with no draft phase (drafts stay retired, #163). The
+thus codex-green at birth, with no draft phase (the pipeline does not use draft PRs). The
 pre-open subset is the only part of the check-set that moves ahead of
 PR-creation; the rest — CI, approval — stay post-open, gated at merge by the same
 check-set the merge skill already enforces. Which members run pre-open is fixed in
@@ -300,9 +300,9 @@ per-gate marker on the gating anchor — `check.<name>=green@<sha>`, meaning "ga
 and the merge skill (`merge-skill.sh`) holds the merge until **every** gate named
 in `check_set` is green **at the live head** — each `check.<name>` must equal
 `green@<live-head-oid>`. Adding a gate is adding a name to `check_set` plus
-whatever step stamps its marker; the merge skill is unchanged. This replaces the
-retired `signoff_head` field (a single conflated marker) and the `review_gate`
-string var: the per-gate marker model is the composable check-set made concrete.
+whatever step stamps its marker; the merge skill is unchanged. One marker per
+gate, never a single conflated field: the per-gate marker model is the
+composable check-set made concrete.
 
 **A dropped gate is silent, so a doctor check watches for it (tk-4na1b).**
 "Empty declares no gates" is load-bearing at merge time and invisible everywhere

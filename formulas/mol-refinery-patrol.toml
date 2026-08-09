@@ -306,10 +306,10 @@ a merge is the one act this pass cannot retract; then an EXPLICIT `gh pr merge
 commit the gates validated so a mid-pass push cannot land an unvalidated head); then
 close the bead `"Merged to <target> at <sha>"` + stamp `merge_result=merged`. The
 refinery is the single writer — it does not delegate the landing to GitHub
-auto-merge and poll. This RETIRES `gh pr merge --auto` as the main-PR path.
+auto-merge and poll; `gh pr merge --auto` is never the main-PR path.
 
 Its `approval` member and the observer's superseded-review arm are two halves of
-one fix (tk-5niup): a COMMENT re-gate never supersedes an earlier
+one mechanism: a COMMENT re-gate never supersedes an earlier
 CHANGES_REQUESTED, so a changes-round PR stays BLOCKED on a dead commit while the
 bead reads green; retracting our own superseded review is what reconciles them,
 and the explicit approval requirement is what keeps that retraction from becoming

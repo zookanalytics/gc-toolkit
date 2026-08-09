@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # gc-proactive.sh — the proactive-via-slung-mol engine. Phase 4 of the
-# Bead-Universe Operating Model (epic tk-q4xaj; bead tk-3d0uh; design Key
-# Components 5-6, Phase 4).
+# Bead-Universe Operating Model (specs/bead-universe/design-doc.md —
+# Key Components 5-6, Phase 4).
 #
 # "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
 # slung at a bead: a cheap first reaction (read the body → articulate /
-# research → write a first-reaction CARD to the bead notes → flag the bead
-# onto the Helm) so the human arrives at *advanced* work. This
+# research → write a first-reaction CARD to the bead notes → file a visit
+# on the bead) so the human arrives at *advanced* work. This
 # tool is the budget-and-trigger layer around that sling. It owns no new
 # lifecycle — it assembles `gc sling`, `gc bd ready`, `gc session list`, and
 # the Phase-3 Helm (assets/scripts/gc-helm.sh).
@@ -56,7 +56,7 @@
 # path fail closed rather than relying on that default.
 #
 # Side effects: `scan` (without --sling) and `demand` are READ-ONLY.
-# `scan --sling` and `sling` route work via `gc sling` (and may flag a
+# `scan --sling` and `sling` route work via `gc sling` (and may surface a
 # bead). Nothing here closes or merges anything.
 #
 # Tunables (env):
@@ -297,9 +297,9 @@ scan_candidates() {
     [ -n "$optin" ] || optin='[]'
 
     # (B) movable-forward: any ready, unassigned, non-epic bead. We then drop
-    # the ones already advanced (gc.proactive_reaction set), already
-    # hand-raised (gc.attention set), or already routed somewhere — those are
-    # not "able to be updated" by a fresh first reaction.
+    # the ones already advanced (gc.proactive_reaction set) or already
+    # routed somewhere — those are not "able to be updated" by a fresh
+    # first reaction.
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
     movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
                 --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
@@ -312,7 +312,6 @@ scan_candidates() {
         (.[0] + .[1])
         | map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
-            and ((.metadata["gc.attention"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
           ))

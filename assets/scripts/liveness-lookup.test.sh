@@ -81,22 +81,22 @@ old_state() {
 }
 
 # --- Fixtures, transcribed from live `gc session list --json` output. ---------
-# A bead-host wisp registers a BARE alias; its beads carry a rig-qualified
+# A city-scoped wisp registers a BARE alias; its beads carry a rig-qualified
 # assignee. A pool polecat registers a RIG-QUALIFIED alias; a bead may carry the
 # bare form. Same city, both directions, at the same time.
-MAP_BEADHOST='{"lx-wisp-q5qbl":"active","s-lx-wisp-q5qbl":"active","gc-toolkit.gc-z0vi2":"active"}'
+MAP_CITYWISP='{"lx-wisp-q5qbl":"active","s-lx-wisp-q5qbl":"active","gc-toolkit.gc-z0vi2":"active"}'
 MAP_POOL='{"lx-fjnq1":"active","gc-toolkit__polecat-lx-fjnq1":"active","gc-toolkit/gc-toolkit.furiosa":"active"}'
 
 # --- Premise: the bug is real and this is the exact shape that fired. ---------
-eq "$(old_state "$MAP_BEADHOST" "gascity/gc-toolkit.gc-z0vi2")" "absent" \
-   "(premise) exact-only lookup resolves a live bead-host to 'absent' (the bug)"
+eq "$(old_state "$MAP_CITYWISP" "gascity/gc-toolkit.gc-z0vi2")" "absent" \
+   "(premise) exact-only lookup resolves a live city-scoped wisp to 'absent' (the bug)"
 eq "$(old_state "$MAP_POOL" "gc-toolkit.furiosa")" "absent" \
    "(premise) exact-only lookup resolves a live pool polecat to 'absent' (reverse shape)"
 
 # --- Behavioral matrix. ------------------------------------------------------
 # (A) THE FIX, confirmed-firing shape: rig-qualified assignee, bare alias key.
 #     `absent` here is what classifies a live agent's bead as orphaned.
-eq "$(state "$MAP_BEADHOST" "gascity/gc-toolkit.gc-z0vi2")" "active" \
+eq "$(state "$MAP_CITYWISP" "gascity/gc-toolkit.gc-z0vi2")" "active" \
    "(A) qualified assignee vs bare alias key -> live, not orphaned"
 # (B) Reverse direction: bare assignee, rig-qualified alias key. Both shapes are
 #     live in the same city, so a one-directional fix would still false-orphan.
@@ -142,17 +142,17 @@ eq "$(state '{"gc-toolkit.furiosa":"active"}' "toolkit.furiosa")" "absent" \
 eq "$(state '{"gc-toolkit.furiosa":"active"}' "gc-toolkit.furiosa-2")" "absent" \
    "(I) sibling pool identity does not match"
 # (J) Multi-segment assignees resolve on the last segment.
-eq "$(state "$MAP_BEADHOST" "city/rig/gc-toolkit.gc-z0vi2")" "active" \
+eq "$(state "$MAP_CITYWISP" "city/rig/gc-toolkit.gc-z0vi2")" "active" \
    "(J) multi-segment assignee resolves on its last segment"
 # (K) Degenerate inputs: the loop skips unassigned beads, but an empty or
 #     whitespace assignee must never resolve to some arbitrary session.
-eq "$(state "$MAP_BEADHOST" "")" "absent" \
+eq "$(state "$MAP_CITYWISP" "")" "absent" \
    "(K) empty assignee -> absent"
 eq "$(state '{}' "gascity/gc-toolkit.gc-z0vi2")" "absent" \
    "(K) empty map -> absent (fail-safe abort is handled separately by MAP_COUNT)"
 # (L) A trailing-slash identity must not match the whole map via an empty bare
 #     form; keys are non-empty so this stays absent rather than aliasing.
-eq "$(state "$MAP_BEADHOST" "gascity/")" "absent" \
+eq "$(state "$MAP_CITYWISP" "gascity/")" "absent" \
    "(L) trailing-slash assignee -> absent (no empty-segment wildcard)"
 
 # --- Static wiring: no un-normalized lookup may survive elsewhere. ------------

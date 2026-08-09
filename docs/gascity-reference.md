@@ -78,9 +78,9 @@ If any of the four fail, the content does not belong here.
 The pack spec is the authoritative reference and the understanding-packs
 guide is the narrative entry point; the shareable-packs guide covers the
 create / import / customize workflow. The design notes in
-`gastownhall/gascity` are deep reference. The standalone migration guide
-was retired upstream — PackV2 migration now lives in `gc doctor` (`gc
-doctor --fix` repairs legacy `pack.toml`) and the shareable-packs guide.
+`gastownhall/gascity` are deep reference. There is no standalone
+migration guide — PackV2 migration lives in `gc doctor` (`gc doctor
+--fix` repairs legacy `pack.toml`) and the shareable-packs guide.
 
 - Pack spec (authoritative `pack.toml` + layout reference): https://docs.gascity.com/reference/specs/pack-spec
 - Understanding packs (pack model, imports, scope, patches, loading order): https://docs.gascity.com/guides/understanding-packs
@@ -149,6 +149,7 @@ Topics gc-toolkit has captured locally, where upstream coverage is
 missing, partial, or contradicted by a more recent maintainer ruling.
 Entries here are gc-toolkit-authored prose, not upstream pointers.
 
+- [Gas City and human engagement](gascity-human-engagement.md) — how upstream supports human engagement (extmsg, gates, pending interactions, the dashboard's attention surfaces) and the pack's subject/visit vocabulary and seams, every claim dated.
 - [Gas City agent types](gascity-agents.md) — the agent variants (named singletons, pool workers, threads, patrol overlay), with their identity, lifecycle, addressing, and work-routing contracts.
 - [Gas City routing model: sling vs assignee vs `--reassign`](gascity-routing-model.md) — three-lane routing model per the PR #1736 ruling.
 - [Gas City graph.v2 dispatch containment](gascity-dispatch-containment.md) — the recovery procedure for a formula dispatch poured before it should have been: finding every record the pour created and taking delivery away from all of them.

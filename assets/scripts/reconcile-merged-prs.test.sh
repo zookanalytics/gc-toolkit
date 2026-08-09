@@ -1503,7 +1503,7 @@ hasin "$OUT1" "2 retargeted" \
   && ok "run 1 summary reports 2 retargeted" \
   || bad "run 1 summary retargeted count (got: $OUT1)"
 grep -qi "auto-merge" <<< "$OUT1" \
-  && bad "run 1 summary must not mention auto-merge (it was retired)" \
+  && bad "run 1 summary must not mention auto-merge (never an arm of this pass)" \
   || ok "run 1 summary makes no mention of auto-merge"
 
 # --- Regression guard (field shape): only gh-supported --json fields. ---------
@@ -2317,7 +2317,7 @@ hasin "$ERR13" "bead-RF — PR#256 reviews history read FAILED" \
   && ok "(53e) the failed history read is reported, not swallowed" \
   || bad "(53e) failed reviews read must warn (got: $ERR13)"
 
-# (53f-53g) THE FORK-KEYED ANCHOR (review tk-5knqi finding #2). Every other path in
+# (53f-53g) THE FORK-KEYED ANCHOR. Every other path in
 # this pass resolves an anchor's PR under every key a bead names one with —
 # pr_number, fork_pr, fork_pr_url — and the ROWS projection picks $num that way.
 # The pre-dismissal re-read did NOT: it asked for `metadata.pr_number` alone. So a

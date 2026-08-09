@@ -1,11 +1,11 @@
 // Package board is the Go port of the Helm board MODEL — the ranking and
 // derivation logic that the bash proof-of-concept (assets/scripts/gc-helm.sh)
 // computes in a single jq pass. It is deliberately free of I/O: a [Source]
-// gathers raw [Anchor] data and a session-liveness map, and [BuildBoard] turns
-// those into a ranked, deduplicated [Board].
+// gathers raw [Anchor] data, and [BuildBoard] turns it into a ranked,
+// deduplicated [Board].
 //
 // SPIKE SCOPE. This is the minimal subset proven by the tk-sy3vj spike. The
-// per-tile fields are exactly {id, rig, kind, title, severity, live, n_closed,
+// per-tile fields are exactly {id, rig, kind, title, severity, n_closed,
 // m_total, open, in_progress, frontier, needs, rank_score} plus the envelope
 // {generated_at, total, tiles}. The following gc-helm.sh behaviours are
 // deferred to a follow-up bead and intentionally NOT reproduced here:
@@ -16,6 +16,12 @@
 //     and the NORMAL→ELEVATED stale bump never fires.
 //   - the takeaway-driven NEEDS sentence: NEEDS uses the deterministic phrase.
 //   - the stranded/empty/complete/progress_mismatch booleans.
+//   - the `held` visit fact (the bash board's glyph: an open visit bead with
+//     task_kind=visit whose gc.continuation_group names the anchor). The
+//     supervisor bead API omits metadata, so visit presence is not derivable
+//     over HTTP; the field is dropped rather than approximated. (The retired
+//     v1 `live` hot/warm/cold host field is gone with the host mechanism
+//     itself — do not reintroduce it.)
 //
 // The struct tags are an additive contract: the TypeScript frontend mirrors
 // them, so fields may be added but never renamed or removed.
@@ -27,8 +33,7 @@ import "time"
 type Severity string
 
 const (
-	SevFlagged  Severity = "FLAGGED"  // operator-flagged (gc.attention=1)
-	SevHigh     Severity = "HIGH"     // stranded: open work, none in progress, no live host
+	SevHigh     Severity = "HIGH"     // stranded: open work with none in progress
 	SevElevated Severity = "ELEVATED" // a human-gated decision (or, with staleness, an aged NORMAL)
 	SevNormal   Severity = "NORMAL"   // healthy in-flight work
 	SevLow      Severity = "LOW"      // empty or fully closed
@@ -39,8 +44,6 @@ const (
 // staleness terms.
 func (s Severity) rank() int {
 	switch s {
-	case SevFlagged:
-		return 4
 	case SevHigh:
 		return 3
 	case SevElevated:
@@ -49,36 +52,6 @@ func (s Severity) rank() int {
 		return 1
 	default: // SevLow and anything unknown
 		return 0
-	}
-}
-
-// Liveness is the resolved host-session state for an anchor: "hot", "warm", or
-// "cold". It mirrors the three-valued $live in gc-helm.sh.
-type Liveness string
-
-const (
-	LiveHot  Liveness = "hot"  // a host session exists and is active/running
-	LiveWarm Liveness = "warm" // a host session exists but is suspended/asleep
-	LiveCold Liveness = "cold" // no host session
-)
-
-// HostSession is the subset of a session needed to resolve liveness. It is
-// keyed by bead-id in the map a [Source] returns.
-type HostSession struct {
-	State   string
-	Running bool
-}
-
-// liveness reduces a host session to hot/warm/cold, mirroring lines 612-615 of
-// gc-helm.sh: cold when absent, hot when active or running, else warm.
-func liveness(h *HostSession) Liveness {
-	switch {
-	case h == nil:
-		return LiveCold
-	case h.State == "active" || h.Running:
-		return LiveHot
-	default:
-		return LiveWarm
 	}
 }
 
@@ -97,13 +70,12 @@ type Child struct {
 type Anchor struct {
 	ID       string  `json:"id"`
 	Title    string  `json:"title"`
-	Kind     string  `json:"kind"`   // epic | decision | flagged | convoy
+	Kind     string  `json:"kind"`   // epic | decision | convoy
 	Source   string  `json:"source"` // same string as Kind; drives derivation branches
 	Rig      string  `json:"rig"`
 	Prefix   string  `json:"prefix"`
 	Priority *int    `json:"priority,omitempty"`
 	Children []Child `json:"children,omitempty"`
-	Reason   string  `json:"reason,omitempty"` // flagged anchors: gc.attention_reason
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
@@ -115,7 +87,6 @@ type Tile struct {
 	Kind       string   `json:"kind"`
 	Title      string   `json:"title"`
 	Severity   Severity `json:"severity"`
-	Live       Liveness `json:"live"`
 	NClosed    int      `json:"n_closed"`
 	MTotal     int      `json:"m_total"`
 	Open       int      `json:"open"`

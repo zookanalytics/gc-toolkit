@@ -9,8 +9,8 @@
 # end-of-wisp check, so context climbed and the check was skipped harder).
 #
 # Self-gates to the three long-running patrol roles (witness, deacon, refinery)
-# and no-ops for every other agent (ephemeral polecats, bead-hosts, mayor,
-# mechanik) so a focused worker is never recycled mid-task.
+# and no-ops for every other agent (ephemeral polecats, converse sessions,
+# mayor, mechanik) so a focused worker is never recycled mid-task.
 #
 # When the agent's measured input_tokens crosses 200K — an absolute
 # work-product threshold (= 20% of a 1M window; a 200K-window agent would fire

@@ -158,13 +158,11 @@ patrolling and indexing are continuous, and nothing continuous can live in a
 role that exists only between claim and drain. One hat is a molecule; all three
 have earned an agent.
 
-**Status.** The shipped realization (epic `tk-q4xaj`, closed) is a resident
-single-bead host plus an attention board. The continuation-group model above is
-the ratified *direction* (`tk-h9pq5`, in design), chosen because it is built from
-primitives that already ship rather than from a bespoke session agent. This
-document describes the primitive-grounded model as the architecture and marks the
-current host-and-board composition as the version in transition; the newer system
-is not yet built.
+**Status.** The continuation-group model above (design:
+`specs/tk-h9pq5/`) is the built system: the converse role holds
+conversations, visits are the filed turns, and the board's pick-a-row
+files a visit on the picked bead. It is built from primitives that
+already ship rather than from a bespoke session agent.
 
 ## How work moves
 
@@ -268,8 +266,8 @@ composes and which belief it serves — not as an inventory.
 - **Fork & upstream** lets the pack patch the Gas City source on a fork and flow
   changes back as reviewable PRs, with no hand-managed patch queue. The
   architecture is git-native: every commit that diverges from upstream *is* a
-  candidate, so the log is the queue, and it reuses the same worker-to-lander
-  division of labor Delivery uses. It serves *The pack borrows before it invents*,
+  candidate, so the log is the queue, and it reuses the same division of labor
+  Delivery uses: workers produce the change, a single-writer step lands it. It serves *The pack borrows before it invents*,
   living alongside Gas City rather than forking it (see
   [gascity-local-patching.md](gascity-local-patching.md)).
 
@@ -301,9 +299,6 @@ Naming it keeps the rest honest about fact versus aspiration.
   the native conversation roles are all post-bead. A present-tense fact and an
   area to sharpen, not a front door this document will invent.
 - **The molecule-check interlock** — mostly unrealized; see above.
-- **The conversation model** — the shipped host-and-board composition is being
-  regrounded on the continuation-group primitives (`tk-h9pq5`); see
-  [how agents exist and converse](#how-agents-exist-and-converse).
 - **The composition boundary.** Much of the agent roster is still stood up by
   importing the gastown example pack and patching it. That mechanism is
   transitional; the direction is to lean less on gastown and more on Gas City's

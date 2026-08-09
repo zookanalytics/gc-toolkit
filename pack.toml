@@ -1,11 +1,9 @@
 # gc-toolkit — primary pack for a Gas Town city.
 #
-# Lane B (2026-05-11): gc-toolkit imports the gastown pack wholesale and
-# layers per-agent patches. See
-# specs/tk-0t1ip/pack-patch-timing-analysis.md for the
-# safety verdict and prerequisites; the prereqs (city-level
-# [imports.gastown] removed, [rigs.imports.gastown] removed) were
-# captured during Lane C cutover and remain in effect.
+# gc-toolkit imports the gastown pack wholesale and layers per-agent
+# patches. See specs/tk-0t1ip/pack-patch-timing-analysis.md for the
+# safety analysis and prerequisites: no city-level [imports.gastown],
+# no [rigs.imports.gastown].
 #
 # Native gc-toolkit agents (mechanik, polecat-codex,
 # _polecat-gemini, plus the *-thread
@@ -40,9 +38,9 @@ schema = 2
 [imports.gastown]
 # gastown composes from the public gascity-packs registry, resolved from
 # the user-global pack cache (the running binary pre-seeds that cache with
-# its embedded gastown PackFS at this pin). The per-city
-# .gc/system/packs/gastown tree was retired upstream — builtin packs are
-# no longer materialized into the city; see cmd/gc/embed_builtin_packs.go.
+# its embedded gastown PackFS at this pin). Builtin packs are not
+# materialized into a per-city .gc/system/packs tree; see
+# cmd/gc/embed_builtin_packs.go.
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gastown"
 version = "sha:33d3a430a67d1782ad364556cb566bdb01d0afe3"
 

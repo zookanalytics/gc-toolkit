@@ -110,8 +110,8 @@ fi
 
 base="$city/.gc/system/packs/gastown"
 if [ ! -d "$base" ]; then
-    # The .gc/system/packs tree was retired upstream — builtin/imported packs
-    # now resolve from the user-global pack cache at a content-addressed path
+    # Builtin/imported packs resolve from the user-global pack cache at a
+    # content-addressed path, not a per-city .gc/system/packs tree — a path
     # this check cannot locate without a gc affordance to resolve a transitive
     # import's dir. Skip (visible WARN) instead of erroring until gc-xdzml
     # reconnects the base lookup.

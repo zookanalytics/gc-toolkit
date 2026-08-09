@@ -16,8 +16,8 @@
 # the controller-driven respawn (handoff for controller-restartable, the
 # chained reset for on-demand named) but before the boot-time tier-1 query
 # fired. Without tier-2 the work bead is invisible to the inheriting session
-# and sits open until manual nudge. See rigs/gc-toolkit/specs/tk-fyzvk for
-# the full diagnostic.
+# and sits open until manual nudge. See specs/tk-fyzvk/ for the full
+# diagnostic.
 #
 # Tier-3 catches open patrol wisps left behind by pour-before-burn
 # cycle-recycle, including pathological multi-wisp accumulation from a
@@ -77,7 +77,7 @@ fragment="$dir/template-fragments/layered-startup-discovery.template.md"
 violations=()
 
 if [ ! -f "$fragment" ]; then
-    echo "1 startup-discovery gap(s) — see rigs/gc-toolkit/specs/tk-fyzvk for context"
+    echo "1 startup-discovery gap(s) — see specs/tk-fyzvk/ for context"
     echo "template-fragments/layered-startup-discovery.template.md: missing fragment file"
     exit 2
 fi
@@ -300,11 +300,11 @@ if [ -n "$boot_block" ]; then
 fi
 
 if [ ${#violations[@]} -eq 0 ]; then
-    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot carries the dedicated mol-deacon-patrol wisp read at both superseded sites, with no --status filter on either"
+    echo "refinery + deacon startup discovery includes tiers 2 and 3; all wisp queries are ephemeral-aware; witness reconcile is scoped to mol-witness-patrol; boot carries the dedicated mol-deacon-patrol wisp read at both sites (Step 2 and the quick-reference row), with no --status filter on either"
     exit 0
 fi
 
-echo "${#violations[@]} startup-discovery gap(s) — see rigs/gc-toolkit/specs/tk-fyzvk for context"
+echo "${#violations[@]} startup-discovery gap(s) — see specs/tk-fyzvk/ for context"
 for v in "${violations[@]}"; do
     echo "$v"
 done

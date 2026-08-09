@@ -172,7 +172,7 @@ cat > "$TMP/panes/lx-clean" <<'PANE'
 • Merged PR #242. Queue is empty.
 ❯
 PANE
-# The live false positive, verbatim: a bead-host that reported the outage to
+# The live false positive, verbatim: a conversation session that reported the outage to
 # the operator and went idle with the banner quoted in its own report.
 cat > "$TMP/panes/lx-quoting" <<'PANE'
   All three codex slots are affected. The banner reads:

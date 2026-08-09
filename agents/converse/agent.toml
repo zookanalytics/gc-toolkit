@@ -1,0 +1,21 @@
+# converse — holds visits: bounded sittings of a subject bead's dialogue.
+# Design authority: specs/tk-h9pq5/design-doc.md. Demand is the default
+# routed-pool predicate (visit beads stamped gc.routed_to=<rig>/gc-toolkit.converse);
+# no work_query override because a filed visit IS the demand.
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/agents/converse/{{.AgentBase}}"
+nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Rebuild the subject's state, prep, hold for the operator."
+# Long idle: a held visit is a live sitting; visit boundaries, not
+# timeouts, end it. Open visits outlive sessions either way — a dead
+# session's visit is recovered (witness patrol, or `gc bd reclaim` once
+# its lease expires) and a fresh session resumes it from the record.
+# Recovery is eventual, not prompt: the reconciler's reassign path
+# refuses a held visit by design, so witness/reclaim latency is the
+# bound on how long a stranded visit waits.
+idle_timeout = "8h"
+min_active_sessions = 0
+# Bounds concurrently LIVE sittings only (provider memory), not how many
+# visits may be open — open visits queue and hold their place
+# indefinitely at zero session cost.
+max_active_sessions = 6

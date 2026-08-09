@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
 # helm-surface-fixture.sh — the automatable assertions for the Phase 3
-# attention surface (epic tk-q4xaj; bead tk-qkags; design Phase 3).
+# attention surface (specs/bead-universe/design-doc.md, Phase 3).
 #
-# Phase 3's SHIP gate is the operator-judged capstone (board → pick a flagged
-# bead → land in its resumed universe → it answers a pre-seeded reach-requiring
-# question). That end-to-end demo is human-in-the-loop by design and is NOT
+# The operator-judged capstone (board → pick a bead → converse session
+# holds the conversation) is human-in-the-loop by design and is NOT
 # what this fixture replaces. What this fixture locks down is the deterministic
-# machinery underneath it, so a regression in the board's new behavior is caught
+# machinery underneath it, so a regression in the board's behavior is caught
 # automatically:
 #
-#   • the 4th anchor kind — a flagged bead (gc.attention=1) is admitted, lands
-#     in its own FLAGGED band, and floats above every other anchor;
-#   • the liveness glyph — the pack-namespaced-alias → bead-id join over
-#     `gc session list` (bead-host sessions only) resolves hot/warm/cold,
-#     and a live host keeps a decomposed anchor out of the stranded band;
+#   • the held glyph — visit presence (an open visit bead whose
+#     gc.continuation_group names the anchor) resolves held/not-held,
+#     and a held anchor stays out of the stranded band;
 #   • the row cap — the board never balloons past the cap, and --limit=0 opts
 #     out for tooling;
-#   • the --json contract — additive only (new `live` field present; existing
-#     fields intact);
-#   • verb dispatch + validation — board/open/flag/clear routing and the
-#     fail-closed arg checks.
+#   • the --json contract — every documented field present (the `held`
+#     visit fact is the one conversation glyph; there is no `live` field);
+#   • verb dispatch + validation — board/open/react/takeaway routing and the
+#     fail-closed arg checks;
+#   • the gather-failure contract — a failed gather errors and
+#     is never cached, a legit empty board still is, and a host with no
+#     timeout/gtimeout degrades instead of dying (stub gc + private PATH).
 #
 # HERMETIC BY DESIGN. The board's render/rank/glyph path is driven through the
-# tool's GC_HELM_FIXTURE hook (canned anchors.ndjson + sessions.json +
-# rigs.json under a temp dir), so these assertions write NOTHING to Dolt and
-# need no live city. A best-effort read-only smoke at the end proves the real
-# gather+contract on the live city; an OPT-IN flag→clear round-trip
-# (GC_HELM_FLAG_SMOKE_BEAD=<id>) exercises the live write path on a bead
+# tool's GC_HELM_FIXTURE hook (canned anchors.ndjson + visits.json +
+# sessions.json + rigs.json under a temp dir), so these assertions write
+# NOTHING to Dolt and need no live city. A best-effort read-only smoke at the
+# end proves the real gather+contract on the live city; an OPT-IN takeaway
+# round-trip (GC_HELM_SMOKE_BEAD=<id>) exercises the live write path on a bead
 # the operator chooses — the fixture never invents or closes a bead of its own.
 #
 # Run:   tools/helm-surface-fixture.sh
@@ -56,8 +56,8 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 B() { GC_HELM_FIXTURE="$FXDIR" "$TOOL" "$@"; }
 
 # ---------------------------------------------------------------------------
-# Seed: 1 rig, and four anchors — a flagged bead with a HOT host, a stranded
-# epic, a decision, and a second flagged bead with a WARM (suspended) host.
+# Seed: 1 rig, and four anchors — an epic with an OPEN VISIT (held), a
+# stranded epic, a decision, and a second epic with no visit.
 # Distinct ids make the ordering + glyph assertions unambiguous.
 # ---------------------------------------------------------------------------
 cat > "$FXDIR/rigs.json" <<'JSON'
@@ -66,50 +66,48 @@ cat > "$FXDIR/rigs.json" <<'JSON'
 JSON
 
 cat > "$FXDIR/anchors.ndjson" <<'JSON'
-{"id":"tk-flaghot","title":"CI mystery","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":3,"updated_at":"2026-06-07T03:00:00Z","description":"","progress":null,"children":[],"reason":"CI red, cause unknown","flagged_at":"2026-06-07T03:00:00Z"}
+{"id":"tk-held","title":"CI mystery","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":3,"updated_at":"2026-06-07T03:00:00Z","description":"","progress":null,"children":[{"id":"tk-hh1","status":"open","assignee":""}]}
 {"id":"tk-epic","title":"Big epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"references sl-zzz9","progress":null,"children":[{"id":"tk-a","status":"open","assignee":""},{"id":"tk-b","status":"closed","assignee":""}]}
 {"id":"sl-dec","title":"Pick a path","kind":"decision","source":"decision","rig":"signal-loom","prefix":"sl","priority":1,"updated_at":"2026-06-05T00:00:00Z","description":"","progress":null,"children":[]}
-{"id":"tk-flagwarm","title":"Stale spec","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[],"reason":"needs a re-read","flagged_at":"2026-06-06T00:00:00Z"}
+{"id":"tk-quiet","title":"Stale spec","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":4,"updated_at":"2026-06-06T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-hw1","status":"open","assignee":""}]}
 JSON
 
-# Sessions model the real shape: a bead-host alias is pack-namespaced
-# (<pack>.<bead-id>) and carries the bead-host template, so the board's
-# liveness join strips the leading "<pack>." and joins only bead-host
-# sessions. tk-flaghot has an ACTIVE host (hot); tk-flagwarm a SUSPENDED one
-# (warm); everything else cold. The refinery (non-bead-host template, aliased
-# with slashes) must NOT perturb the join.
+# Visit presence models the real shape: tk-held has an open visit in its
+# continuation group (held); everything else has none. Sessions feed ONLY
+# the child-owner liveness map now — a session (like the refinery here)
+# must NOT perturb the held glyph.
+cat > "$FXDIR/visits.json" <<'JSON'
+["tk-held"]
+JSON
 cat > "$FXDIR/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-1","alias":"gc-toolkit.tk-flaghot","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":false},
-  {"id":"lx-2","alias":"gc-toolkit.tk-flagwarm","template":"gc-toolkit.bead-host","state":"suspended","running":false,"attached":false},
   {"id":"lx-9","alias":"gc-toolkit/gc-toolkit.refinery","template":"gc-toolkit.refinery","state":"active","running":true}
 ]}
 JSON
 
-echo "── hermetic: 4th anchor (flagged) + FLAGGED band ──"
+echo "── hermetic: anchor kinds + severity bands ──"
 J="$(B --json)"
 eq   "board returns a JSON array"            "array"  "$(printf '%s' "$J" | jq -r 'type')"
 eq   "all four anchors admitted"             "4"      "$(printf '%s' "$J" | jq 'length')"
-eq   "flagged kind present"                  "2"      "$(printf '%s' "$J" | jq '[.[]|select(.kind=="flagged")]|length')"
-eq   "top row is a flagged bead"             "FLAGGED" "$(printf '%s' "$J" | jq -r '.[0].severity')"
-eq   "flagged floats above the stranded epic" "true"  "$(printf '%s' "$J" | jq -r '(.[0].rank_score) > (.[]|select(.kind=="epic").rank_score)')"
-has  "flagged frontier carries the reason"   "CI red" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flaghot").frontier')"
+eq   "epic kind present"                     "3"      "$(printf '%s' "$J" | jq '[.[]|select(.kind=="epic")]|length')"
+eq   "top row is the stranded epic (HIGH)"   "HIGH"   "$(printf '%s' "$J" | jq -r '.[0].severity')"
+eq   "the stranded epic floats above the decision" "true" "$(printf '%s' "$J" | jq -r '(.[]|select(.id=="tk-epic").rank_score) > (.[]|select(.id=="sl-dec").rank_score)')"
+has  "decision frontier is human-gated"      "human-gated" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="sl-dec").frontier')"
 
-echo "── hermetic: liveness glyph join (pack-namespaced alias → bead-id) ──"
-eq   "hot host resolves hot"   "hot"  "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flaghot").live')"
-eq   "suspended host is warm"  "warm" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-flagwarm").live')"
-eq   "no host is cold"         "cold" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").live')"
-eq   "live field is on every row (additive contract)" "4" "$(printf '%s' "$J" | jq '[.[]|select(.live!=null)]|length')"
-has  "hot glyph in human table"   "●" "$(B)"
-has  "warm glyph in human table"  "◐" "$(B)"
+echo "── hermetic: held glyph (visit presence, not sessions) ──"
+eq   "open visit resolves held"       "true"  "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-held").held')"
+eq   "no visit is not held"           "false" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").held')"
+eq   "no visit is not held (control)" "false" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-quiet").held')"
+eq   "held field is on every row"     "4"     "$(printf '%s' "$J" | jq '[.[]|select(.held!=null)]|length')"
+has  "held glyph in human table"      "●"     "$(B)"
 
-echo "── hermetic: live host ⇒ active, not stranded (tk-q4xaj.2) ──"
+echo "── hermetic: open visit ⇒ active, not stranded ──"
 # A decomposed epic with open children and ZERO in-progress is the classic
-# "stranded/HIGH" shape — UNLESS a live bead-host is resident, in which case
-# it is being worked via a 1:1 conversation, not via child polecats. Two
-# sibling epics with the identical stranded shape: tk-hosted has a HOT host,
-# tk-lonely has none. The fix must spare the hosted one and ONLY the hosted
-# one (liveness-gated, not a blanket suppression).
+# "stranded/HIGH" shape — UNLESS an open visit holds its conversation, in
+# which case it is being worked via that conversation, not via child
+# polecats. Two sibling epics with the identical stranded shape: tk-visited
+# has an open visit, tk-lonely has none. The spare must hit the visited one
+# and ONLY the visited one (visit-gated, not a blanket suppression).
 LIVE="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
 # updated_at must be RECENT, not a hardcoded date: this case asserts NORMAL,
 # and a fixed past date eventually crosses STALE_DAYS and bumps NORMAL→ELEVATED
@@ -118,27 +116,24 @@ LIVE="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
 # carry no other shell metacharacters).
 LIVE_RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat > "$LIVE/anchors.ndjson" <<JSON
-{"id":"tk-hosted","title":"Hosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-h1","status":"open","assignee":""},{"id":"tk-h2","status":"open","assignee":""}]}
-{"id":"tk-lonely","title":"Unhosted epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-l1","status":"open","assignee":""},{"id":"tk-l2","status":"open","assignee":""}]}
+{"id":"tk-visited","title":"Visited epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-h1","status":"open","assignee":""},{"id":"tk-h2","status":"open","assignee":""}]}
+{"id":"tk-lonely","title":"Unvisited epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$LIVE_RECENT","description":"","progress":null,"children":[{"id":"tk-l1","status":"open","assignee":""},{"id":"tk-l2","status":"open","assignee":""}]}
 JSON
-cat > "$LIVE/sessions.json" <<'JSON'
-{"sessions":[
-  {"id":"lx-h","alias":"gc-toolkit.tk-hosted","template":"gc-toolkit.bead-host","state":"active","running":true,"attached":true}
-]}
-JSON
+printf '["tk-visited"]\n' > "$LIVE/visits.json"
+printf '{}' > "$LIVE/sessions.json"
 LIVEJ="$(GC_HELM_FIXTURE="$LIVE" "$TOOL" --json)"
-eq     "hosted epic resolves hot"               "hot"    "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").live')"
-eq     "hosted epic is NORMAL, not HIGH"        "NORMAL" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").severity')"
-eq     "hosted epic is NOT stranded"            "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").stranded')"
-has    "hosted epic frontier reads in-conversation" "in conversation" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
-absent "hosted epic frontier drops (stranded)"  "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").frontier')"
-has    "hosted epic needs is open-to-join"      "open to join" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-hosted").needs')"
-has    "hosted epic still shows the hot glyph"  "●" "$(GC_HELM_FIXTURE="$LIVE" "$TOOL")"
-# Control: the unhosted sibling, identical shape but no host, stays HIGH.
-eq     "unhosted sibling stays cold"            "cold"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").live')"
-eq     "unhosted sibling stays HIGH"            "HIGH"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
-eq     "unhosted sibling stays stranded"        "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").stranded')"
-has    "unhosted sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
+eq     "visited epic resolves held"             "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").held')"
+eq     "visited epic is NORMAL, not HIGH"       "NORMAL" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").severity')"
+eq     "visited epic is NOT stranded"           "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").stranded')"
+has    "visited epic frontier reads in-conversation" "in conversation" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").frontier')"
+absent "visited epic frontier drops (stranded)" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").frontier')"
+has    "visited epic needs is open-to-join"     "open to join" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").needs')"
+has    "visited epic still shows the held glyph" "●" "$(GC_HELM_FIXTURE="$LIVE" "$TOOL")"
+# Control: the unvisited sibling, identical shape but no visit, stays HIGH.
+eq     "unvisited sibling is not held"          "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").held')"
+eq     "unvisited sibling stays HIGH"           "HIGH"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
+eq     "unvisited sibling stays stranded"       "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").stranded')"
+has    "unvisited sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
 rm -rf "$LIVE"
 
 echo "── hermetic: dead-owner in-progress is stuck, not moving (PROBLEM 1) ──"
@@ -216,7 +211,7 @@ eq  "unowned: floats above the owned convoy"   "true"    "$(printf '%s' "$UOJ" |
 eq  "owned convoy: kind is convoy"             "convoy"  "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").kind')"
 eq  "owned convoy: owned field is true"        "true"    "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").owned')"
 has "owned convoy: complete reads graduate"    "graduate" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").needs')"
-absent "owned convoy: not flagged unowned"     "unowned convoy" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").frontier')"
+absent "owned convoy: not marked unowned"      "unowned convoy" "$(printf '%s' "$UOJ" | jq -r '.[]|select(.id=="tk-owncv").frontier')"
 rm -rf "$UO"
 
 echo "── hermetic: --json contract stays additive (existing + new fields intact) ──"
@@ -229,7 +224,7 @@ for f in id rig kind title severity weight n_closed m_total open in_progress fro
 done
 
 echo "── hermetic: takeaway drives NEEDS (present → sentence; absent → terse, no bead-ids) ──"
-# The feature's core contract (bead tk-q4xaj.3): an anchor's gc.takeaway is the
+# The feature's core contract: an anchor's gc.takeaway is the
 # NEEDS sentence; when absent NEEDS is a TERSE deterministic phrase, never a
 # bead-id list; the mechanical heads/xref ids move to --json (open_heads,
 # cross_rig_refs). A whitespace-laden takeaway is collapsed to one line so it
@@ -278,11 +273,11 @@ echo "── hermetic: dedup (a bead matched by two gathers shows once) ──"
 DUP="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$DUP/rigs.json"; printf '{}' > "$DUP/sessions.json"
 cat > "$DUP/anchors.ndjson" <<'JSON'
 {"id":"tk-dup","title":"Dual","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-a","status":"open","assignee":""}]}
-{"id":"tk-dup","title":"Dual","kind":"flagged","source":"flagged","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[],"reason":"look here","flagged_at":"2026-06-07T00:00:00Z"}
+{"id":"tk-dup","title":"Dual","kind":"convoy","source":"convoy","owned":true,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-b","status":"closed","assignee":""}]}
 JSON
 DUPJ="$(GC_HELM_FIXTURE="$DUP" "$TOOL" --json)"
-eq   "flagged-epic dedups to a single row" "1"       "$(printf '%s' "$DUPJ" | jq 'length')"
-eq   "the surviving row is the FLAGGED one" "flagged" "$(printf '%s' "$DUPJ" | jq -r '.[0].kind')"
+eq   "doubly-gathered bead dedups to a single row" "1"    "$(printf '%s' "$DUPJ" | jq 'length')"
+eq   "the surviving row is the higher-ranked one"  "epic" "$(printf '%s' "$DUPJ" | jq -r '.[0].kind')"
 rm -rf "$DUP"
 
 echo "── hermetic: empty board ──"
@@ -291,15 +286,84 @@ has  "empty board says nothing floats" "Nothing floats" "$(GC_HELM_FIXTURE="$EMP
 eq   "empty board --json is []" "0" "$(GC_HELM_FIXTURE="$EMPTY" "$TOOL" --json | jq 'length')"
 rm -rf "$EMPTY"
 
+echo "── hermetic: failed gather → error + NO cache; legit-empty → cached quiet board ──"
+# These drive the REAL (non-fixture) gather path through a stub `gc` placed at
+# the front of a private PATH, with TMPDIR + GC_CITY_PATH pointed into the
+# sandbox so the cache lands (or not) somewhere we can assert on hermetically.
+# Nothing touches Dolt, the live city, or the operator's real cache dir.
+
+# (a) Rigs enumerate fine, but EVERY per-rig/convoy query dies (the
+# timeout/wedge/error shape). The board must print the explicit
+# gather-failure line — NOT the quiet empty-board message —, exit non-zero,
+# and write NO cache, so a transient failure can never be served as a false
+# "0 anchors" all-clear for the cache TTL.
+GF="$(mktemp -d)"; mkdir -p "$GF/bin" "$GF/rig/.beads" "$GF/tmp"
+cat > "$GF/bin/gc" <<GCEOF
+#!/bin/sh
+case "\$1 \$2" in
+  "rig list") printf '{"rigs":[{"name":"stubrig","path":"$GF/rig","prefix":"tk"}]}\n' ;;
+  *) exit 1 ;;
+esac
+GCEOF
+chmod +x "$GF/bin/gc"
+ec=0
+FOUT="$(TMPDIR="$GF/tmp" GC_CITY_PATH="$GF/city" PATH="$GF/bin:$PATH" "$TOOL" board 2>&1)" || ec=$?
+eq     "failed gather exits non-zero (3)"             "3"             "$ec"
+has    "failed gather prints the explicit error line" "gather failed" "$FOUT"
+absent "failed gather never reads as a quiet board"   "Nothing floats" "$FOUT"
+eq     "failed gather writes NO cache file"           ""              "$(find "$GF/tmp" -name 'board-*' -type f 2>/dev/null)"
+rm -rf "$GF"
+
+# (b) Control: a legitimately EMPTY board (every query answers, with valid
+# empty JSON) still prints the quiet message, exits 0, and IS cached.
+GE="$(mktemp -d)"; mkdir -p "$GE/bin" "$GE/rig/.beads" "$GE/tmp"
+cat > "$GE/bin/gc" <<GCEOF
+#!/bin/sh
+case "\$1 \$2" in
+  "rig list")     printf '{"rigs":[{"name":"stubrig","path":"$GE/rig","prefix":"tk"}]}\n' ;;
+  "bd list")      printf '[]\n' ;;
+  "convoy list")  printf '{"convoys":[]}\n' ;;
+  "session list") printf '{"sessions":[]}\n' ;;
+  *) printf '[]\n' ;;
+esac
+GCEOF
+chmod +x "$GE/bin/gc"
+ec=0
+EOUT="$(TMPDIR="$GE/tmp" GC_CITY_PATH="$GE/city" PATH="$GE/bin:$PATH" "$TOOL" board 2>&1)" || ec=$?
+eq  "legit empty board exits 0"                   "0"              "$ec"
+has "legit empty board prints the quiet message"  "Nothing floats" "$EOUT"
+eq  "legit empty board IS cached (1 cache file)"  "1"              "$(find "$GE/tmp" -name 'board-*' -type f 2>/dev/null | wc -l | tr -d ' ')"
+EOUT2="$(TMPDIR="$GE/tmp" GC_CITY_PATH="$GE/city" PATH="$GE/bin:$PATH" "$TOOL" board 2>&1 || true)"
+has "second glance serves from the cache"         "cached"         "$EOUT2"
+
+echo "── hermetic: no timeout/gtimeout on PATH → board degrades, does not die ──"
+# Stock-macOS shape: neither GNU timeout nor gtimeout exists. Build a minimal
+# command sandbox (symlinks to only the tools the board needs + the stub gc
+# from (b)) and run with PATH set to ONLY that dir — with_timeout must fall
+# through to running the command unbounded instead of the old hard death
+# ("[: : integer expression expected" + jq --argjson garbage).
+NT="$(mktemp -d)"; mkdir -p "$NT/bin" "$NT/tmp"
+for c in jq date mktemp rm cat head tail sed mkdir mv id cksum cut readlink dirname sort tr uniq wc; do
+    p="$(command -v "$c" 2>/dev/null || true)"; [ -n "$p" ] && ln -s "$p" "$NT/bin/$c"
+done
+ln -s "$GE/bin/gc" "$NT/bin/gc"
+if PATH="$NT/bin" command -v timeout >/dev/null 2>&1 || PATH="$NT/bin" command -v gtimeout >/dev/null 2>&1; then
+    printf '  skip  timeout-less PATH case (sandbox unexpectedly resolves a timeout)\n'
+else
+    ec=0
+    NOUT="$(TMPDIR="$NT/tmp" GC_CITY_PATH="$NT/city" PATH="$NT/bin" "$TOOL" board 2>&1)" || ec=$?
+    eq     "no-timeout PATH: board still runs (exit 0)"        "0"                  "$ec"
+    has    "no-timeout PATH: renders the quiet board"          "Nothing floats"     "$NOUT"
+    absent "no-timeout PATH: no integer-expression crash"      "integer expression" "$NOUT"
+    absent "no-timeout PATH: no jq --argjson garbage"          "invalid JSON text"  "$NOUT"
+fi
+rm -rf "$NT" "$GE"
+
 echo "── hermetic: verb dispatch + fail-closed validation ──"
 has  "help lists the open verb"  "open"  "$("$TOOL" help 2>&1 || true)"
-has  "help lists the flag verb"  "flag"  "$("$TOOL" help 2>&1 || true)"
-ec=0; "$TOOL" flag 2>/dev/null || ec=$?;            eq "flag with no bead errors (exit 2)"        "2" "$ec"
-ec=0; "$TOOL" flag tk-x 2>/dev/null || ec=$?;       eq "flag with no --reason errors (exit 2)"    "2" "$ec"
 ec=0; "$TOOL" open 2>/dev/null || ec=$?;            eq "open with no bead errors (exit 2)"        "2" "$ec"
-ec=0; "$TOOL" clear 2>/dev/null || ec=$?;           eq "clear with no bead errors (exit 2)"       "2" "$ec"
 ec=0; "$TOOL" bogus-verb 2>/dev/null || ec=$?;      eq "unknown verb errors (exit 2)"             "2" "$ec"
-# takeaway: a thin metadata-writer verb (like flag/clear), but bead-id AND text
+# takeaway: a thin metadata-writer verb; bead-id AND text
 # are BOTH required — missing either fails closed (exit 2). Whitespace-only text
 # counts as missing (it collapses to empty before the check).
 ec=0; "$TOOL" takeaway 2>/dev/null || ec=$?;        eq "takeaway with no bead errors (exit 2)"    "2" "$ec"
@@ -369,7 +433,7 @@ echo "── contract: operator surface is the runnable script, not a phantom gc
 # root gc help. Pack commands bind under the pack name (`gc <pack> <cmd>`), so
 # no top-level helm subcommand can exist. The runnable surface is THIS
 # script — reached via the prefix+b tmux picker (tmux-pick-helm.sh →
-# gc-helm.sh) or run directly — plus tools/gc-bead-host.sh. These
+# gc-helm.sh) or run directly. These
 # assertions lock the operator-facing docs to that reality.
 
 # (a) the documented script entry actually runs and prints its own usage.
@@ -381,9 +445,9 @@ has  "script -h prints usage"     "Usage:" "$("$TOOL" -h 2>&1 || true)"
 #     script name "gc-helm" (hyphen) is intentionally NOT matched.
 SURFACE_FILES=(
     "$HERE/../assets/scripts/gc-helm.sh"
-    "$HERE/../agents/bead-host/prompt.template.md"
-    "$HERE/../agents/bead-host/agent.toml"
-    "$HERE/../agents/bead-host/PROVENANCE.md"
+    "$HERE/../agents/converse/prompt.template.md"
+    "$HERE/../agents/converse/agent.toml"
+    "$HERE/../agents/converse/PROVENANCE.md"
 )
 phantom=""
 for f in "${SURFACE_FILES[@]}"; do
@@ -413,24 +477,14 @@ else
     printf '  skip  live board smoke (no reachable city)\n'
 fi
 
-# Opt-in: a full flag→board→clear + takeaway + takeaway --release round-trip on
+# Opt-in: a takeaway + takeaway --release round-trip on
 # an operator-chosen bead. The fixture never invents or closes a bead — it writes
-# only to the bead the operator named, and every leg self-cleans (clear undoes
-# flag; the unset undoes takeaway; the --release leg captures and restores the
+# only to the bead the operator named, and every leg self-cleans (the unset
+# undoes takeaway; the --release leg captures and restores the
 # bead's prior lifecycle fields and unsets the marker it set).
-if [ -n "${GC_HELM_FLAG_SMOKE_BEAD:-}" ]; then
-    echo "── live (opt-in): flag/clear + takeaway + takeaway --release round-trip on $GC_HELM_FLAG_SMOKE_BEAD ──"
-    bead="$GC_HELM_FLAG_SMOKE_BEAD"
-    "$TOOL" flag "$bead" --reason "helm-surface-fixture smoke" >/dev/null 2>&1 \
-        && ok "flag $bead" || bad "flag $bead" "exit 0" "non-zero"
-    eq "bead now carries gc.attention=1" "1" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.attention"] // ""')"
-    has "flagged bead appears on the live board" "$bead" \
-        "$("$TOOL" --json --refresh --timeout=8 2>/dev/null | jq -r '.[]|select(.kind=="flagged").id' || true)"
-    "$TOOL" clear "$bead" >/dev/null 2>&1 \
-        && ok "clear $bead" || bad "clear $bead" "exit 0" "non-zero"
-    eq "bead no longer carries gc.attention" "" \
-        "$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.attention"] // ""')"
+if [ -n "${GC_HELM_SMOKE_BEAD:-}" ]; then
+    echo "── live (opt-in): takeaway + takeaway --release round-trip on $GC_HELM_SMOKE_BEAD ──"
+    bead="$GC_HELM_SMOKE_BEAD"
     # takeaway: write the headline, read back the THREE metadata fields, then
     # unset them (the clean-up leg — takeaway has no inverse verb).
     "$TOOL" takeaway "$bead" "helm-surface-fixture smoke takeaway" --by host >/dev/null 2>&1 \
@@ -474,7 +528,7 @@ if [ -n "${GC_HELM_FLAG_SMOKE_BEAD:-}" ]; then
         --unset-metadata gc.proactive_reaction >/dev/null 2>&1 \
         && ok "restore lifecycle + unset the release smoke (cleanup)" || bad "restore the release smoke" "exit 0" "non-zero"
 else
-    printf '  skip  live flag→clear + takeaway round-trip (set GC_HELM_FLAG_SMOKE_BEAD=<id> to run)\n'
+    printf '  skip  live takeaway round-trip (set GC_HELM_SMOKE_BEAD=<id> to run)\n'
 fi
 
 echo ""

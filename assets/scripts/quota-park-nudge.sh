@@ -119,7 +119,7 @@ DEFAULT_BUSY='esc to interrupt|ctrl.{0,2}c to (stop|interrupt)'
 BUSY_RE="${QUOTA_PARK_BUSY:-$DEFAULT_BUSY}"
 
 # A *quoted* banner is a citation, not a banner. Found live on the first run of
-# this script: a bead-host had reported the Codex outage to the operator and
+# this script: a conversation session had reported the Codex outage to the operator and
 # gone idle with `▎ "You've hit your usage limit… try again at Aug 8th"` still
 # on screen. Providers print their banner bare — never inside quotes, never
 # under a blockquote marker — so dropping such lines costs nothing and takes
@@ -250,7 +250,7 @@ NOW="$(date +%s)"
 # that has actually been hit here. It cannot stop something that can WRITE to
 # STATE_DIR from writing the marker too, and nothing at this layer can: such a
 # writer runs as the same user this order does. The honest boundary is that an
-# accident can no longer forge ownership and a forgery has to be deliberate.
+# accident cannot forge ownership and a forgery has to be deliberate.
 STATE_MAGIC='#quota-park-nudge-state-v1'
 
 # True for a file this order wrote: a regular file — never a symlink, directory,
