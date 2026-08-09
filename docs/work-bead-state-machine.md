@@ -352,9 +352,50 @@ codex-named — so growing the subset needs no undoing of the shipped gate (PR #
 > a separate implementation bead; nothing in the shipped pre-open gate (PR #186)
 > blocks the path.
 
+**`UNSTABLE` is decided on the REQUIRED set, not on the composite (tk-zuoys).**
+`merge-skill.sh` held on `mergeStateStatus != CLEAN`, which treats `UNSTABLE` —
+advisory checks red, nothing actually gating — exactly like `BLOCKED`, where a
+required check or a required review genuinely gates. GitHub defines `UNSTABLE` as
+"mergeable with non-passing commit status"; a failing **required** check is
+reported as `BLOCKED` instead. So on any repo whose CI is red but whose checks
+are not *required*, no PR could ever reach `CLEAN` and refinery throughput for
+that rig was permanently zero — a hold the skill imposed on itself, not one
+GitHub was applying. That is the shape both rigs are in: `main` on gc-toolkit is
+governed by a ruleset requiring a **review** and no status check, and gascity's
+`main` has no rules at all. gascity PR#105 sat `APPROVED`/`MERGEABLE`/`UNSTABLE`
+with seven failing checks, every one pre-existing on `main` and none required; a
+plain `gh pr merge --squash` took it with no override of any kind. (The earlier
+PR#102 `--admin` precedent was therefore never necessary, and it obscured the
+real cause.)
+
+The repair is **not** "merge unless `BLOCKED`" — that is the composite over
+again, and it would land a red required check on any repo that grows one.
+`UNSTABLE` is resolved against the **required contexts protecting the base
+branch**, and only those are evaluated, at the head the pass validated:
+
+- **Zero required contexts** → the red checks are advisory and gate nothing; the
+  PR is mergeable.
+- **A required context red, still running, or absent from the head's rollup** →
+  held. `SUCCESS`/`NEUTRAL`/`SKIPPED` count as passing, matching how GitHub
+  satisfies a required check.
+- **The required set cannot be READ** → held. Unreadable is indistinguishable
+  from "nothing is required", and that guess is the one that merges a red
+  required check.
+
+The required set is the union of **rulesets**
+(`repos/{o}/{r}/rules/branches/{branch}`) and **classic branch protection**, the
+latter read from the **branch object** (`repos/{o}/{r}/branches/{branch}`) rather
+than from `.../branches/{branch}/protection` — "Get branch protection" requires
+**admin**, which the account the city acts as does not hold, and it answers `404`
+for a non-admin token exactly as it does for an unprotected branch. Reading that
+`404` as "nothing required" would be the same fail-open by another route. Every
+other state — `BLOCKED`, `BEHIND`, `DIRTY`, `UNKNOWN` — holds as before, and the
+`approval` member below is untouched by this and evaluated *before* it.
+
 **`approval` is checked explicitly, because `CLEAN` only folds it sometimes
 (tk-5niup).** `merge-skill.sh`'s terminal gate is GitHub's composite
-`mergeStateStatus=CLEAN`, whose comment long read as "mergeable, required checks
+`mergeStateStatus` (`CLEAN`, or `UNSTABLE` with the required set satisfied —
+above), whose comment long read as "mergeable, required checks
 green, **and approved**". That last clause holds only where the repo's ruleset
 *requires* a review — there, no approval means `REVIEW_REQUIRED` and `BLOCKED`.
 On a repo with **no** review requirement and no CI, `CLEAN` is true with **zero**

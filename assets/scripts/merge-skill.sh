@@ -34,7 +34,10 @@
 #             review when the anchor requires it (see below), and GitHub reports
 #             the PR mergeable (mergeStateStatus=CLEAN folds CI + base-current +
 #             no-conflict — and approval too, but ONLY on a repo that requires
-#             reviews; see the approval gate).
+#             reviews; see the approval gate). UNSTABLE is decided on the
+#             REQUIRED status-check set instead of on the composite, because it
+#             means "a check is red and nothing required is blocking" — see the
+#             mergeStateStatus gate (tk-zuoys).
 #   merge:    the anchor is re-read ONE more time, immediately before `gh pr
 #             merge`, and the ENTIRE anchor-local authorization set is recomputed
 #             from it — status, merge_result, PR number, merge_hold, every
@@ -688,6 +691,109 @@ url_repo_q() {
 canon_pr_url() {
   printf '%s' "${1:-}" \
     | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
+}
+
+# --- the REQUIRED status-check set protecting a branch (tk-zuoys) ------------
+# Which status checks actually GATE a merge into <branch>. Read for the UNSTABLE
+# arm of the mergeStateStatus gate below, where the whole question is whether the
+# red checks are gating or merely advisory.
+#
+# Answers THREE ways — known-with-contexts / known-empty / unknown — and the
+# caller HOLDS on unknown. A two-valued answer would have to render an unreadable
+# protection API as "nothing required", which is the one reading that can merge
+# past a red REQUIRED check.
+#
+# TWO sources, unioned, because a repository can gate a branch either way and the
+# two are independently configurable:
+#
+#   repos/<repo>/branches/<branch>          classic branch protection, via the
+#     .protection.required_status_checks    BRANCH object rather than
+#     .contexts + .checks[].context         branches/<branch>/protection.
+#
+#     Deliberately NOT the protection endpoint, which is the obvious one and is
+#     unusable here: "Get branch protection" requires ADMIN on the repository,
+#     and the account this skill acts as holds write, not admin (verified against
+#     both rigs — repos/<repo>.permissions.admin is false). It answers 404 for a
+#     non-admin token exactly as it does for an unprotected branch, so its reply
+#     cannot distinguish "nothing is required" from "you may not ask" — and
+#     reading that 404 as "nothing required" is precisely the fail-open this
+#     helper exists to avoid. The branch object carries the same required_status_
+#     checks summary and needs only read access.
+#
+#   repos/<repo>/rules/branches/<branch>    RULESETS — the modern mechanism, and
+#     .[] | required_status_checks rule     what both rigs actually use today
+#     .parameters.required_status_checks[]  (gc-toolkit's main is governed by a
+#     .context                              ruleset; classic protection is off).
+#
+#     Also read-access only. A repository with no rulesets answers `[]`, which is
+#     a definite empty, not a failure.
+#
+# EITHER read failing makes the answer unknown. A partial union is not a smaller
+# answer, it is a WRONG one: the source that failed is exactly where the required
+# context we would then fail to evaluate would have been.
+#
+# Cached per branch for the pass. Every anchor in a normal pass targets the same
+# base, and the answer cannot change usefully within one sweep.
+REQUIRED_CACHE=""
+REQ_STATE=""
+REQ_CONTEXTS=""
+REQ_SOURCE=""
+required_contexts_for() { # <branch>  -> REQ_STATE / REQ_CONTEXTS / REQ_SOURCE
+  local branch="$1" cached rules_raw rules_rc branch_raw branch_rc from_rules from_branch
+  REQ_STATE=""; REQ_CONTEXTS=""; REQ_SOURCE=""
+  if [ -z "$branch" ]; then
+    REQ_STATE="unknown"; REQ_SOURCE="no base branch to ask about"
+    return 0
+  fi
+
+  cached=$(printf '%s' "$REQUIRED_CACHE" | awk -F'\t' -v b="$branch" '$1 == b { print; exit }')
+  if [ -n "$cached" ]; then
+    REQ_STATE=$(printf '%s' "$cached" | cut -f2)
+    REQ_SOURCE=$(printf '%s' "$cached" | cut -f3)
+    # Contexts are cached comma-joined (the cache line is tab-delimited) and
+    # handed back newline-delimited, the shape every caller reads.
+    REQ_CONTEXTS=$(printf '%s' "$cached" | cut -f4 | tr ',' '\n' | sed '/^$/d')
+    return 0
+  fi
+
+  # A branch name containing `/` (an integration/* target) is passed through
+  # unencoded: both endpoints route the whole remaining path as the branch name.
+  rules_raw=$(gh_api_origin "repos/$ORIGIN_REPO/rules/branches/$branch" 2>/dev/null); rules_rc=$?
+  branch_raw=$(gh_api_origin "repos/$ORIGIN_REPO/branches/$branch" 2>/dev/null); branch_rc=$?
+
+  # SHAPE, not just exit status. `gh api` prints the error body to stdout on a
+  # non-2xx, so a failed read still produces well-formed JSON; and a zero status
+  # with a payload that is not the documented shape (an error object, a proxy
+  # page) would reduce silently to "no contexts" — the same fail-open as a 404
+  # read as "unprotected".
+  if [ "$rules_rc" -ne 0 ] \
+     || ! printf '%s' "$rules_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    REQ_STATE="unknown"
+    REQ_SOURCE="rules/branches/$branch unreadable (rc=$rules_rc)"
+  elif [ "$branch_rc" -ne 0 ] \
+     || ! printf '%s' "$branch_raw" | jq -e 'type == "object" and has("name")' >/dev/null 2>&1; then
+    REQ_STATE="unknown"
+    REQ_SOURCE="branches/$branch unreadable (rc=$branch_rc)"
+  else
+    from_rules=$(printf '%s' "$rules_raw" | jq -r '
+      [ .[]
+        | select(type == "object")
+        | select((.type // "") == "required_status_checks")
+        | (.parameters.required_status_checks // [])[]
+        | (.context // empty) ] | .[]' 2>/dev/null)
+    # `contexts` is the legacy list and `checks[].context` the current one; a
+    # repository can report either, so both are read and the union deduped.
+    from_branch=$(printf '%s' "$branch_raw" | jq -r '
+      [ (.protection.required_status_checks.contexts // [])[],
+        ((.protection.required_status_checks.checks // [])[] | (.context // empty)) ] | .[]' 2>/dev/null)
+    REQ_CONTEXTS=$(printf '%s\n%s\n' "$from_rules" "$from_branch" | sed '/^$/d' | sort -u)
+    REQ_STATE="known"
+    REQ_SOURCE="rulesets + branch protection on '$branch'"
+  fi
+
+  REQUIRED_CACHE=$(printf '%s%s\t%s\t%s\t%s\n' "$REQUIRED_CACHE" "$branch" \
+    "$REQ_STATE" "$REQ_SOURCE" "$(printf '%s' "$REQ_CONTEXTS" | tr '\n' ',' | sed 's/,$//')")
+  return 0
 }
 
 # The same question, asked in jq of a bead's own metadata, for the two HOLD guards
@@ -1443,17 +1549,101 @@ while IFS= read -r row; do
     fi
   fi
   # CI + base-current + no-conflict: GitHub's composite mergeStateStatus. CLEAN
-  # is the only mergeable state with every REQUIRED check green. It also folds
+  # is the mergeable state with every REQUIRED check green. It also folds
   # approval, but only where the repo's ruleset requires a review — on an
   # unprotected repo CLEAN is true with zero approvals, which is what the
-  # explicit `approval` member above exists to cover. BLOCKED (missing
-  # approval/required check), BEHIND (base moved), UNSTABLE (a required check
-  # pending/failing), DIRTY (conflict), UNKNOWN (GitHub still computing) all hold
-  # the merge and retry.
-  if [ "$merge_state" != "CLEAN" ]; then
-    echo "merge-skill: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}', mergeable='${mergeable:-?}'); merge held (anchor $id)"
-    held=$((held + 1)); continue
-  fi
+  # explicit `approval` member above exists to cover. BLOCKED (a required check
+  # or a required review genuinely gating), BEHIND (base moved), DIRTY
+  # (conflict), UNKNOWN (GitHub still computing) hold the merge and retry.
+  #
+  # UNSTABLE is the one non-CLEAN state that is NOT a gate by itself (tk-zuoys),
+  # and treating it as one zeroed refinery throughput outright. GitHub defines it
+  # as "mergeable with non-passing commit status": a check is red, and NOTHING
+  # required is blocking — a failing REQUIRED check is reported as BLOCKED
+  # instead. Both of this city's rigs configure zero required status checks, so
+  # on either of them a red advisory check made every PR permanently unmergeable
+  # under the old `!= CLEAN` rule, however green, approved and gated it was.
+  # gascity PR#105 sat at UNSTABLE with 7 failing checks, all pre-existing on
+  # main and none required; a plain `gh pr merge --squash` took it with no
+  # override at all. The hold was this script's, not GitHub's.
+  #
+  # So UNSTABLE is decided on the REQUIRED SET rather than on the composite:
+  # resolve the contexts that actually gate the base branch and evaluate ONLY
+  # those against the head's check rollup. Deliberately NOT relaxed to "merge
+  # unless BLOCKED" — that reading is GitHub's composite over again, and it would
+  # merge a red required check on any repository that grows one. Zero required
+  # contexts is what makes an UNSTABLE PR mergeable, and it is established by
+  # reading the protection, never assumed from the state name.
+  #
+  # The `approval` member above is untouched by this and runs BEFORE it: an
+  # unapproved PR is still held by that gate, and by BLOCKED, exactly as before.
+  case "$merge_state" in
+    CLEAN) : ;;
+    UNSTABLE)
+      required_contexts_for "$base"
+      if [ "$REQ_STATE" != "known" ]; then
+        # FAIL CLOSED. Unreadable protection cannot establish that the red checks
+        # are advisory, and merging on the state name alone is the composite-only
+        # reading this gate exists to replace. One idle pass, against landing a
+        # red required check.
+        echo "merge-skill: PR#$num is UNSTABLE and the REQUIRED status-check set for base '$base' could not be read ($REQ_SOURCE); cannot tell a red advisory check from a red required one, so merge held (anchor $id)"
+        held=$((held + 1)); continue
+      fi
+      if [ -z "$REQ_CONTEXTS" ]; then
+        # The gascity shape: red CI that gates nothing at GitHub.
+        echo "merge-skill: PR#$num is UNSTABLE but base '$base' requires NO status checks ($REQ_SOURCE); the red checks are advisory and gate nothing — proceeding (anchor $id)"
+      else
+        # Required contexts exist: every one of them must be green AT THE HEAD
+        # this pass validated. Read lazily, only on this arm, so the hot path's
+        # PR payload and its field-shape guard are untouched.
+        rollup_raw=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json statusCheckRollup 2>/dev/null)
+        if [ -z "$rollup_raw" ] \
+           || ! printf '%s' "$rollup_raw" | jq -e 'type == "object" and has("statusCheckRollup")' >/dev/null 2>&1; then
+          echo "merge-skill: PR#$num is UNSTABLE and base '$base' requires $(printf '%s' "$REQ_CONTEXTS" | tr '\n' ' ' | sed 's/ $//'), but the head's check rollup is unreadable; merge held (anchor $id)"
+          held=$((held + 1)); continue
+        fi
+        # One verdict line per REQUIRED context. A rollup entry is a CheckRun
+        # (name + conclusion) or a StatusContext (context + state); SUCCESS,
+        # NEUTRAL and SKIPPED count as passing, matching how GitHub itself
+        # satisfies a required check. A required context with NO entry is MISSING
+        # — never green — and a CheckRun still running has no conclusion yet, so
+        # it lands on the same side. Every rollup entry for a context must pass,
+        # so a red run cannot be masked by a green sibling.
+        req_json=$(printf '%s\n' "$REQ_CONTEXTS" | jq -R -s 'split("\n") | map(select(length > 0))' 2>/dev/null)
+        verdicts=""
+        if [ -n "$req_json" ]; then
+          verdicts=$(printf '%s' "$rollup_raw" | jq -r --argjson req "$req_json" '
+            def name_of: (.name // .context // "");
+            def green:
+              if ((.conclusion // "") | tostring | length) > 0
+                then ((.conclusion | ascii_upcase) as $c
+                      | $c == "SUCCESS" or $c == "NEUTRAL" or $c == "SKIPPED")
+              elif ((.state // "") | tostring | length) > 0
+                then ((.state | ascii_upcase) == "SUCCESS")
+              else false end;
+            (.statusCheckRollup // []) as $rollup
+            | $req[] as $r
+            | ([ $rollup[] | select(type == "object") | select(name_of == $r) ]) as $hits
+            | if ($hits | length) == 0 then "MISSING\t\($r)"
+              elif ([ $hits[] | select(green | not) ] | length) > 0 then "RED\t\($r)"
+              else "GREEN\t\($r)" end' 2>/dev/null)
+        fi
+        if [ -z "$verdicts" ]; then
+          echo "merge-skill: PR#$num is UNSTABLE and the required-check verdicts for base '$base' could not be computed; merge held (anchor $id)"
+          held=$((held + 1)); continue
+        fi
+        notgreen=$(printf '%s\n' "$verdicts" | awk -F'\t' '$1 != "GREEN" { printf "%s(%s) ", $2, $1 }')
+        if [ -n "$notgreen" ]; then
+          echo "merge-skill: PR#$num is UNSTABLE and a REQUIRED status check is not green at head $head_oid: ${notgreen% }; merge held (anchor $id)"
+          held=$((held + 1)); continue
+        fi
+        echo "merge-skill: PR#$num is UNSTABLE but every REQUIRED status check on base '$base' is green at head $head_oid ($(printf '%s' "$REQ_CONTEXTS" | tr '\n' ' ' | sed 's/ $//')); the remaining red checks are advisory — proceeding (anchor $id)"
+      fi
+      ;;
+    *)
+      echo "merge-skill: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}', mergeable='${mergeable:-?}'); merge held (anchor $id)"
+      held=$((held + 1)); continue ;;
+  esac
 
   # --- merge (single writer; IMMEDIATE, not --auto) -----------------------
   # --squash matches the repo's squash-merge convention (commit "(#N)" tail).
