@@ -210,8 +210,33 @@ Pass (a) — close-on-land, in two roles. mr-mode keeps the anchor (a convoy
 graduating, or any mr-mode bead) OPEN as the PR's gating bead (merge-push step
 4); this pass is what later lands and closes it.
 
-(a-norm0) MERGE_RESULT RECOVERY, the first half of `check-set-heal.sh` (tk-wsxd0)
-— runs before everything else in this loop. Every pass below, and the check-set
+(a-reopen) CLOSED-BUT-NOT-LANDED, the first phase of `check-set-heal.sh` (tk-vnlll)
+— runs before (a-norm0), because (a-norm0) and every pass below it enumerate OPEN
+beads, so none of them can see an anchor that was CLOSED at PR-creation. Under the
+close-on-land contract `closed` MEANS landed, which makes such a bead a FALSE DURABLE
+RECORD as well as an unreachable one: the ledger reads "landed" while the PR rots, and
+nothing escalates because nothing can see it. signal-loom sl-jcr4 was closed carrying
+`pr_url` and no `merge_result`, and PR#518 then sat OPEN for four days — head matching
+the anchor's `gc.work_commit`, base main, mergeStateStatus CLEAN, all 11 checks SUCCESS
+and APPROVED by an admin — with zero escalations; the observer could only report it as
+"ANCHORLESS", which is a report, not a repair. The signature is narrow: `closed` + a PR
+reference + `merge_result` ABSENT + that PR still OPEN. A genuinely landed anchor
+carries `merge_result=merged` (or `abandoned`/`retargeted`), so a closed bead with ANY
+merge_result has a disposition recorded by a pass that knew what it was doing and is
+left alone. The repair is ONLY to reopen: a reopened bead is by construction the shape
+(a-norm0) already handles, so it is re-stamped and gated on the SAME pass by code that
+is already reviewed. The reopen is deliberately the FIRST write — stamping merge_result
+onto a still-closed bead would make it a non-candidate for both phases and strand it
+permanently — and the closed set is bounded by ONE `gh pr list --state open` before any
+per-bead work, since hundreds of legitimately closed beads per rig carry a `pr_url`.
+It refuses to guess on the same terms (a-norm0) does: review/rework children, a live
+route, a PR a live anchor already drives, two candidates for one PR, and any PR whose
+identity does not certify are all excluded — and a bead it already reopened ONCE that
+has been closed AGAIN is escalated rather than reopened, because a live writer is
+re-closing it and flapping would fight that writer every idle pass.
+
+(a-norm0) MERGE_RESULT RECOVERY, the second phase of `check-set-heal.sh` (tk-wsxd0)
+— runs before everything else below in this loop. Every pass below, and the check-set
 normalization that follows, enumerates gating anchors on the `merge_result`
 metadata field. So an anchor missing `merge_result` ENTIRELY is not merely
 un-healed: it is INVISIBLE to all of them at once, and there is no pass that can

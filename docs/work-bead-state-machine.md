@@ -1153,6 +1153,117 @@ pass. A gating anchor whose assignee is not the canonical refinery identity is
 therefore **flagged** (`assignee_noncanonical`, bounded to the offending value) and
 never rewritten — the identity is a routing decision an operator owns.
 
+## The closed anchor: when `closed` is a lie
+
+The repair above enumerates **open** beads, so it inherits the assumption every
+other pass makes — that the anchor still exists. An anchor that was **closed at
+PR-creation** breaks it, and does so in a way that is worse than invisibility.
+Under close-on-land, `closed` *means landed*. So such a bead is not only
+unreachable by the merge skill, the pre-open resolver, the observer and the
+`merge_result` recovery — all of which enumerate open beads — it is also a **false
+durable record**: the ledger asserts the work shipped while its PR sits open.
+
+signal-loom `sl-jcr4` was closed on 2026-08-05 carrying
+`pr_url=.../pull/518` and no `merge_result`. PR#518 then sat open for four days
+while satisfying every non-codex gate — head matching the anchor's
+`gc.work_commit`, base `main`, `mergeStateStatus` CLEAN, all 11 checks SUCCESS,
+APPROVED by an admin at the live head — with zero escalations. The anchorless scan
+below did report it, but that scan is *detect-and-surface only*; a report is not a
+repair, and nothing consumed it.
+
+The repair (`check-set-heal.sh` phase 0a, ahead of the `merge_result` recovery in
+the same script) keys on a signature narrow enough to leave every legitimate close
+alone:
+
+> `closed` **+** a PR reference **+** `merge_result` **absent** **+** that PR still
+> **open**
+
+`merge_result` is what separates the two: a genuinely landed anchor is closed with
+`merge_result=merged`, and the observer's other dispositions record `abandoned` or
+`retargeted`. A closed bead carrying **any** `merge_result` has a disposition
+written by a pass that knew what it was doing, and is left alone — resurrecting an
+anchor something deliberately retired is worse than one more pass of a stall.
+
+**The repair is only to reopen.** A reopened bead is, by construction, exactly the
+shape the `merge_result` recovery above already handles, so it is re-stamped,
+gated, and given a signoff on the *same pass*, by code that is already reviewed and
+tested. That is also why the reopen is deliberately the **first** write rather than
+the last. Stamping `merge_result` first and reopening second would, on a dropped
+second write, leave a *closed* bead carrying a `merge_result` — no longer a
+candidate for either phase, and still invisible to every open-bead pass: a
+permanent strand minted by the repair itself. Reopening first cannot do that; if
+everything after it fails, the bead is an ordinary recovery candidate and the next
+pass finishes the job. The exposure that ordering costs is nil, because an open
+bead with no `merge_result` is invisible to the merge skill regardless.
+
+**The closed set is bounded before it is touched.** Hundreds of beads per rig are
+legitimately closed while carrying a `pr_url` — every anchor closed before
+`merge_result` existed — so certifying each against `gh` on every idle pass would
+be unaffordable. The cheapest discriminator is also the narrowest, so it runs
+first: one `gh pr list --state open` names every PR that could possibly qualify,
+and a closed bead whose PR is not in that set costs nothing further. On gc-toolkit
+that takes 413 closed candidates to 14, and the child exclusions take those to 0.
+An unreadable list fails **closed** — an empty result from a failed call is
+indistinguishable from "nothing is open" while meaning the opposite.
+
+Beyond the exclusions the recovery phase already applies (children by
+`anchor_bead` / `task_kind` / `source_review_bead` / `source_anchor_bead` / a live
+`gc.routed_to`, a non-refinery assignee, ambiguity, and full PR certification), two
+guards are specific to reopening:
+
+- **One anchor per PR, asked of live beads only.** A live bead carrying a
+  `merge_result` for this PR *is* the anchor, so the closed bead is a spent
+  predecessor and reopening it would mint a second anchor. The guard keys on a live
+  `merge_result`, **not** on "any live bead names the PR": review and rework
+  children name the PR and carry no `merge_result` by construction, and a live child
+  over a *closed* anchor is the strongest evidence the close was a mistake — it
+  exists to gate a bead that is no longer there. Refusing on those would decline to
+  repair exactly the case that most needs it, and the reopened anchor is what the
+  child was waiting for.
+- **Reopen once, then escalate — durably.** The reopen stamps `reopened_not_landed`.
+  A bead that carries it *confirmed* and is closed *again* was re-closed by a live
+  writer, so reopening it a second time would flap the bead against that writer every
+  idle pass. It is handed to a human the same way the observer hands over an
+  out-of-band close: `gc.routed_to=human` plus a `blocked_reason` on the bead, then
+  one mail to the mayor. A stderr line is not an escalation — it leaves the PR open,
+  untracked and owned by nobody, which is the original failure wearing a log message.
+  The route doubles as the once-only gate: a bead carrying `gc.routed_to` is excluded
+  from the closed-candidate projection, so no later pass reaches the branch again.
+
+- **The marker is staged, because "already reopened" and "reopen never landed" are
+  otherwise the same value.** The marker has to be written and read back *before* the
+  status flip — without a durable marker a later re-close cannot be told from a first
+  repair — which means a *dropped* status write leaves the marker behind on a bead
+  that was never open. Read as a bare flag, that is indistinguishable from a re-close,
+  so a single lost write diverted the bead into the never-reopen branch permanently:
+  every later pass logged and moved on while the PR stayed invisible. So the marker
+  records which:
+
+  | `reopened_not_landed` | meaning | next pass |
+  |---|---|---|
+  | `PR#<n>` | reopen **attempted**; the status write may never have landed | **retry** the reopen |
+  | `PR#<n>@open` | reopen **confirmed**: the status read back `open` | **escalate**, never flap |
+
+  The confirmation is written only *after* the status reads back open, never batched
+  with it: batched, a non-atomic update whose status half was lost would leave a
+  confirmed marker on a bead that never opened, and the next pass would escalate a
+  dropped write as if it were a live writer. Staged this way every failure lands on
+  the safe side — a lost status flip is retried, and the only cost of a lost
+  confirmation is one extra reopen before the escalation fires.
+
+**What closed it.** Worth separating the repair from its cause. The live mr path
+does not close at PR-creation — all four rigs symlink gc-toolkit's
+`mol-refinery-patrol.toml`, which is close-on-land — and the stock GasTown formula
+that *does* (`gc bd close $WORK --reason "Pull request ready: $PR_URL"`, preserved
+in `doctor/check-base-artifact-collision/base-snapshots/`) stamps
+`merge_result=pull_request` in the same chained command, so it cannot produce this
+shape either. `sl-jcr4`'s history shows the ordinary work-bead done-gate instead:
+one update stamping `gc.work_outcome=shipped` + `gc.work_commit`, then a close 0.65s
+later, with `merge_result` never written. That is an agent running the normal "I
+shipped it" sequence on a bead that was an mr anchor with a live PR — a class of
+writer rather than a single code path, which is why the heal arm is the durable
+remedy rather than a fix at one call site.
+
 ## Anchorless PRs: reconciling from the other side
 
 Every automated path in close-on-land starts from the **bead**: the merge skill,
