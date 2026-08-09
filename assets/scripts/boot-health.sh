@@ -65,7 +65,18 @@ STATE_OK=1
 mkdir -p "$STATE_DIR" 2>/dev/null || STATE_OK=0
 { [ -d "$STATE_DIR" ] && [ -w "$STATE_DIR" ]; } || STATE_OK=0
 
-gc_call() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@" 2>/dev/null || true; }
+# Bounded, with the exit status PRESERVED. Expiry is a non-zero rc — 124 for the
+# timeout, 128+n where the hard kill lands first (137 on the hosts tested) — so a
+# caller can tell a call that wedged mid-flight from one that was refused
+# outright. The report step needs that distinction; the probes do not.
+gc_call_rc() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@"; }
+
+# The probe form. Output IS the answer for a read, and a failed read is an empty
+# one — which every caller below already treats as "no evidence" (absent pane, no
+# wisps). Swallowing the status is right for a read and WRONG for the mail: the
+# report is the only thing this order produces, so a send that failed must never
+# be recorded as one that landed. See the three-way split in step 4.
+gc_call() { gc_call_rc "$@" 2>/dev/null || true; }
 
 # --- state ------------------------------------------------------------------
 # A file whose first line is not exactly $STATE_MAGIC is not ours: not read,
@@ -156,7 +167,14 @@ AGE_TXT="no in_progress patrol wisp"
 [ -n "$WISP_AGE" ] && AGE_TXT="newest patrol wisp $((WISP_AGE / 60))m old"
 
 SUMMARY="$DEACON cold for $((COLD / 60))m — no pane change, $AGE_TXT"
-gc_call gc mail send "$REPORT_TO" -s "BOOT_HEALTH: $SUMMARY" -m "boot-health (exec order, no LLM) has seen $DEACON static for $((COLD / 60)) minutes.
+
+# Delivery is CHECKED, not assumed. `last_report` is what silences the next
+# REPORT_EVERY (default 6h) window, so recording a send that never happened
+# suppresses the only alert this order produces — and it does that during
+# precisely the wedged-runtime incident the order exists to catch. Three
+# outcomes, the same split quota-park-nudge draws around its escalation mail.
+MAIL_RC=0
+gc_call_rc gc mail send "$REPORT_TO" -s "BOOT_HEALTH: $SUMMARY" -m "boot-health (exec order, no LLM) has seen $DEACON static for $((COLD / 60)) minutes.
 
   pane            unchanged since $(date -u -d "@$cold_since" '+%Y-%m-%dT%H:%M:%SZ') (digits normalized)
   busy marker     absent
@@ -171,8 +189,30 @@ kill a healthy deacon. See lx-llzfk and tk-qdhnd.
 
 To inspect:
   gc session peek $DEACON --lines 50
-  gc bd list --assignee=$DEACON --status=in_progress --include-infra --json"
+  gc bd list --assignee=$DEACON --status=in_progress --include-infra --json" >/dev/null 2>&1 || MAIL_RC=$?
 
-last_report="$NOW"
-save_state
-echo "boot-health: reported to $REPORT_TO — $SUMMARY"
+# `save_state` runs on every branch regardless: pane_hash and cold_since are the
+# episode's memory and are already updated by step 3. Only `last_report` — the
+# pacing clock — is conditional, because only it claims a mail went out.
+if [ "$MAIL_RC" -eq 0 ]; then
+    # Confirmed: seen to completion. Pace the next report off it.
+    last_report="$NOW"
+    save_state
+    echo "boot-health: reported to $REPORT_TO — $SUMMARY"
+elif [ "$MAIL_RC" -eq 124 ] || [ "$MAIL_RC" -ge 128 ]; then
+    # AMBIGUOUS, and deliberately paced as sent. `gc mail send` writes durable
+    # mail through Dolt, so a bound that expires after the write commits leaves a
+    # mail in the recipient's inbox that this script never heard about. Retrying
+    # would send a second one for the same episode, during exactly the slow-
+    # runtime incident this order has to tolerate. Recorded, and said out loud as
+    # unconfirmed so the operator knows the pacing rests on a guess.
+    last_report="$NOW"
+    save_state
+    echo "boot-health: report UNCONFIRMED (rc=$MAIL_RC) to $REPORT_TO — paced as sent, not resent this episode — $SUMMARY"
+else
+    # A fast rejection: nothing was delivered, so nothing is paced. `last_report`
+    # is left exactly as it was, which keeps this episode DUE and retries on the
+    # next 2m pass — and unlike the ambiguous case, that retry cannot duplicate.
+    save_state
+    echo "boot-health: report FAILED (rc=$MAIL_RC) to $REPORT_TO — retries next cycle — $SUMMARY"
+fi
