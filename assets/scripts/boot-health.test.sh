@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Hermetic test for boot-health.sh.
 #
-# A fake `gc` on PATH answers the three reads (pane peek, wisp list, mail send)
-# and RECORDS the argv of the wisp query, so the flag assertions pin runtime
-# behaviour rather than grepping the source. No dependency on the live city,
-# Dolt, the deacon, or the network.
+# A fake `gc` on PATH answers the three reads (pane peek, wisp list, mail send),
+# RECORDS the argv of the wisp query — so the flag assertions pin runtime
+# behaviour rather than grepping the source — and lets each scenario SCRIPT the
+# mail's exit status. No dependency on the live city, Dolt, the deacon, or the
+# network.
 #
 # The defect this file exists to pin: the wisp query FALSE-EMPTIES against a
 # healthy deacon, which for a report-only detector means mailing the mayor a
@@ -20,7 +21,13 @@
 # one; (d) an absent wisp reports without asserting a status; (e) the wisp
 # survives a flood of unrelated rows; (f) busy marker and pane movement each
 # clear the episode; (g) one report per episode, then silence until
-# REPORT_EVERY; (h) recovery re-arms.
+# REPORT_EVERY; (h) recovery re-arms; (i) the report paces the next window only
+# when the mail was actually DELIVERED — a failed send leaves the episode DUE.
+#
+# (i) guards the second defect this file has to hold: `last_report` silences the
+# next REPORT_EVERY window, so a send recorded as delivered when it was refused
+# suppresses the only alert this order produces, during exactly the wedged-
+# runtime incident it exists to catch.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +52,14 @@ cat > "$TMP/bin/gc" <<'STUB'
 case "$1 $2" in
   "session peek") printf '%s\n' "${STUB_PANE:-deacon idle prompt}" ;;
   "bd list")      printf '%s\n' "$*" >> "$ARGV_LOG"; printf '%s\n' "${STUB_WISPS:-[]}" ;;
-  "mail send")    shift; printf 'MAIL\n' >> "$MAIL_LOG"; printf '%s\n' "$*" >> "$MAIL_BODY" ;;
+  "mail send")    shift; printf 'MAIL\n' >> "$MAIL_LOG"; printf '%s\n' "$*" >> "$MAIL_BODY"
+                  # The ATTEMPT is recorded above before the outcome below, so a
+                  # scenario can tell "never tried" from "tried and refused".
+                  case "${STUB_MAIL:-ok}" in
+                    ok)   exit 0 ;;
+                    fail) exit 42 ;;  # a fast rejection: nothing was delivered
+                    hang) sleep 30 ;; # outlives the bound -> killed (124, or 137)
+                  esac ;;
   *)              exit 0 ;;
 esac
 STUB
@@ -76,10 +90,20 @@ run() { # $1=passes, rest=env assignments
     local i
     for ((i = 0; i < passes; i++)); do pass "$@"; done
 }
+# Same as pass(), but hands back what the script SAID. The delivery split below
+# is only observable in the script's own output and in `last_report`.
+pass_out() {
+    env BOOT_HEALTH_STATE_DIR="$TMP/state" MAIL_LOG="$TMP/mail" MAIL_BODY="$TMP/body" \
+        ARGV_LOG="$TMP/argv" "$@" bash "$SCRIPT" 2>&1 || true
+}
 # grep -c prints 0 AND exits 1 on no match, so take the count from the
 # assignment and let the failure branch supply the value, never both.
 mails()  { local n; n="$(grep -c '^MAIL$' "$TMP/mail" 2>/dev/null)" || n=0; printf '%s\n' "$n"; }
 mailed() { [ "$(mails)" -gt 0 ] && echo yes || echo no; }
+state_get() { awk -F= -v k="$1" '$1 == k {print $2}' "$TMP/state/state" 2>/dev/null; }
+# Has the pacing clock been written? An absent state file reads as "no" rather
+# than erroring, so a scenario that never got that far still answers.
+paced()  { local v; v="$(state_get last_report)"; [ "${v:-0}" -gt 0 ] && echo yes || echo no; }
 
 # --- (a) A YOUNG wisp is healthy in BOTH live statuses. ----------------------
 # `open` is the regression: a just-poured wisp is open until the deacon claims
@@ -166,6 +190,60 @@ pass STUB_WISPS="$(wisp in_progress 60)" BOOT_HEALTH_REPORT_AFTER=0
 pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999
 pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999
 eq "$(mails)" 2 "recovery re-arms: a new episode reports again"
+
+# --- (i) The report is PACED only when it was actually DELIVERED. ------------
+# `last_report` is what silences the next REPORT_EVERY window (6h by default),
+# so writing it for a send that never landed suppresses the only alert this
+# order produces — during precisely the wedged-runtime incident it exists to
+# catch. Before the split, every gc call ran through a helper ending in
+# `|| true`, so a definite mail failure printed "reported", paced the clock, and
+# went quiet for 6h. Three outcomes, discriminated by the send's exit status.
+
+# Confirmed (rc 0): paced, and not resent inside the window.
+reset
+pass STUB_WISPS='[]' STUB_MAIL=ok BOOT_HEALTH_REPORT_AFTER=0
+OUT="$(pass_out STUB_WISPS='[]' STUB_MAIL=ok BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999)"
+eq "$(mails)" 1 "confirmed: the report is sent"
+has "$OUT" "boot-health: reported to" "confirmed: reports delivery"
+eq "$(paced)" yes "confirmed: last_report is paced"
+pass STUB_WISPS='[]' STUB_MAIL=ok BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999
+eq "$(mails)" 1 "confirmed: not resent inside the REPORT_EVERY window"
+
+# Fast rejection (rc 42): nothing was delivered, so NOTHING is paced and the
+# episode stays DUE. This is the regression the split exists to prevent.
+reset
+pass STUB_WISPS='[]' STUB_MAIL=fail BOOT_HEALTH_REPORT_AFTER=0
+OUT="$(pass_out STUB_WISPS='[]' STUB_MAIL=fail BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999)"
+eq "$(mails)" 1 "failed: the send was attempted"
+has   "$OUT" "report FAILED (rc=42)" "failed: names the failure"
+hasnt "$OUT" "reported to" "failed: does NOT claim it reported"
+eq "$(paced)" no "failed: last_report is NOT paced (the next window stays open)"
+eq "$(grep -c '^cold_since=0' "$TMP/state/state" || true)" 0 \
+   "failed: the episode clock is still saved (only the pacing clock is withheld)"
+pass STUB_WISPS='[]' STUB_MAIL=fail BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999
+eq "$(mails)" 2 "failed: still DUE — the next pass retries"
+
+# Bound expired mid-send (124, or 128+n if the hard kill lands first): AMBIGUOUS.
+# `gc mail send` writes durable mail through Dolt, so the write may well have
+# committed — paced as sent so a retry cannot duplicate, and said out loud.
+reset
+pass STUB_WISPS='[]' STUB_MAIL=hang BOOT_HEALTH_REPORT_AFTER=0 \
+     BOOT_HEALTH_CALL_TIMEOUT=1 BOOT_HEALTH_KILL_AFTER=1
+OUT="$(pass_out STUB_WISPS='[]' STUB_MAIL=hang BOOT_HEALTH_REPORT_AFTER=0 \
+       BOOT_HEALTH_REPORT_EVERY=99999 BOOT_HEALTH_CALL_TIMEOUT=1 BOOT_HEALTH_KILL_AFTER=1)"
+eq "$(mails)" 1 "unconfirmed: the send was attempted"
+has   "$OUT" "report UNCONFIRMED" "unconfirmed: says so out loud"
+hasnt "$OUT" "reported to" "unconfirmed: does NOT claim confirmed delivery"
+eq "$(paced)" yes "unconfirmed: paced as sent (a resend could duplicate a mail that did land)"
+pass STUB_WISPS='[]' STUB_MAIL=hang BOOT_HEALTH_REPORT_AFTER=0 \
+     BOOT_HEALTH_REPORT_EVERY=99999 BOOT_HEALTH_CALL_TIMEOUT=1 BOOT_HEALTH_KILL_AFTER=1
+eq "$(mails)" 1 "unconfirmed: not resent this episode"
+
+# The probes keep the SWALLOWING form: a failed read is an empty one, which the
+# script already treats as "no evidence". Only the mail's status is load-bearing.
+reset
+pass STUB_PANE='' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+eq "$(mailed)" no "an unreadable pane exits quietly rather than reporting"
 
 echo
 echo "boot-health.test.sh: $PASS passed, $FAIL failed"
