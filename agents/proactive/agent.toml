@@ -72,6 +72,11 @@ max_active_sessions = 2
 # literal (no shell metacharacters in rig names). The ranking jq is mirrored in
 # tools/gc-proactive.sh `board_rank`; keep the two in sync (gate-asserted).
 work_query = '''
+_='' # env-prefix landing. The reconciler prepends VAR='…' to line 1; before the
+# `case` keyword that is a shell syntax error (exit 2, demand permanently 0). A
+# bare assignment line absorbs the prefix AND persists it for the gc calls below
+# (POSIX: assignments with no command word affect the current shell) — a `:` or
+# `true` landing would silently drop the prefixed variable instead.
 case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '[]'; exit 0 ;; esac
 target="{{.Rig}}/gc-toolkit.proactive"
 active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
@@ -85,6 +90,9 @@ if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
 # alone, so spawns bypassed it; this mirrors that GC_PROACTIVE_ENABLED gate and
 # city-cap shed in COUNT form (0 = no demand = no spawn). Full rationale: tk-8j2g1.
 scale_check = '''
+_='' # env-prefix landing — same rationale as work_query's line 1: an env
+# assignment cannot precede the `case` keyword, and a bare assignment both
+# absorbs and persists the prefixed variable.
 case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '0'; exit 0 ;; esac
 target="{{.Rig}}/gc-toolkit.proactive"
 active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
