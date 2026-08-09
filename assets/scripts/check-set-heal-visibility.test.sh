@@ -254,7 +254,12 @@ mkdir -p "$TMP/bin"
 
 # Beads. One per line:
 #   id|assignee|merge_result|pr_url|pr_number|branch|merged_target|anchor_bead|
-#   task_kind|source_review_bead|routed_to|check_set|target|source_anchor_bead
+#   task_kind|source_review_bead|routed_to|check_set|target|source_anchor_bead|
+#   merge_hold|rebase_hold
+# Fields 15/16 are the OPERATOR HOLD markers (tk-44xkw). The literal `__TRUE__` in
+# either emits a JSON BOOLEAN rather than a string, modelling a writer that stores
+# `merge_hold: true` — the spelling that makes an unguarded `ascii_downcase` abort
+# the whole jq program.
 # Field 7 is `merged_target` (what the merge skill validates against); field 13 is
 # the plain `target` a polecat records at hand-off. They are separate on purpose:
 # the backfill must prefer the recorded intent over the PR's live base.
@@ -292,6 +297,12 @@ b-FORKHEAD|||https://github.com/o/r/pull/744|744|polecat/feat-forkhead|main|||||
 b-URLINC|||https://github.com/o/r/pull/745|745|polecat/feat-urlinc|main||||||
 b-URLINCUMB||pull_request|https://github.com/o/r/pull/745||polecat/feat-urlincumb|main|||||codex||
 b-CLOSEDOK|||https://github.com/o/r/pull/760|760|polecat/feat-closedok|main||||||
+b-MHOLD|||https://github.com/o/r/pull/720|720|polecat/feat-mhold|main||||||||operator-gated-graduation|
+b-RHOLD|||https://github.com/o/r/pull/721|721|polecat/feat-rhold|main|||||||||rebasing-by-hand
+b-BOOLHOLD|||https://github.com/o/r/pull/722|722|polecat/feat-boolhold|main||||||||__TRUE__|
+b-HOLDOFF|||https://github.com/o/r/pull/723|723|polecat/feat-holdoff|main||||||||false|
+b-HOLDDUP|||https://github.com/o/r/pull/724|724|polecat/feat-holddup|main||||||||operator-parked|
+b-HOLDDUPTWIN|||https://github.com/o/r/pull/724|724|polecat/feat-holddup-twin|main||||||
 B
 
 # CLOSED beads, and the reopen marker some of them carry. Kept OUT of $TMP/beads (which
@@ -367,6 +378,11 @@ cat > "$TMP/prs" <<'P'
 766|OPEN|main|polecat/somebody-elses-branch|
 767|OPEN|main|polecat/feat-closedflap|
 768|OPEN|main|polecat/feat-closedrouted|
+720|OPEN|main|polecat/feat-mhold|
+721|OPEN|main|polecat/feat-rhold|
+722|OPEN|main|polecat/feat-boolhold|
+723|OPEN|main|polecat/feat-holdoff|
+724|OPEN|main|polecat/feat-holddup|
 P
 
 # --- git stub. ------------------------------------------------------------------
@@ -589,7 +605,7 @@ rnl_set() {
 
 # Emit one bead as a JSON object, with LIVE metadata overlays applied.
 emit() {
-  local id="$1" assignee mr prurl prnum branch target ab tk srev routed cs sab
+  local id="$1" assignee mr prurl prnum branch target ab tk srev routed cs sab mh rh
   local row; row=$(awk -F'|' -v i="$id" '$1==i{print; exit}' "$FAKE_BEADS")
   assignee=$(printf '%s' "$row" | cut -d'|' -f2)
   prurl=$(purl_for "$id")
@@ -604,6 +620,8 @@ emit() {
   routed=$(stamp_for "$id" gc.routed_to)
   [ -n "$routed" ] || routed=$(printf '%s' "$row" | cut -d'|' -f11)
   sab=$(printf '%s' "$row" | cut -d'|' -f14)
+  mh=$(printf '%s' "$row" | cut -d'|' -f15)
+  rh=$(printf '%s' "$row" | cut -d'|' -f16)
   local plaintgt; plaintgt=$(printf '%s' "$row" | cut -d'|' -f13)
   mr=$(mr_for "$id"); prnum=$(pr_for "$id"); cs=$(cs_for "$id")
   # merged_target: a phase-0 backfill overlays the stored target.
@@ -625,7 +643,8 @@ emit() {
          --arg pn "$prnum" --arg br "$branch" --arg tg "$target" --arg ab "$ab" \
          --arg tk "$tk" --arg sr "$srev" --arg rt "$routed" --arg cs "$cs" \
          --arg anc "$anc" --arg hf "$hflag" --arg pt "$plaintgt" --arg sab "$sab" \
-         --arg mrh "$mrh" --arg mrs "$mrs" --arg st "$st" --arg rnl "$rnl" '
+         --arg mrh "$mrh" --arg mrs "$mrs" --arg st "$st" --arg rnl "$rnl" \
+         --arg mh "$mh" --arg rh "$rh" '
     {id: $id, title: ("impl " + $id), status: $st,
      assignee: (if $as == "" then null else $as end),
      metadata: ({}
@@ -640,6 +659,8 @@ emit() {
        + (if $tk == "" then {} else {task_kind: $tk} end)
        + (if $sr == "" then {} else {source_review_bead: $sr} end)
        + (if $sab == "" then {} else {source_anchor_bead: $sab} end)
+       + (if $mh == "" then {} elif $mh == "__TRUE__" then {merge_hold: true} else {merge_hold: $mh} end)
+       + (if $rh == "" then {} elif $rh == "__TRUE__" then {rebase_hold: true} else {rebase_hold: $rh} end)
        + (if $rt == "" then {} else {"gc.routed_to": $rt} end)
        + (if $anc == "" then {} else {assignee_noncanonical: $anc} end)
        + (if $hf == "" then {} else {check_set_healed: $hf} end)
@@ -995,6 +1016,67 @@ recovered b-NOBRANCH && bad "(NOBRANCH) a PR-referencing bead with no branch is 
 recovered b-POLECAT && bad "(POLECAT) a polecat-assigned bead is live WIP, not a parked anchor" \
                    || ok "(POLECAT) polecat-assigned bead left alone"
 
+# (MHOLD/RHOLD) THE OPERATOR GATE (tk-44xkw, folded into tk-rlm94). A bead an
+# operator held BY HAND matches every other exclusion above perfectly — gascity
+# gc-1g2p1 (merge_hold=operator-gated-graduation, pr_number=60, branch set, no child
+# markers, no route) survives the whole filter. Recovering it stamps merge_result on
+# a deliberately-held bead, phase 1 then arms `codex` and dispatches a review polecat
+# onto a PR that cannot land, and that burn repeats every idle wake because the gate
+# can never be satisfied. This pass was the LAST hold-marker sibling reading neither
+# field.
+recovered b-MHOLD && bad "(MHOLD) a bead under merge_hold must NEVER be recovered — an operator took it out of the queue by hand" \
+                  || ok "(MHOLD) merge_hold-held bead left invisible (the hold means what it means everywhere else)"
+dispatched_for b-MHOLD && bad "(MHOLD) a held bead must not have a signoff dispatched onto its PR" \
+                       || ok "(MHOLD) no review polecat burned on a held PR"
+recovered b-RHOLD && bad "(RHOLD) rebase_hold is the narrower gate and vetoes recovery just as merge_hold does" \
+                  || ok "(RHOLD) rebase_hold-held bead left invisible"
+
+# (BOOLHOLD) the marker is not always a STRING: a writer storing JSON yields
+# `merge_hold: true`. `ascii_downcase` on a boolean ABORTS the jq program — whose
+# error the candidate projection deliberately discards — so an unguarded comparison
+# does not merely miss this veto, it takes the WHOLE candidate set down with it.
+# `tostring` first is what makes the boolean spelling hold like the string one.
+recovered b-BOOLHOLD && bad "(BOOLHOLD) a JSON-boolean merge_hold must hold too" \
+                     || ok "(BOOLHOLD) boolean-spelled merge_hold vetoes recovery (tostring before ascii_downcase)"
+# ...and the guard must not have eaten the projection along the way: the ordinary
+# candidates in the same set are still recovered, which is what distinguishes a
+# working veto from a jq abort that silently empties the phase.
+recovered b-RECOVER \
+  && ok "(BOOLHOLD) a boolean marker in the set does not abort the projection — unheld anchors still recover" \
+  || bad "(BOOLHOLD) the boolean marker took the whole candidate set down with it"
+
+# (HOLDOFF) an explicitly-OFF marker is not a hold. Truthiness matches
+# merge-skill.sh's reading exactly, so a stale `merge_hold=false` cannot freeze a
+# bead out of the repair forever.
+recovered b-HOLDOFF \
+  && ok "(HOLDOFF) merge_hold=false is not a hold — the bead is recovered normally" \
+  || bad "(HOLDOFF) an explicitly-off marker must not veto recovery"
+dispatched_for b-HOLDOFF \
+  && ok "(HOLDOFF) and it is gated in the same pass, like any other recovered anchor" \
+  || bad "(HOLDOFF) an unheld recovered anchor must still be gated"
+
+# (HOLDDUP) the hold is a SKIP, not an exclusion from CANDIDACY — and the difference
+# is only visible here. Refusing ambiguity is a property of the WHOLE candidate set:
+# two merge_result-less candidates for one PR are both skipped precisely because
+# nothing can tell which is the anchor. Filter the held one out of the set and its
+# unheld twin is suddenly the only candidate for PR#724 — unambiguous, and PROMOTED
+# to anchor on a PR an operator parked. Held in the set, both are refused, which is
+# the same rule the closed-candidate projection already states about dropped rows.
+recovered b-HOLDDUP && bad "(HOLDDUP) a held candidate must never be recovered" \
+                    || ok "(HOLDDUP) the held half of a duplicate pair is not recovered"
+recovered b-HOLDDUPTWIN \
+  && bad "(HOLDDUP) the UNHELD twin must NOT be promoted — a held rival still makes PR#724 ambiguous, and picking an anchor over an operator hold is the wrong-anchor hazard the guard exists for" \
+  || ok "(HOLDDUP) the unheld twin is refused too — the held rival still collides with it"
+grep -q 'PR#724 .* MULTIPLE merge_result-less candidates' "$TMP/err1" \
+  && ok "(HOLDDUP) the collision is reported as ambiguity on PR#724, not silently dropped" \
+  || bad "(HOLDDUP) the ambiguity warning must name PR#724 (err: $(grep 'MULTIPLE' "$TMP/err1" || echo none))"
+# The skip line itself is pinned on the UNAMBIGUOUS held bead: for b-HOLDDUP the
+# ambiguity guard runs first and reports that instead, which is the ordering the
+# guard above depends on.
+printf '%s\n' "$OUT1" | grep -q 'b-MHOLD is under an operator hold (merge_hold=operator-gated-graduation)' \
+  && ok "(MHOLD) the skip names the marker it read, so a held bead is diagnosable" \
+  || bad "(MHOLD) the hold skip must report the marker it read"
+
 # (SRCANCH) review tk-ej3wq finding #3. reconcile-merged-prs.sh files stale-base
 # rebase children carrying branch + pr_url + pr_number + source_anchor_bead and NO
 # merge_result — the candidate shape exactly. Routing alone does not exclude them:
@@ -1176,8 +1258,8 @@ done < <(awk -F'|' '{print $1}' "$TMP/beads")
   && ok "(INVARIANT) no anchor is left visible-to-merge-skill with an empty merged_target" \
   || bad "(INVARIANT) these anchors would merge with NO retarget guard:$UNPROTECTED"
 
-printf '%s\n' "$OUT1" | grep -q '8 anchor(s) restored to visible gating' \
-  && ok "run 1 reports 8 anchors restored" || bad "run 1 recovery count (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q '9 anchor(s) restored to visible gating' \
+  && ok "run 1 reports 9 anchors restored" || bad "run 1 recovery count (got: $OUT1)"
 
 # --- Run 2: idempotence. Stamped anchors are no longer candidates. --------------
 : > "$TMP/err2"
