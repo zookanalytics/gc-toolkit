@@ -661,11 +661,39 @@ work wins:
    wisp and claim it `in_progress`.
 
 This shape is enforced at pack-validate time by
-`doctor/check-startup-discovery/`; if `gc doctor` flags a patrol
-agent's prompt as missing tier 2 or 3, expect missed-MERGE_READY-
-style stalls. The reference implementation lives in
-`agents/refinery/prompt.template.md` and
-`agents/deacon/prompt.template.md`.
+`doctor/check-startup-discovery/`; if `gc doctor` flags an agent's
+startup-discovery block as missing tier 2 or 3, expect
+missed-MERGE_READY-style stalls. The reference implementation is a
+single shared fragment in this pack —
+`template-fragments/layered-startup-discovery.template.md` — which
+defines four named blocks,
+`layered-startup-discovery-{boot,deacon,refinery,witness}`, appended
+to those agents' prompts via `inject_fragments_append` in
+`pack.toml`. There are no per-agent patrol prompt templates to read:
+this pack ships none, and the gastown base prompts of the same name
+carry no tier structure. The check inspects each block's region
+separately.
+
+Only refinery and deacon are held to the full walk. The other two
+consumers share the fragment for its ephemeral-awareness rules
+rather than for tier coverage:
+
+- **witness** — reconcile-only by design. It monitors other agents'
+  work rather than receiving branch-bearing work beads of its own,
+  so tiers 2 and 3 are deliberately not asserted against it. What
+  is asserted instead: every `--type=molecule` query carries
+  `--include-infra`, and every one is scoped to `mol-witness-patrol`
+  roots — its reconcile *burns* surplus wisps, so an unscoped query
+  could adopt or destroy an unrelated molecule root.
+- **boot** — reads the *deacon's* wisp as a freshness signal rather
+  than reconciling one of its own, so the tiers do not apply. Its
+  block is held to a positive assertion that the patrol-wisp read
+  still exists at both call sites the fragment supersedes, carrying
+  `--include-infra`, `--limit=0`, `--json`, the deacon `--assignee`
+  and the `mol-deacon-patrol` title — and to the *absence* of any
+  `--status` filter, since a just-poured wisp sits at `open` through
+  the deacon's burn-then-claim window and any status filter
+  false-empties the read against a healthy deacon.
 
 ### Lifecycle
 
