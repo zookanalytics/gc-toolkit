@@ -826,6 +826,143 @@ universal close reason:
 Reading "merged" as the close reason for everything would be wrong: an ephemeral
 child closes with a written note and no merge at all.
 
+## Disposition: a close that hands the work to a successor
+
+Not every close is a landing. A bead also closes because its work **moved** —
+**re-homed** into another rig's store (a pack defect filed from a rig gets
+worked in the gc-toolkit store), **folded** into a bead that absorbed it,
+**fixed upstream** by a commit somebody else already landed, or found to be a
+**duplicate**. Each of those is a sound disposition, and each one hands the work
+to a **successor bead**.
+
+A disposition that does not name its successor is **indistinguishable from a
+careless close** — and it is invisible in exactly the place the question gets
+asked: the store the bead lived in. On 2026-08-09 an operator ruling re-homed
+eight `su-` beads into the gc-toolkit store. Five were correct re-homes whose
+mirrors had been created **seconds before** the close. All eight wrote a bare
+`[Closed]` with no successor pointer, so from the rig store nothing pointed
+anywhere.
+
+What that ambiguity cost, measured: a refinery read the signature as a careless
+sweep and escalated; the mayor acted on the escalation and reopened two beads;
+the refinery found the actor and retracted, but confirmed the two reopens as
+correct; a re-verification found **both of those confirmations were also
+wrong** — one bead had been folded into a target that said so in its own notes,
+the other fixed upstream by a named commit. Four wrong conclusions, two agents,
+one missing field. Nobody was careless. The signal was absent.
+
+So the rule, and it is the same shape as the rest of this doc's law — a bead
+must represent itself accurately: **a close with no reason and no successor
+pointer is not a close.** The sharper form the incident actually proved: the
+failure was not a missing decision, it was a **decision invisible from the store
+where the bead lived**.
+
+A disposition therefore records three things on the **closed** bead:
+
+| Field | Value |
+|---|---|
+| `gc.superseded_by` | the successor's bead id |
+| `gc.superseded_by_store` | `rig:<name>` — the store that id resolves in, the same store-ref form the runtime stamps as `gc.root_store_ref` |
+| close reason | populated prose naming kind, successor and store — never bare |
+
+The store half is not decoration. A bead id alone (`tk-h0tst`) is unresolvable
+from another store: `bd` reads the ledger it is pinned to, so a reader in the
+`su` store gets "no issues found" for a perfectly live successor unless they
+already know which rig `tk-` belongs to. And the close reason is what a human
+reads first — `bd show` renders `Close reason:` in its header and does **not**
+render metadata, so the reason is what the reader deciding "was this close
+sound?" actually sees. `[Closed]` is what a bare close renders as, and that
+string is the signature the incident misread.
+
+The successor carries the back-pointer (`gc.supersedes`,
+`gc.supersedes_store`), so "what did this absorb?" is answerable from the target
+side too.
+
+**Two key conventions exist in the wild**, and the read side must accept both:
+`gc.superseded_by` (the canonical form above, and what the retro-stamping sweep
+of the incident's own beads wrote) and a bare `superseded_by` on a handful of
+older `tk`/`su` beads. Write the canonical one; when you *look* for a successor,
+check either — a reader that knows one key reproduces this section's failure with
+a new coat of paint. Both are **flat dotted keys**, not nested objects: it is
+`jq '.metadata["gc.superseded_by"]'`, and `.metadata.gc.superseded_by` silently
+yields null.
+
+**One writer:** `assets/scripts/bead-rehome.sh`. This is a case where an
+instruction would not have helped — "remember the pointer" is invisible when
+skipped, and the actor skipping it is mid-ruling with eight beads to close. The
+script's ordering is the load-bearing part: it stamps the pointer, **reads it
+back**, and closes only if it stuck. Stamp-then-close can only ever leave an
+**open bead carrying a pointer** — visible, self-explanatory, trivially
+finishable. Close-then-stamp loses the pointer forever on a failed write and
+reproduces the defect exactly. For the same reason it refuses to stamp a
+successor that does not exist in the named store (a pointer that resolves to
+nothing is worse than none — it reads as settled), refuses to overwrite a
+disposition naming a *different* successor (that is someone else's decision),
+and does **not** `--force` past a refused close (that flag also overrides a
+foreign assignee and an open-children hold; see [When the close itself is
+refused](#when-the-close-itself-is-refused)).
+
+An **already-closed** origin is the script's repair path, not an error — that is
+the shape every pre-rule bare close left behind, and there are hundreds of them.
+It stamps the pointer and appends the disposition to the notes; `bd` has no flag
+that rewrites a close reason after the fact, so on those beads the note is the
+only prose that can still be added, and it is appended rather than replacing
+(`--notes` REPLACES; `--append-notes` does not). Nothing is reopened.
+
+### The read side: absence of a successor is not proof of a false close
+
+Every wrong conclusion in that incident was drawn on the read side, and all of
+them from a **single-store search**. `su-cccs`'s own repaired close reason says
+it outright: *"my 04:36Z reopen was an error — I searched for a successor only
+within the su rig."*
+
+Reopening a closed bead is a write against somebody else's decision, so it owes
+the same city-wide search the deacon's finding-dedupe already requires (*"your
+rig store is not the city"*). First ask the bead itself, under **both** key
+conventions:
+
+```bash
+bd --db "<store>/.beads" show "<bead>" --json \
+  | jq -r '.[0] | (.metadata["gc.superseded_by"] // .metadata.superseded_by // "no pointer")
+                  + " @ " + (.metadata["gc.superseded_by_store"] // .metadata.superseded_by_store // "store unrecorded")'
+```
+
+Then read its notes and close reason, and only then search **every** store for a
+successor —
+
+```bash
+gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do
+  HITS=$(bd --db "$RP/.beads" search "<distinctive words from the title>" \
+           --status all --limit 20 --json 2>/dev/null \
+         | jq -r '.[]? | .id + " [" + .status + "] " + .title')
+  [ -n "$HITS" ] && { echo "== $RP"; echo "$HITS"; }
+done
+```
+
+A missing pointer on an older bead means the record is **silent**, not that the
+close was wrong. Silence is a reason to look wider — and, once resolved, to
+stamp the pointer the bead should have carried.
+
+### Attribution: who closed it
+
+The `issues` row carries no `closed_by`, and Dolt's own commit log cannot supply
+it — every write commits as `beads@local`, so attribution exists only at the
+application layer. It does exist there: each store's `events` table has an
+`actor` column, and one query ends the "who did this and why" round-trip that
+opened this incident.
+
+```bash
+gc dolt sql -q "SELECT issue_id, event_type, actor, created_at
+                FROM su.events WHERE issue_id = 'su-cccs' ORDER BY created_at"
+```
+
+The database name is the store's bead prefix (`tk`, `su`, `sl`, `gc`, `lx`).
+`bead-rehome.sh` passes `--actor` explicitly, because `bd` otherwise defaults it
+to `$BEADS_ACTOR`, then `git user.name`, then `$USER` — a close run from a shell
+with no `BEADS_ACTOR` records a human username for an agent's action. Surfacing
+that actor in `bd show` for close events would remove the query entirely; that
+is upstream `beads` work, not a pack change.
+
 ## Merge: one writer of merged-truth
 
 No worker performs the merge by hand. The merge is the terminal check, and it is
