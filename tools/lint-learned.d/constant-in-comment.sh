@@ -27,13 +27,14 @@ set -uo pipefail
 
 # Assignment shape: optional declaration keywords, NAME, = or :=, value.
 kw='(export|const|final|static|let|var|readonly|local|val|def|public|private|protected|declare|-r|-i)'
-assign_re="^[[:space:]]*($kw[[:space:]]+)*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*(=|:=)[[:space:]]*(.*)$"
+assign_re="^[[:space:]]*(${kw}[[:space:]]+)*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*(=|:=)[[:space:]]*(.*)$"
 num_re='^(-?[0-9]+(\.[0-9]+)?)([^0-9A-Za-z_.].*)?$'
 dq_re='^"([^"]*)"'
 sq_re="^'([^']*)'"
 
 # Escape a literal for use inside an extended regex.
 ere_escape() {
+    # shellcheck disable=SC2016 # the $ is a literal ERE metachar, not expansion
     printf '%s' "$1" | sed -e 's/[][\.|$(){}?+*^\\/]/\\&/g'
 }
 

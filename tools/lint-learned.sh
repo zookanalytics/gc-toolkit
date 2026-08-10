@@ -65,7 +65,7 @@ ran=0
 summary=()
 
 for detector in "$detector_dir"/*; do
-    [ -f "$detector" ] && [ -x "$detector" ] || continue
+    if [ ! -f "$detector" ] || [ ! -x "$detector" ]; then continue; fi
     name="$(basename "$detector")"
     ran=$((ran + 1))
 
