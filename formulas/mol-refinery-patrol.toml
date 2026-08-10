@@ -230,7 +230,8 @@ onto a still-closed bead would make it a non-candidate for both phases and stran
 permanently — and the closed set is bounded by ONE `gh pr list --state open` before any
 per-bead work, since hundreds of legitimately closed beads per rig carry a `pr_url`.
 It refuses to guess on the same terms (a-norm0) does: review/rework children, a live
-route, a PR a live anchor already drives, two candidates for one PR, and any PR whose
+route, a bead an operator has parked (`merge_hold`/`rebase_hold`), a PR a live anchor
+already drives, two candidates for one PR, and any PR whose
 identity does not certify are all excluded — and a bead it already reopened ONCE that
 has been closed AGAIN is escalated rather than reopened, because a live writer is
 re-closing it and flapping would fight that writer every idle pass.
@@ -261,7 +262,14 @@ in every other repository. It refuses to guess: a rework/review child, a PR alre
 another open anchor, two candidates naming one PR, live polecat WIP, and the
 pre-open state (a branch with no PR is indistinguishable from ordinary in-flight
 work) are all excluded — stamping a child would silently cancel the in-flight-rework
-hold merge-skill.sh derives from its empty `merge_result`. Running first is what
+hold merge-skill.sh derives from its empty `merge_result`. So is a bead an operator has
+PARKED (`merge_hold`/`rebase_hold`, read the way merge-skill.sh reads them): such a bead
+is held precisely BY being out of the anchor set, so it survives every exclusion above
+by construction, and enrolling it would mutate a parked bead and send (a-norm) to arm
+its gate and dispatch a signoff onto a PR nobody can land (tk-44xkw). That refusal is
+made per candidate rather than by filtering the candidate set, because the
+two-candidates guard is a WHOLE-SET property: dropping a held bead would make its
+unheld rival for the same PR look unambiguous and get promoted. Running first is what
 lets a recovered anchor be GATED by (a-norm) below on the SAME pass. It also flags
 — never rewrites — a gating anchor assigned to a non-canonical refinery identity,
 the second half of PR#37's invisibility (it hid the bead from find-work's assignee

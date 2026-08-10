@@ -1272,8 +1272,8 @@ indistinguishable from "nothing is open" while meaning the opposite.
 
 Beyond the exclusions the recovery phase already applies (children by
 `anchor_bead` / `task_kind` / `source_review_bead` / `source_anchor_bead` / a live
-`gc.routed_to`, a non-refinery assignee, ambiguity, and full PR certification), two
-guards are specific to reopening:
+`gc.routed_to`, a non-refinery assignee, an operator hold, ambiguity, and full PR
+certification), two guards are specific to reopening:
 
 - **One anchor per PR, asked of live beads only.** A live bead carrying a
   `merge_result` for this PR *is* the anchor, so the closed bead is a spent

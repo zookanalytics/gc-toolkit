@@ -238,6 +238,11 @@
 #   (CLOSEDREOPENFAIL) a reopen that does not persist leaves the bead closed AND
 #                      unstamped — a merge_result on a still-closed bead would be a
 #                      permanent strand minted by the repair itself.
+#   (CLOSEDHELD)       an OPERATOR HOLD refuses the REOPEN too, not only phase 0's
+#                      recovery (tk-44xkw). The reopen is the write that FEEDS phase 0,
+#                      so a hold honoured in one arm and not the other leaves the bead
+#                      OPEN, merge_result-less and no longer a candidate for either —
+#                      the park converted into a permanent strand by the repair.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -259,7 +264,9 @@ mkdir -p "$TMP/bin"
 # Fields 15/16 are the OPERATOR HOLD markers (tk-44xkw). The literal `__TRUE__` in
 # either emits a JSON BOOLEAN rather than a string, modelling a writer that stores
 # `merge_hold: true` — the spelling that makes an unguarded `ascii_downcase` abort
-# the whole jq program.
+# the whole jq program. `__EMPTY__` works in them too, for the same reason it does in
+# field 7 below: a marker PRESENT but EMPTY is a partial write, and the fixture has to
+# be able to say that rather than only "absent" or "set" (HOLDEMPTY).
 # Field 7 is `merged_target` (what the merge skill validates against); field 13 is
 # the plain `target` a polecat records at hand-off. They are separate on purpose:
 # the backfill must prefer the recorded intent over the PR's live base.
@@ -301,6 +308,7 @@ b-MHOLD|||https://github.com/o/r/pull/720|720|polecat/feat-mhold|main||||||||ope
 b-RHOLD|||https://github.com/o/r/pull/721|721|polecat/feat-rhold|main|||||||||rebasing-by-hand
 b-BOOLHOLD|||https://github.com/o/r/pull/722|722|polecat/feat-boolhold|main||||||||__TRUE__|
 b-HOLDOFF|||https://github.com/o/r/pull/723|723|polecat/feat-holdoff|main||||||||false|
+b-HOLDEMPTY|||https://github.com/o/r/pull/726|726|polecat/feat-holdempty|main||||||||__EMPTY__|
 b-HOLDDUP|||https://github.com/o/r/pull/724|724|polecat/feat-holddup|main||||||||operator-parked|
 b-HOLDDUPTWIN|||https://github.com/o/r/pull/724|724|polecat/feat-holddup-twin|main||||||
 B
@@ -312,7 +320,7 @@ B
 #
 # Only `b-CLOSEDOK` is carried in the MAIN fixture, as a leak canary — it is the one
 # assertion that the status filter really excludes closed beads from the open scans (run
-# 1 still reports exactly 8 anchors restored with it present). The rest of the phase-0a
+# 1 still reports exactly 10 anchors restored with it present). The rest of the phase-0a
 # fixture lives in $CLOSED_BEADS, which its own runs write, because every extra bead in
 # the main fixture is paid for on every list call of the two slowest runs.
 #   <id>\t<status>\t<reopened_not_landed>
@@ -328,6 +336,7 @@ b-CLOSEDHEAD	closed
 b-CLOSEDFLAP	closed	PR#767@open
 b-CLOSEDRETRY	closed	PR#769
 b-CLOSEDROUTED	closed
+b-CLOSEDHELD	closed
 S
 
 # $FAKE_FLIP rows are "<num>\t<state>": the PR's state CHANGES to <state> after its
@@ -382,6 +391,7 @@ cat > "$TMP/prs" <<'P'
 721|OPEN|main|polecat/feat-rhold|
 722|OPEN|main|polecat/feat-boolhold|
 723|OPEN|main|polecat/feat-holdoff|
+726|OPEN|main|polecat/feat-holdempty|
 724|OPEN|main|polecat/feat-holddup|
 P
 
@@ -659,8 +669,10 @@ emit() {
        + (if $tk == "" then {} else {task_kind: $tk} end)
        + (if $sr == "" then {} else {source_review_bead: $sr} end)
        + (if $sab == "" then {} else {source_anchor_bead: $sab} end)
-       + (if $mh == "" then {} elif $mh == "__TRUE__" then {merge_hold: true} else {merge_hold: $mh} end)
-       + (if $rh == "" then {} elif $rh == "__TRUE__" then {rebase_hold: true} else {rebase_hold: $rh} end)
+       + (if $mh == "" then {} elif $mh == "__TRUE__" then {merge_hold: true}
+          elif $mh == "__EMPTY__" then {merge_hold: ""} else {merge_hold: $mh} end)
+       + (if $rh == "" then {} elif $rh == "__TRUE__" then {rebase_hold: true}
+          elif $rh == "__EMPTY__" then {rebase_hold: ""} else {rebase_hold: $rh} end)
        + (if $rt == "" then {} else {"gc.routed_to": $rt} end)
        + (if $anc == "" then {} else {assignee_noncanonical: $anc} end)
        + (if $hf == "" then {} else {check_set_healed: $hf} end)
@@ -1055,6 +1067,32 @@ dispatched_for b-HOLDOFF \
   && ok "(HOLDOFF) and it is gated in the same pass, like any other recovered anchor" \
   || bad "(HOLDOFF) an unheld recovered anchor must still be gated"
 
+# (HOLDEMPTY) the OTHER not-a-hold spelling: the marker is PRESENT but its value is
+# EMPTY — a partial write, or an operator clearing a hold with `--set-metadata
+# merge_hold=` instead of `--unset-metadata`. HOLDOFF pins the `false` spelling and
+# this pins the empty one; they are NOT the same assertion, because `held()` decides
+# BOTH the absent case and the empty case in one `. != ""` clause. Split that clause —
+# take the absent case with an `if $v == null then false` guard and leave the off-list
+# as `false`/`0`/`null` — and every other hold test above still passes while a marker
+# an operator CLEARED reads as HELD, freezing that bead out of the repair permanently
+# and silently. Verified as a negative control: that refactor fails these three
+# assertions (and, mechanically, run 1's recovery count, since this bead is one of the
+# ten) while MHOLD, RHOLD, BOOLHOLD, HOLDOFF and HOLDDUP all still pass — so nothing
+# else in the suite catches it.
+# The fold is deliberate, and it is the exact OPPOSITE of MTEMPTY's rule on
+# merged_target, where collapsing "" into absent was a real bug: there an empty value
+# SKIPS a guard, so it has to read as present-and-wrong; here an empty value grants no
+# permission to anyone, so it has to read as no hold at all.
+recovered b-HOLDEMPTY \
+  && ok "(HOLDEMPTY) a merge_hold PRESENT but EMPTY is not a hold — the bead is recovered normally" \
+  || bad "(HOLDEMPTY) an empty marker must not veto recovery (a cleared hold is not a hold)"
+dispatched_for b-HOLDEMPTY \
+  && ok "(HOLDEMPTY) ...and it is gated in the same pass, so the repair is complete, not half-done" \
+  || bad "(HOLDEMPTY) an unheld recovered anchor must still be gated"
+printf '%s\n' "$OUT1" | grep -q 'b-HOLDEMPTY is under an operator hold' \
+  && bad "(HOLDEMPTY) an empty marker must not be REPORTED as a hold either" \
+  || ok "(HOLDEMPTY) ...and no operator-hold skip is reported for it"
+
 # (HOLDDUP) the hold is a SKIP, not an exclusion from CANDIDACY — and the difference
 # is only visible here. Refusing ambiguity is a property of the WHOLE candidate set:
 # two merge_result-less candidates for one PR are both skipped precisely because
@@ -1258,8 +1296,8 @@ done < <(awk -F'|' '{print $1}' "$TMP/beads")
   && ok "(INVARIANT) no anchor is left visible-to-merge-skill with an empty merged_target" \
   || bad "(INVARIANT) these anchors would merge with NO retarget guard:$UNPROTECTED"
 
-printf '%s\n' "$OUT1" | grep -q '9 anchor(s) restored to visible gating' \
-  && ok "run 1 reports 9 anchors restored" || bad "run 1 recovery count (got: $OUT1)"
+printf '%s\n' "$OUT1" | grep -q '10 anchor(s) restored to visible gating' \
+  && ok "run 1 reports 10 anchors restored" || bad "run 1 recovery count (got: $OUT1)"
 
 # --- Run 2: idempotence. Stamped anchors are no longer candidates. --------------
 : > "$TMP/err2"
@@ -2876,6 +2914,41 @@ recovered b-CLOSEDOK \
 grep -q 'reopen did NOT persist' "$TMP/err12e" \
   && ok "(CLOSEDREOPENFAIL) the lost reopen is reported" \
   || bad "(CLOSEDREOPENFAIL) must report it (err: $(cat "$TMP/err12e"))"
+
+# (CLOSEDHELD) an OPERATOR HOLD refuses phase 0a's REOPEN, on the same terms phase 0
+# refuses the recovery. Reopening is a status write on a deliberately-parked bead — and
+# it is the write that FEEDS phase 0, so a hold read by phase 0 alone is a door that
+# only looks shut: the two arms would then disagree about the same bead, and the
+# disagreement is worse than either refusal. Reopened here and refused there, the bead
+# ends the pass OPEN, still without a merge_result, hence still invisible to
+# merge-skill — and no longer a candidate for phase 0a either, since it is no longer
+# closed. The park would have been converted into a permanent strand by the repair.
+# Its own fixture, not CLOSED_BEADS: every extra bead in the shared closed fixture is
+# paid for on every list call of the runs above, and this one asserts the ABSENCE of
+# writes, which needs no company to be observable.
+# Negative control: disabling ONLY 0a's hold refusal (leaving phase 0's intact) fails
+# the reopen, the marker and the message assertions below — and leaves `recovered`
+# passing, because phase 0 then refuses what 0a just reopened. That surviving assertion
+# is the disagreement itself, reproduced: open, merge_result-less, candidate for
+# neither arm.
+closed_fixture
+printf 'b-CLOSEDHELD|||https://github.com/o/r/pull/772|772|polecat/feat-closedheld|main||||||||operator-gated|\n' > "$TMP/beads"
+printf '772|OPEN|main|polecat/feat-closedheld|\n' > "$TMP/prs"
+RC12F=0
+OUT12F="$(run_heal 2>"$TMP/err12f")" || RC12F=$?
+eq "$RC12F" "0" "(CLOSEDHELD) refusing a held closed bead is a deferral, not an exposure"
+reopened b-CLOSEDHELD \
+  && bad "(CLOSEDHELD) a bead under merge_hold must NEVER be reopened — the reopen is a status write on a bead an operator parked by hand" \
+  || ok "(CLOSEDHELD) merge_hold refuses the reopen too, not only the recovery"
+stamped b-CLOSEDHELD reopened_not_landed "PR#772" \
+  && bad "(CLOSEDHELD) ...and no reopen marker may be written on a held bead" \
+  || ok "(CLOSEDHELD) ...leaving no durable marker to suppress a later legitimate repair"
+recovered b-CLOSEDHELD \
+  && bad "(CLOSEDHELD) ...and it must never reach phase 0 and be stamped visible" \
+  || ok "(CLOSEDHELD) ...and it never reaches phase 0"
+printf '%s\n' "$OUT12F" | grep -q 'b-CLOSEDHELD is under an operator hold (merge_hold=operator-gated); NOT reopening' \
+  && ok "(CLOSEDHELD) the refusal names the marker it read, so an operator can see WHICH gate stopped it" \
+  || bad "(CLOSEDHELD) the reopen refusal must report the marker (out: $OUT12F)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
