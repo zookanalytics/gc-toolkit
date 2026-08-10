@@ -1123,7 +1123,10 @@ if [ -n "$CLOSED_CANDS" ]; then
     xrepo=$(printf '%s' "$crow" | jq -r '.repo // empty')
     [ -n "$xrepo" ] || xrepo="?"
 
-    if [ -n "$CLOSED_DUP" ] && printf '%s\n' "$CLOSED_DUP" | grep -qxF "$xid"; then
+    # Here-string, never a `printf ... | grep -qxF` pipeline (tk-zfjg9): `grep -q`
+    # exits at its first match and SIGPIPEs the writer, which `pipefail` promotes
+    # to 141 — a member read as a non-member, decided by how much text followed.
+    if [ -n "$CLOSED_DUP" ] && grep -qxF -- "$xid" <<< "$CLOSED_DUP"; then
       echo "check-set-heal: WARN PR#$xnum in '$xrepo' has MULTIPLE closed-but-not-landed candidates (including $xid); cannot identify the anchor — skipping all, operator must disambiguate" >&2
       reopen_skipped=$((reopen_skipped + 1)); continue
     fi
@@ -1597,7 +1600,8 @@ if [ -n "$CAND_NORM" ]; then
     crepo=$(printf '%s' "$crow" | jq -r '.repo // empty')
     [ -n "$crepo" ] || crepo="?"
 
-    if [ -n "$DUP_CAND" ] && printf '%s\n' "$DUP_CAND" | grep -qxF "$cid"; then
+    # Here-string, not a pipeline — see the tk-zfjg9 note on the CLOSED_DUP test.
+    if [ -n "$DUP_CAND" ] && grep -qxF -- "$cid" <<< "$DUP_CAND"; then
       echo "check-set-heal: WARN PR#$cnum in '$crepo' has MULTIPLE merge_result-less candidates (including $cid); cannot identify the anchor — skipping all, operator must disambiguate" >&2
       recover_skipped=$((recover_skipped + 1)); continue
     fi
@@ -2059,7 +2063,8 @@ while IFS= read -r row; do
   # just as wrongly. Certification failure is treated exactly like an unreadable state:
   # keep the recorded verdict, arm nothing, retry next pass.
   recovered_now=0
-  if [ -n "$RECOVERED_INERT" ] && printf '%s' "$RECOVERED_INERT" | grep -qxF "$id"; then
+  # Here-string, not a pipeline — see the tk-zfjg9 note on the CLOSED_DUP test.
+  if [ -n "$RECOVERED_INERT" ] && grep -qxF -- "$id" <<< "$RECOVERED_INERT"; then
     recovered_now=1
   fi
   mrstate=$(printf '%s' "$row" | jq -r '.mrstate // empty')
@@ -2602,9 +2607,12 @@ if [ -n "$RECOVERED_OPEN" ]; then
   while IFS= read -r rid; do
     [ -n "${rid:-}" ] || continue
     # Already counted by the stamp-verification above — same anchor, same defect.
-    if [ -n "$UNSAFE_IDS" ] && printf '%s' "$UNSAFE_IDS" | grep -qxF "$rid"; then continue; fi
+    # Here-strings, not pipelines — see the tk-zfjg9 note on the CLOSED_DUP test.
+    # SEEN_IDS in particular is the whole gating enumeration, so it is exactly the
+    # payload large enough for the SIGPIPE race to decide the answer.
+    if [ -n "$UNSAFE_IDS" ] && grep -qxF -- "$rid" <<< "$UNSAFE_IDS"; then continue; fi
     REACHED=1
-    printf '%s' "$SEEN_IDS" | grep -qxF "$rid" || REACHED=0
+    grep -qxF -- "$rid" <<< "$SEEN_IDS" || REACHED=0
     UNREACHED_NOTE=""
     [ "$REACHED" = 1 ] || UNREACHED_NOTE=" and the gating enumeration never reached it"
     RCS=$(gc bd show "$rid" --json 2>/dev/null | jq -r '.[0].metadata.check_set // empty' 2>/dev/null)

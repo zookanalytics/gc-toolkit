@@ -253,14 +253,14 @@ case "$2" in
     # Capture the dispatched BODY (tk-jufvl). The review method arrives on stdin
     # via --body-file -; recording it per-bead is what lets the assertions below
     # prove the dispatch names a method instead of shipping a bare title.
-    if printf '%s' "$*" | grep -q -- '--body-file -'; then
+    if grep -q -- '--body-file -' <<< "$*"; then
       cat > "$FAKE_BODIES/rev-new-$n" 2>/dev/null || true
     fi
     printf '{"id":"rev-new-%s"}\n' "$n" ;;
   update)
     id="$3"
     # Record a check_set stamp so the NEXT list/show reflects it (convergence).
-    if printf '%s' "$*" | grep -q 'check_set='; then
+    if grep -q 'check_set=' <<< "$*"; then
       val=$(printf '%s' "$*" | sed -n 's/.*--set-metadata check_set=\([^ ]*\).*/\1/p')
       # Honour a deliberate stamp-fail injection: if this id is in FAKE_STAMPFAIL,
       # do NOT persist the check_set (simulate a lost ledger write).
@@ -268,7 +268,7 @@ case "$2" in
         printf '%s\t%s\n' "$id" "$val" >> "$FAKE_STAMPED"
       fi
     fi
-    if printf '%s' "$*" | grep -q 'check_set_healed='; then
+    if grep -q 'check_set_healed=' <<< "$*"; then
       val=$(printf '%s' "$*" | sed -n 's/.*--set-metadata check_set_healed=\([^ ]*\).*/\1/p')
       # $FAKE_HEALFAIL is the PARTIAL-write injection, and it is deliberately
       # independent of $FAKE_STAMPFAIL: the two fields go out in one update but
@@ -279,7 +279,7 @@ case "$2" in
         printf '%s\t%s\n' "$id" "$val" >> "$FAKE_HEALED"
       fi
     fi
-    if printf '%s' "$*" | grep -q 'check_set_heal_flagged='; then
+    if grep -q 'check_set_heal_flagged=' <<< "$*"; then
       # Every ATTEMPT is recorded, whether or not it persists: the flag is now read
       # back and repaired once, and counting attempts is how the regression proves
       # the repair actually happens instead of the script trusting one blind write.
@@ -301,7 +301,7 @@ case "$2" in
     # signoff can no longer restore its route.
     for k in anchor_bead gc.routed_to review_pool task_kind review_branch pr_number fix_target_pool; do
       [ "$k" = "${FAKE_DROPKEY:-}" ] && continue
-      if printf '%s' "$*" | grep -q -- "--set-metadata $k="; then
+      if grep -q -- "--set-metadata $k=" <<< "$*"; then
         v=$(printf '%s' "$*" | sed -n "s/.*--set-metadata $k=\\([^ ]*\\).*/\\1/p")
         # $FAKE_STALE_ROUTE models a SPLIT route: the batched update persists
         # review_pool for THIS pool while gc.routed_to keeps an OLDER pool's
@@ -401,10 +401,12 @@ grep -q '	review_branch	polecat/feat-preopen$' "$TMP/revmeta" \
   && ok "(PREOPEN) pre-open signoff carries review_branch (BRANCH review, no PR)" \
   || bad "(PREOPEN) pre-open signoff must review the branch"
 # The pre-open review must NOT carry a pr_number (no PR yet).
-awk -F'\t' '$2=="anchor_bead" && $3=="bead-PREOPEN"{print $1}' "$TMP/revmeta" | while read -r rid; do
-  grep -q "^$rid	pr_number	" "$TMP/revmeta" && echo "PREOPEN_HAS_PR" || true
-done | grep -q PREOPEN_HAS_PR && bad "(PREOPEN) pre-open review must NOT carry pr_number" \
-                              || ok "(PREOPEN) pre-open review has no pr_number (correct)"
+grep -q PREOPEN_HAS_PR < <(
+  awk -F'\t' '$2=="anchor_bead" && $3=="bead-PREOPEN"{print $1}' "$TMP/revmeta" | while read -r rid; do
+    grep -q "^$rid	pr_number	" "$TMP/revmeta" && echo "PREOPEN_HAS_PR" || true
+  done
+) && bad "(PREOPEN) pre-open review must NOT carry pr_number" \
+  || ok "(PREOPEN) pre-open review has no pr_number (correct)"
 
 # (ORDER) fail-closed: the stamp must be applied BEFORE the dispatch. A stamped +
 # routed anchor proves the order held (routing is the last write); assert every

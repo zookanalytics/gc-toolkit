@@ -255,7 +255,7 @@ case "$2" in
         [ "$fbr" = "$br" ] || continue
         # Honor --status exactly as the real `bd list` would: a bead whose status
         # is not in the requested list is simply not returned.
-        printf '%s' ",$statuses," | grep -qF ",$fstatus," || continue
+        grep -qF -- ",$fstatus," <<< ",$statuses," || continue
         if [ -n "$fjson" ]; then
           # Markers as RAW JSON (booleans/null), not strings.
           obj=$(jq -n --arg id "$fid" --arg b "$fbr" --argjson h "$fhold" --argjson r "$frhold" \
@@ -331,7 +331,7 @@ export FAKE_CONVOYS="$TMP/convoys" FAKE_RIG_CONVOYS="$TMP/rigconvoys" \
        FAKE_BRANCH_BEADS="$TMP/branchbeads"
 
 assigned()     { grep -q "^$1	" "$TMP/assigned" 2>/dev/null; }
-assigned_arg() { grep "^$1	" "$TMP/assigned" 2>/dev/null | grep -q -- "$2"; }
+assigned_arg() { grep -q -- "$2" < <(grep "^$1	" "$TMP/assigned" 2>/dev/null); }
 
 # --- Run 1: the graduation gate. ---------------------------------------------
 OUT1="$(bash "$SCRIPT" --target main 2>&1)"
@@ -367,25 +367,25 @@ assigned tk-grad  && bad "(7) idempotency: already-graduating convoy must NOT re
 # --- Operator gates. ----------------------------------------------------------
 assigned tk-mhold && bad "(9) merge_hold on the convoy must NOT graduate" \
                   || ok "(9) merge_hold on the convoy bead -> held"
-printf '%s\n' "$OUT1" | grep -q "tk-mhold — merge_hold set on the convoy (operator gate)" \
+grep -q "tk-mhold — merge_hold set on the convoy (operator gate)" <<< "$OUT1" \
   && ok "(9) held convoy names the gate in the log (diagnosable, not a silent skip)" \
   || bad "(9) merge_hold hold reason (got: $OUT1)"
 
 assigned tk-rhold && bad "(10) rebase_hold on the convoy must NOT graduate" \
                   || ok "(10) rebase_hold on the convoy bead -> held"
-printf '%s\n' "$OUT1" | grep -q "tk-rhold — rebase_hold set on the convoy (operator gate)" \
+grep -q "tk-rhold — rebase_hold set on the convoy (operator gate)" <<< "$OUT1" \
   && ok "(10) rebase_hold hold reason names the gate" \
   || bad "(10) rebase_hold hold reason (got: $OUT1)"
 
 assigned tk-sib && bad "(11) held BLOCKED sibling bead on the branch must NOT graduate" \
                 || ok "(11) held sibling bead (blocked) on the branch -> held"
-printf '%s\n' "$OUT1" | grep -q "tk-sibhold holds branch 'integration/sib'" \
+grep -q "tk-sibhold holds branch 'integration/sib'" <<< "$OUT1" \
   && ok "(11) hold reason names the holding bead and the branch" \
   || bad "(11) sibling hold reason (got: $OUT1)"
 
 assigned tk-dup && bad "(12) branch already owned: must NOT graduate a second time" \
                 || ok "(12) unheld live owner of the branch -> not graduated"
-printf '%s\n' "$OUT1" | grep -q "tk-dupowner already owns branch 'integration/dup'" \
+grep -q "tk-dupowner already owns branch 'integration/dup'" <<< "$OUT1" \
   && ok "(12) duplicate-PR veto names the owning bead" \
   || bad "(12) duplicate owner reason (got: $OUT1)"
 
@@ -397,7 +397,7 @@ assigned tk-probebad  && bad "(13/bad-array) fail closed: unprojectable payload 
                       || ok "(13/bad-array) fail closed: array of non-objects -> not graduated"
 assigned tk-probemap  && bad "(13/object-map) fail closed: id-keyed envelope must NOT graduate" \
                       || ok "(13/object-map) fail closed: object whose values are bead-shaped -> not graduated"
-printf '%s\n' "$OUT1" | grep -q "branch probe on 'integration/probefail' failed" \
+grep -q "branch probe on 'integration/probefail' failed" <<< "$OUT1" \
   && ok "(13) failed probe is reported, not swallowed" \
   || bad "(13) failed probe report (got: $OUT1)"
 # Fail-closed is PER CONVOY, not a pass-wide abort: the ungated convoys in the
@@ -413,7 +413,7 @@ assigned tk-showbad  && bad "(14/bad-array) fail closed: unprojectable bead read
                      || ok "(14/bad-array) fail closed: array of non-objects -> not graduated"
 assigned tk-showgone && bad "(14/absent) fail closed: absent convoy bead must NOT graduate" \
                      || ok "(14/absent) fail closed: '[]' (bead not there) -> not graduated"
-printf '%s\n' "$OUT1" | grep -q "tk-showfail — convoy bead read failed" \
+grep -q "tk-showfail — convoy bead read failed" <<< "$OUT1" \
   && ok "(14) failed bead read is reported, not swallowed" \
   || bad "(14) failed bead read report (got: $OUT1)"
 
@@ -422,18 +422,18 @@ assigned tk-offspell && ok "(15) merge_hold=false is an OFF spelling -> graduate
 
 assigned tk-boolhold && bad "(16) JSON-boolean hold must NOT graduate" \
                      || ok "(16) hold stored as a JSON boolean still holds"
-printf '%s\n' "$OUT1" | grep -q "tk-boolholdsib holds branch 'integration/boolhold'" \
+grep -q "tk-boolholdsib holds branch 'integration/boolhold'" <<< "$OUT1" \
   && ok "(16) boolean hold is caught by the OPERATOR-GATE arm, not incidentally" \
   || bad "(16) boolean hold must trip the operator gate (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "tk-boolfreesib already owns branch 'integration/boolfree'" \
+grep -q "tk-boolfreesib already owns branch 'integration/boolfree'" <<< "$OUT1" \
   && ok "(16) boolean false reads as OFF (falls through to the unheld-owner arm)" \
   || bad "(16) boolean false must not read as held (got: $OUT1)"
 
 eq "$(wc -l < "$TMP/assigned" | tr -d ' ')" "2" "(1) exactly the two ungated convoys graduated"
-printf '%s\n' "$OUT1" | grep -q "2 graduating" \
+grep -q "2 graduating" <<< "$OUT1" \
   && ok "run 1 summary reports 2 graduating" \
   || bad "run 1 summary graduating count (got: $OUT1)"
-printf '%s\n' "$OUT1" | grep -q "4 held" \
+grep -q "4 held" <<< "$OUT1" \
   && ok "run 1 summary reports 4 held (operator gates counted apart from skips)" \
   || bad "run 1 summary held count (got: $OUT1)"
 

@@ -411,7 +411,7 @@ MSG=$(grep -m1 '^msg ' "$TMP/nudges" | cut -d' ' -f2-)
 MATCH_RE=$(grep -m1 '^DEFAULT_MATCH=' "$SCRIPT" | cut -d"'" -f2)
 [ -n "$MATCH_RE" ] && ok "detector pattern read from the script" \
     || bad "detector pattern read from the script (DEFAULT_MATCH not found)"
-printf '%s\n' "$MSG" | grep -qEi -- "$MATCH_RE" \
+grep -qEi -- "$MATCH_RE" <<< "$MSG" \
     && bad "nudge text must not match the quota detector" \
     || ok "nudge text does not match the quota detector"
 
@@ -1176,7 +1176,7 @@ eq "$(grep -c '^mail ' "$TMP/mail" || true)" "0" \
 
 # The whole surface, not just this line: `escalated` is a 0/1 field everywhere.
 bash "$SCRIPT" --status > "$TMP/status22all"
-if grep -oE 'escalated=[^ ]*' "$TMP/status22all" | grep -qvE '^escalated=[01]$'; then
+if grep -qvE '^escalated=[01]$' < <(grep -oE 'escalated=[^ ]*' "$TMP/status22all"); then
     bad "every escalated= field is 0 or 1"
 else
     ok "every escalated= field is 0 or 1"

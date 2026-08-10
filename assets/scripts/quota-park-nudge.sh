@@ -515,11 +515,15 @@ detector_class() {
     lines="$(banner_candidates "$1" | grep -Ei -- "$MATCH_RE" || true)"
     if [ -n "${QUOTA_PARK_MATCH:-}" ]; then
         echo "custom-match"
-    elif printf '%s\n' "$lines" | grep -qEi -- 'your [a-z0-9 -]{0,24}limit'; then
+    # Here-strings, never `printf ... | grep -qEi` pipelines (tk-zfjg9): `grep -q`
+    # exits at its first match and SIGPIPEs the writer, which `pipefail` promotes
+    # to 141 — so a matched line reads as unmatched and the label falls through to
+    # the generic form, decided by nothing but how much text followed the match.
+    elif grep -qEi -- 'your [a-z0-9 -]{0,24}limit' <<< "$lines"; then
         echo "possessive-limit"
-    elif printf '%s\n' "$lines" | grep -qEi -- '(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit'; then
+    elif grep -qEi -- '(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit' <<< "$lines"; then
         echo "named-provider-limit"
-    elif printf '%s\n' "$lines" | grep -qEi -- '/usage-credits'; then
+    elif grep -qEi -- '/usage-credits' <<< "$lines"; then
         echo "usage-credits"
     else
         echo "provider-limit"
@@ -817,7 +821,13 @@ fi
 # whole city unrecovered.
 valid_ere() {
     local rc=0
-    printf '' | grep -Eq -- "${1:-}" >/dev/null 2>&1 || rc=$?
+    # Zero bytes of input by redirect, not by `printf '' |` (tk-zfjg9). Nothing
+    # can SIGPIPE here — printf is finished before grep reads — but the pipe form
+    # is the shape the doctor check bans outright, and an exception list is a
+    # worse guard than a rule with none. `< /dev/null` is the same empty input:
+    # no line ever matches, so rc is 1 for a valid ERE and 2 for a malformed one,
+    # which is exactly what the caller reads.
+    grep -Eq -- "${1:-}" </dev/null >/dev/null 2>&1 || rc=$?
     [ "$rc" -le 1 ]
 }
 if ! valid_ere "$MATCH_RE"; then
@@ -1079,8 +1089,17 @@ while IFS=$'\t' read -r id alias; do
     # the scrollback is a finished turn, not a running one, and letting it veto
     # a live banner below it is how a genuinely parked session gets vouched for
     # as clean.
-    if pane_tail "$pane" | grep -qEi -- "$BUSY_RE" \
-        || ! banner_candidates "$pane" | grep -qEi -- "$MATCH_RE"; then
+    #
+    # Redirected from a process substitution, never `pane_tail ... | grep -qEi`
+    # (tk-zfjg9). `grep -q` exits at its first match and SIGPIPEs the writer,
+    # which `pipefail` promotes to the pipeline's status — and here that lands on
+    # the FAIL-OPEN side: a 141 from the banner half negates to true, so a session
+    # that IS parked has its state file removed and is vouched for as clean. A
+    # process substitution keeps the writer's death out of the status entirely, so
+    # only grep's own answer decides. A pane tail is exactly the payload size the
+    # race needs.
+    if grep -qEi -- "$BUSY_RE" < <(pane_tail "$pane") \
+        || ! grep -qEi -- "$MATCH_RE" < <(banner_candidates "$pane"); then
         owned_state_rm "$state"
         vouch "$id"
         continue
@@ -1092,7 +1111,8 @@ while IFS=$'\t' read -r id alias; do
     # back to their own judgment instead of deferring to a recovery that was
     # switched off for this session. Counted as parked in the summary, because it
     # is — the escape hatch suppresses the action, not the observation.
-    if [ -n "$EXCLUDE_RE" ] && printf '%s' "$alias" | grep -qEi -- "$EXCLUDE_RE"; then
+    # Here-string, not a pipeline — see the tk-zfjg9 note on detector_class.
+    if [ -n "$EXCLUDE_RE" ] && grep -qEi -- "$EXCLUDE_RE" <<< "$alias"; then
         # Any episode from BEFORE the exclusion goes with it. An alias can be
         # added to QUOTA_PARK_EXCLUDE while a park is already being tracked, and
         # a state file left behind then keeps answering for a session this order

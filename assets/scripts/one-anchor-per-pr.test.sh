@@ -170,10 +170,10 @@ REWORK_ARM="$(awk '
 [ -n "$REWORK_ARM" ] \
   && ok "(6) terminal rework arm extracted between one-anchor-per-pr-terminal markers" \
   || bad "(6) terminal rework arm extraction EMPTY — markers missing from $TOML"
-printf '%s' "$REWORK_ARM" | grep -q 'gc bd close "\$WORK"' \
+grep -q 'gc bd close "\$WORK"' <<< "$REWORK_ARM" \
   && ok "(7) rework arm closes \$WORK (landed-on-branch terminal)" \
   || bad "(7) rework arm must close \$WORK"
-printf '%s' "$REWORK_ARM" | grep -q 'merge_result=' \
+grep -q 'merge_result=' <<< "$REWORK_ARM" \
   && bad "(8) rework arm must NOT stamp merge_result (would mint a second anchor)" \
   || ok "(8) rework arm stamps no merge_result — \$WORK never enters the anchor class"
 

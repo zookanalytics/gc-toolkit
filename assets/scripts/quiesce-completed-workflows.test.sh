@@ -379,9 +379,9 @@ export FAKE_STEPS="$TMP/steps" FAKE_ROOTS="$TMP/roots" FAKE_CONVOYS="$TMP/convoy
 # --- Run 0: --dry-run must select the same work but write nothing. ------------
 OUT0="$(bash "$SCRIPT" --dry-run)"
 eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(DRY) --dry-run issues no update at all"
-printf '%s\n' "$OUT0" | grep -q '(dry-run)' \
+grep -q '(dry-run)' <<< "$OUT0" \
   && ok "(DRY) summary marks the pass as a dry run" || bad "(DRY) summary marks dry run (got: $OUT0)"
-printf '%s\n' "$OUT0" | grep -q 's-affine' \
+grep -q 's-affine' <<< "$OUT0" \
   && ok "(DRY) dry run still reports the steps it would quiesce" || bad "(DRY) dry run reports selection"
 
 # --- Run 1: the real pass. ----------------------------------------------------
@@ -409,10 +409,10 @@ eq "$(grep -c '^gc bd update s-affine' "$TMP/updates")" "1" \
   "(SPLIT) exactly one gc call for the route clear"
 eq "$(grep -c '^bd update s-affine' "$TMP/updates")" "1" \
   "(SPLIT) exactly one bd call for the assignee clear"
-grep '^gc bd update s-affine' "$TMP/updates" | grep -q -- '--assignee' \
+grep -q -- '--assignee' < <(grep '^gc bd update s-affine' "$TMP/updates") \
   && bad "(SPLIT) the route call must NOT also carry --assignee (that is the batched update that fails closed)" \
   || ok "(SPLIT) route call carries only --unset-metadata, never --assignee"
-grep '^bd update s-affine' "$TMP/updates" | grep -q -- '--unset-metadata' \
+grep -q -- '--unset-metadata' < <(grep '^bd update s-affine' "$TMP/updates") \
   && bad "(SPLIT) the assignee call must NOT also carry --unset-metadata" \
   || ok "(SPLIT) assignee call carries only --assignee"
 
@@ -429,7 +429,7 @@ BDLINE="$(grep -n '^bd update s-affine' "$TMP/updates" | head -1 | cut -d: -f1 |
 
 # (FORCE) the assignee clear must pass --force and must not go via the gc wrapper,
 # which aborts on --force in its bead-ID safety pre-check.
-grep '^bd update s-affine' "$TMP/updates" | grep -q -- '--force' \
+grep -q -- '--force' < <(grep '^bd update s-affine' "$TMP/updates") \
   && ok "(FORCE) assignee clear passes --force past the claim guard" \
   || bad "(FORCE) assignee clear must pass --force (got: $(grep '^bd update s-affine' "$TMP/updates" || echo none))"
 grep -qE '^gc bd update .*--force' "$TMP/updates" \
@@ -444,13 +444,13 @@ grep -qE '^gc bd update .*--force' "$TMP/updates" \
 grep -q '^s-live' "$TMP/cleared" \
   && bad "(LIVE) must NOT touch a live molecule's steps — a polecat-assigned anchor is not a refinery handoff" \
   || ok "(LIVE) live anchor assigned to a POLECAT -> steps untouched (not mistaken for a refinery handoff)"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-LIVE still live' \
+grep -q 'anchor anchor-LIVE still live' <<< "$OUT1" \
   && ok "(LIVE) summary explains why the live root was skipped" || bad "(LIVE) live-skip reason"
-printf '%s\n' "$OUT1" | grep -q 'anchor-LIVE still live.*assignee=gc-toolkit__polecat-lx-busy' \
+grep -q 'anchor-LIVE still live.*assignee=gc-toolkit__polecat-lx-busy' <<< "$OUT1" \
   && ok "(LIVE) skip line records the assignee that was inspected" || bad "(LIVE) skip line records assignee"
 # anchor-LIVE is held by the molecule's OWN session, which is what separates it from
 # (RECLAIM) below — the two are otherwise the same shape (polecat-held, unstamped).
-printf '%s\n' "$OUT1" | grep -q 'anchor-LIVE still live.*session=gc-toolkit__polecat-lx-busy molecule_session=gc-toolkit__polecat-lx-busy' \
+grep -q 'anchor-LIVE still live.*session=gc-toolkit__polecat-lx-busy molecule_session=gc-toolkit__polecat-lx-busy' <<< "$OUT1" \
   && ok "(LIVE) the anchor is held by this molecule's own session -> not a re-claim" \
   || bad "(LIVE) skip line records both sessions compared"
 
@@ -463,10 +463,10 @@ printf '%s\n' "$OUT1" | grep -q 'anchor-LIVE still live.*session=gc-toolkit__pol
 grep -q '^s-reclaim	routed$' "$TMP/cleared" && grep -q '^s-reclaim	assignee$' "$TMP/cleared" \
   && ok "(RECLAIM) anchor re-claimed by ANOTHER session -> steps quiesced (both keys)" \
   || bad "(RECLAIM) re-claimed anchor must count as done (got: $(grep '^s-reclaim' "$TMP/cleared" || echo none))"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-RECLAIM DONE' \
+grep -q 'anchor anchor-RECLAIM DONE' <<< "$OUT1" \
   && ok "(RECLAIM) summary reports the re-claimed anchor as DONE" \
   || bad "(RECLAIM) summary reports the re-claimed anchor DONE"
-printf '%s\n' "$OUT1" | grep -q 'anchor-RECLAIM DONE.*session=gc-toolkit__polecat-lx-new molecule_session=gc-toolkit__polecat-lx-old' \
+grep -q 'anchor-RECLAIM DONE.*session=gc-toolkit__polecat-lx-new molecule_session=gc-toolkit__polecat-lx-old' <<< "$OUT1" \
   && ok "(RECLAIM) the verdict line names BOTH sessions it compared (the pass is hand-reversible)" \
   || bad "(RECLAIM) verdict line names both sessions"
 
@@ -478,7 +478,7 @@ printf '%s\n' "$OUT1" | grep -q 'anchor-RECLAIM DONE.*session=gc-toolkit__poleca
 grep -q '^s-stale' "$TMP/cleared" \
   && bad "(STALE) a stale gc.session_name is not a current holder — must NOT quiesce" \
   || ok "(STALE) recorded session that does not match the assignee -> left alone (fail closed)"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-STALE still live' \
+grep -q 'anchor anchor-STALE still live' <<< "$OUT1" \
   && ok "(STALE) summary reports the stale-record root as still live" || bad "(STALE) stale-record skip reason"
 
 # (NOSESS) fail closed when there is nothing to compare: the anchor is held under a
@@ -500,7 +500,7 @@ grep -q '^s-closed	routed$' "$TMP/cleared" && grep -q '^s-closed	assignee$' "$TM
 grep -q '^s-handoff	routed$' "$TMP/cleared" && grep -q '^s-handoff	assignee$' "$TMP/cleared" \
   && ok "(HANDOFF) anchor handed to the refinery -> steps quiesced though merge_result is unstamped" \
   || bad "(HANDOFF) refinery-assigned anchor must count as done (got: $(grep '^s-handoff' "$TMP/cleared" || echo none))"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-HANDOFF DONE' \
+grep -q 'anchor anchor-HANDOFF DONE' <<< "$OUT1" \
   && ok "(HANDOFF) summary reports the handoff anchor as DONE" \
   || bad "(HANDOFF) summary reports the handoff anchor DONE"
 
@@ -512,10 +512,10 @@ printf '%s\n' "$OUT1" | grep -q 'anchor anchor-HANDOFF DONE' \
 grep -q '^s-held	routed$' "$TMP/cleared" && grep -q '^s-held	assignee$' "$TMP/cleared" \
   && ok "(HELD) anchor parked for a human (blocked + routed_to=human) -> steps quiesced" \
   || bad "(HELD) parked anchor must count as done (got: $(grep '^s-held' "$TMP/cleared" || echo none))"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-HELD DONE' \
+grep -q 'anchor anchor-HELD DONE' <<< "$OUT1" \
   && ok "(HELD) summary reports the parked anchor as DONE" \
   || bad "(HELD) summary reports the parked anchor DONE"
-printf '%s\n' "$OUT1" | grep -q 'anchor-HELD DONE.*routed_to=human' \
+grep -q 'anchor-HELD DONE.*routed_to=human' <<< "$OUT1" \
   && ok "(HELD) the verdict line records the route it was decided on" \
   || bad "(HELD) verdict line records routed_to"
 
@@ -526,7 +526,7 @@ printf '%s\n' "$OUT1" | grep -q 'anchor-HELD DONE.*routed_to=human' \
 grep -q '^s-bare' "$TMP/cleared" \
   && bad "(BARE) bare blocked must NOT be treated as terminal — a live escalating session passes through it" \
   || ok "(BARE) blocked with no route -> steps untouched (the conjunction is what keeps this fail-closed)"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-BARE still live' \
+grep -q 'anchor anchor-BARE still live' <<< "$OUT1" \
   && ok "(BARE) summary reports the bare-blocked anchor as still live" \
   || bad "(BARE) bare-blocked anchor reported still live"
 
@@ -535,7 +535,7 @@ printf '%s\n' "$OUT1" | grep -q 'anchor anchor-BARE still live' \
 grep -q '^s-routeonly' "$TMP/cleared" \
   && bad "(ROUTEONLY) routed_to=human alone must NOT be treated as terminal" \
   || ok "(ROUTEONLY) open + routed_to=human -> steps untouched (both halves are required)"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-ROUTEONLY still live' \
+grep -q 'anchor anchor-ROUTEONLY still live' <<< "$OUT1" \
   && ok "(ROUTEONLY) summary reports the route-only anchor as still live" \
   || bad "(ROUTEONLY) route-only anchor reported still live"
 
@@ -557,7 +557,7 @@ printf '%s\n' "$OUT1" | grep -q 'anchor anchor-ROUTEONLY still live' \
 grep -q '^s-reclaimrouted	routed$' "$TMP/cleared" && grep -q '^s-reclaimrouted	assignee$' "$TMP/cleared" \
   && ok "(CROSS-RECLAIM) re-claimed anchor + non-human pool route -> quiesced by the re-claim clause" \
   || bad "(CROSS-RECLAIM) a live pool route must not shadow the session pair (got: $(grep '^s-reclaimrouted' "$TMP/cleared" || echo none))"
-printf '%s\n' "$OUT1" | grep -q 'anchor-RECLAIMROUTED DONE.*routed_to=gc-toolkit/gc-toolkit.polecat.*session=' \
+grep -q 'anchor-RECLAIMROUTED DONE.*routed_to=gc-toolkit/gc-toolkit.polecat.*session=' <<< "$OUT1" \
   && ok "(CROSS-RECLAIM) the verdict line carries BOTH fields, in their own slots" \
   || bad "(CROSS-RECLAIM) verdict names route and session separately (got: $(printf '%s\n' "$OUT1" | grep RECLAIMROUTED || echo none))"
 
@@ -568,7 +568,7 @@ printf '%s\n' "$OUT1" | grep -q 'anchor-RECLAIMROUTED DONE.*routed_to=gc-toolkit
 grep -q '^s-heldsess	routed$' "$TMP/cleared" && grep -q '^s-heldsess	assignee$' "$TMP/cleared" \
   && ok "(CROSS-HELD) parked anchor that also records a session -> quiesced by the park clause" \
   || bad "(CROSS-HELD) a recorded session must not shadow routed_to (got: $(grep '^s-heldsess' "$TMP/cleared" || echo none))"
-printf '%s\n' "$OUT1" | grep -q 'anchor-HELDSESS DONE.*routed_to=human.*session=gc-toolkit__polecat-lx-hsanch' \
+grep -q 'anchor-HELDSESS DONE.*routed_to=human.*session=gc-toolkit__polecat-lx-hsanch' <<< "$OUT1" \
   && ok "(CROSS-HELD) the verdict line carries BOTH fields, in their own slots" \
   || bad "(CROSS-HELD) verdict names route and session separately (got: $(printf '%s\n' "$OUT1" | grep HELDSESS || echo none))"
 
@@ -587,7 +587,7 @@ grep -q '^s-final' "$TMP/cleared" \
 grep -q '^s-scoped	routed$' "$TMP/cleared" && grep -q '^s-scoped	assignee$' "$TMP/cleared" \
   && ok "(CONTRACT) a non-mol-polecat-work graph.v2 husk is quiesced too (selected by contract, not by name)" \
   || bad "(CONTRACT) mol-scoped-work step must be quiesced (got: $(grep '^s-scoped' "$TMP/cleared" || echo none))"
-printf '%s\n' "$OUT1" | grep -q 'anchor anchor-SCOPED DONE' \
+grep -q 'anchor anchor-SCOPED DONE' <<< "$OUT1" \
   && ok "(CONTRACT) the mol-scoped-work root reaches an anchor verdict at all (it used to be dropped before one)" \
   || bad "(CONTRACT) mol-scoped-work root must reach the anchor verdict"
 
@@ -620,7 +620,7 @@ grep -q '^s-orphan' "$TMP/cleared" \
   || ok "(FAILSAFE) unresolved anchor -> skipped (fail closed)"
 # The warning is a diagnostic, so it goes to stderr (matching the other passes);
 # capture both streams to assert on it.
-printf '%s\n' "$ERR1" | grep -q 'anchor unresolved' \
+grep -q 'anchor unresolved' <<< "$ERR1" \
   && ok "(FAILSAFE) unresolved root is reported on stderr" || bad "(FAILSAFE) unresolved root reported"
 
 # (NOCLOSE) the DANGER clause: nothing is ever closed and status is never written.
@@ -643,7 +643,7 @@ grep -q '^s-quiet' "$TMP/cleared" \
   && bad "(QUIET) already-quiet step must not be re-updated" \
   || ok "(QUIET) already-quiet step skipped (idempotent)"
 
-printf '%s\n' "$OUT1" | grep -q '9 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 0 failed' \
+grep -q '9 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 0 failed' <<< "$OUT1" \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 
@@ -653,7 +653,7 @@ RC2=0
 OUT2="$(bash "$SCRIPT")" || RC2=$?
 eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" \
   "(IDEM) second pass issues no updates — quiesced steps stay quiesced"
-printf '%s\n' "$OUT2" | grep -q '0 steps quiesced' \
+grep -q '0 steps quiesced' <<< "$OUT2" \
   && ok "(IDEM) second pass reports nothing left to do" || bad "(IDEM) second-pass summary (got: $(printf '%s' "$OUT2" | tail -1))"
 eq "$RC2" "0" "(IDEM) a no-op pass exits 0"
 
@@ -673,16 +673,16 @@ grep -q '^s-affine	routed$' "$TMP/cleared" \
 grep -q '^s-affine	assignee$' "$TMP/cleared" \
   && bad "(GUARD) the refused assignee clear must not be recorded as applied" \
   || ok "(GUARD) refused assignee clear leaves the assignee intact"
-printf '%s\n' "$ERR3" | grep -q 's-affine assignee clear failed' \
+grep -q 's-affine assignee clear failed' <<< "$ERR3" \
   && ok "(GUARD) the refused half is reported on stderr, naming the key" \
   || bad "(GUARD) refusal reported on stderr (got: $ERR3)"
-printf '%s\n' "$ERR3" | grep -q 's-affine route clear failed' \
+grep -q 's-affine route clear failed' <<< "$ERR3" \
   && bad "(GUARD) the route half succeeded and must not be reported as failed" \
   || ok "(GUARD) the successful route half is not reported as a failure"
 
 # A partial clear is a failure, never a success: the step still rides the affine
 # hand-back, so counting it quiesced would be the same lie in a new place.
-printf '%s\n' "$OUT3" | grep -q '8 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 1 failed' \
+grep -q '8 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 1 failed' <<< "$OUT3" \
   && ok "(EXIT) a partially-cleared step counts as failed, not quiesced" \
   || bad "(EXIT) run 3 summary (got: $(printf '%s' "$OUT3" | tail -1))"
 [ "$RC3" -ne 0 ] \
@@ -714,13 +714,13 @@ grep -q '^s-affine	routed$' "$TMP/cleared" \
   && bad "(ROUTEFAIL) a refused route clear must not be recorded as applied" \
   || ok "(ROUTEFAIL) refused route clear leaves gc.routed_to set"
 
-printf '%s\n' "$ERR4" | grep -q 's-affine route clear failed' \
+grep -q 's-affine route clear failed' <<< "$ERR4" \
   && ok "(ROUTEFAIL) the failed route half is reported on stderr, naming the key" \
   || bad "(ROUTEFAIL) route failure reported on stderr (got: $ERR4)"
-printf '%s\n' "$ERR4" | grep -q 's-affine assignee clear skipped' \
+grep -q 's-affine assignee clear skipped' <<< "$ERR4" \
   && ok "(ROUTEFAIL) the skipped assignee half is reported, and says why" \
   || bad "(ROUTEFAIL) skip reason reported on stderr (got: $ERR4)"
-printf '%s\n' "$ERR4" | grep -q 's-affine assignee clear failed' \
+grep -q 's-affine assignee clear failed' <<< "$ERR4" \
   && bad "(ROUTEFAIL) a SKIPPED assignee clear must not be reported as a failed one" \
   || ok "(ROUTEFAIL) skipped is reported as skipped, never as an attempted-and-failed clear"
 
@@ -733,7 +733,7 @@ grep -q '^bd update s-pool' "$TMP/updates" \
   && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
   || ok "(ROUTEFAIL) route-only step issues no assignee call"
 
-printf '%s\n' "$OUT4" | grep -q '7 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 2 failed' \
+grep -q '7 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 2 failed' <<< "$OUT4" \
   && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
   || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
 [ "$RC4" -ne 0 ] \

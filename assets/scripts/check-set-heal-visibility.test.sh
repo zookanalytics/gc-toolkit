@@ -843,7 +843,7 @@ case "$2" in
     # lets phase 0 pick the bead up in the same run. Injectable through $FAKE_STAMPFAIL
     # on the (id, status) pair, like every other write here, so a reopen that does not
     # persist can be tested.
-    if printf '%s' "$*" | grep -q -- "--status=open"; then
+    if grep -q -- "--status=open" <<< "$*"; then
       if ! grep -qx "$(printf '%s\tstatus' "$id")" "$FAKE_STAMPFAIL" 2>/dev/null; then
         printf '%s\tstatus\topen\n' "$id" >> "$FAKE_STAMPS"
       fi
@@ -852,7 +852,7 @@ case "$2" in
              merge_result_pr_state pr_number pr_url merged_target check_set check_set_healed \
              check_set_heal_flagged assignee_noncanonical anchor_bead gc.routed_to \
              task_kind review_branch reopened_not_landed blocked_reason; do
-      if printf '%s' "$*" | grep -q -- "--set-metadata $k="; then
+      if grep -q -- "--set-metadata $k=" <<< "$*"; then
         v=$(printf '%s' "$*" | sed -n "s/.*--set-metadata $k=\\([^ ]*\\).*/\\1/p")
         # Injected write-loss, per (id, key): never persist this key for this bead.
         if grep -qx "$(printf '%s\t%s' "$id" "$k")" "$FAKE_STAMPFAIL" 2>/dev/null; then
@@ -1089,7 +1089,7 @@ recovered b-HOLDEMPTY \
 dispatched_for b-HOLDEMPTY \
   && ok "(HOLDEMPTY) ...and it is gated in the same pass, so the repair is complete, not half-done" \
   || bad "(HOLDEMPTY) an unheld recovered anchor must still be gated"
-printf '%s\n' "$OUT1" | grep -q 'b-HOLDEMPTY is under an operator hold' \
+grep -q 'b-HOLDEMPTY is under an operator hold' <<< "$OUT1" \
   && bad "(HOLDEMPTY) an empty marker must not be REPORTED as a hold either" \
   || ok "(HOLDEMPTY) ...and no operator-hold skip is reported for it"
 
@@ -1111,7 +1111,7 @@ grep -q 'PR#724 .* MULTIPLE merge_result-less candidates' "$TMP/err1" \
 # The skip line itself is pinned on the UNAMBIGUOUS held bead: for b-HOLDDUP the
 # ambiguity guard runs first and reports that instead, which is the ordering the
 # guard above depends on.
-printf '%s\n' "$OUT1" | grep -q 'b-MHOLD is under an operator hold (merge_hold=operator-gated-graduation)' \
+grep -q 'b-MHOLD is under an operator hold (merge_hold=operator-gated-graduation)' <<< "$OUT1" \
   && ok "(MHOLD) the skip names the marker it read, so a held bead is diagnosable" \
   || bad "(MHOLD) the hold skip must report the marker it read"
 
@@ -1296,13 +1296,13 @@ done < <(awk -F'|' '{print $1}' "$TMP/beads")
   && ok "(INVARIANT) no anchor is left visible-to-merge-skill with an empty merged_target" \
   || bad "(INVARIANT) these anchors would merge with NO retarget guard:$UNPROTECTED"
 
-printf '%s\n' "$OUT1" | grep -q '10 anchor(s) restored to visible gating' \
+grep -q '10 anchor(s) restored to visible gating' <<< "$OUT1" \
   && ok "run 1 reports 10 anchors restored" || bad "run 1 recovery count (got: $OUT1)"
 
 # --- Run 2: idempotence. Stamped anchors are no longer candidates. --------------
 : > "$TMP/err2"
 OUT2="$(run_heal 2>"$TMP/err2")"
-printf '%s\n' "$OUT2" | grep -q '0 anchor(s) restored to visible gating' \
+grep -q '0 anchor(s) restored to visible gating' <<< "$OUT2" \
   && ok "(IDEMPOT) a second pass restores nothing (already visible)" \
   || bad "(IDEMPOT) second pass must recover 0 (got: $OUT2)"
 # The flag is bounded: the same non-canonical assignee is not re-warned.
@@ -1321,7 +1321,7 @@ stamped b-MERGED check_set codex \
 dispatched_for b-MERGED \
   && bad "(INERT2) a second pass must NOT dispatch a signoff for a merged PR" \
   || ok "(INERT2) merged PR -> still no signoff on a later pass"
-printf '%s\n' "$OUT2" | grep -q 'its PR is MERGED; leaving the gate alone' \
+grep -q 'its PR is MERGED; leaving the gate alone' <<< "$OUT2" \
   && ok "(INERT2) the durable skip is reported" || bad "(INERT2) must report the persisted-state skip (got: $OUT2)"
 
 # --- Run 3: REOPEN. A persisted non-OPEN state is RE-CHECKED, never blindly trusted:
@@ -1343,7 +1343,7 @@ dispatched_for b-REOPEN \
   && ok "(REOPEN) a reopened PR's anchor is gated normally, not suppressed by the stale record" \
   || bad "(REOPEN) reopened PR must be gated (revmeta: $(cat "$TMP/revmeta"))"
 eq "$RC3" "0" "(REOPEN) a gated reopened anchor exits 0"
-printf '%s\n' "$OUT3" | grep -q 'is OPEN again; refreshing the record' \
+grep -q 'is OPEN again; refreshing the record' <<< "$OUT3" \
   && ok "(REOPEN) the stale-record correction is reported" \
   || bad "(REOPEN) must report the reopen (got: $OUT3)"
 
@@ -1538,7 +1538,7 @@ grep -q 'stays invisible' "$TMP/err4" \
   && ok "(STAMPFAIL) the still-invisible anchor is warned about" \
   || bad "(STAMPFAIL) must warn that the anchor stays invisible"
 eq "$RC4" "0" "(STAMPFAIL) a failed visibility repair exits 0, NOT UNSAFE_RC (it cannot merge ungated)"
-printf '%s\n' "$OUT4" | grep -q '0 anchor(s) restored to visible gating, 1 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 1 skipped' <<< "$OUT4" \
   && ok "(STAMPFAIL) reported as skipped, not restored" || bad "(STAMPFAIL) summary (got: $OUT4)"
 
 # --- Run 5: PARTIAL persistence. A DEPENDENT of visibility does not stick. -------
@@ -1577,7 +1577,7 @@ stamped b-PARTIAL merge_result_heal_flagged 1 \
   && ok "(PARTIAL) the failed repair is flagged once (bounded noise)" \
   || bad "(PARTIAL) must flag the bead once"
 eq "$RC5" "0" "(PARTIAL) an invisible anchor is a stall, NOT the UNSAFE_RC exposure"
-printf '%s\n' "$OUT5" | grep -q '0 anchor(s) restored to visible gating, 1 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 1 skipped' <<< "$OUT5" \
   && ok "(PARTIAL) reported as skipped, not restored" || bad "(PARTIAL) summary (got: $OUT5)"
 
 # ...and the repair is RETRIED UNTIL DURABLE: with the write-loss lifted, the very
@@ -1594,7 +1594,7 @@ stamped b-PARTIAL merged_target main \
   && ok "(RETRY) the dependent backfill lands on the retry" \
   || bad "(RETRY) merged_target must land on the retry"
 eq "$RC5B" "0" "(RETRY) the completed recovery exits 0"
-printf '%s\n' "$OUT5B" | grep -q '1 anchor(s) restored to visible gating' \
+grep -q '1 anchor(s) restored to visible gating' <<< "$OUT5B" \
   && ok "(RETRY) the deferred anchor is reported restored on the retry" \
   || bad "(RETRY) retry recovery count (got: $OUT5B)"
 
@@ -1620,7 +1620,7 @@ grep -q 'merge_result_healed' "$TMP/err5c" \
   && ok "(MRHEALED) the lost marker is named in the warning" \
   || bad "(MRHEALED) must name merge_result_healed (err: $(cat "$TMP/err5c"))"
 eq "$RC5C" "0" "(MRHEALED) a lost marker is a stall, not an exposure"
-printf '%s\n' "$OUT5C" | grep -q '0 anchor(s) restored to visible gating, 1 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 1 skipped' <<< "$OUT5C" \
   && ok "(MRHEALED) reported as skipped, not restored" || bad "(MRHEALED) summary (got: $OUT5C)"
 
 # --- Run 5d: merge_result_pr_state is the marker that keeps a MERGED PR quiet. ----
@@ -1647,7 +1647,7 @@ grep -q 'merge_result_pr_state' "$TMP/err5d" \
   && ok "(MRSTATE) the lost marker is named in the warning" \
   || bad "(MRSTATE) must name merge_result_pr_state (err: $(cat "$TMP/err5d"))"
 eq "$RC5D" "0" "(MRSTATE) a lost marker is a stall, not an exposure"
-printf '%s\n' "$OUT5D" | grep -q '0 anchor(s) restored to visible gating, 1 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 1 skipped' <<< "$OUT5D" \
   && ok "(MRSTATE) reported as skipped, not restored" || bad "(MRSTATE) summary (got: $OUT5D)"
 
 # --- Run 5e: SCANFAIL. One candidate scan is unreadable. -------------------------
@@ -1678,7 +1678,7 @@ grep -q "recovery scan did not return a readable result" "$TMP/err5e" \
   && ok "(SCANFAIL) the unreadable scan is reported" \
   || bad "(SCANFAIL) must warn about the unreadable scan (err: $(cat "$TMP/err5e"))"
 eq "$RC5E" "0" "(SCANFAIL) a skipped recovery phase is not an exposure (nothing was made visible)"
-printf '%s\n' "$OUT5E" | grep -q 'restored to visible gating' \
+grep -q 'restored to visible gating' <<< "$OUT5E" \
   && bad "(SCANFAIL) the phase must be skipped WHOLESALE, not run and reported per candidate (got: $OUT5E)" \
   || ok "(SCANFAIL) no recovery summary at all — the phase never ran on a partial set"
 
@@ -1694,7 +1694,7 @@ fi
 grep -q 'MULTIPLE merge_result-less candidates' "$TMP/err5f" \
   && ok "(SCANFAIL) the now-visible ambiguity is reported" \
   || bad "(SCANFAIL) must report the ambiguity once the set is complete (err: $(cat "$TMP/err5f"))"
-printf '%s\n' "$OUT5F" | grep -q '0 anchor(s) restored to visible gating, 2 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 2 skipped' <<< "$OUT5F" \
   && ok "(SCANFAIL) BOTH rivals are counted as skipped once the set is complete" \
   || bad "(SCANFAIL) complete-set summary (got: $OUT5F)"
 
@@ -1721,7 +1721,7 @@ grep -q 'incumbent-anchor scan by pr_url failed' "$TMP/err5g" \
   && ok "(INCURLFAIL) the unreadable scan is warned about" \
   || bad "(INCURLFAIL) must warn on an unreadable pr_url incumbent scan (err: $(cat "$TMP/err5g"))"
 eq "$RC5G" "0" "(INCURLFAIL) a deferred recovery is a stall, not an exposure"
-printf '%s\n' "$OUT5G" | grep -q '0 anchor(s) restored to visible gating, 1 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 1 skipped' <<< "$OUT5G" \
   && ok "(INCURLFAIL) reported as skipped, not restored" || bad "(INCURLFAIL) summary (got: $OUT5G)"
 
 # ...and with the scan readable the SAME bead recovers — proving the refusal above was
@@ -1757,7 +1757,7 @@ grep -q 'cannot resolve this checkout' "$TMP/err5i" \
   && ok "(REPOFAIL) the unresolvable origin is reported for an operator" \
   || bad "(REPOFAIL) must warn that the origin repository is unresolvable (err: $(cat "$TMP/err5i"))"
 eq "$RC5I" "0" "(REPOFAIL) a deferred recovery is a stall, not an exposure"
-printf '%s\n' "$OUT5I" | grep -q '0 anchor(s) restored to visible gating, 1 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 1 skipped' <<< "$OUT5I" \
   && ok "(REPOFAIL) reported as skipped, not restored" || bad "(REPOFAIL) summary (got: $OUT5I)"
 
 # --- Run 5i2: WRONGDEFAULT. gh's current repository is NOT this checkout's. --------
@@ -1793,7 +1793,7 @@ grep -q 'PR#750 view failed' "$TMP/err5i2" \
   && ok "(WRONGDEFAULT) the origin-pinned read reports the PR as absent HERE, not as a foreign match" \
   || bad "(WRONGDEFAULT) must warn that PR#750 is unreadable in this repo (err: $(cat "$TMP/err5i2"))"
 eq "$RC5I2" "0" "(WRONGDEFAULT) a refused recovery is a stall, not an exposure"
-printf '%s\n' "$OUT5I2" | grep -q '0 anchor(s) restored to visible gating, 1 skipped' \
+grep -q '0 anchor(s) restored to visible gating, 1 skipped' <<< "$OUT5I2" \
   && ok "(WRONGDEFAULT) reported as skipped, not restored" || bad "(WRONGDEFAULT) summary (got: $OUT5I2)"
 
 # Arm B, the positive control: gh is STILL pointed at `evil/other`, but this time
@@ -2007,7 +2007,7 @@ grep -q '^rev-new-1	gc.routed_to	' "$TMP/revmeta" \
 grep -q 'did not durably route' "$TMP/err5i7" \
   && ok "(DROPROUTE) pass 1: the unclaimable review is reported, not assumed dispatched" \
   || bad "(DROPROUTE) pass 1 must verify the route it just wrote (err: $(cat "$TMP/err5i7"))"
-printf '%s\n' "$OUT5I7" | grep -q '0 signoffs dispatched' \
+grep -q '0 signoffs dispatched' <<< "$OUT5I7" \
   && ok "(DROPROUTE) pass 1: a review nobody can claim is not counted as dispatched" \
   || bad "(DROPROUTE) pass 1 summary (got: $OUT5I7)"
 eq "$RC5I7" "0" "(DROPROUTE) pass 1: a held merge is a stall, not an exposure"
@@ -2022,10 +2022,10 @@ grep -q '^rev-new-1	gc.routed_to	gc-toolkit/gc-toolkit.polecat-codex$' "$TMP/rev
   && ok "(DROPROUTE) pass 2: the stranded review is re-routed and becomes claimable" \
   || bad "(DROPROUTE) pass 2 must repair the route (revmeta: $(cat "$TMP/revmeta"))"
 eq "$(cat "$TMP/seq")" "1" "(DROPROUTE) pass 2: repaired, not twinned — no second review minted"
-printf '%s\n' "$OUT5I8" | grep -q 'STRANDED signoff rev-new-1' \
+grep -q 'STRANDED signoff rev-new-1' <<< "$OUT5I8" \
   && ok "(DROPROUTE) pass 2: the repair is reported for an operator" \
   || bad "(DROPROUTE) pass 2 must report the repair (got: $OUT5I8)"
-printf '%s\n' "$OUT5I8" | grep -q '1 signoffs dispatched' \
+grep -q '1 signoffs dispatched' <<< "$OUT5I8" \
   && ok "(DROPROUTE) pass 2: the re-routed review counts as the dispatch" \
   || bad "(DROPROUTE) pass 2 summary (got: $OUT5I8)"
 eq "$RC5I8" "0" "(DROPROUTE) pass 2: a repaired dispatch exits 0"
@@ -2154,7 +2154,7 @@ grep -q 'still UNGATED' "$TMP/err6" \
 grep -q '1 anchor(s) are visible to merge-skill but still ungated' "$TMP/err6" \
   && ok "(UNGATED) exactly one anchor is counted (the two checks do not double-count)" \
   || bad "(UNGATED) unsafe count must be 1 (err: $(cat "$TMP/err6"))"
-printf '%s\n' "$OUT6" | grep -q '1 anchor(s) restored to visible gating' \
+grep -q '1 anchor(s) restored to visible gating' <<< "$OUT6" \
   && ok "(UNGATED) the exposure really happened (the anchor was restored)" \
   || bad "(UNGATED) recovery count (got: $OUT6)"
 
@@ -2178,7 +2178,7 @@ eq "$RC7" "3" "(ENUMFAIL) an empty enumeration after a recovery exits UNSAFE rc=
 grep -q 'gating enumeration returned NOTHING' "$TMP/err7" \
   && ok "(ENUMFAIL) the contradiction is named in the warning" \
   || bad "(ENUMFAIL) must warn about the empty enumeration (err: $(cat "$TMP/err7"))"
-printf '%s\n' "$OUT7" | grep -q 'no gating anchors' \
+grep -q 'no gating anchors' <<< "$OUT7" \
   && bad "(ENUMFAIL) must NOT report the benign 'no gating anchors' after a recovery" \
   || ok "(ENUMFAIL) the benign no-anchors exit is not taken"
 
@@ -2277,7 +2277,7 @@ echo 1 > "$TMP/enumfail"
 RC8=0
 OUT8="$(run_heal 2>"$TMP/err8")" || RC8=$?
 eq "$RC8" "0" "(NOTHING) an empty enumeration with NO recovery is still the benign exit"
-printf '%s\n' "$OUT8" | grep -q 'no gating anchors' \
+grep -q 'no gating anchors' <<< "$OUT8" \
   && ok "(NOTHING) reports 'no gating anchors'" || bad "(NOTHING) summary (got: $OUT8)"
 
 # --- Run 9: DUPCROSSREPO. The duplicate-candidate key is REPOSITORY **and** number. -
@@ -2504,7 +2504,7 @@ eq "$RC11D" "3" "(RCPAYLOAD-enum) an unreadable gating enumeration exits UNSAFE 
 grep -q 'gating enumeration did not return a readable result' "$TMP/err11d" \
   && ok "(RCPAYLOAD-enum) the unreadable enumeration is reported" \
   || bad "(RCPAYLOAD-enum) must warn about the unreadable enumeration (err: $(cat "$TMP/err11d"))"
-printf '%s\n' "$OUT11D" | grep -q 'no gating anchors' \
+grep -q 'no gating anchors' <<< "$OUT11D" \
   && bad "(RCPAYLOAD-enum) must NOT report the benign 'no gating anchors' on an unreadable scan (got: $OUT11D)" \
   || ok "(RCPAYLOAD-enum) the benign no-anchors exit is not taken"
 # Control: readable enumeration -> the anchor is gated normally and the pass exits 0.
@@ -2611,7 +2611,7 @@ eq "$RC11J" "3" "(OBJPAYLOAD-enum) an rc=0 object payload on the gating enumerat
 grep -q 'gating enumeration did not return a readable result' "$TMP/err11j" \
   && ok "(OBJPAYLOAD-enum) the unreadable enumeration is reported" \
   || bad "(OBJPAYLOAD-enum) must warn about the unreadable enumeration (err: $(cat "$TMP/err11j"))"
-printf '%s\n' "$OUT11J" | grep -q 'no gating anchors' \
+grep -q 'no gating anchors' <<< "$OUT11J" \
   && bad "(OBJPAYLOAD-enum) must NOT report the benign 'no gating anchors' (got: $OUT11J)" \
   || ok "(OBJPAYLOAD-enum) the benign no-anchors exit is not taken"
 
@@ -2696,7 +2696,7 @@ stamped b-CLOSEDOK check_set codex \
 dispatched_for b-CLOSEDOK \
   && ok "(CLOSEDREOPEN) ...and a codex signoff is dispatched, so the gate is satisfiable" \
   || bad "(CLOSEDREOPEN) reopened anchor must get a signoff (revmeta: $(cat "$TMP/revmeta"))"
-printf '%s\n' "$OUT12" | grep -q 'CLOSED while PR#760 is still OPEN' \
+grep -q 'CLOSED while PR#760 is still OPEN' <<< "$OUT12" \
   && ok "(CLOSEDREOPEN) the repair explains itself on stdout" \
   || bad "(CLOSEDREOPEN) must report the reopen (out: $OUT12)"
 
@@ -2757,7 +2757,7 @@ reopened b-CLOSEDHEAD \
 reopened b-CLOSEDFLAP \
   && bad "(CLOSEDFLAP) must not reopen a bead that was reopened, confirmed open and re-closed" \
   || ok "(CLOSEDFLAP) a confirmed-then-re-closed bead is not reopened a second time"
-printf '%s\n' "$OUT12" | grep -q 'has been CLOSED again by a live writer' \
+grep -q 'has been CLOSED again by a live writer' <<< "$OUT12" \
   && ok "(CLOSEDFLAP) the flap is reported" \
   || bad "(CLOSEDFLAP) must report the re-close (out: $OUT12)"
 
@@ -2946,7 +2946,7 @@ stamped b-CLOSEDHELD reopened_not_landed "PR#772" \
 recovered b-CLOSEDHELD \
   && bad "(CLOSEDHELD) ...and it must never reach phase 0 and be stamped visible" \
   || ok "(CLOSEDHELD) ...and it never reaches phase 0"
-printf '%s\n' "$OUT12F" | grep -q 'b-CLOSEDHELD is under an operator hold (merge_hold=operator-gated); NOT reopening' \
+grep -q 'b-CLOSEDHELD is under an operator hold (merge_hold=operator-gated); NOT reopening' <<< "$OUT12F" \
   && ok "(CLOSEDHELD) the refusal names the marker it read, so an operator can see WHICH gate stopped it" \
   || bad "(CLOSEDHELD) the reopen refusal must report the marker (out: $OUT12F)"
 

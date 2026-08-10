@@ -354,7 +354,7 @@ grep -q 'grep -q[a-zA-Z]* codex' "$TMP/toml-nocomment" \
   && bad "(D3) a codex-membership grep pipeline is back in the formula — under pipefail a long check_set reads it as ABSENT" \
   || ok "(D3) codex membership is decided in-shell at every formula site (no pipefail-prone pipeline)"
 # --- Gate must leave the anchor for retry (drain-ack) on the fail path. -------
-printf '%s' "$SNIPPET" | grep -q 'gc runtime drain-ack' \
+grep -q 'gc runtime drain-ack' <<< "$SNIPPET" \
   && ok "(E) fail path drain-acks so the next patrol retries" \
   || bad "(E) fail path must gc runtime drain-ack before exiting"
 

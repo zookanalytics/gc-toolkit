@@ -331,7 +331,7 @@ else
 fi
 
 # The advisory arm must not masquerade as a failure verdict.
-if verdict retired | grep -q '^INFO'; then
+if grep -q '^INFO' < <(verdict retired); then
     ok "extra backup dir is advisory, not a live-backup failure"
 else
     bad "extra backup dir did not come back as INFO: $(verdict retired)"
@@ -339,7 +339,7 @@ fi
 
 # uncommitted_fresh must be caught by the trap arm, not the staleness arm — its
 # manifest is only 5 h old, so a rule that checks age alone would pass it.
-if verdict uncommitted_fresh | grep -q 'not the manifest'; then
+if grep -q 'not the manifest' < <(verdict uncommitted_fresh); then
     ok "uncommitted_fresh caught by the trap arm, not by staleness"
 else
     bad "uncommitted_fresh not caught by the trap arm: $(verdict uncommitted_fresh)"
@@ -348,7 +348,7 @@ fi
 # The tie rule must not swallow the trap it sits next to: one second of strict
 # newness still means the run uploaded data it never committed. If this comes
 # back OK, the fix degenerated into "the manifest always wins".
-if verdict tie_uncommitted | grep -q 'not the manifest'; then
+if grep -q 'not the manifest' < <(verdict tie_uncommitted); then
     ok "a chunk one second newer than the manifest still FLAGs as uncommitted"
 else
     bad "one-second-newer chunk not caught by the trap arm: $(verdict tie_uncommitted)"
@@ -356,7 +356,7 @@ fi
 
 # The uncommitted case must name the trap, not just say "old" — a reader has to
 # understand the data is unrestorable, not merely behind.
-if verdict uncommitted | grep -q 'not the manifest'; then
+if grep -q 'not the manifest' < <(verdict uncommitted); then
     ok "uncommitted verdict explains the .darc-newer-than-manifest trap"
 else
     bad "uncommitted verdict does not explain the trap: $(verdict uncommitted)"
@@ -364,7 +364,7 @@ fi
 
 # The missing-dir verdict must name the database and say what is wrong, or the
 # Step 3 nudge/escalation template has nothing concrete to carry.
-if verdict missing_backup_dir | grep -q 'no backup directory'; then
+if grep -q 'no backup directory' < <(verdict missing_backup_dir); then
     ok "missing-dir verdict names the database and the cause"
 else
     bad "missing-dir verdict is not actionable: $(verdict missing_backup_dir)"
@@ -385,7 +385,7 @@ fi
 
 # No verdict may ever name a literal '*' — that is an unmatched glob leaking
 # through as a database name, and it gives the deacon nothing to act on.
-if printf '%s\n' "$OUT" | grep -qE '^(OK|FLAG|RECHECK|INFO) \*'; then
+if grep -qE '^(OK|FLAG|RECHECK|INFO) \*' <<< "$OUT"; then
     bad "a verdict named the unmatched glob '*': $(printf '%s\n' "$OUT" | grep -E '^\w+ \*')"
 else
     ok "no verdict names the unmatched glob '*'"
@@ -519,7 +519,7 @@ scan_expect scan_empty RECHECK  # exit 0 but listed nothing, manifest readable
 
 # The headline invariant, stated as itself: an unreadable backup directory must
 # never produce a clean verdict, whatever the manifest looks like.
-if printf '%s\n' "$SCAN_OUT" | grep -qE '^OK '; then
+if grep -qE '^OK ' <<< "$SCAN_OUT"; then
     bad "an unenumerable backup directory read as OK: $(printf '%s\n' "$SCAN_OUT" | grep -E '^OK ')"
 else
     ok "no unenumerable backup directory read as OK"
@@ -528,12 +528,12 @@ fi
 # The verdict has to say the SCAN failed, not merely that something is wrong:
 # Step 3 quotes this line verbatim, and "fix the directory read" is a different
 # action from "re-run the backup dog".
-if printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' | grep -q 'scan failed'; then
+if grep -q 'scan failed' < <(grep -E '^RECHECK scan_fresh:' <<< "$SCAN_OUT"); then
     ok "scan-failure verdict names the scan as the cause"
 else
     bad "scan-failure verdict does not name the scan: $(printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' || true)"
 fi
-if printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' | grep -q 'Permission denied'; then
+if grep -q 'Permission denied' < <(grep -E '^RECHECK scan_fresh:' <<< "$SCAN_OUT"); then
     ok "scan-failure verdict carries the underlying find error"
 else
     bad "scan-failure verdict drops the find error: $(printf '%s\n' "$SCAN_OUT" | grep -E '^RECHECK scan_fresh:' || true)"
@@ -592,18 +592,18 @@ root_case() {
     local label="$1" root="$2"
     local out
     out="$(GC_CITY_PATH="$root" GC_CITY="$root" EXPECTED_DBS="$DBS" bash "$TMP/check.sh" 2>&1)"
-    if printf '%s\n' "$out" | grep -q '^FLAG-ROOT:'; then
+    if grep -q '^FLAG-ROOT:' <<< "$out"; then
         ok "$label -> FLAG-ROOT ($(printf '%s\n' "$out" | grep '^FLAG-ROOT:' | head -1))"
     else
         bad "$label -> no FLAG-ROOT finding; got: $out"
     fi
     # It has to name the databases, or the escalation template is empty.
-    if printf '%s\n' "$out" | grep -q 'healthy'; then
+    if grep -q 'healthy' <<< "$out"; then
         ok "$label finding names the affected databases"
     else
         bad "$label finding does not name the affected databases: $out"
     fi
-    if printf '%s\n' "$out" | grep -qE '^(OK|FLAG|RECHECK|INFO) \*'; then
+    if grep -qE '^(OK|FLAG|RECHECK|INFO) \*' <<< "$out"; then
         bad "$label leaked an unmatched glob as a database name: $out"
     else
         ok "$label does not leak an unmatched glob"
@@ -627,7 +627,7 @@ if command -v jq >/dev/null 2>&1; then
     printf '%s\n' '#!/bin/sh' 'echo "{\"databases\":[]}"' > "$TMP/bin/gc"
     chmod +x "$TMP/bin/gc"
     NODB="$(PATH="$TMP/bin:$PATH" GC_CITY_PATH="$TMP" GC_CITY="$TMP" bash "$TMP/check.sh" 2>&1)"
-    if printf '%s\n' "$NODB" | grep -q '^FLAG-ROOT:'; then
+    if grep -q '^FLAG-ROOT:' <<< "$NODB"; then
         ok "empty database list -> FLAG-ROOT ($(printf '%s\n' "$NODB" | head -1))"
     else
         bad "empty database list did not produce FLAG-ROOT; got: $NODB"

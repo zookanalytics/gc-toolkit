@@ -87,7 +87,7 @@ git -C "$TOWN" worktree add -q "$LIVE" --detach HEAD
 HUSK_TOPLEVEL="$(git -C "$HUSK" rev-parse --show-toplevel 2>/dev/null || true)"
 eq "$HUSK_TOPLEVEL" "$(cd "$TOWN" && pwd -P)" \
    "(premise) git from a husk work_dir walks UP to the enclosing town repo"
-(cd "$HUSK" && git add -A --dry-run 2>/dev/null | grep -q "operator-wip.txt") \
+(cd "$HUSK" && grep -q "operator-wip.txt" < <(git add -A --dry-run 2>/dev/null)) \
   && ok "(premise) unguarded 'git add -A' from a husk stages the town repo's operator WIP" \
   || bad "(premise) expected husk 'git add -A' to stage town operator WIP"
 
