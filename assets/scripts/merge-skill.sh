@@ -405,6 +405,135 @@ merge_hold_truthy() { # <merge_hold value>
   esac
 }
 
+# --- ONE PR, ONE GATE: coalescing the anchors that claim the same pull request.
+#
+# tk-ynz4b holds a PR claimed by more than one open gating anchor, because the
+# loop validates each anchor INDEPENDENTLY and the PR would otherwise be gated by
+# its WEAKEST anchor. The hold was written to release "on a later pass once
+# exactly one open anchor remains (close/demote the duplicate)" — but NO pass
+# performs that demotion, and the mechanism that used to converge these pairs was
+# reconcile-merged-prs.sh closing BOTH anchors ON MERGE. The guard gates the very
+# merge that ran it, so the pair can only be resolved by hand (tk-3sdfq).
+#
+# The pairs still occur. Two pre_open_gate anchors on one branch become two
+# pull_request anchors BY DESIGN: pre-open-resolve.sh's "already has PR#N; flipped
+# to pull_request" arm flips the sibling of whichever anchor opened the PR, so the
+# sibling stays visible to the merge and observer passes. That flip is correct —
+# and it lands the pair straight into the permanent hold. The patrol's
+# one-anchor-per-pr-resolve arm (mol-refinery-patrol.toml) is what should stop the
+# second pre_open_gate anchor from being minted in the first place; when it does
+# not — a rig checkout on an older pack, an out-of-band write — the pair is real,
+# and today nothing can retire it. Live at filing: gascity gc-ddvrx + gc-2s6oz on
+# PR#109, codex green on the rework anchor and unable to land.
+#
+# So this resolves the pair instead of holding it: the anchors of one PR are
+# treated as ONE gate whose check-set is the UNION of theirs, satisfied by the
+# markers of all of them pooled. Union is what preserves tk-ynz4b's actual intent.
+# The bypass it prevents is a WEAKER gate deciding the merge, and a union is
+# stronger than either member: a gateless duplicate adds no gate to skip past, and
+# the real anchor's `codex` still has to be green. Pooling the MARKERS is sound
+# for the same reason the markers are head-pinned at all — `check.<g>=green@<oid>`
+# is a statement about the COMMIT ("gate g passed at oid"), not about the bead
+# holding it, and every anchor here is parked on the same PR whose live head is
+# that oid. A sibling's green@<live head> is evidence about the commit this merge
+# would land, whichever bead recorded it.
+#
+# Coalescing is EARNED, not assumed. Every sibling is re-read live and must still
+# be the thing this pass thinks it is — open, parked on a published PR, claiming
+# exactly this PR in this repository, describing this branch and this target — and
+# must declare a NON-EMPTY check_set. Empty is refused deliberately: at the gate
+# site below, an empty check_set means "no gates" because check-set-heal.sh
+# normalizes it on the pass immediately before this one, but a duplicate minted or
+# reclassified MID-PASS has not been through that pass, so an empty set on a
+# sibling is UNVALIDATED, not ungated — reading it as "no gates" would union in
+# nothing and hand the PR to the weakest anchor, which is precisely tk-ynz4b.
+# Anything uncertifiable falls back to the tk-ynz4b hold with the reason named.
+#
+# Sets, on success: COALESCE_ROW (the anchor row with pooled check.* markers),
+# COALESCE_CHECKSET (the unioned check_set), COALESCE_DISMISSED (every
+# signoff_dismissed on the PR, joined — a review the city retracted arms the
+# external-approval requirement no matter which anchor recorded it).
+# On failure: COALESCE_REASON, and returns non-zero.
+COALESCE_ROW=""; COALESCE_CHECKSET=""; COALESCE_DISMISSED=""; COALESCE_REASON=""
+coalesce_gate() { # <self-id> <self-row> <pr-num> <repo-q> <head-oid> <head-ref> <base> <sibling-ids>
+  local self="$1" selfrow="$2" pnum="$3" prepo="$4" head="$5" ref="$6" pbase="$7" sibs="$8"
+  local sid srow sstatus sresult spr sforeign scs shold sbranch starget sdis pooled
+  COALESCE_ROW=""; COALESCE_CHECKSET=""; COALESCE_DISMISSED=""; COALESCE_REASON=""
+  pooled="$selfrow"
+  COALESCE_CHECKSET=$(printf '%s' "$selfrow" | jq -r '.meta.check_set // ""' 2>/dev/null)
+  COALESCE_DISMISSED=$(printf '%s' "$selfrow" | jq -r '.meta.signoff_dismissed // ""' 2>/dev/null)
+  for sid in $sibs; do
+    [ -n "$sid" ] || continue
+    [ "$sid" != "$self" ] || continue
+    # LIVE, like every other fact this merge is decided on. The enumeration
+    # snapshot is older than the PR read, and a sibling anchor is exactly the bead
+    # a concurrent signoff is writing.
+    srow=$(anchor_row "$sid")
+    if [ -z "$srow" ]; then
+      COALESCE_REASON="sibling anchor $sid could not be re-read; an unreadable anchor cannot prove what it gates"
+      return 1
+    fi
+    sstatus=$(printf '%s' "$srow" | jq -r '.status | ascii_downcase' 2>/dev/null)
+    sresult=$(printf '%s' "$srow" | jq -r '.meta.merge_result // ""' 2>/dev/null)
+    spr=$(printf '%s' "$srow" | jq -r --arg o "$prepo" "$PR_SELF_JQ"'
+      {metadata: .meta} | (pr_nums_here($o)) as $ns
+      | if ($ns | length) == 1 then $ns[0] else "" end' 2>/dev/null)
+    if [ "$sstatus" != "open" ] || [ "$sresult" != "pull_request" ] || [ "$spr" != "$pnum" ]; then
+      COALESCE_REASON="sibling anchor $sid no longer gates PR#$pnum (status='${sstatus:-unknown}' merge_result='${sresult:-unset}' claims '${spr:-none}') — the ledger changed mid-pass"
+      return 1
+    fi
+    # Repository, on the same `?`-is-the-fail-closed-wildcard rule as the anchor
+    # projection: only a POSITIVE, parsed disagreement disqualifies a sibling, so a
+    # legacy anchor recording no url still coalesces exactly as it counts today.
+    sforeign=$(printf '%s' "$srow" | jq -r --arg r "$prepo" "$REPO_JQ"'
+      (((.meta.pr_url // "") | tostring) | repo_of) as $x
+      | if same_repo($x; $r) then "" else $x end' 2>/dev/null)
+    if [ -n "$sforeign" ]; then
+      COALESCE_REASON="sibling anchor $sid records a pull request in '$sforeign', not '$prepo'"
+      return 1
+    fi
+    scs=$(printf '%s' "$srow" | jq -r '(.meta.check_set // "") | gsub("[[:space:],]";"")' 2>/dev/null)
+    if [ -z "$scs" ]; then
+      COALESCE_REASON="sibling anchor $sid declares NO check_set, which is UNVALIDATED rather than ungated here (check-set-heal.sh normalizes an empty set on the pass before this one, and a duplicate minted mid-pass has not been through it) — its gates cannot be unioned"
+      return 1
+    fi
+    shold=$(printf '%s' "$srow" | jq -r '.meta.merge_hold // ""' 2>/dev/null)
+    if merge_hold_truthy "$shold"; then
+      COALESCE_REASON="sibling anchor $sid carries merge_hold=$shold (operator gate) — a hold on ANY anchor of this PR holds the PR"
+      return 1
+    fi
+    sbranch=$(printf '%s' "$srow" | jq -r '.meta.branch // ""' 2>/dev/null)
+    if [ -n "$sbranch" ] && [ -n "$ref" ] && [ "$sbranch" != "$ref" ]; then
+      COALESCE_REASON="sibling anchor $sid records branch '$sbranch' but PR#$pnum is opened from '$ref' — the two beads describe different work"
+      return 1
+    fi
+    starget=$(printf '%s' "$srow" | jq -r '.meta.merged_target // ""' 2>/dev/null)
+    if [ -n "$starget" ] && [ -n "$pbase" ] && [ "$starget" != "$pbase" ]; then
+      COALESCE_REASON="sibling anchor $sid records merged_target '$starget' but PR#$pnum lands on '$pbase'"
+      return 1
+    fi
+    # Union the declared gates; pool ONLY the markers that are green at THIS head.
+    # A sibling's stale or absent marker must never overwrite a live green one, so
+    # the pooling is additive and head-conditioned rather than an object merge.
+    COALESCE_CHECKSET="$COALESCE_CHECKSET,$(printf '%s' "$srow" | jq -r '.meta.check_set // ""' 2>/dev/null)"
+    pooled=$(printf '%s\n%s' "$pooled" "$srow" | jq -sc --arg head "$head" '
+      .[0] as $acc | .[1].meta as $sib
+      | $acc
+      | .meta = reduce ($sib | to_entries[]
+                        | select((.key | startswith("check."))
+                                 and ((.value | tostring) == ("green@" + $head))))
+                  as $e (.meta; .[$e.key] = $e.value)' 2>/dev/null)
+    if [ -z "$pooled" ]; then
+      COALESCE_REASON="the pooled check-set markers could not be built from sibling anchor $sid"
+      return 1
+    fi
+    sdis=$(printf '%s' "$srow" | jq -r '.meta.signoff_dismissed // ""' 2>/dev/null)
+    [ -z "$sdis" ] || COALESCE_DISMISSED="${COALESCE_DISMISSED:+$COALESCE_DISMISSED,}$sdis"
+  done
+  COALESCE_ROW="$pooled"
+  return 0
+}
+
 # --- closing an anchor past the identity-ENCODING refusal. --------------------
 # `bd close` is assignee-gated: it refuses when the bead's assignee string differs
 # from the ACTOR string it derives for the calling process. Those two routinely
@@ -1163,9 +1292,31 @@ while IFS= read -r row; do
       echo "merge-skill: PR#$num live open-anchor set '${anchor_ids:-none}' does not contain $id, which the re-read just showed open and parked on this PR; merge held (anchor $id)" >&2
       held=$((held + 1)); continue ;;
   esac
+  # More than one open anchor is COALESCED into a single gate rather than held
+  # outright (tk-3sdfq; see coalesce_gate's header). The hold this replaces had no
+  # release: it told the operator to "close/demote the duplicate", nothing performs
+  # that demotion, and the pass that used to converge these pairs —
+  # reconcile-merged-prs.sh closing every anchor of the PR ON MERGE — is gated
+  # behind the merge the hold prevents.
+  #
+  # Coalescing does not weaken tk-ynz4b: the effective check-set becomes the UNION
+  # of the anchors' sets, so the weakest member adds nothing to skip past, and the
+  # strongest member's gates all still have to be green AT THE LIVE HEAD. Anything
+  # that cannot be certified — a sibling that moved, a sibling with an empty (i.e.
+  # unvalidated) check_set, an operator hold anywhere on the PR — falls back to
+  # exactly the hold that was here before, naming which sibling and why.
+  dup_sibs=""
   if [ "$(printf '%s' "$anchor_ids" | wc -w | tr -d '[:space:]')" -gt 1 ]; then
-    echo "merge-skill: PR#$num has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor $id) — close/demote the duplicate anchor to release (tk-ynz4b)"
-    held=$((held + 1)); continue
+    dup_sibs="$anchor_ids"
+    if coalesce_gate "$id" "$row" "$num" "$arepo" "$head_oid" "$head_ref" "$base" "$dup_sibs"; then
+      row="$COALESCE_ROW"
+      checkset="$COALESCE_CHECKSET"
+      [ -z "$COALESCE_DISMISSED" ] || dismissed="$COALESCE_DISMISSED"
+      echo "merge-skill: PR#$num is claimed by ${anchor_ids// /, } — coalesced into ONE gate (union check_set '$checkset'), markers pooled at $head_oid (anchor $id, tk-3sdfq)"
+    else
+      echo "merge-skill: PR#$num has multiple open gating anchors that cannot be coalesced — $COALESCE_REASON; merge held (anchor $id) — close/demote the duplicate anchor to release (tk-ynz4b)"
+      held=$((held + 1)); continue
+    fi
   fi
   # Retarget: live base must still match the anchor's recorded merged_target. A
   # mismatch means the PR was retargeted after publication; merging would land on
@@ -1267,9 +1418,36 @@ while IFS= read -r row; do
   # next idle pass; a merge past open rework is not.
   # Reported on stdout with the other hold reasons, not stderr: the outcome is a
   # gate HOLD the patrol log must show alongside its peers, not a skipped anchor.
+  #
+  # COALESCED anchors probe as one (tk-3sdfq): the holder set is the UNION of
+  # every member's, and the members themselves are excluded from it. Probing only
+  # the anchor that happens to be merging would be the fail-OPEN half of
+  # coalescing — a sibling's open rework child holds the PR just as its check-set
+  # gates it, and dropping that would land the PR while real rework is in flight.
+  # Excluding the members is what stops the union from holding itself: they are no
+  # longer separate gating anchors, they are one gate, and a gate does not block
+  # its own merge (unexcluded, the pair would deadlock exactly as before, since
+  # each member is a dep-linked or PR-naming holder of the other).
   if ! holders=$(probe_holders "$id" "$pr_beads"); then
     echo "merge-skill: PR#$num in-flight rework/review probe failed; merge held (anchor $id, retry next pass)"
     held=$((held + 1)); continue
+  fi
+  if [ -n "$dup_sibs" ]; then
+    holder_fail=""
+    for sib_id in $dup_sibs; do
+      [ "$sib_id" != "$id" ] || continue
+      if ! sib_holders=$(probe_holders "$sib_id" "$pr_beads"); then
+        holder_fail="$sib_id"; break
+      fi
+      holders=$(printf '%s\n%s' "$holders" "$sib_holders" | jq -sc '
+        add | group_by(.id)
+        | map(.[0] + {_via: (if (map(._via) | index("dep")) then "dep" else "pr_number" end)})' 2>/dev/null)
+      [ -n "$holders" ] || { holder_fail="$sib_id"; break; }
+    done
+    if [ -n "$holder_fail" ]; then
+      echo "merge-skill: PR#$num in-flight rework/review probe failed for coalesced sibling $holder_fail; merge held (anchor $id, retry next pass)"
+      held=$((held + 1)); continue
+    fi
   fi
   # The holder's STATUS rides along in the hold reason. It is no longer always
   # "open" — a `blocked` child holds too, and that is the one an operator has to
@@ -1288,10 +1466,14 @@ while IFS= read -r row; do
   # widened to close, arrived at one layer further down, so it gets the same
   # answer — hold and retry. `if !` (not `$?` after the assignment) because the
   # command substitution's status is the only place the abort is visible.
-  if ! inflight=$(printf '%s' "$holders" | jq -r --arg anchor "$id" --arg live "$LIVE_STATUSES" --arg r "$arepo" "$REPO_JQ"'
+  # `$anchor` is EVERY member of the coalesced gate (just `$id` when there is no
+  # duplicate), space-wrapped for whole-token matching. Nothing holds itself, and
+  # under coalescing "itself" is the whole union.
+  if ! inflight=$(printf '%s' "$holders" | jq -r --arg anchor " ${dup_sibs:-$id} " --arg live "$LIVE_STATUSES" --arg r "$arepo" "$REPO_JQ"'
     ($live | split(",")) as $live_statuses
     | [ .[]
-        | select((.id // "") != "" and .id != $anchor)
+        | (.id // "") as $bid
+        | select($bid != "" and (($anchor | contains(" " + $bid + " ")) | not))
         | select(((.status // "open") | ascii_downcase) as $s | $live_statuses | index($s))
         | ((.metadata.merge_result // "") | tostring) as $mr
         | ((._via // "pr_number")) as $via
@@ -1731,7 +1913,25 @@ while IFS= read -r row; do
   final_prurl=$(printf '%s' "$final_row" | jq -r '.meta.pr_url // ""' 2>/dev/null)
   final_branch=$(printf '%s' "$final_row" | jq -r '.meta.branch // ""' 2>/dev/null)
   final_reason=""
-  if [ "$final_status" != "open" ]; then
+  # A COALESCED gate is re-coalesced here, from fresh reads of every member
+  # (tk-3sdfq). The whole point of this re-read is that a bead can change inside
+  # the pass's window, and under coalescing the gate is not one bead: a sibling's
+  # marker can go stale, an operator can park a sibling, a sibling can stop gating
+  # this PR. Re-asking only `$id` would re-confirm a fraction of the authorization
+  # and merge on the rest as it stood a dozen round-trips ago. On refusal the
+  # reason travels as-is — the same fail-closed answer the first coalesce gives.
+  if [ -n "$dup_sibs" ]; then
+    if coalesce_gate "$id" "$final_row" "$num" "$arepo" "$head_oid" "$head_ref" "$base" "$dup_sibs"; then
+      final_row="$COALESCE_ROW"
+      final_checkset="$COALESCE_CHECKSET"
+      [ -z "$COALESCE_DISMISSED" ] || final_dismissed="$COALESCE_DISMISSED"
+    else
+      final_reason="the anchors claiming this PR can no longer be coalesced — $COALESCE_REASON"
+    fi
+  fi
+  if [ -n "$final_reason" ]; then
+    : # the coalesced re-read above already named the reason
+  elif [ "$final_status" != "open" ]; then
     final_reason="anchor is no longer open (status='${final_status:-unknown}')"
   elif [ "$final_result" != "pull_request" ]; then
     final_reason="anchor no longer parked on a published PR (merge_result='${final_result:-unset}')"

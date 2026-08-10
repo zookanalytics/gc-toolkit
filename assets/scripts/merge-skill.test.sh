@@ -26,8 +26,15 @@
 #   (12) TWO open anchors claim the same PR (a rework bead leaked into the anchor
 #        class, tk-ynz4b): one carries the codex gate (red), the duplicate has an
 #        EMPTY check_set + CLEAN PR -> before the fix the gateless duplicate
-#        merged the PR, bypassing codex; now EVERY anchor of a multi-anchor PR is
-#        HELD until the duplicate is closed/demoted
+#        merged the PR, bypassing codex; still HELD, now through the coalescing
+#        rules of (40) rather than through a bare anchor count
+#   (CO) MULTI-ANCHOR PRs are COALESCED into ONE gate (tk-3sdfq) — union of the
+#        check_sets, markers pooled at the live head, union of the in-flight
+#        children, no member operator-held, every member re-certified live before
+#        the gates and again before the merge. The count hold it replaces had no
+#        release (nothing demotes a duplicate, and the pass that closes both is
+#        gated behind the merge the hold prevented), so the pre-open sibling-flip
+#        pair pre-open-resolve.sh mints by design deadlocked permanently
 #   (13) DEPENDENCY-LINKED rework child with NO pr_number of its own -> merge HELD
 #        (tk-lgjvg: the gate resolved children by pr_number alone, so a child that
 #        carries only branch/source_review_bead was invisible and the gate PASSED)
@@ -336,6 +343,14 @@ bead-SELFCONTRA|369|main|codex|green@HEAD369||||polecat/bead-SELFCONTRA
 bead-NOHEAD|370|main|codex|green@HEAD370||||polecat/bead-NOHEAD
 bead-BRANCHMISMATCH|371|main|codex|green@HEAD371||||polecat/bead-BRANCHMISMATCH
 bead-HEADOK|372|main|codex|green@HEAD372||||polecat/bead-HEADOK
+bead-COALESCE-A|389|main|codex|
+bead-COALESCE-B|389|main|codex|green@HEAD389
+bead-COALESCE-C|390|main|codex|
+bead-COALESCE-D|390|main|codex|green@OLD390
+bead-COALESCE-E|391|main|codex|green@HEAD391
+bead-COALESCE-F|391|main|codex|green@HEAD391|true
+bead-COALESCE-G|392|main|codex|green@HEAD392
+bead-COALESCE-H|392|main|codex|green@HEAD392
 bead-FINALHOLD|374|main|codex|green@HEAD374
 bead-FINALGATE|375|main|codex|green@HEAD375
 bead-FINALCLOSED|376|main|codex|green@HEAD376
@@ -560,6 +575,19 @@ HM
 #   370 OPEN, CLEAN, headRepository/headRepositoryOwner null -> HELD (HD3)
 #   371 OPEN, CLEAN, ours, but opened from 'polecat/somebody-else' while the anchor
 #       records 'polecat/bead-BRANCHMISMATCH' -> HELD (HD4)
+#   389 THE SIBLING-FLIP PAIR (tk-3sdfq). Claimed by bead-COALESCE-A (the original
+#       anchor, check.codex CLEARED by the re-gate) and bead-COALESCE-B (the rework
+#       anchor codex greened, which opened the PR and flipped its sibling), linked
+#       parent-child exactly as the live pair is -> MERGED via the coalesced gate.
+#       Pre-fix: held forever through both, with no pass able to demote either
+#   390 same pair shape, but NEITHER anchor's marker is green at the live head
+#       (one absent, one pinned to an older commit) -> HELD on the UNIONED gate.
+#       The union is a real gate, not a way around one
+#   391 both anchors green, but the SIBLING carries merge_hold -> HELD. An operator
+#       park on any member parks the PR; coalescing must not route around it
+#   392 both anchors green, and the SIBLING has an open dep-linked rework child
+#       that names no pr_number -> HELD. The holder set is the union too, or the
+#       merge lands with real rework in flight
 #   372 OPEN, CLEAN, ours, head branch == the anchor's recorded branch -> MERGED (HD5)
 #
 # Columns 9-11 (headRefName|headRepo|isCrossRepository) are the head identity. They
@@ -655,6 +683,10 @@ cat > "$TMP/prs" <<'P'
 386|OPEN|false|main|HEAD386|CLEAN|MERGEABLE|a386c0ffee000023
 387|OPEN|false|main|HEAD387|CLEAN|MERGEABLE|a387c0ffee000024
 388|OPEN|false|main|HEAD388|CLEAN|MERGEABLE|a388c0ffee000025||polecat/bead-FINALBRANCH|acme/repo|false
+389|OPEN|false|main|HEAD389|CLEAN|MERGEABLE|a389c0ffee000026
+390|OPEN|false|main|HEAD390|CLEAN|MERGEABLE|a390c0ffee000027
+391|OPEN|false|main|HEAD391|CLEAN|MERGEABLE|a391c0ffee000028
+392|OPEN|false|main|HEAD392|CLEAN|MERGEABLE|a392c0ffee000029
 P
 
 # PR review history (the REST `pulls/N/reviews` source — the approval gate's real
@@ -798,6 +830,8 @@ bead-BOTHSRC|up|parent-child|bothsrc-326|open|pull_request
 bead-MULTIDOC|down|blocks|blocker-327|open|pull_request
 bead-MULTIEMPTY|down|blocks|blocker-328|open|pull_request
 bead-DEPFOREIGN|down|blocks|upstream-373|open|pull_request|https://otherhost/acme/repo/pull/999
+bead-COALESCE-A|up|parent-child|bead-COALESCE-B|open|pull_request
+bead-COALESCE-H|up|parent-child|child-392|open|
 D
 
 # Anchors whose dep probe ERRORS (exit 1) — the fail-closed case.
@@ -1152,8 +1186,24 @@ case "$1 $2" in
     # the cases that turn on them vary them. A headrepo of `-` emits NULL objects,
     # which is what gh returns for a deleted head repository (an omitted column
     # cannot mean that: it has to keep meaning "ours").
+    # A PR ALREADY MERGED IN THIS RUN reads back MERGED, exactly as GitHub does.
+    # It matters as soon as one PR is claimed by more than one anchor (tk-3sdfq):
+    # the coalesced gate lands the PR through whichever member the loop reaches
+    # first, and the pass then walks on to its siblings. Against a fixture frozen
+    # at OPEN each of those would merge the same pull request over again, which
+    # real GitHub answers with a state the skill already handles — `state != OPEN`
+    # skips the anchor, and reconcile-merged-prs.sh closes it on its own pass.
+    # Without this, the harness would invent a double-merge and then have to be
+    # taught to expect it.
+    if [ -n "${FAKE_MERGED:-}" ] && [ -f "$FAKE_MERGED" ] && grep -qx "$num" "$FAKE_MERGED"; then
+      state="MERGED"
+    else
+      state=""
+    fi
+    already="$state"
     while IFS='|' read -r pr state isdraft base headoid mss mergeable oid rd headref headrepo cross; do
       [ "$pr" = "$num" ] || continue
+      [ -z "$already" ] || state="$already"
       [ -n "$headref" ]  || headref="polecat/pr-$num"
       [ -n "$cross" ]    || cross="false"
       [ -n "$headrepo" ] || headrepo="acme/repo"
@@ -1604,11 +1654,30 @@ hasin "$OUT1" "PR#310 has unclosed rework/review bead child-310 (open)" \
 hasin "$OUT1" "PR#312 merge_hold set (operator gate)" \
   && ok "(11) merge_hold=true -> held, reason names the operator gate" \
   || bad "(11) merge_hold hold reason (got: $OUT1)"
-hasin "$OUT1" "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPGATED)" \
-  && ok "(12) multi-anchor PR -> gated anchor held with the one-anchor-per-PR reason" \
+# (12) Both anchors of PR#313 are still held, and tk-3sdfq changes only WHICH
+#      gate says so — the two directions are refused for two different reasons,
+#      and each is load-bearing.
+#
+#      From bead-DUPGATED, coalescing is REFUSED: its sibling declares an EMPTY
+#      check_set, which means "no gates" at the gate site only because
+#      check-set-heal.sh normalizes it on the pass before — a duplicate minted
+#      mid-pass has not been through that pass, so empty is UNVALIDATED here.
+#      Unioning it in as "no gates" is exactly the weakest-anchor bypass tk-ynz4b
+#      exists to stop, so the original hold stands, naming the sibling.
+#
+#      From bead-DUPFREE — the gateless duplicate, the one that MERGED pre-tk-ynz4b
+#      — coalescing SUCCEEDS (its sibling is certifiable) and the union is what
+#      holds it: bead-DUPGATED's `codex` is unioned in and neither anchor carries a
+#      marker green at the live head. That is the tk-ynz4b guarantee arriving
+#      through the union rather than through a count, which is the whole claim
+#      tk-3sdfq rests on — so this assertion is on the CHECK-SET reason, not on the
+#      duplicate reason, and a regression that let the gateless duplicate merge
+#      would fail it and the `^313$` not-merged check together.
+hasin "$OUT1" "PR#313 has multiple open gating anchors that cannot be coalesced — sibling anchor bead-DUPFREE declares NO check_set" \
+  && ok "(12) multi-anchor PR -> gated anchor held; an EMPTY sibling check_set refuses coalescing (tk-ynz4b preserved)" \
   || bad "(12) multi-anchor gated-anchor hold (got: $OUT1)"
-hasin "$OUT1" "PR#313 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-DUPFREE)" \
-  && ok "(12) multi-anchor PR -> gateless duplicate ALSO held (pre-fix it merged, bypassing codex)" \
+hasin "$OUT1" "PR#313 check 'codex' not green at live head (have '', want 'green@HEAD313'); merge held (anchor bead-DUPFREE)" \
+  && ok "(12) multi-anchor PR -> gateless duplicate ALSO held, on its sibling's UNIONED codex gate (pre-fix it merged, bypassing codex)" \
   || bad "(12) multi-anchor gateless-duplicate hold (got: $OUT1)"
 
 # (27) THE FAIL-OPEN TRAP (tk-5niup). The re-gate retracted the city's own
@@ -1932,7 +2001,71 @@ has '^355$' "$TMP/merged" && bad "(25d) a PR with a fork_pr-keyed child must not
 #      anchor's gates alone while a stronger duplicate gate existed. The guard is
 #      computed from the LIVE ledger now, in the same place and for the same
 #      reason the anchor itself is re-read.
-hasin "$OUT1" "PR#356 has multiple open gating anchors (one-anchor-per-PR violated); merge held (anchor bead-LIVEDUP)" \
+# (CO1) THE SIBLING-FLIP DEADLOCK (tk-3sdfq). This is the shape pre-open-resolve.sh
+#      mints BY DESIGN and the shape observed live (gascity PR#109): a pre-open
+#      rework leaves TWO pre_open_gate anchors on one branch, the anchor codex
+#      greened opens the PR, and its "already has PR#N; flipped to pull_request"
+#      arm flips the sibling too — so the PR is claimed by the ORIGINAL anchor,
+#      whose check.codex the re-gate cleared, and by the REWORK anchor, which
+#      carries the green marker. tk-ynz4b's count gate held BOTH and told the
+#      operator to demote one; no pass performs that demotion, and the pass that
+#      used to converge the pair (reconcile-merged-prs.sh closing every anchor of
+#      the PR ON MERGE) is gated behind the merge the hold prevents. Every pre-open
+#      rework that codex greens sat there until a human repaired it by hand.
+#
+#      The fixture is adversarial to the two ways a fix could be fake:
+#        - the green marker is on the OTHER anchor, so a fix that only re-read the
+#          merging anchor's own markers still holds;
+#        - the two are dep-linked parent-child exactly as the live pair is, so a
+#          fix that unioned the gates but not the SELF-EXCLUSION deadlocks anyway
+#          (bead-COALESCE-B is a `_via=dep` holder of bead-COALESCE-A, and a
+#          dep-reached holder is deliberately NOT excludable by merge_result).
+has '^389$' "$TMP/merged" \
+  && ok "(CO1) sibling-flip pair -> coalesced and MERGED (pre-fix: held forever, no pass demotes)" \
+  || bad "(CO1) coalesced sibling-flip pair must merge"
+hasin "$OUT1" "PR#389 is claimed by bead-COALESCE-A, bead-COALESCE-B — coalesced into ONE gate" \
+  && ok "(CO1) the coalescing is logged, naming every member" \
+  || bad "(CO1) coalescing must be logged (got: $OUT1)"
+
+# (CO2) THE UNION IS A REAL GATE, not a bypass. Both anchors declare `codex` and
+#       NEITHER has a marker green at the live head (bead-COALESCE-D's is pinned to
+#       an older commit). Coalescing certifies fine — and the merge is still held,
+#       on the unioned gate. A "fix" that treated a coalesced pair as ungated would
+#       land this one.
+hasin "$OUT1" "PR#390 check 'codex' not green at live head" \
+  && ok "(CO2) coalesced pair with no green marker anywhere -> HELD on the unioned gate" \
+  || bad "(CO2) coalesced-but-ungreen pair must hold (got: $OUT1)"
+has '^390$' "$TMP/merged" && bad "(CO2) a coalesced pair with no green marker must not merge" \
+                          || ok "(CO2) coalesced-but-ungreen pair not merged"
+
+# (CO3) AN OPERATOR HOLD ON ANY MEMBER HOLDS THE PR. bead-COALESCE-E is green and
+#       clean on its own terms; its sibling carries merge_hold. The count gate used
+#       to honour that hold only incidentally (it held everything), so coalescing
+#       has to honour it deliberately or the fix would quietly punch through an
+#       operator's park by merging through the other anchor.
+hasin "$OUT1" "sibling anchor bead-COALESCE-F carries merge_hold=true (operator gate)" \
+  && ok "(CO3) merge_hold on a SIBLING refuses coalescing (an operator park is not routed around)" \
+  || bad "(CO3) sibling merge_hold must refuse coalescing (got: $OUT1)"
+has '^391$' "$TMP/merged" && bad "(CO3) a PR whose sibling anchor is operator-held must not merge" \
+                          || ok "(CO3) operator-held sibling -> not merged"
+
+# (CO4) A SIBLING'S OPEN REWORK CHILD HOLDS THE COALESCED PR. Both anchors are
+#       green, so the gate half of coalescing passes; the holder half is what must
+#       stop it. child-392 hangs off bead-COALESCE-H by a dependency edge and names
+#       no pr_number at all, so it is reachable ONLY through H's own dep walk —
+#       probing just the merging anchor would land PR#392 with real rework still in
+#       flight, which is the fail-OPEN half of treating a pair as one gate.
+hasin "$OUT1" "PR#392 has unclosed rework/review bead child-392 (open)" \
+  && ok "(CO4) a coalesced gate holds on the UNION of its members' in-flight children" \
+  || bad "(CO4) sibling's open child must hold the coalesced merge (got: $OUT1)"
+has '^392$' "$TMP/merged" && bad "(CO4) a coalesced PR with a sibling's open child must not merge" \
+                          || ok "(CO4) sibling's open child -> not merged"
+
+#      Under tk-3sdfq the hold arrives through the coalescing refusal: an anchor
+#      that appeared only in the live ledger cannot be re-read individually (it is
+#      not a bead this pass ever enumerated), and an unreadable sibling cannot
+#      prove what it gates — so it is never unioned away, it refuses the union.
+hasin "$OUT1" "PR#356 has multiple open gating anchors that cannot be coalesced — sibling anchor dup-LIVEDUP could not be re-read" \
   && ok "(38) duplicate anchor visible only in the LIVE ledger -> merge HELD (stale snapshot missed it)" \
   || bad "(38) live duplicate anchor must hold (got: $OUT1)"
 has '^356$' "$TMP/merged" && bad "(38) a PR with a mid-pass duplicate anchor must not merge" \
@@ -2161,15 +2294,15 @@ hasin "$OUT1" "anchor bead-TWOKEYS names more than one PR number in this reposit
   && ok "(FK4) the hold names every number the anchor claims" \
   || bad "(FK4) hold reason must list the conflicting numbers"
 
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "18" "(INV) exactly eighteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381)"
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "19" "(INV) exactly nineteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381 + coalesced sibling-flip pair 389)"
 # Every merge that was PERFORMED bound itself to the head it validated — no
 # unbound `gh pr merge` slipped through on any path.
 eq "$(awk -F'\t' '$2 == "" {c++} END {print c+0}' "$TMP/mergeargs")" "0" \
    "(INV) every merge attempt passed --match-head-commit"
 
 # Summary counters.
-hasin "$OUT1" "18 merged" \
-  && ok "run 1 summary reports 18 merged" || bad "run 1 summary merged count (got: $OUT1)"
+hasin "$OUT1" "19 merged" \
+  && ok "run 1 summary reports 19 merged" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard for the approval gate's own reads. ---------------------
 gh pr view 301 --json reviewDecision >/dev/null 2>&1 \
@@ -2409,14 +2542,14 @@ hasin "$OUT1" "PR#373 has unclosed rework/review bead upstream-373 (open, merge_
 #     certified head (372).
 # No held/skipped anchor leaked: not one of the dependency-edge holders, and not one
 # of the four head-identity cases.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "18" "(INV) exactly eighteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381)"
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "19" "(INV) exactly nineteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381 + coalesced sibling-flip pair 389)"
 # ...and all of them landed in THIS checkout's repository, not wherever gh pointed.
 eq "$(cut -f2 "$TMP/mergedwhere" | sort -u | tr '\n' ' ')" "github.com/acme/repo " \
    "(INV) every merge landed in the origin-derived repository"
 
 # Summary counters.
-hasin "$OUT1" "18 merged" \
-  && ok "run 1 summary reports 18 merged (identity view of the same run)" || bad "run 1 summary merged count (got: $OUT1)"
+hasin "$OUT1" "19 merged" \
+  && ok "run 1 summary reports 19 merged (identity view of the same run)" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard: only gh-supported --json fields. ----------------------
 gh pr view 301 --json merged >/dev/null 2>&1 \
