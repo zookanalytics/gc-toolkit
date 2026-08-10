@@ -41,6 +41,23 @@
 #                          head (stale_gate_head); a poolless hold uses a distinct
 #                          stale_gate_nopool_head so a pool configured later still
 #                          dispatches. Symmetric with CONFLICTING.
+#   PR open, a recorded
+#   hold RESOLVED      -> the counterpart of the two arms above, and the half that
+#                          was missing (tk-iwpz0). Both of them keep the anchor
+#                          OPEN and gating, so their holds end MID-LIFE — the
+#                          branch is rebased, the gate goes green again — while the
+#                          only blocked_reason clear in this file sits in the
+#                          merged-CLOSE arm and fires at the end of the anchor's
+#                          life or never. The anchor then asserts a resolved
+#                          conflict, or a re-review that has long since landed, for
+#                          the entire remaining life of the PR. Retract the
+#                          objection where it RESOLVES: on a definite non-conflict,
+#                          or on check.codex green at the live head, clear
+#                          blocked_reason together with the head marker that armed
+#                          it. Keyed off those markers so it touches only anchors
+#                          these arms held, and scoped to the reason text they
+#                          write so a hold recorded by another writer (the signoff
+#                          round-cap) is never wiped by this one.
 #   PR open, gate GREEN
 #   but GitHub RED     -> the INVERSE of the stale gate (tk-5niup): the marker is
 #                          green at the LIVE head, and it is GitHub that lags —
@@ -713,7 +730,7 @@ def pr_nums_here($o):
 ROWS=""
 if [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ]; then
   ROWS=$(printf '%s' "$ANCHORS" \
-    | jq -c --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'.[] | (pr_nums_here($o)) as $ns | {id, pr: (if ($ns | length) == 1 then $ns[0] else "" end), prurl: (.metadata.pr_url // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), stalegate: (.metadata.stale_gate_head // ""), stalegatenopool: (.metadata.stale_gate_nopool_head // ""), codexmark: (.metadata["check.codex"] // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // ""), closefails: (.metadata.close_failures // ""), closeesc: (.metadata.close_escalated // "")}' 2>/dev/null)
+    | jq -c --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'.[] | (pr_nums_here($o)) as $ns | {id, pr: (if ($ns | length) == 1 then $ns[0] else "" end), prurl: (.metadata.pr_url // ""), target: (.metadata.merged_target // ""), checkset: (.metadata.check_set // ""), branch: (.metadata.branch // ""), fixpool: (.metadata.fix_target_pool // ""), staled: (.metadata.stale_base_head // ""), stalegate: (.metadata.stale_gate_head // ""), stalegatenopool: (.metadata.stale_gate_nopool_head // ""), codexmark: (.metadata["check.codex"] // ""), hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // ""), breason: (.metadata.blocked_reason // ""), closefails: (.metadata.close_failures // ""), closeesc: (.metadata.close_escalated // "")}' 2>/dev/null)
 fi
 # No anchors is NOT an early exit: the anchorless pass below walks PR -> BEAD and
 # is at its MOST relevant here (zero live anchors + open PRs is precisely the
@@ -733,6 +750,12 @@ fi
 SELF_LOGIN=$(gh_api_origin user -q .login 2>/dev/null)
 
 closed=0; abandoned=0; escalated=0; retargeted=0; rebased=0; rebase_held=0; regated=0; gate_held=0; identity_held=0; skipped=0
+# Holds this pass RETRACTED: an anchor whose stale-base or stale-gate objection
+# has been resolved while it stays open, whose blocked_reason + head marker this
+# pass therefore cleared (tk-iwpz0). Its own counter because it is not a
+# disposition — nothing was closed, flagged, routed or held — but it IS a durable
+# write, and every durable write this pass makes is reported in the summary.
+cleared=0
 # Superseded-review retractions (tk-5niup) get their OWN counters: a retraction
 # is not a re-review, so folding it into regated/gate_held would misreport the
 # stale-gate arm's throughput in the summary line.
@@ -750,6 +773,10 @@ while IFS= read -r row; do
   target=$(printf '%s' "$row" | jq -r '.target // empty')
   hold=$(printf '%s' "$row" | jq -r '.hold // empty')
   rhold=$(printf '%s' "$row" | jq -r '.rhold // empty')
+  # The anchor's CURRENT live-objection text. Read once here, and updated in place
+  # by the two hold-resolved arms below when they retract it, so the second of them
+  # never reports on a value the first already cleared.
+  breason=$(printf '%s' "$row" | jq -r '.breason // empty')
   if [ -z "$id" ] || [ -z "$num" ]; then
     skipped=$((skipped + 1)); continue
   fi
@@ -960,12 +987,27 @@ anchor's merged_target if the new base is intentional." >/dev/null 2>&1; then
       # describe a wedge that is now over, and a landed anchor still carrying
       # them would read as stuck to the next human and re-bound a future
       # escalation that has nothing to do with this run.
+      #
+      # The two STALE-GATE head markers belong in that set and were missing from
+      # it: an anchor that took a stale-gate re-review on its way to landing
+      # closed still carrying stale_gate_head / stale_gate_nopool_head, i.e. still
+      # asserting "the codex gate was last dispatched at <a commit that is now two
+      # rounds dead>" about work that has shipped (tk-iwpz0). Harmless to the
+      # machinery — a closed anchor leaves this scan either way — and precisely as
+      # misleading to a reader as the blocked_reason beside it.
+      #
+      # This whole write is one batched update over keys that are usually ABSENT
+      # (rejection_reason and close_failures are the exception, not the rule), so
+      # unsetting a key an anchor does not carry has always been the common case
+      # here; the two added keys change nothing about that.
       gc bd update "$id" \
         --set-metadata merge_result=merged \
         --set-metadata merged_sha="$merge_oid" \
         --unset-metadata rejection_reason \
         --unset-metadata blocked_reason \
         --unset-metadata stale_base_head \
+        --unset-metadata stale_gate_head \
+        --unset-metadata stale_gate_nopool_head \
         --unset-metadata close_failures \
         --unset-metadata close_escalated >/dev/null 2>&1 || true
       closed=$((closed + 1))
@@ -1251,6 +1293,85 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
     continue
   fi
 
+  # --- Stale-base hold RESOLVED: retract the objection, not just the block. ---
+  # The arm above records its hold as blocked_reason + stale_base_head and
+  # deliberately KEEPS merge_result=pull_request, because the anchor goes on
+  # gating while the rebase runs. So this hold ENDS MID-LIFE, with the anchor
+  # still open — and nothing retracted it. The only `--unset-metadata
+  # blocked_reason` in this file sits inside the merged-CLOSE arm, which fires at
+  # the very end of an anchor's life or never, so an anchor whose branch was
+  # rebased hours ago went on telling every operator, witness and heal pass that
+  # it "conflicts with base 'main'" — naming a rebase child that has since closed
+  # and a pool that is waiting on nothing — for the entire remaining life of the
+  # PR: through re-review, through approval, and however long the merge waits
+  # (tk-iwpz0). blocked_reason is the only in-band statement of WHY an anchor is
+  # stuck, and a confidently false one is worse than none.
+  #
+  # Symmetric with the arm in both directions, which is what keeps it from
+  # flapping:
+  #   * it fires only on a DEFINITE non-conflict (mergeable=MERGEABLE and not
+  #     DIRTY). The arm refuses to fire on UNKNOWN/blank because that means
+  #     "GitHub is still computing"; the clear refuses for the same reason, so a
+  #     PR mid-computation neither holds nor clears — it waits. Reading UNKNOWN as
+  #     "resolved" would retract on every pass that caught GitHub thinking and
+  #     re-set on the next one.
+  #   * it is keyed off stale_base_head — the marker the arm stamps — so an anchor
+  #     this arm never held is never touched, and the retraction happens exactly
+  #     once, because the marker goes with it.
+  #
+  # Clearing the MARKER as well as the reason is what makes the hold re-armable.
+  # stale_base_head is the one-per-head guard, and a conflict can resolve without
+  # the head moving — the BASE moved instead (a revert landing on main). If the
+  # base is then rewritten again while the head still sits where it did, a marker
+  # left behind reads as "already dispatched at this head" and suppresses the
+  # rebase forever: the arm's own convergence guard, turned into a permanent one.
+  #
+  # Only a reason THIS arm wrote is retracted. blocked_reason is a SHARED field —
+  # the signoff round-cap (mol-refinery-patrol.toml) writes one on an anchor it
+  # routes to a human and leaves merge_result=pull_request, so such an anchor is
+  # in this very scan — and wiping that would erase the only in-band record of why
+  # a human was summoned. Both stale-base texts begin "PR#<num> conflicts with
+  # base ", which no other writer produces; anything else keeps its reason, loses
+  # only the marker, and says so on its way past.
+  #
+  # Routing is deliberately NOT touched. The no-pool path also sets
+  # gc.routed_to=human, but un-routing an anchor is a live dispatch decision (it
+  # can pull a bead out of an operator's triage queue), and it is not what this
+  # field records.
+  #
+  # And no operator-hold guard, unlike every arm around it — deliberately, for the
+  # reason those guards exist. merge_hold/rebase_hold gate ACTIONS on the PR: a
+  # merge, a dispatched force-push, a re-review, a retracted GitHub block. This
+  # retracts a stale sentence from a bead. It dispatches nothing, wakes nobody, and
+  # merge-skill.sh does not read blocked_reason at all, so it cannot advance a PR
+  # an operator has parked. Clearing the head marker only lets the CONFLICTING arm
+  # look again — and that arm checks both holds itself, before it does anything.
+  # Skipping held anchors would leave exactly the operator who set the hold reading
+  # the false statement, for as long as they hold it.
+  if [ "$state" = "OPEN" ] && [ "$is_draft" != "true" ] \
+     && [ "$mergeable" = "MERGEABLE" ] && [ "$merge_state" != "DIRTY" ] \
+     && [ -n "$(printf '%s' "$row" | jq -r '.staled // empty')" ]; then
+    # Only keys the anchor actually carries are unset, so this never asks the
+    # ledger to remove something that is not there.
+    CLEAR_BASE=(--unset-metadata stale_base_head)
+    keep_reason=""
+    case "$breason" in
+      "") : ;;
+      "PR#$num conflicts with base "*) CLEAR_BASE+=(--unset-metadata blocked_reason) ;;
+      *) keep_reason=1 ;;
+    esac
+    # `${arr[@]+"${arr[@]}"}` for the same reason as the retarget arm's unset list:
+    # bash 3.2 under `set -u` trips on a bare "${arr[@]}" when the array is empty.
+    gc bd update "$id" ${CLEAR_BASE[@]+"${CLEAR_BASE[@]}"} >/dev/null 2>&1 || true
+    cleared=$((cleared + 1))
+    if [ -n "$keep_reason" ]; then
+      echo "reconcile-merged-prs: $id — PR#$num no longer conflicts with '$base'; cleared the resolved stale-base head marker, but LEFT blocked_reason ('$breason') — another writer set it and only its writer may retract it"
+    else
+      echo "reconcile-merged-prs: $id — PR#$num no longer conflicts with '$base'; cleared the resolved stale-base hold (blocked_reason + stale_base_head)"
+      breason=""
+    fi
+  fi
+
   # --- PR open, STALE GATE: check-set green at a head that MOVED. -----------
   # The symmetric twin of the CONFLICTING arm above. A gating anchor whose codex
   # marker went green (check.codex=green@<oid>) and whose PR head then advanced
@@ -1517,6 +1638,66 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         skipped=$((skipped + 1))
       fi
       continue
+    fi
+
+    # --- Stale-gate hold RESOLVED: retract the objection, not just the block. -
+    # The mirror of the stale-base retraction above, for the arm immediately above
+    # THIS one, and it exists for the same reason: the stale-gate arm records its
+    # hold as blocked_reason + stale_gate_head (or stale_gate_nopool_head on the
+    # poolless path) and KEEPS merge_result=pull_request, so the hold ends mid-life
+    # with the anchor still gating. Until the anchor merges — which may be days,
+    # and may be never — it goes on saying "check.codex stale (green@<a dead oid>);
+    # re-review <a bead that closed> routed to <a pool waiting on nothing>" about a
+    # gate that is green at the live head (tk-iwpz0).
+    #
+    # Reached only by falling THROUGH the arm above, which continues on every one
+    # of its own paths — so arriving here already means the gate is not stale right
+    # now. The two conditions below make that a POSITIVE reading rather than a mere
+    # absence, which is the difference between observing a resolution and failing
+    # to observe the problem:
+    #   * head_oid must be READABLE. `stale_oid` is only computed for a non-empty
+    #     head, so an unreadable head yields "not stale" for want of evidence —
+    #     retracting on that would drop a live objection because gh hiccupped.
+    #   * check.codex must be green AT that head (the resolution the arm is waiting
+    #     for), or `codex` must no longer be a declared check-set member at all, in
+    #     which case the hold cannot re-arm and cannot be live. A marker that is
+    #     ABSENT is deliberately NOT read as resolution: a REQUEST_CHANGES re-gate
+    #     unsets it while the rework is in flight, and the anchor genuinely is still
+    #     held on the gate then — the reason stands until the head comes back green.
+    #
+    # Same one-writer discipline as the stale-base retraction: keyed off the
+    # markers this arm stamps, and only a reason beginning "PR#<num> check.codex " —
+    # the prefix both of its texts share, and one no other writer produces — is
+    # retracted. Both markers are cleared when both are present: they describe the
+    # same hold at the same head from the dispatched and poolless sides, and a
+    # no-pool hold that later dispatched carries both. No operator-hold guard here
+    # either, for the reason spelled out on the stale-base retraction above: this
+    # advances nothing an operator has parked.
+    gate_resolved=""
+    if [ -n "$head_oid" ] \
+       && { [ -z "$is_codex_member" ] || [ "$codexmark" = "green@$head_oid" ]; }; then
+      gate_resolved=1
+    fi
+    if [ -n "$gate_resolved" ] \
+       && { [ -n "$stalegate" ] || [ -n "$stalegate_nopool" ]; }; then
+      # As above: only keys the anchor actually carries are unset.
+      CLEAR_GATE=()
+      [ -n "$stalegate" ] && CLEAR_GATE+=(--unset-metadata stale_gate_head)
+      [ -n "$stalegate_nopool" ] && CLEAR_GATE+=(--unset-metadata stale_gate_nopool_head)
+      keep_reason=""
+      case "$breason" in
+        "") : ;;
+        "PR#$num check.codex "*) CLEAR_GATE+=(--unset-metadata blocked_reason) ;;
+        *) keep_reason=1 ;;
+      esac
+      gc bd update "$id" ${CLEAR_GATE[@]+"${CLEAR_GATE[@]}"} >/dev/null 2>&1 || true
+      cleared=$((cleared + 1))
+      if [ -n "$keep_reason" ]; then
+        echo "reconcile-merged-prs: $id — PR#$num codex gate no longer stale (${codexmark:-unset} at live head $head_oid); cleared the resolved stale-gate head marker, but LEFT blocked_reason ('$breason') — another writer set it and only its writer may retract it"
+      else
+        echo "reconcile-merged-prs: $id — PR#$num codex gate no longer stale (${codexmark:-unset} at live head $head_oid); cleared the resolved stale-gate hold (blocked_reason + head marker)"
+        breason=""
+      fi
     fi
 
     # --- Superseded-review self-heal: the gate is CURRENT but GitHub is still
@@ -1998,5 +2179,5 @@ polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; th
   fi
 fi
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $retracted superseded reviews retracted, $retract_held retractions held, $identity_held foreign-PR identity holds, $forced identity-encoding forced closes, $close_stuck wedged-close escalations, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $cleared resolved holds cleared, $retracted superseded reviews retracted, $retract_held retractions held, $identity_held foreign-PR identity holds, $forced identity-encoding forced closes, $close_stuck wedged-close escalations, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
 exit 0
