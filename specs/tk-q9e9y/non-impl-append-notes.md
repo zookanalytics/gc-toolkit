@@ -83,6 +83,7 @@ on how the verdict is written, not on which flag writes it.
 | `template-fragments/polecat-non-impl-done.template.md` | four `--notes` → `--append-notes`, plus a short note at the pre-open verdict site naming the second writer and the self-contained requirement |
 | `template-fragments/polecat-append-notes.template.md` | the carve-out paragraph replaced with the corrected rule and its three reasons |
 | `specs/tk-t41dq/done-sequence-append-notes.md` | superseded marker on "Not a blanket rule"; boundary line corrected |
+| `skills/signoff-review/SKILL.md` | the PRE-OPEN verdict example `--notes` → `--append-notes`, carrying the same second-writer and self-contained-verdict note |
 
 Correcting `polecat-append-notes` is not optional cleanup. Both fragments
 render into the **same** polecat prompt — `pack.toml`'s
@@ -92,6 +93,16 @@ same pair. Fixing only the instruction sites would have shipped a prompt
 that tells the reader to append at each site and, a few thousand tokens
 earlier, that the non-impl verdict writes keep `--notes` **on purpose**. A
 fix a later reader can talk themselves out of is not a fix.
+
+`skills/signoff-review/SKILL.md` is that same argument one file further
+out, and it is what the pre-open signoff caught (tk-vjq1e). The skill is
+the **mandatory method** for exactly these dispatched review beads —
+`assets/scripts/review-dispatch-body.sh` puts it in front of every
+reviewer — and its PRE-OPEN step carried its own `--notes "$VERDICT_BODY"`
+example. Left alone, a reviewer following the active method would still
+have replaced the notes on the retry path: the defect would have survived
+its own fix in a second source of truth, while the prompt rendered
+alongside it said to append.
 
 No new prose was added to `polecat-non-impl-done` beyond the one note:
 `specs/tk-23wdf/context-budget-ledger.md` measures that fragment at 70,043
