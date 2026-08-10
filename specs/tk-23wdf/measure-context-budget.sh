@@ -27,7 +27,17 @@ set -uo pipefail
 OUTDIR=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        -o|--outdir) OUTDIR="${2:-}"; shift 2 ;;
+        # CHECK THE VALUE BEFORE SHIFTING. `shift 2` with only one argument left
+        # fails and shifts NOTHING, and there is no `set -e` here to stop on it —
+        # so `--outdir` with no value would leave $# unchanged and spin this loop
+        # forever. Fail with usage instead of hanging.
+        -o|--outdir)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "measure-context-budget: $1 requires a directory argument" >&2
+                echo "usage: measure-context-budget.sh [-o|--outdir <dir>]" >&2
+                exit 2
+            fi
+            OUTDIR="$2"; shift 2 ;;
         -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac

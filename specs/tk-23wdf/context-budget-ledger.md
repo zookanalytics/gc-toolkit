@@ -24,6 +24,8 @@ description: What every gc-toolkit agent actually pays in always-on prompt bytes
 | City config | operator | `/home/zook/loomington/city.toml` (8,052 B) | 2026-08-10 19:18Z |
 | Provider skill sinks | gc skill materialization | `<work_dir>/.claude/skills/`, `<work_dir>/.codex/skills/` | 2026-08-10 19:29Z |
 | Bead caseload counts | beads/Dolt | `bd list --db rigs/<rig>/.beads --status closed --limit 0` | 2026-08-10 19:26Z |
+| Review-bead description census (60 beads, F2) | beads/Dolt | `gc bd list --metadata-field task_kind=review --status=open,closed --limit 60 --json` | 2026-08-10 19:48Z |
+| `review-dispatch-body.sh` call sites (F2) | this repo | `grep -rn review-dispatch-body --include='*.sh' --include='*.toml'` @ `3a9c336` | 2026-08-10 19:47Z |
 | Auto-memory index | Claude Code | `~/.claude/projects/-home-zook-loomington-rigs-gc-toolkit/memory/MEMORY.md` | 2026-08-10 19:28Z |
 
 ---
@@ -275,8 +277,8 @@ assumes a skill is present in the codex sink is wrong today, and flipping
 `inject_assigned_skills` would not fix it: the flag governs whether the prompt
 lists skills, not whether they are materialized.
 
-What already works instead is described next, and it is the model for every
-MIGRATE below.
+What works instead — on the paths where it is actually wired — is described next,
+and it is the model for every MIGRATE below.
 
 ---
 
@@ -294,7 +296,7 @@ signal-loom 48/0. Review beads route to the codex pool essentially without
 exception — in gc-toolkit, 435 of 466 review beads name `polecat-codex` as their
 pool and exactly **one** names `.polecat`.
 
-**F2 — the mechanical-trigger problem is already solved once, in `review-dispatch-body.sh`.**
+**F2 — the mechanical-trigger pattern exists in `review-dispatch-body.sh`, but it is wired into 2 of the 3 dispatch paths, and the one it is missing from mints most review beads.**
 
 The epic's hard constraint says a migration needs a mechanical trigger, not an
 instruction. gc-toolkit already built one. `assets/scripts/review-dispatch-body.sh`
@@ -306,9 +308,42 @@ reviewer whose catalog lacks it. It is gate-asserted by
 path.
 
 The trigger is a property of the **bead**, not of the agent's prompt or catalog.
-That is the pattern every MIGRATE below should copy, and it is why F1's
-disposition is safe: the residual non-impl work on the claude pool arrives as a
-dispatched bead, which is exactly where the method can ride.
+That is the pattern every MIGRATE below should copy.
+
+**Coverage, measured — and it is partial.** The emitter has exactly two callers:
+`assets/scripts/check-set-heal.sh:183` (the empty-check-set repair) and
+`assets/scripts/reconcile-merged-prs.sh:176` (the stale-gate re-review). Both are
+*repair* paths. The path that mints a review bead in the normal case — the
+refinery's own first-round signoff dispatch at
+`formulas/mol-refinery-patrol.toml:1693` — calls bare
+`gc bd create "$REVIEW_TITLE" -t task --json`, with no `--body-file`, and so
+dispatches a **title-only** bead carrying no method at all.
+
+The census agrees. Of the 60 most recent review beads (`task_kind=review`, open
+and closed), **45 (75%) have an empty description**; the 15 that carry one begin
+with the emitter's own first line, `## Method: the signoff-review skill`. This
+ledger's own signoff is an instance: review bead `tk-p7fcn`, the pre-open gate on
+this branch, has description length 0 — the reviewing polecat was handed a title
+and chose its own method.
+
+Note what a title-only bead rules in. `check-set-heal.sh:2435` mints a pre-open
+review under the *same* title shape as the patrol, so the title alone does not
+identify the producer — but heal and reconcile both attach the body and only omit
+it on their loudly-warned fail-soft path. So an empty description means either the
+first-round patrol dispatch (which never attaches one) or a repair path whose
+emitter could not be resolved. Both are delivery failures for the method; only the
+first is by construction, and it is the one that explains 45 beads.
+
+So the pattern is right and the channel is real, but it does not yet reach the
+dispatch that matters. Any disposition that assumes review beads "already carry
+their method" is describing a quarter of them. What that costs the MIGRATE
+verdicts is recorded in §6; the remedy — wiring the first-round dispatch and
+gate-asserting it — is remediation, and therefore out of scope for this bead.
+
+The same caveat applies to F1's disposition in the other direction: the residual
+non-impl work on the claude pool also arrives as a dispatched bead, so the
+channel is *available* there too — but available is not wired, and no emitter
+fills it for research/investigation beads today (§6, second MIGRATE row).
 
 The skill itself already draws the boundary explicitly: *"Everything past this
 point — which marker lands on the anchor, how a rework child is filed, when the
@@ -407,7 +442,7 @@ prompts that actually spawn today.
 | Fragment (define) | Live B/spawn | Injected into | Disposition | Reason | Est. saving |
 |---|---:|---|---|---|---:|
 | `polecat-non-impl-done` | 70,043 | polecat, polecat-codex | **NARROW** (drop from `polecat`, keep on `polecat-codex`) | 2.3% use on the claude pool vs 100% on codex (F1) | **70,043 B/spawn** on the pool running 97.7% of impl work |
-| ↳ same, codex pool | 70,043 | polecat-codex | **MIGRATE** → dispatch-body, per F2 | review beads already carry their method; gate mechanics can ride the same channel | ~69,400 B/spawn (leaves a ~600 B pointer) |
+| ↳ same, codex pool | 70,043 | polecat-codex | **MIGRATE → dispatch-body — BLOCKED**, per F2 | the channel exists but the first-round dispatch does not use it: 75% of live review beads are title-only (F2). Blocked until `mol-refinery-patrol.toml:1693` emits the body under a gate assertion | ~69,400 B/spawn (leaves a ~600 B pointer) — **not bankable until unblocked** |
 | `layered-startup-discovery-witness` | 9,177 | witness | **KEEP** | supersedes a live base-pack bug (ephemeral wisp reads, tk-1waw2); witness spawns are patrol-rate | — |
 | `layered-startup-discovery-boot` | **0** | boot *(never spawns)* | **DELETE** | dormant since lx-8bb1; `mode = "on_demand"`, no `work_query` (F5) | 0 live B; 7,798 B/spawn avoided if boot is ever revived |
 | `watch-dispatched-work` | 6,152 | mechanik | **COMPRESS** | procedure-shaped ("### The ritual", "### Event grammar"); one long-lived agent, so migration gains little, but the prose is compressible | ~2,000 B |
@@ -435,13 +470,25 @@ Per the epic's hard constraint, every MIGRATE must name the trigger that fires i
 
 | Migration | Mechanical trigger | Status |
 |---|---|---|
-| `polecat-non-impl-done` → review-method delivery for the **codex** pool | the review bead's *description*, emitted by `assets/scripts/review-dispatch-body.sh` at dispatch and gate-asserted by its test | **READY** — the channel exists and already carries the `signoff-review` skill verbatim; this extends its payload |
+| `polecat-non-impl-done` → review-method delivery for the **codex** pool | the review bead's *description*, emitted by `assets/scripts/review-dispatch-body.sh` and gate-asserted by its test — but **only** from `check-set-heal.sh:183` and `reconcile-merged-prs.sh:176`. The first-round dispatch at `formulas/mol-refinery-patrol.toml:1693` creates the bead title-only | **BLOCKED** — the channel exists and carries the `signoff-review` skill verbatim *on the repair paths*, but 45 of the 60 most recent review beads have an empty description, this ledger's own signoff (`tk-p7fcn`) among them (F2). Unblocked by emitting the body from the first-round dispatch under a gate assertion — remediation, out of scope here |
 | `polecat-non-impl-done` → residual non-impl work on the **claude** pool (research/investigation, 21 beads) | none today. These are slung by the mayor/mechanik with a free-text description; no emitter guarantees the method is named | **BLOCKED** — needs a `research-dispatch-body.sh` sibling, or the disposition reduces to NARROW-only with the claude pool losing the procedure for ~2% of its beads |
 
-The second row is the honest blocker. Per the epic's rule an instruction-only
-remedy does not count, so it is recorded as BLOCKED rather than counted as a
-saving. Note it is **not** blocked on skill discovery — §4(a) settles that — and
-**not** fixable by flipping `inject_assigned_skills`.
+**Both rows are blocked, and neither blocker is an opinion.** Per the epic's rule
+an instruction-only remedy does not count, so both are recorded as BLOCKED rather
+than counted as savings. They differ only in how far the work has got: the codex
+row has an emitter that no first-round dispatch calls, the claude row has no
+emitter at all. Note that neither is blocked on skill discovery — §4(a) settles
+that — and neither is fixable by flipping `inject_assigned_skills`.
+
+This is a correction to an earlier draft of this ledger, which read the emitter's
+existence as coverage and marked the codex row READY. It is worth stating plainly
+because it is the same mistake the epic's hard constraint exists to prevent: a
+trigger that exists somewhere is not a trigger that fires on the path in
+question. The check that settles it is `grep -rn review-dispatch-body
+--include='*.sh' --include='*.toml'`: outside the emitter and its own test the
+name appears in three files, and exactly **two** of the mentions are invocations
+(`REVIEW_BODY_EMITTER=` in `check-set-heal.sh:183` and
+`reconcile-merged-prs.sh:176`). None is in `mol-refinery-patrol.toml`.
 
 ---
 
@@ -456,22 +503,34 @@ Multiplied again by every compaction (§2).
 Risk: **real but bounded.** ~2.3% of claude-pool beads are non-impl and would
 lose the done-sequence procedure. They would fall back to the impl done sequence
 and hand a zero-commit branch to the refinery — the exact failure the fragment's
-own preamble describes. Mitigate by landing candidate 2 first, or by accepting
-that ~21 beads over the measured window need a human nudge.
+own preamble describes. Mitigate by accepting that ~21 beads over the measured
+window need a human nudge — **not** by "landing candidate 2 first": candidate 2
+carries its own blocking prerequisite, and it delivers the procedure through
+*review* dispatch, while the claude pool's residual non-impl beads are
+research/investigation. Their remedy is the `research-dispatch-body.sh` sibling
+(§6, second MIGRATE row), which nobody has written.
 Cross-check before landing: `doctor/check-polecat-fragment-sync` compares the two
 inject lists and errors on divergence — this change makes them diverge *on
 purpose*, so that check must be taught the exception or it will fail the build.
 
-**2. Extend `review-dispatch-body.sh` to carry the gate mechanics, then drop the fragment from `polecat-codex` too.**
+**2. Wire the first-round dispatch to `review-dispatch-body.sh`, extend it to carry the gate mechanics, then drop the fragment from `polecat-codex` too.**
 Saving: ~69,400 B/spawn on the codex pool, on top of candidate 1 — i.e. both
-polecat pools drop to ~32.5 KB.
+polecat pools drop to ~32.5 KB. **Not bankable until the prerequisite lands.**
+Prerequisite (**blocking**, and it is the larger half of the work): the refinery's
+first-round signoff dispatch at `formulas/mol-refinery-patrol.toml:1693` creates
+review beads title-only, which is how 75% of live review beads got an empty
+description (F2). Until that call emits the body — fail-soft like its two existing
+callers, and gate-asserted the way `review-dispatch-body.test.sh` asserts them —
+dropping the fragment removes the procedure from the majority path rather than
+relocating it. Sequence it as: wire the dispatch, assert it, confirm new review
+beads carry a description, *then* extend the payload, *then* drop the fragment.
 Risk: **higher, and it is a correctness risk, not a cost one.** The gate mechanics
 are what stamp `check.<gate>=green@<oid>` and retract superseded reviews; a review
 bead dispatched by an older emitter, or a pool whose dispatch path is not covered,
-would hold a review with no procedure. The fail-soft design in
-`review-dispatch-body.sh` is the precedent for handling that, and the codex sink
-being stale (§4c) is proof the fail-soft path is load-bearing rather than
-theoretical. Requires the same gate-assertion treatment its predecessor got.
+would hold a review with no procedure. That second case is not hypothetical — it
+is the majority path today. The fail-soft design in `review-dispatch-body.sh` is
+the precedent for handling it, and the codex sink being stale (§4c) is proof the
+fail-soft path is load-bearing rather than theoretical.
 
 **3. File the rework-child misdetection (F4) as its own bug bead.**
 Saving: 0 bytes. Listed here because the audit surfaced it and it is a live
@@ -525,5 +584,9 @@ Two premises need adjusting:
    works in this pack is fragment → **dispatch body**, because the dispatch body
    is a property of the bead and therefore mechanical, while a skill invocation is
    a property of the agent and therefore a hope. `review-dispatch-body.sh` is the
-   working precedent, and it hedges by inlining the skill rather than relying on
-   it. Migrations under this epic should target that channel.
+   precedent, and it hedges by inlining the skill rather than relying on it.
+   Migrations under this epic should target that channel — but a channel counts
+   only where it is wired, and this one is wired into the two repair scripts and
+   not into the refinery's first-round dispatch, which is where three of every
+   four review beads come from (F2). The first migration under this epic is
+   therefore not a migration at all: it is finishing this one.
