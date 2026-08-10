@@ -847,6 +847,42 @@ fi
 Either branch is a **failed** health scan, not a clean one. Do not run
 the findings filter on a payload you could not validate.
 
+**Publish the payload for the close-time doctor-finding gate.** The
+refinery asks, at every anchor close, whether the bead it is closing
+names a doctor check that is STILL FIRING
+(`assets/scripts/doctor-finding-gate.sh`, tk-fwspr) — the gate that
+stops "merged" from silently becoming "fixed". It has to ask with
+`--no-run`: `gc doctor` has no per-check selector, so evaluating a gate
+live means running every check inside the merge loop, minutes per close.
+So it can only answer from a payload someone else already paid for, and
+**this step is the only pass in the city that runs `gc doctor` on a
+schedule.** If you do not publish it, the gate is not degraded — it is
+inert: INDETERMINATE at every close, forever, and the annotation never
+fires once.
+
+This costs nothing. The payload is already in `$DOCTOR_JSON` and already
+validated; publishing is one pipe. Do it only on the validated payload —
+the script re-validates and refuses an empty or schema-drifted one,
+which is the same "NOT reporting clean" rule as above applied at the
+cache boundary (an empty payload installed as the cache would answer
+every later probe with "nothing is firing").
+
+```bash
+GATE=""
+for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$cand/assets/scripts/doctor-finding-gate.sh" ] && { GATE="$cand/assets/scripts/doctor-finding-gate.sh"; break; }
+done
+if [ -n "$GATE" ]; then
+  printf '%s' "$DOCTOR_JSON" | "$GATE" publish -
+fi
+```
+
+The cache path is resolved inside the script, so this step and the
+refinery agree on it by construction. Do not compute it here: a second
+copy of that fallback chain, in prose an agent retypes each patrol, is a
+cache that misses silently and a gate that reports INDETERMINATE while
+looking perfectly wired.
+
 **The actionable subset** — only the warning/error checks, with their
 full details:
 

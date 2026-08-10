@@ -175,6 +175,26 @@ _rmpreal="$(readlink -f "$_rmpself" 2>/dev/null || true)"
 [ -n "$_rmpreal" ] && _rmpself="$_rmpreal"
 REVIEW_BODY_EMITTER="$(cd "$(dirname "$_rmpself")" && pwd)/review-dispatch-body.sh"
 
+# The close-time doctor-finding gate (tk-fwspr). Resolved through the same
+# symlink-aware dirname as the emitter above, and for the same reason.
+#
+# This pass is the town's busiest CLOSER, and under close-on-land its close is
+# what turns "the PR merged" into "the work is done". For a bead filed against a
+# `gc doctor` finding those are different claims, and three times on 2026-08-10 —
+# check-rig-scoped-orders-bound, check-base-artifact-collision (both here),
+# census-owner-liveness (gascity) — the second was recorded because the first was
+# true, while the check went on firing. The gate does not stop the close (an
+# anchor left open over a merged PR is the worse lie); it makes the close say
+# PARTIAL and name the successor that carries the rest.
+DOCTOR_GATE="$(cd "$(dirname "$_rmpself")" && pwd)/doctor-finding-gate.sh"
+# --no-run is not negotiable from HERE. `gc doctor` has no per-check selector, so
+# evaluating the gate live means running all ~147 checks — minutes, inside the
+# refinery's idle loop, ahead of every merge behind it. This pass answers from a
+# payload someone else already paid for (mol-deacon-patrol's system-health step
+# writes it every patrol) and reports INDETERMINATE when there is none, rather
+# than trading merge latency for an annotation. GC_DOCTOR_GATE=off disables the
+# arm entirely.
+
 # create_review_bead <title> [note] — mint the re-review carrying the method, echo
 # its id (empty on failure, exactly as the bare `gc bd create` it replaces). The
 # note is the dispatch-specific context (which head went stale, and why).
@@ -765,6 +785,13 @@ retracted=0; retract_held=0
 # reported in the summary line: an override that happened, and a retry loop that
 # cannot succeed, must each be visible there rather than folded into `skipped`.
 forced=0; close_stuck=0
+# Closes the doctor-finding gate annotated as PARTIAL, and closes where the gate
+# could not be evaluated at all (tk-fwspr). Separate counters because they are
+# separate facts: the first says "we closed and said so", the second says "we
+# closed and nobody knows" — and the second is what a city with no warm doctor
+# payload looks like. Folding the unevaluated ones into silence is precisely the
+# failure this arm exists to end, one level up.
+partial=0; dgate_unknown=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -979,7 +1006,79 @@ anchor's merged_target if the new base is intentional." >/dev/null 2>&1; then
     closefails=$(printf '%s' "$row" | jq -r '.closefails // empty' 2>/dev/null)
     closeesc=$(printf '%s' "$row" | jq -r '.closeesc // empty' 2>/dev/null)
     case "$closefails" in ''|*[!0-9]*) closefails=0 ;; esac
-    if close_anchor "$id" "Merged to $target at ${short:-merge}"; then
+
+    # --- the doctor-finding close gate (tk-fwspr). ---------------------------
+    # Does this anchor name a `gc doctor` check that is STILL FIRING? If so the
+    # close is real but PARTIAL: the PR merged, and the finding it was filed
+    # against did not go away. Say both in the close reason, stamp both on the
+    # anchor, and make sure a successor exists to carry the remainder — the three
+    # instances that produced this arm were each re-filed by hand, days late, by
+    # whoever next read a doctor report.
+    #
+    # Everything here is best-effort and degrades to the un-annotated close. The
+    # gate must never be the reason a merged anchor fails to close: that would
+    # trade a misleading record for a false one.
+    close_reason="Merged to $target at ${short:-merge}"
+    if [ "${GC_DOCTOR_GATE:-on}" != "off" ] && [ -x "$DOCTOR_GATE" ]; then
+      dfchecks=$("$DOCTOR_GATE" probe "$id" --no-run 2>/dev/null); dfrc=$?
+      if [ "$dfrc" = 1 ] && [ -n "$dfchecks" ]; then
+        # The pool a successor is routed to: the anchor's own override first, then
+        # the patrol's --fix-pool default — the same resolution order the
+        # stale-base arm uses. Unresolvable is not fatal here: an UNROUTED
+        # successor is still a durable record that the finding outlived its fix,
+        # which is more than the three instances got. It is reported, not routed.
+        # Derived from THIS row, not from `$fixpool`: that variable is first
+        # assigned in the stale-base arm several hundred lines below, so reading
+        # it here is unbound on the first anchor — and under `set -u` that does
+        # not degrade the annotation, it kills the entire pass (closes,
+        # retractions, anchorless scan and all) at the exact moment the gate
+        # first finds a firing check. Same resolution, same fallback, evaluated
+        # where it is used.
+        dfpool=$(printf '%s' "$row" | jq -r '.fixpool // empty' 2>/dev/null)
+        [ -n "$dfpool" ] || dfpool="$FIX_POOL_DEFAULT"
+        dflist=""; dfsucc=""; dfmissing=""
+        while IFS= read -r dfcheck; do
+          [ -n "$dfcheck" ] || continue
+          dflist="${dflist:+$dflist,}$dfcheck"
+          sid=$("$DOCTOR_GATE" successor "$dfcheck" \
+                  ${dfpool:+--pool "$dfpool"} --source "$id" 2>/dev/null)
+          if [ -n "$sid" ]; then
+            dfsucc="${dfsucc:+$dfsucc,}$sid"
+          else
+            # A successor that could not be resolved must not be silently
+            # dropped: the close reason would then name checks with nothing
+            # tracking them, which reads as "handled" to the next reader.
+            dfmissing="${dfmissing:+$dfmissing,}$dfcheck"
+          fi
+        done <<EOF
+$dfchecks
+EOF
+        # Stamped BEFORE the close, unlike the forensic metadata below it. The
+        # close reason names these values, so they have to be resolved anyway;
+        # and if the close then fails, the next pass re-derives the identical set
+        # (the successor lookup is keyed on metadata.doctor_check, so it finds the
+        # bead this pass minted instead of minting a second one).
+        gc bd update "$id" \
+          --set-metadata doctor_finding_unresolved="$dflist" \
+          ${dfsucc:+--set-metadata doctor_finding_successor="$dfsucc"} \
+            >/dev/null 2>&1 || true
+        close_reason="$close_reason — PARTIAL: doctor check(s) $dflist still fire"
+        close_reason="$close_reason${dfsucc:+; successor(s) $dfsucc}"
+        partial=$((partial + 1))
+        echo "reconcile-merged-prs: $id — PR#$num merged but doctor check(s) $dflist still fire; closing as PARTIAL${dfsucc:+ with successor(s) $dfsucc}" >&2
+        [ -z "$dfmissing" ] || echo "reconcile-merged-prs: $id — could NOT resolve a successor for doctor check(s) $dfmissing (ledger read or create failed); the close names them as unresolved with nothing tracking them" >&2
+      elif [ "$dfrc" = 2 ]; then
+        # The bead named something check-shaped and no payload was available to
+        # judge it. Reported, once, on the anchor's own line: an un-annotated
+        # close here is indistinguishable from a verified-clean one, and a city
+        # whose deacon patrol is not warming the cache should be able to see that
+        # in the refinery's log rather than infer it from an absence.
+        dgate_unknown=$((dgate_unknown + 1))
+        echo "reconcile-merged-prs: $id — doctor-finding gate INDETERMINATE (no cached \`gc doctor --json\` payload within ttl); closing without a finding annotation" >&2
+      fi
+    fi
+
+    if close_anchor "$id" "$close_reason"; then
       [ -z "${CLOSE_FORCED:-}" ] || forced=$((forced + 1))
       # Clear the in-flight blockers too: a landed anchor carrying a stale
       # blocked_reason / stale_base_head reads as still-stuck to a human. The
@@ -2179,5 +2278,5 @@ polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; th
   fi
 fi
 
-echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $cleared resolved holds cleared, $retracted superseded reviews retracted, $retract_held retractions held, $identity_held foreign-PR identity holds, $forced identity-encoding forced closes, $close_stuck wedged-close escalations, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
+echo "reconcile-merged-prs: $closed closed, $abandoned abandoned ($escalated escalated), $retargeted retargeted, $rebased stale-base rebases routed, $rebase_held rebases held, $regated stale-gate re-reviews routed, $gate_held stale-gate re-reviews held, $cleared resolved holds cleared, $retracted superseded reviews retracted, $retract_held retractions held, $identity_held foreign-PR identity holds, $forced identity-encoding forced closes, $close_stuck wedged-close escalations, $partial partial closes (doctor finding still firing), $dgate_unknown doctor-gate indeterminate, $anchorless anchorless open PRs, $unowned unowned open PRs, $skipped skipped"
 exit 0

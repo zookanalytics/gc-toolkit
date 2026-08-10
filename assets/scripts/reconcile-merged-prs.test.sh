@@ -838,6 +838,20 @@ case "$2" in
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_CHILDREN"
         printf '[%s]\n' "$out" ;;
+      *"doctor_check="*)
+        # The close-time gate's successor lookup (Run 16). Answers from a fixture
+        # keyed by check name, and the distinction it exists to preserve is
+        # MISSING vs EMPTY: no file at all is an unreadable ledger (print nothing,
+        # exit non-zero), an empty array is a readable store with no match. The
+        # gate must tell them apart — minting a successor on a failed read is how
+        # one transient error becomes a duplicate successor on every pass.
+        # Matched BEFORE the arms below: this call also carries a --status list
+        # that would otherwise fall through to the live-bead arm and hand the gate
+        # some unrelated anchor as its "existing successor".
+        dcq=$(printf '%s' "$*" | sed -n 's/.*doctor_check=\([A-Za-z0-9:_-]*\).*/\1/p')
+        dcf="${FAKE_DOCTOR_SUCC:-/nonexistent}/$dcq.json"
+        [ -n "$dcq" ] && [ -f "$dcf" ] || exit 1
+        cat "$dcf" ;;
       *"merge_result=pull_request"*)
         out=""
         # The 8th column is the anchor's RECORDED pr_url (the identity
@@ -1120,6 +1134,11 @@ case "$2" in
     # write the shim dropped never reaches the log, so it reads back empty here —
     # exactly what a non-durable ledger write looks like to that guard.
     sd=$(printf '%s\n' "$slog" | grep -o 'signoff_dismissed=[^ ]*' | tail -1 | sed 's/signoff_dismissed=//')
+    # doctor_check — the check this bead is filed against, read by the close-time
+    # doctor-finding gate (Run 16). Replayed from a tab file rather than from the
+    # update log: the gate reads it BEFORE the close, so it is pre-existing bead
+    # state a fixture seeds, not something a pass under test writes.
+    dc=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "${FAKE_DOCTOR_CHECK:-/dev/null}" 2>/dev/null | tail -1)
     # A GATING ANCHOR also answers with its live gating state — status, pr_number,
     # merge_result, check.codex, merge_hold — because the retraction arm re-reads
     # the anchor immediately before the irreversible dismissal and requires it to
@@ -1171,8 +1190,8 @@ case "$2" in
         *)           prkey_json=$(printf '"%s":"%s"' "$s_key" "$s_pr") ;;
       esac
     fi
-    printf '[{"id":"%s","status":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s","review_pool":"%s","signoff_dismissed":"%s",%s"merged_target":"%s","pr_url":"%s","branch":"%s","merge_result":"%s","check.codex":"%s","merge_hold":"%s"}}]\n' \
-      "$sid" "$s_status" "$ab" "$tk" "$rt" "$rp" "$sd" \
+    printf '[{"id":"%s","status":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s","review_pool":"%s","signoff_dismissed":"%s","doctor_check":"%s",%s"merged_target":"%s","pr_url":"%s","branch":"%s","merge_result":"%s","check.codex":"%s","merge_hold":"%s"}}]\n' \
+      "$sid" "$s_status" "$ab" "$tk" "$rt" "$rp" "$sd" "$dc" \
       "${prkey_json:+$prkey_json,}" "$s_target" "$s_prurl" "$s_branch" "$s_result" "$s_mark" "$s_hold" ;;
 esac
 exit 0
@@ -1199,7 +1218,18 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_APIHOST="$TMP/apihost" \
        FAKE_CLOSE_REFUSE="$TMP/closerefuse" FAKE_CLOSE_HARDFAIL="$TMP/closehard" \
        FAKE_FORCED="$TMP/forced" FAKE_CLOSEFAILS="$TMP/closefails" \
-       FAKE_CLOSEESC="$TMP/closeesc"
+       FAKE_CLOSEESC="$TMP/closeesc" FAKE_DOCTOR_CHECK="$TMP/doctorcheck" \
+       FAKE_DOCTOR_SUCC="$TMP/doctorsucc"
+
+# The close-time doctor-finding gate is OFF for every run but Run 16, which turns
+# it on explicitly. Not a convenience: left on, the arm resolves its cache from
+# the AMBIENT environment ($GC_CITY/.gc/runtime/doctor-findings.json in a real
+# city, which the deacon patrol now populates), so every close-reason assertion
+# in this file would depend on whether the machine running the suite happens to
+# have a warm doctor payload and what is currently firing in it. A test whose
+# result changes with the city's health is not a test.
+export GC_DOCTOR_GATE=off
+: > "$TMP/doctorcheck"
 mkdir -p "$TMP/bodies"
 # The close gate is INERT by default: every scenario above this point closes
 # cleanly, and only the identity-encoding runs at the end arm these.
@@ -3348,6 +3378,142 @@ eq "$(awk -F'\t' '$1=="cl-FRGN"{print $2}' "$TMP/closeesc" | tail -1)" "" \
 # and an arm that closes beads more aggressively must not acquire one.
 eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \
    "(CL-INV) the close gate ran no merge for any anchor"
+
+# --- Run 16: the close-time doctor-finding gate (tk-fwspr). -------------------
+# Three findings closed as "fixed" on 2026-08-10 while their checks kept firing,
+# because the close is driven by the MERGE and nothing re-runs the check between
+# the two. This run drives the REAL doctor-finding-gate.sh (not a stub of it)
+# from a seeded payload, so what is under test is the wiring: does a merged
+# anchor whose check still fires close as PARTIAL, with a successor, and does a
+# clean one close exactly as it always did.
+mkdir -p "$TMP/doctorsucc"
+DGCACHE="$TMP/dg-cache.json"
+cat > "$DGCACHE" <<'DGP'
+{"ok":1,"failed":1,"results":[
+  {"name":"check-rig-scoped-orders-bound","status":"error","severity":"blocking","message":"2 orders"},
+  {"name":"check-liveness-sweep-wired","status":"ok","severity":"info","message":"fine"}
+]}
+DGP
+DGRUN() { GC_DOCTOR_GATE=on GC_DOCTOR_GATE_CACHE="$DGCACHE" bash "$SCRIPT" --fix-pool "$FIX_POOL"; }
+dgreset() {
+  : > "$TMP/closed"; : > "$TMP/closelog"; : > "$TMP/updates"; : > "$TMP/created"
+  : > "$TMP/doctorcheck"; rm -f "$TMP/doctorsucc"/*.json
+  : > "$TMP/automerge"; : > "$TMP/openprs"
+}
+
+# (DG1) the finding is STILL FIRING -> the close happens, and says so.
+dgreset
+printf '%s\n' 'dg-FIRE|701|main|||codex|green@h701' > "$TMP/anchors"
+printf '%s\n' '701|MERGED|2026-08-10T01:00:00Z|false|abc7011234beef|main|polecat/dg-FIRE|h701|MERGEABLE|CLEAN' > "$TMP/prs"
+printf 'dg-FIRE\tcheck-rig-scoped-orders-bound\n' > "$TMP/doctorcheck"
+echo '[]' > "$TMP/doctorsucc/check-rig-scoped-orders-bound.json"   # readable, no successor yet
+OUTDG1="$(DGRUN 2>"$TMP/dgerr1")"
+has '^dg-FIRE$' "$TMP/closed" \
+  && ok "(DG1) a merged anchor still CLOSES — the gate never blocks close-on-land" \
+  || bad "(DG1) anchor must still close (got: $OUTDG1)"
+DG1_REASON=$(awk -F'\t' '$1=="dg-FIRE"{print $2}' "$TMP/closelog" | tail -1)
+hasin "$DG1_REASON" 'Merged to main' \
+  && ok "(DG1) the close reason still records the merge" \
+  || bad "(DG1) close reason lost the merge (got: $DG1_REASON)"
+hasin "$DG1_REASON" 'PARTIAL: doctor check(s) check-rig-scoped-orders-bound still fire' \
+  && ok "(DG1) ...and marks it PARTIAL, naming the check that outlived the fix" \
+  || bad "(DG1) close reason must say PARTIAL (got: $DG1_REASON)"
+DG1_UPD=$(grep '^dg-FIRE' "$TMP/updates" || true)
+hasin "$DG1_UPD" 'doctor_finding_unresolved=check-rig-scoped-orders-bound' \
+  && ok "(DG1) the anchor records which finding is unresolved" \
+  || bad "(DG1) missing doctor_finding_unresolved (got: $DG1_UPD)"
+hasin "$DG1_UPD" 'doctor_finding_successor=' \
+  && ok "(DG1) ...and the successor that carries the remainder" \
+  || bad "(DG1) missing doctor_finding_successor (got: $DG1_UPD)"
+hasin "$DG1_REASON" 'successor' \
+  && ok "(DG1) the close reason names the successor, so the next reader has a thread" \
+  || bad "(DG1) close reason must name the successor (got: $DG1_REASON)"
+eq "$(grep -c 'still fires after its fix bead closed' "$TMP/created")" "1" \
+   "(DG1) exactly one successor bead is filed"
+hasin "$OUTDG1" '1 partial closes (doctor finding still firing)' \
+  && ok "(DG1) the summary line reports the partial close instead of burying it" \
+  || bad "(DG1) summary must count partial closes (got: $OUTDG1)"
+
+# (DG2) an EXISTING open successor is reused — the gate is convergent. Without
+# this, every reconcile pass over a still-firing finding files another bead.
+dgreset
+printf '%s\n' 'dg-DUP|702|main|||codex|green@h702' > "$TMP/anchors"
+printf '%s\n' '702|MERGED|2026-08-10T01:00:00Z|false|abc7021234beef|main|polecat/dg-DUP|h702|MERGEABLE|CLEAN' > "$TMP/prs"
+printf 'dg-DUP\tcheck-rig-scoped-orders-bound\n' > "$TMP/doctorcheck"
+echo '[{"id":"tk-already","status":"open"}]' > "$TMP/doctorsucc/check-rig-scoped-orders-bound.json"
+DGRUN >/dev/null 2>&1
+eq "$(grep -c 'still fires after its fix bead closed' "$TMP/created")" "0" \
+   "(DG2) an existing successor is REUSED, not duplicated"
+hasin "$(grep '^dg-DUP' "$TMP/updates" || true)" 'doctor_finding_successor=tk-already' \
+  && ok "(DG2) ...and the anchor points at the one that already exists" \
+  || bad "(DG2) must reuse tk-already"
+
+# (DG3) the named check is GREEN -> an ordinary close, byte for byte. The gate
+# must be invisible on the overwhelmingly common path.
+dgreset
+printf '%s\n' 'dg-OK|703|main|||codex|green@h703' > "$TMP/anchors"
+printf '%s\n' '703|MERGED|2026-08-10T01:00:00Z|false|abc7031234beef|main|polecat/dg-OK|h703|MERGEABLE|CLEAN' > "$TMP/prs"
+printf 'dg-OK\tcheck-liveness-sweep-wired\n' > "$TMP/doctorcheck"
+DGRUN >/dev/null 2>&1
+DG3_REASON=$(awk -F'\t' '$1=="dg-OK"{print $2}' "$TMP/closelog" | tail -1)
+eq "$DG3_REASON" "Merged to main at abc70312" \
+   "(DG3) a green check closes with the ORDINARY reason, unannotated"
+eq "$(grep -c 'still fires after its fix bead closed' "$TMP/created")" "0" \
+   "(DG3) and files no successor"
+
+# (DG4) a bead naming NO check at all — the routine close, which must not pay for
+# a doctor run or acquire an annotation.
+dgreset
+printf '%s\n' 'dg-PLAIN|704|main|||codex|green@h704' > "$TMP/anchors"
+printf '%s\n' '704|MERGED|2026-08-10T01:00:00Z|false|abc7041234beef|main|polecat/dg-PLAIN|h704|MERGEABLE|CLEAN' > "$TMP/prs"
+OUTDG4="$(DGRUN 2>/dev/null)"
+eq "$(awk -F'\t' '$1=="dg-PLAIN"{print $2}' "$TMP/closelog" | tail -1)" "Merged to main at abc70412" \
+   "(DG4) a bead naming no check closes ordinarily"
+hasin "$OUTDG4" '0 partial closes' \
+  && ok "(DG4) ...and is not counted as partial" \
+  || bad "(DG4) routine close must not count as partial (got: $OUTDG4)"
+
+# (DG5) NO warm payload. The refinery probes with --no-run, so a city whose
+# deacon patrol is not publishing gets INDETERMINATE — and that must be VISIBLE,
+# not silent. An un-annotated close is indistinguishable from a verified-clean
+# one, which is how a gate rots into decoration nobody notices is off.
+dgreset
+printf '%s\n' 'dg-COLD|705|main|||codex|green@h705' > "$TMP/anchors"
+printf '%s\n' '705|MERGED|2026-08-10T01:00:00Z|false|abc7051234beef|main|polecat/dg-COLD|h705|MERGEABLE|CLEAN' > "$TMP/prs"
+printf 'dg-COLD\tcheck-rig-scoped-orders-bound\n' > "$TMP/doctorcheck"
+OUTDG5="$(GC_DOCTOR_GATE=on GC_DOCTOR_GATE_CACHE="$TMP/no-such-cache.json" \
+          bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>"$TMP/dgerr5")"
+has '^dg-COLD$' "$TMP/closed" \
+  && ok "(DG5) with no payload the anchor still closes" \
+  || bad "(DG5) anchor must close even when the gate cannot be evaluated"
+eq "$(awk -F'\t' '$1=="dg-COLD"{print $2}' "$TMP/closelog" | tail -1)" "Merged to main at abc70512" \
+   "(DG5) ...unannotated, because nothing was verified"
+hasin "$OUTDG5" '1 doctor-gate indeterminate' \
+  && ok "(DG5) ...and the summary SAYS the gate could not be evaluated" \
+  || bad "(DG5) an unevaluated gate must be visible in the summary (got: $OUTDG5)"
+grep -q 'doctor-finding gate INDETERMINATE' "$TMP/dgerr5" \
+  && ok "(DG5) ...naming the anchor on its own line" \
+  || bad "(DG5) expected an INDETERMINATE log line"
+eq "$(grep -c 'still fires after its fix bead closed' "$TMP/created")" "0" \
+   "(DG5) an unevaluated gate files NO successor — never invent a finding"
+
+# (DG6) GC_DOCTOR_GATE=off is a real off switch, and it is what every other run
+# in this file relies on.
+dgreset
+printf '%s\n' 'dg-OFF|706|main|||codex|green@h706' > "$TMP/anchors"
+printf '%s\n' '706|MERGED|2026-08-10T01:00:00Z|false|abc7061234beef|main|polecat/dg-OFF|h706|MERGEABLE|CLEAN' > "$TMP/prs"
+printf 'dg-OFF\tcheck-rig-scoped-orders-bound\n' > "$TMP/doctorcheck"
+echo '[]' > "$TMP/doctorsucc/check-rig-scoped-orders-bound.json"
+GC_DOCTOR_GATE=off GC_DOCTOR_GATE_CACHE="$DGCACHE" \
+  bash "$SCRIPT" --fix-pool "$FIX_POOL" >/dev/null 2>&1
+eq "$(awk -F'\t' '$1=="dg-OFF"{print $2}' "$TMP/closelog" | tail -1)" "Merged to main at abc70612" \
+   "(DG6) GC_DOCTOR_GATE=off closes with the ordinary reason"
+eq "$(grep -c 'still fires after its fix bead closed' "$TMP/created")" "0" \
+   "(DG6) ...and files no successor"
+
+# (DG-INV) the gate never acquired merge authority, in any of the arms above.
+eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \
+   "(DG-INV) the doctor gate ran no merge"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
