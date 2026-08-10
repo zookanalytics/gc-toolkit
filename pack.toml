@@ -12,7 +12,8 @@
 # expressed as bare-name [[patches.agent]] — pure fragment-append
 # overlays on top of base prompts. Each gc-toolkit-specific doctrine
 # (heartbeat-no-consent-ui, layered-startup-discovery-{boot,deacon,refinery,witness},
-# convoy-integration-branch-mayor, polecat-convoys, polecat-non-impl-done,
+# convoy-integration-branch-mayor, polecat-convoys, polecat-append-notes,
+# polecat-non-impl-done,
 # file-work-records, operator-next-step-trailing) lives in template-fragments/ and is named
 # explicitly in inject_fragments_append below; the base prompt template is
 # reused verbatim from gastown. No whole-file prompt mirrors.
@@ -94,7 +95,21 @@ inject_fragments_append = [
 
 [[patches.agent]]
 name = "polecat"
-inject_fragments_append = ["polecat-convoys", "polecat-non-impl-done", "file-work-records"]
+inject_fragments_append = [
+    "polecat-convoys",
+    # Base ships the impl done sequence in two places that are read as one
+    # instruction — approval-fallacy's "### The Done Sequence" and the prompt's
+    # own "## FINAL REMINDER" — and both write the handoff note with `--notes`,
+    # which REPLACES. Every handoff therefore destroys whatever notes the bead
+    # already carried (typically the mayor's dispatch note), invisibly, at the
+    # moment the bead is passed to the refinery (tk-t41dq). This fragment
+    # supersedes the `--notes` in both copies and in mol-polecat-work's
+    # submit-and-exit step. Ordered before polecat-non-impl-done, which
+    # references the impl sequence it is an alternative to.
+    "polecat-append-notes",
+    "polecat-non-impl-done",
+    "file-work-records",
+]
 
 [[patches.agent]]
 name = "refinery"
