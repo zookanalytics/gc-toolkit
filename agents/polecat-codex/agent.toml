@@ -32,6 +32,15 @@ max_active_sessions = 2
 # inject_fragments must be
 # kept in sync by hand with the polecat patch's inject_fragments_append in
 # pack.toml — there is no automatic propagation — so this pool gets identical
-# convoy, non-impl-done, and file-work-records guidance.
+# convoy, append-notes, non-impl-done, and file-work-records guidance.
+# "By hand" is now checked rather than trusted: doctor/check-polecat-fragment-sync
+# compares the two lists and errors on any divergence. A pool missing a
+# fragment does not fail — it primes cleanly and runs the unpatched base
+# doctrine for whatever that fragment corrected (tk-t41dq).
 prompt_template = "gastown//agents/polecat/prompt.template.md"
-inject_fragments = ["polecat-convoys", "polecat-non-impl-done", "file-work-records"]
+inject_fragments = [
+    "polecat-convoys",
+    "polecat-append-notes",
+    "polecat-non-impl-done",
+    "file-work-records",
+]

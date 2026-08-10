@@ -200,7 +200,7 @@ git push origin HEAD
 gc bd update <work-bead> \
   --set-metadata branch=$(git branch --show-current) \
   --set-metadata target={{ .DefaultBranch }} \
-  --notes "Implemented: <brief summary>"
+  --append-notes "Implemented: <brief summary>"
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}refinery"
 gc bd update <work-bead> --status=open --assignee="$REFINERY_TARGET" --set-metadata gc.routed_to="$REFINERY_TARGET"
 gc runtime drain-ack
@@ -211,6 +211,8 @@ Your work is not complete until you run these commands. `gc runtime drain-ack`
 signals the reconciler to kill this session — it will only restart you if the
 pool check command finds more work. Sitting idle after finishing implementation
 is the "Idle Polecat heresy."
+
+{{ template "polecat-append-notes" . }}
 
 ---
 
