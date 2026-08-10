@@ -742,9 +742,18 @@ on the same PR whose live head is that `oid`.
 
 Coalescing is earned. Every sibling is re-read live — before the gates and again
 immediately before the merge — and must still be open, parked on a published PR,
-claiming exactly this PR in this repository, and describing this branch and this
-target. It must also declare a **non-empty** `check_set`: empty means "no gates"
-only because `check-set-heal.sh` normalizes it on the pass before, and a
+claiming exactly this **pull request**, and describing this branch and this
+target. "Exactly this pull request" is the same identity the anchor's own
+`pr_url` is held to, at the same granularity: the same number, and — when the
+sibling records one at all — a `pr_url` that canonicalizes to the live PR's.
+Repository granularity is not enough, because a sibling recording *this*
+repository's `pull/<other number>` names different work while passing a
+same-repository check, and its markers would then be pooled into this PR's gate.
+A sibling that records no `pr_url` (`check-set-heal.sh`'s recovery shape, before
+the certified URL is backfilled) has nothing to disagree with and is governed by
+the number, status and branch checks. It must also declare a **non-empty**
+`check_set`: empty means "no gates" only because `check-set-heal.sh` normalizes
+it on the pass before, and a
 duplicate minted mid-pass has not been through that pass, so an empty set on a
 sibling is *unvalidated* rather than ungated. Any sibling that fails to certify
 falls back to the original tk-ynz4b hold, naming which sibling and why. On merge,

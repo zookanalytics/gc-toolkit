@@ -440,11 +440,12 @@ merge_hold_truthy() { # <merge_hold value>
 #
 # Coalescing is EARNED, not assumed. Every sibling is re-read live and must still
 # be the thing this pass thinks it is — open, parked on a published PR, claiming
-# exactly this PR in this repository, describing this branch and this target — and
-# must declare a NON-EMPTY check_set. Empty is refused deliberately: at the gate
-# site below, an empty check_set means "no gates" because check-set-heal.sh
-# normalizes it on the pass immediately before this one, but a duplicate minted or
-# reclassified MID-PASS has not been through that pass, so an empty set on a
+# exactly this PULL REQUEST (the same number, and the same url when it records
+# one), describing this branch and this target — and must declare a NON-EMPTY
+# check_set. Empty is refused deliberately: at the gate site below, an empty
+# check_set means "no gates" because check-set-heal.sh normalizes it on the pass
+# immediately before this one, but a duplicate minted or reclassified MID-PASS
+# has not been through that pass, so an empty set on a
 # sibling is UNVALIDATED, not ungated — reading it as "no gates" would union in
 # nothing and hand the PR to the weakest anchor, which is precisely tk-ynz4b.
 # Anything uncertifiable falls back to the tk-ynz4b hold with the reason named.
@@ -455,9 +456,9 @@ merge_hold_truthy() { # <merge_hold value>
 # external-approval requirement no matter which anchor recorded it).
 # On failure: COALESCE_REASON, and returns non-zero.
 COALESCE_ROW=""; COALESCE_CHECKSET=""; COALESCE_DISMISSED=""; COALESCE_REASON=""
-coalesce_gate() { # <self-id> <self-row> <pr-num> <repo-q> <head-oid> <head-ref> <base> <sibling-ids>
-  local self="$1" selfrow="$2" pnum="$3" prepo="$4" head="$5" ref="$6" pbase="$7" sibs="$8"
-  local sid srow sstatus sresult spr sforeign scs shold sbranch starget sdis pooled
+coalesce_gate() { # <self-id> <self-row> <pr-num> <repo-q> <head-oid> <head-ref> <base> <live-url> <sibling-ids>
+  local self="$1" selfrow="$2" pnum="$3" prepo="$4" head="$5" ref="$6" pbase="$7" plive="$8" sibs="$9"
+  local sid srow sstatus sresult spr sprurl scs shold sbranch starget sdis pooled
   COALESCE_ROW=""; COALESCE_CHECKSET=""; COALESCE_DISMISSED=""; COALESCE_REASON=""
   pooled="$selfrow"
   COALESCE_CHECKSET=$(printf '%s' "$selfrow" | jq -r '.meta.check_set // ""' 2>/dev/null)
@@ -482,14 +483,33 @@ coalesce_gate() { # <self-id> <self-row> <pr-num> <repo-q> <head-oid> <head-ref>
       COALESCE_REASON="sibling anchor $sid no longer gates PR#$pnum (status='${sstatus:-unknown}' merge_result='${sresult:-unset}' claims '${spr:-none}') — the ledger changed mid-pass"
       return 1
     fi
-    # Repository, on the same `?`-is-the-fail-closed-wildcard rule as the anchor
-    # projection: only a POSITIVE, parsed disagreement disqualifies a sibling, so a
-    # legacy anchor recording no url still coalesces exactly as it counts today.
-    sforeign=$(printf '%s' "$srow" | jq -r --arg r "$prepo" "$REPO_JQ"'
-      (((.meta.pr_url // "") | tostring) | repo_of) as $x
-      | if same_repo($x; $r) then "" else $x end' 2>/dev/null)
-    if [ -n "$sforeign" ]; then
-      COALESCE_REASON="sibling anchor $sid records a pull request in '$sforeign', not '$prepo'"
+    # Identity, at FULL PULL-REQUEST granularity — the same question the self-anchor
+    # check asks of its own recorded pr_url, and it has to be the same question
+    # (review tk-mnj3f). A sibling is not merely counted here: its check.* markers
+    # are POOLED into the gate that decides this merge, and once the PR lands
+    # reconcile-merged-prs.sh closes it as an anchor of that PR. Compared at
+    # REPOSITORY granularity, a sibling recording `<this repo>/pull/<OTHER number>`
+    # certified — same repository, so the check waved it through — and a bead that
+    # names a DIFFERENT pull request got to contribute a green marker to this one,
+    # then be skipped as self-checked when the loop reached it. The self check HOLDS
+    # exactly that row ("the bead and the PR name different pull requests"), and it
+    # holds because the ambiguity is unresolvable — one of the two PR identities is
+    # wrong and this script cannot choose — not because self is special. A weaker
+    # rule for siblings is the same bypass tk-ynz4b is about, reached THROUGH the
+    # coalescing instead of around it.
+    #
+    # EMPTY still coalesces, on the same fail-closed-wildcard reasoning as the
+    # repository rule it replaces: a pr_number-only anchor (check-set-heal.sh's
+    # recovery shape, before the certified url is backfilled) records nothing to
+    # disagree with, and is governed by the number, status and branch checks
+    # instead. Only a POSITIVE disagreement disqualifies — but "positive" now means
+    # "not this pull request" rather than "not this repository", which subsumes the
+    # foreign-repository case: another repository's url cannot equal this one's.
+    # Compared through canon_pr_url on both sides, like every other url comparison
+    # here, so a cosmetic difference is never read as a different pull request.
+    sprurl=$(printf '%s' "$srow" | jq -r '.meta.pr_url // ""' 2>/dev/null)
+    if [ -n "$sprurl" ] && [ "$(canon_pr_url "$sprurl")" != "$plive" ]; then
+      COALESCE_REASON="sibling anchor $sid records pr_url '$sprurl', which is not PR#$pnum ('${plive:-unreadable}') — the bead and the pull request name different work, so its gates cannot be pooled into this merge"
       return 1
     fi
     scs=$(printf '%s' "$srow" | jq -r '(.meta.check_set // "") | gsub("[[:space:],]";"")' 2>/dev/null)
@@ -1308,7 +1328,7 @@ while IFS= read -r row; do
   dup_sibs=""
   if [ "$(printf '%s' "$anchor_ids" | wc -w | tr -d '[:space:]')" -gt 1 ]; then
     dup_sibs="$anchor_ids"
-    if coalesce_gate "$id" "$row" "$num" "$arepo" "$head_oid" "$head_ref" "$base" "$dup_sibs"; then
+    if coalesce_gate "$id" "$row" "$num" "$arepo" "$head_oid" "$head_ref" "$base" "$live_url" "$dup_sibs"; then
       row="$COALESCE_ROW"
       checkset="$COALESCE_CHECKSET"
       [ -z "$COALESCE_DISMISSED" ] || dismissed="$COALESCE_DISMISSED"
@@ -1921,7 +1941,7 @@ while IFS= read -r row; do
   # and merge on the rest as it stood a dozen round-trips ago. On refusal the
   # reason travels as-is — the same fail-closed answer the first coalesce gives.
   if [ -n "$dup_sibs" ]; then
-    if coalesce_gate "$id" "$final_row" "$num" "$arepo" "$head_oid" "$head_ref" "$base" "$dup_sibs"; then
+    if coalesce_gate "$id" "$final_row" "$num" "$arepo" "$head_oid" "$head_ref" "$base" "$live_url" "$dup_sibs"; then
       final_row="$COALESCE_ROW"
       final_checkset="$COALESCE_CHECKSET"
       [ -z "$COALESCE_DISMISSED" ] || final_dismissed="$COALESCE_DISMISSED"

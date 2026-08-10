@@ -34,7 +34,11 @@
 #        the gates and again before the merge. The count hold it replaces had no
 #        release (nothing demotes a duplicate, and the pass that closes both is
 #        gated behind the merge the hold prevented), so the pre-open sibling-flip
-#        pair pre-open-resolve.sh mints by design deadlocked permanently
+#        pair pre-open-resolve.sh mints by design deadlocked permanently. A member
+#        is certified at PULL-REQUEST granularity, not repository granularity: a
+#        sibling claiming this number while recording this repository's
+#        pull/<other-number> url describes different work and cannot pool its
+#        markers in (CO5, review tk-mnj3f)
 #   (13) DEPENDENCY-LINKED rework child with NO pr_number of its own -> merge HELD
 #        (tk-lgjvg: the gate resolved children by pr_number alone, so a child that
 #        carries only branch/source_review_bead was invisible and the gate PASSED)
@@ -351,6 +355,8 @@ bead-COALESCE-E|391|main|codex|green@HEAD391
 bead-COALESCE-F|391|main|codex|green@HEAD391|true
 bead-COALESCE-G|392|main|codex|green@HEAD392
 bead-COALESCE-H|392|main|codex|green@HEAD392
+bead-COALESCE-I|393|main|codex|
+bead-COALESCE-J|393|main|codex|green@HEAD393|||https://github.com/acme/repo/pull/999
 bead-FINALHOLD|374|main|codex|green@HEAD374
 bead-FINALGATE|375|main|codex|green@HEAD375
 bead-FINALCLOSED|376|main|codex|green@HEAD376
@@ -588,6 +594,10 @@ HM
 #   392 both anchors green, and the SIBLING has an open dep-linked rework child
 #       that names no pr_number -> HELD. The holder set is the union too, or the
 #       merge lands with real rework in flight
+#   393 the merging anchor's marker is CLEARED and the green one is on a sibling
+#       that claims pr_number=393 while recording pr_url .../pull/999 — the SAME
+#       repository, a DIFFERENT pull request -> HELD. A repository-granular sibling
+#       check certified that bead and pooled its marker in
 #   372 OPEN, CLEAN, ours, head branch == the anchor's recorded branch -> MERGED (HD5)
 #
 # Columns 9-11 (headRefName|headRepo|isCrossRepository) are the head identity. They
@@ -687,6 +697,7 @@ cat > "$TMP/prs" <<'P'
 390|OPEN|false|main|HEAD390|CLEAN|MERGEABLE|a390c0ffee000027
 391|OPEN|false|main|HEAD391|CLEAN|MERGEABLE|a391c0ffee000028
 392|OPEN|false|main|HEAD392|CLEAN|MERGEABLE|a392c0ffee000029
+393|OPEN|false|main|HEAD393|CLEAN|MERGEABLE|a393c0ffee000030
 P
 
 # PR review history (the REST `pulls/N/reviews` source — the approval gate's real
@@ -2060,6 +2071,34 @@ hasin "$OUT1" "PR#392 has unclosed rework/review bead child-392 (open)" \
   || bad "(CO4) sibling's open child must hold the coalesced merge (got: $OUT1)"
 has '^392$' "$TMP/merged" && bad "(CO4) a coalesced PR with a sibling's open child must not merge" \
                           || ok "(CO4) sibling's open child -> not merged"
+
+# (CO5) A SIBLING IS CERTIFIED AT PULL-REQUEST GRANULARITY, NOT REPOSITORY
+#       GRANULARITY (review tk-mnj3f). bead-COALESCE-J claims pr_number=393 — so it
+#       enumerates as an anchor of this PR — while recording pr_url .../pull/999:
+#       the SAME repository, a DIFFERENT pull request. The first certification asked
+#       only "same repository?", which that row answers YES, so it certified, and its
+#       green marker was pooled into PR#393's gate.
+#
+#       The fixture is adversarial the same way CO1 is: the merging anchor
+#       (bead-COALESCE-I) has its check.codex CLEARED and records no pr_url of its
+#       own, so the ONLY thing that can green this gate is the mismatched sibling's
+#       marker. Pre-fix PR#393 merged on the strength of a bead describing other
+#       work; post-fix the coalescing refuses and the PR is held.
+#
+#       Note WHICH asymmetry this closes: when the loop reaches bead-COALESCE-J
+#       itself, the self-anchor identity check holds it on exactly this row (asserted
+#       below). The same bead was therefore refused as a merging anchor and accepted
+#       as a gate contributor — one of the two PR identities is wrong either way, and
+#       the script cannot pick which.
+hasin "$OUT1" "PR#393 has multiple open gating anchors that cannot be coalesced — sibling anchor bead-COALESCE-J records pr_url 'https://github.com/acme/repo/pull/999', which is not PR#393" \
+  && ok "(CO5) a sibling whose pr_url names a same-repository DIFFERENT PR refuses coalescing" \
+  || bad "(CO5) same-repo different-number sibling pr_url must refuse coalescing (got: $OUT1)"
+has '^393$' "$TMP/merged" \
+  && bad "(CO5) a PR greened only by a sibling that names a different pull request must not merge" \
+  || ok "(CO5) mismatched-sibling PR not merged"
+hasin "$OUT1" "PR#393 resolves to 'https://github.com/acme/repo/pull/393' but anchor bead-COALESCE-J records pr_url 'https://github.com/acme/repo/pull/999'" \
+  && ok "(CO5) ...and the SELF check holds the very same bead — the two checks now agree" \
+  || bad "(CO5) the self-anchor identity check must still hold bead-COALESCE-J (got: $OUT1)"
 
 #      Under tk-3sdfq the hold arrives through the coalescing refusal: an anchor
 #      that appeared only in the live ledger cannot be re-read individually (it is
