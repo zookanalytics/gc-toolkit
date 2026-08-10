@@ -22,7 +22,10 @@
 #           holds for the operator (cold), or the live group session
 #           vacuums the visit (warm). One open visit per subject: if
 #           one already exists, open prints its id instead of filing
-#           a second.
+#           a second. The SUBJECT MUST RESOLVE first — an id that no
+#           rig ledger answers for exits 4 having filed nothing, so a
+#           typo cannot manufacture a visit (and a converse session to
+#           hold it) for a bead that does not exist.
 #
 # ── What is an anchor ────────────────────────────────────────────────
 # FOUR kinds of OPEN top-level anchors are collected, cross-rig:
@@ -507,6 +510,78 @@ cmd_open() {
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     rig=$(rig_name_for_bead "$bead")
     [ -n "$rig" ] && export GC_RIG="$rig"
+
+    # ── The subject must actually EXIST before anything is filed ──────
+    # The rig resolution above maps the id PREFIX to a rig; nothing so far
+    # confirms a bead by that id RESOLVES anywhere. So without this gate a
+    # typo or a stale id files a REAL visit: routed to the rig converse
+    # pool, carrying gc.continuation_group=<the typo>.
+    # Pool demand then spawns a converse session whose prime step
+    # (`gc bd show $SUBJECT`) can never resolve anything, and it holds a
+    # conversation about a bead that does not exist. This is the operator
+    # front door for the visit spine, so a fat-fingered id must fail here
+    # rather than silently manufacture junk work and an agent to hold it.
+    #
+    # Fail CLOSED on every unhappy reading — not found, an unparseable
+    # answer, a wedged data plane — because the only alternative is filing
+    # a visit on an unverified subject, which is the bug itself. The three
+    # readings get distinct messages: they need different operator moves
+    # (fix the id / add the rig / check Dolt), and "bead not found" for a
+    # Dolt outage would send the operator hunting a typo that isn't there.
+    #
+    # Exit 4 = verb runtime failure, the documented code for bead-not-found
+    # (see "Exit codes" in the header).
+    # >>> open-subject-exists
+    subject_raw=$(gc bd show "$bead" --json 2>/dev/null || true)
+    # `bd show` answers an ARRAY of beads when it resolves and a bare
+    # `{"error": …}` OBJECT when it does not, so the shape is checked before
+    # indexing: `.[]?` over that object iterates its VALUES (strings), and
+    # `.id` on a string is a jq error, not a clean empty. Control chars in a
+    # bead's notes break the parse outright, hence the `tr -d` (an invalid
+    # `bd show --json` must not read as "missing"). The id is compared for
+    # EQUALITY with what was typed: the visit is keyed by that literal
+    # string (gc.continuation_group, the tracks edge), so a near-miss that
+    # resolves to some other bead would file a visit nothing can resolve.
+    #
+    # Deliberately UNPINNED — do not "fix" this by threading `--db` in from
+    # the prefix-resolved rig. `gc bd show <id>` resolves a bead by id across
+    # the city's per-rig ledgers regardless of BEADS_DIR (verified against a
+    # cross-rig subject with BEADS_DIR unset, and pointed at two different
+    # wrong rigs). Pinning `--db` by PREFIX would instead make the existence
+    # check inherit the prefix→rig assumption, turning any bead whose id
+    # prefix does not match its home ledger into a false "bead not found" —
+    # a real subject refused at the front door, which is worse than the bug
+    # this gate closes. Verification must be at least as permissive as the
+    # thing it guards.
+    subject_clean=$(printf '%s' "$subject_raw" | tr -d '\000-\010\013\014\016-\037')
+    subject=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
+             else empty end' 2>/dev/null || true)
+    if [ -z "$subject" ]; then
+        # Which unhappy reading is this? A NOT-FOUND answer is the specific
+        # `{"error": "no issues found matching the provided IDs"}`; any OTHER
+        # error on that channel (a refused Dolt connection, a schema-migration
+        # write-block, an auth failure) means the read FAILED and the bead's
+        # existence is simply unknown. Both file nothing, but they need
+        # different operator moves, and reporting an outage as "bead not found"
+        # sends the operator hunting a typo that is not there. Unrecognized
+        # errors fall to "could not verify" on purpose: over-reporting doubt is
+        # recoverable, asserting a bead is missing when it is not is not.
+        probe_err=$(printf '%s' "$subject_clean" \
+            | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+        case "$probe_err" in *"no issues found"*) probe_err="" ;; esac
+        if [ -z "$rig" ]; then
+            echo "$PROG: open: bead not found: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list'. No visit filed." >&2
+        elif [ -z "$subject_raw" ] || [ -n "$probe_err" ]; then
+            echo "$PROG: open: could not verify '$bead' — 'gc bd show' did not answer${probe_err:+ ($probe_err)} (data plane down?). No visit filed." >&2
+        else
+            echo "$PROG: open: bead not found: '$bead' — no rig ledger answers for that id. No visit filed." >&2
+        fi
+        exit 4
+    fi
+    # <<< open-subject-exists
 
     # Already held? An open visit in this bead's continuation group IS
     # the conversation — filing a second would split it. Print the
