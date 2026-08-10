@@ -23,7 +23,11 @@ prompt_template = "gastown//agents/mayor/prompt.template.md"
 # the generic thread-role fragment. RoleName (below) drives the
 # parameterization so the same fragment serves mayor-thread / mechanik-thread
 # / future <role>-thread variants without duplication.
-append_fragments = ["convoy-integration-branch-mayor", "thread-role", "operator-next-step-trailing"]
+# bead-disposition is likewise in lockstep with the canonical mayor's
+# inject_fragments_append (pack.toml): a thread does the same reopen/re-home
+# judgment the canonical does, and there is no propagation between the two
+# lists — a fragment added to one and not the other silently diverges.
+append_fragments = ["convoy-integration-branch-mayor", "bead-disposition", "thread-role", "operator-next-step-trailing"]
 
 # Plain scratch directory, same shape as the canonical mayor's
 # .gc/agents/mayor home. AgentBase parameterizes by per-instance name

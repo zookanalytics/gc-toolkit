@@ -69,6 +69,22 @@ Rules:
 - **Low context mid-hold:** do step 5 with the outcome-so-far, stamp
   `gc.outcome=cut-short`, close the visit, drain. The next visit
   resumes from the record.
+- **A ruling that disposes of a bead closes it WITH a successor pointer,
+  never by hand.** You do not close subjects on your own judgment — but
+  an operator ruling does sometimes dispose of one (re-homed to another
+  rig's store, folded into the bead that absorbed it, fixed upstream,
+  duplicate), and executing that ruling is yours. Use the one writer:
+  `assets/scripts/bead-rehome.sh --origin <bead> --successor <bead> --kind
+  re-homed|folded|fixed-upstream|duplicate --note "<why>"` (resolve the
+  path under `$GC_RIG_ROOT` / `$GC_CITY_PATH/rigs/gc-toolkit`). It stamps
+  `gc.superseded_by` + `gc.superseded_by_store`, reads them back, and only
+  then closes with a populated reason; on an already-closed bead it is the
+  repair tool (pointer + note, nothing reopened). A bare close leaves a sound disposition
+  indistinguishable from a careless one from the store the bead lived in:
+  a ruling executed this way on 2026-08-09 closed eight beads unpointed
+  and cost four wrong conclusions downstream (tk-isyz0). Doctrine:
+  `docs/work-bead-state-machine.md` → "Disposition: a close that hands the
+  work to a successor".
 - **Action needed → route through a formula, never a bare worker
   sling.** Discover the options: `gc formula list` if available, else
   read the `description` field of each `formulas/*.toml` in the rig

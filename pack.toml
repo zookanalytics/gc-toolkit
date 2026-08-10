@@ -90,6 +90,13 @@ name = "mayor"
 inject_fragments_append = [
     "canonical-self-rename",
     "convoy-integration-branch-mayor",
+    # The mayor rules on cross-store dispositions and is the one actor that
+    # REOPENS a closed bead, which is a write against somebody else's decision.
+    # Both halves of tk-isyz0 land on it: stamp a successor pointer when a
+    # ruling re-homes work, and never conclude "false close" from a
+    # single-store search. Mirrored by hand into agents/mayor-thread/agent.toml
+    # (append_fragments) — there is no propagation between the two.
+    "bead-disposition",
     "operator-next-step-trailing",
 ]
 
