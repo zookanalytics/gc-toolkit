@@ -36,8 +36,12 @@ description: Implementation spec for the three pieces that realize P3 and the ba
 > written for a subject triage moves beads OUT of; parks invert it (beads
 > move in and stay), and they always carry a hint, so the "else" staleness
 > arm never applied to them. The visit body now names which ids entered
-> and which left. Deliberately still uncovered: a purely strategic change
-> that moves no ids — the operator files that visit by hand.
+> and which left. The delta is symmetric, so §3's "no candidates → no
+> turn" holds only for a scope that was ALREADY empty: a subject whose
+> recorded set was non-empty and now matches nothing files one final
+> visit naming what left, then goes quiet. Deliberately still uncovered:
+> a purely strategic change that moves no ids — the operator files that
+> visit by hand.
 
 Realizes P1–P4 ([operating-principles.md](operating-principles.md)) on
 existing patterns only. Three repo pieces, one city-side list, one

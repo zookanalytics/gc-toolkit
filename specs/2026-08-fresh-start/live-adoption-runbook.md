@@ -106,7 +106,10 @@ the next pass lists only what remains.
 Within 24h (or forced): **expect** per triage subject either a skip
 (logged: open visit exists / not ripe) or one `visit: <id> — triage
 visit: candidates look ripe` — and no visit at all if the scope is
-empty. Pull-only: no board row unless there is something to say.
+empty and was empty last time, or if its candidate set has not moved
+since the last visit (logged `skipped-unchanged`). A scope that just
+emptied still files one final visit naming what left. Pull-only: no
+board row unless there is something to say.
 
 ## 5. Optional: enable the intake default (P2)
 
