@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Hermetic test for review-dispatch-body.sh — the method carried by every
-# dispatched signoff review (tk-jufvl). No live city, Dolt, network, or PRs; the
-# skill file is a fixture, so this suite is green both BEFORE and AFTER the
-# `signoff-review` skill (tk-wghh1) lands in the pack.
+# dispatched signoff review (tk-jufvl). No live city, Dolt, network, or PRs.
+#
+# EVERY skill file this suite resolves is a fixture it builds, and every arm
+# names the pack root it resolves from, so no arm's meaning depends on whether
+# the real `signoff-review` skill (tk-wghh1) happens to be in this checkout.
+# That independence has to be constructed, not assumed — see the FALLBACK
+# fixture below for the arm that silently lost it (tk-yp3ca). The one arm that
+# reads the real pack skill, (REALSKILL), is explicitly about that file and
+# skips when it is absent.
 #
 # THE BUG. The review dispatch created a bead with a title and routing metadata
 # and nothing else. Nothing said HOW to review, so the reviewing polecat matched
@@ -22,9 +28,11 @@
 #              nothing is written to stderr.
 #   (RIGROOT)  GC_RIG_ROOT wins over the script-relative path (the refinery runs
 #              these from a rig checkout).
-#   (FALLBACK) with the skill unreadable, a COMPLETE-ENOUGH method is still
-#              emitted (pin the OID, 3-dot diff, tests, severity, verdict shape)
-#              and a WARN goes to stderr — never a method-less body.
+#   (FALLBACK) with the skill unreadable — the emitter run from a COPY inside a
+#              skill-less pack, so BOTH resolution candidates miss — a
+#              COMPLETE-ENOUGH method is still emitted (pin the OID, 3-dot diff,
+#              tests, severity, verdict shape) and a WARN goes to stderr; never a
+#              method-less body, and never a skill inlined instead.
 #   (RC)       both modes exit 0: a dispatch is never blocked on prose.
 #   (NOTE)     --note appends a dispatch-context section; absent without it.
 #   (REALSKILL) if the pack really carries skills/signoff-review/SKILL.md, the
@@ -73,15 +81,47 @@ FIXTURE-SENTINEL-9c3f: the body of the skill, which must be inlined verbatim.
     git diff "origin/$BASE...$REVIEWED_OID"
 S
 
-# An empty pack root: no skills/ at all, so the emitter must take the fallback.
-EMPTYPACK="$TMP/emptypack"
-mkdir -p "$EMPTYPACK"
+# --- fixture pack: a skill-less pack that also holds a COPY of the emitter ----
+# For the FALLBACK arm, and it has to carry that copy — an empty GC_RIG_ROOT is
+# not enough to make the skill unreadable.
+#
+# The emitter resolves TWO candidates in order: `$GC_RIG_ROOT/$SKILL_REL`, then
+# `$HERE/../../$SKILL_REL` relative to the script itself. Pointing GC_RIG_ROOT at
+# an empty directory removes only the first; the second still finds the pack's
+# OWN skill, so the emitter inlines it and the fallback never runs. That
+# precedence is correct in production — a real skill beats the degraded copy —
+# so the fixture must move the SCRIPT rather than try to hide the file: run the
+# emitter from inside a pack root that carries no skills/, which is exactly the
+# older-pack-checkout case the fallback exists for.
+#
+# This arm passed for the wrong reason until skills/signoff-review/SKILL.md
+# landed (tk-wghh1). With no skill anywhere in the repo, both candidates missed
+# and the fallback fired — by accident of what the repo did not contain, not by
+# anything the fixture did. When the file landed, the arm silently flipped to
+# exercising the INLINE path and went red on origin/main and every branch, which
+# is how it was found (tk-yp3ca). Hence the assertion below that the fallback
+# body inlines no skill at all: the arm must fail loudly if a candidate ever
+# resolves again, whatever file it resolves to.
+#
+# A real COPY, never a symlink: the emitter resolves its own path through
+# `readlink -f` deliberately (a symlinked deploy has to find skills/ beside the
+# REAL script), so a symlink here would resolve straight back to the pack this
+# fixture exists to escape.
+FBPACK="$TMP/fbpack"
+mkdir -p "$FBPACK/assets/scripts"
+FB_SCRIPT="$FBPACK/assets/scripts/review-dispatch-body.sh"
+cp "$SCRIPT" "$FB_SCRIPT"
+if [ -e "$FBPACK/skills" ]; then
+  echo "fixture error: $FBPACK must carry no skills/ — the FALLBACK arm is not isolated" >&2
+  exit 1
+fi
 
 # --- run both modes ----------------------------------------------------------
+# Each run names its own pack root, so neither depends on an ambient GC_RIG_ROOT.
 RC_IN=0
 GC_RIG_ROOT="$FIXPACK" bash "$SCRIPT" > "$TMP/inline.out" 2> "$TMP/inline.err" || RC_IN=$?
 RC_FB=0
-GC_RIG_ROOT="$EMPTYPACK" bash "$SCRIPT" > "$TMP/fb.out" 2> "$TMP/fb.err" || RC_FB=$?
+GC_RIG_ROOT="$FBPACK" bash "$FB_SCRIPT" > "$TMP/fb.out" 2> "$TMP/fb.err" || RC_FB=$?
 
 eq "$RC_IN" "0" "(RC) inline mode exits 0"
 eq "$RC_FB" "0" "(RC) fallback mode exits 0 (a dispatch is never blocked on prose)"
@@ -128,6 +168,13 @@ hasF "$TMP/fb.out" '## The method (fallback)' "(FALLBACK) emits the marked fallb
 hasF "$TMP/fb.err" 'WARN' "(FALLBACK) WARNs on stderr that the skill is missing"
 hasF "$TMP/fb.err" 'skills/signoff-review/SKILL.md' "(FALLBACK) the WARN names the missing file"
 notF "$TMP/fb.out" 'FIXTURE-SENTINEL-9c3f' "(FALLBACK) does not leak fixture text"
+# The arm's own isolation, asserted independently of any particular skill file.
+# The sentinel check above proves only that the FIXTURE skill was not read —
+# under the tk-yp3ca bug the body was the REAL pack skill and that check passed
+# while the fallback never ran at all. This header line is emitted if and only if
+# some candidate resolved, so it fails on ANY leaked candidate, whatever file it
+# found, and keeps the arm from going vacuous again.
+notF "$TMP/fb.out" '## The method, inlined from' "(FALLBACK) inlines no skill file (both candidates miss)"
 # Complete-enough: the five load-bearing pieces of a usable single-pass review.
 # Match a token that cannot straddle a wrapped line: the prose says "(three\ndots:
 # compare against the merge-base ...)", and grep -F is line-oriented.
