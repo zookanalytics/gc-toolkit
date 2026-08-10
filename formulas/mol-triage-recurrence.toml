@@ -1,17 +1,33 @@
 description = """
 mol-triage-recurrence — wakes standing triage conversations when they
-have something to talk about.
+have something NEW to talk about.
 
 What it does, plainly: the operator keeps standing "triage subjects" —
 beads marked task_kind=triage-subject, each defining a pool of beads it
 curates (examples: "triage: held ideas", "triage: all P1s of this
 rig"). This formula runs on a daily order and, for each triage subject,
 files ONE visit (a routed conversation sitting) IF the subject's scope
-currently has candidates worth a sitting AND no visit for it is already
-live — open OR held (a held visit is `in_progress`). No candidates, or
-a visit already live → it files nothing for that subject. The result:
-each triage conversation appears on the board exactly when it has
+currently has candidates AND that candidate set has CHANGED since the
+last visit this step filed AND no visit for it is already live — open OR
+held (a held visit is `in_progress`). No candidates, an unchanged set,
+or a visit already live → it files nothing for that subject. The result:
+each triage conversation appears on the board exactly when it has new
 material, and never stacks.
+
+Why a set-delta and not just "the scope is non-empty": the non-empty
+test skips STACKING but not RECURRENCE. A **park-shaped** subject — one
+whose scope matches exactly the beads parking puts into it, e.g.
+`label:parked-debt` — never drains, so a non-empty test re-asks the same
+already-answered question every cooldown forever. Three of them fired at
+once on 2026-08-10, each on a set unchanged from the day before, each
+costing a sitting. Only "the set moved" tells a park worth revisiting
+from one that is simply still parked.
+
+Deliberate gap: a purely STRATEGIC change — the line that parked work
+belongs to becomes live again, so everything in scope turns ripe at once
+— moves no ids and so files nothing. That trigger is the operator's, by
+hand via mol-visit; a subject that wants it says so in its own prose. Do
+not try to infer it here.
 
 The triage itself (enumerate candidates, rank, frame promote/park/kill)
 is NOT this formula's job — the converse session does that at visit
@@ -30,11 +46,13 @@ formula_compiler = ">=2.0.0"
 
 [[steps]]
 id = "evaluate-and-file"
-title = "Per triage subject: skip if a visit is live; file a visit if the scope has candidates"
+title = "Per triage subject: skip if a visit is live or the scope set is unchanged; file a visit on a delta"
 description = """
 **1. List the triage subjects and the live visits.** Fail-safe: an
 unreadable listing means close this step with `gc.outcome=fail` and
-file nothing — never evaluate on partial data.
+file nothing — never evaluate on partial data. On that path stamp
+NOTHING: recording a candidate set you could not read makes the next
+run's delta a lie, and the silence it buys is permanent.
 
 ```bash
 OPEN=$(mktemp); LIVE=$(mktemp)
@@ -46,11 +64,21 @@ if ! jq -e 'type=="array"' "$OPEN" >/dev/null || ! jq -e 'type=="array"' "$LIVE"
 # use the step bead id from YOUR claim — no env var carries it
   exit 0
 fi
-SUBJECTS=$(jq '[.[] | select((.metadata.task_kind // "") == "triage-subject") | {id, title, scope: (.metadata["triage.scope"] // "")}]' "$OPEN")
+SUBJECTS=$(jq '[.[] | select((.metadata.task_kind // "") == "triage-subject")
+  | {id, title,
+     scope: (.metadata["triage.scope"] // ""),
+     last_seen: (if ((.metadata // {}) | has("triage.last_seen"))
+                 then (.metadata["triage.last_seen"] // "") else null end)}]' "$OPEN")
 CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // empty)]' "$LIVE")
 # $LIVE, not $OPEN, for the visit set: a visit being held is
 # in_progress, not open — and a sitting already live is exactly the
 # case the skip below exists to protect.
+# `last_seen` is a TRI-STATE and must stay one: null when the key is
+# ABSENT ("never evaluated" — always file), "" when it is present and
+# empty ("the last evaluation saw an empty scope"), otherwise the
+# recorded set. jq keeps absent and empty apart (an empty string is
+# truthy there); a `// ""` coalesce would flatten them and silence the
+# first visit of every subject that existed before this landed.
 ```
 
 **2. Per subject, in order:**
@@ -58,6 +86,10 @@ CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metad
 - **Skip if a visit is live** — the subject's id appears in
   `$CONVGROUPS` (open AND held visits, per the listing above). Log
   `skipped-live-visit`. Never stack a second visit on one subject.
+  **Stamp nothing on this path.** A bead that enters the scope while a
+  sitting is held must still surface on the first run after that visit
+  closes; stamping here would fold it into the already-seen set and
+  swallow it silently.
 - **Evaluate the scope with the defined filter schema.** A triage
   subject's machine-readable scope is its `triage.scope` metadata:
   space-separated tokens, each one of exactly these forms —
@@ -85,17 +117,72 @@ CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metad
   standing subject, whose visits mol-liveness-sweep files itself — log
   `skipped-owned-by-sweep` for that subject and move on; it is
   expected, not unknown.
-- **File when there are candidates.** One or more candidates → file the
-  visit below. Zero → log `skipped-no-candidates`, file nothing.
+- **Serialize the candidate set and read back the last one filed.**
+  The set is the sorted bead ids, comma-joined — the same shape this
+  step stamps, so the two are comparable as plain strings.
 
-**3. File the visit for each subject with candidates** (`$SUBJECT` =
-that subject's id; put the candidate count and ids in the `-d` body):
+```bash
+# $SUBJECT = this subject's id; $MATCHED = the jq array of its candidates
+NOW=$(printf '%s' "$MATCHED" | jq -r '[.[].id] | sort | join(",")')
+N=$(printf '%s' "$MATCHED" | jq 'length')
+# "<absent>" carries jq's null through to the shell: a comma-joined id
+# list can never contain "<", so the tri-state survives the round trip
+# and "never evaluated" stays distinguishable from "saw an empty scope".
+WAS=$(printf '%s' "$SUBJECTS" | jq -r --arg s "$SUBJECT" \
+  '.[] | select(.id == $s) | (.last_seen // "<absent>")')
+```
+
+- **Zero candidates → `skipped-no-candidates`,** file nothing. Stamp the
+  EMPTY set (not the absent key): the day a bead enters a scope that was
+  empty, `""` → `"tk-xxxxx"` reads as a change, whereas an absent key
+  would leave "never evaluated" standing forever.
+- **Unchanged set → `skipped-unchanged`,** file nothing and stamp
+  nothing — the recorded set already IS this set. This is the park-shaped
+  case: same beads, same question, already answered.
+- **Changed, or `triage.last_seen` absent → file** (step 3). An absent
+  key means never evaluated and MUST file, so every subject that existed
+  before this landed keeps today's behaviour on its first run after it.
+
+```bash
+if [ -z "$NOW" ]; then
+  echo "$SUBJECT: skipped-no-candidates"
+  # Idempotent: re-writing the same empty set every cooldown would be a
+  # Dolt commit per subject per day for no state change.
+  [ "$WAS" = "" ] || gc bd update "$SUBJECT" --set-metadata "triage.last_seen="
+elif [ "$NOW" = "$WAS" ]; then
+  echo "$SUBJECT: skipped-unchanged ($N in scope, none entered or left)"
+else
+  : # file the visit — step 3
+fi
+```
+
+**3. File the visit for each subject with a changed, non-empty set**
+(`$SUBJECT` = that subject's id). Build the DELTA first and put it in
+the `-d` body: which ids entered and which left since
+`triage.last_seen` is what the sitting is actually about — a bare count
+re-states what the subject already knows.
+
+```bash
+DELTA=$(jq -rn --arg now "$NOW" --arg was "$WAS" '
+  def ids: split(",") | map(select(. != ""));
+  ($now | ids) as $n
+  | (if $was == "<absent>" then null else ($was | ids) end) as $w
+  | if $w == null then
+      "First evaluation of this subject (no triage.last_seen recorded), so entered/left are not meaningful yet: all "
+      + ($n | length | tostring) + " are simply what is in scope now."
+    else
+      "Entered since the last visit: "
+      + (($n - $w) | if length == 0 then "(none)" else join(", ") end)
+      + ". Left: "
+      + (($w - $n) | if length == 0 then "(none)" else join(", ") end) + "."
+    end')
+```
 
 ```bash
 # >>> gate-visit
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-VISIT=$(gc bd create -t task --title "visit: $SUBJECT — triage: N candidates in scope" \
-  -d "<candidate count and ids from the scope filter>" --json | jq -r '.id // .[0].id')
+VISIT=$(gc bd create -t task --title "visit: $SUBJECT — triage: $N candidates in scope" \
+  -d "$DELTA Current set: <one line per candidate: id — title>" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
@@ -107,8 +194,16 @@ gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # <<< gate-visit
 ```
 
+Stamp the set you just filed on, and only AFTER the visit exists — the
+guard above exits on a failed create, so an unfiled delta is never
+recorded as seen and the next run re-files it:
+
+```bash
+gc bd update "$SUBJECT" --set-metadata "triage.last_seen=$NOW"
+```
+
 **4. Log the per-subject outcomes** (skipped-live-visit /
-skipped-no-candidates / skipped-no-machine-scope /
+skipped-unchanged / skipped-no-candidates / skipped-no-machine-scope /
 skipped-owned-by-sweep / filed + visit id), then close this step:
 
 ```bash

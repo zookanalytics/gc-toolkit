@@ -23,6 +23,22 @@ description: Implementation spec for the three pieces that realize P3 and the ba
 > needing a "what comes next?" exploration). The per-pass filing cap is
 > superseded by a per-visit listing cap.
 
+> **Recurrence addendum (2026-08-10, operator decision — visit su-aib6):**
+> §3's ripeness pre-check is superseded in the implementation. The machine
+> hint alone is not ripeness: the check is the hint **and** a set-delta
+> against the candidate set the last filed visit was built from
+> (`triage.last_seen` on the subject bead). Motivating case: a
+> **park-shaped** subject — one whose scope matches exactly the beads
+> parking puts into it, e.g. `label:parked-debt` — never drains, so a
+> non-empty-scope test re-asks the same already-answered question every
+> cooldown forever; three fired at once on 2026-08-10, each on a set
+> unchanged from the day before. The gap §3 left is that ripeness was
+> written for a subject triage moves beads OUT of; parks invert it (beads
+> move in and stay), and they always carry a hint, so the "else" staleness
+> arm never applied to them. The visit body now names which ids entered
+> and which left. Deliberately still uncovered: a purely strategic change
+> that moves no ids — the operator files that visit by hand.
+
 Realizes P1–P4 ([operating-principles.md](operating-principles.md)) on
 existing patterns only. Three repo pieces, one city-side list, one
 explicitly deferred design. Vehicle per operator discussion: repo pieces
@@ -103,7 +119,10 @@ exists in its group; else run the cheap ripeness pre-check (the machine
 hint if present, else "any held bead untouched since the last triage
 turn closed"); if ripe, file the gate-turn ("triage visit: N candidates
 look ripe — promote, park, or kill"). No candidates → no turn → no
-board row: pull-only holds. The deep evaluation (which five, what
+board row: pull-only holds. *(Superseded — see the Recurrence addendum
+above: the pre-check is the hint AND a set-delta against the last filed
+visit, because a hint-only test nags park-shaped subjects forever.)* The
+deep evaluation (which five, what
 ranking) is the converse session's prep at turn time — the scope is the
 lens, the chassis does the work.
 
