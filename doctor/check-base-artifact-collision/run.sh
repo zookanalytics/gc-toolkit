@@ -82,7 +82,18 @@
 #   - formulas/mol-refinery-patrol.toml — base + default_merge_strategy +
 #     auto_ff_rig_main + check_set (merge-gate check-set, retires review_gate +
 #     signoff_head) + protected-branch auto-promote +
-#     integration-branch INFO local deltas.
+#     integration-branch INFO local deltas, plus the pre-existing-failure dedup
+#     probe (tk-277aj, 2026-08-10): the base tells handle-failures to dedup with
+#     `bd list --search`, which is not a flag — bd rejects it on stderr with an
+#     EMPTY stdout, the step reads that as "no duplicate", and every patrol that
+#     hits a pre-existing target failure files another P1 for it. The mirror
+#     probes with the real flag (`--title-contains`), shape-validates the result
+#     so an unreadable bd cannot masquerade as "no match", and reuses one
+#     FAIL_TOKEN for both the probe and the filed title so consecutive patrols
+#     actually match. Preserve all three when reconciling — restoring a
+#     `--search` probe, or dropping the shape check, restores silent duplicate
+#     filing. assets/scripts/preexisting-failure-dedup.test.sh executes the
+#     shipped snippet; run it after any reconciliation of this formula.
 #   - formulas/mol-witness-patrol.toml — base + cycle-recycle +
 #     snake_case session-list jq + .work_dir metadata + completed-workflow
 #     quiesce step (tk-p9ji9) local deltas.

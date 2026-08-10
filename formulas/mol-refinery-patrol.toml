@@ -772,15 +772,48 @@ TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_bran
    - Close this step after the current wisp is burned.
 
 3. If pre-existing on target:
-   - Check for duplicates first:
+   - Check for a duplicate FIRST and file only if there is none. Run the whole
+     decision as ONE block: each value below is consumed in the same shell that
+     computed it. These snippets may run in separate shells, and a probe result
+     that does not survive into the filing arm reads there as "no duplicate" —
+     the same fail-open this block exists to close.
      ```bash
-     gc bd list --type=bug --status=open --search "<failure summary>"
+     # >>> preexisting-failure-dedup
+     # ONE short, distinctive token, reused for BOTH the probe below and the
+     # title of any bead it files. Dedup only works while the two agree: the
+     # probe is a title SUBSTRING match, so a prose failure summary — reworded
+     # every cycle — never matches the bead the last cycle filed, and each
+     # patrol files another P1 for the same failure. Use the failing test name,
+     # the failing target, or an error symbol.
+     FAIL_TOKEN="<failing test name or error symbol>"
+     # --title-contains is the real flag (case-insensitive title substring).
+     # NOT --search: bd has no such flag, and rejects it with "unknown flag" on
+     # stderr while leaving stdout EMPTY — which reads as "no duplicate found".
+     DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
+     # SHAPE-validate the read. bd fails open (errors to stderr, empty stdout),
+     # so an unreadable list cannot be told from a genuine "no match" — and
+     # guessing "no match" is precisely what files the duplicate. A readable
+     # empty result is the JSON array []; anything that is not an array is
+     # UNKNOWN. On unknown, file nothing and merge nothing: the GATE below
+     # cannot be satisfied by a bead you were unable to check for, and the same
+     # unavailable bd would fail the `gc bd create` anyway. The next patrol
+     # re-probes.
+     if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+       echo "duplicate probe unreadable (bd unavailable?) — filing nothing and NOT merging $WORK; the next patrol re-probes"
+       gc runtime drain-ack
+       exit 1
+     fi
+     DUP_ID=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
+     if [ -n "$DUP_ID" ]; then
+       echo "pre-existing failure already filed as $DUP_ID — proceeding with merge, filing nothing"
+     else
+       # The SAME token goes in the title, so the NEXT patrol's probe finds it.
+       gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN (<one-line detail>)"
+     fi
+     # <<< preexisting-failure-dedup
      ```
-   - If a matching bug already exists: note its ID and proceed with merge.
-   - If no duplicate: file a new bead:
-     ```bash
-     gc bd create --type=bug --priority=1 --title="Pre-existing failure: <summary>"
-     ```
+   - Note the resulting bug ID — `$DUP_ID`, or the bead just filed — in your
+     merge notes. That ID is what satisfies the GATE below.
    - Proceed with merge (failure not caused by this branch)
 
 **GATE**: Cannot merge without all checks passing OR pre-existing bug filed/found.
