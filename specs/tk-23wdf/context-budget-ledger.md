@@ -57,7 +57,7 @@ the rendered prompt; every row's columns sum to its total.
 | Agent (rig) | Total | Base gastown pack | gc-toolkit | city.toml patches | gc skills appendix | gc header |
 |---|---:|---:|---:|---:|---:|---:|
 | **polecat** (gc-toolkit) | **102,550** | 28,387 | **74,099** | 0 | 0 *(disabled)* | 64 |
-| **polecat-codex** (gc-toolkit) | **102,611** | 28,387 | **74,099** | 0 | 0 *(disabled)* | 125 |
+| **polecat-codex** (gc-toolkit) | **102,611** | 28,402 | **74,099** | 0 | 0 *(disabled)* | 110 |
 | **polecat** (gascity) | **119,620** | 28,389 | 74,099 | **17,067** | 0 *(disabled)* | 65 |
 | **refinery** (gascity) | **63,337** | ~27,7xx | ~3,7xx | **24,764** | ~2,8xx | 163 |
 | **witness** (gc-toolkit) | **39,130** | 25,387 | 10,742 | 0 | 2,840 | 161 |
@@ -66,6 +66,13 @@ the rendered prompt; every row's columns sum to its total.
 | **mayor** (city) | **32,703** | 25,901 | 3,829 | 0 | 2,827 | 146 |
 | **deacon** (city) | **29,593** | 21,209 | 5,408 | 0 | 2,828 | 148 |
 | **converse** (gc-toolkit) | **13,972** | 6,892 | 4,166 | 0 | 2,843 | 71 |
+
+The two polecat pools are byte-for-byte the same prompt apart from the agent's
+own name: diffing the claude and codex renders past their headers shows a single
+divergence, at the `## Your Role: POLECAT (Worker: …)` line. `polecat-codex`
+shares the base prompt by reference (`prompt_template = "gastown//agents/polecat/…"`)
+and mirrors the four fragments by hand in `agents/polecat-codex/agent.toml:41`,
+and the measurement confirms the mirror is currently exact.
 
 "Base gastown pack" folds the agent's own `prompt.template.md` together with the
 base template-fragments it pulls in; both are upstream content we inherit. For
@@ -312,8 +319,9 @@ the same delivery channel closes the split.
 
 **F3 — `operational-awareness` is the only fragment in literally every agent.**
 
-6,762–6,764 B in all nine captured roles (~60,900 B across the live city at any
-moment). It comes from `[agent_defaults] append_fragments` in city.toml but the
+6,762–6,764 B in all nine captured roles. With 22 gc agent sessions live at
+capture time that is ~148,800 B of the same text resident across the city at one
+moment. It comes from `[agent_defaults] append_fragments` in city.toml but the
 content is **base-pack** (`gastown/template-fragments/operational-awareness.template.md`,
 6,803 B at the pin). Per the epic's non-goals and pack principle 1, this is
 recorded as a finding, not proposed for upstream change.
