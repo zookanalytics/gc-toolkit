@@ -120,6 +120,14 @@ fi
 echo "reading observations from rigs: $RIGS"
 
 PENDING=$(mktemp); echo '[]' > "$PENDING"
+# V1 fallback validation must verify three things about this cross-rig read:
+# (a) --rig actually SCOPES the listing — this CLI family has a documented
+#     silent-ignore precedent (`gc convoy list` ignores --rig, per the
+#     assets/scripts/reconcile-graduated-convoys.sh header); if --rig is
+#     silently ignored here, this loop appends the home store once per rig,
+#     inflating the pending count;
+# (b) --limit=0 combines with --rig;
+# (c) cross-rig `gc bd update` (step 3's stamping) writes at all.
 for R in $RIGS; do
   RAW=$(mktemp)
   gc bd list --rig "$R" -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
@@ -151,12 +159,22 @@ N=$(jq 'length' "$PENDING")
 URGENT=$(jq '[.[] | select(((.metadata["obs.endorsed"] // "") == "operator")
                         or ((.metadata["obs.directive"] // "") == "standing"))] | length' "$PENDING")
 NOW=$(date -u +%s)
-# created_at // created: tolerate either creation-timestamp field name.
+# created_at // created: tolerate either field name, but created_at is the
+# CONFIRMED field (per mol-refinery-patrol's own note). If V1 shows
+# timestamp-format variance across rigs, jq's fromdateiso8601-min is the
+# bulletproof alternative to date -d parsing.
 OLDEST=$(jq -r '[.[] | (.created_at // .created // empty)] | sort | first // empty' "$PENDING")
 AGE_D=0
 if [ -n "$OLDEST" ]; then
-  OLDEST_S=$(date -u -d "$OLDEST" +%s 2>/dev/null || echo "$NOW")
-  AGE_D=$(( (NOW - OLDEST_S) / 86400 ))
+  if OLDEST_S=$(date -u -d "$OLDEST" +%s 2>/dev/null); then
+    AGE_D=$(( (NOW - OLDEST_S) / 86400 ))
+  else
+    echo "WARN: unparseable oldest-pending timestamp '$OLDEST' — forcing trickle guard open" >&2
+    AGE_D=$(( {{distill_max_age_days}} + 1 ))
+  fi
+elif [ "$N" -gt 0 ]; then
+  echo "WARN: $N pending observations but no readable creation timestamp — forcing trickle guard open" >&2
+  AGE_D=$(( {{distill_max_age_days}} + 1 ))
 fi
 if [ "$N" -ge "{{distill_min_pending}}" ] || [ "$URGENT" -gt 0 ] || [ "$AGE_D" -gt "{{distill_max_age_days}}" ]; then
   echo "gate open: $N pending, $URGENT urgent, oldest ${AGE_D}d"
@@ -174,26 +192,34 @@ A previously filed `prompt-update` bead whose PR was CLOSED without merging is
 an operator veto — the rubric over-promoted. Refinery CLOSES the bead when it
 opens the PR (`merge_strategy=mr`), so vetoes are found through the PRs of
 closed beads. Each veto becomes ONE observation (`obs.category=learning-rubric`,
-provenance `pr:<repo>#<n>:veto`), deduped on that provenance BEFORE filing so
+provenance `pr:<owner/repo>#<n>:veto`), deduped on that provenance BEFORE filing so
 a veto is recorded exactly once, ever.
 
 ```bash
 if command -v gh >/dev/null 2>&1; then
   REPO_SLUG=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
+  if [ -z "$REPO_SLUG" ]; then
+    echo "WARN: cannot resolve repo slug — skipping veto sweep this run" >&2
+  else
   KNOWN=$(mktemp)
-  gc bd list -l observation --status=closed --json --limit=0 > "$KNOWN" 2>/dev/null
+  # Belt-and-suspenders status list (matches the miner's dedup form): the
+  # provenance dedup surface must include not-yet-closed observations too.
+  gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json --limit=0 > "$KNOWN" 2>/dev/null
   if ! jq -e 'type=="array"' "$KNOWN" >/dev/null 2>&1; then
     echo "WARN: home-rig observation listing unreadable — skipping the veto sweep this run (filing without the dedup surface risks duplicates)" >&2
   else
     KNOWN_PROV=$(jq -r '.[].metadata["obs.provenance"] // empty' "$KNOWN")
-    gc bd list -l prompt-update --status closed --metadata-field merge_result=pull_request --json 2>/dev/null \
+    gc bd list -l prompt-update --status closed --metadata-field merge_result=pull_request --json --limit=0 2>/dev/null \
       | jq -r '.[].metadata.pr_number // empty' | sort -u | while read -r n; do
           [ -n "$n" ] || continue
           # CLOSED = vetoed. MERGED = adopted; OPEN = still in flight.
-          [ "$(gh pr view "$n" --json state -q .state 2>/dev/null)" = "CLOSED" ] || continue
+          [ "$(gh pr view -R "$REPO_SLUG" "$n" --json state -q .state 2>/dev/null)" = "CLOSED" ] || continue
           PROV="pr:${REPO_SLUG}#${n}:veto"
           printf '%s\\n' "$KNOWN_PROV" | grep -qxF "$PROV" && continue   # already recorded
-          CLOSER=$(gh pr view "$n" --json comments -q '.comments[-1].body' 2>/dev/null | head -c 1500)
+          CLOSER=$(gh pr view -R "$REPO_SLUG" "$n" --json comments -q '.comments[-1].body // empty' 2>/dev/null | head -c 1500)
+          # Non-atomic create→update: a crash between the two leaves an
+          # observation without its provenance stamp, invisible to this dedup.
+          # Accepted — low probability, worst case one duplicate observation.
           B=$(gc bd create "obs: operator vetoed promotion PR #$n at review (pr:${REPO_SLUG}#${n}:veto)" \
             -t task -l learning -l observation \
             -d "## Statement
@@ -215,6 +241,7 @@ $CLOSER
             --set-metadata gc.outcome=recorded --status=closed
           echo "recorded veto observation $B for PR #$n"
         done
+  fi
   fi
 fi
 
@@ -267,6 +294,9 @@ already emitted:
   ADD / UPDATE / SUPERSEDE / NOOP — never append blind.
 - Contradiction with an adopted rule is a conversation (a visit), never a
   silent flip.
+- Rule bullets name their scope (`repo:<rig>` / `agent:<role>` / `global`) —
+  infer narrow, explicit operator scope wins; heat prioritizes judging an
+  item, never promotes it.
 
 ## 2. Dedup, then cluster onto pattern beads
 
@@ -365,10 +395,11 @@ open PR must be skipped.
 gc bd list -l prompt-update --status open,in_progress,blocked,deferred --json 2>/dev/null \
   | jq -r '.[] | "live prompt-update \\(.id): \\(.title)\\n\\(.description)"' 2>/dev/null
 if command -v gh >/dev/null 2>&1; then
+  REPO_SLUG="${REPO_SLUG:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)}"
   gc bd list -l prompt-update --status closed --metadata-field merge_result=pull_request --json 2>/dev/null \
     | jq -r '.[].metadata.pr_number // empty' | while read -r n; do
-        [ -n "$n" ] && [ "$(gh pr view "$n" --json state -q .state 2>/dev/null)" = "OPEN" ] \
-          && { echo "open prompt-update PR #$n:"; gh pr view "$n" --json title,body -q '.title, .body' 2>/dev/null; }
+        [ -n "$n" ] && [ "$(gh pr view -R "$REPO_SLUG" "$n" --json state -q .state 2>/dev/null)" = "OPEN" ] \
+          && { echo "open prompt-update PR #$n:"; gh pr view -R "$REPO_SLUG" "$n" --json title,body -q '.title, .body' 2>/dev/null; }
       done
 fi
 ```
@@ -409,13 +440,20 @@ POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 
 BODY="## Rule
 - Action: <ADD | UPDATE | SUPERSEDE | RETIRE | HARDEN>
+  (a cap-displacing ADD also lists the unrelated incumbent's RETIRE here —
+  SUPERSEDE covers only same-topic replacement)
 - Exact text: <the bullet to add or the rewritten bullet, ≤ 2 sentences — or
   the exact bullet + anchor line to remove>
 
 ## Target
 - Fragment: template-fragments/learned-conventions-<role>.template.md
+  (for obs.category=learning-rubric proposals, Fragment is
+  skills/learning-distill/SKILL.md and the Anchor line is omitted —
+  bullet-cap and anchor conventions apply to fragments only)
 - Anchor: <!-- rule:$PATTERN src:<short provenance refs> adopted:<YYYY-MM-DD> -->
-  (added with the bullet; for RETIRE/SUPERSEDE, the anchor line to remove)
+  (added with the bullet; for RETIRE/SUPERSEDE/HARDEN, the anchor line to
+  remove — a harden removes the bullet AND its anchor; provenance thereafter
+  lives on the pattern bead and the PR)
 
 ## Evidence
 - Pattern bead: $PATTERN (evidence_count=<n>, distinct_sources=<k>, first_seen=<date>, last_seen=<date>)
@@ -455,8 +493,10 @@ lifecycle — no bespoke worker formula.
 
 ## 2. Stamp every consumed observation (zero-proposal runs included)
 
-Every observation judged into a pattern this run — promoted, held, NOOPed, or
-discarded — is consumed: stamp it so it never re-counts toward the D7 gate.
+Every observation judged into a pattern this run — promoted, held, NOOPed,
+contested, or discarded — is consumed: stamp it so it never re-counts toward
+the D7 gate. Contested observations behind a contention visit must be stamped
+too, or they re-trigger the cadence gate forever.
 Its evidence now lives on the pattern bead's rollups. This runs even when no
 proposal survived (a judged-but-held run must still shrink the pending set).
 

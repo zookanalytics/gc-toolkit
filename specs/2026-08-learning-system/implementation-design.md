@@ -48,7 +48,7 @@ A standard `task` bead, **closed at creation** (an ephemeral record unit —
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess at D6's key distinction; the distiller re-judges |
 | `obs.endorsed` | `operator` when filed via "learn this" |
-| `obs.provenance` | the dedup key: `pr:<repo>#<n>:comment:<id>` or `bead:<id>:turn:<date>` |
+| `obs.provenance` | the dedup key: `pr:<owner/repo>#<n>:comment:<id>` or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
 
 **Dedup is on `obs.provenance`, always** — the same event captured by
@@ -139,7 +139,7 @@ heartbeat; this gate is the cadence.
 whose PR closed unmerged (the `gh pr view --json state` loop from the
 memory-audit dedup block, checking for `CLOSED` instead of `OPEN`): each is a
 vetoed promotion → file one observation, `obs.category=learning-rubric`,
-provenance `pr:<repo>#<n>:veto`, body quoting any close comment. The rubric's
+provenance `pr:<owner/repo>#<n>:veto`, body quoting any close comment. The rubric's
 misses feed the loop it powers (D6).
 
 Close step bead, no drain (same session continues).
@@ -343,8 +343,8 @@ Starter detectors, one per motivating example that lints cleanly:
   on an adjacent (±3 lines) constant definition.
 
 Each lands via a `prompt-update: harden` PR that deletes the corresponding
-prose bullet in the same diff (`superseded_by` in the anchor) — proof the
-system removes as it adds. (The third example, boilerplate-in-wrong-file,
+prose bullet AND its anchor in the same diff — provenance thereafter lives on
+the pattern bead and the harden PR — proof the system removes as it adds. (The third example, boilerplate-in-wrong-file,
 needs a fingerprint corpus; deferred until the pattern bead for it has real
 instances to fingerprint.)
 

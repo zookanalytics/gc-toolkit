@@ -55,8 +55,14 @@ stale=()
 
 # Mirrors the distiller's fragment_bullet_cap default
 # (specs/2026-08-learning-system/implementation-design.md §3 vars, §5 cap
-# comment). Hardcoded on purpose: the two values move together — change one,
-# change the other.
+# comment). Hardcoded on purpose, and the value lives in FIVE places that
+# move together — change one, change them all:
+#   - formulas/mol-feedback-distiller.toml [vars.fragment_bullet_cap] default
+#   - this hardcode
+#   - doctor/check-learned-rule-anchors/doctor.toml description ("15-bullet cap")
+#   - docs/feedback-learning.md ("at most 15 bullets")
+#   - the seed fragment's managed-by comment
+#     (template-fragments/learned-conventions-polecat.template.md, "cap: 15")
 bullet_cap=15
 
 # The anchor contract from implementation-design.md §5:
@@ -118,15 +124,17 @@ for frag in "${fragments[@]}"; do
             continue
         fi
         if [[ $line == "<!-- rule:"* && $line != "<!-- rule:<"* ]]; then
-            # Intends to be an anchor, is not well-formed. Reported once here;
-            # `rule:<` is exempt: the seeded fragment documents the anchor
-            # format with a placeholder exemplar (<!-- rule:<pattern-bead>
-            # src:<refs> adopted:<date> -->, per implementation-design.md §5)
-            # and a real rule id is [a-z0-9-]+, so the angle bracket is
-            # unambiguous. The exemplar is plain documentation — a bullet
-            # placed under it is still faulted as unanchored below.
-            # a bullet right after it is NOT additionally faulted as
-            # unanchored, so one defect reads as one finding.
+            # Intends to be an anchor, is not well-formed. Two cases, kept
+            # distinct. Exemplar case: `rule:<` is exempt from this branch —
+            # the seeded fragment documents the anchor format with a
+            # placeholder exemplar (<!-- rule:<pattern-bead> src:<refs>
+            # adopted:<date> -->, per implementation-design.md §5), a real
+            # rule id is [a-z0-9-]+ so the angle bracket is unambiguous, and
+            # the exemplar is plain documentation — a bullet placed under it
+            # is still faulted as unanchored below. Malformed-anchor case:
+            # the defect is reported once here, and a bullet right after it
+            # is NOT additionally faulted as unanchored, so one defect reads
+            # as one finding.
             errors+=("$rel:$lineno: malformed anchor comment (expected <!-- rule:<id> src:<refs> adopted:YYYY-MM-DD -->)")
             if [ -n "$pending_anchor" ]; then
                 errors+=("$rel:$pending_anchor: anchor comment with no bullet following it")

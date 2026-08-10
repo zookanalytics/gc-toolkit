@@ -39,6 +39,11 @@ feedback *says*, not how loud it is.
   that item this run, and if it stays diff-scoped, say why in the run
   log. Volume of frustration is not universal intent — only the words
   are.
+- **Not feedback at all? Discard.** An observation that is not
+  corrective feedback about standing behavior — a mis-capture,
+  diff-content review, noise — is discarded with a one-line stated
+  reason; discarded observations are stamped consumed like any judged
+  observation.
 
 ### 2. Has the pattern earned generalization?
 

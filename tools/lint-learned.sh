@@ -47,9 +47,15 @@ if [ "$#" -gt 0 ]; then
     done
 else
     base="${LINT_BASE:-origin/main}"
+    if ! diff_out="$(git diff --name-only "${base}...HEAD" 2>/dev/null)"; then
+        # Exit 2, distinct from findings-exit-1: an unresolvable base must
+        # never read as a green (or merely-findings) gate.
+        echo "lint-learned: cannot resolve base '${base}' — fetch it or set LINT_BASE" >&2
+        exit 2
+    fi
     while IFS= read -r f; do
         [ -n "$f" ] && [ -f "$f" ] && files+=("$f")
-    done < <(git diff --name-only "${base}...HEAD" 2>/dev/null)
+    done <<< "$diff_out"
 fi
 
 if [ "${#files[@]}" -eq 0 ]; then

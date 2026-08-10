@@ -27,11 +27,6 @@ formula = "mol-feedback-miner"
 formula_compiler = ">=2.0.0"
 
 [vars]
-[vars.binding_prefix]
-description = "Import binding prefix for gastown agent identities, with the trailing dot (e.g. 'gc-toolkit.'). Non-empty default — like the doc-keeper audits, this miner is poured by a gc order, and the order-dispatch path does NOT inject routing vars, so this default is the value used at runtime. Note the observation beads this formula files are closed at creation and never routed, so the prefix names no dispatch target inside this formula; it is kept for shape parity with the sibling order-poured formulas ('gc-toolkit.' matches every importer's default_sling_target)."
-required = false
-default = "gc-toolkit."
-
 [vars.miner_window_days]
 description = "Sweep window in days: PRs merged or closed within the last N days are read. Windows overlap across runs by design — dedup on obs.provenance makes re-reading a comment idempotent, and the overlap is what makes a capped or interrupted run naturally resumable."
 required = false
@@ -105,13 +100,20 @@ sweep is one-shot.
 
 ```bash
 cd "$REPO"
-SINCE="$(date -u -d "{{miner_window_days}} days ago" +%Y-%m-%d)"   # GNU date (the city's runners)
+# GNU/BSD-portable window start (same pair as the precedented scripts).
+SINCE_EPOCH=$(( $(date -u +%s) - {{miner_window_days}} * 86400 ))
+SINCE=$(date -u -d "@$SINCE_EPOCH" +%Y-%m-%d 2>/dev/null || date -u -r "$SINCE_EPOCH" +%Y-%m-%d)
 
 # GitHub counts merged PRs as closed, so the two lists overlap; union on
 # number. --limit keeps a busy window from being silently truncated at gh's
 # default of 30.
+# merged:>=/closed:>= deliberately misses comments added to PRs that merged
+# before the window; the updated:>= alternative would re-sweep old PRs — the
+# trade is accepted.
 MERGED=$(gh pr list --state merged --search "merged:>=$SINCE" --limit 200 --json number -q '.[].number')
 CLOSED=$(gh pr list --state closed --search "closed:>=$SINCE" --limit 200 --json number -q '.[].number')
+[ "$(echo "$MERGED" | sed '/^$/d' | wc -l)" -eq 200 ] && echo "WARN: merged listing hit the 200 cap — window may be truncated" >&2
+[ "$(echo "$CLOSED" | sed '/^$/d' | wc -l)" -eq 200 ] && echo "WARN: closed listing hit the 200 cap — window may be truncated" >&2
 PRS=$( { echo "$MERGED"; echo "$CLOSED"; } | sed '/^$/d' | sort -un )
 
 if [ -z "$PRS" ]; then
@@ -183,8 +185,10 @@ occurrence.
 ```bash
 # The dedup surface. Observations are closed at creation, so closed is the
 # norm; the open statuses are included as belt-and-suspenders against a
-# malformed capture.
-SEEN=$(gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json 2>/dev/null | jq -r '.[] | select(.metadata.task_kind == "observation") | .metadata["obs.provenance"] // empty')
+# malformed capture. --limit=0 is deliberate: an unbounded all-time closed
+# listing — dedup correctness beats page-size truncation; the surface grows
+# with observation history.
+SEEN=$(gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json --limit=0 2>/dev/null | jq -r '.[] | select(.metadata.task_kind == "observation") | .metadata["obs.provenance"] // empty')
 
 # Per candidate:
 KEY="pr:$REPO_SLUG#$N:comment:$CID"
@@ -216,8 +220,10 @@ $NORM
 # helps the distiller read the quote.
 
 BEAD=$(gc bd create "obs: $STATEMENT_ONE_LINE (pr:$REPO_SLUG#$N)" -t task -l learning -l observation -d "$BODY" --json | jq -r '.id // .[0].id')
-[ -z "$BEAD" ] || [ "$BEAD" = "null" ] && { echo "WARN: could not create observation for $KEY; skipping" >&2; continue; }
+[ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { echo "WARN: could not create observation for $KEY; skipping" >&2; continue; }
 
+# Non-atomic create→update: a crash between the two leaves an observation
+# without its provenance stamp, invisible to dedup. Accepted — low probability.
 gc bd update "$BEAD" --set-metadata task_kind=observation --set-metadata obs.category="$CATEGORY" --set-metadata obs.scope="$SCOPE" --set-metadata obs.source=miner --set-metadata obs.directive="$DIRECTIVE" --set-metadata obs.provenance="$KEY" --set-metadata gc.outcome=recorded --status=closed
 echo "filed observation $BEAD ($KEY)"
 ```

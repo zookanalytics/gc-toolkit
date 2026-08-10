@@ -46,7 +46,7 @@ routed, never assigned, and never blocks anything.
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess; the distiller re-judges |
 | `obs.endorsed` | `operator` when filed via "learn this" |
-| `obs.provenance` | the dedup key: `pr:<repo>#<n>:comment:<id>` or `bead:<id>:turn:<date>` |
+| `obs.provenance` | the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
 
 **Dedup is on `obs.provenance`, always.** The same event captured by
@@ -55,7 +55,7 @@ before filing, and the distiller checks again before counting.
 
 ## Capture channels
 
-Three channels file the same bead contract:
+Four producers file the same bead contract:
 
 1. **Self-report.** Working agents (polecat, mayor, mechanik, converse,
    and their thread variants) carry the `file-feedback-observations`
@@ -63,14 +63,18 @@ Three channels file the same bead contract:
    behavior, the agent fixes the instance first, then files one
    observation bead with `obs.source=self`.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
-   rig's merged-PR review threads and files what self-report missed,
-   with `obs.source=miner`. It files observations only — never patterns,
-   never proposals.
+   rig's merged/closed PRs' review and conversation comments and files
+   what self-report missed, with `obs.source=miner`. It files
+   observations only — never patterns, never proposals.
 3. **Operator fast path.** "learn this: …" in any conversational session
    files the same bead with the operator's wording as `## Statement`,
    `obs.source=operator`, and `obs.endorsed=operator`. Endorsed
    observations never wait on volume: they trigger the distiller's next
    run and promote at any occurrence count.
+4. **Distiller veto sweep.** The distiller records each promotion PR
+   closed unmerged as one observation (`obs.category=learning-rubric`,
+   provenance `pr:<owner/repo>#<n>:veto`) — the rubric's own misses feed
+   the loop it powers.
 
 ## The promotion path
 
@@ -109,6 +113,8 @@ still binding, subsumed, over cap, or mechanically detectable?
 Retirements ride the same prompt-update → PR → operator-review path as
 promotions. The best outcome a rule can have is hardening: when its
 violation lints cleanly, the lint or doctor check lands in the same PR
-that deletes the prose bullet. Evidence against an adopted rule never
+that deletes the prose bullet AND its anchor — provenance thereafter
+lives on the pattern bead and the harden PR. Evidence against an
+adopted rule never
 silently retires it — contradiction files a visit for the operator, who
 picks scope-narrowing, retirement, or dismissal.

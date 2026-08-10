@@ -26,10 +26,14 @@ gc bd update "$OBS" \
   --set-metadata "obs.scope=<repo:<rig> or agent:<role> or global — guess narrow>" \
   --set-metadata obs.source=self \
   --set-metadata "obs.directive=<standing or diff>" \
-  --set-metadata "obs.provenance=<pr:<repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
+  --set-metadata "obs.provenance=<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
   --set-metadata gc.outcome=recorded \
   --status=closed
 ```
+
+The provenance key's `<owner/repo>` is the full slug — derive it with
+`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the
+origin URL.
 
 Filing is recording, not proposing: never edit a prompt, fragment, or
 skill in response to feedback — the distiller and a reviewed PR do
