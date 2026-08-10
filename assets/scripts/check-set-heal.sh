@@ -789,6 +789,20 @@ certify_pr_identity() {
 #   - PRE-OPEN. A pre_open_gate anchor has a branch and no PR, which is
 #     indistinguishable from ordinary in-flight work — there is no damage-surviving
 #     evidence to key on, so it is out of scope by design rather than guessed at.
+#   - AN OPERATOR HOLD (tk-44xkw). A bead carrying merge_hold or rebase_hold was
+#     taken out of the automated queue BY HAND, and a bead held precisely by being
+#     invisible to the anchor set matches every exclusion above. Recovering it
+#     stamps merge_result on a held bead, phase 1 arms `codex` and dispatches a
+#     review polecat onto a PR that cannot land, and the burn repeats every idle
+#     wake. This pass was the LAST member of the hold-marker family reading neither
+#     field; merge-skill.sh, reconcile-merged-prs.sh and reconcile-graduated-
+#     convoys.sh (tk-hu6pm) all honor them, so a hold now means one thing across
+#     the whole family. Phase 0a applies the same rule, because reopening is what
+#     makes a closed bead a candidate here.
+#     Unlike the exclusions above, the hold is carried on the row and applied as a
+#     SKIP inside the loop rather than filtered out of the candidate set: the
+#     ambiguity guard is a WHOLE-SET property, so dropping a held candidate would
+#     make its unheld twin for the same PR look unambiguous and PROMOTE it.
 #
 # A FAILED STAMP IS NOT UNSAFE_RC; A SUCCESSFUL ONE CAN BE. The two directions are
 # not symmetric. A merge_result stamp that does NOT persist leaves the anchor
@@ -900,6 +914,10 @@ PASS_ORIGIN_REPO_Q=$(resolve_origin_repo_q)
 #     Closed review children are the COMMON closed shape that references a PR (all 14
 #     survivors on this rig were `task_kind=review`), so this exclusion is what keeps
 #     the arm from reopening spent review beads on every live PR.
+#   - AN OPERATOR HOLD (merge_hold / rebase_hold), on the same terms phase 0 applies
+#     one (tk-44xkw). Reopening is what makes a closed bead a phase-0 candidate, so a
+#     hold that vetoes the recovery has to veto the reopen that feeds it. Carried on
+#     the row and skipped in the loop, not filtered, for the same whole-set reason.
 #   - AMBIGUITY. Two closed candidates naming the same PR: neither is reopened.
 #   - AN UNCERTIFIED PR. The same `certify_pr_identity` phase 0 uses — repository, URL,
 #     head branch and head repository — because reopening binds this bead to that PR.
@@ -1000,6 +1018,15 @@ if [ "$CLOSED_ARM_OK" = 1 ] && [ -n "$OPEN_PR_NUMS" ]; then
     # intersection needs it before any per-bead work is done.
     CLOSED_CANDS=$(printf '%s\n' "$CLOSED_RAW" | jq -s -c --arg open "$OPEN_PR_NUMS" \
       --arg originq "$PASS_ORIGIN_REPO_Q" '
+      # An operator hold, read the way merge-skill.sh reads it: set and not one of the
+      # explicit off spellings. `tostring` BEFORE `ascii_downcase`, because a marker is
+      # not always a string — a writer storing JSON (`merge_hold: true`) yields a
+      # boolean, and ascii_downcase on a boolean ABORTS the jq program, whose error the
+      # projection deliberately discards; the veto would evaporate along with the whole
+      # candidate set. jq `//` already folds boolean false (and null) to "", the off
+      # answer, so only the truthy side needs the cast.
+      def held($v): ($v // "") | tostring | ascii_downcase
+                    | (. != "" and . != "false" and . != "0" and . != "null");
       ($open | split("\n") | map(select(. != ""))) as $openprs
       | ((add // []) | unique_by(.id))[]
       | . as $b | (($b.metadata // {})) as $m
@@ -1040,7 +1067,18 @@ if [ "$CLOSED_ARM_OK" = 1 ] && [ -n "$OPEN_PR_NUMS" ]; then
           branch:   (($m.branch // "") | tostring),
           num:      $n,
           repo:     $repo,
-          already:  (($m.reopened_not_landed // "") | tostring)
+          already:  (($m.reopened_not_landed // "") | tostring),
+          # AN OPERATOR HOLD, carried on the same terms and skipped in the same place
+          # as the phase-0 one (tk-44xkw / tk-rlm94) — see the note there. This arm
+          # needs it because REOPENING is the act that turns a closed bead into a
+          # phase-0 candidate: honouring the hold only there would let a held bead in
+          # through the back door, still mutated by automation and now visible-held
+          # rather than gone. And it is carried rather than filtered for the reason
+          # this very projection states above about dropped rows: the ambiguity guard
+          # is a whole-set property.
+          hold: ([ (if held($m.merge_hold) then "merge_hold=" + ($m.merge_hold | tostring) else empty end),
+                   (if held($m.rebase_hold) then "rebase_hold=" + ($m.rebase_hold | tostring) else empty end) ]
+                 | join(", "))
         }' 2>/dev/null) || {
       echo "check-set-heal: WARN the closed-candidate projection failed; the candidate set is unreliable — skipping the closed-but-not-landed arm this pass, retrying next" >&2
       CLOSED_CANDS=""
@@ -1087,6 +1125,16 @@ if [ -n "$CLOSED_CANDS" ]; then
 
     if [ -n "$CLOSED_DUP" ] && printf '%s\n' "$CLOSED_DUP" | grep -qxF "$xid"; then
       echo "check-set-heal: WARN PR#$xnum in '$xrepo' has MULTIPLE closed-but-not-landed candidates (including $xid); cannot identify the anchor — skipping all, operator must disambiguate" >&2
+      reopen_skipped=$((reopen_skipped + 1)); continue
+    fi
+
+    # AN OPERATOR HOLD, in the same place and on the same terms as phase 0's skip
+    # (tk-44xkw). Reopening a held bead is the same act one level earlier: it is what
+    # makes it a recovery candidate, so a hold that stops the recovery has to stop the
+    # reopen that feeds it — otherwise the exclusion is a door that only looks shut.
+    xhold=$(printf '%s' "$crow" | jq -r '.hold // empty')
+    if [ -n "$xhold" ]; then
+      echo "check-set-heal: $xid is under an operator hold ($xhold); NOT reopening — a held bead is out of the automated queue by hand (tk-44xkw)"
       reopen_skipped=$((reopen_skipped + 1)); continue
     fi
 
@@ -1325,6 +1373,15 @@ if [ "$RECOVER_SCAN_OK" = 1 ] && [ -n "$RECOVER_RAW" ]; then
   # exclusion below is applied to the METADATA, not the title, so a bead cannot
   # dress its way in or out of the anchor class.
   CANDS=$(printf '%s\n' "$RECOVER_RAW" | jq -s -c '
+    # An operator hold, read the way merge-skill.sh reads it: set and not one of the
+    # explicit off spellings. `tostring` BEFORE `ascii_downcase`, because a marker is
+    # not always a string — a writer storing JSON (`merge_hold: true`) yields a
+    # boolean, and ascii_downcase on a boolean ABORTS the jq program, whose error the
+    # projection deliberately discards; the veto would evaporate along with the whole
+    # candidate set. jq `//` already folds boolean false (and null) to "", the off
+    # answer, so only the truthy side needs the cast.
+    def held($v): ($v // "") | tostring | ascii_downcase
+                  | (. != "" and . != "false" and . != "0" and . != "null");
     ((add // []) | unique_by(.id))[]
     | . as $b | (($b.metadata // {})) as $m
     | select((($m.merge_result // "") | tostring | ascii_downcase | gsub("[[:space:]]"; "")) == "")
@@ -1351,7 +1408,22 @@ if [ "$RECOVER_SCAN_OK" = 1 ] && [ -n "$RECOVER_RAW" ]; then
         branch:   (($m.branch // "") | tostring),
         mtarget:  $mt,
         target:   (if $mt != "" then $mt else $tg end),
-        flagged:  (($m.merge_result_heal_flagged // "") | tostring)
+        flagged:  (($m.merge_result_heal_flagged // "") | tostring),
+        # AN OPERATOR HOLD (tk-44xkw, folded into tk-rlm94), CARRIED not filtered.
+        # merge_hold is "do not land this yet"; rebase_hold is the narrower "do not
+        # rebase/force-push this branch". Either means an operator took the bead out
+        # of the automated queue by hand, and phase 0 must not put it back — but the
+        # hold is applied as a SKIP inside the loop, never as an exclusion here.
+        #
+        # Dropping the row would silently weaken the ambiguity guard, which is a
+        # WHOLE-SET property: two merge_result-less candidates for one PR are refused
+        # only while BOTH are in the set, so removing the held one makes its unheld
+        # twin look unambiguous and PROMOTES it — the exact hazard the closed-arm
+        # projection below already spells out about dropped rows. A held bead still
+        # collides with its rivals; it simply never gets acted on.
+        hold: ([ (if held($m.merge_hold) then "merge_hold=" + ($m.merge_hold | tostring) else empty end),
+                 (if held($m.rebase_hold) then "rebase_hold=" + ($m.rebase_hold | tostring) else empty end) ]
+               | join(", "))
       }' 2>/dev/null) || {
     # Same rule as an unreadable scan: a projection that ERRORED yields the same
     # empty string as "no candidates survived the exclusions", and acting on it
@@ -1527,6 +1599,26 @@ if [ -n "$CAND_NORM" ]; then
 
     if [ -n "$DUP_CAND" ] && printf '%s\n' "$DUP_CAND" | grep -qxF "$cid"; then
       echo "check-set-heal: WARN PR#$cnum in '$crepo' has MULTIPLE merge_result-less candidates (including $cid); cannot identify the anchor — skipping all, operator must disambiguate" >&2
+      recover_skipped=$((recover_skipped + 1)); continue
+    fi
+
+    # AN OPERATOR HOLD (tk-44xkw). A bead carrying merge_hold/rebase_hold was taken
+    # out of the automated queue BY HAND, and a bead held precisely by being invisible
+    # to the anchor set matches every other condition of this phase — gascity's
+    # gc-1g2p1 (merge_hold=operator-gated-graduation, pr_number=60, branch set, no
+    # child markers, no route) survives the whole filter. Recovering it stamps
+    # merge_result on a held bead, phase 1 then arms `codex` and dispatches a signoff
+    # onto a PR that is CONFLICTING and cannot land, and the burn repeats every idle
+    # wake because that gate can never be satisfied. merge-skill.sh does read the
+    # marker, so the damage stops short of a merge — but the bead is converted from
+    # INVISIBLE to VISIBLE-HELD, which silently changes what the operator's hold means.
+    #
+    # AFTER the ambiguity guard, BEFORE every gh and ledger call. After, because the
+    # held bead must still collide with a rival candidate (see the row's `hold` field);
+    # before, because nothing should be spent certifying a PR we will not touch.
+    chold=$(printf '%s' "$crow" | jq -r '.hold // empty')
+    if [ -n "$chold" ]; then
+      echo "check-set-heal: $cid is under an operator hold ($chold); NOT restoring merge_result — a held bead is out of the automated queue by hand (tk-44xkw)"
       recover_skipped=$((recover_skipped + 1)); continue
     fi
 

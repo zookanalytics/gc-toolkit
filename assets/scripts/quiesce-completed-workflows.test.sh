@@ -28,6 +28,17 @@
 #            not yet stamped, assignee=<rig>/<prefix>refinery — also counts as
 #            done (tk-yxlqb); the polecat is past its work whether or not the
 #            refinery has stamped merge_result yet
+#   (HELD)   anchor PARKED FOR A HUMAN — status=blocked, merge_result never
+#            stamped (the refinery held it before dispatching a review), assignee
+#            CLEARED by the park, gc.routed_to=human — counts as done (tk-rlm94).
+#            The longest-lived husk shape: it lasts the whole human-decision wait,
+#            not a window of minutes
+#   (BARE)   bare `blocked` with NO routed_to is NOT terminal — the escalation
+#            path sets blocked before it drains, so a live session is reachable in
+#            that state and quiescing it would drain a polecat mid-implementation
+#   (ROUTEONLY) routed_to=human on an anchor that is still `open` is NOT terminal
+#            either — the predicate is a CONJUNCTION, and each half alone is a
+#            shape a live molecule can wear
 #   (LIVE)   anchor NOT terminal -> molecule untouched (a running polecat still
 #            needs its assignee to claim the next step), INCLUDING an anchor that
 #            is assigned — to a polecat, not a refinery: the handoff predicate
@@ -84,6 +95,12 @@ mkdir -p "$TMP/bin"
 # root-NOREF : terminal anchor, but its bead carries NO gc.step_ref — not a
 #              graph.v2 step, so it is never a candidate. Its anchor is DONE on
 #              purpose: the membership test is the only thing holding it back.
+# root-HELD  : anchor PARKED FOR A HUMAN (blocked + gc.routed_to=human, assignee
+#              cleared, merge_result never stamped) -> done (tk-rlm94).
+# root-BARE  : anchor `blocked` with NO route -> still live; the escalation path
+#              passes through this state while a session is still alive.
+# root-ROUTEONLY: anchor routed_to=human but still `open` -> still live; the park
+#              predicate is a conjunction and neither half alone is terminal.
 cat > "$TMP/steps" <<'S'
 s-pool|mol-polecat-work.workspace-setup|root-DONE|gc-toolkit/gc-toolkit.polecat||open
 s-affine|mol-polecat-work.load-context|root-DONE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-dead|in_progress
@@ -97,6 +114,9 @@ s-scoped|mol-scoped-work.load-context|root-SCOPED|gc-toolkit/gc-toolkit.polecat|
 s-scopedfin|mol-scoped-work.workflow-finalize|root-SCOPED|gc-toolkit/core.control-dispatcher||open
 s-noref||root-NOREF|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-noref|open
 s-noroot|mol-scoped-work.implement||gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-noroot|open
+s-held|mol-polecat-work.load-context|root-HELD|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-parked|in_progress
+s-bare|mol-polecat-work.load-context|root-BARE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-esc|in_progress
+s-routeonly|mol-polecat-work.load-context|root-ROUTEONLY|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-open|in_progress
 S
 
 # Roots: root_id|convoy_id   (root-ORPHAN deliberately absent -> no convoy)
@@ -108,6 +128,9 @@ root-HANDOFF|convoy-HANDOFF
 root-QUIET|convoy-QUIET
 root-SCOPED|convoy-SCOPED
 root-NOREF|convoy-NOREF
+root-HELD|convoy-HELD
+root-BARE|convoy-BARE
+root-ROUTEONLY|convoy-ROUTEONLY
 R
 
 # Convoys: convoy_id|anchor_id
@@ -119,21 +142,32 @@ convoy-HANDOFF|anchor-HANDOFF
 convoy-QUIET|anchor-QUIET
 convoy-SCOPED|anchor-SCOPED
 convoy-NOREF|anchor-NOREF
+convoy-HELD|anchor-HELD
+convoy-BARE|anchor-BARE
+convoy-ROUTEONLY|anchor-ROUTEONLY
 C
 
-# Anchors: anchor_id|status|merge_result|assignee
+# Anchors: anchor_id|status|merge_result|assignee|routed_to
 #
 # anchor-LIVE and anchor-HANDOFF are the same shape except for WHO holds them
 # (status=open, merge_result unstamped) — that is the whole discrimination the
 # handoff predicate has to make, so the fixture pins both sides of it.
+#
+# anchor-HELD, anchor-BARE and anchor-ROUTEONLY do the same job for the park
+# predicate (tk-rlm94): all three are unstamped and unassigned, and they differ
+# only in the two fields the conjunction reads. HELD has both (blocked + human) and
+# is terminal; each of the others has exactly one and must NOT be.
 cat > "$TMP/anchors" <<'A'
-anchor-DONE|open|pull_request|
-anchor-LIVE|open||gc-toolkit__polecat-lx-busy
-anchor-CLOSED|closed||
-anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery
-anchor-QUIET|open|pre_open_gate|
-anchor-SCOPED|open|pre_open_gate|
-anchor-NOREF|open|pull_request|
+anchor-DONE|open|pull_request||
+anchor-LIVE|open||gc-toolkit__polecat-lx-busy|
+anchor-CLOSED|closed|||
+anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery|
+anchor-QUIET|open|pre_open_gate||
+anchor-SCOPED|open|pre_open_gate||
+anchor-NOREF|open|pull_request||
+anchor-HELD|blocked|||human
+anchor-BARE|blocked|||
+anchor-ROUTEONLY|open|||human
 A
 
 : > "$TMP/updates"     # one line per update: "<binary> <argv>"
@@ -179,9 +213,9 @@ case "$1 ${2:-}" in
     arow=$(awk -F'|' -v a="$id" '$1==a{print; exit}' "$FAKE_ANCHORS")
     if [ -n "$arow" ]; then
       st=$(printf '%s' "$arow" | cut -d'|' -f2); mr=$(printf '%s' "$arow" | cut -d'|' -f3)
-      as=$(printf '%s' "$arow" | cut -d'|' -f4)
-      jq -n --arg s "$st" --arg m "$mr" --arg a "$as" \
-        '[{status:$s, assignee:$a, metadata:{merge_result:$m}}]'
+      as=$(printf '%s' "$arow" | cut -d'|' -f4); rt=$(printf '%s' "$arow" | cut -d'|' -f5)
+      jq -n --arg s "$st" --arg m "$mr" --arg a "$as" --arg r "$rt" \
+        '[{status:$s, assignee:$a, metadata:{merge_result:$m, "gc.routed_to":$r}}]'
     elif [ -n "$convoy" ]; then
       jq -n --arg c "$convoy" '[{metadata:{"gc.input_convoy_id":$c}}]'
     else printf '[{"metadata":{}}]\n'; fi ;;
@@ -358,6 +392,41 @@ printf '%s\n' "$OUT1" | grep -q 'anchor anchor-HANDOFF DONE' \
   && ok "(HANDOFF) summary reports the handoff anchor as DONE" \
   || bad "(HANDOFF) summary reports the handoff anchor DONE"
 
+# (HELD) the human-decision park (tk-rlm94): the refinery held the bead BEFORE
+# dispatching a review, so merge_result was never stamped; parking to a human
+# cleared the assignee. status/merge_result/assignee therefore all miss, and the
+# husk kept minting a fresh full-context polecat per session restart for the whole
+# human-decision wait — five re-offers of tk-vgxlu in ~40 minutes, observed live.
+grep -q '^s-held	routed$' "$TMP/cleared" && grep -q '^s-held	assignee$' "$TMP/cleared" \
+  && ok "(HELD) anchor parked for a human (blocked + routed_to=human) -> steps quiesced" \
+  || bad "(HELD) parked anchor must count as done (got: $(grep '^s-held' "$TMP/cleared" || echo none))"
+printf '%s\n' "$OUT1" | grep -q 'anchor anchor-HELD DONE' \
+  && ok "(HELD) summary reports the parked anchor as DONE" \
+  || bad "(HELD) summary reports the parked anchor DONE"
+printf '%s\n' "$OUT1" | grep -q 'anchor-HELD DONE.*routed_to=human' \
+  && ok "(HELD) the verdict line records the route it was decided on" \
+  || bad "(HELD) verdict line records routed_to"
+
+# (BARE) bare `blocked` is NOT terminal. The escalation path sets blocked before it
+# drains, so a LIVE session is reachable in that state; relaxing the predicate to
+# bare `blocked` would strip the assignee off steps that polecat still has to claim
+# and drain it mid-implementation.
+grep -q '^s-bare' "$TMP/cleared" \
+  && bad "(BARE) bare blocked must NOT be treated as terminal — a live escalating session passes through it" \
+  || ok "(BARE) blocked with no route -> steps untouched (the conjunction is what keeps this fail-closed)"
+printf '%s\n' "$OUT1" | grep -q 'anchor anchor-BARE still live' \
+  && ok "(BARE) summary reports the bare-blocked anchor as still live" \
+  || bad "(BARE) bare-blocked anchor reported still live"
+
+# (ROUTEONLY) the other half alone is not terminal either: routed_to=human on an
+# `open` anchor is a bead handed to a human while its work may still be live.
+grep -q '^s-routeonly' "$TMP/cleared" \
+  && bad "(ROUTEONLY) routed_to=human alone must NOT be treated as terminal" \
+  || ok "(ROUTEONLY) open + routed_to=human -> steps untouched (both halves are required)"
+printf '%s\n' "$OUT1" | grep -q 'anchor anchor-ROUTEONLY still live' \
+  && ok "(ROUTEONLY) summary reports the route-only anchor as still live" \
+  || bad "(ROUTEONLY) route-only anchor reported still live"
+
 # (FINAL) the finalize step keeps its control-dispatcher route.
 grep -q '^s-final' "$TMP/cleared" \
   && bad "(FINAL) must NOT de-route workflow-finalize — it is the escape path" \
@@ -429,7 +498,7 @@ grep -q '^s-quiet' "$TMP/cleared" \
   && bad "(QUIET) already-quiet step must not be re-updated" \
   || ok "(QUIET) already-quiet step skipped (idempotent)"
 
-printf '%s\n' "$OUT1" | grep -q '5 steps quiesced across 5 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 0 failed' \
+printf '%s\n' "$OUT1" | grep -q '6 steps quiesced across 6 completed workflow(s); 3 still live, 1 already quiet, 1 unresolved, 0 failed' \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 
@@ -468,7 +537,7 @@ printf '%s\n' "$ERR3" | grep -q 's-affine route clear failed' \
 
 # A partial clear is a failure, never a success: the step still rides the affine
 # hand-back, so counting it quiesced would be the same lie in a new place.
-printf '%s\n' "$OUT3" | grep -q '4 steps quiesced across 5 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 1 failed' \
+printf '%s\n' "$OUT3" | grep -q '5 steps quiesced across 6 completed workflow(s); 3 still live, 1 already quiet, 1 unresolved, 1 failed' \
   && ok "(EXIT) a partially-cleared step counts as failed, not quiesced" \
   || bad "(EXIT) run 3 summary (got: $(printf '%s' "$OUT3" | tail -1))"
 [ "$RC3" -ne 0 ] \
@@ -519,7 +588,7 @@ grep -q '^bd update s-pool' "$TMP/updates" \
   && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
   || ok "(ROUTEFAIL) route-only step issues no assignee call"
 
-printf '%s\n' "$OUT4" | grep -q '3 steps quiesced across 5 completed workflow(s); 1 still live, 1 already quiet, 1 unresolved, 2 failed' \
+printf '%s\n' "$OUT4" | grep -q '4 steps quiesced across 6 completed workflow(s); 3 still live, 1 already quiet, 1 unresolved, 2 failed' \
   && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
   || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
 [ "$RC4" -ne 0 ] \

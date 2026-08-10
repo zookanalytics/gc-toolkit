@@ -940,7 +940,7 @@ flipped only once they are durable. A dependent that will not stick leaves the b
 invisible and retried on the next pass — the stall we already had, rather than a
 new and permanent exposure.
 
-Four rules keep it from inventing anchors:
+Five rules keep it from inventing anchors:
 
 - **Never enroll a child.** The merge skill's in-flight-rework hold counts exactly
   "open, references the PR, no `merge_result`" — the absence *is* the hold. Stamping
@@ -1109,6 +1109,29 @@ Four rules keep it from inventing anchors:
   own unmet marker no matter what this pass could not read, so it warns and retries —
   which is what keeps one anchor's silence from stalling the whole rig's queue.
 
+- **Never act on a bead an operator held.** `merge_hold` ("do not land this yet")
+  and `rebase_hold` ("do not rebase or force-push this branch") are the operator's
+  hand-taking of a bead out of the automated queue, and a bead held *precisely by*
+  being invisible to the anchor set matches every other condition of this phase
+  perfectly — gascity's `gc-1g2p1` (held since 2026-06 for PR#60, `branch` set, no
+  child markers, no route) survives the whole filter. Recovering it stamps
+  `merge_result` on a deliberately-held bead, the check-set normalization below then
+  arms `codex` and dispatches a signoff onto a PR that is `CONFLICTING` and cannot
+  land, and that burn repeats every idle wake because the gate can never be
+  satisfied. The damage is bounded — the merge skill reads the marker, so the
+  recovered anchor is held rather than merged — but it converts a bead the operator
+  made *invisible* into a *visible-held* one, which silently changes what the hold
+  means. The same rule governs the closed-bead arm below, because reopening is
+  what turns a closed bead into a candidate here. The marker is read the way the
+  merge skill reads it: set and not one of the explicit off spellings
+  (`""`/`false`/`0`/`null`), with a `tostring` before the comparison so a writer that
+  stores JSON (`merge_hold: true`) holds exactly like one that stores a string.
+  Unlike the other four, this rule is applied as a **skip**, not as a filter on the
+  candidate set: refusing ambiguity is a property of the *whole* set, so dropping a
+  held candidate would make an unheld twin naming the same PR look unambiguous and
+  promote it. The held bead still collides with its rivals; it is simply never
+  acted on, and nothing is spent certifying a PR the phase will not touch.
+
 Pre-open anchors are deliberately **out of scope**: a branch with no PR is
 indistinguishable from ordinary in-flight polecat work, so there is no
 damage-surviving evidence to key on and the phase does not guess.
@@ -1249,8 +1272,8 @@ indistinguishable from "nothing is open" while meaning the opposite.
 
 Beyond the exclusions the recovery phase already applies (children by
 `anchor_bead` / `task_kind` / `source_review_bead` / `source_anchor_bead` / a live
-`gc.routed_to`, a non-refinery assignee, ambiguity, and full PR certification), two
-guards are specific to reopening:
+`gc.routed_to`, a non-refinery assignee, an operator hold, ambiguity, and full PR
+certification), two guards are specific to reopening:
 
 - **One anchor per PR, asked of live beads only.** A live bead carrying a
   `merge_result` for this PR *is* the anchor, so the closed bead is a spent
