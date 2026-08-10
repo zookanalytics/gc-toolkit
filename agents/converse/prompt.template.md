@@ -94,3 +94,5 @@ Rules:
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
+
+{{ template "file-feedback-observations" . }}

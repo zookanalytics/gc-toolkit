@@ -154,6 +154,8 @@ that follow it, not in the brief.
 
 {{ template "operator-next-step-trailing" . }}
 
+{{ template "file-feedback-observations" . }}
+
 ## Directory Guidelines
 
 | Location | Use for |
