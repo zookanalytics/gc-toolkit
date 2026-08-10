@@ -150,6 +150,20 @@ does *for the store the bead is being written to*, qualify it (the
 `NormalizePoolRouteTarget` treatment). If it does not and the qualification is
 ambiguous or absent, refuse the write with an error naming the candidates.
 
+**Resolution is byte-for-byte, and so is the guard.** "Resolves to a live
+identity" means the stored bytes equal an identity, not that they equal one
+after tidying: the offer compares the value as stored. A route padded with
+surrounding whitespace — `" gc-toolkit/gc-toolkit.polecat "` — is therefore
+exactly as unclaimable as a misspelled one, and bd preserves those bytes
+verbatim, so nothing downstream ever repairs it. The guard must trim (or refuse)
+padding at the write site for the same reason it qualifies a bare name, and a
+route that is *only* whitespace must be refused rather than treated as the empty
+value that means "no route". This class is worse than the unqualified one in a
+specific way that argues for fixing it at the write site: an unqualified route
+is at least *visible* as wrong when someone reads it, whereas padding renders
+identically to a correct route in every listing, bead show, and dashboard an
+operator would consult.
+
 **One detail decides whether that patch is correct or catastrophic.** The test
 is *"does this resolve to a live identity"*, never *"does this look
 qualified"*. Bare route values that are perfectly live exist and are common:
@@ -167,9 +181,11 @@ below, which currently allows exactly `human`.
 
 **The test.** Stamp a bare rig-pool name onto a bead in a rig store and assert
 the write is qualified or refused; stamp a live city-scope bare identity and
-assert it is untouched; stamp `human` and assert it is untouched. Then the
-order-side case: fire an order whose registration carries a bare pool with no
-rig bound, and assert no bead is left carrying an unclaimable route.
+assert it is untouched; stamp `human` and assert it is untouched; stamp a
+whitespace-padded copy of a live identity and assert it is trimmed or refused,
+never stored as given. Then the order-side case: fire an order whose
+registration carries a bare pool with no rig bound, and assert no bead is left
+carrying an unclaimable route.
 
 Tracked as **`gc-xaqpf`** in the gascity rig (priority 1), together with the
 order-discovery guard from the companion spec.
@@ -177,10 +193,20 @@ order-discovery guard from the companion spec.
 ### Half 2 — the detector (this pack, shipped with this bead)
 
 `doctor/check-routed-work-claimable` errors for every open, unassigned bead
-whose `gc.routed_to` is non-empty, matches no live agent identity, and whose
-rig-qualified form does. It scans every store `gc rig list` reports, so it
-covers the two blind spots above at once: all rig stores, and the
+whose `gc.routed_to` is non-empty, matches no live agent identity *compared as
+stored*, and whose rig-qualified form does. It scans every store `gc rig list`
+reports, so it covers the two blind spots above at once: all rig stores, and the
 rig-unqualified form specifically.
+
+The comparison order is load-bearing, and the first cut of this check got it
+wrong (found in pre-open review, tk-yffik): it trimmed the route before testing
+it against the identity set, which normalized a padded, genuinely unclaimable
+route *into* a live identity and reported the store clean. That is the same
+fail-open the check exists to remove, so the check now compares the stored bytes
+first and normalizes only afterwards, purely to name the repair. A route that is
+a live identity or a sentinel only after stripping whitespace/control characters
+is an error quoting the exact stored bytes; so is one made entirely of
+whitespace, which is not the empty value that means "no route".
 
 It reports the exact repair when the bead's own rig qualifies the route into a
 live identity (the `tk-5cgyk` shape), and lists candidates when nothing does —
@@ -192,9 +218,15 @@ unreadable probe warns rather than passing, because "could not tell" and
 "nothing wrong" are different answers and collapsing them is the same fail-open
 that let this strand run.
 
-Against the live city on 2026-08-10 it reports exactly one bead — `tk-5cgyk`
-itself — and nothing else. Once half 1 lands it is permanently green and
-becomes the regression gate.
+Against the live city on 2026-08-10 it first reported exactly one bead —
+`tk-5cgyk` itself — and nothing else. After the mayor re-routed that bead to the
+qualified target, the corrected check caught a second live case the original
+would have passed: `tk-kjt0m`, the padded-route probe the pre-open review
+created to demonstrate the finding above. That bead was closed as a spent
+artifact, and the check now reports OK across 60 open, unassigned, routed beads
+(gc-toolkit 41, signal-loom 10, shutupandlisten 6, gascity 3, city root 0) — a
+substantive pass, not an empty scan. Once half 1 lands it is permanently green
+and becomes the regression gate.
 
 ## What was deliberately not done
 

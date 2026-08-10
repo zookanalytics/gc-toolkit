@@ -214,6 +214,103 @@ has "$OUT" "a-7" "the finding survives the control characters"
 hasnt "$OUT" "NOT checked" "the store is not degraded to unchecked by them"
 rm -f "$TMP/stores/alpha.json"
 
+# --- 7c. REGRESSION (tk-yffik P1): a route is compared as STORED -------------
+# The first cut of this check trimmed leading/trailing whitespace off
+# `gc.routed_to` BEFORE testing it against the identity set and the sentinels.
+# That is the same fail-open the check exists to remove, wearing a disguise: the
+# offer is byte-for-byte equality (hookClaimMatchesRoute / the `bd ready
+# --metadata-field` query) and bd stores metadata values with their surrounding
+# bytes intact, so a bead routed to " alpha/pack.refinery " is offered to
+# NOBODY — while a check that trims first normalizes it into a live identity and
+# reports the store clean. Padding is invisible in every listing an operator
+# would look at, so nothing else would have caught it either.
+#
+# Each case below is unclaimable in the live city and must be an ERROR.
+
+# Positive control first: the unpadded route really is live, so any failure
+# below is about the padding and not about a typo in the fixture.
+store alpha "$(bead p-0 alpha/pack.refinery)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "positive control: the same route UNPADDED is a clean pass"
+
+# The exact shape the reviewer reproduced: surrounding spaces on a live identity.
+store alpha "$(bead p-1 ' alpha/pack.refinery ')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a whitespace-padded live identity is an ERROR, not an OK"
+has "$OUT" "p-1" "the padded-route error names the bead"
+has "$OUT" "set gc.routed_to=\"alpha/pack.refinery\"" "it names the de-padded repair"
+has "$OUT" "\" alpha/pack.refinery \"" "it quotes the stored bytes so the padding is visible"
+
+# A tab and a newline are whitespace too, and they must survive into the report
+# as escapes rather than splitting the TSV row the finding travels in.
+store alpha "$(bead p-2 '\talpha/pack.refinery\n')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a tab/newline-padded live identity is an ERROR"
+has "$OUT" "p-2" "the tab-padded route is reported"
+has "$OUT" '\t' "the control characters are escaped, not emitted raw"
+hasnt "$OUT" "NOT checked" "escaping them does not cost us the store"
+
+# Control characters below 0x20 that are not whitespace behave the same way.
+# Written as a JSON \u escape, which is the only form that can actually reach
+# us: bd emits JSON, where a raw sub-0x20 byte is invalid, so a route stored
+# with a control character comes back escaped. (A raw byte would be deleted by
+# strip_ctl before jq ever parsed it, and would test nothing.)
+store alpha "$(bead p-3 '\u0001alpha/pack.refinery')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a control-character-padded live identity is an ERROR"
+has "$OUT" "p-3" "the control-padded route is reported"
+
+# The `human` sentinel is exempt as an EXACT value only. The quiesce sweeps that
+# read it compare byte-for-byte as well, so a padded copy is not that sentinel
+# and not a parked human decision — it is an unclaimable bead.
+store alpha "$(bead p-4 ' human ')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a padded \`human\` is NOT the sentinel and is an ERROR"
+has "$OUT" "p-4" "the padded sentinel is named"
+has "$OUT" "set gc.routed_to=\"human\"" "the repair is the exact sentinel"
+
+# Padding and rig-unqualification at once: the repair must be the fully
+# qualified identity, which fixes both defects in one write.
+store alpha "$(bead p-5 ' pack.polecat ')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a padded AND rig-unqualified route is an ERROR"
+has "$OUT" "set gc.routed_to=\"alpha/pack.polecat\"" "the repair fixes the padding and the prefix together"
+
+# A route of nothing but blanks is not the empty value that means "no route".
+# The old `select($route != "")` ran on the TRIMMED string, so this was silently
+# dropped as a cleared route — the same bug's second mouth.
+store alpha "$(bead p-6 '   ')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a whitespace-only route is an ERROR, not a cleared route"
+has "$OUT" "p-6" "the blank route is named"
+has "$OUT" "not the empty value" "the finding distinguishes it from a cleared route"
+
+# ...and the genuinely empty value is still exempt, so the line above did not
+# turn every healthy done-sequence hand-off into a finding.
+store alpha "$(bead p-7 '')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an EXACTLY empty route is still not a finding"
+hasnt "$OUT" "p-7" "the cleared-route bead is not named"
+rm -f "$TMP/stores/alpha.json"
+
+# --- 7d. A scope with no name is still SCANNED ------------------------------
+# The scope rows carry (name, path) and the name may be empty. Joined on a tab,
+# bash would collapse the empty first field, land the path in `rig_name`, leave
+# `rig_path` empty and `continue` past it — skipping an entire store without a
+# word. A check that silently stops looking is the failure it was written to
+# catch, so the row is joined on US instead and the store is still scanned.
+cat > "$TMP/rigs-noname.json" <<EOF
+{"schema_version":"1","ok":true,"rigs":[
+  {"name":"testcity","path":"$CITY"},
+  {"name":"","path":"$TMP/alpha"}
+]}
+EOF
+store alpha "$(bead n-1 pack.polecat)"
+OUT=$(RIGS_JSON_OVERRIDE="$TMP/rigs-noname.json" run_check); RC=$?
+eq "$RC" "2" "a scope with an empty name is still scanned, not silently skipped"
+has "$OUT" "n-1" "the finding in the unnamed scope is reported"
+rm -f "$TMP/stores/alpha.json"
+
 # --- 8. A city with nothing routed is a clean pass, not a crash -------------
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "empty stores are OK"

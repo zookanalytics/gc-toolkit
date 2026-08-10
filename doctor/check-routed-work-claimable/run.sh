@@ -47,22 +47,36 @@
 # specs/tk-5cgyk/unqualified-route-targets.md. This check is the pack-side
 # backstop that keeps the failure loud until then, and the regression gate after.
 #
-# WHAT IS FLAGGED — an OPEN, UNASSIGNED bead whose `gc.routed_to` is non-empty,
-# is not a live agent identity, and whose rig-qualified form IS one:
+# WHAT IS FLAGGED — an OPEN, UNASSIGNED bead whose `gc.routed_to`, COMPARED
+# BYTE-FOR-BYTE, is neither empty nor a live agent identity nor a sentinel:
 #   * `<rig>/<route>` is live, where <rig> is the rig whose store the bead is in
 #     → error naming the exact repair. This is the tk-5cgyk shape.
 #   * some other `<other-rig>/<route>` is live → error listing the candidates.
 #     The bead is just as unclaimable; only the repair is not ours to pick. This
 #     is the shape a wisp poured into the city store takes (tk-gi2pc): a bare
 #     rig-pool name at city scope, where no rig prefix applies.
+#   * the route becomes a live identity (or a sentinel) ONLY once leading or
+#     trailing whitespace and control characters are stripped → error, quoting
+#     the exact stored bytes. The offer is byte equality, so
+#     `" gc-toolkit/gc-toolkit.polecat "` is every bit as invisible to every pool
+#     as a misspelling is — and far harder to SEE, since no listing renders the
+#     padding. That invisibility is the whole reason this check compares the
+#     stored value first and normalizes only afterwards, as a diagnostic: a
+#     check that trims before comparing hands back "OK" for a bead that will
+#     never be offered to anyone, which is precisely the fail-open it exists to
+#     remove.
+#   * a route made ENTIRELY of whitespace or control characters → error. It
+#     names no agent, and it is not the empty value that means "no route".
 #
 # WHAT IS NOT FLAGGED:
 #   * An exact live identity. That is a working route.
 #   * `human` — the deliberate escalation sentinel ("a person must decide"),
 #     written by the signoff round cap and read by the quiesce sweeps. It names
-#     no agent ON PURPOSE.
-#   * An empty `gc.routed_to`. Clearing the route is how the done sequence hands
-#     a bead to an assignee; the key is present and blank all over a healthy store.
+#     no agent ON PURPOSE. Exact match only: the sweeps that read it compare
+#     byte-for-byte too, so a padded `" human "` is not that sentinel either.
+#   * An EXACTLY empty `gc.routed_to`. Clearing the route is how the done
+#     sequence hands a bead to an assignee; the key is present and blank all
+#     over a healthy store.
 #   * An ASSIGNED bead. An assignee is its own reachability — the route is not
 #     what is carrying it.
 #   * A route matching no identity and no `*/route` either. It is unclaimable,
@@ -104,9 +118,10 @@ print_lines() { [ "$#" -eq 0 ] || printf '%s\n' "$@"; }
 # Bead notes and titles can carry control characters that make jq abort mid-parse,
 # which would otherwise cost us a whole store. Everything below 0x20 except the
 # newline goes, which is wider than the usual pack idiom: a literal TAB is
-# invalid inside a JSON string just like the rest, and this check reduces to TSV,
-# so a tab that survived the parse would split a row instead. Nothing here reads
-# free text — only ids and route strings — so there is no payload to preserve.
+# invalid inside a JSON string just like the rest, and it also clears the 0x1F
+# this check joins its rows on, so no payload byte can pose as a field separator.
+# Nothing here reads free text — only ids and route strings — so there is no
+# payload to preserve.
 strip_ctl() { tr -d '\000-\011\013-\037'; }
 
 # ---------------------------------------------------------------------------
@@ -155,7 +170,9 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$rigs_raw" ]; then
 fi
 
 scopes=$(printf '%s' "$rigs_raw" \
-    | jq -r '.rigs[]? | select((.path // "") != "") | [(.name // ""), .path] | @tsv' 2>/dev/null)
+    | jq -r '.rigs[]? | select((.path // "") != "")
+             | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path]
+             | join("\u001f")' 2>/dev/null)
 
 if [ -z "$scopes" ]; then
     echo "cannot determine whether routed work is claimable"
@@ -167,7 +184,11 @@ fi
 # One targeted listing per store — open, unassigned, carrying a route key. Each
 # row is classified against the identity set in jq.
 # ---------------------------------------------------------------------------
-while IFS=$'\t' read -r rig_name rig_path; do
+# US-joined, not tab: a rig whose name is empty must still yield an empty FIRST
+# field and a path in the second. Under a tab IFS bash would collapse the pair,
+# land the path in rig_name, leave rig_path empty, and `continue` — silently
+# skipping a whole store, which is the fail-open this check exists to remove.
+while IFS=$'\037' read -r rig_name rig_path; do
     [ -n "$rig_path" ] || continue
 
     # At the city root no rig prefix applies, so a dead route there can be
@@ -200,16 +221,53 @@ while IFS=$'\t' read -r rig_name rig_path; do
         --arg qualifier "$qualifier" '
         .[]?
         | . as $b
-        | (($b.metadata["gc.routed_to"] // "") | tostring | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $route
-        | select($route != "")
-        | select(($sentinels | index($route)) == null)
-        | select(($ids | index($route)) == null)
-        | ([$ids[] | select(endswith("/" + $route))]) as $cands
-        | [ (if ($qualifier != "" and ($ids | index($qualifier + "/" + $route)) != null) then "repair"
-             elif ($cands | length) > 0 then "ambiguous"
-             else "unknown" end),
-            ($b.id // "?"), $route, ($cands | join(", ")) ]
-        | @tsv' 2>/dev/null)
+        # The route EXACTLY as stored. The offer is byte-for-byte equality, so
+        # this — never a tidied-up copy of it — is the only value that may be
+        # compared against the identity set. Normalizing first is how a padded,
+        # genuinely unclaimable route gets certified healthy: it is trimmed INTO
+        # a live identity before anything looks at it.
+        | (($b.metadata["gc.routed_to"] // "") | tostring) as $raw
+        # Only the exactly-empty value means "no route" (the done sequence
+        # clears the key). A value made of blanks is a route that matches
+        # nothing — not a cleared one.
+        | select($raw != "")
+        | select(($sentinels | index($raw)) == null)
+        | select(($ids | index($raw)) == null)
+        # Past this point the bead is UNCLAIMABLE as stored, and the only
+        # question left is which repair to name. Normalization is a DIAGNOSTIC
+        # from here on; it can no longer exonerate a bead.
+        | ($raw
+           | sub("^[[:space:][:cntrl:]]+"; "")
+           | sub("[[:space:][:cntrl:]]+$"; "")) as $norm
+        | ([$ids[] | select(endswith("/" + $norm))]) as $cands
+        | (if $norm == "" then "blank"
+           elif ($ids | index($norm)) != null
+                or ($sentinels | index($norm)) != null then "padded"
+           elif ($qualifier != "" and ($ids | index($qualifier + "/" + $norm)) != null) then "repair"
+           elif ($cands | length) > 0 then "ambiguous"
+           else "unknown" end) as $class
+        # Both routes are rendered as JSON so a value carrying a tab or a newline
+        # cannot break the row it is reported in — and so the operator SEES the
+        # padding that makes the route dead.
+        #
+        # Rows are joined on US (0x1F), NOT tab. Tab is an IFS *whitespace*
+        # character, so bash collapses a run of them and drops empty fields
+        # entirely: the row for a finding with no repair to name would lose its
+        # blank column and shift every field after it left, reporting the
+        # candidate list in the repair slot. US is not IFS whitespace, so empty
+        # fields survive in place. Nothing can smuggle one into a field either —
+        # strip_ctl has already deleted every raw 0x1F from the payload, the two
+        # routes are JSON-escaped, and the id and candidate list are flattened
+        # below.
+        | [ $class,
+            (($b.id // "?") | gsub("[[:cntrl:]]"; " ")),
+            ($raw | tojson),
+            (if $class == "padded" then ($norm | tojson)
+             elif $class == "repair" then (($qualifier + "/" + $norm) | tojson)
+             else "" end),
+            ($cands | join(", ") | gsub("[[:cntrl:]]"; " ")),
+            (if $raw == $norm then "" else "padded" end) ]
+        | join("\u001f")' 2>/dev/null)
     rows_rc=$?
 
     if [ "$rows_rc" -ne 0 ]; then
@@ -219,17 +277,27 @@ while IFS=$'\t' read -r rig_name rig_path; do
 
     [ -n "$rows" ] || continue
 
-    while IFS=$'\t' read -r class bead_id route cands; do
+    while IFS=$'\037' read -r class bead_id route repair cands padded; do
         [ -n "$class" ] || continue
+        # `$route` and `$repair` arrive JSON-quoted, so they carry their own
+        # surrounding quotes and any control character is already escaped.
+        pad_note=""
+        [ -z "$padded" ] || pad_note=" (the stored value also carries leading or trailing whitespace/control characters — it is quoted above exactly as stored)"
         case "$class" in
+            padded)
+                errors+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=$route names no agent — stripped of its surrounding whitespace/control characters it would be $repair, but the pool offer is exact string equality, so no pool is ever offered this bead; set gc.routed_to=$repair")
+                ;;
+            blank)
+                errors+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=$route is nothing but whitespace/control characters — it names no agent, and it is not the empty value that means \"no route\", so no pool is ever offered this bead; clear the key or set a live identity")
+                ;;
             repair)
-                errors+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=\"$route\" names no agent — it is the rig-unqualified form of \"$qualifier/$route\", so no pool is ever offered this bead; set gc.routed_to=\"$qualifier/$route\"")
+                errors+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=$route names no agent — it is the rig-unqualified form of $repair, so no pool is ever offered this bead; set gc.routed_to=$repair$pad_note")
                 ;;
             ambiguous)
-                errors+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=\"$route\" names no agent — it is the rig-unqualified form of ${cands}, none of which reads this store, so no pool is ever offered this bead")
+                errors+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=$route names no agent — it is the rig-unqualified form of ${cands}, none of which reads this store, so no pool is ever offered this bead$pad_note")
                 ;;
             *)
-                notes+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=\"$route\" matches no agent identity and no rig-qualified form of one; unclaimable, but indistinguishable from a sentinel like \"human\" — reported, not judged")
+                notes+=("${rig_name:-<city>} bead $bead_id: gc.routed_to=$route matches no agent identity and no rig-qualified form of one; unclaimable, but indistinguishable from a sentinel like \"human\" — reported, not judged$pad_note")
                 ;;
         esac
     done <<< "$rows"
@@ -240,7 +308,7 @@ if [ "${#errors[@]}" -ne 0 ]; then
     print_lines "${errors[@]}"
     print_lines "${warnings[@]+"${warnings[@]}"}" "${notes[@]+"${notes[@]}"}"
     echo ""
-    echo "Each of these is open, unassigned, and invisible to every pool: the offer is an exact string match on gc.routed_to (gascity hookClaimMatchesRoute), so a rig-unqualified pool name is matched by nothing and the bead waits forever. Repair the route as named above. The write-time guard that makes this unwritable is gc-xaqpf in the gascity rig; the design is in specs/tk-5cgyk/unqualified-route-targets.md."
+    echo "Each of these is open, unassigned, and invisible to every pool: the offer is an exact string match on gc.routed_to (gascity hookClaimMatchesRoute), so a route that is not byte-identical to a live identity — a rig-unqualified pool name, or one padded with whitespace or control characters — is matched by nothing and the bead waits forever. Routes are quoted above exactly as stored, because padding is invisible in every other listing. Repair the route as named above. The write-time guard that makes this unwritable is gc-xaqpf in the gascity rig; the design is in specs/tk-5cgyk/unqualified-route-targets.md."
     exit 2
 fi
 
