@@ -48,9 +48,26 @@ Everything else that writes a work bead's notes already appends —
 hand-back. The done sequence was the one destructive writer into a field
 the rest of the system treats as history.
 
-**This is not "notes are append-only everywhere."** A review bead's notes
-are a single-valued artifact — `pre-open-resolve.sh` replays them verbatim
-as the PR's codex-signoff comment — so the non-impl verdict writes keep
-`--notes` on purpose. The rule here is scoped to the impl done sequence,
-where notes are a history field with more than one writer.
+**The non-impl done sequence follows the same rule** — its verdict and
+findings writes append too, and the fragment below says so at each site.
+They were briefly carved out on the grounds that a review bead's notes are
+a single-valued artifact, because `pre-open-resolve.sh` replays that field
+verbatim as the PR's codex-signoff comment. The replay is real; the
+carve-out did not follow from it (tk-q9e9y):
+
+- A review bead's notes have a **second writer**. `signoff_retry_release`
+  appends the "gate unrecorded" diagnostic to the same field and re-offers
+  the same bead, so the next round's replacing verdict erases the only
+  in-bead record of why the previous round failed.
+- Appending splices nothing stale into that comment. Each re-gate mints a
+  **fresh** review bead and the replay takes the newest one, so rounds
+  never accumulate in one bead's notes — except on that retry path, where
+  the accumulated entries all describe the PR being opened.
+- Research and investigation beads are not replayed by anything, and their
+  notes **are** the deliverable. Replacing them is the original data-loss
+  bug (tk-6kf6r), not an exception to it.
+
+What the verbatim replay does require is that a pre-open verdict be
+**self-contained** — written to read correctly as an opening PR comment,
+not as a diff against the entry above it.
 {{ end }}

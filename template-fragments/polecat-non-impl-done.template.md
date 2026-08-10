@@ -101,17 +101,23 @@ reached GitHub.
 #      never a head that moved after — the same stale-head guard the post-open arm
 #      gets from the reviews API `.commit_id`:
 #        gc bd update <work-bead> --set-metadata reviewed_oid="$REVIEWED_OID" \
-#          --notes "<verdict + findings>"
+#          --append-notes "<verdict + findings>"
 #      Then set VERDICT=COMMENT (pass) or VERDICT=REQUEST_CHANGES; the
 #      fix-target dispatch below stamps check.codex at reviewed_oid (pass) or
 #      files a rework child against the branch (changes).
+#      APPEND, never --notes: this bead's notes already have a second writer
+#      (signoff_retry_release below appends the "gate unrecorded" diagnostic to
+#      the SAME field, then re-offers this SAME bead), so a replacing write
+#      erases the record of why the previous round failed. Write a
+#      self-contained verdict — pre-open-resolve.sh replays this field verbatim
+#      as the opening PR comment.
 #    - Research/investigation tasks: ensure findings live in the
-#      bead via `gc bd update <work-bead> --notes "..."` before close.
+#      bead via `gc bd update <work-bead> --append-notes "..."` before close.
 gh pr review <pr-num> --comment --body "<verdict + notes>"   # POST-OPEN signoff PASS: COMMENT only, never --approve
 # changes needed → gh pr review <pr-num> --request-changes --body "<blocking findings>"
 # PRE-OPEN (review_branch set): NO gh pr review — record the verdict in notes instead:
-#   gc bd update <work-bead> --notes "<verdict + findings>"
-# (research/investigation instead: gc bd update <work-bead> --notes "...")
+#   gc bd update <work-bead> --append-notes "<verdict + findings>"
+# (research/investigation instead: gc bd update <work-bead> --append-notes "...")
 
 # 2. Stamp task-specific metadata (review_id, pr_url, verdict, etc.)
 gc bd update <work-bead> --set-metadata <task-specific fields>
