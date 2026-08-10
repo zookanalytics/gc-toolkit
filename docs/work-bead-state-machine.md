@@ -715,10 +715,49 @@ stamping it would enroll it in the anchor enumeration as a second anchor with
 no `check_set` — the PR's effective gate would become its *weakest* anchor,
 landing the PR past a red codex gate. The re-review dispatched at hand-back
 anchors to the existing anchor (its `check.<name>` markers are the ones the
-merge skill and `pre-open-resolve.sh` read). Independently, the merge skill
-refuses to merge any PR claimed by more than one open anchor: a legacy
-double-anchor pair is held — never merged through either anchor — until the
-duplicate is closed or demoted.
+merge skill and `pre-open-resolve.sh` read).
+
+**A PR claimed by more than one anchor is ONE gate, not several (tk-3sdfq).**
+Pairs still arise. Two `pre_open_gate` anchors on one branch become two
+`pull_request` anchors *by design*: the anchor that opens the PR flips its
+sibling to `pull_request` too, so the sibling stays visible to the merge and
+observer passes. The one-anchor-per-PR arm above is what should stop that second
+`pre_open_gate` anchor from being minted at all; when it does not — a rig
+checkout on an older pack, an out-of-band write — the pair is real. The merge skill used to refuse such a PR outright and
+tell the operator to "close or demote the duplicate" — but no pass performs that
+demotion, and the mechanism that used to converge these pairs is
+`reconcile-merged-prs.sh` closing *every* anchor of the PR **on merge**, which
+the refusal gates. Every pre-open rework that codex greens deadlocked there.
+
+So the skill coalesces them instead: the anchors of one PR are validated as a
+single gate whose `check_set` is the **union** of theirs, satisfied by their
+`check.<name>` markers **pooled**, holding on the union of their in-flight
+children, and merging only when no member is operator-held. Union is what keeps
+tk-ynz4b's guarantee — the bypass it prevents is a *weaker* gate deciding the
+merge, and a union is stronger than either member, so a gateless duplicate adds
+nothing to skip past while the real anchor's `codex` still has to be green.
+Pooling the markers is sound because `check.<name>=green@<oid>` is a claim about
+the **commit**, not about the bead recording it, and every anchor here is parked
+on the same PR whose live head is that `oid`.
+
+Coalescing is earned. Every sibling is re-read live — before the gates and again
+immediately before the merge — and must still be open, parked on a published PR,
+claiming exactly this **pull request**, and describing this branch and this
+target. "Exactly this pull request" is the same identity the anchor's own
+`pr_url` is held to, at the same granularity: the same number, and — when the
+sibling records one at all — a `pr_url` that canonicalizes to the live PR's.
+Repository granularity is not enough, because a sibling recording *this*
+repository's `pull/<other number>` names different work while passing a
+same-repository check, and its markers would then be pooled into this PR's gate.
+A sibling that records no `pr_url` (`check-set-heal.sh`'s recovery shape, before
+the certified URL is backfilled) has nothing to disagree with and is governed by
+the number, status and branch checks. It must also declare a **non-empty**
+`check_set`: empty means "no gates" only because `check-set-heal.sh` normalizes
+it on the pass before, and a
+duplicate minted mid-pass has not been through that pass, so an empty set on a
+sibling is *unvalidated* rather than ungated. Any sibling that fails to certify
+falls back to the original tk-ynz4b hold, naming which sibling and why. On merge,
+`reconcile-merged-prs.sh` closes both, which is what finally retires the pair.
 
 ## When a child isn't landing
 
