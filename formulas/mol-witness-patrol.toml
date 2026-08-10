@@ -539,6 +539,47 @@ needs = ["recover-orphaned-beads"]
 description = """
 Ensure the refinery is processing work and the queue is healthy.
 
+**Step 0: Recover handoffs stranded by a near-miss address (tk-0nn3f).**
+
+Before reading the queue, repair the merge handoffs that are missing FROM it.
+A polecat (or any agent composing the address by hand) can hand off to
+`<rig>/refinery` instead of `<rig>/{{binding_prefix}}refinery`; the assignee is
+free text, so the near-miss is accepted silently and then polled by nobody. That
+bead has no `merge_result` and no `pr_url`, so the refinery's bead-keyed
+reconcile passes cannot see it either, and orphan recovery above deliberately
+steps over it — a refinery-shaped assignee reads as an infrastructure identity.
+Every detector is blind at once, and the queue reading in Step 1 is the last one:
+an idle refinery with an empty queue is indistinguishable from a healthy one.
+Live case: completed, pushed work waited 1h07m until a human witness noticed.
+
+```bash
+# Same agent-env resolution mol-refinery-patrol uses, so the idle loop runs the
+# CURRENT script even when a worktree copy lags.
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" \\
+            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \\
+            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/reconcile-refinery-handoffs.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# Best-effort, like every other patrol pass. NOTE the identity: $GC_AGENT is the
+# WITNESS here, so pass the refinery's configured identity explicitly — the same
+# string Step 1 queries with.
+if [ -n "$SCRIPTS_DIR" ]; then
+  "$SCRIPTS_DIR/reconcile-refinery-handoffs.sh" \\
+    --refinery "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery" \\
+    || echo "reconcile-refinery-handoffs: pass failed (non-fatal); retries next cycle" >&2
+fi
+```
+
+The refinery's own idle loop runs this pass too, and it is the primary owner —
+it repairs and re-checks in one cycle. This call is the backstop for the case
+that loop cannot cover: a refinery that is down, quarantined, or never woke.
+It repairs only an address that no session answers to, and only toward an
+identity that resolves; a live holder, another rig's refinery, an unresolvable
+canonical identity, or an unreadable session roster are all reported and left
+alone. Read its stderr — those refusals are an operator's decision, and a
+repeated one means the configured refinery identity is itself wrong.
+
 **Step 1: Check work beads assigned to refinery:**
 ```bash
 gc bd list --assignee=<rig>/{{binding_prefix}}refinery --status=open --json
@@ -551,7 +592,12 @@ polecats have submitted for merging. Look for:
   may be stuck or the bead may have been missed.
 - **Queue depth**: Many beads waiting may indicate the refinery is
   overwhelmed or down.
-- **Empty queue**: No work assigned — refinery is idle, which is fine.
+- **Empty queue**: No work assigned — refinery is idle, which is fine *after
+  Step 0 has run*. On its own an empty queue proves nothing: a handoff sent to a
+  near-miss identity is missing from this listing, not absent from the city, and
+  reading it as health is what let the live case sit for over an hour (tk-0nn3f).
+  If Step 0 could not run (no `SCRIPTS_DIR`), say so in the escalation rather
+  than reporting the queue healthy.
 
 **Step 2: Assess refinery wisp freshness:**
 
