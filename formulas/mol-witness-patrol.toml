@@ -666,9 +666,35 @@ Run it with `--dry-run` first if you want to see the selection without writing.
 
 **What it touches, and what it must not.** For each molecule it resolves the
 anchor the way the formula itself does (root -> `gc.input_convoy_id` -> the
-convoy's single tracked member) and acts only when that anchor is DONE:
-`merge_result` of `pre_open_gate`, `pull_request`, or `merged`, or the anchor is
-closed. It never writes to the anchor, never rewrites `status`, and never
+convoy's single tracked member) and acts only when that anchor is DONE. Five
+shapes count as done, the last three each a re-offer the predicates before them
+missed:
+
+| Shape | Anchor reads | Why the molecule is dead |
+|---|---|---|
+| closed | `status=closed` | the work bead itself is finished |
+| stamped | `merge_result` of `pre_open_gate`, `pull_request`, `merged` | past polecat work, parked in the merge gate |
+| handoff (tk-yxlqb) | `assignee=<rig>/{{binding_prefix}}refinery`, unstamped | handed off, but the refinery has not stamped yet |
+| parked (tk-rlm94) | `status=blocked` AND `gc.routed_to=human`, unstamped, assignee cleared | handed off the pool for a human decision — `blocked` is not in the pool's ready predicate, so no polecat can be offered it |
+| re-claimed (tk-nv3qr) | `assignee` = the anchor's own `gc.session_name`, and that session is NOT the molecule's | rejected, re-pooled, and re-claimed by ANOTHER polecat — which works it as a bare bead and never re-walks this step graph |
+
+The last two are each conjunctions, and in both cases that is what keeps the pass
+fail-closed rather than an accident of how they were written.
+
+Parked is never bare `blocked`: the escalation path sets `blocked` before it
+drains, so a live session is reachable in that state, while `blocked` +
+routed-to-human is only ever written by a pass that has already routed the work
+off the pool.
+
+Re-claimed is doubly conditional. `gc.session_name` is stamped at claim time and
+is NOT cleared on release, so a leftover record proves nothing — the assignee
+must still EQUAL it before it counts as the current holder, and all three names
+must be non-empty, or the pass declines to guess and leaves the molecule alone.
+
+The two clauses read different fields and are independent: a re-claimed anchor is
+held by a session and is not parked, and a parked one is held by nobody at all.
+
+It never writes to the anchor, never rewrites `status`, and never
 touches the `workflow-finalize` step — that one keeps its control-dispatcher
 route because it is the molecule's only escape path. An anchor it cannot resolve
 is SKIPPED, deliberately: quiescing a live molecule would strip the assignee off
@@ -678,8 +704,14 @@ un-quiesced husk only wastes wisps, which is much the cheaper failure.
 Regression test: `assets/scripts/quiesce-completed-workflows.test.sh` (hermetic,
 stubs `gc` and `bd`, including bd's claim guard; covers both shapes, the split
 calls and their route-first order, the `--force` assignee clear, the no-close
-rule, the finalize-route exemption, fail-closed, idempotence, and that a refused
-assignee clear neither rolls back the route clear nor exits 0).
+rule, the finalize-route exemption, fail-closed, idempotence, that a refused
+assignee clear neither rolls back the route clear nor exits 0, the
+re-claimed-anchor predicate together with both of its fail-closed halves — a
+recorded session that is not the current holder, and an anchor recording no
+session at all — the parked predicate with both of ITS halves alone as negative
+controls, and the intersection of the last two: each of them decided by its own
+clause on an anchor that also carries the other's field, which is what pins the
+argument positions the two landed on).
 
 **Exit criteria:** Completed-workflow husks quiesced, or none found. Continue to
 `check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is

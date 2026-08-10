@@ -174,6 +174,44 @@ done
 # matched exactly, the one spelling every writer uses (reconcile-merged-prs.sh,
 # check-set-heal.sh, mol-refinery-patrol.toml); an unrecognized variant simply
 # leaves the husk armed, which is the cheap failure.
+#
+# AND A FIFTH SHAPE, an anchor RE-CLAIMED BY ANOTHER SESSION (tk-nv3qr). When the
+# refinery REJECTS a branch it clears the handoff and re-pools the anchor, and the
+# next polecat claims it as a bare bead — exactly like the REQUEST_CHANGES rework
+# path in the header (:56-63), it never re-walks this molecule's step graph. The
+# anchor then reads
+#
+#     status=in_progress   merge_result=<absent>   assignee=<another polecat session>
+#
+# which satisfies none of the four predicates above: not closed, never re-stamped,
+# not a refinery, and not parked for a human. So the husk stays armed for as long as
+# the new owner holds the bead — and for the next owner after that, if it is rejected
+# too. Observed on root tk-gonyp: its own load-context step was handed back to session
+# lx-x3bt four minutes after lx-o9k2 claimed the anchor out of the pool.
+#
+# This clause and the park clause above were written in parallel against the same
+# function. PR#272 (tk-rlm94) landed first and took $4 for gc.routed_to; this one
+# was written against $4/$5 for the session pair and renumbered to $5/$6 when it was
+# rebased onto that. Both are live and they are semantically independent — a
+# re-claimed anchor is not parked (it is in_progress under a session, not blocked
+# and routed off the pool), and a parked one is held by nobody at all.
+#
+# Those steps are dead by construction: `gc.session_affinity=require` binds them to
+# the molecule's original session, and the work they describe now belongs to another
+# one. No holder can ever advance them.
+#
+# BOTH conjuncts below are what keep this fail-closed, and neither is optional:
+#
+#   - the assignee must EQUAL the anchor's recorded session, which proves that
+#     session is the CURRENT holder. `gc.session_name` is stamped at claim time and
+#     is not cleared on release, so a bare "recorded session != molecule session"
+#     test would also fire on a leftover from an earlier claim while the molecule's
+#     own polecat is still running — stripping the assignee off steps that polecat
+#     has yet to claim and draining it mid-implementation, the precise hazard the
+#     fail-closed note below is about.
+#   - all three values must be non-empty, so an anchor held under an agent or pool
+#     name rather than a session name (no `gc.session_name` to compare) is left
+#     alone rather than guessed at.
 is_terminal_anchor() {
   case "$1" in                       # $1 = anchor status
     closed) return 0 ;;
@@ -187,6 +225,11 @@ is_terminal_anchor() {
   case "$4" in                       # $4 = anchor metadata["gc.routed_to"]
     human) [ "$1" = blocked ] && return 0 ;;
   esac
+  # $5 = anchor metadata.gc.session_name, $6 = this molecule's root gc.session_name
+  if [ -n "$3" ] && [ -n "${5:-}" ] && [ -n "${6:-}" ] \
+     && [ "$3" = "${5:-}" ] && [ "${5:-}" != "${6:-}" ]; then
+    return 0
+  fi
   return 1
 }
 
@@ -273,8 +316,15 @@ while IFS= read -r root; do
   # rather than by formula name, this is also the gate that turns away a graph.v2
   # formula built on some other anchoring shape. Refusing it costs a husk that
   # stays noisy; guessing costs a live molecule drained mid-implementation.
-  convoy=$(gc bd show "$root" --json 2>/dev/null \
-    | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null)
+  #
+  # One read, two values: the convoy, and the session this molecule's steps are
+  # bound to (`gc.session_affinity=require`). The session is what the re-claim
+  # predicate compares the anchor's current holder against; an empty one simply
+  # means the molecule was never claimed, and the predicate fails closed on it.
+  rootinfo=$(gc bd show "$root" --json 2>/dev/null \
+    | jq -r '.[0] | "\(.metadata["gc.input_convoy_id"] // "")|\(.metadata["gc.session_name"] // "")"' 2>/dev/null)
+  convoy=""; rsession=""
+  IFS='|' read -r convoy rsession <<< "$rootinfo"
   anchor=""
   [ -n "$convoy" ] && anchor=$(gc convoy status "$convoy" --json 2>/dev/null \
     | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null)
@@ -288,14 +338,15 @@ while IFS= read -r root; do
     unresolved=$((unresolved + 1)); continue
   fi
 
-  # ONE read, four fields. `gc.routed_to` rides along in the same call the other
-  # three already come from (tk-rlm94) — the park predicate needs it, and reading
-  # it separately would let the two halves of one verdict describe two different
-  # observations of the anchor.
+  # ONE read, five fields. `gc.routed_to` rides along in the same call the first
+  # three already come from (tk-rlm94), and `gc.session_name` alongside it
+  # (tk-nv3qr) — the park predicate needs the one and the re-claim predicate needs
+  # the other, and reading either separately would let the halves of one verdict
+  # describe two different observations of the anchor.
   ainfo=$(gc bd show "$anchor" --json 2>/dev/null \
-    | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")|\(.assignee // "")|\(.metadata["gc.routed_to"] // "")"' 2>/dev/null)
-  astatus=""; amerge=""; aassignee=""; arouted=""
-  IFS='|' read -r astatus amerge aassignee arouted <<< "$ainfo"
+    | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")|\(.assignee // "")|\(.metadata["gc.routed_to"] // "")|\(.metadata["gc.session_name"] // "")"' 2>/dev/null)
+  astatus=""; amerge=""; aassignee=""; arouted=""; asession=""
+  IFS='|' read -r astatus amerge aassignee arouted asession <<< "$ainfo"
   # Every real bead carries a status, so an empty one means the READ failed (bead
   # gone, jq error, Dolt hiccup) rather than "an anchor with no status". Fail
   # closed on it, same as an unresolved anchor.
@@ -304,8 +355,14 @@ while IFS= read -r root; do
     unresolved=$((unresolved + 1)); continue
   fi
 
+  # The session pair is appended only when it is actually recorded, so the log line
+  # for the four older shapes is unchanged — but a re-claim verdict has to say WHICH
+  # two sessions it compared, since that is the whole basis for the call and this
+  # pass is meant to be reversible by hand.
   adesc="status=$astatus merge_result=${amerge:-none} assignee=${aassignee:-none} routed_to=${arouted:-none}"
-  if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee" "$arouted"; then
+  [ -z "$asession" ] || adesc="$adesc session=$asession"
+  [ -z "$rsession" ] || adesc="$adesc molecule_session=$rsession"
+  if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee" "$arouted" "$asession" "$rsession"; then
     echo "quiesce-completed-workflows: root $root — anchor $anchor still live ($adesc); left alone"
     roots_live=$((roots_live + 1)); continue
   fi
