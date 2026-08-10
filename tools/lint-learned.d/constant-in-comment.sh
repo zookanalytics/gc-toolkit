@@ -56,21 +56,36 @@ for f in "$@"; do
 
         # Extract a number or short quoted string; skip everything else.
         lit=""
+        kind=""
         if [[ "$rest" =~ $num_re ]]; then
             lit="${BASH_REMATCH[1]}"
+            kind="num"
         elif [[ "$rest" =~ $dq_re ]] || [[ "$rest" =~ $sq_re ]]; then
             lit="${BASH_REMATCH[1]}"
+            kind="str"
         fi
         [ -n "$lit" ] || continue
 
-        # Trivial-literal skip list: too common to mean anything.
-        case "$lit" in
-            0 | 1 | -1 | 0.0 | 1.0 | ?) continue ;;
-        esac
+        # Trivial-literal skip: 0/1/-1 (and float forms) for numbers,
+        # empty or single-character content for strings — too common to
+        # mean anything. Long strings are quoted prose, not constants.
+        if [ "$kind" = "num" ]; then
+            case "$lit" in
+                0 | 1 | -1 | 0.0 | 1.0) continue ;;
+            esac
+        else
+            [ "${#lit}" -lt 2 ] && continue
+        fi
         [ "${#lit}" -gt 24 ] && continue
 
         lit_re="$(ere_escape "$lit")"
-        hit_re="(^|[^[:alnum:]_.\"'-])${lit_re}([^[:alnum:]_.\"'-]|$)"
+        if [ "$kind" = "num" ]; then
+            # `.` and `-` are non-boundaries for numbers so 30 never
+            # matches inside 30.5 or -30.
+            hit_re="(^|[^[:alnum:]_.-])${lit_re}([^[:alnum:]_.-]|$)"
+        else
+            hit_re="(^|[^[:alnum:]_])${lit_re}([^[:alnum:]_]|$)"
+        fi
 
         lo=$((i - 3)); [ "$lo" -lt 0 ] && lo=0
         hi=$((i + 3)); [ "$hi" -ge "$n" ] && hi=$((n - 1))

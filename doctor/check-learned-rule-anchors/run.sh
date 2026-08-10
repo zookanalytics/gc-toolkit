@@ -117,8 +117,14 @@ for frag in "${fragments[@]}"; do
             fi
             continue
         fi
-        if [[ $line == "<!-- rule:"* ]]; then
+        if [[ $line == "<!-- rule:"* && $line != "<!-- rule:<"* ]]; then
             # Intends to be an anchor, is not well-formed. Reported once here;
+            # `rule:<` is exempt: the seeded fragment documents the anchor
+            # format with a placeholder exemplar (<!-- rule:<pattern-bead>
+            # src:<refs> adopted:<date> -->, per implementation-design.md §5)
+            # and a real rule id is [a-z0-9-]+, so the angle bracket is
+            # unambiguous. The exemplar is plain documentation — a bullet
+            # placed under it is still faulted as unanchored below.
             # a bullet right after it is NOT additionally faulted as
             # unanchored, so one defect reads as one finding.
             errors+=("$rel:$lineno: malformed anchor comment (expected <!-- rule:<id> src:<refs> adopted:YYYY-MM-DD -->)")

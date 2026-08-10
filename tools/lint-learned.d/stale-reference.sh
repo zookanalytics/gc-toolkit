@@ -64,7 +64,7 @@ done
 bounded="([^[:alnum:]_]|^)($phrase_alt)([^[:alnum:]_]|$)"
 
 # The passive purpose form of "used to" — not a stale reference.
-purpose_form="(is|are|was|were|be|been|being)[[:space:]]+used[[:space:]]+to[[:space:]]"
+purpose_form="(^|[^[:alnum:]_])(is|are|was|were|be|been|being)[[:space:]]+used[[:space:]]+to[[:space:]]"
 
 found=0
 
