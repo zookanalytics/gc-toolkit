@@ -291,7 +291,67 @@ artifact**, so future upstream fixes to it are masked.
   shadow). Preserve that: check the basename against the base packs before
   adding any formula, fragment, or script.
 
-## 8. `pack.toml` authoring traps
+## 8. A directory-imported pack is live from the **working tree**, not from a merge
+
+Section 7 is shadowing between pack *layers*. This is the other shadowing —
+between the *committed* and the *working* copy of the same path — and it is the
+one that makes a green PR a lie. `city.toml` can import a pack by directory:
+
+```toml
+[rigs.imports.gc-toolkit]
+source = "rigs/gc-toolkit"   # a path: no ref, no version
+```
+
+A URL import can be pinned to a commit with `version = "sha:…"`. A directory
+import has no such knob at all: the pack's orders, formulas, prompts and
+scripts are read from that rig checkout's **working tree**. No git ref is
+consulted, so nothing about a merge to `origin/main` changes what is live.
+Two silent failure modes follow, and a landing pack-content PR usually trips
+both at once:
+
+- **The rig root is behind `origin/main`** — the merged content simply is not
+  there. Every git-side check reports success while the live pack is older:
+  `git ls-tree origin/main`, the anchor's `merge_result` / `merged_sha`, the PR
+  state. `reconcile-rig-checkouts` ff-s each checkout forward on a 15m cooldown
+  ([rig-checkout-reconciler.md](rig-checkout-reconciler.md)), so the window is
+  usually minutes — but it is open exactly when you go to confirm the landing.
+- **An untracked draft shadows the committed artifact** — a file authored in
+  place at the destination path and never committed is still sitting there
+  after the merge, and it is what the pack reads. It also blocks its own
+  repair: `git merge --ff-only` refuses to clobber untracked files, so the
+  reconciler cannot advance the checkout and escalates to the mayor instead,
+  leaving the rig behind *and* holding the stale draft. The general form is
+  worth stating plainly — because the working tree is the deployment, an
+  untracked file **is** a deployed artifact, committed or not.
+
+**So verify the DEPLOYED artifact, not the merged one.** In the rig root:
+
+```bash
+git rev-list --count origin/main..HEAD   # 0 = nothing local at risk
+git status --short                       # ?? at a landed path = a shadowing draft
+# remove superseded drafts (back them up first), then:
+git merge --ff-only origin/main
+diff <(git show origin/main:<path>) <path>   # deployed copy == merged copy
+```
+
+Then confirm the executable bit survived and that the artifact registered.
+`gc order list` and `gc config show` re-parse **disk**, so they prove the file
+is on disk and parses — not that the live supervisor picked it up.
+
+**The convention directories are hot-watched, so an in-place edit is live
+surgery.** A config watcher covers the pack's `agents`, `commands`, `doctor`,
+`formulas`, `orders`, `template-fragments`, `skills` and `mcp` directories
+(`internal/config/revision.go`, `conventionDiscoveryDirNames`); a file event
+pokes a rescan that diffs the order set by signature and logs `orders
+reloaded: added|changed|removed <name>` (`cmd/gc/city_runtime.go`,
+`rescanOrderDispatcher` / `orderSetChangeSummary`). A reload that lands
+mid-sync observes the intermediate state, not your intent: deleting a draft
+before the ff-merge logs `removed <name>` and leaves the order absent from the
+live supervisor while HEAD is already correct and every git check reads clean.
+Sequence the change so **one** reload observes the final state, then confirm
+re-registration in the supervisor log (`added <name>`) rather than on disk.
+
+## 9. `pack.toml` authoring traps
 
 Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
 
@@ -324,7 +384,7 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
   | `[pack].includes` | `[imports.<binding>]` |
   | `[agents]`, `[defaults.rig.imports]`, `[[patches.rigs]]`, `[[patches.providers]]` | city-level only (`city.toml`), not `pack.toml` |
 
-## 9. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
+## 10. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
 
 Gas City expands `{{...}}` through **two different engines**, and writing the
 prompt form in a formula silently no-ops the formula. Know which surface you
