@@ -306,7 +306,12 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
   *`[imports.<binding>]`* / *Authoring Summary*).
 - **`[[patches.agent]]` modifies, never creates.** A patch targets an existing
   agent by its bare local `name` (`dir = ""` in `pack.toml` matches by name
-  before rig stamping) and **fails loading if the target doesn't exist**. Append
+  before rig stamping) and **fails loading if the target doesn't exist**. That
+  bare-name tolerance is specific to *agent* patches:
+  `[[patches.named_session]]` has no such fallback and matches only
+  import-qualified identities (`gc-toolkit.boot`), so reusing this block's
+  targeting style there hits nothing and hard-fails the whole `city.toml` load —
+  see [gascity-agents.md](gascity-agents.md), Variant A → Lifecycle. Append
   to list fields with the `_append` variants — `inject_fragments_append`,
   `session_setup_append`, `pre_start_append`, etc. — never by re-declaring the
   agent (pack-spec, *`[[patches.agent]]`* / *Loader → Patches*).

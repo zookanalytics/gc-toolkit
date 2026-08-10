@@ -293,12 +293,65 @@ name = "<binding>.<identity>"  # the canonical identity to patch
 mode = "on_demand"
 ```
 
-The patch targets by identity: `name` is matched against the
-stanza's QualifiedName, so it is the disambiguating key when several
-sessions share a template — and it still matches a stanza declared
-with only a `template`, because an omitted `name` falls back to the
-template. `template` works as a targeting key too, but an ambiguous
-target is a load error rather than a silent partial patch.
+The patch targets by identity, and **both targeting keys are matched
+against import-qualified names — there is no bare-name fallback.**
+`name` is compared to the stanza's `QualifiedName()`; `template` is
+compared to `QualifiedName()` *or* `TemplateQualifiedName()`
+(`namedSessionPatchMatches`,
+`rigs/gascity/internal/config/patch.go:378`). Both of those fold the
+binding prefix in (`internal/config/config.go:485`, `:512`), so a
+stanza that a pack declares as `template = "boot"` is reachable *only*
+as `gc-toolkit.boot` — with `dir` supplying the leading `<rig>/`
+segment for a rig-scoped stanza, exactly as in
+[Identity](#identity). An omitted `name` does fall back to the
+template — but *inside* the qualified form (`IdentityName()`,
+`config.go:497`), so the fallback yields `gc-toolkit.boot`, never
+bare `boot`. `name` stays the disambiguating key when several
+sessions share a template; an ambiguous target is a load error
+rather than a silent partial patch.
+
+**The asymmetry that misleads.** `[[patches.agent]]` *does* accept a
+bare local name — it carries a V1 `Dir`+`Name` fallback
+(`patch.go:424`) that fires even for an imported V2 agent, and that
+is the documented way to write one (see
+[gascity-packs.md](gascity-packs.md) §8, "`[[patches.agent]]`
+modifies, never creates"). Named-session patches have no such
+fallback. The two blocks look interchangeable and are not — copying
+the agent block's targeting style produces a target that matches
+nothing.
+
+**An unmatched target is not a no-op; it fails the whole city.**
+`ApplyPatches` returns on the first patch error (`patch.go:334`), so
+one bad target — `patches.named_session[0]: named_session "boot" not
+found in merged config` — fails the **entire** `city.toml` load, not
+just that one patch. What that looks like from the outside:
+
+- The live reload keeps the previous config (`config reload: …
+  (keeping old config)`, `rigs/gascity/cmd/gc/city_runtime.go:1767`),
+  so **the agent you were patching keeps running under the old
+  setting.**
+- Everything else that loads config fails meanwhile: scheduled orders
+  die (`gc: order exec <order> output: gc bd: loading config: … not
+  found in merged config`) and `gc sling` is rejected mid-dispatch.
+- The affected scope logs `WARN native_store_unavailable
+  gate=native_open` for as long as the target stays broken.
+
+None of that reads as an outage from where you sit. The symptom
+presents as **a patch that silently did nothing**, which invites a
+diagnosis of a startup or resume race rather than of a config that is
+not loading at all.
+
+**So check the load, every time.** After any `[[patches.*]]` edit,
+before anything else:
+
+```bash
+gc config show >/dev/null; echo $?   # 0, or you have a live outage
+gc config show --validate            # same gate, purpose-built
+```
+
+Read the qualified identity straight off the startup lint / `gc
+config show` warnings — the `named_session "gc-toolkit.boot": …`
+string *is* the target.
 
 Check the premise before relying on it: read the backing agent's
 `agent.toml` for a `work_query` first. A session that declares one
