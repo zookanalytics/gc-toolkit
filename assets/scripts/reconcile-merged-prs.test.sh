@@ -167,7 +167,9 @@ has() { grep -q "$1" "$2" 2>/dev/null; }
 # EOF, no upstream writer exists to be signalled, and the exit status is grep's
 # alone. Match semantics are unchanged from the pipelines this replaced. Same
 # helper, same reasoning, as merge-skill.test.sh's.
-hasin() { grep -q "$2" <<< "$1"; }
+# `-e` so a PATTERN may begin with a dash — `--unset-metadata <key>` is one of the
+# things worth asserting, and without it grep reads the pattern as its own options.
+hasin() { grep -q -e "$2" <<< "$1"; }
 
 mkdir -p "$TMP/bin"
 
@@ -342,7 +344,7 @@ printf '%s\n' \
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mailbody"
 : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
 : > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
-: > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"
+: > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/blocked"
 
 # Rework/review children referencing a PR (the merge skill's in-flight set; the
 # conflict arm reuses that query so it never races a rework already in flight).
@@ -854,13 +856,20 @@ case "$2" in
           staled=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_STALED" 2>/dev/null | tail -1)
           gatehead=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATEHEAD" 2>/dev/null | tail -1)
           gatenopool=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_GATENOPOOL" 2>/dev/null | tail -1)
+          # The live-objection text, replayed the same way the head markers are —
+          # this is what makes "the hold RESOLVED, so the reason must go with it"
+          # (tk-iwpz0) testable at all: the clearing pass has to READ what the
+          # holding pass wrote, and then a later pass has to see it gone.
+          # Escaped, unlike the markers: a reason is prose and carries quotes.
+          breason=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_BLOCKED" 2>/dev/null | tail -1)
+          breason=$(printf '%s' "$breason" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
           # The consecutive close-failure count and its escalation marker, replayed
           # the same way — this is what makes "N consecutive PASSES" testable at
           # all: pass 2 has to read what pass 1 wrote.
           cfails=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSEFAILS" 2>/dev/null | tail -1)
           cesc=$(awk -F'\t' -v i="$id" '$1==i{print $2}' "$FAKE_CLOSEESC" 2>/dev/null | tail -1)
-          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s","close_failures":"%s","close_escalated":"%s"}}' \
-                  "$id" "$pr" "$prurl" "$forkpr" "$forkprurl" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$cset" "$cmark" "$mhold" "$rhold" "$cfails" "$cesc")
+          obj=$(printf '{"id":"%s","metadata":{"pr_number":"%s","pr_url":"%s","fork_pr":"%s","fork_pr_url":"%s","merged_target":"%s","branch":"polecat/%s","stale_base_head":"%s","stale_gate_head":"%s","stale_gate_nopool_head":"%s","blocked_reason":"%s","check_set":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s","close_failures":"%s","close_escalated":"%s"}}' \
+                  "$id" "$pr" "$prurl" "$forkpr" "$forkprurl" "$target" "$id" "$staled" "$gatehead" "$gatenopool" "$breason" "$cset" "$cmark" "$mhold" "$rhold" "$cfails" "$cesc")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -1025,6 +1034,25 @@ case "$2" in
     case "$*" in
       *"--unset-metadata close_escalated"*) printf '%s\t\n' "$id" >> "$FAKE_CLOSEESC" ;;
     esac
+    # The hold fields the resolved-hold arms retract (tk-iwpz0), replayed the same
+    # way. Without these the clear is write-only in the harness: the pass after the
+    # clearing one would still read the marker and the reason, so "cleared exactly
+    # once, and the next pass has nothing left to clear" could not be asserted.
+    # Each pattern is checked separately — one update carries several of them —
+    # and `stale_gate_head` cannot swallow `stale_gate_nopool_head`, which is a
+    # different key with a different meaning.
+    case "$*" in
+      *"--unset-metadata blocked_reason"*)  printf '%s\t\n' "$id" >> "$FAKE_BLOCKED" ;;
+    esac
+    case "$*" in
+      *"--unset-metadata stale_base_head"*) printf '%s\t\n' "$id" >> "$FAKE_STALED" ;;
+    esac
+    case "$*" in
+      *"--unset-metadata stale_gate_head"*) printf '%s\t\n' "$id" >> "$FAKE_GATEHEAD" ;;
+    esac
+    case "$*" in
+      *"--unset-metadata stale_gate_nopool_head"*) printf '%s\t\n' "$id" >> "$FAKE_GATENOPOOL" ;;
+    esac
     printf '%s\t%s\n' "$id" "$upd_args" >> "$FAKE_UPDATES"
     case "$*" in
       *merge_result=abandoned*)  printf '%s\n' "$id" >> "$FAKE_ABANDONED" ;;
@@ -1040,6 +1068,7 @@ case "$2" in
       case "$a" in
         close_failures=*)  printf '%s\t%s\n' "$id" "${a#close_failures=}" >> "$FAKE_CLOSEFAILS" ;;
         close_escalated=*) printf '%s\t%s\n' "$id" "${a#close_escalated=}" >> "$FAKE_CLOSEESC" ;;
+        blocked_reason=*) printf '%s\t%s\n' "$id" "${a#blocked_reason=}" >> "$FAKE_BLOCKED" ;;
         stale_base_head=*) printf '%s\t%s\n' "$id" "${a#stale_base_head=}" >> "$FAKE_STALED" ;;
         stale_gate_nopool_head=*) printf '%s\t%s\n' "$id" "${a#stale_gate_nopool_head=}" >> "$FAKE_GATENOPOOL" ;;
         stale_gate_head=*) printf '%s\t%s\n' "$id" "${a#stale_gate_head=}" >> "$FAKE_GATEHEAD" ;;
@@ -1158,6 +1187,7 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
        FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
+       FAKE_BLOCKED="$TMP/blocked" \
        FAKE_REVIEWS="$TMP/reviews" FAKE_DISMISSED="$TMP/dismissed" \
        FAKE_HEADMOVE="$TMP/headmove" FAKE_AM_READS="$TMP/amreads" \
        FAKE_OPENPRS="$TMP/openprs" FAKE_DEAD="$TMP/dead" FAKE_MAILBODY="$TMP/mailbody" \
@@ -2553,6 +2583,226 @@ eq "$(lhl_probe "$(printf '77\n177\n')" '7')" "no"  "(58) PR#7 is NOT satisfied 
 eq "$(lhl_probe "$(printf '7\n42\n')" '42')"  "yes" "(58) the LAST line matches too"
 eq "$(lhl_probe "$(printf '7\n42\n')" '')"    "no"  "(58) an empty needle never matches"
 eq "$(lhl_probe '' '7')"                      "no"  "(58) an empty haystack never matches"
+
+# --- Run 15: a hold that RESOLVES while the anchor stays OPEN (tk-iwpz0). ------
+# The stale-BASE and stale-GATE arms both record their hold as blocked_reason + a
+# head marker and both deliberately KEEP merge_result=pull_request, because the
+# anchor goes on gating while the remedy runs. So both holds end MID-LIFE, with
+# the anchor still open — and the only `--unset-metadata blocked_reason` in the
+# script sits inside the merged-CLOSE arm, which fires at the end of the anchor's
+# life or never. An anchor whose branch was rebased hours ago went on asserting
+# "conflicts with base 'main'", naming a closed rebase bead and a pool waiting on
+# nothing, for the rest of the PR's life. Both live gating anchors on the rig were
+# in exactly that state when this was filed.
+#
+# Written END-TO-END wherever it can be: the holding pass WRITES the reason and
+# the clearing pass READS it back, so nothing here transcribes the reason text by
+# hand. That is the point — the retraction is scoped by matching the text its own
+# arm writes, and a hand-copied fixture would keep passing after the two drifted
+# apart, which is the one failure this pair of arms can have.
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/blocked"
+: > "$TMP/children"; : > "$TMP/openprs"; : > "$TMP/mail"; : > "$TMP/reviews"
+
+# (62) stale BASE, end to end. Pass 1 holds it; pass 2 sees a definite
+# non-conflict and retracts BOTH the reason and the head marker; pass 3 has
+# nothing left to do.
+printf '%s\n' 'bead-CB1|270|main' > "$TMP/anchors"
+printf '%s\n' '270|OPEN||false||main|polecat/bead-CB1|head270|CONFLICTING|DIRTY' > "$TMP/prs"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null 2>&1
+CB1_HELD=$(awk -F'\t' '$1=="bead-CB1"{print $2}' "$TMP/blocked" | tail -1)
+hasin "$CB1_HELD" '^PR#270 conflicts with base' \
+  && ok "(62) the conflict arm records its hold as a blocked_reason" \
+  || bad "(62) conflict arm must record blocked_reason (got: '$CB1_HELD')"
+eq "$(awk -F'\t' '$1=="bead-CB1"{print $2}' "$TMP/staled" | tail -1)" "head270" \
+   "(62) ...alongside the head marker that bounds it"
+# The rebase landed: same head in this fixture, because a conflict can also clear
+# because the BASE moved — which is precisely the case a marker left behind would
+# suppress forever.
+printf '%s\n' '270|OPEN||false||main|polecat/bead-CB1|head270|MERGEABLE|CLEAN' > "$TMP/prs"
+: > "$TMP/updates"
+OUT15A="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>/dev/null)"
+CB1_UPD=$(grep '^bead-CB1' "$TMP/updates" || true)
+hasin "$CB1_UPD" '--unset-metadata blocked_reason' \
+  && ok "(62) hold resolved -> the stale blocked_reason is retracted" \
+  || bad "(62) resolved stale-base hold must clear blocked_reason (got: $CB1_UPD)"
+hasin "$CB1_UPD" '--unset-metadata stale_base_head' \
+  && ok "(62) ...and the head marker with it, so the arm can re-arm at this head" \
+  || bad "(62) resolved stale-base hold must clear stale_base_head (got: $CB1_UPD)"
+eq "$(awk -F'\t' '$1=="bead-CB1"{print $2}' "$TMP/blocked" | tail -1)" "" \
+   "(62) ...and the anchor now reads with no live objection at all"
+hasin "$OUT15A" 'no longer conflicts' \
+  && ok "(62) the retraction is reported for an operator" \
+  || bad "(62) the retraction should be logged (got: $OUT15A)"
+hasin "$OUT15A" '1 resolved holds cleared' \
+  && ok "(62) ...and counted in the summary line" \
+  || bad "(62) summary must count the cleared hold (got: $OUT15A)"
+has '^bead-CB1$' "$TMP/closed" \
+  && bad "(62) clearing a hold must NEVER close the anchor" \
+  || ok "(62) clearing a hold closes nothing — the merge skill still lands it"
+# (63) convergence: the marker went with the reason, so there is nothing to
+# retract on the next pass. Without that, this arm would rewrite the anchor on
+# every idle wake forever.
+: > "$TMP/updates"
+OUT15B="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>/dev/null)"
+eq "$(grep -c '^bead-CB1' "$TMP/updates")" "0" \
+   "(63) a cleared hold is not re-cleared on the next pass (no write at all)"
+hasin "$OUT15B" '0 resolved holds cleared' \
+  && ok "(63) ...and the summary says so" \
+  || bad "(63) second pass must clear nothing (got: $OUT15B)"
+
+# (64) stale GATE, end to end. Same shape, the other arm: pass 1 dispatches the
+# re-review and records the hold, the signoff stamps green at the live head, and
+# the next pass retracts.
+printf '%s\n' 'bead-CG1|273|main|||codex|green@old273' > "$TMP/anchors"
+printf '%s\n' '273|OPEN||false||main|polecat/bead-CG1|head273|MERGEABLE|BLOCKED' > "$TMP/prs"
+: > "$TMP/updates"; : > "$TMP/created"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null 2>&1
+CG1_HELD=$(awk -F'\t' '$1=="bead-CG1"{print $2}' "$TMP/blocked" | tail -1)
+hasin "$CG1_HELD" '^PR#273 check.codex stale' \
+  && ok "(64) the stale-gate arm records its hold as a blocked_reason" \
+  || bad "(64) stale-gate arm must record blocked_reason (got: '$CG1_HELD')"
+eq "$(awk -F'\t' '$1=="bead-CG1"{print $2}' "$TMP/gatehead" | tail -1)" "head273" \
+   "(64) ...alongside the one-per-head guard"
+# The codex signoff came back COMMENT and stamped the gate green at the live head,
+# and the review child closed — exactly what the arm dispatched it to do.
+printf '%s\n' 'bead-CG1|273|main|||codex|green@head273' > "$TMP/anchors"
+: > "$TMP/children"; : > "$TMP/updates"
+OUT15C="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>/dev/null)"
+CG1_UPD=$(grep '^bead-CG1' "$TMP/updates" || true)
+hasin "$CG1_UPD" '--unset-metadata blocked_reason' \
+  && ok "(64) gate green at the live head -> the stale blocked_reason is retracted" \
+  || bad "(64) resolved stale-gate hold must clear blocked_reason (got: $CG1_UPD)"
+hasin "$CG1_UPD" '--unset-metadata stale_gate_head' \
+  && ok "(64) ...and the one-per-head guard with it" \
+  || bad "(64) resolved stale-gate hold must clear stale_gate_head (got: $CG1_UPD)"
+hasin "$CG1_UPD" 'check.codex=' \
+  && bad "(64) clearing a hold must never touch the gate marker itself" \
+  || ok "(64) the gate marker itself is untouched (only the hold record is)"
+hasin "$OUT15C" '1 resolved holds cleared' \
+  && ok "(64) ...counted in the summary line" \
+  || bad "(64) summary must count the cleared gate hold (got: $OUT15C)"
+: > "$TMP/updates"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null 2>&1
+eq "$(grep -c '^bead-CG1' "$TMP/updates")" "0" \
+   "(64) ...and it converges too — nothing left to retract next pass"
+
+# (65) the POOLLESS gate hold clears the same way. It stamps a DIFFERENT marker
+# (stale_gate_nopool_head), so a retraction keyed on stale_gate_head alone would
+# leave every no-pool hold asserting a stale objection forever.
+printf '%s\n' 'bead-CG3|275|main|||codex|green@old275' > "$TMP/anchors"
+printf '%s\n' '275|OPEN||false||main|polecat/bead-CG3|head275|MERGEABLE|BLOCKED' > "$TMP/prs"
+: > "$TMP/updates"; : > "$TMP/created"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" >/dev/null 2>&1          # no --review-pool
+eq "$(awk -F'\t' '$1=="bead-CG3"{print $2}' "$TMP/gatenopool" | tail -1)" "head275" \
+   "(65) no review pool -> the hold is recorded under the no-pool marker"
+printf '%s\n' 'bead-CG3|275|main|||codex|green@head275' > "$TMP/anchors"
+: > "$TMP/updates"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" >/dev/null 2>&1
+CG3_UPD=$(grep '^bead-CG3' "$TMP/updates" || true)
+hasin "$CG3_UPD" '--unset-metadata stale_gate_nopool_head' \
+  && ok "(65) a resolved no-pool hold clears its own marker" \
+  || bad "(65) resolved no-pool hold must clear stale_gate_nopool_head (got: $CG3_UPD)"
+hasin "$CG3_UPD" '--unset-metadata blocked_reason' \
+  && ok "(65) ...and the reason it wrote" \
+  || bad "(65) resolved no-pool hold must clear blocked_reason (got: $CG3_UPD)"
+
+# --- (66)-(68) what must NOT be retracted. ------------------------------------
+# Each of these is a way to mistake "I cannot see the problem" for "the problem is
+# gone" — and a wrong retraction here deletes the only in-band statement of why an
+# anchor is stuck, which is strictly worse than the stale one this arm removes.
+#   bead-CB2 271 conflict hold, mergeable UNKNOWN  -> GitHub is still computing
+#   bead-CB3 272 conflict RESOLVED, but the reason was written by another writer
+#   bead-CG2 274 gate hold, check.codex ABSENT     -> a re-gate is in flight
+#   bead-CG4 276 gate green but the HEAD is unreadable -> no evidence either way
+printf '%s\n' \
+  'bead-CB2|271|main' \
+  'bead-CB3|272|main' \
+  'bead-CG2|274|main|||codex|' \
+  'bead-CG4|276|main|||codex|green@head276' \
+  > "$TMP/anchors"
+printf '%s\n' \
+  '271|OPEN||false||main|polecat/bead-CB2|head271|UNKNOWN|UNKNOWN' \
+  '272|OPEN||false||main|polecat/bead-CB3|head272|MERGEABLE|CLEAN' \
+  '274|OPEN||false||main|polecat/bead-CG2|head274|MERGEABLE|BLOCKED' \
+  '276|OPEN||false||main|polecat/bead-CG4||MERGEABLE|BLOCKED' \
+  > "$TMP/prs"
+printf '%s\t%s\n' 'bead-CB2' 'head271' 'bead-CB3' 'head272' > "$TMP/staled"
+printf '%s\t%s\n' 'bead-CG2' 'old274' 'bead-CG4' 'head276' > "$TMP/gatehead"
+: > "$TMP/gatenopool"
+# CB2 and CG2 carry a reason THIS pass wrote in an earlier round; CB3 carries the
+# signoff round-cap's, which is written by mol-refinery-patrol on an anchor it
+# routes to a human and which leaves merge_result=pull_request — so that anchor is
+# in this very scan, and its reason is not this pass's to retract.
+printf '%s\t%s\n' \
+  'bead-CB2' "PR#271 conflicts with base 'main' (stale base) at head head271; rebase fix-x routed to $FIX_POOL" \
+  'bead-CB3' 'signoff did not converge after 3 rework rounds (cap 3); findings are in the review beads under this anchor' \
+  'bead-CG2' 'PR#274 check.codex stale (green@old274, live head head274); re-review rev-x routed to pool' \
+  'bead-CG4' 'PR#276 check.codex stale (green@old276, live head head276); re-review rev-y routed to pool' \
+  > "$TMP/blocked"
+: > "$TMP/updates"; : > "$TMP/created"
+OUT15D="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>/dev/null)"
+
+# (66) mergeable=UNKNOWN is GitHub still computing — the conflict arm refuses to
+# fire on it, and the retraction must refuse for the same reason. Read as
+# "resolved", it would clear on every pass that caught GitHub thinking and the
+# conflict arm would re-write the reason on the next one: a field that flaps
+# instead of one that is merely stale.
+eq "$(grep -c '^bead-CB2' "$TMP/updates")" "0" \
+   "(66) mergeable=UNKNOWN -> hold NOT retracted (indeterminate is not resolved)"
+
+# (67) blocked_reason is a SHARED field. The retraction is scoped to the text its
+# own arms write, so a hold recorded by another writer keeps its reason — only the
+# head marker, which IS this pass's, goes.
+CB3_UPD=$(grep '^bead-CB3' "$TMP/updates" || true)
+hasin "$CB3_UPD" '--unset-metadata stale_base_head' \
+  && ok "(67) a foreign blocked_reason still lets the resolved head marker clear" \
+  || bad "(67) the resolved head marker should clear (got: $CB3_UPD)"
+hasin "$CB3_UPD" '--unset-metadata blocked_reason' \
+  && bad "(67) a blocked_reason this pass did not write must NEVER be retracted" \
+  || ok "(67) another writer's blocked_reason is left standing (the human it summoned still needs it)"
+hasin "$OUT15D" 'LEFT blocked_reason' \
+  && ok "(67) ...and the refusal is reported rather than silent" \
+  || bad "(67) leaving a foreign reason should be logged (got: $OUT15D)"
+
+# (68) an ABSENT check.codex is a re-gate IN FLIGHT (a REQUEST_CHANGES round
+# unsets it while the rework runs), not a resolution — the anchor genuinely is
+# still held on the gate. And an unreadable head is no evidence at all: `stale_oid`
+# is only computed for a non-empty head, so "not stale" there means "we could not
+# look", and retracting on it would drop a live objection because gh hiccupped.
+eq "$(grep -c '^bead-CG2' "$TMP/updates")" "0" \
+   "(68) check.codex ABSENT (rework in flight) -> hold NOT retracted"
+eq "$(grep -c '^bead-CG4' "$TMP/updates")" "0" \
+   "(68) unreadable head -> hold NOT retracted (absence of evidence is not resolution)"
+hasin "$OUT15D" '1 resolved holds cleared' \
+  && ok "(68) exactly one of the four anchors was touched" \
+  || bad "(68) only bead-CB3's marker should clear (got: $OUT15D)"
+
+# (69) the merged-CLOSE arm's own cleanup covers the gate markers too. It already
+# cleared blocked_reason + stale_base_head; an anchor that took a stale-gate
+# re-review on the way to landing closed still asserting "the gate was last
+# dispatched at <a commit two rounds dead>" about work that has shipped.
+printf '%s\n' 'bead-CM1|277|main|||codex|green@head277' > "$TMP/anchors"
+printf '%s\n' '277|MERGED|2026-06-24T01:00:00Z|false|feed1234beef5678|main|polecat/bead-CM1|head277|MERGEABLE|CLEAN' > "$TMP/prs"
+printf '%s\t%s\n' 'bead-CM1' 'head277' > "$TMP/gatehead"
+printf '%s\t%s\n' 'bead-CM1' 'head277' > "$TMP/gatenopool"
+: > "$TMP/updates"; : > "$TMP/staled"; : > "$TMP/blocked"
+bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" >/dev/null 2>&1
+has '^bead-CM1$' "$TMP/closed" \
+  && ok "(69) the merged anchor still closes as landed" \
+  || bad "(69) merged anchor must close"
+CM1_UPD=$(grep '^bead-CM1' "$TMP/updates" || true)
+hasin "$CM1_UPD" '--unset-metadata stale_gate_head' \
+  && ok "(69) ...and the close clears the stale-gate head marker with the rest" \
+  || bad "(69) merged close must clear stale_gate_head (got: $CM1_UPD)"
+hasin "$CM1_UPD" '--unset-metadata stale_gate_nopool_head' \
+  && ok "(69) ...including the no-pool one" \
+  || bad "(69) merged close must clear stale_gate_nopool_head (got: $CM1_UPD)"
+
+# Leave the fixtures inert for the runs below.
+: > "$TMP/anchors"; : > "$TMP/prs"; : > "$TMP/staled"; : > "$TMP/gatehead"
+: > "$TMP/gatenopool"; : > "$TMP/blocked"; : > "$TMP/children"; : > "$TMP/openprs"
+: > "$TMP/updates"; : > "$TMP/created"; : > "$TMP/mail"
 
 # --- Run 13: REPOFAIL. The origin repository cannot be resolved. ---------------
 # Every PR here is named by NUMBER, and a number resolves in whatever repository

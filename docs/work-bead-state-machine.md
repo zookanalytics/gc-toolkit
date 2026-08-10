@@ -182,8 +182,8 @@ dispatch
 | handed off | open | refinery | — | `branch`, `target` |
 | **pre-open gating** | **open** | **—** | **—** | `branch`, `merged_target`, `merge_result=pre_open_gate` (pre-open subset — currently `{codex}` — runs before the PR opens) |
 | **gating** | **open** | **—** | **—** | `pr_url`, `pr_number`, `merge_result=pull_request` |
-| **gating, stale base** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_base_head`, `blocked_reason`, and an open rebase child |
-| **gating, stale gate** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_gate_head`, `blocked_reason`, and an open codex re-review child (the head moved off the reviewed `green@<oid>`) |
+| **gating, stale base** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_base_head`, `blocked_reason`, and an open rebase child. Both markers are cleared on the pass that observes a definite non-conflict — the hold ends mid-life, not at close |
+| **gating, stale gate** | **open** | **—** | **—** | still `merge_result=pull_request`, plus `stale_gate_head`, `blocked_reason`, and an open codex re-review child (the head moved off the reviewed `green@<oid>`). Both markers are cleared on the pass that observes the gate green at the live head |
 | closed (landed) | closed | — | — | `merged_sha` (committed output) / close reason (ephemeral) |
 | abandoned | closed / open | — | — / `human` | PR closed unmerged: refinery-closed, or escalated if out-of-band |
 | **anchorless** | **closed** | **—** | **—** | Not a state close-on-land creates: bead closed while its PR is still OPEN, so every bead-side scan is blind to it. Found by the PR → bead pass and marked `anchorless_flagged`; disposition is an operator call |
@@ -204,6 +204,39 @@ purpose:
 
 A gating convoy is therefore invisible to find-work and to the pool reconciler;
 the only thing that watches it is the refinery's reconcile pass.
+
+**The two hold sub-states are RETRACTED where they resolve, not at close.** Both
+*gating, stale base* and *gating, stale gate* keep `merge_result=pull_request` —
+the anchor goes on gating while the rebase or the re-review runs — so both holds
+end **mid-life**, with the anchor still open: the branch is rebased, or the gate
+comes back green at the live head. `blocked_reason` is a **live-objection** field,
+so whatever resolves the objection must clear it; leaving that to the terminal
+close (the only place `reconcile-merged-prs.sh` used to clear it) left an anchor
+asserting a resolved conflict, a closed rebase bead and a pool waiting on nothing
+for the entire remaining life of the PR — through re-review, through approval, and
+however long the merge waits. The observer therefore clears `blocked_reason`
+together with the head marker that armed it (`stale_base_head`,
+`stale_gate_head` / `stale_gate_nopool_head`) as soon as it observes a **definite**
+resolution: `mergeable=MERGEABLE`, or `check.<gate>` green at the live head. Two
+properties make that safe rather than noisy, and both are load-bearing:
+
+- **Definite, never indefinite.** The arms refuse to fire on `UNKNOWN`/blank
+  ("GitHub is still computing", or a head we could not read); the retraction
+  refuses for the same reason. Read the other way, the field would *flap* — cleared
+  on every pass that caught GitHub thinking, re-written on the next — which is
+  worse than stale, because a flapping field cannot be trusted even when correct.
+- **Only its own writer's reason.** `blocked_reason` is shared: the signoff
+  round-cap writes one on an anchor it routes to a human and *also* leaves
+  `merge_result=pull_request`, so that anchor sits in the same scan. The retraction
+  is scoped to the reason text its own arms write, so another writer's objection
+  keeps its reason and loses only the marker. Erasing the record of why a human was
+  summoned is the one failure worse than the staleness being fixed.
+
+Clearing the marker matters as much as clearing the reason: it is the
+one-per-head guard, and a hold can resolve **without the head moving** (a conflict
+clears because the *base* moved). A marker left behind then reads as "already
+dispatched at this head" and suppresses the remedy forever — the arm's own
+convergence guard turned into a permanent one.
 
 **Pre-open gating** (`merge_result=pre_open_gate`) is another such sub-state
 marker, added per the above without a new status. It is the phase in which a
