@@ -66,10 +66,21 @@ bounded="([^[:alnum:]_]|^)($phrase_alt)([^[:alnum:]_]|$)"
 # The passive purpose form of "used to" — not a stale reference.
 purpose_form="(^|[^[:alnum:]_])(is|are|was|were|be|been|being)[[:space:]]+used[[:space:]]+to[[:space:]]"
 
+# The ELLIPTICAL purpose form: "Used to translate X" at the start of a
+# comment, or "— used to align Y" after punctuation, means "this is used
+# to…". Excluded UNLESS followed by be/have, which keeps the genuinely
+# historical "Used to be…" / "— used to have…" (prefer false negatives).
+ellipsis_form="((#|//|<!--|/\*)[[:space:]]*|[.;:,][[:space:]]+|[-—][[:space:]]+)used[[:space:]]+to[[:space:]]"
+history_follow="used[[:space:]]+to[[:space:]]+(be|have)[[:space:]]"
+
 found=0
 
 for f in "$@"; do
     [ -f "$f" ] || continue
+
+    # Never lint the detectors themselves: their phrase arrays and headers
+    # necessarily contain the phrases they hunt, so self-lint is pure noise.
+    case "$f" in */lint-learned.d/* | */lint-learned.sh) continue ;; esac
 
     # Per-filetype comment leaders. Markdown/HTML/XML: <!-- --> only.
     case "$f" in
@@ -87,6 +98,11 @@ for f in "$@"; do
 
         # Drop the purpose-passive "…be used to <verb>" form.
         if printf '%s' "$text" | grep -qiE "$purpose_form"; then
+            continue
+        fi
+        # Drop the elliptical purpose form, keeping "used to be/have".
+        if printf '%s' "$text" | grep -qiE "$ellipsis_form" \
+            && ! printf '%s' "$text" | grep -qiE "$history_follow"; then
             continue
         fi
 

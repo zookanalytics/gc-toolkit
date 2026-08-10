@@ -42,6 +42,9 @@ found=0
 
 for f in "$@"; do
     [ -f "$f" ] || continue
+    # Never lint the detectors themselves: comments documenting the
+    # heuristic's own patterns and leaders read as self-findings.
+    case "$f" in */lint-learned.d/* | */lint-learned.sh) continue ;; esac
     # Skip binaries cheaply: grep -qI exits 1 on binary data.
     grep -qI . -- "$f" 2>/dev/null || continue
 
@@ -75,6 +78,15 @@ for f in "$@"; do
             esac
         else
             [ "${#lit}" -lt 2 ] && continue
+            # A "string" containing an expansion or template placeholder
+            # ($VAR, {{var}}, %s, <name>) is not a constant value — a comment
+            # naming the placeholder is describing intent, not duplicating data.
+            case "$lit" in *'$'* | *'{'* | *'}'* | *'%'* | *'<'* | *'>'*) continue ;; esac
+            # A single plain lowercase word ("timeout", "else", "auto") is
+            # ordinary English: a comment containing it is almost always
+            # using the word, not restating the constant. Values that look
+            # constant-like (digits, dots, dashes, underscores, case) stay.
+            [[ "$lit" =~ ^[a-z]+$ ]] && continue
         fi
         [ "${#lit}" -gt 24 ] && continue
 
