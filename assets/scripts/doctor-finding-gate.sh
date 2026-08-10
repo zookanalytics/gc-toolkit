@@ -98,11 +98,14 @@
 # somebody else already paid for.
 #
 # A live run is attempted ONLY when the bead carries an explicit doctor_check or a
-# `check-*`-shaped token — the cheap pre-filter that says "there is plausibly
-# something here", so a routine close never triggers a doctor run. With a warm
-# cache the full intersection runs regardless, which is what gives the bare-named
-# builtins their coverage. Cold cache + a bare-named check is the one gap, and it
-# closes itself on the next patrol.
+# `check-*`-shaped token, in EITHER shape a check-prefixed name arrives in — the
+# bare `check-x` and the namespaced `gc-toolkit:check-x` that pack checks are
+# actually reported under. That is the cheap pre-filter that says "there is
+# plausibly something here", so a routine close never triggers a doctor run. With
+# a warm cache the full intersection runs regardless, which is what gives the
+# bare-named builtins their coverage. Cold cache + a check whose name carries no
+# `check-` component at all (the bare builtins, `census-owner-liveness`) is the
+# one gap, and it closes itself on the next patrol.
 #
 # FAIL-SOFT, ALWAYS. Every unreadable input — the bead, the payload, the ledger —
 # exits 2 and prints nothing. The caller then behaves exactly as it did before
@@ -240,9 +243,30 @@ cmd_probe() {
   # A `check-*`-shaped token or an explicit declaration says "plausibly about a
   # check". It is never used to REPORT — reporting is the payload intersection
   # below — so its false positives cost a lookup, not a finding.
+  #
+  # BOTH shapes, because a check-prefixed name arrives in two: the bare `check-x`
+  # and the namespaced `gc-toolkit:check-x` that pack checks are actually reported
+  # under. The intersection below already treats the namespaced form as a check
+  # name (it matches in full, or on the bare suffix after the last colon), so a
+  # pre-filter that recognized only ` check-` made the two halves of this script
+  # disagree about what a check name looks like — and the disagreement failed in
+  # the one direction that is invisible. A bead naming nothing but a full
+  # namespaced token was NOT plausible, so with a cold cache and `--no-run` the
+  # probe fell through to the clean return below instead of the indeterminate one:
+  # rc 0, no output, and a refinery close arm that neither annotates the close nor
+  # counts it as unevaluated. A namespaced pack-check anchor could close as
+  # verified-clean at the exact moment the gate had verified nothing — the
+  # silent-inert failure this whole script exists to end.
+  #
+  # Both patterns still require the `check-` prefix itself, which is what keeps
+  # the filter cheap: a token is plausible because a check name begins right
+  # there, either at a word boundary or straight after a namespace colon. An
+  # ordinary colon token buys nothing — a `18:55Z` timestamp out of a mayor note,
+  # a bare `https:` left by a normalized url — so a routine close still pays for
+  # no doctor run.
   local plausible=""
   [ -n "$explicit" ] && plausible=1
-  [ -z "$plausible" ] && case "$norm" in *" check-"*) plausible=1 ;; esac
+  [ -z "$plausible" ] && case "$norm" in *" check-"*|*":check-"*) plausible=1 ;; esac
 
   # --- resolve a payload. ------------------------------------------------------
   local payload="" ran=""

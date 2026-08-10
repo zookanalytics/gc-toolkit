@@ -17,6 +17,13 @@
 #                is the whole reason `publish` exists: the refinery probes with
 #                --no-run, so with nothing warming the cache the arm never fires
 #                once. rc 0 here would make that invisible forever.
+#   (NSINERT)    the same, for a check named in FULL (`gc-toolkit:check-x`, how
+#                doctor reports pack checks). The cold-cache pre-filter decides
+#                whether the probe may answer at all, so a shape it does not
+#                recognize is INERT for that whole class of bead — and it is
+#                inert as rc 0, which the refinery cannot tell apart from a
+#                verified-clean close. Half of this script already treated the
+#                namespaced form as a check name; the pre-filter did not.
 #   (PUBREFUSE)  publish must REFUSE an empty/drifted payload and LEAVE THE
 #                PRIOR CACHE INTACT. The patrol's doctor run can come back empty
 #                at its 300s bound; installed as the cache it would answer every
@@ -213,6 +220,13 @@ out=$("$SCRIPT" probe b-ns --json "$FRESH" 2>/dev/null); rc=$?
 eq "$rc" "1" "(NAMESPACE) a namespaced check matches on its bare suffix"
 eq "$out" "gc-toolkit:check-namespaced" "(NAMESPACE) it reports the full name"
 
+# The other way a namespaced check is written — in FULL, which is how doctor
+# itself reports it and how a filer copying a doctor line would name it.
+bead b-nsfull "gc doctor: gc-toolkit:check-namespaced is still firing" "" "" ""
+out=$("$SCRIPT" probe b-nsfull --json "$FRESH" 2>/dev/null); rc=$?
+eq "$rc" "1" "(NSFULL) a full namespaced token matches"
+eq "$out" "gc-toolkit:check-namespaced" "(NSFULL) it reports the full name"
+
 bead b-path "see specs/tk-gi2pc/check-rig-scoped-orders-bound.md" "" "" ""
 eq "$("$SCRIPT" probe b-path --json "$FRESH" >/dev/null 2>&1; echo $?)" "1" \
    "(TOKENIZE) a check name embedded in a path still matches"
@@ -251,12 +265,33 @@ bead b-routine "ordinary work bead, no checks named" "just code" "" ""
 "$SCRIPT" probe b-routine --cache "$COLD" --no-run >/dev/null 2>&1
 eq "$?" "0" "(ROUTINE) a bead naming nothing check-shaped is clean on a cold cache"
 
+# (NSINERT) The same INERT claim for a bead whose ONLY check token is written in
+# full, `gc-toolkit:check-namespaced`. The pre-filter decides whether the probe
+# may answer at all on a cold cache, so a shape it does not recognize returns
+# CLEAN — indistinguishable, at the refinery close arm, from a gate that ran and
+# found nothing: no annotation, and not even a dgate_unknown to say the gate was
+# never evaluated. A namespaced pack-check anchor would close as verified-clean
+# having verified nothing, which is the silent-inert failure (INERT) above pins
+# for the bare shape.
+"$SCRIPT" probe b-nsfull --cache "$COLD" --no-run >/dev/null 2>&1
+eq "$?" "2" "(NSINERT) a FULL namespaced token is plausible: cold cache + --no-run is INDETERMINATE"
+
+# ...and the pre-filter must stay narrow while it is wider: a colon token that is
+# not a namespace-before-a-check (a timestamp out of a bead note) must still buy
+# no doctor run, or every routine close pays for one.
+bead b-colon "mayor note 2026-08-10T18:55Z about ordinary work" "" "" ""
+"$SCRIPT" probe b-colon --cache "$COLD" --no-run >/dev/null 2>&1
+eq "$?" "0" "(NSNARROW) a colon token that names no check is still clean on a cold cache"
+
 # publish, then the same cold-cache probe answers for real — the end-to-end
 # claim the patrol wiring rests on.
 "$SCRIPT" publish "$FRESH" --cache "$COLD" >/dev/null 2>&1
 out=$("$SCRIPT" probe b-plaus --cache "$COLD" --no-run 2>/dev/null); rc=$?
 eq "$rc" "1" "(WARM) after publish, the same --no-run probe reports the finding"
 eq "$out" "check-rig-scoped-orders-bound" "(WARM) and names it"
+out=$("$SCRIPT" probe b-nsfull --cache "$COLD" --no-run 2>/dev/null); rc=$?
+eq "$rc" "1" "(WARM) the full-namespaced bead answers from the same warm cache"
+eq "$out" "gc-toolkit:check-namespaced" "(WARM) and names the namespaced check"
 
 # A cache older than the ttl is not a payload.
 touch -t 200001010000 "$COLD" 2>/dev/null || true
