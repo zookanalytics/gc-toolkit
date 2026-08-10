@@ -38,6 +38,23 @@ else
         || errors+=("$script: the empty/unreadable-roster fail-safe is gone — an empty roster makes every address look unheld and every assignee rewritable")
     grep -q 'is_alive' "$dir/$script" \
         || errors+=("$script: the liveness guard is gone — the pass may rewrite an address a live session still answers to")
+    # The fail-safe has to be decided from the LIVE roster read ALONE. Merging the
+    # session-bead fallback in first is what defeated it once already: a failed
+    # `gc session list` collapsed to an empty set, the configured identities were
+    # appended, and the non-empty union read as a healthy roster — so the pass
+    # rewrote assignees without ever proving no live session answers to them.
+    grep -q 'LIVE_ROSTER_OK' "$dir/$script" \
+        || errors+=("$script: the live-roster read is no longer tracked on its own — a session-bead fallback can satisfy the fail-safe again and the pass will rewrite assignees on a roster read that never happened")
+    # Every bead call must carry the rig pin. Unpinned, the pass reads whatever
+    # ledger is ambient: in an imported rig it never sees the stranded handoff it
+    # exists to recover, and any same-shaped candidate in the ambient database is
+    # rewritten instead. Structural, not textual — every `gc bd` line has to be the
+    # helper's own (the only two that forward "$@").
+    grep -q -- '--rig' "$dir/$script" \
+        || errors+=("$script: the rig pin is gone — an unpinned bead call reads the ambient ledger, misses the rig's stranded handoff, and can rewrite a candidate in a database nobody named")
+    if grep -n 'gc bd ' "$dir/$script" | grep -v '^[0-9]*:#' | grep -qv '"\$@"'; then
+        errors+=("$script: a bead call bypasses the rig-pinned helper (bd_pinned) — $(grep -n 'gc bd ' "$dir/$script" | grep -v '^[0-9]*:#' | grep -v '"\$@"' | head -3 | tr '\n' ' ')")
+    fi
 fi
 [ -s "$dir/${script%.sh}.test.sh" ] \
     || errors+=("missing: ${script#assets/scripts/} regression test (${script%.sh}.test.sh)")

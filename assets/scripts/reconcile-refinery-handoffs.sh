@@ -66,9 +66,15 @@
 #                                             signal without delivering the work —
 #                                             the "template guesses a name no session
 #                                             holds" failure, from the other end
-#   the roster could not be read, or is       an empty roster makes EVERY address
-#     empty while sessions exist              look dead; repairing on it would rewrite
-#                                             assignees out from under live agents
+#   the LIVE session roster did not read,     an unread or empty roster makes EVERY
+#     did not parse, or came back empty       address look dead; repairing on it would
+#                                             rewrite assignees out from under live
+#                                             agents. Only a live census can prove an
+#                                             address unheld — the session-bead
+#                                             fallback names identities that SHOULD
+#                                             exist, so it can prove one alive and
+#                                             never one dead, and it does not satisfy
+#                                             this gate
 #
 # The fail-safe direction is always "leave it and say so": an un-repaired strand is
 # the status quo this pass improves on, while a wrong rewrite creates a new one.
@@ -81,6 +87,12 @@
 # holder and deliberate cross-rig routing are not incidents, and mailing them would
 # train the reader to ignore the ones that are.
 #
+# WHICH LEDGER — every bead call is pinned to a rig (`--rig`, defaulting to $GC_RIG)
+# through `bd_pinned`. An unpinned `gc bd` reads whatever ledger is ambient, which
+# in an imported rig is not the one whose refinery this pass was handed: it would
+# both miss the stranded handoff it exists to recover AND rewrite candidates in a
+# database nobody named. See the note on the helper below.
+#
 # NOT set -e: best-effort, must never abort the patrol mid-pass. Any tool error
 # skips that bead and retries next cycle. The pass DOES exit non-zero when a repair
 # it decided on could not be verified — the call sites treat that as non-fatal and
@@ -89,13 +101,45 @@ set -uo pipefail
 
 REFINERY_ID=""
 DRY_RUN=0
+# WHICH LEDGER this pass reads and writes. Defaults to the caller's $GC_RIG, which
+# both call sites already export, and is overridable with --rig for a cross-rig or
+# test invocation. Empty means "unpinned", which is correct only in an HQ-only city
+# with no rigs at all.
+# NOTE the name: the candidate loop below uses `RIG` for the ASSIGNEE's rig, and a
+# global called `RIG` would be silently overwritten by the first bead examined —
+# every bead call after it would then be pinned to whatever rig that assignee
+# happened to name.
+RIG_PIN="${GC_RIG:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --refinery) REFINERY_ID="${2:-}"; shift 2 ;;
+    --rig)      RIG_PIN="${2:-}"; shift 2 ;;
+    --rig=*)    RIG_PIN="${1#--rig=}"; shift ;;
     --dry-run)  DRY_RUN=1; shift ;;
     *)          shift ;;
   esac
 done
+
+# EVERY bead read and write goes through this — never a bare `gc bd`. A bare call
+# resolves to whatever ledger is ambient (BEADS_DIR, or the cwd's rig), and this
+# pass runs from a patrol worktree whose ambient ledger is NOT necessarily the rig
+# whose refinery it was handed. In an imported rig (shutupandlisten, signal-loom)
+# that is exactly the live shape, and it breaks the pass in both directions at
+# once: the candidate enumeration never SEES the rig-scoped stranded handoff, so
+# the pass reports "0 examined" and the strand persists invisibly — the very
+# failure it exists to end — while any near-miss `refinery` candidate that happens
+# to live in the AMBIENT ledger is enumerated and REWRITTEN there, a repair applied
+# to a database nobody asked about. mol-refinery-patrol's own find-work query
+# carries the same pin for the same reason ("`${GC_RIG:+--rig=...}` scopes the
+# query to this refinery's rig"), and a repair pass must read the queue the
+# refinery actually polls or it is reasoning about a different city.
+bd_pinned() { # <bd-subcommand> [args...]
+  if [ -n "$RIG_PIN" ]; then
+    gc bd --rig "$RIG_PIN" "$@"
+  else
+    gc bd "$@"
+  fi
+}
 
 # Without a canonical identity there is nothing to compare against and every
 # assignee would look wrong. Same skip check-set-heal takes for the same reason.
@@ -126,12 +170,53 @@ case "$REFINERY_ID" in */*) CANON_RIG="${REFINERY_ID%/*}" ;; esac
 #
 # Both blobs go to jq on STDIN, never `--argjson` on argv: on a busy city the
 # session `command` fields overflow ARG_MAX ("argument list too long: jq").
-SESSIONS_JSON=$(gc session list --state=all --json 2>/dev/null) || SESSIONS_JSON=""
-SESSION_BEADS_JSON=$(gc bd list --type=session --label=gc:session --include-infra \
+SESSIONS_JSON=$(gc session list --state=all --json 2>/dev/null); SESSIONS_RC=$?
+SESSION_BEADS_JSON=$(bd_pinned list --type=session --label=gc:session --include-infra \
   --include-gates --all --json --limit=0 2>/dev/null) || SESSION_BEADS_JSON=""
 
 SESSION_COUNT=$(printf '%s' "$SESSIONS_JSON" | jq -r '(.sessions // []) | length' 2>/dev/null)
 [ -n "$SESSION_COUNT" ] || SESSION_COUNT=0
+
+# Can the LIVE roster be trusted to prove an address DEAD? Decided HERE, from the
+# live read alone, and never from the merged identity set below.
+#
+# The two sources are not interchangeable and only one of them can answer this
+# question. The live roster is a census: an address absent from a COMPLETE one is
+# genuinely unheld. The session BEADS are a configuration record — they name
+# identities that are supposed to exist, so they can prove an address ALIVE (the
+# scale-from-zero refinery between spawns) but they say nothing about who is
+# answering right now, and therefore can never prove one dead.
+#
+# Merging them before the check is what broke it: a failed `gc session list`
+# collapsed to an EMPTY live set, the session-bead fallback was appended, and the
+# non-empty union was read as "the roster is fine". Every near-miss address then
+# resolved to "nobody holds it" on the strength of a read that never happened, and
+# the pass rewrote assignees without ever proving no live session answers to them.
+# Reproduced: `gc session list` exiting non-zero while a session bead advertises
+# the canonical identity still REPAIRED a bead.
+#
+# So the live read is tracked on its own, by exit status AND by shape — a payload
+# that is not `{"sessions": [...]}` is unreadable no matter what it parses as, and
+# an empty string from a failed capture must not read as "an empty city".
+LIVE_ROSTER_OK=1
+LIVE_ROSTER_WHY=""
+if [ "$SESSIONS_RC" -ne 0 ]; then
+  LIVE_ROSTER_OK=0
+  LIVE_ROSTER_WHY="the live session roster could not be READ (gc session list --state=all --json exited $SESSIONS_RC)"
+elif ! printf '%s' "$SESSIONS_JSON" \
+     | jq -e 'type == "object" and has("sessions") and (.sessions | type == "array")' \
+       >/dev/null 2>&1; then
+  LIVE_ROSTER_OK=0
+  LIVE_ROSTER_WHY="the live session roster did not PARSE as {\"sessions\": [...]}"
+elif [ "$SESSION_COUNT" -eq 0 ]; then
+  # Readable and genuinely empty. That still cannot prove an address dead — it
+  # makes EVERY address look dead at once, which is the permissive direction. In
+  # practice this costs nothing: whoever runs this pass is itself a live session,
+  # so a roster that answers with zero sessions is reporting on a city it cannot
+  # see rather than on a city that is idle.
+  LIVE_ROSTER_OK=0
+  LIVE_ROSTER_WHY="the live session roster is EMPTY (0 sessions listed) while this pass is itself running in one, so it is not a census of who is alive"
+fi
 
 # Every identifier form of every session that is NOT closed or archived. A
 # `drained`, `asleep`, `suspended` or `quarantined` session still has an owner and
@@ -161,8 +246,16 @@ fi
 # resolves every address to "nobody holds it", which is the permissive direction
 # here: it would rewrite assignees out from under live agents. Report-only for the
 # pass; the next cycle re-reads.
+#
+# The LIVE read decides this on its own (above): a session-bead fallback can add
+# identities to the set but can never repair a census that did not happen, so it
+# must not be able to satisfy this gate. The union is still checked afterwards for
+# the case where every source read fine and produced nothing.
 ROSTER_OK=1
-if [ -z "$ALIVE_IDS" ]; then
+if [ "$LIVE_ROSTER_OK" != 1 ]; then
+  ROSTER_OK=0
+  echo "reconcile-refinery-handoffs: FAIL-SAFE $LIVE_ROSTER_WHY; NOT repairing any assignee this pass — an address can only be proved unheld against a live roster that was actually read, and configured session beads cannot stand in for one. Reporting only; retries next cycle" >&2
+elif [ -z "$ALIVE_IDS" ]; then
   ROSTER_OK=0
   echo "reconcile-refinery-handoffs: FAIL-SAFE the session roster is empty or unreadable ($SESSION_COUNT session(s) listed); NOT repairing any assignee this pass — an empty roster makes every address look unheld. Reporting only; retries next cycle" >&2
 fi
@@ -183,7 +276,7 @@ is_alive "$REFINERY_ID" && CANON_ALIVE=1
 # --- candidate enumeration -------------------------------------------------
 # The handoff shape, and nothing else: OPEN, carrying `metadata.branch` (what the
 # done sequence stamps and what find-work filters on), not an epic.
-RAW=$(gc bd list --status=open --has-metadata-key=branch --exclude-type=epic \
+RAW=$(bd_pinned list --status=open --has-metadata-key=branch --exclude-type=epic \
   --limit=0 --json 2>/dev/null)
 RC=$?
 if [ "$RC" -ne 0 ] || [ -z "$RAW" ] \
@@ -249,7 +342,7 @@ That address resolves to no session, so nobody polls it — and the bead carries
 It was NOT repaired: the canonical refinery identity this pass was given, '$REFINERY_ID', resolves to no session either, so rewriting would move the bead from one dead address to another and remove the last evidence.
 Action needed: confirm the refinery's real identity, then reassign the bead to it. If '$REFINERY_ID' is wrong, the configured/rendered refinery address is the actual defect and every future handoff will strand the same way (tk-0nn3f)." >/dev/null 2>&1 || true
   fi
-  gc bd update "$id" --set-metadata refinery_handoff_flagged="$assignee" >/dev/null 2>&1 || true
+  bd_pinned update "$id" --set-metadata refinery_handoff_flagged="$assignee" >/dev/null 2>&1 || true
 }
 
 while IFS= read -r row; do
@@ -300,8 +393,8 @@ while IFS= read -r row; do
   # batching it with the marker risks losing both to one rejection. The marker is
   # never part of the repair predicate either — a marker that stuck while the
   # assignee did not must NOT suppress the retry.
-  gc bd update "$ID" --assignee="$REFINERY_ID" >/dev/null 2>&1 || true
-  GOT=$(gc bd show "$ID" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037' \
+  bd_pinned update "$ID" --assignee="$REFINERY_ID" >/dev/null 2>&1 || true
+  GOT=$(bd_pinned show "$ID" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037' \
     | jq -r '.[0].assignee // empty' 2>/dev/null)
   if [ "$GOT" != "$REFINERY_ID" ]; then
     failed=$((failed + 1))
@@ -310,7 +403,7 @@ while IFS= read -r row; do
   fi
   repaired=$((repaired + 1))
   echo "reconcile-refinery-handoffs: REPAIRED $ID assignee '$ASSIGNEE' -> '$REFINERY_ID' (branch ${BRANCH:-none}); a completed merge handoff that no session would ever have polled (tk-0nn3f)"
-  gc bd update "$ID" \
+  bd_pinned update "$ID" \
     --set-metadata refinery_address_repaired="$ASSIGNEE" \
     --append-notes "reconcile-refinery-handoffs: assignee was '$ASSIGNEE', a near-miss of the canonical refinery identity '$REFINERY_ID' that no session answered to. The bead carried branch '${BRANCH:-none}' and no merge_result, so it was invisible to the refinery's assignee filter AND to every bead-keyed pass. Reassigned to the canonical identity; work content, branch and metadata untouched (tk-0nn3f)." \
     >/dev/null 2>&1 || true
