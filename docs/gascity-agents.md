@@ -1215,6 +1215,95 @@ children at any given instant is normal. Never judge from
 `last_active` or `peek`, and never file a stuck-agent warrant on
 them.
 
+### A fresh-wake singleton's continuation epoch moves under a queued nudge
+
+**Memory:**
+`reference-nudge-to-always-fresh-session-fails-fence-mismatch.md`.
+
+`wake_mode = "fresh"` bumps `continuation_epoch` on **every** wake
+after the first, while keeping the *same* session bead —
+`shouldBumpContinuationEpoch` (`rigs/gascity/cmd/gc/session_wake.go`)
+is `WakeMode == "fresh" && LastWokeAt != ""`. Pair it with `mode =
+"always"` and the recycle becomes continuous rather than occasional:
+the agent drains, and an always-mode session — desired every tick,
+against no predicate — is spawned straight back, fresh, on a new
+epoch. The config loader flags the pairing rather than rejecting it —
+`IsAlwaysFreshWakeModeWarning` (`internal/config/config.go`), *"use
+only for a deliberate restart-per-cycle actor"* — and in gc-toolkit
+the mayor, deacon, mechanik and every witness run it.
+
+A queued nudge is stamped with the target's session id **and** its
+epoch, so any nudge that outlives one recycle meets a moved fence at
+delivery. Against a patrol agent that is the *normal* case, not a
+race: a deacon cycling every few minutes turns "queued a moment ago"
+into "queued an epoch ago" routinely — measured 2026-08-08, four of
+boot's five nudges to `gc-toolkit.deacon` over 14 days died this way.
+What happens at the fence is not uniform, and the difference matters:
+
+- **Same-session epoch drift is retargeted onto the live
+  conversation.** A non-empty session id that already cleared the
+  identity guard is proof the item belongs to this agent, so the
+  epoch is not treated as a veto — the sender addressed the *agent*,
+  not one of its conversations. `queuedNudgeMatchesTargetFence` /
+  `queuedNudgeEpochRetargetable` (`cmd/gc/cmd_nudge.go`).
+- **A wait-sourced nudge keeps the strict fence, by design.** It
+  carries the wait's own `registered_epoch` (`cmd_wait.go`), which is
+  a real conversation-scoped guarantee: a stale-epoch wait is
+  independently canceled as continuation-stale, so delivering its
+  reminder into a later conversation would contradict the wait state
+  machine.
+- **An item naming no session keeps the strict fence too** — with no
+  session id there is no identity evidence at all, and the epoch is
+  the only thing left to judge on.
+
+**A fenced nudge is destroyed, not delayed.** `failedQueuedNudge`
+(`cmd/gc/cmd_nudge.go`) special-cases
+`errNudgeSessionFenceMismatch`: it stamps `DeadAt` on the **first**
+attempt and returns dead, bypassing the attempt-count and backoff
+path every other failure gets. The nudge wisp closes `state=failed`,
+`last_error = "queued nudge session fence mismatch"`. Nothing retries
+it, and the sender is never told — from the outside a destroyed nudge
+and an ignored nudge are the same silence.
+
+**The rule that follows: nudge delivery is not a liveness signal.**
+Silence from one of these identities is evidence about the *queue*
+before it is evidence about the agent. Any design that reads
+nudge-response as proof of life can therefore condemn a perfectly
+healthy target — and it fails in the worst direction, because the
+false-positive guard is usually itself a response. `mol-shutdown-dance`
+is the live example: it interrogates by `gc session nudge` three
+times (60s / 120s / 240s) and executes the warrant if no `ALIVE`
+comes back, so a non-delivered interrogation suppresses the very
+pardon path meant to catch the mistake.
+
+Prefer signals that need no response from the target — a wisp's
+`updated_at` advancing, pane text changing, a generation counter
+moving. When you must conclude something from silence, first confirm
+the nudge actually shipped: check that its wisp reached a state other
+than `failed`, and treat `state=failed` as *"the message died"*, not
+*"the agent is dead"*.
+
+**Detection — know which behavior your build has.** The retarget arm
+is newer than the fence, so a city running an older `gc` dead-letters
+*every* epoch drift, not just the two fenced cases above. `gc version
+--json` reports the build `commit`; resolve it against the gascity
+checkout to see whether the arm is present:
+
+```bash
+COMMIT=$(gc version --json | jq -r .commit)  # e.g. 3e629adc4-dirty
+COMMIT=${COMMIT%%-dirty}                     # build-tree marker, not part of the rev
+git -C rigs/gascity show "$COMMIT:cmd/gc/cmd_nudge.go" \
+  | grep -c queuedNudgeEpochRetargetable     # 0 = every drift dead-letters
+```
+
+Strip the `-dirty` suffix before using the commit as a rev, and let
+`git show` write its own error: left attached, the rev simply fails to
+resolve, `grep -c` prints `0` into the silence, and a **present** arm
+reads as absent.
+
+The design rule above holds either way — the arm narrows the failure,
+it does not remove it, and the two fenced cases are permanent.
+
 ### A bare (city-scoped) alias never matches a rig-qualified assignee
 
 **Memory:** `reference-polecat-liveness.md` (§ city-scoped aliases are
