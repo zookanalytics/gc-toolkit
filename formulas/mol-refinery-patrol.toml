@@ -392,6 +392,27 @@ done
 if [ -n "$SCRIPTS_DIR" ]; then
   # All passes are best-effort: a failed pass is retried next idle wake and
   # never blocks find-work.
+  # (a-addr) Near-miss HANDOFF ADDRESS recovery (tk-0nn3f). Runs FIRST, because it
+  #      is the only pass that can make a bead visible to the assignee filter this
+  #      step just ran: a merge handoff addressed to a refinery WITHOUT the binding
+  #      prefix ("<rig>/refinery" instead of "<rig>/{{binding_prefix}}refinery") is
+  #      accepted as free text and then polled by nobody. It carries no
+  #      merge_result and no pr_url either, so every bead-keyed pass below is blind
+  #      to it as well, and an idle refinery with an empty queue is exactly what a
+  #      healthy city looks like — the live case sat 1h07m until a human found it.
+  #      Repairing here means the re-check at the bottom of this loop claims the
+  #      bead in the SAME cycle. The canonical identity is $GC_AGENT when we have
+  #      one: it is the literal string find-work filters on above, so repairing to
+  #      it cannot disagree with the queue we actually poll. The pass only rewrites
+  #      an address no session answers to, and only toward an identity that
+  #      resolves — everything else it reports and leaves alone (a gating anchor
+  #      with a non-canonical assignee stays check-set-heal's flag-only business).
+  REFINERY_CANON="${GC_AGENT:-}"
+  [ -n "$REFINERY_CANON" ] || REFINERY_CANON="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+  if [ -x "$SCRIPTS_DIR/reconcile-refinery-handoffs.sh" ]; then
+    "$SCRIPTS_DIR/reconcile-refinery-handoffs.sh" --refinery "$REFINERY_CANON" \
+      || echo "reconcile-refinery-handoffs: pass failed (non-fatal); retries next idle wake" >&2
+  fi
   # (a-norm) Check-set normalization at the REFINERY BOUNDARY (tk-i48ca). A
   #      hand-RECOVERED anchor never ran the merge-push step, so its check_set was
   #      never normalized: it arrives empty, and merge-skill.sh reads empty as "no

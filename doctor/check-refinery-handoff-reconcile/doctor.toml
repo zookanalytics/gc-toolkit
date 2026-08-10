@@ -1,0 +1,1 @@
+description = "The near-miss refinery-address recovery stays shipped and wired — assets/scripts/reconcile-refinery-handoffs.sh with its regression test, called from the refinery's find-work idle loop and the witness's check-refinery step, so a merge handoff addressed without the binding prefix cannot go back to being invisible to every detector at once (tk-0nn3f)"
