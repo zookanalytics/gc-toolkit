@@ -6,10 +6,21 @@ held-by-design; anything else is an UNNAMED WAIT
 specs/2026-08-fresh-start/liveness-and-triage-spec.md §2).
 
 Normalization is BATCHED, not per-bead: the sweep owns a standing
-"unnamed waits" triage subject per rig and files ONE visit per pass
-listing every candidate — a large backlog costs one conversation, never
-one per idle bead. Per-bead visits emerge only from that sitting's
-decisions.
+"unnamed waits" triage subject per rig and files ONE visit per pass —
+a large backlog costs one conversation, never one per idle bead.
+Per-bead visits emerge only from that sitting's decisions.
+
+Reporting is DELTA, not census: a pass names the candidates that are NEW
+since the previous pass and files nothing when none are. "Unnamed" is
+the resting state of any filed-but-not-active bead, so the full
+population is approximately the whole backlog — re-listing it every pass
+re-litigates a stable set and buries the one bead that actually changed.
+The baseline lives in `sweep.reported` on the standing subject; its
+failure mode is to re-report, never to hide (operator decision
+2026-08-10, bead tk-snnpp). `assets/scripts/liveness-sweep-delta.test.sh`
+extracts the two marked blocks below and executes them, so the delta
+split, the takeaway filter and the park wording cannot drift from what
+an agent actually runs.
 
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
@@ -28,7 +39,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.list_cap]
-description = "Max candidates ENUMERATED INDIVIDUALLY in the batch visit body; candidates beyond the cap are still included, grouped into labelled cohorts (the cap bounds line-by-line detail, not coverage)"
+description = "Max NEW candidates ENUMERATED INDIVIDUALLY in the batch visit body; new candidates beyond the cap are still included, grouped into labelled cohorts (the cap bounds line-by-line detail, not coverage). Carried candidates are never enumerated individually — they are a count plus a bare id list."
 default = "20"
 
 [[steps]]
@@ -76,8 +87,30 @@ fifth is a defect:
    being held is `in_progress`, which is why the listing above is
    `--status=open,in_progress`; an open-only read would re-file on
    exactly the subjects whose sittings are live.
-4. **held-by-design** — `task_kind=triage-subject`.
+4. **held-by-design** — three shapes, all named waits:
+   (a) `task_kind=triage-subject` — a scope bead itself;
+   (b) a bead a scope actually HOLDS — parked onto a scope bead with a
+   real dependency edge (`gc bd dep add <bead> <scope>`), which makes it
+   blocker-blocked, so `gc bd ready` drops it before it ever reaches the
+   candidate set. Nothing here has to test for (b): the edge IS the
+   park, and it is the ONLY park (see the note below);
+   (c) `gc.takeaway` non-empty — a human is holding it awaiting their
+   own answer, with `gc.takeaway_at`/`gc.takeaway_by` recording who and
+   when. This is the one held shape carrying no structural edge, so it
+   is the one that must be filtered explicitly. Skip it and the sweep
+   re-litigates precisely the beads a human touched most recently, in
+   front of the person who parked them.
 5. **unnamed** — none of the above: the defect this sweep exists for.
+
+**Scope coverage is the EDGE, and only the edge** (operator decision
+2026-08-10, bead tk-snnpp). A scope naming its members by filter — the
+`triage.scope` token schema that mol-triage-recurrence evaluates — is
+deliberately NOT read here, so there is no membership-by-name: a bead is
+covered when an edge holds it and at no other time. Two consequences
+worth stating where the park is performed: the edge is load-bearing (a
+tidy-up that deletes it silently un-parks the bead), and the scope bead
+must stay OPEN (closing it un-parks everything it holds). If
+membership-by-name is ever wanted, that token schema is where to start.
 
 Mechanically: start from the ready set, apply the jq below, then for
 each survivor check its dependency edges with `gc bd show <id>` — any
@@ -87,6 +120,7 @@ shape; an epic whose children have ALL closed → keep it, called out as
 a "what comes next?" candidate.
 
 ```bash
+# >>> classify-candidates
 CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" '
   ([($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
@@ -95,11 +129,20 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" '
       | select((.metadata["gc.routed_to"] // "") == "")
       | select((.metadata.task_kind // "") != "visit")
       | select((.metadata.task_kind // "") != "triage-subject")
+      | select((.metadata["gc.takeaway"] // "") == "")
       | select(.id as $id | ($convgroups | index($id)) | not)
     ] | map({id, title, type})')
+# <<< classify-candidates
 printf '%s\n' "$CANDIDATES"
 # apply the edge check (children + tracks) per candidate before step 2
 ```
+
+Every `// ""` above is load-bearing, not style: on a real store most
+beads carry no `gc.routed_to`, no `task_kind` and no `gc.takeaway` key
+at all, so a strict `==`/`!=` against a missing key compares to `null`
+and matches the wrong set. The takeaway filter drops a bead whose stamp
+is non-empty and KEEPS one whose stamp is present-but-empty — an empty
+takeaway is a cleared hold, not a hold.
 
 Record in your notes: counts per class as a funnel, the surviving ids,
 and what the edge check dropped. Then close this step:
@@ -112,7 +155,7 @@ gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status
 
 [[steps]]
 id = "normalize"
-title = "One batch visit on the sweep's triage subject (never per-bead)"
+title = "One batch visit on the sweep's triage subject — new candidates only, never per-bead"
 needs = ["classify"]
 description = """
 **0. Fail-closed:** read the classify step's `gc.outcome`. If it is not
@@ -122,37 +165,97 @@ to run — reading its outcome is the guard; the graph has no other
 brake.)
 
 **1. Resolve the sweep's standing triage subject** (one per rig; create
-on first run, idempotent — search `$LIVE` for it first):
+on first run, idempotent — search `$LIVE` for it first). It is also
+where this sweep keeps its only piece of state, the delta baseline:
 
 ```bash
 SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subject")
   | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | (.[0].id // "")' "$LIVE")
 if [ -z "$SWEEP_SUBJECT" ]; then
   SWEEP_SUBJECT=$(gc bd create -t task --title "triage: unnamed waits (this rig)" \
-    -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the current unnamed waits; dispositions are route / gate / park-into-a-scope / kill — or open a visit on one." --json | jq -r '.id // .[0].id')
+    -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits that are NEW since the previous pass, and carries the rest as a count. Dispositions are route / gate / kill / park — where park means hanging the bead off a triage-subject scope bead with a real dependency edge (gc bd dep add <bead> <scope>), never prose in a note. This bead also holds the sweep's delta baseline in metadata sweep.reported." --json | jq -r '.id // .[0].id')
   gc bd update "$SWEEP_SUBJECT" --set-metadata "task_kind=triage-subject" \
     --set-metadata "triage.scope=unnamed-waits"
 fi
 ```
 
-**2. Skip if its visit is already live (open or held)** — if
+**2. Split the survivors into NEW and CARRIED.** `$CANDIDATES` is the
+classify step's post-edge-check survivor set. The baseline
+`sweep.reported` is a comma-separated id list — the candidate set as of
+the last pass that actually reported. ABSENT baseline (first run, or a
+rig that has never reported) means every candidate is new, which is the
+intended first-run behaviour: one full census, then deltas.
+
+```bash
+# >>> sweep-delta
+REPORTED=$(gc bd show "$SWEEP_SUBJECT" --json | tr -d '[:cntrl:]' \
+  | jq -r '.[0].metadata["sweep.reported"] // ""')
+NEW=$(printf '%s' "$CANDIDATES" | jq -c --arg seen "$REPORTED" '
+  ($seen | split(",") | map(select(. != ""))) as $s
+  | map(select(.id as $id | ($s | index($id)) | not))')
+CARRIED=$(printf '%s' "$CANDIDATES" | jq -c --arg seen "$REPORTED" '
+  ($seen | split(",") | map(select(. != ""))) as $s
+  | map(select(.id as $id | ($s | index($id)) != null))')
+NEW_COUNT=$(printf '%s' "$NEW" | jq 'length')
+CARRIED_COUNT=$(printf '%s' "$CARRIED" | jq 'length')
+CARRIED_IDS=$(printf '%s' "$CARRIED" | jq -r '[.[].id] | join(", ")')
+CUR_IDS=$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | join(",")')
+# <<< sweep-delta
+```
+
+Membership is `index($id)`, which returns a POSITION or `null` — and
+position 0 is a real hit. jq happens to treat 0 as truthy, so the `| not`
+in the NEW predicate is safe; the CARRIED predicate is written `!= null`
+rather than relying on that, because a truthiness test ported to almost
+any other language would read the FIRST id in the baseline as a miss and
+re-report that one bead on every pass forever.
+
+**3. Skip if its visit is already live (open or held)** — if
 `$SWEEP_SUBJECT` appears in the live-visit continuation groups from the
 classify step, log
-"batch visit already live; N candidates await it", close this step
-(`gc.outcome=pass`), done. Self-limiting: the backlog never costs more
-than one conversation.
+"batch visit already live; $CARRIED_COUNT candidates await it, $NEW_COUNT new since the last pass",
+close this step (`gc.outcome=pass`), done. Self-limiting: the backlog
+never costs more than one conversation. **Do not advance the baseline on
+this path** — those new candidates were never put in front of anyone, so
+marking them reported would retire them unseen. Skipping the stamp costs
+one re-listing; taking it loses the bead.
 
-**3. Otherwise, if any unnamed waits survived, file ONE visit**:
-enumerate up to {{list_cap}} individually (one line each: `id — title —
-why it reads idle`, epic what-comes-next candidates called out); group
-any remainder into labelled cohorts with every id still listed; put it
-all in the `-d` body.
+**4. Otherwise, if anything is NEW, file ONE visit.** Zero new candidates
+→ file nothing and go to step 5, even when `$CARRIED_COUNT` is large: a
+stable population is not news, and an empty board is success either way.
+The body reports the delta:
+
+- **New this pass** — the sitting's actual agenda. Enumerate up to
+  {{list_cap}} individually, one line each: `id — title — why it reads
+  idle`, with epic what-comes-next candidates called out. Beyond the
+  cap, group the remainder into labelled cohorts with every id still
+  listed.
+- **Carried** — one line: `$CARRIED_COUNT` still unnamed from earlier
+  passes, followed by `$CARRIED_IDS`. Bare ids, no re-litigation. They
+  are listed so nothing is hidden, not so the sitting works them again.
+- **Dispositions** — spell the menu out, with the park that actually
+  works:
+  - **route** — give it demand (`gc sling <pool> <id> --on <formula>`);
+  - **gate** — file a visit or a gate on it, so the wait has a name;
+  - **kill** — `gc bd close <id> --reason "…"`;
+  - **park** — hang it off a `task_kind=triage-subject` scope bead with
+    a REAL dependency edge: `gc bd dep add <bead> <scope>`. The bead
+    becomes blocked by the scope, leaves `gc bd ready`, and stops being
+    a candidate. **The edge IS the park** — it is load-bearing, so a
+    later tidy-up of "stray" edges silently un-parks every bead it held,
+    and closing the scope bead does the same. Parking in prose — a note,
+    a comment, a decision recorded in the sitting — parks nothing: the
+    bead is a candidate again on the next pass.
+
+File the visit BEFORE stamping the baseline in step 5. In that order a
+failed create leaves the baseline untouched and the next pass re-reports;
+the reverse would retire the whole set on a visit nobody ever saw.
 
 ```bash
 # >>> gate-visit
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-VISIT=$(gc bd create -t task --title "visit: $SWEEP_SUBJECT — unnamed waits: N candidates to disposition" \
-  -d "<the candidate list built from the classify step>" --json | jq -r '.id // .[0].id')
+VISIT=$(gc bd create -t task --title "visit: $SWEEP_SUBJECT — unnamed waits: $NEW_COUNT new, $CARRIED_COUNT carried" \
+  -d "<the new-candidate list, the carried ids, and the disposition menu>" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
@@ -165,8 +268,28 @@ gc bd dep add "$VISIT" "$SWEEP_SUBJECT" --type=tracks
 # <<< gate-visit
 ```
 
-Zero unnamed waits → file nothing (an empty board is success). Log the
-outcome either way, then close this step:
+**5. Advance the baseline to the CURRENT candidate set** — reached only
+from step 4 (visit filed, or nothing new to file), never from the step-3
+skip. Writing the current set, rather than adding to the old one, is what
+prunes departures: a bead that was dispositioned and later regresses into
+the candidate set counts as new again and gets re-surfaced.
+
+```bash
+if [ -n "$CUR_IDS" ]; then
+  gc bd update "$SWEEP_SUBJECT" --set-metadata "sweep.reported=$CUR_IDS" \
+    --set-metadata "sweep.reported_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+else
+  gc bd update "$SWEEP_SUBJECT" --unset-metadata sweep.reported >/dev/null 2>&1 || true
+fi
+```
+
+The baseline is one comma-joined id list, bounded by the rig's open-bead
+count. Two passes overlapping would make the last writer win; the
+cooldown order makes that unlikely, and the loss is a re-report, never a
+hidden bead — which is the direction every choice in this step is biased.
+
+Log the outcome either way (new count, carried count, visit id or
+"nothing filed"), then close this step:
 
 ```bash
 gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed

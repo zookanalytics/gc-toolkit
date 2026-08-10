@@ -74,19 +74,55 @@ open bead must be one of —
    or gating-state markers (refinery sub-states count);
 3. **conversing** — an open turn in its continuation group, or it *is*
    a turn;
-4. **held-by-design** — `task_kind=triage-subject` beads and beads a
-   triage scope covers (they wait on their triage conversation, §3);
+4. **held-by-design** — `task_kind=triage-subject` beads; beads a triage
+   scope covers, where *covers* means a real dependency edge onto the
+   scope bead, which makes them blocker-blocked and drops them from
+   `gc bd ready` (the edge is the whole park — there is no
+   membership-by-name; see the amendment below); and beads carrying a
+   `gc.takeaway` stamp, which is a human holding the bead awaiting their
+   own answer (they wait on their triage conversation, §3);
 5. **unnamed** — none of the above: the defect.
 
-**The action:** for each unnamed bead, file **one** gate-turn on it
-(canonical snippet; visit prompt: "unnamed wait: what is this waiting
-on? Route it, gate it, or park it into a triage scope"), idempotent (no
-second turn while one is open), capped per cycle (default 5, config
-var) so a first run against a messy store produces a triage-able trickle
-instead of a flood. Every filing logged to the sweep's own notes.
+**The action:** ONE batch visit per pass on the sweep's standing
+"unnamed waits" triage subject, listing the candidates that are NEW
+since the previous pass — never one turn per idle bead, and never the
+full population. Idempotent (no second visit while one is live, open or
+held), so the backlog costs at most one conversation. Every filing
+logged to the sweep's own notes.
 **Doctor check:** `check-liveness-sweep-wired` asserts the order exists,
 enabled, and the formula parses — the sweep watches beads; the doctor
 watches the sweep.
+
+**Amendment, 2026-08-10 (operator decision on bead tk-snnpp).** As
+first written, class 4 promised more than the sweep could perform and
+the report was a census rather than a delta. Three corrections, now
+shipped in `formulas/mol-liveness-sweep.toml` and pinned by
+`assets/scripts/liveness-sweep-delta.test.sh`:
+
+- **Report the delta, not the population.** "Unnamed" is the resting
+  state of any filed-but-not-active bead, so a full report returns
+  roughly the whole backlog — measured at 93 of 113 open beads on
+  gc-toolkit. A stable set re-listed every pass buries the one bead that
+  changed. Each pass now names only what is new since the last one,
+  against a baseline (`sweep.reported`) stamped on the standing subject,
+  and files nothing when nothing is new. Carried candidates ride along
+  as a count and a bare id list so none is hidden.
+- **A park is an edge, not a sentence.** The generated visit body no
+  longer offers "park into a named scope", which the formula cannot
+  perform: a bead parked in prose was a candidate again on the next
+  pass. The menu now spells the mechanism — `gc bd dep add <bead>
+  <scope>` onto a `task_kind=triage-subject` bead — and says the edge is
+  load-bearing, because deleting it, or closing the scope bead,
+  un-parks everything silently.
+- **A `gc.takeaway` stamp is a named wait.** It marks a bead a human is
+  already holding, and it carries no structural edge, so without an
+  explicit filter the sweep re-litigated exactly the beads a human
+  touched most recently.
+
+Deliberately NOT adopted: scope membership by name (a scope naming its
+members via the `triage.scope` token schema, §3). Delta reporting
+delivers the benefit at a fraction of the cost; if membership-by-name is
+ever wanted, those tokens are where it starts.
 
 ## 3. Triage recurrence
 
