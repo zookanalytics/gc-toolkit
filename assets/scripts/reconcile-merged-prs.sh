@@ -1559,14 +1559,36 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       *",codex,"*) is_codex_member=1 ;;
     esac
 
-    # Stale-green? The marker must be green at a NON-EMPTY oid that is NOT the live
-    # head. An empty/absent marker is "never reviewed" (check-set-heal's / the normal
-    # dispatch's job, not this bug); green@<live-head> is current (merges normally).
-    # Only green@<other-oid> is the head-moved stall this arm heals.
+    # Stale marker? The marker must name a KNOWN verdict verb at a NON-EMPTY oid
+    # that is NOT the live head. An empty/absent marker is "never reviewed"
+    # (check-set-heal's / the normal dispatch's job, not this bug); a verb at the
+    # live head is current (green@<live-head> merges normally, and the two non-OK
+    # verbs hold deliberately). Only <verb>@<other-oid> is the head-moved stall this
+    # arm heals.
+    #
+    # ALL THREE VERBS, not `green` alone (WS4, tk-zgse0). `check.<name>` used to
+    # hold exactly one verb, so matching `green@*` matched every marker there was.
+    # It now also carries `fixable@<sha>` (remediation in flight) and
+    # `exception@<sha>` (held for an operator) — see
+    # specs/tk-zgse0.2/merge-gate-exception-lifecycle.md and
+    # assets/scripts/reconcile-gate-verdicts.sh, whose `gate_verdict` contract this
+    # mirrors. Left matching `green@*` only, a head that moved past EITHER of the
+    # new verbs would fall through this arm entirely: no re-review, no rework bead,
+    # merge-skill holding forever on a marker bound to a dead commit — which is the
+    # exact silent indefinite hold this arm was written to end, re-created by the
+    # verbs meant to describe it. A head move is a new subject whatever the previous
+    # verdict was: the design's lifecycle drops OK, fixable and exception alike back
+    # to Unevaluated on a head move, and re-evaluating fresh is precisely a
+    # re-review at the live head.
+    #
+    # STALE_VERB is carried alongside so the messages below say which verdict went
+    # stale; the arm's decision does not depend on it.
     stale_oid=""
+    STALE_VERB=""
     case "$codexmark" in
-      green@*)
-        oid="${codexmark#green@}"
+      green@*|fixable@*|exception@*)
+        STALE_VERB="${codexmark%%@*}"
+        oid="${codexmark#*@}"
         if [ -n "$oid" ] && [ -n "$head_oid" ] && [ "$oid" != "$head_oid" ]; then
           stale_oid="$oid"
         fi ;;
@@ -1578,7 +1600,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # (symmetric with the CONFLICTING arm honoring it before a rebase). When the
       # operator releases the hold, the next pass heals the gate.
       if is_held "$hold"; then
-        echo "reconcile-merged-prs: $id — PR#$num check.codex stale (green@$stale_oid != live head ${head_oid:-?}) but merge_hold set (operator gate); no re-review dispatched"
+        echo "reconcile-merged-prs: $id — PR#$num check.codex stale (${STALE_VERB:-green}@$stale_oid != live head ${head_oid:-?}) but merge_hold set (operator gate); no re-review dispatched"
         gate_held=$((gate_held + 1)); continue
       fi
       # One re-review per head: already routed at this exact head -> nothing new.
@@ -1676,8 +1698,8 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
         # stays HELD on the stale marker, the safe side.
         gc bd update "$id" \
           --set-metadata stale_gate_nopool_head="${head_oid:-unknown}" \
-          --set-metadata blocked_reason="PR#$num check.codex green@$stale_oid is stale (live head ${head_oid:-?}); no review pool configured to re-dispatch the signoff" >/dev/null 2>&1
-        echo "reconcile-merged-prs: $id — PR#$num check.codex stale (green@$stale_oid, live head ${head_oid:-?}) but no --review-pool; cannot re-dispatch (merge stays held)" >&2
+          --set-metadata blocked_reason="PR#$num check.codex ${STALE_VERB:-green}@$stale_oid is stale (live head ${head_oid:-?}); no review pool configured to re-dispatch the signoff" >/dev/null 2>&1
+        echo "reconcile-merged-prs: $id — PR#$num check.codex stale (${STALE_VERB:-green}@$stale_oid, live head ${head_oid:-?}) but no --review-pool; cannot re-dispatch (merge stays held)" >&2
         gate_held=$((gate_held + 1)); continue
       fi
       # Need a PR url to point the review at (num is non-empty by the loop head).
@@ -1689,7 +1711,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # review_note metadata below — one string, so the reviewer reads the same
       # reason wherever they look. The body additionally carries the review METHOD
       # (create_review_bead): title says WHAT, metadata says WHERE, body says HOW.
-      STALE_NOTE="Stale-gate self-heal: check.codex was green@$stale_oid; the PR head moved to ${head_oid:-?} with no rework bead filed. Re-review the live head."
+      STALE_NOTE="Stale-gate self-heal: check.codex was ${STALE_VERB:-green}@$stale_oid; the PR head moved to ${head_oid:-?} with no rework bead filed. Re-review the live head."
       REVIEW_BEAD=$(create_review_bead "Review PR#$num: re-review at live head (stale-gate self-heal)" "$STALE_NOTE")
       if [ -z "$REVIEW_BEAD" ]; then
         echo "reconcile-merged-prs: $id could not file re-review bead for PR#$num; retry next pass" >&2
@@ -1731,7 +1753,7 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
       # unstamped) and the in-flight probe above re-routes this same bead.
       if arm_stale_gate "$REVIEW_BEAD" "$id" "$head_oid" "$stale_oid" "$REVIEW_POOL_DEFAULT" "$num"; then
         regated=$((regated + 1))
-        echo "reconcile-merged-prs: $id — PR#$num check.codex green@$stale_oid stale (live head ${head_oid:-?}); filed re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT"
+        echo "reconcile-merged-prs: $id — PR#$num check.codex ${STALE_VERB:-green}@$stale_oid stale (live head ${head_oid:-?}); filed re-review $REVIEW_BEAD routed to $REVIEW_POOL_DEFAULT"
       else
         echo "reconcile-merged-prs: WARN re-review $REVIEW_BEAD route write did not persist the full route (gc.routed_to + review_pool = $REVIEW_POOL_DEFAULT); leaving un-armed (retry/repair next pass)" >&2
         skipped=$((skipped + 1))

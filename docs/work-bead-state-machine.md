@@ -350,6 +350,74 @@ site, or rig `formula_vars`). It is detect-only and never treats an **unset**
 `check_set` as a drop — unset is the pre-#182 legacy state, and holding on it is
 the stranding bug that "empty declares no gates" exists to fix.
 
+### Gate verdicts: the marker verb (WS4, tk-zgse0)
+
+A gate has **three** outcomes, not two, and all three are the same
+`check.<name>` marker with a different **verb** in front of the head:
+
+| Verdict | Marker | What it means | Merge effect |
+|---|---|---|---|
+| **OK** | `check.<name>=green@<sha>` | the skill passed at `<sha>` | merges iff `<sha>` is the live head |
+| **fixable** | `check.<name>=fixable@<sha>` | the skill found addressable problems; remediation children are in flight | holds |
+| **exception** | `check.<name>=exception@<sha>` | the result cannot be turned into pass-or-fixable | holds; **never** auto-remediated |
+
+**The merge skill is unchanged by this, which is the whole point.** It holds
+while any declared gate is `!= green@<live-head>`, so a stale green, an absent
+marker and a non-green *verb* are already one and the same to it. Recording the
+two non-OK verdicts explicitly — rather than as the mere absence of a green
+marker — buys every reader a **pure read**: a gate's current verdict is a total
+function of its last marker, with no need to cross-reference open children to
+tell "fixable" from "never ran". The full design is
+`specs/tk-zgse0.2/merge-gate-exception-lifecycle.md`; the contract and the arm
+are `assets/scripts/reconcile-gate-verdicts.sh` (`gate_verdict`), which the
+refinery patrol runs on each idle wake after the observer.
+
+**The contract is a total function.** `exception` is *defined* as everything the
+other two arms cannot claim, so no observable state is left without a verdict.
+That totality is what makes "the gate is still thinking about it" impossible to
+confuse with "the gate died" — the confusion that let a review bead whose worker
+crashed hold a PR indefinitely while `check-set-heal.sh` read it as work in
+flight, the stale-gate arm skipped it (no *green* marker to be stale), and
+`merge-skill.sh` held on the marker that would never come.
+
+**Two triggers reach exception.** Bounded remediation exhaustion (R11): the
+rounds are spent and the gate is still not green, so re-spawning again is the
+non-convergent move the bound exists to rule out. And infrastructure failure
+(R12): the check-skill crashed, went past its deadline with no live session
+answering for it, or left a marker naming no verb the contract knows.
+
+**Exception is terminal-until-operator, and it clears by a head move.** The arm
+records the verdict, leaves `merge_result` intact (the anchor stays the single
+gating locus, so a later-green head still has a lander), and escalates **once per
+head** via `check.<name>.exception_escalated=<sha>`. It never auto-fixes: an
+exception has no mechanical remedy, which is precisely what makes it one. When
+the operator fixes the branch (or the underlying skill), the head advances and
+every head-bound datum goes stale at once — marker, round count, escalation
+guard — so the gate re-arms to unevaluated and re-evaluates fresh. No reopen
+dance and no manual flag reset; the same head-binding that governs OK and fixable
+governs the exit from exception. Because the hold is unbounded after that single
+notification, `doctor/check-merge-gate-drop/` also reports live anchors held in
+exception, so a human looking for "what is stuck" finds them.
+
+**A head move re-arms every verb, so every reader must know all three.** The
+stale-gate arm (below) matches `<verb>@<other-oid>`, not `green@` alone: left
+matching green only, a head that moved past a `fixable`/`exception` marker would
+fall through it entirely and re-create the silent indefinite hold that arm exists
+to end. `check-set-heal.sh` skips its dispatch on `green@` (satisfiable) and on
+`exception@` (terminal until an operator acts) but **not** on `fixable@` — when
+remediation ends without turning the gate green, nothing should hold the next
+dispatch back.
+
+**The round count is not reset per head, deliberately.** The design doc describes
+`check.<name>.attempts` as "rounds spent on this head"; taken literally the
+counter resets whenever the head moves, but a rework round that does any work at
+all moves the head by construction, so the bound would reset every round and
+could never fire. The runaway it exists to stop is a sequence of rounds across
+*moving* heads (one PR reached 15). So the bound counts remediation children of
+the anchor, all statuses — a closed child is a completed round, which is how the
+shipped signoff round cap counts it too — and it is the **escalation** that is
+head-bound, which is what one-per-head is actually protecting against.
+
 **The pre-open subset: members that run before the PR opens (gc-toolkit,
 tk-6d0vb.1.8).** Some check-set members can be produced *early* — against the
 branch, before the PR exists — instead of post-open. These form the **pre-open
@@ -1090,8 +1158,9 @@ records why, and the merge skill remains the single writer of merged-truth.
 
 ## Stale gate: the review we re-dispatch, not leave hanging
 
-The symmetric twin of stale base. A gating anchor whose check-set went green —
-`check.<name>=green@<oid>` — and whose PR head then advanced **past** `<oid>`
+The symmetric twin of stale base. A gating anchor whose check-set recorded a
+verdict — `check.<name>=<verb>@<oid>`, and since WS4 that verb may be any of
+`green` / `fixable` / `exception` (above) — and whose PR head then advanced **past** `<oid>`
 through a path that files **no rework bead** (a direct push to the PR branch, an
 operator fixup) sits in a **silent indefinite hold**. The merge skill correctly
 refuses (its stale-head guard: `green@<oid>` must equal the *live* head), but with

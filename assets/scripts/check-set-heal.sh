@@ -2336,11 +2336,36 @@ while IFS= read -r row; do
     continue
   fi
 
-  # Already green: a review ran for this anchor at some point and stamped the
-  # marker — the gate is satisfiable (green at the live head merges; green at a
-  # stale head re-gates through the normal rework path). Nothing to dispatch.
-  if [ -n "$marker" ]; then
-    [ "$needs_stamp" = 1 ] && echo "check-set-heal: $id already carries check.codex='$marker'; gate is satisfiable, no dispatch"
+  # A marker that means the gate needs no dispatch from here. TWO verbs qualify,
+  # and the distinction matters now that `check.<name>` carries more than one
+  # (WS4, tk-zgse0 — specs/tk-zgse0.2/merge-gate-exception-lifecycle.md, the
+  # `gate_verdict` contract in assets/scripts/reconcile-gate-verdicts.sh):
+  #
+  #   green@<sha>      a review ran and passed at some head. The gate is
+  #                    SATISFIABLE — green at the live head merges, green at a
+  #                    stale head re-gates through the normal rework path.
+  #   exception@<sha>  the verdict arm recorded a hold no worker can lift; it is
+  #                    terminal until an operator acts and the head moves. A
+  #                    dispatch here would spawn a reviewer against a gate that
+  #                    was just declared un-reviewable, and the exception's
+  #                    one-per-head escalation is what actually moves it forward.
+  #
+  # Everything else — `fixable@<sha>`, or any value this vocabulary does not know
+  # — is NOT a reason to skip. `fixable` says remediation is in flight, and when
+  # that remediation ends without turning the gate green there is nothing left
+  # holding a dispatch back; treating it as "satisfiable" (which the old
+  # `[ -n "$marker" ]` test did, since a non-empty marker was necessarily green
+  # before WS4) would leave the anchor with no review, no rework child, and no
+  # marker that can ever go green — the silent indefinite hold this whole file
+  # exists to prevent, re-created by the verb meant to describe it. Falling
+  # through is safe: the in-flight probe below is what stops a twin dispatch
+  # while the remediation really is running.
+  marker_blocks_dispatch=""
+  case "$marker" in
+    green@*|exception@*) marker_blocks_dispatch=1 ;;
+  esac
+  if [ -n "$marker_blocks_dispatch" ]; then
+    [ "$needs_stamp" = 1 ] && echo "check-set-heal: $id already carries check.codex='$marker'; gate needs no dispatch from here, no dispatch"
     [ "$needs_stamp" = 1 ] || normal=$((normal + 1))
     continue
   fi
