@@ -107,48 +107,102 @@ partial data.
 # Rig set: a poured {{rig_list}} wins; otherwise attempt runtime enumeration.
 # (Build-validation V2, implementation-design §9: if enumeration is not
 # available in this runtime, rig_list must be poured on the order.)
-RIGS="{{rig_list}}"
-if [ -z "$RIGS" ]; then
+#
+# Written to a file as one store per line, `<name>` or `<name><TAB><path>`.
+# A path, where known, is how the store gets opened — see the loop below.
+RIGSET=$(mktemp)
+POURED="{{rig_list}}"
+if [ -n "$POURED" ]; then
+  # A poured entry is a rig NAME with no path, so it keeps the name surface.
+  # Split with tr, not unquoted word-splitting — see the loop's note on zsh.
+  printf '%s' "$POURED" | tr ' ' '\\n' | grep -v '^$' > "$RIGSET"
+else
   # `gc rig list --json` returns an OBJECT ({"ok":true,"rigs":[...]}), not an
-  # array — `.[].name` errors ("Cannot index number with string"), RIGS goes
+  # array — `.[].name` errors ("Cannot index number with string"), the set goes
   # empty, and the fail-safe below aborts EVERY run.
-  RIGS=$(gc rig list --json 2>/dev/null | jq -r '.rigs[].name // empty' 2>/dev/null | tr '\\n' ' ')
+  #
+  # Take `.path` alongside `.name`, because the enumeration also returns the
+  # city HQ entry — {"name":"<city>","hq":true,"path":"<town root>"} — and HQ
+  # is NOT addressable by name: `gc bd list --rig <city>` exits 1 with
+  # `gc bd: rig "<city>" not found` and EMPTY stdout, which trips the per-store
+  # fail-safe below. HQ came back first in the enumeration on the city where
+  # this was diagnosed (loomington, 5 entries), so the abort landed on
+  # iteration one and no run ever reached a second store.
+  #
+  # Dropping HQ with `select(.hq != true)` would also clear the fail-safe, but
+  # silently: HQ is a real bead store (its own id prefix) that can hold
+  # observations, and they would simply never be judged.
+  gc rig list --json 2>/dev/null \
+    | jq -r '.rigs[] | select((.name // "") != "") | [.name, (.path // "")] | @tsv' 2>/dev/null \
+    > "$RIGSET"
 fi
-if [ -z "${RIGS// /}" ]; then
+if [ ! -s "$RIGSET" ]; then
   echo "FAIL-SAFE: no rig_list poured and rig enumeration returned nothing — distiller aborts, nothing judged, nothing filed"
   [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
   gc runtime drain-ack
   exit 0
 fi
-echo "reading observations from rigs: $RIGS"
+echo "reading observations from stores: $(cut -f1 "$RIGSET" | tr '\\n' ' ')"
 
 PENDING=$(mktemp); echo '[]' > "$PENDING"
-# V1 fallback validation must verify three things about this cross-rig read:
-# (a) --rig actually SCOPES the listing — this CLI family has a documented
-#     silent-ignore precedent (`gc convoy list` ignores --rig, per the
-#     assets/scripts/reconcile-graduated-convoys.sh header); if --rig is
-#     silently ignored here, this loop appends the home store once per rig,
-#     inflating the pending count;
-# (b) --limit=0 combines with --rig;
-# (c) cross-rig `gc bd update` (step 3's stamping) writes at all.
-for R in $RIGS; do
+# Two things this loop is deliberate about:
+#
+# 1. `while read < file`, not `for R in $RIGS`. Unquoted-expansion word
+#    splitting is a POSIX/bash behaviour that zsh — this city's default shell —
+#    does not perform; under zsh the whole list arrives as ONE store name and
+#    trips the fail-safe. Redirect from a file rather than a pipe so the
+#    fail-safe `exit 0` below exits the step, not just a subshell.
+#
+# 2. Store access is `-C <path>` when a path is known, `--rig <name>` only for
+#    poured names. `-C` is bd's global "cd first" flag (like `git -C`); it is
+#    not an HQ special case but the equivalent-and-wider form. Verified
+#    2026-08-11: `--rig gc-toolkit` and `-C <gc-toolkit path>` return identical
+#    id sets (330 beads, and 7 on this step's own observation query; signal-loom
+#    31 and 1) — and `-C` additionally opens HQ, which `--rig` cannot.
+TAB=$(printf '\\t')
+while IFS="$TAB" read -r R RPATH; do
+  [ -n "$R" ] || continue
   RAW=$(mktemp)
-  gc bd list --rig "$R" -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
+  if [ -n "$RPATH" ]; then
+    gc bd -C "$RPATH" list -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
+  else
+    gc bd --rig "$R" list -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
+  fi
   if ! jq -e 'type=="array"' "$RAW" >/dev/null 2>&1; then
-    echo "FAIL-SAFE: observation listing for rig $R unreadable — distiller aborts, nothing judged, nothing filed"
+    echo "FAIL-SAFE: observation listing for store $R unreadable — distiller aborts, nothing judged, nothing filed"
     [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
     gc runtime drain-ack
     exit 0
   fi
-  jq --arg rig "$R" '[.[] | select((.metadata.task_kind // "") == "observation")
-                          | select((.metadata["obs.distilled"] // "") == "")
-                          | . + {obs_rig: $rig}]' "$RAW" > "$RAW.pending"
+  # obs_rig_path rides along so step 4's stamping can reopen the SAME store it
+  # was read from; without it an HQ-store observation could never be stamped.
+  jq --arg rig "$R" --arg rigpath "$RPATH" '[.[]
+      | select((.metadata.task_kind // "") == "observation")
+      | select((.metadata["obs.distilled"] // "") == "")
+      | . + {obs_rig: $rig, obs_rig_path: $rigpath}]' "$RAW" > "$RAW.pending"
   jq -s 'add' "$PENDING" "$RAW.pending" > "$PENDING.next" && mv "$PENDING.next" "$PENDING"
-done
+done < "$RIGSET"
 ```
 
 The `// <default>` coalescing is load-bearing, not style: most beads carry no
 `obs.distilled` key at all, so a strict comparison matches zero beads.
+
+**V1 validation of the cross-store read (settled 2026-08-11, tk-zdyvr).** The
+three properties this step used to ask a V1 run to confirm:
+
+- **(a) the listing is genuinely SCOPED** — the `gc convoy list` silent-ignore
+  precedent (see `assets/scripts/reconcile-graduated-convoys.sh`) does NOT
+  apply here. Each store returns its own id prefix and nothing else:
+  gc-toolkit `tk`, signal-loom `sl`, gascity `gc`, shutupandlisten `su`, HQ
+  `lx`. The loop cannot be appending the home store once per rig.
+- **(b) `--limit=0` composes with the store selector** — gc-toolkit returns 330
+  beads at `--limit=0` versus 3 at `--limit=3`.
+- **(c) the store selector routes WRITES, not just reads** — `gc bd -C <path>
+  update` resolves the id against the store at `<path>`: updating `tk-zdyvr`
+  through `-C <signal-loom>` and through `-C <HQ>` both fail `no issue found
+  matching "tk-zdyvr"`, while `-C <gc-toolkit>` succeeds. A write into a
+  foreign store therefore lands in that store; it was proven by routing rather
+  than by depositing a gratuitous probe bead in someone else's ledger.
 
 ## 3. The cadence gate (D7)
 
@@ -258,7 +312,9 @@ Veto observations filed this sweep are judged by the NEXT gate-opening run —
 they were filed after this run's pending set was read, and that is fine.
 
 **Exit criteria:** Environment primed; home rig confirmed; `$PENDING` holds
-every undistilled observation across `$RIGS` (or the run no-opped/aborted);
+every undistilled observation across every store in `$RIGSET` — the city HQ
+store included — each tagged with the `obs_rig`/`obs_rig_path` pair that step 3
+stamps it back through (or the run no-opped/aborted);
 the D7 gate is open; any new vetoes are recorded as learning-rubric
 observations.
 """
@@ -423,7 +479,9 @@ rate: most runs should end here with zero or one survivors.
 pattern bead with recomputed rollups; a bounded proposal list (≤
 `{{max_beads_per_run}}`) of promote/retire/harden changes each carrying its
 written reasoning; contested rules marked for a visit; a consumed-observation
-map `(obs id, obs rig) → pattern bead` for step 3's stamping.
+map `(obs id, obs rig, obs rig path) → pattern bead` for step 3's stamping —
+carry the `obs_rig_path` recorded in `$PENDING` through unchanged, because it
+is what reopens an HQ-store observation's store.
 """
 
 [[steps]]
@@ -504,8 +562,16 @@ Its evidence now lives on the pattern bead's rollups. This runs even when no
 proposal survived (a judged-but-held run must still shrink the pending set).
 
 ```bash
-# For each (OBS_ID, OBS_RIG) → PATTERN in the step-2 consumed map:
-gc bd update --rig "$OBS_RIG" "$OBS_ID" --set-metadata "obs.distilled=$PATTERN"
+# For each (OBS_ID, OBS_RIG, OBS_RIG_PATH) → PATTERN in the step-2 consumed map.
+# Reopen the store the observation was READ from, by the same rule step 1 used:
+# the path when the pending record carries `obs_rig_path`, the name otherwise.
+# An HQ-store observation is writable only through the path form — `--rig` does
+# not accept the HQ name (see step 1's enumeration note).
+if [ -n "$OBS_RIG_PATH" ]; then
+  gc bd -C "$OBS_RIG_PATH" update "$OBS_ID" --set-metadata "obs.distilled=$PATTERN"
+else
+  gc bd --rig "$OBS_RIG" update "$OBS_ID" --set-metadata "obs.distilled=$PATTERN"
+fi
 # V1 fallback (implementation-design §9): if cross-rig `gc bd update` proves
 # impossible in this runtime, do NOT leave observations unstamped — record the
 # consumed provenance keys on the pattern bead instead (append them to its
