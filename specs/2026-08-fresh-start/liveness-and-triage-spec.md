@@ -144,6 +144,54 @@ members via the `triage.scope` token schema, §3). Delta reporting
 delivers the benefit at a fraction of the cost; if membership-by-name is
 ever wanted, those tokens are where it starts.
 
+**Amendment, 2026-08-11 (operator ruling on bead tk-yyfjv).** Class 2
+above was written as "an open blocking dependency, an open `type=human`
+gate, or gating-state markers (refinery sub-states count)"; the shipped
+formula implemented only the first clause, under the name
+*waiting-on-structure*. Both halves now ship, pinned by the same
+`liveness-sweep-delta.test.sh`:
+
+- **Class 2 has its gate half back.** A bead whose work is done,
+  pushed, codex-green and parked on an OPEN pull request awaiting a
+  human approval has no open blocker and no bd-level gate, so
+  `gc bd ready` returns it and it classified as *unnamed* — the defect
+  class. Measured on signal-loom (sweep of 2026-08-09T23:55Z): six of
+  the ten unnamed waits were PR-parked, so 60% of that sitting was one
+  condition the classifier could not see, and nothing about those beads
+  could change until a human acted. The marker is
+  `merge_result=pull_request`, and the marker is explicitly **not** the
+  test — the check intersects against the live open PRs, because a
+  "carries `merge_result`, skip it" rule would hide REJECTED work
+  permanently. **merged** (finishable — surface it for close-out) and
+  **closed-unmerged** (rejected — it needs a sitting) both stay
+  visible. The read is one `gh pr list` per repository the candidates'
+  own beads name, keyed on host + owner/repo + number so a PR number,
+  which names nothing on its own, cannot match another repository's.
+  Every unreadable case reports rather than hides, and the pass tells
+  the sitting when PR liveness was `unverified`.
+- **Class 4 gained a fourth shape: `triage.hold`.** A bead the operator
+  has deliberately held had no machine-readable marker at all, so
+  classify saw it as unnamed and re-surfaced it every pass forever —
+  tk-0tln5's hold existed only as the word HELD in its title. The
+  value is the REASON for the hold, with `triage.hold_at` /
+  `triage.hold_by` recording who and when, and an empty stamp is a
+  cleared hold (the same absent-vs-empty tri-state as `gc.takeaway`).
+  It is a stamp and **not** a park edge: the park was rejected for this
+  scope by the same ruling, because parking is scope membership while a
+  hold is a per-bead decision that only the operator reverses, and an
+  edge is something a later tidy-up of "stray" edges can silently
+  delete. `gc.takeaway` was not reused either — that field is the helm
+  surface's "what this bead needs from a human" and is spent as the
+  board's NEEDS sentence. The visit menu now offers **hold** alongside
+  route / gate / kill / park; offering *park* for a bead the operator
+  simply wanted held was itself part of the defect.
+
+Still open in the same classify pass, deliberately not folded in here:
+the class-1 convoy discriminator (bead tk-8rm3q — a work bead reads as
+unnamed for the whole time its molecule runs, because `mol-polecat-work`
+stamps `assignee`/`gc.routed_to` on the molecule, never on the work
+bead).
+
 ## 3. Triage recurrence
 
 **The subject:** an ordinary bead, `task_kind=triage-subject`, body =
