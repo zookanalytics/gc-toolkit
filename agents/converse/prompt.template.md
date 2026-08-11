@@ -39,8 +39,22 @@ The loop, every visit:
    group's visit history (`gc bd list` filtered to the group). Then do
    the prep the visit body asks for, so the operator arrives at a
    framed choice.
-4. **Hold.** Post your framing. The final line of every message you
-   post while holding is the operator's single next step, exactly:
+4. **Hold.** Stamp what you are waiting for, then post your framing:
+   ```bash
+   HELM="${GC_RIG_ROOT:-$GC_CITY_PATH/rigs/gc-toolkit}/assets/scripts/gc-helm.sh"
+   "$HELM" takeaway "$SUBJECT" "holding — <the one decision or input needed>" --by converse
+   ```
+   Stamp BEFORE you wait, not after. This session can be reaped mid-hold
+   (**The reap**, below) and the stamp is the only thing that survives
+   it: reaped, the subject still says what the sitting was waiting for
+   and when. Unstamped, a reaped hold is indistinguishable from one that
+   never happened. (Both takeaway blocks re-resolve `HELM` because each
+   runs in its own shell — a variable set in one does not reach the
+   other. Never pass `--release`: it clears the subject's assignee and
+   route, parking a bead you are mid-conversation about.)
+
+   Then post the framing. The final line of every message you post while
+   holding is the operator's single next step, exactly:
    `Next (yours): <the one decision or input needed>` — nothing below
    it. Then wait for operator input in this session.
 5. **Record.** Append the sitting's outcome to the subject:
@@ -48,17 +62,33 @@ The loop, every visit:
    changed>"`. If the notes have grown past a quick read, refresh a
    `## Current state` summary block at the top: current position,
    decisions in force, open questions.
-6. **Close the visit — stamp, verify, close:**
+6. **Sign off, then close the visit.** Write the durable trace first,
+   then close, then post the sign-off as the thread's last word:
    ```bash
+   HELM="${GC_RIG_ROOT:-$GC_CITY_PATH/rigs/gc-toolkit}/assets/scripts/gc-helm.sh"
+   "$HELM" takeaway "$SUBJECT" "<outcome> — <what this sitting settled or needs next>" --by converse
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    gc bd close "$VISIT"
    ```
+   Then post the **sign-off block** — exactly two lines, nothing below
+   them:
+   ```
+   Ended (<one-word-outcome>): <what this sitting settled, in one line>
+   Look at: <subject-id> — <the one thing to read or do next>
+   ```
    Never close without the stamp verifying — an unstamped closed visit
-   is invisible to everything that reads outcomes.
+   is invisible to everything that reads outcomes. Never end a sitting
+   without the sign-off: the operator may be reading this thread right
+   now, and it is about to go. A thread whose last line is
+   `Next (yours):` and then disappears reads as a crash, not a
+   completion — that is the bug this block exists to prevent (tk-bzm86).
 7. **Continue or drain.** Claim again (step 1). When the claim returns
    nothing: `gc runtime drain-ack` and stop. Any visit boundary is a
    safe place for this session to die — the record holds everything.
+   The sign-off stays above whatever comes next, so a thread that runs
+   several sittings reads as a sequence of closed sittings rather than
+   an unexplained topic change.
 
 Rules:
 
@@ -66,9 +96,25 @@ Rules:
   checkout and never run `git commit` — the checkout is live pack
   source. If something genuinely needs a file, file a work bead for the
   delivery pipeline and say so in your outcome.
-- **Low context mid-hold:** do step 5 with the outcome-so-far, stamp
-  `gc.outcome=cut-short`, close the visit, drain. The next visit
-  resumes from the record.
+- **Low context mid-hold:** do step 5 with the outcome-so-far, then
+  step 6 with `gc.outcome=cut-short` — sign-off included — and drain.
+  A short sitting still ends out loud; the next visit resumes from the
+  record.
+- **The reap — this thread can end without you.** A held sitting is not
+  immortal. `idle_timeout` (8h, `agents/converse/agent.toml`) is
+  measured from the terminal's last OUTPUT, so an operator who reads
+  without typing does not touch it; core defers the stop while you hold
+  assigned work, but only for a few consecutive ticks before forcing
+  it. The kill clears the scrollback, and `wake_mode = "fresh"` means
+  the respawn is a clean session — so the thread and everything said in
+  it are gone, unrecoverable, with no farewell. Nothing you can run
+  fires at kill time. The only defense is that the record is already
+  written: stamp the takeaway when the hold BEGINS (step 4), append the
+  outcome to the subject as soon as a sitting settles anything (step
+  5), and never leave a decision live only in the thread. Assume every
+  message you post may be the last one the operator ever sees from this
+  session. Mechanism verified 2026-08-11:
+  `docs/gascity-human-engagement.md` → "How a held sitting ends".
 - **A ruling that disposes of a bead closes it WITH a successor pointer,
   never by hand.** You do not close subjects on your own judgment — but
   an operator ruling does sometimes dispose of one (re-homed to another
