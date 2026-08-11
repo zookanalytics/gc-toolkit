@@ -64,6 +64,22 @@ else
     grep -q 'REPO_SLUG' "$dir/$script" \
         || errors+=("$script: the PR lookup is no longer pinned to the rig's own repository — gh would answer from ambient context")
 
+    # The handoff is VERIFIED, not merely issued. `gc bd update` reporting success is
+    # not proof that a write is durable, and every write in this pass is best-effort,
+    # so an assignee that sticks over a branch/target that did NOT both removes the
+    # bead from this pass's candidate set (it is no longer unassigned) and hands the
+    # refinery a branch to rebase onto a missing or stale base.
+    grep -q 'read_handoff' "$dir/$script" \
+        || errors+=("$script: the handoff read-back is gone — a branch/target write that reports success and is not durable would still reach the refinery, which would then rebase the work onto the wrong base with nothing left to retry it")
+
+    # status=open is what makes a recovered bead VISIBLE at all. The refinery's
+    # find-work polls `--assignee=$GC_AGENT --status=open` and the candidate scan
+    # admits in_progress beads, so a handoff that does not set it assigns the bead to
+    # an actor that never polls it — and, being assigned, it is no longer a candidate
+    # here either. That is a strictly worse strand than the one the pass found.
+    grep -q -- '--status=open' "$dir/$script" \
+        || errors+=("$script: the handoff no longer sets status=open — the refinery's find-work step polls --status=open, so an in_progress strand would be handed to an actor that never sees it and would no longer be retryable by this pass")
+
     # Only the refinery closes a work bead, after verifying the merge. A close path
     # here would retire work that never landed.
     if grep -qE '(^|[^-[:alnum:]_])(bd|gc bd) close|--status=closed' "$dir/$script"; then
@@ -90,6 +106,10 @@ else
         || errors+=("$test_script: no live-molecule case — the guard against handing off a running polecat's branch is unproven")
     grep -q 'FAILED' "$dir/$test_script" \
         || errors+=("$test_script: no failed-handoff case — a silent exit 0 over a failed write is how this class of bug hides")
+    grep -q 'VERIFY' "$dir/$test_script" \
+        || errors+=("$test_script: no unverified-handoff case — that a non-durable branch/target write stops the handoff BEFORE the assignee is unproven")
+    grep -q 'INPROG' "$dir/$test_script" \
+        || errors+=("$test_script: no in_progress-strand case — that a recovered bead is handed over as status=open, the only status the refinery's find-work polls, is unproven")
 fi
 
 # --- the call site ---------------------------------------------------------

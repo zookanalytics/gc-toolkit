@@ -59,8 +59,41 @@ routinely outlasts any age threshold; liveness is what protects a running poleca
 
 The report suggested re-dispatching to the pool "to resume at submit-to-refinery".
 That names the missing action exactly — and the missing action is a metadata write:
-stamp `branch` and `target`, reassign to the refinery. Pouring a fresh molecule
-would spend a full-context session re-deriving three fields.
+stamp `branch` and `target`, set the bead back to `open`, reassign it to the
+refinery. Pouring a fresh molecule would spend a full-context session re-deriving
+four fields.
+
+**All four are the handoff, and each is read back.** `gc bd update` reporting success
+is not proof that a write is durable, and every write here is best-effort (`|| true`,
+so the pass never aborts the patrol), which makes success and failure otherwise
+indistinguishable:
+
+| field | what it decides | when it is verified |
+|---|---|---|
+| `branch` / `target` | what the refinery MERGES BY | **before** the assignee is written at all |
+| `status=open` | whether the refinery ever POLLS the bead | with the assignee, after |
+| `assignee` | who owns the next move | with the rest, after |
+
+`branch`/`target` are verified first because the two failures compound: an assignee
+that sticks over a target that did not takes the bead out of this pass's candidate
+set (it is no longer unassigned, so nothing retries it) *and* hands the refinery a
+branch to rebase onto a missing or stale base — an owned-convoy member onto `main`.
+Refusing before the assignee write costs one cycle; proceeding is un-retryable.
+
+`status=open` is not cosmetic. The refinery's find-work step polls
+`--assignee=$GC_AGENT --status=open` (`formulas/mol-refinery-patrol.toml`), and the
+candidate scan admits `in_progress` beads — a strand wears that status whenever a
+partial quiesce cleared the assignee without resetting the status. Handed over as
+`in_progress`, the bead is assigned to an actor that will never poll it and is no
+longer unassigned, so this pass cannot retry it either: strictly worse than the
+strand it started from. It is written in the same update as the assignee, exactly as
+the polecat done sequence writes it.
+
+A post-write mismatch **releases our own assignee** (its own single-flag update — a
+claim guard can roll back a batched release and lose both writes), restoring the
+candidate shape so the next cycle retries the whole handoff. Only our own: a
+different assignee means another actor took the bead in the window, and clearing
+that is stealing a live claim.
 
 This is not a shortcut past review. The refinery still takes the branch through the
 pre-open codex gate, and the PR still needs external human approval, so a branch
@@ -68,7 +101,8 @@ pushed by a polecat that died *mid*-implementation is reviewed exactly as it wou
 have been; a REQUEST_CHANGES verdict files the rework child as usual. The failure
 being fixed is the bead never entering that pipeline at all.
 
-The pass never closes a bead. Only the refinery does that, after verifying a merge.
+The pass never closes a bead — only the refinery does that, after verifying a merge.
+`open` is the only status it ever writes.
 
 ## The `gc.routed_to=""` aside: deliberately not implemented
 

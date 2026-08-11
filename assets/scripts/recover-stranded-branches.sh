@@ -69,9 +69,34 @@
 # report suggested re-dispatching to the pool "to resume at submit-to-refinery".
 # That names the missing action exactly — and the missing action is a metadata
 # write. submit-and-exit pushes the branch (already done), stamps `branch` and
-# `target`, and reassigns the bead to the refinery; there is nothing else in it. So
-# this pass performs it directly instead of pouring a fresh molecule to spend a
-# full-context session re-deriving the same three fields.
+# `target`, sets the bead back to `open` and reassigns it to the refinery; there is
+# nothing else in it. So this pass performs it directly instead of pouring a fresh
+# molecule to spend a full-context session re-deriving the same three fields.
+#
+# ALL FOUR FIELDS ARE THE HANDOFF, and each is READ BACK before the handoff counts.
+# `gc bd update` reporting success is not proof that a write is durable, and each
+# write here is best-effort, so success and failure are otherwise indistinguishable:
+#
+#   branch/target  what the refinery MERGES BY. Stamped and verified BEFORE the
+#                  assignee, because an assignee that sticks over a target that did
+#                  not takes the bead out of this pass's candidate set (it is no
+#                  longer unassigned) and hands the refinery a branch to rebase onto
+#                  a missing or stale base — an integration member onto main. That is
+#                  the un-retryable wrong handoff, so the assignee is not written at
+#                  all until the fields it depends on read back.
+#   status=open    what makes the bead VISIBLE to the refinery. Its find-work step
+#                  polls `--assignee=$GC_AGENT --status=open`
+#                  (formulas/mol-refinery-patrol.toml), and the candidate scan admits
+#                  in_progress beads — a strand wears that status whenever a partial
+#                  quiesce cleared the assignee without resetting the status. Handed
+#                  over as in_progress, the bead is assigned to an actor that will
+#                  never poll it AND no longer unassigned, so this pass will not
+#                  retry it either: a strictly worse strand than the one it found.
+#   assignee       WHO owns the next move. Written last, verified with the rest.
+#
+# A post-write mismatch RELEASES our own assignee (its own single-flag update — a
+# claim guard can roll back a batched release, losing both writes), which restores
+# the candidate shape so the next cycle retries the whole handoff.
 #
 # That is not a shortcut past review. The refinery takes the branch through the
 # ordinary pre-open codex gate and the PR still needs external human approval, so a
@@ -386,6 +411,38 @@ fetch_commit() { # <branch> <sha>
   have_commit "$2"
 }
 
+# The whole handoff, read in ONE call: the two fields the refinery merges by, the
+# status that decides whether it ever polls the bead, and who owns it. One read so
+# every comparison speaks about the same observation of the bead.
+#
+# One field PER LINE, each read with `IFS= read -r`, rather than one @tsv line split
+# on tabs: a tab is an IFS *whitespace* character, so `IFS=$'\t' read a b c d` folds
+# runs of tabs together and drops leading ones — a bead with an empty status would
+# silently shift `branch` into `$a`, and every comparison below would then be made
+# against the wrong field. An empty line stays an empty field.
+handoff_state() { # <id> -> status, assignee, branch, target — one per line
+  bd_pinned show "$1" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037' \
+    | jq -r '.[0] | select(. != null)
+             | ((.status // "") | ascii_downcase),
+               ((.assignee // "") | tostring),
+               (((.metadata // {}).branch // "") | tostring),
+               (((.metadata // {}).target // "") | tostring)' 2>/dev/null
+}
+
+# Read $1's handoff into HS_STATUS / HS_ASSIGNEE / HS_BRANCH / HS_TARGET. All four
+# are cleared first: an unreadable bead produces no lines at all, and every read
+# then hits EOF, which must read as four empty values that mismatch everything —
+# the fail-safe direction — rather than as the previous bead's answer.
+read_handoff() { # <id>
+  HS_STATUS=""; HS_ASSIGNEE=""; HS_BRANCH=""; HS_TARGET=""
+  {
+    IFS= read -r HS_STATUS
+    IFS= read -r HS_ASSIGNEE
+    IFS= read -r HS_BRANCH
+    IFS= read -r HS_TARGET
+  } <<< "$(handoff_state "$1")"
+}
+
 NOW=$(date +%s 2>/dev/null || echo 0)
 MIN_AGE_SECONDS=$((MIN_AGE_MINUTES * 60))
 
@@ -552,13 +609,44 @@ while IFS= read -r row; do
   bd_pinned update "$ID" \
     --set-metadata branch="$BRANCH" \
     --set-metadata target="$TARGET" >/dev/null 2>&1 || true
-  bd_pinned update "$ID" --assignee="$REFINERY_ID" >/dev/null 2>&1 || true
 
-  GOT=$(bd_pinned show "$ID" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037' \
-    | jq -r '.[0].assignee // empty' 2>/dev/null)
-  if [ "$GOT" != "$REFINERY_ID" ]; then
+  # Verify what the refinery MERGES BY *before* handing it the bead. The write above
+  # is best-effort and a reported success is not a durable one, so a metadata write
+  # that silently did not stick — paired with an assignee write that did — would
+  # both remove the bead from this pass's candidate set and hand the refinery a
+  # branch to rebase onto a missing or stale target. Refusing here leaves the bead
+  # unassigned, i.e. still a candidate, and costs one cycle.
+  read_handoff "$ID"
+  if [ "$HS_BRANCH" != "$BRANCH" ] || [ "$HS_TARGET" != "$TARGET" ]; then
     failed=$((failed + 1))
-    echo "recover-stranded-branches: WARN $ID handoff did NOT stick (assignee read back '${GOT:-}', want '$REFINERY_ID'); the branch is still stranded — retries next cycle" >&2
+    echo "recover-stranded-branches: WARN $ID the fields the refinery merges by did NOT stick (branch read back '${HS_BRANCH:-}' want '$BRANCH'; target read back '${HS_TARGET:-}' want '$TARGET'; bead reads status='${HS_STATUS:-}' assignee='${HS_ASSIGNEE:-}'); NOT assigning it to '$REFINERY_ID' — an assigned bead with an unstamped target leaves this pass's candidate set and would be rebased onto the wrong base. Still stranded; retries next cycle" >&2
+    continue
+  fi
+
+  # status=open AND the assignee together, exactly as the done sequence writes them.
+  # The scan admits in_progress beads, but the refinery's find-work step polls
+  # `--assignee=$GC_AGENT --status=open`, so an in_progress bead handed over is
+  # assigned to an actor that will never see it — and, being assigned, is no longer
+  # a candidate for this pass either.
+  bd_pinned update "$ID" --status=open --assignee="$REFINERY_ID" >/dev/null 2>&1 || true
+
+  read_handoff "$ID"
+  if [ "$HS_ASSIGNEE" != "$REFINERY_ID" ] || [ "$HS_STATUS" != "open" ] \
+     || [ "$HS_BRANCH" != "$BRANCH" ] || [ "$HS_TARGET" != "$TARGET" ]; then
+    failed=$((failed + 1))
+    echo "recover-stranded-branches: WARN $ID handoff did NOT stick (read back status='${HS_STATUS:-}' assignee='${HS_ASSIGNEE:-}' branch='${HS_BRANCH:-}' target='${HS_TARGET:-}'; want open + '$REFINERY_ID' + '$BRANCH' + '$TARGET'); the branch is still stranded — retries next cycle" >&2
+    # Put the bead back in the candidate set rather than leaving it held by an
+    # actor that cannot act on it. ONLY our own assignee is released — a different
+    # one means another actor took the bead between the write and this read, and
+    # clearing that is stealing a live claim. Its own single-flag update: a claim
+    # guard can roll back a batched release and lose both writes.
+    if [ "$HS_ASSIGNEE" = "$REFINERY_ID" ]; then
+      bd_pinned update "$ID" --assignee="" >/dev/null 2>&1 || true
+      read_handoff "$ID"
+      if [ -n "$HS_ASSIGNEE" ]; then
+        echo "recover-stranded-branches: WARN $ID could not be released back to unassigned (reads status='${HS_STATUS:-}' assignee='$HS_ASSIGNEE' branch='${HS_BRANCH:-}' target='${HS_TARGET:-}'); it is now held by '$REFINERY_ID' with an incomplete handoff and no longer matches this pass's candidate shape, so nothing retries it. Repair by hand: gc bd update $ID --status=open --set-metadata branch='$BRANCH' --set-metadata target='$TARGET'" >&2
+      fi
+    fi
     continue
   fi
 

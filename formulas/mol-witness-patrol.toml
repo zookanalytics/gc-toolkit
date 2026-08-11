@@ -601,13 +601,27 @@ as live if the root records a live session or any of its live steps is held by
 one.
 
 **The repair is the handoff, not a re-dispatch.** The missing action is the submit
-step itself — stamp `branch` and `target`, reassign to the refinery — so the pass
-performs it directly rather than pouring a fresh molecule to spend a full-context
-session re-deriving three fields. That is not a shortcut past review: the refinery
-still takes the branch through the pre-open codex gate and the PR still needs
-external human approval, so a branch pushed by a polecat that died MID-
-implementation gets reviewed exactly as it would have been. It never closes a
-bead — only the refinery does that, after verifying a merge.
+step itself — stamp `branch` and `target`, set the bead back to `open`, reassign it
+to the refinery — so the pass performs it directly rather than pouring a fresh
+molecule to spend a full-context session re-deriving four fields. That is not a
+shortcut past review: the refinery still takes the branch through the pre-open
+codex gate and the PR still needs external human approval, so a branch pushed by a
+polecat that died MID-implementation gets reviewed exactly as it would have been.
+It never closes a bead — only the refinery does that, after verifying a merge, and
+`open` is the only status this pass ever writes.
+
+**Every field of that handoff is READ BACK, because a reported write is not a
+durable one.** `branch` and `target` are verified BEFORE the assignee is written at
+all: an assignee that sticks over a target that did not both removes the bead from
+this pass's candidate set (it is no longer unassigned, so nothing retries it) and
+hands the refinery a branch to rebase onto a missing or stale base — an owned-convoy
+member onto `main`. Refusing there costs one cycle; proceeding is un-retryable.
+`status=open` is written in the same update as the assignee for a matching reason:
+`find-work` polls `--assignee=$GC_AGENT --status=open`, and this scan admits
+`in_progress` beads, so an `in_progress` handoff is assigned to an actor that never
+polls it AND no longer unassigned — strictly worse than the strand it started from.
+If the post-write read disagrees, the pass releases its OWN assignee (never another
+actor's) so the bead matches the candidate shape again next cycle.
 
 Everything it cannot establish, it refuses and says so: an unreadable session
 roster or bead listing hands off NOTHING (an unread roster makes every running
@@ -627,8 +641,11 @@ assignee order, target resolution from the bead / its convoy / the repository
 default, both liveness signals and their converse, every non-candidate field, an
 existing PR in any state, a failed PR lookup, an unpublished branch, a missing
 target branch, an already-landed branch, the age gate, both fail-safes, the
-one-warning-per-bead bound, the non-zero exit on an unverified handoff, that
-`--dry-run` writes nothing, and that no bead is ever closed).
+one-warning-per-bead bound, the non-zero exit on an unverified handoff, a
+branch/target write that reports success and is NOT durable stopping the handoff
+before the assignee, an `in_progress` strand being handed over as `status=open`, a
+handoff whose fields are rolled back after the assignee sticks releasing that
+assignee again, that `--dry-run` writes nothing, and that no bead is ever closed).
 
 **Exit criteria:** Stranded branches handed off, or none found. Continue to
 `check-refinery` — do NOT exit the wisp here. The `next-iteration` step is the

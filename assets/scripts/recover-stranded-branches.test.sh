@@ -46,9 +46,22 @@
 #              but not re-warned and not re-mailed
 #   (FAILED)   a handoff whose assignee does not read back exits NON-ZERO — a silent
 #              exit 0 over a failed write is how this class of bug hides
+#   (VERIFY)   a branch/target write that reports success and is NOT durable stops
+#              the handoff BEFORE the assignee is written: an assignee that sticks
+#              over a target that did not takes the bead out of the candidate set
+#              (it is no longer unassigned) AND hands the refinery a branch to
+#              rebase onto a missing base — an integration member onto main
+#   (INPROG)   an in_progress strand is handed over as status=open. The refinery's
+#              find-work polls `--assignee=$GC_AGENT --status=open`, so an
+#              in_progress handoff is assigned to an actor that never polls it and,
+#              being assigned, is no longer retryable by this pass either
+#   (RELEASE)  a handoff whose fields are rolled back AFTER the assignee sticks
+#              releases our own assignee, restoring the candidate shape so the next
+#              cycle retries the whole handoff
 #   (DRY)      --dry-run selects the same beads and issues no write at all
-#   (NOCLOSE)  the pass never closes a bead and never rewrites status: only the
-#              refinery closes a work bead, after verifying the merge
+#   (NOCLOSE)  the pass never closes a bead: only the refinery closes a work bead,
+#              after verifying the merge. The one status it writes is `open` — what
+#              makes the bead visible to the refinery at all
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -104,6 +117,12 @@ cat > "$TMP/candidates.json" <<JSON
    "metadata":{"branch":"polecat/b-flagged","stranded_branch_flagged":"polecat/b-flagged@missing"}},
   {"id":"b-fail","status":"open","assignee":"","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/b-fail"}},
+  {"id":"b-metafail","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-metafail"}},
+  {"id":"b-inprog","status":"in_progress","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-inprog"}},
+  {"id":"b-clobber","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-clobber"}},
 
   {"id":"x-assigned","status":"open","assignee":"gc-toolkit__polecat-lx-1","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/x-assigned"}},
@@ -166,6 +185,9 @@ b-behind|c-strand
 b-fresh|c-strand
 b-flagged|c-strand
 b-fail|c-strand
+b-metafail|c-strand
+b-inprog|c-strand
+b-clobber|c-strand
 D
 
 # convoy -> metadata.target (only the owned convoy carries one)
@@ -187,6 +209,9 @@ polecat/b-nobase|sha-nobase
 polecat/b-behind|sha-behind
 polecat/b-fresh|sha-fresh
 polecat/b-fail|sha-fail
+polecat/b-metafail|sha-metafail
+polecat/b-inprog|sha-inprog
+polecat/b-clobber|sha-clobber
 R
 
 # sha -> commits ahead of its base
@@ -201,6 +226,9 @@ sha-nobase|1
 sha-behind|0
 sha-fresh|1
 sha-fail|4
+sha-metafail|1
+sha-inprog|2
+sha-clobber|1
 A
 
 # branch -> the `gh pr list` payload for it. Absent -> [] (no PR).
@@ -211,11 +239,19 @@ P
 : > "$TMP/updates"
 : > "$TMP/mail"
 : > "$TMP/nudges"
-: > "$TMP/assignees"
+: > "$TMP/state"
 
 # --- gc stub ------------------------------------------------------------------
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+# The stub keeps DURABLE state: every write is recorded to $FAKE_STATE and `show`
+# reduces it (last write wins), so a readback sees exactly what the writes did or
+# did not apply. That is the whole point of the verified handoff — a `gc bd update`
+# that reports success and is not durable has to be representable, or the guard
+# against it cannot be tested.
+state_of() { # <id> <key>
+  awk -F'\t' -v i="$1" -v k="$2" '$1==i && $2==k{v=$3} END{print v}' "$FAKE_STATE"
+}
 sub="$1"; shift
 case "$sub" in
   bd)
@@ -238,18 +274,36 @@ case "$sub" in
         id="$1"
         t=$(awk -F'|' -v c="$id" '$1==c{print $2; exit}' "$FAKE_CONVOY_TARGETS")
         if [ -n "$t" ]; then jq -n --arg t "$t" '[{metadata:{target:$t}}]'; else
-          a=$(awk -F'\t' -v i="$id" '$1==i{r=$2} END{print r}' "$FAKE_ASSIGNEES")
-          jq -n --arg a "$a" '[{assignee:$a, metadata:{}}]'
+          jq -n --arg s "$(state_of "$id" status)" --arg a "$(state_of "$id" assignee)" \
+                --arg b "$(state_of "$id" branch)" --arg g "$(state_of "$id" target)" \
+            '[{status:$s, assignee:$a, metadata:{branch:$b, target:$g}}]'
         fi ;;
       update)
         printf 'gc bd update %s\n' "$*" >> "$FAKE_UPDATES"
-        id="$1"
+        id="$1"; shift
+        pending=""
         for arg in "$@"; do
+          if [ "$pending" = "meta" ]; then
+            pending=""
+            # b-metafail models a METADATA write that reports success and is not
+            # durable — the case the pre-assign readback exists to catch.
+            [ "$id" = "b-metafail" ] && continue
+            printf '%s\t%s\t%s\n' "$id" "${arg%%=*}" "${arg#*=}" >> "$FAKE_STATE"
+            continue
+          fi
           case "$arg" in
+            --set-metadata) pending="meta" ;;
+            --status=*)
+              printf '%s\t%s\t%s\n' "$id" "status" "${arg#--status=}" >> "$FAKE_STATE" ;;
             --assignee=*)
-              # b-fail models a write that reports success and is not durable.
+              # b-fail models an ASSIGNEE write that reports success and is not durable.
               [ "$id" = "b-fail" ] && continue
-              printf '%s\t%s\n' "$id" "${arg#--assignee=}" >> "$FAKE_ASSIGNEES" ;;
+              printf '%s\t%s\t%s\n' "$id" "assignee" "${arg#--assignee=}" >> "$FAKE_STATE"
+              # b-clobber models a ROLLBACK: the assignee sticks while the target
+              # stamped just before it is lost. Only the POST-assign readback can
+              # see this one — the pre-assign check passed on the same bead.
+              [ "$id" = "b-clobber" ] \
+                && printf '%s\t%s\t%s\n' "$id" "target" "" >> "$FAKE_STATE" ;;
           esac
         done ;;
       dep)
@@ -323,7 +377,7 @@ export FAKE_CANDIDATES="$TMP/candidates.json" FAKE_LIVE="$TMP/live.json"
 export FAKE_SESSIONS="$TMP/sessions.json" FAKE_DEPS="$TMP/deps"
 export FAKE_CONVOY_TARGETS="$TMP/convoy_targets" FAKE_REMOTE="$TMP/remote"
 export FAKE_AHEAD="$TMP/ahead" FAKE_PRS="$TMP/prs" FAKE_UPDATES="$TMP/updates"
-export FAKE_MAIL="$TMP/mail" FAKE_NUDGES="$TMP/nudges" FAKE_ASSIGNEES="$TMP/assignees"
+export FAKE_MAIL="$TMP/mail" FAKE_NUDGES="$TMP/nudges" FAKE_STATE="$TMP/state"
 export FAKE_OLD_EPOCH="$OLD_EPOCH" FAKE_FRESH_EPOCH="$FRESH_EPOCH"
 export GC_RIG="gc-toolkit" GC_AGENT="gc-toolkit/gc-toolkit.witness"
 
@@ -356,8 +410,8 @@ META_LINE=$(printf '%s\n' "$STRAND_LINES" | grep -c 'set-metadata branch=polecat
 eq "$META_LINE" "1" "(STRAND) stamps branch on the recovered bead"
 has "gc bd update b-strand --set-metadata branch=polecat/b-strand --set-metadata target=main" "$TMP/updates" \
   "(DEFAULT) target falls back to the repository default branch"
-has "gc bd update b-strand --assignee=gc-toolkit/gc-toolkit.refinery" "$TMP/updates" \
-  "(STRAND) hands the bead to the refinery"
+has "gc bd update b-strand --status=open --assignee=gc-toolkit/gc-toolkit.refinery" "$TMP/updates" \
+  "(STRAND) hands the bead to the refinery, open so the refinery's find-work sees it"
 FIRST=$(grep -n 'gc bd update b-strand' "$TMP/updates" | head -1)
 case "$FIRST" in
   *set-metadata*) ok "(ORDER) metadata is written before the assignee" ;;
@@ -380,11 +434,41 @@ hasnt "b-live@" "$TMP/updates" "(LIVEROOT) no marker is left on live work"
 
 # (DEADROOT): the converse of LIVEROOT — b-strand's root session is absent from the
 # roster, and it IS handed off (asserted above). Assert the discrimination directly:
-# exactly three beads reach an assignee write — b-strand, b-conv, and b-fail, whose
-# write is ATTEMPTED and then does not read back (that is the (FAILED) case, and it
-# belongs in this count precisely because the pass decided it was stranded).
-eq "$(grep -c 'assignee=gc-toolkit/gc-toolkit.refinery' "$TMP/updates")" "3" \
-  "(DEADROOT) exactly the three dead-molecule beads reach a handoff"
+# exactly five beads reach an assignee write — b-strand, b-conv, b-inprog, plus the
+# two whose write is ATTEMPTED and then does not survive the readback (b-fail, whose
+# assignee is not durable, and b-clobber, whose target is rolled back under it). Both
+# belong in this count precisely because the pass DECIDED they were stranded.
+# b-metafail is deliberately NOT here: its handoff is refused one step earlier.
+eq "$(grep -c 'assignee=gc-toolkit/gc-toolkit.refinery' "$TMP/updates")" "5" \
+  "(DEADROOT) exactly the five dead-molecule beads reach a handoff"
+
+# (VERIFY): the branch/target write reported success and was not durable, so the
+# assignee is never written — the bead stays unassigned, i.e. still a candidate.
+has "gc bd update b-metafail --set-metadata branch=polecat/b-metafail" "$TMP/updates" \
+  "(VERIFY) the fields the refinery merges by are stamped first"
+hasnt "gc bd update b-metafail --status" "$TMP/updates" \
+  "(VERIFY) a metadata write that did not stick never reaches the assignee write"
+has "the fields the refinery merges by did NOT stick" "$TMP/err" \
+  "(VERIFY) and says why it refused"
+has "b-metafail" "$TMP/err" "(VERIFY) naming the bead it left stranded"
+
+# (INPROG): the refinery polls --status=open, so every handoff sets it — in the same
+# write as the assignee, exactly as the done sequence does.
+has "gc bd update b-inprog --status=open --assignee=gc-toolkit/gc-toolkit.refinery" \
+  "$TMP/updates" "(INPROG) an in_progress strand is handed over as status=open"
+eq "$(grep -c -- '--status=open --assignee=gc-toolkit/gc-toolkit.refinery' "$TMP/updates")" "5" \
+  "(INPROG) every handoff sets status=open in the same write as the assignee"
+has "RECOVERED b-inprog" "$TMP/out" "(INPROG) and the in_progress strand is recovered"
+
+# (RELEASE): the target is rolled back AFTER the assignee sticks. Only the
+# post-assign readback can see it, and the repair is to release OUR OWN assignee so
+# the bead matches the candidate shape again next cycle.
+has "gc bd update b-clobber --assignee=$" "$TMP/updates" \
+  "(RELEASE) a clobbered handoff releases the assignee it just set"
+has "handoff did NOT stick" "$TMP/err" "(RELEASE) and reports the mismatch"
+hasnt "b-clobber could not be released" "$TMP/err" \
+  "(RELEASE) a release that reads back clean needs no hand-repair warning"
+hasnt "RECOVERED b-clobber" "$TMP/out" "(RELEASE) and it is never counted as recovered"
 
 # (HASPR) / (PRFAIL) / (NOBRANCH) / (NOBASE) / (BEHIND) / (FRESH)
 hasnt "gc bd update b-pr " "$TMP/updates" "(HASPR) a branch with an open PR is left alone"
@@ -415,16 +499,20 @@ for x in x-assigned x-routed x-stamped x-pr x-dup x-hold x-review; do
   hasnt "gc bd update $x" "$TMP/updates" "(SKIPSET) $x is not a candidate"
 done
 
-# (NOCLOSE): the pass has no close path and never rewrites status.
+# (NOCLOSE): the pass has no close path. `open` is the ONLY status it ever writes —
+# what makes a recovered bead visible to the refinery — and closing one is the
+# refinery's job, after it has verified the merge.
 hasnt "bd close" "$TMP/updates" "(NOCLOSE) never closes a bead"
-hasnt "\-\-status=" "$TMP/updates" "(NOCLOSE) never rewrites status"
+hasnt "\-\-status=closed" "$TMP/updates" "(NOCLOSE) never closes one by status either"
+eq "$(grep -o -- '--status=[a-z_]*' "$TMP/updates" | sort -u | tr '\n' ' ')" "--status=open " \
+  "(NOCLOSE) the only status it writes is open"
 hasnt "close" "$TMP/nudges" "(NOCLOSE) never asks anyone else to close one"
 
 # The refinery is nudged once, and only because this pass is not the refinery.
 eq "$(grep -c 'gc-toolkit.refinery' "$TMP/nudges")" "1" "(STRAND) nudges the refinery once"
 
 # --- pass 3: fail-safes -------------------------------------------------------
-: > "$TMP/updates"; : > "$TMP/mail"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"
 set +e
 FAKE_SESSIONS_FAIL=1 run
 ROSTER_RC=$?
@@ -434,7 +522,7 @@ has "FAIL-SAFE" "$TMP/err" "(ROSTER) says it is failing safe"
 hasnt "assignee=gc-toolkit/gc-toolkit.refinery" "$TMP/updates" \
   "(ROSTER) hands off nothing while the roster is unreadable"
 
-: > "$TMP/updates"; : > "$TMP/mail"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"
 set +e
 FAKE_LIVE_FAIL=1 run
 BEADS_RC=$?
@@ -450,7 +538,7 @@ hasnt "assignee=gc-toolkit/gc-toolkit.refinery" "$TMP/updates" \
 jq -c 'map(if .id == "b-strand" or .id == "b-conv"
            then .assignee = "gc-toolkit/gc-toolkit.refinery" else . end)' \
   "$TMP/candidates.json" > "$TMP/candidates2.json"
-: > "$TMP/updates"; : > "$TMP/mail"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"
 set +e
 FAKE_CANDIDATES="$TMP/candidates2.json" run
 set -e
