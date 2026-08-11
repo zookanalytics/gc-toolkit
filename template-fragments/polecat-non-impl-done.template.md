@@ -994,8 +994,71 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
       # PARENTLESS mol-polecat-work root that carries the ready demand; the parent
       # edge stays for visibility. This is the canonical dep-add-then-sling pattern
       # (see convoy-integration-branch.template.md). Wake stays as a latency nudge.
-      [ -n "$FIX_BEAD" ] && { gc sling "$FIX_POOL" "$FIX_BEAD" || true; }
-      [ -n "$FIX_BEAD" ] && { gc session wake "$FIX_POOL" || true; }
+      #
+      # The sling is the ONLY thing that makes the child claimable on an idle pool,
+      # so a failed one is not a nicety to swallow with `|| true`. Swallowed, the
+      # child stays open, parent-child under the still-blocked anchor, routed to a
+      # pool nothing ever asks to spawn — the exact deadlock this dispatch exists to
+      # prevent — and THIS review closes moments later (step 3), leaving no marker,
+      # no open review and no signal anywhere (review tk-c9rh7 finding 2). So verify
+      # it took: the exit status, and — when the sling names the workflow root it
+      # minted — that root reading back with the pool route that is what makes it
+      # ready demand. Wake only on a dispatch that took; waking a pool with nothing
+      # ready is the no-op this whole fix is about.
+      #
+      # On a miss, escalate durably rather than re-offering THIS review (the other
+      # shape the finding allows). A re-offered review re-runs the whole codex round
+      # and files a SECOND rework child against the same anchor — nothing in this arm
+      # dedups them — which puts two live children on one branch (a concurrent
+      # force-push hazard) and burns a round against the convergence cap. The child
+      # that exists is already correct; only its dispatch is missing, so the repair is
+      # one `gc sling`, and that is what the escalation hands the operator. The child
+      # also stays OPEN under the anchor, so the merge hold still holds either way:
+      # what the escalation removes is the silence, not the hold.
+      SLING_OK=""; SLING_RC=0; SLING_ROOT=""; SLING_ROUTE=""
+      if [ -n "$FIX_BEAD" ]; then
+        SLING_JSON=$(gc sling "$FIX_POOL" "$FIX_BEAD" --json 2>/dev/null)
+        SLING_RC=$?
+        SLING_ROOT=$(printf '%s' "$SLING_JSON" \
+          | jq -r '.workflow_id // .molecule_id // empty' 2>/dev/null)
+        if [ "$SLING_RC" = 0 ] && [ -n "$SLING_ROOT" ]; then
+          SLING_ROUTE=$(gc bd show "$SLING_ROOT" --json 2>/dev/null \
+            | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+          [ "$SLING_ROUTE" = "$FIX_POOL" ] && SLING_OK=1
+        elif [ "$SLING_RC" = 0 ]; then
+          # No root id to verify (a gc without --json on this path, or a route that
+          # minted no workflow): the exit status is all the evidence there is.
+          SLING_OK=1
+        fi
+        [ -n "$SLING_OK" ] && { gc session wake "$FIX_POOL" || true; }
+      fi
+      if [ -n "$FIX_BEAD" ] && [ -z "$SLING_OK" ]; then
+        # Say it in three durable places: on the CHILD (why this bead is sitting
+        # still), on the ANCHOR (why the branch/PR is held, and that a human owns it
+        # now), and to the mayor. Best-effort writes — the mail and the WARN carry the
+        # same repair, so a dropped marker cannot silence the escalation.
+        gc bd update "$FIX_BEAD" \
+          --set-metadata blocked_reason="filed but NOT dispatched: gc sling to $FIX_POOL did not take (rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}'). Repair: gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
+        if [ -n "$ANCHOR" ]; then
+          gc bd update "$ANCHOR" \
+            --set-metadata gc.routed_to=human \
+            --set-metadata blocked_reason="rework $FIX_BEAD filed for this signoff round but NOT dispatched to $FIX_POOL; it is cascade-blocked under this anchor, so no pool self-spawns for it. Repair: gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
+        fi
+        gc mail send mayor/ -s "ESCALATION: rework $FIX_BEAD filed but not dispatched to $FIX_POOL" \
+          -m "Signoff returned REQUEST_CHANGES on ${REVIEW_BRANCH:-PR#${PR_NUMBER:-?}} and filed rework
+child $FIX_BEAD under anchor ${ANCHOR:-<unresolved>}, but the dispatch did not take
+(rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}').
+
+That child is inert. It is a parent-child descendant of the still-open anchor, so it
+inherits the anchor's blocked status and never appears in 'bd ready' — gc.routed_to
+alone cannot self-spawn a polecat on an idle pool (tk-7xvz5, where the same shape sat
+18h). The anchor stays held with an open child nothing will ever work.
+
+Repair — dispatch the child that already exists (do NOT file a second one; two live
+children on one branch race each other's force-push):
+  gc sling $FIX_POOL $FIX_BEAD" || true
+        echo "WARN: rework child $FIX_BEAD was filed but the sling to $FIX_POOL did NOT take (rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}'); mayor escalated${ANCHOR:+ and anchor $ANCHOR routed to human}. Repair: gc sling $FIX_POOL $FIX_BEAD" >&2
+      fi
       # <<< signoff-rework-dispatch
       ;;
   esac
