@@ -124,7 +124,14 @@ gc prime                    # role context
 gc bd prime                 # beads context
 
 REPO="$(git rev-parse --show-toplevel)"
-git -C "$REPO" fetch origin main --quiet || true   # best-effort freshness
+# Load-bearing, not decorative: step 2 reads the rubric and the adopted-rule
+# inventory from origin/main, never from $REPO's working tree. This formula has
+# no workspace-setup step, so nothing makes that tree current — it stays on
+# whatever branch the last polecat left (observed 152 commits behind main). This
+# fetch is what makes those origin/main reads current. || true keeps it
+# fail-soft: a transient fetch failure falls back to the last-known origin/main,
+# still a real commit rather than the stale checkout.
+git -C "$REPO" fetch origin main --quiet || true
 
 DISTILL_RUN=open   # §0: open | gated | aborted | off-home
 
@@ -396,9 +403,9 @@ title = "Judge the pending set with the learning-distill rubric; cluster onto pa
 needs = ["load-and-gate"]
 description = """
 This is a judging task, not a counting script. The method is the
-learning-distill rubric, read from the pack at run time — the rubric is a
-versioned, learnable artifact (D6), so the file is the source of truth and
-this step never restates it in parallel prose that could drift.
+learning-distill rubric, read from the pack on `origin/main` at run time (§1) —
+the rubric is a versioned, learnable artifact (D6), so the file is the source
+of truth and this step never restates it in parallel prose that could drift.
 
 ## 0. Carry the run disposition
 
@@ -444,12 +451,21 @@ volume coupling §5 exists outside of.
 
 ## 1. Load the rubric (fail-soft, never fail-stop)
 
+Read the rubric from `origin/main`, NOT from `$REPO`'s working tree. `$REPO` is
+the polecat agent home worktree; this formula has no workspace-setup step and
+never makes that tree current, so its checkout is whatever branch the last
+occupant left (observed 152 commits behind main, predating the skill itself).
+`load-and-gate` §1 already fetched `origin/main` locally, so the read below is
+current — that is what makes the fetch load-bearing rather than decorative. The
+fail-soft WARN then fires only when the skill is genuinely absent from `main`,
+never merely stale in the checkout.
+
 ```bash
-RUBRIC="$REPO/skills/learning-distill/SKILL.md"
-if [ -r "$RUBRIC" ]; then
-  cat "$RUBRIC"   # READ it now — it is the judging method for everything below
+RUBRIC_PATH="skills/learning-distill/SKILL.md"
+if RUBRIC_TEXT=$(git -C "$REPO" show "origin/main:$RUBRIC_PATH" 2>/dev/null) && [ -n "$RUBRIC_TEXT" ]; then
+  printf '%s\\n' "$RUBRIC_TEXT"   # READ it now — it is the judging method for everything below
 else
-  echo "WARN: $RUBRIC not readable (older checkout, or the skill has not landed) — judging on the degraded core in this step text; land/install the learning-distill skill" >&2
+  echo "WARN: origin/main:$RUBRIC_PATH not readable (the skill has not landed on main) — judging on the degraded core in this step text; land/install the learning-distill skill" >&2
 fi
 ```
 
@@ -547,10 +563,19 @@ The adopted-rule inventory is the fragments' anchor comments — one source of
 truth (the files on `main`), no side list:
 
 ```bash
-grep -h '<!-- rule:' "$REPO"/template-fragments/learned-conventions-*.template.md 2>/dev/null || true
-for f in "$REPO"/template-fragments/learned-conventions-*.template.md; do
-  [ -e "$f" ] || continue
-  echo "$f: $(grep -c '^- ' "$f") bullets (cap {{fragment_bullet_cap}})"
+# Inventory from origin/main, not the worktree (§1 explains why; the fetch there
+# makes it current). ls-tree enumerates the fragments that exist on main, so
+# there is no shell glob to expand — which also sidesteps zsh's fatal
+# `no matches found` on an unmatched pattern (bash passes an unmatched glob
+# through literally, so the `[ -e ]` guard is reached; under zsh — this city's
+# default shell — the block aborts first). Skip the seeded format placeholder
+# `<!-- rule:<pattern-bead> ... -->` so a fresh fragment reads as 0 adopted
+# rules, not 1; the honest count is the bullets (`grep -c '^- '`), which the
+# cap is defined against.
+git -C "$REPO" ls-tree -r --name-only origin/main -- template-fragments/ 2>/dev/null | grep 'learned-conventions-' | while IFS= read -r f; do
+  FRAG=$(git -C "$REPO" show "origin/main:$f" 2>/dev/null) || continue
+  printf '%s\\n' "$FRAG" | grep '<!-- rule:' | grep -vF 'rule:<pattern-bead>' || true
+  echo "$f: $(printf '%s\\n' "$FRAG" | grep -c '^- ') bullets (cap {{fragment_bullet_cap}})"
 done
 ```
 
