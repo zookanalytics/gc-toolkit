@@ -19,10 +19,10 @@ The baseline lives in `sweep.reported` on the standing subject; its
 failure mode is to re-report, never to hide (operator decision
 2026-08-10, bead tk-snnpp) — and that bias governs every check added
 since: a probe that cannot be read excludes nothing.
-`assets/scripts/liveness-sweep-delta.test.sh` extracts the three marked
+`assets/scripts/liveness-sweep-delta.test.sh` extracts the four marked
 blocks below and executes them, so the delta split, the class filters
-(takeaway, gating state, operator hold) and the park wording cannot
-drift from what an agent actually runs.
+(worked-via-convoy, takeaway, gating state, operator hold) and the park
+wording cannot drift from what an agent actually runs.
 
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
@@ -83,7 +83,25 @@ jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE"
 The classes — the first four are named waits or live work; only the
 fifth is a defect:
 
-1. **worked** — assigned, or `gc.routed_to` non-empty.
+1. **worked** — assigned, `gc.routed_to` non-empty, or a work bead a live
+   molecule is driving. mol-polecat-work stamps assignee and `gc.routed_to`
+   on the molecule ROOT and its step beads, never on the work bead it
+   carries, so for the whole life of the molecule that work bead has neither
+   and would read as unnamed. The only edge back to it is the INCOMING
+   `tracks` edge from its input convoy — the direction 2(i) deliberately
+   ignores, and one not even present on the work bead to read (`gc bd show
+   <work-bead>` returns `dependents: null`; the edge lives only on the
+   convoy's outgoing side). So it is resolved FORWARD, once per pass, by the
+   `worked-via-convoy` block below: the convoys some non-closed bead names as
+   `gc.input_convoy_id`, and the members those convoys `tracks`. **The husk
+   is the hard half:** a `tracks` edge is not itself coverage — an orphan
+   synthetic convoy named by no live molecule tracks its member too, and
+   skipping on the edge alone would hide the highest-priority idle bead
+   behind a dead convoy (live case gc-spwr under husk gc-j20jn). The test is
+   a LIVE NAMER read from ALIVE, never the convoy's existence. It proved
+   itself twice in one day — gc-f7wx8 and gc-1mtj both read as unnamed while
+   actively dispatched — and the signal that fools the agent who just
+   performed the dispatch fools the sweep every pass.
 2. **gated** — the wait has a name, either in the graph (structure) or
    in a gating state. The spec's class 2 is both halves
    (liveness-and-triage-spec.md §2: "an open blocking dependency, an
@@ -222,8 +240,9 @@ that made the park an edge — for the opposite reason (an edge a tidy-up
 can delete is the wrong home for a decision only the operator may
 reverse).
 
-Mechanically: read the open pull requests once (the block below), apply
-the jq, then for each survivor check its dependency edges with
+Mechanically: read the open pull requests and the worked-via-convoy set
+once each (the blocks below), apply the jq, then for each survivor check
+its dependency edges with
 `gc bd show <id>`, resolving every "is that target still alive?" test
 against ALIVE (not closed), never against LIVE — any of the three
 class-2(i) structural shapes above (non-closed parent-child children;
@@ -290,9 +309,76 @@ reported — but the sitting is owed the word `unverified` in the visit
 body, because otherwise a list full of already-parked work looks like a
 real backlog.
 
+**The worked half is a batched bead read, once per pass, before the
+jq** — the exact shape of the gate half above, for the same reason: a
+work bead a live molecule is driving carries no worker stamp of its own
+(class 1's molecule indirection). Read the convoys ANY non-closed bead
+names as `gc.input_convoy_id` (from ALIVE, so a blocked or deferred
+molecule still counts as a live namer), then read each convoy's tracked
+members — those members are worked, and the jq drops them.
+
+```bash
+# >>> worked-via-convoy
+# The worked half of class 1, read ONCE per pass. mol-polecat-work stamps
+# assignee and gc.routed_to on the molecule root and its steps, never on the
+# work bead the convoy tracks, so the work bead reads as unnamed for the whole
+# life of its molecule. The incoming tracks edge is not even on the work bead
+# to read (gc bd show <work-bead> returns dependents: null), so resolve it
+# forward: convoys some non-closed bead names as its input convoy, and the
+# members those convoys track.
+#
+# HUSK-SAFE, the hard half: a tracks edge is not itself coverage. An orphan
+# synthetic convoy (gc.synthetic=true, created and abandoned, named by no live
+# molecule) tracks its member too, and a "has an incoming tracks edge, skip it"
+# rule would hide the highest-priority genuinely-idle bead behind a dead convoy.
+# The gate is a LIVE NAMER, never the convoy's existence: INPUT_CONVOYS is read
+# from ALIVE, so a convoy no non-closed bead names contributes nothing and its
+# members stay candidates.
+INPUT_CONVOYS=$(jq -r '[ .[] | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' "$ALIVE" 2>/dev/null)
+WORKED_TMP=$(mktemp)
+CONVOY_LIVENESS=none
+for C in $INPUT_CONVOYS; do
+  # An if, not a &&, as the loop body's first statement: a false && would be the
+  # body's exit status and abort the pass under set -e (same as the open-prs loop).
+  if [ "$CONVOY_LIVENESS" = "none" ]; then CONVOY_LIVENESS=verified; fi
+  # gc bd show, NOT the list JSON. gc bd list and gc bd ready key a dependency on
+  # .type + .depends_on_id and render an EMPTY tracks list for this very edge; gc
+  # bd show keys it on .dependency_type + .id and returns the real one. Read the
+  # wrong shape and every convoy looks memberless, WORKED stays empty, the
+  # discriminator drops nothing, and the bug returns in silence. The read sits
+  # inside the if for the same errexit reason as open-prs. Read the convoy's
+  # OUTGOING tracks members — the reliable direction gc bd show emits.
+  if ROWS=$(gc bd show "$C" --json 2>/dev/null) && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf '%s' "$ROWS" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id' >> "$WORKED_TMP"
+  else
+    CONVOY_LIVENESS=unverified
+    echo "WARN: convoy read FAILED for $C — the beads it tracks are REPORTED this pass, never hidden; say so in the visit body" >&2
+  fi
+done
+WORKED=$(jq -R . < "$WORKED_TMP" | jq -sc 'map(select(length > 0)) | unique')
+# <<< worked-via-convoy
+```
+
+`$CONVOY_LIVENESS` is three-valued exactly as `$PR_LIVENESS`: `none` (no
+non-closed bead named any convoy this pass — nothing to resolve),
+`verified` (every named convoy read), `unverified` (at least one read
+failed). A failed convoy read cannot hide a bead — its members are
+simply not marked worked, so they stay candidates and are reported — but
+the sitting is owed the word, or a list of actively-worked beads reads
+as a real backlog.
+
+**Verify against a known-worked bead before trusting a clean run.** If
+`$INPUT_CONVOYS` is non-empty but `$WORKED` came back `[]`, the tracks
+read is almost certainly keyed wrong (the `gc bd list` vs `gc bd show`
+trap the block comment names) — the discriminator looks like it works
+and silently excludes nothing. Spot-check one convoy by hand
+(`gc bd show <convoy>`) against a molecule you know is in flight; the
+regression test pins the `dependency_type` key so an edit cannot swap it
+back to the list shape unseen.
+
 ```bash
 # >>> classify-candidates
-CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson openprs "${OPEN_PRS:-[]}" '
+CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" '
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
@@ -303,6 +389,7 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
   | ([($openprs // [])[] | pr_key] | map(select(. != ""))) as $openkeys
   | [ ($ready[0] // [])[]
       | select((.metadata["gc.routed_to"] // "") == "")
+      | select(.id as $id | ($worked | index($id)) | not)
       | select((.metadata.task_kind // "") != "visit")
       | select((.metadata.task_kind // "") != "triage-subject")
       | select((.metadata["gc.takeaway"] // "") == "")
@@ -352,12 +439,13 @@ an empty `triage.hold`, are cleared holds, not holds.
 
 Record in your notes: counts per class as a funnel, the surviving ids,
 what the edge check dropped, and — because these are the drops nothing
-else in the pass makes visible — the PR-parked ids with their PR
-numbers, the held ids WITH the reason each hold gives, and the
-`$PR_LIVENESS` value. A hold and a parked PR are named waits, not
-defects, but a wait nobody ever reads is how a bead disappears for
-good; the funnel note is the only place they surface. Then close this
-step:
+else in the pass makes visible — the worked-via-convoy ids with the
+convoy covering each, the PR-parked ids with their PR numbers, the held
+ids WITH the reason each hold gives, and both the `$PR_LIVENESS` and
+`$CONVOY_LIVENESS` values. A hold, a parked PR and a molecule-driven
+work bead are named waits, not defects, but a wait nobody ever reads is
+how a bead disappears for good; the funnel note is the only place they
+surface. Then close this step:
 
 ```bash
 gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed
@@ -479,7 +567,10 @@ parked on a live PR may be listed here as candidates. Nothing is
 hidden by that failure, but the sitting would otherwise read a list of
 already-parked work as a real backlog and re-decide beads nobody in the
 city can move — which is the exact cost this class-2 gate half exists
-to remove.
+to remove. Likewise if `$CONVOY_LIVENESS` is `unverified`: a convoy read
+failed, so a work bead a live molecule is driving may be listed as a
+candidate — reported, never hidden, but the sitting should know a worked
+bead can appear here for that reason.
 
 File the visit BEFORE stamping the baseline in step 5. In that order a
 failed create leaves the baseline untouched and the next pass re-reports;
