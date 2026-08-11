@@ -46,17 +46,25 @@ The loop, every visit:
    framed choice.
 4. **Hold.** Stamp what you are waiting for, then post your framing:
    ```bash
-   HELM="${GC_RIG_ROOT:-$GC_CITY_PATH/rigs/gc-toolkit}/assets/scripts/gc-helm.sh"
+   HELM=""
+   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
+   done
+   [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
    "$HELM" takeaway "$SUBJECT" "holding — <the one decision or input needed>" --by converse
    ```
    Stamp BEFORE you wait, not after. This session can be reaped mid-hold
    (**The reap**, below) and the stamp is the only thing that survives
    it: reaped, the subject still says what the sitting was waiting for
    and when. Unstamped, a reaped hold is indistinguishable from one that
-   never happened. (Both takeaway blocks re-resolve `HELM` because each
-   runs in its own shell — a variable set in one does not reach the
-   other. Never pass `--release`: it clears the subject's assignee and
-   route, parking a bead you are mid-conversation about.)
+   never happened. (The writer is **searched for**, never assumed:
+   `$GC_RIG_ROOT` is the rig that IMPORTED this agent, not the gc-toolkit
+   pack — a `signal-loom/gc-toolkit.converse` session gets signal-loom's
+   root, which has no `assets/` at all, so a path built from it alone
+   fails before writing anything. Both takeaway blocks run the same
+   search because each runs in its own shell — a variable set in one does
+   not reach the other. Never pass `--release`: it clears the subject's
+   assignee and route, parking a bead you are mid-conversation about.)
 
    Then post the framing. The final line of every message you post while
    holding is the operator's single next step, exactly:
@@ -70,7 +78,11 @@ The loop, every visit:
 6. **Sign off, then close the visit.** Write the durable trace first,
    then close, then post the sign-off as the thread's last word:
    ```bash
-   HELM="${GC_RIG_ROOT:-$GC_CITY_PATH/rigs/gc-toolkit}/assets/scripts/gc-helm.sh"
+   HELM=""
+   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
+   done
+   [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the subject carries no trace of this sitting"
    "$HELM" takeaway "$SUBJECT" "<outcome> — <what this sitting settled or needs next>" --by converse
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
@@ -126,8 +138,10 @@ Rules:
   rig's store, folded into the bead that absorbed it, fixed upstream,
   duplicate), and executing that ruling is yours. Use the one writer:
   `assets/scripts/bead-rehome.sh --origin <bead> --successor <bead> --kind
-  re-homed|folded|fixed-upstream|duplicate --note "<why>"` (resolve the
-  path under `$GC_RIG_ROOT` / `$GC_CITY_PATH/rigs/gc-toolkit`). It stamps
+  re-homed|folded|fixed-upstream|duplicate --note "<why>"` (find it with
+  the same candidate search as `HELM` in step 4 — first root holding an
+  executable copy; `$GC_RIG_ROOT` alone is the wrong rig in an imported
+  session). It stamps
   `gc.superseded_by` + `gc.superseded_by_store`, reads them back, and only
   then closes with a populated reason; on an already-closed bead it is the
   repair tool (pointer + note, nothing reopened). A bare close leaves a sound disposition

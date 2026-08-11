@@ -72,7 +72,7 @@ have "hold stamp carries the holding- prefix" '"holding — ' "$PROMPT"
 # step resolves to the empty string and the stamp never lands — silently,
 # at exactly the moment the trace is the only thing that would survive.
 n_takeaway=$(grep -c 'takeaway "\$SUBJECT"' "$PROMPT")
-n_helm=$(grep -c '^   HELM=' "$PROMPT")
+n_helm=$(grep -c '^ *HELM=' "$PROMPT")
 if [ "$n_takeaway" -ge 2 ] && [ "$n_helm" -eq "$n_takeaway" ]; then
     ok "every takeaway block resolves HELM itself ($n_helm/$n_takeaway)"
 else
@@ -87,6 +87,150 @@ if grep -n 'takeaway "\$SUBJECT"' "$PROMPT" | grep -q -- '--release'; then
         "--release parks the subject (clears assignee + route) mid-conversation"
 else
     ok "no --release on a converse takeaway"
+fi
+
+echo "── the takeaway writer resolves in an IMPORTED (cross-rig) session ──"
+# converse is scope="rig", so it is imported into EVERY rig, and
+# rigNameForQualifiedAgent resolves the rig from the qualified name: a
+# `signal-loom/gc-toolkit.converse` session runs with GC_RIG_ROOT pointing
+# at signal-loom, a rig with no assets/ at all. A writer path built from
+# GC_RIG_ROOT alone therefore names a file that does not exist — and
+# because the variable is NON-EMPTY, a `${GC_RIG_ROOT:-<pack>}` default
+# never fires to save it. Both mandatory stamps then fail before writing,
+# in precisely the cross-rig shape that produced this bug's second
+# instance (tk-bzm86 notes: signal-loom session lx-qk9v). Grepping the
+# prompt cannot catch that, so these blocks are EXTRACTED AND RUN.
+TMPD="$(mktemp -d)"
+trap 'rm -rf "$TMPD"' EXIT
+PACKROOT="$TMPD/city/rigs/gc-toolkit"
+FOREIGN="$TMPD/city/rigs/signal-loom" # an importing rig: no assets/ tree
+mkdir -p "$PACKROOT/assets/scripts" "$FOREIGN"
+printf '#!/bin/sh\necho STUB-HELM "$@"\n' >"$PACKROOT/assets/scripts/gc-helm.sh"
+chmod +x "$PACKROOT/assets/scripts/gc-helm.sh"
+
+# extract_resolver <n> — everything the Nth takeaway block runs BEFORE it
+# invokes the writer, de-indented. Deliberately shape-agnostic: it lifts
+# whatever the prompt says rather than a resolver of an expected form, so
+# a prompt that reverts to assuming one path is executed and FAILS on
+# behaviour below, instead of skipping these cases for want of a match.
+extract_resolver() {
+    awk -v want="$1" '
+        /^[[:space:]]*```/ { infence = !infence; nl = 0; next }
+        !infence { next }
+        {
+            line = $0; sub(/^[[:space:]]*/, "", line)
+            if (line ~ /^"\$HELM" takeaway/) {
+                if (++n == want) { for (i = 1; i <= nl; i++) print buf[i]; exit }
+                nl = 0; next
+            }
+            buf[++nl] = line
+        }
+    ' "$PROMPT"
+}
+# resolve <n> <GC_RIG_ROOT> <GC_CITY_PATH> — prints the writer it picked.
+# Runs from $TMPD with git discovery fenced, so the middle candidate
+# (`git rev-parse --show-toplevel`) cannot silently rescue a broken
+# search from an ambient checkout; the case below exercises it on purpose.
+# The value is tagged rather than simply echoed: a block may legitimately
+# print of its own accord (the not-found guard does), and that output must
+# not be mistaken for the resolved path.
+resolve() {
+    {
+        extract_resolver "$1"
+        printf 'printf "RESOLVED=%%s\\n" "$HELM"\n'
+    } >"$TMPD/probe.sh"
+    (cd "$TMPD" && GIT_CEILING_DIRECTORIES="$TMPD" GC_RIG_ROOT="$2" GC_CITY_PATH="$3" bash "$TMPD/probe.sh" 2>/dev/null) |
+        sed -n 's/^RESOLVED=//p' | tail -1
+}
+
+# Fixture control: if the probe's cwd were itself inside a checkout that
+# happens to ship assets/scripts/gc-helm.sh, every case below would pass
+# for the wrong reason.
+if (cd "$TMPD" && GIT_CEILING_DIRECTORIES="$TMPD" git rev-parse --show-toplevel >/dev/null 2>&1); then
+    bad "probe runs outside any git checkout" \
+        "$TMPD resolves to a repo; the toplevel candidate could mask a broken search"
+else
+    ok "probe runs outside any git checkout (toplevel candidate inert unless a case arms it)"
+fi
+
+n_blocks=$(grep -c '^[[:space:]]*"\$HELM" takeaway' "$PROMPT")
+n_search=$(grep -c '\[ -x "\$cand/assets/scripts/gc-helm.sh" \]' "$PROMPT")
+if [ "$n_blocks" -ge 2 ] && [ "$n_search" -eq "$n_blocks" ]; then
+    ok "both takeaway blocks search for the writer rather than assume it ($n_search/$n_blocks)"
+else
+    bad "both takeaway blocks search for the writer rather than assume it" \
+        "$n_search executable-test(s) for $n_blocks takeaway block(s); a path built from GC_RIG_ROOT alone is wrong in every imported session"
+fi
+
+blk=1
+while [ "$blk" -le "$n_blocks" ]; do
+    # THE REGRESSION: non-empty GC_RIG_ROOT naming a rig without the asset.
+    got=$(resolve "$blk" "$FOREIGN" "$TMPD/city")
+    if [ "$got" = "$PACKROOT/assets/scripts/gc-helm.sh" ]; then
+        ok "block $blk: imported session (GC_RIG_ROOT=a rig without assets/) still finds the pack writer"
+    else
+        bad "block $blk: imported session (GC_RIG_ROOT=a rig without assets/) still finds the pack writer" \
+            "resolved '$got' — a non-empty GC_RIG_ROOT must not defeat the pack fallback"
+    fi
+    # The owning rig keeps precedence: its checkout is the CURRENT source.
+    got=$(resolve "$blk" "$PACKROOT" "$TMPD/city")
+    if [ "$got" = "$PACKROOT/assets/scripts/gc-helm.sh" ]; then
+        ok "block $blk: the owning rig's own copy still wins when it has one"
+    else
+        bad "block $blk: the owning rig's own copy still wins when it has one" \
+            "resolved '$got'"
+    fi
+    # Unset GC_RIG_ROOT (city-scoped invocation) must not break the search.
+    got=$(resolve "$blk" "" "$TMPD/city")
+    if [ "$got" = "$PACKROOT/assets/scripts/gc-helm.sh" ]; then
+        ok "block $blk: an empty GC_RIG_ROOT falls through to the city pack path"
+    else
+        bad "block $blk: an empty GC_RIG_ROOT falls through to the city pack path" \
+            "resolved '$got'"
+    fi
+    # Nothing anywhere: must land EMPTY, which is what makes the loud
+    # guard reachable. Resolving to a plausible-but-absent path instead
+    # would restore the silent failure this section exists to prevent.
+    got=$(resolve "$blk" "$FOREIGN" "$TMPD/no-such-city")
+    if [ -z "$got" ]; then
+        ok "block $blk: no writer anywhere resolves EMPTY (the guard can fire)"
+    else
+        bad "block $blk: no writer anywhere resolves EMPTY (the guard can fire)" \
+            "resolved '$got' — an unexecutable path passes the guard and fails at the stamp instead"
+    fi
+    blk=$((blk + 1))
+done
+
+# The middle candidate is a real arm, not decoration: prove it fires when
+# the session IS inside a pack checkout and neither env var helps.
+GITPACK="$TMPD/gitpack"
+mkdir -p "$GITPACK/assets/scripts"
+printf '#!/bin/sh\necho STUB-HELM "$@"\n' >"$GITPACK/assets/scripts/gc-helm.sh"
+chmod +x "$GITPACK/assets/scripts/gc-helm.sh"
+if git -C "$GITPACK" init -q >/dev/null 2>&1; then
+    extract_resolver 1 >"$TMPD/probe-git.sh"
+    printf 'printf "RESOLVED=%%s\\n" "$HELM"\n' >>"$TMPD/probe-git.sh"
+    got=$(cd "$GITPACK" && GC_RIG_ROOT="$FOREIGN" GC_CITY_PATH="$TMPD/no-such-city" \
+        bash "$TMPD/probe-git.sh" 2>/dev/null | sed -n 's/^RESOLVED=//p' | tail -1)
+    if [ "$got" = "$GITPACK/assets/scripts/gc-helm.sh" ]; then
+        ok "the git-toplevel candidate resolves a pack checkout when the env vars do not"
+    else
+        bad "the git-toplevel candidate resolves a pack checkout when the env vars do not" \
+            "resolved '$got'"
+    fi
+else
+    ok "git-toplevel candidate case skipped (git init unavailable)"
+fi
+
+# A search that finds nothing must SAY so. Silence here reproduces the
+# original bug one level down: the stamp is skipped and the sitting
+# reports nothing wrong.
+n_guard=$(grep -c 'NO TAKEAWAY WRITER' "$PROMPT")
+if [ "$n_guard" -eq "$n_blocks" ] && [ "$n_guard" -gt 0 ]; then
+    ok "every resolver block fails LOUD when no writer is found ($n_guard/$n_blocks)"
+else
+    bad "every resolver block fails LOUD when no writer is found" \
+        "$n_guard guard(s) for $n_blocks block(s) — an unguarded block stamps nothing and says nothing"
 fi
 
 echo "── the sitting ends out loud (deliberate-close path) ──"

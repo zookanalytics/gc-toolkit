@@ -101,6 +101,24 @@ NEEDS headline. `--release` is deliberately **not** passed: it clears
 assignee and route and marks a proactive reaction, which would park a
 subject the operator is mid-conversation about.
 
+**Finding the writer is a search, not a path.** converse is
+`scope = "rig"`, so it is imported into every rig and
+`rigNameForQualifiedAgent` resolves the rig from the qualified name: a
+`signal-loom/gc-toolkit.converse` session runs with `GC_RIG_ROOT` at
+*signal-loom*, which ships no `assets/` at all. Both stamps therefore
+walk the pack's standard candidate list — `$GC_RIG_ROOT`, the git
+toplevel, `$GC_CITY_PATH/rigs/gc-toolkit` — taking the first root with
+an **executable** copy, and say so loudly when none has one.
+
+A single default (`${GC_RIG_ROOT:-<pack>}`) cannot do this: `GC_RIG_ROOT`
+is *non-empty* in the broken case, so the fallback never fires and the
+stamp fails before writing. That is not a hypothetical rig — this bug's
+second instance was a signal-loom sitting (session `lx-qk9v`), so the
+first form would have left exactly the case that motivated the fix
+untraced. A missing writer is now announced in-thread rather than
+swallowed, because a stamp that silently does not happen is the original
+bug one level down.
+
 Order matters and is fixed: **durable stamp → close the visit → post the
 sign-off.** The writes go first so a session that dies mid-sequence has
 still left the trace; the human-visible line goes last so it is what
@@ -172,15 +190,26 @@ against the gascity rig as **`gc-rjtk1`** rather than approximated here.
 only) pins both halves of the contract: the hold-time stamp, the
 sign-off block's two lines, the cut-short path signing off too, the
 absence of `--release`, the corrected agent.toml comment, and the
-central mechanism record. Verified to fail 20/25 against the pre-fix
-tree — a prompt is prose, and the stamp is exactly the kind of line a
-tidy-up edit drops with nothing downstream noticing.
+central mechanism record. A prompt is prose, and the stamp is exactly
+the kind of line a tidy-up edit drops with nothing downstream noticing.
+
+Writer resolution is the one part that is **executed** rather than
+grepped: the test lifts each takeaway block's resolver out of the prompt
+and runs it against fixture roots — an importing rig with no `assets/`,
+the owning rig, an empty `GC_RIG_ROOT`, a git-toplevel pack, and nothing
+at all. Extraction is deliberately shape-agnostic (everything the block
+runs before invoking the writer), so a prompt that reverts to assuming
+one path is *run and fails on behaviour* rather than skipped for want of
+a matching pattern. 41 assertions pass here; 7 fail against the
+round-2 tree, where the imported-session case resolves the writer to
+`…/rigs/signal-loom/assets/scripts/gc-helm.sh` — a file that does not
+exist.
 
 ## Files
 
 | File | Change |
 |---|---|
-| `agents/converse/prompt.template.md` | Hold stamps the takeaway before waiting; close becomes sign-off-then-close; cut-short routes through it; a "The reap" rule states what can end the thread without the agent. |
+| `agents/converse/prompt.template.md` | Hold stamps the takeaway before waiting; close becomes sign-off-then-close; cut-short routes through it; a "The reap" rule states what can end the thread without the agent; both takeaway blocks (and the `bead-rehome.sh` pointer) search the candidate roots for their writer instead of assuming one path. |
 | `agents/converse/agent.toml` | Corrects the false "timeouts do not end a sitting" comment; records the real mechanism and why longevity is not the fix. |
 | `assets/scripts/gc-helm.sh` | Usage only: documents `--by converse` and the two-stamps-per-sitting caller. |
 | `docs/gascity-human-engagement.md` | New "How a held sitting ends" section — the verified mechanism, the seam, and the unbuilt core seam. |
