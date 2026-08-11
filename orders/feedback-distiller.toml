@@ -17,14 +17,22 @@
 # pending learning beads, not the calendar — but the `gc order` rail only
 # offers time-based cooldown triggers. So this order is the
 # mol-triage-recurrence restraint pattern: a cheap daily fire wakes the
-# formula, and the formula's OWN first step is the cadence. It proceeds only
-# when pending observations reach distill_min_pending, or any pending one is
-# operator-endorsed / an explicit standing directive (those never wait on
-# volume), or the oldest pending exceeds distill_max_age_days; otherwise it
-# logs "gated: N pending, none urgent, oldest Xd" and cleanly no-ops.
-# Effective cadence therefore scales with feedback volume — a heavy week
-# distills daily, a quiet month distills once. Do not "fix" a quiet order by
-# shortening this interval; tune the formula's gate vars instead.
+# formula, and the formula's OWN first step is the cadence. It judges the
+# pending observations only when they reach distill_min_pending, or any
+# pending one is operator-endorsed / an explicit standing directive (those
+# never wait on volume), or the oldest pending exceeds distill_max_age_days;
+# otherwise it logs "gated: N pending, none urgent, oldest Xd" and judges
+# nothing. Effective cadence therefore scales with feedback volume — a heavy
+# week distills daily, a quiet month distills once. Do not "fix" a quiet order
+# by shortening this interval; tune the formula's gate vars instead.
+#
+# The gate scopes the JUDGING of observations, not the run. A gated fire still
+# runs the retirement questions over the adopted rules — that pass is
+# unconditional by specification ("every run", in the formula's step 2 and in
+# skills/learning-distill/SKILL.md), and a quiet city is exactly when it earns
+# its keep, since "still binding?" asks about rules with no recent evidence.
+# A gated fire stamps nothing, so its pending observations still open the next
+# gate.
 #
 # ── Enablement / scope / pool / pool-wake ──────────────────────────────
 # Identical to the doc-keeper orders and explained in full in
@@ -41,14 +49,16 @@
 #
 # ── Home-rig gate: importers no-op by design ───────────────────────────
 # Every importing rig fires this order, but prompt updates are edits to the
-# pack repo itself, authorable only from the pack's home rig. The formula's
-# first step no-ops cleanly wherever $REPO/pack.toml is not gc-toolkit's own
-# (name = "gc-toolkit") — so in importers the daily fire is a cheap,
-# idempotent no-op, not an error. Importing rigs still participate: their
+# pack repo itself, authorable only from the pack's home rig. All three of the
+# formula's steps re-derive the same gate and no-op cleanly wherever
+# $REPO/pack.toml is not gc-toolkit's own (name = "gc-toolkit") — each carries
+# it rather than one step force-closing the others, and only the last one
+# drains, so an importer's daily fire is one cheap idempotent session, not an
+# error and not a second spawn. Importing rigs still participate: their
 # agents FILE observations locally (capture is rig-local, D5); this home-rig
 # run reads those stores cross-rig at distill time.
 [order]
-description = "learning: distill pending feedback observations; file prompt-update / retirement beads when the volume or urgency gate opens"
+description = "learning: distill pending feedback observations; file prompt-update / retirement beads (judging gated on volume or urgency; the retirement pass runs every fire)"
 formula = "mol-feedback-distiller"
 trigger = "cooldown"
 interval = "24h"
