@@ -695,6 +695,15 @@ pr_bead_query() {
 #      docs/work-bead-state-machine.md) and how an operator files an explicit
 #      merge-ordering block.
 #
+# `--direction` is read from the ANCHOR's end: `up` returns the beads that depend
+# ON it — its parent-child CHILDREN — and `down` the beads it depends on, its own
+# PARENT and its `blocks` blockers. Confirm that on an anchor which HAS an open
+# child before concluding either leg is broken: probed against one whose children
+# are all closed, or which has none yet, `up -t parent-child` correctly returns
+# `[]`, and reading that as "this leg never returns anything" has already produced
+# one spurious fail-OPEN report (tk-8329m). `gc bd show` is the authority on which
+# edges exist; dependency_count and the bare `dep list` disagree with it.
+#
 # The two walks deliberately NOT taken are the reason both dep probes are type-
 # filtered; either one would deadlock a healthy anchor forever:
 #   - up / blocks         = DOWNSTREAM beads waiting for this one to LAND. They
@@ -1427,6 +1436,37 @@ while IFS= read -r row; do
   # too widely, re-entered through the identity guard instead. So identity
   # narrows only what the number swept in.
   #
+  # The TRACKING_ONLY exclusion is the THIRD SHAPE (tk-8329m). The taxonomy above
+  # is binary and the two buckets do not cover the ledger: merge_result PRESENT is
+  # a duplicate gating anchor (the DUP_PRS guard's business), merge_result ABSENT
+  # is presumed a rework child. A bead that references a PR for LINKAGE ONLY is
+  # neither, so it lands in the second bucket by construction and holds its own PR
+  # forever. The omission that makes such a bead non-gating — no merge_result,
+  # deliberately, because stamping one arms this pass to auto-land an operator's
+  # PR — is the same omission that makes it a blocker. Nothing releases it: the
+  # only pass that closes a PR-linked bead is reconcile-merged-prs.sh, AFTER the
+  # PR merges, which is the very thing the hold prevents. The release condition
+  # sits downstream of what it blocks, so the hold is permanent, not the one pass
+  # this gate is designed to cost (live case: tk-uicmw / PR#291 — CLEAN, APPROVED,
+  # codex-green at the live head, held on every idle wake).
+  #
+  # An EXPLICIT opt-out, never a loosening of the default. An unmarked bead with no
+  # merge_result keeps holding exactly as before: fail-closed is the whole point of
+  # the $mr == "" arm, and the alternative remedy — presume rework only when a
+  # rework/review `task_kind` is present — inverts that, since almost no rework
+  # child records a task_kind and every one of them would stop holding. Only a
+  # marker an operator sets BY HAND clears the hold, read with merge_hold's
+  # truthiness rule (merge_hold_truthy, restated here in jq because the value is
+  # per-holder inside the filter, not per-anchor in shell): unset, empty, false, 0
+  # and null all keep holding, so a half-written marker cannot disarm a gate.
+  #
+  # Scoped to `_via == "pr_number"` like both of its neighbours, and by the same
+  # rule. A dependency edge is a claim made in THIS ledger that this bead holds
+  # this anchor, and "I merely reference the PR for tracking" cannot be true of a
+  # bead somebody filed as an explicit merge-ordering `blocks` or as the anchor's
+  # own rework child. Honouring the marker on the dep arm would re-open tk-je0rk's
+  # fail-OPEN hole through a third door — a holder that names itself harmless.
+  #
   # `?` remains the fail-closed wildcard (REPO_JQ): only a positive, parsed
   # disagreement clears a hold, so a legacy child with no pr_url keeps its veto.
   #
@@ -1497,8 +1537,11 @@ while IFS= read -r row; do
         | select(((.status // "open") | ascii_downcase) as $s | $live_statuses | index($s))
         | ((.metadata.merge_result // "") | tostring) as $mr
         | ((._via // "pr_number")) as $via
+        | ((.metadata.tracking_only // "") | tostring | ascii_downcase) as $track
+        | (["", "false", "0", "null"] | index($track) | not) as $tracking_only
         | select($via == "dep"
                  or ($mr == ""
+                     and ($tracking_only | not)
                      and same_repo((((.metadata.pr_url // "") | tostring) | repo_of); $r)))
         | "\(.id) (\(.status // "open")\(if $mr == "" then "" else ", merge_result=" + $mr end))" ]
     | .[0] // empty' 2>/dev/null); then

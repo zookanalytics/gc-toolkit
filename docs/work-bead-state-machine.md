@@ -737,6 +737,33 @@ coincidence until certified — only the coincidence is filtered.** Certificatio
 fail-closed either way: a holder whose `pr_url` cannot be parsed into a repository
 stays the `?` wildcard and keeps its veto, so no legacy row loses its hold.
 
+**A bead may reference a PR without gating it or holding it —
+`tracking_only` (tk-8329m).** The two buckets above do not cover the ledger.
+`merge_result` present is a duplicate gating anchor; `merge_result` absent is
+presumed an unclosed rework child; and a bead that references a PR purely for
+**linkage** — a durable record that an operator's pull request exists, filed so it
+is no longer invisible to every automated path — is neither. It landed in the
+second bucket by construction, and the consequence was circular: the very omission
+that keeps such a record non-gating (no `merge_result`, deliberately, so the merge
+skill cannot arm itself to auto-land a PR nobody asked it to land) is the omission
+that classed it as rework in flight. Nothing could release the hold, because the
+only pass that closes a PR-linked bead is `reconcile-merged-prs.sh`, *after* the PR
+merges — the thing the hold prevents. The live case sat `CLEAN`, `APPROVED` and
+codex-green at its head and was held on every idle wake (tk-uicmw / PR#291).
+
+The remedy is an **explicit opt-out**, never a loosening of the default:
+`metadata.tracking_only` on the referencing bead, read for truth the way
+`merge_hold` is (`tostring`, then set and not one of `""`/`false`/`0`/`null`), so a
+half-written marker disarms nothing. An unmarked bead with no `merge_result` keeps
+holding exactly as before — that fail-closed default is the whole point of the
+arm, and the tempting alternative, presuming rework only when a
+`review`/`rework` `task_kind` is present, inverts it: almost no rework child
+records a `task_kind`, so nearly all of them would stop holding. **Only an operator
+sets this marker, and setting it is a claim about the bead's purpose, not about the
+PR's readiness.** It is scoped to `_via == "pr_number"` like both exclusions above,
+by the same rule: a bead filed as an explicit dependency edge against this anchor
+is not merely naming a number, so it holds with the marker set.
+
 **A rework child never becomes a second anchor — one gating anchor per PR
 (tk-ynz4b).** When a rework child hands its fix back through the refinery, its
 commits are already on the convoy branch, which *is* that child's landing
