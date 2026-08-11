@@ -1386,6 +1386,14 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
     gc bd update "$id" \
       --set-metadata stale_base_head="${head_oid:-unknown}" \
       --set-metadata blocked_reason="PR#$num conflicts with base '$base' (stale base) at head ${head_oid:-unknown}; rebase $FIX_BEAD routed to $pool" >/dev/null 2>&1
+    # DISPATCH the rebase. The parent-child edge above makes the child inherit the
+    # anchor's is_blocked (the anchor stays gating/open while the rebase runs), so it
+    # drops out of `bd ready`: gc.routed_to alone never self-spawns a pool and the
+    # wake below is a no-op on an idle pool (tk-7xvz5). `gc sling` mints a PARENTLESS
+    # mol-polecat-work root carrying the ready demand; the parent edge stays for
+    # visibility. Canonical dep-add-then-sling (convoy-integration-branch.template.md).
+    gc sling "$pool" "$FIX_BEAD" >/dev/null 2>&1 \
+      || echo "reconcile-merged-prs: WARN could not sling rebase $FIX_BEAD to $pool; route it by hand" >&2
     gc session wake "$pool" >/dev/null 2>&1 || true
     rebased=$((rebased + 1))
     echo "reconcile-merged-prs: $id — PR#$num conflicts with '$base' (stale base); filed rebase $FIX_BEAD routed to $pool"

@@ -976,6 +976,7 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
       # no child, and it already cleared the gate marker and routed the anchor to
       # a human. Waking the fix pool there would spawn the session the cap exists
       # to prevent.
+      # >>> signoff-rework-dispatch
       if [ -n "$FIX_BEAD" ] && [ -n "$ANCHOR" ]; then
         gc bd dep add "$FIX_BEAD" "$ANCHOR" --type=parent-child \
           || echo "WARN: could not link rework $FIX_BEAD under anchor $ANCHOR" >&2
@@ -985,7 +986,17 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
       elif [ -n "$FIX_BEAD" ]; then
         echo "WARN: no gating anchor resolved for review <work-bead>; rework $FIX_BEAD filed unlinked" >&2
       fi
+      # DISPATCH the rework. The parent-child edge above makes the child inherit the
+      # still-open anchor's is_blocked (it blocks on workflow-finalize while in
+      # flight), which drops the child out of `bd ready` — so gc.routed_to alone
+      # never self-spawns a pool and the wake below is a no-op on an idle pool
+      # (tk-7xvz5; su-iyng sat 18h until slung by hand). `gc sling` mints a
+      # PARENTLESS mol-polecat-work root that carries the ready demand; the parent
+      # edge stays for visibility. This is the canonical dep-add-then-sling pattern
+      # (see convoy-integration-branch.template.md). Wake stays as a latency nudge.
+      [ -n "$FIX_BEAD" ] && { gc sling "$FIX_POOL" "$FIX_BEAD" || true; }
       [ -n "$FIX_BEAD" ] && { gc session wake "$FIX_POOL" || true; }
+      # <<< signoff-rework-dispatch
       ;;
   esac
 fi

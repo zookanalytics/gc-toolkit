@@ -343,7 +343,7 @@ printf '%s\n' \
 
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mailbody"
 : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/blocked"
 
 # Rework/review children referencing a PR (the merge skill's in-flight set; the
@@ -687,6 +687,12 @@ if [ "$1" = "mail" ]; then
 fi
 if [ "$1" = "session" ]; then
   [ "${2:-}" = "wake" ] && printf '%s\n' "${3:-}" >> "$FAKE_WAKES"
+  exit 0
+fi
+if [ "$1" = "sling" ]; then
+  # `gc sling <pool> <bead>` — record the whole invocation so assertions can match
+  # both the routed bead and the pool regardless of any future flag ordering.
+  shift; printf '%s\n' "$*" >> "$FAKE_SLINGS"
   exit 0
 fi
 [ "$1" = "bd" ] || exit 0
@@ -1204,7 +1210,7 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_RETARGETED="$TMP/retargeted" \
        FAKE_AUTOMERGE="$TMP/automerge" FAKE_MAIL="$TMP/mail" FAKE_CLOSELOG="$TMP/closelog" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
-       FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
+       FAKE_WAKES="$TMP/wakes" FAKE_SLINGS="$TMP/slings" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
        FAKE_BLOCKED="$TMP/blocked" \
        FAKE_REVIEWS="$TMP/reviews" FAKE_DISMISSED="$TMP/dismissed" \
@@ -1298,6 +1304,13 @@ grep -q 'fix-1 bead-J' "$TMP/deps" \
   || bad "(9) rebase child linked parent-child under the anchor (got: $(cat "$TMP/deps"))"
 grep -qx "$FIX_POOL" "$TMP/wakes" && ok "(9) fix pool woken for the rebase" \
                                   || bad "(9) fix pool woken for the rebase"
+# The rebase child is a parent-child child of the still-open (blocked) anchor, so it
+# inherits is_blocked and drops out of `bd ready`: routing + waking alone never
+# self-spawn an idle pool (tk-7xvz5). It MUST also be slung so a parentless
+# mol-polecat-work root carries the ready demand.
+{ grep -q 'fix-1' "$TMP/slings" && grep -q "$FIX_POOL" "$TMP/slings"; } \
+  && ok "(9) rebase child SLUNG to the fix pool (parentless root -> ready demand)" \
+  || bad "(9) rebase child must be slung, not just routed+woken (got: $(cat "$TMP/slings"))"
 eq "$(grep -c 'PR#210' "$TMP/mail")" "0" "(9) a routable conflict does not escalate to mayor"
 
 # (10) a rework/review child is already open for PR#211 -> do not race it.
@@ -1753,7 +1766,7 @@ printf '%s\n' \
   '222|OPEN||false||main|polecat/bead-V|head222|MERGEABLE|BLOCKED' \
   > "$TMP/prs"
 printf '222\tchild-V\n' > "$TMP/children"       # bead-V already has an open review child
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 OUT8="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
 
@@ -1891,7 +1904,7 @@ hasin "$OUT10" '1 stale-gate re-reviews held' \
 # pass stamped stale_gate_head=head223, so this pass hit the one-per-head guard and
 # skipped forever — recreating the exact silent hold the whole arm exists to heal.
 # (Continues from Run 10: gatenopool carries the head223 hold marker; NOT reset.)
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 OUT11="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
 eq "$(grep -c 'Review PR#223' "$TMP/created")" "1" \
    "(29) no-pool hold + review pool configured later -> re-review dispatched at the same head (not suppressed)"
@@ -1924,7 +1937,7 @@ hasin "$OUT11" '1 stale-gate re-reviews routed' \
 # the in-flight probe re-routes an unrouted review for the anchor on a later pass.
 printf '%s\n' 'bead-X|224|main|||codex|green@old224' > "$TMP/anchors"
 printf '%s\n' '224|OPEN||false||main|polecat/bead-X|head224|MERGEABLE|BLOCKED' > "$TMP/prs"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 
 # Pass A: the route write to the review pool is dropped in flight.
@@ -1978,7 +1991,7 @@ grep -qx "$REVIEW_POOL" "$TMP/wakes" \
 # re-enters. Same terminal strand as tk-3xy37, reached through the other field.
 printf '%s\n' 'bead-XP|225|main|||codex|green@old225' > "$TMP/anchors"
 printf '%s\n' '225|OPEN||false||main|polecat/bead-XP|head225|MERGEABLE|BLOCKED' > "$TMP/prs"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 
 # Pass A: the live half lands, the durable half is dropped, the call SUCCEEDS.
@@ -2032,7 +2045,7 @@ hasin "$OUT12D" '1 stale-gate re-reviews routed' \
 # one. The repair predicate has to be the exact negation of the arming one.
 printf '%s\n' 'bead-XW|226|main|||codex|green@old226' > "$TMP/anchors"
 printf '%s\n' '226|OPEN||false||main|polecat/bead-XW|head226|MERGEABLE|BLOCKED' > "$TMP/prs"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 
 # Pass A: the durable half lands, the live half persists as a DIFFERENT pool.
@@ -2193,7 +2206,7 @@ printf '%s\n' \
 # PR 247's head moves between the pass's snapshot and the dismissal call.
 printf '%s\n' '247|newhead247' > "$TMP/headmove"
 printf '0' > "$TMP/amreads"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"; : > "$TMP/dismissed"
 # Both streams are asserted below, and they carry different things on purpose:
 # a HELD retraction with a routine, expected cause (merge_hold — an operator
@@ -2514,7 +2527,7 @@ printf '%s\n' \
   '261|OPEN||false||main|polecat/bead-LC2|head261|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
   > "$TMP/prs"
 printf '%s\n' '261|9981|zook-bot|CHANGES_REQUESTED|deadcommit261|1' > "$TMP/reviews"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"; : > "$TMP/dismissed"
 : > "$TMP/children"; : > "$TMP/headmove"; printf '0' > "$TMP/amreads"
 OUT14="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>/dev/null)"
@@ -2630,7 +2643,7 @@ eq "$(lhl_probe '' '7')"                      "no"  "(58) an empty haystack neve
 # hand. That is the point — the retraction is scoped by matching the text its own
 # arm writes, and a hand-copied fixture would keep passing after the two drifted
 # apart, which is the one failure this pair of arms can have.
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/blocked"
 : > "$TMP/children"; : > "$TMP/openprs"; : > "$TMP/mail"; : > "$TMP/reviews"
 
