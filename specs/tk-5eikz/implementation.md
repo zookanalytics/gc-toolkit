@@ -27,11 +27,11 @@ deliberately left out.
 | The exception reconcile arm (R8, R11, R12) | same file |
 | Wired into the refinery idle pass, after the observer | `formulas/mol-refinery-patrol.toml`, pass `(a2)` |
 | Stale-gate arm learns all three verbs | `assets/scripts/reconcile-merged-prs.sh` |
-| Heal skips on `green@`/`exception@`, dispatches on `fixable@` | `assets/scripts/check-set-heal.sh` |
+| Heal skips on `green@`/`exception@`/unmappable, dispatches on `fixable@` | `assets/scripts/check-set-heal.sh` |
 | Held exceptions surfaced to `gc doctor` | `doctor/check-merge-gate-drop/run.sh`, arm 3 |
 | Pre-open re-arm: a stale `green@`/`exception@` on a `pre_open_gate` anchor is cleared, since nothing else re-arms a pre-open gate | `assets/scripts/reconcile-gate-verdicts.sh` |
 | Spec | `docs/work-bead-state-machine.md`, §"Gate verdicts: the marker verb" |
-| Regression | `assets/scripts/reconcile-gate-verdicts.test.sh` (88 assertions) |
+| Regression | `assets/scripts/reconcile-gate-verdicts.test.sh` (102 assertions); the heal-side verb classification in `assets/scripts/check-set-heal.test.sh` (cases `EXCEPT`/`FIXABLE`/`WEIRD`/`NOVERB`) |
 
 `merge-skill.sh` is **untouched**, which is the design's central claim and it
 holds unmodified: it merges only while every declared gate equals
@@ -126,9 +126,9 @@ skill emit fixable. This arm is an observer: it does not run skills, so it recor
 `fixable@<head>` only when there is an open remediation child — which is what
 "the skill found addressable problems and remediation is in flight" looks like
 from outside. With no open child the gate is left **unevaluated** rather than
-stamped fixable. Stamping it there would assert a finding nobody made, and — worse
-— would tell `check-set-heal.sh` that a gate with nothing in flight needs no
-dispatch, re-creating the indefinite hold this work exists to end.
+stamped fixable. Stamping it there would assert a finding nobody made — a verdict
+standing in for the absence of one, which puts the gate's state back to something
+inferred from open children rather than the pure read this record exists to give.
 
 ## The hazard this change had to clear
 
@@ -145,8 +145,28 @@ indefinite hold, the exact class WS4 addresses:
 - **`check-set-heal.sh`** treated *any* non-empty marker as "the gate is
   satisfiable, no dispatch" — sound when green was the only verb there was. A
   `fixable@` marker left after remediation ended would have suppressed the
-  dispatch forever. Now: skip on `green@` (satisfiable) and on `exception@`
-  (terminal until an operator acts), dispatch on everything else.
+  dispatch forever. Now the marker is classified **totally**, the way
+  `gate_verdict` classifies it: skip on `green@` (satisfiable), on `exception@`
+  (terminal until an operator acts), and on any value naming **no verb at all**
+  (R12 unmappable — see below); dispatch on `fixable@` and on an absent marker.
+
+  The unmappable arm was added in round-3 rework (review `tk-i688b`, P1), and it
+  is an **ordering** fix rather than a vocabulary one. `check-set-heal.sh` runs
+  *before* `reconcile-gate-verdicts.sh` in the same patrol step, so dispatching on
+  an unmappable marker queues a codex review in the window before the exception
+  arm records `exception@<head>` for it. That review outlives the window — it is
+  claimed on a later wake — and a passing verdict stamps `green@<head>` over the
+  exception, lifting by ordinary automation a hold R12 defines as
+  terminal-until-operator with no automated pass-or-fixable path. Skipping costs
+  one wake of latency and nothing else: the merge is held under both markers,
+  since `merge-skill.sh` holds on anything that is not `green@<live head>`.
+
+  Nothing is stranded by the extra skip. An unmappable marker never goes stale —
+  `gate_verdict` answers `unmappable` at *every* head, because an unreadable verb
+  leaves no oid comparison to make — so it does not need the pre-open re-arm
+  below. It is converted to `exception@<head>` by the very next pass in the same
+  wake, and from there it is an ordinary stale exception that the re-arm already
+  clears.
 
 `merge-skill.sh` and `pre-open-resolve.sh` were checked and needed **no** change:
 both compare for equality against `green@<head>`, so a new verb holds correctly.

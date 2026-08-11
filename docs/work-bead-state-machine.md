@@ -409,6 +409,19 @@ to end. `check-set-heal.sh` skips its dispatch on `green@` (satisfiable) and on
 remediation ends without turning the gate green, nothing should hold the next
 dispatch back.
 
+It also skips a marker naming **no verb at all** — the R12 unmappable case — and
+that one is about pass ordering rather than vocabulary. The heal pass runs *before*
+`reconcile-gate-verdicts.sh` in the same patrol step, so a dispatch here queues a
+review in the window before the exception arm records `exception@<head>` for the
+unreadable marker. The review is claimed on a later wake, and a passing verdict
+stamps `green@<head>` over the exception — automation lifting a hold R12 defines as
+terminal until an operator acts, which is precisely the door that arm closes.
+Skipping costs a wake of latency and nothing else: the merge is held under either
+marker, because `merge-skill.sh` holds on anything but `green@<live head>`. Both
+passes read the vocabulary the same way — the verb is the text before the first
+`@`, so a bare `green` with no oid is unmappable and *not* green, which is what
+keeps an unreadable marker from meaning two different things to two readers.
+
 **And something must re-arm the two verbs it skips on, or the skip outlives its
 reason.** `check-set-heal.sh` is bead-side: it resolves no head, so it cannot tell
 a live verdict from residue left by a head that has since moved. Post-open the
@@ -423,8 +436,12 @@ operator is supposed to be able to lift. `reconcile-gate-verdicts.sh` already
 resolves the pre-open head to bind its own verdicts, so it **clears** a stale
 `green@`/`exception@` on a `pre_open_gate` anchor with nothing in flight; the gate
 returns to unevaluated and the heal pass dispatches on the next wake. Only those
-two verbs, because only those two block a dispatch, and clearing can never merge
-or open anything — an absent marker is green at no head.
+two verbs. `fixable@` does not block a dispatch, so it strands nothing; and an
+unmappable marker, though it does block, cannot go stale in the first place —
+`gate_verdict` answers `unmappable` at every head, since an unreadable verb leaves
+no oid comparison to make, so the exception arm converts it to `exception@<head>`
+in the same wake and it re-arms as an ordinary stale exception from there.
+Clearing can never merge or open anything — an absent marker is green at no head.
 
 **A condemned review is retired, or the head move it is waiting for never
 happens.** A review bead records no dispatch head, and the R12 worker-lost test —

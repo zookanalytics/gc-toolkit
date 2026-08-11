@@ -58,8 +58,9 @@
 #
 #   RE-ARM (pre-open). The mirror image of R12, and the same silent hold from the
 #        other end: a verdict marker left behind by a head that has since MOVED.
-#        check-set-heal.sh skips its dispatch on `green@*` and `exception@*` and
-#        resolves no head, so it cannot tell a live verdict from residue.
+#        check-set-heal.sh skips its dispatch on `green@*` and `exception@*` (and,
+#        since review tk-i688b, on any marker naming no verb at all) and resolves no
+#        head, so it cannot tell a live verdict from residue.
 #        Post-open, reconcile-merged-prs.sh's stale-marker arm reads the live PR
 #        head and re-dispatches; PRE-open there is no PR and that arm enumerates
 #        `merge_result=pull_request` only, so nothing re-arms the gate — the
@@ -740,9 +741,9 @@ EOF
         # is true: `fixable` means the skill found addressable problems and
         # remediation is in flight, which is observable as an open child. With no
         # open child the gate is UNEVALUATED (never run, or re-armed by a head move),
-        # and stamping fixable there would assert a finding nobody made — and would
-        # tell check-set-heal.sh that a gate with nothing in flight needs no
-        # dispatch, which is the indefinite hold this file exists to end.
+        # and stamping fixable there would assert a finding nobody made — a verdict
+        # standing in for the absence of one, which is what makes the gate's state an
+        # inference again rather than the pure read this record exists to give.
         if [ "$open_kids" -gt 0 ] && [ "$marker" != "$GATE_VERB_FIXABLE@$head" ]; then
           if apply "record check.$gate=fixable@$head on $id ($open_kids open remediation child(ren))" \
                "$id" --set-metadata "check.$gate=$GATE_VERB_FIXABLE@$head"; then
@@ -795,6 +796,18 @@ EOF
         # KEEP THIS VERB LIST IN SYNC with `marker_blocks_dispatch` in
         # check-set-heal.sh: a verb added to that skip list is a verb that strands a
         # pre-open branch when it goes stale, and it belongs here the same day.
+        #
+        # That predicate blocks a THIRD class this arm deliberately does not clear:
+        # an UNMAPPABLE marker (one naming no verb at all), which check-set-heal
+        # stops dispatching on as of review tk-i688b so that no review can be queued
+        # in the window before this pass records its exception. It needs no clearing
+        # here because it can never reach this branch: `gate_verdict` answers
+        # `unmappable` for such a marker at EVERY head — the verb is unreadable, so
+        # there is no oid comparison to go stale — and that verdict is routed to the
+        # exception arm above, which replaces it with `exception@<live head>` in this
+        # same pass. From there it is an ordinary stale exception, and the two-verb
+        # list above is what re-arms it. So an unmappable marker is terminal for one
+        # wake, not forever, and it leaves this file wearing a verb this arm knows.
         #
         # The head-bound COMPANIONS are deliberately left alone. `.exception_escalated`
         # is compared for equality against the live head, so a stale one never
