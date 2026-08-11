@@ -22,6 +22,16 @@
 #            (the gate is already satisfiable).
 #   (INFLGT) empty check_set BUT an open review already references the anchor ->
 #            stamp, NO dispatch (reuse the in-flight review, never a twin).
+#   The WS4 verdict vocabulary on check.codex — `marker_blocks_dispatch` is TOTAL,
+#   and each answer holds a different door shut:
+#   (EXCEPT) exception@<sha> -> stamp, NO dispatch (terminal until an operator acts).
+#   (FIXABLE) fixable@<sha> -> DISPATCH. The one non-green verb that falls through;
+#            the in-flight probe, not the marker, is what prevents a twin.
+#   (WEIRD)  weird@<sha> names no verb -> NO dispatch. R12 unmappable belongs to
+#            reconcile-gate-verdicts.sh, which runs LATER in the same patrol wake;
+#            dispatching first queues a review that can later stamp green over the
+#            exception and lift a terminal hold by automation (review tk-i688b).
+#   (NOVERB) a bare "green" with no @oid is unmappable too, and skipped the same.
 #   (PREOPEN) a pre_open_gate anchor (no PR) with empty check_set -> stamp +
 #            dispatch a BRANCH review (review_branch/review_base, no pr_number).
 #   (ORDER)  the stamp is applied BEFORE the dispatch (fail-closed): the PR cannot
@@ -109,6 +119,10 @@ bead-NORMAL|pull_request|codex|406|polecat/feat-normal|main|green@HEAD406|
 bead-GREEN|pull_request|EMPTY|407|polecat/feat-green|main|green@HEAD407|
 bead-INFLGT|pull_request|EMPTY|408|polecat/feat-inflgt|main||
 bead-PREOPEN|pre_open_gate|EMPTY||polecat/feat-preopen|main||
+bead-EXCEPT|pull_request|EMPTY|409|polecat/feat-except|main|exception@HEAD409|
+bead-FIXABLE|pull_request|EMPTY|410|polecat/feat-fixable|main|fixable@HEAD410|
+bead-WEIRD|pull_request|EMPTY|411|polecat/feat-weird|main|weird@HEAD411|
+bead-NOVERB|pull_request|EMPTY|412|polecat/feat-noverb|main|green|
 A
 
 # An open review already referencing bead-INFLGT (so the heal must NOT dispatch a
@@ -394,6 +408,51 @@ grep -q '^bead-INFLGT	codex$' "$TMP/stamped" \
 grep -q '	anchor_bead	bead-INFLGT$' "$TMP/revmeta" && bad "(INFLGT) in-flight review must NOT be twinned" \
                                                        || ok "(INFLGT) in-flight review reused -> no twin dispatch"
 
+# --- The WS4 verdict vocabulary on check.codex, one anchor per verb -----------
+# `marker_blocks_dispatch` is a TOTAL classification of the marker value, and the
+# three answers below are each load-bearing for a DIFFERENT hold. They are asserted
+# together because the bug in each direction is the same shape — a gate nothing can
+# raise, or a gate raised by something that should not have raised it.
+
+# (EXCEPT) an exception is terminal until an operator acts and the head moves.
+# Dispatching under one would put a reviewer on a gate just declared un-reviewable.
+grep -q '^bead-EXCEPT	codex$' "$TMP/stamped" \
+  && ok "(EXCEPT) exception-marked anchor still stamped codex (audit trail)" \
+  || bad "(EXCEPT) exception-marked anchor must be stamped"
+grep -q '	anchor_bead	bead-EXCEPT$' "$TMP/revmeta" && bad "(EXCEPT) exception@ gate must NOT dispatch" \
+                                                      || ok "(EXCEPT) exception@ gate -> stamp only, no dispatch"
+
+# (FIXABLE) the one non-green verb that MUST fall through. `fixable` says
+# remediation is in flight, and the in-flight probe — not the marker — is what
+# stops a twin while it really is running. Blocking on the marker instead would
+# leave an anchor whose remediation ended without green with no review, no rework
+# child, and no marker that can ever go green: the silent indefinite hold.
+grep -q '	anchor_bead	bead-FIXABLE$' "$TMP/revmeta" \
+  && ok "(FIXABLE) fixable@ with nothing in flight -> dispatch (not treated as satisfiable)" \
+  || bad "(FIXABLE) fixable@ must NOT block dispatch (got: $(cat "$TMP/revmeta"))"
+
+# (WEIRD) review tk-i688b P1 — the R12 unmappable case. A marker naming no verb is
+# reconcile-gate-verdicts.sh's to classify, and that pass runs AFTER this one in the
+# same patrol wake. Dispatching here queues a review in the window before the
+# exception is recorded; that review is claimed on a later wake and can stamp
+# green@<head> over the exception, lifting by ordinary automation a hold R12 defines
+# as terminal-until-operator. The gate stays HELD either way, so skipping costs a
+# wake of latency and nothing else.
+grep -q '	anchor_bead	bead-WEIRD$' "$TMP/revmeta" \
+  && bad "(WEIRD) unmappable marker must NOT dispatch before the exception arm records the hold" \
+  || ok "(WEIRD) unmappable 'weird@<head>' -> no dispatch (left for reconcile-gate-verdicts.sh)"
+hasin "$OUT1" 'bead-WEIRD carries an UNMAPPABLE' \
+  && ok "(WEIRD) unmappable marker is REPORTED, not silently skipped" \
+  || bad "(WEIRD) skipping an unmappable marker must say so on stdout"
+
+# (NOVERB) the same rule reached the other way: a value with no "@" at all names no
+# verb either (`gate_marker_verb` splits on the FIRST "@" and a bare token has
+# none). A literal `green` is therefore UNMAPPABLE, not green — the answer both
+# passes must give it, or a marker nobody can read means two different things.
+grep -q '	anchor_bead	bead-NOVERB$' "$TMP/revmeta" \
+  && bad "(NOVERB) a bare 'green' with no @oid must NOT dispatch (it is unmappable)" \
+  || ok "(NOVERB) bare 'green' (no @oid) -> unmappable, no dispatch"
+
 # (PREOPEN) a pre_open_gate anchor heals + dispatches a BRANCH review.
 grep -q '^bead-PREOPEN	codex$' "$TMP/stamped" \
   && ok "(PREOPEN) pre_open_gate anchor stamped codex" || bad "(PREOPEN) pre-open anchor must heal"
@@ -458,10 +517,14 @@ else
   bad "(METHOD) no body captured for the PRE-OPEN dispatch"
 fi
 
-# Summary: 6 healed (EMPTY, ABSENT, SEP, GREEN, INFLGT, PREOPEN), and the opt-outs
-# / normal untouched.
-hasin "$OUT1" '6 healed' \
-  && ok "run 1 summary reports 6 healed" || bad "run 1 summary healed count (got: $OUT1)"
+# Summary: 10 healed (EMPTY, ABSENT, SEP, GREEN, INFLGT, PREOPEN, and the four
+# verdict-vocabulary anchors EXCEPT/FIXABLE/WEIRD/NOVERB), and the opt-outs /
+# normal untouched. Healed counts the STAMP, which is orthogonal to the dispatch:
+# an anchor whose marker blocks the dispatch is still stamped, exactly as (GREEN)
+# has always been — the stamp is the audit trail that the gate was normalized, and
+# withholding it would leave the anchor ungated to merge-skill.sh.
+hasin "$OUT1" '10 healed' \
+  && ok "run 1 summary reports 10 healed" || bad "run 1 summary healed count (got: $OUT1)"
 hasin "$OUT1" '2 explicit opt-out' \
   && ok "run 1 summary reports 2 explicit opt-out" || bad "run 1 summary opt-out count (got: $OUT1)"
 

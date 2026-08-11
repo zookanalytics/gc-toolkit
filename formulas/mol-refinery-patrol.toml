@@ -532,6 +532,30 @@ if [ -n "$SCRIPTS_DIR" ]; then
     --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
     --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex" \
     || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
+  # (a2) Merge-gate VERDICT arm (WS4 of tk-zgse0; design
+  #      specs/tk-zgse0.2/merge-gate-exception-lifecycle.md). Records the THIRD gate
+  #      verdict — `exception` — and the non-OK verdicts generally, so a gate that
+  #      will never go green on its own SAYS SO on the anchor instead of holding in
+  #      silence. Two triggers: a remediation round count past its cap (R11), and a
+  #      gate whose dispatched worker died or whose marker names no verb the
+  #      contract knows (R12). R12 is the one with no other detector today — a
+  #      review bead whose worker crashed sits open forever and every existing pass
+  #      reads it as healthy work in flight, so the PR is held indefinitely and
+  #      nothing anywhere times it out.
+  #
+  #      The merge skill is UNCHANGED by this: it holds while any declared gate is
+  #      != green@<live head>, so the new verbs already hold. This pass NEVER writes
+  #      `green` and never merges — every write it makes holds the merge or keeps it
+  #      held, so no failure mode of it can land work. Runs AFTER the observer so a
+  #      re-review the stale-gate arm dispatched this pass is in flight before its
+  #      gate is judged, and so an anchor the observer just closed as landed is out
+  #      of the gating set before it is examined. -x guard: importer rigs that have
+  #      not yet synced this script keep today's behaviour (a dead gate holds
+  #      silently) until the pack syncs.
+  if [ -x "$SCRIPTS_DIR/reconcile-gate-verdicts.sh" ]; then
+    "$SCRIPTS_DIR/reconcile-gate-verdicts.sh" \
+      || echo "reconcile-gate-verdicts: pass failed (non-fatal); retries next idle wake" >&2
+  fi
   # (b) Convoy graduation: assign each OWNED integration convoy whose members
   #     are all closed, and whose branch the ledger records a merge onto, to the
   #     refinery for an integration->main

@@ -41,6 +41,14 @@
 #       2026-07-02 — su-5ls was a live merge_result=pull_request anchor when
 #       the first check_set="" was written.
 #
+#   (3) EXCEPTION-HELD (warning). A LIVE gating anchor carries a gate marker
+#       `check.<name>=exception@<sha>` — the third verdict verb (WS4, tk-zgse0),
+#       recorded when a gate's result cannot be turned into pass-or-fixable. The
+#       hold is correct and deliberate, so this is not a drop; what earns the line
+#       is that the hold is UNBOUNDED and self-announces exactly once per head, so
+#       nothing surfaces it afterwards. A PR held forever belongs in the answer to
+#       "what is stuck".
+#
 # WHAT IS NOT FLAGGED — deliberately:
 #
 #   - An UNSET/absent check_set, at either arm. Absent is the pre-#182 legacy
@@ -254,6 +262,51 @@ $(printf '%s' "$anchors_json" | jq -r --arg var "$VAR" '
         ("#" + ((.metadata.pr_number // "?") | tostring)) ]
     | @tsv' 2>/dev/null)
 EOF
+
+    # --- Arm 3: gates HELD IN EXCEPTION ----------------------------------
+    # The third verdict verb (WS4, tk-zgse0 —
+    # specs/tk-zgse0.2/merge-gate-exception-lifecycle.md). A gate records
+    # `check.<name>=exception@<sha>` when its result cannot be turned into
+    # pass-or-fixable: the remediation rounds are spent (R11), or the check-skill
+    # crashed, timed out, or emitted output the contract cannot map (R12). The
+    # marker verb is not `green`, so merge-skill.sh holds — correctly, and
+    # INDEFINITELY, because an exception has no mechanical remedy by definition.
+    #
+    # Warning, not error, and this is the distinction that keeps the check honest:
+    # an exception is a gate working exactly as designed, not a gate silently
+    # dropped. What earns a line here is that the hold is UNBOUNDED and its one
+    # operator notification fires once per head — so after that single mail the
+    # anchor sits held with nothing further to announce it. `gc doctor` is where a
+    # human looks for "what is stuck"; an indefinitely-held PR belongs in that
+    # answer. It clears when the operator acts and the head moves, which re-arms
+    # every head-bound datum at once and re-evaluates the gate fresh.
+    #
+    # Read off the SAME anchor list as arm 2 — every gating anchor with a gate
+    # carries check_set, which is what --has-metadata-key already selected. The
+    # value test (not a key-shape test) is what keeps the arm off the sidecar keys
+    # the verdict arm writes beside the marker: check.<name>.reason holds prose,
+    # .attempts holds "<n>@<sha>", .exception_escalated holds a bare sha, and none
+    # of them can begin with "exception@".
+    while IFS=$'\t' read -r bead gate marker merge_result pr reason; do
+        [ -z "$bead" ] && continue
+        warnings+=("$rig/$bead: merge gate '$gate' is HELD IN EXCEPTION ($marker) on a live gating anchor (merge_result=$merge_result, PR $pr) — reason: ${reason:-<none recorded>}. The gate holds the merge and no automated path will lift it; it re-arms only when the input changes and the head moves.")
+    done <<EOF
+$(printf '%s' "$anchors_json" | jq -r '
+    .[]?
+    | select((.metadata.merge_result // "") | . == "pull_request" or . == "pre_open_gate")
+    | . as $b
+    | (.metadata // {}) | to_entries[]
+    | select(.key | startswith("check."))
+    | select((.value | type) == "string")
+    | select(.value | startswith("exception@"))
+    | [ $b.id,
+        (.key | sub("^check\\."; "")),
+        .value,
+        ($b.metadata.merge_result // ""),
+        ("#" + (($b.metadata.pr_number // "?") | tostring)),
+        (($b.metadata[.key + ".reason"] // "") | tostring) ]
+    | @tsv' 2>/dev/null)
+EOF
 done <<EOF
 $rig_rows
 EOF
@@ -281,12 +334,12 @@ if [ "$n_err" -gt 0 ]; then
 fi
 
 if [ "$n_warn" -gt 0 ]; then
-    echo "$n_warn rig-level $VAR divergence(s) / undetermined arm(s)"
+    echo "$n_warn rig-level $VAR divergence(s) / exception-held gate(s) / undetermined arm(s)"
     emit_details
     exit 1
 fi
 
-summary="no silently-dropped merge gates: $checked rig(s) checked, no empty $VAR override, 0 live gating anchor(s) stamped empty"
+summary="no silently-dropped merge gates: $checked rig(s) checked, no empty $VAR override, 0 live gating anchor(s) stamped empty, 0 gate(s) held in exception"
 [ "$skipped_suspended" -gt 0 ] && summary="$summary ($skipped_suspended suspended rig(s) skipped)"
 [ -z "$formula_vars_readable" ] && summary="$summary [formula_vars overrides unread]"
 echo "$summary"

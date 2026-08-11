@@ -28,6 +28,11 @@
 #   (14) rig roster unavailable -> WARN (exit 1), never a silent OK
 #   (15) bead store unavailable for a rig -> WARN (exit 1), never a silent OK
 #   (16) formula var declarations unreadable -> WARN (exit 1)
+#   (19) live anchor with check.<gate>=exception@<sha> -> WARN (exit 1), naming
+#        the gate, the marker and the recorded reason  [WS4, tk-zgse0]
+#   (20) the verdict arm's SIDECAR keys (.reason/.attempts/.exception_escalated)
+#        are never mistaken for a gate marker, and green@/fixable@ are not flagged
+#   (21) an exception on a MERGED anchor is out of scope, like every other arm
 #   (17) .config.Rigs schema drift -> WARN (exit 1), arm 1b declared unread
 #   (18) error outranks warning when both fire
 #   (INV) detect-only: no fix.sh ships next to run.sh (a sibling fix.sh would
@@ -276,6 +281,52 @@ rc=$(run_check "$D")
 eq "$rc" "2" "(18) error + warning -> exit 2"
 has "ERROR: alpha/a-3" "$D/out" "(18) the error is reported"
 has "WARN:  beta" "$D/out" "(18) the warning is still reported alongside it"
+
+# --- (19) a gate held in EXCEPTION is surfaced as a warning ------------------
+# WS4 (tk-zgse0): `check.<name>=exception@<sha>` is the third verdict verb. The
+# hold is correct — it is the gate working — but it is unbounded and it announces
+# itself to an operator exactly once per head, so `gc doctor` is the only place a
+# human can later find it.
+D=$(scenario gate-exception)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x1","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":77,
+  "check.codex":"exception@deadbeef",
+  "check.codex.reason":"attempts-exhausted: 3 remediation round(s) spent against a cap of 3",
+  "check.codex.attempts":"3@deadbeef",
+  "check.codex.exception_escalated":"deadbeef"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "1" "(19) exception-held gate -> exit 1 (warning, not error: the gate is working)"
+has "alpha/a-x1" "$D/out" "(19) warning names rig and bead"
+has "HELD IN EXCEPTION" "$D/out" "(19) warning names the state"
+has "exception@deadbeef" "$D/out" "(19) warning carries the head-bound marker"
+has "attempts-exhausted" "$D/out" "(19) warning carries the recorded reason"
+has "#77" "$D/out" "(19) warning names the PR"
+
+# --- (20) sidecar keys and non-exception verbs are not gate exceptions -------
+# The arm filters on the VALUE, not the key shape, precisely so the three sidecar
+# keys the verdict arm writes beside the marker cannot be read as gates of their
+# own — `.attempts` in particular holds a "<n>@<sha>" that looks marker-shaped.
+D=$(scenario gate-verbs-ok)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x2","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":78,
+  "check.codex":"green@cafe1234","check.codex.attempts":"1@cafe1234"}},
+ {"id":"a-x3","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":79,
+  "check.codex":"fixable@cafe5678","check.codex.attempts":"2@cafe5678"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "0" "(20) green@ and fixable@ markers are not flagged"
+hasnt "HELD IN EXCEPTION" "$D/out" "(20) no exception reported for the non-exception verbs"
+has "0 gate(s) held in exception" "$D/out" "(20) the clean summary counts the new arm"
+
+# --- (21) an exception on a landed anchor is out of scope -------------------
+D=$(scenario gate-exception-merged)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x4","metadata":{"check_set":"codex","merge_result":"merged","pr_number":80,
+  "check.codex":"exception@deadbeef"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "0" "(21) exception on a merged anchor -> exit 0 (landed work is out of scope)"
 
 # --- (INV) detect-only: no fix script --------------------------------------
 [ -e "$HERE/fix.sh" ] \

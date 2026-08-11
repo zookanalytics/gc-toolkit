@@ -2336,11 +2336,67 @@ while IFS= read -r row; do
     continue
   fi
 
-  # Already green: a review ran for this anchor at some point and stamped the
-  # marker — the gate is satisfiable (green at the live head merges; green at a
-  # stale head re-gates through the normal rework path). Nothing to dispatch.
-  if [ -n "$marker" ]; then
-    [ "$needs_stamp" = 1 ] && echo "check-set-heal: $id already carries check.codex='$marker'; gate is satisfiable, no dispatch"
+  # Does this marker mean the gate needs no dispatch from here? The question has
+  # more than a yes/no answer now that `check.<name>` carries more than one verb
+  # (WS4, tk-zgse0 — specs/tk-zgse0.2/merge-gate-exception-lifecycle.md, the
+  # `gate_verdict` contract in assets/scripts/reconcile-gate-verdicts.sh), so the
+  # classification below is TOTAL over marker values, exactly as that contract is:
+  #
+  #   (absent)         nothing has evaluated this gate. A fresh dispatch raises
+  #                    it — the case this whole phase exists for.
+  #   green@<sha>      a review ran and passed at some head. The gate is
+  #                    SATISFIABLE — green at the live head merges, green at a
+  #                    stale head re-gates through the normal rework path.
+  #   fixable@<sha>    remediation is in flight. NOT a reason to skip: when that
+  #                    remediation ends without turning the gate green there is
+  #                    nothing left holding a dispatch back, and treating it as
+  #                    "satisfiable" (which the old `[ -n "$marker" ]` test did,
+  #                    since a non-empty marker was necessarily green before WS4)
+  #                    would leave the anchor with no review, no rework child, and
+  #                    no marker that can ever go green — the silent indefinite
+  #                    hold this whole file exists to prevent, re-created by the
+  #                    verb meant to describe it. Falling through is safe: the
+  #                    in-flight probe below is what stops a twin dispatch while
+  #                    the remediation really is running.
+  #   exception@<sha>  the verdict arm recorded a hold no worker can lift; it is
+  #                    terminal until an operator acts and the head moves. A
+  #                    dispatch here would spawn a reviewer against a gate that
+  #                    was just declared un-reviewable, and the exception's
+  #                    one-per-head escalation is what actually moves it forward.
+  #   anything else    UNMAPPABLE (R12): a marker exists but names no verb the
+  #                    contract knows. Also no dispatch — see below.
+  #
+  # WHY UNMAPPABLE BLOCKS RATHER THAN FALLING THROUGH (review tk-i688b, P1). An
+  # unmappable marker is not this pass's to act on: `gate_verdict` classifies it
+  # and reconcile-gate-verdicts.sh records the terminal `exception@<head>` for it.
+  # But that pass runs AFTER this one in the same patrol wake (mol-refinery-patrol
+  # runs check-set-heal.sh, then pre-open-resolve.sh, then reconcile-gate-verdicts.sh
+  # in one step), so falling through here dispatches a codex review in the window
+  # BEFORE the exception is recorded. That queued review outlives the window: it is
+  # claimed on a later wake, and a pass verdict stamps `green@<head>` over the
+  # exception — lifting, by ordinary automation, a hold R12 defines as
+  # terminal-until-operator with no automated pass-or-fixable path. Leaving it
+  # alone costs one wake of latency and nothing else; the merge stays HELD either
+  # way, because merge-skill.sh holds on any gate != `green@<live head>` and an
+  # unmappable value is not that.
+  #
+  # The vocabulary is the one `gate_marker_verb` parses, matched the same way: a
+  # verb is the text before the FIRST "@", and a value with no "@" at all names no
+  # verb. So a bare `green` is unmappable, NOT green — same answer both passes give
+  # it, which is what keeps a marker nobody can read from meaning two things.
+  marker_blocks_dispatch=""; marker_unmappable=""
+  case "$marker" in
+    "")                  : ;;
+    green@*|exception@*) marker_blocks_dispatch=1 ;;
+    fixable@*)           : ;;
+    *)                   marker_blocks_dispatch=1; marker_unmappable=1 ;;
+  esac
+  if [ -n "$marker_blocks_dispatch" ]; then
+    if [ -n "$marker_unmappable" ]; then
+      echo "check-set-heal: $id carries an UNMAPPABLE check.codex='$marker' (names no verdict verb); no dispatch — reconcile-gate-verdicts.sh records the exception for it this pass"
+    elif [ "$needs_stamp" = 1 ]; then
+      echo "check-set-heal: $id already carries check.codex='$marker'; gate needs no dispatch from here, no dispatch"
+    fi
     [ "$needs_stamp" = 1 ] || normal=$((normal + 1))
     continue
   fi
