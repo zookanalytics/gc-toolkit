@@ -13,7 +13,8 @@
 # overlays on top of base prompts. Each gc-toolkit-specific doctrine
 # (heartbeat-no-consent-ui, layered-startup-discovery-{boot,deacon,refinery,witness},
 # convoy-integration-branch-mayor, polecat-convoys, polecat-append-notes,
-# file-work-records, operator-next-step-trailing) lives in template-fragments/ and is named
+# file-work-records, operator-next-step-trailing, file-feedback-observations,
+# learned-conventions-polecat) lives in template-fragments/ and is named
 # explicitly in inject_fragments_append below; the base prompt template is
 # reused verbatim from gastown. No whole-file prompt mirrors.
 #
@@ -103,6 +104,9 @@ inject_fragments_append = [
     # (append_fragments) — there is no propagation between the two.
     "bead-disposition",
     "operator-next-step-trailing",
+    # Feedback-learning capture: file corrective feedback as observation
+    # beads (specs/2026-08-learning-system/implementation-design.md §2a).
+    "file-feedback-observations",
 ]
 
 [[patches.agent]]
@@ -141,6 +145,15 @@ inject_fragments_append = [
     # 2,583 B correction on the path EVERY polecat takes.
     "polecat-append-notes",
     "file-work-records",
+    # Feedback-learning loop (specs/2026-08-learning-system/
+    # implementation-design.md §2a, §5): the capture fragment files
+    # corrective feedback as observation beads; learned-conventions-polecat
+    # is the distiller-managed rule surface, seeded empty. Any change to
+    # this list must be hand-synced into agents/polecat-codex/agent.toml
+    # inject_fragments (no automatic propagation) — and that hand-sync is
+    # checked by doctor/check-polecat-fragment-sync.
+    "file-feedback-observations",
+    "learned-conventions-polecat",
 ]
 
 [[patches.agent]]

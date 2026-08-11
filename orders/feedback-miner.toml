@@ -1,0 +1,37 @@
+# feedback miner — periodic PR-review corrective-feedback sweep.
+# Learning-system phase 3; design
+# specs/2026-08-learning-system/implementation-design.md §7
+# (decisions.md D5, D6).
+#
+# Fires the mol-feedback-miner formula on a 24h cooldown. One fire = one
+# sweep: a polecat lists THIS rig's PRs merged or closed in the window,
+# reads their review threads and PR conversation comments via gh, and
+# files one closed-at-creation observation bead
+# (task_kind=observation, obs.source=miner) per comment that is
+# corrective feedback about standing agent behavior — dedup'd on
+# obs.provenance against observations already filed by in-conversation
+# self-report. Observations only: the miner never files pattern beads
+# or prompt-update proposals, and never edits a prompt.
+#
+# Ships in-pack, so enablement IS the import: EVERY rig importing
+# gc-toolkit mines its own repo into its own bead store — deliberately
+# NO home-rig gate (D5). Per-rig mining is the point; the distiller (a
+# separate order, orders/feedback-distiller.toml, phase 2) is the
+# consumer, home-rig-gated, reading observations cross-rig. A rig with
+# no gh binary, no GitHub origin, or no gh auth no-ops cleanly on the
+# formula's first step.
+#
+# Scope + pool + the pool-wake (Ready-surface) prerequisite are
+# identical to the doc-keeper orders and explained in full in
+# orders/doc-keeper-drift-audit.toml. In short: rig-scoped with a BARE
+# pool so the wisp lands in, and is claimed from, each importing rig's
+# own polecat store; the formula is graph.v2, so its compiled root is
+# Ready-visible without a top-level `phase = "vapor"` (do not add
+# vapor), and must merge before/with this order.
+[order]
+description = "learning: mine this rig's merged/closed PR review threads for corrective feedback; file observation beads"
+formula = "mol-feedback-miner"
+trigger = "cooldown"
+interval = "24h"
+pool = "gc-toolkit.polecat"
+scope = "rig"

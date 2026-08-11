@@ -27,7 +27,16 @@ prompt_template = "gastown//agents/mayor/prompt.template.md"
 # inject_fragments_append (pack.toml): a thread does the same reopen/re-home
 # judgment the canonical does, and there is no propagation between the two
 # lists — a fragment added to one and not the other silently diverges.
-append_fragments = ["convoy-integration-branch-mayor", "bead-disposition", "thread-role", "operator-next-step-trailing"]
+# file-feedback-observations is in that same lockstep, and for the same
+# reason: a thread takes corrective feedback exactly as the canonical does,
+# so it must capture it as an observation bead too.
+append_fragments = [
+    "convoy-integration-branch-mayor",
+    "bead-disposition",
+    "thread-role",
+    "operator-next-step-trailing",
+    "file-feedback-observations",
+]
 
 # Plain scratch directory, same shape as the canonical mayor's
 # .gc/agents/mayor home. AgentBase parameterizes by per-instance name
