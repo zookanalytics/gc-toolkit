@@ -234,10 +234,18 @@ fi
 # Polecats reassign work to you with status=open + metadata.branch.
 # If cycle-recycle interleaved with a polecat handoff, the work bead
 # is here even though no in-progress wisp exists yet.
+#
+# Beads carrying `merge_result` are excluded, matching the find-work selection
+# guard this tier hands off to (mol-refinery-patrol, tk-jcal4). A parked gating
+# anchor is also open-with-a-branch, so an assignee stray-written onto one
+# satisfies this query too — and find-work will NOT pick it up, making the
+# handoff claimed below false and the pour spurious. Filtering client-side
+# means the window must exceed 1 row, or one parked anchor at the head hides a
+# real handoff behind it.
 if [ -z "$WISP" ]; then
   WORK=$(gc bd list --assignee="$GC_AGENT" --status=open \
-    --has-metadata-key=branch --exclude-type=epic --json --limit=1 \
-    | jq -r '.[0].id // empty')
+    --has-metadata-key=branch --exclude-type=epic --json --limit=25 \
+    | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty')
   if [ -n "$WORK" ]; then
     echo "Found routed work bead: $WORK — pouring wisp and entering formula at find-work"
     WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --var default_merge_strategy=mr --json | jq -r '.new_epic_id')
