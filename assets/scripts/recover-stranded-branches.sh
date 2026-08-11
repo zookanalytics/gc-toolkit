@@ -451,10 +451,37 @@ recovered=0; reported=0; skipped=0; failed=0
 # Report a bead we decline to hand off, ONCE per (branch, tip) it was seen at. The
 # marker records what provoked the warning, so a genuinely stuck bead is named once
 # rather than every cycle forever — and a bead that MOVES is reported again.
-report_only() { # <id> <marker-value> <already-flagged> <escalate 0|1> <message>
-  local id="$1" marker="$2" flagged="$3" escalate="$4" message="$5"
+#
+# The marker also records the refusal's ESCALATION CLASS, and suppression is by
+# class rather than by tip alone. Nearly every refusal here is a read that did not
+# answer — a dep listing, a convoy bead, a `gh pr list` — and they all write the
+# same `branch@tip`; exactly one, an unresolvable target, additionally summons a
+# human. Suppressing on the tip alone lets a transient failure SILENCE that summons:
+# one cycle marks `branch@tip` because the dep list did not answer, the next cycle
+# reads it fine and discovers the target branch is missing, and the escalating
+# refusal returns at the suppression check having mailed nobody. The branch is then
+# left stranded behind a summary count with no human-facing signal anywhere — the
+# exact outcome the escalating arm exists to prevent, produced by an unrelated blip.
+#
+# So a quiet marker never suppresses a loud refusal: an escalating refusal is
+# suppressed only by a previous ESCALATION at the same tip, while a non-escalating
+# one is suppressed by either class — a human has already been summoned to this
+# tip, and a quieter warning about the same commit adds noise without signal.
+# Escalating once per (branch, tip) is deliberate: the mail asks an operator to look
+# at the branch, and a second reason to look at the same commit needs no second mail.
+#
+# A bead flagged by an earlier revision of this pass carries a bare `branch@tip`
+# even where an escalation did fire, so the first escalating refusal after this
+# change may re-mail once for such a bead. That is the right direction to err: the
+# other reading of an ambiguous marker is silence about a stranded branch.
+ESCALATED_SUFFIX='#escalated'
+report_only() { # <id> <tip-marker> <already-flagged> <escalate 0|1> <message>
+  local id="$1" tip="$2" flagged="$3" escalate="$4" message="$5"
+  local marker="$tip" loud="$tip$ESCALATED_SUFFIX"
+  if [ "$escalate" = 1 ]; then marker="$loud"; fi
   reported=$((reported + 1))
-  [ "$flagged" = "$marker" ] && return 0
+  # Already reported at this tip, at a class at least as loud as this one.
+  if [ "$flagged" = "$marker" ] || [ "$flagged" = "$loud" ]; then return 0; fi
   echo "recover-stranded-branches: WARN $id $message" >&2
   [ "$DRY_RUN" = 1 ] && return 0
   if [ "$escalate" = 1 ]; then

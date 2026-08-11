@@ -165,3 +165,16 @@ PR past the convoy boundary — and the pre-assign readback cannot catch it, bec
 all the readback proves is that the *wrong* target stuck. The same empty list also
 leaves the liveness gate with no convoy to test, so a live molecule becomes invisible
 and a running polecat's branch is handed to the refinery mid-implementation.
+
+The refusal *marker* is held to the same standard, and for the same reason: it is
+the one piece of state that can turn a refusal into silence. Every refusal writes
+`stranded_branch_flagged=<branch>@<tip>` so a stuck bead is named once rather than
+every cycle, but only one of them — the unresolvable target — also mails the mayor.
+Keyed on the tip alone, the quiet marker a *transient* read failure leaves would
+suppress that mail when a later cycle reads those facts successfully and discovers
+the missing target: the escalating refusal returns at the suppression check having
+summoned nobody, and the branch stays stranded behind a summary count with no
+human-facing signal anywhere. So the marker records the refusal's escalation class
+as well as its tip, and a quiet marker never suppresses a loud refusal — while the
+mail itself stays bounded to once per `(branch, tip)`, since a second reason to look
+at the same commit does not need a second summons.

@@ -633,7 +633,10 @@ creates a new one.
 Read its stderr. A recurring refusal on the same bead means a branch is stranded
 in a way this pass will not repair on its own — the one refusal that mails the
 mayor is the unresolvable-target case, and the rest are bounded to one warning per
-(branch, tip) by a marker on the bead.
+(branch, tip) by a marker on the bead. The marker records the refusal's escalation
+class as well as the tip, so the quiet marker a transient read failure leaves can
+never cancel the mail a later cycle owes for the same commit; the mail itself is
+still issued once per (branch, tip).
 
 Regression test: `assets/scripts/recover-stranded-branches.test.sh` (hermetic;
 stubs `gc`, `git` and `gh`; covers the canonical strand, the metadata-before-
@@ -641,7 +644,8 @@ assignee order, target resolution from the bead / its convoy / the repository
 default, both liveness signals and their converse, every non-candidate field, an
 existing PR in any state, a failed PR lookup, an unpublished branch, a missing
 target branch, an already-landed branch, the age gate, both fail-safes, the
-one-warning-per-bead bound, the non-zero exit on an unverified handoff, a
+one-warning-per-bead bound and the escalation class that keeps a transient
+refusal from cancelling it, the non-zero exit on an unverified handoff, a
 branch/target write that reports success and is NOT durable stopping the handoff
 before the assignee, an `in_progress` strand being handed over as `status=open`, a
 handoff whose fields are rolled back after the assignee sticks releasing that

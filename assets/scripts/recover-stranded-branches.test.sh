@@ -50,6 +50,11 @@
 #              molecule can be proved husked
 #   (BOUND)    a bead already carrying the flag for this (branch, tip) is counted
 #              but not re-warned and not re-mailed
+#   (ESCALATE) that bound is by (branch, tip) AND escalation class. Every refusal
+#              writes the same marker, but only one of them summons a human, so a
+#              quiet marker left by a transient read failure must not cancel the
+#              escalation a later cycle owes — while an already-escalated tip is
+#              neither re-escalated nor re-warned by a quieter refusal
 #   (FAILED)   a handoff whose assignee does not read back exits NON-ZERO — a silent
 #              exit 0 over a failed write is how this class of bug hides
 #   (VERIFY)   a branch/target write that reports success and is NOT durable stops
@@ -602,6 +607,53 @@ hasnt "gc bd update b-strand" "$TMP/updates" "(IDEM) a recovered bead is not rec
 # `b-convfail`, and an unanchored match would read that bead's flag write as a
 # second recovery of this one.
 hasnt "gc bd update b-conv " "$TMP/updates" "(IDEM) nor is the convoy-targeted one"
+
+# --- pass 5: an escalating refusal is never silenced by a quieter one ---------
+# (ESCALATE) `report_only` writes the SAME `branch@tip` marker for a transient read
+# that did not answer (the dep listing, a convoy bead, `gh pr list`) as for the one
+# refusal that mails the mayor. Suppressing on the tip alone therefore let a blip in
+# one cycle cancel the escalation in the next: mark `branch@tip` because the dep list
+# failed, then read it fine and discover the target branch is missing, and the
+# escalating refusal returns at the suppression check having mailed nobody — branch
+# still stranded, human-facing signal gone, nothing left but a summary count. Model
+# exactly that ordering: b-nobase (missing target -> escalates) arrives already
+# carrying the QUIET marker at its current tip.
+jq -c 'map(if .id == "b-nobase"
+           then .metadata.stranded_branch_flagged = "polecat/b-nobase@sha-nobase"
+           else . end)' \
+  "$TMP/candidates.json" > "$TMP/candidates3.json"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_CANDIDATES="$TMP/candidates3.json" run
+set -e
+has "STRANDED BRANCH: b-nobase" "$TMP/mail" \
+  "(ESCALATE) a quiet same-tip marker does not cancel the escalation"
+has "would land on 'integration/gone'" "$TMP/err" \
+  "(ESCALATE) and the refusal is warned rather than swallowed"
+has "stranded_branch_flagged=polecat/b-nobase@sha-nobase#escalated" "$TMP/updates" \
+  "(ESCALATE) the marker is upgraded to record that a human was summoned"
+
+# The bound itself survives: one escalation per (branch, tip), and an escalated tip
+# also silences a QUIETER refusal at the same tip — the human is already looking at
+# that commit, so a lower-class warning about it adds noise and no signal. Both
+# beads are still COUNTED, exactly as (BOUND) requires of a suppressed report.
+jq -c 'map(if .id == "b-nobase"
+           then .metadata.stranded_branch_flagged = "polecat/b-nobase@sha-nobase#escalated"
+           elif .id == "b-depfail"
+           then .metadata.stranded_branch_flagged = "polecat/b-depfail@sha-depfail#escalated"
+           else . end)' \
+  "$TMP/candidates.json" > "$TMP/candidates4.json"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_CANDIDATES="$TMP/candidates4.json" run
+set -e
+hasnt "STRANDED BRANCH: b-nobase" "$TMP/mail" \
+  "(ESCALATE) but the same tip is never escalated twice"
+hasnt "gc bd update b-nobase" "$TMP/updates" "(ESCALATE) nor re-marked"
+hasnt "would land on 'integration/gone'" "$TMP/err" "(ESCALATE) nor re-warned"
+hasnt "gc bd update b-depfail" "$TMP/updates" \
+  "(ESCALATE) an escalated tip suppresses a quieter refusal at the same tip too"
+has "6 reported" "$TMP/out" "(ESCALATE) every suppressed refusal is still counted"
 
 echo
 echo "passed: $PASS, failed: $FAIL"
