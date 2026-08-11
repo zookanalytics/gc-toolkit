@@ -1750,7 +1750,49 @@ created and no pool was woken. The anchor is OPEN, held, and routed to human:
 land as-is, split the remaining findings into follow-up beads, or abandon." >/dev/null 2>&1 || true
     echo "refinery: $GATING_ANCHOR — signoff round cap reached ($ROUNDS >= ${GC_MAX_REVIEW_ROUNDS:-3}); routed to human, no re-dispatch"
   elif [ -z "$EXISTING_REVIEW" ]; then
-    REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
+# The METHOD carried by this dispatch (tk-jufvl, wired here by tk-dy7sb). THIS is
+# the path that mints most review beads — both the PRE_OPEN (branch) arm and the
+# post-open (PR) arm funnel through the one create below — and until now it was
+# the only dispatch that named no method: 45 of the 60 most recent review beads
+# in this rig carry an empty description. A reviewer handed a bare title picks its
+# own method by catalog description-match, which is the drift that ran a 6-persona
+# fan-out at ~4.7M tokens per review. review-dispatch-body.sh is the ONE source of
+# that prose, already shared by check-set-heal.sh and reconcile-merged-prs.sh —
+# both REPAIR paths. Wiring it here is what makes the method a property of the
+# review bead rather than of the reviewing agent's catalog.
+#
+# FAIL-SOFT, never fail-stop, for the same reason as the two existing callers: an
+# un-dispatched signoff leaves the armed gate unsatisfiable and HOLDS the merge
+# forever, which is strictly worse than a title-only bead. A missing or failing
+# emitter degrades to exactly today's behaviour, loudly.
+#
+# Resolution mirrors the pack-script precedent in this same formula (find-work,
+# SCRIPTS_DIR): a formula step is NOT the script, so there is no $0/BASH_SOURCE to
+# dirname off — resolve from agent-env paths instead. The owning rig finds the
+# emitter under its own root; importer rigs (signal-loom, gascity, shutupandlisten)
+# find it at <city>/rigs/gc-toolkit. First executable candidate wins.
+#
+# Kept BACKSLASH-FREE on purpose. This description is a TOML basic multi-line
+# string (triple-quoted), where a line-ending backslash is an escape that joins
+# the two lines: the text the agent runs would then differ from the text
+# assets/scripts/first-round-review-body.test.sh extracts and executes. That test
+# asserts the absence of backslashes here, so the two forms cannot diverge.
+# >>> first-round-review-body
+    REVIEW_BODY_EMITTER=""
+    for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+      if [ -x "$cand/review-dispatch-body.sh" ]; then REVIEW_BODY_EMITTER="$cand/review-dispatch-body.sh"; break; fi
+    done
+    REVIEW_BODY=""
+    if [ -x "$REVIEW_BODY_EMITTER" ]; then
+      REVIEW_BODY=$("$REVIEW_BODY_EMITTER" 2>/dev/null) || REVIEW_BODY=""
+    fi
+    if [ -n "$REVIEW_BODY" ]; then
+      REVIEW_BEAD=$(printf '%s' "$REVIEW_BODY" | gc bd create "$REVIEW_TITLE" -t task --body-file - --json | jq -r .id)
+    else
+      echo "refinery: WARN review method unavailable (${REVIEW_BODY_EMITTER:-review-dispatch-body.sh not found beside this rig assets/scripts}); dispatching a TITLE-ONLY review — the reviewer will have to pick its own method (tk-jufvl)" >&2
+      REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
+    fi
+# <<< first-round-review-body
     # anchor_bead is the DURABLE anchor pointer: it is set atomically with the
     # review's routing fields here, so it is as reliable as the review's own
     # dispatch. The completion path resolves the anchor by the BLOCKS edge first
