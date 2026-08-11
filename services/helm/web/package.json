@@ -8,19 +8,26 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "gen:supervisor-types": "node scripts/gen-supervisor-types.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
+    "openapi-fetch": "0.17.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/react": "16.3.0",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.7.0",
+    "jsdom": "29.1.1",
+    "openapi-typescript": "7.13.0",
     "typescript": "^5.6.3",
     "vite": "^7.3.5",
     "vitest": "^4.1.10"

@@ -35,8 +35,30 @@ function resolveLoopbackTarget(envName: string, fallback: string): string {
   return raw;
 }
 
+// The city name the drill plane addresses in dev. In production it is read from
+// the mount path (/v0/city/<city>/svc/helm/); the dev server has no such path,
+// so it comes from the same HELM_DEV_MOUNT that configures the proxy below —
+// one source of truth rather than a second hardcoded city. See src/drill/origin.ts.
+function resolveDevCity(mount: string): string {
+  const match = /\/v0\/city\/([^/]+)\//.exec(new URL(mount).pathname);
+  if (match === null) {
+    throw new Error(
+      `HELM_DEV_MOUNT must contain a /v0/city/<city>/ segment; got ${JSON.stringify(mount)}`,
+    );
+  }
+  return decodeURIComponent(match[1]);
+}
+
+const devMount = resolveLoopbackTarget('HELM_DEV_MOUNT', DEFAULT_DEV_MOUNT);
+
 export default defineConfig({
   plugins: [react()],
+
+  define: {
+    // Only ever read behind `import.meta.env.DEV`, so this is constant-folded
+    // out of production bundles.
+    __HELM_DEV_CITY__: JSON.stringify(resolveDevCity(devMount)),
+  },
 
   // KTD5, the load-bearing setting for this app. helm-svc is reached through
   // the supervisor's service proxy at a runtime-city-named prefix
@@ -64,13 +86,30 @@ export default defineConfig({
     proxy: {
       // The app fetches the board as a document-relative 'helm', which is
       // '/helm' when served from the dev root.
-      '/helm': { target: resolveLoopbackTarget('HELM_DEV_MOUNT', DEFAULT_DEV_MOUNT), changeOrigin: true },
+      '/helm': { target: devMount, changeOrigin: true },
       // ws: true is required — the terminal is a WebSocket at /terminal/ws, and
       // without it the upgrade is not proxied and the tile never attaches.
       '/terminal': {
         target: resolveLoopbackTarget('HELM_DEV_TTYD', DEFAULT_DEV_TTYD),
         changeOrigin: true,
         ws: true,
+      },
+      // The drill plane addresses the supervisor same-origin (see
+      // src/drill/origin.ts). In production that is literally the same server;
+      // in dev the proxy stands in for it, so /v0/... reaches the real
+      // supervisor — including the SSE stream, which needs buffering off to
+      // arrive as frames rather than in one lump at the end.
+      '/v0': {
+        target: new URL(devMount).origin,
+        changeOrigin: true,
+        ws: false,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+              proxyRes.headers['x-accel-buffering'] = 'no';
+            }
+          });
+        },
       },
     },
   },

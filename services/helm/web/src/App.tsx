@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
 import { resolveTerminalBase } from './terminal/endpoint';
@@ -35,6 +36,9 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
+  // The tile being drilled into, or null. A tile's id IS a bead id, which is
+  // all the drill plane needs to open it.
+  const [drillTarget, setDrillTarget] = useState<string | null>(null);
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
@@ -81,6 +85,7 @@ export function App() {
         <button type="button" onClick={refresh} disabled={loading}>
           {loading ? 'refreshing…' : 'refresh'}
         </button>
+        <CitySignals />
       </header>
 
       {error && (
@@ -115,10 +120,24 @@ export function App() {
             </tr>
           </thead>
           <tbody>
+            {/* The drilled row is marked with a class, not aria-selected: that
+                attribute is only meaningful on a grid/treegrid row, and this is
+                a plain table. */}
             {tiles.map((tile) => (
-              <tr key={tile.id}>
+              <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
                 <td>{tile.severity}</td>
-                <td>{tile.id}</td>
+                <td>
+                  {/* The drill-in entry point. A button rather than a clickable
+                      row so it is reachable by keyboard and announced as an
+                      action. */}
+                  <button
+                    type="button"
+                    className="drill-open"
+                    onClick={() => setDrillTarget(tile.id)}
+                  >
+                    {tile.id}
+                  </button>
+                </td>
                 <td>{tile.rig}</td>
                 <td>{tile.kind}</td>
                 <td>{tile.title}</td>
@@ -142,6 +161,7 @@ export function App() {
           wiring question that is deliberately still open — see the Terminal
           section of services/helm/README.md. */}
       <TerminalTile label="city terminal" base={terminalBase} />
+      <DrillPanel beadId={drillTarget} onClose={() => setDrillTarget(null)} />
     </main>
   );
 }
