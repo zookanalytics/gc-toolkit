@@ -43,6 +43,12 @@
 #              leaves the stall un-retired
 #   (NOMARK)   a visit create that returns no id does NOT stamp the marker and exits
 #              non-zero
+#   (ROUTEBACK) the visit's routing metadata is READ BACK before the marker is stamped
+#   (UNROUTED) a routing write that exits 0 and persists NOTHING leaves the stall
+#              un-retired. An unrouted, untyped visit is offered to no pool and
+#              resolved by no board row, so retiring the stall over it re-creates the
+#              exact defect this pass exists to end — with the marker asserting the
+#              signal was sent
 #   (ROSTER)   an unreadable session roster reports NOTHING at all
 #   (LISTFAIL) an unreadable bead listing reports NOTHING at all
 #   (NOWRITE)  the pass never closes a bead and never writes to a member or an anchor
@@ -244,7 +250,16 @@ if [ "${1:-}" = "bd" ]; then
       if [ "${FAKE_READY_BROKEN:-0}" = "1" ]; then echo 'not json'; exit 0; fi
       jq -c '[.[] | select(._ready == true)]' "$FAKE_BEADS"; exit 0 ;;
     show)
-      jq -c --arg i "${1:-}" '[.[] | select(.id == $i)]' "$FAKE_BEADS"; exit 0 ;;
+      # Metadata written by `update` this run is merged over the fixture, so a
+      # read-back sees what the write claimed to store. A bead that exists only
+      # because the pass created it (a visit) is synthesized from that store.
+      jq -c --arg i "${1:-}" --slurpfile meta "$FAKE_META" '
+        (($meta[0] // {})[$i] // {}) as $extra
+        | ([.[] | select(.id == $i)]) as $rows
+        | if ($rows | length) > 0 then [$rows[0] | .metadata = ((.metadata // {}) + $extra)]
+          elif ($extra | length) > 0 then [{id: $i, status: "open", metadata: $extra}]
+          else [] end' "$FAKE_BEADS"
+      exit 0 ;;
     create)
       if [ "${FAKE_CREATE_BROKEN:-0}" = "1" ]; then echo '{}'; exit 0; fi
       n=$(( $(wc -l < "$FAKE_CREATED") + 1 ))
@@ -257,7 +272,32 @@ if [ "${1:-}" = "bd" ]; then
       esac
       exit 0 ;;
     update|dep)
-      printf '%s\n' "$sub $*" >> "$FAKE_UPDATES"; exit 0 ;;
+      printf '%s\n' "$sub $*" >> "$FAKE_UPDATES"
+      # `update` PERSISTS its --set-metadata pairs, so the pass's read-back is a real
+      # round trip rather than a stub that always agrees. FAKE_META_LOST=1 is the
+      # write that exits 0 and stores NOTHING — the silent half of that failure, and
+      # the only half `|| true` on the write cannot see.
+      if [ "$sub" = "update" ] && [ "${FAKE_META_LOST:-0}" != "1" ]; then
+        id="${1:-}"; shift || true
+        pairs=""
+        while [ $# -gt 0 ]; do
+          if [ "${1:-}" = "--set-metadata" ]; then pairs="${pairs}${2:-}
+"; shift; fi
+          shift
+        done
+        if [ -n "$pairs" ]; then
+          printf '%s' "$pairs" | jq -R -s --arg id "$id" --slurpfile cur "$FAKE_META" '
+            ($cur[0] // {}) as $c
+            | (split("\n") | map(select(length > 0))
+               | map((index("=")) as $i
+                     | if $i == null then {key: ., value: ""}
+                       else {key: .[0:$i], value: .[$i+1:]} end)
+               | from_entries) as $new
+            | $c + {($id): (($c[$id] // {}) + $new)}' > "$FAKE_META.tmp" \
+            && mv "$FAKE_META.tmp" "$FAKE_META"
+        fi
+      fi
+      exit 0 ;;
     list)
       if [ "${FAKE_LIST_BROKEN:-0}" = "1" ]; then echo 'not json'; exit 0; fi
       # the session-bead listing this pass makes alongside the roster
@@ -291,8 +331,9 @@ export FAKE_BEADS="$TMP/beads.json" FAKE_CLOSED="$TMP/closed.json"
 export FAKE_CONVOYS="$TMP/convoys" FAKE_SESSIONS="$TMP/sessions.json"
 
 run() { # <label> [args...]
-  : > "$TMP/updates"; : > "$TMP/created"; : > "$TMP/calls"
+  : > "$TMP/updates"; : > "$TMP/created"; : > "$TMP/calls"; echo '{}' > "$TMP/meta"
   export FAKE_UPDATES="$TMP/updates" FAKE_CREATED="$TMP/created" FAKE_CALLS="$TMP/calls"
+  export FAKE_META="$TMP/meta"
   set +e
   "$SCRIPT" --stall-minutes 120 "$@" > "$TMP/out" 2> "$TMP/err"
   RC=$?
@@ -343,10 +384,24 @@ has "$TMP/updates" "--type=tracks" "the visit hangs off the subject by TRACKS, n
 # (ORDER) the visit must exist before the marker retires the stall. Compare the
 # first create against the first stall_flagged stamp in call order.
 CREATE_LINE=$(grep -n 'bd create' "$TMP/calls" | head -1 | cut -d: -f1)
-MARK_LINE=$(grep -n 'stall_flagged=' "$TMP/calls" | head -1 | cut -d: -f1)
+# Anchored on the UPDATE call, never on the bare word: the visit's own description says
+# "The root is stamped stall_flagged=<marker>", and that body text is logged as part of
+# the CREATE. A bare grep therefore matches a line inside the create and the comparison
+# proves nothing — it holds even if the stamp really did come first.
+MARK_LINE=$(grep -n 'bd update r-.*--set-metadata stall_flagged=' "$TMP/calls" | head -1 | cut -d: -f1)
 [ -n "$CREATE_LINE" ] && [ -n "$MARK_LINE" ] && [ "$CREATE_LINE" -lt "$MARK_LINE" ] \
   && ok "(ORDER) the visit is filed BEFORE the marker is stamped" \
   || bad "(ORDER) the marker was stamped before the visit existed — a failed create would retire the stall unseen"
+
+# (ROUTEBACK) filing it is not enough: the routing must be READ BACK before the marker
+# retires the stall. gc.routed_to is what offers the visit to a pool and
+# gc.continuation_group is what resolves it back to the subject, so a write that did
+# not land leaves a bead nobody is ever handed.
+has "$TMP/updates" "gc.continuation_group=subject-1" "the visit is tied to the standing subject"
+SHOW_LINE=$(grep -n 'bd show visit-' "$TMP/calls" | head -1 | cut -d: -f1)
+[ -n "$SHOW_LINE" ] && [ -n "$MARK_LINE" ] && [ "$SHOW_LINE" -lt "$MARK_LINE" ] \
+  && ok "(ROUTEBACK) the visit's routing is read back BEFORE the marker is stamped" \
+  || bad "(ROUTEBACK) the marker was stamped without reading the visit's routing back — a --set-metadata that exits 0 without persisting would retire the stall on a signal no pool is offered"
 
 # (NOWRITE) the pass reports; it never repairs. Nothing may be closed, and no member
 # or anchor may be written.
@@ -384,6 +439,17 @@ FAKE_CREATE_BROKEN=1 run createfail
 unset FAKE_CREATE_BROKEN
 hasnt "$TMP/updates" "stall_flagged=" "(NOMARK) a failed create never stamps the marker"
 eq "$RC" "1" "(NOMARK) and the pass exits non-zero"
+
+# (UNROUTED) the harder half: the routing write EXITS 0 and persists nothing. The visit
+# bead exists, so every guard keyed on the create still passes — and the bead is
+# invisible to the converse pool and to the board. Retiring the stall over it is this
+# pass's own defect, with the marker asserting the signal was sent.
+FAKE_META_LOST=1 run metalost
+unset FAKE_META_LOST
+hasnt "$TMP/updates" "stall_flagged=" "(UNROUTED) a routing write that did not persist never stamps the marker"
+eq "$RC" "1" "(UNROUTED) and the pass exits non-zero"
+has "$TMP/err" "did not read back as routed and typed" "(UNROUTED) and names the unrouted visit on stderr"
+has "$TMP/out" "root r-stall STALLED" "(UNROUTED) the stall is still reported on stdout — the signal failed to durably route, not to be detected"
 
 echo
 echo "passed: $PASS   failed: $FAIL"

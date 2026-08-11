@@ -166,9 +166,25 @@ same last-touch and is never re-reported; one that advances and stalls again ear
 exactly one more signal. The patrol runs continuously, so a per-pass signal would be a
 per-minute signal — the noise tk-jbv0r and tk-76jxq are about.
 
-The visit is created BEFORE the marker is stamped. In that order a failed create leaves
-the stall un-retired and the next pass re-signals; the reverse would retire it on a
-visit nobody ever saw.
+The visit is created BEFORE the marker is stamped, **and its routing is read back
+before the marker is stamped.** In that order a failed create — or a `--set-metadata`
+that exits 0 and persists nothing — leaves the stall un-retired and the next pass
+re-signals; the reverse would retire it on a visit nobody ever saw.
+
+The read-back covers the three stamps that make a visit a signal rather than a bead:
+`gc.routed_to` (what offers it to the converse pool), `task_kind=visit` (what the board
+and the converse role select on) and `gc.continuation_group` (what resolves it back to
+the standing subject, an exact-string read). The `tracks` edge is lineage and is
+deliberately outside the gate — losing it costs provenance, not the signal. Guarding
+the write's exit status alone is not enough: the failure that matters here is the write
+that succeeds and stores nothing, and from inside the pass the only way to tell those
+apart is to read the bead back.
+
+A failed read-back costs one unrouted visit bead, left behind and named on stderr, plus
+one more filed next pass. That is the same cost the marker-write failure path already
+carries, and it is the right side to err on — a duplicate visit is noise, while a stall
+retired without a signal is precisely the silence this pass exists to end, now asserted
+by a marker saying it was reported.
 
 ## 7. Fail-safe direction
 
@@ -205,7 +221,7 @@ escalation about a workflow that is fine.
 The remedy is a query plus a threshold that an existing patrol runs on a schedule:
 `assets/scripts/detect-stalled-workflows.sh`, called from the witness patrol's
 `detect-stalled-workflows` step, with `assets/scripts/detect-stalled-workflows.test.sh`
-(hermetic, 44 assertions) and `doctor/check-stalled-workflow-detector` guarding that
+(hermetic, 50 assertions) and `doctor/check-stalled-workflow-detector` guarding that
 the script, its test and its call site all stay shipped and wired — the patrol formula
 is an allowlisted mirror of a base artifact, so a reconciliation that drops the step
 would otherwise restore the blind spot in silence.

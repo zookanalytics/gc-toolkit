@@ -475,17 +475,47 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
     failed=$((failed + 1)); continue
   fi
 
+  # A visit is only a signal once it is ROUTED and TYPED. `gc.routed_to` is what offers
+  # it to the converse pool, `task_kind=visit` is what the board and the converse role
+  # select on, and `gc.continuation_group` is what ties it to the standing subject on
+  # the read side (an exact-string match, gc-helm.sh). Miss any of them and the bead
+  # exists but nothing is ever offered it — a workflow that stopped advancing and
+  # emitted no signal, which is the exact defect this pass was built to end.
+  #
+  # So the write is VERIFIED, not assumed. `|| true` on the update covers only the half
+  # that exits non-zero; the half that matters is the write that exits 0 and persists
+  # nothing, and the only way to tell those apart from here is to read it back.
+  vrc=0
   bd_pinned update "$VISIT" --set-metadata "gc.routed_to=$CONVERSE" \
     --set-metadata "gc.continuation_group=$SUBJECT" \
-    --set-metadata "task_kind=visit" >/dev/null 2>&1 || true
+    --set-metadata "task_kind=visit" >/dev/null 2>&1 || vrc=$?
   # tracks, NOT parent-child: a parent-child edge transmits the subject's blocked
   # state to the visit, making it unclaimable on exactly the beads that need talking
-  # about (the same choice mol-liveness-sweep's gate-visit block makes).
+  # about (the same choice mol-liveness-sweep's gate-visit block makes). Lineage only,
+  # and deliberately NOT part of the gate below: what carries the visit to a pool is
+  # gc.routed_to, and what resolves it back to the subject is gc.continuation_group —
+  # both of which are verified. A missing edge costs provenance, not the signal.
   bd_pinned dep add "$VISIT" "$SUBJECT" --type=tracks >/dev/null 2>&1 || true
 
-  # The marker is stamped LAST, and only after the visit exists. In that order a
-  # failed create leaves the root unflagged and the next pass re-signals; the reverse
-  # would retire the stall on a visit nobody ever saw.
+  vmeta=$(bd_pinned show "$VISIT" --json 2>/dev/null | scrub | jq -r '.[0]
+    | ((.metadata // {})) as $m
+    | [(($m["gc.routed_to"] // "") | tostring),
+       (($m.task_kind // "") | tostring),
+       (($m["gc.continuation_group"] // "") | tostring)]
+    | join("\u001f")' 2>/dev/null)
+  vrouted=""; vkind=""; vgroup=""
+  IFS="$SEP" read -r vrouted vkind vgroup <<< "$vmeta"
+  if [ "$vrouted" != "$CONVERSE" ] || [ "$vkind" != "visit" ] || [ "$vgroup" != "$SUBJECT" ]; then
+    echo "detect-stalled-workflows: $root — visit $VISIT did not read back as routed and typed (update exited $vrc; gc.routed_to='$vrouted' want '$CONVERSE', task_kind='$vkind' want 'visit', gc.continuation_group='$vgroup' want '$SUBJECT'); NOT stamping the marker so the next pass re-signals. $VISIT is left behind unrouted — nothing will be offered it, so dispose of it by hand if this keeps failing" >&2
+    failed=$((failed + 1)); continue
+  fi
+
+  # The marker is stamped LAST, and only after the visit exists AND reads back routed.
+  # In that order a failed create — or a routing write that did not land — leaves the
+  # root unflagged and the next pass re-signals; the reverse would retire the stall on
+  # a visit nobody ever saw. The cost of the retry is a duplicate visit, the same cost
+  # the marker-write failure below already carries, and the right side to err on: a
+  # duplicate is noise, a stall retired without a signal is silence.
   if ! bd_pinned update "$root" --set-metadata "stall_flagged=$marker" >/dev/null 2>&1; then
     echo "detect-stalled-workflows: $root — visit $VISIT filed but the stall_flagged marker did not stick; the next pass will file a duplicate visit" >&2
     failed=$((failed + 1)); continue

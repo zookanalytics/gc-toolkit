@@ -71,6 +71,14 @@ else
     grep -q 'stall_flagged' "$dir/$script" \
         || errors+=("$script: the stall_flagged dedupe marker is gone — the witness patrol runs continuously, so every stalled workflow would be re-reported every pass")
 
+    # ...and the marker may only be stamped over a signal that DURABLY routed. A visit
+    # missing gc.routed_to/task_kind/gc.continuation_group is offered to no pool and
+    # resolved by no board row, so a --set-metadata that exits 0 without persisting
+    # would retire the stall on a bead nobody is ever handed — this pass's own defect,
+    # re-created by the pass, with the dedupe marker asserting it was reported.
+    grep -q 'did not read back as routed and typed' "$dir/$script" \
+        || errors+=("$script: the visit routing read-back is gone — the dedupe marker would be stamped over an unrouted visit, and the workflow goes silent again while the root records that it was signalled")
+
     # Rows are joined on US (0x1f), never a tab. Tab is IFS whitespace: empty interior
     # fields collapse and every later field shifts left, so a workflow's TITLE lands
     # in triage.hold and reads as an operator hold. It suppresses real signals in
@@ -103,6 +111,8 @@ else
         || errors+=("$test_script: no dedupe case — one signal per stalled workflow is unproven, and this patrol runs continuously")
     grep -q 'ROSTER' "$dir/$test_script" \
         || errors+=("$test_script: no unreadable-roster case — the fail-safe that stops every live molecule being reported is unproven")
+    grep -q 'UNROUTED' "$dir/$test_script" \
+        || errors+=("$test_script: no unrouted-visit case — that a routing write which exits 0 and persists nothing leaves the stall un-retired is unproven, and a stub that always agrees would never show it")
 fi
 
 # --- the call site ---------------------------------------------------------
