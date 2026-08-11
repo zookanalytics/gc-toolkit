@@ -12,8 +12,9 @@ local remedy gc-toolkit shipped, and the upstream target if anyone later
 decides to engage.
 
 **Boundaries.** Only the **impl** done sequence. The non-impl (review /
-research / investigation) done sequence keeps `--notes` deliberately —
-see [Not a blanket rule](#not-a-blanket-rule).
+research / investigation) done sequence kept `--notes` deliberately — see
+[Not a blanket rule](#not-a-blanket-rule), whose conclusion tk-q9e9y later
+overturned; the non-impl sequence appends today.
 
 ## The defect
 
@@ -105,6 +106,14 @@ appended override, not an edit:
    doctrine.
 
 ## Not a blanket rule
+
+> **SUPERSEDED by tk-q9e9y (2026-08-10).** This section's conclusion was
+> wrong and the non-impl done sequence now appends at every site. The
+> replay it rests on is real, but a review bead's notes have a second
+> writer (`signoff_retry_release`, which appends and re-offers the same
+> bead), each re-gate mints a fresh review bead so rounds never
+> accumulate, and research/investigation beads are replayed by nothing.
+> See `specs/tk-q9e9y/`. Kept here as the record of what was believed.
 
 `--notes` is correct where a bead's notes are a **single-valued
 artifact** rather than a history field. A review bead is the case:

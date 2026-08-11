@@ -275,10 +275,18 @@ the review bead's notes, and stamp the commit you pinned:
 
 ```bash
 gc bd update "$BEAD" --set-metadata reviewed_oid="$REVIEWED_OID" \
-  --notes "$VERDICT_BODY"
+  --append-notes "$VERDICT_BODY"
 ```
 
-The refinery replays those notes when it opens the PR.
+`--append-notes`, never `--notes`, which replaces. This field has a
+second writer: when the done sequence cannot record the gate marker it
+appends the "gate unrecorded" diagnostic to these same notes and
+re-offers this same bead, so a replacing write on the retry erases the
+only record of why the previous round failed.
+
+The refinery replays those notes verbatim when it opens the PR, so write
+a **self-contained** verdict — one that reads correctly as an opening PR
+comment, not as a diff against the entry above it.
 
 Everything past this point — which marker lands on the anchor, how a
 rework child is filed, when the review bead closes — belongs to the
