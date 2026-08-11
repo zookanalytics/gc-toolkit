@@ -109,7 +109,10 @@ partial data.
 # available in this runtime, rig_list must be poured on the order.)
 RIGS="{{rig_list}}"
 if [ -z "$RIGS" ]; then
-  RIGS=$(gc rig list --json 2>/dev/null | jq -r '.[].name // empty' 2>/dev/null | tr '\\n' ' ')
+  # `gc rig list --json` returns an OBJECT ({"ok":true,"rigs":[...]}), not an
+  # array — `.[].name` errors ("Cannot index number with string"), RIGS goes
+  # empty, and the fail-safe below aborts EVERY run.
+  RIGS=$(gc rig list --json 2>/dev/null | jq -r '.rigs[].name // empty' 2>/dev/null | tr '\\n' ' ')
 fi
 if [ -z "${RIGS// /}" ]; then
   echo "FAIL-SAFE: no rig_list poured and rig enumeration returned nothing — distiller aborts, nothing judged, nothing filed"
