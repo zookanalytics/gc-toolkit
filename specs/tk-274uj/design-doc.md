@@ -1,31 +1,44 @@
 ---
-name: Design — Stewardship Turns and Continuation-Group Granularity (Bead-Universe v2 completion)
-description: Completes the v2 conversation model for STEWARDSHIP conversations ("let's move Epic X forward") — stewardship as a second turn kind, its subtree roll-up prep contract, its three formula-driven triggers, the epic-routing constraint that forces turns-as-children, and the operator's ruling that continuation-group and hierarchy are orthogonal axes (with the two-layer prompt-influence mechanism that makes hierarchy real). Design-only.
+name: Design — Stewardship Visits and Continuation-Group Granularity (Bead-Universe v2 completion)
+description: Completes the v2 conversation model for STEWARDSHIP conversations ("let's move Epic X forward") — stewardship as a second visit kind, its subtree roll-up prep contract, its three formula-driven triggers, the routing constraint that makes the conversation a separate tracks-linked routed bead (never the epic, never its parent-child child), and the operator's ruling that continuation-group and hierarchy are orthogonal axes (with the two-layer prompt-influence mechanism that makes hierarchy real). Design-only.
 ---
 
-# Design: Stewardship Turns and Continuation-Group Granularity
+# Design: Stewardship Visits and Continuation-Group Granularity
 
 *Design-only spec for tk-274uj. It **completes** `specs/tk-h9pq5/design-doc.md`
 (Conversation-as-Continuation-Group, Bead-Universe v2 — landed via PR#233, merged
-`763e2825`). That doc models a conversation turn as **reactive to a discrete event**
+`763e2825`). That doc models a conversation sitting as **reactive to a discrete event**
 and mentions epics only as *duration*. It therefore cannot express "have a
 conversation about moving Epic X forward" — a thing v1's bead-host did by
 construction, and a property v2's own Q4 recommendation ("supersede the binding")
 depends on. This spec closes that gap. Read tk-h9pq5's doc first; its primitives,
-role contract, and turn mechanism are assumed here and not re-derived.*
+role contract, and sitting mechanism are assumed here and not re-derived.*
+
+> **Vocabulary.** tk-h9pq5 says **turn**; the live surfaces say **visit**. The rename
+> was an operator decision taken in the implementing PR on 2026-08-08 — `mol-turn.toml`
+> → `mol-visit.toml`, `gate-turn` → `gate-visit`, `task_kind=conversation` →
+> `task_kind=visit` (`specs/2026-08-fresh-start/liveness-and-triage-spec.md:8-12`).
+> **This spec uses the live vocabulary throughout.** Read tk-h9pq5's "turn" as "visit".
+
+> **Ground truth.** Where the ratified tk-h9pq5 design and the *ported* spine disagree,
+> **the port wins** — it is what actually runs (`specs/2026-08-fresh-start/spine-port.md`,
+> `formulas/mol-visit.toml`, `agents/converse/prompt.template.md`,
+> `formulas/mol-witness-patrol.toml`). One such disagreement is load-bearing here and is
+> stated where it bites (§1, orphan recovery).
 
 ---
 
 ## Scope
 
 **Mandate.** How a v2 conversation addresses a **subject with aggregate state** (an
-epic) rather than a discrete occurrence: the turn kind that does it, what that turn
+epic) rather than a discrete occurrence: the visit kind that does it, what that visit
 owes the operator before it holds, what files it, and how conversation identity
 relates to work hierarchy.
 
 **Boundaries.** This is a completion of tk-h9pq5, not a replacement. It does not
-revisit the v2 reframe, the role's claim contract, warm/cold continuity, the reaper
-skip, or the attention rewire — those are settled there. No implementation.
+revisit the v2 reframe, the role's claim contract, warm/cold continuity, or the
+attention rewire — those are settled there, and their *as-shipped* form is settled in
+the port. No implementation.
 
 ---
 
@@ -33,36 +46,39 @@ skip, or the attention rewire — those are settled there. No implementation.
 
 **Five things, four of which follow from one.**
 
-1. **Stewardship is a second TURN KIND, not a second agent.** The instruction lives
-   on the turn bead's description, because `run-operator`'s contract is literally
+1. **Stewardship is a second VISIT KIND, not a second agent.** The instruction lives
+   on the visit bead's description, because `run-operator`'s contract is literally
    *"Execute exactly the claimed bead's description and result contract"*
    (`run-operator/prompt.template.md:175`). One conversation role therefore serves
-   both event turns and stewardship turns, and the set of turn kinds is extensible
+   both event visits and stewardship visits, and the set of visit kinds is extensible
    **without touching any agent config**. This is an *advantage* over v1's bead-host,
    which baked one ownership posture into a static agent prompt — not a concession.
 
-2. **A stewardship turn owes the operator a proposal, not archaeology.** Its prep
+2. **A stewardship visit owes the operator a proposal, not archaeology.** Its prep
    contract is a subtree roll-up in four buckets — **ready / blocked-and-why / stale
    / contradictory** — plus **exactly one recommended next move**, and only then does
    it hold. It is the epic-scale analogue of `formulas/mol-first-reaction.toml`, which
    already does this for a single bead.
 
 3. **Three triggers, one mechanism.** Operator, event, and formula all resolve to
-   *file a turn bead in the subject's group.* The event trigger is restricted to
-   **aggregate-state** events; a single child's news is that child's conversation, not
-   the epic's. Do not build three mechanisms.
+   *run the canonical `gate-visit` snippet against the epic.* The event trigger is
+   restricted to **aggregate-state** events; a single child's news is that child's
+   conversation, not the epic's. Do not build three mechanisms.
 
-4. **Turns-as-children is the only shape core routing permits.** Pool demand is
-   `bd ready … --unassigned --exclude-type=epic`
+4. **The conversation is a SEPARATE ROUTED BEAD, `tracks`-linked to the epic.** Pool
+   demand is `bd ready … --unassigned --exclude-type=epic`
    (`gascity/internal/config/workquery.go:42`), so an epic can never *be* pool demand
-   and a conversation can never be routed **at** an epic bead. (The exclusion is
-   tier-scoped — §4 shows why the assigned-tier loophole is a dead end anyway.)
+   and a conversation can never be routed **at** an epic bead. That forces a separate
+   claimable bead; it does **not** license hanging that bead off the epic with a
+   `parent-child` edge — which is forbidden, because parent-child transmits the
+   subject's blocked/arrested state to the visit (F-06). The canonical link is
+   `tracks`. (§4.)
 
 5. **Continuation-group and hierarchy are ORTHOGONAL AXES** — the operator's ruling,
    which supersedes the mayor's lean recorded in this bead's description. An epic
    **spans** many conversations; it does not *have* them. The epic has **one** group —
-   its own — and resuming its conversation is *filing a new turn into that group*
-   (that is the stewardship turn). A unit of work spun up under the epic gets a
+   its own — and resuming its conversation is *filing a new visit into that group*
+   (that is the stewardship visit). A unit of work spun up under the epic gets a
    **different** group: its own conversation. **A child knows it belongs to the epic
    through its PROMPT, not by sharing a group.**
 
@@ -80,9 +96,10 @@ Protocol"*. **Epic-awareness is one more key plus one clause — not a new mecha
 
 ## Problem Statement
 
-tk-h9pq5 defines exactly one `task_kind=conversation` with no notion of turn *scope*,
-and models the subject of a turn as a discrete occurrence ("PR review posted —
-decision needed"). Its prep step is "rebuild the subject's fed slice."
+tk-h9pq5 defines exactly one conversation class — stamped `task_kind=visit` on the
+live spine — with no notion of visit *scope*, and models the subject of a visit as a
+discrete occurrence ("PR review posted — decision needed"). Its prep step is "rebuild
+the subject's fed slice."
 
 That is sufficient when the subject is a leaf bead whose slice *is* the subject. It
 is not sufficient when the subject is an **epic**, whose state is not a body to read
@@ -93,21 +110,24 @@ one-paragraph body — which is precisely the archaeology the operator would the
 to do by hand, and precisely what v1's bead-host avoided by carrying "own the broader
 epic" in its prompt.
 
-So the gap is not a missing agent. It is a missing **turn contract**.
+So the gap is not a missing agent. It is a missing **visit contract**.
 
 ---
 
-## 1. Stewardship as a Turn Kind
+## 1. Stewardship as a Visit Kind
 
 ### The mechanism
 
-A stewardship turn is an ordinary v2 turn bead — child of the subject,
-`gc.run_target=<conversation-role>`, `gc.continuation_group=<subject-id>` — whose
-**description carries the stewardship prep contract** (§2) instead of an event
-prompt.
+A stewardship visit is an **ordinary v2 visit bead**, filed by the canonical
+`gate-visit` snippet with no modification (`formulas/mol-visit.toml:36-55`):
+`task_kind=visit`, `gc.routed_to=<rig-qualified converse pool>`,
+`gc.continuation_group=<subject-id>`, and a `tracks` edge to the subject. The **only**
+thing that makes it a stewardship visit is its `-d` body — the stewardship prep
+contract (§2) in place of an event prompt.
 
-Nothing else changes. The role does not branch on kind; it does what the claimed
-bead's description says, because that is its entire contract:
+That is the whole delta. **Stewardship needs no new filing mechanism, no new edge
+type, and no change to the role.** The role does not branch on kind; it does what the
+claimed bead's description says, because that is its entire contract:
 
 > `run-operator/prompt.template.md:175` — *"Execute exactly the claimed bead's
 > description and result contract."*
@@ -120,43 +140,81 @@ bead, chosen at config time by whoever wrote the prompt. Wanting a second postur
 meant a second agent — a second `agent.toml`, a second prompt to keep in sync, a
 second pool, and a second always-on context cost.
 
-v2 puts it in the **turn bead**. Three consequences, all in v2's favour:
+v2 puts it in the **visit bead**. Three consequences, all in v2's favour:
 
-- **Extensible at zero config cost.** A third or fourth turn kind (a triage turn, a
-  ratification turn, a post-mortem turn) is a new *description template in a
+- **Extensible at zero config cost.** A third or fourth visit kind (a triage visit, a
+  ratification visit, a post-mortem visit) is a new *description template in a
   formula*. No agent, no pool, no prompt edit, no redeploy.
-- **Per-turn posture on the same subject.** The same epic can take a stewardship turn
-  on Monday and a narrow event turn on Tuesday. Under bead-host, posture was a
+- **Per-visit posture on the same subject.** The same epic can take a stewardship visit
+  on Monday and a narrow event visit on Tuesday. Under bead-host, posture was a
   property of the *host*, so it could not vary per visit.
 - **The posture is legible and auditable after the fact.** The instruction that
-  produced a given conversation is durable on the turn bead, not implicit in whatever
+  produced a given conversation is durable on the visit bead, not implicit in whatever
   the agent prompt happened to say that week. This matters for the same reason the
   whole reframe matters: *the record is the durable thing.*
 
-The cost is that turn descriptions must be authored well and consistently. That is a
+The cost is that visit descriptions must be authored well and consistently. That is a
 formula-authoring concern, and formulas are the intended home for it (§3).
 
-### The one piece of new metadata, and why it earns its keep
+### The class marker, and the recovery contract that actually ships
 
-Keep `task_kind=conversation` as the **class** marker, unchanged. tk-h9pq5's Phase 2
-reaper-skip clause keys on it (`mol-witness-patrol.toml` orphan-recovery skip, sibling
-case in `host-bead-skip.test.sh`); a stewardship turn is a conversation turn and must
-be skipped by exactly the same clause, with no revision to a landed gate.
+**`task_kind=visit` is the class marker, unchanged** — stamped by the canonical
+snippet, and the structural tell the board and the patrols read.
 
-Add `turn_kind` (`event` | `stewardship`) as the **subkind**. It is not read by the
-role — the description is the instruction — so it must justify itself on other
-grounds. It does, on one:
+**Orphan recovery does NOT skip it, and a stewardship visit must not ask it to.**
+tk-h9pq5's Phase 2 specified a reaper-skip clause keyed on the conversation marker.
+That clause was **deliberately not ported** (`spine-port.md` D4), and the live patrol
+says the opposite in as many words:
 
-> **Dedup.** Filing a second stewardship turn while one is open produces two
-> concurrent roll-ups of the same subtree and two competing "recommended next moves"
-> for one operator. The three triggers in §3 fire independently and *will* collide
-> (a phase-checkpoint formula and a staleness event on the same quiet epic is the
-> normal case, not the exotic one). The trigger's precondition is therefore *"no open
-> bead in group `<epic-id>` with `turn_kind=stewardship`"* — which needs a queryable
-> facet, not prose in a description.
+> `formulas/mol-witness-patrol.toml:156-160` — *"there is no class of assigned bead
+> that orphan recovery must skip. Visits and their converse sessions need no carve-out
+> either: a visit whose session died mid-hold SHOULD return to the pool, because
+> respawn-and-reconstitute-from-the-record is the cold continuity path."*
 
-Secondary, non-justifying benefits: the board can rank stewardship turns differently,
+The filter is assigned-only and is pinned by a regression that executes it verbatim
+(`assets/scripts/host-bead-skip.test.sh`). Recovery *is* kind-aware, but in the other
+direction: for `task_kind == "visit"` the patrol releases **the assignee only**,
+because the workflow reset would strip `gc.routed_to` / `gc.continuation_group` /
+`task_kind` — which *are* a visit's identity (`mol-witness-patrol.toml:486-496`).
+
+**A stewardship visit gets ordinary recovery, and is better off for it.** Its state is
+a *computed roll-up*, not a conversation transcript: a died-mid-hold stewardship visit
+that returns to the pool is re-prepped by a fresh converse session from the record,
+which recomputes the subtree **as of the respawn**. Reviving a stale roll-up would be
+strictly worse. This is the cold-continuity path working as designed, not a hazard to
+be skipped around.
+
+### The one piece of new metadata, and what it actually earns
+
+Add `visit_kind` (`event` | `stewardship`) as the **subkind**, layered on
+`task_kind=visit` (never in place of it). It is not read by the role — the description
+is the instruction — so it must justify itself on other grounds.
+
+**It does not earn its keep on dedup — the obvious first argument, and the wrong one.**
+The live spine already dedups **group-wide and subkind-agnostically**: *"Skip if a visit
+is live — the subject's id appears in `$CONVGROUPS` … Never stack a second visit on
+one subject"* (`formulas/mol-triage-recurrence.toml:88-90`), with the same rule
+enforced from the claim side by converse's concurrent-hold fold
+(`agents/converse/prompt.template.md:24-33`). Two concurrent roll-ups of one subtree
+are already impossible without any new key. §3's precondition is now that live rule.
+
+What the key does buy is narrower and real:
+
+> **The phase-checkpoint trigger needs to know that a stewardship roll-up specifically
+> is in flight or was the last thing that happened on this epic.** A checkpoint asks
+> "has this epic been rolled up and ratified before we proceed?" An unrelated event
+> visit sitting in the epic's group does not answer that question — but it *does*
+> satisfy the group-wide "a visit is live" rule, so the checkpoint cannot distinguish
+> the two without a queryable facet. Prose in a description is not queryable.
+
+Secondary, non-justifying benefits: the board can rank stewardship visits differently,
 and "how often does an epic need stewardship" becomes answerable.
+
+*Naming note.* An earlier draft of this spec called this key `turn_kind`, carried over
+from tk-h9pq5's pre-rename vocabulary. It is spelled `visit_kind` here for the same
+reason the operator renamed turn→visit on the live surfaces: a **new** schema key
+spelled in retired vocabulary would fork the vocabulary a second time, on the one
+surface — bead metadata — where the fork is queryable and therefore permanent.
 
 ---
 
@@ -164,8 +222,8 @@ and "how often does an epic need stewardship" becomes answerable.
 
 **The rule, stated once:** *the operator arrives at a proposal, not at archaeology.*
 
-Before it holds, a stewardship turn rolls up the subject's subtree into four buckets
-and commits to one recommendation. Everything below is what the turn's description
+Before it holds, a stewardship visit rolls up the subject's subtree into four buckets
+and commits to one recommendation. Everything below is what the visit's description
 instructs; the role executes it because that is its contract.
 
 ### The four buckets
@@ -177,22 +235,27 @@ instructs; the role executes it because that is its contract.
 | **Stale** | What has quietly stopped | no state change in N days (children whose last write predates the threshold), which is the only bucket that is invisible on a board |
 | **Contradictory** | Where the subtree disagrees with itself or with the epic's frame | **not a query** — see below |
 
-The first three are mechanical and should be computed, not narrated: a turn that
-reports "12 ready, 3 blocked, 5 stale" and lists them is doing arithmetic the
+The subtree is walked over `parent-child`, which is the work axis and **only** the work
+axis (§5). Because visits hang off their subject by `tracks` and not by `parent-child`
+(§4), the roll-up never counts the epic's own conversations as work — the epic's visit
+history is context for the roll-up, not a row in it.
+
+The first three buckets are mechanical and should be computed, not narrated: a visit
+that reports "12 ready, 3 blocked, 5 stale" and lists them is doing arithmetic the
 operator should never do by hand.
 
 **Contradiction is the bucket that is not mechanical, and that is the point.** There
 is no dep type for "these two decisions are incompatible." Detecting that a child's
 recorded decision contradicts the epic's frame — or another child's — requires
 reading the rolled-up record and understanding it. That is exactly the work an LLM
-does and a query cannot, and it is *why the stewardship turn is a conversation rather
+does and a query cannot, and it is *why the stewardship visit is a conversation rather
 than a generated report*. A design that made all four buckets mechanical would have
 argued itself out of needing a conversation at all.
 
 Honest limit: contradiction detection is **best-effort and unbounded in quality**. It
 will miss things on a large subtree, and it degrades with record quality — the same
 dependency tk-h9pq5 already flagged under "cold reconstitution quality depends on
-record discipline." State it in the turn's output rather than implying completeness:
+record discipline." State it in the visit's output rather than implying completeness:
 *what was read, and what was not.*
 
 ### The recommendation
@@ -202,9 +265,10 @@ menu — a menu is archaeology with extra steps, and it pushes the synthesis bac
 the operator. One recommendation the operator can ratify in a single move, plus the
 runner-up and why it lost, is the shape that makes the visit short.
 
-Then the turn **holds** (`in_progress`), per tk-h9pq5's Engage step, and on operator
-input writes the outcome to the **subject** bead, stamps `gc.outcome` on the turn, and
-closes **only the turn**. Unchanged from v2.
+Then the visit **holds** (`in_progress`), and on operator input writes the outcome to
+the **subject** bead, stamps `gc.outcome` on the visit, and closes **only the visit**
+— the live loop's steps 4-6 verbatim (`agents/converse/prompt.template.md:42-58`),
+unchanged from v2. The epic is never closed by a stewardship visit.
 
 ### The analogue that already ships
 
@@ -212,24 +276,26 @@ closes **only the turn**. Unchanged from v2.
 the bead's body — its durable seed/prompt — does the cheap reaction …, writes a
 first-reaction CARD to the bead notes, and files a visit on the bead so the human
 arrives at advanced work through a held visit. Then it drains. One reaction, then
-gone." A stewardship turn is the same move with the subtree as the body and the
-roll-up as the card. Where first-reaction never closes its target, a stewardship turn
+gone." A stewardship visit is the same move with the subtree as the body and the
+roll-up as the card. Where first-reaction never closes its target, a stewardship visit
 never closes the epic — the same invariant, for the same reason.
 
 ---
 
 ## 3. Triggers: Three Channels, One Mechanism
 
-All three **file a turn bead into the epic's group and route it to the conversation
-role.** All three are **formula-driven** — no trigger writes a session, and no event
-starts a conversation directly.
+All three **run the canonical `gate-visit` snippet against the epic** — one visit,
+stamped into the epic's group, routed to the converse pool. All three are
+**formula-driven** — no trigger writes a session, and no event starts a conversation
+directly.
 
-**1. Operator — "let's talk about epic X."** A one-step formula that creates the turn
-and routes it. This is the direct replacement for bead-host's pick-a-row, and it is
-the same action tk-h9pq5's Phase 3 attention rewire performs from the Helm board.
+**1. Operator — "let's talk about epic X."** A one-step formula that creates the visit
+and routes it — i.e. `mol-visit` itself, with a stewardship body. This is the direct
+replacement for bead-host's pick-a-row, and it is the same action tk-h9pq5's Phase 3
+attention rewire performs from the Helm board.
 
 **2. Event — but only AGGREGATE-state events.** An event drives a formula, which
-decides whether a turn is warranted; the event never files the turn itself.
+decides whether a visit is warranted; the event never files the visit itself.
 Qualifying events change the state *of the epic as a whole*:
 
 - the **last** child of a phase closes (the phase is done — proceed or re-plan?)
@@ -241,26 +307,46 @@ child is that child's conversation, not the epic's.* A PR opening, a review post
 a single bead going blocked with its siblings still moving — those belong to the
 child's own group. They reach the epic only if the child's conversation escalates
 them (§5, the escalation clause), which is a decision made *by a conversation*, not
-by an event router. This is what keeps a busy epic from generating a stewardship turn
+by an event router. This is what keeps a busy epic from generating a stewardship visit
 per child event, and it is the same restraint the operator already imposed in v2 ("a
 PR merely opening must not start a conversation").
 
-**3. Formula — phase checkpoints.** The epic's own workflow files a stewardship turn
+**3. Formula — phase checkpoints.** The epic's own workflow files a stewardship visit
 *before proceeding* past a checkpoint, so ratification is a step in the work rather
 than an interrupt to it. This is the trigger that makes stewardship routine instead
-of exceptional.
+of exceptional, and the only one that reads `visit_kind` (§1).
 
-**Shared precondition (all three):** no open `turn_kind=stewardship` bead already in
-group `<epic-id>` (§1). If one exists, the new trigger appends its cause to that
-turn's description instead of filing a second — the open turn has not yet held, so
-its roll-up will simply include the new fact.
+### Shared precondition: the live one-live-visit-per-subject rule
+
+**No trigger files a visit while any visit is live (open or held) in the subject's
+group.** This is not new policy — it is the shipped rule
+(`mol-triage-recurrence.toml:88-90`, "Never stack a second visit on one subject";
+converse's concurrent-hold fold at `prompt.template.md:24-33` catches the race from
+the claim side). What each trigger does instead:
+
+| Trigger | On a live visit in the epic's group |
+|---|---|
+| **Operator** | Do not file. The ask is already served: same group, so the live sitting *is* the conversation the operator wants — warm, the running session vacuums it. |
+| **Event** | Skip and **stamp nothing**, exactly as triage recurrence does: a fact that arrives during a hold must resurface on the first pass after that visit closes, and stamping it as seen swallows it silently. |
+| **Phase checkpoint** | Wait. The checkpoint is gated on a stewardship roll-up, so it re-fires after the live visit closes — and files only if that visit was not itself `visit_kind=stewardship`. This is the read that justifies the key. |
+
+**The tempting alternative — append the new cause to the open visit's description —
+is wrong.** It rewrites a held visit's contract mid-sitting, and a converse session
+that has already prepped will not re-read it; worse, it can turn a narrow event visit
+into a stewardship roll-up the operator never asked for. Skip-and-resurface is the
+shipped idiom and needs no new mechanism.
 
 ---
 
-## 4. The Structural Constraint: Why Turns-as-Children Is the Only Shape
+## 4. The Structural Constraint: Why the Conversation Is a Separate, `tracks`-Linked Bead
 
-The obvious wrong answer is "route the conversation at the epic bead itself." Core
-routing forecloses it:
+Two questions, two independent answers. The obvious wrong answer to the first is
+"route the conversation at the epic bead itself"; the obvious wrong answer to the
+second is "then hang the conversation off the epic as its child."
+
+### 4a. Why the conversation cannot BE the epic
+
+Core routing forecloses it:
 
 ```
 bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json
@@ -292,10 +378,59 @@ sidestepping the pool entirely. Reject it on two independent grounds:
 - **It resurrects v1.** An assigned epic held by a session *is* the bead-host: one
   resident conversation per epic, holding across the epic's whole life, accumulating
   context with no principled place to shed it. That is the single thing v2 exists to
-  shed ("turn boundaries are the release valve").
+  shed (spine-port D3: *"Turn boundaries — not recycling — are the release valve by
+  design"*).
 
-**Conclusion: turns-as-children is not a style choice.** It is what core routing
-permits, and independently what the v2 context bet requires.
+So the conversation must be **its own routed bead**: a `task=visit` the pool can
+actually offer.
+
+### 4b. Why that bead is `tracks`-linked, NOT a parent-child child
+
+The routing constraint above says nothing about the *edge*. Getting the edge wrong is
+its own outage, and it is one this rig already had:
+
+> **F-06 — "A visit on a blocked/arrested subject is never claimable: the parent-child
+> edge transmits the subject's block."** `specs/2026-08-fresh-start/live-adoption-findings.md:227`,
+> isolated with a 2×2 (four visits identical but for two variables): on an **arrested**
+> subject, the visit **without** the edge entered `bd ready`; the visit **with** it never
+> did. Fixed by moving to `tracks`, and confirmed end-to-end in round 2
+> (`live-adoption-findings-round2.md:183`).
+
+The canonical snippet now carries the rule and the reason inline
+(`formulas/mol-visit.toml:49-54`), and `assets/scripts/gate-visit.test.sh:71-74` fails
+any copy that omits `--type=tracks` **or** that contains `--type=parent-child`, in every
+marked block under `formulas/*.toml`, and additionally fails if fewer than the four
+known formula consumers carry one. This is a pinned invariant, not a convention.
+
+**It bites hardest exactly here.** The subject in F-06 was an arrested bead; an epic is
+the *long-lived* subject most likely to be carrying a blocker or an arrest at the
+moment someone most needs to talk about it — "this epic is stuck" is a leading reason
+to file a stewardship visit at all. A parent-child edge would make the stewardship
+visit unclaimable on precisely the epics that need one.
+
+**And it would corrupt the axis §5 depends on.** `parent-child` is the hierarchy axis:
+§5's epic-ancestry walk climbs it, and §2's roll-up enumerates it. Hanging visits on
+it would put the epic's own conversations into its own subtree — visits showing up as
+"work" in the roll-up they produced, and an ancestry walk that has to filter them back
+out. Two axes, two edge types, no overlap.
+
+**When a `blocks` edge is right:** only when *another bead is genuinely gated on this
+conversation* — the canonical snippet's commented `--blocks` line
+(`mol-visit.toml:53-54`). A stewardship visit filed by a phase checkpoint is the
+normal case for that: the checkpoint's downstream work waits on the ratification.
+Blocking is a deliberate, per-case statement about *other* work; it is never the
+lineage link.
+
+**Conclusion.** The shape is forced twice over: core routing permits nothing but a
+separate routed bead, and F-06 permits nothing but a `tracks` edge to reach it. Neither
+is a style choice.
+
+> *Implementation note for whoever builds this:* `agents/converse/prompt.template.md:13`
+> still describes a visit as *"a child of its subject"* — loose wording that predates
+> F-06 and now reads as an instruction to add the forbidden edge. The prompt's own
+> filing rule points at the marked block (which is correct), so nothing is broken today,
+> but the sentence should be reworded when that file is next touched. Out of scope here:
+> this bead is design-only.
 
 ---
 
@@ -311,13 +446,14 @@ and must not be designed.
 
 | Axis | Encodes | Mechanism |
 |---|---|---|
-| **Continuation group** | *conversation identity* — which thread this turn belongs to | `gc.continuation_group` |
+| **Continuation group** | *conversation identity* — which thread this visit belongs to | `gc.continuation_group` |
 | **Hierarchy** | *work structure* — what this bead is part of | `parent-child` deps |
+| **Lineage** | *what this visit is about* — non-blocking | `tracks` (§4) |
 
 - **An epic spans MANY conversations. It does not have one.**
 - **The epic itself largely has one thread — its own group.** Resuming a conversation
-  with the epic = **file a new turn bead into the EPIC'S group**. That is the
-  stewardship turn; the two are the same act.
+  with the epic = **file a new visit bead into the EPIC'S group**. That is the
+  stewardship visit; the two are the same act.
 - **A unit of work spun up under the epic gets a DIFFERENT group** — its own
   conversation, not the epic's.
 - **A child knows it belongs to the epic through its PROMPT, not by sharing a group.**
@@ -325,12 +461,12 @@ and must not be designed.
 ### Why the superseded lean was wrong
 
 Not merely inconvenient — it collapses the two axes, and the collapse costs exactly
-what v2 was built to save. If group = epic, then every turn about every child lands
+what v2 was built to save. If group = epic, then every visit about every child lands
 in **one** conversation. On a forty-child epic that is one provider context absorbing
 forty threads of unrelated detail — which is the resume-forever context problem
 tk-h9pq5 rejected, reintroduced through the group key instead of through session
 lifetime. The property it was reaching for ("one epic, one mind, full history") is
-real, but it is served by the **stewardship turn's roll-up** (§2), which reconstitutes
+real, but it is served by the **stewardship visit's roll-up** (§2), which reconstitutes
 the epic's state from the record on demand — cold, cheap, and current — rather than by
 holding forty conversations in one context and hoping the relevant one is still in the
 window.
@@ -404,13 +540,13 @@ Draft; wording to be refined during implementation, semantics fixed:
 
 > **If you have an epic ancestor, read its thread's record before deciding. It is your
 > frame: your decisions must be consistent with it. If you find a contradiction, do
-> not resolve it unilaterally — file a stewardship turn on the epic.**
+> not resolve it unilaterally — file a stewardship visit on the epic.**
 
 **The final sentence is the load-bearing one.** It is the **escalation path** from a
 child conversation up to the epic thread, and it is what makes the hierarchy *real
 rather than decorative*: without it, "you belong to an epic" is a fact the child can
-read and nothing it can act on. And it introduces no new primitive — *file a turn bead
-into the epic's group* is the same single act as §3's triggers and as "resume the epic
+read and nothing it can act on. And it introduces no new primitive — *run `gate-visit`
+against the epic* is the same single act as §3's triggers and as "resume the epic
 conversation."
 
 Note the symmetry with §3's event discriminator: child-level events do not reach the
@@ -426,6 +562,10 @@ place that judgment can be made well.
 $ gc bd dep list tk-23wdf --direction=down -t parent-child --json
 tk-yhwfv  [epic]  Context budget: audit and reduce always-on prompt context…
 ```
+
+The walk is clean precisely because visits do not ride this axis (§4): everything a
+`parent-child` walk returns is work, so the climb terminates on the epic rather than
+wandering into conversation beads.
 
 Two implementation notes for whoever builds this:
 
@@ -461,7 +601,7 @@ addition proportionate:
    the size of the `run-operator` block it is modeled on — a handful of lines, not a
    section.
 2. **Inject only where it can fire.** An agent that never claims a bead under an epic,
-   or that has no authority to file a turn, pays for nothing. Layer 3's per-agent
+   or that has no authority to file a visit, pays for nothing. Layer 3's per-agent
    granularity (`[[patches.agent]]` with `dir` + `name`) is exactly the right knob, and
    the ledger's per-agent table is how to choose the list.
 3. **Measure it against the ledger before landing.** The method in
@@ -478,32 +618,42 @@ unilaterally — it surfaces it. This section is that surfacing.
 
 | Surface | Change | Built from |
 |---|---|---|
-| Stewardship turn description template | **New** — the §2 prep contract, authored in a formula | turn-filing convention (tk-h9pq5) |
-| `turn_kind` (`event`\|`stewardship`) on turn beads | **New** — dedup key for the §3 trigger precondition | bead metadata (free-form, no migration) |
-| Stewardship trigger formula(s) | **New** — three entry points, one filing action | `gc bd create` + `gc.run_target`→`gc.routed_to` |
+| Stewardship visit description template | **New** — the §2 prep contract, authored in a formula | the `-d` body of the canonical `gate-visit` snippet (`mol-visit.toml:36-55`) |
+| `visit_kind` (`event`\|`stewardship`) on visit beads | **New** — read by the §3 phase-checkpoint trigger | bead metadata (free-form, no migration) |
+| Stewardship trigger formula(s) | **New** — three entry points, one filing action | `gate-visit` snippet, copied with its markers |
 | Epic-awareness fragment | **New** — protocol clause + escalation rule | `template-fragments/` + `inject_fragments_append` |
-| `task_kind=conversation`, the conversation role, reaper skip, warm/cold continuity, Helm rewire | **Unchanged** — a stewardship turn is a conversation turn | tk-h9pq5 |
+| `task_kind=visit`, the `gate-visit` snippet (incl. its `tracks` edge), the converse role and its loop, warm/cold continuity, **ordinary orphan recovery**, Helm rewire | **Unchanged** — a stewardship visit is an ordinary visit | `mol-visit.toml`, `agents/converse/`, `mol-witness-patrol.toml`, tk-h9pq5 |
+| One-live-visit-per-subject rule | **Unchanged** — reused as §3's shared precondition | `mol-triage-recurrence.toml:88-90`, `agents/converse/prompt.template.md:24-33` |
 | `gc.continuation_group` semantics | **Unchanged** — and explicitly *not* widened to epics | core |
-| `parent-child` deps | **Unchanged** — already the hierarchy axis | core |
+| `parent-child` deps | **Unchanged** — already the hierarchy axis, and kept free of visits | core |
 
 ---
 
 ## Trade-offs and Decisions
 
-- **Turn kind over a second agent.** (§1.) Extensibility at zero config cost and
-  per-visit posture, at the price of turn-description authoring discipline. Formulas
+- **Visit kind over a second agent.** (§1.) Extensibility at zero config cost and
+  per-visit posture, at the price of visit-description authoring discipline. Formulas
   are where that discipline lives.
-- **`turn_kind` earns its keep on dedup alone.** (§1.) If dedup were not needed, the
-  description would carry the whole contract and no new key would be justified. Stated
-  this way so a future reader can retire the key if the trigger design changes.
+- **`visit_kind` earns its keep on the phase-checkpoint trigger alone.** (§1, §3.) The
+  dedup argument this spec originally made for it is already served group-wide by the
+  shipped one-live-visit rule. Stated plainly so a future reader can **retire the key**
+  if the checkpoint trigger is dropped or changes shape.
+- **`tracks`, not `parent-child`, for the visit→subject link.** (§4b.) Costs the
+  intuition that a conversation "belongs to" its subject in the dep graph; buys
+  claimability on blocked and arrested subjects (F-06) and keeps the hierarchy axis
+  clean for §2's roll-up and §5's ancestry walk.
+- **Ordinary orphan recovery, no reaper skip.** (§1.) Deviates from tk-h9pq5 Phase 2
+  and follows the shipped port (spine-port D4): a died-mid-hold stewardship visit
+  returns to the pool and is re-prepped against a *current* subtree, which is better
+  than reviving a stale roll-up.
 - **Orthogonal axes over group-per-epic.** (§5.) Operator ruling; the roll-up serves
   "one epic, one mind" better than a shared context does, and without the context bill.
 - **Escalation is a judgment, not a route.** (§3, §5.) Child events do not
   auto-propagate to the epic. Costs some latency on genuinely epic-level news that a
   child under-escalates; buys the epic thread's coherence, and the child holds the
   context needed to make the call.
-- **One recommendation, not a menu.** (§2.) A menu returns the synthesis to the
-  operator, which is the thing the turn exists to do for them.
+- **One recommendation, not a menu.** (§2.) A menu hands the synthesis back to the
+  operator, which is the thing the visit exists to do for them.
 - **Fragment injection over prompt forking.** (§5.) Already the city's idiom; the
   alternative (per-agent prompt copies) is the drift-generating pattern this pack
   avoids by policy.
@@ -513,16 +663,21 @@ unilaterally — it surfaces it. This section is that surfacing.
 ## Risks and Mitigations
 
 - **Roll-up quality degrades with subtree size.** Forty children is a long read;
-  contradiction detection is best-effort (§2). *Mitigation:* the turn states what it
-  read and what it did not; phase-scoped stewardship turns (roll up one phase, not the
+  contradiction detection is best-effort (§2). *Mitigation:* the visit states what it
+  read and what it did not; phase-scoped stewardship visits (roll up one phase, not the
   whole epic) are the natural escape hatch and need no new mechanism.
 - **Trigger storms on a busy epic.** Three independent triggers on one subtree.
-  *Mitigation:* the §3 open-turn precondition, which is why `turn_kind` exists;
-  triggers append to the open turn rather than filing beside it.
+  *Mitigation:* the shipped one-live-visit-per-subject rule (§3), which already bounds
+  the epic to one conversation at a time; triggers skip and resurface rather than
+  stacking.
+- **A stewardship visit whose session dies mid-hold loses its roll-up.** *Mitigation:*
+  by design — recovery returns it to the pool and the fresh session recomputes the
+  roll-up from the record (§1). The cost is one re-prep; the alternative (a skip clause)
+  strands it assigned to a dead session.
 - **Always-on context cost.** (Cost section.) *Mitigation:* protocol-only fragment,
   per-agent injection, measured delta against the landed ledger before landing.
 - **The escalation clause is instruction-dependent, and instruction-dependent remedies
-  fail silently.** A child that ignores "file a stewardship turn" produces no error —
+  fail silently.** A child that ignores "file a stewardship visit" produces no error —
   the epic simply never hears. *Mitigation:* prefer a structural backstop where one
   exists — the staleness event in §3 fires on a quiet subtree regardless of whether any
   child escalated, so the epic's blind spot is bounded by N days rather than unbounded.
@@ -534,25 +689,29 @@ unilaterally — it surfaces it. This section is that surfacing.
 
 ## Implementation Plan
 
-Sequenced after tk-h9pq5's Phase 1 (the role + the turn spine), which this depends on
-entirely. Each phase independently shippable; none requires a schema migration.
+Sequenced after tk-h9pq5's Phase 1 (the role + the visit spine), which this depends on
+entirely — and which has shipped as the port. Each phase independently shippable; none
+requires a schema migration.
 
-**Phase A — The stewardship turn description (the contract).** Author the §2 prep
-contract as a formula-owned description template; add `turn_kind`. **Gate:** file a
-stewardship turn on one real epic → the role produces all four buckets plus exactly one
-recommendation, then holds; the roll-up's ready/blocked/stale counts match an
-independent `bd` query of the same subtree.
+**Phase A — The stewardship visit description (the contract).** Author the §2 prep
+contract as a formula-owned `-d` body for the canonical `gate-visit` snippet; add
+`visit_kind`. **Gate:** file a stewardship visit on one real epic → the role produces
+all four buckets plus exactly one recommendation, then holds; the roll-up's
+ready/blocked/stale counts match an independent `bd` query of the same subtree; the
+filed bead passes `assets/scripts/gate-visit.test.sh` (tracks edge, no parent-child,
+`task_kind=visit`, rig-qualified pool).
 
 **Phase B — Triggers (§3).** The operator one-step formula first (it is the direct
 bead-host replacement and is exercised by hand); then the phase-checkpoint formula;
 then the aggregate-state event formula last, since it is the one that can storm.
-**Gate:** each trigger files exactly one turn; a second trigger firing against an open
-stewardship turn appends rather than files.
+**Gate:** each trigger files exactly one visit; with a visit already live on the epic,
+the operator trigger files nothing, the event trigger files nothing **and stamps
+nothing**, and the checkpoint re-fires after that visit closes.
 
 **Phase C — Epic-awareness fragment (§5).** The protocol clause + escalation rule; the
 per-agent injection list chosen from the ledger. **Gate:** a bead under an epic reports
 its epic ancestor from a fresh claim without being told the epic id, and a seeded
-contradiction produces a stewardship turn on the epic rather than a unilateral
+contradiction produces a stewardship visit on the epic rather than a unilateral
 resolution. Measured prompt delta recorded against `context-budget-ledger.md`.
 
 **Definition of done (composite):** Phase A gate (roll-up correctness, automated
@@ -567,12 +726,12 @@ operator-judged) on one real epic.
    parameter with no principled derivation here. Best answered by observing real epics;
    start deliberately long (a week) so the event trigger is the backstop it is meant to
    be rather than a source of noise.
-2. **Does a phase-scoped stewardship turn need its own group?** If phase roll-ups become
+2. **Does a phase-scoped stewardship visit need its own group?** If phase roll-ups become
    routine on large epics, a phase may be "large enough to be its own conversation" —
    the same judgment as "should this be an epic." The orthogonal model already permits
    it; whether it is wanted is an operating question, not a design one.
 3. **How do the mayor and mechanik relate to epic threads?** Carried forward unresolved
-   from tk-h9pq5's Open Question 2. Stewardship turns sharpen it: if an epic's own
+   from tk-h9pq5's Open Question 2. Stewardship visits sharpen it: if an epic's own
    thread proposes the next move, the mayor's dispatch role over that epic narrows.
    Still a v1.5 question, still not to be pre-specified.
 4. **Is contradiction detection worth any mechanical assist?** §2 argues it is
@@ -585,9 +744,12 @@ operator-judged) on one real epic.
 ## Non-goals
 
 - **No implementation.** Design only, per the bead.
-- **No second agent.** Stewardship is a turn kind (§1); proposing a stewardship agent
+- **No second agent.** Stewardship is a visit kind (§1); proposing a stewardship agent
   is the thing this spec argues against.
-- **No revision of tk-h9pq5.** Its reframe, role contract, continuity model, reaper
-  skip, and attention rewire are settled and assumed.
+- **No revision of tk-h9pq5.** Its reframe, role contract, continuity model, and
+  attention rewire are settled and assumed. Where the port deviated from it (D4, the
+  reaper skip), this spec follows the port and says so (§1) rather than re-opening it.
+- **No new edge type, and no change to the `gate-visit` snippet.** A stewardship visit
+  is filed by the shipped block, verbatim (§1, §4b).
 - **No queue/suspend policy.** Still deferred (tk-h9pq5 Q3).
 - **No `gc.epic_id`.** Explicitly an optimization, not part of this design (§5).
