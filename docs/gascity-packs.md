@@ -49,9 +49,9 @@ Choose by **what the formula does**, not by version number:
   prompt-driven coordination and patrol loops where one agent reads the steps
   and self-pours the next cycle.
 - **v2** — a runtime-orchestrated **graph of independently-routable step beads**;
-  the engine is the orchestrator. It buys `check` / `retry` / `drain` / `tally`,
-  scope checks, a `workflow-finalize` sink, and per-step routing
-  (`gc.run_target`) to many agents and scale-from-zero pools.
+  the engine is the orchestrator. It buys `check` / `retry` / `drain` /
+  `on_complete` / `timeout`, scope checks, a `workflow-finalize` sink, and
+  per-step routing (`gc.run_target`) to many agents and scale-from-zero pools.
 
 **For new orchestration work — default v2** (understanding-formulas, *Choosing a
 Compiler Contract*): fan-out over a runtime-discovered set, multi-lane review
@@ -80,7 +80,7 @@ doctor` warns and tells you to switch (formula-spec-v2, *Conformance →
 Opt-in surface* / *Deprecated surfaces*). No `[requires]` table at all means
 **v1** (the default).
 
-Graph-only constructs — `check`, `retry`, `drain`, `on_complete`, `tally`, and
+Graph-only constructs — `check`, `retry`, `drain`, `on_complete`, `timeout`, and
 reserved `gc.*` step metadata — require the v2 declaration; a formula that uses
 them without it fails to compile. `formula_compiler` is the only `[requires]`
 axis; an unknown axis is a hard error.
