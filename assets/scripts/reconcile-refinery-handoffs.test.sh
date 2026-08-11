@@ -75,7 +75,7 @@ case "${1:-}" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list)
-        if printf '%s\n' "$@" | grep -q -- '--type=session'; then
+        if grep -q -- '--type=session' <<< "$(printf '%s\n' "$@")"; then
           cat "$SESSION_DB"
         else
           # The handoff enumeration: open, non-epic, carrying metadata.branch.

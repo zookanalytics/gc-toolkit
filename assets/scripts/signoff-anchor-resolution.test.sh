@@ -116,7 +116,7 @@ REVIEW_UPDATE="$(awk '
 # tk-ynz4b): $WORK on a first handoff, the existing anchor on a rework
 # hand-back — never unconditionally $WORK, or a rework's signoff would stamp
 # check.<name> on the rework bead instead of the anchor the merge skill gates on.
-printf '%s' "$REVIEW_UPDATE" | grep -q -- '--set-metadata anchor_bead="\$GATING_ANCHOR"' \
+grep -q -- '--set-metadata anchor_bead="\$GATING_ANCHOR"' <<< "$REVIEW_UPDATE" \
   && ok "(E) dispatch stamps anchor_bead=\$GATING_ANCHOR atomically in the review-bead update batch" \
   || bad "(E) dispatch must stamp --set-metadata anchor_bead=\"\$GATING_ANCHOR\" in the review-bead update batch"
 
@@ -126,10 +126,10 @@ printf '%s' "$REVIEW_UPDATE" | grep -q -- '--set-metadata anchor_bead="\$GATING_
 #     since the awk above grabs the FIRST review-bead update (the pre-open one),
 #     REVIEW_UPDATE is that batch. The completion path (resolution snippet tested
 #     above) and the fail-closed gate both depend on anchor_bead being here too. -
-printf '%s' "$REVIEW_UPDATE" | grep -qF -- '--set-metadata review_branch="$BRANCH"' \
+grep -qF -- '--set-metadata review_branch="$BRANCH"' <<< "$REVIEW_UPDATE" \
   && ok "(E2) pre-open dispatch stamps review_branch=\$BRANCH (reviewer compare-range + template discriminator)" \
   || bad "(E2) pre-open dispatch must stamp --set-metadata review_branch=\"\$BRANCH\""
-printf '%s' "$REVIEW_UPDATE" | grep -qF -- '--set-metadata review_base="$TARGET"' \
+grep -qF -- '--set-metadata review_base="$TARGET"' <<< "$REVIEW_UPDATE" \
   && ok "(E3) pre-open dispatch stamps review_base=\$TARGET" \
   || bad "(E3) pre-open dispatch must stamp --set-metadata review_base=\"\$TARGET\""
 

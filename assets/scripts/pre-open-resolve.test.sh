@@ -422,14 +422,14 @@ has '^polecat/feat-a$' "$TMP/created" \
 grep -q '^bead-GREEN	501$' "$TMP/fliplog" \
   && ok "(GREEN) flipped to pull_request with the NEW pr_number (501)" \
   || bad "(GREEN) flip records new pr_number (got: $(cat "$TMP/fliplog"))"
-printf '%s\n' "$OUT1" | grep -q "bead-GREEN opened PR#501" \
+grep -q "bead-GREEN opened PR#501" <<< "$OUT1" \
   && ok "(GREEN) summary names the opened PR" || bad "(GREEN) open summary (got: $OUT1)"
 
 # (STALE) marker at an old head -> held, NOT created, NOT flipped.
 has '^polecat/feat-b$' "$TMP/created" && bad "(STALE) must NOT create a PR" \
                                       || ok "(STALE) no PR created"
 grep -q '^bead-STALE	' "$TMP/fliplog" && bad "(STALE) must NOT flip" || ok "(STALE) not flipped"
-printf '%s\n' "$OUT1" | grep -q "bead-STALE .* codex not green at live head" \
+grep -q "bead-STALE .* codex not green at live head" <<< "$OUT1" \
   && ok "(STALE) held, reason names the stale marker" || bad "(STALE) hold reason (got: $OUT1)"
 
 # (MISS) no marker -> held.
@@ -466,7 +466,7 @@ grep -q '^bead-HASPR	https://github.com/acme/repo/pull/404$' "$TMP/flipurl" \
   || bad "(URL) existing-PR pr_url (got: $(cat "$TMP/flipurl"))"
 
 # Summary counters: 1 opened, 1 flipped, 2 held.
-printf '%s\n' "$OUT1" | grep -q "1 opened, 1 flipped, 2 held" \
+grep -q "1 opened, 1 flipped, 2 held" <<< "$OUT1" \
   && ok "run 1 summary reports 1 opened, 1 flipped, 2 held" || bad "run 1 summary (got: $OUT1)"
 
 # --- Run 2: convergence. Flipped anchors left the pre_open_gate set. -----------
@@ -867,7 +867,7 @@ grep -q '^bead-PW	pr_url	https://github.com/acme/repo/pull/701$' "$TMP/meta" \
 grep -q "merge_result is still" "$TMP/errpw2" \
   && ok "(PW2) the un-thrown switch is reported for an operator" \
   || bad "(PW2) must report that merge_result did not persist (err: $(cat "$TMP/errpw2"))"
-printf '%s\n' "$(cat "$TMP/outpw2")" | grep -q "0 opened" \
+grep -q "0 opened" "$TMP/outpw2" \
   && ok "(PW2) the pass does not count an incomplete flip as opened" \
   || bad "(PW2) summary must not report it as opened (got: $(cat "$TMP/outpw2"))"
 

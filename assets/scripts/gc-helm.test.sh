@@ -138,22 +138,22 @@ line_for() { grep -E "^bd update $1( |\$)" "$UP" || true; }
 # (RELEASE) the parked anchor still gets the full reopen/unassign/clear-route bundle.
 A="$(line_for A-PARKED)"
 [ -n "$A" ] && ok "(RELEASE) anchor A-PARKED was updated" || bad "(RELEASE) anchor never updated"
-printf '%s' "$A" | grep -q -- '--status=open' \
+grep -q -- '--status=open' <<< "$A" \
   && ok "(RELEASE) anchor reopened (--status=open)" || bad "(RELEASE) anchor --status=open (got: $A)"
-printf '%s' "$A" | grep -q 'gc.proactive_reaction=1' \
+grep -q 'gc.proactive_reaction=1' <<< "$A" \
   && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
-printf '%s' "$A" | grep -q 'gc.routed_to=' \
+grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
-printf '%s' "$A" | grep -q 'gc.takeaway_by=proactive' \
+grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
 # (AFFINE) affine step -> routed_to + assignee + session_affinity, in ONE update.
 eq "$(grep -c '^bd update s-load' "$UP" || true)" "1" \
   "(ATOMIC) s-load quiesced in exactly one update (no split-update race)"
 SL="$(line_for s-load)"
-if printf '%s' "$SL" | grep -q -- '--unset-metadata gc.routed_to' \
-   && printf '%s' "$SL" | grep -q -- '--assignee' \
-   && printf '%s' "$SL" | grep -q -- '--unset-metadata gc.session_affinity'; then
+if grep -q -- '--unset-metadata gc.routed_to' <<< "$SL" \
+   && grep -q -- '--assignee' <<< "$SL" \
+   && grep -q -- '--unset-metadata gc.session_affinity' <<< "$SL"; then
   ok "(AFFINE) affine step -> routed_to + assignee + session_affinity all cleared"
 else
   bad "(AFFINE) affine step must clear all three pins (got: $SL)"
@@ -161,11 +161,11 @@ fi
 
 # (POOL) unassigned+routed step -> routed_to only.
 SI="$(line_for s-impl)"
-printf '%s' "$SI" | grep -q -- '--unset-metadata gc.routed_to' \
+grep -q -- '--unset-metadata gc.routed_to' <<< "$SI" \
   && ok "(POOL) unassigned+routed step -> routed_to cleared" || bad "(POOL) routed_to cleared (got: $SI)"
-printf '%s' "$SI" | grep -q -- '--assignee' \
+grep -q -- '--assignee' <<< "$SI" \
   && bad "(POOL) must not clear an assignee that was already empty" || ok "(POOL) no spurious assignee clear"
-printf '%s' "$SI" | grep -q 'gc.session_affinity' \
+grep -q 'gc.session_affinity' <<< "$SI" \
   && bad "(POOL) must not clear a session_affinity that was absent" || ok "(POOL) no spurious affinity clear"
 
 # (FINAL) workflow-finalize keeps its control-dispatcher route.
@@ -189,9 +189,9 @@ SN="$(line_for s-nonmol)"
 [ -n "$SN" ] \
   && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the parked anchor IS quiesced" \
   || bad "(CONTRACT) graph.v2 step of another formula must be quiesced (got: none)"
-printf '%s' "$SN" | grep -q -- '--unset-metadata gc.routed_to' \
+grep -q -- '--unset-metadata gc.routed_to' <<< "$SN" \
   && ok "(CONTRACT) its route is cleared" || bad "(CONTRACT) route cleared (got: $SN)"
-printf '%s' "$SN" | grep -q -- '--assignee' \
+grep -q -- '--assignee' <<< "$SN" \
   && ok "(CONTRACT) its assignee is cleared" || bad "(CONTRACT) assignee cleared (got: $SN)"
 
 # (NOTV2) a bead with NO gc.step_ref is not a graph.v2 step at all, so it is
@@ -213,14 +213,14 @@ printf '%s' "$SN" | grep -q -- '--assignee' \
 
 # (NOCLOSE dynamic) no STEP update ever closes a bead or rewrites its status.
 STEP_UPDATES="$(grep -E '^bd update s-' "$UP" || true)"
-if printf '%s' "$STEP_UPDATES" | grep -qE -- '--status|--close|bd close'; then
+if grep -qE -- '--status|--close|bd close' <<< "$STEP_UPDATES"; then
   bad "(NOCLOSE) a step update rewrote status or closed a bead (DANGER clause)"
 else
   ok "(NOCLOSE) no step status rewrite / close (DANGER clause honored)"
 fi
 
 # (REPORT) the run announces the steps it quiesced.
-printf '%s' "$OUT" | grep -q 'quiesced husk step s-load' \
+grep -q 'quiesced husk step s-load' <<< "$OUT" \
   && ok "(REPORT) run reports the affine step it quiesced" || bad "(REPORT) run reports s-load (out: $OUT)"
 
 # (STATIC NOCLOSE) the quiesce block itself contains no close/status-write cmd.

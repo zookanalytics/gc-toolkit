@@ -123,7 +123,12 @@ PANE1="$(gc_call gc session peek "$DEACON" --lines 1)"
 # --- 1. pane -----------------------------------------------------------------
 PANE="$(gc_call gc session peek "$DEACON" --lines "$PEEK_LINES")"
 
-if printf '%s' "$PANE" | grep -qiE "$BUSY_RE"; then
+# A here-string, never a `printf ... | grep -qiE` pipeline (tk-zfjg9): `grep -q`
+# exits at its first match and SIGPIPEs the writer, which `pipefail` promotes to
+# 141 — so a busy deacon reads as idle and the pass goes on to open a coldness
+# episode against a session that is mid-turn. $PANE is PEEK_LINES of pane text,
+# comfortably past the buffer size where the race starts to fire.
+if grep -qiE -- "$BUSY_RE" <<< "$PANE"; then
     clear_state ""            # mid-turn: unambiguous, and cheapest to detect
     exit 0
 fi

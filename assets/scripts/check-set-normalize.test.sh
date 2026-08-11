@@ -65,7 +65,7 @@ NORM="$(awk '
   || bad "normalization NOT extractable — markers missing or renamed"
 
 # The extracted snippet must be template-free so it can be executed directly.
-printf '%s' "$NORM" | grep -q '{{' \
+grep -q '{{' <<< "$NORM" \
   && bad "extracted snippet still contains a {{template}} — it must be env-driven" \
   || ok "extracted snippet is template-free (env-driven)"
 

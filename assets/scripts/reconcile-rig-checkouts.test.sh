@@ -81,7 +81,7 @@ export PATH="$TMP/bin:$PATH" FAKE_RIGS_JSON="$TMP/rigs.json" FAKE_LEDGER="$TMP/l
 bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/alpha" rev-parse HEAD)" "$REMOTE_HEAD" "clean-behind rig advances to origin"
 eq "$(git -C "$TMP/beta"  rev-parse HEAD)" "$BETA_DIVERGED" "diverged rig is not mutated"
-git -C "$TMP/beta" log --oneline | grep -q c3-local && ok "diverged rig keeps local commit" || bad "diverged rig keeps local commit"
+grep -q c3-local < <(git -C "$TMP/beta" log --oneline) && ok "diverged rig keeps local commit" || bad "diverged rig keeps local commit"
 eq "$(open_count beta)"  "1" "diverged rig produces exactly one escalation"
 eq "$(open_count alpha)" "0" "advanced rig produces no escalation"
 eq "$(open_count loomington)" "0" "HQ root is excluded (not reconciled)"

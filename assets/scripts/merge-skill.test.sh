@@ -1038,7 +1038,7 @@ if [ "$1" = "api" ]; then
       # host/repository identity is the reviews arm's story, not this one's.
       rbranch="${PATH_ARG#*/rules/branches/}"
       if [ -n "${FAKE_PROTFAIL:-}" ] \
-         && printf '%s\n' "$FAKE_PROTFAIL" | tr ',' '\n' | grep -qxF "$rbranch"; then
+         && grep -qxF "$rbranch" <<< "${FAKE_PROTFAIL//,/$'\n'}"; then
         printf '{"message":"Not Found","status":"404"}\n'; exit 1
       fi
       rctx=""
@@ -1072,7 +1072,7 @@ if [ "$1" = "api" ]; then
       # can report either and the script unions them.
       bbranch="${PATH_ARG#*/branches/}"
       if [ -n "${FAKE_PROTFAIL:-}" ] \
-         && printf '%s\n' "$FAKE_PROTFAIL" | tr ',' '\n' | grep -qxF "$bbranch"; then
+         && grep -qxF "$bbranch" <<< "${FAKE_PROTFAIL//,/$'\n'}"; then
         printf '{"message":"Not Found","status":"404"}\n'; exit 1
       fi
       cctx=""
@@ -1098,7 +1098,7 @@ if [ "$1" = "api" ]; then
       # the tail (where a superseding CHANGES_REQUESTED lives) is missing.
       failnow=""
       if [ -n "${FAKE_APIFAIL:-}" ] \
-         && printf '%s\n' "$FAKE_APIFAIL" | tr ',' '\n' | grep -qxF "$prnum"; then
+         && grep -qxF "$prnum" <<< "${FAKE_APIFAIL//,/$'\n'}"; then
         failnow=1
       fi
       # THE REVIEW HISTORY IS PER REPOSITORY TOO, and it is the evidence the veto
@@ -1153,7 +1153,7 @@ case "$1 $2" in
     case ",$fields," in
       *,statusCheckRollup,*)
         if [ -n "${FAKE_ROLLUPFAIL:-}" ] \
-           && printf '%s\n' "$FAKE_ROLLUPFAIL" | tr ',' '\n' | grep -qxF "$num"; then
+           && grep -qxF "$num" <<< "${FAKE_ROLLUPFAIL//,/$'\n'}"; then
           echo "could not read rollup" >&2; exit 1
         fi ;;
     esac
@@ -1368,11 +1368,11 @@ case "$2" in
         # parseable, and projecting to zero rows, so every guard except the
         # array-shape one waves it through as "no child holds this PR".
         if [ -n "${FAKE_QUERYFAIL:-}" ] \
-           && printf '%s\n' "$FAKE_QUERYFAIL" | tr ',' '\n' | grep -qxF "$prnum"; then
+           && grep -qxF "$prnum" <<< "${FAKE_QUERYFAIL//,/$'\n'}"; then
           printf '[]\n'; exit 1
         fi
         if [ -n "${FAKE_PROBEOBJ:-}" ] \
-           && printf '%s\n' "$FAKE_PROBEOBJ" | tr ',' '\n' | grep -qxF "$prnum"; then
+           && grep -qxF "$prnum" <<< "${FAKE_PROBEOBJ//,/$'\n'}"; then
           printf '{"error":"ledger unavailable"}\n'; exit 0
         fi
         # A FAILED child lookup, scoped to one PR so every other case is unaffected.

@@ -206,7 +206,13 @@ while IFS="$(printf '\t')" read -r cid ctarget; do
   # Rig scope: only graduate convoys present in this rig's ledger. -F (fixed
   # string) because convoy IDs contain dots (e.g. tk-6d0vb.1.2) — an unescaped
   # dot in a regex match would be a wildcard and could cross-match another id.
-  printf '%s\n' "$RIG_CONVOYS" | grep -qxF "$cid" || { skipped=$((skipped + 1)); continue; }
+  #
+  # A here-string, never a `printf ... | grep -qxF` pipeline (tk-zfjg9): `grep -q`
+  # exits at its first match and SIGPIPEs the writer over the ids that FOLLOW the
+  # match, which `pipefail` (set at :61) promotes to 141 — so the `||` fires and a
+  # convoy that IS in this rig's ledger is silently counted as skipped, decided by
+  # nothing but its position in a list capped at --limit=200.
+  grep -qxF -- "$cid" <<< "$RIG_CONVOYS" || { skipped=$((skipped + 1)); continue; }
 
   # One validated read serves both gate (a) and the idempotency check. FAIL
   # CLOSED on anything untrustworthy — an unreadable convoy bead is one whose

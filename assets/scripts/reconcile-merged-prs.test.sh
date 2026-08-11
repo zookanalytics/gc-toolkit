@@ -503,7 +503,7 @@ if [ "$1" = "api" ]; then
       # the tail is missing.
       failnow=""
       if [ -n "${FAKE_REVIEWS_FAIL:-}" ] \
-         && printf '%s\n' "$FAKE_REVIEWS_FAIL" | tr ',' '\n' | grep -qxF "$prnum"; then
+         && grep -qxF "$prnum" <<< "${FAKE_REVIEWS_FAIL//,/$'\n'}"; then
         failnow=1
       fi
       out=""
@@ -792,7 +792,7 @@ case "$2" in
           [ "$prev" = "--status" ] && sts="$a"
           prev="$a"
         done
-        visible() { printf '%s' ",$sts," | grep -q ",$1,"; }
+        visible() { grep -q ",$1," <<< ",$sts,"; }
         # A bead's PR key -> the metadata object that names it. fork_pr_url holds a
         # URL, so the number only reaches the script through the parse.
         keyjson_for() {
@@ -967,7 +967,7 @@ case "$2" in
     # Capture the dispatched BODY (tk-jufvl). The stale-gate re-review carries the
     # review METHOD on stdin via --body-file -; recording it per-bead is what lets
     # the assertions prove the re-review names a method instead of a bare title.
-    if printf '%s' "$*" | grep -q -- '--body-file -'; then
+    if grep -q -- '--body-file -' <<< "$*"; then
       cat > "$FAKE_BODIES/$cid" 2>/dev/null || true
     fi
     printf '{"id":"%s"}\n' "$cid" ;;
@@ -1009,7 +1009,7 @@ case "$2" in
     # to the log — and the command reports failure. Models the ledger dropping the
     # stale-gate route step so the verify-before-arm path (arm_stale_gate) and the
     # next-pass in-flight repair can be exercised. Scoped to the one run that sets it.
-    if [ -n "${FAKE_ROUTE_FAIL:-}" ] && printf '%s' "$*" | grep -q "gc.routed_to=$FAKE_ROUTE_FAIL"; then
+    if [ -n "${FAKE_ROUTE_FAIL:-}" ] && grep -q "gc.routed_to=$FAKE_ROUTE_FAIL" <<< "$*"; then
       exit 1
     fi
     # A signoff_dismissed write on FAKE_MARK_NOT_DURABLE's bead reports SUCCESS
@@ -1017,7 +1017,7 @@ case "$2" in
     # reason that write is read back. Scoped to one bead so the other anchors in
     # the same run still retract normally.
     if [ -n "${FAKE_MARK_NOT_DURABLE:-}" ] && [ "$id" = "$FAKE_MARK_NOT_DURABLE" ] \
-       && printf '%s' "$*" | grep -q 'signoff_dismissed='; then
+       && grep -q 'signoff_dismissed=' <<< "$*"; then
       exit 0
     fi
     # Inject a PARTIAL route write: the batched update carries both halves of the
@@ -1372,7 +1372,7 @@ hasin "$OUT1" 'ANCHORLESS PR#301' \
   || bad "(12) open PR whose bead is CLOSED is reported as anchorless (got: $OUT1)"
 eq "$(grep -c 'anchorless open PR#301' "$TMP/mail")" "1" \
    "(12) anchorless PR escalated to mayor once"
-grep '^dead-1' "$TMP/updates" | grep -q 'anchorless_flagged=301' \
+grep -q 'anchorless_flagged=301' < <(grep '^dead-1' "$TMP/updates") \
   && ok "(12) escalation bounded by an anchorless_flagged marker on the closed bead" \
   || bad "(12) escalation bounded by an anchorless_flagged marker (got: $(grep dead-1 "$TMP/updates" || true))"
 # Resolution must land on the bead that OPENED the PR — not a review bead (no
@@ -1392,7 +1392,7 @@ grep -q 'dead-1, review-1, rework-1' "$TMP/mailbody" \
 # Detect + surface ONLY: the arm must not close, reopen, or otherwise dispose.
 has '^dead-1$' "$TMP/closed" && bad "(12) anchorless arm must NOT close anything" \
                              || ok "(12) anchorless arm closes nothing (detect + surface only)"
-grep '^dead-1' "$TMP/updates" | grep -q 'status' \
+grep -q 'status' < <(grep '^dead-1' "$TMP/updates") \
   && bad "(12) anchorless arm must NOT reopen the closed bead" \
   || ok "(12) anchorless arm never reopens the closed bead (disposition is the operator's)"
 # A draft is still invisible to every automated path, so it is still a finding —
@@ -1502,7 +1502,7 @@ hasin "$OUT1" 'ANCHORLESS PR#405.*anchor dead-5 is CLOSED' \
   || bad "(36) fork_pr-keyed closed anchor resolved to dead-5 (got: $(printf '%s\n' "$OUT1" | grep 'PR#405' || true))"
 eq "$(grep -c 'anchorless open PR#405' "$TMP/mail")" "1" \
    "(36) resolved fork_pr-keyed anchor escalates once (the unwidened path could not)"
-grep '^dead-5' "$TMP/updates" | grep -q 'anchorless_flagged=405' \
+grep -q 'anchorless_flagged=405' < <(grep '^dead-5' "$TMP/updates") \
   && ok "(36) escalation bounded by a marker on the fork_pr-keyed closed bead" \
   || bad "(36) anchorless_flagged marker on dead-5 (got: $(grep dead-5 "$TMP/updates" || true))"
 
@@ -1543,7 +1543,7 @@ hasin "$OUT1" 'ANCHORLESS PR#407' \
 hasin "$OUT1" 'ANCHORLESS PR#407.*no bead in any state references it' \
   && ok "(38) a foreign closed bead does not resolve as our PR's dead anchor" \
   || bad "(38) PR#407 must fall to the no-bead arm (got: $(printf '%s\n' "$OUT1" | grep 'PR#407' || true))"
-grep '^dead-foreign-407' "$TMP/updates" | grep -q 'anchorless_flagged' \
+grep -q 'anchorless_flagged' < <(grep '^dead-foreign-407' "$TMP/updates") \
   && bad "(38) a foreign closed bead must NEVER be stamped anchorless_flagged for our PR" \
   || ok "(38) no metadata written to the foreign closed bead"
 eq "$(grep -c 'anchorless open PR#407' "$TMP/mail")" "0" \
@@ -1665,7 +1665,7 @@ for shape in error-rc1 error-rc0 array-rc1; do
   MAIL_BEFORE=$(wc -l < "$TMP/mail" | tr -d ' ')
   UPD_BEFORE=$(wc -l < "$TMP/updates" | tr -d ' ')
   OUT_S="$(FAKE_LIVE_SHAPE="$shape" bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>"$TMP/err39")"
-  printf '%s\n' "$OUT_S" | grep -q 'ANCHORLESS' \
+  grep -q 'ANCHORLESS' <<< "$OUT_S" \
     && bad "(39/$shape) an unreadable live-bead read must flag nothing (fail closed)" \
     || ok "(39/$shape) unreadable live-bead read ($shape) flags nothing"
   eq "$(wc -l < "$TMP/mail" | tr -d ' ')" "$MAIL_BEFORE" \
@@ -1724,7 +1724,7 @@ for shape in error-rc1 error-rc0 array-rc1 bad-array object-map; do
      "(23/$shape) still no child for the branch a keeper froze"
   eq "$(grep -c 'Rebase PR#217' "$TMP/created")" "0" \
      "(23/$shape) still no child for the shared-branch PR"
-  printf '%s\n' "$OUT8" | grep -q '0 stale-base rebases routed' \
+  grep -q '0 stale-base rebases routed' <<< "$OUT8" \
     && ok "(23/$shape) routes no rebases at all" \
     || bad "(23/$shape) must route zero rebases (got: $OUT8)"
 done
