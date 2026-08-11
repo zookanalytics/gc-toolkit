@@ -138,10 +138,22 @@ never assemble a half-built branch. A child contributes to the branch however it
 needs: one commit, a dozen, a rebase, or none (a child can exist only to group
 or to mark a sub-unit). There is no one-bead-one-commit rule.
 
+That inference runs **one way only**, and the count cannot check it. Closed does
+not distinguish a child closed *because* it landed from one closed having landed
+nothing — a probe, a duplicate its owner disposed of, anything closed before
+close-on-land was the contract. For those, "all children closed" is **vacuously**
+true and says nothing about the branch. So completion is necessary but not
+sufficient: graduation also requires the ledger to record **at least one merge
+onto the convoy branch** — some bead carrying `merged_target=<branch>` with
+`merge_result=merged`, the merged-truth pair. One landing is enough; demanding it
+of every child would refuse the ordinary case of a child disposed of without
+landing. A convoy that has none is reported as vacuous and held, and an operator
+who knows better lands it deliberately with `gc convoy land` (tk-q0uxl).
+
 The convoy graduates **through this same machine, one level up**: once all
-children are closed, a reconcile pass assigns the convoy to the refinery with
-its branch and `target=main`, and it walks `open → PR → check-set → merge →
-closed` like any bead. No coordinator drives graduation.
+children are closed and that evidence exists, a reconcile pass assigns the convoy
+to the refinery with its branch and `target=main`, and it walks `open → PR →
+check-set → merge → closed` like any bead. No coordinator drives graduation.
 
 ## The states
 

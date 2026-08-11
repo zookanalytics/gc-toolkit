@@ -44,6 +44,14 @@ convoy bead to itself and opens a human-approved
 [docs/work-bead-state-machine.md](../docs/work-bead-state-machine.md)).
 No manual graduation bead and no `gc convoy land` are needed.
 
+Graduation also requires that at least one child actually **landed** on
+the integration branch. Children closed without landing anything — a
+probe, a placeholder, a duplicate you disposed of — leave "all children
+closed" vacuously true, and the pass reports the convoy as vacuous
+rather than opening a PR for a branch nothing tracked. If a convoy is
+genuinely complete but has no landing on record, land it deliberately
+with `gc convoy land`.
+
 **Per-invocation override (alternative):** instead of (or in addition
 to) the convoy target, `gc sling <target> <bead> --var
 base_branch=integration/<convoy-id>` points a single dispatch at any
