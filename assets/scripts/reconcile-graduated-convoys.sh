@@ -15,6 +15,41 @@
 # stays OPEN (escalated by reconcile-merged-prs.sh, not closed), so it keeps the
 # convoy incomplete and blocks graduation until a human resolves it.
 #
+# THE INTERLOCK'S LIMIT: that reading is one-directional, and the completion count
+# cannot check it. "Closed" does not distinguish a member closed BECAUSE it landed
+# from a member closed having landed nothing — a probe/chore closed seconds after
+# creation, a duplicate its owner disposed of, anything closed before close-on-land
+# (PR #163) was the contract. For those the count is VACUOUSLY true: N/N closed
+# says nothing whatever about what is on the branch.
+#
+# The observed failure (tk-q0uxl, 2026-08-09): convoy tk-aezem4
+# (integration/smoke-tests) graduated on a sole member, chore tk-8coyao, created
+# and closed ten seconds apart in May having landed nothing. "1/1 closed" had been
+# true since the day the convoy was born, so it had been graduation-eligible for
+# three months; the branch's four real commits were tracked by no member bead at
+# all. The branch was 171 commits behind main and its copy of a file main had since
+# rewritten conflicted, so landing it would have reverted five merged PRs.
+#
+# NON-VACUOUS COMPLETION (the guard): graduate only when the LEDGER records at
+# least one merge ONTO the integration branch — some bead carrying
+# merged_target=<branch> AND merge_result=merged, the merged-truth pair written by
+# the one writer of it (mol-refinery-patrol's merge-push, in direct and mr mode
+# alike). Keyed on the BRANCH rather than on convoy membership for the same reason
+# gate (b) is: tk-aezem4's real commits belonged to no member bead, so a membership
+# walk is precisely the thing that was missing. ONE landing suffices — demanding it
+# of EVERY member would refuse every convoy that legitimately disposes of a member
+# without landing it (tk-44xkw, folded into a sibling by operator decision and
+# closed carrying no merge_result, is a member of a live convoy here).
+#
+# Two neighbouring remedies were weighed and NOT taken. A STALENESS guard ("hold
+# if the branch is more than N commits behind target") would put git and a
+# threshold policy into a pass that is otherwise pure ledger reads, and it aims at
+# a different hazard — a genuinely-landed branch gone stale, which the refinery's
+# existing rebase/conflict arms route rather than land silently. A CONTRACT EPOCH
+# ("closed before the close-on-land cutover is not proof of merge") is subsumed: a
+# pre-cutover close carries no merged_target/merge_result either, so the guard
+# above already refuses it — and without a hardcoded date that ages out.
+#
 # SCOPE: OWNED integration convoys in THIS rig only.
 #   - Owned-ness + member progress live in ConvoyFields, surfaced ONLY by
 #     `gc convoy list` (NOT in `gc bd show` metadata). `gc convoy list` is
@@ -87,6 +122,17 @@ fi
 # branch-owning as `blocked`. Re-derive if `bd statuses` grows a new status.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
+# LIVE_STATUSES plus `closed`, for the landing probe — which asks the opposite
+# question of the branch probe and so needs the opposite half of the ledger.
+# Evidence of a merge lives on a bead that close-on-land CLOSED at that merge, and
+# `gc bd list --metadata-field` returns OPEN beads only unless --status says
+# otherwise: with the flag omitted the same query that matches three landed beads
+# returns zero rows. A live-only landing probe would therefore find nothing ever,
+# and refuse every convoy in the city forever. Spelled as a superset rather than
+# as `closed` alone so a landed bead REOPENED for rework still counts as evidence
+# of what is on the branch — the merge it records happened either way.
+ALL_STATUSES="$LIVE_STATUSES,closed"
+
 # Truthy in the operators' sense: set, and not one of the explicit "off"
 # spellings. Mirrors merge-skill.sh's reading of merge_hold exactly, so a marker
 # that holds a merge there cannot fail to hold a graduation here.
@@ -127,6 +173,52 @@ probe_branch_beads() {
   #     jq's failure would be discarded by the caller's `probe=$(...)` capture.
   out=$(printf '%s' "$raw" \
     | jq -c '.[] | {id, hold: (.metadata.merge_hold // ""), rhold: (.metadata.rebase_hold // "")}' 2>/dev/null) \
+    || return 1
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return 0
+}
+
+# The ids of every bead recording a MERGE onto <branch> — the ledger's answer to
+# "has anything ever actually landed here?", which is what "all members closed" is
+# taken to imply and cannot itself establish.
+#
+# The two-field pair is asked as ONE flag plus a jq test, not as two
+# `--metadata-field` flags. Repeated flags do AND today, but `--status` next door
+# keeps only its LAST value, so the CLI's answer to a repeated flag is per-flag
+# convention rather than a contract this script can lean on. If merged_target's
+# flag ever lost that race the query would degrade to `merge_result=merged` alone —
+# every landed bead in the rig, 127 of them here — which is NON-EMPTY for every
+# branch and would silently retire this guard. The selective half goes in the flag
+# (few beads name any one integration branch); the half whose loss fails OPEN is
+# tested here, where it cannot be traded away.
+#
+# Same fail-closed contract as the probes below: NON-ZERO on any read the caller
+# cannot trust, which it MUST treat as "I cannot tell" and NOT as "nothing landed".
+# The directions differ, though — an untrustworthy read here is not dangerous in
+# itself (its fail-open direction, "evidence exists", merely restores the old
+# behaviour), but reporting it as a VACUOUS convoy would name a permanent,
+# operator-actionable defect on the strength of a transient ledger blip.
+probe_landed_beads() {
+  local raw rc out
+  raw=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "merged_target=$1" \
+    --status "$ALL_STATUSES" --limit=0 --json 2>/dev/null)
+  rc=$?
+  # (1) The command's own verdict, checked even when it wrote to stdout.
+  [ "$rc" -eq 0 ] || return 1
+  # (2) No output at all — a broken `gc bd list`, as distinct from "[]".
+  [ -n "$raw" ] || return 1
+  # (3) The payload must be the ARRAY of beads we asked for, rejecting an error
+  #     object that arrived with a ZERO exit status. Load-bearing exactly as in
+  #     probe_branch_beads: `.[]` iterates an OBJECT's values happily, so an
+  #     id-keyed envelope would project into well-formed rows.
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  # (4) The projection's own status, captured first: emitted straight to stdout,
+  #     jq's failure would be discarded by the caller's `landed=$(...)` capture.
+  #     `tostring` before `ascii_downcase` because a writer that stores JSON yields
+  #     a boolean, on which ascii_downcase ABORTS the program — an error this call
+  #     discards, and one that would turn every landing into no landing.
+  out=$(printf '%s' "$raw" \
+    | jq -r '.[] | select(((.metadata.merge_result // "") | tostring | ascii_downcase) == "merged") | .id' 2>/dev/null) \
     || return 1
   [ -n "$out" ] && printf '%s\n' "$out"
   return 0
@@ -179,9 +271,14 @@ probe_convoy_meta() {
 CONVOYS=$(gc convoy list --json 2>/dev/null)
 [ -n "$CONVOYS" ] || { echo "reconcile-graduated-convoys: convoy list unavailable"; exit 0; }
 
-# Candidate = targets the integration boundary AND all members closed (== all
-# merged, per the interlock above) AND has members. The graduation predicate is
-# the target + completion, not ownership per se; `owned` is the core label that
+# Candidate = targets the integration boundary AND all members closed AND has
+# members. CANDIDATE, not decision: this is the interlock's completion count, and
+# the count alone cannot tell a member closed on a merge from one closed having
+# landed nothing — the non-vacuous-completion gate in the loop settles that from
+# the ledger, on the branch.
+#
+# The candidate predicate is the target + completion, not ownership per se;
+# `owned` is the core label that
 # carries the integration target, kept as the underlying mechanism that scopes
 # this to integration convoys (per-sling auto-convoys are un-owned and carry no
 # integration/* target). progress.total>0 guards an empty convoy; closed==total
@@ -199,7 +296,7 @@ CANDS=$(printf '%s' "$CONVOYS" | jq -r '
 RIG_CONVOYS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --type=convoy --status=open \
   --limit=200 --json 2>/dev/null | jq -r '.[].id' 2>/dev/null)
 
-graduated=0; skipped=0; held=0
+graduated=0; skipped=0; held=0; vacuous=0
 while IFS="$(printf '\t')" read -r cid ctarget; do
   [ -n "${cid:-}" ] || continue
 
@@ -290,6 +387,35 @@ while IFS="$(printf '\t')" read -r cid ctarget; do
     skipped=$((skipped + 1)); continue
   fi
 
+  # NON-VACUOUS COMPLETION: the last precondition before acting. Does the ledger
+  # record anything ever LANDING on this branch — the thing "all members closed" is
+  # read as implying and cannot itself establish?
+  #
+  # Checked LAST, after every veto that names another actor. Those describe live
+  # contention someone is already inside of — an operator's freeze, a graduation
+  # already in flight — and that is what a human looking at this convoy right now
+  # needs told. Vacuity is a standing property of the convoy's own bookkeeping: it
+  # does not change while contention is resolved, and it is reported the moment the
+  # contention clears. Order costs nothing either way — both are one ledger read.
+  #
+  # FAIL CLOSED on an unreadable probe, in both of its senses: do not graduate on a
+  # read that cannot show the evidence, and do not ANNOUNCE a convoy vacuous on one
+  # either. Costs an idle pass; the pass is convergent and asks again.
+  if ! landed=$(probe_landed_beads "$ctarget"); then
+    echo "reconcile-graduated-convoys: $cid — landing probe on '$ctarget' failed; not graduated (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  # Zero landings from a probe that worked: the convoy is closed-complete and its
+  # branch is untracked. Neither a transient skip nor an operator gate but a
+  # standing defect in the convoy's own bookkeeping, so it is counted apart —
+  # a population of these is then visible in the summary instead of buried among
+  # idempotency skips, which is exactly how one sat eligible for three months.
+  if [ -z "$landed" ]; then
+    echo "reconcile-graduated-convoys: $cid — no bead records a merge onto '$ctarget' (none carries merge_result=merged with that merged_target), so its members closing proves nothing about that branch; not graduated"
+    echo "reconcile-graduated-convoys: $cid — if '$ctarget' is genuinely complete, land it deliberately with \`gc convoy land\`"
+    vacuous=$((vacuous + 1)); continue
+  fi
+
   # Assign the convoy bead to the refinery as an ordinary mr-mode work bead:
   #   branch         = the integration branch to merge (source)
   #   target         = <main> (destination) — overwrites the child-inheritance
@@ -311,5 +437,5 @@ while IFS="$(printf '\t')" read -r cid ctarget; do
   fi
 done <<< "$CANDS"
 
-echo "reconcile-graduated-convoys: $graduated graduating, $skipped skipped, $held held"
+echo "reconcile-graduated-convoys: $graduated graduating, $skipped skipped, $held held, $vacuous vacuous"
 exit 0

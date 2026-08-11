@@ -55,6 +55,33 @@
 #        holds — `ascii_downcase` aborts the jq program on a boolean, and that
 #        error is discarded, so an uncast comparison drops the veto silently.
 #        Boolean `false` still reads as off.
+# and NON-VACUOUS COMPLETION — "all members closed" is read as "all members
+# MERGED", an inference the count cannot check, and a member closed having landed
+# nothing makes it vacuously true forever (tk-q0uxl):
+#   (17) THE OBSERVED FAILURE (tk-aezem4 / tk-8coyao): a complete owned convoy
+#        whose integration branch has NO landing recorded anywhere in the ledger
+#        is NOT graduated, and is counted apart from ordinary skips so a
+#        population of them is visible rather than buried.
+#   (18) merged_target ALONE is not evidence: it is stamped when the PR is
+#        PUBLISHED (pre-open-resolve.sh, patrol merge-push), so a bead naming the
+#        branch with merge_result=pull_request records an OPEN PR, not a merge.
+#   (19) ONE landing suffices — a convoy that legitimately disposes of members
+#        without landing them (tk-44xkw, folded into a sibling by operator
+#        decision) still graduates on the members that did land.
+#   (20) the probe reads CLOSED beads: close-on-land closes a bead AT its merge,
+#        and `gc bd list --metadata-field` returns open beads only unless --status
+#        says otherwise — a live-only probe finds no landing ever and refuses
+#        every convoy in the city. The stub honors --status, so this is falsifiable.
+#   (21) ...and not closed beads ONLY: a landed bead REOPENED for rework still
+#        records the merge that put its work on the branch.
+#   (22) marker TYPE and CASE, as (16) one field over: a merge_result stored as a
+#        JSON boolean must not abort the projection and take the genuine landing
+#        rows with it, and "MERGED" counts.
+#   (23) FAIL CLOSED, four ways, as (13): a landing probe that fails WITH OUTPUT
+#        yields zero rows, which reads as "nothing ever landed here" — and would
+#        report a healthy convoy as permanently defective on a transient blip.
+#        Each shape pins a different guard and none can be deleted without a red
+#        test; a failed probe counts as a SKIP (retry next pass), never as vacuous.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,6 +120,16 @@ mkdir -p "$TMP/bin"
 #   tk-shownull  owned, integration/*, 2/2  -> bead show 'null' -> fail closed
 #   tk-showbad   owned, integration/*, 2/2  -> bead show [1,2] -> fail closed
 #   tk-showgone  owned, integration/*, 2/2  -> bead show '[]' (absent) -> fail closed
+#   tk-vacuous   owned, integration/*, 1/1  -> nothing ever landed on the branch
+#   tk-pubonly   owned, integration/*, 2/2  -> branch named by an OPEN PR, no merge
+#   tk-mixed     owned, integration/*, 3/3  -> GRADUATE (one member landed, others
+#                                             closed without landing)
+#   tk-reopened  owned, integration/*, 2/2  -> GRADUATE (landing bead reopened)
+#   tk-landtype  owned, integration/*, 2/2  -> GRADUATE (boolean + "MERGED" rows)
+#   tk-landfail  owned, integration/*, 2/2  -> landing error object -> fail closed
+#   tk-landerr   owned, integration/*, 2/2  -> landing '[]' + exit 1 -> fail closed
+#   tk-landbad   owned, integration/*, 2/2  -> landing [1,2] -> fail closed
+#   tk-landmap   owned, integration/*, 2/2  -> landing id-keyed object -> fail closed
 cat > "$TMP/convoys" <<'C'
 tk-ready|true|integration/ready|3|3
 tk-half|true|integration/half|1|2
@@ -117,6 +154,15 @@ tk-showrc|true|integration/showrc|2|2
 tk-shownull|true|integration/shownull|2|2
 tk-showbad|true|integration/showbad|2|2
 tk-showgone|true|integration/showgone|2|2
+tk-vacuous|true|integration/vacuous|1|1
+tk-pubonly|true|integration/pubonly|2|2
+tk-mixed|true|integration/mixed|3|3
+tk-reopened|true|integration/reopened|2|2
+tk-landtype|true|integration/landtype|2|2
+tk-landfail|true|integration/landfail|2|2
+tk-landerr|true|integration/landerr|2|2
+tk-landbad|true|integration/landbad|2|2
+tk-landmap|true|integration/landmap|2|2
 C
 
 # This rig's convoy ledger (rig-scoped `gc bd list --type=convoy`): all tk-* but
@@ -145,6 +191,15 @@ tk-showrc
 tk-shownull
 tk-showbad
 tk-showgone
+tk-vacuous
+tk-pubonly
+tk-mixed
+tk-reopened
+tk-landtype
+tk-landfail
+tk-landerr
+tk-landbad
+tk-landmap
 R
 
 # Per-convoy bead metadata (gc bd show source): id|branch|merge_hold|rebase_hold
@@ -178,6 +233,45 @@ integration/boolhold|tk-boolholdsib|blocked|true|null|1
 integration/boolfree|tk-boolfreesib|open|false|null|1
 B
 
+# Beads recording a merge ONTO an integration branch (the `gc bd list
+# --metadata-field merged_target=<b>` probe source): branch|id|status|merge_result|json
+# `json` non-empty emits merge_result as RAW JSON rather than as a string.
+#
+# Every genuine landing row is CLOSED, because close-on-land is what closes it —
+# so a probe that forgot --status (the CLI returns OPEN beads only by default)
+# sees none of these and every convoy below reads as vacuous. Cases (20)/(23) are
+# only falsifiable because the stub honors --status exactly as the CLI does.
+#
+#   tk-mixedland    — one landing in a convoy whose other members closed without
+#                     landing anything: the disposal case (tk-44xkw). ONE suffices.
+#   tk-reopland     — a landed bead REOPENED for rework. The merge it records
+#                     happened; a closed-only probe would miss it.
+#   tk-pubopen      — names the branch with merge_result=pull_request: merged_target
+#                     is stamped when the PR is PUBLISHED, so this is an OPEN PR.
+#                     The one row that must NOT read as evidence.
+#   tk-typebool     — merge_result as a JSON BOOLEAN. `ascii_downcase` aborts the
+#                     whole jq program on it, and that error is discarded, so an
+#                     uncast projection drops tk-typecase alongside it and the
+#                     convoy reads as vacuous.
+#   tk-typecase     — "MERGED": the case-folded spelling ascii_downcase is there for.
+cat > "$TMP/landed" <<'L'
+integration/ready|tk-readyland|closed|merged|
+integration/offspell|tk-offspellland|closed|merged|
+integration/mixed|tk-mixedland|closed|merged|
+integration/reopened|tk-reopland|in_progress|merged|
+integration/pubonly|tk-pubopen|open|pull_request|
+integration/landtype|tk-typebool|closed|true|1
+integration/landtype|tk-typecase|closed|MERGED|
+L
+
+# Deliberately ABSENT from the table above: every branch whose convoy is vetoed by
+# an operator gate or a branch-probe guard (mhold, rhold, sib, dup, boolhold,
+# boolfree, probe*, show*). Those convoys never reach the landing probe, because
+# the vacuity check runs LAST — after every veto that names another actor, which
+# is what a human looking at the convoy right now needs told. Withholding their
+# rows is what pins that order: move the check any earlier and cases (9)-(16) go
+# red instead of silently reporting the wrong reason.
+
 : > "$TMP/assigned"
 
 # --- gc stub: convoy list / bd list (convoy ledger + branch probe) / show / update
@@ -199,10 +293,12 @@ esac
 [ "$1" = "bd" ] || exit 0
 case "$2" in
   list)
-    # Two different `bd list` callers: the rig convoy ledger (--type=convoy) and
-    # the branch probe (--metadata-field branch=<b>). Discriminate on the flag,
-    # and capture --status so the probe can honor it — a probe that ignored the
-    # status filter would make the LIVE_STATUSES case (11) unfalsifiable.
+    # Three different `bd list` callers: the rig convoy ledger (--type=convoy),
+    # the branch probe (--metadata-field branch=<b>), and the landing probe
+    # (--metadata-field merged_target=<b>). Discriminate on the flag and its KEY,
+    # and capture --status so both probes can honor it — a stub that ignored the
+    # status filter would make the LIVE_STATUSES case (11) and the ALL_STATUSES
+    # case (20) equally unfalsifiable.
     mfield=""; statuses=""; prev=""
     for a in "$@"; do
       case "$prev" in
@@ -215,6 +311,56 @@ case "$2" in
       esac
       prev="$a"
     done
+    # The real CLI returns OPEN beads only when --status is absent. Model that,
+    # so a probe that omits the flag gets the CLI's answer and not a free pass.
+    [ -n "$statuses" ] || statuses="open"
+    case "$mfield" in
+      merged_target=*)
+        br="${mfield#merged_target=}"
+        # Injected ledger failures, exactly as for the branch probe below and for
+        # the same reason: `gc ... --json` reports its own errors as a non-empty
+        # JSON object on stdout, and every shape here then yields zero landing
+        # rows — which reads as "nothing ever landed on this branch", i.e. reports
+        # a healthy convoy as permanently defective. Each shape defeats every
+        # guard but one. (`[]` with a zero exit is NOT here: that is the genuine
+        # "nothing landed" answer, which tk-vacuous exercises.)
+        case "$br" in
+          # The observed shape: a JSON error OBJECT plus a non-zero exit.
+          integration/landfail) printf '{"error":"invalid --metadata-field","schema_version":1}\n'; exit 1 ;;
+          # A well-formed EMPTY array with a non-zero exit. Isolates the
+          # exit-status guard: the payload is exactly the value that legitimately
+          # means "nothing landed", so nothing else can reject it — and the two
+          # readings differ, since one is a skip and the other a standing defect.
+          integration/landerr)  printf '[]\n'; exit 1 ;;
+          # An array of non-objects: passes the type guard, then blows up the
+          # projection. Isolates the jq-status guard.
+          integration/landbad)  printf '[1, 2]\n'; exit 0 ;;
+          # An OBJECT whose values are bead-shaped — a --json envelope keyed by id
+          # rather than a list. `.[]` iterates an object's values happily, so the
+          # projection SUCCEEDS and emits a landing row; only "is the payload an
+          # array?" rejects it. The row carries merge_result=merged, so the pass
+          # would graduate on it and the test cannot go green by accident.
+          integration/landmap)
+            printf '{"tk-x": {"id": "tk-x", "metadata": {"merged_target": "%s", "merge_result": "merged"}}}\n' \
+              "$br"; exit 0 ;;
+        esac
+        out=""
+        while IFS='|' read -r fbr fid fstatus fresult fjson; do
+          [ -n "$fbr" ] || continue
+          [ "$fbr" = "$br" ] || continue
+          grep -qF -- ",$fstatus," <<< ",$statuses," || continue
+          if [ -n "$fjson" ]; then
+            obj=$(jq -n --arg id "$fid" --arg b "$fbr" --argjson m "$fresult" \
+              '{id:$id, metadata:{merged_target:$b, merge_result:$m}}')
+          else
+            obj=$(jq -n --arg id "$fid" --arg b "$fbr" --arg m "$fresult" \
+              '{id:$id, metadata:{merged_target:$b, merge_result:$m}}')
+          fi
+          if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+        done < "$FAKE_LANDED"
+        printf '[%s]\n' "$out"
+        exit 0 ;;
+    esac
     if [ -n "$mfield" ]; then
       br="${mfield#branch=}"
       # Injected ledger failures. `gc ... --json` reports its own errors as a
@@ -328,7 +474,7 @@ export PATH="$TMP/bin:$PATH"
 export GC_AGENT="gc-toolkit/gc-toolkit.refinery"
 export FAKE_CONVOYS="$TMP/convoys" FAKE_RIG_CONVOYS="$TMP/rigconvoys" \
        FAKE_META="$TMP/meta" FAKE_ASSIGNED="$TMP/assigned" \
-       FAKE_BRANCH_BEADS="$TMP/branchbeads"
+       FAKE_BRANCH_BEADS="$TMP/branchbeads" FAKE_LANDED="$TMP/landed"
 
 assigned()     { grep -q "^$1	" "$TMP/assigned" 2>/dev/null; }
 assigned_arg() { grep -q -- "$2" < <(grep "^$1	" "$TMP/assigned" 2>/dev/null); }
@@ -429,13 +575,56 @@ grep -q "tk-boolfreesib already owns branch 'integration/boolfree'" <<< "$OUT1" 
   && ok "(16) boolean false reads as OFF (falls through to the unheld-owner arm)" \
   || bad "(16) boolean false must not read as held (got: $OUT1)"
 
-eq "$(wc -l < "$TMP/assigned" | tr -d ' ')" "2" "(1) exactly the two ungated convoys graduated"
-grep -q "2 graduating" <<< "$OUT1" \
-  && ok "run 1 summary reports 2 graduating" \
+# --- Non-vacuous completion. ---------------------------------------------------
+assigned tk-vacuous && bad "(17) convoy with nothing landed on its branch must NOT graduate" \
+                    || ok "(17) complete convoy, no landing recorded on the branch -> not graduated"
+grep -q "tk-vacuous — no bead records a merge onto 'integration/vacuous'" <<< "$OUT1" \
+  && ok "(17) vacuous convoy names the branch and what is missing" \
+  || bad "(17) vacuous veto reason (got: $OUT1)"
+grep -q "gc convoy land" <<< "$OUT1" \
+  && ok "(17) veto points at the deliberate manual path" \
+  || bad "(17) vacuous veto must name the operator's override (got: $OUT1)"
+
+assigned tk-pubonly && bad "(18) merged_target from a PUBLISHED PR must not read as a merge" \
+                    || ok "(18) merged_target + merge_result=pull_request is not landing evidence"
+
+assigned tk-mixed && ok "(19) one landed member is enough (others closed without landing)" \
+                  || bad "(19) a convoy that disposes of members without landing them must still graduate"
+assigned tk-reopened && ok "(21) a REOPENED landed bead still records its merge" \
+                     || bad "(21) landing evidence must not be restricted to closed beads"
+# (20) needs no assertion of its own: it is pinned by every graduating case above.
+# Their landing rows are CLOSED and the stub returns open beads only when --status
+# is absent, so a probe that dropped the flag reports all of them vacuous. (21)
+# pins the other half — tk-reopened's row is in_progress, so `--status closed`
+# alone fails too. Only the superset passes both.
+assigned tk-landtype && ok "(22) JSON-boolean merge_result does not abort the projection" \
+                     || bad "(22) boolean merge_result must not take the genuine landing rows with it"
+
+assigned tk-landfail && bad "(23/error-obj) fail closed: error-object landing probe must NOT graduate" \
+                     || ok "(23/error-obj) fail closed: JSON error object -> not graduated"
+assigned tk-landerr  && bad "(23/array-rc1) fail closed: non-zero landing probe must NOT graduate" \
+                     || ok "(23/array-rc1) fail closed: '[]' with non-zero exit -> not graduated"
+assigned tk-landbad  && bad "(23/bad-array) fail closed: unprojectable landing payload must NOT graduate" \
+                     || ok "(23/bad-array) fail closed: array of non-objects -> not graduated"
+assigned tk-landmap  && bad "(23/object-map) fail closed: id-keyed envelope must NOT graduate" \
+                     || ok "(23/object-map) fail closed: object whose values are bead-shaped -> not graduated"
+grep -q "landing probe on 'integration/landfail' failed" <<< "$OUT1" \
+  && ok "(23) failed landing probe is reported, not swallowed" \
+  || bad "(23) failed landing probe report (got: $OUT1)"
+grep -q "no bead records a merge onto 'integration/landerr'" <<< "$OUT1" \
+  && bad "(23) a FAILED probe must not be reported as a vacuous convoy" \
+  || ok "(23) a failed probe is a retry, never a standing-defect report"
+
+eq "$(wc -l < "$TMP/assigned" | tr -d ' ')" "5" "(1) exactly the five ungated convoys graduated"
+grep -q "5 graduating" <<< "$OUT1" \
+  && ok "run 1 summary reports 5 graduating" \
   || bad "run 1 summary graduating count (got: $OUT1)"
 grep -q "4 held" <<< "$OUT1" \
   && ok "run 1 summary reports 4 held (operator gates counted apart from skips)" \
   || bad "run 1 summary held count (got: $OUT1)"
+grep -q "2 vacuous" <<< "$OUT1" \
+  && ok "(17) vacuous convoys counted apart from skips (a population is visible)" \
+  || bad "run 1 summary vacuous count (got: $OUT1)"
 
 # --- Run 2: convergence. tk-ready now carries branch (assignment persisted) ----
 # so the second pass must not re-graduate it.

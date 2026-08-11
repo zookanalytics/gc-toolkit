@@ -80,7 +80,7 @@ description = "Whether to delete source branches after merge"
 default = "true"
 
 [vars.integration_branch_auto_land]
-description = "System-auto convoy graduation. When an OWNED integration convoy's members are all closed (== all merged, under close-on-land), the refinery assigns the convoy bead to itself and lands integration->main through the same work-bead machine (a human-approved PR). Default on; set 'false' as a kill-switch. Non-owned auto-convoys (per-sling tracking bundles) are never affected."
+description = "System-auto convoy graduation. When an OWNED integration convoy's members are all closed AND the ledger records at least one merge onto its integration branch, the refinery assigns the convoy bead to itself and lands integration->main through the same work-bead machine (a human-approved PR). Default on; set 'false' as a kill-switch. Non-owned auto-convoys (per-sling tracking bundles) are never affected."
 default = "true"
 
 [vars.event_timeout]
@@ -375,8 +375,15 @@ ALL closed it assigns the convoy bead to the refinery as an ordinary mr-mode
 work bead (`branch=integration/<id>`, `target={{target_branch}}`,
 `merge_strategy=mr`); the next iteration lands integration->main behind a
 human-approved PR. The interlock: under close-on-land a child closes only on
-merge, so "all closed" == "all merged" — graduation can never assemble a
-half-built integration branch. Owned-only and rig-scoped — non-owned
+merge, so "all closed" reads as "all merged" and graduation cannot assemble a
+half-built integration branch. That reading is one-directional, though, and the
+count cannot check it — a member closed having landed NOTHING (a probe, a
+duplicate the owner disposed of, anything closed before close-on-land was the
+contract) makes it vacuously true forever. So completion is not sufficient: the
+pass also requires the ledger to record at least one merge ONTO the branch
+(some bead carrying `merged_target=<branch>` with `merge_result=merged`), and
+reports a convoy that has none as vacuous rather than graduating it (tk-q0uxl).
+Owned-only and rig-scoped — non-owned
 auto-convoys (per-sling tracking bundles) are never touched. Idempotent: a
 convoy already carrying `branch` (graduation initiated) is skipped. See
 docs/work-bead-state-machine.md.
@@ -526,7 +533,8 @@ if [ -n "$SCRIPTS_DIR" ]; then
     --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex" \
     || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
   # (b) Convoy graduation: assign each OWNED integration convoy whose members
-  #     are all closed (== all merged) to the refinery for an integration->main
+  #     are all closed, and whose branch the ledger records a merge onto, to the
+  #     refinery for an integration->main
   #     PR. Runs AFTER (a) so the wake that closes the last child graduates the
   #     convoy in the same pass. Gated on integration_branch_auto_land (default
   #     "true"; "false" is the kill-switch) and -x (importer rigs that have not
@@ -2131,8 +2139,11 @@ exactly where "all members closed" first becomes true. Pass (c) runs right
 after (b) on that same wake and assigns the now-complete OWNED convoy to the
 refinery (`branch=integration/<id>`, `target={{target_branch}}`,
 `merge_strategy=mr`) to land integration->main behind a human-approved PR.
-Owned-only, rig-scoped, idempotent. No coordinator and no `gc convoy land` in
-the loop. Nothing to do in this step.
+Owned-only, rig-scoped, idempotent — and non-vacuous: "all members closed" is
+necessary but NOT sufficient, since a member closed having landed nothing makes
+it vacuously true, so the pass also requires the ledger to record a merge onto
+the branch (tk-q0uxl). No coordinator and no `gc convoy land` in the loop.
+Nothing to do in this step.
 
 **FORBIDDEN**: Landing integration branches via raw `git merge`/`git push`.
 The convoy-bead assignment in pass (c) is the ONLY path.
