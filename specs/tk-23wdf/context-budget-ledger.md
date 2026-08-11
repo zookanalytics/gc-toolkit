@@ -386,12 +386,19 @@ the claude pool. Still worth its own bead so the rule is correct if that happens
 (cross-reference `tk-4dvem`); the correct rule is almost certainly "`pr_number` set
 **and** `task_kind = review`", or the zero-commit fallback alone.
 
-**F5 — two defines are dead, and one is dormant.**
+**F5 — three defines render zero live bytes today, and none is a clean delete: one is pinned by live references, two are dormant agents.**
 
-- `cycle-recycle` (117 B) — **dead**. Referenced by no `inject_fragments_append`
-  list anywhere. The behaviour it names is delivered by `overlays/cycle-recycle/`
-  as a Claude `Stop` hook (`.claude/settings.json` + `hooks/cycle-recycle.sh`);
-  the template define is a leftover. Rendered into zero prompts.
+- `cycle-recycle` (117 B) — **zero live bytes, but not a free delete.** The
+  define is named by no `inject_fragments_append` list, so it renders into zero
+  prompts, and the behaviour it once carried now ships as a Claude `Stop` hook in
+  `overlays/cycle-recycle/` (`.claude/settings.json` + `hooks/cycle-recycle.sh`).
+  But the *file* `template-fragments/cycle-recycle.template.md` is still cited as
+  the canonical policy source by two live artifacts — `heartbeat-no-consent-ui`
+  (a fragment injected into deacon+witness) and `skills/handoff/SKILL.md` — plus
+  the overlay-wiring comments in `pack.toml`. Deleting the file would dangle those
+  pointers, so it is removable only after they are repointed (a follow-up, out of
+  scope for this bead); until then it stays. The define is dead weight; the file is
+  load-bearing.
 - `layered-startup-discovery-boot` (7,798 B) — **dormant, not dead**. Still named
   in `pack.toml`'s boot patch, but boot is retired to `mode = "on_demand"` and
   has no `work_query`, so it never spawns (0 live sessions). Costs 0 live bytes
@@ -400,9 +407,11 @@ the claude pool. Still worth its own bead so the rule is correct if that happens
   operator-spawned only (`work_query = "printf '[]'"`). Real agents, currently
   unspawned.
 
-The distinction matters for the shortlist: deleting a dormant define saves **no
-live bytes**. Only `cycle-recycle` is genuinely removable, and it saves nothing
-either — it is hygiene.
+The distinction matters for the shortlist: none of the three is a live-byte
+saving. Deleting a dormant define saves **no live bytes** — the cost is
+counterfactual, paid only if the agent is revived — and `cycle-recycle`, though it
+too renders zero live bytes, is not even a clean delete, because its file is
+pinned by the live references above. There is no free hygiene delete in this group.
 
 **F6 — the mechanik carries the heaviest gc-toolkit-authored surface after the polecat.**
 
@@ -463,7 +472,7 @@ prompts that actually spawn today.
 | `file-work-records` | 648 | polecat, polecat-codex | **KEEP — reference implementation** | 648 B of always-on text that *names* a 2,148 B on-demand skill. This is the shape the epic wants; do not migrate it, copy it | — |
 | `canonical-self-rename` | 617 | deacon, mayor, mechanik | **KEEP** | small, identity hygiene | — |
 | `operator-next-step-trailing` | 491 | mayor, mechanik, mayor-thread | **KEEP** | small, and the operator-facing agents act on it every reply | — |
-| `cycle-recycle` | **0** | *nothing* | **DELETE** | referenced by no inject list; behaviour ships as an overlay hook (F5) | 0 live B (hygiene) |
+| `cycle-recycle` | **0** | *nothing (define uninjected; file referenced)* | **KEEP — referenced** | define renders zero live bytes, but its file is cited as policy by `heartbeat-no-consent-ui` (deacon+witness) and `skills/handoff`; repoint those before any delete (F5) | 0 live B (not a clean delete) |
 | *(city.toml)* `rebase-conventions` | 11,102 / 11,102 | gascity polecat + refinery | **NARROW** | ~⅓ of it is refinery-only force-push/re-pour policy a polecat cannot act on | ~4,000 B/spawn, gascity only |
 | *(city.toml)* `polecat-patterns` | 5,965 | gascity polecat | **KEEP** | rig-specific and polecat-actionable | — |
 | *(city.toml)* `refinery-rebase-handling` | ~13,600 | gascity refinery | **KEEP** | refinery acts on it every rebase | — |
@@ -476,7 +485,7 @@ Per the epic's hard constraint, every MIGRATE must name the trigger that fires i
 
 | Migration | Mechanical trigger | Status |
 |---|---|---|
-| `polecat-non-impl-done` → review-method delivery for the **codex** pool | the review bead's *description*, emitted by `assets/scripts/review-dispatch-body.sh`; the first-round dispatch at `formulas/mol-refinery-patrol.toml:1693` now emits it too (tk-dy7sb / PR #304), so the channel is fully wired | **KEEP — measured non-saving.** The prerequisite this row once blocked on has landed, but wiring does not make the migration worth doing: the codex pool needs the procedure on 100% of spawns (F1), so moving it into the description relocates the bytes into the same window rather than eliminating them, and codex sessions never compact (`continuation_epoch=1`) so no multiplier applies. Demoted to *explicitly not recommended* — see §7, candidate 2 |
+| `polecat-non-impl-done` → review-method delivery for the **codex** pool | the review bead's *description*, emitted by `assets/scripts/review-dispatch-body.sh`; the first-round dispatch at `formulas/mol-refinery-patrol.toml:1693` now emits it too (tk-dy7sb / PR #304), so the channel is fully wired | **KEEP — measured non-saving.** The prerequisite this row once blocked on has landed, but wiring does not make the migration worth doing: the codex pool needs the procedure on 100% of spawns (F1), so moving it into the description relocates the bytes into the same window rather than eliminating them, and codex sessions almost never compact (`continuation_epoch=1` for 37 of 38 sampled sessions) so no meaningful multiplier applies. Demoted to *explicitly not recommended* — see §7, candidate 2 |
 | `polecat-non-impl-done` → residual non-impl work on the **claude** pool (research/investigation, 21 beads) | none today. These are slung by the mayor/mechanik with a free-text description; no emitter guarantees the method is named | **BLOCKED** — needs a `research-dispatch-body.sh` sibling, or the disposition reduces to NARROW-only with the claude pool losing the procedure for ~2% of its beads |
 
 **The two rows differ now.** The claude row (residual research/investigation work)
@@ -549,10 +558,15 @@ Saving: ~2,000 B/spawn (mechanik) and unquantified (keeper).
 Risk: low, but the keeper number should be measured live before anyone spends
 effort — capture it the next time the keeper wakes.
 
-**6. Delete the `cycle-recycle` define.**
+**6. Do not delete `cycle-recycle` outright — repoint its references first (follow-up).**
 Saving: 0 live bytes.
-Risk: none. Pure hygiene — it removes a file that looks injected and is not,
-which is the kind of thing that costs an auditor an hour.
+The define renders into no prompt, but the file
+`template-fragments/cycle-recycle.template.md` is cited as the canonical policy
+source by `heartbeat-no-consent-ui` (injected into deacon+witness) and
+`skills/handoff/SKILL.md`, so deleting it dangles two live references. Removing it
+cleanly means first repointing those citations — worth a follow-up bead, not the
+one-line hygiene delete an earlier draft assumed (F5).
+Risk: deleting as-is breaks the two references; leaving the file costs nothing.
 
 ### Explicitly not recommended
 
@@ -573,10 +587,12 @@ which is the kind of thing that costs an auditor an hour.
   through the description instead of the system prompt moves the same bytes into
   the same window. This is the exact inverse of candidate 1, whose saving was real
   precisely because 97.7% of claude-pool beads never reach that path. **(2) No
-  compaction multiplier:** sampled codex polecat sessions all carry
-  `continuation_epoch=1` — they wake, run one review, and drain without compacting
-  — so the per-spawn cost is never re-paid (the amplification that would rescue the
-  number, §2, is ~0 here). **(3) Net-negative on storage:** at ~27 review beads/day
+  compaction multiplier:** codex polecat sessions almost never compact — in a
+  38-session sample (2026-08-11, via the command below) 37 carried
+  `continuation_epoch=1` and one had compacted once (epoch 2) — so they typically
+  wake, run one review, and drain at epoch 1, and the per-spawn cost is essentially
+  never re-paid (the amplification that would rescue the number, §2, is ~0 here).
+  **(3) Net-negative on storage:** at ~27 review beads/day
   (28 on 08-11, 31 on 08-10, 21 on 08-09) a ~70 KB payload per description is
   ~2 MB/day of new Dolt description rows, permanently, against the city's standing
   guidance to keep bead volume down. **(4) Highest correctness risk on the list:**
@@ -585,11 +601,23 @@ which is the kind of thing that costs an auditor an hour.
   children, and enforces the round cap — §7 already rated it "a correctness risk,
   not a cost one." The wiring prerequisite it once blocked on has since landed
   (tk-dy7sb / PR #304), which is exactly why leaving it marked "BLOCKED" would now
-  read as "ready to proceed" — the opposite of the conclusion. Reproduce reason (2):
+  read as "ready to proceed" — the opposite of the conclusion. Reproduce reason (2)
+  — codex session beads are ephemeral (not returned by `gc bd list`, which is why an
+  earlier draft's `gc bd list --status=closed … .metadata.template` reproducer
+  silently returned nothing), so reach them through the closed review beads they
+  produced, each recording its producing session in `metadata."gc.session_id"`, then
+  read each session's epoch directly:
   ```bash
-  gc bd list --status=closed --limit 400 --json \
-    | jq -r '[.[] | select((.metadata.template // "") | test("polecat-codex"))
-             | "\(.id) epoch=\(.metadata.continuation_epoch)"] | .[0:10][]'
+  gc bd list --metadata-field task_kind=review --status=closed --limit 40 --json \
+    | jq -r '[.[].metadata."gc.session_id" // empty] | unique | .[]' \
+    | while read -r sid; do
+        gc bd show "$sid" --json \
+          | jq -r '.[0] | select((.metadata.template // "") | test("polecat-codex"))
+                   | .metadata.continuation_epoch'
+      done | sort | uniq -c
+  # 2026-08-11 sample → "37 1" and "1 2": 37 of 38 codex sessions never compacted
+  # (epoch 1), one had compacted once (epoch 2). Change the jq tail to emit
+  # "\(.id) epoch=\(.metadata.continuation_epoch)" to list each session by id.
   ```
 
 ---
@@ -627,5 +655,6 @@ Two premises need adjusting:
    (`gc prime` re-emitting the whole prompt after every compaction); **both effects
    must be measured, not assumed.** The codex-pool migration (candidate 2) now
    passes the first test but fails the second — it runs the non-impl path on every
-   spawn and its sessions do not compact (`continuation_epoch=1`) — which is why it
-   is *explicitly not recommended* (§7) despite its prerequisite having landed.
+   spawn and its sessions almost never compact (`continuation_epoch=1` for 37 of 38
+   sampled sessions) — which is why it is *explicitly not recommended* (§7) despite
+   its prerequisite having landed.
