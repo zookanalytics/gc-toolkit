@@ -33,6 +33,16 @@
 #               operator acts and something is still coming
 #   (CAPCLOSE)  that child closes -> the exception fires on the next wake, so the
 #               deferral above is not a way of disabling R11
+#   (POISON)    a pre-open gate excepted at an OLD head whose dead review is still
+#               open, branch head since moved: the corpse must NOT re-condemn the
+#               new head. It carries no dispatch head, so left open it answers the
+#               worker-lost scan at every later head and re-stamps exception before
+#               the re-arm can fire — the head move is consumed and the operator
+#               escape the design promises never happens. Re-arm, and RETIRE the
+#               corpse so check-set-heal can dispatch a replacement.
+#   (TWIN)      all the dead reviews are retired, not just the first (the scan used
+#               to stop at one, leaving the next to poison the next head), and a
+#               LIVE reviewer on the same anchor is left alone
 #   (PRESTALE)  a pre-open exception bound to a head the branch moved past is
 #               CLEARED: nothing else re-arms a pre-open gate, and check-set-heal
 #               skips its dispatch on `exception@*` without ever resolving a head
@@ -176,7 +186,15 @@ cat > "$TMP/beads.json" <<JSON
 
   {"id":"a-prefix","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-prefix","check.codex":"fixable@oldprefix"}},
 
-  {"id":"a-poststale","status":"open","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"27","check.codex":"exception@oldpost","check.codex.exception_escalated":"oldpost"}}
+  {"id":"a-poststale","status":"open","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"27","check.codex":"exception@oldpost","check.codex.exception_escalated":"oldpost"}},
+
+  {"id":"a-poison","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-poison","check.codex":"exception@oldpoison","check.codex.reason":"worker-lost: review rv-poison held by 'ghost-session' (no live session answers it) and untouched for 99999s > 3600s deadline","check.codex.exception_escalated":"oldpoison"}},
+  {"id":"rv-poison","status":"in_progress","assignee":"ghost-session","heartbeat_at":"$(old_ts 99999)","updated_at":"$(old_ts 99999)","metadata":{"anchor_bead":"a-poison","check_name":"codex"}},
+
+  {"id":"a-twin","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-twin"}},
+  {"id":"rv-twin1","status":"in_progress","assignee":"ghost-session","heartbeat_at":"$(old_ts 99999)","updated_at":"$(old_ts 99999)","metadata":{"anchor_bead":"a-twin","check_name":"codex"}},
+  {"id":"rv-twin2","status":"in_progress","assignee":"ghost-session","heartbeat_at":"$(old_ts 88888)","updated_at":"$(old_ts 88888)","metadata":{"anchor_bead":"a-twin","check_name":"codex"}},
+  {"id":"rv-twinlive","status":"in_progress","assignee":"live-session","heartbeat_at":"$(old_ts 99999)","updated_at":"$(old_ts 99999)","metadata":{"anchor_bead":"a-twin","check_name":"codex"}}
 ]
 JSON
 
@@ -202,6 +220,8 @@ branch:polecat/tk-pre|headpre
 branch:polecat/tk-prestale|headprestale
 branch:polecat/tk-pregreen|headpregreen
 branch:polecat/tk-prefix|headprefix
+branch:polecat/tk-poison|headpoison
+branch:polecat/tk-twin|headtwin
 H
 
 # The live session roster. `ghost-session` is deliberately absent.
@@ -271,6 +291,26 @@ case "${1:-}" in
     id="${1:-}"
     jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$STORE"
     exit 0 ;;
+  close)
+    # `gc bd close <id> --reason "..." [--force]`. ASSIGNEE-GATED like the real one:
+    # a bead held by somebody else is refused without --force. The retirement path
+    # closes reviews whose assignee is a DEAD session — foreign by construction — so
+    # it always lands on the --force retry, and a stub that closed unconditionally
+    # would let a regression in that fallback pass unnoticed.
+    shift
+    id="${1:-}"; shift
+    printf '%s close %s\n' "$id" "$*" >> "$FAKE_UPDATES"
+    forced=""
+    for a in "$@"; do [ "$a" = "--force" ] && forced=1; done
+    assignee=$(jq -r --arg id "$id" '[ .[] | select(.id == $id) | .assignee // "" ] | .[0] // ""' "$STORE")
+    if [ -n "$assignee" ] && [ -z "$forced" ]; then
+      echo "cannot close $id: assignee is \"$assignee\", actor is \"patrol\"; reclaim or use --force to override" >&2
+      exit 1
+    fi
+    tmp=$(mktemp)
+    jq --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$STORE" > "$tmp"
+    mv "$tmp" "$STORE"
+    exit 0 ;;
   update)
     shift
     id="${1:-}"; shift
@@ -331,6 +371,8 @@ run_pass() {
 
 marker() { jq -r --arg id "$1" --arg k "$2" \
   '.[] | select(.id == $id) | .metadata[$k] // "<none>"' "$TMP/beads.json"; }
+bstatus() { jq -r --arg id "$1" \
+  '.[] | select(.id == $id) | .status // "<none>"' "$TMP/beads.json"; }
 
 # ---------------------------------------------------------------------------
 # Run 0 — dry run first, over the untouched fixture: it must change nothing.
@@ -470,6 +512,38 @@ eq "$(marker a-prefix check.codex)" "fixable@oldprefix" "(PREFIX) a stale pre-op
 eq "$(marker a-poststale check.codex)" "exception@oldpost" "(POSTSTALE) a stale POST-open marker is left to reconcile-merged-prs.sh's stale-marker arm"
 hasnt "$TMP/update.log" "a-poststale " "(POSTSTALE) no write at all against it"
 
+# (POISON) THE REGRESSION for the P1 in review tk-bjyld. A pre-open gate excepted
+# at an OLD head, with the dead review that caused it STILL OPEN, and the branch
+# head since moved: exactly the state an operator produces by doing what the design
+# tells them to do — fix the branch and let the head move.
+#
+# A review bead records no dispatch head, so before the fix this corpse answered
+# the worker-lost scan again at the NEW head and re-stamped `exception@<new head>`
+# before the pre-open re-arm further down could clear anything. The head move was
+# consumed on every wake, the gate never re-armed, and `exception` was terminal
+# FULL STOP rather than "terminal until the input changes" — the operator escape
+# the design promises did not exist. Two halves are needed and both are asserted:
+# suppress the re-condemnation so the re-arm runs, and RETIRE the corpse so
+# check-set-heal.sh stops reading it as a signoff already in flight and can
+# dispatch the replacement that raises the gate.
+eq "$(marker a-poison check.codex)" "<none>" "(POISON) a stale dead review does NOT re-condemn the new head; the gate re-arms instead"
+eq "$(bstatus rv-poison)" "closed" "(POISON) and the dead review is retired, so check-set-heal stops reading it as a signoff in flight"
+eq "$(marker rv-poison gate_verdict_condemned)" "headpoison" "(POISON) marked as well as closed, so even a refused close cannot spend a second condemnation"
+hasnt "$TMP/mail.log" "a-poison" "(POISON) re-arming is not an escalation — the operator is not re-mailed for doing what they were asked"
+has "$TMP/out" "retired dead review rv-poison" "(POISON) the retirement is announced"
+has "$TMP/update.log" "--force" "(POISON) bd close is assignee-gated on a dead session's bead, so the retirement takes the --force retry"
+
+# (TWIN) the scan takes ALL the dead reviews, not just the first. It used to break
+# at the first match, so a second corpse stayed open and condemned the NEXT head by
+# itself — the same poisoning, one bead over. A LIVE reviewer sharing the anchor is
+# never swept up in it, and with no stale exception to suppress it a first-ever
+# condemnation still fires normally.
+eq "$(marker a-twin check.codex)" "exception@headtwin" "(TWIN) a first-ever worker-lost condemnation still fires (no stale exception to suppress it)"
+eq "$(bstatus rv-twin1)" "closed" "(TWIN) the first dead review is retired"
+eq "$(bstatus rv-twin2)" "closed" "(TWIN) and so is the second — the scan no longer stops at the first"
+eq "$(bstatus rv-twinlive)" "in_progress" "(TWIN) but a LIVE reviewer on the same anchor is left strictly alone"
+eq "$(marker rv-twinlive gate_verdict_condemned)" "<none>" "(TWIN) and is not marked either"
+
 # (NEVERGREEN) the safety invariant
 hasnt "$TMP/update.log" "green@" "(NEVERGREEN) the pass never writes a green marker"
 hasnt "$TMP/update.log" "merge_result" "(NEVERGREEN) the pass never touches the gating marker"
@@ -487,6 +561,9 @@ hasnt "$TMP/update.log" "a-fix " "(CONVERGE) and is not rewritten every wake"
 hasnt "$TMP/update.log" "a-prestale " "(CONVERGE) a re-armed pre-open gate is not re-cleared on every wake"
 eq "$(marker a-capopen check.codex)" "fixable@head26" "(CONVERGE) the deferred cap stays fixable while its child is open"
 hasnt "$TMP/mail.log" "a-capopen" "(CONVERGE) and still does not escalate"
+hasnt "$TMP/update.log" "rv-poison " "(CONVERGE) a retired review is not re-retired on every wake"
+eq "$(marker a-poison check.codex)" "<none>" "(CONVERGE) and the re-armed pre-open gate stays re-armed — the corpse is gone, so nothing re-condemns it"
+hasnt "$TMP/mail.log" "a-poison" "(CONVERGE) still no escalation for it"
 
 # ---------------------------------------------------------------------------
 # Run 2b — the merge_hold lifts. The exception is already recorded and current at

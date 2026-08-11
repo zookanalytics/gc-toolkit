@@ -426,6 +426,29 @@ returns to unevaluated and the heal pass dispatches on the next wake. Only those
 two verbs, because only those two block a dispatch, and clearing can never merge
 or open anything — an absent marker is green at no head.
 
+**A condemned review is retired, or the head move it is waiting for never
+happens.** A review bead records no dispatch head, and the R12 worker-lost test —
+open, assignee answered by no live session, untouched past the deadline — is not
+bound to one either. So a dead review left open answers that test again at *every*
+later head: the operator fixes the branch, the head advances, the marker correctly
+reads as unevaluated, and then the same corpse re-derives `worker-lost` and
+re-stamps `exception@<new head>` before the pre-open re-arm above can clear
+anything. The head move is consumed on every wake; `exception` stops being
+terminal-until-operator and becomes terminal outright. So the arm (a) does not
+derive a *fresh* worker-lost condemnation while an `exception@<old head>` marker is
+still on the anchor — pre-open nothing can have been dispatched for the current
+head while that marker sat there, since the heal pass skips on `exception@`, so any
+review found under it is residue — and (b) **retires** every review it condemns:
+marked `gate_verdict_condemned=<head>` so it can never spend a second
+condemnation, and **closed** so `check-set-heal.sh` stops counting a corpse as a
+signoff already in flight and can dispatch the replacement that actually raises the
+gate. Marking without closing fixes the re-condemnation and leaves the gate
+un-dispatchable — the same silent hold, one step along. Retirement runs only on
+gates that are **not** OK: post-open an open review bead is itself a merge hold, so
+closing one releases a hold, and only off the OK path is the gate's own marker
+guaranteed not to be `green@<live head>` and therefore holding the merge by itself
+throughout.
+
 **The round count is not reset per head, deliberately.** The design doc describes
 `check.<name>.attempts` as "rounds spent on this head"; taken literally the
 counter resets whenever the head moves, but a rework round that does any work at

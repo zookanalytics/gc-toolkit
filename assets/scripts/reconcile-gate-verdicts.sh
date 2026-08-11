@@ -40,6 +40,22 @@
 #        marker at all), and merge-skill.sh holds on the missing marker. Nothing
 #        anywhere times it out. The PR is held indefinitely and silently.
 #
+#        ...and the dead review is RETIRED when it is condemned, which is the half
+#        that makes the escape real. A review bead carries no record of the head it
+#        was dispatched for, so left open it answers this scan again at EVERY later
+#        head: the operator fixes the branch, the head moves, `gate_verdict` reads
+#        the old marker as unevaluated exactly as designed — and then the same dead
+#        review condemns the new head before the re-arm below can clear anything.
+#        The exception is not "terminal until the input changes", it is terminal
+#        FULL STOP, and the escape the design promises does not exist. Worse
+#        post-open: once reconcile-merged-prs.sh dispatches a fresh re-review, the
+#        old dead review can stamp exception over a real review in flight. So a
+#        condemned review is marked (`gate_verdict_condemned=<head>`, so it can
+#        never spend a second condemnation) and CLOSED (so check-set-heal.sh stops
+#        reading it as a signoff already in flight and can dispatch the replacement
+#        that actually raises the gate). Marking alone would fix the re-condemnation
+#        and leave the gate un-dispatchable — the same silent hold, one step along.
+#
 #   RE-ARM (pre-open). The mirror image of R12, and the same silent hold from the
 #        other end: a verdict marker left behind by a head that has since MOVED.
 #        check-set-heal.sh skips its dispatch on `green@*` and `exception@*` and
@@ -418,7 +434,69 @@ apply() { # <description> <bd args...>
   bd_pinned update "$@" >/dev/null 2>&1
 }
 
+# Retire the dead reviews the R12b scan collected for one gate (LOST_REVIEWS). A
+# review whose worker is gone must be able to condemn AT MOST ONE head, and must not
+# — by staying open — suppress the replacement dispatch that would raise the gate at
+# the next one. Two writes, neither redundant:
+#
+#   1. `gate_verdict_condemned=<head>` on the review. The scan skips a review
+#      carrying it, so even where the close below is refused by the ledger, this
+#      review can never spend a second condemnation.
+#   2. CLOSE it. This is the half that re-opens the escape. check-set-heal.sh's
+#      in-flight probe asks `--status=open,in_progress` on the EXACT `anchor_bead`
+#      surface and trusts a hit outright, so a dead review left open reads as "a
+#      signoff is already in flight" on every future pass and the replacement
+#      dispatch is suppressed forever.
+#
+# Closing is the NORMAL terminal state of a review bead, not a novel one invented
+# here: every signoff that completes closes itself (the non-impl done sequence), and
+# check-set-heal.sh's closed-anchor scan filters out beads carrying `anchor_bead` or
+# `task_kind` — which every review carries — so a closed review is inert everywhere
+# it is read.
+#
+# SAFE ONLY BECAUSE THE GATE IS NOT OK, and that is why every call site sits below
+# the `verdict = ok` early-continue. Post-open an open review bead is itself a merge
+# hold (merge-skill.sh holds on any unclosed rework/review bead for the anchor), so
+# closing one RELEASES a hold. Off the OK path this gate's marker is by construction
+# not `green@<live head>` — absent, stale, or a non-green verb — so
+# `checkset_hold_gate` holds the merge on the marker alone, before, during and
+# after, and the pass's never-merges invariant is intact whichever order the writes
+# land in. On an OK gate the open review could be the only remaining hold, and this
+# pass never touches one.
+#
+# `--force` on the retry. `bd close` is assignee-gated, and this bead's assignee is
+# by construction FOREIGN — a session that no longer exists — so merge-skill.sh's
+# identity-ENCODING recovery does not apply and the plain close is refused for the
+# one reason that provably does not hold here. That gate protects a LIVE holder's
+# work; the two-part test that selected this bead (no live session answers its
+# assignee, and it is past the deadline) is the proof there is no live holder, and
+# it is the same evidence already trusted to record a terminal verdict and mail an
+# operator. Overriding it is strictly less consequential than that.
+retire_lost_reviews() { # <anchor> <gate> <head>
+  local aid="$1" g="$2" h="$3" rid creason
+  for rid in $LOST_REVIEWS; do
+    [ -n "$rid" ] || continue
+    creason="worker-lost: retired by the merge-gate verdict arm (anchor $aid, gate $g, head $h). No live session answered its assignee and it was untouched past the ${GATE_DEADLINE}s deadline, so it can neither raise this gate nor stand in for the review that will."
+    apply "mark review $rid condemned at $h and retire it (R12b)" \
+      "$rid" --set-metadata "gate_verdict_condemned=$h" \
+      || echo "reconcile-gate-verdicts: WARN could not mark review $rid condemned at $h; it may condemn a later head — repair by hand" >&2
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "reconcile-gate-verdicts: [dry-run] would close condemned review $rid"
+      continue
+    fi
+    if bd_pinned close "$rid" --reason "$creason" >/dev/null 2>&1 \
+       || bd_pinned close "$rid" --reason "$creason" --force >/dev/null 2>&1; then
+      echo "reconcile-gate-verdicts: $aid — retired dead review $rid (check.$g, head $h)"
+      retired=$((retired + 1))
+    else
+      echo "reconcile-gate-verdicts: WARN could not close dead review $rid on $aid; check-set-heal.sh will keep reading it as a signoff already in flight and will not dispatch the replacement — close it by hand" >&2
+    fi
+  done
+  LOST_REVIEWS=""
+}
+
 examined=0; recorded=0; exceptions=0; escalated=0; held=0; skipped=0; rearmed=0
+retired=0
 
 while IFS= read -r row; do
   [ -n "$row" ] || continue
@@ -521,6 +599,75 @@ while IFS= read -r row; do
       [ -n "$reason" ] || reason="recorded by an earlier pass (no reason stored)"
     fi
 
+    # An exception marker left over from a PREVIOUS head. The verdict is not
+    # `exception` on this path — that case cleared RECORD_NEEDED above — so any
+    # exception marker still here is necessarily bound to some other head.
+    STALE_EXCEPTION=""
+    if [ -n "$RECORD_NEEDED" ]; then
+      case "$marker" in
+        "$GATE_VERB_EXCEPTION"@*) STALE_EXCEPTION=1 ;;
+      esac
+    fi
+
+    # -----------------------------------------------------------------------
+    # The DEAD REVIEWS behind this gate. Found ONCE, here, and used for two
+    # different things: condemnation (R12b below, conditionally) and RETIREMENT
+    # (always — see `retire_lost_reviews`).
+    #
+    # A review is dead when all three hold: it is open/in_progress, its assignee is
+    # answered by NO live session, and it has been untouched for longer than the
+    # deadline. An unassigned or freshly-touched review is in flight, and a live
+    # assignee is a slow reviewer, not a dead one. Disabled outright when the roster
+    # could not be read — an unreadable roster makes every assignee look dead, and
+    # this arm mails an operator.
+    #
+    # The clock is `heartbeat_at` where the bead carries one, falling back to
+    # updated_at then created_at. A claimed bead's heartbeat is stamped by the
+    # session holding it, so its age measures how long since the WORKER was last
+    # alive — which is the question. `updated_at` moves only when the bead is
+    # WRITTEN, so a reviewer thinking hard about a large diff looks identical to a
+    # reviewer whose session died an hour ago. Both are kept because a review that
+    # was never claimed carries no heartbeat at all, and it must still be timed
+    # rather than exempted.
+    #
+    # ALL of them, not the first. The scan used to stop at the first match, so a
+    # second dead review stayed open and condemned the NEXT head on its own — the
+    # same poisoning, one bead over. And a review already carrying
+    # `gate_verdict_condemned` is skipped outright: it has had its one condemnation.
+    # -----------------------------------------------------------------------
+    LOST_REVIEWS=""
+    LOST_REASON=""
+    if [ -n "$ROSTER_READABLE" ]; then
+      lost=$(printf '%s' "$reviews" | jq -r --arg g "$gate" '
+        .[]
+        | select(((.status // "") | ascii_downcase) != "closed")
+        | select(((.metadata.check_name // "codex")) == $g)
+        | select(((.metadata.gate_verdict_condemned // "") | tostring) == "")
+        | select(((.assignee // "") | length) > 0)
+        | [ .id, (.assignee // ""),
+            (.heartbeat_at // .updated_at // .created_at // "") ]
+        | @tsv' 2>/dev/null)
+      while IFS=$'\t' read -r rid rassignee rts; do
+        [ -n "$rid" ] || continue
+        answered_by_live_session "$rassignee" && continue
+        age=$(ts_age "$rts")
+        [ -n "$age" ] || continue
+        [ "$age" -gt "$GATE_DEADLINE" ] || continue
+        LOST_REVIEWS="${LOST_REVIEWS:+$LOST_REVIEWS }$rid"
+        [ -n "$LOST_REASON" ] \
+          || LOST_REASON="worker-lost: review $rid held by '$rassignee' (no live session answers it) and untouched for ${age}s > ${GATE_DEADLINE}s deadline"
+      done <<EOF
+$lost
+EOF
+    fi
+
+    # Already excepted AT THIS HEAD: nothing left to decide, so any dead review
+    # still open under it is the residue of that same exception. Retire it now —
+    # this is the legacy shape (an exception recorded before this arm retired
+    # anything) and leaving it open is what strands the branch after the head
+    # finally moves, with check-set-heal.sh reading a corpse as work in flight.
+    [ -n "$RECORD_NEEDED" ] || retire_lost_reviews "$id" "$gate" "$head"
+
     # -----------------------------------------------------------------------
     # Which non-OK verdict is this? Checked in the order the design fixes: the
     # two exception triggers first, because they are TERMINAL and must not be
@@ -534,40 +681,29 @@ while IFS= read -r row; do
       # recorded something no reader can map: exception by definition of totality.
       [ "$verdict" = "unmappable" ] && reason="unmappable-marker: check.$gate='$marker' names no known verdict verb"
 
-      # R12b — a dispatched review whose worker is GONE. Open/in_progress, untouched
-      # for longer than the deadline, and assigned to an address no live session
-      # answers to. All three are required: an unassigned or freshly-touched review is
-      # in flight, and a live assignee is a slow reviewer, not a dead one. Disabled
-      # outright when the roster could not be read.
+      # R12b — a dispatched review whose worker is GONE, scanned for above.
       #
-      # The clock is `heartbeat_at` where the bead carries one, falling back to
-      # updated_at then created_at. A claimed bead's heartbeat is stamped by the
-      # session holding it, so its age measures how long since the WORKER was last
-      # alive — which is the question. `updated_at` moves only when the bead is
-      # WRITTEN, so a reviewer thinking hard about a large diff looks identical to a
-      # reviewer whose session died an hour ago. Both are kept because a review that
-      # was never claimed carries no heartbeat at all, and it must still be timed
-      # rather than exempted.
-      if [ -z "$reason" ] && [ -n "$ROSTER_READABLE" ]; then
-        lost=$(printf '%s' "$reviews" | jq -r --arg g "$gate" '
-          .[]
-          | select(((.status // "") | ascii_downcase) != "closed")
-          | select(((.metadata.check_name // "codex")) == $g)
-          | select(((.assignee // "") | length) > 0)
-          | [ .id, (.assignee // ""),
-              (.heartbeat_at // .updated_at // .created_at // "") ]
-          | @tsv' 2>/dev/null)
-        while IFS=$'\t' read -r rid rassignee rts; do
-          [ -n "$rid" ] || continue
-          answered_by_live_session "$rassignee" && continue
-          age=$(ts_age "$rts")
-          [ -n "$age" ] || continue
-          [ "$age" -gt "$GATE_DEADLINE" ] || continue
-          reason="worker-lost: review $rid held by '$rassignee' (no live session answers it) and untouched for ${age}s > ${GATE_DEADLINE}s deadline"
-          break
-        done <<EOF
-$lost
-EOF
+      # SUPPRESSED while an exception marker from a PREVIOUS head is still on the
+      # anchor, and that is the whole of the head-binding this arm can have. A review
+      # bead records no dispatch head, so "was this review dispatched FOR the live
+      # head?" is not directly answerable — but under a stale `exception@<old>` it is
+      # answerable in the negative, and provably so pre-open: check-set-heal.sh's
+      # `marker_blocks_dispatch` skips its dispatch on `exception@*`, so nothing can
+      # have dispatched a review for the current head while that marker sat there.
+      # Such a review is residue of the OLD head's exception. Condemning the new head
+      # with it re-stamps `exception@<new>` before the pre-open re-arm below can clear
+      # anything — the head move is consumed and the gate never re-arms, so the
+      # operator escape the design specifies ("fix the branch, let the head move")
+      # silently does not exist. Post-open the same residue can stamp exception over
+      # a genuine re-review that reconcile-merged-prs.sh dispatched at the new head.
+      #
+      # Suppressing only DEFERS: the residue is retired below, so the next wake sees
+      # a gate with nothing dead under it and judges it fresh. And the direction is
+      # the safe one — an un-recorded exception under-reports a hold that the marker
+      # keeps holding anyway, while a wrongly-recorded one is terminal until a human
+      # acts.
+      if [ -z "$reason" ] && [ -n "$LOST_REASON" ] && [ -z "$STALE_EXCEPTION" ]; then
+        reason="$LOST_REASON"
       fi
 
       # R11 — bounded remediation exhaustion. The rounds are spent and the gate is
@@ -592,6 +728,13 @@ EOF
       fi
 
       if [ -z "$reason" ]; then
+        # No exception will be recorded this pass, so nothing downstream is going to
+        # act on the dead reviews found above. Retire them here instead: whether they
+        # were suppressed as residue of an older head's exception or simply lost the
+        # race to a `fixable` record, leaving one open is what makes check-set-heal.sh
+        # read a corpse as a signoff in flight and withhold the dispatch forever.
+        retire_lost_reviews "$id" "$gate" "$head"
+
         # Not an exception. Record the non-terminal verdict so the gate's state is a
         # pure read rather than an inference from open children — but ONLY where it
         # is true: `fixable` means the skill found addressable problems and
@@ -709,6 +852,20 @@ EOF
       fi
       exceptions=$((exceptions + 1))
       echo "reconcile-gate-verdicts: $id — check.$gate EXCEPTION at $head ($reason)"
+
+      # RETIRE the dead reviews this verdict was derived from, now that the verdict
+      # is recorded and read back. They have spent their one condemnation; leaving
+      # one open would let it condemn the NEXT head too — consuming the head move
+      # that is supposed to re-arm this exception — and would keep check-set-heal.sh
+      # from dispatching the replacement once it does re-arm.
+      #
+      # AFTER the record, not before, though the safety argument does not depend on
+      # the order (see `retire_lost_reviews`: off the OK path the marker holds the
+      # merge either way). What the order buys is the RETRY: a record that failed to
+      # stick left the loop above via `continue`, so the reviews are still un-retired
+      # and the next wake re-derives the same condemnation instead of finding the
+      # evidence already swept away.
+      retire_lost_reviews "$id" "$gate" "$head"
     fi
 
     # -----------------------------------------------------------------------
@@ -780,5 +937,5 @@ done <<EOF
 $ROWS
 EOF
 
-echo "reconcile-gate-verdicts: $examined anchor(s) examined, $recorded fixable verdict(s) recorded, $exceptions exception(s) recorded, $escalated escalated, $held held, $rearmed pre-open gate(s) re-armed, $skipped skipped"
+echo "reconcile-gate-verdicts: $examined anchor(s) examined, $recorded fixable verdict(s) recorded, $exceptions exception(s) recorded, $escalated escalated, $held held, $rearmed pre-open gate(s) re-armed, $retired dead review(s) retired, $skipped skipped"
 exit 0

@@ -179,6 +179,57 @@ pre-open, because post-open the stale marker is the evidence
 arm that already heals it. The pass's safety invariant is untouched: clearing can
 only hold harder, since an absent marker is green at no head.
 
+**And the re-arm is only reachable if the dead review is retired** (pre-open
+signoff finding, review `tk-bjyld`). The R12 worker-lost scan condemned a review
+bead on three facts — open, assignee answered by no live session, untouched past
+the deadline — none of which is bound to a head, because a review bead records no
+dispatch head. Left open, the same corpse therefore answered the scan again at
+*every* later head: the operator fixed the branch, the head moved, `gate_verdict`
+read the old marker as unevaluated exactly as designed, and then the corpse
+re-derived `worker-lost` and re-stamped `exception@<new head>` *before* the re-arm
+above could clear anything. The head move was consumed on every wake. `exception`
+was not "terminal until the input changes", it was terminal full stop, and the
+operator escape this whole lifecycle is built around did not exist. Post-open the
+same residue could stamp exception over a genuine re-review that
+`reconcile-merged-prs.sh` had just dispatched at the new head.
+
+Two halves fix it, and neither is sufficient alone:
+
+- **Suppress** a fresh worker-lost condemnation while an `exception@<old head>`
+  marker is still on the anchor, so the re-arm runs instead. That is as much
+  head-binding as this arm can have without a dispatch-time head stamp, and
+  pre-open it is a proof rather than a heuristic: `check-set-heal.sh` skips its
+  dispatch on `exception@*`, so nothing *can* have dispatched a review for the
+  current head while that marker sat there — any review found under it is residue
+  of the old one. Suppressing only defers, since the residue is retired in the same
+  pass, and it errs in the safe direction: an unrecorded exception under-reports a
+  hold the marker keeps holding anyway, while a wrongly-recorded one is terminal
+  until a human acts.
+- **Retire** the condemned review — mark it `gate_verdict_condemned=<head>` (so it
+  can never spend a second condemnation even if the close is refused) and **close**
+  it. The close is what makes the escape real: `check-set-heal.sh`'s in-flight probe
+  asks `--status=open,in_progress` on the exact `anchor_bead` surface and trusts a
+  hit outright, so a dead review left open reads as "a signoff is already in flight"
+  forever and the replacement dispatch never goes out. Marking alone would stop the
+  re-condemnation and still leave the gate un-dispatchable — the same silent hold,
+  one step along.
+
+Retirement is confined to gates that are **not** OK, which is why every call site
+sits below the `verdict = ok` early-continue. Post-open an open review bead is
+itself a merge hold (`merge-skill.sh` holds on any unclosed rework/review bead for
+the anchor), so closing one *releases* a hold; off the OK path this gate's marker
+is by construction not `green@<live head>`, so `checkset_hold_gate` holds the merge
+on the marker alone throughout and the never-merges invariant survives whichever
+order the writes land in. On an OK gate the open review could be the only remaining
+hold, and this pass never touches one. Two supporting details: the scan now takes
+**all** the dead reviews rather than stopping at the first (a second corpse left
+open poisons the next head by itself), and the close takes a `--force` retry
+because `bd close` is assignee-gated and this bead's assignee is foreign by
+construction — a session that no longer exists. That gate protects a *live*
+holder's work, and the two-part test that selected the bead is the proof there is
+none; it is the same evidence already trusted to record a terminal verdict and mail
+an operator.
+
 ## Scoped out of this branch
 
 **R7/R10/R23 — per-finding child fan-out with `finding_key` dedup** (filed as `tk-elc0x`). The design
