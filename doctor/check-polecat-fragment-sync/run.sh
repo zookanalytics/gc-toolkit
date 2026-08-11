@@ -34,14 +34,40 @@
 # polecat-codex, codex polecats would have gone on destroying notes while the
 # bug read as fixed.
 #
-# WHAT IS ASSERTED. Set equality, not order: order changes reading sequence,
-# not doctrine. A native pool that shares the base prompt and declares NO
-# fragments at all is the same finding as one missing a single name — it is the
-# maximal drift, not an opt-out.
+# WHAT IS ASSERTED. Set equality modulo the declared exceptions below, not
+# order: order changes reading sequence, not doctrine. A native pool that shares
+# the base prompt and declares NO fragments at all is the same finding as one
+# missing a single name — it is the maximal drift, not an opt-out.
+#
+# DECLARED EXCEPTIONS. Set equality was the whole assertion until a fragment
+# earned a pool-scoped home: polecat-non-impl-done is 70,043 B — 68% of the
+# polecat prompt — and it is read by 100% of polecat-codex spawns (the signoff
+# pool) against 2.3% of the claude pool's (specs/tk-23wdf/context-budget-ledger.md
+# §7 candidate 1, landed as tk-0981e). Keeping the lists identical would mean
+# paying it everywhere or dropping it everywhere; neither is what the measurement
+# says to do.
+#
+# An exception is DELIBERATE DIVERGENCE, not a mute button, so it is written as
+# an expectation in both directions:
+#
+#   * the fragment is REQUIRED on the named pool. An exception adds it to that
+#     pool's expected set, so removing it there is an ERROR reported exactly like
+#     any other missing fragment. Tolerating it instead — "ignore this name" —
+#     would reintroduce the silent-drift failure at the one pool that depends on
+#     it, which is the whole failure class this check exists to end.
+#   * it is EXPECTED NOWHERE ELSE. Exceptions are keyed by pool, so the same
+#     fragment on a different sharing pool is still reported as extra.
+#   * it is expected to be ABSENT FROM THE PATCH. Once the patch injects it
+#     again, every pool gets it, the entry grants nothing, and a stale entry
+#     documenting a divergence that no longer exists is worth a warning.
 #
 # WHAT IS NOT ASSERTED. That the named fragments exist or render;
 # check-base-artifact-collision owns define-name shadowing and
-# check-agent-prompt-integrity owns template resolution.
+# check-agent-prompt-integrity owns template resolution. Nor that an exception's
+# pool exists: a renamed pool still trips the set comparison loudly (it carries a
+# fragment the patch does not), and a pool deleted outright leaves an entry that
+# grants nothing to nobody. Warning on a missing pool would fire on every pack
+# and every fixture that simply does not have one.
 #
 # Exit codes: 0=OK, 1=Warning, 2=Error
 # stdout: first line=message, rest=details
@@ -49,6 +75,25 @@
 set -u
 
 dir="${GC_PACK_DIR:-.}"
+
+# Declared pool-scoped exceptions, one per entry: "<fragment> <pool> <reason>".
+# Hardcoded rather than read from a data file on purpose — an exception is
+# doctrine, and it should cost a reviewed edit to this file with a reason
+# attached, not a stray file appearing in a pack dir.
+FRAGMENT_EXCEPTIONS=(
+    "polecat-non-impl-done polecat-codex 100% of this pool's spawns run the non-impl signoff path it documents, against 2.3% on the claude polecat pool where it costs 70,043 B/spawn — 68% of the prompt, re-paid on every compaction (tk-0981e; specs/tk-23wdf/context-budget-ledger.md §7 candidate 1)"
+)
+
+# Render the exception table for humans reading a finding. Printed alongside
+# both the OK line and any mismatch, because in either case it is the answer to
+# "why is that name in one list and not the other".
+print_exceptions() {
+    local entry frag pool reason
+    for entry in ${FRAGMENT_EXCEPTIONS[@]+"${FRAGMENT_EXCEPTIONS[@]}"}; do
+        read -r frag pool reason <<< "$entry"
+        echo "Declared exception: $frag is expected on $pool ONLY, and not in the pack.toml polecat patch — $reason"
+    done
+}
 
 # The base prompt whose reuse defines this class of pool. An agent carrying its
 # own colocated prompt file is NOT in the class (it has no base doctrine to
@@ -126,6 +171,17 @@ if [ -z "$patch_frags" ]; then
     exit 1
 fi
 
+# A stale exception asserts nothing false, but it describes a divergence that
+# has been closed — and it is the one part of the table a reader cannot check by
+# eye, since the patch list lives in another file.
+stale_exceptions=()
+for entry in ${FRAGMENT_EXCEPTIONS[@]+"${FRAGMENT_EXCEPTIONS[@]}"}; do
+    read -r exc_frag exc_pool _ <<< "$entry"
+    if printf '%s\n' "$patch_frags" | grep -qxF "$exc_frag"; then
+        stale_exceptions+=("$exc_frag is declared as a $exc_pool-only exception but the pack.toml polecat patch injects it too — every pool gets it, so the exception grants nothing. Remove the entry from doctor/check-polecat-fragment-sync/run.sh, or drop the fragment from the patch again.")
+    fi
+done
+
 mismatched=()
 checked=0
 shared=()
@@ -138,8 +194,18 @@ for agent_toml in "$dir"/agents/*/agent.toml; do
     shared+=("$agent_dir")
     checked=$((checked + 1))
     agent_frags="$(array_values inject_fragments < "$agent_toml")"
-    missing="$(comm -23 <(printf '%s\n' "$patch_frags") <(printf '%s\n' "$agent_frags") | tr '\n' ' ')"
-    extra="$(comm -13 <(printf '%s\n' "$patch_frags") <(printf '%s\n' "$agent_frags") | tr '\n' ' ')"
+    # This pool's expectation is the patch list PLUS whatever is declared for it
+    # by name. Adding to the expected set (rather than filtering out of the
+    # comparison) is what makes an exception fragment required here and extra
+    # everywhere else, with no special-casing in the report below.
+    expected_frags="$patch_frags"
+    for entry in ${FRAGMENT_EXCEPTIONS[@]+"${FRAGMENT_EXCEPTIONS[@]}"}; do
+        read -r exc_frag exc_pool _ <<< "$entry"
+        [ "$exc_pool" = "$agent_dir" ] || continue
+        expected_frags="$(printf '%s\n%s\n' "$expected_frags" "$exc_frag" | sort -u)"
+    done
+    missing="$(comm -23 <(printf '%s\n' "$expected_frags") <(printf '%s\n' "$agent_frags") | tr '\n' ' ')"
+    extra="$(comm -13 <(printf '%s\n' "$expected_frags") <(printf '%s\n' "$agent_frags") | tr '\n' ' ')"
     missing="${missing% }"; extra="${extra% }"
     if [ -n "$missing" ] || [ -n "$extra" ]; then
         detail="agents/$agent_dir/agent.toml:"
@@ -153,8 +219,19 @@ if [ "${#mismatched[@]}" -gt 0 ]; then
     echo "${#mismatched[@]} native polecat pool(s) inject a different fragment set than the pack.toml polecat patch"
     printf '%s\n' "${mismatched[@]}"
     echo "Expected (pack.toml [[patches.agent]] name = \"polecat\" -> inject_fragments_append): $(printf '%s' "$patch_frags" | tr '\n' ' ')"
-    echo "A pool missing a fragment primes fine and runs the UNPATCHED base doctrine for whatever that fragment corrects — no error, no stderr, just the old behaviour. Copy the list across; there is no propagation between the two files."
+    print_exceptions
+    if [ "${#stale_exceptions[@]}" -gt 0 ]; then
+        printf 'Stale exception: %s\n' "${stale_exceptions[@]}"
+    fi
+    echo "A pool missing a fragment primes fine and runs the UNPATCHED base doctrine for whatever that fragment corrects — no error, no stderr, just the old behaviour. Copy the list across; there is no propagation between the two files. A fragment listed as a declared exception above is expected on its own pool and nowhere else, so it counts as missing there and as extra anywhere else."
     exit 2
+fi
+
+if [ "${#stale_exceptions[@]}" -gt 0 ]; then
+    echo "${#stale_exceptions[@]} declared fragment exception(s) no longer describe a divergence — the lists are otherwise in sync"
+    printf '%s\n' "${stale_exceptions[@]}"
+    echo "Nothing is mis-injected: this is the exception table describing a divergence that has been closed, which is worth removing before it is read as still true."
+    exit 1
 fi
 
 if [ "$checked" -eq 0 ]; then
@@ -162,5 +239,10 @@ if [ "$checked" -eq 0 ]; then
     exit 0
 fi
 
-echo "OK: all $checked native polecat pool(s) (${shared[*]}) inject the same $(printf '%s\n' "$patch_frags" | grep -c .) fragment(s) as the pack.toml polecat patch"
+exc_suffix=""
+if [ "${#FRAGMENT_EXCEPTIONS[@]}" -gt 0 ]; then
+    exc_suffix=", plus their declared exceptions"
+fi
+echo "OK: all $checked native polecat pool(s) (${shared[*]}) inject the same $(printf '%s\n' "$patch_frags" | grep -c .) fragment(s) as the pack.toml polecat patch$exc_suffix"
 echo "Fragments: $(printf '%s' "$patch_frags" | tr '\n' ' ')"
+print_exceptions

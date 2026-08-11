@@ -31,12 +31,21 @@ max_active_sessions = 2
 # the guard for that; it asserts resolution, not spelling.
 # inject_fragments must be
 # kept in sync by hand with the polecat patch's inject_fragments_append in
-# pack.toml — there is no automatic propagation — so this pool gets identical
-# convoy, append-notes, non-impl-done, and file-work-records guidance.
+# pack.toml — there is no automatic propagation — so this pool gets the same
+# convoy, append-notes, and file-work-records guidance.
 # "By hand" is now checked rather than trusted: doctor/check-polecat-fragment-sync
 # compares the two lists and errors on any divergence. A pool missing a
 # fragment does not fail — it primes cleanly and runs the unpatched base
 # doctrine for whatever that fragment corrected (tk-t41dq).
+#
+# polecat-non-impl-done is the ONE name this pool carries that the pack.toml
+# patch does not, and it is load-bearing here: this is the signoff pool, so
+# 100% of its spawns run the non-impl done sequence, against 2.3% on the claude
+# pool where the fragment costs 70 KB/spawn (tk-0981e;
+# specs/tk-23wdf/context-budget-ledger.md §7 candidate 1). The divergence is
+# declared as a pool-scoped exception in check-polecat-fragment-sync, which
+# makes the fragment REQUIRED here — remove it from the list below and the
+# check errors, exactly as if the patch had listed it.
 prompt_template = "gastown//agents/polecat/prompt.template.md"
 inject_fragments = [
     "polecat-convoys",
