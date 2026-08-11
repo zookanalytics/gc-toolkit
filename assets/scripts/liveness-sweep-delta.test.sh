@@ -101,22 +101,22 @@ done
 # comparison silently misses.
 cat > "$TMP/ready.json" <<'JSON'
 [
-  {"id":"c-plain","title":"an ordinary idle bug","type":"bug"},
-  {"id":"c-routed","title":"already dispatched","type":"task","metadata":{"gc.routed_to":"rig/rig.polecat"}},
-  {"id":"c-visit","title":"visit: something","type":"task","metadata":{"task_kind":"visit"}},
-  {"id":"c-subject","title":"triage: a scope","type":"task","metadata":{"task_kind":"triage-subject"}},
-  {"id":"c-ingroup","title":"subject of a live visit","type":"task","metadata":{}},
-  {"id":"c-takeaway","title":"parked by a human","type":"epic","metadata":{"gc.takeaway":"needs operator ratify; resume on ping","gc.takeaway_by":"proactive"}},
-  {"id":"c-takeaway-empty","title":"hold was cleared","type":"task","metadata":{"gc.takeaway":""}},
-  {"id":"c-pr-open","title":"done, parked on an open PR awaiting approval","type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
-  {"id":"c-pr-case","title":"same PR, written with a different case and a trailing path","type":"task","metadata":{"merge_result":"pull_request","pr_number":"522","pr_url":"https://GitHub.com/zookanalytics/signal-loom/pull/522/files"}},
-  {"id":"c-pr-merged","title":"landed — finishable, must surface for close-out","type":"task","metadata":{"merge_result":"merged","pr_number":"520","pr_url":"https://github.com/zookanalytics/signal-loom/pull/520"}},
-  {"id":"c-pr-closed","title":"rejected — PR closed unmerged, needs a sitting","type":"task","metadata":{"merge_result":"pull_request","pr_number":"999","pr_url":"https://github.com/zookanalytics/signal-loom/pull/999"}},
-  {"id":"c-pr-otherrepo","title":"number 521 — but in a different repository","type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
-  {"id":"c-pr-nourl","title":"marker but no pr_url to check liveness against","type":"task","metadata":{"merge_result":"pull_request","pr_number":"521"}},
-  {"id":"c-hold","title":"operator decided this waits","type":"task","metadata":{"triage.hold":"deferred; operator may take a different direction","triage.hold_by":"operator"}},
-  {"id":"c-hold-bare","title":"held, but the stamp names no reason","type":"task","metadata":{"triage.hold":"true"}},
-  {"id":"c-hold-empty","title":"hold was cleared","type":"task","metadata":{"triage.hold":""}}
+  {"id":"c-plain","title":"an ordinary idle bug","issue_type":"bug"},
+  {"id":"c-routed","title":"already dispatched","issue_type":"task","metadata":{"gc.routed_to":"rig/rig.polecat"}},
+  {"id":"c-visit","title":"visit: something","issue_type":"task","metadata":{"task_kind":"visit"}},
+  {"id":"c-subject","title":"triage: a scope","issue_type":"task","metadata":{"task_kind":"triage-subject"}},
+  {"id":"c-ingroup","title":"subject of a live visit","issue_type":"task","metadata":{}},
+  {"id":"c-takeaway","title":"parked by a human","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify; resume on ping","gc.takeaway_by":"proactive"}},
+  {"id":"c-takeaway-empty","title":"hold was cleared","issue_type":"task","metadata":{"gc.takeaway":""}},
+  {"id":"c-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
+  {"id":"c-pr-case","title":"same PR, written with a different case and a trailing path","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"522","pr_url":"https://GitHub.com/zookanalytics/signal-loom/pull/522/files"}},
+  {"id":"c-pr-merged","title":"landed — finishable, must surface for close-out","issue_type":"task","metadata":{"merge_result":"merged","pr_number":"520","pr_url":"https://github.com/zookanalytics/signal-loom/pull/520"}},
+  {"id":"c-pr-closed","title":"rejected — PR closed unmerged, needs a sitting","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"999","pr_url":"https://github.com/zookanalytics/signal-loom/pull/999"}},
+  {"id":"c-pr-otherrepo","title":"number 521 — but in a different repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
+  {"id":"c-pr-nourl","title":"marker but no pr_url to check liveness against","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521"}},
+  {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator may take a different direction","triage.hold_by":"operator"}},
+  {"id":"c-hold-bare","title":"held, but the stamp names no reason","issue_type":"task","metadata":{"triage.hold":"true"}},
+  {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}}
 ]
 JSON
 cat > "$TMP/live.json" <<'JSON'
@@ -165,6 +165,13 @@ echo "── classify keeps only genuinely unnamed beads ──"
 eq "$SURVIVORS" \
    "c-hold-empty,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-takeaway-empty" \
    "survivors are exactly the unnamed beads"
+# tk-tnwo0: the candidate's `type` is projected from `.issue_type` — the field
+# real `gc bd list`/`gc bd ready` emit (the fixtures now carry it too). The old
+# `map({id,title,type})` read `.type`, absent on every real row, so every
+# candidate carried type=null. A populated type is what normalize's post-cap
+# cohort grouping will consume.
+eq "$(printf '%s' "$CANDIDATES" | jq -r '.[] | select(.id=="c-plain") | .type')" "bug" \
+   "a survivor's type is populated from issue_type, never null"
 # Each drop asserted on its own so a regression names the class it broke.
 for drop in c-routed:worked c-visit:conversing c-subject:held-by-design \
             c-ingroup:live-visit-in-group c-takeaway:takeaway-held \
@@ -353,6 +360,15 @@ has "merged stays visible"               'merged'                        "$FORMU
 has "closed-unmerged stays visible"      'closed-unmerged'               "$FORMULA"
 # shellcheck disable=SC2016
 has "the read is batched per repository" 'One `gh pr list` per repository' "$FORMULA"
+
+# Class 2(i)'s liveness test is "not closed", resolved against a widened set —
+# so a convoy tracking a BLOCKED bead is gated, not a class-5 unnamed wait
+# (bead tk-tnwo0, live case tk-dhue). LIVE is open+in_progress only, so a
+# strict "present in LIVE" test drops blocked/deferred/pinned/hooked targets.
+echo "── the edge check tests 'not closed', resolved against a widened ALIVE set ──"
+has "the widening reads every non-closed status LIVE omits" 'blocked,deferred,pinned,hooked' "$FORMULA"
+has "liveness is 'not closed', not 'present in LIVE'"       'not only when it is open'        "$FORMULA"
+has "the edge check resolves against the widened set"       'against ALIVE'                   "$FORMULA"
 
 echo
 echo "liveness-sweep-delta: $PASS passed, $FAIL failed"

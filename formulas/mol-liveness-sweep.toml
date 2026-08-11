@@ -56,15 +56,28 @@ Never normalize on partial data.** (Torn reads under concurrent writes
 are a known transient, so an aborted pass is correct, not alarming.)
 
 ```bash
-LIVE=$(mktemp); READY=$(mktemp)
+LIVE=$(mktemp); READY=$(mktemp); WIDEN=$(mktemp); ALIVE=$(mktemp)
 gc bd list --status=open,in_progress --json --limit=0 > "$LIVE"
 gc bd ready --unassigned --limit=0 --json > "$READY"
-if ! jq -e 'type=="array"' "$LIVE" >/dev/null || ! jq -e 'type=="array"' "$READY" >/dev/null; then
+# WIDEN carries every non-closed status LIVE omits. The per-candidate edge
+# check below asks "is the bead this candidate tracks or parents still
+# ALIVE?" — and alive means NOT CLOSED, not "present in LIVE". LIVE is
+# open+in_progress only, so a target that is blocked, deferred, pinned or
+# hooked is absent from it, and a candidate waiting on such a target reads
+# as an unnamed wait when it is a named one (live case tk-dhue: a convoy
+# tracking a BLOCKED bead). A silently empty widening reintroduces exactly
+# that bug, so it aborts the pass under the same fail-safe as the other two.
+gc bd list --status=blocked,deferred,pinned,hooked --json --limit=0 > "$WIDEN"
+if ! jq -e 'type=="array"' "$LIVE" >/dev/null || ! jq -e 'type=="array"' "$READY" >/dev/null || ! jq -e 'type=="array"' "$WIDEN" >/dev/null; then
   echo "FAIL-SAFE: listing unreadable — sweep aborts, nothing filed"
   gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=fail --status=closed
 # use the step bead id from YOUR claim — no env var carries it
   exit 0
 fi
+# ALIVE is the not-closed set the edge check resolves against: LIVE widened
+# by WIDEN. LIVE itself stays open+in_progress — the visit-liveness and
+# subject reads below need exactly that narrower set.
+jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE"
 ```
 
 The classes — the first four are named waits or live work; only the
@@ -81,12 +94,19 @@ fifth is a defect:
    **(i) structure** — open blockers, or a structural edge that
    explains the wait, **checked in the directions that mean waiting** —
    a direction-blind rule floods the census with false waits: (a) it has
-   open children via `parent-child`
+   non-closed children via `parent-child`
    (a parent waits on its children — the reverse is NOT a wait: a child
-   with an open parent is workable); (b) it has open members via
+   with an open parent is workable); (b) it has non-closed members via
    `tracks` (a convoy/container waits on what it carries); (c) it
-   `tracks` an open bead (it hangs off something still alive — spec
-   beads tracking a routed root). `gc bd ready` already excludes
+   `tracks` a non-closed bead (it hangs off something still alive — spec
+   beads tracking a routed root). **The wait is real whenever the target
+   is not closed, not only when it is open.** A blocked, deferred, pinned
+   or hooked target still names the wait, so liveness is resolved against
+   ALIVE — the not-closed set the opening block builds — and never against
+   LIVE, which is open+in_progress only: a target absent from LIVE but
+   present in ALIVE (the live case tk-dhue, a convoy `tracks`-ing a
+   BLOCKED bead) would otherwise survive the edge check and misfile as a
+   class 5 unnamed wait. `gc bd ready` already excludes
    blocker-blocked beads and gates; the edge checks need the
    per-candidate pass below. Note: a fully idle linked cluster still
    surfaces through its root (the node with no outgoing waits), so one
@@ -204,10 +224,18 @@ reverse).
 
 Mechanically: read the open pull requests once (the block below), apply
 the jq, then for each survivor check its dependency edges with
-`gc bd show <id>` — any of the three class-2(i) structural shapes above
-(open parent-child children; open tracks members; tracks an open bead)
-→ class 2, drop it, logging which shape; an epic whose children have
-ALL closed → keep it, called out as a "what comes next?" candidate.
+`gc bd show <id>`, resolving every "is that target still alive?" test
+against ALIVE (not closed), never against LIVE — any of the three
+class-2(i) structural shapes above (non-closed parent-child children;
+non-closed tracks members; tracks a non-closed bead) → class 2, drop
+it, logging which shape; an epic whose children have ALL closed → keep
+it, called out as a "what comes next?" candidate. Shape (a) has no
+outgoing edge on the candidate to read — children hold the parent-child
+edge, so `gc bd show <parent>` lists none of them — so build the reverse
+index from ALIVE, not LIVE: a blocked child is absent from LIVE, which
+is exactly how a gated parent used to misfile as unnamed. A parent is
+gated iff ALIVE holds a bead whose `parent-child` parent is this
+candidate.
 
 **The gate half is a batched GitHub read, once per pass, before the
 jq.** One `gh pr list` per repository the candidates' own beads name —
@@ -283,7 +311,7 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
                 and (((.metadata.pr_url // "") | pr_key) as $k
                      | $k != "" and ($openkeys | index($k)) != null)) | not)
       | select(.id as $id | ($convgroups | index($id)) | not)
-    ] | map({id, title, type})')
+    ] | map({id, title, type: .issue_type})')
 # <<< classify-candidates
 printf '%s\n' "$CANDIDATES"
 # apply the edge check (children + tracks) per candidate before step 2
