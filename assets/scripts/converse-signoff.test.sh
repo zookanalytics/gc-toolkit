@@ -113,6 +113,28 @@ have "prompt carries a reap rule" 'The reap' "$PROMPT"
 have "reap rule names the real clock" 'idle_timeout' "$PROMPT"
 have "reap rule states the thread is unrecoverable" 'wake_mode' "$PROMPT"
 
+# The Hold definition is page one, and a definition outranks a rule
+# further down: from "a hold has no timeout" the role reasons straight
+# to "my held sitting cannot be reaped" — the belief that produced the
+# bug. Correcting the reap rule alone leaves the root cause live in the
+# active role definition, which is where the session reads it first.
+lacks "no 'a hold has no timeout' claim in the definition" \
+    'A hold has no timeout' "$PROMPT" \
+    "false on the runtime: idle_timeout + the assigned-work defer cap do end a held sitting"
+HOLD_DEF="$(awk '/^- \*\*Hold\*\*/ {f=1} f && /^$/ {exit} f {print}' "$PROMPT")"
+if printf '%s\n' "$HOLD_DEF" | grep -q 'reap'; then
+    ok "the Hold definition carries the reap contract"
+else
+    bad "the Hold definition carries the reap contract" \
+        "the definition itself must say a hold is reapable, not only the rule further down"
+fi
+if printf '%s\n' "$HOLD_DEF" | grep -q 'mandatory'; then
+    ok "the Hold definition makes the hold-time stamp mandatory"
+else
+    bad "the Hold definition makes the hold-time stamp mandatory" \
+        "a reapable hold makes the step-4 takeaway required, not advisory"
+fi
+
 echo "── the agent config no longer claims timeouts do not end a sitting ──"
 # The original comment asserted "visit boundaries, not timeouts, end it".
 # It was false, and it is exactly what stops the next reader from looking.

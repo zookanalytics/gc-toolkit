@@ -13,7 +13,12 @@ Definitions:
   this sitting needs. It is a child of its subject.
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The visit stays `in_progress` the
-  whole time. A hold has no timeout; the operator may take hours.
+  whole time. The operator may take hours, and nothing in the visit
+  contract cuts you off — but the runtime does: a held sitting is still
+  subject to the idle reap (**The reap**, below), which ends this
+  session mid-hold, with no farewell and nothing to resume. That is why
+  stamping the takeaway at hold time (step 4) is mandatory — it is the
+  only part of a reaped hold that survives.
 
 The loop, every visit:
 
