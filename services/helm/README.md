@@ -199,12 +199,79 @@ HELM_DEV_MOUNT=http://127.0.0.1:8372/v0/city/<city>/svc/helm npm run dev
 `HELM_DEV_MOUNT` must resolve to loopback — the supervisor binds loopback only
 and the dev proxy refuses to send traffic off-host.
 
+## Terminal
+
+`web/src/terminal/` embeds a live terminal in the board (U9, `tk-eemvf.4`): a
+peek at rest, a live terminal on focus. It attaches to the city's **existing**
+ttyd — this service owns no PTY and spawns no process.
+
+```
+ttyd -i 127.0.0.1 -p 7681 -b /terminal -W gc session attach <session>
+```
+
+Four things about it are load-bearing.
+
+**It works because a tailscale mapping makes it same-origin.** ttyd is
+published by its own `tailscale serve` mapping, separate from the supervisor's:
+
+```
+https://<host>/terminal  ->  http://127.0.0.1:7681/terminal    (ttyd)
+https://<host>/v0        ->  http://127.0.0.1:8372/v0          (supervisor, and the board under it)
+```
+
+So on the published origin the board and ttyd share an origin, and the socket is
+admitted by this app's own strict `connect-src 'self'` CSP with **no widening**
+and no CORS. That is a property of the tailscale mapping, not of the supervisor:
+reach the board directly on `127.0.0.1:8372` instead and ttyd is a different
+port, a different origin, and the terminal cannot connect there. The app says so
+rather than hanging — see the reachability check below.
+
+**The reachability check is a content-type check, not a status check.** The
+supervisor serves a SPA at its root with a catch-all that answers *every*
+unmatched path with `200 text/html`. On an origin that does not route ttyd,
+`GET /terminal/token` therefore looks perfectly healthy:
+
+```bash
+curl -si http://127.0.0.1:8372/terminal/token | head -2   # 200, text/html  <- NOT ttyd
+curl -si http://127.0.0.1:7681/terminal/token | head -2   # 200, application/json
+```
+
+A status-only probe reports a working terminal and the operator finds out when
+the socket dies. The tile requires `application/json` before opening a socket,
+so a misrouted origin produces a sentence instead of a silent failure.
+
+**Closing a tile detaches; it never kills the session.** ttyd runs one
+`gc session attach` per connected client, and that process is a *tmux client* of
+a session that outlives it. Teardown therefore closes the socket and writes
+**nothing** — an `exit`, a `^C` or a `^D` written on the way out is
+indistinguishable from the operator typing it and would end a live agent's
+session. `session.ts` holds the invariant, `session.test.ts` asserts it, and it
+was verified end-to-end against a real ttyd wrapping a throwaway tmux session:
+after a clean close the session, its shell, and its ability to run commands all
+survived. See `specs/tk-eemvf.4/decisions.md`.
+
+**One terminal, one session — for now.** The ttyd invocation bakes in a single
+session, so the board attaches to that one target. Per-tile terminals need a
+ttyd or wiring change and are deliberately deferred to the design handoff;
+tracked as `tk-mw9qz`, not absorbed here.
+
+The tile reports at least 80x24 to ttyd however small it is rendered, because
+tmux sizes a window to fit its clients and a tile reporting its own size would
+reflow a terminal the operator is also attached to.
+
+For dev, the vite server proxies `/terminal` (with `ws: true`) to ttyd's
+loopback port, reproducing the same-origin shape the tailscale mapping provides
+in deployment; override with `HELM_DEV_TTYD`, which is loopback-checked exactly
+like `HELM_DEV_MOUNT`.
+
 ## Build / run / test
 
 ```bash
 cd services/helm
 go test ./...                 # unit tests (model golden cases + mock-supervisor source + server/cache + the embedded app)
 go build ./cmd/helm-svc  # or let the launcher build it
+
+cd web && npm test            # the app's own tests: ttyd protocol, endpoint check, detach invariant
 
 # Run standalone against the live supervisor (no [[service]] needed):
 GC_SERVICE_SOCKET=/tmp/helm.sock \
@@ -249,6 +316,11 @@ unit tests over the model and a mock supervisor.
 **Delivered since** (tk-eemvf.1, the U5 scaffold): a mount-prefix-safe Vite +
 React + TS app embedded in the binary and served at the mount, alongside the
 JSON the mount already served. Structure only — see *Web UI*.
+
+**Delivered since** (tk-eemvf.4, the U9 terminal embed): an xterm.js terminal
+attached to the city's existing ttyd, peek at rest and live on focus, with the
+same-origin reachability confirmed and detach-not-kill verified — see
+*Terminal*.
 
 **Still deferred** (and *why*):
 

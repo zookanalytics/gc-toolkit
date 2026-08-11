@@ -67,3 +67,79 @@ th {
   opacity: 0.7;
   white-space: nowrap;
 }
+
+/*
+ * Terminal tile. Same brief as the rest of this file: enough shape to show the
+ * two states (peek at rest, live on focus) and no further. The spatial
+ * placement this tile eventually gets belongs to U6.
+ */
+
+.terminal-tile {
+  border: 1px solid rgb(128 128 128 / 35%);
+  border-radius: 4px;
+  margin-top: 1.5rem;
+  overflow: hidden;
+}
+
+.terminal-tile__head {
+  align-items: center;
+  border-bottom: 1px solid rgb(128 128 128 / 35%);
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.terminal-tile__head h2 {
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.terminal-tile__state {
+  font-size: 0.8125rem;
+  margin-right: auto;
+  opacity: 0.7;
+}
+
+.terminal-tile__state--attached {
+  color: #1a7f37;
+  opacity: 1;
+}
+
+.terminal-tile__state--failed {
+  color: #b3261e;
+  opacity: 1;
+}
+
+.terminal-tile__detail {
+  font-size: 0.8125rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+}
+
+/* The peek and the live terminal occupy the same box, so focusing a tile
+   swaps its contents in place instead of moving the page around. */
+.terminal-tile__peek,
+.terminal-tile__live {
+  background: #11131a;
+  color: #d6dae4;
+  height: 20rem;
+  margin: 0;
+  overflow: auto;
+}
+
+.terminal-tile__peek {
+  font-size: 0.75rem;
+  opacity: 0.85;
+  padding: 0.5rem 0.75rem;
+  white-space: pre;
+}
+
+.terminal-tile__live {
+  padding: 0.25rem;
+}
+
+.terminal-tile__foot {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  padding: 0.5rem 0.75rem;
+}

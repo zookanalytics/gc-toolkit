@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { TerminalTile } from './terminal/TerminalTile';
+import { resolveTerminalBase } from './terminal/endpoint';
 
 // A minimal local shape of the board envelope, sufficient to render it.
 //
@@ -60,6 +63,10 @@ export function App() {
   const [reloadToken, setReloadToken] = useState(0);
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
+
+  // Read once: the override is a launch-time knob, and re-reading it on every
+  // render would tear the terminal down whenever the board refreshes.
+  const terminalBase = useMemo(() => resolveTerminalBase(window.location.search), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -155,6 +162,12 @@ export function App() {
           </tbody>
         </table>
       )}
+
+      {/* One terminal, not one per anchor: the city runs a single ttyd wired to
+          a single session. Whether tiles get their own terminals is a ttyd
+          wiring question that is deliberately still open — see the Terminal
+          section of services/helm/README.md. */}
+      <TerminalTile label="city terminal" base={terminalBase} />
     </main>
   );
 }
