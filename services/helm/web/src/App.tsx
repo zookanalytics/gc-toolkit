@@ -2,38 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { TerminalTile } from './terminal/TerminalTile';
 import { resolveTerminalBase } from './terminal/endpoint';
+import type { Board } from './contract';
 
-// A minimal local shape of the board envelope, sufficient to render it.
-//
-// This is NOT the contract mirror. The hand-written TypeScript type that
-// mirrors internal/board's Go struct field-for-field — and the parity check
-// that fails when a field is renamed or dropped — is U7 (tk-eemvf.2), which
-// lands src/contract.ts. Replace these declarations with an import from there;
-// do not grow them into a second contract in the meantime.
-type Tile = {
-  id: string;
-  rig: string;
-  kind: string;
-  title: string;
-  severity: string;
-  n_closed: number;
-  m_total: number;
-  open: number;
-  in_progress: number;
-  frontier: string;
-  needs: string;
-  stale_days: number;
-  updated_at?: string;
-  rank_score: number;
-};
-
-type Board = {
-  generated_at: string;
-  total: number;
-  tiles: Tile[] | null;
-  partial?: boolean;
-  partial_errors?: string[];
-};
+// The board shape lives in ./contract.ts — the hand-written mirror of the Go
+// structs in internal/board, guarded by the parity check in
+// contract_parity_test.go. Do not redeclare any part of the wire shape here;
+// a second copy is the drift this app is built to avoid.
 
 // The server caches each computed board for 45s, so polling faster than that
 // only re-reads the same bytes. This surface is pull-only by charter: it
