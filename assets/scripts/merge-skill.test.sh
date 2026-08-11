@@ -221,6 +221,28 @@
 #   (HD5) HEADOK: the positive control — anchor branch == PR head branch, head
 #         repository ours, isCrossRepository=false, CLEAN -> MERGED. Without it the
 #         four holds above could all pass by the checks rejecting everything.
+#
+# THE THIRD HOLDER SHAPE (tk-8329m). The in-flight holder taxonomy was BINARY —
+# merge_result present is a duplicate gating anchor the DUP_PRS guard owns,
+# merge_result absent is presumed an unclosed rework child — and a bead that
+# references a PR for LINKAGE ONLY is neither. It fell into the second bucket by
+# construction, so the omission that keeps such a record non-gating (no
+# merge_result, deliberately, so this pass cannot auto-land an operator's PR) was
+# the same omission that made it a permanent blocker of its own PR. Nothing could
+# release it: the only pass that closes a PR-linked bead runs AFTER the PR merges.
+#   (TO1) an open, same-repository, merge_result-less holder carrying
+#         tracking_only=true -> MERGED. The live case was tk-uicmw / PR#291, held
+#         on every idle wake while CLEAN, APPROVED and codex-green at the head.
+#   (TO2) the same shape with tracking_only=FALSE -> merge HELD. The marker is read
+#         for TRUTH (merge_hold's rule: unset, empty, false, 0, null all hold), so
+#         the default stays fail-closed and a half-written value disarms nothing.
+#         With (TO1) it is an A/B on the marker alone — same status, same
+#         repository, same absent merge_result.
+#   (TO3) a DEPENDENCY-EDGE holder carrying tracking_only=true -> merge HELD. The
+#         opt-out is scoped to pr_number-swept holders like its two neighbours: a
+#         bead filed as an explicit edge against this anchor is not merely naming
+#         the number, and honouring the marker there would re-enter tk-je0rk's
+#         fail-OPEN hole through a third door.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -357,6 +379,9 @@ bead-COALESCE-G|392|main|codex|green@HEAD392
 bead-COALESCE-H|392|main|codex|green@HEAD392
 bead-COALESCE-I|393|main|codex|
 bead-COALESCE-J|393|main|codex|green@HEAD393|||https://github.com/acme/repo/pull/999
+bead-TRACKONLY|394|main|codex|green@HEAD394
+bead-TRACKFALSE|395|main|codex|green@HEAD395
+bead-TRACKDEP|396|main|codex|green@HEAD396
 bead-FINALHOLD|374|main|codex|green@HEAD374
 bead-FINALGATE|375|main|codex|green@HEAD375
 bead-FINALCLOSED|376|main|codex|green@HEAD376
@@ -594,6 +619,18 @@ HM
 #   392 both anchors green, and the SIBLING has an open dep-linked rework child
 #       that names no pr_number -> HELD. The holder set is the union too, or the
 #       merge lands with real rework in flight
+#   394 OPEN, CLEAN, gate green — its only holder is a pr_number-linked bead
+#       carrying tracking_only=true: an operator's deliberate NON-GATING tracking
+#       record -> MERGED (tk-8329m). Pre-fix the record held its own PR forever,
+#       because the very omission that keeps it non-gating (no merge_result) is
+#       what classes it as an unclosed rework child
+#   395 the same holder shape with tracking_only=FALSE -> HELD. The marker is read
+#       for TRUTH, not presence, so a half-written value cannot disarm the gate;
+#       with 394 this is the A/B that pins the marker as the operative difference
+#   396 OPEN, CLEAN, gate green — an open DEP-LINKED child carrying
+#       tracking_only=true -> HELD. The opt-out is scoped to pr_number holders;
+#       a bead filed as an explicit edge against this anchor cannot claim it is
+#       only referencing the number (tk-je0rk's rule, third door)
 #   393 the merging anchor's marker is CLEARED and the green one is on a sibling
 #       that claims pr_number=393 while recording pr_url .../pull/999 — the SAME
 #       repository, a DIFFERENT pull request -> HELD. A repository-granular sibling
@@ -698,6 +735,9 @@ cat > "$TMP/prs" <<'P'
 391|OPEN|false|main|HEAD391|CLEAN|MERGEABLE|a391c0ffee000028
 392|OPEN|false|main|HEAD392|CLEAN|MERGEABLE|a392c0ffee000029
 393|OPEN|false|main|HEAD393|CLEAN|MERGEABLE|a393c0ffee000030
+394|OPEN|false|main|HEAD394|CLEAN|MERGEABLE|a394c0ffee000031
+395|OPEN|false|main|HEAD395|CLEAN|MERGEABLE|
+396|OPEN|false|main|HEAD396|CLEAN|MERGEABLE|
 P
 
 # PR review history (the REST `pulls/N/reviews` source — the approval gate's real
@@ -772,6 +812,15 @@ APIFAIL_PRS="348"
 # PAST the former --limit cap behind 24 jq-excluded decoys. PR 354's child is
 # `blocked`, not open: it owes exactly as much work, and a gate keyed on
 # open,in_progress alone could not see it at all.
+#
+# The 6th column is metadata.tracking_only (tk-8329m). tracking-394 and
+# tracking-395 are the A/B pair for the third holder shape: BOTH are open, carry
+# this PR's number and a same-repository pr_url, and record NO merge_result — the
+# shape a bead has when it references a PR for linkage only, deliberately unarmed
+# so this pass cannot auto-land an operator's PR. Pre-fix both HELD, forever, with
+# no automated pass able to release either. They differ in the marker alone, which
+# is what makes the marker (and not the repository filter, and not the status
+# read) the thing under test.
 cat > "$TMP/children" <<'C'
 305|child-305||open
 317|prblocked-317||blocked
@@ -779,6 +828,8 @@ cat > "$TMP/children" <<'C'
 354|child-354||blocked
 365|child-foreign-365|||https://otherhost/acme/repo/pull/365
 366|child-same-366|||https://github.com/acme/repo/pull/366
+394|tracking-394|||https://github.com/acme/repo/pull/394|true
+395|tracking-395|||https://github.com/acme/repo/pull/395|false
 C
 
 # Children that name their PR with `fork_pr` and carry NO pr_number — the
@@ -828,6 +879,13 @@ printf '310|child-310||\n' >> "$TMP/children"
 # BY DEFINITION, and a child that reached its own pre-open gate carries
 # pre_open_gate. Reached by a dependency edge, both hold — the exclusion is scoped
 # to pr_number-swept duplicate anchors only.
+#
+# The 8th column is metadata.tracking_only, and trackdep-396 is the SCOPE control
+# for it (tk-8329m): a holder reached by a DEPENDENCY EDGE carrying the opt-out
+# marker must hold anyway. The marker means "I only reference this PR by number",
+# which cannot be true of a bead somebody filed as an explicit edge against this
+# anchor, so honouring it on the dep arm would re-open tk-je0rk's fail-OPEN hole
+# through a third door.
 cat > "$TMP/deps" <<'D'
 bead-DEPCHILD|up|parent-child|depchild-315|open|
 bead-BLOCKEDKID|up|parent-child|blockedkid-316|blocked|
@@ -843,6 +901,7 @@ bead-MULTIEMPTY|down|blocks|blocker-328|open|pull_request
 bead-DEPFOREIGN|down|blocks|upstream-373|open|pull_request|https://otherhost/acme/repo/pull/999
 bead-COALESCE-A|up|parent-child|bead-COALESCE-B|open|pull_request
 bead-COALESCE-H|up|parent-child|child-392|open|
+bead-TRACKDEP|up|parent-child|trackdep-396|open|||true
 D
 
 # Anchors whose dep probe ERRORS (exit 1) — the fail-closed case.
@@ -1420,13 +1479,16 @@ case "$2" in
           # 4th column: the child's STATUS. Absent -> open. The gate reads every
           # non-closed status, so a `blocked`/`hooked` child holds the merge too.
           # 5th: the child's own pr_url (empty = the `?` wildcard).
-          while IFS='|' read -r cpr cid cmr cstatus cprurl; do
+          # 6th: metadata.tracking_only, the operator's explicit non-gating marker
+          # (tk-8329m). Absent -> "" -> holds, which is the fail-closed default
+          # every legacy row above keeps exercising.
+          while IFS='|' read -r cpr cid cmr cstatus cprurl ctrack; do
             [ -n "$cpr" ] || continue
             [ "$cpr" = "$prnum" ] || continue
             grep -qx "$cid" "$FAKE_CLOSED" 2>/dev/null && continue
             status_ok "${cstatus:-open}" || continue
-            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"%s","pr_url":"%s"}}' \
-                    "$cid" "${cstatus:-open}" "$cpr" "$cmr" "$cprurl")
+            obj=$(printf '{"id":"%s","status":"%s","metadata":{"pr_number":"%s","merge_result":"%s","pr_url":"%s","tracking_only":"%s"}}' \
+                    "$cid" "${cstatus:-open}" "$cpr" "$cmr" "$cprurl" "$ctrack")
             if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
           done < "$FAKE_CHILDREN"
         fi
@@ -1503,13 +1565,17 @@ case "$2" in
     fi
     out=""
     if [ -f "$FAKE_DEPS" ]; then
-      while IFS='|' read -r danchor ddir dtype did dstatus dmr dprurl; do
+      while IFS='|' read -r danchor ddir dtype did dstatus dmr dprurl dtrack; do
         [ -n "$danchor" ] || continue
         [ "$danchor" = "$aid" ] || continue
         [ "$ddir" = "$dir" ] || continue
         [ -z "$typ" ] || [ "$dtype" = "$typ" ] || continue
         grep -qx "$did" "$FAKE_CLOSED" 2>/dev/null && continue
-        obj=$(printf '{"id":"%s","status":"%s","dependency_type":"%s","metadata":{"merge_result":"%s","pr_url":"%s"}}' "$did" "$dstatus" "$dtype" "$dmr" "$dprurl")
+        # 8th column: metadata.tracking_only. Present on the dep side so the
+        # opt-out's SCOPE is testable — a dependency-edge holder must keep holding
+        # with the marker set, and only a fixture that can set it there can prove
+        # the exclusion did not leak onto that arm.
+        obj=$(printf '{"id":"%s","status":"%s","dependency_type":"%s","metadata":{"merge_result":"%s","pr_url":"%s","tracking_only":"%s"}}' "$did" "$dstatus" "$dtype" "$dmr" "$dprurl" "$dtrack")
         if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
       done < "$FAKE_DEPS"
     fi
@@ -1640,7 +1706,7 @@ has '^320$' "$TMP/merged" && ok "(18) closed dep-linked child -> merged" \
 # standing between them and a merge is the gate each case is about.
 for n in 302 303 304 305 306 307 308 309 310 312 313 315 316 317 318 321 \
          322 323 324 325 326 329 331 332 334 336 337 338 339 340 341 342 \
-         344 345 346 347 348 349 350 358 360 361; do
+         344 345 346 347 348 349 350 358 360 361 395 396; do
   has "^$n$" "$TMP/merged" && bad "($n) anchor must NOT be merged" \
                           || ok "($n) anchor not merged"
 done
@@ -1928,6 +1994,21 @@ grep -q "PR#325 in-flight holder filter unreadable; merge held" <<< "$OUT1" \
 grep -q "PR#326 has unclosed rework/review bead bothsrc-326 (open, merge_result=pre_open_gate)" <<< "$OUT1" \
   && ok "(24) holder seen by BOTH pr_number and dep probes -> held (provenance unions to 'dep')" \
   || bad "(24) a both-source holder must not be demoted into the excludable pr_number class (got: $OUT1)"
+
+# (TO1)-(TO3) tk-8329m: THE THIRD HOLDER SHAPE. tracking-394 and tracking-395 are
+# the same bead in every respect the filter reads — open, this PR's number, a
+# same-repository pr_url, no merge_result — and differ only in the marker, so the
+# pair cannot pass by the repository filter or the status read doing the work.
+# (TO1) is the fix; (TO2) and (TO3) are the two ways it must NOT generalize.
+has '^394$' "$TMP/merged" \
+  && ok "(TO1) tracking_only=true holder -> merged (the non-gating record no longer holds its own PR)" \
+  || bad "(TO1) an explicitly non-gating tracking record must not hold the merge (got: $OUT1)"
+grep -q "PR#395 has unclosed rework/review bead tracking-395 (open)" <<< "$OUT1" \
+  && ok "(TO2) tracking_only=false -> held (the marker is read for truth, not presence)" \
+  || bad "(TO2) a false marker must not disarm the hold (got: $OUT1)"
+grep -q "PR#396 has unclosed rework/review bead trackdep-396 (open)" <<< "$OUT1" \
+  && ok "(TO3) tracking_only on a DEP-EDGE holder -> held (opt-out is scoped to pr_number holders)" \
+  || bad "(TO3) a dependency-edge holder must hold regardless of the marker (got: $OUT1)"
 
 # (25)-(26) tk-wkrcy: a probe payload can be MORE THAN ONE JSON document and still
 # clear a `jq -e` run over the raw stream, because -e reports the exit status of
@@ -2333,15 +2414,15 @@ hasin "$OUT1" "anchor bead-TWOKEYS names more than one PR number in this reposit
   && ok "(FK4) the hold names every number the anchor claims" \
   || bad "(FK4) hold reason must list the conflicting numbers"
 
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "19" "(INV) exactly nineteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381 + coalesced sibling-flip pair 389)"
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "20" "(INV) exactly twenty PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381 + coalesced sibling-flip pair 389 + non-gating tracking record 394)"
 # Every merge that was PERFORMED bound itself to the head it validated — no
 # unbound `gh pr merge` slipped through on any path.
 eq "$(awk -F'\t' '$2 == "" {c++} END {print c+0}' "$TMP/mergeargs")" "0" \
    "(INV) every merge attempt passed --match-head-commit"
 
 # Summary counters.
-hasin "$OUT1" "19 merged" \
-  && ok "run 1 summary reports 19 merged" || bad "run 1 summary merged count (got: $OUT1)"
+hasin "$OUT1" "20 merged" \
+  && ok "run 1 summary reports 20 merged" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard for the approval gate's own reads. ---------------------
 gh pr view 301 --json reviewDecision >/dev/null 2>&1 \
@@ -2581,14 +2662,14 @@ hasin "$OUT1" "PR#373 has unclosed rework/review bead upstream-373 (open, merge_
 #     certified head (372).
 # No held/skipped anchor leaked: not one of the dependency-edge holders, and not one
 # of the four head-identity cases.
-eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "19" "(INV) exactly nineteen PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381 + coalesced sibling-flip pair 389)"
+eq "$(wc -l < "$TMP/merged" | tr -d ' ')" "20" "(INV) exactly twenty PRs merged (301 + 311 + 314 + unholdable children 319, 320 + approved 330, 333, 335, 343, 351, 359, 362 + cross-repo 364, 365 + head-certified 372 + terminal-re-read control 379 + fork-keyed 380, 381 + coalesced sibling-flip pair 389 + non-gating tracking record 394)"
 # ...and all of them landed in THIS checkout's repository, not wherever gh pointed.
 eq "$(cut -f2 "$TMP/mergedwhere" | sort -u | tr '\n' ' ')" "github.com/acme/repo " \
    "(INV) every merge landed in the origin-derived repository"
 
 # Summary counters.
-hasin "$OUT1" "19 merged" \
-  && ok "run 1 summary reports 19 merged (identity view of the same run)" || bad "run 1 summary merged count (got: $OUT1)"
+hasin "$OUT1" "20 merged" \
+  && ok "run 1 summary reports 20 merged (identity view of the same run)" || bad "run 1 summary merged count (got: $OUT1)"
 
 # --- Field-shape guard: only gh-supported --json fields. ----------------------
 gh pr view 301 --json merged >/dev/null 2>&1 \

@@ -803,6 +803,16 @@ certify_pr_identity() {
 #     SKIP inside the loop rather than filtered out of the candidate set: the
 #     ambiguity guard is a WHOLE-SET property, so dropping a held candidate would
 #     make its unheld twin for the same PR look unambiguous and PROMOTE it.
+#   - A NON-GATING TRACKING RECORD (tk-8329m), carried and skipped in that same
+#     place. `tracking_only` is the operator's statement that a bead references a
+#     PR for LINKAGE ONLY — it holds pr_url/pr_number and a branch and withholds
+#     merge_result deliberately, so that nothing arms itself to land a pull request
+#     nobody asked this city to land. That is this phase's candidate shape exactly,
+#     and the live case (tk-uicmw / PR#291) stayed out only by an incidental
+#     `gc.routed_to=human`. The marker also releases merge-skill.sh's in-flight
+#     holder hold, so honouring it HERE is what makes it safe to set there: a
+#     marker read by one pass and ignored by this one would trade a permanent hold
+#     for an armed auto-merge.
 #
 # A FAILED STAMP IS NOT UNSAFE_RC; A SUCCESSFUL ONE CAN BE. The two directions are
 # not symmetric. A merge_result stamp that does NOT persist leaves the anchor
@@ -918,6 +928,9 @@ PASS_ORIGIN_REPO_Q=$(resolve_origin_repo_q)
 #     one (tk-44xkw). Reopening is what makes a closed bead a phase-0 candidate, so a
 #     hold that vetoes the recovery has to veto the reopen that feeds it. Carried on
 #     the row and skipped in the loop, not filtered, for the same whole-set reason.
+#     `tracking_only` travels with them (tk-8329m) and for exactly that argument: a
+#     deliberately non-gating tracking record must not reach the recovery through
+#     this arm's back door.
 #   - AMBIGUITY. Two closed candidates naming the same PR: neither is reopened.
 #   - AN UNCERTIFIED PR. The same `certify_pr_identity` phase 0 uses — repository, URL,
 #     head branch and head repository — because reopening binds this bead to that PR.
@@ -1076,8 +1089,14 @@ if [ "$CLOSED_ARM_OK" = 1 ] && [ -n "$OPEN_PR_NUMS" ]; then
           # rather than gone. And it is carried rather than filtered for the reason
           # this very projection states above about dropped rows: the ambiguity guard
           # is a whole-set property.
+          # tracking_only travels with them, on the same terms and for the same
+          # back-door reason (tk-8329m): reopening is what makes a closed bead a
+          # phase-0 candidate, so a marker honoured only there would let a
+          # deliberately non-gating tracking record in through this arm and hand it
+          # to the recovery anyway.
           hold: ([ (if held($m.merge_hold) then "merge_hold=" + ($m.merge_hold | tostring) else empty end),
-                   (if held($m.rebase_hold) then "rebase_hold=" + ($m.rebase_hold | tostring) else empty end) ]
+                   (if held($m.rebase_hold) then "rebase_hold=" + ($m.rebase_hold | tostring) else empty end),
+                   (if held($m.tracking_only) then "tracking_only=" + ($m.tracking_only | tostring) else empty end) ]
                  | join(", "))
         }' 2>/dev/null) || {
       echo "check-set-heal: WARN the closed-candidate projection failed; the candidate set is unreliable — skipping the closed-but-not-landed arm this pass, retrying next" >&2
@@ -1424,8 +1443,24 @@ if [ "$RECOVER_SCAN_OK" = 1 ] && [ -n "$RECOVER_RAW" ]; then
         # twin look unambiguous and PROMOTES it — the exact hazard the closed-arm
         # projection below already spells out about dropped rows. A held bead still
         # collides with its rivals; it simply never gets acted on.
+        # tracking_only rides in the SAME field for the same reason (tk-8329m). It
+        # is not "do not land this yet" but "this bead is not an anchor at all" —
+        # a deliberate, operator-set record that a pull request EXISTS, carrying
+        # pr_url/pr_number and a branch and NO merge_result on purpose, so that
+        # nothing arms itself to auto-land a pull request no operator asked this
+        # city to land. That is the recovery candidate shape EXACTLY, and the only
+        # thing keeping the live case (tk-uicmw / PR#291) out of this set was an
+        # incidental gc.routed_to=human. Recovering one stamps merge_result on a
+        # bead whose whole point is to withhold it, phase 1 arms `codex`, and a PR
+        # that was merely TRACKED becomes a PR this city will land. Honouring the
+        # marker here is what keeps it safe to set: without this, clearing the
+        # merge-skill hold with tracking_only would arm the very merge the bead
+        # exists to leave unarmed — strictly worse than the permanent hold it
+        # replaces. Same family rule as merge_hold/rebase_hold: one marker means
+        # ONE thing across every pass.
         hold: ([ (if held($m.merge_hold) then "merge_hold=" + ($m.merge_hold | tostring) else empty end),
-                 (if held($m.rebase_hold) then "rebase_hold=" + ($m.rebase_hold | tostring) else empty end) ]
+                 (if held($m.rebase_hold) then "rebase_hold=" + ($m.rebase_hold | tostring) else empty end),
+                 (if held($m.tracking_only) then "tracking_only=" + ($m.tracking_only | tostring) else empty end) ]
                | join(", "))
       }' 2>/dev/null) || {
     # Same rule as an unreadable scan: a projection that ERRORED yields the same

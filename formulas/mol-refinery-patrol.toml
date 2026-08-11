@@ -230,7 +230,8 @@ onto a still-closed bead would make it a non-candidate for both phases and stran
 permanently — and the closed set is bounded by ONE `gh pr list --state open` before any
 per-bead work, since hundreds of legitimately closed beads per rig carry a `pr_url`.
 It refuses to guess on the same terms (a-norm0) does: review/rework children, a live
-route, a bead an operator has parked (`merge_hold`/`rebase_hold`), a PR a live anchor
+route, a bead an operator has parked (`merge_hold`/`rebase_hold`) or marked non-gating
+(`tracking_only`), a PR a live anchor
 already drives, two candidates for one PR, and any PR whose
 identity does not certify are all excluded — and a bead it already reopened ONCE that
 has been closed AGAIN is escalated rather than reopened, because a live writer is
@@ -266,7 +267,12 @@ hold merge-skill.sh derives from its empty `merge_result`. So is a bead an opera
 PARKED (`merge_hold`/`rebase_hold`, read the way merge-skill.sh reads them): such a bead
 is held precisely BY being out of the anchor set, so it survives every exclusion above
 by construction, and enrolling it would mutate a parked bead and send (a-norm) to arm
-its gate and dispatch a signoff onto a PR nobody can land (tk-44xkw). That refusal is
+its gate and dispatch a signoff onto a PR nobody can land (tk-44xkw). A NON-GATING
+TRACKING RECORD (`tracking_only`, read on the same terms) is refused in the same place
+and for a sharper version of that reason (tk-8329m): it withholds `merge_result` on
+purpose so nothing arms itself to land a PR this city was only tracking, and the same
+marker releases merge-skill.sh's in-flight holder hold — so honouring it there and not
+here would trade a permanent hold for an armed auto-merge. That refusal is
 made per candidate rather than by filtering the candidate set, because the
 two-candidates guard is a WHOLE-SET property: dropping a held bead would make its
 unheld rival for the same PR look unambiguous and get promoted. Running first is what

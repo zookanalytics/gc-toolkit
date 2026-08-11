@@ -243,6 +243,15 @@
 #                      so a hold honoured in one arm and not the other leaves the bead
 #                      OPEN, merge_result-less and no longer a candidate for either —
 #                      the park converted into a permanent strand by the repair.
+#   (TRACKONLY)        a NON-GATING TRACKING RECORD (`tracking_only`) refuses the
+#                      recovery too (tk-8329m). It wears the candidate shape exactly —
+#                      pr_url, pr_number, branch, no merge_result, all on purpose — and
+#                      the same marker releases merge-skill.sh's in-flight holder hold,
+#                      so a marker honoured there and ignored here would trade a
+#                      permanent hold for an ARMED auto-merge of a PR this city was
+#                      only tracking.
+#   (CLOSEDTRACK)      ...and it refuses the REOPEN as well, for CLOSEDHELD's reason:
+#                      the reopen is the write that feeds phase 0.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -260,9 +269,12 @@ mkdir -p "$TMP/bin"
 # Beads. One per line:
 #   id|assignee|merge_result|pr_url|pr_number|branch|merged_target|anchor_bead|
 #   task_kind|source_review_bead|routed_to|check_set|target|source_anchor_bead|
-#   merge_hold|rebase_hold
-# Fields 15/16 are the OPERATOR HOLD markers (tk-44xkw). The literal `__TRUE__` in
-# either emits a JSON BOOLEAN rather than a string, modelling a writer that stores
+#   merge_hold|rebase_hold|tracking_only
+# Fields 15/16 are the OPERATOR HOLD markers (tk-44xkw), and field 17 is
+# `tracking_only`, the non-gating TRACKING-RECORD marker (tk-8329m) — a different
+# claim ("this bead is not an anchor") read on the same terms and vetoing the same
+# two writes. The literal `__TRUE__` in
+# any of them emits a JSON BOOLEAN rather than a string, modelling a writer that stores
 # `merge_hold: true` — the spelling that makes an unguarded `ascii_downcase` abort
 # the whole jq program. `__EMPTY__` works in them too, for the same reason it does in
 # field 7 below: a marker PRESENT but EMPTY is a partial write, and the fixture has to
@@ -311,6 +323,7 @@ b-HOLDOFF|||https://github.com/o/r/pull/723|723|polecat/feat-holdoff|main|||||||
 b-HOLDEMPTY|||https://github.com/o/r/pull/726|726|polecat/feat-holdempty|main||||||||__EMPTY__|
 b-HOLDDUP|||https://github.com/o/r/pull/724|724|polecat/feat-holddup|main||||||||operator-parked|
 b-HOLDDUPTWIN|||https://github.com/o/r/pull/724|724|polecat/feat-holddup-twin|main||||||
+b-TRACKONLY|||https://github.com/o/r/pull/727|727|polecat/feat-trackonly|main||||||||||true
 B
 
 # CLOSED beads, and the reopen marker some of them carry. Kept OUT of $TMP/beads (which
@@ -337,6 +350,7 @@ b-CLOSEDFLAP	closed	PR#767@open
 b-CLOSEDRETRY	closed	PR#769
 b-CLOSEDROUTED	closed
 b-CLOSEDHELD	closed
+b-CLOSEDTRACK	closed
 S
 
 # $FAKE_FLIP rows are "<num>\t<state>": the PR's state CHANGES to <state> after its
@@ -393,6 +407,7 @@ cat > "$TMP/prs" <<'P'
 723|OPEN|main|polecat/feat-holdoff|
 726|OPEN|main|polecat/feat-holdempty|
 724|OPEN|main|polecat/feat-holddup|
+727|OPEN|main|polecat/feat-trackonly|
 P
 
 # --- git stub. ------------------------------------------------------------------
@@ -615,7 +630,7 @@ rnl_set() {
 
 # Emit one bead as a JSON object, with LIVE metadata overlays applied.
 emit() {
-  local id="$1" assignee mr prurl prnum branch target ab tk srev routed cs sab mh rh
+  local id="$1" assignee mr prurl prnum branch target ab tk srev routed cs sab mh rh to
   local row; row=$(awk -F'|' -v i="$id" '$1==i{print; exit}' "$FAKE_BEADS")
   assignee=$(printf '%s' "$row" | cut -d'|' -f2)
   prurl=$(purl_for "$id")
@@ -632,6 +647,7 @@ emit() {
   sab=$(printf '%s' "$row" | cut -d'|' -f14)
   mh=$(printf '%s' "$row" | cut -d'|' -f15)
   rh=$(printf '%s' "$row" | cut -d'|' -f16)
+  to=$(printf '%s' "$row" | cut -d'|' -f17)
   local plaintgt; plaintgt=$(printf '%s' "$row" | cut -d'|' -f13)
   mr=$(mr_for "$id"); prnum=$(pr_for "$id"); cs=$(cs_for "$id")
   # merged_target: a phase-0 backfill overlays the stored target.
@@ -654,7 +670,7 @@ emit() {
          --arg tk "$tk" --arg sr "$srev" --arg rt "$routed" --arg cs "$cs" \
          --arg anc "$anc" --arg hf "$hflag" --arg pt "$plaintgt" --arg sab "$sab" \
          --arg mrh "$mrh" --arg mrs "$mrs" --arg st "$st" --arg rnl "$rnl" \
-         --arg mh "$mh" --arg rh "$rh" '
+         --arg mh "$mh" --arg rh "$rh" --arg to "$to" '
     {id: $id, title: ("impl " + $id), status: $st,
      assignee: (if $as == "" then null else $as end),
      metadata: ({}
@@ -673,6 +689,8 @@ emit() {
           elif $mh == "__EMPTY__" then {merge_hold: ""} else {merge_hold: $mh} end)
        + (if $rh == "" then {} elif $rh == "__TRUE__" then {rebase_hold: true}
           elif $rh == "__EMPTY__" then {rebase_hold: ""} else {rebase_hold: $rh} end)
+       + (if $to == "" then {} elif $to == "__TRUE__" then {tracking_only: true}
+          elif $to == "__EMPTY__" then {tracking_only: ""} else {tracking_only: $to} end)
        + (if $rt == "" then {} else {"gc.routed_to": $rt} end)
        + (if $anc == "" then {} else {assignee_noncanonical: $anc} end)
        + (if $hf == "" then {} else {check_set_healed: $hf} end)
@@ -1114,6 +1132,28 @@ grep -q 'PR#724 .* MULTIPLE merge_result-less candidates' "$TMP/err1" \
 grep -q 'b-MHOLD is under an operator hold (merge_hold=operator-gated-graduation)' <<< "$OUT1" \
   && ok "(MHOLD) the skip names the marker it read, so a held bead is diagnosable" \
   || bad "(MHOLD) the hold skip must report the marker it read"
+
+# (TRACKONLY) tk-8329m. A NON-GATING TRACKING RECORD refuses the recovery on the same
+# terms a hold does, and it has to, because the marker's OTHER job is to release
+# merge-skill.sh's in-flight holder hold. `tracking_only` says "this bead references a
+# PR for linkage only": it carries pr_url, pr_number and a branch and withholds
+# merge_result ON PURPOSE, so nothing arms itself to land a pull request nobody asked
+# this city to land. That is this phase's candidate shape EXACTLY — the live case
+# (tk-uicmw / PR#291) stayed out of the set only by an incidental gc.routed_to=human,
+# which no rule required it to carry. Recover one and phase 1 arms `codex` on a PR the
+# operator was merely TRACKING; the marker set to clear a permanent hold would have
+# bought an armed auto-merge instead, which is strictly worse than the hold it
+# replaced. The fixture is b-MHOLD's shape with the marker moved to field 17, so it
+# provably reaches the same skip rather than being dropped by an earlier exclusion.
+recovered b-TRACKONLY \
+  && bad "(TRACKONLY) a deliberately non-gating tracking record must NEVER be recovered — stamping merge_result arms the merge its author withheld it to prevent" \
+  || ok "(TRACKONLY) tracking_only vetoes the recovery (the marker means one thing in both passes)"
+dispatched_for b-TRACKONLY \
+  && bad "(TRACKONLY) ...and no signoff may be dispatched onto a PR this city only tracks" \
+  || ok "(TRACKONLY) no review polecat burned on a merely-tracked PR"
+grep -q 'b-TRACKONLY is under an operator hold (tracking_only=true)' <<< "$OUT1" \
+  && ok "(TRACKONLY) the skip names the marker it read, so the refusal is diagnosable" \
+  || bad "(TRACKONLY) the tracking_only skip must report the marker it read (out: $OUT1)"
 
 # (SRCANCH) review tk-ej3wq finding #3. reconcile-merged-prs.sh files stale-base
 # rebase children carrying branch + pr_url + pr_number + source_anchor_bead and NO
@@ -2949,6 +2989,28 @@ recovered b-CLOSEDHELD \
 grep -q 'b-CLOSEDHELD is under an operator hold (merge_hold=operator-gated); NOT reopening' <<< "$OUT12F" \
   && ok "(CLOSEDHELD) the refusal names the marker it read, so an operator can see WHICH gate stopped it" \
   || bad "(CLOSEDHELD) the reopen refusal must report the marker (out: $OUT12F)"
+
+# (CLOSEDTRACK) tk-8329m, the same back door for the tracking marker. Reopening is
+# what MAKES a closed bead a phase-0 candidate, so honouring `tracking_only` in
+# phase 0 alone would let a closed tracking record in through this arm and hand it
+# to the recovery anyway — and a record whose PR is still open is exactly the bead
+# an operator closes once the linkage has served its purpose. Its own fixture for
+# the reason CLOSEDHELD has one: this asserts the ABSENCE of writes.
+closed_fixture
+printf 'b-CLOSEDTRACK|||https://github.com/o/r/pull/773|773|polecat/feat-closedtrack|main||||||||||true\n' > "$TMP/beads"
+printf '773|OPEN|main|polecat/feat-closedtrack|\n' > "$TMP/prs"
+RC12G=0
+OUT12G="$(run_heal 2>"$TMP/err12g")" || RC12G=$?
+eq "$RC12G" "0" "(CLOSEDTRACK) refusing a tracking record is a deferral, not an exposure"
+reopened b-CLOSEDTRACK \
+  && bad "(CLOSEDTRACK) a non-gating tracking record must NEVER be reopened — the reopen is what feeds it to the recovery" \
+  || ok "(CLOSEDTRACK) tracking_only refuses the reopen too, not only the recovery"
+recovered b-CLOSEDTRACK \
+  && bad "(CLOSEDTRACK) ...and it must never reach phase 0 and be stamped visible" \
+  || ok "(CLOSEDTRACK) ...and it never reaches phase 0"
+grep -q 'b-CLOSEDTRACK is under an operator hold (tracking_only=true); NOT reopening' <<< "$OUT12G" \
+  && ok "(CLOSEDTRACK) the refusal names the marker it read" \
+  || bad "(CLOSEDTRACK) the reopen refusal must report the marker (out: $OUT12G)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
