@@ -231,9 +231,20 @@ instructs; the role executes it because that is its contract.
 | Bucket | What it answers | How it is derived |
 |---|---|---|
 | **Ready** | What could move right now, and who would move it | `bd ready` scoped to the subtree; unassigned + routed rows are the ones a pool would actually claim |
-| **Blocked — and why** | What cannot move, named by its blocker | open children with unclosed `blocks`/`waits-for` deps; the *why* is the blocker's identity and status, not the word "blocked" |
+| **Blocked — and why** | What cannot move, named by its blocker | open children held by an unclosed **ready-blocking** dep — the canonical set `bd ready` itself uses, `blocks` / `waits-for` / `conditional-blocks` (`gascity/internal/beads/beads.go:433-436`, `IsReadyBlockingDependencyType`); the *why* is the blocker's identity and status, not the word "blocked" |
 | **Stale** | What has quietly stopped | no state change in N days (children whose last write predates the threshold), which is the only bucket that is invisible on a board |
 | **Contradictory** | Where the subtree disagrees with itself or with the epic's frame | **not a query** — see below |
+
+**Name the blocking set, never re-list a subset of it.** Ready and Blocked must
+*partition* the open subtree, and they only do so if both sides read readiness the same
+way. Ready is whatever `bd ready` returns, and `bd ready` blocks on all three types
+above; a blocked predicate that hand-copies `blocks`/`waits-for` alone puts a child held
+by a live `conditional-blocks` edge in **neither** bucket — `bd ready` excludes it, the
+roll-up never names it, and the visit hands the operator a blocked count that is short
+by exactly the children they most need to see, under a recommendation computed without
+them. So the implementation names the canonical set (or asks core for it via
+`IsReadyBlockingDependencyType`); it does not restate a predicate that already exists
+upstream and can drift from it silently.
 
 The subtree is walked over `parent-child`, which is the work axis and **only** the work
 axis (§5). Because visits hang off their subject by `tracks` and not by `parent-child`
@@ -697,9 +708,12 @@ requires a schema migration.
 contract as a formula-owned `-d` body for the canonical `gate-visit` snippet; add
 `visit_kind`. **Gate:** file a stewardship visit on one real epic → the role produces
 all four buckets plus exactly one recommendation, then holds; the roll-up's
-ready/blocked/stale counts match an independent `bd` query of the same subtree; the
-filed bead passes `assets/scripts/gate-visit.test.sh` (tracks edge, no parent-child,
-`task_kind=visit`, rig-qualified pool).
+ready/blocked/stale counts match an independent `bd` query of the same subtree — with
+the blocked query built over the **full** ready-blocking dep set (§2), and seeded with a
+`conditional-blocks`-held child, since a partial predicate is the one failure this gate
+would otherwise pass by counting nothing; the filed bead passes
+`assets/scripts/gate-visit.test.sh` (tracks edge, no parent-child, `task_kind=visit`,
+rig-qualified pool).
 
 **Phase B — Triggers (§3).** The operator one-step formula first (it is the direct
 bead-host replacement and is exercised by hand); then the phase-checkpoint formula;
