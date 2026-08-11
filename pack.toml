@@ -13,10 +13,15 @@
 # overlays on top of base prompts. Each gc-toolkit-specific doctrine
 # (heartbeat-no-consent-ui, layered-startup-discovery-{boot,deacon,refinery,witness},
 # convoy-integration-branch-mayor, polecat-convoys, polecat-append-notes,
-# polecat-non-impl-done,
 # file-work-records, operator-next-step-trailing) lives in template-fragments/ and is named
 # explicitly in inject_fragments_append below; the base prompt template is
 # reused verbatim from gastown. No whole-file prompt mirrors.
+#
+# One doctrine fragment is deliberately NOT injected here:
+# polecat-non-impl-done is carried by agents/polecat-codex/agent.toml alone.
+# See the polecat patch below for why, and
+# doctor/check-polecat-fragment-sync for the declared exception that keeps
+# the divergence honest.
 #
 # Opt-in sub-packs ship under packs/<name>/ and are imported by
 # specific rigs (not by gc-toolkit's importers). The first sub-pack
@@ -102,6 +107,27 @@ inject_fragments_append = [
 
 [[patches.agent]]
 name = "polecat"
+# polecat-non-impl-done is ABSENT ON PURPOSE — do not "restore" it.
+#
+# It is the largest artifact in this pack: 70,043 B rendered, 68% of the whole
+# polecat prompt, re-paid on every compaction. It documents the done sequence
+# for beads that produce no commits (PR signoffs, research), and the measurement
+# in specs/tk-23wdf/context-budget-ledger.md §7 candidate 1 is that 2.3% of this
+# pool's beads take that path — against 100% on polecat-codex, which is the
+# signoff pool and keeps the fragment (agents/polecat-codex/agent.toml).
+#
+# The cost of the omission is stated in the ledger and accepted, not overlooked:
+# the ~2% of claude-pool beads that are non-impl fall back to the impl done
+# sequence and hand a zero-commit branch to the refinery, which needs a human
+# nudge. The remedy is a research-dispatch emitter that names the method on the
+# bead (§6, second MIGRATE row) — nobody has written it — NOT re-adding 70 KB to
+# every spawn.
+#
+# doctor/check-polecat-fragment-sync asserts this list against every native pool
+# that shares the base prompt, so the divergence is declared there as a
+# pool-scoped exception. That declaration is what makes the fragment REQUIRED on
+# polecat-codex rather than merely tolerated: drop it there too and the check
+# errors.
 inject_fragments_append = [
     "polecat-convoys",
     # Base ships the impl done sequence in two places that are read as one
@@ -111,10 +137,9 @@ inject_fragments_append = [
     # already carried (typically the mayor's dispatch note), invisibly, at the
     # moment the bead is passed to the refinery (tk-t41dq). This fragment
     # supersedes the `--notes` in both copies and in mol-polecat-work's
-    # submit-and-exit step. Ordered before polecat-non-impl-done, which
-    # references the impl sequence it is an alternative to.
+    # submit-and-exit step. It is the anti-case to polecat-non-impl-done: a
+    # 2,583 B correction on the path EVERY polecat takes.
     "polecat-append-notes",
-    "polecat-non-impl-done",
     "file-work-records",
 ]
 
