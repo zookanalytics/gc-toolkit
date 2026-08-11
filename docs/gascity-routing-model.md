@@ -40,6 +40,7 @@ poured is
 | Instance-suffixed `gc.routed_to` normalized on the **demand read side only** | gastownhall/gascity | `17130b324` — "Normalize routed work instance names in demand matching (#4596)". Read side: `controllerDemandRouteTarget` (`rigs/gascity/cmd/gc/build_desired_state.go:1718`, rationale comment at `:1707-1717`), reached from `defaultScaleCheckCountsAndDemand` (`:1474`, invoked at `:735`) for every template in `defaultScaleTargets` — which is *not* only the no-custom-`scale_check` pools (`:446`, `:491`, `:567`): a custom-`scale_check` pool also gets this probe while cold (`isCold` at `:476`; append + `coldWakeTemplates` at `:633-637`), its contribution clamped to 1 (`:757-759`) and merged as a maximum against the custom count (`:766-768`); helper `agentutil.NormalizePoolRouteTarget` (`rigs/gascity/internal/agentutil/resolve.go:228`); coverage `TestDefaultScaleCheckCountsAndDemandNormalizesInstanceSuffixedRouteTarget` and `…LeavesUnmatchedInstanceSuffixAlone` (`cmd/gc/build_desired_state_test.go`). Offer side deliberately unchanged and exact-match: `bdReadyPoolDemandShell` (`rigs/gascity/internal/config/workquery.go:41`) with `$target` from `poolDemandTarget()` (`:157`), and `hookClaimMatchesRoute`'s raw `==` (`rigs/gascity/cmd/gc/cmd_hook_claim.go:1205`) over base-name route targets (`cmd/gc/cmd_hook.go:468`, `:685`). Write side, two distinct helpers: `032c1fbcd` (#3963) centralizes the **agent-derived** route identity as `agentutil.RoutedToIdentity` (`resolve.go:204`, collapse to `PoolName`), which the default sling query inlines rather than calls (`internal/config/workquery.go:532-536` — `internal/config` cannot import `agentutil`, which imports `config`); the **explicit-target-string** collapse is the separate `agentutil.NormalizePoolRouteTarget` (`resolve.go:228`), applied by sling's built-in routing path at `cmd/gc/cmd_sling.go:766`. Assigned-work companion `738f44732` (#4597): `cmd/gc/assigned_work_scope.go:156`, `cmd/gc/pool_desired_state.go:178`. Read in the `rigs/gascity` fork at `390624b0e`, whose adopted upstream base is `e6135a435` (#4847). | 2026-07-31 |
 | `default_sling_formula` — a default formula on the target silently converts a bare `gc sling <target> <bead>` from Lane 1 into a Lane 4 attach | gastownhall/gascity + this city's config | Formula-branch predicate at `rigs/gascity/cmd/gc/cmd_sling.go:978` — taken when `IsFormula` is set, **or** `OnFormula` is non-empty, **or** `NoFormula` is unset and `Target.EffectiveDefaultSlingFormula()` is non-empty; the plain-routing predicate `missingBeadForceApplies` (`:1183`) carries the same condition inverted. Opt-out `--no-formula` ("suppress default formula (route raw bead)") at `:153`, mutually exclusive with `--formula` and `--on` at `:159-160`. Resolver `EffectiveDefaultSlingFormula` (own → inherited → empty) at `internal/config/config.go:3581`. Default-formula and `--on` share one attach pipeline, `attachFormulaToBead` — contract comment "graph-vs-legacy behavior is byte-identical across both entry points" — at `internal/sling/sling_core.go:479-497`. JSON `routed` is computed independently of any routing write at `cmd/gc/cmd_sling.go:1138`; payload keys at `:1090-1106`; `workflow_id` sourced from `result.WorkflowID` (`internal/sling/sling_core.go:730`, source-bead stamp at `:752`). `mol-polecat-work` is graph.v2 via `[requires] formula_compiler = ">=2.0.0"`, matching `graphV2Requirement` / `UsesGraphCompiler` (`internal/formula/requirements.go:14-16`, `:299`). That formula is **imported, not repo-local** — no path under this rig's `formulas/` resolves it, so cite the resolution contract rather than a local file: `gc formula show mol-polecat-work --json` reports the formula plus the `search_paths` it resolved through, and for this formula that is the imported gastown pack's `gastown/formulas/mol-polecat-work.toml:48-49` (materialized in the local pack cache under `~/.gc/cache/repos/<hash>/`). Its stable source is that pack at the fork's adopted pin `sha:33d3a430a67d1782ad364556cb566bdb01d0afe3` — recorded in `rigs/gascity/examples/gastown/packs.lock:5-6`, as `PublicGastownPackVersion` (`internal/config/public_packs.go:11`), and as the `go.mod` pseudo-version `v0.3.1-0.20260617013242-33d3a430a67d` (trailing 12 hex == the pin); the module copy at `$(go env GOMODCACHE)/github.com/gastownhall/gascity-packs@<pseudo-version>/gastown/formulas/mol-polecat-work.toml` is byte-identical to the cached one (`cmp`, 2026-08-02). City scope: `default_sling_formula = "mol-polecat-work"` in this city's `city.toml`, resolved onto every agent in `gc config show`. Stamp-don't-sling counterexample in this repo: `assets/scripts/check-set-heal.sh:355-357` (rationale comment) and `:393` (the direct `gc.routed_to` stamp); the script contains no `gc sling` call. Applies to a **targetless** `gc sling <bead>` too, and by the same predicate: `inferSling1ArgTarget` resolves only a target *string* (`cmd/gc/cmd_sling.go:244-252`), which the shared path turns into an agent (`:433`) and stores as `opts.Target` (`:463-464`) — the same field an explicit target fills — before the `:978` branch is reached, so the resolved default target decides the lane exactly as a typed one would. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 | A `blocks` dep between **work** beads does not gate a formula dispatch | gascity source + live city | Blocking dependency types are exactly `blocks`/`waits-for`/`conditional-blocks` (`readyBlockingDependencyTypes`, `rigs/gascity/internal/beads/beads.go:433`, read via `IsReadyBlockingDependencyType` at `:441`); `step` is separately a `readyExcludeTypes` member (`:424`, "non-root formula steps; parent molecule is the actionable unit", #1039) — but graph.v2 workflows deliberately skip that coercion so their steps stay independently claimable (`internal/molecule/graph_apply.go:206-212`). The routed record under graph.v2 is the **workflow root**, not the work bead (though what a pool worker actually claims are the Ready-visible *step* beads — the pour promotes the root to `in_progress`, `cmd/gc/cmd_sling_test.go:4494`, and the compiler blocks it on `workflow-finalize`): the root persists `gc.routed_to` (#2763 / ga-eld2x — `internal/graphroute/graphroute.go:562-570`, pinned by `TestDecorateGraphWorkflowRecipe_RootStampsRoutedToForClaim` at `internal/graphroute/graphroute_test.go:412` and `cmd/gc/cmd_sling_test.go:4497-4501`) and keeps an executable type instead of the `Ready()`-excluded `molecule` when `gc.kind` is `workflow`/`wisp` (`graph_apply.go:166-170` via `preserveExecutableRootType`, `internal/molecule/molecule.go:1333-1340`). The work bead itself is left unrouted; under the current convoy-first attach it is linked only by membership in the synthetic input convoy the pour mints (`internal/graphv2/invocation.go:415-445`, tracked via `TrackItem`'s `convoy --tracks--> bead` edge, `internal/convoy/membership.go:36`), which the root names in `gc.input_convoy_id` (`internal/sling/sling.go:1520-1534`) — the `workflow_id`/`gc.source_bead_id` pointer pair is written only when the pour carries a source bead (`internal/sling/sling_core.go:741-755`, `graphroute.go:576-577`), and `cmd/gc/cmd_sling_test.go:4460` and `:4506` pin both as empty for a convoy-first attach. The root's own `blocks` edge is formula-internal — root → `workflow-finalize` (`internal/formula/compile.go:672-699`), never to the work bead's blockers. By contrast a *classic* attached wisp routes the source bead and leaves the wisp root unrouted (`sling_core.go:569-578`). graph.v2 stamps `gc.root_bead_id` on every non-root node (`graph_apply.go:219-223`) and connects each step to the root with a deliberately non-blocking `tracks` edge — rationale comment and emit at `:288-313`. Withheld delivery is parked at pour in `gc.deferred_routed_to`, `gc.deferred_execution_routed_to`, and — only for a node that has an assignee — `gc.deferred_assignee` (`deferGraphNodeRouting`, `graph_apply.go:320-329`), each promoted into its live counterpart (`gc.routed_to`, `gc.execution_routed_to`, `assignee`) on activation (`cmd/gc/convergence_store.go:213-240`, `internal/molecule/molecule.go:1399-1406`). The hook's in-progress tier applies the same blocking-type set to the candidate's *own* dependency rows (`internal/config/workquery.go:199-201`, "would strand every molecule step"), pinned by `TestInProgressTierIgnoresNonBlockingDependencyTypes` (`internal/config/workquery_inprogress_blocked_test.go:117`). Negative finding on the write side: no blocker check anywhere on the sling path — the dep walk it does run is cycle detection only (`internal/sling/sling_core.go:114` → `DetectCycle`, `internal/sling/cycle.go:36`); no non-test file in `internal/sling/` reads blocker state (`blocked` occurs there only in `*_test.go` fixtures), and its sole occurrence in `cmd/gc/cmd_sling.go` is the cross-rig routing guard (`:2115`). Behavioral confirmation 2026-08-02 in signal-loom: four beads, two `blocks` deps between them, `gc bd blocked` correct, all four slung molecules poured and claimed within ~2 min. Live confirmation of root routing 2026-08-02 in gc-toolkit: every open `gc.kind=workflow` root is `issue_type=task` carrying `gc.routed_to=gc-toolkit/gc-toolkit.polecat`, with its steps linked by `gc.root_bead_id` and the `workflow-finalize` control bead separately routed to `gc-toolkit/core.control-dispatcher`. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
+| `bd ready` excludes descendants of a **blocked** bead — `is_blocked` cascades down `parent-child` edges | `bd` binary (`github.com/steveyegge/beads`) + live city | Served by the `bd` binary, not the `gc`-side helpers cited above. `bd ready`/`GetReadyWork` filters the materialized `is_blocked = 0` (`internal/storage/sqlbuild/ready.go:110`); the flag is not evaluated at read time. `is_blocked = 1` is set on a non-closed/non-pinned bead that either has an own active blocker (`blocks`/`conditional-blocks` to a non-closed target, or an unmet `waits-for` gate) **or** a `parent-child` edge to a parent with `p.is_blocked = 1` (`internal/storage/issueops/blocked_state.go:198-211`, un-block mirror `:243-256`), recomputed to a fixpoint (`RecomputeIsBlockedInTx`, `:96-119`) so it propagates down the whole subtree — the trigger is a **blocked** ancestor, not a merely-open one. Same rule stated as SQL in the classic `ready_issues` view (`blocked_transitively` recursing `parent-child` from `blocked_directly`, kept out by `bt.issue_id IS NULL`; migration `0025_update_ready_issues_view.up.sql`); both stacks pinned by `TestParityReadyBlockedDescendants` — "descendants of a blocked parent must drop out of ready", "new child of a blocked parent must not be ready" (`internal/storage/domain/db/parity_direct_test.go:260-294`). Deferred parents excluded on a separate path (`getChildrenOfDeferredParents`, `internal/storage/domain/db/ready_work.go:65-116`). Cascade-blocked children are still listed by `bd blocked`, attributed to the parent via the inherited-blocker path (`GetBlockedIssuesInTx`, `internal/storage/issueops/blocked.go:302-317`). Read at the running build `v1.1.1-0.20260729113304-423afdcb2813` (module commit `423afdcb2813`); live confirmation 2026-08-11 in gc-toolkit — this `doc-update` bead `tk-8appy`, a `parent-child` child of the **closed** epic `tk-yw3zb`, was claimed off the pool. | 2026-08-11 |
 
 ## The maintainer's ruling
 
@@ -604,7 +605,8 @@ issues" (`gc bd ready --help`). Spelled out, a bead is offered to a
 | Term | Requirement |
 | --- | --- |
 | status | `open` — `in_progress`, `blocked`, `deferred`, `hooked` are excluded |
-| blockers | no active blocker (dependency-aware `GetReadyWork` semantics) |
+| blockers | no active blocker **of its own**: an open `blocks`/`conditional-blocks` dep to a non-closed target, or an unmet `waits-for` gate (dependency-aware `GetReadyWork` semantics) |
+| parent-child ancestry | no `parent-child` ancestor is **itself** blocked. The blocked flag cascades **down** parent-child edges, so a descendant of a blocked bead is excluded even with no blocker of its own. A **closed** or **pinned** parent — or an **open-but-unblocked** one — does *not* exclude; a **deferred** parent does. See ["The blocked flag cascades down parent-child edges"](#the-blocked-flag-cascades-down-parent-child-edges) below |
 | `gc.routed_to` | equals the pool target — **exact string match** on this offer side (the demand side normalizes an instance suffix; see below) |
 | `assignee` | empty (`--unassigned`) |
 | type | not `epic` (`--exclude-type=epic`) |
@@ -614,6 +616,90 @@ on it. It is dependency-aware about **the bead the predicate reads** —
 which, under a formula dispatch, is not the bead a human thinks of as
 the work. "A `blocks` dep between work beads does not hold a graph.v2
 dispatch" below covers that case.
+
+### The blocked flag cascades down parent-child edges
+
+The `blockers` and `parent-child ancestry` rows are two ways to fail a
+single **materialized** term. `bd ready` does not walk dependency edges
+at read time — it filters `is_blocked = 0`
+(`internal/storage/sqlbuild/ready.go:110`), a column recomputed on write.
+(These are the `bd` binary's own semantics, served by the
+`github.com/steveyegge/beads` module — a *different* codebase from the
+`gc`-side helpers cited elsewhere in this doc; paths in this subsection
+are relative to that module, read at the running build
+`v1.1.1-0.20260729113304-423afdcb2813`. See the Provenance row.)
+
+A bead is marked `is_blocked = 1` when it is non-closed/non-pinned
+**and** either has an active blocker of its own — an open
+`blocks`/`conditional-blocks` dep to a non-closed target, or an unmet
+`waits-for` gate — **or** has a `parent-child` edge to a parent that is
+*itself* `is_blocked = 1`
+(`internal/storage/issueops/blocked_state.go:198-211`; the un-block pass
+mirrors the same arm at `:243-256`). The recompute iterates to a fixpoint
+(`RecomputeIsBlockedInTx`, `:96-119`), so the flag propagates **down the
+whole parent-child subtree** from any blocked ancestor. The classic
+stack's `ready_issues` view states the identical rule as SQL — a
+`blocked_transitively` CTE seeded from `blocked_directly` and recursed
+through `parent-child` edges, kept out of the result by `bt.issue_id IS
+NULL` (migration `0025_update_ready_issues_view.up.sql`) — and a parity
+test pins the two stacks together: parent-child descendants stay ready
+**until a `blocks` edge is added to the parent**, and a child *newly
+attached under an already-blocked parent* "must not be ready"
+(`TestParityReadyBlockedDescendants`,
+`internal/storage/domain/db/parity_direct_test.go:260-294`).
+
+Read the trigger precisely: it is a **blocked** ancestor, not merely a
+non-closed one.
+
+- A **closed** or **pinned** parent never propagates — the mark pass
+  guards `status <> 'closed' AND status <> 'pinned'` and the cascade arm
+  requires `p.is_blocked = 1`, which a closed bead is not. This is why a
+  bead parented under a **closed** epic is claimable — `doc-update`
+  beads, whose doc-keeper parent epic (`tk-yw3zb`) is closed, are
+  routinely claimed off the pool (Provenance row).
+- An **open but unblocked** parent does not propagate either — its
+  `is_blocked` is `0`, so the arm never fires. *Having* a parent is not
+  disqualifying; having a **blocked** one is. (It is tempting to compress
+  the rule to "ready offers only parentless beads" — that is wrong:
+  neither a closed parent nor an open-but-unblocked one excludes a child;
+  only a blocked ancestor does.)
+- The one status-only parent exclusion is **deferral**: children of a
+  parent whose `defer_until` is in the future are dropped directly, not
+  through `is_blocked` (`getChildrenOfDeferredParents`,
+  `internal/storage/domain/db/ready_work.go:65-116`; the view's trailing
+  `NOT EXISTS (… parent.defer_until > UTC_TIMESTAMP())`).
+
+This cascade is the one dependency mechanism that **does** reach a
+hand-filed work bead. A `blocks` dep between two work beads does not — it
+sits on the wrong bead under a graph.v2 dispatch (see ["A `blocks` dep
+between work beads does not hold a graph.v2
+dispatch"](#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch))
+— whereas the `parent-child` cascade follows the very edge the filer
+creates. Hence a real deadlock, and its remedy:
+
+- **The hazard — stamp-and-parent.** File a rework/review bead, stamp
+  `gc.routed_to=<pool>` on it, and attach it as a `parent-child` child of
+  an anchor that is *itself blocked*. The child inherits `is_blocked = 1`
+  and is **never offered**: Tier 3 is a `bd ready` read, and the demand
+  probe runs the same predicate (next section), so pool demand computes
+  to `0` too — the pool neither offers the bead nor scales for it. It is
+  not quite invisible — `bd blocked` **does** surface it, attributing the
+  parent as its blocker through the inherited-blocker path
+  (`GetBlockedIssuesInTx`, `internal/storage/issueops/blocked.go:302-317`)
+  — but nothing *routes* it, so the child and the anchor it was filed to
+  unblock both stall. An **in-flight graph.v2 workflow root is always
+  such an anchor**: the compiler blocks the root on its own
+  `workflow-finalize` (`addWorkflowRootDeps`,
+  `internal/formula/compile.go:672-699`), so it reads `is_blocked = 1`
+  for the entire run.
+- **The remedy — sling, don't stamp-and-parent.** `gc sling` mints a
+  **parentless** workflow root that carries the `gc.routed_to` demand,
+  and the claimable **step** beads hang off that root by non-blocking
+  `tracks` edges, never `parent-child`. `tracks` does not cascade
+  `is_blocked` (only `parent-child` does), so the steps stay ready even
+  while the root is blocked on finalize. That is precisely why slinging
+  routes work where stamp-and-parent deadlocks it: the work is attached
+  by the one edge type the cascade does not follow.
 
 ### Offer and demand are one predicate, read two ways — for a base-name route
 
@@ -849,7 +935,12 @@ Two independent reasons it cannot gate, either of which is sufficient:
   exactly `blocks`, `waits-for`, `conditional-blocks`
   (`readyBlockingDependencyTypes`, `internal/beads/beads.go:433`, read
   through `IsReadyBlockingDependencyType` at `:441`); `parent-child` and
-  `tracks` never block. The step→root edge is that way *on purpose* —
+  `tracks` are both absent from it, so neither is a *blocking dependency
+  type*. (`parent-child` still bears on readiness through a **separate**
+  mechanism — the blocked *flag* cascades down parent-child edges to
+  descendants, ["The blocked flag cascades …"](#the-blocked-flag-cascades-down-parent-child-edges)
+  above — but `tracks` cascades nothing, which is what matters here.) The
+  step→root edge is that way *on purpose* —
   the comment introducing it asks for "a non-blocking dependency" so a
   cascade delete still discovers the workflow "without making the
   workflow root a readiness blocker." The hook's in-progress tier
