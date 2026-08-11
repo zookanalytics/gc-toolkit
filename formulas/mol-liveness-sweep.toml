@@ -1,7 +1,7 @@
 description = """
 mol-liveness-sweep — the P3 enforcement pass: no idle beads. Every open
-bead must be worked, waiting-on-structure, gated, conversing, or
-held-by-design; anything else is an UNNAMED WAIT
+bead must be worked, gated (by structure or by a gating state),
+conversing, or held-by-design; anything else is an UNNAMED WAIT
 (specs/2026-08-fresh-start/operating-principles.md P3;
 specs/2026-08-fresh-start/liveness-and-triage-spec.md §2).
 
@@ -17,10 +17,12 @@ population is approximately the whole backlog — re-listing it every pass
 re-litigates a stable set and buries the one bead that actually changed.
 The baseline lives in `sweep.reported` on the standing subject; its
 failure mode is to re-report, never to hide (operator decision
-2026-08-10, bead tk-snnpp). `assets/scripts/liveness-sweep-delta.test.sh`
-extracts the two marked blocks below and executes them, so the delta
-split, the takeaway filter and the park wording cannot drift from what
-an agent actually runs.
+2026-08-10, bead tk-snnpp) — and that bias governs every check added
+since: a probe that cannot be read excludes nothing.
+`assets/scripts/liveness-sweep-delta.test.sh` extracts the three marked
+blocks below and executes them, so the delta split, the class filters
+(takeaway, gating state, operator hold) and the park wording cannot
+drift from what an agent actually runs.
 
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
@@ -69,7 +71,14 @@ The classes — the first four are named waits or live work; only the
 fifth is a defect:
 
 1. **worked** — assigned, or `gc.routed_to` non-empty.
-2. **waiting-on-structure** — open blockers, or a structural edge that
+2. **gated** — the wait has a name, either in the graph (structure) or
+   in a gating state. The spec's class 2 is both halves
+   (liveness-and-triage-spec.md §2: "an open blocking dependency, an
+   open `type=human` gate, OR gating-state markers — refinery
+   sub-states count"); this formula once implemented only the first,
+   which is the defect bead tk-yyfjv records.
+
+   **(i) structure** — open blockers, or a structural edge that
    explains the wait, **checked in the directions that mean waiting** —
    a direction-blind rule floods the census with false waits: (a) it has
    open children via `parent-child`
@@ -82,24 +91,100 @@ fifth is a defect:
    per-candidate pass below. Note: a fully idle linked cluster still
    surfaces through its root (the node with no outgoing waits), so one
    sitting dispositions the cluster.
+
+   **(ii) gating state** — a refinery sub-state that names a wait no
+   edge in the graph expresses: the work is DONE, pushed, codex-green,
+   and parked on an open pull request awaiting a human approval on
+   GitHub. Such a bead has no open blocker and no bd-level gate, so
+   `gc bd ready` returns it, and nothing about it changes until a human
+   acts — so it re-surfaces every pass, forever, and each pass spends a
+   sitting re-deciding a bead nobody in the city can move. Measured on
+   signal-loom (sweep of 2026-08-09T23:55Z): six of the ten unnamed
+   waits were PR-parked, all codex-green, all BLOCKED on GitHub
+   awaiting approval — 60% of that sitting was one condition the
+   classifier could not see. The marker is `merge_result=pull_request`
+   (`docs/work-bead-state-machine.md`; the same field
+   `doctor/check-merge-gate-drop` enumerates live gating anchors on).
+
+   **The marker alone is NOT the test — the PR must still be LIVE.** A
+   naive "carries `merge_result`, skip it" rule builds the inverse
+   defect and hides rejected work permanently, exactly when it most
+   needs a sitting. The marker outlives the work: it stays stamped
+   after the PR closes. So the check is an intersection against the
+   OPEN pull requests read from GitHub, and both terminal states stay
+   VISIBLE — **merged** (the bead is finishable and should surface for
+   close-out) and **closed-unmerged** (the work was rejected and
+   genuinely needs a sitting).
+
+   Three cases deliberately left VISIBLE rather than guessed at, all
+   erring toward re-report: a bead with `merge_result=pull_request` but
+   no parseable `pr_url` (nothing to check liveness against — the
+   refinery patrol backfills `pr_url`/`pr_number`, and until it does
+   the bead is reported); a `pr_url` naming a repository the open-PR
+   read did not cover; and any pass where that read failed at all.
+   `merge_result=pre_open_gate` is NOT covered here and needs no cover:
+   there is no PR to check, and the review bead holding a pre-open gate
+   carries a `blocks` edge onto the anchor, so `gc bd ready` drops it
+   before it can reach the candidate set. If that ever stops being
+   true, it is a distinct discriminator with a distinct liveness test —
+   file it rather than widening this one.
 3. **conversing** — it IS a visit (`task_kind=visit`), or a live visit
    exists in its continuation group. Live means open OR held — a visit
    being held is `in_progress`, which is why the listing above is
    `--status=open,in_progress`; an open-only read would re-file on
    exactly the subjects whose sittings are live.
-4. **held-by-design** — three shapes, all named waits:
+4. **held-by-design** — four shapes, all named waits:
    (a) `task_kind=triage-subject` — a scope bead itself;
    (b) a bead a scope actually HOLDS — parked onto a scope bead with a
    real dependency edge (`gc bd dep add <bead> <scope>`), which makes it
    blocker-blocked, so `gc bd ready` drops it before it ever reaches the
    candidate set. Nothing here has to test for (b): the edge IS the
-   park, and it is the ONLY park (see the note below);
+   park, and it is the only way a SCOPE covers a bead (see the note
+   below — that ruling is about scope membership, and (d) is not scope
+   membership);
    (c) `gc.takeaway` non-empty — a human is holding it awaiting their
    own answer, with `gc.takeaway_at`/`gc.takeaway_by` recording who and
-   when. This is the one held shape carrying no structural edge, so it
-   is the one that must be filtered explicitly. Skip it and the sweep
-   re-litigates precisely the beads a human touched most recently, in
-   front of the person who parked them.
+   when. Skip it and the sweep re-litigates precisely the beads a human
+   touched most recently, in front of the person who parked them;
+   (d) `triage.hold` non-empty — an operator has decided this bead
+   waits, and the value is the REASON it waits, with
+   `triage.hold_at`/`triage.hold_by` recording who and when.
+
+   (c) and (d) are the two held shapes carrying no structural edge, so
+   they are the two that must be filtered explicitly.
+
+   **Why (d) exists, and why it is a stamp rather than an edge**
+   (operator ruling on bead tk-yyfjv, ratified 2026-08-11). A bead the
+   operator has deliberately held had no machine-readable marker at
+   all, so classify saw it as unnamed and re-surfaced it every pass,
+   forever. Live instances at filing: tk-4day9, tk-bird61, tk-0tln5 —
+   the last one's hold existed only as the word HELD in its title,
+   which no classifier can read. The park edge was REJECTED for this
+   scope by that ruling: parking is scope membership, and a hold is a
+   per-bead decision that a later tidy-up of "stray" edges would
+   silently un-park. `gc.takeaway` was not reused for it either — that
+   field is the helm surface's "what this bead needs from a human" and
+   is spent as the board's NEEDS sentence, so overloading it would
+   reroute every operator hold onto the board as a request.
+
+   **A hold must name its wait — that is the whole of P3.** The value
+   IS the reason, and an EMPTY `triage.hold` is a cleared hold, not a
+   hold — the same absent-vs-empty tri-state as `gc.takeaway`, and the
+   same `// ""` coalescing makes it work. Any non-empty stamp holds the
+   bead, including a reasonless `triage.hold=true`: a marker that read
+   as set and silently did nothing would be a worse failure than a
+   terse one. A bare `true` still names no wait, which is why the
+   funnel note lists every held bead WITH its reason — that is what
+   makes a reasonless hold visible as something to fix, rather than a
+   hold nobody can read.
+
+   The hold has no external liveness to check — the operator's decision
+   IS the live thing until they clear it, which is the whole difference
+   from 2(ii), where the live thing is a PR that GitHub can be asked
+   about. So it is honoured for as long as it is stamped, and the
+   funnel note is what keeps a stale hold visible while it is not a
+   defect.
+
 5. **unnamed** — none of the above: the defect this sweep exists for.
 
 **Scope coverage is the EDGE, and only the edge** (operator decision
@@ -111,25 +196,87 @@ worth stating where the park is performed: the edge is load-bearing (a
 tidy-up that deletes it silently un-parks the bead), and the scope bead
 must stay OPEN (closing it un-parks everything it holds). If
 membership-by-name is ever wanted, that token schema is where to start.
+This governs SCOPE COVERAGE only; class 4(d)'s operator hold is a
+per-bead decision, not membership, and is a stamp by the same ruling
+that made the park an edge — for the opposite reason (an edge a tidy-up
+can delete is the wrong home for a decision only the operator may
+reverse).
 
-Mechanically: start from the ready set, apply the jq below, then for
-each survivor check its dependency edges with `gc bd show <id>` — any
-of the three class-2 shapes above (open parent-child children; open
-tracks members; tracks an open bead) → class 2, drop it, logging which
-shape; an epic whose children have ALL closed → keep it, called out as
-a "what comes next?" candidate.
+Mechanically: read the open pull requests once (the block below), apply
+the jq, then for each survivor check its dependency edges with
+`gc bd show <id>` — any of the three class-2(i) structural shapes above
+(open parent-child children; open tracks members; tracks an open bead)
+→ class 2, drop it, logging which shape; an epic whose children have
+ALL closed → keep it, called out as a "what comes next?" candidate.
+
+**The gate half is a batched GitHub read, once per pass, before the
+jq.** One `gh pr list` per repository the candidates' own beads name —
+never one call per bead, and never a call against whatever repository
+`gh` happens to be pointed at. The repositories come from the beads'
+`pr_url` values because a PR NUMBER alone names nothing: every
+repository has a #246, so an unqualified intersection would drop a bead
+whose PR is closed merely because some other repository has that number
+open. Matching on the repo-qualified URL also makes every failure mode
+safe by construction — a repository that was not read contributes no
+open PRs, so its beads are reported rather than hidden.
+
+```bash
+# >>> open-prs
+# The gate half of class 2, read ONCE per pass. Which repositories to ask is
+# read from the BEADS (their own pr_url), never from whatever repository gh
+# happens to be pointed at: a sweep runs in some agent's worktree, and an
+# ambient repo would answer about a different project's PR numbers entirely.
+PRREPOS=$(jq -r '[ .[] | select((.metadata.merge_result // "") == "pull_request") | [ ((.metadata.pr_url // "") | ascii_downcase) | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]+") ] | .[0] | select(. != null) | (.h + "/" + .o) ] | unique | .[]' "$READY" 2>/dev/null)
+PRURLS=$(mktemp)
+PR_LIVENESS=none
+for R in $PRREPOS; do
+  # An `if`, not a `&&`: as the first statement in the loop body a false `&&`
+  # is the body's exit status, which aborts the pass under `set -e`.
+  if [ "$PR_LIVENESS" = "none" ]; then PR_LIVENESS=verified; fi
+  # --limit is REQUIRED: gh pr list defaults to 30 and truncates in silence.
+  ROWS=$(gh pr list --repo "$R" --state open --limit 1000 --json url 2>/dev/null)
+  if [ -n "$ROWS" ] && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf '%s' "$ROWS" | jq -r '.[].url // empty' >> "$PRURLS"
+  else
+    PR_LIVENESS=unverified
+    echo "WARN: open-PR read FAILED for $R — its PR-parked beads are REPORTED this pass, never hidden; say so in the visit body" >&2
+  fi
+done
+OPEN_PRS=$(jq -R . < "$PRURLS" | jq -sc 'map(select(length > 0))')
+# <<< open-prs
+```
+
+`$PR_LIVENESS` is three-valued and all three must stay distinguishable:
+`none` (no PR-parked candidate this pass — nothing to ask about),
+`verified` (every named repository answered), `unverified` (at least one
+did not). Collapsing the last two is the failure this whole file is
+biased against: an unreadable probe that reads as "no open PRs" would
+be indistinguishable from a genuine empty answer. It cannot hide a bead
+— an unread repository contributes no open PRs, so its beads are
+reported — but the sitting is owed the word `unverified` in the visit
+body, because otherwise a list full of already-parked work looks like a
+real backlog.
 
 ```bash
 # >>> classify-candidates
-CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" '
+CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson openprs "${OPEN_PRS:-[]}" '
+  def pr_key:
+    [ ((. // "") | tostring | ascii_downcase)
+      | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
+    | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
   ([($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata["gc.continuation_group"] // empty)]) as $convgroups
+  | ([($openprs // [])[] | pr_key] | map(select(. != ""))) as $openkeys
   | [ ($ready[0] // [])[]
       | select((.metadata["gc.routed_to"] // "") == "")
       | select((.metadata.task_kind // "") != "visit")
       | select((.metadata.task_kind // "") != "triage-subject")
       | select((.metadata["gc.takeaway"] // "") == "")
+      | select((.metadata["triage.hold"] // "") == "")
+      | select((((.metadata.merge_result // "") == "pull_request")
+                and (((.metadata.pr_url // "") | pr_key) as $k
+                     | $k != "" and ($openkeys | index($k)) != null)) | not)
       | select(.id as $id | ($convgroups | index($id)) | not)
     ] | map({id, title, type})')
 # <<< classify-candidates
@@ -137,15 +284,47 @@ printf '%s\n' "$CANDIDATES"
 # apply the edge check (children + tracks) per candidate before step 2
 ```
 
+Neither block contains a BACKSLASH, and that is deliberate — this
+paragraph does not contain one either, for the same reason. A formula
+description is a TOML triple-quoted string, so TOML consumes escapes
+before an agent ever sees them: a trailing backslash silently joins two
+lines, backslash-n becomes a real newline, and jq's string
+interpolation (backslash-paren) is not a valid TOML escape at all — it
+fails the whole formula to parse, which is how this note came to be
+written (the first draft of it did exactly that). The regression test
+extracts these blocks from the RAW file text while the agent runs the
+PARSED string, so any backslash makes those two texts differ and the
+test stops pinning what actually runs. Hence `capture("://...")` with
+no start anchor and no whitespace class, `.h + "/" + .o` instead of
+interpolation, and `jq -R . | jq -sc` instead of splitting on a newline
+literal. The rule for editing this file: if a block needs a backslash,
+find the form that does not.
+
+The `pr_key` normalization is what makes the intersection mean
+anything. It keys on host + owner/repo + number, so `#521` in one
+repository never matches `#521` in another; it ignores the scheme and
+any trailing path (`/files`), so the same PR written two ways still
+matches itself; and anything that is not a pull-request URL — a bare
+number, an empty string, an absent key, an issues link — keys to `""`
+and is dropped from both sides, which leaves the bead visible.
+
 Every `// ""` above is load-bearing, not style: on a real store most
-beads carry no `gc.routed_to`, no `task_kind` and no `gc.takeaway` key
-at all, so a strict `==`/`!=` against a missing key compares to `null`
-and matches the wrong set. The takeaway filter drops a bead whose stamp
-is non-empty and KEEPS one whose stamp is present-but-empty — an empty
-takeaway is a cleared hold, not a hold.
+beads carry no `gc.routed_to`, no `task_kind`, no `gc.takeaway`,
+no `triage.hold` and no `merge_result` key at all — measured on this
+rig, 106 of 147 ready rows carry no `metadata` object whatsoever — so a
+strict `==`/`!=` against a missing key compares to `null` and matches
+the wrong set. Both hold filters drop a bead whose stamp is non-empty
+and KEEP one whose stamp is present-but-empty: an empty takeaway, and
+an empty `triage.hold`, are cleared holds, not holds.
 
 Record in your notes: counts per class as a funnel, the surviving ids,
-and what the edge check dropped. Then close this step:
+what the edge check dropped, and — because these are the drops nothing
+else in the pass makes visible — the PR-parked ids with their PR
+numbers, the held ids WITH the reason each hold gives, and the
+`$PR_LIVENESS` value. A hold and a parked PR are named waits, not
+defects, but a wait nobody ever reads is how a bead disappears for
+good; the funnel note is the only place they surface. Then close this
+step:
 
 ```bash
 gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed
@@ -188,8 +367,7 @@ intended first-run behaviour: one full census, then deltas.
 
 ```bash
 # >>> sweep-delta
-REPORTED=$(gc bd show "$SWEEP_SUBJECT" --json | tr -d '[:cntrl:]' \
-  | jq -r '.[0].metadata["sweep.reported"] // ""')
+REPORTED=$(gc bd show "$SWEEP_SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["sweep.reported"] // ""')
 NEW=$(printf '%s' "$CANDIDATES" | jq -c --arg seen "$REPORTED" '
   ($seen | split(",") | map(select(. != ""))) as $s
   | map(select(.id as $id | ($s | index($id)) | not))')
@@ -245,7 +423,30 @@ The body reports the delta:
     later tidy-up of "stray" edges silently un-parks every bead it held,
     and closing the scope bead does the same. Parking in prose — a note,
     a comment, a decision recorded in the sitting — parks nothing: the
-    bead is a candidate again on the next pass.
+    bead is a candidate again on the next pass;
+  - **hold** — the operator decides this bead waits, and says why:
+    `gc bd update <id> --set-metadata "triage.hold=<the reason>"`, plus
+    `triage.hold_at` and `triage.hold_by`. Class 4(d): the bead stays
+    open, ready and unblocked, and stops being a candidate because the
+    wait now has a name a classifier can read. **This is the hold, and
+    park is NOT it** — park makes a bead a scope's member; a hold is a
+    per-bead decision only the operator reverses, which is why it is a
+    stamp rather than an edge a later tidy-up can delete (operator
+    ruling on tk-yyfjv, 2026-08-11). The value is the reason, so an
+    empty stamp clears the hold and a bare `true` holds the bead while
+    naming nothing — the classify funnel note lists held beads with
+    their reasons so a reasonless one is visible.
+    Offering **park** for a bead the operator simply wants held was
+    itself part of that defect: it is the wrong mechanism, and it was
+    the only one this menu had.
+
+If `$PR_LIVENESS` is `unverified`, say so in the body, in one line at
+the top: the open-PR read failed for at least one repository, so beads
+parked on a live PR may be listed here as candidates. Nothing is
+hidden by that failure, but the sitting would otherwise read a list of
+already-parked work as a real backlog and re-decide beads nobody in the
+city can move — which is the exact cost this class-2 gate half exists
+to remove.
 
 File the visit BEFORE stamping the baseline in step 5. In that order a
 failed create leaves the baseline untouched and the next pass re-reports;
