@@ -48,6 +48,20 @@ mkdir -p "$TMP/bin"
 #                     failure an exit status cannot see: the sling reported
 #                     success and the root carries no route, so it is offered to
 #                     nobody and the child is as stranded as if nothing ran.
+#
+# Two more model the way the WORK ORDER fails, which is the other half of the
+# same fail-open (review tk-d97n8). The template body runs without errexit, so
+# the `gc bd update` that stamps the child is best-effort: it can fail or drop
+# fields and execution walks straight on into the dispatch.
+#   FAKE_CHILD_META       — the metadata object the child READS BACK as. Anything
+#                           short of the full work order must leave the child
+#                           inert: a slung child with no branch/target reads like
+#                           ordinary new work and the polecat branches fresh and
+#                           (post-open) opens a SECOND PR.
+#   FAKE_CHILD_UNREADABLE — `gc bd show` returns nothing at all for the child.
+#                           The empty string a failed read produces must not pass
+#                           for the empty string a clean check produces — which is
+#                           what the jq "ok" sentinel is for.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1" in
@@ -62,8 +76,16 @@ case "$1" in
     case "${2:-}" in
       dep)    shift 2; printf '%s\n' "$*" >> "$FAKE_DEPS" ;;
       update) shift 2; printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
-      show)   printf '[{"id":"%s","metadata":{"gc.routed_to":"%s"}}]\n' \
-                "${3:-}" "${FAKE_ROOT_ROUTE:-}" ;;
+      show)
+        # Two different reads land here — the CHILD's work order (before the
+        # sling) and the sling ROOT's route (after it). Serve each its own row,
+        # keyed on the id, so a case can corrupt one without touching the other.
+        if [ -n "${FAKE_SLING_ROOT:-}" ] && [ "${3:-}" = "$FAKE_SLING_ROOT" ]; then
+          printf '[{"id":"%s","metadata":{"gc.routed_to":"%s"}}]\n' \
+            "${3:-}" "${FAKE_ROOT_ROUTE:-}"
+        elif [ -z "${FAKE_CHILD_UNREADABLE:-}" ]; then
+          printf '[{"id":"%s","metadata":%s}]\n' "${3:-}" "${FAKE_CHILD_META:-null}"
+        fi ;;
     esac ;;
 esac
 exit 0
@@ -92,16 +114,34 @@ sling_ln=$(grep -m1 -n 'gc sling' "$TMP/dispatch.sh" || true); sling_ln=${sling_
   && ok "sling follows the parent-child dep (dep@$dep_ln, sling@$sling_ln)" \
   || bad "sling must come after the parent-child dep (dep@${dep_ln:-none}, sling@${sling_ln:-none})"
 
+# The work-order read-back must PRECEDE the sling — verifying a stamp after
+# arming the child is not a gate, it is a log line.
+read_ln=$(grep -m1 -n 'FIX_MISSING=' "$TMP/dispatch.sh" || true); read_ln=${read_ln%%:*}
+{ [ -n "$read_ln" ] && [ -n "$sling_ln" ] && [ "$sling_ln" -gt "$read_ln" ]; } \
+  && ok "work-order read-back precedes the sling (read@$read_ln, sling@$sling_ln)" \
+  || bad "the child's work order must be read back BEFORE it is slung (read@${read_ln:-none}, sling@${sling_ln:-none})"
+
+# The work order a complete pre-open stamp leaves on the child, and the FIX_*
+# values the arm above WROTE it from. The read-back compares the two, so these
+# must agree for the default (happy-path) cases.
+CHILD_PRE_OPEN='{"branch":"polecat/tk-work","target":"main","source_review_bead":"tk-review","merge_strategy":"mr","rejection_reason":"pre-open signoff requested changes on branch polecat/tk-work","gc.routed_to":"rig/rig.polecat"}'
+
 # run_dispatch <FIX_BEAD> <ANCHOR> <FIX_POOL>
 # The snippet's tail is `[ -n "$FIX_BEAD" ] && { ... }` guard-idiom, which is NOT
 # meant to run under `set -e` (a false guard is a legitimate no-op that returns 1,
 # exactly the cap-arm/no-child case). Run it the way the template body runs — with
 # -u and pipefail for real-bug safety but without -e — and swallow the guard's
 # trailing non-zero so this (set -e) harness does not abort on it.
+#
+# FIX_*/FAKE_CHILD_META default to a complete PRE-OPEN work order; a case that
+# wants the post-open shape or a dropped write exports its own before calling.
 run_dispatch() {
   : > "$FAKE_SLINGS"; : > "$FAKE_WAKES"; : > "$FAKE_DEPS"; : > "$FAKE_UPDATES"
   : > "$FAKE_MAIL"
   FIX_BEAD="$1" ANCHOR="$2" FIX_POOL="$3" CHECK_NAME="codex" \
+  FIX_BRANCH="${FIX_BRANCH:-polecat/tk-work}" FIX_TARGET="${FIX_TARGET:-main}" \
+  FIX_PR_URL="${FIX_PR_URL:-}" FIX_PR_NUM="${FIX_PR_NUM:-}" \
+  FAKE_CHILD_META="${FAKE_CHILD_META:-$CHILD_PRE_OPEN}" \
     bash -c 'set -uo pipefail; source "$1"' _ "$TMP/dispatch.sh" || true
 }
 
@@ -194,6 +234,102 @@ grep -q 'gc.routed_to=human' "$FAKE_UPDATES" \
   && bad "unlinked + sling failed -> no anchor exists to route to human (got: $(cat "$FAKE_UPDATES"))" \
   || ok "unlinked + sling failed -> no anchor write attempted"
 unset FAKE_SLING_RC
+
+# --- work order DROPPED: the child was filed but never stamped ---------------
+# The other half of the same fail-open (review tk-d97n8). The template body runs
+# without errexit, so the `gc bd update` that writes the work order is
+# best-effort — a failed one leaves the child carrying nothing and execution
+# walks straight into the dispatch. Slinging THEN is the damaging outcome, not
+# the safe one: mol-polecat-work over a bead with no branch/target reads like
+# ordinary new work, so the polecat branches fresh from main and re-implements
+# instead of resuming the branch under review. Inert-and-escalated is bounded;
+# runnable-and-malformed force-pushes somewhere else.
+export FAKE_CHILD_META='{}'
+run_dispatch fix-7 tk-anchor rig/rig.polecat
+eq "$(wc -c < "$FAKE_SLINGS" | tr -d ' ')" "0" "dropped work order -> NOT slung (a malformed work order must not become runnable demand)"
+eq "$(wc -c < "$FAKE_WAKES"  | tr -d ' ')" "0" "dropped work order -> pool not woken"
+grep -q 'fix-7' "$FAKE_DEPS" \
+  && ok "dropped work order -> child still linked under the anchor (visibility survives)" \
+  || bad "dropped work order -> the parent-child edge is independent of the stamp (got: $(cat "$FAKE_DEPS"))"
+grep -q '^tk-anchor .*check.codex' "$FAKE_UPDATES" \
+  && ok "dropped work order -> anchor gate marker still cleared (the head is unreviewed either way)" \
+  || bad "dropped work order -> gate marker must still be cleared (got: $(cat "$FAKE_UPDATES"))"
+grep -q 'ESCALATION' "$FAKE_MAIL" \
+  && ok "dropped work order -> mayor escalated" \
+  || bad "dropped work order -> an inert child must not close silently (mail: $(cat "$FAKE_MAIL"))"
+grep -q '^fix-7 .*work order incomplete' "$FAKE_UPDATES" \
+  && ok "dropped work order -> child marked with WHICH fields are missing" \
+  || bad "dropped work order -> child must carry the incomplete-order reason (got: $(cat "$FAKE_UPDATES"))"
+grep -q "gc bd show fix-7" "$FAKE_MAIL" \
+  && ok "dropped work order -> escalation names the work-order inspection, not just the sling" \
+  || bad "dropped work order -> repair must start at the stamp (mail: $(cat "$FAKE_MAIL"))"
+grep -q '^tk-anchor .*gc.routed_to=human' "$FAKE_UPDATES" \
+  && ok "dropped work order -> anchor routed to human" \
+  || bad "dropped work order -> anchor must be routed to human (got: $(cat "$FAKE_UPDATES"))"
+unset FAKE_CHILD_META
+
+# --- work order PARTIAL: branch present, routing field dropped ---------------
+# A single dropped `--set-metadata` is likelier than a wholesale failure, and it
+# is invisible without a field-by-field read-back: the child looks plausible and
+# is offered to nobody.
+export FAKE_CHILD_META='{"branch":"polecat/tk-work","target":"main","source_review_bead":"tk-review","merge_strategy":"mr","rejection_reason":"x"}'
+run_dispatch fix-8 tk-anchor rig/rig.polecat
+eq "$(wc -c < "$FAKE_SLINGS" | tr -d ' ')" "0" "partial work order (no route) -> NOT slung"
+grep -q '^fix-8 .*gc.routed_to' "$FAKE_UPDATES" \
+  && ok "partial work order -> the missing field is named on the child" \
+  || bad "partial work order -> must name the missing field (got: $(cat "$FAKE_UPDATES"))"
+unset FAKE_CHILD_META
+
+# --- the EXPECTATION itself is empty -----------------------------------------
+# Post-open resolves branch/target/url from `gh pr view`. If those reads return
+# nothing, the write stamps empty strings and a naive equality check compares ""
+# to "" and passes — a work order verified to be blank. An empty expectation must
+# count as missing, or the read-back certifies exactly the case it exists to stop.
+export FIX_BRANCH="" FAKE_CHILD_META='{"branch":"","target":"main","source_review_bead":"tk-review","merge_strategy":"mr","rejection_reason":"x","gc.routed_to":"rig/rig.polecat"}'
+run_dispatch fix-12 tk-anchor rig/rig.polecat
+eq "$(wc -c < "$FAKE_SLINGS" | tr -d ' ')" "0" "empty expectation -> NOT slung ('' == '' must not pass for a stamped branch)"
+grep -q '^fix-12 .*branch' "$FAKE_UPDATES" \
+  && ok "empty expectation -> branch reported missing" \
+  || bad "empty expectation -> must report branch missing (got: $(cat "$FAKE_UPDATES"))"
+unset FIX_BRANCH FAKE_CHILD_META
+
+# --- work order UNREADABLE: `gc bd show` returns nothing ----------------------
+# The failure the "ok" sentinel exists for: a failed read yields the same empty
+# string a clean check would, so without the sentinel an unreadable bead passes
+# for a complete stamp.
+export FAKE_CHILD_UNREADABLE=1
+run_dispatch fix-9 tk-anchor rig/rig.polecat
+eq "$(wc -c < "$FAKE_SLINGS" | tr -d ' ')" "0" "unreadable child -> NOT slung (empty output is not a passing check)"
+grep -q '^fix-9 .*unreadable' "$FAKE_UPDATES" \
+  && ok "unreadable child -> marked unreadable rather than silently armed" \
+  || bad "unreadable child -> must report unreadable (got: $(cat "$FAKE_UPDATES"))"
+unset FAKE_CHILD_UNREADABLE
+
+# --- POST-OPEN work order: the PR fields are what keep it on ONE PR ----------
+# existing_pr/pr_url/pr_number are the difference between reworking PR#N and
+# opening a second PR against the same branch. They are required only when the
+# arm that filed the child was the post-open one (FIX_PR_NUM non-empty), so the
+# pre-open cases above must not be held to them.
+export FIX_PR_URL="https://github.com/o/r/pull/7" FIX_PR_NUM="7"
+export FAKE_CHILD_META='{"branch":"pr-head","target":"main","source_review_bead":"tk-review","merge_strategy":"mr","rejection_reason":"x","existing_pr":"https://github.com/o/r/pull/7","pr_url":"https://github.com/o/r/pull/7","pr_number":"7","gc.routed_to":"rig/rig.polecat"}'
+export FIX_BRANCH="pr-head"
+run_dispatch fix-10 tk-anchor rig/rig.polecat
+grep -q 'fix-10' "$FAKE_SLINGS" \
+  && ok "post-open: a complete PR work order IS slung" \
+  || bad "post-open: a complete work order must dispatch (got: $(cat "$FAKE_SLINGS"))"
+eq "$(wc -c < "$FAKE_MAIL" | tr -d ' ')" "0" "post-open: a complete PR work order does not escalate"
+
+# Same child, PR fields dropped — the write that survived makes it look fine.
+export FAKE_CHILD_META='{"branch":"pr-head","target":"main","source_review_bead":"tk-review","merge_strategy":"mr","rejection_reason":"x","gc.routed_to":"rig/rig.polecat"}'
+run_dispatch fix-11 tk-anchor rig/rig.polecat
+eq "$(wc -c < "$FAKE_SLINGS" | tr -d ' ')" "0" "post-open: dropped PR fields -> NOT slung (a slung child would open a SECOND PR)"
+grep -q '^fix-11 .*pr_fields' "$FAKE_UPDATES" \
+  && ok "post-open: dropped PR fields named on the child" \
+  || bad "post-open: must name pr_fields as missing (got: $(cat "$FAKE_UPDATES"))"
+grep -q 'ESCALATION' "$FAKE_MAIL" \
+  && ok "post-open: dropped PR fields -> mayor escalated" \
+  || bad "post-open: dropped PR fields must escalate (mail: $(cat "$FAKE_MAIL"))"
+unset FAKE_CHILD_META FIX_PR_URL FIX_PR_NUM FIX_BRANCH
 
 # --- no-child case: cap arm / signoff pass filed nothing ---------------------
 # When the cap arm escalates instead of filing, FIX_BEAD is empty. Slinging then

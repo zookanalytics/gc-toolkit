@@ -941,10 +941,19 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
         # pr_number. When it hands back, the refinery re-dispatches codex on the
         # (new) branch head via the pre-open path — the PR still never opens until
         # codex is green. review_base is the intended landing target.
-        FIX_BEAD=$(gc bd create "Rework branch $REVIEW_BRANCH: address pre-open signoff findings" -t task --json | jq -r .id)
+        #
+        # FIX_* hold the intended work order in variables so the write below and
+        # the read-back further down cannot disagree about what was supposed to
+        # land. Empty PR fields are what mark this child PRE-OPEN.
+        FIX_BRANCH="$REVIEW_BRANCH"; FIX_TARGET="$REVIEW_BASE"
+        FIX_PR_URL=""; FIX_PR_NUM=""
+        # `// empty`, not a bare `.id`: on a failed create jq prints the literal
+        # "null" for a missing key, and a FIX_BEAD of "null" is non-empty — it
+        # would pass every guard below and sling a bead that does not exist.
+        FIX_BEAD=$(gc bd create "Rework branch $REVIEW_BRANCH: address pre-open signoff findings" -t task --json | jq -r '.id // empty')
         gc bd update "$FIX_BEAD" \
-          --set-metadata branch="$REVIEW_BRANCH" \
-          --set-metadata target="$REVIEW_BASE" \
+          --set-metadata branch="$FIX_BRANCH" \
+          --set-metadata target="$FIX_TARGET" \
           --set-metadata rejection_reason="pre-open signoff requested changes on branch $REVIEW_BRANCH; see review bead notes for findings" \
           --set-metadata source_review_bead=<work-bead> \
           --set-metadata merge_strategy=mr \
@@ -958,16 +967,21 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
         PR_HEAD=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefName -q .headRefName)
         PR_BASE=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json baseRefName -q .baseRefName)
         PR_URL_FOR_FIX=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json url -q .url)
-        FIX_BEAD=$(gc bd create "Rework PR#$PR_NUMBER: address signoff findings" -t task --json | jq -r .id)
+        # Same single source of truth as the pre-open arm. A non-empty
+        # FIX_PR_NUM is what makes the read-back require the PR fields — the
+        # ones that keep the rework on THIS PR instead of opening a second one.
+        FIX_BRANCH="$PR_HEAD"; FIX_TARGET="$PR_BASE"
+        FIX_PR_URL="$PR_URL_FOR_FIX"; FIX_PR_NUM="$PR_NUMBER"
+        FIX_BEAD=$(gc bd create "Rework PR#$PR_NUMBER: address signoff findings" -t task --json | jq -r '.id // empty')
         gc bd update "$FIX_BEAD" \
-          --set-metadata branch="$PR_HEAD" \
-          --set-metadata target="$PR_BASE" \
+          --set-metadata branch="$FIX_BRANCH" \
+          --set-metadata target="$FIX_TARGET" \
           --set-metadata rejection_reason="signoff requested changes on PR#$PR_NUMBER; see PR review comments for findings" \
           --set-metadata source_review_bead=<work-bead> \
           --set-metadata merge_strategy=mr \
-          --set-metadata existing_pr="$PR_URL_FOR_FIX" \
-          --set-metadata pr_url="$PR_URL_FOR_FIX" \
-          --set-metadata pr_number="$PR_NUMBER" \
+          --set-metadata existing_pr="$FIX_PR_URL" \
+          --set-metadata pr_url="$FIX_PR_URL" \
+          --set-metadata pr_number="$FIX_PR_NUM" \
           --set-metadata gc.routed_to="$FIX_POOL"
       fi
       # Attach as a child of the anchor (visibility + completion interlock).
@@ -985,6 +999,64 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
         gc bd update "$ANCHOR" --unset-metadata "check.$CHECK_NAME" >/dev/null 2>&1 || true
       elif [ -n "$FIX_BEAD" ]; then
         echo "WARN: no gating anchor resolved for review <work-bead>; rework $FIX_BEAD filed unlinked" >&2
+      fi
+      # --- Verify the child's WORK ORDER before arming it. ---------------------
+      # The stamped fields ARE the work order: branch/target say WHICH branch to
+      # resume and where it lands, existing_pr/pr_url/pr_number (post-open only)
+      # say to rework THAT PR rather than open a second one, source_review_bead
+      # names the review whose findings to address, merge_strategy keeps it on the
+      # PR path, rejection_reason carries the resume-don't-redo instruction, and
+      # the route says who claims it. That write is a plain `gc bd update` in a
+      # template body that runs WITHOUT errexit, so a failed or partial one leaves
+      # the child carrying none of it and execution continues here regardless.
+      #
+      # Slinging then is worse than not slinging: it attaches mol-polecat-work to
+      # a bead that reads like ordinary new work, and the polecat that claims it
+      # branches fresh from main, re-implements, and (post-open) opens a SECOND PR
+      # — instead of resuming the branch under review. An unstamped child sitting
+      # inert is a bounded orphan a human can route; runnable demand over a
+      # malformed work order is a force-push in the wrong place (review tk-d97n8).
+      # So READ THE STAMP BACK and arm only on a complete one — the same
+      # write-then-read-back rule the stale-base rebase arm applies for the same
+      # reason (assets/scripts/reconcile-merged-prs.sh): `gc bd update` reporting
+      # success is not proof the write is durable.
+      #
+      # Each field is compared against the FIX_* variable the write itself used,
+      # and an EMPTY expectation counts as missing — otherwise a `gh pr view` that
+      # returned nothing would make its own check vacuously true. The exception is
+      # source_review_bead, checked only for non-emptiness: its value is the
+      # `<work-bead>` placeholder you substitute above, so an equality test here
+      # would compare against whichever copy of it got substituted.
+      #
+      # The route is the one field allowed to be missing-because-consumed: a claim
+      # CONSUMES gc.routed_to, so a polecat that picked the child up between the
+      # write and this read has already made it reachable. Hence assignee-or-route,
+      # not bare equality.
+      #
+      # jq prints the literal "ok" when nothing is missing, so an unreadable bead
+      # (empty output, failed parse) cannot masquerade as a complete stamp by
+      # producing the same empty string a clean check would.
+      FIX_MISSING=""
+      if [ -n "$FIX_BEAD" ]; then
+        FIX_ROW=$(gc bd show "$FIX_BEAD" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037')
+        FIX_MISSING=$(printf '%s' "$FIX_ROW" \
+          | jq -r --arg branch "${FIX_BRANCH:-}" --arg target "${FIX_TARGET:-}" \
+                  --arg pr "${FIX_PR_URL:-}" --arg num "${FIX_PR_NUM:-}" \
+                  --arg pool "${FIX_POOL:-}" '
+              (.[0] // {}) as $b | ($b.metadata // {}) as $m | [
+                (if $branch != "" and ($m.branch // "") == $branch then empty else "branch" end),
+                (if $target != "" and ($m.target // "") == $target then empty else "target" end),
+                (if ($m.source_review_bead // "") != "" then empty else "source_review_bead" end),
+                (if ($m.merge_strategy // "") == "mr" then empty else "merge_strategy" end),
+                (if ($m.rejection_reason // "") != "" then empty else "rejection_reason" end),
+                (if $num == "" then empty
+                 elif $pr != "" and ($m.existing_pr // "") == $pr
+                      and ($m.pr_url // "") == $pr
+                      and (($m.pr_number // "") | tostring) == $num then empty
+                 else "pr_fields" end),
+                (if (($m["gc.routed_to"] // "") == $pool) or (($b.assignee // "") != "")
+                 then empty else "gc.routed_to" end)
+              ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
       fi
       # DISPATCH the rework. The parent-child edge above makes the child inherit the
       # still-open anchor's is_blocked (it blocks on workflow-finalize while in
@@ -1015,49 +1087,63 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
       # one `gc sling`, and that is what the escalation hands the operator. The child
       # also stays OPEN under the anchor, so the merge hold still holds either way:
       # what the escalation removes is the silence, not the hold.
-      SLING_OK=""; SLING_RC=0; SLING_ROOT=""; SLING_ROUTE=""
-      if [ -n "$FIX_BEAD" ]; then
+      #
+      # UNARMED carries the reason the child was left inert, from EITHER cause — an
+      # incomplete work order (never slung) or a sling that did not take. Both end in
+      # the same place: a filed, linked, undispatched child, and one escalation that
+      # says which it was.
+      UNARMED=""; SLING_RC=0; SLING_ROOT=""; SLING_ROUTE=""
+      if [ -n "$FIX_BEAD" ] && [ "$FIX_MISSING" != "ok" ]; then
+        UNARMED="child work order incomplete (${FIX_MISSING:-unreadable}); NOT slung"
+      fi
+      if [ -n "$FIX_BEAD" ] && [ -z "$UNARMED" ]; then
         SLING_JSON=$(gc sling "$FIX_POOL" "$FIX_BEAD" --json 2>/dev/null)
         SLING_RC=$?
         SLING_ROOT=$(printf '%s' "$SLING_JSON" \
           | jq -r '.workflow_id // .molecule_id // empty' 2>/dev/null)
-        if [ "$SLING_RC" = 0 ] && [ -n "$SLING_ROOT" ]; then
+        if [ "$SLING_RC" != 0 ]; then
+          UNARMED="gc sling to $FIX_POOL failed (rc=$SLING_RC)"
+        elif [ -n "$SLING_ROOT" ]; then
           SLING_ROUTE=$(gc bd show "$SLING_ROOT" --json 2>/dev/null \
             | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
-          [ "$SLING_ROUTE" = "$FIX_POOL" ] && SLING_OK=1
-        elif [ "$SLING_RC" = 0 ]; then
-          # No root id to verify (a gc without --json on this path, or a route that
-          # minted no workflow): the exit status is all the evidence there is.
-          SLING_OK=1
+          [ "$SLING_ROUTE" = "$FIX_POOL" ] \
+            || UNARMED="sling root $SLING_ROOT is not routed to $FIX_POOL (read back '${SLING_ROUTE:-}')"
         fi
-        [ -n "$SLING_OK" ] && { gc session wake "$FIX_POOL" || true; }
+        # No root id to verify (a gc without --json on this path, or a route that
+        # minted no workflow): the exit status is all the evidence there is.
+        [ -z "$UNARMED" ] && { gc session wake "$FIX_POOL" || true; }
       fi
-      if [ -n "$FIX_BEAD" ] && [ -z "$SLING_OK" ]; then
+      if [ -n "$FIX_BEAD" ] && [ -n "$UNARMED" ]; then
         # Say it in three durable places: on the CHILD (why this bead is sitting
         # still), on the ANCHOR (why the branch/PR is held, and that a human owns it
         # now), and to the mayor. Best-effort writes — the mail and the WARN carry the
         # same repair, so a dropped marker cannot silence the escalation.
         gc bd update "$FIX_BEAD" \
-          --set-metadata blocked_reason="filed but NOT dispatched: gc sling to $FIX_POOL did not take (rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}'). Repair: gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
+          --set-metadata blocked_reason="filed but NOT dispatched to $FIX_POOL: $UNARMED. Repair: gc bd show $FIX_BEAD --json | jq '.[0].metadata' then gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
         if [ -n "$ANCHOR" ]; then
           gc bd update "$ANCHOR" \
             --set-metadata gc.routed_to=human \
-            --set-metadata blocked_reason="rework $FIX_BEAD filed for this signoff round but NOT dispatched to $FIX_POOL; it is cascade-blocked under this anchor, so no pool self-spawns for it. Repair: gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
+            --set-metadata blocked_reason="rework $FIX_BEAD filed for this signoff round but NOT dispatched to $FIX_POOL ($UNARMED); it is cascade-blocked under this anchor, so no pool self-spawns for it. Repair: gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
         fi
         gc mail send mayor/ -s "ESCALATION: rework $FIX_BEAD filed but not dispatched to $FIX_POOL" \
           -m "Signoff returned REQUEST_CHANGES on ${REVIEW_BRANCH:-PR#${PR_NUMBER:-?}} and filed rework
-child $FIX_BEAD under anchor ${ANCHOR:-<unresolved>}, but the dispatch did not take
-(rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}').
+child $FIX_BEAD under anchor ${ANCHOR:-<unresolved>}, but the dispatch did not take:
+$UNARMED
+(sling rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}').
 
 That child is inert. It is a parent-child descendant of the still-open anchor, so it
 inherits the anchor's blocked status and never appears in 'bd ready' — gc.routed_to
 alone cannot self-spawn a polecat on an idle pool (tk-7xvz5, where the same shape sat
 18h). The anchor stays held with an open child nothing will ever work.
 
-Repair — dispatch the child that already exists (do NOT file a second one; two live
-children on one branch race each other's force-push):
+Repair — check the child's work order, then dispatch the child that already exists
+(do NOT file a second one; two live children on one branch race each other's
+force-push). If the work order is the thing that is missing, re-stamp it first:
+branch/target, source_review_bead, merge_strategy=mr, gc.routed_to, and — post-open
+only — existing_pr/pr_url/pr_number, or the polecat will open a second PR.
+  gc bd show $FIX_BEAD --json | jq '.[0].metadata'
   gc sling $FIX_POOL $FIX_BEAD" || true
-        echo "WARN: rework child $FIX_BEAD was filed but the sling to $FIX_POOL did NOT take (rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}'); mayor escalated${ANCHOR:+ and anchor $ANCHOR routed to human}. Repair: gc sling $FIX_POOL $FIX_BEAD" >&2
+        echo "WARN: rework child $FIX_BEAD was filed but NOT dispatched to $FIX_POOL: $UNARMED (sling rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}'); mayor escalated${ANCHOR:+ and anchor $ANCHOR routed to human}. Repair: gc sling $FIX_POOL $FIX_BEAD" >&2
       fi
       # <<< signoff-rework-dispatch
       ;;
