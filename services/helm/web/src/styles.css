@@ -34,7 +34,8 @@ h1 {
 }
 
 .error,
-.warn {
+.warn,
+.partial {
   border-left: 3px solid currentColor;
   margin: 0 0 1rem;
   padding: 0.5rem 0.75rem;
@@ -44,8 +45,15 @@ h1 {
   color: #b3261e;
 }
 
-.warn {
+.warn,
+/* Incomplete, not broken — the same amber as a warning rather than the red of
+   an error, because a partial read still carries real data worth reading. */
+.partial {
   color: #8a6100;
+}
+
+.partial {
+  font-size: 0.875rem;
 }
 
 table {
@@ -142,4 +150,113 @@ th {
   font-size: 0.75rem;
   opacity: 0.7;
   padding: 0.5rem 0.75rem;
+}
+
+/*
+ * Drill-in plane (U8). Same posture as the rest of this file: enough structure
+ * to read the panel, no visual language — that arrives with U6.
+ */
+
+.signals {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+}
+
+.muted {
+  opacity: 0.65;
+}
+
+.drill-open {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+tr.drilled {
+  background: rgb(128 128 128 / 12%);
+}
+
+.drill {
+  border: 1px solid rgb(128 128 128 / 35%);
+  border-radius: 4px;
+  margin-top: 1.5rem;
+  padding: 1rem;
+}
+
+.drill-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.drill-head h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.drill-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.drill h3 {
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  margin: 1rem 0 0.35rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.drill-facts {
+  display: grid;
+  font-size: 0.875rem;
+  gap: 0.15rem 0.75rem;
+  grid-template-columns: max-content 1fr;
+  margin: 0.5rem 0 0;
+}
+
+.drill-facts dt {
+  opacity: 0.65;
+}
+
+.drill-facts dd {
+  margin: 0;
+}
+
+.drill pre {
+  background: rgb(128 128 128 / 12%);
+  border-radius: 3px;
+  font-size: 0.8125rem;
+  margin: 0;
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+}
+
+.drill-activity ol {
+  font-size: 0.8125rem;
+  list-style: none;
+  margin: 0;
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.drill-activity li {
+  border-bottom: 1px solid rgb(128 128 128 / 25%);
+  padding: 0.3rem 0;
+}
+
+/* Liveness is stated in words, not colour alone — the board is read at a glance
+   and colour-only status is unreadable to some operators. */
+.stream-degraded,
+.stream-closed {
+  opacity: 0.8;
 }

@@ -310,6 +310,62 @@ narrow it (`board.tiles ?? []`) before iterating.
 Reasoning and rejected alternatives (codegen, a TS test runner, a `.ts`
 fixture): `specs/tk-eemvf.2/decisions.md`.
 
+## Drill-in plane (`web/src/drill/`, U8)
+
+Clicking a tile's id opens live detail for that anchor: the bead, the session
+working it (with its `?peek` output snapshot), and an activity feed. It reads
+the **supervisor's** typed API — not `/helm` — and keeps itself current off the
+supervisor's SSE stream. A live terminal is U9.
+
+**It addresses the supervisor same-origin.** Not `127.0.0.1:8372`. helm-svc is
+reverse-proxied *by* the supervisor, so the app and the API already share an
+origin, and two things make that the only workable target: the board is read
+over tailscale from machines where `127.0.0.1` is the *reader's* host, and the
+app is served under `connect-src 'self'` (`web/handler.go`), which refuses
+cross-origin requests before they leave the page. The one value discovered at
+runtime is the city name, parsed from the mount path by `src/drill/origin.ts`.
+`npm run dev` proxies `/v0` to the loopback supervisor so the same code path
+works there, taking its city from `HELM_DEV_MOUNT`.
+
+**It never states an incomplete read as a complete one.** The board aggregates
+across every rig, and a rig store that does not answer is normal: the supervisor
+returns 200 with `partial: true` and a reason per store. Every list read here
+therefore carries that envelope (`ListResult` in `src/drill/client.ts`), a read
+that failed outright is expressed as the maximally partial one, and counts come
+from the supervisor's `total` rather than the page it returned. Under a partial
+read the panel says it could not tell whether an agent is working the anchor —
+never "no agent is working this anchor" — and the signals strip states floors
+("at least 3") with the stores' own reasons beside them.
+
+**Its event stream resumes where it left off.** A dropped stream is reconnected
+with capped backoff to a URL carrying `after_seq=<highest seq delivered>`. The
+browser resends `Last-Event-ID` only for its own reconnect of the same
+`EventSource` object, so a replacement built from the bare URL would start at the
+current city head and silently lose the outage — and since the panel refetches
+only on a delivered event, it would then show stale state under a "live"
+indicator. Where no cursor exists yet (the drop preceded the first event), the
+hooks refetch on the way back to `open` instead.
+
+**Its types are generated, not hand-written.** The supervisor API is in the
+OpenAPI spec, so `src/drill/gen/supervisor.d.ts` is generated from it — pruned
+to the eight operations this plane calls, because the full spec generates ~23k
+lines for a spec owned by another repo (the gascity rig). Regenerate after any
+supervisor API change, and commit the result:
+
+```bash
+cd services/helm/web
+npm run gen:supervisor-types                 # from the live supervisor's /openapi.json
+npm run gen:supervisor-types -- --spec <file>  # or from a copy of the spec, offline
+npm run gen:supervisor-types -- --check      # fails if the committed types are stale
+npm test                                     # vitest; no city needed
+```
+
+Adding an endpoint means adding it to `OPERATIONS` in
+`scripts/gen-supervisor-types.mjs` and regenerating — `tsc` rejects a call to
+any path missing from the generated types, so the two cannot drift apart
+silently. The hand-written contract mirror in U7 is for the board JSON only,
+which is absent from the supervisor spec; do not hand-write supervisor shapes.
+
 ## Build / run / test
 
 ```bash
