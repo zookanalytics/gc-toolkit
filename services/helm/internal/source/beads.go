@@ -1,0 +1,400 @@
+package source
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/steveyegge/beads"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
+)
+
+// BeadsSource reads bead state through the IN-PROCESS BEADS LIBRARY
+// (github.com/steveyegge/beads), opening each rig's own `.beads` store the way
+// the `bd` CLI does. It satisfies [Source].
+//
+// WHY THIS EXISTS (tk-x89rn). [SupervisorSource] cannot carry two facts the
+// board model needs, and no HTTP endpoint supplies them:
+//
+//   - updated_at is absent from EVERY supervisor bead payload — /beads,
+//     /beads/graph/{id}, /beads/ready, /bead/{id} and /convoy/{id} alike. The
+//     Bead schema declares the field, but it serializes `omitzero` and arrives
+//     zero, and there is no `fields`/`full` parameter to widen the projection.
+//     Without it stale_days is pinned to 0 and the NORMAL→ELEVATED stale bump
+//     can never fire.
+//   - metadata reaches only the single-bead reads (/bead/{id}, /convoy/{id});
+//     the list and graph endpoints omit it, so the gather cannot see it without
+//     one extra round trip per anchor.
+//
+// Of the two paths the data-access contract sanctions — the in-process library,
+// or a new/extended supervisor endpoint — only this one is buildable from this
+// repository: the supervisor is the `gc` binary, which lives in the `gascity`
+// rig. This is also what the bash PoC always did (`bd list --db <rig>/.beads`),
+// so it is the proven shape rather than a new one.
+//
+// DATA-ACCESS CONTRACT. This still honours the package contract: reads go
+// through the sanctioned beads library, never raw Dolt. There is no
+// sql.Open("mysql") and no JSON_EXTRACT here — the library owns the connection,
+// exactly as it does for every `bd` invocation.
+type BeadsSource struct {
+	cityPath string
+
+	// mu guards stores. Handles are opened lazily and kept for the process
+	// lifetime: a long-lived sidecar re-gathers on every cache miss, and
+	// reconnecting to Dolt each time would be both slow and needless churn
+	// against a store the whole city shares. The rig SET is re-read per gather
+	// (a cheap directory scan), so a rig added later is picked up without a
+	// restart; only its handle is cached.
+	mu     sync.Mutex
+	stores map[string]beadStore
+
+	// openStore is injectable so tests can exercise Gather without a live Dolt.
+	openStore func(ctx context.Context, beadsDir string) (beadStore, error)
+}
+
+// beadStore is the slice of [beads.Storage] this source uses. Narrowing it to
+// four methods keeps the seam testable with a fake — the full Storage interface
+// is ~70 methods.
+type beadStore interface {
+	SearchIssues(ctx context.Context, query string, filter beads.IssueFilter) ([]*beads.Issue, error)
+	GetDependenciesWithMetadata(ctx context.Context, issueID string) ([]*beads.IssueWithDependencyMetadata, error)
+	GetDependentsWithMetadata(ctx context.Context, issueID string) ([]*beads.IssueWithDependencyMetadata, error)
+	Close() error
+}
+
+// BeadsOption configures a BeadsSource.
+type BeadsOption func(*BeadsSource)
+
+// WithCityPath overrides the discovered city root (used by tests).
+func WithCityPath(p string) BeadsOption { return func(s *BeadsSource) { s.cityPath = p } }
+
+// withStoreOpener overrides how a rig store is opened (used by tests).
+func withStoreOpener(f func(ctx context.Context, beadsDir string) (beadStore, error)) BeadsOption {
+	return func(s *BeadsSource) { s.openStore = f }
+}
+
+// NewBeadsSource builds a source over the city's per-rig bead stores. The city
+// root comes from GC_HELM_CITY_PATH, else GC_CITY_PATH, else GC_CITY.
+func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
+	s := &BeadsSource{
+		cityPath:  discoverCityPath(),
+		stores:    map[string]beadStore{},
+		openStore: openLibraryStore,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// openLibraryStore is the production opener: the beads library's own
+// config-respecting entry point, which honours the rig's dolt server-mode
+// settings from .beads/metadata.json.
+func openLibraryStore(ctx context.Context, beadsDir string) (beadStore, error) {
+	return beads.OpenFromConfig(ctx, beadsDir)
+}
+
+func discoverCityPath() string {
+	for _, k := range []string{"GC_HELM_CITY_PATH", "GC_CITY_PATH", "GC_CITY"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Check reports whether this source has a city root with at least one rig bead
+// store to read. It resolves paths only — it opens no store and touches no
+// Dolt — so the entrypoint can pick a backend at startup without paying for a
+// connection it may not use.
+func (s *BeadsSource) Check() error {
+	_, err := s.rigs()
+	return err
+}
+
+// Close releases every cached store handle. The sidecar calls this on shutdown;
+// it is safe to call more than once.
+func (s *BeadsSource) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var errs []string
+	for name, st := range s.stores {
+		if err := st.Close(); err != nil {
+			errs = append(errs, name+": "+err.Error())
+		}
+		delete(s.stores, name)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("closing bead stores: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// rigRef is one rig's identity plus the location of its bead store.
+type rigRef struct {
+	name     string
+	prefix   string
+	beadsDir string
+}
+
+// rigs enumerates <city>/rigs/*/.beads. Scanning the directory (rather than
+// asking the supervisor for the roster) keeps this source self-contained: it
+// needs no HTTP at all, so a supervisor outage degrades the board's freshness
+// but not its ability to read. Rig NAME is the directory name, matching what
+// `gc rig list` reports.
+func (s *BeadsSource) rigs() ([]rigRef, error) {
+	if s.cityPath == "" {
+		return nil, fmt.Errorf("no city path (set GC_HELM_CITY_PATH, GC_CITY_PATH or GC_CITY)")
+	}
+	root := filepath.Join(s.cityPath, "rigs")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("read rigs dir %s: %w", root, err)
+	}
+	var out []rigRef
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		beadsDir := filepath.Join(root, e.Name(), ".beads")
+		if st, err := os.Stat(beadsDir); err != nil || !st.IsDir() {
+			continue
+		}
+		out = append(out, rigRef{
+			name:     e.Name(),
+			prefix:   readIssuePrefix(filepath.Join(beadsDir, "config.yaml")),
+			beadsDir: beadsDir,
+		})
+	}
+	// Deterministic order so the board's pre-sort anchor sequence — and thus
+	// the tie-break among equal rank_scores — does not depend on readdir order.
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no rig bead stores under %s", root)
+	}
+	return out, nil
+}
+
+// readIssuePrefix scans .beads/config.yaml for `issue_prefix: tk`, avoiding a
+// YAML dependency for one scalar (the same trick readSupervisorPort uses for
+// supervisor.toml). Best-effort: an unreadable config yields an empty prefix,
+// which only affects the display field, never which beads are gathered.
+func readIssuePrefix(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		for _, key := range []string{"issue_prefix:", "issue-prefix:"} {
+			if strings.HasPrefix(line, key) {
+				v := strings.TrimSpace(strings.TrimPrefix(line, key))
+				v = strings.Trim(v, `"'`)
+				if v != "" {
+					return v
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// store returns the cached handle for a rig, opening it on first use.
+func (s *BeadsSource) store(ctx context.Context, r rigRef) (beadStore, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if st, ok := s.stores[r.name]; ok {
+		return st, nil
+	}
+	st, err := s.openStore(ctx, r.beadsDir)
+	if err != nil {
+		return nil, err
+	}
+	s.stores[r.name] = st
+	return st, nil
+}
+
+// Gather reads every anchor kind from every rig. A rig that cannot be opened or
+// queried degrades to empty and records a partial error; only a total failure —
+// no rig produced anything — aborts, so the server returns 502 rather than an
+// empty board that reads as "nothing needs attention".
+func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
+	rigs, err := s.rigs()
+	if err != nil {
+		return nil, err
+	}
+
+	g := &gatherState{rigByPrefix: map[string]string{}}
+	for _, r := range rigs {
+		st, err := s.store(ctx, r)
+		if err != nil {
+			g.note(true, []string{"rig " + r.name + ": " + err.Error()})
+			continue
+		}
+		s.gatherRig(ctx, g, st, r)
+	}
+
+	if !g.anyOK {
+		return nil, fmt.Errorf("no rig bead store could be read: %s", strings.Join(g.partialErrs, "; "))
+	}
+	return &Result{
+		Anchors:       g.anchors,
+		Partial:       g.partial,
+		PartialErrors: g.partialErrs,
+	}, nil
+}
+
+// gatherRig collects the three anchor kinds from one rig's store. Each kind
+// fails independently: a rig whose convoys error still contributes its epics.
+func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef) {
+	// Anchors are OPEN beads only, mirroring gc-helm.sh's `--status open` on
+	// each anchor query. Children below are read at ALL statuses so n_closed is
+	// a real count rather than a count of the still-open ones.
+	open := beads.StatusOpen
+
+	for _, kind := range []string{"epic", "decision", "convoy"} {
+		it := beads.IssueType(kind)
+		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &open})
+		if err != nil {
+			g.note(true, []string{kind + "s@" + r.name + ": " + err.Error()})
+			continue
+		}
+		g.ok()
+		for _, iss := range issues {
+			if iss == nil {
+				continue
+			}
+			if kind == "convoy" && !admitConvoy(iss.Title) {
+				continue
+			}
+			a := board.Anchor{
+				ID:        iss.ID,
+				Title:     iss.Title,
+				Kind:      kind,
+				Source:    kind,
+				Rig:       r.name,
+				Prefix:    r.prefix,
+				Priority:  clonePriority(iss.Priority),
+				UpdatedAt: iss.UpdatedAt,
+				Metadata:  decodeMetadata(iss.Metadata),
+			}
+			switch kind {
+			case "epic":
+				a.Children = s.epicChildren(ctx, g, st, iss.ID)
+			case "convoy":
+				a.Children = s.convoyChildren(ctx, g, st, iss.ID)
+			}
+			// A decision needs no roll-up: its band is ELEVATED regardless.
+			g.anchors = append(g.anchors, a)
+		}
+	}
+}
+
+// admitConvoy mirrors the SupervisorSource filter: drop the transient MACHINE
+// convoys, which are the auto-generated `sling-*` wrappers and the per-sling
+// `input convoy for …` one-child wrappers. Partitioning the survivors into
+// owned vs. unowned stays deferred — this source could now read the parent edge
+// and decide, but changing WHICH convoys reach the board is a gather change,
+// and tk-x89rn ships the capability without spending it.
+func admitConvoy(title string) bool {
+	return !strings.HasPrefix(title, "sling-") && !strings.HasPrefix(title, "input convoy for")
+}
+
+// epicChildren returns an epic's DIRECT children — the beads joined to it by a
+// parent-child edge, which in the beads model points child→parent, so the
+// children are the epic's DEPENDENTS.
+func (s *BeadsSource) epicChildren(ctx context.Context, g *gatherState, st beadStore, epicID string) []board.Child {
+	deps, err := st.GetDependentsWithMetadata(ctx, epicID)
+	if err != nil {
+		g.note(true, []string{"children@" + epicID + ": " + err.Error()})
+		return nil
+	}
+	return childrenOf(deps, "parent-child")
+}
+
+// convoyChildren returns a convoy's tracked members. A convoy tracks its
+// members with a `tracks` edge pointing convoy→bead (gascity
+// internal/convoy/membership.go), so the members are what the convoy DEPENDS
+// ON — the opposite direction from an epic's children.
+func (s *BeadsSource) convoyChildren(ctx context.Context, g *gatherState, st beadStore, convoyID string) []board.Child {
+	deps, err := st.GetDependenciesWithMetadata(ctx, convoyID)
+	if err != nil {
+		g.note(true, []string{"convoy " + convoyID + ": " + err.Error()})
+		return nil
+	}
+	return childrenOf(deps, "tracks")
+}
+
+// childrenOf projects the edges of one dependency type onto board children.
+func childrenOf(deps []*beads.IssueWithDependencyMetadata, want string) []board.Child {
+	var out []board.Child
+	for _, d := range deps {
+		if d == nil || string(d.DependencyType) != want {
+			continue
+		}
+		out = append(out, board.Child{
+			ID:        d.Issue.ID,
+			Status:    string(d.Issue.Status),
+			Assignee:  d.Issue.Assignee,
+			UpdatedAt: d.Issue.UpdatedAt,
+			Metadata:  decodeMetadata(d.Issue.Metadata),
+		})
+	}
+	return out
+}
+
+// clonePriority copies the priority into the pointer the model uses. The beads
+// library types it as a plain int where the board wants "absent" to be
+// expressible, and every bead the store returns has one, so this never yields
+// nil — prioWeight's nil branch stays reachable only for anchors built by hand.
+func clonePriority(p int) *int {
+	v := p
+	return &v
+}
+
+// decodeMetadata converts a bead's raw metadata object into the string map the
+// model carries.
+//
+// Values are NOT required to be strings. `bd --set-metadata key=true` is
+// type-inferred to a JSON boolean and `key=42` to a number, so a strict decode
+// into map[string]string fails on the whole object — and one such bead would
+// blank the metadata of every anchor in the gather. (gascity hit exactly this
+// and answered it with its StringMap coercion; this mirrors that behaviour.)
+// Non-string scalars are rendered as their JSON text; nested objects and arrays
+// keep their compact JSON form; a null renders as the empty string. In every
+// case the KEY survives, which is what keeps "absent" distinguishable from "set
+// but empty" for a consumer that checks presence rather than truthiness.
+//
+// A payload that is not a JSON object at all yields nil rather than an error:
+// metadata is carried, not interpreted, and a malformed blob on one bead must
+// not fail a board that has nothing to do with it.
+func decodeMetadata(raw json.RawMessage) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(fields))
+	for k, v := range fields {
+		var str string
+		if err := json.Unmarshal(v, &str); err == nil {
+			out[k] = str
+			continue
+		}
+		out[k] = string(v)
+	}
+	return out
+}

@@ -17,10 +17,29 @@ const (
 	rankTermCap            = 999
 )
 
-// staleDays is 0 for the spike: the supervisor HTTP API omits updated_at, so the
-// staleness tiebreaker and the NORMAL→ELEVATED stale bump cannot be computed.
-// The follow-up bead reintroduces this from a richer source.
-const staleDays = 0
+// staleThresholdDays mirrors gc-helm.sh's STALE_DAYS=14: a NORMAL anchor
+// untouched for MORE than this many days is bumped to ELEVATED.
+const staleThresholdDays = 14
+
+// staleDays is whole days since updatedAt, mirroring gc-helm.sh line 769
+// (`(($now - $upd) / 86400) | floor`). A zero updatedAt means the source could
+// not read the field, which the bash treats as `$upd == null` → 0.
+//
+// The result is floored at 0. A negative value — a future updated_at, from clock
+// skew between the writer and this process — occupies the units lane of
+// rank_score, where it would borrow from the weight lane and could invert the
+// band ordering the lane packing exists to guarantee. gc-helm.sh does not floor;
+// it also does not run against a clock it did not set.
+//
+// There is deliberately no UPPER clamp here: rankScore caps its own term, so
+// capping the reported value too would only lie to the reader about how old an
+// ancient anchor is. The tile reports the real age; the rank lane stays bounded.
+func staleDays(updatedAt, now time.Time) int {
+	if updatedAt.IsZero() {
+		return 0
+	}
+	return max(int(now.Sub(updatedAt)/(24*time.Hour)), 0)
+}
 
 // prioWeight mirrors gc-helm.sh's `def prio_w($p)`: max(0, 4-priority),
 // with a nil/absent priority treated as the gather default (priority 3 → 1).
@@ -52,10 +71,11 @@ func counts(children []Child) (mTotal, nClosed, open, inProgress int) {
 }
 
 // severity mirrors gc-helm.sh's band derivation. STRANDED (HIGH) is open work
-// with none in progress. The stale bump (NORMAL→ELEVATED when stale>14)
-// is a no-op in the spike because staleDays is 0, but is kept structurally so the
-// follow-up only has to supply a real staleDays.
-func severity(src string, mTotal, open, inProgress int) Severity {
+// with none in progress. The stale bump (NORMAL→ELEVATED when stale>14) fires
+// on a real stale, which an anchor with an unreadable updated_at never reaches:
+// staleness there is 0, so an unknown age is treated as fresh rather than
+// silently promoted.
+func severity(src string, mTotal, open, inProgress, stale int) Severity {
 	var sev0 Severity
 	switch {
 	case src == "decision":
@@ -69,20 +89,21 @@ func severity(src string, mTotal, open, inProgress int) Severity {
 	default:
 		sev0 = SevNormal
 	}
-	if sev0 == SevNormal && staleDays > 14 {
+	if sev0 == SevNormal && stale > staleThresholdDays {
 		return SevElevated
 	}
 	return sev0
 }
 
 // rankScore reproduces line 672: sevrank*1e6 + weight*1e3 + min(stale,999). The
-// spike weight is m_total + prio_w(priority) (the cross-rig-ref term is
-// deferred). weight is capped so it can never bleed into the severity lane.
-func rankScore(sev Severity, mTotal int, priority *int) int {
+// weight is m_total + prio_w(priority) (the cross-rig-ref term is deferred).
+// weight is capped so it can never bleed into the severity lane; stale arrives
+// already clamped to the units lane by [staleDays].
+func rankScore(sev Severity, mTotal int, priority *int, stale int) int {
 	weight := min(mTotal+prioWeight(priority), rankTermCap)
 	return sev.rank()*rankSeverityMultiplier +
 		weight*rankWeightMultiplier +
-		min(staleDays, rankTermCap)
+		min(stale, rankTermCap)
 }
 
 // frontier is the one-line human summary. Display-only; it does
@@ -123,10 +144,13 @@ func needs(a Anchor, mTotal, open, inProgress int) string {
 	}
 }
 
-// computeTile derives a single tile from an anchor.
-func computeTile(a Anchor) Tile {
+// computeTile derives a single tile from an anchor. now is the board's
+// generation instant, shared by every tile so one board never mixes staleness
+// measured against two different clock reads.
+func computeTile(a Anchor, now time.Time) Tile {
 	mTotal, nClosed, open, inProgress := counts(a.Children)
-	sev := severity(a.Source, mTotal, open, inProgress)
+	stale := staleDays(a.UpdatedAt, now)
+	sev := severity(a.Source, mTotal, open, inProgress, stale)
 
 	return Tile{
 		ID:         a.ID,
@@ -140,7 +164,9 @@ func computeTile(a Anchor) Tile {
 		InProgress: inProgress,
 		Frontier:   frontier(a, mTotal, open, inProgress),
 		Needs:      needs(a, mTotal, open, inProgress),
-		RankScore:  rankScore(sev, mTotal, a.Priority),
+		StaleDays:  stale,
+		UpdatedAt:  a.UpdatedAt,
+		RankScore:  rankScore(sev, mTotal, a.Priority, stale),
 	}
 }
 
@@ -152,7 +178,7 @@ func computeTile(a Anchor) Tile {
 func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []string) Board {
 	tiles := make([]Tile, 0, len(anchors))
 	for _, a := range anchors {
-		tiles = append(tiles, computeTile(a))
+		tiles = append(tiles, computeTile(a, now))
 	}
 
 	sort.SliceStable(tiles, func(i, j int) bool {

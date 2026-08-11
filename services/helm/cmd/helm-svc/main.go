@@ -4,9 +4,10 @@
 // and reaches GET /helm (the board) and GET /healthz (liveness) over it.
 // Requests arrive already path-stripped.
 //
-// The service sources all data through the supervisor's loopback HTTP API (a Gas
-// City API) — never raw Dolt — via the internal/source.Source seam, and serves a
-// ranked board ported from assets/scripts/gc-helm.sh.
+// The service reads all bead state through the internal/source.Source seam —
+// either the in-process beads library or the supervisor's loopback HTTP API,
+// both Gas City interfaces, never raw Dolt — and serves a ranked board ported
+// from assets/scripts/gc-helm.sh. See selectSource for which backend runs when.
 package main
 
 import (
@@ -18,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,7 +44,8 @@ func main() {
 	}
 
 	ttl := cacheTTL()
-	src := source.NewSupervisorSource()
+	src, closeSrc := selectSource()
+	defer closeSrc()
 	srv := server.New(src, ttl)
 
 	// The supervisor removes any stale socket before spawning us, so we own
@@ -74,6 +77,57 @@ func main() {
 		log.Fatalf("serve: %v", err)
 	}
 	log.Print("shut down cleanly")
+}
+
+// selectSource picks the data-access backend and returns it with a cleanup
+// func. Both options honour the data-access contract; they differ in what they
+// can SEE (tk-x89rn):
+//
+//   - "beads" (default) reads each rig's own store through the in-process beads
+//     library. It is the only backend that carries updated_at, so it is the only
+//     one under which stale_days is real and the NORMAL→ELEVATED stale bump can
+//     fire. It needs the city root on disk.
+//   - "supervisor" reads the loopback HTTP API. Nothing on that API supplies
+//     updated_at, so under it every tile reports stale_days 0 and no tile ever
+//     ages. Kept as the fallback for an environment with no readable city root.
+//
+// The choice is made ONCE, at startup, and logged — never silently per request.
+// A per-request fallback would let a board quietly lose its staleness lane and
+// still look healthy, which is the exact failure this bead exists to end.
+// GC_HELM_SOURCE forces either backend.
+func selectSource() (source.Source, func()) {
+	noop := func() {}
+	want := strings.ToLower(strings.TrimSpace(os.Getenv("GC_HELM_SOURCE")))
+
+	switch want {
+	case "", "beads", "supervisor":
+	default:
+		// A typo must not quietly select a backend nobody asked for.
+		log.Printf("GC_HELM_SOURCE=%q is not a known backend (want beads|supervisor); using the default", want)
+		want = ""
+	}
+
+	if want == "supervisor" {
+		log.Print("source: supervisor HTTP API (forced by GC_HELM_SOURCE); stale_days will be 0 — the API omits updated_at")
+		return source.NewSupervisorSource(), noop
+	}
+
+	bs := source.NewBeadsSource()
+	if err := bs.Check(); err != nil {
+		if want == "beads" {
+			// Explicitly demanded and unavailable: fail loudly rather than
+			// silently downgrading to a board with no staleness.
+			log.Fatalf("GC_HELM_SOURCE=beads but the city bead stores are unreadable: %v", err)
+		}
+		log.Printf("source: falling back to the supervisor HTTP API (%v); stale_days will be 0 — the API omits updated_at", err)
+		return source.NewSupervisorSource(), noop
+	}
+	log.Print("source: in-process beads library over the city's per-rig stores")
+	return bs, func() {
+		if err := bs.Close(); err != nil {
+			log.Printf("closing bead stores: %v", err)
+		}
+	}
 }
 
 // cacheTTL reads GC_HELM_CACHE_TTL as either a Go duration ("30s") or a
