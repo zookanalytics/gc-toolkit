@@ -152,3 +152,16 @@ from origin is escalated to the mayor rather than guessed at; and any bead carry
 `duplicate_of`, `hold_reason` or a live `merge_hold` is left alone because somebody
 decided that branch should not move. An un-repaired strand is the status quo this
 pass improves on; a wrong handoff creates a new one.
+
+The convoy read is held to the same standard at both of its levels, because both
+degrade into silence rather than into an error. A dependency list that did not read
+and a bead with no upstream convoy both reduce to an empty id list; an unreadable
+convoy bead and a convoy that records no `target` both reduce to an empty string. So
+neither read is trusted on its value alone — the listing must arrive as an array and
+each convoy row as an object, or the candidate is reported and skipped. Guessing
+there is not a cosmetic error in one field: it stamps the repository default over an
+owned convoy's integration branch, which recovers an integration member into a `main`
+PR past the convoy boundary — and the pre-assign readback cannot catch it, because
+all the readback proves is that the *wrong* target stuck. The same empty list also
+leaves the liveness gate with no convoy to test, so a live molecule becomes invisible
+and a running polecat's branch is handed to the refinery mid-implementation.

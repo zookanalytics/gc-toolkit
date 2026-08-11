@@ -504,15 +504,59 @@ while IFS= read -r row; do
   # convoy's (an owned convoy lands its members on an integration branch, not main);
   # then the repository default. Stamping the wrong target would rebase the work onto
   # the wrong base, so an unresolvable one skips the bead.
-  CONVOYS=$(bd_pinned dep list "$ID" --direction=up --json 2>/dev/null \
-    | tr -d '\000-\010\013\014\016-\037' | jq -r '.[]?.id // empty' 2>/dev/null)
+  #
+  # The dependency list is READ-CHECKED, not merely mined for ids. `gc bd dep list`
+  # answers a failure with a JSON object carrying `error` and rc=1, and `.[]?.id`
+  # reduces that to the SAME empty string a genuinely dep-less bead produces. Read as
+  # "no upstream convoy" it fails OPEN in two places at once: here, where the
+  # repository default is then stamped over an owned convoy's integration branch —
+  # the un-retryable wrong handoff, an integration member recovered into a main PR
+  # past the convoy boundary, and the readback below only proves that the WRONG
+  # target stuck — and at gate 6, where an empty convoy list leaves nothing to test
+  # for liveness, so the live molecule standing behind the bead becomes invisible and
+  # a running polecat's branch is handed to the refinery mid-implementation. Both are
+  # facts this pass must establish rather than assume, so an unreadable list skips.
+  DEPS_RAW=$(bd_pinned dep list "$ID" --direction=up --json 2>/dev/null); DEPS_RC=$?
+  if [ "$DEPS_RC" -ne 0 ] || [ -z "$DEPS_RAW" ] \
+     || ! printf '%s' "$DEPS_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    report_only "$ID" "$BRANCH@$HEAD_SHA" "$FLAGGED" 0 \
+      "its upstream dependency list could not be read (gc bd dep list rc=$DEPS_RC); an unread list is not proof that there is no convoy, and guessing one would both land a convoy member on '$DEFAULT_BRANCH' and hide any live molecule standing behind the bead"
+    continue
+  fi
+  CONVOYS=$(printf '%s' "$DEPS_RAW" | tr -d '\000-\010\013\014\016-\037' \
+    | jq -r '.[]?.id // empty' 2>/dev/null)
+  # Both initialized BEFORE the branch that fills them, in the same style and for the
+  # same reason as ROOT_ROWS/STEP_ROWS above: `set -u` is on, and a variable first
+  # assigned inside a conditional arm kills the whole pass the first time the other
+  # arm runs. CROW_RC additionally must not carry over from the previous candidate.
+  CONVOY_UNREADABLE=""
+  CROW_RC=0
   if [ -z "$TARGET" ]; then
     while IFS= read -r cid; do
       [ -n "$cid" ] || continue
-      CT=$(bd_pinned show "$cid" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037' \
-        | jq -r '.[0].metadata.target // empty' 2>/dev/null)
+      # The same distinction one level down, and it is the one that actually bites:
+      # an unreadable convoy bead and a convoy that records no target both leave $CT
+      # empty, and only the second of them means "land on the default". Require a row
+      # that really READ — rc, an array, and an object at [0] — before believing its
+      # answer. rc alone is not enough (a malformed payload can arrive with rc=0),
+      # and an empty array is `bd` declining to return the bead at all, which is an
+      # unestablished fact, not a convoy without a target.
+      CROW=$(bd_pinned show "$cid" --json 2>/dev/null); CROW_RC=$?
+      CROW=$(printf '%s' "$CROW" | tr -d '\000-\010\013\014\016-\037')
+      if [ "$CROW_RC" -ne 0 ] \
+         || ! printf '%s' "$CROW" | jq -e 'type == "array" and (.[0] | type == "object")' \
+              >/dev/null 2>&1; then
+        CONVOY_UNREADABLE="$cid"
+        break
+      fi
+      CT=$(printf '%s' "$CROW" | jq -r '.[0].metadata.target // empty' 2>/dev/null)
       if [ -n "$CT" ]; then TARGET="$CT"; break; fi
     done <<< "$CONVOYS"
+  fi
+  if [ -n "$CONVOY_UNREADABLE" ]; then
+    report_only "$ID" "$BRANCH@$HEAD_SHA" "$FLAGGED" 0 \
+      "its upstream convoy '$CONVOY_UNREADABLE' could not be read (rc=$CROW_RC), so whether that convoy lands its members on an integration branch is unknown; falling back to '$DEFAULT_BRANCH' on an unread convoy is how integration work gets rebased onto the wrong base"
+    continue
   fi
   TARGET_SOURCE="bead/convoy"
   if [ -z "$TARGET" ]; then TARGET="$DEFAULT_BRANCH"; TARGET_SOURCE="repository default"; fi

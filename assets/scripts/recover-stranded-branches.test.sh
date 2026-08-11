@@ -16,6 +16,12 @@
 #   (CONVOY)   a target the BEAD does not carry is taken from its input convoy —
 #              an owned convoy lands its members on an integration branch, and
 #              stamping `main` there would rebase the work onto the wrong base
+#   (DEPFAIL)  the convoy read fails CLOSED at both levels. A dep listing that did
+#              not read, and a convoy bead that did not read, each reduce to the
+#              same empty answer a dep-less/target-less bead gives — so taken at
+#              face value they stamp the repository default over an owned convoy's
+#              integration branch AND leave gate 6 with no convoy to test for
+#              liveness. Both are reported, neither is handed off
 #   (LIVEROOT) THE guard: a candidate whose molecule root records a LIVE session is
 #              left alone. Verified live on tk-f69ay itself — a work bead is open
 #              with assignee=null and no gc.routed_to for the WHOLE time its polecat
@@ -123,6 +129,10 @@ cat > "$TMP/candidates.json" <<JSON
    "metadata":{"branch":"polecat/b-inprog"}},
   {"id":"b-clobber","status":"open","assignee":"","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/b-clobber"}},
+  {"id":"b-depfail","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-depfail"}},
+  {"id":"b-convfail","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-convfail"}},
 
   {"id":"x-assigned","status":"open","assignee":"gc-toolkit__polecat-lx-1","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/x-assigned"}},
@@ -188,6 +198,8 @@ b-fail|c-strand
 b-metafail|c-strand
 b-inprog|c-strand
 b-clobber|c-strand
+b-depfail|c-strand
+b-convfail|c-unreadable
 D
 
 # convoy -> metadata.target (only the owned convoy carries one)
@@ -212,6 +224,8 @@ polecat/b-fail|sha-fail
 polecat/b-metafail|sha-metafail
 polecat/b-inprog|sha-inprog
 polecat/b-clobber|sha-clobber
+polecat/b-depfail|sha-depfail
+polecat/b-convfail|sha-convfail
 R
 
 # sha -> commits ahead of its base
@@ -229,6 +243,8 @@ sha-fail|4
 sha-metafail|1
 sha-inprog|2
 sha-clobber|1
+sha-depfail|1
+sha-convfail|1
 A
 
 # branch -> the `gh pr list` payload for it. Absent -> [] (no PR).
@@ -272,6 +288,15 @@ case "$sub" in
         esac ;;
       show)
         id="$1"
+        # c-unreadable models the nastier half of the convoy read: rc=0 with a
+        # payload that is NOT the expected array. `.[0].metadata.target` reduces it
+        # to the same empty string a convoy without a target produces, so only a
+        # type check can tell "this convoy lands on main" from "this convoy did not
+        # answer".
+        if [ "$id" = "c-unreadable" ]; then
+          printf '{"error":"resolving c-unreadable: connection refused","schema_version":1}\n'
+          exit 0
+        fi
         t=$(awk -F'|' -v c="$id" '$1==c{print $2; exit}' "$FAKE_CONVOY_TARGETS")
         if [ -n "$t" ]; then jq -n --arg t "$t" '[{metadata:{target:$t}}]'; else
           jq -n --arg s "$(state_of "$id" status)" --arg a "$(state_of "$id" assignee)" \
@@ -309,6 +334,13 @@ case "$sub" in
       dep)
         # `dep list <id> --direction=up --json`
         id="$2"
+        # b-depfail models the dep listing FAILING the way bd really fails it: an
+        # error object on stdout with rc=1, which `.[]?.id` reduces to the same
+        # empty string a dep-less bead produces.
+        if [ "$id" = "b-depfail" ]; then
+          printf '{"error":"resolving b-depfail: connection refused","schema_version":1}\n'
+          exit 1
+        fi
         c=$(awk -F'|' -v b="$id" '$1==b{print $2; exit}' "$FAKE_DEPS")
         if [ -n "$c" ]; then jq -n --arg c "$c" '[{id:$c, issue_type:"convoy"}]'; else printf '[]\n'; fi ;;
       *) : ;;
@@ -470,6 +502,29 @@ hasnt "b-clobber could not be released" "$TMP/err" \
   "(RELEASE) a release that reads back clean needs no hand-repair warning"
 hasnt "RECOVERED b-clobber" "$TMP/out" "(RELEASE) and it is never counted as recovered"
 
+# (DEPFAIL): the two unreadable convoy facts. Both beads are otherwise PERFECT
+# candidates — pushed, ahead, no PR, no live molecule — so the only thing that can
+# hold either back is the read check itself. The assertion that matters is the
+# absence of a target stamp: `target=main` on b-convfail is the un-retryable wrong
+# handoff (an owned-convoy member recovered into a main PR, past the convoy
+# boundary), and the pre-assign readback would only confirm that the wrong value
+# stuck.
+has "stranded_branch_flagged=polecat/b-depfail@sha-depfail" "$TMP/updates" \
+  "(DEPFAIL) an unreadable dependency list flags the bead"
+hasnt "gc bd update b-depfail --set-metadata branch=" "$TMP/updates" \
+  "(DEPFAIL) and never stamps a guessed target on it"
+hasnt "gc bd update b-depfail --status" "$TMP/updates" "(DEPFAIL) nor hands it off"
+has "its upstream dependency list could not be read" "$TMP/err" \
+  "(DEPFAIL) explains the refusal"
+has "stranded_branch_flagged=polecat/b-convfail@sha-convfail" "$TMP/updates" \
+  "(DEPFAIL) an unreadable convoy bead flags the bead too"
+hasnt "gc bd update b-convfail --set-metadata branch=" "$TMP/updates" \
+  "(DEPFAIL) an unread convoy never falls back to the repository default"
+hasnt "gc bd update b-convfail --status" "$TMP/updates" \
+  "(DEPFAIL) and the bead is never handed off on a guessed target"
+has "its upstream convoy 'c-unreadable' could not be read" "$TMP/err" \
+  "(DEPFAIL) naming the convoy that did not answer"
+
 # (HASPR) / (PRFAIL) / (NOBRANCH) / (NOBASE) / (BEHIND) / (FRESH)
 hasnt "gc bd update b-pr " "$TMP/updates" "(HASPR) a branch with an open PR is left alone"
 has "already has #297 OPEN" "$TMP/out" "(HASPR) says which PR it found"
@@ -487,10 +542,10 @@ hasnt "gc bd update b-fresh" "$TMP/updates" "(FRESH) work younger than the age g
 
 # (BOUND): already flagged for this exact (branch, tip) -> no second warning, no
 # second mail, no repeated marker write.
-# 4 reported = b-ghfail + b-nobranch + b-nobase + b-flagged. The already-flagged
-# bead is COUNTED (so a genuinely stuck bead never disappears from the summary)
-# while issuing no second warning, marker or mail.
-has "4 reported" "$TMP/out" "(BOUND) an already-flagged bead is still counted"
+# 6 reported = b-ghfail + b-nobranch + b-nobase + b-flagged + b-depfail + b-convfail.
+# The already-flagged bead is COUNTED (so a genuinely stuck bead never disappears
+# from the summary) while issuing no second warning, marker or mail.
+has "6 reported" "$TMP/out" "(BOUND) an already-flagged bead is still counted"
 hasnt "gc bd update b-flagged" "$TMP/updates" "(BOUND) but is not re-marked"
 hasnt "b-flagged" "$TMP/mail" "(BOUND) and not re-mailed"
 
@@ -543,7 +598,10 @@ set +e
 FAKE_CANDIDATES="$TMP/candidates2.json" run
 set -e
 hasnt "gc bd update b-strand" "$TMP/updates" "(IDEM) a recovered bead is not recovered twice"
-hasnt "gc bd update b-conv" "$TMP/updates" "(IDEM) nor is the convoy-targeted one"
+# Trailing space, like the b-pr / b-live assertions above: `b-conv` is a PREFIX of
+# `b-convfail`, and an unanchored match would read that bead's flag write as a
+# second recovery of this one.
+hasnt "gc bd update b-conv " "$TMP/updates" "(IDEM) nor is the convoy-targeted one"
 
 echo
 echo "passed: $PASS, failed: $FAIL"
