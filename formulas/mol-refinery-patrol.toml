@@ -145,10 +145,17 @@ needs = ["check-inbox"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
-Search for work beads assigned to you with branch metadata:
+Search for work beads assigned to you with branch metadata, skipping any bead
+that is already a gating anchor:
 ```bash
-WORK=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open \
-  --exclude-type=epic --has-metadata-key=branch --limit=1 --json | jq -r '.[0].id // empty')
+# >>> find-work-select
+WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=25 --json)
+WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
+WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
+if [ -n "$WORK_PARKED" ]; then
+  echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the bead-keyed passes below, never by find-work; an assignee on one is an anomaly. Flag only — do not re-gate it, do not clear it here (tk-jcal4)." >&2
+fi
+# <<< find-work-select
 ```
 
 `${GC_RIG:+--rig="$GC_RIG"}` scopes the query to this refinery's rig
@@ -156,6 +163,41 @@ database. Without it, `gc bd list` routes to the HQ database and never
 sees rig-scoped work beads — the `assignee` field alone does not route
 by namespace. For HQ-only refineries `$GC_RIG` is empty and the flag
 expands to nothing.
+
+The `merge_result` filter is the selection guard (tk-jcal4). A parked gating
+anchor is `status=open` and carries `metadata.branch` — both BY DESIGN, since
+"open means unlanded" and the resolver needs the branch — so the only thing
+that kept one out of this query was `assignee=""`. That made
+"a gating anchor is never re-processed" rest on an unenforced convention:
+nobody ever writing an assignee onto one. Any actor can write that field, and
+on 2026-08-11 a rig witness wrote `assignee=<refinery>` onto two correctly
+parked shutupandlisten anchors (`merge_result=pull_request`, codex-green,
+PR#55/PR#56 open awaiting human approval). Re-processing them would have
+reset both to `merge_result=pre_open_gate`, orphaning two live PRs from their
+anchors, dispatching duplicate codex reviews, and eventually opening a SECOND
+PR per branch via `pre-open-resolve.sh` — every write reporting success. Now
+the query decides it: a bead carrying ANY `merge_result` is out.
+
+ANY value, not just the gating pair. Every path that legitimately returns a
+bead to this queue clears the field first — the rejection repool folds
+`--unset-metadata merge_result` into the same update (merge-push step 3,
+`mr-aware-rejection`) precisely so the hand-back re-gates fresh. The terminal
+dispositions (`merged`, `blocked`, `refused_false_completion`) are already
+`assignee=""` and routed to human. So `merge_result` present means some pass
+that knew what it was doing recorded a disposition, and this queue is not it.
+
+`--limit` is 25, not 1, because the filter is applied client-side: with
+`--limit=1` a single parked anchor at the head of the result set would return
+NO work and idle a refinery that has real work queued, converting this false
+positive into a starvation-shaped false negative. 25 is far above the normal
+population of this query (parked anchors do not carry an assignee at all, so
+the expected count is zero), and the flag line above makes an unexpected pile
+visible rather than silent.
+
+Flag, never rewrite. Restoring `assignee=""` here would fight whichever writer
+set it, from a pass that cannot see why. This mirrors how `check-set-heal.sh`
+(a-norm0) treats the same anomaly — it flags a gating anchor assigned to a
+non-canonical refinery identity and leaves the field alone.
 
 If found: read the bead metadata to confirm it has a branch:
 ```bash
@@ -1463,15 +1505,48 @@ CODEX_GATE=0
 case ",$(printf '%s' "$CHECK_SET" | tr -d '[:space:]')," in
   *",codex,"*) CODEX_GATE=1 ;;
 esac
+# PRE_OPEN means "no PR exists for this bead yet" (first handoff), so the test
+# must read EVERY key under which a PR can already be recorded — not just the
+# caller-supplied `existing_pr` (tk-jcal4). The refinery's own post-open
+# transition records the PR it opened as `pr_url` + `pr_number` and never writes
+# `existing_pr`; so does check-set-heal.sh's merge_result recovery. A bead
+# carrying those keys reaching this decision read as PRE_OPEN and was parked back
+# to `merge_result=pre_open_gate`, detaching a live PR from its anchor and
+# arranging for `pre-open-resolve.sh` to open a SECOND PR for the same branch
+# once the (duplicate) review greened. The find-work guard above closes the one
+# known route to that state; this closes the decision itself, so any other path
+# reaching merge-push with a post-open anchor converges instead of forking.
+#
+# RECORDED_PR is deliberately separate from EXISTING_PR: `existing_pr` is a
+# caller's reuse contract and carries its own strict validation (block-and-
+# escalate if that PR is not OPEN on this branch/base/repo). A `pr_url` the
+# refinery itself minted is not a caller contract, so it selects the post-open
+# path without inheriting that escalation. The post-open path then resolves the
+# PR by branch — `gh pr create` fails harmlessly on a branch that already has
+# one, and the `gh pr view "$BRANCH"` fallback recovers it — and re-verifies its
+# shape before re-stamping the anchor with the same PR.
+#
+# jq: `//` falls through on null and false ONLY, so an empty-string `pr_url`
+# would out-rank a real `pr_number` under a `//` chain. Test each for emptiness.
+#
 # PRE_OPEN also requires gh: the pre-open PR-create resolver (pre-open-resolve.sh)
 # opens the PR via gh, so a no-gh (REST-fallback) rig must stay on the post-open
 # path or its PR would never open. merge-skill/observer already require gh, so
 # this only preserves the no-gh path's prior behavior (open via REST for manual
 # merge), never regresses it.
+# >>> pre-open-recorded-pr
+RECORDED_PR="$EXISTING_PR"
+if [ -z "$RECORDED_PR" ]; then
+  RECORDED_PR=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata | (.pr_url // "") as $u | (.pr_number // "" | tostring) as $n | if $u != "" then $u elif $n != "" then $n else empty end' 2>/dev/null)
+fi
 PRE_OPEN=0
-if [ "$CODEX_GATE" = 1 ] && [ -z "$EXISTING_PR" ] && command -v gh >/dev/null 2>&1; then
+if [ "$CODEX_GATE" = 1 ] && [ -z "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
   PRE_OPEN=1
 fi
+if [ -n "$RECORDED_PR" ] && [ -z "$EXISTING_PR" ]; then
+  echo "merge-push: $WORK already records PR $RECORDED_PR (pr_url/pr_number); taking the POST-OPEN path so the existing PR is reused, not re-parked to pre_open_gate (tk-jcal4)." >&2
+fi
+# <<< pre-open-recorded-pr
 
 # POST-OPEN only: reuse/create + verify the PR now. Skipped entirely in pre-open,
 # where pre-open-resolve.sh opens the PR later once codex is green.
