@@ -24,8 +24,8 @@ description: What every gc-toolkit agent actually pays in always-on prompt bytes
 | City config | operator | `/home/zook/loomington/city.toml` (8,052 B) | 2026-08-10 19:18Z |
 | Provider skill sinks | gc skill materialization | `<work_dir>/.claude/skills/`, `<work_dir>/.codex/skills/` | 2026-08-10 19:29Z |
 | Bead caseload counts | beads/Dolt | `bd list --db rigs/<rig>/.beads --status closed --limit 0` | 2026-08-10 19:26Z |
-| Review-bead description census (60 beads, F2) | beads/Dolt | `gc bd list --metadata-field task_kind=review --status=open,closed --limit 60 --json` | 2026-08-10 19:48Z |
-| `review-dispatch-body.sh` call sites (F2) | this repo | `grep -rn review-dispatch-body --include='*.sh' --include='*.toml'` @ `3a9c336` | 2026-08-10 19:47Z |
+| Review-bead description census (60 beads, F2) — *historical; superseded by tk-dy7sb / PR #304, see F2* | beads/Dolt | `gc bd list --metadata-field task_kind=review --status=open,closed --limit 60 --json` | 2026-08-10 19:48Z |
+| `review-dispatch-body.sh` call sites (F2) — *historical; the first-round dispatch is a third caller since tk-dy7sb / PR #304* | this repo | `grep -rn review-dispatch-body --include='*.sh' --include='*.toml'` @ `3a9c336` | 2026-08-10 19:47Z |
 | Auto-memory index | Claude Code | `~/.claude/projects/-home-zook-loomington-rigs-gc-toolkit/memory/MEMORY.md` | 2026-08-10 19:28Z |
 
 ---
@@ -296,7 +296,7 @@ signal-loom 48/0. Review beads route to the codex pool essentially without
 exception — in gc-toolkit, 435 of 466 review beads name `polecat-codex` as their
 pool and exactly **one** names `.polecat`.
 
-**F2 — the mechanical-trigger pattern exists in `review-dispatch-body.sh`, but it is wired into 2 of the 3 dispatch paths, and the one it is missing from mints most review beads.**
+**F2 — the mechanical-trigger pattern exists in `review-dispatch-body.sh`. At measurement it was wired into 2 of the 3 dispatch paths, and the one it was missing from minted most review beads. That gap has since been closed (tk-dy7sb / PR #304): the finding is RESOLVED, and the coverage numbers below are the historical evidence that motivated the fix, not live figures.**
 
 The epic's hard constraint says a migration needs a mechanical trigger, not an
 instruction. gc-toolkit already built one. `assets/scripts/review-dispatch-body.sh`
@@ -310,35 +310,67 @@ path.
 The trigger is a property of the **bead**, not of the agent's prompt or catalog.
 That is the pattern every MIGRATE below should copy.
 
-**Coverage, measured — and it is partial.** The emitter has exactly two callers:
+**Coverage as measured, 2026-08-10 — and it was partial.** At the surveyed pin
+(`3a9c336`) the emitter had exactly two callers:
 `assets/scripts/check-set-heal.sh:183` (the empty-check-set repair) and
 `assets/scripts/reconcile-merged-prs.sh:176` (the stale-gate re-review). Both are
 *repair* paths. The path that mints a review bead in the normal case — the
-refinery's own first-round signoff dispatch at
-`formulas/mol-refinery-patrol.toml:1693` — calls bare
+refinery's own first-round signoff dispatch, in the merge-push step of
+`formulas/mol-refinery-patrol.toml` — called bare
 `gc bd create "$REVIEW_TITLE" -t task --json`, with no `--body-file`, and so
-dispatches a **title-only** bead carrying no method at all.
+dispatched a **title-only** bead carrying no method at all.
 
-The census agrees. Of the 60 most recent review beads (`task_kind=review`, open
-and closed), **45 (75%) have an empty description**; the 15 that carry one begin
-with the emitter's own first line, `## Method: the signoff-review skill`. This
-ledger's own signoff is an instance: review bead `tk-p7fcn`, the pre-open gate on
-this branch, has description length 0 — the reviewing polecat was handed a title
-and chose its own method.
+The census agreed. Of the 60 most recent review beads at that survey
+(`task_kind=review`, open and closed), **45 (75%) had an empty description**; the
+15 that carried one began with the emitter's own first line,
+`## Method: the signoff-review skill`. This ledger's own first signoff was an
+instance: review bead `tk-p7fcn`, the pre-open gate on this branch, had
+description length 0 — the reviewing polecat was handed a title and chose its own
+method.
 
-Note what a title-only bead rules in. `check-set-heal.sh:2435` mints a pre-open
-review under the *same* title shape as the patrol, so the title alone does not
-identify the producer — but heal and reconcile both attach the body and only omit
-it on their loudly-warned fail-soft path. So an empty description means either the
-first-round patrol dispatch (which never attaches one) or a repair path whose
-emitter could not be resolved. Both are delivery failures for the method; only the
-first is by construction, and it is the one that explains 45 beads.
+Note what a title-only bead ruled in, at that pin. `check-set-heal.sh` mints a
+pre-open review through `create_review_bead` under the *same* title shape as the
+patrol (`Review branch <branch> -> <target>: …`), so the title alone does not
+identify the producer — but heal and reconcile both attach the body and
+only omit it on their loudly-warned fail-soft path. So an empty description meant
+either the first-round patrol dispatch (which attached none at all) or a repair
+path whose emitter could not be resolved. Both are delivery failures for the
+method; only the first was by construction, and it is the one that explains the
+45 beads.
 
-So the pattern is right and the channel is real, but it does not yet reach the
-dispatch that matters. Any disposition that assumes review beads "already carry
-their method" is describing a quarter of them. What that costs the MIGRATE
-verdicts is recorded in §6; the remedy — wiring the first-round dispatch and
-gate-asserting it — is remediation, and therefore out of scope for this bead.
+**Resolved — the third path is now wired.** tk-dy7sb / PR #304 wired the
+first-round dispatch. It resolves the emitter from agent-env paths
+(`GC_RIG_ROOT/assets/scripts`, the git toplevel, then
+`GC_CITY_PATH/rigs/gc-toolkit/assets/scripts` for importer rigs; first executable
+candidate wins) and creates the bead with
+`gc bd create "$REVIEW_TITLE" -t task --body-file -`. Both the PRE_OPEN and
+post-open arms funnel through that one create. Find the block by its delimiters,
+`# >>> first-round-review-body` … `# <<< first-round-review-body`, rather than by
+line number (lines 1887–1902 at `5719554`, and they will move). It is
+**fail-soft**: an unresolvable, failing, or silently-empty emitter WARNs and
+degrades to exactly the title-only create measured above, because an
+un-dispatched signoff leaves the armed gate unsatisfiable and holds the merge
+forever. `assets/scripts/first-round-review-body.test.sh` is the gate — it
+extracts that snippet verbatim between the markers and executes it against
+stubbed `gc`/`git`, asserting the happy path carries the emitter's own body, each
+of the three candidate resolutions, all three degrade arms, and that the shipped
+emitter is present, executable, and produces a non-empty body.
+
+So the emitter now has **three** callers, and every dispatch path names a method.
+Two consequences for anyone reading the numbers above: the 45/60 figure is
+historical — re-run the census over review beads minted after PR #304 before
+quoting a coverage rate — and an empty description on a post-#304 bead no longer
+implicates the first-round dispatch by construction; it now means the fail-soft
+arm fired, which leaves a WARN naming the emitter it could not resolve.
+
+So the pattern is right, the channel is real, and it now reaches the dispatch
+that matters. The remedy named by this finding — wiring the first-round dispatch
+and gate-asserting it — was remediation, out of scope for this research bead, and
+was filed and landed separately as tk-dy7sb / PR #304. What the gap cost the
+MIGRATE verdicts while it stood is recorded in §6: the codex row was BLOCKED on
+exactly this prerequisite. Its landing removed that blocker but did not make the
+migration worth doing — the saving is relocation, not elimination (§6; §7,
+candidate 2).
 
 The same caveat applies to F1's disposition in the other direction: the residual
 non-impl work on the claude pool also arrives as a dispatched bead, so the
@@ -485,7 +517,7 @@ Per the epic's hard constraint, every MIGRATE must name the trigger that fires i
 
 | Migration | Mechanical trigger | Status |
 |---|---|---|
-| `polecat-non-impl-done` → review-method delivery for the **codex** pool | the review bead's *description*, emitted by `assets/scripts/review-dispatch-body.sh`; the first-round dispatch at `formulas/mol-refinery-patrol.toml:1693` now emits it too (tk-dy7sb / PR #304), so the channel is fully wired | **KEEP — measured non-saving.** The prerequisite this row once blocked on has landed, but wiring does not make the migration worth doing: the codex pool needs the procedure on 100% of spawns (F1), so moving it into the description relocates the bytes into the same window rather than eliminating them, and codex sessions almost never compact (`continuation_epoch=1` for 37 of 38 sampled sessions) so no meaningful multiplier applies. Demoted to *explicitly not recommended* — see §7, candidate 2 |
+| `polecat-non-impl-done` → review-method delivery for the **codex** pool | the review bead's *description*, emitted by `assets/scripts/review-dispatch-body.sh`; the first-round dispatch in `formulas/mol-refinery-patrol.toml` (the `first-round-review-body` marker block) now emits it too (tk-dy7sb / PR #304), so the channel is fully wired | **KEEP — measured non-saving.** The prerequisite this row once blocked on has landed, but wiring does not make the migration worth doing: the codex pool needs the procedure on 100% of spawns (F1), so moving it into the description relocates the bytes into the same window rather than eliminating them, and codex sessions almost never compact (`continuation_epoch=1` for 37 of 38 sampled sessions) so no meaningful multiplier applies. Demoted to *explicitly not recommended* — see §7, candidate 2 |
 | `polecat-non-impl-done` → residual non-impl work on the **claude** pool (research/investigation, 21 beads) | none today. These are slung by the mayor/mechanik with a free-text description; no emitter guarantees the method is named | **BLOCKED** — needs a `research-dispatch-body.sh` sibling, or the disposition reduces to NARROW-only with the claude pool losing the procedure for ~2% of its beads |
 
 **The two rows differ now.** The claude row (residual research/investigation work)
