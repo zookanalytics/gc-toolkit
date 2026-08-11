@@ -1,8 +1,9 @@
 // Command helm-svc is the Attention Canvas backend sidecar. It runs as a
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
 // a unix socket path in GC_SERVICE_SOCKET, dials that socket as a reverse proxy,
-// and reaches GET /helm (the board) and GET /healthz (liveness) over it.
-// Requests arrive already path-stripped.
+// and reaches GET /helm (the board), GET /healthz (liveness) and the embedded
+// web app (the mount root, plus its assets) over it. Requests arrive already
+// path-stripped.
 //
 // The service reads all bead state through the internal/source.Source seam —
 // either the in-process beads library or the supervisor's loopback HTTP API,
@@ -25,6 +26,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/server"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
+	"github.com/zookanalytics/gc-toolkit/services/helm/web"
 )
 
 // defaultCacheTTL matches the bash PoC's 45s file cache; override with
@@ -46,7 +48,7 @@ func main() {
 	ttl := cacheTTL()
 	src, closeSrc := selectSource()
 	defer closeSrc()
-	srv := server.New(src, ttl)
+	srv := server.New(src, ttl, server.WithSPA(spaHandler()))
 
 	// The supervisor removes any stale socket before spawning us, so we own
 	// creation. net.Listen("unix") unlinks the socket on close.
@@ -77,6 +79,23 @@ func main() {
 		log.Fatalf("serve: %v", err)
 	}
 	log.Print("shut down cleanly")
+}
+
+// spaHandler builds the embedded single-page app's handler, or returns nil to
+// serve the board JSON alone.
+//
+// A broken bundle must not take the service down. The board is the load-bearing
+// contract — the operator curls it and the frontend units consume it — while
+// the app is additive, so an unreadable bundle is logged loudly and the service
+// keeps serving JSON exactly as it did before the app existed. The embed itself
+// is checked at compile time, so this only fires on a dist/ that built badly.
+func spaHandler() http.Handler {
+	h, err := web.NewHandler()
+	if err != nil {
+		log.Printf("embedded web app unavailable, serving board JSON only: %v", err)
+		return nil
+	}
+	return h
 }
 
 // selectSource picks the data-access backend and returns it with a cleanup

@@ -30,11 +30,20 @@ if [ -z "$GO" ]; then
     if command -v go >/dev/null 2>&1; then GO="go"; else GO="/usr/local/go/bin/go"; fi
 fi
 
+# Sources that end up inside the binary: Go files, plus the built web bundle,
+# which is compiled in by go:embed (services/helm/web/embed.go). A bundle-only
+# change has to rebuild too, or the mount keeps serving the SPA that was
+# embedded at the last Go edit. node_modules is pruned — nothing there is built
+# from, and walking it costs more than the rest of the module together.
+newer_than_binary() {
+    find "$MOD" -name node_modules -prune -o \( -name '*.go' -o -path "$MOD/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
+}
+
 # Build when the binary is missing or any source file is newer than it.
 need_build=0
 if [ ! -x "$BIN" ]; then
     need_build=1
-elif [ -n "$(find "$MOD" -name '*.go' -newer "$BIN" -print -quit 2>/dev/null)" ]; then
+elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
 fi
 if [ "$need_build" -eq 1 ]; then
