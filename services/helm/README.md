@@ -1,20 +1,22 @@
 # helm — Attention Canvas backend spine (spike: tk-sy3vj)
 
-A long-lived Go sidecar that serves a ranked **Helm board** as JSON, sourced
-live from the Gas City supervisor's loopback HTTP API. It is the backend data +
-serving plane for the Attention Canvas operator dashboard (epic `tk-eemvf`) and
-the Go port of the board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC,
-which this replaces — the bash dies).
+A long-lived Go sidecar that serves a ranked **Helm board** as JSON, sourced live
+from the city's bead state. It is the backend data + serving plane for the
+Attention Canvas operator dashboard (epic `tk-eemvf`) and the Go port of the
+board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces —
+the bash dies).
 
-This is a **spike**: it proves the data+serving spine end-to-end with a minimal
-real payload. The full model port is a follow-up bead (see *Deferred*, below).
+The spine came from the `tk-sy3vj` spike; `tk-x89rn` then widened the source seam
+so the board can read `updated_at` and bead metadata, which is what makes
+`stale_days` real. The model port is still partial — see *Still deferred*, below.
 
 ## What it does
 
 ```
 GET /helm   -> { generated_at, total, tiles:[ {id,rig,kind,title,severity,
                       n_closed,m_total,open,in_progress,frontier,needs,
-                      rank_score}, ... ], partial?, partial_errors? }
+                      stale_days,updated_at,rank_score}, ... ],
+                 partial?, partial_errors? }
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 ```
 
@@ -28,23 +30,77 @@ Three packages, a clean dependency line `board <- source <- server <- cmd`:
 | Package | Responsibility |
 |---|---|
 | `internal/board` | The MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
-| `internal/source` | The data-access **seam**. `Source` interface + `SupervisorSource` (HTTP client against the supervisor API). |
+| `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). |
 | `internal/server` | HTTP routes + a server-side TTL cache of the computed board. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
 
 ### Data-access contract (hard constraint)
 
-All bead/Dolt access goes through a Gas City API — **never raw Dolt**. v1 uses the
-supervisor HTTP API (itself a Gas City API). There is no `sql.Open("mysql")`, no
-`JSON_EXTRACT` against bead DBs. The `source.Source` interface is the seam: a
-future contract-compliant backend (the in-process beads library, or a sanctioned
-new endpoint) can swap in without touching the model or serving code.
+All bead/Dolt access goes through a Gas City API — **never raw Dolt**. There is
+no `sql.Open("mysql")`, no `JSON_EXTRACT` against bead DBs. The `source.Source`
+interface is the seam, and both shipped backends sit behind it without the model
+or serving code knowing which one is live.
 
-Endpoints consumed (all under `/v0/city/<city>/`): `/rigs`, `/beads?type=epic`,
-`/beads/graph/{id}` (all-status child roll-up), `/beads?type=decision`,
-`/convoys` + `/convoy/{id}`. Cross-rig `partial` /
-`partial_errors` are propagated to the board envelope; a 503 (total outage)
-surfaces as a 502 from `/helm`.
+**`BeadsSource` — the in-process beads library (default).** Opens each rig's own
+`.beads` store through `beads.OpenFromConfig`, the same library the `bd` CLI uses
+and the same access pattern the bash PoC always had (`bd list --db
+<rig>/.beads`). Rigs are enumerated from `<city>/rigs/*/.beads`, so it needs the
+city root on disk and no HTTP at all. Store handles are opened lazily and reused
+for the process lifetime; the rig *set* is re-read each gather, so a rig added
+later is picked up without a restart.
+
+**`SupervisorSource` — the loopback HTTP API (fallback).** Endpoints consumed
+(all under `/v0/city/<city>/`): `/rigs`, `/beads?type=epic`, `/beads/graph/{id}`
+(all-status child roll-up), `/beads?type=decision`, `/convoys` + `/convoy/{id}`.
+
+Either way, cross-rig `partial` / `partial_errors` are propagated to the board
+envelope, and a total outage (no rig or no endpoint readable) surfaces as a 502
+from `/helm` rather than an empty board that reads as "nothing needs attention".
+
+### Why there are two backends
+
+`SupervisorSource` cannot see two facts the model needs, and this is a property
+of the API, not of the client:
+
+- **`updated_at` reaches no endpoint at all** — not `/beads`, `/beads/graph/{id}`,
+  `/beads/ready`, `/bead/{id}` or `/convoy/{id}`. The `Bead` schema declares the
+  field, but it serializes `omitzero`, arrives zero everywhere, and there is no
+  `fields`/`full` parameter to widen the projection. Without it `stale_days` is
+  pinned to 0 and **no tile can ever age**.
+- **metadata reaches only the single-bead reads** (`/bead/{id}`, `/convoy/{id}`),
+  so a gather would pay one extra round trip per anchor to see it.
+
+`BeadsSource` reads both directly. Choosing it over a new supervisor endpoint —
+the other sanctioned path — is recorded, with the measurements, in
+`specs/tk-x89rn/source-backend-decision.md`; the short version is that the
+supervisor is the `gc` binary in the **gascity** rig and cannot be changed from
+this repository.
+
+**Costs of the library backend, paid at build and startup, not per request:** the
+module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
+`helm-svc` is ~158 MB, a *cold* build takes minutes (the build cache keeps
+restarts instant thereafter), and the Go floor moved to 1.26.5.
+
+**One behavioural difference.** The HTTP backend reports one extra anchor,
+because gascity's `mapBdStatus` flattens every status that is not
+`closed`/`in_progress` into `open` — so a **deferred** epic arrives over HTTP
+looking open and is admitted. The library backend sees the real status and
+filters to `open`, matching `gc-helm.sh` (`bd list --status open`). A
+deliberately-parked epic is not an attention item, so the library behaviour is
+the faithful one. Child counts are unaffected: the board already treats every
+non-closed, non-in-progress child as open.
+
+### Picking a backend
+
+Selected once at startup and logged — never silently per request, because a
+per-request fallback could drop the staleness lane while the board still looked
+healthy.
+
+| `GC_HELM_SOURCE` | Behaviour |
+|---|---|
+| unset (default) | beads library if `<city>/rigs/*/.beads` is readable; otherwise the HTTP API, with a log line naming the consequence |
+| `beads` | force the library; **fatal** if the stores are unreadable, rather than a quiet downgrade |
+| `supervisor` | force the HTTP API (accepting `stale_days = 0`) |
 
 ## Wiring it as a workspace-service
 
@@ -99,41 +155,58 @@ GC_CITY_PATH=$GC_CITY_PATH \
 curl --unix-socket /tmp/helm.sock http://x/helm | jq .
 ```
 
-Discovery env: `GC_HELM_SUPERVISOR_URL` (else supervisor.toml port, default
-`127.0.0.1:8372`); `GC_HELM_CITY` (else parsed from `GC_SERVICE_URL_PREFIX`,
-else `GC_CITY_PATH` basename); `GC_HELM_CACHE_TTL` (seconds or a Go
-duration; default 45s).
+Discovery env:
 
-## Spike findings — what's proven vs. deferred
+- `GC_HELM_SOURCE` — `beads` | `supervisor`; see *Picking a backend* above.
+- `GC_HELM_CITY_PATH` (else `GC_CITY_PATH`, else `GC_CITY`) — the city root the
+  beads backend enumerates `rigs/*/.beads` under.
+- `GC_HELM_SUPERVISOR_URL` (else supervisor.toml port, default `127.0.0.1:8372`)
+  and `GC_HELM_CITY` (else parsed from `GC_SERVICE_URL_PREFIX`, else the
+  `GC_CITY_PATH` basename) — the HTTP backend's target.
+- `GC_HELM_CACHE_TTL` — seconds or a Go duration; default 45s.
 
-**Proven** (this spike): the spine works end-to-end against the live city —
-auto-buildable launcher, unix-socket serving, `/healthz`, a real cross-rig ranked
-board, instant crash-restart, TTL cache, contract-compliant HTTP-only data
-access, unit tests over the model and a mock supervisor.
+The standalone invocation above reaches the supervisor over HTTP; to run it on
+the library backend instead, pass `GC_CITY_PATH` (the supervisor already injects
+it under a real service mount) and leave `GC_HELM_SOURCE` unset.
 
-**Deferred to the follow-up model-port bead** (and *why*):
+## What's proven vs. deferred
 
-- **`stale_days`** and the NORMAL→ELEVATED stale bump — the supervisor bead API
-  omits `updated_at` (serialized `omitzero`), so staleness is not derivable over
-  HTTP. The rank formula keeps the staleness lane (currently 0) so the follow-up
-  only has to supply a richer source.
-- **The full rank `weight`** — the spike weight is `m_total + prio_w(priority)`;
-  the cross-rig-ref description scan (`min(xrefs,5)`) is dropped.
-- **`assigned` / `open_heads`** — the bead API omits `assignee`.
-- **The takeaway-driven NEEDS sentence** — NEEDS uses the deterministic phrase;
-  `gc.takeaway` plumbing is deferred.
+**Proven** (the `tk-sy3vj` spike): the spine works end-to-end against the live
+city — auto-buildable launcher, unix-socket serving, `/healthz`, a real cross-rig
+ranked board, instant crash-restart, TTL cache, contract-compliant data access,
+unit tests over the model and a mock supervisor.
+
+**Delivered since** (tk-x89rn, the source-seam widening):
+
+- **`stale_days`** and the NORMAL→ELEVATED stale bump are real under
+  `BeadsSource`. `updated_at` rides on the tile alongside it, because
+  `stale_days: 0` alone cannot distinguish "touched today" from "the source
+  could not read it".
+- **`assignee`** is carried on children.
+- **metadata** is carried on every anchor and child — but *carried, not spent*:
+  no derivation reads it yet. That is deliberate, so the three consumers below
+  stay separately reviewable.
+
+**Still deferred** (and *why*):
+
+- **The full rank `weight`** — the weight is `m_total + prio_w(priority)`; the
+  cross-rig-ref description scan (`min(xrefs,5)`) is dropped.
+- **The takeaway-driven NEEDS sentence** — NEEDS uses the deterministic phrase.
+  `gc.takeaway` is now readable; spending it is `tk-x55wt`.
 - **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans. (STRANDED
   itself is already in the severity derivation: open work with none in
   progress.)
 - **The `held` visit fact** — the bash board's glyph (an open visit bead with
-  `task_kind=visit` whose `gc.continuation_group` names the anchor). The
-  supervisor bead API omits metadata, so visit presence is not derivable over
-  HTTP; the field is dropped, not approximated.
-- **owned-convoy filter** — `/convoys` omits the `owned` flag, so floating +
-  non-`sling-` title approximates ownership; true `owned==true` filtering needs a
-  richer convoy source.
+  `task_kind=visit` whose `gc.continuation_group` names the anchor). Metadata is
+  now readable, so this is derivable; deriving it belongs to the consumer bead.
+- **owned-convoy filter** — floating + non-`sling-` title still approximates
+  ownership. `BeadsSource` could resolve the real edge, but changing *which*
+  convoys reach the board is a gather change and was kept out of tk-x89rn.
 - **event-invalidation** — the cache is TTL-only; the supervisor SSE
   `/v0/events/stream` can later replace polling.
+
+The three beads that spend the widened seam: `tk-x55wt` (dead columns + constant
+NEEDS), `tk-b3rga` (decision tiles), `tk-2v08m` (human-routed beads invisible).
 
 ## Handoff
 

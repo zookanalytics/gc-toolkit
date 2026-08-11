@@ -4,24 +4,29 @@
 // gathers raw [Anchor] data, and [BuildBoard] turns it into a ranked,
 // deduplicated [Board].
 //
-// SPIKE SCOPE. This is the minimal subset proven by the tk-sy3vj spike. The
-// per-tile fields are exactly {id, rig, kind, title, severity, n_closed,
-// m_total, open, in_progress, frontier, needs, rank_score} plus the envelope
-// {generated_at, total, tiles}. The following gc-helm.sh behaviours are
-// deferred to a follow-up bead and intentionally NOT reproduced here:
+// SCOPE. This started as the minimal subset proven by the tk-sy3vj spike and
+// was widened by tk-x89rn, which restored the two raw facts the spike could not
+// read — [Anchor.UpdatedAt] and [Anchor.Metadata] — and with them the real
+// stale_days. The per-tile fields are {id, rig, kind, title, severity, n_closed,
+// m_total, open, in_progress, frontier, needs, stale_days, updated_at,
+// rank_score} plus the envelope {generated_at, total, tiles}.
 //
-//   - the full rank weight (priority + cross-rig-ref scan): the spike weight is
+// Carrying a fact is not the same as spending it. tk-x89rn deliberately ships
+// only the CAPABILITY: Metadata is populated on every anchor and child but no
+// derivation reads it yet, because the three consumers are separate beads
+// (tk-x55wt dead columns + constant NEEDS, tk-b3rga decision tiles, tk-2v08m
+// human-routed beads). Keeping them apart keeps each reviewable. So the
+// following gc-helm.sh behaviours remain NOT reproduced here:
+//
+//   - the full rank weight (priority + cross-rig-ref scan): the weight is
 //     m_total + prio_w(priority); the cross-rig description scan is dropped.
-//   - stale_days: the supervisor HTTP API omits updated_at, so staleness is 0
-//     and the NORMAL→ELEVATED stale bump never fires.
 //   - the takeaway-driven NEEDS sentence: NEEDS uses the deterministic phrase.
 //   - the stranded/empty/complete/progress_mismatch booleans.
 //   - the `held` visit fact (the bash board's glyph: an open visit bead with
-//     task_kind=visit whose gc.continuation_group names the anchor). The
-//     supervisor bead API omits metadata, so visit presence is not derivable
-//     over HTTP; the field is dropped rather than approximated. (The retired
-//     v1 `live` hot/warm/cold host field is gone with the host mechanism
-//     itself — do not reintroduce it.)
+//     task_kind=visit whose gc.continuation_group names the anchor). Metadata
+//     is now readable, so this is derivable — but deriving it belongs to the
+//     consumer bead, not here. (The retired v1 `live` hot/warm/cold host field
+//     is gone with the host mechanism itself — do not reintroduce it.)
 //
 // The struct tags are an additive contract: the TypeScript frontend mirrors
 // them, so fields may be added but never renamed or removed.
@@ -56,26 +61,38 @@ func (s Severity) rank() int {
 }
 
 // Child is a rolled-up member of an anchor (epic child or convoy dependent).
-// Only the status is needed for the spike counts; assignee is carried for parity
-// with the model but is not surfaced (the supervisor API omits it).
+// Only the status feeds the counts today; Assignee, UpdatedAt and Metadata are
+// carried for parity with the model and are what the consumer beads spend (a
+// dead-owner check, per-child staleness, the visit glyph). A source that cannot
+// read a field leaves it zero rather than approximating it.
 type Child struct {
-	ID       string `json:"id"`
-	Status   string `json:"status"`
-	Assignee string `json:"assignee,omitempty"`
+	ID        string            `json:"id"`
+	Status    string            `json:"status"`
+	Assignee  string            `json:"assignee,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitzero"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 // Anchor is one raw gather result before derivation — the Go analogue of a line
 // in gc-helm.sh's anchors.ndjson. A [Source] produces these; [BuildBoard]
 // consumes them.
+//
+// UpdatedAt and Metadata are the two facts tk-x89rn widened the seam to carry.
+// UpdatedAt drives stale_days (and through it the NORMAL→ELEVATED bump); a zero
+// value means the source could not read it and staleness reads as 0, exactly as
+// gc-helm.sh treats a null updated_at. Metadata is carried but not yet read by
+// any derivation — see the package doc.
 type Anchor struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Kind     string  `json:"kind"`   // epic | decision | convoy
-	Source   string  `json:"source"` // same string as Kind; drives derivation branches
-	Rig      string  `json:"rig"`
-	Prefix   string  `json:"prefix"`
-	Priority *int    `json:"priority,omitempty"`
-	Children []Child `json:"children,omitempty"`
+	ID        string            `json:"id"`
+	Title     string            `json:"title"`
+	Kind      string            `json:"kind"`   // epic | decision | convoy
+	Source    string            `json:"source"` // same string as Kind; drives derivation branches
+	Rig       string            `json:"rig"`
+	Prefix    string            `json:"prefix"`
+	Priority  *int              `json:"priority,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitzero"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	Children  []Child           `json:"children,omitempty"`
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
@@ -93,7 +110,14 @@ type Tile struct {
 	InProgress int      `json:"in_progress"`
 	Frontier   string   `json:"frontier"`
 	Needs      string   `json:"needs"`
-	RankScore  int      `json:"rank_score"`
+	// StaleDays is whole days since the anchor was last updated, and UpdatedAt
+	// is the timestamp it came from. Both are 0/zero when the source cannot read
+	// updated_at — indistinguishable, on the wire, from an anchor touched today.
+	// That ambiguity is why UpdatedAt is carried alongside: absent means unknown,
+	// present means genuinely fresh.
+	StaleDays int       `json:"stale_days"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	RankScore int       `json:"rank_score"`
 }
 
 // Board is the envelope returned by the service. Tiles are sorted by rank_score
