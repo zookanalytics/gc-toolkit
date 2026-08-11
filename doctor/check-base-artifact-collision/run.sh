@@ -96,7 +96,18 @@
 #     shipped snippet; run it after any reconciliation of this formula.
 #   - formulas/mol-witness-patrol.toml — base + cycle-recycle +
 #     snake_case session-list jq + .work_dir metadata + completed-workflow
-#     quiesce step (tk-p9ji9) local deltas.
+#     quiesce step (tk-p9ji9) + stranded-branch recovery step (tk-f69ay)
+#     local deltas.
+#     The stranded-branch step is a whole extra link in the patrol chain, so a
+#     reconciliation that takes base's step list wholesale drops it AND rewires
+#     check-refinery back onto recover-orphaned-beads. Preserve both: the step
+#     itself and `needs = ["recover-stranded-branches"]` on check-refinery.
+#     It covers the case base has no detector for — work that is committed and
+#     PUSHED, so every salvage case correctly reports "nothing at risk", while
+#     the bead is unassigned, unrouted and carries no PR, so no other pass can
+#     see it either. doctor/check-stranded-branch-recovery guards the wiring and
+#     assets/scripts/recover-stranded-branches.test.sh the behavior; run it
+#     after any reconciliation of this formula.
 #
 # The allowlist is intentionally narrow. Adding a new entry means the
 # rig is taking on the maintenance cost of re-reconciling that artifact

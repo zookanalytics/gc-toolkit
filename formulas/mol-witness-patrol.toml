@@ -528,14 +528,116 @@ gc bd update <bead> --set-metadata recovered=true
 ```
 
 **Exit criteria:** All orphaned beads recovered, worktrees cleaned.
-Or no orphans found. Continue to `check-refinery` — do NOT exit the
-wisp here. The `next-iteration` step is the only place that pours the
-next wisp and burns this one."""
+Or no orphans found. Continue to `recover-stranded-branches` — do NOT
+exit the wisp here. The `next-iteration` step is the only place that
+pours the next wisp and burns this one."""
+
+[[steps]]
+id = "recover-stranded-branches"
+title = "Recover published work with no landing path"
+needs = ["recover-orphaned-beads"]
+description = """
+Hand off COMPLETED work that reached origin and then stopped, because nothing in
+the city owns its next move (tk-f69ay).
+
+**The failure this catches.** A polecat implemented, committed and PUSHED its
+branch, then died BEFORE its "Submit work to refinery and exit" step. Recovered by
+hand on 2026-08-11 (tk-0981e): the branch sat on origin, one clean commit ahead of
+main, merging cleanly — and the bead read `status=open`, assignee EMPTY,
+`gc.routed_to` EMPTY, no `merge_result`, no PR. No data was lost, but only because
+a human happened to look.
+
+**Why the step above does not see it.** `recover-orphaned-beads` is scoped to
+"beads assigned to agents that will never process them" and keyed on the assignee,
+so an UNASSIGNED bead is not in its candidate set at all; and its salvage cases C,
+D and E all reason about UNCOMMITTED work at risk inside a worktree, so for work
+that is already committed and pushed, Case E ("nothing to salvage") is literally
+correct. The patrol is right that no DATA is at risk. The question none of the
+passes asks is the next one: is there a LANDING PATH? Work safely on origin with
+no owner is not salvaged — it is stranded, and every other detector is blind to it
+at the same time (pool demand needs a route, the refinery's queue needs its own
+assignee, and every bead-keyed reconcile pass enumerates on `pr_url` /
+`pr_number` / `merge_result`, none of which this bead has).
+
+```bash
+# Same agent-env resolution the other passes use, so the idle loop runs the
+# CURRENT script even when a worktree copy lags.
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" \\
+            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \\
+            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/recover-stranded-branches.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# Best-effort, like every other patrol pass: a failed pass is retried next cycle
+# and must never abort the wisp. The pass exits NON-ZERO when a handoff it decided
+# on could not be verified — a verdict, not an abort; it still attempts every bead.
+if [ -n "$SCRIPTS_DIR" ]; then
+  "$SCRIPTS_DIR/recover-stranded-branches.sh" \\
+    --refinery "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery" \\
+    || echo "recover-stranded-branches: pass failed (non-fatal); retries next cycle" >&2
+fi
+```
+
+Run it with `--dry-run` first if you want to see the selection without writing.
+`--min-age-minutes` (default 30) sets how long a branch must have been quiet
+before it counts as stranded rather than mid-submission.
+
+**What it selects, and what it must not.** A bead qualifies only when ALL of it
+holds: open or in_progress, assignee EMPTY, `gc.routed_to` empty or absent, a
+`metadata.branch`, no `merge_result`, no recorded PR field, no `duplicate_of` /
+`hold_reason` / live `merge_hold` (those mean somebody DECIDED the branch should
+not move), a non-review `task_kind`, a branch that really is on origin and ahead
+of its target, NO pull request for that head in any state, no LIVE session behind
+its molecule, and a tip older than the age gate.
+
+The liveness condition is the load-bearing one, and it is an AND — not the OR the
+bug report proposed. Verified live: a work bead is `open` with `assignee=null` and
+no `gc.routed_to` for the WHOLE time its polecat is working it, because
+mol-polecat-work assigns the polecat to the STEP beads and never to the anchor. So
+"unassigned" describes every in-flight molecule too, and only "no live session
+stands behind it" separates a strand from work in progress. The pass resolves the
+bead's input convoy, finds the workflow root that owns it, and treats the molecule
+as live if the root records a live session or any of its live steps is held by
+one.
+
+**The repair is the handoff, not a re-dispatch.** The missing action is the submit
+step itself — stamp `branch` and `target`, reassign to the refinery — so the pass
+performs it directly rather than pouring a fresh molecule to spend a full-context
+session re-deriving three fields. That is not a shortcut past review: the refinery
+still takes the branch through the pre-open codex gate and the PR still needs
+external human approval, so a branch pushed by a polecat that died MID-
+implementation gets reviewed exactly as it would have been. It never closes a
+bead — only the refinery does that, after verifying a merge.
+
+Everything it cannot establish, it refuses and says so: an unreadable session
+roster or bead listing hands off NOTHING (an unread roster makes every running
+polecat look dead), a failed `gh` lookup is not proof that no PR exists, and a
+target branch missing from origin is escalated rather than guessed at. An
+un-repaired strand is the status quo this pass improves on; a wrong handoff
+creates a new one.
+
+Read its stderr. A recurring refusal on the same bead means a branch is stranded
+in a way this pass will not repair on its own — the one refusal that mails the
+mayor is the unresolvable-target case, and the rest are bounded to one warning per
+(branch, tip) by a marker on the bead.
+
+Regression test: `assets/scripts/recover-stranded-branches.test.sh` (hermetic;
+stubs `gc`, `git` and `gh`; covers the canonical strand, the metadata-before-
+assignee order, target resolution from the bead / its convoy / the repository
+default, both liveness signals and their converse, every non-candidate field, an
+existing PR in any state, a failed PR lookup, an unpublished branch, a missing
+target branch, an already-landed branch, the age gate, both fail-safes, the
+one-warning-per-bead bound, the non-zero exit on an unverified handoff, that
+`--dry-run` writes nothing, and that no bead is ever closed).
+
+**Exit criteria:** Stranded branches handed off, or none found. Continue to
+`check-refinery` — do NOT exit the wisp here. The `next-iteration` step is the
+only place that pours the next wisp and burns this one."""
 
 [[steps]]
 id = "check-refinery"
 title = "Check refinery queue health"
-needs = ["recover-orphaned-beads"]
+needs = ["recover-stranded-branches"]
 description = """
 Ensure the refinery is processing work and the queue is healthy.
 
