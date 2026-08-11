@@ -381,10 +381,11 @@ flight, the stale-gate arm skipped it (no *green* marker to be stale), and
 `merge-skill.sh` held on the marker that would never come.
 
 **Two triggers reach exception.** Bounded remediation exhaustion (R11): the
-rounds are spent and the gate is still not green, so re-spawning again is the
-non-convergent move the bound exists to rule out. And infrastructure failure
-(R12): the check-skill crashed, went past its deadline with no live session
-answering for it, or left a marker naming no verb the contract knows.
+rounds are spent, nothing is still in flight, and the gate is still not green, so
+re-spawning again is the non-convergent move the bound exists to rule out. And
+infrastructure failure (R12): the check-skill crashed, went past its deadline with
+no live session answering for it, or left a marker naming no verb the contract
+knows.
 
 **Exception is terminal-until-operator, and it clears by a head move.** The arm
 records the verdict, leaves `merge_result` intact (the anchor stays the single
@@ -408,15 +409,46 @@ to end. `check-set-heal.sh` skips its dispatch on `green@` (satisfiable) and on
 remediation ends without turning the gate green, nothing should hold the next
 dispatch back.
 
+**And something must re-arm the two verbs it skips on, or the skip outlives its
+reason.** `check-set-heal.sh` is bead-side: it resolves no head, so it cannot tell
+a live verdict from residue left by a head that has since moved. Post-open the
+stale-gate arm closes that gap — it reads the live PR head and files the
+re-review. **Pre-open there is no PR**, that arm enumerates
+`merge_result=pull_request` only, and nothing else re-armed a pre-open gate: an
+`exception@<old>` (or `green@<old>`) survived the operator's fix, the heal pass
+kept skipping, `pre-open-resolve.sh` kept refusing to open a PR that was not green
+at the *live* branch head, and the branch sat held with nothing left to raise it —
+the exact silent indefinite hold, reached through the verb that describes a hold an
+operator is supposed to be able to lift. `reconcile-gate-verdicts.sh` already
+resolves the pre-open head to bind its own verdicts, so it **clears** a stale
+`green@`/`exception@` on a `pre_open_gate` anchor with nothing in flight; the gate
+returns to unevaluated and the heal pass dispatches on the next wake. Only those
+two verbs, because only those two block a dispatch, and clearing can never merge
+or open anything — an absent marker is green at no head.
+
 **The round count is not reset per head, deliberately.** The design doc describes
 `check.<name>.attempts` as "rounds spent on this head"; taken literally the
 counter resets whenever the head moves, but a rework round that does any work at
 all moves the head by construction, so the bound would reset every round and
 could never fire. The runaway it exists to stop is a sequence of rounds across
 *moving* heads (one PR reached 15). So the bound counts remediation children of
-the anchor, all statuses — a closed child is a completed round, which is how the
-shipped signoff round cap counts it too — and it is the **escalation** that is
-head-bound, which is what one-per-head is actually protecting against.
+the anchor — the same population the shipped signoff round cap counts — and it is
+the **escalation** that is head-bound, which is what one-per-head is actually
+protecting against.
+
+**A round in flight is not a round spent.** The count is over **closed**
+remediation children, and the exhaustion trigger additionally requires that *no*
+child is open. The design fixes the increment on the child's close ("when a
+remediation child closes unresolved, the gate increments attempts"), and a rework
+child does close at hand-back, as landed-on-branch (above) — so every finished
+round is counted and the bound still bites. Counting an *open* child as spent
+brings the cap forward by a whole round: at `MAX=3`, two closed rounds plus a live
+third read as exhausted, and the arm converts a branch a worker is actively fixing
+into an `exception` — which is terminal until an operator acts. That is the one
+direction this arm must never fail in, so exhaustion waits for the wake after the
+last child closes. The signoff cap asks the same question at a single instant,
+immediately before it files the next child, where nothing is in flight and the
+distinction cannot change its answer.
 
 **The pre-open subset: members that run before the PR opens (gc-toolkit,
 tk-6d0vb.1.8).** Some check-set members can be produced *early* — against the

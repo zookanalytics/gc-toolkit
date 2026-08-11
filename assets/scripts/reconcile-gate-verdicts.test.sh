@@ -26,6 +26,22 @@
 #               totality case — no observable state is left without a verdict
 #   (FIXABLE)   an open remediation child under the cap -> fixable@<head> recorded,
 #               NO escalation (a non-terminal verdict is a record, not an alarm)
+#   (INFLIGHT)  a round still RUNNING is not a round spent: two closed rounds plus
+#               an open child at cap 3 is fixable, not exhaustion
+#   (CAPOPEN)   the completed rounds reach the cap but a child is still open ->
+#               exhaustion is DEFERRED, because an exception is terminal until an
+#               operator acts and something is still coming
+#   (CAPCLOSE)  that child closes -> the exception fires on the next wake, so the
+#               deferral above is not a way of disabling R11
+#   (PRESTALE)  a pre-open exception bound to a head the branch moved past is
+#               CLEARED: nothing else re-arms a pre-open gate, and check-set-heal
+#               skips its dispatch on `exception@*` without ever resolving a head
+#   (PREGREEN)  the same for a stale pre-open `green@*` — the other verb that
+#               blocks the dispatch
+#   (PREFIX)    and only those two: a stale `fixable@*` blocked nothing, so it is
+#               left alone
+#   (POSTSTALE) the boundary — post-open a stale marker is left intact, because it
+#               is what reconcile-merged-prs.sh's stale-marker arm keys on
 #   (UNEVAL)    no marker, no open child, under the cap -> NOTHING written. Stamping
 #               fixable here would assert a finding nobody made AND would tell
 #               check-set-heal.sh a gate with nothing in flight needs no dispatch.
@@ -141,7 +157,26 @@ cat > "$TMP/beads.json" <<JSON
   {"id":"a-stick","status":"open","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"24"}},
   {"id":"k-st1","status":"closed","metadata":{"source_review_bead":"rv-s1","parent":"a-stick"}},
   {"id":"k-st2","status":"closed","metadata":{"source_review_bead":"rv-s2","parent":"a-stick"}},
-  {"id":"k-st3","status":"closed","metadata":{"source_review_bead":"rv-s3","parent":"a-stick"}}
+  {"id":"k-st3","status":"closed","metadata":{"source_review_bead":"rv-s3","parent":"a-stick"}},
+
+  {"id":"a-inflight","status":"open","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"25"}},
+  {"id":"k-if1","status":"closed","metadata":{"source_review_bead":"rv-if1","parent":"a-inflight"}},
+  {"id":"k-if2","status":"closed","metadata":{"source_review_bead":"rv-if2","parent":"a-inflight"}},
+  {"id":"k-if3","status":"in_progress","metadata":{"source_review_bead":"rv-if3","parent":"a-inflight"}},
+
+  {"id":"a-capopen","status":"open","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"26"}},
+  {"id":"k-co1","status":"closed","metadata":{"source_review_bead":"rv-co1","parent":"a-capopen"}},
+  {"id":"k-co2","status":"closed","metadata":{"source_review_bead":"rv-co2","parent":"a-capopen"}},
+  {"id":"k-co3","status":"closed","metadata":{"source_review_bead":"rv-co3","parent":"a-capopen"}},
+  {"id":"k-co4","status":"open","metadata":{"source_review_bead":"rv-co4","parent":"a-capopen"}},
+
+  {"id":"a-prestale","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-prestale","check.codex":"exception@oldprestale","check.codex.reason":"worker-lost: review rv-gone held by a dead session","check.codex.exception_escalated":"oldprestale"}},
+
+  {"id":"a-pregreen","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-pregreen","check.codex":"green@oldpregreen"}},
+
+  {"id":"a-prefix","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-prefix","check.codex":"fixable@oldprefix"}},
+
+  {"id":"a-poststale","status":"open","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"27","check.codex":"exception@oldpost","check.codex.exception_escalated":"oldpost"}}
 ]
 JSON
 
@@ -160,7 +195,13 @@ pr:19|head19
 pr:20|head20
 pr:21|head21
 pr:24|head24
+pr:25|head25
+pr:26|head26
+pr:27|head27
 branch:polecat/tk-pre|headpre
+branch:polecat/tk-prestale|headprestale
+branch:polecat/tk-pregreen|headpregreen
+branch:polecat/tk-prefix|headprefix
 H
 
 # The live session roster. `ghost-session` is deliberately absent.
@@ -242,6 +283,16 @@ case "${1:-}" in
         tmp=$(mktemp)
         jq --arg id "$id" --arg k "$k" --arg v "$v" \
           'map(if .id == $id then .metadata[$k] = $v else . end)' "$STORE" > "$tmp"
+        mv "$tmp" "$STORE"
+      fi
+      # The pre-open re-arm CLEARS a stale marker, so the store has to be able to
+      # lose a key as well as gain one — a stub that silently ignored the unset
+      # would read back the stale marker and the re-arm assertions would pass only
+      # by never having run.
+      if [ "$prev" = "--unset-metadata" ]; then
+        tmp=$(mktemp)
+        jq --arg id "$id" --arg k "$a" \
+          'map(if .id == $id then .metadata |= del(.[$k]) else . end)' "$STORE" > "$tmp"
         mv "$tmp" "$STORE"
       fi
       prev="$a"
@@ -383,6 +434,42 @@ eq "$(marker a-stick check.codex)" "<none>" "(STICK) the dropped write really di
 hasnt "$TMP/mail.log" "a-stick" "(STICK) no escalation over a verdict that did not read back"
 has "$TMP/out" "did not stick" "(STICK) and the failure is reported"
 
+# (INFLIGHT) a round still running is not a round spent. Two CLOSED rounds and one
+# OPEN child at cap 3: counting the open one as spent would read as exhausted and
+# convert a branch a worker is actively fixing into a terminal operator hold.
+eq "$(marker a-inflight check.codex)" "fixable@head25" "(INFLIGHT) two closed rounds + an OPEN child at cap 3 -> fixable, not exception"
+hasnt "$TMP/mail.log" "a-inflight" "(INFLIGHT) no operator escalation over a round still in flight"
+
+# (CAPOPEN) the completed rounds DO reach the cap, and a child is still open. The
+# count alone says exhausted; the in-flight guard is what defers it.
+eq "$(marker a-capopen check.codex)" "fixable@head26" "(CAPOPEN) rounds AT the cap with a child still open -> exhaustion deferred, fixable recorded"
+hasnt "$TMP/mail.log" "a-capopen" "(CAPOPEN) and nobody is mailed while remediation is running"
+
+# (PRESTALE) the pre-open re-arm. An exception bound to a head the branch has moved
+# past is residue: check-set-heal.sh skips its dispatch on `exception@*` and cannot
+# see that the head moved, pre-open-resolve.sh opens only on green@<live head>, and
+# no other pass re-arms a PRE-open gate — so the operator's fix has no effect and
+# the branch is held with nothing left to raise it.
+eq "$(marker a-prestale check.codex)" "<none>" "(PRESTALE) a stale pre-open exception is cleared, so check-set-heal can dispatch again"
+has "$TMP/out" "pre-open re-arm" "(PRESTALE) and the re-arm is announced"
+hasnt "$TMP/mail.log" "a-prestale" "(PRESTALE) re-arming a gate is not an escalation"
+eq "$(marker a-prestale check.codex.exception_escalated)" "oldprestale" "(PRESTALE) the head-bound guard is left alone — it stales itself out by never matching a new head"
+
+# (PREGREEN) the same for the OTHER verb check-set-heal skips on. A stale green
+# strands a pre-open branch identically: no dispatch, and no PR because
+# pre-open-resolve.sh requires green at the LIVE branch head.
+eq "$(marker a-pregreen check.codex)" "<none>" "(PREGREEN) a stale pre-open green is cleared too"
+
+# (PREFIX) and only those two. `fixable@<old>` does not block check-set-heal's
+# dispatch, so it strands nothing and is left for the fixable record to overwrite.
+eq "$(marker a-prefix check.codex)" "fixable@oldprefix" "(PREFIX) a stale pre-open fixable is NOT cleared — it never blocked the dispatch"
+
+# (POSTSTALE) the scope boundary. Post-open, the stale marker is what
+# reconcile-merged-prs.sh's stale-marker arm keys on to file the re-review; clearing
+# it here would take the evidence away from the arm that already heals it.
+eq "$(marker a-poststale check.codex)" "exception@oldpost" "(POSTSTALE) a stale POST-open marker is left to reconcile-merged-prs.sh's stale-marker arm"
+hasnt "$TMP/update.log" "a-poststale " "(POSTSTALE) no write at all against it"
+
 # (NEVERGREEN) the safety invariant
 hasnt "$TMP/update.log" "green@" "(NEVERGREEN) the pass never writes a green marker"
 hasnt "$TMP/update.log" "merge_result" "(NEVERGREEN) the pass never touches the gating marker"
@@ -397,6 +484,9 @@ hasnt "$TMP/mail.log" "a-moved" "(CONVERGE) nor for the re-armed one"
 hasnt "$TMP/update.log" "a-r11 " "(CONVERGE) no rewrite of a verdict already current"
 eq "$(marker a-fix check.codex)" "fixable@head16" "(CONVERGE) the fixable record is stable"
 hasnt "$TMP/update.log" "a-fix " "(CONVERGE) and is not rewritten every wake"
+hasnt "$TMP/update.log" "a-prestale " "(CONVERGE) a re-armed pre-open gate is not re-cleared on every wake"
+eq "$(marker a-capopen check.codex)" "fixable@head26" "(CONVERGE) the deferred cap stays fixable while its child is open"
+hasnt "$TMP/mail.log" "a-capopen" "(CONVERGE) and still does not escalate"
 
 # ---------------------------------------------------------------------------
 # Run 2b — the merge_hold lifts. The exception is already recorded and current at
@@ -428,6 +518,21 @@ jq 'map(if .id == "a-lost" then .metadata |= del(."check.codex") else . end)' "$
      bash "$SCRIPT" ) > "$TMP/out" 2>&1 || true
 eq "$(marker a-lost check.codex)" "<none>" "(NOROSTER) an unreadable roster does not condemn a dead-looking assignee"
 has "$TMP/out" "roster unreadable" "(NOROSTER) and the disabled arm is announced"
+
+# ---------------------------------------------------------------------------
+# Run 4 — the last remediation child closes. Deferring exhaustion while a round
+# was in flight must not SUPPRESS it: with nothing left coming, the completed
+# rounds are past the cap and the exception fires on the very next wake. Without
+# this the (CAPOPEN) fix would be indistinguishable from disabling R11.
+# ---------------------------------------------------------------------------
+jq 'map(if .id == "k-co4" then .status = "closed" else . end)' "$TMP/beads.json" > "$TMP/b3" \
+  && mv "$TMP/b3" "$TMP/beads.json"
+: > "$TMP/update.log"; : > "$TMP/mail.log"
+run_pass
+eq "$(marker a-capopen check.codex)" "exception@head26" "(CAPCLOSE) once the last round closes, exhaustion fires — the deferral was not a suppression"
+has "$TMP/out" "attempts-exhausted" "(CAPCLOSE) with the reason that names the trigger"
+has "$TMP/mail.log" "a-capopen" "(CAPCLOSE) and the operator is mailed then, not before"
+eq "$(marker a-capopen check.codex.attempts)" "4@head26" "(CAPCLOSE) the stamped count is the COMPLETED rounds"
 
 # ---------------------------------------------------------------------------
 # The verdict contract itself, extracted and exercised as the pass runs it.

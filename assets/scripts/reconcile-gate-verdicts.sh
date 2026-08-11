@@ -19,7 +19,7 @@
 # vocabulary plus this one reconcile arm: no new writer of merged-truth, no new
 # blocking driver, no change to the merge condition.
 #
-# WHAT THIS PASS IS FOR — two gates that hold FOREVER with nothing to raise them:
+# WHAT THIS PASS IS FOR — gates that hold FOREVER with nothing to raise them:
 #
 #   R11  bounded remediation exhaustion. A gate that has burned its remediation
 #        rounds keeps filing rework children that keep not converging. The signoff
@@ -39,6 +39,21 @@
 #        keys on a stale GREEN marker, and a first review that died stamped no
 #        marker at all), and merge-skill.sh holds on the missing marker. Nothing
 #        anywhere times it out. The PR is held indefinitely and silently.
+#
+#   RE-ARM (pre-open). The mirror image of R12, and the same silent hold from the
+#        other end: a verdict marker left behind by a head that has since MOVED.
+#        check-set-heal.sh skips its dispatch on `green@*` and `exception@*` and
+#        resolves no head, so it cannot tell a live verdict from residue.
+#        Post-open, reconcile-merged-prs.sh's stale-marker arm reads the live PR
+#        head and re-dispatches; PRE-open there is no PR and that arm enumerates
+#        `merge_result=pull_request` only, so nothing re-arms the gate — the
+#        operator fixes the branch, the head advances, and the fix has no effect
+#        because the stale marker still reads as authoritative to the only pass
+#        that dispatches. This pass already resolves the pre-open head to bind its
+#        own verdicts, so it clears the residue and the gate re-arms to
+#        Unevaluated, which is the transition the design specifies for a head move
+#        anyway. Clearing can only hold harder: an absent marker is green at no
+#        head.
 #
 # THIS PASS NEVER WRITES `green` AND NEVER MERGES. Every write it makes either
 # holds the merge or keeps it held, so no failure mode of this script can land
@@ -67,12 +82,25 @@
 # bound would reset every single round and R11's "convert to exception rather than
 # re-spawning again" could never fire. The runaway this requirement exists to stop
 # (one PR reached 15 rounds) is precisely a sequence of rounds across MOVING heads.
-# So the bound is counted the way the shipped round cap counts it — remediation
-# children of the anchor, all statuses, because a closed child is a COMPLETED round
-# — and it is the ESCALATION that is head-bound, which is what the doc's
-# one-per-head rule is actually protecting against (notification spam). The head is
-# still stamped alongside the count, so `attempts=<n>@<sha>` reads as "n rounds
-# spent, observed at this head".
+# So the bound is counted over the same population the shipped signoff round cap
+# counts — the anchor's remediation children, keyed by `source_review_bead` — and
+# it is the ESCALATION that is head-bound, which is what the doc's one-per-head
+# rule is actually protecting against (notification spam). The head is still
+# stamped alongside the count, so `attempts=<n>@<sha>` reads as "n rounds spent,
+# observed at this head".
+#
+# COMPLETED rounds only, which is where this count and the signoff cap's differ.
+# The signoff cap asks the question at ONE instant — immediately before it files
+# the next child — and at that instant nothing is in flight, so open-vs-closed
+# cannot change its answer. This pass asks on every idle wake, including in the
+# middle of a round, and there the difference is the whole finding: an open child
+# counted as spent brings the cap forward a full round and converts a state a
+# worker is actively fixing into an exception, which is terminal until an operator
+# acts. The design fixes the increment on the child's CLOSE ("when a remediation
+# child closes unresolved, the gate increments attempts"), and a rework child does
+# close at hand-back, as landed-on-branch (docs/work-bead-state-machine.md
+# §"Rework is a new child"), so the bound still bites — one wake later, on a gate
+# with nothing left coming.
 #
 # SCOPE: both phases of the gate, because a gate holds in both.
 #   * post-open (`merge_result=pull_request`) — the gate decides whether the PR
@@ -390,7 +418,7 @@ apply() { # <description> <bd args...>
   bd_pinned update "$@" >/dev/null 2>&1
 }
 
-examined=0; recorded=0; exceptions=0; escalated=0; held=0; skipped=0
+examined=0; recorded=0; exceptions=0; escalated=0; held=0; skipped=0; rearmed=0
 
 while IFS= read -r row; do
   [ -n "$row" ] || continue
@@ -426,10 +454,22 @@ while IFS= read -r row; do
 
   examined=$((examined + 1))
 
-  # The anchor's remediation children — every round spent on this gate, all
-  # statuses, because a CLOSED child is a COMPLETED round. This is the bound the
-  # shipped signoff round cap counts, read from the same edge and the same marker
+  # The anchor's remediation children — the rounds spent on this gate, read from
+  # the edge and the marker the shipped signoff round cap uses
   # (`source_review_bead`, stamped on every rework child the signoff files).
+  #
+  # COMPLETED rounds only: a child that is still OPEN is a round IN FLIGHT, and a
+  # round in flight has not been spent. The design fixes the increment on the
+  # child's CLOSE ("when a remediation child closes unresolved, the gate increments
+  # attempts", specs/tk-zgse0.2/merge-gate-exception-lifecycle.md §"The exception
+  # arm"), and the operational lifecycle agrees: a rework child closes at hand-back
+  # as landed-on-branch (docs/work-bead-state-machine.md §"Rework is a new child"),
+  # so every finished round really does close and the bound still bites. Counting
+  # an open child as spent brings the cap forward by one whole round — at MAX=3,
+  # two closed rounds plus a live third reads as exhausted — and converts a state a
+  # worker is actively fixing into an exception, which is TERMINAL until an
+  # operator acts. That is the one direction this arm must never fail in: it
+  # replaces a converging state with a held one.
   #
   # Unreadable is NOT zero: zero would read as "no rounds spent" and could only
   # ever make this pass quieter, but it also feeds the R11 cap, and a cap fed a
@@ -441,7 +481,8 @@ while IFS= read -r row; do
     skipped=$((skipped + 1)); continue
   fi
   attempts=$(printf '%s' "$kids" \
-    | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null)
+    | jq '[.[] | select(.metadata.source_review_bead != null)
+                | select(((.status // "") | ascii_downcase) == "closed")] | length' 2>/dev/null)
   case "$attempts" in ''|*[!0-9]*) attempts=0 ;; esac
   open_kids=$(printf '%s' "$kids" \
     | jq '[.[] | select(((.status // "") | ascii_downcase) != "closed")] | length' 2>/dev/null)
@@ -532,7 +573,21 @@ EOF
       # R11 — bounded remediation exhaustion. The rounds are spent and the gate is
       # still not green, so re-spawning again is the non-convergent move this bound
       # exists to rule out.
-      if [ -z "$reason" ] && [ "$attempts" -ge "$MAX_ATTEMPTS" ] && [ "$MAX_ATTEMPTS" -gt 0 ]; then
+      #
+      # NOTHING IN FLIGHT is part of "spent", and it is a second guard rather than a
+      # restatement of the closed-only count above. The count answers "how many
+      # rounds finished"; this answers "is one running right now" — and the two come
+      # apart in a state that is reachable whenever a child is filed outside the
+      # signoff cap's accounting (a hand-filed rework, a re-dispatch that raced it):
+      # MAX closed rounds AND an open child. There the count alone says exhausted
+      # while a worker is mid-fix, and an exception recorded over live remediation
+      # is terminal until an operator acts. Exhaustion is a statement about a gate
+      # with nothing left coming; while a child is open something is still coming,
+      # so the gate stays `fixable` (recorded below) and the cap bites on the wake
+      # after that child closes. Deferring costs one idle wake; firing early costs
+      # the round the bound was still allowing.
+      if [ -z "$reason" ] && [ "$open_kids" -eq 0 ] \
+         && [ "$attempts" -ge "$MAX_ATTEMPTS" ] && [ "$MAX_ATTEMPTS" -gt 0 ]; then
         reason="attempts-exhausted: $attempts remediation round(s) spent against a cap of $MAX_ATTEMPTS with check.$gate still not green"
       fi
 
@@ -551,6 +606,72 @@ EOF
             echo "reconcile-gate-verdicts: $id — check.$gate recorded fixable@$head ($open_kids open remediation child(ren), $attempts round(s) spent)"
             recorded=$((recorded + 1))
           fi
+          continue
+        fi
+
+        # -------------------------------------------------------------------
+        # PRE-OPEN RE-ARM. The gate is Unevaluated with nothing in flight, but a
+        # marker from a PREVIOUS head is still sitting on the anchor — and two of
+        # the verbs it can carry make check-set-heal.sh skip the dispatch that
+        # would raise the gate:
+        #
+        #   green@<old>      "satisfiable, no dispatch from here"
+        #   exception@<old>  "terminal until an operator acts"
+        #
+        # Both readings are true only AT THE HEAD THE MARKER NAMES, and
+        # check-set-heal is bead-side: it resolves no head, so it cannot tell a
+        # current verdict from residue. Post-open that gap is closed by
+        # reconcile-merged-prs.sh's stale-marker arm, which reads the live PR head
+        # and files a re-review. Pre-open there IS no PR, that arm enumerates
+        # `merge_result=pull_request` only, and no other pass re-arms the gate — so
+        # the residue is terminal in the literal sense: check-set-heal skips
+        # forever, pre-open-resolve.sh opens only on green@<live branch head> and so
+        # never opens, and the branch sits held with nothing left to move it. That
+        # is exactly the silent indefinite hold this file exists to end, reached
+        # through the verb meant to describe a hold an operator can lift: the
+        # operator lifts it — fixes the branch, moves the head — and the lift has no
+        # effect, because the datum that was supposed to go stale still reads as
+        # authoritative to the one pass that dispatches.
+        #
+        # So clear it. The design already says this is the state transition: a head
+        # move drops OK, fixable and exception alike back to Unevaluated
+        # (specs/tk-zgse0.2/merge-gate-exception-lifecycle.md §"The verdict
+        # lifecycle"), and Unevaluated with no marker is precisely what check-set-heal
+        # dispatches on. The dispatch lands on the NEXT idle wake, because this pass
+        # runs after check-set-heal in the patrol — convergent, one wake later.
+        #
+        # This can only HOLD HARDER, never merge or open: an absent marker is not
+        # green at any head, so merge-skill.sh and pre-open-resolve.sh both keep
+        # refusing. The pass's safety invariant is intact.
+        #
+        # Only the two BLOCKING verbs are cleared, and only with nothing in flight:
+        #   * `fixable@<old>` does not block check-set-heal, so it strands nothing;
+        #     leaving it lets the record above overwrite it at the live head.
+        #   * With an open child the fixable record IS the re-arm — it replaces the
+        #     stale marker in the same pass — which is why that arm returns above.
+        # KEEP THIS VERB LIST IN SYNC with `marker_blocks_dispatch` in
+        # check-set-heal.sh: a verb added to that skip list is a verb that strands a
+        # pre-open branch when it goes stale, and it belongs here the same day.
+        #
+        # The head-bound COMPANIONS are deliberately left alone. `.exception_escalated`
+        # is compared for equality against the live head, so a stale one never
+        # matches and re-arms itself; `.reason` is read only on the
+        # already-excepted-at-this-head path, which an absent marker cannot reach;
+        # and `.attempts` is a record of rounds spent, not a head-bound bound (see
+        # the divergence note in this file's header) — clearing it on a head move
+        # would reset the very count R11 needs to keep across moving heads.
+        if [ "$phase" = "pre_open_gate" ]; then
+          case "$marker" in
+            "$GATE_VERB_OK"@*|"$GATE_VERB_EXCEPTION"@*)
+              if apply "clear stale check.$gate='$marker' on $id (branch head is now $head; re-arms the gate to unevaluated so check-set-heal can dispatch)" \
+                   "$id" --unset-metadata "check.$gate"; then
+                echo "reconcile-gate-verdicts: $id — check.$gate was '$marker' but the branch head is $head; cleared (pre-open re-arm, gate back to unevaluated for a fresh dispatch)"
+                rearmed=$((rearmed + 1))
+              else
+                echo "reconcile-gate-verdicts: $id — could not clear stale check.$gate='$marker'; the pre-open gate stays blocked, retry next wake" >&2
+              fi
+              ;;
+          esac
         fi
         continue
       fi
@@ -659,5 +780,5 @@ done <<EOF
 $ROWS
 EOF
 
-echo "reconcile-gate-verdicts: $examined anchor(s) examined, $recorded fixable verdict(s) recorded, $exceptions exception(s) recorded, $escalated escalated, $held held, $skipped skipped"
+echo "reconcile-gate-verdicts: $examined anchor(s) examined, $recorded fixable verdict(s) recorded, $exceptions exception(s) recorded, $escalated escalated, $held held, $rearmed pre-open gate(s) re-armed, $skipped skipped"
 exit 0

@@ -29,8 +29,9 @@ deliberately left out.
 | Stale-gate arm learns all three verbs | `assets/scripts/reconcile-merged-prs.sh` |
 | Heal skips on `green@`/`exception@`, dispatches on `fixable@` | `assets/scripts/check-set-heal.sh` |
 | Held exceptions surfaced to `gc doctor` | `doctor/check-merge-gate-drop/run.sh`, arm 3 |
+| Pre-open re-arm: a stale `green@`/`exception@` on a `pre_open_gate` anchor is cleared, since nothing else re-arms a pre-open gate | `assets/scripts/reconcile-gate-verdicts.sh` |
 | Spec | `docs/work-bead-state-machine.md`, §"Gate verdicts: the marker verb" |
-| Regression | `assets/scripts/reconcile-gate-verdicts.test.sh` (69 assertions) |
+| Regression | `assets/scripts/reconcile-gate-verdicts.test.sh` (88 assertions) |
 
 `merge-skill.sh` is **untouched**, which is the design's central claim and it
 holds unmodified: it merges only while every declared gate equals
@@ -99,12 +100,26 @@ does any work at all moves the head *by construction*, so the bound would reset
 every single round and R11's "convert to exception rather than re-spawning again"
 could never fire. The runaway R11 exists to stop is a sequence of rounds across
 **moving** heads (one PR reached 15). So the bound counts remediation children of
-the anchor across all statuses — a closed child is a completed round, which is how
-the shipped signoff round cap already counts it — and it is the **escalation**
-that is head-bound, which is what the doc's one-per-head rule is actually
-protecting against (notification spam, per AE-WS4-4). The head is still stamped
-alongside the count, so `attempts=<n>@<sha>` reads as "n rounds spent, observed at
-this head".
+the anchor — the same population the shipped signoff round cap counts — and it is
+the **escalation** that is head-bound, which is what the doc's one-per-head rule
+is actually protecting against (notification spam, per AE-WS4-4). The head is
+still stamped alongside the count, so `attempts=<n>@<sha>` reads as "n rounds
+spent, observed at this head".
+
+The count is over **closed** children only, and the exhaustion trigger separately
+requires that no child is open. That is *not* a third divergence — it is the
+design read literally ("when a remediation child closes unresolved, the gate
+increments attempts") and it is where the first shipped cut got it wrong: counting
+all statuses made a round *in flight* count as a round *spent*, so at `MAX=3` two
+closed rounds plus a live third read as exhausted and the arm stamped `exception`
+— terminal until an operator acts — over a branch a worker was actively fixing.
+The two guards answer different questions ("how many rounds finished" and "is one
+running right now") and come apart whenever a child is filed outside the signoff
+cap's accounting, so both are enforced. It costs at most one idle wake: the cap
+fires on the wake after the last child closes, and the operational lifecycle
+guarantees that close — a rework child closes at hand-back, as landed-on-branch.
+The signoff cap can keep counting all statuses because it asks at a single instant,
+immediately before filing the next child, where nothing is in flight.
 
 **2. `fixable` is recorded only where it is observable.** The design has the gate
 skill emit fixable. This arm is an observer: it does not run skills, so it records
@@ -135,6 +150,34 @@ indefinite hold, the exact class WS4 addresses:
 
 `merge-skill.sh` and `pre-open-resolve.sh` were checked and needed **no** change:
 both compare for equality against `green@<head>`, so a new verb holds correctly.
+
+**But teaching a reader the verbs is only half of it — something has to re-arm
+them.** `check-set-heal.sh` now skips on two verbs, and its skip is *bead-side*:
+it resolves no head, so it cannot tell a current verdict from residue left behind
+by a head that has since moved. Post-open, `reconcile-merged-prs.sh`'s stale-marker
+arm supplies the missing head-awareness and files the re-review. **Pre-open it does
+not exist**: that arm enumerates `merge_result=pull_request` only, there is no PR
+to read a head from, and no other pass re-armed a pre-open gate. So an
+`exception@<old>` on a `pre_open_gate` anchor outlived the operator fix it was
+waiting for — the operator fixed the branch, the head advanced, the heal pass kept
+skipping, `pre-open-resolve.sh` kept refusing to open a PR that was not green at
+the *live* branch head, and the branch sat held with nothing left to raise it. The
+same hole swallowed a stale `green@<old>` pre-open, for the same reason and with
+the same result.
+
+`reconcile-gate-verdicts.sh` closes it, because it is the one pass that already
+resolves the pre-open head: on a `pre_open_gate` anchor whose gate reads
+unevaluated with nothing in flight, a stale `green@`/`exception@` marker is
+**cleared**, and the gate returns to unevaluated for `check-set-heal.sh` to
+dispatch on the next wake (this pass runs after the heal pass, so the re-arm and
+the dispatch are one wake apart — convergent, not immediate). Scope is deliberate
+in three ways: only the two verbs that block a dispatch (`fixable@` blocks
+nothing, and the fixable record overwrites it anyway); only with no open child
+(with one, the `fixable@<head>` record *is* the re-arm, in the same pass); and only
+pre-open, because post-open the stale marker is the evidence
+`reconcile-merged-prs.sh` keys on and clearing it would take the case away from the
+arm that already heals it. The pass's safety invariant is untouched: clearing can
+only hold harder, since an absent marker is green at no head.
 
 ## Scoped out of this branch
 
