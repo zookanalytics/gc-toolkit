@@ -234,8 +234,13 @@ for R in $PRREPOS; do
   # is the body's exit status, which aborts the pass under `set -e`.
   if [ "$PR_LIVENESS" = "none" ]; then PR_LIVENESS=verified; fi
   # --limit is REQUIRED: gh pr list defaults to 30 and truncates in silence.
-  ROWS=$(gh pr list --repo "$R" --state open --limit 1000 --json url 2>/dev/null)
-  if [ -n "$ROWS" ] && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  # The read itself sits INSIDE the `if`, for the same reason as the `if` above.
+  # A bare `ROWS=$(gh ...)` is a simple assignment, so its exit status IS the
+  # command substitution's: under `set -e` a transient `gh` failure — precisely
+  # the case the `else` below exists to report — would abort the pass before
+  # `unverified` could be recorded, leaving the sweep with no liveness word at
+  # all rather than an honest one.
+  if ROWS=$(gh pr list --repo "$R" --state open --limit 1000 --json url 2>/dev/null) && [ -n "$ROWS" ] && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
     printf '%s' "$ROWS" | jq -r '.[].url // empty' >> "$PRURLS"
   else
     PR_LIVENESS=unverified

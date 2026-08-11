@@ -204,6 +204,30 @@ printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-pr-open")' >/dev/null 2>&1
     || bad "a live-PR bead is REPORTED when liveness is unverified" "it was hidden on a failed probe"
 unset GH_FAIL
 
+# The same failed read, under `set -e` — where reporting it is HARDER than not
+# reporting it, and where the block's own comments say it must still work. A
+# bare `ROWS=$(gh ...)` is a simple assignment whose exit status is the command
+# substitution's, so errexit kills the pass on the transient `gh` failure that
+# the `else` arm exists to disclose: no `unverified`, no WARN, no visit body —
+# the classify step simply stops. The test above cannot see that, because this
+# file runs under `set -u` alone; only a child shell with `-e` can.
+#
+# Asked for the word it reached, an aborted pass prints NOTHING, so the check is
+# fail-closed. The healthy read is run the same way as a positive control: it
+# proves the -e harness reaches the end of the block at all, so a future edit
+# that breaks errexit-safety ANYWHERE in the block (not just at this one
+# assignment) fails here rather than passing vacuously.
+echo "── the open-PR read survives 'set -e', which is where reporting is hard ──"
+# shellcheck disable=SC2016  # $1/$PR_LIVENESS are for the CHILD shell to expand
+ERRX_RUN='. "$1"; printf "%s" "$PR_LIVENESS"'
+ERRX_FAIL="$(GH_FAIL=1 READY="$TMP/ready.json" LIVE="$TMP/live.json" \
+    bash -e -c "$ERRX_RUN" _ "$TMP/openprs.sh" 2>/dev/null)"
+eq "$ERRX_FAIL" "unverified" \
+   "under 'set -e' a failed gh read still records 'unverified' (never aborts the pass)"
+ERRX_OK="$(READY="$TMP/ready.json" LIVE="$TMP/live.json" \
+    bash -e -c "$ERRX_RUN" _ "$TMP/openprs.sh" 2>/dev/null)"
+eq "$ERRX_OK" "verified" "…and a healthy read runs to completion under 'set -e' too"
+
 # No PR-parked candidate at all: nothing to ask about, and 'none' is a third
 # state so an empty board is not mistaken for an unread one.
 echo "── no PR-parked candidates → no GitHub call at all ──"
