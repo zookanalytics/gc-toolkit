@@ -264,6 +264,52 @@ loopback port, reproducing the same-origin shape the tailscale mapping provides
 in deployment; override with `HELM_DEV_TTYD`, which is loopback-checked exactly
 like `HELM_DEV_MOUNT`.
 
+## The board contract
+
+`web/src/contract.ts` is the TypeScript mirror of the Go structs in
+`internal/board/model.go` — the body of `GET <mount>/helm`, and the one shape
+the frontend is allowed to assume. It is **hand-written**: the `/svc/` surface
+is not in the supervisor's OpenAPI document, so there is no generated client to
+hang a type off.
+
+What makes that safe is the rule in model.go's package doc — the tags are an
+**additive** contract, so fields may be added but never renamed or removed. What
+makes it *stay* true is `web/contract_parity_test.go`, which fails `go test ./...`
+when the two sides disagree about a field's name, its type, or whether it is
+optional. It mirrors the wire only: `board.Anchor` and `board.Child` carry tags
+too, but they feed `BuildBoard` and never cross the wire, so the parity test
+rejects an interface for them just as it rejects a missing one for `Tile`.
+
+**Adding a field to the board.** Add it to the Go struct, mirror it in
+`contract.ts`, populate it in `fixtureBoard()`, and regenerate the fixture:
+
+```bash
+cd services/helm
+go test ./web -run TestBoardFixture -update   # rewrites web/src/board.fixture.json
+go test ./web                                 # parity + coverage
+(cd web && npm run build)                     # tsc asserts the fixture against contract.ts
+```
+
+Skip any of those and a test tells you which one — that is the point of them.
+
+**Why two checks.** The Go test compares by reflection, and is the only layer
+that catches a renamed *optional* field (the key just goes missing, which an
+optional property tolerates). The fixture is a committed sample of the bytes the
+Go encoder actually produced, asserted against the contract at compile time by
+`web/src/contract.fixture.ts`; it validates the encoder rather than a second
+reading of the structs, and it fails `npm run build`, so a frontend author who
+never runs `go test` is still caught. `TestFixtureCoversEveryField` keeps the
+fixture from decaying into a check that passes because it exercises nothing.
+
+Two shapes deserve care when mirroring, and the mapping derives both from the
+struct tag rather than leaving them to judgement: `omitempty`/`omitzero` becomes
+a TypeScript `?`, and a slice *without* `omitempty` becomes `T[] | null` because
+`encoding/json` writes `null` for a nil slice. `tiles` really is nullable —
+narrow it (`board.tiles ?? []`) before iterating.
+
+Reasoning and rejected alternatives (codegen, a TS test runner, a `.ts`
+fixture): `specs/tk-eemvf.2/decisions.md`.
+
 ## Build / run / test
 
 ```bash
