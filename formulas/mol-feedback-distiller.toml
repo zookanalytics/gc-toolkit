@@ -5,8 +5,10 @@ prompt-update proposals, on judgment rather than counters.
 What it does, plainly: agents and the miner record corrective feedback about
 *standing* behavior as observation beads (`task_kind=observation`, closed at
 creation, provenance-keyed). This formula runs on a daily heartbeat order,
-gates itself on pending volume and urgency (D7 — the timer is a heartbeat,
-this gate is the cadence), reads the pending observations cross-rig (D5),
+gates the JUDGING of those observations on pending volume and urgency (D7 —
+the timer is a heartbeat, this gate is the cadence; the gate scopes the
+judging, never the run, so the retirement pass keeps its own unconditional
+every-run cadence), reads the pending observations cross-rig (D5),
 judges them with the learning-distill rubric (D6: promotion is a *reasoned
 judgment*, not a counter comparison — an explicit standing directive or an
 operator-endorsed observation promotes at N=1, a diff-scoped nit waits for
@@ -66,9 +68,54 @@ id = "load-and-gate"
 title = "Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate"
 description = """
 Initialize, no-op cleanly off the pack home rig, collect the pending
-observation set from every rig, and decide whether this run proceeds at all.
+observation set from every rig, and decide how much of this run proceeds.
 This formula is read-only plus bead-filing — it has no per-bead worktree and
 no refinery handoff of its own.
+
+## 0. How a no-op run ends (read before running any arm below)
+
+Every arm below that decides not to proceed ends its own SHELL and closes its
+own step bead. It does NOT drain the session, and it never closes another
+step's bead.
+
+- Closing a step bead is what makes the NEXT step ready. It does not reach
+  `workflow-finalize`: `judge-and-cluster` needs `load-and-gate` and
+  `file-and-dispatch` needs `judge-and-cluster`, so closing this step advances
+  the graph by exactly one step.
+- `gc runtime drain-ack` anywhere before the terminal step therefore does not
+  stop the run — it only forces the remaining steps onto a freshly spawned
+  worker that has lost this session's context and must reconstruct it from
+  bead notes. The no-op arms are the COMMON paths here (a daily heartbeat, a
+  base rate of zero-or-one proposals, and most rigs in a city are not the pack
+  home rig), so that spawn would be a daily cost for nothing.
+- Force-closing the successor step beads from inside this step is the other
+  wrong answer: a step that closes its successors is the graph.v2 husk
+  anti-pattern. The successors carry their own gates instead.
+
+Each arm sets `DISTILL_RUN` and echoes it. The later steps branch on it:
+
+| `DISTILL_RUN` | meaning | judge observations | retirement pass | files / stamps |
+|---|---|---|---|---|
+| `open` | D7 gate open | yes | yes | as judged |
+| `gated` | D7 volume gate closed | no — the judgeable set is emptied | YES | retirement proposals only; stamps nothing |
+| `aborted` | a fail-safe tripped; the observation read is untrustworthy | no | no | nothing |
+| `off-home` | not the pack home rig | no | no | nothing |
+
+A `gated` run still runs the retirement pass because that pass is specified
+unconditional — "every run" — in both places that define it: step 2 §5 and
+`skills/learning-distill/SKILL.md`. D7 is a pending-OBSERVATION-VOLUME gate:
+it decides whether there is anything to JUDGE, never whether the adopted rules
+get reviewed. Coupling the two inverts the pass's purpose, because the
+rubric's "still binding?" question is explicitly about rules with no recent
+evidence — exactly the quiet city that closes the gate. Prompt rot is the
+failure the anti-bloat half exists to prevent.
+
+An `aborted` run suppresses the retirement pass on purpose: "still binding? no
+recent evidence" is only answerable from an observation read that succeeded.
+
+`DISTILL_RUN` is session state, not Dolt state. A worker that wakes fresh on a
+later step without it must not guess — re-run this step's §1-§3 to rebuild
+`$REPO`, `$PENDING` and the disposition. They are read-only and deterministic.
 
 ## 1. Prime and home-rig gate
 
@@ -79,17 +126,22 @@ gc bd prime                 # beads context
 REPO="$(git rev-parse --show-toplevel)"
 git -C "$REPO" fetch origin main --quiet || true   # best-effort freshness
 
+DISTILL_RUN=open   # §0: open | gated | aborted | off-home
+
 # Home-rig gate. The order ships in the pack, so EVERY importing rig fires it —
 # but prompt updates are edits to the pack repo itself, authorable only from
 # the pack's home rig. Anywhere else, this run is a clean no-op, not an error.
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
-  echo "not the gc-toolkit pack home rig — prompt updates are authored there; nothing to distill here."
-  # Close this step bead before draining. A graph.v2 step advances by CLOSING
-  # its bead, not by drain-ack alone; a drain-acking session that still owns an
-  # open assigned step bead is parked and re-pooled — a fresh worker re-wakes on
-  # this same step forever. Closing it lets the graph reach workflow-finalize.
+  DISTILL_RUN=off-home
+  echo "DISTILL_RUN=off-home — not the gc-toolkit pack home rig; prompt updates are authored there, nothing to distill here."
+  # Close this step bead, end this shell, do NOT drain (§0). A graph.v2 step
+  # advances by CLOSING its bead, not by drain-ack alone; a drain-acking
+  # session that still owns an open assigned step bead is parked and re-pooled.
+  # But closing this bead only makes judge-and-cluster READY — it does not
+  # reach workflow-finalize. The two successor steps re-derive this same
+  # home-rig gate and no-op through it, so staying in-session costs two hook
+  # claims and the terminal step drains once, at the end.
   [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-  gc runtime drain-ack
   exit 0
 fi
 ```
@@ -137,9 +189,11 @@ else
     > "$RIGSET"
 fi
 if [ ! -s "$RIGSET" ]; then
-  echo "FAIL-SAFE: no rig_list poured and rig enumeration returned nothing — distiller aborts, nothing judged, nothing filed"
+  DISTILL_RUN=aborted
+  echo "FAIL-SAFE: no rig_list poured and rig enumeration returned nothing — DISTILL_RUN=aborted, nothing judged, nothing filed"
+  # Close, end this shell, no drain-ack (§0): the successors read the aborted
+  # disposition and no-op through it, and the terminal step drains once.
   [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-  gc runtime drain-ack
   exit 0
 fi
 echo "reading observations from stores: $(cut -f1 "$RIGSET" | tr '\\n' ' ')"
@@ -169,10 +223,10 @@ while IFS="$TAB" read -r R RPATH; do
     gc bd --rig "$R" list -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
   fi
   if ! jq -e 'type=="array"' "$RAW" >/dev/null 2>&1; then
-    echo "FAIL-SAFE: observation listing for store $R unreadable — distiller aborts, nothing judged, nothing filed"
+    DISTILL_RUN=aborted
+    echo "FAIL-SAFE: observation listing for store $R unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
     [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-    gc runtime drain-ack
-    exit 0
+    exit 0   # no drain-ack (§0)
   fi
   # obs_rig_path rides along so step 4's stamping can reopen the SAME store it
   # was read from; without it an HQ-store observation could never be stamped.
@@ -206,10 +260,16 @@ three properties this step used to ask a V1 run to confirm:
 
 ## 3. The cadence gate (D7)
 
-The 24h order timer is a heartbeat; THIS is the cadence. Proceed iff any of:
-pending count ≥ `{{distill_min_pending}}`; any pending observation is urgent
-(`obs.endorsed=operator` or `obs.directive=standing` — those never wait on
-volume); the oldest pending exceeds `{{distill_max_age_days}}` days.
+The 24h order timer is a heartbeat; THIS is the cadence. **Judge** the pending
+observations iff any of: pending count ≥ `{{distill_min_pending}}`; any pending
+observation is urgent (`obs.endorsed=operator` or `obs.directive=standing` —
+those never wait on volume); the oldest pending exceeds
+`{{distill_max_age_days}}` days.
+
+What this gate scopes is the judging of observations, and nothing else (§0).
+When it closes, the run does not stop: the judgeable set is emptied, the veto
+sweep below still runs, and step 2's retirement pass still reviews the adopted
+rules on its own unconditional cadence.
 
 ```bash
 N=$(jq 'length' "$PENDING")
@@ -234,12 +294,21 @@ elif [ "$N" -gt 0 ]; then
   AGE_D=$(( {{distill_max_age_days}} + 1 ))
 fi
 if [ "$N" -ge "{{distill_min_pending}}" ] || [ "$URGENT" -gt 0 ] || [ "$AGE_D" -gt "{{distill_max_age_days}}" ]; then
-  echo "gate open: $N pending, $URGENT urgent, oldest ${AGE_D}d"
+  DISTILL_RUN=open
+  echo "DISTILL_RUN=open — gate open: $N pending, $URGENT urgent, oldest ${AGE_D}d"
 else
-  echo "gated: $N pending, none urgent, oldest ${AGE_D}d"
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-  gc runtime drain-ack
-  exit 0
+  DISTILL_RUN=gated
+  echo "DISTILL_RUN=gated — $N pending, none urgent, oldest ${AGE_D}d; no observation is judged this run"
+  # Empty the JUDGEABLE set and fall through — no close here, no drain, no exit.
+  # $PENDING is "what this run will judge", not "what is pending in the stores":
+  # nothing is stamped obs.distilled on a gated run, so all $N stay pending and
+  # still count toward the next run's gate. Downstream this makes step 2's
+  # clustering and judging (§2-§4) and step 3 §2-§3 no-ops by construction,
+  # with no second gate to keep in sync — while step 2 §5's retirement pass,
+  # whose inputs are the fragments on disk and the pattern beads and not this
+  # set, runs exactly as its own text says it does: every run. Step 3 §1 then
+  # files whatever that pass proposed.
+  echo '[]' > "$PENDING"
 fi
 ```
 
@@ -304,19 +373,21 @@ fi
 
 # Non-terminal step complete: close this step bead so the graph advances to
 # judge-and-cluster. No drain-ack — the same session continues (continuation-
-# group affinity), carrying $REPO, $PENDING, and the rig set into the next step.
+# group affinity), carrying $REPO, $PENDING, $DISTILL_RUN, and the rig set into
+# the next step.
 [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
 ```
 
 Veto observations filed this sweep are judged by the NEXT gate-opening run —
 they were filed after this run's pending set was read, and that is fine.
 
-**Exit criteria:** Environment primed; home rig confirmed; `$PENDING` holds
-every undistilled observation across every store in `$RIGSET` — the city HQ
-store included — each tagged with the `obs_rig`/`obs_rig_path` pair that step 3
-stamps it back through (or the run no-opped/aborted);
-the D7 gate is open; any new vetoes are recorded as learning-rubric
-observations.
+**Exit criteria:** Environment primed; the run's disposition decided, echoed,
+and carried as `$DISTILL_RUN` (§0); on an `open` run `$PENDING` holds every
+undistilled observation across every store in `$RIGSET` — the city HQ store
+included — each tagged with the `obs_rig`/`obs_rig_path` pair that step 3
+stamps it back through, and on a `gated` run `$PENDING` is empty; any new
+vetoes are recorded as learning-rubric observations. This step's bead is
+closed on every path and the session is NOT drained on any of them.
 """
 
 [[steps]]
@@ -328,6 +399,48 @@ This is a judging task, not a counting script. The method is the
 learning-distill rubric, read from the pack at run time — the rubric is a
 versioned, learnable artifact (D6), so the file is the source of truth and
 this step never restates it in parallel prose that could drift.
+
+## 0. Carry the run disposition
+
+`load-and-gate` §0 defines `DISTILL_RUN` and the table of what each value
+means. Two of its values end this step immediately — and, per §0, this step
+ends by closing its OWN bead and its own shell, never by draining the session
+and never by closing `file-and-dispatch`'s bead:
+
+```bash
+REPO="${REPO:-$(git rev-parse --show-toplevel)}"
+# Re-derive the home-rig gate rather than trusting it was checked upstream: a
+# step that can wake on its own gates itself.
+if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
+  echo "DISTILL_RUN=off-home — not the pack home rig; nothing to judge here."
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  exit 0
+fi
+if [ "${DISTILL_RUN:-}" = "aborted" ]; then
+  # A fail-safe tripped upstream, so the observation read is untrustworthy.
+  # Judge nothing AND propose nothing: the retirement pass below asks "no
+  # recent evidence?", which is only answerable from a read that succeeded.
+  echo "DISTILL_RUN=aborted — load-and-gate tripped a fail-safe; judging nothing, proposing nothing."
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  exit 0
+fi
+```
+
+If `DISTILL_RUN` is unset because you woke fresh on this step, do not guess and
+do not assume `open` — re-run `load-and-gate` §1-§3 to rebuild `$REPO`,
+`$PENDING` and the disposition. They are read-only and deterministic.
+
+On a `gated` run `$PENDING` is empty by construction, so there is nothing to
+dedup, cluster or judge: §2 clusters nothing and seeds no pattern bead, §3
+recomputes no rollups, §4 judges no cluster, and §6 has no
+observation-derived proposal to weigh. Run §2's pattern-bead LISTING anyway —
+it is read-only, and it is the evidence view §5 needs to answer "no recent
+evidence?" against the adopted rules. Then go to §5, which is the substance of
+a gated run.
+
+Do not re-read the pending observations to "check" whether the gate was right.
+Emptying the judgeable set IS the gate; re-reading it would restore the exact
+volume coupling §5 exists outside of.
 
 ## 1. Load the rubric (fail-soft, never fail-stop)
 
@@ -375,10 +488,10 @@ store, open, unrouted, never assigned: ledger rows, not claimable work.
 OPENB=$(mktemp)
 gc bd list --status=open --json --limit=0 > "$OPENB" 2>/dev/null
 if ! jq -e 'type=="array"' "$OPENB" >/dev/null 2>&1; then
-  echo "FAIL-SAFE: open-bead listing unreadable — distiller aborts, nothing filed"
+  DISTILL_RUN=aborted
+  echo "FAIL-SAFE: open-bead listing unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
   [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-  gc runtime drain-ack
-  exit 0
+  exit 0   # no drain-ack (§0): file-and-dispatch reads the aborted disposition and drains
 fi
 jq '[.[] | select((.metadata.task_kind // "") == "feedback-pattern") | {id, title, metadata}]' "$OPENB"
 ```
@@ -421,6 +534,14 @@ Write the reasoning down — it travels in the proposal body and the D3
 reviewer judges from the PR alone.
 
 ## 5. Retirement pass over adopted rules (the anti-bloat half, every run)
+
+"Every run" is literal, and it is the reason a gated run reaches this step at
+all instead of no-opping out at the D7 gate: this pass runs on `open` and
+`gated` runs alike. Its input is the adopted-rule inventory on disk, not the
+pending observation set, so a closed volume gate takes nothing away from it —
+and a quiet city is precisely when it matters, since the "still binding?"
+question below is about rules with no recent evidence. (`aborted` and
+`off-home` runs are the exception, and they exited back in §0.)
 
 The adopted-rule inventory is the fragments' anchor comments — one source of
 truth (the files on `main`), no side list:
@@ -471,17 +592,21 @@ rate: most runs should end here with zero or one survivors.
 ```bash
 # Non-terminal step complete: close this step bead so the graph advances to
 # file-and-dispatch. No drain-ack — the same session continues (continuation-
-# group affinity), carrying the survivors and consumed-observation map forward.
+# group affinity), carrying $DISTILL_RUN, the survivors, and the
+# consumed-observation map forward.
 [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
 ```
 
-**Exit criteria:** Every pending observation deduped and judged into a
-pattern bead with recomputed rollups; a bounded proposal list (≤
+**Exit criteria:** Every observation in the judgeable set deduped and judged
+into a pattern bead with recomputed rollups (on a `gated` run that set is
+empty, so this is vacuous and the consumed map stays empty); the retirement
+pass asked of every adopted rule; a bounded proposal list (≤
 `{{max_beads_per_run}}`) of promote/retire/harden changes each carrying its
 written reasoning; contested rules marked for a visit; a consumed-observation
 map `(obs id, obs rig, obs rig path) → pattern bead` for step 3's stamping —
 carry the `obs_rig_path` recorded in `$PENDING` through unchanged, because it
-is what reopens an HQ-store observation's store.
+is what reopens an HQ-store observation's store. This step's bead is closed on
+every path and the session is NOT drained on any of them.
 """
 
 [[steps]]
@@ -493,6 +618,35 @@ Memory-audit shape, different change unit. Each surviving proposal becomes
 ONE change-unit `prompt-update` bead targeting `main` as one small PR, routed
 to the worker pool. Consumed observations are stamped so they never re-count.
 Then drain — the distiller is one-shot.
+
+## 0. Carry the run disposition
+
+This is the TERMINAL step, so this is the one step that drains — on every
+path, including the no-op ones (`load-and-gate` §0). Two dispositions file
+nothing and stamp nothing:
+
+```bash
+REPO="${REPO:-$(git rev-parse --show-toplevel)}"
+if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
+  echo "DISTILL_RUN=off-home — not the pack home rig; no bead filed, no observation stamped."
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  gc runtime drain-ack
+  exit 0
+fi
+if [ "${DISTILL_RUN:-}" = "aborted" ]; then
+  echo "DISTILL_RUN=aborted — a fail-safe tripped upstream; no bead filed, no observation stamped."
+  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  gc runtime drain-ack
+  exit 0
+fi
+```
+
+If `DISTILL_RUN` is unset because you woke fresh on this step, rebuild it the
+way step 2 §0 says: re-run `load-and-gate` §1-§3. Never file on a guess.
+
+A `gated` run reaches here normally. It carries an empty consumed map, and it
+may carry retirement proposals from step 2 §5 — file those the same way as any
+other survivor.
 
 ## 1. File one bead per surviving proposal
 
@@ -561,6 +715,11 @@ too, or they re-trigger the cadence gate forever.
 Its evidence now lives on the pattern bead's rollups. This runs even when no
 proposal survived (a judged-but-held run must still shrink the pending set).
 
+**Judged is the criterion, not seen.** On a `gated` run the consumed map is
+empty because nothing was judged, so this section stamps NOTHING and the
+pending observations stay pending — which is the whole point, since they are
+what opens the next gate. Stamping them would silently discard them unjudged.
+
 ```bash
 # For each (OBS_ID, OBS_RIG, OBS_RIG_PATH) → PATTERN in the step-2 consumed map.
 # Reopen the store the observation was READ from, by the same rule step 1 used:
@@ -608,9 +767,12 @@ gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 ## 4. Summarize and drain
 
 ```bash
-echo "distiller complete: filed F proposal(s), held H pattern(s) awaiting recurrence, V contention visit(s), discarded D (reasons logged above), stamped S observation(s)."
-# Terminal step: close this step bead, THEN drain. The dispatcher's
-# workflow-finalize closes the kind=workflow root once every step is closed.
+echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F proposal(s), held H pattern(s) awaiting recurrence, V contention visit(s), discarded D (reasons logged above), stamped S observation(s)."
+# Terminal step: close this step bead, THEN drain. This is the ONLY drain-ack
+# in the workflow (load-and-gate §0) — every earlier arm closes its bead and
+# exits its shell, so the whole run, no-op paths included, stays in one
+# session. The dispatcher's workflow-finalize closes the kind=workflow root
+# once every step is closed.
 [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
 gc runtime drain-ack
 ```
@@ -623,6 +785,8 @@ dispatches, full stop.
 **Exit criteria:** Each surviving proposal became one change-unit
 `prompt-update` bead (target `main`, `merge_strategy=mr`) routed to the worker
 pool or was skipped by dedup; every consumed observation carries
-`obs.distilled=<pattern-bead>` (or the V1 fallback consumed-list is recorded);
-each contested rule has exactly one live visit; the session drained.
+`obs.distilled=<pattern-bead>` (or the V1 fallback consumed-list is recorded)
+and no unjudged observation was stamped; each contested rule has exactly one
+live visit; this step's bead is closed and the session drained — here and
+nowhere else in the workflow.
 """

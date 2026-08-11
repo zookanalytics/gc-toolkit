@@ -96,7 +96,7 @@ graph.v2 (`formula_compiler = ">=2.0.0"`), poured by
 
 ```toml
 [order]
-description = "learning: distill pending feedback observations; file prompt-update / retirement beads when the volume or urgency gate opens"
+description = "learning: distill pending feedback observations; file prompt-update / retirement beads (judging gated on volume or urgency; the retirement pass runs every fire)"
 formula = "mol-feedback-distiller"
 trigger = "cooldown"
 interval = "24h"
@@ -113,10 +113,24 @@ Vars: `binding_prefix` (default `"gc-toolkit."`), `distill_min_pending`
 
 `gc prime` / `gc bd prime`; resolve `$REPO`.
 
+**Run disposition.** Every no-op arm in this workflow sets one of
+`open` / `gated` / `aborted` / `off-home`, closes its own step bead, and ends
+its own shell — never `drain-ack`, and never a close of a successor's bead.
+Closing a step bead only makes the NEXT step ready (`judge-and-cluster` needs
+`load-and-gate`, `file-and-dispatch` needs `judge-and-cluster`), so an early
+drain does not end the run; it just relocates the remaining steps to a fresh
+worker that has to reconstruct the context. Since the no-op arms are the
+common paths — a daily heartbeat, base rate zero-or-one proposals, and most
+rigs are not the pack home rig — that would be a daily spawn for nothing. Only
+the terminal step drains. Force-closing successors from inside a step is the
+other wrong answer (the graph.v2 husk anti-pattern); each successor re-derives
+the home-rig gate and reads the disposition instead.
+
 **Home-rig gate.** The order ships in the pack, so every importing rig fires
 it — but prompt updates are edits to the pack repo, authorable only from the
 pack's home rig. Non-home rigs no-op cleanly (memory-audit missing-source
-idiom: log, close step `gc.outcome=pass`, drain-ack, exit 0):
+idiom: log, close step `gc.outcome=pass`, exit 0 — all three steps carry this
+same gate, so the run finalizes in one session):
 
 ```bash
 [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml" || no_op "not the pack home rig"
@@ -127,13 +141,28 @@ if poured, else the runtime's rig enumeration (**build-validation task V1**,
 §9) — and collect pending observations: `task_kind=observation` beads not yet
 stamped `obs.distilled=<pattern-bead>`, via `gc bd list --rig <r> -l
 observation --json`. Fail-safe per `mol-triage-recurrence`: an unreadable
-listing for any rig → close step `gc.outcome=fail`, file nothing.
+listing for any rig → disposition `aborted`, close step `gc.outcome=fail`,
+file nothing. `aborted` also suppresses the retirement pass in step 2, because
+its "still binding? no recent evidence" question is only answerable from a
+read that succeeded.
 
-**Cadence gate (D7).** Proceed only if: pending ≥ `{{distill_min_pending}}`,
-OR any pending has `obs.endorsed=operator` or `obs.directive=standing`, OR
-the oldest pending exceeds `{{distill_max_age_days}}`. Otherwise log
-`gated: N pending, none urgent, oldest Xd` and no-op out. The timer is a
+**Cadence gate (D7).** **Judge** the pending observations only if: pending ≥
+`{{distill_min_pending}}`, OR any pending has `obs.endorsed=operator` or
+`obs.directive=standing`, OR the oldest pending exceeds
+`{{distill_max_age_days}}`. Otherwise log `gated: N pending, none urgent,
+oldest Xd`, empty the judgeable set, and fall through. The timer is a
 heartbeat; this gate is the cadence.
+
+This gate is scoped to the judging of observations, and nothing else. It is a
+pending-observation-VOLUME gate, so letting it short-circuit the run would
+also cancel step 2's retirement pass — which both the step and
+`skills/learning-distill/SKILL.md` specify as unconditional ("every run"), and
+which is *most* needed exactly when the gate closes: the rubric's "still
+binding?" question is about rules with no recent evidence, i.e. the quiet city.
+Emptying the judgeable set rather than exiting keeps that decoupling with no
+second gate to hold in sync: a `gated` run judges nothing, stamps nothing
+(nothing was judged, so all N stay pending and still open the next gate), and
+still reviews the adopted rules.
 
 **Rubric self-feedback sweep.** List previously filed `prompt-update` beads
 whose PR closed unmerged (the `gh pr view --json state` loop from the
@@ -162,11 +191,14 @@ discard-with-reason). Recompute and cache rollups on each pattern bead
 `rule.path`, `promoted_at`, …) — derived by query, single-writer (only this
 formula writes pattern rollups), so lost writes self-heal next run.
 
-**Retirement pass** (the anti-bloat half, same run): for adopted rules —
-enumerated from the fragment's anchor markers (§5) — ask the rubric's
-retirement questions (stale? subsumed? hardenable? over-cap?). Output
-retire/harden proposals into step 3. The `{{fragment_bullet_cap}}` is
-enforced here: a promotion that would exceed it must name its displacement.
+**Retirement pass** (the anti-bloat half, every run — `open` and `gated`
+alike; only `aborted`/`off-home` skip it): for adopted rules — enumerated from
+the fragment's anchor markers (§5) — ask the rubric's retirement questions
+(stale? subsumed? hardenable? over-cap?). Its input is the on-disk rule
+inventory, not the pending observation set, so the D7 volume gate takes
+nothing from it. Output retire/harden proposals into step 3. The
+`{{fragment_bullet_cap}}` is enforced here: a promotion that would exceed it
+must name its displacement.
 
 Dedup all proposals against live `prompt-update` beads **and open PRs of
 closed ones** (memory-audit block, verbatim), cap at
@@ -186,13 +218,16 @@ Memory-audit shape, different change unit. Per surviving proposal, ONE bead:
   hand-sync warning: also update `agents/polecat-codex/agent.toml`
   `inject_fragments` if the fragment list itself changes.
 - Stamp every consumed observation `obs.distilled=<pattern-bead>` (cross-rig
-  update) so it never re-counts.
+  update) so it never re-counts. **Judged** is the criterion, not seen: a
+  `gated` run judged nothing, so it stamps nothing and its pending
+  observations stay pending — they are what opens the next gate.
 - Contested rules (rubric outcome 4) file a **visit** on the pattern bead
   instead — the `# >>> gate-visit` block verbatim, routed to converse — never
   a silent rule flip.
 
 Summarize (`filed N, held M, gated K, discarded J with reasons`), close step,
-drain-ack. Never close a filed bead; never edit a fragment here.
+drain-ack — this terminal step is the workflow's only drain. Never close a
+filed bead; never edit a fragment here.
 
 ## 4. `skills/learning-distill/SKILL.md` — rubric v1
 
