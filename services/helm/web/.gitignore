@@ -1,0 +1,5 @@
+node_modules/
+*.local
+
+# dist/ is deliberately NOT ignored — the Go binary embeds it and the
+# launcher never runs npm, so the built bundle is committed. See README.md.

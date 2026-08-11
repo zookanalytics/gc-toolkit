@@ -18,6 +18,9 @@ GET /helm   -> { generated_at, total, tiles:[ {id,rig,kind,title,severity,
                       stale_days,updated_at,rank_score}, ... ],
                  partial?, partial_errors? }
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
+GET /            -> the board JSON, or the embedded web app for a browser
+                    (Accept: text/html) — see *Web UI*
+GET /assets/...  -> the web app's bundle
 ```
 
 Tiles are ranked `rank_score` descending and deduplicated by id. Three anchor
@@ -32,6 +35,7 @@ Three packages, a clean dependency line `board <- source <- server <- cmd`:
 | `internal/board` | The MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
 | `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). |
 | `internal/server` | HTTP routes + a server-side TTL cache of the computed board. |
+| `web` | The operator's web app (Vite + React + TS) and the `go:embed` that compiles its built bundle into the binary. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
 
 ### Data-access contract (hard constraint)
@@ -137,14 +141,69 @@ Once declared, the board is reachable:
 
 ```bash
 curl http://127.0.0.1:8372/v0/city/<city>/svc/helm/helm   # ranked board
+open http://127.0.0.1:8372/v0/city/<city>/svc/helm/       # the web app
 # and through the same tailscale origin the gc dashboard uses (:8372).
 ```
+
+## Web UI
+
+`web/` is a Vite + React + TypeScript app — the operator's board surface —
+embedded in the binary and served at the service mount. This is the U5 scaffold
+(`tk-eemvf.1`): **structure only**. It renders the board contract as a plain
+readable table. The spatial canvas, and the visual direction it implements, are
+U6 and land on top of this.
+
+Three things about it are load-bearing.
+
+**`base: './'` (KTD5).** The app is served under a runtime-city-named prefix
+(`/v0/city/<city>/svc/helm/`), never at an origin root, and the supervisor's
+service proxy strips that prefix before the request arrives — so the server
+cannot know it and cannot rewrite absolute URLs. Every asset reference must be
+document-relative. `base: '/'` is the known failure for this service: it works
+on a dev server and 404s everything under the mount. `TestAssetsResolveUnderMountPrefix`
+resolves the shell's references the way a browser does and fetches them back
+through a simulated mount, so a regression fails the build rather than the
+board.
+
+The same proxy maps both `.../svc/helm` and `.../svc/helm/` to `/`, so the
+server cannot redirect the slash-less form either. An inline script in
+`index.html` normalizes it client-side, before the deferred module scripts run.
+
+**`dist/` is committed.** The launcher rebuilds the Go binary on demand but
+never runs npm, so the built bundle is tracked — same contract as the stock
+dashboard SPA. After changing anything under `web/`, rebuild and commit the
+output:
+
+```bash
+cd services/helm/web
+npm install        # first time (or npm ci)
+npm run build      # tsc + vite build -> dist/
+git add dist       # the bundle ships in the repo
+```
+
+The launcher treats `web/dist/**` as build input alongside `*.go`, so a
+bundle-only change still triggers a rebuild of the binary that embeds it.
+
+**The bare mount answers two audiences.** It has always returned the board
+JSON, and the app has to live at that same path because a workspace-service
+gets exactly one mount. So the representation follows the request: a browser
+navigation (`Accept: text/html`) gets the app, everything else — curl, `fetch`,
+any script — gets the JSON it always got. `/helm` is JSON unconditionally; that
+is the contract U7 mirrors and U8/U9 consume, and no Accept header changes it.
+
+```bash
+npm run dev        # http://127.0.0.1:5175, proxying the board fetch to a live mount
+HELM_DEV_MOUNT=http://127.0.0.1:8372/v0/city/<city>/svc/helm npm run dev
+```
+
+`HELM_DEV_MOUNT` must resolve to loopback — the supervisor binds loopback only
+and the dev proxy refuses to send traffic off-host.
 
 ## Build / run / test
 
 ```bash
 cd services/helm
-go test ./...                 # unit tests (model golden cases + mock-supervisor source + server/cache)
+go test ./...                 # unit tests (model golden cases + mock-supervisor source + server/cache + the embedded app)
 go build ./cmd/helm-svc  # or let the launcher build it
 
 # Run standalone against the live supervisor (no [[service]] needed):
@@ -186,6 +245,10 @@ unit tests over the model and a mock supervisor.
 - **metadata** is carried on every anchor and child — but *carried, not spent*:
   no derivation reads it yet. That is deliberate, so the three consumers below
   stay separately reviewable.
+
+**Delivered since** (tk-eemvf.1, the U5 scaffold): a mount-prefix-safe Vite +
+React + TS app embedded in the binary and served at the mount, alongside the
+JSON the mount already served. Structure only — see *Web UI*.
 
 **Still deferred** (and *why*):
 

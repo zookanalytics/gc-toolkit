@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,19 +25,41 @@ type Server struct {
 	src source.Source
 	ttl time.Duration
 	now func() time.Time
+	spa http.Handler
 
 	mu     sync.Mutex
 	cached *board.Board
 	expiry time.Time
 }
 
+// An Option configures a Server at construction.
+type Option func(*Server)
+
+// WithSPA serves the embedded single-page app beneath the board routes: the
+// app shell at the mount root for browsers, plus its assets. A nil handler is
+// ignored, which leaves the JSON-only routing this service had before the app
+// existed — so a bundle that fails to load degrades the UI without taking the
+// board's consumers down with it.
+func WithSPA(h http.Handler) Option {
+	return func(s *Server) {
+		if h != nil {
+			s.spa = h
+		}
+	}
+}
+
 // New builds a Server. ttl<=0 disables caching (every request recomputes).
-func New(src source.Source, ttl time.Duration) *Server {
-	return &Server{src: src, ttl: ttl, now: time.Now}
+func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
+	s := &Server{src: src, ttl: ttl, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Handler returns the HTTP routes: GET /helm (and bare /) serve the board;
-// GET /healthz is the liveness probe (no gather).
+// GET /healthz is the liveness probe (no gather). With [WithSPA] the bare
+// mount also serves the app shell to browsers, and its assets beneath.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -50,14 +73,52 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
-// handleRoot serves the board at the bare mount but 404s any other path so the
+// handleRoot serves the bare mount and, with an SPA wired, everything beneath
+// it that is not a board route.
+//
+// The bare mount answers two audiences at one URL. It has always returned the
+// board JSON — the operator curls it, and it is the address of the whole
+// service — and the SPA has to live at that same mount because the supervisor
+// gives a workspace-service exactly one path. So the representation follows
+// the request: a browser navigation (Accept: text/html) gets the app shell,
+// every other client (curl, fetch, a script, Accept: */*) gets the JSON it got
+// before. Nothing that already reads this mount changes behaviour, and
+// /helm — the contract U7 mirrors and U8/U9 consume — is JSON unconditionally,
+// on its own route, whatever the Accept header says.
+//
+// Without an SPA the whole mount stays JSON, and any other path 404s so the
 // catch-all does not mask routing mistakes.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+	if s.spa == nil {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		s.handleBoard(w, r)
 		return
 	}
-	s.handleBoard(w, r)
+	if r.URL.Path == "/" && !wantsHTML(r) {
+		s.handleBoard(w, r)
+		return
+	}
+	s.spa.ServeHTTP(w, r)
+}
+
+// wantsHTML reports whether the client asked for an HTML document. Browsers
+// send "text/html,application/xhtml+xml,…" on a navigation; curl and fetch()
+// default to */*, which is not a request for HTML and so keeps the JSON.
+func wantsHTML(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+		// Drop any ";q=…" and other parameters before comparing.
+		mediaType := strings.ToLower(strings.TrimSpace(part))
+		if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+			mediaType = strings.TrimSpace(mediaType[:i])
+		}
+		if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
