@@ -66,7 +66,16 @@
 #   resume a step of a terminal molecule: the claim is abandoned in exactly the
 #   sense --force is reserved for, even while the holding session is alive and
 #   looks busy (it is busy re-deriving "already done"). That terminal-anchor check
-#   IS the gate on --force — never use it where that gate has not already passed.
+#   is ONE of exactly TWO gates on --force; the other is the absent-root arm below,
+#   which reaches the same "no holder can advance this" conclusion by a different
+#   route. Never use --force where neither gate has passed.
+#
+#   The guard --force overrides is NOT liveness-aware — verified against bd
+#   v1.1.1-0.20260729113304: `bd update <id> --assignee ""` is refused on any
+#   in_progress bead with an assignee ("cannot reassign …: held by …"), including
+#   one held by a session that ended hours ago. So --force is load-bearing rather
+#   than belt-and-braces: without it the assigned shape — the one that actually
+#   burns polecats — can never be cleared by either gate.
 #
 #   WHY BARE `bd` FOR THAT ONE CALL. `gc bd` rejects --force in its bead-ID safety
 #   pre-check ("cannot safely verify bead IDs (unrecognized flag in args)") and
@@ -88,6 +97,62 @@
 # quiet, which is what the witness's manual sweep achieves today. Finalizing the
 # step graph at submit-and-exit time is the durable upstream fix (gascity core /
 # gastown formula) and is deliberately out of scope here.
+#
+# THE ONE UNRESOLVED SHAPE WE ACT ON: A DELETED ROOT (tk-7g37t). Anchor resolution
+# runs through the ROOT bead (root -> gc.input_convoy_id -> the convoy's single
+# member). If the root ROW IS GONE from the store, that read yields nothing, the
+# anchor is empty, and the fail-closed skip below fires — forever. Nothing else
+# retires those steps either: gc-helm.sh's quiesce_release_molecule_steps()
+# resolves the anchor exactly the same way, and core.control-dispatcher cannot
+# finalize a graph whose root it cannot read. So the husk keeps its route +
+# assignee + gc.session_affinity, `gc hook --claim` re-offers it every cycle, and
+# each restart burns a fresh full-context polecat that re-derives "already done"
+# and drains. Observed on root tk-wea42 (six surviving steps), which `--dry-run`
+# reported as `anchor unresolved (convoy 'none'); skipped` in the same pass that
+# quiesced tk-dg1oa — a DUPLICATE dispatch over the very same anchor. The only
+# difference between the two was that one root row still existed.
+#
+# WHY THIS IS NOT A HOLE IN THE FAIL-CLOSED RULE. That rule protects against one
+# thing: quiescing a LIVE molecule strips the assignee off steps a running polecat
+# still has to claim. That hazard needs a molecule that can still RUN. A molecule
+# whose root row is absent cannot be finalized by anything — the dispatcher closes
+# the finalize step AND the root, and there is no root — so its steps are dead by
+# construction. Absent-root is the one unresolved shape where quiescing is
+# strictly safer than skipping. It is emphatically NOT the same as an unresolvable
+# convoy on a root that DOES exist (a shape we genuinely do not understand): that
+# one still skips.
+#
+# AND IT LICENSES --force, by a different route than the terminal-anchor gate. A
+# root is never deleted by the machinery — finalize CLOSES it, leaving the row in
+# place — so an absent root is the trace of a deliberate cleanup, and the claim it
+# overrides can never reach a terminal state regardless of who holds it. The
+# residual case, a root deleted out from under a still-running polecat, costs the
+# step's assignee and nothing else: graph.v2 steps are executed INLINE in one
+# session (the premise this whole script rests on), no step closes its own bead,
+# and the polecat's hand-off — push the branch, stamp metadata, reassign — runs
+# entirely off the ANCHOR bead. There is no step claim a running session depends
+# on, so there is no work to strand.
+#
+# HOW "ABSENT" IS TOLD APART FROM "THE READ FAILED" — the distinction the arm
+# lives or dies by, since treating an outage as absence is a way to quiesce LIVE
+# molecules wholesale. `gc bd show <id> --json` answers the two cases differently:
+#
+#   absent bead    exit 1, and stdout carries a JSON envelope
+#                  {"error": "no issues found matching the provided IDs", …}
+#   failed read    exit 1, and stdout is EMPTY — no envelope at all (verified by
+#                  pointing --db at a nonexistent path)
+#   live bead      exit 0, stdout is the usual JSON array
+#
+# So the arm keys on the envelope, not on a non-zero exit and not on empty output.
+# The message is matched EXACTLY. That is deliberately brittle in the safe
+# direction: if beads ever rewords it, the match stops firing and the root falls
+# through to the fail-closed skip — i.e. back to the pre-fix behavior, a noisy
+# husk, never a wrongly-quiesced live molecule.
+#
+# One more thing makes the verdict trustworthy: we only reach it because
+# `gc bd list` returned live step beads from THIS SAME store moments earlier. A
+# misconfigured BEADS_DIR (the case where every id would read as absent) exits at
+# the top with "no open work beads" and never reaches a root read at all.
 #
 # NOT set -e: best-effort, must never abort the witness patrol mid-pass. Any tool
 # error skips that root and retries next patrol cycle.
@@ -233,6 +298,34 @@ is_terminal_anchor() {
   return 1
 }
 
+# Did the store DEFINITIVELY answer "no such bead", as opposed to failing to
+# answer at all? See the header for why the difference is the whole safety of the
+# absent-root arm, and for the three observed response shapes.
+#
+# Every condition below is a fail-closed one — anything unrecognized returns 1 and
+# the caller keeps skipping the root:
+#   * a zero exit means the read SUCCEEDED, so whatever it returned, it is not an
+#     absence verdict;
+#   * empty stdout is the signature of a read that never got an answer (wedged
+#     store, unreachable db), not of an answer meaning "not here";
+#   * a payload that is not a JSON OBJECT is not an error envelope — a successful
+#     read returns an array — and unparseable output fails the jq call itself;
+#   * and the message must match exactly, so a DIFFERENT error carried in the same
+#     envelope shape (a connection failure, a permission error) is never read as
+#     absence.
+root_row_absent() {
+  # $1 = raw stdout of `gc bd show <id> --json`, $2 = its exit status
+  local _err
+  [ "${2:-0}" -ne 0 ] || return 1
+  [ -n "${1:-}" ] || return 1
+  # Assigned on its own line, never as `local _err=$(…)`: `local` would report ITS
+  # own exit status and swallow a jq failure, turning unparseable output into a
+  # silent empty string.
+  _err=$(printf '%s' "$1" \
+    | jq -r 'if type == "object" then (.error // "") else "" end' 2>/dev/null) || return 1
+  [ "$_err" = "no issues found matching the provided IDs" ]
+}
+
 STEPS=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null)
 [ -n "$STEPS" ] && [ "$STEPS" != "[]" ] \
   || { echo "quiesce-completed-workflows: no open work beads"; exit 0; }
@@ -291,7 +384,7 @@ ROOTS=$(printf '%s\n' "$ROWS" | jq -r -s 'map(.root) | map(select(. != "")) | un
 [ -n "$ROOTS" ] \
   || { echo "quiesce-completed-workflows: no resolvable workflow roots"; exit 0; }
 
-quiesced=0; roots_done=0; roots_live=0; already=0; unresolved=0; failed=0
+quiesced=0; roots_done=0; roots_live=0; already=0; unresolved=0; failed=0; orphaned=0
 
 # The assignee half needs `bd ... --force`, which `gc bd` refuses (see header).
 # Resolve the binary once, so a rig without `bd` on PATH says so plainly instead
@@ -321,54 +414,83 @@ while IFS= read -r root; do
   # bound to (`gc.session_affinity=require`). The session is what the re-claim
   # predicate compares the anchor's current holder against; an empty one simply
   # means the molecule was never claimed, and the predicate fails closed on it.
-  rootinfo=$(gc bd show "$root" --json 2>/dev/null \
-    | jq -r '.[0] | "\(.metadata["gc.input_convoy_id"] // "")|\(.metadata["gc.session_name"] // "")"' 2>/dev/null)
-  convoy=""; rsession=""
-  IFS='|' read -r convoy rsession <<< "$rootinfo"
-  anchor=""
-  [ -n "$convoy" ] && anchor=$(gc convoy status "$convoy" --json 2>/dev/null \
-    | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null)
-
-  # FAIL CLOSED on an unresolved anchor. Quiescing a LIVE molecule would strip the
-  # assignee off the steps a running polecat still has to claim, draining it
-  # mid-implementation and stranding real work. An un-quiesced husk only wastes
-  # wisps — the cheaper failure by far, and the witness still catches it by hand.
-  if [ -z "$anchor" ]; then
-    echo "quiesce-completed-workflows: root $root — anchor unresolved (convoy '${convoy:-none}'); skipped" >&2
-    unresolved=$((unresolved + 1)); continue
-  fi
-
-  # ONE read, five fields. `gc.routed_to` rides along in the same call the first
-  # three already come from (tk-rlm94), and `gc.session_name` alongside it
-  # (tk-nv3qr) — the park predicate needs the one and the re-claim predicate needs
-  # the other, and reading either separately would let the halves of one verdict
-  # describe two different observations of the anchor.
-  ainfo=$(gc bd show "$anchor" --json 2>/dev/null \
-    | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")|\(.assignee // "")|\(.metadata["gc.routed_to"] // "")|\(.metadata["gc.session_name"] // "")"' 2>/dev/null)
+  # Clear the whole anchor-resolution scope up front. The absent-root arm below
+  # skips that resolution entirely, so without this every one of these would still
+  # hold the PREVIOUS root's values while the shared step loop runs. Nothing after
+  # the branch reads them today; this is here so that stays true by construction
+  # rather than by luck, since the failure it prevents — an orphan root logged
+  # against some earlier root's anchor — would read as correct output.
+  convoy=""; rsession=""; anchor=""; adesc=""
   astatus=""; amerge=""; aassignee=""; arouted=""; asession=""
-  IFS='|' read -r astatus amerge aassignee arouted asession <<< "$ainfo"
-  # Every real bead carries a status, so an empty one means the READ failed (bead
-  # gone, jq error, Dolt hiccup) rather than "an anchor with no status". Fail
-  # closed on it, same as an unresolved anchor.
-  if [ -z "$astatus" ]; then
-    echo "quiesce-completed-workflows: root $root — anchor $anchor unreadable; skipped" >&2
-    unresolved=$((unresolved + 1)); continue
-  fi
 
-  # The session pair is appended only when it is actually recorded, so the log line
-  # for the four older shapes is unchanged — but a re-claim verdict has to say WHICH
-  # two sessions it compared, since that is the whole basis for the call and this
-  # pass is meant to be reversible by hand.
-  adesc="status=$astatus merge_result=${amerge:-none} assignee=${aassignee:-none} routed_to=${arouted:-none}"
-  [ -z "$asession" ] || adesc="$adesc session=$asession"
-  [ -z "$rsession" ] || adesc="$adesc molecule_session=$rsession"
-  if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee" "$arouted" "$asession" "$rsession"; then
-    echo "quiesce-completed-workflows: root $root — anchor $anchor still live ($adesc); left alone"
-    roots_live=$((roots_live + 1)); continue
-  fi
+  # Capture the root read RAW, rather than piping it straight into jq: the absent-
+  # root verdict needs the exit status and the error envelope, and a pipeline
+  # discards the first and jq turns the second into an empty string
+  # indistinguishable from a failed read.
+  rootjson=$(gc bd show "$root" --json 2>/dev/null); rootshow_rc=$?
 
-  echo "quiesce-completed-workflows: root $root — anchor $anchor DONE ($adesc); quiescing steps"
-  roots_done=$((roots_done + 1))
+  # THE ROOT ROW IS GONE (tk-7g37t). Not an anchor we failed to resolve — a
+  # molecule that provably cannot be finalized by anything, because finalization
+  # runs through a root that no longer exists. Dead by construction, so quiescing
+  # is safe where guessing at any other unresolved shape is not. See the header for
+  # the full argument, for why this is the second gate on --force, and for how an
+  # absence verdict is told apart from a failed read.
+  if root_row_absent "$rootjson" "$rootshow_rc"; then
+    echo "quiesce-completed-workflows: root $root — ROOT ROW ABSENT from store; molecule can never finalize; quiescing steps"
+    orphaned=$((orphaned + 1))
+  else
+    rootinfo=$(printf '%s' "$rootjson" \
+      | jq -r '.[0] | "\(.metadata["gc.input_convoy_id"] // "")|\(.metadata["gc.session_name"] // "")"' 2>/dev/null)
+    convoy=""; rsession=""
+    IFS='|' read -r convoy rsession <<< "$rootinfo"
+    anchor=""
+    [ -n "$convoy" ] && anchor=$(gc convoy status "$convoy" --json 2>/dev/null \
+      | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null)
+
+    # FAIL CLOSED on an unresolved anchor. Quiescing a LIVE molecule would strip the
+    # assignee off the steps a running polecat still has to claim, draining it
+    # mid-implementation and stranding real work. An un-quiesced husk only wastes
+    # wisps — the cheaper failure by far, and the witness still catches it by hand.
+    # The root that is merely ABSENT was handled above; everything still reaching
+    # here is a root the store CAN read, whose anchor we could not resolve — a
+    # shape we do not understand, and still the cheap skip.
+    if [ -z "$anchor" ]; then
+      echo "quiesce-completed-workflows: root $root — anchor unresolved (convoy '${convoy:-none}'); skipped" >&2
+      unresolved=$((unresolved + 1)); continue
+    fi
+
+    # ONE read, five fields. `gc.routed_to` rides along in the same call the first
+    # three already come from (tk-rlm94), and `gc.session_name` alongside it
+    # (tk-nv3qr) — the park predicate needs the one and the re-claim predicate needs
+    # the other, and reading either separately would let the halves of one verdict
+    # describe two different observations of the anchor.
+    ainfo=$(gc bd show "$anchor" --json 2>/dev/null \
+      | jq -r '.[0] | "\(.status // "")|\(.metadata.merge_result // "")|\(.assignee // "")|\(.metadata["gc.routed_to"] // "")|\(.metadata["gc.session_name"] // "")"' 2>/dev/null)
+    astatus=""; amerge=""; aassignee=""; arouted=""; asession=""
+    IFS='|' read -r astatus amerge aassignee arouted asession <<< "$ainfo"
+    # Every real bead carries a status, so an empty one means the READ failed (bead
+    # gone, jq error, Dolt hiccup) rather than "an anchor with no status". Fail
+    # closed on it, same as an unresolved anchor.
+    if [ -z "$astatus" ]; then
+      echo "quiesce-completed-workflows: root $root — anchor $anchor unreadable; skipped" >&2
+      unresolved=$((unresolved + 1)); continue
+    fi
+
+    # The session pair is appended only when it is actually recorded, so the log line
+    # for the four older shapes is unchanged — but a re-claim verdict has to say WHICH
+    # two sessions it compared, since that is the whole basis for the call and this
+    # pass is meant to be reversible by hand.
+    adesc="status=$astatus merge_result=${amerge:-none} assignee=${aassignee:-none} routed_to=${arouted:-none}"
+    [ -z "$asession" ] || adesc="$adesc session=$asession"
+    [ -z "$rsession" ] || adesc="$adesc molecule_session=$rsession"
+    if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee" "$arouted" "$asession" "$rsession"; then
+      echo "quiesce-completed-workflows: root $root — anchor $anchor still live ($adesc); left alone"
+      roots_live=$((roots_live + 1)); continue
+    fi
+
+    echo "quiesce-completed-workflows: root $root — anchor $anchor DONE ($adesc); quiescing steps"
+    roots_done=$((roots_done + 1))
+  fi
 
   while IFS= read -r row; do
     [ -n "${row:-}" ] || continue
@@ -447,7 +569,10 @@ done <<< "$ROOTS"
 
 MODE=""
 [ "$DRY_RUN" -eq 1 ] && MODE="(dry-run) "
-echo "quiesce-completed-workflows: ${MODE}${quiesced} steps quiesced across $roots_done completed workflow(s); $roots_live still live, $already already quiet, $unresolved unresolved, $failed failed"
+# `orphaned` is reported separately from `roots_done` rather than folded into it:
+# a root-deleted molecule was never a normal completion, and a summary that said so
+# would hide the one shape an operator may want to go look at.
+echo "quiesce-completed-workflows: ${MODE}${quiesced} steps quiesced across $roots_done completed and $orphaned orphaned (root-deleted) workflow(s); $roots_live still live, $already already quiet, $unresolved unresolved, $failed failed"
 
 # Failed WRITES make the pass dishonest if swallowed; an unresolved anchor does
 # not — that one is a deliberate fail-closed skip, already reported, and correct.
