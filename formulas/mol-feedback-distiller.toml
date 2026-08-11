@@ -78,6 +78,15 @@ Every arm below that decides not to proceed ends its own SHELL and closes its
 own step bead. It does NOT drain the session, and it never closes another
 step's bead.
 
+Each close below targets `$GC_TRIGGER_BEAD_ID` — the id of the step bead this
+shell was dispatched with. `$GC_BEAD_ID` is NOT populated in the
+step-execution environment (tk-7w69a): a close guarded on it short-circuits
+silently, the step bead is never closed, and the graph re-offers this same
+step forever with no error and exit status 0. So each site closes on
+`$GC_TRIGGER_BEAD_ID`, and when even that cannot be resolved it shouts to
+stderr rather than skipping quietly — an unresolvable step id is a stranded
+workflow, not a no-op.
+
 - Closing a step bead is what makes the NEXT step ready. It does not reach
   `workflow-finalize`: `judge-and-cluster` needs `load-and-gate` and
   `file-and-dispatch` needs `judge-and-cluster`, so closing this step advances
@@ -148,7 +157,11 @@ if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.
   # reach workflow-finalize. The two successor steps re-derive this same
   # home-rig gate and no-op through it, so staying in-session costs two hook
   # claims and the terminal step drains once, at the end.
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  else
+    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+  fi
   exit 0
 fi
 ```
@@ -200,7 +213,11 @@ if [ ! -s "$RIGSET" ]; then
   echo "FAIL-SAFE: no rig_list poured and rig enumeration returned nothing — DISTILL_RUN=aborted, nothing judged, nothing filed"
   # Close, end this shell, no drain-ack (§0): the successors read the aborted
   # disposition and no-op through it, and the terminal step drains once.
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  else
+    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+  fi
   exit 0
 fi
 echo "reading observations from stores: $(cut -f1 "$RIGSET" | tr '\\n' ' ')"
@@ -232,7 +249,11 @@ while IFS="$TAB" read -r R RPATH; do
   if ! jq -e 'type=="array"' "$RAW" >/dev/null 2>&1; then
     DISTILL_RUN=aborted
     echo "FAIL-SAFE: observation listing for store $R unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
-    [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+    if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+      gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+    else
+      echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+    fi
     exit 0   # no drain-ack (§0)
   fi
   # obs_rig_path rides along so step 4's stamping can reopen the SAME store it
@@ -382,7 +403,11 @@ fi
 # judge-and-cluster. No drain-ack — the same session continues (continuation-
 # group affinity), carrying $REPO, $PENDING, $DISTILL_RUN, and the rig set into
 # the next step.
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+  gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+else
+  echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+fi
 ```
 
 Veto observations filed this sweep are judged by the NEXT gate-opening run —
@@ -420,7 +445,11 @@ REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 # step that can wake on its own gates itself.
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — not the pack home rig; nothing to judge here."
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  else
+    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+  fi
   exit 0
 fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
@@ -428,7 +457,11 @@ if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   # Judge nothing AND propose nothing: the retirement pass below asks "no
   # recent evidence?", which is only answerable from a read that succeeded.
   echo "DISTILL_RUN=aborted — load-and-gate tripped a fail-safe; judging nothing, proposing nothing."
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  else
+    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+  fi
   exit 0
 fi
 ```
@@ -506,7 +539,11 @@ gc bd list --status=open --json --limit=0 > "$OPENB" 2>/dev/null
 if ! jq -e 'type=="array"' "$OPENB" >/dev/null 2>&1; then
   DISTILL_RUN=aborted
   echo "FAIL-SAFE: open-bead listing unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  else
+    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+  fi
   exit 0   # no drain-ack (§0): file-and-dispatch reads the aborted disposition and drains
 fi
 jq '[.[] | select((.metadata.task_kind // "") == "feedback-pattern") | {id, title, metadata}]' "$OPENB"
@@ -619,7 +656,11 @@ rate: most runs should end here with zero or one survivors.
 # file-and-dispatch. No drain-ack — the same session continues (continuation-
 # group affinity), carrying $DISTILL_RUN, the survivors, and the
 # consumed-observation map forward.
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+  gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+else
+  echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+fi
 ```
 
 **Exit criteria:** Every observation in the judgeable set deduped and judged
@@ -654,13 +695,21 @@ nothing and stamp nothing:
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — not the pack home rig; no bead filed, no observation stamped."
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  else
+    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+  fi
   gc runtime drain-ack
   exit 0
 fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   echo "DISTILL_RUN=aborted — a fail-safe tripped upstream; no bead filed, no observation stamped."
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
+  else
+    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+  fi
   gc runtime drain-ack
   exit 0
 fi
@@ -798,7 +847,11 @@ echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F proposal(s)
 # exits its shell, so the whole run, no-op paths included, stays in one
 # session. The dispatcher's workflow-finalize closes the kind=workflow root
 # once every step is closed.
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
+  gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+else
+  echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
+fi
 gc runtime drain-ack
 ```
 
