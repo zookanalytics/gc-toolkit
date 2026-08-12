@@ -218,6 +218,27 @@ COLD_OPENED="$(state_get cold_since)"
 pass STUB_PANE='idle 2m' STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0                   # unreadable + numeric-only change
 eq "$(state_get cold_since)" "$COLD_OPENED" "unreadable + numeric-only change is STATIC (digits normalized) — clock stands"
 
+# --- (f2) The report describes the pane HONESTLY (tk-xiswq / tk-uz3de). -------
+# The inversion (f) makes the report fire on a stale/absent wisp REGARDLESS of
+# the pane, so the wedge it catches has a pane that looks alive — busy AND
+# moving. The report text must NOT keep hardcoding the old static-pane predicate:
+# a mail whose summary says "no pane change", whose body calls the session
+# "static", and whose evidence says "busy marker absent" is false at the exact
+# moment it fires against a busy expired-login pane. Two cold passes with
+# DIFFERENT busy panes so movement (not just the busy marker) is live at report
+# time; the summary rides in MAIL_BODY alongside the body, so both are checked.
+reset
+pass STUB_PANE='patrol step alpha (esc to interrupt)' STUB_WISPS="$(wisp in_progress 7200)" BOOT_HEALTH_REPORT_AFTER=0
+pass STUB_PANE='patrol step beta (esc to interrupt)'  STUB_WISPS="$(wisp in_progress 7200)" BOOT_HEALTH_REPORT_AFTER=0
+eq "$(mailed)" yes "busy+moving pane with a stale wisp still reports"
+BODY="$(cat "$TMP/body")"
+# Positive pins — each FAILS against the pre-fix text, which hardcoded the old
+# static-pane predicate ("no pane change" / "static" / "busy marker absent").
+has   "$BODY" "busy marker present" "report states the busy marker is present, not absent"
+has   "$BODY" "changing"            "report states the pane is changing, not static"
+hasnt "$BODY" "no pane change"      "summary does NOT claim 'no pane change' for a moving pane"
+hasnt "$BODY" "static"              "report does NOT call a moving pane static"
+
 # --- (g) One report per episode, then silence until REPORT_EVERY. ------------
 run 4 STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999
 eq "$(mails)" 1 "a persisting episode mails once, not once per pass"

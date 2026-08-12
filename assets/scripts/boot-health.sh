@@ -275,12 +275,26 @@ DUE=0
 [ "$last_report" -gt 0 ] && [ $((NOW - last_report)) -ge "$REPORT_EVERY" ] && DUE=1
 [ "$DUE" -eq 1 ] || { save_state; exit 0; }
 
-# Report what was actually observed. The query constrains no status, so saying
-# "no in_progress wisp" would assert something this pass never asked.
+# Report what was actually observed. Coldness is judged on the patrol-wisp
+# signal (step 3), so the report LEADS with it. The pane no longer decides
+# anything here, so it is reported as OBSERVED rather than assumed static: the
+# old text hardcoded "no pane change" / "static" / "busy marker absent", every
+# one of which is false for the wedge this fix exists to catch — an expired-login
+# session paints a busy, moving pane while completing no work (tk-uz3de). The
+# query constrains no status, so the summary names the wisp signal and asserts
+# nothing this pass never asked.
 AGE_TXT="no live patrol wisp"
 [ -n "$WISP_AGE" ] && AGE_TXT="newest patrol wisp $((WISP_AGE / 60))m old (status ${WISP_STATUS:-unknown})"
 
-SUMMARY="$DEACON cold for $((COLD / 60))m — no pane change, $AGE_TXT"
+# Two independent pane facts, each reported as observed — neither is the trigger.
+# Digits are normalized out before the movement hash (see "ON HASHING THE PANE"),
+# so a numeric-only change reads as static.
+PANE_MOVE_TXT="static (digits normalized)"
+[ "$PANE_MOVED" -eq 1 ] && PANE_MOVE_TXT="changing (digits normalized)"
+PANE_BUSY_TXT="busy marker absent"
+[ "$PANE_BUSY" -eq 1 ] && PANE_BUSY_TXT="busy marker present"
+
+SUMMARY="$DEACON cold for $((COLD / 60))m — $AGE_TXT"
 
 # Delivery is CHECKED, not assumed. `last_report` is what silences the next
 # REPORT_EVERY (default 6h) window, so recording a send that never happened
@@ -288,12 +302,18 @@ SUMMARY="$DEACON cold for $((COLD / 60))m — no pane change, $AGE_TXT"
 # precisely the wedged-runtime incident the order exists to catch. Three
 # outcomes, the same split quota-park-nudge draws around its escalation mail.
 MAIL_RC=0
-gc_call_rc gc mail send "$REPORT_TO" -s "BOOT_HEALTH: $SUMMARY" -m "boot-health (exec order, no LLM) has seen $DEACON static for $((COLD / 60)) minutes.
+gc_call_rc gc mail send "$REPORT_TO" -s "BOOT_HEALTH: $SUMMARY" -m "boot-health (exec order, no LLM) has seen no patrol progress from $DEACON for $((COLD / 60)) minutes.
 
-  pane            unchanged since $(date -u -d "@$cold_since" '+%Y-%m-%dT%H:%M:%SZ') (digits normalized)
-  busy marker     absent
+Coldness is judged on the patrol-wisp signal — work COMPLETED — not on the pane.
+The wisp ledger is readable and its newest patrol wisp is stale or absent past
+the freshness gate. The pane does not decide this: an expired-login session
+paints a busy, moving pane while completing no work, so the pane line below is
+context, not the trigger (tk-uz3de).
+
   patrol wisp     $AGE_TXT
   freshness gate  ${WISP_FRESH}s
+  cold since      $(date -u -d "@$cold_since" '+%Y-%m-%dT%H:%M:%SZ')
+  pane            $PANE_MOVE_TXT; $PANE_BUSY_TXT
 
 This order does NOT nudge or file warrants. Escalation is deliberately a human
 decision until nudge delivery to always/wake_mode=fresh sessions is trustworthy
