@@ -892,6 +892,57 @@ grep -q "not the reviewed 'HEADPW'" "$TMP/erroid" \
   && ok "(OIDDRIFT) the refusal names both the opened head and the reviewed one" \
   || bad "(OIDDRIFT) must name the head drift (err: $(cat "$TMP/erroid"))"
 
+# ==============================================================================
+# DISK PRESSURE — the false empty queue (tk-lslk2).
+#
+# The reproduced incident: under /tmp quota exhaustion bash could not create the temp
+# file backing the `<<<` here-string that fed the enumeration loop, so the loop ran
+# ZERO times and the pass printed "0 opened, 0 flipped, 0 held, 0 skipped" and exited
+# 0 — byte-indistinguishable from a healthy empty queue while three anchors sat held.
+# Every observer (patrol idle loop, witness, deacon, mayor) read the disk-pressure
+# blackout as "nothing to do".
+#
+# The fix feeds the loop from an EXPLICIT, CHECKED temp file, so a temp-file-creation
+# failure aborts the pass NON-ZERO (the patrol wraps the call in `|| echo '...pass
+# failed...'` and retries next idle wake) instead of forging an all-clear. A `mktemp`
+# that FAILS is the hermetic stand-in for that disk pressure: bash's own here-string
+# temp file falls back to /tmp when TMPDIR is bad, so the condition is forced at the
+# one temp file the pass now creates for itself.
+# ==============================================================================
+pw_reset
+cat > "$TMP/anchors" <<'A'
+bead-DF|polecat/feat-df|main|green@HEADDF
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-df|HEADDF
+H
+: > "$TMP/existpr"
+cat > "$TMP/newpr" <<'N'
+polecat/feat-df|614|https://github.com/acme/repo/pull/614|OPEN|main|polecat/feat-df|acme/repo
+N
+# A mktemp that always fails, ahead of the real one on PATH: the temp file the pass
+# creates to enumerate its anchors cannot be made, exactly as under a full /tmp.
+mkdir -p "$TMP/failbin"
+cat > "$TMP/failbin/mktemp" <<'MK'
+#!/usr/bin/env bash
+echo "mktemp: failed to create file via template: Disk quota exceeded" >&2
+exit 1
+MK
+chmod +x "$TMP/failbin/mktemp"
+
+df_rc=0
+PATH="$TMP/failbin:$PATH" bash "$SCRIPT" >"$TMP/outdf" 2>"$TMP/errdf" || df_rc=$?
+
+[ "$df_rc" -ne 0 ] \
+  && ok "(DISKFULL) a temp-file-creation failure aborts the pass NON-ZERO (the patrol logs it and retries)" \
+  || bad "(DISKFULL) must exit non-zero when it cannot create its enumeration temp file (rc=$df_rc; out: $(cat "$TMP/outdf"))"
+grep -q "0 opened, 0 flipped, 0 held, 0 skipped" "$TMP/outdf" \
+  && bad "(DISKFULL) must NOT print the false '0 opened, 0 flipped, 0 held, 0 skipped' all-clear on a pass that could not enumerate" \
+  || ok "(DISKFULL) the false all-clear summary is NOT printed when enumeration failed"
+grep -qE "could NOT enumerate|ABORTING non-zero" "$TMP/errdf" \
+  && ok "(DISKFULL) the enumeration failure is announced on stderr, not silent" \
+  || bad "(DISKFULL) must announce the enumeration failure (err: $(cat "$TMP/errdf"))"
+
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
