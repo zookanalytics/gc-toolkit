@@ -465,11 +465,24 @@ flip_to_pull_request() {
 ANCHORS=$(gc bd list --status=open \
   --metadata-field merge_result=pre_open_gate \
   --limit=200 --json 2>/dev/null)
+gc_list_rc=$?
+# A FAILED LIST IS NOT AN EMPTY ONE. `gc bd list` returning non-zero (Dolt down, a
+# binary/db skew) is the enumeration FAILING, not the queue being empty — and the two
+# were indistinguishable here: an empty result took the "no pre-open anchors" exit-0
+# below, so a ledger blackout looked byte-for-byte like a healthy all-clear (the same
+# false-empty class as tk-lslk2). Fail LOUD instead. The patrol wraps this call in
+# `|| echo '...pass failed...'` (mol-refinery-patrol.toml), so a non-zero exit is
+# logged and retried next idle wake rather than read as nothing-to-do.
+if [ "$gc_list_rc" -ne 0 ]; then
+  echo "pre-open-resolve: could not list pre-open anchors (gc bd list rc=$gc_list_rc); that is a failure to ENUMERATE, not an empty queue, so this pass is ABORTING non-zero rather than reporting a false all-clear (retries next idle wake)" >&2
+  exit 1
+fi
 [ -n "$ANCHORS" ] && [ "$ANCHORS" != "[]" ] \
   || { echo "pre-open-resolve: no pre-open anchors"; exit 0; }
 
-# One compact JSON row per anchor. Built into a variable (not piped into the loop)
-# so the loop runs in THIS shell and the counters below survive the pipe boundary.
+# One compact JSON row per anchor. Built into a variable (not streamed straight into
+# the loop) so the loop below runs in THIS shell and its counters survive — a pipe
+# would fork a subshell and lose them.
 ROWS=$(printf '%s' "$ANCHORS" \
   | jq -c '.[] | {
       id,
@@ -482,11 +495,46 @@ ROWS=$(printf '%s' "$ANCHORS" \
       prio:   (.priority // ""),
       codex:  (.metadata["check.codex"] // "")
     }' 2>/dev/null)
-[ -n "$ROWS" ] || { echo "pre-open-resolve: no pre-open anchors"; exit 0; }
+rows_rc=$?
+# ANCHORS is already known non-empty and not "[]" (the guard above), so a jq that
+# fails or renders NOTHING has not "found no anchors" — it has FAILED TO RENDER the
+# ones it has. Concluding "no pre-open anchors" from that is the same false-empty the
+# top of this pass just guarded against, one stage later. Abort non-zero instead.
+if [ "$rows_rc" -ne 0 ] || [ -z "$ROWS" ]; then
+  echo "pre-open-resolve: read pre-open anchors from the ledger but could not render them for processing (jq rc=$rows_rc); that is a failure to ENUMERATE, not an empty queue, so this pass is ABORTING non-zero rather than reporting a false all-clear (retries next idle wake)" >&2
+  exit 1
+fi
 
-created=0; flipped=0; held=0; skipped=0
+# Feed the loop from an EXPLICIT, CHECKED temp file — never a `<<<` here-string. A
+# here-string is backed by a temp file bash creates implicitly, and when /tmp is full
+# that creation fails SILENTLY: the redirection errors (this script is NOT set -e, by
+# design — see the header), the loop body runs ZERO times, and control falls straight
+# through to the summary, which then prints a healthy-looking "0 opened, 0 flipped, 0
+# held, 0 skipped" for a pass that enumerated NOTHING. That line is byte-identical to a
+# genuine empty queue, so every observer — the patrol idle loop, witness, deacon, mayor
+# — reads a disk-pressure blackout as "nothing to do" while anchors sit held (tk-lslk2).
+# Making the temp file explicit and CHECKED turns that silent blackout into a non-zero
+# abort the patrol logs and retries. A plain file redirect (`< "$ROWS_FILE"`) keeps the
+# loop in THIS shell, so the counters still survive.
+ROWS_FILE=$(mktemp 2>/dev/null) || {
+  echo "pre-open-resolve: cannot create a temp file to enumerate pre-open anchors (disk full?); this pass could NOT enumerate its work, so it is ABORTING non-zero rather than reporting a false-empty '0 opened, 0 flipped, 0 held, 0 skipped' queue (retries next idle wake)" >&2
+  exit 1
+}
+trap 'rm -f "$ROWS_FILE"' EXIT
+printf '%s\n' "$ROWS" > "$ROWS_FILE" || {
+  echo "pre-open-resolve: cannot write the pre-open anchor list to a temp file (disk full?); this pass could NOT enumerate its work, so it is ABORTING non-zero rather than reporting a false-empty queue (retries next idle wake)" >&2
+  exit 1
+}
+# How many anchors this pass MUST account for. If the loop below processes fewer, the
+# read was cut short and the summary is NOT a finished all-clear (see the assertion
+# after the loop). Counted with the SAME non-empty semantics the loop skips rows by.
+expected=$(grep -c . "$ROWS_FILE" 2>/dev/null || true)
+case "$expected" in ''|*[!0-9]*) expected=0 ;; esac
+
+created=0; flipped=0; held=0; skipped=0; processed=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
+  processed=$((processed + 1))
   id=$(printf '%s' "$row" | jq -r '.id // empty')
   branch=$(printf '%s' "$row" | jq -r '.branch // empty')
   target=$(printf '%s' "$row" | jq -r '.target // empty')
@@ -568,7 +616,15 @@ while IFS= read -r row; do
   itype=$(printf '%s' "$row" | jq -r '.itype // "task"')
   prio=$(printf '%s'  "$row" | jq -r '.prio // empty')
 
-  PR_BODY_FILE=$(mktemp)
+  # CHECKED mktemp: an unchecked one under disk pressure (the tk-lslk2 condition) would
+  # hand `gh pr create --body-file` an empty path and open the PR with no body, or fail
+  # in a way this best-effort pass would swallow. A temp file it cannot create is a
+  # could-not-proceed, not a skip — abort non-zero so the patrol retries rather than
+  # logging this as a clean pass.
+  PR_BODY_FILE=$(mktemp 2>/dev/null) || {
+    echo "pre-open-resolve: $id branch '$branch' — cannot create a temp file for the PR body (disk full?); this pass cannot open the PR, so it is ABORTING non-zero rather than reporting a clean queue (retries next idle wake)" >&2
+    exit 1
+  }
   {
     echo "## Summary"
     echo
@@ -584,6 +640,15 @@ while IFS= read -r row; do
     printf -- '- Target: `%s`\n' "$target"
     printf -- '- Codex signed off pre-open at `%.8s`; PR opened codex-green.\n' "$head_oid"
   } > "$PR_BODY_FILE"
+  # A body that came out EMPTY means the writes failed mid-flight (disk full after the
+  # inode was created). Opening a PR with no body is a published artifact no retry takes
+  # back; refuse loudly instead. The body always carries at least a "## Summary", so a
+  # zero-byte file is unambiguously a failed write, never a legitimate one.
+  if [ ! -s "$PR_BODY_FILE" ]; then
+    echo "pre-open-resolve: $id branch '$branch' — the PR body came out empty (disk full?); refusing to open a PR with no body, ABORTING non-zero (retries next idle wake)" >&2
+    rm -f "$PR_BODY_FILE"
+    exit 1
+  fi
 
   # PINNED like every read above: the PR must be created in the repository whose
   # branch head was just certified, not in whatever repository gh considers
@@ -719,7 +784,16 @@ while IFS= read -r row; do
     echo "pre-open-resolve: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (codex-green) but did NOT reach pull_request (see above); anchor stays pre_open_gate and re-adopts this PR next pass" >&2
     skipped=$((skipped + 1))
   fi
-done <<< "$ROWS"
+done < "$ROWS_FILE"
+
+# A pass that could not read every anchor it enumerated must NOT print the summary as
+# though it finished: that all-clear is exactly what disk pressure forged in tk-lslk2.
+# If the loop saw fewer rows than were written, the read was cut short (a truncated or
+# corrupted temp file) — abort non-zero rather than report a partial pass as done.
+if [ "$processed" -ne "$expected" ]; then
+  echo "pre-open-resolve: enumerated only $processed of $expected pre-open anchors — the work list was read short (disk pressure? a truncated temp file?); this pass is INCOMPLETE, so it is ABORTING non-zero rather than reporting '$created opened, $flipped flipped, $held held, $skipped skipped' as a finished queue (retries next idle wake)" >&2
+  exit 1
+fi
 
 echo "pre-open-resolve: $created opened, $flipped flipped, $held held, $skipped skipped"
 exit 0
