@@ -887,9 +887,115 @@ argument positions the two landed on).
 the only place that pours the next wisp and burns this one."""
 
 [[steps]]
+id = "detect-stalled-workflows"
+title = "Signal workflows that stopped advancing"
+needs = ["quiesce-completed-workflows"]
+description = """
+Report a graph.v2 workflow whose frontier has stopped moving and which nothing in
+the city can pick up (tk-xesf6).
+
+**The failure this catches.** A workflow that stops advancing emits nothing — no
+alarm, no escalation, no board entry. It is found when a human asks after the work
+by name, which is how the two instances this step was built on were found (signal-loom
+`sl-xhfl` and `sl-jnjd`, silent for 2h and 7h). Every other consumer keys on BEADS,
+and a stalled workflow's beads are each individually healthy:
+
+| Pass | Keyed on | Why it misses a stalled workflow |
+|---|---|---|
+| mol-liveness-sweep | `gc bd ready` + edge check | a ROOT is blocked by its own workflow-finalize step, so no root is ever a candidate; its STEPS reach the candidate set and are then dropped by class 2(i)(c), because every graph.v2 step `tracks` its still-open root |
+| witness `recover-orphaned-beads` | assignee + dead session | scoped to ASSIGNED beads; a stalled frontier is unassigned |
+| `recover-stranded-branches.sh` | `metadata.branch` | a workflow that stalled before its worktree step pushed nothing |
+| `quiesce-completed-workflows.sh` | the ANCHOR's state | de-routes husks; never asks whether a LIVE workflow is moving |
+| deacon / refinery patrols | session queues, merge queue | a stalled workflow has neither an assignee nor a merge handoff |
+
+Each is right about its own question. The unasked one is whether the workflow is
+still MOVING — visible only in the time derivative, which nothing computed.
+
+```bash
+# Resolve the pack scripts the same way the steps above do, so the idle loop runs
+# the CURRENT script even when a worktree copy lags.
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" \\
+            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \\
+            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/detect-stalled-workflows.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# Best-effort, like every other patrol pass: a failed pass is retried next cycle and
+# must never abort the wisp. The -x guard means a rig that has not synced this script
+# simply keeps the old behavior (no signal at all).
+#
+# A NON-ZERO exit is a verdict, not an abort: every root is attempted first, and the
+# code says only that some signal could not be written. Read the stderr lines.
+if [ -n "$SCRIPTS_DIR" ]; then
+  "$SCRIPTS_DIR/detect-stalled-workflows.sh" \\
+    || echo "detect-stalled-workflows: pass failed (non-fatal); retries next cycle" >&2
+fi
+```
+
+Run it with `--dry-run` to see the selection without writing, and
+`--stall-minutes N` to change the window (default 120).
+
+**What it reports, and what it must not.** A workflow is stalled only when ALL of
+these hold for at least the window: SILENT (no bead of the workflow written — the
+root or anything carrying `gc.root_bead_id`, in any status), UNHELD (no live session
+behind the root or any member), STARTED (the graph closed at least one step), and
+UNCLAIMABLE (its frontier — the members `gc bd ready` returns — is non-empty and
+every frontier bead is unassigned AND unrouted, so no pool and no session can be
+offered it).
+
+Every other wait has a name and is exempt: a live session is working it; a ROUTED
+frontier means demand exists and a quiet pool is the deacon's queue-starvation pass,
+not this one; an ASSIGNED frontier belongs to orphan recovery; an empty frontier
+means a blocker is naming the wait in the graph; `triage.hold` or `gc.takeaway` on
+the root or the anchor is an operator holding it deliberately. A suspended rig needs
+no test — it runs no patrol.
+
+**The anchor is consulted for exactly two states, and this is the load-bearing
+choice.** `closed` and `merge_result=merged` mean the work landed, so the workflow
+is finished. Every OTHER state `quiesce-completed-workflows.sh` treats as terminal —
+`pull_request`, `pre_open_gate`, a refinery handoff, a human park — is deliberately
+NOT honoured here: an anchor carries several molecules over its life, and a REWORK
+molecule is poured against an anchor that already wears the previous round's
+`pull_request`. Reading that as "this workflow is done" is what made both live
+stalls invisible. The husk guard is instead the workflow's own evidence — a molecule
+that closed NO step is an inline-execution husk (mol-polecat-work closes none, ever,
+tk-p9ji9) and is exempt by construction, which is what keeps this pass from
+reporting most of the rig.
+
+**One signal per stalled workflow, never one per pass.** The root is stamped
+`stall_flagged=<last-touch>`, keyed to the OBSERVATION exactly as
+`recover-stranded-branches.sh` keys `stranded_branch_flagged` to `<branch>@<tip>`.
+A workflow that stays stuck keeps the same last-touch and is never re-reported; one
+that advances and stalls again earns exactly one more. This patrol runs continuously,
+so a per-pass signal would be a per-minute signal — the noise tk-jbv0r and tk-76jxq
+are about.
+
+The signal is one visit per stalled workflow on a standing `triage.scope=stalled-workflows`
+subject, routed to the rig's converse pool — the same shape and the same vocabulary
+mol-liveness-sweep files its batch visit in, so a stall lands where the board already
+looks. The visit is filed BEFORE the marker is stamped: a failed create then leaves
+the stall un-retired, while the reverse would retire it on a visit nobody saw.
+
+This pass REPORTS; it never repairs. It writes nothing to a member, a step or an
+anchor, and it has no close path at all.
+
+Regression test: `assets/scripts/detect-stalled-workflows.test.sh` (hermetic; stubs
+`gc`; covers the stall, the pull_request-anchor rework case, both landed-anchor
+exemptions, movement recorded only on a CLOSED member, the zero-closed-step husk,
+both liveness signals, a routed and an assigned frontier, an empty frontier, holds on
+the root and on the anchor, the empty-hold tri-state, the dedupe marker and its
+re-flag, the create-before-mark order, a failed create leaving the marker unstamped,
+all three fail-safes, that no bead is ever closed or written outside the visit, and
+that `--dry-run` writes nothing).
+
+**Exit criteria:** Stalled workflows signalled, or none found. Continue to
+`check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is the
+only place that pours the next wisp and burns this one."""
+
+[[steps]]
 id = "check-polecat-health"
 title = "Check polecat work progress"
-needs = ["quiesce-completed-workflows"]
+needs = ["detect-stalled-workflows"]
 description = """
 Detect polecats that are alive but not making progress on their work.
 
