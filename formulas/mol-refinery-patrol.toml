@@ -336,9 +336,29 @@ is an opt-out; because the merge-push step now STAMPS that sentinel instead of
 collapsing it to empty, "gateless by choice" and "never normalized" are distinct
 states on the anchor. Stamp-then-dispatch, on purpose: a stamp that lands without
 its dispatch leaves the merge HELD and retried, whereas a dispatch that lands
-without its stamp leaves the PR mergeable un-reviewed. Idempotent — a healed
-anchor carries `check_set_healed`, which keeps it under the satisfiability check
-until something can actually raise its gate.
+without its stamp leaves the PR mergeable un-reviewed.
+
+(a-norm) IS ALSO THE RE-GATE OWNER (tk-t46nq). The same pass runs the
+satisfiability check over EVERY gating anchor that names a real gate — not only
+ones whose check_set it healed. An anchor is satisfiable only while its marker is
+green AT THE LIVE HEAD, so an ABSENT marker (in either sub-state) and a STALE one
+on a PRE-OPEN anchor both re-dispatch the codex signoff. This is what gives
+"rework done -> re-gate" an automated owner on the pre-open path: a
+REQUEST_CHANGES signoff CLEARS `check.codex` and files a rework child, and when
+that child lands and is handed back, the anchor carries a perfectly normal
+`check_set=codex` with no marker and nothing in flight. Before this it belonged to
+nobody — the heal pass called it already-normalized, `pre-open-resolve.sh` can
+only HOLD, and `merge-skill.sh` never sees a pre-open anchor — so it parked until
+a human hand-dispatched the re-gate, once per REVIEW ROUND. A stale marker on a
+POST-OPEN anchor is deliberately NOT taken here: that is (a1)'s stale-gate arm,
+which carries `merge_hold` and one-re-review-per-head guards this pass does not.
+
+Idempotent — the dispatched review is itself in flight, so the next pass reuses it
+instead of twinning, and the anchor reclassifies as satisfiable the moment the
+signoff stamps the marker at the live head. Both repair markers — `check_set_healed`
+here and phase 0's `merge_result_healed` — remain the durable audit trail of what
+was repaired; neither decides who gets checked any more, because every gating anchor
+now does.
 
 (a0) The MERGE SKILL (`merge-skill.sh`) — the single writer of merged-truth. For
 each open gating anchor whose PR is open+ready it runs validate -> merge ->
@@ -1749,6 +1769,19 @@ landed-on-branch and the re-review is anchored to the EXISTING anchor. A rework
 bead stamped `merge_result` would join the merge skill's anchor enumeration
 with no `check_set` (the weakest anchor decides the merge — check-set bypass)
 while simultaneously vanishing from its in-flight-rework hold.
+
+REWORK HAND-BACK IS NOT AN ORDINARY mr WORK BEAD (tk-t46nq). This is the trap the
+exception exists to close, and it is easy to walk into because the child LOOKS
+like ordinary work: the fix-target dispatch stamps it `merge_strategy=mr` with
+`branch=<the anchor's branch>` and routes it to the polecat pool like any other
+task. Run it as a normal mr handoff and you mint that gateless second anchor on a
+branch that already has one. The join key is the BRANCH, in BOTH sub-states
+(`pr_number` exists only post-open) — which is why `one-anchor-per-pr-resolve`
+scans `pull_request` and `pre_open_gate` alike. The correct handling is exactly
+three things: close the child as landed-on-branch, never stamp `merge_result` on
+it, and dispatch the re-review against the EXISTING anchor. If this step never
+runs, the re-dispatch is not lost — (a-norm)'s satisfiability sweep is the
+deterministic backstop that re-gates the anchor on the next idle pass.
 
 gc-toolkit local delta: if `codex` is a member of `check_set`, dispatch a signoff
 bead (one member of the anchor's check-set) for the codex polecat pool and record

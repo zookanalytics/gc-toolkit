@@ -2284,6 +2284,16 @@ reset_run
 i=1
 while [ "$i" -le 200 ]; do
   printf 'f-%03d||pull_request||9%03d|polecat/f-%03d|main|||||codex||\n' "$i" "$i" "$i" >> "$TMP/beads"
+  # ...each with its signoff already in flight, which is what a healthy gated anchor
+  # looks like between dispatch and verdict. The fillers exist only to occupy 200
+  # enumeration rows ahead of b-PAGE, and nothing about the page boundary depends on
+  # their gate being unraisable — but since tk-t46nq EVERY anchor's satisfiability is
+  # examined, not only a repaired one's, so a filler with no marker and nothing in
+  # flight would have each of them dispatch a signoff of its own: 200 dispatches, a
+  # dozen stub calls apiece, to test a paging property. (Measured: it took this suite
+  # from 5m34s to 15m44s.) One in-flight review each keeps the fixture's intent and
+  # its cost.
+  printf 'rev-f-%03d\tanchor_bead\tf-%03d\n' "$i" "$i" >> "$TMP/revmeta"
   i=$((i + 1))
 done
 # check_set already reads `codex` — the CSNORMAL shape, and the one that makes the page
