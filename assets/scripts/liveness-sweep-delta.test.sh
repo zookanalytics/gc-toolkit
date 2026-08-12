@@ -34,12 +34,21 @@
 #      so the sweep re-nominated it every pass forever, and the only disposition
 #      the menu offered for it was park — which the operator had rejected for
 #      this scope. Class 4 gained `triage.hold`, a stamp rather than an edge.
+#   6. A WORK BEAD A LIVE MOLECULE WAS DRIVING READ AS UNNAMED (bead tk-8rm3q).
+#      mol-polecat-work stamps assignee and gc.routed_to on the molecule root and
+#      its steps, never on the work bead its input convoy tracks, so an actively
+#      worked bead carried no worker signal and re-surfaced every pass — it even
+#      fooled the agent who had just dispatched it. Class 1 gained the
+#      worked-via-convoy discriminator: the convoys a non-closed bead names as
+#      gc.input_convoy_id, and the members those convoys track. Its hard half is
+#      the husk — a tracks edge is not coverage unless a LIVE bead names the
+#      convoy, or a dead synthetic convoy hides the highest-priority idle bead.
 #
-# The three computational blocks are EXTRACTED VERBATIM from the shipped formula
-# (`# >>> open-prs` / `# >>> classify-candidates` / `# >>> sweep-delta`) and
-# executed against fixtures, so the test cannot drift from the instruction an
-# agent actually runs. Hermetic: reads the repo, stubs `gc` and `gh`; no city,
-# no Dolt, no network.
+# The four computational blocks are EXTRACTED VERBATIM from the shipped formula
+# (`# >>> open-prs` / `# >>> worked-via-convoy` / `# >>> classify-candidates` /
+# `# >>> sweep-delta`) and executed against fixtures, so the test cannot drift
+# from the instruction an agent actually runs. Hermetic: reads the repo, stubs
+# `gc` and `gh`; no city, no Dolt, no network.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,9 +73,11 @@ extract() { # extract() <marker> <file> — the lines between # >>> and # <<<
 extract classify-candidates "$FORMULA" > "$TMP/classify.sh"
 extract sweep-delta         "$FORMULA" > "$TMP/delta.sh"
 extract open-prs            "$FORMULA" > "$TMP/openprs.sh"
+extract worked-via-convoy   "$FORMULA" > "$TMP/worked.sh"
 [ -s "$TMP/classify.sh" ] || { echo "no marked classify-candidates block"; exit 1; }
 [ -s "$TMP/delta.sh" ]    || { echo "no marked sweep-delta block"; exit 1; }
 [ -s "$TMP/openprs.sh" ]  || { echo "no marked open-prs block"; exit 1; }
+[ -s "$TMP/worked.sh" ]   || { echo "no marked worked-via-convoy block"; exit 1; }
 
 echo "── the extracted blocks are valid shell ──"
 bash -n "$TMP/classify.sh" && ok "classify-candidates: valid bash" \
@@ -75,6 +86,8 @@ bash -n "$TMP/delta.sh" && ok "sweep-delta: valid bash" \
     || bad "sweep-delta: valid bash" "bash -n failed"
 bash -n "$TMP/openprs.sh" && ok "open-prs: valid bash" \
     || bad "open-prs: valid bash" "bash -n failed"
+bash -n "$TMP/worked.sh" && ok "worked-via-convoy: valid bash" \
+    || bad "worked-via-convoy: valid bash" "bash -n failed"
 
 # The blocks live inside a TOML `"""` string, so TOML consumes escapes before an
 # agent ever sees them: a trailing backslash joins two lines, backslash-n becomes
@@ -88,7 +101,7 @@ bash -n "$TMP/openprs.sh" && ok "open-prs: valid bash" \
 echo "── the formula parses as TOML and the blocks survive it unchanged ──"
 python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$FORMULA" 2>/dev/null \
     && ok "formula parses as TOML" || bad "formula parses as TOML" "tomllib rejected it"
-for blk in classify.sh delta.sh openprs.sh; do
+for blk in classify.sh delta.sh openprs.sh worked.sh; do
     grep -q '[\]' "$TMP/$blk" \
         && bad "${blk%.sh}: no backslash (TOML would eat it)" "found a backslash" \
         || ok "${blk%.sh}: no backslash (TOML would eat it)"
@@ -116,7 +129,9 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-pr-nourl","title":"marker but no pr_url to check liveness against","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521"}},
   {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator may take a different direction","triage.hold_by":"operator"}},
   {"id":"c-hold-bare","title":"held, but the stamp names no reason","issue_type":"task","metadata":{"triage.hold":"true"}},
-  {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}}
+  {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}},
+  {"id":"c-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
+  {"id":"c-husk-tracked","title":"tracked only by a dead synthetic convoy","issue_type":"bug","metadata":{}}
 ]
 JSON
 cat > "$TMP/live.json" <<'JSON'
@@ -157,13 +172,56 @@ eq "$(printf '%s' "$OPEN_PRS" | jq 'length')" "2" "the open PRs of the repos the
 eq "$(printf '%s' "$PRREPOS" | sort | tr '\n' ' ')" \
    "github.com/someone/elsewhere github.com/zookanalytics/signal-loom " \
    "repos derived from the beads' own pr_url, both of them, deduped"
+
+# The worked half of class 1 (bead tk-8rm3q). A `gc` stub answering
+# `gc bd show <convoy>` from per-id fixtures in $CONVOY_DIR, emitting the gc bd
+# SHOW dependency shape (.dependency_type + .id) — NOT the gc bd LIST shape
+# (.type + .depends_on_id). The block MUST read the show shape; a fixture in the
+# show shape read with the wrong key would yield nothing, so "c-worked dropped"
+# below is exactly what pins the key against a silent regression. GC_CONVOY_FAIL
+# makes one convoy read fail the way a real outage does (non-zero, no output).
+mkdir -p "$TMP/bin" "$TMP/convoys"
+cat > "$TMP/bin/gc" <<'GC'
+#!/usr/bin/env bash
+[ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
+id="$3"
+[ -n "${GC_CONVOY_FAIL:-}" ] && [ "$id" = "$GC_CONVOY_FAIL" ] && exit 1
+f="$CONVOY_DIR/$id.json"
+[ -f "$f" ] && cat "$f" || printf '%s\n' '[]'
+GC
+chmod +x "$TMP/bin/gc"
+export CONVOY_DIR="$TMP/convoys"
+# conv-live is named by a LIVE molecule in ALIVE and tracks c-worked → worked.
+printf '%s\n' '[{"id":"conv-live","issue_type":"convoy","dependencies":[{"id":"c-worked","dependency_type":"tracks","status":"open"}],"dependents":null}]' > "$TMP/convoys/conv-live.json"
+# conv-husk tracks c-husk-tracked but NO live bead names it → never read, and
+# even if it were, its member is not coverage. This is the husk, the hard half.
+printf '%s\n' '[{"id":"conv-husk","issue_type":"convoy","metadata":{"gc.synthetic":"true"},"dependencies":[{"id":"c-husk-tracked","dependency_type":"tracks","status":"open"}],"dependents":null}]' > "$TMP/convoys/conv-husk.json"
+# ALIVE is the not-closed set the block reads input convoys from. m-live is a
+# live molecule naming conv-live; nothing names conv-husk.
+cat > "$TMP/alive.json" <<'JSON'
+[
+  {"id":"m-live","title":"a live molecule driving a work bead","metadata":{"gc.input_convoy_id":"conv-live"}},
+  {"id":"c-worked","title":"a work bead a live molecule is driving","metadata":{}},
+  {"id":"c-husk-tracked","title":"tracked only by a dead synthetic convoy","metadata":{}}
+]
+JSON
+# Exported like LIVE/READY: the block reads $ALIVE, and shellcheck cannot follow
+# the sourced file to see the read, so export marks it used-externally (SC2034).
+ALIVE="$TMP/alive.json"; export ALIVE
+# shellcheck disable=SC1090
+. "$TMP/worked.sh"
+echo "── worked-via-convoy resolves live molecules FORWARD to the work beads they drive ──"
+eq "$CONVOY_LIVENESS" "verified" "every convoy a live molecule names answered → verified"
+eq "$(printf '%s' "$WORKED" | jq -r 'sort | join(",")')" "c-worked" \
+   "only a LIVE-named convoy's member is worked; a husk-tracked bead is not"
+
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 SURVIVORS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
 
 echo "── classify keeps only genuinely unnamed beads ──"
 eq "$SURVIVORS" \
-   "c-hold-empty,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-takeaway-empty" \
+   "c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-takeaway-empty" \
    "survivors are exactly the unnamed beads"
 # tk-tnwo0: the candidate's `type` is projected from `.issue_type` — the field
 # real `gc bd list`/`gc bd ready` emit (the fixtures now carry it too). The old
@@ -195,6 +253,19 @@ for keep in c-pr-merged:merged-is-finishable-and-surfaces-for-close-out \
     printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
         && ok "kept $id ($why)" || bad "kept $id ($why)" "was hidden — the inverse defect"
 done
+
+# Class 1's molecule indirection and its husk (bead tk-8rm3q). c-worked is
+# tracked by conv-live, which a LIVE molecule (m-live) names → dropped as
+# worked. c-husk-tracked is tracked by conv-husk, which NO live bead names → it
+# is NOT coverage and the bead stays a candidate; dropping on the tracks edge
+# alone would hide it, the inverse defect the husk rule exists to prevent.
+echo "── class 1: a molecule-driven work bead is dropped; a husk-tracked one is kept ──"
+printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-worked")' >/dev/null 2>&1 \
+    && bad "dropped c-worked (worked-via-convoy)" "still a candidate" \
+    || ok "dropped c-worked (worked-via-convoy)"
+printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-husk-tracked")' >/dev/null 2>&1 \
+    && ok "kept c-husk-tracked (husk convoy — no live namer is not coverage)" \
+    || bad "kept c-husk-tracked (husk)" "was hidden — dropped on the tracks edge alone"
 
 # An unreadable probe must never read as "no open PRs". It cannot hide a bead
 # (an unread repository contributes none), but the sitting is owed the word.
@@ -252,6 +323,41 @@ printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-takeaway-empty")' >/dev/nu
 printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-plain")' >/dev/null 2>&1 \
     && ok "a bead with no metadata object survives" \
     || bad "a bead with no metadata object survives" "c-plain was dropped"
+
+# The worked-via-convoy liveness word is three-valued exactly as PR_LIVENESS:
+# 'none' (no non-closed bead named a convoy), 'verified' (all reads answered),
+# 'unverified' (a read failed). A failed read never hides a bead — the member is
+# simply not marked worked, so it stays a candidate and is reported — but the
+# sitting is owed the word or a list of actively-worked beads reads as a backlog.
+echo "── the worked-via-convoy probe is three-valued and reports rather than hides ──"
+printf '%s\n' '[{"id":"x","metadata":{}}]' > "$TMP/alive-none.json"
+ALIVE="$TMP/alive-none.json"
+# shellcheck disable=SC1090
+. "$TMP/worked.sh"
+eq "$CONVOY_LIVENESS" "none" "no convoy named → 'none', distinct from verified and unverified"
+eq "$(printf '%s' "$WORKED" | jq 'length')" "0" "nothing named → nothing marked worked"
+ALIVE="$TMP/alive.json"; GC_CONVOY_FAIL=conv-live; export GC_CONVOY_FAIL
+# shellcheck disable=SC1090
+. "$TMP/worked.sh"
+eq "$CONVOY_LIVENESS" "unverified" "a failed convoy read is 'unverified', never a silent empty"
+printf '%s' "$WORKED" | jq -e 'any(.[]; . == "c-worked")' >/dev/null 2>&1 \
+    && bad "a failed read hides nothing" "c-worked was marked worked despite the read failing" \
+    || ok "a failed read contributes no worked ids (the bead stays a candidate, reported)"
+unset GC_CONVOY_FAIL
+
+# Under 'set -e', where recording the failure is HARDER than aborting — the same
+# control as the open-prs errexit test. A bare ROWS=$(gc ...) assignment would
+# let errexit kill the pass on the very transient the else arm exists to report.
+echo "── the worked-via-convoy read survives 'set -e' ──"
+# shellcheck disable=SC2016
+ERRX_WVC='. "$1"; printf "%s" "$CONVOY_LIVENESS"'
+ERRX_WVC_FAIL="$(GC_CONVOY_FAIL=conv-live ALIVE="$TMP/alive.json" CONVOY_DIR="$TMP/convoys" PATH="$TMP/bin:$PATH" \
+    bash -e -c "$ERRX_WVC" _ "$TMP/worked.sh" 2>/dev/null)"
+eq "$ERRX_WVC_FAIL" "unverified" \
+   "under 'set -e' a failed convoy read still records 'unverified' (never aborts the pass)"
+ERRX_WVC_OK="$(ALIVE="$TMP/alive.json" CONVOY_DIR="$TMP/convoys" PATH="$TMP/bin:$PATH" \
+    bash -e -c "$ERRX_WVC" _ "$TMP/worked.sh" 2>/dev/null)"
+eq "$ERRX_WVC_OK" "verified" "…and a healthy read runs to completion under 'set -e' too"
 
 # --- 2. the delta split ------------------------------------------------------
 # `gc` stub: the one read the block performs (gc bd show <subject> --json).
@@ -369,6 +475,17 @@ echo "── the edge check tests 'not closed', resolved against a widened ALIVE
 has "the widening reads every non-closed status LIVE omits" 'blocked,deferred,pinned,hooked' "$FORMULA"
 has "liveness is 'not closed', not 'present in LIVE'"       'not only when it is open'        "$FORMULA"
 has "the edge check resolves against the widened set"       'against ALIVE'                   "$FORMULA"
+
+# Class 1's worked-via-convoy discriminator and its husk rule (bead tk-8rm3q).
+echo "── class 1 states the worked-via-convoy discriminator and its husk rule ──"
+has "class 1 names the discriminator"         'worked-via-convoy'   "$FORMULA"
+has "the input convoy is the signal"          'gc.input_convoy_id'  "$FORMULA"
+has "the read is via gc bd show"              'gc bd show'          "$FORMULA"
+has "the show key is dependency_type"         'dependency_type'     "$FORMULA"
+has "the husk requires a live namer"          'LIVE NAMER'          "$FORMULA"
+has "a tracks edge alone is not coverage"     'not itself coverage' "$FORMULA"
+# shellcheck disable=SC2016
+has "unverified convoy liveness is disclosed" '`$CONVOY_LIVENESS` is `unverified`' "$FORMULA"
 
 echo
 echo "liveness-sweep-delta: $PASS passed, $FAIL failed"
