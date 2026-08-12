@@ -29,6 +29,15 @@
 # the detector would never fire — failing safe, but useless. Digits are
 # normalized out before hashing: real work writes new TEXT, not just larger
 # numbers. A pane whose only change is numeric correctly reads as static.
+#
+# ON PRECEDENCE (tk-uz3de). The patrol-wisp age is the only signal here that
+# measures WORK COMPLETED rather than the pane's appearance, so it wins. When
+# the wisp ledger is readable, a stale or absent wisp opens a coldness episode
+# even if the pane looks busy or is animating — because an expired-login session
+# paints a busy, moving pane while completing no work, and the pane reads (busy
+# marker, pane movement) used to exit "healthy" BEFORE the wisp was ever
+# consulted. That false-negatived a 3h51m deacon stall across ~105 passes. The
+# pane is now a FALLBACK, consulted only when the wisp cannot be read.
 set -euo pipefail
 
 DEACON="${BOOT_HEALTH_DEACON:-gc-toolkit.deacon}"
@@ -121,6 +130,11 @@ PANE1="$(gc_call gc session peek "$DEACON" --lines 1)"
 [ -n "$PANE1" ] || exit 0
 
 # --- 1. pane -----------------------------------------------------------------
+# Read the pane and reduce it to two facts, but DECIDE nothing here. The old
+# code exited "healthy" the instant the pane looked busy or had moved — before
+# it ever asked whether any work had completed. That is the defect (tk-uz3de):
+# an expired-login session paints a busy, animating pane while completing
+# nothing. Precedence is inverted in step 3; the pane is now a FALLBACK.
 PANE="$(gc_call gc session peek "$DEACON" --lines "$PEEK_LINES")"
 
 # A here-string, never a `printf ... | grep -qiE` pipeline (tk-zfjg9): `grep -q`
@@ -128,16 +142,15 @@ PANE="$(gc_call gc session peek "$DEACON" --lines "$PEEK_LINES")"
 # 141 — so a busy deacon reads as idle and the pass goes on to open a coldness
 # episode against a session that is mid-turn. $PANE is PEEK_LINES of pane text,
 # comfortably past the buffer size where the race starts to fire.
-if grep -qiE -- "$BUSY_RE" <<< "$PANE"; then
-    clear_state ""            # mid-turn: unambiguous, and cheapest to detect
-    exit 0
-fi
+PANE_BUSY=0
+if grep -qiE -- "$BUSY_RE" <<< "$PANE"; then PANE_BUSY=1; fi
 
+# Digits are normalized out before hashing (see "ON HASHING THE PANE" above): a
+# pane whose only change is a larger timer reads as static, while a cycling
+# spinner glyph or a new action word reads as moved.
 NEW_HASH="$(printf '%s' "$PANE" | tr -d '0-9' | cksum | awk '{print $1}')"
-if [ -n "$pane_hash" ] && [ "$NEW_HASH" != "$pane_hash" ]; then
-    clear_state "$NEW_HASH"   # pane advanced: producing output
-    exit 0
-fi
+PANE_MOVED=0
+if [ -n "$pane_hash" ] && [ "$NEW_HASH" != "$pane_hash" ]; then PANE_MOVED=1; fi
 
 # --- 2. patrol wisp ----------------------------------------------------------
 # TWO filters false-empty this query against a perfectly healthy deacon, and it
@@ -208,31 +221,53 @@ if [ -n "$WISPS" ]; then
     fi
 fi
 
+# --- 3. adjudicate: work-completion first, pane only as fallback -------------
+# The wisp age measures WORK COMPLETED, not pixels painted, so when it can be
+# read it is authoritative and the pane defers to it. This ordering is the fix
+# for tk-uz3de: the pane reads used to run FIRST and exit healthy on a busy or
+# advancing pane — exactly what an expired-login session paints while doing no
+# work — so the stale-wisp signal below was never reached.
+
+# (a) A FRESH wisp is the strongest healthy signal: a patrol completed inside
+#     the freshness window. Healthy whatever the pane shows.
 if [ -n "$WISP_AGE" ] && [ "$WISP_AGE" -lt "$WISP_FRESH" ]; then
     clear_state "$NEW_HASH"   # wisp young: cycling normally, whatever its status
     exit 0
 fi
 
-# The probe could not be READ — no ledger to pin, or no parseable answer from
-# one. That is not evidence about the deacon, and reporting it as coldness is
-# the cry-wolf failure this order exists to avoid: a detector that reports on
-# evidence it never gathered gets ignored, which costs more than no detector.
-# Record the pane so movement is still tracked, and wait for a readable pass.
+# (b) Ledger READ, wisp stale or absent: no patrol completed in the window. A
+#     busy-looking or animating pane must NOT rescue this — "pane moving + no
+#     work in 30m" is the wedged-runtime signature, not health. Fall through to
+#     the coldness clock (step 4) REGARDLESS of the pane. This is the inversion.
+# (c) Ledger NOT read — no store to pin, or no parseable answer. That is not
+#     evidence about the deacon, and reporting coldness on evidence never
+#     gathered is the cry-wolf failure this order exists to avoid. Fall back to
+#     the pane exactly as the pre-inversion code did: a busy or advancing pane
+#     reads as alive; a static one records movement and waits for a readable
+#     pass.
 if [ "$WISP_READ_OK" -eq 0 ]; then
-    pane_hash="$NEW_HASH"
+    if [ "$PANE_BUSY" -eq 1 ]; then
+        clear_state ""            # mid-turn: unambiguous, and cheapest to detect
+        exit 0
+    fi
+    if [ "$PANE_MOVED" -eq 1 ]; then
+        clear_state "$NEW_HASH"   # pane advanced: producing output
+        exit 0
+    fi
+    pane_hash="$NEW_HASH"         # static + unreadable: track movement, wait
     save_state
     exit 0
 fi
 
-# --- 3. cold -----------------------------------------------------------------
-# Pane static, no busy marker, wisp stale or absent. Start (or continue) the
+# --- 4. cold -----------------------------------------------------------------
+# Ledger read, wisp stale or absent, pane overridden. Start (or continue) the
 # clock. A first cold pass only records — one observation is not evidence.
 pane_hash="$NEW_HASH"
 [ "$cold_since" -eq 0 ] && { cold_since="$NOW"; save_state; exit 0; }
 COLD=$((NOW - cold_since))
 [ "$COLD" -ge "$REPORT_AFTER" ] || { save_state; exit 0; }
 
-# --- 4. report ---------------------------------------------------------------
+# --- 5. report ---------------------------------------------------------------
 # Once per episode, then at REPORT_EVERY while it persists, so a genuine wedge
 # does not go silent after one mail and a flapping deacon does not spam.
 DUE=0

@@ -170,26 +170,53 @@ run 2 STUB_WISPS="$(awk -v n=120 -v old="$(iso $((NOW - 7200)))" -v new="$(iso $
     BOOT_HEALTH_REPORT_AFTER=0
 eq "$(mailed)" no "a young wisp behind 120 unrelated rows still reads healthy"
 
-# --- (f) Either liveness signal clears the episode. --------------------------
+# --- (f) The pane is a FALLBACK, not an override (tk-uz3de). -----------------
+# The pre-inversion bug this section now pins: a busy or advancing pane exited
+# "healthy" BEFORE the wisp was ever consulted, so an expired-login session —
+# which paints a busy, animating pane while completing no work — read as alive
+# across a 3h51m stall (~105 passes, cold_since never left 0). The wisp measures
+# WORK COMPLETED, so it wins when it can be read; the pane speaks only when it
+# cannot. Precedence: fresh wisp > readable stale/absent wisp > pane.
+
+# A busy marker does NOT rescue an absent-but-READABLE wisp. This is the stall
+# this order missed: the ledger says no patrol completed, and no interrupt
+# affordance in the pane can override that.
 run 2 STUB_PANE='working... (esc to interrupt)' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
-eq "$(mailed)" no "busy marker in the pane suppresses the report"
+eq "$(mailed)" yes "busy pane does NOT suppress a readable ABSENT wisp (the missed stall)"
 
-# Pane MOVEMENT, across two passes on one state dir. Digits are normalized out
-# before hashing — Claude Code paints a self-advancing post-turn duration, so a
-# byte-exact hash would report "changed" every cycle and the detector would
-# never fire. A pane whose ONLY change is numeric must therefore read as static
-# (and, with no dwell time configured, report).
-reset
-pass STUB_PANE='idle 1m' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
-pass STUB_PANE='idle 2m' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
-eq "$(mailed)" yes "a pane whose only change is numeric reads as STATIC (digits normalized)"
+# Nor does it rescue a STALE readable wisp — the wedged-runtime signature stated
+# in the bead: pane moving/busy + no patrol completed in the freshness window.
+# This is the case that FAILS if the script exits healthy on stale-wisp+busy-pane.
+run 2 STUB_PANE='working... (esc to interrupt)' STUB_WISPS="$(wisp in_progress 7200)" BOOT_HEALTH_REPORT_AFTER=0
+eq "$(mailed)" yes "busy pane does NOT suppress a STALE wisp (pane moving + no work in window = wedged)"
 
-# Real new TEXT is liveness: it clears the episode instead.
+# But when the wisp is UNREADABLE, the pane IS the only signal, so a busy marker
+# still suppresses — reporting coldness on evidence never gathered is the cry-
+# wolf failure this order exists to avoid.
+run 2 STUB_PANE='working... (esc to interrupt)' STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0
+eq "$(mailed)" no "busy pane still suppresses when the wisp is UNREADABLE (pane is the fallback)"
+
+# Pane MOVEMENT is likewise a fallback-only signal now, and digit-normalization
+# still governs what counts as movement. Claude Code paints a self-advancing
+# post-turn duration, so a byte-exact hash would report "changed" every cycle;
+# digits are stripped before hashing so a numeric-only change reads as STATIC.
+# Observe both against an UNREADABLE ledger (the only path where the pane hash
+# still steers the verdict): open a cold clock with a readable absent wisp, then
+# feed one unreadable pass and watch whether it clears the episode.
+#
+# Real new TEXT reads as alive and clears the episode:
 reset
-pass STUB_PANE='idle 1m' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
-pass STUB_PANE='now running a patrol step' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
-eq "$(mailed)" no "new pane TEXT clears the episode"
-eq "$(grep -c '^cold_since=0' "$TMP/state/state" || true)" 1 "pane movement resets the cold clock"
+pass STUB_PANE='idle 1m' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0                 # readable absent: cold clock opens
+pass STUB_PANE='now running a patrol step' STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0 # unreadable + real movement
+eq "$(state_get cold_since)" 0 "unreadable + real pane movement clears the episode (fallback liveness)"
+
+# A numeric-only change reads as STATIC (digits normalized) and leaves the clock
+# standing — if digit-stripping regressed, this pass would clear the episode too.
+reset
+pass STUB_PANE='idle 1m' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0                 # readable absent: cold clock opens
+COLD_OPENED="$(state_get cold_since)"
+pass STUB_PANE='idle 2m' STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0                   # unreadable + numeric-only change
+eq "$(state_get cold_since)" "$COLD_OPENED" "unreadable + numeric-only change is STATIC (digits normalized) — clock stands"
 
 # --- (g) One report per episode, then silence until REPORT_EVERY. ------------
 run 4 STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0 BOOT_HEALTH_REPORT_EVERY=99999
