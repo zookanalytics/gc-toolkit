@@ -160,12 +160,48 @@ fifth is a defect:
    refinery patrol backfills `pr_url`/`pr_number`, and until it does
    the bead is reported); a `pr_url` naming a repository the open-PR
    read did not cover; and any pass where that read failed at all.
-   `merge_result=pre_open_gate` is NOT covered here and needs no cover:
-   there is no PR to check, and the review bead holding a pre-open gate
-   carries a `blocks` edge onto the anchor, so `gc bd ready` drops it
-   before it can reach the candidate set. If that ever stops being
-   true, it is a distinct discriminator with a distinct liveness test —
-   file it rather than widening this one.
+   **`merge_result=pre_open_gate` IS covered — a distinct gate, not the
+   open-PR one** (bead tk-5ttye). The earlier carve-out held that a
+   pre-open anchor never reaches the candidate set, because the review
+   bead holding its gate carries a `blocks` edge that `gc bd ready`
+   drops on. That is true only while the review is OPEN, and the normal
+   end of every pre-open review is the review bead CLOSING — which lifts
+   the `blocks` edge. The anchor then sits in `pre_open_gate` waiting for
+   `pre-open-resolve.sh` to open its PR, with no open blocker and no
+   bd-level gate, so `gc bd ready` returns it and every other
+   discriminator misses it (live case gc-d760o: codex-green, review
+   closed, branch pushed and live — reported as an unnamed wait when it
+   was a named one).
+
+   A pre-open anchor has no PR yet, so the live thing is not a PR GitHub
+   can be asked about but the GATE itself: `check_set` names the required
+   checks and `check.<name>` carries each verdict (`green@<oid>`,
+   `fixable@<oid>`, `exception@<oid>`; `docs/work-bead-state-machine.md`,
+   the same pair `doctor/check-merge-gate-drop` reads). The test is
+   verdict-based — the marker's VALUE, never a live-head lookup, because
+   the sweep does batched reads only and never one network call per bead:
+
+   * `merge_result=pre_open_gate` AND every gate in `check_set` records
+     `green@` → gated, waiting on `pre-open-resolve.sh` — dropped. The
+     `none`/`off`/`approval` sentinels are not marker-backed gates and
+     are removed from the set exactly as the merge gate removes them
+     (`merge-skill.sh` `checkset_hold_gate`); an effective set that is
+     then EMPTY is no positive evidence and does NOT drop.
+   * a gate recording a NON-green verdict (`fixable@`, `exception@`) is
+     left to fall through, not skipped: a live rework child (a non-closed
+     `parent-child`) is dropped by 2(i)(a), and a live review bead never
+     reaches the candidate set at all (its `blocks` edge) — so what
+     survives to class 5 is a non-green gate with nothing in flight,
+     which is genuinely stalled work and MUST stay visible.
+   * `check_set` unset, or any named gate's marker absent → reported. An
+     unset or absent marker is the hole tk-t46nq and tk-qs1j6 describe,
+     and it must stay visible.
+
+   This is why it is a discriminator and not a one-line "carries
+   `pre_open_gate`, skip it": that naive rule would hide an anchor
+   sitting on a `fixable` verdict under the signoff convergence cap — the
+   operator-gated state that most needs the board — the same inverse
+   defect the open-PR half warns about for a closed PR.
 3. **conversing** — it IS a visit (`task_kind=visit`), or a live visit
    exists in its continuation group. Live means open OR held — a visit
    being held is `in_progress`, which is why the listing above is
@@ -383,6 +419,15 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
     | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
+  def pre_open_all_green:
+    (.metadata // {}) as $m
+    | (($m.check_set // "")
+        | split(",")
+        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+        | map(select(length > 0))
+        | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
+    | ($gates | length) > 0
+      and all($gates[]; ($m["check." + .] // "") | startswith("green@"));
   ([($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata["gc.continuation_group"] // empty)]) as $convgroups
@@ -397,6 +442,8 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
       | select((((.metadata.merge_result // "") == "pull_request")
                 and (((.metadata.pr_url // "") | pr_key) as $k
                      | $k != "" and ($openkeys | index($k)) != null)) | not)
+      | select((((.metadata.merge_result // "") == "pre_open_gate")
+                and pre_open_all_green) | not)
       | select(.id as $id | ($convgroups | index($id)) | not)
     ] | map({id, title, type: .issue_type})')
 # <<< classify-candidates
@@ -440,12 +487,13 @@ an empty `triage.hold`, are cleared holds, not holds.
 Record in your notes: counts per class as a funnel, the surviving ids,
 what the edge check dropped, and — because these are the drops nothing
 else in the pass makes visible — the worked-via-convoy ids with the
-convoy covering each, the PR-parked ids with their PR numbers, the held
+convoy covering each, the PR-parked ids with their PR numbers, the
+pre-open-gated ids with the green gate marker each carries, the held
 ids WITH the reason each hold gives, and both the `$PR_LIVENESS` and
-`$CONVOY_LIVENESS` values. A hold, a parked PR and a molecule-driven
-work bead are named waits, not defects, but a wait nobody ever reads is
-how a bead disappears for good; the funnel note is the only place they
-surface. Then close this step:
+`$CONVOY_LIVENESS` values. A hold, a parked PR, a pre-open gate and a
+molecule-driven work bead are named waits, not defects, but a wait
+nobody ever reads is how a bead disappears for good; the funnel note is
+the only place they surface. Then close this step:
 
 ```bash
 gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed
