@@ -19,10 +19,10 @@ The baseline lives in `sweep.reported` on the standing subject; its
 failure mode is to re-report, never to hide (operator decision
 2026-08-10, bead tk-snnpp) — and that bias governs every check added
 since: a probe that cannot be read excludes nothing.
-`assets/scripts/liveness-sweep-delta.test.sh` extracts the four marked
+`assets/scripts/liveness-sweep-delta.test.sh` extracts the six marked
 blocks below and executes them, so the delta split, the class filters
-(worked-via-convoy, takeaway, gating state, operator hold) and the park
-wording cannot drift from what an agent actually runs.
+(worked-via-convoy, takeaway, gating state, operator hold) and the
+classify→normalize handoff cannot drift from what an agent actually runs.
 
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
@@ -30,9 +30,14 @@ Fired by orders/liveness-sweep.toml on cooldown.
 
 Contract: graph.v2 — the compiled workflow root is Ready-visible, so a
 scale-from-zero pool wakes for it (a v1 molecule root is NOT
-Ready-visible, so a cold pool would never wake). Each step closes its own step bead with gc.outcome
-before the graph advances; the normalize step is fail-closed on the
-classify step's outcome.
+Ready-visible, so a cold pool would never wake). Each step closes its own
+step bead with gc.outcome before the graph advances. classify hands its
+survivor set and both liveness words to normalize as metadata on the shared
+ROOT bead — NOT as shell state, which a separate normalize step bead claimed
+by a fresh session does not inherit (bead tk-7uvm9). Both step beads carry
+gc.root_bead_id, so the handoff needs no knowledge of the other step's id.
+The normalize step is fail-closed on that handoff, and distinguishes a
+classify that failed from one whose output is unreadable.
 """
 formula = "mol-liveness-sweep"
 
@@ -493,7 +498,46 @@ ids WITH the reason each hold gives, and both the `$PR_LIVENESS` and
 `$CONVOY_LIVENESS` values. A hold, a parked PR, a pre-open gate and a
 molecule-driven work bead are named waits, not defects, but a wait
 nobody ever reads is how a bead disappears for good; the funnel note is
-the only place they surface. Then close this step:
+the only place they surface.
+
+**Hand the survivor set to normalize as MACHINE state, not prose** (bead
+tk-7uvm9). classify and normalize are separate step beads and the pool
+re-offers each ready step, so a fresh normalize session inherits none of this
+shell — `$CANDIDATES`, `$PR_LIVENESS`, `$CONVOY_LIVENESS` are simply gone.
+The funnel note above is for humans; the block below is the contract the next
+step's jq reads. It rides the ROOT bead: every step bead carries
+`gc.root_bead_id`, so normalize reads the same root back without ever knowing
+this step's id. Resolve the root from YOUR step bead first:
+
+```bash
+ROOT=$(gc bd show <your-claimed-step-bead-id> --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.root_bead_id"] // ""')
+# use the step bead id from YOUR claim — no env var carries it
+```
+
+The survivor set to hand off is the POST-edge-check set: the
+classify-candidates `$CANDIDATES` minus every id the per-candidate edge check
+moved to class 2. Collect those dropped ids as `$EDGE_DROPS` (space- or
+newline-separated, empty if none) and the block derives the survivors
+deterministically — never hand-type the survivor list, which is exactly the
+prose fragility this fix removes. `$CANDIDATES` stays the source of each
+survivor's title and type, so nothing is re-derived against a newer listing.
+
+```bash
+# >>> stamp-handoff
+DROPS_TMP=$(mktemp)
+for d in ${EDGE_DROPS:-}; do echo "$d" >> "$DROPS_TMP"; done
+EDGE_DROPS_JSON=$(jq -R . < "$DROPS_TMP" | jq -sc 'map(select(length > 0))')
+SURVIVORS=$(printf '%s' "$CANDIDATES" | jq -c --argjson drop "$EDGE_DROPS_JSON" 'map(select(.id as $i | ($drop | index($i)) | not))')
+printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null || { echo "stamp-handoff: SURVIVORS is not a JSON array — do not close this step" >&2; exit 1; }
+[ -n "$ROOT" ] || { echo "stamp-handoff: no gc.root_bead_id resolved — cannot hand off to normalize" >&2; exit 1; }
+gc bd update "$ROOT" --set-metadata "sweep.candidates=$SURVIVORS" --set-metadata "sweep.pr_liveness=$PR_LIVENESS" --set-metadata "sweep.convoy_liveness=$CONVOY_LIVENESS" --set-metadata "sweep.classify_outcome=pass" || { echo "stamp-handoff: failed to stamp root $ROOT — do not close this step" >&2; exit 1; }
+# <<< stamp-handoff
+```
+
+Then close this step — AFTER the stamp above, never before: closing releases
+normalize, so the handoff must be durable first. The `sweep.classify_outcome=pass`
+the stamp writes is what tells normalize the handoff is present and readable,
+a state distinct from a classify that failed.
 
 ```bash
 gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=pass --status=closed
@@ -506,15 +550,79 @@ id = "normalize"
 title = "One batch visit on the sweep's triage subject — new candidates only, never per-bead"
 needs = ["classify"]
 description = """
-**0. Fail-closed:** read the classify step's `gc.outcome`. If it is not
-`pass`, log "classify failed — normalizing nothing" and close this step
-with `gc.outcome=fail`. (A closed-failed predecessor releases this step
-to run — reading its outcome is the guard; the graph has no other
-brake.)
+**0. Read classify's handoff, fail-closed.** classify hands its survivor
+set and both liveness words to this step as METADATA ON THE ROOT BEAD, not
+as shell state — the two steps are separate step beads and a fresh normalize
+session (the normal case: the pool re-offers each ready step) inherits none
+of classify's variables (bead tk-7uvm9). Both step beads carry
+`gc.root_bead_id`, so resolve the shared root from THIS step's bead and read
+the stamp back:
 
-**1. Resolve the sweep's standing triage subject** (one per rig; create
-on first run, idempotent — search `$LIVE` for it first). It is also
-where this sweep keeps its only piece of state, the delta baseline:
+```bash
+ROOT=$(gc bd show <your-claimed-step-bead-id> --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.root_bead_id"] // ""')
+# use the step bead id from YOUR claim — no env var carries it
+[ -n "$ROOT" ] || { echo "normalize: no gc.root_bead_id on this step bead — nothing filed"; gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=fail --status=closed; exit 0; }
+```
+
+```bash
+# >>> read-handoff
+ROOTMETA=$(gc bd show "$ROOT" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -c '.[0].metadata // {}' 2>/dev/null || echo '{}')
+CLASSIFY_OUTCOME=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.classify_outcome"] // ""')
+CANDIDATES=$(printf '%s' "$ROOTMETA" | jq -c '.["sweep.candidates"] // empty | (if type == "string" then fromjson else . end)' 2>/dev/null || true)
+PR_LIVENESS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.pr_liveness"] // "unverified"')
+CONVOY_LIVENESS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.convoy_liveness"] // "unverified"')
+if [ "$CLASSIFY_OUTCOME" != "pass" ]; then HANDOFF_STATE=classify-failed
+elif [ -z "$CANDIDATES" ] || ! printf '%s' "$CANDIDATES" | jq -e 'type == "array"' >/dev/null 2>&1; then HANDOFF_STATE=unreadable
+else HANDOFF_STATE=ok; fi
+# <<< read-handoff
+```
+
+The two failure modes are now DISTINCT, which they were not when this step
+read a bare `gc.outcome` (bead tk-7uvm9 — the whole reason it exists):
+
+- `classify-failed` — classify never reached `pass` (a fail-safe abort on an
+  unreadable listing, or it never ran). Log "classify failed — normalizing
+  nothing"; this is a known transient under concurrent writes.
+- `unreadable` — classify reported `pass` but its handoff is gone or
+  malformed (`sweep.candidates` absent, or not a JSON array). Log "classify
+  passed but its handoff is UNREADABLE — normalizing nothing". This is a real
+  defect to notice, not a transient — say so in the log.
+
+Either way, close this step with `gc.outcome=fail` and stop — never normalize
+on absent or partial input:
+
+```bash
+if [ "$HANDOFF_STATE" != "ok" ]; then
+  gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=fail --status=closed
+  exit 0
+fi
+```
+
+`$CANDIDATES` is now the post-edge-check survivor set exactly as classify
+computed it — the same variable steps 2–5 already consume, unchanged.
+`$PR_LIVENESS` and `$CONVOY_LIVENESS` are the words classify recorded; both
+default to `unverified` if somehow unset — the report-don't-hide bias this
+whole file is built on.
+
+**1. Build the live listing fresh, then resolve the standing triage
+subject.** Unlike the survivor set, `$LIVE` is a point-in-time read that is
+correct to take now, not carry: the subject is a persistent bead, and step 3
+asks whether a visit is live *at this moment*, not in the population classify
+measured. So this step reads it fresh (its fail-safe mirrors classify's):
+
+```bash
+LIVE=$(mktemp)
+gc bd list --status=open,in_progress --json --limit=0 > "$LIVE"
+if ! jq -e 'type=="array"' "$LIVE" >/dev/null 2>&1; then
+  echo "normalize: live listing unreadable — nothing filed"
+  gc bd update <your-claimed-step-bead-id> --set-metadata gc.outcome=fail --status=closed
+  exit 0
+fi
+```
+
+The standing triage subject (one per rig; create on first run, idempotent —
+search `$LIVE` for it first) is also where this sweep keeps its only piece of
+state, the delta baseline:
 
 ```bash
 SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subject")
@@ -557,9 +665,17 @@ rather than relying on that, because a truthiness test ported to almost
 any other language would read the FIRST id in the baseline as a miss and
 re-report that one bead on every pass forever.
 
-**3. Skip if its visit is already live (open or held)** — if
-`$SWEEP_SUBJECT` appears in the live-visit continuation groups from the
-classify step, log
+**3. Skip if its visit is already live (open or held)** — recompute the
+live-visit continuation groups from `$LIVE` (built fresh in step 1, no longer
+inherited from classify) and check whether one already names `$SWEEP_SUBJECT`:
+
+```bash
+LIVE_VISIT=$(jq -r --arg s "$SWEEP_SUBJECT" '[.[] | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "")] | (index($s) // "") | tostring' "$LIVE")
+```
+
+`index` returns a position or null; position 0 (`"0"`) is a real hit and
+null coalesces to `""`, so a non-empty `$LIVE_VISIT` means a visit is live.
+If it is non-empty, log
 "batch visit already live; $CARRIED_COUNT candidates await it, $NEW_COUNT new since the last pass",
 close this step (`gc.outcome=pass`), done. Self-limiting: the backlog
 never costs more than one conversation. **Do not advance the baseline on

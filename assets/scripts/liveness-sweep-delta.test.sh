@@ -74,10 +74,14 @@ extract classify-candidates "$FORMULA" > "$TMP/classify.sh"
 extract sweep-delta         "$FORMULA" > "$TMP/delta.sh"
 extract open-prs            "$FORMULA" > "$TMP/openprs.sh"
 extract worked-via-convoy   "$FORMULA" > "$TMP/worked.sh"
+extract stamp-handoff       "$FORMULA" > "$TMP/stamp.sh"
+extract read-handoff        "$FORMULA" > "$TMP/read.sh"
 [ -s "$TMP/classify.sh" ] || { echo "no marked classify-candidates block"; exit 1; }
 [ -s "$TMP/delta.sh" ]    || { echo "no marked sweep-delta block"; exit 1; }
 [ -s "$TMP/openprs.sh" ]  || { echo "no marked open-prs block"; exit 1; }
 [ -s "$TMP/worked.sh" ]   || { echo "no marked worked-via-convoy block"; exit 1; }
+[ -s "$TMP/stamp.sh" ]    || { echo "no marked stamp-handoff block"; exit 1; }
+[ -s "$TMP/read.sh" ]     || { echo "no marked read-handoff block"; exit 1; }
 
 echo "── the extracted blocks are valid shell ──"
 bash -n "$TMP/classify.sh" && ok "classify-candidates: valid bash" \
@@ -88,6 +92,10 @@ bash -n "$TMP/openprs.sh" && ok "open-prs: valid bash" \
     || bad "open-prs: valid bash" "bash -n failed"
 bash -n "$TMP/worked.sh" && ok "worked-via-convoy: valid bash" \
     || bad "worked-via-convoy: valid bash" "bash -n failed"
+bash -n "$TMP/stamp.sh" && ok "stamp-handoff: valid bash" \
+    || bad "stamp-handoff: valid bash" "bash -n failed"
+bash -n "$TMP/read.sh" && ok "read-handoff: valid bash" \
+    || bad "read-handoff: valid bash" "bash -n failed"
 
 # The blocks live inside a TOML `"""` string, so TOML consumes escapes before an
 # agent ever sees them: a trailing backslash joins two lines, backslash-n becomes
@@ -101,7 +109,7 @@ bash -n "$TMP/worked.sh" && ok "worked-via-convoy: valid bash" \
 echo "── the formula parses as TOML and the blocks survive it unchanged ──"
 python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$FORMULA" 2>/dev/null \
     && ok "formula parses as TOML" || bad "formula parses as TOML" "tomllib rejected it"
-for blk in classify.sh delta.sh openprs.sh worked.sh; do
+for blk in classify.sh delta.sh openprs.sh worked.sh stamp.sh read.sh; do
     grep -q '[\]' "$TMP/$blk" \
         && bad "${blk%.sh}: no backslash (TOML would eat it)" "found a backslash" \
         || ok "${blk%.sh}: no backslash (TOML would eat it)"
@@ -397,6 +405,100 @@ ERRX_WVC_OK="$(ALIVE="$TMP/alive.json" CONVOY_DIR="$TMP/convoys" PATH="$TMP/bin:
     bash -e -c "$ERRX_WVC" _ "$TMP/worked.sh" 2>/dev/null)"
 eq "$ERRX_WVC_OK" "verified" "…and a healthy read runs to completion under 'set -e' too"
 
+# --- the classify→normalize handoff (bead tk-7uvm9) --------------------------
+# classify and normalize are separate step beads and the pool re-offers each, so
+# NO shell state crosses between them: classify stamps the post-edge-check
+# survivors + both liveness words + its outcome on the ROOT bead, and normalize
+# reads them back via its own gc.root_bead_id. These two blocks are that
+# contract; before it, normalize inherited $CANDIDATES/$PR_LIVENESS from a shell
+# it did not share and a fresh session had nothing to read.
+echo "── stamp-handoff derives survivors = candidates − edge-drops and stamps the root ──"
+# A gc stub that CAPTURES `bd update <root> --set-metadata …` so the stamp itself
+# can be asserted. stamp-handoff takes the root from $ROOT (set in prose from the
+# step bead's gc.root_bead_id), so no `bd show` is needed here.
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gc" <<'GC'
+#!/usr/bin/env bash
+if [ "$1" = "bd" ] && [ "$2" = "update" ]; then
+    shift 2
+    printf '%s\n' "$@" >> "$STAMP_CAP"
+    exit 0
+fi
+exit 0
+GC
+chmod +x "$TMP/bin/gc"
+PATH="$TMP/bin:$PATH"; export PATH
+STAMP_CAP="$TMP/stamp-cap.txt"; export STAMP_CAP
+: > "$STAMP_CAP"
+
+ROOT="tk-root"; export ROOT
+CANDIDATES="$(jq -nc '[{id:"s-1",title:"one",type:"bug"},{id:"s-2",title:"two",type:"task"},{id:"s-3",title:"three — dropped by the edge check",type:"epic"}]')"
+export CANDIDATES
+PR_LIVENESS="verified"; CONVOY_LIVENESS="none"; export PR_LIVENESS CONVOY_LIVENESS
+EDGE_DROPS="s-3"; export EDGE_DROPS
+# shellcheck disable=SC1090
+. "$TMP/stamp.sh"
+eq "$(printf '%s' "$SURVIVORS" | jq -r '[.[].id] | join(",")')" "s-1,s-2" \
+   "the edge-check drop (s-3) is removed; s-1 and s-2 survive"
+has "the stamp carries the survivor candidates" "sweep.candidates=[" "$STAMP_CAP"
+has "the stamp carries pr liveness"     "sweep.pr_liveness=verified"   "$STAMP_CAP"
+has "the stamp carries convoy liveness" "sweep.convoy_liveness=none"   "$STAMP_CAP"
+has "the stamp records the pass outcome" "sweep.classify_outcome=pass" "$STAMP_CAP"
+
+echo "── stamp-handoff with no edge drops keeps every candidate ──"
+EDGE_DROPS=""; export EDGE_DROPS
+# shellcheck disable=SC1090
+. "$TMP/stamp.sh"
+eq "$(printf '%s' "$SURVIVORS" | jq -r '[.[].id] | join(",")')" "s-1,s-2,s-3" \
+   "empty EDGE_DROPS → the survivor set is the full candidate set"
+
+echo "── a malformed survivor set refuses to stamp (fail-closed, no partial handoff) ──"
+( CANDIDATES='not json' EDGE_DROPS="" ROOT="tk-root" \
+    bash -c '. "$1"' _ "$TMP/stamp.sh" >/dev/null 2>&1 ) \
+  && bad "malformed CANDIDATES aborts the stamp" "block exited 0 on non-array input" \
+  || ok "malformed CANDIDATES aborts the stamp"
+
+echo "── read-handoff reads the survivor set and liveness words back from the root ──"
+# A gc stub answering `gc bd show <root> --json` from $FAKE_ROOT — the raw
+# payload, so a case can inject a missing key or the exact shape bd stores: a
+# JSON-valued metadata is a STRING holding escaped JSON (verified against the
+# live store), so the survivor array must survive a string → fromjson round-trip.
+cat > "$TMP/bin/gc" <<'GC'
+#!/usr/bin/env bash
+[ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
+printf '%s\n' "${FAKE_ROOT:-[]}"
+GC
+chmod +x "$TMP/bin/gc"
+ROOT="tk-root"; export ROOT
+CANDS_JSON='[{"id":"s-1","title":"one","type":"bug"},{"id":"s-2","title":"two","type":"task"}]'
+FAKE_ROOT="$(jq -nc --arg c "$CANDS_JSON" '[{"metadata":{"sweep.classify_outcome":"pass","sweep.candidates":$c,"sweep.pr_liveness":"unverified","sweep.convoy_liveness":"verified"}}]')"
+export FAKE_ROOT
+# shellcheck disable=SC1090
+. "$TMP/read.sh"
+eq "$HANDOFF_STATE" "ok" "a pass with a readable JSON-string survivor set → ok"
+eq "$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | join(",")')" "s-1,s-2" \
+   "the survivor set is recovered as an array (bd stores it as a string → fromjson)"
+eq "$PR_LIVENESS" "unverified" "the pr liveness word is read back"
+eq "$CONVOY_LIVENESS" "verified" "the convoy liveness word is read back"
+
+echo "── read-handoff distinguishes classify-failed from an unreadable handoff ──"
+FAKE_ROOT="$(jq -nc '[{"metadata":{"sweep.classify_outcome":"fail"}}]')"; export FAKE_ROOT
+# shellcheck disable=SC1090
+. "$TMP/read.sh"
+eq "$HANDOFF_STATE" "classify-failed" "outcome != pass → classify-failed (a known transient)"
+# The distinct branch the bead exists for: classify SAID pass but the survivor
+# stamp is gone — the old bare-outcome read could not tell this from a clean run.
+FAKE_ROOT="$(jq -nc '[{"metadata":{"sweep.classify_outcome":"pass"}}]')"; export FAKE_ROOT
+# shellcheck disable=SC1090
+. "$TMP/read.sh"
+eq "$HANDOFF_STATE" "unreadable" "outcome=pass but sweep.candidates absent → unreadable, not ok"
+eq "$PR_LIVENESS" "unverified" "an absent liveness word defaults to unverified (report, don't hide)"
+# outcome=pass but the stamp is present-but-not-an-array (corruption/truncation).
+FAKE_ROOT="$(jq -nc '[{"metadata":{"sweep.classify_outcome":"pass","sweep.candidates":"{not an array"}}]')"; export FAKE_ROOT
+# shellcheck disable=SC1090
+. "$TMP/read.sh"
+eq "$HANDOFF_STATE" "unreadable" "outcome=pass but the survivor stamp is unparseable → unreadable"
+
 # --- 2. the delta split ------------------------------------------------------
 # `gc` stub: the one read the block performs (gc bd show <subject> --json).
 # FAKE_SUBJECT is the raw payload, so a case can inject a missing baseline or a
@@ -534,6 +636,18 @@ has "the husk requires a live namer"          'LIVE NAMER'          "$FORMULA"
 has "a tracks edge alone is not coverage"     'not itself coverage' "$FORMULA"
 # shellcheck disable=SC2016
 has "unverified convoy liveness is disclosed" '`$CONVOY_LIVENESS` is `unverified`' "$FORMULA"
+
+# The classify→normalize handoff (bead tk-7uvm9): shell state does not cross a
+# step-bead boundary, so classify stamps the survivor set on the ROOT bead and
+# normalize reads it back via its own gc.root_bead_id, fail-closed and able to
+# tell a classify that failed from one whose output is unreadable.
+echo "── the classify→normalize handoff is machine state on the root, not prose ──"
+has "the handoff rides the root bead"             'gc.root_bead_id'         "$FORMULA"
+has "the survivor set is stamped as metadata"     'sweep.candidates'        "$FORMULA"
+has "classify stamps its outcome for normalize"   'sweep.classify_outcome'  "$FORMULA"
+has "the stamp precedes the step close"           'AFTER the stamp above'   "$FORMULA"
+has "normalize distinguishes an unreadable handoff" 'UNREADABLE'            "$FORMULA"
+has "normalize reads the live listing fresh"      'built fresh in step 1'   "$FORMULA"
 
 echo
 echo "liveness-sweep-delta: $PASS passed, $FAIL failed"
