@@ -1383,9 +1383,107 @@ merge skill lands it once the conflict clears — or configure the pool." >/dev/
     # already routed and independently linked by source_anchor_bead + pr_number.
     gc bd dep add "$FIX_BEAD" "$id" -t parent-child >/dev/null 2>&1 \
       || echo "reconcile-merged-prs: WARN could not link rebase $FIX_BEAD under anchor $id" >&2
-    gc bd update "$id" \
-      --set-metadata stale_base_head="${head_oid:-unknown}" \
-      --set-metadata blocked_reason="PR#$num conflicts with base '$base' (stale base) at head ${head_oid:-unknown}; rebase $FIX_BEAD routed to $pool" >/dev/null 2>&1
+    # --- Arm the child, or leave it inert. -------------------------------------
+    # The stamped fields ARE the work order: branch/target say WHAT to rebase,
+    # existing_pr/pr_url/pr_number say to rework THAT PR instead of opening a
+    # second one, source_anchor_bead names the gating anchor, rejection_reason
+    # carries the rebase-do-not-redo instruction, and the route says who claims
+    # it. The stamp above is nonfatal by design, so a dropped write leaves the
+    # child carrying NONE of it — and a sling would attach mol-polecat-work to
+    # that bead anyway, handing a polecat something that reads like ordinary new
+    # work: it would branch fresh, open a second PR, or rebase onto the wrong
+    # target (review tk-c9rh7 finding 1). An unstamped child sitting inert is a
+    # bounded orphan; runnable demand over a malformed work order is a force-push
+    # in the wrong place. So READ THE STAMP BACK and arm only on a complete one —
+    # the same write-then-read-back rule as arm_stale_gate, for the same reason:
+    # `gc bd update` reporting success is not proof the write is durable.
+    #
+    # The route is the one field allowed to be missing-because-consumed: a claim
+    # CONSUMES gc.routed_to, and a polecat that picked the child up between the
+    # write and this read has already made it reachable (that is how a
+    # cascade-blocked child gets worked at all on a busy pool). So it is the same
+    # assignee-or-route test arm_stale_gate applies, not a bare equality.
+    #
+    # jq prints the literal "ok" when nothing is missing, so an unreadable bead
+    # (empty output, failed parse) cannot masquerade as a complete stamp by
+    # producing the same empty string a clean check would.
+    fix_row=$(gc bd show "$FIX_BEAD" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037')
+    fix_missing=$(printf '%s' "$fix_row" \
+      | jq -r --arg branch "$fix_branch" --arg target "$base" --arg pr "$pr_url" \
+              --arg num "$num" --arg anchor "$id" --arg pool "$pool" '
+          (.[0] // {}) as $b | ($b.metadata // {}) as $m | [
+            (if ($m.branch // "") == $branch then empty else "branch" end),
+            (if ($m.target // "") == $target then empty else "target" end),
+            (if ($m.existing_pr // "") == $pr then empty else "existing_pr" end),
+            (if ($m.pr_url // "") == $pr then empty else "pr_url" end),
+            (if (($m.pr_number // "") | tostring) == $num then empty else "pr_number" end),
+            (if ($m.source_anchor_bead // "") == $anchor then empty else "source_anchor_bead" end),
+            (if ($m.rejection_reason // "") != "" then empty else "rejection_reason" end),
+            (if (($m["gc.routed_to"] // "") == $pool) or (($b.assignee // "") != "")
+             then empty else "gc.routed_to" end)
+          ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
+    unarmed=""; sling_root=""; root_route=""; sling_rc=0
+    [ "$fix_missing" = "ok" ] || unarmed="child work order incomplete (${fix_missing:-unreadable})"
+    if [ -z "$unarmed" ]; then
+      gc bd update "$id" \
+        --set-metadata stale_base_head="${head_oid:-unknown}" \
+        --set-metadata blocked_reason="PR#$num conflicts with base '$base' (stale base) at head ${head_oid:-unknown}; rebase $FIX_BEAD routed to $pool" >/dev/null 2>&1
+      # DISPATCH the rebase. The parent-child edge above makes the child inherit the
+      # anchor's is_blocked (the anchor stays gating/open while the rebase runs), so it
+      # drops out of `bd ready`: gc.routed_to alone never self-spawns a pool and the
+      # wake below is a no-op on an idle pool (tk-7xvz5). `gc sling` mints a PARENTLESS
+      # mol-polecat-work root carrying the ready demand; the parent edge stays for
+      # visibility. Canonical dep-add-then-sling (convoy-integration-branch.template.md).
+      # Verified the same way as everything else here: the exit status, and — when the
+      # sling names the root it minted — that root reading back with the pool route
+      # that is what makes it ready demand.
+      sling_json=$(gc sling "$pool" "$FIX_BEAD" --json 2>/dev/null)
+      sling_rc=$?
+      sling_root=$(printf '%s' "$sling_json" | jq -r '.workflow_id // .molecule_id // empty' 2>/dev/null)
+      if [ "$sling_rc" -ne 0 ]; then
+        unarmed="gc sling to $pool failed (rc=$sling_rc)"
+      elif [ -n "$sling_root" ]; then
+        root_route=$(gc bd show "$sling_root" --json 2>/dev/null \
+          | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+        [ "$root_route" = "$pool" ] \
+          || unarmed="sling root $sling_root is not routed to $pool (read back '${root_route:-}')"
+      fi
+    fi
+    if [ -n "$unarmed" ]; then
+      # Filed, linked, and NOT dispatched. Nothing offers this child: it is a
+      # parent-child descendant of a still-open anchor, so it inherits the block
+      # and never reaches `bd ready`, and the arm will not file another for this
+      # head. Bound + escalate exactly like the no-pool arm above — the marker
+      # stops a fresh orphan every wake, blocked_reason + gc.routed_to=human say
+      # why in-band, and the mail names the one command that repairs it. The child
+      # stays OPEN under the anchor, so the merge hold still holds; what the
+      # escalation removes is the silence, not the hold.
+      gc bd update "$id" \
+        --set-metadata stale_base_head="${head_oid:-unknown}" \
+        --set-metadata gc.routed_to=human \
+        --set-metadata blocked_reason="PR#$num conflicts with base '$base' (stale base) at head ${head_oid:-unknown}; rebase $FIX_BEAD filed but NOT dispatched ($unarmed)" >/dev/null 2>&1
+      if gc mail send mayor/ -s "ESCALATION: rebase $FIX_BEAD for PR#$num filed but not dispatched" \
+           -m "Gating anchor $id is parked on PR#$num, which cannot merge: it conflicts with its
+base '$base' (mergeable='${mergeable:-?}', mergeStateStatus='${merge_state:-?}'),
+typically because the base branch was rewritten under it.
+
+Rebase child $FIX_BEAD was filed and linked under the anchor, but it was NOT
+dispatched: $unarmed.
+
+That child is inert. It is a parent-child descendant of this still-open anchor, so
+it inherits the anchor's blocked status and never appears in 'bd ready' —
+gc.routed_to alone cannot self-spawn a polecat on an idle pool (tk-7xvz5) — and the
+stale_base_head marker stops this pass filing another one for the same head. So the
+PR sits until a human acts.
+
+Repair — check the child's work order, then dispatch it:
+  gc bd show $FIX_BEAD --json | jq '.[0].metadata'
+  gc sling $pool $FIX_BEAD" >/dev/null 2>&1; then
+        escalated=$((escalated + 1))
+      fi
+      echo "reconcile-merged-prs: $id — PR#$num conflicted (stale base); rebase $FIX_BEAD filed but NOT dispatched ($unarmed); routed to human + escalated" >&2
+      continue
+    fi
     gc session wake "$pool" >/dev/null 2>&1 || true
     rebased=$((rebased + 1))
     echo "reconcile-merged-prs: $id — PR#$num conflicts with '$base' (stale base); filed rebase $FIX_BEAD routed to $pool"

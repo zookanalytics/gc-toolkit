@@ -343,7 +343,7 @@ printf '%s\n' \
 
 : > "$TMP/closed"; : > "$TMP/abandoned"; : > "$TMP/retargeted"; : > "$TMP/mailbody"
 : > "$TMP/automerge"; : > "$TMP/mail"; : > "$TMP/closelog"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/blocked"
 
 # Rework/review children referencing a PR (the merge skill's in-flight set; the
@@ -689,6 +689,18 @@ if [ "$1" = "session" ]; then
   [ "${2:-}" = "wake" ] && printf '%s\n' "${3:-}" >> "$FAKE_WAKES"
   exit 0
 fi
+if [ "$1" = "sling" ]; then
+  # `gc sling <pool> <bead>` — record the whole invocation so assertions can match
+  # both the routed bead and the pool regardless of any future flag ordering.
+  #
+  # FAKE_SLING_ROOT is the workflow root the real `gc sling --json` reports; unset
+  # models a gc that names none, where the exit status is the only evidence there
+  # is. FAKE_SLING_RC makes the dispatch fail outright.
+  shift; printf '%s\n' "$*" >> "$FAKE_SLINGS"
+  [ -n "${FAKE_SLING_ROOT:-}" ] \
+    && printf '{"schema_version":"1","success":true,"workflow_id":"%s"}\n' "$FAKE_SLING_ROOT"
+  exit "${FAKE_SLING_RC:-0}"
+fi
 [ "$1" = "bd" ] || exit 0
 case "$2" in
   list)
@@ -1012,6 +1024,15 @@ case "$2" in
     if [ -n "${FAKE_ROUTE_FAIL:-}" ] && grep -q "gc.routed_to=$FAKE_ROUTE_FAIL" <<< "$*"; then
       exit 1
     fi
+    # FAKE_STAMP_FAIL drops the rebase child's WORK ORDER: the batched write that
+    # carries source_anchor_bead persists nothing and reports failure — the exact
+    # nonfatal loss the arm's `|| echo WARN` path already tolerates. The child then
+    # reads back with no branch/target/PR keys, which is the malformed bead the
+    # dispatch must refuse to arm rather than hand a polecat as ordinary new work
+    # (review tk-c9rh7 finding 1). Scoped to the one run that sets it.
+    if [ -n "${FAKE_STAMP_FAIL:-}" ] && grep -q 'source_anchor_bead=' <<< "$*"; then
+      exit 1
+    fi
     # A signoff_dismissed write on FAKE_MARK_NOT_DURABLE's bead reports SUCCESS
     # and stores nothing — the failure an exit-status check cannot see, and the
     # reason that write is read back. Scoped to one bead so the other anchors in
@@ -1118,6 +1139,15 @@ case "$2" in
     # An id in $FAKE_SHOW_FAIL answers with NOTHING — the unreadable-bead case the
     # pre-dismissal re-read must treat as unsafe rather than as "no hold set".
     case " ${FAKE_SHOW_FAIL:-} " in *" $sid "*) exit 0 ;; esac
+    # The workflow ROOT a sling minted is not a ledger bead any fixture describes;
+    # it answers with the one field the dispatch verifies — the route that makes it
+    # ready demand. Empty models the failure an exit status cannot see: the sling
+    # reported success and produced a root nobody is offered.
+    case " ${FAKE_SLING_ROOT:-} " in
+      *" $sid "*)
+        printf '[{"id":"%s","metadata":{"gc.routed_to":"%s"}}]\n' "$sid" "${FAKE_ROOT_ROUTE:-}"
+        exit 0 ;;
+    esac
     slog=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "$FAKE_UPDATES" 2>/dev/null)
     ab=$(printf '%s\n' "$slog" | grep -o 'anchor_bead=[^ ]*' | tail -1 | sed 's/anchor_bead=//')
     tk=$(printf '%s\n' "$slog" | grep -o 'task_kind=[^ ]*' | tail -1 | sed 's/task_kind=//')
@@ -1139,6 +1169,21 @@ case "$2" in
     # update log: the gate reads it BEFORE the close, so it is pre-existing bead
     # state a fixture seeds, not something a pass under test writes.
     dc=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "${FAKE_DOCTOR_CHECK:-/dev/null}" 2>/dev/null | tail -1)
+    # The rebase child's WORK ORDER, replayed from the update log the same way. The
+    # conflict arm reads these back before it arms the child (review tk-c9rh7
+    # finding 1): the stamp is nonfatal, so a dropped write has to be VISIBLE here
+    # as a missing field — which is precisely what a value that never reached the
+    # log is. Each key is matched WITH its `--set-metadata ` prefix so none can
+    # swallow another as a substring (source_anchor_bead vs anchor_bead,
+    # merged_target vs target). Values read to the first space, which is all the
+    # arm needs: rejection_reason is only tested for non-emptiness.
+    meta_last() {
+      printf '%s\n' "$slog" | grep -o -- "--set-metadata $1=[^ ]*" | tail -1 | sed "s/.*$1=//"
+    }
+    u_branch=$(meta_last branch);          u_target=$(meta_last target)
+    u_existing=$(meta_last existing_pr);   u_prurl=$(meta_last pr_url)
+    u_prnum=$(meta_last pr_number);        u_srcanchor=$(meta_last source_anchor_bead)
+    u_reason=$(meta_last rejection_reason)
     # A GATING ANCHOR also answers with its live gating state — status, pr_number,
     # merge_result, check.codex, merge_hold — because the retraction arm re-reads
     # the anchor immediately before the irreversible dismissal and requires it to
@@ -1190,8 +1235,18 @@ case "$2" in
         *)           prkey_json=$(printf '"%s":"%s"' "$s_key" "$s_pr") ;;
       esac
     fi
-    printf '[{"id":"%s","status":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s","review_pool":"%s","signoff_dismissed":"%s","doctor_check":"%s",%s"merged_target":"%s","pr_url":"%s","branch":"%s","merge_result":"%s","check.codex":"%s","merge_hold":"%s"}}]\n' \
-      "$sid" "$s_status" "$ab" "$tk" "$rt" "$rp" "$sd" "$dc" \
+    # A bead with no fixture row is not an anchor — it is the rebase child, whose
+    # branch and pr_url live in the update log rather than in $FAKE_ANCHORS. Its
+    # pr_number goes in through the same prkey slot the anchors use, so the object
+    # never carries the key twice.
+    if [ -z "$s_found" ]; then
+      s_branch="$u_branch"; s_prurl="$u_prurl"
+      [ -z "$u_prnum" ] || prkey_json=$(printf '"pr_number":"%s"' "$u_prnum")
+    fi
+    childjson=$(printf '"target":"%s","existing_pr":"%s","source_anchor_bead":"%s","rejection_reason":"%s"' \
+      "$u_target" "$u_existing" "$u_srcanchor" "$u_reason")
+    printf '[{"id":"%s","status":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s","review_pool":"%s","signoff_dismissed":"%s","doctor_check":"%s",%s,%s"merged_target":"%s","pr_url":"%s","branch":"%s","merge_result":"%s","check.codex":"%s","merge_hold":"%s"}}]\n' \
+      "$sid" "$s_status" "$ab" "$tk" "$rt" "$rp" "$sd" "$dc" "$childjson" \
       "${prkey_json:+$prkey_json,}" "$s_target" "$s_prurl" "$s_branch" "$s_result" "$s_mark" "$s_hold" ;;
 esac
 exit 0
@@ -1204,7 +1259,7 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_RETARGETED="$TMP/retargeted" \
        FAKE_AUTOMERGE="$TMP/automerge" FAKE_MAIL="$TMP/mail" FAKE_CLOSELOG="$TMP/closelog" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
-       FAKE_WAKES="$TMP/wakes" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
+       FAKE_WAKES="$TMP/wakes" FAKE_SLINGS="$TMP/slings" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
        FAKE_BLOCKED="$TMP/blocked" \
        FAKE_REVIEWS="$TMP/reviews" FAKE_DISMISSED="$TMP/dismissed" \
@@ -1298,6 +1353,13 @@ grep -q 'fix-1 bead-J' "$TMP/deps" \
   || bad "(9) rebase child linked parent-child under the anchor (got: $(cat "$TMP/deps"))"
 grep -qx "$FIX_POOL" "$TMP/wakes" && ok "(9) fix pool woken for the rebase" \
                                   || bad "(9) fix pool woken for the rebase"
+# The rebase child is a parent-child child of the still-open (blocked) anchor, so it
+# inherits is_blocked and drops out of `bd ready`: routing + waking alone never
+# self-spawn an idle pool (tk-7xvz5). It MUST also be slung so a parentless
+# mol-polecat-work root carries the ready demand.
+{ grep -q 'fix-1' "$TMP/slings" && grep -q "$FIX_POOL" "$TMP/slings"; } \
+  && ok "(9) rebase child SLUNG to the fix pool (parentless root -> ready demand)" \
+  || bad "(9) rebase child must be slung, not just routed+woken (got: $(cat "$TMP/slings"))"
 eq "$(grep -c 'PR#210' "$TMP/mail")" "0" "(9) a routable conflict does not escalate to mayor"
 
 # (10) a rework/review child is already open for PR#211 -> do not race it.
@@ -1622,6 +1684,91 @@ hasin "$M_UPDATES" 'gc.routed_to=human' \
   && ok "(9) no fix pool -> anchor routed to human" \
   || bad "(9) no fix pool -> anchor routed to human (got: $M_UPDATES)"
 
+# --- Runs 4b-4e: a child is ARMED only when the dispatch really produced -----
+# runnable demand (review tk-c9rh7 finding 1).
+#
+# The child's routing fields ARE its work order, and the write that stamps them is
+# nonfatal by design. Dropped, the child reads back with no branch, no target and
+# no PR — and slinging THAT attaches mol-polecat-work to a bead a polecat would
+# work as ordinary NEW work: a fresh branch, a second PR, or a rebase onto the
+# wrong target. Inert is the safe state for a malformed work order; runnable
+# demand is not. The same rule covers the dispatch itself: a sling that failed, or
+# that produced a root nobody is routed to, has armed nothing, and saying so in
+# the ledger is what keeps the anchor from sitting silently.
+#
+# Each run re-arms the conflict arm the way Run 3 did — drop the in-flight child
+# row and move the head, since stale_base_head bounds one dispatch per head. The
+# sling/wake sinks are reset here because these cases count dispatches; the next
+# reader of either sink is Run 24, past its own reset.
+: > "$TMP/slings"; : > "$TMP/wakes"
+rearm_210() { # <new-head>
+  awk -F'\t' '$1 != "210"' "$TMP/children" > "$TMP/children.next"
+  mv "$TMP/children.next" "$TMP/children"
+  sed "s/^210|\(.*\)|head210[a-z]*|/210|\1|$1|/" "$TMP/prs" > "$TMP/prs.next"
+  mv "$TMP/prs.next" "$TMP/prs"
+}
+
+# (9b) the work-order stamp is DROPPED -> file it, leave it inert, escalate.
+rearm_210 head210c
+CREATED_BEFORE=$(grep -c 'Rebase PR#210' "$TMP/created" || true)
+OUT9B="$(FAKE_STAMP_FAIL=1 bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>&1)"
+eq "$(grep -c 'Rebase PR#210' "$TMP/created")" "$((CREATED_BEFORE + 1))" \
+   "(9b) dropped work order -> the child is still filed (it is the record of the stall)"
+eq "$(wc -l < "$TMP/slings" | tr -d ' ')" "0" \
+   "(9b) dropped work order -> NOT slung (no runnable demand over a malformed bead)"
+hasin "$OUT9B" 'filed but NOT dispatched (child work order incomplete' \
+  && ok "(9b) dropped work order -> reported, naming the missing fields" \
+  || bad "(9b) dropped work order -> must report what was missing (got: $OUT9B)"
+eq "$(grep -c 'filed but not dispatched' "$TMP/mail")" "1" \
+   "(9b) dropped work order -> escalated to mayor once"
+J_UNARMED=$(grep '^bead-J' "$TMP/updates" | tail -1 || true)
+hasin "$J_UNARMED" 'gc.routed_to=human' \
+  && ok "(9b) dropped work order -> anchor routed to human" \
+  || bad "(9b) dropped work order -> anchor routed to human (got: $J_UNARMED)"
+hasin "$J_UNARMED" 'stale_base_head=head210c' \
+  && ok "(9b) dropped work order -> marker still bounds the arm to one child per head" \
+  || bad "(9b) dropped work order -> marker still stamped (got: $J_UNARMED)"
+
+# (9c) a complete work order, and the sling FAILS. The attempt happens; only its
+# result differs, and the failure must not be a log line nobody reads.
+rearm_210 head210d
+: > "$TMP/slings"; : > "$TMP/wakes"
+OUT9C="$(FAKE_SLING_RC=1 bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>&1)"
+eq "$(wc -l < "$TMP/slings" | tr -d ' ')" "1" \
+   "(9c) complete work order -> the sling IS attempted"
+eq "$(wc -l < "$TMP/wakes" | tr -d ' ')" "0" \
+   "(9c) failed sling -> pool NOT woken (nothing is ready to claim)"
+hasin "$OUT9C" 'filed but NOT dispatched (gc sling to' \
+  && ok "(9c) failed sling -> reported as undispatched" \
+  || bad "(9c) failed sling -> must report the failed dispatch (got: $OUT9C)"
+eq "$(grep -c 'filed but not dispatched' "$TMP/mail")" "2" \
+   "(9c) failed sling -> escalated rather than logged and forgotten"
+
+# (9d) the sling reports SUCCESS and mints a root nothing is routed to — the
+# failure an exit status cannot see, and the reason the root is read back.
+rearm_210 head210e
+: > "$TMP/slings"; : > "$TMP/wakes"
+OUT9D="$(FAKE_SLING_ROOT=wf-9 FAKE_ROOT_ROUTE='' bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>&1)"
+hasin "$OUT9D" 'is not routed to' \
+  && ok "(9d) unrouted sling root -> caught by the read-back, not the exit code" \
+  || bad "(9d) unrouted sling root -> must be caught (got: $OUT9D)"
+eq "$(wc -l < "$TMP/wakes" | tr -d ' ')" "0" "(9d) unrouted sling root -> pool NOT woken"
+eq "$(grep -c 'filed but not dispatched' "$TMP/mail")" "3" \
+   "(9d) unrouted sling root -> escalated"
+
+# (9e) positive control: the root reads back carrying the pool route, so the child
+# IS armed — the read-back must not reject a dispatch that really took.
+rearm_210 head210f
+: > "$TMP/slings"; : > "$TMP/wakes"
+OUT9E="$(FAKE_SLING_ROOT=wf-10 FAKE_ROOT_ROUTE="$FIX_POOL" bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>&1)"
+hasin "$OUT9E" "filed rebase .* routed to $FIX_POOL" \
+  && ok "(9e) root routed to the pool -> armed and reported as dispatched" \
+  || bad "(9e) root routed to the pool -> must arm (got: $OUT9E)"
+eq "$(grep -qx "$FIX_POOL" "$TMP/wakes" && echo yes || echo no)" "yes" \
+   "(9e) armed dispatch wakes the fix pool"
+eq "$(grep -c 'filed but not dispatched' "$TMP/mail")" "3" \
+   "(9e) armed dispatch escalates nothing"
+
 # --- Run 5: zero gating anchors must NOT short-circuit the anchorless scan. ---
 # Before the anchorless arm this pass returned early on an empty gating set. That
 # is the worst possible place to go blind: zero live anchors WITH open PRs is
@@ -1753,7 +1900,7 @@ printf '%s\n' \
   '222|OPEN||false||main|polecat/bead-V|head222|MERGEABLE|BLOCKED' \
   > "$TMP/prs"
 printf '222\tchild-V\n' > "$TMP/children"       # bead-V already has an open review child
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 OUT8="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
 
@@ -1891,7 +2038,7 @@ hasin "$OUT10" '1 stale-gate re-reviews held' \
 # pass stamped stale_gate_head=head223, so this pass hit the one-per-head guard and
 # skipped forever — recreating the exact silent hold the whole arm exists to heal.
 # (Continues from Run 10: gatenopool carries the head223 hold marker; NOT reset.)
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 OUT11="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
 eq "$(grep -c 'Review PR#223' "$TMP/created")" "1" \
    "(29) no-pool hold + review pool configured later -> re-review dispatched at the same head (not suppressed)"
@@ -1924,7 +2071,7 @@ hasin "$OUT11" '1 stale-gate re-reviews routed' \
 # the in-flight probe re-routes an unrouted review for the anchor on a later pass.
 printf '%s\n' 'bead-X|224|main|||codex|green@old224' > "$TMP/anchors"
 printf '%s\n' '224|OPEN||false||main|polecat/bead-X|head224|MERGEABLE|BLOCKED' > "$TMP/prs"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 
 # Pass A: the route write to the review pool is dropped in flight.
@@ -1978,7 +2125,7 @@ grep -qx "$REVIEW_POOL" "$TMP/wakes" \
 # re-enters. Same terminal strand as tk-3xy37, reached through the other field.
 printf '%s\n' 'bead-XP|225|main|||codex|green@old225' > "$TMP/anchors"
 printf '%s\n' '225|OPEN||false||main|polecat/bead-XP|head225|MERGEABLE|BLOCKED' > "$TMP/prs"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 
 # Pass A: the live half lands, the durable half is dropped, the call SUCCEEDS.
@@ -2032,7 +2179,7 @@ hasin "$OUT12D" '1 stale-gate re-reviews routed' \
 # one. The repair predicate has to be the exact negation of the arming one.
 printf '%s\n' 'bead-XW|226|main|||codex|green@old226' > "$TMP/anchors"
 printf '%s\n' '226|OPEN||false||main|polecat/bead-XW|head226|MERGEABLE|BLOCKED' > "$TMP/prs"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/children"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 
 # Pass A: the durable half lands, the live half persists as a DIFFERENT pool.
@@ -2193,7 +2340,7 @@ printf '%s\n' \
 # PR 247's head moves between the pass's snapshot and the dismissal call.
 printf '%s\n' '247|newhead247' > "$TMP/headmove"
 printf '0' > "$TMP/amreads"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"; : > "$TMP/dismissed"
 # Both streams are asserted below, and they carry different things on purpose:
 # a HELD retraction with a routine, expected cause (merge_hold — an operator
@@ -2514,7 +2661,7 @@ printf '%s\n' \
   '261|OPEN||false||main|polecat/bead-LC2|head261|MERGEABLE|BLOCKED|CHANGES_REQUESTED|' \
   > "$TMP/prs"
 printf '%s\n' '261|9981|zook-bot|CHANGES_REQUESTED|deadcommit261|1' > "$TMP/reviews"
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"; : > "$TMP/dismissed"
 : > "$TMP/children"; : > "$TMP/headmove"; printf '0' > "$TMP/amreads"
 OUT14="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" 2>/dev/null)"
@@ -2630,7 +2777,7 @@ eq "$(lhl_probe '' '7')"                      "no"  "(58) an empty haystack neve
 # hand. That is the point — the retraction is scoped by matching the text its own
 # arm writes, and a hand-copied fixture would keep passing after the two drifted
 # apart, which is the one failure this pair of arms can have.
-: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"
+: > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/staled"; : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/blocked"
 : > "$TMP/children"; : > "$TMP/openprs"; : > "$TMP/mail"; : > "$TMP/reviews"
 
