@@ -127,6 +127,14 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-pr-closed","title":"rejected — PR closed unmerged, needs a sitting","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"999","pr_url":"https://github.com/zookanalytics/signal-loom/pull/999"}},
   {"id":"c-pr-otherrepo","title":"number 521 — but in a different repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
   {"id":"c-pr-nourl","title":"marker but no pr_url to check liveness against","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521"}},
+  {"id":"c-preopen-green","title":"pre-open, codex green, review closed — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green@756d5d7d3"}},
+  {"id":"c-preopen-multigreen","title":"pre-open, two gates both green (spaced list)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci","check.codex":"green@aa11","check.ci":"green@aa11"}},
+  {"id":"c-preopen-approval","title":"pre-open, codex green + non-marker approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval","check.codex":"green@bb22"}},
+  {"id":"c-preopen-fixable","title":"pre-open, fixable verdict, nothing in flight — genuinely stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"fixable@4b366f6f"}},
+  {"id":"c-preopen-partial","title":"pre-open, two gates but one marker absent","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci","check.codex":"green@cc33"}},
+  {"id":"c-preopen-nomarker","title":"pre-open, check_set names codex but no marker at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+  {"id":"c-preopen-noset","title":"pre-open, green marker but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check.codex":"green@dd44"}},
+  {"id":"c-preopen-none","title":"pre-open, check_set=none opt-out — no positive green evidence","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"none"}},
   {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator may take a different direction","triage.hold_by":"operator"}},
   {"id":"c-hold-bare","title":"held, but the stamp names no reason","issue_type":"task","metadata":{"triage.hold":"true"}},
   {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}},
@@ -221,7 +229,7 @@ SURVIVORS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
 
 echo "── classify keeps only genuinely unnamed beads ──"
 eq "$SURVIVORS" \
-   "c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-takeaway-empty" \
+   "c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-takeaway-empty" \
    "survivors are exactly the unnamed beads"
 # tk-tnwo0: the candidate's `type` is projected from `.issue_type` — the field
 # real `gc bd list`/`gc bd ready` emit (the fixtures now carry it too). The old
@@ -249,6 +257,36 @@ for keep in c-pr-merged:merged-is-finishable-and-surfaces-for-close-out \
             c-pr-closed:closed-unmerged-was-rejected-and-needs-a-sitting \
             c-pr-otherrepo:a-pr-number-names-nothing-without-its-repository \
             c-pr-nourl:no-pr_url-means-no-liveness-check-so-report-it; do
+    id="${keep%%:*}"; why="${keep##*:}"
+    printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
+        && ok "kept $id ($why)" || bad "kept $id ($why)" "was hidden — the inverse defect"
+done
+
+# Class 2's OTHER gate: merge_result=pre_open_gate (bead tk-5ttye). The old
+# carve-out assumed a pre-open anchor never reaches the candidate set (the review
+# bead's `blocks` edge), which fails the moment that review CLOSES — its gate is
+# then verdict-based on the anchor's own markers, not an open PR. A pre-open
+# anchor with every check_set gate recorded green@ is waiting on
+# pre-open-resolve.sh: a NAMED wait, dropped.
+echo "── a pre-open anchor, all gates green, is a named wait and drops ──"
+for drop in c-preopen-green:codex-green-review-closed-waits-on-pre-open-resolve \
+            c-preopen-multigreen:every-gate-in-a-spaced-list-green \
+            c-preopen-approval:non-marker-approval-sentinel-dropped-codex-green; do
+    id="${drop%%:*}"; why="${drop##*:}"
+    printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
+        && bad "dropped $id ($why)" "still a candidate" || ok "dropped $id ($why)"
+done
+
+# The inverse defect for the pre-open gate: the same "carries pre_open_gate, skip
+# it" naivety would hide a fixable verdict with nothing in flight (genuinely
+# stalled), or an absent/unset marker (the tk-t46nq / tk-qs1j6 hole). Each must
+# stay VISIBLE — the verdict-based test drops ONLY positive all-green evidence.
+echo "── a pre-open marker is not a gate: non-green, absent, or unset stays visible ──"
+for keep in c-preopen-fixable:fixable-with-nothing-in-flight-is-stalled-work \
+            c-preopen-partial:one-of-two-gates-unmarked-so-not-all-green \
+            c-preopen-nomarker:check_set-names-a-gate-but-no-marker-at-all \
+            c-preopen-noset:a-green-marker-but-check_set-unset \
+            c-preopen-none:the-none-opt-out-is-no-positive-green-evidence; do
     id="${keep%%:*}"; why="${keep##*:}"
     printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
         && ok "kept $id ($why)" || bad "kept $id ($why)" "was hidden — the inverse defect"
@@ -466,6 +504,16 @@ has "merged stays visible"               'merged'                        "$FORMU
 has "closed-unmerged stays visible"      'closed-unmerged'               "$FORMULA"
 # shellcheck disable=SC2016
 has "the read is batched per repository" 'One `gh pr list` per repository' "$FORMULA"
+
+# Class 2's pre-open gate half (bead tk-5ttye): the carve-out that dropped
+# merge_result=pre_open_gate is gone, replaced by a verdict-based gate on the
+# anchor's own check_set / check.<name> markers.
+echo "── class 2 covers the pre-open gate as a distinct, verdict-based test ──"
+has "the pre-open gate is now covered"    'pre_open_gate` IS covered'      "$FORMULA"
+has "the gate reads check_set markers"    'check_set` names the required'  "$FORMULA"
+has "the test is verdict-based not head"  'verdict-based'                  "$FORMULA"
+has "an all-green pre-open anchor drops"  'every gate in `check_set` records' "$FORMULA"
+has "a fixable-with-nothing-in-flight surfaces" 'nothing in flight'        "$FORMULA"
 
 # Class 2(i)'s liveness test is "not closed", resolved against a widened set —
 # so a convoy tracking a BLOCKED bead is gated, not a class-5 unnamed wait
