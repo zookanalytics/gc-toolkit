@@ -201,7 +201,7 @@ conversation, an owner), and the board gives gates the first-class
 ranked identity `await_type` lacks. Ride the notify/renudge orders and
 the alert model rather than duplicating them.
 
-## How a held sitting ends (source-verified 2026-08-11)
+## How a held sitting ends (source-verified 2026-08-11; attachment rung reconciled 2026-08-12)
 
 A hold has no timeout *in the pack's doctrine* — but the runtime under it
 does end sittings, and every surface that said otherwise was wrong. The
@@ -221,13 +221,18 @@ mechanism, verified against the gascity source (rig checkout `7cff88fdc`,
   `checkIdle` reads the provider's last activity, which for tmux is the
   most recent per-window `#{window_activity}` (`Tmux.rawSessionActivity`,
   `internal/runtime/tmux/tmux.go`) — pane output and `send-keys`. **An
-  operator reading a held thread generates neither**, so sustained
-  attention is indistinguishable from abandonment, and reading a thread
-  for 8h is what gets it collected.
+  operator reading a held thread generates neither**, so activity alone
+  cannot tell sustained attention from abandonment. For a **detached**
+  reader — watching through the dashboard or scrollback, not connected to
+  the pane — that is the whole story, and reading a thread for 8h is what
+  gets it collected. (An *attached* terminal is now observed separately and
+  defers the reap — see *The core seam, now closed*, below.)
 - **Holding work defers the stop, but only briefly.**
   `DecideIdleTimeout` (`internal/session/lifecycle_timers.go`) walks
-  blocker → pending interaction → assigned work → stop, and a held visit
-  is assigned work, so the stop defers. The reconciler caps that streak:
+  blocker → pending interaction → attachment → assigned work → stop, and a
+  held visit is assigned work, so the stop defers on the assigned-work rung
+  (the attachment rung above it — landed since; see below — is a separate,
+  uncapped defer). The reconciler caps the assigned-work streak:
   `assigned_work_defer_limit` (default 3 —
   `defaultAssignedWorkDeferLimit`, `cmd/gc/assigned_work_defer_tracker.go`)
   consecutive same-anchor defers, then `DecideAssignedWorkExhausted`
@@ -251,12 +256,37 @@ with a sign-off block naming the outcome and the subject to look at next.
 Longevity is deliberately not the remedy: raising `idle_timeout` only
 widens the window in which a dead thread looks alive.
 
-*The core seam, unbuilt:* attachment **is** observable —
-`runtime.LiveObservation.IsAttached` — but the idle ladder never consults
-it, so "an operator is attached to this pane" cannot defer a reap. That
-is the one fix that would make read-attention count, and it belongs
-upstream, not here — filed cross-rig against the gascity rig as
-`gc-rjtk1`; design record `specs/tk-bzm86/design-doc.md`.
+*The core seam, now closed (landed 2026-08-12):* attachment is observable —
+`runtime.Provider.IsAttached` — and the idle ladder now consults it.
+gascity merged `gc-rjtk1` (PR #126, commit `c8bff331d`; confirmed in
+gascity `origin/main` 809a97f47): the reconciler supplies
+`TimerFacts.Attached` from `sp.IsAttached(name)`
+(`cmd/gc/session_reconciler.go`), and `DecideIdleTimeout`
+(`internal/session/lifecycle_timers.go`) gained an **attachment rung**
+between pending interaction and assigned work —
+`if f.Attached { return deferDecision("attached", "deferred_attached") }`.
+So "an operator is attached to this pane" now defers the reap, and
+read-attention on a connected pane finally counts. The rung is
+deliberately narrow, so the mechanism above still holds:
+
+- **A defer, not an exemption.** It is re-evaluated every tick and the stop
+  resumes the moment the terminal detaches — a forgotten attached pane is
+  *not* immortal. Unlike the pending arm it cancels no drain and skips no
+  wake pass; it is a plain defer.
+- **The *attached* case only.** Idle is still measured from output
+  activity, so a **detached** reader (dashboard or scrollback) is still
+  indistinguishable from abandonment and still gets collected — attachment
+  is a separate signal, not a fix to activity measurement. The pack's
+  trace-at-hold-begin lever above therefore still earns its keep.
+- **Aligns two subsystems.** `ComputeAwakeSet` already re-wakes an attached
+  session via its "attached" wake override, so the old behavior killed a
+  watched pane only to bounce it straight back awake — the same
+  idle-kill/wake treadmill the assigned-work rung fixed (`ga-3ox7rk`).
+- **Idle-timeout only.** `DecideMaxSessionAge` (a health restart, e.g.
+  credential expiry) still fires regardless of who is attached.
+
+Design record: `specs/tk-bzm86/design-doc.md`; the cross-rig filing
+`gc-rjtk1` is now resolved upstream.
 
 ## Watch items — moving now, re-verify before building on them
 
