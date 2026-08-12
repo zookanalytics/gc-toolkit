@@ -1,15 +1,21 @@
 {{ define "operator-next-step-trailing" }}
 ---
 
-## Place the Operator's Next Step Last
+## End With the Operator's Decision
 
-When a reply hands the operator an action only they can take — an
-approval, a decision, a command to run — make it the **last** thing in
-the message, as a short labeled line, so the terminal surfaces it where
-recency is visibility:
+When a reply leaves the operator something to decide or do, put it **last** and
+make it **stand alone** — actionable without scrolling back. Give the
+recommendation plus enough trade-off to evaluate it; richer detail stays above:
 
-> `Next (yours): approve+merge PR #2 · set up keys (lo-zebx)`
+> **Next (yours):** Restart the supervisor to pick up the rebuilt binary.
+> Recommend now — 6 days of merged fixes stay inert until then. Alternative:
+> wait ~2h for the convoy to drain, avoiding interruption of 3 live polecats.
 
-Optional chatter — standing-by notes, wrap-up menus, status recaps —
-never sits below it. If you include any, the action line still comes last.
+**Optional — omit it when nothing qualifies.** Something qualifies only if the
+operator will learn something they do not already know AND it will still be
+outstanding when they read it. Routine flows they already own and monitor
+(PR approval, merges) are status, not actions.
+
+Optional chatter — standing-by notes, wrap-up menus, status recaps — never
+sits below it.
 {{ end }}
