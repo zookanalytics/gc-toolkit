@@ -175,7 +175,7 @@ Usage:
   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
   gc-helm open  <bead-id>                 file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive] [--release]  set the board-visible takeaway headline
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--release]  set the board-visible takeaway headline
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, and decisions) by how much
@@ -184,10 +184,13 @@ continuation group (pool demand spawns/vacuums a converse session —
 attach via the sessions picker); react slings a proactive first
 reaction (via tools/gc-proactive.sh, on the codex-gated mr path) so a
 takeaway-less row self-heals to an explanatory NEEDS on the next render.
-takeaway writes that NEEDS headline directly — the thin writer the host and
-proactive worker call to stamp gc.takeaway (+_at/+_by) in one update; with
---release it also reopens/unassigns/clears the route and marks the proactive
-reaction in that same write (the proactive worker's one-call close).
+takeaway writes that NEEDS headline directly — the thin writer the host, the
+proactive worker, and the converse role call to stamp gc.takeaway (+_at/+_by)
+in one update; with --release it also reopens/unassigns/clears the route and
+marks the proactive reaction in that same write (the proactive worker's
+one-call close). converse calls it WITHOUT --release, twice per sitting: once
+when the hold begins and once at sign-off, so a reaped thread still leaves a
+dated trace of what it was waiting for (tk-bzm86).
 
   --json             Emit the ranked board as a JSON array (stable contract).
   --limit=N          Show only the top N rows (0 = all/uncapped; default caps at 50).

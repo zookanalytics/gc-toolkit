@@ -6,13 +6,33 @@ scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
 nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Rebuild the subject's state, prep, hold for the operator."
-# Long idle: a held visit is a live sitting; visit boundaries, not
-# timeouts, end it. Open visits outlive sessions either way — a dead
-# session's visit is recovered (witness patrol, or `gc bd reclaim` once
-# its lease expires) and a fresh session resumes it from the record.
-# Recovery is eventual, not prompt: the reconciler's reassign path
-# refuses a held visit by design, so witness/reclaim latency is the
-# bound on how long a stranded visit waits.
+# Long idle, but a timeout DOES end a held sitting — do not read this as
+# "visit boundaries are the only ending" (it said that until tk-bzm86
+# checked). Verified 2026-08-11 against the gascity source; the full
+# mechanism and its consequences live in
+# docs/gascity-human-engagement.md → "How a held sitting ends":
+#   - idle is tmux `#{window_activity}` — the terminal's last OUTPUT. An
+#     operator reading a held thread without typing does not touch it, so
+#     8h of attention reads as 8h of neglect.
+#   - a held visit is assigned work, so core DEFERS the idle stop
+#     (DecideIdleTimeout) — but only for `assigned_work_defer_limit`
+#     consecutive ticks (default 3, ~90s at patrol_interval=30s), then
+#     forces the stop as `assigned_work_exhausted`. The defer buys
+#     seconds, not immortality.
+#   - the stop clears the scrollback, and wake_mode=fresh makes the
+#     respawn a clean session: the thread is UNRECOVERABLE, not hidden.
+# So this value is a bound on how long an unattended sitting survives, and
+# the pack's defense is durability, not longevity — the converse prompt
+# stamps the subject's takeaway when the hold BEGINS so a reap still
+# leaves a dated trace. Raising this number would only widen the window
+# in which a dead thread looks alive.
+#
+# Open visits outlive sessions either way — a dead session's visit is
+# recovered (witness patrol, or `gc bd reclaim` once its lease expires)
+# and a fresh session resumes it from the record. Recovery is eventual,
+# not prompt: the reconciler's reassign path refuses a held visit by
+# design, so witness/reclaim latency is the bound on how long a stranded
+# visit waits.
 idle_timeout = "8h"
 min_active_sessions = 0
 # Bounds concurrently LIVE sittings only (provider memory), not how many

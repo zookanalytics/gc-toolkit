@@ -201,6 +201,63 @@ conversation, an owner), and the board gives gates the first-class
 ranked identity `await_type` lacks. Ride the notify/renudge orders and
 the alert model rather than duplicating them.
 
+## How a held sitting ends (source-verified 2026-08-11)
+
+A hold has no timeout *in the pack's doctrine* — but the runtime under it
+does end sittings, and every surface that said otherwise was wrong. The
+mechanism, verified against the gascity source (rig checkout `7cff88fdc`,
+2026-08-11) after an operator lost two threads mid-attention (`tk-bzm86`):
+
+- **`wisp_ttl` is not this, and never was.** `[daemon] wisp_ttl` is how
+  long a **closed** wisp — an ephemeral v1 formula-run bead — survives
+  before the GC deletes it (`internal/config/config.go`, `WispTTL`;
+  enabled only when `wisp_gc_interval` and `wisp_ttl` are both non-zero).
+  It reaps *records*, not sessions, and never touches a live held visit.
+  Reading the city's `wisp_ttl = "8h"` as the thing that collects
+  conversations is a coincidence of two unrelated 8h values.
+- **The clock that ends a sitting is the agent's own `idle_timeout`** —
+  pack-owned config (`agents/converse/agent.toml`), not core policy.
+- **"Idle" means the terminal produced no output.** The reconciler's
+  `checkIdle` reads the provider's last activity, which for tmux is the
+  most recent per-window `#{window_activity}` (`Tmux.rawSessionActivity`,
+  `internal/runtime/tmux/tmux.go`) — pane output and `send-keys`. **An
+  operator reading a held thread generates neither**, so sustained
+  attention is indistinguishable from abandonment, and reading a thread
+  for 8h is what gets it collected.
+- **Holding work defers the stop, but only briefly.**
+  `DecideIdleTimeout` (`internal/session/lifecycle_timers.go`) walks
+  blocker → pending interaction → assigned work → stop, and a held visit
+  is assigned work, so the stop defers. The reconciler caps that streak:
+  `assigned_work_defer_limit` (default 3 —
+  `defaultAssignedWorkDeferLimit`, `cmd/gc/assigned_work_defer_tracker.go`)
+  consecutive same-anchor defers, then `DecideAssignedWorkExhausted`
+  forces the stop under its own `assigned_work_exhausted` reason. At
+  `patrol_interval = "30s"` the defer buys ~90 seconds, not immortality.
+- **The kill erases the evidence.** The stop path calls
+  `ClearScrollback` (`cmd/gc/session_reconciler.go`), wiping the pane's
+  history, and the converse template's `wake_mode = "fresh"` makes the
+  respawn a clean provider session. Contrast `wake_mode = "resume"`,
+  which replays the provider transcript across gaps far longer than the
+  timeout (measured at ~15h, `specs/tk-oml75/spike-report.md` §1). So a
+  reaped converse thread is **unrecoverable, not merely hidden**, and no
+  remedy may assume the operator can reopen it.
+
+*Seam:* **nothing pack-owned runs at kill time**, so a warn-before-reap
+is not available to us; the pack's only lever is to have already written
+the trace. Hence the converse contract stamps the subject's takeaway when
+the hold *begins* (not only at close) — a reap then leaves a dated record
+of what the sitting was waiting for — and every deliberate close ends
+with a sign-off block naming the outcome and the subject to look at next.
+Longevity is deliberately not the remedy: raising `idle_timeout` only
+widens the window in which a dead thread looks alive.
+
+*The core seam, unbuilt:* attachment **is** observable —
+`runtime.LiveObservation.IsAttached` — but the idle ladder never consults
+it, so "an operator is attached to this pane" cannot defer a reap. That
+is the one fix that would make read-attention count, and it belongs
+upstream, not here — filed cross-rig against the gascity rig as
+`gc-rjtk1`; design record `specs/tk-bzm86/design-doc.md`.
+
 ## Watch items — moving now, re-verify before building on them
 
 - **`gc.session_affinity`** — still advisory (no routing path reads it),
@@ -229,7 +286,10 @@ definition first, because everything below uses it:
 > metadata routes it to the converse pool and names the subject's
 > continuation group, whose `gc.outcome` records what the sitting
 > decided, and which closes when the sitting ends (the subject never
-> closes this way). The sequence of visits under a subject is the
+> closes this way) — out loud, with a sign-off naming the outcome and
+> the subject to look at next, because the ending is the one part of a
+> sitting the operator cannot reconstruct from the record ("How a held
+> sitting ends", above). The sequence of visits under a subject is the
 > dialogue's durable spine — board-legible, cold-reconstructable, no
 > provider transcript required.
 
