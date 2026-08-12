@@ -825,10 +825,13 @@ printf '5\n' > "$GATE_STATE/wedge_show"
 run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
 holder=$!
 wait_for_lock || bad "LIVETTL: the holder never took the lock"
-rm -f "$GATE_STATE/wedge_show"
 HELD_BY=$(cat "$LOCK/owner" 2>/dev/null)
 # Age it past LOCK_TTL (300s) but under the LOCK_MAX_HOLD backstop, without
-# touching who owns it.
+# touching who owns it. The wedge stays IN PLACE through the peer's attempt:
+# removing it here (as an earlier draft did) lets the holder finish and release
+# before the peer looks, so on a slow run the peer takes a fresh lock and DECIDES
+# (mails=1, rc=0) instead of deferring to a live owner. That is a harness race,
+# not a product regression — the holder is released only after the peer decides.
 printf '%s\n' "$((NOW - 600))" > "$LOCK/at"; backdate "$LOCK" "$((NOW - 600))"
 out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
 eq "$(cat "$LOCK/owner" 2>/dev/null)" "$HELD_BY" \
@@ -836,6 +839,7 @@ eq "$(cat "$LOCK/owner" 2>/dev/null)" "$HELD_BY" \
 eq "$(mails)" "0" "LIVETTL: and no peer decides inside the holder's section"
 eq "$rc" "1" "LIVETTL: it defers"
 wait "$holder"
+rm -f "$GATE_STATE/wedge_show"
 eq "$(mails)" "1" "LIVETTL: the holder finishes its own escalation — exactly one"
 
 # --- MAXHOLD --------------------------------------------------------------------
