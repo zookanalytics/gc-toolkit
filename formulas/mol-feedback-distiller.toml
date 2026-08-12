@@ -513,6 +513,15 @@ already emitted:
   distinct sources, a genuinely shared cause).
 - Adjudicate every promotable statement against what already exists:
   ADD / UPDATE / SUPERSEDE / NOOP — never append blind.
+- Gate 1 (source diversity): a cluster entirely `obs.source=self`, or with
+  `distinct_sources=1`, does NOT auto-promote into an always-injected
+  `learned-conventions-<role>` fragment without an `obs.endorsed=operator`
+  observation — surface it, do not file the prompt-update.
+- Gate 2 (remedy class): an exhortation ("be thorough", "try harder") or a
+  structural fix (a verification gap, a race, a missing mechanical check)
+  routes to an engineering work bead (§ file-and-dispatch), not a prompt
+  bullet; only a concrete behavior keyed to a concrete trigger promotes as
+  prose.
 - Contradiction with an adopted rule is a conversation (a visit), never a
   silent flip.
 - Rule bullets name their scope (`repo:<rig>` / `agent:<role>` / `global`) —
@@ -585,6 +594,24 @@ would change the call), **contest** (evidence contradicts an adopted rule —
 becomes a visit in step 3, never a silent flip), or **discard with reason**.
 Write the reasoning down — it travels in the proposal body and the D3
 reviewer judges from the PR alone.
+
+Before recording **promote** for any cluster whose target is an
+always-injected `learned-conventions-<role>` fragment, clear the two
+promotion gates (rubric § "Two gates on promotion into always-injected
+content"). A gate failure is not a discard — it redirects the outcome:
+
+- **Gate 1 (source diversity) fails** — the cluster is entirely
+  `obs.source=self`, or `distinct_sources=1`, with no `obs.endorsed=operator`
+  observation: the outcome is **surface**, not promote. Hold the pattern with
+  the block stated in its reasoning and file no `prompt-update`; it promotes
+  on later corroboration (a second distinct source) or an operator
+  `learn this`.
+- **Gate 2 (remedy class) fails** — the remedy is an exhortation ("be
+  thorough") or fixes a structural failure (a verification gap, a race, a
+  missing mechanical check): the outcome is **route-to-engineering**. Step 3
+  files one engineering work bead for the mechanical fix instead of a
+  `prompt-update`, and records on the pattern bead that the remedy is
+  structural.
 
 ## 5. Retirement pass over adopted rules (the anti-bloat half, every run)
 
@@ -780,6 +807,48 @@ Routing the bead to the pool (`gc.routed_to=$POOL`, unassigned) is the
 dispatch: a pool polecat claims it and runs the standard `mol-polecat-work`
 lifecycle — no bespoke worker formula.
 
+## 1b. Engineering-bead route (Gate 2 outcomes)
+
+A cluster whose outcome was **route-to-engineering** (rubric Gate 2: the
+remedy is an exhortation or a structural fix that a prompt bullet would only
+fail silently at) does NOT get a `prompt-update` bead. File one ordinary
+engineering work bead describing the mechanical fix — a lint, a doctor check,
+a gate, or a code change — routed to the same pool so a polecat builds it
+through the normal `mol-polecat-work` → refinery → operator-review pipeline.
+It is normal engineering work, not a prompt edit: no `task_kind=prompt-update`,
+no bullet-cap accounting, and `merge_strategy` stays unset (defaults to `mr`,
+so the code change still rides the review gate).
+
+Dedup first: if the pattern bead already carries `eng_bead=<id>` and that
+bead — or its PR — is still live, skip; the fix is already in flight.
+
+```bash
+POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+
+EBODY="## Problem
+<the structural failure this pattern names — the verification gap / race /
+missing mechanical check — and why a prompt bullet fails silently here>
+
+## Proposed fix
+<the mechanism to build: the lint / doctor check / gate / code change>
+
+## Evidence
+- Pattern bead: $PATTERN (evidence_count=<n>, distinct_sources=<k>)
+- Provenance: <the obs.provenance keys behind this pattern>"
+
+EBEAD=$(gc bd create "eng: <one-line mechanical fix> (learning Gate 2, pattern $PATTERN)" \
+  -t task -l learning -l learning-engineering -d "$EBODY" --json | jq -r '.id // .[0].id')
+[ -n "$EBEAD" ] && [ "$EBEAD" != "null" ] || { echo "WARN: could not create engineering bead for $PATTERN; skipping" >&2; continue; }
+gc bd update "$EBEAD" --set-metadata target=main --set-metadata gc.routed_to="$POOL"
+# Record on the pattern bead that its remedy is structural, so a later run
+# neither re-judges it toward a prompt bullet nor files a duplicate eng bead.
+gc bd update "$PATTERN" --set-metadata remedy_class=structural --set-metadata "eng_bead=$EBEAD"
+echo "filed + routed engineering bead $EBEAD (pattern $PATTERN)"
+```
+
+An engineering bead counts against `{{max_beads_per_run}}` like any other
+survivor.
+
 ## 2. Stamp every consumed observation (zero-proposal runs included)
 
 Every observation judged into a pattern this run — promoted, held, NOOPed,
@@ -841,7 +910,7 @@ gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 ## 4. Summarize and drain
 
 ```bash
-echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F proposal(s), held H pattern(s) awaiting recurrence, V contention visit(s), discarded D (reasons logged above), stamped S observation(s)."
+echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s) (Gate 2), held/surfaced H pattern(s) (incl. Gate-1 blocks awaiting corroboration), V contention visit(s), discarded D (reasons logged above), stamped S observation(s)."
 # Terminal step: close this step bead, THEN drain. This is the ONLY drain-ack
 # in the workflow (load-and-gate §0) — every earlier arm closes its bead and
 # exits its shell, so the whole run, no-op paths included, stays in one
