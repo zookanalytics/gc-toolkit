@@ -313,6 +313,31 @@ rig_name_for_bead() {
 #     update would briefly leave the step open+unassigned+routed (the exact
 #     pool-offer shape), racing a fresh polecat into the husk.
 #
+# ONE GUARD DELIBERATELY DOES NOT MIRROR THE SIBLING (tk-7g37t). That pass grew an
+# arm for a root whose ROW IS ABSENT from the store: it quiesces such a molecule
+# instead of skipping it, because a molecule that cannot be finalized by anything
+# is dead by construction. That arm CANNOT be ported here, and the reason is
+# structural rather than a matter of caution.
+#
+# The two functions ask different questions of the same resolution walk. The
+# sibling asks a VERDICT — "is this molecule DONE?" — and an absent root answers
+# it: dead, by construction. This one asks a MATCH — "does this molecule belong to
+# the bead being parked?" — and an absent root leaves that unanswerable, not
+# answered-yes. Step beads carry `gc.root_bead_id` and nothing else pointing
+# upward: no convoy id, no anchor id (verified against the live husks of root
+# tk-wea42). With the root row gone there is NO path from a step to its anchor, so
+# an orphaned husk cannot be attributed to the parked bead — or to any other.
+#
+# Quiescing it anyway would silently widen `takeaway --release` from "clean up the
+# molecule of the bead I just parked" into "sweep every orphaned husk in the rig",
+# mutating husks of beads the operator never named and logging them under the one
+# they did. That sweep already has an owner: quiesce-completed-workflows.sh runs on
+# the witness patrol and retires absent-root husks there, so an orphan this
+# function passes over is retired within a cycle rather than left forever. The
+# in-scope case degrades the same way — a park whose OWN molecule lost its root
+# quiesces nothing here and waits for the patrol — which is the honest bound on
+# what an anchor-matched cleanup can do.
+#
 # The body is a subshell (`() ( … )`) with `set +e`, so it stays best-effort:
 # no tool failure here can abort the park (the caller runs under `set -e`), and
 # the `_`-locals never leak. $1 = parked anchor bead id. $2 = rig .beads db path
@@ -360,6 +385,10 @@ quiesce_release_molecule_steps() (
         [ -n "$_root" ] || continue
 
         # Resolve this root's anchor: root -> input convoy -> its single member.
+        # An empty read here covers both a failed read and an ABSENT root row; the
+        # header explains why this function skips the latter where the sibling pass
+        # quiesces it (attribution to the parked bead is impossible without the
+        # root, so the patrol pass owns those).
         _convoy=$(gc bd show "$_root" ${_db:+--db "$_db"} --json 2>/dev/null \
             | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null || true)
         [ -n "$_convoy" ] || continue

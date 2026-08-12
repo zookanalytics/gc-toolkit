@@ -67,7 +67,19 @@
 #   (FINAL)  the workflow-finalize step keeps its control-dispatcher route — it is
 #            the molecule's only escape path
 #   (CLOSED) a CLOSED anchor also counts as done (strictly later than pull_request)
-#   (FAILSAFE) unresolvable anchor -> skipped, never quiesced
+#   (FAILSAFE) unresolvable anchor on a root the store CAN read -> skipped, never
+#            quiesced
+#   (ORPHAN) the root ROW ITSELF is gone from the store (tk-7g37t) -> quiesced,
+#            and counted in its own `orphaned` slot rather than as a completion.
+#            Nothing can ever finalize such a molecule — finalization runs through
+#            a root that does not exist — so its steps are dead by construction,
+#            and this is the one unresolved shape where quiescing beats skipping
+#   (READFAIL) the fail-closed half of (ORPHAN): a root read that FAILS TO ANSWER
+#            (wedged store, unreachable db — non-zero exit, empty stdout) must
+#            still be skipped. Its anchor is DONE on purpose, so the read failure
+#            is the only thing holding it back: key the arm on exit status alone
+#            and this fixture gets swept during an outage, which is the same
+#            live-molecule strip the FAILSAFE skip exists to prevent
 #   (CONTRACT) steps are selected by the graph.v2 CONTRACT, not by formula name
 #            (tk-q5r65): a mol-scoped-work husk quiesces exactly like a
 #            mol-polecat-work one, and its workflow-finalize step is just as
@@ -105,7 +117,19 @@ mkdir -p "$TMP/bin"
 # root-CLOSED: anchor CLOSED (landed) -> also done.
 # root-HANDOFF: anchor open + UNSTAMPED but already assigned to the refinery — the
 #              handoff window (tk-yxlqb) -> done.
-# root-ORPHAN: root has no input convoy -> anchor unresolvable -> fail closed.
+# root-ORPHAN: the root ROW IS ABSENT from the store — the store answers "no such
+#              bead", not "here it is, without a convoy" -> the molecule can never
+#              be finalized -> quiesced, counted `orphaned` (tk-7g37t). Carries a
+#              workflow-finalize step too: the new arm is a second entry into the
+#              shared step loop, and the DANGER clause has to hold on it as well.
+# root-NOCONVOY: the root row EXISTS and simply carries no gc.input_convoy_id ->
+#              anchor unresolvable -> fail closed. This is the shape (FAILSAFE)
+#              covers, and it is NOT root-ORPHAN's: one is a bead we can read and
+#              do not understand, the other is a bead that is not there.
+# root-READFAIL: the root read FAILS (see FAKE_GC_SHOW_FAIL) — non-zero exit,
+#              nothing on stdout, the signature of a wedged store rather than an
+#              absence verdict -> fail closed. Its anchor is DONE, so the read
+#              failure is the ONLY thing holding it back.
 # root-QUIET : already quiesced by an earlier pass -> counted, not re-updated.
 # root-SCOPED: a graph.v2 molecule that is NOT mol-polecat-work (mol-scoped-work,
 #              a core pack formula) with a terminal anchor -> quiesced all the
@@ -142,6 +166,9 @@ s-live|mol-polecat-work.load-context|root-LIVE|gc-toolkit/gc-toolkit.polecat|gc-
 s-closed|mol-polecat-work.implement|root-CLOSED|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-gone|open
 s-handoff|mol-polecat-work.load-context|root-HANDOFF|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-drained|in_progress
 s-orphan|mol-polecat-work.implement|root-ORPHAN|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-x|open
+s-orphanfin|mol-polecat-work.workflow-finalize|root-ORPHAN|gc-toolkit/core.control-dispatcher||open
+s-noconvoy|mol-polecat-work.implement|root-NOCONVOY|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-nc|open
+s-readfail|mol-polecat-work.implement|root-READFAIL|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rf|open
 s-quiet|mol-polecat-work.implement|root-QUIET|||open
 s-scoped|mol-scoped-work.load-context|root-SCOPED|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-scoped|in_progress
 s-scopedfin|mol-scoped-work.workflow-finalize|root-SCOPED|gc-toolkit/core.control-dispatcher||open
@@ -157,8 +184,11 @@ s-reclaimrouted|mol-polecat-work.load-context|root-RECLAIMROUTED|gc-toolkit/gc-t
 s-heldsess|mol-polecat-work.load-context|root-HELDSESS|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-hsmol|in_progress
 S
 
-# Roots: root_id|convoy_id|gc.session_name   (root-ORPHAN deliberately absent -> no
-# convoy). The session is the one the molecule's steps are bound to by
+# Roots: root_id|convoy_id|gc.session_name   (root-ORPHAN is deliberately ABSENT
+# from this file — the stub answers "no such bead" for it, which is the whole
+# point of the fixture; root-NOCONVOY is PRESENT with an empty convoy, which is a
+# different answer and a different verdict). The session is the one the
+# molecule's steps are bound to by
 # gc.session_affinity=require; the older fixtures leave it empty, which is also the
 # shape of a molecule that was never claimed.
 cat > "$TMP/roots" <<'R'
@@ -177,6 +207,8 @@ root-STALE|convoy-STALE|gc-toolkit__polecat-lx-here
 root-NOSESS|convoy-NOSESS|gc-toolkit__polecat-lx-anon
 root-RECLAIMROUTED|convoy-RECLAIMROUTED|gc-toolkit__polecat-lx-rrold
 root-HELDSESS|convoy-HELDSESS|gc-toolkit__polecat-lx-hsmol
+root-NOCONVOY||
+root-READFAIL|convoy-READFAIL|
 R
 
 # Convoys: convoy_id|anchor_id
@@ -196,6 +228,7 @@ convoy-STALE|anchor-STALE
 convoy-NOSESS|anchor-NOSESS
 convoy-RECLAIMROUTED|anchor-RECLAIMROUTED
 convoy-HELDSESS|anchor-HELDSESS
+convoy-READFAIL|anchor-READFAIL
 C
 
 # Anchors: anchor_id|status|merge_result|assignee|routed_to|gc.session_name
@@ -238,6 +271,7 @@ anchor-STALE|in_progress||gc-toolkit/gc-toolkit.polecat||gc-toolkit__polecat-lx-
 anchor-NOSESS|in_progress||gc-toolkit__polecat-lx-other||
 anchor-RECLAIMROUTED|in_progress||gc-toolkit__polecat-lx-rr|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rr
 anchor-HELDSESS|blocked|||human|gc-toolkit__polecat-lx-hsanch
+anchor-READFAIL|open|pull_request|||
 A
 
 : > "$TMP/updates"     # one line per update: "<binary> <argv>"
@@ -279,8 +313,21 @@ case "$1 ${2:-}" in
     printf '[%s]\n' "$out" ;;
   "bd show")
     id="$3"
-    convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
-    rsess=$(awk -F'|' -v r="$id" '$1==r{print $3; exit}' "$FAKE_ROOTS")
+    # A read that FAILS TO ANSWER: non-zero exit and NOTHING on stdout. This is
+    # what a wedged store or an unreachable db looks like, and it is deliberately
+    # NOT the absent-bead answer below — telling the two apart is the entire
+    # safety of the absent-root arm (tk-7g37t), so the stub has to be able to
+    # produce both.
+    case " ${FAKE_GC_SHOW_FAIL:-} " in
+      *" $id "*) echo "gc bd: store unreachable" >&2; exit 1 ;;
+    esac
+    # Row PRESENCE, not field content, decides whether the bead exists: a root
+    # row with an empty convoy is a bead that IS there and merely unresolvable
+    # (root-NOCONVOY), which is a different store answer from a row that is not
+    # there at all (root-ORPHAN). Keying on the convoy value collapsed the two.
+    rrow=$(awk -F'|' -v r="$id" '$1==r{print; exit}' "$FAKE_ROOTS")
+    convoy=$(printf '%s' "$rrow" | cut -d'|' -f2)
+    rsess=$(printf '%s' "$rrow" | cut -d'|' -f3)
     arow=$(awk -F'|' -v a="$id" '$1==a{print; exit}' "$FAKE_ANCHORS")
     if [ -n "$arow" ]; then
       st=$(printf '%s' "$arow" | cut -d'|' -f2); mr=$(printf '%s' "$arow" | cut -d'|' -f3)
@@ -289,10 +336,19 @@ case "$1 ${2:-}" in
       jq -n --arg s "$st" --arg m "$mr" --arg a "$as" --arg r "$rt" --arg n "$an" \
         '[{status:$s, assignee:$a,
            metadata:{merge_result:$m, "gc.routed_to":$r, "gc.session_name":$n}}]'
-    elif [ -n "$convoy" ]; then
+    elif [ -n "$rrow" ]; then
       jq -n --arg c "$convoy" --arg n "$rsess" \
         '[{metadata:{"gc.input_convoy_id":$c, "gc.session_name":$n}}]'
-    else printf '[{"metadata":{}}]\n'; fi ;;
+    else
+      # The store's ABSENCE verdict, verbatim: `gc bd show <gone-id> --json`
+      # exits non-zero and puts a JSON error ENVELOPE on stdout (an object, not
+      # the usual array). The stub used to answer `[{"metadata":{}}]` with exit
+      # 0 here, which is a successful read of a bead with no metadata — so an
+      # absent root was indistinguishable from an unresolvable one and the
+      # absent-root arm could not be exercised at all.
+      printf '{"error":"no issues found matching the provided IDs"}\n'
+      exit 1
+    fi ;;
   "bd update")
     printf 'gc %s\n' "$*" >> "$FAKE_UPDATES"
     id="$3"
@@ -374,6 +430,10 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS="$TMP/steps" FAKE_ROOTS="$TMP/roots" FAKE_CONVOYS="$TMP/convoys" \
        FAKE_ANCHORS="$TMP/anchors" FAKE_UPDATES="$TMP/updates" \
        FAKE_CLEARED="$TMP/cleared" FAKE_STATE="$TMP/state" FAKE_LIB="$TMP/bin/_state.sh"
+# Held across EVERY run, not injected into one: a store that cannot answer for a
+# root is a standing condition of the pass, and the fail-closed skip it must
+# produce has to survive each of the failure paths the later runs drive.
+export FAKE_GC_SHOW_FAIL="root-READFAIL"
 : > "$TMP/state"
 
 # --- Run 0: --dry-run must select the same work but write nothing. ------------
@@ -614,14 +674,47 @@ grep -q '^s-noroot' "$TMP/cleared" \
   && bad "(NOROOT) a step with no root bead can never be anchor-verified and must not be touched" \
   || ok "(NOROOT) step_ref without gc.root_bead_id -> excluded (no anchor could ever gate it)"
 
-# (FAILSAFE) unresolvable anchor -> skipped, not quiesced.
-grep -q '^s-orphan' "$TMP/cleared" \
+# (FAILSAFE) unresolvable anchor on a root that EXISTS -> skipped, not quiesced.
+grep -q '^s-noconvoy' "$TMP/cleared" \
   && bad "(FAILSAFE) must NOT quiesce a root whose anchor cannot be resolved" \
   || ok "(FAILSAFE) unresolved anchor -> skipped (fail closed)"
 # The warning is a diagnostic, so it goes to stderr (matching the other passes);
 # capture both streams to assert on it.
-grep -q 'anchor unresolved' <<< "$ERR1" \
+grep -q "anchor unresolved (convoy 'none')" <<< "$ERR1" \
   && ok "(FAILSAFE) unresolved root is reported on stderr" || bad "(FAILSAFE) unresolved root reported"
+
+# (ORPHAN) the root ROW IS GONE (tk-7g37t). Not an anchor we failed to resolve —
+# a molecule nothing can ever finalize, because finalization runs through a root
+# that no longer exists. Its steps are dead by construction, and this is the one
+# unresolved shape where quiescing is safer than skipping: left alone, they keep
+# assignee + gc.routed_to and the pool re-offers them every cycle, burning a
+# fresh full-context polecat per restart that re-derives "already done" and
+# drains. Observed live on root tk-wea42, whose six husks outlived it.
+grep -q '^s-orphan	routed$' "$TMP/cleared" && grep -q '^s-orphan	assignee$' "$TMP/cleared" \
+  && ok "(ORPHAN) absent root row -> steps quiesced (the husk can never finalize itself)" \
+  || bad "(ORPHAN) absent-root step must be quiesced (got: $(grep '^s-orphan	' "$TMP/cleared" || echo none))"
+grep -q 'root root-ORPHAN — ROOT ROW ABSENT from store' <<< "$OUT1" \
+  && ok "(ORPHAN) the absent-root verdict names the root and says why it is safe" \
+  || bad "(ORPHAN) absent-root verdict reported (got: $(printf '%s\n' "$OUT1" | grep ORPHAN || echo none))"
+# The absent-root arm is a SECOND entry into the shared step loop, so the DANGER
+# clause has to hold on it too — even though this particular escape path is dead,
+# de-routing finalize is never this pass's call to make.
+grep -q '^s-orphanfin' "$TMP/cleared" \
+  && bad "(ORPHAN) must NOT de-route workflow-finalize, on the absent-root path either" \
+  || ok "(ORPHAN) an orphan's workflow-finalize keeps its control-dispatcher route"
+
+# (READFAIL) the fail-closed half of (ORPHAN): a read that never ANSWERED is not
+# an absence verdict. Keyed on exit status alone, every root reads as absent
+# during a Dolt outage and the pass strips the assignee off the steps live
+# polecats are still claiming — the exact hazard the FAILSAFE skip exists to
+# prevent, at city scale. anchor-READFAIL is DONE, so nothing but the failed read
+# is holding this step back.
+grep -q '^s-readfail' "$TMP/cleared" \
+  && bad "(READFAIL) a root read that FAILED must never be treated as an absent root" \
+  || ok "(READFAIL) failed root read -> skipped (an outage must not quiesce live molecules)"
+grep -q 'root root-READFAIL — ROOT ROW ABSENT' <<< "$OUT1" \
+  && bad "(READFAIL) a failed read must not be reported as an absence verdict" \
+  || ok "(READFAIL) failed read is not reported as an absent root"
 
 # (NOCLOSE) the DANGER clause: nothing is ever closed and status is never written.
 grep -qE -- '--status|--close|bd close' "$TMP/updates" \
@@ -643,7 +736,10 @@ grep -q '^s-quiet' "$TMP/cleared" \
   && bad "(QUIET) already-quiet step must not be re-updated" \
   || ok "(QUIET) already-quiet step skipped (idempotent)"
 
-grep -q '9 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 0 failed' <<< "$OUT1" \
+# The orphaned roots are reported in their OWN slot, never folded into the
+# completed count: a molecule whose root was deleted did not complete, and a
+# summary that says it did hides the deletion behind a normal-looking pass.
+grep -q '10 steps quiesced across 9 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 already quiet, 2 unresolved, 0 failed' <<< "$OUT1" \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 
@@ -682,7 +778,7 @@ grep -q 's-affine route clear failed' <<< "$ERR3" \
 
 # A partial clear is a failure, never a success: the step still rides the affine
 # hand-back, so counting it quiesced would be the same lie in a new place.
-grep -q '8 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 1 failed' <<< "$OUT3" \
+grep -q '9 steps quiesced across 9 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 already quiet, 2 unresolved, 1 failed' <<< "$OUT3" \
   && ok "(EXIT) a partially-cleared step counts as failed, not quiesced" \
   || bad "(EXIT) run 3 summary (got: $(printf '%s' "$OUT3" | tail -1))"
 [ "$RC3" -ne 0 ] \
@@ -733,7 +829,7 @@ grep -q '^bd update s-pool' "$TMP/updates" \
   && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
   || ok "(ROUTEFAIL) route-only step issues no assignee call"
 
-grep -q '7 steps quiesced across 9 completed workflow(s); 5 still live, 1 already quiet, 1 unresolved, 2 failed' <<< "$OUT4" \
+grep -q '8 steps quiesced across 9 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 already quiet, 2 unresolved, 2 failed' <<< "$OUT4" \
   && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
   || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
 [ "$RC4" -ne 0 ] \
