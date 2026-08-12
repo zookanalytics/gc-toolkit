@@ -47,7 +47,29 @@ elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
 fi
 if [ "$need_build" -eq 1 ]; then
-    ( cd "$MOD" && "$GO" build -o "$BIN" ./cmd/helm-svc )
+    # Keep the Go linker's and cgo's scratch off /tmp. /tmp is a size-capped
+    # tmpfs shared by the whole fleet; the linker maps its output object under
+    # $TMPDIR (and cgo's gcc ignores $GOTMPDIR), so a build left on the default
+    # /tmp leaks a multi-hundred-MB go-link dir on every failed link. Pin both
+    # to a root-fs path, per the Build Cache Conventions in gascity AGENTS.md.
+    # GOCACHE is deliberately NOT set: its default (~/.cache/go-build) is the
+    # correct warm on-disk cache and must not be redirected.
+    GOTMP=/var/tmp/gotmp
+    mkdir -p "$GOTMP"
+    if ! ( cd "$MOD" && TMPDIR="$GOTMP" GOTMPDIR="$GOTMP" "$GO" build -o "$BIN" ./cmd/helm-svc ); then
+        # A failed rebuild must not exit into an immediate supervisor restart:
+        # the rerun rebuilds and fails again, and that loop is what turns a
+        # transient build failure into the self-sustaining outage this guards
+        # against. If a previously-built binary exists, keep serving it so the
+        # failure surfaces in logs instead of a crash-restart storm; with no
+        # binary to fall back on there is nothing to serve, so propagate it.
+        if [ -x "$BIN" ]; then
+            echo "gc-helm-svc: rebuild failed; continuing to serve existing $BIN" >&2
+        else
+            echo "gc-helm-svc: build failed and no cached binary to serve" >&2
+            exit 1
+        fi
+    fi
 fi
 
 exec "$BIN" "$@"
