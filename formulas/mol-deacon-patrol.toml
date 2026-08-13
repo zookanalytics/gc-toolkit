@@ -847,6 +847,38 @@ fi
 Either branch is a **failed** health scan, not a clean one. Do not run
 the findings filter on a payload you could not validate.
 
+**Before escalating "`gc doctor --json` emits invalid JSON", rule out
+your own capture — this non-bug has been re-filed 6+ times.** The check
+above is immune because it pipes with `printf '%s'` and `jq -e`, but
+hand-inspection reopens the trap: zsh's `echo` (and `print`) collapse
+backslash escapes in their argument, so a payload that is valid JSON on
+disk comes out mangled the instant you `echo "$DOCTOR_JSON"` to look at
+it — a doubled backslash becomes a single one, and `jq` then rightly
+rejects what `echo` printed, not what `gc doctor` emitted. Findings from
+shell-script checks quote embedded code, so they carry exactly the
+escaped quotes an echo round-trip corrupts. Inspect a JSON payload only
+through `printf '%s' "$DOCTOR_JSON" | jq .` or a file redirect — never
+`echo` it under zsh.
+
+So reproduce any suspected serializer or double-escape bug from a
+**fresh redirect** before you escalate it:
+
+```bash
+gc doctor --json > /tmp/doc.json      # a redirect writes the bytes verbatim
+jq -e . /tmp/doc.json > /dev/null      # exit 0 = valid JSON; the serializer is fine
+```
+
+If the redirected file parses, the corruption was your capture method,
+not `gc doctor`, and there is nothing to report. A byte-level
+investigation already proved the serializer (Go `json.Encoder`,
+`cmd/gc/json_schema.go`) correct and byte-identical between the running
+binary and gascity HEAD, and the live cache
+`.gc/runtime/doctor-findings.json` valid and fresh (tk-roz7f
+/ PR#334, `specs/tk-roz7f/analysis.md`; lx-ns0p closed as a no-op;
+prior mis-escalations lx-wisp-jjwn, j6xsp, mvhdd, ktuur, zxx26). A real
+serializer break reproduces through a redirect; one that appears only
+through an echo is a capture artifact — do not re-file it.
+
 **Publish the payload for the close-time doctor-finding gate.** The
 refinery asks, at every anchor close, whether the bead it is closing
 names a doctor check that is STILL FIRING
@@ -876,6 +908,13 @@ if [ -n "$GATE" ]; then
   printf '%s' "$DOCTOR_JSON" | "$GATE" publish -
 fi
 ```
+
+`publish` is fail-soft and quiet by design: on success it prints the
+cache path (one line) and exits 0; on an empty or schema-drifted payload
+it refuses, prints nothing, and exits 2, leaving the prior cache in
+place. A bare path here is the success confirmation, and silence is a
+soft skip — the gate is INDETERMINATE until the next patrol republishes.
+Neither is an error, and neither is anything to escalate.
 
 The cache path is resolved inside the script, so this step and the
 refinery agree on it by construction. Do not compute it here: a second
