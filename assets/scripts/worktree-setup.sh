@@ -38,13 +38,46 @@ else
     SYNC="${4:-}"
 fi
 
+# rebase_in_progress reports whether the worktree is parked mid-rebase.
+rebase_in_progress() {
+    for STATE in rebase-merge rebase-apply; do
+        DIR=$(git -C "$WT" rev-parse --git-path "$STATE" 2>/dev/null) || DIR=""
+        if [ -n "$DIR" ] && [ -d "$DIR" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 sync_worktree() {
     [ "$SYNC" = "--sync" ] || return 0
     if ! git -C "$WT" remote get-url origin >/dev/null 2>&1; then
         return 0
     fi
+
+    # A worktree found mid-rebase or mid-merge already carries a
+    # conflicted index from an earlier cycle. Clear it before the session
+    # starts; --abort restores the branch tip, so no commit is at risk.
+    if rebase_in_progress; then
+        git -C "$WT" rebase --abort 2>/dev/null || true
+    fi
+    if git -C "$WT" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        git -C "$WT" merge --abort 2>/dev/null || true
+    fi
+
     git -C "$WT" fetch origin 2>/dev/null || true
-    git -C "$WT" pull --rebase 2>/dev/null || true
+
+    # Sync by fast-forward, never by replaying local commits. Agent home
+    # branches accumulate commits the default branch later sheds; a
+    # `pull --rebase` replays them onto every fetched tip, conflicts once
+    # they are gone, and parks the worktree mid-rebase behind `|| true`.
+    UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || return 0
+    [ -n "$UPSTREAM" ] || return 0
+
+    # A branch that cannot fast-forward — diverged, or dirty enough that
+    # the merge would clobber uncommitted work — is left as it stands.
+    # That is the designed outcome here, not a failure to report.
+    git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1 || true
 }
 
 branch_name() {
