@@ -155,6 +155,14 @@ run_dispatch fix-1 tk-anchor rig/rig.polecat
 { grep -q 'fix-1' "$FAKE_SLINGS" && grep -q 'rig/rig.polecat' "$FAKE_SLINGS"; } \
   && ok "anchored: rework child SLUNG to the fix pool (parentless root -> ready demand)" \
   || bad "anchored: rework child must be slung, not just linked+woken (got: $(cat "$FAKE_SLINGS"))"
+# The sling MUST carry the resume branch as base_branch so the rework worktree pours
+# from the PR head (origin/$FIX_BRANCH), NOT from metadata.target. This work order is
+# the branch≠target shape (branch=polecat/tk-work, target=main); without --var
+# base_branch, gc sling auto-computes base_branch from target=main and the rework
+# pours from main, where PR-only files are absent and its git ops fail (tk-qqgeo).
+grep -q 'var base_branch=polecat/tk-work' "$FAKE_SLINGS" \
+  && ok "anchored: sling passes --var base_branch=\$FIX_BRANCH (pours from PR head, not target=main)" \
+  || bad "anchored: sling must pass --var base_branch=\$FIX_BRANCH or the rework pours from main (tk-qqgeo) (got: $(cat "$FAKE_SLINGS"))"
 grep -qx 'rig/rig.polecat' "$FAKE_WAKES" \
   && ok "anchored: fix pool woken (latency nudge on top of the sling)" \
   || bad "anchored: fix pool not woken (got: $(cat "$FAKE_WAKES"))"
@@ -317,6 +325,12 @@ run_dispatch fix-10 tk-anchor rig/rig.polecat
 grep -q 'fix-10' "$FAKE_SLINGS" \
   && ok "post-open: a complete PR work order IS slung" \
   || bad "post-open: a complete work order must dispatch (got: $(cat "$FAKE_SLINGS"))"
+# Same single dispatch line, post-open branch value: FIX_BRANCH=pr-head (the PR head),
+# target=main — again branch≠target. Proves the one --var base_branch change covers
+# BOTH arms (pre-open REVIEW_BRANCH and post-open PR_HEAD both resolve into FIX_BRANCH).
+grep -q 'var base_branch=pr-head' "$FAKE_SLINGS" \
+  && ok "post-open: sling passes --var base_branch=\$FIX_BRANCH (PR head, not target=main)" \
+  || bad "post-open: sling must pass --var base_branch=\$FIX_BRANCH (tk-qqgeo) (got: $(cat "$FAKE_SLINGS"))"
 eq "$(wc -c < "$FAKE_MAIL" | tr -d ' ')" "0" "post-open: a complete PR work order does not escalate"
 
 # Same child, PR fields dropped — the write that survived makes it look fine.
