@@ -90,6 +90,9 @@ case "$1" in
     # answers — the only way to reach the last-resort env path, which is
     # otherwise shadowed by discovery.
     [ "${FAKE_LIST_BLIND:-0}" = "1" ] && { printf '[]\n'; exit 0; }
+    # FAKE_LIST_GARBAGE: bd reporting an error as a JSON OBJECT rather than the
+    # expected array — the shape that turns an unguarded `.[]` into a jq error.
+    [ "${FAKE_LIST_GARBAGE:-0}" = "1" ] && { printf '{"error":"store unavailable"}\n'; exit 0; }
     wstatus=""; wassignee=""
     for a in "$@"; do
       case "$a" in
@@ -268,6 +271,24 @@ eq "$RC" "2" "(UNRESOLVABLE) no own bead anywhere is a refusal"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(UNRESOLVABLE) nothing was written"
 has "$OUT" "cannot identify this session's bead" "(UNRESOLVABLE) says what it could not do"
 has "$OUT" "still OPEN and will be re-offered" "(UNRESOLVABLE) names the consequence"
+
+# --- 9b. bd answers with an error OBJECT, not an array -----------------------
+# A degraded store must refuse, not crash and not fall through to a guess. The
+# unguarded `.[]` on an object is a jq error, and a swallowed jq error is
+# indistinguishable from "no bead found".
+reset_beads
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" FAKE_LIST_GARBAGE=1 \
+      bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+eq "$RC" "2" "(GARBAGE) a non-array listing is a refusal, not a crash"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(GARBAGE) nothing was written"
+
+# --- 9c. a --bead hint naming a bead that does not exist ---------------------
+reset_beads
+run --step "$STEP" --bead tk-nosuch
+eq "$RC" "0" "(NO-SUCH-BEAD) an unknown hint falls through to discovery"
+has "$(cat "$FAKE_CLOSED")" "tk-9b3d8 pass" "(NO-SUCH-BEAD) the real bead is still closed"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-nosuch" "(NO-SUCH-BEAD) the phantom id was never written to"
 
 # --- 10. control characters in bd's JSON -------------------------------------
 reset_beads
