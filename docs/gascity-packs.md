@@ -119,22 +119,39 @@ named in the same error text is the legacy path, not a v2 option
 *bodies* must then do. That is where a v1 author's habits break, because the
 correct v1 ending is the incorrect v2 ending.
 
-**Every step body closes `$GC_BEAD_ID` on its way out.** Materialized step beads
-are ordinary beads wired together by `blocks` edges, so closing one is precisely
-what makes its dependents Ready. Nothing else advances the graph:
+**Every step body closes its own step bead on its way out.** Materialized step
+beads are ordinary beads wired together by `blocks` edges, so closing one is
+precisely what makes its dependents Ready. Nothing else advances the graph. The
+close carries the outcome:
 
 ```bash
-bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+--set-metadata gc.outcome=pass --status=closed
 # failure: gc.outcome=fail + gc.failure_class=transient|hard + gc.failure_reason
 ```
 
-Mirror the canonical bodies in the base `core` pack, which split the idiom
-across two files: `assets/prompts/graph-worker.md` carries the full outcome set
-verbatim — pass, plus `gc.outcome=fail` with `gc.failure_class=transient|hard`
-and a `gc.failure_reason`; `formulas/mol-do-work.toml` carries only the
+The base `core` pack's canonical bodies split that idiom across two files:
+`assets/prompts/graph-worker.md` carries the full outcome set verbatim — pass,
+plus `gc.outcome=fail` with `gc.failure_class=transient|hard` and a
+`gc.failure_reason`; `formulas/mol-do-work.toml` carries only the
 `gc.outcome=pass` + `--status=closed` closure and the terminal
 close-then-drain-ack ordering below (its `drain` step), and never names a
 failure class at all.
+
+**Mirror the outcome set, not the target: neither upstream body's `$GC_BEAD_ID`
+nor `$GC_TRIGGER_BEAD_ID` names the bead your step is executing.** This is the
+one place to deviate from the canonical bodies, because both spellings have been
+observed writing to the wrong bead — or to none:
+
+| spelling | what happens | how it fails |
+|---|---|---|
+| `$GC_BEAD_ID` | unset in the step-execution environment (tk-7w69a) | CLOSED — a guarded close short-circuits, the bead is never closed, and the graph re-offers the step forever at exit 0 |
+| `$GC_TRIGGER_BEAD_ID` | not refreshed by `gc hook --claim` (tk-niu2f), so it still names the session's spawn bead | OPEN — the close succeeds against *another live session's* in-progress step |
+
+Close through `assets/scripts/step-close.sh --step <formula>.<step-id>` instead.
+It resolves the target from the store by (`assignee`, `metadata."gc.step_ref"`)
+— a pair that names exactly one bead and cannot go stale across a claim — and
+refuses to write at all when it cannot prove which bead is yours. The pack's
+`doctor/check-step-close-owns-bead` holds the line.
 
 **`gc runtime drain-ack` is a session verb, not a step verb.** It tells the
 reconciler this session is finished; it closes no bead. So a step body that

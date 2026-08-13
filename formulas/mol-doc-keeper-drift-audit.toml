@@ -11,6 +11,28 @@ One pour = one audit run, poured periodically onto the polecat pool. Each filed
 bead (`task_kind=doc-update`, `target=main`, `merge_strategy=mr`) feeds the
 shared `doc-update` pipeline — a pool polecat edits the brief(s) under
 `mol-polecat-work` and the refinery opens one small PR to `main`.
+
+## How every step closes its own bead
+
+Each step below closes its bead with `assets/scripts/step-close.sh --step
+<this step's id>`, resolved into `$SC` at the top of each shell block. **Do
+not close a step bead any other way, and never on an id read from the
+environment.** The helper asks the store which in-progress bead has this
+session as its `assignee` and this step as its `metadata."gc.step_ref"` — a
+pair that identifies exactly one bead and cannot go stale.
+
+The two environment variables that look like the answer are both wrong.
+`$GC_BEAD_ID` is not populated in the step environment (tk-7w69a), so a close
+guarded on it short-circuits silently and the step is re-offered forever —
+this formula shipped with that bug. `$GC_TRIGGER_BEAD_ID` is worse (tk-niu2f):
+`gc hook --claim` does not refresh it, so it still names whatever the session
+was spawned with and the close succeeds against a *different* molecule's step
+bead, owned by a *different* live session.
+
+If the helper cannot prove which bead is yours it writes nothing and exits 2.
+Close it then by the id your `gc hook --claim --json` returned in `.bead_id`,
+and note that you did.
+
 """
 formula = "mol-doc-keeper-drift-audit"
 
@@ -51,7 +73,10 @@ a graph.v2 step advances by CLOSING its bead, and the same session continues
 (continuation-group affinity) into the next step:
 
 ```bash
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-drift-audit.prime --outcome pass
 ```
 """
 
@@ -67,6 +92,9 @@ not a stored baseline — is what makes a clean run file nothing.
 ## 1. Resolve the brief set and the repos
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 REPO="$(git rev-parse --show-toplevel)"
 MAX="{{audit_max_beads_per_run}}"
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
@@ -80,7 +108,7 @@ if [ -z "$BRIEFS" ]; then
   # Close this step bead before draining. A graph.v2 step advances by CLOSING
   # its bead; a drain-acking session that still owns an open assigned step bead
   # is parked and re-pooled, re-waking a fresh worker on this step forever.
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-drift-audit.audit-and-file --outcome pass
   gc runtime drain-ack
   exit 0
 fi
@@ -211,7 +239,10 @@ graph advances to `drain`. No drain-ack here — the same session continues
 (continuation-group affinity) to the terminal step.
 
 ```bash
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-drift-audit.audit-and-file --outcome pass
 ```
 
 **Exit criteria:** every brief was read and judged against its `## Scope`; each
@@ -239,7 +270,10 @@ Print a one-line summary (count filed this run vs deferred), close this step,
 then drain:
 
 ```bash
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-drift-audit.drain --outcome pass
 gc runtime drain-ack
 ```
 

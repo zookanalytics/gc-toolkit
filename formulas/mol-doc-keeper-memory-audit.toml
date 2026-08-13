@@ -19,6 +19,28 @@ filed bead (`task_kind=doc-update`, `target=main`, `merge_strategy=mr`) feeds
 the shared `doc-update` pipeline — a
 pool polecat promotes the learning under `mol-polecat-work` and the refinery
 opens one small PR to `main`.
+
+## How every step closes its own bead
+
+Each step below closes its bead with `assets/scripts/step-close.sh --step
+<this step's id>`, resolved into `$SC` at the top of each shell block. **Do
+not close a step bead any other way, and never on an id read from the
+environment.** The helper asks the store which in-progress bead has this
+session as its `assignee` and this step as its `metadata."gc.step_ref"` — a
+pair that identifies exactly one bead and cannot go stale.
+
+The two environment variables that look like the answer are both wrong.
+`$GC_BEAD_ID` is not populated in the step environment (tk-7w69a), so a close
+guarded on it short-circuits silently and the step is re-offered forever —
+this formula shipped with that bug. `$GC_TRIGGER_BEAD_ID` is worse (tk-niu2f):
+`gc hook --claim` does not refresh it, so it still names whatever the session
+was spawned with and the close succeeds against a *different* molecule's step
+bead, owned by a *different* live session.
+
+If the helper cannot prove which bead is yours it writes nothing and exits 2.
+Close it then by the id your `gc hook --claim --json` returned in `.bead_id`,
+and note that you did.
+
 """
 formula = "mol-doc-keeper-memory-audit"
 
@@ -51,6 +73,9 @@ is read-only and files no commits — it has no per-bead worktree and no refiner
 handoff.
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 gc prime                    # role context
 gc bd prime                 # beads context
 
@@ -65,7 +90,7 @@ if [ ! -d "$MEM" ]; then
   # its bead, not by drain-ack alone; a drain-acking session that still owns an
   # open assigned step bead is parked and re-pooled — a fresh worker re-wakes on
   # this same step forever. Closing it lets the graph reach workflow-finalize.
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-memory-audit.load-context --outcome pass
   gc runtime drain-ack
   exit 0
 fi
@@ -74,7 +99,7 @@ fi
 BRIEFS=$(cd "$REPO" && ls docs/gascity-*.md 2>/dev/null)
 if [ -z "$BRIEFS" ]; then
   echo "no docs/gascity-*.md briefs in this rig — nothing to promote into (no-op)."
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-memory-audit.load-context --outcome pass
   gc runtime drain-ack
   exit 0
 fi
@@ -83,7 +108,7 @@ echo "Auditing memory at $MEM against briefs:"; echo "$BRIEFS"
 # Non-terminal step complete: close this step bead so the graph advances to
 # scan-and-classify. No drain-ack — the same session continues (continuation-
 # group affinity), carrying $REPO / $MEM / $BRIEFS into the next step.
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-memory-audit.load-context --outcome pass
 ```
 
 **Exit criteria:** Environment primed; `$REPO`, `$MEM`, and `$BRIEFS` resolved;
@@ -213,7 +238,10 @@ to `file-and-dispatch`. No drain-ack — the same session continues (continuatio
 group affinity), carrying the survivor list forward into the next step.
 
 ```bash
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-memory-audit.scan-and-classify --outcome pass
 ```
 
 **Exit criteria:** A bounded list (≤ `{{max_beads_per_run}}`) of
@@ -235,9 +263,12 @@ one-shot.
 ## 1. Clean run? Drain.
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 if [ -z "$SURVIVORS" ]; then   # however you tracked the step-2 result
   echo "memory-audit: no in-scope gaps this run — nothing to file."
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-memory-audit.file-and-dispatch --outcome pass
   gc runtime drain-ack
   exit 0
 fi
@@ -288,10 +319,13 @@ bespoke worker formula.
 ## 3. Summarize and drain
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 echo "memory-audit complete: filed N bead(s) to main; deferred M to next cycle."
 # Terminal step: close this step bead, THEN drain. The dispatcher's
 # workflow-finalize closes the kind=workflow root once every step is closed.
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-doc-keeper-memory-audit.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```
 
