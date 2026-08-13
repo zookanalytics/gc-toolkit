@@ -406,17 +406,25 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
     the next command after an upgrade.
   - **`core` and `gastown` are different packs from different repos.** `core` is
     the bundled builtin — `gc-*` skills, default prompts, core formulas, orders,
-    doctor checks, provider overlays — and **ships no agents**; the crew
-    (`mayor`, `deacon`, `polecat`, `refinery`, `witness`, `boot`) is the
-    separate `gastown` pack. `core`, `bd` and `dolt` address subpaths of the
-    gascity main repo; `gastown` also publishes from the gascity-packs
+    doctor checks, provider overlays — and **ships no crew agents**, but it is
+    not agentless: it also contributes the scope-local `control-dispatcher`
+    lane (qualified `core.control-dispatcher`), a deterministic
+    `prompt_mode = "none"` worker that runs `gc convoy control --serve` over
+    formula-v2 control beads. So don't go looking in `gastown` for the
+    formula-v2 dispatcher: the **crew** (`mayor`, `deacon`, `polecat`,
+    `refinery`, `witness`, `dog`, `boot`) is the `gastown` pack, while the
+    control lane ships with `core`. `core`, `bd` and `dolt` address subpaths
+    of the gascity main repo; `gastown` also publishes from the gascity-packs
     registry.
 
   Don't read `gc pack list` as evidence here: "No remote packs configured"
   describes the legacy remote-registry mechanism, is orthogonal to `[imports]`,
   and does not mean no packs are loaded. (`cmd/gc/embed_builtin_packs.go`;
   `internal/builtinpacks/registry.go`, `MaterializeSyntheticRepo` /
-  `publicSubpathForPack`; `cmd/gc/import_state_doctor_check.go`. Verified
+  `publicSubpathForPack`; `cmd/gc/import_state_doctor_check.go`. Pack contents
+  from `internal/bootstrap/packs/core/` — its `pack.toml`, the `all:agents`
+  embed in `embed.go`, and `agents/control-dispatcher/agent.toml` — and the
+  `gastown` roster from the `gascity-packs` module the binary embeds. Verified
   against `gc 1.4.1`, built from fork `origin/main` at `3983cc049`, 2026-08-13.)
 - **`[[patches.agent]]` modifies, never creates.** A patch targets an existing
   agent by its bare local `name` (`dir = ""` in `pack.toml` matches by name
