@@ -47,7 +47,48 @@ elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
 fi
 if [ "$need_build" -eq 1 ]; then
-    ( cd "$MOD" && "$GO" build -o "$BIN" ./cmd/helm-svc )
+    # Keep the Go linker's and cgo's scratch off /tmp. /tmp is a size-capped
+    # tmpfs shared by the whole fleet; the linker maps its output object under
+    # $TMPDIR (and cgo's gcc ignores $GOTMPDIR), so a build left on the default
+    # /tmp leaks a multi-hundred-MB go-link dir on every failed link. Pin both
+    # to a root-fs path, per the Build Cache Conventions in gascity AGENTS.md.
+    # GOCACHE is deliberately NOT set: its default (~/.cache/go-build) is the
+    # correct warm on-disk cache and must not be redirected.
+    GOTMP=/var/tmp/gotmp
+    mkdir -p "$GOTMP"
+    # Publish a freshly built binary to $BIN only via an atomic rename from a
+    # scratch file beside it. Building `-o "$BIN"` in place would let a failed
+    # link truncate the live cached binary: the fallback below only tests
+    # `-x "$BIN"`, so a zero-byte or half-written file still passes as a
+    # servable binary and the final `exec` dies with "Exec format error",
+    # re-arming the crash-restart loop this guard exists to break. The scratch
+    # sits in $BIN_DIR (same filesystem as $BIN) so the rename is atomic;
+    # renaming over a running binary is safe on Linux (the old inode lives on
+    # for the running exec), unlike an in-place `-o` that truncates it.
+    # TMPDIR/GOTMPDIR still steer the linker's own scratch off the /tmp tmpfs.
+    build_ok=0
+    if BIN_TMP="$(mktemp "$BIN_DIR/.helm-svc.build.XXXXXX" 2>/dev/null)"; then
+        if ( cd "$MOD" && TMPDIR="$GOTMP" GOTMPDIR="$GOTMP" "$GO" build -o "$BIN_TMP" ./cmd/helm-svc ) && mv -f "$BIN_TMP" "$BIN"; then
+            build_ok=1
+        else
+            rm -f "$BIN_TMP"
+        fi
+    fi
+    if [ "$build_ok" -eq 0 ]; then
+        # No fresh binary was published and the live $BIN was never touched, so
+        # a rebuild failure (or an inability to stage the scratch) must not exit
+        # into an immediate supervisor restart: the rerun fails again, and that
+        # loop is what turns a transient failure into the self-sustaining outage
+        # this guards against. If a previously-built binary exists, keep serving
+        # it so the failure surfaces in logs instead of a crash-restart storm;
+        # with no binary to fall back on there is nothing to serve, so propagate.
+        if [ -x "$BIN" ]; then
+            echo "gc-helm-svc: rebuild failed; continuing to serve existing $BIN" >&2
+        else
+            echo "gc-helm-svc: build failed and no cached binary to serve" >&2
+            exit 1
+        fi
+    fi
 fi
 
 exec "$BIN" "$@"
