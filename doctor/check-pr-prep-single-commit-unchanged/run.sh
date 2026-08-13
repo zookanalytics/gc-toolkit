@@ -16,8 +16,19 @@
 #      must select today's upstream-pr/<short-sha> naming, not a batch name.
 #   3. workspace-setup keeps the N=1 branch rule: a `[ "$N" -eq 1 ]` arm that
 #      sets BRANCH="upstream-pr/$SHORT_SHA" from `rev-parse --short`.
-#   4. cherry-pick applies each SHA via a `for SHA in $COMMIT_SHA` loop running
-#      `git cherry-pick "$SHA"` (N=1 == one iteration == one pick).
+#   4. cherry-pick still iterates the ordered list one SHA at a time, running
+#      `git cherry-pick "$SHA"` per commit (N=1 == one iteration == one pick).
+#
+# Invariant 4 used to pin the literal `for SHA in $COMMIT_SHA`. That spelling
+# was itself a defect (tk-1c9vf): zsh — the shell an agent pastes these blocks
+# into — does NOT word-split an unquoted expansion, so a multi-commit batch
+# cherry-picked ONE ref made of every SHA joined together, which cannot
+# resolve. Pinning the broken spelling made this guard demand exactly what
+# doctor/check-formula-shell-portability now bans, so invariant 4 pins the
+# BEHAVIOUR (split the ordered list, one pick per SHA, read from a file so the
+# conflict arm's `exit 0` leaves the step rather than a subshell) and asserts
+# the old shape is gone. What N=1 must produce is unchanged either way: one
+# iteration, one pick.
 #
 # The shell-literal greps use -F (fixed strings): they assert the exact bash
 # the formula's polecat runs, not prose about it.
@@ -76,10 +87,20 @@ grep -qF 'rev-parse --short' "$file" || \
     violations+=("workspace-setup no longer derives the short sha via 'rev-parse --short'")
 
 # --- 4: cherry-pick applies each sha (N=1 == one pick). ---
-grep -qF 'for SHA in $COMMIT_SHA' "$file" || \
-    violations+=("cherry-pick no longer loops 'for SHA in \$COMMIT_SHA' over the ordered list")
+# The ordered list is still derived from $COMMIT_SHA, but split by awk rather
+# than by shell word-splitting that zsh declines to perform (tk-1c9vf).
+grep -qF '"$COMMIT_SHA" | awk' "$file" || \
+    violations+=("cherry-pick no longer splits the ordered list out of \$COMMIT_SHA")
+grep -qF 'while IFS= read -r SHA' "$file" || \
+    violations+=("cherry-pick no longer iterates the ordered list one SHA at a time")
+grep -qF 'done < "$SHA_LIST"' "$file" || \
+    violations+=("cherry-pick no longer reads the SHA list from a FILE -- a pipe would subshell the conflict arm's 'exit 0'")
 grep -qF 'git cherry-pick "$SHA"' "$file" || \
     violations+=("cherry-pick no longer runs 'git cherry-pick \"\$SHA\"' per commit")
+# The shape this guard used to REQUIRE is now banned outright: zsh runs it once
+# on every SHA joined into a single unresolvable ref.
+! grep -qF 'for SHA in $COMMIT_SHA' "$file" || \
+    violations+=("cherry-pick reintroduced 'for SHA in \$COMMIT_SHA' -- zsh does not word-split it (tk-1c9vf)")
 
 if [ ${#violations[@]} -eq 0 ]; then
     echo "mol-upstream-gc-pr-prep preserves the single-commit (N=1) path: required commit_sha, empty-default branch_name, upstream-pr/<short-sha> branch, per-sha cherry-pick"

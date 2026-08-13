@@ -317,7 +317,16 @@ open PRs, so its beads are reported rather than hidden.
 PRREPOS=$(jq -r '[ .[] | select((.metadata.merge_result // "") == "pull_request") | [ ((.metadata.pr_url // "") | ascii_downcase) | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]+") ] | .[0] | select(. != null) | (.h + "/" + .o) ] | unique | .[]' "$READY" 2>/dev/null)
 PRURLS=$(mktemp)
 PR_LIVENESS=none
-for R in $PRREPOS; do
+# `while read` from a FILE — never `for R in $PRREPOS`, and never a pipe.
+# zsh, the shell an agent actually pastes this block into, does NOT word-split
+# an unquoted expansion: the for-loop ran ONCE with every repository joined
+# into a single token, every read failed on that nonsense name, and the pass
+# reported `unverified` having asked about nothing (tk-1c9vf). A FILE rather
+# than `... | while read` because a pipe puts the loop in a SUBSHELL, and
+# $PR_LIVENESS — the entire point of the loop — would not survive it.
+PRREPO_LIST=$(mktemp)
+printf '%s' "$PRREPOS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$PRREPO_LIST"
+while IFS= read -r R; do
   # An `if`, not a `&&`: as the first statement in the loop body a false `&&`
   # is the body's exit status, which aborts the pass under `set -e`.
   if [ "$PR_LIVENESS" = "none" ]; then PR_LIVENESS=verified; fi
@@ -334,7 +343,7 @@ for R in $PRREPOS; do
     PR_LIVENESS=unverified
     echo "WARN: open-PR read FAILED for $R — its PR-parked beads are REPORTED this pass, never hidden; say so in the visit body" >&2
   fi
-done
+done < "$PRREPO_LIST"
 OPEN_PRS=$(jq -R . < "$PRURLS" | jq -sc 'map(select(length > 0))')
 # <<< open-prs
 ```
@@ -378,7 +387,15 @@ members — those members are worked, and the jq drops them.
 INPUT_CONVOYS=$(jq -r '[ .[] | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' "$ALIVE" 2>/dev/null)
 WORKED_TMP=$(mktemp)
 CONVOY_LIVENESS=none
-for C in $INPUT_CONVOYS; do
+# `while read` from a FILE, for the reasons spelled out on the open-prs loop
+# above: zsh does not word-split, so `for C in $INPUT_CONVOYS` ran the body
+# ONCE on every convoy id joined into one token. This is the loop the defect
+# was MEASURED on (bead sl-e7l4): under zsh, one WARN naming the joined string
+# and WORKED=[]; under bash, three ids resolved. The pass looked clean while
+# the class-1 discriminator did nothing at all (tk-1c9vf).
+CONVOY_LIST=$(mktemp)
+printf '%s' "$INPUT_CONVOYS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$CONVOY_LIST"
+while IFS= read -r C; do
   # An if, not a &&, as the loop body's first statement: a false && would be the
   # body's exit status and abort the pass under set -e (same as the open-prs loop).
   if [ "$CONVOY_LIVENESS" = "none" ]; then CONVOY_LIVENESS=verified; fi
@@ -395,7 +412,7 @@ for C in $INPUT_CONVOYS; do
     CONVOY_LIVENESS=unverified
     echo "WARN: convoy read FAILED for $C — the beads it tracks are REPORTED this pass, never hidden; say so in the visit body" >&2
   fi
-done
+done < "$CONVOY_LIST"
 WORKED=$(jq -R . < "$WORKED_TMP" | jq -sc 'map(select(length > 0)) | unique')
 # <<< worked-via-convoy
 ```
@@ -525,7 +542,11 @@ survivor's title and type, so nothing is re-derived against a newer listing.
 ```bash
 # >>> stamp-handoff
 DROPS_TMP=$(mktemp)
-for d in ${EDGE_DROPS:-}; do echo "$d" >> "$DROPS_TMP"; done
+# awk does the splitting, not the shell: `for d in ${EDGE_DROPS:-}` relied on
+# word-splitting that zsh does not perform, so a multi-id EDGE_DROPS landed in
+# the file as ONE joined line and dropped no candidate (tk-1c9vf). $EDGE_DROPS
+# is hand-set, space- OR newline-separated, so split on any whitespace.
+printf '%s' "${EDGE_DROPS:-}" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$DROPS_TMP"
 EDGE_DROPS_JSON=$(jq -R . < "$DROPS_TMP" | jq -sc 'map(select(length > 0))')
 SURVIVORS=$(printf '%s' "$CANDIDATES" | jq -c --argjson drop "$EDGE_DROPS_JSON" 'map(select(.id as $i | ($drop | index($i)) | not))')
 printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null || { echo "stamp-handoff: SURVIVORS is not a JSON array — do not close this step" >&2; exit 1; }
