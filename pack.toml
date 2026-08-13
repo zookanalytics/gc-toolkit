@@ -155,6 +155,16 @@ inject_fragments_append = [
     "file-feedback-observations",
     "learned-conventions-polecat",
 ]
+# Deterministic work-bead description delivery: overlays/work-context/ ships a
+# Claude `PostToolUse` hook that injects the work bead's own description right
+# after the polecat claims it. Upstream mol-polecat-work/mol-polecat-base read
+# the bead five times, always jq-filtered to one metadata field; the description
+# reaches the worker only through `load-context`'s prose `gc bd show`, which the
+# `implement` step never repeats and a mid-workflow respawn never runs. Both
+# paths degrade silently to title-only (tk-osf13). The hook self-gates to
+# GC_TEMPLATE polecat pools on the claude provider, so staging it elsewhere is a
+# no-op. doctor/check-work-context-hook guards the wiring.
+overlay_dir = "overlays/work-context"
 
 [[patches.agent]]
 name = "refinery"

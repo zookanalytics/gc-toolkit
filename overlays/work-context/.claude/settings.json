@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\"; S=\"${GC_DIR:-${CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/work-context.sh\"; [ -f \"$S\" ] && sh \"$S\" || true",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
