@@ -7,6 +7,15 @@
 # queue, nothing malformed. Two signal-loom workflows sat silent for 2h and 7h and
 # were found only because a human asked after the work by name.
 #
+# ...and from the OTHER direction (tk-1g9yw). The pass must file exactly ONE visit per
+# stalled workflow. The original dedupe keyed the marker on the root's last-touch — but
+# stamping the marker is a bd update, which bumps updated_at, the very field the key was
+# read from, so the same workflow re-flagged every stall window, minting a fresh visit
+# and a fresh converse session forever. One unrecoverable stall became a city-wide token
+# burn (24 converse sessions grinding 13-23h). The marker is now keyed on the frontier
+# set, with a visit-already-open guard as the primary bound; this check guards both, and
+# a reconciliation that drops either restores the amplifier as silently as the blind spot.
+#
 # Why a doctor check rather than trust. The call site lives in
 # formulas/mol-witness-patrol.toml, an ALLOWLISTED MIRROR of a base artifact (see
 # check-base-artifact-collision), so it is periodically reconciled against an upstream
@@ -71,12 +80,28 @@ else
     grep -q 'stall_flagged' "$dir/$script" \
         || errors+=("$script: the stall_flagged dedupe marker is gone — the witness patrol runs continuously, so every stalled workflow would be re-reported every pass")
 
+    # ...and the marker must be keyed on the FRONTIER set, never the root's last-touch.
+    # A last-touch key is self-defeating: stamping the marker is a bd update, every
+    # update bumps updated_at — the very field the key is read from — so one stall
+    # window later the SAME workflow re-flags, minting a fresh visit and converse
+    # session, forever. That was the token amplifier (tk-1g9yw).
+    grep -qF "stall_flagged=\$frontier_key" "$dir/$script" \
+        || errors+=("$script: the dedupe marker is no longer keyed on the frontier set — if it reverted to the last-touch timestamp, stamping it bumps updated_at and the same workflow re-flags every stall window (the amplifier tk-1g9yw)")
+
+    # The visit-already-open guard: ONE open visit per stalled root. A visit may sit
+    # open indefinitely (the operator gets to it), so without this guard a stall whose
+    # visit is still open is re-filed every pass, stacking a converse session each time
+    # — the same amplifier from the other direction. The guard matches open visits by
+    # the stall_root the visit is stamped with.
+    grep -qF "stall_root=\$root" "$dir/$script" \
+        || errors+=("$script: the visit-already-open guard is gone — a stalled workflow whose visit is still open would be re-filed every pass, stacking a converse session each time (the amplifier tk-1g9yw)")
+
     # ...and the marker may only be stamped over a signal that DURABLY routed. A visit
     # missing gc.routed_to/task_kind/gc.continuation_group is offered to no pool and
     # resolved by no board row, so a --set-metadata that exits 0 without persisting
     # would retire the stall on a bead nobody is ever handed — this pass's own defect,
     # re-created by the pass, with the dedupe marker asserting it was reported.
-    grep -q 'did not read back as routed and typed' "$dir/$script" \
+    grep -q 'did not read back as routed' "$dir/$script" \
         || errors+=("$script: the visit routing read-back is gone — the dedupe marker would be stamped over an unrouted visit, and the workflow goes silent again while the root records that it was signalled")
 
     # Rows are joined on US (0x1f), never a tab. Tab is IFS whitespace: empty interior
@@ -113,6 +138,8 @@ else
         || errors+=("$test_script: no unreadable-roster case — the fail-safe that stops every live molecule being reported is unproven")
     grep -q 'UNROUTED' "$dir/$test_script" \
         || errors+=("$test_script: no unrouted-visit case — that a routing write which exits 0 and persists nothing leaves the stall un-retired is unproven, and a stub that always agrees would never show it")
+    grep -q 'REPEAT' "$dir/$test_script" \
+        || errors+=("$test_script: no repeated-pass case — that ONE visit is filed per stalled bead across passes (the guard while the visit is open, the frontier marker once it is closed) is unproven, and a stub that never bumps updated_at would hide the re-flag amplifier tk-1g9yw fixed")
 fi
 
 # --- the call site ---------------------------------------------------------
