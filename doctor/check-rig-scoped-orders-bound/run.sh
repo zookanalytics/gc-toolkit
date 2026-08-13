@@ -29,14 +29,33 @@
 # doctor error at the moment the order is added, instead of a silent patrol
 # outage discovered days later through session-model findings.
 #
-# THE DURABLE FIX IS NOT HERE. Refusing to fire is better than emitting and
-# detecting, and that guard belongs in the discovery path (city scan must skip
-# an order that explicitly declares scope="rig"), which is gascity Go source,
-# not this pack — tracked as gc-xaqpf in the gascity rig, with the patch site
-# and the correct-vs-catastrophic detail written up in
-# specs/tk-gi2pc/rig-scoped-order-unbound-firing.md. This check is the pack-side
-# backstop: once that guard lands it is permanently green and becomes the
-# regression gate against a new rig-scoped order reintroducing the strand.
+# THE DURABLE FIX LANDED — this check is now the regression gate it was
+# written to become (gc-xaqpf, closed 2026-08-11). The guard lives where this
+# header always said it belonged, in the discovery path rather than this pack:
+# gascity internal/orderdiscovery/discovery.go, where ScanAll calls
+# dropUnboundRigScoped and removes the city-pass registration for any order
+# whose file explicitly declares scope="rig". The patch site and the
+# correct-vs-catastrophic detail are written up in
+# specs/tk-gi2pc/rig-scoped-order-unbound-firing.md.
+#
+# SO A GREEN VERDICT IS NOW THE EXPECTED ONE, and the load-time lines it comes
+# with are the fix working, not a symptom:
+#
+#   gc order list: order "liveness-sweep" declares scope = "rig": dropped the
+#   unbound city-scope registration nothing could claim (still registered on
+#   rig(s) …)
+#
+# Read that as evidence, not as a normalization hiding the defect from us. The
+# drop happens inside ScanAll — the single discovery entry point the FIRING
+# path consumes, not a display layer over it — and it is unconditional
+# (`OnUnboundRigScoped` is an optional log handler; a nil one still drops).
+# Nothing can fire unbound, which is why nothing is left for this check to
+# find. It still fails loudly if that guard is ever reverted, because the
+# dropped registration would reappear in `gc order list` with an empty rig.
+#
+# This distinction is not academic: reading those drop lines as a live defect
+# is what produced bead tk-0c7tw, which reported the check as "invisible to
+# its own condition" when it was simply green for the right reason.
 #
 # WHAT IS FLAGGED — a LIVE registration with no rig bound whose order file
 # declares scope="rig". Two ways an entry is judged, in priority order:
