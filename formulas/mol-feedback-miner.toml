@@ -20,6 +20,28 @@ generalizability: would this feedback apply to future changes, not just this
 one? The expected yield of a run is zero or a few beads; a run filing many
 observations is a smell that the distinction is being skipped, not a good
 harvest.
+
+## How every step closes its own bead
+
+Each step below closes its bead with `assets/scripts/step-close.sh --step
+<this step's id>`, resolved into `$SC` at the top of each shell block. **Do
+not close a step bead any other way, and never on an id read from the
+environment.** The helper asks the store which in-progress bead has this
+session as its `assignee` and this step as its `metadata."gc.step_ref"` —
+a pair that identifies exactly one bead and cannot go stale.
+
+Both environment variables that look like the answer are wrong.
+`$GC_BEAD_ID` is not populated in the step environment at all (tk-7w69a), so a
+close guarded on it short-circuits silently and the step is re-offered forever
+— the bug this formula shipped with. `$GC_TRIGGER_BEAD_ID` is worse
+(tk-niu2f): `gc hook --claim` does not refresh it, so it names whatever the
+session was spawned with and the close lands, successfully, on another
+molecule's bead. Observed 2026-08-13 with this formula's own
+`load-context` bead as the victim.
+
+If the helper cannot prove which bead is yours it writes nothing and exits 2.
+Close it then by the id your `gc hook --claim --json` returned in `.bead_id`,
+and note that you did.
 """
 formula = "mol-feedback-miner"
 
@@ -49,6 +71,9 @@ gh auth. There is no home-rig gate here, on purpose: per-rig mining is the
 point.
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 gc prime                    # role context
 gc bd prime                 # beads context
 
@@ -61,7 +86,7 @@ no_op() {
   # its bead, not by drain-ack alone; a drain-acking session that still owns an
   # open assigned step bead is parked and re-pooled — a fresh worker re-wakes on
   # this same step forever. Closing it lets the graph reach workflow-finalize.
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-miner.load-context --outcome pass
   gc runtime drain-ack
   exit 0
 }
@@ -78,7 +103,7 @@ echo "Mining $REPO_SLUG (window: last {{miner_window_days}} day(s))"
 # Non-terminal step complete: close this step bead so the graph advances to
 # mine-and-file. No drain-ack — the same session continues (continuation-group
 # affinity), carrying $REPO and $REPO_SLUG into the next step.
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-miner.load-context --outcome pass
 ```
 
 **Exit criteria:** Environment primed; `$REPO` and `$REPO_SLUG` resolved; gh
@@ -99,6 +124,9 @@ sweep is one-shot.
 ## 1. Enumerate the window's PRs
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 cd "$REPO"
 # GNU/BSD-portable window start (same pair as the precedented scripts).
 SINCE_EPOCH=$(( $(date -u +%s) - {{miner_window_days}} * 86400 ))
@@ -118,7 +146,7 @@ PRS=$( { echo "$MERGED"; echo "$CLOSED"; } | sed '/^$/d' | sort -un )
 
 if [ -z "$PRS" ]; then
   echo "feedback-miner: no PRs merged or closed in $REPO_SLUG since $SINCE — clean run."
-  [ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-miner.mine-and-file --outcome pass
   gc runtime drain-ack
   exit 0
 fi
@@ -236,10 +264,13 @@ naturally resumable.
 ## 6. Summarize and drain
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 echo "feedback-miner complete: read P PR(s); filed F observation(s); skipped S already-recorded; dropped D for the {{max_obs_per_run}} cap (window re-covers them next run)."
 # Terminal step: close this step bead, THEN drain. The dispatcher's
 # workflow-finalize closes the kind=workflow root once every step is closed.
-[ -n "${GC_BEAD_ID:-}" ] && gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-miner.mine-and-file --outcome pass
 gc runtime drain-ack
 ```
 

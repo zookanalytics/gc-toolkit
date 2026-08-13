@@ -78,14 +78,34 @@ Every arm below that decides not to proceed ends its own SHELL and closes its
 own step bead. It does NOT drain the session, and it never closes another
 step's bead.
 
-Each close below targets `$GC_TRIGGER_BEAD_ID` — the id of the step bead this
-shell was dispatched with. `$GC_BEAD_ID` is NOT populated in the
-step-execution environment (tk-7w69a): a close guarded on it short-circuits
-silently, the step bead is never closed, and the graph re-offers this same
-step forever with no error and exit status 0. So each site closes on
-`$GC_TRIGGER_BEAD_ID`, and when even that cannot be resolved it shouts to
-stderr rather than skipping quietly — an unresolvable step id is a stranded
-workflow, not a no-op.
+Every close below runs `assets/scripts/step-close.sh --step <this step's id>`,
+resolved into `$SC` at the top of each shell block. **Do not close a step bead
+any other way, and do not close one on an id taken from the environment.**
+
+The helper resolves which bead to close by asking the store: the in-progress
+bead whose `assignee` is this session and whose `metadata."gc.step_ref"` is
+the step named on the command line. That pair identifies exactly one bead, and
+it cannot go stale. Two environment variables have already been tried here and
+both are wrong:
+
+- `$GC_BEAD_ID` is not populated in the step-execution environment (tk-7w69a).
+  A close guarded on it short-circuits silently, the bead is never closed, and
+  the graph re-offers this same step forever with no error and exit status 0.
+  Fails CLOSED: nothing written, one workflow visibly stuck.
+- `$GC_TRIGGER_BEAD_ID` is not refreshed by `gc hook --claim` (tk-niu2f), so
+  after a claim it still names whatever the session was spawned with. Observed
+  2026-08-13: a session executing this very step held an id belonging to a
+  *different* molecule's in-progress step, owned by a *different* live
+  session. Fails OPEN: the close succeeds against someone else's bead, that
+  workflow loses a step it never ran, and this one stays open to be re-offered.
+  The `[ -n "$GC_TRIGGER_BEAD_ID" ]` guard cannot see it — the variable is set,
+  just to the wrong bead.
+
+If the helper cannot prove which bead is yours it writes nothing and exits 2,
+shouting to stderr. That is deliberate: an unclosed step bead stalls one
+workflow and is visible in the graph, while a wrong close silently corrupts
+two. On that message — and only then — close the bead by the id your own
+`gc hook --claim --json` returned in `.bead_id`, and say so in its notes.
 
 - Closing a step bead is what makes the NEXT step ready. It does not reach
   `workflow-finalize`: `judge-and-cluster` needs `load-and-gate` and
@@ -129,6 +149,9 @@ later step without it must not guess — re-run this step's §1-§3 to rebuild
 ## 1. Prime and home-rig gate
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 gc prime                    # role context
 gc bd prime                 # beads context
 
@@ -157,11 +180,7 @@ if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.
   # reach workflow-finalize. The two successor steps re-derive this same
   # home-rig gate and no-op through it, so staying in-session costs two hook
   # claims and the terminal step drains once, at the end.
-  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-  else
-    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-  fi
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.load-and-gate --outcome pass
   exit 0
 fi
 ```
@@ -176,6 +195,9 @@ close this step with `gc.outcome=fail` and file nothing; never judge on
 partial data.
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 # Rig set: a poured {{rig_list}} wins; otherwise attempt runtime enumeration.
 # (Build-validation V2, implementation-design §9: if enumeration is not
 # available in this runtime, rig_list must be poured on the order.)
@@ -213,11 +235,7 @@ if [ ! -s "$RIGSET" ]; then
   echo "FAIL-SAFE: no rig_list poured and rig enumeration returned nothing — DISTILL_RUN=aborted, nothing judged, nothing filed"
   # Close, end this shell, no drain-ack (§0): the successors read the aborted
   # disposition and no-op through it, and the terminal step drains once.
-  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-  else
-    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-  fi
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.load-and-gate --outcome fail
   exit 0
 fi
 echo "reading observations from stores: $(cut -f1 "$RIGSET" | tr '\\n' ' ')"
@@ -249,11 +267,7 @@ while IFS="$TAB" read -r R RPATH; do
   if ! jq -e 'type=="array"' "$RAW" >/dev/null 2>&1; then
     DISTILL_RUN=aborted
     echo "FAIL-SAFE: observation listing for store $R unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
-    if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-      gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-    else
-      echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-    fi
+    "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.load-and-gate --outcome fail
     exit 0   # no drain-ack (§0)
   fi
   # obs_rig_path rides along so step 4's stamping can reopen the SAME store it
@@ -350,6 +364,9 @@ provenance `pr:<owner/repo>#<n>:veto`), deduped on that provenance BEFORE filing
 a veto is recorded exactly once, ever.
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 if command -v gh >/dev/null 2>&1; then
   REPO_SLUG=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
   if [ -z "$REPO_SLUG" ]; then
@@ -403,11 +420,7 @@ fi
 # judge-and-cluster. No drain-ack — the same session continues (continuation-
 # group affinity), carrying $REPO, $PENDING, $DISTILL_RUN, and the rig set into
 # the next step.
-if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-  gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-else
-  echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-fi
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.load-and-gate --outcome pass
 ```
 
 Veto observations filed this sweep are judged by the NEXT gate-opening run —
@@ -440,16 +453,15 @@ ends by closing its OWN bead and its own shell, never by draining the session
 and never by closing `file-and-dispatch`'s bead:
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 # Re-derive the home-rig gate rather than trusting it was checked upstream: a
 # step that can wake on its own gates itself.
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — not the pack home rig; nothing to judge here."
-  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-  else
-    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-  fi
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.judge-and-cluster --outcome pass
   exit 0
 fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
@@ -457,11 +469,7 @@ if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   # Judge nothing AND propose nothing: the retirement pass below asks "no
   # recent evidence?", which is only answerable from a read that succeeded.
   echo "DISTILL_RUN=aborted — load-and-gate tripped a fail-safe; judging nothing, proposing nothing."
-  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-  else
-    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-  fi
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.judge-and-cluster --outcome fail
   exit 0
 fi
 ```
@@ -543,16 +551,15 @@ Pattern beads are the `triage-subject` idiom — standing records in THIS rig's
 store, open, unrouted, never assigned: ledger rows, not claimable work.
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 OPENB=$(mktemp)
 gc bd list --status=open --json --limit=0 > "$OPENB" 2>/dev/null
 if ! jq -e 'type=="array"' "$OPENB" >/dev/null 2>&1; then
   DISTILL_RUN=aborted
   echo "FAIL-SAFE: open-bead listing unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
-  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-  else
-    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-  fi
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.judge-and-cluster --outcome fail
   exit 0   # no drain-ack (§0): file-and-dispatch reads the aborted disposition and drains
 fi
 jq '[.[] | select((.metadata.task_kind // "") == "feedback-pattern") | {id, title, metadata}]' "$OPENB"
@@ -679,15 +686,14 @@ plus the pattern beads, so this is naturally resumable). Remember the base
 rate: most runs should end here with zero or one survivors.
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 # Non-terminal step complete: close this step bead so the graph advances to
 # file-and-dispatch. No drain-ack — the same session continues (continuation-
 # group affinity), carrying $DISTILL_RUN, the survivors, and the
 # consumed-observation map forward.
-if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-  gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-else
-  echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-fi
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.judge-and-cluster --outcome pass
 ```
 
 **Exit criteria:** Every observation in the judgeable set deduped and judged
@@ -719,24 +725,19 @@ path, including the no-op ones (`load-and-gate` §0). Two dispositions file
 nothing and stamp nothing:
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — not the pack home rig; no bead filed, no observation stamped."
-  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-  else
-    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-  fi
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
   gc runtime drain-ack
   exit 0
 fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   echo "DISTILL_RUN=aborted — a fail-safe tripped upstream; no bead filed, no observation stamped."
-  if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-    gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=fail --status=closed
-  else
-    echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-  fi
+  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.file-and-dispatch --outcome fail
   gc runtime drain-ack
   exit 0
 fi
@@ -910,17 +911,16 @@ gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 ## 4. Summarize and drain
 
 ```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
 echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s) (Gate 2), held/surfaced H pattern(s) (incl. Gate-1 blocks awaiting corroboration), V contention visit(s), discarded D (reasons logged above), stamped S observation(s)."
 # Terminal step: close this step bead, THEN drain. This is the ONLY drain-ack
 # in the workflow (load-and-gate §0) — every earlier arm closes its bead and
 # exits its shell, so the whole run, no-op paths included, stays in one
 # session. The dispatcher's workflow-finalize closes the kind=workflow root
 # once every step is closed.
-if [ -n "${GC_TRIGGER_BEAD_ID:-}" ]; then
-  gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-else
-  echo "FATAL: this step cannot resolve its own bead id (GC_TRIGGER_BEAD_ID unset) — it will be re-offered forever; close it by explicit id" >&2
-fi
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```
 
