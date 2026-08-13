@@ -1097,7 +1097,7 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
         UNARMED="child work order incomplete (${FIX_MISSING:-unreadable}); NOT slung"
       fi
       if [ -n "$FIX_BEAD" ] && [ -z "$UNARMED" ]; then
-        SLING_JSON=$(gc sling "$FIX_POOL" "$FIX_BEAD" --json 2>/dev/null)
+        SLING_JSON=$(gc sling "$FIX_POOL" "$FIX_BEAD" --var base_branch="$FIX_BRANCH" --json 2>/dev/null)
         SLING_RC=$?
         SLING_ROOT=$(printf '%s' "$SLING_JSON" \
           | jq -r '.workflow_id // .molecule_id // empty' 2>/dev/null)
@@ -1119,11 +1119,11 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
         # now), and to the mayor. Best-effort writes — the mail and the WARN carry the
         # same repair, so a dropped marker cannot silence the escalation.
         gc bd update "$FIX_BEAD" \
-          --set-metadata blocked_reason="filed but NOT dispatched to $FIX_POOL: $UNARMED. Repair: gc bd show $FIX_BEAD --json | jq '.[0].metadata' then gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
+          --set-metadata blocked_reason="filed but NOT dispatched to $FIX_POOL: $UNARMED. Repair: gc bd show $FIX_BEAD --json | jq '.[0].metadata' then gc sling $FIX_POOL $FIX_BEAD --var base_branch=$FIX_BRANCH" >/dev/null 2>&1 || true
         if [ -n "$ANCHOR" ]; then
           gc bd update "$ANCHOR" \
             --set-metadata gc.routed_to=human \
-            --set-metadata blocked_reason="rework $FIX_BEAD filed for this signoff round but NOT dispatched to $FIX_POOL ($UNARMED); it is cascade-blocked under this anchor, so no pool self-spawns for it. Repair: gc sling $FIX_POOL $FIX_BEAD" >/dev/null 2>&1 || true
+            --set-metadata blocked_reason="rework $FIX_BEAD filed for this signoff round but NOT dispatched to $FIX_POOL ($UNARMED); it is cascade-blocked under this anchor, so no pool self-spawns for it. Repair: gc sling $FIX_POOL $FIX_BEAD --var base_branch=$FIX_BRANCH" >/dev/null 2>&1 || true
         fi
         gc mail send mayor/ -s "ESCALATION: rework $FIX_BEAD filed but not dispatched to $FIX_POOL" \
           -m "Signoff returned REQUEST_CHANGES on ${REVIEW_BRANCH:-PR#${PR_NUMBER:-?}} and filed rework
@@ -1142,8 +1142,8 @@ force-push). If the work order is the thing that is missing, re-stamp it first:
 branch/target, source_review_bead, merge_strategy=mr, gc.routed_to, and — post-open
 only — existing_pr/pr_url/pr_number, or the polecat will open a second PR.
   gc bd show $FIX_BEAD --json | jq '.[0].metadata'
-  gc sling $FIX_POOL $FIX_BEAD" || true
-        echo "WARN: rework child $FIX_BEAD was filed but NOT dispatched to $FIX_POOL: $UNARMED (sling rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}'); mayor escalated${ANCHOR:+ and anchor $ANCHOR routed to human}. Repair: gc sling $FIX_POOL $FIX_BEAD" >&2
+  gc sling $FIX_POOL $FIX_BEAD --var base_branch=$FIX_BRANCH" || true
+        echo "WARN: rework child $FIX_BEAD was filed but NOT dispatched to $FIX_POOL: $UNARMED (sling rc=$SLING_RC, root '${SLING_ROOT:-none}', route '${SLING_ROUTE:-}'); mayor escalated${ANCHOR:+ and anchor $ANCHOR routed to human}. Repair: gc sling $FIX_POOL $FIX_BEAD --var base_branch=$FIX_BRANCH" >&2
       fi
       # <<< signoff-rework-dispatch
       ;;
