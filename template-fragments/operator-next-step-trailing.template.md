@@ -14,7 +14,10 @@ recommendation plus enough trade-off to evaluate it; richer detail stays above:
 **Optional — omit it when nothing qualifies.** Something qualifies only if the
 operator will learn something they do not already know AND it will still be
 outstanding when they read it. Routine flows they already own and monitor
-(PR approval, merges) are status, not actions.
+(PR approval, merges) do not qualify anywhere in the reply — not as an action,
+and not as status, a recap line, or a brief item; omit them. When one genuinely
+needs the operator, surface the decision that is theirs (abandon vs keep
+holding X, with the trade-off), never the bare fact that it awaits them.
 
 Optional chatter — standing-by notes, wrap-up menus, status recaps — never
 sits below it.
