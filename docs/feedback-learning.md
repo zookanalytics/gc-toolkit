@@ -87,6 +87,35 @@ it; the refinery opens the PR; **operator review of that PR is the
 gate**. The distiller records and proposes — it never edits a prompt,
 fragment, or skill, and neither does any capturing agent.
 
+### Two gates on promotion into always-injected content
+
+Not every earned pattern may be auto-adopted into the always-injected
+`learned-conventions-<role>` fragments. Two gates — defined in full in the
+`learning-distill` rubric, `skills/learning-distill/SKILL.md` — guard that
+surface:
+
+- **Source diversity (Gate 1).** A cluster that is entirely
+  `obs.source=self`, or whose `distinct_sources=1`, cannot auto-promote
+  into an always-injected fragment without an `obs.endorsed=operator`
+  observation — a self-report → self-promote → self-inject loop has no
+  external check. A blocked pattern is *surfaced* to the operator (held
+  with the block stated), never adopted; it promotes later on independent
+  corroboration (a second distinct source) or an explicit `learn this`
+  endorsement.
+- **Remedy class (Gate 2).** A remedy that is an exhortation ("be
+  thorough", "try harder") or that fixes a structural failure (a
+  verification gap, a race, a missing mechanical check) does not become a
+  prompt bullet — a bullet an agent can forget fails silently, since the
+  agent who forgets the behavior is the one who skips the bullet. It routes
+  instead to an **engineering work bead** (the promotion-time twin of the
+  retirement pass's *hardenable?* question). Only a concrete behavior keyed
+  to a concrete trigger promotes as prose.
+
+Both gates guard only the always-injected fragments; they do not apply to
+`learning-rubric` proposals against the skill, to retirements, or to
+hardens (see decisions D8/D9 in
+`specs/2026-08-learning-system/decisions.md`).
+
 ## The rule surface
 
 Adopted rules render into agent prompts via
@@ -99,9 +128,11 @@ comment:
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
 ```
 
-Each fragment holds at most **15 bullets**. A promotion that would
-exceed the cap must name the bullet it displaces — the weakest incumbent
-goes in the same PR, or the promotion does not file. The polecat
+Each fragment holds at most **15 bullets**. A promotion into one of these
+always-injected fragments must clear the two promotion gates above (source
+diversity, remedy class). A promotion that would exceed the cap must also
+name the bullet it displaces — the weakest incumbent goes in the same PR,
+or the promotion does not file. The polecat
 fragment is wired in both `pack.toml` (polecat patch) and
 `agents/polecat-codex/agent.toml` `inject_fragments`; the two lists are
 hand-synced.

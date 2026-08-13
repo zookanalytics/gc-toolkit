@@ -1,6 +1,6 @@
 ---
 name: Learning-System — Narrowing Decisions
-description: The operator rulings that narrow the 2026-08 learning-system exploration into a buildable shape — substrate, apply timing, promotion gate, rule reach, miner reach, the judgment-over-counters evidence model, and bead-count-driven cadence. Supersedes the numeric-threshold proposal in capture-promotion-pruning.md §B and the fixed cadences in the option docs.
+description: The operator rulings that narrow the 2026-08 learning-system exploration into a buildable shape — substrate, apply timing, promotion gate, rule reach, miner reach, the judgment-over-counters evidence model, bead-count-driven cadence, and the two always-injected-promotion gates. Supersedes the numeric-threshold proposal in capture-promotion-pruning.md §B and the fixed cadences in the option docs.
 ---
 
 # Learning-System — Narrowing Decisions
@@ -113,6 +113,41 @@ Effective cadence therefore scales with feedback volume: a heavy week
 distills daily, a quiet month distills once. The miner keeps a plain 24h
 cooldown (it sweeps external state; time-based is correct there).
 
+## D8. Promotion gate — source diversity: no self-only auto-adoption
+
+**Operator ruling, 2026-08-12** (visit tk-yohhf, subject tk-d9g0x / PR #330,
+closed unmerged): a pattern that is entirely `obs.source=self`, or whose
+`distinct_sources=1`, **cannot auto-promote into always-injected prompt
+content** (a `learned-conventions-<role>` fragment bullet) without an explicit
+`obs.endorsed=operator` observation. Self-report → self-promote → self-inject
+is a loop with no external check — the design intent of a learning rule is to
+encode a mistake an external voice (the operator, or an independent
+reviewer/miner signal) called out, not one an agent asserted about itself. A
+blocked pattern is *surfaced* to the operator, never auto-adopted; it promotes
+on independent corroboration (a second distinct source) or an operator
+`learn this`. The gate guards only the always-injected fragments —
+`learning-rubric` proposals, retirements, and hardens are exempt. This narrows
+D6: source diversity was a *weighed input*; for the always-injected surface it
+is now a *hard floor*.
+
+## D9. Promotion gate — remedy class: structural fixes are engineering, not prose
+
+**Operator ruling, 2026-08-12** (same visit): an observation whose remedy is an
+**exhortation** ("be thorough", "try harder", "don't declare done from a
+partial view") or that addresses a **structural failure** (a verification gap,
+a race, a missing mechanical check) does **not** promote into a prompt bullet —
+it routes to an **engineering work bead**. A prose bullet an agent can forget
+fails silently: the agent who would forget the behavior is the same one who
+skips the bullet telling them to remember. Structural failures need a
+mechanical fix (a lint, a doctor check, a gate, a code change); only a concrete
+behavior keyed to a concrete trigger promotes as prose. This is the
+promotion-time twin of the existing *hardenable?* retirement question (Option
+A's hardening ladder, adopted into D6's composite): rather than promote prose
+and retire it for a lint later, the distiller files the mechanism now. The
+discriminator and the alternate filing route live in
+`skills/learning-distill/SKILL.md` and `formulas/mol-feedback-distiller.toml`
+(`file-and-dispatch` §1b).
+
 ## Superseded / adjusted in the research docs
 
 - capture-promotion-pruning.md §B "Thresholds scale with blast radius" table
@@ -134,8 +169,9 @@ cooldown (it sweeps external state; time-based is correct there).
 ## What this settles, and what remains
 
 Settled: substrate, apply timing, gate, reach, miner shape, evidence model,
-cadence. The composite is Option B's spine + Option A's projection surface and
-hardening ladder + D6's reasoned promotion with a learnable rubric.
+cadence, and the two always-injected-promotion gates (D8 source diversity, D9
+remedy class). The composite is Option B's spine + Option A's projection
+surface and hardening ladder + D6's reasoned promotion with a learnable rubric.
 
 Remaining before build: draft the implementation design (formula/step-level,
 including the cross-rig distiller read and the rubric skill's first version)
