@@ -398,9 +398,14 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
     site, so a bundled source pinned at *any* other commit "is an ordinary
     remote import and is fetched for real" — trading offline resolution for a
     network fetch of a tree the binary cannot supply. Advance builtin packs by
-    installing a newer `gc` and letting `gc doctor --fix` / `gc import install`
-    re-pin: the `builtin-pack-imports` and `packv2-import-state` checks rewrite
-    superseded bundled pins for you. The cache marker is a content hash bound to
+    installing a newer `gc` and letting **`gc doctor --fix`** re-pin: its
+    `packv2-import-state` check rewrites superseded bundled pins for you
+    (`rewriteSupersededBundledPinsFS`). **`gc import install` does not re-pin** —
+    it collects the declared imports, syncs `packs.lock` and installs what is
+    locked, leaving the declared pin untouched; against a superseded pin it
+    fetches that exact superseded commit over the network. That is why the
+    not-cached remediation leads with the doctor and keeps `gc import install`
+    only as the fallback. The cache marker is a content hash bound to
     the running binary and every production config load routes through
     `ensureBuiltinPacksForConfigLoad`, so a cold or evicted cache self-heals on
     the next command after an upgrade.
