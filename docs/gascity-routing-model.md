@@ -29,7 +29,7 @@ poured is
 | PR #1736 closing comment (maintainer ruling) | julianknutsen | https://github.com/gastownhall/gascity/pull/1736#issuecomment-4504727391 | 2026-05-21 |
 | PR #1841 — `--reassign` flag (merged 2026-05-12) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/1841 (merge commit `44fcee6af60277f87aaa063f72dafeff7f705966`) | 2026-05-21 |
 | `TestDoSling_Reassign_NoOpWhenAlreadyEmpty` | gastown source | `rigs/gascity/internal/sling/sling_test.go:3809` (added in `043e61ea6cb99a9f89657e292c9459be8620714c`, observed at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17`) | 2026-05-21 |
-| Upstream tutorial `docs/tutorials/06-beads.md` — **superseded by PR #1736 ruling, not yet updated** | gastownhall/gascity | https://github.com/gastownhall/gascity/blob/19a0bb201eb6d1723a10eecdae20371bd8ceeb17/docs/tutorials/06-beads.md (last touched in `eac98595e701008087f7ee6acecbf55d5dca7794`) | 2026-05-21 |
+| Upstream tutorial `docs/tutorials/06-beads.md` — **rewritten repeatedly since the PR #1736 ruling, but never reconciled with it** | gastownhall/gascity | https://github.com/gastownhall/gascity/blob/207775a00b1a35e4ab4e05eceb6dc15bc2bead84/docs/tutorials/06-beads.md (last touched in `207775a00b1a35e4ab4e05eceb6dc15bc2bead84`, 2026-07-23). Not a stalled file: nine commits have touched it since the ruling-era `eac98595e701008087f7ee6acecbf55d5dca7794` (2026-05-16), rewriting over half of it (blob `c5c9527032d` → `6fb68f315`, 160 insertions / 148 deletions; measured from the `19a0bb201` pin this row previously cited, blob `63dc267d4`, it is 159 / 153). Four of those nine touched the `## How agents find work` section quoted at the end of this doc — `14153ed41` (#3073), `2315679e2` (#3461), `317e1cda6`, `207775a00` — and two rewrote the very steps at issue: `14153ed41` the claim step, `317e1cda6` the routing step. What survived every pass is the assignee-vs-`gc.routed_to` conflation the ruling settled, so the row's finding stands on a live reading, not on upstream inaction. | 2026-08-13 |
 | Upstream CLI reference (`--reassign` row only) | gastownhall/gascity | `rigs/gascity/docs/reference/cli.md:2789` at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17` | 2026-05-21 |
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
@@ -1082,16 +1082,27 @@ work, and the two have to be changed together.
 
 ## Note: upstream tutorial wording
 
-`docs/tutorials/06-beads.md` (upstream) still says, at line ~389:
+`docs/tutorials/06-beads.md` (upstream) still says, at line 399 of
+`207775a00`:
 
-> Work is routed to an agent (via assignee or `gc.routed_to`
-> metadata)
+> Work is routed to an agent (assignee or `gc.routed_to` metadata)
 
-This conflates Lanes 1 and 2 as parallel routing paths. It is
-superseded by the PR #1736 ruling and is expected to be updated by
-upstream on its own schedule. Per the gc-toolkit
-`upstream-engagement` posture, we do not pre-empt that update; this
-local doc is authoritative inside gc-toolkit until upstream catches
-up. The upstream `docs/reference/cli.md` already covers the
+This conflates Lanes 1 and 2 as parallel routing paths, and it is
+superseded by the PR #1736 ruling.
+
+Read that as a live finding, not as a backlog item. The enclosing
+`## How agents find work` section has been edited four times since the
+ruling, and two of those edits landed on the numbered steps themselves:
+`14153ed41` (#3073) replaced the claim step with the current "the hook
+atomically claims one ready bead and preassigns continuation siblings",
+and `317e1cda6` rewrote the routing step quoted above — changing it
+only by dropping the word *via*. So upstream has revised this exact
+passage, with the ruling already in hand, and kept the
+two-parallel-paths framing every time. Whatever the eventual correction
+looks like, it is not simply pending.
+
+Per the gc-toolkit `upstream-engagement` posture we still do not
+pre-empt it; this local doc is authoritative inside gc-toolkit
+meanwhile. The upstream `docs/reference/cli.md` already covers the
 mechanical `--reassign` flag (one table row at `cli.md:2789`); it
 does not cover the broader four-lane model.
