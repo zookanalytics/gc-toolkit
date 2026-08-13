@@ -2854,13 +2854,16 @@ has '^301$' "$TMP/merged" \
 # (SYNC) THE DUPLICATED IDENTITY RESOLVER MUST NOT DRIFT
 # =============================================================================
 # `pr_nums_here` — which PR a bead names, under every key, restricted to this
-# repository — exists in THREE places: this script, reconcile-merged-prs.sh, and
-# the signoff template's pre-dismissal guard. They are duplicated on purpose (each
-# script is standalone, and the third is instruction text a polecat executes, so
-# there is nothing to source), and every one of those files says "keep them in
-# step" in prose. Prose is not a mechanism: tk-5knqi finding #2 was precisely one
-# of the three drifting to `pr_number` alone, which stranded fork-keyed anchors in
-# the arm that was supposed to un-strand them, while the other two kept working.
+# repository — exists in FOUR places: this script, reconcile-merged-prs.sh, the
+# signoff template's pre-dismissal guard, and mol-refinery-patrol's held-anchor
+# escalation block. They are duplicated on purpose (each script is standalone, and
+# the last two are instruction text an agent executes, so there is nothing to
+# source), and every one of those files says "keep them in step" in prose. Prose is
+# not a mechanism: tk-5knqi finding #2 was precisely one of them drifting to
+# `pr_number` alone, which stranded fork-keyed anchors in the arm that was supposed
+# to un-strand them, while the others kept working — and tk-97tdf found the same
+# narrowing in the escalation gate's fingerprint, where it makes a fork-keyed
+# anchor's PR news invisible for a whole cooldown.
 #
 # So the invariant is checked rather than asked for. Whitespace-normalized, because
 # the template's copy is indented inside a jq program; everything else must match
@@ -2872,11 +2875,13 @@ extract_pnh() { # <file> -> the pr_nums_here definition, whitespace-normalized
 PNH_MS=$(extract_pnh "$SCRIPT")
 PNH_RC=$(extract_pnh "$(dirname "$SCRIPT")/reconcile-merged-prs.sh")
 PNH_TM=$(extract_pnh "$(dirname "$SCRIPT")/../../template-fragments/polecat-non-impl-done.template.md")
+PNH_FM=$(extract_pnh "$(dirname "$SCRIPT")/../../formulas/mol-refinery-patrol.toml")
 [ -n "$PNH_MS" ] \
   && ok "(SYNC) pr_nums_here found in merge-skill.sh (the reference copy)" \
   || bad "(SYNC) pr_nums_here not found in $SCRIPT"
 eq "$PNH_RC" "$PNH_MS" "(SYNC) reconcile-merged-prs.sh's copy is identical"
 eq "$PNH_TM" "$PNH_MS" "(SYNC) the signoff template's copy is identical"
+eq "$PNH_FM" "$PNH_MS" "(SYNC) mol-refinery-patrol's held-anchor copy is identical"
 # ...and it really does read all three keys, so three identical copies of a
 # NARROWED definition cannot pass this check quietly.
 hasin "$PNH_MS" 'pr_number' && hasin "$PNH_MS" 'fork_pr' && hasin "$PNH_MS" 'fork_pr_url' \

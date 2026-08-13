@@ -809,6 +809,30 @@ SCRIPTS_DIR=""
 for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
   if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
 done
+# The repository THIS checkout's origin names, host-qualified. A bead names its
+# PR by NUMBER, and `gh pr view <n>` resolves a number in whatever repository gh
+# considers CURRENT — `gh repo set-default`, GH_REPO, GH_HOST and cwd all move
+# it — so an unpinned read can fingerprint a stranger's same-numbered pull
+# request and then mail, or stay silent, on ITS state. It comes from the origin
+# remote, never from `gh`: gh's current repository is the hazard itself. Same
+# parse and same fail-closed rule as reconcile-merged-prs.sh's
+# ORIGIN_REPO_Q and check-set-heal.sh's resolve_origin_repo_q (the reference
+# implementation), in parameter expansion rather than their `sed` because a TOML
+# multi-line string cannot carry that expression's backslashes.
+ORIGIN_REPO_Q=""
+ORIGIN_URL=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
+case "$ORIGIN_URL" in
+  git@github.com:*)       ORIGIN_REPO_Q=${ORIGIN_URL#git@github.com:} ;;
+  https://github.com/*)   ORIGIN_REPO_Q=${ORIGIN_URL#https://github.com/} ;;
+  ssh://git@github.com/*) ORIGIN_REPO_Q=${ORIGIN_URL#ssh://git@github.com/} ;;
+esac
+ORIGIN_REPO_Q=${ORIGIN_REPO_Q%.git}
+while [ "${ORIGIN_REPO_Q%/}" != "$ORIGIN_REPO_Q" ]; do ORIGIN_REPO_Q=${ORIGIN_REPO_Q%/}; done
+case "$ORIGIN_REPO_Q" in
+  */*/*|/*|*/) ORIGIN_REPO_Q="" ;;
+  */*)         ORIGIN_REPO_Q="github.com/$ORIGIN_REPO_Q" ;;
+  *)           ORIGIN_REPO_Q="" ;;
+esac
 # tr -d strips control characters BEFORE jq: bd emits them from prose notes and
 # jq rejects every unescaped one, including a plain tab. An unsanitized read
 # fails the jq calls below and leaves STATE empty, which the gate reads as "no
@@ -816,18 +840,56 @@ done
 # character CLASS, not a numeric-escape range, because this block lives in a
 # TOML multi-line string that would eat the backslashes.
 ROW=$(gc bd show <anchor> --json 2>/dev/null | tr -d '[:cntrl:]')
-PR=$(printf '%s' "$ROW" | jq -r '.[0].metadata.pr_number // empty' 2>/dev/null)
+# WHICH pull request this anchor names, read from EVERY key a bead names one
+# with — pr_number, fork_pr, and a number scanned out of fork_pr_url — and
+# restricted to this repository. From `pr_number` ALONE, as this did, an anchor
+# keyed only by fork_pr/fork_pr_url — what the fork-sync flow stamps, and it
+# stamps no pr_number at all — takes the NO-PR branch below and is fingerprinted
+# from its bead, so a head move, an approval, or a mergeStateStatus change on
+# the very PR holding it is invisible to this gate until the cooldown expires:
+# the exact "suppress repetition, never news" contract this block exists to
+# keep. Byte-for-byte merge-skill.sh's `pr_nums_here`, which
+# reconcile-merged-prs.sh already duplicates for the same question about the
+# same anchors (assets/scripts/reconcile-merged-prs.sh:704 documents why); each
+# copy is standalone by design — this one is instruction text an agent runs, so
+# there is nothing to source — and merge-skill.test.sh's (SYNC) check compares
+# all four character for character, so a narrowing here fails there.
+PR_SELF_JQ='
+def pr_nums_here($o):
+  ( [ (.metadata.pr_number // empty), (.metadata.fork_pr // empty) ] | map(tostring) )
+  + ( ((.metadata.fork_pr_url // "") | tostring)
+      | [ capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<r>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
+      | .[0]
+      | if . == null then []
+        elif ($o == "" or (.h + "/" + .r) == $o) then [ .n ]
+        else [] end )
+  | map(select(test("^[0-9]+$"))) | unique;
+'
+PR_NUMS=$(printf '%s' "$ROW" | jq -r --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'.[0] | pr_nums_here($o) | join(" ")' 2>/dev/null)
+# EXACTLY ONE in-repo number or nothing, which is merge-skill.sh's rule for the
+# same question: zero says the anchor names no PR here, several says it names
+# more than one and neither answers "which PR holds this anchor".
+PR=""
+PR_AMBIGUOUS=""
+case "$PR_NUMS" in
+  "")    PR="" ;;
+  *" "*) PR_AMBIGUOUS=1 ;;
+  *)     PR="$PR_NUMS" ;;
+esac
 # ONE CHANNEL, ONE SHAPE OF FINGERPRINT. A PR-backed anchor is fingerprinted
 # from the PR — head oid, reviewDecision, mergeStateStatus, the three inputs
 # that actually hold it — and an anchor with no PR yet (pre_open_gate) from the
 # bead. They are NOT substitutes: sending the bead one on the PR one's channel
 # compares unequal in both directions, so a gh outage mails when it starts AND
 # again when it ends, a flap through the cooldown driven by GitHub's
-# availability rather than by news.
+# availability rather than by news. Which is why an anchor that names a PR this
+# pass cannot READ — no resolvable origin to pin the number to, or two numbers
+# and no way to choose — degrades below instead of borrowing the bead shape.
 KIND=refinery
-if [ -n "$PR" ]; then
-  STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
-else
+STATE=""
+if [ -n "$PR" ] && [ -n "$ORIGIN_REPO_Q" ]; then
+  STATE=$(gh pr view "$PR" --repo "$ORIGIN_REPO_Q" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
+elif [ -z "$PR" ] && [ -z "$PR_AMBIGUOUS" ]; then
   STATE=$(printf '%s' "$ROW" | jq -r '.[0] | [
     (.status // "-"),
     (.metadata.merge_result // "-"),
@@ -841,10 +903,18 @@ if [ -z "$STATE" ]; then
   # and nothing that varies while it is, so a degraded read mails once and then
   # rides its own cooldown for the length of the outage.
   KIND=refinery-degraded
-  if [ -n "$PR" ]; then STATE="unavailable/gh/pr-$PR"; else STATE="unavailable/bead/<anchor>"; fi
+  if [ -n "$PR_AMBIGUOUS" ]; then
+    STATE="unavailable/ambiguous-pr/<anchor>"
+  elif [ -n "$PR" ] && [ -z "$ORIGIN_REPO_Q" ]; then
+    STATE="unavailable/origin-repo/pr-$PR"
+  elif [ -n "$PR" ]; then
+    STATE="unavailable/gh/pr-$PR"
+  else
+    STATE="unavailable/bead/<anchor>"
+  fi
 fi
 BODY="Anchor: <anchor>
-PR: ${PR:-none}
+PR: ${PR:-${PR_NUMS:-none}}
 Observation: <why this specific anchor cannot proceed without a human>
 Recommendation: <what the human must do>"
 if [ -n "$SCRIPTS_DIR" ]; then

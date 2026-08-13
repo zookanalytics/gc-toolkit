@@ -61,6 +61,15 @@
 #   - substituting a differently-shaped fingerprint when `gh` fails -> it compares
 #     unequal in BOTH directions, so the item mails when the outage starts and
 #     again when it ends, a flap driven by GitHub's availability (DEGRADED)
+#   - resolving the anchor's PR from `pr_number` alone -> the fork-sync flow stamps
+#     fork_pr/fork_pr_url and no pr_number, so a live fork-keyed anchor takes the
+#     no-PR branch and is fingerprinted from its bead: a head move, an approval or
+#     a mergeStateStatus change on the PR actually holding it is invisible until
+#     the cooldown expires (FORKPR, FORKPRURL)
+#   - reading that number with an unpinned `gh pr view` -> gh resolves a bare
+#     number in whatever repository it considers current, so a drifted default
+#     fingerprints a stranger's same-numbered PR and both the suppression and the
+#     news come from an unrelated repo (PINNED, NOORIGIN)
 #   - calling the gate bare instead of `if ! ...; then echo` -> a gate that
 #     refuses (it could not BOUND the escalation) takes the best-effort idle pass
 #     down with it (GATEFAIL)
@@ -212,11 +221,21 @@ make_gh 0
 # Not a repo, unless a case exports STUB_TOPLEVEL. Without this the middle
 # resolution candidate would find the real gc-toolkit checkout and the
 # "nothing resolves" case could never be tested.
+#
+# It DOES have an origin remote, because the wiring pins its PR reads to the
+# repository that remote names. `${STUB_ORIGIN_URL-<default>}` (not `:-`) so a
+# case can set it to "" to model a checkout with no origin at all — the shape
+# that must degrade rather than read a number in whatever repo gh points at.
 cat > "$TMP/bin/git" <<'GIT'
 #!/usr/bin/env bash
 if [ "${1:-}" = "rev-parse" ] && [ "${2:-}" = "--show-toplevel" ]; then
   [ -n "${STUB_TOPLEVEL:-}" ] || exit 128
   echo "$STUB_TOPLEVEL"; exit 0
+fi
+if [ "${1:-}" = "remote" ] && [ "${2:-}" = "get-url" ]; then
+  url="${STUB_ORIGIN_URL-https://github.com/zookanalytics/gc-toolkit.git}"
+  [ -n "$url" ] || exit 128
+  printf '%s\n' "$url"; exit 0
 fi
 exit 0
 GIT
@@ -321,6 +340,84 @@ GHARGV="$(gh_argv)"
 has "headRefOid"       "$GHARGV" "GHCALL: fingerprints the head oid (a push is news)"
 has "reviewDecision"   "$GHARGV" "GHCALL: fingerprints the review decision (an approval is news)"
 has "mergeStateStatus" "$GHARGV" "GHCALL: fingerprints the merge state (a gate clearing is news)"
+
+# --- PINNED: the PR read is pinned to the ORIGIN remote's repository ----------
+# `gh pr view <n>` resolves a bare number in whatever repository gh considers
+# current — set-default, GH_REPO, GH_HOST and cwd all move it — and every other
+# PR read in this rig is pinned for exactly that reason. Unpinned, a drifted gh
+# fingerprints a stranger's PR #55: the gate then mails on ITS head moves and
+# stays silent through the real one's, suppression and news both decided by an
+# unrelated repository.
+has "--repo" "$GHARGV" "PINNED: the PR read carries --repo"
+eq "$(arg_after gh-args.json --repo)" "github.com/zookanalytics/gc-toolkit" \
+   "PINNED: pinned to the origin remote's repository, host-qualified"
+
+# --- FORKPR: an anchor keyed by fork_pr is PR-backed --------------------------
+# THE REVIEWED DEFECT (tk-97tdf). The fork-sync flow stamps fork_pr/fork_pr_url
+# and NO pr_number at all, so a resolver reading pr_number alone sends a live
+# fork-keyed anchor down the no-PR branch and fingerprints it from its bead —
+# where a head move, an approval, or a mergeStateStatus change does not appear.
+# The PR holding it can go from BLOCKED to clean and this gate cannot tell.
+reset
+make_gate "$TMP/rig/assets/scripts"
+printf 'fork_pr|77\n' >> "$STUB_LOG/meta"
+PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-held-anchor.sh" >/dev/null 2>&1
+eq "$(gate_arg --state)" "oid123/APPROVED/BLOCKED" \
+   "FORKPR: a fork_pr anchor is fingerprinted from its PR, not from its bead"
+eq "$(arg_after gh-args.json view)" "77" "FORKPR: and the number read is fork_pr's"
+has "77" "$(gate_arg --body)" "FORKPR: the body names the PR too (it said 'none' before)"
+
+# --- FORKPRURL: the number scanned out of fork_pr_url, repo-filtered ----------
+reset
+make_gate "$TMP/rig/assets/scripts"
+printf 'fork_pr_url|https://github.com/zookanalytics/gc-toolkit/pull/88\n' >> "$STUB_LOG/meta"
+PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-held-anchor.sh" >/dev/null 2>&1
+eq "$(arg_after gh-args.json view)" "88" "FORKPRURL: an in-repo fork_pr_url names the anchor's PR"
+eq "$(gate_arg --kind)" "refinery" "FORKPRURL: on the real channel, not the degraded one"
+# ...and a fork_pr_url pointing somewhere else is NOT this anchor's PR. It is the
+# one key that carries a repository in its own value, so it is the one that can be
+# checked — reading its number anyway would fingerprint a foreign PR.
+reset
+make_gate "$TMP/rig/assets/scripts"
+printf 'fork_pr_url|https://github.com/someone/elsewhere/pull/88\n' >> "$STUB_LOG/meta"
+PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-held-anchor.sh" >/dev/null 2>&1
+has "pre_open_gate" "$(gate_arg --state)" \
+    "FORKPRURL: a foreign fork_pr_url does not make the anchor PR-backed here"
+[ ! -s "$STUB_LOG/gh-args.json" ] \
+  && ok "FORKPRURL: and no PR in another repository was read" \
+  || bad "FORKPRURL: read PR 88 out of a repository this checkout does not own ($(gh_argv))"
+
+# --- NOORIGIN: an unresolvable origin degrades, it does not read unpinned -----
+# Fail closed, as merge-skill.sh and reconcile-merged-prs.sh do: a repository this
+# checkout cannot name is one the number cannot be pinned to, and an unpinned read
+# is the drift hazard itself. One degraded escalation costs a cooldown; a wrong
+# fingerprint mutes the real anchor for one.
+reset
+make_gate "$TMP/rig/assets/scripts"
+PR_NUMBER=55 STUB_ORIGIN_URL="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
+  bash "$TMP/escalation-wiring-held-anchor.sh" >/dev/null 2>&1
+eq "$(gate_arg --kind)" "refinery-degraded" \
+   "NOORIGIN: no resolvable origin -> the degraded channel, not an ambient read"
+has "unavailable" "$(gate_arg --state)" "NOORIGIN: --state names what is unavailable"
+has "pr-55" "$(gate_arg --state)" "NOORIGIN: and which PR could not be pinned"
+hasnt "pre_open_gate" "$(gate_arg --state)" \
+      "NOORIGIN: does NOT borrow the bead shape on the PR channel"
+[ ! -s "$STUB_LOG/gh-args.json" ] \
+  && ok "NOORIGIN: gh was never called without a pin" \
+  || bad "NOORIGIN: gh ran unpinned ($(gh_argv))"
+
+# --- AMBIG: two in-repo numbers is not an invitation to pick one --------------
+reset
+make_gate "$TMP/rig/assets/scripts"
+printf 'fork_pr|77\n' >> "$STUB_LOG/meta"
+PR_NUMBER=55 GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-held-anchor.sh" >/dev/null 2>&1
+eq "$(gate_arg --kind)" "refinery-degraded" \
+   "AMBIG: an anchor naming two PRs here degrades rather than choosing arbitrarily"
+hasnt "pre_open_gate" "$(gate_arg --state)" \
+      "AMBIG: and does not substitute the bead fingerprint on the PR channel"
+[ ! -s "$STUB_LOG/gh-args.json" ] \
+  && ok "AMBIG: neither candidate was read" \
+  || bad "AMBIG: read one of two ambiguous candidates ($(gh_argv))"
 
 # --- NOPR: a pre-open anchor with no PR still gets a real fingerprint ---------
 reset
