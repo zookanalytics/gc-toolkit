@@ -492,11 +492,19 @@ STALE_H="${STALE_H:-12}"
 NOW=$(date +%s)
 # Portable mtime: GNU (-c), BSD/macOS (-f), 0 when the file is absent.
 mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
-# One-line form of the list, so a root-level finding can name every affected
-# database on a single line. The unquoted expansion is the point: it collapses
-# the newline-separated list.
-# shellcheck disable=SC2086,SC2116
-DB_NAMES="$(echo $EXPECTED_DBS)"
+# Split the list ONCE, with awk rather than with shell word-splitting, and
+# derive both forms from it: one name per line for the loop below, and the
+# space-joined one-liner a root-level finding names every affected database on.
+# Both used to lean on splitting an unquoted expansion, which zsh — the shell
+# this snippet is pasted into — does not perform (tk-1c9vf): `for name in
+# $EXPECTED_DBS` ran ONCE on every name joined into a single token, and
+# DB_NAMES stayed newline-separated, so the `case " $DB_NAMES "` membership
+# test below matched nothing and called every live database's backup directory
+# an orphan. $EXPECTED_DBS arrives newline-separated from jq and
+# space-separated from the test's fixture, so split on any whitespace.
+DB_LIST=$(mktemp)
+printf '%s' "$EXPECTED_DBS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$DB_LIST"
+DB_NAMES=$(awk '{ if (s == "") s = $0; else s = s " " $0 } END { print s }' "$DB_LIST")
 
 if [ -z "$EXPECTED_DBS" ]; then
     echo "FLAG-ROOT: health report listed no databases - cannot verify any backup"
@@ -505,7 +513,7 @@ elif [ ! -d "$BACKUP_ROOT" ]; then
 elif [ -z "$(ls -A "$BACKUP_ROOT" 2>/dev/null)" ]; then
     echo "FLAG-ROOT: backup root $BACKUP_ROOT is empty - NO restorable backup for: $DB_NAMES"
 else
-    for name in $EXPECTED_DBS; do
+    while IFS= read -r name; do
         db="$BACKUP_ROOT/$name"
         if [ ! -d "$db" ]; then
             echo "FLAG $name: no backup directory at $db - never backed up"
@@ -590,7 +598,7 @@ else
         else
             echo "OK $name: manifest is newest, ${age_h}h old"
         fi
-    done
+    done < "$DB_LIST"
     for d in "$BACKUP_ROOT"/*/; do
         [ -d "$d" ] || continue
         extra="${d%/}"; extra="${extra##*/}"
