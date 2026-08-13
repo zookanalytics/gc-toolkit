@@ -80,12 +80,32 @@
 #   suspended rig     needs no test: this pass runs FROM the rig's own witness patrol,
 #                     so a rig that is stopped runs no patrol and emits no signal.
 #
-# ONE SIGNAL PER STALLED WORKFLOW, NOT ONE PER PASS. The marker `stall_flagged=
-# <last-touch>` on the root is keyed to the OBSERVATION, exactly as
-# recover-stranded-branches.sh keys `stranded_branch_flagged` to `<branch>@<tip>`.
-# A workflow that stays stuck keeps the same last-touch and is never re-reported; one
-# that advances and stalls again has a new last-touch and is reported once more. The
-# patrol runs continuously, so a per-pass signal would be a per-minute signal.
+# ONE SIGNAL PER STALLED WORKFLOW, NOT ONE PER PASS. Two independent guards, because
+# the marker alone was self-defeating (tk-1g9yw):
+#
+#   visit-already-open  the PRIMARY guarantee. Before filing, this pass skips a root
+#                       that already has an OPEN visit naming it (stall_root=<root>),
+#                       exactly as mol-liveness-sweep and mol-triage-recurrence skip a
+#                       subject whose visit is already live. One open visit per stalled
+#                       root, however many passes run and however the frontier shifts. A
+#                       visit may sit open indefinitely — the operator gets to it — so
+#                       this guard, not any timer, is what bounds the converse fleet.
+#   stall_flagged       the BACKSTOP, for after a visit has been closed. Keyed to the
+#                       OBSERVATION — the sorted frontier bead-id set — the way
+#                       recover-stranded-branches.sh keys `stranded_branch_flagged` to
+#                       `<branch>@<tip>`. A workflow that stays stuck keeps the same
+#                       frontier and is never re-reported; one that advances and stalls
+#                       again has a DIFFERENT frontier and is reported once more.
+#
+# The marker was ORIGINALLY keyed to the root's last-touch (max updated_at over the root
+# and its members), and that was a self-defeating key: stamping the marker is a `bd
+# update`, every update sets updated_at = now, so the dedup WRITE bumped the very field
+# the dedup KEY was read from. One stall window later the recomputed last-touch no longer
+# matched the stored marker, the SAME workflow was re-flagged, and a fresh visit — and a
+# fresh converse session — was minted, forever. That is the amplifier tk-1g9yw was filed
+# on. The frontier set is not in the last-touch computation, so stamping the root cannot
+# invalidate it. The patrol runs continuously, so a per-pass signal would be a per-minute
+# signal.
 #
 # NOT set -e: best-effort, must never abort the witness patrol mid-pass. Any tool
 # error skips that root and retries next cycle. FAIL-SAFE DIRECTION throughout: a
@@ -291,7 +311,7 @@ resolve_subject() {
 }
 
 stalled=0; moving=0; unheld_skip=0; never_started=0; landed=0; held=0; gated=0
-claimable=0; already=0; failed=0; unreadable=0
+claimable=0; already=0; visit_open=0; failed=0; unreadable=0
 
 while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rtitle; do
   [ -n "${root:-}" ] || continue
@@ -423,18 +443,53 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
     claimable=$((claimable + 1)); continue
   fi
 
-  # Deduped on the OBSERVATION, not the workflow: a stall that has not moved keeps
-  # the same last-touch and is never re-reported, while a workflow that advances and
-  # stalls again earns exactly one more signal.
-  marker=$(date -u -d "@$last" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
-  [ -n "$marker" ] || marker="$last"
-  if [ "$rflagged" = "$marker" ]; then
+  # A stable per-observation dedup key: the SORTED frontier bead-id set. That set is
+  # exactly what makes the workflow stalled, it does not change while the workflow sits,
+  # and it changes the instant the workflow advances (a ready bead closes, a new one
+  # unblocks). Crucially it is NOT the root's updated_at, so stamping stall_flagged on
+  # the root — which, like every bd update, bumps updated_at — cannot invalidate the key
+  # it just wrote. That self-defeating dependency was the amplifier (tk-1g9yw). Sorted
+  # so the key is independent of the order `gc bd ready` happened to return the members.
+  frontier_key=$(printf '%s' "$frontier" | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ',' | sed 's/,$//')
+
+  # Display-only last-movement timestamp, for the log line and the visit body; NEVER the
+  # dedup key. Derived from the last-touch, which the marker no longer depends on.
+  last_iso=$(date -u -d "@$last" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+  [ -n "$last_iso" ] || last_iso="$last"
+  hours=$((silent_for / 3600)); mins=$(((silent_for % 3600) / 60))
+
+  # (5) NOT ALREADY UNDER CONVERSATION — the primary one-visit guarantee. If an OPEN
+  # visit already names this root (stall_root=$root), the conversation exists and a
+  # second visit would just pile another converse session on the same stall: the exact
+  # amplifier this pass must not become. Mirrors the visit-already-live guard in
+  # mol-liveness-sweep and mol-triage-recurrence, keyed PER ROOT because this pass files
+  # one visit per root rather than one batch visit per subject. FAIL-SAFE like every
+  # other read here: an unreadable listing cannot prove no visit is open, so it skips
+  # rather than risk the duplicate — the same direction (report nothing) the roster and
+  # member reads take.
+  OPEN_VISITS=$(bd_pinned list --status=open,in_progress --metadata-field "stall_root=$root" \
+    --limit=0 --json 2>/dev/null)
+  if [ -z "$OPEN_VISITS" ] || ! printf '%s' "$OPEN_VISITS" | scrub | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "detect-stalled-workflows: root $root — open-visit listing unreadable; skipped, so a second visit is never filed on a read that did not happen" >&2
+    unreadable=$((unreadable + 1)); continue
+  fi
+  open_visits_n=$(printf '%s' "$OPEN_VISITS" | scrub \
+    | jq -r '[.[] | select(((.metadata // {}).task_kind // "") == "visit")] | length' 2>/dev/null)
+  [ -n "$open_visits_n" ] || open_visits_n=0
+  if [ "$open_visits_n" -gt 0 ]; then
+    visit_open=$((visit_open + 1)); continue
+  fi
+
+  # (6) NOT THE SAME OBSERVATION ALREADY SIGNALLED — the backstop for after a visit was
+  # closed. A stall whose frontier has not changed keeps the same key and is never
+  # re-reported; one that advanced and re-stalled has a different frontier and earns
+  # exactly one more signal.
+  if [ "$rflagged" = "$frontier_key" ]; then
     already=$((already + 1)); continue
   fi
 
-  hours=$((silent_for / 3600)); mins=$(((silent_for % 3600) / 60))
   stalled=$((stalled + 1))
-  echo "detect-stalled-workflows: root $root STALLED ${hours}h${mins}m — frontier [$frontier] is ready, unassigned and unrouted; $closed_count step(s) closed, last movement $marker"
+  echo "detect-stalled-workflows: root $root STALLED ${hours}h${mins}m — frontier [$frontier] is ready, unassigned and unrouted; $closed_count step(s) closed, last movement $last_iso"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     continue
@@ -450,7 +505,7 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
     -d "$(printf '%s\n' \
       "Workflow root: $root — $rtitle" \
       "" \
-      "It has been silent for ${hours}h${mins}m: no bead of this workflow — the root or anything carrying gc.root_bead_id=$root, in any status — has been written since $marker." \
+      "It has been silent for ${hours}h${mins}m: no bead of this workflow — the root or anything carrying gc.root_bead_id=$root, in any status — has been written since $last_iso." \
       "" \
       "It is not waiting on anything with a name:" \
       "  - no live session holds the root or any member (roster read this pass)" \
@@ -467,7 +522,7 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
       "              gc bd update $root --set-metadata 'triage.hold=<the reason>'" \
       "" \
       "Filed once per observation by assets/scripts/detect-stalled-workflows.sh (tk-xesf6)." \
-      "The root is stamped stall_flagged=$marker; it is re-reported only if it advances and stalls again.")" \
+      "While THIS visit stays open it is never re-filed. The root is stamped stall_flagged=$frontier_key (its current frontier); once the visit is closed it is re-reported only if the workflow advances and stalls again with a different frontier.")" \
     --json 2>/dev/null | scrub | jq -r '.id // .[0].id // ""' 2>/dev/null)
 
   if [ -z "$VISIT" ] || [ "$VISIT" = "null" ]; then
@@ -477,8 +532,10 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
 
   # A visit is only a signal once it is ROUTED and TYPED. `gc.routed_to` is what offers
   # it to the converse pool, `task_kind=visit` is what the board and the converse role
-  # select on, and `gc.continuation_group` is what ties it to the standing subject on
-  # the read side (an exact-string match, gc-helm.sh). Miss any of them and the bead
+  # select on, `gc.continuation_group` is what ties it to the standing subject on the
+  # read side (an exact-string match, gc-helm.sh), and `stall_root` is what the
+  # visit-already-open guard above matches on next pass — miss it and every later pass
+  # files a fresh duplicate for this same root. Miss any of the first three and the bead
   # exists but nothing is ever offered it — a workflow that stopped advancing and
   # emitted no signal, which is the exact defect this pass was built to end.
   #
@@ -488,7 +545,8 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
   vrc=0
   bd_pinned update "$VISIT" --set-metadata "gc.routed_to=$CONVERSE" \
     --set-metadata "gc.continuation_group=$SUBJECT" \
-    --set-metadata "task_kind=visit" >/dev/null 2>&1 || vrc=$?
+    --set-metadata "task_kind=visit" \
+    --set-metadata "stall_root=$root" >/dev/null 2>&1 || vrc=$?
   # tracks, NOT parent-child: a parent-child edge transmits the subject's blocked
   # state to the visit, making it unclaimable on exactly the beads that need talking
   # about (the same choice mol-liveness-sweep's gate-visit block makes). Lineage only,
@@ -501,31 +559,32 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
     | ((.metadata // {})) as $m
     | [(($m["gc.routed_to"] // "") | tostring),
        (($m.task_kind // "") | tostring),
-       (($m["gc.continuation_group"] // "") | tostring)]
+       (($m["gc.continuation_group"] // "") | tostring),
+       (($m.stall_root // "") | tostring)]
     | join("\u001f")' 2>/dev/null)
-  vrouted=""; vkind=""; vgroup=""
-  IFS="$SEP" read -r vrouted vkind vgroup <<< "$vmeta"
-  if [ "$vrouted" != "$CONVERSE" ] || [ "$vkind" != "visit" ] || [ "$vgroup" != "$SUBJECT" ]; then
-    echo "detect-stalled-workflows: $root — visit $VISIT did not read back as routed and typed (update exited $vrc; gc.routed_to='$vrouted' want '$CONVERSE', task_kind='$vkind' want 'visit', gc.continuation_group='$vgroup' want '$SUBJECT'); NOT stamping the marker so the next pass re-signals. $VISIT is left behind unrouted — nothing will be offered it, so dispose of it by hand if this keeps failing" >&2
+  vrouted=""; vkind=""; vgroup=""; vroot=""
+  IFS="$SEP" read -r vrouted vkind vgroup vroot <<< "$vmeta"
+  if [ "$vrouted" != "$CONVERSE" ] || [ "$vkind" != "visit" ] || [ "$vgroup" != "$SUBJECT" ] || [ "$vroot" != "$root" ]; then
+    echo "detect-stalled-workflows: $root — visit $VISIT did not read back as routed, typed and root-tagged (update exited $vrc; gc.routed_to='$vrouted' want '$CONVERSE', task_kind='$vkind' want 'visit', gc.continuation_group='$vgroup' want '$SUBJECT', stall_root='$vroot' want '$root'); NOT stamping the marker so the next pass re-signals. $VISIT is left behind — nothing will be offered it and the guard cannot find it, so dispose of it by hand if this keeps failing" >&2
     failed=$((failed + 1)); continue
   fi
 
   # The marker is stamped LAST, and only after the visit exists AND reads back routed.
   # In that order a failed create — or a routing write that did not land — leaves the
   # root unflagged and the next pass re-signals; the reverse would retire the stall on
-  # a visit nobody ever saw. The cost of the retry is a duplicate visit, the same cost
-  # the marker-write failure below already carries, and the right side to err on: a
-  # duplicate is noise, a stall retired without a signal is silence.
-  if ! bd_pinned update "$root" --set-metadata "stall_flagged=$marker" >/dev/null 2>&1; then
-    echo "detect-stalled-workflows: $root — visit $VISIT filed but the stall_flagged marker did not stick; the next pass will file a duplicate visit" >&2
+  # a visit nobody ever saw. And if this stamp itself fails, the visit is still open, so
+  # next pass the visit-already-open guard catches it before the missing marker ever
+  # matters — the marker is only the backstop for after the visit is closed.
+  if ! bd_pinned update "$root" --set-metadata "stall_flagged=$frontier_key" >/dev/null 2>&1; then
+    echo "detect-stalled-workflows: $root — visit $VISIT filed but the stall_flagged marker did not stick; harmless while the visit stays open (the guard dedupes), a duplicate only if it is closed before the next pass" >&2
     failed=$((failed + 1)); continue
   fi
-  echo "  -> visit $VISIT filed on subject $SUBJECT, root stamped stall_flagged=$marker"
+  echo "  -> visit $VISIT filed on subject $SUBJECT, root stamped stall_flagged=$frontier_key"
 done <<< "$ROOT_ROWS"
 
 MODE=""
 [ "$DRY_RUN" -eq 1 ] && MODE="(dry-run) "
-echo "detect-stalled-workflows: ${MODE}${stalled} stalled workflow(s) signalled; $moving moving, $unheld_skip held by a live session, $never_started never advanced (husk-shaped), $landed already landed, $held on an operator hold, $gated waiting on a blocker, $claimable with a claimable frontier, $already already flagged, $unreadable unreadable, $failed failed"
+echo "detect-stalled-workflows: ${MODE}${stalled} stalled workflow(s) signalled; $moving moving, $unheld_skip held by a live session, $never_started never advanced (husk-shaped), $landed already landed, $held on an operator hold, $gated waiting on a blocker, $claimable with a claimable frontier, $visit_open already under an open visit, $already already flagged, $unreadable unreadable, $failed failed"
 
 # Only failed WRITES decide the exit code. An unreadable root is a deliberate
 # fail-closed skip, already reported on stderr, and correct.

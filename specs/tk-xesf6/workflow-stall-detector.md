@@ -159,6 +159,15 @@ where the board already looks. The visit body carries the diagnosis (how long si
 which frontier beads, how many steps closed) and the disposition menu: route, unstick,
 kill, or hold.
 
+> **Superseded by tk-1g9yw.** The last-touch key described below was self-defeating:
+> stamping the marker is a `bd update`, which bumps `updated_at` — the very field the
+> key is read from — so the same workflow re-flagged every stall window forever, minting
+> a fresh visit and converse session each time (a token amplifier). The marker is now
+> keyed on the sorted **frontier bead-id set**, and a **visit-already-open guard**
+> (skip a root that already has an open visit, matched by `stall_root`) is the primary
+> one-visit bound. See `assets/scripts/detect-stalled-workflows.sh` and its doctor check.
+> The paragraph below records the original design.
+
 **Dedupe is per workflow, keyed to the observation.** The root is stamped
 `stall_flagged=<last-touch>`, exactly as `recover-stranded-branches.sh` keys
 `stranded_branch_flagged` to `<branch>@<tip>`. A workflow that stays stuck keeps the

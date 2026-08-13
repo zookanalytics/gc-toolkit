@@ -1385,13 +1385,21 @@ that closed NO step is an inline-execution husk (mol-polecat-work closes none, e
 tk-p9ji9) and is exempt by construction, which is what keeps this pass from
 reporting most of the rig.
 
-**One signal per stalled workflow, never one per pass.** The root is stamped
-`stall_flagged=<last-touch>`, keyed to the OBSERVATION exactly as
-`recover-stranded-branches.sh` keys `stranded_branch_flagged` to `<branch>@<tip>`.
-A workflow that stays stuck keeps the same last-touch and is never re-reported; one
-that advances and stalls again earns exactly one more. This patrol runs continuously,
-so a per-pass signal would be a per-minute signal — the noise tk-jbv0r and tk-76jxq
-are about.
+**One signal per stalled workflow, never one per pass.** Two guards (tk-1g9yw). The
+PRIMARY is a visit-already-open check: before filing, the pass skips a root that
+already carries an open visit (matched by `stall_root`), the same way mol-liveness-sweep
+and mol-triage-recurrence skip a subject whose visit is already live. A visit may sit
+open indefinitely — the operator gets to it — so this guard, not any timer, bounds the
+converse fleet. The BACKSTOP, for after a visit is closed, is the `stall_flagged` marker
+on the root, keyed to the OBSERVATION — the sorted frontier bead-id set — exactly as
+`recover-stranded-branches.sh` keys `stranded_branch_flagged` to `<branch>@<tip>`. The
+marker is deliberately NOT keyed on the root's last-touch: stamping it is a `bd update`,
+which bumps `updated_at`, the very field a last-touch key is read from, so such a key
+re-flags the same workflow every stall window forever — the token amplifier tk-1g9yw
+fixed. A workflow that stays stuck keeps the same frontier and is never re-reported; one
+that advances and stalls again has a different frontier and earns exactly one more. This
+patrol runs continuously, so a per-pass signal would be a per-minute signal — the noise
+tk-jbv0r and tk-76jxq are about.
 
 The signal is one visit per stalled workflow on a standing `triage.scope=stalled-workflows`
 subject, routed to the rig's converse pool — the same shape and the same vocabulary
@@ -1406,10 +1414,11 @@ Regression test: `assets/scripts/detect-stalled-workflows.test.sh` (hermetic; st
 `gc`; covers the stall, the pull_request-anchor rework case, both landed-anchor
 exemptions, movement recorded only on a CLOSED member, the zero-closed-step husk,
 both liveness signals, a routed and an assigned frontier, an empty frontier, holds on
-the root and on the anchor, the empty-hold tri-state, the dedupe marker and its
-re-flag, the create-before-mark order, a failed create leaving the marker unstamped,
-all three fail-safes, that no bead is ever closed or written outside the visit, and
-that `--dry-run` writes nothing).
+the root and on the anchor, the empty-hold tri-state, the frontier-keyed dedupe marker
+and its re-flag, one visit per stalled bead across REPEATED passes with the real
+`updated_at` bump in play, the create-before-mark order, a failed create leaving the
+marker unstamped, all three fail-safes, that no bead is ever closed or written outside
+the visit, and that `--dry-run` writes nothing).
 
 **Exit criteria:** Stalled workflows signalled, or none found. Continue to
 `check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is the
