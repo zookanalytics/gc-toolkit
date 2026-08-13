@@ -156,6 +156,8 @@ that follow it, not in the brief.
 
 {{ template "file-feedback-observations" . }}
 
+{{ template "learned-conventions-mechanik" . }}
+
 ## Directory Guidelines
 
 | Location | Use for |
