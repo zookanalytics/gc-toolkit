@@ -162,6 +162,38 @@ silently (and were already slightly overstated by the `folded` path).
 Both now carry the boundary. Central docs are authoritative — leaving
 either would have made the doc the bug.
 
+### Round 2: the definition has four sites, not one (tk-flctq findings)
+
+The pass above corrected what each definition *said about endings* and
+left what each one said a visit **is**. Four places define it, and all
+four still opened by equating a visit with a sitting — the model the bug
+was made of, stated as the model:
+
+| Site | Opened with |
+|---|---|
+| `agents/converse/prompt.template.md:3` | "You hold visits: bounded sittings" |
+| `agents/converse/agent.toml:1` | "holds visits: bounded sittings" |
+| `docs/gascity-human-engagement.md` — **Vocabulary** | "A visit is one bounded sitting" |
+| same doc — "a definition first, because everything below uses it" | "A visit is one bounded sitting" |
+
+Each then contradicted itself a few lines later with the silent close, so
+a reader met the corrected rule as a qualifier on a model already set.
+The pre-open signoff (`tk-flctq`) flagged the prompt and the seam
+definition as P1; the vocabulary paragraph was fixed in `tk-78yia` and
+the remaining three in `tk-4q2kz`.
+
+All four now say the same thing: a visit is a **filed request** for one
+bounded sitting; held, it becomes the sitting and ends out loud with a
+sign-off; moot or benign, it closes silently and never becomes a sitting
+at all. "Sitting" names only the held path.
+
+The regressions pin each site separately — the paragraph is extracted and
+checked on its own, because a whole-file grep goes green as soon as *any*
+copy is right, which is exactly how the first pass left two of them stale
+— plus one file-wide bar on the phrase *"is one bounded sitting"*, so a
+fifth definition added later cannot reintroduce it. 61 → 69 assertions;
+the five that pin this round go red against the pre-fix files.
+
 ## Related
 
 - `su-59z4` — fold rule misfires on standing subjects; filed the same

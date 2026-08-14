@@ -359,6 +359,24 @@ else
     bad "the opening says a sitting is earned, not automatic" \
         "the summary must not read as if every claimed visit ends in a hold"
 fi
+# That paragraph was necessary and not sufficient. The role's FIRST
+# sentence still read "You hold visits: bounded sittings", so the model was
+# already set — visit == sitting — by the time the earned-sitting rule
+# arrived to qualify it, and the two contradicted each other on page one
+# (tk-flctq). A definition has to be right where it is first given, which
+# means "sitting" naming only the held path from the opening line.
+if printf '%s\n' "$INTRO" | grep -q 'filed request'; then
+    ok "the opening defines a visit as a request for a sitting"
+else
+    bad "the opening defines a visit as a request for a sitting" \
+        "the first sentence sets the role's model; a visit is the request, and only a held one becomes the sitting"
+fi
+if printf '%s\n' "$INTRO" | grep -q 'visits: bounded sittings'; then
+    bad "the opening no longer equates a visit with a sitting" \
+        "'visits: bounded sittings' states the tk-mndjz bug as the role's own definition, ahead of the rule that corrects it"
+else
+    ok "the opening no longer equates a visit with a sitting"
+fi
 VISIT_DEF="$(awk '/^- \*\*Visit\*\*/ {f = 1; print; next} f && /^- \*\*/ {exit} f && /^$/ {exit} f {print}' "$PROMPT")"
 if printf '%s\n' "$VISIT_DEF" | grep -q 'premise'; then
     ok "the Visit definition names the premise as re-testable"
@@ -432,6 +450,13 @@ lacks "no 'visit boundaries, not timeouts' claim" \
     'visit boundaries, not' "$ATOML" \
     "the claim is false: idle_timeout + the assigned-work defer cap do end a held sitting"
 have "config points at the verified mechanism" 'gascity-human-engagement.md' "$ATOML"
+# The config header is the role's definition in its third copy, and it
+# opened with the same equation the prompt did. Fixing one copy of a
+# definition and leaving its siblings stale is how the corrected model
+# stops being the one a reader meets first.
+lacks "config header no longer equates a visit with a sitting" \
+    'holds visits: bounded sittings' "$ATOML" \
+    "the header states visit == sitting, which is the behaviour tk-mndjz removed"
 
 echo "── the verified mechanism is recorded centrally ──"
 have "engagement doc has the ending section" 'How a held sitting ends' "$ENGAGE"
@@ -467,6 +492,44 @@ else
     bad "the vocabulary keeps the out-loud ending" \
         "correcting tk-mndjz must not drop tk-bzm86's rule: a held sitting still ends out loud, with a sign-off"
 fi
+
+# The doc defines a visit TWICE — the vocabulary above, and again in
+# "What upstream does not ship", which announces itself as "a definition
+# first, because everything below uses it". Fixing the first and leaving
+# the second is what happened (tk-flctq): the block still opened "A visit
+# is one bounded sitting", then contradicted itself a few lines later with
+# the silent close. Both copies are authoritative, so both are pinned, and
+# the stale phrase is barred from the whole file — the next definition
+# added below these two must not reintroduce it either.
+SEAM_DEF="$(awk '/^> \*\*A visit\*\* is/ {f = 1} f && /^>[[:space:]]*$/ {exit} f {print}' "$ENGAGE")"
+if [ -z "$SEAM_DEF" ]; then
+    bad "the seam section still carries a visit definition to check" \
+        "no '> **A visit** is ...' block in $ENGAGE — the extraction is stale, not the doc"
+else
+    ok "the seam section still carries a visit definition to check"
+    if printf '%s\n' "$SEAM_DEF" | grep -q 'request for one bounded'; then
+        ok "the seam definition calls a visit a request, not a sitting"
+    else
+        bad "the seam definition calls a visit a request, not a sitting" \
+            "this block is the one the section says everything below uses; it must not open by equating the two"
+    fi
+    if printf '%s\n' "$SEAM_DEF" | grep -q 'never becomes a sitting'; then
+        ok "the seam definition carries the silent ending"
+    else
+        bad "the seam definition carries the silent ending" \
+            "a definition that ends every visit out loud is the tk-mndjz model restated"
+    fi
+    if printf '%s\n' "$SEAM_DEF" | grep -q 'out loud' &&
+        printf '%s\n' "$SEAM_DEF" | grep -q 'sign-off'; then
+        ok "the seam definition keeps the out-loud ending"
+    else
+        bad "the seam definition keeps the out-loud ending" \
+            "a held sitting still ends out loud, with a sign-off (tk-bzm86)"
+    fi
+fi
+lacks "no 'is one bounded sitting' definition anywhere in the doc" \
+    'is one bounded sitting' "$ENGAGE" \
+    "a visit is a request FOR one bounded sitting; the bare equation is the bug written as the model"
 
 echo "── the writer the contract depends on still exists ──"
 have "gc-helm exposes the takeaway verb" 'cmd_takeaway()' "$HELM"

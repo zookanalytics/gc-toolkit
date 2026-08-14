@@ -1,4 +1,6 @@
-# converse — holds visits: bounded sittings of a subject bead's dialogue.
+# converse — works visits: filed requests for bounded sittings of a
+# subject bead's dialogue. A visit that still needs a human is held and
+# becomes the sitting; one whose premise died closes silently (tk-mndjz).
 # Design authority: specs/tk-h9pq5/design-doc.md. Demand is the default
 # routed-pool predicate (visit beads stamped gc.routed_to=<rig>/gc-toolkit.converse);
 # no work_query override because a filed visit IS the demand.
