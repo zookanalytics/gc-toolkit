@@ -30,7 +30,13 @@
 #     re-armed at 04:49 with Restart=no).
 #
 # Each of those produces a driver that LOOKS armed. Encoding them here is the
-# difference between a remedy and a reminder.
+# difference between a remedy and a reminder — and the already-armed path
+# re-checks every one of them against the LIVE unit, because a no-op that only
+# asks "is something holding the lock in the right cgroup" answers "already
+# armed" for every degraded state above. That is a false all-clear on the one
+# script an operator runs after being told the driver is broken:
+# doctor/check-refinery-idle-driver names this script as the fix for a unit whose
+# WorkingDirectory is not a repo, and the fix has to actually be one.
 #
 # WHAT THIS DOES NOT DO: author idle-loop.sh. The driver on disk is the proven
 # one — it holds the canonical lock, runs the full current pass set, and emits by
@@ -49,13 +55,18 @@
 #                        [--force] [--dry-run]
 #
 # Exit codes:
-#   0  armed and verified, or already durably armed (idempotent no-op)
-#   1  refused — a live driver or an unidentified lock holder needs a decision
+#   0  armed and verified, or already armed AND healthy (idempotent no-op)
+#   1  refused — a live driver needs a decision: it is degraded, it is doomed
+#      (alive in a session cgroup), or the lock is held by something else
 #   2  failed — a precondition is missing, or the arm did not come up
 
 set -u
 
 PROG="refinery-idle-arm"
+
+# What every reconcile pass shells out to. A missing one exits 127 and its pass
+# reads as "nothing to do" — on a unit that reads active/running.
+REQUIRED_TOOLS="gc bd gh jq flock git"
 
 # Same seam the detector reads (doctor/check-refinery-idle-driver), so the two
 # can never disagree about where a driver lives.
@@ -163,6 +174,103 @@ lock_holders() {
 pid_args()   { ps -o args= -p "$1" 2>/dev/null | head -1; }
 pid_cgroup() { ps -o cgroup= -p "$1" 2>/dev/null | head -1; }
 
+unit_show() { # unit_show <property> — one property of the live unit
+    systemctl --user show "$UNIT" -p "$1" 2>/dev/null | sed -n "s/^$1=//p" | head -1
+}
+
+# One key out of `Environment=A=1 B=2`. Word-splitting is enough: systemd quotes
+# any value containing whitespace, and every key read below (two paths, a rig
+# name, an agent identity, PATH) is whitespace-free anywhere the rest of gc works.
+unit_env_value() { # unit_env_value <key> <environment-line>
+    printf '%s\n' "$2" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1
+}
+
+# Does <path-value> resolve <tool>? Asked of the PATH the UNIT holds, which is
+# NOT this shell's — that difference is the entire 127 failure.
+path_resolves() { # path_resolves <path-value> <tool>
+    local IFS=: dir
+    for dir in $1; do
+        [ -x "${dir:-.}/$2" ] && return 0
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Is an EXISTING arm still a WORKING arm?
+#
+# A holder in the right cgroup is LIVENESS, not health. Every property below has
+# already been dropped by hand on this host, each one fails silently, and the
+# unit reads active/running either way — so "a driver of ours is alive in its own
+# unit" is precisely the state that must not be waved through unlooked at. The
+# cost of not looking is specific: doctor/check-refinery-idle-driver tells the
+# operator to re-run THIS script when a live driver's WorkingDirectory is not a
+# repo, and an unvalidated no-op answers that with "already armed" while the rig
+# goes on merging nothing.
+#
+# Reported, never repaired in place: the driver is a live merge writer, so
+# replacing it is the caller's decision (--force).
+# ---------------------------------------------------------------------------
+unit_degradations() { # -> one degradation per line; no output = healthy
+    local restart wd env_line rig_env beads_env agent_env path_env tool
+    local unresolvable="" unfixable=""
+
+    restart=$(unit_show Restart)
+    [ "$restart" = "always" ] || printf '%s\n' \
+        "Restart='${restart:-unset}', not always — a genuine crash would be permanent. This property is easy to drop on a re-arm and nothing notices; the unit live on this host when the script was written had lost it."
+
+    # systemd prefixes the value with `-`/`!` for its ignore-failure and
+    # privileged forms; both name the same directory.
+    wd=$(unit_show WorkingDirectory); wd=${wd#-}; wd=${wd#!}
+    if [ -z "$wd" ]; then
+        printf '%s\n' "WorkingDirectory is unset or unreadable — a --user unit then inherits \$HOME, which is not a git work tree, so merge-skill.sh:773 fails closed on \`git remote get-url origin\` and merges NOTHING on every tick while the unit reads active/running."
+    elif ! git -C "$wd" rev-parse --git-dir >/dev/null 2>&1; then
+        printf '%s\n' "WorkingDirectory '$wd' is not a git work tree — merge-skill.sh:773 fails closed there and prints 'NOTHING is merged this pass' every tick, silently."
+    elif ! git -C "$wd" remote get-url origin >/dev/null 2>&1; then
+        printf '%s\n' "WorkingDirectory '$wd' is a git work tree with no 'origin' remote — the merge passes cannot name the repository to merge in, and refuse on every tick."
+    fi
+
+    env_line=$(unit_show Environment)
+
+    rig_env=$(unit_env_value GC_RIG "$env_line")
+    [ "$rig_env" = "$RIG" ] || printf '%s\n' \
+        "GC_RIG='${rig_env:-unset}' in the unit named for '$RIG' — its passes resolve the wrong rig's roster and ledger."
+
+    beads_env=$(unit_env_value BEADS_DIR "$env_line")
+    if [ -z "$beads_env" ]; then
+        printf '%s\n' "BEADS_DIR is unset — a --user unit inherits none, so the passes read whatever ledger the systemd user manager's environment happens to name, or none at all, and an unreadable ledger reads as an empty queue."
+    elif [ "$beads_env" != "$RIG_ROOT/.beads" ]; then
+        printf '%s\n' "BEADS_DIR='$beads_env', not this rig's ledger at $RIG_ROOT/.beads."
+    fi
+
+    agent_env=$(unit_env_value GC_AGENT "$env_line")
+    if [ -z "$agent_env" ]; then
+        printf '%s\n' "GC_AGENT is unset — reconcile-graduated-convoys.sh:111 prints 'GC_AGENT unset; skip' on EVERY tick, so owned-convoy graduation never runs on the cadence at all. That is the state the driver shipped in, and nothing else reports it."
+    elif [ -n "$AGENT" ] && [ "$agent_env" != "$AGENT" ]; then
+        printf '%s\n' "GC_AGENT='$agent_env', not this rig's refinery '$AGENT' — this driver's convoy graduations are stamped with somebody else's identity."
+    fi
+
+    path_env=$(unit_env_value PATH "$env_line")
+    if [ -z "$path_env" ]; then
+        printf '%s\n' "PATH is unset in the unit — it runs with the systemd user manager's PATH, which has no ~/.local/bin, so \`gc\` exits 127 and its pass reads an unreadable ledger as an empty queue."
+    else
+        for tool in $REQUIRED_TOOLS; do
+            path_resolves "$path_env" "$tool" && continue
+            if command -v "$tool" >/dev/null 2>&1; then
+                unresolvable="${unresolvable:+$unresolvable }$tool"
+            else
+                unfixable="${unfixable:+$unfixable }$tool"
+            fi
+        done
+        [ -n "$unresolvable" ] && printf '%s\n' \
+            "the unit's PATH does not resolve: $unresolvable — the passes shell out to them, a missing one exits 127, and its pass reads as 'nothing to do'. This shell resolves them, so re-arming hands over a PATH that works."
+        # Reported, not counted: re-arming would hand over the same gap, and a
+        # degradation whose only remedy is this script must be one this script
+        # can actually fix.
+        [ -n "$unfixable" ] && echo "$PROG: WARNING the unit's PATH does not resolve $unfixable, and neither does this shell's — re-arming cannot fix that, so it is not treated as a reason to replace a live driver. Install them on this host." >&2
+    fi
+    return 0
+}
+
 driver_pid=""
 foreign_pids=""
 while read -r pid; do
@@ -186,17 +294,26 @@ if [ -n "$driver_pid" ]; then
     cg=$(pid_cgroup "$driver_pid")
     case "$cg" in
         *"$UNIT"*)
-            restart=$(systemctl --user show "$UNIT" -p Restart 2>/dev/null | sed -n 's/^Restart=//p')
-            if [ "$restart" = "always" ] && [ -z "$FORCE" ]; then
-                say "already armed: pid $driver_pid holds $LOCK in $UNIT (Restart=always). Nothing to do."
-                exit 0
+            degraded=()
+            while IFS= read -r degradation; do
+                [ -n "$degradation" ] && degraded+=("$degradation")
+            done <<< "$(unit_degradations)"
+
+            if [ "${#degraded[@]}" -eq 0 ]; then
+                if [ -z "$FORCE" ]; then
+                    say "already armed: pid $driver_pid holds $LOCK in $UNIT — Restart=always, WorkingDirectory=$(unit_show WorkingDirectory), rig environment complete. Nothing to do."
+                    exit 0
+                fi
+                say "--force: replacing a live and healthy driver in $UNIT (pid $driver_pid)"
+            elif [ -z "$FORCE" ]; then
+                echo "$PROG: REFUSING — a driver of ours is ALIVE in $UNIT (pid $driver_pid), but the arm holding it is DEGRADED:" >&2
+                for degradation in "${degraded[@]}"; do echo "  - $degradation" >&2; done
+                echo "$PROG: every one of those reads active/running, so nothing else on this host reports them. Replacing that driver is a decision — it is a live merge writer — so say so: re-run with --force. It stops the driver for a moment and nothing is lost; the next tick re-reads everything." >&2
+                exit 1
+            else
+                say "--force: replacing a DEGRADED driver in $UNIT (pid $driver_pid)"
+                for degradation in "${degraded[@]}"; do say "  - $degradation"; done
             fi
-            if [ -z "$FORCE" ]; then
-                say "already armed: pid $driver_pid holds $LOCK in $UNIT, but Restart='${restart:-unset}' — a genuine crash would not be recovered."
-                say "Re-arm with --force to restore Restart=always (this stops the live driver for a moment; nothing is lost, the next tick re-reads everything)."
-                exit 0
-            fi
-            say "--force: replacing the live driver in $UNIT (pid $driver_pid, Restart='${restart:-unset}')"
             ;;
         *)
             if [ -z "$FORCE" ]; then
@@ -244,7 +361,7 @@ setenv_args+=("--setenv=BEADS_DIR=$RIG_ROOT/.beads")
 # rather than the one this shell happens to have. `gc` missing here is the 127
 # that reads an unreadable ledger as an empty queue.
 missing=""
-for tool in gc bd gh jq flock git; do
+for tool in $REQUIRED_TOOLS; do
     command -v "$tool" >/dev/null 2>&1 || missing="${missing:+$missing }$tool"
 done
 [ -n "$missing" ] && echo "$PROG: WARNING these tools are not resolvable on the PATH being passed to the unit: $missing. The passes shell out to them; a missing one exits 127 and its pass reads as 'nothing to do'." >&2

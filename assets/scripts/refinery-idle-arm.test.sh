@@ -9,6 +9,12 @@
 # else's cgroup (cases 12-13). `ActiveState=active` proves nothing here: the
 # driver exits 0 the moment it cannot take the lock.
 #
+# The (8) family guards the same thing on the way IN rather than the way out: a
+# holder in the right cgroup is liveness, not health, and answering "already
+# armed" to a degraded unit is a false all-clear delivered by the very script
+# doctor/check-refinery-idle-driver tells an operator to run. Each (8) case
+# degrades exactly one property of an otherwise-healthy live unit.
+#
 # systemd-run, systemctl, fuser and ps are faked through PATH; the fake
 # systemd-run writes the fixtures that describe the unit it "started", so a case
 # can pose a unit that comes up healthy, one that never takes the lock, and one
@@ -21,8 +27,10 @@
 #   (4)  no driver on disk        -> 2, and it refuses to author one
 #   (5)  working directory is not a git work tree      -> 2
 #   (6)  working directory has no origin remote        -> 2
-#   (7)  already armed, Restart=always -> 0 and NOTHING is run
-#   (8)  already armed, Restart=no     -> 0, advises --force, runs nothing
+#   (7)  already armed AND healthy     -> 0 and NOTHING is run
+#   (8)  already armed but DEGRADED    -> 1 each, runs nothing: Restart dropped,
+#        WorkingDirectory unset / non-repo / no origin, GC_AGENT unset, another
+#        rig's ledger, a PATH that cannot resolve `gc` — and --force replaces it
 #   (9)  alive in a session scope, no --force -> 1, kills nothing
 #   (10) foreign lock holder                  -> 1, kills nothing
 #   (11) clean arm, unit takes the lock in its own cgroup -> 0
@@ -98,7 +106,7 @@ for a in "$@"; do
         --user) ;;
         show|stop|reset-failed|status) verb="$a" ;;
         -p) ;;
-        Restart|MainPID|ActiveState|SubState|WorkingDirectory) props="$props $a" ;;
+        Restart|MainPID|ActiveState|SubState|WorkingDirectory|Environment) props="$props $a" ;;
         *) unit="$a" ;;
     esac
 done
@@ -177,6 +185,29 @@ add_holder() { # add_holder <case-dir> <pid> <args> <cgroup>
 armed() { [ -f "$1/systemd-run.args" ]; }
 arg_has() { grep -qxF -- "$2" "$1/systemd-run.args" 2>/dev/null; }
 
+# What a HEALTHY live unit shows. The already-armed cases each degrade exactly
+# one of these, because each one ALONE is a driver that reads active/running
+# while merging nothing or silently skipping a pass — which is the whole reason
+# the no-op path has to read the unit instead of trusting the cgroup.
+#
+# The unit PATH here is the sandbox's own bin, which has gc/jq/git but no
+# bd/gh/flock. That is deliberate: the script's shell cannot resolve them either,
+# so re-arming would hand over the same gap and they must be REPORTED rather than
+# counted as a reason to replace a live driver.
+healthy_unit() { # healthy_unit <case-dir>
+    local d="$1"
+    echo always    > "$d/unit.Restart"
+    echo "$GITDIR" > "$d/unit.WorkingDirectory"
+    printf 'GC_RIG=alpha GC_RIG_ROOT=%s BEADS_DIR=%s GC_AGENT=alpha/gc-toolkit.refinery PATH=%s HOME=%s\n' \
+        "$d/rigs/alpha" "$d/rigs/alpha/.beads" "$d/bin" "$HOME" > "$d/unit.Environment"
+}
+
+# A live driver of ours, in its own unit — the shape every case below starts from.
+live_in_unit() { # live_in_unit <case-dir> <pid>
+    add_holder "$1" "$2" "bash $1/drivers/gc-refinery-idle-alpha/idle-loop.sh" \
+        "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gc-refinery-idle-alpha.service"
+}
+
 echo "refinery-idle-arm:"
 
 # (1) The shape of the invocation is the whole point of the script.
@@ -230,21 +261,88 @@ OUT="$(PATH="$d/bin" FAKE_CASE="$d" GC_REFINERY_IDLE_ROOT="$d/drivers" GC_CITY_P
        bash "$ARM" --rig alpha --working-directory "$NOORIGIN" 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ]; then ok "work tree with no origin -> failure (exit 2)"; else bad "no origin remote" "got $rc: $OUT"; fi
 
-# (7)+(8) Idempotence. A live, durable driver is left alone.
+# (7) Idempotence. A live, durable, HEALTHY driver is left alone.
 d=$(newcase c7)
-add_holder "$d" 9100 "bash $d/drivers/gc-refinery-idle-alpha/idle-loop.sh" \
-    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gc-refinery-idle-alpha.service"
-echo always > "$d/unit.Restart"
-run_arm "$d" 0 "already armed with Restart=always -> no-op"
+live_in_unit "$d" 9100
+healthy_unit "$d"
+run_arm "$d" 0 "already armed and healthy -> no-op"
 if armed "$d"; then bad "no-op really is a no-op" "systemd-run ran"; else ok "no-op really is a no-op"; fi
+case "$OUT" in *"does not resolve bd gh flock"*)
+        ok "reports the tools no re-arm could supply, without refusing over them" ;;
+    *)  bad "reports unfixable PATH gaps" "not in: $OUT" ;; esac
 
-d=$(newcase c8)
-add_holder "$d" 9101 "bash $d/drivers/gc-refinery-idle-alpha/idle-loop.sh" \
-    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gc-refinery-idle-alpha.service"
-echo no > "$d/unit.Restart"
-run_arm "$d" 0 "already armed with Restart=no -> reports, does not act"
+# (8x) …and every degradation of that same live driver is REFUSED, not waved
+#      through. Each one alone reads active/running, so an unvalidated no-op
+#      answers "already armed" for all of them — which is a false all-clear on
+#      the one script doctor/check-refinery-idle-driver names as the remedy.
+d=$(newcase c8a)
+live_in_unit "$d" 9101
+healthy_unit "$d"; echo no > "$d/unit.Restart"
+run_arm "$d" 1 "already armed, Restart dropped -> refuse"
 case "$OUT" in *"--force"*) ok "names --force as the upgrade" ;; *) bad "names --force" "not in: $OUT" ;; esac
+case "$OUT" in *"Restart='no'"*) ok "names the dropped property" ;; *) bad "names Restart" "not in: $OUT" ;; esac
 if armed "$d"; then bad "did not re-arm without --force" "systemd-run ran"; else ok "did not re-arm without --force"; fi
+
+d=$(newcase c8b)
+live_in_unit "$d" 9104
+healthy_unit "$d"; : > "$d/unit.WorkingDirectory"
+run_arm "$d" 1 "already armed, WorkingDirectory unset -> refuse"
+case "$OUT" in *"WorkingDirectory is unset"*) ok "names the unset working directory" ;;
+    *) bad "names the unset working directory" "not in: $OUT" ;; esac
+if armed "$d"; then bad "unset WorkingDirectory armed nothing" "systemd-run ran"; else ok "unset WorkingDirectory armed nothing"; fi
+
+# The bad directory is the UNIT's, while --working-directory names a good one:
+# the health of a live driver is a property of the unit, never of this argv.
+d=$(newcase c8c)
+live_in_unit "$d" 9105
+healthy_unit "$d"; echo "$PLAIN" > "$d/unit.WorkingDirectory"
+run_arm "$d" 1 "already armed, unit WorkingDirectory is not a git tree -> refuse"
+case "$OUT" in *"is not a git work tree"*) ok "names the non-repo working directory" ;;
+    *) bad "names the non-repo working directory" "not in: $OUT" ;; esac
+
+d=$(newcase c8d)
+live_in_unit "$d" 9106
+healthy_unit "$d"; echo "$NOORIGIN" > "$d/unit.WorkingDirectory"
+run_arm "$d" 1 "already armed, unit WorkingDirectory has no origin -> refuse"
+case "$OUT" in *"no 'origin' remote"*) ok "names the missing origin remote" ;;
+    *) bad "names the missing origin remote" "not in: $OUT" ;; esac
+
+# GC_AGENT: the pass that self-skips. Nothing else on the host reports it.
+d=$(newcase c8e)
+live_in_unit "$d" 9107
+healthy_unit "$d"
+sed 's| GC_AGENT=[^ ]*||' "$d/unit.Environment" > "$d/unit.Environment.tmp" && mv "$d/unit.Environment.tmp" "$d/unit.Environment"
+run_arm "$d" 1 "already armed, GC_AGENT unset in the unit -> refuse"
+case "$OUT" in *"GC_AGENT is unset"*) ok "names the self-skipping pass" ;;
+    *) bad "names GC_AGENT" "not in: $OUT" ;; esac
+
+d=$(newcase c8f)
+live_in_unit "$d" 9108
+healthy_unit "$d"
+sed 's|BEADS_DIR=[^ ]*|BEADS_DIR=/some/other/rig/.beads|' "$d/unit.Environment" > "$d/unit.Environment.tmp" && mv "$d/unit.Environment.tmp" "$d/unit.Environment"
+run_arm "$d" 1 "already armed against another rig's ledger -> refuse"
+case "$OUT" in *"/some/other/rig/.beads"*) ok "names the wrong ledger" ;;
+    *) bad "names the wrong ledger" "not in: $OUT" ;; esac
+
+# A PATH gap this shell CAN close is a degradation; the ones it cannot are only
+# reported (asserted in case 7), so the remedy is never one that cannot work.
+d=$(newcase c8g)
+live_in_unit "$d" 9109
+healthy_unit "$d"
+sed "s|PATH=[^ ]*|PATH=$d/nowhere|" "$d/unit.Environment" > "$d/unit.Environment.tmp" && mv "$d/unit.Environment.tmp" "$d/unit.Environment"
+run_arm "$d" 1 "already armed with a PATH that cannot resolve gc -> refuse"
+case "$OUT" in *"does not resolve: gc"*) ok "names the tool the unit cannot run" ;;
+    *) bad "names the unresolvable tool" "not in: $OUT" ;; esac
+
+# (8h) --force is the decision, and it replaces the degraded driver.
+d=$(newcase c8h)
+live_in_unit "$d" 9110
+healthy_unit "$d"; echo no > "$d/unit.Restart"
+run_arm "$d" 0 "degraded + --force -> proceeds to replace it" --force --dry-run
+case "$OUT" in *"replacing a DEGRADED driver"*) ok "says what it is replacing and why" ;;
+    *) bad "announces the replacement" "not in: $OUT" ;; esac
+case "$OUT" in *"--property=Restart=always"*) ok "the replacement restores Restart=always" ;;
+    *) bad "replacement restores Restart=always" "not in: $OUT" ;; esac
 
 # (9) A doomed driver is still a live merge writer: replacing it is a decision.
 d=$(newcase c9)

@@ -89,6 +89,10 @@
 # with `setsid` or a bare `&` from inside an agent session: per the mechanism
 # above that cannot survive, and a re-arm that silently lapses is worse than a
 # known-dead driver because it converts a visible gap into a false all-clear.
+# For a rig reported here as ALIVE-but-degraded (the WorkingDirectory warnings
+# below), that remedy needs `--force`: the arm re-checks the live unit's
+# properties and refuses to replace a live merge writer on its own say-so, so a
+# bare re-run reports the same degradation instead of fixing it.
 #
 # The investigation behind every assertion here — the measurements, and the two
 # hypotheses their own authors retracted — is written up in
@@ -283,9 +287,9 @@ while IFS=$'\t' read -r rig suspended rig_path; do
         *"$unit"*)
             wd=$(unit_working_directory "$unit")
             if [ -z "$wd" ]; then
-                warnings+=("$rig: driver ALIVE in $unit (pid $driver_pid), but its WorkingDirectory is unset or unreadable. A --user unit inherits \`WorkingDirectory=!\$HOME\`, which is not a git work tree; merge-skill.sh:773 then fails closed on \`git remote get-url origin\` and merges NOTHING on every tick while the unit reads active/running. Re-arm with assets/scripts/refinery-idle-arm.sh, which passes --working-directory.")
+                warnings+=("$rig: driver ALIVE in $unit (pid $driver_pid), but its WorkingDirectory is unset or unreadable. A --user unit inherits \`WorkingDirectory=!\$HOME\`, which is not a git work tree; merge-skill.sh:773 then fails closed on \`git remote get-url origin\` and merges NOTHING on every tick while the unit reads active/running. Re-arm with assets/scripts/refinery-idle-arm.sh --rig $rig --force, which passes --working-directory (--force because that driver is live: the arm reports the degradation and refuses to replace a live driver without it).")
             elif command -v git >/dev/null 2>&1 && ! git -C "${wd#!}" rev-parse --git-dir >/dev/null 2>&1; then
-                warnings+=("$rig: driver ALIVE in $unit (pid $driver_pid) but its WorkingDirectory '$wd' is NOT a git work tree — merge-skill.sh:773 fails closed there and prints 'NOTHING is merged this pass' every tick, silently, while the unit reads active/running. Re-arm with assets/scripts/refinery-idle-arm.sh.")
+                warnings+=("$rig: driver ALIVE in $unit (pid $driver_pid) but its WorkingDirectory '$wd' is NOT a git work tree — merge-skill.sh:773 fails closed there and prints 'NOTHING is merged this pass' every tick, silently, while the unit reads active/running. Re-arm with assets/scripts/refinery-idle-arm.sh --rig $rig --force (--force because that driver is live: the arm reports the degradation and refuses to replace a live driver without it).")
             else
                 healthy=$((healthy + 1))
             fi

@@ -163,8 +163,27 @@ passes that case, and must not.
 `--working-directory`, and an explicit environment. It does not author
 `idle-loop.sh`: the on-disk driver is the proven one, and rewriting its emit
 filter from scratch is a trap that has been re-tripped six times. Idempotent —
-already-armed is a no-op — and it refuses rather than guesses when a live driver
-or an unidentified lock holder is on the lock.
+already-armed AND healthy is a no-op — and it refuses rather than guesses when a
+live driver or an unidentified lock holder is on the lock.
+
+"Healthy" is load-bearing there, and was added in review. A holder in the right
+cgroup is LIVENESS, not health: the same properties this script exists to set can
+all be absent from a unit that reads active/running, so a no-op keyed only on
+"someone of ours holds the lock" answers "already armed" for every degraded state
+the script was written to prevent. That is a false all-clear delivered by the one
+script an operator runs after being told the driver is broken — the check's own
+WorkingDirectory warning names this script as the remedy, so the remedy has to be
+one. The already-armed path therefore re-reads the LIVE unit: `Restart=always`,
+a `WorkingDirectory` that is a git work tree with an origin remote, and
+`GC_RIG`/`BEADS_DIR`/`GC_AGENT`/`PATH` in the unit's own environment. Anything
+missing is reported, per property, and refused with exit 1 — never repaired in
+place, because that driver is a live merge writer and replacing it is the
+caller's decision (`--force`).
+
+One asymmetry is deliberate: a tool missing from the unit's PATH counts as a
+degradation only when this shell CAN resolve it. If neither can, re-arming would
+hand over the same gap, and a degradation whose only advertised remedy cannot fix
+it is a loop rather than a finding — so it is reported and not counted.
 
 The environment is passed explicitly because a `--user` unit inherits the systemd
 user manager's, not the caller's: its PATH has no `~/.local/bin`, so `gc` exits

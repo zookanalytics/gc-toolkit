@@ -414,7 +414,13 @@ invariants:
   as an 8-minute lifetime and once as a 9h20m merge outage during which
   APPROVED+CLEAN PRs simply sat. Nothing reports it, because the bead state, the
   wisp, and your own session all look healthy. Arm through the script; it is
-  idempotent, so running it when a driver is already live costs one probe:
+  idempotent, so running it when a driver is already live AND healthy costs one
+  probe and exits 0. If that live driver is armed WRONG — Restart dropped, a
+  non-repo WorkingDirectory, no GC_AGENT or BEADS_DIR, a PATH that cannot resolve
+  `gc` — it names the degradation and exits 1 instead, because every one of those
+  merges nothing (or silently skips a pass) while the unit reads active/running.
+  Replacing a live merge writer is your decision: re-run with `--force` once you
+  have read what it found.
 
 ```bash
 # Same agent-env resolution the reconcile passes below use — resolved here too
@@ -444,8 +450,11 @@ permanent.
 has been running them every {{event_timeout}}s the whole time, and a second
 inline run is a second `merge-skill.sh` writer against the same anchors — which
 is exactly what the canonical lock exists to prevent. `refinery-idle-arm.sh`
-answers the question and does nothing when the answer is "already armed"; read
-`<state-dir>/reconcile.log` for the current verdict rather than re-deriving it.
+answers the question and does nothing when the answer is "already armed and
+healthy" (exit 0); an exit 1 naming a degradation still means a driver is LIVE,
+so it is not a licence to run the passes inline either — fix the arm, do not
+double-write. Read `<state-dir>/reconcile.log` for the current verdict rather
+than re-deriving it.
 Run the passes inline only when the driver is NOT live.
 
 Whatever drives the cadence, this step is not satisfied until those passes have run.
