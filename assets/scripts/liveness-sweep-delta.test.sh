@@ -55,6 +55,18 @@
 #      is a NAMED list (`standing_kinds`), so idiom four is one string and a
 #      fixture; its inverse defect is over-breadth — a kind stamp is not a
 #      standing record unless it is listed.
+#   8. MACHINE CONVOYS WERE OPERATOR CANDIDATES (bead tk-gri6a, operator ruling
+#      2026-08-14). Every sling mints an `input convoy for <bead>` wrapper; it
+#      orphans when its work bead closes and then stays open forever, so classify
+#      handed the operator transient machine scaffolding as work needing a
+#      disposition — 40 open city-wide when this was filed, seven of them in the
+#      gc-toolkit ready set that day. gc-helm.sh and supervisor.go both already
+#      dropped exactly these two title prefixes; the sweep that GENERATES the
+#      operator's work did not. Its inverse defect is new here and not present in
+#      either of those two: they read `gc convoy list` and see only convoys,
+#      while this block reads every ready bead, so a title-prefix test alone
+#      would hide a real bug whose TITLE talks about a convoy. Hence the
+#      issue_type=convoy guard.
 #
 # The four computational blocks are EXTRACTED VERBATIM from the shipped formula
 # (`# >>> open-prs` / `# >>> worked-via-convoy` / `# >>> classify-candidates` /
@@ -161,7 +173,13 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-hold-bare","title":"held, but the stamp names no reason","issue_type":"task","metadata":{"triage.hold":"true"}},
   {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}},
   {"id":"c-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
-  {"id":"c-husk-tracked","title":"tracked only by a dead synthetic convoy","issue_type":"bug","metadata":{}}
+  {"id":"c-husk-tracked","title":"tracked only by a dead synthetic convoy","issue_type":"bug","metadata":{}},
+  {"id":"c-inputconvoy","title":"input convoy for c-plain","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"c-slingconvoy","title":"sling-c-plain","issue_type":"convoy"},
+  {"id":"c-synthconvoy","title":"a convoy the machinery minted under some other name","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"c-realconvoy","title":"an unowned floating convoy — the orphan the observer must CATCH","issue_type":"convoy","metadata":{}},
+  {"id":"c-titletalk","title":"input convoy for tk-x never closes once its work bead lands","issue_type":"bug","metadata":{}},
+  {"id":"c-slingtalk","title":"sling-created convoys are never reaped","issue_type":"bug","metadata":{}}
 ]
 JSON
 cat > "$TMP/live.json" <<'JSON'
@@ -251,7 +269,7 @@ SURVIVORS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
 
 echo "── classify keeps only genuinely unnamed beads ──"
 eq "$SURVIVORS" \
-   "c-docupdate,c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-takeaway-empty" \
+   "c-docupdate,c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway-empty,c-titletalk" \
    "survivors are exactly the unnamed beads"
 # tk-tnwo0: the candidate's `type` is projected from `.issue_type` — the field
 # real `gc bd list`/`gc bd ready` emit (the fixtures now carry it too). The old
@@ -338,6 +356,36 @@ printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-worked")' >/dev/null 2>&1 
 printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-husk-tracked")' >/dev/null 2>&1 \
     && ok "kept c-husk-tracked (husk convoy — no live namer is not coverage)" \
     || bad "kept c-husk-tracked (husk)" "was hidden — dropped on the tracks edge alone"
+
+# Class 0 (bead tk-gri6a): the machine convoys the machinery mints for its own
+# bookkeeping are not work. Same two title prefixes gc-helm.sh:1118 and
+# supervisor.go gatherConvoys already drop, plus gc.synthetic. Note c-slingconvoy
+# carries NO metadata key at all — the shape measured on the live store, and the
+# one a gc.synthetic-only filter would silently miss.
+echo "── class 0: machine convoy scaffolding is not work and drops ──"
+for drop in c-inputconvoy:the-per-sling-input-convoy-wrapper \
+            c-slingconvoy:a-sling-convoy-carrying-no-metadata-at-all \
+            c-synthconvoy:gc.synthetic-catches-a-machine-convoy-under-another-name; do
+    id="${drop%%:*}"; why="${drop##*:}"
+    printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
+        && bad "dropped $id ($why)" "still a candidate" || ok "dropped $id ($why)"
+done
+
+# THE INVERSE DEFECT of class 0, which does not exist in gc-helm.sh or
+# supervisor.go: those two read `gc convoy list` and see only convoys, while this
+# block reads every ready bead of every type. A bare title-prefix test would hide
+# a real bug whose TITLE talks about a machine convoy — including the beads
+# filed against this very defect. The issue_type=convoy guard is what prevents
+# it, and a non-machine convoy stays visible because an unowned floating convoy
+# is the orphan the observer must CATCH, not residue to hide.
+echo "── class 0 drops what the machinery minted, never what merely names it ──"
+for keep in c-titletalk:a-bug-whose-title-starts-with-input-convoy-for \
+            c-slingtalk:a-bug-whose-title-starts-with-sling- \
+            c-realconvoy:a-non-machine-unowned-convoy-is-the-orphan-to-catch; do
+    id="${keep%%:*}"; why="${keep##*:}"
+    printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
+        && ok "kept $id ($why)" || bad "kept $id ($why)" "was hidden — the inverse defect"
+done
 
 # An unreadable probe must never read as "no open PRs". It cannot hide a bead
 # (an unread repository contributes none), but the sitting is owed the word.
