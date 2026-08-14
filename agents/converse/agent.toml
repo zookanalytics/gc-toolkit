@@ -5,7 +5,10 @@
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
-nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Rebuild the subject's state, prep, hold for the operator."
+# The nudge names the premise re-check on purpose: it is the one-line
+# restatement of the loop the session reads at wake, and a version that
+# goes straight from claim to hold re-teaches the shape tk-mndjz fixed.
+nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Re-check the visit's premise against live state — a dead or benign premise closes silently, with nothing posted. Otherwise rebuild the subject's state, prep, hold for the operator."
 # Long idle, but a timeout DOES end a held sitting — do not read this as
 # "visit boundaries are the only ending" (it said that until tk-bzm86
 # checked). Verified 2026-08-11 against the gascity source; the full

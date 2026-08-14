@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # converse-signoff.test.sh — regression test for the converse role's
-# thread-ending contract (bug tk-bzm86; precedent: gate-visit.test.sh).
+# thread-ending contract (bugs tk-bzm86 and tk-mndjz; precedent:
+# gate-visit.test.sh).
+#
+# Two operator complaints, opposite in sign, and the contract has to hold
+# both at once — which is why they are guarded in one file. tk-bzm86: a
+# sitting ended and said nothing, so the operator was left reading a
+# thread that had already gone. tk-mndjz: a visit that needed no operator
+# at all held a sitting anyway, so the operator was asked to decide about
+# a state they already knew and accepted. The first bug's fix — "never end
+# without a sign-off" — is the second bug's cause if it is read as "every
+# claimed visit ends out loud". The boundary between them is whether a
+# framing was ever POSTED, and the assertions below pin both sides of it.
 #
 # The bug: an operator was reading a converse thread; it ended and simply
 # vanished. The work was recorded correctly and the operator was never
@@ -250,6 +261,141 @@ if grep -A 4 'Low context mid-hold' "$PROMPT" | grep -q 'sign-off'; then
 else
     bad "low-context exit routes through the sign-off" \
         "cut-short must still end out loud (step 6, not a bare close)"
+fi
+
+echo "── a visit whose premise died closes SILENTLY (tk-mndjz) ──"
+# The instance: a stalled-workflow visit was filed at 02:49, its premise
+# ("no triage.hold and no gc.takeaway on the root") was dispositioned two
+# hours later by a sibling visit that named the wait, and a session
+# claimed the stale visit ~1.5 days after that. It rebuilt state, SAW the
+# hold in force, SAW the underlying condition was a benign open PR
+# awaiting the operator's own review — and held a sitting regardless,
+# because the loop had exactly one output shape. Both halves are
+# load-bearing: without the re-check the role never asks whether the
+# premise survived, and without a silent exit a correct diagnosis still
+# costs the operator a decision.
+have "the loop re-checks the visit's own premise" 'Re-check the premise' "$PROMPT"
+have "the silent exit names both readings" 'gc.outcome=<moot|benign>' "$PROMPT"
+have "the silent exit posts nothing to the thread" 'Post nothing' "$PROMPT"
+have "the canonical benign case is named" 'awaiting the operator' "$PROMPT"
+have "the bug is cited where the rule lives (tk-mndjz)" 'tk-mndjz' "$PROMPT"
+# A silent exit that fires on a hunch swallows real signals, which is a
+# worse bug than the one it fixes. The gate is a NAMED state, not a quiet
+# one, and it is the first sentence a "streamline this step" edit drops.
+have "uncertainty does not qualify as benign" 'Uncertain is not benign' "$PROMPT"
+
+# Order matters twice over: the premise is re-tested before the prep
+# (otherwise the role has already spent the context it was avoiding) and
+# before the rename (a visit closing silently must not have moved the
+# operator's session title either — that is thread output by another
+# route).
+ln_recheck=$(grep -n 'Re-check the premise' "$PROMPT" | head -1 | cut -d: -f1)
+ln_title=$(grep -n '\*\*Title\.\*\*' "$PROMPT" | head -1 | cut -d: -f1)
+ln_prime=$(grep -n '\*\*Prime\.\*\*' "$PROMPT" | head -1 | cut -d: -f1)
+if [ -n "$ln_recheck" ] && [ -n "$ln_title" ] && [ -n "$ln_prime" ] &&
+    [ "$ln_recheck" -lt "$ln_title" ] && [ "$ln_recheck" -lt "$ln_prime" ]; then
+    ok "the re-check runs before the rename and before the prep"
+else
+    bad "the re-check runs before the rename and before the prep" \
+        "re-check@${ln_recheck:-none} title@${ln_title:-none} prime@${ln_prime:-none} — a premise tested after the prep saves nothing"
+fi
+
+# The silent close is extracted rather than grepped line by line, because
+# what matters is what the block does NOT contain.
+silent_block=$(awk '
+    /^[[:space:]]*```/ {
+        if (infence) { if (hit) { printf "%s", buf; exit } infence = 0 }
+        else { infence = 1; buf = ""; hit = 0 }
+        next
+    }
+    !infence { next }
+    { buf = buf $0 "\n"; if (index($0, "gc.outcome=<moot|benign>") > 0) hit = 1 }
+' "$PROMPT")
+if [ -z "$silent_block" ]; then
+    bad "the silent close is a runnable block" \
+        "no fenced block performs the moot/benign close — prose alone leaves the role to improvise the writes"
+else
+    ok "the silent close is a runnable block"
+    if printf '%s' "$silent_block" | grep -qF -- '--append-notes'; then
+        ok "the silent close records the finding on the subject"
+    else
+        bad "the silent close records the finding on the subject" \
+            "the append-note is the ENTIRE durable record of a silently closed visit; without it the visit leaves no trace at all"
+    fi
+    # THE ASYMMETRY, and the assertion most likely to be "fixed": steps 5
+    # and 7 both stamp a takeaway, so a tidying edit reaches for symmetry
+    # here. It must not. A takeaway is the subject's headline of what it
+    # NEEDS — it is what the board renders and what the stall detector
+    # reads as a named wait. Stamping one for a visit that needs nobody
+    # re-surfaces the very thing this exit suppresses, one surface out.
+    if printf '%s' "$silent_block" | grep -q 'takeaway'; then
+        bad "the silent close stamps NO takeaway" \
+            "a takeaway is the subject's NEEDS headline; a visit that needs no human must not leave one"
+    else
+        ok "the silent close stamps NO takeaway"
+    fi
+    if printf '%s' "$silent_block" | grep -qF -- "jq -e '.[0].metadata[\"gc.outcome\"] // empty'"; then
+        ok "the silent close verifies its outcome stamp before closing"
+    else
+        bad "the silent close verifies its outcome stamp before closing" \
+            "an unstamped closed visit is invisible to everything that reads outcomes — silence is not an excuse to skip the read-back"
+    fi
+    if printf '%s' "$silent_block" | grep -qF -- 'gc bd close "$VISIT"'; then
+        ok "the silent close closes only the visit"
+    else
+        bad "the silent close closes only the visit" \
+            "the subject never closes this way"
+    fi
+fi
+
+# Page one outranks a rule further down — the same reasoning the Hold
+# definition case below rests on. A role that reads the opening summary as
+# the loop's whole shape reasons straight back to "every visit I claim
+# becomes a sitting", which is the bug.
+INTRO="$(sed -n '1,/^Definitions:/p' "$PROMPT")"
+if printf '%s\n' "$INTRO" | grep -q 'Not every claimed visit earns a sitting'; then
+    ok "the opening says a sitting is earned, not automatic"
+else
+    bad "the opening says a sitting is earned, not automatic" \
+        "the summary must not read as if every claimed visit ends in a hold"
+fi
+VISIT_DEF="$(awk '/^- \*\*Visit\*\*/ {f = 1; print; next} f && /^- \*\*/ {exit} f && /^$/ {exit} f {print}' "$PROMPT")"
+if printf '%s\n' "$VISIT_DEF" | grep -q 'premise'; then
+    ok "the Visit definition names the premise as re-testable"
+else
+    bad "the Visit definition names the premise as re-testable" \
+        "the definition itself must say a visit carries a premise that can die, not only the step further down"
+fi
+
+# The two contracts read as contradictions to an editor who meets them
+# apart, so the resolution lives where the sign-off rule lives.
+have "the sign-off rule is scoped to a HELD sitting" 'owed to a sitting that was' "$PROMPT"
+
+echo "── the loop's step numbering still resolves ──"
+# Inserting a step renumbers every step after it AND every cross-reference
+# to them ("stamp the takeaway at hold time (step 5)"). A stale pointer
+# sends the role to the wrong step, and nothing at runtime notices.
+nsteps=0
+seq_ok=1
+for n in $(grep -o '^[0-9]\{1,\}\. \*\*' "$PROMPT" | tr -cd '0-9\n'); do
+    nsteps=$((nsteps + 1))
+    [ "$n" = "$nsteps" ] || seq_ok=0
+done
+if [ "$nsteps" -gt 0 ] && [ "$seq_ok" -eq 1 ]; then
+    ok "the loop is numbered 1..$nsteps with no gaps"
+else
+    bad "the loop is numbered 1..N with no gaps" \
+        "$nsteps numbered step(s), contiguous=$seq_ok"
+fi
+stale_refs=""
+for n in $(grep -o 'step [0-9]\{1,\}' "$PROMPT" | tr -cd '0-9\n'); do
+    if [ "$n" -lt 1 ] || [ "$n" -gt "$nsteps" ]; then stale_refs="$stale_refs $n"; fi
+done
+if [ -z "$stale_refs" ]; then
+    ok "every 'step N' cross-reference names a step that exists"
+else
+    bad "every 'step N' cross-reference names a step that exists" \
+        "out-of-range reference(s):$stale_refs (the loop has $nsteps steps)"
 fi
 
 echo "── the reap is documented where the role can see it ──"

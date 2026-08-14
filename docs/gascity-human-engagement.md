@@ -327,10 +327,22 @@ mechanism, verified against the gascity source (rig checkout `7cff88fdc`,
 is not available to us; the pack's only lever is to have already written
 the trace. Hence the converse contract stamps the subject's takeaway when
 the hold *begins* (not only at close) — a reap then leaves a dated record
-of what the sitting was waiting for — and every deliberate close ends
-with a sign-off block naming the outcome and the subject to look at next.
-Longevity is deliberately not the remedy: raising `idle_timeout` only
-widens the window in which a dead thread looks alive.
+of what the sitting was waiting for — and every deliberate close of a
+**held** sitting ends with a sign-off block naming the outcome and the
+subject to look at next. Longevity is deliberately not the remedy:
+raising `idle_timeout` only widens the window in which a dead thread
+looks alive.
+
+*The converse of that rule (added 2026-08-14, tk-mndjz):* a visit that
+never held closes **silently** — no sign-off, no thread output at all,
+only the note appended to its subject. That covers a visit folded into a
+sibling sitting, and one whose premise died between filing and claiming
+or turned out to name a state that needs no human (`gc.outcome=moot` /
+`benign`; an open PR awaiting the operator's own review is the canonical
+case). The sign-off exists because an unanswered framing left in a
+vanishing thread reads as a crash; where no framing was ever posted there
+is no question to abandon, and holding a sitting anyway spends the
+attention the whole engagement model is trying to conserve.
 
 *The core seam, now closed (landed 2026-08-12):* attachment is observable —
 `runtime.Provider.IsAttached` — and the idle ladder now consults it.
@@ -392,12 +404,16 @@ definition first, because everything below uses it:
 > metadata routes it to the converse pool and names the subject's
 > continuation group, whose `gc.outcome` records what the sitting
 > decided, and which closes when the sitting ends (the subject never
-> closes this way) — out loud, with a sign-off naming the outcome and
-> the subject to look at next, because the ending is the one part of a
-> sitting the operator cannot reconstruct from the record ("How a held
-> sitting ends", above). The sequence of visits under a subject is the
-> dialogue's durable spine — board-legible, cold-reconstructable, no
-> provider transcript required.
+> closes this way) — out loud if it was ever *held*, with a sign-off
+> naming the outcome and the subject to look at next, because the ending
+> is the one part of a sitting the operator cannot reconstruct from the
+> record ("How a held sitting ends", above). A visit that is claimed and
+> found not to need a human never becomes a sitting at all: it closes
+> silently against its subject, because a visit is a request for
+> attention and the loop has to be able to answer it with *no*
+> (tk-mndjz). The sequence of visits under a subject is the dialogue's
+> durable spine — board-legible, cold-reconstructable, no provider
+> transcript required.
 >
 > **A visit body is written at FILING time and read at CLAIM time**, and
 > those are routinely a day or more apart — a queued visit holds its
