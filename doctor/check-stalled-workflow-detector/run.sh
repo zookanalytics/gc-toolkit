@@ -114,6 +114,19 @@ else
     grep -q 'is_executable_kind' "$dir/$script" \
         || errors+=("$script: the frontier no longer filters on executable gc.kind — graph.v2's own inert descriptor beads (spec/scope) are ready and unroutable forever, so every mol-scoped-work graph reads as stalled through them, and they dominate the dedup key (tk-6mccf)")
 
+    # ...and that allow-list must be the dispatcher's WHOLE vocabulary. beadmeta.ControlKinds
+    # is exactly eight; the first cut of the filter was sampled from this rig's ledger, which
+    # had never poured five of them, and a kind missing from an allow-list does not fail
+    # loudly — it reads as INERT. An unrouted `check`/`ralph`/`fanout`/`drain`/`retry-eval`
+    # frontier filters to empty, the workflow is counted as a descriptor-only wait, and the
+    # stall goes unreported. That is the missing-route class the pass exists to surface, so
+    # a narrowing here re-creates the blind spot inside the fix for it.
+    for kind in retry ralph check retry-eval fanout drain scope-check workflow-finalize; do
+        sed -n '/^is_executable_kind()/,/^}/p' "$dir/$script" \
+            | grep -qE "(^|\|)[[:space:]]*${kind}[[:space:]]*(\||\))" \
+            || errors+=("$script: is_executable_kind no longer allows gc.kind=$kind — beadmeta.ControlKinds has exactly eight members (internal/beadmeta/kindsets.go, one ProcessControl case each) and an unnamed control kind reads as inert, so an unrouted one filters the frontier to empty and its stall is never reported (tk-6mccf)")
+    done
+
     # Rows are joined on US (0x1f), never a tab. Tab is IFS whitespace: empty interior
     # fields collapse and every later field shifts left, so a workflow's TITLE lands
     # in triage.hold and reads as an operator hold. It suppresses real signals in
@@ -152,6 +165,8 @@ else
         || errors+=("$test_script: no descriptor-only-frontier case — that a frontier of nothing but graph.v2's own inert spec/scope beads is NOT reported as a stall is unproven (tk-6mccf)")
     grep -q 'MIXED' "$dir/$test_script" \
         || errors+=("$test_script: no mixed-frontier case — that descriptor beads are dropped from BOTH the report and the stall_flagged key, while the real step is still reported, is unproven; that key is what suppresses re-reports once the real frontier moves (tk-6mccf)")
+    grep -q 'CONTROL' "$dir/$test_script" \
+        || errors+=("$test_script: no control-kind case — that all eight beadmeta.ControlKinds survive the frontier filter is unproven, and five of them have never been poured in this rig, so nothing else in the suite would notice them being dropped back out (tk-6mccf)")
     grep -q 'REPEAT' "$dir/$test_script" \
         || errors+=("$test_script: no repeated-pass case — that ONE visit is filed per stalled bead across passes (the guard while the visit is open, the frontier marker once it is closed) is unproven, and a stub that never bumps updated_at would hide the re-flag amplifier tk-1g9yw fixed")
 fi

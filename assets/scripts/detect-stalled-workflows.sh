@@ -313,28 +313,59 @@ is_ready() { grep -Fxq -- "$1" <<< "$READY_IDS"; }
 # recomputed key would still match stall_flagged and stay silent.
 #
 # An ALLOW-LIST, not a deny-list on spec/scope. Inertness is what gets STAMPED here —
-# `gc.kind` is ABSENT on ordinary step beads (3468 of 3937 beads in this rig) and present
-# on the descriptors — so naming the executable kinds excludes the next inert kind on the
-# day it is poured, instead of letting it silently re-enter reports. The cost falls in the
-# direction this file always chooses: a new EXECUTABLE kind is filtered out and its stall
-# goes unreported until it is named here, which is a missed signal rather than a false
-# escalation.
+# `gc.kind` is ABSENT on ordinary step beads (3896 of 4480 beads in this rig, 2026-08-14)
+# and present on the descriptors — so naming the executable kinds excludes the next inert
+# kind on the day it is poured, instead of letting it silently re-enter reports. The cost
+# falls in the direction this file always chooses: a new EXECUTABLE kind is filtered out
+# and its stall goes unreported until it is named here, which is a missed signal rather
+# than a false escalation.
 #
-# Every value below was read off the live ledger, each with the bead that shows what it is:
+# The list is read off the PRODUCER CONTRACT, not off this rig's ledger. The first cut of
+# this filter named the kinds a listing over gc-toolkit actually returned, and a listing
+# is a sample, not a vocabulary. The executable control set is `beadmeta.ControlKinds` —
+# exactly eight, `rigs/gascity/internal/beadmeta/kindsets.go`, behavior owner the
+# one-case-per-member `ProcessControl` switch in `internal/dispatch/runtime.go`, kept in
+# lockstep by TestControlKindsExact. Five of those eight (ralph, check, retry-eval,
+# fanout, drain) had never been poured in this rig, so the sampled list dropped them —
+# and a dropped control kind does not fail loudly here, it reads as INERT: an unrouted
+# `check` on the frontier is filtered out, the frontier goes empty, the workflow is
+# counted as a descriptor-only wait, and the stall is never reported. An unrouted control
+# bead is precisely the missing-route class this pass exists to surface, so the
+# sample-derived list hid the case it was written to find (caught in review of tk-6mccf;
+# su-pepq is a live `ralph` control bead in the shutupandlisten rig).
+#
+# WORKER-EXECUTED — an ordinary pool actor claims these:
 #   «absent»          ordinary graph.v2 step beads — the whole of mol-polecat-work's graph
 #   task              mol-scoped-work's real step (tk-y8tb3 "Load context…", .attempt.2)
+#   cleanup           mol-scoped-work.cleanup-worktree (tk-qbpcx, routed to
+#                     gc-toolkit/gc-toolkit.polecat). It sits in
+#                     beadmeta.StructuralGraphKinds rather than ControlKinds, but that set
+#                     is about what ProcessControl dispatches, not about what can take
+#                     demand — a worker claims this one.
+# CONTROL — beadmeta.ControlKinds in full, dispatched to core.control-dispatcher. Routed
+# is their normal state, and a routed frontier exempts at `offerable` anyway; it is the
+# UNROUTED one — a control bead nothing can retire — that has to reach the report:
 #   retry             a re-poured attempt of a real step (tk-23ka0 "Implement…")
-#   cleanup           mol-scoped-work.cleanup-worktree (tk-ynm0t "Clean up the worktree")
-#   scope-check       "Finalize scope for <step>" (tk-2o7ep) — routed to core.control-dispatcher
-#   workflow-finalize the machinery's own finalize step (tk-c93ed) — same dispatcher
-# and the kinds it excludes:
+#   ralph             a check-loop controller (su-pepq "Write review report")
+#   check             one check-loop iteration's check bead
+#   retry-eval        the retry controller's verdict step
+#   fanout            engine-minted from [steps.on_complete] (EngineMintedOnlyKinds)
+#   drain             the drain control
+#   scope-check       "Finalize scope for <step>" (tk-2o7ep)
+#   workflow-finalize the machinery's own finalize step (tk-c93ed)
+# EXCLUDED — beadmeta.WorkflowTopologyKinds, whose docstring is the contract-level
+# statement of the inertness this filter keys on: "Routing never lands on these; agents
+# must never claim them."
 #   spec              "Step spec for <step>" (tk-1rrpg) — never routed, never assigned
 #   scope             "Worktree body scope" (tk-ltus2) — likewise
 #   workflow          a ROOT, which is never a member (it carries gc.input_convoy_id, not
 #                     gc.root_bead_id) — listed for completeness, it cannot reach here
 is_executable_kind() {
   case "${1:-}" in
-    ''|task|retry|cleanup|scope-check|workflow-finalize) return 0 ;;
+    # worker-executed
+    ''|task|cleanup) return 0 ;;
+    # beadmeta.ControlKinds, all eight — core.control-dispatcher's whole vocabulary
+    retry|ralph|check|retry-eval|fanout|drain|scope-check|workflow-finalize) return 0 ;;
     *) return 1 ;;
   esac
 }

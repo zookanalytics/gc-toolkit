@@ -40,6 +40,11 @@
 #              suppressed re-reports even after the real frontier moved
 #   (FINALIZE) workflow-finalize is EXECUTABLE — dispatched to core.control-dispatcher
 #              — so an unrouted one nothing can retire is a real stall, still reported
+#   (CONTROL)  ...and so is every OTHER member of beadmeta.ControlKinds. The first cut of
+#              the allow-list was sampled from this rig's ledger, which had never poured
+#              ralph/check/retry-eval/fanout/drain, so five of the dispatcher's eight
+#              kinds read as inert: an unrouted `check` frontier filtered to empty and
+#              the stall went unreported — the missing-route class this pass exists for
 #   (NEWKIND)  an unrecognised gc.kind -> exempt. This is what the ALLOW-list buys over
 #              deny-listing spec/scope: the next descriptor kind poured is excluded on
 #              the day it appears, not the day someone remembers to name it
@@ -213,6 +218,30 @@ cat > "$TMP/beads.json" <<EOF
  {"id":"m-finalize","status":"open","updated_at":"$OLD","_ready":true,
   "metadata":{"gc.root_bead_id":"r-finalize","gc.kind":"workflow-finalize","gc.step_ref":"mol-polecat-work.workflow-finalize"}},
 
+ {"id":"r-control","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-control"}},
+ {"id":"m-ctl-check","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"check","gc.step_ref":"mol-scoped-work.review.check.1"}},
+ {"id":"m-ctl-drain","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"drain","gc.step_ref":"mol-scoped-work.review.drain"}},
+ {"id":"m-ctl-fanout","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"fanout","gc.step_ref":"mol-scoped-work.implement.fanout"}},
+ {"id":"m-ctl-finalize","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"workflow-finalize","gc.step_ref":"mol-scoped-work.workflow-finalize"}},
+ {"id":"m-ctl-ralph","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"ralph","gc.step_ref":"mol-scoped-work.review.ralph"}},
+ {"id":"m-ctl-retry","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"retry","gc.step_ref":"mol-scoped-work.implement.attempt.2"}},
+ {"id":"m-ctl-retryeval","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"retry-eval","gc.step_ref":"mol-scoped-work.implement.retry-eval"}},
+ {"id":"m-ctl-scopecheck","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-control","gc.kind":"scope-check","gc.step_ref":"mol-scoped-work.implement.scope-check"}},
+
+ {"id":"r-checkonly","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-checkonly"}},
+ {"id":"m-checkonly","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-checkonly","gc.kind":"check","gc.step_ref":"mol-scoped-work.review.check.1"}},
+
  {"id":"r-newkind","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
   "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-newkind"}},
  {"id":"m-newkind","status":"open","updated_at":"$OLD","_ready":true,
@@ -249,7 +278,9 @@ cat > "$TMP/closed.json" <<EOF
  {"id":"c17","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-inert"}},
  {"id":"c18","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-mixed"}},
  {"id":"c19","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-finalize"}},
- {"id":"c20","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-newkind"}}
+ {"id":"c20","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-newkind"}},
+ {"id":"c21","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-control"}},
+ {"id":"c22","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-checkonly"}}
 ]
 EOF
 
@@ -274,6 +305,8 @@ c-reflag|a-plain
 c-inert|a-plain
 c-mixed|a-plain
 c-finalize|a-plain
+c-control|a-plain
+c-checkonly|a-plain
 c-newkind|a-plain
 C
 
@@ -449,6 +482,33 @@ has "$TMP/updates" "update r-mixed --set-metadata stall_flagged=m-mixed-step" \
   "(MIXED) the dedup key is recomputed from the FILTERED set — descriptor ids never close, so keying on them pinned the key to constants and suppressed re-reports after the real frontier moved"
 has "$TMP/out" "root r-finalize STALLED" \
   "(FINALIZE) workflow-finalize is EXECUTABLE — it is dispatched to core.control-dispatcher, and an unrouted one nothing can retire is a real stall"
+
+# (CONTROL) the allow-list is the dispatcher's WHOLE vocabulary — beadmeta.ControlKinds,
+# exactly eight — not the subset this rig happens to have poured. The first cut named the
+# kinds a listing over gc-toolkit returned, which omitted ralph/check/retry-eval/fanout/
+# drain; each omission is silent in the direction that matters, since a dropped kind is
+# treated as INERT and takes its workflow out of the report entirely. r-control carries
+# one ready, unrouted member per control kind, so the stall_flagged key below is the
+# membership assertion: drop any one of the eight and the key loses that id.
+has "$TMP/out" "root r-control STALLED" \
+  "(CONTROL) an unrouted frontier of control beads is a stall — a control bead nothing routed is one nothing can retire"
+has "$TMP/updates" "update r-control --set-metadata stall_flagged=m-ctl-check,m-ctl-drain,m-ctl-fanout,m-ctl-finalize,m-ctl-ralph,m-ctl-retry,m-ctl-retryeval,m-ctl-scopecheck" \
+  "(CONTROL) all EIGHT of beadmeta.ControlKinds survive the filter — ralph, check, retry-eval, fanout and drain had never been poured in this rig, so a ledger-sampled allow-list dropped them and their stalls read as descriptor-only waits"
+for id in m-ctl-check m-ctl-drain m-ctl-fanout m-ctl-finalize m-ctl-ralph m-ctl-retry m-ctl-retryeval m-ctl-scopecheck; do
+  has "$TMP/out" "$id" "(CONTROL) $id reaches the report, so the operator is shown the bead that needs a route"
+done
+
+# r-control proves MEMBERSHIP; r-checkonly proves the CONSEQUENCE. Its whole frontier is a
+# single unrouted `check` bead, so a dropped kind does not merely shorten the report — the
+# frontier goes empty, the workflow is filed under the descriptor-only wait, and the stall
+# is never reported at all. That silence is the failure mode, so it gets its own root.
+has "$TMP/out" "root r-checkonly STALLED" \
+  "(CONTROL) a workflow whose ENTIRE frontier is one unrouted control bead is reported — with that kind dropped from the allow-list the frontier empties and the stall goes silent, which is the whole defect"
+has "$TMP/out" "frontier \[m-checkonly\]" \
+  "(CONTROL) and the check bead is named as the thing needing a route"
+has "$TMP/updates" "update r-checkonly --set-metadata stall_flagged=m-checkonly" \
+  "(CONTROL) the dedup key is the control bead itself, so the stall re-reports once the frontier moves"
+
 hasnt "$TMP/out" "root r-newkind STALLED" \
   "(NEWKIND) a gc.kind this script has never heard of is excluded — that is what the allow-list buys over deny-listing spec/scope: the next descriptor kind is safe the day it is poured, not the day someone remembers to add it"
 
@@ -463,8 +523,8 @@ grep -q 'join("\\u001f")' "$SCRIPT" \
 # --- the signal itself --------------------------------------------------------
 eq "$(grep -c 'triage: stalled workflows' "$TMP/created")" "1" \
   "the standing triage subject is created once, not once per stalled workflow"
-eq "$(grep -c 'visit: r-' "$TMP/created")" "6" \
-  "one visit per stalled workflow — r-stall, r-pr, r-emptyhold, r-reflag, r-mixed and r-finalize, all six on the one subject"
+eq "$(grep -c 'visit: r-' "$TMP/created")" "8" \
+  "one visit per stalled workflow — r-stall, r-pr, r-emptyhold, r-reflag, r-mixed, r-finalize, r-control and r-checkonly, all eight on the one subject"
 has "$TMP/updates" "stall_flagged=" "the root is stamped with the dedupe marker"
 has "$TMP/updates" "task_kind=visit" "the visit is stamped as a visit"
 has "$TMP/updates" "gc.routed_to=" "the visit is routed to the conversation pool"
