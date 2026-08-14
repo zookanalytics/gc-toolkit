@@ -738,6 +738,17 @@ retries the resolution — the same shape as the ORPHAN_CLOSED one-shot above.
 An orphan that waits a cycle costs one patrol pass; an orphan wrongly declared
 empty costs the branch.
 
+**What a skip does and does not risk.** A resolution that stays blind — a root
+row genuinely gone, say — is retried every cycle and never recovered, so the
+diagnostic above repeats on the patrol's stderr indefinitely. That is loud on
+purpose, and it is not a data risk: `recover-stranded-branches` selects work
+beads by their OWN `metadata.branch` and a published head, with no reference to
+any workflow root, so PUBLISHED work behind a skipped step is already owned by
+that pass. What a skip does defer is UNPUBLISHED worktree work — the Case C and
+D writes — which is exactly what the anchor's `work_dir` above exists to reach.
+A bead blind across many cycles is worth the mayor's attention under the
+Escalation discipline above; it is not worth guessing a branch for.
+
 Whatever `$ANCHOR` resolved to belongs in the Step 4 notice: for a step bead
 it names the work item whose branch was searched, which is the one thing a
 reader needs to check the verdict by hand.
