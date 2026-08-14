@@ -19,8 +19,19 @@
 #     does not, so a caller carrying a stale claim id cannot re-create the bug;
 #   * the SUBSTRING trap — jq's `inside`/`contains` match substrings, so a
 #     session named lx-zzk would "own" lx-zzk9's bead. Exact membership only;
+#   * the OPEN-STATUS anchor (tk-jww3y) — a graph.v2 step is assigned by the
+#     graph, not by the claim, so it executes at status `open` and never reaches
+#     in_progress. Resolution must turn on the (assignee, step_ref) pair, not on
+#     a status the dispatch never sets. With it: that a SIBLING step, open and
+#     pre-assigned to the same session, is still never touched; that in_progress
+#     outranks open rather than merging with it; and that ambiguity inside the
+#     open tier is refused like any other;
 #   * ambiguity: two in_progress beads for one step, which is refused rather
 #     than guessed, because guessing is how the original defect writes;
+#   * the refusal DIAGNOSTIC distinguishing "not your bead" from "your bead, in
+#     a status this script will not close" — they have different fixes, and
+#     conflating them sent a reader hunting a stale-environment bug that had not
+#     happened;
 #   * idempotence: an already-closed step bead is a normal re-run, exit 0;
 #   * the last-resort env path, which still requires verification;
 #   * refusal arms write NOTHING — the invariant that makes a stall the safe
@@ -196,6 +207,111 @@ eq "$RC" "0" "(NO-ENV) resolves with GC_TRIGGER_BEAD_ID unset"
 has "$(cat "$FAKE_CLOSED")" "tk-9b3d8 pass" "(NO-ENV) closed by (assignee, step_ref)"
 has "$OUT" "resolved by (assignee, step_ref)" "(NO-ENV) reports how it resolved"
 
+# --- 2b. THE OPEN-STATUS REGRESSION ANCHOR (tk-jww3y) ------------------------
+# A graph.v2 step bead is assigned to its session by the GRAPH, not by the
+# claim, so `gc hook --claim` finds the assignee already set and advances
+# nothing: the step is executed at status `open` and never reaches in_progress.
+# Live shape from mol-feedback-distiller run tk-u67el (2026-08-14) — tk-jihd0
+# and tk-xf0ly both went open/unassigned -> open/assigned -> closed, with no
+# in_progress state anywhere in their history. Resolution must not turn on a
+# status the dispatch never sets; the ownership proof is the (assignee,
+# step_ref) pair, and it holds here.
+cat > "$FAKE_BEADS" <<B
+tk-xf0ly|$MINE|$STEP|open
+B
+: > "$FAKE_CLOSED"
+run --step "$STEP"
+eq "$RC" "0" "(OPEN) a step bead left at open by the claim resolves"
+has "$(cat "$FAKE_CLOSED")" "tk-xf0ly pass" "(OPEN) it is closed like any other own bead"
+has "$OUT" "resolved by (assignee, step_ref)" "(OPEN) resolved on the ownership pair, not on status"
+
+# --- 2c. a SIBLING step, pre-assigned open, is not touched -------------------
+# The safety property that makes 2b safe. The graph assigns every step of the
+# molecule to the same session at once (both live beads above were assigned
+# within one second of each other), so at any moment several open beads carry
+# this session's name. They are told apart by `gc.step_ref` — the one fact the
+# arm passes in — so accepting `open` cannot close a step that has not run.
+cat > "$FAKE_BEADS" <<B
+tk-jihd0|$MINE|mol-feedback-distiller.judge-and-cluster|open
+tk-xf0ly|$MINE|mol-feedback-distiller.file-and-dispatch|open
+B
+: > "$FAKE_CLOSED"
+run --step mol-feedback-distiller.judge-and-cluster
+eq "$RC" "0" "(SIBLING) one of several open beads for this session resolves"
+has "$(cat "$FAKE_CLOSED")" "tk-jihd0 pass" "(SIBLING) closed the step this arm named"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-xf0ly" "(SIBLING) the next step's pre-assigned bead was NOT closed"
+
+# --- 2d. in_progress outranks open -------------------------------------------
+# The two statuses are tiers, not one merged set. Merging them would make this
+# fixture — a bead the claim DID advance, plus a same-step bead pre-assigned by
+# a second molecule — an ambiguity refusal, breaking a case that works today.
+cat > "$FAKE_BEADS" <<B
+tk-live1|$MINE|$STEP|in_progress
+tk-pend1|$MINE|$STEP|open
+B
+: > "$FAKE_CLOSED"
+run --step "$STEP"
+eq "$RC" "0" "(TIER) in_progress resolves even when an open same-step bead exists"
+has "$(cat "$FAKE_CLOSED")" "tk-live1 pass" "(TIER) the started bead is the one closed"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-pend1" "(TIER) the open one was left alone"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "1" "(TIER) exactly one write"
+
+# --- 2e. ambiguity within the open tier is still refused ---------------------
+cat > "$FAKE_BEADS" <<B
+tk-open1|$MINE|$STEP|open
+tk-open2|$MINE|$STEP|open
+B
+: > "$FAKE_CLOSED"
+run --step "$STEP"
+eq "$RC" "2" "(OPEN-AMBIG) two open beads for one step is a refusal, not a guess"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(OPEN-AMBIG) nothing was written"
+has "$OUT" "tk-open1" "(OPEN-AMBIG) both candidates are named — tk-open1"
+has "$OUT" "tk-open2" "(OPEN-AMBIG) both candidates are named — tk-open2"
+
+# --- 2f. --bead and the env path both accept open ----------------------------
+cat > "$FAKE_BEADS" <<B
+tk-open1|$MINE|$STEP|open
+tk-open2|$MINE|$STEP|open
+B
+: > "$FAKE_CLOSED"
+run --step "$STEP" --bead tk-open2
+eq "$RC" "0" "(OPEN-HINT) a hint verifying at open breaks the ambiguity"
+has "$(cat "$FAKE_CLOSED")" "tk-open2 pass" "(OPEN-HINT) the named open bead is the one closed"
+
+cat > "$FAKE_BEADS" <<B
+tk-solo2|$MINE|$STEP|open
+B
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-solo2" \
+      FAKE_LIST_BLIND=1 bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+eq "$RC" "0" "(OPEN-ENV) the last-resort env path accepts a verified open bead"
+has "$(cat "$FAKE_CLOSED")" "tk-solo2 pass" "(OPEN-ENV) it closed the verified bead"
+
+# --- 2g. "your bead, unexpected status" is not reported as "not your bead" ---
+# The diagnostic that sent a reader hunting the stale-environment defect
+# (tk-niu2f) after what was really a status mismatch. `blocked` is owned by this
+# session for this step and is still not closed — but the refusal must say so,
+# because "not this step's bead" is a different problem with a different fix.
+cat > "$FAKE_BEADS" <<B
+tk-blockd|$MINE|$STEP|blocked
+B
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-blockd" \
+      bash "$SCRIPT" --step "$STEP" 2>&1) || RC=$?
+eq "$RC" "2" "(DIAG) an owned bead in an unexecutable status is still refused"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(DIAG) nothing was written"
+has "$OUT" "IS this session's bead for this step" "(DIAG) ownership is reported as proven"
+has "$OUT" "status is 'blocked'" "(DIAG) the actual status is named"
+hasnt "$OUT" "not this step's bead, or unreadable" "(DIAG) the misleading line is not emitted"
+
+# ...and the same distinction on the --bead hint arm.
+: > "$FAKE_CLOSED"
+run --step "$STEP" --bead tk-blockd
+eq "$RC" "2" "(DIAG-HINT) an owned-but-parked hint does not resolve"
+has "$OUT" "but its status is 'blocked'" "(DIAG-HINT) the hint arm names the status too"
+
 # --- 3. --bead hint that verifies --------------------------------------------
 reset_beads
 run --step "$STEP" --bead tk-9b3d8 --outcome fail
@@ -270,7 +386,7 @@ OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
 eq "$RC" "2" "(UNRESOLVABLE) no own bead anywhere is a refusal"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(UNRESOLVABLE) nothing was written"
 has "$OUT" "cannot identify this session's bead" "(UNRESOLVABLE) says what it could not do"
-has "$OUT" "still OPEN and will be re-offered" "(UNRESOLVABLE) names the consequence"
+has "$OUT" "still UNCLOSED and will be re-offered" "(UNRESOLVABLE) names the consequence"
 
 # --- 9b. bd answers with an error OBJECT, not an array -----------------------
 # A degraded store must refuse, not crash and not fall through to a guess. The
@@ -327,7 +443,7 @@ reset_beads
 echo "tk-9b3d8" > "$FAKE_UPDFAIL"
 run --step "$STEP"
 eq "$RC" "2" "(WRITE-FAIL) a failed update exits 2"
-has "$OUT" "still open and will be re-offered" "(WRITE-FAIL) names the consequence"
+has "$OUT" "still unclosed and will be re-offered" "(WRITE-FAIL) names the consequence"
 has "$OUT" "permission denied (stub)" "(WRITE-FAIL) keeps bd's own diagnostic"
 
 # --- 15. usage errors ---------------------------------------------------------

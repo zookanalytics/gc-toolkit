@@ -53,17 +53,50 @@
 # that looks wrong.
 #
 # WHAT IS AUTHORITATIVE INSTEAD. The bead itself. Every step bead carries, set
-# by the claim that dispatched it:
+# by the dispatch that handed it to this session:
 #
 #     assignee                = the claiming session's name
 #     metadata."gc.step_ref"  = the formula step it materializes
-#     status                  = in_progress while it is being executed
 #
-# Those three together name exactly one bead: this session's bead for this
-# step. That is a query, not an inheritance, so it cannot go stale across a
-# hook-claim — which is the whole defect. The caller passes --step because the
+# That PAIR is the identity, and it names exactly one bead: this session's bead
+# for this step. It is a query, not an inheritance, so it cannot go stale across
+# a hook-claim — which is the whole defect. The caller passes --step because the
 # step id is the one fact the shell knows about itself and cannot misread; the
 # rest is read back from the store.
+#
+# STATUS IS NOT PART OF THE IDENTITY (tk-jww3y). The pair above is the proof of
+# ownership; status only says which tier of an executable bead we are looking
+# at, and an earlier version of this script treated `in_progress` as a third
+# identity component. It is not one, and assuming it was made the script fail on
+# its own happy path:
+#
+#     `gc hook --claim` flips status to in_progress only when the claim is what
+#     ASSIGNS the bead — the pool route. A graph.v2 step bead is assigned to its
+#     session up front by the graph (session affinity), so by the time the
+#     session claims it the assignee is already set and the claim advances
+#     nothing. The bead is executed at status `open`.
+#
+# Observed on mol-feedback-distiller run tk-u67el (2026-08-14): steps tk-jihd0
+# and tk-xf0ly both went open/unassigned -> open/assigned-to-the-session ->
+# closed, and were never in_progress at any point in their history. Both
+# resolutions here refused with an ownership proof they already held, and both
+# steps survived only on the agent noticing the FATAL and closing by explicit
+# id. Every step of every graph.v2 formula that self-closes through this helper
+# was on that fallback.
+#
+# So `open` is executable and is closed like `in_progress`. This does not
+# loosen the guard: the guard is the (assignee, step_ref) pair, which is
+# unchanged, and ambiguity is still refused rather than guessed. What it cannot
+# do is close a SIBLING step early — a sibling bead is pre-assigned to the same
+# session at the same time, but carries a different `gc.step_ref`, so it never
+# matches the --step this arm passes.
+#
+# `in_progress` is still resolved FIRST, and `open` is consulted only when that
+# tier is empty. Merging the two sets instead would turn a case this script
+# handles today (one in_progress bead, plus a same-step bead pre-assigned by a
+# second molecule) into an ambiguity refusal. Tiering keeps every currently
+# working resolution working and adds the open path strictly where the script
+# used to give up.
 #
 # WHY --bead IS A HINT AND NOT AN INSTRUCTION. `gc hook --claim --json` returns
 # `.bead_id`, and a caller holding it should say so — it saves a listing and it
@@ -102,6 +135,12 @@ usage: step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>] [--d
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session; any that are
      set are tried as the assignee. GC_TRIGGER_BEAD_ID is consulted only as a
      last resort and only if it verifies — see the header.
+
+Ownership is the (assignee, gc.step_ref) pair. A bead proven to be this
+session's for this step is closed at status `in_progress` or `open` — a
+graph.v2 step is assigned by the graph rather than by the claim, so it
+executes at `open` and never reaches in_progress (tk-jww3y). `in_progress`
+is resolved first; `open` only if that finds nothing.
 
 exit: 0 closed (or already closed) · 2 refused to close, nothing written
 USAGE
@@ -212,9 +251,15 @@ verify() {
   ' 2>/dev/null
 }
 
-# Every in_progress bead for this step assigned to one of our identities, one id
+# Every bead at <status> for this step assigned to one of our identities, one id
 # per line. This is the authoritative resolution: it asks the store who owns
 # this step right now instead of trusting a value the session inherited.
+#
+# One status per call, deliberately. `bd list` does accept `--status=a,b` (and
+# the REPEATED flag silently keeps only the last value, so that spelling is not
+# an option), but a combined query answers "these beads are executable" without
+# saying which status each one is in — and the caller resolves in_progress ahead
+# of open, so it needs them apart. Asking twice is what makes the tiers legible.
 discover() {
   local want_status="$1" ident json
   while IFS= read -r ident; do
@@ -241,7 +286,7 @@ close_bead() {
     echo "step-close: closed $target ($STEP) outcome=$OUTCOME [$via]"
     return 0
   fi
-  echo "step-close: FATAL — 'gc bd update $target --status=closed' failed; the step bead is still open and will be re-offered. Close it by explicit id." >&2
+  echo "step-close: FATAL — 'gc bd update $target --status=closed' failed; the step bead is still unclosed and will be re-offered. Close it by explicit id." >&2
   [ -n "$err" ] && echo "step-close:   $err" >&2
   return 1
 }
@@ -258,8 +303,19 @@ warn_env_mismatch() {
   echo "step-close: NOTE — GC_TRIGGER_BEAD_ID=$env_id is not this step's bead ($resolved for $STEP); the environment value is stale after a hook-claim and was not used (tk-niu2f)." >&2
 }
 
+# Executable tiers, most-started first. `open` is consulted only when nothing is
+# in_progress: a graph.v2 step is assigned by the graph rather than by the
+# claim, so it executes at `open` (tk-jww3y), but a bead the claim DID advance
+# is the better answer whenever one exists. See the header on why these are
+# tiers and not one merged set.
+TIER=in_progress
 FOUND=$(discover in_progress | sort -u)
 N=$(printf '%s\n' "$FOUND" | awk 'NF' | wc -l | tr -d ' ')
+if [ "$N" -eq 0 ]; then
+  TIER=open
+  FOUND=$(discover open | sort -u)
+  N=$(printf '%s\n' "$FOUND" | awk 'NF' | wc -l | tr -d ' ')
+fi
 
 # 1. A hint that verifies wins: it is the id the claim handed out, and it has
 #    just been checked against the same (assignee, step_ref) identity as
@@ -267,9 +323,9 @@ N=$(printf '%s\n' "$FOUND" | awk 'NF' | wc -l | tr -d ' ')
 if [ -n "$HINT" ]; then
   HINT_STATUS=$(verify "$HINT")
   case "$HINT_STATUS" in
-    in_progress)
+    in_progress|open)
       if [ "$N" -gt 1 ]; then
-        echo "step-close: NOTE — $N in_progress beads match $STEP for this session ($(printf '%s' "$FOUND" | tr '\n' ' ')); using the caller's verified --bead $HINT" >&2
+        echo "step-close: NOTE — $N $TIER beads match $STEP for this session ($(printf '%s' "$FOUND" | tr '\n' ' ')); using the caller's verified --bead $HINT" >&2
       fi
       warn_env_mismatch "$HINT"
       close_bead "$HINT" "--bead, verified" || exit 2
@@ -277,8 +333,13 @@ if [ -n "$HINT" ]; then
     closed)
       echo "step-close: $HINT ($STEP) is already closed — nothing to do"
       exit 0 ;;
+    '')
+      echo "step-close: NOTE — --bead $HINT is not this session's bead for $STEP; ignoring the hint and resolving from the store" >&2 ;;
     *)
-      echo "step-close: NOTE — --bead $HINT is not this session's in_progress bead for $STEP; ignoring the hint and resolving from the store" >&2 ;;
+      # Ours, for this step, but parked in a status no arm executes from
+      # (blocked, deferred, ...). Say which: "not your bead" would send the
+      # reader looking for an ownership problem that is not there.
+      echo "step-close: NOTE — --bead $HINT IS this session's bead for $STEP, but its status is '$HINT_STATUS', which this script does not close; ignoring the hint and resolving from the store" >&2 ;;
   esac
 fi
 
@@ -291,12 +352,13 @@ if [ "$N" -eq 1 ]; then
 fi
 
 if [ "$N" -gt 1 ]; then
-  echo "step-close: FATAL — $N in_progress beads match step '$STEP' for this session: $(printf '%s' "$FOUND" | tr '\n' ' ')" >&2
+  echo "step-close: FATAL — $N $TIER beads match step '$STEP' for this session: $(printf '%s' "$FOUND" | tr '\n' ' ')" >&2
   echo "step-close: refusing to guess which one this shell is executing. Close the right one by explicit id (--bead), and treat the duplicate as a graph defect." >&2
   exit 2
 fi
 
-# 3. Nothing in progress. Already closed is a normal re-run, not a failure.
+# 3. Nothing executable in either tier. Already closed is a normal re-run, not a
+#    failure.
 ALREADY=$(discover closed | sort -u | head -n 1)
 if [ -n "$ALREADY" ]; then
   echo "step-close: $ALREADY ($STEP) is already closed — nothing to do"
@@ -309,7 +371,7 @@ fi
 #    makes it safe.
 ENV_STATUS=$(verify "${GC_TRIGGER_BEAD_ID:-}")
 case "$ENV_STATUS" in
-  in_progress)
+  in_progress|open)
     echo "step-close: NOTE — resolved from GC_TRIGGER_BEAD_ID (${GC_TRIGGER_BEAD_ID}) after the store listing returned nothing; verified as this session's bead for $STEP" >&2
     close_bead "${GC_TRIGGER_BEAD_ID}" "GC_TRIGGER_BEAD_ID, verified" || exit 2
     exit 0 ;;
@@ -318,8 +380,17 @@ case "$ENV_STATUS" in
     exit 0 ;;
 esac
 
+# Two different failures reach here and they need different fixes, so name which
+# one happened. A non-empty $ENV_STATUS means the env id passed the ownership
+# proof — it IS this session's bead for this step — and was rejected purely on
+# status. Reporting that as "not this step's bead" is what sent a reader hunting
+# the stale-environment defect (tk-niu2f) after a status mismatch (tk-jww3y).
 echo "step-close: FATAL — cannot identify this session's bead for step '$STEP'." >&2
 echo "step-close:   identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')" >&2
-echo "step-close:   GC_TRIGGER_BEAD_ID=${GC_TRIGGER_BEAD_ID:-<unset>} (not this step's bead, or unreadable)" >&2
-echo "step-close:   The step bead is still OPEN and will be re-offered until it is closed by explicit id." >&2
+if [ -n "$ENV_STATUS" ]; then
+  echo "step-close:   GC_TRIGGER_BEAD_ID=${GC_TRIGGER_BEAD_ID} IS this session's bead for this step, but its status is '$ENV_STATUS' — this script closes 'in_progress' and 'open', and reports 'closed' as already done. Nothing else was resolvable either." >&2
+else
+  echo "step-close:   GC_TRIGGER_BEAD_ID=${GC_TRIGGER_BEAD_ID:-<unset>} (not this step's bead, or unreadable)" >&2
+fi
+echo "step-close:   The step bead is still UNCLOSED and will be re-offered until it is closed by explicit id." >&2
 exit 2
