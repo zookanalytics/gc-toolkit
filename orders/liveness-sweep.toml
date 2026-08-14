@@ -47,6 +47,14 @@
 # LIVENESS_SWEEP_INTERVAL at the top of the precheck script, which
 # stamps it per rig.
 #
+# That per-rig stamping is load-bearing for the `scope = "rig"` below,
+# and the coupling is easy to miss from either side: the script stamps
+# into GC_PACK_STATE_DIR, which the runner scopes to CITY+PACK, while
+# this order runs one check per importing rig. The script keys the
+# window by GC_RIG for exactly that reason. If you ever widen this
+# scope, or move the state elsewhere, re-read "the state dir" in the
+# script first — an unkeyed window silences every rig but the first.
+#
 # `check_timeout` MUST stay above the script's own worst case (three
 # bounded reads at LIVENESS_SWEEP_CALL_TIMEOUT=45s each). A condition
 # check killed by this deadline never proves its condition, so the order

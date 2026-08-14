@@ -233,7 +233,12 @@ The formula, the bare pool and the rig scope are unchanged, so a pass
 that does run is dispatched by exactly the path that dispatched it
 before — single-flight open-work gate included. Only the CLOCK moved: a
 condition trigger has no `interval`, so the window lives in the script
-and is stamped per rig.
+and is stamped per rig — keyed by `GC_RIG`, because the state directory
+it is built from (`GC_PACK_STATE_DIR`) is city+pack scoped while the
+order is rig-scoped. Without that key the first rig through the check
+would stamp a window shared by every importing rig and silence the rest
+for six hours, which is the one failure mode the whole design is
+arranged to avoid: a sweep that looks quiet because it never ran.
 
 **Why skipping is provably safe.** The precheck applies a strictly
 SMALLER filter than classify. It excludes only on locally-decidable

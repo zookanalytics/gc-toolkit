@@ -25,11 +25,15 @@
 #      non-array answer, missing subject and mid-flight abort is exercised, and
 #      each must RUN — never skip.
 #
-#   4. THE COOLDOWN IS ENFORCED, AND STAMPED BEFORE THE WORK. A condition
-#      trigger has no interval, so the 6h cadence lives in the script. Stamping
-#      after the verdict would let a crash re-offer the pass on the next tick
-#      and let a degraded store dispatch a session every tick, so the ordering
-#      is itself under test.
+#   4. THE COOLDOWN IS ENFORCED, STAMPED BEFORE THE WORK, AND PER RIG. A
+#      condition trigger has no interval, so the 6h cadence lives in the script.
+#      Stamping after the verdict would let a crash re-offer the pass on the
+#      next tick and let a degraded store dispatch a session every tick, so the
+#      ordering is itself under test. And the state directory it stamps into is
+#      city+pack scoped while the order is rig-scoped, so a window without a rig
+#      component would let the first rig through the check silence every other
+#      rig for six hours — section 4b runs two rigs against one shared state
+#      directory, which is the only way to see that.
 #
 #   5. THE SUBSET PROPERTY, which is the soundness argument itself. The precheck
 #      is only safe because its exclusions are a strict subset of the shipped
@@ -168,6 +172,11 @@ export PATH="$TMP/bin:$PATH"
 export GC_RIG=testrig
 export GC_RIG_ROOT="$TMP/rigroot"
 export LIVENESS_SWEEP_STATE_DIR="$TMP/state"
+# LIVENESS_SWEEP_STATE_DIR is the BASE; the script keys a rig component onto it
+# so two rigs sharing one state directory cannot share a cooldown window. With
+# GC_RIG=testrig that component is `testrig` — an ordinary rig name survives
+# sanitizing untouched, which section 4 pins directly.
+STATE="$LIVENESS_SWEEP_STATE_DIR/testrig"
 
 # Every case below wants a fresh classification, so the cooldown stamp is
 # cleared first; the cooldown itself is exercised in its own section.
@@ -345,19 +354,19 @@ echo "── the cadence is enforced here, and stamped BEFORE the work ──"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 "$SCRIPT" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "first run in a fresh window classifies and runs"
-[ -f "$LIVENESS_SWEEP_STATE_DIR/last-pass" ] && ok "it stamped the window" \
-    || bad "it stamped the window" "no $LIVENESS_SWEEP_STATE_DIR/last-pass"
+[ -f "$STATE/last-pass" ] && ok "it stamped the window" \
+    || bad "it stamped the window" "no $STATE/last-pass"
 OUT="$("$SCRIPT" 2>&1)"; RC=$?
 eq "$RC" "1" "a second tick inside the window does NOT run the pass"
 eq "$OUT" "" "and says nothing — this is the answer on almost every tick"
 OUT="$("$SCRIPT" --force 2>&1)"; RC=$?
 eq "$RC" "0" "--force classifies anyway"
 # Backdate the stamp past the window: the next tick classifies again.
-printf '%s\n' "$(( $(date -u +%s) - 21601 ))" > "$LIVENESS_SWEEP_STATE_DIR/last-pass"
+printf '%s\n' "$(( $(date -u +%s) - 21601 ))" > "$STATE/last-pass"
 "$SCRIPT" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "once the window has elapsed the pass runs again"
 # A shorter window is honoured, so the interval is really read from one place.
-printf '%s\n' "$(( $(date -u +%s) - 100 ))" > "$LIVENESS_SWEEP_STATE_DIR/last-pass"
+printf '%s\n' "$(( $(date -u +%s) - 100 ))" > "$STATE/last-pass"
 LIVENESS_SWEEP_INTERVAL=60 "$SCRIPT" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "LIVENESS_SWEEP_INTERVAL is the single source of the cadence"
 # STAMP-BEFORE-WORK: a run whose reads all fail must still have stamped, or a
@@ -365,12 +374,12 @@ eq "$RC" "0" "LIVENESS_SWEEP_INTERVAL is the single source of the cadence"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 FAIL_ready=1 "$SCRIPT" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "a degraded store runs the pass"
-[ -f "$LIVENESS_SWEEP_STATE_DIR/last-pass" ] && ok "and STILL stamped — a degraded store cannot storm" \
+[ -f "$STATE/last-pass" ] && ok "and STILL stamped — a degraded store cannot storm" \
     || bad "and STILL stamped — a degraded store cannot storm" "no stamp; every tick would dispatch"
 # --dry-run must never move the window.
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 "$SCRIPT" --dry-run >/dev/null 2>&1
-[ -f "$LIVENESS_SWEEP_STATE_DIR/last-pass" ] \
+[ -f "$STATE/last-pass" ] \
     && bad "--dry-run does not stamp" "it wrote the window stamp" \
     || ok "--dry-run does not stamp"
 # An unwritable state dir is the one condition that refuses to run: with no
@@ -386,14 +395,79 @@ has "$OUT" "the sweep is OFF" "and that the sweep is off until it is fixed"
 echo "── the report survives the controller discarding stdout ──"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 "$SCRIPT" >/dev/null 2>&1
-[ -s "$LIVENESS_SWEEP_STATE_DIR/pass.log" ] && ok "the verdict is appended to pass.log" \
+[ -s "$STATE/pass.log" ] && ok "the verdict is appended to pass.log" \
     || bad "the verdict is appended to pass.log" "no log — a condition check's stdout is discarded"
-grep -q "RUN:" "$LIVENESS_SWEEP_STATE_DIR/pass.log" && ok "the log carries the verdict" \
+grep -q "RUN:" "$STATE/pass.log" && ok "the log carries the verdict" \
     || bad "the log carries the verdict" "no verdict line in pass.log"
 LIVENESS_SWEEP_LOG_KEEP=3 "$SCRIPT" --force >/dev/null 2>&1
 LIVENESS_SWEEP_LOG_KEEP=3 "$SCRIPT" --force >/dev/null 2>&1
-eq "$(awk 'END { print NR }' "$LIVENESS_SWEEP_STATE_DIR/pass.log")" "3" \
+eq "$(awk 'END { print NR }' "$STATE/pass.log")" "3" \
    "the log is bounded — a quiet rig cannot grow it without limit"
+
+# --- 4b. the window is PER RIG -----------------------------------------------
+# The production path, not the LIVENESS_SWEEP_STATE_DIR one: the order runner
+# gives every rig-scoped check the SAME GC_PACK_STATE_DIR (city+pack —
+# `<city>/.gc/runtime/packs/<pack>`, citylayout.PackStateDir) and a per-rig
+# GC_RIG/GC_RIG_ROOT. A stamp without a rig component is therefore shared by
+# every importing rig, and the first one through the check silences all the
+# others for the whole 6h window — an empty-looking sweep on a rig that was
+# never read. This section runs two rigs against one shared state directory.
+echo "── two rigs sharing one GC_PACK_STATE_DIR keep separate windows ──"
+SHARED="$TMP/packstate"
+rm -rf "$SHARED"
+# Rig A: a normal first pass. Classifies, runs, and stamps its own window.
+: > "$FIXDIR/reads"
+OUT_A="$(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$SHARED" GC_RIG=rigA "$SCRIPT" 2>&1)"; RC_A=$?
+eq "$RC_A" "0" "rig A runs its pass"
+has "$OUT_A" "RUN:" "and reached a real verdict"
+[ -f "$SHARED/liveness-sweep/rigA/last-pass" ] && ok "rig A stamped its OWN window" \
+    || bad "rig A stamped its OWN window" "no $SHARED/liveness-sweep/rigA/last-pass"
+# Rig A again, inside the window: still silent, so the cadence was not simply
+# disabled to separate the rigs.
+OUT_A2="$(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$SHARED" GC_RIG=rigA "$SCRIPT" 2>&1)"; RC_A2=$?
+eq "$RC_A2" "1" "rig A's own second tick is still held by the cooldown"
+eq "$OUT_A2" "" "and still says nothing"
+# Rig B, same state directory, immediately after: this is the regression. It
+# must classify its own store rather than inherit rig A's window.
+: > "$FIXDIR/reads"
+OUT_B="$(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$SHARED" GC_RIG=rigB "$SCRIPT" 2>&1)"; RC_B=$?
+eq "$RC_B" "0" "rig B still runs after rig A stamped — the window is not shared"
+has "$OUT_B" "RUN:" "and rig B reached a real verdict"
+[ -s "$FIXDIR/reads" ] && ok "rig B actually read its store" \
+    || bad "rig B actually read its store" "no reads — it exited from the cooldown branch"
+[ -f "$SHARED/liveness-sweep/rigB/last-pass" ] && ok "rig B stamped a window of its own" \
+    || bad "rig B stamped a window of its own" "no $SHARED/liveness-sweep/rigB/last-pass"
+# Two rigs, two logs: a quiet rig's history stays its own.
+[ -s "$SHARED/liveness-sweep/rigA/pass.log" ] && [ -s "$SHARED/liveness-sweep/rigB/pass.log" ] \
+    && ok "each rig keeps its own pass.log" \
+    || bad "each rig keeps its own pass.log" "the logs are shared or missing"
+
+# The key is derived, so it must not be escapable or collidable. Two rig names
+# that differ only in a character the sanitizer rewrites must NOT land on one
+# directory — that would rebuild the shared window through the back door.
+echo "── the rig key is sanitized, and sanitizing cannot collide ──"
+KEYS="$TMP/keys"
+rm -rf "$KEYS"
+(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$KEYS" GC_RIG='a/b' "$SCRIPT" >/dev/null 2>&1)
+(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$KEYS" GC_RIG='a_b' "$SCRIPT" >/dev/null 2>&1)
+eq "$(find "$KEYS/liveness-sweep" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')" "2" \
+   "'a/b' and 'a_b' get two windows, not one"
+[ -e "$KEYS/liveness-sweep/a/b" ] \
+    && bad "a rig name cannot escape into a subdirectory" "'a/b' wrote a nested path" \
+    || ok "a rig name cannot escape into a subdirectory"
+# No rig identity at all is a hand run, and it gets its own bucket rather than
+# stamping over whichever rig happened to be first.
+rm -rf "$KEYS"
+(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$KEYS" GC_RIG='' GC_RIG_ROOT='' "$SCRIPT" >/dev/null 2>&1)
+[ -f "$KEYS/liveness-sweep/_unscoped/last-pass" ] && ok "an unscoped hand run stamps its own bucket" \
+    || bad "an unscoped hand run stamps its own bucket" "no _unscoped window"
+# A rig root with no rig name still keys per root, and two roots sharing a last
+# component stay distinct — the basename reads well, the full path is the identity.
+rm -rf "$KEYS"
+(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$KEYS" GC_RIG='' GC_RIG_ROOT="$TMP/one/dup" "$SCRIPT" >/dev/null 2>&1)
+(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$KEYS" GC_RIG='' GC_RIG_ROOT="$TMP/two/dup" "$SCRIPT" >/dev/null 2>&1)
+eq "$(find "$KEYS/liveness-sweep" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')" "2" \
+   "two rig roots ending in the same name keep separate windows"
 
 # --- 5. the order wiring -----------------------------------------------------
 echo "── the order is wired to this script, with one source for the cadence ──"

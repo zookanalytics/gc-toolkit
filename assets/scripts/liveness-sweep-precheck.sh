@@ -129,6 +129,12 @@
 # agent pass every tick instead of one per window. Stamping first costs at most
 # one missed cycle and cannot storm.
 #
+# The stamp is PER RIG. The order is rig-scoped and each importing rig sweeps
+# its own store, but the state directory it is built from is city+pack scoped,
+# so a stamp without a rig component would let the first rig through the check
+# silence every other rig's sweep for the whole window. See "the state dir"
+# below, which is the only place that decides this.
+#
 # ---------------------------------------------------------------------------
 # WHAT IT DOES NOT DO
 #
@@ -195,8 +201,58 @@ REASON="precheck did not complete"
 DECIDED=0
 TMP=""
 
+# --- the state dir, WHICH MUST BE PER RIG ------------------------------------
+# `GC_PACK_STATE_DIR` is CITY+PACK scoped — `<city>/.gc/runtime/packs/<pack>`,
+# `citylayout.PackStateDir` — but this order runs with `scope = "rig"`, and each
+# importing rig runs its own check against its own store. A stamp with no rig
+# component is therefore SHARED: the first rig to reach the precheck stamps the
+# window, and every other rig then exits from the cooldown branch below before
+# it ever reads its own `.beads`, however many unnamed waits it has. That is the
+# hide direction — silent, healthy-looking, and indistinguishable from a quiet
+# board — which is the one failure this whole file is written to prevent.
+#
+# So the key is appended to whichever base is in play, an explicit
+# LIVENESS_SWEEP_STATE_DIR included: no combination of environment can produce
+# a window shared by two rigs. LIVENESS_SWEEP_STATE_DIR names the BASE for this
+# rig's state, not the exact directory.
+#
+# Identity is GC_RIG — the rig name, which the order runner sets for every
+# rig-scoped check alongside GC_RIG_ROOT (`orderExecEnvWithError`) — else the
+# rig root, else a hand-run bucket. Production always has GC_RIG, so an ad-hoc
+# run from outside a rig cannot stamp over a real rig's window.
+
+# One safe, readable, collision-free path component. Two DIFFERENT identities
+# must never sanitize onto one directory, since that re-creates the shared
+# window this key exists to prevent — so anything the sanitizer had to change
+# also carries a checksum of the identity it came from. An ordinary rig name,
+# the only case production reaches, passes through untouched and stays
+# greppable.
+state_key() {
+    local readable="$1" identity="$2" safe
+    safe="$(printf '%s' "$readable" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
+    case "$safe" in ''|.|..) safe=rig ;; esac
+    if [ "$safe" = "$readable" ] && [ "$readable" = "$identity" ] && [ "${#safe}" -le 64 ]; then
+        printf '%s' "$safe"
+    else
+        printf '%s-%s' "${safe:0:64}" "$(printf '%s' "$identity" | cksum | cut -d' ' -f1)"
+    fi
+}
+
+if [ -n "${GC_RIG:-}" ]; then
+    RIG_KEY="$(state_key "$GC_RIG" "$GC_RIG")"
+elif [ -n "${GC_RIG_ROOT:-}" ]; then
+    # No name but a root: the last component reads well in a path, and the FULL
+    # path is the identity, so two roots ending in the same directory name keep
+    # separate windows.
+    ROOT_TAIL="${GC_RIG_ROOT%/}"
+    RIG_KEY="$(state_key "${ROOT_TAIL##*/}" "$GC_RIG_ROOT")"
+else
+    RIG_KEY=_unscoped
+fi
+
 DEFAULT_STATE_DIR="${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}"
-STATE_DIR="${LIVENESS_SWEEP_STATE_DIR:-$DEFAULT_STATE_DIR/liveness-sweep}"
+STATE_BASE="${LIVENESS_SWEEP_STATE_DIR:-$DEFAULT_STATE_DIR/liveness-sweep}"
+STATE_DIR="$STATE_BASE/$RIG_KEY"
 STAMP="$STATE_DIR/last-pass"
 LOG="$STATE_DIR/pass.log"
 LOG_KEEP="${LIVENESS_SWEEP_LOG_KEEP:-400}"
@@ -486,7 +542,7 @@ fi
 DECIDED=1
 
 # --- report ------------------------------------------------------------------
-say "liveness-sweep precheck — rig ${GC_RIG:-<none>} · store ${DB:-<ambient>}"
+say "liveness-sweep precheck — rig ${GC_RIG:-<none>} · store ${DB:-<ambient>} · window $STAMP"
 if [ "$READS_OK" -eq 1 ]; then
     say "  reads: ready $N_READY · live $N_LIVE · alive $N_ALIVE — every call exited 0 and answered a JSON array"
 else
