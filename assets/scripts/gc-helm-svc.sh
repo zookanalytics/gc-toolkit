@@ -30,13 +30,23 @@ if [ -z "$GO" ]; then
     if command -v go >/dev/null 2>&1; then GO="go"; else GO="/usr/local/go/bin/go"; fi
 fi
 
-# Sources that end up inside the binary: Go files, plus the built web bundle,
-# which is compiled in by go:embed (services/helm/web/embed.go). A bundle-only
-# change has to rebuild too, or the mount keeps serving the SPA that was
-# embedded at the last Go edit. node_modules is pruned — nothing there is built
-# from, and walking it costs more than the rest of the module together.
+# Sources that end up inside the binary: Go files, the module's dependency
+# manifests, plus the built web bundle, which is compiled in by go:embed
+# (services/helm/web/embed.go). A bundle-only change has to rebuild too, or the
+# mount keeps serving the SPA that was embedded at the last Go edit.
+#
+# go.mod and go.sum are listed EXPLICITLY because `-name '*.go'` does not match
+# them — they end in .mod/.sum. Without them a dependency-only bump touches no
+# file this predicate inspects, so the service restarts, the stale binary passes
+# the `-x "$BIN"` check below, and the old dependency keeps serving as if the
+# bump never landed. That is not hypothetical: helm-svc served a blind board for
+# days on a beads pin whose schema support the city had migrated past, and the
+# fix looked like it had not landed because this find never saw go.mod (tk-ohdex).
+#
+# node_modules is pruned — nothing there is built from, and walking it costs
+# more than the rest of the module together.
 newer_than_binary() {
-    find "$MOD" -name node_modules -prune -o \( -name '*.go' -o -path "$MOD/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
+    find "$MOD" -name node_modules -prune -o \( -name '*.go' -o -name go.mod -o -name go.sum -o -path "$MOD/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
 }
 
 # Build when the binary is missing or any source file is newer than it.
