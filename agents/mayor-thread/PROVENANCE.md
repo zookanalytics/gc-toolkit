@@ -32,7 +32,29 @@ the mayor — the other canonical interactive role — and adds the
 and spawns a matching thread.
 
 The deacon, witness, and refinery are intentionally excluded:
-they are patrol / automation roles, not operator-facing.
+they are patrol / automation roles, and nobody holds a focused
+thinking session with one.
+
+That is a statement about **thread-spawnability**, and it does not
+generalise. This paragraph used to end "…, not operator-facing", and
+that phrasing was read as a roster: the `operator-next-step-trailing`
+fragment was distributed to the roles named here and withheld from the
+ones excluded here, which left the refinery — the single largest
+producer of "a PR is waiting on you" traffic in the city — running
+without the one rule that governs it (tk-l1pj6). Two different tests
+were collapsed into one:
+
+- *Does the operator converse with this role?* decides whether it gets
+  a thread. Patrol roles: no.
+- *Does a human read this role's prose as a report?* decides whether it
+  is bound by operator-reply doctrine. The refinery: yes — it holds the
+  human-approval merge gate, narrates that queue into a pane the
+  operator watches, and parks beads with `gc.routed_to=human`.
+
+The thread exclusion above stands. The operator-facing roster is held,
+with a reason per agent, by
+`doctor/check-operator-next-step-wiring/run.sh`; classify there, not
+here.
 
 ## Notes
 
