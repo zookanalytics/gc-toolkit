@@ -390,7 +390,7 @@ sleep {{event_timeout}}
 
 `sleep {{event_timeout}}` is a **cadence contract**, not an implementation. A
 harness that blocks foreground `sleep` (Claude Code answers "use Monitor with an
-until-loop") drives this idle loop out-of-band instead — supported, under four
+until-loop") drives this idle loop out-of-band instead — supported, under five
 invariants:
 
 - **Run every reconcile pass below, in order, on every tick.** The merge skill
@@ -407,8 +407,52 @@ invariants:
   work, anchor-set change, mail, tool failure). `merge held` and `0 escalated, 0
   retargeted` are the normal readings of an approval-gated queue; notifying on
   them firehoses the driver into being shut off as noise.
+- **Arm it outside your own session's cgroup.** An agent session runs in a
+  systemd scope whose KillMode is control-group, so when that session rotates
+  systemd SIGKILLs every process in the cgroup. `setsid` changes the SESSION,
+  not the CGROUP, so a setsid-armed driver dies with you — measured twice, once
+  as an 8-minute lifetime and once as a 9h20m merge outage during which
+  APPROVED+CLEAN PRs simply sat. Nothing reports it, because the bead state, the
+  wisp, and your own session all look healthy. Arm through the script; it is
+  idempotent, so running it when a driver is already live costs one probe:
+
+```bash
+# Same agent-env resolution the reconcile passes below use — resolved here too
+# rather than reused, because SCRIPTS_DIR is first assigned in step 2 and a
+# forward reference is a `set -u` crash that takes the whole pass with it.
+ARM_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/refinery-idle-arm.sh" ]; then ARM_DIR="$cand"; break; fi
+done
+if [ -n "$ARM_DIR" ]; then
+  "$ARM_DIR/refinery-idle-arm.sh" --rig "${GC_RIG:-}"
+else
+  echo "refinery: refinery-idle-arm.sh not found; the merge cadence is UNVERIFIED this session" >&2
+fi
+```
+
+Do not hand-roll the `systemd-run` line. Every property it sets has already been
+dropped by hand on a live rig and every omission fails silently: no
+`--working-directory` and the unit inherits a non-repo cwd, so every merge pass
+fails closed on `git remote get-url origin` while the unit reads active/running;
+no `--setenv` and the unit gets the systemd user manager's PATH, where `gc` exits
+127 and an unreadable ledger reads as an empty queue; no `GC_AGENT` and convoy
+graduation self-skips on every tick; no `Restart=always` and a genuine crash is
+permanent.
+
+**Probe the driver BEFORE running the passes below inline.** If it is alive it
+has been running them every {{event_timeout}}s the whole time, and a second
+inline run is a second `merge-skill.sh` writer against the same anchors — which
+is exactly what the canonical lock exists to prevent. `refinery-idle-arm.sh`
+answers the question and does nothing when the answer is "already armed"; read
+`<state-dir>/reconcile.log` for the current verdict rather than re-deriving it.
+Run the passes inline only when the driver is NOT live.
 
 Whatever drives the cadence, this step is not satisfied until those passes have run.
+`doctor/check-refinery-idle-driver` is the standing regression gate on all of
+this, and it deliberately refuses the four signals that look like liveness and
+are not: session presence, `gc rig status` agent lines, driver.out/reconcile.log
+mtime, and the existence of the lock file.
 
 **2. Reconcile state (best-effort, every idle wake).** Three convergent
 passes run here on the idle cadence: (a-pre) pre-open PR-create — open the PR for
