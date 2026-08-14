@@ -97,19 +97,19 @@ for f in "$@"; do
         text="${hit#*:}"
 
         # Drop the purpose-passive "…be used to <verb>" form.
-        if printf '%s' "$text" | grep -qiE "$purpose_form"; then
+        if grep -qiE "$purpose_form" <<< "$text"; then
             continue
         fi
         # Drop the elliptical purpose form, keeping "used to be/have".
-        if printf '%s' "$text" | grep -qiE "$ellipsis_form" \
-            && ! printf '%s' "$text" | grep -qiE "$history_follow"; then
+        if grep -qiE "$ellipsis_form" <<< "$text" \
+            && ! grep -qiE "$history_follow" <<< "$text"; then
             continue
         fi
 
         # Allowlist: skip lines matching any operator-supplied regex.
         skip=""
         for rx in ${allow[@]+"${allow[@]}"}; do
-            if printf '%s' "$text" | grep -qE "$rx"; then
+            if grep -qE "$rx" <<< "$text"; then
                 skip=1
                 break
             fi
