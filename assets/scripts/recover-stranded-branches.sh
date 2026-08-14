@@ -65,6 +65,28 @@
 # and the two conditions have to hold together. Getting this wrong would hand a
 # running polecat's branch to the refinery mid-implementation.
 #
+# AND IT RUNS FIRST, because a gate that is right about its question still has to be
+# REACHED (tk-pwm2g). The liveness resolution used to sit last, after the "branch is
+# not on origin" arm had already reported and moved on — which made it unreachable
+# for the one bead it exists to protect. A polecat carries `metadata.branch` from its
+# workspace-setup step and nothing on origin until it pushes, tens of minutes later,
+# so EVERY implementation that outlived --min-age-minutes collected a durable
+# `<branch>@missing` marker asserting its published work had vanished, while the
+# polecat was healthily mid-edit. The age gate cannot help here — implementation
+# routinely outlasts any threshold, which is the whole reason liveness is the guard.
+# So liveness is resolved before every refusal in this pass, not merely before the
+# handoff, and the convoy chain it resolves through is read up front for the same
+# reason.
+#
+# AND A REFUSAL IS RETRACTED WHEN IT STOPS BEING TRUE. Every other marker this pass
+# writes names the TIP it was written at, so it expires the moment the branch moves.
+# `<branch>@missing` names the ABSENCE of a tip: nothing about a later push makes it
+# stop reading as true, and the bead it sits on is usually handed to the refinery
+# minutes afterwards, which takes it out of this pass's candidate set for good. So
+# the marker outlives the condition it describes, on a bead a human is about to read.
+# A sweep at the top of the pass clears the `@missing` class as soon as `ls-remote`
+# answers for the branch, candidate or not.
+#
 # WHY IT REPAIRS BY HANDING OFF, RATHER THAN RE-DISPATCHING A POLECAT. The bug
 # report suggested re-dispatching to the pool "to resume at submit-to-refinery".
 # That names the missing action exactly — and the missing action is a metadata
@@ -148,6 +170,11 @@ case "$MIN_AGE_MINUTES" in
   ''|*[!0-9]*) MIN_AGE_MINUTES=30 ;;
 esac
 
+# The suffix a refusal marker carries once it has summoned a human. Defined up here
+# because the stale-marker projection below has to recognise it too; what it means
+# for suppression is documented at `report_only`.
+ESCALATED_SUFFIX='#escalated'
+
 bd_pinned() { # <bd-subcommand> [args...]
   if [ -n "$RIG_PIN" ]; then
     gc bd --rig "$RIG_PIN" "$@"
@@ -166,8 +193,9 @@ fi
 
 # --- candidate enumeration -------------------------------------------------
 # Runs FIRST, before the roster and molecule maps below, because the common case is
-# zero candidates and everything after this is only paid when there is something to
-# decide.
+# nothing to do and everything after this is only paid when there is: one listing
+# feeds both the candidate scan and the stale-marker sweep, and a pass that finds
+# neither stops here.
 #
 # `gc.routed_to` is tested as EMPTY-OR-ABSENT, deliberately. Both forms occur live
 # and they mean the same thing: the done sequence and the refinery's park write the
@@ -215,7 +243,28 @@ CANDIDATES=$(printf '%s' "$RAW" | tr -d '\000-\010\013\014\016-\037' | jq -c '
      flagged: ((($m.stranded_branch_flagged // "") | tostring)),
      recovered: ((($m.stranded_branch_recovered // "") | tostring))}' 2>/dev/null)
 
-if [ -z "$CANDIDATES" ]; then
+# The same listing answers a SECOND question, so it is asked here rather than paid
+# for with a listing of its own: which live beads carry a `<branch>@missing` marker
+# that their branch would now DISPROVE (tk-pwm2g).
+#
+# Deliberately NOT restricted to the candidate set above. The bead that most needs
+# the retraction is the one that was flagged mid-implementation and then completed
+# its handoff normally: an assignee takes it out of the candidate shape for good, so
+# nothing in the loop below would ever look at it again and the false marker would
+# outlive by an unbounded margin the branch it claims never existed. Every bead that
+# can carry the marker carries `metadata.branch` — the pass only ever writes it on
+# one that does — so this projection of the same listing already holds them all.
+STALE_FLAGS=$(printf '%s' "$RAW" | tr -d '\000-\010\013\014\016-\037' \
+  | jq -c --arg esc "$ESCALATED_SUFFIX" '
+  .[]
+  | ((.metadata // {})) as $m
+  | ((($m.branch // "") | tostring)) as $b
+  | select($b != "")
+  | ((($m.stranded_branch_flagged // "") | tostring)) as $f
+  | select($f == ($b + "@missing") or $f == ($b + "@missing" + $esc))
+  | {id: .id, branch: $b, flagged: $f}' 2>/dev/null)
+
+if [ -z "$CANDIDATES" ] && [ -z "$STALE_FLAGS" ]; then
   echo "recover-stranded-branches: no unowned branch-carrying work beads"
   exit 0
 fi
@@ -236,6 +285,16 @@ if [ -z "$REPO_ROOT" ] || ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2
 fi
 
 git_pinned() { git -C "$REPO_ROOT" "$@"; }
+
+# The remote tip of a branch, by EXACT ref. `ls-remote` is the identity (no local
+# state, so a concurrent fetch in the same repo cannot substitute another sha) and
+# the fetch that follows only makes the objects readable. It sits here rather than
+# with the other per-bead helpers because the retraction sweep below is its first
+# caller, and that sweep runs before the roster and molecule maps are built.
+remote_sha() { # <branch>
+  git_pinned ls-remote origin "refs/heads/$1" 2>/dev/null \
+    | awk -v r="refs/heads/$1" '$2 == r { print $1; exit }'
+}
 
 # WHICH REPOSITORY the PR lookup answers about. Derived from the rig repo's own
 # `origin`, never left to gh's ambient context: this pass runs from a patrol
@@ -260,6 +319,47 @@ fi
 DEFAULT_BRANCH=$(git_pinned symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
 DEFAULT_BRANCH="${DEFAULT_BRANCH#origin/}"
 [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="main"
+
+# --- retraction: a `<branch>@missing` marker the branch now disproves ---------
+# One `ls-remote` per flagged bead, before any candidate is examined, because this
+# is the pass's own claim being audited rather than a bead's state being judged: the
+# marker asserts that nothing is published under the branch name, and the moment the
+# remote answers for that ref the assertion is false (tk-pwm2g). Nothing else in the
+# city retracts it, and it is read by whoever touches the bead next — disproving one
+# by hand costs half a dozen calls.
+#
+# Only the `@missing` class is retracted, and only where the marker names the bead's
+# CURRENT branch. Every other marker is keyed to the tip it was written at, so it
+# expires on its own as soon as the branch moves; a marker naming some earlier branch
+# is a claim about a ref this pass has not re-examined, and clearing it would erase a
+# refusal nobody has re-checked.
+#
+# Liveness is deliberately NOT consulted. A live molecule is the common way a bead
+# ends up wrongly flagged in the first place, so gating the retraction on the same
+# condition that produced the flag would leave the flag in place for exactly the
+# beads it is most wrong about.
+retracted=0
+while IFS= read -r frow; do
+  [ -n "$frow" ] || continue
+  FID=$(printf '%s' "$frow" | jq -r '.id // empty' 2>/dev/null)
+  FBRANCH=$(printf '%s' "$frow" | jq -r '.branch // empty' 2>/dev/null)
+  FFLAG=$(printf '%s' "$frow" | jq -r '.flagged // empty' 2>/dev/null)
+  [ -n "$FID" ] && [ -n "$FBRANCH" ] || continue
+  # Still nothing on origin under that name: the marker is still true, leave it.
+  FSHA=$(remote_sha "$FBRANCH")
+  [ -n "$FSHA" ] || continue
+  retracted=$((retracted + 1))
+  echo "recover-stranded-branches: $FID branch '$FBRANCH' is published at ${FSHA:0:12} — retracting the stale '$FFLAG' marker, which said it was not"
+  [ "$DRY_RUN" = 1 ] && continue
+  bd_pinned update "$FID" --unset-metadata stranded_branch_flagged >/dev/null 2>&1 || true
+done <<< "$STALE_FLAGS"
+
+# The sweep is the only thing this pass owes a bead that is no longer a candidate,
+# so a listing that produced nothing but retractions is finished here.
+if [ -z "$CANDIDATES" ]; then
+  echo "recover-stranded-branches: no unowned branch-carrying work beads, $retracted stale marker(s) retracted"
+  exit 0
+fi
 
 # --- session roster: who is actually alive ----------------------------------
 # Same two sources, and the same fail-safe, as reconcile-refinery-handoffs.sh: the
@@ -393,14 +493,6 @@ convoy_is_live() { # <convoy-id>
 }
 
 # --- per-bead helpers -------------------------------------------------------
-# The remote tip of a branch, by EXACT ref. `ls-remote` is the identity (no local
-# state, so a concurrent fetch in the same repo cannot substitute another sha) and
-# the fetch that follows only makes the objects readable.
-remote_sha() { # <branch>
-  git_pinned ls-remote origin "refs/heads/$1" 2>/dev/null \
-    | awk -v r="refs/heads/$1" '$2 == r { print $1; exit }'
-}
-
 have_commit() { # <sha>
   git_pinned cat-file -e "${1}^{commit}" 2>/dev/null
 }
@@ -474,7 +566,6 @@ recovered=0; reported=0; skipped=0; failed=0
 # even where an escalation did fire, so the first escalating refusal after this
 # change may re-mail once for such a bead. That is the right direction to err: the
 # other reading of an ambiguous marker is silence about a stranded branch.
-ESCALATED_SUFFIX='#escalated'
 report_only() { # <id> <tip-marker> <already-flagged> <escalate 0|1> <message>
   local id="$1" tip="$2" flagged="$3" escalate="$4" message="$5"
   local marker="$tip" loud="$tip$ESCALATED_SUFFIX"
@@ -516,42 +607,79 @@ while IFS= read -r row; do
     continue
   fi
 
-  # --- gate 2: the branch is really on origin.
+  # The remote tip, read before any verdict is reached. Whether the branch is
+  # published is gate 3's question, but the answer is needed here: it names the
+  # marker every refusal below is suppressed by, and the gate that decides whether
+  # this bead may be spoken about AT ALL — liveness — has to run first.
   HEAD_SHA=$(remote_sha "$BRANCH")
-  if [ -z "$HEAD_SHA" ]; then
-    # Recorded a branch that origin does not have. Unpushed work is the witness's
-    # salvage domain (cases C/D), not this pass's — and with no assignee there is
-    # no worktree owner to salvage from either. Report, never guess.
-    report_only "$ID" "$BRANCH@missing" "$FLAGGED" 0 \
-      "records branch '$BRANCH', which does not exist on origin — nothing is published under that name, so this pass has nothing to hand off (unpushed work belongs to the witness's worktree salvage)"
+
+  # --- gate 2: no live session is behind it. THE guard (see the header): an
+  # unassigned anchor is what every in-flight molecule looks like, so this is the
+  # only thing separating a strand from a polecat that is still working. It gates
+  # every refusal below and not just the handoff, because a bead with a live
+  # molecule behind it is not this pass's business in any direction — the marker a
+  # refusal leaves is durable, and the loudest of them mails a human (tk-pwm2g).
+  if [ "$ROSTER_OK" != 1 ] || [ "${MOLECULE_OK:-0}" != 1 ]; then
+    skipped=$((skipped + 1))
     continue
   fi
 
-  # --- gate 3: a target to land on. The bead's own `target` first; then the input
-  # convoy's (an owned convoy lands its members on an integration branch, not main);
-  # then the repository default. Stamping the wrong target would rebase the work onto
-  # the wrong base, so an unresolvable one skips the bead.
+  # The upstream convoy chain: this gate resolves liveness THROUGH it, and gate 4
+  # takes the target FROM it.
   #
-  # The dependency list is READ-CHECKED, not merely mined for ids. `gc bd dep list`
-  # answers a failure with a JSON object carrying `error` and rc=1, and `.[]?.id`
-  # reduces that to the SAME empty string a genuinely dep-less bead produces. Read as
-  # "no upstream convoy" it fails OPEN in two places at once: here, where the
-  # repository default is then stamped over an owned convoy's integration branch —
-  # the un-retryable wrong handoff, an integration member recovered into a main PR
-  # past the convoy boundary, and the readback below only proves that the WRONG
-  # target stuck — and at gate 6, where an empty convoy list leaves nothing to test
-  # for liveness, so the live molecule standing behind the bead becomes invisible and
-  # a running polecat's branch is handed to the refinery mid-implementation. Both are
-  # facts this pass must establish rather than assume, so an unreadable list skips.
+  # It is READ-CHECKED, not merely mined for ids. `gc bd dep list` answers a failure
+  # with a JSON object carrying `error` and rc=1, and `.[]?.id` reduces that to the
+  # SAME empty string a genuinely dep-less bead produces. Read as "no upstream
+  # convoy" it fails OPEN in two places at once: here, where an empty list leaves
+  # nothing to test for liveness, so the live molecule standing behind the bead
+  # becomes invisible and a running polecat's branch is handed to the refinery
+  # mid-implementation — and at gate 4, where the repository default is then stamped
+  # over an owned convoy's integration branch, the un-retryable wrong handoff, which
+  # the readback there can only confirm stuck. Both are facts this pass must
+  # establish rather than assume, so an unreadable list skips.
   DEPS_RAW=$(bd_pinned dep list "$ID" --direction=up --json 2>/dev/null); DEPS_RC=$?
   if [ "$DEPS_RC" -ne 0 ] || [ -z "$DEPS_RAW" ] \
      || ! printf '%s' "$DEPS_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    # Nothing published under the name AND no way to tell whether anyone is still
+    # working on it: both facts this pass reasons from are missing, so it has nothing
+    # to say about the bead — least of all the `@missing` marker it would write here,
+    # which asserts the very thing it just failed to establish.
+    if [ -z "$HEAD_SHA" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
     report_only "$ID" "$BRANCH@$HEAD_SHA" "$FLAGGED" 0 \
       "its upstream dependency list could not be read (gc bd dep list rc=$DEPS_RC); an unread list is not proof that there is no convoy, and guessing one would both land a convoy member on '$DEFAULT_BRANCH' and hide any live molecule standing behind the bead"
     continue
   fi
   CONVOYS=$(printf '%s' "$DEPS_RAW" | tr -d '\000-\010\013\014\016-\037' \
     | jq -r '.[]?.id // empty' 2>/dev/null)
+
+  MOLECULE_LIVE=0
+  while IFS= read -r cid; do
+    [ -n "$cid" ] || continue
+    if convoy_is_live "$cid"; then MOLECULE_LIVE=1; break; fi
+  done <<< "$CONVOYS"
+  if [ "$MOLECULE_LIVE" = 1 ]; then
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  # --- gate 3: the branch is really on origin.
+  if [ -z "$HEAD_SHA" ]; then
+    # Records a branch that origin does not have, and nothing alive is about to push
+    # one. Unpushed work is the witness's salvage domain (cases C/D), not this
+    # pass's. Report, never guess.
+    report_only "$ID" "$BRANCH@missing" "$FLAGGED" 0 \
+      "records branch '$BRANCH', which does not exist on origin — nothing is published under that name, so this pass has nothing to hand off (unpushed work belongs to the witness's worktree salvage)"
+    continue
+  fi
+
+  # --- gate 4: a target to land on. The bead's own `target` first; then the input
+  # convoy's (an owned convoy lands its members on an integration branch, not main);
+  # then the repository default. Stamping the wrong target would rebase the work onto
+  # the wrong base, so an unresolvable one skips the bead.
+  #
   # Both initialized BEFORE the branch that fills them, in the same style and for the
   # same reason as ROOT_ROWS/STEP_ROWS above: `set -u` is on, and a variable first
   # assigned inside a conditional arm kills the whole pass the first time the other
@@ -595,7 +723,7 @@ while IFS= read -r row; do
     continue
   fi
 
-  # --- gate 4: the branch actually carries work. Objects are fetched only to answer
+  # --- gate 5: the branch actually carries work. Objects are fetched only to answer
   # this; nothing local is written beyond the object store.
   if ! fetch_commit "$BRANCH" "$HEAD_SHA" || ! fetch_commit "$TARGET" "$BASE_SHA"; then
     report_only "$ID" "$BRANCH@$HEAD_SHA" "$FLAGGED" 0 \
@@ -605,7 +733,7 @@ while IFS= read -r row; do
   # The second half of the age gate, and the one that cannot be defeated by this
   # pass's own writes: the tip's commit time is immutable, while a bead's
   # `updated_at` is bumped by the very marker `report_only` writes below. Neither is
-  # the real guard (gate 6 is) — together they simply keep the pass off work that is
+  # the real guard (gate 2 is) — together they simply keep the pass off work that is
   # visibly still in motion.
   TIP_EPOCH=$(git_pinned log -1 --format=%ct "$HEAD_SHA" 2>/dev/null)
   case "${TIP_EPOCH:-x}" in
@@ -634,7 +762,7 @@ while IFS= read -r row; do
     continue
   fi
 
-  # --- gate 5: nothing is already carrying it. ANY pull request for this head, in
+  # --- gate 6: nothing is already carrying it. ANY pull request for this head, in
   # any state, means a landing path exists or an operator deliberately closed one —
   # neither is this pass's business. Fail closed: an unreadable answer is not "no PR".
   PR_JSON=$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state all \
@@ -648,23 +776,6 @@ while IFS= read -r row; do
   if [ "${PR_COUNT:-0}" -gt 0 ]; then
     skipped=$((skipped + 1))
     echo "recover-stranded-branches: $ID branch '$BRANCH' already has $(printf '%s' "$PR_JSON" | jq -r 'map("#\(.number) \(.state)") | join(", ")') — a landing path exists, leaving it alone"
-    continue
-  fi
-
-  # --- gate 6: no live session is behind it. THE guard (see the header): an
-  # unassigned anchor is what every in-flight molecule looks like, so this is the
-  # only thing separating a strand from a polecat that is still working.
-  if [ "$ROSTER_OK" != 1 ] || [ "${MOLECULE_OK:-0}" != 1 ]; then
-    skipped=$((skipped + 1))
-    continue
-  fi
-  MOLECULE_LIVE=0
-  while IFS= read -r cid; do
-    [ -n "$cid" ] || continue
-    if convoy_is_live "$cid"; then MOLECULE_LIVE=1; break; fi
-  done <<< "$CONVOYS"
-  if [ "$MOLECULE_LIVE" = 1 ]; then
-    skipped=$((skipped + 1))
     continue
   fi
 
@@ -745,5 +856,5 @@ if [ "$recovered" -gt 0 ] && [ "$DRY_RUN" != 1 ] && [ "${GC_AGENT:-}" != "$REFIN
   gc session nudge "$REFINERY_ID" "Stranded branch(es) recovered and handed off; run 'gc prime' and check the queue." >/dev/null 2>&1 || true
 fi
 
-echo "recover-stranded-branches: $recovered recovered, $reported reported (not handed off), $skipped skipped, $failed failed"
+echo "recover-stranded-branches: $recovered recovered, $reported reported (not handed off), $skipped skipped, $failed failed, $retracted stale marker(s) retracted"
 [ "$failed" -eq 0 ]

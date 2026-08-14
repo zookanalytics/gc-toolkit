@@ -884,6 +884,15 @@ bead's input convoy, finds the workflow root that owns it, and treats the molecu
 as live if the root records a live session or any of its live steps is held by
 one.
 
+That resolution runs FIRST, ahead of every refusal and not just the handoff
+(tk-pwm2g). A polecat carries `metadata.branch` from its workspace-setup step and
+nothing on origin until it pushes, tens of minutes later, so an unpushed branch and
+a lost one look identical — and while the "not on origin" refusal returned before
+liveness was consulted, every implementation that outlasted the age gate collected
+a durable marker saying its published work had vanished. The age gate cannot cover
+this: implementation routinely outlasts any threshold, which is exactly why
+liveness is the guard.
+
 **The repair is the handoff, not a re-dispatch.** The missing action is the submit
 step itself — stamp `branch` and `target`, set the bead back to `open`, reassign it
 to the refinery — so the pass performs it directly rather than pouring a fresh
@@ -922,11 +931,22 @@ class as well as the tip, so the quiet marker a transient read failure leaves ca
 never cancel the mail a later cycle owes for the same commit; the mail itself is
 still issued once per (branch, tip).
 
+One marker is retracted rather than left to expire. Every other one names the tip it
+was written at and so goes stale the moment the branch moves, but `<branch>@missing`
+names the ABSENCE of a tip: a later push does not make it read as false. A sweep at
+the top of each pass clears that class as soon as `ls-remote` answers for the
+branch, on any bead carrying one — including a bead that has since been handed to
+the refinery, which is where the marker was actually found and where nothing else
+would ever revisit it.
+
 Regression test: `assets/scripts/recover-stranded-branches.test.sh` (hermetic;
 stubs `gc`, `git` and `gh`; covers the canonical strand, the metadata-before-
 assignee order, target resolution from the bead / its convoy / the repository
 default, both liveness signals and their converse, every non-candidate field, an
-existing PR in any state, a failed PR lookup, an unpublished branch, a missing
+existing PR in any state, a failed PR lookup, an unpublished branch, a live polecat
+whose branch is unpublished BECAUSE it has not pushed yet being left entirely alone,
+a stale `@missing` marker being retracted once the branch appears (on a handed-off
+bead as well as a candidate), a missing
 target branch, an already-landed branch, the age gate, both fail-safes, the
 one-warning-per-bead bound and the escalation class that keeps a transient
 refusal from cancelling it, the non-zero exit on an unverified handoff, a

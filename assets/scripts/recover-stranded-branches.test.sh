@@ -30,6 +30,15 @@
 #   (LIVESTEP) the second liveness signal: the root records no live session, but one
 #              of its live STEP beads is held by one — a re-claimed or re-nudged
 #              molecule wears that shape
+#   (LIVEMISS) liveness gates the REFUSALS too, not just the handoff: a live polecat
+#              that has not pushed yet — `branch` stamped by workspace-setup, nothing
+#              on origin — is left completely alone. The unpublished-branch refusal
+#              used to return before liveness was ever consulted, so every
+#              implementation outlasting the age gate was marked as vanished work
+#   (RETRACT)  a `<branch>@missing` marker the branch now DISPROVES is cleared, on
+#              any live bead carrying one — including a bead that has since been
+#              handed to the refinery and so left the candidate set for good, which
+#              is where the false marker would otherwise live forever
 #   (DEADROOT) the converse: a molecule whose root session is gone IS handed off
 #   (HASPR)    any pull request for the head, in ANY state, means a landing path
 #              exists (or an operator closed one deliberately) -> left alone
@@ -112,6 +121,12 @@ cat > "$TMP/candidates.json" <<JSON
    "metadata":{"branch":"polecat/b-live"}},
   {"id":"b-livestep","status":"open","assignee":"","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/b-livestep"}},
+  {"id":"b-mid-impl","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-mid-impl"}},
+  {"id":"b-retract","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-retract","stranded_branch_flagged":"polecat/b-retract@missing"}},
+  {"id":"b-handed","status":"open","assignee":"gc-toolkit/gc-toolkit.refinery","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-handed","stranded_branch_flagged":"polecat/b-handed@missing"}},
   {"id":"b-pr","status":"open","assignee":"","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/b-pr"}},
   {"id":"b-ghfail","status":"open","assignee":"","updated_at":"__OLD__",
@@ -192,6 +207,8 @@ b-strand|c-strand
 b-conv|c-conv
 b-live|c-live
 b-livestep|c-livestep
+b-mid-impl|c-live
+b-retract|c-live
 b-pr|c-strand
 b-ghfail|c-strand
 b-nobranch|c-strand
@@ -212,10 +229,15 @@ cat > "$TMP/convoy_targets" <<'C'
 c-conv|integration/gc-2026
 C
 
-# branch -> sha on origin. A branch absent here does not exist on origin.
+# branch -> sha on origin. A branch absent here does not exist on origin — which is
+# what a live polecat's branch looks like right up until it pushes (b-mid-impl), and
+# what the two @missing-flagged beads looked like when they were flagged. b-retract
+# and b-handed have since pushed; b-flagged has not.
 cat > "$TMP/remote" <<'R'
 main|sha-main
 integration/gc-2026|sha-int
+polecat/b-retract|sha-retract
+polecat/b-handed|sha-handed
 polecat/b-strand|sha-strand
 polecat/b-conv|sha-conv
 polecat/b-live|sha-live
@@ -430,6 +452,9 @@ eq "$DRY_RC" "0" "(DRY) dry run exits 0"
 has "DRY-RUN would hand b-strand" "$TMP/out" "(DRY) selects the stranded bead"
 has "DRY-RUN would hand b-conv" "$TMP/out" "(DRY) selects the convoy-targeted bead"
 hasnt "b-live" "$TMP/out" "(DRY) does not select the live molecule"
+has "retracting the stale" "$TMP/out" "(RETRACT) --dry-run says what it would retract"
+# Covers the retraction as much as the handoff: it is the one write in this pass
+# that fires on beads the loop below never even examines.
 eq "$(wc -l < "$TMP/updates")" "0" "(DRY) issues no bead update at all"
 eq "$(wc -l < "$TMP/mail")" "0" "(DRY) sends no mail"
 
@@ -468,6 +493,36 @@ has "gc bd update b-conv --set-metadata branch=polecat/b-conv --set-metadata tar
 hasnt "gc bd update b-live " "$TMP/updates" "(LIVEROOT) a live molecule root is never written to"
 hasnt "gc bd update b-livestep" "$TMP/updates" "(LIVESTEP) a live step holder is never written to"
 hasnt "b-live@" "$TMP/updates" "(LIVEROOT) no marker is left on live work"
+
+# (LIVEMISS): the ordering. b-mid-impl is a live polecat's bead in the state every
+# implementation passes through — `branch` stamped by workspace-setup, nothing on
+# origin until it pushes tens of minutes later — so it is BOTH unpublished and alive.
+# Before liveness ran first, the unpublished-branch refusal returned before the guard
+# was ever consulted and left `<branch>@missing` on healthy work, asserting that
+# published work had vanished on a branch that had simply not been pushed yet.
+hasnt "gc bd update b-mid-impl" "$TMP/updates" \
+  "(LIVEMISS) a live polecat's unpushed branch is never flagged"
+hasnt "b-mid-impl" "$TMP/err" "(LIVEMISS) nor warned about"
+hasnt "b-mid-impl" "$TMP/mail" "(LIVEMISS) nor mailed about"
+# It is not merely un-marked but un-REPORTED: the count below is unchanged by it,
+# which is what separates "silently suppressed" from "never reached the refusal".
+has "6 reported" "$TMP/out" "(LIVEMISS) and not counted as a refusal either"
+
+# (RETRACT): a marker the branch now disproves is cleared. b-retract still looks like
+# a candidate (its molecule is live, so nothing else happens to it) and b-handed does
+# NOT — it was flagged mid-implementation and then handed to the refinery, which is
+# the shape the marker was actually observed on, and an assignee takes a bead out of
+# the candidate set for good.
+has "gc bd update b-retract --unset-metadata stranded_branch_flagged" "$TMP/updates" \
+  "(RETRACT) a stale @missing marker is retracted"
+hasnt "gc bd update b-retract --status" "$TMP/updates" \
+  "(RETRACT) retracting is not recovering — the live bead is not handed off"
+has "gc bd update b-handed --unset-metadata stranded_branch_flagged" "$TMP/updates" \
+  "(RETRACT) including on a bead that has left the candidate set"
+has "retracting the stale 'polecat/b-handed@missing' marker" "$TMP/out" \
+  "(RETRACT) and says which claim it is withdrawing"
+hasnt "gc bd update b-flagged" "$TMP/updates" \
+  "(RETRACT) a marker whose branch is still absent from origin stands"
 
 # (DEADROOT): the converse of LIVEROOT — b-strand's root session is absent from the
 # roster, and it IS handed off (asserted above). Assert the discrimination directly:
@@ -632,6 +687,12 @@ has "would land on 'integration/gone'" "$TMP/err" \
   "(ESCALATE) and the refusal is warned rather than swallowed"
 has "stranded_branch_flagged=polecat/b-nobase@sha-nobase#escalated" "$TMP/updates" \
   "(ESCALATE) the marker is upgraded to record that a human was summoned"
+# (RETRACT) only the `@missing` class is withdrawn. Every other marker names the TIP
+# it was written at, so it expires on its own when the branch moves — and b-nobase's
+# refusal (a target branch that is not on origin) is about something the branch's own
+# publication says nothing about.
+hasnt "gc bd update b-nobase --unset-metadata" "$TMP/updates" \
+  "(RETRACT) a marker naming a real tip is never retracted"
 
 # The bound itself survives: one escalation per (branch, tip), and an escalated tip
 # also silences a QUIETER refusal at the same tip — the human is already looking at
