@@ -441,6 +441,33 @@ have "doc names the defer cap" 'assigned_work_defer_limit' "$ENGAGE"
 have "doc records the scrollback erasure" 'ClearScrollback' "$ENGAGE"
 have "doc names the unbuilt core seam" 'IsAttached' "$ENGAGE"
 
+# Page one outranks a rule further down here too: the doc opens with the
+# pack's vocabulary, and a definition reading "a visit IS a sitting, held
+# live, closed when the sitting ends" teaches the tk-mndjz behaviour to
+# every reader who never reaches the section that corrects it. The
+# vocabulary paragraph — not the doc as a whole — has to carry both
+# endings, so it is extracted and checked on its own.
+VOCAB="$(awk '/^\*\*Vocabulary\.\*\*/ {f = 1} f {print} f && /^$/ {exit}' "$ENGAGE")"
+if printf '%s\n' "$VOCAB" | grep -q 'request for one bounded'; then
+    ok "the vocabulary defines a visit as a request, not a sitting"
+else
+    bad "the vocabulary defines a visit as a request, not a sitting" \
+        "the opening definition must not equate a claimed visit with a held sitting — that is the tk-mndjz bug, stated as the model"
+fi
+if printf '%s\n' "$VOCAB" | grep -q 'never becomes a sitting'; then
+    ok "the vocabulary carries the silent ending"
+else
+    bad "the vocabulary carries the silent ending" \
+        "both endings belong in the definition; a reader who stops at page one must already know a visit can close silently"
+fi
+if printf '%s\n' "$VOCAB" | grep -q 'out loud' &&
+    printf '%s\n' "$VOCAB" | grep -q 'sign-off'; then
+    ok "the vocabulary keeps the out-loud ending"
+else
+    bad "the vocabulary keeps the out-loud ending" \
+        "correcting tk-mndjz must not drop tk-bzm86's rule: a held sitting still ends out loud, with a sign-off"
+fi
+
 echo "── the writer the contract depends on still exists ──"
 have "gc-helm exposes the takeaway verb" 'cmd_takeaway()' "$HELM"
 have "takeaway usage documents the converse caller" 'host|proactive|converse' "$HELM"

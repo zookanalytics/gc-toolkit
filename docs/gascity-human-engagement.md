@@ -9,9 +9,12 @@ description: Local supplement tracking how Gas City is evolving to support human
 technical nouns. A **subject** is the durable thing a dialogue is about —
 the bead; its id is the continuation-group identity; its notes and visit
 history are the dialogue's record, spanning its whole life (an epic may
-see hundreds of visits). A **visit** is one bounded sitting of that
-dialogue: filed as a child bead, held live by the converse role, outcome recorded to the
-subject, closed when the sitting ends; at most one sitting is live per
+see hundreds of visits). A **visit** is a filed request for one bounded
+sitting of that dialogue: a child bead the converse role claims, whose
+outcome is recorded to the subject and which closes when it resolves —
+out loud, with a sign-off, if it was ever *held*; silently against its
+subject if its premise died or it turned out to need no human, in which
+case it never becomes a sitting at all. At most one sitting is live per
 subject (the continuation-group vacuum serializes pending visits into
 it). "Conversation" is deliberately **not** a technical term in this
 pack — it reverts to plain speech, which also leaves upstream's extmsg
