@@ -147,16 +147,33 @@ script validates it *before* arming rather than waiting to observe it.
 **`doctor/check-refinery-idle-driver/`** — per rig that is not suspended and has
 a refinery configured, asserts the lock is HELD, by a process whose command line
 is that rig's own `idle-loop.sh`, in the driver's own unit, whose
-`WorkingDirectory` is a git work tree. A dead driver is the defect on its own;
-APPROVED+CLEAN PRs escalate it from warning to error rather than triggering it,
-because the stall is silent and its cost is set by when someone happens to look,
-not by the queue depth at this instant. That PR probe runs only for a rig already
-found unhealthy, so a green host makes no network call.
+`WorkingDirectory` is a git work tree **with an `origin` remote**. A dead driver
+is the defect on its own; APPROVED+CLEAN PRs escalate it from warning to error
+rather than triggering it, because the stall is silent and its cost is set by
+when someone happens to look, not by the queue depth at this instant. That PR
+probe runs only for a rig already found unhealthy, so a green host makes no
+network call.
 
 Its hermetic test's load-bearing case is not any of the failures — it is the one
 where the driver is dead while a fresh `reconcile.log`, a fresh `driver.out` and
 a present lock file all read healthy. A check built on any discarded signal
 passes that case, and must not.
+
+The origin-remote half of that `WorkingDirectory` assertion was added in review.
+The check originally stopped at "is a git work tree", which is a *weaker* rule
+than the one the arming script validates before it will arm
+(`refinery-idle-arm.sh:161`) — so a unit whose `WorkingDirectory` was a repo
+with no origin passed the detector as `OK` while all five passes that resolve
+the repository through `git remote get-url origin` (`merge-skill.sh:773`,
+`pre-open-resolve.sh:105`, `reconcile-merged-prs.sh:235`,
+`reconcile-gate-verdicts.sh:189`, `check-set-heal.sh:562`) failed closed on
+every tick. That is the same "armed, ticking, merging nothing" state above,
+reached by a different route. The general rule the two halves have to obey: a
+detector must never be more permissive than the remedy it names, or it certifies
+a state that remedy would refuse — and the operator is sent to a script that
+tells them nothing is wrong. Both now also strip systemd's `-`/`!`
+`WorkingDirectory` prefixes identically, so they cannot disagree about which
+directory they are judging.
 
 **`assets/scripts/refinery-idle-arm.sh`** — arms the on-disk driver in
 `gc-refinery-idle-<rig>.service` with `Restart=always`, an explicit

@@ -65,10 +65,17 @@
 # orphaned children. Only a holder whose argv is this rig's idle-loop.sh counts.
 #
 # ALSO ASSERTED, on a driver that IS durably armed: that its unit has a
-# WorkingDirectory which is a git work tree. `systemd-run --user` units inherit
-# `WorkingDirectory=!/home/zook`, which is not a repo, and merge-skill.sh:773
-# then fails closed on `git remote get-url origin` and prints "NOTHING is merged
-# this pass" on every tick while the unit reads active/running. A driver that
+# WorkingDirectory which is a git work tree WITH an `origin` remote.
+# `systemd-run --user` units inherit `WorkingDirectory=!/home/zook`, which is not
+# a repo, and merge-skill.sh:773 then fails closed on `git remote get-url origin`
+# and prints "NOTHING is merged this pass" on every tick while the unit reads
+# active/running. A repo with NO origin fails at that same line for the same
+# reason — the passes cannot name the repository to merge in — and so do
+# pre-open-resolve.sh:105, reconcile-merged-prs.sh:235,
+# reconcile-gate-verdicts.sh:189 and check-set-heal.sh:562. The two are one
+# defect wearing two faces, and refinery-idle-arm.sh:159-162 refuses to arm into
+# either; a detector that accepted one of them would call a rig healthy and then
+# send its operator to a remedy that refuses that very state. A driver that
 # ticks forever and merges nothing is worse than a dead one, and it is the exact
 # shape — merge-ready work, silent host — this check exists to end.
 #
@@ -161,6 +168,12 @@ lock_holders() { # lock_holders <path>
 
 pid_args()   { ps -o args= -p "$1" 2>/dev/null | head -1; }
 pid_cgroup() { ps -o cgroup= -p "$1" 2>/dev/null | head -1; }
+
+# Both WorkingDirectory probes are git questions. Without git they are skipped
+# rather than answered wrongly — the same degrade-to-empty rule every other probe
+# here follows.
+HAVE_GIT=""
+command -v git >/dev/null 2>&1 && HAVE_GIT="yes"
 
 unit_working_directory() { # unit_working_directory <unit>
     command -v systemctl >/dev/null 2>&1 || return 0
@@ -285,11 +298,19 @@ while IFS=$'\t' read -r rig suspended rig_path; do
     unit="gc-refinery-idle-$rig.service"
     case "$cgroup" in
         *"$unit"*)
-            wd=$(unit_working_directory "$unit")
+            # systemd reports the value with its `-` (ignore-failure) and `!`
+            # (privileged) prefixes still attached; both name the same directory.
+            # Stripped exactly as refinery-idle-arm.sh:223 strips them, so a
+            # prefixed path is judged as the path it is rather than reported as a
+            # missing repo, and so the detector and the remedy can never disagree
+            # about which directory they are looking at.
+            wd=$(unit_working_directory "$unit"); wd=${wd#-}; wd=${wd#!}
             if [ -z "$wd" ]; then
                 warnings+=("$rig: driver ALIVE in $unit (pid $driver_pid), but its WorkingDirectory is unset or unreadable. A --user unit inherits \`WorkingDirectory=!\$HOME\`, which is not a git work tree; merge-skill.sh:773 then fails closed on \`git remote get-url origin\` and merges NOTHING on every tick while the unit reads active/running. Re-arm with assets/scripts/refinery-idle-arm.sh --rig $rig --force, which passes --working-directory (--force because that driver is live: the arm reports the degradation and refuses to replace a live driver without it).")
-            elif command -v git >/dev/null 2>&1 && ! git -C "${wd#!}" rev-parse --git-dir >/dev/null 2>&1; then
+            elif [ -n "$HAVE_GIT" ] && ! git -C "$wd" rev-parse --git-dir >/dev/null 2>&1; then
                 warnings+=("$rig: driver ALIVE in $unit (pid $driver_pid) but its WorkingDirectory '$wd' is NOT a git work tree — merge-skill.sh:773 fails closed there and prints 'NOTHING is merged this pass' every tick, silently, while the unit reads active/running. Re-arm with assets/scripts/refinery-idle-arm.sh --rig $rig --force (--force because that driver is live: the arm reports the degradation and refuses to replace a live driver without it).")
+            elif [ -n "$HAVE_GIT" ] && ! git -C "$wd" remote get-url origin >/dev/null 2>&1; then
+                warnings+=("$rig: driver ALIVE in $unit (pid $driver_pid) and its WorkingDirectory '$wd' IS a git work tree, but it has no 'origin' remote — so the merge passes cannot name the repository to merge in and refuse on every tick. merge-skill.sh:773 fails closed at the same line an absent repo fails at, as do pre-open-resolve.sh:105, reconcile-merged-prs.sh:235, reconcile-gate-verdicts.sh:189 and check-set-heal.sh:562: nothing merges, silently, while the unit reads active/running. Re-arm with assets/scripts/refinery-idle-arm.sh --rig $rig --force, which validates the working directory against this same rule before arming (--force because that driver is live: the arm reports the degradation and refuses to replace a live driver without it).")
             else
                 healthy=$((healthy + 1))
             fi

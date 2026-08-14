@@ -25,6 +25,8 @@
 #   (6)  the same dead rig, suspended                          -> OK      (0)
 #   (7)  the same dead rig, no refinery agent configured       -> OK      (0)
 #   (8)  durably armed but WorkingDirectory is not a git tree  -> WARNING (1)
+#   (8b) durably armed, git tree, but NO origin remote         -> WARNING (1)
+#   (8c) WorkingDirectory carrying systemd's `-`/`!` prefix    -> OK      (0)
 #   (9)  lock held by a FOREIGN process, no driver             -> WARNING (1)
 #   (10) `gc rig list` unreadable                              -> WARNING (1)
 #   (11) neither fuser nor lsof on PATH                        -> WARNING (1)
@@ -181,10 +183,21 @@ run_case() {
     fi
 }
 
-# A git work tree the durable cases can point WorkingDirectory at.
+# A working directory the merge passes can actually use: a git work tree WITH an
+# origin remote. The remote is not decoration — merge-skill.sh:773 and the four
+# other passes resolve the repository to merge in through
+# `git remote get-url origin` and fail closed without one, so a bare `git init`
+# is a directory that ticks forever and merges nothing. Cases that expect OK
+# must therefore point at a tree that has one.
 GITDIR="$SANDBOX/worktree"
 mkdir -p "$GITDIR"
 git -C "$GITDIR" init -q 2>/dev/null
+git -C "$GITDIR" remote add origin https://github.com/example/rig.git 2>/dev/null
+# A git work tree with NO origin remote — the half-configured shape the arm
+# script refuses at refinery-idle-arm.sh:161 and the detector used to pass.
+NOORIGIN="$SANDBOX/worktree-no-origin"
+mkdir -p "$NOORIGIN"
+git -C "$NOORIGIN" init -q 2>/dev/null
 NOTGIT="$SANDBOX/plain"
 mkdir -p "$NOTGIT"
 
@@ -268,6 +281,44 @@ add_holder "$d" alpha 5150 "bash $d/drivers/gc-refinery-idle-alpha/idle-loop.sh"
     "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gc-refinery-idle-alpha.service"
 printf '%s\n' "$NOTGIT" > "$d/wd.gc-refinery-idle-alpha.service"
 run_case "$d" 1 "armed but WorkingDirectory is not a git tree -> WARNING"
+
+# (8b) Durably armed, ticking, active/running, WorkingDirectory IS a git work
+#      tree — and still merging nothing, because that tree has no origin remote.
+#      The passes resolve the repository to merge in through
+#      `git remote get-url origin` (merge-skill.sh:773, pre-open-resolve.sh:105,
+#      reconcile-merged-prs.sh:235, reconcile-gate-verdicts.sh:189,
+#      check-set-heal.sh:562) and every one of them fails closed without it.
+#      refinery-idle-arm.sh:161 refuses to arm into this state, so a green here
+#      would send the operator to a remedy that rejects what the check just
+#      called healthy.
+d=$(newcase c8b)
+add_rig "$d" alpha false
+add_driver "$d" alpha >/dev/null
+add_holder "$d" alpha 5151 "bash $d/drivers/gc-refinery-idle-alpha/idle-loop.sh" \
+    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gc-refinery-idle-alpha.service"
+printf '%s\n' "$NOORIGIN" > "$d/wd.gc-refinery-idle-alpha.service"
+run_case "$d" 1 "armed, git tree, but NO origin remote -> WARNING (not OK)"
+case "$OUT" in
+    *"no 'origin' remote"*) ok "names the missing origin remote" ;;
+    *) bad "names the missing origin remote" "not in: $OUT" ;;
+esac
+
+# (8c) The same healthy driver, with the prefixes systemd attaches to the value
+#      it reports (`-` ignore-failure, `!` privileged). Both name the same
+#      directory; refinery-idle-arm.sh:223 strips both, and a detector that
+#      stripped only one would call a perfectly good repo "NOT a git work tree"
+#      and send its operator to re-arm a driver that is already correct.
+prefix_case=0
+for prefix in - '!'; do
+    prefix_case=$((prefix_case + 1))
+    d=$(newcase "c8c_$prefix_case")
+    add_rig "$d" alpha false
+    add_driver "$d" alpha >/dev/null
+    add_holder "$d" alpha 5252 "bash $d/drivers/gc-refinery-idle-alpha/idle-loop.sh" \
+        "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gc-refinery-idle-alpha.service"
+    printf '%s%s\n' "$prefix" "$GITDIR" > "$d/wd.gc-refinery-idle-alpha.service"
+    run_case "$d" 0 "WorkingDirectory prefixed '$prefix' is normalized -> OK"
+done
 
 # (9) Something else holds the lock. An arm would exit 0 without taking it.
 d=$(newcase c9)
