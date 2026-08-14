@@ -178,6 +178,10 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit routed proactive
                                       codex-gated mr path. Refuses --merge
                                       direct (the security invariant).
        $PROG cap                      Print the city-cap state (active/cap/shed).
+       $PROG deliverable              Would a slung first reaction actually be
+                                      PICKED UP? Prints the reason; exit 0 yes,
+                                      1 no. Read-only. For callers that must
+                                      fall back when it is no.
 
 Budget: pool cap = agents/proactive/agent.toml max_active_sessions; city cap =
 GC_PROACTIVE_CITY_CAP (default $CITY_CAP). Security: proactive output is mr-only
@@ -215,6 +219,47 @@ cmd_cap() {
     if [ "$active" -ge "$CITY_CAP" ]; then state="SHED (at/over cap)"; else state="ok"; fi
     printf 'city-active=%s cap=%s -> %s\n' "$active" "$CITY_CAP" "$state"
     [ "$active" -lt "$CITY_CAP" ]
+}
+
+# ---------------------------------------------------------------------------
+# deliverable — "if I sling right now, will anything ever pick it up?"
+# ---------------------------------------------------------------------------
+# `sling` is fire-and-forget: it routes a bead to the proactive pool and the
+# REACTION happens later, in a session the reconciler decides to spawn. Both
+# clamps that decide that spawn are OUTSIDE the sling, and neither reports back:
+#
+#   * at the city cap, `sling` itself logs "proactive sheds" and returns 0 —
+#     success and no-op are the same exit status; and
+#   * with auto-spawn disabled (the DEFAULT — GC_PROACTIVE_ENABLED unset), the
+#     sling succeeds outright and the bead simply sits routed forever, because
+#     work_query/scale_check both emit "no demand" and nothing is ever spawned.
+#
+# So a caller that depends on the reaction's OUTPUT — notably the visit
+# assets/scripts/gc-visit-open.sh hands the operator, which mol-first-reaction's
+# advance-and-drain step is what actually files — cannot learn from `sling`
+# whether it got anything. It must ask BEFORE it slings and take its own path
+# when the answer is no. That is the whole job of this verb.
+#
+# It re-uses `proactive_auto_enabled` and `at_cap` rather than restating either
+# clamp, so the third caller cannot drift from the two copies that already have
+# to be kept in sync (this file and agents/proactive/agent.toml).
+#
+# Read-only. Exit 0 = a slung reaction will be picked up; 1 = it will not, and
+# stdout names which clamp said no (the two need different operator moves:
+# set GC_PROACTIVE_ENABLED, versus wait for city load to fall).
+cmd_deliverable() {
+    if ! proactive_auto_enabled; then
+        printf 'no: proactive auto-spawn is disabled (GC_PROACTIVE_ENABLED unset or not truthy) — a slung reaction would sit routed and unclaimed\n'
+        return 1
+    fi
+    if at_cap; then
+        printf 'no: city at session cap (%s/%s) — proactive sheds first under session pressure\n' \
+            "$(active_session_count)" "$CITY_CAP"
+        return 1
+    fi
+    printf 'yes: proactive enabled and under the city cap (%s/%s)\n' \
+        "$(active_session_count)" "$CITY_CAP"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -435,7 +480,8 @@ main() {
         scan)   cmd_scan "$@" ;;
         sling)  cmd_sling "$@" ;;
         cap)    cmd_cap ;;
-        *) die "unknown verb '$verb' (demand|scan|sling|cap; --help)" ;;
+        deliverable) cmd_deliverable ;;
+        *) die "unknown verb '$verb' (demand|scan|sling|cap|deliverable; --help)" ;;
     esac
 }
 

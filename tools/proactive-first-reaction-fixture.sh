@@ -169,6 +169,32 @@ has "manual sling works with the flag UNSET (dry-run)"   "--merge mr" \
 has "manual sling works with the flag ENABLED (dry-run)" "--merge mr" \
     "$(GC_PROACTIVE_ENABLED=1 P sling px-1 --dry-run 2>&1 || true)"
 
+echo "── deliverable: will a slung reaction actually be PICKED UP? ──"
+# The manual sling being UNGATED (just above) is exactly why this verb exists.
+# A sling succeeds in both states, but with auto-spawn disabled nothing is ever
+# spawned to RUN the reaction, so the bead sits routed forever and the visit
+# mol-first-reaction would have filed never appears. Callers that depend on
+# that output — assets/scripts/gc-visit-open.sh, whose whole promise is that a
+# topic is never silently forgotten — cannot learn this from the sling's exit
+# status, so they ask here first and take their own path on a "no".
+ec=0; (unset GC_PROACTIVE_ENABLED; GC_PROACTIVE_CITY_CAP=10 P deliverable >/dev/null 2>&1) || ec=$?
+eq  "flag unset: NOT deliverable (exit 1)"                    "1" "$ec"
+has "flag unset: names the disabled clamp"      "auto-spawn is disabled" \
+    "$(unset GC_PROACTIVE_ENABLED; GC_PROACTIVE_CITY_CAP=10 P deliverable 2>&1 || true)"
+ec=0; GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=10 P deliverable >/dev/null 2>&1 || ec=$?
+eq  "enabled, below cap: deliverable (exit 0)"                "0" "$ec"
+has "enabled, below cap: says yes with the counts"            "yes:" \
+    "$(GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=10 P deliverable 2>&1 || true)"
+ec=0; GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=5 P deliverable >/dev/null 2>&1 || ec=$?
+eq  "enabled but AT cap: NOT deliverable (exit 1)"            "1" "$ec"
+has "enabled but AT cap: names the cap clamp, not the flag"   "session cap" \
+    "$(GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=5 P deliverable 2>&1 || true)"
+# The two "no" answers need different operator moves (set the flag vs wait for
+# load to fall), so they must never collapse into one message.
+absent "the cap answer does not blame the disable flag" "auto-spawn is disabled" \
+    "$(GC_PROACTIVE_ENABLED=1 GC_PROACTIVE_CITY_CAP=5 P deliverable 2>&1 || true)"
+has "usage advertises the verb"                 "deliverable" "$(P --help 2>&1 || true)"
+
 echo "── the gate lives in the REAL work_query too (agent.toml, gc-free, FIRST) ──"
 # Drive the agent.toml work_query directly (not just the tool mirror): extract
 # the ''' body, substitute the template vars, and run it under sh. The gate is
