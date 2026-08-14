@@ -104,6 +104,16 @@ else
     grep -q 'did not read back as routed' "$dir/$script" \
         || errors+=("$script: the visit routing read-back is gone — the dedupe marker would be stamped over an unrouted visit, and the workflow goes silent again while the root records that it was signalled")
 
+    # The frontier holds only beads that can take demand. graph.v2 pours inert
+    # descriptor beads next to its steps (gc.kind=spec/scope) which are ready and
+    # unroutable BY CONSTRUCTION, so they satisfy the unclaimable test forever without
+    # meaning it — 7 of the 8 beads in one live report were spec beads, telling the
+    # operator to route beads that cannot be routed. And because the frontier set is
+    # also the dedup key, ids that never close pin the key to constants and suppress
+    # re-reports after the real frontier has moved (tk-6mccf).
+    grep -q 'is_executable_kind' "$dir/$script" \
+        || errors+=("$script: the frontier no longer filters on executable gc.kind — graph.v2's own inert descriptor beads (spec/scope) are ready and unroutable forever, so every mol-scoped-work graph reads as stalled through them, and they dominate the dedup key (tk-6mccf)")
+
     # Rows are joined on US (0x1f), never a tab. Tab is IFS whitespace: empty interior
     # fields collapse and every later field shifts left, so a workflow's TITLE lands
     # in triage.hold and reads as an operator hold. It suppresses real signals in
@@ -138,6 +148,10 @@ else
         || errors+=("$test_script: no unreadable-roster case — the fail-safe that stops every live molecule being reported is unproven")
     grep -q 'UNROUTED' "$dir/$test_script" \
         || errors+=("$test_script: no unrouted-visit case — that a routing write which exits 0 and persists nothing leaves the stall un-retired is unproven, and a stub that always agrees would never show it")
+    grep -q 'INERT' "$dir/$test_script" \
+        || errors+=("$test_script: no descriptor-only-frontier case — that a frontier of nothing but graph.v2's own inert spec/scope beads is NOT reported as a stall is unproven (tk-6mccf)")
+    grep -q 'MIXED' "$dir/$test_script" \
+        || errors+=("$test_script: no mixed-frontier case — that descriptor beads are dropped from BOTH the report and the stall_flagged key, while the real step is still reported, is unproven; that key is what suppresses re-reports once the real frontier moves (tk-6mccf)")
     grep -q 'REPEAT' "$dir/$test_script" \
         || errors+=("$test_script: no repeated-pass case — that ONE visit is filed per stalled bead across passes (the guard while the visit is open, the frontier marker once it is closed) is unproven, and a stub that never bumps updated_at would hide the re-flag amplifier tk-1g9yw fixed")
 fi

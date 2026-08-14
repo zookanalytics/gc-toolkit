@@ -30,6 +30,19 @@
 #              quiet pool is not this pass's business)
 #   (ASSIGNED) a frontier bead with an assignee -> exempt (orphan recovery owns it)
 #   (GATED)    no member is ready -> exempt, the wait has a name in the graph
+#   (INERT)    the only ready members are graph.v2's own descriptor beads
+#              (gc.kind=spec/scope) -> exempt. They are ready and unroutable BY
+#              CONSTRUCTION, so they satisfy the unclaimable test forever without
+#              meaning it; 7 of the 8 beads in one live report were spec beads
+#   (MIXED)    a real step among descriptor beads -> reported, with the descriptors
+#              absent from BOTH the report and the stall_flagged key. Descriptor ids
+#              never close, so keying on them pinned the dedup key to constants and
+#              suppressed re-reports even after the real frontier moved
+#   (FINALIZE) workflow-finalize is EXECUTABLE — dispatched to core.control-dispatcher
+#              — so an unrouted one nothing can retire is a real stall, still reported
+#   (NEWKIND)  an unrecognised gc.kind -> exempt. This is what the ALLOW-list buys over
+#              deny-listing spec/scope: the next descriptor kind poured is excluded on
+#              the day it appears, not the day someone remembers to name it
 #   (HOLD)     triage.hold on the root, and gc.takeaway on the ANCHOR -> exempt
 #   (EMPTYHOLD) an EMPTY triage.hold is a CLEARED hold, not a hold -> still reported
 #   (DEDUP)    stall_flagged already equal to the current FRONTIER key -> silent
@@ -177,6 +190,34 @@ cat > "$TMP/beads.json" <<EOF
  {"id":"m-reflag","status":"open","updated_at":"$OLD","_ready":true,
   "metadata":{"gc.root_bead_id":"r-reflag","gc.step_ref":"mol-scoped-work.implement"}},
 
+ {"id":"r-inert","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-inert"}},
+ {"id":"m-inert-spec","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-inert","gc.kind":"spec","gc.step_ref":"mol-scoped-work.implement.spec"}},
+ {"id":"m-inert-scope","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-inert","gc.kind":"scope","gc.step_ref":"mol-scoped-work.body"}},
+ {"id":"m-inert-step","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.root_bead_id":"r-inert","gc.kind":"task","gc.step_ref":"mol-scoped-work.implement"}},
+
+ {"id":"r-mixed","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-mixed"}},
+ {"id":"m-mixed-step","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-mixed","gc.kind":"task","gc.step_ref":"mol-scoped-work.load-context.attempt.2"}},
+ {"id":"m-mixed-spec1","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-mixed","gc.kind":"spec","gc.step_ref":"mol-scoped-work.load-context.spec"}},
+ {"id":"m-mixed-spec2","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-mixed","gc.kind":"spec","gc.step_ref":"mol-scoped-work.submit.spec"}},
+
+ {"id":"r-finalize","title":"mol-polecat-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-finalize"}},
+ {"id":"m-finalize","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-finalize","gc.kind":"workflow-finalize","gc.step_ref":"mol-polecat-work.workflow-finalize"}},
+
+ {"id":"r-newkind","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-newkind"}},
+ {"id":"m-newkind","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-newkind","gc.kind":"blueprint","gc.step_ref":"mol-scoped-work.implement.blueprint"}},
+
  {"id":"a-stall","status":"open","updated_at":"$OLD","metadata":{}},
  {"id":"a-pr","status":"open","updated_at":"$OLD","metadata":{"merge_result":"pull_request"}},
  {"id":"a-landed","status":"closed","updated_at":"$OLD","metadata":{"merge_result":"merged"}},
@@ -204,7 +245,11 @@ cat > "$TMP/closed.json" <<EOF
  {"id":"c13","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-ahold"}},
  {"id":"c14","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-emptyhold"}},
  {"id":"c15","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-dedup"}},
- {"id":"c16","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-reflag"}}
+ {"id":"c16","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-reflag"}},
+ {"id":"c17","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-inert"}},
+ {"id":"c18","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-mixed"}},
+ {"id":"c19","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-finalize"}},
+ {"id":"c20","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-newkind"}}
 ]
 EOF
 
@@ -226,6 +271,10 @@ c-ahold|a-ahold
 c-emptyhold|a-plain
 c-dedup|a-plain
 c-reflag|a-plain
+c-inert|a-plain
+c-mixed|a-plain
+c-finalize|a-plain
+c-newkind|a-plain
 C
 
 cat > "$TMP/sessions.json" <<'S'
@@ -381,6 +430,28 @@ has "$TMP/out" "root r-emptyhold STALLED" "(EMPTYHOLD) an EMPTY hold is a cleare
 hasnt "$TMP/out" "root r-dedup STALLED"   "(DEDUP) stall_flagged equal to the current frontier key is silent"
 has "$TMP/out" "root r-reflag STALLED"    "(REFLAG) a stall_flagged from a DIFFERENT frontier (it advanced and re-stalled) is reported once more"
 
+# --- the frontier holds only beads that can take demand (tk-6mccf) -------------
+# graph.v2 pours inert descriptor beads next to its steps — gc.kind=spec ("Step spec
+# for <step>") and gc.kind=scope — which are ready and unroutable BY CONSTRUCTION, i.e.
+# they satisfy condition (4) forever without meaning it. On the live pass that filed
+# this, 7 of the 8 beads reported as one workflow's frontier were spec beads.
+hasnt "$TMP/out" "root r-inert STALLED" \
+  "(INERT) a frontier of nothing but descriptor beads is NOT a stall — they are ready and unroutable by construction"
+has "$TMP/out" "2 with a descriptor-only frontier" \
+  "(INERT) and it is counted under its own name — r-inert and r-newkind — not silently folded into the blocked wait"
+has "$TMP/out" "root r-mixed STALLED" \
+  "(MIXED) a real step among descriptor beads is still reported — the filter narrows the frontier, it does not suppress the signal"
+has "$TMP/out" "frontier \[m-mixed-step\]" \
+  "(MIXED) only the executable bead is reported, so the operator is never told to route a bead that cannot take demand"
+hasnt "$TMP/out" "m-mixed-spec" \
+  "(MIXED) no descriptor bead reaches the report"
+has "$TMP/updates" "update r-mixed --set-metadata stall_flagged=m-mixed-step" \
+  "(MIXED) the dedup key is recomputed from the FILTERED set — descriptor ids never close, so keying on them pinned the key to constants and suppressed re-reports after the real frontier moved"
+has "$TMP/out" "root r-finalize STALLED" \
+  "(FINALIZE) workflow-finalize is EXECUTABLE — it is dispatched to core.control-dispatcher, and an unrouted one nothing can retire is a real stall"
+hasnt "$TMP/out" "root r-newkind STALLED" \
+  "(NEWKIND) a gc.kind this script has never heard of is excluded — that is what the allow-list buys over deny-listing spec/scope: the next descriptor kind is safe the day it is poured, not the day someone remembers to add it"
+
 # (SEP) r-emptyhold carries an empty triage.hold AND a non-empty title. Joined on a
 # tab those collapse and the title lands in triage.hold, silently suppressing the
 # signal — which is exactly what (EMPTYHOLD) passing proves did not happen. Assert
@@ -392,8 +463,8 @@ grep -q 'join("\\u001f")' "$SCRIPT" \
 # --- the signal itself --------------------------------------------------------
 eq "$(grep -c 'triage: stalled workflows' "$TMP/created")" "1" \
   "the standing triage subject is created once, not once per stalled workflow"
-eq "$(grep -c 'visit: r-' "$TMP/created")" "4" \
-  "one visit per stalled workflow — r-stall, r-pr, r-emptyhold and r-reflag, all four on the one subject"
+eq "$(grep -c 'visit: r-' "$TMP/created")" "6" \
+  "one visit per stalled workflow — r-stall, r-pr, r-emptyhold, r-reflag, r-mixed and r-finalize, all six on the one subject"
 has "$TMP/updates" "stall_flagged=" "the root is stamped with the dedupe marker"
 has "$TMP/updates" "task_kind=visit" "the visit is stamped as a visit"
 has "$TMP/updates" "gc.routed_to=" "the visit is routed to the conversation pool"

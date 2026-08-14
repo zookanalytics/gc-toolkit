@@ -96,6 +96,22 @@ STALLED when all four hold for at least `--stall-minutes` (default 120):
    every frontier bead is unassigned AND unrouted. No pool can be offered it and no
    session holds it.
 
+> **(4) was NARROWED after this record — tk-6mccf.** As written above the frontier is
+> every ready member, and graph.v2 pours inert DESCRIPTOR beads alongside its steps
+> (`gc.kind=spec` "Step spec for <step>", `gc.kind=scope`) which are ready and
+> unroutable by construction — so they satisfy (4) forever without meaning it. On the
+> first live report against a `mol-scoped-work` graph, 7 of the 8 beads named as the
+> frontier were spec beads. The shipped predicate is now the ready **executable**
+> members: an allow-list of `gc.kind` (absent, `task`, `retry`, `cleanup`,
+> `scope-check`, `workflow-finalize`), so the next inert kind poured is excluded on
+> the day it appears. This is load-bearing twice over, because §6's dedup marker is
+> keyed on that same set — descriptor ids never close, so including them pinned most
+> of the key to constants and suppressed re-reports after the real frontier moved. A
+> descriptor-only frontier now exempts as the *empty frontier* row in the table below —
+> every executable member is still blocked — and is counted under its own name in the
+> pass's summary line. See `assets/scripts/detect-stalled-workflows.sh`
+> (`is_executable_kind`), its regression cases INERT/MIXED/NEWKIND, and its doctor check.
+
 **Closed members are not optional to (1).** A step *closing* is the graph advancing,
 and it is routinely the workflow's most recent event. Measured on `sl-xhfl`: its
 closed steps were last written at 19:30:06Z while every live member sat at 19:19:10Z.

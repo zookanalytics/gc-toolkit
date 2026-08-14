@@ -34,10 +34,11 @@
 #   3. STARTED     the graph closed at least one step, so it demonstrably moved and
 #                  then stopped. See the husk note below — this is the whole of what
 #                  keeps this pass from reporting every molecule in the rig.
-#   4. UNCLAIMABLE its frontier — the members `gc bd ready` returns, i.e. whose
-#                  blockers are all closed — is non-empty and EVERY frontier bead is
-#                  unassigned AND unrouted. No pool can be offered it and no session
-#                  holds it, so no actor in the city can advance it.
+#   4. UNCLAIMABLE its frontier — the EXECUTABLE members `gc bd ready` returns, i.e.
+#                  whose blockers are all closed, less graph.v2's own inert descriptor
+#                  beads (see is_executable_kind) — is non-empty and EVERY frontier
+#                  bead is unassigned AND unrouted. No pool can be offered it and no
+#                  session holds it, so no actor in the city can advance it.
 #
 # WHY (3) IS THE HUSK GUARD, AND WHY IT IS NOT THE ANCHOR. The obvious husk test —
 # "the anchor is terminal", the predicate quiesce-completed-workflows.sh uses — is
@@ -74,6 +75,10 @@
 #                     is blocking every member — an external dependency, a human
 #                     gate, a blocked-status cascade. That wait has a name in the
 #                     graph, which is precisely what P3 asks of it.
+#   descriptor-only   the only ready members are the inert descriptor beads graph.v2
+#     frontier        pours alongside its steps (gc.kind=spec/scope). Every EXECUTABLE
+#                     member is still blocked, so this is the empty-frontier wait
+#                     wearing a disguise — not a workflow nobody can work.
 #   operator hold     `triage.hold` or `gc.takeaway` on the root: a human decided
 #                     this waits, and the value is the reason (mol-liveness-sweep
 #                     class 4(c)/(d) — same fields, same absent-vs-empty tri-state).
@@ -275,7 +280,7 @@ if [ -z "$ROOT_ROWS" ]; then
   exit 0
 fi
 
-# member rows: root US id US updated_at US assignee US routed_to
+# member rows: root US id US updated_at US assignee US routed_to US kind
 MEMBER_ROWS=$(printf '%s' "$ALIVE" | scrub | jq -r '
   .[]
   | ((.metadata // {})) as $m
@@ -284,11 +289,55 @@ MEMBER_ROWS=$(printf '%s' "$ALIVE" | scrub | jq -r '
      (.id // ""),
      ((.updated_at // "") | tostring),
      ((.assignee // "") | tostring),
-     (($m["gc.routed_to"] // "") | tostring)]
+     (($m["gc.routed_to"] // "") | tostring),
+     (($m["gc.kind"] // "") | tostring)]
   | join("\u001f")' 2>/dev/null)
 
 READY_IDS=$(printf '%s' "$READY" | scrub | jq -r '.[].id // empty' 2>/dev/null)
 is_ready() { grep -Fxq -- "$1" <<< "$READY_IDS"; }
+
+# --- what can actually take demand ------------------------------------------
+# graph.v2 pours DESCRIPTOR beads alongside its steps — `mol-scoped-work` materialises
+# `gc.kind=spec` ("Step spec for <step>") and `gc.kind=scope` ("Worktree body scope").
+# They carry `gc.root_bead_id`, so they are members; they go ready the moment their
+# blockers close; and they are unassigned and unrouted FOREVER, because nothing is ever
+# meant to work them. That is, verbatim, condition (4)'s definition of an unclaimable
+# frontier bead — so without this filter a mol-scoped-work graph reads as stalled
+# through beads that are doing exactly what they were poured to do.
+#
+# Measured on the live case (tk-6mccf; visit tk-0o6gw against root tk-s68nh, 2026-08-13):
+# of the 8 beads reported as that workflow's frontier, SEVEN were gc.kind=spec and one —
+# tk-y8tb3 — was the real step. The report told the operator to give demand to beads that
+# cannot take it. Worse than cosmetic, because the frontier set is also the dedup key: it
+# was dominated by seven ids that never change, so the real frontier could move and the
+# recomputed key would still match stall_flagged and stay silent.
+#
+# An ALLOW-LIST, not a deny-list on spec/scope. Inertness is what gets STAMPED here —
+# `gc.kind` is ABSENT on ordinary step beads (3468 of 3937 beads in this rig) and present
+# on the descriptors — so naming the executable kinds excludes the next inert kind on the
+# day it is poured, instead of letting it silently re-enter reports. The cost falls in the
+# direction this file always chooses: a new EXECUTABLE kind is filtered out and its stall
+# goes unreported until it is named here, which is a missed signal rather than a false
+# escalation.
+#
+# Every value below was read off the live ledger, each with the bead that shows what it is:
+#   «absent»          ordinary graph.v2 step beads — the whole of mol-polecat-work's graph
+#   task              mol-scoped-work's real step (tk-y8tb3 "Load context…", .attempt.2)
+#   retry             a re-poured attempt of a real step (tk-23ka0 "Implement…")
+#   cleanup           mol-scoped-work.cleanup-worktree (tk-ynm0t "Clean up the worktree")
+#   scope-check       "Finalize scope for <step>" (tk-2o7ep) — routed to core.control-dispatcher
+#   workflow-finalize the machinery's own finalize step (tk-c93ed) — same dispatcher
+# and the kinds it excludes:
+#   spec              "Step spec for <step>" (tk-1rrpg) — never routed, never assigned
+#   scope             "Worktree body scope" (tk-ltus2) — likewise
+#   workflow          a ROOT, which is never a member (it carries gc.input_convoy_id, not
+#                     gc.root_bead_id) — listed for completeness, it cannot reach here
+is_executable_kind() {
+  case "${1:-}" in
+    ''|task|retry|cleanup|scope-check|workflow-finalize) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 # --- the standing triage subject a stall visit hangs off ---------------------
 # One per rig, created on first signal and reused after — the same shape
@@ -311,7 +360,7 @@ resolve_subject() {
 }
 
 stalled=0; moving=0; unheld_skip=0; never_started=0; landed=0; held=0; gated=0
-claimable=0; already=0; visit_open=0; failed=0; unreadable=0
+claimable=0; already=0; visit_open=0; failed=0; unreadable=0; inert_only=0
 
 while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rtitle; do
   [ -n "${root:-}" ] || continue
@@ -325,7 +374,7 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
     echo "detect-stalled-workflows: root $root — updated_at '$rupd' did not parse; skipped" >&2
     unreadable=$((unreadable + 1)); continue
   fi
-  while IFS="$SEP" read -r _r _id mupd _a _rt; do
+  while IFS="$SEP" read -r _r _id mupd _a _rt _k; do
     [ -n "${_id:-}" ] || continue
     e=$(epoch_of "$mupd")
     [ -n "$e" ] && [ "$e" -gt "$last" ] && last="$e"
@@ -416,7 +465,7 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
   molecule_live=0
   is_alive "$rsession" && molecule_live=1
   if [ "$molecule_live" -eq 0 ]; then
-    while IFS="$SEP" read -r _r _id _u massignee _rt; do
+    while IFS="$SEP" read -r _r _id _u massignee _rt _k; do
       [ -n "${massignee:-}" ] || continue
       if is_alive "$massignee"; then molecule_live=1; break; fi
     done <<< "$MINE"
@@ -425,25 +474,47 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
     unheld_skip=$((unheld_skip + 1)); continue
   fi
 
-  # (4) UNCLAIMABLE. The frontier is the members `gc bd ready` returns — every
-  # blocker closed, nothing gating them. An EMPTY frontier means something outside
-  # is blocking the whole workflow, which is a named wait, not a stall.
+  # (4) UNCLAIMABLE. The frontier is the members `gc bd ready` returns — every blocker
+  # closed, nothing gating them — LESS the inert descriptor beads, which are ready and
+  # unroutable by construction and so satisfy the unclaimable test without meaning it
+  # (is_executable_kind). An EMPTY frontier means something outside is blocking the whole
+  # workflow, which is a named wait, not a stall.
+  #
+  # The filter runs BEFORE `offerable` too, so claimability is decided by the beads an
+  # actor could actually be handed. Routing a descriptor is not a thing that happens, but
+  # if it ever did it would exempt the workflow on a bead no pool would work.
   frontier=""
   offerable=0
-  while IFS="$SEP" read -r _r mid _u massignee mrouted; do
+  inert_seen=0
+  while IFS="$SEP" read -r _r mid _u massignee mrouted mkind; do
     [ -n "${mid:-}" ] || continue
     is_ready "$mid" || continue
+    if ! is_executable_kind "$mkind"; then
+      inert_seen=$((inert_seen + 1)); continue
+    fi
     frontier="${frontier:+$frontier }$mid"
     if [ -n "$massignee" ] || [ -n "$mrouted" ]; then offerable=1; fi
   done <<< "$MINE"
   if [ -z "$frontier" ]; then
-    gated=$((gated + 1)); continue
+    # Counted apart because they are different facts about the graph, and the summary
+    # line is where an operator reads what this pass decided: a frontier of nothing but
+    # descriptors is a workflow whose every EXECUTABLE member is still blocked.
+    if [ "$inert_seen" -gt 0 ]; then
+      inert_only=$((inert_only + 1))
+    else
+      gated=$((gated + 1))
+    fi
+    continue
   fi
   if [ "$offerable" -eq 1 ]; then
     claimable=$((claimable + 1)); continue
   fi
 
-  # A stable per-observation dedup key: the SORTED frontier bead-id set. That set is
+  # A stable per-observation dedup key: the SORTED frontier bead-id set — the FILTERED
+  # one, since `frontier` now holds only executable members. That matters as much for the
+  # key as for the report: descriptor beads never close, so including them pinned most of
+  # the key to constants and a workflow could advance its real frontier while the
+  # recomputed key still matched the stored marker and stayed silent. That set is
   # exactly what makes the workflow stalled, it does not change while the workflow sits,
   # and it changes the instant the workflow advances (a ready bead closes, a new one
   # unblocks). Crucially it is NOT the root's updated_at, so stamping stall_flagged on
@@ -584,7 +655,7 @@ done <<< "$ROOT_ROWS"
 
 MODE=""
 [ "$DRY_RUN" -eq 1 ] && MODE="(dry-run) "
-echo "detect-stalled-workflows: ${MODE}${stalled} stalled workflow(s) signalled; $moving moving, $unheld_skip held by a live session, $never_started never advanced (husk-shaped), $landed already landed, $held on an operator hold, $gated waiting on a blocker, $claimable with a claimable frontier, $visit_open already under an open visit, $already already flagged, $unreadable unreadable, $failed failed"
+echo "detect-stalled-workflows: ${MODE}${stalled} stalled workflow(s) signalled; $moving moving, $unheld_skip held by a live session, $never_started never advanced (husk-shaped), $landed already landed, $held on an operator hold, $gated waiting on a blocker, $inert_only with a descriptor-only frontier, $claimable with a claimable frontier, $visit_open already under an open visit, $already already flagged, $unreadable unreadable, $failed failed"
 
 # Only failed WRITES decide the exit code. An unreadable root is a deliberate
 # fail-closed skip, already reported on stderr, and correct.
