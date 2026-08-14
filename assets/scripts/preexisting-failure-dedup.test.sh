@@ -65,7 +65,7 @@ case "$2" in
   list)
     shift 2
     printf 'LIST|%s\n' "$*" >> "$FAKE_META"
-    if printf '%s' "$*" | grep -q -- '--search'; then
+    if grep -q -- '--search' <<< "$*"; then
       echo "Error: unknown flag: --search" >&2
       exit 0
     fi

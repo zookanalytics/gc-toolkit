@@ -117,21 +117,21 @@ run_open() {
 run_open found tk-real1
 eq "$RC" "0" "(EXISTS) a resolvable subject exits 0"
 # The stub records `$*`, so quoting is flattened — match the argv words.
-printf '%s' "$CALLS" | grep -q 'bd create .*--title visit: tk-real1' \
+grep -q 'bd create .*--title visit: tk-real1' <<< "$CALLS" \
   && ok "(EXISTS) the visit bead is created" || bad "(EXISTS) visit created (calls: $CALLS)"
-printf '%s' "$CALLS" | grep -q 'gc.routed_to=gc-toolkit/gc-toolkit.converse' \
+grep -q 'gc.routed_to=gc-toolkit/gc-toolkit.converse' <<< "$CALLS" \
   && ok "(EXISTS) routed to the rig-qualified converse pool" || bad "(EXISTS) routed_to stamp (calls: $CALLS)"
-printf '%s' "$CALLS" | grep -q 'gc.continuation_group=tk-real1' \
+grep -q 'gc.continuation_group=tk-real1' <<< "$CALLS" \
   && ok "(EXISTS) continuation_group stamped with the subject" || bad "(EXISTS) continuation_group stamp"
-printf '%s' "$CALLS" | grep -q 'task_kind=visit' \
+grep -q 'task_kind=visit' <<< "$CALLS" \
   && ok "(EXISTS) task_kind=visit stamped" || bad "(EXISTS) task_kind stamp"
-printf '%s' "$CALLS" | grep -q 'bd dep add tk-visit1 tk-real1 --type=tracks' \
+grep -q 'bd dep add tk-visit1 tk-real1 --type=tracks' <<< "$CALLS" \
   && ok "(EXISTS) tracks edge wired to the subject" || bad "(EXISTS) tracks edge (calls: $CALLS)"
 
 # --- (HELD) an existing open visit still short-circuits ------------------------
 run_open found tk-real1 tk-visit0
 eq "$RC" "0" "(HELD) an already-held subject exits 0"
-printf '%s' "$OUT" | grep -q 'visit tk-visit0 is already open' \
+grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
   && ok "(HELD) prints the existing visit id" || bad "(HELD) existing visit reported (out: $OUT)"
 [ -z "$CALLS" ] \
   && ok "(HELD) no second visit filed" || bad "(HELD) must not file a second visit (calls: $CALLS)"
@@ -142,14 +142,14 @@ eq "$RC" "4" "(MISSING) an unresolvable id exits 4 (verb runtime failure)"
 [ -z "$CALLS" ] \
   && ok "(MISSING) NO visit bead created, routed, or wired — nothing filed" \
   || bad "(MISSING) filed something for a nonexistent bead (calls: $CALLS)"
-printf '%s' "$ERR" | grep -q 'bead not found' \
+grep -q 'bead not found' <<< "$ERR" \
   && ok "(MISSING) says 'bead not found'" || bad "(MISSING) message (err: $ERR)"
-printf '%s' "$ERR" | grep -q "tk-nope1" \
+grep -q "tk-nope1" <<< "$ERR" \
   && ok "(MISSING) names the offending id" || bad "(MISSING) message names the id (err: $ERR)"
 # (SHAPE) the not-found payload is an OBJECT, so a `.[]?|.id` probe would make jq
 # error out rather than answer cleanly. Assert the gate never mistakes that for a
 # resolved subject — i.e. it fails closed on the shape it meets in production.
-printf '%s' "$OUT" | grep -q 'filed on' \
+grep -q 'filed on' <<< "$OUT" \
   && bad "(SHAPE) the {\"error\":…} object read as a resolved subject" \
   || ok "(SHAPE) the {\"error\":…} object never reads as resolved"
 
@@ -163,7 +163,7 @@ eq "$RC" "4" "(MISMATCH) an answer for another bead exits 4"
 run_open missing zz-1234
 eq "$RC" "4" "(NORIG) an id whose prefix matches no rig exits 4"
 [ -z "$CALLS" ] && ok "(NORIG) nothing filed" || bad "(NORIG) filed something (calls: $CALLS)"
-printf '%s' "$ERR" | grep -q "prefix 'zz' matches no rig" \
+grep -q "prefix 'zz' matches no rig" <<< "$ERR" \
   && ok "(NORIG) names the unmatched prefix (the actionable diagnostic)" \
   || bad "(NORIG) message names the prefix (err: $ERR)"
 
@@ -171,7 +171,7 @@ printf '%s' "$ERR" | grep -q "prefix 'zz' matches no rig" \
 run_open down tk-real1
 eq "$RC" "4" "(DOWN) an empty answer exits 4 (fail closed — no visit on an unverified subject)"
 [ -z "$CALLS" ] && ok "(DOWN) nothing filed" || bad "(DOWN) filed on an unverified subject (calls: $CALLS)"
-printf '%s' "$ERR" | grep -q 'could not verify' \
+grep -q 'could not verify' <<< "$ERR" \
   && ok "(DOWN) says 'could not verify', not 'bead not found'" \
   || bad "(DOWN) a data-plane outage must not be reported as a typo (err: $ERR)"
 
@@ -182,10 +182,10 @@ printf '%s' "$ERR" | grep -q 'could not verify' \
 run_open dberror tk-real1
 eq "$RC" "4" "(DBERROR) an error payload exits 4 (fail closed)"
 [ -z "$CALLS" ] && ok "(DBERROR) nothing filed" || bad "(DBERROR) filed on an unverified subject (calls: $CALLS)"
-printf '%s' "$ERR" | grep -q 'could not verify' \
+grep -q 'could not verify' <<< "$ERR" \
   && ok "(DBERROR) reported as unverifiable, not as a typo" \
   || bad "(DBERROR) a non-not-found error must not read as 'bead not found' (err: $ERR)"
-printf '%s' "$ERR" | grep -q 'connection refused' \
+grep -q 'connection refused' <<< "$ERR" \
   && ok "(DBERROR) surfaces the underlying error to the operator" \
   || bad "(DBERROR) message carries the underlying error (err: $ERR)"
 
@@ -194,7 +194,7 @@ printf '%s' "$ERR" | grep -q 'connection refused' \
 # "not found" would send the operator hunting a typo that does not exist.
 run_open ctrlchr tk-real1
 eq "$RC" "0" "(CTRLCHR) a real bead with control chars in its payload still resolves"
-printf '%s' "$CALLS" | grep -q 'bd create' \
+grep -q 'bd create' <<< "$CALLS" \
   && ok "(CTRLCHR) the visit is filed normally" || bad "(CTRLCHR) visit filed (err: $ERR)"
 
 # --- (ORDER static) the gate precedes the gate-visit block --------------------

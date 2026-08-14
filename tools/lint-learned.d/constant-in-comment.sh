@@ -122,7 +122,7 @@ for f in "$@"; do
             fi
             [ -n "$comment" ] || continue
 
-            if printf '%s' "$comment" | grep -qE "$hit_re"; then
+            if grep -qE "$hit_re" <<< "$comment"; then
                 echo "$f:$((j + 1)): comment repeats the literal '$lit' assigned to $name on line $((i + 1)) — say why, not what; the value will drift (learned rule: constant-in-comment)"
                 flagged[$j]=1
                 found=1

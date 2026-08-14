@@ -355,7 +355,7 @@ fi
 # Does any live session answer to this address?
 answered_by_live_session() { # <assignee>
   [ -n "${1:-}" ] || return 1
-  printf '%s\n' "$ROSTER" | grep -qxF -- "$1"
+  grep -qxF -- "$1" <<< "$ROSTER"
 }
 
 NOW=$(date +%s 2>/dev/null || echo 0)
