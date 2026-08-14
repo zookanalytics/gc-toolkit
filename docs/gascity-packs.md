@@ -381,6 +381,56 @@ Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
   durable import TOML), and never persist a registry handle like `main:gascity`
   as `source` — handles are command-time lookups only (pack-spec,
   *`[imports.<binding>]`* / *Authoring Summary*).
+- **Builtin imports resolve from a binary-seeded cache — so a builtin `version`
+  pin is not yours to bump.** Builtin packs are never materialized into the
+  city. They compose through the same explicit `[imports.<binding>]`
+  declarations, but their sources resolve from a **user-global repo cache** that
+  the running `gc` pre-seeds with its own **embedded** copy of each pack at that
+  pack's **canonical pin** — which is why they resolve offline, and why the
+  retired per-city `.gc/system/packs` tree is pruned on sight rather than
+  repopulated (an empty `.gc/system/` is correct, not a broken install). Three
+  consequences bite:
+  - **Builtin pins track the gc binary's build revision, not upstream HEAD.**
+    They advance only when a newer `gc` is installed, so a builtin pin sitting
+    behind upstream is expected — not drift to chase.
+  - **Hand-bumping a builtin pin silently demotes it to a remote import.**
+    `config.IsBundledSourceAtCanonicalPin` gates every synthetic-cache call
+    site, so a bundled source pinned at *any* other commit "is an ordinary
+    remote import and is fetched for real" — trading offline resolution for a
+    network fetch of a tree the binary cannot supply. Advance builtin packs by
+    installing a newer `gc` and letting **`gc doctor --fix`** re-pin: its
+    `packv2-import-state` check rewrites superseded bundled pins for you
+    (`rewriteSupersededBundledPinsFS`). **`gc import install` does not re-pin** —
+    it collects the declared imports, syncs `packs.lock` and installs what is
+    locked, leaving the declared pin untouched; against a superseded pin it
+    fetches that exact superseded commit over the network. That is why the
+    not-cached remediation leads with the doctor and keeps `gc import install`
+    only as the fallback. The cache marker is a content hash bound to
+    the running binary and every production config load routes through
+    `ensureBuiltinPacksForConfigLoad`, so a cold or evicted cache self-heals on
+    the next command after an upgrade.
+  - **`core` and `gastown` are different packs from different repos.** `core` is
+    the bundled builtin — `gc-*` skills, default prompts, core formulas, orders,
+    doctor checks, provider overlays — and **ships no crew agents**, but it is
+    not agentless: it also contributes the scope-local `control-dispatcher`
+    lane (qualified `core.control-dispatcher`), a deterministic
+    `prompt_mode = "none"` worker that runs `gc convoy control --serve` over
+    formula-v2 control beads. So don't go looking in `gastown` for the
+    formula-v2 dispatcher: the **crew** (`mayor`, `deacon`, `polecat`,
+    `refinery`, `witness`, `dog`, `boot`) is the `gastown` pack, while the
+    control lane ships with `core`. `core`, `bd` and `dolt` address subpaths
+    of the gascity main repo; `gastown` also publishes from the gascity-packs
+    registry.
+
+  Don't read `gc pack list` as evidence here: "No remote packs configured"
+  describes the legacy remote-registry mechanism, is orthogonal to `[imports]`,
+  and does not mean no packs are loaded. (`cmd/gc/embed_builtin_packs.go`;
+  `internal/builtinpacks/registry.go`, `MaterializeSyntheticRepo` /
+  `publicSubpathForPack`; `cmd/gc/import_state_doctor_check.go`. Pack contents
+  from `internal/bootstrap/packs/core/` — its `pack.toml`, the `all:agents`
+  embed in `embed.go`, and `agents/control-dispatcher/agent.toml` — and the
+  `gastown` roster from the `gascity-packs` module the binary embeds. Verified
+  against `gc 1.4.1`, built from fork `origin/main` at `3983cc049`, 2026-08-13.)
 - **`[[patches.agent]]` modifies, never creates.** A patch targets an existing
   agent by its bare local `name` (`dir = ""` in `pack.toml` matches by name
   before rig stamping) and **fails loading if the target doesn't exist**. That
