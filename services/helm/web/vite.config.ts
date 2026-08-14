@@ -50,6 +50,7 @@ function resolveDevCity(mount: string): string {
 }
 
 const devMount = resolveLoopbackTarget('HELM_DEV_MOUNT', DEFAULT_DEV_MOUNT);
+const devTtyd = resolveLoopbackTarget('HELM_DEV_TTYD', DEFAULT_DEV_TTYD);
 
 export default defineConfig({
   plugins: [react()],
@@ -90,9 +91,25 @@ export default defineConfig({
       // ws: true is required — the terminal is a WebSocket at /terminal/ws, and
       // without it the upgrade is not proxied and the tile never attaches.
       '/terminal': {
-        target: resolveLoopbackTarget('HELM_DEV_TTYD', DEFAULT_DEV_TTYD),
+        target: devTtyd,
         changeOrigin: true,
         ws: true,
+        // Forward the upgrade as same-origin. `changeOrigin` rewrites Host to
+        // the target but leaves Origin as the dev server's, and ttyd's
+        // `-O/--check-origin` compares the two: measured on 1.7.7, an Origin
+        // that does not match Host is refused, and so is a request with no
+        // Origin at all. So the moment the city adds -O (recommended alongside
+        // -a: see the Terminal section of the README), an unrewritten dev proxy
+        // stops attaching, with only a dropped socket to explain it. Inert
+        // while -O is off, since ttyd then ignores Origin entirely.
+        configure: (proxy) => {
+          const sameOrigin = (proxyReq: { setHeader(name: string, value: string): void }) => {
+            proxyReq.setHeader('origin', devTtyd);
+          };
+          // The upgrade is proxyReqWs; proxyReq is the plain-HTTP token fetch.
+          proxy.on('proxyReqWs', sameOrigin);
+          proxy.on('proxyReq', sameOrigin);
+        },
       },
       // The drill plane addresses the supervisor same-origin (see
       // src/drill/origin.ts). In production that is literally the same server;

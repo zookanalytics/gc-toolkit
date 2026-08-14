@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
-import { resolveTerminalBase } from './terminal/endpoint';
+import { resolveTerminalBase, resolveTerminalSession } from './terminal/endpoint';
 import type { Board } from './contract';
 
 // The board shape lives in ./contract.ts — the hand-written mirror of the Go
@@ -42,9 +42,10 @@ export function App() {
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
-  // Read once: the override is a launch-time knob, and re-reading it on every
-  // render would tear the terminal down whenever the board refreshes.
+  // Read once: these overrides are launch-time knobs, and re-reading them on
+  // every render would tear the terminal down whenever the board refreshes.
   const terminalBase = useMemo(() => resolveTerminalBase(window.location.search), []);
+  const terminalSession = useMemo(() => resolveTerminalSession(window.location.search), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -156,11 +157,24 @@ export function App() {
         </table>
       )}
 
-      {/* One terminal, not one per anchor: the city runs a single ttyd wired to
-          a single session. Whether tiles get their own terminals is a ttyd
-          wiring question that is deliberately still open — see the Terminal
-          section of services/helm/README.md. */}
-      <TerminalTile label="city terminal" base={terminalBase} />
+      {/* One terminal, not one per anchor — and that is now a LAYOUT decision,
+          not a wiring limit. The city still runs a single ttyd, but its attach
+          target is chosen per connection (`?arg=`, tk-rbf9r) rather than baked
+          into the systemd unit, so this tile can be pointed at any live session
+          and `?session=` does exactly that. What remains open is how many
+          terminals a board should show and how they are arranged, which is the
+          design handoff on tk-mw9qz — see the Terminal section of
+          services/helm/README.md.
+
+          What is deliberately NOT wired here is drill-target -> session: the
+          board contract carries no session for a tile (contract.ts), and
+          inventing a name from a bead's rig would be a guess that the guard
+          would then refuse. Naming that mapping is part of tk-mw9qz. */}
+      <TerminalTile
+        label={terminalSession ?? 'city terminal'}
+        base={terminalBase}
+        session={terminalSession}
+      />
       <DrillPanel beadId={drillTarget} onClose={() => setDrillTarget(null)} />
     </main>
   );

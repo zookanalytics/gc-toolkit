@@ -33,6 +33,15 @@ const SOCKET_OPEN = 1;
 /**
  * One terminal attached to ttyd.
  *
+ * ### Which session this attaches
+ *
+ * The URL decides. ttyd runs with `-a/--url-arg`, so the `?arg=<session>` that
+ * {@link endpoint.socketURL} puts on this socket becomes the argv of the
+ * command ttyd spawns — a guard script that validates the name against the live
+ * session list and, given no name, attaches the city's default. Nothing about
+ * that changes this class: the target is chosen before the socket opens, and
+ * what arrives afterwards is one PTY either way.
+ *
  * ### Close means detach, not kill
  *
  * This is the destructive failure mode for an embedded terminal, so it is
@@ -43,6 +52,11 @@ const SOCKET_OPEN = 1;
  * that outlives every client. When this socket closes, ttyd hangs up that one
  * client process; tmux detaches it and the session — and the agent working
  * inside it — carries on. Nothing about closing a socket reaches the session.
+ *
+ * The guard script preserves that by `exec`ing the attach rather than forking
+ * it, so the process ttyd signals on close IS the tmux client. A guard that
+ * forked and waited would take the hangup itself and leave what happens
+ * underneath unspecified — which is why its test asserts the `exec`.
  *
  * What WOULD kill it is writing to the PTY on the way out: an `exit`, a
  * Ctrl-D, a Ctrl-C, a `tmux kill-session`. Those are indistinguishable from
