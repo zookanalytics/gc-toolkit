@@ -322,6 +322,17 @@ definition first, because everything below uses it:
 > sitting ends", above). The sequence of visits under a subject is the
 > dialogue's durable spine — board-legible, cold-reconstructable, no
 > provider transcript required.
+>
+> **A visit body is written at FILING time and read at CLAIM time**, and
+> those are routinely a day or more apart — a queued visit holds its
+> place indefinitely at zero session cost, which is a feature of the
+> spine and a hazard for any body that states facts. A body whose claims
+> can go stale therefore carries `visit.recheck`: the PATH to an
+> executable taking the visit's bead id as its only argument, which the
+> converse loop runs during prep and whose corrected output supersedes
+> the body. Verified 2026-08-14; the measured failure it answers is bead
+> tk-gvas6 — a sweep census claimed 41.5 hours after it was cut, by
+> which time five of its ten candidates had merged and deployed.
 
 - **The hold on the gate.** Upstream has the *wait* (human gates,
   `blocks` edges — work durably stops). It has no role that services
