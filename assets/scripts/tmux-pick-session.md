@@ -174,8 +174,8 @@ city-resolution detail.
 Titles render in both default and `--all` modes. The most
 title-rich sessions today are force-spawn polecats (hidden in
 default mode), so `--all` is where the change is most visible. But
-mechanik-thread, mayor-thread, and other sessions with non-default
-titles also benefit in default mode.
+converse sittings and other sessions with non-default titles also
+benefit in default mode.
 
 ### Why not strip the rig prefix from the rendered title
 

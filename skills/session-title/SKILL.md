@@ -1,13 +1,13 @@
 ---
 name: session-title
-description: Use when the operator explicitly asks to set, view, suggest, or rotate a title for the current session — thread or canonical. Triggers include "rename this session", "rename this thread", "rename mechanik", "rename mayor", "set my title", "set the title to X", "what's my title", "what's my session title", "suggest a title".
+description: Use when the operator explicitly asks to set, view, suggest, or rotate a title for the current session. Triggers include "rename this session", "rename mechanik", "rename mayor", "set my title", "set the title to X", "what's my title", "what's my session title", "suggest a title".
 ---
 
 # Session Title
 
 Set, view, suggest, or auto-rotate the title for the current session.
-Applies to both **threads** (mayor-thread, mechanik-thread, …) and
-**canonical agents** (mayor, mechanik, deacon). The title shows up in
+Applies to **canonical agents** (mayor, mechanik, deacon) and to any
+ad-hoc session the operator spawns. The title shows up in
 `gc session list`, the operator's session popup, the dashboard, and
 (once the consumer side lands — tk-ki46h) the tmux footer, so a
 descriptive title helps the operator and other agents see at a glance
@@ -18,18 +18,17 @@ what the session is on.
 > stale or noisy is not a trigger; surface the suggestion in
 > conversation and let the operator decide.
 >
-> The convention side of self-renaming — threads renaming when focus
-> crystallizes, canonicals rotating as focus shifts — is documented
-> in template fragments (`thread-role`, `canonical-self-rename`),
-> not gated by this skill.
+> The convention side of self-renaming — canonicals rotating as focus
+> shifts — is documented in the `canonical-self-rename` template
+> fragment, not gated by this skill.
 
 ## Detect the form
 
 This skill has four forms. Pick one based on what the operator typed:
 
 - **Auto-rename** (default no-args) — `/session-title` with no args,
-  or a bare "rename this session" / "rename this thread" /
-  "rename mechanik" with no value supplied. Propose nothing — pick
+  or a bare "rename this session" / "rename mechanik" with no value
+  supplied. Propose nothing — pick
   a forward-focus title from recent context and **apply it
   directly**.
 - **Set** — `/session-title <text>`, or "rename this session to
@@ -103,10 +102,10 @@ gc session list --json \
 
 The `title` field is plumbed end-to-end in gascity but defaults to the
 agent name (e.g. `gc-toolkit.polecat`) when no operator or agent has
-refined it. For thread agents — whose `agent_name` includes an
+refined it. For an ad-hoc session — whose `agent_name` includes an
 `-adhoc-<hex>` suffix — gascity strips that suffix when assigning the
-default, so `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` gets the
-default title `gc-toolkit.mayor-thread`. The jq above collapses both
+default, so `gc-toolkit.mechanik-adhoc-6d0c0eb30f` gets the
+default title `gc-toolkit.mechanik`. The jq above collapses both
 forms to `(no title set)` so the report reflects whether a
 *meaningful* title exists, not whether the field happens to be
 populated. Canonical sessions don't carry the `-adhoc-*` suffix; the
@@ -177,29 +176,19 @@ Optimize for **future-self at a glance**:
 ## When to self-rename (without being asked)
 
 This is the **convention side** of the skill, not a trigger to invoke
-it. Both modes below are documented in their respective template
-fragments; this section cross-references rather than duplicating.
-
-### Thread mode
-
-Threads set a title early and change it rarely. The starting title is
-either the role-name default or a short hint auto-seeded at spawn
-time; once the conversation converges, the agent runs a single
-`gc session rename` (no skill invocation) to lock in a concrete
-focus — typical shapes are `<repo> PR #123` or a verb-noun phrase
-naming the focus. See the `thread-role` template fragment for the
-full convention.
+it. The mode below is documented in its template fragment; this
+section cross-references rather than duplicating.
 
 ### Canonical mode
 
 Canonical agents (mayor, mechanik, deacon) **rotate** their title as
-focus shifts. Unlike threads, the canonical's role-name default
-(`mayor`, `mechanik`, `deacon`) gives the operator no signal beyond
+focus shifts. The canonical's role-name default (`mayor`, `mechanik`,
+`deacon`) gives the operator no signal beyond
 "this agent is alive." A rotating focus title — `skill rename
 audit`, `signal-loom landing convoy`, `gc-toolkit PR #60 review
 triage` — makes `gc session list` and the session popup scannable:
 the operator sees what each canonical is currently on without having
-to peek. As in thread mode, the title must use a human-meaningful
+to peek. The title must use a human-meaningful
 reference (a `<repo> PR #N` form or topic/verb-noun phrase) — a bare
 bead ID gives the operator nothing to scan.
 

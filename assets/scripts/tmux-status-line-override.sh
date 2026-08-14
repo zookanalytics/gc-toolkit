@@ -55,15 +55,15 @@ gcmux set-option -t "$SESSION" status-right \
     2>/dev/null || true
 
 # Replace status-left's "$icon $AGENT" with "$icon $short". The
-# pack-prefix and "-adhoc-<hex>" thread suffix carry no useful
-# information once the agent fits inside its tier theme, and they
-# routinely push the left side past the 25-cell length cap (e.g.
-# "gc-toolkit.mechanik-thread-adhoc-a36bc330b9" -> "Mechanik focu…").
-# Two parameter expansions strip both:
-#   gc-toolkit.mechanik                          -> mechanik
-#   gc-toolkit.mechanik-thread-adhoc-a36bc330b9  -> mechanik-thread
-#   gc-toolkit.polecat-1                         -> polecat-1
-#   mayor                                        -> mayor (unchanged)
+# pack-prefix and the "-adhoc-<hex>" suffix gascity gives an ad-hoc
+# session carry no useful information once the agent fits inside its
+# tier theme, and they routinely push the left side past the 25-cell
+# length cap (e.g. "gc-toolkit.mechanik-adhoc-a36bc330b9" ->
+# "Mechanik focu…"). Two parameter expansions strip both:
+#   gc-toolkit.mechanik                    -> mechanik
+#   gc-toolkit.mechanik-adhoc-a36bc330b9   -> mechanik
+#   gc-toolkit.polecat-1                   -> polecat-1
+#   mayor                                  -> mayor (unchanged)
 short="${AGENT##*.}"
 short="${short%-adhoc-*}"
 

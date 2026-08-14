@@ -276,11 +276,11 @@ mail_seg=""
 
 # --- Title slot presentation --------------------------------------------
 # Pure string work (no fork), runs every render. Hide when title is the
-# gascity default. For most agents that means title == alias; for thread
-# agents gascity strips the `-adhoc-<hex>` suffix when assigning the
-# default, so the title equals the role name instead (e.g. alias
-# `gc-toolkit.mayor-thread-adhoc-6d0c0eb30f` → default title
-# `gc-toolkit.mayor-thread`). Strip the suffix and compare both.
+# gascity default. For most agents that means title == alias; for an
+# ad-hoc session gascity strips the `-adhoc-<hex>` suffix when assigning
+# the default, so the title equals the template name instead (e.g. alias
+# `gc-toolkit.mechanik-adhoc-6d0c0eb30f` → default title
+# `gc-toolkit.mechanik`). Strip the suffix and compare both.
 title=""
 agent_role="${agent%-adhoc-*}"
 if [ "$raw_title" = "$agent" ] || [ "$raw_title" = "$agent_role" ] || [ "$raw_title" = "null" ]; then

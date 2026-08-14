@@ -12,7 +12,7 @@ terminating, and routing work to each. Upstream Gas City tutorials
 [03-sessions](https://docs.gascity.com/tutorials/03-sessions))
 introduce the primitives. This doc consolidates the variants and
 the corners that show up only when you mix them — `[[named_session]]`
-duplicates, pool routing vs. assignee routing, thread instances vs.
+duplicates, pool routing vs. assignee routing, ad-hoc instances vs.
 canonical singletons, and the addressing form `gc session new`
 actually accepts.
 
@@ -42,7 +42,6 @@ prompt-template authoring or any single agent's role behavior.
 | **Patrol (overlay)** | named singleton + patrol-cycle prompt (4-tier startup, pour-before-burn) | yes — runs as the underlying named singleton | yes, as underlying named | no — Tier 3 skipped; patrol wisps are produced, not consumed via routed queue | deacon, witness, refinery |
 | **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
 | **Deterministic worker (no prompt loop)** | `prompt_mode = "none"` + `start_command` + `max_active_sessions`; no `[[named_session]]` | in effect — capped at `max_active_sessions = 1` | yes, demand-scaled from zero | yes — but through its own serve-loop query, not the hook tiers | control-dispatcher (bundled core pack) |
-| **Thread (operator-spawned)** | agent with `work_query = "printf '[]'"` + `sling_query` that exits non-zero | no, N instances | never (work query is a stub) | no | mayor-thread, mechanik-thread |
 | **Manual** | `gc session new <template>` | no — just a session_origin | no — operator initiates | depends on the agent's variant | any template invoked this way |
 
 "Singleton" here means **at most one canonical session per scope**.
@@ -613,82 +612,31 @@ min_active_sessions = 0
 max_active_sessions = 3
 ```
 
-## Variant C — Threads (operator-spawned only)
+## Variant C — Conversations (visits)
 
-Thread agents are regular agents with their `work_query` and
-`sling_query` stubbed so the controller never auto-spawns them
-and `gc sling` never routes to them. They exist for operator-
-initiated parallel reasoning at the same scope as a canonical
-agent — e.g., a second mayor instance the operator nudges
-through a focused planning task without disturbing the canonical
-mayor's coordination state.
+An earlier variant sat here: a *thread* agent — a regular agent
+with `work_query = "printf '[]'"` and a `sling_query` that exits
+non-zero, so the controller never auto-spawned it and `gc sling`
+never routed to it — spawned by the operator for parallel reasoning
+alongside a canonical. This city retired that shape when it moved to
+the converse model (`tk-5savt`): nothing declares one, and the two
+that shipped — plus the role fragment they shared — were removed
+from the pack. The mechanism is still expressible, since the stubs
+are ordinary agent config, but a reader looking for the
+operator-conversation surface wants the visit below, not a revival
+of the stubs. The removed files are in git history.
 
-```toml
-# rigs/gc-toolkit/agents/mayor-thread/agent.toml
-work_query = "printf '[]'"
-sling_query = "echo 'mayor-thread is operator-spawned only; not a sling target' >&2; exit 1"
-```
+An operator who wants a second instance of an existing role for a
+side conversation spawns one ad-hoc: `gc session new <template>`
+gives a `…-adhoc-<id>` session with `session_origin = "manual"` (see
+[the duplicate named-session
+footgun](#duplicate-named-session-via-manual-spawn) for what that
+costs against a singleton).
 
-### Identity
-
-Thread agents inherit their canonical's scope (see [Threads do not
-change agent scope](#threads-do-not-change-agent-scope) below) —
-both checked-in thread agents (`mayor-thread`, `mechanik-thread`)
-declare `scope = "city"`, matching their canonicals.
-
-- Template name: `mayor-thread`, `mechanik-thread`, …
-- Template QualifiedName: `<binding>.<template>` for city-scoped
-  threads (e.g., `gc-toolkit.mayor-thread`); rig-scoped would prefix
-  the rig name.
-- Per-instance alias: `<binding>.<template>-adhoc-<id>` (city) or
-  `<rig>/<binding>.<template>-adhoc-<id>` (rig). Verify via
-  `gc session list`.
-- Per-instance AgentBase: assigned at spawn, drives
-  `work_dir = ".gc/agents/<template>/{{.AgentBase}}"` so parallel
-  threads don't collide in their scratch dirs.
-
-### Lifecycle
-
-- **Spawn.** Operator runs
-  `gc session new <scope>/<pack>.<thread-template>` with an
-  optional name. Session metadata gets
-  `session_origin = "manual"`.
-- **Run.** The thread reads its prompt and follows operator
-  nudges. It can send mail and read mail like any other agent,
-  but its hook will never find auto-routed work.
-- **Termination.** Operator-driven: `exit` from inside, or
-  `gc session close <session-id>` from outside.
-
-### Threads do not change agent scope
-
-A thread runs at the same scope as its canonical counterpart.
-A mayor-thread is city-scoped because mayor is city-scoped; a
-hypothetical witness-thread would be rig-scoped. The
-`<role>-thread` suffix marks the variant; it does **not** rebind
-the scope.
-
-### Addressing
-
-```bash
-# City-scoped thread (current mayor-thread / mechanik-thread).
-gc session new gc-toolkit.mayor-thread --alias my-focus-thread
-# spawns gc-toolkit.mayor-thread-adhoc-<id>, returns the session name
-
-gc session nudge gc-toolkit.mayor-thread-adhoc-<id> "..."  # specific instance
-gc mail send gc-toolkit.mayor-thread-adhoc-<id> -s "..." -m "..."
-```
-
-A rig-scoped thread (if one existed) would spawn from the
-`<rig>/<binding>.<template>` form instead; see [gc session new
-addressing footgun](#gc-session-new-requires-the-fully-qualified-form).
-
-`gc sling <thread-qualified-name> <bead>` is explicitly rejected
-by the thread's `sling_query` stub.
-
-### Conversations are visits, not per-bead host threads
+### Conversations are visits, not per-bead host sessions
 
 A conversation about a bead is ordinary routed work — there is no
-per-bead host thread. File a **visit** — a small child bead with
+per-bead host session. File a **visit** — a small child bead with
 `task_kind=visit` and `gc.continuation_group=<subject-id>`, routed to the
 rig-qualified `converse` pool (`agents/converse/`; canonical filing lines
 in `formulas/mol-visit.toml`). Pool demand spawns a converse session that
@@ -709,8 +657,8 @@ but their prompts (and the `propulsion-deacon`, `propulsion-witness`,
 contract described below.
 
 This is called out as its own variant because the contract has
-substantial mechanics that pool workers and threads do not have,
-and because regressions in this contract show up as
+substantial mechanics that pool workers and ad-hoc sessions do
+not have, and because regressions in this contract show up as
 missed-MERGE_READY and stale-patrol incidents (`tk-fyzvk`,
 `tk-6hm32`, `tk-yvtiv`).
 
@@ -937,7 +885,7 @@ records the *birth path*.
 | Value | Set by | Used for |
 |---|---|---|
 | `ephemeral` | controller spawned this session in response to demand (pool worker scaling up, on-demand named singleton waking) | Tier 3 routed-queue access (this is the only origin allowed to consume `gc.routed_to`) |
-| `manual` | operator ran `gc session new <template>` | thread spawn, ad-hoc named-template spawn; **not** allowed to consume Tier 3 |
+| `manual` | operator ran `gc session new <template>` | ad-hoc named-template spawn; **not** allowed to consume Tier 3 |
 | `named` | controller spawned the canonical session for a `[[named_session]]` declaration | named singletons; **not** allowed to consume Tier 3 |
 
 The Tier 3 gating is the practical effect to know:
@@ -1011,11 +959,11 @@ which speak to a *prompt loop* — `nudge`, `peek` — have nothing to
 speak to; see
 [the inert-liveness footgun](#a-deterministic-workers-liveness-signals-are-structurally-inert).
 
-The **Thread** column means an ordinary operator-spawned `-adhoc-<id>`
-instance. (A converse session is not a thread: it is a **pool worker**
+The **Ad-hoc** column means an ordinary operator-spawned `-adhoc-<id>`
+instance. (A converse session is not one: it is a **pool worker**
 summoned by a routed visit bead, and it addresses like the pool column.)
 
-| Command | Named singleton | Pool worker | Thread (`-adhoc-`) |
+| Command | Named singleton | Pool worker | Ad-hoc (`-adhoc-`) |
 |---|---|---|---|
 | `gc session nudge <addr>` | QualifiedName | session-id or instance name | session name (e.g., `…-adhoc-<id>`) |
 | `gc session new <template>` | QualifiedName — spawns a `manual`-origin session *alongside* the canonical, see [singleton footgun](#duplicate-named-session-via-manual-spawn) | QualifiedName — spawns an extra instance | QualifiedName + optional name |
@@ -1205,13 +1153,6 @@ Fix shape (per `project_gascity_keeper_config_break.md`): remove
 the city-level `[[named_session]]`, add `[rigs.imports.<sub-pack>]`
 to the importing rig, and rely on the sub-pack's own declaration
 to materialize with `scope = "rig"`.
-
-### Threads do not change agent scope
-
-A `<role>-thread` variant runs at the same scope as its
-canonical counterpart. `mayor-thread` is city-scoped because
-`mayor` is city-scoped. The `-thread` suffix is a behavioral
-mode, not a scope override.
 
 ### Pool-instance race on simultaneous claim
 
@@ -1486,7 +1427,7 @@ is **not** the always-live `mode = "always"` config (see
 [Lifecycle](#lifecycle)). The pin targets **the** canonical
 session, the one whose alias equals the QualifiedName in
 `gc session list`; reaching for `gc session new` instead spawns a
-separate `…-adhoc-<id>` thread *alongside* it (the [duplicate
+separate `…-adhoc-<id>` session *alongside* it (the [duplicate
 named-session footgun](#duplicate-named-session-via-manual-spawn)).
 You don't need to create it first — pinning a not-yet-materialized
 canonical session creates its bead so the reconciler can start it.
@@ -1505,7 +1446,7 @@ Signals that this doc needs a refresh:
   (`internal/config/workquery.go`; currently three tiers; Tier 3
   gated by `$GC_SESSION_ORIGIN`).
 - A new variant emerges — e.g., something that is neither
-  `[[named_session]]`, pool, nor operator-spawned thread.
+  `[[named_session]]`, pool, nor operator-spawned ad-hoc session.
 - A new gc-toolkit auto-memory entry documents a *by-design* sharp
   edge — a contract-level consequence a consumer must account for
   permanently — and NOT a defect with a tracked fix. A defect (a

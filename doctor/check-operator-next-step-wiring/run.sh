@@ -10,7 +10,9 @@
 # fine, works fine, and spends the operator's attention on their own queue.
 #
 # WHY THIS CHECK EXISTS. The fragment shipped in tk-fc28x and was wired onto
-# mayor, mayor-thread and mechanik. Nobody wired the refinery. The refinery is
+# the roles someone listed as conversational — mayor, mechanik, and the
+# operator-spawned threads of each (since retired, tk-5savt). Nobody wired the
+# refinery. The refinery is
 # the agent that holds the human-approval merge gate, so every status it can
 # emit is about work waiting on the operator; it is the single largest producer
 # of "a PR is waiting on you" traffic in the city. On 2026-08-13 the gascity
@@ -19,17 +21,17 @@
 # converse was missed the same way, and its whole contract is holding a sitting
 # FOR the operator.
 #
-# The omission had a written cause. agents/mayor-thread/PROVENANCE.md recorded
+# The omission had a written cause. The pack's own agent provenance recorded
 # "deacon, witness and refinery … are patrol / automation roles, not
 # operator-facing", which is the correct test for whether a role deserves an
-# operator-spawnable THREAD and the wrong test for this fragment. Nobody
+# operator-spawnable sitting and the wrong test for this fragment. Nobody
 # converses with the refinery; a human still reads what it writes.
 #
 # So the failure was not a forgotten name — it was a roster nobody was required
 # to derive. This check makes the derivation mandatory: every agent the pack
 # governs carries an explicit verdict with a reason, and an agent with no
 # verdict is an ERROR. That is the assertion. A check that merely confirmed the
-# six known names would go green on the seventh agent, which is the bug.
+# known names would go green on the next agent added, which is the bug.
 #
 # WHAT IS ASSERTED.
 #   1. The fragment file exists (nothing below means anything without it).
@@ -56,14 +58,16 @@
 #       The surface for an IMPORTED gastown agent (mayor, refinery).
 #   (b) agents/<a>/agent.toml -> append_fragments / inject_fragments.
 #       The surface for a native agent that renders someone else's prompt
-#       (mayor-thread).
+#       (polecat-codex).
 #   (c) agents/<a>/prompt.template.md -> an inline {{ template "…" . }} call.
 #       The surface for a native agent carrying its own prompt (mechanik,
 #       converse).
 #   (d) inherited: agents/<a>/agent.toml sets prompt_template to another
-#       agent's prompt inside THIS pack, and that prompt carries (c).
-#       mechanik-thread renders agents/mechanik/prompt.template.md and gets the
-#       fragment with no list of its own.
+#       agent's prompt inside THIS pack, and that prompt carries (c) — the
+#       agent gets the fragment with no list of its own. No agent uses this
+#       surface today (the retired threads did, tk-5savt); it stays resolved
+#       because the next native agent that reuses a pack-local prompt would be
+#       reported unwired without it, and that is a false red on a real wiring.
 # A pack-qualified reference ("gastown//agents/polecat/prompt.template.md")
 # resolves outside this pack and is deliberately NOT followed: the base prompts
 # are upstream's, they carry no gc-toolkit fragment, and treating an unreadable
@@ -96,13 +100,11 @@ FRAGMENT_FILE="template-fragments/$FRAGMENT.template.md"
 # in the first place.
 #
 # The test, applied to each: does a human read this agent's prose as a report or
-# a request? Not "does the operator converse with it" — that is the thread test,
-# and conflating the two is what caused tk-l1pj6.
+# a request? Not "does the operator converse with it" — that is the sitting
+# test, and conflating the two is what caused tk-l1pj6.
 CLASSIFICATION=(
     "mayor yes the operator's primary interlocutor; coordination replies are read by a human as they are written"
-    "mayor-thread yes operator-spawned conversational thread of mayor; same replies, same reader"
     "mechanik yes the city's interactive builder role; the operator converses with it directly"
-    "mechanik-thread yes operator-spawned conversational thread of mechanik"
     "converse yes its whole contract is the sitting — 'post your framing and wait in place for the operator to reply' (agents/converse/prompt.template.md)"
     "refinery yes holds the human-approval merge gate, so its entire subject is work waiting on the operator; narrates that queue into a pane the operator watches and parks beads with gc.routed_to=human (tk-l1pj6)"
     "boot no deacon watchdog: one judgement per wake, consumers are the deacon and the controller; composes no report for a human"
@@ -139,7 +141,7 @@ fi
 if [ ! -s "$dir/$FRAGMENT_FILE" ]; then
     echo "The $FRAGMENT fragment is missing or empty — every wiring below points at nothing"
     echo "Expected: $FRAGMENT_FILE"
-    echo "Six agents name this fragment. With no file behind it, they render without the rule and nothing else in this check can mean anything."
+    echo "Four agents name this fragment. With no file behind it, they render without the rule and nothing else in this check can mean anything."
     exit 2
 fi
 
@@ -331,7 +333,7 @@ if [ "${#unclassified[@]}" -gt 0 ] || [ "${#unwired[@]}" -gt 0 ]; then
     [ "${#stale[@]}" -gt 0 ] && printf 'STALE: %s\n' "${stale[@]}"
     echo
     if [ "${#unclassified[@]}" -gt 0 ]; then
-        echo "An unclassified agent is an ERROR because it is the exact failure this check exists to end: the fragment reached the roles someone thought of, and the refinery — which holds the operator's own approval gate — was never on that list. Add the agent to CLASSIFICATION in this file with a verdict and a one-line reason. The test is 'does a human read this agent's prose as a report', NOT 'does the operator converse with it' (that is the thread test; conflating them is what caused tk-l1pj6)."
+        echo "An unclassified agent is an ERROR because it is the exact failure this check exists to end: the fragment reached the roles someone thought of, and the refinery — which holds the operator's own approval gate — was never on that list. Add the agent to CLASSIFICATION in this file with a verdict and a one-line reason. The test is 'does a human read this agent's prose as a report', NOT 'does the operator converse with it' (that is the sitting test; conflating them is what caused tk-l1pj6)."
     fi
     if [ "${#unwired[@]}" -gt 0 ]; then
         echo "An unwired operator-facing agent primes fine and reports the operator's own review queue back to them — no error, no stderr, just the attention cost the rule was written to prevent. Wire it through one of: the pack.toml patch's inject_fragments_append; the agent's append_fragments/inject_fragments; an inline {{ template \"$FRAGMENT\" . }} in its own prompt; or a prompt_template pointing at a pack prompt that already carries the inline call."

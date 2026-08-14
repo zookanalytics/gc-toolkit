@@ -5,9 +5,8 @@
 # safety analysis and prerequisites: no city-level [imports.gastown],
 # no [rigs.imports.gastown].
 #
-# Native gc-toolkit agents (mechanik, polecat-codex,
-# _polecat-gemini, plus the *-thread
-# variants) ship under agents/. Gastown roster (boot, deacon, mayor,
+# Native gc-toolkit agents (mechanik, converse, proactive, polecat-codex,
+# _polecat-gemini) ship under agents/. Gastown roster (boot, deacon, mayor,
 # polecat, refinery, witness) is imported and divergences are
 # expressed as bare-name [[patches.agent]] — pure fragment-append
 # overlays on top of base prompts. Each gc-toolkit-specific doctrine
@@ -100,8 +99,7 @@ inject_fragments_append = [
     # REOPENS a closed bead, which is a write against somebody else's decision.
     # Both halves of tk-isyz0 land on it: stamp a successor pointer when a
     # ruling re-homes work, and never conclude "false close" from a
-    # single-store search. Mirrored by hand into agents/mayor-thread/agent.toml
-    # (append_fragments) — there is no propagation between the two.
+    # single-store search.
     "bead-disposition",
     "operator-next-step-trailing",
     # Feedback-learning capture: file corrective feedback as observation
@@ -180,15 +178,17 @@ inject_fragments_append = [
     #
     # The omission was not an oversight about this one name. The set of agents
     # that carry this fragment was derived from "which roles does the operator
-    # converse with", and agents/mayor-thread/PROVENANCE.md wrote that reading
+    # converse with", and the pack's own agent provenance wrote that reading
     # down as fact — "deacon, witness and refinery … are patrol / automation
-    # roles, not operator-facing". That is the right test for whether a role
-    # deserves an operator-spawnable THREAD. It is the wrong test for this
-    # fragment, whose trigger is whether a human reads the agent's prose as a
-    # report. The refinery is precisely where the two tests diverge: nobody
-    # holds a sitting with it, and it still writes straight into the operator's
-    # attention (pane narration, escalations, and `gc.routed_to=human` on the
-    # beads it parks).
+    # roles, not operator-facing" (it lived in a PROVENANCE.md under the
+    # thread agents, removed with them in tk-5savt and still readable in git
+    # history). That is the right test for
+    # whether a role deserves an operator-spawnable sitting. It is the wrong
+    # test for this fragment, whose trigger is whether a human reads the
+    # agent's prose as a report. The refinery is precisely where the two tests
+    # diverge: nobody holds a sitting with it, and it still writes straight
+    # into the operator's attention (pane narration, escalations, and
+    # `gc.routed_to=human` on the beads it parks).
     #
     # doctor/check-operator-next-step-wiring now holds the corrected
     # classification for every agent in the pack and fails closed on an
