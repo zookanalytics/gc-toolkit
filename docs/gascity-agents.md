@@ -8,8 +8,8 @@ description: Reference for the agent variants Gas City supports — identity mod
 This doc is the single-page reference for the agent *variants*
 Gas City supports, and the contracts for addressing, spawning,
 terminating, and routing work to each. Upstream Gas City tutorials
-([02-agents](https://docs.gascityhall.com/tutorials/02-agents),
-[03-sessions](https://docs.gascityhall.com/tutorials/03-sessions))
+([02-agents](https://docs.gascity.com/tutorials/02-agents),
+[03-sessions](https://docs.gascity.com/tutorials/03-sessions))
 introduce the primitives. This doc consolidates the variants and
 the corners that show up only when you mix them — `[[named_session]]`
 duplicates, pool routing vs. assignee routing, thread instances vs.
