@@ -170,6 +170,30 @@ overlay_dir = "overlays/work-context"
 name = "refinery"
 inject_fragments_append = [
     "layered-startup-discovery-refinery",
+    # The refinery holds the human-approval merge gate, so its entire subject
+    # matter is work that is waiting on the operator — and it went the whole
+    # life of the rule without receiving it. On 2026-08-13 the gascity refinery
+    # spent ~7h escalating twice and re-narrating the clock over a queue whose
+    # only content was PRs awaiting the operator's own approval: exactly the
+    # behaviour of an agent that has never been told this is not reportable
+    # (tk-l1pj6).
+    #
+    # The omission was not an oversight about this one name. The set of agents
+    # that carry this fragment was derived from "which roles does the operator
+    # converse with", and agents/mayor-thread/PROVENANCE.md wrote that reading
+    # down as fact — "deacon, witness and refinery … are patrol / automation
+    # roles, not operator-facing". That is the right test for whether a role
+    # deserves an operator-spawnable THREAD. It is the wrong test for this
+    # fragment, whose trigger is whether a human reads the agent's prose as a
+    # report. The refinery is precisely where the two tests diverge: nobody
+    # holds a sitting with it, and it still writes straight into the operator's
+    # attention (pane narration, escalations, and `gc.routed_to=human` on the
+    # beads it parks).
+    #
+    # doctor/check-operator-next-step-wiring now holds the corrected
+    # classification for every agent in the pack and fails closed on an
+    # unclassified one, so the next agent cannot inherit the same silence.
+    "operator-next-step-trailing",
 ]
 # Deterministic cycle-recycle (see deacon patch above).
 overlay_dir = "overlays/cycle-recycle"
