@@ -1786,7 +1786,7 @@ grep -q 'pr view.*polecat/tp-pre' "$TMP/ghlog" 2>/dev/null \
 # it open. Every later pass finds it, counts the gate as covered by a review nobody
 # can claim, and never mints a replacement — the armed gate holds the merge forever
 # while the dispatch counter says a signoff went out.
-reuse_run() { # <reviews-fixture> <revmeta-fixture> [revshowfail] -> OUT
+reuse_run() { # <reviews-fixture> <revmeta-fixture> [revshowfail] [dropkey] -> OUT
   cat > "$TMP/anchors" <<'A'
 bead-REUSE|pull_request|EMPTY|431|polecat/feat-reuse|main||
 A
@@ -1794,12 +1794,23 @@ A
   : > "$TMP/stampfail"; : > "$TMP/closed"
   printf '%s' "$1" > "$TMP/reviews"
   printf '%s' "$2" > "$TMP/revmeta"
-  FAKE_REVSHOWFAIL="${3:-}" bash "$SCRIPT" \
+  # [dropkey] is the same one-key write-drop $FAKE_DROPKEY models for the dispatch
+  # (route_run): the repair paths write the route in one update whose halves persist
+  # independently, so a repair that reports success without reading BOTH back is the
+  # same unverified write, one arm further along.
+  FAKE_REVSHOWFAIL="${3:-}" FAKE_DROPKEY="${4:-}" bash "$SCRIPT" \
     --default 'codex' \
     --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' \
     --fix-pool 'gc-toolkit/gc-toolkit.polecat' 2>&1
 }
 POOL_C='gc-toolkit/gc-toolkit.polecat-codex'
+# Did the run record this exact <id, key, value> in the review ledger? Field-split on
+# the recorded TSV rather than matching a line, so a value that itself contains
+# whitespace cannot be read as a match on a shorter one.
+revmeta_is() { # <review-id> <key> <value>
+  awk -F'\t' -v i="$1" -v k="$2" -v v="$3" \
+    '$1==i && $2==k && $3==v {found=1} END {exit !found}' "$TMP/revmeta" 2>/dev/null
+}
 
 # (REUSE-INERT) the review exists, is open, and is offered to NOBODY: no
 # gc.routed_to, no assignee, no durable copy. Believing it holds the gate forever.
@@ -1863,6 +1874,82 @@ hasin "$OUT5K" '0 signoffs dispatched' \
 [ -s "$TMP/closed" ] \
   && bad "(REUSE-UNREADABLE) an unreadable review must never be closed" \
   || ok "(REUSE-UNREADABLE) the unreadable review is left exactly as it was"
+
+# --- Run 5d: the STRANDED-signoff fast path writes BOTH halves of the route
+#     (review tk-8x7mv P1). --------------------------------------------------------
+# `repair_review_routing` runs BEFORE the reuse validation above and `continue`s on
+# success, so nothing downstream ever sees what it leaves behind. It wrote
+# `gc.routed_to` alone — the only write site in this script that wrote one half of
+# the pair — and that reads as harmless, because the review IS claimable when the
+# pass ends.
+#
+# It strands on the NEXT step. A claim consumes `gc.routed_to`, so the repair
+# predicate (open + unclaimed + unrouted) stops matching and no later pass looks at
+# the bead again; `review_pool` is the only field left that says which pool the
+# review came from, and it is absent. The first signoff that ends with the gate
+# UNRECORDED then releases the review open, unassigned and in NO pool — offered to
+# nobody, gate armed, owed by nobody. The repair rebuilds the exact silent hold the
+# repair exists to end, which is why the cases below assert the PAIR and not just
+# reachability.
+#
+# (STRANDED-PAIR) both halves absent on a bead `bd show` reads as a review for THIS
+# anchor: the one shape the fast path claims.
+OUT5L="$(reuse_run 'rev-stranded|bead-REUSE|431
+' $'rev-stranded\ttask_kind\treview\nrev-stranded\tanchor_bead\tbead-REUSE\n')"
+hasin "$OUT5L" 'had a STRANDED signoff rev-stranded' \
+  && ok "(STRANDED-PAIR) a stranded signoff is answered by the fast path, not by the reuse arm" \
+  || bad "(STRANDED-PAIR) the fast path must repair the stranded review (got: $OUT5L)"
+revmeta_is 'rev-stranded' 'gc.routed_to' "$POOL_C" \
+  && ok "(STRANDED-PAIR) the live offer is restored" \
+  || bad "(STRANDED-PAIR) the repair must re-offer the review (revmeta: $(cat "$TMP/revmeta"))"
+revmeta_is 'rev-stranded' 'review_pool' "$POOL_C" \
+  && ok "(STRANDED-PAIR) and the DURABLE copy is written with it — the claim eats the live half, and this is the only field a signoff can restore the route from" \
+  || bad "(STRANDED-PAIR) review_pool must be written alongside gc.routed_to (revmeta: $(cat "$TMP/revmeta"))"
+hasin "$OUT5L" '1 signoffs dispatched' \
+  && ok "(STRANDED-PAIR) a verified repair counts as the dispatch it is" \
+  || bad "(STRANDED-PAIR) the repaired signoff must count as dispatched (got: $OUT5L)"
+[ -s "$TMP/closed" ] \
+  && bad "(STRANDED-PAIR) a stranded review is repaired in place, never closed" \
+  || ok "(STRANDED-PAIR) the review is repaired in place, not closed"
+
+# (STRANDED-PAIR-OPERATOR) the same stranded shape, except the durable copy names a
+# DIFFERENT pool. `review_pool` is never consumed, so a non-empty value is somebody's
+# deliberate route — an operator's re-route, or the pool an earlier pass dispatched
+# to — while `--review-pool` is only what this invocation was handed. Stamping the
+# default over it SPLITS the route (durable copy A, live offer B), which is the shape
+# `route_ok` rejects as unverified: pool A is woken with nothing to claim while pool B
+# is offered a review minted for A. Same precedence, same reason, as the INERT
+# re-offer's `${REUSE_POOL:-$REVIEW_POOL}` above.
+POOL_OP='other-rig/other.polecat-codex'
+OUT5M="$(reuse_run 'rev-stranded-op|bead-REUSE|431
+' $'rev-stranded-op\ttask_kind\treview\nrev-stranded-op\tanchor_bead\tbead-REUSE\nrev-stranded-op\treview_pool\t'"$POOL_OP"$'\n')"
+revmeta_is 'rev-stranded-op' 'gc.routed_to' "$POOL_OP" \
+  && ok "(STRANDED-PAIR-OPERATOR) a stranded review is re-offered through the pool its durable copy names" \
+  || bad "(STRANDED-PAIR-OPERATOR) the operator's pool must win over this pass's default (revmeta: $(cat "$TMP/revmeta"))"
+revmeta_is 'rev-stranded-op' 'gc.routed_to' "$POOL_C" \
+  && bad "(STRANDED-PAIR-OPERATOR) the live offer must not be split away from the durable copy" \
+  || ok "(STRANDED-PAIR-OPERATOR) the route is not split — nothing is offered to this pass's default pool"
+hasin "$OUT5M" "re-routed to $POOL_OP" \
+  && ok "(STRANDED-PAIR-OPERATOR) and the pass names the pool that now holds the offer" \
+  || bad "(STRANDED-PAIR-OPERATOR) the log (and the wake) must name the pool actually routed to (got: $OUT5M)"
+
+# (STRANDED-PAIR-UNVERIFIED) the pair goes out in ONE update whose halves persist
+# independently — the same transient the dispatch's read-back exists to catch. Here
+# the DURABLE half is dropped. Reporting success on it would `continue` past the only
+# block that can still restore that half, leaving the missing-review_pool strand
+# behind while the counter says a signoff went out. So the repair must fail its
+# read-back, fall through, and let the reuse arm say what is wrong.
+OUT5N="$(reuse_run 'rev-halfwrite|bead-REUSE|431
+' $'rev-halfwrite\ttask_kind\treview\nrev-halfwrite\tanchor_bead\tbead-REUSE\n' '' 'review_pool')"
+hasin "$OUT5N" 'had a STRANDED signoff rev-halfwrite' \
+  && bad "(STRANDED-PAIR-UNVERIFIED) a half-landed repair must not be reported as a re-route" \
+  || ok "(STRANDED-PAIR-UNVERIFIED) the repair reads both halves back and does not claim success on one"
+hasin "$OUT5N" 'DURABLE route copy (review_pool) is missing' \
+  && ok "(STRANDED-PAIR-UNVERIFIED) it falls through to the reuse arm, which reports the missing durable copy" \
+  || bad "(STRANDED-PAIR-UNVERIFIED) the unrestorable durable copy must be WARNed about (got: $OUT5N)"
+hasin "$OUT5N" '0 signoffs dispatched' \
+  && ok "(STRANDED-PAIR-UNVERIFIED) an unverified repair is not counted as a dispatch" \
+  || bad "(STRANDED-PAIR-UNVERIFIED) must not count a repair whose route did not verify (got: $OUT5N)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -636,9 +636,34 @@ inflight_for() { # <anchor-id> <pr-number> <branch> <anchor-repo-q>
 # re-route is verified for the same reason the original write now is: an unverified
 # repair of an unverified write repairs nothing.
 #
-# Returns 0 only if a stranded review was found AND is now routed.
+# Returns 0 only if a stranded review was found AND is now routed — through BOTH
+# halves of the route, verified by reading them back (review tk-8x7mv P1).
+#
+# THE REPAIR WRITES THE SAME PAIR EVERY OTHER PATH WRITES. It used to set
+# `gc.routed_to` alone, and it is the only write site that did: the dispatch below
+# (and its retry), the INERT re-offer, and the claimed-review restore all stamp
+# `review_pool` with it. A review repaired here therefore came out CLAIMABLE ONCE
+# and with no durable copy — and the fast path returns before the reuse-validation
+# block that would have restored it. A claim then consumes `gc.routed_to`, the
+# repair predicate no longer matches (claimed, routed), so nothing repairs the
+# missing half afterwards: the first signoff that ends with the gate UNRECORDED
+# releases the review open, unassigned and in NO pool, and the gate is owed by
+# nobody — the silent hold this whole sweep exists to end.
+#
+# WHICH POOL, when the review already names one: its OWN. `review_pool` is the
+# durable copy, so a non-empty value is somebody's deliberate route (an operator's
+# re-route, or the pool a previous pass dispatched to), and this pass's default is
+# merely what the current invocation was handed. Overwriting it would split the
+# route — durable copy naming A, live offer naming B — which is exactly the shape
+# `route_ok` rejects as unverified: pool A is woken with nothing to claim while
+# pool B is offered a review minted for A. Same precedence, same reason, as the
+# INERT re-offer's `${REUSE_POOL:-$REVIEW_POOL}`. The chosen pool is published in
+# `REPAIR_ROUTE_POOL` (the `CERT_STATE` shape) so the caller wakes, nudges and logs
+# the pool that now holds the offer rather than the one it proposed.
+REPAIR_ROUTE_POOL=""
 repair_review_routing() { # <review-id> <anchor-id> <pool>
-  local rid="$1" aid="$2" pool="$3" rjson
+  local rid="$1" aid="$2" pool="$3" rjson existing target
+  REPAIR_ROUTE_POOL=""
   [ -n "$rid" ] && [ -n "$aid" ] && [ -n "$pool" ] || return 1
   rjson=$(gc bd show "$rid" --json 2>/dev/null | jq -c '.[0] // empty' 2>/dev/null)
   [ -n "$rjson" ] || return 1
@@ -650,9 +675,18 @@ repair_review_routing() { # <review-id> <anchor-id> <pool>
       and ((((.assignee // "") | tostring) | gsub("[[:space:]]"; "")) == "")
       and ((((.status // "") | tostring) | ascii_downcase) == "open")' \
     >/dev/null 2>&1 || return 1
-  gc bd update "$rid" --set-metadata gc.routed_to="$pool" >/dev/null 2>&1
-  [ "$(gc bd show "$rid" --json 2>/dev/null \
-        | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)" = "$pool" ] || return 1
+  existing=$(printf '%s' "$rjson" | jq -r '((.metadata // {}).review_pool // "") | tostring' 2>/dev/null)
+  target="${existing:-$pool}"
+  gc bd update "$rid" \
+    --set-metadata gc.routed_to="$target" \
+    --set-metadata review_pool="$target" >/dev/null 2>&1
+  # Read the route back through the same helper and the same predicate the dispatch
+  # verifies its own write with: an unverified repair of an unverified write repairs
+  # nothing, and "verified" has to mean the same thing at both sites. A failure here
+  # is not a dead end — returning 1 falls through to the reuse-validation block
+  # below, which re-reads the bead and repairs whichever half actually landed.
+  route_ok "$(read_route "$rid")" "$target" || return 1
+  REPAIR_ROUTE_POOL="$target"
   return 0
 }
 
@@ -2757,10 +2791,15 @@ while IFS= read -r row; do
   if [ -n "$EXISTING_REVIEW" ]; then
     if [ "$INFLIGHT_VIA" = "review" ] && [ -n "$REVIEW_POOL" ] \
        && repair_review_routing "$EXISTING_REVIEW" "$id" "$REVIEW_POOL"; then
-      gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
-      gc session nudge "$REVIEW_POOL" "Review bead $EXISTING_REVIEW for anchor $id" >/dev/null 2>&1 || true
+      # The pool the repair actually routed through, which is the review's own
+      # durable copy when it named one. Waking this pass's default instead would
+      # wake a pool with nothing to claim and leave the pool now holding the offer
+      # unnotified — and would say the wrong thing in the log.
+      REPAIR_TARGET="${REPAIR_ROUTE_POOL:-$REVIEW_POOL}"
+      gc session wake "$REPAIR_TARGET" >/dev/null 2>&1 || true
+      gc session nudge "$REPAIR_TARGET" "Review bead $EXISTING_REVIEW for anchor $id" >/dev/null 2>&1 || true
       dispatched=$((dispatched + 1))
-      echo "check-set-heal: $id had a STRANDED signoff $EXISTING_REVIEW (open, unclaimed, UNROUTED — its routing write was lost); re-routed to $REVIEW_POOL rather than counting it in flight"
+      echo "check-set-heal: $id had a STRANDED signoff $EXISTING_REVIEW (open, unclaimed, UNROUTED — its routing write was lost); re-routed to $REPAIR_TARGET rather than counting it in flight"
       continue
     fi
     # VALIDATE THE REUSED ROUTE — do not merely believe the lookup (review tk-tbacg
