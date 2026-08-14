@@ -840,13 +840,20 @@ case "$2" in
     # A review minted this run is not in FAKE_BEADS; serve its recorded metadata.
     # task_kind / gc.routed_to / assignee are the fields the stranded-route repair
     # inspects, so they are served too — last write wins, as the ledger would.
+    #
+    # review_pool with them: it is the DURABLE half of the route, and every write
+    # site stamps the two together, so a stub that recorded one and not the other
+    # would make the read-back see a half-landed write on EVERY repair — a fixture
+    # artefact reported as the failure the read-back exists to catch (review
+    # tk-8x7mv P1).
     if ! awk -F'|' -v i="$id" '$1==i{f=1} END{exit !f}' "$FAKE_BEADS"; then
       rv() { awk -F'\t' -v i="$id" -v k="$1" '$1==i && $2==k{v=$3} END{print v}' "$FAKE_REVMETA" 2>/dev/null; }
-      ab=$(rv anchor_bead); rtk=$(rv task_kind); rrt=$(rv gc.routed_to)
-      jq -nc --arg ab "$ab" --arg tk "$rtk" --arg rt "$rrt" \
+      ab=$(rv anchor_bead); rtk=$(rv task_kind); rrt=$(rv gc.routed_to); rvp=$(rv review_pool)
+      jq -nc --arg ab "$ab" --arg tk "$rtk" --arg rt "$rrt" --arg rp "$rvp" \
         '[{assignee: null, status: "open", metadata: ({}
            + (if $ab == "" then {} else {anchor_bead: $ab} end)
            + (if $tk == "" then {} else {task_kind: $tk} end)
+           + (if $rp == "" then {} else {review_pool: $rp} end)
            + (if $rt == "" then {} else {"gc.routed_to": $rt} end))}]'
       exit 0
     fi
@@ -868,7 +875,7 @@ case "$2" in
     fi
     for k in merge_result merge_result_healed merge_result_heal_flagged \
              merge_result_pr_state pr_number pr_url merged_target check_set check_set_healed \
-             check_set_heal_flagged assignee_noncanonical anchor_bead gc.routed_to \
+             check_set_heal_flagged assignee_noncanonical anchor_bead gc.routed_to review_pool \
              task_kind review_branch reopened_not_landed blocked_reason; do
       if grep -q -- "--set-metadata $k=" <<< "$*"; then
         v=$(printf '%s' "$*" | sed -n "s/.*--set-metadata $k=\\([^ ]*\\).*/\\1/p")
@@ -878,7 +885,7 @@ case "$2" in
         fi
         printf '%s\t%s\t%s\n' "$id" "$k" "$v" >> "$FAKE_STAMPS"
         case "$k" in
-          anchor_bead|gc.routed_to|task_kind|review_branch)
+          anchor_bead|gc.routed_to|review_pool|task_kind|review_branch)
             printf '%s\t%s\t%s\n' "$id" "$k" "$v" >> "$FAKE_REVMETA" ;;
         esac
       fi
