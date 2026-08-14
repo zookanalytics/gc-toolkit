@@ -23,8 +23,9 @@ Definitions:
 The loop, every visit:
 
 1. **Claim.** `gc hook --claim --json` is your only source of work.
-   Work only the bead it returns. Set `SUBJECT` from the claim's
-   `continuation_group`. A claim is authoritative even when it names a
+   Work only the bead it returns. Set `VISIT` to that bead's id and
+   `SUBJECT` from the claim's `continuation_group` — both are used by
+   name below. A claim is authoritative even when it names a
    different subject than your last one — work it the same way.
    Before prepping, check for a concurrent hold on the same subject:
    ```bash
@@ -44,6 +45,32 @@ The loop, every visit:
    group's visit history (`gc bd list` filtered to the group). Then do
    the prep the visit body asks for, so the operator arrives at a
    framed choice.
+
+   **A visit body is written at FILING time, and you are reading it
+   now.** Before you prep, run the re-check its filer left you, if it
+   left one:
+   ```bash
+   # >>> visit-recheck-hook
+   RECHECK=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["visit.recheck"] // ""')
+   if [ -n "$RECHECK" ] && [ -x "$RECHECK" ]; then "$RECHECK" "$VISIT"
+   elif [ -n "$RECHECK" ]; then echo "visit.recheck=$RECHECK is not executable here — the body is UNVERIFIED; re-verify by hand before routing anything"; fi
+   # <<< visit-recheck-hook
+   ```
+   `visit.recheck` is a path to an executable taking the visit bead id
+   as its only argument — a stamp, never a command string to eval, so
+   what runs is a file you can read first.
+   **Its output supersedes the body's lists.** Work from the corrected
+   census and treat the body as provenance. Say in your framing what
+   changed, so the operator sees the correction rather than a silently
+   different list. A body with no such stamp is not thereby fresh —
+   check how old it is before acting on anything time-sensitive in it.
+
+   Why this is mandatory rather than tidy: a liveness-sweep visit
+   measured on 2026-08-13 was claimed ~41.5 hours after its census was
+   cut, and five of its ten candidates had merged AND deployed in the
+   interval — 60% of the body wrong on arrival, its headline P0
+   included. Routing one of those burns a polecat on a no-op, which
+   this scope has already paid for once (bead tk-gvas6).
 4. **Hold.** Stamp what you are waiting for, then post your framing:
    ```bash
    HELM=""

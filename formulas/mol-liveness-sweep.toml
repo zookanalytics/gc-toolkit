@@ -24,6 +24,18 @@ blocks below and executes them, so the delta split, the class filters
 (worked-via-convoy, takeaway, gating state, operator hold) and the
 classify→normalize handoff cannot drift from what an agent actually runs.
 
+The visit body is a SNAPSHOT of the pass, and a sitting reads it whenever
+the visit is claimed — a day or more later, by which time a routed
+candidate may have merged and deployed (bead tk-gvas6: 60% of one body
+was wrong on arrival, its headline P0 included). So the pass stamps the
+census as machine state on the visit — `sweep.new_ids`,
+`sweep.carried_ids`, `sweep.pass_at`, and a `visit.recheck` naming
+`assets/scripts/liveness-recheck.sh` — and the claim-time re-check
+re-derives every listed id's class from two batched reads. The census the
+sitting works from is therefore current; the body is its provenance.
+`assets/scripts/liveness-recheck.test.sh` pins that seventh marked block
+and the re-check itself.
+
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
 Fired by orders/liveness-sweep.toml on cooldown.
@@ -61,6 +73,10 @@ Never normalize on partial data.** (Torn reads under concurrent writes
 are a known transient, so an aborted pass is correct, not alarming.)
 
 ```bash
+# The census CUT. Everything below is true as of this instant and of no other,
+# and the visit that carries it is read a day or more later — so the moment is
+# stamped and travels with the census (bead tk-gvas6).
+PASS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 LIVE=$(mktemp); READY=$(mktemp); WIDEN=$(mktemp); ALIVE=$(mktemp)
 gc bd list --status=open,in_progress --json --limit=0 > "$LIVE"
 gc bd ready --unassigned --limit=0 --json > "$READY"
@@ -551,7 +567,12 @@ EDGE_DROPS_JSON=$(jq -R . < "$DROPS_TMP" | jq -sc 'map(select(length > 0))')
 SURVIVORS=$(printf '%s' "$CANDIDATES" | jq -c --argjson drop "$EDGE_DROPS_JSON" 'map(select(.id as $i | ($drop | index($i)) | not))')
 printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null || { echo "stamp-handoff: SURVIVORS is not a JSON array — do not close this step" >&2; exit 1; }
 [ -n "$ROOT" ] || { echo "stamp-handoff: no gc.root_bead_id resolved — cannot hand off to normalize" >&2; exit 1; }
-gc bd update "$ROOT" --set-metadata "sweep.candidates=$SURVIVORS" --set-metadata "sweep.pr_liveness=$PR_LIVENESS" --set-metadata "sweep.convoy_liveness=$CONVOY_LIVENESS" --set-metadata "sweep.classify_outcome=pass" || { echo "stamp-handoff: failed to stamp root $ROOT — do not close this step" >&2; exit 1; }
+# The cut travels with the census. Fall back to now only if the opening block's
+# capture did not survive a restart — a slightly-late cut still measures the
+# right thing, an ABSENT one leaves the sitting unable to tell a fresh body from
+# a two-day-old one.
+PASS_AT="${PASS_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+gc bd update "$ROOT" --set-metadata "sweep.candidates=$SURVIVORS" --set-metadata "sweep.pr_liveness=$PR_LIVENESS" --set-metadata "sweep.convoy_liveness=$CONVOY_LIVENESS" --set-metadata "sweep.pass_at=$PASS_AT" --set-metadata "sweep.classify_outcome=pass" || { echo "stamp-handoff: failed to stamp root $ROOT — do not close this step" >&2; exit 1; }
 # <<< stamp-handoff
 ```
 
@@ -592,6 +613,7 @@ CLASSIFY_OUTCOME=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.classify_outcome"] 
 CANDIDATES=$(printf '%s' "$ROOTMETA" | jq -c '.["sweep.candidates"] // empty | (if type == "string" then fromjson else . end)' 2>/dev/null || true)
 PR_LIVENESS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.pr_liveness"] // "unverified"')
 CONVOY_LIVENESS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.convoy_liveness"] // "unverified"')
+PASS_AT=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.pass_at"] // ""')
 if [ "$CLASSIFY_OUTCOME" != "pass" ]; then HANDOFF_STATE=classify-failed
 elif [ -z "$CANDIDATES" ] || ! printf '%s' "$CANDIDATES" | jq -e 'type == "array"' >/dev/null 2>&1; then HANDOFF_STATE=unreadable
 else HANDOFF_STATE=ok; fi
@@ -623,7 +645,9 @@ fi
 computed it — the same variable steps 2–5 already consume, unchanged.
 `$PR_LIVENESS` and `$CONVOY_LIVENESS` are the words classify recorded; both
 default to `unverified` if somehow unset — the report-don't-hide bias this
-whole file is built on.
+whole file is built on. `$PASS_AT` is the census CUT — the instant everything
+in `$CANDIDATES` was last true — and step 4 stamps it on the visit so the
+sitting can measure the body's age instead of guessing it.
 
 **1. Build the live listing fresh, then resolve the standing triage
 subject.** Unlike the survivor set, `$LIVE` is a point-in-time read that is
@@ -707,7 +731,9 @@ one re-listing; taking it loses the bead.
 **4. Otherwise, if anything is NEW, file ONE visit.** Zero new candidates
 → file nothing and go to step 5, even when `$CARRIED_COUNT` is large: a
 stable population is not news, and an empty board is success either way.
-The body reports the delta:
+The body reports the delta, under a first line that says what it is —
+a snapshot of `$PASS_AT`, re-checkable with the command step 4a stamps
+(the sitting reads this body a day or more from now; see 4a):
 
 - **New this pass** — the sitting's actual agenda. Enumerate up to
   {{list_cap}} individually, one line each: `id — title — why it reads
@@ -777,6 +803,63 @@ gc bd dep add "$VISIT" "$SWEEP_SUBJECT" --type=tracks
 # the beads that most need conversation.
 # <<< gate-visit
 ```
+
+**4a. Stamp the census so it can be RE-CHECKED at claim time.** The body you
+just wrote is a snapshot of `$PASS_AT`, and the sitting reads it whenever the
+visit is claimed — routinely a day or more later. Measured on visit 8 of
+tk-hok6w (visit tk-3qeq0, bead tk-gvas6): the pass cut at 2026-08-12T00:10Z,
+the sitting read it ~41.5 hours later, and FIVE of the ten new candidates had
+merged AND deployed in between (tk-1u8mi #316, tk-7g37t #322, tk-xesf6 #325,
+tk-5ttye #328, tk-pe1hd #332 — the headline P0). Three of the five closed
+within two and a half hours of the pass, so the body was already half wrong
+long before anyone opened it. 60% of that body was wrong on arrival, including
+the three items it called "worth deciding first".
+
+Naming the timestamp in the body does not fix this — that body already did.
+The fix is that the ids leave here as MACHINE state, so a claim-time re-read
+is one command rather than a prep budget: `assets/scripts/liveness-recheck.sh`
+re-derives every listed id's class from two batched reads and prints a
+corrected census — measured on that pass's 115 ids, 0.34s of query time and
+1.8s wall. The sweep itself is unchanged: the re-check runs later, when the
+answer is still true.
+
+```bash
+# >>> visit-recheck-stamp
+# The id lists as machine state. Nothing should ever have to parse ids back out
+# of the prose body, which is exactly the fragility the survivor handoff removed
+# one step upstream (bead tk-7uvm9).
+NEW_IDS_CSV=$(printf '%s' "$NEW" | jq -r 'map(.id) | join(",")')
+CARRIED_IDS_CSV=$(printf '%s' "$CARRIED" | jq -r 'map(.id) | join(",")')
+# The script is SEARCHED for, never assumed: this sweep runs in every importer
+# rig, and $GC_RIG_ROOT there is a rig with no assets/ at all (the same search
+# the converse prompt performs for gc-helm.sh, for the same reason).
+RECHECK_SH=""
+for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  if [ -x "$cand/assets/scripts/liveness-recheck.sh" ]; then RECHECK_SH="$cand/assets/scripts/liveness-recheck.sh"; break; fi
+done
+gc bd update "$VISIT" --set-metadata "sweep.new_ids=$NEW_IDS_CSV" --set-metadata "sweep.carried_ids=$CARRIED_IDS_CSV" --set-metadata "sweep.pass_at=$PASS_AT"
+if [ -n "$RECHECK_SH" ]; then
+  gc bd update "$VISIT" --set-metadata "visit.recheck=$RECHECK_SH"
+else
+  echo "WARN: no liveness-recheck.sh on any candidate root — the visit carries its id lists but NO runnable re-check; say so at the top of the body so the sitting knows to verify by hand" >&2
+fi
+# <<< visit-recheck-stamp
+```
+
+`visit.recheck` is the generic handle, not a sweep-private one: it says "this
+visit's body is a snapshot — run this before acting on it", and the converse
+loop runs it during prep for any visit that carries one
+(`agents/converse/prompt.template.md`, step 3). Its contract is a PATH to an
+executable taking the visit bead id as its only argument — never a command
+string, so what the sitting runs is a file it can read first. The two id lists
+and `sweep.pass_at` are this sweep's payload for it.
+
+**The body must say so too, in its first line** — the stamp is what makes the
+re-check mechanical, and the line is what makes it legible to a sitting whose
+prompt is a version behind:
+
+> Census cut `$PASS_AT` — a snapshot, not the board. Re-check before acting:
+> `<the visit.recheck value> <this visit's id>`
 
 **5. Advance the baseline to the CURRENT candidate set** — reached only
 from step 4 (visit filed, or nothing new to file), never from the step-3

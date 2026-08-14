@@ -43,6 +43,33 @@ description: Implementation spec for the three pieces that realize P3 and the ba
 > a purely strategic change that moves no ids — the operator files that
 > visit by hand.
 
+> **Staleness addendum (2026-08-14, bead tk-gvas6):** §2's visit body is
+> a SNAPSHOT of the pass, and the sitting reads it whenever the visit is
+> claimed. Measured on visit 8 of tk-hok6w (visit tk-3qeq0): the pass cut
+> 2026-08-12T00:10Z, the sitting read it ~41.5 hours later, and five of
+> the ten new candidates had merged AND deployed in between (#316, #322,
+> #325, #328, #332 — the last one the headline P0). 60% of that body was
+> wrong on arrival, including all three items it called "worth deciding
+> first"; three of the five had closed within two and a half hours of the
+> pass. A sitting that TRUSTS such a body routes already-merged work and
+> burns a polecat on a no-op, which this scope had already paid for once
+> (visit 4 routed tk-yjtf, closed as a no-op 30 minutes later). The
+> implementation now re-validates at CLAIM time rather than narrowing the
+> window: the pass stamps the census as machine state on the visit
+> (`sweep.new_ids`, `sweep.carried_ids`, `sweep.pass_at`) plus a
+> `visit.recheck` path, and `assets/scripts/liveness-recheck.sh`
+> re-derives every listed id's class from two batched reads (0.34s for
+> that pass's 115 ids). The sweep's classification is unchanged. Naming
+> the timestamp in the body was considered and rejected — that body
+> already named it. Two properties are load-bearing and pinned by
+> `assets/scripts/liveness-recheck.test.sh`: the re-check reads BEAD
+> state only, so a `merge_result` marker is flagged rather than acted on
+> (PR liveness is never re-checked here), and every failure path leaves a
+> bead VISIBLE — a re-check that hid a bead on a signal it had not
+> verified would be worse than the staleness, since a hidden bead gets no
+> next pass. `visit.recheck` is a general visit contract, not sweep
+> machinery: any filer whose body can go stale may stamp one.
+
 Realizes P1–P4 ([operating-principles.md](operating-principles.md)) on
 existing patterns only. Three repo pieces, one city-side list, one
 explicitly deferred design. Vehicle per operator discussion: repo pieces

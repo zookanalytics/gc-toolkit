@@ -10,6 +10,16 @@
 # the wisp in every importer), both formulas present with their
 # fail-safe aborts and marked gate-visit copies.
 #
+# It also guards the CLAIM-TIME re-check (bead tk-gvas6), because that
+# half fails silently in a way the others do not: a sweep with no
+# re-check still files a perfectly well-formed visit, and the sitting
+# reads a census that is hours or days out of date without anything
+# saying so. Measured once already — 60% of one body wrong on arrival,
+# five of ten candidates merged AND deployed in the 41.5h between the
+# pass and the sitting. Three pieces, each useless without the others:
+# the script exists and is executable, the sweep stamps the visit, and
+# the converse loop runs the stamp.
+#
 # Exit codes: 0=OK, 1=Warning, 2=Error
 # stdout: first line=message, rest=details
 
@@ -44,13 +54,35 @@ check_formula() { # file
     fi
 }
 
+check_recheck() {
+    local s="$dir/assets/scripts/liveness-recheck.sh"
+    local f="$dir/formulas/mol-liveness-sweep.toml"
+    local p="$dir/agents/converse/prompt.template.md"
+    if [ ! -s "$s" ]; then
+        errors+=("missing the claim-time re-check: assets/scripts/liveness-recheck.sh")
+    elif [ ! -x "$s" ]; then
+        # The converse hook guards on -x, so a non-executable copy is not a
+        # loud failure — it is a re-check that silently never runs.
+        errors+=("assets/scripts/liveness-recheck.sh is not executable — the converse hook's -x guard would skip it in silence")
+    fi
+    [ -s "$f" ] && { grep -q '# >>> visit-recheck-stamp' "$f" \
+        || errors+=("formulas/mol-liveness-sweep.toml: no marked visit-recheck-stamp block — visits would ship with no re-checkable id lists"); }
+    if [ -s "$p" ]; then
+        grep -q 'visit.recheck' "$p" \
+            || errors+=("agents/converse/prompt.template.md: no visit.recheck hook — nothing runs the re-check at claim time")
+    else
+        errors+=("missing agents/converse/prompt.template.md")
+    fi
+}
+
 check_order "liveness-sweep" "mol-liveness-sweep"
 check_order "triage-recurrence" "mol-triage-recurrence"
 check_formula "mol-liveness-sweep.toml"
 check_formula "mol-triage-recurrence.toml"
+check_recheck
 
 if [ "${#errors[@]}" -eq 0 ]; then
-    echo "OK: liveness sweep + triage recurrence wired (orders bare-pool/rig-scope; formulas fail-safe with marked gate-visit copies)"
+    echo "OK: liveness sweep + triage recurrence wired (orders bare-pool/rig-scope; formulas fail-safe with marked gate-visit copies; claim-time re-check shipped, stamped and hooked)"
     exit 0
 fi
 echo "liveness machinery mis-wired: ${#errors[@]} problem(s)"
