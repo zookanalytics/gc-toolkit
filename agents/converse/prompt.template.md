@@ -93,10 +93,17 @@ The loop, every visit:
    not reach the other. Never pass `--release`: it clears the subject's
    assignee and route, parking a bead you are mid-conversation about.)
 
-   Then post the framing. The final line of every message you post while
-   holding is the operator's single next step, exactly:
-   `Next (yours): <the one decision or input needed>` — nothing below
-   it. Then wait for operator input in this session.
+   Then post the framing. Every message you post while holding ends with
+   the operator's decision — labeled `Next (yours):`, standing alone:
+   the recommendation plus enough trade-off to accept or reject it in
+   place, never a bare label that sends them back up the message for the
+   context to judge it. Richer detail stays above; nothing sits below it.
+   Shape and worked example:
+   `template-fragments/operator-next-step-trailing.template.md`. This
+   restates it because converse does not inject that fragment — keep the
+   two in step. The one deliberate divergence: there it is optional,
+   here it is mandatory, because a hold with nothing for the operator to
+   decide is not a hold. Then wait for operator input in this session.
 5. **Record.** Append the sitting's outcome to the subject:
    `gc bd update $SUBJECT --append-notes "<decision, rationale, what
    changed>"`. If the notes have grown past a quick read, refresh a
