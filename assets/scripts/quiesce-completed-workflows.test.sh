@@ -149,6 +149,33 @@ mkdir -p "$TMP/bin"
 #              leftover from an earlier claim -> fail closed, left alone.
 # root-NOSESS: anchor held under a session name it does not record -> nothing to
 #              compare -> fail closed, left alone.
+# root-REWORK: a REWORK molecule (tk-8m8d4) — materialized at 19:16:41 against an
+#              anchor this pass had already dated terminal at 19:00. The anchor's
+#              `pull_request` belongs to the round being reworked, so the molecule
+#              standing in front of it is LIVE -> left alone. Modeled on the live
+#              strip: signal-loom sl-xhfl / step sl-um8j / anchor sl-ew4w, PR #533.
+# root-PREDATE: the converse control — a stamp is PRESENT but the molecule predates
+#              it, which is every ordinary husk once an episode has been dated. It
+#              must still quiesce, or guard 1 would degrade into "any stamped anchor
+#              is off limits" and the pass would stop working after its first pass.
+# root-BADTS : a stamp and a created_at that cannot be compared (unparseable) ->
+#              fail closed, skipped, counted unresolved. Its anchor is terminal and
+#              un-advanced, so the timestamps are the only thing holding it back.
+# root-MIDFLIGHT: the anchor went terminal MID-FLIGHT (tk-8m8d4). A mol-scoped-work
+#              graph is driven one step at a time, and its anchor is stamped at the
+#              submit step while `cleanup-worktree` still has to run. 4 closed steps
+#              say the graph is moving -> left alone. De-routing this step is what
+#              stranded sl-jnjd's root (its cleanup-worktree.attempt.1, sl-wmf1).
+# root-CLOSED: (see above) also carries 3 closed steps, which makes it guard 2's
+#              exemption as well: `closed` and `merged` are the two anchor states no
+#              live molecule wears, and a husk can ACQUIRE a closed step when
+#              somebody closes one by hand to stop the churn.
+# root-CLOSEDFAIL: the closed-step listing FAILS to answer -> fail closed, skipped.
+#              An unreadable listing must never pass for "closed nothing", which is
+#              the husk signature itself.
+# root-STAMPFAIL: the anchor stamp write is refused. That is bookkeeping, not the
+#              verdict — the molecule predates `now` either way — so the pass warns
+#              and quiesces anyway rather than stranding a husk over a failed write.
 # root-RECLAIMROUTED / root-HELDSESS: the INTERSECTION of the park predicate
 #              (tk-rlm94) and the re-claim predicate (tk-nv3qr). The two clauses were
 #              written in parallel against the same function and both wanted $4, so
@@ -182,34 +209,61 @@ s-stale|mol-polecat-work.load-context|root-STALE|gc-toolkit/gc-toolkit.polecat|g
 s-nosess|mol-polecat-work.load-context|root-NOSESS|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-anon|in_progress
 s-reclaimrouted|mol-polecat-work.load-context|root-RECLAIMROUTED|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rrold|in_progress
 s-heldsess|mol-polecat-work.load-context|root-HELDSESS|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-hsmol|in_progress
+s-rework|mol-scoped-work.workspace-setup|root-REWORK|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-vge0|in_progress
+s-predate|mol-polecat-work.load-context|root-PREDATE|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-pre|in_progress
+s-badts|mol-polecat-work.load-context|root-BADTS|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-bad|in_progress
+s-midflight|mol-scoped-work.cleanup-worktree.attempt.1|root-MIDFLIGHT|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-mid|open
+s-closedfail|mol-polecat-work.load-context|root-CLOSEDFAIL|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-cf|in_progress
+s-stampfail|mol-polecat-work.load-context|root-STAMPFAIL|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-sf|in_progress
 S
 
-# Roots: root_id|convoy_id|gc.session_name   (root-ORPHAN is deliberately ABSENT
-# from this file — the stub answers "no such bead" for it, which is the whole
+# Roots: root_id|convoy_id|gc.session_name|created_at   (root-ORPHAN is deliberately
+# ABSENT from this file — the stub answers "no such bead" for it, which is the whole
 # point of the fixture; root-NOCONVOY is PRESENT with an empty convoy, which is a
 # different answer and a different verdict). The session is the one the
 # molecule's steps are bound to by
 # gc.session_affinity=require; the older fixtures leave it empty, which is also the
 # shape of a molecule that was never claimed.
+#
+# `created_at` is when the molecule was MATERIALIZED, and guard 1 (tk-8m8d4) reads
+# it against the anchor's `quiesce.terminal_since` stamp. Every pre-existing fixture
+# is dated well before any stamp this pass could write, which is the ordinary case:
+# a molecule poured while its anchor was still live. Only root-REWORK inverts it.
 cat > "$TMP/roots" <<'R'
-root-DONE|convoy-DONE|
-root-LIVE|convoy-LIVE|gc-toolkit__polecat-lx-busy
-root-CLOSED|convoy-CLOSED|
-root-HANDOFF|convoy-HANDOFF|
-root-QUIET|convoy-QUIET|
-root-SCOPED|convoy-SCOPED|
-root-NOREF|convoy-NOREF|
-root-HELD|convoy-HELD|
-root-BARE|convoy-BARE|
-root-ROUTEONLY|convoy-ROUTEONLY|
-root-RECLAIM|convoy-RECLAIM|gc-toolkit__polecat-lx-old
-root-STALE|convoy-STALE|gc-toolkit__polecat-lx-here
-root-NOSESS|convoy-NOSESS|gc-toolkit__polecat-lx-anon
-root-RECLAIMROUTED|convoy-RECLAIMROUTED|gc-toolkit__polecat-lx-rrold
-root-HELDSESS|convoy-HELDSESS|gc-toolkit__polecat-lx-hsmol
-root-NOCONVOY||
-root-READFAIL|convoy-READFAIL|
+root-DONE|convoy-DONE||2026-08-11T06:00:00Z
+root-LIVE|convoy-LIVE|gc-toolkit__polecat-lx-busy|2026-08-11T06:00:00Z
+root-CLOSED|convoy-CLOSED||2026-08-11T06:00:00Z
+root-HANDOFF|convoy-HANDOFF||2026-08-11T06:00:00Z
+root-QUIET|convoy-QUIET||2026-08-11T06:00:00Z
+root-SCOPED|convoy-SCOPED||2026-08-11T06:00:00Z
+root-NOREF|convoy-NOREF||2026-08-11T06:00:00Z
+root-HELD|convoy-HELD||2026-08-11T06:00:00Z
+root-BARE|convoy-BARE||2026-08-11T06:00:00Z
+root-ROUTEONLY|convoy-ROUTEONLY||2026-08-11T06:00:00Z
+root-RECLAIM|convoy-RECLAIM|gc-toolkit__polecat-lx-old|2026-08-11T06:00:00Z
+root-STALE|convoy-STALE|gc-toolkit__polecat-lx-here|2026-08-11T06:00:00Z
+root-NOSESS|convoy-NOSESS|gc-toolkit__polecat-lx-anon|2026-08-11T06:00:00Z
+root-RECLAIMROUTED|convoy-RECLAIMROUTED|gc-toolkit__polecat-lx-rrold|2026-08-11T06:00:00Z
+root-HELDSESS|convoy-HELDSESS|gc-toolkit__polecat-lx-hsmol|2026-08-11T06:00:00Z
+root-NOCONVOY|||2026-08-11T06:00:00Z
+root-READFAIL|convoy-READFAIL||2026-08-11T06:00:00Z
+root-REWORK|convoy-REWORK|gc-toolkit__polecat-lx-ith3|2026-08-11T19:16:41Z
+root-PREDATE|convoy-PREDATE||2026-08-11T06:00:00Z
+root-BADTS|convoy-BADTS||not-a-timestamp
+root-MIDFLIGHT|convoy-MIDFLIGHT||2026-08-11T06:00:00Z
+root-CLOSEDFAIL|convoy-CLOSEDFAIL||2026-08-11T06:00:00Z
+root-STAMPFAIL|convoy-STAMPFAIL||2026-08-11T06:00:00Z
 R
+
+# Closed step beads per root: root_id|count. Guard 2 (tk-8m8d4) reads this as the
+# molecule's own evidence — zero closed steps is the inline-execution husk this
+# pass exists for, more than zero is a graph being driven step by step, whose open
+# steps are pending work rather than husks. Absent from this file = 0, which is
+# what every pre-existing fixture is and must stay.
+cat > "$TMP/closed" <<'X'
+root-MIDFLIGHT|4
+root-CLOSED|3
+X
 
 # Convoys: convoy_id|anchor_id
 cat > "$TMP/convoys" <<'C'
@@ -229,9 +283,24 @@ convoy-NOSESS|anchor-NOSESS
 convoy-RECLAIMROUTED|anchor-RECLAIMROUTED
 convoy-HELDSESS|anchor-HELDSESS
 convoy-READFAIL|anchor-READFAIL
+convoy-REWORK|anchor-REWORK
+convoy-PREDATE|anchor-PREDATE
+convoy-BADTS|anchor-BADTS
+convoy-MIDFLIGHT|anchor-MIDFLIGHT
+convoy-CLOSEDFAIL|anchor-CLOSEDFAIL
+convoy-STAMPFAIL|anchor-STAMPFAIL
 C
 
-# Anchors: anchor_id|status|merge_result|assignee|routed_to|gc.session_name
+# Anchors: anchor_id|status|merge_result|assignee|routed_to|gc.session_name|quiesce.terminal_since
+#
+# The seventh field is guard 1's observation stamp (tk-8m8d4) — when THIS pass
+# first saw the anchor terminal. Empty on most fixtures, which is the un-observed
+# anchor the pass stamps on sight and then quiesces in the same run (no rollout
+# gap). Four fixtures pre-load it, because the comparison it feeds is the whole
+# guard: anchor-REWORK is dated BEFORE its molecule, anchor-PREDATE and
+# anchor-BADTS after it, and anchor-LIVE carries a stamp on an anchor that is no
+# longer terminal, which must be CLEARED so the next terminal episode is dated from
+# its own first sighting rather than inheriting this one's.
 #
 # anchor-LIVE and anchor-HANDOFF are the same shape except for WHO holds them
 # (status=open, merge_result unstamped) — that is the whole discrimination the
@@ -256,22 +325,28 @@ C
 # above are how that is held: no park row records a session, and no re-claim row is
 # blocked or routed. anchor-RECLAIMHELD is the deliberate exception — see below.
 cat > "$TMP/anchors" <<'A'
-anchor-DONE|open|pull_request|||
-anchor-LIVE|open||gc-toolkit__polecat-lx-busy||gc-toolkit__polecat-lx-busy
-anchor-CLOSED|closed||||
-anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery||
-anchor-QUIET|open|pre_open_gate|||
-anchor-SCOPED|open|pre_open_gate|||
-anchor-NOREF|open|pull_request|||
-anchor-HELD|blocked|||human|
-anchor-BARE|blocked||||
-anchor-ROUTEONLY|open|||human|
-anchor-RECLAIM|in_progress||gc-toolkit__polecat-lx-new||gc-toolkit__polecat-lx-new
-anchor-STALE|in_progress||gc-toolkit/gc-toolkit.polecat||gc-toolkit__polecat-lx-ghost
-anchor-NOSESS|in_progress||gc-toolkit__polecat-lx-other||
-anchor-RECLAIMROUTED|in_progress||gc-toolkit__polecat-lx-rr|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rr
-anchor-HELDSESS|blocked|||human|gc-toolkit__polecat-lx-hsanch
-anchor-READFAIL|open|pull_request|||
+anchor-DONE|open|pull_request||||
+anchor-LIVE|open||gc-toolkit__polecat-lx-busy||gc-toolkit__polecat-lx-busy|2026-08-10T00:00:00Z
+anchor-CLOSED|closed|||||
+anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery|||
+anchor-QUIET|open|pre_open_gate||||
+anchor-SCOPED|open|pre_open_gate||||
+anchor-NOREF|open|pull_request||||
+anchor-HELD|blocked|||human||
+anchor-BARE|blocked|||||
+anchor-ROUTEONLY|open|||human||
+anchor-RECLAIM|in_progress||gc-toolkit__polecat-lx-new||gc-toolkit__polecat-lx-new|
+anchor-STALE|in_progress||gc-toolkit/gc-toolkit.polecat||gc-toolkit__polecat-lx-ghost|
+anchor-NOSESS|in_progress||gc-toolkit__polecat-lx-other|||
+anchor-RECLAIMROUTED|in_progress||gc-toolkit__polecat-lx-rr|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rr|
+anchor-HELDSESS|blocked|||human|gc-toolkit__polecat-lx-hsanch|
+anchor-READFAIL|open|pull_request||||
+anchor-REWORK|open|pull_request||||2026-08-11T19:00:00Z
+anchor-PREDATE|open|pull_request||||2026-08-12T00:00:00Z
+anchor-BADTS|open|pull_request||||2026-08-12T00:00:00Z
+anchor-MIDFLIGHT|open|pull_request||||
+anchor-CLOSEDFAIL|open|pull_request||||
+anchor-STAMPFAIL|open|pull_request||||
 A
 
 : > "$TMP/updates"     # one line per update: "<binary> <argv>"
@@ -288,6 +363,21 @@ state_get() {
   else awk -F'|' -v i="$1" '$1==i{print $4"|"$5; exit}' "$FAKE_STEPS"; fi
 }
 state_set() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$FAKE_STATE"; }
+
+# The anchor's guard-1 stamp, same last-write-wins shape. An UNSET stamp has to be
+# representable distinctly from "never written", or a cleared stamp would fall back
+# to the fixture value and the episode-reset path could not be observed at all —
+# hence the __NONE__ sentinel.
+astamp_get() {
+  local cur
+  cur=$(awk -F'\t' -v i="$1" '$1==i{r=$2} END{if(r!="")print r}' "$FAKE_ASTATE" 2>/dev/null)
+  if [ -n "$cur" ]; then
+    [ "$cur" = "__NONE__" ] || printf '%s' "$cur"
+  else
+    awk -F'|' -v i="$1" '$1==i{print $7; exit}' "$FAKE_ANCHORS"
+  fi
+}
+astamp_set() { printf '%s\t%s\n' "$1" "$2" >> "$FAKE_ASTATE"; }
 LIB
 
 # --- gc stub ------------------------------------------------------------------
@@ -300,6 +390,24 @@ case "$1 ${2:-}" in
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
   "bd list")
+    # Guard 2's read (tk-8m8d4): the molecule's CLOSED step beads, listed per root.
+    # Only the length is consumed, so the rows are placeholders — what matters is
+    # that a failed read produces the store's failure shape (non-zero, no stdout)
+    # and NOT an empty array, which is the husk signature itself.
+    case "$*" in
+      *--status=closed*)
+        croot=""
+        for a in "$@"; do
+          case "$a" in "gc.root_bead_id="*) croot="${a#gc.root_bead_id=}" ;; esac
+        done
+        case " ${FAKE_CLOSED_LIST_FAIL:-} " in
+          *" $croot "*) echo "gc bd: store unreachable" >&2; exit 1 ;;
+        esac
+        n=$(awk -F'|' -v r="$croot" '$1==r{print $2; exit}' "$FAKE_CLOSED")
+        [ -n "$n" ] || n=0
+        jq -n --argjson n "$n" '[range(0;$n) | {id: ("c-" + (.|tostring)), status: "closed"}]'
+        exit 0 ;;
+    esac
     out=""
     while IFS='|' read -r id step root routed assignee status; do
       [ -n "$id" ] || continue
@@ -328,17 +436,19 @@ case "$1 ${2:-}" in
     rrow=$(awk -F'|' -v r="$id" '$1==r{print; exit}' "$FAKE_ROOTS")
     convoy=$(printf '%s' "$rrow" | cut -d'|' -f2)
     rsess=$(printf '%s' "$rrow" | cut -d'|' -f3)
+    rcreated=$(printf '%s' "$rrow" | cut -d'|' -f4)
     arow=$(awk -F'|' -v a="$id" '$1==a{print; exit}' "$FAKE_ANCHORS")
     if [ -n "$arow" ]; then
       st=$(printf '%s' "$arow" | cut -d'|' -f2); mr=$(printf '%s' "$arow" | cut -d'|' -f3)
       as=$(printf '%s' "$arow" | cut -d'|' -f4); rt=$(printf '%s' "$arow" | cut -d'|' -f5)
-      an=$(printf '%s' "$arow" | cut -d'|' -f6)
-      jq -n --arg s "$st" --arg m "$mr" --arg a "$as" --arg r "$rt" --arg n "$an" \
+      an=$(printf '%s' "$arow" | cut -d'|' -f6); ts=$(astamp_get "$id")
+      jq -n --arg s "$st" --arg m "$mr" --arg a "$as" --arg r "$rt" --arg n "$an" --arg t "$ts" \
         '[{status:$s, assignee:$a,
-           metadata:{merge_result:$m, "gc.routed_to":$r, "gc.session_name":$n}}]'
+           metadata:{merge_result:$m, "gc.routed_to":$r, "gc.session_name":$n,
+                     "quiesce.terminal_since":$t}}]'
     elif [ -n "$rrow" ]; then
-      jq -n --arg c "$convoy" --arg n "$rsess" \
-        '[{metadata:{"gc.input_convoy_id":$c, "gc.session_name":$n}}]'
+      jq -n --arg c "$convoy" --arg n "$rsess" --arg d "$rcreated" \
+        '[{created_at:$d, metadata:{"gc.input_convoy_id":$c, "gc.session_name":$n}}]'
     else
       # The store's ABSENCE verdict, verbatim: `gc bd show <gone-id> --json`
       # exits non-zero and puts a JSON error ENVELOPE on stdout (an object, not
@@ -352,6 +462,22 @@ case "$1 ${2:-}" in
   "bd update")
     printf 'gc %s\n' "$*" >> "$FAKE_UPDATES"
     id="$3"
+    # Guard 1's observation stamp (tk-8m8d4) — the ONE key this pass may write to an
+    # anchor. Handled before the step-bead paths below so it never touches step
+    # state, and so the (ANCHOR) assertion can hold the line at "this key and
+    # nothing else": any OTHER anchor write would fall through to those paths and be
+    # recorded as a route/assignee clear on a bead that has neither.
+    case "$*" in
+      *"--set-metadata quiesce.terminal_since="*|*"--unset-metadata quiesce.terminal_since"*)
+        case " ${FAKE_ANCHOR_WRITE_FAIL:-} " in
+          *" $id "*) echo "gc bd: update failed for $id: store write refused" >&2; exit 1 ;;
+        esac
+        case "$*" in
+          *"--unset-metadata quiesce.terminal_since"*) astamp_set "$id" "__NONE__" ;;
+          *) v="${*#*--set-metadata quiesce.terminal_since=}"; astamp_set "$id" "${v%% *}" ;;
+        esac
+        exit 0 ;;
+    esac
     # Real wrapper behavior: `gc bd` aborts on --force in its bead-ID safety
     # pre-check ("unrecognized flag in args") and exits 1 — the clear never lands.
     case "$*" in
@@ -429,12 +555,18 @@ chmod +x "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS="$TMP/steps" FAKE_ROOTS="$TMP/roots" FAKE_CONVOYS="$TMP/convoys" \
        FAKE_ANCHORS="$TMP/anchors" FAKE_UPDATES="$TMP/updates" \
-       FAKE_CLEARED="$TMP/cleared" FAKE_STATE="$TMP/state" FAKE_LIB="$TMP/bin/_state.sh"
+       FAKE_CLEARED="$TMP/cleared" FAKE_STATE="$TMP/state" FAKE_LIB="$TMP/bin/_state.sh" \
+       FAKE_CLOSED="$TMP/closed" FAKE_ASTATE="$TMP/astate"
 # Held across EVERY run, not injected into one: a store that cannot answer for a
 # root is a standing condition of the pass, and the fail-closed skip it must
-# produce has to survive each of the failure paths the later runs drive.
+# produce has to survive each of the failure paths the later runs drive. The two
+# tk-8m8d4 failures are the same kind of standing condition, one per guard: a
+# closed-step listing that never answers, and an anchor the stamp cannot be written
+# to.
 export FAKE_GC_SHOW_FAIL="root-READFAIL"
-: > "$TMP/state"
+export FAKE_CLOSED_LIST_FAIL="root-CLOSEDFAIL"
+export FAKE_ANCHOR_WRITE_FAIL="anchor-STAMPFAIL"
+: > "$TMP/state"; : > "$TMP/astate"
 
 # --- Run 0: --dry-run must select the same work but write nothing. ------------
 OUT0="$(bash "$SCRIPT" --dry-run)"
@@ -443,9 +575,16 @@ grep -q '(dry-run)' <<< "$OUT0" \
   && ok "(DRY) summary marks the pass as a dry run" || bad "(DRY) summary marks dry run (got: $OUT0)"
 grep -q 's-affine' <<< "$OUT0" \
   && ok "(DRY) dry run still reports the steps it would quiesce" || bad "(DRY) dry run reports selection"
+# The selection a dry run reports is the one the real pass acts on, guards included
+# — a preview that showed work the pass would not do would be worse than no preview
+# (tk-8m8d4). Both guarded roots are held back here on the FIXTURE stamp, since a
+# dry run writes none of its own.
+grep -qE 's-rework|s-midflight' <<< "$OUT0" \
+  && bad "(DRY) dry run must not list steps the guards hold back (got: $(printf '%s\n' "$OUT0" | grep -E 's-rework|s-midflight' | head -1))" \
+  || ok "(DRY) dry run applies both guards too — its preview matches what the pass would do"
 
 # --- Run 1: the real pass. ----------------------------------------------------
-: > "$TMP/updates"; : > "$TMP/cleared"; : > "$TMP/state"
+: > "$TMP/updates"; : > "$TMP/cleared"; : > "$TMP/state"; : > "$TMP/astate"
 RC1=0
 OUT1="$(bash "$SCRIPT" 2>"$TMP/err1")" || RC1=$?
 ERR1="$(cat "$TMP/err1")"
@@ -716,6 +855,100 @@ grep -q 'root root-READFAIL — ROOT ROW ABSENT' <<< "$OUT1" \
   && bad "(READFAIL) a failed read must not be reported as an absence verdict" \
   || ok "(READFAIL) failed read is not reported as an absent root"
 
+# (REWORK) THE tk-8m8d4 regression. The anchor is terminal, but it was ALREADY
+# terminal when this molecule was materialized — so its `pull_request` is the
+# previous round's, and the molecule in front of it is the REWORK for that very PR.
+# Quiescing it de-routes and un-assigns the frontier step of a live workflow, which
+# is what happened to signal-loom sl-um8j 87 seconds after a polecat claimed it; the
+# molecule never moved again.
+grep -q '^s-rework' "$TMP/cleared" \
+  && bad "(REWORK) must NOT quiesce a molecule materialized AFTER its anchor was already terminal" \
+  || ok "(REWORK) molecule poured against an already-terminal anchor -> left alone (its terminal state is a previous round's)"
+grep -q 'root root-REWORK — anchor anchor-REWORK was ALREADY terminal at 2026-08-11T19:00:00 when this molecule was materialized at 2026-08-11T19:16:41' <<< "$OUT1" \
+  && ok "(REWORK) the verdict names both dates, so the call can be checked by hand" \
+  || bad "(REWORK) postdate verdict reported (got: $(printf '%s\n' "$OUT1" | grep REWORK || echo none))"
+
+# (PREDATE) the converse, and the reason guard 1 is a COMPARISON rather than a
+# presence test: once an episode is dated, every ordinary husk under that anchor is
+# older than the stamp and must still quiesce. Read as "a stamped anchor is off
+# limits", the guard would switch the whole pass off after its first sighting.
+grep -q '^s-predate	routed$' "$TMP/cleared" && grep -q '^s-predate	assignee$' "$TMP/cleared" \
+  && ok "(PREDATE) a molecule OLDER than the stamp still quiesces (the guard compares dates, it does not just look for one)" \
+  || bad "(PREDATE) predating molecule must still be quiesced (got: $(grep '^s-predate' "$TMP/cleared" || echo none))"
+
+# (FIRSTSEEN) an undated terminal anchor is stamped on sight AND swept in the same
+# pass. That is what makes this fix free of a rollout gap: every molecule alive when
+# the stamp lands predates it, so today's population behaves exactly as before and
+# only later-poured molecules are held back.
+grep -q 'gc bd update anchor-DONE --set-metadata quiesce.terminal_since=' "$TMP/updates" \
+  && ok "(FIRSTSEEN) first sighting of a terminal anchor records the date" \
+  || bad "(FIRSTSEEN) terminal anchor must be stamped (got: $(grep 'anchor-DONE' "$TMP/updates" || echo none))"
+grep -q '^s-affine	assignee$' "$TMP/cleared" \
+  && ok "(FIRSTSEEN) and the same pass still quiesces it — the stamp costs no cycle" \
+  || bad "(FIRSTSEEN) stamping must not defer the sweep"
+
+# (EPISODE) a LIVE anchor ends the terminal episode, so its stamp is dropped. Left
+# in place, the NEXT episode — the rework's own PR, after a repool cleared
+# merge_result — would inherit a date from before the rework molecule existed, and
+# guard 1 would wave through precisely the molecule it exists to protect.
+grep -q 'gc bd update anchor-LIVE --unset-metadata quiesce.terminal_since' "$TMP/updates" \
+  && ok "(EPISODE) a stale stamp on a live anchor is cleared, so the next episode is dated from its own first sighting" \
+  || bad "(EPISODE) stale stamp must be cleared on a live anchor (got: $(grep 'anchor-LIVE' "$TMP/updates" || echo none))"
+grep -q '^s-live' "$TMP/cleared" \
+  && bad "(EPISODE) clearing the stamp must not touch the live molecule's steps" \
+  || ok "(EPISODE) the live molecule itself is still left alone"
+
+# (BADTS) fail-closed half of guard 1: two timestamps that cannot be compared are
+# not evidence of anything. Its anchor is terminal and its molecule closed nothing,
+# so the unusable dates are the ONLY thing holding this root back.
+grep -q '^s-badts' "$TMP/cleared" \
+  && bad "(BADTS) unparseable timestamps must never be compared into a quiesce verdict" \
+  || ok "(BADTS) undatable molecule -> skipped (fail closed)"
+grep -q "cannot date the molecule against the anchor" <<< "$ERR1" \
+  && ok "(BADTS) the undatable root is reported on stderr" || bad "(BADTS) undatable root reported"
+
+# (MIDFLIGHT) guard 2: the anchor went terminal WHILE the molecule was still running.
+# mol-scoped-work drives one step at a time and its anchor is stamped at the submit
+# step, with `cleanup-worktree` still to run — de-routing that step is what left
+# sl-jnjd's root unable to close, since the escape path is a chain and protecting
+# only workflow-finalize does not save the links before it.
+grep -q '^s-midflight' "$TMP/cleared" \
+  && bad "(MIDFLIGHT) must NOT de-route a molecule that is still advancing (its teardown steps are pending work)" \
+  || ok "(MIDFLIGHT) anchor terminal mid-flight + closed steps -> left alone"
+grep -q 'root root-MIDFLIGHT — anchor anchor-MIDFLIGHT reads pull_request, but this molecule has closed 4 step(s)' <<< "$OUT1" \
+  && ok "(MIDFLIGHT) the verdict names the state and the evidence that overruled it" \
+  || bad "(MIDFLIGHT) mid-flight verdict reported (got: $(printf '%s\n' "$OUT1" | grep MIDFLIGHT || echo none))"
+
+# (LANDED) guard 2's exemption. `closed` and `merged` are the two anchor states no
+# live molecule wears, so a molecule under one of them is spent whatever its step
+# graph did — and a husk CAN acquire a closed step, when somebody closes
+# load-context by hand to stop the churn. root-CLOSED carries 3 closed steps and
+# must be swept regardless.
+grep -q '^s-closed	routed$' "$TMP/cleared" && grep -q '^s-closed	assignee$' "$TMP/cleared" \
+  && ok "(LANDED) closed anchor -> quiesced even with closed steps (the two unambiguous states are exempt from guard 2)" \
+  || bad "(LANDED) closed-anchor molecule must still be quiesced (got: $(grep '^s-closed' "$TMP/cleared" || echo none))"
+
+# (CLOSEDFAIL) fail-closed half of guard 2. A listing that never ANSWERED must not
+# pass for "closed nothing" — that is the husk signature itself, so keying the guard
+# on a failed read would strip live molecules during exactly the outage that broke
+# the read.
+grep -q '^s-closedfail' "$TMP/cleared" \
+  && bad "(CLOSEDFAIL) an unreadable closed-step listing must never be read as the zero-closed husk signature" \
+  || ok "(CLOSEDFAIL) unreadable closed-step listing -> skipped (fail closed)"
+grep -q 'closed-step listing unreadable' <<< "$ERR1" \
+  && ok "(CLOSEDFAIL) the unreadable listing is reported on stderr" || bad "(CLOSEDFAIL) unreadable listing reported"
+
+# (STAMPFAIL) the stamp is bookkeeping, not the verdict: this molecule predates
+# `now` whether or not the write lands, so a refused stamp must warn and sweep, not
+# strand a husk. The cost of the failure is only that the episode stays undated
+# until a later pass records it.
+grep -q '^s-stampfail	routed$' "$TMP/cleared" && grep -q '^s-stampfail	assignee$' "$TMP/cleared" \
+  && ok "(STAMPFAIL) a refused stamp does not block the sweep" \
+  || bad "(STAMPFAIL) refused stamp must still quiesce (got: $(grep '^s-stampfail' "$TMP/cleared" || echo none))"
+grep -q 'anchor anchor-STAMPFAIL — quiesce.terminal_since stamp failed' <<< "$ERR1" \
+  && ok "(STAMPFAIL) the refused stamp is reported, and says what it costs" \
+  || bad "(STAMPFAIL) refused stamp reported on stderr"
+
 # (NOCLOSE) the DANGER clause: nothing is ever closed and status is never written.
 grep -qE -- '--status|--close|bd close' "$TMP/updates" \
   && bad "(NOCLOSE) pass must never close a step bead or rewrite status" \
@@ -723,13 +956,25 @@ grep -qE -- '--status|--close|bd close' "$TMP/updates" \
 # Static guard: no close/status-write COMMAND may exist in the script at all.
 # Matches invocations only — the header comments legitimately discuss closing,
 # since explaining why this pass must never close is half the point of the file.
-grep -qE -- 'bd close|--status[ =]+closed|--close([ =]|$)' "$SCRIPT" \
+# `bd list` lines are dropped first: `--status=closed` on a LIST is a filter on a
+# read (guard 2 counts the molecule's closed steps that way, tk-8m8d4), and folding
+# a read into a guard about writes would either fail here or push the guard into
+# matching nothing at all.
+SCRIPT_WRITES="$(grep -vE 'bd list' "$SCRIPT")"
+grep -qE -- 'bd close|--status[ =]+closed|--close([ =]|$)' <<< "$SCRIPT_WRITES" \
   && bad "(NOCLOSE) script must contain no close/status-write command" \
   || ok "(NOCLOSE) script contains no bead-close command whatsoever"
 
-# (ANCHOR) the anchor bead itself is never updated.
-grep -qE 'bd update anchor-' "$TMP/updates" \
-  && bad "(ANCHOR) must never write to the anchor" || ok "(ANCHOR) anchor never modified"
+# (ANCHOR) the anchor is written for exactly ONE key and nothing else. Guard 1's
+# observation stamp is the only reason this pass touches an anchor at all
+# (tk-8m8d4); every lifecycle field on a bead sitting in the merge gate — status,
+# assignee, routing, merge_result — stays out of reach, which is what keeps the
+# stamp additive rather than a second writer on gated state.
+ANCHOR_WRITES="$(grep -E 'bd update anchor-' "$TMP/updates" || true)"
+OTHER_ANCHOR_WRITES="$(grep -vE -- '--(set|unset)-metadata quiesce\.terminal_since' <<< "$ANCHOR_WRITES" || true)"
+[ -n "$OTHER_ANCHOR_WRITES" ] \
+  && bad "(ANCHOR) the ONLY anchor write may be the quiesce.terminal_since stamp (got: $(head -1 <<< "$OTHER_ANCHOR_WRITES"))" \
+  || ok "(ANCHOR) anchor written for the terminal_since stamp alone — no status, assignee, route or merge_result"
 
 # (QUIET) an already-quiesced step is counted, not re-updated.
 grep -q '^s-quiet' "$TMP/cleared" \
@@ -739,7 +984,7 @@ grep -q '^s-quiet' "$TMP/cleared" \
 # The orphaned roots are reported in their OWN slot, never folded into the
 # completed count: a molecule whose root was deleted did not complete, and a
 # summary that says it did hides the deletion behind a normal-looking pass.
-grep -q '10 steps quiesced across 9 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 already quiet, 2 unresolved, 0 failed' <<< "$OUT1" \
+grep -q "12 steps quiesced across 11 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 1 still advancing, 1 already quiet, 4 unresolved, 0 failed" <<< "$OUT1" \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 
@@ -747,8 +992,14 @@ eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 : > "$TMP/cleared"; : > "$TMP/updates"
 RC2=0
 OUT2="$(bash "$SCRIPT")" || RC2=$?
-eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" \
-  "(IDEM) second pass issues no updates — quiesced steps stay quiesced"
+eq "$(grep -cvE 'bd update anchor-' "$TMP/updates" | tr -d ' ')" "0" \
+  "(IDEM) second pass issues no step update — quiesced steps stay quiesced"
+# The one write a converged pass may still issue is the guard-1 stamp it could not
+# land last time (anchor-STAMPFAIL): an undated episode is retried every cycle, the
+# same retry-next-patrol shape as a refused route clear. Every OTHER anchor is
+# already dated and is not re-stamped, which is what keeps a converged pass quiet.
+eq "$(grep -cE 'bd update anchor-' "$TMP/updates" | tr -d ' ')" "1" \
+  "(IDEM) the only surviving write is the refused stamp's retry — a dated anchor is never re-stamped"
 grep -q '0 steps quiesced' <<< "$OUT2" \
   && ok "(IDEM) second pass reports nothing left to do" || bad "(IDEM) second-pass summary (got: $(printf '%s' "$OUT2" | tail -1))"
 eq "$RC2" "0" "(IDEM) a no-op pass exits 0"
@@ -758,7 +1009,7 @@ eq "$RC2" "0" "(IDEM) a no-op pass exits 0"
 # the route clear back too, the step stayed fully re-offerable, and the pass still
 # exited 0. Split, the route clear must land anyway — and the pass must say it
 # failed.
-: > "$TMP/cleared"; : > "$TMP/updates"; : > "$TMP/state"
+: > "$TMP/cleared"; : > "$TMP/updates"; : > "$TMP/state"; : > "$TMP/astate"
 RC3=0
 OUT3="$(FAKE_BD_REFUSE="s-affine" bash "$SCRIPT" 2>"$TMP/err3")" || RC3=$?
 ERR3="$(cat "$TMP/err3")"
@@ -778,7 +1029,7 @@ grep -q 's-affine route clear failed' <<< "$ERR3" \
 
 # A partial clear is a failure, never a success: the step still rides the affine
 # hand-back, so counting it quiesced would be the same lie in a new place.
-grep -q '9 steps quiesced across 9 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 already quiet, 2 unresolved, 1 failed' <<< "$OUT3" \
+grep -q "11 steps quiesced across 11 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 1 still advancing, 1 already quiet, 4 unresolved, 1 failed" <<< "$OUT3" \
   && ok "(EXIT) a partially-cleared step counts as failed, not quiesced" \
   || bad "(EXIT) run 3 summary (got: $(printf '%s' "$OUT3" | tail -1))"
 [ "$RC3" -ne 0 ] \
@@ -793,7 +1044,7 @@ grep -q '9 steps quiesced across 9 completed and 1 orphaned (root-deleted) workf
 # a durable state rather than a momentary window, and strictly worse than the
 # assigned+routed husk the pass found. So the assignee half must be SKIPPED, the
 # step left exactly as it was, and the pass must still say it failed.
-: > "$TMP/cleared"; : > "$TMP/updates"; : > "$TMP/state"
+: > "$TMP/cleared"; : > "$TMP/updates"; : > "$TMP/state"; : > "$TMP/astate"
 RC4=0
 OUT4="$(FAKE_GC_REFUSE_ROUTE="s-affine s-pool" bash "$SCRIPT" 2>"$TMP/err4")" || RC4=$?
 ERR4="$(cat "$TMP/err4")"
@@ -829,7 +1080,7 @@ grep -q '^bd update s-pool' "$TMP/updates" \
   && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
   || ok "(ROUTEFAIL) route-only step issues no assignee call"
 
-grep -q '8 steps quiesced across 9 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 already quiet, 2 unresolved, 2 failed' <<< "$OUT4" \
+grep -q "10 steps quiesced across 11 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 1 still advancing, 1 already quiet, 4 unresolved, 2 failed" <<< "$OUT4" \
   && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
   || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
 [ "$RC4" -ne 0 ] \

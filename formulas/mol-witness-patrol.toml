@@ -1401,6 +1401,37 @@ missed:
 The last two are each conjunctions, and in both cases that is what keeps the pass
 fail-closed rather than an accident of how they were written.
 
+**And a terminal anchor is not by itself a dead molecule (tk-8m8d4).** An anchor
+outlives its molecules — the original, then one per rework round — so `merge_result`
+describes the WORK, not the molecule standing in front of it. Read as the latter,
+the pass de-routed and un-assigned the frontier step of a LIVE rework molecule 87
+seconds after a polecat claimed it, and that molecule never moved again (signal-loom
+`sl-xhfl`, anchor `sl-ew4w` wearing `pull_request` from the very PR the rework
+existed to fix). Two guards sit between the verdict above and the sweep, one per
+direction the marker can be wrong in:
+
+| Guard | Holds back | How it knows |
+|---|---|---|
+| 1 — the marker PREDATES the molecule | a rework molecule poured against an anchor that was already terminal | `quiesce.terminal_since` on the anchor: when this pass FIRST saw it terminal. A molecule materialized after that instant cannot have produced that state |
+| 2 — the marker arrived MID-FLIGHT | a step-driven graph whose anchor was stamped at its submit step while its teardown steps still had to run | the molecule's own closed-step count. Zero is the inline-execution husk this pass exists for; more means the graph is being driven step by step |
+
+Guard 1 stamps on first sighting and sweeps in the SAME pass — every molecule alive
+when the stamp lands predates it — so there is no rollout gap and no cycle of delay;
+it protects only molecules poured later, which is the whole population at risk. The
+stamp is cleared when the anchor is next seen non-terminal, so a repool-and-rework
+round is dated from its own first sighting instead of inheriting the previous one's.
+
+Guard 2 exempts `closed` and `merge_result=merged`: those two are the only anchor
+states no live molecule wears, and a husk can ACQUIRE a closed step when somebody
+closes `load-context` by hand to stop the churn. That is the same two-state line
+`detect-stalled-workflows.sh` draws from the other side, and the two passes now
+agree about which anchor states prove anything.
+
+Both fail closed: an undatable molecule, an unparseable stamp or an unreadable
+closed-step listing skips the root, exactly like an unresolved anchor. A refused
+stamp WRITE does not — the molecule predates `now` either way — so the pass warns
+and sweeps rather than stranding a husk over bookkeeping.
+
 Parked is never bare `blocked`: the escalation path sets `blocked` before it
 drains, so a live session is reachable in that state, while `blocked` +
 routed-to-human is only ever written by a pass that has already routed the work
@@ -1414,12 +1445,15 @@ must be non-empty, or the pass declines to guess and leaves the molecule alone.
 The two clauses read different fields and are independent: a re-claimed anchor is
 held by a session and is not parked, and a parked one is held by nobody at all.
 
-It never writes to the anchor, never rewrites `status`, and never
-touches the `workflow-finalize` step — that one keeps its control-dispatcher
-route because it is the molecule's only escape path. An anchor it cannot resolve
-is SKIPPED, deliberately: quiescing a live molecule would strip the assignee off
-steps a running polecat still has to claim, draining it mid-implementation. An
-un-quiesced husk only wastes wisps, which is much the cheaper failure.
+It never rewrites `status`, and never touches the `workflow-finalize` step — that
+one keeps its control-dispatcher route because it is the molecule's only escape
+path. On the anchor it writes exactly one key, guard 1's `quiesce.terminal_since`
+stamp: additive, read by nothing but this pass, and never a lifecycle field, so no
+gated state on a bead sitting in the merge queue is in reach. An anchor it cannot
+resolve is SKIPPED, deliberately: quiescing a live molecule would strip the
+assignee off steps a running polecat still has to claim, draining it
+mid-implementation. An un-quiesced husk only wastes wisps, which is much the
+cheaper failure.
 
 Regression test: `assets/scripts/quiesce-completed-workflows.test.sh` (hermetic,
 stubs `gc` and `bd`, including bd's claim guard; covers both shapes, the split
@@ -1429,9 +1463,15 @@ assignee clear neither rolls back the route clear nor exits 0, the
 re-claimed-anchor predicate together with both of its fail-closed halves — a
 recorded session that is not the current holder, and an anchor recording no
 session at all — the parked predicate with both of ITS halves alone as negative
-controls, and the intersection of the last two: each of them decided by its own
+controls, the intersection of the last two: each of them decided by its own
 clause on an anchor that also carries the other's field, which is what pins the
-argument positions the two landed on).
+argument positions the two landed on — and both tk-8m8d4 guards: the rework
+molecule held back by its date, the ordinary husk that still sweeps once an
+episode is dated, the stamp landing and sweeping in one pass, a stale stamp
+cleared on a live anchor, the mid-flight graph held back by its closed steps, the
+landed anchor exempt from that despite carrying some, each guard's fail-closed
+half, a refused stamp that sweeps anyway, and that the anchor is written for the
+stamp key and nothing else).
 
 **Exit criteria:** Completed-workflow husks quiesced, or none found. Continue to
 `check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is
@@ -1456,7 +1496,7 @@ and a stalled workflow's beads are each individually healthy:
 | mol-liveness-sweep | `gc bd ready` + edge check | a ROOT is blocked by its own workflow-finalize step, so no root is ever a candidate; its STEPS reach the candidate set and are then dropped by class 2(i)(c), because every graph.v2 step `tracks` its still-open root |
 | witness `recover-orphaned-beads` | assignee + dead session | scoped to ASSIGNED beads; a stalled frontier is unassigned |
 | `recover-stranded-branches.sh` | `metadata.branch` | a workflow that stalled before its worktree step pushed nothing |
-| `quiesce-completed-workflows.sh` | the ANCHOR's state | de-routes husks; never asks whether a LIVE workflow is moving |
+| `quiesce-completed-workflows.sh` | the ANCHOR's state, plus its two tk-8m8d4 guards | de-routes husks; asks whether the workflow ADVANCED, never how long ago it last moved — a workflow silent for hours with an un-landed anchor is quiet, not quiesceable |
 | deacon / refinery patrols | session queues, merge queue | a stalled workflow has neither an assignee nor a merge handoff |
 
 Each is right about its own question. The unasked one is whether the workflow is
