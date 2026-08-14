@@ -206,7 +206,7 @@ peek at rest, a live terminal on focus. It attaches to the city's **existing**
 ttyd — this service owns no PTY and spawns no process.
 
 ```
-ttyd -i 127.0.0.1 -p 7681 -b /terminal -W gc session attach <session>
+ttyd -i 127.0.0.1 -p 7681 -b /terminal -W -a <guard script>   # -> gc session attach <session>
 ```
 
 Four things about it are load-bearing.
@@ -250,10 +250,52 @@ was verified end-to-end against a real ttyd wrapping a throwaway tmux session:
 after a clean close the session, its shell, and its ability to run commands all
 survived. See `specs/tk-eemvf.4/decisions.md`.
 
-**One terminal, one session — for now.** The ttyd invocation bakes in a single
-session, so the board attaches to that one target. Per-tile terminals need a
-ttyd or wiring change and are deliberately deferred to the design handoff;
-tracked as `tk-mw9qz`, not absorbed here.
+**One terminal, any session.** The attach target is chosen per connection, not
+baked into the systemd unit (`tk-rbf9r`). ttyd runs with `-a/--url-arg`, which
+appends each `arg` in the socket's query string to the argv of the command it
+spawns, so `…/terminal/ws?arg=<session>` selects what gets attached:
+
+```
+ttyd -i 127.0.0.1 -p 7681 -b /terminal -W -a \
+  <rig>/assets/scripts/gc-terminal-attach.sh
+```
+
+`?session=<name>` on the board's own URL is what puts it there — an operator
+knob in the same family as `?terminal=`, accepting anything `gc session attach`
+names: an id (`lx-k7r38`), an alias (`gc-toolkit/gc-toolkit.witness`), or a
+session name. Naming nothing sends no `arg` and lands on the city default,
+`gc-toolkit.mayor`, which is exactly what this terminal did before.
+
+**`-a` means the URL chooses argv, so a guard is load-bearing.**
+`assets/scripts/gc-terminal-attach.sh` is the only thing between the query
+string and `gc`. It takes at most one argument (ttyd appends *every* `arg=`, so
+a second one is an injection attempt, not a typo), refuses a leading `-`, `..`,
+whitespace and shell metacharacters, and then — the part that actually decides
+— requires an exact match in the live `gc session list`. A name that is
+well-formed but not live is refused. A name that fails anything is refused
+outright rather than quietly falling back to the mayor: `gc session attach`
+runs tmux, tmux clears the screen on attach, so a "that was rejected" notice
+would be wiped and the operator would be typing into the mayor believing it was
+something else. `assets/scripts/gc-terminal-attach.test.sh` covers this
+hermetically, driving the real script against a stub `gc` with the hostile
+inputs that ttyd 1.7.7 was measured to deliver.
+
+The guard `exec`s the attach rather than forking it, so ttyd's close-time
+SIGHUP lands on the tmux client itself — that is the deployment half of the
+detach invariant above.
+
+**What this widens.** Any client that can reach the terminal could already open
+a writable mayor terminal, so this does not change *whether* write is possible;
+it changes *which* sessions are reachable, from one to every live session. That
+is real. It is bounded by the tailnet (there is no new port and no new
+`tailscale serve` mapping), and by the allowlist, which can only ever name
+sessions that already exist.
+
+**Still one terminal — that part is now layout, not wiring.** How many
+terminals a board should show at once, and how a tile maps to a session, are
+the open questions; the board contract carries no session for a tile, so
+drill-target → session is deliberately not guessed here. Deferred to the design
+handoff, tracked as `tk-mw9qz`.
 
 The tile reports at least 80x24 to ttyd however small it is rendered, because
 tmux sizes a window to fit its clients and a tile reporting its own size would

@@ -1,10 +1,12 @@
 // A tile that is a peek at rest and a live terminal on focus.
 //
-// SCOPE. There is exactly one terminal here, because there is exactly one ttyd
-// and it wraps one fixed session (`gc session attach <session>`, baked into the
-// ttyd invocation). Per-tile terminals — one per anchor — need a ttyd or
-// wiring change and are deliberately not decided yet; see the Terminal section
-// of services/helm/README.md.
+// SCOPE. There is exactly one terminal here, and it is a LAYOUT limit, not a
+// wiring one. The session is no longer baked into the ttyd invocation: this
+// tile names its target and ttyd's `-a/--url-arg` carries it (see
+// ./endpoint.ts), so a tile can attach whatever it is pointed at. What is still
+// undecided is how many terminals a board should show at once and how they are
+// arranged — the design handoff on `tk-mw9qz`, and see the Terminal section of
+// services/helm/README.md.
 //
 // This tile owns the xterm/DOM wiring only. The protocol, the endpoint check,
 // the detach invariant and the snapshot each live in their own DOM-free module
@@ -21,10 +23,17 @@ import { TtydSession, type SessionState } from './session';
 import { captureSnapshot } from './snapshot';
 
 export interface TerminalTileProps {
-  /** Human-readable name of the session ttyd is wired to. */
+  /** Human-readable name for the tile's header. */
   label: string;
   /** ttyd's base path on this origin. */
   base?: string;
+  /**
+   * The session to attach, as `gc session attach` names one (an id, an alias,
+   * or a session name). Omitted means "no session named", which the guard
+   * script answers with the city's default — the same terminal this tile showed
+   * before the target was selectable.
+   */
+  session?: string;
 }
 
 const STATE_TEXT: Record<SessionState, string> = {
@@ -35,7 +44,7 @@ const STATE_TEXT: Record<SessionState, string> = {
   failed: 'unavailable',
 };
 
-export function TerminalTile({ label, base = DEFAULT_TERMINAL_BASE }: TerminalTileProps) {
+export function TerminalTile({ label, base = DEFAULT_TERMINAL_BASE, session }: TerminalTileProps) {
   const [focused, setFocused] = useState(false);
   const [state, setState] = useState<SessionState>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -53,7 +62,11 @@ export function TerminalTile({ label, base = DEFAULT_TERMINAL_BASE }: TerminalTi
 
     let cancelled = false;
     let terminal: Terminal | null = null;
-    let session: TtydSession | null = null;
+    // Named for what it is rather than `session`, which is now the prop naming
+    // the target — one is a live socket, the other a string, and shadowing the
+    // second with the first inside this effect is exactly how the wrong one
+    // ends up on the wire.
+    let attached: TtydSession | null = null;
     let observer: ResizeObserver | null = null;
     const controller = new AbortController();
 
@@ -100,12 +113,12 @@ export function TerminalTile({ label, base = DEFAULT_TERMINAL_BASE }: TerminalTi
         if (next.columns !== term.cols || next.rows !== term.rows) {
           term.resize(next.columns, next.rows);
         }
-        session?.resize(next);
+        attached?.resize(next);
       };
       applySize();
 
       const live = new TtydSession(
-        socketURL(base, window.location),
+        socketURL(base, window.location, session),
         probe.token,
         { columns: term.cols, rows: term.rows },
         {
@@ -118,7 +131,7 @@ export function TerminalTile({ label, base = DEFAULT_TERMINAL_BASE }: TerminalTi
         },
       );
       term.onData((data) => live.send(data));
-      session = live;
+      attached = live;
       live.attach();
 
       observer = new ResizeObserver(() => applySize());
@@ -134,10 +147,14 @@ export function TerminalTile({ label, base = DEFAULT_TERMINAL_BASE }: TerminalTi
       if (terminal) setSnapshot(captureSnapshot(terminal));
       // Detach first, dispose second. detach() closes the socket and writes
       // nothing; see session.ts — this teardown must never reach the PTY.
-      session?.detach();
+      attached?.detach();
       terminal?.dispose();
     };
-  }, [focused, base]);
+    // `session` belongs here: repointing the tile must tear the old socket down
+    // and open a new one, because the target is fixed when the socket opens.
+    // The teardown above is the safe half of that — it detaches and writes
+    // nothing, so re-pointing a tile never reaches the session it is leaving.
+  }, [focused, base, session]);
 
   return (
     <section className="terminal-tile">

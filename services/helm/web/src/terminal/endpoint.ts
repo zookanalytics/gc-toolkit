@@ -4,9 +4,12 @@
 // its own process on loopback and is published by a *separate* tailscale-serve
 // mapping from the supervisor's:
 //
-//   ttyd:  ttyd -i 127.0.0.1 -p 7681 -b /terminal -W gc session attach <session>
+//   ttyd:  ttyd -i 127.0.0.1 -p 7681 -b /terminal -W -a <guard>  (tk-rbf9r)
 //   serve: https://<host>/terminal  -> http://127.0.0.1:7681/terminal
 //          https://<host>/v0        -> http://127.0.0.1:8372/v0
+//
+// `-a` is what makes the attach target a per-connection choice rather than a
+// systemd constant; the guard it runs is the allowlist. See socketURL below.
 //
 // So on the published origin the board (under /v0/city/<city>/svc/helm/) and
 // ttyd (under /terminal/) are SAME-ORIGIN, which is what makes this embed
@@ -21,6 +24,28 @@
 
 /** Where ttyd is published on the board's own origin. */
 export const DEFAULT_TERMINAL_BASE = '/terminal';
+
+/**
+ * Reads the session to attach, honouring a `?session=` override.
+ *
+ * Absent (or blank) means "name no session", which is not the same as naming
+ * the mayor: the socket then carries no `arg` at all and ttyd runs the attach
+ * command with no argument, which is byte-for-byte what it did before the
+ * target became selectable. The default lives in the guard script, once, rather
+ * than being spelled again here where it could drift.
+ *
+ * NOTHING IS VALIDATED HERE, deliberately. The name travels to a guard script
+ * that checks it against the live session list before `gc` ever sees it, and
+ * that guard is the security boundary. A second copy of its rules in the
+ * browser would be a decorative check that drifts from the real one — and it
+ * would be checking a string the client controls anyway.
+ */
+export function resolveTerminalSession(search: string): string | undefined {
+  const raw = new URLSearchParams(search).get('session');
+  if (raw === null) return undefined;
+  const trimmed = raw.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
 
 /**
  * Reads the terminal base path, honouring a `?terminal=` override.
@@ -56,10 +81,36 @@ export function tokenURL(base: string): string {
  * An https document must use wss: — a ws: socket from a secure page is blocked
  * as mixed content — and the board is served over https wherever tailscale
  * publishes it.
+ *
+ * ### How `session` reaches the attach command
+ *
+ * ttyd runs with `-a/--url-arg`, which appends each `arg` in this query string
+ * to the argv of the command it spawns per connection. So `?arg=<session>`
+ * here becomes `<guard script> <session>` there, and the guard decides whether
+ * to attach it (`assets/scripts/gc-terminal-attach.sh`). Verified against the
+ * deployed ttyd 1.7.7 — `?arg=` is read on the `/ws` request itself, not on the
+ * page URL.
+ *
+ * Omitting the session omits the parameter entirely rather than sending an
+ * empty one. Both land on the default, but only one of them is the request the
+ * pre-selectable-target board made, and staying byte-identical to it is the
+ * cheapest way to keep "no session chosen" from ever becoming a new code path.
+ *
+ * ONE `arg`, ALWAYS. ttyd appends *every* `arg` it is given, so a name that
+ * smuggled in `&arg=--flag` would append a second argument to the guard's argv.
+ * `encodeURIComponent` is what stops that: it escapes `&` and `=`, so whatever
+ * the name contains arrives as exactly one argument. The guard refuses a second
+ * argument anyway — this is the near half of that pair, not a replacement for
+ * it.
  */
-export function socketURL(base: string, location: Pick<Location, 'protocol' | 'host'>): string {
+export function socketURL(
+  base: string,
+  location: Pick<Location, 'protocol' | 'host'>,
+  session?: string,
+): string {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${scheme}//${location.host}${stripTrailingSlash(base)}/ws`;
+  const url = `${scheme}//${location.host}${stripTrailingSlash(base)}/ws`;
+  return session ? `${url}?arg=${encodeURIComponent(session)}` : url;
 }
 
 /** The outcome of {@link probeTerminal}. */

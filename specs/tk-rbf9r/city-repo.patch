@@ -1,0 +1,146 @@
+diff --git a/setup/files/systemd/gc-terminal.service b/setup/files/systemd/gc-terminal.service
+index 261e74c..7cfc0e3 100644
+--- a/setup/files/systemd/gc-terminal.service
++++ b/setup/files/systemd/gc-terminal.service
+@@ -8,17 +8,37 @@ After=network-online.target
+ Type=simple
+ WorkingDirectory=%h/loomington
+ # ttyd spawns the attach command PER browser connection (not at service start),
+-# so the mayor is only attached while the panel is open. Closing it SIGHUPs the
+-# attach, which detaches (does NOT kill) the mayor — safe because the mayor runs
++# so a session is only attached while the panel is open. Closing it SIGHUPs the
++# attach, which detaches (does NOT kill) it — safe for the mayor because it runs
+ # mode=always (an on_demand session would drain on detach). -W makes the panel
+-# writable so it can drive the mayor; the tailnet origin is already accepted as
+-# full read/write for the dashboard.
++# writable so it can drive the session; the tailnet origin is already accepted
++# as full read/write for the dashboard.
++#
++# -a/--url-arg lets the CLIENT choose which session gets attached, by appending
++# each `arg` in the socket's query string to the argv below
++# (…/terminal/ws?arg=<session>). That is what makes the helm board's "dive into
++# this anchor" follow the click instead of always landing on the mayor.
++#
++# It also means the URL chooses the child's argv, which is why the command is a
++# guard and not `gc` itself: gc-terminal-attach validates the name against the
++# live session list before `gc session attach` ever sees it, and attaches
++# gc-toolkit.mayor when the client names nothing. Installed by
++# steps/96-gc-terminal.sh from the gc-toolkit rig, where it is tested
++# (assets/scripts/gc-terminal-attach.test.sh). See gc-toolkit bead tk-rbf9r and
++# the Terminal section of that rig's services/helm/README.md.
++#
++# NOT set: -O/--check-origin, which would refuse WebSocket upgrades whose Origin
++# does not match Host. Recommended — a writable terminal is otherwise reachable
++# cross-origin, since WebSockets are not subject to CORS — but it must be
++# verified against the tailscale-served origin when enabled, or the board stops
++# attaching for everyone. The check and its one-line curl are in the gc-toolkit
++# rig at specs/tk-rbf9r/decisions.md §4.
+ #
+ # -b /terminal must match the tailscale serve sub-path: tailscale strips and
+ # re-forwards the full /terminal/* prefix to the backend (same pattern Grafana
+ # needs). See steps/96-gc-terminal.sh.
+ Environment=PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+-ExecStart=/home/linuxbrew/.linuxbrew/bin/ttyd -i 127.0.0.1 -p 7681 -b /terminal -W %h/.local/bin/gc session attach gc-toolkit.mayor
++ExecStart=/home/linuxbrew/.linuxbrew/bin/ttyd -i 127.0.0.1 -p 7681 -b /terminal -W -a %h/.local/bin/gc-terminal-attach
+ Restart=always
+ RestartSec=2s
+ 
+diff --git a/setup/steps/96-gc-terminal.sh b/setup/steps/96-gc-terminal.sh
+index 7dbb007..7931828 100755
+--- a/setup/steps/96-gc-terminal.sh
++++ b/setup/steps/96-gc-terminal.sh
+@@ -3,25 +3,36 @@
+ # shellcheck disable=SC1091,SC2154
+ set -euo pipefail
+ 
+-# Expose a web terminal (ttyd) wired to the mayor session, for the gc dashboard's
+-# terminal panel. The panel iframes whatever URL is in the browser's localStorage
++# Expose a web terminal (ttyd) for the gc dashboard's terminal panel and the
++# helm board's terminal tile. The session it attaches is chosen per connection
++# and defaults to the mayor (see piece 1 below); it is no longer fixed here.
++# The panel iframes whatever URL is in the browser's localStorage
+ # key `gcMayorTtyUrl` (default http://localhost:7681, baked into gc's dashboard.js
+ # and not changeable without rebuilding gc) — set that field to
+ # https://<tailnet>/terminal/ once this step has run.
+ #
+-# Two coupled pieces:
+-#   1. gc-terminal.service — runs `ttyd ... gc session attach gc-toolkit.mayor`
+-#      bound to 127.0.0.1, base-path /terminal. ttyd spawns the attach per
+-#      browser connection, so the mayor is only attached while the panel is open
+-#      (close = detach, not kill; mayor is mode=always so no drain).
+-#   2. tailscale serve — proxies /terminal -> :7681/terminal under the same HTTPS
++# Three coupled pieces:
++#   1. gc-terminal-attach — the guard ttyd runs. ttyd is started with
++#      -a/--url-arg, so the browser's query string chooses which session gets
++#      attached (…/terminal/ws?arg=<session>); the guard validates that name
++#      against the live session list and falls back to gc-toolkit.mayor when the
++#      client names none. It is authored and TESTED in the gc-toolkit rig
++#      (assets/scripts/gc-terminal-attach{,.test}.sh, bead tk-rbf9r) and
++#      installed here, so the unit depends on a file in $HOME/.local/bin rather
++#      than on a rig checkout that may lag main.
++#   2. gc-terminal.service — runs `ttyd ... -a <guard>` bound to 127.0.0.1,
++#      base-path /terminal. ttyd spawns the guard per browser connection, so a
++#      session is only attached while the panel is open (close = detach, not
++#      kill; the mayor is mode=always so no drain).
++#   3. tailscale serve — proxies /terminal -> :7681/terminal under the same HTTPS
+ #      origin as the dashboard. ttyd's --base-path must match the proxied prefix
+ #      because tailscale forwards the full /terminal/* path (same as Grafana).
+ #
+-# Depends on 10-packages.sh (ttyd) and the step-90 sudoers entry (tailscale
+-# serve). Idempotent and safe to re-run.
++# Depends on 10-packages.sh (ttyd), the step-90 sudoers entry (tailscale serve),
++# and a gc-toolkit rig checkout for the guard. Idempotent and safe to re-run.
+ 
+ STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++CITY_ROOT="$(cd "$STEP_DIR/../.." && pwd)"
+ source "$STEP_DIR/../lib/common.sh"
+ 
+ # systemctl --user needs XDG_RUNTIME_DIR; sudo -iu from setup.sh doesn't set it.
+@@ -39,7 +50,22 @@ tailnet_host="$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
+ [[ -n "$tailnet_host" && "$tailnet_host" != "null" ]] \
+   || die "could not resolve tailnet DNS name from 'tailscale status'"
+ 
+-# 2. Install the (static) systemd --user unit.
++# 2. Install the attach guard. It is the security boundary for -a: the URL picks
++#    the argv, so this is what decides whether a named session may be attached.
++#    Installed (not referenced in place) so the unit points at a stable path and
++#    so a missing/renamed source fails HERE, loudly, instead of at the next
++#    browser connection with a terminal that no longer opens.
++guard_src="$CITY_ROOT/rigs/gc-toolkit/assets/scripts/gc-terminal-attach.sh"
++guard_dst="$HOME/.local/bin/gc-terminal-attach"
++[[ -f "$guard_src" ]] \
++  || die "terminal attach guard not found at $guard_src — the gc-toolkit rig checkout is missing or predates tk-rbf9r"
++mkdir -p "$(dirname "$guard_dst")"
++if ! cmp -s "$guard_src" "$guard_dst"; then
++  log "installing $guard_dst"
++  install -m 755 "$guard_src" "$guard_dst"
++fi
++
++# 3. Install the (static) systemd --user unit.
+ unit_src="$STEP_DIR/../files/systemd/gc-terminal.service"
+ unit_dst="$HOME/.config/systemd/user/gc-terminal.service"
+ unit_changed=0
+@@ -50,7 +76,7 @@ if ! cmp -s "$unit_src" "$unit_dst"; then
+   unit_changed=1
+ fi
+ 
+-# 3. Reconcile the service. daemon-reload on unit change, enable for boot, then
++# 4. Reconcile the service. daemon-reload on unit change, enable for boot, then
+ #    restart UNCONDITIONALLY so a fresh gc/ttyd binary is picked up (the running
+ #    ttyd holds the old inode otherwise). It's a localhost terminal proxy; the
+ #    bounce only affects panels opened during the sub-second restart.
+@@ -59,12 +85,12 @@ systemctl --user enable gc-terminal.service >/dev/null 2>&1 || true
+ log "restarting gc-terminal.service (picks up any new gc/ttyd binary)"
+ systemctl --user restart gc-terminal.service
+ 
+-# 4. Proxy the terminal under the tailnet HTTPS origin, same origin as the
++# 5. Proxy the terminal under the tailnet HTTPS origin, same origin as the
+ #    dashboard. The path-form re-appends /terminal to the target so ttyd's
+ #    --base-path sees the full prefix (see tailscale_serve_https in lib/common.sh).
+ tailscale_serve_https 7681 /terminal
+ 
+-# 5. Verify.
++# 6. Verify.
+ sleep 1
+ api_url="https://${tailnet_host}"
+ term_code="$(curl -s -o /dev/null -w '%{http_code}' "${api_url}/terminal/" || true)"
