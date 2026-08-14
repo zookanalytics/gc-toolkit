@@ -36,6 +36,27 @@ sitting works from is therefore current; the body is its provenance.
 `assets/scripts/liveness-recheck.test.sh` pins that seventh marked block
 and the re-check itself.
 
+A mechanical PRECHECK decides whether this formula runs at all (bead
+tk-7h51d). `orders/liveness-sweep.toml` is a condition order whose check is
+`assets/scripts/liveness-sweep-precheck.sh` — three batched bead reads and a
+jq, about three seconds, no session and no network — run on the rig's 6h
+cadence. Every pass used to spend a polecat session reaching the conclusion
+"nothing new", which made the common case the expensive one. The precheck
+applies a deliberately SMALLER filter than classify below: every exclusion it
+makes, classify also makes, and it omits the three that are not locally
+decidable (worked-via-convoy, the open-PR intersection, the pre-open gate
+verdicts). Its survivors are therefore a SUPERSET of this step's candidates,
+so it may end the pass when the NEW set is provably empty, and anything else
+— including any unreadable probe, a missing subject, or its own abort — runs
+the pass unchanged.
+
+Two consequences for whoever is reading this because they are RUNNING it.
+Reaching this step means only that the cheap half could not PROVE the board
+empty; it is not evidence that there is something to file, and classify below
+remains the authority on that. And nothing upstream has been decided on your
+behalf: the precheck writes no bead, never advances `sweep.reported`, and
+never creates the standing subject.
+
 Graph-liveness only: the witness patrol owns SESSION-liveness (dead
 assignees, orphan recovery); this sweep never touches assigned work.
 Fired by orders/liveness-sweep.toml on cooldown.
