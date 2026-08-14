@@ -75,14 +75,19 @@ echo "── the hold stamps the takeaway BEFORE waiting (survives a reap) ─�
 # The reap defense in full: without a stamp written at hold time, a
 # reaped sitting leaves nothing at all — the visit is in_progress, the
 # subject is silent, and the thread that knew why is gone.
-have "hold stamps via the helm takeaway writer" 'takeaway "$SUBJECT"' "$PROMPT"
+# The stamp targets $ITEM — the bead this sitting is about — which is the
+# subject itself whenever the visit names no other target. Stamping the
+# shared continuation group instead lets siblings of a standing scope
+# overwrite each other's headline, and hides the hold from the readers
+# that look at the item (converse-fold-scope.test.sh owns that contract).
+have "hold stamps via the helm takeaway writer" 'takeaway "$ITEM"' "$PROMPT"
 have "hold stamp is attributed --by converse" '--by converse' "$PROMPT"
 have "hold stamp carries the holding- prefix" '"holding — ' "$PROMPT"
 # Each takeaway block runs in its own shell, so every one of them must
 # resolve HELM itself. A block that inherits the variable from an earlier
 # step resolves to the empty string and the stamp never lands — silently,
 # at exactly the moment the trace is the only thing that would survive.
-n_takeaway=$(grep -c 'takeaway "\$SUBJECT"' "$PROMPT")
+n_takeaway=$(grep -c 'takeaway "\$ITEM"' "$PROMPT")
 n_helm=$(grep -c '^ *HELM=' "$PROMPT")
 if [ "$n_takeaway" -ge 2 ] && [ "$n_helm" -eq "$n_takeaway" ]; then
     ok "every takeaway block resolves HELM itself ($n_helm/$n_takeaway)"
@@ -90,10 +95,19 @@ else
     bad "every takeaway block resolves HELM itself" \
         "$n_takeaway takeaway call(s), $n_helm HELM resolution(s) — a block relying on an earlier step's shell var stamps nothing"
 fi
+# $ITEM is a shell variable like any other: a takeaway block that does not
+# resolve it itself stamps the empty string and the write fails outright.
+n_item=$(grep -c '^ *ITEM="\${ITEM:-\$SUBJECT}"' "$PROMPT")
+if [ "$n_takeaway" -ge 2 ] && [ "$n_item" -ge "$n_takeaway" ]; then
+    ok "every takeaway block resolves ITEM itself ($n_item/$n_takeaway, fold-check included)"
+else
+    bad "every takeaway block resolves ITEM itself" \
+        "$n_takeaway takeaway call(s), $n_item ITEM resolution(s) — a block relying on step 1's shell var stamps nothing"
+fi
 # The stamp must be a plain takeaway: --release clears assignee and route
 # and marks a proactive reaction, which would park a subject the operator
 # is actively in conversation about.
-if grep -n 'takeaway "\$SUBJECT"' "$PROMPT" | grep -q -- '--release'; then
+if grep -n 'takeaway "\$ITEM"' "$PROMPT" | grep -q -- '--release'; then
     bad "no --release on a converse takeaway" \
         "--release parks the subject (clears assignee + route) mid-conversation"
 else

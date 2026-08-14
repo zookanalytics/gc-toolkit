@@ -22,6 +22,11 @@ Definitions:
   this sitting needs, and states the **premise** — the condition that
   justified filing it, which you re-test at claim time (step 2) because
   it may no longer be true. It is a child of its subject.
+- **Item** — what THIS visit is about, which is not always the subject.
+  A visit that names its own target carries it as `stall_root`; a
+  subject that is a standing scope (`task_kind=triage-subject`) carries
+  one visit per distinct item, so its group is a bucket rather than a
+  topic. With no target named, the item is the subject. `$ITEM` below.
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The visit stays `in_progress` the
   whole time. The operator may take hours, and nothing in the visit
@@ -38,16 +43,44 @@ The loop, every visit:
    `SUBJECT` from the claim's `continuation_group` — both are used by
    name below. A claim is authoritative even when it names a
    different subject than your last one — work it the same way.
-   Before prepping, check for a concurrent hold on the same subject:
+   Before prepping, resolve what this sitting is about and who holds it:
    ```bash
-   gc bd list --status=in_progress --json --limit=0 \
-     | jq --arg s "$SUBJECT" '[.[] | select((.metadata.task_kind // "")=="visit")
-         | select((.metadata["gc.continuation_group"] // "")==$s)
-         | select(.assignee != "" )] | length'
+   # >>> visit-fold-check
+   ITEM=$(gc bd show "$VISIT" --json \
+     | tr -d '[:cntrl:]' | jq -r '.[0].metadata.stall_root // ""')
+   ITEM="${ITEM:-$SUBJECT}"
+   HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
+     | tr -d '[:cntrl:]' \
+     | jq -r --arg s "$SUBJECT" --arg i "$ITEM" --arg v "$VISIT" '
+         [ .[]
+           | select((.metadata.task_kind // "")=="visit")
+           | select((.metadata["gc.continuation_group"] // "")==$s)
+           | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
+           | select((.assignee // "")!="")
+           | .id ]
+         + [$v] | unique | .[0]')
+   # <<< visit-fold-check
    ```
-   If another session already holds a sibling visit of this group,
-   append `folded into <that visit id>` to the subject's notes, stamp
-   your visit `gc.outcome=folded`, close it, and go to step 8.
+   **Fold only when `$HOLDER` is another visit's id** — then append
+   `folded into $HOLDER` to the subject's notes, stamp your visit
+   `gc.outcome=folded`, close it, and go to step 8. When `$HOLDER` is
+   `$VISIT` you are the holder: prep and continue. When it is EMPTY the
+   listing did not read, which proves nothing — hold. Folding on a read
+   that did not happen loses a decision nobody can tell was ever made.
+
+   Both halves of that filter are load-bearing, and each has its own
+   failure (tk-ogsok). Matching on the continuation group ALONE folds a
+   sitting about workflow A into a live one about workflow B, because a
+   standing scope's group says only that two visits share a bucket — so
+   the per-visit `stall_root` is what decides sameness, and the subject
+   is the fallback for the ordinary case where one subject is one topic.
+   Matching without the lowest-id tiebreak leaves the symmetric race:
+   two live sittings each see the other, both fold, and the subject ends
+   with ZERO sittings — recorded live as su-331y (workflow su-ykfw) and
+   su-s1if (workflow su-vc8n) under group su-vehr. Lowest id holds, so
+   the outcome is one sitting rather than none.
+   `assets/scripts/converse-fold-scope.test.sh` runs this block against
+   both shapes; keep them in step.
 2. **Re-check the premise.** A visit can sit for days before anyone
    claims it, and the condition that justified filing it routinely dies
    in the meantime. Test the VISIT's own premise against live state
@@ -136,25 +169,40 @@ The loop, every visit:
    this scope has already paid for once (bead tk-gvas6).
 5. **Hold.** Stamp what you are waiting for, then post your framing:
    ```bash
+   ITEM=$(gc bd show "$VISIT" --json \
+     | tr -d '[:cntrl:]' | jq -r '.[0].metadata.stall_root // ""')
+   ITEM="${ITEM:-$SUBJECT}"
    HELM=""
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
-   "$HELM" takeaway "$SUBJECT" "holding — <the one decision or input needed>" --by converse
+   "$HELM" takeaway "$ITEM" "holding — <the one decision or input needed>" --by converse
    ```
    Stamp BEFORE you wait, not after. This session can be reaped mid-hold
    (**The reap**, below) and the stamp is the only thing that survives
-   it: reaped, the subject still says what the sitting was waiting for
-   and when. Unstamped, a reaped hold is indistinguishable from one that
+   it: reaped, the item still says what the sitting was waiting for and
+   when. Unstamped, a reaped hold is indistinguishable from one that
    never happened. (The writer is **searched for**, never assumed:
    `$GC_RIG_ROOT` is the rig that IMPORTED this agent, not the gc-toolkit
    pack — a `signal-loom/gc-toolkit.converse` session gets signal-loom's
    root, which has no `assets/` at all, so a path built from it alone
    fails before writing anything. Both takeaway blocks run the same
-   search because each runs in its own shell — a variable set in one does
-   not reach the other. Never pass `--release`: it clears the subject's
-   assignee and route, parking a bead you are mid-conversation about.)
+   search — and re-resolve `$ITEM` the same way — because each runs in
+   its own shell: a variable set in one does not reach the other. Never
+   pass `--release`: it clears the assignee and route, parking a bead you
+   are mid-conversation about.)
+
+   **The stamp lands on the ITEM, not on the shared bucket.** Siblings of
+   a standing scope would otherwise overwrite each other's headline — one
+   field, one bucket, N sittings — and the readers that consume it look
+   at the item: `assets/scripts/detect-stalled-workflows.sh` treats a
+   non-empty `gc.takeaway` on the workflow root (or its anchor) as the
+   named wait that exempts it from being re-reported, and never reads the
+   subject at all. Stamped on the bucket, a held sitting leaves the thing
+   it is about looking unattended, and the next pass files another visit
+   on it. Where no target is named `$ITEM` IS the subject, so the
+   ordinary one-topic subject stamps exactly where it always did.
 
    Then post the framing. Every message you post while holding ends with
    the operator's decision — labeled `Next (yours):`, standing alone:
@@ -171,16 +219,24 @@ The loop, every visit:
    `gc bd update $SUBJECT --append-notes "<decision, rationale, what
    changed>"`. If the notes have grown past a quick read, refresh a
    `## Current state` summary block at the top: current position,
-   decisions in force, open questions.
+   decisions in force, open questions. The notes stay on the SUBJECT
+   even when the item is another bead — appending accumulates, so a
+   scope's log reads as the sequence of sittings held under it. Only the
+   single-valued takeaway moves to the item, and only because one field
+   cannot hold N sittings. Name the item in what you append, or the log
+   says a sitting happened without saying about what.
 7. **Sign off, then close the visit.** Write the durable trace first,
    then close, then post the sign-off as the thread's last word:
    ```bash
+   ITEM=$(gc bd show "$VISIT" --json \
+     | tr -d '[:cntrl:]' | jq -r '.[0].metadata.stall_root // ""')
+   ITEM="${ITEM:-$SUBJECT}"
    HELM=""
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
    done
-   [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the subject carries no trace of this sitting"
-   "$HELM" takeaway "$SUBJECT" "<outcome> — <what this sitting settled or needs next>" --by converse
+   [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the item carries no trace of this sitting"
+   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next>" --by converse
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    gc bd close "$VISIT"
