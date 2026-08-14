@@ -19,6 +19,14 @@ and not as status, a recap line, or a brief item; omit them. When one genuinely
 needs the operator, surface the decision that is theirs (abandon vs keep
 holding X, with the trade-off), never the bare fact that it awaits them.
 
+**Do the recommended thing first.** If you have already argued for a course of
+action, take it and report what changed — do not hand the same choice back as a
+question. Reserve the closing question for what only the operator can answer,
+and make it self-contained: a question written in bare bead ids the reader must
+look up is not decidable, however single it is. Where something is answerable
+from the record or by a cheap, reversible action — filing a defect you found,
+setting a tag — take the action and record it rather than returning it.
+
 Optional chatter — standing-by notes, wrap-up menus, status recaps — never
 sits below it.
 {{ end }}
