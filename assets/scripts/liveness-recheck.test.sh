@@ -109,24 +109,46 @@ jq -nc --argjson b "[
  ,$(bead b-routed  open   '{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}')
  ,$(bead b-held    open   '{"triage.hold":"waiting on the operator"}')
  ,$(bead b-take    open   '{"gc.takeaway":"holding — needs a decision"}')
+ ,$(bead b-stand   open   '{"task_kind":"feedback-pattern"}')
  ,$(bead b-parked  open   '{}')
  ,$(bead b-marker  open   '{"merge_result":"pull_request","pr_number":"349"}')
 ]" '$b' > "$STUB_BEADS"
 # b-parked is absent from ready: a park/blocker edge appeared since the pass.
-jq -nc '[{id:"b-idle"},{id:"b-closed"},{id:"b-routed"},{id:"b-held"},{id:"b-take"},{id:"b-marker"}]' > "$STUB_READY"
-C="$("$SCRIPT" --ids "b-idle,b-closed,b-routed,b-held,b-take,b-parked,b-marker,b-gone" --json 2>/dev/null)"
+# b-stand IS ready — a standing record is open, unblocked and unassigned by
+# design, which is exactly why every other test here reads it as idle.
+jq -nc '[{id:"b-idle"},{id:"b-closed"},{id:"b-routed"},{id:"b-held"},{id:"b-take"},{id:"b-stand"},{id:"b-marker"}]' > "$STUB_READY"
+C="$("$SCRIPT" --ids "b-idle,b-closed,b-routed,b-held,b-take,b-stand,b-parked,b-marker,b-gone" --json 2>/dev/null)"
 
 eq "$(verdict_of "$C" b-idle)"   "idle"       "an unchanged bead stays on the agenda"
 eq "$(verdict_of "$C" b-closed)" "resolved"   "a bead closed since the pass is resolved — do NOT route"
 eq "$(verdict_of "$C" b-routed)" "worked"     "a route that appeared since the pass reads as worked"
 eq "$(verdict_of "$C" b-held)"   "held"       "a triage.hold that appeared since the pass reads as held"
 eq "$(verdict_of "$C" b-take)"   "held"       "a gc.takeaway that appeared since the pass reads as held"
+eq "$(verdict_of "$C" b-stand)"  "standing"   "a standing record is held-by-design, never an idle bead (tk-rw2ra)"
 eq "$(verdict_of "$C" b-parked)" "not-ready"  "a bead that left the ready set was parked or blocked"
 eq "$(verdict_of "$C" b-marker)" "marker"     "a merge_result marker is FLAGGED, not dropped"
 eq "$(verdict_of "$C" b-gone)"   "unreadable" "an id the read did not return stays visible"
 
-eq "$(printf '%s' "$C" | jq -r '.summary.new_listed')" "8" "every listed id is accounted for"
-eq "$(printf '%s' "$C" | jq -r '.summary.new_live')"   "3" "live agenda = idle + marker + unreadable (never the resolved/worked/held/parked)"
+# The detail is what tells a sitting why it cannot disposition the bead: a
+# standing record has no owner to chase and no close to wait for.
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-stand")] | .[0].detail | test("task_kind=feedback-pattern")' >/dev/null 2>&1 \
+    && ok "the standing-record detail names the kind" \
+    || bad "the standing-record detail names the kind" "detail did not name task_kind"
+
+eq "$(printf '%s' "$C" | jq -r '.summary.new_listed')" "9" "every listed id is accounted for"
+eq "$(printf '%s' "$C" | jq -r '.summary.new_live')"   "3" "live agenda = idle + marker + unreadable (never the resolved/worked/held/standing/parked)"
+
+# The text report prints one bucket per verdict and NOTHING else, so a verdict
+# with no bucket line is dropped from it silently while still counted in the
+# JSON — a hidden bead, the one failure this whole script is built to avoid.
+# Assert the rendered report, not just the census.
+T="$("$SCRIPT" --ids "b-idle,b-closed,b-routed,b-held,b-take,b-stand,b-parked,b-marker,b-gone" --all 2>/dev/null)"
+printf '%s' "$T" | grep -q "b-stand" \
+    && ok "a standing record is PRINTED, not silently dropped from the report" \
+    || bad "a standing record is PRINTED, not silently dropped from the report" "b-stand absent from the text report"
+printf '%s' "$T" | grep -q "standing record" \
+    && ok "its bucket says what it is, rather than filing it under a human hold" \
+    || bad "its bucket says what it is, rather than filing it under a human hold" "no standing-record bucket in the report"
 
 echo "── an assignee alone marks a bead worked, and closed beats every other signal ──"
 jq -nc --argjson b "[
@@ -349,6 +371,21 @@ echo "── a visit with no stamp runs nothing and says nothing ──"
 jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
 OUT="$(VISIT=tk-visit bash "$TMP/hook.sh" 2>&1)"
 eq "$OUT" "" "an unstamped visit produces no hook output (the ordinary case, not an error)"
+
+echo "── the standing-record list agrees across the sweep and the re-check ──"
+# The other string that has to agree across two files, read out of each side for
+# the same reason as the stamp key above (bead tk-rw2ra). These two cannot share
+# code — one is a jq program inside a TOML formula description, the other this
+# standalone script — and a drifted pair fails INVISIBLY in both directions: the
+# sweep stops filing an idiom the re-check still calls idle, or the re-check
+# holds one the sweep is still filing, and either way the disagreement shows up
+# only as a bead a sitting cannot disposition.
+kinds_of() { sed -n 's/.*def standing_kinds: *\(\[[^]]*\]\);.*/\1/p' "$1" | head -1 | tr -d ' '; }
+F_KINDS="$(kinds_of "$FORMULA")"
+[ -n "$F_KINDS" ] && ok "the sweep names a standing_kinds list" \
+    || bad "the sweep names a standing_kinds list" "no def standing_kinds in $FORMULA"
+eq "$(kinds_of "$SCRIPT")" "$F_KINDS" \
+   "the standing records the sweep excludes are the ones the re-check holds"
 
 echo "── the formula documents why the body alone cannot be trusted ──"
 has "the classify step stamps the census cut" 'sweep.pass_at' "$FORMULA"

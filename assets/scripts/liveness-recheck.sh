@@ -49,6 +49,20 @@
 #   - an id the read did not return    -> its own `unreadable` bucket, counted
 #                                         INTO the live agenda.
 #
+# Every verdict that takes a bead off the agenda — `resolved`, `worked`,
+# `held`, `standing` — is a positive property read out of the same batched
+# listing, never a probe, so no failure here can turn into a silent hide.
+# `standing` is the newest of them (bead tk-rw2ra): the standing-record
+# idioms (`task_kind=triage-subject`, `feedback-pattern`) are created open,
+# unrouted and unassigned BY DESIGN and never close, so every other test here
+# reads them as idle work — permanently, because no state change would ever
+# retire them. It is its own verdict rather than a flavour of `held` because
+# nobody is holding it and nothing changed since the pass: a sitting can
+# route, gate, kill, park or hold a held bead, and can do none of those to
+# this one. The list is deliberately the same one mol-liveness-sweep.toml
+# holds in its classify block; adding an idiom means adding it to both, and
+# liveness-recheck.test.sh fails if the two ever disagree.
+#
 # Usage:
 #   liveness-recheck.sh <visit-bead-id> [--all] [--json]
 #   liveness-recheck.sh --ids <id[,id ...]> [--all] [--json]
@@ -232,6 +246,12 @@ CENSUS=$(jq -n \
     --arg ready_state "$READY_STATE" '
   def meta: (.metadata // {});
   def mv($k): ((meta[$k] // "") | tostring);
+  # The standing-record idioms, held-by-design class 4(a) — kept as ONE named
+  # list here for the same reason mol-liveness-sweep.toml keeps it as one:
+  # each is created open, unrouted and unassigned ON PURPOSE and is never
+  # claimable, so every test below reads them as an idle bead, and they never
+  # close (bead tk-rw2ra). Same strings as standing_kinds in that classify block.
+  def standing_kinds: ["triage-subject", "feedback-pattern"];
   (($beadfile[0] // []) | map({key: .id, value: .}) | from_entries) as $by
   | (if $ready == null then null
      else ($ready | map({key: ., value: true}) | from_entries) end) as $readyset
@@ -251,6 +271,10 @@ CENSUS=$(jq -n \
             detail: ((if ($b.assignee // "") != "" then ["assignee=" + $b.assignee] else [] end)
                      + (if ($b | mv("gc.routed_to")) != "" then ["routed_to=" + ($b | mv("gc.routed_to"))] else [] end))
                     | join("  ")}
+         elif ((standing_kinds | index($b | mv("task_kind"))) != null) then
+           {verdict: "standing",
+            detail: "task_kind=" + ($b | mv("task_kind"))
+                    + " — open, unrouted and unassigned by design; it never closes, and there is no disposition to make"}
          elif ((($b | mv("gc.takeaway")) != "") or (($b | mv("triage.hold")) != "")) then
            {verdict: "held",
             detail: ((if ($b | mv("triage.hold")) != "" then ["triage.hold=" + ($b | mv("triage.hold"))] else [] end)
@@ -330,6 +354,7 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
     + bucket($rows; "resolved";   "resolved — closed since the pass; do NOT route"; true)
     + bucket($rows; "worked";     "now worked — someone has it"; true)
     + bucket($rows; "held";       "now held — a human is holding it"; true)
+    + bucket($rows; "standing";   "not work — a standing record, held by design; it was never dispositionable"; true)
     + bucket($rows; "not-ready";  "no longer ready — a blocker, gate or park appeared"; true)
     end;
   ([ "liveness re-check — visit " + (if .visit == "" then "(ad-hoc id list)" else .visit end)
