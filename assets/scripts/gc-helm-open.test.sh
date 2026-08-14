@@ -211,6 +211,78 @@ else
   bad "(ORDER) gate must precede the gate-visit block (gate=${GATE_LINE:-absent} visit=${VISIT_LINE:-absent})"
 fi
 
+# --- (BLURB) --reason / --body say what the sitting is actually for -----------
+# The default wording ("operator pick from the board") is true of the board
+# picker and false of every other caller, and the body is not decoration: it is
+# written at filing time and read at CLAIM time as the converse session's only
+# brief. Two knobs because the default is two — a short title tail and a longer
+# brief — so one flag driving both would bloat titles or starve briefs.
+: > "$FAKE_CALLS"
+export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+set +e
+sh "$SCRIPT" open tk-real1 --reason "operator-origin topic intake" \
+   --body "Rebuild what context exists, prep, and hold." >/dev/null 2>&1
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+grep -q 'bd create .*--title visit: tk-real1 — operator-origin topic intake' <<< "$CALLS" \
+  && ok "(BLURB) --reason replaces the title tail" || bad "(BLURB) title tail (calls: $CALLS)"
+grep -q -- '-d Rebuild what context exists' <<< "$CALLS" \
+  && ok "(BLURB) --body becomes the claim-time brief" || bad "(BLURB) body (calls: $CALLS)"
+grep -q 'operator pick from the board' <<< "$CALLS" \
+  && bad "(BLURB) the stock wording must not survive an override" || ok "(BLURB) no stock wording left over"
+# --reason alone must not leave a stock body contradicting a custom title.
+: > "$FAKE_CALLS"
+set +e
+sh "$SCRIPT" open tk-real1 --reason "operator-origin topic intake" >/dev/null 2>&1
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+grep -q 'operator pick from the board' <<< "$CALLS" \
+  && bad "(BLURB) --reason alone left the stock body (calls: $CALLS)" \
+  || ok "(BLURB) --reason alone carries into the body too"
+# Still fails closed on a flag with no value, and on a second bead-id.
+set +e; sh "$SCRIPT" open tk-real1 --reason >/dev/null 2>&1; RC=$?; set -e
+eq "$RC" "2" "(BLURB) --reason with no value is a usage error"
+set +e; sh "$SCRIPT" open tk-real1 tk-real2 >/dev/null 2>&1; RC=$?; set -e
+eq "$RC" "2" "(BLURB) two bead-ids is a usage error"
+
+# --- (RIGTIMEOUT) the rig-enumeration bound is generous, and tunable ----------
+# `gc rig list` measured 2.6-8.4s in a loaded city against a 10s bound, so open
+# could exit 3 having filed nothing. Harmless for the board picker, not for
+# gc-visit-open.sh's topic path — by the time open runs there, the subject bead
+# already exists, so a timeout strands it visit-less. TIMEOUT is set only by
+# cmd_board's parser, so the one-shot verbs take the tunable below.
+mkdir -p "$TMP/slowbin"
+cat > "$TMP/slowbin/gc" <<'SLOW'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "rig list")  sleep 2; jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+  "bd show")   jq -n --arg i "$3" '[{id:$i, title:"a real bead"}]' ;;
+  "bd list")   printf '[]\n' ;;
+  "bd create") printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{id:"tk-visit1"}' ;;
+  "bd update") printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
+  "bd dep")    printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
+esac
+exit 0
+SLOW
+chmod +x "$TMP/slowbin/gc"
+: > "$FAKE_CALLS"
+set +e
+PATH="$TMP/slowbin:$PATH" GC_HELM_RIG_TIMEOUT=1 sh "$SCRIPT" open tk-slow1 >/dev/null 2>&1; RC=$?
+set -e
+eq "$RC" "3" "(RIGTIMEOUT) a bound shorter than the answer still fails closed"
+eq "$(cat "$FAKE_CALLS")" "" "(RIGTIMEOUT) and files nothing when it does"
+: > "$FAKE_CALLS"
+set +e
+PATH="$TMP/slowbin:$PATH" GC_HELM_RIG_TIMEOUT=10 sh "$SCRIPT" open tk-slow1 >/dev/null 2>&1; RC=$?
+set -e
+eq "$RC" "0" "(RIGTIMEOUT) a generous bound rides out a slow gc rig list"
+grep -q 'bd create' <<< "$(cat "$FAKE_CALLS")" \
+  && ok "(RIGTIMEOUT) and the visit is filed" || bad "(RIGTIMEOUT) visit filed"
+# The shipped default must be generous, not the board's render budget.
+grep -q 'GC_HELM_RIG_TIMEOUT:-30' "$SCRIPT" \
+  && ok "(RIGTIMEOUT) the shipped default is 30s, not the board's 10" \
+  || bad "(RIGTIMEOUT) shipped default changed — a one-shot verb must not inherit the board budget"
+
 # --- (SYNTAX) the shipped script still parses ---------------------------------
 sh -n "$SCRIPT" 2>/dev/null && ok "(SYNTAX) gc-helm.sh parses as POSIX sh" || bad "(SYNTAX) sh -n failed"
 

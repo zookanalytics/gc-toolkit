@@ -201,6 +201,82 @@ conversation, an owner), and the board gives gates the first-class
 ranked identity `await_type` lacks. Ride the notify/renudge orders and
 the alert model rather than duplicating them.
 
+## How a conversation starts: operator-origin intake (2026-08-14)
+
+Every other visit producer in the pack is **agent-origin** and attaches to a
+bead that already exists — `mol-first-reaction` files one after reacting,
+`detect-stalled-workflows.sh` files one on a stall, `gc-helm.sh open` files one
+on a row the operator picked off the board. None of them answers "I need an
+agent on topic X," where X has no bead yet. That affordance existed under the
+retired `-thread` model (a keystroke, any moment) and was not carried across
+when threads were dropped for converse. Converse supplies the persistence
+threads lacked; `assets/scripts/gc-visit-open.sh` supplies the intake:
+
+```sh
+gc-visit-open "why does the refinery hold siblings for a full pass?"
+gc-visit-open tk-abc12                     # an existing bead is its own subject
+gc-visit-open "a gascity topic" --rig gascity
+gc-visit-open "just talk to me about X" --no-react
+```
+
+It creates the subject bead from the topic string — the string is both title
+and durable body, because the converse session reads the **body** at claim time
+— and then opens the conversation one of two ways.
+
+**The default rig is fixed: `gc-toolkit`** (`--rig` overrides,
+`GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"` and its
+pool name is rig-qualified, so a topic that is not rig-specific still has to
+land somewhere. It is deliberately *not* inferred from cwd: the command is
+fired from wherever the operator happens to be sitting, and a destination that
+varies silently with the shell's directory is the worst failure mode an intake
+path can have.
+
+**Two paths, and the choice is not a preference.** The preferred path slings
+`mol-first-reaction` at the new subject, and *that formula files the visit*
+from its `advance-and-drain` step — so the operator arrives at a framed
+conversation with a first-reaction card already written, not a blank one. The
+script files nothing on that path; a second visit would split one conversation
+into two sittings of the same subject.
+
+The fallback path (`--no-react`, or automatically) files the visit
+immediately, through `gc-helm.sh open --reason/--body`. **Visit filing lives
+in exactly one place** — that verb's marked `gate-visit` block — and the intake
+script calls it rather than copying it, so the metadata shape, the
+subject-exists gate, the one-open-visit-per-subject gate and the board cache
+bust are inherited. `assets/scripts/gate-visit.test.sh` now sweeps
+`assets/scripts/*.sh` as well as `formulas/*.toml`, so that copy is guarded on
+the same terms as the formula ones.
+
+**Why the fallback is not optional.** The react path is fire-and-forget: `gc
+sling` routes the subject and returns 0, and the visit appears only if the
+reconciler later spawns a proactive session to run the formula. Two clamps
+outside the sling can prevent that spawn, and neither shows up in its exit
+status — proactive auto-spawn is **default-disabled**
+(`GC_PROACTIVE_ENABLED` unset ⇒ `agents/proactive/agent.toml`'s `work_query`
+and `scale_check` both emit "no demand" forever), and at
+`GC_PROACTIVE_CITY_CAP` the pool sheds first under session pressure. Under
+either, an unguarded react path leaves a routed bead nobody picks up and *no
+visit at all*: a topic that looks filed and is silently forgotten, which is the
+one outcome this channel exists to prevent. So the path is chosen by asking
+`tools/gc-proactive.sh deliverable` first (exit 0/1 plus the reason), and the
+answer is printed either way — the operator always knows whether a visit exists
+yet, or only a queued reaction.
+
+> **As of 2026-08-14 `GC_PROACTIVE_ENABLED` is set nowhere in this city**, so
+> the automatic fallback is the path that actually runs and every intake yields
+> a visit immediately, without a framing card. Opting proactive in flips the
+> default to the framed path with no change to this script.
+
+Note what is *not* here: there is no mail-to-visit bridge, and no seam for one.
+A mailbox whose endpoint spins up a visit per message was considered and
+rejected outright (operator ruling, 2026-08-14) — a mail is already a bead and
+a visit is already a bead, so the bridge converts bead to bead for an extra hop
+and tick of latency, and it puts a background process on the critical path of
+"the operator wants to talk about X." If external-origin intake is ever wanted,
+gascity has its own external-messaging process and it belongs there.
+
+The key binding that fires this from anywhere is tracked separately (tk-bn1oi).
+
 ## How a held sitting ends (source-verified 2026-08-11; attachment rung reconciled 2026-08-12)
 
 A hold has no timeout *in the pack's doctrine* — but the runtime under it

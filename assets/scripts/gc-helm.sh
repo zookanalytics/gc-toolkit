@@ -8,7 +8,7 @@
 #
 # Usage:
 #   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
-#   gc-helm open  <bead-id>                 file a visit on the bead (converse holds it)
+#   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (converse holds it)
 #   gc-helm takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline
 #
 #   board → the operator glances the ranked rows (with a held glyph,
@@ -173,7 +173,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
-  gc-helm open  <bead-id>                 file a visit on the bead (a converse session holds the conversation)
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--release]  set the board-visible takeaway headline
 
@@ -184,6 +184,10 @@ continuation group (pool demand spawns/vacuums a converse session —
 attach via the sessions picker); react slings a proactive first
 reaction (via tools/gc-proactive.sh, on the codex-gated mr path) so a
 takeaway-less row self-heals to an explanatory NEEDS on the next render.
+The two --reason flags differ: open's REPLACES what the visit says it is
+for — --reason is the short title tail and --body the brief the converse
+session reads at claim time (default: the board-pick wording) — while
+react's is log-only operator intent.
 takeaway writes that NEEDS headline directly — the thin writer the host, the
 proactive worker, and the converse role call to stamp gc.takeaway (+_at/+_by)
 in one update; with --release it also reopens/unassigns/clears the route and
@@ -259,7 +263,16 @@ enumerate_rigs() {
         RIGS=$(jq -c '.' < "$FIXTURE/rigs.json" 2>/dev/null || printf '[]')
         [ "$(rigs_count)" -gt 0 ] && return 0
     fi
-    rigs_raw=$(with_timeout "${TIMEOUT:-10}" gc rig list --json 2>/dev/null || true)
+    # TIMEOUT is set ONLY by cmd_board's flag parser, so on the one-shot verbs
+    # (open/react/takeaway) this falls through to the tunable below. That is
+    # deliberate: 10s is a BOARD-RENDER budget — the board fires many queries
+    # and would rather show a thin row than stall — but a one-shot operator
+    # command that exits 3 having filed nothing is the wrong trade for the same
+    # slow answer. Measured 2.6-8.4s for `gc rig list` in a loaded city
+    # (2026-08-14), i.e. the old bound was marginal, and the failure it caused
+    # is worst for gc-visit-open.sh's topic path: the subject bead is already
+    # created by then, so a timeout here strands it visit-less.
+    rigs_raw=$(with_timeout "${TIMEOUT:-${GC_HELM_RIG_TIMEOUT:-30}}" gc rig list --json 2>/dev/null || true)
     RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null || printf '[]')
     if [ "$(rigs_count)" -eq 0 ]; then
         echo "$PROG: could not enumerate rigs (gc rig list returned nothing)" >&2
@@ -528,9 +541,38 @@ cmd_takeaway() {
 # vacuums the visit (warm). One open visit per subject: if one already
 # exists, print its id and the attach hint instead of filing a second.
 # Opening busts the cache so the next board render shows the held glyph.
+#
+# `--reason <short>` and `--body <text>` override what the visit SAYS it is
+# for. The default wording ("operator pick from the board") is true of the
+# board picker and false of every other caller, and the visit body is not
+# decoration: it is written at filing time and read at CLAIM time, often a day
+# later, as the converse session's only statement of what the sitting is about
+# (docs/gascity-human-engagement.md → "A visit body is written at FILING time
+# and read at CLAIM time"). So a second front door reusing this verb — the
+# operator-origin topic intake in assets/scripts/gc-visit-open.sh — passes its
+# own blurb rather than filing a visit that misreports its own origin. Callers
+# reuse the verb instead of copying the gate-visit block, which is why the
+# override lives here and not in a second copy of the block.
+#
+# They are two knobs because the default is two: a SHORT title tail the
+# operator scans in a list, and a LONGER brief the converse session reads. One
+# flag driving both would either bloat every title or starve every brief.
 cmd_open() {
-    bead="${1:-}"
-    case "$bead" in -h|--help) usage; exit 0 ;; "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
+    bead=""; open_reason=""; open_body=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --reason=*) open_reason="${1#--reason=}"; shift ;;
+            --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: open: --reason requires a value" >&2; exit 2; }
+                        open_reason="$1"; shift ;;
+            --body=*)   open_body="${1#--body=}"; shift ;;
+            --body)     shift; [ $# -gt 0 ] || { echo "$PROG: open: --body requires a value" >&2; exit 2; }
+                        open_body="$1"; shift ;;
+            -h|--help)  usage; exit 0 ;;
+            -*) echo "$PROG: open: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: open takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    case "$bead" in "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
 
     # Point bd at the bead's rig so the visit lands in the right per-rig
     # ledger even cross-rig (BEADS_DIR pins bd), and export the bead's
@@ -629,11 +671,25 @@ cmd_open() {
         return 0
     fi
 
+    # What this sitting is FOR, in the caller's words (see --reason/--body
+    # above). Both strings are resolved here, outside the marked block, so the
+    # block itself stays a verbatim copy of the canonical form. A caller that
+    # supplies only --reason gets it in both places rather than a stock body
+    # contradicting a custom title.
+    visit_tail="${open_reason:-operator pick from the board}"
+    if [ -n "$open_body" ]; then
+        visit_body="$open_body"
+    elif [ -n "$open_reason" ]; then
+        visit_body="$open_reason"
+    else
+        visit_body="Operator picked $bead off the helm board: rebuild the subject's slice, prep, hold for the operator."
+    fi
+
     # File the visit — the canonical gate-visit lines (formulas/mol-visit.toml).
     # >>> gate-visit
     POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-    VISIT=$(gc bd create -t task --title "visit: $bead — operator pick from the board" \
-        -d "Operator picked $bead off the helm board: rebuild the subject's slice, prep, hold for the operator." \
+    VISIT=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
+        -d "$visit_body" \
         --json | jq -r '.id // .[0].id')
     [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
         || { echo "$PROG: open: could not create a visit bead for '$bead' (does it exist?)" >&2; exit 4; }
