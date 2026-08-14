@@ -182,7 +182,7 @@ if [ "${#errors[@]}" -ne 0 ]; then
     print_lines "${errors[@]}"
     print_lines "${warnings[@]+"${warnings[@]}"}" "${notes[@]+"${notes[@]}"}"
     echo ""
-    echo "Each of these re-strands on its own cooldown. The durable fix is in the order-discovery path (see specs/tk-gi2pc/rig-scoped-order-unbound-firing.md); until it lands, a deliberate city.toml \`[[orders.overrides]]\` with \`enabled = false\` and no \`rig\` key disables the unbound copy only."
+    echo "Each of these re-strands on its own cooldown. The discovery-path guard that prevents this ALREADY LANDED (gascity internal/orderdiscovery/discovery.go, ScanAll -> dropUnboundRigScoped; gc-xaqpf, written up in specs/tk-gi2pc/rig-scoped-order-unbound-firing.md), so a finding here means that guard was reverted or a newer registration path bypasses it — restore the guard rather than paper over the symptom. Only as an interim stopgap, a deliberate city.toml \`[[orders.overrides]]\` with \`enabled = false\` and no \`rig\` key disables the unbound copy of one named order."
     exit 2
 fi
 
