@@ -487,7 +487,9 @@ lifecycle directly.
 The canonical work chain: `worktree → (push) → branch → (merge) → target`.
 Our job is to ensure work reaches the branch so it's schedulable.
 
-Read the bead metadata to find the worktree and branch:
+Read the bead metadata to find the worktree and branch — and, when the
+orphaned bead is a workflow STEP that records neither, resolve them from its
+anchor before deciding anything:
 ```bash
 META=$(gc bd show <bead> --json | jq '.[0].metadata')
 # gc-toolkit local delta: polecat formula records the per-bead worktree in
@@ -496,6 +498,59 @@ META=$(gc bd show <bead> --json | jq '.[0].metadata')
 # what mol-polecat-work.workspace-setup actually writes.
 WORKTREE=$(echo "$META" | jq -r '.work_dir // empty')
 BRANCH=$(echo "$META" | jq -r '.branch // empty')
+
+# >>> salvage-anchor-resolve
+# BOTH KEYS ARE EMPTY for the shape this step orphans most often (tk-19213). A
+# graph.v2 STEP bead carries `gc.step_ref`, `gc.root_bead_id` and a session name
+# — never a branch or a worktree. Those live on the ANCHOR (the work item), one
+# hop away through the root's input convoy. So the reads above returned nothing,
+# Cases A through D were all skipped, and every orphaned step landed in Case E,
+# "nothing salvageable", however much finished work was sitting on origin.
+#
+# With no branch name in hand the pass improvised, searching remote refs for the
+# only ids it had: the workflow, the convoy, the session. No branch is named
+# after any of those — a polecat branch is `polecat/<work-item-id>` — so the
+# search could not match the branch it existed to find. Step tk-bs8mv was closed
+# "no branch/worktree work to salvage (verified via git branch -r search for
+# s68nh/c2h7d/mnd3, none found)" while `polecat/tk-lv6q5` held the whole
+# implementation, codex-green; it later merged as PR #333. Nothing was lost, and
+# nothing about the check is why.
+#
+# resolve-salvage-branch.sh walks root -> gc.input_convoy_id -> the convoy's
+# single tracked member, then asks origin about that work item's recorded
+# `metadata.branch` and `polecat/<work-item-id>` BY NAME. The old id searches are
+# kept as additional keys and reported as `candidate_refs` — a weak signal, never
+# the verdict. It is read-only.
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/resolve-salvage-branch.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# SALVAGE_BLIND=1 means the search never ran to a conclusion. Case E is gated on
+# it below: "nothing to salvage" is a claim about a search that completed, and
+# the whole failure being fixed here is a pass that made that claim without one.
+SALVAGE_BLIND=0
+SALVAGE_RC=0
+ANCHOR=""
+if [ -z "$SCRIPTS_DIR" ]; then
+  SALVAGE_BLIND=1
+  echo "witness: resolve-salvage-branch.sh not found on any candidate path; cannot resolve an anchor for <bead>." >&2
+else
+  SALVAGE_OUT=$(mktemp)
+  "$SCRIPTS_DIR/resolve-salvage-branch.sh" --bead "<bead>" > "$SALVAGE_OUT"
+  SALVAGE_RC=$?
+  ANCHOR=$(sed -n 's/^anchor=//p' "$SALVAGE_OUT")
+  # The bead's own metadata still wins where it has any: a rejection-resume or a
+  # caller-supplied branch is recorded deliberately. The resolver only fills what
+  # the orphaned bead could not answer for itself.
+  [ -n "$BRANCH" ]   || BRANCH=$(sed -n 's/^branch=//p' "$SALVAGE_OUT")
+  [ -n "$WORKTREE" ] || WORKTREE=$(sed -n 's/^work_dir=//p' "$SALVAGE_OUT")
+  if [ "$SALVAGE_RC" -ne 0 ]; then
+    SALVAGE_BLIND=1
+    echo "witness: resolve-salvage-branch exited $SALVAGE_RC for <bead> (see its stderr); the branch search did not complete." >&2
+  fi
+  rm -f "$SALVAGE_OUT"
+fi
+# <<< salvage-anchor-resolve
 
 # HUSK GUARD (gc-7v0lx / gc-5v01w): a husk work_dir — the git worktree was
 # removed but the directory survives (typically only .gc/ left) — still lets
@@ -662,6 +717,42 @@ Nothing to salvage — a husk's git data is already gone, and no `git add -A` /
 `commit` / `push` may run against it. The bead goes back to pool and a new
 polecat starts fresh.
 
+**Case E requires a completed search — `SALVAGE_BLIND` must be 0.** "Nothing
+to salvage" is a claim about a search that ran and came back empty, and the
+bug this gate closes is a pass that made that claim having never named a
+branch to look for. When `SALVAGE_BLIND=1` the anchor did not resolve, the
+store did not answer, or the remote did not — none of which is evidence that
+the work is not there:
+
+```bash
+if [ "$SALVAGE_BLIND" = "1" ]; then
+  echo "witness: <bead> — branch search did not complete (rc $SALVAGE_RC); NOT concluding Case E. Skipping this bead; the orphan condition re-derives it next cycle." >&2
+  # Do NOT fall through to Step 3: returning the bead to the pool clears the
+  # orphan condition, and with it the only thing that brings this bead back.
+fi
+```
+
+Skip the bead entirely and move to the next one. It stays assigned to a dead
+agent, so it is re-detected rather than re-dispatched, and the next cycle
+retries the resolution — the same shape as the ORPHAN_CLOSED one-shot above.
+An orphan that waits a cycle costs one patrol pass; an orphan wrongly declared
+empty costs the branch.
+
+**What a skip does and does not risk.** A resolution that stays blind — a root
+row genuinely gone, say — is retried every cycle and never recovered, so the
+diagnostic above repeats on the patrol's stderr indefinitely. That is loud on
+purpose, and it is not a data risk: `recover-stranded-branches` selects work
+beads by their OWN `metadata.branch` and a published head, with no reference to
+any workflow root, so PUBLISHED work behind a skipped step is already owned by
+that pass. What a skip does defer is UNPUBLISHED worktree work — the Case C and
+D writes — which is exactly what the anchor's `work_dir` above exists to reach.
+A bead blind across many cycles is worth the mayor's attention under the
+Escalation discipline above; it is not worth guessing a branch for.
+
+Whatever `$ANCHOR` resolved to belongs in the Step 4 notice: for a step bead
+it names the work item whose branch was searched, which is the one thing a
+reader needs to check the verdict by hand.
+
 **Step 3: Verify work on main before resetting.**
 
 Before resetting the bead to pool, check if the branch was already merged
@@ -672,7 +763,24 @@ git log main --oneline | grep -q "$BRANCH"
 git merge-base --is-ancestor origin/$BRANCH origin/main
 ```
 
-If the work is already on main:
+**A branch that came from the ANCHOR does not license closing THIS bead.**
+Now that a step bead resolves a branch (see `salvage-anchor-resolve` above),
+"already on main" can be true of a bead that is not the one holding the work:
+`$ANCHOR` non-empty means `$BRANCH` belongs to the work item, and the verdict
+is about the work item's branch, not about this step. Closing the step is the
+one thing that must not happen — `load-context` closed unblocks
+`workspace-setup`, which is pool-routed, and the next polecat walks forward
+into re-implementing on a branch that is already merged. Send it to Step 3b
+instead, where `gc workflow delete-source` retires the whole subtree the way
+the machinery does:
+
+```bash
+if [ -n "$ANCHOR" ]; then
+  echo "witness: <bead> is a workflow STEP; the merged branch $BRANCH belongs to anchor $ANCHOR. Not closing the step — falling through to Step 3b." >&2
+fi
+```
+
+If the work is already on main **and the bead owns the branch itself**:
 - **Close the bead** (work is done, don't re-dispatch). Bead-scoped, so it
   goes through the gate — and the gate call comes BEFORE the close,
   because the gate stamps `escalated.<kind>` on this same bead and that
