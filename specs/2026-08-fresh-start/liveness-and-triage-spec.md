@@ -255,8 +255,12 @@ programmatic short-circuit INVERTS that: a script that silently returns
 empty on a bad jq or a degraded store files nothing and looks perfectly
 healthy, and there is no agent left to find the result strange. So the
 precheck concludes empty only from positively verified reads — every
-read validated as a JSON array, one guarded assignment as the only path
-to "skip", and an exit trap that turns any abort into a run. Its
+read required to exit 0 AND validate as a JSON array, one guarded
+assignment as the only path to "skip", and an exit trap that turns any
+abort into a run. Both halves of the read check are load-bearing: a
+failed call can still print a well-formed array, and `[]` from a dead
+store is byte-identical to `[]` from an idle board, so a shape-only
+test would read an outage as "nothing to report" (tk-zydg6). Its
 `check_timeout` is held above the script's own worst case, because a
 condition check killed by that deadline reads as NOT DUE, which is
 precisely the silent skip being designed out. It writes no bead: in

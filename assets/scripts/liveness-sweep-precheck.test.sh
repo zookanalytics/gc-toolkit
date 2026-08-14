@@ -92,11 +92,19 @@ case "$sub" in
 esac
 # FAIL_<name> is a call that fails the way a real outage does: non-zero, no
 # output. GARBAGE_<name> is the subtler one — a call that SUCCEEDS and answers
-# with something that is not a JSON array.
+# with something that is not a JSON array. NONZERO_<name> is the subtlest of the
+# three and the only one a shape-only check cannot see: the call FAILS and still
+# leaves a perfectly well-formed array on stdout — a timeout killed after the
+# first flush, a store that errors partway through a listing, a `gc` that
+# reports a stale schema on stderr and exits non-zero. Its stdout is
+# indistinguishable from a genuinely empty board, so nothing but the exit status
+# can tell the two apart.
 eval "fail=\${FAIL_${name}:-}"
 eval "garbage=\${GARBAGE_${name}:-}"
+eval "nonzero=\${NONZERO_${name}:-}"
 [ -n "$fail" ] && exit 1
 [ -n "$garbage" ] && { printf '%s\n' '{"error":"store is migrating"}'; exit 0; }
+[ -n "$nonzero" ] && { printf '%s\n' '[]'; exit 1; }
 cat "$FIXDIR/$name.json"
 GC
 chmod +x "$TMP/bin/gc"
@@ -282,6 +290,24 @@ for probe in ready live widen; do
     OUT="$(bash -c "export GARBAGE_${probe}=1; exec \"\$0\" --force --dry-run" "$SCRIPT" 2>&1)"; RC=$?
     eq "$RC" "0" "a NON-ARRAY $probe answer RUNS the pass"
     has "$OUT" "UNREADABLE" "a non-array $probe answer is unreadable, not empty"
+done
+
+# The gap a shape-only check leaves wide open, and the reason the read's own
+# exit status is required and not merely observed: a failed call whose stdout IS
+# a JSON array. `[]` from a call that exited non-zero is byte-identical to `[]`
+# from a healthy empty board, so a check that consults only the shape reads a
+# store outage as "nothing to report" and skips — silently, on every pass, for
+# as long as the outage lasts. That is precisely the inversion this whole file
+# exists to pin shut, arriving through the one door left open.
+#
+# The board is still the emptied one the control above proved really does SKIP,
+# so a RUN here can be the non-zero status and nothing else.
+for probe in ready live widen; do
+    OUT="$(bash -c "export NONZERO_${probe}=1; exec \"\$0\" --force --dry-run" "$SCRIPT" 2>&1)"; RC=$?
+    eq "$RC" "0" "a $probe read that exits NON-ZERO with a valid array RUNS the pass"
+    hasnt "$OUT" "SKIP:" "an array-shaped answer from a FAILED $probe call does not skip"
+    has "$OUT" "UNREADABLE" "a failed $probe call is unreadable however good its stdout looks"
+    has "$OUT" "$probe" "the diagnostic names the $probe read"
 done
 
 echo "── the standing subject must resolve, or there is no baseline to trust ──"

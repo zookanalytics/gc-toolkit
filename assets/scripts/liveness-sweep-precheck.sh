@@ -100,8 +100,11 @@
 #
 #   * DECISION is initialised to `run` and exactly ONE line in the file sets it
 #     to `skip`, guarded on every positive fact at once;
-#   * every read is validated as a JSON array before it is used, and the jq
-#     output is validated as a JSON array before it is counted;
+#   * every read must BOTH succeed — the bounded call's own exit status, which
+#     `pipefail` makes the pipeline's — and validate as a JSON array before it
+#     is used, because a failed call can still print a well-formed array and
+#     `[]` from a dead store is byte-identical to `[]` from an idle board; the
+#     jq output is validated as a JSON array before it is counted;
 #   * an EXIT trap fires when the script leaves without having decided — an
 #     abort, a signal, a bad edit — and that path exits 0, i.e. RUNS THE PASS.
 #
@@ -311,14 +314,33 @@ strip_ctrl() { tr -d '\000-\010\013\014\016-\037'; }
 
 bd_read() { # bd_read <outfile> <subcommand> <flags...>
     local out="$1"; shift
+    local rc
     if [ -n "$DB" ]; then
         bounded gc bd "$1" --db "$DB" "${@:2}" 2>/dev/null | strip_ctrl > "$out"
+        rc=$?
     else
         bounded gc bd "$@" 2>/dev/null | strip_ctrl > "$out"
+        rc=$?
     fi
-    # The pipeline's status is deliberately not consulted: a truncated or absent
-    # answer fails this check anyway, and this is the check that matters.
-    jq -e 'type == "array"' "$out" >/dev/null 2>&1
+    # BOTH halves are required, and the status is the half that cannot be
+    # inferred from the answer. A failing call can still leave a well-formed
+    # array on stdout — `timeout` killing the call after the opening `[` was
+    # flushed, a store erroring partway through a listing, a `gc` that writes its
+    # complaint to stderr and exits non-zero — and `[]` from a call that FAILED
+    # is byte-identical to `[]` from a healthy empty board. Shape alone therefore
+    # reads an outage as "nothing to report", which is the one direction this
+    # script must never take: an unreadable probe excludes nothing, so a read
+    # that did not demonstrably succeed can never be eligible for SKIP.
+    # `set -o pipefail` is in force (see the top of the file), so $rc is the
+    # bounded `gc bd` call's own failure or timeout, not merely strip_ctrl's.
+    LAST_READ_ERR=""
+    if [ "$rc" -ne 0 ]; then
+        LAST_READ_ERR="the call failed or timed out, rc=$rc"
+        return 1
+    fi
+    jq -e 'type == "array"' "$out" >/dev/null 2>&1 && return 0
+    LAST_READ_ERR="the answer is not a JSON array"
+    return 1
 }
 
 # --- the three reads ---------------------------------------------------------
@@ -331,14 +353,19 @@ bd_read() { # bd_read <outfile> <subcommand> <flags...>
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
 READS_OK=1
 READ_FAIL=""
+# Set by every bd_read, and read only on its failure branch. Declared here as
+# well because `set -u` is in force: a first assignment that lives inside the
+# function would abort the script on any path that reached the branch first.
+LAST_READ_ERR=""
 
-bd_read "$READY" ready --unassigned --limit=0 --json || { READS_OK=0; READ_FAIL="ready"; }
-bd_read "$LIVE"  list --status=open,in_progress --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL, }live"; }
-bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL, }widen"; }
+bd_read "$READY" ready --unassigned --limit=0 --json || { READS_OK=0; READ_FAIL="ready: $LAST_READ_ERR"; }
+bd_read "$LIVE"  list --status=open,in_progress --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }live: $LAST_READ_ERR"; }
+bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }widen: $LAST_READ_ERR"; }
 
 if [ "$READS_OK" -eq 1 ]; then
     jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE" 2>/dev/null
-    jq -e 'type == "array"' "$ALIVE" >/dev/null 2>&1 || { READS_OK=0; READ_FAIL="alive-merge"; }
+    jq -e 'type == "array"' "$ALIVE" >/dev/null 2>&1 \
+        || { READS_OK=0; READ_FAIL="alive-merge: the merged not-closed set is not a JSON array"; }
 fi
 
 N_READY=""; N_LIVE=""; N_ALIVE=""
@@ -461,9 +488,9 @@ DECIDED=1
 # --- report ------------------------------------------------------------------
 say "liveness-sweep precheck — rig ${GC_RIG:-<none>} · store ${DB:-<ambient>}"
 if [ "$READS_OK" -eq 1 ]; then
-    say "  reads: ready $N_READY · live $N_LIVE · alive $N_ALIVE — all verified as JSON arrays"
+    say "  reads: ready $N_READY · live $N_LIVE · alive $N_ALIVE — every call exited 0 and answered a JSON array"
 else
-    say "  reads: FAILED ($READ_FAIL) — not a JSON array, or the call failed/timed out"
+    say "  reads: FAILED — $READ_FAIL"
 fi
 if [ -n "$SUBJECT" ]; then
     if [ -n "$LIVE_VISIT" ]; then VISIT_WORD=yes; else VISIT_WORD=no; fi
