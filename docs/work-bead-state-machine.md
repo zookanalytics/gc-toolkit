@@ -929,6 +929,25 @@ landing the PR past a red codex gate. The re-review dispatched at hand-back
 anchors to the existing anchor (its `check.<name>` markers are the ones the
 merge skill and `pre-open-resolve.sh` read).
 
+**That re-review has a deterministic owner, not just a hand-back step.** The
+hand-back dispatch is prose in the refinery formula, so it runs only if the session
+handling the hand-back performs it — and on the **pre-open** path nothing else did:
+`pre-open-resolve.sh` can only HOLD ("codex not green at live head"), and the merge
+skill never sees a pre-open anchor at all. An anchor whose `REQUEST_CHANGES`
+signoff cleared `check.codex` therefore sat with a perfectly normal `check_set`, no
+marker and nothing in flight, waiting for a human to notice — four hand-dispatches
+inside one patrol on 2026-08-01. `check-set-heal.sh`'s satisfiability sweep is the
+backstop: it runs over **every** gating anchor, so an absent marker re-dispatches
+the signoff on the next idle pass whether or not the hand-back step ran. It reads
+the marker by its WS4 verb (tk-zgse0): an absent one re-dispatches, a `green@`
+re-dispatches only when its oid is malformed or stale-at-the-live-head on a
+pre-open anchor, and an `exception@`, `fixable@`, or no-verb (unmappable) marker
+is left to `reconcile-gate-verdicts.sh`, never re-gated here. What counts as "in
+flight" is narrowed to match, since a hand-back leaves the child OPEN with its
+route cleared: a candidate suppresses the dispatch only if something will actually
+**act** on it (a review; any live status other than plain `open`; a pool-routed
+bead) — an assignee alone is not agency, and a handed-back child has one.
+
 **A PR claimed by more than one anchor is ONE gate, not several (tk-3sdfq).**
 Pairs still arise. Two `pre_open_gate` anchors on one branch become two
 `pull_request` anchors *by design*: the anchor that opens the PR flips its
@@ -1250,11 +1269,51 @@ operator fixup) sits in a **silent indefinite hold**. The merge skill correctly
 refuses (its stale-head guard: `green@<oid>` must equal the *live* head), but with
 nothing re-dispatching the review the anchor is indistinguishable from a healthy
 PR awaiting approval — it never merges, never rejects, never escalates. The
-in-band re-gate paths do not reach it: `find-work` skips `assignee=""` anchors,
-the auto-re-dispatch arm fires only on a polecat rework hand-back, and
-`check-set-heal.sh` heals only an *empty* check-set and explicitly assumes a
-green-at-a-stale-head marker "re-gates through the normal rework path" — the exact
-assumption the no-rework-bead push disproves.
+in-band re-gate paths do not reach it: `find-work` skips `assignee=""` anchors, and
+the auto-re-dispatch arm fires only on a polecat rework hand-back.
+
+`check-set-heal.sh` does not reach it either, and that is now a **deliberate
+division of labour** rather than the gap it once was (it used to heal only an
+*empty* check-set and assume a green-at-a-stale-head marker "re-gates through the
+normal rework path" — the assumption a no-rework-bead push disproves). The two
+passes split the marker states, disjointly, so exactly one of them ever dispatches:
+
+| marker on the anchor | `pre_open_gate` | `pull_request` |
+|---|---|---|
+| `green@<live head>` | satisfiable — nobody acts | satisfiable — nobody acts |
+| absent (never reviewed, or CLEARED by a `REQUEST_CHANGES` signoff) | `check-set-heal.sh` | `check-set-heal.sh` |
+| `green@<other oid>` (head moved) | `check-set-heal.sh` — the observer cannot see a pre-open anchor at all, since it enumerates `merge_result=pull_request` | **the observer** (this section) — it carries `merge_hold` and one-re-review-per-head guards the heal pass does not |
+| `green@<malformed oid>` (`green@`, `green@<not-hex>`) | `check-set-heal.sh` — re-gated without a head read: no head can equal it | **the observer** — its stale-gate arm matches `green@<non-empty oid>` |
+| no verb (`green`, `red`, any value with no `@`) | `reconcile-gate-verdicts.sh` (R12a) — unmappable; neither pass here re-gates it | `reconcile-gate-verdicts.sh` (R12a) |
+
+Both `pull_request` cells carry one exception: an anchor whose PR has already
+reached a **terminal** state — MERGED, or CLOSED out of band — is *not* re-gated,
+whatever its marker says. `check-set-heal.sh` certifies the PR still OPEN before
+dispatching a post-open re-gate and skips the rest. An absent marker is the normal
+shape behind a merged PR (the signoff that cleared it has nothing left to
+re-stamp), and this pass runs *before* the observer in the same patrol, so without
+the check it would spend a codex review on a pull request nobody can merge and
+route an inert review child ahead of the observer that was about to close the
+anchor — or escalate an out-of-band close. Disposing of a terminal PR is the
+observer's job, not a reviewer's. The check fails **soft**: an unreadable state
+dispatches anyway, because suppressing on one would re-create the pre-open park
+this sweep exists to end, and a rig without `gh` behaves exactly as it did before.
+A reopened PR is picked up on the next pass, since the state is re-read each time.
+
+The malformed rows are not pedantry about spelling. The merge skill clears a gate
+by **string equality** against `green@<live head>`, so any other shape is
+unmeetable for as long as it stands, and read as merely "present" such an anchor
+parked: gate armed, no dispatch, no escalation, no merge. WS4 (tk-zgse0) split
+these by **verb**, and the two rows follow it. A value with the `green` verb but a
+malformed oid (`green@`, `green@<not-hex>`) still names the green verdict, so it
+stays `check-set-heal.sh`'s on a pre-open anchor — re-gated without a head read,
+since no head can equal it — and the observer's on a post-open one (its stale-gate
+arm matches `green@<non-empty oid>`). A value that names **no verb** (`green`,
+`red`, anything without an `@`) is *unmappable*: `reconcile-gate-verdicts.sh`
+records the terminal R12a exception for it later in the same patrol wake, so
+re-gating it here would spawn a reviewer that later stamps `green@` over that
+exception. That is why `check-set-heal.sh` skips no-verb markers (see the R12
+section above) — the two statements are the same rule.
 
 The observer therefore files a **codex re-review child** of the anchor at the LIVE
 head and routes it to the review pool, the same shape as the stale-base rebase
@@ -1570,16 +1629,19 @@ shape the damage most often produces — an anchor that came back still carrying
 `codex`. Dropped from the enumeration, it passes a gatedness-only check in silence.
 So reach and gatedness are two questions: unreached *and* ungated is the
 ungated-merge condition and holds the whole pass; unreached but gated is held by its
-own armed gate, so it is reported and left to the next pass, which the durable
-`merge_result_healed` marker carries it into.
+own armed gate, so it is reported and left to the next pass.
 
-That handoff is also why a recovered anchor keeps flowing through the
-satisfiability check even when its `check_set` already reads normal. The damage
-that dropped `merge_result` need not have dropped `check_set` too: an anchor can
-come back carrying `codex` and no `check.codex` marker, which looks "already
-normalized" while having nothing that can ever raise its gate. Treating
-`merge_result_healed` as a reason to keep checking — alongside `check_set_healed` —
-is what stops the repair from trading an invisible PR for a permanently stuck one.
+A recovered anchor must also keep flowing through the **satisfiability** check even
+when its `check_set` already reads normal. The damage that dropped `merge_result`
+need not have dropped `check_set` too: an anchor can come back carrying `codex` and
+no `check.codex` marker, which looks "already normalized" while having nothing that
+can ever raise its gate — an invisible PR traded for a permanently stuck one. That
+was first held open by treating `merge_result_healed` as a reason to keep checking,
+alongside `check_set_healed`. **Both markers are now audit trail only**: *every*
+gating anchor naming a real gate reaches the satisfiability check, whether it was
+repaired or normalized normally, so the exposure cannot recur under any marker —
+present, absent, or dropped. That is the same widening the pre-open rework
+hand-back needed (see the stale-gate table above); one rule covers both.
 
 **A signoff already in flight is a claim about reachability, and the heal checks
 it.** The dispatch is skipped when a review for the anchor already exists — that

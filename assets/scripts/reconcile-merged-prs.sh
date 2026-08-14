@@ -1576,10 +1576,16 @@ Repair — check the child's work order, then dispatch it:
   # branch, an operator fixup — sits in a SILENT indefinite hold: merge-skill.sh
   # correctly refuses (its stale-head guard: green@<oid> != live head), but before
   # this arm NOTHING re-dispatched the review, so the anchor was indistinguishable
-  # from a healthy PR awaiting approval (WS4 GAP1, su-PR#31 class). check-set-heal.sh
-  # heals the DISJOINT empty-check_set case and EXPLICITLY punts on stale-green
-  # ("re-gates through the normal rework path") — the exact assumption this bug
-  # disproves for the no-rework-bead path, so the two passes are complementary.
+  # from a healthy PR awaiting approval (WS4 GAP1, su-PR#31 class).
+  #
+  # DIVISION OF LABOUR with check-set-heal.sh (tk-t46nq). That pass owns the ABSENT
+  # marker — "never reviewed", or CLEARED by a REQUEST_CHANGES signoff — on both
+  # gating sub-states, and it owns STALE-green on PRE-OPEN anchors, which this pass
+  # cannot even see (it enumerates merge_result=pull_request, and a pre-open anchor
+  # has no PR). THIS arm owns stale-green on an OPEN PR, and keeps it: the guards
+  # below (merge_hold, one-re-review-per-head via stale_gate_head, the PR-scoped
+  # in-flight probe) have no equivalent there. The two are disjoint by marker state
+  # and sub-state, so exactly one pass dispatches and neither twins the other.
   #
   # The remedy is ALWAYS a real review at the live head, NEVER a hand-stamped
   # check.codex=green: stamping green here would certify an UNREVIEWED commit (the
