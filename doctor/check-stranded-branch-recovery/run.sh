@@ -45,6 +45,28 @@ else
     grep -q 'is_alive' "$dir/$script" \
         || errors+=("$script: the session-liveness lookup is gone — nothing can prove a molecule husked")
 
+    # And it must be REACHED. The guard used to sit last, after the "branch is not on
+    # origin" refusal had already returned — which made it unreachable for the one
+    # bead it protects: a polecat carries `metadata.branch` from workspace-setup and
+    # nothing on origin until it pushes, so every implementation outlasting the age
+    # gate was marked as vanished work while it was healthily mid-edit (tk-pwm2g).
+    # A reordering that puts any refusal back above the liveness resolution restores
+    # that, and it is invisible from the outside — the marker is written on beads
+    # whose work lands normally.
+    awk '
+      /MOLECULE_LIVE=1/              { if (!live) live = NR }
+      /report_only .*BRANCH@missing/ { if (!miss) miss = NR }
+      END { exit !(live && miss && live < miss) }
+    ' "$dir/$script" \
+        || errors+=("$script: the unpublished-branch refusal is no longer gated by the liveness resolution — a running polecat that has not pushed yet would be flagged as vanished work on every pass")
+
+    # A refusal this pass can outlive has to be withdrawable. `<branch>@missing` is
+    # the only marker that does not name a tip, so nothing about a later push expires
+    # it, and the bead it sits on is usually handed to the refinery minutes later —
+    # out of the candidate set, where no future pass would revisit it.
+    grep -q -- '--unset-metadata stranded_branch_flagged' "$dir/$script" \
+        || errors+=("$script: the stale-marker retraction is gone — a '<branch>@missing' marker would outlive the branch it claims never existed, on a bead a human reads next")
+
     # Both fail-safes. Each one, if lost, converts an unreadable input into a
     # confident wrong answer: an unread roster makes every live session look dead,
     # and an unreadable bead listing removes the molecule map the liveness gate is
@@ -110,6 +132,10 @@ else
         || errors+=("$test_script: no unverified-handoff case — that a non-durable branch/target write stops the handoff BEFORE the assignee is unproven")
     grep -q 'INPROG' "$dir/$test_script" \
         || errors+=("$test_script: no in_progress-strand case — that a recovered bead is handed over as status=open, the only status the refinery's find-work polls, is unproven")
+    grep -q 'LIVEMISS' "$dir/$test_script" \
+        || errors+=("$test_script: no live-but-unpushed case — that the liveness gate is reached BEFORE the unpublished-branch refusal, and not merely present, is unproven")
+    grep -q 'RETRACT' "$dir/$test_script" \
+        || errors+=("$test_script: no retraction case — that a '<branch>@missing' marker is withdrawn once the branch appears on origin is unproven")
 fi
 
 # --- the call site ---------------------------------------------------------

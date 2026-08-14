@@ -83,7 +83,7 @@ status.
 | `reconcile-merged-prs.sh:697` (observer) | `--status=open` + `merge_result=pull_request` | acts on it | no |
 | `reconcile-gate-verdicts.sh:390,392` | `--status=open` + either marker | acts on it | no |
 | `check-set-heal.sh:1382` | `--status=open` + metadata key | acts on it | no |
-| `recover-stranded-branches.sh:190-193` | assignee `""` **and** routed_to `""` **and** `branch` **and** `merge_result==""` **and** no PR ref **and** no live session **and** min-age | **excluded by `merge_result`** | no |
+| `recover-stranded-branches.sh:218-221` | assignee `""` **and** routed_to `""` **and** `branch` **and** `merge_result==""` **and** no PR ref **and** no live session **and** min-age | **excluded by `merge_result`** | no |
 | witness `recover-orphaned-beads` | `select((.assignee // "") != "")` | **never in the candidate set** | no |
 | `quiesce-completed-workflows.sh` | `is_terminal_anchor` — five arms, incl. both markers | de-routes the husk's dead steps | no |
 | `doctor/check-routed-work-claimable` | requires `gc.routed_to` **non-empty** | never sees it | no |

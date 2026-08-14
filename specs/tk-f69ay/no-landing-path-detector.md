@@ -1,6 +1,6 @@
 ---
 name: Detecting published work with no landing path
-description: Why the stranded-branch detector gates on molecule liveness rather than on an empty assignee, why it repairs by handing off instead of re-dispatching, and why the report's `gc.routed_to=""` aside was deliberately NOT implemented.
+description: Why the stranded-branch detector gates on molecule liveness rather than on an empty assignee, why that gate has to run ahead of every refusal and not just the handoff, why a `<branch>@missing` refusal is retracted rather than left to expire, why it repairs by handing off instead of re-dispatching, and why the report's `gc.routed_to=""` aside was deliberately NOT implemented.
 ---
 
 # Detecting published work with no landing path
@@ -178,3 +178,71 @@ human-facing signal anywhere. So the marker records the refusal's escalation cla
 as well as its tip, and a quiet marker never suppresses a loud refusal — while the
 mail itself stays bounded to once per `(branch, tip)`, since a second reason to look
 at the same commit does not need a second summons.
+
+## A gate that is right has to be REACHED (tk-pwm2g)
+
+The liveness resolution originally ran last, immediately before the handoff — the
+only place it could change whether work moved. Everything above it was "merely"
+reporting, so its order looked like a detail. It was not.
+
+The refusal directly above it, `branch is not on origin`, returns for a bead whose
+recorded branch has no remote ref. That is precisely what a **healthy** polecat looks
+like for most of its life: `workspace-setup` stamps `metadata.branch` at the very
+start of the molecule, and the branch does not reach origin until the push, tens of
+minutes later. The `--min-age-minutes` backstop cannot separate the two — as this
+document already says, implementation routinely outlasts any age threshold, which is
+the entire reason liveness is the guard. So every implementation that ran past the
+threshold was marked `stranded_branch_flagged=<branch>@missing` while its polecat was
+healthily mid-edit, and the guard that would have skipped it was three refusals
+downstream, unreachable.
+
+Observed on tk-76jxq: branch stamped ~16:04Z, commit 16:21Z, pushed 16:49:33Z, marker
+written 16:50:15Z — 42 seconds *after* the branch it says does not exist appeared on
+origin. Blast radius was small by construction (that arm passes `escalate=0`, so no
+mail; and `<branch>@missing` can never equal a later `<branch>@<sha>`, so it suppresses
+no genuine refusal). The cost is a false durable claim on a bead that shipped
+normally, read by whoever touches it next, and it recurred on every long
+implementation.
+
+So liveness now runs ahead of **every** refusal rather than only the handoff, and the
+convoy chain it resolves through is read with it. A bead with something alive behind
+it is not this pass's business in any direction: the pass's outputs are a handoff, a
+durable marker, and sometimes a mail to the mayor, and none of the three is
+appropriate for work in progress. The one arm that cannot be ordered behind the guard
+is the unreadable dependency list, since the guard is resolved *through* that list —
+when it fails on a bead with nothing on origin, the pass has established neither fact
+it reasons from and says nothing at all, rather than writing the `@missing` claim it
+just failed to establish.
+
+## A refusal that can outlive its condition has to be withdrawable
+
+`<branch>@missing` is the only marker this pass writes that does not name a tip.
+Every other one is keyed to `<branch>@<sha>`, so the next commit expires it
+automatically. This one names the *absence* of a commit, and nothing about a later
+push makes it stop reading as true.
+
+It also sits on the one bead class the pass will never look at again. A polecat
+flagged mid-implementation finishes normally minutes later and hands the bead to the
+refinery — which gives it an assignee, and an assignee takes it out of the candidate
+enumeration for good. The marker then outlives, by an unbounded margin, the branch it
+claims never existed.
+
+So the pass sweeps the `@missing` class before it examines any candidate: one
+`ls-remote` per flagged bead, clearing the marker as soon as the remote answers for
+the branch. Three properties are deliberate:
+
+- **Not restricted to the candidate set.** The handed-off bead is the main case. The
+  sweep reuses the same branch-carrying listing the candidate scan already reads —
+  every bead that can carry the marker carries `metadata.branch` — so it costs no
+  extra query.
+- **Liveness is not consulted.** A live molecule is the usual reason a bead was
+  wrongly flagged, so gating the retraction on the condition that produced the flag
+  would leave it in place on exactly the beads it is most wrong about.
+- **Only the `@missing` class, and only where the marker names the bead's current
+  branch.** A marker naming a real tip expires on its own; one naming some earlier
+  branch is a refusal about a ref this pass has not re-examined, and clearing it would
+  erase an unchecked claim rather than a disproved one.
+
+What is NOT in scope here: telling a dead polecat's branch from one whose content was
+already ported by other means (patch-id / cherry / merge-base). That discriminator is
+tk-zmrui and touches the same file; it is deliberately not folded in.
