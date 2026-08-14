@@ -121,20 +121,61 @@
 #   state. Nothing on a bead records when `merge_result` was written (surveyed:
 #   no companion timestamp, `updated_at` is rewritten by every patrol that touches
 #   the anchor, `started_at` moves with the anchor's latest claim, and
-#   `bd history --json` snapshots carry no metadata at all), so the pass records
-#   the one fact it can honestly know: `quiesce.terminal_since` on the anchor, the
-#   FIRST time this pass observed it terminal. A molecule materialized after that
-#   instant provably postdates the terminal state and is left alone.
+#   `bd history --json` snapshots carry no metadata at all), so the pass has to
+#   build the date itself, out of its own observations, in `quiesce.terminal_since`
+#   on the anchor. That key holds this pass's LAST OBSERVATION of the anchor, and
+#   takes exactly two shapes:
 #
-#   The stamp is written on first sighting and the SAME pass proceeds to quiesce:
-#   every molecule that already exists predates the stamp, so behavior on today's
-#   population is unchanged and there is no rollout gap. It protects the molecules
-#   poured AFTER it — which is the whole population at risk, since a rework is
-#   dispatched against an anchor that has been parked in the merge gate for hours.
-#   It is CLEARED when the anchor is next seen non-terminal, so a repool-and-rework
-#   round is dated from its own first sighting rather than the previous round's.
-#   The residual window is one patrol cycle at the head of a terminal episode —
-#   where the PR has just been opened and no rework can have been dispatched yet.
+#     live      the anchor was observed NON-terminal. Written (idempotently) on
+#               every live verdict — it both discards a previous episode's date and
+#               is the record that this pass had eyes on the anchor before the
+#               episode that follows.
+#     <ISO ts>  the anchor was observed terminal, having been observed `live`
+#               immediately before. THAT is what makes the timestamp a bound on the
+#               transition rather than a guess: the marker was written between the
+#               previous pass and this one.
+#
+#   A molecule materialized after a dated transition provably postdates the terminal
+#   state — a rework by construction — and is left alone.
+#
+#   AN UNDATED EPISODE IS NOT EVIDENCE OF ANYTHING (tk-fotoi). The key is ABSENT
+#   whenever this pass has never seen the anchor live: at rollout, after a witness
+#   outage, on an anchor first met mid-episode, or when the stamp write is refused.
+#   In that state the pass cannot tell a husk (molecule poured, then its own work
+#   made the anchor terminal) from the sl-xhfl shape (anchor terminal for hours,
+#   rework molecule poured against it) — BOTH have a molecule older than anything
+#   we know, and both wear the zero-closed signature guard 2 reads. An earlier cut
+#   of this guard stamped `now` on first sighting and swept in the same pass, on the
+#   reasoning that "every molecule that already exists predates the stamp". It does
+#   — and that is exactly why the stamp proves nothing about them. So for the
+#   ambiguous reasons the undated path is NON-DESTRUCTIVE: the root is left alone
+#   and counted `undated`. Only `closed` and `merged` — the two states no live
+#   molecule wears at all — are swept without a dated transition.
+#
+#   Nothing is written on that path either. A date invented on first sighting is a
+#   guess, and the next pass would read it back as evidence and sweep on it; leaving
+#   the key absent keeps the pass honestly ignorant until it earns an observation.
+#
+#   AND THE STAMP IS READ BACK before it is trusted (tk-fotoi). `gc bd update` can
+#   report success on a write that never lands, and a stamp that does not persist
+#   turns every subsequent pass back into a first sighting — the failure mode above,
+#   repeating forever under an anchor whose episode looks freshly dated each cycle.
+#   So the transition write is re-read from the store, and a value that does not
+#   come back is treated as the undated episode it actually is.
+#
+#   THE COST, stated plainly: an anchor that is already terminal when this pass
+#   first meets it is never swept for an ambiguous reason. Its husk keeps burning
+#   wisps until the anchor lands (`closed`/`merged`, swept unconditionally) or is
+#   repooled (seen live, which arms the dating), and the witness's manual sweep is
+#   the fallback in between. That is the rollout population, once. Every episode
+#   that BEGINS under patrol coverage is dated from its own transition and swept
+#   normally, one cycle later.
+#
+#   The residual window is one patrol cycle at the head of a dated episode — a
+#   rework dispatched between the live observation and the terminal one is swept.
+#   The pre-open gate makes that implausible in practice (a review round is many
+#   minutes), and it is bounded by the patrol interval rather than by how long the
+#   anchor has been parked.
 #
 #   GUARD 2 — THE MARKER ARRIVED MID-FLIGHT. Not every graph.v2 formula executes
 #   inline. mol-scoped-work drives its steps ONE AT A TIME (each attempt bead is
@@ -155,8 +196,9 @@
 #   which is what mol-polecat-work produces by construction and what the pass was
 #   built for.
 #
-# Both guards fail CLOSED: an unreadable stamp, an unparseable timestamp or an
-# unreadable closed-step listing skips the root, exactly like an unresolved anchor.
+# Both guards fail CLOSED: an unreadable stamp, an unparseable timestamp, a stamp
+# that will not persist, an episode we never saw begin, or an unreadable closed-step
+# listing all leave the root alone, exactly like an unresolved anchor.
 #
 # THE ONE UNRESOLVED SHAPE WE ACT ON: A DELETED ROOT (tk-7g37t). Anchor resolution
 # runs through the ROOT bead (root -> gc.input_convoy_id -> the convoy's single
@@ -416,6 +458,20 @@ molecule_closed_step_count() {
   printf '%s' "$_n"
 }
 
+# Re-read guard 1's observation key straight from the store (tk-fotoi). `gc bd
+# update` reporting success is not proof the value landed, and a stamp that did not
+# land makes the NEXT pass a first sighting again — the undated episode, dressed up
+# as a freshly dated one, every cycle. So the transition write is read back and only
+# a value that comes back is allowed to license a sweep.
+#
+# Echoes whatever the store holds, and NOTHING when the read itself fails — which
+# the caller must treat exactly like an absent stamp, since a read it could not make
+# is not evidence that a write it could not verify succeeded.
+anchor_stamp() {
+  gc bd show "$1" --json 2>/dev/null \
+    | jq -r --arg k "$STAMP_KEY" '.[0].metadata[$k] // ""' 2>/dev/null
+}
+
 # Did the store DEFINITIVELY answer "no such bead", as opposed to failing to
 # answer at all? See the header for why the difference is the whole safety of the
 # absent-root arm, and for the three observed response shapes.
@@ -503,18 +559,22 @@ ROOTS=$(printf '%s\n' "$ROWS" | jq -r -s 'map(.root) | map(select(. != "")) | un
   || { echo "quiesce-completed-workflows: no resolvable workflow roots"; exit 0; }
 
 quiesced=0; roots_done=0; roots_live=0; already=0; unresolved=0; failed=0; orphaned=0
-postdated=0; advanced=0
+postdated=0; advanced=0; undated=0
 
-# Guard 1's observation stamp (see header): the key on the ANCHOR recording when
-# this pass FIRST saw it terminal, and the instant every stamp in this pass is
-# dated with — one reading for the whole sweep, so two roots sharing an anchor
-# cannot date it differently.
+# Guard 1's observation key (see header): the key on the ANCHOR recording this
+# pass's LAST OBSERVATION of it — the `live` sentinel while it is non-terminal, and
+# the instant of the transition once it goes terminal under our eyes. NOW_TS is the
+# instant every stamp in this pass is dated with — one reading for the whole sweep,
+# so two roots sharing an anchor cannot date it differently.
 STAMP_KEY="quiesce.terminal_since"
+SEEN_LIVE="live"
 NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
 # An unusable clock disables the WRITE, never the comparison: stamps already on
 # anchors stay authoritative and keep protecting the molecules they cover, while a
 # new episode goes undated rather than being dated with an empty value — which
-# round-trips, reads back as "never observed", and would re-stamp every cycle.
+# round-trips, reads back as "never observed", and would re-stamp every cycle. An
+# undated episode is the fail-closed state (see guard 1), so a broken clock costs
+# husks left noisy, never a live molecule stripped.
 normalize_ts "$NOW_TS" >/dev/null 2>&1 \
   || { echo "quiesce-completed-workflows: clock unusable ('${NOW_TS:-empty}'); terminal episodes cannot be dated this pass" >&2; NOW_TS=""; }
 
@@ -554,7 +614,7 @@ while IFS= read -r root; do
   # against some earlier root's anchor — would read as correct output.
   convoy=""; rsession=""; rcreated=""; anchor=""; adesc=""
   astatus=""; amerge=""; aassignee=""; arouted=""; asession=""; astamp=""
-  reason=""; rcreated_n=""; astamp_n=""; closed_steps=""
+  reason=""; rcreated_n=""; astamp_n=""; closed_steps=""; episode_ts=""
 
   # Capture the root read RAW, rather than piping it straight into jq: the absent-
   # root verdict needs the exit status and the error envelope, and a pipeline
@@ -622,15 +682,25 @@ while IFS= read -r root; do
     [ -z "$asession" ] || adesc="$adesc session=$asession"
     [ -z "$rsession" ] || adesc="$adesc molecule_session=$rsession"
     if ! is_terminal_anchor "$astatus" "$amerge" "$aassignee" "$arouted" "$asession" "$rsession"; then
-      # A LIVE anchor ends any terminal episode we had dated, so the stamp goes with
-      # it (tk-8m8d4). Leave it and the NEXT episode — a rework's PR, after a repool
-      # cleared merge_result — inherits the PREVIOUS one's date, which is a date
-      # before the rework molecule existed: guard 1 would then wave through exactly
-      # the molecule it exists to protect. Only ever a clear, never a rewrite, and
-      # only when something is there to clear.
-      if [ -n "$astamp" ] && [ "$DRY_RUN" -eq 0 ]; then
-        gc bd update "$anchor" --unset-metadata "$STAMP_KEY" >/dev/null 2>&1 \
-          || echo "quiesce-completed-workflows: anchor $anchor — stale $STAMP_KEY clear failed; retries next patrol" >&2
+      # A LIVE anchor does two things to guard 1's key, and ONE write of the `live`
+      # sentinel does both (tk-8m8d4, tk-fotoi).
+      #
+      #   It ENDS any terminal episode we had dated. Leave the old date and the NEXT
+      #   episode — a rework's PR, after a repool cleared merge_result — inherits the
+      #   PREVIOUS one's date, which is a date before the rework molecule existed:
+      #   guard 1 would then wave through exactly the molecule it exists to protect.
+      #
+      #   And it ARMS the next episode's dating. A timestamp only bounds a transition
+      #   if we saw the anchor live on the near side of it; without this record the
+      #   next terminal sighting is undatable and guard 1 has to fail closed. An
+      #   earlier cut UNSET the key here, which discarded the stale date correctly
+      #   and threw away the observation with it.
+      #
+      # Idempotent, so a long-lived anchor costs one write and not one per cycle:
+      # written only when the stored value is something other than the sentinel.
+      if [ "$astamp" != "$SEEN_LIVE" ] && [ "$DRY_RUN" -eq 0 ]; then
+        gc bd update "$anchor" --set-metadata "$STAMP_KEY=$SEEN_LIVE" >/dev/null 2>&1 \
+          || echo "quiesce-completed-workflows: anchor $anchor — $STAMP_KEY live mark failed; the next terminal episode will be undatable until a later pass records it" >&2
       fi
       echo "quiesce-completed-workflows: root $root — anchor $anchor still live ($adesc); left alone"
       roots_live=$((roots_live + 1)); continue
@@ -639,19 +709,30 @@ while IFS= read -r root; do
     adesc="$adesc terminal=$reason"
 
     # GUARD 1 — is this molecule's terminal anchor a PREVIOUS round's (tk-8m8d4)?
-    # First sighting records the date and the pass carries on: every molecule alive
-    # right now predates the stamp, so nothing already in flight changes behavior.
-    # A later molecule compared against that date is one materialized while the
-    # anchor was ALREADY terminal — a rework, by construction — and is left alone.
-    if [ -z "$astamp" ]; then
-      # A failed stamp is not fatal to THIS root's verdict (the molecule predates
-      # `now` either way); it only means the next pass re-dates the episode. Say so
-      # and carry on, rather than skipping a husk over a bookkeeping write.
-      if [ "$DRY_RUN" -eq 0 ] && [ -n "$NOW_TS" ]; then
-        gc bd update "$anchor" --set-metadata "$STAMP_KEY=$NOW_TS" >/dev/null 2>&1 \
-          || echo "quiesce-completed-workflows: anchor $anchor — $STAMP_KEY stamp failed; this episode is undated until a later pass records it" >&2
+    # Three shapes of the observation key, and only the middle one licenses a sweep
+    # on an ambiguous reason. See the header for why an undated episode is not
+    # evidence and why a first sighting must not date itself.
+    if [ "$astamp" = "$SEEN_LIVE" ]; then
+      # TRANSITION OBSERVED. The previous pass had this anchor live, so the marker
+      # was written between then and now: `now` bounds it. Record the date for the
+      # passes that follow — and READ IT BACK (tk-fotoi), because a write that
+      # reports success and does not land turns every later pass into a first
+      # sighting again, which is the undated episode wearing a fresh date.
+      if [ "$DRY_RUN" -eq 1 ]; then
+        # Nothing is written in dry-run, so nothing can be read back. Report the
+        # verdict the real pass would reach at this observation rather than the
+        # undated one its own no-op would produce — a dry run that described the
+        # effect of dry-running is worth nothing to the operator reading it.
+        episode_ts="$NOW_TS"
+      elif [ -n "$NOW_TS" ] \
+           && gc bd update "$anchor" --set-metadata "$STAMP_KEY=$NOW_TS" >/dev/null 2>&1 \
+           && [ "$(anchor_stamp "$anchor")" = "$NOW_TS" ]; then
+        episode_ts="$NOW_TS"
+      else
+        echo "quiesce-completed-workflows: anchor $anchor — $STAMP_KEY transition stamp did not persist; this episode stays undated" >&2
       fi
-    else
+    elif [ -n "$astamp" ]; then
+      # DATED EPISODE, from a transition an earlier pass watched happen.
       rcreated_n=$(normalize_ts "$rcreated") || rcreated_n=""
       astamp_n=$(normalize_ts "$astamp") || astamp_n=""
       if [ -z "$rcreated_n" ] || [ -z "$astamp_n" ]; then
@@ -662,6 +743,18 @@ while IFS= read -r root; do
         echo "quiesce-completed-workflows: root $root — anchor $anchor was ALREADY terminal at $astamp_n when this molecule was materialized at $rcreated_n ($adesc); its terminal state belongs to a PREVIOUS round, not this molecule; left alone"
         postdated=$((postdated + 1)); continue
       fi
+      episode_ts="$astamp_n"
+    fi
+
+    # UNDATED EPISODE — never seen live, or the transition stamp would not persist.
+    # We cannot say whether the marker predates this molecule, and for the ambiguous
+    # reasons the two possibilities are a spent husk and a live rework wearing the
+    # identical signature (sl-xhfl). Nothing is written: a date invented here is a
+    # guess the next pass would read back as evidence. `closed` and `merged` are the
+    # two states no live molecule wears at all, so they still sweep undated.
+    if [ -z "$episode_ts" ] && ! is_unambiguous_reason "$reason"; then
+      echo "quiesce-completed-workflows: root $root — anchor $anchor reads $reason, but this pass has no dated transition for it (${STAMP_KEY} '${astamp:-unset}'), so its terminal state cannot be placed before or after this molecule ($adesc); left alone"
+      undated=$((undated + 1)); continue
     fi
 
     # GUARD 2 — did the marker arrive while this molecule was still mid-flight
@@ -767,12 +860,15 @@ MODE=""
 # a root-deleted molecule was never a normal completion, and a summary that said so
 # would hide the one shape an operator may want to go look at.
 #
-# The two guard slots are likewise their own (tk-8m8d4), and not folded into
+# The guard slots are likewise their own (tk-8m8d4, tk-fotoi), and not folded into
 # `still live`: a molecule held back by guard 1 or 2 sits under an anchor this pass
 # DID read as terminal, so counting it as a live anchor would describe the opposite
-# of what happened and hide the only two lines that say a terminal verdict was
-# overruled.
-echo "quiesce-completed-workflows: ${MODE}${quiesced} steps quiesced across $roots_done completed and $orphaned orphaned (root-deleted) workflow(s); $roots_live still live, $postdated postdating the anchor's terminal state, $advanced still advancing, $already already quiet, $unresolved unresolved, $failed failed"
+# of what happened and hide the only lines that say a terminal verdict was
+# overruled. `undated` is split from `postdating` for the same reason one step in:
+# postdating is a verdict this pass REACHED about the ordering, undated is the
+# absence of one, and an operator watching a rollout drain needs to see which of the
+# two is holding a husk back.
+echo "quiesce-completed-workflows: ${MODE}${quiesced} steps quiesced across $roots_done completed and $orphaned orphaned (root-deleted) workflow(s); $roots_live still live, $postdated postdating the anchor's terminal state, $undated under an undated terminal episode, $advanced still advancing, $already already quiet, $unresolved unresolved, $failed failed"
 
 # Failed WRITES make the pass dishonest if swallowed; an unresolved anchor does
 # not — that one is a deliberate fail-closed skip, already reported, and correct.

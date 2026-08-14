@@ -173,9 +173,25 @@ mkdir -p "$TMP/bin"
 # root-CLOSEDFAIL: the closed-step listing FAILS to answer -> fail closed, skipped.
 #              An unreadable listing must never pass for "closed nothing", which is
 #              the husk signature itself.
-# root-STAMPFAIL: the anchor stamp write is refused. That is bookkeeping, not the
-#              verdict — the molecule predates `now` either way — so the pass warns
-#              and quiesces anyway rather than stranding a husk over a failed write.
+# root-STAMPFAIL: the anchor's transition stamp write is REFUSED. An episode whose
+#              date will not persist is an undated episode (tk-fotoi) — every later
+#              pass would meet it as a first sighting again — so the ambiguous
+#              reason fails closed and the husk is left noisy. An earlier cut called
+#              the write "bookkeeping, not the verdict" and quiesced anyway, which
+#              is the sl-xhfl strip reachable through a wedged store.
+# root-SILENT: the same failure told a LIE — the write reports SUCCESS and the value
+#              never lands. No exit status catches it; only reading the stamp back
+#              does (tk-fotoi). Must reach the same undated verdict as STAMPFAIL.
+# root-ROLLOUT: THE HISTORICAL SHAPE, ROLLED OUT (tk-fotoi). Identical to root-REWORK
+#              — a live rework molecule materialized at 19:16:41 against an anchor
+#              wearing the previous round's `pull_request` — except that this pass
+#              has NEVER seen the anchor live, so there is no dated transition to
+#              compare against: at rollout, after a witness outage, or on any anchor
+#              first met mid-episode. Guard 1's earlier cut stamped `now` on sight
+#              and swept in the same pass, so the exact sl-xhfl molecule was stripped
+#              by the very guard written to protect it. It must be left alone here,
+#              and STILL left alone on the second pass — the stamp is deliberately
+#              not written, so the next pass cannot mistake a guess for evidence.
 # root-RECLAIMROUTED / root-HELDSESS: the INTERSECTION of the park predicate
 #              (tk-rlm94) and the re-claim predicate (tk-nv3qr). The two clauses were
 #              written in parallel against the same function and both wanted $4, so
@@ -215,6 +231,8 @@ s-badts|mol-polecat-work.load-context|root-BADTS|gc-toolkit/gc-toolkit.polecat|g
 s-midflight|mol-scoped-work.cleanup-worktree.attempt.1|root-MIDFLIGHT|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-mid|open
 s-closedfail|mol-polecat-work.load-context|root-CLOSEDFAIL|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-cf|in_progress
 s-stampfail|mol-polecat-work.load-context|root-STAMPFAIL|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-sf|in_progress
+s-rollout|mol-polecat-work.load-context|root-ROLLOUT|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rollout|in_progress
+s-silent|mol-polecat-work.load-context|root-SILENT|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-silent|in_progress
 S
 
 # Roots: root_id|convoy_id|gc.session_name|created_at   (root-ORPHAN is deliberately
@@ -225,10 +243,12 @@ S
 # gc.session_affinity=require; the older fixtures leave it empty, which is also the
 # shape of a molecule that was never claimed.
 #
-# `created_at` is when the molecule was MATERIALIZED, and guard 1 (tk-8m8d4) reads
-# it against the anchor's `quiesce.terminal_since` stamp. Every pre-existing fixture
-# is dated well before any stamp this pass could write, which is the ordinary case:
-# a molecule poured while its anchor was still live. Only root-REWORK inverts it.
+# `created_at` is when the molecule was MATERIALIZED, and guard 1 (tk-8m8d4) reads it
+# against the anchor's `quiesce.terminal_since` observation. Every pre-existing fixture
+# is dated well before any transition this pass could date, which is the ordinary case:
+# a molecule poured while its anchor was still live. root-REWORK and root-ROLLOUT are
+# the two that invert it — the same rework molecule, one under an episode this pass
+# dated and one under an episode it never saw begin (tk-fotoi).
 cat > "$TMP/roots" <<'R'
 root-DONE|convoy-DONE||2026-08-11T06:00:00Z
 root-LIVE|convoy-LIVE|gc-toolkit__polecat-lx-busy|2026-08-11T06:00:00Z
@@ -253,6 +273,8 @@ root-BADTS|convoy-BADTS||not-a-timestamp
 root-MIDFLIGHT|convoy-MIDFLIGHT||2026-08-11T06:00:00Z
 root-CLOSEDFAIL|convoy-CLOSEDFAIL||2026-08-11T06:00:00Z
 root-STAMPFAIL|convoy-STAMPFAIL||2026-08-11T06:00:00Z
+root-SILENT|convoy-SILENT||2026-08-11T06:00:00Z
+root-ROLLOUT|convoy-ROLLOUT|gc-toolkit__polecat-lx-rollout|2026-08-11T19:16:41Z
 R
 
 # Closed step beads per root: root_id|count. Guard 2 (tk-8m8d4) reads this as the
@@ -289,18 +311,30 @@ convoy-BADTS|anchor-BADTS
 convoy-MIDFLIGHT|anchor-MIDFLIGHT
 convoy-CLOSEDFAIL|anchor-CLOSEDFAIL
 convoy-STAMPFAIL|anchor-STAMPFAIL
+convoy-SILENT|anchor-SILENT
+convoy-ROLLOUT|anchor-ROLLOUT
 C
 
 # Anchors: anchor_id|status|merge_result|assignee|routed_to|gc.session_name|quiesce.terminal_since
 #
-# The seventh field is guard 1's observation stamp (tk-8m8d4) — when THIS pass
-# first saw the anchor terminal. Empty on most fixtures, which is the un-observed
-# anchor the pass stamps on sight and then quiesces in the same run (no rollout
-# gap). Four fixtures pre-load it, because the comparison it feeds is the whole
-# guard: anchor-REWORK is dated BEFORE its molecule, anchor-PREDATE and
-# anchor-BADTS after it, and anchor-LIVE carries a stamp on an anchor that is no
-# longer terminal, which must be CLEARED so the next terminal episode is dated from
-# its own first sighting rather than inheriting this one's.
+# The seventh field is guard 1's observation key (tk-8m8d4, tk-fotoi) — this pass's
+# LAST OBSERVATION of the anchor, in one of three states, and the fixture pins all
+# three because the whole guard turns on telling them apart:
+#
+#   live      observed NON-terminal last cycle. A terminal sighting now is a
+#             TRANSITION this pass watched happen, so `now` bounds it and the sweep
+#             is licensed. Every anchor that must actually quiesce carries it.
+#   <ISO ts>  a transition an earlier pass dated. anchor-REWORK is dated BEFORE its
+#             molecule (the sl-xhfl strip), anchor-PREDATE and anchor-BADTS after it.
+#   empty     never observed live — the pass has no idea when the episode began.
+#             anchor-ROLLOUT and anchor-CLOSED both sit here on purpose: the first
+#             must be left alone (ambiguous reason, no dated transition), the second
+#             must sweep anyway (`closed` is a state no live molecule wears).
+#
+# anchor-LIVE carries a stale DATE on an anchor that is no longer terminal, and must
+# come back as `live`: the date has to go (or the next episode inherits it), and the
+# observation has to be recorded (or the next episode cannot be dated at all). One
+# write does both — an earlier cut UNSET the key here and threw the second half away.
 #
 # anchor-LIVE and anchor-HANDOFF are the same shape except for WHO holds them
 # (status=open, merge_result unstamped) — that is the whole discrimination the
@@ -325,28 +359,30 @@ C
 # above are how that is held: no park row records a session, and no re-claim row is
 # blocked or routed. anchor-RECLAIMHELD is the deliberate exception — see below.
 cat > "$TMP/anchors" <<'A'
-anchor-DONE|open|pull_request||||
+anchor-DONE|open|pull_request||||live
 anchor-LIVE|open||gc-toolkit__polecat-lx-busy||gc-toolkit__polecat-lx-busy|2026-08-10T00:00:00Z
 anchor-CLOSED|closed|||||
-anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery|||
-anchor-QUIET|open|pre_open_gate||||
-anchor-SCOPED|open|pre_open_gate||||
-anchor-NOREF|open|pull_request||||
-anchor-HELD|blocked|||human||
+anchor-HANDOFF|open||gc-toolkit/gc-toolkit.refinery|||live
+anchor-QUIET|open|pre_open_gate||||live
+anchor-SCOPED|open|pre_open_gate||||live
+anchor-NOREF|open|pull_request||||live
+anchor-HELD|blocked|||human||live
 anchor-BARE|blocked|||||
 anchor-ROUTEONLY|open|||human||
-anchor-RECLAIM|in_progress||gc-toolkit__polecat-lx-new||gc-toolkit__polecat-lx-new|
+anchor-RECLAIM|in_progress||gc-toolkit__polecat-lx-new||gc-toolkit__polecat-lx-new|live
 anchor-STALE|in_progress||gc-toolkit/gc-toolkit.polecat||gc-toolkit__polecat-lx-ghost|
 anchor-NOSESS|in_progress||gc-toolkit__polecat-lx-other|||
-anchor-RECLAIMROUTED|in_progress||gc-toolkit__polecat-lx-rr|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rr|
-anchor-HELDSESS|blocked|||human|gc-toolkit__polecat-lx-hsanch|
-anchor-READFAIL|open|pull_request||||
+anchor-RECLAIMROUTED|in_progress||gc-toolkit__polecat-lx-rr|gc-toolkit/gc-toolkit.polecat|gc-toolkit__polecat-lx-rr|live
+anchor-HELDSESS|blocked|||human|gc-toolkit__polecat-lx-hsanch|live
+anchor-READFAIL|open|pull_request||||live
 anchor-REWORK|open|pull_request||||2026-08-11T19:00:00Z
 anchor-PREDATE|open|pull_request||||2026-08-12T00:00:00Z
 anchor-BADTS|open|pull_request||||2026-08-12T00:00:00Z
-anchor-MIDFLIGHT|open|pull_request||||
-anchor-CLOSEDFAIL|open|pull_request||||
-anchor-STAMPFAIL|open|pull_request||||
+anchor-MIDFLIGHT|open|pull_request||||live
+anchor-CLOSEDFAIL|open|pull_request||||live
+anchor-STAMPFAIL|open|pull_request||||live
+anchor-SILENT|open|pull_request||||live
+anchor-ROLLOUT|open|pull_request||||
 A
 
 : > "$TMP/updates"     # one line per update: "<binary> <argv>"
@@ -472,9 +508,44 @@ case "$1 ${2:-}" in
         case " ${FAKE_ANCHOR_WRITE_FAIL:-} " in
           *" $id "*) echo "gc bd: update failed for $id: store write refused" >&2; exit 1 ;;
         esac
+        # A write that reports SUCCESS and does not land — the shape the read-back
+        # exists for (tk-fotoi). Distinct from FAKE_ANCHOR_WRITE_FAIL above, which
+        # is honest about failing; this one is the store lying, and no exit status
+        # can catch it.
+        case " ${FAKE_ANCHOR_WRITE_SILENT:-} " in
+          *" $id "*) exit 0 ;;
+        esac
         case "$*" in
           *"--unset-metadata quiesce.terminal_since"*) astamp_set "$id" "__NONE__" ;;
-          *) v="${*#*--set-metadata quiesce.terminal_since=}"; astamp_set "$id" "${v%% *}" ;;
+          *)
+            # Parse the FLAG'S OWN ARGUMENT, positionally (tk-fotoi). The obvious
+            # `v="${*#*--set-metadata quiesce.terminal_since=}"` does not work and
+            # does not look broken: `${*#pat}` strips the pattern from EACH
+            # positional parameter and rejoins, and the flag and its value are two
+            # separate parameters, so nothing ever matches and `v` comes back as the
+            # whole joined argv. `${v%% *}` then stored the FIRST WORD — `bd` — as
+            # the timestamp on every stamp write. The suite still passed: the second
+            # pass read `quiesce.terminal_since=bd`, normalize_ts rejected it, and
+            # every root was skipped as undatable while the idempotence assertions
+            # (which only check that no STEP was updated again) stayed green. The
+            # dated-anchor path was never exercised at all.
+            v=""
+            prev=""
+            for a in "$@"; do
+              case "$prev" in
+                --set-metadata)
+                  case "$a" in quiesce.terminal_since=*) v="${a#quiesce.terminal_since=}" ;; esac ;;
+              esac
+              case "$a" in
+                --set-metadata=quiesce.terminal_since=*) v="${a#--set-metadata=quiesce.terminal_since=}" ;;
+              esac
+              prev="$a"
+            done
+            # Fail LOUDLY rather than record an empty stamp: an empty value reads
+            # back through astamp_get as "never written" and falls through to the
+            # fixture, which is exactly how the bug above stayed invisible.
+            [ -n "$v" ] || { echo "stub: could not parse the quiesce.terminal_since argument out of: $*" >&2; exit 1; }
+            astamp_set "$id" "$v" ;;
         esac
         exit 0 ;;
     esac
@@ -566,6 +637,7 @@ export FAKE_STEPS="$TMP/steps" FAKE_ROOTS="$TMP/roots" FAKE_CONVOYS="$TMP/convoy
 export FAKE_GC_SHOW_FAIL="root-READFAIL"
 export FAKE_CLOSED_LIST_FAIL="root-CLOSEDFAIL"
 export FAKE_ANCHOR_WRITE_FAIL="anchor-STAMPFAIL"
+export FAKE_ANCHOR_WRITE_SILENT="anchor-SILENT"
 : > "$TMP/state"; : > "$TMP/astate"
 
 # --- Run 0: --dry-run must select the same work but write nothing. ------------
@@ -577,11 +649,18 @@ grep -q 's-affine' <<< "$OUT0" \
   && ok "(DRY) dry run still reports the steps it would quiesce" || bad "(DRY) dry run reports selection"
 # The selection a dry run reports is the one the real pass acts on, guards included
 # — a preview that showed work the pass would not do would be worse than no preview
-# (tk-8m8d4). Both guarded roots are held back here on the FIXTURE stamp, since a
-# dry run writes none of its own.
-grep -qE 's-rework|s-midflight' <<< "$OUT0" \
-  && bad "(DRY) dry run must not list steps the guards hold back (got: $(printf '%s\n' "$OUT0" | grep -E 's-rework|s-midflight' | head -1))" \
-  || ok "(DRY) dry run applies both guards too — its preview matches what the pass would do"
+# (tk-8m8d4). The guarded roots are held back here on the FIXTURE observation, since
+# a dry run writes none of its own: s-rework postdates a dated transition, s-midflight
+# has closed steps, and s-rollout sits under an episode nobody ever saw begin.
+#
+# The two write-failure fixtures (s-stampfail, s-silent) are the deliberate exception
+# and are NOT asserted here: a dry run makes no write, so it cannot discover that the
+# write it would have made will not land, and it previews the sweep the store would
+# have licensed. That divergence is the injected fault showing through, not the guard
+# disagreeing with itself.
+grep -qE 's-rework|s-midflight|s-rollout' <<< "$OUT0" \
+  && bad "(DRY) dry run must not list steps the guards hold back (got: $(printf '%s\n' "$OUT0" | grep -E 's-rework|s-midflight|s-rollout' | head -1))" \
+  || ok "(DRY) dry run applies every guard too — its preview matches what the pass would do"
 
 # --- Run 1: the real pass. ----------------------------------------------------
 : > "$TMP/updates"; : > "$TMP/cleared"; : > "$TMP/state"; : > "$TMP/astate"
@@ -876,26 +955,48 @@ grep -q '^s-predate	routed$' "$TMP/cleared" && grep -q '^s-predate	assignee$' "$
   && ok "(PREDATE) a molecule OLDER than the stamp still quiesces (the guard compares dates, it does not just look for one)" \
   || bad "(PREDATE) predating molecule must still be quiesced (got: $(grep '^s-predate' "$TMP/cleared" || echo none))"
 
-# (FIRSTSEEN) an undated terminal anchor is stamped on sight AND swept in the same
-# pass. That is what makes this fix free of a rollout gap: every molecule alive when
-# the stamp lands predates it, so today's population behaves exactly as before and
-# only later-poured molecules are held back.
-grep -q 'gc bd update anchor-DONE --set-metadata quiesce.terminal_since=' "$TMP/updates" \
-  && ok "(FIRSTSEEN) first sighting of a terminal anchor records the date" \
-  || bad "(FIRSTSEEN) terminal anchor must be stamped (got: $(grep 'anchor-DONE' "$TMP/updates" || echo none))"
+# (TRANSITION) an anchor last seen LIVE and now terminal is a transition this pass
+# watched happen — the marker was written between the two observations, so `now`
+# bounds it. That date is recorded, and the sweep runs in the same pass.
+grep -q 'gc bd update anchor-DONE --set-metadata quiesce.terminal_since=2' "$TMP/updates" \
+  && ok "(TRANSITION) live -> terminal records the transition date (not the sentinel)" \
+  || bad "(TRANSITION) transition must be dated (got: $(grep 'anchor-DONE' "$TMP/updates" || echo none))"
 grep -q '^s-affine	assignee$' "$TMP/cleared" \
-  && ok "(FIRSTSEEN) and the same pass still quiesces it — the stamp costs no cycle" \
-  || bad "(FIRSTSEEN) stamping must not defer the sweep"
+  && ok "(TRANSITION) and the same pass still quiesces it — dating costs no cycle" \
+  || bad "(TRANSITION) dating must not defer the sweep"
 
-# (EPISODE) a LIVE anchor ends the terminal episode, so its stamp is dropped. Left
-# in place, the NEXT episode — the rework's own PR, after a repool cleared
-# merge_result — would inherit a date from before the rework molecule existed, and
-# guard 1 would wave through precisely the molecule it exists to protect.
-grep -q 'gc bd update anchor-LIVE --unset-metadata quiesce.terminal_since' "$TMP/updates" \
-  && ok "(EPISODE) a stale stamp on a live anchor is cleared, so the next episode is dated from its own first sighting" \
-  || bad "(EPISODE) stale stamp must be cleared on a live anchor (got: $(grep 'anchor-LIVE' "$TMP/updates" || echo none))"
+# (ROLLOUT) THE tk-fotoi REGRESSION, and the exact historical shape. Same live rework
+# molecule as (REWORK), under the same previous-round `pull_request` — but this pass
+# has never seen the anchor live, so there is NO dated transition to compare against.
+# That is rollout, a witness outage, or any anchor first met mid-episode. The earlier
+# cut stamped `now` on sight and swept in the same pass, on the reasoning that
+# "every molecule alive predates the stamp" — which is true, and is precisely why the
+# stamp proves nothing about them. sl-xhfl was stripped through the guard meant to
+# protect it.
+grep -q '^s-rollout' "$TMP/cleared" \
+  && bad "(ROLLOUT) must NOT quiesce under a terminal episode this pass never saw begin — that is the sl-xhfl strip" \
+  || ok "(ROLLOUT) ambiguous terminal reason with no dated transition -> left alone"
+grep -q "root root-ROLLOUT — anchor anchor-ROLLOUT reads pull_request, but this pass has no dated transition for it (quiesce.terminal_since 'unset')" <<< "$OUT1" \
+  && ok "(ROLLOUT) the verdict says WHY it could not decide, and names the missing evidence" \
+  || bad "(ROLLOUT) undated verdict reported (got: $(printf '%s\n' "$OUT1" | grep ROLLOUT || echo none))"
+# And it writes NOTHING. A date invented on first sighting is a guess, and the next
+# pass would read it back as evidence — which is how a one-cycle delay would have
+# masqueraded as a fix. (Run 2 proves the molecule survives that second pass.)
+grep -q 'anchor-ROLLOUT' "$TMP/updates" \
+  && bad "(ROLLOUT) an undated episode must not date itself (got: $(grep 'anchor-ROLLOUT' "$TMP/updates" | head -1))" \
+  || ok "(ROLLOUT) nothing is written to an undated anchor — the next pass stays honestly ignorant"
+
+# (EPISODE) a LIVE anchor both ENDS the terminal episode it had dated and RECORDS the
+# observation that lets the next one be dated. Left in place, the old date would be
+# inherited by the rework's own PR after a repool cleared merge_result, and guard 1
+# would wave through precisely the molecule it exists to protect. Unset instead of
+# marked, and the next terminal sighting is undatable — correct but useless, since
+# the pass would then never sweep an ambiguous anchor again.
+grep -q 'gc bd update anchor-LIVE --set-metadata quiesce.terminal_since=live' "$TMP/updates" \
+  && ok "(EPISODE) a live anchor is marked live — the stale date goes AND the observation is recorded" \
+  || bad "(EPISODE) live anchor must be marked live (got: $(grep 'anchor-LIVE' "$TMP/updates" || echo none))"
 grep -q '^s-live' "$TMP/cleared" \
-  && bad "(EPISODE) clearing the stamp must not touch the live molecule's steps" \
+  && bad "(EPISODE) marking the anchor must not touch the live molecule's steps" \
   || ok "(EPISODE) the live molecule itself is still left alone"
 
 # (BADTS) fail-closed half of guard 1: two timestamps that cannot be compared are
@@ -938,16 +1039,28 @@ grep -q '^s-closedfail' "$TMP/cleared" \
 grep -q 'closed-step listing unreadable' <<< "$ERR1" \
   && ok "(CLOSEDFAIL) the unreadable listing is reported on stderr" || bad "(CLOSEDFAIL) unreadable listing reported"
 
-# (STAMPFAIL) the stamp is bookkeeping, not the verdict: this molecule predates
-# `now` whether or not the write lands, so a refused stamp must warn and sweep, not
-# strand a husk. The cost of the failure is only that the episode stays undated
-# until a later pass records it.
-grep -q '^s-stampfail	routed$' "$TMP/cleared" && grep -q '^s-stampfail	assignee$' "$TMP/cleared" \
-  && ok "(STAMPFAIL) a refused stamp does not block the sweep" \
-  || bad "(STAMPFAIL) refused stamp must still quiesce (got: $(grep '^s-stampfail' "$TMP/cleared" || echo none))"
-grep -q 'anchor anchor-STAMPFAIL — quiesce.terminal_since stamp failed' <<< "$ERR1" \
+# (STAMPFAIL) a transition whose date will not PERSIST is an undated episode
+# (tk-fotoi): every later pass meets it as a first sighting again, so the guard never
+# engages and the anchor looks freshly dated forever. The earlier cut called the
+# write "bookkeeping, not the verdict" and swept anyway — which makes the sl-xhfl
+# strip reachable through nothing worse than a wedged store.
+grep -q '^s-stampfail' "$TMP/cleared" \
+  && bad "(STAMPFAIL) a stamp that will not persist must not license a sweep — the episode is undated" \
+  || ok "(STAMPFAIL) refused transition stamp -> undated episode -> left alone (fail closed)"
+grep -q 'anchor anchor-STAMPFAIL — quiesce.terminal_since transition stamp did not persist' <<< "$ERR1" \
   && ok "(STAMPFAIL) the refused stamp is reported, and says what it costs" \
-  || bad "(STAMPFAIL) refused stamp reported on stderr"
+  || bad "(STAMPFAIL) refused stamp reported on stderr (got: $(printf '%s\n' "$ERR1" | grep STAMPFAIL || echo none))"
+
+# (SILENT) the same failure, LYING. `gc bd update` exits 0 and the value never lands
+# — no exit status can catch that, which is why the write is READ BACK before it is
+# trusted (tk-fotoi). Without the read-back this root is indistinguishable from a
+# clean transition and gets swept.
+grep -q '^s-silent' "$TMP/cleared" \
+  && bad "(SILENT) a stamp write that reports success and does not land must not license a sweep" \
+  || ok "(SILENT) unpersisted stamp caught by reading it back -> left alone (fail closed)"
+grep -q 'anchor anchor-SILENT — quiesce.terminal_since transition stamp did not persist' <<< "$ERR1" \
+  && ok "(SILENT) the silent write is reported exactly like the refused one" \
+  || bad "(SILENT) unpersisted stamp reported on stderr (got: $(printf '%s\n' "$ERR1" | grep SILENT || echo none))"
 
 # (NOCLOSE) the DANGER clause: nothing is ever closed and status is never written.
 grep -qE -- '--status|--close|bd close' "$TMP/updates" \
@@ -984,7 +1097,7 @@ grep -q '^s-quiet' "$TMP/cleared" \
 # The orphaned roots are reported in their OWN slot, never folded into the
 # completed count: a molecule whose root was deleted did not complete, and a
 # summary that says it did hides the deletion behind a normal-looking pass.
-grep -q "12 steps quiesced across 11 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 1 still advancing, 1 already quiet, 4 unresolved, 0 failed" <<< "$OUT1" \
+grep -q "11 steps quiesced across 10 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 3 under an undated terminal episode, 1 still advancing, 1 already quiet, 4 unresolved, 0 failed" <<< "$OUT1" \
   && ok "run 1 summary counts are exact" || bad "run 1 summary (got: $(printf '%s' "$OUT1" | tail -1))"
 eq "$RC1" "0" "(EXIT) a clean pass exits 0"
 
@@ -994,12 +1107,24 @@ RC2=0
 OUT2="$(bash "$SCRIPT")" || RC2=$?
 eq "$(grep -cvE 'bd update anchor-' "$TMP/updates" | tr -d ' ')" "0" \
   "(IDEM) second pass issues no step update — quiesced steps stay quiesced"
-# The one write a converged pass may still issue is the guard-1 stamp it could not
-# land last time (anchor-STAMPFAIL): an undated episode is retried every cycle, the
-# same retry-next-patrol shape as a refused route clear. Every OTHER anchor is
-# already dated and is not re-stamped, which is what keeps a converged pass quiet.
-eq "$(grep -cE 'bd update anchor-' "$TMP/updates" | tr -d ' ')" "1" \
-  "(IDEM) the only surviving write is the refused stamp's retry — a dated anchor is never re-stamped"
+# The only writes a converged pass may still issue are the two transition stamps that
+# could not land last time (anchor-STAMPFAIL refused, anchor-SILENT unpersisted):
+# both anchors are still marked `live`, so each pass meets the transition afresh and
+# retries — the same retry-next-patrol shape as a refused route clear. Every OTHER
+# anchor is already dated, or already marked live, and is not rewritten; that
+# idempotence is what keeps a converged pass quiet instead of writing to every anchor
+# in the city every cycle.
+eq "$(grep -cE 'bd update anchor-' "$TMP/updates" | tr -d ' ')" "2" \
+  "(IDEM) the only surviving writes are the two unlanded stamps' retries — a dated or live-marked anchor is never rewritten"
+
+# (ROLLOUT2) THE point of the tk-fotoi fix, and what a one-cycle delay would have
+# missed. Skipping the first sighting but stamping it anyway would let THIS pass read
+# the stamp back as evidence, find the molecule older than it, and strip the same
+# live rework one cycle later. Nothing was written, so the episode is still undated
+# and the molecule is still safe.
+grep -q '^s-rollout' "$TMP/cleared" \
+  && bad "(ROLLOUT2) the undated episode must not become sweepable on the NEXT pass — a delayed strip is still the strip" \
+  || ok "(ROLLOUT2) still left alone on the second pass (the fix is not a one-cycle delay)"
 grep -q '0 steps quiesced' <<< "$OUT2" \
   && ok "(IDEM) second pass reports nothing left to do" || bad "(IDEM) second-pass summary (got: $(printf '%s' "$OUT2" | tail -1))"
 eq "$RC2" "0" "(IDEM) a no-op pass exits 0"
@@ -1029,7 +1154,7 @@ grep -q 's-affine route clear failed' <<< "$ERR3" \
 
 # A partial clear is a failure, never a success: the step still rides the affine
 # hand-back, so counting it quiesced would be the same lie in a new place.
-grep -q "11 steps quiesced across 11 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 1 still advancing, 1 already quiet, 4 unresolved, 1 failed" <<< "$OUT3" \
+grep -q "10 steps quiesced across 10 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 3 under an undated terminal episode, 1 still advancing, 1 already quiet, 4 unresolved, 1 failed" <<< "$OUT3" \
   && ok "(EXIT) a partially-cleared step counts as failed, not quiesced" \
   || bad "(EXIT) run 3 summary (got: $(printf '%s' "$OUT3" | tail -1))"
 [ "$RC3" -ne 0 ] \
@@ -1080,7 +1205,7 @@ grep -q '^bd update s-pool' "$TMP/updates" \
   && bad "(ROUTEFAIL) an unassigned step must never reach the assignee call" \
   || ok "(ROUTEFAIL) route-only step issues no assignee call"
 
-grep -q "10 steps quiesced across 11 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 1 still advancing, 1 already quiet, 4 unresolved, 2 failed" <<< "$OUT4" \
+grep -q "9 steps quiesced across 10 completed and 1 orphaned (root-deleted) workflow(s); 5 still live, 1 postdating the anchor's terminal state, 3 under an undated terminal episode, 1 still advancing, 1 already quiet, 4 unresolved, 2 failed" <<< "$OUT4" \
   && ok "(ROUTEFAIL) both route failures count as failed, not quiesced" \
   || bad "(ROUTEFAIL) run 4 summary (got: $(printf '%s' "$OUT4" | tail -1))"
 [ "$RC4" -ne 0 ] \

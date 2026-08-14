@@ -73,23 +73,45 @@ nothing for `pre_open_gate`, a refinery handoff, or a human park.
 ### Guard 1 — the marker predates the molecule
 
 The pass records the one fact it can honestly know: `quiesce.terminal_since` on the
-anchor, the first time THIS pass observed it terminal. A molecule whose
-`created_at` is later than that instant was materialized while the anchor was
-already terminal, and cannot have produced that state.
+anchor, holding THIS pass's last observation of it — the `live` sentinel while the
+anchor is non-terminal, and the instant of a terminal transition the pass watched
+happen. A molecule whose `created_at` is later than a dated transition was
+materialized while the anchor was already terminal, and cannot have produced that
+state.
 
 Properties that made this the choice:
 
-- **No rollout gap.** The stamp is written on first sighting and the same pass
-  proceeds to sweep. Every molecule alive when a stamp lands predates it, so
-  behavior on the existing population is unchanged; only later-poured molecules are
-  held back — which is the whole population at risk, since a rework is dispatched
-  against an anchor that has been parked in the merge gate for hours.
-- **Per-episode.** The stamp is cleared when the anchor is next seen non-terminal,
-  so a repool-and-rework round is dated from its own first sighting rather than
-  inheriting the previous one's.
-- **Bounded error.** The residual window is one patrol cycle at the head of a
-  terminal episode — the minutes just after a PR opens, when no rework can yet have
-  been dispatched.
+- **Per-episode.** The `live` mark is written on every live verdict, so a
+  repool-and-rework round is dated from its own transition rather than inheriting the
+  previous one's — and the same write is what arms the next episode's dating at all.
+- **Bounded error.** The residual window is one patrol cycle at the head of a *dated*
+  episode — the minutes just after a PR opens, when no rework can yet have been
+  dispatched.
+
+**Correction (tk-fotoi, pre-open signoff round 2).** The first cut of this guard
+claimed a third property — *no rollout gap*: the stamp was written on first sighting
+and the same pass swept, on the reasoning that "every molecule alive when a stamp
+lands predates it, so behavior on the existing population is unchanged". Both halves
+are true and the conclusion does not follow. Behavior on the existing population being
+*unchanged* is the defect, not the safety argument: `sl-xhfl` — a live rework molecule
+under an anchor terminal for three hours — is a member of that population, and a stamp
+written after it was poured places nothing. Guard 1 swept the exact molecule it was
+written to protect, whenever the pass met the anchor mid-episode: at rollout, after a
+witness outage, or after any stamp write that did not land.
+
+So a first sighting is now **non-destructive** for the ambiguous reasons, and writes
+nothing at all — a date invented on sight is a guess the next pass would read back as
+evidence, which would make the fix a one-cycle delay rather than a fix. Only a
+transition observed from a `live` mark licenses a sweep, and the write that records it
+is **read back** before it is trusted, because a stamp that silently fails to persist
+turns every later pass into another first sighting.
+
+The cost is a real one and belongs here rather than in a footnote: an anchor already
+terminal when the patrol first meets it is never swept for an ambiguous reason. Its
+husk keeps burning wisps until the anchor lands (`closed`/`merged` sweep
+unconditionally) or is repooled, with the witness's manual sweep as the fallback in
+between. That is the rollout population, once; every episode beginning under patrol
+coverage is dated from its own transition and swept a cycle later.
 
 It costs the pass's "never writes to the anchor" invariant. The replacement
 invariant is narrower and stated in both the script header and the patrol step: one
@@ -120,7 +142,7 @@ They cover each other's blind spot, and neither covers both live instances:
 
 | | `sl-xhfl` (rework) | `sl-jnjd` (mid-flight teardown) |
 |---|---|---|
-| guard 1 | catches it — the anchor was terminal for three hours before the pour | misses — the anchor went terminal DURING the molecule's life |
+| guard 1 | catches it — the anchor was terminal for three hours before the pour, so a dated transition postdates the molecule and an undated episode declines to decide (tk-fotoi; the historical strip is the undated arm, since the pass had never seen `sl-ew4w` live) | misses — the anchor went terminal DURING the molecule's life |
 | guard 2 | misses at the moment of the strip: the molecule had closed nothing yet (its first close came 30s later) | catches it — the graph had closed many steps |
 
 Guard 2 alone would also have left the dominant case unfixed: a rework dispatched
@@ -133,17 +155,28 @@ generalizes; guard 2 is what covers the formula whose anchor goes terminal early
 An undatable molecule, an unparseable stamp, and an unreadable closed-step listing
 all skip the root and are counted `unresolved`, exactly like an unresolved anchor:
 an un-quiesced husk wastes wisps, while a wrong sweep drains a polecat
-mid-implementation. A refused stamp WRITE is the one failure that does not skip —
-the molecule predates `now` either way — so the pass warns and sweeps, and the
-episode stays undated until a later pass records it.
+mid-implementation.
+
+A terminal episode with no dated transition skips too, counted `undated` in its own
+summary slot (tk-fotoi) — `undated` is the absence of an ordering verdict, where
+`postdated` is one the pass actually reached, and an operator watching a rollout drain
+needs to see which of the two is holding a husk back. Three inputs land there: an
+anchor never observed live, a transition stamp the store REFUSED, and one it accepted
+and did not store. The last is why the write is read back at all; no exit status
+distinguishes it from a clean write, and the earlier cut treated both as bookkeeping
+and swept anyway — which put the `sl-xhfl` strip one wedged store away.
 
 ## 7. Not in this change
 
 - Backfilling a true `merge_result_at` at every write site in the refinery patrol.
   It would make guard 1 exact rather than observation-bounded, at the cost of five
-  writer sites in the merge path and a rollout window in which anchors parked today
-  carry no stamp at all. The observation stamp converges on the same answer within
-  one patrol cycle with a contained blast radius.
+  writer sites in the merge path. Note what tk-fotoi changed about this trade: the
+  argument used to be "same answer within one patrol cycle, contained blast radius",
+  and the rollout window was listed as the backfill's cost. The observation stamp has
+  that window too — it simply declines to sweep inside it instead of sweeping wrongly.
+  A real write time is still the only thing that would close it, and is still the
+  standing candidate if the undated population turns out to be more than a rollout's
+  worth of husks.
 - Finalizing a husk's step graph rather than quiescing it, which remains the durable
   upstream fix and is out of scope here as it was in tk-p9ji9.
 - Unsticking `sl-xhfl` / `sl-jnjd` themselves — both were already force-closed by
