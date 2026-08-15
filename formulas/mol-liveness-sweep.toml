@@ -802,7 +802,16 @@ a snapshot of `$PASS_AT`, re-checkable with the command step 4a stamps
   are listed so nothing is hidden, not so the sitting works them again.
 - **Dispositions** — spell the menu out, with the park that actually
   works:
-  - **route** — give it demand (`gc sling <pool> <id> --on <formula>`);
+  - **route** — give it demand with the plain form (`gc sling <pool> <id>`):
+    it picks up the pool's `default_sling_formula`, which starts a real
+    workflow with a root bound to that formula and an input convoy that
+    TRACKS the bead. **Do not route with `--on <formula>` here** — `--on`
+    attaches an ephemeral wisp instead, and the root it builds is DETACHED:
+    bound to no pool formula, carrying no input convoy, so no convoy tracks
+    the work. The failure is silent — a detached root looks routed at a
+    glance, and the cost lands later as work nothing is following. `--on`
+    belongs only to the visit that genuinely needs a non-default formula,
+    and then knowingly, with that consequence accepted (bead tk-f21vs);
   - **gate** — file a visit or a gate on it, so the wait has a name;
   - **kill** — `gc bd close <id> --reason "…"`;
   - **park** — hang it off a `task_kind=triage-subject` scope bead with
