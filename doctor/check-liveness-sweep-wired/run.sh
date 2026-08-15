@@ -20,6 +20,18 @@
 # the script exists and is executable, the sweep stamps the visit, and
 # the converse loop runs the stamp.
 #
+# And it guards the MECHANICAL PRECHECK (bead tk-7h51d), which fails
+# silently in the worst way of the three. The liveness-sweep order is
+# `condition`-triggered and its check IS that script, so a missing,
+# non-executable, mis-named or too-slow precheck makes the check command
+# fail — and a failing condition check reads as NOT DUE. The sweep then
+# never fires on any rig, with every order, formula and pool still
+# perfectly correct and nothing anywhere reporting an error. The two
+# numeric guards are the same failure from the other side: an `interval`
+# key a condition trigger ignores, and a `check_timeout` below the
+# script's own worst case, which kills the check mid-read and reads —
+# again — as not due.
+#
 # Exit codes: 0=OK, 1=Warning, 2=Error
 # stdout: first line=message, rest=details
 
@@ -28,18 +40,64 @@ set -u
 dir="${GC_PACK_DIR:-.}"
 errors=()
 
-check_order() { # name formula
+check_order() { # name formula trigger
     local f="$dir/orders/$1.toml"
     if [ ! -s "$f" ]; then errors+=("missing order: orders/$1.toml"); return; fi
     grep -q '^\[order\]' "$f" || errors+=("orders/$1.toml: no [order] block")
     grep -qE "^formula *= *\"$2\"" "$f" || errors+=("orders/$1.toml: formula is not \"$2\"")
-    grep -qE '^trigger *= *"cooldown"' "$f" || errors+=("orders/$1.toml: trigger is not cooldown")
+    grep -qE "^trigger *= *\"$3\"" "$f" || errors+=("orders/$1.toml: trigger is not $3")
     grep -qE '^scope *= *"rig"' "$f" || errors+=("orders/$1.toml: scope is not rig")
     local pool
     pool="$(grep -E '^pool *= *"' "$f" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
     case "$pool" in
         */*) errors+=("orders/$1.toml: pool \"$pool\" is rig-qualified — must be BARE (a qualified pool strands the wisp in every importer)") ;;
         "")  errors+=("orders/$1.toml: no pool") ;;
+    esac
+}
+
+# The sweep's mechanical precheck (bead tk-7h51d). Guarded harder than the rest
+# because its failure mode is TOTAL and silent: the order is condition-
+# triggered, so if this script is missing, not executable, or not the thing the
+# order actually names, the check command simply fails — and a failing condition
+# check reads as NOT DUE. The sweep would then never fire again on any rig, with
+# every other file in this directory still perfectly correct and nothing
+# anywhere saying so.
+check_precheck() {
+    local s="$dir/assets/scripts/liveness-sweep-precheck.sh"
+    local f="$dir/orders/liveness-sweep.toml"
+    if [ ! -s "$s" ]; then
+        errors+=("missing the sweep precheck: assets/scripts/liveness-sweep-precheck.sh — the liveness-sweep order's check would fail, and a failing condition check reads as NOT DUE, so the sweep would never fire")
+        return
+    fi
+    [ -x "$s" ] || errors+=("assets/scripts/liveness-sweep-precheck.sh is not executable — the order's check would fail on every tick and the sweep would never fire")
+    [ -s "$f" ] || return
+    grep -qE '^check *= *".*liveness-sweep-precheck\.sh"' "$f" \
+        || errors+=("orders/liveness-sweep.toml: its check does not name assets/scripts/liveness-sweep-precheck.sh")
+    # A condition trigger IGNORES `interval`, so one here is an inert second
+    # copy of the cadence that a later editor would change with no effect. The
+    # window lives in LIVENESS_SWEEP_INTERVAL in the script.
+    if grep -qE '^interval *= *"' "$f"; then
+        errors+=('orders/liveness-sweep.toml: has an `interval` key, which a condition trigger IGNORES — the cadence lives in LIVENESS_SWEEP_INTERVAL in the precheck script, and a second copy here would silently do nothing')
+    fi
+    # check_timeout must exceed the script's own worst case (three bounded
+    # store reads at LIVENESS_SWEEP_CALL_TIMEOUT each, default 45s). A check
+    # killed by this deadline reads as not-due — a silent skip — whereas the
+    # script's internal bound turns a wedged store into "unreadable" and runs
+    # the pass. The per-call bound is read out of the script rather than
+    # duplicated here, so raising it there cannot leave this check asserting an
+    # inequality that no longer holds.
+    local ct call worst
+    ct="$(grep -E '^check_timeout *= *"' "$f" | head -1 | sed 's/.*"\([0-9]*\)s".*/\1/')"
+    call="$(sed -n 's/^CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-\([0-9]*\)}"/\1/p' "$s" | head -1)"
+    case "$call" in
+        ''|*[!0-9]*)
+            errors+=("assets/scripts/liveness-sweep-precheck.sh: cannot read its CALL_TIMEOUT default — the check_timeout inequality below cannot be verified")
+            return ;;
+    esac
+    worst=$(( 3 * call ))
+    case "$ct" in
+        ''|*[!0-9]*) errors+=("orders/liveness-sweep.toml: no parseable check_timeout — the default is 10s, far below the precheck's worst case, so a slow store would silently never fire the sweep") ;;
+        *) [ "$ct" -gt "$worst" ] || errors+=("orders/liveness-sweep.toml: check_timeout ${ct}s does not exceed the precheck's worst case (${worst}s) — a check killed by the deadline reads as NOT DUE, which is the silent skip the precheck exists to prevent") ;;
     esac
 }
 
@@ -75,14 +133,15 @@ check_recheck() {
     fi
 }
 
-check_order "liveness-sweep" "mol-liveness-sweep"
-check_order "triage-recurrence" "mol-triage-recurrence"
+check_order "liveness-sweep" "mol-liveness-sweep" "condition"
+check_order "triage-recurrence" "mol-triage-recurrence" "cooldown"
 check_formula "mol-liveness-sweep.toml"
 check_formula "mol-triage-recurrence.toml"
 check_recheck
+check_precheck
 
 if [ "${#errors[@]}" -eq 0 ]; then
-    echo "OK: liveness sweep + triage recurrence wired (orders bare-pool/rig-scope; formulas fail-safe with marked gate-visit copies; claim-time re-check shipped, stamped and hooked)"
+    echo "OK: liveness sweep + triage recurrence wired (orders bare-pool/rig-scope; formulas fail-safe with marked gate-visit copies; claim-time re-check shipped, stamped and hooked; sweep precheck executable and gated with room under its check_timeout)"
     exit 0
 fi
 echo "liveness machinery mis-wired: ${#errors[@]} problem(s)"

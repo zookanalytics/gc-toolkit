@@ -1,8 +1,7 @@
 # liveness-sweep — the P3 order: every open bead is worked, gated,
 # conversing, or held-by-design; unnamed waits get batched into one
-# triage visit. Fires mol-liveness-sweep on a 6h cooldown — the
-# sweep hunts drift, not emergencies; anything urgent already has a
-# route, a gate, or a visit.
+# triage visit. The sweep hunts drift, not emergencies; anything urgent
+# already has a route, a gate, or a visit.
 #
 # Spec: specs/2026-08-fresh-start/liveness-and-triage-spec.md §2.
 # Principle: specs/2026-08-fresh-start/operating-principles.md P3.
@@ -17,10 +16,60 @@
 # nothing filed) and BATCHED: one standing "unnamed waits" triage
 # subject per rig, one visit per pass listing all candidates — a messy
 # store costs one conversation, never one per idle bead.
+#
+# GATED BY A MECHANICAL PRECHECK (bead tk-7h51d). This was a plain
+# `trigger = "cooldown"` formula order, so every pass spent a polecat
+# session — and the common case, an empty board, is the case that cost
+# the most relative to what it produced: ~16 sessions/day across four
+# rigs to conclude "nothing new" and file nothing. The classifier is
+# already shell and jq; what it lacked was a production caller.
+#
+# So the trigger is now `condition`, and the check is the deterministic
+# half of one pass: three batched bead reads and a jq, ~3s, no session
+# and no network. It answers "run the pass" unless it can POSITIVELY
+# prove the new-candidate set is empty. Everything else here is
+# deliberately unchanged — same formula, same bare pool, same rig scope
+# — so a pass that does run is dispatched by exactly the path that
+# dispatched it before, single-flight open-work gate and all. Only the
+# empty path short-circuits; the narration is still an agent's job.
+#
+# The precheck's exclusions are a strict SUBSET of the formula's, which
+# is what makes skipping provably safe rather than probably safe: its
+# survivors are a superset of the true candidates, so zero locally
+# implies zero really. It never excludes on PR/merge_result grounds —
+# that read is non-monotone and can un-exclude rejected work. See the
+# script's header and liveness-sweep-precheck.test.sh, which pins the
+# containment against the classifier block extracted from the formula.
+#
+# NO `interval` KEY, deliberately: a condition trigger ignores it, so an
+# interval here would be an inert second copy of the cadence that a
+# later editor would change with no effect. The 6h window lives in
+# LIVENESS_SWEEP_INTERVAL at the top of the precheck script, which
+# stamps it per rig.
+#
+# That per-rig stamping is load-bearing for the `scope = "rig"` below,
+# and the coupling is easy to miss from either side: the script stamps
+# into GC_PACK_STATE_DIR, which the runner scopes to CITY+PACK, while
+# this order runs one check per importing rig. The script keys the
+# window by GC_RIG for exactly that reason. If you ever widen this
+# scope, or move the state elsewhere, re-read "the state dir" in the
+# script first — an unkeyed window silences every rig but the first.
+#
+# `check_timeout` MUST stay above the script's own worst case (three
+# bounded reads at LIVENESS_SWEEP_CALL_TIMEOUT=45s each). A condition
+# check killed by this deadline never proves its condition, so the order
+# does not fire — whereas the script's internal bound fires first and
+# turns a wedged store into "unreadable", which RUNS the pass. Keep the
+# inequality if you touch either number; the doctor check asserts it.
+# The controller does log a killed check distinctly rather than as an
+# ordinary false condition (gastownhall/gascity ga-ocypq2), so this is
+# diagnosable rather than invisible — but the inequality is what keeps
+# it from happening.
 [order]
-description = "liveness sweep: classify open beads; batch unnamed waits into one triage visit (P3)"
+description = "liveness sweep: classify open beads; batch unnamed waits into one triage visit (P3). Gated by a mechanical precheck so an empty board costs no agent session."
 formula = "mol-liveness-sweep"
-trigger = "cooldown"
-interval = "6h"
+trigger = "condition"
+check = "$PACK_DIR/assets/scripts/liveness-sweep-precheck.sh"
+check_timeout = "300s"
 pool = "gc-toolkit.polecat"
 scope = "rig"

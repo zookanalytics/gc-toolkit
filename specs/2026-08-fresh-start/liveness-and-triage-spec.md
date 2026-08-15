@@ -219,6 +219,73 @@ unnamed for the whole time its molecule runs, because `mol-polecat-work`
 stamps `assignee`/`gc.routed_to` on the molecule, never on the work
 bead).
 
+**Amendment, 2026-08-14 (bead tk-7h51d).** The pass is now gated by a
+mechanical precheck, so an empty board costs no agent session. As
+written above, every pass spent a polecat session — ~4/day/rig, ~16/day
+across four rigs — and the common case, an empty board, was the case
+that cost the most relative to what it produced. Worse, the price of
+concluding "nothing" was O(open beads), so it grew with the backlog.
+
+`orders/liveness-sweep.toml` is therefore a `condition` order whose
+check is `assets/scripts/liveness-sweep-precheck.sh`: three batched bead
+reads and a jq, ~3s, no session and no network, on the same 6h cadence.
+The formula, the bare pool and the rig scope are unchanged, so a pass
+that does run is dispatched by exactly the path that dispatched it
+before — single-flight open-work gate included. Only the CLOCK moved: a
+condition trigger has no `interval`, so the window lives in the script
+and is stamped per rig — keyed by `GC_RIG`, because the state directory
+it is built from (`GC_PACK_STATE_DIR`) is city+pack scoped while the
+order is rig-scoped. Without that key the first rig through the check
+would stamp a window shared by every importing rig and silence the rest
+for six hours, which is the one failure mode the whole design is
+arranged to avoid: a sweep that looks quiet because it never ran.
+
+**Why skipping is provably safe.** The precheck applies a strictly
+SMALLER filter than classify. It excludes only on locally-decidable
+grounds — assignee, `gc.routed_to`, `task_kind` (visit /
+triage-subject), a live visit's continuation group, `gc.takeaway`,
+`triage.hold`, and the class-2(i) structural edges to non-closed beads
+— and omits the three exclusions that are not local: worked-via-convoy,
+the open-PR intersection, and the pre-open gate verdicts. Since its
+exclusions are a subset, its survivors are a SUPERSET of the true
+candidates, so *zero new locally* implies *zero new really*. The
+converse never has to hold: a non-empty local set simply runs the pass.
+The PR half is excluded for a second reason on top of locality — that
+read is NON-MONOTONE, and the amendment above records why a naive
+"carries `merge_result`, skip it" rule hides rejected work.
+
+**Why the failure mode needed explicit handling.** Every check added
+since tk-snnpp obeys "a probe that cannot be read excludes nothing". A
+programmatic short-circuit INVERTS that: a script that silently returns
+empty on a bad jq or a degraded store files nothing and looks perfectly
+healthy, and there is no agent left to find the result strange. So the
+precheck concludes empty only from positively verified reads — every
+read required to exit 0 AND validate as a JSON array, one guarded
+assignment as the only path to "skip", and an exit trap that turns any
+abort into a run. Both halves of the read check are load-bearing: a
+failed call can still print a well-formed array, and `[]` from a dead
+store is byte-identical to `[]` from an idle board, so a shape-only
+test would read an outage as "nothing to report" (tk-zydg6). Its
+`check_timeout` is held above the script's own worst case, because a
+condition check killed by that deadline reads as NOT DUE, which is
+precisely the silent skip being designed out. It writes no bead: in
+particular it never advances `sweep.reported`, so a skipped pass leaves
+the baseline exactly as a pass that never ran would.
+
+Pinned by `assets/scripts/liveness-sweep-precheck.test.sh`, whose
+containment case runs the precheck's filter and the formula's
+`classify-candidates` block — extracted verbatim — over one fixture and
+asserts the superset relation, with positive controls so a pass cannot
+mean "both sets were empty".
+
+**Doctor check (extended):** `check-liveness-sweep-wired` now also
+asserts the precheck is shipped executable, that the order's `check`
+names it, that no inert `interval` key has crept back in, and that
+`check_timeout` exceeds the script's worst case. That half is guarded
+hardest because it fails worst: a broken precheck makes the condition
+check fail, a failing condition check reads as not due, and the sweep
+retires itself on every rig with every other file still correct.
+
 ## 3. Triage recurrence
 
 **The subject:** an ordinary bead, `task_kind=triage-subject`, body =
