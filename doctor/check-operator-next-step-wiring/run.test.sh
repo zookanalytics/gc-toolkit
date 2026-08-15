@@ -18,6 +18,14 @@
 #        pack.toml patch comments discuss this fragment by name at length, so a
 #        comment-inclusive scrape would score the explanation as the wiring.
 #
+# Surfaces (b) and (d) lost their shipped users when the thread agents were
+# retired (tk-5savt), so cases (4), (14) and (15) exercise them by REWIRING an
+# agent that does ship — converse, which is classified operator-facing and
+# whose wiring the check must therefore resolve. (4) and (14) are a matched
+# pair: the same relocation is asserted to be found when it is legitimate and
+# NOT found when it points out of the pack, which is what keeps the (d)
+# resolver honest now that nothing ships on it.
+#
 # Every case mutates a throwaway copy of the SHIPPED artifacts, so the fixtures
 # cannot drift from what the pack actually ships. No live city, Dolt, or network.
 #
@@ -26,8 +34,7 @@
 #   (2)  refinery loses the pack.toml wiring -> ERROR (the tk-l1pj6 regression)
 #   (3)  converse loses its inline template call -> ERROR
 #   (4)  inheritance via a pack-qualified prompt_template -> ERROR (false-green)
-#   (5)  mechanik loses the inline call -> ERROR twice (itself + its thread)
-#   (6)  mayor-thread loses append_fragments -> ERROR
+#   (5)  mechanik loses the inline call -> ERROR
 #   (7)  a new, unclassified agent appears -> ERROR (the roster-drift guard)
 #   (8)  a new `_`-prefixed (disabled) agent appears -> still OK
 #   (9)  a dir under agents/ with no agent.toml -> still OK
@@ -35,6 +42,10 @@
 #   (11) real entry replaced by a commented-out one -> ERROR (vacuous-green)
 #   (12) a classified agent no longer exists -> WARNING (stale roster)
 #   (13) a non-operator-facing agent gains the fragment -> WARNING (stray)
+#   (14) inheritance via a pack-root-relative prompt_template -> OK (surface d)
+#   (15) wiring relocated to append_fragments -> OK (surface b)
+# (6) was the retired thread agent's append_fragments case; (14) and (15)
+# replace the coverage it carried.
 
 set -u
 
@@ -106,16 +117,33 @@ drop_mechanik_inline() {
     sed -i "/{{ template \"$FRAG\" . }}/d" "$1/agents/mechanik/prompt.template.md"
 }
 
-# Rewrite mechanik-thread's inheritance as a pack-qualified reference. The
-# fragment is still reachable in agents/mechanik/prompt.template.md, so a
-# resolver that ignores the `//` form would keep reporting it wired.
-qualify_thread_prompt() {
-    sed -i 's@prompt_template = "agents/mechanik/prompt.template.md"@prompt_template = "gastown//agents/mechanik/prompt.template.md"@' \
-        "$1/agents/mechanik-thread/agent.toml"
+# Move converse off its inline call and onto inheritance, expressed as a
+# pack-QUALIFIED reference. Strip the `<pack>//` prefix and the path is a real
+# file in the sandbox that carries the fragment, so a resolver that normalizes
+# the prefix away instead of refusing it would report converse wired by a
+# prompt this pack does not own.
+qualify_converse_prompt() {
+    sed -i "/{{ template \"$FRAG\" . }}/d" "$1/agents/converse/prompt.template.md"
+    printf '\nprompt_template = "gastown//agents/mechanik/prompt.template.md"\n' \
+        >> "$1/agents/converse/agent.toml"
 }
 
-drop_mayor_thread_list() {
-    sed -i "/^    \"$FRAG\",$/d" "$1/agents/mayor-thread/agent.toml"
+# The same relocation with a pack-root-relative reference — the legitimate
+# form of surface (d). Paired with the case above: together they assert that
+# the resolver follows in-pack inheritance and refuses the qualified form,
+# rather than being blind to both.
+inherit_converse_prompt() {
+    sed -i "/{{ template \"$FRAG\" . }}/d" "$1/agents/converse/prompt.template.md"
+    printf '\nprompt_template = "agents/mechanik/prompt.template.md"\n' \
+        >> "$1/agents/converse/agent.toml"
+}
+
+# Surface (b) on an operator-facing agent: converse gives up its inline call
+# and declares the fragment in append_fragments instead. Stop reading that key
+# and this goes red.
+relocate_converse_to_append_fragments() {
+    sed -i "/{{ template \"$FRAG\" . }}/d" "$1/agents/converse/prompt.template.md"
+    printf '\nappend_fragments = ["%s"]\n' "$FRAG" >> "$1/agents/converse/agent.toml"
 }
 
 add_unclassified_agent() {
@@ -159,9 +187,10 @@ run_check "pristine shipped artifacts pass"             0 none
 echo "── wiring surfaces ──"
 run_check "refinery loses pack.toml wiring"             2 drop_refinery
 run_check "converse loses inline template call"         2 drop_converse_inline
-run_check "mechanik loses inline call (thread too)"     2 drop_mechanik_inline
-run_check "mayor-thread loses append_fragments"         2 drop_mayor_thread_list
-run_check "pack-qualified prompt_template not inherited" 2 qualify_thread_prompt
+run_check "mechanik loses inline call"                  2 drop_mechanik_inline
+run_check "wiring relocated to append_fragments"        0 relocate_converse_to_append_fragments
+run_check "pack-root-relative prompt_template inherited" 0 inherit_converse_prompt
+run_check "pack-qualified prompt_template not inherited" 2 qualify_converse_prompt
 run_check "commented-out entry does not count"          2 comment_out_refinery
 
 echo "── roster ──"

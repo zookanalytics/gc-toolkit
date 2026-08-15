@@ -57,11 +57,11 @@ before filing, and the distiller checks again before counting.
 
 Four producers file the same bead contract:
 
-1. **Self-report.** Working agents (polecat, mayor, mechanik, converse,
-   and their thread variants) carry the `file-feedback-observations`
-   fragment: when a turn brings corrective feedback about standing
-   behavior, the agent fixes the instance first, then files one
-   observation bead with `obs.source=self`.
+1. **Self-report.** Working agents (polecat, mayor, mechanik, converse)
+   carry the `file-feedback-observations` fragment: when a turn brings
+   corrective feedback about standing behavior, the agent fixes the
+   instance first, then files one observation bead with
+   `obs.source=self`.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
    rig's merged/closed PRs' review and conversation comments and files
    what self-report missed, with `obs.source=miner`. It files

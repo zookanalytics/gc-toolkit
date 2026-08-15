@@ -183,7 +183,7 @@ echo "  claude procs > ~34 sustained      -> measured 24 on 2026-08-04 with 6 po
 echo "                                       live and 28 sessions. The non-polecat"
 echo "                                       roster alone (4 witness, 4 refinery, 4"
 echo "                                       dispatcher, mayor/boot/deacon/dog/"
-echo "                                       mechanik, bead-hosts, mayor-threads) is"
+echo "                                       mechanik, bead-hosts) is"
 echo "                                       ~18-22, so a low threshold here is all"
 echo "                                       false alarms. Ceiling = that + 16."
 echo "                                       Trust the per-pool counts, not this."

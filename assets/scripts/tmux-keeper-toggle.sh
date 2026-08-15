@@ -43,9 +43,9 @@
 # picker renders a neutral label instead of stalling or guessing, and
 # `toggle` refuses to act rather than flip the wrong way. A keeper that
 # has never been materialized has no session row and reads as "down"
-# (unpinned). `…-adhoc-<id>` threads carry their own distinct aliases, so
-# the exact Alias match keeps excluding them — only the canonical session
-# is the front-door.
+# (unpinned). `…-adhoc-<id>` ad-hoc sessions carry their own distinct
+# aliases, so the exact Alias match keeps excluding them — only the
+# canonical session is the front-door.
 #
 # Usage: tmux-keeper-toggle.sh [--city-path <path>] [state|toggle]
 #   state    print "up" (pinned), "down" (unpinned), or "unknown" (beads
