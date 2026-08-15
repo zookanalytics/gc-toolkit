@@ -93,8 +93,11 @@ answer for.
   A target that carries a default formula — including one that merely
   *inherits* it from city scope — silently turns a bare
   `gc sling <target> <bead>`, with no `--formula` and no `--on`, into a
-  **Lane 4 formula attach**, and under a graph.v2 default formula that
-  writes *neither* routing field. `--no-formula` is the opt-out that
+  **Lane 4 formula attach**, under which a graph.v2 default formula
+  leaves **no claim route on the bead**: `gc.routed_to` is not written,
+  any the bead was already carrying is retired, and
+  `gc.execution_routed_to` is stamped in its place — a key the Tier 3
+  offer predicate does not read. `--no-formula` is the opt-out that
   restores the shape above. This is not a corner case in a city that
   sets the field at city scope: see
   ["When a bare sling is silently Lane 4"](#when-a-bare-sling-is-silently-lane-4--default_sling_formula),
@@ -319,7 +322,7 @@ absent *and* `assignee` null **while it is fully dispatched**. Per the
 paragraph above that is the designed shape, not a stranded bead — and
 since `dbc0012ac` it is an actively maintained one, because the pour
 retires any route the bead was carrying rather than merely declining to
-write one. "No routing fields" is not evidence that dispatch failed.
+write one. An empty `gc.routed_to` is not evidence that dispatch failed.
 
 **Re-slinging on that misreading is now refused.** It used to pour a
 **second** wisp against the same bead and converge two workers on one
@@ -453,13 +456,16 @@ success:
 {"schema_version":"1","success":true,"routed":true,"workflow_id":"..."}
 ```
 
-`routed: true` is not a claim that a routing field was written. It is
+`routed: true` is not a claim that a *claim* route was written. It is
 computed as `result.Routed > 0 || (!result.Idempotent &&
 result.BeadID != "" && !result.DryRun)`
 (`rigs/gascity/cmd/gc/cmd_sling.go:1138`), so it reports true on the
-graph.v2 path that wrote no routing field at all. Exit code is 0,
-nothing warns, and the bead ends with `gc.routed_to` empty — matching no
-offer predicate, since [the read side](#the-read-side-the-claim-predicate)
+graph.v2 path, which writes no `gc.routed_to` at all: the only routing
+key it leaves on the bead is `gc.execution_routed_to`, read by the
+graphroute resolver, convoy dispatch, the dashboard orders feed, and the
+dispatch engine — and by no offer predicate. Exit code is 0, nothing
+warns, and the bead ends with `gc.routed_to` empty — matching no offer
+predicate, since [the read side](#the-read-side-the-claim-predicate)
 is exact-match on that key. The bead sits forever.
 
 Stamping first does not save you, and since `dbc0012ac` it is explicit
@@ -562,9 +568,10 @@ targetless sling is whichever lane the *resolved target* implies:
 - **Resolved target carries `default_sling_formula`** — its own or one
   inherited from city scope → **Lane 4**, via the same formula-branch
   predicate an explicit target hits (`:978`); under a graph.v2 default
-  formula that writes **neither routing field on the bead**.
-  `--no-formula` suppresses the default and restores the Lane 1 shape
-  above.
+  formula **no claim route survives on the bead** — none is written, any
+  it was carrying is retired, and `gc.execution_routed_to` is stamped in
+  its place. `--no-formula` suppresses the default and restores the Lane
+  1 shape above.
 
 Targetless resolution therefore introduces no field behavior of its own
 — it inherits the resolved target's. The two `default_sling_target*`
@@ -584,9 +591,10 @@ importing rig. A bare `gc sling <bead>` then reaches that pool — but
 the pool via `gc.routed_to` and the pool's demand-driven scale_check fans
 out an ephemeral polecat to pick it up. With it set — as it is at city
 scope in this city — the dispatch is a Lane 4 attach instead: under a
-graph.v2 formula the bead carries no routing field and it is the *wisp*
-that the pool sees. Neither shape is safe to assume; read the resolved
-value (`gc config show`) for the target before predicting which you get.
+graph.v2 formula the bead carries no claim route — only the
+`gc.execution_routed_to` record — and it is the *wisp* that the pool
+sees. Neither shape is safe to assume; read the resolved value
+(`gc config show`) for the target before predicting which you get.
 
 - **CLI example:**
   ```bash
@@ -744,8 +752,9 @@ onto the lanes:
   The **graph.v2** variants are the exception, but a narrower one than "nothing
   is routed" — and the difference is best read as *which term of the
   filter* each record fails. The **work bead** fails the **routing** term
-  outright: the pour leaves it unrouted, so no state it could ever be in
-  makes it match. The **workflow root** is the opposite case — it carries
+  outright: the pour retires its claim route and writes no new one, so no
+  state it could ever be in makes it match. The **workflow root** is the
+  opposite case — it carries
   `gc.routed_to=<target>` (`internal/graphroute/graphroute.go:562-570`),
   so it satisfies the routing term. It is the **routed record** of the
   dispatch — the record delivery is addressed to, and the one containment
@@ -1039,8 +1048,9 @@ path that stamps a resolved instance name.
 pool name — `gc sling --no-formula <rig>/<pool> <bead>` (Lane 1 restamps
 it, and its collapse is idempotent on a value that is already base; the
 `--no-formula` is what keeps the repair *on* Lane 1 when the pool carries
-a `default_sling_formula`, since a Lane 4 attach would rewrite no route
-at all) or a direct
+a `default_sling_formula`, since a Lane 4 attach writes no claim route —
+and since `dbc0012ac` actively retires the suffixed one you came to
+repair, leaving the bead unrouted instead of corrected) or a direct
 `bd update <bead> --set-metadata gc.routed_to=<rig>/<pool>`. Do not wait
 for the pool to catch up; the offer side will not. This is the same
 repair upstream already applies to the
