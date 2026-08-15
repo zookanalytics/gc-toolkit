@@ -1771,9 +1771,10 @@ does not close at PR-creation — all four rigs symlink gc-toolkit's
 `mol-refinery-patrol.toml`, which is close-on-land — and the stock GasTown formula
 that *does* (`gc bd close $WORK --reason "Pull request ready: $PR_URL"`) stamps
 `merge_result=pull_request` in the same chained command, so it cannot produce this
-shape either. That base formula was readable in-repo as a frozen snapshot under
+shape either. (That base formula was readable in-repo as a frozen snapshot under
 `doctor/check-base-artifact-collision/base-snapshots/` until that check was
-retired (tk-3w7p7, 2026-08-15); read it from the gastown pack itself now. `sl-jcr4`'s history shows the ordinary work-bead done-gate instead:
+retired — tk-3w7p7, 2026-08-15; read it from the gastown pack itself now.)
+`sl-jcr4`'s history shows the ordinary work-bead done-gate instead:
 one update stamping `gc.work_outcome=shipped` + `gc.work_commit`, then a close 0.65s
 later, with `merge_result` never written. That is an agent running the normal "I
 shipped it" sequence on a bead that was an mr anchor with a live PR — a class of
