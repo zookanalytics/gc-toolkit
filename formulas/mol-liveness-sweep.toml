@@ -21,8 +21,9 @@ failure mode is to re-report, never to hide (operator decision
 since: a probe that cannot be read excludes nothing.
 `assets/scripts/liveness-sweep-delta.test.sh` extracts the six marked
 blocks below and executes them, so the delta split, the class filters
-(worked-via-convoy, takeaway, gating state, operator hold) and the
-classify→normalize handoff cannot drift from what an agent actually runs.
+(machine convoy, worked-via-convoy, takeaway, gating state, operator
+hold) and the classify→normalize handoff cannot drift from what an agent
+actually runs.
 
 The visit body is a SNAPSHOT of the pass, and a sitting reads it whenever
 the visit is claimed — a day or more later, by which time a routed
@@ -122,8 +123,50 @@ fi
 jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE"
 ```
 
-The classes — the first four are named waits or live work; only the
-fifth is a defect:
+The classes — class 0 is not work at all, 1 through 4 are named waits or
+live work, and only the fifth is a defect:
+
+0. **machine scaffolding** — a convoy bead the machinery mints for its
+   own bookkeeping: the per-sling `input convoy for <bead>` one-child
+   wrapper, and the `sling-<bead>` convoy. Nobody dispositions it, it
+   carries no work, and it never closes on its own — the wrapper orphans
+   the moment the work bead it tracks closes, then stays open forever and
+   arrives as an unnamed wait on every pass thereafter. Two other readers
+   of this same spine already drop exactly these two title prefixes as
+   MACHINE convoys: `assets/scripts/gc-helm.sh` (the operator board's
+   floating-convoy gather, whose comment records that the `input convoy
+   for …` kind once slipped through "only by accident") and
+   `services/helm/internal/source/supervisor.go` (`gatherConvoys`, whose
+   comment says it mirrors the shell). So the surface an operator READS
+   excluded them in two independent implementations while the sweep that
+   GENERATES operator work did not. Measured 2026-08-14: 40 open input
+   convoys city-wide (gc-toolkit 19, gascity 11, signal-loom 6,
+   shutupandlisten 4), each one a future candidate; the gc-toolkit ready
+   set that day already held seven. Operator ruling 2026-08-14 (visit
+   sl-ji4b4 on subject sl-djvs, sitting 8): exclusion first, a reaper for
+   the orphans follows.
+
+   **The discriminator is the title prefix, guarded by the bead's TYPE.**
+   `gc.synthetic=true` alone does not do it — the `sling-` convoys carry
+   no metadata at all — and the title prefix alone is broader HERE than in
+   the two implementations above, which read `gc convoy list` and so see
+   nothing but convoys. This block reads every ready bead of every type,
+   where a bug titled "input convoy for tk-x never closes" or
+   "sling-created convoys are never reaped" is an ordinary thing to file
+   against this very defect. So the test is `issue_type=convoy` AND (one
+   of the two machine prefixes OR `gc.synthetic=true`), which cannot hide
+   a work bead whose title merely talks about a convoy.
+
+   **A non-machine convoy is NOT dropped**, and that is the distinction
+   gc-helm.sh draws in the same breath: an unowned floating convoy is the
+   orphan the observer must CATCH, not residue to hide. Class 0 covers
+   only what the machinery minted for itself.
+
+   Do not confuse this with the husk in class 1 below — they are opposite
+   directions of the same fact. There, a dead synthetic convoy must not
+   HIDE the member bead it tracks. Here, the convoy bead ITSELF is the
+   candidate. Class 1 keeps the member visible; class 0 drops the
+   wrapper. Both hold at once and neither weakens the other.
 
 1. **worked** — assigned, `gc.routed_to` non-empty, or a work bead a live
    molecule is driving. mol-polecat-work stamps assignee and `gc.routed_to`
@@ -166,7 +209,11 @@ fifth is a defect:
    LIVE, which is open+in_progress only: a target absent from LIVE but
    present in ALIVE (the live case tk-dhue, a convoy `tracks`-ing a
    BLOCKED bead) would otherwise survive the edge check and misfile as a
-   class 5 unnamed wait. `gc bd ready` already excludes
+   class 5 unnamed wait. That instance no longer reaches the edge check —
+   tk-dhue is `sling-tk-24gdht` and class 0 now drops it earlier — but
+   the rule it established is unchanged and still load-bearing for every
+   non-machine convoy: re-derive against a current case before treating
+   tk-dhue as reproducible. `gc bd ready` already excludes
    blocker-blocked beads and gates; the edge checks need the
    per-candidate pass below. Note: a fully idle linked cluster still
    surfaces through its root (the node with no outgoing waits), so one
@@ -514,6 +561,11 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
     | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
   def standing_kinds: ["triage-subject", "feedback-pattern"];
+  def machine_convoy:
+    (.issue_type // "") == "convoy"
+    and ((((.title // "") | startswith("sling-"))
+          or ((.title // "") | startswith("input convoy for"))
+          or ((.metadata["gc.synthetic"] // "") == "true")));
   def pre_open_all_green:
     (.metadata // {}) as $m
     | (($m.check_set // "")
@@ -528,6 +580,7 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
      | (.metadata["gc.continuation_group"] // empty)]) as $convgroups
   | ([($openprs // [])[] | pr_key] | map(select(. != ""))) as $openkeys
   | [ ($ready[0] // [])[]
+      | select(machine_convoy | not)
       | select((.metadata["gc.routed_to"] // "") == "")
       | select(.id as $id | ($worked | index($id)) | not)
       | select((.metadata.task_kind // "") != "visit")
@@ -583,10 +636,14 @@ Record in your notes: counts per class as a funnel, the surviving ids,
 what the edge check dropped, and — because these are the drops nothing
 else in the pass makes visible — the worked-via-convoy ids with the
 convoy covering each, the PR-parked ids with their PR numbers, the
-pre-open-gated ids with the green gate marker each carries, the held
-ids WITH the reason each hold gives, and both the `$PR_LIVENESS` and
-`$CONVOY_LIVENESS` values. A hold, a parked PR, a pre-open gate and a
-molecule-driven work bead are named waits, not defects, but a wait
+machine-scaffolding drops as a COUNT and never a list (class 0 is noise
+by construction, and a reaper rather than a sitting is what removes it;
+a count that keeps growing pass over pass is the signal that the reaper
+is still owed), the pre-open-gated ids with the green gate marker each
+carries, the held ids WITH the reason each hold gives, and both the
+`$PR_LIVENESS` and `$CONVOY_LIVENESS` values. A hold, a parked PR, a
+pre-open gate and a molecule-driven work bead are named waits, not
+defects, but a wait
 nobody ever reads is how a bead disappears for good; the funnel note is
 the only place they surface.
 
