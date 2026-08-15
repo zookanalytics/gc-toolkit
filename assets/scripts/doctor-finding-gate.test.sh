@@ -137,7 +137,7 @@ CACHE="$TMP/cache.json"
 FRESH="$TMP/fresh.json"
 payload "$FRESH" \
   "check-rig-scoped-orders-bound:error" \
-  "check-base-artifact-collision:warning" \
+  "check-warning-fixture:warning" \
   "census-owner-liveness:error" \
   "gc-toolkit:check-namespaced:error" \
   "check-set-heal:error" \
@@ -236,7 +236,7 @@ out=$("$SCRIPT" probe b-explicit --json "$FRESH" 2>/dev/null); rc=$?
 eq "$rc" "1" "(EXPLICIT) metadata.doctor_check matches with no prose token"
 eq "$out" "census-owner-liveness" "(EXPLICIT) it names the declared check"
 
-bead b-notes "unrelated title" "unrelated body" "notes mention check-base-artifact-collision" ""
+bead b-notes "unrelated title" "unrelated body" "notes mention check-warning-fixture" ""
 eq "$("$SCRIPT" probe b-notes --json "$FRESH" >/dev/null 2>&1; echo $?)" "1" \
    "(NOTES) notes are searched too"
 

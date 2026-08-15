@@ -74,11 +74,13 @@
 # path as satisfied is the false-green this check exists to prevent.
 #
 # WHAT IS NOT ASSERTED. That the fragment RENDERS — check-agent-prompt-integrity
-# owns template resolution and check-base-artifact-collision owns define-name
-# shadowing. Nor that an agent obeys the rule once it has it: that is tk-l1pj6's
-# second cause (a correctly-worded instruction with nothing enforcing it, the
-# same shape as tk-76jxq), and no static check can reach it. This check closes
-# distribution, which is the half that is mechanically closable.
+# owns template resolution. Define-name shadowing against base is owned by
+# NOTHING since check-base-artifact-collision was retired (tk-3w7p7); see
+# docs/gascity-packs.md §7a. Nor that an agent obeys the rule once it has it:
+# that is tk-l1pj6's second cause (a correctly-worded instruction with nothing
+# enforcing it, the same shape as tk-76jxq), and no static check can reach it.
+# This check closes distribution, which is the half that is mechanically
+# closable.
 #
 # Exit codes: 0=OK, 1=Warning, 2=Error
 # stdout: first line=message, rest=details

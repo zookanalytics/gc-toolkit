@@ -62,8 +62,9 @@
 #     documenting a divergence that no longer exists is worth a warning.
 #
 # WHAT IS NOT ASSERTED. That the named fragments exist or render;
-# check-base-artifact-collision owns define-name shadowing and
-# check-agent-prompt-integrity owns template resolution. Nor that an exception's
+# check-agent-prompt-integrity owns template resolution, and define-name
+# shadowing against base is owned by NOTHING since check-base-artifact-collision
+# was retired (tk-3w7p7; see docs/gascity-packs.md §7a). Nor that an exception's
 # pool exists: a renamed pool still trips the set comparison loudly (it carries a
 # fragment the patch does not), and a pool deleted outright leaves an entry that
 # grants nothing to nobody. Warning on a missing pool would fire on every pack

@@ -11,7 +11,7 @@
 # pushed work until a human noticed.
 #
 # Why a doctor check rather than trust. Both call sites live in formulas that are
-# ALLOWLISTED MIRRORS of base artifacts (see check-base-artifact-collision), so
+# DELIBERATE MIRRORS of base artifacts (see docs/gascity-packs.md §7a), so
 # they are periodically reconciled against an upstream that does not carry this
 # pass. A reconciliation that drops either call restores the blind spot silently
 # and in exactly the state where nothing reports it. The script existing without a

@@ -181,8 +181,9 @@ REVIEW_BODY_EMITTER="$(cd "$(dirname "$_rmpself")" && pwd)/review-dispatch-body.
 # This pass is the town's busiest CLOSER, and under close-on-land its close is
 # what turns "the PR merged" into "the work is done". For a bead filed against a
 # `gc doctor` finding those are different claims, and three times on 2026-08-10 —
-# check-rig-scoped-orders-bound, check-base-artifact-collision (both here),
-# census-owner-liveness (gascity) — the second was recorded because the first was
+# check-rig-scoped-orders-bound, check-base-artifact-collision (both here then;
+# the latter was retired 2026-08-15, tk-3w7p7), census-owner-liveness (gascity) —
+# the second was recorded because the first was
 # true, while the check went on firing. The gate does not stop the close (an
 # anchor left open over a merged PR is the worse lie); it makes the close say
 # PARTIAL and name the successor that carries the rest.
