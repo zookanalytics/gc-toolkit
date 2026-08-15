@@ -32,7 +32,8 @@ poured is
 | Upstream tutorial `docs/tutorials/06-beads.md` — **rewritten repeatedly since the PR #1736 ruling, but never reconciled with it** | gastownhall/gascity | https://github.com/gastownhall/gascity/blob/207775a00b1a35e4ab4e05eceb6dc15bc2bead84/docs/tutorials/06-beads.md (last touched in `207775a00b1a35e4ab4e05eceb6dc15bc2bead84`, 2026-07-23). Not a stalled file: nine commits have touched it since the ruling-era `eac98595e701008087f7ee6acecbf55d5dca7794` (2026-05-16), rewriting over half of it (blob `c5c9527032d` → `6fb68f315`, 160 insertions / 148 deletions; measured from the `19a0bb201` pin this row previously cited, blob `63dc267d4`, it is 159 / 153). Four of those nine touched the `## How agents find work` section quoted at the end of this doc — `14153ed41` (#3073), `2315679e2` (#3461), `317e1cda6`, `207775a00` — and two rewrote the very steps at issue: `14153ed41` the claim step, `317e1cda6` the routing step. What survived every pass is the assignee-vs-`gc.routed_to` conflation the ruling settled, so the row's finding stands on a live reading, not on upstream inaction. | 2026-08-13 |
 | Upstream CLI reference (`--reassign` row only) | gastownhall/gascity | `rigs/gascity/docs/reference/cli.md:2789` at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17` | 2026-05-21 |
 | `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
-| PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
+| PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted from it (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md`. **The "compile-time-only" reading this row once carried is retired**: #2779 demoted `gc.run_target` from the routing key, not from every runtime reader — it shipped the workflow-root fallbacks (`legacyWorkflowRunTarget`, `bdReadyPoolDemandMigrationShell`) in the same commit, and PR #3421 later added the broad controller recovery. See the route-recovery row below. | 2026-06-19 (re-judged 2026-08-15) |
+| Controller route recovery — a **stored** `gc.run_target` is read at runtime and restored into `gc.routed_to` | gastownhall/gascity | `restoreCarriedWorkRoutes` / `carriedPoolRoute` / `liveGraphWorkflowDrivesBead` at `rigs/gascity/cmd/gc/route_recovery.go`, called from `cmd/gc/city_runtime.go:635` (startup, phase `startup-route-recovery`) and `:1218` (every patrol tick, phase `recover_unrouted_work_routes`). Added by PR #3421 (`a7509adca`, 2026-06-28), whose message names it "the automatic, broader-scoped equivalent of the manual `gc doctor --fix` run-target-to-routed-to backfill" and states the scope: a plain kind-less standalone work bead ("the dominant work shape, which a workflow-only recovery would catch none of") plus a pre-`ga-eld2x` workflow root, with control-dispatcher and topology beads left untouched. The live-workflow skip, and the explicit refusal to clear `gc.run_target` when a graph workflow retires the claim route ("blanking it strands the bead invisible to pool demand", `ga-20zd`), are `dbc0012ac` (PR #143, 2026-08-15). The two narrower workflow-root-only readers: `legacyWorkflowRunTarget` (`cmd/gc/work_routing_metadata.go`, consumed by `pool_desired_state.go:163`, `pool_session_name.go`, `build_desired_state.go:1824`) and `runTargetRoutedToBackfillCheck` (`cmd/gc/doctor_run_target_backfill.go`, lists `gc.kind=workflow` only). Read at gascity `origin/main`; file history is `a7509adca` / `41491b490` / `0ca343426` / `dbc0012ac`. | 2026-08-15 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
 | Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | **Classic** attach routes the source and leaves the wisp root unrouted — the graph.v2 attach does **not**, it routes its workflow root (see the graph.v2 clause later in this row): `rigs/gascity/internal/sling/sling_core.go:563` (`molecule_id` on source) and the rationale comment at `:569-578`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4178`, which attaches the *classic* `code-review` formula), asserting source `gc.routed_to=mayor` at `:4202` and wisp-root `gc.routed_to` empty at `:4224`. Standalone launch routes the root instead: `slingFormula` (`sling_core.go:366`) finalizes on `mResult.RootID` at `:405`, and its own graph branch (`:395`) hands off to `doStartGraphWorkflow` at `:396` before ever reaching that finalize. Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:335` (called at `:138`) with its rationale at `:328-334`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns *before* all of that classic routing and routes its **workflow root** instead: the `isGraph` branch of `attachFormulaToBead` (`sling_core.go:479`) spans `:487-533` and calls `doStartGraphWorkflow` (`:516`, defined at `:726`), with the root's `gc.routed_to` stamped at `internal/graphroute/graphroute.go:569`. Line references re-verified in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 | Pool demand counts routed **and unassigned** — and excludes canonical dispatch holds | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:180-181`: `bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --exclude-label "hold:mayor" --exclude-label "hold:external"`. The two hold flags are rendered by `excludeHoldLabelsShellArgs` (`:132`) from `beadmeta.DispatchHoldLabels` (`internal/beadmeta/hold_labels.go`), and the whole string is pinned verbatim by `internal/config/config_test.go:1862`. Offer and demand are the same shell by construction — the count-form differs only in `--limit 0` (`poolDemandCountShell`, `:293-295`) — and the `gc.run_target` migration twin `bdReadyPoolDemandMigrationShell` (`:192`) carries the same flags. The jq form applies the same `assignee == ""` filter at `workquery.go:233` and the same hold exclusion at `:236` (clause at `:157`). The hold terms arrived in `3dbc1b74a` (#4952, 2026-08-03), first reachable in this fork after the 2026-08-14 upstream rebase; the `assignee == ""` half is unchanged, only its line moved (was cited at `:41-43` / `:586`). Re-derived from source in the `rigs/gascity` fork at `main` `255d35ae0`. | 2026-08-14 |
@@ -505,26 +506,83 @@ It earns its place only when dispatches should be spread across
 sessions). Remember the precedence rule: a non-empty plural silently
 supersedes a configured singular.
 
-### Adjacent — `gc.run_target` (deprecated wire field; compile-time authoring hint)
+### Adjacent — `gc.run_target` (deprecated wire field; authoring hint **and** archived route)
 
 `gc.run_target` still appears as metadata on individual template
 steps inside graph.v2 formula files — e.g. `mol-review-quorum.toml`
 sets it on each review lane and the synthesis step — so you *will*
-see it there. But it is **not** a live, parallel routing field, and
-it does not route anything at runtime. Upstream PR #2779
-(`ga-eld2x`, merged 2026-06-01) made `gc.routed_to` the sole
-*persisted* routing key that every runtime demand / claim / scale
-reader consults, and demoted `gc.run_target` to a compile-time
-recipe-authoring hint: it declares a step's intended config/pool
-target for the steps where `assignee` can't be used (check and
-control-dispatch steps), and the stampers resolve it **into**
-`gc.routed_to` before the bead is persisted. So `gc.run_target` is
-an authoring-time precursor to `gc.routed_to`, not a sibling routing
-key alongside it — don't conflate the two when you see
-`gc.run_target` in formula files. A bare `gc.run_target` left on a
-stored bead is inert authoring provenance; `gc doctor --fix`
-backfills `gc.routed_to` for any pre-migration workflow root that
-still carries only the old field.
+see it there. It is **not** a sibling routing key alongside
+`gc.routed_to`. Upstream PR #2779 (`ga-eld2x`, merged 2026-06-01)
+made `gc.routed_to` the canonical *persisted* routing key for the
+runtime demand / claim / scale readers, and demoted
+`gc.run_target` to a recipe-authoring hint: it declares a step's
+intended config/pool target for the steps where `assignee` can't be
+used (check and control-dispatch steps), and the stampers resolve it
+**into** `gc.routed_to` before the bead is persisted. So
+`gc.run_target` is an authoring-time precursor to `gc.routed_to`,
+not a parallel routing field — don't conflate the two when you see
+`gc.run_target` in formula files.
+
+**But a `gc.run_target` left on a stored bead is not inert
+provenance.** It is the *archived route*, and the controller reads it
+at runtime to put the bead back into pool demand.
+`restoreCarriedWorkRoutes` (`rigs/gascity/cmd/gc/route_recovery.go`)
+re-stamps `gc.routed_to` from the route a bead already declares for
+itself via `gc.run_target`, for `open` + unassigned work — and the
+controller runs it in the cheap dispatch phase both at startup
+(`cmd/gc/city_runtime.go:635`, phase `startup-route-recovery`) and on
+**every patrol tick** (`:1218`, phase
+`recover_unrouted_work_routes`). The stall it heals: the pool
+autoscaler keys exclusively on `gc.routed_to`, so ready work carrying
+only the old field is invisible to demand and spawns no worker until
+someone re-slings it by hand. Upstream introduced it (PR #3421,
+`a7509adca`, merged 2026-06-28) as "the automatic, broader-scoped
+equivalent of the manual `gc doctor --fix`
+run-target-to-routed-to backfill".
+
+Broader-scoped is the operative word, and it is where "inert" is both
+right and wrong at once. `carriedPoolRoute` recovers **two** bead
+shapes: a plain, kind-less standalone work bead — upstream's own words,
+"the dominant work shape, which a workflow-only recovery would catch
+none of" — and a
+pre-`ga-eld2x` workflow root (`legacyWorkflowRunTarget`,
+`cmd/gc/work_routing_metadata.go`). Everything else is deliberately
+left alone: control-dispatcher beads (`retry`, `ralph`) and
+workflow-topology beads (`scope`, `spec`) also carry a bare
+`gc.run_target`, but *there* it is a dispatch/structure target no agent
+ever claims from a pool, so restoring `gc.routed_to` on one would
+mis-route it **into** pool demand. On those beads a stored
+`gc.run_target` really is inert to routing; on a work bead or a
+workflow root it is a live recovery source. The recovery cannot
+mis-route the beads it does touch, either: it only copies a route the
+bead already declares — never invents one — and it is idempotent, since
+a bead that already carries `gc.routed_to` yields no route at all.
+
+Two narrower legacy readers sit alongside it, both scoped to workflow
+roots: the `bdReadyPoolDemandMigrationShell` demand probe queries
+`gc.run_target` directly for `gc.kind=workflow` beads
+(`internal/config/workquery.go:192`) — its own comment says it is
+"scoped to workflow roots so `gc.run_target` remains an authoring hint
+everywhere else" — and `gc doctor --fix`'s
+`run-target-routed-to-backfill` check
+(`cmd/gc/doctor_run_target_backfill.go`) lists only `gc.kind=workflow`
+and backfills those. That manual check is still the *narrow* repair;
+the controller recovery is the broad one.
+
+That the field is load-bearing shows clearest where upstream **declined
+to clear it**. When a graph.v2 workflow starts it retires
+`gc.routed_to` on the work it drives, so the workflow is that bead's
+single live dispatch surface — but it leaves `gc.run_target` standing,
+because that key is "the archived route both this recovery and convoy
+reopen-source restore the bead from once the workflow is gone", and
+blanking it "strands the bead invisible to pool demand" (`dbc0012ac`,
+PR #143, merged 2026-08-15, `ga-20zd`). The collision between the
+retire and the tick is resolved on the *reading* side instead:
+`liveGraphWorkflowDrivesBead` makes the recovery skip a bead a live
+workflow already drives, gating on the workflow's liveness rather than
+on a mark left behind, so work outlives a workflow that ends without
+cleanup. A field whose removal would strand work is not authoring
+provenance.
 
 ## The read side: the claim predicate
 
