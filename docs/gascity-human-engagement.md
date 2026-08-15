@@ -381,10 +381,43 @@ Design record: `specs/tk-bzm86/design-doc.md`; the cross-rig filing
 
 ## Watch items — moving now, re-verify before building on them
 
-- **`gc.session_affinity`** — still advisory (no routing path reads it),
-  but drain has begun *writing* it, and a `gc.drain_continuation_group`
-  key exists (2026-08-06). If a read side lands, warm-continuity
-  assumptions should be re-derived on it.
+- **`gc.session_affinity`** — **this watch fired; re-derived 2026-08-14.**
+  The read side landed. Upstream #4845 (`b02df40bc`, 2026-08-02; reached
+  the fork on the 2026-08-14 rebase) makes `gc.session_affinity ==
+  "require"` a *necessary* conjunct of the controller's
+  stalled-continuation backstop — first in the candidate predicate
+  (`cmd/gc/build_desired_state.go:4703`,
+  `continuationRowCouldBeCandidate`), then again in the last-moment guard
+  before delivery (`cmd/gc/idle_nudge.go:233`,
+  `poolContinuationBackstop.revalidate`), where anything but `require`
+  resolves to *clear*: the pending nudge is dropped and its pacing marker
+  erased. The key therefore now helps decide whether a stalled graph-v2
+  continuation step is nudged back to the session already holding it. The
+  backstop is deliberately bounded (90-second grace, 3-minute backoff,
+  three attempts) and also demands exact
+  store/workflow-root/session-identity/session-generation provenance plus
+  a non-empty `gc.continuation_group`. The write side the 2026-08-06 pass
+  noted is still live and is what populates the readers: the value is
+  stamped at route time on pool-routed graph.v2 steps
+  (`internal/graphroute/graphroute.go:219`) and by drain on shared-drain
+  executable steps (`internal/dispatch/drain.go:1532`) — jointly the
+  population this backstop can reach. The separate
+  `gc.drain_continuation_group` key also still exists
+  (`internal/beadmeta/keys.go:81`), feeding drain's shared-group suffix
+  (`internal/dispatch/drain.go:1557`).
+
+  What survives narrowly: **no *routing* path reads it.** The hook vacuum
+  still routes on `gc.continuation_group` + `gc.root_bead_id`, and
+  affinity cannot send a bead anywhere. Upstream's own comments still say
+  exactly that (`internal/beadmeta/keys.go:476`, echoed at
+  `cmd/gc/pool_session_name.go:448`) and #4845 did not update them —
+  accurate about routing, stale as a description of consumption. **The
+  seam:** warm continuity is no longer carried by the group key alone.
+  Clearing or rewriting `gc.session_affinity` on a live step now silently
+  disables the one path that recovers a stalled continuation, so treat it
+  as load-bearing state cleared *only* together with the group
+  (`beadmeta.SessionAffinityMetadataKeys` is that list), not as hygiene on
+  an advisory field.
 - **The roles pack's growth** — every new upstream role is a standing
   question against a hand-authored one here. Recorded tripwire: when
   upstream ships a role covering something the pack hand-authors,
