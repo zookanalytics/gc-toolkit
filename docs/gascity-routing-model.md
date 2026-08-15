@@ -35,8 +35,8 @@ poured is
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted to compile-time-only (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md` | 2026-06-19 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
 | Lane 4 formula-sling field contract (`--on` attach vs standalone launch) | gastownhall/gascity | **Classic** attach routes the source and leaves the wisp root unrouted — the graph.v2 attach does **not**, it routes its workflow root (see the graph.v2 clause later in this row): `rigs/gascity/internal/sling/sling_core.go:563` (`molecule_id` on source) and the rationale comment at `:569-578`, citing gastownhall/gascity#2848; pinned by `TestOnFormulaAttachesAndRoutes` (`rigs/gascity/cmd/gc/cmd_sling_test.go:4178`, which attaches the *classic* `code-review` formula), asserting source `gc.routed_to=mayor` at `:4202` and wisp-root `gc.routed_to` empty at `:4224`. Standalone launch routes the root instead: `slingFormula` (`sling_core.go:366`) finalizes on `mResult.RootID` at `:405`, and its own graph branch (`:395`) hands off to `doStartGraphWorkflow` at `:396` before ever reaching that finalize. Flags are mutually exclusive at `rigs/gascity/cmd/gc/cmd_sling.go:158`; `AttachFormula` leaves `IsFormula` false (`internal/sling/sling.go:326`) while `LaunchFormula` sets it true (`:305-309`). Reassign gate `shouldReopenForReassign` at `sling_core.go:335` (called at `:138`) with its rationale at `:328-334`, and the `Reassign` field comment at `internal/sling/sling.go:273-279`. Graph.v2 attach returns *before* all of that classic routing and routes its **workflow root** instead: the `isGraph` branch of `attachFormulaToBead` (`sling_core.go:479`) spans `:487-533` and calls `doStartGraphWorkflow` (`:516`, defined at `:726`), with the root's `gc.routed_to` stamped at `internal/graphroute/graphroute.go:569`. Line references re-verified in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
-| Pool demand counts routed **and unassigned** | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:41-43` (`bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic`); the jq form applies the same `assignee == ""` filter at `workquery.go:586`. Verified current at upstream/main `1dbf0731e`. | 2026-07-23 |
-| Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | running `gc` binary + live city | Read off the **running implementation**, not from prose: `gc hook --help` ("Finds routed work using the agent's `work_query` config"); `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries embedded in the `gc` binary — the assignee tiers loop `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd list --status=in_progress --assignee=<candidate>` (in-progress recovery) then `bd ready … --assignee=<candidate> --exclude-type=epic --json --limit=…` (ready assigned), and the routed tier is `bd ready --metadata-field "gc.routed_to=<target>" --unassigned --exclude-type=epic --json --sort oldest --limit=…` (offer) with the same filter at `--limit 0` counted (demand); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. The routed-tier shape is corroborated by this rig's own `proactive` agent, whose `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard. `hold:<value>` convention observed as the live `gc doctor` checks `hold-label-routed-to` and `hold-label-conventions:<scope>`. Binary build `salvage/gc-c05nr-89e2e699f`. | 2026-07-23 |
+| Pool demand counts routed **and unassigned** — and excludes canonical dispatch holds | gastownhall/gascity | `bdReadyPoolDemandShell` at `rigs/gascity/internal/config/workquery.go:180-181`: `bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --exclude-label "hold:mayor" --exclude-label "hold:external"`. The two hold flags are rendered by `excludeHoldLabelsShellArgs` (`:132`) from `beadmeta.DispatchHoldLabels` (`internal/beadmeta/hold_labels.go`), and the whole string is pinned verbatim by `internal/config/config_test.go:1862`. Offer and demand are the same shell by construction — the count-form differs only in `--limit 0` (`poolDemandCountShell`, `:293-295`) — and the `gc.run_target` migration twin `bdReadyPoolDemandMigrationShell` (`:192`) carries the same flags. The jq form applies the same `assignee == ""` filter at `workquery.go:233` and the same hold exclusion at `:236` (clause at `:157`). The hold terms arrived in `3dbc1b74a` (#4952, 2026-08-03), first reachable in this fork after the 2026-08-14 upstream rebase; the `assignee == ""` half is unchanged, only its line moved (was cited at `:41-43` / `:586`). Re-derived from source in the `rigs/gascity` fork at `main` `255d35ae0`. | 2026-08-14 |
+| Claim predicate — `gc hook` tiers, `bd ready` semantics, built-in pool query | gascity source (`rigs/gascity`) + running `bd` binary — **no longer the running `gc` binary** | Method changed 2026-08-14, deliberately. This city's installed `gc` is build `pre-upstream-rebase-20260813` (`gc version`), which predates the rebase that brought the hold-label commits in: a live `gc hook` probe here still serves a held bead, and `gc config show` still resolves the hold-free routed tier (zero occurrences of `hold:mayor`), so the running binary is **not** the oracle for this row until the install catches up. The `gc`-side predicate below is therefore read from source in the `rigs/gascity` fork at `main` `255d35ae0`; `bd`-side semantics are still read off the running `bd`, and `gc hook --help` ("Finds routed work using the agent's `work_query` config") is retained from the 2026-07-23 binary read. `gc bd ready --help` ("open issues with no active blockers", "Excludes in_progress, blocked, deferred, and hooked issues", `GetReadyWork` semantics); the built-in queries as generated in source — the assignee tiers loop `for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"` around `bd list --status in_progress --assignee="$id" --json --limit=1` (in-progress recovery, `internal/config/workquery.go:330-337`) then an assigned-ready read (`assignedReadyTierCommand`, `:418-422`), and the routed tier is `bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --exclude-label "hold:mayor" --exclude-label "hold:external" --json --sort oldest --limit=20` (offer, `bdReadyPoolDemandShell`, `:180-181`, pinned by `internal/config/config_test.go:1862`) with the same shell at `--limit 0` counted (demand, `poolDemandCountShell`, `:293-295`); Go-side helper symbols `UnassignedRoutedWork` / `UnassignedInProgressPoolWork`. Hold labels are a term of this predicate in two layers, added by `3dbc1b74a` (#4952) and `a4e4cc2bf` (#5114): query level for route-scoped tiers only (`excludeHoldLabelsShellArgs`, `:132`), and hook level for every path including `--claim` (`filterUnreadyHookCandidates`, `cmd/gc/cmd_hook.go:915`; Tier 1's serve gate `heldLabelCountJQ`, `workquery.go:168`, applied at `:405`), while the assignee-scoped demand/liveness probes stay hold-transparent by design (`filterReadyByAssignee`, `cmd/gc/dispatch_control_ready.go:190`; `ephemeralAssignedReadyProbeScript`, `workquery.go:498`). **Not** re-derived in this pass: the assigned-ready tier's exact flag set — the 2026-07-23 binary read recorded `--exclude-type=epic` on it, and `assignedReadyTierCommand` at this pin does not render that flag. Treat the Tier 2 quote in "The read side" below as carrying its original 2026-07-23 date, and re-derive it before relying on it. This rig's own `proactive` agent corroborates the routed tier's *shape* — its `work_query`/`scale_check` in the resolved city config (`gc config show`) are that same filter, adding only a `--db` pin and an enablement guard — but as generated by the stale install it is still the **hold-free** form, so read it as corroborating every term except the two `--exclude-label` flags, which it will pick up when the install catches up. The `hold:<value>` convention checks survive and are unchanged in kind: `hold-label-routed-to` (`cmd/gc/doctor_hold_label_routed_to.go:33`; `hold:external` exempt, `--fix` backfills `gc.routed_to` from the label) and `hold-label-conventions:<scope>` (`doctor_hold_label_conventions.go:52`). What changed is that the label is now itself a term of the predicate, not merely a marker those checks reconcile against the routing fields. Binary build for the retained 2026-07-23 reads: `salvage/gc-c05nr-89e2e699f`; current install `pre-upstream-rebase-20260813`. | 2026-08-14 |
 | Instance-suffixed `gc.routed_to` normalized on the **demand read side only** | gastownhall/gascity | `17130b324` — "Normalize routed work instance names in demand matching (#4596)". Read side: `controllerDemandRouteTarget` (`rigs/gascity/cmd/gc/build_desired_state.go:1718`, rationale comment at `:1707-1717`), reached from `defaultScaleCheckCountsAndDemand` (`:1474`, invoked at `:735`) for every template in `defaultScaleTargets` — which is *not* only the no-custom-`scale_check` pools (`:446`, `:491`, `:567`): a custom-`scale_check` pool also gets this probe while cold (`isCold` at `:476`; append + `coldWakeTemplates` at `:633-637`), its contribution clamped to 1 (`:757-759`) and merged as a maximum against the custom count (`:766-768`); helper `agentutil.NormalizePoolRouteTarget` (`rigs/gascity/internal/agentutil/resolve.go:228`); coverage `TestDefaultScaleCheckCountsAndDemandNormalizesInstanceSuffixedRouteTarget` and `…LeavesUnmatchedInstanceSuffixAlone` (`cmd/gc/build_desired_state_test.go`). Offer side deliberately unchanged and exact-match: `bdReadyPoolDemandShell` (`rigs/gascity/internal/config/workquery.go:41`) with `$target` from `poolDemandTarget()` (`:157`), and `hookClaimMatchesRoute`'s raw `==` (`rigs/gascity/cmd/gc/cmd_hook_claim.go:1205`) over base-name route targets (`cmd/gc/cmd_hook.go:468`, `:685`). Write side, two distinct helpers: `032c1fbcd` (#3963) centralizes the **agent-derived** route identity as `agentutil.RoutedToIdentity` (`resolve.go:204`, collapse to `PoolName`), which the default sling query inlines rather than calls (`internal/config/workquery.go:532-536` — `internal/config` cannot import `agentutil`, which imports `config`); the **explicit-target-string** collapse is the separate `agentutil.NormalizePoolRouteTarget` (`resolve.go:228`), applied by sling's built-in routing path at `cmd/gc/cmd_sling.go:766`. Assigned-work companion `738f44732` (#4597): `cmd/gc/assigned_work_scope.go:156`, `cmd/gc/pool_desired_state.go:178`. Read in the `rigs/gascity` fork at `390624b0e`, whose adopted upstream base is `e6135a435` (#4847). | 2026-07-31 |
 | `default_sling_formula` — a default formula on the target silently converts a bare `gc sling <target> <bead>` from Lane 1 into a Lane 4 attach | gastownhall/gascity + this city's config | Formula-branch predicate at `rigs/gascity/cmd/gc/cmd_sling.go:978` — taken when `IsFormula` is set, **or** `OnFormula` is non-empty, **or** `NoFormula` is unset and `Target.EffectiveDefaultSlingFormula()` is non-empty; the plain-routing predicate `missingBeadForceApplies` (`:1183`) carries the same condition inverted. Opt-out `--no-formula` ("suppress default formula (route raw bead)") at `:153`, mutually exclusive with `--formula` and `--on` at `:159-160`. Resolver `EffectiveDefaultSlingFormula` (own → inherited → empty) at `internal/config/config.go:3581`. Default-formula and `--on` share one attach pipeline, `attachFormulaToBead` — contract comment "graph-vs-legacy behavior is byte-identical across both entry points" — at `internal/sling/sling_core.go:479-497`. JSON `routed` is computed independently of any routing write at `cmd/gc/cmd_sling.go:1138`; payload keys at `:1090-1106`; `workflow_id` sourced from `result.WorkflowID` (`internal/sling/sling_core.go:730`, source-bead stamp at `:752`). `mol-polecat-work` is graph.v2 via `[requires] formula_compiler = ">=2.0.0"`, matching `graphV2Requirement` / `UsesGraphCompiler` (`internal/formula/requirements.go:14-16`, `:299`). That formula is **imported, not repo-local** — no path under this rig's `formulas/` resolves it, so cite the resolution contract rather than a local file: `gc formula show mol-polecat-work --json` reports the formula plus the `search_paths` it resolved through, and for this formula that is the imported gastown pack's `gastown/formulas/mol-polecat-work.toml:48-49` (materialized in the local pack cache under `~/.gc/cache/repos/<hash>/`). Its stable source is that pack at the fork's adopted pin `sha:33d3a430a67d1782ad364556cb566bdb01d0afe3` — recorded in `rigs/gascity/examples/gastown/packs.lock:5-6`, as `PublicGastownPackVersion` (`internal/config/public_packs.go:11`), and as the `go.mod` pseudo-version `v0.3.1-0.20260617013242-33d3a430a67d` (trailing 12 hex == the pin); the module copy at `$(go env GOMODCACHE)/github.com/gastownhall/gascity-packs@<pseudo-version>/gastown/formulas/mol-polecat-work.toml` is byte-identical to the cached one (`cmp`, 2026-08-02). City scope: `default_sling_formula = "mol-polecat-work"` in this city's `city.toml`, resolved onto every agent in `gc config show`. Stamp-don't-sling counterexample in this repo: `assets/scripts/check-set-heal.sh:355-357` (rationale comment) and `:393` (the direct `gc.routed_to` stamp); the script contains no `gc sling` call. Applies to a **targetless** `gc sling <bead>` too, and by the same predicate: `inferSling1ArgTarget` resolves only a target *string* (`cmd/gc/cmd_sling.go:244-252`), which the shared path turns into an agent (`:433`) and stores as `opts.Target` (`:463-464`) — the same field an explicit target fills — before the `:978` branch is reached, so the resolved default target decides the lane exactly as a typed one would. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 | A `blocks` dep between **work** beads does not gate a formula dispatch | gascity source + live city | Blocking dependency types are exactly `blocks`/`waits-for`/`conditional-blocks` (`readyBlockingDependencyTypes`, `rigs/gascity/internal/beads/beads.go:433`, read via `IsReadyBlockingDependencyType` at `:441`); `step` is separately a `readyExcludeTypes` member (`:424`, "non-root formula steps; parent molecule is the actionable unit", #1039) — but graph.v2 workflows deliberately skip that coercion so their steps stay independently claimable (`internal/molecule/graph_apply.go:206-212`). The routed record under graph.v2 is the **workflow root**, not the work bead (though what a pool worker actually claims are the Ready-visible *step* beads — the pour promotes the root to `in_progress`, `cmd/gc/cmd_sling_test.go:4494`, and the compiler blocks it on `workflow-finalize`): the root persists `gc.routed_to` (#2763 / ga-eld2x — `internal/graphroute/graphroute.go:562-570`, pinned by `TestDecorateGraphWorkflowRecipe_RootStampsRoutedToForClaim` at `internal/graphroute/graphroute_test.go:412` and `cmd/gc/cmd_sling_test.go:4497-4501`) and keeps an executable type instead of the `Ready()`-excluded `molecule` when `gc.kind` is `workflow`/`wisp` (`graph_apply.go:166-170` via `preserveExecutableRootType`, `internal/molecule/molecule.go:1333-1340`). The work bead itself is left unrouted; under the current convoy-first attach it is linked only by membership in the synthetic input convoy the pour mints (`internal/graphv2/invocation.go:415-445`, tracked via `TrackItem`'s `convoy --tracks--> bead` edge, `internal/convoy/membership.go:36`), which the root names in `gc.input_convoy_id` (`internal/sling/sling.go:1520-1534`) — the `workflow_id`/`gc.source_bead_id` pointer pair is written only when the pour carries a source bead (`internal/sling/sling_core.go:741-755`, `graphroute.go:576-577`), and `cmd/gc/cmd_sling_test.go:4460` and `:4506` pin both as empty for a convoy-first attach. The root's own `blocks` edge is formula-internal — root → `workflow-finalize` (`internal/formula/compile.go:672-699`), never to the work bead's blockers. By contrast a *classic* attached wisp routes the source bead and leaves the wisp root unrouted (`sling_core.go:569-578`). graph.v2 stamps `gc.root_bead_id` on every non-root node (`graph_apply.go:219-223`) and connects each step to the root with a deliberately non-blocking `tracks` edge — rationale comment and emit at `:288-313`. Withheld delivery is parked at pour in `gc.deferred_routed_to`, `gc.deferred_execution_routed_to`, and — only for a node that has an assignee — `gc.deferred_assignee` (`deferGraphNodeRouting`, `graph_apply.go:320-329`), each promoted into its live counterpart (`gc.routed_to`, `gc.execution_routed_to`, `assignee`) on activation (`cmd/gc/convergence_store.go:213-240`, `internal/molecule/molecule.go:1399-1406`). The hook's in-progress tier applies the same blocking-type set to the candidate's *own* dependency rows (`internal/config/workquery.go:199-201`, "would strand every molecule step"), pinned by `TestInProgressTierIgnoresNonBlockingDependencyTypes` (`internal/config/workquery_inprogress_blocked_test.go:117`). Negative finding on the write side: no blocker check anywhere on the sling path — the dep walk it does run is cycle detection only (`internal/sling/sling_core.go:114` → `DetectCycle`, `internal/sling/cycle.go:36`); no non-test file in `internal/sling/` reads blocker state (`blocked` occurs there only in `*_test.go` fixtures), and its sole occurrence in `cmd/gc/cmd_sling.go` is the cross-rig routing guard (`:2115`). Behavioral confirmation 2026-08-02 in signal-loom: four beads, two `blocks` deps between them, `gc bd blocked` correct, all four slung molecules poured and claimed within ~2 min. Live confirmation of root routing 2026-08-02 in gc-toolkit: every open `gc.kind=workflow` root is `issue_type=task` carrying `gc.routed_to=gc-toolkit/gc-toolkit.polecat`, with its steps linked by `gc.root_bead_id` and the `workflow-finalize` control bead separately routed to `gc-toolkit/core.control-dispatcher`. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
@@ -393,9 +393,13 @@ decorator stamps `gc.routed_to` on the root instead
 Pool demand does not count "routed" — it counts **routed *and*
 unassigned**. The demand probe is
 `bd ready --metadata-field "gc.routed_to=$target" --unassigned
---exclude-type=epic` (`rigs/gascity/internal/config/workquery.go:41-43`), and the jq
-form applies the same `assignee == ""` filter
-(`workquery.go:586`). So a bead that is correctly routed but still
+--exclude-type=epic --exclude-label "hold:mayor" --exclude-label
+"hold:external"` (`bdReadyPoolDemandShell`,
+`rigs/gascity/internal/config/workquery.go:180-181`) — the same shell the
+Tier 3 offer runs, the count-form differing only in `--limit 0`
+(`poolDemandCountShell`, `:293-295`) — and the jq form applies the same
+`assignee == ""` filter (`workquery.go:233`) and the same hold exclusion
+(`:236`, clause at `:157`). So a bead that is correctly routed but still
 carries a stale `assignee` is **invisible to `scale_check`**, and a
 scale-from-zero pool never wakes for it. Nothing errors; the work just
 sits. This is the field-contract reason Lane 3 exists — clearing the
@@ -548,8 +552,15 @@ onto the lanes:
   through Lane 1's `gc.routed_to` contract, so each is claimed here like
   any other routed bead).
   `bd ready --metadata-field "gc.routed_to=$target" --unassigned
-  --exclude-type=epic`. A pool worker finds work here, and only here. The
-  **graph.v2** variants are the exception, but a narrower one than "nothing
+  --exclude-type=epic --exclude-label "hold:mayor" --exclude-label
+  "hold:external"` (`bdReadyPoolDemandShell`,
+  `internal/config/workquery.go:180-181`, pinned verbatim by
+  `internal/config/config_test.go:1862`). A pool worker finds work here,
+  and only here. The two `--exclude-label` flags are this tier's own —
+  `bd ready` does not supply them, and the assignee tiers deliberately do
+  not pass them (see ["How to actually hold a
+  bead"](#how-to-actually-hold-a-bead)).
+  The **graph.v2** variants are the exception, but a narrower one than "nothing
   is routed" — and the difference is best read as *which term of the
   filter* each record fails. The **work bead** fails the **routing** term
   outright: the pour leaves it unrouted, so no state it could ever be in
@@ -597,8 +608,8 @@ Tiers 1 and 2 both run for each of `$GC_SESSION_ID`, `$GC_SESSION_NAME`,
 `assignee` — never on `gc.routed_to`. A named session finds its own work
 through them; the pool finds its work only through Tier 3.
 
-`bd ready` supplies the rest: it shows "open issues with no active
-blockers" and "excludes in_progress, blocked, deferred, and hooked
+`bd ready` supplies most of the rest: it shows "open issues with no
+active blockers" and "excludes in_progress, blocked, deferred, and hooked
 issues" (`gc bd ready --help`). Spelled out, a bead is offered to a
 **pool** worker when **all** of the following hold:
 
@@ -610,6 +621,14 @@ issues" (`gc bd ready --help`). Spelled out, a bead is offered to a
 | `gc.routed_to` | equals the pool target — **exact string match** on this offer side (the demand side normalizes an instance suffix; see below) |
 | `assignee` | empty (`--unassigned`) |
 | type | not `epic` (`--exclude-type=epic`) |
+| labels | carries neither `hold:mayor` nor `hold:external` — the two canonical dispatch hold labels (`beadmeta.DispatchHoldLabels`), each excluded by its own `--exclude-label` flag. Only those two values are load-bearing; a label that merely reads as a hold (`mpr-human-hold`, the routing label `needs-mayor`) is ordinary work. See ["How to actually hold a bead"](#how-to-actually-hold-a-bead) |
+
+The `labels` row is the one term here that is **not** a `bd ready`
+semantic — it is two flags the Tier 3 command passes — and so it is also
+the one term the assignee tiers do not share. That asymmetry is
+deliberate, and a second layer at the hook enforces the hold on every
+path regardless of tier; both are covered in ["How to actually hold a
+bead"](#how-to-actually-hold-a-bead) below.
 
 The `blockers` row carries a scope limit worth reading before you rely
 on it. It is dependency-aware about **the bead the predicate reads** —
@@ -1058,6 +1077,14 @@ about:
   nothing under a graph.v2 formula dispatch, where the routed bead is
   the workflow root the pour just minted (previous section). Hold that
   case by not slinging until the blocker closes.
+- **A canonical `hold:` label** — `hold:mayor` or `hold:external`,
+  written by `bd set-state <bead> hold=mayor|external` (which removes any
+  existing `hold:*` label, adds the new one, and records an event bead).
+  This falsifies the `labels` term, and it is the widest-coverage of the
+  four: it drops the bead out of Tier 3 *and* out of every `gc hook`
+  path, including `--claim`, while leaving status, `assignee` and
+  `gc.routed_to` exactly as they were. It is also the only one enforced
+  in two places rather than one — the next subsection is the whole rule.
 
 Two combinations are idiomatic, and they differ in intent:
 
@@ -1073,12 +1100,79 @@ Keep the explanatory metadata either way: a `hold_reason` is genuinely
 useful *alongside* a real hold. It is only dangerous as a *substitute*
 for one.
 
-There is also a recognized label convention worth preferring over an
-invented key — `hold:<value>` labels, which `gc doctor` checks against
-the routing fields (`hold-label-routed-to`,
-`hold-label-conventions:<scope>`). That those checks exist at all makes
-the same point: the label records the intent, the routing fields do the
-work, and the two have to be changed together.
+#### The `hold:` label is a term of the predicate, not a note in the margin
+
+`hold:<value>` labels are a recognized convention worth preferring over
+an invented key — and for two values they are no longer *only* a
+convention. `beadmeta.DispatchHoldLabels` is exactly `{"hold:mayor",
+"hold:external"}` (`internal/beadmeta/hold_labels.go`), and carrying
+either one removes the bead from automatic dispatch **with no
+routing-field edit at all**.
+
+The exclusion is deliberately not uniform across the tiers, and the rule
+deciding where it applies is stated in that file: *filter on holds when
+deciding what to DO, never when deciding who EXISTS.* It lands in two
+layers.
+
+- **Query level — route-scoped tiers only.** `excludeHoldLabelsShellArgs`
+  (`internal/config/workquery.go:132`) renders one `--exclude-label` flag
+  per value into `bdReadyPoolDemandShell` (`:180`) and its
+  `gc.run_target` migration twin `bdReadyPoolDemandMigrationShell`
+  (`:192`) — Tier 3's offer and the reconciler's count-form, which share
+  the predicate by construction. Its own comment: "Assignee-scoped tiers
+  (Tier 1/2) must stay hold-transparent by design and must never call
+  this." The control dispatcher mirrors the split in-process
+  (`filterReadyByRoute`, `cmd/gc/dispatch_control_ready.go:209`;
+  `controlReadyExcludeHoldLabelsShellArgs`,
+  `cmd/gc/dispatch_runtime.go:730`), and jq-side mirrors cover the legacy
+  ephemeral filters that have no bd-side flag to lean on
+  (`excludeHoldLabelsJQClause`, `workquery.go:157`).
+- **Hook level — every path.** `filterUnreadyHookCandidates`
+  (`cmd/gc/cmd_hook.go:915`) drops held candidates whatever tier produced
+  them, and that is the single seam `gc hook`, `gc hook --claim` and the
+  cross-store federation all already run through. Tier 1 additionally
+  gates its own serve: it counts hold labels off the candidate row it
+  already holds (`heldLabelCountJQ`, `workquery.go:168`, applied at
+  `:405`) and — the load-bearing part — **falls through to the ready
+  tiers instead of exiting**. That short-circuit is what used to starve a
+  jammed worker of the whole queue behind it. Both of these fail open:
+  unparseable `bd` stdout serves the candidate unchanged, so a hiccup can
+  never disable crash recovery.
+
+What stays hold-transparent, by design and by pinned test, is the
+demand/liveness side: `filterReadyByAssignee`
+(`cmd/gc/dispatch_control_ready.go:190`) and
+`ephemeralAssignedReadyProbeScript` (`workquery.go:498`). Those answer
+*"does a session still need to exist"*, where a parked bead's owner must
+stay visible to the pool and to crash recovery. For the same reason the
+**assignment is left in place**: `bd set-state` touches neither status
+nor owner, and clearing the assignee would break the accounting those
+tiers keep hold-transparent on purpose. There is no `action=held` either
+— a held-only hook returns `action=drain`, `reason=no_work`, exactly like
+an idle one.
+
+So a hold label is a *fourth* way to fall out of the predicate, and it
+fails a different subset of the tiers than any of the three above it:
+clearing `gc.routed_to` misses the assignee tiers, status and blockers
+miss Tier 1, and only this one reaches every hook path. Note also that
+only those two values do anything — the hook-level filter compares them
+case-insensitively against the shared constants, so a label that merely
+reads as a hold (`mpr-human-hold`, `needs-mayor`) is ordinary work
+(`isHeldHookCandidate`, `cmd/gc/cmd_hook.go:1037`).
+
+The `gc doctor` checks that gave this convention its authority still
+exist: `hold-label-routed-to`
+(`cmd/gc/doctor_hold_label_routed_to.go:33`) flags a `hold:<value>` label
+whose `gc.routed_to` is missing or does not match `<value>` — with
+`hold:external` exempt, because it names a human or out-of-system
+dependency rather than an agent — and its `--fix` backfills
+`gc.routed_to` from the label; `hold-label-conventions:<scope>`
+(`doctor_hold_label_conventions.go:52`) checks the vocabulary. Read them
+as a **consistency** rule, not as a division of labor. The older reading
+of these same checks — that the label records the intent while the
+routing fields do the work — is no longer true: for these two values the
+label *is* one of the working terms, and it is the one term that no
+routing field can substitute for.
 
 ## Note: upstream tutorial wording
 
