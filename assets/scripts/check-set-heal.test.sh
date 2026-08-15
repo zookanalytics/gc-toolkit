@@ -121,8 +121,15 @@ has() { grep -q "$1" "$2" 2>/dev/null; }
 # A here-string is a REDIRECT, not a pipeline: bash hands grep a file it reads to
 # EOF, no upstream writer exists to be signalled, and the exit status is grep's
 # alone. Match semantics are unchanged from the pipelines this replaced. Same
-# helper, same reasoning, as merge-skill.test.sh's.
-hasin() { grep -q "$2" <<< "$1"; }
+# reasoning as merge-skill.test.sh's.
+#
+# `-e` (as in reconcile-merged-prs.test.sh's copy) so a pattern that BEGINS with
+# a dash is still a pattern: the gh-invocation assertions below match on literal
+# flags (`--hostname github.com`, `--repo ...`), which bare `grep -q "$2"` would
+# parse as grep's own options and die on. Without it those two call sites cannot
+# use this helper at all, and the pipeline they would keep instead is the very
+# defect the helper exists to remove.
+hasin() { grep -q -e "$2" <<< "$1"; }
 
 mkdir -p "$TMP/bin"
 
@@ -1364,10 +1371,10 @@ GH_HEAD_READ=$(grep 'commits/polecat/rg-stale' "$TMP/ghlog" 2>/dev/null | head -
 [ -n "$GH_HEAD_READ" ] \
   && ok "(PINNED) the marker-vs-head test actually read the branch head through gh" \
   || bad "(PINNED) no gh head read was recorded for RG-STALE"
-printf '%s' "$GH_HEAD_READ" | grep -q -- '--hostname github.com' \
+hasin "$GH_HEAD_READ" '--hostname github.com' \
   && ok "(PINNED) the head read carries the origin HOST pin, not just the o/r path" \
   || bad "(PINNED) live_head_for must pass --hostname from the ORIGIN it resolved; a hostless read answers on whatever host GH_HOST names (got: '$GH_HEAD_READ')"
-printf '%s' "$GH_HEAD_READ" | grep -q 'repos/o/r/commits/' \
+hasin "$GH_HEAD_READ" 'repos/o/r/commits/' \
   && ok "(PINNED) the head read is pinned to the origin-derived repository" \
   || bad "(PINNED) head read must name repos/o/r (got: '$GH_HEAD_READ')"
 # The operator hold, and the deliberate asymmetry between the two paths.
@@ -1383,13 +1390,13 @@ grep -q '^RG-HEALHOLD	codex$' "$TMP/stamped" \
 # The re-gate path never stamps check_set. RG-HEALHOLD is the only anchor here
 # with an un-normalized check_set, so it is the only heal — every other fixture
 # arrives already normalized and must leave with its check_set untouched.
-printf '%s\n' "$OUT7" | grep -q '1 healed' \
+hasin "$OUT7" '1 healed' \
   && ok "(REGATE) only the un-normalized anchor heals; re-gates stamp no check_set" \
   || bad "(REGATE) exactly 1 heal expected on the re-gate pass (got: $OUT7)"
 STAMPED7=$(cut -f1 "$TMP/stamped" | sort -u | tr '\n' ' ')
 eq "$STAMPED7" "RG-HEALHOLD " "(REGATE) no already-normalized anchor was re-stamped"
 # The counters separate a re-gate from a heal-path dispatch.
-printf '%s\n' "$OUT7" | grep -q '5 signoffs dispatched (4 of them re-gated)' \
+hasin "$OUT7" '5 signoffs dispatched (4 of them re-gated)' \
   && ok "(REGATE) the summary counts 4 re-gates distinctly from heals" \
   || bad "(REGATE) summary must report 4 of 5 dispatches re-gated (got: $OUT7)"
 # The reviewer is told WHY it was woken — without it a re-gate reads as a
@@ -1410,13 +1417,13 @@ RGSTALE_NOTE="$(note_for RG-STALE)"
 [ -n "$RGPRE_NOTE" ] \
   && ok "(NOTE) the absent-marker re-gate records a NON-EMPTY review_note" \
   || bad "(NOTE) RG-PRE's re-gate must record a non-empty review_note"
-printf '%s' "$RGPRE_NOTE" | grep -q 'absent' \
+hasin "$RGPRE_NOTE" 'absent' \
   && ok "(NOTE) the absent-marker re-gate's note states the marker was absent" \
   || bad "(NOTE) RG-PRE note must say the marker was absent (got: '$RGPRE_NOTE')"
 [ -n "$RGSTALE_NOTE" ] \
   && ok "(NOTE) the stale-marker re-gate records a NON-EMPTY review_note" \
   || bad "(NOTE) RG-STALE's re-gate must record a non-empty review_note"
-printf '%s' "$RGSTALE_NOTE" | grep -q 'a11a11a' && printf '%s' "$RGSTALE_NOTE" | grep -q 'b22b22b' \
+hasin "$RGSTALE_NOTE" 'a11a11a' && hasin "$RGSTALE_NOTE" 'b22b22b' \
   && ok "(NOTE) the stale-marker re-gate's note names the reviewed OID and the live head" \
   || bad "(NOTE) RG-STALE note must name both shas (got: '$RGSTALE_NOTE')"
 # ...and the same reason reaches the bead BODY, not only its metadata. The body is
@@ -1528,7 +1535,7 @@ dispatched_for RT-PRE \
 grep -q '	gc.routed_to	' "$TMP/revmeta" \
   && bad "(ROUTEFAIL) the route did not persist — nothing may record it as routed" \
   || ok "(ROUTEFAIL) no route recorded (the write was dropped)"
-printf '%s\n' "$OUT10" | grep -q '0 signoffs dispatched' \
+hasin "$OUT10" '0 signoffs dispatched' \
   && ok "(ROUTEFAIL) an unrouted review is NOT counted as dispatched" \
   || bad "(ROUTEFAIL) must report 0 dispatched (got: $OUT10)"
 grep -q "did not durably route" "$RT_ERR" \
@@ -1552,10 +1559,10 @@ eq "$RT_REVS" "1" "(REPAIR) the repair re-routes the SAME review — no twin dis
 # A repair IS a dispatch: the signoff reaches the pool on this pass, having been
 # created on the last one. It is reported as such, and named STRANDED so the log
 # says which of the two it was.
-printf '%s\n' "$OUT10B" | grep -q 'had a STRANDED signoff .* re-routed to' \
+hasin "$OUT10B" 'had a STRANDED signoff .* re-routed to' \
   && ok "(REPAIR) the pass names the re-route as a repair of a stranded signoff" \
   || bad "(REPAIR) must report the stranded re-route (got: $OUT10B)"
-printf '%s\n' "$OUT10B" | grep -q '1 signoffs dispatched' \
+hasin "$OUT10B" '1 signoffs dispatched' \
   && ok "(REPAIR) the repaired signoff counts as dispatched — it is claimable now" \
   || bad "(REPAIR) must count the repair as 1 dispatched (got: $OUT10B)"
 
@@ -1606,7 +1613,7 @@ for m in MAL-BARE MAL-RED; do
     && bad "(MALFORMED) $m names no verb — it is unmappable and must NOT be re-gated here (reconcile-gate-verdicts.sh records its exception)" \
     || ok "(MALFORMED) $m (no verb) -> unmappable, no dispatch (WS4 exception arm owns it)"
 done
-printf '%s\n' "$OUT11" | grep -q "UNMAPPABLE check.codex='green'" \
+hasin "$OUT11" "UNMAPPABLE check.codex='green'" \
   && ok "(MALFORMED) the unmappable marker is named and reconcile-gate-verdicts.sh cited as its owner" \
   || bad "(MALFORMED) an unmappable marker must be logged as such (got: $OUT11)"
 # A malformed OID under the green verb re-gates on a pre-open anchor, without a head read.
@@ -1628,10 +1635,10 @@ dispatched_for MAL-OK \
 # The reviewer is told which value was rejected — "re-gated" with no reason reads
 # as a duplicate of the signoff that already ran.
 MALAT_NOTE="$(note_for MAL-AT)"
-printf '%s' "$MALAT_NOTE" | grep -q "hexadecimal form" \
+hasin "$MALAT_NOTE" "hexadecimal form" \
   && ok "(MALFORMED) the re-gate reason names the form the merge gate requires" \
   || bad "(MALFORMED) note must explain the malformed marker (got: '$MALAT_NOTE')"
-printf '%s\n' "$OUT11" | grep -q '1 of them re-gated' \
+hasin "$OUT11" '1 of them re-gated' \
   && ok "(MALFORMED) exactly the one pre-open malformed-oid marker re-gates" \
   || bad "(MALFORMED) expected 1 re-gate (got: $OUT11)"
 
@@ -1676,7 +1683,7 @@ dispatched_for DEAD-OTHER \
 dispatched_for DEAD-LIVE \
   && bad "(DEADREV) a review that names THIS anchor must still suppress the dispatch (no twins)" \
   || ok "(DEADREV) control: a review naming this anchor is in flight — no twin dispatched"
-printf '%s\n' "$OUT12" | grep -q '2 of them re-gated' \
+hasin "$OUT12" '2 of them re-gated' \
   && ok "(DEADREV) exactly the two unactionable reviews are re-gated past" \
   || bad "(DEADREV) expected 2 re-gates (got: $OUT12)"
 
@@ -1745,15 +1752,15 @@ dispatched_for TP-UNREAD \
 dispatched_for TP-PRE \
   && ok "(TERMINAL) a pre-open anchor has no PR to be terminal — re-gate unaffected" \
   || bad "(TERMINAL) the terminal-PR guard must not touch the pre-open path"
-printf '%s\n' "$OUT13" | grep -q '3 of them re-gated' \
+hasin "$OUT13" '3 of them re-gated' \
   && ok "(TERMINAL) exactly the three non-terminal anchors re-gate" \
   || bad "(TERMINAL) expected 3 re-gates (got: $OUT13)"
 # The operator is TOLD why the anchor was passed over, and who owns it now — a
 # silent skip on a gating anchor is indistinguishable from the park.
-printf '%s\n' "$OUT13" | grep -q 'TP-MERGED (PR#450) needs a re-gate.*MERGED' \
+hasin "$OUT13" 'TP-MERGED (PR#450) needs a re-gate.*MERGED' \
   && ok "(TERMINAL) the skip names the anchor, the PR and its terminal state" \
   || bad "(TERMINAL) the skip must be logged with the PR state (got: $OUT13)"
-printf '%s\n' "$OUT13" | grep -q 'reconcile-merged-prs.sh' \
+hasin "$OUT13" 'reconcile-merged-prs.sh' \
   && ok "(TERMINAL) the skip names the pass that owns the disposition" \
   || bad "(TERMINAL) the skip must say which pass disposes of the anchor"
 grep -q 'TP-UNREAD.*dispatching the signoff anyway' "$TMP/err13" \
@@ -1764,7 +1771,7 @@ grep -q 'TP-UNREAD.*dispatching the signoff anyway' "$TMP/err13" \
 # considers current, and a FOREIGN closed PR would suppress a signoff this anchor
 # genuinely needs — a park caused by the very guard meant to prevent waste.
 GH_PR_READ=$(grep '^pr view 450' "$TMP/ghlog" 2>/dev/null | head -1 || true)   # see (PINNED)
-printf '%s' "$GH_PR_READ" | grep -q -- '--repo github.com/o/r' \
+hasin "$GH_PR_READ" '--repo github.com/o/r' \
   && ok "(TERMINAL) the PR state read is pinned host-qualified to this checkout's origin" \
   || bad "(TERMINAL) certify_pr_identity must pin the state read (got: '$GH_PR_READ')"
 # A pre-open anchor must not cost a PR read at all — it has no PR.
