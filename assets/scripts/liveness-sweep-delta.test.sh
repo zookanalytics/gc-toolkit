@@ -43,6 +43,18 @@
 #      gc.input_convoy_id, and the members those convoys track. Its hard half is
 #      the husk — a tracks edge is not coverage unless a LIVE bead names the
 #      convoy, or a dead synthetic convoy hides the highest-priority idle bead.
+#   7. A SECOND STANDING-RECORD IDIOM WAS NEVER ADDED TO THE EXCLUSION LIST
+#      (bead tk-rw2ra). Class 4(a) excluded `task_kind=triage-subject` as one
+#      hand-maintained select line, so when mol-feedback-distiller began
+#      creating `task_kind=feedback-pattern` cluster anchors — open, unrouted
+#      and unassigned by the same design — they classified as UNNAMED: 13 of
+#      the 42 new waits in the 2026-08-14T05:05Z pass, 31% of that census.
+#      A standing record is the worst false positive available here because it
+#      NEVER closes, so each one inflates the carried count of every future
+#      pass forever and the population grows with every distiller run. The fix
+#      is a NAMED list (`standing_kinds`), so idiom four is one string and a
+#      fixture; its inverse defect is over-breadth — a kind stamp is not a
+#      standing record unless it is listed.
 #
 # The four computational blocks are EXTRACTED VERBATIM from the shipped formula
 # (`# >>> open-prs` / `# >>> worked-via-convoy` / `# >>> classify-candidates` /
@@ -126,6 +138,8 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-routed","title":"already dispatched","issue_type":"task","metadata":{"gc.routed_to":"rig/rig.polecat"}},
   {"id":"c-visit","title":"visit: something","issue_type":"task","metadata":{"task_kind":"visit"}},
   {"id":"c-subject","title":"triage: a scope","issue_type":"task","metadata":{"task_kind":"triage-subject"}},
+  {"id":"c-pattern","title":"pattern: a distiller cluster anchor","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
+  {"id":"c-docupdate","title":"a doc-update bead nobody has routed","issue_type":"task","metadata":{"task_kind":"doc-update"}},
   {"id":"c-ingroup","title":"subject of a live visit","issue_type":"task","metadata":{}},
   {"id":"c-takeaway","title":"parked by a human","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify; resume on ping","gc.takeaway_by":"proactive"}},
   {"id":"c-takeaway-empty","title":"hold was cleared","issue_type":"task","metadata":{"gc.takeaway":""}},
@@ -237,7 +251,7 @@ SURVIVORS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
 
 echo "── classify keeps only genuinely unnamed beads ──"
 eq "$SURVIVORS" \
-   "c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-takeaway-empty" \
+   "c-docupdate,c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-takeaway-empty" \
    "survivors are exactly the unnamed beads"
 # tk-tnwo0: the candidate's `type` is projected from `.issue_type` — the field
 # real `gc bd list`/`gc bd ready` emit (the fixtures now carry it too). The old
@@ -248,12 +262,24 @@ eq "$(printf '%s' "$CANDIDATES" | jq -r '.[] | select(.id=="c-plain") | .type')"
    "a survivor's type is populated from issue_type, never null"
 # Each drop asserted on its own so a regression names the class it broke.
 for drop in c-routed:worked c-visit:conversing c-subject:held-by-design \
+            c-pattern:held-by-design-standing-record \
             c-ingroup:live-visit-in-group c-takeaway:takeaway-held \
             c-pr-open:gated-on-an-open-pr c-pr-case:gated-case-and-path-insensitive \
             c-hold:operator-held c-hold-bare:operator-held-reasonless; do
     id="${drop%%:*}"; why="${drop##*:}"
     printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
         && bad "dropped $id ($why)" "still a candidate" || ok "dropped $id ($why)"
+done
+
+# The inverse for class 4(a) (bead tk-rw2ra). `standing_kinds` is a MEMBERSHIP
+# test, not "carries a task_kind at all" — the over-broad rule that would hide
+# every kind-stamped bead. A doc-update bead is ordinary work: nothing has
+# routed it, so it is exactly the unnamed wait this sweep exists to surface.
+echo "── a task_kind outside the standing list is ordinary work and stays visible ──"
+for keep in c-docupdate:a-kind-stamp-is-not-a-standing-record-unless-listed; do
+    id="${keep%%:*}"; why="${keep##*:}"
+    printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
+        && ok "kept $id ($why)" || bad "kept $id ($why)" "was hidden — the inverse defect"
 done
 
 # THE INVERSE DEFECT, which is the whole difficulty of the class-2 gate half: a

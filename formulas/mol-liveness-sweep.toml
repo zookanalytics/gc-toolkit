@@ -250,7 +250,16 @@ fifth is a defect:
    `--status=open,in_progress`; an open-only read would re-file on
    exactly the subjects whose sittings are live.
 4. **held-by-design** — four shapes, all named waits:
-   (a) `task_kind=triage-subject` — a scope bead itself;
+   (a) a **standing record** — `task_kind` names one of the idioms that
+   are created open, unrouted and unassigned ON PURPOSE and are never
+   claimable: `triage-subject` (a scope bead itself) and
+   `feedback-pattern` (a distiller cluster anchor,
+   `mol-feedback-distiller.toml`: "Standing record: stays open, gets NO
+   `gc.routed_to` and NO assignee — like a triage-subject, it is never
+   routed and never claimable"). The classify block holds these in ONE
+   named list (`standing_kinds`) rather than a select line per idiom, so
+   the next standing shape is a string rather than a new filter — see
+   below for why, and for the one other file that holds the same list;
    (b) a bead a scope actually HOLDS — parked onto a scope bead with a
    real dependency edge (`gc bd dep add <bead> <scope>`), which makes it
    blocker-blocked, so `gc bd ready` drops it before it ever reaches the
@@ -266,8 +275,34 @@ fifth is a defect:
    waits, and the value is the REASON it waits, with
    `triage.hold_at`/`triage.hold_by` recording who and when.
 
-   (c) and (d) are the two held shapes carrying no structural edge, so
-   they are the two that must be filtered explicitly.
+   Only (b) needs no test of its own — the edge does it. (a), (c) and
+   (d) carry no structural edge and so must each be filtered explicitly:
+   (a) against the `standing_kinds` list, (c) and (d) on their stamps.
+
+   **Why (a) is a named list and not one select line per idiom**
+   (bead tk-rw2ra). `feedback-pattern` was the second standing-record
+   idiom and it was missed for its whole existence: the 2026-08-14T05:05Z
+   pass reported 42 new unnamed waits of which THIRTEEN were distiller
+   pattern beads — 31% of the census, none of them work, none of them
+   dispositionable. A standing record is the worst possible false
+   positive here because it NEVER closes: the distiller keeps each
+   pattern bead forever as its cluster anchor, so every one migrates
+   from new to carried and inflates the carried count of every future
+   pass permanently, and the population grows monotonically with each
+   distiller run. Nothing about the classifier announced the gap — the
+   exclusion list simply never got its second member, the same way the
+   merge-gate anchor false positive (tk-yyfjv) was a deliberate empty
+   `gc.routed_to` read as unrouted. A fourth idiom would land the same
+   way, so the test to apply when adding one is not "does it look like a
+   triage-subject" but the property all of these share: **created
+   unrouted and unassigned by design, and never claimable.** If a new
+   `task_kind` has that property, add the string to `standing_kinds` —
+   in the classify block below AND in the matching def in
+   `assets/scripts/liveness-recheck.sh`, which must hold the same list
+   or a census filed before the change re-checks the bead as idle. The
+   two cannot share code (a jq program inside a TOML description, and a
+   standalone script), so `liveness-recheck.test.sh` reads the def out
+   of each side and fails on a drifted pair.
 
    **Why (d) exists, and why it is a stamp rather than an edge**
    (operator ruling on bead tk-yyfjv, ratified 2026-08-11). A bead the
@@ -478,6 +513,7 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
     | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
+  def standing_kinds: ["triage-subject", "feedback-pattern"];
   def pre_open_all_green:
     (.metadata // {}) as $m
     | (($m.check_set // "")
@@ -495,7 +531,7 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
       | select((.metadata["gc.routed_to"] // "") == "")
       | select(.id as $id | ($worked | index($id)) | not)
       | select((.metadata.task_kind // "") != "visit")
-      | select((.metadata.task_kind // "") != "triage-subject")
+      | select((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) == null)
       | select((.metadata["gc.takeaway"] // "") == "")
       | select((.metadata["triage.hold"] // "") == "")
       | select((((.metadata.merge_result // "") == "pull_request")
