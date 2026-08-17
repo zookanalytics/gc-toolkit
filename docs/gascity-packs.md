@@ -306,12 +306,12 @@ artifact**, so future upstream fixes to it are masked.
   by their binding-qualified name (`gastown.mayor`), not the bare local name.
 - Most gc-toolkit formulas are authored under pack-distinct `mol-*` names and
   shadow nothing. Preserve that: check the basename against the base packs
-  before adding any formula, fragment, or script. Four artifacts are the
+  before adding any formula, fragment, or script. Five artifacts are the
   deliberate exception, listed below.
 
 ### 7a. The deliberate mirrors, and what to preserve when reconciling them
 
-Four gc-toolkit artifacts *do* shadow a gastown base artifact of the same name.
+Five gc-toolkit artifacts *do* shadow a gastown base artifact of the same name.
 Each carries a local delta that base does not, so each has to be re-reconciled
 by hand whenever base advances. **The delta is the reason the mirror exists** —
 a reconciliation that takes base's version wholesale silently restores the
@@ -356,6 +356,52 @@ defect is one that reports nothing when it fires.
   `assets/scripts/dolt-backup-manifest-check.test.sh` executes the shipped Step
   2a snippet and asserts over the shipped step text; run it after any
   reconciliation of this formula.
+
+- **`formulas/mol-polecat-work.toml`** — base + two `submit-and-exit` deltas
+  that stop the step from spending `{{base_branch}}` on a question it does not
+  answer (tk-3yj8g, 2026-08-17). `{{base_branch}}` is *what the worktree was
+  poured from*; `metadata.target` is *where the work lands*. On a rework child
+  those are deliberately different — the signoff dispatch slings the child with
+  `--var base_branch=<the reviewed branch>` so the worktree has the PR-only
+  files (tk-qqgeo), while `metadata.target` already holds `REVIEW_BASE`. Base
+  conflates them twice over, and both misreads fire on the same bead:
+  1. **Branch gate (step 1).** Base rebuilds the branch name as
+     `polecat/<bead-id>` and fails closed on a mismatch — unreachable for a
+     rework child, whose `metadata.branch` names the reviewed branch and whose
+     `workspace-setup` step 3 calls that value AUTHORITATIVE and checks it out.
+     The mirror gates on the invariant the handoff actually needs,
+     `CURRENT_BRANCH == metadata.branch`, and keeps the `polecat/<bead-id>`
+     rule for the fresh-work case where `metadata.branch` is unset — so the
+     skipped-workspace-setup case base was written to catch is still caught.
+     Obeying base here is worse than stalling: cutting `polecat/<bead-id>` from
+     the reviewed branch forks it, orphans the pre-open review bead's
+     `review_branch` pin, and offers the refinery a second branch to land
+     independently of the unopened PR for the first.
+  2. **Target resolution (new step 1b).** Base writes
+     `--set-metadata target={{base_branch}}` at two sites, rendering
+     `target=<the branch being pushed>` on a rework — a self-merge, and a
+     strand indistinguishable from a missing merge target. The mirror resolves
+     `$LANDING_TARGET` once, before the push: a caller-set `metadata.target`
+     always wins, `base_branch` fills in only for fresh work, and a bead that
+     can name neither halts with nothing pushed. Both consumers (the
+     `auto_push=false` halt arm and the step-5 handoff) read that one variable
+     so they cannot disagree.
+
+  The mirror also writes `--append-notes` at both sites where base writes
+  `--notes`. That is not a new opinion — `template-fragments/` already tells
+  every polecat to make exactly that substitution in this step, because
+  `--notes` REPLACES and silently erases the mayor's dispatch note at the
+  moment the bead reaches the refinery (tk-6kf6r). The formula now says it
+  where the polecat reads it.
+
+  Preserve all three. `assets/scripts/submit-branch-gate.test.sh` executes the
+  shipped snippets (extracted between the `submit-branch-gate`,
+  `submit-target-resolve` and `submit-target-consume` markers) across the
+  fresh, rework, detached-HEAD and malformed-work-order shapes; run it after
+  any reconciliation of this formula.
+  Take extra care here: this is the formula *every polecat in the city* runs,
+  and per §8 a directory-imported pack is live from the working tree, so a
+  half-finished edit at this path is deployed before any PR merges.
 
 - **`formulas/mol-refinery-patrol.toml`** — base + `default_merge_strategy` +
   `auto_ff_rig_main` + `check_set` (merge-gate check-set, retiring `review_gate`
