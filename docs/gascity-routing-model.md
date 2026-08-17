@@ -42,6 +42,7 @@ poured is
 | `default_sling_formula` — a default formula on the target silently converts a bare `gc sling <target> <bead>` from Lane 1 into a Lane 4 attach | gastownhall/gascity + this city's config | Formula-branch predicate at `rigs/gascity/cmd/gc/cmd_sling.go:978` — taken when `IsFormula` is set, **or** `OnFormula` is non-empty, **or** `NoFormula` is unset and `Target.EffectiveDefaultSlingFormula()` is non-empty; the plain-routing predicate `missingBeadForceApplies` (`:1183`) carries the same condition inverted. Opt-out `--no-formula` ("suppress default formula (route raw bead)") at `:153`, mutually exclusive with `--formula` and `--on` at `:159-160`. Resolver `EffectiveDefaultSlingFormula` (own → inherited → empty) at `internal/config/config.go:3581`. Default-formula and `--on` share one attach pipeline, `attachFormulaToBead` — contract comment "graph-vs-legacy behavior is byte-identical across both entry points" — at `internal/sling/sling_core.go:479-497`. JSON `routed` is computed independently of any routing write at `cmd/gc/cmd_sling.go:1138`; payload keys at `:1090-1106`; `workflow_id` sourced from `result.WorkflowID` (`internal/sling/sling_core.go:730`, source-bead stamp at `:752`). `mol-polecat-work` is graph.v2 via `[requires] formula_compiler = ">=2.0.0"`, matching `graphV2Requirement` / `UsesGraphCompiler` (`internal/formula/requirements.go:14-16`, `:299`). That formula is **imported, not repo-local** — no path under this rig's `formulas/` resolves it, so cite the resolution contract rather than a local file: `gc formula show mol-polecat-work --json` reports the formula plus the `search_paths` it resolved through, and for this formula that is the imported gastown pack's `gastown/formulas/mol-polecat-work.toml:48-49` (materialized in the local pack cache under `~/.gc/cache/repos/<hash>/`). Its stable source is that pack at the fork's adopted pin `sha:33d3a430a67d1782ad364556cb566bdb01d0afe3` — recorded in `rigs/gascity/examples/gastown/packs.lock:5-6`, as `PublicGastownPackVersion` (`internal/config/public_packs.go:11`), and as the `go.mod` pseudo-version `v0.3.1-0.20260617013242-33d3a430a67d` (trailing 12 hex == the pin); the module copy at `$(go env GOMODCACHE)/github.com/gastownhall/gascity-packs@<pseudo-version>/gastown/formulas/mol-polecat-work.toml` is byte-identical to the cached one (`cmp`, 2026-08-02). City scope: `default_sling_formula = "mol-polecat-work"` in this city's `city.toml`, resolved onto every agent in `gc config show`. Stamp-don't-sling counterexample in this repo: `assets/scripts/check-set-heal.sh:355-357` (rationale comment) and `:393` (the direct `gc.routed_to` stamp); the script contains no `gc sling` call. Applies to a **targetless** `gc sling <bead>` too, and by the same predicate: `inferSling1ArgTarget` resolves only a target *string* (`cmd/gc/cmd_sling.go:244-252`), which the shared path turns into an agent (`:433`) and stores as `opts.Target` (`:463-464`) — the same field an explicit target fills — before the `:978` branch is reached, so the resolved default target decides the lane exactly as a typed one would. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 | A `blocks` dep between **work** beads does not gate a formula dispatch | gascity source + live city | Blocking dependency types are exactly `blocks`/`waits-for`/`conditional-blocks` (`readyBlockingDependencyTypes`, `rigs/gascity/internal/beads/beads.go:433`, read via `IsReadyBlockingDependencyType` at `:441`); `step` is separately a `readyExcludeTypes` member (`:424`, "non-root formula steps; parent molecule is the actionable unit", #1039) — but graph.v2 workflows deliberately skip that coercion so their steps stay independently claimable (`internal/molecule/graph_apply.go:206-212`). The routed record under graph.v2 is the **workflow root**, not the work bead (though what a pool worker actually claims are the Ready-visible *step* beads — the pour promotes the root to `in_progress`, `cmd/gc/cmd_sling_test.go:4494`, and the compiler blocks it on `workflow-finalize`): the root persists `gc.routed_to` (#2763 / ga-eld2x — `internal/graphroute/graphroute.go:562-570`, pinned by `TestDecorateGraphWorkflowRecipe_RootStampsRoutedToForClaim` at `internal/graphroute/graphroute_test.go:412` and `cmd/gc/cmd_sling_test.go:4497-4501`) and keeps an executable type instead of the `Ready()`-excluded `molecule` when `gc.kind` is `workflow`/`wisp` (`graph_apply.go:166-170` via `preserveExecutableRootType`, `internal/molecule/molecule.go:1333-1340`). The work bead itself is left unrouted; under the current convoy-first attach it is linked only by membership in the synthetic input convoy the pour mints (`internal/graphv2/invocation.go:415-445`, tracked via `TrackItem`'s `convoy --tracks--> bead` edge, `internal/convoy/membership.go:36`), which the root names in `gc.input_convoy_id` (`internal/sling/sling.go:1520-1534`) — the `workflow_id`/`gc.source_bead_id` pointer pair is written only when the pour carries a source bead (`internal/sling/sling_core.go:741-755`, `graphroute.go:576-577`), and `cmd/gc/cmd_sling_test.go:4460` and `:4506` pin both as empty for a convoy-first attach. The root's own `blocks` edge is formula-internal — root → `workflow-finalize` (`internal/formula/compile.go:672-699`), never to the work bead's blockers. By contrast a *classic* attached wisp routes the source bead and leaves the wisp root unrouted (`sling_core.go:569-578`). graph.v2 stamps `gc.root_bead_id` on every non-root node (`graph_apply.go:219-223`) and connects each step to the root with a deliberately non-blocking `tracks` edge — rationale comment and emit at `:288-313`. Withheld delivery is parked at pour in `gc.deferred_routed_to`, `gc.deferred_execution_routed_to`, and — only for a node that has an assignee — `gc.deferred_assignee` (`deferGraphNodeRouting`, `graph_apply.go:320-329`), each promoted into its live counterpart (`gc.routed_to`, `gc.execution_routed_to`, `assignee`) on activation (`cmd/gc/convergence_store.go:213-240`, `internal/molecule/molecule.go:1399-1406`). The hook's in-progress tier applies the same blocking-type set to the candidate's *own* dependency rows (`internal/config/workquery.go:199-201`, "would strand every molecule step"), pinned by `TestInProgressTierIgnoresNonBlockingDependencyTypes` (`internal/config/workquery_inprogress_blocked_test.go:117`). Negative finding on the write side: no blocker check anywhere on the sling path — the dep walk it does run is cycle detection only (`internal/sling/sling_core.go:114` → `DetectCycle`, `internal/sling/cycle.go:36`); no non-test file in `internal/sling/` reads blocker state (`blocked` occurs there only in `*_test.go` fixtures), and its sole occurrence in `cmd/gc/cmd_sling.go` is the cross-rig routing guard (`:2115`). Behavioral confirmation 2026-08-02 in signal-loom: four beads, two `blocks` deps between them, `gc bd blocked` correct, all four slung molecules poured and claimed within ~2 min. Live confirmation of root routing 2026-08-02 in gc-toolkit: every open `gc.kind=workflow` root is `issue_type=task` carrying `gc.routed_to=gc-toolkit/gc-toolkit.polecat`, with its steps linked by `gc.root_bead_id` and the `workflow-finalize` control bead separately routed to `gc-toolkit/core.control-dispatcher`. Read in the `rigs/gascity` fork at `390624b0e`. | 2026-08-02 |
 | `bd ready` excludes descendants of a **blocked** bead — `is_blocked` cascades down `parent-child` edges | `bd` binary (`github.com/steveyegge/beads`) + live city | Served by the `bd` binary, not the `gc`-side helpers cited above. `bd ready`/`GetReadyWork` filters the materialized `is_blocked = 0` (`internal/storage/sqlbuild/ready.go:110`); the flag is not evaluated at read time. `is_blocked = 1` is set on a non-closed/non-pinned bead that either has an own active blocker (`blocks`/`conditional-blocks` to a non-closed target, or an unmet `waits-for` gate) **or** a `parent-child` edge to a parent with `p.is_blocked = 1` (`internal/storage/issueops/blocked_state.go:198-211`, un-block mirror `:243-256`), recomputed to a fixpoint (`RecomputeIsBlockedInTx`, `:96-119`) so it propagates down the whole subtree — the trigger is a **blocked** ancestor, not a merely-open one. Same rule stated as SQL in the classic `ready_issues` view (`blocked_transitively` recursing `parent-child` from `blocked_directly`, kept out by `bt.issue_id IS NULL`; migration `0025_update_ready_issues_view.up.sql`); both stacks pinned by `TestParityReadyBlockedDescendants` — "descendants of a blocked parent must drop out of ready", "new child of a blocked parent must not be ready" (`internal/storage/domain/db/parity_direct_test.go:260-294`). Deferred parents excluded on a separate path (`getChildrenOfDeferredParents`, `internal/storage/domain/db/ready_work.go:65-116`). Cascade-blocked children are still listed by `bd blocked`, attributed to the parent via the inherited-blocker path (`GetBlockedIssuesInTx`, `internal/storage/issueops/blocked.go:302-317`). Read at the running build `v1.1.1-0.20260729113304-423afdcb2813` (module commit `423afdcb2813`); live confirmation 2026-08-11 in gc-toolkit — this `doc-update` bead `tk-8appy`, a `parent-child` child of the **closed** epic `tk-yw3zb`, was claimed off the pool. | 2026-08-11 |
+| Clearing `assignee` is refused on a bead another actor holds `in_progress`, and the refusal drops the whole atomic update | `bd` binary (`github.com/steveyegge/beads`) + live probe | Guard `validation.AssigneeNotStolen` (`internal/validation/issue.go:179-194`), reached from the update path at `cmd/bd/update.go:499` under the condition at `:498`, whose rationale comment (`:488-497`) states the two skips — `--claim` ("the claim CAS is itself the anti-steal gate") and `--if-assignee` ("that CAS names the holder explicitly, which is how sanctioned X→Y transfers (park) stay possible without `--force`") — and classes the refusal as a policy refusal that "exits 1, not 13". A refused ID `continue`s **before** the mutation the next comment describes as "one atomic operation carries the claim, every field edit, the label edits, the metadata edits and the reparent" (`:508-516`), which is why the permitted flags in the same invocation are lost with it. Failure reporting `reportUpdateFailures` (`:859`) — per-ID on stderr, a single JSON line under `--json`, exit 1 at `:900`. Acting identity is `BEADS_ACTOR`, which `gc` fills in and defaults to `controller` (`rigs/gascity/cmd/gc/bd_env.go:351-352`); the pool carve-out reads config key `claim.pools` (`cmd/bd/show_unit_helpers.go:56-63`). Read at the running `bd` build `v1.2.2-0.20260812111556-4ad99760b895`, whose module commit the local `beads` checkout matches exactly. Live probe 2026-08-15 in gc-toolkit on disposable bead `tk-27w95`, through `gc bd update` (build `v1.4.1-0.20260815173122-dbc0012ac9a8+dirty`): batching `--assignee ""` with `--unset-metadata` and `--set-metadata` against a bead held `in_progress` by another actor exited **1**, printed the guard text on stderr with empty stdout, and left **every** field unchanged; the same metadata write issued alone exited 0 and landed; the same clear issued by the holder itself exited 0 and landed. | 2026-08-15 |
 
 ## The maintainer's ruling
 
@@ -805,9 +806,13 @@ and "does this bead create pool demand?" have the same answer, and you
 should not model them as two predicates that happen to agree.
 [work-bead-state-machine.md](work-bead-state-machine.md) relies on
 exactly this when it detaches a gating bead from both queues in one
-move (`assignee=""` **and** `gc.routed_to=""`) — and that move stays
-safe unconditionally, because an empty route matches nothing on either
-side.
+move (`assignee=""` **and** `gc.routed_to=""`) — and on the **read**
+side that move is safe unconditionally, because an empty route matches
+nothing on either side. Whether the write *lands* is a separate
+question, and the answer is not unconditional: the assignee half is
+guarded, and a refusal takes the rest of the same invocation down with
+it. See ["Clearing the `assignee` is a write, and the claim lease can
+refuse it"](#clearing-the-assignee-is-a-write-and-the-claim-lease-can-refuse-it).
 
 **The symmetry is a property of the value, not a law of the system.**
 It breaks for an instance-suffixed route, which the next section covers.
@@ -1149,7 +1154,9 @@ Two combinations are idiomatic, and they differ in intent:
 - **`assignee=""` + `gc.routed_to=""`, status still `open`** — detached
   from both queues while still counting as unlanded work. This is the
   gating pattern in
-  [work-bead-state-machine.md](work-bead-state-machine.md).
+  [work-bead-state-machine.md](work-bead-state-machine.md). Written as
+  one `bd update`, it is a recipe for a bead nobody holds; the next
+  subsection is why, and what to write instead against a held one.
 - **Clear `gc.routed_to` *and* set `status=blocked`** — the
   belt-and-braces park, for when the bead should not read as ready work
   at all.
@@ -1157,6 +1164,68 @@ Two combinations are idiomatic, and they differ in intent:
 Keep the explanatory metadata either way: a `hold_reason` is genuinely
 useful *alongside* a real hold. It is only dangerous as a *substitute*
 for one.
+
+#### Clearing the `assignee` is a write, and the claim lease can refuse it
+
+Every hold above is described by what it does to the *read* side — which
+term of the predicate it falsifies. One of them is also a **write that
+can be refused**, and the refusal is not confined to the field that
+caused it. The guard is reached only when the call sets `assignee`, so
+route, status, label and metadata edits all stay permitted on a bead
+another actor holds. Clearing `assignee` is the one that does not.
+
+`assignee=""` is an assignee edit like any other, and beads guards
+assignee edits against silently overwriting a live claim
+(`validation.AssigneeNotStolen`, `internal/validation/issue.go:179`,
+applied on the `bd update` path at `cmd/bd/update.go:499`):
+
+> `cannot reassign <id>: held by "<holder>" (in_progress); coordinate
+> with the holder …`
+
+The guard fires on a conjunction, and the terms decide whether *your*
+detach lands:
+
+- **The bead is `in_progress`.** Reassigning an `open` bead stays
+  frictionless by design — hand-doling and pool takes depend on it — so
+  a bead parked before it was ever claimed is never affected.
+- **The holder is someone other than you.** The comparison is
+  identity-by-string under `CanonicalActor`, against the acting identity
+  — `BEADS_ACTOR`, which `gc` puts in bd's environment and defaults to
+  `controller` when unset (`rigs/gascity/cmd/gc/bd_env.go:351-352`). So
+  a worker clearing the assignee on the bead it itself holds is never
+  blocked (that is the polecat done sequence, and it is the reason this
+  edge stays invisible until something else trips it), while an
+  unattended sweep — acting as `controller`, a stranger to every
+  session-held bead — is refused on every one it touches.
+- **The holder is not a `claim.pools` alias**, and the call carries
+  neither `--claim` nor an `--if-assignee` CAS. Each of those is its own
+  anti-steal gate, so each skips this one.
+
+**The sharp edge is that the update is atomic.** The guard is a
+*pre-write* refusal, and one `bd` / `gc bd update` invocation carries
+every field edit, label edit, metadata edit and reparent for that bead
+as a single operation (`cmd/bd/update.go:508-516`). Batching the refused
+`--assignee ""` with flags that would each have been permitted on their
+own — `--unset-metadata gc.routed_to`, a status change, any other
+metadata write — loses the permitted half too. Nothing lands: the
+permitted flags are collateral, not separately refused.
+
+So against a held bead the one-liner must be **split**: issue the route
+clear as its own call and the assignee clear as another, so the half
+that is allowed to land does. Expect a partial detach to be the outcome,
+and treat it as a real state rather than a failed attempt — a bead whose
+route is cleared but whose assignee survives is out of Tier 3 and still
+delivered on Tiers 1 and 2, which is a *different* hold from the one the
+recipe names.
+
+Confirm the result by re-reading the bead. The refusal is reported per
+ID on **stderr** — a single JSON line under `--json` — while stdout
+carries only the issues that did update, which is nothing at all when
+none did (`reportUpdateFailures`, `cmd/bd/update.go:859`). The exit
+status is a truthful `1`, but it is the only signal that survives into a
+caller that discards stderr, so any wrapper that drops the child's
+status turns a refused detach into a silent no-op on a bead everyone
+downstream now believes is held.
 
 #### The `hold:` label is a term of the predicate, not a note in the margin
 
