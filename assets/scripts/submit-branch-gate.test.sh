@@ -272,19 +272,51 @@ eq "$(run_consume '')" \
    "unset LANDING_TARGET: halts instead of writing an empty target"
 
 # --- 4. The snippets compose. -------------------------------------------------
-# The resolver consumes $CURRENT_BRANCH, which the gate sets. Run them in
-# sequence exactly as the step does, on the rework shape that broke both.
+# They share variables across the step: the resolver reads $CURRENT_BRANCH from
+# the gate, and the consumer reads $LANDING_TARGET from the resolver. Run all
+# three in sequence exactly as the step does, on the rework shape that broke
+# base — the end-to-end case this whole mirror exists for.
 : > "$TMP/log"
 printf '%s\n' "$GATE" > "$TMP/both.sh"
 printf '%s\n' "$RESOLVE" | sed "s|{{base_branch}}|polecat/su-uzy9.5|g" >> "$TMP/both.sh"
+printf '%s\n' "$CONSUME" >> "$TMP/both.sh"
 BOTH_RC=0
 FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":"main"}' \
   FAKE_LOG="$TMP/log" bash "$TMP/both.sh" > "$TMP/out" 2>&1 || BOTH_RC=$?
-eq "$BOTH_RC" "0" "composed run exits 0 on the rework shape"
+eq "$BOTH_RC" "0" "composed run exits 0 on the rework shape (base halted here)"
 eq "$(sed -n 's/^landing target: //p' "$TMP/out")" "main" \
-   "composed run resolves the landing target to main"
-eq "$(tr '\n' ';' < "$TMP/log")" "" \
-   "composed run performs no bead writes (branch and target both already correct)"
+   "composed run resolves the landing target to main, not to the pushed branch"
+# The only write is the target/notes handoff: metadata.branch already agreed,
+# so nothing rewrites it, and target lands on main rather than the self-merge.
+eq "$(tr '\n' ';' < "$TMP/log")" \
+   "UPDATE|tk-work --set-metadata target=main --append-notes Implemented: <brief summary>;" \
+   "composed run writes only the handoff, with target=main"
+
+# --- 5. Negative control. -----------------------------------------------------
+# Everything above passes against the shipped snippets. That proves nothing
+# unless the same fixtures FAIL against the implementation being replaced —
+# otherwise a future reconciliation could restore base and the suite would stay
+# green. Base's two lines are reproduced literally here; they are a control, not
+# a mirror of base, and are not expected to track it.
+BASE_RC=0
+cat > "$TMP/base-gate.sh" <<'BASE'
+EXPECTED_BRANCH="polecat/$WORK_BEAD_ID"
+[ "$CURRENT_BRANCH" = "$EXPECTED_BRANCH" ] || exit 1
+BASE
+CURRENT_BRANCH=polecat/su-uzy9.5 bash "$TMP/base-gate.sh" || BASE_RC=$?
+eq "$BASE_RC" "1" \
+   "control: base's templated gate REJECTS the rework branch (the defect is real)"
+
+# Base wrote target={{base_branch}} unconditionally. Render it through the same
+# substitution the resolver gets, on the same fixture, and compare both answers
+# against the branch being pushed: base's IS that branch, the shipped
+# resolver's is not.
+printf '%s\n' 'TARGET="{{base_branch}}"; printf "%s" "$TARGET"' \
+  | sed "s|{{base_branch}}|polecat/su-uzy9.5|g" > "$TMP/base-target.sh"
+BASE_TARGET="$(bash "$TMP/base-target.sh")"
+OURS_TARGET="$(run_resolve polecat/su-uzy9.5 polecat/su-uzy9.5 '{"target":"main"}')"
+eq "$BASE_TARGET|$OURS_TARGET" "polecat/su-uzy9.5|0|main" \
+   "control: base renders target == the pushed branch (self-merge); shipped resolver renders main"
 
 echo
 echo "submit-branch-gate: $PASS passed, $FAIL failed"
