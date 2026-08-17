@@ -17,8 +17,8 @@
 # a reconciliation that drops either restores the amplifier as silently as the blind spot.
 #
 # Why a doctor check rather than trust. The call site lives in
-# formulas/mol-witness-patrol.toml, an ALLOWLISTED MIRROR of a base artifact (see
-# check-base-artifact-collision), so it is periodically reconciled against an upstream
+# formulas/mol-witness-patrol.toml, a DELIBERATE MIRROR of a base artifact (see
+# docs/gascity-packs.md §7a), so it is periodically reconciled against an upstream
 # that does not carry this pass. A reconciliation that drops the step restores the
 # blind spot silently — and silence is the whole defect, so nothing would report it.
 # The script existing without a caller is the same failure.

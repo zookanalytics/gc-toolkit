@@ -101,9 +101,9 @@ eq "$(rc_of "$TMP/clean")" "0" "(CLEAN) the step-close.sh remedy and near-misses
 has "$(run "$TMP/clean")" "OK:" "(CLEAN) reports OK"
 
 # --- 4. base-snapshots are excluded ------------------------------------------
-mkdir -p "$TMP/snap/doctor/check-base-artifact-collision/base-snapshots/formulas"
+mkdir -p "$TMP/snap/doctor/check-x/base-snapshots/formulas"
 cp "$TMP/dirty/mol-bad.toml" \
-   "$TMP/snap/doctor/check-base-artifact-collision/base-snapshots/formulas/mol-bad.toml"
+   "$TMP/snap/doctor/check-x/base-snapshots/formulas/mol-bad.toml"
 eq "$(rc_of "$TMP/snap")" "0" "(SNAPSHOT) vendored base-snapshots are not scanned"
 
 # --- 4b. specs/ are dated records, docs/ are live ----------------------------

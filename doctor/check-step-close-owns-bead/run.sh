@@ -79,8 +79,10 @@ UPDATE_CLOSE='bd[[:space:]]+update[[:space:]]+'"$ENV_ID"'[^|;&]*--status[= ]clos
 # idiom on purpose (including in this file's own header).
 CMD_SHAPE='^[[:space:]]*(gc[[:space:]]+bd|bd|\[)[[:space:]]'
 
-# base-snapshots: vendored upstream copies, kept for collision detection and
-# never executed — the same exclusion check-pipefail-grep-q uses.
+# base-snapshots: vendored upstream copies, never executed — the same exclusion
+# check-pipefail-grep-q uses. The pack vendors none today (the check that kept
+# them was retired, tk-3w7p7); the scope rule is what makes re-vendoring safe,
+# so it stays.
 #
 # specs/: dated records of what was found or decided at the time, not
 # instructions anyone executes. Several of them quote this exact defect *while

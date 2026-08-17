@@ -12,9 +12,12 @@
 #                                   still reports "2 order(s)". Its successor
 #                                   tk-5cgyk closed too (merged, PR#279) and the
 #                                   finding STILL fires.
-#   check-base-artifact-collision   gc-xdzml closed; the check still reports
+#   check-base-artifact-collision   gc-xdzml closed; the check went on reporting
 #                                   "skipped — see gc-xdzml", naming the very
-#                                   bead that was closed over it.
+#                                   bead that was closed over it. (That check
+#                                   was retired outright on 2026-08-15, tk-3w7p7
+#                                   — it never came back. The other two are
+#                                   live; this row is history.)
 #   census-owner-liveness           gc-ddvrx closed 18:49Z (merged, PR#109); the
 #                                   finding still reports the identical "8
 #                                   dangling owner_bead reference(s)". The PR

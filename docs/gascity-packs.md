@@ -304,9 +304,104 @@ artifact**, so future upstream fixes to it are masked.
   qualified name on the same surface **fail loading** outright — there is no
   fallback (pack-spec, *Naming And Collisions*). Imported agents are addressed
   by their binding-qualified name (`gastown.mayor`), not the bare local name.
-- gc-toolkit's formulas are authored under pack-distinct `mol-*` names (no
-  shadow). Preserve that: check the basename against the base packs before
-  adding any formula, fragment, or script.
+- Most gc-toolkit formulas are authored under pack-distinct `mol-*` names and
+  shadow nothing. Preserve that: check the basename against the base packs
+  before adding any formula, fragment, or script. Four artifacts are the
+  deliberate exception, listed below.
+
+### 7a. The deliberate mirrors, and what to preserve when reconciling them
+
+Four gc-toolkit artifacts *do* shadow a gastown base artifact of the same name.
+Each carries a local delta that base does not, so each has to be re-reconciled
+by hand whenever base advances. **The delta is the reason the mirror exists** —
+a reconciliation that takes base's version wholesale silently restores the
+defect the mirror was written to close, and in every case below the restored
+defect is one that reports nothing when it fires.
+
+- **`assets/scripts/worktree-setup.sh`** — base + a whitespace-safe
+  branch-create argv. Base built the worktree-add invocation as an unquoted
+  command string, splitting rig/worktree paths containing whitespace; the mirror
+  builds argv via `set --` instead. Native gc-toolkit `polecat-codex` /
+  `_polecat-gemini` agents reference
+  `{{.ConfigDir}}/assets/scripts/worktree-setup.sh`, and `ConfigDir` does not
+  fall through to imported packs.
+
+- **`formulas/mol-deacon-patrol.toml`** — base + cycle-recycle + `gc doctor
+  --json` deltas (validated 2026-05-27), plus the dolt-health manifest-mtime
+  backup verification (tk-hef7t, 2026-08-01). Base keys its backup verdict off
+  `backups.dolt_stale`, which renders absent backup data as `dolt_stale=false`
+  and so reads false-clean straight through a TOTAL backup outage. The mirror
+  verifies manifest mtime on disk instead (Step 2a) and reads the backup dog's
+  failure mail as a second channel (Step 2b). Preserve both — do not restore a
+  `dolt_stale`-keyed threshold row. Step 2a carries **six** load-bearing arms,
+  and dropping any one restores a false-clean path:
+  1. the scan is driven by `databases[].name` (`EXPECTED_DBS`), **not** by a
+     walk of `$BACKUP_ROOT/*/` — a database with no backup dir at all is
+     invisible to a dir-walk and would emit no verdict;
+  2. missing/empty `$BACKUP_ROOT` and an empty database list are explicit
+     FLAG-ROOT findings that NAME the affected databases;
+  3. the RECHECK grace window keeps a normal in-flight sync from flagging, but
+     is bypassed once the manifest is itself stale (a run in flight cannot
+     explain a 40 h-old manifest);
+  4. backup dirs with no live database are INFO/advisory, never a verdict;
+  5. the loop seeds `newest` with the manifest so an equal-second
+     manifest/chunk mtime tie resolves to the manifest (tk-40mlc) — `stat`
+     reports whole seconds and Dolt commits the manifest LAST, so a tie is a
+     fast healthy sync; only a STRICTLY newer file is torn;
+  6. the directory scan's exit status is captured and checked, and an
+     enumeration that fails (or returns nothing while the manifest is readable)
+     is RECHECK/FLAG, never OK — the seed in (5) makes an unreadable directory
+     with a fresh manifest look healthy otherwise.
+
+  `assets/scripts/dolt-backup-manifest-check.test.sh` executes the shipped Step
+  2a snippet and asserts over the shipped step text; run it after any
+  reconciliation of this formula.
+
+- **`formulas/mol-refinery-patrol.toml`** — base + `default_merge_strategy` +
+  `auto_ff_rig_main` + `check_set` (merge-gate check-set, retiring `review_gate`
+  + `signoff_head`) + protected-branch auto-promote + integration-branch INFO
+  deltas, plus the pre-existing-failure dedup probe (tk-277aj, 2026-08-10). Base
+  tells `handle-failures` to dedup with `bd list --search`, which is not a flag
+  — `bd` rejects it on stderr with an EMPTY stdout, the step reads that as "no
+  duplicate", and every patrol hitting a pre-existing target failure files
+  another P1 for it. The mirror probes with the real flag (`--title-contains`),
+  shape-validates the result so an unreadable `bd` cannot masquerade as "no
+  match", and reuses one `FAIL_TOKEN` for both the probe and the filed title so
+  consecutive patrols actually match. Preserve all three.
+  `assets/scripts/preexisting-failure-dedup.test.sh` executes the shipped
+  snippet; run it after any reconciliation of this formula.
+
+- **`formulas/mol-witness-patrol.toml`** — base + cycle-recycle + snake_case
+  session-list jq + `.work_dir` metadata + completed-workflow quiesce step
+  (tk-p9ji9) + stranded-branch recovery step (tk-f69ay) deltas. The
+  stranded-branch step is a whole extra link in the patrol chain, so a
+  reconciliation that takes base's step list wholesale drops it **and** rewires
+  `check-refinery` back onto `recover-orphaned-beads`. Preserve both: the step
+  itself and `needs = ["recover-stranded-branches"]` on `check-refinery`. It
+  covers the case base has no detector for — work that is committed and PUSHED,
+  so every salvage case correctly reports "nothing at risk", while the bead is
+  unassigned, unrouted and carries no PR, so no other pass can see it either.
+  `doctor/check-stranded-branch-recovery` guards the wiring and
+  `assets/scripts/recover-stranded-branches.test.sh` the behavior; run it after
+  any reconciliation of this formula.
+
+**Keep this list narrow.** Adding an entry means the rig takes on the cost of
+re-reconciling that artifact every time base advances, forever.
+
+**Reconciling a mirror.** Diff the local copy against the base pack's copy,
+decide which base advances to fold in, re-apply the local deltas above, run the
+named test for that artifact, and commit.
+
+**No automated guard.** `gc-toolkit:check-base-artifact-collision` used to
+enforce this section mechanically — ERROR on an un-allowlisted basename
+collision, ERROR on a `{{ define "name" }}` in `template-fragments/` whose name
+also exists in base (the template engine resolves defines by name, not by file,
+so a redefined block silently replaces the base block at render time), and WARN
+when base advanced past a frozen snapshot of an allowlisted mirror. It was
+retired on 2026-08-15 (tk-3w7p7): it could not locate the base pack under the
+import-cache model and had reported `skipped` on every run for roughly two
+months, and its reconnection path was a `gc import path` subcommand that was
+never merged. Auditing this section is a human step until something replaces it.
 
 ## 8. A directory-imported pack is live from the **working tree**, not from a merge
 

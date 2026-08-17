@@ -78,7 +78,9 @@ set -u
 
 dir="${GC_PACK_DIR:-.}"
 
-# Vendored upstream copies, kept for collision detection and never executed.
+# Vendored upstream copies, never executed. The pack vendors none today — the
+# check that kept them was retired (tk-3w7p7) — but the scope rule is what makes
+# re-vendoring safe, so it stays.
 is_excluded() {
     case "$1" in
         */base-snapshots/*) return 0 ;;
