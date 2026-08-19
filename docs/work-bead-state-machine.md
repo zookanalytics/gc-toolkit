@@ -255,7 +255,7 @@ marker, added per the above without a new status. It is the phase in which a
 **subset of the check-set runs early — against the branch, before the PR opens.**
 That pre-open subset is **currently exactly `{codex}`**: the refinery dispatches
 the codex signoff against the **branch** and parks the bead here — detached from
-both queues exactly like gating — *before* opening the PR. An idle-loop pass
+both queues exactly like gating — *before* opening the PR. A cadence pass
 beside the merge skill (`pre-open-resolve.sh`) opens the non-draft PR only once
 every pre-open member is green at the branch head — today just `check.codex` —
 moving the bead to ordinary `pull_request` gating. A PR that becomes visible is
@@ -382,7 +382,8 @@ function of its last marker, with no need to cross-reference open children to
 tell "fixable" from "never ran". The full design is
 `specs/tk-zgse0.2/merge-gate-exception-lifecycle.md`; the contract and the arm
 are `assets/scripts/reconcile-gate-verdicts.sh` (`gate_verdict`), which the
-refinery patrol runs on each idle wake after the observer.
+merge cadence runs on each tick after the observer (see
+[refinery-merge-cadence.md](refinery-merge-cadence.md)).
 
 **The contract is a total function.** `exception` is *defined* as everything the
 other two arms cannot claim, so no observable state is left without a verdict.
@@ -901,7 +902,7 @@ skill cannot arm itself to auto-land a PR nobody asked it to land) is the omissi
 that classed it as rework in flight. Nothing could release the hold, because the
 only pass that closes a PR-linked bead is `reconcile-merged-prs.sh`, *after* the PR
 merges — the thing the hold prevents. The live case sat `CLEAN`, `APPROVED` and
-codex-green at its head and was held on every idle wake (tk-uicmw / PR#291).
+codex-green at its head and was held on every cadence tick (tk-uicmw / PR#291).
 
 The remedy is an **explicit opt-out**, never a loosening of the default:
 `metadata.tracking_only` on the referencing bead, read for truth the way
@@ -1565,7 +1566,7 @@ Five rules keep it from inventing anchors:
   child markers, no route) survives the whole filter. Recovering it stamps
   `merge_result` on a deliberately-held bead, the check-set normalization below then
   arms `codex` and dispatches a signoff onto a PR that is `CONFLICTING` and cannot
-  land, and that burn repeats every idle wake because the gate can never be
+  land, and that burn repeats every cadence tick because the gate can never be
   satisfied. The damage is bounded — the merge skill reads the marker, so the
   recovered anchor is held rather than merged — but it converts a bead the operator
   made *invisible* into a *visible-held* one, which silently changes what the hold

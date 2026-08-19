@@ -5,6 +5,18 @@ description: Why the merge cadence stops silently, why every cheap liveness sign
 
 # Detecting a Dead Refinery Idle Driver
 
+> **SUPERSEDED 2026-08-19 (tk-d83wm).** The driver this document is about no
+> longer exists. The merge cadence is now an exec order the controller owns
+> (`orders/refinery-reconcile.toml`; see
+> [docs/refinery-merge-cadence.md](../../docs/refinery-merge-cadence.md)), and
+> the apparatus described here — `assets/scripts/refinery-idle-arm.sh` and
+> `doctor/check-refinery-idle-driver` — was deleted with it. Every failure this
+> document catalogues is a property of running a driver outside the city; none
+> of them can recur through the order path, which is why the whole apparatus was
+> retired rather than rehoused. It is kept as history: the measurements and the
+> four false-green liveness signals are the evidence for that decision, and the
+> reasoning is in `specs/tk-d83wm/exec-order-cadence.md`.
+
 > **Bead:** tk-agzpl. **Investigated:** 2026-08-13/14 by the mayor and the
 > gc-toolkit refinery; implemented 2026-08-14. **Author:** Polecat
 > gc-toolkit.furiosa.

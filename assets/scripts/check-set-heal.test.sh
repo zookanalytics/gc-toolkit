@@ -88,17 +88,22 @@
 #            anchor is untouched by the guard and costs no PR read.
 #   (ROUTEFAIL/REPAIR) a dropped gc.routed_to write is not counted as dispatched
 #            and leaves the bead unrouted; the next pass re-routes the SAME bead.
-#   (GATE)   the REAL formula wiring (heal-gates-merge, extracted from
-#            mol-refinery-patrol.toml): a stamp-failing heal (rc=UNSAFE_RC) HOLDS
-#            the merge-skill stub (no merge attempted); a clean heal lets it run.
-#            This is the review tk-z4u2e finding #1 regression — a failed stamp used
-#            to fall through to merge-skill in the SAME pass and merge un-reviewed.
+#   (GATE)   the REAL cadence wiring (heal-gates-merge, extracted from
+#            assets/scripts/refinery-reconcile.sh, the merge-cadence order's pass
+#            runner): a stamp-failing heal (rc=UNSAFE_RC) HOLDS the merge-skill
+#            stub (no merge attempted); a clean heal lets it run. This is the
+#            review tk-z4u2e finding #1 regression — a failed stamp used to fall
+#            through to merge-skill in the SAME pass and merge un-reviewed. The
+#            snippet moved out of mol-refinery-patrol.toml with the cadence
+#            itself (tk-d83wm); the guarantee and this test are unchanged.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/check-set-heal.sh"
-ROOT="$(cd "$HERE/../.." && pwd)"
-TOML="$ROOT/formulas/mol-refinery-patrol.toml"
+# The merge cadence's pass runner — the caller the heal gates (run 6). It used
+# to be formulas/mol-refinery-patrol.toml; the gating snippet moved out with the
+# cadence itself (tk-d83wm).
+RUNNER="$HERE/refinery-reconcile.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -1192,23 +1197,25 @@ grep -q '	anchor_bead	bead-LONGCS$' "$TMP/revmeta" \
   && ok "(LONGCS) the dispatched signoff is linked to the long-check_set anchor" \
   || bad "(LONGCS) long-check_set anchor must get a linked signoff"
 
-# --- Run 6: FORMULA GATING (heal-gates-merge). The finding this rework closes
+# --- Run 6: CADENCE GATING (heal-gates-merge). The finding this rework closes
 #     (review tk-z4u2e #1): a stamp that did not persist used to exit 0, so the
-#     formula ran merge-skill.sh in the SAME pass and the still-ungated anchor
-#     merged un-reviewed. Extract the REAL gating snippet from the formula and
-#     drive the REAL check-set-heal.sh into it with a merge-skill STUB — a
-#     stamp-failing heal must HOLD the merge; a clean heal must let it run.
+#     caller ran merge-skill.sh in the SAME pass and the still-ungated anchor
+#     merged un-reviewed. Extract the REAL gating snippet from the merge-cadence
+#     pass runner and drive the REAL check-set-heal.sh into it with a merge-skill
+#     STUB — a stamp-failing heal must HOLD the merge; a clean heal must let it
+#     run.
 GATE="$(awk '
   /# >>> heal-gates-merge/ {f=1; next}
   /# <<< heal-gates-merge/ {f=0}
-  f' "$TOML")"
+  f' "$RUNNER")"
 [ -n "$GATE" ] \
-  && ok "(GATE) heal-gates-merge snippet extracted from the formula" \
-  || bad "(GATE) heal-gates-merge markers missing or renamed in the formula"
-# Template-free so it executes directly (the {{...}} args are hoisted ABOVE the
-# markers in the formula).
+  && ok "(GATE) heal-gates-merge snippet extracted from the pass runner" \
+  || bad "(GATE) heal-gates-merge markers missing or renamed in the pass runner"
+# Template-free so it executes directly. The runner is plain shell with no
+# formula-var channel at all, so this now also guards against someone
+# reintroducing one.
 hasin "$GATE" '{{' \
-  && bad "(GATE) extracted snippet still contains a {{template}} — hoist the args above the markers" \
+  && bad "(GATE) extracted snippet still contains a {{template}} — the pass runner takes no formula vars" \
   || ok "(GATE) heal-gates-merge snippet is template-free (executable verbatim)"
 
 # Stub SCRIPTS_DIR: the REAL heal (symlinked) + a merge-skill STUB that records if
@@ -1227,7 +1234,13 @@ export MERGE_SENTINEL="$TMP/merge-ran"
 {
   printf 'set -u\n'
   printf 'SCRIPTS_DIR=%q\n' "$GSD"
-  printf "CHECK_SET_HEAL_ARGS=( --default codex --review-pool 'gc-toolkit/gc-toolkit.polecat-codex' --fix-pool 'gc-toolkit/gc-toolkit.polecat' )\n"
+  # Everything the extracted region reads and does not itself define. The runner
+  # derives the three addresses from one discovery; here they are pinned.
+  printf 'PASS_OUT=""\nNOTED=""\nFAILED=""\n'
+  printf 'AGENT=%q\n'             'gc-toolkit/gc-toolkit.refinery'
+  printf 'CHECK_SET_DEFAULT=%q\n' 'codex'
+  printf 'REVIEW_POOL=%q\n'       'gc-toolkit/gc-toolkit.polecat-codex'
+  printf 'FIX_POOL=%q\n'          'gc-toolkit/gc-toolkit.polecat'
   printf '%s\n' "$GATE"
   printf 'echo "MERGE_SKILL_HELD=$MERGE_SKILL_HELD"\n'
 } > "$TMP/gaterun.sh"
@@ -1243,8 +1256,8 @@ GATEOUT="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
 [ -s "$MERGE_SENTINEL" ] && bad "(GATE-FAIL) merge-skill RAN despite an unsafe heal — ungated merge NOT prevented" \
                          || ok "(GATE-FAIL) an unsafe heal HELD merge-skill (no merge attempted)"
 hasin "$GATEOUT" 'MERGE_SKILL_HELD=1' \
-  && ok "(GATE-FAIL) the formula recorded MERGE_SKILL_HELD=1" \
-  || bad "(GATE-FAIL) the formula did not set MERGE_SKILL_HELD (got: $GATEOUT)"
+  && ok "(GATE-FAIL) the pass runner recorded MERGE_SKILL_HELD=1" \
+  || bad "(GATE-FAIL) the pass runner did not set MERGE_SKILL_HELD (got: $GATEOUT)"
 
 # 6b: stamp SUCCEEDS -> real heal exits 0 -> merge-skill RUNS.
 : > "$TMP/reviews"; : > "$TMP/revmeta"; : > "$TMP/stamped"; : > "$TMP/healed"
@@ -1254,8 +1267,8 @@ GATEOUT2="$(bash "$TMP/gaterun.sh" 2>/dev/null)"
 [ -s "$MERGE_SENTINEL" ] && ok "(GATE-OK) a clean heal lets merge-skill run" \
                          || bad "(GATE-OK) merge-skill did NOT run after a clean heal (got: $GATEOUT2)"
 hasin "$GATEOUT2" 'MERGE_SKILL_HELD=0' \
-  && ok "(GATE-OK) the formula recorded MERGE_SKILL_HELD=0" \
-  || bad "(GATE-OK) the formula MERGE_SKILL_HELD should be 0 (got: $GATEOUT2)"
+  && ok "(GATE-OK) the pass runner recorded MERGE_SKILL_HELD=0" \
+  || bad "(GATE-OK) the pass runner MERGE_SKILL_HELD should be 0 (got: $GATEOUT2)"
 
 # --- Run 7: RE-GATE an ALREADY-NORMALIZED anchor (tk-t46nq). ------------------
 # The bug: the satisfiability sweep was reachable only through the heal path, so
