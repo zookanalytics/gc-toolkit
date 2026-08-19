@@ -921,13 +921,31 @@ if [ -n "$FIX_POOL" ]; then
       # Guards the tail below: empty means no child was filed this round.
       FIX_BEAD=""
       if [ "$CAP_HIT" = 1 ]; then
-        # Clear the gate marker (the head is not gate-validated) and hand the
-        # anchor to a human. Escalate ONCE: gc.routed_to=human is the marker that
-        # makes a later pass skip this arm rather than re-mail every cycle.
+        # Hand the anchor to a human. Escalate ONCE: gc.routed_to=human is the
+        # marker that makes a later pass skip this arm rather than re-mail every
+        # cycle.
+        #
+        # >>> signoff-cap-no-gate-write
+        # LEAVE check.<name> ALONE. This used to also clear the marker ("the head
+        # is not gate-validated"), which is true and is nonetheless the wrong
+        # write: the gate's VERDICT belongs to
+        # assets/scripts/reconcile-gate-verdicts.sh, whose R11 records
+        # `check.<name>=exception@<head>` for exactly this condition. Two arms
+        # writing opposite terminal states for one cap event is tk-mf3em, and
+        # which one survived was decided by pass ordering, not by design.
+        #
+        # An absent marker is not a safer hold than a stale one — merge-skill.sh
+        # holds on everything that is not `green@<live head>` — but it IS a
+        # weaker one downstream: check-set-heal.sh dispatches on an absent marker
+        # and skips on `exception@*`, so clearing re-armed the codex dispatch
+        # this arm had just declined to make. The refinery half of the cap
+        # (formulas/mol-refinery-patrol.toml, same marker name) dropped its clear
+        # for the same reason; keep the two halves agreeing.
         gc bd update "$ANCHOR" \
           --set-metadata gc.routed_to=human \
           --set-metadata blocked_reason="signoff did not converge after $ROUNDS rework rounds (cap ${GC_MAX_REVIEW_ROUNDS:-3}); findings are in the review beads under this anchor" \
-          --unset-metadata "check.$CHECK_NAME" >/dev/null 2>&1 || true
+          >/dev/null 2>&1 || true
+        # <<< signoff-cap-no-gate-write
         gc mail send mayor/ -s "ESCALATION: signoff not converging on $ANCHOR ($ROUNDS rounds)" \
           -m "Target: ${REVIEW_BRANCH:-PR#$PR_NUMBER}
 Rounds spent: $ROUNDS (cap ${GC_MAX_REVIEW_ROUNDS:-3})
@@ -987,9 +1005,15 @@ as-is, split the remaining findings into follow-up beads, or abandon." || true
       # Attach as a child of the anchor (visibility + completion interlock).
       # Best-effort: a failed edge must not strand the rework, so warn only.
       # All three actions below are guarded on FIX_BEAD: the cap arm above files
-      # no child, and it already cleared the gate marker and routed the anchor to
-      # a human. Waking the fix pool there would spawn the session the cap exists
-      # to prevent.
+      # no child, and routed the anchor to a human. Waking the fix pool there
+      # would spawn the session the cap exists to prevent.
+      #
+      # The marker clear below is the FIXABLE path's retraction, not the cap's,
+      # and the distinction is why the cap arm no longer makes one (tk-mf3em).
+      # Here a rework child is in flight, so re-arming check-set-heal.sh is the
+      # point: the fix moves the head and a fresh review has to run against it.
+      # Past the cap nothing is coming, the verdict is terminal, and
+      # reconcile-gate-verdicts.sh R11 is the pass that records it.
       # >>> signoff-rework-dispatch
       if [ -n "$FIX_BEAD" ] && [ -n "$ANCHOR" ]; then
         gc bd dep add "$FIX_BEAD" "$ANCHOR" --type=parent-child \
