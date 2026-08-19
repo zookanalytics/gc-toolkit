@@ -183,18 +183,74 @@ introduces a regression is not.
 When upstream merges its own fix for something you carry, drop your
 local patch:
 
-1. Confirm the upstream fix is functionally equivalent (or strictly
+1. **Establish what each side actually changed — diff against the
+   merge-base, never against `upstream/main` directly.** See [Telling
+   fork-local debt from upstream-authored
+   change](#telling-fork-local-debt-from-upstream-authored-change).
+2. Confirm the upstream fix is functionally equivalent (or strictly
    better). It often differs from yours in style or scope — that's fine
    as long as it solves the same root cause.
-2. Revert the local commit on `origin/main` with a message linking the
+3. Revert the local commit on `origin/main` with a message linking the
    upstream merge SHA. Don't `git rebase` your patch out — the revert
    keeps the history clean and explains the drop.
-3. Rebuild and verify the running install picks up the new behavior.
-4. Close the local tracker bead with a reference to both the original
+4. Rebuild and verify the running install picks up the new behavior.
+5. Close the local tracker bead with a reference to both the original
    commit and the upstream merge.
 
 Branches on `origin/main` that no longer exist (because they were
 deleted at merge) need no further action.
+
+### Telling fork-local debt from upstream-authored change
+
+Deciding whether a file carries fork-local debt or was authored upstream
+rests on a comparison that is easy to get wrong. A fork is normally
+**behind as well as ahead** — measured 2026-08-10, this city's fork was
+41 commits ahead of `upstream/main` and 198 behind. So a bare `git diff
+upstream/main origin/main` shows the *net* difference between two moving
+tips, and that difference is dominated by upstream commits you simply
+have not absorbed. It reports upstream's forward motion as your
+divergence: a file you never touched comes back looking like heavy
+fork-local debt.
+
+The inversion is the tell — a file upstream *added* after the merge-base
+appears as a pile of **deletions** on your side. Run against this city's
+fork on 2026-08-15, `git diff upstream/main origin/main` reported
+`cmd/gc/assigned_work_residency_test.go` as 626 deletions; the fork has
+never touched that file. Read as fork-local debt, its disposition would
+be "drop it" — exactly backwards, since the change is upstream's and the
+work is to absorb it.
+
+Diff against the merge-base instead, in both directions:
+
+```bash
+mb=$(git merge-base upstream/main origin/main)
+git diff --shortstat "$mb" origin/main   -- <path>   # what we changed
+git diff --shortstat "$mb" upstream/main -- <path>   # upstream motion we lack
+```
+
+The second command is the *"has upstream already fixed this?"* test —
+the one that tells you a drop is warranted at all, and the trigger for
+revisiting rebase posture generally.
+
+Note that the same `upstream/main..origin/main` spelling is correct for
+`git log` (line-of-development syntax: commits on ours, not on theirs)
+and wrong for `git diff` (two endpoint trees). That asymmetry is the
+trap. `git diff upstream/main...origin/main` — three dots — is shorthand
+for the first command above, but spell out `$mb` when you need it twice.
+
+Confirm at function granularity before concluding. A file can churn
+heavily without the function under consideration changing at all, so
+file-level `--shortstat` both over- and under-reports:
+
+```bash
+T='<FunctionName>'
+for r in "$mb" upstream/main; do
+  git show "${r}:<path>" | awk "/^func $T\(/,/^}/" | md5sum
+done   # identical hashes => upstream has NOT touched that function
+```
+
+Brace the `${r}:` — unbraced, `zsh` reads `:<path>` as a history
+modifier and silently rewrites the argument.
 
 ---
 
