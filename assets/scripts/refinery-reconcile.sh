@@ -258,8 +258,28 @@ run_pass "(a2) reconcile-gate-verdicts" reconcile-gate-verdicts.sh \
 if [ "$INTEGRATION_AUTO_LAND" = "false" ]; then
     log "-- (b) reconcile-graduated-convoys: DISABLED (integration_auto_land=false)"
 else
-    run_pass "(b) reconcile-graduated-convoys" reconcile-graduated-convoys.sh \
-        --target "$TARGET" \
+    # GC_AGENT is projected for THIS pass only, in a subshell.
+    #
+    # Why it is needed: core's order exec env (orderExecEnvWithError) supplies
+    # BEADS_ACTOR, GC_RIG, GC_RIG_ROOT and BEADS_DIR but NOT GC_AGENT, and
+    # reconcile-graduated-convoys.sh refuses to act without an identity — it
+    # exits 0 with "GC_AGENT unset; skip" (:111) rather than strand a convoy
+    # bead at assignee="", well before the assignment at :427. Under the order
+    # that early exit is silent AND rc=0, so the cadence reported a healthy
+    # queue every tick while owned integration convoys never graduated at all.
+    #
+    # Why it is NOT exported process-wide: reconcile-refinery-handoffs.sh
+    # (:415) suppresses its "wake the refinery" nudge when GC_AGENT is already
+    # the refinery, reasoning that the refinery's own idle loop re-checks
+    # find-work in the same cycle. recover-stranded-branches.sh (:855) shares
+    # the shape. That is an AGENT-SESSION premise, and it is false here: this
+    # order is the session-less cadence that REPLACED that idle loop, so there
+    # is no find-work re-check to fall back on. A process-wide export would fix
+    # graduation and simultaneously silence those nudges, leaving a recovered
+    # handoff to wake nobody. Scope the identity to the pass that consumes it.
+    ( export GC_AGENT="$AGENT"
+      run_pass "(b) reconcile-graduated-convoys" reconcile-graduated-convoys.sh \
+          --target "$TARGET" ) \
         || FAILED="${FAILED}reconcile-graduated-convoys rc=$?; "
 fi
 

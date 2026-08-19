@@ -18,7 +18,11 @@
 # dedup; (i) the fresh-handoff detector gates on the branch existing on origin,
 # reports each id once, and re-reports one that returns; (j) an anchored bead is
 # never reported as a lost handoff; (k) the pass log is bounded; (l) the order
-# file parses and still carries the wiring the runner depends on.
+# file parses and still carries the wiring the runner depends on; (m) the
+# refinery identity is projected to the convoy-graduation pass and to NOTHING
+# else, since a process-wide export would silence the other passes' "wake the
+# refinery" nudges; (n) the real graduation pass's GC_AGENT gate still matches
+# the contract (m) relies on, and both of its states exit 0.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +55,7 @@ mkstub() { # name
     cat > "$PACK/assets/scripts/$1.sh" <<STUB
 #!/usr/bin/env bash
 printf '%s %s\n' "$1" "\$*" >> "$TMP/trace"
+printf '%s GC_AGENT=[%s]\n' "$1" "\${GC_AGENT-}" >> "$TMP/envtrace"
 rcfile="$TMP/rc.$1"
 [ -f "\$rcfile" ] && exit "\$(cat "\$rcfile")"
 exit 0
@@ -69,6 +74,9 @@ case "$1 ${2:-}" in
     ;;
   "bd list")
     cat "$GCSTUB_BEADS"
+    ;;
+  "convoy list")
+    echo '[]'
     ;;
   *) exit 0 ;;
 esac
@@ -102,8 +110,12 @@ export GCSTUB_BEADS="$TMP/beads-empty.json"
 export GITSTUB_BRANCHES="$TMP/branches"
 
 run() { # [env assignments handled by caller]; runs the runner, captures out+rc
-    : > "$TMP/trace"
-    OUT="$(PATH="$TMP/bin:$PATH" \
+    : > "$TMP/trace"; : > "$TMP/envtrace"
+    # `env -u GC_AGENT` reproduces the order's environment exactly: core's
+    # exec env sets BEADS_ACTOR/GC_RIG/GC_RIG_ROOT/BEADS_DIR and no GC_AGENT.
+    # Without the scrub this suite would inherit a GC_AGENT from whatever agent
+    # session invoked it and silently stop testing the condition that matters.
+    OUT="$(env -u GC_AGENT PATH="$TMP/bin:$PATH" \
         GC_RIG="${RIG_OVERRIDE-alpha}" \
         GC_RIG_ROOT="$TMP/rigroot" \
         GC_PACK_STATE_DIR="$TMP/state" \
@@ -302,5 +314,52 @@ else
 fi
 
 echo
+# --- 13. the graduation pass's identity, and its blast radius ----------------
+# Regression for the pre-open review finding on tk-d83wm: the runner resolved
+# the refinery identity but never projected it, so under the order the convoy
+# graduation pass skipped every tick while reporting success.
+echo "── 13. GC_AGENT reaches the graduation pass, and only it ──"
+rm -f "$TMP"/rc.*
+run
+ENVTRACE="$(cat "$TMP/envtrace" 2>/dev/null)"
+has "$ENVTRACE" "reconcile-graduated-convoys GC_AGENT=[alpha/gc-toolkit.refinery]" \
+    "(44) the graduation pass sees the resolved refinery identity, not an empty one"
+has "$ENVTRACE" "reconcile-refinery-handoffs GC_AGENT=[]" \
+    "(45) the handoff pass still sees GC_AGENT unset, so its refinery nudge is NOT suppressed"
+# Any pass other than the graduation one seeing a non-empty GC_AGENT means the
+# export leaked process-wide — which would silence the nudges at
+# reconcile-refinery-handoffs.sh:415 and recover-stranded-branches.sh:855.
+LEAKED="$(printf '%s\n' "$ENVTRACE" | grep -v '^reconcile-graduated-convoys ' \
+    | grep -v 'GC_AGENT=\[\]$' || true)"
+eq "$LEAKED" "" "(46) no other pass sees GC_AGENT — the identity does not leak process-wide"
+
+# The identity must follow the discovery, not a hardcoded address.
+GCSTUB_AGENTS="$TMP/agents-bare.json" run
+ENVTRACE="$(cat "$TMP/envtrace" 2>/dev/null)"
+has "$ENVTRACE" "reconcile-graduated-convoys GC_AGENT=[alpha/refinery]" \
+    "(47) an unbound refinery projects its own discovered address"
+GCSTUB_AGENTS="$TMP/agents.json"
+
+# --- 14. the contract with the REAL graduation pass --------------------------
+# Section 13 asserts against stubs that echo their own environment, so a rename
+# of the variable inside the consumer would leave those green while the cadence
+# silently broke again. Pin the actual cross-script contract: the gate is keyed
+# on GC_AGENT, and BOTH states exit 0 — which is precisely why this regression
+# was invisible under the order (a skipped pass and a working pass are the same
+# rc, so `order.failed` never rose).
+GRAD="$HERE/reconcile-graduated-convoys.sh"
+if [ ! -f "$GRAD" ]; then
+    echo "── 14. real-pass contract: SKIPPED (no reconcile-graduated-convoys.sh alongside) ──"
+else
+    echo "── 14. the real graduation pass's GC_AGENT gate ──"
+    GOUT="$(env -u GC_AGENT PATH="$TMP/bin:$PATH" GC_RIG=alpha GC_RIG_ROOT="$TMP/rigroot" \
+        bash "$GRAD" --target main 2>&1)"; GRC=$?
+    eq "$GRC" 0 "(48) GC_AGENT unset — the real pass exits 0, so the no-op is SILENT not an error"
+    has "$GOUT" "GC_AGENT unset; skip" "(49) ...and it is the identity gate that skipped it"
+    GOUT="$(PATH="$TMP/bin:$PATH" GC_AGENT=alpha/gc-toolkit.refinery GC_RIG=alpha \
+        GC_RIG_ROOT="$TMP/rigroot" bash "$GRAD" --target main 2>&1)"
+    hasnt "$GOUT" "GC_AGENT unset; skip" "(50) GC_AGENT set — it gets PAST the gate and does its work"
+fi
+
 echo "refinery-reconcile.test: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
