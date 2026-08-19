@@ -1,3 +1,8 @@
+---
+name: Determination — replacing the /tmp refinery idle driver with a core exec order
+description: Why the per-rig /tmp idle-loop.sh daemon was deleted rather than relocated, and the evidence settling the two questions bead tk-d83wm required first — whether the controller serialises cooldown orders per rig (it does, via the ScopedName tracking bead) and whether exec supports scope="rig" (it does). Read this for the reasoning; docs/refinery-merge-cadence.md is the standing description of what shipped.
+---
+
 # Replacing the /tmp refinery idle driver with a core exec order
 
 Bead: tk-d83wm. Landed as `orders/refinery-reconcile.toml` +
