@@ -32,6 +32,12 @@
 #            dispatching first queues a review that can later stamp green over the
 #            exception and lift a terminal hold by automation (review tk-i688b).
 #   (NOVERB) a bare "green" with no @oid is unmappable too, and skipped the same.
+#   (INFLIGHT-CONV/HANDBACK-CONV) the CONVOY-FIRST dispatch form, tk-79zn6: a rework
+#            child whose live route is gc.execution_routed_to (gc.routed_to having been
+#            retired at pour) is IN FLIGHT and suppresses the re-gate; the same child
+#            after its hand-back — same route key, refinery assignee — is NOT, and the
+#            re-gate is dispatched. The assignee is the whole discriminator, because
+#            nothing retires the execution route on the way back.
 #   (PREOPEN) a pre_open_gate anchor (no PR) with empty check_set -> stamp +
 #            dispatch a BRANCH review (review_branch/review_base, no pr_number).
 #   (ORDER)  the stamp is applied BEFORE the dispatch (fail-closed): the PR cannot
@@ -280,18 +286,32 @@ case "$2" in
       # an anchor's branch. Backed by $FAKE_BRANCHBEADS so a fixture can express
       # the exact discriminator this bug turns on — a rework still being WORKED vs
       # one already handed BACK.
-      #   id|branch|status|task_kind|gc.routed_to|assignee
+      #   id|branch|status|task_kind|gc.routed_to|assignee|gc.execution_routed_to
+      #
+      # gc.execution_routed_to IS ALSO A REAL COLUMN, and it is filled on the handed-BACK
+      # rows too (tk-79zn6). The convoy-first dispatch that mints rework children now
+      # retires gc.routed_to and stamps the live route there instead — but NOTHING retires
+      # it on the way back, so the field is set on a live child and on a finished one
+      # alike, and only the assignee tells them apart. A fixture that carried it on the
+      # live rows alone would let the obvious fix — read gc.execution_routed_to, ignore the
+      # assignee — pass this suite while re-parking every pre-open re-gate in production,
+      # which is the tk-t46nq bug arriving through a new door. Filled on both sides, that
+      # fix fails (HANDBACK-CONV) here.
       #
       # ASSIGNEE IS A REAL COLUMN, and the handed-back fixtures fill it with the
       # refinery identity the refinery actually leaves there (review tk-w9ttd testing
       # gap). A hand-back is OPEN, unrouted and ASSIGNED BACK — three facts, of which
       # only the first two were modelled, so the row stood for a bead that does not
-      # exist. That mattered in one direction: `acting()` deliberately does NOT read
-      # assignee (a hand-back is assigned to the refinery precisely because the
-      # refinery is DONE with it), and with the column blank a later change that
-      # started treating assignee as liveness would suppress every re-gate in
-      # production while this suite stayed green — the tk-t46nq park, re-introduced
+      # exist. That mattered in one direction: with the column blank, a change that
+      # started treating a non-empty assignee as LIVENESS would suppress every re-gate
+      # in production while this suite stayed green — the tk-t46nq park, re-introduced
       # invisibly. With the real value present, that change fails (HANDBACK) here.
+      #
+      # `acting()` now does read the assignee, but only in the direction this column was
+      # put here to protect (tk-79zn6): a non-empty one DISQUALIFIES the execution-route
+      # disjunct below, and can never on its own make a bead count as in flight. The
+      # failure the paragraph above describes therefore stays impossible — an assignee
+      # can only add a dispatch here, never suppress one.
       #
       # The --status list the caller asked for is HONOURED here, exactly as the real
       # `bd list` honours it. That is what makes the live-owner fixtures a real
@@ -303,15 +323,15 @@ case "$2" in
         br=$(printf '%s' "$*" | sed -n 's/.*branch=\([^ ]*\).*/\1/p')
         want_st=$(printf '%s' "$*" | sed -n 's/.*--status=\([^ ]*\).*/\1/p')
         out=""
-        while IFS='|' read -r bid bbr bst btk brt basg; do
+        while IFS='|' read -r bid bbr bst btk brt basg bero; do
           [ -n "$bid" ] || continue
           [ "$bbr" = "$br" ] || continue
           if [ -n "$want_st" ]; then
             case ",$want_st," in *",$bst,"*) ;; *) continue ;; esac
           fi
           tkf=""; [ -n "$btk" ] && tkf=$(printf ',"task_kind":"%s"' "$btk")
-          obj=$(printf '{"id":"%s","status":"%s","assignee":"%s","metadata":{"branch":"%s","gc.routed_to":"%s"%s}}' \
-            "$bid" "$bst" "${basg:-}" "$bbr" "$brt" "$tkf")
+          obj=$(printf '{"id":"%s","status":"%s","assignee":"%s","metadata":{"branch":"%s","gc.routed_to":"%s","gc.execution_routed_to":"%s"%s}}' \
+            "$bid" "$bst" "${basg:-}" "$bbr" "$brt" "${bero:-}" "$tkf")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_BRANCHBEADS"
         printf '[%s]\n' "$out" ;;
@@ -1292,6 +1312,8 @@ cat > "$TMP/anchors" <<'A'
 RG-PRE|pre_open_gate|codex||polecat/rg-pre|main||
 RG-POST|pull_request|codex|420|polecat/rg-post|main||
 RG-BACK|pre_open_gate|codex||polecat/rg-back|main||
+RG-CONV|pre_open_gate|codex||polecat/rg-conv|main||
+RG-CBACK|pre_open_gate|codex||polecat/rg-cback|main||
 RG-WORK|pre_open_gate|codex||polecat/rg-work|main||
 RG-POOL|pre_open_gate|codex||polecat/rg-pool|main||
 RG-STALE|pre_open_gate|codex||polecat/rg-stale|main|green@a11a11a|
@@ -1307,10 +1329,27 @@ A
 # dispatch this pass is deciding whether to make. The assignee is spelled out rather
 # than left blank: it is the field most likely to be mistaken for liveness later, and
 # a blank one would let that mistake pass this suite (see the branch probe above).
+#
+# RG-CONV and RG-CBACK are the two halves of the CONVOY-FIRST dispatch (tk-79zn6),
+# and they exist as a PAIR on purpose — either one alone is passable by a wrong fix:
+#   rework-conv   a rework being worked RIGHT NOW by a live polecat. Under graph.v2
+#                 the work bead itself is never claimed (the polecat claims its STEP
+#                 beads), so it sits plain `open`, unassigned, with gc.routed_to
+#                 RETIRED at pour and the live route in gc.execution_routed_to. Every
+#                 field the old predicate read is empty, which is exactly why it was
+#                 dispatched a twin over an unchanged head. MUST suppress.
+#   rework-cback  the SAME child after its hand-back: identical execution route, still
+#                 open, now assigned to the refinery. MUST NOT suppress — this is
+#                 tk-t46nq, and the modelled shape is live bead tk-b5iaq, which carries
+#                 gc.execution_routed_to to this day with the refinery as its assignee.
+# Together they pin the discriminator to the assignee and nothing else: read the route
+# key alone and RG-CBACK parks; keep ignoring it and RG-CONV twins.
 cat > "$TMP/branchbeads" <<'B'
-rework-back|polecat/rg-back|open|||gc-toolkit/gc-toolkit.refinery
-rework-work|polecat/rg-work|in_progress|||gc-toolkit__polecat-lx-88888
-rework-pool|polecat/rg-pool|open||gc-toolkit/gc-toolkit.polecat|
+rework-back|polecat/rg-back|open|||gc-toolkit/gc-toolkit.refinery|
+rework-conv|polecat/rg-conv|open||||gc-toolkit/gc-toolkit.polecat
+rework-cback|polecat/rg-cback|open|||gc-toolkit/gc-toolkit.refinery|gc-toolkit/gc-toolkit.polecat
+rework-work|polecat/rg-work|in_progress|||gc-toolkit__polecat-lx-88888|
+rework-pool|polecat/rg-pool|open||gc-toolkit/gc-toolkit.polecat||
 B
 # Live heads. RG-STALE/RG-PSTAL moved past a11a11a; RG-FRESH is still at its
 # reviewed commit; RG-NOGH is deliberately absent so the stub exits non-zero.
@@ -1340,6 +1379,15 @@ dispatched_for RG-WORK \
 dispatched_for RG-POOL \
   && bad "(INFLIGHT) a pool-routed unclaimed rework must suppress the dispatch" \
   || ok "(INFLIGHT) pool-routed rework awaiting a claim -> no dispatch"
+# The convoy-first pair (tk-79zn6). RG-CONV is the twin-minting bug: a rework a live
+# polecat is working reads inert to the un-widened predicate, because its route moved
+# to gc.execution_routed_to. RG-CBACK is the guard that keeps the obvious fix honest.
+dispatched_for RG-CONV \
+  && bad "(INFLIGHT-CONV) a convoy-dispatched rework (route in gc.execution_routed_to) must suppress the dispatch — this is the twin signoff over an unchanged head" \
+  || ok "(INFLIGHT-CONV) convoy-first rework in flight -> no twin dispatch"
+dispatched_for RG-CBACK \
+  && ok "(HANDBACK-CONV) a convoy-first rework already handed back does NOT count as in-flight — re-gate dispatched" \
+  || bad "(HANDBACK-CONV) gc.execution_routed_to survives the hand-back; reading it without the assignee re-parks the gate (tk-t46nq)"
 # Marker-vs-live-head, and the ownership split with reconcile-merged-prs.sh.
 dispatched_for RG-STALE \
   && ok "(STALE) pre-open marker green at a head that MOVED re-dispatches (no other pass can see it)" \
@@ -1396,9 +1444,14 @@ hasin "$OUT7" '1 healed' \
 STAMPED7=$(cut -f1 "$TMP/stamped" | sort -u | tr '\n' ' ')
 eq "$STAMPED7" "RG-HEALHOLD " "(REGATE) no already-normalized anchor was re-stamped"
 # The counters separate a re-gate from a heal-path dispatch.
-hasin "$OUT7" '5 signoffs dispatched (4 of them re-gated)' \
-  && ok "(REGATE) the summary counts 4 re-gates distinctly from heals" \
-  || bad "(REGATE) summary must report 4 of 5 dispatches re-gated (got: $OUT7)"
+# 6 dispatches, 5 of them re-gates: RG-PRE, RG-POST, RG-BACK, RG-CBACK and RG-STALE
+# re-gate; RG-HEALHOLD is the one heal-path dispatch. RG-CONV contributes NOTHING to
+# either count — a convoy-first rework in flight is the dispatch that must not happen,
+# so this line doubles as the arithmetic proof of (INFLIGHT-CONV): read the route key
+# without the assignee and RG-CBACK drops out, making it 5 and 4 again.
+hasin "$OUT7" '6 signoffs dispatched (5 of them re-gated)' \
+  && ok "(REGATE) the summary counts 5 re-gates distinctly from heals" \
+  || bad "(REGATE) summary must report 5 of 6 dispatches re-gated (got: $OUT7)"
 # The reviewer is told WHY it was woken — without it a re-gate reads as a
 # duplicate of the signoff that already ran. Asserted PER RE-GATED REVIEW and on
 # the note's CONTENT: an unscoped `grep review_note` over the whole fixture set
