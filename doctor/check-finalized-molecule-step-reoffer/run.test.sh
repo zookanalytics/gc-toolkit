@@ -143,6 +143,11 @@ case "$verb" in
     if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
   show)
     [ "$name" = "${BD_SHOW_FAIL_STORE:-}" ] && exit 3
+    # The REAL `bd show` answers an object at rc=0 when none of the requested
+    # ids resolves, and arbitrary bytes only if the store is corrupt.
+    [ "$name" = "${BD_SHOW_NONE_STORE:-}" ] && {
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 0; }
+    [ "$name" = "${BD_SHOW_GARBAGE_STORE:-}" ] && { printf 'not json at all'; exit 0; }
     f="$ROOTS/$name.json"
     if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
   *) exit 0 ;;
@@ -315,6 +320,31 @@ eq "$RC" "1" "a store whose roots cannot be resolved is a WARNING"
 has "$OUT" "could not resolve molecule roots" "the failed root resolution is named"
 hasnt "$OUT" "not judged" "an unresolvable-root store is NOT downgraded to a cross-store note"
 hasnt "$OUT" "OK:" "a store with unresolved roots never prints the clean verdict"
+
+# --- 12. `bd show` resolving NOTHING is an answer, not corruption -------------
+# The real verb answers an OBJECT — {"error":"no issues found..."} — at rc=0
+# when none of the requested ids resolves, and an ARRAY otherwise. Treating that
+# object as a parse failure would warn "store NOT checked" for the ordinary case
+# of a chunk made entirely of cross-store roots, and take every real finding in
+# that store down with it.
+put steps alpha "$(step_xstore a-s11 zz-r10 rig:beta)"
+put steps beta "$(step b-s3 b-r3 pass)"
+put roots beta "$(root b-r3 closed "$LONG_AGO")"
+OUT=$(BD_SHOW_NONE_STORE=alpha run_check); RC=$?
+eq "$RC" "2" "a store whose roots all resolve elsewhere does not suppress other stores"
+has "$OUT" "b-s3" "the readable store's finding survives"
+has "$OUT" "zz-r10" "the unresolved root is reported as a note"
+hasnt "$OUT" "could not resolve molecule roots" "resolving nothing is not reported as a failed probe"
+clear_store beta
+
+OUT=$(BD_SHOW_NONE_STORE=alpha run_check); RC=$?
+eq "$RC" "0" "a store whose roots all resolve elsewhere is not itself a finding"
+
+# Genuine corruption still fails the store closed.
+OUT=$(BD_SHOW_GARBAGE_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "a root payload that is neither array nor object is a WARNING"
+has "$OUT" "could not resolve molecule roots" "corrupt root bytes are reported as a failed probe"
+clear_store alpha
 
 # --- Summary ----------------------------------------------------------------
 echo

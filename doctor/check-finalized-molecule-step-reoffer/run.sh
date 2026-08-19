@@ -208,11 +208,23 @@ while IFS=$'\037' read -r rig_name rig_path; do
             return 1
         fi
         out=$(printf '%s' "$out" | strip_ctl)
-        merged=$(jq -c -n --argjson a "$roots_json" --argjson b "$out" '$a + $b' 2>/dev/null) || {
+        # `bd show` answers an ARRAY when at least one id resolves, but an
+        # OBJECT — {"error":"no issues found matching the provided IDs"} — when
+        # NONE of them does, at rc=0 either way. Adding an object to an array is
+        # a jq type error, so taking that shape as corruption would warn "store
+        # NOT checked" for the ordinary case of a chunk made entirely of
+        # cross-store roots, and skip every real finding in that store with it.
+        # An object contributes nothing; its ids then surface as unresolved-root
+        # notes, which is what they are. Anything that is neither shape is still
+        # corruption and still fails the store.
+        merged=$(printf '%s' "$out" | jq -c --argjson a "$roots_json" '
+            if type == "array" then $a + .
+            elif type == "object" then $a
+            else error("unexpected root payload") end' 2>/dev/null)
+        if [ -z "$merged" ]; then
             chunk_failed="unparseable root payload"
             return 1
-        }
-        [ -n "$merged" ] || { chunk_failed="unparseable root payload"; return 1; }
+        fi
         roots_json="$merged"
         chunk=()
         return 0
