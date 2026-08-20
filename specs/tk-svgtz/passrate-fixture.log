@@ -1,0 +1,18 @@
+# specs/tk-svgtz/passrate-fixture.log — positive control for passrate.py.
+# Three synthetic driver ticks covering the three cases the live log cannot:
+#   tick 1  gauge + failed attempt ONLY          -> acted 0 (the tk-o96cd defect)
+#   tick 2  the one-time anchorless escalation   -> acted 1 (never fires live)
+#   tick 3  a real mutation alongside the gauge  -> acted 1 (gauge must not mask it)
+# Expected: 3 ticks, 2 with ANY action; reconcile-merged-prs 3 seen / 2 acted /
+# 1 gauge-only; reconcile-refinery-handoffs 2 seen / 1 acted / 1 gauge-only;
+# 1 one-time transition. See cadence-audit.md, Appendix: reproduction.
+---- tick 2026-08-20T00:00:00Z ----
+reconcile-merged-prs: ANCHORLESS PR#334 (draft) (polecat/tk-a -> main) — anchor tk-a is CLOSED; already escalated, awaiting operator disposition
+reconcile-merged-prs: 0 closed, 0 abandoned (0 escalated), 0 retargeted, 0 stale-base rebases routed, 0 rebases held, 0 stale-gate re-reviews routed, 0 stale-gate re-reviews held, 0 resolved holds cleared, 0 superseded reviews retracted, 0 retractions held, 0 foreign-PR identity holds, 0 identity-encoding forced closes, 0 wedged-close escalations, 0 partial closes (doctor finding still firing), 0 doctor-gate indeterminate, 1 anchorless open PRs, 0 unowned open PRs, 4 skipped
+reconcile-refinery-handoffs: 0 repaired, 0 reported (not rewritten), 2 failed
+---- tick 2026-08-20T00:02:00Z ----
+reconcile-merged-prs: ANCHORLESS PR#999 (polecat/tk-b -> main) — anchor tk-b is CLOSED; routed to operator + escalated
+reconcile-merged-prs: 0 closed, 0 abandoned (0 escalated), 0 retargeted, 0 stale-base rebases routed, 0 rebases held, 0 stale-gate re-reviews routed, 0 stale-gate re-reviews held, 0 resolved holds cleared, 0 superseded reviews retracted, 0 retractions held, 0 foreign-PR identity holds, 0 identity-encoding forced closes, 0 wedged-close escalations, 0 partial closes (doctor finding still firing), 0 doctor-gate indeterminate, 1 anchorless open PRs, 0 unowned open PRs, 4 skipped
+---- tick 2026-08-20T00:04:00Z ----
+reconcile-merged-prs: 1 closed, 0 abandoned (0 escalated), 0 retargeted, 0 stale-base rebases routed, 0 rebases held, 0 stale-gate re-reviews routed, 0 stale-gate re-reviews held, 0 resolved holds cleared, 0 superseded reviews retracted, 0 retractions held, 0 foreign-PR identity holds, 0 identity-encoding forced closes, 0 wedged-close escalations, 0 partial closes (doctor finding still firing), 0 doctor-gate indeterminate, 1 anchorless open PRs, 0 unowned open PRs, 4 skipped
+reconcile-refinery-handoffs: 1 repaired, 0 reported (not rewritten), 0 failed

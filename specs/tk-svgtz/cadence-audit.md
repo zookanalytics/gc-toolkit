@@ -326,7 +326,7 @@ ledger.
 ### Q5. Merge cadence — how much of the 24.6k lines is load-bearing?
 
 Answered with measurements in [§4](#4-merge-cadence-what-is-load-bearing).
-Short version: the *cadence* is not load-bearing at 60 s — 92.5% of ticks
+Short version: the *cadence* is not load-bearing at 60 s — 97.4% of ticks
 do nothing. Of the *code*, two passes carry essentially all of the
 observed value, one has never fired at all, and one has 13 of 18
 capabilities that did not fire once in eight days.
@@ -353,20 +353,47 @@ are **44% of the pack's entire 56,300-line `assets/scripts` layer**.
 
 ### 4.2 What each pass actually did, over 5,032 ticks / 186.6 hours
 
-Counters below are true summary-line event counters, not gauges.
+Counters below count state changes only. Two counter shapes that are not
+state changes — gauges and failed attempts — are excluded; the rule and its
+effect on `reconcile-merged-prs` are under the table.
 
 | Pass | Ticks it ran | Ticks it acted | Act rate | What it did |
 |---|---:|---:|---:|---|
-| reconcile-merged-prs | 5,028 | 256 | 5.09% | 3 stale-base rebases routed, 3 resolved holds cleared, **1 bead closed** |
 | pre-open-resolve | 1,178 | 39 | 3.31% | **38 PRs opened**, 2 flipped |
 | merge-skill | 4,360 | 33 | 0.76% | **41 merges** (40 distinct squash SHAs) |
 | reconcile-gate-verdicts | 5,007 | 32 | 0.64% | 30 fixable verdicts, 1 exception, 1 escalation, 1 gate re-armed |
-| check-set-heal | 5,008 | 17 | 0.34% | 16 signoffs dispatched, **1 heal** |
 | reconcile-graduated-convoys | 5,031 | 25 | 0.50% | 1 convoy graduated |
+| check-set-heal | 5,008 | 17 | 0.34% | 16 signoffs dispatched, **1 heal** |
+| reconcile-merged-prs | 5,028 | **6** | 0.12% | 3 stale-base rebases routed, 3 resolved holds cleared, **1 bead closed** |
 | reconcile-refinery-handoffs | 4,693 | **0** | **0.00%** | **nothing, ever** |
 
-**Any pass acting at all: 380 of 5,032 ticks — 7.55%.** The other 92.45%
+**Any pass acting at all: 132 of 5,032 ticks — 2.62%.** The other 97.38%
 of the cadence is pure polling.
+
+**"Acted" means changed state.** Two kinds of summary counter do not, and
+counting them reports polling as work:
+
+- **Gauges** are recomputed and re-reported every pass for as long as the
+  condition holds. `reconcile-merged-prs` counts `anchorless open PRs` this
+  way (`assets/scripts/reconcile-merged-prs.sh:2318`, `:2363`, `:2369`), so a
+  single un-dispositioned PR adds 1 to every pass forever.
+- **Failed attempts** are writes that did not stick and retry next cycle
+  (`assets/scripts/reconcile-refinery-handoffs.sh:400`). This one moves no
+  number here — `failed` was zero all window — but it is the same defect, and
+  a non-zero one would have reported a pass that repaired nothing as active.
+
+The gauge is what separates 6 from 256 for `reconcile-merged-prs`: **250
+of its 256 apparently-active ticks were one PR — #334 — being re-reported as
+`already escalated, awaiting operator disposition`**, an observation the pass
+had already acted on before this window opened. All 250 are the identical
+line. The one anchorless arm that *does* mutate (stamp `anchorless_flagged`,
+mail the mayor — `:2376-2396`) fired zero times here, so `passrate.py` reads
+it from its own per-PR line rather than from the gauge that hides it.
+
+Counters that survive the rule do so because a marker bounds them:
+`repaired`/`reported` per offending address, `non-canonical assignee` per
+assignee value. `passrate.py` lists every exclusion explicitly and prints the
+excluded totals, so the gap between the two readings stays auditable.
 
 ### 4.3 Which capabilities have never fired
 
@@ -422,7 +449,7 @@ Unit CPU since arming (2026-08-19 07:52 → 2026-08-20 04:19, ~20.5 h):
 
 ¹ Inflated because `dolt sql-server` lives in this unit's cgroup. The
 three clean drivers alone are **~57% of one core, permanently, to do
-something on 7.55% of ticks.**
+something on 2.62% of ticks.**
 
 ---
 
@@ -440,11 +467,15 @@ this pack that is meant to be per-rig therefore *must* say
 `scope = "rig"` — and does. The Go comment is the defect.
 
 <a id="f2"></a>
-### F2 — The merge cadence polls 13× more often than it acts, at ~57% of a core
+### F2 — The merge cadence polls 38× more often than it acts, at ~57% of a core
 
-7.55% of 5,032 ticks did anything. Median period 114 s against a declared
-60 s. Three drivers cost 57% of a core continuously; the fourth's cost is
-unmeasurable because it is hosting the database.
+2.62% of 5,032 ticks did anything — and the pass that looks busiest,
+`reconcile-merged-prs` at an apparent 5.09%, is at 0.12% once its
+re-reported gauges are excluded
+([§4.2](#42-what-each-pass-actually-did-over-5032-ticks--1866-hours)).
+Median period 114 s against a declared 60 s. Three drivers cost 57% of a
+core continuously; the fourth's cost is unmeasurable because it is
+hosting the database.
 
 <a id="f3"></a>
 ### F3 — The out-of-band driver was dead 13.6% of the last eight days
@@ -550,7 +581,7 @@ separately-filable change.
    `GC_PACK_STATE_DIR` state by `GC_RIG`. This also resolves [F3](#f3) and
    removes the cgroup that currently captures dolt ([F4](#f4)).
 2. **Raise the merge cadence from 60 s to 120–180 s.** Observed period is
-   already 114 s, so this mostly makes the real cadence honest; at 7.55%
+   already 114 s, so this mostly makes the real cadence honest; at a 2.62%
    action rate the latency cost is small and the CPU saving is direct.
    Cheap, reversible, and independent of recommendation 1.
 3. **Give dolt a durable owner** ([F4](#f4)). `gascity-supervisor.service`
@@ -603,12 +634,26 @@ git diff --stat "$MB"..origin/main -- internal/bootstrap/packs/core/
 git ls-tree -r upstream/main --name-only | grep -c merge-skill   # 0
 
 # Merge-cadence measurements (5,032 ticks)
+# The log is append-only and the driver keeps writing, so re-running against
+# the live file answers for a LONGER window than this report and will not
+# reproduce its totals. Pin the window first: this report's is ticks 1-5,032,
+# ending 2026-08-20T04:17:24Z.
 L=/tmp/gc-refinery-idle-gc-toolkit/reconcile.log
-grep -c '^---- tick' "$L"
+END=$(grep -n '^---- tick' "$L" | sed -n '5033p' | cut -d: -f1)
+[ -n "$END" ] || echo "WARNING: fewer than 5,033 ticks; window NOT pinned" >&2
+head -n $((END-1)) "$L" > /tmp/window.log && L=/tmp/window.log
+grep -c '^---- tick' "$L"                 # 5032
 grep -o 'merge-skill: [0-9]* merged' "$L" | awk '{s+=$2} END{print s}'
 grep -c 'FAIL-SAFE the live session roster could not be READ' "$L"
 python3 specs/tk-svgtz/passrate.py "$L"   # per-pass action rates
 python3 specs/tk-svgtz/counters.py "$L"   # per-counter totals (summary lines only)
+
+# passrate.py's action/observation rule (§4.2). Its one-time-transition arm
+# fires zero times in the live window — every anchorless line there is the
+# repeated diagnostic — so a synthetic fixture is the positive control:
+python3 specs/tk-svgtz/passrate.py specs/tk-svgtz/passrate-fixture.log
+# expect: 3 ticks, 2 with ANY action; reconcile-merged-prs 2 acted / 1
+# gauge-only; reconcile-refinery-handoffs 1 acted / 1 gauge-only; 1 transition.
 
 # Cost and ownership
 systemctl --user show gc-refinery-idle-<rig>.service -p CPUUsageNSec -p ActiveEnterTimestamp
