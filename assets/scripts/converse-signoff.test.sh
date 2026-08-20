@@ -550,8 +550,8 @@ echo "── the post-sitting drain is documented, not just the reap ──"
 # reap section above was written about a HELD sitting and reads as the
 # complete account of how the pane goes; it is not. Once a sitting ENDS
 # the session has no wake reason and is drained as `no-wake-reason`
-# within about a minute, and that drain sends C-c into the pane before
-# killing it — so the operator's composer is cleared while they type.
+# within about a minute, and that drain kills the pane and its process
+# tree outright — nothing reads the composer, and nothing warns.
 # Every claim below is load-bearing for a reader deciding whether a
 # visible pane is safe to type into, and each one was absent (not wrong)
 # before the incident. Absence is exactly what made the window invisible.
@@ -560,7 +560,23 @@ echo "── the post-sitting drain is documented, not just the reap ──"
 # with the section itself deleted (caught by mutating this file).
 have "doc carries the post-sitting ending" '## How a pane dies when no sitting is live' "$ENGAGE"
 have "doc names the drain reason" 'no-wake-reason' "$ENGAGE"
-have "doc names the interrupt that clears the composer" 'SendKeysRaw' "$ENGAGE"
+# The mechanism, pinned at both ends: the deferred signal the reconciler
+# actually sends (metadata, not a keystroke) and the call that actually
+# destroys the pane. A reader who trusts a visible pane needs to know
+# there is no interruption, no prompt and no read-out first — the pane
+# and everything composed in it goes in one step.
+have "doc names the deferred drain signal" 'GC_DRAIN_ACK=1' "$ENGAGE"
+have "doc names the destructor" 'KillSessionWithProcesses' "$ENGAGE"
+have "doc rules out the keystroke" 'no Ctrl-C keystroke injection into the pane' "$ENGAGE"
+# Regression guard, not decoration. The first version of this section
+# said the drain's first act was `Provider.Interrupt` -> SendKeysRaw C-c
+# clearing the composer, and THIS suite pinned that string — so the false
+# mechanism was load-bearing in two places at once and a corrected doc
+# would have failed the tests. `verifiedInterrupt` is the drain code's
+# only interrupt wrapper and has no caller outside its own unit test;
+# nothing on this path types into the pane. Keep it that way.
+lacks "doc does not revive the keystroke mechanism" 'SendKeysRaw' "$ENGAGE" \
+    "the no-wake-reason drain signals through GC_DRAIN_ACK metadata and kills; it sends no keys"
 have "doc records the misleading stop wording" 'drain acknowledged by agent' "$ENGAGE"
 have "doc points at the upstream filing" 'gc-ze774' "$ENGAGE"
 # The operator's ruling is a PROHIBITION, and it is the part most likely

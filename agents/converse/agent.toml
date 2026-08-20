@@ -36,8 +36,9 @@ nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Re-
 # usually takes the pane. Once a sitting ENDS the session has no wake
 # reason left, and the reconciler drains it as `no-wake-reason` within
 # about a minute — measured at ~58s on 2026-08-20, roughly an hour after
-# the sitting itself concluded. That drain's first act is `C-c` sent into
-# the pane, so an operator still composing a reply loses what they typed
+# the sitting itself concluded. That drain kills the pane and its whole
+# process tree outright, reading nothing out of it first, so an operator
+# still composing a reply loses what they typed
 # (tk-tufrw; upstream fix gc-ze774). Mechanism in the sibling section of
 # the doc cited above: docs/gascity-human-engagement.md → "How a pane
 # dies when no sitting is live". Nothing in this file can defend against

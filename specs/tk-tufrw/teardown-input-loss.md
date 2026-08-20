@@ -45,21 +45,41 @@ fired:
   a coincidence, and the real interval has a different explanation
   (below).
 
-The operator's words were destroyed **twice over, by two separate
-actions**, and the first one is not the kill:
+The operator's words were destroyed by **one act, the kill**, and the
+drain reaches the pane in no other way. The path, end to end:
 
-1. **A `C-c` typed into their terminal.** A drain's first act is
-   `runtime.Provider.Interrupt`, which for tmux is
-   `SendKeysRaw(name, "C-c")` (`internal/runtime/tmux/adapter.go:270-282`).
-   That keystroke lands in whatever is focused in the pane — here, a
-   composer holding an unsent paragraph.
-2. **The kill.** `workerKillSessionTargetWithConfig` →
-   `KillSessionWithProcesses`, which frees the pane and its history.
-   `wake_mode = "fresh"` means the respawn shares nothing with it.
+1. **The drain is recorded, and nothing is sent.**
+   `beginSessionDrainInfo` (`cmd/gc/session_wake.go:160-205`) takes a
+   `runtime.Provider` and ignores it — the parameter is literally
+   `_ runtime.Provider`, "kept for caller compatibility". It writes an
+   in-memory `drainState` and returns.
+2. **One tick later the reconciler acks on the agent's behalf.** If
+   nothing cancelled in between, `advanceSessionDrainsWithSessionsTraced`
+   sets `GC_DRAIN_ACK=1` (`cmd/gc/session_wake.go:606-645`). Its own
+   comment states the mechanism: the Phase 1 drain-ack check "sees it on
+   the next tick and calls `sp.Stop()` for a clean SIGTERM/SIGKILL — no
+   Ctrl-C keystroke injection into the pane."
+3. **The kill.** Phase 1 marks the session stop-pending and queues
+   `queueDrainAckAsyncStop` (`cmd/gc/session_reconciler.go:291+`) →
+   `workerKillSessionTargetWithConfig` → `Provider.Stop` →
+   `KillSessionWithProcessesExcluding`
+   (`internal/runtime/tmux/tmux.go:880+`): SIGTERM to the pane's whole
+   process tree deepest-first with a grace window, SIGKILL for
+   survivors, then `tmux kill-session`. That frees the pane and its
+   history; `wake_mode = "fresh"` means the respawn shares nothing with
+   it.
 
-So this is not only "teardown raced a typist". The runtime **injected a
-cancel keystroke into a terminal a human was composing in**, roughly a
-minute before taking the pane away.
+**Nothing types into the pane.** `Provider.Interrupt` → `SendKeysRaw(name,
+"C-c")` (`internal/runtime/tmux/adapter.go:268-287`) is a real API and it
+is not on this path: the drain code's own wrapper, `verifiedInterrupt`
+(`cmd/gc/session_wake.go:723-737`), has no caller anywhere outside
+`session_wake_test.go`. An earlier draft of this determination said the
+drain's first act was a `C-c` into the composer. It is not, and the
+correction matters in the operator's favour — **the draft was still
+there, whole, for the entire window**, and every second of it was time in
+which something could have saved the text. This is exactly "teardown
+raced a typist", and teardown won by taking the terminal out from under
+them.
 
 ## Evidence
 
@@ -100,10 +120,13 @@ lost transcript, and it is the id carried in the 22:04:15 stop payload.
 ## The window, and why nothing closed it
 
 `beginSessionDrainInfo` (`cmd/gc/session_wake.go:160-205`) deliberately
-defers the interrupt by one full reconciler tick so a falsely-orphaned
-session gets a chance to be cancelled. Measured here: drain began in the
-22:03:13 tick, stop recorded at 22:04:15 — a **~58-second** window
-between the decision and the kill, with the `C-c` somewhere inside it.
+defers the drain signal by one full reconciler tick so a falsely-orphaned
+session gets a chance to be cancelled — and the ack it eventually writes
+is consumed by a *later* tick still, so the kill is two tick boundaries
+away from the decision. Measured here: drain began in the 22:03:13 tick,
+stop recorded at 22:04:15 — a **~58-second** window between the decision
+and the kill, with the operator's unsent paragraph sitting untouched in
+the pane for all of it.
 
 ### What was keeping the pane alive — and it was not the operator
 
@@ -145,16 +168,33 @@ The operator confirms the pane was responsive — cursor and characters
 behaving normally — right up until it vanished. This was not a stale pane
 swallowing keystrokes: teardown raced live composition and won.
 
-Once the drain has begun, the advance scan
-(`advanceSessionDrainsWithSessionsTraced`,
-`cmd/gc/session_wake.go:493+`) cancels only for `WakePending` and
-`assigned-work` wake reasons. **It has no attachment check and no
-pending-input check.** A human who attaches and starts typing at second
-5 of the window is not a cancel condition on that path.
+Once the drain has begun the protection thins out along the window, and
+it is worth being exact about where:
 
-And the cancel that does exist could not have saved the text anyway: the
-`C-c` is sent to the pane, so by the time any later tick reconsiders,
-the composer has already been cleared.
+- **Before the ack.** The advance scan
+  (`advanceSessionDrainsWithSessionsTraced`,
+  `cmd/gc/session_wake.go:493+`) has named cancels for `WakePending` and
+  `assigned-work`, and above the ack it also cancels generically:
+  `no-wake-reason` satisfies `drainReasonCancelable`, so *any* wake
+  reason that reappears — attachment included — clears `GC_DRAIN_ACK`
+  and drops the drain (`cmd/gc/session_wake.go:587-604`). Re-attaching
+  this early does save the session.
+- **After the ack.** The stop is decided by the Phase 1 drain-ack
+  consumer (`cmd/gc/session_reconciler.go:1966-2032` and `2320-2440`),
+  which runs *before* that tick's `ComputeAwakeSet`. Its cancels are
+  assigned work, a *structured* pending interaction
+  (`pendingInteractionKeepsAwakeInfo` — a prompt the agent is blocked
+  on, which a half-typed reply is not), and a config-drift-plus-
+  recently-attached special case. Plain attachment on a
+  `no-wake-reason` ack is not among them, so attaching here does not
+  call the kill off.
+
+**Neither rung ever looks at what is typed.** Attachment is the closest
+thing to a proxy for "a human is here", and it is a proxy for presence,
+not for pending work — a pane can be attached with an empty composer and
+unattached with a full one. Nothing on this path reads the pane's
+contents at any point, which is why the guard has to be an explicit
+input-state check rather than a stricter reading of attachment.
 
 ## Why none of this can be built in this pack
 
@@ -163,18 +203,19 @@ reconciler is the `gc` binary. The **capture** runs into the seam
 `docs/gascity-human-engagement.md` → "How a held sitting ends" already
 records for the idle reap: **nothing pack-owned runs at kill time.** This
 determination extends that finding rather than re-deriving it, and the
-same seam holds for the drain path — with the additional point that the
-destructive act here is a keystroke sent *into* the pane, which no
-pack-side hook can intercept either.
+same seam holds for the drain path: the kill is issued by the reconciler
+against the pane's own process tree, and the pack owns nothing between
+that decision and those signals.
 
 Ruled out explicitly, so nobody re-derives them:
 
 - **A tmux hook.** `session-closed` / `pane-exited` fire *after* the
-  pane is gone, so there is nothing left to capture. No tmux hook fires
-  on an inbound `send-keys`.
+  pane is gone, so there is nothing left to capture. There is no hook on
+  the kill itself.
 - **A Claude Code `SessionEnd` hook.** It receives session id,
   transcript path, cwd and reason — never the unsent composer buffer —
-  and would run after the `C-c` had already cleared it.
+  and it is racing a SIGTERM with a bounded grace window followed by
+  SIGKILL, so it is not guaranteed to run to completion either.
 - **A cooldown order polling for draining sessions.** Cooldown orders
   fire on a multi-minute cadence against a ~58-second window, so the
   poll would usually arrive after the kill.
@@ -206,20 +247,25 @@ incident:
    `user_hold` heartbeat — a condition that cancels the drain rather than
    one that decorates it.
 2. **The check must survive the whole window, not just the decision.**
-   `beginSessionDrainInfo` defers the interrupt by a tick and the kill
-   comes ~58s later, so a human who starts typing *after* the drain began
-   must still stop it. That means the guard belongs in
+   `beginSessionDrainInfo` defers the drain signal by a tick, the ack is
+   consumed a tick after that, and the kill landed ~58s after the
+   decision — so a human who starts typing *after* the drain began must
+   still stop it. One guard is not enough to cover that: it belongs in
    `advanceSessionDrainsWithSessionsTraced` alongside the existing
-   `WakePending` / `assigned-work` cancels, not only at the decision site.
+   `WakePending` / `assigned-work` cancels **and** in the Phase 1
+   drain-ack consumer, which today cancels for assigned work alone and
+   is the rung that actually issues the stop.
 3. **Do not rely on attachment as the proxy.** One client for the whole
    city means the pane being typed into routinely reads as unattached.
    Input state has to be read from the pane itself.
-4. **Fallback only: capture before the interrupt, not before the kill.**
-   Where a drain genuinely cannot be blocked (`orphaned`, `suspended`),
-   capture first — and note the `C-c` is the first destructor, so a
-   capture placed at the kill site captures an already-cleared composer.
-   Park it where the operator will look; for a converse sitting that is
-   the subject bead.
+4. **Fallback only: capture before the kill.** Where a drain genuinely
+   cannot be blocked (`orphaned`, `suspended`), capture first. The kill
+   is the sole destructor — nothing disturbs the pane before it — so a
+   capture anywhere upstream of `queueDrainAckAsyncStop` still sees the
+   composer intact, and the ack-set tick is the natural site: it is a
+   full tick of headroom, and it already knows the session is going.
+   Park what it captures where the operator will look; for a converse
+   sitting that is the subject bead.
 5. **Fix the stop reason's wording.** `"drain acknowledged by agent"`
    for a reconciler-authored ack sent this investigation looking for an
    agent decision that never happened.

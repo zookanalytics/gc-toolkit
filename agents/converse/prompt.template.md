@@ -289,10 +289,10 @@ Rules:
   it are gone, unrecoverable, with no farewell. Nothing you can run
   fires at kill time. And `idle_timeout` is not the short clock: once
   the sitting ENDS this session has no wake reason left and is drained
-  as `no-wake-reason` within about a minute, whose first act is `C-c`
-  sent into the pane — so an operator still typing a reply loses it
-  (tk-tufrw). That is one more reason the sign-off has to land before
-  you close, not after. The only defense is that the record is already
+  as `no-wake-reason` within about a minute, and that drain takes the
+  pane whole without reading anything out of it — so an operator still
+  typing a reply loses it (tk-tufrw). That is one more reason the
+  sign-off has to land before you close, not after. The only defense is that the record is already
   written: stamp the takeaway when the hold BEGINS (step 5), append the
   outcome to the subject as soon as a sitting settles anything (step
   6), and never leave a decision live only in the thread. Assume every

@@ -418,23 +418,46 @@ decision.
 
 Three things about that path are worth knowing before trusting a pane:
 
-- **The first act of a drain is a keystroke, not a kill.**
-  `beginSessionDrainInfo` defers the interrupt one full tick, and the
-  interrupt is `runtime.Provider.Interrupt` → `SendKeysRaw(name, "C-c")`
-  (`internal/runtime/tmux/adapter.go`). It is delivered into whatever
-  holds focus in the pane. An operator composing a reply gets their
-  composer cleared before the pane is taken.
-- **Attachment protects less than it looks like it does.** Attachment is
-  a wake cause (`WakeCauseAttached`,
-  `internal/session/lifecycle_projection.go`), so an *attached* pane does
-  not enter this drain — but this city runs **one tmux client** switched
-  between per-agent sessions, so at most one session reports
+- **Nothing is typed into the pane; the pane is taken whole.** The drain
+  signals through *metadata*, not keystrokes. `beginSessionDrainInfo`
+  only records the drain — it takes a `runtime.Provider` and ignores it
+  (`_ runtime.Provider`, `cmd/gc/session_wake.go`). One tick later, if
+  nothing cancelled, `advanceSessionDrainsWithSessionsTraced` sets
+  `GC_DRAIN_ACK=1` on the session, and says so in as many words: the
+  reconciler's Phase 1 drain-ack check "calls `sp.Stop()` for a clean
+  SIGTERM/SIGKILL — no Ctrl-C keystroke injection into the pane." That
+  stop is `Provider.Stop` (`internal/runtime/tmux/adapter.go`) →
+  `KillSessionWithProcessesExcluding`
+  (`internal/runtime/tmux/tmux.go`): SIGTERM to the pane's whole
+  process tree with a grace window, SIGKILL to whatever survives it,
+  then `tmux kill-session`. `Provider.Interrupt` — the one API that
+  would put a `C-c` in the pane — is not on this path at all; the drain
+  code's only interrupt helper, `verifiedInterrupt`, has no caller
+  outside its own test. So the composer is never cleared first. The
+  draft is still sitting in the pane, intact, for the whole window, and
+  then the pane is gone.
+- **Attachment protects, but it stops protecting at the ack.**
+  Attachment is a wake cause (`WakeCauseAttached`,
+  `internal/session/lifecycle_projection.go`), and `ComputeAwakeSet`
+  applies it as an override that wakes *even a drained session*
+  (`cmd/gc/compute_awake_set.go`), so an *attached* pane does not enter
+  this drain, and re-attaching during the first tick of one cancels it
+  — `no-wake-reason` is cancellable, so any wake reason that reappears
+  clears the ack and drops the drain. Two things eat that protection.
+  *First*, this city runs **one tmux client** switched between
+  per-agent sessions, so at most one session reports
   `session_attached=1` at a time and every other live pane reads as
-  unattached. The idle ladder's attachment rung is on the `idle` path
-  only; `no-wake-reason` never reaches it. The drain-advance scan
-  (`advanceSessionDrainsWithSessionsTraced`) cancels for `WakePending`
-  and `assigned-work` and nothing else — attaching and typing inside the
-  window is not a cancel condition.
+  unattached; the idle ladder's attachment rung is on the `idle` path
+  only, and `no-wake-reason` never reaches it. *Second*, once
+  `GC_DRAIN_ACK` is set, the stop is decided by the
+  Phase 1 drain-ack consumer (`cmd/gc/session_reconciler.go`), whose
+  cancels are assigned work, a *structured* pending interaction, and a
+  config-drift-plus-recently-attached case — plain attachment on a
+  `no-wake-reason` ack is not one of them, so attaching late does not
+  call the kill off. And typing is not a cancel condition at any point
+  on this path: a pending *interaction* is a prompt the agent is blocked
+  on, not a half-written reply, and nothing in the decision reads the
+  pane's contents.
 - **The stop event's wording is misleading here.** It reads
   `"drain acknowledged by agent"` even when the agent never ran
   `gc runtime drain-ack`: the reconciler acks on its behalf
@@ -443,10 +466,9 @@ Three things about that path are worth knowing before trusting a pane:
   not read that event as an agent decision.
 
 *Seam:* the same one as the reap — **nothing pack-owned runs at kill
-time**, and nothing can intercept an inbound `send-keys` either, so the
-pack cannot capture pending input here. Ruled out with evidence in the
-determination: tmux `session-closed`/`pane-exited` hooks (fire after the
-pane is gone), a Claude Code `SessionEnd` hook (never receives the
+time**, so the pack cannot capture pending input here. Ruled out with
+evidence in the determination: tmux `session-closed`/`pane-exited` hooks
+(fire after the pane is gone), a Claude Code `SessionEnd` hook (never receives the
 composer buffer), a cooldown order (multi-minute cadence against a
 ~58-second window), and `pipe-pane` logging (a redrawing TUI makes the
 volume unusable). The capture has to live in the drain path upstream:
