@@ -37,6 +37,16 @@ gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --cit
 # (bead tk-qkags; design Key Component 4). See tmux-pick-helm.sh.
 gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
 
-# Spawn a thread of the current pane's role. Input handling (gum
-# input in a tmux popup) lives in the script — see tmux-spawn-thread.sh.
-gcmux bind-key a run-shell -b "$CONFIGDIR/assets/scripts/tmux-spawn-thread.sh $CONFIGDIR"
+# Operator-origin visit intake — type a message, get a durable, routed
+# conversation on it. `command-prompt` opens the bottom-bar prompt; `%%%`
+# parks the response in a paste buffer (escaping quotation marks) instead of
+# splicing it into a command line, and tmux-visit-prompt.sh reads the buffer
+# back. That indirection is load-bearing: the response is substituted as TEXT
+# and the result is then PARSED as a tmux command, so a `;` or a `"` in a
+# message spliced directly into `run-shell` mangles it — or executes part of
+# it. Via the buffer the message crosses a process boundary untouched. The
+# handler runs FOREGROUND so the fixed buffer name is serialised against the
+# next press (a backgrounded read can lose a topic to the press behind it);
+# it backgrounds the slow half itself. See tmux-visit-prompt.sh.
+gcmux bind-key a command-prompt -p "visit topic: " \
+    "set-buffer -b gc-visit-topic -- \"%%%\" ; run-shell \"$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")\""
