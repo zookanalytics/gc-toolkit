@@ -401,6 +401,14 @@ it: `gc order list` shows the order and `<GC_PACK_STATE_DIR>/refinery-reconcile/
 holds the recent passes. A pass that fails raises an `order.failed` event
 carrying the failing pass names.
 
+If you need to know whether it is running at all, `gc doctor` answers that —
+`check-refinery-merge-cadence` asserts per rig that the order is registered,
+has run recently, and has no out-of-band driver beside it. Do NOT reach for
+`gc order history` without `--limit 0`: a bounded read answers for the city
+store alone while printing a RIG column, so it reports one rig's runs as though
+they were the city's. That misread produced a P1 against a cadence that was
+running normally (tk-fdstg; gascity gc-6a6vz has the binary-side fix).
+
 **2. What the cadence runs (best-effort, every tick).** The passes below are
 convergent nets for single best-effort one-shots that can fail for any reason:
 (a-pre) pre-open PR-create — open the PR for each anchor parked in

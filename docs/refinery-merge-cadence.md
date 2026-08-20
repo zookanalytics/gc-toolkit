@@ -87,6 +87,53 @@ built around that:
 
 `gc order list` shows the order and its per-rig registrations.
 
+## Verifying the cadence is alive
+
+`gc doctor` answers this now — `check-refinery-merge-cadence` asserts, per rig,
+that the order is registered and has run recently, and that no out-of-band
+driver is running alongside it. Prefer it to a hand-rolled query: the two hand
+surfaces below both have a way of lying, and the check exists because they did.
+
+**`gc order history` is store-complete only when the read is unbounded.** Any
+positive `--limit` — including the default 50, and including a limit larger than
+the number of rows that exist — returns runs from the city store alone, and
+prints them under a `RIG` column, so a single-rig answer looks city-wide.
+Measured 2026-08-20 with 43 retained runs across four rigs: `--limit 40`,
+`--limit 100` and `--since 20m` each returned `gascity` rows only; `--limit 0`
+returned all four. Two code paths, not an exhausted budget. So:
+
+```bash
+# City-wide, and cheap: --since bounds the cost, --limit 0 keeps it complete.
+gc order history refinery-reconcile --since 30m --limit 0
+
+# One rig. --rig is honoured on the bounded path too, but keep --limit 0:
+# a bounded read can return fewer rows than the limit for reasons unrelated
+# to how often the rig ran, which is not a signal you want to reason from.
+gc order history refinery-reconcile --rig gc-toolkit --limit 0
+```
+
+The help text recommends a bound "when triaging". For *this* order, don't —
+triage is exactly when a per-rig answer dressed as a city-wide one does damage.
+It is what produced tk-fdstg, a P1 reporting that gc-toolkit's registration had
+never fired, when it had been firing in lockstep with the other three rigs since
+the order's first tick.
+
+**Per-rig pass output** is the other authoritative surface, and it is not
+subject to bead retention:
+
+```bash
+grep '^=== ' "$GC_PACK_STATE_DIR/refinery-reconcile/<rig>/pass.log" | tail -5
+```
+
+Each `=== <timestamp> rig=<rig> refinery=<addr>` line is one completed pass.
+
+**A leftover `/tmp/gc-refinery-idle-<rig>/` directory is not a driver.** The
+state dirs of the retired daemons outlive them, lock file and all. Only a
+running process counts — `ps -eo args= | grep idle-loop.sh`. Reading an idle
+directory as "armed" is the exact confusion catalogued in
+`specs/tk-agzpl/refinery-idle-driver-liveness.md`, where a lock file reported a
+driver that had been dead for hours.
+
 ## Why an order and not a daemon
 
 Until 2026-08 the cadence was a hand-authored shell daemon per rig —
@@ -115,3 +162,29 @@ controller evidence behind it are in `specs/tk-d83wm/exec-order-cadence.md`.
 `merge-skill.sh` writer that the controller's gate cannot see — the one thing
 the old canonical lock was there to stop, reintroduced past the mechanism that
 now enforces it.
+
+The migration finished on 2026-08-20 (tk-fdstg). Three of the four drivers were
+retired on 2026-08-19 once their rigs' orders were confirmed firing; gc-toolkit's
+was deliberately kept back as a safety net and then stayed, so the pack-owning
+rig — the one carrying most of the city's PR traffic — spent a day with *two*
+merge-skill writers: the order, single-flighted by the controller, and a daemon
+the controller could not see. Retiring it is what closed the migration, and
+`check-refinery-merge-cadence` is what keeps it closed.
+
+Retiring it took two attempts, which is why **do not re-create an out-of-band
+driver** is written as a prohibition and not a preference. gc-toolkit's driver was stopped at 08:27:33Z and re-armed
+by hand at 08:42:05Z, because a query for its order-tracking beads returned zero
+and was read as "the cadence is dead". The query was `bd list`, which cannot
+enumerate wisps and so returns zero for every rig always; the order had in fact
+ticked four times during the supposed outage. The re-arm restored the two-writer
+state on the busiest rig for five minutes — driver 08:42:53Z, order 08:44:12Z,
+19s apart on the same anchors — and was caught by this check, which exits 2 on a
+live `idle-loop.sh`. Stopped for good at 08:47:45Z; ticks at 08:51:03Z and
+08:57:17Z with no driver anywhere in the city; check green.
+
+**Do not re-create an out-of-band driver** applies to a stopped cadence too, and
+that is the case that actually catches people. A zero from a surface that cannot
+enumerate what you are counting is not evidence of an outage — re-read the
+cadence on the two authoritative surfaces above before concluding anything. If it
+really has stopped, fix the order: the check will tell you whether the fault is
+one rig (the controller is up, and the other rigs prove it) or the whole city.
