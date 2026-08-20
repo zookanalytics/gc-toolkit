@@ -182,16 +182,50 @@ else
     exit 1
 fi
 ```
-If resuming a rejected branch, rebase onto latest base:
+If resuming a rejected branch, bring it current with the base the way the
+refinery classified it — **not** always by rebase.
+
+`metadata.prepare_mode` is that classification, stamped by the refinery's
+`shared-branch-merge-mode` block in the same pass that rejected you: `rebase`
+for a disposable per-bead `polecat/<bead-id>` branch, `merge` for every other
+shape. A rebase REWRITES commits, which is free on your own throwaway branch and
+destructive on a branch other work already depends on — an owned convoy's
+`integration/*` branch carries commits that are already MERGED PRs, so rewriting
+them re-points those PRs at objects the branch no longer holds and leaves the
+originals dangling and GC-eligible (incident 2026-08-19, convoy tk-t80p1 ->
+PR #388, three merged PRs rewritten; tk-a0hva).
+
+The refinery refuses to rewrite such a branch itself. The hand-back is the way
+that rewrite still reaches one: the rejection routes the same bead to this pool,
+and this step is where a worker would rebase it. So read the mode and honor it.
+
 ```bash
-REJECTION=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.rejection_reason // empty')
+# >>> rejected-branch-resume-mode
+BEAD_JSON=$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null)
+REJECTION=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.rejection_reason // empty')
 if [ -n "$REJECTION" ]; then
-    git rebase origin/{{base_branch}}
-    # If conflicts: resolve them (this is likely the rejection reason)
-    # After resolving: git rebase --continue
+    PREPARE_MODE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.prepare_mode // empty')
+    if [ "$PREPARE_MODE" = "merge" ]; then
+        echo "prepare_mode=merge: this is a SHARED branch — bringing it current by MERGE (rewriting it would orphan already-merged PRs)"
+        git merge --no-edit origin/{{base_branch}}
+        # If conflicts: resolve them (this is likely the rejection reason), then
+        #   git add <resolved files> && git commit
+        # to complete the MERGE commit. Do NOT reach for git rebase, git merge
+        # --squash, git commit --amend, or a force-push to tidy the result: every
+        # one of them rewrites the shared history this mode exists to preserve.
+    else
+        git rebase origin/{{base_branch}}
+        # If conflicts: resolve them (this is likely the rejection reason)
+        # After resolving: git rebase --continue
+    fi
     gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
 fi
+# <<< rejected-branch-resume-mode
 ```
+
+Leave `prepare_mode` on the bead. It is the refinery's classification, re-stamped
+on every prepare — clearing it here would hand the next rejection an unclassified
+branch.
 
 **If no branch** — create one and record it. Always branch from the
 freshly-fetched `origin/{{base_branch}}`, never from local
@@ -485,6 +519,8 @@ if [ $PUSH_EXIT -ne 0 ]; then
     echo "Aborting handoff — bead stays with polecat."
     echo ""
     echo "Diagnose the push failure (network, auth, force-needed?) and re-run submit-and-exit."
+    echo "NOTE: if metadata.prepare_mode=merge, a non-fast-forward rejection is NOT a force-push case."
+    echo "      That branch is shared; force-pushing it orphans already-merged PRs. Redo the resume as a merge."
     gc runtime drain-ack
     exit 1
 fi

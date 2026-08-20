@@ -778,24 +778,85 @@ needs = ["find-work"]
 description = """
 **Config: target_branch = {{target_branch}}**
 
-Read the work bead metadata:
-```bash
-BRANCH=$(gc bd show $WORK --json | jq -r '.[0].metadata.branch')
-TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_branch}}"')
-```
+Read the work bead ONCE, then prepare the branch. WHICH git operation is
+correct depends on what kind of branch this is, so the read, the
+classification and the action are one fail-closed block: a separate
+`gc bd show` per field fails OPEN (`gc bd` writes errors to stderr and leaves
+stdout empty), and a classification field that reads empty because the bead
+was unreadable is indistinguishable from one that is genuinely unset.
 
-Fetch and attempt mechanical rebase:
 ```bash
+TARGET_BRANCH_DEFAULT="{{target_branch}}"
+# >>> shared-branch-merge-mode
+BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  echo "could not read $WORK (bd unavailable?) — NOT preparing the branch; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
+GRADUATION=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.graduation // empty')
+[ -n "$TARGET" ] || TARGET="$TARGET_BRANCH_DEFAULT"
+if [ -z "$BRANCH" ]; then
+  echo "$WORK carries no metadata.branch — nothing to prepare; leaving it with the refinery"
+  gc runtime drain-ack
+  exit 1
+fi
+# Rebase REWRITES commits. That is free on a disposable per-bead branch and
+# destructive on a branch other work already depends on. An owned convoy's
+# integration branch carries commits that are already MERGED PRs: rewriting
+# them re-points those PRs at objects the branch no longer holds and leaves the
+# originals dangling and GC-eligible (incident 2026-08-19, convoy tk-t80p1 ->
+# PR #388, three merged PRs rewritten; tk-a0hva).
+#
+# ALLOWLIST, not denylist: the only branch shape the refinery may rewrite is
+# the per-bead polecat/<bead-id> branch, which the polecat branch convention
+# guarantees is single-author and disposable. Every other shape — an
+# integration/* branch, feat/*, an unprefixed one-off — is brought current by
+# MERGE. An unrecognized branch therefore fails to the non-destructive side by
+# construction, which a denylist of known-shared prefixes could not do.
+case "$BRANCH" in
+  polecat/*) PREPARE_MODE=rebase ;;
+  *)         PREPARE_MODE=merge ;;
+esac
+# A graduation bead IS the integration->main case, whatever its branch is
+# named; reconcile-graduated-convoys.sh stamps the flag when it hands one over.
+if [ "$GRADUATION" = "true" ]; then PREPARE_MODE=merge; fi
+# CARRY the classification on the bead, because the rewrite this block prevents
+# can still happen one step later, performed by a different actor. Both rejection
+# arms below hand the bead back to the polecat pool, and the polecat resume path
+# brings a branch current by REBASE and is told to force-push when that push is
+# non-fast-forward. The classifier runs ONLY here, and the snippets downstream
+# run in separate shells, so the bead is the only carrier that reaches them:
+# mol-polecat-work's `rejected-branch-resume-mode` block reads this key and
+# merges instead of rebasing when it says merge.
+# Fail CLOSED, and before touching the worktree: a mode that was not recorded is
+# a hand-back that WILL rebase a shared branch, so refuse to prepare a branch
+# that cannot be handed back safely.
+if ! gc bd update $WORK --set-metadata prepare_mode="$PREPARE_MODE" >/dev/null 2>&1; then
+  echo "could not record prepare_mode=$PREPARE_MODE on $WORK — NOT preparing the branch; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
 git fetch --prune origin
-git checkout -b temp origin/$BRANCH
-git rebase origin/$TARGET
+git checkout -b temp "origin/$BRANCH"
+PREPARE_FAILED=
+if [ "$PREPARE_MODE" = "rebase" ]; then
+  git rebase "origin/$TARGET" || { git rebase --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
+else
+  echo "$BRANCH is not a disposable per-bead branch (graduation=${GRADUATION:-false}) — merging origin/$TARGET IN, not rebasing"
+  git merge --no-edit "origin/$TARGET" || { git merge --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
+fi
+# <<< shared-branch-merge-mode
 ```
 
-If rebase SUCCEEDED (exit 0): close this step, proceed to run-tests.
+If `$PREPARE_FAILED` is EMPTY (the rebase or the merge succeeded): close this
+step, proceed to run-tests.
 
-If rebase FAILED (conflicts):
+If `$PREPARE_FAILED` is SET (conflicts):
 
-1. Abort: `git rebase --abort`
+1. The block already ran the matching abort, so the worktree is clean here.
 2. Clean up the existing workflow and reopen the source bead:
 ```bash
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
@@ -823,7 +884,7 @@ PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 gc bd update $WORK \
   --status=open \
   --assignee="" \
-  --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET)" \
+  --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)" \
   --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
   ${MR_STATE:+--unset-metadata merge_result} \
   ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
@@ -1568,14 +1629,38 @@ branch_has_real_change "origin/$TARGET" temp || \
   halt_false_completion "$BRANCH" "$(git merge-base "origin/$TARGET" temp 2>/dev/null || printf '%s' "origin/$TARGET")"
 ```
 
-**1. Push the rebased branch back to origin:**
+**1. Push the prepared branch back to origin:**
+
+Force-push ONLY when the push actually rewrites history. In merge mode
+(`shared-branch-merge-mode` in the rebase step) `temp` is a DESCENDANT of the
+branch, so a plain fast-forward push carries it and no force is needed or
+wanted; in rebase mode it is not a descendant, and the lease is what makes the
+rewrite safe. Deriving that from the git ancestry rather than re-testing the
+branch name keeps this site from drifting away from the one that classified
+the branch.
+
 ```bash
 git checkout temp
-git push origin HEAD:$BRANCH --force-with-lease
+# >>> shared-branch-push-mode
+# Deliberately NO fetch here. `--force-with-lease` with no explicit expected
+# value compares against the LOCAL remote-tracking ref, so a fetch immediately
+# before the push refreshes the very ref the lease is checked against and
+# quietly degrades it to a plain --force. The rebase step's fetch is the
+# snapshot both the ancestry test and the lease are taken against, which is
+# what makes "the branch moved under us" detectable at all.
+if git merge-base --is-ancestor "origin/$BRANCH" temp; then
+  git push origin "HEAD:$BRANCH"
+else
+  git push origin "HEAD:$BRANCH" --force-with-lease
+fi
+# <<< shared-branch-push-mode
 ```
-If `--force-with-lease` fails, the existing PR branch moved after your
-fetch. STOP, fetch the latest branch, rebase your temp branch again, and
-retry with `--force-with-lease`. Do not use plain `--force`.
+If the fast-forward push is REJECTED, the branch moved since the rebase step's
+fetch and your merge no longer contains its tip: STOP, fetch, re-run the prepare
+block, retry. If `--force-with-lease` fails it is the same cause and the same
+remedy.
+Never use plain `--force`, and never force a branch the prepare block put in
+merge mode — that rewrite is the thing this design exists to prevent.
 
 **2. Decide pre-open vs post-open, then (post-open only) reuse/create the PR:**
 
