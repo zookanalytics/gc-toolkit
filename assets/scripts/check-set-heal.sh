@@ -497,10 +497,55 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 #                           this reason: a status not asked for is an owner unseen.)
 #   gc.routed_to non-empty  pool-routed and claimable — a dispatched rework waiting
 #                           for a polecat.
+#   gc.execution_routed_to  the SAME fact, for the dispatch form that actually mints
+#   non-empty AND the bead  rework children now (tk-79zn6). `gc sling` pours a graph.v2
+#   carries NO assignee     workflow over the bead, RETIRES the `gc.routed_to` it was
+#                           carrying, and stamps the live route in
+#                           `gc.execution_routed_to` instead, with claimability held by
+#                           the synthetic input convoy's root. That retirement is
+#                           deliberate and documented, not an accident — see
+#                           `docs/gascity-routing-model.md`, and e4f229d (tk-4zzdn) for
+#                           the gascity-side change that made the pour do it. So a
+#                           convoy-dispatched rework is claimable in exactly the sense
+#                           the line above means, while every field that line reads is
+#                           empty: the work bead stays plain `open` and unassigned for
+#                           the whole run, because what a polecat claims are its STEP
+#                           beads, not the bead itself.
 #
-# Anything else — status exactly `open`, unrouted, not a review — is inert with respect
-# to this gate: the handed-back rework child, or a detached sibling anchor on the same
-# branch. Neither will ever stamp check.<gate> on THIS anchor.
+#                           WHY THE ASSIGNEE CONDITION IS LOAD-BEARING, and not defensive
+#                           dressing: `gc.execution_routed_to` is NOT retired on the way
+#                           back. The done-sequence clears `gc.routed_to` and assigns the
+#                           bead to the refinery, leaving the execution route stamped, so
+#                           a handed-back child and a live one are identical in that one
+#                           field and differ only in the assignee. Reading it alone would
+#                           therefore re-introduce the tk-t46nq park through a new door —
+#                           the fix as originally proposed on tk-79zn6, which is why it
+#                           is not the fix applied. Live proof: tk-b5iaq, the rework child
+#                           of the second reproduction, still carries
+#                           `gc.execution_routed_to=gc-toolkit/gc-toolkit.polecat` today,
+#                           with `assignee=gc-toolkit/gc-toolkit.refinery` and
+#                           `gc.routed_to` empty.
+#
+#                           This reads the assignee only to DISQUALIFY, never as
+#                           liveness — the direction the branch-probe stub warns about
+#                           stays closed. A non-empty assignee cannot suppress a dispatch
+#                           here; it can only decline to add one, which at worst leaves
+#                           today's behavior. (Boundary, deliberately not coded: the
+#                           `auto_push=false` halt clears the assignee instead of setting
+#                           the refinery, so a bead parked there reads as acting. That
+#                           shape is a mol-pr-from-issue halt awaiting a human, never a
+#                           check-set rework child, which this pass slings through
+#                           mol-polecat-work.)
+#
+# Anything else — status exactly `open`, unrouted by EITHER route key, not a review — is
+# inert with respect to this gate: the handed-back rework child, or a detached sibling
+# anchor on the same branch. Neither will ever stamp check.<gate> on THIS anchor.
+#
+# Both route keys carry the same bounded-wait bet, and it is the pre-existing one: a
+# dispatched-and-claimable child is assumed to be claimed eventually. A pour that strands
+# a husk parks this gate exactly as a stranded pool route already does — no new class of
+# park, the same one the `gc.routed_to` line has always accepted, now reached by the
+# dispatch form that superseded it.
 
 # The ACTING half, as a jq function so the exact and broad surfaces cannot drift on it
 # (the same reason the identity predicate below is one variable). $live is
@@ -510,9 +555,11 @@ ACTING_JQ_DEF='def acting($live):
   . as $b
   | (($b.metadata // {})) as $m
   | (($live | split(",")) | map(select(. != "open"))) as $owning
+  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
   | ((($m.task_kind // "") | tostring) == "review")
     or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
-    or ((($m["gc.routed_to"] // "") | tostring) != "");
+    or ((($m["gc.routed_to"] // "") | tostring) != "")
+    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
 '
 
 # The validation predicate, as a jq filter over a `gc bd list` array. Kept in one
