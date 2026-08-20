@@ -254,10 +254,6 @@ default = "true"
 description = "System-auto convoy graduation. When an OWNED integration convoy's members are all closed AND the ledger records at least one merge onto its integration branch, the refinery assigns the convoy bead to itself and lands integration->main through the same work-bead machine (a human-approved PR). Default on; set 'false' as a kill-switch. Non-owned auto-convoys (per-sling tracking bundles) are never affected."
 default = "true"
 
-[vars.event_timeout]
-description = "Seconds to sleep before re-checking for work. Replaces former event-watch loop which hot-spun on cache-reconcile firehose."
-default = "60"
-
 [vars.escalation_cooldown]
 description = "Seconds before an UNCHANGED situation may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h: at the 60s idle cadence that is a 1440x reduction on an approval-gated queue, while still resurfacing it daily so it cannot fall silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier."
 default = "86400"
@@ -315,11 +311,9 @@ Close this step and proceed."""
 
 [[steps]]
 id = "find-work"
-title = "Find next work bead assigned to me or wait"
+title = "Find next work bead assigned to me"
 needs = ["check-inbox"]
 description = """
-**Config: event_timeout = {{event_timeout}}**
-
 Search for work beads assigned to you with branch metadata, skipping any bead
 that is already a gating anchor:
 ```bash
@@ -381,100 +375,43 @@ gc bd show $WORK --json | jq '.[0].metadata'
 The bead MUST have `metadata.branch`. If `metadata.target` is missing,
 use {{target_branch}} as default. Note the work bead ID and close this step.
 
-If NO work found: sleep, reconcile in-flight PRs and convoys, then re-check.
+If NO work found: this turn is over. Do NOT sleep, do NOT call ScheduleWakeup,
+do NOT use Monitor. End the turn; the session_sleep policy restarts this session
+after the configured idle interval.
 
-**1. Sleep before re-checking:**
-```bash
-sleep {{event_timeout}}
-```
+**1. The reconcile cadence is not yours to drive.** The passes described below
+run every 60s on every rig, in the controller, as the `refinery-reconcile` exec
+order (`orders/refinery-reconcile.toml` ->
+`assets/scripts/refinery-reconcile.sh`, `scope = "rig"`). They are mechanical
+shell — metadata and timer comparison, GitHub API status decoding — so they need
+no agent and no session, and they keep running while every refinery in the city
+is asleep.
 
-`sleep {{event_timeout}}` is a **cadence contract**, not an implementation. A
-harness that blocks foreground `sleep` (Claude Code answers "use Monitor with an
-until-loop") drives this idle loop out-of-band instead — supported, under five
-invariants:
+That order is also the ONLY writer you have to coordinate with. Running the
+passes inline is a SECOND `merge-skill.sh` writer against the same anchors: the
+controller's own single-flight gate cannot see a copy you launched by hand, and
+two writers racing one anchor is the failure the cadence is arranged to prevent.
+So do not run them here, and do not re-implement the cadence out of band — an
+out-of-band driver is what this replaced (tk-d83wm; the history is in
+specs/tk-agzpl/refinery-idle-driver-liveness.md and
+docs/refinery-merge-cadence.md).
 
-- **Run every reconcile pass below, in order, on every tick.** The merge skill
-  fires only from this pass, so a loop that skips the passes looks fine on an
-  empty queue and then never lands an anchor parked mid-session. Idle is exactly
-  when anchors wait.
-- **Use a driver that cannot terminate itself.** A polling loop with an
-  iteration backstop exits on its own and must be re-armed each time; the re-arm
-  is where it gets lost. A persistent driver has no backstop to trip.
-- **Namespace anything per-rig.** Co-tenant rig refineries run this one formula
-  on one host, so an un-namespaced helper path or dedup file collides — and
-  killing "the" poll by name kills another rig's.
-- **Stay silent in steady state.** Emit only on a real transition (merge, new
-  work, anchor-set change, mail, tool failure). `merge held` and `0 escalated, 0
-  retargeted` are the normal readings of an approval-gated queue; notifying on
-  them firehoses the driver into being shut off as noise.
-- **Arm it outside your own session's cgroup.** An agent session runs in a
-  systemd scope whose KillMode is control-group, so when that session rotates
-  systemd SIGKILLs every process in the cgroup. `setsid` changes the SESSION,
-  not the CGROUP, so a setsid-armed driver dies with you — measured twice, once
-  as an 8-minute lifetime and once as a 9h20m merge outage during which
-  APPROVED+CLEAN PRs simply sat. Nothing reports it, because the bead state, the
-  wisp, and your own session all look healthy. Arm through the script; it is
-  idempotent, so running it when a driver is already live AND healthy costs one
-  probe and exits 0. If that live driver is armed WRONG — Restart dropped, a
-  non-repo WorkingDirectory, no GC_AGENT or BEADS_DIR, a PATH that cannot resolve
-  `gc` — it names the degradation and exits 1 instead, because every one of those
-  merges nothing (or silently skips a pass) while the unit reads active/running.
-  Replacing a live merge writer is your decision: re-run with `--force` once you
-  have read what it found.
+If you need to know what the cadence just did, read it rather than re-deriving
+it: `gc order list` shows the order and `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`
+holds the recent passes. A pass that fails raises an `order.failed` event
+carrying the failing pass names.
 
-```bash
-# Same agent-env resolution the reconcile passes below use — resolved here too
-# rather than reused, because SCRIPTS_DIR is first assigned in step 2 and a
-# forward reference is a `set -u` crash that takes the whole pass with it.
-ARM_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/refinery-idle-arm.sh" ]; then ARM_DIR="$cand"; break; fi
-done
-if [ -n "$ARM_DIR" ]; then
-  "$ARM_DIR/refinery-idle-arm.sh" --rig "${GC_RIG:-}"
-else
-  echo "refinery: refinery-idle-arm.sh not found; the merge cadence is UNVERIFIED this session" >&2
-fi
-```
-
-Do not hand-roll the `systemd-run` line. Every property it sets has already been
-dropped by hand on a live rig and every omission fails silently: no
-`--working-directory` and the unit inherits a non-repo cwd, so every merge pass
-fails closed on `git remote get-url origin` while the unit reads active/running;
-no `--setenv` and the unit gets the systemd user manager's PATH, where `gc` exits
-127 and an unreadable ledger reads as an empty queue; no `GC_AGENT` and convoy
-graduation self-skips on every tick; no `Restart=always` and a genuine crash is
-permanent.
-
-**Probe the driver BEFORE running the passes below inline.** If it is alive it
-has been running them every {{event_timeout}}s the whole time, and a second
-inline run is a second `merge-skill.sh` writer against the same anchors — which
-is exactly what the canonical lock exists to prevent. `refinery-idle-arm.sh`
-answers the question and does nothing when the answer is "already armed and
-healthy" (exit 0); an exit 1 naming a degradation still means a driver is LIVE,
-so it is not a licence to run the passes inline either — fix the arm, do not
-double-write. Read `<state-dir>/reconcile.log` for the current verdict rather
-than re-deriving it.
-Run the passes inline only when the driver is NOT live.
-
-Whatever drives the cadence, this step is not satisfied until those passes have run.
-`doctor/check-refinery-idle-driver` is the standing regression gate on all of
-this, and it deliberately refuses the four signals that look like liveness and
-are not: session presence, `gc rig status` agent lines, driver.out/reconcile.log
-mtime, and the existence of the lock file.
-
-**2. Reconcile state (best-effort, every idle wake).** Three convergent
-passes run here on the idle cadence: (a-pre) pre-open PR-create — open the PR for
-each anchor parked in `pre_open_gate` whose codex signoff is green at the branch
-head (the second half of the pre-open codex gate; the PR is born codex-green,
-tk-6d0vb.1.8); (a) close-on-land — the merge skill lands each ready gating anchor
-(validate -> merge -> record) and the detect-only observer closes anchors whose
-PR merged and flags out-of-band-closed PRs; and (b) graduate owned integration
-convoys whose members are now all closed. All are the net for single best-effort
-one-shots that can fail for any reason. The find-work idle loop is the ONLY thing
-that runs on the {{event_timeout}} cadence when the refinery is idle, so the
-reconcile lives here rather than in a standalone step that idle would never
-reach.
+**2. What the cadence runs (best-effort, every tick).** The passes below are
+convergent nets for single best-effort one-shots that can fail for any reason:
+(a-pre) pre-open PR-create — open the PR for each anchor parked in
+`pre_open_gate` whose codex signoff is green at the branch head (the second half
+of the pre-open codex gate; the PR is born codex-green, tk-6d0vb.1.8); (a)
+close-on-land — the merge skill lands each ready gating anchor (validate ->
+merge -> record) and the detect-only observer closes anchors whose PR merged and
+flags out-of-band-closed PRs; and (b) graduate owned integration convoys whose
+members are now all closed. This step remains their specification — what each
+pass does, in what order, and why — because the order is their caller, not their
+charter.
 
 Pass (a) — close-on-land, in two roles. mr-mode keeps the anchor (a convoy
 graduating, or any mr-mode bead) OPEN as the PR's gating bead (merge-push step
@@ -677,189 +614,6 @@ Owned-only and rig-scoped — non-owned
 auto-convoys (per-sling tracking bundles) are never touched. Idempotent: a
 convoy already carrying `branch` (graduation initiated) is skipped. See
 docs/work-bead-state-machine.md.
-```bash
-# Resolve the reconcile scripts from the gc-toolkit pack. Dotted Go-template
-# field tokens (dot-prefixed names such as a ConfigDir accessor) do NOT render
-# in formula step descriptions (formula.Substitute expands only single-word
-# formula vars), and no pack-dir env var (GC_PACK_DIR/GC_CONFIG_DIR) is exported
-# to agents — so resolve from agent-env paths. The owning rig finds the scripts
-# under its own root; importer rigs (signal-loom, gascity, shutupandlisten) find
-# them at <city>/rigs/gc-toolkit (all four import "source = rigs/gc-toolkit").
-# First existing scripts dir wins.
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" \
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \
-            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/reconcile-merged-prs.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-if [ -n "$SCRIPTS_DIR" ]; then
-  # All passes are best-effort: a failed pass is retried next idle wake and
-  # never blocks find-work.
-  # (a-addr) Near-miss HANDOFF ADDRESS recovery (tk-0nn3f). Runs FIRST, because it
-  #      is the only pass that can make a bead visible to the assignee filter this
-  #      step just ran: a merge handoff addressed to a refinery WITHOUT the binding
-  #      prefix ("<rig>/refinery" instead of "<rig>/{{binding_prefix}}refinery") is
-  #      accepted as free text and then polled by nobody. It carries no
-  #      merge_result and no pr_url either, so every bead-keyed pass below is blind
-  #      to it as well, and an idle refinery with an empty queue is exactly what a
-  #      healthy city looks like — the live case sat 1h07m until a human found it.
-  #      Repairing here means the re-check at the bottom of this loop claims the
-  #      bead in the SAME cycle. The canonical identity is $GC_AGENT when we have
-  #      one: it is the literal string find-work filters on above, so repairing to
-  #      it cannot disagree with the queue we actually poll. The pass only rewrites
-  #      an address no session answers to, and only toward an identity that
-  #      resolves — everything else it reports and leaves alone (a gating anchor
-  #      with a non-canonical assignee stays check-set-heal's flag-only business).
-  REFINERY_CANON="${GC_AGENT:-}"
-  [ -n "$REFINERY_CANON" ] || REFINERY_CANON="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
-  if [ -x "$SCRIPTS_DIR/reconcile-refinery-handoffs.sh" ]; then
-    "$SCRIPTS_DIR/reconcile-refinery-handoffs.sh" --refinery "$REFINERY_CANON" \
-      || echo "reconcile-refinery-handoffs: pass failed (non-fatal); retries next idle wake" >&2
-  fi
-  # (a-norm) Check-set normalization at the REFINERY BOUNDARY (tk-i48ca). A
-  #      hand-RECOVERED anchor never ran the merge-push step, so its check_set was
-  #      never normalized: it arrives empty, and merge-skill.sh reads empty as "no
-  #      gates" — the PR would land with NO codex review. This pass stamps the
-  #      declared default on any gating anchor whose check_set is absent/empty and
-  #      dispatches the missing signoff so the armed gate is satisfiable. Runs
-  #      FIRST, before the merge skill enumerates anchors, so a bypassed anchor is
-  #      gated before it can be merged. Only the explicit `none`/`off` sentinel is
-  #      an opt-out (tk-4na1b) — and because the formula now STAMPS that sentinel
-  #      rather than collapsing it to empty, "gateless by choice" is distinguishable
-  #      here from "never normalized". --default carries the RENDERED {{check_set}}
-  #      so the script never hand-substitutes from raw TOML (the tk-4na1b footgun).
-  # The heal args carry rendered templates ({{check_set}}, {{binding_prefix}}); they
-  # are collected HERE, above the marker, so the heal-gates-merge block below stays
-  # template-free and the regression can extract and execute it verbatim
-  # (check-set-heal.test.sh, Run 6).
-  # --refinery carries the CANONICAL refinery identity — the same string the
-  # merge-push handoff assigns. The heal's phase 0 (tk-wsxd0) uses it to flag a
-  # gating anchor assigned to a NON-canonical identity: that was the second half of
-  # PR#37's 6-day invisibility (assignee "shutupandlisten/refinery" vs canonical
-  # "shutupandlisten/gc-toolkit.refinery" hid it from find-work's assignee filter
-  # while the missing merge_result hid it from every bead-keyed pass). Flag only,
-  # never rewrite — the identity is an operator call.
-  CHECK_SET_HEAL_ARGS=(
-    --default "{{check_set}}"
-    --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
-    --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
-    --refinery "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
-  )
-  # >>> heal-gates-merge
-  # The heal pass GATES the merge skill for this pass. check-set-heal.sh exits
-  # HEAL_UNSAFE_RC for exactly one condition, stated as an exposure rather than as a
-  # particular write: an anchor is VISIBLE to merge-skill.sh this pass while its
-  # check_set is still empty, which merge-skill.sh reads as "declares no gates" and
-  # would land un-reviewed in this SAME pass. Two distinct failures produce it:
-  #   1. a required check_set stamp did NOT persist on an already-visible anchor
-  #      (tk-i48ca / review tk-z4u2e finding #1); or
-  #   2. the heal's phase 0 RESTORED merge_result on an anchor — making it visible to
-  #      merge-skill for the first time — and phase 1 then did not gate it, either
-  #      because the gating enumeration came back empty or because the anchor was not
-  #      reached in it (tk-zl932 / review tk-ej3wq finding #2). Phase 0 created that
-  #      exposure, so phase 0 holds the merge for it.
-  # On either signal we HOLD merge-skill for the pass (the next idle wake re-heals;
-  # once the anchor is gated it merges normally). Holding a merge one pass is the
-  # acceptable failure; an un-reviewed merge is not. HEAL_UNSAFE_RC MUST match
-  # check-set-heal.sh's UNSAFE_RC. (pre-open-resolve runs between the two passes and
-  # is intentionally NOT gated — it only OPENS PRs, never merges, so it is not the
-  # merge hazard.)
-  # NOT in this contract, deliberately: a merge_result restore that did not persist,
-  # and a phase-0 dependent (pr_number/merged_target/the recovery markers) that did
-  # not persist. Both leave the anchor INVISIBLE, which merge-skill cannot merge
-  # either — a stall, not an exposure — so the heal exits 0 and retries next wake.
-  HEAL_UNSAFE_RC=3
-  MERGE_SKILL_HELD=0
-  if [ -x "$SCRIPTS_DIR/check-set-heal.sh" ]; then
-    heal_rc=0
-    "$SCRIPTS_DIR/check-set-heal.sh" "${CHECK_SET_HEAL_ARGS[@]}" || heal_rc=$?
-    if [ "$heal_rc" = "$HEAL_UNSAFE_RC" ]; then
-      MERGE_SKILL_HELD=1
-      echo "check-set-heal: UNSAFE (rc=$heal_rc) — an anchor is VISIBLE to merge-skill but NOT gated (a check_set stamp did not persist, or a merge_result restored this pass was not gated in it); HOLDING merge-skill this pass so an ungated anchor cannot merge un-reviewed (retries next idle wake)" >&2
-    elif [ "$heal_rc" != 0 ]; then
-      echo "check-set-heal: pass failed (non-fatal, rc=$heal_rc); retries next idle wake" >&2
-    fi
-  fi
-  # (a-pre) Pre-open PR-create resolver (pre-open codex gate, tk-6d0vb.1.8): for
-  #      each anchor parked in pre_open_gate whose codex signoff is green at the
-  #      branch head, OPEN the non-draft PR and flip it to pull_request so the
-  #      merge skill below can gate it. Runs BEFORE the merge skill so a freshly
-  #      opened PR enters the gating set promptly (it will not merge the same pass
-  #      — CI/approval are still pending). -x guard: importer rigs that have not
-  #      synced this script leave pre-open anchors parked until the pack syncs.
-  if [ -x "$SCRIPTS_DIR/pre-open-resolve.sh" ]; then
-    "$SCRIPTS_DIR/pre-open-resolve.sh" \
-      || echo "pre-open-resolve: pass failed (non-fatal); retries next idle wake" >&2
-  fi
-  # (a0) Merge skill: the single writer of merged-truth. For each ready gating
-  #      anchor it runs validate -> merge -> record — an EXPLICIT `gh pr merge
-  #      --squash`, NOT GitHub auto-merge. Runs BEFORE the observer so a ready PR
-  #      lands and records in this same pass; the observer is then the convergent
-  #      backstop. -x guard: importer rigs that have not yet synced this script
-  #      degrade to the observer-only passes (a ready PR simply waits for the
-  #      synced pack rather than landing via the retired auto-merge path).
-  if [ "$MERGE_SKILL_HELD" = 1 ]; then
-    echo "merge-skill: HELD this pass — check-set-heal reported an unsafe failure (an anchor is visible to merge-skill but ungated: a check_set stamp did not persist, or an anchor it restored to visibility was not gated this pass); retries next idle wake" >&2
-  elif [ -x "$SCRIPTS_DIR/merge-skill.sh" ]; then
-    "$SCRIPTS_DIR/merge-skill.sh" \
-      || echo "merge-skill: pass failed (non-fatal); retries next idle wake" >&2
-  else
-    echo "merge-skill: merge-skill.sh not found in $SCRIPTS_DIR; ready PRs wait for a synced pack (auto-merge retired)" >&2
-  fi
-  # <<< heal-gates-merge
-  # (a1) Close-on-land OBSERVER (detect-only): close gating anchors whose PR
-  #      merged (the convergent record + backstop for a skill that died between
-  #      merging and recording), flag out-of-band-closed / retargeted PRs to
-  #      human, route a rebase for a PR left CONFLICTING by a rewritten base, and
-  #      re-dispatch a codex review for a PR whose gate went STALE when its head
-  #      moved past the reviewed commit with no rework bead filed (WS4 GAP1).
-  #      NO merge authority — it never runs `gh pr merge`. --fix-pool is the pool
-  #      stale-base rebases route to; --review-pool is the codex pool stale-gate
-  #      re-reviews route to (same source as check-set-heal.sh's --review-pool).
-  #      The script cannot render {{binding_prefix}} itself, and without a pool the
-  #      matching arm escalates to human / holds instead of routing.
-  "$SCRIPTS_DIR/reconcile-merged-prs.sh" \
-    --fix-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
-    --review-pool "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex" \
-    || echo "reconcile-merged-prs: pass failed (non-fatal); retries next idle wake" >&2
-  # (a2) Merge-gate VERDICT arm (WS4 of tk-zgse0; design
-  #      specs/tk-zgse0.2/merge-gate-exception-lifecycle.md). Records the THIRD gate
-  #      verdict — `exception` — and the non-OK verdicts generally, so a gate that
-  #      will never go green on its own SAYS SO on the anchor instead of holding in
-  #      silence. Two triggers: a remediation round count past its cap (R11), and a
-  #      gate whose dispatched worker died or whose marker names no verb the
-  #      contract knows (R12). R12 is the one with no other detector today — a
-  #      review bead whose worker crashed sits open forever and every existing pass
-  #      reads it as healthy work in flight, so the PR is held indefinitely and
-  #      nothing anywhere times it out.
-  #
-  #      The merge skill is UNCHANGED by this: it holds while any declared gate is
-  #      != green@<live head>, so the new verbs already hold. This pass NEVER writes
-  #      `green` and never merges — every write it makes holds the merge or keeps it
-  #      held, so no failure mode of it can land work. Runs AFTER the observer so a
-  #      re-review the stale-gate arm dispatched this pass is in flight before its
-  #      gate is judged, and so an anchor the observer just closed as landed is out
-  #      of the gating set before it is examined. -x guard: importer rigs that have
-  #      not yet synced this script keep today's behaviour (a dead gate holds
-  #      silently) until the pack syncs.
-  if [ -x "$SCRIPTS_DIR/reconcile-gate-verdicts.sh" ]; then
-    "$SCRIPTS_DIR/reconcile-gate-verdicts.sh" \
-      || echo "reconcile-gate-verdicts: pass failed (non-fatal); retries next idle wake" >&2
-  fi
-  # (b) Convoy graduation: assign each OWNED integration convoy whose members
-  #     are all closed, and whose branch the ledger records a merge onto, to the
-  #     refinery for an integration->main
-  #     PR. Runs AFTER (a) so the wake that closes the last child graduates the
-  #     convoy in the same pass. Gated on integration_branch_auto_land (default
-  #     "true"; "false" is the kill-switch) and -x (importer rigs that have not
-  #     yet synced this script degrade to pass (a) only).
-  if [ "{{integration_branch_auto_land}}" != "false" ] \
-     && [ -x "$SCRIPTS_DIR/reconcile-graduated-convoys.sh" ]; then
-    "$SCRIPTS_DIR/reconcile-graduated-convoys.sh" --target "{{target_branch}}" \
-      || echo "reconcile-graduated-convoys: pass failed (non-fatal); retries next idle wake" >&2
-  fi
-fi
-```
 
 **3. Escalating a held anchor — once per anchor, through the gate.**
 

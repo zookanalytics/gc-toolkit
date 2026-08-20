@@ -10,12 +10,19 @@
 # city looks like, so nothing escalates — the live case sat 1h07m with completed,
 # pushed work until a human noticed.
 #
-# Why a doctor check rather than trust. Both call sites live in formulas that are
-# DELIBERATE MIRRORS of base artifacts (see docs/gascity-packs.md §7a), so
-# they are periodically reconciled against an upstream that does not carry this
-# pass. A reconciliation that drops either call restores the blind spot silently
-# and in exactly the state where nothing reports it. The script existing without a
+# Why a doctor check rather than trust. The backstop call site lives in a formula
+# that is a DELIBERATE MIRROR of a base artifact (see docs/gascity-packs.md §7a),
+# so it is periodically reconciled against an upstream that does not carry this
+# pass. A reconciliation that drops the call restores the blind spot silently and
+# in exactly the state where nothing reports it. The script existing without a
 # caller is the same failure: "whichever session notices" is not an owner.
+#
+# The PRIMARY call site is no longer a formula (tk-d83wm). The refinery merge
+# cadence is an exec order — orders/refinery-reconcile.toml ->
+# assets/scripts/refinery-reconcile.sh — so the pass now has a caller that runs
+# whether or not a refinery agent is awake, and that caller is what this check
+# asserts. The witness formula remains the backstop for a rig whose order is
+# disabled.
 #
 # Exit codes: 0=OK, 1=Warning, 2=Error
 # stdout: first line=message, rest=details
@@ -73,11 +80,31 @@ check_wired() { # <formula> <human description of the call site>
     fi
 }
 
-check_wired "mol-refinery-patrol.toml" "the find-work idle loop — the primary owner, it repairs and re-checks in one cycle"
+# The primary caller is the merge-cadence order's pass runner, not a formula: it
+# runs in the controller on a cooldown, so the recovery happens on a rig whose
+# refinery has never woken at all. Assert the order that drives it too — a pass
+# runner nothing calls is the same "no owner" failure as a script with no caller.
+runner="assets/scripts/refinery-reconcile.sh"
+order="orders/refinery-reconcile.toml"
+if [ ! -s "$dir/$runner" ]; then
+    errors+=("missing: $runner — the merge cadence has no pass runner, so nothing calls the recovery on a cadence")
+else
+    grep -q 'reconcile-refinery-handoffs.sh' "$dir/$runner" \
+        || errors+=("$runner: no longer calls reconcile-refinery-handoffs.sh (the primary owner — it repairs before every bead-keyed pass in the same tick) — a handoff sent to a near-miss address goes unseen again")
+    grep -q -- '--refinery' "$dir/$runner" \
+        || errors+=("$runner: calls the pass without --refinery; with no canonical identity it skips every bead")
+fi
+if [ ! -s "$dir/$order" ]; then
+    errors+=("missing: $order — the pass runner has no cadence, so the recovery runs only when an agent happens to run it by hand")
+elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "import tomllib,sys; d=tomllib.load(open('$dir/$order','rb')); sys.exit(0 if 'refinery-reconcile.sh' in d['order'].get('exec','') else 1)" 2>/dev/null \
+        || errors+=("$order: does not parse as TOML, or no longer execs refinery-reconcile.sh — the cadence names a different runner than the one checked above")
+fi
+
 check_wired "mol-witness-patrol.toml"  "the check-refinery step — the backstop for a refinery that is down or never woke"
 
 if [ "${#errors[@]}" -eq 0 ]; then
-    echo "OK: near-miss refinery-address recovery shipped and wired (refinery find-work + witness check-refinery)"
+    echo "OK: near-miss refinery-address recovery shipped and wired (refinery-reconcile order + witness check-refinery)"
     exit 0
 fi
 echo "refinery handoff-address recovery mis-wired: ${#errors[@]} problem(s)"

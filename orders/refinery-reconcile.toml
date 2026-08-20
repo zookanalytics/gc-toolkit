@@ -1,0 +1,54 @@
+# refinery-reconcile — the refinery merge cadence, owned by the controller.
+#
+# `merge-skill.sh` fires only from this cadence, so this order IS the merge
+# queue's clock: without it, APPROVED + CLEAN PRs sit unlanded and nothing
+# reports it. It runs the same pass set, in the same order, that
+# mol-refinery-patrol's find-work step describes — the formula remains the spec
+# for what each pass does and why; this order is what runs them when no refinery
+# agent is awake.
+#
+# WHY AN ORDER (tk-d83wm). The cadence used to be a hand-authored daemon per rig
+# — /tmp/gc-refinery-idle-<rig>/idle-loop.sh in a transient `systemd --user`
+# unit, armed by a script the formula told the agent to run every session. Four
+# copies, already drifted apart, in tmpfs, outside the city: `gc` shutting down
+# did not stop them, `gc status` did not show them, city.toml did not declare
+# them, and a host reboot deleted all four at once (2026-08-19: ~47 minutes with
+# no merge cadence on any rig, invisible to `gc doctor` by construction).
+#
+# The passes are mechanical shell — timer and metadata comparison, GitHub API
+# status decoding, no LLM judgment — on a fixed interval. That is the definition
+# of an exec order, and this pack already writes them (orders/boot-health.toml,
+# orders/quota-park-nudge.toml, orders/reconcile-rig-checkouts.toml). Everything
+# the daemon hand-built, the order runner supplies: the loop is `cooldown`, the
+# working directory is the rig root, the environment is built by the controller,
+# and there is no long-lived process for a session rotation to SIGKILL.
+#
+# `scope = "rig"` — one registration per importing rig, each with its own store,
+# its own refinery identity, and its own cooldown clock. This is also what
+# replaces the driver's per-rig flock: the dispatcher's open-tracking gate keys
+# on ScopedName(), which is `refinery-reconcile:rig:<rig>`, so a run still in
+# flight suppresses the next tick for THAT rig only and two `merge-skill.sh`
+# writers can never race the same anchors. Co-tenant rigs do not serialise
+# against each other.
+#
+# NO `no_work_gate` — deliberately. That flag opts an order out of both open-work
+# gates, and the first of them IS the single-flight guarantee above. Setting it
+# here would restore the exact race the canonical lock existed to prevent.
+#
+# `timeout` MUST stay below `order-tracking-sweep`'s `--stale-after` (10m in
+# core), because that sweep closes a tracking bead it judges stale — and an
+# un-gated tracking bead is a second dispatch. Keeping the kill earlier than the
+# sweep is what makes single-flight hold for a wedged pass rather than merely a
+# slow one. 300s also matches the exec default, so the number is not a surprise.
+#
+# `interval` is the former `{{event_timeout}}` of mol-refinery-patrol (60s), kept
+# unchanged so this is a relocation of the cadence and not a retuning of it.
+# Tune it from city.toml `[[orders.overrides]]` — the same lever that moved
+# feedback-miner from 24h to 48h — rather than by editing a shell script in tmpfs.
+[order]
+description = "Refinery merge cadence: heal check-sets, open pre-open PRs, land approved PRs, close landed anchors, graduate convoys"
+trigger = "cooldown"
+interval = "60s"
+timeout = "300s"
+exec = "$PACK_DIR/assets/scripts/refinery-reconcile.sh"
+scope = "rig"
