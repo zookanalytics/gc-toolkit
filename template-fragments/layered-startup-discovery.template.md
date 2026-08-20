@@ -149,6 +149,43 @@ behind.
 # an empty alias is what self-polled for hours with queued beads (upstream
 # #1833). Do not switch these back to $GC_ALIAS.
 
+# >>> deacon-patrol-wisp-vars
+# Materialize the formula's declared vars for the pours below. A --root-only
+# pour materializes NO defaults: each `[vars.x] default` reaches the wisp
+# unrendered, so a var these pours omit is a var the whole cycle runs without.
+# The loop's own `next-iteration` pour forwards them, but it only runs at the
+# END of a cycle — so a startup pour that drops them has already lost the
+# setting for the cycle it just began, and it re-forwards the unrendered value
+# to the next one. For `event_timeout` that is not a slower patrol, it is no
+# pacing at all: `next-iteration` spends the interval as an arithmetic
+# expression over that value, and an unrendered placeholder is not a number.
+# A fresh deacon reaches its loop only through the pours below (tk-a3gb8).
+#
+# The values come from the formula's OWN declarations, never from numbers
+# retyped here: a literal would freeze every deacon at whatever the default was
+# the day this fragment was written, which is the same drop wearing a
+# plausible-looking fix. Enumerated rather than named one by one, so a var
+# declared later cannot quietly stop propagating. binding_prefix is skipped —
+# it is agent identity, passed below from the rendered template, not a formula
+# default.
+#
+# Every failure degrades to today's behaviour (pour without the extra vars), so
+# this can only improve on it: an absent `gc formula show`, an unparseable
+# payload, or a default carrying anything but plain word characters — that last
+# one is skipped rather than word-split into the command line. This mirrors
+# `patrol-wisp-vars` in the witness block, which carries the same treatment for
+# the same reason.
+PATROL_VARS=""
+PATROL_FORMULA=$(gc formula show mol-deacon-patrol --json 2>/dev/null)
+for v in $(printf '%s' "$PATROL_FORMULA" | jq -r '.vars[]?.name // empty' 2>/dev/null); do
+  [ "$v" = "binding_prefix" ] && continue
+  d=$(printf '%s' "$PATROL_FORMULA" | jq -r --arg v "$v" '.vars[]? | select(.name == $v) | .default // empty' 2>/dev/null)
+  [ -n "$d" ] || continue
+  case "$d" in *[!A-Za-z0-9._:/-]*) continue ;; esac
+  PATROL_VARS="$PATROL_VARS --var $v=$d"
+done
+# <<< deacon-patrol-wisp-vars
+
 # Tier 1 — In-progress patrol wisp (resume in place)
 WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress \
   --type=molecule --include-infra --json --limit=1 | jq -r '.[0].id // empty')
@@ -165,7 +202,7 @@ if [ -z "$WISP" ]; then
     | jq -r '.[0].id // empty')
   if [ -n "$WORK" ]; then
     echo "Found routed work bead: $WORK — pouring wisp; formula handles the work"
-    WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix={{ .BindingPrefix }} --json | jq -r '.new_epic_id')
+    WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id')
     gc bd update "$WISP" --assignee="$GC_AGENT"
   fi
 fi
@@ -193,7 +230,7 @@ fi
 
 # Tier 4 — Pour fresh wisp (no in-progress, no routed work, no open wisp)
 if [ -z "$WISP" ]; then
-  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix={{ .BindingPrefix }} --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id')
   gc bd update "$WISP" --assignee="$GC_AGENT"
   echo "Poured fresh wisp: $WISP"
 fi

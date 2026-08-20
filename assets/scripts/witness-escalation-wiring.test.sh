@@ -672,6 +672,113 @@ case "$FB_BLOCK" in
     bad "FRAGMENT: the crash-recovery block references PATROL_VARS without building it — standalone, that expands to nothing" ;;
 esac
 
+# --- FRAGMENT-DEACON: the deacon's startup pours must carry the vars too ------
+# The same defect as FRAGMENT above, in the same file, one role over. The deacon
+# block's two pours — the routed-work tier and the fresh-pour tier — forwarded
+# only binding_prefix, so a deacon started by `gc session reset gc-toolkit.deacon`
+# (the activation path for a changed cadence) poured a wisp whose event_timeout
+# arrived unrendered. next-iteration then spends the interval as arithmetic over
+# that value AND re-forwards it, so the drop is self-perpetuating: the loop
+# either fails its wait or runs with no pacing at all, on the role that is 17.9%
+# of city model calls. Raising the default alone would not have reached a single
+# fresh deacon (tk-a3gb8).
+#
+# These checks live beside the witness ones because it is one mechanism in one
+# file; they are the assertions above re-aimed at the deacon.
+DTOML="$ROOT/formulas/mol-deacon-patrol.toml"
+[ -f "$DTOML" ] && ok "FRAGMENT-DEACON: located mol-deacon-patrol.toml" \
+  || bad "FRAGMENT-DEACON: $DTOML is missing — the deacon pours cannot be checked"
+dtoml_default() { awk -v v="$1" '$0 == "[vars." v "]" {f=1; next} f && /^default = /{sub(/^default = /, ""); gsub(/"/, ""); print; exit} f && /^\[/{exit}' "$DTOML"; }
+DDECLARED_VARS=$(awk -F'.' '/^\[vars\.[a-z_]+\]$/ {n=$2; sub(/\]$/, "", n); print n}' "$DTOML")
+[ -n "$DDECLARED_VARS" ] \
+  && ok "FRAGMENT-DEACON: read the deacon formula's [vars.*] declarations" \
+  || bad "FRAGMENT-DEACON: found no [vars.*] in $DTOML — the per-var checks below would be vacuous"
+case "$DDECLARED_VARS" in
+  *event_timeout*) ok "FRAGMENT-DEACON: event_timeout is a declared deacon var" ;;
+  *)               bad "FRAGMENT-DEACON: event_timeout is no longer declared in $DTOML" ;;
+esac
+
+# Every deacon pour in the fragment forwards the materialized vars — count-based,
+# so a THIRD pour added later cannot quietly ship bare.
+DPOUR_LINES=$(grep -c 'mol wisp mol-deacon-patrol --root-only' "$FRAG" 2>/dev/null)
+DVAR_LINES=$(grep 'mol wisp mol-deacon-patrol --root-only' "$FRAG" 2>/dev/null | grep -c 'PATROL_VARS')
+[ "${DPOUR_LINES:-0}" -ge 2 ] \
+  && ok "FRAGMENT-DEACON: found the deacon startup pours ($DPOUR_LINES of them)" \
+  || bad "FRAGMENT-DEACON: expected at least 2 deacon pours in the template, found ${DPOUR_LINES:-0}"
+eq "${DVAR_LINES:-0}" "${DPOUR_LINES:-0}" \
+   "FRAGMENT-DEACON: every deacon pour forwards the materialized vars"
+
+DVARS_BLOCK=$(frag_extract deacon-patrol-wisp-vars)
+[ -n "$DVARS_BLOCK" ] && ok "deacon-patrol-wisp-vars: extracted between markers" \
+  || bad "deacon-patrol-wisp-vars: extraction EMPTY — markers missing from $FRAG"
+printf '%s\n' "$DVARS_BLOCK" > "$TMP/deacon-patrol-wisp-vars.sh"
+bash -n "$TMP/deacon-patrol-wisp-vars.sh" \
+  && ok "deacon-patrol-wisp-vars: extracted block is valid bash" \
+  || bad "deacon-patrol-wisp-vars: extracted block failed bash -n"
+# It must read the DEACON formula. Copying the witness block verbatim would
+# materialize the wrong formula's defaults and still pass a naive check.
+has "gc formula show mol-deacon-patrol" "$DVARS_BLOCK" \
+    "FRAGMENT-DEACON: the block reads mol-deacon-patrol's own declarations"
+has '.vars[]?.name' "$DVARS_BLOCK" \
+    "FRAGMENT-DEACON: enumerates the declared vars instead of listing names"
+
+# Behavioural, against the REAL declared vars and their REAL defaults.
+DFORMULA_JSON=$(for v in $DDECLARED_VARS; do printf '%s\t%s\n' "$v" "$(dtoml_default "$v")"; done \
+  | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t")) | {vars: map({name: .[0], default: (.[1] // "")})}')
+{ printf '%s\n' "$DVARS_BLOCK"; printf 'printf "%%s" "$PATROL_VARS"\n'; } > "$TMP/deacon-vars-probe.sh"
+DGOT_VARS=$(STUB_FORMULA_JSON="$DFORMULA_JSON" bash "$TMP/deacon-vars-probe.sh" 2>/dev/null)
+for v in $DDECLARED_VARS; do
+  d=$(dtoml_default "$v")
+  if [ "$v" = "binding_prefix" ]; then
+    case "$DGOT_VARS" in
+      *"--var binding_prefix="*) bad "FRAGMENT-DEACON: materializes binding_prefix, overriding the rendered identity" ;;
+      *)                         ok  "FRAGMENT-DEACON: leaves binding_prefix to the rendered template" ;;
+    esac
+    continue
+  fi
+  case "$DGOT_VARS" in
+    *"--var $v=$d"*) ok "FRAGMENT-DEACON: the startup pour materializes $v=$d from the formula's own declaration" ;;
+    *) bad "FRAGMENT-DEACON: the startup pour drops $v — a --root-only pour materializes no defaults, so a fresh deacon runs without it (got '$DGOT_VARS')" ;;
+  esac
+done
+# The value must come from the formula, not from a number retyped in the
+# template: a literal freezes every deacon at whatever the default was that day.
+# Comments are stripped first: the cadence is discussed in prose all over this
+# fragment, so a bare number match would fire on the explanation rather than on
+# an actual hardcode. What is banned is a --var whose VALUE is a literal.
+DVARS_CODE=$(printf '%s\n' "$DVARS_BLOCK" | grep -v '^[[:space:]]*#' || true)
+case "$DVARS_CODE" in
+  *'--var '*=[0-9]*) bad "FRAGMENT-DEACON: a default is hardcoded in the template — it will drift from [vars.*]" ;;
+  *)                 ok  "FRAGMENT-DEACON: no default is hardcoded; the values come from gc formula show" ;;
+esac
+# A lookup that returns nothing degrades to today's pour rather than emitting a
+# broken command line.
+DGOT_NONE=$(STUB_FORMULA_JSON="" bash "$TMP/deacon-vars-probe.sh" 2>/dev/null)
+eq "$DGOT_NONE" "" "FRAGMENT-DEACON: an unavailable formula lookup pours without the extra vars, as it did before"
+# ...and a default carrying shell metacharacters is skipped, not word-split into
+# the pour.
+DGOT_HOSTILE=$(STUB_FORMULA_JSON='{"vars":[{"name":"event_timeout","default":"600"},{"name":"hostile","default":"a b; touch pwned"}]}' \
+  bash "$TMP/deacon-vars-probe.sh" 2>/dev/null)
+case "$DGOT_HOSTILE" in
+  *hostile*) bad "FRAGMENT-DEACON: a default with shell metacharacters reached the pour ('$DGOT_HOSTILE')" ;;
+  *)         ok  "FRAGMENT-DEACON: a default that is not a plain word is skipped, not word-split into the command" ;;
+esac
+has "--var event_timeout=600" "$DGOT_HOSTILE" \
+    "FRAGMENT-DEACON: and the well-formed vars alongside it still propagate"
+
+# The loop's own pour must keep forwarding them too — the deacon equivalent of
+# PROPAGATE. Placeholders, never literals, for the same reason as above.
+DNEXT_POUR=$(grep 'mol wisp mol-deacon-patrol --root-only' "$DTOML" || true)
+[ -n "$DNEXT_POUR" ] \
+  && ok "FRAGMENT-DEACON: located the deacon next-iteration pour" \
+  || bad "FRAGMENT-DEACON: no next-iteration pour found in $DTOML"
+for v in $DDECLARED_VARS; do
+  case "$DNEXT_POUR" in
+    *"--var $v='{{$v}}'"*) ok "FRAGMENT-DEACON: the next-iteration pour forwards $v" ;;
+    *) bad "FRAGMENT-DEACON: the next-iteration pour drops $v — a configured $v dies after this cycle (want --var $v='{{$v}}')" ;;
+  esac
+done
+
 # --- SELFREOPEN: the gate's own stamp must not reopen the fingerprint ---------
 # THE P1 REGRESSION. This runs the REAL gate, not the recording stub, twice over
 # an unchanged non-PR anchor. The gate stamps `escalated.witness` on that anchor

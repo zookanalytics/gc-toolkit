@@ -145,12 +145,13 @@ so at the wait site.
 | # | role | disposition | change |
 |---|---|---|---|
 | 1-4 | the four witnesses | keep `mode="always"`; slow the patrol | `mol-witness-patrol` `event_timeout` **180 → 600** |
-| 5 | `gc-toolkit.deacon` | keep `mode="always"`; slow the patrol **and repair the backoff** | `mol-deacon-patrol` `event_timeout` **60 → 600**, plus the two fixes below |
+| 5 | `gc-toolkit.deacon` | keep `mode="always"`; slow the patrol **and repair the backoff** | `mol-deacon-patrol` `event_timeout` **60 → 600**, plus the three fixes below |
 
-### The deacon's backoff was partly dead letter
+### The deacon's backoff was dead letter
 
-`mol-deacon-patrol`'s `next-iteration` step had two defects that made its
-`event_timeout` weaker than it reads:
+Three defects made `mol-deacon-patrol`'s `event_timeout` weaker than it reads —
+the first two in its `next-iteration` step, the third on the startup path that
+is the only way a *new* value ever reaches a deacon:
 
 1. **The pour dropped the var.** It forwarded only `binding_prefix`. A
    `--root-only` pour materialises no defaults, so from cycle 2 onward
@@ -162,9 +163,25 @@ so at the wait site.
    records the harness refusing exactly this form (*"Blocked: standalone
    sleep 60. To wait for a condition, use Monitor with an until-loop"*), and
    notes a blocked wait removes pacing rather than slowing it.
+3. **The startup pour dropped it too**, and that is the one that made the
+   others moot. Both deacon pours in
+   `template-fragments/layered-startup-discovery.template.md` — the routed-work
+   tier and the fresh-pour tier — forwarded only `binding_prefix`, so the
+   `gc session reset` in *Activation* below, the very step that is supposed to
+   deliver a changed cadence, poured a wisp with `event_timeout` unrendered.
+   `next-iteration` then re-forwarded that unrendered value, so the drop
+   sustained itself: raising the default alone would have reached no deacon at
+   all, and the first fresh cycle would have run its wait as arithmetic over a
+   placeholder. The witness block already carried the
+   materialise-and-forward treatment (`patrol-wisp-vars`) for exactly this
+   reason; the deacon block did not. Caught in pre-open review (tk-a3gb8).
 
-Both are now fixed by mirroring the witness: the pour forwards
-`--var event_timeout`, and the wait is the bounded clock-poll.
+All three are now fixed by mirroring the witness: both startup pours and the
+`next-iteration` pour forward `--var event_timeout`, materialised from the
+formula's own declaration rather than a number retyped in the template, and the
+wait is the bounded clock-poll. The `FRAGMENT-DEACON` cases in
+`assets/scripts/witness-escalation-wiring.test.sh` hold all of it, alongside the
+witness checks they mirror.
 
 ### Coupled threshold: `boot-health.sh`
 
