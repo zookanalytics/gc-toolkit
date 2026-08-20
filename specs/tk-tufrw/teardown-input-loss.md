@@ -161,7 +161,14 @@ incident:
 ## Companion, not a substitute
 
 Typing a bare bead id into `prefix + a` already reopens a conversation on
-that subject (`assets/scripts/tmux-visit-prompt.sh:130-137`); it is
-merely undiscoverable. That returns the operator to the *subject*. It
-does not return their *words*, and `tk-tufrw` is explicit that it does
-not close the bead.
+that subject; it is merely undiscoverable. That returns the operator to
+the *subject*. It does not return their *words*, and `tk-tufrw` is
+explicit that it does not close the bead.
+
+*Citation corrected:* the bead points at
+`assets/scripts/tmux-visit-prompt.sh:130-137`, which today is the
+dependency precheck, not this affordance. The pass-through decision is
+documented at `tmux-visit-prompt.sh:207-212` — the topic is deliberately
+**not** forced with `--topic` — and the resolution itself lives in
+`assets/scripts/gc-visit-open.sh:145-158`, which disambiguates by rig
+prefix rather than by shape.
