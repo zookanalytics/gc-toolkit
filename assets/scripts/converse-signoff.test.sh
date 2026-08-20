@@ -545,6 +545,41 @@ lacks "no 'is one bounded sitting' definition anywhere in the doc" \
     'is one bounded sitting' "$ENGAGE" \
     "a visit is a request FOR one bounded sitting; the bare equation is the bug written as the model"
 
+echo "── the post-sitting drain is documented, not just the reap ──"
+# tk-tufrw: an operator lost an unsubmitted multi-paragraph reply. The
+# reap section above was written about a HELD sitting and reads as the
+# complete account of how the pane goes; it is not. Once a sitting ENDS
+# the session has no wake reason and is drained as `no-wake-reason`
+# within about a minute, and that drain sends C-c into the pane before
+# killing it — so the operator's composer is cleared while they type.
+# Every claim below is load-bearing for a reader deciding whether a
+# visible pane is safe to type into, and each one was absent (not wrong)
+# before the incident. Absence is exactly what made the window invisible.
+# The HEADING, not the phrase: the forward pointer added to the reap
+# section quotes the section name, so a bare phrase match passes even
+# with the section itself deleted (caught by mutating this file).
+have "doc carries the post-sitting ending" '## How a pane dies when no sitting is live' "$ENGAGE"
+have "doc names the drain reason" 'no-wake-reason' "$ENGAGE"
+have "doc names the interrupt that clears the composer" 'SendKeysRaw' "$ENGAGE"
+have "doc records the misleading stop wording" 'drain acknowledged by agent' "$ENGAGE"
+have "doc points at the upstream filing" 'gc-ze774' "$ENGAGE"
+# A reader who finds the reap section first must not stop there: without
+# a forward pointer the held-sitting account silently doubles as "all the
+# ways the pane goes", which is the reading that left this window
+# unguarded in the first place.
+HELD_SEC="$(awk '/^## How a held sitting ends/ {f=1; next} f && /^## / {exit} f {print}' "$ENGAGE")"
+if printf '%s\n' "$HELD_SEC" | grep -qF 'How a pane dies when no sitting is live'; then
+    ok "the held-sitting section points at the other ending"
+else
+    bad "the held-sitting section points at the other ending" \
+        "without the pointer, the held-sitting account reads as the complete one"
+fi
+# Both role-facing copies carry it too. The config is where someone goes
+# to tune idle_timeout, and the prompt is what the session reads at wake;
+# a correction that lands only in the central doc reaches neither.
+have "config names the second, shorter clock" 'no-wake-reason' "$ATOML"
+have "prompt names the second, shorter clock" 'no-wake-reason' "$PROMPT"
+
 echo "── the writer the contract depends on still exists ──"
 have "gc-helm exposes the takeaway verb" 'cmd_takeaway()' "$HELM"
 have "takeaway usage documents the converse caller" 'host|proactive|converse' "$HELM"

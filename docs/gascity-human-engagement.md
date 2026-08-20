@@ -379,6 +379,79 @@ deliberately narrow, so the mechanism above still holds:
 Design record: `specs/tk-bzm86/design-doc.md`; the cross-rig filing
 `gc-rjtk1` is now resolved upstream.
 
+*This section is about a sitting that is still **held**.* A sitting that
+has **ended** leaves a live pane with no wake reason, and that pane dies
+on a different, much shorter clock — see
+*How a pane dies when no sitting is live*, below. Reading this section as
+the complete account of how the operator's pane goes is what left the
+post-sitting window unguarded.
+
+## How a pane dies when no sitting is live (source-verified 2026-08-20)
+
+The section above answers "what ends a **held** sitting". It is not the
+only way the operator's pane goes, and the other way is the one that has
+cost them words. Verified against the gascity source and this city's
+event/reconciler record after an operator lost an unsubmitted
+multi-paragraph reply (`tk-tufrw`); full evidence in
+`specs/tk-tufrw/teardown-input-loss.md`.
+
+Once a sitting **ends** — the visit closed, the takeaway stamped, the
+sign-off posted — the session still has a live pane, and the thread the
+operator is reading is still on screen. What it no longer has is a wake
+reason. `ComputeAwakeSet` finds none, and the reconciler's
+`if !shouldWake && target.alive` arm (`cmd/gc/session_reconciler.go`)
+begins a drain whose reason resolves to the `switch` default,
+**`no-wake-reason`**. Measured on 2026-08-20: the tick at 22:03:13Z saw
+`state: awake`, the same tick at 22:03:17Z recorded `state: draining`,
+and the stop landed at 22:04:15Z — a **~58-second** window, about an
+hour after the sitting itself had ended.
+
+Three things about that path are worth knowing before trusting a pane:
+
+- **The first act of a drain is a keystroke, not a kill.**
+  `beginSessionDrainInfo` defers the interrupt one full tick, and the
+  interrupt is `runtime.Provider.Interrupt` → `SendKeysRaw(name, "C-c")`
+  (`internal/runtime/tmux/adapter.go`). It is delivered into whatever
+  holds focus in the pane. An operator composing a reply gets their
+  composer cleared before the pane is taken.
+- **Attachment protects less than it looks like it does.** Attachment is
+  a wake cause (`WakeCauseAttached`,
+  `internal/session/lifecycle_projection.go`), so an *attached* pane does
+  not enter this drain — but this city runs **one tmux client** switched
+  between per-agent sessions, so at most one session reports
+  `session_attached=1` at a time and every other live pane reads as
+  unattached. The idle ladder's attachment rung is on the `idle` path
+  only; `no-wake-reason` never reaches it. The drain-advance scan
+  (`advanceSessionDrainsWithSessionsTraced`) cancels for `WakePending`
+  and `assigned-work` and nothing else — attaching and typing inside the
+  window is not a cancel condition.
+- **The stop event's wording is misleading here.** It reads
+  `"drain acknowledged by agent"` even when the agent never ran
+  `gc runtime drain-ack`: the reconciler acks on its behalf
+  (`GC_DRAIN_ACK_SOURCE=reconciler`, `cmd/gc/session_wake.go`) and
+  `finalizeDrainAckStoppedSession` emits the same string either way. Do
+  not read that event as an agent decision.
+
+*Seam:* the same one as the reap — **nothing pack-owned runs at kill
+time**, and nothing can intercept an inbound `send-keys` either, so the
+pack cannot capture pending input here. Ruled out with evidence in the
+determination: tmux `session-closed`/`pane-exited` hooks (fire after the
+pane is gone), a Claude Code `SessionEnd` hook (never receives the
+composer buffer), a cooldown order (multi-minute cadence against a
+~58-second window), and `pipe-pane` logging (a redrawing TUI makes the
+volume unusable). The capture has to live in the drain path upstream:
+filed as `gc-ze774`, with `gc-8g41r`'s `InputAreaState` — buffered-input
+detection over `tmux capture-pane` — as the primitive it should consume.
+
+**What follows for the pack.** Treat "the sitting ended" as the start of
+a short countdown on that pane, not as a quiet state. The existing
+lever still applies and is still the only one we own: the record has to
+be written before the pane matters — the takeaway stamped at hold time,
+the outcome appended as soon as a sitting settles anything, the sign-off
+posted at close. Nothing has changed about that. What is new is that the
+operator's *own* unsent words have no such protection, and until
+`gc-ze774` lands they are not durable anywhere.
+
 ## Watch items — moving now, re-verify before building on them
 
 - **`gc.session_affinity`** — **this watch fired; re-derived 2026-08-14.**
