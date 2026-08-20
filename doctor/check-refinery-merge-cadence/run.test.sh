@@ -43,6 +43,10 @@
 #        makes the arm structurally unable to fire  [green with a live driver]
 #   (18b) that same fallback does not turn a mere reader into a driver — the
 #        normalisation is precise, not just permissive
+#   (18c) the same, on a `ps` whose COMMAND is preceded by THREE columns and not
+#        four (busybox: PID USER TIME). A fixed-field strip eats the first word
+#        of COMMAND here, turning a pager into a bare script path — which arm 3
+#        reads as a driver. The strip anchors on the TIME column for this reason
 #   (19) NO `ps` form works -> WARN (exit 1), never an OK whose summary claims
 #        "no out-of-band driver" on evidence nobody gathered  [FAIL CLOSED]
 #   (INV) detect-only: no fix.sh ships next to run.sh (a sibling fix.sh would
@@ -108,11 +112,18 @@ emit() {
     return 0
 }
 if [ "$want" = pidprefixed ]; then
-    echo "  PID TTY      STAT   TIME COMMAND"
+    # How many columns precede COMMAND is NOT fixed across implementations:
+    # procps prints PID TTY STAT TIME, busybox prints PID USER TIME. Both are
+    # simulated because a fixed-field strip silently mangles the other one.
+    case "${GC_STUB_PS_COLUMNS-procps}" in
+        busybox) echo "  PID USER     TIME COMMAND"; fmt='%5d root     0:00 %s\n' ;;
+        *)       echo "  PID TTY      STAT   TIME COMMAND"; fmt='%5d ?        Ss     0:00 %s\n' ;;
+    esac
     n=100
     emit "$@" | while IFS= read -r l; do
         [ -n "$l" ] || continue
-        printf '%5d ?        Ss     0:00 %s\n' "$n" "$l"
+        # shellcheck disable=SC2059 # fmt is a chosen literal, not user input
+        printf "$fmt" "$n" "$l"
         n=$((n + 1))
     done
 else
@@ -372,6 +383,19 @@ printf 'less /tmp/gc-refinery-idle-gascity/idle-loop.sh\ntail -f /tmp/gc-refiner
 GC_STUB_PS_FORMS=pidprefixed run_check; rc=$?
 eq "$rc" 0 "(18b) reader seen through \`ps ax\` is still not a driver -> exit 0"
 hasnt "out-of-band refinery driver running" "$TMP/out" "(18b) not flagged"
+
+# (18c) a three-column `ps` (busybox: PID USER TIME) normalises just as exactly
+reset
+printf 'less /tmp/gc-refinery-idle-gascity/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+GC_STUB_PS_FORMS=pidprefixed GC_STUB_PS_COLUMNS=busybox run_check; rc=$?
+eq "$rc" 0 "(18c) reader on a three-column ps is still not a driver -> exit 0"
+hasnt "out-of-band refinery driver running" "$TMP/out" "(18c) not flagged"
+
+reset
+printf 'bash /tmp/gc-refinery-idle-signal-loom/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+GC_STUB_PS_FORMS=pidprefixed GC_STUB_PS_COLUMNS=busybox run_check; rc=$?
+eq "$rc" 2 "(18c) real driver on a three-column ps is still found -> exit 2"
+has "out-of-band refinery driver running for rig signal-loom" "$TMP/out" "(18c) names the rig"
 
 # ---------------------------------------------------------------------------
 # (19) no `ps` form works at all -> warn, never a silent OK

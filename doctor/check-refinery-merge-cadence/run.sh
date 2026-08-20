@@ -302,12 +302,22 @@ done
 if [ "$ps_readable" -eq 0 ]; then
     ps_raw=$(ps ax 2>/dev/null) || ps_raw=""
     if [ -n "$ps_raw" ]; then
-        # Drop the header row, then the PID/TTY/STAT/TIME columns, leaving the
-        # COMMAND column alone. Addressed by pattern rather than by line number
-        # so the two expressions stay portable across GNU and BSD sed.
+        # Drop the header row, then everything up to and including the TIME
+        # column, leaving COMMAND alone. Addressed by pattern rather than by
+        # line number so both expressions stay portable across GNU and BSD sed.
+        #
+        # The strip anchors on TIME (`N:NN`) instead of counting a fixed number
+        # of leading fields, because the count is not fixed: procps prints PID
+        # TTY STAT TIME, busybox prints PID USER TIME. Blindly dropping four
+        # fields on a three-column `ps` eats the first word of COMMAND, which
+        # turns `less /tmp/gc-refinery-idle-<rig>/idle-loop.sh` into a bare
+        # script path — and arm 3 reads a bare script path as a driver. That is
+        # the reader-is-not-a-driver false positive this arm is written to
+        # avoid, reintroduced through the fallback. Bounding the intermediate
+        # fields to two keeps the match from running into COMMAND.
         ps_snapshot=$(printf '%s\n' "$ps_raw" | sed -E \
-            -e '/^[[:space:]]*PID[[:space:]]+TTY/d' \
-            -e 's/^[[:space:]]*[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+//')
+            -e '/^[[:space:]]*PID[[:space:]]+[A-Z]/d' \
+            -e 's/^[[:space:]]*[0-9]+([[:space:]]+[^[:space:]]+){0,2}[[:space:]]+[0-9]+:[0-9][0-9][[:space:]]+//')
         [ -n "$ps_snapshot" ] && ps_readable=1
     fi
 fi
