@@ -72,7 +72,12 @@ SCRIPT="$HERE/tmux-visit-prompt.sh"
 BINDINGS="$HERE/tmux-bindings.sh"
 TMP="$(mktemp -d)"
 SOCKET="gcvp-test-$$"
-cleanup() { tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true; rm -rf "$TMP"; }
+PROBE_SOCKET="gcvp-probe-$$"
+cleanup() {
+    tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+    tmux -L "$PROBE_SOCKET" kill-server >/dev/null 2>&1 || true
+    rm -rf "$TMP"
+}
 trap cleanup EXIT
 
 PASS=0; FAIL=0; SKIP=0
@@ -272,6 +277,45 @@ fi
 # only be delivered by typing. script(1) supplies the pty; the sleeps let tmux
 # attach and open the prompt before keys arrive. \002 is C-b, the default
 # prefix on a fresh server.
+#
+# The pty needs a TERM the local terminfo database can actually drive: tmux
+# refuses to attach under a terminal it cannot drive, and an agent shell
+# frequently has TERM=dumb (or no TERM at all), where every case below fails
+# with `open terminal failed: terminal does not support clear` rather than
+# telling you anything about the handler. So the TERM for the private attach
+# is resolved here, not inherited — and resolved by ATTACHING, not by name: a
+# candidate is accepted only if a throwaway server takes a real client under
+# it. A machine with no usable entry at all skips the live half instead of
+# reporting a wall of red.
+#
+# The oracle is the `client-attached` hook firing — POSITIVE evidence from
+# tmux that a client really connected — not the absence of an error string.
+# tmux has more than one way to say no (`open terminal failed: ...` for a
+# TERM it cannot drive, `missing or unsuitable terminal: ...` for one that is
+# not in terminfo at all), so matching any single message silently accepts
+# the terminals it does not happen to mention.
+term_attaches() {   # term_attaches <term>
+    local t=$1 flag="$TMP/term-attached" rc=1
+    rm -f "$flag"
+    tmux -L "$PROBE_SOCKET" kill-server >/dev/null 2>&1 || true
+    tmux -L "$PROBE_SOCKET" new-session -d -x 80 -y 24 'sleep 30' >/dev/null 2>&1 || return 1
+    tmux -L "$PROBE_SOCKET" set-hook -g client-attached "run-shell \"touch '$flag'\"" >/dev/null 2>&1 || true
+    { sleep 0.7; printf '\002d'; sleep 0.3; } \
+        | TERM="$t" script -qec "tmux -L $PROBE_SOCKET attach" /dev/null >/dev/null 2>&1
+    [ -f "$flag" ] && rc=0
+    tmux -L "$PROBE_SOCKET" kill-server >/dev/null 2>&1 || true
+    rm -f "$flag"
+    return $rc
+}
+
+LIVE_TERM=""
+if command -v tmux >/dev/null 2>&1 && command -v script >/dev/null 2>&1; then
+    for cand in "${TERM:-}" xterm-256color xterm screen ansi vt100; do
+        [ -n "$cand" ] || continue
+        if term_attaches "$cand"; then LIVE_TERM="$cand"; break; fi
+    done
+fi
+
 press() {           # press <message>...
     local feed=("$@") m
     { sleep 1.5
@@ -279,10 +323,10 @@ press() {           # press <message>...
           printf '\002'; sleep 0.3; printf 'a'; sleep 0.4; printf '%s\r' "$m"; sleep 0.6
       done
       sleep 2; printf '\002d'; sleep 0.5
-    } | script -qec "tmux -L $SOCKET attach" /dev/null >/dev/null 2>&1
+    } | TERM="$LIVE_TERM" script -qec "tmux -L $SOCKET attach" /dev/null >/dev/null 2>&1
 }
 
-if command -v tmux >/dev/null 2>&1 && command -v script >/dev/null 2>&1; then
+if command -v tmux >/dev/null 2>&1 && command -v script >/dev/null 2>&1 && [ -n "$LIVE_TERM" ]; then
     LIVE_CALLS="$TMP/live-calls.log"
     LIVE_CFG="$TMP/cfg-live"
     mkcfg "$LIVE_CFG" "$STUB_OK"
@@ -326,7 +370,11 @@ sleep 5'
         bad "NOFREEZE: expected 2 intakes, got ${#starts[@]}"
     fi
 else
-    skip "ROUNDTRIP/THREE/NOFREEZE: need both tmux and script(1) for a pty client"
+    if command -v tmux >/dev/null 2>&1 && command -v script >/dev/null 2>&1; then
+        skip "ROUNDTRIP/THREE/NOFREEZE: no TERM in the local terminfo database can attach a tmux client"
+    else
+        skip "ROUNDTRIP/THREE/NOFREEZE: need both tmux and script(1) for a pty client"
+    fi
 fi
 
 ###############################################################################
