@@ -257,11 +257,11 @@ description = "Import binding prefix for gastown agent identities, including tra
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep (the harness blocks that, which drops all pacing). This value sets patrol frequency, which is the dominant cost term once a cycle is cheap — raise it rather than trimming steps if patrol cost needs to come down."
-default = "180"
+description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep (the harness blocks that, which drops all pacing). This value sets patrol frequency, which is the dominant cost term once a cycle is cheap — raise it rather than trimming steps if patrol cost needs to come down. Raised 180 -> 600 (tk-2qa85): the four witnesses were 56.9% of all city model calls over 24h (19,905 of 34,983), and sampled cycles ran ~285-521 s of which only the 180 s wait was compressible, so frequency was the only term that could move without dropping a check. 600 is a CEILING, not a preference: the wait is one bounded tool call and the harness caps a single call at 600 s (a longer one is SIGTERMed mid-wait and silently returns less pacing than configured), so a larger value here would not be honoured without also making the wait resumable across calls. This value reaches the loop ONLY through the startup pour, which reads it from this default via `gc formula show` and forwards it as an explicit --var; city.toml [rigs].formula_vars cannot override it, because mergeRigFormulaVars preserves an explicit --var."
+default = "600"
 
 [vars.escalation_cooldown]
-description = "Seconds before an UNCHANGED situation may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h: at the 180s patrol interval that is a 480x reduction on a stuck item, while still resurfacing it daily so it cannot fall silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier."
+description = "Seconds before an UNCHANGED situation may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h: at the 600s patrol interval that is a 144x reduction on a stuck item, while still resurfacing it daily so it cannot fall silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier."
 default = "86400"
 
 [[steps]]
@@ -1805,6 +1805,14 @@ A blocked wait is not a no-op that costs one tool error — it silently
 removes all pacing, and the patrol re-cycles as fast as it can spawn.
 The bounded clock-poll above is accepted by the harness and keeps the
 same fixed-duration semantics.
+
+Keep this wait inside ONE tool call and keep {{event_timeout}} at or below
+600 seconds. The harness caps a single call at 600 s and SIGTERMs it at the
+cap mid-wait, so a larger value does not wait longer — it silently returns
+whatever pacing fit under the cap, and the configured number stops meaning
+anything. Raising the interval past 600 s means first making the wait
+resumable across calls (persist the deadline, re-enter the loop until it
+passes), not just raising the number.
 
 Previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. Fixed duration gives predictable idle cost.
 
