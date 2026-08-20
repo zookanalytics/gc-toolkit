@@ -58,7 +58,7 @@
 # already assumes timeout(1), so this is not a new dependency).
 #
 # Invoked from the picker menu with `run-shell -b` so a slow `gc session pin`
-# can never freeze the tmux server (same pattern as tmux-spawn-thread.sh).
+# can never freeze the tmux server (same pattern as tmux-visit-prompt.sh).
 set -eu
 
 # The keeper's QualifiedName (the alias shown in `gc session list`).

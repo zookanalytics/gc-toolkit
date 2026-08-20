@@ -373,7 +373,9 @@ reinvoke_suffix=""
 # the entry stays actionable. The ',' hotkey is a fixed punctuation slot
 # (like '.' for show-all) so it never collides with the a-z0-9 per-row
 # hotkeys. run-shell -b backgrounds the toggle so a slow `gc session pin`
-# cannot freeze the server (cf. tmux-spawn-thread.sh).
+# cannot freeze the server (cf. tmux-visit-prompt.sh, which backgrounds the
+# same class of call from inside the script because its foreground half has
+# ordering work to do first).
 KEEPER_TOGGLE="$(dirname "$SCRIPT")/tmux-keeper-toggle.sh"
 # shellcheck disable=SC2086 # ${EXPLICIT_CITY_PATH:+…} expands to 0 or 2 fields
 case "$("$KEEPER_TOGGLE" ${EXPLICIT_CITY_PATH:+--city-path "$EXPLICIT_CITY_PATH"} state 2>/dev/null || echo unknown)" in

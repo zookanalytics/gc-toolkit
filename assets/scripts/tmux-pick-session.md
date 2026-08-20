@@ -45,8 +45,19 @@ judgment those mechanics force on agents.
   an un-renamed session is a needle in the role column.
 
 - The companion `prefix+a` binding (installed by
-  `tmux-bindings.sh`, runs `tmux-spawn-thread.sh`) spawns a thread
-  of the current pane's role.
+  `tmux-bindings.sh`, runs `tmux-visit-prompt.sh`) is the intake
+  half of this picker: it opens a `command-prompt`, and whatever
+  the operator types becomes a subject bead with a visit queued on
+  it (`gc-visit-open.sh`, tk-4ojka) — so `prefix+S` has something
+  to switch to. It held the `-thread` spawner until tk-bn1oi;
+  threads are retired and the key was dead. The response reaches
+  the handler through a **paste buffer**, not the command line:
+  `command-prompt` substitutes the response as text and then
+  parses the result as a tmux command, so a `;` or a `"` typed
+  into a message spliced straight into `run-shell` would be
+  mangled or partly executed. The handler runs foreground (the
+  buffer name is fixed, so the read must be serialised against the
+  next press) and backgrounds the slow half itself.
 
 ## Why display-menu, not choose-tree
 
