@@ -5,8 +5,8 @@
 # THE BUG. A filer who writes a real spec into a bead's description has no
 # guarantee the worker ever reads it. `mol-polecat-work` (+ `mol-polecat-base`,
 # both upstream in the gastown pack, not editable from here) reads the work bead
-# five times and every read is jq-filtered to one metadata field — work_dir,
-# branch, rejection_reason, auto_push. The description reaches the worker at
+# five times and every read is jq-filtered to metadata alone — work_dir, branch,
+# rejection_reason, prepare_mode, auto_push. The description reaches the worker at
 # exactly one site: the `load-context` step's prose `gc bd show "$WORK_BEAD_ID"`.
 # That is an instruction, and it is delivered *once*, in the first step:
 #
