@@ -256,17 +256,43 @@ fi
 # leftover state directory is deliberately NOT evidence.
 # ---------------------------------------------------------------------------
 # Is this command line a driver actually RUNNING, rather than a process that
-# merely mentions one? True for a shell invoked on the script, and for the
-# script exec'd directly. False for a pager, an editor, or a grep.
+# merely mentions one? True for a shell invoked on the script as its script
+# argument, and for the script exec'd directly. False for a shell running `-c`,
+# a pager, an editor, or a grep.
 is_running_driver() { # command-line
     case "$1" in
         *gc-refinery-idle-*/idle-loop.sh*) ;;
         *) return 1 ;;
     esac
-    local word="${1%% *}"
-    case "${word##*/}" in
-        sh|bash|dash|ksh|zsh|idle-loop.sh) return 0 ;;
+
+    local -a argv
+    local word shell_name arg
+    read -r -a argv <<< "$1"
+    [ "${#argv[@]}" -gt 0 ] || return 1
+
+    word="${argv[0]}"
+    shell_name="${word##*/}"
+    case "$word" in
+        *gc-refinery-idle-*/idle-loop.sh) return 0 ;;
     esac
+
+    case "$shell_name" in
+        sh|bash|dash|ksh|zsh) ;;
+        *) return 1 ;;
+    esac
+
+    for arg in "${argv[@]:1}"; do
+        case "$arg" in
+            -c|--command) return 1 ;;
+            -?*c*) return 1 ;;
+            --) continue ;;
+            -*) continue ;;
+        esac
+        case "$arg" in
+            *gc-refinery-idle-*/idle-loop.sh) return 0 ;;
+        esac
+        return 1
+    done
     return 1
 }
 

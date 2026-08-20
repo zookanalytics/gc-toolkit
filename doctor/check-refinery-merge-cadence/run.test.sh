@@ -15,11 +15,12 @@
 #   (5)  zero registrations city-wide -> ERROR (exit 2), "NOT REGISTERED"
 #   (6)  live /tmp/gc-refinery-idle-<rig>/idle-loop.sh -> ERROR (exit 2), names
 #        the rig and the retire command  [the second merge-skill.sh writer]
-#   (7)  a process merely MENTIONING the driver — a tail on its log, or a pager
-#        open on idle-loop.sh itself — is NOT a driver -> not flagged. Arm 3
-#        matches the command WORD, not the path anywhere in the line, so reading
-#        the retired script (quite possibly to confirm it is gone) does not get
-#        you reported as a live second writer
+#   (7)  a process merely MENTIONING the driver — a tail on its log, a pager
+#        open on idle-loop.sh itself, or a shell `-c` command string naming the
+#        path — is NOT a driver -> not flagged. Arm 3 matches the shell's script
+#        argument, not the path anywhere in the line, so reading the retired
+#        script (quite possibly to confirm it is gone) does not get you reported
+#        as a live second writer
 #   (7b) the script exec'd directly, with no shell word, IS a driver -> flagged
 #   (7c) one driver forking children with the same argv is ONE finding, not one
 #        per process (the live driver showed up three times in `ps`)
@@ -277,7 +278,7 @@ has "1 problem(s)" "$TMP/out" "(7c) the headline counts one problem"
 # (7) a process merely naming the driver is not a driver
 # ---------------------------------------------------------------------------
 reset
-printf 'tail -f /tmp/gc-refinery-idle-gc-toolkit/reconcile.log\nless /tmp/gc-refinery-idle-gascity/idle-loop.sh\ngrep -n merge /tmp/gc-refinery-idle-signal-loom/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+printf 'tail -f /tmp/gc-refinery-idle-gc-toolkit/reconcile.log\nless /tmp/gc-refinery-idle-gascity/idle-loop.sh\ngrep -n merge /tmp/gc-refinery-idle-signal-loom/idle-loop.sh\n/usr/bin/zsh -c cat /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\nbash --command cat /tmp/gc-refinery-idle-signal-loom/idle-loop.sh\n' > "$TMP/stub/ps.txt"
 run_check; rc=$?
 eq "$rc" 0 "(7) a reader of the driver's log or script is not a driver -> exit 0"
 hasnt "out-of-band refinery driver running" "$TMP/out" "(7) not flagged"
@@ -290,6 +291,12 @@ printf '/tmp/gc-refinery-idle-signal-loom/idle-loop.sh\n' > "$TMP/stub/ps.txt"
 run_check; rc=$?
 eq "$rc" 2 "(7b) directly exec'd idle-loop.sh -> exit 2"
 has "out-of-band refinery driver running for rig signal-loom" "$TMP/out" "(7b) names the rig"
+
+reset
+printf 'bash -e /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+run_check; rc=$?
+eq "$rc" 2 "(7b) shell script argument after options -> exit 2"
+has "out-of-band refinery driver running for rig gc-toolkit" "$TMP/out" "(7b) names the rig from the script argument"
 
 # ---------------------------------------------------------------------------
 # (8) suspended rig
