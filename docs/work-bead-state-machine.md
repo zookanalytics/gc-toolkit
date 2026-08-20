@@ -155,6 +155,27 @@ children are closed and that evidence exists, a reconcile pass assigns the convo
 to the refinery with its branch and `target=main`, and it walks `open → PR →
 check-set → merge → closed` like any bead. No coordinator drives graduation.
 
+**One step of that machine is not like any bead: the branch prepare.** Bringing a
+branch current on its target is a rebase for an ordinary work bead, and a rebase
+REWRITES commits. On a convoy's integration branch those commits are already
+merged PRs, so rewriting them re-points each PR at objects the branch no longer
+holds and leaves the originals dangling and GC-eligible. The refinery therefore
+classifies the branch before it acts (`shared-branch-merge-mode` in
+`mol-refinery-patrol.toml`): the only shape it may rewrite is the per-bead
+`polecat/<bead-id>` branch the polecat convention guarantees is single-author and
+disposable, plus never a bead carrying `graduation=true`. Everything else —
+`integration/*`, `feat/*`, an unprefixed one-off — is brought current by **merging
+the target in**, and the push that follows is a fast-forward rather than a
+force-push, because the prepare left the branch's own tip an ancestor. This is an
+allowlist, so an unrecognized branch fails to the non-destructive side.
+
+An operator's `rebase_hold` ("do not rebase or force-push this branch") still
+exists and still gates graduation, but it is now a second line rather than the
+only one: a per-dispatch instruction cannot reach the refinery's protocol, and on
+2026-08-19 a twice-restated bead-level prohibition did not hold — the session that
+rebased was processing the convoy's graduation bead, not the bead the prohibition
+was written on (convoy tk-t80p1, PR #388, three merged PRs rewritten; tk-a0hva).
+
 ## The states
 
 The states below are drawn for the code path — the richest instantiation. A
