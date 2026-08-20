@@ -2277,10 +2277,46 @@ if [ "$CODEX_GATE" = 1 ]; then
     # Do NOT mint a review bead and do NOT wake the codex pool. Leave the anchor
     # OPEN and held: with no open rework child the merge skill still will not
     # land it, so this parks for a human rather than merging past an owed gate.
+    #
+    # >>> signoff-cap-no-gate-write
+    # AND DO NOT TOUCH check.<gate>. This arm stops the SPAWN and routes to a
+    # human; the gate's VERDICT is recorded by the one pass that owns it,
+    # assets/scripts/reconcile-gate-verdicts.sh, whose R11 stamps
+    # `check.<gate>=exception@<head>` for this exact condition. Until tk-mf3em
+    # this arm also cleared the marker, so ONE convergence-cap event produced two
+    # opposite terminal states and which one survived was decided by pass
+    # ordering (su-uzy9.5 2026-08-13, arm B last; sl-ew4w 2026-08-19, this arm
+    # last). Both were observed in production.
+    #
+    # Clearing was never a safety property. merge-skill.sh holds on anything that
+    # is not `green@<live head>`, so an absent marker holds exactly as hard as a
+    # stale or non-green one — the clear bought nothing there. What it cost is
+    # the opposite of what the cap is for: check-set-heal.sh dispatches on an
+    # ABSENT marker and skips on `exception@*`, so clearing re-armed the very
+    # dispatch this arm just declined to make. It also re-runs every pass that
+    # reaches the dispatch (see the escalation note below), while
+    # reconcile-gate-verdicts runs earlier in the same wake from find-work — so
+    # the marker oscillated stamped/cleared once per wake and check-set-heal
+    # re-dispatched codex on every one. Live on sl-ew4w/PR#533: a no-op review
+    # roughly every 14 minutes (sl-88w0u, sl-o8akz, sl-pv0md, sl-3bi4n), holding
+    # an APPROVED + CLEAN PR for ~14h.
+    #
+    # It could also destroy a VALID verdict. CODEX_GATE is decided by check_set
+    # membership alone, so this arm is reached whenever the merge is held for ANY
+    # reason — including `check.codex=green@<live head>` with a different gate
+    # (say `approval`) doing the holding. Unsetting there discards a green nobody
+    # asked to retract.
+    #
+    # The sidecars are the tell that this was always incoherent: the clear
+    # removed `check.codex` but not `check.codex.reason` /
+    # `.exception_escalated`, leaving the anchor asserting that an exception was
+    # escalated for a gate that was never evaluated. Not writing the marker at
+    # all is what makes the two arms agree by construction.
     gc bd update "$GATING_ANCHOR" \
       --set-metadata gc.routed_to=human \
       --set-metadata blocked_reason="signoff did not converge after $ROUNDS rework rounds (cap ${GC_MAX_REVIEW_ROUNDS:-3}); findings are in the review beads under this anchor" \
-      --unset-metadata "check.codex" >/dev/null 2>&1 || true
+      >/dev/null 2>&1 || true
+    # <<< signoff-cap-no-gate-write
     # >>> escalation-wiring-signoff-cap
     # RE-DERIVED, so next cycle genuinely retries: the anchor stays OPEN and held
     # with its rounds count intact, and this arm recomputes ROUNDS >= cap on every

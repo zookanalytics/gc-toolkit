@@ -24,11 +24,24 @@
 #   R11  bounded remediation exhaustion. A gate that has burned its remediation
 #        rounds keeps filing rework children that keep not converging. The signoff
 #        round cap (template-fragments/polecat-non-impl-done.template.md,
-#        `signoff-round-cap`) already stops the SPAWNING at the cap and routes the
-#        anchor to a human — but it records no verdict, so the anchor's own state
-#        never says WHY it is held, and the cap only fires on a round that actually
-#        reaches a reviewer. This pass records the verdict, and reaches the rounds
-#        the fragment never saw.
+#        `signoff-round-cap`, and its refinery mirror in
+#        formulas/mol-refinery-patrol.toml) already stops the SPAWNING at the cap
+#        and routes the anchor to a human — but it records no verdict, so the
+#        anchor's own state never says WHY it is held, and the cap only fires on a
+#        round that actually reaches a reviewer. This pass records the verdict, and
+#        reaches the rounds the fragment never saw.
+#
+#        THE CAP ARMS WRITE NO MARKER; THIS PASS IS THE SINGLE WRITER OF THE
+#        VERDICT. Both of them used to ALSO `--unset-metadata check.<name>` on the
+#        same event this arm records as `exception@<head>` — one cap, two opposite
+#        terminal states, and pass ordering deciding which survived (tk-mf3em;
+#        su-uzy9.5 and sl-ew4w caught the two orderings in production). Worse than
+#        a tie-break: the cap arms sit in the patrol's merge-push step and this
+#        pass in find-work, so a single wake stamped then cleared, and
+#        check-set-heal.sh — which dispatches on an ABSENT marker and skips on
+#        `exception@*` — re-dispatched codex every wake against a gate that had
+#        already given up. The clear is gone from both arms; if a third writer of
+#        `check.<name>` ever appears, this is the note that says why it must not.
 #
 #   R12  infrastructure failure. The check-skill crashed, ran past its deadline, or
 #        produced output no contract could map. This is the arm with NO coverage
@@ -105,6 +118,16 @@
 # rule is actually protecting against (notification spam). The head is still
 # stamped alongside the count, so `attempts=<n>@<sha>` reads as "n rounds spent,
 # observed at this head".
+#
+# THE PRICE OF THAT DIVERGENCE, and what pays it. A count that never resets is
+# permanently past the cap, so R11 would re-fire at EVERY later head and re-stamp
+# the exception on the exact wake meant to re-arm it — the design's operator
+# escape ("fix the branch, let the head move") silently would not exist. R11 is
+# therefore suppressed while the marker is an exception bound to an OLDER head,
+# exactly as R12b is and for the same reason: let the re-arm run first, and judge
+# the new head on its own evidence. The count still is not reset, so a head move
+# buys one evaluation rather than a clean slate, and the bound bites again as soon
+# as that round closes (tk-mf3em).
 #
 # COMPLETED rounds only, which is where this count and the signoff cap's differ.
 # The signoff cap asks the question at ONE instant — immediately before it files
@@ -723,7 +746,30 @@ EOF
       # so the gate stays `fixable` (recorded below) and the cap bites on the wake
       # after that child closes. Deferring costs one idle wake; firing early costs
       # the round the bound was still allowing.
-      if [ -z "$reason" ] && [ "$open_kids" -eq 0 ] \
+      #
+      # SUPPRESSED UNDER A STALE EXCEPTION, for the same reason R12b is and with
+      # the same consequence if it is not (tk-mf3em). The round count is
+      # deliberately NOT head-bound (see this file's header), so once it reaches
+      # the cap it stays there for every later head — and an unguarded R11 then
+      # re-stamps `exception@<new head>` on the very wake that was supposed to
+      # re-arm the gate. The `reason` it sets skips the whole `-z "$reason"`
+      # block below, which is where BOTH re-arms live: the pre-open clear here,
+      # and (post-open) leaving the marker stale so reconcile-merged-prs.sh's
+      # stale-gate arm can read it as stale and dispatch a re-review. So the head
+      # move is consumed either way and the escape the design specifies —
+      # "the operator fixes the branch, the head advances, the gate re-evaluates
+      # fresh" (specs/tk-zgse0.2/merge-gate-exception-lifecycle.md, AE-WS4-2) —
+      # does not exist: exception becomes terminal FULL STOP rather than
+      # terminal-until-operator.
+      #
+      # Suppressing only DEFERS, and keeps the bound. The count is not reset — a
+      # head move buys ONE honest evaluation at the new head, not a clean slate.
+      # If that round also fails and closes, `attempts` grows and the marker by
+      # then is `fixable@<new head>` or absent rather than a stale exception, so
+      # this arm fires normally and the gate is terminal at the new head. Nothing
+      # here can loop: past the cap no rework child is filed, so only an operator
+      # moves the head.
+      if [ -z "$reason" ] && [ -z "$STALE_EXCEPTION" ] && [ "$open_kids" -eq 0 ] \
          && [ "$attempts" -ge "$MAX_ATTEMPTS" ] && [ "$MAX_ATTEMPTS" -gt 0 ]; then
         reason="attempts-exhausted: $attempts remediation round(s) spent against a cap of $MAX_ATTEMPTS with check.$gate still not green"
       fi

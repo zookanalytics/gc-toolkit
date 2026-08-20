@@ -399,15 +399,43 @@ infrastructure failure (R12): the check-skill crashed, went past its deadline wi
 no live session answering for it, or left a marker naming no verb the contract
 knows.
 
+**The verdict has exactly one writer, and the signoff round cap is not it
+(tk-mf3em).** The cap has two independent halves — the polecat one in
+`template-fragments/polecat-non-impl-done.template.md` (`signoff-round-cap`) and
+the refinery one in `formulas/mol-refinery-patrol.toml` — and their job is to stop
+the **spawn** and route the anchor to a human. They write `gc.routed_to=human` and
+`blocked_reason`; they write nothing under `check.`. Both used to also
+`--unset-metadata check.<name>` on the same event R11 records as
+`exception@<head>`, so one convergence-cap event produced two opposite terminal
+states and which one survived was decided by pass ordering. Both orderings were
+seen in production (su-uzy9.5, 43s apart; sl-ew4w, the mirror). Worse than a
+coin-flip: the cap arms run in the patrol's `merge-push` step and
+`reconcile-gate-verdicts.sh` earlier in the same wake from `find-work`, so a
+single wake stamped the marker and then cleared it — and `check-set-heal.sh`,
+which dispatches on an **absent** marker and skips on `exception@`, re-dispatched
+codex every wake against a gate that had already given up. On sl-ew4w that was a
+no-op review roughly every 14 minutes holding an APPROVED + CLEAN PR for ~14h, and
+it presented as a dead refinery, which is a diagnosis trap: the idle driver was
+alive and the merge skill was holding correctly on a genuinely absent gate.
+Clearing was never a safety property either — the merge skill holds on anything
+that is not `green@<live head>`, so an absent marker holds exactly as hard as a
+stale one, and the clear could instead destroy a **valid** `green@<live head>` on
+an anchor whose merge was being held by a different gate. The cap is not the only
+arm that touches `check.<name>` — the *under-cap* path retracts the marker when it
+files a rework child, and must, because re-arming the dispatch is the point while
+remediation is in flight. What has one writer is the **terminal verdict**, and if a
+second one is ever proposed, this is the paragraph that says why it must not be.
+
 **Exception is terminal-until-operator, and it clears by a head move.** The arm
 records the verdict, leaves `merge_result` intact (the anchor stays the single
 gating locus, so a later-green head still has a lander), and escalates **once per
 head** via `check.<name>.exception_escalated=<sha>`. It never auto-fixes: an
 exception has no mechanical remedy, which is precisely what makes it one. When
 the operator fixes the branch (or the underlying skill), the head advances and
-every head-bound datum goes stale at once — marker, round count, escalation
-guard — so the gate re-arms to unevaluated and re-evaluates fresh. No reopen
-dance and no manual flag reset; the same head-binding that governs OK and fixable
+every head-bound datum goes stale at once — the marker and the escalation guard
+(the round count is deliberately **not** head-bound; see below) — so the gate
+re-arms to unevaluated and re-evaluates fresh. No reopen dance and no manual flag
+reset; the same head-binding that governs OK and fixable
 governs the exit from exception. Because the hold is unbounded after that single
 notification, `doctor/check-merge-gate-drop/` also reports live anchors held in
 exception, so a human looking for "what is stuck" finds them.
@@ -487,6 +515,22 @@ could never fire. The runaway it exists to stop is a sequence of rounds across
 the anchor — the same population the shipped signoff round cap counts — and it is
 the **escalation** that is head-bound, which is what one-per-head is actually
 protecting against.
+
+**And that divergence has a price, which one guard pays (tk-mf3em).** A count that
+never resets is past the cap at every later head, so an unguarded R11 fires again
+on the very wake meant to re-arm the gate: the reason it sets skips the whole
+branch both re-arms live in — the pre-open clear here, and post-open leaving the
+marker stale for the stale-gate arm to find — and re-stamps `exception@<new
+head>`. The head move is consumed either way, and `exception` becomes terminal
+outright rather than terminal-until-operator, which is the escape the design
+promises. So R11 is **suppressed while the marker is an exception bound to an
+older head**, exactly as the R12 worker-lost trigger already is and for the same
+reason: let the re-arm run, and judge the new head on its own evidence.
+Suppressing only defers. The count is still not reset, so a head move buys one
+honest evaluation rather than a clean slate, and the bound bites again the moment
+that round closes — by which point the marker is `fixable@<new head>` or absent
+rather than a stale exception, so nothing suppresses it. Nothing can loop: past
+the cap no rework child is filed, so only an operator moves the head.
 
 **A round in flight is not a round spent.** The count is over **closed**
 remediation children, and the exhaustion trigger additionally requires that *no*

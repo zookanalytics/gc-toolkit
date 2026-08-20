@@ -57,9 +57,22 @@
 #               check-set-heal.sh a gate with nothing in flight needs no dispatch.
 #   (ONEHEAD)   an exception already recorded at the live head -> held, no second
 #               mail, no rewrite
-#   (MOVED)     an exception bound to an OLD head -> the head move re-arms the gate
-#               and it is judged fresh (and re-escalated: a new head is a new
-#               subject). This is how an exception CLEARS.
+#   (MOVED)     an exception bound to an OLD head, POST-open, with the rounds at
+#               the cap -> R11 does NOT re-condemn the new head. The round count is
+#               not head-bound, so it is past the cap for every later head, and an
+#               unguarded R11 re-stamps `exception@<new head>` on the very wake
+#               meant to re-arm the gate. The stale marker is left for
+#               reconcile-merged-prs.sh's stale-gate arm, which is the post-open
+#               re-arm. This is how an exception CLEARS.
+#   (CAPREARM)  the same shape PRE-open, which is the live case in tk-mf3em: the
+#               rounds are spent, the operator fixed the branch and the head moved,
+#               and the gate must come back to Unevaluated so check-set-heal can
+#               dispatch. Without the guard R11 sets a reason, which skips the
+#               whole block the re-arm lives in.
+#   (CAPBITE)   and the deferral is not a disabling: with the stale exception now
+#               cleared, the SAME anchor at the SAME still-past-cap count is
+#               condemned on the next wake. A head move buys one honest
+#               evaluation, not a reset.
 #   (HOLD)      merge_hold set -> the verdict is still recorded (it only holds
 #               harder) but the operator is NOT mailed about a PR they parked
 #   (HUMAN)     gc.routed_to=human -> recorded, not re-escalated (another writer
@@ -188,6 +201,11 @@ cat > "$TMP/beads.json" <<JSON
 
   {"id":"a-poststale","status":"open","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"27","check.codex":"exception@oldpost","check.codex.exception_escalated":"oldpost"}},
 
+  {"id":"a-caprearm","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-caprearm","check.codex":"exception@oldcaprearm","check.codex.reason":"attempts-exhausted: 3 remediation round(s) spent against a cap of 3 with check.codex still not green","check.codex.attempts":"3@oldcaprearm","check.codex.exception_escalated":"oldcaprearm"}},
+  {"id":"k-cr1","status":"closed","metadata":{"source_review_bead":"rv-cr1","parent":"a-caprearm"}},
+  {"id":"k-cr2","status":"closed","metadata":{"source_review_bead":"rv-cr2","parent":"a-caprearm"}},
+  {"id":"k-cr3","status":"closed","metadata":{"source_review_bead":"rv-cr3","parent":"a-caprearm"}},
+
   {"id":"a-poison","status":"open","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/tk-poison","check.codex":"exception@oldpoison","check.codex.reason":"worker-lost: review rv-poison held by 'ghost-session' (no live session answers it) and untouched for 99999s > 3600s deadline","check.codex.exception_escalated":"oldpoison"}},
   {"id":"rv-poison","status":"in_progress","assignee":"ghost-session","heartbeat_at":"$(old_ts 99999)","updated_at":"$(old_ts 99999)","metadata":{"anchor_bead":"a-poison","check_name":"codex"}},
 
@@ -222,6 +240,7 @@ branch:polecat/tk-pregreen|headpregreen
 branch:polecat/tk-prefix|headprefix
 branch:polecat/tk-poison|headpoison
 branch:polecat/tk-twin|headtwin
+branch:polecat/tk-caprearm|headcaprearm
 H
 
 # The live session roster. `ghost-session` is deliberately absent.
@@ -445,10 +464,27 @@ eq "$(marker a-onehead check.codex)" "exception@head18" "(ONEHEAD) the recorded 
 hasnt "$TMP/update.log" "a-onehead " "(ONEHEAD) no rewrite of a verdict already current"
 hasnt "$TMP/mail.log" "a-onehead" "(ONEHEAD) no second mail at the same head"
 
-# (MOVED) the head moved past an exception: re-armed, judged fresh, re-escalated
-eq "$(marker a-moved check.codex)" "exception@head19" "(MOVED) a head move re-arms and re-judges the gate"
-eq "$(marker a-moved check.codex.exception_escalated)" "head19" "(MOVED) the escalation guard re-arms at the new head"
-has "$TMP/mail.log" "a-moved" "(MOVED) a new head is a new subject, so it escalates again"
+# (MOVED) THE REGRESSION for tk-mf3em's second-order finding, post-open half. The
+# rounds are at the cap and the marker is an exception bound to an OLD head — the
+# state an operator produces by doing exactly what the design tells them to do:
+# fix the branch and let the head move.
+#
+# The round count is deliberately NOT head-bound (reconcile-gate-verdicts.sh
+# header, "WHY THE ROUND COUNT IS NOT RESET PER HEAD"), so it is past the cap at
+# every later head forever. Unguarded, R11 therefore set a `reason` on this wake,
+# which skips the entire `-z "$reason"` block — the only place either re-arm can
+# happen — and re-stamped `exception@<new head>`. The marker was then never stale
+# for reconcile-merged-prs.sh's stale-gate arm either, so NOTHING re-armed it:
+# `exception` was terminal FULL STOP rather than terminal-until-operator, and the
+# escape in AE-WS4-2 did not exist.
+#
+# Post-open the correct move is to leave the stale marker exactly where it is —
+# it is the evidence the stale-gate arm keys on to dispatch the re-review, the
+# same boundary (POSTSTALE) draws for an under-cap anchor.
+eq "$(marker a-moved check.codex)" "exception@OLDHEAD" "(MOVED) rounds at the cap do NOT re-condemn a moved head; the stale marker stands"
+eq "$(marker a-moved check.codex.exception_escalated)" "OLDHEAD" "(MOVED) and the head-bound guard is left to stale itself out"
+hasnt "$TMP/update.log" "a-moved " "(MOVED) no write at all — reconcile-merged-prs.sh's stale-gate arm owns the post-open re-arm"
+hasnt "$TMP/mail.log" "a-moved" "(MOVED) re-arming is not an escalation; the operator is not re-mailed for doing what they were asked"
 
 # (HOLD) operator park
 eq "$(marker a-hold check.codex)" "exception@head20" "(HOLD) the verdict is recorded under merge_hold"
@@ -506,6 +542,18 @@ eq "$(marker a-pregreen check.codex)" "<none>" "(PREGREEN) a stale pre-open gree
 # dispatch, so it strands nothing and is left for the fixable record to overwrite.
 eq "$(marker a-prefix check.codex)" "fixable@oldprefix" "(PREFIX) a stale pre-open fixable is NOT cleared — it never blocked the dispatch"
 
+# (CAPREARM) the PRE-open half of the same regression, and the live shape in
+# tk-mf3em: a pre-open gate whose rounds are spent, excepted at a head the branch
+# has since moved past. Pre-open there is no stale-gate arm to fall back on —
+# check-set-heal.sh skips its dispatch on `exception@*` without resolving a head,
+# and pre-open-resolve.sh opens only on green@<live branch head> — so an R11 that
+# consumes the head move leaves the branch held with nothing left to raise it.
+# Clearing the marker is what puts the gate back to Unevaluated for a fresh
+# dispatch.
+eq "$(marker a-caprearm check.codex)" "<none>" "(CAPREARM) rounds at the cap do not out-rank the pre-open re-arm; the stale exception is cleared"
+hasnt "$TMP/mail.log" "a-caprearm" "(CAPREARM) and re-arming is not an escalation"
+eq "$(marker a-caprearm check.codex.attempts)" "3@oldcaprearm" "(CAPREARM) the round count is NOT reset — a head move buys one evaluation, not a clean slate"
+
 # (POSTSTALE) the scope boundary. Post-open, the stale marker is what
 # reconcile-merged-prs.sh's stale-marker arm keys on to file the re-review; clearing
 # it here would take the evidence away from the arm that already heals it.
@@ -554,7 +602,8 @@ hasnt "$TMP/update.log" "merge_result" "(NEVERGREEN) the pass never touches the 
 : > "$TMP/update.log"; : > "$TMP/mail.log"
 run_pass
 hasnt "$TMP/mail.log" "a-r11" "(CONVERGE) no second mail for an exception already escalated at this head"
-hasnt "$TMP/mail.log" "a-moved" "(CONVERGE) nor for the re-armed one"
+hasnt "$TMP/mail.log" "a-moved" "(CONVERGE) nor for the one left to the post-open stale-gate arm"
+hasnt "$TMP/update.log" "a-moved " "(CONVERGE) and it is still not written on a second wake"
 hasnt "$TMP/update.log" "a-r11 " "(CONVERGE) no rewrite of a verdict already current"
 eq "$(marker a-fix check.codex)" "fixable@head16" "(CONVERGE) the fixable record is stable"
 hasnt "$TMP/update.log" "a-fix " "(CONVERGE) and is not rewritten every wake"
@@ -564,6 +613,20 @@ hasnt "$TMP/mail.log" "a-capopen" "(CONVERGE) and still does not escalate"
 hasnt "$TMP/update.log" "rv-poison " "(CONVERGE) a retired review is not re-retired on every wake"
 eq "$(marker a-poison check.codex)" "<none>" "(CONVERGE) and the re-armed pre-open gate stays re-armed — the corpse is gone, so nothing re-condemns it"
 hasnt "$TMP/mail.log" "a-poison" "(CONVERGE) still no escalation for it"
+
+# (CAPBITE) the positive control on the R11 suppression, and the reason it is a
+# DEFERRAL rather than a way of switching the bound off. Run 1 cleared
+# a-caprearm's stale exception without touching its round count, so this wake
+# sees the same anchor at the same past-the-cap count with no stale marker left
+# to suppress anything — and condemns it at the NEW head. The operator's fix got
+# exactly one honest evaluation; the bound survived it.
+#
+# Without this arm the (CAPREARM) fix would be indistinguishable from deleting
+# R11, which is the failure the (CAPOPEN)/(CAPCLOSE) pair guards against for the
+# in-flight deferral.
+eq "$(marker a-caprearm check.codex)" "exception@headcaprearm" "(CAPBITE) with the stale marker gone, the still-spent rounds condemn the new head"
+eq "$(marker a-caprearm check.codex.attempts)" "3@headcaprearm" "(CAPBITE) re-stamped at the new head, with the count carried across it unchanged"
+has "$TMP/mail.log" "a-caprearm" "(CAPBITE) and the operator is escalated once for the new head"
 
 # ---------------------------------------------------------------------------
 # Run 2b — the merge_hold lifts. The exception is already recorded and current at
