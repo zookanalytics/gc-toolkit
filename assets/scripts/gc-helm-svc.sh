@@ -107,17 +107,31 @@ if [ "$need_build" -eq 1 ]; then
         gotmp_pid="${gotmp_entry##*/run.}"
         case "$gotmp_pid" in ''|*[!0-9]*) continue ;; esac   # not pid-owned
         if pid_alive "$gotmp_pid"; then continue; fi
-        rm -rf -- "$gotmp_entry"
+        rm -rf -- "$gotmp_entry" 2>/dev/null || true
     done
     find "$GOTMP" -mindepth 1 -maxdepth 1 -mmin +1440 -exec rm -rf -- {} + 2>/dev/null || true
 
     # Build in scratch this invocation owns: it is what makes the sweep above
     # able to tell stranded from live, and it is deleted below whichever way
     # the build goes.
+    #
+    # Every step of the hygiene degrades rather than fails, because none of it
+    # is worth a service that will not start. `set -e` is live here, so an
+    # unguarded mkdir would abort the script — and the case where it aborts is
+    # a full disk, precisely when the fallback below (keep serving the cached
+    # binary, log, do not restart-loop) is the behaviour that matters. Falling
+    # back to the shared root is no worse than before this bounding existed,
+    # and the sweeps above still reclaim what lands there.
     GOTMP_RUN="$GOTMP/run.$$"
-    rm -rf -- "$GOTMP_RUN"        # a recycled pid must not inherit stale scratch
-    mkdir -p "$GOTMP_RUN"
-    trap 'rm -rf -- "$GOTMP_RUN"' EXIT
+    GOTMP_RUN_OWNED=0
+    rm -rf -- "$GOTMP_RUN" 2>/dev/null || true   # a recycled pid inherits nothing
+    if mkdir "$GOTMP_RUN" 2>/dev/null; then
+        GOTMP_RUN_OWNED=1
+        trap 'rm -rf -- "$GOTMP_RUN" 2>/dev/null || true' EXIT
+    else
+        echo "gc-helm-svc: cannot create $GOTMP_RUN; building in $GOTMP" >&2
+        GOTMP_RUN="$GOTMP"
+    fi
 
     # Publish a freshly built binary to $BIN only via an atomic rename from a
     # scratch file beside it. Building `-o "$BIN"` in place would let a failed
@@ -159,8 +173,12 @@ if [ "$need_build" -eq 1 ]; then
     # is now helm-svc's own — live for the whole service lifetime, and invisible
     # to the sweep above for exactly as long. That is the leak again, one dir per
     # restart. The trap stays armed until here to cover the `exit 1` above.
-    rm -rf -- "$GOTMP_RUN"
-    trap - EXIT
+    # Guarded on ownership: on the degraded path $GOTMP_RUN *is* $GOTMP, and
+    # removing that would take every concurrent build's scratch with it.
+    if [ "$GOTMP_RUN_OWNED" -eq 1 ]; then
+        rm -rf -- "$GOTMP_RUN" 2>/dev/null || true
+        trap - EXIT
+    fi
 fi
 
 exec "$BIN" "$@"

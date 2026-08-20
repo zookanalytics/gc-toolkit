@@ -32,6 +32,8 @@
 #   (FAILSOFT)    a failed build with a cached binary still serves it — and the
 #                 failed build's leak does not survive the exec
 #   (NOBUILD)     nothing to build: no toolchain call, scratch untouched
+#   (DEGRADE)     an unwritable scratch root degrades — the service still starts
+#                 on the cached binary and the shared root is not removed
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP
 set -euo pipefail
 
@@ -182,6 +184,29 @@ has "$OUT" "cached-binary ran:" "(NOBUILD) exec'd without rebuilding"
 absent "$RECORD" "(NOBUILD) the toolchain was never invoked"
 present "$GOTMP/go-link-old" "(NOBUILD) the sweep is scoped to builds; scratch is untouched"
 
+# --- case 5: scratch hygiene cannot stop the service starting -----------------
+# `set -e` is live in the script, so an unguarded mkdir/rm in the hygiene would
+# abort the start — and the case where it aborts is a full or unwritable disk,
+# exactly when the cached-binary fallback is the behaviour that matters. An
+# unwritable $GOTMP stands in for that here: every cleanup call fails, and the
+# run dir cannot be created at all.
+fixture
+cache_binary
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"    # source newer -> rebuild attempted
+mkdir -p "$GOTMP/go-link-old" "$GOTMP/run.$DEAD_PID"
+: > "$GOTMP/go-link-old/obj"
+: > "$GOTMP/run.$DEAD_PID/obj"
+age_days "$GOTMP/go-link-old" 2                     # both sweepable, but every
+chmod 500 "$GOTMP"                                  # rm below will fail on EACCES
+run_script --socket /run/helm.sock
+chmod 700 "$GOTMP"
+eq "$RC" 0 "(DEGRADE) an unwritable scratch root does not stop the service starting"
+has "$OUT" "cached-binary ran:" "(DEGRADE) the cached binary is still served"
+has "$ERR" "cannot create" "(DEGRADE) the degraded path says so"
+present "$GOTMP" "(DEGRADE) the shared root is not removed as if it were owned scratch"
+present "$GOTMP/go-link-old" "(DEGRADE) a failed age sweep is swallowed, not fatal"
+present "$GOTMP/run.$DEAD_PID" "(DEGRADE) a failed dead-pid sweep is swallowed, not fatal"
+
 # --- case 5: static guard ----------------------------------------------------
 # The regression that caused the incident is pointing the toolchain straight at
 # the shared, unbounded $GOTMP. Whatever else the build line grows, it must hand
@@ -194,6 +219,17 @@ fi
 grep -q 'GOTMPDIR="\$GOTMP_RUN"' "$SCRIPT" \
     && ok "(STATIC) build is handed the per-invocation scratch dir" \
     || bad "(STATIC) build no longer uses \$GOTMP_RUN"
+
+# On the degraded path $GOTMP_RUN IS the shared root, so the cleanup after the
+# build must be ownership-guarded: unguarded, a fallback triggered by ENOSPC —
+# mkdir fails while the directory is still perfectly writable — would rm -rf
+# every concurrent build's scratch, on the full disk this whole change exists to
+# prevent. (DEGRADE) above cannot demonstrate that: its fallback is triggered by
+# unwritability, and the same unwritability defeats the destructive rm. So the
+# guard is pinned here instead.
+grep -q '\[ "\$GOTMP_RUN_OWNED" -eq 1 \]' "$SCRIPT" \
+    && ok "(STATIC) post-build cleanup only removes scratch this invocation created" \
+    || bad "(STATIC) post-build cleanup is no longer ownership-guarded — a degraded run can rm -rf the shared root"
 
 echo ""
 echo "gc-helm-svc build-scratch bounding: $PASS passed, $FAIL failed"
