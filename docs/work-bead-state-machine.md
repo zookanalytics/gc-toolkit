@@ -169,6 +169,18 @@ the target in**, and the push that follows is a fast-forward rather than a
 force-push, because the prepare left the branch's own tip an ancestor. This is an
 allowlist, so an unrecognized branch fails to the non-destructive side.
 
+**The classification travels with the bead**, because refusing to rewrite the
+branch here does not stop the rewrite from happening one step later. A prepare
+that conflicts, and a test run that fails, both hand the same bead back to the
+polecat pool — and the polecat's rejected-branch resume brings a branch current
+by rebase, then reads a non-fast-forward push as a reason to force. So the
+refinery stamps `metadata.prepare_mode` (`rebase` or `merge`) on the bead before
+it prepares anything, and refuses to prepare a branch whose mode it could not
+record; `mol-polecat-work`'s `rejected-branch-resume-mode` block reads that key
+and merges rather than rebases when it says `merge`. One classifier, stamped
+once, honored by both actors — the alternative is a second copy of the rule in
+the polecat formula, drifting against this one.
+
 An operator's `rebase_hold` ("do not rebase or force-push this branch") still
 exists and still gates graduation, but it is now a second line rather than the
 only one: a per-dispatch instruction cannot reach the refinery's protocol, and on

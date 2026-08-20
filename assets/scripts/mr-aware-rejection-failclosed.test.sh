@@ -106,7 +106,7 @@ eq "$NBLOCKS" "2" "both rejection arms extracted between mr-aware-rejection mark
 # populated. exit 0 == repool proceeded; non-zero == fail-closed defer.
 run() {
   : > "$FAKE_META"
-  if SHOW_SCENARIO="$2" WORK=work-1 TARGET=main GC_RIG=rig bash "$1" >/dev/null 2>&1; then
+  if SHOW_SCENARIO="$2" WORK=work-1 TARGET=main GC_RIG=rig PREPARE_MODE="${PREPARE_MODE:-merge}" bash "$1" >/dev/null 2>&1; then
     echo 0
   else
     echo "$?"
@@ -159,6 +159,15 @@ for BLK in "$TMP"/block*.sh; do
   fi
 done
 
+# The rebase arm's work order must NAME the prepare mode, not just carry it as
+# metadata: metadata.prepare_mode is what the resume block switches on, and this
+# string is what the worker reads when it decides whether to force past a
+# non-fast-forward push. Only block1 (the rebase arm) has PREPARE_MODE in scope.
+run "$TMP/block1.sh" mr >/dev/null
+grep -q '^set|rejection_reason|.*prepare_mode=merge' "$FAKE_META" \
+  && ok  "[block1] conflict work order names prepare_mode for the worker" \
+  || bad "[block1] conflict work order does not name the prepare mode"
+
 # =============================================================================
 # SHARED-BRANCH PREPARE MODE (tk-a0hva)
 # =============================================================================
@@ -206,6 +215,10 @@ cat > "$SB/bin/gc" <<'GCS'
 if [ "$1" = "bd" ] && [ "$2" = "show" ]; then
   printf '%s' "${BEAD_JSON_OUT:-}"
   exit 0
+fi
+if [ "$1" = "bd" ] && [ "$2" = "update" ]; then
+  [ -n "${GC_ARGV_LOG:-}" ] && printf '%s\n' "$*" >> "$GC_ARGV_LOG"
+  exit "${GC_UPDATE_RC:-0}"
 fi
 exit 0
 GCS
@@ -295,9 +308,12 @@ prepare() { # <bead-json>
   rm -rf "$SB/run"
   "$REAL_GIT" clone -q "$SB/origin.git" "$SB/run"
   : > "$SB/run.argv"
+  : > "$SB/run.gc"
   ( cd "$SB/run" \
     && PATH="$SB/bin:$ORIG_PATH" \
        GIT_ARGV_LOG="$SB/run.argv" \
+       GC_ARGV_LOG="$SB/run.gc" \
+       GC_UPDATE_RC="${GC_UPDATE_RC:-0}" \
        BEAD_JSON_OUT="$1" \
        WORK=work-1 \
        TARGET_BRANCH_DEFAULT=main \
@@ -437,6 +453,199 @@ grep -q 'push origin HEAD:polecat/p --force-with-lease' "$SB/run.argv" \
 grep -q 'push origin HEAD:polecat/p --force$' "$SB/run.argv" \
   && bad "(I) plain --force was used" \
   || ok  "(I) plain --force never used"
+
+# =============================================================================
+# THE HAND-BACK WORK ORDER (tk-j32ep — signoff finding on tk-a0hva)
+# =============================================================================
+# Case (G) above proves the merge arm ABORTS a conflicting merge. That is only
+# the first half of the story, and the half that stops here is not the half that
+# rewrites anything.
+#
+# What happens NEXT is the hazard. `PREPARE_FAILED` falls into the rejection
+# flow, which repools the SAME work bead to the polecat pool with a
+# rejection_reason. The polecat's rejected-branch resume brings a branch current
+# by REBASE, and its submit step reads a non-fast-forward push as "force-needed?"
+# — so the shared branch this block refused to rewrite gets rewritten one step
+# later by a different actor, and force-pushed. The prohibition held for the
+# refinery and leaked around it.
+#
+# The fix carries the refinery's classification on the bead
+# (`metadata.prepare_mode`), and the polecat's `rejected-branch-resume-mode`
+# block honors it. These cases follow case (G) THROUGH that handoff: the stamp,
+# its fail-closed guard, and the resume block executed for real against a real
+# shared branch and a real origin — asserting on git's object graph and on
+# whether a plain push fast-forwards, not on a stub's argv alone.
+
+# (K) The prepare block stamps the mode it just derived — this is what makes the
+#     classification reachable from the other formula, one step later.
+eq "$(prepare "$J_INT")" "0" "(K) integration branch prepares cleanly"
+grep -q 'bd update work-1 --set-metadata prepare_mode=merge' "$SB/run.gc" \
+  && ok  "(K) prepare_mode=merge stamped on the work bead" \
+  || bad "(K) prepare_mode NOT stamped — the hand-back cannot know this branch is shared"
+
+eq "$(prepare "$J_POL")" "0" "(L) polecat branch prepares cleanly"
+grep -q 'bd update work-1 --set-metadata prepare_mode=rebase' "$SB/run.gc" \
+  && ok  "(L) prepare_mode=rebase stamped for a disposable per-bead branch" \
+  || bad "(L) prepare_mode=rebase NOT stamped"
+
+# (M) The stamp is FAIL-CLOSED and runs BEFORE the worktree is touched. An
+#     unrecorded mode is a hand-back that will rebase a shared branch, so the
+#     block must refuse to prepare at all rather than prepare something it
+#     cannot hand back safely.
+GC_UPDATE_RC=1
+prepare_rc=$(prepare "$J_INT")
+GC_UPDATE_RC=0
+eq "$prepare_rc" "1" "(M) unrecordable prepare_mode -> fail-closed refusal (exit 1)"
+grep -q 'could not record prepare_mode' "$SB/run.out" \
+  && ok  "(M) refusal names the unrecorded mode" \
+  || bad "(M) refusal was misreported: $(head -1 "$SB/run.out")"
+if g "$SB/run" rev-parse --verify temp >/dev/null 2>&1; then
+  bad "(M) temp branch was prepared despite an unrecordable mode"
+else
+  ok "(M) nothing prepared when the mode could not be recorded"
+fi
+
+# --- The other half of the handoff: the polecat's resume block. ---------------
+# Extracted from mol-polecat-work.toml the same way, so this test fails if the
+# markers are renamed or the block drifts. `{{base_branch}}` is a formula var
+# rendered at pour time; substitute what the refinery would have resolved.
+TOML_POLECAT="$ROOT/formulas/mol-polecat-work.toml"
+awk '
+  /# >>> rejected-branch-resume-mode$/ { f=1; next }
+  /# <<< rejected-branch-resume-mode$/ { f=0 }
+  f' "$TOML_POLECAT" | sed 's/{{base_branch}}/main/g' > "$SB/resume.sh"
+
+[ -s "$SB/resume.sh" ] \
+  && ok  "resume block extracted between rejected-branch-resume-mode markers" \
+  || bad "resume block extraction EMPTY — markers missing from $TOML_POLECAT"
+case "$(cat "$SB/resume.sh")" in
+  *\\*) bad "resume.sh contains a backslash — TOML will mangle it" ;;
+  *)    ok  "resume.sh is backslash-free (safe in a TOML triple-quote)" ;;
+esac
+bash -n "$SB/resume.sh" 2>/dev/null \
+  && ok "resume.sh is syntactically valid bash" \
+  || bad "resume.sh is NOT valid bash"
+
+# Dedicated branches so the resume cases cannot disturb (H)/(I), which push to
+# integration/x and polecat/p on this same origin.
+C1=$(g "$SB/seed" rev-parse main~2)
+"$REAL_GIT" -C "$SB/seed" checkout -q -b integration/resume "$C1"
+commit_in "$SB/seed" r-a.txt "ra" "r1: merged PR (integration/resume)"
+commit_in "$SB/seed" r-b.txt "rb" "r2: merged PR (integration/resume)"
+g "$SB/seed" push -q origin integration/resume
+RES_TIP=$(g "$SB/seed" rev-parse origin/integration/resume)
+
+"$REAL_GIT" -C "$SB/seed" checkout -q -b integration/resumeconf "$C1"
+commit_in "$SB/seed" shared.txt "integration side" "r3: conflicting edit"
+g "$SB/seed" push -q origin integration/resumeconf
+CONF_TIP=$(g "$SB/seed" rev-parse origin/integration/resumeconf)
+
+"$REAL_GIT" -C "$SB/seed" checkout -q -b polecat/resume "$C1"
+commit_in "$SB/seed" pr.txt "pr" "r4: polecat work"
+g "$SB/seed" push -q origin polecat/resume
+POLRES_TIP=$(g "$SB/seed" rev-parse origin/polecat/resume)
+
+# resume <branch> <bead-json> -> exit code. Leaves the worktree at $SB/resume
+# with whatever the block did, git argv in $SB/resume.argv. The checkout uses
+# the REAL git directly so only the block's own git calls land in the log.
+resume() { # <branch> <bead-json>
+  rm -rf "$SB/resume"
+  "$REAL_GIT" clone -q "$SB/origin.git" "$SB/resume"
+  "$REAL_GIT" -C "$SB/resume" checkout -q -B "$1" "origin/$1"
+  : > "$SB/resume.argv"
+  ( cd "$SB/resume" \
+    && PATH="$SB/bin:$ORIG_PATH" \
+       GIT_ARGV_LOG="$SB/resume.argv" \
+       BEAD_JSON_OUT="$2" \
+       WORK_BEAD_ID=work-1 \
+       bash "$SB/resume.sh" ) > "$SB/resume.out" 2>&1
+  echo "$?"
+}
+
+# push_resume -> exit code of the polecat submit step's PLAIN push. Not a
+# convenience: whether `git push origin HEAD` fast-forwards is exactly what
+# decides if the worker is told "force-needed?", so it is the assertion that
+# proves the rewrite pressure is gone rather than merely discouraged.
+push_resume() {
+  ( cd "$SB/resume" && PATH="$SB/bin:$ORIG_PATH" GIT_ARGV_LOG="$SB/resume.argv" \
+      git push origin HEAD ) >/dev/null 2>&1
+  echo "$?"
+}
+
+J_RES_MERGE='[{"metadata":{"branch":"integration/resume","target":"main","rejection_reason":"Conflicts with main at deadbeef","prepare_mode":"merge"}}]'
+J_RES_REBASE='[{"metadata":{"branch":"polecat/resume","target":"main","rejection_reason":"tests failed","prepare_mode":"rebase"}}]'
+J_RES_CONF='[{"metadata":{"branch":"integration/resumeconf","target":"main","rejection_reason":"Conflicts with main at deadbeef","prepare_mode":"merge"}}]'
+
+# (N) prepare_mode=merge -> the resume MERGES. The old tip stays reachable, so
+#     the merged PRs on that branch still point at objects the branch holds.
+eq "$(resume integration/resume "$J_RES_MERGE")" "0" "(N) merge-mode resume runs"
+grep -q '^rebase ' "$SB/resume.argv" \
+  && bad "(N) the resume REBASED a shared branch — the hand-back rewrite, reproduced" \
+  || ok  "(N) the resume never invoked git rebase on a shared branch"
+grep -q '^merge --no-edit origin/main$' "$SB/resume.argv" \
+  && ok  "(N) origin/main was merged IN by the resume" \
+  || bad "(N) origin/main was not merged in by the resume"
+if g "$SB/resume" merge-base --is-ancestor "$RES_TIP" HEAD 2>/dev/null; then
+  ok "(N) integration/resume tip $RES_TIP still an ancestor — merged PRs NOT rewritten"
+else
+  bad "(N) integration/resume tip $RES_TIP was REWRITTEN by the hand-back"
+fi
+
+# (O) …and the push that follows is an ordinary fast-forward. This is the whole
+#     point: the worker is never shown a non-fast-forward rejection, so it is
+#     never invited to force past one.
+eq "$(push_resume)" "0" "(O) merge-mode resume pushes as a plain fast-forward"
+grep -q 'force' "$SB/resume.argv" \
+  && bad "(O) a force flag appeared on a shared-branch resume" \
+  || ok  "(O) no force flag anywhere in the merge-mode resume"
+if g "$SB/origin.git" merge-base --is-ancestor "$RES_TIP" "refs/heads/integration/resume" 2>/dev/null; then
+  ok "(O) origin/integration/resume still contains its pre-resume tip"
+else
+  bad "(O) origin/integration/resume lost its pre-resume tip — merged PRs orphaned"
+fi
+
+# (P) The disposable per-bead branch must still REBASE. The fix narrows what may
+#     be rewritten; it must not stop the rewrite that is correct.
+eq "$(resume polecat/resume "$J_RES_REBASE")" "0" "(P) rebase-mode resume runs"
+grep -q '^rebase origin/main$' "$SB/resume.argv" \
+  && ok  "(P) git rebase origin/main invoked for the polecat branch" \
+  || bad "(P) polecat branch was not rebased — resume behaviour regressed"
+if g "$SB/resume" merge-base --is-ancestor "$POLRES_TIP" HEAD 2>/dev/null; then
+  bad "(P) polecat branch was MERGED, not rebased"
+else
+  ok "(P) polecat branch was rebased (its old tip is no longer an ancestor)"
+fi
+
+# (Q) An ABSENT prepare_mode still rebases. Every bead the refinery hands back
+#     has been stamped, so absence means some other writer set rejection_reason
+#     — and silently switching every ordinary resume to a merge would put merge
+#     commits in every rework PR. Pinned so the default cannot drift unnoticed.
+J_RES_NONE='[{"metadata":{"branch":"polecat/resume","target":"main","rejection_reason":"tests failed"}}]'
+eq "$(resume polecat/resume "$J_RES_NONE")" "0" "(Q) resume with no prepare_mode runs"
+grep -q '^rebase origin/main$' "$SB/resume.argv" \
+  && ok  "(Q) absent prepare_mode keeps the existing rebase behaviour" \
+  || bad "(Q) absent prepare_mode changed the default resume path"
+
+# (R) CASE (G), FOLLOWED THROUGH. The branch whose merge conflicted in (G) is
+#     repooled and resumed here. The resume hits the same conflict — that is
+#     expected and is the worker's job to resolve — but it must reach that
+#     conflict via MERGE, leaving the shared tip intact and resolvable into a
+#     merge commit. Pre-fix, this same handoff rebased and then force-pushed.
+resume integration/resumeconf "$J_RES_CONF" > "$SB/resumeconf.rc"
+grep -q '^rebase ' "$SB/resume.argv" \
+  && bad "(R) the conflicting hand-back REBASED the shared branch — case (G) still leaks" \
+  || ok  "(R) the conflicting hand-back never rebased"
+grep -q '^merge --no-edit origin/main$' "$SB/resume.argv" \
+  && ok  "(R) the conflicting hand-back attempted a MERGE" \
+  || bad "(R) the conflicting hand-back did not attempt a merge"
+[ -f "$SB/resume/.git/MERGE_HEAD" ] \
+  && ok  "(R) left mid-MERGE for the worker to resolve into a merge commit" \
+  || bad "(R) not left mid-merge — the conflict was not surfaced as a merge"
+if g "$SB/resume" merge-base --is-ancestor "$CONF_TIP" HEAD 2>/dev/null; then
+  ok "(R) shared tip $CONF_TIP intact through the conflicting hand-back"
+else
+  bad "(R) shared tip $CONF_TIP rewritten by the conflicting hand-back"
+fi
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

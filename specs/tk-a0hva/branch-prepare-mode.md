@@ -114,6 +114,82 @@ whether the classification above it is right.
   vetoes graduation. Making the safety depend on someone setting it is the
   instruction-shaped fix that has now failed once in production.
 
+## Round 2: the hand-back carries the classification
+
+The signoff on round 1 found that refusing to rewrite the branch *here* does not
+stop the rewrite from happening — it moves it one step downstream, to an actor
+this block cannot reach (review `tk-wz00c`, P1; rework `tk-j32ep`).
+
+Both rejection arms of this same step — `PREPARE_FAILED` on a conflict, and a
+test regression in `handle-failures` — repool the same work bead to the polecat
+pool. `mol-polecat-work.toml`'s workspace-setup then brought any rejected branch
+current with `git rebase origin/{{base_branch}}`, and its submit step prints
+"force-needed?" when the push that follows is non-fast-forward. So an
+`integration/*` branch whose merge-from-main conflicted was handed to a worker
+who would rebase it and then be invited to force-push it: the prohibition held
+for the refinery and leaked around it, reaching the same three-merged-PRs
+outcome by a different actor.
+
+The prohibition cannot be restated on the bead — that is precisely what failed
+in the incident. The classification has to travel.
+
+**The remedy.** The `shared-branch-merge-mode` block stamps the mode it derived
+onto the work bead, `metadata.prepare_mode` (`rebase` | `merge`), *before* it
+touches the worktree, and refuses to prepare at all if it cannot record it:
+
+```bash
+if ! gc bd update $WORK --set-metadata prepare_mode="$PREPARE_MODE" >/dev/null 2>&1; then
+  echo "could not record prepare_mode=$PREPARE_MODE on $WORK — NOT preparing the branch..."
+  gc runtime drain-ack
+  exit 1
+fi
+```
+
+A new marker-fenced block in `mol-polecat-work.toml`,
+`rejected-branch-resume-mode`, reads that key and merges instead of rebasing
+when it says `merge`; the submit step's "force-needed?" hint is qualified with
+the one case where a non-fast-forward push is a bug rather than an obstacle.
+
+### Why the bead, and why on the happy path
+
+The classifier runs once, in this step. The two rejection arms run in **separate
+shell invocations** — the formula says so at its own branch-delete site — so
+`PREPARE_MODE` does not survive to either of them, and `handle-failures` never
+had it in scope at all. The bead is the only carrier that reaches both. Which
+is why the stamp sits with the classification rather than inside the conflict
+arm: written only where `PREPARE_MODE` is live, it would cover the conflict
+hand-back and miss the test-failure hand-back, which rewrites just as
+destructively.
+
+This is the same reasoning as *Why the push site re-derives from git*, arriving
+at the opposite mechanism, and the difference is worth stating. The push site is
+in the refinery's own process and can observe the consequence directly
+(ancestry); re-testing the branch *name* there would be a mirrored predicate free
+to drift. The polecat can observe neither — by the time it holds the bead the
+prepare has been aborted and there is no artifact of it to inspect — so the only
+alternatives are a carried value or a second copy of the `case` statement in
+another formula. A carried value cannot drift.
+
+### Why absent means rebase
+
+`rejected-branch-resume-mode` treats an absent `prepare_mode` as `rebase`, which
+is the pre-existing behaviour, not a fail-open hole:
+
+- every bead the refinery hands back has passed through the stamp, and the stamp
+  is fail-closed, so absence never means "the refinery declined to say";
+- absence means some *other* writer set `rejection_reason`, and both such writers
+  want a rebase. One is the sibling site below, unchanged by this round rather
+  than newly exposed by it. The other is
+  `packs/gascity-keeper/template-fragments/refinery-rebase-handling.template.md`,
+  whose preflight-failure hand-back repools a `mol-upstream-gc-rebase` bead —
+  a bead whose entire purpose is divergent history force-pushed to `main` under
+  an explicit lease. Defaulting *that* to a merge would break the one branch
+  family that is supposed to be rewritten;
+- the alternative, defaulting to `merge`, silently puts a merge commit into every
+  ordinary rework branch in the city to guard a case that cannot occur.
+
+Case (Q) pins the default so it cannot drift unnoticed.
+
 ## The sibling site this change does NOT cover
 
 Sweeping for every path that can rewrite a shared branch — rather than only the
@@ -125,8 +201,10 @@ which is filed as `tk-rvspf` rather than fixed here.
 branch, whatever its shape — and files a rework child into a live fix pool whose
 `rejection_reason` reads "Rebase '$fix_branch' onto origin/$base ... and
 force-push with --force-with-lease". `mol-polecat-work.toml`'s workspace-setup
-then executes that unconditionally (`git rebase origin/{{base_branch}}` on
-whatever `metadata.branch` names). Neither site classifies the branch.
+then executes that on whatever `metadata.branch` names. Since round 2 that
+execution is conditional on `metadata.prepare_mode` — but this arm stamps no
+such key, so it still resolves to `git rebase origin/{{base_branch}}`. Neither
+site classifies the branch.
 
 The allowlist added here does not reach either of them: it guards the refinery's
 own prepare step, and this path hands the rewrite to a polecat instead. A
@@ -142,6 +220,11 @@ Kept out of this change deliberately: different file, different actor, different
 test suite (`reconcile-merged-prs.test.sh`, which already extracts from that
 script). Fixing it here would mean a second, independently-invented classifier
 landing unreviewed alongside this one; `tk-rvspf` proposes reusing this shape.
+
+Round 2 makes that reuse concrete rather than aspirational: the carrier now
+exists, so `tk-rvspf`'s remedy is to classify once at that dispatch site and
+stamp `prepare_mode` on the rework child it files — the resume path already
+honors it. No third classifier, and no change to `mol-polecat-work.toml`.
 
 ## Verification
 
@@ -167,6 +250,37 @@ Mutant 5 initially passed: `(E)` asserted only the exit code, and with the shape
 check deleted the block still exited 1 via the empty-`BRANCH` arm — the right
 answer for the wrong reason. `(E)`/`(F)` now assert the *diagnostic*, which is
 the only thing separating "bd was unreadable" from "this bead names no branch".
+
+### Round 2
+
+Same suite, cases (K)-(R) plus one work-order assertion — **85 passed / 0
+failed**. (K)/(L) pin the stamp, (M) its fail-closed guard. (N)-(R) execute the
+`rejected-branch-resume-mode` block extracted from the *other* formula against
+the same real repo and bare origin, and follow it through the plain
+`git push origin HEAD` that the submit step actually runs: whether that push
+fast-forwards is precisely what decides whether the worker is shown
+"force-needed?", so it is the assertion that proves the rewrite pressure is
+gone rather than merely discouraged. (R) is case (G) followed through — the
+branch whose merge conflicted, repooled and resumed.
+
+| mutant | result |
+|---|---|
+| A. resume reverts to unconditional rebase | 8 fail: "integration/resume tip was REWRITTEN by the hand-back", "merge-mode resume pushes as a plain fast-forward (got '1' want '0')", "(R) the conflicting hand-back REBASED the shared branch — case (G) still leaks" |
+| B. `prepare_mode` stamp deleted | 5 fail — (K), (L), (M) |
+| C. work order stops naming the mode | 1 fail — the block1 work-order assertion |
+
+All 23 suites that reference either formula, run at this commit: **0 failed**.
+check-set-heal 184/0, check-set-heal-visibility 320/0, check-set-normalize 20/0,
+detect-stalled-workflows 80/0, find-work-gating-guard 28/0,
+first-round-review-body 29/0, gc-helm 23/0, liveness-sweep-delta 133/0,
+merge-skill 274/0, mr-aware-rejection-failclosed 85/0, one-anchor-per-pr 13/0,
+preexisting-failure-dedup 14/0, quiesce-completed-workflows 100/0,
+reconcile-merged-prs 406/0, recover-stranded-branches 93/0,
+refinery-escalation-wiring 132/0, resolve-salvage-branch 51/0,
+signoff-anchor-failclosed 26/0, signoff-anchor-resolution 15/0,
+signoff-rework-dispatch 45/0, signoff-round-cap 26/0, submit-branch-gate 29/0,
+work-context-hook 21/0. `merge-skill` took 454s — over the 300s cap noted in
+round 1, confirming that finding, and it passes when given room.
 
 Neighbouring suites, unchanged: one-anchor-per-pr 13/0, check-set-normalize
 20/0, preexisting-failure-dedup 14/0, signoff-anchor-failclosed 26/0,

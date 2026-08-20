@@ -823,6 +823,22 @@ esac
 # A graduation bead IS the integration->main case, whatever its branch is
 # named; reconcile-graduated-convoys.sh stamps the flag when it hands one over.
 if [ "$GRADUATION" = "true" ]; then PREPARE_MODE=merge; fi
+# CARRY the classification on the bead, because the rewrite this block prevents
+# can still happen one step later, performed by a different actor. Both rejection
+# arms below hand the bead back to the polecat pool, and the polecat resume path
+# brings a branch current by REBASE and is told to force-push when that push is
+# non-fast-forward. The classifier runs ONLY here, and the snippets downstream
+# run in separate shells, so the bead is the only carrier that reaches them:
+# mol-polecat-work's `rejected-branch-resume-mode` block reads this key and
+# merges instead of rebasing when it says merge.
+# Fail CLOSED, and before touching the worktree: a mode that was not recorded is
+# a hand-back that WILL rebase a shared branch, so refuse to prepare a branch
+# that cannot be handed back safely.
+if ! gc bd update $WORK --set-metadata prepare_mode="$PREPARE_MODE" >/dev/null 2>&1; then
+  echo "could not record prepare_mode=$PREPARE_MODE on $WORK — NOT preparing the branch; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
 git fetch --prune origin
 git checkout -b temp "origin/$BRANCH"
 PREPARE_FAILED=
@@ -868,7 +884,7 @@ PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 gc bd update $WORK \
   --status=open \
   --assignee="" \
-  --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET)" \
+  --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)" \
   --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
   ${MR_STATE:+--unset-metadata merge_result} \
   ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
