@@ -43,10 +43,26 @@ set -euo pipefail
 DEACON="${BOOT_HEALTH_DEACON:-gc-toolkit.deacon}"
 REPORT_TO="${BOOT_HEALTH_REPORT_TO:-mayor/}"
 
-# Thresholds. The deacon's exponential backoff caps at 300s and it cycles every
-# ~4.6 min in practice, so WISP_FRESH is ~3 cycles of margin. Being wrong here
-# only costs a mail, but a detector that cries wolf gets ignored.
-WISP_FRESH="${BOOT_HEALTH_WISP_FRESH:-900}"        # wisp newer than this = healthy
+# Thresholds. WISP_FRESH is ~3 cycles of margin. Being wrong here only costs a
+# mail, but a detector that cries wolf gets ignored, so the margin is generous
+# by design.
+#
+# Raised 900 -> 3600 with mol-deacon-patrol's event_timeout 60 -> 600 (tk-2qa85).
+# The bound that matters is the MAXIMUM AGE the live wisp reaches, not the cycle
+# time: next-iteration pours the next wisp BEFORE the wait, so a wisp is already
+# `event_timeout` old when the cycle it belongs to starts, and it stays live
+# until the following pour. Max age is therefore a full cycle — wait + work.
+# Sampled 2026-08-20 on the live deacon (consecutive live wisps, ignoring the
+# leaked ones, which are not cycle markers): 679 s and 839 s at the old 60 s
+# wait, i.e. ~620-780 s of work. At a 600 s wait that is ~1220-1380 s, so the
+# old 900 s bar would have read a perfectly healthy deacon as cold on nearly
+# every cycle. 3600 restores ~2.6-3 cycles of margin. Size this off the LONGER
+# observed cycle: under-margining here mails the mayor, over-margining only
+# delays a report the REPORT_AFTER dwell already delays.
+#
+# This threshold is coupled to that formula var: change one and re-derive the
+# other, or this order becomes a permanent false-positive generator.
+WISP_FRESH="${BOOT_HEALTH_WISP_FRESH:-3600}"       # wisp newer than this = healthy
 REPORT_AFTER="${BOOT_HEALTH_REPORT_AFTER:-1800}"   # cold this long = mail once
 REPORT_EVERY="${BOOT_HEALTH_REPORT_EVERY:-21600}"  # re-mail a CONTINUING episode
 PEEK_LINES="${BOOT_HEALTH_PEEK_LINES:-30}"
