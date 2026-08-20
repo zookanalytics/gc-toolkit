@@ -4,18 +4,26 @@
 import re, sys, collections
 LOG=sys.argv[1]
 
-# A pass "acted" on a tick when it CHANGED STATE. Two kinds of summary counter
-# do not mean that, and counting them reports polling as work:
+# A pass "acted" on a tick when it CHANGED STATE. Three output shapes do not
+# mean that, and counting any of them reports polling as work:
 #
 #   * gauges — recomputed from scratch on every pass and re-reported for as
 #     long as the condition holds. One un-dispositioned PR adds 1 to
 #     `anchorless open PRs` on every pass, forever
 #     (reconcile-merged-prs.sh:2318, :2363, :2369).
 #   * failed attempts — a write that did not stick and will be retried next
-#     cycle (reconcile-refinery-handoffs.sh:400).
+#     cycle (reconcile-refinery-handoffs.sh:400,
+#     reconcile-graduated-convoys.sh:436).
+#   * diagnostics — a line explaining why the pass did nothing: an early exit
+#     before any candidate is read (reconcile-graduated-convoys.sh:112, :272,
+#     :292) or a per-item "not graduated" refusal (:320-:415). The pass ran;
+#     nothing moved.
 #
-# ACTION therefore lists only counters recording a BOUNDED state change:
-# something the pass stops reporting once it has done it.
+# Only a summary counter, or an explicitly listed one-time TRANSITION line,
+# can mark a tick as acted. Every other recognised line marks the pass SEEN
+# — it ran — and nothing more. ACTION therefore lists only counters recording
+# a BOUNDED state change: something the pass stops reporting once it has done
+# it.
 ACTION={
  'reconcile-refinery-handoffs':['repaired','reported'],
  'check-set-heal':['healed','signoffs dispatched','merge_result restored','non-canonical assignee'],
@@ -26,7 +34,12 @@ ACTION={
    'identity-encoding forced closes','wedged-close escalations','partial closes'],
  'reconcile-gate-verdicts':['fixable verdict(s) recorded','exception(s) recorded','escalated',
    'pre-open gate(s) re-armed','dead review(s) retired'],
- 'reconcile-graduated-convoys':['graduated','landed','merged'],
+ # reconcile-graduated-convoys.sh:440 prints `$graduated graduating, $skipped
+ # skipped, $held held, $vacuous vacuous`. Only `graduating` is a state change,
+ # and only the participle spelling ever appears — 'graduated'/'landed'/'merged'
+ # were guesses that matched no line the script emits, so a real graduation
+ # scored zero. `held`/`vacuous` are refusals; `skipped` is below.
+ 'reconcile-graduated-convoys':['graduating'],
 }
 # Counters excluded from ACTION by the rule above, kept here rather than
 # deleted so the exclusion is auditable and so re-adding one to ACTION cannot
@@ -37,6 +50,10 @@ ACTION={
 OBSERVATION={
  'reconcile-merged-prs':['anchorless open PRs','unowned open PRs'],
  'reconcile-refinery-handoffs':['failed'],
+ # `skipped` here is not a benign skip: it counts a convoy whose graduating
+ # write FAILED and is retried next pass (reconcile-graduated-convoys.sh:436).
+ # Same failed-attempt class as `failed` above.
+ 'reconcile-graduated-convoys':['skipped'],
 }
 # One-time transitions the summary line cannot express, because the field
 # counting them is a gauge. `anchorless open PRs` covers four arms and exactly
@@ -68,16 +85,17 @@ for line in open(LOG, errors='replace'):
     if not m: continue
     name, rest = m.group(1), m.group(2)
     if name not in ACTION: continue
-    if any(t.match(rest) for t in TRANSITION.get(name, ())):
-        curseen.add(name); curacts.add(name); transitions[name]+=1; continue
-    # only treat as the summary line if it has "<num> <word>" pairs, or the convoy no-op
-    pairs=re.findall(r'(\d+)\s+([a-zA-Z][^,]*)', rest)
-    if not pairs:
-        if name=='reconcile-graduated-convoys':
-            curseen.add(name)
-            if 'no complete owned integration convoys' not in rest: curacts.add(name)
-        continue
+    # Any recognised line proves the pass RAN on this tick. Counting only the
+    # summary line would read reconcile-graduated-convoys as having run once in
+    # 5,032 ticks, since it exits before printing one whenever it has no
+    # candidate — which is almost always.
     curseen.add(name)
+    if any(t.match(rest) for t in TRANSITION.get(name, ())):
+        curacts.add(name); transitions[name]+=1; continue
+    # Only a line carrying "<num> <word>" counter pairs is a summary line.
+    # Everything else is a diagnostic: seen above, never an action.
+    pairs=re.findall(r'(\d+)\s+([a-zA-Z][^,]*)', rest)
+    if not pairs: continue
     for num, label in pairs:
         label=label.strip()
         if any(label.startswith(o) for o in OBSERVATION.get(name, ())):
