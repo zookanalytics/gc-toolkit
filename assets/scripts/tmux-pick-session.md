@@ -46,18 +46,22 @@ judgment those mechanics force on agents.
 
 - The companion `prefix+a` binding (installed by
   `tmux-bindings.sh`, runs `tmux-visit-prompt.sh`) is the intake
-  half of this picker: it opens a `command-prompt`, and whatever
-  the operator types becomes a subject bead with a visit queued on
-  it (`gc-visit-open.sh`, tk-4ojka) — so `prefix+S` has something
-  to switch to. It held the `-thread` spawner until tk-bn1oi;
-  threads are retired and the key was dead. The response reaches
-  the handler through a **paste buffer**, not the command line:
-  `command-prompt` substitutes the response as text and then
-  parses the result as a tmux command, so a `;` or a `"` typed
-  into a message spliced straight into `run-shell` would be
-  mangled or partly executed. The handler runs foreground (the
-  buffer name is fixed, so the read must be serialised against the
-  next press) and backgrounds the slow half itself.
+  half of this picker: it opens a popup, and whatever the operator
+  types becomes a subject bead with a visit queued on it
+  (`gc-visit-open.sh`, tk-4ojka) — so `prefix+S` has something to
+  switch to. It held the `-thread` spawner until tk-bn1oi; threads
+  are retired and the key was dead. The message reaches the handler
+  through a **`gum write` popup** writing a per-press tmpfile, not
+  through the command line. tmux's `command-prompt` held the key
+  for one commit and is wrong on both counts: it substitutes the
+  response as text and then parses the result as a tmux command, so
+  a `;` or a `"` typed into a message spliced straight into
+  `run-shell` is mangled or partly executed — and it is
+  single-line by construction, which cost the operator multi-line
+  messages for as long as it was bound (tk-7z8c6). The popup
+  carries arbitrary text and arbitrary newlines. `run-shell -b`
+  because the popup stays open for as long as the operator is
+  typing; the handler backgrounds the slow half itself.
 
 ## Why display-menu, not choose-tree
 

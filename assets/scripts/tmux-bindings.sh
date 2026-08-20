@@ -38,15 +38,17 @@ gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --cit
 gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
 
 # Operator-origin visit intake — type a message, get a durable, routed
-# conversation on it. `command-prompt` opens the bottom-bar prompt; `%%%`
-# parks the response in a paste buffer (escaping quotation marks) instead of
-# splicing it into a command line, and tmux-visit-prompt.sh reads the buffer
-# back. That indirection is load-bearing: the response is substituted as TEXT
-# and the result is then PARSED as a tmux command, so a `;` or a `"` in a
-# message spliced directly into `run-shell` mangles it — or executes part of
-# it. Via the buffer the message crosses a process boundary untouched. The
-# handler runs FOREGROUND so the fixed buffer name is serialised against the
-# next press (a backgrounded read can lose a topic to the press behind it);
-# it backgrounds the slow half itself. See tmux-visit-prompt.sh.
-gcmux bind-key a command-prompt -p "visit topic: " \
-    "set-buffer -b gc-visit-topic -- \"%%%\" ; run-shell \"$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")\""
+# conversation on it. Input handling (a `gum write` popup) lives in the
+# script; the key just runs it, which is the shape this binding had before
+# threads were retired. `command-prompt` held it for exactly one commit
+# (tk-bn1oi) and is SINGLE-LINE by construction, so the operator could file a
+# sentence and nothing longer (tk-7z8c6). Restoring the popup restores the
+# input surface without disturbing where the message goes.
+#
+# `-b` is not decoration: the popup is modal and stays open for as long as
+# the operator is typing, and a foreground `run-shell` would hold tmux's
+# command queue — the whole server — open for that entire time. Nothing is
+# lost by backgrounding it now that the handler reads its message from a
+# per-press tmpfile instead of one shared paste buffer, which is what the
+# foreground read used to be ordering against. See tmux-visit-prompt.sh.
+gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")"
