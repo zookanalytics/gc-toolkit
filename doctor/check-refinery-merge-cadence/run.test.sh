@@ -17,12 +17,21 @@
 #        the rig and the retire command  [the second merge-skill.sh writer]
 #   (7)  a process merely MENTIONING the driver — a tail on its log, or a pager
 #        open on idle-loop.sh itself — is NOT a driver -> not flagged. Arm 3
-#        matches the command WORD, not the path anywhere in the line, so reading
-#        the retired script (quite possibly to confirm it is gone) does not get
-#        you reported as a live second writer
+#        matches the SCRIPT ARGUMENT, not the path anywhere in the line, so
+#        reading the retired script (quite possibly to confirm it is gone) does
+#        not get you reported as a live second writer
 #   (7b) the script exec'd directly, with no shell word, IS a driver -> flagged
 #   (7c) one driver forking children with the same argv is ONE finding, not one
 #        per process (the live driver showed up three times in `ps`)
+#   (7d) a shell `-c` wrapper that merely NAMES the driver — what an agent
+#        inspecting the retired script actually runs — is NOT a driver. The
+#        path is a word in the command STRING; argv[0] alone flagged it and
+#        told the operator to stop the service (tk-3t0ab)
+#   (7e) the driver path passed as an ARGUMENT to another script is NOT a
+#        driver either — the script argument is what identifies one
+#   (7f) POSITIVE CONTROL: a real driver behind shell options (`-x`, `-o
+#        pipefail`, `--`) still fires, so (7d)/(7e) cannot pass by way of a
+#        matcher that stopped detecting drivers at all
 #   (8)  suspended rig with no runs -> skipped, still exit 0, and said in a note
 #   (9)  `gc order list` unreadable -> WARN (exit 1), never a silent OK
 #   (10) `gc order history` unreadable -> WARN (exit 1); with a registration
@@ -39,8 +48,9 @@
 #   (17) a stale rig's message points at that rig's own pass.log and history
 #   (18) a host whose only working `ps` form is the PID-prefixed `ps ax` still
 #        reports a live driver. The snapshot is normalised to a command-only
-#        column first; feeding `123 ? Ss 0:00 bash ...` to a first-WORD matcher
-#        makes the arm structurally unable to fire  [green with a live driver]
+#        column first; feeding `123 ? Ss 0:00 bash ...` to a matcher that starts
+#        at argv[0] makes the arm structurally unable to fire  [green with a
+#        live driver]
 #   (18b) that same fallback does not turn a mere reader into a driver — the
 #        normalisation is precise, not just permissive
 #   (18c) the same, on a `ps` whose COMMAND is preceded by THREE columns and not
@@ -83,9 +93,9 @@ case "${1:-}:${2:-}" in
 esac
 exit 1
 STUB
-# The `ps` stub is FORM-AWARE on purpose. run.sh matches the first WORD of each
-# line, so what a given host's `ps` puts in column 1 decides whether the driver
-# arm can fire at all. GC_STUB_PS_FORMS names the shapes this simulated host
+# The `ps` stub is FORM-AWARE on purpose. run.sh parses each line as argv from
+# argv[0], so what a given host's `ps` puts in column 1 decides whether the
+# driver arm can fire at all. GC_STUB_PS_FORMS names the shapes this simulated host
 # supports; anything else exits 1, the way a host without that flag would:
 #   argsonly     -> `-eo args=` / `ax -o args=`: argv only, no header
 #   pidprefixed  -> `ps ax`: header + PID TTY STAT TIME COMMAND
@@ -290,6 +300,66 @@ printf '/tmp/gc-refinery-idle-signal-loom/idle-loop.sh\n' > "$TMP/stub/ps.txt"
 run_check; rc=$?
 eq "$rc" 2 "(7b) directly exec'd idle-loop.sh -> exit 2"
 has "out-of-band refinery driver running for rig signal-loom" "$TMP/out" "(7b) names the rig"
+
+# ---------------------------------------------------------------------------
+# (7d) a shell -c wrapper that merely NAMES the driver is not a driver
+#
+# The regression for tk-3t0ab: argv[0] is a shell and the driver path is in the
+# line, but the path is a word inside the -c command string, so no driver runs.
+# Matching on argv[0] alone flagged this and told the operator to stop the
+# service — the reader-is-not-a-driver false positive of (7), arriving through
+# the shell. These are the command lines an agent inspecting the retired script
+# actually runs.
+# ---------------------------------------------------------------------------
+reset
+printf 'bash -c cat /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+run_check; rc=$?
+eq "$rc" 0 "(7d) bash -c naming the driver script -> exit 0"
+hasnt "out-of-band refinery driver running" "$TMP/out" "(7d) not flagged"
+
+reset
+printf 'bash -xc grep -n merge /tmp/gc-refinery-idle-gascity/idle-loop.sh\nsh -c while :; do echo /tmp/gc-refinery-idle-signal-loom/idle-loop.sh; done\nbash --command cat /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\nbash -s /tmp/gc-refinery-idle-gascity/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+run_check; rc=$?
+eq "$rc" 0 "(7d) short cluster (-xc), long --command, and -s stdin -> exit 0"
+hasnt "out-of-band refinery driver running" "$TMP/out" "(7d) none flagged"
+
+# ---------------------------------------------------------------------------
+# (7e) the driver path passed as an ARGUMENT to something else is not a driver
+#
+# Same root cause as (7d) from the other side: a shell running some OTHER
+# script, with the driver's path as that script's argument. The script argument
+# is what identifies a driver, so it has to be the first non-option word.
+# ---------------------------------------------------------------------------
+reset
+printf 'bash /opt/tools/inspect.sh /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\n/home/me/idle-loop.sh --config /tmp/gc-refinery-idle-gascity/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+run_check; rc=$?
+eq "$rc" 0 "(7e) driver path as an argument to another script -> exit 0"
+hasnt "out-of-band refinery driver running" "$TMP/out" "(7e) not flagged"
+
+# ---------------------------------------------------------------------------
+# (7f) POSITIVE CONTROL for (7d)/(7e): option-skipping must not over-reject.
+#
+# Tightening the matcher is only correct if a real driver behind shell options
+# still fires. Without this, (7d) and (7e) would pass just as well against a
+# matcher that had stopped detecting drivers altogether.
+# ---------------------------------------------------------------------------
+reset
+printf 'bash -x /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+run_check; rc=$?
+eq "$rc" 2 "(7f) bash -x <driver> is still a driver -> exit 2"
+has "out-of-band refinery driver running for rig gc-toolkit" "$TMP/out" "(7f) names the rig"
+
+reset
+printf 'bash -o pipefail /tmp/gc-refinery-idle-gascity/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+run_check; rc=$?
+eq "$rc" 2 "(7f) an option that takes a value is skipped, driver still found"
+has "out-of-band refinery driver running for rig gascity" "$TMP/out" "(7f) names the rig"
+
+reset
+printf 'bash -- /tmp/gc-refinery-idle-signal-loom/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+run_check; rc=$?
+eq "$rc" 2 "(7f) end-of-options marker, driver still found"
+has "out-of-band refinery driver running for rig signal-loom" "$TMP/out" "(7f) names the rig"
 
 # ---------------------------------------------------------------------------
 # (8) suspended rig

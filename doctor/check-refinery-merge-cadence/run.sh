@@ -63,14 +63,18 @@
 #      liveness confusion catalogued in
 #      specs/tk-agzpl/refinery-idle-driver-liveness.md, where a lock file
 #      reported a driver that had been dead for hours — so the match is on the
-#      command WORD (a shell running the script, or the script exec'd directly),
-#      not on the path appearing anywhere in the line. `less
-#      /tmp/gc-refinery-idle-<rig>/idle-loop.sh` is somebody reading the old
-#      driver, quite possibly to confirm it is gone; calling that a live second
-#      writer would make this arm cry wolf at exactly the people fixing it.
-#      Because the match is on the command WORD, the process-table snapshot must
-#      be a command-only column; see the ps ladder at the arm itself for why a
-#      PID-prefixed fallback silently defeats it.
+#      command's SCRIPT ARGUMENT (the first non-option word of a shell, or
+#      argv[0] for the script exec'd directly), not on the path appearing
+#      anywhere in the line. `less /tmp/gc-refinery-idle-<rig>/idle-loop.sh` is
+#      somebody reading the old driver, quite possibly to confirm it is gone;
+#      calling that a live second writer would make this arm cry wolf at
+#      exactly the people fixing it. The same holds one level in: `bash -c cat
+#      …/idle-loop.sh` is a shell in argv[0] with the path in its command
+#      string, and runs no driver — see the matcher for why that shape has to
+#      be parsed rather than pattern-matched. Because the match starts at
+#      argv[0], the process-table snapshot must be a command-only column; see
+#      the ps ladder at the arm itself for why a PID-prefixed fallback silently
+#      defeats it.
 #
 # COLD BOOT. A city started less than one tick ago has registrations and no runs
 # yet, and arm 2 will call that stale. It is not a false statement — there is no
@@ -256,28 +260,100 @@ fi
 # leftover state directory is deliberately NOT evidence.
 # ---------------------------------------------------------------------------
 # Is this command line a driver actually RUNNING, rather than a process that
-# merely mentions one? True for a shell invoked on the script, and for the
+# merely mentions one? True for a shell invoked ON the script, and for the
 # script exec'd directly. False for a pager, an editor, or a grep.
-is_running_driver() { # command-line
+#
+# The test is on the shell's SCRIPT ARGUMENT, not on argv[0] plus a substring
+# match anywhere in the line. Both halves are load-bearing:
+#
+#   * `bash -c cat /tmp/gc-refinery-idle-<rig>/idle-loop.sh` names a shell in
+#     argv[0] and the driver path in the line, and runs no driver at all — the
+#     path is a word inside the -c command string. Reading argv[0] alone flags
+#     it, which is this arm's own reader-is-not-a-driver false positive coming
+#     back through the shell (tk-3t0ab). It is not hypothetical: `-c` wrappers
+#     around the retired script are what agents and operators INSPECTING it
+#     run, so the arm would cry wolf at exactly the people confirming it is
+#     gone — and tell them to stop a service.
+#   * `bash /other/script.sh /tmp/gc-refinery-idle-<rig>/idle-loop.sh` passes
+#     the path as an argument to something else. Same reasoning.
+#
+# So: disqualify the shell forms that take no script file (`-c`, `-s`, and any
+# short cluster containing either), skip the remaining options, and require the
+# first non-option word to BE a driver script path.
+#
+# The deliberate trade-off: `bash -c '/tmp/gc-refinery-idle-<rig>/idle-loop.sh'`
+# would RUN a driver, and this returns false for it. Telling that apart from
+# `bash -c 'cat …/idle-loop.sh'` means parsing the command string as shell, and
+# a check that guesses at shell semantics to decide whether to tell an operator
+# to stop a service is worse than one that under-reports here. It also costs
+# little in practice: bash exec's a lone simple command in place, so the
+# process's own argv becomes the script path and the direct-exec branch below
+# catches it; anything more complex leaves the driver running as a CHILD with
+# its own argv, which this catches too. A false alarm aimed at the people
+# retiring the driver is the failure that actually happened (tk-3t0ab).
+is_driver_path() { # word
     case "$1" in
-        *gc-refinery-idle-*/idle-loop.sh*) ;;
-        *) return 1 ;;
-    esac
-    local word="${1%% *}"
-    case "${word##*/}" in
-        sh|bash|dash|ksh|zsh|idle-loop.sh) return 0 ;;
+        *gc-refinery-idle-*/idle-loop.sh) return 0 ;;
     esac
     return 1
 }
 
+is_running_driver() { # command-line
+    # Cheap prefilter: no driver path anywhere in the line, nothing to do.
+    case "$1" in
+        *gc-refinery-idle-*/idle-loop.sh*) ;;
+        *) return 1 ;;
+    esac
+
+    # `local -` scopes the option change to this function (restored on return).
+    # `set -f` matters: these words come from the process table, so an
+    # unquoted `*` in somebody's command string must not glob against the
+    # check's own cwd before we can read it.
+    local -
+    set -f
+    # shellcheck disable=SC2086 # deliberate split: ps hands us argv as one string
+    set -- $1
+    [ "$#" -gt 0 ] || return 1
+
+    case "${1##*/}" in
+        sh|bash|dash|ksh|zsh)
+            shift ;;
+        *)
+            # Not a shell. The only remaining driver shape is the script
+            # exec'd directly, so argv[0] itself must be the driver script.
+            is_driver_path "$1"
+            return ;;
+    esac
+
+    # A shell. Walk its options to find the script argument.
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --)               shift; break ;;
+            -c|--command)     return 1 ;;   # script comes from the ARGUMENT
+            -s|--stdin)       return 1 ;;   # script comes from stdin
+            -o|+o|--rcfile|--init-file)
+                              shift 2 2>/dev/null || return 1; continue ;;
+            --*)              shift; continue ;;
+            -*c*|-*s*|+*c*|+*s*)
+                              return 1 ;;   # short cluster, e.g. `-xc`
+            -?*|+?*)          shift; continue ;;
+            *)                break ;;
+        esac
+    done
+
+    [ "$#" -gt 0 ] || return 1
+    is_driver_path "$1"
+}
+
 # Snapshot the process table as a COMMAND-ONLY column.
 #
-# The matcher above tests the first WORD of a line, so the SHAPE of this
-# snapshot is load-bearing. `ps -eo args=` gives exactly that shape: argv, one
-# process per line, no header and no leading columns. The fallbacks exist
-# because that form is not universal — but the shapes are NOT interchangeable.
-# `ps ax` prefixes every row with PID TTY STAT TIME, so the first word of a
-# driver's line is a PID, never `bash`, and the word test can never fire.
+# The matcher above parses each line as argv, starting at argv[0], so the SHAPE
+# of this snapshot is load-bearing. `ps -eo args=` gives exactly that shape:
+# argv, one process per line, no header and no leading columns. The fallbacks
+# exist because that form is not universal — but the shapes are NOT
+# interchangeable. `ps ax` prefixes every row with PID TTY STAT TIME, so the
+# first word of a driver's line is a PID, never `bash`, and the argv walk can
+# never fire.
 # Falling back to it raw keeps the arm running while making it structurally
 # incapable of reporting the second writer it exists to catch — a green verdict
 # with a live driver on the host.
