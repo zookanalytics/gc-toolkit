@@ -68,6 +68,9 @@
 #      /tmp/gc-refinery-idle-<rig>/idle-loop.sh` is somebody reading the old
 #      driver, quite possibly to confirm it is gone; calling that a live second
 #      writer would make this arm cry wolf at exactly the people fixing it.
+#      Because the match is on the command WORD, the process-table snapshot must
+#      be a command-only column; see the ps ladder at the arm itself for why a
+#      PID-prefixed fallback silently defeats it.
 #
 # COLD BOOT. A city started less than one tick ago has registrations and no runs
 # yet, and arm 2 will call that stale. It is not a false statement — there is no
@@ -267,8 +270,49 @@ is_running_driver() { # command-line
     return 1
 }
 
-ps_snapshot=$(ps -eo args= 2>/dev/null || ps ax 2>/dev/null)
-if [ -n "$ps_snapshot" ]; then
+# Snapshot the process table as a COMMAND-ONLY column.
+#
+# The matcher above tests the first WORD of a line, so the SHAPE of this
+# snapshot is load-bearing. `ps -eo args=` gives exactly that shape: argv, one
+# process per line, no header and no leading columns. The fallbacks exist
+# because that form is not universal — but the shapes are NOT interchangeable.
+# `ps ax` prefixes every row with PID TTY STAT TIME, so the first word of a
+# driver's line is a PID, never `bash`, and the word test can never fire.
+# Falling back to it raw keeps the arm running while making it structurally
+# incapable of reporting the second writer it exists to catch — a green verdict
+# with a live driver on the host.
+#
+# So: ask for command-only forms first, and if the only form this host answers
+# is the PID-prefixed one, strip its four leading columns rather than hand them
+# to a matcher that cannot read them.
+#
+# A zero-row snapshot counts as a FAILED read, not as "no drivers running": the
+# reading process is always in its own output, so an empty table is not an
+# observation anyone can make. That also catches the restricted-/proc container
+# where `ps` exits 0 and prints nothing — which would otherwise pass green.
+ps_snapshot=""
+ps_readable=0
+for ps_form in "-eo args=" "ax -o args="; do
+    # shellcheck disable=SC2086 # each form is a deliberate multi-word argv
+    if ps_snapshot=$(ps $ps_form 2>/dev/null) && [ -n "$ps_snapshot" ]; then
+        ps_readable=1
+        break
+    fi
+done
+if [ "$ps_readable" -eq 0 ]; then
+    ps_raw=$(ps ax 2>/dev/null) || ps_raw=""
+    if [ -n "$ps_raw" ]; then
+        # Drop the header row, then the PID/TTY/STAT/TIME columns, leaving the
+        # COMMAND column alone. Addressed by pattern rather than by line number
+        # so the two expressions stay portable across GNU and BSD sed.
+        ps_snapshot=$(printf '%s\n' "$ps_raw" | sed -E \
+            -e '/^[[:space:]]*PID[[:space:]]+TTY/d' \
+            -e 's/^[[:space:]]*[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+//')
+        [ -n "$ps_snapshot" ] && ps_readable=1
+    fi
+fi
+
+if [ "$ps_readable" -eq 1 ]; then
     # ONE finding per rig, not per process. A driver is a shell loop: its
     # command substitutions fork children that inherit the same argv, so the
     # single live driver on this city showed up as three identical `ps` lines.
@@ -286,7 +330,10 @@ if [ -n "$ps_snapshot" ]; then
         errors+=("out-of-band refinery driver running for rig $rig ($procs process(es), e.g. \"$line\") — this is a SECOND merge-skill.sh writer against the same anchors, and the controller's single-flight gate keys on the order's ScopedName() so it cannot see this one. Retire it (\`systemctl --user stop gc-refinery-idle-$rig.service\`); the order already runs the same pass set.")
     done <<< "$ps_snapshot"
 else
-    notes+=("could not snapshot the process table — the out-of-band driver arm did not run")
+    # FAIL CLOSED. "We could not look" is not "there is nothing there": a note
+    # leaves the exit code at 0, which publishes an OK verdict whose own summary
+    # line claims "no out-of-band driver" on evidence nobody gathered.
+    warnings+=("could not snapshot the process table — the out-of-band driver arm did not run, so a second merge-skill.sh writer against these anchors would not be visible here. \`ps\` answered none of the forms tried (-eo args=, ax -o args=, ax); check that it is installed and on PATH.")
 fi
 
 # ---------------------------------------------------------------------------

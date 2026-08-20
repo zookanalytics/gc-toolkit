@@ -37,6 +37,14 @@
 #   (15) GC_DOCTOR_MERGE_CADENCE_WINDOW overrides the window
 #   (16) a malformed window falls back to 15m rather than passing junk to `gc`
 #   (17) a stale rig's message points at that rig's own pass.log and history
+#   (18) a host whose only working `ps` form is the PID-prefixed `ps ax` still
+#        reports a live driver. The snapshot is normalised to a command-only
+#        column first; feeding `123 ? Ss 0:00 bash ...` to a first-WORD matcher
+#        makes the arm structurally unable to fire  [green with a live driver]
+#   (18b) that same fallback does not turn a mere reader into a driver — the
+#        normalisation is precise, not just permissive
+#   (19) NO `ps` form works -> WARN (exit 1), never an OK whose summary claims
+#        "no out-of-band driver" on evidence nobody gathered  [FAIL CLOSED]
 #   (INV) detect-only: no fix.sh ships next to run.sh (a sibling fix.sh would
 #        auto-opt this check into `gc doctor --fix`, and there is nothing here
 #        to fix automatically — restarting a merge cadence is an operator act)
@@ -71,10 +79,45 @@ case "${1:-}:${2:-}" in
 esac
 exit 1
 STUB
+# The `ps` stub is FORM-AWARE on purpose. run.sh matches the first WORD of each
+# line, so what a given host's `ps` puts in column 1 decides whether the driver
+# arm can fire at all. GC_STUB_PS_FORMS names the shapes this simulated host
+# supports; anything else exits 1, the way a host without that flag would:
+#   argsonly     -> `-eo args=` / `ax -o args=`: argv only, no header
+#   pidprefixed  -> `ps ax`: header + PID TTY STAT TIME COMMAND
+# Unset means both, which is what a real Linux host does.
 cat > "$TMP/bin/ps" <<'STUB'
 #!/usr/bin/env bash
 D="${GC_STUB_DIR:?}"
-[ -f "$D/ps.txt" ] && cat "$D/ps.txt"
+forms="${GC_STUB_PS_FORMS-argsonly pidprefixed}"
+case "$*" in
+    *"args="*|*"command="*) want=argsonly ;;
+    *)                      want=pidprefixed ;;
+esac
+case " $forms " in
+    *" $want "*) ;;
+    *) exit 1 ;;
+esac
+# A real `ps` always lists at least itself, so the baseline snapshot is one
+# line even when the fixture adds none. run.sh reads a zero-row table as a
+# failed read; a stub that returned nothing would be simulating something no
+# host does.
+emit() {
+    echo "/usr/bin/ps $*"
+    [ -f "$D/ps.txt" ] && cat "$D/ps.txt"
+    return 0
+}
+if [ "$want" = pidprefixed ]; then
+    echo "  PID TTY      STAT   TIME COMMAND"
+    n=100
+    emit "$@" | while IFS= read -r l; do
+        [ -n "$l" ] || continue
+        printf '%5d ?        Ss     0:00 %s\n' "$n" "$l"
+        n=$((n + 1))
+    done
+else
+    emit "$@"
+fi
 exit 0
 STUB
 chmod +x "$TMP/bin/gc" "$TMP/bin/ps"
@@ -312,6 +355,34 @@ reset
 GC_DOCTOR_MERGE_CADENCE_WINDOW='; rm -rf /' run_check
 grep -q -- '--since 15m' "$TMP/stub/calls.log" && ok "(16) malformed window falls back to 15m" \
     || bad "(16) malformed window was passed through ($(grep '^order history' "$TMP/stub/calls.log" | head -1))"
+
+# ---------------------------------------------------------------------------
+# (18) only `ps ax` works — the PID-prefixed fallback must still find a driver
+# ---------------------------------------------------------------------------
+reset
+printf 'bash /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\n/usr/bin/sshd -D\n' > "$TMP/stub/ps.txt"
+GC_STUB_PS_FORMS=pidprefixed run_check; rc=$?
+eq "$rc" 2 "(18) live driver seen only through \`ps ax\` -> exit 2"
+has "out-of-band refinery driver running for rig gc-toolkit" "$TMP/out" "(18) names the rig from the normalised line"
+has "(1 process(es)" "$TMP/out" "(18) counts the driver once, header row not miscounted"
+
+# (18b) the same fallback must not promote a reader into a driver
+reset
+printf 'less /tmp/gc-refinery-idle-gascity/idle-loop.sh\ntail -f /tmp/gc-refinery-idle-gc-toolkit/reconcile.log\n' > "$TMP/stub/ps.txt"
+GC_STUB_PS_FORMS=pidprefixed run_check; rc=$?
+eq "$rc" 0 "(18b) reader seen through \`ps ax\` is still not a driver -> exit 0"
+hasnt "out-of-band refinery driver running" "$TMP/out" "(18b) not flagged"
+
+# ---------------------------------------------------------------------------
+# (19) no `ps` form works at all -> warn, never a silent OK
+# ---------------------------------------------------------------------------
+reset
+printf 'bash /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh\n' > "$TMP/stub/ps.txt"
+GC_STUB_PS_FORMS= run_check; rc=$?
+eq "$rc" 1 "(19) unreadable process table -> exit 1 (warn, not OK)"
+has "could not snapshot the process table" "$TMP/out" "(19) says what it could not read"
+hasnt "OK:" "$TMP/out" "(19) never green about a driver arm that did not run"
+hasnt "no out-of-band driver" "$TMP/out" "(19) does not claim absence it never checked"
 
 # ---------------------------------------------------------------------------
 # (INV) detect-only
