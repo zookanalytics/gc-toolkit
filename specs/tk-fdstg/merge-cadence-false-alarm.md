@@ -74,12 +74,49 @@ relocation of the daemon's `run_passes()`. That is what made the duplication
 survivable and invisible for a day, and it is also why retiring the daemon costs
 nothing: the order already does all of it.
 
-The unit was stopped at 2026-08-20T08:27:33Z. It was transient
-(`systemd-run --user`), so stopping it removes it, and nothing in the pack arms
-a replacement — a concept sweep for `idle-loop`, `gc-refinery-idle`,
-`systemd-run` and `systemctl --user` finds only history: this order's own
-header, the two spec files above, and prose in `mol-refinery-patrol.toml` that
-already tells the refinery agent not to drive the cadence itself.
+### Retiring it took two attempts
+
+The unit was stopped at 2026-08-20T08:27:33Z, then re-armed by hand at 08:42:05Z
+on the belief that stopping it had left gc-toolkit with no merge cadence at all.
+It had not: the order ticked at 08:28:22Z, 08:32:51Z, 08:36:32Z and 08:39:47Z —
+straight through the supposed outage. The belief came from this document's own
+subject, a measurement error, in a third variant:
+
+```
+$ gc bd list --status all --include-infra --limit 500 --json \
+    | jq '[.[]? | select((.title//"")|startswith("order:refinery-reconcile:rig:"))] | length'
+0
+```
+
+That query returns 0 for every rig always — including the three nobody doubted —
+because order-tracking beads are wisps and `bd list` does not enumerate wisps.
+That is the same wisp finding the verdict above rests on, turned to the wrong
+conclusion. The
+positive control was one edit away: widening the same query to *any*
+order-tracking title also returns 0, which shows the probe is dead rather than
+the cadence.
+
+The re-arm put the busiest rig back into the two-writer state for five minutes,
+with a signoff under review and a PR about to open — driver pass 08:42:53Z,
+order tick 08:44:12Z, 19 seconds apart on the same three anchors.
+
+The unit was stopped for good at 2026-08-20T08:47:45Z. gc-toolkit ticked again at
+08:51:03Z and 08:57:17Z with zero `idle-loop.sh` processes alive anywhere in the
+city — the cadence carrying on unaided across consecutive ticks, not a single
+sample — and the check this bead shipped confirmed the end state against the live
+city:
+
+```
+$ bash doctor/check-refinery-merge-cadence/run.sh
+OK: refinery-reconcile registered and ticking on 4 rig(s) within 15m, no out-of-band driver
+```
+
+The unit was transient (`systemd-run --user`), so stopping it removes it, and
+nothing in the pack arms a replacement — a concept sweep for `idle-loop`,
+`gc-refinery-idle`, `systemd-run` and `systemctl --user` finds only history:
+this order's own header, the two spec files named in Boundaries, the detector's
+own matching logic, and prose in `mol-refinery-patrol.toml` that already tells
+the refinery agent not to drive the cadence itself.
 
 Note what is *not* evidence of a driver: `/tmp/gc-refinery-idle-<rig>/`
 directories still exist for all four rigs, lock files and all. Only a process
@@ -141,6 +178,13 @@ It reads history with `--since <window> --limit 0`, and `run.test.sh` asserts
 that `--limit 0` is present. That assertion is the point: a future reader
 tidying the call into a bounded read would rebuild this bead's blind spot inside
 the check written to prevent it.
+
+Assertion 3 met the real thing within the hour, and not in a test. The pre-open
+review of this branch ran the check against the live city while the re-armed
+driver was up; it exited 2 and named
+`bash /tmp/gc-refinery-idle-gc-toolkit/idle-loop.sh`. The detector caught a
+hand-armed second writer on its first encounter with one, which is also how the
+re-arm above came to be undone.
 
 Both the outage and its inverse are now cheap. A stopped cadence is a doctor
 error naming the rig; a *claim* of a stopped cadence is one `gc doctor` run away

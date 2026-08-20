@@ -171,7 +171,20 @@ merge-skill writers: the order, single-flighted by the controller, and a daemon
 the controller could not see. Retiring it is what closed the migration, and
 `check-refinery-merge-cadence` is what keeps it closed.
 
-**Do not re-create an out-of-band driver** applies to a stopped cadence too. If
-the order is not ticking, fix the order — the check will tell you whether the
-fault is one rig (the controller is up, and the other rigs prove it) or the
-whole city.
+Retiring it took two attempts, which is why **do not re-create an out-of-band
+driver** is written as a prohibition and not a preference. gc-toolkit's driver was stopped at 08:27:33Z and re-armed
+by hand at 08:42:05Z, because a query for its order-tracking beads returned zero
+and was read as "the cadence is dead". The query was `bd list`, which cannot
+enumerate wisps and so returns zero for every rig always; the order had in fact
+ticked four times during the supposed outage. The re-arm restored the two-writer
+state on the busiest rig for five minutes — driver 08:42:53Z, order 08:44:12Z,
+19s apart on the same anchors — and was caught by this check, which exits 2 on a
+live `idle-loop.sh`. Stopped for good at 08:47:45Z; ticks at 08:51:03Z and
+08:57:17Z with no driver anywhere in the city; check green.
+
+**Do not re-create an out-of-band driver** applies to a stopped cadence too, and
+that is the case that actually catches people. A zero from a surface that cannot
+enumerate what you are counting is not evidence of an outage — re-read the
+cadence on the two authoritative surfaces above before concluding anything. If it
+really has stopped, fix the order: the check will tell you whether the fault is
+one rig (the controller is up, and the other rigs prove it) or the whole city.
