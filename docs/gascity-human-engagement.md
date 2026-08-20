@@ -398,13 +398,23 @@ multi-paragraph reply (`tk-tufrw`); full evidence in
 Once a sitting **ends** — the visit closed, the takeaway stamped, the
 sign-off posted — the session still has a live pane, and the thread the
 operator is reading is still on screen. What it no longer has is a wake
-reason. `ComputeAwakeSet` finds none, and the reconciler's
+reason of its own. `ComputeAwakeSet` finds none, and the reconciler's
 `if !shouldWake && target.alive` arm (`cmd/gc/session_reconciler.go`)
 begins a drain whose reason resolves to the `switch` default,
 **`no-wake-reason`**. Measured on 2026-08-20: the tick at 22:03:13Z saw
 `state: awake`, the same tick at 22:03:17Z recorded `state: draining`,
-and the stop landed at 22:04:15Z — a **~58-second** window, about an
-hour after the sitting itself had ended.
+and the stop landed at 22:04:15Z — a **~58-second** window.
+
+**What holds the pane up in the meantime is not the operator.** The
+converse pool is demand-driven (`min_active_sessions = 0`), so a live
+session survives on the pool having open visits at all — anyone's. In
+this incident the operator's own visit had closed an hour earlier, and
+the pane outlived it only because an unrelated visit (`tk-lrylu`, a
+different subject entirely) stayed open; that one closed at 22:02:15Z and
+the drain began 58 seconds later. Do not read a still-present pane as
+evidence that the system knows you are there. It does not: neither the
+operator's attention nor anything they have typed is an input to the
+decision.
 
 Three things about that path are worth knowing before trusting a pane:
 
@@ -442,6 +452,13 @@ composer buffer), a cooldown order (multi-minute cadence against a
 volume unusable). The capture has to live in the drain path upstream:
 filed as `gc-ze774`, with `gc-8g41r`'s `InputAreaState` — buffered-input
 detection over `tmux capture-pane` — as the primitive it should consume.
+
+**The operator's ruling on this (2026-08-20T22:21Z):** *"draining a
+session with typed text should be a hard no."* Pending input is a hard
+blocker on teardown, not something to capture on the way out — capture
+and warning are the fallback for a teardown that happens anyway. That
+prohibition is what `gc-ze774` is filed to implement; the pack has no
+part of it to build.
 
 **What follows for the pack.** Treat "the sitting ended" as the start of
 a short countdown on that pane, not as a quiet state. The existing

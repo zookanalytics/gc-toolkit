@@ -563,6 +563,15 @@ have "doc names the drain reason" 'no-wake-reason' "$ENGAGE"
 have "doc names the interrupt that clears the composer" 'SendKeysRaw' "$ENGAGE"
 have "doc records the misleading stop wording" 'drain acknowledged by agent' "$ENGAGE"
 have "doc points at the upstream filing" 'gc-ze774' "$ENGAGE"
+# The operator's ruling is a PROHIBITION, and it is the part most likely
+# to be softened by a later edit into "capture it on the way out" — which
+# is the option they explicitly overrode. Pin the ruling itself, not a
+# paraphrase of it.
+have "doc carries the hard-no ruling" 'should be a hard no' "$ENGAGE"
+# A live pane is not evidence the system knows anyone is there: the
+# session survives on the pool having ANY open visit, so a reader must
+# not infer protection from the pane still being up.
+have "doc says the pane is held by unrelated demand" 'demand-driven' "$ENGAGE"
 # A reader who finds the reap section first must not stop there: without
 # a forward pointer the held-sitting account silently doubles as "all the
 # ways the pane goes", which is the reading that left this window

@@ -8,16 +8,24 @@ description: What actually tore down the converse pane that ate an operator's un
 Bead: `tk-tufrw`. Subject of the lost reply: `tk-gy1ws`.
 
 `tk-tufrw` asks for the trigger to be established *before* a fix is
-designed, and names three candidates: an idle timer, a periodic
-witness/liveness sweep, or something else. It is the third. This
-document records what fired, with the evidence, and the ownership split
-that follows from it.
+designed. This document records what fired, with the evidence, and the
+ownership split that follows from it.
+
+**The requirement is binding and it is a prohibition** (operator,
+2026-08-20T22:21Z): *"draining a session with typed text should be a hard
+no."* Tearing down a session that holds unsubmitted operator input is
+forbidden — pending input is a hard blocker on teardown, the way an
+uncommitted working tree blocks a destructive git operation. Capture and
+warning are worth having *in addition*, as the fallback for a teardown
+that happens anyway. They are explicitly **not** the fix; an earlier
+draft of the bead ranked capture-before-kill first and the operator
+overrode it. Everything below is written against the prohibition.
 
 ## Verdict
 
 The pane was destroyed by a **reconciler-initiated `no-wake-reason`
 drain** of the converse session — the path that stops a session the
-controller can find no reason to keep awake. Neither named hypothesis
+controller can find no reason to keep awake. No hypothesis the bead names
 fired:
 
 - **Not the idle timer.** `agents/converse/agent.toml` sets
@@ -25,6 +33,17 @@ fired:
 - **Not a witness or liveness sweep.** No sweep touched it; the stop
   came from the session reconciler's own drain scan, and the recorded
   stop reason is a drain, not a reap.
+- **Not `restart_window`, and not any one-hour timer.** The bead flags
+  `city.toml:214` `restart_window = "1h"` as an unconfirmed candidate.
+  It is refuted. `RestartWindow` is the *sliding window over which
+  restarts are counted* for crash-loop quarantine —
+  `internal/config/config.go`: "the maximum number of agent restarts
+  within RestartWindow before the agent is quarantined" — consumed by
+  `newCrashTracker` (`cmd/gc/city_runtime.go:331`,
+  `cmd/gc/crash_tracker.go:44`). It starts no timer and stops nothing;
+  reaching one hour is not an event in it. The ~57-minute arithmetic is
+  a coincidence, and the real interval has a different explanation
+  (below).
 
 The operator's words were destroyed **twice over, by two separate
 actions**, and the first one is not the kill:
@@ -54,6 +73,7 @@ session `gc-toolkit__converse-lx-3r9dc`.
 | 21:05:10 | last tool call of the session: the takeaway/close block | transcript `cfd57ee4-…jsonl` |
 | 21:05:12 | `gc.takeaway` stamped on `tk-gy1ws`; the visit closes | bead |
 | 21:05:45 | last assistant turn — a framing that invites a reply | transcript |
+| 22:02:15 | `tk-lrylu` closes — the last open converse-pool visit, on an unrelated subject | bead |
 | 22:03:13 | reconciler tick observes the session: `state: awake` | reconciler trace `segments/2026/08/20/segment-000010.jsonl` |
 | 22:03:17 | same tick's result: `state: draining` | same |
 | ~22:04 | operator is mid-compose; pane disappears | operator report |
@@ -85,14 +105,45 @@ session gets a chance to be cancelled. Measured here: drain began in the
 22:03:13 tick, stop recorded at 22:04:15 — a **~58-second** window
 between the decision and the kill, with the `C-c` somewhere inside it.
 
-Attachment is a wake cause — `input.Runtime.Attached` →
+### What was keeping the pane alive — and it was not the operator
+
+The hour is not a timer. The converse pool is demand-driven
+(`min_active_sessions = 0`), so a live converse session survives only
+while the pool has demand, and the demand is open visit beads.
+
+`tk-lrylu` — *"visit: tk-yps55 — operator-origin topic intake"*, an
+**unrelated** subject — was open across the whole gap and closed at
+**22:02:15Z**. It was the last open converse-pool visit. The drain began
+in the reconciler tick at **22:03:13Z**, 58 seconds later. The operator's
+own visit (`tk-2jyqb`, on `tk-gy1ws`) had closed at 21:05, an hour
+earlier.
+
+So the pane the operator was composing in stayed alive for that hour as a
+**side effect of somebody else's conversation being open**, and died
+within a minute of that unrelated visit closing. Nothing about the
+operator — not their presence, not their attention, not the paragraph
+they were typing — was an input to the decision at any point.
+
+(Stated as mechanism-fit plus correlation, not as a traced decision: the
+reconciler's baseline trace records carry `state` and `sleep_reason` only,
+not the wake-reason set. The falsifiable prediction is that a converse
+session outlives its own visit exactly until the pool's last open visit
+closes.)
+
+### Attachment is not a usable proxy either
+
+Attachment *is* a wake cause — `input.Runtime.Attached` →
 `WakeCauseAttached` (`internal/session/lifecycle_projection.go:834-836`)
-— so an *attached* pane does not enter this drain at all. That defence
-did not apply, and the city's tmux layout explains why it is thin: there
-is **one tmux client** for the whole city (`tmux list-clients` →
-a single `/dev/pts/*` entry), switched between per-agent sessions, so at
-most one agent session reports `session_attached=1` at any instant and
-every other live pane the operator moves between reads as unattached.
+— so an *attached* pane does not enter this drain. It is far too fragile
+to be the protection: this city runs **one tmux client** for everything
+(`tmux list-clients` → a single `/dev/pts/*` entry), switched between
+per-agent sessions. At most one session reports `session_attached=1` at
+any instant, so glancing at any other pane makes the pane you were
+typing in eligible for the drain on the next tick.
+
+The operator confirms the pane was responsive — cursor and characters
+behaving normally — right up until it vanished. This was not a stale pane
+swallowing keystrokes: teardown raced live composition and won.
 
 Once the drain has begun, the advance scan
 (`advanceSessionDrainsWithSessionsTraced`,
@@ -105,14 +156,16 @@ And the cancel that does exist could not have saved the text anyway: the
 `C-c` is sent to the pane, so by the time any later tick reconsiders,
 the composer has already been cleared.
 
-## Why the capture cannot be built in this pack
+## Why none of this can be built in this pack
 
+Both halves are upstream. The **block** is a reconciler decision, and the
+reconciler is the `gc` binary. The **capture** runs into the seam
 `docs/gascity-human-engagement.md` → "How a held sitting ends" already
-records the seam, established for the idle reap: **nothing pack-owned
-runs at kill time.** This determination extends that finding rather than
-re-deriving it, and the same seam holds for the drain path — with the
-additional point that the destructive act here is a keystroke sent
-*into* the pane, which no pack-side hook can intercept either.
+records for the idle reap: **nothing pack-owned runs at kill time.** This
+determination extends that finding rather than re-deriving it, and the
+same seam holds for the drain path — with the additional point that the
+destructive act here is a keystroke sent *into* the pane, which no
+pack-side hook can intercept either.
 
 Ruled out explicitly, so nobody re-derives them:
 
@@ -144,17 +197,30 @@ convoy.
 
 ## Design constraints the evidence imposes
 
-Any fix upstream has to satisfy all four, or it will not have fixed this
+Any fix upstream has to satisfy all five, or it will not have fixed this
 incident:
 
-1. **Capture before the interrupt, not before the kill.** The `C-c` is
-   the first destructor. A capture placed at the kill site captures an
-   already-cleared composer.
-2. **Do not rely on attachment.** One client for the whole city means an
-   actively-used pane routinely reads as unattached.
-3. **Park it where the operator will look.** For a converse sitting that
-   is the subject bead — the thing they were writing about.
-4. **Fix the stop reason's wording.** `"drain acknowledged by agent"`
+1. **Pending input blocks the drain outright.** This is the requirement,
+   not a mitigation. A session holding unsubmitted operator input is not
+   drainable; the reconciler must treat it the way it already treats a
+   `user_hold` heartbeat — a condition that cancels the drain rather than
+   one that decorates it.
+2. **The check must survive the whole window, not just the decision.**
+   `beginSessionDrainInfo` defers the interrupt by a tick and the kill
+   comes ~58s later, so a human who starts typing *after* the drain began
+   must still stop it. That means the guard belongs in
+   `advanceSessionDrainsWithSessionsTraced` alongside the existing
+   `WakePending` / `assigned-work` cancels, not only at the decision site.
+3. **Do not rely on attachment as the proxy.** One client for the whole
+   city means the pane being typed into routinely reads as unattached.
+   Input state has to be read from the pane itself.
+4. **Fallback only: capture before the interrupt, not before the kill.**
+   Where a drain genuinely cannot be blocked (`orphaned`, `suspended`),
+   capture first — and note the `C-c` is the first destructor, so a
+   capture placed at the kill site captures an already-cleared composer.
+   Park it where the operator will look; for a converse sitting that is
+   the subject bead.
+5. **Fix the stop reason's wording.** `"drain acknowledged by agent"`
    for a reconciler-authored ack sent this investigation looking for an
    agent decision that never happened.
 
