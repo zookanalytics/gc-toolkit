@@ -59,6 +59,10 @@
 #               tmux considers current — on a real city, not necessarily the
 #               operator who pressed the key. ROUNDTRIP covers the message
 #               target, which fails outright without the foreground capture.)
+#   (TIMEOUT)   a wedged intake is reported rather than hanging with the
+#               indicator lit and no message. A silent hang is the same
+#               outcome as a silent failure: a thought the operator believes
+#               was filed and was not.
 #   (GONE)      tmux-spawn-thread.sh is deleted and nothing live still points
 #               at it (specs/ is a historical record and is exempt).
 set -uo pipefail
@@ -82,11 +86,14 @@ hasnt() { grep -qF -- "$2" <<< "$1" && bad "$3 (in: $1)" || ok "$3"; }
 [ -f "$SCRIPT" ] && ok "tmux-visit-prompt.sh present" || { bad "missing at $SCRIPT"; exit 1; }
 [ -x "$SCRIPT" ] && ok "tmux-visit-prompt.sh executable" || bad "tmux-visit-prompt.sh not executable"
 
-# The hostile message. Every character in it breaks a different layer if the
+# The hostile message. Every piece of it breaks a different layer if the
 # response is ever spliced into a command line: `'` the shell's single quotes,
 # `;` tmux's command separator, `"` its argument quoting, `$`/`\`/`~` the
-# shell again. It is one string so a regression in any layer fails one case.
-HOSTILE="ship it; don't wait \"ok\" \$HOME ~x back\\sl"
+# shell again, and `#{}`/`#()`/`#H` tmux's FORMAT layer — `#(...)` runs a
+# shell command wherever a format is expanded, so a message that reaches one
+# is not a mangling bug but an execution one. It is one string, so a
+# regression in any layer fails one case.
+HOSTILE="ship it; don't wait \"ok\" \$HOME ~x back\\sl #{session_name} #(id -un) #H"
 
 # ── Fake config dir: the handler resolves gc-visit-open.sh under it ──────────
 # Passing the stub this way (rather than through the environment) matches how
@@ -145,7 +152,7 @@ chmod +x "$TMP/bin/tmux"
 # run_handler <cfg-dir> <topic> — seed the buffer, run the handler, wait for
 # the backgrounded half to report. Returns the handler's exit code; the tmux
 # and gc-visit-open call logs are left in $TMUX_CALLS / $CALLS.
-run_handler() {
+run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     local cfg="$1" topic="$2" rc=0
     export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux.log" FAKE_BUFFER="$TMP/buffer"
     : > "$CALLS"; : > "$TMUX_CALLS"
@@ -224,6 +231,17 @@ done
 [ -f "$INDICATOR_PATH" ] \
     && { bad "INDICATOR: the slot was not cleared when the intake finished"; rm -f "$INDICATOR_PATH"; } \
     || ok "INDICATOR: the slot is cleared when the intake finishes"
+
+# (TIMEOUT)
+CFG_HANG="$TMP/cfg-hang"; mkcfg "$CFG_HANG" '#!/bin/sh
+sleep 60'
+if command -v timeout >/dev/null 2>&1; then
+    GC_VISIT_INTAKE_TIMEOUT=1 run_handler "$CFG_HANG" "a topic that wedges"
+    has "$(cat "$TMP/tmux.log")" "gc visit FAILED (rc=124)" "TIMEOUT: a wedged intake is reported, not left hanging"
+    has "$(cat "$TMP/tmux.log")" "timed out after 1s" "TIMEOUT: the message says what happened"
+else
+    skip "TIMEOUT: timeout(1) not installed"
+fi
 
 # A missing intake script is reported, not silently swallowed.
 CFG_NONE="$TMP/cfg-none"; mkdir -p "$CFG_NONE/assets/scripts"
@@ -320,9 +338,12 @@ fi
 
 # specs/ is the historical record of what was decided at the time and is
 # deliberately not rewritten; everything else must not point at a dead script.
+# This file is excluded too — it has to name what it forbids, and a case
+# label is not a pointer at live code.
 REPO="$(cd "$HERE/../.." && pwd)"
 if command -v git >/dev/null 2>&1 && git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
-    dangling=$(git -C "$REPO" grep -ln 'tmux-spawn-thread' -- . ':(exclude)specs' 2>/dev/null || true)
+    dangling=$(git -C "$REPO" grep -ln 'tmux-spawn-thread' \
+        -- . ':(exclude)specs' ':(exclude)assets/scripts/tmux-visit-prompt.test.sh' 2>/dev/null || true)
     eq "$dangling" "" "GONE: no live file still references tmux-spawn-thread.sh"
 else
     skip "GONE: not a git checkout, cannot sweep for references"

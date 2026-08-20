@@ -52,6 +52,9 @@ BUF="${GC_VISIT_TOPIC_BUFFER:-gc-visit-topic}"
 
 VISIT_OPEN="${GC_VISIT_OPEN_TOOL:-$CONFIGDIR/assets/scripts/gc-visit-open.sh}"
 
+# Seconds to let the intake run before calling it stuck. See the bound below.
+INTAKE_TIMEOUT="${GC_VISIT_INTAKE_TIMEOUT:-300}"
+
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
 # 1. Drain the topic buffer. First thing, before anything that can block —
@@ -132,17 +135,34 @@ fi
     # conversation on that bead, which is a real thing to want from this key.
     # A prefix-shaped string no ledger answers for fails loudly there rather
     # than becoming a bead literally titled "tk-abc12".
+    # Bounded, because the whole point of this key is that nothing is lost:
+    # `bd create` against a wedged data plane would otherwise leave the
+    # indicator lit and the operator with no message at all — a hang is an
+    # invisible failure, which is the one outcome an intake path must not
+    # have. Degrades to unbounded where timeout(1) is missing, as
+    # tmux-keeper-toggle.sh does. The default 300s is far past the slowest
+    # healthy run (gc-visit-open bounds its own rig enumeration at
+    # GC_HELM_RIG_TIMEOUT, default 30s) so it fires only on a genuinely stuck
+    # call.
     RC=0
-    OUT=$("$VISIT_OPEN" -- "$TOPIC" 2>&1) || RC=$?
+    if command -v timeout >/dev/null 2>&1; then
+        OUT=$(timeout "$INTAKE_TIMEOUT" "$VISIT_OPEN" -- "$TOPIC" 2>&1) || RC=$?
+    else
+        OUT=$("$VISIT_OPEN" -- "$TOPIC" 2>&1) || RC=$?
+    fi
 
-    SUBJECT=$(printf '%s\n' "$OUT" | sed -n 's/.*subject \([A-Za-z0-9][A-Za-z0-9_-]*\).*/\1/p' | head -1)
-    VISIT=$(printf '%s\n' "$OUT" | sed -n 's/.*visit \([A-Za-z0-9][A-Za-z0-9_-]*\) filed.*/\1/p' | head -1)
+    # Anchored at the start of a line, and on the reporting tool's own
+    # prefix: an unanchored `.*subject ` would match those words inside an
+    # echoed topic, and greedily pick the last one at that.
+    SUBJECT=$(printf '%s\n' "$OUT" | sed -n 's/^[A-Za-z0-9_-]*: subject \([A-Za-z0-9][A-Za-z0-9_-]*\).*/\1/p' | head -1)
+    VISIT=$(printf '%s\n' "$OUT" | sed -n 's/^[A-Za-z0-9_-]*: visit \([A-Za-z0-9][A-Za-z0-9_-]*\) filed .*/\1/p' | head -1)
 
     if [ "$RC" -ne 0 ]; then
         # Name the subject when one was already created: it survives the
         # failure, and knowing its id is the difference between retrying and
         # losing the thought.
         DETAIL=$(printf '%s\n' "$OUT" | grep -v '^[[:space:]]*$' | tail -1)
+        [ "$RC" -eq 124 ] && DETAIL="timed out after ${INTAKE_TIMEOUT}s. ${DETAIL:-no output}"
         say 10000 "gc visit FAILED (rc=$RC)${SUBJECT:+ — subject $SUBJECT exists}: $DETAIL"
         exit 1
     fi
