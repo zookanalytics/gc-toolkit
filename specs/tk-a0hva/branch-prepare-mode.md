@@ -114,6 +114,35 @@ whether the classification above it is right.
   vetoes graduation. Making the safety depend on someone setting it is the
   instruction-shaped fix that has now failed once in production.
 
+## The sibling site this change does NOT cover
+
+Sweeping for every path that can rewrite a shared branch — rather than only the
+one the bead named — turns up a second reachable route to the same destruction,
+which is filed as `tk-rvspf` rather than fixed here.
+
+`assets/scripts/reconcile-merged-prs.sh`'s stale-base arm does not rebase; it
+*dispatches* a rebase. It resolves `fix_branch="$head_ref"` — the PR's live head
+branch, whatever its shape — and files a rework child into a live fix pool whose
+`rejection_reason` reads "Rebase '$fix_branch' onto origin/$base ... and
+force-push with --force-with-lease". `mol-polecat-work.toml`'s workspace-setup
+then executes that unconditionally (`git rebase origin/{{base_branch}}` on
+whatever `metadata.branch` names). Neither site classifies the branch.
+
+The allowlist added here does not reach either of them: it guards the refinery's
+own prepare step, and this path hands the rewrite to a polecat instead. A
+graduation PR is the reachable case — PR #388's head branch was
+`integration/refinery-script-fixes`; had it gone CONFLICTING rather than merging,
+that arm would have dispatched a rebase and force-push of the same branch whose
+rewrite is the incident above.
+
+Its only current vetoes are `merge_hold` and `rebase_hold` — the operator markers
+this document argues, two sections down, are the wrong thing to depend on.
+
+Kept out of this change deliberately: different file, different actor, different
+test suite (`reconcile-merged-prs.test.sh`, which already extracts from that
+script). Fixing it here would mean a second, independently-invented classifier
+landing unreviewed alongside this one; `tk-rvspf` proposes reusing this shape.
+
 ## Verification
 
 `assets/scripts/mr-aware-rejection-failclosed.test.sh` — the suite already
@@ -149,4 +178,5 @@ HEAD as well** — pre-existing, not introduced here.
 ## Related
 
 `tk-0d3y5` (closed; carries the full audit and the content verification), convoy
-`tk-t80p1`, PR #388, `docs/work-bead-state-machine.md` (graduation section).
+`tk-t80p1`, PR #388, `docs/work-bead-state-machine.md` (graduation section),
+`tk-rvspf` (the sibling dispatch site above, filed from this change's self-review).
