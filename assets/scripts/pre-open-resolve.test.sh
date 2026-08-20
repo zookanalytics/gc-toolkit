@@ -14,10 +14,34 @@
 #   (HASPR)  branch already has an open PR (a sibling anchor opened it) -> flipped
 #            to pull_request (record the existing pr), NEVER a second `gh pr create`
 #            — this is the orphan-convoy convergence.
+#   (DEAD)   ...but a CLOSED-and-NOT-MERGED PR is not an existing PR in any sense the
+#            merge gate can use (tk-g0hd2): it is what a supersede leaves behind, it
+#            can never merge, and adopting it moved the anchor out of the only state
+#            that retries PR-open. Such a branch gets a FRESH PR pointing at the one it
+#            supersedes — while a MERGED sibling still flips (DEAD2) and an OPEN one is
+#            still reused (DEAD3), which is what `--state all` is there for. The
+#            same-head case (DEAD7) is an operator's close, not a supersede, and holds.
 #   (INV)    `gh pr create` is reached for EXACTLY the one green no-PR anchor.
 #   (URL)    both arms stamp the canonical pull-request URL as the anchor's identity.
 #   (CONV)   convergence: a flipped anchor leaves the pre_open_gate set, so a
 #            second pass neither re-creates nor re-flips it.
+#
+# OPERATOR HOLDS (tk-3j0ob). merge_hold/rebase_hold on the anchor are explicit
+# operator gates. This pass honored neither, so a hold stopped a held anchor from
+# MERGING while the open side PUBLISHED a pull request against it — the operator
+# saw a hold in place and a new PR appear anyway. Covered:
+#   (HOLD0) POSITIVE CONTROL, run first: the explicit "off" spellings (false, 0) do
+#           NOT hold, so an unheld anchor still opens. Without it, a gate that held
+#           unconditionally would pass every case below.
+#   (HOLD1) merge_hold truthy -> nothing opened, nothing flipped, nothing
+#           commented; named in the log and counted HELD, not skipped.
+#   (HOLD2) rebase_hold truthy -> the same, named as rebase_hold specifically.
+#   (HOLD3) ...but a held anchor whose branch ALREADY has a PR is still FLIPPED:
+#           the hold is on publishing, not on adopting a PR that exists. Holding
+#           the flip would leak the anchor open (pre_open_gate is invisible to the
+#           merged-close observer, which scans only pull_request).
+#   (HOLD4) the gate precedes the branch-head read, so an unreadable head cannot
+#           mask an operator's block as a transient skip.
 #
 # REPOSITORY IDENTITY (review tk-jc66l). A branch name does not name a repository,
 # and every fork of this repo can carry the same `polecat/<bead>`. Uncertified, a
@@ -81,7 +105,10 @@ has() { grep -q "$1" "$2" 2>/dev/null; }
 
 mkdir -p "$TMP/bin"
 
-# Pre-open-gated anchors (gc bd list source): id|branch|merged_target|check.codex
+# Pre-open-gated anchors (gc bd list source):
+#   id|branch|merged_target|check.codex[|merge_hold|rebase_hold]
+# The two hold columns are optional — omitted means the marker is unset, which is
+# the shape every anchor filed before tk-3j0ob has.
 #   bead-GREEN : green at the live head            -> open PR + flip
 #   bead-STALE : green at an OLD head (rework moved it) -> held
 #   bead-MISS  : no marker (codex not done)        -> held
@@ -136,6 +163,7 @@ cat > "$TMP/notes" <<'NT'
 rev-green|Codex signoff: LGTM (pre-open).
 NT
 
+: > "$TMP/createdbody"; : > "$TMP/commentbody"
 : > "$TMP/created"; : > "$TMP/fliplog"; : > "$TMP/flipped"; : > "$TMP/comments"
 : > "$TMP/meta"; : > "$TMP/drop"
 : > "$TMP/createdwhere"; : > "$TMP/flipurl"; : > "$TMP/commentwhere"
@@ -195,6 +223,14 @@ rows_json() {
           url: (.[2] // ""), state: (.[3] // ""),
           baseRefName: (.[4] // ""), headRefName: (.[5] // ""),
           headRefOid: (.[7] // ""),
+          # gh reports mergedAt as NULL on everything that did not land — including a
+          # pull request closed unmerged, which is the row the dead/live distinction
+          # turns on. Derived from the state so every fixture carries the real shape;
+          # column 9 states it outright, for the REST shape (state=closed + merged_at
+          # set) that no state-derived default can produce.
+          mergedAt: (if ((.[8] // "") | length) > 0 then .[8]
+                     elif (.[3] // "") == "MERGED" then "2026-07-01T00:00:00Z"
+                     else null end),
           isCrossRepository: ($hr != $origin) }
         + ( if $hr == "" or $hr == "-"
             then { headRepositoryOwner: null, headRepository: null }
@@ -263,8 +299,17 @@ case "$cmd $sub" in
         "$head" "${RESOLVED%%/*}" "${RESOLVED#*/}" "$head" "${RESOLVED#*/}" | rows_json
     else printf '[]\n'; fi ;;
   "pr create") # --repo R --base X --head <branch> --title T --body-file F
-    head=""; shift 2
-    while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; esac; done
+    head=""; bodyfile=""; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --head) head="$2"; shift 2 ;;
+        --body-file) bodyfile="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    # The body as the pass actually wrote it — where the supersede pointer lives.
+    [ -n "$bodyfile" ] && [ -f "$bodyfile" ] \
+      && { printf '=== %s\n' "$head"; cat "$bodyfile"; } >> "$FAKE_CREATEDBODY"
     row=$(awk -F'|' -v b="$head" '$1==b{print; exit}' "$FAKE_NEWPR")
     if [ -z "$row" ]; then
       # A CONCURRENT OPEN. Real `gh pr create` fails here ("a pull request already
@@ -312,7 +357,12 @@ case "$cmd $sub" in
     printf '%s\n' "$row" | rows_json | jq -c '.[0]' ;;
   "pr comment") # <num> --repo R --body ...
     printf '%s\n' "$3" >> "$FAKE_COMMENTS"
-    printf '%s\t%s\n' "$3" "$RESOLVED" >> "$FAKE_COMMENTWHERE" ;;
+    printf '%s\t%s\n' "$3" "$RESOLVED" >> "$FAKE_COMMENTWHERE"
+    cnum="$3"; cbody=""; shift 3
+    while [ $# -gt 0 ]; do case "$1" in --body) cbody="$2"; shift 2 ;; *) shift ;; esac; done
+    # WHICH pull request was told WHAT: the supersede pointer is posted on the DEAD
+    # one, so the number alone cannot tell the two comments this pass writes apart.
+    printf '%s\t%s\n' "$cnum" "$(printf '%s' "$cbody" | tr '\n' ' ')" >> "$FAKE_COMMENTBODY" ;;
 esac
 exit 0
 GH
@@ -345,14 +395,14 @@ case "$2" in
     case "$*" in
       *"merge_result=pre_open_gate"*)
         out=""
-        while IFS='|' read -r id branch target codexmark; do
+        while IFS='|' read -r id branch target codexmark mhold rhold; do
           [ -n "$id" ] || continue
           # Convergence is a LEDGER fact: an anchor whose merge_result actually
           # PERSISTED as pull_request has left this scan. One whose flip did not
           # persist is still in it — which is the whole point of splitting the write.
           [ "$(meta_get "$id" merge_result)" = "pull_request" ] && continue
-          obj=$(printf '{"id":"%s","title":"impl %s","description":"desc %s","metadata":{"branch":"%s","merged_target":"%s","check.codex":"%s","merge_result":"pre_open_gate"}}' \
-            "$id" "$id" "$id" "$branch" "$target" "$codexmark")
+          obj=$(printf '{"id":"%s","title":"impl %s","description":"desc %s","metadata":{"branch":"%s","merged_target":"%s","check.codex":"%s","merge_hold":"%s","rebase_hold":"%s","merge_result":"pre_open_gate"}}' \
+            "$id" "$id" "$id" "$branch" "$target" "$codexmark" "$mhold" "$rhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
         printf '[%s]\n' "$out" ;;
@@ -410,7 +460,8 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_HEADS="$TMP/heads" FAKE_EXISTPR="$TMP/ex
        FAKE_GH_DEFAULT="$TMP/ghdefault" FAKE_GH_HOST="$TMP/ghhost" \
        FAKE_IGNORE_REPO="$TMP/ignorerepo" \
        FAKE_IGNORE_REPO_CREATE="$TMP/ignorerepocreate" FAKE_REPOFAIL="$TMP/repofail" \
-       FAKE_META="$TMP/meta" FAKE_DROP="$TMP/drop"
+       FAKE_META="$TMP/meta" FAKE_DROP="$TMP/drop" \
+       FAKE_CREATEDBODY="$TMP/createdbody" FAKE_COMMENTBODY="$TMP/commentbody"
 
 # --- Run 1. -------------------------------------------------------------------
 OUT1="$(bash "$SCRIPT")"
@@ -942,6 +993,384 @@ grep -q "0 opened, 0 flipped, 0 held, 0 skipped" "$TMP/outdf" \
 grep -qE "could NOT enumerate|ABORTING non-zero" "$TMP/errdf" \
   && ok "(DISKFULL) the enumeration failure is announced on stderr, not silent" \
   || bad "(DISKFULL) must announce the enumeration failure (err: $(cat "$TMP/errdf"))"
+# --- OPERATOR HOLDS (tk-3j0ob). ------------------------------------------------
+# merge_hold/rebase_hold on the anchor are explicit operator gates, honored by
+# merge-skill.sh, reconcile-merged-prs.sh and reconcile-graduated-convoys.sh — and,
+# until this fix, by NEITHER arm of this pass. A hold stopped a held anchor from
+# MERGING while the open side walked straight past it and PUBLISHED a pull request
+# against it, so the operator saw a hold in place and a new PR appear anyway.
+hold_reset() {   # <merge_hold> <rebase_hold>
+  printf 'bead-HOLD|polecat/feat-hold|main|green@HEADHOLD|%s|%s\n' "${1:-}" "${2:-}" \
+    > "$TMP/anchors"
+  cat > "$TMP/heads" <<'H'
+polecat/feat-hold|HEADHOLD
+H
+  : > "$TMP/existpr"
+  cat > "$TMP/newpr" <<'N'
+polecat/feat-hold|801|https://github.com/acme/repo/pull/801|OPEN|main|polecat/feat-hold|acme/repo
+N
+  : > "$TMP/foreignpr"; : > "$TMP/racepr"; : > "$TMP/reviews"; : > "$TMP/notes"
+  : > "$TMP/created"; : > "$TMP/createdwhere"; : > "$TMP/fliplog"
+  : > "$TMP/flipurl"; : > "$TMP/flipped"; : > "$TMP/comments"; : > "$TMP/commentwhere"
+  : > "$TMP/meta"; : > "$TMP/drop"
+  : > "$TMP/viewbyname"
+  : > "$TMP/ghdefault"; : > "$TMP/ghhost"; : > "$TMP/ignorerepo"
+  : > "$TMP/ignorerepocreate"; : > "$TMP/repofail"; : > "$TMP/listfail"
+}
+
+# (HOLD0) POSITIVE CONTROL, run FIRST so the assertions below mean something. The
+# anchor is green, has no PR, and carries the explicit "off" spellings — `false`
+# and `0`, the values an operator's cleared marker actually leaves behind. It must
+# OPEN. A gate that held unconditionally would pass every HOLD case that follows
+# while silently stopping the pass dead for every unheld anchor in the city.
+hold_reset false 0
+bash "$SCRIPT" >"$TMP/outh0" 2>"$TMP/errh0"
+has '^polecat/feat-hold$' "$TMP/created" \
+  && ok "(HOLD0) control: merge_hold=false / rebase_hold=0 do NOT hold — the PR still opens" \
+  || bad "(HOLD0) control: an unheld anchor must still open its PR (err: $(cat "$TMP/errh0"))"
+grep -q '^bead-HOLD	801$' "$TMP/fliplog" \
+  && ok "(HOLD0) control: ...and it still flips to pull_request" \
+  || bad "(HOLD0) control: flip must record pr_number 801 (got: $(cat "$TMP/fliplog"))"
+
+# (HOLD1) merge_hold — "do not land this yet", and opening the PR is what arms the
+# landing. Nothing may be published: not the pull request, not the codex-signoff
+# comment that names a commit as reviewed.
+hold_reset true ""
+OUTH1="$(bash "$SCRIPT" 2>"$TMP/errh1")"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(HOLD1) merge_hold set -> NO pull request is opened"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+   "(HOLD1) ...and the anchor is not flipped out of pre_open_gate"
+eq "$(wc -l < "$TMP/comments" | tr -d ' ')" "0" \
+   "(HOLD1) ...and no codex-signoff comment is published about it"
+printf '%s\n' "$OUTH1" | grep -q "bead-HOLD branch 'polecat/feat-hold' merge_hold set (operator gate)" \
+  && ok "(HOLD1) the refusal names the marker, so a held anchor is diagnosable" \
+  || bad "(HOLD1) must name merge_hold (got: $OUTH1)"
+printf '%s\n' "$OUTH1" | grep -q "0 opened, 0 flipped, 1 held" \
+  && ok "(HOLD1) counted as HELD (an operator gate), not as a skip" \
+  || bad "(HOLD1) summary must count it held (got: $OUTH1)"
+
+# (HOLD2) rebase_hold — the narrower "do not rebase/force-push this branch", which
+# is exactly the branch a PR would be published FROM. This pass's contract is that
+# a PR is codex-green AT BIRTH; a branch frozen for rewriting is one whose reviewed
+# head is expected to move, so the PR would be born green and be stale moments
+# later, over a comment asserting a signoff at a commit that has left the branch.
+hold_reset "" true
+OUTH2="$(bash "$SCRIPT" 2>"$TMP/errh2")"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(HOLD2) rebase_hold set -> NO pull request is opened"
+eq "$(wc -l < "$TMP/comments" | tr -d ' ')" "0" \
+   "(HOLD2) ...and nothing is commented on the branch the operator froze"
+printf '%s\n' "$OUTH2" | grep -q "bead-HOLD branch 'polecat/feat-hold' rebase_hold set (operator gate)" \
+  && ok "(HOLD2) the refusal names rebase_hold specifically, not merge_hold" \
+  || bad "(HOLD2) must name rebase_hold (got: $OUTH2)"
+printf '%s\n' "$OUTH2" | grep -q "0 opened, 0 flipped, 1 held" \
+  && ok "(HOLD2) counted as held" || bad "(HOLD2) summary (got: $OUTH2)"
+
+# (HOLD3) THE HOLD IS ON THE IRREVERSIBLE HALF ONLY. A held anchor whose branch
+# ALREADY has a pull request is still FLIPPED: adopting a PR that exists publishes
+# nothing, and the gates it hands the anchor to honor these same markers themselves
+# (merge-skill.sh holds on merge_hold; reconcile-merged-prs.sh holds its rebase
+# dispatch on either). Holding the flip too would COST the convergence it exists
+# for — pre_open_gate is invisible to the merged-close observer, which scans only
+# pull_request, so a held anchor whose sibling PR merged would leak open forever.
+hold_reset true true
+printf '%s\n' 'polecat/feat-hold|802|https://github.com/acme/repo/pull/802|OPEN|main|polecat/feat-hold|acme/repo' \
+  > "$TMP/existpr"
+bash "$SCRIPT" >"$TMP/outh3" 2>"$TMP/errh3"
+grep -q '^bead-HOLD	802$' "$TMP/fliplog" \
+  && ok "(HOLD3) a held anchor still adopts the PR its branch already has (convergence preserved)" \
+  || bad "(HOLD3) held anchor must still flip onto PR#802 (got: $(cat "$TMP/fliplog"))"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(HOLD3) ...and still opens nothing of its own"
+
+# (HOLD4) THE HOLD PRECEDES THE BRANCH-HEAD READ. With the gate placed after it, a
+# held anchor whose head cannot be read would be reported as a transient "retry
+# next pass" skip — the operator's deliberate block rendered as a read failure, and
+# counted in the wrong bucket. Same ordering merge-skill.sh gives merge_hold among
+# its validate gates: cheapest, and highest priority.
+hold_reset true ""
+: > "$TMP/heads"          # the branch head cannot be resolved at all
+OUTH4="$(bash "$SCRIPT" 2>"$TMP/errh4")"
+printf '%s\n' "$OUTH4" | grep -q "merge_hold set (operator gate)" \
+  && ok "(HOLD4) an unreadable head does not mask the hold — the operator gate is reported" \
+  || bad "(HOLD4) must report the hold (got: $OUTH4 / err: $(cat "$TMP/errh4"))"
+grep -q "head unresolved" "$TMP/errh4" \
+  && bad "(HOLD4) the head read must not be reached for a held anchor" \
+  || ok "(HOLD4) the gate short-circuits before the branch-head read (no I/O for a held anchor)"
+printf '%s\n' "$OUTH4" | grep -q "0 opened, 0 flipped, 1 held" \
+  && ok "(HOLD4) counted as held, not skipped" || bad "(HOLD4) summary (got: $OUTH4)"
+
+# ==============================================================================
+# THE DEAD PULL REQUEST (tk-g0hd2).
+#
+# `--state all` is deliberate — a MERGED sibling PR must still flip the anchor onto
+# the scan the merged-close observer watches — but the three states it returns are
+# not interchangeable. A CLOSED-and-NOT-MERGED pull request is DEAD: it is what a
+# deliberate supersede leaves behind after a corrected-scope force-push. Adopting it
+# moved the anchor out of pre_open_gate (the ONLY state that retries PR-open) onto a
+# pull request that can never merge, while no open pull request existed for the work
+# at all — the live incident on anchor tk-4jz9s / PR#212.
+#
+# Three anchors, one pass, covering the bead's three acceptance criteria at once:
+#   bead-DEAD : its branch's ONLY pull request is closed-unmerged at an OLD head
+#               -> a FRESH pull request is opened, pointing at the one it supersedes
+#   bead-MRG  : a MERGED sibling PR                 -> still flipped (no regression)
+#   bead-LIVE : an OPEN PR beside a closed-unmerged one -> still reuses the OPEN one
+# ==============================================================================
+dead_reset() {
+  cat > "$TMP/anchors" <<'A'
+bead-DEAD|polecat/feat-dead|main|green@HEADDEAD
+bead-MRG|polecat/feat-mrg|main|green@HEADMRG
+bead-LIVE|polecat/feat-live|main|green@HEADLIVE
+A
+  cat > "$TMP/heads" <<'H'
+polecat/feat-dead|HEADDEAD
+polecat/feat-mrg|HEADMRG
+polecat/feat-live|HEADLIVE
+H
+  # Column 8 is the commit the pull request is open AT — for a closed one, the head
+  # it was closed at. It is what tells a re-implemented branch from an operator's
+  # close of exactly this commit, so every dead row states it.
+  cat > "$TMP/existpr" <<'E'
+polecat/feat-dead|601|https://github.com/acme/repo/pull/601|CLOSED|main|polecat/feat-dead|acme/repo|OLDDEAD
+polecat/feat-mrg|603|https://github.com/acme/repo/pull/603|MERGED|main|polecat/feat-mrg|acme/repo|HEADMRG
+polecat/feat-live|604|https://github.com/acme/repo/pull/604|CLOSED|main|polecat/feat-live|acme/repo|OLDLIVE
+polecat/feat-live|605|https://github.com/acme/repo/pull/605|OPEN|main|polecat/feat-live|acme/repo|HEADLIVE
+E
+  cat > "$TMP/newpr" <<'N'
+polecat/feat-dead|602|https://github.com/acme/repo/pull/602|OPEN|main|polecat/feat-dead|acme/repo
+N
+  cat > "$TMP/reviews" <<'R'
+bead-DEAD|rev-dead
+R
+  cat > "$TMP/notes" <<'NT'
+rev-dead|Codex signoff: LGTM (pre-open, re-implemented at corrected scope).
+NT
+  : > "$TMP/foreignpr"; : > "$TMP/racepr"
+  : > "$TMP/created"; : > "$TMP/createdwhere"; : > "$TMP/fliplog"
+  : > "$TMP/flipurl"; : > "$TMP/flipped"; : > "$TMP/comments"; : > "$TMP/commentwhere"
+  : > "$TMP/createdbody"; : > "$TMP/commentbody"
+  : > "$TMP/meta"; : > "$TMP/drop"
+  : > "$TMP/viewbyname"
+  : > "$TMP/ghdefault"; : > "$TMP/ghhost"; : > "$TMP/ignorerepo"
+  : > "$TMP/ignorerepocreate"; : > "$TMP/repofail"; : > "$TMP/listfail"
+}
+
+dead_reset
+OUTD="$(bash "$SCRIPT" 2>"$TMP/errdead")"
+
+# (DEAD1) THE BUG. A branch whose only pull request is closed-unmerged, codex green
+# at the live head, gets a FRESH pull request — never a flip onto the dead one.
+has '^polecat/feat-dead$' "$TMP/created" \
+  && ok "(DEAD1) closed-unmerged-only branch -> a FRESH PR is opened" \
+  || bad "(DEAD1) must open a fresh PR for the superseded branch (created: $(cat "$TMP/created"))"
+grep -q '^bead-DEAD	602$' "$TMP/fliplog" \
+  && ok "(DEAD1) the anchor is flipped onto the FRESH PR#602" \
+  || bad "(DEAD1) flip must record the fresh pr_number 602 (got: $(cat "$TMP/fliplog"))"
+grep -q '^bead-DEAD	601$' "$TMP/fliplog" \
+  && bad "(DEAD1) must NOT flip onto the dead PR#601 — it can never merge" \
+  || ok "(DEAD1) the dead PR#601 is never stamped as the anchor's identity"
+grep -q '^bead-DEAD	https://github.com/acme/repo/pull/602$' "$TMP/flipurl" \
+  && ok "(DEAD1) pr_url is the fresh pull request's" \
+  || bad "(DEAD1) pr_url (got: $(cat "$TMP/flipurl"))"
+
+# (DEAD2) NO REGRESSION on the case `--state all` exists for: a MERGED sibling PR
+# still flips the anchor, so reconcile-merged-prs.sh (which scans only
+# merge_result=pull_request) can close it. A merged pull request is landed work, not
+# a dead one — the distinction is mergedAt, not "not OPEN".
+grep -q '^bead-MRG	603$' "$TMP/fliplog" \
+  && ok "(DEAD2) a MERGED sibling PR still flips the anchor (observer path preserved)" \
+  || bad "(DEAD2) merged sibling must still flip (got: $(cat "$TMP/fliplog"))"
+has '^polecat/feat-mrg$' "$TMP/created" \
+  && bad "(DEAD2) must NOT open a PR for a branch whose work already merged" \
+  || ok "(DEAD2) no PR opened for the merged branch"
+
+# (DEAD3) NO REGRESSION on the live case, and the ranking that makes it hold: a
+# closed-unmerged row sitting next to an OPEN one must not win, and must not drag
+# the branch onto the create path either.
+grep -q '^bead-LIVE	605$' "$TMP/fliplog" \
+  && ok "(DEAD3) an OPEN PR beside a dead one is still the one adopted (605, not 604)" \
+  || bad "(DEAD3) must adopt the OPEN PR#605 (got: $(cat "$TMP/fliplog"))"
+has '^polecat/feat-live$' "$TMP/created" \
+  && bad "(DEAD3) must NOT open a twin for a branch that already has an open PR" \
+  || ok "(DEAD3) no twin opened for the branch with a live PR"
+
+# (DEAD4) THE POINTER, from both ends. The body cross-references the superseded pull
+# request (which is what makes GitHub render the backlink), and the dead PR itself is
+# told where the work went — that is where a human who opens #601 is standing.
+grep -q 'Supersedes #601' "$TMP/createdbody" \
+  && ok "(DEAD4) the fresh PR body names the pull request it supersedes" \
+  || bad "(DEAD4) body must name 'Supersedes #601' (got: $(cat "$TMP/createdbody"))"
+grep -q '^601	Superseded by #602' "$TMP/commentbody" \
+  && ok "(DEAD4) the superseded PR#601 is commented with the pointer forward" \
+  || bad "(DEAD4) pointer comment on the dead PR (got: $(cat "$TMP/commentbody"))"
+grep -q '^602	Codex signoff' "$TMP/commentbody" \
+  && ok "(DEAD4) ...and the codex verdict still lands on the FRESH PR, not the dead one" \
+  || bad "(DEAD4) codex verdict comment (got: $(cat "$TMP/commentbody"))"
+
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "1" "(DEAD5) exactly one PR opened this pass"
+printf '%s\n' "$OUTD" | grep -q "superseding closed PR#601" \
+  && ok "(DEAD5) the summary line says the fresh PR supersedes the dead one" \
+  || bad "(DEAD5) summary must name the supersede (got: $OUTD)"
+printf '%s\n' "$OUTD" | grep -q "1 opened, 2 flipped, 0 held" \
+  && ok "(DEAD5) counters: 1 opened, 2 flipped, 0 held" || bad "(DEAD5) summary (got: $OUTD)"
+
+# (DEAD6) CONVERGENCE. The fresh pull request outranks the headstone from the next
+# pass on — modelled the way (PW1b) models it, by making the opened PR visible to the
+# list and re-running with the flip suppressed. One create across both passes.
+dead_reset
+printf 'bead-DEAD\tmerge_result\n' > "$TMP/drop"
+bash "$SCRIPT" >/dev/null 2>&1
+printf '%s\n' 'polecat/feat-dead|602|https://github.com/acme/repo/pull/602|OPEN|main|polecat/feat-dead|acme/repo|HEADDEAD' \
+  >> "$TMP/existpr"
+: > "$TMP/drop"
+bash "$SCRIPT" >"$TMP/outdead6" 2>&1
+eq "$(grep -c '^polecat/feat-dead$' "$TMP/created")" "1" \
+   "(DEAD6) the retry re-adopts the PR it already opened — never a second supersede"
+grep -q '^bead-DEAD	602$' "$TMP/fliplog" \
+  && ok "(DEAD6) the retry flips onto that same fresh PR#602" \
+  || bad "(DEAD6) retry must flip onto PR#602 (got: $(cat "$TMP/fliplog"))"
+
+# (DEAD7) AN OPERATOR'S CLOSE IS NOT A SUPERSEDE. The dead pull request was closed at
+# EXACTLY the head this pass would open a new one at: nothing was re-implemented, so
+# that close was a decision about this commit. Opening a replacement would re-litigate
+# it — and would repeat every idle pass, since closing the replacement returns the
+# branch to this same state. Hold instead.
+dead_reset
+cat > "$TMP/anchors" <<'A'
+bead-SAME|polecat/feat-same|main|green@HEADSAME
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-same|HEADSAME
+H
+cat > "$TMP/existpr" <<'E'
+polecat/feat-same|606|https://github.com/acme/repo/pull/606|CLOSED|main|polecat/feat-same|acme/repo|HEADSAME
+E
+cat > "$TMP/newpr" <<'N'
+polecat/feat-same|607|https://github.com/acme/repo/pull/607|OPEN|main|polecat/feat-same|acme/repo
+N
+bash "$SCRIPT" >"$TMP/outsame" 2>"$TMP/errsame"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(DEAD7) a PR closed at the reviewed head -> NO replacement is opened"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+   "(DEAD7) ...and the anchor is not flipped onto the dead one either"
+grep -q "closed at the SAME head" "$TMP/errsame" \
+  && ok "(DEAD7) the hold names why: the branch was never re-implemented" \
+  || bad "(DEAD7) must name the same-head close (err: $(cat "$TMP/errsame"))"
+
+# (DEAD8) AN UNREADABLE DEAD HEAD IS A REFUSAL, not a default. A supersede and an
+# operator's close differ only by that commit; without it neither action can be
+# chosen, and the two have opposite consequences.
+dead_reset
+cat > "$TMP/anchors" <<'A'
+bead-NOOID|polecat/feat-nooid|main|green@HEADNOOID
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-nooid|HEADNOOID
+H
+cat > "$TMP/existpr" <<'E'
+polecat/feat-nooid|608|https://github.com/acme/repo/pull/608|CLOSED|main|polecat/feat-nooid|acme/repo
+E
+cat > "$TMP/newpr" <<'N'
+polecat/feat-nooid|609|https://github.com/acme/repo/pull/609|OPEN|main|polecat/feat-nooid|acme/repo
+N
+bash "$SCRIPT" >"$TMP/outnooid" 2>"$TMP/errnooid"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(DEAD8) an unreadable dead-PR head -> nothing opened"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+   "(DEAD8) ...and nothing flipped"
+grep -q "head commit is unreadable" "$TMP/errnooid" \
+  && ok "(DEAD8) the refusal says which fact it is missing" \
+  || bad "(DEAD8) must name the unreadable head (err: $(cat "$TMP/errnooid"))"
+
+# (DEAD9) A STATE THIS SCRIPT DOES NOT MODEL is refused for the whole branch: `live`
+# and `dead` have opposite actions (adopt it / open a second one past it), so an
+# unclassifiable row is exactly what must not be fallen through on.
+dead_reset
+cat > "$TMP/anchors" <<'A'
+bead-UNK|polecat/feat-unk|main|green@HEADUNK
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-unk|HEADUNK
+H
+cat > "$TMP/existpr" <<'E'
+polecat/feat-unk|610|https://github.com/acme/repo/pull/610|LOCKED|main|polecat/feat-unk|acme/repo|OLDUNK
+E
+cat > "$TMP/newpr" <<'N'
+polecat/feat-unk|611|https://github.com/acme/repo/pull/611|OPEN|main|polecat/feat-unk|acme/repo
+N
+bash "$SCRIPT" >"$TMP/outunk" 2>"$TMP/errunk"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(DEAD9) an unmodelled PR state -> nothing opened"
+eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+   "(DEAD9) ...and nothing flipped"
+grep -q "not one of OPEN/CLOSED/MERGED" "$TMP/errunk" \
+  && ok "(DEAD9) the refusal names the state it could not classify" \
+  || bad "(DEAD9) must name the unmodelled state (err: $(cat "$TMP/errunk"))"
+
+# (DEAD10) mergedAt PROMOTES, IT NEVER DEMOTES. GitHub's REST shape reports a landed
+# pull request as state=closed + merged_at set; read as "CLOSED, so dead", this pass
+# would open a duplicate for work that is already in. A closed row carrying a
+# mergedAt is adopted as merged.
+dead_reset
+cat > "$TMP/anchors" <<'A'
+bead-RESTMRG|polecat/feat-restmrg|main|green@HEADRESTMRG
+A
+cat > "$TMP/heads" <<'H'
+polecat/feat-restmrg|HEADRESTMRG
+H
+cat > "$TMP/newpr" <<'N'
+polecat/feat-restmrg|613|https://github.com/acme/repo/pull/613|OPEN|main|polecat/feat-restmrg|acme/repo
+N
+# CLOSED, and column 9 states the mergedAt outright — the REST shape.
+cat > "$TMP/existpr" <<'E'
+polecat/feat-restmrg|612|https://github.com/acme/repo/pull/612|CLOSED|main|polecat/feat-restmrg|acme/repo|OLDRESTMRG|2026-07-02T00:00:00Z
+E
+bash "$SCRIPT" >"$TMP/outrest" 2>"$TMP/errrest"
+eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+   "(DEAD10) a closed row carrying mergedAt is LANDED work -> no duplicate opened"
+grep -q '^bead-RESTMRG	612$' "$TMP/fliplog" \
+  && ok "(DEAD10) ...and it is adopted so the merged-close observer can close the anchor" \
+  || bad "(DEAD10) must flip onto the merged-by-mergedAt PR#612 (got: $(cat "$TMP/fliplog"))"
+
+# (DEAD11) THE INTERSECTION with the operator holds (tk-3j0ob + tk-g0hd2). Replacing
+# a dead pull request is an OPEN — a publish, not an adoption — so it is subject to
+# merge_hold/rebase_hold like any other create. Landing these two fixes independently
+# is exactly how that could have been missed: the hold gate was written when the only
+# way past the existing-PR arm was "no PR at all", and the dead-PR fall-through adds a
+# second way past it. Held, this branch must end the pass with nothing adopted AND
+# nothing opened — not a fresh PR published under a hold the operator can see in place.
+for HOLDKEY in merge rebase; do
+  dead_reset
+  if [ "$HOLDKEY" = "merge" ]; then
+    printf 'bead-DEADHOLD|polecat/feat-deadhold|main|green@HEADDEADHOLD|true|\n' > "$TMP/anchors"
+  else
+    printf 'bead-DEADHOLD|polecat/feat-deadhold|main|green@HEADDEADHOLD||true\n' > "$TMP/anchors"
+  fi
+  cat > "$TMP/heads" <<'H'
+polecat/feat-deadhold|HEADDEADHOLD
+H
+  # The only PR for the branch is closed-unmerged at an OLD head — the (DEAD1) shape,
+  # which without a hold opens a fresh replacement.
+  cat > "$TMP/existpr" <<'E'
+polecat/feat-deadhold|620|https://github.com/acme/repo/pull/620|CLOSED|main|polecat/feat-deadhold|acme/repo|OLDDEADHOLD
+E
+  cat > "$TMP/newpr" <<'N'
+polecat/feat-deadhold|621|https://github.com/acme/repo/pull/621|OPEN|main|polecat/feat-deadhold|acme/repo
+N
+  OUTDH="$(bash "$SCRIPT" 2>"$TMP/errdh")"
+  eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
+     "(DEAD11/${HOLDKEY}_hold) a held anchor gets NO replacement for its dead PR"
+  eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
+     "(DEAD11/${HOLDKEY}_hold) ...and is not adopted onto the dead one either"
+  printf '%s\n' "$OUTDH" | grep -q "${HOLDKEY}_hold set (operator gate)" \
+    && ok "(DEAD11/${HOLDKEY}_hold) the operator gate is what reports the refusal" \
+    || bad "(DEAD11/${HOLDKEY}_hold) must report the hold (got: $OUTDH / err: $(cat "$TMP/errdh"))"
+  printf '%s\n' "$OUTDH" | grep -q "0 opened, 0 flipped, 1 held" \
+    && ok "(DEAD11/${HOLDKEY}_hold) counted as held, not skipped" \
+    || bad "(DEAD11/${HOLDKEY}_hold) summary (got: $OUTDH)"
+done
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

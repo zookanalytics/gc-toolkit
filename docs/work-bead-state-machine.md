@@ -258,7 +258,13 @@ the codex signoff against the **branch** and parks the bead here — detached fr
 both queues exactly like gating — *before* opening the PR. An idle-loop pass
 beside the merge skill (`pre-open-resolve.sh`) opens the non-draft PR only once
 every pre-open member is green at the branch head — today just `check.codex` —
-moving the bead to ordinary `pull_request` gating. A PR that becomes visible is
+moving the bead to ordinary `pull_request` gating. It opens nothing at all while
+the anchor carries an operator `merge_hold` or `rebase_hold`: opening the PR is
+what arms the landing a `merge_hold` defers, and the branch a `rebase_hold`
+freezes is the one the PR would be published from. Adopting a PR the branch
+*already* has is still allowed under either marker — that publishes nothing, and
+holding it would strand the anchor in `pre_open_gate`, which the merged-close
+observer does not scan. A PR that becomes visible is
 thus codex-green at birth, with no draft phase (the pipeline does not use draft PRs). The
 pre-open subset is the only part of the check-set that moves ahead of
 PR-creation; the rest — CI, approval — stay post-open, gated at merge by the same
@@ -269,6 +275,28 @@ the pass that *mints* the PR from a **branch name**, every read it makes and the
 create itself are pinned to this checkout's origin repository and certified before
 anything is stamped — see
 [the invisible anchor](#the-invisible-anchor-repairing-the-field-every-pass-enumerates-on).
+
+**An existing PR is adopted by disposition, not by existence.** The pass looks the
+branch up across `--state all` — deliberately, since a **merged** sibling PR must
+still flip the anchor onto `pull_request`, the only sub-state
+`reconcile-merged-prs.sh` scans, or an anchor left behind a landed PR is never
+closed by anything. But the three states that lookup returns are not
+interchangeable. **Open** is the live PR the merge gate will act on and **merged**
+is landed work; both are adopted. **Closed-and-not-merged is dead** — it is what a
+deliberate supersede leaves behind after a corrected-scope force-push — and
+adopting it is a strand, not a convergence: the anchor leaves `pre_open_gate`,
+the only state that retries PR-open, carrying a `pr_url` that can never merge,
+while no open PR exists for the work at all. Such a branch instead gets a **fresh
+PR at the reviewed head**, cross-referencing the one it supersedes from both ends.
+Because that replacement is an open — a publish, not an adoption — it is subject to
+the operator holds above like any other: a held anchor whose only PR is dead has
+nothing adopted *and* nothing opened, and waits for the hold to lift.
+The exception is a dead PR closed at **exactly** the head the replacement would be
+opened at: nothing was re-implemented there, so the close was a decision about that
+commit, and re-opening it would repeat every idle pass — that case holds for an
+operator. An unreadable dead-PR head, or a PR state this pass does not model, holds
+for the same reason it refuses elsewhere: adopt and open-past are opposite actions,
+so "I cannot tell which" cannot pick one.
 
 **The flip out of `pre_open_gate` is ordered, not atomic.** `merge_result` is not
 one field among four here: it is the **visibility switch**. `pre_open_gate` is the
