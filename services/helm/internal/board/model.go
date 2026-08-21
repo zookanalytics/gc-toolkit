@@ -11,11 +11,15 @@
 // m_total, open, in_progress, frontier, needs, stale_days, updated_at,
 // rank_score} plus the envelope {generated_at, total, tiles}.
 //
-// Carrying a fact is not the same as spending it. tk-x89rn deliberately ships
-// only the CAPABILITY: Metadata is populated on every anchor and child but no
-// derivation reads it yet, because the three consumers are separate beads
-// (tk-x55wt dead columns + constant NEEDS, tk-b3rga decision tiles, tk-2v08m
-// human-routed beads). Keeping them apart keeps each reviewable. So the
+// Carrying a fact is not the same as spending it. tk-x89rn shipped only the
+// CAPABILITY — Metadata populated on every anchor and child, read by nothing —
+// because its three consumers are separate beads, kept apart to stay
+// reviewable. tk-2v08m has since spent it in the GATHER: `source.BeadsSource`
+// selects two further anchor kinds by metadata (`human` for
+// `gc.routed_to=human`, `parked` for a bead carrying `gc.takeaway`), so the
+// board's KIND is no longer a synonym for the bead's issue type. No derivation
+// in THIS package reads Metadata yet; the two beads that will are tk-x55wt
+// (dead columns + constant NEEDS) and tk-b3rga (decision tiles). So the
 // following gc-helm.sh behaviours remain NOT reproduced here:
 //
 //   - the full rank weight (priority + cross-rig-ref scan): the weight is
@@ -80,12 +84,13 @@ type Child struct {
 // UpdatedAt and Metadata are the two facts tk-x89rn widened the seam to carry.
 // UpdatedAt drives stale_days (and through it the NORMAL→ELEVATED bump); a zero
 // value means the source could not read it and staleness reads as 0, exactly as
-// gc-helm.sh treats a null updated_at. Metadata is carried but not yet read by
-// any derivation — see the package doc.
+// gc-helm.sh treats a null updated_at. Metadata is what a source SELECTS the
+// `human` and `parked` kinds by; carrying it here keeps that decision auditable
+// from the anchor, but no derivation reads it — see the package doc.
 type Anchor struct {
 	ID        string            `json:"id"`
 	Title     string            `json:"title"`
-	Kind      string            `json:"kind"`   // epic | decision | convoy
+	Kind      string            `json:"kind"`   // epic | decision | convoy | human | parked
 	Source    string            `json:"source"` // same string as Kind; drives derivation branches
 	Rig       string            `json:"rig"`
 	Prefix    string            `json:"prefix"`

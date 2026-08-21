@@ -38,6 +38,15 @@ import (
 // rig. This is also what the bash PoC always did (`bd list --db <rig>/.beads`),
 // so it is the proven shape rather than a new one.
 //
+// It is also the only backend that can gather the METADATA-keyed anchor kinds
+// (tk-2v08m): selecting beads by `gc.routed_to=human` or by the presence of
+// `gc.takeaway` is a filter the library applies in the query, while the
+// supervisor's list endpoints omit metadata entirely and would need one extra
+// round trip per candidate bead to rediscover it. Under GC_HELM_SOURCE=
+// supervisor those two kinds are simply absent from the board — a narrower
+// board, not a wrong one, and the same shape of gap the source seam already
+// documents for `updated_at`.
+//
 // DATA-ACCESS CONTRACT. This still honours the package contract: reads go
 // through the sanctioned beads library, never raw Dolt. There is no
 // sql.Open("mysql") and no JSON_EXTRACT here — the library owns the connection,
@@ -252,15 +261,60 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	}, nil
 }
 
-// gatherRig collects the three anchor kinds from one rig's store. Each kind
-// fails independently: a rig whose convoys error still contributes its epics.
+// typedAnchorKinds are the anchor kinds selected by ISSUE TYPE. The list is
+// hoisted because the metadata-keyed gathers below exclude exactly these types,
+// and the two must not drift: a bead already admitted as an epic, decision or
+// convoy must not be re-admitted under a second kind, or the board carries it
+// twice and BuildBoard's dedup picks the survivor by rank rather than by which
+// row is truer.
+var typedAnchorKinds = []string{"epic", "decision", "convoy"}
+
+// metadataAnchor is an anchor kind selected by a bead's METADATA rather than by
+// its issue type — the gather tk-2v08m adds.
+//
+// The typed kinds all answer "what KIND of thing is this", and that question
+// cannot see an operator-owned item. `gc.routed_to=human` and `gc.takeaway` are
+// stamped on ordinary task/bug/chore beads, so a board keyed on issue type
+// excludes them by construction, however plainly they are marked as the
+// operator's — which is the bug: the one item in the city provably blocked on
+// the operator was the one item the operator's dashboard would not show. These
+// markers are the city's own durable statement about who owns an item, which
+// makes them as good an anchor key as the type is.
+type metadataAnchor struct {
+	// kind is the board KIND these beads surface as.
+	kind string
+	// key is the top-level metadata key that selects them.
+	key string
+	// value, when non-empty, requires that exact value. Empty selects on key
+	// PRESENCE, which is the only usable test when the value is free text.
+	value string
+	// label prefixes this kind's entry in partial_errors, so a degraded gather
+	// names the kind an operator would recognise rather than a metadata key.
+	label string
+}
+
+var metadataAnchors = []metadataAnchor{
+	// Routed to the operator. The marker means no agent will take it, so the
+	// item moves only when a human moves it — the same human gate a `decision`
+	// bead carries, and banded the same way.
+	{kind: "human", key: "gc.routed_to", value: "human", label: "human-routed"},
+	// A conversation that reached a takeaway: `gc-visit-open` mints the subject
+	// bead and the converse agent stamps `gc.takeaway` on it when the sitting
+	// ends. Presence, not value — the takeaway is a paragraph of free text.
+	// These are deliberately NOT attention items (see the LOW band in
+	// derive.go); they are items the operator has to be able to find again.
+	{kind: "parked", key: "gc.takeaway", label: "parked-visits"},
+}
+
+// gatherRig collects every anchor kind from one rig's store. Each kind fails
+// independently: a rig whose convoys error still contributes its epics.
 func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef) {
 	// Anchors are OPEN beads only, mirroring gc-helm.sh's `--status open` on
 	// each anchor query. Children below are read at ALL statuses so n_closed is
 	// a real count rather than a count of the still-open ones.
 	open := beads.StatusOpen
 
-	for _, kind := range []string{"epic", "decision", "convoy"} {
+	for _, kind := range typedAnchorKinds {
 		it := beads.IssueType(kind)
 		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &open})
 		if err != nil {
@@ -275,17 +329,7 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 			if kind == "convoy" && !admitConvoy(iss.Title) {
 				continue
 			}
-			a := board.Anchor{
-				ID:        iss.ID,
-				Title:     iss.Title,
-				Kind:      kind,
-				Source:    kind,
-				Rig:       r.name,
-				Prefix:    r.prefix,
-				Priority:  clonePriority(iss.Priority),
-				UpdatedAt: iss.UpdatedAt,
-				Metadata:  decodeMetadata(iss.Metadata),
-			}
+			a := newAnchor(iss, kind, r)
 			switch kind {
 			case "epic":
 				a.Children = s.epicChildren(ctx, g, st, iss.ID)
@@ -295,6 +339,64 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 			// A decision needs no roll-up: its band is ELEVATED regardless.
 			g.anchors = append(g.anchors, a)
 		}
+	}
+
+	s.gatherMetadataAnchors(ctx, g, st, r, open)
+}
+
+// gatherMetadataAnchors runs the metadata-keyed gathers for one rig. They fail
+// independently of each other and of the typed kinds, and neither carries a
+// child roll-up: the gather admits the bead itself, not a set it owns.
+func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, open beads.Status) {
+	excluded := make([]beads.IssueType, 0, len(typedAnchorKinds))
+	for _, kind := range typedAnchorKinds {
+		excluded = append(excluded, beads.IssueType(kind))
+	}
+	for _, ma := range metadataAnchors {
+		filter := beads.IssueFilter{
+			Status:       &open,
+			ExcludeTypes: excluded,
+			// The board answers for durable city state. A type-keyed query
+			// never reaches the ephemeral wisp side by accident; a query keyed
+			// on a `gc.` metadata field would, because wisps — heartbeats,
+			// order tracking beads, session beads — are made of those.
+			SkipWisps: true,
+		}
+		if ma.value == "" {
+			filter.HasMetadataKey = ma.key
+		} else {
+			filter.MetadataFields = map[string]string{ma.key: ma.value}
+		}
+		issues, err := st.SearchIssues(ctx, "", filter)
+		if err != nil {
+			g.note(true, []string{ma.label + "@" + r.name + ": " + err.Error()})
+			continue
+		}
+		g.ok()
+		for _, iss := range issues {
+			if iss == nil {
+				continue
+			}
+			g.anchors = append(g.anchors, newAnchor(iss, ma.kind, r))
+		}
+	}
+}
+
+// newAnchor projects one bead onto a board anchor under the given kind. Kind
+// and Source are the same string: Kind is displayed, Source drives the
+// derivation branches, and nothing in this source has ever needed them to
+// differ.
+func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
+	return board.Anchor{
+		ID:        iss.ID,
+		Title:     iss.Title,
+		Kind:      kind,
+		Source:    kind,
+		Rig:       r.name,
+		Prefix:    r.prefix,
+		Priority:  clonePriority(iss.Priority),
+		UpdatedAt: iss.UpdatedAt,
+		Metadata:  decodeMetadata(iss.Metadata),
 	}
 }
 

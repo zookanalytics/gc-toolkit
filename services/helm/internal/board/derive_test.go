@@ -77,6 +77,100 @@ func TestFourAnchorBoard(t *testing.T) {
 	}
 }
 
+// TestMetadataKindDerivation covers the two kinds tk-2v08m gathers by metadata.
+// Neither carries a roll-up, so the count branches below them must not run —
+// falling through would read both as empty anchors and file them under LOW.
+func TestMetadataKindDerivation(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-human", Title: "Disposition: one PR needs the operator", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(4)},
+		{ID: "tk-parked", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil)
+
+	human, ok := tileByID(b, "tk-human")
+	if !ok {
+		t.Fatal("the human-routed tile is missing")
+	}
+	// Same band as a decision, for the same reason: no agent will take it.
+	if human.Severity != SevElevated {
+		t.Errorf("a human-routed bead is ELEVATED, not %s — it is human-gated the way a decision is", human.Severity)
+	}
+	if !strings.Contains(human.Frontier, "routed to the operator") {
+		t.Errorf("frontier must say who owns it: %q", human.Frontier)
+	}
+	if human.Needs != "operator action" {
+		t.Errorf("needs: %q", human.Needs)
+	}
+
+	parked, ok := tileByID(b, "tk-parked")
+	if !ok {
+		t.Fatal("the parked tile is missing")
+	}
+	// LOW is the whole point: the bead asks that a parked conversation NOT
+	// compete for ranking with stranded epics. It has to be findable, not
+	// urgent.
+	if parked.Severity != SevLow {
+		t.Errorf("a parked conversation is LOW, not %s", parked.Severity)
+	}
+	if !strings.Contains(parked.Frontier, "parked") {
+		t.Errorf("frontier: %q", parked.Frontier)
+	}
+	// The resume GESTURE, not a sentence derived from the takeaway — that is
+	// tk-x55wt's bead.
+	if !strings.Contains(parked.Needs, "prefix+a") {
+		t.Errorf("needs must name the resume gesture: %q", parked.Needs)
+	}
+}
+
+// TestParkedNeverOutranksAttention pins the LOW band's job: a parked
+// conversation at maximum priority and age must still sort under ordinary
+// in-flight work, or it is competing for exactly the attention the bead says it
+// should not ask for.
+func TestParkedNeverOutranksAttention(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-parked", Title: "ancient parked visit", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(400)},
+		{ID: "tk-live", Title: "healthy in-flight epic", Kind: "epic", Source: "epic",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(4), UpdatedAt: fixtureNow, Children: []Child{
+				{ID: "c1", Status: "in_progress"},
+			}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil)
+	if b.Tiles[0].ID != "tk-live" {
+		t.Errorf("in-flight work sorts above a parked conversation: got %q first", b.Tiles[0].ID)
+	}
+	parked, _ := tileByID(b, "tk-parked")
+	// The NORMAL->ELEVATED stale bump is guarded on NORMAL, so age cannot
+	// promote a parked row out of its band however old it gets.
+	if parked.Severity != SevLow {
+		t.Errorf("400 days stale must not promote a parked row: got %s", parked.Severity)
+	}
+	if parked.StaleDays != 400 {
+		t.Errorf("the tile still reports the real age: got %d", parked.StaleDays)
+	}
+}
+
+// TestMetadataKindDedup: one bead carrying both markers is gathered twice, and
+// the higher band wins — the operator sees the thing they must act on, not the
+// note that it was parked.
+func TestMetadataKindDedup(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-both", Title: "routed and parked", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
+		{ID: "tk-both", Title: "routed and parked", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil)
+	if len(b.Tiles) != 1 {
+		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
+	}
+	if b.Tiles[0].Kind != "human" || b.Tiles[0].Severity != SevElevated {
+		t.Errorf("dedup keeps the higher band: got kind=%s severity=%s", b.Tiles[0].Kind, b.Tiles[0].Severity)
+	}
+}
+
 // TestDedupKeepsHigherBand verifies that an id gathered twice survives once,
 // in its higher band — the sort-then-dedup contract from gc-helm.sh.
 func TestDedupKeepsHigherBand(t *testing.T) {

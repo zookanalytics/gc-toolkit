@@ -77,6 +77,21 @@ th {
 }
 
 /*
+ * Parked conversations (tk-2v08m). A second section rather than more rows: these
+ * are findable-not-urgent, and the whole point is that they do not compete with
+ * the ranked table above.
+ */
+
+.parked {
+  margin-top: 2rem;
+}
+
+.parked h2 {
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+/*
  * Terminal tile. Same brief as the rest of this file: enough shape to show the
  * two states (peek at rest, live on focus) and no further. The spatial
  * placement this tile eventually gets belongs to U6.

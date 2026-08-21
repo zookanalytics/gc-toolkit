@@ -75,11 +75,26 @@ func counts(children []Child) (mTotal, nClosed, open, inProgress int) {
 // on a real stale, which an anchor with an unreadable updated_at never reaches:
 // staleness there is 0, so an unknown age is treated as fresh rather than
 // silently promoted.
+//
+// The two metadata-gathered kinds (tk-2v08m) sit at opposite ends on purpose. A
+// `human` bead is ELEVATED for the same reason a decision is: it is stamped
+// `gc.routed_to=human`, so no agent will take it and it moves only when the
+// operator moves it. A `parked` bead is LOW because it is the opposite claim —
+// the conversation reached a takeaway and wants nothing, it just has to stay
+// FINDABLE. Ranking it against stranded epics is what the bead asks not to do,
+// and LOW is how it stays out of that contest: the band floor puts every parked
+// row beneath every real attention item, whatever its priority or age.
 func severity(src string, mTotal, open, inProgress, stale int) Severity {
 	var sev0 Severity
 	switch {
-	case src == "decision":
+	// These three kinds carry no roll-up by construction — the gather admits
+	// the bead itself, not a set it owns — so the band comes from what the bead
+	// IS. Falling through to the count branches below would read every one of
+	// them as an empty anchor and file it under LOW.
+	case src == "decision", src == "human":
 		sev0 = SevElevated
+	case src == "parked":
+		sev0 = SevLow
 	case mTotal == 0:
 		sev0 = SevLow
 	case open == 0:
@@ -107,11 +122,16 @@ func rankScore(sev Severity, mTotal int, priority *int, stale int) int {
 }
 
 // frontier is the one-line human summary. Display-only; it does
-// not feed rank_score.
+// not feed rank_score. The metadata-gathered kinds describe their own state
+// rather than a roll-up they do not have.
 func frontier(a Anchor, mTotal, open, inProgress int) string {
 	switch {
 	case a.Source == "decision":
 		return "human-gated decision"
+	case a.Source == "human":
+		return "routed to the operator — no agent will take it"
+	case a.Source == "parked":
+		return "conversation parked — takeaway recorded"
 	case mTotal == 0:
 		return "empty — no children"
 	case open == 0:
@@ -125,11 +145,22 @@ func frontier(a Anchor, mTotal, open, inProgress int) string {
 
 // needs is the "what does a human do" hint, using the
 // deterministic phrase only. The takeaway-driven sentence is deferred, so the
-// leading takeaway branch of gc-helm.sh is intentionally omitted here.
+// leading takeaway branch of gc-helm.sh is intentionally omitted here — a
+// `parked` bead names the resume GESTURE, not what its takeaway said, because
+// deriving a sentence from `gc.takeaway` is tk-x55wt's bead, not this one.
+//
+// The gesture is real: `gc-visit-open` resolves a bare bead id against the live
+// rig prefixes and reopens the conversation on that bead, which is what the
+// prefix+a popup feeds it (assets/scripts/tmux-visit-prompt.sh). Resume already
+// worked before this change; only finding the id did not.
 func needs(a Anchor, mTotal, open, inProgress int) string {
 	switch {
 	case a.Source == "decision":
 		return "operator decision"
+	case a.Source == "human":
+		return "operator action"
+	case a.Source == "parked":
+		return "resume: prefix+a, then the bead id"
 	case mTotal == 0:
 		return "no children — decompose or assign"
 	case open == 0:

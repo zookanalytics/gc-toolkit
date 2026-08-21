@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,24 +22,81 @@ type fakeStore struct {
 	depsDown map[string][]*beads.IssueWithDependencyMetadata // convoy -> tracked members
 	depsUp   map[string][]*beads.IssueWithDependencyMetadata // epic -> parent-child children
 	failType map[string]error                                // issue type -> forced SearchIssues error
+	failMeta map[string]error                                // metadata key -> forced SearchIssues error
 	failDeps map[string]error                                // issue id -> forced dependency error
 	closed   bool
 }
 
+// SearchIssues answers both gather shapes: the type-keyed anchor queries, and
+// the metadata-keyed ones tk-2v08m added. It APPLIES the filters rather than
+// trusting them, because every one of them is load-bearing — a fake that
+// returned its fixtures regardless would let the gather ask a wrong question
+// and still pass.
 func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.IssueFilter) ([]*beads.Issue, error) {
-	if filter.IssueType == nil {
-		return nil, errors.New("test fake requires an issue type filter")
-	}
-	kind := string(*filter.IssueType)
-	if err, bad := f.failType[kind]; bad {
-		return nil, err
-	}
 	// The source must ask for OPEN anchors only; a fake that ignored the filter
 	// would let a regression through silently.
 	if filter.Status == nil || *filter.Status != beads.StatusOpen {
 		return nil, errors.New("expected a status=open filter on the anchor query")
 	}
-	return f.issues[kind], nil
+	if filter.IssueType != nil {
+		kind := string(*filter.IssueType)
+		if err, bad := f.failType[kind]; bad {
+			return nil, err
+		}
+		return f.issues[kind], nil
+	}
+	return f.searchByMetadata(filter)
+}
+
+// searchByMetadata models the library's metadata predicates over the fixtures:
+// HasMetadataKey is a presence test, MetadataFields an equality test, and
+// ExcludeTypes drops whole issue types before either runs.
+func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, error) {
+	key := filter.HasMetadataKey
+	exact := key == ""
+	if exact {
+		if len(filter.MetadataFields) != 1 {
+			return nil, errors.New("test fake requires an issue type, a metadata key, or exactly one metadata field")
+		}
+		for k := range filter.MetadataFields {
+			key = k
+		}
+	}
+	if err, bad := f.failMeta[key]; bad {
+		return nil, err
+	}
+	// Without the exclusion a type-agnostic query re-gathers every epic that
+	// happens to carry the key, and the board shows it twice. Pinning it here
+	// is what makes the dedup in BuildBoard a safety net rather than the only
+	// thing standing between the operator and a duplicated row.
+	excluded := map[string]bool{}
+	for _, t := range filter.ExcludeTypes {
+		excluded[string(t)] = true
+	}
+	for _, want := range []string{"epic", "decision", "convoy"} {
+		if !excluded[want] {
+			return nil, errors.New("a metadata-keyed gather must exclude the typed anchor kinds; missing " + want)
+		}
+	}
+
+	var out []*beads.Issue
+	for _, kind := range slices.Sorted(maps.Keys(f.issues)) { // deterministic order
+		if excluded[kind] {
+			continue
+		}
+		for _, iss := range f.issues[kind] {
+			meta := decodeMetadata(iss.Metadata)
+			got, present := meta[key]
+			if !present {
+				continue
+			}
+			if exact && got != filter.MetadataFields[key] {
+				continue
+			}
+			out = append(out, iss)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) GetDependenciesWithMetadata(_ context.Context, id string) ([]*beads.IssueWithDependencyMetadata, error) {
@@ -111,8 +171,14 @@ func cityWithRigs(t *testing.T, rigs map[string]string) string {
 var testNow = time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 
 // populatedStore is one rig's worth of fixtures: an epic with two children (one
-// closed), a decision, a real convoy with a tracked member, and the two machine
-// convoys that must be filtered out.
+// closed), a decision, a real convoy with a tracked member, the two machine
+// convoys that must be filtered out, and the ordinary task/bug beads the
+// metadata-keyed kinds are gathered from.
+//
+// The epic and the decision each carry one of the metadata markers on purpose.
+// They are the dedup control: both are already anchors by TYPE, so a gather
+// that forgot to exclude the typed kinds would admit each of them a second time
+// and the board would carry a duplicate row.
 func populatedStore() *fakeStore {
 	return &fakeStore{
 		issues: map[string][]*beads.Issue{
@@ -123,6 +189,25 @@ func populatedStore() *fakeStore {
 				issue("tk-cv", "real convoy", "convoy", 2, testNow.Add(-time.Hour), ""),
 				issue("tk-sling", "sling-tk-x", "convoy", 2, testNow, ""),
 				issue("tk-inputcv", "input convoy for tk-sy3vj", "convoy", 2, testNow, ""),
+			},
+			// The metadata-keyed kinds ride on ORDINARY beads — that is the
+			// whole of tk-2v08m — so these fixtures are plain tasks and bugs,
+			// the two types no anchor query has ever asked for.
+			"task": {
+				issue("tk-human", "Disposition: one PR needs the operator", "task", 1, testNow.Add(-4*24*time.Hour),
+					`{"gc.routed_to":"human"}`),
+				issue("tk-both", "Routed to the operator and parked", "task", 2, testNow.Add(-time.Hour),
+					`{"gc.routed_to":"human","gc.takeaway":"stood down — nothing further"}`),
+				issue("tk-quiet", "Carries no marker at all", "task", 2, testNow, `{"branch":"polecat/tk-quiet"}`),
+			},
+			"bug": {
+				issue("tk-parked", "helm returns the raw script path", "bug", 2, testNow.Add(-2*24*time.Hour),
+					`{"gc.takeaway":"routed — fix slung; nothing further needed here","gc.takeaway_by":"converse"}`),
+				// gc.routed_to is on every pool-routed step bead in the city.
+				// Only the value `human` means the operator owns it, so a
+				// presence test on this key would flood the board.
+				issue("tk-pooled", "Routed to a pool, not a human", "bug", 1, testNow,
+					`{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}`),
 			},
 		},
 		depsUp: map[string][]*beads.IssueWithDependencyMetadata{
@@ -234,12 +319,16 @@ func TestBeadsGatherFiltersAndKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	if len(res.Anchors) != 3 {
+	// epic + decision + real convoy, then human (tk-human, tk-both) and parked
+	// (tk-both, tk-parked). tk-both is gathered under both metadata kinds; that
+	// is one bead, two anchors, and BuildBoard's dedup is what folds it back to
+	// one row — see TestMetadataKindDedup in the board package.
+	if len(res.Anchors) != 7 {
 		ids := []string{}
 		for _, a := range res.Anchors {
-			ids = append(ids, a.ID)
+			ids = append(ids, a.ID+"/"+a.Kind)
 		}
-		t.Fatalf("want 3 anchors (epic, decision, real convoy), got %d: %v", len(res.Anchors), ids)
+		t.Fatalf("want 7 anchors, got %d: %v", len(res.Anchors), ids)
 	}
 	for _, banned := range []string{"tk-sling", "tk-inputcv"} {
 		if _, ok := findAnchor(res, banned); ok {
@@ -270,15 +359,126 @@ func TestBeadsGatherFiltersAndKinds(t *testing.T) {
 	}
 }
 
+// TestBeadsGatherMetadataKinds is the point of tk-2v08m: a bead the operator
+// owns is gathered because of what its METADATA says, not what its type is.
+// Before this, `human` and `parked` beads were plain tasks and bugs and the
+// board — keyed on epic/decision/convoy — excluded them by construction.
+func TestBeadsGatherMetadataKinds(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	kinds := map[string][]string{}
+	for _, a := range res.Anchors {
+		kinds[a.ID] = append(kinds[a.ID], a.Kind)
+	}
+	for _, c := range []struct {
+		id   string
+		want []string
+		why  string
+	}{
+		{"tk-human", []string{"human"}, "gc.routed_to=human on an ordinary task is the whole bug"},
+		{"tk-parked", []string{"parked"}, "gc.takeaway is a presence test — the value is free text"},
+		{"tk-both", []string{"human", "parked"}, "both markers gather twice; dedup folds it, the gather does not"},
+		{"tk-quiet", nil, "an unmarked task is not an anchor"},
+		{"tk-pooled", nil, "gc.routed_to=<pool> is not the operator; only the value `human` is"},
+		{"tk-epic", []string{"epic"}, "an epic carrying gc.takeaway stays an epic — ExcludeTypes, not luck"},
+		{"tk-dec", []string{"decision"}, "a decision carrying gc.routed_to=human stays a decision"},
+	} {
+		got := kinds[c.id]
+		if len(got) != len(c.want) {
+			t.Errorf("%s: got kinds %v, want %v — %s", c.id, got, c.want, c.why)
+			continue
+		}
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: got kinds %v, want %v — %s", c.id, got, c.want, c.why)
+				break
+			}
+		}
+	}
+
+	// The metadata kinds carry the same facts every anchor does, and no
+	// children: the gather admits the bead itself, not a set it owns.
+	i, ok := findAnchor(res, "tk-human")
+	if !ok {
+		t.Fatal("human anchor missing")
+	}
+	human := res.Anchors[i]
+	if len(human.Children) != 0 {
+		t.Errorf("a human-routed bead has no roll-up: %+v", human.Children)
+	}
+	if human.Source != "human" {
+		t.Errorf("Source drives the derivation branch: got %q", human.Source)
+	}
+	if human.Rig != "gc-toolkit" || human.Prefix != "tk" {
+		t.Errorf("rig identity: rig=%s prefix=%s", human.Rig, human.Prefix)
+	}
+	if human.UpdatedAt.IsZero() {
+		t.Error("a human-routed bead must carry updated_at like any other anchor")
+	}
+	if human.Priority == nil || *human.Priority != 1 {
+		t.Errorf("priority not carried: %v", human.Priority)
+	}
+	if got := human.Metadata["gc.routed_to"]; got != "human" {
+		t.Errorf("the marker that selected the anchor must ride on it: %v", human.Metadata)
+	}
+}
+
+// TestBeadsGatherMetadataKindsDegradeIndependently: the metadata gathers are
+// two more independently-failing kinds, not a second chance to lose the board.
+func TestBeadsGatherMetadataKindsDegradeIndependently(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := populatedStore()
+	st.failMeta = map[string]error{"gc.takeaway": errors.New("metadata query failed")}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("one failing metadata kind must not hard-fail the gather: %v", err)
+	}
+	if !res.Partial {
+		t.Error("a failing metadata kind must set partial")
+	}
+	var named bool
+	for _, e := range res.PartialErrors {
+		if strings.HasPrefix(e, "parked-visits@gc-toolkit") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("the partial error must name the kind an operator would recognise: %v", res.PartialErrors)
+	}
+	if _, ok := findAnchor(res, "tk-parked"); ok {
+		t.Error("the failed kind must be absent, not approximated")
+	}
+	if _, ok := findAnchor(res, "tk-human"); !ok {
+		t.Error("the other metadata kind must still gather")
+	}
+	if _, ok := findAnchor(res, "tk-epic"); !ok {
+		t.Error("the typed kinds must still gather")
+	}
+}
+
 // TestBeadsGatherDegradesPerRig mirrors SupervisorSource's contract: one rig
 // failing must not lose the others, and it must be recorded as partial.
 func TestBeadsGatherDegradesPerRig(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
-	broken := &fakeStore{failType: map[string]error{
-		"epic":     errors.New("dolt timeout"),
-		"decision": errors.New("dolt timeout"),
-		"convoy":   errors.New("dolt timeout"),
-	}}
+	broken := &fakeStore{
+		failType: map[string]error{
+			"epic":     errors.New("dolt timeout"),
+			"decision": errors.New("dolt timeout"),
+			"convoy":   errors.New("dolt timeout"),
+		},
+		failMeta: map[string]error{
+			"gc.routed_to": errors.New("dolt timeout"),
+			"gc.takeaway":  errors.New("dolt timeout"),
+		},
+	}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
 		"gc-toolkit":  populatedStore(),
 		"signal-loom": broken,

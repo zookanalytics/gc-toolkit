@@ -22,6 +22,15 @@ const defaultSupervisorPort = 8372
 
 // SupervisorSource reads bead state from the supervisor loopback HTTP
 // API. It satisfies [Source].
+//
+// It gathers the three TYPE-keyed anchor kinds only. The two metadata-keyed
+// kinds ([metadataAnchors]: `human` and `parked`) are unreachable from here,
+// and not for want of trying: `GET /beads` takes status/type/label/assignee/rig
+// and no metadata predicate, and its payloads omit metadata entirely, so there
+// is nothing to filter on server-side and nothing to filter on client-side
+// either — recovering it would mean one `/bead/{id}` round trip per open bead
+// in the city. A board served from this backend is therefore NARROWER, in the
+// same way its stale_days is pinned to 0; see the backend table in README.md.
 type SupervisorSource struct {
 	baseURL string // e.g. http://127.0.0.1:8372
 	city    string // registered city name, e.g. "loomington"
