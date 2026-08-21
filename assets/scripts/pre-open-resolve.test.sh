@@ -1043,10 +1043,10 @@ eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
    "(HOLD1) ...and the anchor is not flipped out of pre_open_gate"
 eq "$(wc -l < "$TMP/comments" | tr -d ' ')" "0" \
    "(HOLD1) ...and no codex-signoff comment is published about it"
-printf '%s\n' "$OUTH1" | grep -q "bead-HOLD branch 'polecat/feat-hold' merge_hold set (operator gate)" \
+grep -q "bead-HOLD branch 'polecat/feat-hold' merge_hold set (operator gate)" <<< "$OUTH1" \
   && ok "(HOLD1) the refusal names the marker, so a held anchor is diagnosable" \
   || bad "(HOLD1) must name merge_hold (got: $OUTH1)"
-printf '%s\n' "$OUTH1" | grep -q "0 opened, 0 flipped, 1 held" \
+grep -q "0 opened, 0 flipped, 1 held" <<< "$OUTH1" \
   && ok "(HOLD1) counted as HELD (an operator gate), not as a skip" \
   || bad "(HOLD1) summary must count it held (got: $OUTH1)"
 
@@ -1061,10 +1061,10 @@ eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
    "(HOLD2) rebase_hold set -> NO pull request is opened"
 eq "$(wc -l < "$TMP/comments" | tr -d ' ')" "0" \
    "(HOLD2) ...and nothing is commented on the branch the operator froze"
-printf '%s\n' "$OUTH2" | grep -q "bead-HOLD branch 'polecat/feat-hold' rebase_hold set (operator gate)" \
+grep -q "bead-HOLD branch 'polecat/feat-hold' rebase_hold set (operator gate)" <<< "$OUTH2" \
   && ok "(HOLD2) the refusal names rebase_hold specifically, not merge_hold" \
   || bad "(HOLD2) must name rebase_hold (got: $OUTH2)"
-printf '%s\n' "$OUTH2" | grep -q "0 opened, 0 flipped, 1 held" \
+grep -q "0 opened, 0 flipped, 1 held" <<< "$OUTH2" \
   && ok "(HOLD2) counted as held" || bad "(HOLD2) summary (got: $OUTH2)"
 
 # (HOLD3) THE HOLD IS ON THE IRREVERSIBLE HALF ONLY. A held anchor whose branch
@@ -1092,13 +1092,13 @@ eq "$(wc -l < "$TMP/created" | tr -d ' ')" "0" \
 hold_reset true ""
 : > "$TMP/heads"          # the branch head cannot be resolved at all
 OUTH4="$(bash "$SCRIPT" 2>"$TMP/errh4")"
-printf '%s\n' "$OUTH4" | grep -q "merge_hold set (operator gate)" \
+grep -q "merge_hold set (operator gate)" <<< "$OUTH4" \
   && ok "(HOLD4) an unreadable head does not mask the hold — the operator gate is reported" \
   || bad "(HOLD4) must report the hold (got: $OUTH4 / err: $(cat "$TMP/errh4"))"
 grep -q "head unresolved" "$TMP/errh4" \
   && bad "(HOLD4) the head read must not be reached for a held anchor" \
   || ok "(HOLD4) the gate short-circuits before the branch-head read (no I/O for a held anchor)"
-printf '%s\n' "$OUTH4" | grep -q "0 opened, 0 flipped, 1 held" \
+grep -q "0 opened, 0 flipped, 1 held" <<< "$OUTH4" \
   && ok "(HOLD4) counted as held, not skipped" || bad "(HOLD4) summary (got: $OUTH4)"
 
 # ==============================================================================
@@ -1210,10 +1210,10 @@ grep -q '^602	Codex signoff' "$TMP/commentbody" \
   || bad "(DEAD4) codex verdict comment (got: $(cat "$TMP/commentbody"))"
 
 eq "$(wc -l < "$TMP/created" | tr -d ' ')" "1" "(DEAD5) exactly one PR opened this pass"
-printf '%s\n' "$OUTD" | grep -q "superseding closed PR#601" \
+grep -q "superseding closed PR#601" <<< "$OUTD" \
   && ok "(DEAD5) the summary line says the fresh PR supersedes the dead one" \
   || bad "(DEAD5) summary must name the supersede (got: $OUTD)"
-printf '%s\n' "$OUTD" | grep -q "1 opened, 2 flipped, 0 held" \
+grep -q "1 opened, 2 flipped, 0 held" <<< "$OUTD" \
   && ok "(DEAD5) counters: 1 opened, 2 flipped, 0 held" || bad "(DEAD5) summary (got: $OUTD)"
 
 # (DEAD6) CONVERGENCE. The fresh pull request outranks the headstone from the next
@@ -1364,10 +1364,10 @@ N
      "(DEAD11/${HOLDKEY}_hold) a held anchor gets NO replacement for its dead PR"
   eq "$(wc -l < "$TMP/fliplog" | tr -d ' ')" "0" \
      "(DEAD11/${HOLDKEY}_hold) ...and is not adopted onto the dead one either"
-  printf '%s\n' "$OUTDH" | grep -q "${HOLDKEY}_hold set (operator gate)" \
+  grep -q "${HOLDKEY}_hold set (operator gate)" <<< "$OUTDH" \
     && ok "(DEAD11/${HOLDKEY}_hold) the operator gate is what reports the refusal" \
     || bad "(DEAD11/${HOLDKEY}_hold) must report the hold (got: $OUTDH / err: $(cat "$TMP/errdh"))"
-  printf '%s\n' "$OUTDH" | grep -q "0 opened, 0 flipped, 1 held" \
+  grep -q "0 opened, 0 flipped, 1 held" <<< "$OUTDH" \
     && ok "(DEAD11/${HOLDKEY}_hold) counted as held, not skipped" \
     || bad "(DEAD11/${HOLDKEY}_hold) summary (got: $OUTDH)"
 done
