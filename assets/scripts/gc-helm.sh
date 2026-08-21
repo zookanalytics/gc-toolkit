@@ -28,7 +28,10 @@
 #           hold it) for a bead that does not exist.
 #
 # ── What is an anchor ────────────────────────────────────────────────
-# FOUR kinds of OPEN top-level anchors are collected, cross-rig:
+# SIX kinds of OPEN anchors are collected, cross-rig. The first four are
+# selected by the bead's issue TYPE (or convoy shape); the last two by its
+# METADATA — see "Metadata-keyed kinds" below for why that distinction
+# exists at all.
 #   1. epic       — every open `epic`-type bead (per-rig durable anchor).
 #   2. convoy     — OWNED convoys that are NOT under an epic (floating
 #                   "epic-improvisers"). MACHINE convoys are transient and
@@ -42,6 +45,34 @@
 #                   old `owned==true` filter hid exactly this case).
 #   4. decision   — every open `decision`-type bead (human-gated; only a
 #                   human can move it).
+#   5. human      — any non-typed open bead carrying `gc.routed_to=human`.
+#   6. parked     — any non-typed open bead carrying a `gc.takeaway`.
+#
+# ── Metadata-keyed kinds (5 and 6) ───────────────────────────────────
+# The type-keyed gather is closed by construction: an ordinary task or bug
+# the OPERATOR owns cannot appear on the board no matter its state or who
+# it is waiting on. That is not merely a ranking miss — the board is the
+# front door, so a subject absent from it is also unresumable: nothing
+# prompts a return to it once the thread that produced it ends.
+#
+#   human   `gc.routed_to=human` is the city's durable "a human must act"
+#           marker. Banded ELEVATED for a decision's reason: no agent will
+#           take it, so it moves only when the operator moves it.
+#   parked  a `gc.takeaway` means the conversation reached a conclusion.
+#           Banded LOW — the opposite claim. It wants nothing; it only has
+#           to stay FINDABLE, and the band floor keeps it from competing
+#           with real attention items whatever its priority or age.
+#           Resume with prefix+a, then the bead id.
+#
+# Both EXCLUDE the four typed kinds, so an epic or decision that happens to
+# carry a marker stays its own kind instead of arriving twice. A bead
+# carrying BOTH markers is emitted twice on purpose and the id-dedup below
+# keeps the higher band.
+#
+# This mirrors the Go helm service's gather (services/helm/README.md,
+# "Anchor kinds", tk-2v08m). THE TWO BOARDS ARE SEPARATE IMPLEMENTATIONS
+# of one model and a fix landing on one does not reach the other — see
+# docs/gascity-human-engagement.md, "Two helm boards".
 #
 # Beads live in separate per-rig Dolt databases (lo/tk/sl/gc/su/…), so
 # the board enumerates `gc rig list` and queries each rig's `.beads`
@@ -61,17 +92,46 @@
 #                      `progress_mismatch` in the JSON output. Decisions
 #                      carry no frontier (N/M = —).
 #   • open/in-progress/assigned — counts over the open frontier.
-#   • stranded       — decomposed (M>0) with open children, ZERO LIVE
-#                      in-progress, AND no open visit: work exists but
-#                      nothing is moving. An open visit counts as moving —
-#                      the bead is worked via its held conversation,
-#                      not via in-progress child polecats. An in-progress
+#   • in flight      — a child is MOVING if EITHER (1) it is claimed
+#                      (status=in_progress) and its OWNING session is live,
+#                      or (2) a LIVE graph.v2 workflow covers it. Clause 2
+#                      is not a refinement, it is most of the signal: a bead
+#                      dispatched by `gc sling` keeps status=open and
+#                      assignee=null for its whole life — in-flight state
+#                      lives on the WORKFLOW (root bead + step beads), never
+#                      on the work bead — so under clause 1 alone a polecat
+#                      five minutes into an implementation is byte-for-byte
+#                      identical to a bead nobody has ever touched, and its
+#                      parent renders "stranded — assign or visit", an
+#                      instruction to intervene in work already moving.
+#                      The join is the canonical walk (root ->
+#                      gc.input_convoy_id -> the convoy's SINGLE tracked
+#                      member); a convoy resolving to any other count is a
+#                      shape this does not understand and makes NO movement
+#                      claim.
+#                      LIVENESS IS LOAD-BEARING. Nothing finalizes a
+#                      graph.v2 chain after its session drains, so completed
+#                      workflows leave open husk roots behind and they pile
+#                      up (18 open roots in one rig when this was written,
+#                      17 dead). Joining on root EXISTENCE would flip every
+#                      husk to "in flight" — trading a false stall for a
+#                      false all-clear, the worse lie on a board whose job
+#                      is to say what needs a human. Checked in two places:
+#                      the gather resolves only live roots (bounding the
+#                      convoy reads), and the render re-checks each session
+#                      against the FRESH list, so a polecat that drained
+#                      mid-cache stops counting at once.
+#   • stranded       — decomposed (M>0) with open children, NOTHING in
+#                      flight, AND no open visit: work exists but nothing is
+#                      moving. An open visit counts as moving — the bead is
+#                      worked via its held conversation. An in-progress
 #                      child whose OWNING session is dead (state
 #                      archived/closed/absent — keyed off .state, never
-#                      .running, per the witness orphan-liveness rule) does
-#                      NOT count as moving: it is the canonical UNKNOWN-stuck
-#                      case, so a frontier of only dead-owner children reads
-#                      stranded, not active (PROBLEM 1).
+#                      .running, per the witness orphan-liveness rule) and
+#                      which no live workflow covers does NOT count as
+#                      moving: it is the canonical UNKNOWN-stuck case, so a
+#                      frontier of only dead-owner children reads stranded,
+#                      not active (PROBLEM 1).
 #   • dead_owner     — count of in-progress children with a dead/absent
 #                      owner. Surfaced as "stuck (dead owner)" and never
 #                      masks a stall; the stuck ids ride into --json as
@@ -98,16 +158,18 @@
 # Each anchor gets a SEVERITY band, then rows sort by band, then by a
 # weight PROXY, then by staleness:
 #
-#   HIGH      stranded frontier (decomposed, open, no LIVE in-progress, and
+#   HIGH      stranded frontier (decomposed, open, nothing in flight, and
 #             no open visit — incl. a frontier whose only in-progress
 #             children have dead owners), OR an unowned non-machine convoy
 #             (the orphan exception).
-#   ELEVATED  a `decision` (human-gated); an otherwise-NORMAL anchor gone
-#             stale (> STALE_DAYS days); OR a still-moving anchor that has a
-#             dead-owner (stuck) in-progress child to recover.
-#   NORMAL    active frontier (has LIVE in-progress work, OR an open visit —
-#             a conversation is held).
-#   LOW       empty epic (0 children) or complete convoy (all closed).
+#   ELEVATED  a `decision` (human-gated); a `human` bead (same reason); an
+#             otherwise-NORMAL anchor gone stale (> STALE_DAYS days); OR a
+#             still-moving anchor that has a dead-owner (stuck) in-progress
+#             child to recover.
+#   NORMAL    active frontier (work in flight, OR an open visit — a
+#             conversation is held).
+#   LOW       empty epic (0 children), complete convoy (all closed), or a
+#             `parked` bead (floored by band, never by score).
 #
 #   weight PROXY = M (subtree size)
 #                + priority weight (P1→3, P2→2, P3→1, P4→0)
@@ -122,6 +184,10 @@
 # `--json`: a ranked JSON array; each element carries every fact above
 # plus the computed `severity`, `weight`, `rank_score`, `frontier`
 # (one-line summary), `needs` (short hint), and `held` (visit presence).
+# `in_progress` stays the RAW status count (honestly 0 for a slung bead);
+# `in_progress_live` is the moving count under both clauses, and
+# `in_flight` / `in_flight_heads` name the part attributable to a live
+# workflow, so the join can be audited without re-deriving it.
 # `--json` is the stable contract for downstream tooling (the tmux
 # board picker reads it). There is no `live` (hot/warm/cold) host
 # field — the visit/converse spine is the only conversation
@@ -138,6 +204,11 @@
 # CAPPED at GC_HELM_MAX_ROWS (default 50) by default so the board
 # can never balloon to "every bead"; `--limit=N` overrides with an
 # explicit N, and `--limit=0` means ALL (uncapped) for tooling.
+# `parked` rows draw on a SEPARATE budget, GC_HELM_MAX_PARKED (default
+# 15), instead of competing for the same slots: they are band-floored to
+# LOW and so sort last, and under one shared cap they would be the first
+# rows trimmed — which would re-hide, on the operator's actual surface,
+# exactly the beads the kind exists to surface.
 #
 # Exit codes:
 #   0   board rendered / verb succeeded
@@ -150,9 +221,14 @@
 # Test hook: GC_HELM_FIXTURE=<dir> — when set, the board reads
 # canned data instead of Dolt/sessions: <dir>/anchors.ndjson (one anchor
 # object per line, the gathered shape), <dir>/visits.json (a JSON array
-# of subject ids with an open visit), and <dir>/sessions.json (the
-# `gc session list --json` shape, for the child-owner liveness map).
-# Keeps the render/rank/glyph assertions hermetic. Unset in normal use.
+# of subject ids with an open visit), <dir>/inflight.json (a JSON object,
+# work-bead id -> the session names of the live workflows over it), and
+# <dir>/sessions.json (the `gc session list --json` shape, for both
+# liveness maps). Keeps the render/rank/glyph assertions hermetic, and is
+# the only way to exercise the render's liveness re-check on its own —
+# through the real gather a dead workflow is dropped before the render
+# ever sees it, so each of the two liveness checks would mask the other.
+# Unset in normal use.
 
 set -eu
 
@@ -162,11 +238,13 @@ PROG="gc-helm"
 STALE_DAYS=14                                   # > this many days since update → staleness bump
 XREF_CAP=5                                       # max cross-rig refs that count toward weight
 MAX_ROWS="${GC_HELM_MAX_ROWS:-50}"          # default row cap (--limit=0 disables)
+MAX_PARKED="${GC_HELM_MAX_PARKED:-15}"      # separate budget for `parked` rows (see below)
 CACHE_TTL="${GC_HELM_CACHE_TTL:-45}"        # seconds the gather cache stays fresh
 FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook (see header)
 # Fall back to defaults on a non-numeric override so `set -e` arithmetic
 # (the cap + cache-age tests) can't crash the board on a bad env value.
-case "$MAX_ROWS"  in ''|*[!0-9]*) MAX_ROWS=50 ;; esac
+case "$MAX_ROWS"   in ''|*[!0-9]*) MAX_ROWS=50 ;; esac
+case "$MAX_PARKED" in ''|*[!0-9]*) MAX_PARKED=15 ;; esac
 case "$CACHE_TTL" in ''|*[!0-9]*) CACHE_TTL=45 ;; esac
 
 usage() {
@@ -235,13 +313,16 @@ PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # ── Cache location ───────────────────────────────────────────────────
 # Keyed by city path so distinct cities don't collide. Cache format:
 # line 1 = gather epoch, line 2 = the visit map (one JSON array of
-# subject ids with an open visit), lines 3.. = anchors ndjson (portable:
-# no stat(1) / find(1) mtime flags, which differ GNU vs BSD). The file
-# name carries the format ("board-"), so a stale v1 "anchors-" cache is
-# simply never read.
+# subject ids with an open visit), line 3 = the in-flight map (one JSON
+# object, work-bead id -> the session names of the live workflows over
+# it), lines 4.. = anchors ndjson (portable: no stat(1) / find(1) mtime
+# flags, which differ GNU vs BSD). The file name carries the format
+# ("board2-"), so a stale cache written by an older layout — v1
+# "anchors-", or "board-" without the in-flight line — is simply never
+# read rather than being parsed one line out of register.
 CACHE_DIR="${TMPDIR:-/tmp}/gc-helm-cache.$(id -u 2>/dev/null || echo 0)"
 _city_key=$(printf '%s' "${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-default}}}" | cksum | cut -d' ' -f1)
-CACHE_FILE="$CACHE_DIR/board-$_city_key.ndjson"
+CACHE_FILE="$CACHE_DIR/board2-$_city_key.ndjson"
 
 bust_cache() { rm -f "$CACHE_FILE" 2>/dev/null || true; }
 
@@ -798,6 +879,14 @@ cmd_board() {
     : > "$ANCHORS"
     VISITS_FILE="$TMP/visits.json"
     printf '[]\n' > "$VISITS_FILE"
+    INFLIGHT_FILE="$TMP/inflight.json"
+    printf '{}\n' > "$INFLIGHT_FILE"
+    # Per-rig open-bead snapshots, written once and read by three consumers
+    # (visits, the metadata-keyed anchor kinds, the in-flight join). Kept as
+    # FILES because a rig's open set carries every bead's description and
+    # notes — the same payload the anchor gather must keep off argv.
+    OPEN_DIR="$TMP/open"
+    mkdir -p "$OPEN_DIR"
     # Gather-failure marker. The gather loops run in pipeline
     # subshells, so a shell variable cannot carry "a query died" back up —
     # a marker FILE can. Any line in it means the gather is NOT trusted:
@@ -821,25 +910,54 @@ cmd_board() {
     RIGNAMES=$(printf '%s' "$RIGS" | jq -c '[.[].name]')
     rig_for_prefix() { printf '%s' "$RIGS" | jq -c --arg p "$1" '.[] | select(.prefix==$p)' 2>/dev/null | head -n1; }
 
+    # ── Session list ─────────────────────────────────────────────────
+    # Fetched BEFORE the gather because two consumers need it: the
+    # in-flight join (which resolves only the workflows whose session is
+    # alive, so the gather's convoy reads stay bounded by live polecats
+    # rather than by every husk in the store) and the owner-liveness map
+    # below. Deliberately OUTSIDE the cache — session state is the one
+    # fact that must be fresh on every glance, so a workflow whose polecat
+    # died mid-TTL stops counting as movement immediately.
+    if [ -n "$FIXTURE" ]; then
+        sess_raw=$([ -f "$FIXTURE/sessions.json" ] && cat "$FIXTURE/sessions.json" || printf '{}')
+    else
+        sess_raw=$(gcq session list --state all --json)
+    fi
+    # Live session names+aliases, as a JSON array. Same liveness rule the
+    # render applies to a child's owner: archived/closed = dead, absent
+    # from the list entirely = dead. Never keys off .running (null for an
+    # active session mid-churn).
+    LIVE_SESSIONS=$(printf '%s' "$sess_raw" | jq -c '
+        [ (.sessions // . // [])[]?
+          | select(((.state // "") != "archived") and ((.state // "") != "closed"))
+          | [ (.session_name // empty), (.alias // empty) ][] ]' 2>/dev/null || printf '[]')
+    printf '%s' "$LIVE_SESSIONS" | jq -e 'type=="array"' >/dev/null 2>&1 || LIVE_SESSIONS='[]'
+
     # ── Gather (cached: the expensive part) ──────────────────────────
     gathered_from_cache=0
     if [ -n "$FIXTURE" ]; then
-        # Hermetic test path: anchors + visits come from the fixture, no Dolt.
+        # Hermetic test path: anchors + visits + in-flight come from the
+        # fixture, no Dolt.
         [ -f "$FIXTURE/anchors.ndjson" ] && cat "$FIXTURE/anchors.ndjson" > "$ANCHORS"
         [ -f "$FIXTURE/visits.json" ] && cat "$FIXTURE/visits.json" > "$VISITS_FILE"
+        [ -f "$FIXTURE/inflight.json" ] && cat "$FIXTURE/inflight.json" > "$INFLIGHT_FILE"
     elif [ "$REFRESH" -eq 0 ] && [ -f "$CACHE_FILE" ]; then
         ts=$(head -n1 "$CACHE_FILE" 2>/dev/null || echo 0)
         case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
         if [ "$ts" -gt 0 ] && [ $((NOW_EPOCH - ts)) -le "$CACHE_TTL" ] && [ $((NOW_EPOCH - ts)) -ge 0 ]; then
             sed -n '2p' "$CACHE_FILE" > "$VISITS_FILE" 2>/dev/null || printf '[]\n' > "$VISITS_FILE"
-            tail -n +3 "$CACHE_FILE" > "$ANCHORS" 2>/dev/null || : > "$ANCHORS"
+            sed -n '3p' "$CACHE_FILE" > "$INFLIGHT_FILE" 2>/dev/null || printf '{}\n' > "$INFLIGHT_FILE"
+            tail -n +4 "$CACHE_FILE" > "$ANCHORS" 2>/dev/null || : > "$ANCHORS"
             gathered_from_cache=1
         fi
     fi
 
     if [ -z "$FIXTURE" ] && [ "$gathered_from_cache" -eq 0 ]; then
+        gather_open_beads # writes $OPEN_DIR/<rig>.json (one query per rig)
         gather_anchors    # writes $ANCHORS
+        gather_meta_anchors # appends the metadata-keyed kinds to $ANCHORS
         gather_visits     # writes $VISITS_FILE (one JSON array line)
+        gather_inflight   # writes $INFLIGHT_FILE (one JSON object line)
         # A failed gather is an ERROR, not an empty board. Caching it
         # would serve a false "0 anchors" all-clear for the whole TTL — on the
         # one surface whose job is to tell a human whether anything needs
@@ -852,7 +970,7 @@ cmd_board() {
         # Persist the gather under one timestamp (portable mtime).
         mkdir -p "$CACHE_DIR" 2>/dev/null || true
         if [ -d "$CACHE_DIR" ]; then
-            { printf '%s\n' "$NOW_EPOCH"; cat "$VISITS_FILE"; cat "$ANCHORS"; } > "$CACHE_FILE.tmp.$$" 2>/dev/null \
+            { printf '%s\n' "$NOW_EPOCH"; cat "$VISITS_FILE"; cat "$INFLIGHT_FILE"; cat "$ANCHORS"; } > "$CACHE_FILE.tmp.$$" 2>/dev/null \
                 && mv "$CACHE_FILE.tmp.$$" "$CACHE_FILE" 2>/dev/null || rm -f "$CACHE_FILE.tmp.$$" 2>/dev/null || true
         fi
     fi
@@ -866,12 +984,18 @@ cmd_board() {
     VISITS=$(cat "$VISITS_FILE" 2>/dev/null || printf '[]')
     printf '%s' "$VISITS" | jq -e 'type=="array"' >/dev/null 2>&1 || VISITS='[]'
 
-    # ── Session list (for the child-owner liveness map below) ─────────
-    if [ -n "$FIXTURE" ]; then
-        sess_raw=$([ -f "$FIXTURE/sessions.json" ] && cat "$FIXTURE/sessions.json" || printf '{}')
-    else
-        sess_raw=$(gcq session list --state all --json)
-    fi
+    # ── In-flight map (work bead -> live workflow sessions) ───────────
+    # The fix for the false-stranded board. A work bead dispatched by
+    # `gc sling` keeps status=open and assignee=null for its whole life —
+    # graph.v2 carries the in-flight state on the WORKFLOW (root bead +
+    # step beads), never on the work bead — so a child being actively
+    # implemented is byte-for-byte identical, in bead state, to one nobody
+    # has touched. Reading only child status makes the board call live work
+    # "stranded, assign or visit". This map is the missing join; the render
+    # re-checks each session against the FRESH session list, so a cached
+    # entry whose polecat has since died stops counting immediately.
+    INFLIGHT=$(cat "$INFLIGHT_FILE" 2>/dev/null || printf '{}')
+    printf '%s' "$INFLIGHT" | jq -e 'type=="object"' >/dev/null 2>&1 || INFLIGHT='{}'
 
     # ── Owner liveness join (child-owner state; PROBLEM 1) ────────────
     # A child bead's `assignee` is its OWNING session — the session_name a
@@ -909,6 +1033,18 @@ def owner_live($assignee):
              elif ($st == "archived" or $st == "closed") then false
              else true end
       end;
+# Is a child bead covered by a LIVE graph.v2 workflow? `gc sling` leaves the
+# work bead at status=open/assignee=null and puts the in-flight state on the
+# workflow, so this is the only way a polecat mid-implementation is visible at
+# all. Liveness is re-derived HERE, against the fresh session list, rather than
+# trusted from the cached map: the gather can only record which workflows were
+# live when it ran, and a polecat that drained since must stop counting at once
+# — otherwise the fix would trade a false "stranded" for a false "in flight",
+# which is the worse lie on a board whose job is to say what needs a human.
+def wf_live($id):
+    (($inflight[$id]) // []) as $names
+    | if ($names|type) != "array" then false
+      else any($names[]; owner_live(.)) end;
 
 [ inputs ]
 | map(
@@ -921,13 +1057,30 @@ def owner_live($assignee):
     | [$ch[] | select(.status != "closed")] as $openset
     | ($openset|length) as $open
     | ([$ch[]|select(.status=="in_progress")]|length) as $inprog
-    # in-progress work only counts as MOVING when its owner is live; an
-    # in-progress child with a dead/absent owner is stuck, not active.
-    | ([$ch[]|select(.status=="in_progress" and owner_live(.assignee))]|length) as $inprog_live
-    | ($inprog - $inprog_live) as $inprog_dead
-    | [ $ch[] | select(.status=="in_progress" and (owner_live(.assignee)|not)) | .id ] as $dead_owner_heads
+    # MOVING — a child demonstrably being worked, by EITHER mechanism:
+    #   1. it is claimed (status=in_progress) and its owning session is live;
+    #   2. a live workflow covers it (the sling case: the work bead itself
+    #      never leaves status=open/assignee=null, so mechanism 1 can never
+    #      see it — this is the whole false-stranded defect).
+    # Unioned by id, so a child matched both ways is counted once.
+    | [ $openset[] | select((.status=="in_progress" and owner_live(.assignee)) or wf_live(.id)) | .id ] as $live_heads
+    | ($live_heads|length) as $inprog_live
+    # STUCK — claimed, owner dead, and no live workflow standing behind it.
+    # The workflow clause matters: a re-dispatched bead can carry a stale
+    # assignee from the session that died while a live workflow works it now,
+    # and calling that "dead owner" would be the same error in a new place.
+    | [ $openset[] | select(.status=="in_progress" and (owner_live(.assignee)|not) and (wf_live(.id)|not)) | .id ] as $dead_owner_heads
+    | ($dead_owner_heads|length) as $inprog_dead
+    # How many movers are moving via a workflow rather than a claim — the
+    # quantity the board was blind to. Surfaced in --json so the join can be
+    # audited without re-deriving it.
+    | [ $openset[] | select(wf_live(.id)) | .id ] as $inflight_heads
+    | ($inflight_heads|length) as $inflight_n
     | ([$openset[]|select((.assignee // "") != "")]|length) as $assigned
-    | [ $openset[] | select((.assignee // "")=="" or .status!="in_progress") | .id ] as $open_ids
+    # Idle heads: unclaimed/unowned open children, MINUS anything a live
+    # workflow is already carrying — those are not idle, they are in flight.
+    | [ $openset[] | select((.assignee // "")=="" or .status!="in_progress")
+                  | . as $c | select(($live_heads | index($c.id)) == null) | $c.id ] as $open_ids
     | (epoch($a.updated_at)) as $upd
     | (if $upd==null then 0 else ((($now - $upd) / 86400) | floor) end) as $stale
     | ($prefixes - [$a.prefix]) as $others
@@ -943,8 +1096,20 @@ def owner_live($assignee):
     # stranded when a visit is open. Stranded/HIGH is reserved for a
     # decomposed anchor with open children, zero in-progress, AND no
     # open visit.
+    # The metadata-keyed kinds carry no roll-up by construction — the gather
+    # admits the bead itself, not a set it owns — so the band comes from what
+    # the bead IS, and they are placed ahead of the count branches that would
+    # otherwise read every one of them as an empty anchor. `human` is ELEVATED
+    # for the same reason a decision is: gc.routed_to=human means no agent
+    # will take it.
+    # `parked` is LOW for the opposite reason — the conversation reached a
+    # takeaway and wants nothing, it only has to stay FINDABLE, so the band
+    # floor keeps it out of the contest with real attention items whatever its
+    # priority or age.
     | (if $a.source=="unowned" then "HIGH"
        elif $a.source=="decision" then "ELEVATED"
+       elif $a.source=="human" then "ELEVATED"
+       elif $a.source=="parked" then "LOW"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
        elif ($open>0 and $inprog_live==0 and ($held|not)) then "HIGH"
@@ -956,12 +1121,14 @@ def owner_live($assignee):
     | (if $inprog_dead>0 then " · \($inprog_dead) stuck (dead owner)" else "" end) as $deadsfx
     | (if $a.source=="unowned" then "unowned convoy — no owning bead"
        elif $a.source=="decision" then "human-gated decision"
+       elif $a.source=="human" then "routed to the operator — no agent will take it"
+       elif $a.source=="parked" then "conversation parked — takeaway recorded"
        elif $m==0 then "empty — no children"
        elif $open==0 then "all \($m) closed · 0 open"
        elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "\($open) open · \($inprog_dead) stuck (dead owner)"
        elif ($inprog_live==0 and $held) then ("\($open) open · in conversation" + $deadsfx)
-       elif $inprog_live==0 then "\($open) open · 0 in-progress (stranded)"
-       else "\($open) open · \($inprog_live) in-progress" + $deadsfx end) as $frontier
+       elif $inprog_live==0 then "\($open) open · 0 in flight (stranded)"
+       else "\($open) open · \($inprog_live) in flight" + $deadsfx end) as $frontier
     # The LLM-authored takeaway (host or proactive), if any: the board-visible
     # headline of what this anchor concluded / what it needs. Collapse any
     # internal whitespace (a stray newline would break the table) and trim.
@@ -974,6 +1141,8 @@ def owner_live($assignee):
     | (if ($takeaway|length) > 0 then $takeaway
        elif $a.source=="unowned" then "unowned — assign an owning bead"
        elif $a.source=="decision" then "operator decision"
+       elif $a.source=="human" then "operator action"
+       elif $a.source=="parked" then "resume: prefix+a, then the bead id"
        elif $m==0 then "no children — decompose or assign"
        elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
        elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "dead owner — recover or reassign"
@@ -986,9 +1155,11 @@ def owner_live($assignee):
         severity:$sev, weight:$weight, held:$held,
         n_closed:$closed, m_total:$m, open:$open, in_progress:$inprog, assigned:$assigned,
         in_progress_live:$inprog_live, in_progress_dead:$inprog_dead, dead_owner:($inprog_dead>0),
+        in_flight:$inflight_n, in_flight_heads:$inflight_heads,
         owned:(if ($a|has("owned")) then $a.owned else null end),
         stranded:($m>0 and $open>0 and $inprog_live==0 and ($held|not)),
-        empty:($m==0 and $a.source!="decision" and $a.source!="unowned"),
+        empty:($m==0 and $a.source!="decision" and $a.source!="unowned"
+                    and $a.source!="human" and $a.source!="parked"),
         complete:($m>0 and $open==0),
         progress_mismatch:$pmismatch,
         stale_days:$stale, priority:$a.priority, cross_rig_refs:$xrefs,
@@ -1010,10 +1181,28 @@ def owner_live($assignee):
 '
     FULL=$(jq -c -n --argjson prefixes "$PREFIXES" --argjson rignames "$RIGNAMES" \
         --argjson now "$NOW_EPOCH" --argjson visits "$VISITS" --argjson ownermap "$OWNER_MAP" \
+        --argjson inflight "$INFLIGHT" \
         "$RENDER" < "$ANCHORS")
     TOTAL=$(printf '%s' "$FULL" | jq 'length')
+    # ── Row cap, with a RESERVED budget for `parked` ─────────────────
+    # A single rank-ordered cap would silently undo half of what the parked
+    # kind is for. Parked is band-floored at LOW, so it sorts last by
+    # construction, and the operator's own surface asks for 36 rows
+    # (tmux-pick-helm.sh) against a board whose attention bands alone fill
+    # most of that — so every parked row falls off the end, and a bead added
+    # to the gather specifically so it could be FOUND is once again absent
+    # from the board the operator actually reads.
+    #
+    # So the cap is split: attention rows keep the whole of --limit/MAX_ROWS
+    # (their budget is not reduced by parked existing), and parked rows draw
+    # on a separate MAX_PARKED. The two slices are re-merged by rank_score,
+    # so the output stays one globally ranked array — `--json` is unchanged
+    # in shape for the picker. `--limit=0` means ALL, both kinds.
     if [ "$EFFLIMIT" -gt 0 ]; then
-        BOARD=$(printf '%s' "$FULL" | jq -c --argjson n "$EFFLIMIT" '.[0:$n]')
+        BOARD=$(printf '%s' "$FULL" | jq -c --argjson n "$EFFLIMIT" --argjson p "$MAX_PARKED" '
+            ([.[] | select(.kind != "parked")] | .[0:$n])
+          + ([.[] | select(.kind == "parked")] | .[0:$p])
+          | sort_by(-.rank_score)')
     else
         BOARD=$(printf '%s' "$FULL" | jq -c '.')
     fi
@@ -1044,10 +1233,12 @@ def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as 
 ( (" "|rpad(2)) + ("SEV"|rpad(9)) + ("ID"|rpad(11)) + ("RIG"|rpad(13)) + ("KIND"|rpad(9)) + ("N/M"|rpad(7)) + ("FRONTIER"|rpad(36)) + "NEEDS" ),
 ( ("─"*1|rpad(2)) + ("─"*8|rpad(9)) + ("─"*10|rpad(11)) + ("─"*12|rpad(13)) + ("─"*8|rpad(9)) + ("─"*6|rpad(7)) + ("─"*35|rpad(36)) + ("─"*16) ),
 ( .[] | ((if .held then "●" else " " end)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad(11)) + ((.rig)|rpad(13)) + ((.kind)|rpad(9))
-        + ((if .kind=="decision" then "—" else "\(.n_closed)/\(.m_total)" end)|rpad(7))
+        + ((if (.kind=="decision" or .kind=="human" or .kind=="parked") then "—"
+            else "\(.n_closed)/\(.m_total)" end)|rpad(7))
         + ((.frontier)|rpad(36)) + (.needs) )
 '
-    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/stale/stuck · NORMAL=active · LOW=empty/complete\n'
+    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/parked\n'
+    printf 'Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n'
     printf 'Held: ● an open visit holds this anchor'\''s conversation (attach via the sessions picker) · blank = none\n'
     printf 'open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
 }
@@ -1165,27 +1356,168 @@ gather_anchors() {
     done
 }
 
-# ── Visit gather (rides the cached gather) ───────────────────────────
-# Writes ONE JSON-array line to $VISITS_FILE: the unique subject ids
-# carried by open visit beads (task_kind=visit, gc.continuation_group).
-# Per-rig like the anchor gather; a rig whose query dies is
-# gather_mark'ed (see gather_anchors). Both
-# open AND in_progress count as "open" here — a claimed visit is a held
-# conversation, not a finished one.
-gather_visits() {
-    : > "$TMP/visit-subjects.txt"
+# ── Shared per-rig open-bead snapshot ────────────────────────────────
+# ONE `bd list --status open,in_progress` per rig, written to
+# $OPEN_DIR/<n>.json as {rig, prefix, beads:[…]}. Three consumers read it
+# — gather_visits, gather_meta_anchors, gather_inflight — so widening the
+# board from one of those queries to three costs no extra Dolt round
+# trips. Kept on disk rather than in a variable: a rig's open set carries
+# every bead's description and notes, the same payload gather_anchors
+# takes care never to put on argv.
+gather_open_beads() {
+    _i=0
     printf '%s' "$RIGS" | jq -c '.[]' | while IFS= read -r rig; do
+        _i=$((_i + 1))
+        name=$(printf '%s' "$rig" | jq -r '.name')
         path=$(printf '%s' "$rig" | jq -r '.path')
+        prefix=$(printf '%s' "$rig" | jq -r '.prefix')
         beads="$path/.beads"
         [ -d "$beads" ] || continue
-        v_raw=$(gcq bd list --db "$beads" --status open,in_progress --json --limit=0)
-        printf '%s' "$v_raw" | jq -e 'type=="array"' >/dev/null 2>&1 || gather_mark "visits@$path"
-        as_array "$v_raw" \
-            | jq -r '.[] | select((.metadata.task_kind // "") == "visit")
-                     | .metadata["gc.continuation_group"] // empty' >> "$TMP/visit-subjects.txt" 2>/dev/null || true
+        o_raw=$(gcq bd list --db "$beads" --status open,in_progress --json --limit=0)
+        printf '%s' "$o_raw" | jq -e 'type=="array"' >/dev/null 2>&1 \
+            || { gather_mark "open@$name"; continue; }
+        printf '%s' "$o_raw" | jq -c --arg rig "$name" --arg prefix "$prefix" \
+            '{rig:$rig, prefix:$prefix, beads:.}' > "$OPEN_DIR/$_i.json" 2>/dev/null \
+            || gather_mark "open-wrap@$name"
+    done
+}
+
+# ── Visit gather (rides the shared snapshot) ─────────────────────────
+# Writes ONE JSON-array line to $VISITS_FILE: the unique subject ids
+# carried by open visit beads (task_kind=visit, gc.continuation_group).
+# Both open AND in_progress count as "open" here — a claimed visit is a
+# held conversation, not a finished one.
+gather_visits() {
+    : > "$TMP/visit-subjects.txt"
+    for f in "$OPEN_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        jq -r '(.beads // [])[] | select((.metadata.task_kind // "") == "visit")
+               | .metadata["gc.continuation_group"] // empty' \
+            < "$f" >> "$TMP/visit-subjects.txt" 2>/dev/null || true
     done
     jq -R -s -c 'split("\n") | map(select(length > 0)) | unique' \
         < "$TMP/visit-subjects.txt" > "$VISITS_FILE" 2>/dev/null || printf '[]\n' > "$VISITS_FILE"
+}
+
+# ── Metadata-keyed anchor kinds (rides the shared snapshot) ──────────
+# Appends `human` and `parked` anchors to $ANCHORS. The three original
+# kinds are selected by issue TYPE; these two by METADATA, which is the
+# only way an ordinary task/bug the operator owns can reach the board at
+# all — under the type-only gather it is not merely unranked, it is
+# absent, and invisible also means unresumable.
+#
+#   human   gc.routed_to=human   the city's durable "a human must act"
+#                                marker; no agent will take it.
+#   parked  gc.takeaway present  a conversation that reached a takeaway.
+#                                It wants nothing; it has to stay findable.
+#
+# Both EXCLUDE the three typed kinds, so an epic or decision that happens
+# to carry a marker stays its own kind instead of arriving twice. A bead
+# carrying BOTH markers is emitted twice on purpose and the render's
+# existing id-dedup keeps the higher band.
+#
+# This mirrors the Go helm service's gather (services/helm/README.md
+# "Anchor kinds", tk-2v08m), which is the other implementation of this
+# board — see docs/gascity-human-engagement.md on the divergence.
+gather_meta_anchors() {
+    for f in "$OPEN_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        jq -c '
+            .rig as $rig | .prefix as $prefix
+            | (.beads // [])[]
+            | select((.issue_type // "") as $t | (["epic","decision","convoy"] | index($t)) == null)
+            | . as $b
+            | ($b.metadata // {}) as $md
+            | (($md["gc.routed_to"] // "") | tostring) as $routed
+            | (($md["gc.takeaway"]  // "") | tostring) as $tk
+            | [ (if $routed == "human" then "human" else empty end),
+                (if ($tk | length) > 0 then "parked" else empty end) ][]
+            | . as $kind
+            | {id:$b.id, title:($b.title // ""), kind:$kind, source:$kind,
+               rig:$rig, prefix:$prefix, priority:($b.priority // 3),
+               updated_at:($b.updated_at // ""), description:($b.description // ""),
+               progress:null, children:[],
+               takeaway:$tk,
+               takeaway_at:(($md["gc.takeaway_at"] // "") | tostring),
+               takeaway_by:(($md["gc.takeaway_by"] // "") | tostring)}' \
+            < "$f" >> "$ANCHORS" 2>/dev/null || gather_mark "meta-anchors@$f"
+    done
+}
+
+# ── In-flight join (rides the shared snapshot) ───────────────────────
+# Writes ONE JSON-object line to $INFLIGHT_FILE: work-bead id -> the
+# session names of the live workflows over it.
+#
+# WHY THIS EXISTS. `gc sling` pours a graph.v2 molecule and routes its
+# STEP beads; the work bead itself keeps status=open and assignee=null
+# from dispatch until the refinery closes it. The in-flight state lives on
+# the workflow, so a board that reads only child status sees a polecat
+# five minutes into an implementation as a bead nobody has ever touched,
+# and calls its parent "stranded — assign or visit".
+#
+# THE JOIN is the canonical one, the same walk quiesce-completed-workflows.sh
+# uses: root -> gc.input_convoy_id -> the convoy's SINGLE tracked member.
+# The one-member rule is a fail-closed gate, not an optimisation: a convoy
+# resolving to any other count is a shape this does not understand, and the
+# safe reading of "not understood" is "no claim about movement".
+#
+# LIVENESS FIRST, and it is what makes this safe. An open workflow root
+# does NOT mean live work — nothing finalizes a graph.v2 chain after its
+# session drains, so completed workflows leave husks behind and they
+# accumulate (at this writing, 18 open roots in one rig, 17 of them dead).
+# Joining on root existence alone would flip those husks to "in flight" and
+# trade a false stall for a false all-clear — strictly the worse failure on
+# a board whose job is to say what needs a human. So a root is resolved
+# only when a session it is stamped with is live, which also bounds the
+# convoy reads by the number of live polecats rather than by the husk pile.
+# The session name is read from the root, falling back to its step beads:
+# roots stamp `gc.session_name` at claim time, but not every root in the
+# store carries one, and the steps do.
+gather_inflight() {
+    : > "$TMP/inflight-pairs.tsv"
+    for f in "$OPEN_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        jq -r --argjson live "$LIVE_SESSIONS" '
+            (.beads // []) as $bs
+            # root id -> session names stamped on its steps
+            | ([ $bs[]
+                 | select(((.metadata["gc.root_bead_id"] // "") | tostring) != "")
+                 | {root: (.metadata["gc.root_bead_id"] | tostring),
+                    sess: ((.metadata["gc.session_name"] // "") | tostring)} ]
+               | map(select(.sess != ""))
+               | group_by(.root)
+               | map({key: .[0].root, value: (map(.sess) | unique)})
+               | from_entries) as $stepsess
+            | $bs[]
+            | select(((.metadata["gc.input_convoy_id"] // "") | tostring) != "")
+            | . as $r
+            | ((($r.metadata["gc.session_name"] // "") | tostring)) as $rsess
+            | ((([ (if $rsess != "" then $rsess else empty end) ]
+                 + ($stepsess[$r.id] // [])) | unique)
+               | map(select(. as $n | $live | index($n)))) as $livenames
+            | select(($livenames | length) > 0)
+            | "\($r.metadata["gc.input_convoy_id"] | tostring)\t\($livenames | join(","))"' \
+            < "$f" >> "$TMP/inflight-pairs.tsv" 2>/dev/null || gather_mark "inflight-roots@$f"
+    done
+
+    : > "$TMP/inflight-map.tsv"
+    # `gcq` reads from this loop's stdin unless told not to, and a child that
+    # swallows the remaining lines would silently truncate the map to its first
+    # entry — hence the explicit </dev/null.
+    while IFS="$(printf '\t')" read -r _convoy _names; do
+        [ -n "${_convoy:-}" ] || continue
+        _anchor=$(gcq convoy status "$_convoy" --json </dev/null \
+            | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null)
+        [ -n "${_anchor:-}" ] || continue
+        printf '%s\t%s\n' "$_anchor" "$_names" >> "$TMP/inflight-map.tsv"
+    done < "$TMP/inflight-pairs.tsv"
+
+    jq -R -s -c 'split("\n") | map(select(length > 0))
+                 | map(split("\t") | {key: .[0], value: ((.[1] // "") | split(","))})
+                 | group_by(.key)
+                 | map({key: .[0].key, value: (map(.value) | add | unique)})
+                 | from_entries' \
+        < "$TMP/inflight-map.tsv" > "$INFLIGHT_FILE" 2>/dev/null || printf '{}\n' > "$INFLIGHT_FILE"
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────

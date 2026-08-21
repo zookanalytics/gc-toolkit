@@ -302,7 +302,10 @@ run_board() {
                 sh "$SCRIPT" board --json --refresh 2>"$run/err")" || BRC=$?
     BERR="$(cat "$run/err" 2>/dev/null || true)"
     # Any cache the run decided to persist lands under TMPDIR/gc-helm-cache.<uid>.
-    BCACHE_N="$(find "$run" -name 'board-*.ndjson' 2>/dev/null | wc -l | tr -d ' ')"
+    # Format-AGNOSTIC glob: the cache file name carries its format and changes
+    # with it, and every assertion below expects ZERO — so a glob pinned to one
+    # format would go on passing while matching nothing.
+    BCACHE_N="$(find "$run" -name 'board*.ndjson' 2>/dev/null | wc -l | tr -d ' ')"
 }
 
 # --- (ARGVCAP) the live sl-zi5z shape: 158 KB of child NOTES, two children. ----
@@ -373,6 +376,401 @@ eq "$BRC" "0" "(HEADROOM) 400 children render clean"
 eq "$(printf '%s' "$BOUT" | jq -r 'first(.[]? | select(.id=="tk-epic1")) | .m_total' 2>/dev/null || true)" \
    "400" "(HEADROOM) all 400 children survive the roll-up"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SCENARIO 3 — the board reads work-bead status, so live work reads as stranded
+#              (tk-fkeft), and metadata-owned beads never reach the board at all
+#
+# THE BUG (a). `gc sling` pours a graph.v2 molecule and routes its STEP beads.
+# The work bead itself keeps status=open / assignee=null from dispatch until the
+# refinery closes it — the in-flight state lives on the WORKFLOW. The board
+# counted only children with status=in_progress, so a polecat five minutes into
+# an implementation was byte-for-byte identical, in bead state, to a bead nobody
+# had ever touched, and its parent epic rendered
+#   "N open · 0 in-progress (stranded) / decomposed, idle — assign or visit"
+# i.e. an instruction to intervene in work that is already moving. Ten of the
+# eleven HIGH rows on the live board read that way when this was filed.
+#
+# THE FIX: join the work bead to any LIVE workflow over it, by the canonical
+# walk (root -> gc.input_convoy_id -> the convoy's single tracked member), and
+# count a covered child as moving.
+#
+# WHY LIVENESS IS THE WHOLE GAME, and why (HUSK) below is the load-bearing case:
+# nothing finalizes a graph.v2 chain after its session drains, so every completed
+# workflow leaves an open husk root behind and they pile up (18 open roots in
+# one rig when this was written; 17 of them dead). Joining on root EXISTENCE
+# would flip all 17 husks to "in flight" — trading a false stall for a false
+# all-clear, which is the worse lie on a board whose job is to say what needs a
+# human. So a root counts only while a session it is stamped with is live.
+#
+# THE BUG (b). The gather admitted three anchor kinds, all selected by issue
+# TYPE — epic, decision, convoy. An ordinary task/bug the operator owns could
+# not appear no matter its state, and invisible also means unresumable. Two
+# metadata-keyed kinds are added, mirroring the Go helm service (tk-2v08m):
+# `human` (gc.routed_to=human, ELEVATED) and `parked` (gc.takeaway present, LOW).
+#
+# Covered:
+#   (INFLIGHT)  a live workflow over an unclaimed child -> parent NOT stranded
+#   (HUSK)      a DEAD-session workflow -> parent still stranded (no false green)
+#   (CLAIMED)   the pre-existing claimed+live-owner path still counts as moving
+#   (IDLEHEAD)  a workflow-covered child drops out of open_heads
+#   (ONEMEMBER) a convoy resolving to != 1 member is refused, not guessed
+#   (HUMAN)     gc.routed_to=human gathers as kind `human`, band ELEVATED
+#   (PARKED)    gc.takeaway gathers as kind `parked`, band LOW
+#   (EXCLUDE)   an EPIC carrying a takeaway stays kind `epic` — gathered once
+#   (FLOOR)     a parked row never outranks a stranded epic
+# ══════════════════════════════════════════════════════════════════════════════
+
+ITMP="$TMP/inflight"
+mkdir -p "$ITMP/bin" "$ITMP/rig/.beads"
+
+# Two epics. e-LIVE's child is carried by a live workflow; e-HUSK's child is
+# carried by a workflow whose session is gone. Both children are open with NO
+# assignee — the shape the old board could not tell apart.
+cat > "$ITMP/epics.json" <<'J'
+[
+ {"id":"tk-eLIVE","title":"live epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
+ {"id":"tk-eHUSK","title":"husk epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
+ {"id":"tk-eCLAIM","title":"claimed epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
+ {"id":"tk-eMANY","title":"many-member epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
+ {"id":"tk-eTAKE","title":"epic that carries a takeaway","priority":1,"updated_at":"2026-08-21T00:00:00Z",
+  "metadata":{"gc.takeaway":"an epic may carry one of these too"}}
+]
+J
+
+cat > "$ITMP/kids-eLIVE.json"  <<'J'
+[{"id":"tk-wLIVE","status":"open","assignee":null},{"id":"tk-done1","status":"closed","assignee":null}]
+J
+cat > "$ITMP/kids-eHUSK.json"  <<'J'
+[{"id":"tk-wHUSK","status":"open","assignee":null},{"id":"tk-done2","status":"closed","assignee":null}]
+J
+# Claimed by a live session the old way — must keep counting as moving.
+cat > "$ITMP/kids-eCLAIM.json" <<'J'
+[{"id":"tk-wCLAIM","status":"in_progress","assignee":"gc-toolkit__polecat-lx-live"},{"id":"tk-done3","status":"closed","assignee":null}]
+J
+cat > "$ITMP/kids-eMANY.json"  <<'J'
+[{"id":"tk-wMANY","status":"open","assignee":null},{"id":"tk-done4","status":"closed","assignee":null}]
+J
+cat > "$ITMP/kids-eTAKE.json"  <<'J'
+[{"id":"tk-done5","status":"closed","assignee":null}]
+J
+
+# The shared per-rig open-bead snapshot: workflow roots, their steps, and the
+# two metadata-owned beads. root-MANY's convoy resolves to TWO members, which
+# the fail-closed one-member gate must refuse rather than guess at.
+cat > "$ITMP/open.json" <<'J'
+[
+ {"id":"tk-rLIVE","status":"in_progress","assignee":null,"issue_type":"task","title":"wf live","priority":3,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"cv-LIVE","gc.session_name":"gc-toolkit__polecat-lx-live"}},
+ {"id":"tk-rHUSK","status":"open","assignee":null,"issue_type":"task","title":"wf husk","priority":3,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"cv-HUSK","gc.session_name":"gc-toolkit__polecat-lx-gone"}},
+ {"id":"tk-rMANY","status":"open","assignee":null,"issue_type":"task","title":"wf many","priority":3,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"cv-MANY","gc.session_name":"gc-toolkit__polecat-lx-live"}},
+ {"id":"tk-sSTEP","status":"open","assignee":null,"issue_type":"task","title":"a step","priority":3,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.root_bead_id":"tk-rLIVE","gc.step_ref":"mol-polecat-work.implement","gc.session_name":"gc-toolkit__polecat-lx-live"}},
+ {"id":"tk-human","status":"open","assignee":null,"issue_type":"bug","title":"the operator owns this","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human"}},
+ {"id":"tk-parked","status":"open","assignee":null,"issue_type":"task","title":"a parked conversation","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"nothing further needed here"}},
+ {"id":"tk-eTAKE","status":"open","assignee":null,"issue_type":"epic","title":"epic that carries a takeaway","priority":1,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"an epic may carry one of these too"}},
+ {"id":"tk-dHUMAN","status":"open","assignee":null,"issue_type":"decision","title":"decision routed to human","priority":1,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human"}},
+ {"id":"tk-both","status":"open","assignee":null,"issue_type":"task","title":"routed to the operator AND parked","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human","gc.takeaway":"parked, and still owed to the operator"}}
+]
+J
+
+cat > "$ITMP/decisions.json" <<'J'
+[{"id":"tk-dHUMAN","title":"decision routed to human","priority":1,"updated_at":"2026-08-21T00:00:00Z",
+  "metadata":{"gc.routed_to":"human"}}]
+J
+
+# lx-live is active; lx-gone is ABSENT from the list entirely (the dead shape).
+cat > "$ITMP/sessions.json" <<'J'
+{"sessions":[{"session_name":"gc-toolkit__polecat-lx-live","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active"}]}
+J
+
+cat > "$ITMP/bin/gc" <<'GCI'
+#!/usr/bin/env bash
+args="$*"
+case "$1 ${2:-}" in
+  "rig list")     jq -n --arg p "$FAKE_RIG_PATH" '{rigs:[{name:"gc-toolkit",path:$p,prefix:"tk"}]}' ;;
+  "convoy list")  printf '{"convoys":[]}\n' ;;
+  "session list") cat "$FAKE_SESSIONS" ;;
+  "bd show")      printf '[]\n' ;;
+  "convoy status")
+    case "$3" in
+      cv-LIVE) jq -n '{children:[{id:"tk-wLIVE"}]}' ;;
+      cv-HUSK) jq -n '{children:[{id:"tk-wHUSK"}]}' ;;
+      # Two members: a shape the join does not understand. It must make NO
+      # claim about movement rather than pick one.
+      cv-MANY) jq -n '{children:[{id:"tk-wMANY"},{id:"tk-extra"}]}' ;;
+      *)       printf '{"children":[]}\n' ;;
+    esac ;;
+  "bd list")
+    case "$args" in
+      *"--parent tk-eLIVE"*)  cat "$FAKE_DIR/kids-eLIVE.json" ;;
+      *"--parent tk-eHUSK"*)  cat "$FAKE_DIR/kids-eHUSK.json" ;;
+      *"--parent tk-eCLAIM"*) cat "$FAKE_DIR/kids-eCLAIM.json" ;;
+      *"--parent tk-eMANY"*)  cat "$FAKE_DIR/kids-eMANY.json" ;;
+      *"--parent tk-eTAKE"*)  cat "$FAKE_DIR/kids-eTAKE.json" ;;
+      *"--type epic"*)        cat "$FAKE_EPICS" ;;
+      *"--type decision"*)    cat "$FAKE_DIR/decisions.json" ;;
+      *)                      cat "$FAKE_OPEN" ;;   # the shared snapshot
+    esac ;;
+esac
+exit 0
+GCI
+chmod +x "$ITMP/bin/gc"
+
+IRUN="$ITMP/run"; mkdir -p "$IRUN"
+IRC=0
+IOUT="$(env PATH="$ITMP/bin:$PATH" TMPDIR="$IRUN" \
+            FAKE_RIG_PATH="$ITMP/rig" FAKE_EPICS="$ITMP/epics.json" \
+            FAKE_OPEN="$ITMP/open.json" FAKE_SESSIONS="$ITMP/sessions.json" \
+            FAKE_DIR="$ITMP" GC_HELM_FIXTURE= \
+            sh "$SCRIPT" board --json --refresh --limit=0 2>"$IRUN/err")" || IRC=$?
+IERR="$(cat "$IRUN/err" 2>/dev/null || true)"
+eq "$IRC" "0" "(SCENARIO3) board renders (err: ${IERR:-none})"
+
+# row <id> <field>
+row() { printf '%s' "$IOUT" | jq -r --arg i "$1" --arg k "$2" \
+        'first(.[]? | select(.id==$i)) | .[$k] | if .==null then "null" else tostring end' 2>/dev/null || true; }
+
+# --- (INFLIGHT) the defect itself -------------------------------------------
+eq "$(row tk-eLIVE stranded)"        "false"  "(INFLIGHT) a live workflow over an unclaimed child clears stranded"
+eq "$(row tk-eLIVE in_progress_live)" "1"     "(INFLIGHT) the covered child counts as moving"
+eq "$(row tk-eLIVE in_flight)"       "1"      "(INFLIGHT) it is attributed to the workflow, not to a claim"
+eq "$(row tk-eLIVE in_progress)"     "0"      "(INFLIGHT) and the raw status count is still honestly zero"
+eq "$(row tk-eLIVE severity)"        "NORMAL" "(INFLIGHT) the row leaves the HIGH attention band"
+printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-eLIVE")).frontier | test("1 in flight")' >/dev/null 2>&1 \
+  && ok "(INFLIGHT) the frontier says in flight, not '0 in-progress (stranded)'" \
+  || bad "(INFLIGHT) frontier still reads: $(row tk-eLIVE frontier)"
+
+# --- (HUSK) the load-bearing guard ------------------------------------------
+# 17 of 18 open roots in the live rig were husks when this was written. If root
+# existence alone counted, every one of them would render a false all-clear.
+eq "$(row tk-eHUSK stranded)"         "true" "(HUSK) a dead-session workflow does NOT clear stranded"
+eq "$(row tk-eHUSK in_flight)"        "0"    "(HUSK) the husk contributes no in-flight movement"
+eq "$(row tk-eHUSK severity)"         "HIGH" "(HUSK) the row stays in the attention band"
+eq "$(row tk-eHUSK in_progress_dead)" "0"    "(HUSK) an unclaimed child is not a dead OWNER either"
+
+# --- (CLAIMED) the pre-existing path is untouched ---------------------------
+eq "$(row tk-eCLAIM stranded)"         "false" "(CLAIMED) claimed + live owner still counts as moving"
+eq "$(row tk-eCLAIM in_progress_live)" "1"     "(CLAIMED) counted once"
+eq "$(row tk-eCLAIM in_flight)"        "0"     "(CLAIMED) and attributed to the claim, not a workflow"
+
+# --- (IDLEHEAD) covered work is not an idle head ----------------------------
+printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-eLIVE")).open_heads | index("tk-wLIVE") == null' >/dev/null 2>&1 \
+  && ok "(IDLEHEAD) a workflow-covered child drops out of open_heads" \
+  || bad "(IDLEHEAD) tk-wLIVE still listed as an idle head"
+printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-eHUSK")).open_heads | index("tk-wHUSK") != null' >/dev/null 2>&1 \
+  && ok "(IDLEHEAD) a husk-covered child REMAINS an idle head" \
+  || bad "(IDLEHEAD) tk-wHUSK wrongly dropped from open_heads"
+
+# --- (ONEMEMBER) fail closed on a shape the walk does not understand --------
+eq "$(row tk-eMANY stranded)" "true" "(ONEMEMBER) a convoy with 2 tracked members makes no movement claim"
+eq "$(row tk-eMANY in_flight)" "0"   "(ONEMEMBER) nothing is guessed from the ambiguous convoy"
+
+# --- (HUMAN) / (PARKED) the metadata-keyed kinds ----------------------------
+eq "$(row tk-human kind)"     "human"    "(HUMAN) gc.routed_to=human reaches the board at all"
+eq "$(row tk-human severity)" "ELEVATED" "(HUMAN) banded with the other human-gated rows"
+eq "$(row tk-parked kind)"     "parked"  "(PARKED) a takeaway-bearing bead is findable"
+eq "$(row tk-parked severity)" "LOW"     "(PARKED) floored — it wants nothing, it just has to be findable"
+
+# --- (EXCLUDE) the typed kinds are not re-gathered by metadata --------------
+eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-eTAKE")]|length')" "1" \
+   "(EXCLUDE) an epic carrying a takeaway appears exactly once"
+eq "$(row tk-eTAKE kind)" "epic" "(EXCLUDE) …and stays kind epic, not parked"
+eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-dHUMAN")]|length')" "1" \
+   "(EXCLUDE) a decision routed to human appears exactly once"
+eq "$(row tk-dHUMAN kind)" "decision" "(EXCLUDE) …and stays kind decision, not human"
+
+eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-both")]|length')" "1" \
+   "(BOTH) …and renders exactly once after dedup"
+eq "$(row tk-both kind)"     "human"    "(BOTH) the higher band wins the row"
+eq "$(row tk-both severity)" "ELEVATED" "(BOTH) an owed-to-the-operator bead is not floored by its takeaway"
+
+# --- (FLOOR) a parked row never competes with real attention ----------------
+# Guard the comparison on both scores being REAL numbers first. Defaulting a
+# missing score to 0 would let this pass when the parked row does not exist at
+# all — which is precisely the state before the fix, so the assertion would
+# have certified the bug as compliant.
+PARKED_SCORE="$(row tk-parked rank_score)"; HUSK_SCORE="$(row tk-eHUSK rank_score)"
+case "${PARKED_SCORE}${HUSK_SCORE}" in
+  ''|*[!0-9]*) bad "(FLOOR) a rank_score is missing or non-numeric (parked='$PARKED_SCORE' husk='$HUSK_SCORE')" ;;
+  *) [ "$PARKED_SCORE" -lt "$HUSK_SCORE" ] \
+       && ok "(FLOOR) parked ranks below a stranded epic ($PARKED_SCORE < $HUSK_SCORE)" \
+       || bad "(FLOOR) parked outranked a stranded epic ($PARKED_SCORE >= $HUSK_SCORE)" ;;
+esac
+
+# --- (MAPGATHER) the gather-side filter, asserted on its own output ----------
+# The two liveness checks (gather-side, render-side) each mask the other under
+# a single end-to-end assertion: mutate either one alone and the board still
+# reads correctly, because the other still refuses the husk. So each is pinned
+# by a test that can only see THAT layer. Here: the map the gather produced,
+# read straight off the cache it wrote. A dead root must never have had its
+# convoy resolved at all.
+ICACHE="$(find "$IRUN" -name 'board2-*.ndjson' 2>/dev/null | head -1)"
+if [ -n "$ICACHE" ] && [ -s "$ICACHE" ]; then
+    IMAP="$(sed -n '3p' "$ICACHE")"
+    printf '%s' "$IMAP" | jq -e 'has("tk-wLIVE")' >/dev/null 2>&1 \
+      && ok "(MAPGATHER) the live workflow's member is in the in-flight map" \
+      || bad "(MAPGATHER) tk-wLIVE missing from the map: $IMAP"
+    printf '%s' "$IMAP" | jq -e 'has("tk-wHUSK") | not' >/dev/null 2>&1 \
+      && ok "(MAPGATHER) the dead workflow's convoy was never resolved" \
+      || bad "(MAPGATHER) a husk reached the in-flight map: $IMAP"
+    printf '%s' "$IMAP" | jq -e 'has("tk-wMANY") | not' >/dev/null 2>&1 \
+      && ok "(MAPGATHER) the ambiguous convoy was never resolved" \
+      || bad "(MAPGATHER) a 2-member convoy reached the map: $IMAP"
+
+    # (EXCLGATHER) the type exclusion, asserted where it happens. Counting rows
+    # in the RENDERED board cannot see it: the render dedups by id, so a
+    # doubly-gathered epic collapses back to one row and the assertion passes
+    # whether or not the exclusion ran. The gathered anchor set is lines 4.. of
+    # the same cache, before any dedup.
+    GATHERED="$(tail -n +4 "$ICACHE" 2>/dev/null | jq -s -c '.' 2>/dev/null || printf '[]')"
+    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-eTAKE")]|length')" "1" \
+       "(EXCLGATHER) an epic carrying a takeaway is gathered ONCE, not also as parked"
+    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-dHUMAN")]|length')" "1" \
+       "(EXCLGATHER) a decision routed to human is gathered ONCE, not also as human"
+    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-parked")]|length')" "1" \
+       "(EXCLGATHER) …while a non-typed bead still gathers exactly once"
+    # (BOTH) a bead carrying BOTH markers is emitted twice ON PURPOSE — the two
+    # kinds are independent claims — and the render's id-dedup collapses it to
+    # the higher band. Asserted on both sides of that dedup, because each half
+    # is invisible from the other: the gather count cannot see which band won,
+    # and the rendered row cannot see that two were produced.
+    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-both")]|length')" "2" \
+       "(BOTH) a bead with both markers is gathered under both kinds"
+else
+    bad "(MAPGATHER) no cache written — cannot inspect the gathered map"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCENARIO 4 — the RENDER-side liveness re-check, isolated (tk-fkeft)
+#
+# The map is CACHED (45s) but session state is not: it is re-read every glance
+# precisely so a polecat that drained mid-TTL stops counting as movement at
+# once. That re-check is the correctness guarantee — the gather-side filter is
+# an optimisation that bounds convoy reads — and scenario 3 cannot see it,
+# because there the gather has already dropped the dead root before the render
+# ever runs.
+#
+# So drive the render directly through GC_HELM_FIXTURE with a map that CONTAINS
+# both a live-session entry and dead-session ones. Only liveness separates them.
+# ══════════════════════════════════════════════════════════════════════════════
+
+FTMP="$TMP/fixture"; mkdir -p "$FTMP/fx" "$FTMP/bin" "$FTMP/run"
+cat > "$FTMP/fx/anchors.ndjson" <<'J'
+{"id":"tk-fLIVE","title":"live","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-fw1","status":"open","assignee":null}]}
+{"id":"tk-fGONE","title":"absent owner","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-fw2","status":"open","assignee":null}]}
+{"id":"tk-fARCH","title":"archived owner","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-fw3","status":"open","assignee":null}]}
+J
+printf '[]\n' > "$FTMP/fx/visits.json"
+# All three children ARE in the map. tk-fw1's session is active; tk-fw2's is
+# absent from the session list entirely; tk-fw3's is archived.
+cat > "$FTMP/fx/inflight.json" <<'J'
+{"tk-fw1":["sess-alive"],"tk-fw2":["sess-absent"],"tk-fw3":["sess-archived"]}
+J
+cat > "$FTMP/fx/sessions.json" <<'J'
+{"sessions":[{"session_name":"sess-alive","alias":"a","state":"active"},
+             {"session_name":"sess-archived","alias":"b","state":"archived"}]}
+J
+cat > "$FTMP/bin/gc" <<'GCF'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "rig list") jq -n '{rigs:[{name:"gc-toolkit",path:"/nonexistent",prefix:"tk"}]}' ;;
+  *)          printf '[]\n' ;;
+esac
+exit 0
+GCF
+chmod +x "$FTMP/bin/gc"
+
+FRC=0
+FOUT="$(env PATH="$FTMP/bin:$PATH" TMPDIR="$FTMP/run" GC_HELM_FIXTURE="$FTMP/fx" \
+            sh "$SCRIPT" board --json --limit=0 2>"$FTMP/err")" || FRC=$?
+eq "$FRC" "0" "(SCENARIO4) fixture board renders (err: $(cat "$FTMP/err" 2>/dev/null || true))"
+frow() { printf '%s' "$FOUT" | jq -r --arg i "$1" --arg k "$2" \
+         'first(.[]? | select(.id==$i)) | .[$k] | if .==null then "null" else tostring end' 2>/dev/null || true; }
+
+eq "$(frow tk-fLIVE stranded)"  "false" "(RENDERLIVE) a mapped child with an ACTIVE session counts as moving"
+eq "$(frow tk-fLIVE in_flight)" "1"     "(RENDERLIVE) …and is attributed to the workflow"
+eq "$(frow tk-fGONE stranded)"  "true"  "(RENDERLIVE) a mapped child whose session is ABSENT does not count"
+eq "$(frow tk-fGONE in_flight)" "0"     "(RENDERLIVE) …and contributes no in-flight movement"
+eq "$(frow tk-fARCH stranded)"  "true"  "(RENDERLIVE) a mapped child whose session is ARCHIVED does not count"
+eq "$(frow tk-fARCH in_flight)" "0"     "(RENDERLIVE) …and contributes no in-flight movement either"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCENARIO 5 — the row cap must not re-hide what the parked kind surfaces
+#
+# Parked is band-floored to LOW, so it sorts LAST. Under one shared cap it is
+# therefore the first thing trimmed — and the operator's own surface asks for
+# 36 rows (tmux-pick-helm.sh:64) against a board whose attention bands alone
+# fill most of that. Measured on the live city while this was written: at
+# --limit=36 under a shared cap, 0 of 17 parked rows survived. A bead added to
+# the gather so it could be FOUND would have been absent from the only board
+# the operator reads — defect (b) fixed in the gather and undone in the cap.
+#
+# So parked draws on its own budget. Attention rows keep the whole of --limit.
+# ══════════════════════════════════════════════════════════════════════════════
+
+CTMP="$TMP/cap"; mkdir -p "$CTMP/fx" "$CTMP/bin" "$CTMP/run"
+# 5 stranded epics (attention, HIGH) + 8 parked beads.
+{
+  for i in 1 2 3 4 5; do
+    printf '{"id":"tk-cap-e%s","title":"epic %s","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-cap-k%s","status":"open","assignee":null}]}\n' "$i" "$i" "$i"
+  done
+  for i in 1 2 3 4 5 6 7 8; do
+    printf '{"id":"tk-cap-p%s","title":"parked %s","kind":"parked","source":"parked","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"a takeaway","takeaway_at":"","takeaway_by":"converse","children":[]}\n' "$i" "$i"
+  done
+} > "$CTMP/fx/anchors.ndjson"
+printf '[]\n' > "$CTMP/fx/visits.json"
+printf '{}\n'  > "$CTMP/fx/inflight.json"
+printf '{"sessions":[]}\n' > "$CTMP/fx/sessions.json"
+cp "$FTMP/bin/gc" "$CTMP/bin/gc"
+
+# cap_run <limit> <max_parked> -> COUT
+cap_run() {
+    COUT="$(env PATH="$CTMP/bin:$PATH" TMPDIR="$CTMP/run" GC_HELM_FIXTURE="$CTMP/fx" \
+                GC_HELM_MAX_PARKED="$2" \
+                sh "$SCRIPT" board --json --limit="$1" 2>/dev/null || printf '[]')"
+}
+ckind() { printf '%s' "$COUT" | jq -r --arg k "$1" '[.[]?|select(.kind==$k)]|length' 2>/dev/null || echo 0; }
+
+# --limit=3 with a parked budget of 2: attention keeps its FULL 3.
+cap_run 3 2
+eq "$(ckind epic)"   "3" "(CAPSPLIT) attention rows get the whole of --limit, undiminished by parked"
+eq "$(ckind parked)" "2" "(CAPSPLIT) parked rows draw on their own budget"
+eq "$(printf '%s' "$COUT" | jq -r 'length')" "5" "(CAPSPLIT) the board is attention + parked, not one shared cap"
+
+# The regression this guards: a parked budget of 0 is the old shared-cap shape.
+cap_run 3 0
+eq "$(ckind epic)"   "3" "(CAPSPLIT) …attention unaffected when parked is budgeted to zero"
+eq "$(ckind parked)" "0" "(CAPSPLIT) …and parked can still be switched off explicitly"
+
+# Ranking is preserved across the merge: every attention row outranks every
+# parked row, so the re-merged array is still globally rank-ordered.
+cap_run 5 8
+printf '%s' "$COUT" | jq -e '[.[].rank_score] as $r | $r == ($r | sort | reverse)' >/dev/null 2>&1 \
+  && ok "(CAPSPLIT) the merged board is still sorted by rank_score" \
+  || bad "(CAPSPLIT) merge broke the global rank order"
+eq "$(printf '%s' "$COUT" | jq -r '[.[]?|select(.kind=="epic")]|length')" "5" "(CAPSPLIT) all 5 attention rows at limit=5"
+eq "$(printf '%s' "$COUT" | jq -r '[.[]?|select(.kind=="parked")]|length')" "8" "(CAPSPLIT) all 8 parked rows at a budget of 8"
+
+# --limit=0 means ALL, both kinds, regardless of the parked budget.
+cap_run 0 2
+eq "$(printf '%s' "$COUT" | jq -r 'length')" "13" "(CAPSPLIT) --limit=0 is uncapped for both kinds"
+
 echo ""
-echo "gc-helm takeaway --release quiesce + anchor-gather argv boundary: $PASS passed, $FAIL failed"
+echo "gc-helm takeaway --release quiesce + anchor-gather argv boundary + in-flight/metadata kinds: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

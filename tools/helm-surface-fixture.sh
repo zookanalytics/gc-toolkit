@@ -311,7 +311,12 @@ FOUT="$(TMPDIR="$GF/tmp" GC_CITY_PATH="$GF/city" PATH="$GF/bin:$PATH" "$TOOL" bo
 eq     "failed gather exits non-zero (3)"             "3"             "$ec"
 has    "failed gather prints the explicit error line" "gather failed" "$FOUT"
 absent "failed gather never reads as a quiet board"   "Nothing floats" "$FOUT"
-eq     "failed gather writes NO cache file"           ""              "$(find "$GF/tmp" -name 'board-*' -type f 2>/dev/null)"
+# Glob the cache format-AGNOSTICALLY ('board*', not 'board-*'). The file name
+# carries the format on purpose, so it CHANGES whenever the cache layout does
+# (tk-fkeft bumped it to board2-). A glob pinned to one format stops matching
+# at that moment — and because both of these assertions expect to find NOTHING,
+# they would keep passing while measuring nothing at all.
+eq     "failed gather writes NO cache file"           ""              "$(find "$GF/tmp" -name 'board*' -type f 2>/dev/null)"
 rm -rf "$GF"
 
 # (b) Control: a legitimately EMPTY board (every query answers, with valid
@@ -332,7 +337,7 @@ ec=0
 EOUT="$(TMPDIR="$GE/tmp" GC_CITY_PATH="$GE/city" PATH="$GE/bin:$PATH" "$TOOL" board 2>&1)" || ec=$?
 eq  "legit empty board exits 0"                   "0"              "$ec"
 has "legit empty board prints the quiet message"  "Nothing floats" "$EOUT"
-eq  "legit empty board IS cached (1 cache file)"  "1"              "$(find "$GE/tmp" -name 'board-*' -type f 2>/dev/null | wc -l | tr -d ' ')"
+eq  "legit empty board IS cached (1 cache file)"  "1"              "$(find "$GE/tmp" -name 'board*' -type f 2>/dev/null | wc -l | tr -d ' ')"
 EOUT2="$(TMPDIR="$GE/tmp" GC_CITY_PATH="$GE/city" PATH="$GE/bin:$PATH" "$TOOL" board 2>&1 || true)"
 has "second glance serves from the cache"         "cached"         "$EOUT2"
 
