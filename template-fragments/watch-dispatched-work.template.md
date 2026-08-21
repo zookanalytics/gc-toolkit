@@ -6,6 +6,19 @@ progress back to the operator, spawn a watcher in the same turn. The
 watcher wakes you when the bead transitions, so you can surface
 status changes without polling.
 
+**Do not watch a blocker in order to sling something after it.** That
+is a dispatch held in your context: invisible to everyone else, and
+gone when this session ends. Record it on the bead instead and drain —
+
+```
+{{ .ConfigDir }}/assets/scripts/deferred-dispatch.sh arm <bead> \
+    --target <rig>/<agent> --reason "waits for <blocker>"
+```
+
+The rig's `deferred-dispatch` order slings it once `bd` reports the bead
+ready. Watch for *reporting*; arm for *sequencing*. See
+`docs/deferred-dispatch.md`.
+
 The portable mechanism is `gc events --follow` filtered to one bead.
 `gc` is always on `PATH`, so this works from any agent in any pack. It
 runs as a long-lived process whose stdout is a JSON Lines stream — one

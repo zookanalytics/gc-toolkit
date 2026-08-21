@@ -9,8 +9,11 @@ A `blocks` dep between work beads does not hold a graph.v2 formula
 dispatch, and nothing on the sling path checks for one either: sling a
 blocked bead and the molecule pours immediately, routes the workflow
 root, and a worker claims it. Sequencing lives in the *order you
-dispatch*, not in the dep graph. The mechanism — which record is routed,
-and why none of the edges the read side walks reach the work bead — is
+dispatch*, not in the dep graph — so a dispatch that must wait is
+recorded on the bead and performed later
+([deferred-dispatch.md](deferred-dispatch.md)) rather than held in the
+dispatcher's context. The mechanism — which record is routed, and why
+none of the edges the read side walks reach the work bead — is
 the routing contract's question and lives in
 [gascity-routing-model.md](gascity-routing-model.md#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch).
 
