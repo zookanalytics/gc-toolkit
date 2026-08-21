@@ -32,6 +32,18 @@ nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Re-
 # leaves a dated trace. Raising this number would only widen the window
 # in which a dead thread looks alive.
 #
+# This timeout bounds a HELD sitting only, and it is not the clock that
+# usually takes the pane. Once a sitting ENDS the session has no wake
+# reason left, and the reconciler drains it as `no-wake-reason` within
+# about a minute — measured at ~58s on 2026-08-20, roughly an hour after
+# the sitting itself concluded. That drain kills the pane and its whole
+# process tree outright, reading nothing out of it first, so an operator
+# still composing a reply loses what they typed
+# (tk-tufrw; upstream fix gc-ze774). Mechanism in the sibling section of
+# the doc cited above: docs/gascity-human-engagement.md → "How a pane
+# dies when no sitting is live". Nothing in this file can defend against
+# it; do not tune idle_timeout expecting to.
+#
 # Open visits outlive sessions either way — a dead session's visit is
 # recovered (witness patrol, or `gc bd reclaim` once its lease expires)
 # and a fresh session resumes it from the record. Recovery is eventual,

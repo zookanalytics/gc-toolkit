@@ -379,6 +379,118 @@ deliberately narrow, so the mechanism above still holds:
 Design record: `specs/tk-bzm86/design-doc.md`; the cross-rig filing
 `gc-rjtk1` is now resolved upstream.
 
+*This section is about a sitting that is still **held**.* A sitting that
+has **ended** leaves a live pane with no wake reason, and that pane dies
+on a different, much shorter clock — see
+*How a pane dies when no sitting is live*, below. Reading this section as
+the complete account of how the operator's pane goes is what left the
+post-sitting window unguarded.
+
+## How a pane dies when no sitting is live (source-verified 2026-08-20)
+
+The section above answers "what ends a **held** sitting". It is not the
+only way the operator's pane goes, and the other way is the one that has
+cost them words. Verified against the gascity source and this city's
+event/reconciler record after an operator lost an unsubmitted
+multi-paragraph reply (`tk-tufrw`); full evidence in
+`specs/tk-tufrw/teardown-input-loss.md`.
+
+Once a sitting **ends** — the visit closed, the takeaway stamped, the
+sign-off posted — the session still has a live pane, and the thread the
+operator is reading is still on screen. What it no longer has is a wake
+reason of its own. `ComputeAwakeSet` finds none, and the reconciler's
+`if !shouldWake && target.alive` arm (`cmd/gc/session_reconciler.go`)
+begins a drain whose reason resolves to the `switch` default,
+**`no-wake-reason`**. Measured on 2026-08-20: the tick at 22:03:13Z saw
+`state: awake`, the same tick at 22:03:17Z recorded `state: draining`,
+and the stop landed at 22:04:15Z — a **~58-second** window.
+
+**What holds the pane up in the meantime is not the operator.** The
+converse pool is demand-driven (`min_active_sessions = 0`), so a live
+session survives on the pool having open visits at all — anyone's. In
+this incident the operator's own visit had closed an hour earlier, and
+the pane outlived it only because an unrelated visit (`tk-lrylu`, a
+different subject entirely) stayed open; that one closed at 22:02:15Z and
+the drain began 58 seconds later. Do not read a still-present pane as
+evidence that the system knows you are there. It does not: neither the
+operator's attention nor anything they have typed is an input to the
+decision.
+
+Three things about that path are worth knowing before trusting a pane:
+
+- **Nothing is typed into the pane; the pane is taken whole.** The drain
+  signals through *metadata*, not keystrokes. `beginSessionDrainInfo`
+  only records the drain — it takes a `runtime.Provider` and ignores it
+  (`_ runtime.Provider`, `cmd/gc/session_wake.go`). One tick later, if
+  nothing cancelled, `advanceSessionDrainsWithSessionsTraced` sets
+  `GC_DRAIN_ACK=1` on the session, and says so in as many words: the
+  reconciler's Phase 1 drain-ack check "calls `sp.Stop()` for a clean
+  SIGTERM/SIGKILL — no Ctrl-C keystroke injection into the pane." That
+  stop is `Provider.Stop` (`internal/runtime/tmux/adapter.go`) →
+  `KillSessionWithProcessesExcluding`
+  (`internal/runtime/tmux/tmux.go`): SIGTERM to the pane's whole
+  process tree with a grace window, SIGKILL to whatever survives it,
+  then `tmux kill-session`. `Provider.Interrupt` — the one API that
+  would put a `C-c` in the pane — is not on this path at all; the drain
+  code's only interrupt helper, `verifiedInterrupt`, has no caller
+  outside its own test. So the composer is never cleared first. The
+  draft is still sitting in the pane, intact, for the whole window, and
+  then the pane is gone.
+- **Attachment protects, but it stops protecting at the ack.**
+  Attachment is a wake cause (`WakeCauseAttached`,
+  `internal/session/lifecycle_projection.go`), and `ComputeAwakeSet`
+  applies it as an override that wakes *even a drained session*
+  (`cmd/gc/compute_awake_set.go`), so an *attached* pane does not enter
+  this drain, and re-attaching during the first tick of one cancels it
+  — `no-wake-reason` is cancellable, so any wake reason that reappears
+  clears the ack and drops the drain. Two things eat that protection.
+  *First*, this city runs **one tmux client** switched between
+  per-agent sessions, so at most one session reports
+  `session_attached=1` at a time and every other live pane reads as
+  unattached; the idle ladder's attachment rung is on the `idle` path
+  only, and `no-wake-reason` never reaches it. *Second*, once
+  `GC_DRAIN_ACK` is set, the stop is decided by the
+  Phase 1 drain-ack consumer (`cmd/gc/session_reconciler.go`), whose
+  cancels are assigned work, a *structured* pending interaction, and a
+  config-drift-plus-recently-attached case — plain attachment on a
+  `no-wake-reason` ack is not one of them, so attaching late does not
+  call the kill off. And typing is not a cancel condition at any point
+  on this path: a pending *interaction* is a prompt the agent is blocked
+  on, not a half-written reply, and nothing in the decision reads the
+  pane's contents.
+- **The stop event's wording is misleading here.** It reads
+  `"drain acknowledged by agent"` even when the agent never ran
+  `gc runtime drain-ack`: the reconciler acks on its behalf
+  (`GC_DRAIN_ACK_SOURCE=reconciler`, `cmd/gc/session_wake.go`) and
+  `finalizeDrainAckStoppedSession` emits the same string either way. Do
+  not read that event as an agent decision.
+
+*Seam:* the same one as the reap — **nothing pack-owned runs at kill
+time**, so the pack cannot capture pending input here. Ruled out with
+evidence in the determination: tmux `session-closed`/`pane-exited` hooks
+(fire after the pane is gone), a Claude Code `SessionEnd` hook (never receives the
+composer buffer), a cooldown order (multi-minute cadence against a
+~58-second window), and `pipe-pane` logging (a redrawing TUI makes the
+volume unusable). The capture has to live in the drain path upstream:
+filed as `gc-ze774`, with `gc-8g41r`'s `InputAreaState` — buffered-input
+detection over `tmux capture-pane` — as the primitive it should consume.
+
+**The operator's ruling on this (2026-08-20T22:21Z):** *"draining a
+session with typed text should be a hard no."* Pending input is a hard
+blocker on teardown, not something to capture on the way out — capture
+and warning are the fallback for a teardown that happens anyway. That
+prohibition is what `gc-ze774` is filed to implement; the pack has no
+part of it to build.
+
+**What follows for the pack.** Treat "the sitting ended" as the start of
+a short countdown on that pane, not as a quiet state. The existing
+lever still applies and is still the only one we own: the record has to
+be written before the pane matters — the takeaway stamped at hold time,
+the outcome appended as soon as a sitting settles anything, the sign-off
+posted at close. Nothing has changed about that. What is new is that the
+operator's *own* unsent words have no such protection, and until
+`gc-ze774` lands they are not durable anywhere.
+
 ## Watch items — moving now, re-verify before building on them
 
 - **`gc.session_affinity`** — **this watch fired; re-derived 2026-08-14.**
