@@ -1074,7 +1074,18 @@ gather_anchors() {
             eid=$(printf '%s' "$epic" | jq -r '.id')
             ch_raw=$(gcq bd list --db "$beads" --parent "$eid" --status open,in_progress,closed,blocked,deferred --json)
             printf '%s' "$ch_raw" | jq -e 'type=="array"' >/dev/null 2>&1 || gather_mark "children@$eid"
-            children=$(as_array "$ch_raw")
+            # Project to the three fields the render consumes BEFORE the value
+            # crosses the argv boundary. $ch_raw carries every child's full
+            # description and notes, and Linux caps a SINGLE argv string at
+            # MAX_ARG_STRLEN (131072 B) independent of the much larger ARG_MAX —
+            # so one bead's accumulated notes is enough to push --argjson past
+            # the cap, at which point jq never execs at all. Feeding the bulk
+            # through a PIPE (no argv limit) and passing only the projection
+            # re-bases growth on child COUNT (~50 B/child) instead of unbounded
+            # note volume.
+            children=$(as_array "$ch_raw" | jq -c '[.[] | {id, status, assignee}]') \
+                || gather_mark "children-project@$eid"
+            children=$(as_array "$children")
             printf '%s' "$epic" | jq -c \
                 --argjson ch "$children" --arg rig "$name" --arg prefix "$prefix" \
                 '{id, title:(.title//""), kind:"epic", source:"epic", rig:$rig, prefix:$prefix,
@@ -1083,7 +1094,7 @@ gather_anchors() {
                   takeaway:(.metadata["gc.takeaway"] // ""),
                   takeaway_at:(.metadata["gc.takeaway_at"] // ""),
                   takeaway_by:(.metadata["gc.takeaway_by"] // ""),
-                  children:[$ch[] | {id, status, assignee}]}' >> "$ANCHORS"
+                  children:$ch}' >> "$ANCHORS" || gather_mark "anchor@$eid"
         done
 
         # Decisions: human-gated; no child roll-up needed (rank is elevated regardless).

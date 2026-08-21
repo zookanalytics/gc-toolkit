@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic test for gc-helm takeaway --release molecule-step quiescing (tk-xypcy,
-# tk-q5r65).
+# Hermetic tests for gc-helm.sh. Two independent scenarios, one file:
+#   1. takeaway --release molecule-step quiescing (tk-xypcy, tk-q5r65) — below
+#   2. the anchor-gather argv boundary (tk-hgmob) — second half, own header
+#
+# SCENARIO 1 — takeaway --release molecule-step quiescing
 #
 # THE BUG (recurring polecat burn): `gc-helm takeaway <anchor> "..." --release`
 # parks a work bead — the ANCHOR of a graph.v2 molecule — by clearing
@@ -237,6 +240,139 @@ DANGER="$(printf '%s\n' "$BLOCK" | grep -v 'bd list --status' | grep -E 'bd clos
 # Surface any script stderr for debugging only (not an assertion).
 if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ANCHOR GATHER — the argv boundary (tk-hgmob)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# THE BUG: gather_anchors() passed the FULL child listing — every child's
+# description and notes — across the argv boundary as `jq --argjson ch`. Linux
+# caps a SINGLE argv string at MAX_ARG_STRLEN = 131072 B, independent of the far
+# larger ARG_MAX (2 MB here), which the "Argument list too long" wording invites
+# you to blame. One bead's accumulated notes is enough to cross it: live epic
+# sl-zi5z had TWO children carrying 158 KB between them.
+#
+# Why it was SILENT: jq never execs, so nothing is appended to $ANCHORS. The
+# existing guards at the -raw queries check QUERY validity, and the query was
+# fine — so the gather was judged clean and the board CACHED AND RENDERED AS
+# COMPLETE with the epic simply missing. The stderr line scrolls away.
+#
+# THE FIX (both halves, one diff):
+#   1. project to {id,status,assignee} through a PIPE before the argv hop, so
+#      the payload re-bases on child COUNT (~50 B/child) not note volume;
+#   2. guard the render with `|| gather_mark`, so a future failure at this step
+#      refuses the cache instead of silently shipping a short board.
+#
+# These run the REAL script with a board-path `gc` stub, same as above.
+
+GTMP="$TMP/gather"
+mkdir -p "$GTMP/bin" "$GTMP/rig/.beads"
+
+cat > "$GTMP/bin/gc" <<'GCB'
+#!/usr/bin/env bash
+# Board-path stub: just enough of the gather surface for gather_anchors().
+args="$*"
+case "$1 ${2:-}" in
+  "rig list")    jq -n --arg p "$FAKE_RIG_PATH" '{rigs:[{name:"gc-toolkit",path:$p,prefix:"tk"}]}' ;;
+  "convoy list")  printf '{"convoys":[]}\n' ;;
+  "session list") printf '{"sessions":[]}\n' ;;
+  "bd show")      printf '[]\n' ;;
+  "bd list")
+    case "$args" in
+      *--parent*)          cat "$FAKE_CHILDREN" ;;
+      *"--type epic"*)     cat "$FAKE_EPICS" ;;
+      *"--type decision"*) printf '[]\n' ;;
+      *)                   printf '[]\n' ;;   # the visits query
+    esac ;;
+esac
+exit 0
+GCB
+chmod +x "$GTMP/bin/gc"
+
+printf '[{"id":"tk-epic1","title":"epic one","priority":1,"updated_at":"2026-08-20T00:00:00Z","metadata":{}}]\n' \
+  > "$GTMP/epics.json"
+
+# run_board <children-file> <case-tag> -> sets BRC / BOUT / BERR / BCACHE_N
+run_board() {
+    local kids="$1" run="$GTMP/run-$2"
+    rm -rf "$run"; mkdir -p "$run"
+    BRC=0
+    BOUT="$(env PATH="$GTMP/bin:$PATH" TMPDIR="$run" \
+                FAKE_RIG_PATH="$GTMP/rig" FAKE_EPICS="$GTMP/epics.json" FAKE_CHILDREN="$kids" \
+                GC_HELM_FIXTURE= \
+                sh "$SCRIPT" board --json --refresh 2>"$run/err")" || BRC=$?
+    BERR="$(cat "$run/err" 2>/dev/null || true)"
+    # Any cache the run decided to persist lands under TMPDIR/gc-helm-cache.<uid>.
+    BCACHE_N="$(find "$run" -name 'board-*.ndjson' 2>/dev/null | wc -l | tr -d ' ')"
+}
+
+# --- (ARGVCAP) the live sl-zi5z shape: 158 KB of child NOTES, two children. ----
+# Old code: jq is never exec'd, the anchor is dropped, the board renders without
+# it and exit 0. Fixed code: the notes never reach argv, so the row survives.
+head -c 150000 /dev/zero | tr '\0' 'x' > "$GTMP/big.txt"
+jq -n --rawfile big "$GTMP/big.txt" \
+  '[{id:"tk-c1",status:"open",assignee:"gc-toolkit__polecat-lx-aaa",description:$big,notes:$big},
+    {id:"tk-c2",status:"closed",assignee:null,description:"short",notes:"short"}]' \
+  > "$GTMP/children-fat.json"
+
+run_board "$GTMP/children-fat.json" fat
+eq "$BRC" "0" "(ARGVCAP) board exits 0 with a 158 KB child payload"
+printf '%s' "$BOUT" | jq -e 'any(.[]?; .id=="tk-epic1")' >/dev/null 2>&1 \
+  && ok "(ARGVCAP) the epic anchor still renders when a child's notes exceed MAX_ARG_STRLEN" \
+  || bad "(ARGVCAP) epic anchor VANISHED from the board (the tk-hgmob bug)"
+grep -qi 'argument list too long' <<< "$BERR" \
+  && bad "(ARGVCAP) still hitting the argv cap: $BERR" \
+  || ok "(ARGVCAP) no 'Argument list too long' on the gather"
+
+# --- (PROJSHAPE) the projection is output-identical to the old inline filter. --
+# The render used to build children as [$ch[] | {id,status,assignee}]; it now
+# receives that projection ready-made. The board does not emit `children`
+# verbatim — it emits the ROLL-UP derived from it, which is the stronger check:
+# these four counts can only come out right if all THREE projected fields
+# arrived intact. m_total/n_closed/open need id+status; `assigned` needs
+# assignee, and only tk-c1 has one.
+rollup() { printf '%s' "$BOUT" | jq -r --arg k "$1" 'first(.[]? | select(.id=="tk-epic1")) | .[$k]' 2>/dev/null || true; }
+eq "$(rollup m_total)"  "2" "(PROJSHAPE) roll-up counts both children (id survived)"
+eq "$(rollup n_closed)" "1" "(PROJSHAPE) the closed child is counted closed (status survived)"
+eq "$(rollup open)"     "1" "(PROJSHAPE) the open child is counted open (status survived)"
+eq "$(rollup assigned)" "1" "(PROJSHAPE) the assigned child is counted assigned (assignee survived)"
+
+# --- (PROJGUARD) a VALID array whose elements are not objects. ----------------
+# The -raw guard passes (it is a real array), so this reaches the projection and
+# nothing else can catch it. Old code: the same failure happened inside the
+# unguarded render — board rendered short, exit 0, and CACHED. Fixed: marked.
+printf '[1,2,3]\n' > "$GTMP/children-bad.json"
+run_board "$GTMP/children-bad.json" bad
+eq "$BRC" "3" "(PROJGUARD) a projection failure exits 3 (gather refused), not 0"
+grep -q 'gather failed' <<< "$BERR" \
+  && ok "(PROJGUARD) the run says the gather failed" || bad "(PROJGUARD) no gather-failed line (err: $BERR)"
+grep -q 'children-project@tk-epic1' <<< "$BERR" \
+  && ok "(PROJGUARD) the mark names the projection step and the epic" \
+  || bad "(PROJGUARD) expected children-project@tk-epic1 in: $BERR"
+eq "$BCACHE_N" "0" "(PROJGUARD) nothing cached — no false short board served for the TTL"
+
+# --- (RENDERGUARD) force a failure at the render itself. ----------------------
+# This is the acceptance case for fix 2: even projected, ~3000 children exceed
+# MAX_ARG_STRLEN, so jq cannot exec at the render step. That step used to have no
+# `|| gather_mark` at all, which is exactly why the bug was invisible.
+jq -n '[range(3000) | {id:("tk-c"+(.|tostring)), status:"open",
+                       assignee:"gc-toolkit__polecat-lx-aaaaaaa"}]' > "$GTMP/children-many.json"
+run_board "$GTMP/children-many.json" many
+eq "$BRC" "3" "(RENDERGUARD) a render that cannot exec exits 3 instead of shipping a short board"
+grep -q 'anchor@tk-epic1' <<< "$BERR" \
+  && ok "(RENDERGUARD) the render step is gather_mark'ed by name" \
+  || bad "(RENDERGUARD) expected anchor@tk-epic1 in: $BERR"
+eq "$BCACHE_N" "0" "(RENDERGUARD) nothing cached on a render failure"
+
+# --- (HEADROOM) the fix re-bases growth on child COUNT, not note volume. ------
+# 400 children is far past the note-driven failure the bug produced, and well
+# inside the new bound — it must render clean.
+jq -n '[range(400) | {id:("tk-h"+(.|tostring)), status:"open", assignee:"a",
+                      description:"x", notes:"y"}]' > "$GTMP/children-400.json"
+run_board "$GTMP/children-400.json" many400
+eq "$BRC" "0" "(HEADROOM) 400 children render clean"
+eq "$(printf '%s' "$BOUT" | jq -r 'first(.[]? | select(.id=="tk-epic1")) | .m_total' 2>/dev/null || true)" \
+   "400" "(HEADROOM) all 400 children survive the roll-up"
+
 echo ""
-echo "gc-helm takeaway --release quiesce: $PASS passed, $FAIL failed"
+echo "gc-helm takeaway --release quiesce + anchor-gather argv boundary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
