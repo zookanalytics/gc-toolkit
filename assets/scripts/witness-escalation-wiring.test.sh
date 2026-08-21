@@ -289,6 +289,15 @@ eq "$(count mail)" "0" "RIGROOT: sends no bare mail"
 eq "$(gate_arg --anchor)" "su-lou.10.8" "RIGROOT: passes --anchor (the dedup key)"
 eq "$(gate_arg --state)" "oid123/APPROVED/BLOCKED" \
    "RIGROOT: --state is the PR fingerprint that lets real news through"
+
+# --- PRWIRED: the gate is told WHICH PR, so it can refuse the resting state ---
+# Without this the gate can only dedup, and dedup is keyed on the anchor: "once
+# per PR awaiting approval" is a per-PR toll that scales with throughput, not a
+# bound (tk-qe2tv). The gate re-reads the PR itself and refuses only when GitHub
+# says nothing is wrong, so passing it cannot mute a real fault — but not passing
+# it silently restores the drip, on the channel that sent five of the seven
+# PR #35 mails.
+eq "$(gate_arg --pr)" "35" "PRWIRED: names the PR whose holding state this reports"
 has "QUEUE_HEALTH" "$(gate_arg --subject)" "RIGROOT: passes --subject"
 has "Recommendation" "$(gate_arg --body)" "RIGROOT: passes --body intact (multi-line)"
 
@@ -316,6 +325,11 @@ make_gate "$TMP/rig/assets/scripts"
 PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring-refinery.sh" >/dev/null 2>&1
 eq "$(gate_arg --state)" "open/pre_open_gate/polecat/su-lou.10.8/main/-" \
    "NOPR: --state falls back to the bead's own hold inputs (landing target via target, merged_target absent)"
+# An anchor that names no PR passes an EMPTY --pr, which the gate reads as "no PR
+# named" and never considers the class for — so a bead-fingerprinted anchor is
+# still decided by the ordinary dedup. A wiring that forwarded anything else here
+# would hand the gate a PR this anchor does not own.
+eq "$(gate_arg --pr)" "" "PRNONE: a bead-fingerprinted anchor names no PR to the gate"
 case "$(gate_arg --state)" in
   *2026-07-27T*) bad "NOPR: fingerprint must not contain updated_at (the gate's own write bumps it)" ;;
   *)             ok  "NOPR: fingerprint contains no timestamp" ;;
@@ -387,6 +401,11 @@ for ghcase in fail empty; do
      "GH${ghcase}: names what is unavailable — not the bead fingerprint, which is not comparable to a PR one"
   eq "$(gate_arg --kind)" "witness-degraded" \
      "GH${ghcase}: on its own channel, so the PR channel's stamp and cooldown survive the outage"
+  # A degraded escalation is about the OUTAGE, not about the PR — and the number
+  # could not be read anyway. Naming it would invite the gate to refuse the
+  # notice on the strength of a read this block just failed to make.
+  eq "$(gate_arg --pr)" "" \
+     "GH${ghcase}: and names no PR to the gate, whose refusal would be about a PR nobody could read"
   [ -n "$(gate_arg --state)" ] && ok "GH${ghcase}: and is never EMPTY, which the gate would stamp as 'no state tracked'" \
     || bad "GH${ghcase}: --state must never be empty"
 done

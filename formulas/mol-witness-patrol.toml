@@ -118,9 +118,13 @@ fi
 ```
 
 It mails the first time, then stays quiet until `--state` changes or the
-cooldown elapses. It suppresses REPETITION, never news. A rig that has
-not synced the script falls back to mailing directly — the old behavior,
-not a dropped escalation.
+cooldown elapses. It suppresses REPETITION, never news — with one class it
+declines outright rather than deduping: a PR that is mergeable, green and
+merely unapproved is a resting state, and the correct number of escalations
+about it is zero, not one (tk-qe2tv). That only applies where the block
+names the PR through `--pr`, which the queue-health step does and no
+one-shot notice does. A rig that has not synced the script falls back to
+mailing directly — the old behavior, not a dropped escalation.
 
 Keep the resolution loop in the SAME shell as the send. Each tool call is
 a fresh shell, so a `SCRIPTS_DIR` you resolved earlier is gone, and an
@@ -129,7 +133,7 @@ nothing. Only the gc-toolkit rig has its own `assets/scripts`; the other
 three resolve through the `GC_CITY_PATH` candidate.
 
 A non-zero exit from the gate is NOT fatal and NOT a licence to mail
-anyway. It refuses in exactly one situation — it could not bound the
+anyway. A NON-ZERO exit means one thing only — it could not bound the
 escalation (unreadable anchor, unwritable stamp) — and mailing past that
 is the unbounded storm. Log it, keep patrolling, let the next cycle
 retry. That is why the call above is wrapped in `if ! ...; then echo`
@@ -1209,11 +1213,20 @@ if [ -z "$STATE" ]; then
   KIND=witness-degraded
   if [ -n "$PR" ]; then STATE="unavailable/gh/pr-$PR"; else STATE="unavailable/bead/<bead>"; fi
 fi
+# Name the PR to the gate only on the path that actually read it. The gate does
+# its own `gh pr view` to decide whether this bead is held by nothing worse than
+# an unsigned PR, so a degraded read must name nothing and be decided by the
+# ordinary dedup. Note this block resolves the PR UNPINNED, so the gate inherits
+# the same ambient resolution the fingerprint came from — the same PR, and so the
+# same answer. mol-refinery-patrol's held-anchor block pins both to the origin
+# remote; porting that here is a separate change and is not made by this one.
+GATE_PR=""
+if [ "$KIND" = witness ] && [ -n "$PR" ]; then GATE_PR="$PR"; fi
 BODY="Work bead IDs: <ids>
 Observation: <what you found>
 Recommendation: <what should happen>"
 if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --kind "$KIND" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"; then
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --kind "$KIND" --state "$STATE" --pr "$GATE_PR" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"; then
     echo "witness: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
   fi
 else

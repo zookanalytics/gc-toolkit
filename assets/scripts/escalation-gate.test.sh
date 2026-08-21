@@ -10,9 +10,41 @@
 #   (DRIFT)    THE REGRESSION: the five real PR #35 subjects, one anchor, one
 #              unchanged state -> exactly ONE mail. Dedup must key on the anchor
 #              and channel, never the message, because an LLM reframes the
-#              subject every cycle
+#              subject every cycle. Those five are quoted history, not a model of
+#              a valid escalation — REFUSEDRIFT below sends zero of them today.
+#              Every other case here asks for a CONFLICTING PR for that reason
 #   (CHANGED)  a different state fingerprint -> mails again immediately; the gate
 #              hides repetition, never news
+#   (REFUSE)   THE SUPPRESSED CLASS: dedup answers "have I said this already?",
+#              not "is this worth saying once?" — and for a mergeable, green,
+#              merely-unapproved PR the answer is no. Named through --pr, that
+#              class is REFUSED: nothing sent, nothing STAMPED, and a word of its
+#              own, because SUPPRESSED means "you were already told" and a
+#              one-shot caller spends an irreversible close on it
+#   (REFUSEDRIFT) the DRIFT fixture with the PR named: five framings of one
+#              resting state cost ZERO mails, not one. Exactly-once was never a
+#              bound — the stamp is keyed on the ANCHOR, so it is a per-PR toll
+#              that scales with throughput (#541 corrected, #544 sent anyway)
+#   (REFUSENOSTAMP) a refusal writes nothing, so it cannot mute the anchor: the
+#              same anchor and kind mail at once when the PR turns faulty
+#   (REFUSEOPTIN) the identical PR, with no --pr -> mails, and the PR is not even
+#              read. This is what keeps ORPHAN_CLOSED safe: it closes a bead on
+#              exit 0, and a refusal it never asked for would close it having
+#              told nobody
+#   (REFUSEFORCE/REFUSEDRY) --force sends past the class; --dry-run reports it
+#   (SEND*)    the carve-outs, each one field away from the refused fixture, so a
+#              failure names the term of the predicate that stopped protecting
+#              it: APPROVED-and-still-not-landing, CONFLICTING, a failing check
+#              in either of GitHub's two shapes, a check still running,
+#              CHANGES_REQUESTED, draft, closed, BEHIND, mergeable=UNKNOWN
+#   (SENDFAULT*) and the half `gh` cannot see, read from the ANCHOR: a gate
+#              stranded at a head the PR moved past, a red gate, an anchor a
+#              previous pass blocked. "GitHub is happy" is not "nothing is wrong"
+#   (SENDGHFAIL/SENDNOGH) an unanswerable question never suppresses: an
+#              unreadable PR, or no gh on PATH, declines the refusal and mails
+#   (PRBAD)    a --pr the pour never substituted is dropped with a warning, never
+#              fatal — exit 2 on a flag that can only ever WITHHOLD a mail would
+#              be a silent mute built out of the fix for one
 #   (COLLIDE)  two DIFFERENT raw states that render to the same display-safe
 #              label ("abc/123" and "abc 123") must still compare as different.
 #              A lossy token would suppress them as identical — the mute the
@@ -230,6 +262,38 @@ fi
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
+# --- Stub `gh` ----------------------------------------------------------------
+# In its OWN PATH entry, so (SENDNOGH) can rebuild PATH without it — and without
+# any real gh — and exercise the "not on PATH" branch rather than asserting it by
+# inspection. Backed by one state file:
+#   pr   emitted verbatim as `gh pr view --json ...` output. ABSENT means the
+#        call fails, which is the rate-limited / offline / wrong-repo case.
+mkdir -p "$TMP/gh"
+cat > "$TMP/gh/gh" <<'GH'
+#!/usr/bin/env bash
+S="$GATE_STATE"
+printf 'gh %s\n' "$*" >> "$S/calls"
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
+  [ -f "$S/pr" ] || exit 1
+  cat "$S/pr"
+  exit 0
+fi
+exit 0
+GH
+chmod +x "$TMP/gh/gh"
+export PATH="$TMP/gh:$PATH"
+
+# PATH with the stub and every directory holding a real gh removed. Built by
+# probing each entry rather than from `command -v`, because a second gh further
+# down PATH would otherwise walk straight back into the case it is meant to
+# remove.
+PATH_NO_GH="$TMP/bin"
+while IFS= read -r _d; do
+  [ -n "$_d" ] || continue
+  [ "$_d" = "$TMP/bin" ] && continue
+  [ -x "$_d/gh" ] && continue
+  PATH_NO_GH="$PATH_NO_GH:$_d"
+done < <(printf '%s\n' "$PATH" | tr ':' '\n')
 
 # --- Helpers ------------------------------------------------------------------
 reset() {
@@ -258,6 +322,20 @@ token_for() { # <state> -> token
   local cur; cur=$(stamp_of su-lou.10.8 witness)
   printf '%s' "${cur%@*}"
 }
+# The PR fixtures below start from ONE healthy awaiting-approval PR and override
+# a single field per case, so each must-send case names exactly the term of the
+# predicate that excludes it. Values are JSON (`reviewDecision="APPROVED"`).
+pr_json() { # [key=<json> ...] -> a PR blocked solely on a human approval
+  local j kv
+  j='{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":[],"reviews":[],"headRefOid":"abc123"}'
+  for kv in "$@"; do
+    j=$(printf '%s' "$j" | jq -c --arg k "${kv%%=*}" --argjson v "${kv#*=}" '.[$k] = $v')
+  done
+  printf '%s' "$j"
+}
+seed_pr()   { printf '%s' "$1" > "$GATE_STATE/pr"; }        # after reset(), never before
+seed_meta() { printf 'su-lou.10.8|%s|%s\n' "$1" "$2" >> "$GATE_STATE/meta"; }
+
 seed_prior() { # <state> <epoch> — a prior stamp for <state>, aged to <epoch>
   local token; token=$(token_for "$1")
   reset
@@ -297,7 +375,7 @@ TOKEN_ABC=$(token_for "abc123")
 
 # --- FIRST --------------------------------------------------------------------
 reset
-out=$(run "PR #35 stranded" --state "abc123/APPROVED/BLOCKED" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123/APPROVED/BLOCKED" 2>&1); rc=$?
 eq "$rc" "0" "FIRST: exits 0"
 eq "$(mails)" "1" "FIRST: mails once"
 stamp=$(stamp_of su-lou.10.8 witness)
@@ -316,7 +394,7 @@ case "$out" in *ESCALATED*) ok "FIRST: reports ESCALATED" ;; *) bad "FIRST: repo
 
 # --- SUPPRESS -----------------------------------------------------------------
 : > "$GATE_STATE/calls"
-out=$(run "PR #35 still stranded" --state "abc123/APPROVED/BLOCKED" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 still CONFLICTING" --state "abc123/APPROVED/BLOCKED" 2>&1); rc=$?
 eq "$rc" "0" "SUPPRESS: exits 0 (suppression is a correct outcome)"
 eq "$(mails)" "0" "SUPPRESS: sends no mail"
 eq "$(updates)" "0" "SUPPRESS: writes nothing"
@@ -337,6 +415,188 @@ ESCALATION: PR #35 stranded 3d
 SUBJECTS
 eq "$(mails)" "1" "DRIFT: five reframings of one situation produce exactly ONE mail"
 
+# --- REFUSE (the class) -------------------------------------------------------
+# Those five subjects are a record of what the witness actually sent, and they
+# stay verbatim above for that reason. What has changed is that the gate no
+# longer sends the FIRST of them either: a PR that is mergeable, green and merely
+# unapproved is a resting state, and the correct count is zero rather than one
+# (tk-qe2tv). DRIFT proves dedup is not subject-keyed; this proves the class
+# never opens at all.
+reset; seed_pr "$(pr_json)"
+out=$(run "MERGE_HELD: PR #35 needs human approval" --state "abc123/REVIEW_REQUIRED/BLOCKED" --pr 35 2>&1); rc=$?
+eq "$rc" "0" "REFUSE: exits 0 — refusing is a correct outcome, not a broken gate"
+eq "$(mails)" "0" "REFUSE: sends nothing"
+eq "$(updates)" "0" "REFUSE: stamps nothing — there is no escalation being held back"
+case "$out" in
+  *REFUSED*) ok "REFUSE: reports REFUSED" ;;
+  *) bad "REFUSE: reports REFUSED (got '$out')" ;;
+esac
+# SUPPRESSED means "you were already told" and mol-witness-patrol's ORPHAN_CLOSED
+# spends an irreversible close on it. A refusal told nobody, so it must never
+# wear that word.
+case "$out" in
+  *SUPPRESSED*) bad "REFUSE: must not say SUPPRESSED — nobody was told (got '$out')" ;;
+  *) ok "REFUSE: does not say SUPPRESSED" ;;
+esac
+
+# --- REFUSEDRIFT --------------------------------------------------------------
+# The DRIFT fixture again, with the PR named: five framings of one resting state
+# now cost ZERO mails instead of one.
+reset; seed_pr "$(pr_json)"
+while IFS= read -r subj; do
+  run "$subj" --state "abc123/REVIEW_REQUIRED/BLOCKED" --pr 35 >/dev/null 2>&1
+done <<'SUBJECTS'
+WITNESS: PR #35 stranded on human approval
+ESCALATION: PR #35 Codex-green but stranded
+QUEUE_HEALTH: su PR #35 fully gate-green
+ESCALATION: PR #35 approval-gated ~88h
+ESCALATION: PR #35 stranded 3d
+SUBJECTS
+eq "$(mails)" "0" "REFUSEDRIFT: the whole class costs ZERO mails, not one"
+
+# --- REFUSENOSTAMP ------------------------------------------------------------
+# A refusal writes nothing, so it cannot mute the anchor: the same anchor and
+# kind escalate immediately once the PR is genuinely faulted. A refusal that
+# stamped would suppress this for a full cooldown.
+seed_pr "$(pr_json 'mergeable="CONFLICTING"' 'mergeStateStatus="DIRTY"')"
+: > "$GATE_STATE/calls"
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123/REVIEW_REQUIRED/DIRTY" --pr 35 >/dev/null 2>&1
+eq "$(mails)" "1" "REFUSENOSTAMP: a refusal leaves no stamp, so a real fault still mails"
+
+# --- REFUSEOPTIN --------------------------------------------------------------
+# The identical PR state, with no --pr. Nothing is refused, because the caller
+# did not say the holding state it is reporting is that PR's. This is what keeps
+# every one-shot caller safe — ORPHAN_CLOSED closes a bead on exit 0, and a
+# refusal it never asked for would close it having told nobody.
+reset; seed_pr "$(pr_json)"
+run "ORPHAN_CLOSED: su-lou.10.8 already merged" --state "orphan-closed/branch" >/dev/null 2>&1
+eq "$(mails)" "1" "REFUSEOPTIN: without --pr the class is never considered"
+eq "$(count_calls '^gh pr view')" "0" "REFUSEOPTIN: and the PR is not even read"
+
+# --- REFUSEFORCE --------------------------------------------------------------
+# --force is the operator's escape hatch. An escape hatch a predicate can close
+# is not one.
+reset; seed_pr "$(pr_json)"
+out=$(run "MERGE_HELD: PR #35 needs human approval" --state "s" --pr 35 --force 2>&1)
+eq "$(mails)" "1" "REFUSEFORCE: --force sends past the class"
+case "$out" in
+  *REFUSED*) bad "REFUSEFORCE: must not refuse under --force (got '$out')" ;;
+  *) ok "REFUSEFORCE: does not refuse" ;;
+esac
+
+# --- REFUSEDRY ----------------------------------------------------------------
+reset; seed_pr "$(pr_json)"
+out=$(run "MERGE_HELD: PR #35 needs human approval" --state "s" --pr 35 --dry-run 2>&1); rc=$?
+eq "$rc" "0" "REFUSEDRY: --dry-run on the class exits 0"
+eq "$(mails)" "0" "REFUSEDRY: sends nothing"
+case "$out" in
+  *REFUSED*) ok "REFUSEDRY: reports the refusal rather than WOULD ESCALATE" ;;
+  *) bad "REFUSEDRY: reports the refusal (got '$out')" ;;
+esac
+
+# --- SEND* (the carve-outs) ---------------------------------------------------
+# Each case takes the refused fixture and changes exactly ONE thing, so a failure
+# names the term of the predicate that stopped protecting it. These are the
+# conditions the class must never blind the refinery to.
+send_case() { # <label> <description> <pr-json>
+  reset; seed_pr "$3"
+  run "MERGE_HELD: PR #35" --state "s" --pr 35 >/dev/null 2>&1
+  eq "$(mails)" "1" "$1: $2"
+}
+send_case SENDAPPROVED "approved and green and still not landing is a real fault" \
+  "$(pr_json 'reviewDecision="APPROVED"' 'mergeStateStatus="CLEAN"')"
+send_case SENDCONFLICT "a CONFLICTING PR still escalates" \
+  "$(pr_json 'mergeable="CONFLICTING"' 'mergeStateStatus="DIRTY"')"
+send_case SENDCHECKRED "a failing required check still escalates" \
+  "$(pr_json 'statusCheckRollup=[{"status":"COMPLETED","conclusion":"FAILURE"}]')"
+send_case SENDCHECKCTX "...including one reported as a StatusContext, not a CheckRun" \
+  "$(pr_json 'statusCheckRollup=[{"state":"FAILURE"}]')"
+send_case SENDCHECKRUN "a check still running is not 'green or irrelevant' either" \
+  "$(pr_json 'statusCheckRollup=[{"status":"IN_PROGRESS","conclusion":null}]')"
+send_case SENDCHANGES "a CHANGES_REQUESTED review still escalates" \
+  "$(pr_json 'reviews=[{"state":"CHANGES_REQUESTED"}]')"
+send_case SENDDRAFT "a draft is not awaiting anyone's approval" \
+  "$(pr_json 'isDraft=true')"
+send_case SENDCLOSED "a closed or merged PR is not a resting state" \
+  "$(pr_json 'state="MERGED"' 'mergeStateStatus="CLEAN"')"
+send_case SENDBEHIND "a base the PR must catch up to is not a human's signature" \
+  "$(pr_json 'mergeStateStatus="BEHIND"')"
+send_case SENDUNKNOWN "mergeable=UNKNOWN is not a claim that the PR is fine" \
+  "$(pr_json 'mergeable="UNKNOWN"')"
+# ...and the class still fires on the untouched fixture, so send_case is not
+# passing because every state escalates.
+reset; seed_pr "$(pr_json)"
+run "MERGE_HELD: PR #35" --state "s" --pr 35 >/dev/null 2>&1
+eq "$(mails)" "0" "SENDCONTROL: the unmodified fixture is still refused"
+
+# --- SENDFAULT (the city-side half) -------------------------------------------
+# GitHub cannot see these, and "GitHub is happy" is not "nothing is wrong". Each
+# fixture is the REFUSED PR exactly; only the anchor differs.
+fault_case() { # <label> <description> <meta-key> <meta-value>
+  reset; seed_pr "$(pr_json)"; seed_meta "$3" "$4"
+  out=$(run "MERGE_HELD: PR #35" --state "s" --pr 35 2>&1)
+  eq "$(mails)" "1" "$1: $2"
+  case "$out" in
+    *"NOT refusing"*) ok "$1: and says why the carve-out fired" ;;
+    *) bad "$1: says why the carve-out fired (got '$out')" ;;
+  esac
+}
+fault_case SENDSTALEGATE "a gate stranded at a head the PR moved past still escalates" \
+  'check.codex' 'green@OLDOID'
+fault_case SENDREDGATE "a red gate still escalates" \
+  'check.codex' 'red'
+fault_case SENDBLOCKEDWHY "an anchor a previous pass blocked still escalates" \
+  'blocked_reason' 'PR#35 metadata needs human correction'
+fault_case SENDBLOCKEDRES "...and so does merge_result=blocked" \
+  'merge_result' 'blocked'
+# The control: a gate green AT the PR's live head is not a fault, or the carve-out
+# would veto every refusal and the class would never fire at all.
+reset; seed_pr "$(pr_json)"; seed_meta 'check.codex' 'green@abc123'; seed_meta 'merge_result' 'pull_request'
+run "MERGE_HELD: PR #35" --state "s" --pr 35 >/dev/null 2>&1
+eq "$(mails)" "0" "SENDFAULTCONTROL: a gate green at the LIVE head is not a fault"
+
+# --- SENDGHFAIL ---------------------------------------------------------------
+# An unanswerable question must never suppress. No `pr` fixture means `gh pr
+# view` fails, exactly as a rate limit or an offline host would.
+reset
+out=$(run "MERGE_HELD: PR #35" --state "s" --pr 35 2>&1)
+eq "$(mails)" "1" "SENDGHFAIL: an unreadable PR declines the refusal and mails"
+case "$out" in
+  *"could not read PR #35"*) ok "SENDGHFAIL: and names what it could not read" ;;
+  *) bad "SENDGHFAIL: names what it could not read (got '$out')" ;;
+esac
+
+# --- SENDNOGH -----------------------------------------------------------------
+reset; seed_pr "$(pr_json)"
+if PATH="$PATH_NO_GH" command -v gh >/dev/null 2>&1; then
+  bad "SENDNOGH: could not build a PATH without gh; the case would prove nothing"
+else
+  out=$(PATH="$PATH_NO_GH" run "MERGE_HELD: PR #35" --state "s" --pr 35 2>&1)
+  eq "$(mails)" "1" "SENDNOGH: no gh on PATH declines the refusal and mails"
+  case "$out" in
+    *"gh is not on PATH"*) ok "SENDNOGH: and says so" ;;
+    *) bad "SENDNOGH: says so (got '$out')" ;;
+  esac
+fi
+
+# --- PRBAD --------------------------------------------------------------------
+# A --pr the pour never substituted, or a typo. Fatal here would exit 2 and send
+# NOTHING — a silent mute out of a flag that can only ever withhold a mail. It is
+# dropped with a warning and the escalation goes out as it did before the flag
+# existed.
+reset; seed_pr "$(pr_json)"
+out=$(run "MERGE_HELD: PR #35" --state "s" --pr '{{pr_number}}' 2>&1); rc=$?
+eq "$rc" "0" "PRBAD: an unsubstituted --pr is not fatal"
+eq "$(mails)" "1" "PRBAD: and the escalation still goes out"
+case "$out" in
+  *"--pr must be a plain PR number"*) ok "PRBAD: warns that it was ignored" ;;
+  *) bad "PRBAD: warns that it was ignored (got '$out')" ;;
+esac
+reset; seed_pr "$(pr_json)"
+run "MERGE_HELD: PR #35" --state "s" --pr "" >/dev/null 2>&1
+eq "$(mails)" "1" "PRBAD: an EMPTY --pr is the un-set case, not an error"
+eq "$(count_calls '^gh pr view')" "0" "PRBAD: and reads no PR"
+
 # --- CHANGED ------------------------------------------------------------------
 : > "$GATE_STATE/calls"
 run "PR #35 head moved" --state "def456/APPROVED/BLOCKED" >/dev/null 2>&1
@@ -348,7 +608,7 @@ eq "$(mails)" "1" "CHANGED: a new state fingerprint re-escalates at once"
 # EQUAL and suppresses the second. The gate would then be hiding news, which is
 # the one thing it must never do — and silently, which is worse than the storm.
 reset
-run "PR #35 stranded" --state "abc/123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc/123" >/dev/null 2>&1
 : > "$GATE_STATE/calls"
 run "PR #35 moved on" --state "abc 123" >/dev/null 2>&1
 eq "$(mails)" "1" "COLLIDE: states that RENDER alike but differ raw still re-escalate"
@@ -360,16 +620,16 @@ eq "$(mails)" "0" "COLLIDE: an identical raw state is still suppressed"
 
 # --- COOLDOWN -----------------------------------------------------------------
 seed_prior "abc123" "$((NOW - 90000))"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "COOLDOWN: unchanged but older than 24h re-escalates"
 
 seed_prior "abc123" "$((NOW - 90000))"
-run "PR #35 stranded" --state "abc123" --cooldown 172800 >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" --cooldown 172800 >/dev/null 2>&1
 eq "$(mails)" "0" "COOLDOWN: a longer --cooldown still suppresses it"
 
 # --- ORDER --------------------------------------------------------------------
 reset
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 first=$(head -1 "$GATE_STATE/calls" | cut -d' ' -f1-2)
 stamp_line=$(grep -n '^bd update' "$GATE_STATE/calls" | head -1 | cut -d: -f1)
 mail_line=$(grep -n '^mail send' "$GATE_STATE/calls" | head -1 | cut -d: -f1)
@@ -380,7 +640,7 @@ eq "$first" "bd show" "ORDER: reads the anchor first"
 # --- STAMPFAIL ----------------------------------------------------------------
 reset
 touch "$GATE_STATE/refuse_update"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$rc" "1" "STAMPFAIL: exits non-zero"
 eq "$(mails)" "0" "STAMPFAIL: sends NOTHING when it cannot bound the escalation"
 case "$out" in *"NOT SENT"*) ok "STAMPFAIL: says NOT SENT" ;; *) bad "STAMPFAIL: says NOT SENT (got '$out')" ;; esac
@@ -388,18 +648,18 @@ case "$out" in *"NOT SENT"*) ok "STAMPFAIL: says NOT SENT" ;; *) bad "STAMPFAIL:
 # --- MAILFAIL + RETRY ---------------------------------------------------------
 reset
 touch "$GATE_STATE/fail_mail"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$rc" "1" "MAILFAIL: exits non-zero"
 eq "$(stamp_of su-lou.10.8 witness)" "" "MAILFAIL: rolls the stamp back (unset — there was no prior)"
 rm -f "$GATE_STATE/fail_mail"; : > "$GATE_STATE/calls"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "RETRY: the next cycle still escalates, so nothing was lost"
 
 # --- RESTORE ------------------------------------------------------------------
 reset
 printf 'su-lou.10.8|escalated.witness|old000@%s\n' "$((NOW - 90000))" > "$GATE_STATE/meta"
 touch "$GATE_STATE/fail_mail"
-run "PR #35 stranded" --state "new111" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "new111" >/dev/null 2>&1
 eq "$(stamp_of su-lou.10.8 witness)" "old000@$((NOW - 90000))" "RESTORE: a failed send restores the PREVIOUS stamp, not an empty one"
 
 # --- ROLLBACKRACE -------------------------------------------------------------
@@ -410,7 +670,7 @@ eq "$(stamp_of su-lou.10.8 witness)" "old000@$((NOW - 90000))" "RESTORE: a faile
 # never escalated. Roll back only while the stamp is still the one this run wrote.
 reset
 printf 'su-lou.10.8|escalated.witness|peer000@%s\n' "$NOW" > "$GATE_STATE/stamp_race"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 rm -f "$GATE_STATE/stamp_race"
 eq "$rc" "1" "ROLLBACKRACE: exits 1 — this run sent nothing"
 eq "$(stamp_of su-lou.10.8 witness)" "peer000@$NOW" \
@@ -427,7 +687,7 @@ esac
 # goes quiet for a full cooldown. Report the true state, and name the key to clear.
 reset
 touch "$GATE_STATE/fail_mail" "$GATE_STATE/refuse_rollback"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 rm -f "$GATE_STATE/fail_mail" "$GATE_STATE/refuse_rollback"
 eq "$rc" "1" "ROLLBACKFAIL: exits 1"
 [ -n "$(stamp_of su-lou.10.8 witness)" ] \
@@ -462,7 +722,7 @@ case "$out" in
   *)                    bad "ROLLBACKFAIL: reports what the next cycle will do (got '$out')" ;;
 esac
 : > "$GATE_STATE/calls"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1)
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1)
 eq "$(mails)" "1" "ROLLBACKFAIL: the next cycle RE-ESCALATES rather than suppressing on an undelivered stamp"
 case "$out" in
   *pending*) ok "ROLLBACKFAIL: and says why it did not suppress" ;;
@@ -471,20 +731,20 @@ esac
 # ...and that re-send converges: it is delivered, so the stamp is promoted and the
 # cycle after it goes quiet. Re-escalating forever would be the storm.
 : > "$GATE_STATE/calls"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "0" "ROLLBACKFAIL: the delivered re-send converges — the cycle after it is suppressed"
 
 # --- NOANCHOR -----------------------------------------------------------------
 reset
 touch "$GATE_STATE/missing"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$rc" "1" "NOANCHOR: exits non-zero"
 eq "$(mails)" "0" "NOANCHOR: refuses to send what it cannot bound"
 
 # --- CORRUPT ------------------------------------------------------------------
 reset
 printf 'su-lou.10.8|escalated.witness|garbage-no-epoch\n' > "$GATE_STATE/meta"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "CORRUPT: a malformed stamp re-escalates rather than muting forever"
 eq "$(stamp_of su-lou.10.8 witness)" "$TOKEN_ABC@$(stamp_of su-lou.10.8 witness | sed 's/.*@//')" \
    "CORRUPT: and is rewritten well-formed, so it converges after one mail"
@@ -498,7 +758,7 @@ eq "$(stamp_of su-lou.10.8 witness)" "$TOKEN_ABC@$(stamp_of su-lou.10.8 witness 
 # its one-shot `gc bd close` on it. So the stamp records its own delivery state,
 # and an unconfirmed one re-escalates INSIDE the cooldown.
 seed_pending "abc123" "$NOW"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1)
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1)
 eq "$(mails)" "1" "PENDING: an undelivered prior stamp re-escalates inside the cooldown"
 case "$out" in
   *pending*) ok "PENDING: and names the unconfirmed delivery as the reason" ;;
@@ -512,14 +772,14 @@ esac
 # case above would pass just as well if pending had been ignored and something else
 # were forcing the mail.
 seed_prior "abc123" "$NOW"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "0" "PENDING: a DELIVERED stamp of the same age still suppresses"
 
 # ...and the promotion is a second write that lands AFTER the mail, never before:
 # promoting first would record a delivery that had not happened yet, which is the
 # whole defect wearing the fix's clothes.
 reset
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 mail_at=$(grep -n '^mail send' "$GATE_STATE/calls" | head -1 | cut -d: -f1)
 promote_at=$(grep -n '^bd update' "$GATE_STATE/calls" | tail -1 | cut -d: -f1)
 eq "$(updates)" "2" "PENDING: one escalation writes twice — the pending stamp and its promotion"
@@ -532,7 +792,7 @@ eq "$(updates)" "2" "PENDING: one escalation writes twice — the pending stamp 
 # soon as a write succeeds.
 reset
 touch "$GATE_STATE/refuse_rollback"   # refuses the run's SECOND update: the promotion
-out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 rm -f "$GATE_STATE/refuse_rollback"
 eq "$rc" "0" "PENDING: a failed promotion does not turn a delivered mail into a failure"
 eq "$(mails)" "1" "PENDING: the mail went out"
@@ -541,10 +801,10 @@ case "$out" in
   *)                 bad "PENDING: reports the failed promotion (got '$out')" ;;
 esac
 : > "$GATE_STATE/calls"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "PENDING: the next cycle re-sends once rather than trusting an unconfirmed stamp"
 : > "$GATE_STATE/calls"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "0" "PENDING: and then converges — the duplicate is bounded at one"
 
 # --- FUTURE / SKEW ------------------------------------------------------------
@@ -553,7 +813,7 @@ eq "$(mails)" "0" "PENDING: and then converges — the duplicate is bounded at o
 # until that timestamp actually arrives. A stamp from next month mutes the anchor
 # for a month. Treat a future epoch as corrupt: re-escalate once and rewrite it.
 seed_prior "abc123" "$((NOW + 2592000))"
-out=$(run "PR #35 stranded" --state "abc123" 2>&1)
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1)
 eq "$(mails)" "1" "FUTURE: a stamp dated a month ahead re-escalates instead of muting until then"
 case "$out" in
   *FUTURE*) ok "FUTURE: says the stamp was in the future" ;;
@@ -564,7 +824,7 @@ case "$(stamp_of su-lou.10.8 witness)" in
   *)                       ok  "FUTURE: and is rewritten, so it converges after one mail" ;;
 esac
 : > "$GATE_STATE/calls"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "0" "FUTURE: the rewritten stamp suppresses normally"
 
 # The other direction: stamps are written by whichever host ran the gate, so a few
@@ -572,20 +832,20 @@ eq "$(mails)" "0" "FUTURE: the rewritten stamp suppresses normally"
 # would re-escalate every cycle for as long as the skew lasts — the storm again,
 # sourced from the clocks. Inside the grace it still suppresses.
 seed_prior "abc123" "$((NOW + 60))"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "0" "SKEW: a stamp seconds ahead is clock skew, not corruption — still suppressed"
 
 # --- FORCE --------------------------------------------------------------------
 reset
 printf 'su-lou.10.8|escalated.witness|%s@%s\n' "$TOKEN_ABC" "$NOW" > "$GATE_STATE/meta"
-run "PR #35 stranded" --state "abc123" --force >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" --force >/dev/null 2>&1
 eq "$(mails)" "1" "FORCE: bypasses an in-cooldown suppression"
 # Two writes, one escalation: the pending stamp and its promotion to delivered.
 eq "$(updates)" "2" "FORCE: still stamps"
 
 # --- DRY ----------------------------------------------------------------------
 reset
-out=$(run "PR #35 stranded" --state "abc123" --dry-run 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" --dry-run 2>&1); rc=$?
 eq "$rc" "0" "DRY: exits 0"
 eq "$(mails)" "0" "DRY: sends nothing"
 eq "$(updates)" "0" "DRY: writes nothing"
@@ -614,7 +874,7 @@ for ctl in '\001' '\011' '\015'; do
   reset
   printf "[{\"id\":\"su-lou.10.8\",\"metadata\":{\"escalated.witness\":\"%s@%s\"},\"notes\":\"line${ctl}two\"}]" \
     "$TOKEN_ABC" "$NOW" > "$GATE_STATE/raw_show"
-  out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+  out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
   eq "$rc" "0" "CTRL($ctl): survives the control character in the bead payload"
   eq "$(mails)" "0" "CTRL($ctl): still sees the prior stamp and suppresses"
 done
@@ -627,7 +887,7 @@ done
 # sequence, so the section runs under an anchor+kind mutex.
 reset
 touch "$GATE_STATE/slow_show"
-run "PR #35 stranded on human approval" --state "abc123" >/dev/null 2>&1 &
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1 &
 a=$!
 run "ESCALATION: PR #35 Codex-green but stranded" --state "abc123" >/dev/null 2>&1 &
 b=$!
@@ -658,7 +918,7 @@ reset
 mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
 ( sleep 2; rm -f "$LOCK/at"; rmdir "$LOCK" 2>/dev/null ) &
 releaser=$!
-out=$(run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 wait "$releaser" 2>/dev/null
 eq "$rc" "0" "LOCKWAIT: exits 0"
 eq "$(mails)" "1" "LOCKWAIT: waits for the holder, then decides normally"
@@ -679,7 +939,7 @@ esac
 # compares, and still decides — rather than down a silent exit.
 reset
 mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
-out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$rc" "0" "HELD: exits 0"
 eq "$(mails)" "1" "HELD: a peer's lock delays this decision, it does not make it"
 case "$out" in *UNSERIALIZED*) ok "HELD: says it proceeded unserialized" ;; *) bad "HELD: warns (got '$out')" ;; esac
@@ -719,7 +979,7 @@ rm -rf "$LOCK"
 # scheduling order.
 seed_prior "old" "$NOW"
 touch "$GATE_STATE/slow_show"
-run "PR #35 still stranded" --state "old" >/dev/null 2>&1 &
+run "MERGE_HELD: PR #35 still CONFLICTING" --state "old" >/dev/null 2>&1 &
 a=$!
 run "PR #35 head moved" --state "new" >/dev/null 2>&1 &
 b=$!
@@ -738,7 +998,7 @@ grep -q 'head moved' "$GATE_STATE/calls" \
 reset
 mkdir -p "$LOCK"; printf '%s\n' "$((NOW - 3600))" > "$LOCK/at"
 touch -t 202001010000 "$LOCK" 2>/dev/null   # the dir mtime is the primary age source
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 eq "$(mails)" "1" "STALEBREAK: a lock from a dead holder does not mute the anchor"
 [ -d "$LOCK" ] && bad "STALEBREAK: the broken lock was not released" || ok "STALEBREAK: and is released again on exit"
 
@@ -782,7 +1042,7 @@ rm -f "$GATE_STATE/wedge_show"; rm -rf "$LOCK"
 # both against the pre-fix script: wedged read sends 1 mail, wedged stamp sends 2.
 reset
 printf '5\n' > "$GATE_STATE/wedge_update"
-run "PR #35 stranded on human approval" --state "abc123" >/dev/null 2>&1 &
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1 &
 holder=$!
 wait_for_lock || bad "DUPFIRST: the holder never took the lock"
 wait_for stamp_inflight || bad "DUPFIRST: the holder never reached its stamp write"
@@ -804,7 +1064,7 @@ eq "$(mails)" "1" "DUPFIRST: the holder's own escalation still goes out — exac
 # holding a lock is not one.
 reset
 printf '5\n' > "$GATE_STATE/wedge_update"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1 &
 holder=$!
 wait_for_lock || bad "FORCEDEFER: the holder never took the lock"
 wait_for stamp_inflight || bad "FORCEDEFER: the holder never reached its stamp write"
@@ -822,7 +1082,7 @@ rm -f "$GATE_STATE/wedge_update"
 # abandonment; ownership answers it. A lock whose owner is alive is not breakable.
 reset
 printf '5\n' > "$GATE_STATE/wedge_show"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1 &
 holder=$!
 wait_for_lock || bad "LIVETTL: the holder never took the lock"
 HELD_BY=$(cat "$LOCK/owner" 2>/dev/null)
@@ -833,7 +1093,7 @@ HELD_BY=$(cat "$LOCK/owner" 2>/dev/null)
 # (mails=1, rc=0) instead of deferring to a live owner. That is a harness race,
 # not a product regression — the holder is released only after the peer decides.
 printf '%s\n' "$((NOW - 600))" > "$LOCK/at"; backdate "$LOCK" "$((NOW - 600))"
-out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$(cat "$LOCK/owner" 2>/dev/null)" "$HELD_BY" \
    "LIVETTL: a live owner's lock is not broken on age alone"
 eq "$(mails)" "0" "LIVETTL: and no peer decides inside the holder's section"
@@ -850,12 +1110,12 @@ eq "$(mails)" "1" "LIVETTL: the holder finishes its own escalation — exactly o
 # prevent; a duplicate is not.
 reset
 printf '5\n' > "$GATE_STATE/wedge_show"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1 &
 holder=$!
 wait_for_lock || bad "MAXHOLD: the holder never took the lock"
 rm -f "$GATE_STATE/wedge_show"
 printf '%s\n' "$((NOW - 7200))" > "$LOCK/at"; backdate "$LOCK" "$((NOW - 7200))"
-out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$rc" "0" "MAXHOLD: a lock held past the backstop does not defer forever"
 eq "$(mails)" "1" "MAXHOLD: the escalation gets out"
 # The broken-past holder then reads the stamp this run left and suppresses — the
@@ -870,7 +1130,7 @@ eq "$(mails)" "1" "MAXHOLD: and the holder converges on suppress rather than mai
 # invocation in behind it. Release must check the lock is still ours.
 reset
 printf '3\n' > "$GATE_STATE/wedge_show"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1 &
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1 &
 holder=$!
 wait_for_lock || bad "RELEASEOWNER: the holder never took the lock"
 rm -f "$GATE_STATE/wedge_show"
@@ -893,7 +1153,7 @@ mkdir -p "$LOCK"; printf '%s\n' "$NOW" > "$LOCK/at"
 # The owner the gate itself writes, with a pid that is gone — only the field the
 # case is about is changed.
 printf '%s\n' "$REAL_OWNER" | awk -v p="$DEAD_PID" '{$2 = p; print}' > "$LOCK/owner"
-out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(GC_ESCALATION_GATE_LOCK_WAIT=1 run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$rc" "0" "DEADBREAK: exits 0"
 eq "$(mails)" "1" "DEADBREAK: a fresh lock from a dead holder does not mute the anchor"
 case "$out" in
@@ -904,26 +1164,26 @@ esac
 
 # --- RELEASE ------------------------------------------------------------------
 reset
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 [ -d "$LOCK" ] && bad "RELEASE: a normal run left its lock behind" || ok "RELEASE: the lock is released on exit"
 # ...including the failure paths, or one unreadable anchor wedges it until the TTL.
 reset
 touch "$GATE_STATE/missing"
-run "PR #35 stranded" --state "abc123" >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" >/dev/null 2>&1
 [ -d "$LOCK" ] && bad "RELEASE: a non-zero exit left its lock behind" || ok "RELEASE: released even when the run exits 1"
 
 # --- DRYLOCK ------------------------------------------------------------------
 # A probe must not be able to suppress a real escalation, so --dry-run takes no
 # lock at all (it writes nothing and sends nothing, so it has no section to guard).
 reset
-run "PR #35 stranded" --state "abc123" --dry-run >/dev/null 2>&1
+run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" --dry-run >/dev/null 2>&1
 [ -d "$LOCK" ] && bad "DRYLOCK: --dry-run took a lock" || ok "DRYLOCK: --dry-run takes no lock"
 
 # --- LOCKFREE -----------------------------------------------------------------
 # The lock root cannot be created. Refusing to send would be a mute; the race it
 # leaves open costs at most a duplicate mail. Proceed, and say so.
 reset
-out=$(GC_ESCALATION_GATE_LOCKDIR=/dev/null/nope run "PR #35 stranded" --state "abc123" 2>&1); rc=$?
+out=$(GC_ESCALATION_GATE_LOCKDIR=/dev/null/nope run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1); rc=$?
 eq "$rc" "0" "LOCKFREE: an unusable lock root is not fatal"
 eq "$(mails)" "1" "LOCKFREE: the escalation is still delivered"
 case "$out" in *UNSERIALIZED*) ok "LOCKFREE: warns that it proceeded unserialized" ;; *) bad "LOCKFREE: warns (got '$out')" ;; esac
@@ -953,7 +1213,7 @@ else
   # under the normal umask, or the gate would take the unusable-root path instead.
   ACQFAIL_ROOT="$NOWRITE/locks"; mkdir -p "$ACQFAIL_ROOT"
   out=$( (umask 0555; GC_ESCALATION_GATE_LOCKDIR="$ACQFAIL_ROOT" \
-          run "PR #35 stranded" --state "abc123" 2>&1) ); rc=$?
+          run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" 2>&1) ); rc=$?
   eq "$rc" "0" "ACQUIREFAIL: a lock it cannot own is not fatal"
   eq "$(mails)" "1" "ACQUIREFAIL: the escalation is still delivered"
   case "$out" in
@@ -976,7 +1236,7 @@ chmod 0755 "$NOWRITE/probe" 2>/dev/null; rm -rf "$NOWRITE"
 # 2 there would send NOTHING on every escalation — a silent mute strictly worse
 # than the storm. It must degrade to the default and still deliver.
 reset
-out=$(run "PR #35 stranded" --state "abc123" --cooldown '{{escalation_cooldown}}' 2>&1); rc=$?
+out=$(run "MERGE_HELD: PR #35 CONFLICTING" --state "abc123" --cooldown '{{escalation_cooldown}}' 2>&1); rc=$?
 eq "$rc" "0" "UNSUBSTITUTED: an unrendered formula var is not fatal"
 eq "$(mails)" "1" "UNSUBSTITUTED: the escalation is still delivered"
 case "$out" in *"using the 86400s default"*) ok "UNSUBSTITUTED: warns that it fell back" ;; *) bad "UNSUBSTITUTED: warns (got '$out')" ;; esac
@@ -1098,7 +1358,7 @@ eq "$(updates)" "0" "ARGFLAG: nothing is stamped"
 # A value that merely STARTS with a dash is legitimate prose and must still work,
 # or the guard becomes the silent mute it exists to prevent.
 reset
-bounded --anchor su-lou.10.8 --subject "-- urgent: PR #35 stranded" --body "-> see thread" --state abc123
+bounded --anchor su-lou.10.8 --subject "-- urgent: PR #35 CONFLICTING" --body "-> see thread" --state abc123
 eq "$?" "0" "ARGFLAG: a dash-leading subject/body is still a valid value"
 eq "$(mails)" "1" "ARGFLAG: and is still delivered"
 
