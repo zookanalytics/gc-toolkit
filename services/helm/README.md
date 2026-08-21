@@ -23,8 +23,40 @@ GET /            -> the board JSON, or the embedded web app for a browser
 GET /assets/...  -> the web app's bundle
 ```
 
-Tiles are ranked `rank_score` descending and deduplicated by id. Three anchor
-kinds are gathered: **epic**, **decision**, and **convoy** (owned, floating).
+Tiles are ranked `rank_score` descending and deduplicated by id.
+
+### Anchor kinds
+
+Five kinds are gathered. The first three are selected by the bead's issue
+**type**; the last two by its **metadata** (`tk-2v08m`).
+
+| kind | selected by | band | why |
+|---|---|---|---|
+| `epic` | `issue_type=epic` | derived from the roll-up | durable per-rig anchor |
+| `decision` | `issue_type=decision` | ELEVATED | human-gated |
+| `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
+| `human` | `gc.routed_to=human` | ELEVATED | the operator owns it; no agent will take it |
+| `parked` | `gc.takeaway` present | LOW | a conversation that reached a takeaway |
+
+**Why metadata is an anchor key at all.** The type question cannot see an
+operator-owned item. `gc.routed_to=human` and `gc.takeaway` are stamped on
+ordinary task/bug/chore beads, so a board keyed on type excluded them by
+construction — including the one bead in the city that was provably blocked on
+the operator and explicitly stamped as such. `gc.routed_to=human` is already the
+city's durable marker for "a human must act"; the board just was not reading it.
+
+Both metadata gathers **exclude** the three typed kinds, so a bead that is
+already an anchor (an epic carrying a takeaway, say) is not gathered twice. A
+bead carrying both markers is, and `BuildBoard`'s dedup keeps the higher band —
+`human` over `parked`.
+
+**`parked` is deliberately not an attention item.** It is LOW so it can never
+compete for rank with a stranded epic, and the web app lists it in a section of
+its own below the ranked table rather than as a row inside it. What the operator
+needs from these is not triage but recall: an open bead whose visit ended with a
+takeaway is already resumable — typing a bare bead id into the `prefix+a` popup
+reopens the conversation on that bead (`assets/scripts/tmux-visit-prompt.sh`) —
+it was only unfindable.
 
 ## Architecture
 
@@ -73,6 +105,11 @@ of the API, not of the client:
   pinned to 0 and **no tile can ever age**.
 - **metadata reaches only the single-bead reads** (`/bead/{id}`, `/convoy/{id}`),
   so a gather would pay one extra round trip per anchor to see it.
+- **the metadata-keyed anchor kinds are therefore unreachable over HTTP at all.**
+  `GET /beads` filters on status/type/label/assignee/rig and nothing else, and
+  its payloads carry no metadata, so `human` and `parked` can be selected
+  neither server-side nor client-side — finding them would mean one
+  `/bead/{id}` round trip per open bead in the city.
 
 `BeadsSource` reads both directly. Choosing it over a new supervisor endpoint —
 the other sanctioned path — is recorded, with the measurements, in
@@ -90,7 +127,7 @@ because gascity's `mapBdStatus` flattens every status that is not
 `closed`/`in_progress` into `open` — so a **deferred** epic arrives over HTTP
 looking open and is admitted. The library backend sees the real status and
 filters to `open`, matching `gc-helm.sh` (`bd list --status open`). A
-deliberately-parked epic is not an attention item, so the library behaviour is
+deliberately-deferred epic is not an attention item, so the library behaviour is
 the faithful one. Child counts are unaffected: the board already treats every
 non-closed, non-in-progress child as open.
 
@@ -104,7 +141,7 @@ healthy.
 |---|---|
 | unset (default) | beads library if `<city>/rigs/*/.beads` is readable; otherwise the HTTP API, with a log line naming the consequence |
 | `beads` | force the library; **fatal** if the stores are unreadable, rather than a quiet downgrade |
-| `supervisor` | force the HTTP API (accepting `stale_days = 0`) |
+| `supervisor` | force the HTTP API (accepting `stale_days = 0` and no `human`/`parked` kinds) |
 
 ## Wiring it as a workspace-service
 
@@ -153,7 +190,16 @@ embedded in the binary and served at the service mount. This is the U5 scaffold
 readable table. The spatial canvas, and the visual direction it implements, are
 U6 and land on top of this.
 
-Three things about it are load-bearing.
+It renders the board as **two** tables. The ranked one is the board proper;
+below it, when the gather found any, a *parked conversations* section lists the
+`parked` tiles — id, rig, title, staleness, and how to resume. They are split
+because they answer different questions, and mixing them would put a thread that
+wants nothing in the same ranking as work that is stuck (`tk-2v08m`). The parked
+table drops the progress columns: a `parked` bead carries no roll-up, so `n/m`
+and `open/wip` would read `0/0` on every row — a number that looks like an answer
+and is not one.
+
+Four things about it are load-bearing.
 
 **`base: './'` (KTD5).** The app is served under a runtime-city-named prefix
 (`/v0/city/<city>/svc/helm/`), never at an origin root, and the supervisor's
@@ -453,13 +499,19 @@ unit tests over the model and a mock supervisor.
   `stale_days: 0` alone cannot distinguish "touched today" from "the source
   could not read it".
 - **`assignee`** is carried on children.
-- **metadata** is carried on every anchor and child — but *carried, not spent*:
-  no derivation reads it yet. That is deliberate, so the three consumers below
-  stay separately reviewable.
+- **metadata** is carried on every anchor and child. tk-x89rn shipped it
+  *carried, not spent*, so its consumers could stay separately reviewable.
 
 **Delivered since** (tk-eemvf.1, the U5 scaffold): a mount-prefix-safe Vite +
 React + TS app embedded in the binary and served at the mount, alongside the
 JSON the mount already served. Structure only — see *Web UI*.
+
+**Delivered since** (tk-2v08m, the metadata-keyed anchor kinds): the board
+gathers `human` (`gc.routed_to=human`) and `parked` (`gc.takeaway` present)
+beads, so an item the operator owns is no longer invisible for the sole reason
+that its issue type is `task`. See *Anchor kinds*. This is the first consumer to
+spend the metadata tk-x89rn widened the seam to carry — it spends it in the
+GATHER; no derivation in `internal/board` reads metadata yet.
 
 **Delivered since** (tk-eemvf.4, the U9 terminal embed): an xterm.js terminal
 attached to the city's existing ttyd, peek at rest and live on focus, with the
@@ -478,14 +530,18 @@ same-origin reachability confirmed and detach-not-kill verified — see
 - **The `held` visit fact** — the bash board's glyph (an open visit bead with
   `task_kind=visit` whose `gc.continuation_group` names the anchor). Metadata is
   now readable, so this is derivable; deriving it belongs to the consumer bead.
+  It is a different question from the `parked` kind: `held` marks an anchor whose
+  conversation is *live*, `parked` surfaces a subject bead whose conversation
+  *ended with a takeaway* and would otherwise have no row at all.
 - **owned-convoy filter** — floating + non-`sling-` title still approximates
   ownership. `BeadsSource` could resolve the real edge, but changing *which*
   convoys reach the board is a gather change and was kept out of tk-x89rn.
 - **event-invalidation** — the cache is TTL-only; the supervisor SSE
   `/v0/events/stream` can later replace polling.
 
-The three beads that spend the widened seam: `tk-x55wt` (dead columns + constant
-NEEDS), `tk-b3rga` (decision tiles), `tk-2v08m` (human-routed beads invisible).
+The beads that spend the widened seam: `tk-2v08m` (human-routed and parked beads
+invisible) — **landed**, in the gather; `tk-x55wt` (dead columns + constant
+NEEDS) and `tk-b3rga` (decision tiles) still open, both in the derivation.
 
 ## Handoff
 

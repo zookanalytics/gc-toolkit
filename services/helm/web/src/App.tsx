@@ -15,6 +15,14 @@ import type { Board } from './contract';
 // refreshes in place and never notifies.
 const REFRESH_MS = 30_000;
 
+// The board arrives as ONE ranked list carrying two different kinds of answer.
+// Every kind but this one is something that wants doing, ranked by how badly. A
+// `parked` tile is a conversation that already reached a takeaway: it wants
+// nothing, it only has to stay FINDABLE. Ranking those against stranded epics is
+// what tk-2v08m asks not to do — the LOW band already floors them, and splitting
+// them into their own section keeps them out of the contest visually too.
+const PARKED_KIND = 'parked';
+
 // Document-relative on purpose. The app is served under a runtime-city-named
 // prefix (/v0/city/<city>/svc/helm/), so an absolute '/helm' would address the
 // supervisor root and 404. Relative to the document, this is <mount>/helm.
@@ -29,6 +37,16 @@ async function fetchBoard(signal: AbortSignal): Promise<Board> {
     throw new Error(`board request failed: HTTP ${res.status}`);
   }
   return (await res.json()) as Board;
+}
+
+// The drill-in entry point, shared by both tables. A button rather than a
+// clickable row so it is reachable by keyboard and announced as an action.
+function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
+  return (
+    <button type="button" className="drill-open" onClick={() => onOpen(id)}>
+      {id}
+    </button>
+  );
 }
 
 export function App() {
@@ -71,6 +89,8 @@ export function App() {
   }, [refresh]);
 
   const tiles = board?.tiles ?? [];
+  const attention = tiles.filter((tile) => tile.kind !== PARKED_KIND);
+  const parked = tiles.filter((tile) => tile.kind === PARKED_KIND);
 
   return (
     <main>
@@ -78,7 +98,9 @@ export function App() {
         <h1>helm</h1>
         <p className="sub">
           {board
-            ? `${board.total} anchors · generated ${board.generated_at}`
+            ? `${attention.length} anchors${
+                parked.length ? ` · ${parked.length} parked` : ''
+              } · generated ${board.generated_at}`
             : loading
               ? 'loading the board…'
               : 'no board'}
@@ -102,9 +124,9 @@ export function App() {
         </p>
       )}
 
-      {board && tiles.length === 0 && !error && <p>No anchors need attention.</p>}
+      {board && attention.length === 0 && !error && <p>No anchors need attention.</p>}
 
-      {tiles.length > 0 && (
+      {attention.length > 0 && (
         <table>
           <thead>
             <tr>
@@ -124,20 +146,11 @@ export function App() {
             {/* The drilled row is marked with a class, not aria-selected: that
                 attribute is only meaningful on a grid/treegrid row, and this is
                 a plain table. */}
-            {tiles.map((tile) => (
+            {attention.map((tile) => (
               <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
                 <td>{tile.severity}</td>
                 <td>
-                  {/* The drill-in entry point. A button rather than a clickable
-                      row so it is reachable by keyboard and announced as an
-                      action. */}
-                  <button
-                    type="button"
-                    className="drill-open"
-                    onClick={() => setDrillTarget(tile.id)}
-                  >
-                    {tile.id}
-                  </button>
+                  <DrillOpen id={tile.id} onOpen={setDrillTarget} />
                 </td>
                 <td>{tile.rig}</td>
                 <td>{tile.kind}</td>
@@ -155,6 +168,44 @@ export function App() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {parked.length > 0 && (
+        <section className="parked" aria-labelledby="parked-heading">
+          <h2 id="parked-heading">parked conversations</h2>
+          <p className="sub">
+            Open beads whose visit ended with a takeaway. Nothing here is waiting on work — these
+            are threads to pick back up: press prefix+a and type the id.
+          </p>
+          {/* No progress columns. A parked bead carries no roll-up, so n/m and
+              open/wip would read 0/0 on every row — a number that looks like an
+              answer and is not one. (Those columns are questionable on the
+              anchor table too; that is tk-x55wt's bead, not this one.) */}
+          <table>
+            <thead>
+              <tr>
+                <th>id</th>
+                <th>rig</th>
+                <th>title</th>
+                <th>stale</th>
+                <th>needs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {parked.map((tile) => (
+                <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
+                  <td>
+                    <DrillOpen id={tile.id} onOpen={setDrillTarget} />
+                  </td>
+                  <td>{tile.rig}</td>
+                  <td>{tile.title}</td>
+                  <td>{tile.stale_days}d</td>
+                  <td>{tile.needs}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       )}
 
       {/* One terminal, not one per anchor — and that is now a LAYOUT decision,
