@@ -1190,7 +1190,10 @@ graph — but only to reject a cycle (`internal/sling/sling_core.go:114`
 there only inside `*_test.go` fixtures), and that word's only occurrence
 in `cmd/gc/cmd_sling.go` is the cross-rig routing guard (`:2115`). Sling a
 blocked bead and the molecule pours immediately, routes the workflow
-root, and a worker claims it.
+root, and a worker claims it. This pack does not change that: it adds a
+caller that withholds the sling and records it on the bead
+([deferred-dispatch.md](deferred-dispatch.md)), leaving `gc sling`
+itself as dependency-blind as this section describes.
 
 **Observed** (2026-08-02, signal-loom). Four test-coverage beads were
 filed with two `blocks` deps between them. `gc bd blocked` listed the
@@ -1272,7 +1275,13 @@ about:
   where the work bead is itself the routed claimable unit. It holds
   nothing under a graph.v2 formula dispatch, where the routed bead is
   the workflow root the pour just minted (previous section). Hold that
-  case by not slinging until the blocker closes.
+  case by not slinging until the blocker closes — and record the
+  dispatch you are withholding rather than remembering it, with
+  `deferred-dispatch.sh arm`
+  ([deferred-dispatch.md](deferred-dispatch.md)). A hold kept only in an
+  agent's context is invisible to everyone else and dies with the
+  session; the armed record is what the rig's `deferred-dispatch` order
+  performs once the blocker closes.
 - **A canonical `hold:` label** — `hold:mayor` or `hold:external`,
   written by `bd set-state <bead> hold=mayor|external` (which removes any
   existing `hold:*` label, adds the new one, and records an event bead).

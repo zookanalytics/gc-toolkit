@@ -1,0 +1,46 @@
+# deferred-dispatch — perform the dispatches that are owed once their blockers
+# clear, so nobody has to hold one in their context.
+#
+# WHY THIS ORDER EXISTS (tk-y0ygs). `gc sling` pours immediately and reads no
+# `blocks` deps; none of the records the pour creates carries an edge to the
+# work bead, so a dep between two work beads is invisible to every readiness
+# query (docs/gascity-routing-model.md, "A `blocks` dep between work beads does
+# not hold a graph.v2 dispatch"). The city's remedy was therefore *"sling only
+# beads that `gc bd blocked` does not list; hold the rest"* — a hold that lives
+# in one agent's context, dies with the session, is invisible to everyone else,
+# and has no recovery path. The operator named it: "This someone or something
+# needs to hold state outside of beads is a problem."
+#
+# `deferred-dispatch.sh arm` moves that hold onto the bead. This order is what
+# consumes it. Without this order the arm is a note nobody acts on — the same
+# stranding, one layer down — which is why the two ship together and
+# doctor/check-deferred-dispatch-wired asserts both.
+#
+# EXEC, not a formula: the pass is a `bd list --ready` read and a `gc sling` per
+# ready bead. There is no judgment in it, so it needs no LLM and no wisp.
+#
+# `scope = "rig"` — one registration per importing rig, each against its own
+# store. The dispatcher's open-tracking gate keys on ScopedName()
+# (`deferred-dispatch:rig:<rig>`), so a pass still in flight suppresses the next
+# tick for THAT rig only and two slinging writers can never race the same bead.
+# No `no_work_gate`: that flag opts out of the open-work gates, and the first of
+# them IS that single-flight guarantee.
+#
+# `interval` buys down the latency between a blocker closing and the dispatch it
+# releases. A pass with nothing armed is one `bd list`, so the idle cost of a
+# short interval is negligible; cooldown orders in practice fire somewhat slower
+# than they declare, so read 2m as "within a few minutes of the blocker
+# closing". Tune from city.toml `[[orders.overrides]]`, not by editing the
+# script.
+#
+# `timeout` must stay below `order-tracking-sweep`'s `--stale-after` (10m in
+# core): that sweep closes a tracking bead it judges stale, and an un-gated
+# tracking bead is a second dispatch. Keeping the kill earlier than the sweep is
+# what makes single-flight hold for a wedged pass and not merely a slow one.
+[order]
+description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first"
+trigger = "cooldown"
+interval = "2m"
+timeout = "120s"
+exec = "$PACK_DIR/assets/scripts/deferred-dispatch.sh reconcile"
+scope = "rig"
