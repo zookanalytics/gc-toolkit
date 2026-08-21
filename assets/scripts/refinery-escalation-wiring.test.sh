@@ -73,6 +73,13 @@
 #   - calling the gate bare instead of `if ! ...; then echo` -> a gate that
 #     refuses (it could not BOUND the escalation) takes the best-effort idle pass
 #     down with it (GATEFAIL)
+#   - dropping `--pr`/`--repo` -> the gate cannot tell that the anchor is held by
+#     nothing worse than an unsigned PR, so the one class that is never news is
+#     deduped instead of REFUSED and bills one mail per PR forever. Exactly-once
+#     is a per-PR toll, not a bound: signal-loom was corrected about #541 and then
+#     escalated #544 (PRWIRED, PRNONE, PRFORK). And an unpinned --repo hands the
+#     gate a number resolved in whatever repository gh considers current, so the
+#     refusal is decided against a stranger's PR (PRPINNED)
 #
 # So this executes the wiring EXTRACTED VERBATIM from the formula (between the
 # `escalation-wiring-*` markers) against stubs, and asserts what reaches the gate.
@@ -325,6 +332,21 @@ eq "$(gate_arg --kind)" "refinery" "RIGROOT: escalates on the refinery's own cha
 has "MERGE_HELD" "$(gate_arg --subject)" "RIGROOT: passes --subject"
 has "Recommendation" "$(gate_arg --body)" "RIGROOT: passes --body intact (multi-line)"
 
+# --- PRWIRED: the gate is told WHICH PR, so it can refuse the resting state ---
+# Without this the gate can only dedup, and dedup is keyed on the anchor: "once
+# per PR awaiting approval" then scales with throughput instead of bounding
+# anything (tk-qe2tv). The gate re-reads the PR itself and refuses only when
+# GitHub says nothing is wrong, so passing it cannot mute a real fault — but not
+# passing it silently restores the drip.
+eq "$(gate_arg --pr)" "55" "PRWIRED: names the PR whose holding state this reports"
+
+# --- PRPINNED: and pins it to the same repository the fingerprint came from ---
+# `gh pr view <n>` inside the gate resolves a bare number in whatever repository
+# gh considers current, exactly as it does in the wiring itself (PINNED above).
+# Unpinned, the refusal would be decided against a stranger's PR #55.
+eq "$(gate_arg --repo)" "github.com/zookanalytics/gc-toolkit" \
+   "PRPINNED: pins the gate's own PR read to the origin remote's repository"
+
 # --- CITYPATH: the other three rigs have no assets/scripts of their own -------
 reset
 make_gate "$TMP/city/rigs/gc-toolkit/assets/scripts"
@@ -365,6 +387,7 @@ PR_NUMBER="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" bash "$TMP/escalation-wiring
 eq "$(gate_arg --state)" "oid123/APPROVED/BLOCKED" \
    "FORKPR: a fork_pr anchor is fingerprinted from its PR, not from its bead"
 eq "$(arg_after gh-args.json view)" "77" "FORKPR: and the number read is fork_pr's"
+eq "$(gate_arg --pr)" "77" "PRFORK: and the gate is told the same number, not pr_number's"
 has "77" "$(gate_arg --body)" "FORKPR: the body names the PR too (it said 'none' before)"
 
 # --- FORKPRURL: the number scanned out of fork_pr_url, repo-filtered ----------
@@ -386,6 +409,12 @@ has "pre_open_gate" "$(gate_arg --state)" \
 [ ! -s "$STUB_LOG/gh-args.json" ] \
   && ok "FORKPRURL: and no PR in another repository was read" \
   || bad "FORKPRURL: read PR 88 out of a repository this checkout does not own ($(gh_argv))"
+# --- PRNONE: an anchor that names no PR passes an EMPTY --pr ------------------
+# The gate treats empty as "no PR named" and never considers the class, which is
+# what keeps a bead-fingerprinted anchor decided by the ordinary dedup. A wiring
+# that forwarded some other value here would hand the gate a PR the anchor does
+# not own.
+eq "$(gate_arg --pr)" "" "PRNONE: a bead-fingerprinted anchor names no PR to the gate"
 
 # --- NOORIGIN: an unresolvable origin degrades, it does not read unpinned -----
 # Fail closed, as merge-skill.sh and reconcile-merged-prs.sh do: a repository this
@@ -398,6 +427,12 @@ PR_NUMBER=55 STUB_ORIGIN_URL="" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
   bash "$TMP/escalation-wiring-held-anchor.sh" >/dev/null 2>&1
 eq "$(gate_arg --kind)" "refinery-degraded" \
    "NOORIGIN: no resolvable origin -> the degraded channel, not an ambient read"
+# ...and it must not hand the gate the number either. The gate does its OWN
+# `gh pr view` to decide the awaiting-approval class, so an unpinned number there
+# is this same drift hazard one layer down: the class would be decided against a
+# stranger's PR #55, and a refusal decided that way mutes the real anchor.
+eq "$(gate_arg --pr)" "" \
+   "NOORIGIN: and names no PR to the gate, whose own read would be unpinned too"
 has "unavailable" "$(gate_arg --state)" "NOORIGIN: --state names what is unavailable"
 has "pr-55" "$(gate_arg --state)" "NOORIGIN: and which PR could not be pinned"
 hasnt "pre_open_gate" "$(gate_arg --state)" \

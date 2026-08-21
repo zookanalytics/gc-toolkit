@@ -27,6 +27,14 @@
 #     ESCALATION: PR #35 approval-gated ~88h
 #     ESCALATION: PR #35 stranded 3d
 #
+# Those are quoted, not modelled. Every one of them is now REFUSED at source —
+# "stranded on human approval" is the class below, and the correct number of
+# these is zero, not one. They are kept verbatim because the argument they carry
+# is about the SUBJECT LINE and needs the real ones: five framings of one
+# situation is what defeats message-keyed dedup, whatever the situation was.
+# Reach for a conflict, a stranded gate or a merge that errored when you want an
+# example of an escalation worth sending.
+#
 # One situation, five framings — because an LLM composes the subject fresh each
 # cycle from whatever it just observed. Any dedup keyed on the message (subject,
 # body, topic) is defeated by rephrasing, which is precisely what a re-deriving
@@ -59,6 +67,75 @@
 #   COOLDOWN        the same fingerprint re-mails after `--cooldown` seconds
 #                   (default 24h) so an item stuck for days still resurfaces
 #                   periodically instead of falling silent forever.
+#
+# ...AND ONE CLASS NEVER OPENS AT ALL. Dedup answers "have I said this already?"
+# It cannot answer "is this worth saying once?", and for one situation the honest
+# answer is no: a PR that is mergeable, green, and simply not approved yet. The
+# city structurally cannot approve its own PRs, and the operator reviews the
+# queue on their own cadence — reviewing PRs periodically IS the workflow
+# (operator, 2026-08-20: "a PR waiting approval is a totally valid state ... I
+# just periodically review PRs, that's the workflow"). Nothing is stuck and
+# nobody is blocked, so the correct number of escalations is ZERO, not one.
+#
+# EXACTLY-ONCE LOOKED LIKE A BOUND AND IS NOT ONE. The stamp is keyed on the
+# anchor, so "once per PR" is a per-PR toll that scales with throughput rather
+# than a fixed cost. The signal-loom refinery was corrected about PR #541 and
+# then escalated PR #544 hours later — a different anchor and a different head,
+# so genuinely new to every fingerprint compared here, and correctly mailed under
+# the old rule. The better the city gets at producing PRs, the worse the drip.
+# Only refusing the CLASS closes it, and the predicate has to key on the STATE
+# that holds the item, never on which item it is (tk-qe2tv).
+#
+# WHICH IS A DIFFERENT VERB FROM SUPPRESS, AND IS SPELLED DIFFERENTLY. SUPPRESSED
+# means "you have already been told". REFUSED means "this is not news, and no
+# later cycle will make it news either". A refusal stamps NOTHING: it is not an
+# escalation held back, so there is nothing to bound, nothing to roll back, and
+# no cooldown that could later let it through. It exits 0 like a suppression,
+# because refusing is a correct outcome and not a broken gate — the callers must
+# not read it as "the gate failed" and fall back to a bare `gc mail send`.
+#
+# THE CALLER NAMES THE PR; THE CLASS IS DECIDED FROM LIVE STATE, NOT FROM WHAT
+# THE CALLER SAYS ABOUT IT. `--pr` means "the holding state I am reporting is
+# this PR's", which is exactly what the two PR-fingerprint sites already build
+# `--state` from (mol-refinery-patrol's held-anchor block, mol-witness-patrol's
+# queue-health block). It is never a request to suppress: the gate re-reads the
+# PR itself and refuses only if GitHub says nothing is wrong. A caller cannot
+# mute an anchor by mislabelling it, and cannot silence a real fault by passing
+# the flag.
+#
+# WHAT MUST STILL GET THROUGH — the class is narrow on purpose, and each of these
+# is refused ADMISSION to it by a specific term of the predicate:
+#
+#   approved and still not landing      reviewDecision=APPROVED, not REVIEW_REQUIRED
+#   changes requested / a blocking      reviewDecision=CHANGES_REQUESTED, and a
+#   review                              CHANGES_REQUESTED review is checked directly
+#   conflicts, or a merge that errors   mergeable must be MERGEABLE
+#   failing or still-running checks     statusCheckRollup must be green or empty
+#   a draft, a closed or merged PR      state=OPEN and isDraft=false
+#   a head move that strands a gate     check.<name>=green@<oid> on the anchor at
+#                                       an oid that is not the PR's live head
+#   a red gate                          check.<name>=red on the anchor
+#   broken existing_pr metadata, a      blocked_reason / merge_result=blocked on
+#   non-converging signoff              the anchor — and those callers pass no --pr
+#
+# The last three read the ANCHOR, not GitHub: a city-side fault is invisible to
+# `gh pr view`, and "GitHub is happy" is not the same claim as "nothing is
+# wrong". A PR whose gate is stranded at an old head looks identical to a healthy
+# one from GitHub's side, and that one is a real fault.
+#
+# EVERY UNREADABLE INPUT DECLINES THE REFUSAL. No `gh` on PATH, a failed or
+# rate-limited `gh pr view`, an unparseable response, an unreadable head oid: all
+# of them leave the class undecided, and undecided falls through to the ordinary
+# dedup — which may well mail. Refusing on a question we could not answer is how
+# a gate becomes the silent mute this whole script is written against.
+#
+# NO ONE-SHOT CALLER CAN REACH IT. mol-witness-patrol's ORPHAN_CLOSED spends an
+# irreversible `gc bd close` on the gate's exit status, reading 0 as "the mayor
+# was told". A refusal also exits 0 and nobody was told — so the property that
+# keeps that safe is that ORPHAN_CLOSED, and every other one-shot notice, passes
+# no `--pr` and therefore cannot be refused. Keep it that way: if you ever gate
+# an irreversible transition on this script's exit code, do not name a PR on that
+# call.
 #
 # ONE CHANNEL, ONE SHAPE OF FINGERPRINT. Every `--state` sent on a given `--kind`
 # is compared against the last one sent on that same kind, so they have to be
@@ -199,11 +276,14 @@
 #            critical section, where muting the anchor forever is the worse
 #            failure.
 #
-# GENERALIZES BUT IS NOT YET WIRED ELSEWHERE. Nothing here is witness-specific —
-# the su refinery's two escalations in the same incident are the same defect from
-# the opposite direction, and `--kind refinery` would cover them. That change is
-# deliberately NOT made here: tk-z4aka scopes this to mol-witness-patrol and asks
-# that a refinery change be checked back first (su-xgz2 tracks that side).
+# GENERALIZES, AND IS NOW WIRED ON BOTH SIDES. Nothing here is witness-specific —
+# the su refinery's two escalations in the same incident were the same defect from
+# the opposite direction. That side was left out of tk-z4aka, which scoped this to
+# mol-witness-patrol; tk-76jxq then wired mol-refinery-patrol to `--kind refinery`,
+# and refinery-escalation-wiring.test.sh guards it the way
+# witness-escalation-wiring.test.sh guards the other. Both formulas now also name
+# their PR through `--pr`, so the refused class above covers both roles from this
+# one predicate.
 #
 # NOT set -e: this is called from a best-effort patrol pass and must never abort
 # the wisp. Every exit is explicit.
@@ -213,6 +293,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: escalation-gate.sh --anchor <bead-id> --subject <s> --body <b>
                           [--state <fingerprint>] [--kind <k>] [--cooldown <secs>]
+                          [--pr <number>] [--repo <owner/repo>]
                           [--to <addr>] [--force] [--dry-run]
 
   --anchor    bead the escalation is ABOUT; the dedup stamp lives on it (required)
@@ -226,6 +307,20 @@ usage: escalation-gate.sh --anchor <bead-id> --subject <s> --body <b>
               fingerprint the caller could not build the usual way belongs on its
               own kind (e.g. "witness-degraded"), never on the normal one.
   --cooldown  seconds before an UNCHANGED situation may re-mail (default 86400)
+  --pr        the PR whose holding state this escalation reports. Naming it lets
+              the gate REFUSE the one class that is never news — a mergeable,
+              green PR that a human simply has not approved yet. The refusal is
+              decided by re-reading the PR and the anchor, never from the fact
+              that the flag was passed, so it cannot mute a real fault. A value
+              that is not a plain number is ignored with a warning rather than
+              being fatal: a mistyped flag must never cost an escalation. Omit it
+              on any call whose exit status drives an irreversible step (see the
+              header).
+  --repo      OWNER/REPO for --pr, when the working directory is not the PR's
+              repository. Default: whatever `gh` resolves from the cwd. Inert
+              without --pr, and deliberately silent about it: the held-anchor
+              block passes both unconditionally, so an anchor with no PR would
+              otherwise warn on every escalation it sends.
   --to        recipient, default "mayor/"
   --force     bypass the gate but still stamp (operator escape hatch)
   --dry-run   print the verdict; write nothing, send nothing
@@ -240,7 +335,8 @@ env:
                               holder defers this cycle (nothing sent, exit 1),
                               anything else proceeds unserialized.
 
-exit: 0 mailed or suppressed (both correct) · 1 not gated, nothing sent · 2 usage
+exit: 0 mailed, suppressed or refused (all correct) · 1 not gated, nothing sent
+      · 2 usage
 USAGE
 }
 
@@ -273,7 +369,7 @@ require_value() {
     exit 2
   fi
   case "$2" in
-    --anchor|--subject|--body|--state|--kind|--cooldown|--to|--force|--dry-run|-h|--help)
+    --anchor|--subject|--body|--state|--kind|--cooldown|--pr|--repo|--to|--force|--dry-run|-h|--help)
       echo "escalation-gate: $1 requires a value, but the next argument is the option '$2'" >&2
       usage
       exit 2 ;;
@@ -289,6 +385,7 @@ DEFAULT_COOLDOWN=86400
 
 ANCHOR=""; SUBJECT=""; BODY=""; STATE=""; KIND="witness"
 COOLDOWN="$DEFAULT_COOLDOWN"; TO="mayor/"; FORCE=0; DRY_RUN=0
+PR=""; REPO=""
 
 # Every value-taking arm calls `require_value "$@"` FIRST, on the same line, so
 # the `shift 2` that follows can never fail (see require_value above). Keep that
@@ -302,6 +399,8 @@ while [ $# -gt 0 ]; do
     --state)    require_value "$@"; STATE="$2";    shift 2 ;;
     --kind)     require_value "$@"; KIND="$2";     shift 2 ;;
     --cooldown) require_value "$@"; COOLDOWN="$2"; shift 2 ;;
+    --pr)       require_value "$@"; PR="$2";       shift 2 ;;
+    --repo)     require_value "$@"; REPO="$2";     shift 2 ;;
     --to)       require_value "$@"; TO="$2";       shift 2 ;;
     --force)    FORCE=1; shift ;;
     --dry-run)  DRY_RUN=1; shift ;;
@@ -346,6 +445,30 @@ case "$COOLDOWN" in
     # anything is sent.
     echo "escalation-gate: --cooldown must be a whole number of seconds (got '$COOLDOWN')" >&2
     exit 2 ;;
+esac
+# --pr AND --repo ARE NEVER FATAL. Both only ever unlock a REFUSAL, so the worst
+# a bad value can cost is that the class is not considered and the ordinary dedup
+# decides — which may mail. That is the safe direction, and it is the opposite of
+# --kind and --cooldown above, where a bad value would corrupt the dedup key or
+# the window and so must stop the run before anything is sent. It also absorbs the
+# unsubstituted-formula-var case (`--pr {{pr_number}}`) without a special arm: a
+# var the pour never materialized is not a number, so it is dropped with a warning
+# and the escalation goes out exactly as it did before this flag existed.
+case "$PR" in
+  '') ;;
+  *[!0-9]*)
+    echo "escalation-gate: --pr must be a plain PR number (got '$PR'); ignoring it — the awaiting-approval class will not be considered and this escalation is decided by the ordinary gate" >&2
+    PR="" ;;
+esac
+# Restricted to what a GitHub repo reference can contain (`owner/repo`, or a
+# host-qualified `github.com/owner/repo`). A value outside that set would only
+# make `gh` fail, which already declines the refusal — dropping it here just
+# names the reason in the log instead of leaving a silent `gh` error.
+case "$REPO" in
+  '') ;;
+  *[!A-Za-z0-9._/-]*|*' '*)
+    echo "escalation-gate: --repo must look like [host/]owner/repo (got '$REPO'); ignoring it and letting gh resolve the repository from the working directory" >&2
+    REPO="" ;;
 esac
 
 KEY="escalated.$KIND"
@@ -713,6 +836,105 @@ else
   STATE_TOKEN="$STATE_LABEL.$(state_digest "$STATE")"
 fi
 
+# THE SUPPRESSED CLASS — is this PR blocked SOLELY on a human approval?
+#
+# Answers with a one-line reason when it is, and with NOTHING in every other
+# case, including every case it could not read. See "AND ONE CLASS NEVER OPENS AT
+# ALL" in the header for why this class is refused rather than deduped, and for
+# the list of conditions each term below is here to let through.
+GH_PR_FIELDS='state,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews,headRefOid'
+
+# GitHub reports a check two different ways in one array. A CheckRun carries
+# `status` + `conclusion`; a StatusContext carries `state`. Reading only one
+# shape would score the other as not-green and veto every refusal on a repo that
+# uses it — a fix that quietly does nothing. An EMPTY rollup is green by
+# vacuous truth, which is the "or irrelevant" half: a repo with no CI configured
+# (this one) has nothing to be red about.
+#
+# GREEN IS `SUCCESS` AND NOTHING ELSE ON THE StatusContext SIDE. Its `state` is
+# GitHub's StatusState enum — ERROR, EXPECTED, FAILURE, PENDING, SUCCESS — and
+# only the last one says a check passed. EXPECTED is the trap: it reads like an
+# outcome and is a WAIT, the value GitHub reports for a required status that has
+# been declared for the ref and has not reported yet. Scoring it green refuses a
+# PR whose only unmet blocker is a check still owed, which is precisely the
+# "failing or still-running checks" carve-out in the header — and a refusal
+# stamps nothing, so that PR is not deferred for a cooldown but silenced for
+# good. The CheckRun side already draws the same line by requiring COMPLETED
+# before it reads a conclusion; this is that rule stated once for the other
+# shape (tk-oig44).
+APPROVAL_WAIT_JQ='
+  def check_green:
+    ((.state // "") | ascii_upcase) as $ctx
+    | if $ctx != "" then ($ctx == "SUCCESS")
+      else (((.status // "") | ascii_upcase) == "COMPLETED")
+           and ((((.conclusion // "") | ascii_upcase)) as $c
+                | $c == "SUCCESS" or $c == "SKIPPED" or $c == "NEUTRAL")
+      end;
+  ((.statusCheckRollup // [])) as $rollup
+  | if ((.state // "") == "OPEN")
+       and ((.isDraft // false) == false)
+       and ((.mergeable // "") == "MERGEABLE")
+       and ((.reviewDecision // "") == "REVIEW_REQUIRED")
+       and (((.mergeStateStatus // "") | . == "BLOCKED" or . == "CLEAN"))
+       and (([.reviews[]? | select(((.state // "") | ascii_upcase) == "CHANGES_REQUESTED")] | length) == 0)
+       and (($rollup | map(check_green) | all))
+    then "mergeable, "
+         + (if ($rollup | length) == 0 then "no checks configured" else "checks green" end)
+         + ", no blocking review, reviewDecision=REVIEW_REQUIRED, mergeStateStatus="
+         + (.mergeStateStatus // "?")
+    else "" end'
+
+# The city-side half, read from the ANCHOR. `gh` cannot see a gate stranded at a
+# head the PR has moved past, or a bead a previous pass already blocked, and
+# those are faults however healthy the PR looks from GitHub. An unreadable live
+# head scores every green@ marker as stale, which vetoes the refusal — the safe
+# direction, since it ends in sending.
+ANCHOR_FAULT_JQ='
+  (.[0].metadata // {}) as $m
+  | [ (if (($m.blocked_reason // "") | tostring | length) > 0 then "blocked_reason is set on the anchor" else empty end),
+      (($m.merge_result // "") | tostring
+        | select(. == "blocked" or . == "refused_false_completion" or . == "abandoned")
+        | "merge_result=" + .),
+      ($m | to_entries[]
+        | select(.key | startswith("check."))
+        | (.value | tostring) as $v
+        | if $v == "red" then .key + "=red"
+          elif ($v | startswith("green@")) and ($v != ("green@" + $head))
+          then .key + "=" + $v + " is stale (live head " + (if $head == "" then "unreadable" else $head end) + ")"
+          else empty end)
+    ] | join("; ")'
+
+approval_wait_refusal() {
+  # $1 is the anchor row this run already read, so the anchor is not fetched
+  # twice. Everything else is read here, live: the caller told us WHICH PR, never
+  # what state it is in.
+  local row="$1" pr_row reason head fault
+  command -v gh >/dev/null 2>&1 || {
+    echo "escalation-gate: $ANCHOR [$KIND] --pr $PR was passed but gh is not on PATH; the awaiting-approval class cannot be decided, so this escalation is decided by the ordinary gate" >&2
+    return 0
+  }
+  if [ -n "$REPO" ]; then
+    pr_row=$(gh pr view "$PR" --repo "$REPO" --json "$GH_PR_FIELDS" 2>/dev/null)
+  else
+    pr_row=$(gh pr view "$PR" --json "$GH_PR_FIELDS" 2>/dev/null)
+  fi
+  if [ -z "$pr_row" ]; then
+    echo "escalation-gate: $ANCHOR [$KIND] could not read PR #$PR${REPO:+ in $REPO}; the awaiting-approval class cannot be decided, so this escalation is decided by the ordinary gate" >&2
+    return 0
+  fi
+  reason=$(printf '%s' "$pr_row" | jq -r "$APPROVAL_WAIT_JQ" 2>/dev/null)
+  [ -n "$reason" ] || return 0
+  head=$(printf '%s' "$pr_row" | jq -r '.headRefOid // empty' 2>/dev/null)
+  fault=$(printf '%s' "$row" | jq -r --arg head "$head" "$ANCHOR_FAULT_JQ" 2>/dev/null)
+  if [ -n "$fault" ]; then
+    # Worth a line: this is the carve-out doing its job, and an operator reading
+    # a mail about an apparently-healthy PR should be able to see why it came.
+    echo "escalation-gate: $ANCHOR [$KIND] PR #$PR is waiting on approval, but the anchor carries a city-side fault ($fault); NOT refusing — this is not the resting state, and it is escalated on its merits" >&2
+    return 0
+  fi
+  printf 'PR #%s is %s' "$PR" "$reason"
+}
+
 iso_of() {
   # GNU first, BSD/macOS second, raw epoch as the last resort — this only ever
   # feeds a log line, so an unparsed value must not fail the pass.
@@ -744,6 +966,29 @@ if [ -z "$ANCHOR_ID" ]; then
   # cannot bound is the storm this script exists to stop. Refuse to send.
   echo "escalation-gate: $ANCHOR [$KIND] NOT SENT — anchor bead unreadable; cannot bound the escalation, retry next cycle: $SUBJECT" >&2
   exit 1
+fi
+
+# REFUSE BEFORE ANYTHING IS WRITTEN. A refusal is not an escalation held back —
+# there is nothing to bound — so it stamps nothing, rolls nothing back, and
+# leaves no value a later cycle could read as "already told". It sits after the
+# anchor read only to reuse $ROW; a run that reaches here has written nothing yet.
+#
+# --force skips it with everything else: an operator asking for this send has
+# already decided it is worth making, and an escape hatch a predicate can close
+# is not one.
+#
+# It runs INSIDE the lock, which widens the critical section by one `gh pr view`.
+# That is deliberate: the anchor has to be re-read after the lock is taken
+# anyway — a peer can stamp while we wait — so deciding the class before it would
+# cost a second `gc bd show` to buy back a few hundred milliseconds. The cost of
+# the widening is bounded and already handled: a peer that outwaits LOCK_WAIT
+# against a live holder DEFERS, sends nothing, and re-derives next cycle.
+if [ -n "$PR" ] && [ "$FORCE" != "1" ]; then
+  CLASS_REFUSAL=$(approval_wait_refusal "$ROW")
+  if [ -n "$CLASS_REFUSAL" ]; then
+    echo "escalation-gate: $ANCHOR_ID [$KIND] REFUSED — $CLASS_REFUSAL. A healthy PR waiting for a human to approve it is a resting state, not an anomaly: the city cannot approve its own PRs and the operator reviews the queue on their own cadence. Nothing stamped, nothing sent, nothing to retry: $SUBJECT"
+    exit 0
+  fi
 fi
 
 PRIOR=$(printf '%s' "$ROW" | jq -r --arg k "$KEY" '.[0].metadata[$k] // empty' 2>/dev/null)

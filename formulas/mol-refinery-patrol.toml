@@ -46,10 +46,44 @@ subjects varied only in the count as PRs accumulated — "3 CI-green PRs
 held", "6 merge-ready PRs blocked", "7 PRs green but parked" — so nothing
 was actionable differently at mail 8 than at mail 1.
 
-**A PR awaiting operator approval is a HEALTHY state, not an anomaly.** It
-cannot change without a GitHub-side event, and the city structurally
-cannot approve its own PRs. The remedy is identical every pass (a human
-approves), so the escalation is worth sending exactly once.
+**A PR awaiting operator approval is a HEALTHY state, not an anomaly, and
+the number of escalations it is worth is ZERO.** It cannot change without
+a GitHub-side event, the city structurally cannot approve its own PRs,
+and the operator reviews the queue on their own cadence — that IS the
+workflow, not a backlog anyone is unblocking. Telling them about it tells
+them nothing they did not already know.
+
+This paragraph used to end "so the escalation is worth sending exactly
+once", which does not follow from its own premise: a state that is not an
+anomaly does not warrant one mail either. Exactly-once was not even a
+bound. The gate's stamp is keyed on the ANCHOR, so "once per PR" is a
+toll that scales with throughput — signal-loom's refinery was corrected
+about PR #541 and then escalated PR #544 hours later, a different anchor
+at a different head and so genuinely new to every fingerprint the gate
+compares. The better this city gets at producing PRs, the worse the drip
+(tk-qe2tv).
+
+**You do not have to remember this.** `escalation-gate.sh` REFUSES the
+class outright when the held-anchor block below hands it `--pr`: it
+re-reads the PR itself and sends nothing if GitHub says the PR is
+mergeable, green, unobjected-to and merely unapproved. A refusal exits 0,
+prints `REFUSED`, and stamps nothing. It is not the gate failing and it
+is not a licence to mail anyway — there is nothing being held back to
+retry.
+
+**What still escalates, and must.** The class is narrow, and the gate
+proves each of these is outside it rather than trusting you to:
+
+- a PR that is APPROVED and green and still not landing — that is a real
+  fault, and the remedy is not a signature;
+- a head move that strands a gate (`check.<name>=green@<old-head>` on the
+  anchor while the PR sits at a newer head);
+- a merge that errors, or a PR GitHub reports as CONFLICTING;
+- failing or still-running checks, a CHANGES_REQUESTED review, a draft, a
+  closed PR;
+- an anchor a previous pass already blocked — `blocked_reason` or
+  `merge_result=blocked`, which is where "Existing PR metadata needs
+  human correction" lands.
 
 **The cost is burial, not volume.** Those duplicates pushed the mayor's
 inbox to 19 unread, and two escalations that genuinely needed a mayor
@@ -82,9 +116,11 @@ fi
 ```
 
 It mails the first time, then stays quiet until `--state` changes or the
-cooldown elapses. It suppresses REPETITION, never news. A rig that has not
-synced the script falls back to mailing directly — the old behavior, not a
-dropped escalation.
+cooldown elapses. It suppresses REPETITION, never news — with one class it
+declines outright rather than deduping, the mergeable-and-merely-unapproved
+PR described above, and only where the held-anchor block names the PR. A rig
+that has not synced the script falls back to mailing directly — the old
+behavior, not a dropped escalation.
 
 **`--kind refinery`, always.** The gate's default kind is `witness`, and
 one anchor + kind = one open escalation. The witness escalates about these
@@ -111,7 +147,7 @@ nothing. Only the gc-toolkit rig has its own `assets/scripts`; the other
 three resolve through the `GC_CITY_PATH` candidate.
 
 A non-zero exit from the gate is NOT fatal and NOT a licence to mail
-anyway. It refuses in exactly one situation — it could not bound the
+anyway. A NON-ZERO exit means one thing only — it could not bound the
 escalation (unreadable anchor, unwritable stamp) — and mailing past that
 is the unbounded storm. Log it, keep patrolling, let the next cycle retry.
 That is why the call above is wrapped in `if ! ...; then echo` rather than
@@ -748,12 +784,27 @@ if [ -z "$STATE" ]; then
     STATE="unavailable/bead/<anchor>"
   fi
 fi
+# NAME THE PR TO THE GATE ONLY ON THE PATH THAT ACTUALLY READ IT, PINNED. The
+# gate does its own `gh pr view` to decide whether this anchor is held by nothing
+# worse than an unsigned PR, and an unpinned read THERE is the same drift hazard
+# this block refuses for its own fingerprint: `gh pr view <n>` resolves a bare
+# number in whatever repository gh considers current, so the class would be
+# decided against a stranger's same-numbered PR. A degraded read and an ambiguous
+# anchor therefore name nothing, and are decided by the ordinary dedup — which is
+# also right on its own terms, since a degraded escalation is about the outage,
+# not about the PR.
+GATE_PR=""
+GATE_REPO=""
+if [ "$KIND" = refinery ] && [ -n "$PR" ] && [ -n "$ORIGIN_REPO_Q" ]; then
+  GATE_PR="$PR"
+  GATE_REPO="$ORIGIN_REPO_Q"
+fi
 BODY="Anchor: <anchor>
 PR: ${PR:-${PR_NUMS:-none}}
 Observation: <why this specific anchor cannot proceed without a human>
 Recommendation: <what the human must do>"
 if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<anchor>" --kind "$KIND" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "MERGE_HELD: <anchor> <summary>" --body "$BODY"; then
+  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<anchor>" --kind "$KIND" --state "$STATE" --pr "$GATE_PR" --repo "$GATE_REPO" --cooldown "{{escalation_cooldown}}" --subject "MERGE_HELD: <anchor> <summary>" --body "$BODY"; then
     echo "refinery: escalation-gate did not send MERGE_HELD (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
   fi
 else
