@@ -850,10 +850,22 @@ GH_PR_FIELDS='state,isDraft,mergeable,mergeStateStatus,reviewDecision,statusChec
 # uses it — a fix that quietly does nothing. An EMPTY rollup is green by
 # vacuous truth, which is the "or irrelevant" half: a repo with no CI configured
 # (this one) has nothing to be red about.
+#
+# GREEN IS `SUCCESS` AND NOTHING ELSE ON THE StatusContext SIDE. Its `state` is
+# GitHub's StatusState enum — ERROR, EXPECTED, FAILURE, PENDING, SUCCESS — and
+# only the last one says a check passed. EXPECTED is the trap: it reads like an
+# outcome and is a WAIT, the value GitHub reports for a required status that has
+# been declared for the ref and has not reported yet. Scoring it green refuses a
+# PR whose only unmet blocker is a check still owed, which is precisely the
+# "failing or still-running checks" carve-out in the header — and a refusal
+# stamps nothing, so that PR is not deferred for a cooldown but silenced for
+# good. The CheckRun side already draws the same line by requiring COMPLETED
+# before it reads a conclusion; this is that rule stated once for the other
+# shape (tk-oig44).
 APPROVAL_WAIT_JQ='
   def check_green:
     ((.state // "") | ascii_upcase) as $ctx
-    | if $ctx != "" then ($ctx == "SUCCESS" or $ctx == "EXPECTED")
+    | if $ctx != "" then ($ctx == "SUCCESS")
       else (((.status // "") | ascii_upcase) == "COMPLETED")
            and ((((.conclusion // "") | ascii_upcase)) as $c
                 | $c == "SUCCESS" or $c == "SKIPPED" or $c == "NEUTRAL")

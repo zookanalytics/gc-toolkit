@@ -513,6 +513,17 @@ send_case SENDCHECKCTX "...including one reported as a StatusContext, not a Chec
   "$(pr_json 'statusCheckRollup=[{"state":"FAILURE"}]')"
 send_case SENDCHECKRUN "a check still running is not 'green or irrelevant' either" \
   "$(pr_json 'statusCheckRollup=[{"status":"IN_PROGRESS","conclusion":null}]')"
+# ...and the StatusContext spelling of "still running". `state` is GitHub's
+# StatusState enum, and only SUCCESS in it means a check passed. EXPECTED is the
+# one that reads like an outcome and is a WAIT — a required status declared for
+# the ref that has not reported yet — so it is the value a PR blocked on an owed
+# check actually carries. Scoring any of these green refuses that PR, and a
+# refusal stamps nothing, so it is silenced permanently rather than deferred.
+for ctx_state in EXPECTED PENDING ERROR; do
+  send_case "SENDCHECKCTX$ctx_state" \
+    "a StatusContext state=$ctx_state is not green — the PR still escalates" \
+    "$(pr_json "statusCheckRollup=[{\"state\":\"$ctx_state\"}]")"
+done
 send_case SENDCHANGES "a CHANGES_REQUESTED review still escalates" \
   "$(pr_json 'reviews=[{"state":"CHANGES_REQUESTED"}]')"
 send_case SENDDRAFT "a draft is not awaiting anyone's approval" \
@@ -528,6 +539,26 @@ send_case SENDUNKNOWN "mergeable=UNKNOWN is not a claim that the PR is fine" \
 reset; seed_pr "$(pr_json)"
 run "MERGE_HELD: PR #35" --state "s" --pr 35 >/dev/null 2>&1
 eq "$(mails)" "0" "SENDCONTROL: the unmodified fixture is still refused"
+
+# --- REFUSEGREEN (the other side of the same predicate) -----------------------
+# The SENDCHECK* cases above all pass on an empty rollup too, so on their own
+# they cannot tell "not-green vetoes" apart from "any non-empty rollup vetoes" —
+# and the second is the fix that quietly does nothing, refusing nothing on a repo
+# that reports checks at all. These fixtures carry a NON-EMPTY GREEN rollup in
+# each of the two shapes and must still be refused.
+refuse_case() { # <label> <description> <pr-json>
+  reset; seed_pr "$3"
+  out=$(run "MERGE_HELD: PR #35" --state "s" --pr 35 2>&1)
+  eq "$(mails)" "0" "$1: $2"
+  case "$out" in
+    *"checks green"*) ok "$1: and says the checks were read as green" ;;
+    *) bad "$1: reason should say 'checks green', not 'no checks configured' (got '$out')" ;;
+  esac
+}
+refuse_case REFUSEGREENCTX "a green StatusContext is green — SUCCESS still refuses" \
+  "$(pr_json 'statusCheckRollup=[{"state":"SUCCESS"}]')"
+refuse_case REFUSEGREENRUN "a passed CheckRun is green — COMPLETED/SUCCESS still refuses" \
+  "$(pr_json 'statusCheckRollup=[{"status":"COMPLETED","conclusion":"SUCCESS"}]')"
 
 # --- SENDFAULT (the city-side half) -------------------------------------------
 # GitHub cannot see these, and "GitHub is happy" is not "nothing is wrong". Each
