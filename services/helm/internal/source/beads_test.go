@@ -236,6 +236,17 @@ func populatedStore() *fakeStore {
 				// A non-parent-child edge into the same epic must not be counted.
 				withDepType(child("tk-ref", "open", testNow, ""), "related"),
 			},
+			// A parked subject that DECOMPOSED. The canonical converse shape
+			// files the work a sitting routes as a child of the subject, so
+			// this is where that work lives — and the only relation that can
+			// see it, since beads refuses a parent→descendant `blocks` edge
+			// (tk-a9k0l, tk-2cyxo). The `tracks` edge is the visit convoy
+			// pointing at the same bead: not a child.
+			"tk-parked": {
+				withDepType(child("tk-p1", "open", testNow, ""), "parent-child"),
+				withDepType(child("tk-p2", "closed", testNow.Add(-24*time.Hour), ""), "parent-child"),
+				withDepType(child("tk-visit", "open", testNow, ""), "tracks"),
+			},
 		},
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
 			"tk-cv": {
@@ -457,15 +468,33 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 		}
 	}
 
-	// The metadata kinds carry the same facts every anchor does, and no
-	// children: the gather admits the bead itself, not a set it owns.
+	// The metadata kinds carry the same facts every anchor does — including a
+	// child roll-up, read the same way an epic's is (tk-a9k0l). A bead with no
+	// children still gathers none; the empty slice used to be hardcoded for
+	// every one of them, which is a false statement of the relation rather than
+	// a cheap approximation of it.
 	i, ok := findAnchor(res, "tk-human")
 	if !ok {
 		t.Fatal("human anchor missing")
 	}
 	human := res.Anchors[i]
 	if len(human.Children) != 0 {
-		t.Errorf("a human-routed bead has no roll-up: %+v", human.Children)
+		t.Errorf("a bead with no parent-child edges rolls up nothing: %+v", human.Children)
+	}
+	j, ok := findAnchor(res, "tk-parked")
+	if !ok {
+		t.Fatal("parked anchor missing")
+	}
+	parked := res.Anchors[j]
+	if len(parked.Children) != 2 {
+		t.Fatalf("a decomposed parked subject rolls up its children: %+v", parked.Children)
+	}
+	gotKids := []string{parked.Children[0].ID, parked.Children[1].ID}
+	if gotKids[0] != "tk-p1" || gotKids[1] != "tk-p2" {
+		t.Errorf("children: got %v, want [tk-p1 tk-p2] — the tracks edge is membership, not a child", gotKids)
+	}
+	if parked.Children[0].Status != "open" || parked.Children[1].Status != "closed" {
+		t.Errorf("children are read at ALL statuses so n_closed is real: %+v", parked.Children)
 	}
 	if human.Source != "human" {
 		t.Errorf("Source drives the derivation branch: got %q", human.Source)

@@ -391,6 +391,26 @@ budget where roughly 40% of the reserved rows were already terminal.
 Pass `--waiting-on` for every bead a sitting routes work into; a wait
 recorded only in prose is a wait nothing will ever re-ask.
 
+*Where that edge cannot be written, and what re-asks the wait instead
+(2026-08-22, `tk-a9k0l`):* the canonical converse shape files the routed
+work as a **child** of the subject, and beads refuses a `blocks` edge
+from a parent to its own descendant — `cannot be blocked by its
+descendant: blocked status cascades to descendants` — so `--waiting-on`
+is not available for exactly that shape, and no amount of hygiene makes
+it available. The relation the board re-asks there is the
+**parent-child roll-up**: a `parked` subject with children is banded by
+them rather than floored at LOW, so open work under a parked
+conversation reads as the frontier it is. Both boards do this
+(`assets/scripts/gc-helm.sh`, `services/helm/internal/`). It also
+matters that a plain child bead is not an anchor of its own: it reaches
+the board ONLY through its parent's roll-up, so while these kinds
+carried a hardcoded empty child set, parking a subject deleted its open
+children from every surface. Measured on `tk-z9nln`: the row read
+`m_total=0`, and the deliverable it was waiting for was open,
+unassigned, unrouted and on no board at all. Pushing the operator once
+the last child closes is a separate piece of work (`tk-2cyxo`); the
+board stays quiet for that state and only stops mis-stating it.
+
 *The converse of that rule (added 2026-08-14, tk-mndjz):* a visit that
 never held closes **silently** — no sign-off, no thread output at all,
 only the note appended to its subject. That covers a visit folded into a

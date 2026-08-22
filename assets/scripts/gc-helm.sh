@@ -64,6 +64,19 @@
 #           with real attention items whatever its priority or age.
 #           Resume with prefix+a, then the bead id.
 #
+#           EXCEPT when it has CHILDREN. Both metadata-keyed kinds roll up
+#           their `parent-child` children like an epic does, and a parked
+#           subject that decomposed is banded by that roll-up instead of by
+#           the floor — the floor asserts "wants nothing", which is simply
+#           false while open work hangs under it. This is the canonical
+#           converse shape: a sitting files the work it routes as a CHILD of
+#           the subject, and `bd` REFUSES a `blocks` edge from a parent to
+#           its own descendant, so that work can never appear as a
+#           `waiting_on` edge (tk-2cyxo). Before this, a decomposed subject
+#           reported zero children and its open children — which reach the
+#           board only through a parent's roll-up — vanished from every
+#           surface (tk-a9k0l).
+#
 #           EXCEPT when it was waiting on something that has since landed.
 #           A sitting that routes work out of a subject writes a `blocks`
 #           edge to that work (`takeaway --waiting-on`), and the render
@@ -95,14 +108,17 @@
 # ── Per-anchor deterministic frontier facts ──────────────────────────
 #   • N/M            — children/members closed (N) of total (M). Epic
 #                      children come from the `--parent` roll-up; convoy
-#                      members from the convoy bead's tracks deps
+#                      members and the metadata-keyed kinds' children from
+#                      the anchor bead's deps
 #                      (`bd show --include-dependents`). N/M and the
 #                      frontier derive from the SAME child set, so a row
 #                      cannot self-contradict. `gc convoy list` .progress
 #                      is kept ONLY as a cross-check: any disagreement
 #                      with the resolved set is surfaced as
-#                      `progress_mismatch` in the JSON output. Decisions
-#                      carry no frontier (N/M = —).
+#                      `progress_mismatch` in the JSON output. A row with
+#                      no children at all carries no frontier (N/M = —):
+#                      decisions always, and a `human`/`parked` bead that
+#                      never decomposed.
 #   • open/in-progress/assigned — counts over the open frontier.
 #   • in flight      — a child is MOVING if EITHER (1) it is claimed
 #                      (status=in_progress) and its OWNING session is live,
@@ -181,7 +197,10 @@
 #   NORMAL    active frontier (work in flight, OR an open visit — a
 #             conversation is held).
 #   LOW       empty epic (0 children), complete convoy (all closed), or a
-#             `parked` bead (floored by band, never by score).
+#             CHILDLESS `parked` bead (floored by band, never by score).
+#             A parked bead that decomposed is banded by its children like
+#             any other roll-up anchor — the floor claims it wants nothing,
+#             which stops being true the moment open work hangs under it.
 #
 #   weight PROXY = M (subtree size)
 #                + priority weight (P1→3, P2→2, P3→1, P4→0)
@@ -1307,21 +1326,29 @@ def wf_live($id):
     # stranded when a visit is open. Stranded/HIGH is reserved for a
     # decomposed anchor with open children, zero in-progress, AND no
     # open visit.
-    # The metadata-keyed kinds carry no roll-up by construction — the gather
-    # admits the bead itself, not a set it owns — so the band comes from what
-    # the bead IS, and they are placed ahead of the count branches that would
-    # otherwise read every one of them as an empty anchor. `human` is ELEVATED
-    # for the same reason a decision is: gc.routed_to=human means no agent
-    # will take it.
+    # The metadata-keyed kinds are placed ahead of the count branches because
+    # a CHILDLESS one has no roll-up to band on, and falling through would read
+    # every such bead as an empty anchor. `human` is ELEVATED for the same
+    # reason a decision is: gc.routed_to=human means no agent will take it.
     # `parked` is LOW for the opposite reason — the conversation reached a
     # takeaway and wants nothing, it only has to stay FINDABLE, so the band
     # floor keeps it out of the contest with real attention items whatever its
     # priority or age.
+    #
+    # …but only while it HAS no children. The floor is a claim about the bead —
+    # "wants nothing" — and open work hanging under it falsifies that claim, so
+    # a decomposed parked subject is banded by its roll-up like any other
+    # anchor: HIGH when its frontier is stranded, NORMAL when something is
+    # moving, LOW again once every child has closed (via the $open==0 branch).
+    # The children are how the canonical converse shape is visible at all: a
+    # sitting files the work it routes as a CHILD of the subject, and `bd`
+    # refuses a parent→descendant `blocks` edge, so $waiting is empty for
+    # exactly the subjects that decomposed (tk-a9k0l, tk-2cyxo).
     | (if $a.source=="unowned" then "HIGH"
        elif $a.source=="decision" then "ELEVATED"
        elif $a.source=="human" then "ELEVATED"
        elif $disposition_due then "ELEVATED"
-       elif $a.source=="parked" then "LOW"
+       elif ($a.source=="parked" and $m==0) then "LOW"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
        elif ($open>0 and $inprog_live==0 and ($held|not)) then "HIGH"
@@ -1337,7 +1364,13 @@ def wf_live($id):
        elif $disposition_due then "parked · blocker landed"
        elif ($a.source=="parked" and ($waiting_open|length) > 0)
             then "parked · waiting on \($waiting_open|length)"
-       elif $a.source=="parked" then "conversation parked — takeaway recorded"
+       # A NAMED wait outranks the roll-up above: the sitting stated it, and
+       # that is why this row is quiet. Below it, a parked subject that
+       # decomposed reports its frontier through the same count phrases as
+       # every other roll-up anchor, so the phrase explains the band it just
+       # got from those counts.
+       elif ($a.source=="parked" and $m==0)
+            then "conversation parked — takeaway recorded"
        elif $m==0 then "empty — no children"
        elif $open==0 then "all \($m) closed · 0 open"
        elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "\($open) open · \($inprog_dead) stuck (dead owner)"
@@ -1358,7 +1391,7 @@ def wf_live($id):
        elif $a.source=="unowned" then "unowned — assign an owning bead"
        elif $a.source=="decision" then "operator decision"
        elif $a.source=="human" then "operator action"
-       elif $a.source=="parked" then "resume: prefix+a, then the bead id"
+       elif ($a.source=="parked" and $m==0) then "resume: prefix+a, then the bead id"
        elif $m==0 then "no children — decompose or assign"
        elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
        elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "dead owner — recover or reassign"
@@ -1474,14 +1507,19 @@ def clip($w): . as $s | if (($s|length) > $w) then (($s[0:$w-1]) + "…") else $
 | ( (" "|rpad(2)) + ("SEV"|rpad(9)) + ("ID"|rpad($idw)) + ("RIG"|rpad($rigw)) + ("KIND"|rpad(9)) + ("N/M"|rpad(7)) + ("FRONTIER"|rpad(36)) + "NEEDS" ),
 ( ("─"*1|rpad(2)) + ("─"*8|rpad(9)) + ("─"*($idw-1)|rpad($idw)) + ("─"*($rigw-1)|rpad($rigw)) + ("─"*8|rpad(9)) + ("─"*6|rpad(7)) + ("─"*35|rpad(36)) + ("─"*16) ),
 ( .[] | ((if .held then "●" else " " end)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad($idw)) + ((.rig)|rpad($rigw)) + ((.kind)|rpad(9))
-        + ((if (.kind=="decision" or .kind=="human" or .kind=="parked") then "—"
+        # "—" means "this row has no roll-up", not "this KIND never has one":
+        # a decision never does, and a human/parked bead does exactly when it
+        # decomposed. Printing "—" over a real child set is what hid the open
+        # children of a parked subject (tk-a9k0l).
+        + ((if (.m_total==0 and (.kind=="decision" or .kind=="human" or .kind=="parked")) then "—"
             else "\(.n_closed)/\(.m_total)" end)|rpad(7))
         + ((.frontier)|rpad(36)) + ((.needs)|clip($needsw)) )
 '
     # <<< board-table-render
-    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck/blocker-landed · NORMAL=active · LOW=empty/complete/parked\n'
+    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck/blocker-landed · NORMAL=active · LOW=empty/complete/childless-parked\n'
     printf 'Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n'
     printf 'A parked row reading "blocker landed" was waiting on work that has since closed — it needs a disposition, not a re-read\n'
+    printf 'A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n'
     printf 'Held: ● an open visit holds this anchor'\''s conversation (attach via the sessions picker) · blank = none\n'
     printf 'open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
 }
@@ -1674,6 +1712,27 @@ gather_visits() {
 # fresh on every render (resolve_waiting_status), never cached — a blocker
 # that merged is exactly the fact a cached board would go on hiding.
 #
+# `children` rides along too, and this is the fix tk-a9k0l is about. These
+# kinds used to hardcode `children:[]`, which is not a cheap approximation of
+# the roll-up — it is a false statement of it. A plain (non-epic/convoy/
+# decision) bead reaches the board ONLY through its parent's roll-up, so a
+# parked subject that decomposed reported zero children AND deleted its own
+# open children from every surface: the row said "wants nothing" while the work
+# it was waiting for sat unassigned and unrouted, on no board at all (measured
+# on tk-z9nln, 2026-08-22). The relation matters most for exactly this kind,
+# because `bd` REFUSES a `blocks` edge from a parent to its own descendant, so
+# the canonical converse shape — file the routed work as a CHILD of the subject
+# — can never express its wait as a `waiting_on` edge (tk-2cyxo).
+#
+# ONE `bd show <every anchor id in this rig> --include-dependents` answers it
+# for the whole rig, the same batching resolve_waiting_status uses: the ids ride
+# argv at ~8 bytes each (bounded by ANCHOR count, far from MAX_ARG_STRLEN) and
+# the reply, which carries whole beads, comes back through a pipe. Children are
+# projected to {id,status,assignee} before crossing back over argv, for the
+# reason gather_anchors spells out at length (tk-hgmob). Dependents are filtered
+# to the `parent-child` edge: a convoy's `tracks` edge points at the same bead
+# and is not a child.
+#
 # Both EXCLUDE the three typed kinds, so an epic or decision that happens
 # to carry a marker stays its own kind instead of arriving twice. A bead
 # carrying BOTH markers is emitted twice on purpose and the render's
@@ -1685,7 +1744,48 @@ gather_visits() {
 gather_meta_anchors() {
     for f in "$OPEN_DIR"/*.json; do
         [ -f "$f" ] || continue
-        jq -c '
+
+        # Anchor ids first: the child read is one call over all of them.
+        _mids=$(jq -r '
+            (.beads // [])[]
+            | select((.issue_type // "") as $t | (["epic","decision","convoy"] | index($t)) == null)
+            | . as $b
+            | ($b.metadata // {}) as $md
+            | select(((($md["gc.routed_to"] // "") | tostring) == "human")
+                     or ((($md["gc.takeaway"] // "") | tostring) | length) > 0)
+            | $b.id' < "$f" 2>/dev/null | sort -u | tr '\n' ' ')
+
+        _mkids='{}'
+        if [ -n "$_mids" ]; then
+            _mrig=$(jq -r '.rig // ""' < "$f" 2>/dev/null || printf '')
+            _mdb=$(printf '%s' "$RIGS" | jq -r --arg n "$_mrig" \
+                     'first(.[] | select(.name == $n) | .path) // ""' 2>/dev/null || printf '')
+            if [ -n "$_mdb" ] && [ -d "$_mdb/.beads" ]; then
+                # shellcheck disable=SC2086  # $_mids is a deliberate list of bare ids
+                _mraw=$(gcq bd show $_mids --db "$_mdb/.beads" --include-dependents --json | tr -d '\000-\037')
+                # Same shape rule resolve_waiting_status documents: `bd show`
+                # answers with an ARRAY when any id resolves and a bare OBJECT
+                # when none do, rc=0 either way. An anchor set that resolves to
+                # nothing is the wedge/timeout shape here — every one of these
+                # ids came out of this rig's own open-bead snapshot moments ago.
+                if printf '%s' "$_mraw" | jq -e 'type=="array"' >/dev/null 2>&1; then
+                    _mkids=$(printf '%s' "$_mraw" | jq -c '
+                        [ .[]? | select(type == "object")
+                          | {key: ((.id // "") | tostring),
+                             value: [ (.dependents // [])[]
+                                      | select(((.dependency_type // "") | tostring) == "parent-child")
+                                      | {id, status, assignee} ]}
+                          | select(.key != "") ] | from_entries' 2>/dev/null || printf '{}')
+                else
+                    gather_mark "meta-children@$_mrig"
+                fi
+            else
+                gather_mark "meta-children-db@$_mrig"
+            fi
+        fi
+        printf '%s' "$_mkids" | jq -e 'type=="object"' >/dev/null 2>&1 || _mkids='{}'
+
+        jq -c --argjson kids "$_mkids" '
             .rig as $rig | .prefix as $prefix
             | (.beads // [])[]
             | select((.issue_type // "") as $t | (["epic","decision","convoy"] | index($t)) == null)
@@ -1703,7 +1803,7 @@ gather_meta_anchors() {
             | {id:$b.id, title:($b.title // ""), kind:$kind, source:$kind,
                rig:$rig, prefix:$prefix, priority:($b.priority // 3),
                updated_at:($b.updated_at // ""), description:($b.description // ""),
-               progress:null, children:[],
+               progress:null, children:(($kids[$b.id] // []) | if type=="array" then . else [] end),
                # Only the parked kind spends these (the disposition derivation
                # keys on source=="parked"), and the Go gather pays a query per
                # anchor for them — so both sides gather them for parked alone.
