@@ -639,7 +639,40 @@ cat > "$ITMP/open.json" <<'J'
  {"id":"tk-punk","status":"open","assignee":null,"issue_type":"task","title":"waiting on a bead this store cannot resolve","priority":2,
   "updated_at":"2026-08-21T00:00:00Z","description":"",
   "metadata":{"gc.takeaway":"holding — awaiting sl-9999 over in another rig"},
-  "dependencies":[{"issue_id":"tk-punk","depends_on_id":"sl-9999","type":"blocks"}]}
+  "dependencies":[{"issue_id":"tk-punk","depends_on_id":"sl-9999","type":"blocks"}]},
+ {"id":"tk-pkids","status":"open","assignee":null,"issue_type":"task","title":"parked, and the work it routed is its own child","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"routed — next sitting when the findings land"}},
+ {"id":"tk-pmove","status":"open","assignee":null,"issue_type":"task","title":"parked, and a child is being worked right now","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"routed — implementation in flight"}},
+ {"id":"tk-pdone2","status":"open","assignee":null,"issue_type":"task","title":"parked, and every child has closed","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"routed — next sitting when the findings land"}},
+ {"id":"tk-hkids","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, and decomposed","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human"}}
+]
+J
+
+# What `bd show <anchor ids> --include-dependents` answers with: the children
+# of the metadata-keyed anchors, at ALL statuses, so n_closed is a real count.
+# tk-pkids also carries a `tracks` dependent — the edge a convoy files, which
+# points at the same bead and is NOT a child. Filtering to `parent-child` is
+# the only thing that keeps it out of the roll-up.
+cat > "$ITMP/dependents.json" <<'J'
+[
+ {"id":"tk-pkids","dependents":[
+   {"id":"tk-kOPEN","status":"open","assignee":null,"dependency_type":"parent-child"},
+   {"id":"tk-kDONE","status":"closed","assignee":null,"dependency_type":"parent-child"},
+   {"id":"cv-TRACK","status":"in_progress","assignee":null,"dependency_type":"tracks"}]},
+ {"id":"tk-pmove","dependents":[
+   {"id":"tk-kMOVE","status":"in_progress","assignee":"gc-toolkit__polecat-lx-live","dependency_type":"parent-child"}]},
+ {"id":"tk-pdone2","dependents":[
+   {"id":"tk-kDONE1","status":"closed","assignee":null,"dependency_type":"parent-child"},
+   {"id":"tk-kDONE2","status":"closed","assignee":null,"dependency_type":"parent-child"}]},
+ {"id":"tk-hkids","dependents":[
+   {"id":"tk-kHUM","status":"open","assignee":null,"dependency_type":"parent-child"}]}
 ]
 J
 
@@ -671,12 +704,15 @@ case "$1 ${2:-}" in
   "convoy list")  printf '{"convoys":[]}\n' ;;
   "session list") cat "$FAKE_SESSIONS" ;;
   "bd show")
-    # resolve_waiting_status batches a rig's DISTINCT blocker ids into one
-    # call. Every other `bd show` on the board path is unrelated and keeps
-    # answering empty, so the match is on the ids themselves.
+    # Two batched `bd show` calls ride the board path, told apart by their
+    # flags: gather_meta_anchors asks for --include-dependents (the children
+    # roll-up of the metadata-keyed kinds), resolve_waiting_status asks for the
+    # DISTINCT blocker ids of a rig with no such flag. Everything else is
+    # unrelated and keeps answering empty.
     case "$args" in
-      *tk-blk*|*sl-9999*) cat "$FAKE_BLOCKERS" ;;
-      *)                  printf '[]\n' ;;
+      *--include-dependents*) cat "$FAKE_DEPENDENTS" ;;
+      *tk-blk*|*sl-9999*)     cat "$FAKE_BLOCKERS" ;;
+      *)                      printf '[]\n' ;;
     esac ;;
   "convoy status")
     case "$3" in
@@ -708,7 +744,8 @@ IRC=0
 IOUT="$(env PATH="$ITMP/bin:$PATH" TMPDIR="$IRUN" \
             FAKE_RIG_PATH="$ITMP/rig" FAKE_EPICS="$ITMP/epics.json" \
             FAKE_OPEN="$ITMP/open.json" FAKE_SESSIONS="$ITMP/sessions.json" \
-            FAKE_DIR="$ITMP" FAKE_BLOCKERS="$ITMP/blockers.json" GC_HELM_FIXTURE= \
+            FAKE_DIR="$ITMP" FAKE_BLOCKERS="$ITMP/blockers.json" \
+            FAKE_DEPENDENTS="$ITMP/dependents.json" GC_HELM_FIXTURE= \
             sh "$SCRIPT" board --json --refresh --limit=0 2>"$IRUN/err")" || IRC=$?
 IERR="$(cat "$IRUN/err" 2>/dev/null || true)"
 eq "$IRC" "0" "(SCENARIO3) board renders (err: ${IERR:-none})"
@@ -790,6 +827,59 @@ eq "$(row tk-parked disposition_due)" "false" "(BAREPARK) no edges is not a disc
 eq "$(row tk-parked frontier)" "conversation parked — takeaway recorded" \
    "(BAREPARK) an edgeless parked row renders exactly as before"
 eq "$(row tk-parked waiting_on)" '[]' "(BAREPARK) the field is an empty ARRAY, never null (jq/Go parity)"
+eq "$(row tk-parked m_total)" "0" "(BAREPARK) a childless parked row still rolls up nothing"
+eq "$(row tk-parked severity)" "LOW" "(BAREPARK) …and keeps the floor"
+
+# --- (PKIDS) the defect tk-a9k0l is about ------------------------------------
+# The canonical converse shape: the sitting filed the work it routed as a CHILD
+# of the subject. That work can never be a `waiting_on` edge — `bd` refuses a
+# parent→descendant `blocks` edge (tk-2cyxo) — so `children` is the ONLY
+# relation that can see it. The gather used to hardcode `children:[]`, which
+# reported zero children AND, because a plain bead reaches the board only
+# through its parent's roll-up, deleted the open child from every surface.
+eq "$(row tk-pkids kind)"     "parked" "(PKIDS) it is still a parked conversation"
+eq "$(row tk-pkids m_total)"  "2"      "(PKIDS) its children are counted, not hardcoded away"
+eq "$(row tk-pkids n_closed)" "1"      "(PKIDS) …at all statuses, so n_closed is real"
+eq "$(row tk-pkids open)"     "1"      "(PKIDS) …and the open frontier is visible"
+eq "$(row tk-pkids open_heads)" '["tk-kOPEN"]' "(PKIDS) the open child is nameable from the row"
+eq "$(row tk-pkids severity)" "HIGH"   "(PKIDS) the LOW floor does not survive open work under it"
+eq "$(row tk-pkids stranded)" "true"   "(PKIDS) …because the frontier is genuinely stranded"
+eq "$(row tk-pkids frontier)" "1 open · 0 in flight (stranded)" \
+   "(PKIDS) and the frontier explains the band it was given"
+# A convoy files a `tracks` edge that points at the same bead. It is a
+# membership edge, not a child, and counting it would inflate every roll-up.
+# cv-TRACK is in_progress on purpose: drop the `parent-child` filter and this
+# row reads m_total=3 with one in-progress child, so the assertion can only
+# pass while the filter is there.
+eq "$(row tk-pkids in_progress)" "0" "(TRACKSEDGE) a tracks dependent is not a child"
+
+# --- (PMOVE) the same row, with the work actually moving ---------------------
+eq "$(row tk-pmove severity)" "NORMAL" "(PMOVE) a parked subject whose child is being worked is active, not floored"
+eq "$(row tk-pmove frontier)" "1 open · 1 in flight" "(PMOVE) …and says what is moving"
+
+# --- (PALLDONE) the state tk-2cyxo has to be able to see ---------------------
+# Every child closed. The band is LOW either way, so this is not about ranking:
+# it is about the row being able to SAY that the work it routed has landed.
+# Before the fix "never decomposed" and "decomposed, all landed" were the same
+# m_total=0 row, and no sweep could tell them apart.
+eq "$(row tk-pdone2 m_total)"  "2"    "(PALLDONE) a finished roll-up is still reported"
+eq "$(row tk-pdone2 n_closed)" "2"    "(PALLDONE) …and reads as complete"
+eq "$(row tk-pdone2 complete)" "true" "(PALLDONE) …structurally, not just in a phrase"
+eq "$(row tk-pdone2 severity)" "LOW"  "(PALLDONE) promoting this row is tk-2cyxo's call, not this one's"
+eq "$(row tk-pdone2 frontier)" "all 2 closed · 0 open" "(PALLDONE) the frontier stops claiming it wants nothing"
+
+# --- (HKIDS) the same hole on the other metadata-keyed kind ------------------
+eq "$(row tk-hkids m_total)"  "1"        "(HKIDS) a human-routed bead rolls up its children too"
+eq "$(row tk-hkids severity)" "ELEVATED" "(HKIDS) …and its band still comes from the marker, not the counts"
+
+# --- (PRANK) the floor was the thing hiding it ------------------------------
+PK_SCORE="$(row tk-pkids rank_score)"; BARE_SCORE="$(row tk-parked rank_score)"
+case "${PK_SCORE}${BARE_SCORE}" in
+  ''|*[!0-9]*) bad "(PRANK) a rank_score is missing or non-numeric (pkids='$PK_SCORE' bare='$BARE_SCORE')" ;;
+  *) [ "$PK_SCORE" -gt "$BARE_SCORE" ] \
+       && ok "(PRANK) a decomposed parked row outranks a floored one ($PK_SCORE > $BARE_SCORE)" \
+       || bad "(PRANK) the decomposed row is still floored ($PK_SCORE <= $BARE_SCORE)" ;;
+esac
 
 # --- (FAILCLOSE) the direction to be wrong in --------------------------------
 # sl-9999 is absent from the blocker read — a cross-store id, an `external:`
@@ -867,6 +957,27 @@ if [ -n "$ICACHE" ] && [ -s "$ICACHE" ]; then
 else
     bad "(MAPGATHER) no cache written — cannot inspect the gathered map"
 fi
+
+# --- (NMCOL) the human table, where the operator actually reads it -----------
+# The N/M cell printed "—" for every human/parked row by KIND. That is right
+# for a row with no roll-up and a lie over a real child set — and the table is
+# the surface the operator glances at, so the JSON being correct is not enough.
+ITAB="$(env PATH="$ITMP/bin:$PATH" TMPDIR="$IRUN" \
+            FAKE_RIG_PATH="$ITMP/rig" FAKE_EPICS="$ITMP/epics.json" \
+            FAKE_OPEN="$ITMP/open.json" FAKE_SESSIONS="$ITMP/sessions.json" \
+            FAKE_DIR="$ITMP" FAKE_BLOCKERS="$ITMP/blockers.json" \
+            FAKE_DEPENDENTS="$ITMP/dependents.json" GC_HELM_FIXTURE= \
+            sh "$SCRIPT" board --refresh --limit=0 2>/dev/null)" || true
+# The held glyph is a bare space on an unheld row, so the column index shifts
+# by one under awk's whitespace splitting. Find the ID cell instead (it is
+# field 1 or 2, and rpad never truncates it) and step three fields to N/M:
+# ID, RIG, KIND, N/M.
+tabcell() { printf '%s' "$ITAB" | awk -v id="$1" '{for(i=1;i<=2;i++) if($i==id){print $(i+3); exit}}'; }
+[ -n "$ITAB" ] && ok "(NMCOL) the human table rendered" || bad "(NMCOL) the human table did not render"
+eq "$(tabcell tk-pkids)"  "1/2" "(NMCOL) a decomposed parked row prints its real count"
+eq "$(tabcell tk-parked)" "—"   "(NMCOL) …while a childless one still prints —"
+eq "$(tabcell tk-hkids)"  "0/1" "(NMCOL) the same on a human-routed row"
+eq "$(tabcell tk-dHUMAN)" "—"   "(NMCOL) a decision never has a roll-up to print"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SCENARIO 4 — the RENDER-side liveness re-check, isolated (tk-fkeft)

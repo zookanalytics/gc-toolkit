@@ -292,20 +292,26 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 		if t.Held {
 			glyph = "●"
 		}
-		// The metadata-keyed kinds carry no roll-up by construction, so a count
-		// would be a fabricated 0/0 rather than a fact.
+		// "—" means THIS ROW has no roll-up, not that its KIND never has one: a
+		// decision never does, and a human/parked bead does exactly when it
+		// decomposed. Printing "—" over a real child set is what hid the open
+		// children of a parked subject (tk-a9k0l); printing 0/0 for a bead that
+		// owns no set at all would be a fabricated count.
 		nm := fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
-		switch t.Kind {
-		case "decision", "human", "parked":
-			nm = "—"
+		if t.MTotal == 0 {
+			switch t.Kind {
+			case "decision", "human", "parked":
+				nm = "—"
+			}
 		}
 		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
 			rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
 			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+t.Needs+"\n")
 	}
 
-	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/parked\n")
+	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
+	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
 }

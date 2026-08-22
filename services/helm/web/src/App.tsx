@@ -28,11 +28,19 @@ const REFRESH_MS = 30_000;
 // Leaving it in the parked section would re-hide the one row this distinction
 // exists to surface — the section's own sub-heading promises nothing there is
 // waiting on work (tk-2plde).
+//
+// And EXCEPT a tile with OPEN CHILDREN. "Wants nothing" is equally untrue of a
+// subject whose routed work is still in flight, and that work reaches the board
+// only through this tile's roll-up — a plain child bead is never a tile of its
+// own — so the quiet section is where it would disappear. The service bands
+// these by their roll-up rather than flooring them (tk-a9k0l); this is the same
+// row set, kept out of the same section for the same reason.
 const PARKED_KIND = 'parked';
 
 // A tile that belongs in the quiet parked section rather than the attention
-// table: parked, and not owed a disposition.
-const isParked = (tile: Tile): boolean => tile.kind === PARKED_KIND && !tile.disposition_due;
+// table: parked, not owed a disposition, and with no open work under it.
+const isParked = (tile: Tile): boolean =>
+  tile.kind === PARKED_KIND && !tile.disposition_due && tile.open === 0;
 
 // Document-relative on purpose. The app is served under a runtime-city-named
 // prefix (/v0/city/<city>/svc/helm/), so an absolute '/helm' would address the
@@ -185,14 +193,15 @@ export function App() {
         <section className="parked" aria-labelledby="parked-heading">
           <h2 id="parked-heading">parked conversations</h2>
           <p className="sub">
-            Open beads whose visit ended with a takeaway. Nothing here is owed a disposition —
-            a row whose routed work has landed moves up to the anchor table. These are threads to
-            pick back up: press prefix+a and type the id.
+            Open beads whose visit ended with a takeaway. Nothing here is owed a disposition and
+            nothing here has open work under it — either one moves the row up to the anchor
+            table. These are threads to pick back up: press prefix+a and type the id.
           </p>
-          {/* No progress columns. A parked bead carries no roll-up, so n/m and
-              open/wip would read 0/0 on every row — a number that looks like an
-              answer and is not one. (Those columns are questionable on the
-              anchor table too; that is tk-x55wt's bead, not this one.) */}
+          {/* No progress columns. Every row that reaches this section has an
+              empty open frontier — that is the filter — so open/wip reads 0 on
+              all of them, and any row whose roll-up is still saying something
+              is in the anchor table by construction. (Those columns are
+              questionable there too; that is tk-x55wt's bead, not this one.) */}
           <table>
             <thead>
               <tr>

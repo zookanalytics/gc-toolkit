@@ -88,9 +88,11 @@ func TestFourAnchorBoard(t *testing.T) {
 	}
 }
 
-// TestMetadataKindDerivation covers the two kinds tk-2v08m gathers by metadata.
-// Neither carries a roll-up, so the count branches below them must not run —
-// falling through would read both as empty anchors and file them under LOW.
+// TestMetadataKindDerivation covers the two kinds tk-2v08m gathers by metadata,
+// in the shape both have whenever the bead never decomposed: no roll-up, so the
+// count branches below them must not run — falling through would read both as
+// empty anchors and file them under LOW. The decomposed shape is
+// TestParkedWithChildren.
 func TestMetadataKindDerivation(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-human", Title: "Disposition: one PR needs the operator", Kind: "human", Source: "human",
@@ -132,6 +134,122 @@ func TestMetadataKindDerivation(t *testing.T) {
 	// tk-x55wt's bead.
 	if !strings.Contains(parked.Needs, "prefix+a") {
 		t.Errorf("needs must name the resume gesture: %q", parked.Needs)
+	}
+}
+
+// TestParkedWithChildren covers the defect tk-a9k0l is about: the LOW floor is
+// a claim about the bead — "it wants nothing" — and open work hanging under it
+// falsifies the claim.
+//
+// The relation only reaches this kind through `children`. A sitting that routes
+// work out of a subject files that work as the subject's CHILD, and beads
+// REFUSES a `blocks` edge from a parent to its own descendant, so the canonical
+// converse shape carries no waiting edge at all and dispositionDue can never
+// fire for it (tk-2cyxo). The source used to hand these kinds an empty child
+// slice, which reported zero children AND — because a plain child bead is never
+// an anchor in its own right — deleted the open child from every surface: on
+// tk-z9nln the audit's remaining deliverable sat open, unassigned and unrouted,
+// on no board at all.
+func TestParkedWithChildren(t *testing.T) {
+	anchors := []Anchor{
+		// Decomposed, and the child is going nowhere.
+		{ID: "tk-stranded", Title: "audit the workflow; deliverable C outstanding", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway: "next sitting when the findings land", Children: []Child{
+				{ID: "tk-done", Status: "closed"},
+				{ID: "tk-open", Status: "open"},
+			}},
+		// Decomposed, and the child is being worked right now.
+		{ID: "tk-moving", Title: "routed; implementation in flight", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Children: []Child{{ID: "tk-wip", Status: "in_progress", Assignee: "polecat-live"}}},
+		// Decomposed, and every child has landed.
+		{ID: "tk-landed", Title: "routed; the work merged", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Children: []Child{{ID: "tk-c1", Status: "closed"}, {ID: "tk-c2", Status: "closed"}}},
+		// Never decomposed: the floor is still right for this one.
+		{ID: "tk-bare", Title: "a conversation that concluded", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
+		// The other metadata-keyed kind, decomposed: its band comes from the
+		// marker, so children change the roll-up and nothing else.
+		{ID: "tk-human", Title: "the operator owns this, and it decomposed", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Children: []Child{{ID: "tk-hk", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live"))
+
+	stranded, ok := tileByID(b, "tk-stranded")
+	if !ok {
+		t.Fatal("the decomposed parked tile is missing")
+	}
+	if stranded.MTotal != 2 || stranded.NClosed != 1 || stranded.Open != 1 {
+		t.Errorf("the roll-up must be real: got %d/%d with %d open", stranded.NClosed, stranded.MTotal, stranded.Open)
+	}
+	if !equalIDs(stranded.OpenHeads, []string{"tk-open"}) {
+		t.Errorf("the open child must be nameable from the row: %v", stranded.OpenHeads)
+	}
+	if stranded.Severity != SevHigh {
+		t.Errorf("open work under a parked subject outranks the floor: got %s", stranded.Severity)
+	}
+	if !stranded.Stranded {
+		t.Error("a frontier with nothing live in it is stranded, whatever kind the parent is")
+	}
+	if stranded.Frontier != "1 open · 0 in flight (stranded)" {
+		t.Errorf("the frontier must explain the band it was given: %q", stranded.Frontier)
+	}
+	// The takeaway still answers for the row. It is the sitting's own sentence
+	// and nothing here has made it stale — only dispositionDue overrides it.
+	if stranded.Needs != "next sitting when the findings land" {
+		t.Errorf("the takeaway is still the NEEDS answer: %q", stranded.Needs)
+	}
+
+	moving, _ := tileByID(b, "tk-moving")
+	if moving.Severity != SevNormal {
+		t.Errorf("a parked subject whose child is being worked is active: got %s", moving.Severity)
+	}
+	if moving.Frontier != "1 open · 1 in flight" {
+		t.Errorf("frontier: %q", moving.Frontier)
+	}
+
+	// Every child closed. The band is LOW either way, so this is not about
+	// ranking: it is about the row being ABLE to say the work it routed has
+	// landed. Before this, "never decomposed" and "decomposed, all landed" were
+	// the same MTotal=0 row and no sweep could tell them apart (tk-2cyxo).
+	landed, _ := tileByID(b, "tk-landed")
+	if landed.MTotal != 2 || landed.NClosed != 2 || !landed.Complete {
+		t.Errorf("a finished roll-up is still reported: %d/%d complete=%v",
+			landed.NClosed, landed.MTotal, landed.Complete)
+	}
+	if landed.Severity != SevLow {
+		t.Errorf("promoting this row is tk-2cyxo's call, not this one's: got %s", landed.Severity)
+	}
+	if landed.Frontier != "all 2 closed · 0 open" {
+		t.Errorf("the frontier stops claiming it wants nothing: %q", landed.Frontier)
+	}
+
+	bare, _ := tileByID(b, "tk-bare")
+	if bare.Severity != SevLow || bare.MTotal != 0 {
+		t.Errorf("a childless parked row is untouched: %s %d children", bare.Severity, bare.MTotal)
+	}
+	if bare.Frontier != "conversation parked — takeaway recorded" {
+		t.Errorf("…and renders exactly as before: %q", bare.Frontier)
+	}
+	if !strings.Contains(bare.Needs, "prefix+a") {
+		t.Errorf("…including the resume gesture: %q", bare.Needs)
+	}
+
+	human, _ := tileByID(b, "tk-human")
+	if human.MTotal != 1 {
+		t.Errorf("a human-routed bead rolls up its children too: got %d", human.MTotal)
+	}
+	if human.Severity != SevElevated {
+		t.Errorf("…and its band still comes from the marker, not the counts: got %s", human.Severity)
+	}
+
+	// The floor was the thing hiding it: a decomposed subject has to sort above
+	// one that concluded, or the promotion buys nothing on a capped board.
+	if stranded.RankScore <= bare.RankScore {
+		t.Errorf("a decomposed parked row outranks a floored one: %d <= %d", stranded.RankScore, bare.RankScore)
 	}
 }
 

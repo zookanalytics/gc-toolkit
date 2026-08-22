@@ -299,9 +299,8 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // severity mirrors gc-helm.sh's band derivation.
 //
 // The three metadata/shape-keyed kinds are placed AHEAD of the count branches
-// on purpose: they carry no roll-up by construction — the gather admits the
-// bead itself, not a set it owns — so the band must come from what the bead IS,
-// and falling through would read every one of them as an empty anchor.
+// on purpose: a CHILDLESS one has no roll-up to band on, so the band must come
+// from what the bead IS, and falling through would read it as an empty anchor.
 //
 //   - `unowned` is HIGH: under the everything-is-owned law an unowned
 //     non-machine convoy is exactly the orphan the observer exists to catch.
@@ -313,7 +312,14 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 //     it was waiting on work that has since landed, which is a disposition the
 //     operator owes and so is banded with the other human-gated rows: the
 //     floor is what made a finished topic indistinguishable from a live hold
-//     (tk-2plde).
+//     (tk-2plde). And UNLESS it has CHILDREN, in which case it is banded by
+//     them like any other roll-up anchor — "wants nothing" is a claim about
+//     the bead, and open work hanging under it falsifies the claim. That is
+//     the canonical converse shape: the sitting files the work it routes as a
+//     CHILD of the subject, and beads refuses a parent→descendant `blocks`
+//     edge, so those subjects have no waiting edges at all (tk-a9k0l,
+//     tk-2cyxo). A roll-up whose children have all closed lands back on LOW
+//     through the r.open == 0 branch below.
 //
 // STRANDED (HIGH) is open work with nothing LIVE in it and no open visit. Two
 // things make that different from the naive "0 in progress": inProgressLive
@@ -330,7 +336,7 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue bool) Severity {
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
-	case a.Source == "parked":
+	case a.Source == "parked" && r.mTotal == 0:
 		sev0 = SevLow
 	case r.mTotal == 0:
 		sev0 = SevLow
@@ -386,7 +392,11 @@ func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue bool)
 		return "parked · blocker landed"
 	case a.Source == "parked" && len(waitingOpen) > 0:
 		return fmt.Sprintf("parked · waiting on %d", len(waitingOpen))
-	case a.Source == "parked":
+	// A NAMED wait outranks the roll-up below: the sitting stated it, and that
+	// is why the row is quiet. Under it, a parked subject that decomposed
+	// reports its frontier through the same count phrases as every other
+	// roll-up anchor, so the phrase explains the band those counts just gave it.
+	case a.Source == "parked" && r.mTotal == 0:
 		return "conversation parked — takeaway recorded"
 	case r.mTotal == 0:
 		return "empty — no children"
@@ -441,7 +451,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue bool) string 
 		return "operator decision"
 	case a.Source == "human":
 		return "operator action"
-	case a.Source == "parked":
+	case a.Source == "parked" && r.mTotal == 0:
 		return "resume: prefix+a, then the bead id"
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
