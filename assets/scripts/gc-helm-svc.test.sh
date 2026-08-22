@@ -61,6 +61,9 @@
 #   (RESTART)     a successful build restarts the service
 #   (NORESTART)   an up-to-date binary restarts nothing
 #   (RCFAIL)      a failed restart is reported as a failure
+#   (RETRY)       a failed restart is retried on the NEXT run, even though the
+#                 binary is by then current — and stops once it is serving
+#   (HANDBUILT)   a hand-run build's binary is restarted onto by the next tick
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -545,6 +548,47 @@ run_build --deploy
 RESTART_FAIL=""
 eq "$RC" 1 "(RCFAIL) a failed restart exits non-zero"
 has "$ERR" "not yet serving" "(RCFAIL) names the half-applied state"
+present "$STATE/restart-pending" "(RCFAIL) the unfinished restart is recorded for the next run"
+
+# --- case: the next run finishes a restart the last one could not -------------
+# Two runs, because the hole only opens on the second. Run 1 publishes and its
+# restart fails, which leaves the binary NEWER than every source: nothing is
+# stale any more, so the up-to-date branch is the only one any later run can
+# reach. Exiting 0 there — "is up to date", no restart — is what would make a
+# transient restart failure permanent, the old process serving the old inode for
+# as long as nobody edits a source file again. That is the "landed but inert"
+# state this whole order exists to end, reached the other way round.
+fixture
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(RETRY) run 1's restart fails"
+present "$STATE/bin/helm-svc" "(RETRY) run 1 published the binary regardless"
+rm -f "$RECORD"; : > "$GCLOG"          # judge run 2 on its own calls alone
+run_build --deploy
+eq "$RC" 0 "(RETRY) run 2 exits 0"
+absent "$RECORD" "(RETRY) run 2 rebuilds nothing — the binary is current"
+has "$(cat "$GCLOG")" "service restart helm" "(RETRY) run 2 restarts onto it anyway"
+absent "$STATE/restart-pending" "(RETRY) and the record is cleared by the restart that worked"
+rm -f "$RECORD"; : > "$GCLOG"
+run_build --deploy
+eq "$RC" 0 "(RETRY) run 3 exits 0"
+hasnt "$(cat "$GCLOG")" "service restart" "(RETRY) a served binary is not restarted again every tick"
+
+# --- case: a hand-run build reaches the service on the next tick --------------
+# `gc-helm-build.sh` with no --deploy publishes and restarts nothing by design.
+# Before the pending record existed, that binary was inert until the next SOURCE
+# edit made it stale again — the same dead end as a failed restart, entered by
+# someone building by hand.
+fixture
+run_build
+eq "$RC" 0 "(HANDBUILT) a hand-run build exits 0"
+hasnt "$(cat "$GCLOG")" "service restart" "(HANDBUILT) and restarts nothing itself"
+rm -f "$RECORD"; : > "$GCLOG"
+run_build --deploy
+eq "$RC" 0 "(HANDBUILT) the next deploy tick exits 0"
+absent "$RECORD" "(HANDBUILT) with nothing left to build"
+has "$(cat "$GCLOG")" "service restart helm" "(HANDBUILT) and serves what the hand build left"
 
 # ==============================================================================
 # STATIC GUARDS

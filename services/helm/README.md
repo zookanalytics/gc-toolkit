@@ -342,18 +342,35 @@ So the two jobs are separate:
 `gc-helm-build.sh` rebuilds only when a source is newer than the binary — an
 ordinary `find -newer` dependency, the same question `make` asks — publishes by
 atomic rename so a failed link can never truncate a serving binary, and in
-`--deploy` mode restarts the service **iff** it published something. Build and
-restart are one step on purpose: a new binary that nothing restarts onto is the
-other half of the defect. On 2026-08-22 the helm process had been up 14h55m on a
+`--deploy` mode restarts the service onto what it published. Build and restart
+are one step on purpose: a new binary that nothing restarts onto is the other
+half of the defect. On 2026-08-22 the helm process had been up 14h55m on a
 binary built at 02:40 while three commits touching `services/helm` had landed
 after it, all three inert in the served board.
+
+**A publish that was never restarted onto is remembered.** Publishing marks
+`<state_root>/restart-pending`, and only a restart that returns success clears
+it; the next `--deploy` run restarts even though the binary is by then current.
+Without that record the same inert state returns by a different road: a restart
+that fails once leaves a binary newer than every source, so nothing is ever
+stale again, every later tick exits on "is up to date" without reaching the
+restart, and the old process serves the old inode until someone edits a source
+file. The same record is what carries a hand-run build (below) to the service.
 
 To build by hand — after editing Go sources or rebuilding `web/dist` — run:
 
 ```bash
 assets/scripts/gc-helm-build.sh            # build iff stale
-gc service restart helm                    # serve it
+gc service restart helm                    # serve it now, rather than waiting
 ```
+
+The `gc service restart` there is only to see it immediately — the build records
+the publish either way, so the next `helm-build` tick would restart onto it
+within 5 minutes. A restart run by hand does not clear that record (only the
+build's own restart does), so it costs one redundant restart on the following
+tick; `rm <state_root>/restart-pending` skips it. Recognising a hand restart
+would mean probing whether the running process is on the new inode, which is
+exactly the bespoke liveness machinery this split exists to avoid.
 
 If the binary is missing entirely the launcher exits non-zero with a message
 naming the builder, and the service sits `degraded` until the order builds one.

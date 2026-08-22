@@ -35,12 +35,16 @@
 #   gc-helm-build.sh              build iff the binary is missing or stale
 #   gc-helm-build.sh --deploy     the order's mode: do nothing unless the helm
 #                                 service is registered in this city; build iff
-#                                 stale; restart the service iff a new binary
-#                                 was published
+#                                 stale; restart the service iff a published
+#                                 binary is not yet being served — including one
+#                                 an earlier run published but could not restart
+#                                 onto
 #
-# Exit: 0 = the binary is current (built now, or already fresh, or this city
-#           does not run helm); 1 = a build was needed and failed, in which case
-#           the previously-built binary is left exactly as it was.
+# Exit: 0 = the binary is current AND serving (built now, or already fresh, or
+#           this city does not run helm); 1 = a build was needed and failed, in
+#           which case the previously-built binary is left exactly as it was —
+#           or, in --deploy mode, the restart onto a published binary failed, in
+#           which case the next run retries it.
 #
 # Env honoured: GC_SERVICE_STATE_ROOT (binary cache location; the supervisor
 # sets it, and it wins when present), GC_CITY_ROOT / GC_CITY (used to derive
@@ -150,6 +154,11 @@ BIN_DIR="$STATE_ROOT/bin"
 BIN="$BIN_DIR/helm-svc"
 mkdir -p "$BIN_DIR"
 
+# Present while a published binary has nothing running on it yet; removed only
+# by a restart that succeeded. See restart_service() for why that fact has to
+# outlive the run that created it.
+RESTART_PENDING="$STATE_ROOT/restart-pending"
+
 # Resolve a Go toolchain: explicit override, then PATH, then the conventional
 # system install (an order's PATH may not include Go).
 GO="${GC_GO_BIN:-}"
@@ -188,6 +197,35 @@ pid_alive() {
     fi
 }
 
+# Restart the service onto the published binary, and clear the pending marker
+# only if the restart actually returned success.
+#
+# WHY THAT FACT HAS TO OUTLIVE THE RUN. "Published" and "serving" are different
+# things, and only the first is visible on disk. A run that builds, renames the
+# new binary into place and then fails to restart — a refused restart, this
+# order's 900s SIGTERM landing in between, a machine that goes down — leaves a
+# binary NEWER than every source with the old process still holding the old
+# inode. The staleness predicate can never see that state: nothing is stale, so
+# every later tick takes the up-to-date branch and exits 0 before reaching the
+# restart, and the old code serves indefinitely. That is the same "landed but
+# inert" failure this script exists to end, reached through a transient restart
+# failure instead of a missing build. The marker is what carries the unfinished
+# restart into the next run, which is the only thing that can still finish it.
+restart_service() {
+    echo "gc-helm-build: restarting service '$SERVICE_NAME'"
+    if ! "$GC_BIN" service restart "$SERVICE_NAME"; then
+        echo "gc-helm-build: 'gc service restart $SERVICE_NAME' failed; the new binary is published but not yet serving" >&2
+        return 1
+    fi
+    # Success is the only thing that clears it. If the clear itself fails, the
+    # next run restarts a service that did not need it — wasteful, and said out
+    # loud — which is the right side to err on: the alternative is discarding
+    # the record of a restart that has not happened.
+    rm -f -- "$RESTART_PENDING" 2>/dev/null \
+        || echo "gc-helm-build: could not clear $RESTART_PENDING; the next run will restart again" >&2
+    return 0
+}
+
 # Reclaim the staging files the inline-build era stranded in $BIN_DIR, and any
 # this script itself loses to a kill. `mktemp` publishes the name before the
 # build writes a byte, so anything interrupted between the two leaves one
@@ -204,6 +242,16 @@ elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
 fi
 if [ "$need_build" -eq 0 ]; then
+    # Current is not the same as serving. If an earlier run published this
+    # binary and never got a restart onto it, the marker is still here — and
+    # because nothing is stale any more, this branch is the only one any later
+    # run can reach. Retrying here is what stops a transient restart failure
+    # from becoming a permanent one.
+    if [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
+        echo "gc-helm-build: $BIN is up to date but not yet serving; retrying the restart"
+        restart_service || exit 1
+        exit 0
+    fi
     echo "gc-helm-build: $BIN is up to date"
     exit 0
 fi
@@ -312,14 +360,18 @@ fi
 printf 'ok %s\n' "$(date -u +%FT%TZ)" > "$STATE_ROOT/build-status" 2>/dev/null || true
 echo "gc-helm-build: built $BIN"
 
+# Record the unfinished half — a binary published with nothing running on it —
+# BEFORE attempting the restart, so that whatever stops this run between the two
+# leaves the evidence for the next one. It also makes a hand-run build (no
+# --deploy, which restarts nothing by design) reach the service on the next
+# tick, instead of sitting inert until someone happens to edit a source again.
+printf 'published %s\n' "$(date -u +%FT%TZ)" > "$RESTART_PENDING" 2>/dev/null \
+    || echo "gc-helm-build: could not write $RESTART_PENDING; a failed restart will not be retried" >&2
+
 # Build and restart are one step on purpose. A new binary that nothing restarts
 # onto is the defect this replaced: three commits touching services/helm landed
 # on 2026-08-22 and all three were inert in the served board because the process
 # had been up 14h55m on an older artifact.
 if [ "$DEPLOY" -eq 1 ]; then
-    echo "gc-helm-build: restarting service '$SERVICE_NAME'"
-    if ! "$GC_BIN" service restart "$SERVICE_NAME"; then
-        echo "gc-helm-build: 'gc service restart $SERVICE_NAME' failed; the new binary is published but not yet serving" >&2
-        exit 1
-    fi
+    restart_service || exit 1
 fi
