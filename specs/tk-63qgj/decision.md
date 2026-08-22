@@ -5,6 +5,17 @@ description: Why gc-toolkit adopted neither PR #88 nor compound-engineering's ce
 
 # Decision: lesson-capture approach — neither A nor B, superseded by #291
 
+| Doc-type or artifact | Producer | Source location (URL or repo path + commit SHA) | Surveyed at |
+|---|---|---|---|
+| Decision bead + operator ruling | converse (visit `tk-934cr`), operator | bead `tk-63qgj` description + notes, "Sitting 1 — DECIDED" | 2026-08-22T22:00Z |
+| Pull request (Option A) | polecat, anchor `tk-7druqk` | https://github.com/zookanalytics/gc-toolkit/pull/88 — CLOSED, head `polecat/tk-7druqk` @ `9207893` | 2026-08-22T22:13Z |
+| Option A fragment source | same | `template-fragments/lesson-capture.template.md` @ `9207893` (branch only; never on main) | 2026-08-22T22:13Z |
+| Pull request (adopted mechanism) | gc-toolkit | https://github.com/zookanalytics/gc-toolkit/pull/291 — MERGED, squash `c7b7a6af` | 2026-08-22T22:13Z |
+| #291 wiring sites | gc-toolkit | this repo @ `2d87f91` (cited `83d2471` is an ancestor; line numbers unchanged) | 2026-08-22T22:13Z |
+| #291 prior-art survey | gc-toolkit | `specs/2026-08-learning-system/prior-art.md` @ `2d87f91` | 2026-08-22T22:13Z |
+| City configuration | city repo (not this repo) | `$GC_CITY/city.toml` at current HEAD — zero `ce-compound` occurrences; removal commits `1335d575`, `a68a29b0` | 2026-08-22T22:13Z |
+| Option B skill (`ce-compound`) | compound-engineering (external) | **not surveyed in this pass.** Pin `5b7c5c13` is quoted from `tk-63qgj`'s own description, not re-fetched | last surveyed 2026-07-22, per `tk-63qgj` |
+
 **Subject bead:** `tk-63qgj` (type `decision`, filed 2026-07-22) — "which
 lesson-capture mechanism gc-toolkit adopts, plus a disposition for PR #88."
 
@@ -16,19 +27,6 @@ been disposed of by events before the decision was taken; what was missing was
 the written record the bead's Acceptance asks for. The comparison was
 deliberately not reopened and compound-engineering was deliberately not
 re-surveyed — see the provenance table's last row for what that leaves unchecked.
-
-## Provenance
-
-| Doc-type or artifact | Producer | Source location (URL or repo path + commit SHA) | Surveyed at |
-|---|---|---|---|
-| Decision bead + operator ruling | converse (visit `tk-934cr`), operator | bead `tk-63qgj` description + notes, "Sitting 1 — DECIDED" | 2026-08-22T22:00Z |
-| Pull request (Option A) | polecat, anchor `tk-7druqk` | https://github.com/zookanalytics/gc-toolkit/pull/88 — CLOSED, head `polecat/tk-7druqk` @ `9207893` | 2026-08-22T22:13Z |
-| Option A fragment source | same | `template-fragments/lesson-capture.template.md` @ `9207893` (branch only; never on main) | 2026-08-22T22:13Z |
-| Pull request (adopted mechanism) | gc-toolkit | https://github.com/zookanalytics/gc-toolkit/pull/291 — MERGED, squash `c7b7a6af` | 2026-08-22T22:13Z |
-| #291 wiring sites | gc-toolkit | this repo @ `2d87f91` (cited `83d2471` is an ancestor; line numbers unchanged) | 2026-08-22T22:13Z |
-| #291 prior-art survey | gc-toolkit | `specs/2026-08-learning-system/prior-art.md` @ `2d87f91` | 2026-08-22T22:13Z |
-| City configuration | city repo (not this repo) | `$GC_CITY/city.toml` at current HEAD — zero `ce-compound` occurrences; removal commits `1335d575`, `a68a29b0` | 2026-08-22T22:13Z |
-| Option B skill (`ce-compound`) | compound-engineering (external) | **not surveyed in this pass.** Pin `5b7c5c13` is quoted from `tk-63qgj`'s own description, not re-fetched | last surveyed 2026-07-22, per `tk-63qgj` |
 
 ## Outcome
 
