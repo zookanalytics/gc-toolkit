@@ -990,11 +990,25 @@ The liveness condition is the load-bearing one, and it is an AND — not the OR 
 bug report proposed. Verified live: a work bead is `open` with `assignee=null` and
 no `gc.routed_to` for the WHOLE time its polecat is working it, because
 mol-polecat-work assigns the polecat to the STEP beads and never to the anchor. So
-"unassigned" describes every in-flight molecule too, and only "no live session
-stands behind it" separates a strand from work in progress. The pass resolves the
+"unassigned" describes every in-flight molecule too, and "no live session stands
+behind it" is what separates a strand from work in progress. The pass resolves the
 bead's input convoy, finds the workflow root that owns it, and treats the molecule
 as live if the root records a live session or any of its live steps is held by
 one.
+
+**A queued rework child is the second shape that is not a strand** (tk-6tlcu). A
+pre-open rework child carries no `merge_result`, no PR field and no hold — they all
+sit on its `parent-child` ANCHOR — so it wears the candidate shape in full while
+its anchor's own gate is carrying its next move. The pass therefore walks DOWN to
+the parent (`--direction=down`; the upward listing answers with the convoys that
+track the bead, not with the parent) and leaves the child alone when the anchor
+carries a terminal `merge_result` or a `check.*=fixable@<oid>` marker. The grab it
+prevents is not merely a wasted handoff: the assignee write breaks the
+`gc.execution_routed_to != "" AND assignee == ""` clause that is the only way a
+queued child satisfies check-set-heal's `acting()`, so each one silently
+un-suppresses the anchor's review gate and burns a round of `GC_MAX_REVIEW_ROUNDS`
+against an UNCHANGED head — until the cap escalates the anchor to a human as
+"review rounds exhausted", falsely.
 
 That resolution runs FIRST, ahead of every refusal and not just the handoff
 (tk-pwm2g). A polecat carries `metadata.branch` from its workspace-setup step and
@@ -1043,6 +1057,15 @@ class as well as the tip, so the quiet marker a transient read failure leaves ca
 never cancel the mail a later cycle owes for the same commit; the mail itself is
 still issued once per (branch, tip).
 
+The recovery marker is read back, not merely written (tk-6tlcu). When the refinery
+DECLINES a handoff it clears the assignee and hands the bead back, restoring the
+candidate shape exactly — and the hand-back itself bumps `updated_at`, which is all
+the age gate reads. So a decline used to set the loop PERIOD rather than break the
+loop, and every declined bead returned every `--min-age-minutes`, forever. The pass
+now compares `stranded_branch_recovered` against `<branch>@<tip>` by EQUALITY, so a
+tip it has already handed off once is left alone while a branch that has genuinely
+moved is still rescued.
+
 One marker is retracted rather than left to expire. Every other one names the tip it
 was written at and so goes stale the moment the branch moves, but `<branch>@missing`
 names the ABSENCE of a tip: a later push does not make it read as false. A sweep at
@@ -1065,7 +1088,13 @@ refusal from cancelling it, the non-zero exit on an unverified handoff, a
 branch/target write that reports success and is NOT durable stopping the handoff
 before the assignee, an `in_progress` strand being handed over as `status=open`, a
 handoff whose fields are rolled back after the assignee sticks releasing that
-assignee again, that `--dry-run` writes nothing, and that no bead is ever closed).
+assignee again, a queued pre-open rework child being left untouched while a child
+whose parent carries neither marker is still recovered, a declined handoff not
+re-arming at the same tip while a moved branch still is, that `--dry-run` writes
+nothing, and that no bead is ever closed). The two guards above are additionally
+proved by MUTATION — each is cut out of a copy of the pass and the case is required
+to fail — because two guards in series mask each other and both would otherwise
+read green.
 
 **Exit criteria:** Stranded branches handed off, or none found. Continue to
 `check-refinery` — do NOT exit the wisp here. The `next-iteration` step is the

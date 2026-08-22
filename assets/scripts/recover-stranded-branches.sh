@@ -592,6 +592,7 @@ while IFS= read -r row; do
   TARGET=$(printf '%s' "$row" | jq -r '.target // empty' 2>/dev/null)
   UPDATED=$(printf '%s' "$row" | jq -r '.updated // empty' 2>/dev/null)
   FLAGGED=$(printf '%s' "$row" | jq -r '.flagged // empty' 2>/dev/null)
+  RECOVERED=$(printf '%s' "$row" | jq -r '.recovered // empty' 2>/dev/null)
   [ -n "$ID" ] && [ -n "$BRANCH" ] || continue
 
   # --- gate 1: age. The window between a polecat's `git push` and its handoff is
@@ -662,6 +663,106 @@ while IFS= read -r row; do
   done <<< "$CONVOYS"
   if [ "$MOLECULE_LIVE" = 1 ]; then
     skipped=$((skipped + 1))
+    continue
+  fi
+
+  # --- gate 2b: an ANCHOR is already carrying this bead's next move (tk-6tlcu).
+  # A pre-open rework child wears the candidate shape exactly — open, unassigned,
+  # unrouted, `branch` stamped — because every field the filter above rejects on
+  # (`merge_result`, `pr_url`/`pr_number`, `hold_reason`, `merge_hold`) lives on its
+  # `parent-child` PARENT and none of them on the child. The filter tests only the
+  # candidate, so an anchor parked at `merge_result=pre_open_gate` carrying
+  # `check.codex=fixable@<oid>` cannot protect its own rework child, and this pass
+  # grabs work that is QUEUED rather than stranded.
+  #
+  # The grab is not merely wasted work, and the damage is done by the ASSIGNEE WRITE
+  # — before the refinery ever reads the bead. check-set-heal suppresses its review
+  # dispatch while something is `acting()` on the anchor, and a queued rework child
+  # satisfies `acting()` only through `gc.execution_routed_to != "" AND assignee ==
+  # ""`. Writing an assignee breaks exactly that clause, so each grab silently
+  # un-suppresses the anchor's gate and burns one of GC_MAX_REVIEW_ROUNDS against an
+  # UNCHANGED head; at the cap the anchor is escalated to a human as "review rounds
+  # exhausted", which is false. Observed on anchor tk-y3tks: rounds 1 and 2 consumed
+  # with zero rework commits, `polecat/tk-y3tks` byte-identical to the reviewed oid.
+  #
+  # The edge is read DOWNWARD. `--direction=up` (gate 2, above) answers with the
+  # convoys that TRACK the bead; a `parent-child` edge sits on the CHILD with the
+  # parent in the depends-on slot, so only `--direction=down` names the anchor. Its
+  # rows carry the parent's full metadata, so one call answers both halves of the
+  # question and no second read of the parent is needed.
+  #
+  # `merged` is deliberately NOT in the terminal set. The two states here are the
+  # ones in which the anchor's own gate machinery owns the child's next move; a
+  # merged anchor's machinery has finished, so a child of one that really is
+  # stranded must stay rescuable.
+  #
+  # The shape check lives INSIDE the filter so that ONE exit status covers both
+  # halves of the read: a payload that is not an array (bd answers a failure with an
+  # error OBJECT, and `.[]?` reduces that to the same empty output a parentless bead
+  # gives) and a row the filter cannot evaluate are the same unestablished fact.
+  # `set -o pipefail` carries either one out to the test below. The array check is
+  # written out rather than left to whichever downstream expression happens to blow
+  # up first on a non-row: that incidental error is real but accidental, and the
+  # next edit to the filter would silently remove it. This direction matters more
+  # here than anywhere else in the pass — an empty guard read from a payload that
+  # did not answer fails OPEN, straight into the grab this gate exists to prevent.
+  PARENTS_RAW=$(bd_pinned dep list "$ID" --direction=down --json 2>/dev/null); PARENT_READ_RC=$?
+  PARENT_GUARD=""
+  if [ "$PARENT_READ_RC" -eq 0 ] && [ -n "$PARENTS_RAW" ]; then
+    PARENT_GUARD=$(printf '%s' "$PARENTS_RAW" | tr -d '\000-\010\013\014\016-\037' | jq -r '
+    if type == "array" then . else error("dependency payload is not an array") end
+    | .[]?
+    | select(((.dependency_type // "") | tostring) == "parent-child")
+    | . as $p
+    | ((.metadata // {})) as $m
+    | ((($m.merge_result // "") | tostring)) as $mr
+    | [ (if $mr == "pre_open_gate" or $mr == "pull_request"
+         then "merge_result=" + $mr else empty end),
+        ($m | to_entries[]
+            | select((.key | startswith("check.")) and ((.value | tostring) | startswith("fixable@")))
+            | .key + "=" + (.value | tostring)) ]
+    | select(length > 0)
+    | (($p.id | tostring) + " (" + join(", ") + ")")' 2>/dev/null \
+      | tr '\n' ' ' | sed -e 's/  *$//')
+    PARENT_READ_RC=$?
+  fi
+  if [ "$PARENT_READ_RC" -ne 0 ] || [ -z "$PARENTS_RAW" ]; then
+    # Same fail-closed reading as the dep listing above, and for the same reason: an
+    # unread parent is not proof that no anchor stands behind this bead, and the one
+    # thing this pass must never do is take a rework child out from under a live
+    # review gate. With nothing on origin either there is no tip to key a marker to,
+    # so the bead is simply left for the next cycle.
+    if [ -z "$HEAD_SHA" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    report_only "$ID" "$BRANCH@$HEAD_SHA" "$FLAGGED" 0 \
+      "its parent-child parent could not be established (gc bd dep list --direction=down rc=$PARENT_READ_RC); an unread parent is not proof that no anchor is carrying this bead's next move, and grabbing a rework child out from under its anchor un-suppresses that anchor's review gate"
+    continue
+  fi
+  if [ -n "$PARENT_GUARD" ]; then
+    skipped=$((skipped + 1))
+    echo "recover-stranded-branches: $ID is a rework child of $PARENT_GUARD — its anchor's own gate is carrying its next move, so it is queued, not stranded; left alone (writing an assignee here would un-suppress that gate)"
+    continue
+  fi
+
+  # --- gate 2c: this pass has already handed THIS EXACT TIP off once (tk-6tlcu).
+  # The recovery stamp written at the bottom of this loop was write-only: nothing
+  # ever read it back, so there was no once-marker anywhere in the pass. When the
+  # refinery DECLINES a handoff it clears the assignee and hands the bead back —
+  # restoring the candidate shape exactly — and the hand-back itself bumps
+  # `updated_at`, which is all gate 1 reads. The decline therefore set the loop
+  # PERIOD (--min-age-minutes) instead of breaking the loop, and every declined bead
+  # returned forever. Observed twice on tk-kbb8s, whose notes carry two identical
+  # recovery stamps either side of the refinery's hand-back.
+  #
+  # The comparison is EQUALITY against `<branch>@<tip>`, never mere presence: a bead
+  # whose branch has since moved — or been repointed — is a genuinely new strand and
+  # must still be rescued. That is also what makes this self-expiring; nothing has to
+  # retract the marker, exactly as the tip-keyed refusal markers above expire.
+  if [ -n "$HEAD_SHA" ] && [ "$RECOVERED" = "$BRANCH@$HEAD_SHA" ]; then
+    skipped=$((skipped + 1))
+    echo "recover-stranded-branches: $ID branch '$BRANCH' @ ${HEAD_SHA:0:12} was already handed to '$REFINERY_ID' by this pass at this exact tip and has come back unassigned — a hand-back is a decision, not a strand; declining to re-arm until the branch moves"
     continue
   fi
 
