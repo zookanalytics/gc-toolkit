@@ -19,11 +19,13 @@ The baseline lives in `sweep.reported` on the standing subject; its
 failure mode is to re-report, never to hide (operator decision
 2026-08-10, bead tk-snnpp) — and that bias governs every check added
 since: a probe that cannot be read excludes nothing.
-`assets/scripts/liveness-sweep-delta.test.sh` extracts the six marked
+`assets/scripts/liveness-sweep-delta.test.sh` extracts the eight marked
 blocks below and executes them, so the delta split, the class filters
-(machine convoy, worked-via-convoy, takeaway, gating state, operator
-hold) and the classify→normalize handoff cannot drift from what an agent
-actually runs.
+(machine convoy, landed-anchor husk, worked-via-convoy, takeaway, gating
+state, operator hold, and the root fold that keeps this sweep out of a
+conversation another formula is already having) and the
+classify→normalize handoff cannot drift from what an agent actually
+runs. The re-file guard is extracted with them.
 
 The visit body is a SNAPSHOT of the pass, and a sitting reads it whenever
 the visit is claimed — a day or more later, by which time a routed
@@ -50,6 +52,20 @@ verdicts). Its survivors are therefore a SUPERSET of this step's candidates,
 so it may end the pass when the NEW set is provably empty, and anything else
 — including any unreadable probe, a missing subject, or its own abort — runs
 the pass unchanged.
+
+One consequence of the class 0(b) exclusion lands HERE rather than in
+classify, and is deliberate (bead tk-st143). A landed husk is not
+locally decidable — telling it from a live step needs the root, its
+convoy and the anchor — so the precheck cannot exclude it, and it must
+not try: excluding more than classify does is the one direction that
+breaks the superset guarantee, and the bead it would hide is a genuinely
+stalled step. So husks keep the precheck firing: they never enter
+`sweep.reported` any more, they never close on their own, and the
+precheck therefore reads them as new on every pass and runs a pass that
+now files nothing. That is a session for no visit — a strictly better
+trade than the visit it replaces, which spent an operator sitting on
+work that did not exist, but it is residue and not a fix. What ends it
+is the reaper `sweep.husk_roots` exists to feed.
 
 Two consequences for whoever is reading this because they are RUNNING it.
 Reaching this step means only that the cheap half could not PROVE the board
@@ -126,7 +142,15 @@ jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE"
 The classes — class 0 is not work at all, 1 through 4 are named waits or
 live work, and only the fifth is a defect:
 
-0. **machine scaffolding** — a convoy bead the machinery mints for its
+0. **machine scaffolding** — residue the machinery minted for itself,
+   which owes a reaper rather than a sitting. Two shapes: **(a)** the
+   convoy beads below, and **(b)** the step beads of a workflow whose
+   anchor already landed (the `landed-husks` block; a step of a finished
+   workflow is teardown backlog and there is no disposition a sitting
+   could take on it). Both are excluded here for the same reason and by
+   the same ruling — exclusion first, a reaper follows.
+
+   **(a) machine convoys** — a convoy bead the machinery mints for its
    own bookkeeping: the per-sling `input convoy for <bead>` one-child
    wrapper, and the `sling-<bead>` convoy. Nobody dispositions it, it
    carries no work, and it never closes on its own — the wrapper orphans
@@ -291,11 +315,37 @@ live work, and only the fifth is a defect:
    sitting on a `fixable` verdict under the signoff convergence cap — the
    operator-gated state that most needs the board — the same inverse
    defect the open-PR half warns about for a closed PR.
-3. **conversing** — it IS a visit (`task_kind=visit`), or a live visit
-   exists in its continuation group. Live means open OR held — a visit
-   being held is `in_progress`, which is why the listing above is
+3. **conversing** — it IS a visit (`task_kind=visit`), a live visit
+   exists in its continuation group, or a live visit already names the
+   WORKFLOW ROOT it belongs to. Live means open OR held — a visit being
+   held is `in_progress`, which is why the listing above is
    `--status=open,in_progress`; an open-only read would re-file on
    exactly the subjects whose sittings are live.
+
+   **The root fold is the cross-FORMULA half, and the continuation group
+   cannot do it** (bead tk-st143). A visit is deduped against its
+   siblings by `gc.continuation_group`, which folds two visits on the
+   same SUBJECT — and a root-scoped stall visit
+   (`assets/scripts/detect-stalled-workflows.sh`, stamping
+   `stall_root=<root>` and hanging off the stalled-workflows subject)
+   never shares a group with this sweep's batch visit on the
+   unnamed-waits subject. So both filed, about the same frozen workflow,
+   and the operator held three concurrent sittings on one shape
+   (2026-08-13: su-331y and su-s1if on the roots, su-qoma listing su-adua
+   — a frontier step of su-ykfw, the root su-331y was already about).
+   The fold is therefore keyed on `gc.root_bead_id`, matched against the
+   `stall_root` of every live visit.
+
+   **Precedence is deliberate and one-directional: the root-scoped visit
+   wins, and this sweep folds into it.** A stall visit is a diagnosis of
+   one workflow — its frontier, its silence, what cannot be claimed; this
+   sweep's contribution is one line of a batch census. Folding the census
+   line into the diagnosis loses nothing. Folding the other way, by
+   suppressing a stall visit because some batch census happened to list a
+   bead of that root, would trade the diagnosis for the bullet point —
+   which is why `detect-stalled-workflows.sh` deliberately does NOT read
+   this sweep's visits, and why that asymmetry is written down here
+   rather than left to look like an oversight.
 4. **held-by-design** — four shapes, all named waits:
    (a) a **standing record** — `task_kind` names one of the idioms that
    are created open, unrouted and unassigned ON PURPOSE and are never
@@ -400,8 +450,8 @@ that made the park an edge — for the opposite reason (an edge a tidy-up
 can delete is the wrong home for a decision only the operator may
 reverse).
 
-Mechanically: read the open pull requests and the worked-via-convoy set
-once each (the blocks below), apply the jq, then for each survivor check
+Mechanically: read the open pull requests, the worked-via-convoy set and
+the landed-anchor husks once each (the blocks below), apply the jq, then for each survivor check
 its dependency edges with
 `gc bd show <id>`, resolving every "is that target still alive?" test
 against ALIVE (not closed), never against LIVE — any of the three
@@ -544,6 +594,129 @@ simply not marked worked, so they stay candidates and are reported — but
 the sitting is owed the word, or a list of actively-worked beads reads
 as a real backlog.
 
+**The husk half is a third batched read, once per pass, before the jq**
+(bead tk-st143). It answers a question no other block here asks: not "is
+this bead being worked?" but "did the workflow this bead belongs to
+already finish?" — because a graph.v2 workflow whose ANCHOR has landed
+owes no more work, while its step beads stay open forever
+(`mol-polecat-work` closes no step, ever), stay ready, and so arrive as
+unnamed waits on every pass. Measured on shutupandlisten 2026-08-13:
+sixteen step beads across two dead roots (su-zu1j, anchor su-uzy9.4, PR
+#57 merged; su-vc8n, anchor su-uzy9.5, PR #58 merged, input convoy
+su-lo2e closed), all nominated, none of them work anybody could do.
+
+They are class 0(b) for a reason worth stating: a step of a landed
+workflow is TEARDOWN BACKLOG, and there is no disposition a sitting can
+take on it. Route it and a polecat re-implements landed work on a branch
+whose PR already merged; kill it by hand and the dep-chained siblings it
+gates are still there; park or hold it and the operator has spent a
+decision on machine residue. What retires these is a reaper, exactly as
+for the machine convoys of 0(a) — so this block excludes them and the
+funnel note names the ROOT ids as the teardown set owed, which
+`stamp-handoff` also stamps as machine state.
+
+The chain is root to input convoy to anchor, so it resolves per ROOT and
+never per candidate: the distinct `gc.root_bead_id` values across the
+ready set, three reads each, and every step bead of a landed root drops
+at once.
+
+```bash
+# >>> landed-husks
+# Class 0(b), read ONCE per pass, keyed by ROOT. The candidates carry
+# gc.root_bead_id; the root names its input convoy; the convoy tracks the anchor.
+STEP_ROOTS=$(jq -r '[ .[] | (.metadata["gc.root_bead_id"] // "") | select(. != "") ] | unique | .[]' "$READY" 2>/dev/null)
+HUSK_TMP=$(mktemp)
+HUSK_ROOTS_TMP=$(mktemp)
+HUSK_LIVENESS=none
+ROOT_LIST=$(mktemp)
+# awk splits, not the shell, and the loop reads a FILE rather than a pipe — the
+# two traps spelled out on the open-prs and worked-via-convoy loops above (zsh
+# does not word-split an unquoted expansion; a piped loop runs in a subshell and
+# loses every variable it sets). Same shape, same reasons (bead tk-1c9vf).
+printf '%s' "$STEP_ROOTS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$ROOT_LIST"
+while IFS= read -r R; do
+  # An if, not a &&, as the loop body's first statement: a false && would be the
+  # body's exit status and abort the pass under set -e.
+  if [ "$HUSK_LIVENESS" = "none" ]; then HUSK_LIVENESS=verified; fi
+  CONVOY=""
+  if RJSON=$(gc bd show "$R" --json 2>/dev/null) && printf '%s' "$RJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    CONVOY=$(printf '%s' "$RJSON" | jq -r '.[0].metadata["gc.input_convoy_id"] // ""')
+  else
+    HUSK_LIVENESS=unverified
+    echo "WARN: root read FAILED for $R — its step beads are REPORTED this pass, never hidden; say so in the visit body" >&2
+  fi
+  # A root naming NO convoy is not a failure and not a husk: it has no anchor that
+  # could have landed, so its steps stay ordinary candidates.
+  if [ -n "$CONVOY" ]; then
+    MEMBERS=""
+    if CJSON=$(gc bd show "$CONVOY" --json 2>/dev/null) && printf '%s' "$CJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      # gc bd show, NOT the list JSON: only show emits this edge on
+      # .dependency_type + .id, the same trap worked-via-convoy documents.
+      MEMBERS=$(printf '%s' "$CJSON" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id')
+    else
+      HUSK_LIVENESS=unverified
+      echo "WARN: convoy read FAILED for $CONVOY — root $R is REPORTED this pass, never hidden; say so in the visit body" >&2
+    fi
+    if [ -n "$MEMBERS" ]; then
+      ALL_LANDED=1
+      MEMBER_LIST=$(mktemp)
+      printf '%s' "$MEMBERS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$MEMBER_LIST"
+      while IFS= read -r A; do
+        LANDED=""
+        if AJSON=$(gc bd show "$A" --json 2>/dev/null) && printf '%s' "$AJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+          # LANDED is the unambiguous PAIR and deliberately only that pair.
+          LANDED=$(printf '%s' "$AJSON" | jq -r 'if ((.[0].status // "") == "closed") or ((((.[0].metadata // {}).merge_result // "") | tostring) == "merged") then "yes" else "" end')
+        else
+          HUSK_LIVENESS=unverified
+          echo "WARN: anchor read FAILED for $A — root $R is REPORTED this pass, never hidden; say so in the visit body" >&2
+        fi
+        if [ -z "$LANDED" ]; then ALL_LANDED=0; fi
+      done < "$MEMBER_LIST"
+      if [ "$ALL_LANDED" = "1" ]; then
+        echo "$R" >> "$HUSK_ROOTS_TMP"
+        jq -r --arg r "$R" '[ .[] | select((.metadata["gc.root_bead_id"] // "") == $r) | .id ] | .[]' "$READY" >> "$HUSK_TMP"
+      fi
+    fi
+  fi
+done < "$ROOT_LIST"
+HUSK_STEPS=$(jq -R . < "$HUSK_TMP" | jq -sc 'map(select(length > 0)) | unique')
+HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | unique')
+# <<< landed-husks
+```
+
+`$HUSK_LIVENESS` is three-valued exactly as the other two: `none` (no
+ready bead named a workflow root this pass), `verified` (every root,
+convoy and anchor read), `unverified` (at least one read failed). A
+failed read cannot hide a bead — the root contributes no husk steps, so
+its candidates stay visible and are reported — but the sitting is owed
+the word.
+
+**Landed is `status=closed` OR `merge_result=merged`, and deliberately
+only that pair.** Every other terminal-looking marker is a state a LIVE
+molecule wears mid-flight: `pull_request` is what a rework molecule's
+anchor already carries from the round being reworked, `pre_open_gate` is
+a gate the anchor is actively sitting in, and a refinery handoff or a
+human park are both mid-flight. Reading any of them as completion is what
+made two live stalls invisible in the sibling implementation of this same
+test (`assets/scripts/detect-stalled-workflows.sh`, whose block comment
+records the measurement); this one inherits both the rule and the reason.
+
+Cost, measured on this rig 2026-08-22: 239 ready rows, 21 of them
+carrying a `gc.root_bead_id` across 21 distinct roots, 63 bd reads, ~31s
+wall. That is the whole of this block's price on a 6h cadence, and it
+scales with the number of distinct ROOTS rather than with the backlog.
+Sixteen of those 21 were husks — so on the day this shipped, three
+quarters of the step beads this rig was nominating were steps of
+workflows that had already landed.
+
+**ALL tracked members must be landed, and a convoy with none is not a
+husk.** The anchor set is the convoy's `tracks` members, and the test is
+universal rather than existential so a multi-member convoy with one live
+anchor keeps every step of that root visible. The `mol-polecat-work`
+wrapper tracks exactly one member, so in the common case the two readings
+coincide — but the difference is the whole safety margin if a convoy ever
+carries two, and it costs one word.
+
 **Verify against a known-worked bead before trusting a clean run.** If
 `$INPUT_CONVOYS` is non-empty but `$WORKED` came back `[]`, the tracks
 read is almost certainly keyed wrong (the `gc bd list` vs `gc bd show`
@@ -555,7 +728,7 @@ back to the list shape unseen.
 
 ```bash
 # >>> classify-candidates
-CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" '
+CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" '
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
@@ -578,11 +751,18 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
   ([($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata["gc.continuation_group"] // empty)]) as $convgroups
+  | ([($live[0] // [])[]
+     | select((.metadata.task_kind // "") == "visit")
+     | (.metadata.stall_root // empty)
+     | select(. != "")]) as $rootvisits
   | ([($openprs // [])[] | pr_key] | map(select(. != ""))) as $openkeys
   | [ ($ready[0] // [])[]
       | select(machine_convoy | not)
+      | select(.id as $id | ($husks | index($id)) | not)
       | select((.metadata["gc.routed_to"] // "") == "")
       | select(.id as $id | ($worked | index($id)) | not)
+      | select((.metadata["gc.root_bead_id"] // "") as $r
+               | $r == "" or (($rootvisits | index($r)) == null))
       | select((.metadata.task_kind // "") != "visit")
       | select((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) == null)
       | select((.metadata["gc.takeaway"] // "") == "")
@@ -636,12 +816,16 @@ Record in your notes: counts per class as a funnel, the surviving ids,
 what the edge check dropped, and — because these are the drops nothing
 else in the pass makes visible — the worked-via-convoy ids with the
 convoy covering each, the PR-parked ids with their PR numbers, the
-machine-scaffolding drops as a COUNT and never a list (class 0 is noise
+machine-convoy drops as a COUNT and never a list (class 0(a) is noise
 by construction, and a reaper rather than a sitting is what removes it;
 a count that keeps growing pass over pass is the signal that the reaper
-is still owed), the pre-open-gated ids with the green gate marker each
-carries, the held ids WITH the reason each hold gives, and both the
-`$PR_LIVENESS` and `$CONVOY_LIVENESS` values. A hold, a parked PR, a
+is still owed), the landed-husk drops as a count of STEPS plus the
+distinct ROOT ids in `$HUSK_ROOTS` — the teardown set, worth naming
+where the machine convoys are not, because each root is one reap rather
+than one bead — the ids folded into a live root-scoped visit with the
+`stall_root` covering each, the pre-open-gated ids with the green gate marker each
+carries, the held ids WITH the reason each hold gives, and the
+`$PR_LIVENESS`, `$CONVOY_LIVENESS` and `$HUSK_LIVENESS` values. A hold, a parked PR, a
 pre-open gate and a molecule-driven work bead are named waits, not
 defects, but a wait
 nobody ever reads is how a bead disappears for good; the funnel note is
@@ -686,7 +870,12 @@ printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null || { echo "stamp-h
 # right thing, an ABSENT one leaves the sitting unable to tell a fresh body from
 # a two-day-old one.
 PASS_AT="${PASS_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-gc bd update "$ROOT" --set-metadata "sweep.candidates=$SURVIVORS" --set-metadata "sweep.pr_liveness=$PR_LIVENESS" --set-metadata "sweep.convoy_liveness=$CONVOY_LIVENESS" --set-metadata "sweep.pass_at=$PASS_AT" --set-metadata "sweep.classify_outcome=pass" || { echo "stamp-handoff: failed to stamp root $ROOT — do not close this step" >&2; exit 1; }
+# The teardown set travels as machine state for the same reason the survivor set
+# does: it is the one output of this pass no visit carries, because class 0(b) is
+# excluded from the census by design. A reaper reads sweep.husk_roots; nothing has
+# to parse root ids back out of a funnel note.
+HUSK_ROOTS_CSV=$(printf '%s' "${HUSK_ROOTS:-[]}" | jq -r 'if type == "array" then join(",") else "" end' 2>/dev/null || echo "")
+gc bd update "$ROOT" --set-metadata "sweep.candidates=$SURVIVORS" --set-metadata "sweep.pr_liveness=$PR_LIVENESS" --set-metadata "sweep.convoy_liveness=$CONVOY_LIVENESS" --set-metadata "sweep.husk_liveness=${HUSK_LIVENESS:-unverified}" --set-metadata "sweep.husk_roots=$HUSK_ROOTS_CSV" --set-metadata "sweep.pass_at=$PASS_AT" --set-metadata "sweep.classify_outcome=pass" || { echo "stamp-handoff: failed to stamp root $ROOT — do not close this step" >&2; exit 1; }
 # <<< stamp-handoff
 ```
 
@@ -727,6 +916,8 @@ CLASSIFY_OUTCOME=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.classify_outcome"] 
 CANDIDATES=$(printf '%s' "$ROOTMETA" | jq -c '.["sweep.candidates"] // empty | (if type == "string" then fromjson else . end)' 2>/dev/null || true)
 PR_LIVENESS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.pr_liveness"] // "unverified"')
 CONVOY_LIVENESS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.convoy_liveness"] // "unverified"')
+HUSK_LIVENESS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.husk_liveness"] // "unverified"')
+HUSK_ROOTS=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.husk_roots"] // ""')
 PASS_AT=$(printf '%s' "$ROOTMETA" | jq -r '.["sweep.pass_at"] // ""')
 if [ "$CLASSIFY_OUTCOME" != "pass" ]; then HANDOFF_STATE=classify-failed
 elif [ -z "$CANDIDATES" ] || ! printf '%s' "$CANDIDATES" | jq -e 'type == "array"' >/dev/null 2>&1; then HANDOFF_STATE=unreadable
@@ -757,9 +948,14 @@ fi
 
 `$CANDIDATES` is now the post-edge-check survivor set exactly as classify
 computed it — the same variable steps 2–5 already consume, unchanged.
-`$PR_LIVENESS` and `$CONVOY_LIVENESS` are the words classify recorded; both
+`$PR_LIVENESS`, `$CONVOY_LIVENESS` and `$HUSK_LIVENESS` are the words classify
+recorded; all three
 default to `unverified` if somehow unset — the report-don't-hide bias this
-whole file is built on. `$PASS_AT` is the census CUT — the instant everything
+whole file is built on. `$HUSK_ROOTS` is the teardown set classify excluded
+(class 0(b)): a comma-separated list of workflow roots whose anchor has landed
+and whose step beads are backlog for a reaper. It is NOT part of the census and
+never goes in the body — it rides here so the number is reportable in the log
+line, and so a reaper has one place to read it. `$PASS_AT` is the census CUT — the instant everything
 in `$CANDIDATES` was last true — and step 4 stamps it on the visit so the
 sitting can measure the body's age instead of guessing it.
 
@@ -842,7 +1038,8 @@ this path** — those new candidates were never put in front of anyone, so
 marking them reported would retire them unseen. Skipping the stamp costs
 one re-listing; taking it loses the bead.
 
-**4. Otherwise, if anything is NEW, file ONE visit.** Zero new candidates
+**4. Otherwise, if anything is NEW, run the re-file guard and then file
+ONE visit.** Zero new candidates
 → file nothing and go to step 5, even when `$CARRIED_COUNT` is large: a
 stable population is not news, and an empty board is success either way.
 The body reports the delta, under a first line that says what it is —
@@ -904,7 +1101,80 @@ city can move — which is the exact cost this class-2 gate half exists
 to remove. Likewise if `$CONVOY_LIVENESS` is `unverified`: a convoy read
 failed, so a work bead a live molecule is driving may be listed as a
 candidate — reported, never hidden, but the sitting should know a worked
-bead can appear here for that reason.
+bead can appear here for that reason. And likewise if `$HUSK_LIVENESS`
+is `unverified`: a root, convoy or anchor read failed, so a step bead of
+a workflow that already landed may be listed — again reported rather
+than hidden, and again worth a line, because a step of a finished
+workflow is the one candidate shape with no disposition available.
+
+**First, the re-file guard: an agenda a sitting already dispositioned is
+not news, however the baseline reads** (bead tk-st143). The step-3 skip
+deliberately does not advance `sweep.reported`, and a baseline can also be
+lost or reset — so the same NEW set can come round again after a sitting
+has already worked it, and be filed a second time under a title identical
+to the first. That happened: su-qoma was a verbatim re-file of su-7j8b,
+same title, on a set su-7j8b had closed out two days earlier with
+`gc.outcome=dispositioned`.
+
+So before creating, ask whether a CLOSED visit on this subject already
+carried exactly this NEW set and was stamped `dispositioned`. The test is
+the id SET and not the title: the title is a pair of counts, which collide
+by accident and change whenever one bead moves, while the set is the
+agenda itself — "unless the underlying candidate set actually changed" is
+what the guard has to mean.
+
+`dispositioned` specifically, and not merely "closed", because
+`gc.outcome` is the sitting's own one-word verdict and the words are not
+interchangeable: a visit closed `cut-short` ran out of time with its
+agenda un-worked, and re-filing it is exactly right. Every other outcome
+word therefore files, which keeps the guard biased the way the rest of
+this formula is — toward re-reporting.
+
+```bash
+# >>> refile-guard
+REFILE_SUPPRESSED=""
+NEW_KEY=$(printf '%s' "$NEW" | jq -r '[.[].id] | sort | join(",")')
+if [ -n "$NEW_KEY" ]; then
+  # --status=closed is REQUIRED: a --metadata-field query defaults to open beads
+  # only, so without it this asks about the one population that cannot answer.
+  # Capture the payload and the read's exit status SEPARATELY. Piping the read
+  # straight into `tr` reports TR's status instead, and tr succeeds on anything
+  # it is handed — so a listing that failed partway through, having already
+  # printed some of its page, would read as a good answer purely because what it
+  # did manage to print still parses as an array. The `|| PRIOR_RC=$?` form
+  # keeps the status without letting a failed read abort a `set -e` caller.
+  PRIOR_RC=0
+  PRIOR_RAW=$(gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json 2>/dev/null) || PRIOR_RC=$?
+  # Fail-open, like every other probe here: an unreadable listing proves nothing
+  # was dispositioned, so the visit is filed. A non-zero read is unreadable
+  # WHATEVER it printed, which is why both the scrub and the parse wait behind
+  # rc=0 — suppression is the one outcome here that retires an agenda without
+  # putting it in front of anyone, so it may only rest on a read that succeeded.
+  PRIOR=""
+  if [ "$PRIOR_RC" -eq 0 ]; then
+    PRIOR=$(printf '%s' "$PRIOR_RAW" | tr -d '[:cntrl:]')
+  fi
+  if [ "$PRIOR_RC" -eq 0 ] && printf '%s' "$PRIOR" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    REFILE_SUPPRESSED=$(printf '%s' "$PRIOR" | jq -r --arg key "$NEW_KEY" '
+      [ .[]
+        | select(((.metadata // {}).task_kind // "") == "visit")
+        | select((((.metadata // {})["gc.outcome"] // "") | tostring) == "dispositioned")
+        | select(((((.metadata // {})["sweep.new_ids"] // "") | tostring)
+                  | split(",") | map(select(length > 0)) | sort | join(",")) == $key)
+        | .id ] | (.[0] // "")')
+  fi
+fi
+# <<< refile-guard
+```
+
+If `$REFILE_SUPPRESSED` is non-empty, file NOTHING and log
+"same NEW set as dispositioned visit $REFILE_SUPPRESSED; not re-filed",
+then go to step 5 and DO advance the baseline. Advancing is what makes the
+guard terminate: these ids stop being new, become carried, and the next
+pass files nothing on them at all. This is the one path other than a filed
+visit that may advance the baseline, and it is allowed for the reason
+step 3's skip is not — the set WAS put in front of someone, and they closed
+it out.
 
 File the visit BEFORE stamping the baseline in step 5. In that order a
 failed create leaves the baseline untouched and the next pass re-reports;
@@ -985,7 +1255,8 @@ prompt is a version behind:
 > `<the visit.recheck value> <this visit's id>`
 
 **5. Advance the baseline to the CURRENT candidate set** — reached only
-from step 4 (visit filed, or nothing new to file), never from the step-3
+from step 4 (visit filed, nothing new to file, or the re-file guard
+suppressed an already-dispositioned set), never from the step-3
 skip. Writing the current set, rather than adding to the old one, is what
 prunes departures: a bead that was dispositioned and later regresses into
 the candidate set counts as new again and gets re-surfaced.

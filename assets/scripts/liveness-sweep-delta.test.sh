@@ -100,12 +100,16 @@ extract open-prs            "$FORMULA" > "$TMP/openprs.sh"
 extract worked-via-convoy   "$FORMULA" > "$TMP/worked.sh"
 extract stamp-handoff       "$FORMULA" > "$TMP/stamp.sh"
 extract read-handoff        "$FORMULA" > "$TMP/read.sh"
+extract landed-husks        "$FORMULA" > "$TMP/husk.sh"
+extract refile-guard        "$FORMULA" > "$TMP/refile.sh"
 [ -s "$TMP/classify.sh" ] || { echo "no marked classify-candidates block"; exit 1; }
 [ -s "$TMP/delta.sh" ]    || { echo "no marked sweep-delta block"; exit 1; }
 [ -s "$TMP/openprs.sh" ]  || { echo "no marked open-prs block"; exit 1; }
 [ -s "$TMP/worked.sh" ]   || { echo "no marked worked-via-convoy block"; exit 1; }
 [ -s "$TMP/stamp.sh" ]    || { echo "no marked stamp-handoff block"; exit 1; }
 [ -s "$TMP/read.sh" ]     || { echo "no marked read-handoff block"; exit 1; }
+[ -s "$TMP/husk.sh" ]     || { echo "no marked landed-husks block"; exit 1; }
+[ -s "$TMP/refile.sh" ]   || { echo "no marked refile-guard block"; exit 1; }
 
 echo "── the extracted blocks are valid shell ──"
 bash -n "$TMP/classify.sh" && ok "classify-candidates: valid bash" \
@@ -120,6 +124,10 @@ bash -n "$TMP/stamp.sh" && ok "stamp-handoff: valid bash" \
     || bad "stamp-handoff: valid bash" "bash -n failed"
 bash -n "$TMP/read.sh" && ok "read-handoff: valid bash" \
     || bad "read-handoff: valid bash" "bash -n failed"
+bash -n "$TMP/husk.sh" && ok "landed-husks: valid bash" \
+    || bad "landed-husks: valid bash" "bash -n failed"
+bash -n "$TMP/refile.sh" && ok "refile-guard: valid bash" \
+    || bad "refile-guard: valid bash" "bash -n failed"
 
 # The blocks live inside a TOML `"""` string, so TOML consumes escapes before an
 # agent ever sees them: a trailing backslash joins two lines, backslash-n becomes
@@ -133,7 +141,7 @@ bash -n "$TMP/read.sh" && ok "read-handoff: valid bash" \
 echo "── the formula parses as TOML and the blocks survive it unchanged ──"
 python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$FORMULA" 2>/dev/null \
     && ok "formula parses as TOML" || bad "formula parses as TOML" "tomllib rejected it"
-for blk in classify.sh delta.sh openprs.sh worked.sh stamp.sh read.sh; do
+for blk in classify.sh delta.sh openprs.sh worked.sh stamp.sh read.sh husk.sh refile.sh; do
     grep -q '[\]' "$TMP/$blk" \
         && bad "${blk%.sh}: no backslash (TOML would eat it)" "found a backslash" \
         || ok "${blk%.sh}: no backslash (TOML would eat it)"
@@ -179,12 +187,18 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-synthconvoy","title":"a convoy the machinery minted under some other name","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
   {"id":"c-realconvoy","title":"an unowned floating convoy — the orphan the observer must CATCH","issue_type":"convoy","metadata":{}},
   {"id":"c-titletalk","title":"input convoy for tk-x never closes once its work bead lands","issue_type":"bug","metadata":{}},
-  {"id":"c-slingtalk","title":"sling-created convoys are never reaped","issue_type":"bug","metadata":{}}
+  {"id":"c-slingtalk","title":"sling-created convoys are never reaped","issue_type":"bug","metadata":{}},
+  {"id":"c-husk-step-1","title":"Load context and verify assignment","issue_type":"task","metadata":{"gc.root_bead_id":"root-landed"}},
+  {"id":"c-husk-step-2","title":"Implement the solution","issue_type":"task","metadata":{"gc.root_bead_id":"root-landed"}},
+  {"id":"c-live-step","title":"a step of a workflow whose anchor is still in flight","issue_type":"task","metadata":{"gc.root_bead_id":"root-live"}},
+  {"id":"c-noconvoy-step","title":"a step whose root names no input convoy","issue_type":"task","metadata":{"gc.root_bead_id":"root-noconvoy"}},
+  {"id":"c-rootvisit-step","title":"a step of a root a live stall visit already names","issue_type":"task","metadata":{"gc.root_bead_id":"root-underconversation"}}
 ]
 JSON
 cat > "$TMP/live.json" <<'JSON'
 [
-  {"id":"v-1","title":"visit: c-ingroup — a live sitting","metadata":{"task_kind":"visit","gc.continuation_group":"c-ingroup"}}
+  {"id":"v-1","title":"visit: c-ingroup — a live sitting","metadata":{"task_kind":"visit","gc.continuation_group":"c-ingroup"}},
+  {"id":"v-stall","title":"visit: root-underconversation — workflow stalled with an unclaimable frontier","metadata":{"task_kind":"visit","gc.continuation_group":"subj-stalled","stall_root":"root-underconversation"}}
 ]
 JSON
 
@@ -231,9 +245,19 @@ eq "$(printf '%s' "$PRREPOS" | sort | tr '\n' ' ')" \
 mkdir -p "$TMP/bin" "$TMP/convoys"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+# `gc bd list` — the refile-guard's closed-visit read. Serves $PRIOR_VISITS when
+# set; with it unset the stub prints nothing, which is how an unreadable listing
+# looks and is exactly the fail-open case the guard must survive.
+if [ "$1" = "bd" ] && [ "$2" = "list" ]; then
+    if [ -n "${GC_LIST_FAIL:-}" ]; then exit 1; fi
+    if [ -n "${PRIOR_VISITS:-}" ] && [ -f "$PRIOR_VISITS" ]; then cat "$PRIOR_VISITS"; fi
+    exit 0
+fi
 [ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
 id="$3"
 [ -n "${GC_CONVOY_FAIL:-}" ] && [ "$id" = "$GC_CONVOY_FAIL" ] && exit 1
+# GC_SHOW_FAIL is a space-separated id list; a real outage is non-zero and silent.
+case " ${GC_SHOW_FAIL:-} " in *" $id "*) exit 1 ;; esac
 f="$CONVOY_DIR/$id.json"
 [ -f "$f" ] && cat "$f" || printf '%s\n' '[]'
 GC
@@ -263,13 +287,43 @@ eq "$CONVOY_LIVENESS" "verified" "every convoy a live molecule names answered �
 eq "$(printf '%s' "$WORKED" | jq -r 'sort | join(",")')" "c-worked" \
    "only a LIVE-named convoy's member is worked; a husk-tracked bead is not"
 
+# Class 0(b), the landed-anchor husk (bead tk-st143). The chain the block walks
+# is root -> gc.input_convoy_id -> tracks member -> that anchor's own state, so
+# the fixtures are one file per link. root-landed's anchor is closed AND merged:
+# the workflow is finished and its step beads are teardown backlog. root-live's
+# anchor carries merge_result=pull_request, which is the whole discrimination —
+# a marker a LIVE molecule wears mid-flight (a rework anchor carries it from the
+# round being reworked), so its steps stay candidates. root-noconvoy names no
+# input convoy at all: nothing to have landed, so not a husk either.
+printf '%s\n' '[{"id":"root-landed","issue_type":"task","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-landed"}}]' > "$TMP/convoys/root-landed.json"
+printf '%s\n' '[{"id":"conv-landed","issue_type":"convoy","dependencies":[{"id":"anchor-landed","dependency_type":"tracks","status":"closed"}],"dependents":null}]' > "$TMP/convoys/conv-landed.json"
+printf '%s\n' '[{"id":"anchor-landed","status":"closed","metadata":{"merge_result":"merged","pr_number":"57"}}]' > "$TMP/convoys/anchor-landed.json"
+printf '%s\n' '[{"id":"root-live","issue_type":"task","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-anchorlive"}}]' > "$TMP/convoys/root-live.json"
+printf '%s\n' '[{"id":"conv-anchorlive","issue_type":"convoy","dependencies":[{"id":"anchor-live","dependency_type":"tracks","status":"open"}],"dependents":null}]' > "$TMP/convoys/conv-anchorlive.json"
+printf '%s\n' '[{"id":"anchor-live","status":"open","metadata":{"merge_result":"pull_request","pr_number":"58"}}]' > "$TMP/convoys/anchor-live.json"
+printf '%s\n' '[{"id":"root-noconvoy","issue_type":"task","metadata":{"gc.kind":"workflow"}}]' > "$TMP/convoys/root-noconvoy.json"
+# root-underconversation's anchor is OPEN and unmarked, so the husk rule keeps
+# its step — which is what makes the root-fold assertion below attributable to
+# the fold alone rather than to class 0(b) dropping it for another reason.
+printf '%s\n' '[{"id":"root-underconversation","issue_type":"task","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-uc"}}]' > "$TMP/convoys/root-underconversation.json"
+printf '%s\n' '[{"id":"conv-uc","issue_type":"convoy","dependencies":[{"id":"anchor-uc","dependency_type":"tracks","status":"open"}],"dependents":null}]' > "$TMP/convoys/conv-uc.json"
+printf '%s\n' '[{"id":"anchor-uc","status":"open","metadata":{}}]' > "$TMP/convoys/anchor-uc.json"
+# shellcheck disable=SC1090
+. "$TMP/husk.sh"
+echo "── landed-anchor husks resolve per ROOT, and only a landed anchor drops one ──"
+eq "$HUSK_LIVENESS" "verified" "every root, convoy and anchor read → verified"
+eq "$(printf '%s' "$HUSK_STEPS" | jq -r 'join(",")')" "c-husk-step-1,c-husk-step-2" \
+   "every step bead of a landed root drops at once, and only those"
+eq "$(printf '%s' "$HUSK_ROOTS" | jq -r 'join(",")')" "root-landed" \
+   "the teardown set is the ROOT ids, which is what a reaper acts on"
+
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 SURVIVORS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
 
 echo "── classify keeps only genuinely unnamed beads ──"
 eq "$SURVIVORS" \
-   "c-docupdate,c-hold-empty,c-husk-tracked,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway-empty,c-titletalk" \
+   "c-docupdate,c-hold-empty,c-husk-tracked,c-live-step,c-noconvoy-step,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway-empty,c-titletalk" \
    "survivors are exactly the unnamed beads"
 # tk-tnwo0: the candidate's `type` is projected from `.issue_type` — the field
 # real `gc bd list`/`gc bd ready` emit (the fixtures now carry it too). The old
@@ -386,6 +440,89 @@ for keep in c-titletalk:a-bug-whose-title-starts-with-input-convoy-for \
     printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
         && ok "kept $id ($why)" || bad "kept $id ($why)" "was hidden — the inverse defect"
 done
+
+# Class 0(b) (bead tk-st143): a graph.v2 workflow whose ANCHOR landed owes no
+# more work, but mol-polecat-work closes no step ever, so its step beads stay
+# open, stay ready, and arrive as unnamed waits on every pass — 16 of them across
+# two dead roots in the incident this was written for. There is no disposition a
+# sitting can take on one: routing it re-implements landed work on a branch whose
+# PR already merged. They are teardown backlog, and a reaper retires them.
+echo "── class 0(b): the step beads of a landed workflow are teardown, not waits ──"
+for drop in c-husk-step-1:a-step-of-a-root-whose-anchor-closed-and-merged \
+            c-husk-step-2:every-step-of-that-root-drops-not-just-the-frontier; do
+    id="${drop%%:*}"; why="${drop##*:}"
+    printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
+        && bad "dropped $id ($why)" "still a candidate" || ok "dropped $id ($why)"
+done
+
+# THE INVERSE DEFECT of class 0(b), and the one that made two live stalls
+# invisible in the sibling implementation of this test: every OTHER
+# terminal-looking marker is a state a live molecule wears mid-flight.
+# merge_result=pull_request in particular is what a REWORK molecule's anchor
+# already carries from the round being reworked, so reading it as completion
+# hides a workflow that is genuinely in flight.
+echo "── only closed-or-merged is landed: a mid-flight marker keeps its steps visible ──"
+for keep in c-live-step:merge_result-pull_request-is-mid-flight-not-landed \
+            c-noconvoy-step:a-root-naming-no-convoy-has-no-anchor-to-have-landed; do
+    id="${keep%%:*}"; why="${keep##*:}"
+    printf '%s' "$CANDIDATES" | jq -e --arg i "$id" 'any(.[]; .id == $i)' >/dev/null 2>&1 \
+        && ok "kept $id ($why)" || bad "kept $id ($why)" "was hidden — the inverse defect"
+done
+
+# Class 3's root fold, the cross-FORMULA half (bead tk-st143). A root-scoped
+# stall visit hangs off the stalled-workflows subject and this sweep's batch
+# visit off the unnamed-waits subject, so gc.continuation_group can never fold
+# them: both filed, about one frozen workflow, and the operator held three
+# concurrent sittings on the same shape. The key is gc.root_bead_id matched
+# against a live visit's stall_root. c-rootvisit-step's own root has an OPEN,
+# unmarked anchor, so class 0(b) keeps it — the fold is the only thing that can
+# drop it, which is what makes this assertion attributable.
+echo "── class 3: a candidate whose ROOT is already under a live visit folds into it ──"
+printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-rootvisit-step")' >/dev/null 2>&1 \
+    && bad "dropped c-rootvisit-step (a live visit names its root)" "still a candidate" \
+    || ok "dropped c-rootvisit-step (a live visit names its root)"
+# The inverse: the fold is a MEMBERSHIP test against the stall_root values, not
+# "carries a gc.root_bead_id at all" — the over-broad rule would hide every step
+# bead in the rig, which is the population this sweep most needs to see.
+printf '%s' "$CANDIDATES" | jq -e 'any(.[]; .id == "c-live-step")' >/dev/null 2>&1 \
+    && ok "kept c-live-step (a root no live visit names is not under conversation)" \
+    || bad "kept c-live-step" "the root fold dropped a root nothing is conversing about"
+
+# The husk probe is three-valued exactly as the other two, and a failed read
+# REPORTS: the root contributes no husk steps, so its candidates stay visible.
+# Its own READY fixture, so the verified run above keeps its word.
+echo "── the landed-husk probe is three-valued and reports rather than hides ──"
+printf '%s\n' '[{"id":"c-orphan-step","title":"a step whose root cannot be read","issue_type":"task","metadata":{"gc.root_bead_id":"root-landed"}}]' > "$TMP/ready-husk.json"
+HUSK_SAVE_STEPS="$HUSK_STEPS"; HUSK_SAVE_ROOTS="$HUSK_ROOTS"; HUSK_SAVE_LIVENESS="$HUSK_LIVENESS"
+READY="$TMP/ready-husk.json"; GC_SHOW_FAIL="anchor-landed"; export GC_SHOW_FAIL
+# shellcheck disable=SC1090
+. "$TMP/husk.sh"
+eq "$HUSK_LIVENESS" "unverified" "a failed anchor read is 'unverified', never a silent empty"
+eq "$(printf '%s' "$HUSK_STEPS" | jq 'length')" "0" \
+   "a failed read contributes no husk steps (the bead stays a candidate, reported)"
+unset GC_SHOW_FAIL
+printf '%s\n' '[{"id":"c-plain","title":"an ordinary idle bug","issue_type":"bug"}]' > "$TMP/ready-noroot.json"
+READY="$TMP/ready-noroot.json"
+# shellcheck disable=SC1090
+. "$TMP/husk.sh"
+eq "$HUSK_LIVENESS" "none" "no ready bead names a workflow root → 'none', distinct from the other two"
+READY="$TMP/ready.json"
+HUSK_STEPS="$HUSK_SAVE_STEPS"; HUSK_ROOTS="$HUSK_SAVE_ROOTS"; HUSK_LIVENESS="$HUSK_SAVE_LIVENESS"
+
+# Under 'set -e', where recording the failure is HARDER than aborting — the same
+# control the open-prs and worked-via-convoy blocks carry. The healthy read is
+# run the same way as a positive control, so a future edit that breaks
+# errexit-safety anywhere in the block fails here rather than passing vacuously.
+echo "── the landed-husk read survives 'set -e', which is where reporting is hard ──"
+# shellcheck disable=SC2016  # $1/$HUSK_LIVENESS are for the CHILD shell to expand
+HUSKX_RUN='. "$1"; printf "%s" "$HUSK_LIVENESS"'
+HUSKX_FAIL="$(GC_SHOW_FAIL=anchor-landed READY="$TMP/ready.json" CONVOY_DIR="$TMP/convoys" \
+    bash -e -c "$HUSKX_RUN" _ "$TMP/husk.sh" 2>/dev/null)"
+eq "$HUSKX_FAIL" "unverified" \
+   "under 'set -e' a failed anchor read still records 'unverified' (never aborts the pass)"
+HUSKX_OK="$(READY="$TMP/ready.json" CONVOY_DIR="$TMP/convoys" \
+    bash -e -c "$HUSKX_RUN" _ "$TMP/husk.sh" 2>/dev/null)"
+eq "$HUSKX_OK" "verified" "…and a healthy read runs to completion under 'set -e' too"
 
 # An unreadable probe must never read as "no open PRs". It cannot hide a bead
 # (an unread repository contributes none), but the sitting is owed the word.
@@ -580,6 +717,16 @@ eq "$HANDOFF_STATE" "unreadable" "outcome=pass but the survivor stamp is unparse
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+# `gc bd list` is the refile-guard's closed-visit read. With $PRIOR_VISITS unset
+# the stub prints nothing, which is what an unreadable listing looks like and is
+# the fail-open case the guard must survive. $GC_LIST_RC sets the read's exit
+# status INDEPENDENTLY of what it printed, because that is the combination the
+# guard has to get right: a real failure can arrive having already emitted a
+# perfectly well-formed page.
+if [ "$1" = "bd" ] && [ "$2" = "list" ]; then
+    if [ -n "${PRIOR_VISITS:-}" ] && [ -f "$PRIOR_VISITS" ]; then cat "$PRIOR_VISITS"; fi
+    exit "${GC_LIST_RC:-0}"
+fi
 [ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
 printf '%s\n' "${FAKE_SUBJECT:-[]}"
 GC
@@ -640,6 +787,85 @@ FAKE_SUBJECT="$(subject_json "a,b" "notes with a raw $(printf '\001') control ch
 export FAKE_SUBJECT
 run_delta a b c
 eq "$CARRIED_COUNT" "2" "control chars in the subject's notes do not destroy the baseline"
+
+# --- 2b. the re-file guard (bead tk-st143) -----------------------------------
+# THE DEFECT. The step-3 skip deliberately does not advance the baseline, and a
+# baseline can also be lost or reset, so the same NEW set can come round again
+# after a sitting has already worked it. It did: su-qoma was a verbatim re-file
+# of su-7j8b — same title, same set — which su-7j8b had closed out two days
+# earlier with gc.outcome=dispositioned. The guard asks whether a CLOSED visit
+# on this subject already carried exactly this agenda and disposed of it.
+prior_visits() { # prior_visits <outcome> <new_ids-csv> [id]
+    printf '[{"id":"%s","metadata":{"task_kind":"visit","gc.outcome":"%s","sweep.new_ids":"%s"}}]' \
+        "${3:-v-prior}" "$1" "$2" > "$TMP/prior.json"
+    PRIOR_VISITS="$TMP/prior.json"; export PRIOR_VISITS
+}
+run_refile() { # run_refile — needs $NEW from run_delta; sets REFILE_SUPPRESSED
+    # shellcheck disable=SC1090
+    . "$TMP/refile.sh"
+}
+
+echo "── the re-file guard suppresses an agenda a sitting already dispositioned ──"
+FAKE_SUBJECT="$(subject_json ABSENT)"; export FAKE_SUBJECT
+run_delta a b c
+prior_visits dispositioned "a,b,c" v-done
+run_refile
+eq "$REFILE_SUPPRESSED" "v-done" "the same NEW set, already dispositioned, is not re-filed"
+
+# The test is the id SET, not the title and not the string: the title is a pair
+# of counts that collide by accident, and a stored list in another order is the
+# same agenda. "Unless the underlying candidate set actually changed" is what
+# the guard has to mean.
+prior_visits dispositioned "c,a,b" v-order
+run_refile
+eq "$REFILE_SUPPRESSED" "v-order" "the comparison is a SET, so a different id order still matches"
+
+echo "── and files in every case where the agenda is not proven disposed of ──"
+prior_visits dispositioned "a,b" v-subset
+run_refile
+eq "$REFILE_SUPPRESSED" "" "a genuinely different candidate set files"
+# gc.outcome is the sitting's own one-word verdict and the words are not
+# interchangeable: a visit closed `cut-short` ran out of time with its agenda
+# un-worked, and re-filing it is exactly right.
+prior_visits cut-short "a,b,c" v-cut
+run_refile
+eq "$REFILE_SUPPRESSED" "" "a cut-short sitting did NOT dispose of its agenda — file it again"
+# A visit filed before the sweep.new_ids stamp shipped carries no set to compare.
+prior_visits dispositioned "" v-nostamp
+run_refile
+eq "$REFILE_SUPPRESSED" "" "a prior visit with no stamped id set cannot match — file"
+# Fail-open, like every other probe in this formula: an unreadable listing
+# proves nothing was dispositioned.
+unset PRIOR_VISITS
+run_refile
+eq "$REFILE_SUPPRESSED" "" "an unreadable closed-visit listing files rather than suppresses"
+# ...and "unreadable" is a property of the READ, not of the shape of what
+# arrived. A failing listing can print a page first — a truncated or partial one
+# parses as a perfectly good array and can match the key exactly. Piping the read
+# through `tr` threw its status away (a pipeline reports the LAST command, and tr
+# succeeds on anything), so the guard trusted that page, suppressed the visit,
+# and step 5 then advanced the baseline over an agenda nobody was ever shown.
+# Only the rc check can catch this one: the payload IS a matching array, so the
+# shape check passes on its own.
+prior_visits dispositioned "a,b,c" v-failed
+GC_LIST_RC=1; export GC_LIST_RC
+run_refile
+eq "$REFILE_SUPPRESSED" "" "a FAILING listing files, even when what it printed is a matching array"
+# The control for that case: the very same payload, read successfully, does
+# suppress — so what the case pins is the exit status and nothing else.
+GC_LIST_RC=0
+run_refile
+eq "$REFILE_SUPPRESSED" "v-failed" "control: the identical payload read cleanly still suppresses"
+unset GC_LIST_RC
+# Nothing new at all: the guard has no question to ask and step 4 files nothing
+# anyway. Pinned because an empty NEW_KEY must not match an empty stored list.
+prior_visits dispositioned "" v-empty
+FAKE_SUBJECT="$(subject_json "a,b,c")"; export FAKE_SUBJECT
+run_delta a b c
+eq "$NEW_COUNT" "0" "control: nothing is new this pass"
+run_refile
+eq "$REFILE_SUPPRESSED" "" "an empty NEW set never matches an empty stored list"
+unset PRIOR_VISITS
 
 # --- 3. the instruction the sitting reads ------------------------------------
 echo "── the visit body offers only the park the formula can perform ──"
