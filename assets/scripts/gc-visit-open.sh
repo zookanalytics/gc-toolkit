@@ -120,6 +120,66 @@ EOF
 die()   { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
 note()  { printf '%s\n' "$*" >&2; }
 
+# ── The subject's title ──────────────────────────────────────────────
+# `bd create` refuses a title over 500 bytes. The topic key exists so the
+# operator can type a PARAGRAPH — that is the whole rationale of the popup
+# (tk-w4dp4), which is deliberately sized multi-line to invite one — so handing
+# the topic through as the title made the key fail exactly when it was used as
+# designed: a 579-character paragraph was refused, and the draft's only route
+# into the ledger with it (tk-wp50s, hit live 2026-08-22).
+#
+# Shortening costs nothing, because the title is not where the topic lives.
+# SUBJ_BODY carries $ARG verbatim and the converse session reads the BODY at
+# claim time, so the title only has to be a findable label on the board. Capped
+# well under the library's 500 so the value stays a label rather than a
+# paragraph that happens to fit, and so this does not have to track that limit.
+#
+# Bytes, even though the refusal says "characters": a 600-character CJK title
+# is refused as "got 1800". So this is a byte budget too, which is what
+# `${#var}` measures in the shell this runs under.
+TITLE_MAX=200
+
+# derive_title <text> — a one-line board label for a free-text topic.
+#
+# Whitespace (newlines included) collapses to single spaces: a multi-line title
+# renders as garbage on every surface that shows one, and the popup hands us
+# multi-line input by design.
+#
+# An over-long topic is cut back to a WORD boundary, never to an offset — an
+# offset cut can slice a multi-byte character in half and leave a title that is
+# not valid UTF-8. Cutting at a SENTENCE boundary is deliberately not attempted:
+# the period that ends a sentence is not distinguishable here from the one in
+# "gc-visit-open.sh is slow", which would title itself "gc-visit-open."
+derive_title() {
+    _dt=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -s ' ')
+    _dt="${_dt# }"; _dt="${_dt% }"
+    [ "${#_dt}" -le "$TITLE_MAX" ] && { printf '%s' "$_dt"; return 0; }
+
+    # Drop whole trailing words until it fits, holding a byte back for the
+    # ellipsis that marks the cut. That ellipsis is itself three bytes, so the
+    # label can land two bytes over TITLE_MAX — which is the point of setting
+    # TITLE_MAX nowhere near the 500 that actually matters.
+    while [ "${#_dt}" -gt "$((TITLE_MAX - 1))" ]; do
+        _dt_prev="$_dt"
+        _dt="${_dt% *}"
+        [ "$_dt" = "$_dt_prev" ] && break     # one unbroken token — no boundary to use
+    done
+    # Only reachable for one unbroken token — a URL, a hash, or a script whose
+    # writing system does not put spaces between words. Nothing to cut on but
+    # the byte, so cut, then drop the half-character that leaves at the end:
+    # an invalid title is refused by the ledger, and a topic with no spaces in
+    # it is exactly the input that would hit that.
+    if [ "${#_dt}" -gt "$((TITLE_MAX - 1))" ]; then
+        while [ "${#_dt}" -gt "$((TITLE_MAX - 1))" ]; do _dt="${_dt%?}"; done
+        # Keyed on OUTPUT, not exit status: iconv reports a trailing incomplete
+        # sequence as a failure while still emitting the valid prefix, which is
+        # exactly the repair wanted. Empty output means no iconv — keep the cut.
+        _dt_utf8=$(printf '%s' "$_dt" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null)
+        [ -n "$_dt_utf8" ] && _dt="$_dt_utf8"
+    fi
+    printf '%s…' "${_dt% }"
+}
+
 # ── Argument parsing ─────────────────────────────────────────────────
 ARG=""; RIG=""; NO_REACT=""; SUBJ_TYPE=""; FORCE_TOPIC=""
 while [ $# -gt 0 ]; do
@@ -208,23 +268,34 @@ else
         esac
     fi
 
-    # The topic string is the whole of what was said at the keystroke, so it
-    # is BOTH the title and the durable seed in the body — the converse
-    # session reads the body at claim time to rebuild what this is about, and
-    # a title alone strands it if the operator typed a paragraph.
+    # The topic string is the whole of what was said at the keystroke, so it is
+    # the durable seed in the BODY — the converse session reads the body at
+    # claim time to rebuild what this is about, and a title alone strands it if
+    # the operator typed a paragraph. The title is a label derived from it
+    # (derive_title above), never the topic itself.
     SUBJ_BODY="$ARG
 
 ---
 Operator-origin intake, filed by \`$PROG\` on $(date -u +%Y-%m-%dT%H:%M:%SZ).
-The line above is the whole of what was said at the keystroke — the seed of a
-conversation, not a specification. Ask before assuming scope."
+The text above is the whole of what was said at the keystroke — the seed of a
+conversation, not a specification. The title is a shortened label for the
+board; this body is the record. Ask before assuming scope."
 
-    SUBJ_RAW=$(gc bd create -t "$SUBJ_TYPE" --title "$ARG" -d "$SUBJ_BODY" \
+    SUBJ_TITLE=$(derive_title "$ARG")
+    SUBJ_RAW=$(gc bd create -t "$SUBJ_TYPE" --title "$SUBJ_TITLE" -d "$SUBJ_BODY" \
         --db "$RIG_PATH/.beads" --json 2>/dev/null)
-    SUBJECT=$(printf '%s' "$SUBJ_RAW" | tr -d '\000-\010\013\014\016-\037' \
-        | jq -r '.id // .[0].id // empty' 2>/dev/null)
-    [ -n "$SUBJECT" ] && [ "$SUBJECT" != "null" ] \
-        || die "could not create the subject bead in rig '$RIG' (bd create returned no id) — nothing filed" 4
+    SUBJ_RC=$?
+    SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | tr -d '\000-\010\013\014\016-\037')
+    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
+        # A refused create STATES its reason in .error, and keeping only .id
+        # threw the whole of it away — the operator was told the create
+        # "returned no id" for a refusal that was stated and fixable, and went
+        # looking for a broken ledger instead of an over-long title (tk-wp50s).
+        SUBJ_ERR=$(printf '%s' "$SUBJ_JSON" | jq -r '.error // .[0].error // empty' 2>/dev/null)
+        [ -n "$SUBJ_ERR" ] || SUBJ_ERR="bd create returned no id and no error (exit $SUBJ_RC)"
+        die "could not create the subject bead in rig '$RIG': $SUBJ_ERR — nothing filed" 4
+    fi
     RIG_NAME="$RIG"
     note "$PROG: subject $SUBJECT created in rig $RIG_NAME ($SUBJ_TYPE)"
 fi

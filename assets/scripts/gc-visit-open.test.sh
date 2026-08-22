@@ -34,6 +34,17 @@
 #   (TYPE)      a question becomes a decision bead; --type overrides.
 #   (FAILCLOSE) a subject that could not be created files no visit, and a
 #               missing argument creates nothing at all.
+#   (PARAGRAPH) the topic key exists so the operator can type a PARAGRAPH, and
+#               the popup is sized multi-line to invite one — so a paragraph is
+#               the DESIGNED input, not an edge case. Passing it through as the
+#               title made it the one input guaranteed to fail: `bd create`
+#               refuses a title over 500 bytes, so a 579-character topic filed
+#               nothing at all (tk-wp50s, hit live). The title is a derived
+#               label; the BODY is where the operator's words have to survive.
+#   (WHY)       a create refused for a stated reason must relay that reason.
+#               Keeping only .id off the response reported every refusal as
+#               "bd create returned no id", which sent the operator looking for
+#               a broken ledger instead of an over-long title.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,6 +58,11 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 has() { grep -qF -- "$2" <<< "$1" && ok "$3" || bad "$3 (in: $1)"; }
 hasnt() { grep -qF -- "$2" <<< "$1" && bad "$3 (in: $1)" || ok "$3"; }
+# The ledger's title limit is counted in BYTES (a 600-character CJK title is
+# refused as "got 1800"), while bash's ${#var} counts CHARACTERS under a UTF-8
+# locale. Measuring the wrong unit would let a 500-character/1500-byte title
+# pass an assertion the ledger would reject, so measure bytes explicitly.
+bytes() { printf '%s' "$1" | wc -c | tr -d ' '; }
 
 [ -f "$SCRIPT" ] && ok "gc-visit-open.sh present" || { bad "gc-visit-open.sh missing at $SCRIPT"; exit 1; }
 
@@ -65,7 +81,36 @@ case "$1 ${2:-}" in
               {name:"gascity",    path:$g, prefix:"gc"}]}' ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
-    if [ -n "${FAKE_CREATE_FAIL:-}" ]; then printf '{"error":"nope"}\n'; exit 1; fi
+    # The argv line above flattens the title and body into one blob. Record
+    # each as its own exact value too: the title is precisely what tk-wp50s is
+    # about, and "the paragraph survived verbatim" is an assertion about the
+    # body alone.
+    prev=""; title=""
+    for a in "$@"; do
+      case "$prev" in
+        --title) title="$a"; printf '%s' "$a" > "$FAKE_TITLE" ;;
+        -d)      printf '%s' "$a" > "$FAKE_BODY" ;;
+      esac
+      prev="$a"
+    done
+    # $FAKE_CREATE_ERROR is the .error the ledger states; the default keeps the
+    # original stub's payload for the cases that only care that it failed.
+    if [ -n "${FAKE_CREATE_FAIL:-}" ]; then
+      jq -n --arg e "${FAKE_CREATE_ERROR:-nope}" '{error:$e}'; exit 1
+    fi
+    # A failure that states nothing at all — the caller still owes the operator
+    # a message, so the fallback has to carry one.
+    if [ -n "${FAKE_CREATE_SILENT:-}" ]; then exit 1; fi
+    # THE TITLE CAP, because a stub that accepts what the tool refuses hides the
+    # bug behind a green suite: with the cap left out, "an over-cap paragraph
+    # files" passes against the very script that could not file one. Mirrored
+    # from the live tool — refused over 500 BYTES (a 600-character CJK title is
+    # refused as "got 1800"), exit 1, reason in .error, and no id.
+    tbytes=$(printf '%s' "$title" | wc -c | tr -d ' ')
+    if [ "$tbytes" -gt 500 ]; then
+      jq -n --arg e "validation failed: validation failed for issue : title must be 500 characters or less (got $tbytes)" '{error:$e}'
+      exit 1
+    fi
     jq -n '{id:"tk-newsub"}' ;;
 esac
 exit 0
@@ -95,6 +140,8 @@ chmod +x "$TMP/bin/gc" "$TMP/bin/gc-helm.sh" "$TMP/bin/gc-proactive.sh"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_CALLS="$TMP/calls"
+export FAKE_TITLE="$TMP/title"
+export FAKE_BODY="$TMP/body"
 export FAKE_RIGS="$TMP/rigs"
 export GC_HELM_TOOL="$TMP/bin/gc-helm.sh"
 export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
@@ -102,7 +149,7 @@ export TMPDIR="$TMP"
 
 # run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS
 run() {
-    : > "$FAKE_CALLS"
+    : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"
     export FAKE_DELIVERABLE="$1"; shift
     set +e
     OUT="$(sh "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
@@ -220,6 +267,85 @@ has "$CALLS" "bd create -t task" "(TYPE) everything else is a task"
 run disabled "should we do this?" --type task
 has "$CALLS" "bd create -t task" "(TYPE) --type overrides the heuristic"
 
+# --- (PARAGRAPH) the designed input: a paragraph, not a phrase ----------------
+# Invoked exactly the way the key does it — `-- "$TOPIC"`, no --no-react — so
+# this exercises the live reproduction rather than a convenient shape.
+PARA_L1="The helm board is slow and the parked conversations show nothing useful at a glance."
+PARA_L2="Jumping into one takes forever to load and the row gives no hint of what it was even about."
+PARA_L3="I want the board to say something at a glance and to open in about a second, and I don't much care how."
+PARA_L4="This is the third time this week it has cost me a real chunk of a morning, so please treat it as real."
+PARA_L5="For reference the last one took about forty minutes of clicking around before I gave up and went to the beads directly."
+PARA_L6="I don't need a design, I need someone to look at it and tell me what it would take."
+PARAGRAPH="$PARA_L1
+$PARA_L2
+$PARA_L3
+$PARA_L4
+$PARA_L5
+$PARA_L6"
+# A positive control on the fixture itself: under the cap it would exercise
+# nothing, and every assertion below would still pass.
+[ "$(bytes "$PARAGRAPH")" -gt 500 ] \
+    && ok "(PARAGRAPH) the fixture exceeds the 500-byte title cap ($(bytes "$PARAGRAPH") bytes)" \
+    || bad "(PARAGRAPH) fixture is $(bytes "$PARAGRAPH") bytes — it must exceed 500 or it tests nothing"
+
+run disabled -- "$PARAGRAPH"
+TITLE="$(cat "$FAKE_TITLE")"; BODY="$(cat "$FAKE_BODY")"
+eq "$RC" "0" "(PARAGRAPH) an over-cap paragraph files instead of dying at the create"
+has "$CALLS" "helm open tk-newsub" "(PARAGRAPH) the visit is filed on the new subject"
+has "$OUT" "visit filed" "(PARAGRAPH) and the operator is told so"
+
+# The title: short enough for the ledger to accept, and still the operator's
+# own opening words rather than a stock label.
+[ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
+    && ok "(PARAGRAPH) the title is within the cap ($(bytes "$TITLE") bytes)" \
+    || bad "(PARAGRAPH) the title is $(bytes "$TITLE") bytes — bd create refuses over 500"
+eq "$(printf '%s' "$TITLE" | wc -l | tr -d ' ')" "0" "(PARAGRAPH) the title is a single line"
+has "$TITLE" "The helm board is slow" "(PARAGRAPH) the title leads with the operator's own words"
+case "$TITLE" in
+    *…) ok "(PARAGRAPH) the cut is marked with an ellipsis" ;;
+    *)  bad "(PARAGRAPH) a truncated title does not say it was cut (got '$TITLE')" ;;
+esac
+
+# The body: the whole point. Every line the operator typed has to be recoverable
+# from the bead, because the converse session reads the BODY at claim time.
+has "$BODY" "$PARA_L1" "(PARAGRAPH) the body keeps the first line verbatim"
+has "$BODY" "$PARA_L2" "(PARAGRAPH) the body keeps the second line verbatim"
+has "$BODY" "$PARA_L3" "(PARAGRAPH) the body keeps the third line verbatim"
+has "$BODY" "$PARA_L4" "(PARAGRAPH) the body keeps the fourth line verbatim"
+has "$BODY" "$PARA_L5" "(PARAGRAPH) the body keeps the fifth line verbatim"
+has "$BODY" "$PARA_L6" "(PARAGRAPH) the body keeps the last line verbatim"
+
+# A topic that already fits is passed through untouched — the cap must not
+# rewrite the ordinary case. Multi-line still collapses: a title with newlines
+# in it renders as garbage on every surface that shows one.
+run disabled "why is dolt wedging under load"
+eq "$(cat "$FAKE_TITLE")" "why is dolt wedging under load" "(PARAGRAPH) a topic within the cap is used verbatim"
+run disabled "$(printf 'the board is slow\nand jumping in is slower')"
+eq "$(cat "$FAKE_TITLE")" "the board is slow and jumping in is slower" "(PARAGRAPH) a short multi-line topic collapses to one line"
+# Not `has`: grep -F reads a multi-line pattern as one-per-line ALTERNATIVES, so
+# it would pass on either line by itself — which is the very thing being denied.
+case "$(cat "$FAKE_BODY")" in
+    *"the board is slow"$'\n'"and jumping in is slower"*)
+        ok "(PARAGRAPH) while the body keeps the line break" ;;
+    *)  bad "(PARAGRAPH) the body lost the line break between the two lines" ;;
+esac
+
+# A paragraph in a writing system that does not space its words is one
+# unbroken token: there is no word boundary to cut on, and cutting on the byte
+# would leave half a character and a title the ledger refuses.
+# Built with printf octal escapes rather than python3: a fallback to an ASCII
+# token would silently retarget this case at the one shape it is not about.
+CJK_TOPIC="$(printf '\344\270\255%.0s' $(seq 1 600))"
+eq "$(bytes "$CJK_TOPIC")" "1800" "(PARAGRAPH) the CJK fixture is 600 unbroken 3-byte characters"
+run disabled -- "$CJK_TOPIC"
+TITLE="$(cat "$FAKE_TITLE")"
+[ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
+    && ok "(PARAGRAPH) an unbroken 600-character token is cut to fit ($(bytes "$TITLE") bytes)" \
+    || bad "(PARAGRAPH) an unbroken token was not cut ($(bytes "$TITLE") bytes)"
+printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
+    && ok "(PARAGRAPH) and is still valid UTF-8 — no half character at the cut" \
+    || bad "(PARAGRAPH) the cut left an incomplete multi-byte character"
+
 # --- (FAILCLOSE) nothing half-filed -------------------------------------------
 : > "$FAKE_CALLS"
 set +e
@@ -229,6 +355,35 @@ CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
 eq "$RC" "4" "(FAILCLOSE) a subject that cannot be created exits 4"
 hasnt "$CALLS" "helm open" "(FAILCLOSE) and files no visit"
 has "$ERR" "nothing filed" "(FAILCLOSE) the message says nothing was filed"
+
+# --- (WHY) a stated refusal reaches the operator ------------------------------
+# `bd create --json` says WHY it refused in .error. Keeping only .id off the
+# response threw all of it away and reported every refusal as "returned no id",
+# so the operator was told the ledger returned nothing when in fact it had
+# refused for a stated, fixable reason — and went looking for a broken data
+# plane instead of a long title (tk-wp50s).
+: > "$FAKE_CALLS"
+set +e
+LEDGER_SAID="validation failed: validation failed for issue : title must be 500 characters or less (got 579)"
+OUT="$(FAKE_CREATE_FAIL=1 FAKE_CREATE_ERROR="$LEDGER_SAID" FAKE_DELIVERABLE=disabled \
+       sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(WHY) a refused create still exits 4"
+has "$ERR" "$LEDGER_SAID" "(WHY) the ledger's stated reason reaches the operator verbatim"
+hasnt "$ERR" "returned no id" "(WHY) and is not replaced by the generic no-id message"
+has "$ERR" "nothing filed" "(WHY) while still saying nothing was filed"
+hasnt "$CALLS" "helm open" "(WHY) and no visit is filed on a subject that does not exist"
+
+# A response with no .error at all still has to say something useful rather
+# than nothing — the fallback names the missing id and the exit status.
+: > "$FAKE_CALLS"
+set +e
+FAKE_CREATE_SILENT=1 FAKE_DELIVERABLE=disabled sh "$SCRIPT" "a topic" >/dev/null 2>"$TMP/err"; RC=$?
+set -e
+ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(WHY) a silent create failure exits 4"
+has "$ERR" "no error" "(WHY) a response with no .error says so, rather than reporting nothing"
 
 run disabled
 eq "$RC" "2" "(FAILCLOSE) no argument is a usage error"
