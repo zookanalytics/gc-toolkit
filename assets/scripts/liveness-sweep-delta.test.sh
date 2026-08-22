@@ -719,10 +719,13 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 # `gc bd list` is the refile-guard's closed-visit read. With $PRIOR_VISITS unset
 # the stub prints nothing, which is what an unreadable listing looks like and is
-# the fail-open case the guard must survive.
+# the fail-open case the guard must survive. $GC_LIST_RC sets the read's exit
+# status INDEPENDENTLY of what it printed, because that is the combination the
+# guard has to get right: a real failure can arrive having already emitted a
+# perfectly well-formed page.
 if [ "$1" = "bd" ] && [ "$2" = "list" ]; then
     if [ -n "${PRIOR_VISITS:-}" ] && [ -f "$PRIOR_VISITS" ]; then cat "$PRIOR_VISITS"; fi
-    exit 0
+    exit "${GC_LIST_RC:-0}"
 fi
 [ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
 printf '%s\n' "${FAKE_SUBJECT:-[]}"
@@ -836,6 +839,24 @@ eq "$REFILE_SUPPRESSED" "" "a prior visit with no stamped id set cannot match �
 unset PRIOR_VISITS
 run_refile
 eq "$REFILE_SUPPRESSED" "" "an unreadable closed-visit listing files rather than suppresses"
+# ...and "unreadable" is a property of the READ, not of the shape of what
+# arrived. A failing listing can print a page first — a truncated or partial one
+# parses as a perfectly good array and can match the key exactly. Piping the read
+# through `tr` threw its status away (a pipeline reports the LAST command, and tr
+# succeeds on anything), so the guard trusted that page, suppressed the visit,
+# and step 5 then advanced the baseline over an agenda nobody was ever shown.
+# Only the rc check can catch this one: the payload IS a matching array, so the
+# shape check passes on its own.
+prior_visits dispositioned "a,b,c" v-failed
+GC_LIST_RC=1; export GC_LIST_RC
+run_refile
+eq "$REFILE_SUPPRESSED" "" "a FAILING listing files, even when what it printed is a matching array"
+# The control for that case: the very same payload, read successfully, does
+# suppress — so what the case pins is the exit status and nothing else.
+GC_LIST_RC=0
+run_refile
+eq "$REFILE_SUPPRESSED" "v-failed" "control: the identical payload read cleanly still suppresses"
+unset GC_LIST_RC
 # Nothing new at all: the guard has no question to ask and step 4 files nothing
 # anyway. Pinned because an empty NEW_KEY must not match an empty stored list.
 prior_visits dispositioned "" v-empty

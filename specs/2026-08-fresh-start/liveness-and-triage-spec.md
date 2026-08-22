@@ -338,7 +338,12 @@ already having. Three corrections, shipped in
   `gc.outcome=dispositioned`: a visit closed `cut-short` ran out of time
   with its agenda un-worked and re-filing it is correct. Suppression
   advances the baseline, which is what makes the guard terminate rather
-  than fire forever.
+  than fire forever. Because that pairing is the one path here that
+  retires an agenda without anyone seeing it, suppression rests on a read
+  that actually SUCCEEDED: the closed-visit listing's exit status is
+  captured apart from its output, and a non-zero read is unreadable
+  whatever it printed. A failure that emits a partial page emits valid
+  JSON, so shape alone cannot tell the two apart.
 
 One consequence is accepted rather than fixed. A landed husk is not
 locally decidable, so the precheck of the amendment above cannot exclude

@@ -1137,10 +1137,24 @@ NEW_KEY=$(printf '%s' "$NEW" | jq -r '[.[].id] | sort | join(",")')
 if [ -n "$NEW_KEY" ]; then
   # --status=closed is REQUIRED: a --metadata-field query defaults to open beads
   # only, so without it this asks about the one population that cannot answer.
-  PRIOR=$(gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json 2>/dev/null | tr -d '[:cntrl:]')
+  # Capture the payload and the read's exit status SEPARATELY. Piping the read
+  # straight into `tr` reports TR's status instead, and tr succeeds on anything
+  # it is handed — so a listing that failed partway through, having already
+  # printed some of its page, would read as a good answer purely because what it
+  # did manage to print still parses as an array. The `|| PRIOR_RC=$?` form
+  # keeps the status without letting a failed read abort a `set -e` caller.
+  PRIOR_RC=0
+  PRIOR_RAW=$(gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json 2>/dev/null) || PRIOR_RC=$?
   # Fail-open, like every other probe here: an unreadable listing proves nothing
-  # was dispositioned, so the visit is filed.
-  if printf '%s' "$PRIOR" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  # was dispositioned, so the visit is filed. A non-zero read is unreadable
+  # WHATEVER it printed, which is why both the scrub and the parse wait behind
+  # rc=0 — suppression is the one outcome here that retires an agenda without
+  # putting it in front of anyone, so it may only rest on a read that succeeded.
+  PRIOR=""
+  if [ "$PRIOR_RC" -eq 0 ]; then
+    PRIOR=$(printf '%s' "$PRIOR_RAW" | tr -d '[:cntrl:]')
+  fi
+  if [ "$PRIOR_RC" -eq 0 ] && printf '%s' "$PRIOR" | jq -e 'type == "array"' >/dev/null 2>&1; then
     REFILE_SUPPRESSED=$(printf '%s' "$PRIOR" | jq -r --arg key "$NEW_KEY" '
       [ .[]
         | select(((.metadata // {}).task_kind // "") == "visit")
