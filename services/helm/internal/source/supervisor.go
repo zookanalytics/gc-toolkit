@@ -35,10 +35,21 @@ type SupervisorSource struct {
 	baseURL string // e.g. http://127.0.0.1:8372
 	city    string // registered city name, e.g. "loomington"
 	client  *http.Client
+
+	// gc supplies session liveness. No supervisor endpoint does, and without
+	// it the derivation reads EVERY claimed child as an orphan — so a board on
+	// this backend would come up entirely HIGH. Injectable for tests.
+	gc gcClient
 }
 
 // Option configures a SupervisorSource.
 type Option func(*SupervisorSource)
+
+// withSupervisorGCClient overrides the `gc` CLI shim this backend uses for
+// session liveness (used by tests).
+func withSupervisorGCClient(c gcClient) Option {
+	return func(s *SupervisorSource) { s.gc = c }
+}
 
 // WithBaseURL overrides the discovered supervisor base URL (used by tests).
 func WithBaseURL(u string) Option {
@@ -64,6 +75,9 @@ func NewSupervisorSource(opts ...Option) *SupervisorSource {
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.gc == nil {
+		s.gc = newGCExec(discoverCityPath())
 	}
 	return s
 }
@@ -270,8 +284,26 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 		return nil, fmt.Errorf("supervisor unreachable: %s", strings.Join(g.partialErrs, "; "))
 	}
 
+	// Session liveness, so a claimed child with a live owner reads as moving.
+	// This backend supplies no VISITS and no in-flight map — both need bead
+	// metadata the list endpoints omit — so on it a held anchor reads as
+	// unheld and a slung bead reads as stranded. That is the same shape of gap
+	// this backend already documents for updated_at: a narrower board, not a
+	// wrong one. What it must not do is invert the liveness test, which is
+	// what leaving OwnerState empty would do.
+	owners := sessionStates(ctx, s.gc, g)
+
+	facts := board.Facts{OwnerState: owners}
+	for prefix, name := range g.rigByPrefix {
+		facts.Prefixes = append(facts.Prefixes, prefix)
+		facts.RigNames = append(facts.RigNames, name)
+	}
+	facts.Prefixes = uniqueStrings(facts.Prefixes)
+	facts.RigNames = uniqueStrings(facts.RigNames)
+
 	return &Result{
 		Anchors:       g.anchors,
+		Facts:         facts,
 		Partial:       g.partial,
 		PartialErrors: g.partialErrs,
 	}, nil
