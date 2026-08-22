@@ -73,10 +73,29 @@
 #   (DRAFTDIRFAIL) the other half of that split — an unwritable draft directory
 #               falls back and the press still files. A bad directory must not
 #               cost the thought.
-#   (CANCELKEEP) a cancel with text in the buffer is not the same event as an
-#               Esc on an empty one. tmux cannot tell them apart (both exit
-#               non-zero with empty stderr) but the FILE can, and silence is
-#               only correct for the empty case.
+#   (CANCELSAY)  a cancel is never silent. The FILE cannot tell a cancel-after-
+#               typing from an Esc on an empty buffer: `gum write` holds the
+#               buffer in memory and prints it only on submit, so Esc after five
+#               paragraphs exits 1 having written NOTHING. An earlier version of
+#               this suite asserted the opposite via a stub that printed text
+#               and THEN failed — behaviour the real primitive never exhibits —
+#               so the branch was green and dead at once. CANCELPTY below pins
+#               what gum actually does; this case pins the consequence: since
+#               the two cannot be distinguished, silence is the wrong default,
+#               because silence is exactly what makes a cancel and a broken key
+#               identical from the operator's seat.
+#   (CANCELPTY) the live control for that, through a real pty: type text, press
+#               Esc, and assert the draft file is EMPTY and the handler reports
+#               rather than staying silent. Without this the hermetic case is a
+#               statement about a stub.
+#   (CANCELKEEP) the preserve branch is still correct IF anything ever reaches
+#               the file on a non-zero exit (a partial write, a different popup
+#               failure, a future gum). Kept and tested as that, not as a claim
+#               about Esc.
+#   (REAPSCOPE) the reaper must not reach a file this script does not own. The
+#               unwritable-dir fallback used to land on the shared temp ROOT,
+#               where `draft-*` from any other tool was inside its scope — a
+#               real deletion, reproduced in review.
 #   (BLANKDUR)  the blank branch is also where a truncated write lands: a
 #               paragraph whose redirect wrote nothing arrives here looking
 #               exactly like an empty submit. It flashed for 3s. Too short
@@ -356,20 +375,28 @@ eq "$(find "$TMP/drafts" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
 eq "$(find "$TMP/tmpfiles" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
    "TMPFILE: nothing is left in TMPDIR either"
 
-# (CANCEL) — Esc on an EMPTY buffer. Deliberate, so: nothing filed, nothing
-# said, and nothing kept — there is no text to keep.
-EXPECT_SAY=0 FAKE_GUM_RC=1 run_handler "$CFG_OK" "typed, then thought better of it"
+# (CANCEL) + (CANCELSAY) — a cancel. The gum stub does what real gum does on
+# Esc: exits non-zero having written NOTHING, whatever was "typed".
+FAKE_GUM_RC=1 run_handler "$CFG_OK" "typed, then thought better of it"
 eq "$(cat "$TMP/calls.log")" "" "CANCEL: Esc files nothing"
-hasnt "$(cat "$TMP/tmux.log")" "-d " "CANCEL: ...and says nothing, because it was deliberate"
 eq "$(find "$TMP/drafts" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
    "CANCEL: an empty buffer leaves no draft behind"
+tcalls=$(cat "$TMP/tmux.log")
+has "$tcalls" "cancelled — nothing filed" \
+    "CANCELSAY: a cancel says so — silence is what makes it indistinguishable from a broken key"
+has "$tcalls" "Esc discards" \
+    "CANCELSAY: ...and names the reason the text is gone, which is the one fact that makes it legible"
 
-# (CANCELKEEP) — the same non-zero exit and the same empty stderr, but with
-# text in the buffer. tmux cannot tell these apart; the file can, and this is
-# the branch that used to swallow a paragraph in silence.
+# (CANCELKEEP) — the preserve branch, exercised on the ONLY thing that can
+# reach it: a non-zero exit that nonetheless left bytes in the file. Real `gum
+# write` never does this on Esc (CANCELPTY proves it), so this case is a
+# statement about a partial write, a different popup failure, or a future gum —
+# NOT about cancelling. It is kept because the branch is correct if that ever
+# happens; it is labelled this way because the previous label claimed it
+# satisfied the bead's cancel acceptance, and it does not.
 FAKE_GUM_PARTIAL=1 run_handler "$CFG_OK" "half a thought I did not mean to lose" || true
 tcalls=$(cat "$TMP/tmux.log")
-has "$tcalls" "DRAFT KEPT" "CANCELKEEP: a cancel with text in the buffer reports rather than staying silent"
+has "$tcalls" "DRAFT KEPT" "CANCELKEEP: bytes in the file on a non-zero exit are preserved, not dropped"
 kept=$(find "$TMP/drafts" -type f -name 'draft-*' 2>/dev/null | head -1)
 { [ -n "$kept" ] && grep -q 'half a thought I did not mean to lose' "$kept"; } \
     && ok "CANCELKEEP: the typed text is still on disk" \
@@ -484,6 +511,33 @@ DRAFT_DIR_OVERRIDE="$REAPDIR" run_handler "$CFG_OK" "a fresh press that reaps"
 [ -e "$REAPDIR/draft-old" ] && bad "REAP: a draft past the window was not reaped" || ok "REAP: a draft past the retention window is reaped"
 [ -e "$REAPDIR/draft-recent" ] && ok "REAP: a fresh draft is left alone" || bad "REAP: a fresh draft was reaped"
 [ -e "$REAPDIR/not-a-draft" ] && ok "REAP: only this script's own drafts are touched" || bad "REAP: it deleted a file it does not own"
+
+# (REAPSCOPE) — the reaper's scope is only safe because every directory
+# $DRAFT_DIR can name is one this script owns. The unwritable-dir fallback used
+# to land on the shared temp ROOT, which put `draft-*` from any other tool
+# inside its reach — a real deletion, reproduced in review on this branch. The
+# fallback is now a script-owned subdirectory, so an unrelated stale draft in
+# the temp root survives a press that falls back.
+SHAREDTMP="$TMP/sharedtmp"; mkdir -p "$SHAREDTMP"
+: > "$SHAREDTMP/draft-unrelated"
+touch -d '30 days ago' "$SHAREDTMP/draft-unrelated" 2>/dev/null || touch -t 202001010000 "$SHAREDTMP/draft-unrelated"
+NOWRITE="$TMP/nowrite2"; mkdir -p "$NOWRITE"; chmod 500 "$NOWRITE"
+(
+    export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux-rs.log" GUM_CALLS="$TMP/gum.log"
+    export FAKE_TOPIC="a press that has to fall back" TMPDIR="$SHAREDTMP"
+    export GC_VISIT_DRAFT_DIR="$NOWRITE"
+    : > "$TMUX_CALLS"; : > "$CALLS"
+    PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
+    for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
+)
+chmod 700 "$NOWRITE"
+[ -e "$SHAREDTMP/draft-unrelated" ] \
+    && ok "REAPSCOPE: an unrelated stale draft-* in the shared temp root survives the fallback" \
+    || bad "REAPSCOPE: the fallback reaper deleted a file this script does not own"
+has "$(cat "$TMP/tmux-rs.log")" "gc-visit-drafts" \
+    "REAPSCOPE: ...because the fallback is a script-owned subdirectory, and the message names it"
+has "$(cat "$TMP/calls.log")" "argv=[a press that has to fall back]" \
+    "REAPSCOPE: ...and the press still files"
 
 # (BLANK) — blank and whitespace-only both file nothing.
 for blank in "" "   "; do
@@ -655,6 +709,78 @@ if [ -n "$LIVE_TERM" ]; then
     eq "$(grep -c '=== call ===' <<< "$live")" "3" "THREE: three presses, three independent invocations"
     msgs=$(tmux -L "$SOCKET" show-messages 2>/dev/null || true)
     has "$msgs" "visit tk-vis01 filed" "ROUNDTRIP: the outcome reaches the operator's client"
+
+    # (CANCELPTY) THE CONTROL THIS SUITE WAS MISSING. Everything hermetic here
+    # runs against a gum STUB, and a stub can be taught to do things the real
+    # primitive cannot — which is how the cancel branch shipped green and dead:
+    # the stub printed text and THEN exited non-zero, and no case asked whether
+    # `gum write` ever does that. It does not. Type into a real popup through a
+    # real pty, press Esc, and pin BOTH halves: what gum leaves in the file, and
+    # what the handler does about it.
+    #
+    # Part one — the primitive itself, with no handler in the way. This is the
+    # fact every cancel decision rests on, so it is asserted directly rather
+    # than inferred from the handler's behaviour.
+    CANCEL_RAW="$TMP/cancel-raw.txt"; : > "$CANCEL_RAW"
+    tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+    tmux -L "$SOCKET" new-session -d -x 100 -y 30 'sleep 600' >/dev/null 2>&1
+    tmux -L "$SOCKET" bind-key b run-shell -b \
+        "tmux -L $SOCKET display-popup -E -w 80% -h 50% 'gum write --show-help --height 5 > $CANCEL_RAW'" >/dev/null 2>&1
+    {   sleep 1.5
+        printf '\002'; sleep 0.4; printf 'b'
+        sleep 1.5
+        printf 'a paragraph I typed and then abandoned'; sleep 0.5
+        printf '\033'; sleep 1.2
+        printf '\002d'; sleep 0.5
+    } | TERM="$LIVE_TERM" script -qec "tmux -L $SOCKET attach" /dev/null >/dev/null 2>&1
+    raw_bytes=$(wc -c < "$CANCEL_RAW" | tr -d ' ')
+
+    # POSITIVE CONTROL, and the assertion above is worthless without it: an
+    # empty file is also what a popup that never opened leaves behind, so
+    # "0 bytes" only means "gum discarded the buffer" if the SAME binding,
+    # the same pty and the same keystrokes demonstrably produce bytes on
+    # submit. Run it before judging the cancel.
+    SUBMIT_RAW="$TMP/submit-raw.txt"; : > "$SUBMIT_RAW"
+    tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+    tmux -L "$SOCKET" new-session -d -x 100 -y 30 'sleep 600' >/dev/null 2>&1
+    tmux -L "$SOCKET" bind-key b run-shell -b \
+        "tmux -L $SOCKET display-popup -E -w 80% -h 50% 'gum write --show-help --height 5 > $SUBMIT_RAW'" >/dev/null 2>&1
+    {   sleep 1.5
+        printf '\002'; sleep 0.4; printf 'b'
+        sleep 1.5
+        printf 'a paragraph I typed and then submitted'; sleep 0.5
+        printf '\r'; sleep 0.5; printf '\004'; sleep 1.2
+        printf '\002d'; sleep 0.5
+    } | TERM="$LIVE_TERM" script -qec "tmux -L $SOCKET attach" /dev/null >/dev/null 2>&1
+    has "$(cat "$SUBMIT_RAW")" "a paragraph I typed and then submitted" \
+        "CANCELPTY control: the same popup, pty and keystrokes DO deliver the buffer on submit"
+
+    eq "$raw_bytes" "0" \
+       "CANCELPTY: real gum write emits NOTHING on Esc after typing — the buffer cannot be recovered"
+
+    # Part two — the handler over that same primitive. Since the buffer is
+    # unknowable, the requirement is that a cancel is not SILENT: a silent
+    # cancel and a broken key are the same event from the operator's seat.
+    CANCEL_DRAFTS="$TMP/live-cancel-drafts"; mkdir -p "$CANCEL_DRAFTS"
+    CANCEL_CALLS="$TMP/live-cancel-calls.log"; : > "$CANCEL_CALLS"
+    tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+    tmux -L "$SOCKET" new-session -d -x 100 -y 30 'sleep 600' >/dev/null 2>&1
+    tmux -L "$SOCKET" set-environment -g CALLS "$CANCEL_CALLS" >/dev/null 2>&1
+    tmux -L "$SOCKET" set-environment -g GC_VISIT_DRAFT_DIR "$CANCEL_DRAFTS" >/dev/null 2>&1
+    GC_TMUX_SOCKET="$SOCKET" sh "$BINDINGS" "$LIVE_CFG" >/dev/null 2>&1
+    {   sleep 1.5
+        printf '\002'; sleep 0.4; printf 'a'
+        sleep 1.5
+        printf 'another one I abandon'; sleep 0.5
+        printf '\033'; sleep 1.5
+        printf '\002d'; sleep 0.5
+    } | TERM="$LIVE_TERM" script -qec "tmux -L $SOCKET attach" /dev/null >/dev/null 2>&1
+    eq "$(cat "$CANCEL_CALLS")" "" "CANCELPTY: a real Esc files nothing"
+    eq "$(find "$CANCEL_DRAFTS" -type f 2>/dev/null | wc -l | tr -d ' ')" "0" \
+       "CANCELPTY: ...and leaves no draft, because gum wrote none to keep"
+    cmsgs=$(tmux -L "$SOCKET" show-messages 2>/dev/null || true)
+    has "$cmsgs" "cancelled" \
+        "CANCELPTY: ...and the operator is told, so a cancel is not mistaken for a dead key"
 
     # (NOFREEZE) A press must be able to start while the previous intake is
     # still running: the popup is modal for as long as the operator types, so

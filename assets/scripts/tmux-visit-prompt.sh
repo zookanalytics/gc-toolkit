@@ -66,10 +66,17 @@
 # So the draft is now removed at exactly two kinds of moment, and nowhere else:
 # when the intake CONFIRMS an id (a subject or a visit came back), and when
 # there is provably nothing to lose (the file is empty or whitespace-only).
-# Every other path — cancel with text in the buffer, popup failure, blank-but-
-# unreadable, intake failure, intake success that named no id, a signal — KEEPS
-# the file and names its path to the operator. An orphan draft is recoverable;
-# a deleted one is the bug.
+# Every other path — popup failure, blank-but-unreadable, intake failure,
+# intake success that named no id, a signal — KEEPS the file and names its path
+# to the operator. An orphan draft is recoverable; a deleted one is the bug.
+#
+# ONE CASE THIS DOES NOT REACH, stated plainly because a previous version of
+# this comment claimed it did: a cancel after typing. `gum write` never emits an
+# unsubmitted buffer, so Esc leaves an empty file and the text is gone before
+# this script can see it. That is a property of the input primitive, not a
+# choice made here, and it cannot be fixed without replacing the primitive. What
+# IS fixed is the silence: every cancel now says that it discarded, so a cancel
+# can no longer be mistaken for a key that does nothing.
 #
 # It also lives outside /tmp by default. /tmp here is a tmpfs shared by the
 # whole city, its pressure fluctuates, and a truncated write is one of the ways
@@ -223,19 +230,29 @@ drop_draft() { rm -f "$DRAFT_FILE"; }
 
 # The directory is created before the popup for the same reason the dependency
 # checks above are: discovering there is nowhere to write AFTER a paragraph has
-# been typed wastes the thought. A failure here falls back to the temp dir
-# rather than killing the key, and says so — that is the pressure this moved
-# away from, so landing back on it is news rather than a detail.
+# been typed wastes the thought. A failure here falls back rather than killing
+# the key, and says so — the temp root is the pressure this moved away from, so
+# landing back on it is news rather than a detail.
+#
+# The fallback is a SUBDIRECTORY of the temp root, never the temp root itself.
+# The reaper below deletes `draft-*` in whatever directory this ends up naming,
+# and the temp root is shared with the whole city: falling back to it directly
+# put an unrelated `draft-anything` from another tool inside the reaper's reach.
+# That was a real deletion, not a theoretical one — reproduced by review on this
+# branch with an older `draft-unrelated` in TMPDIR, which the next press removed.
+# A script-owned subdirectory keeps the reaper's scope equal to what this script
+# writes, which is the invariant the comment below always claimed.
 if ! mkdir -p "$DRAFT_DIR" 2>/dev/null || ! [ -w "$DRAFT_DIR" ]; then
-    say 10000 "gc visit: draft dir $(short "$DRAFT_DIR") is not writable — falling back to ${TMPDIR:-/tmp} for this press"
-    DRAFT_DIR="${TMPDIR:-/tmp}"
+    DRAFT_DIR="${TMPDIR:-/tmp}/gc-visit-drafts"
+    say 10000 "gc visit: draft dir is not writable — falling back to $(short "$DRAFT_DIR") for this press"
     mkdir -p "$DRAFT_DIR" 2>/dev/null || true
 fi
 
 # Reap what the operator has had long enough to recover. Scoped to this one
 # directory, non-recursively, and to the `draft-` prefix this script writes, so
-# it cannot reach a file it does not own — which matters most on the /tmp
-# fallback above, where the directory is shared with the rest of the city.
+# it cannot reach a file it does not own. That holds only because every value
+# $DRAFT_DIR can take is a directory this script owns — see the fallback above,
+# which is why it is a subdirectory rather than the shared temp root.
 # Best-effort: a missing or different `find` must not cost a press.
 if command -v find >/dev/null 2>&1; then
     find "$DRAFT_DIR" -maxdepth 1 -type f -name 'draft-*' -mtime "+$DRAFT_KEEP_DAYS" -delete 2>/dev/null || true
@@ -286,12 +303,31 @@ if [ "$POPUP_RC" -ne 0 ]; then
     #     the geometry. tmux says so on stderr, and staying silent would make
     #     a key that is broken look exactly like one the operator changed
     #     their mind about.
-    #   * a cancel with TEXT still in the buffer, or gum dying for any other
-    #     reason with nothing on stderr. Indistinguishable from a deliberate
-    #     Esc at the tmux layer — but not on disk, which is where the answer
-    #     is: an Esc on an empty buffer leaves an empty file, and anything
-    #     that reached the file is content the operator would rather not
-    #     retype. So the buffer decides whether this is silence or a report.
+    #   * gum dying for any other reason with nothing on stderr.
+    #
+    # THE BUFFER CANNOT DISAMBIGUATE THESE, and an earlier version of this
+    # handler assumed it could. `gum write` holds the buffer in memory and
+    # prints it on stdout ONLY on submit: cancel after typing five paragraphs
+    # exits 1 having written NOTHING. Measured through a real pty on this
+    # branch — typed text then Esc gives rc=1 and a zero-byte file, while the
+    # identical setup on submit gives rc=0 and the text — and `gum write` has
+    # no flag that changes it (no output file, `--value` is input only). So
+    # "the file is empty" does not mean "nothing was typed"; it means the
+    # operator did not submit, and how much they typed is simply not knowable
+    # here.
+    #
+    # Given that, silence is the wrong default. The bead's own complaint about
+    # this branch is that a cancel and a BROKEN KEY look identical from the
+    # operator's seat, and staying silent is what makes them identical. So
+    # every cancel says so, briefly, and says that Esc discards — which is the
+    # one fact that turns "nothing happened" into "the thing I pressed did what
+    # it says". A deliberate Esc pays one short message for that.
+    #
+    # The preserve branch below is kept, and is not dead weight pretending to
+    # be a feature: it is correct if anything ever DOES reach the file on a
+    # non-zero exit (a partial write, a different popup failure, a future gum),
+    # and it costs one test. It is simply not reachable through Esc today, and
+    # nothing here claims otherwise.
     if [ -n "$POPUP_ERR" ]; then
         if [ -s "$TOPIC_FILE" ]; then
             keep_draft 10000 "gc visit: could not open the input popup: $POPUP_ERR"
@@ -306,6 +342,7 @@ if [ "$POPUP_RC" -ne 0 ]; then
         exit 0
     fi
     drop_draft
+    say 4000 "gc visit: cancelled — nothing filed (Esc discards the draft; gum cannot hand back an unsubmitted buffer)"
     exit 0
 fi
 
