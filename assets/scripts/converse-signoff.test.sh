@@ -848,13 +848,56 @@ fi
 # that is the strand, so the whole set gates the verdict.
 run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1"]}' \
           "tk-subj" "$RELEASED" tk-sib1
-eq "$COUT" "action=work bead=tk-foreign group=tk-other reason=unreleasable" \
-   "(VACUUM-FAILSAFE) a held sibling stops the drain even when the named turn released"
 eq "$CRC" "0" "(VACUUM-FAILSAFE) …and the session does not drain onto it"
 grep -q 'could not release .*tk-sib1' "$CTMP/err" \
   && ok "(VACUUM-FAILSAFE) …and the held sibling is named in the report" \
   || bad "(VACUUM-FAILSAFE) …and the held sibling is named in the report" \
          "tk-sib1 missing from: $(cat "$CTMP/err")"
+
+# (VACUUM-HELD-NAMED) the turn the caller is sent to work must be one this
+# session still HOLDS. This is the exact split the fixture above builds and the
+# reason it exists: tk-foreign reads back open/unassigned (it released), tk-sib1
+# reads back in_progress/assigned (it did not). Naming tk-foreign here hands the
+# sitting a bead this script has just returned to the pool — another session can
+# claim it concurrently — while tk-sib1 stays assigned to this session and
+# unworked. Both halves of that split are asserted first, so a fixture that
+# stopped producing it could never leave the verdict assertion vacuously green.
+# read_back <id> -> "<status>|<assignee>", through the SAME stub lookup the
+# script's own read-back uses, so these assert what the script saw and not just
+# what the fixture files contain.
+read_back() {
+    env PATH="$CTMP/bin:$PATH" FAKE_SHOW="$CTMP/show.json" \
+        FAKE_SHOW_DIR="$CTMP/show.d" gc bd show "$1" --json \
+        | sed -e 's/.*"status":"\([^"]*\)".*"assignee":\("\([^"]*\)"\|null\).*/\1|\3/'
+}
+eq "$(read_back tk-foreign)" "open|" \
+   "(VACUUM-HELD-NAMED) fixture: the named turn did read back released"
+eq "$(read_back tk-sib1)" "in_progress|converse-1" \
+   "(VACUUM-HELD-NAMED) fixture: the sibling did read back still held"
+eq "$COUT" "action=work bead=tk-sib1 group=tk-other reason=unreleasable" \
+   "(VACUUM-HELD-NAMED) the held sibling is worked, not the turn already put back"
+
+# (VACUUM-HELD-FIRST) when the NAMED turn is among the stuck ones it wins, so
+# the single-turn (FAILSAFE) contract is unchanged by the rule above. Both are
+# held here; the claimed turn is released first, so it is the first failure.
+run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1"]}' \
+          "tk-subj" "$RELEASED" tk-foreign tk-sib1
+eq "$COUT" "action=work bead=tk-foreign group=tk-other reason=unreleasable" \
+   "(VACUUM-HELD-FIRST) a stuck claimed turn still outranks a stuck sibling"
+grep -q 'could not release .*tk-foreign.*tk-sib1' "$CTMP/err" \
+  && ok "(VACUUM-HELD-FIRST) …and both stuck turns are reported" \
+  || bad "(VACUUM-HELD-FIRST) …and both stuck turns are reported" \
+         "expected both ids in: $(cat "$CTMP/err")"
+
+# (VACUUM-HELD-LATER) the named turn and the FIRST sibling both go back; only
+# the second sibling sticks. Guards the off-by-one shape of "first failure":
+# a fix that reported the last-processed id, or the first id of the set, or the
+# first SIBLING regardless of outcome, all pass the case above and fail here.
+run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1","tk-sib2"]}' \
+          "tk-subj" "$RELEASED" tk-sib2
+eq "$COUT" "action=work bead=tk-sib2 group=tk-other reason=unreleasable" \
+   "(VACUUM-HELD-LATER) the one stuck turn is named even when it is last"
+eq "$CRC" "0" "(VACUUM-HELD-LATER) …and the session does not drain onto it"
 
 # --- (VACUUM-ABSENT) an older gc names no siblings — unchanged behaviour ----
 # Guards the other direction: the release set must not invent ids when the key

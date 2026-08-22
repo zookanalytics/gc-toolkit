@@ -90,6 +90,22 @@
 # cannot see; the group filter in `gc hook --claim` retires it along with the
 # round trip.
 #
+# ── An unreleasable set names a turn still HELD ──────────────────
+# When part of the set will not go back, the script works a turn instead of
+# draining — and the turn it names has to be one this session still holds. That
+# is NOT always the claimed one. The release runs the named turn first, so the
+# ordinary vacuum failure is "the named turn released cleanly, a sibling stuck":
+# naming `.bead_id` there would hand the sitting a bead this script had just
+# reopened and unassigned, free for another session to claim concurrently, while
+# the actually-held sibling sat assigned and unworked — a strand and a race from
+# one line. The reported turn is therefore the FIRST that failed to release,
+# which is still the claimed turn whenever the claimed turn is the stuck one.
+#
+# Residual: only one turn can be named, so if several stay held the others are
+# reported on stderr but not worked. That is the same one-turn ceiling the
+# single-bead design always had — the caller acts on one bead — and the stderr
+# report is what makes the rest legible.
+#
 # ── What it does NOT own ─────────────────────────────────────────────
 # Everything about the sitting itself. This is the claim boundary only: which
 # turn this session may work, and how a turn it may not work gets back to the
@@ -171,19 +187,27 @@ RELEASE_IDS=$(printf '%s' "$CLAIM" | jq -r '
 
 RELEASED=1
 UNRELEASED=""
+# The turn to NAME if the set does not all go back. It must be one this session
+# still HOLDS, which is not always the claimed one: the loop releases the named
+# turn first, so a clean release there followed by a stuck sibling would other-
+# wise emit a bead that is already open and unassigned. First failure wins, and
+# because the named turn is tried first that is still `$BEAD` whenever `$BEAD`
+# itself is stuck — the single-turn behaviour is unchanged.
+HELD_TURN=""
 for _turn in $RELEASE_IDS; do
     if ! release_turn "$_turn"; then
         RELEASED=0
+        [ -z "$HELD_TURN" ] && HELD_TURN="$_turn"
         UNRELEASED="${UNRELEASED:+$UNRELEASED }$_turn(${STATE:-unreadable})"
     fi
 done
 
 if [ "$RELEASED" = "0" ]; then
-    # Could not put it all back. Working the claimed turn out of group is a
+    # Could not put it all back. Working a still-held turn out of group is a
     # legible surprise the sitting can open by naming; draining now would
     # strand whatever is still held, which is the silent one nobody sees.
-    echo "$PROG: could not release $UNRELEASED back to the pool; working $BEAD rather than stranding it" >&2
-    echo "action=work bead=$BEAD group=$GROUP reason=unreleasable"
+    echo "$PROG: could not release $UNRELEASED back to the pool; working $HELD_TURN rather than stranding it" >&2
+    echo "action=work bead=$HELD_TURN group=$GROUP reason=unreleasable"
     exit 0
 fi
 

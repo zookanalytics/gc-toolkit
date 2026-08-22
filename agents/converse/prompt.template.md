@@ -88,10 +88,14 @@ The loop, every visit:
    unrelated merge-skill visit prepped in the same thread: *"How'd we get
    here? I thought we were talking about the helm UI?"* (tk-msfmu).
 
-   If the script reports `reason=unreleasable` it could not put the turn
-   back, so it hands it to you rather than stranding it. Work it — and say
-   in your first message that the thread is switching subjects, because
-   nothing else will.
+   If the script reports `reason=unreleasable` it could not put the whole
+   claim back, so it hands you a turn that is still held rather than
+   stranding it. Work it — and say in your first message that the thread is
+   switching subjects, because nothing else will. Use `VISIT` as parsed
+   above and do not assume it is the bead the claim named: one claim can
+   assign several turns, and the one still stuck may be a sibling of the
+   claimed one. Either way `VISIT` is the one turn to work; anything the
+   script did put back is no longer yours.
 
    Before prepping, resolve what this sitting is about and who holds it:
    ```bash

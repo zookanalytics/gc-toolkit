@@ -93,6 +93,20 @@ still be held, so the script re-reads the bead and only drains on a confirmed
 `reason=unreleasable` rather than stranded — which is also where upstream
 clause 2 applies: a claim in hand is authoritative. Pinned by `(FAILSAFE)`.
 
+**The turn named on that path is one still HELD, which is not always the claimed
+one** (added on the second pre-open re-gate of this branch). The release runs the
+named turn first, so the ordinary vacuum failure is "named turn released cleanly,
+sibling stuck". Reporting `.bead_id` there handed the sitting a bead the script
+had just reopened and unassigned — claimable by another session concurrently —
+while the actually-held sibling stayed assigned and unworked: a strand and a race
+from one line, on the very path that exists to prevent stranding. The reported
+turn is now the FIRST that failed to release, which is still the claimed turn
+whenever the claimed turn is the stuck one, so the single-turn `(FAILSAFE)`
+contract is unchanged. Residual: only one turn can be named, so if several stay
+held the rest are reported on stderr but not worked — the same one-turn ceiling
+the caller always had. Pinned by `(VACUUM-HELD-NAMED)`, `(VACUUM-HELD-FIRST)`
+and `(VACUUM-HELD-LATER)`.
+
 **One claim can assign more than one turn** (added on the pre-open re-gate of
 this branch; the first version released only `.bead_id`). `gc hook --claim`
 preassigns the claimed bead's continuation-group siblings onto the same session
@@ -117,7 +131,8 @@ if `gc` fails part way through the preassign it exits non-zero having already
 assigned some siblings and prints no JSON, so no release list reaches the
 script at all. The upstream `--continuation-group` filter retires that along
 with the round trip. Pinned by `(VACUUM)`, `(VACUUM-ORDER)`, `(VACUUM-SPLIT)`,
-`(VACUUM-NOROUTE)`, `(VACUUM-FAILSAFE)` and `(VACUUM-ABSENT)`.
+`(VACUUM-NOROUTE)`, `(VACUUM-FAILSAFE)`, `(VACUUM-HELD-NAMED)`,
+`(VACUUM-HELD-FIRST)`, `(VACUUM-HELD-LATER)` and `(VACUUM-ABSENT)`.
 
 ## Rejected
 
@@ -133,11 +148,12 @@ with the round trip. Pinned by `(VACUUM)`, `(VACUUM-ORDER)`, `(VACUUM-SPLIT)`,
 
 ## Verification
 
-`assets/scripts/converse-signoff.test.sh` — 122 passed, 0 failed. New section
+`assets/scripts/converse-signoff.test.sh` — 128 passed, 0 failed. New section
 "the claim boundary is scoped to the continuation group": `(NOWORK)` `(FIRST)`
 `(SAME)` `(NOGROUP)` `(FOREIGN)` `(SPLIT)` `(ORDER)` `(NOROUTE)` `(FAILSAFE)`
 and, for the vacuumed set, `(VACUUM)` `(VACUUM-ORDER)` `(VACUUM-SPLIT)`
-`(VACUUM-NOROUTE)` `(VACUUM-FAILSAFE)` `(VACUUM-ABSENT)`, plus static assertions
+`(VACUUM-NOROUTE)` `(VACUUM-FAILSAFE)` `(VACUUM-HELD-NAMED)`
+`(VACUUM-HELD-FIRST)` `(VACUUM-HELD-LATER)` `(VACUUM-ABSENT)`, plus static assertions
 that the prompt no longer carries the broadened sentence and that the wake nudge
 names the claimer (the nudge is read before step 1, so a stale nudge re-teaches
 the unscoped claim whatever the prompt says).
@@ -159,6 +175,19 @@ update, and clearing a sibling's `gc.routed_to`) and each then failed.
 all of them shapes already present in the file). Adjacent suites unchanged:
 `converse-fold-scope.test.sh` 22/0, `liveness-recheck.test.sh` 67/0,
 `doctor/check-operator-next-step-wiring/run.test.sh` 14/0.
+
+The `VACUUM-HELD` guards were verified the same way. Against the pre-fix script
+(`c221f8c`, which reported `.bead_id` on the unreleasable path) in a parallel
+tree, `(VACUUM-HELD-NAMED) the held sibling is worked` and `(VACUUM-HELD-LATER)
+the one stuck turn is named even when it is last` both FAIL — they are the two
+that catch the defect. `(VACUUM-HELD-FIRST)` passes there because it pins
+behaviour the fix does not change, so it was mutation-tested on the fixed script
+instead: dropping the first-wins guard (`HELD_TURN` overwritten on every failure,
+i.e. last failure wins) makes it the ONLY failing case, which is what proves it
+load-bearing rather than decorative. The two fixture guards under
+`(VACUUM-HELD-NAMED)` were mutated by removing `tk-sib1` from the held list, so
+the fixture no longer produces the released/held split at all: the guard fails
+loudly instead of letting the verdict assertion go vacuously green.
 
 One harness defect surfaced and was fixed here: `bad` interpolated `$2`
 unconditionally under `set -u`, so a one-argument call aborted the run and every
