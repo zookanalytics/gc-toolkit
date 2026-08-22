@@ -89,7 +89,25 @@ Each entry: the upstream fact, its verification status, and the seam.
   discovery is claim-only via the `gc gc claim` wrapper; **an empty
   continuation group after close is a hard session boundary; a successful
   claim is authoritative even across groups**. Per-role prompt citations
-  older than this are stale. The pack also now ships
+  older than this are stale.
+
+  *Those two clauses are in tension for a conversation role, and the pack
+  read only the second one* (tk-msfmu, 2026-08-22). The converse prompt
+  carried "a claim is authoritative even when it names a different subject
+  than your last one — work it the same way" and dropped the hard boundary,
+  so a session whose group went dry claimed an unrelated subject and prepped
+  it in a thread an operator was still reading. The clauses are not actually
+  in conflict: the first governs whether to CLAIM across a group, the second
+  what a claim already in hand is worth. The pack now honours both —
+  `assets/scripts/converse-claim.sh` refuses to *make* the cross-group claim
+  (it puts back every turn that claim assigned — the named one and any
+  continuation-group siblings the claim vacuumed onto the session with it — and
+  drains, per clause 1), and when a turn cannot be released it is worked rather
+  than stranded, because clause 2 says a claim in hand is authoritative. The scoping is pack-side only because
+  `gc hook --claim` has no group filter — its whole option set is `--claim`,
+  `--drain-ack`, `--inject`, `--json` (verified 2026-08-22) — which is the
+  upstream ask: a `--continuation-group` filter would make the claim/release
+  round trip unnecessary. The pack also now ships
   `requirements-planner` and `task-decomposer` — planning roles adjacent
   to decomposition work. *Seam:* a conversation role is `gc-role-worker`'s
   contract with the execute/close clause replaced by hold-for-operator;
