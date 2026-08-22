@@ -349,6 +349,128 @@ func TestRenderTableColumns(t *testing.T) {
 	}
 }
 
+// TestRenderTableIDsStayDistinct is the regression for tk-mtuej: the ID column
+// was a fixed 11 runes wide and rpad TRUNCATES, so the three sibling anchors
+// sl-kg9z6.4.1/.2/.9 — 12 characters each, discriminated only by the last one —
+// all rendered as "sl-kg9z6.4." and became three rows the operator could not
+// tell apart. RIG failed the same way at 13 ("shutupandlisten" lost "en").
+func TestRenderTableIDsStayDistinct(t *testing.T) {
+	tiles := []board.Tile{
+		{ID: "sl-kg9z6.4.1", Rig: "shutupandlisten", Kind: "convoy", Severity: board.SevElevated,
+			NClosed: 1, MTotal: 4, Frontier: "3 open · 0 in flight", Needs: "assign or visit"},
+		{ID: "sl-kg9z6.4.2", Rig: "shutupandlisten", Kind: "convoy", Severity: board.SevElevated,
+			NClosed: 2, MTotal: 4, Frontier: "2 open · 0 in flight", Needs: "assign or visit"},
+		{ID: "sl-kg9z6.4.9", Rig: "shutupandlisten", Kind: "convoy", Severity: board.SevElevated,
+			NClosed: 3, MTotal: 4, Frontier: "1 open · 0 in flight", Needs: "assign or visit"},
+	}
+	var buf bytes.Buffer
+	renderTable(&buf, board.Board{Total: 3, Tiles: tiles}, tiles, time.Date(2026, 8, 22, 1, 2, 3, 0, time.UTC), 1)
+	out := buf.String()
+
+	// The ID cell is the run of columns after the held glyph and the severity.
+	idW := colWidth(colIDMin, tiles, func(t board.Tile) string { return t.ID })
+	cell := func(line string, start, w int) string {
+		r := []rune(line)
+		if len(r) < start+w {
+			t.Fatalf("row is shorter than the ID column:\n%s", line)
+		}
+		return strings.TrimRight(string(r[start:start+w]), " ")
+	}
+
+	seen := map[string]int{}
+	var rows int
+	for _, ln := range strings.Split(out, "\n") {
+		if !strings.Contains(ln, "sl-kg9z6") {
+			continue
+		}
+		rows++
+		got := cell(ln, colHeld+colSeverity, idW)
+		seen[got]++
+	}
+	if rows != 3 {
+		t.Fatalf("expected 3 data rows, got %d:\n%s", rows, out)
+	}
+	for _, want := range []string{"sl-kg9z6.4.1", "sl-kg9z6.4.2", "sl-kg9z6.4.9"} {
+		if seen[want] != 1 {
+			t.Errorf("ID cell %q rendered %d times; every anchor must render its id in full and exactly once:\n%s",
+				want, seen[want], out)
+		}
+	}
+	if len(seen) != 3 {
+		t.Errorf("three distinct anchors collapsed to %d distinct ID cells (%v):\n%s", len(seen), seen, out)
+	}
+
+	// The rig column is the same defect one column over, and a truncated rig
+	// name also butts straight against KIND with no gutter.
+	if !strings.Contains(out, "shutupandlisten ") {
+		t.Errorf("the rig name is truncated or has no gutter before KIND:\n%s", out)
+	}
+
+	// Widening must move the whole layout, not just the cells: the header, the
+	// rule and every data row start RIG at the same column.
+	var rigCols []int
+	for _, ln := range strings.Split(out, "\n") {
+		i := strings.Index(ln, "shutupandlisten")
+		if i < 0 {
+			continue
+		}
+		rigCols = append(rigCols, len([]rune(ln[:i])))
+	}
+	for _, c := range rigCols {
+		if c != colHeld+colSeverity+idW {
+			t.Errorf("RIG starts at %d, want %d — the header/rule/rows disagree about the ID width:\n%s",
+				c, colHeld+colSeverity+idW, out)
+		}
+	}
+}
+
+// TestRenderTableKeepsClassicWidthsForShortIDs is the quiet half of the tk-mtuej
+// fix: widening is driven by content, so an ordinary board — the common case —
+// must still lay out exactly as it did at the old fixed widths.
+func TestRenderTableKeepsClassicWidthsForShortIDs(t *testing.T) {
+	tiles := []board.Tile{
+		{ID: "tk-1", Rig: "gc-toolkit", Kind: "epic", Severity: board.SevHigh, Frontier: "8 open", Needs: "assign"},
+		{ID: "sl-dec", Rig: "signal-loom", Kind: "decision", Severity: board.SevElevated, Frontier: "human-gated", Needs: "decide"},
+	}
+	if got := colWidth(colIDMin, tiles, func(t board.Tile) string { return t.ID }); got != colIDMin {
+		t.Errorf("ID column widened to %d for short ids; the floor is %d", got, colIDMin)
+	}
+	if got := colWidth(colRigMin, tiles, func(t board.Tile) string { return t.Rig }); got != colRigMin {
+		t.Errorf("RIG column widened to %d for ordinary rig names; the floor is %d", got, colRigMin)
+	}
+
+	var buf bytes.Buffer
+	renderTable(&buf, board.Board{Total: 2, Tiles: tiles}, tiles, time.Date(2026, 8, 22, 1, 2, 3, 0, time.UTC), 2)
+	// The header is the layout: two spaces, SEV padded to 9, ID padded to 11.
+	if want := "  SEV      ID         RIG          KIND     N/M    "; !strings.Contains(buf.String(), want) {
+		t.Errorf("header lost its classic column layout.\nwant prefix: %q\ngot:\n%s", want, buf.String())
+	}
+}
+
+// TestBashBoardDerivesIDWidth pins the OTHER renderer's half of the same fix.
+// The field-set parity above cannot see this: the two boards can agree on every
+// wire field and still disagree about whether an id survives rendering, which
+// is exactly how gc-helm.sh and helm-svc board both shipped a fixed 11.
+func TestBashBoardDerivesIDWidth(t *testing.T) {
+	src, err := os.ReadFile(shBoardPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", shBoardPath, err)
+	}
+	text := string(src)
+	for _, fixed := range []string{"(.id)|rpad(11)", "(.rig)|rpad(13)"} {
+		if strings.Contains(text, fixed) {
+			t.Errorf("%s still renders %s at a FIXED width; a 12-char hierarchical id loses the tail that discriminates it (tk-mtuej)",
+				shBoardPath, fixed)
+		}
+	}
+	for _, derived := range []string{"(.id)|rpad($idw)", "(.rig)|rpad($rigw)"} {
+		if !strings.Contains(text, derived) {
+			t.Errorf("%s no longer renders %s; the bash board must size these columns from the widest value on the board, as helm-svc board does",
+				shBoardPath, derived)
+		}
+	}
+}
+
 // TestEmptyBoardSaysSo: zero anchors is a legitimate answer and must read as
 // one. The failure mode it guards is the opposite reading — a gather that could
 // not look reported as "nothing needs you" — which runBoard keeps distinct by

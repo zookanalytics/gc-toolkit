@@ -207,7 +207,9 @@ func renderJSON(stdout, stderr io.Writer, tiles []board.Tile) int {
 // rpad truncates to w and pads to width, counting RUNES rather than bytes.
 // gc-helm.sh's jq `rpad` measures in codepoints, and the board is full of
 // multi-byte glyphs (·, —, ●), so byte-counting would ragged every column that
-// contains one.
+// contains one. The truncation is for the prose columns only — the ID and RIG
+// widths are derived from their contents (colWidth), so nothing in them is ever
+// long enough to lose its tail here.
 func rpad(s string, w int) string {
 	r := []rune(s)
 	if len(r) > w {
@@ -216,16 +218,44 @@ func rpad(s string, w int) string {
 	return string(r) + strings.Repeat(" ", w-len(r))
 }
 
-// Column widths, in the order gc-helm.sh lays them out.
+// Column widths, in the order gc-helm.sh lays them out. ID and RIG are
+// MINIMUMS rather than fixed widths — see colWidth.
 const (
 	colHeld     = 2
 	colSeverity = 9
-	colID       = 11
-	colRig      = 13
+	colIDMin    = 11
+	colRigMin   = 13
 	colKind     = 9
 	colNM       = 7
 	colFrontier = 36
 )
+
+// colWidth sizes an identifier column to the widest value on THIS board plus a
+// single space of gutter, never narrower than floor.
+//
+// Identifiers cannot be truncated the way prose can, because a hierarchical
+// bead id carries its discriminator in the TAIL. At the fixed width of 11 this
+// column used to have, sl-kg9z6.4.1, .2 and .9 all rendered as "sl-kg9z6.4." —
+// three distinct anchors the operator could not tell apart without going to
+// another tool (tk-mtuej). Rig names lost their tails the same way:
+// "shutupandlisten" rendered "shutupandlist" and butted against the next
+// column.
+//
+// Sizing to content rather than capping with an ellipsis keeps the guarantee
+// absolute — no two distinct ids ever render the same cell — and costs nothing
+// in layout: NEEDS is the last column and already runs to whatever length its
+// text needs, so a wide id cannot push anything off a line that was fixed.
+// floor keeps a board of ordinary ids laid out exactly as it was.
+func colWidth(floor int, tiles []board.Tile, value func(board.Tile) string) int {
+	w := floor
+	for _, t := range tiles {
+		// +1 for the gutter: the cell must not butt against the next column.
+		if n := len([]rune(value(t))) + 1; n > w {
+			w = n
+		}
+	}
+	return w
+}
 
 // renderTable writes the human board: the header, the ranked table, and the
 // legend that says what the bands and the held glyph mean.
@@ -243,12 +273,18 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 		return
 	}
 
-	fmt.Fprint(w, rpad(" ", colHeld)+rpad("SEV", colSeverity)+rpad("ID", colID)+
-		rpad("RIG", colRig)+rpad("KIND", colKind)+rpad("N/M", colNM)+
+	// The two identifier columns are sized to what this board actually holds;
+	// every other column carries prose, where a fixed width and a trimmed tail
+	// are the right trade.
+	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
+	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
+
+	fmt.Fprint(w, rpad(" ", colHeld)+rpad("SEV", colSeverity)+rpad("ID", idW)+
+		rpad("RIG", rigW)+rpad("KIND", colKind)+rpad("N/M", colNM)+
 		rpad("FRONTIER", colFrontier)+"NEEDS\n")
 	rule := func(n, w int) string { return rpad(strings.Repeat("─", n), w) }
-	fmt.Fprint(w, rule(1, colHeld)+rule(8, colSeverity)+rule(10, colID)+
-		rule(12, colRig)+rule(8, colKind)+rule(6, colNM)+
+	fmt.Fprint(w, rule(1, colHeld)+rule(8, colSeverity)+rule(idW-1, idW)+
+		rule(rigW-1, rigW)+rule(8, colKind)+rule(6, colNM)+
 		rule(35, colFrontier)+strings.Repeat("─", 16)+"\n")
 
 	for _, t := range shown {
@@ -264,7 +300,7 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 			nm = "—"
 		}
 		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
-			rpad(t.ID, colID)+rpad(t.Rig, colRig)+rpad(t.Kind, colKind)+
+			rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
 			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+t.Needs+"\n")
 	}
 
