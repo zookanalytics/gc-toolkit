@@ -47,6 +47,19 @@ const defaultCacheTTL = 45 * time.Second
 // shutdownGrace is kept under the proxy_process SIGTERM→SIGKILL window (2s).
 const shutdownGrace = 1500 * time.Millisecond
 
+// defaultProbeTimeout bounds the startup readability probe in [selectSource];
+// override with GC_HELM_PROBE_TIMEOUT.
+//
+// The listening socket is not created until selectSource returns, so this is
+// readiness delay: an UNBOUNDED probe would turn a slow or wedged Dolt into a
+// service that never starts, which is strictly worse than the behaviour it
+// replaces (start, then fail every gather). Ten seconds is generous for a
+// local Dolt connection and small beside the launcher's on-demand `go build`,
+// which the supervisor already tolerates on a cold start. It is deliberately
+// tighter than the 30s the launcher allows `-selfcheck`, whose caller is a
+// shell willing to wait rather than a readiness window.
+const defaultProbeTimeout = 10 * time.Second
+
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("helm: ")
@@ -155,6 +168,26 @@ func spaHandler() http.Handler {
 // A per-request fallback would let a board quietly lose its staleness lane and
 // still look healthy, which is the exact failure this bead exists to end.
 // GC_HELM_SOURCE forces either backend.
+//
+// THE CHOICE IS MADE ON [source.BeadsSource.Probe], NOT Check (tk-4cqtv).
+// Check resolves paths only, so the ONE failure this fallback exists for is
+// invisible to it: a binary whose embedded beads library is older than the live
+// stores finds every directory present, is handed the beads backend, and then
+// dies inside every Gather with a schema-version mismatch. That is how a
+// helm-svc reported itself healthy while all four rigs' gathers failed. Probe
+// opens a store, which is where that error is raised, so the question the
+// fallback answers is the question actually asked.
+//
+// Paying for that open at startup is affordable because it is NOT AN EXTRA
+// connection: [source.BeadsSource.store] caches the handle, so the first Gather
+// reuses what Probe opened. Startup pays what the first request would have paid
+// anyway. Only a candidate beads backend is probed — a forced supervisor
+// backend returns before this and pays nothing.
+//
+// A probe that fails or times out selects the supervisor, rather than refusing
+// to start. A degraded board that says stale_days 0 is worth more than no board
+// at all, and it preserves this entry point's contract of deciding once and
+// saying so.
 func selectSource() (source.Source, func()) {
 	noop := func() {}
 	want := strings.ToLower(strings.TrimSpace(os.Getenv("GC_HELM_SOURCE")))
@@ -173,11 +206,22 @@ func selectSource() (source.Source, func()) {
 	}
 
 	bs := source.NewBeadsSource()
-	if err := bs.Check(); err != nil {
+	// This deadline bounds the OPEN, not the handle it leaves behind: the beads
+	// store keeps a database/sql pool and retains no context, so cancelling here
+	// does not disturb the connection the first Gather goes on to reuse.
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout())
+	defer cancel()
+	if err := bs.Probe(ctx); err != nil {
+		// bs is being discarded; release anything it managed to open. Probe
+		// returns on its first success, so today this closes nothing on the
+		// error path — it is here so that stays true of whoever edits Probe.
+		if cerr := bs.Close(); cerr != nil {
+			log.Printf("closing bead stores after a failed probe: %v", cerr)
+		}
 		if want == "beads" {
-			// Explicitly demanded and unavailable: fail loudly rather than
+			// Explicitly demanded and unusable: fail loudly rather than
 			// silently downgrading to a board with no staleness.
-			log.Fatalf("GC_HELM_SOURCE=beads but the city bead stores are unreadable: %v", err)
+			log.Fatalf("GC_HELM_SOURCE=beads but this binary cannot read the city bead stores: %v", err)
 		}
 		log.Printf("source: falling back to the supervisor HTTP API (%v); stale_days will be 0 — the API omits updated_at", err)
 		return source.NewSupervisorSource(), noop
@@ -190,12 +234,14 @@ func selectSource() (source.Source, func()) {
 	}
 }
 
-// cacheTTL reads GC_HELM_CACHE_TTL as either a Go duration ("30s") or a
-// bare integer number of seconds, falling back to defaultCacheTTL.
-func cacheTTL() time.Duration {
-	v := os.Getenv("GC_HELM_CACHE_TTL")
+// durationEnv reads an env var as either a Go duration ("30s") or a bare
+// integer number of seconds, falling back to def. Anything else — including a
+// negative value — is the fallback, so a typo degrades to the default rather
+// than to zero.
+func durationEnv(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
 	if v == "" {
-		return defaultCacheTTL
+		return def
 	}
 	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
 		return d
@@ -203,5 +249,24 @@ func cacheTTL() time.Duration {
 	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
 		return time.Duration(secs) * time.Second
 	}
-	return defaultCacheTTL
+	return def
+}
+
+// cacheTTL reads GC_HELM_CACHE_TTL as either a Go duration ("30s") or a
+// bare integer number of seconds, falling back to defaultCacheTTL. Zero is a
+// meaningful setting here — it disables the cache.
+func cacheTTL() time.Duration { return durationEnv("GC_HELM_CACHE_TTL", defaultCacheTTL) }
+
+// probeTimeout reads GC_HELM_PROBE_TIMEOUT the same way, falling back to
+// defaultProbeTimeout.
+//
+// Zero is NOT meaningful here and is coerced to the default: a zero-length
+// deadline expires before the probe can open anything, so every probe would
+// fail and the service would pin itself to the supervisor backend — silently
+// losing the staleness lane for good, which is the opposite of a tuning knob.
+func probeTimeout() time.Duration {
+	if d := durationEnv("GC_HELM_PROBE_TIMEOUT", defaultProbeTimeout); d > 0 {
+		return d
+	}
+	return defaultProbeTimeout
 }

@@ -141,6 +141,50 @@ func (s *BeadsSource) Check() error {
 	return err
 }
 
+// Probe reports whether THIS BINARY can actually read the live stores, by
+// opening one. It is the deep counterpart to [BeadsSource.Check]: Check
+// resolves paths, while Probe pays for the Dolt connection Check deliberately
+// skips.
+//
+// WHY BOTH EXIST. The cheap check cannot see the failure that matters most
+// when something is CHOOSING this backend: a binary whose embedded beads
+// library is older than the stores it must read. A helm-svc built at schema
+// v61 against rigs since migrated to v65 passes Check — every directory is
+// still there — and fails only later, per rig, inside Gather. Anything that
+// selects on Check therefore cannot see the one failure its fallback exists
+// for (tk-4cqtv), and a launcher deciding whether a cached artifact is worth
+// serving cannot see it either (tk-y3tks).
+//
+// The success condition MIRRORS [BeadsSource.Gather]: one readable rig is
+// enough, because that is exactly when Gather returns a board rather than its
+// "no rig bead store could be read" error. The two must not drift — a Probe
+// stricter than Gather would refuse a backend that serves fine, and a looser
+// one would bless a backend whose every gather fails.
+//
+// Opening is the whole test: the schema-mismatch error this exists to catch is
+// raised by the store OPEN, which is also the only per-rig error Gather itself
+// reports before it reads anything.
+//
+// The handle Probe opens is CACHED by [BeadsSource.store], so the connection is
+// not spent twice — the first Gather reuses it. That is what makes probing at
+// startup affordable: it moves the first connection earlier rather than adding
+// one.
+func (s *BeadsSource) Probe(ctx context.Context) error {
+	rigs, err := s.rigs()
+	if err != nil {
+		return err
+	}
+	var errs []string
+	for _, r := range rigs {
+		if _, err := s.store(ctx, r); err != nil {
+			errs = append(errs, "rig "+r.name+": "+err.Error())
+			continue
+		}
+		return nil // one readable store is what Gather needs
+	}
+	return fmt.Errorf("no rig bead store could be read: %s", strings.Join(errs, "; "))
+}
+
 // Close releases every cached store handle. The sidecar calls this on shutdown;
 // it is safe to call more than once.
 func (s *BeadsSource) Close() error {
