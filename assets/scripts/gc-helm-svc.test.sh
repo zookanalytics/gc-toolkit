@@ -1,46 +1,119 @@
 #!/usr/bin/env bash
-# Hermetic test for gc-helm-svc.sh build-scratch bounding (tk-m18ml).
+# Hermetic tests for the helm build/start split (tk-9tbbk.2) and the
+# build-scratch bounding that came before it (tk-m18ml).
 #
-# THE BUG: the script created /var/tmp/gotmp and pointed TMPDIR/GOTMPDIR there
-# for every `go build`, and nothing — here or anywhere else in the tree — ever
-# deleted from it. A build killed before its own cleanup runs (OOM, supervisor
-# SIGKILL, ENOSPC) strands a ~300MB go-link dir permanently, and /var/tmp is on
-# the root filesystem and survives reboot, so the leak is monotonic and shares a
-# device with the Dolt journal. One post-reboot rebuild storm stranded 222 dirs
-# (33G) and filled the root fs.
+# THE SPLIT. gc-helm-svc.sh used to build the binary and then exec it. The
+# supervisor allows a proxy_process 5s to answer its health probe
+# (proxyProcessReadyTimeout); a warm build of this module takes ~12.5s and a
+# cold one 2m29s. So the build never finished inside the window, waitReady's
+# stopProcessGroup() killed it along with the start, and the next start began
+# again — 2,677 abandoned .helm-svc.build.* staging files in three days, and a
+# restart that could only report "did not become ready before timeout".
 #
-# THE FIX: each invocation builds in $GOTMP/run.<pid> and deletes it on every
-# exit path; a sweep before the build reclaims run dirs whose pid is gone
-# (immediately — the storm filled the disk in four hours, long before anything
-# was "old") and any other entry that is a day stale (the pre-fix backlog).
+# Building now lives in gc-helm-build.sh, out of band, driven by the helm-build
+# order. gc-helm-svc.sh execs and nothing else. These tests pin BOTH halves:
+# that the launcher cannot build, and that the builder still does everything the
+# launcher used to do correctly.
 #
-# This runs the REAL script — copied into a throwaway rig tree, because it
-# derives the Go module from its own path — with a stub toolchain on GC_GO_BIN
-# and GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network,
-# and the real /var/tmp/gotmp is never touched. Covered:
-#   (BUILD)       the build/rename/exec path still works end to end
+# THE SCRATCH BOUNDING (inherited, tk-m18ml). The build pointed TMPDIR/GOTMPDIR
+# at a shared /var/tmp/gotmp that nothing ever emptied; one post-reboot rebuild
+# storm stranded 222 dirs (33G) and filled the root fs. Each invocation now
+# builds in $GOTMP/run.<pid> and deletes it on every exit path, and sweeps both
+# run dirs whose pid is gone and day-old un-owned scratch.
+#
+# These run the REAL scripts — copied into a throwaway rig tree, because they
+# derive the Go module from their own path — with a stub toolchain on GC_GO_BIN,
+# a stub gc on GC_HELM_GC_BIN, and GC_HELM_GOTMP pointed at scratch under
+# $TMPDIR. No live city, no network, no real /var/tmp/gotmp. Covered:
+#
+#   launcher (gc-helm-svc.sh)
+#   (EXEC)        an existing binary is exec'd, with its arguments
+#   (NOBIN)       no binary -> exit 1 naming the out-of-band builder
+#   (NOBUILD)     the launcher NEVER invokes a toolchain, even with sources
+#                 newer than the binary — the whole point of the split
+#   (NOSTALE)     a stale binary is still exec'd; staleness is not its business
+#
+#   builder (gc-helm-build.sh)
+#   (BUILD)       builds and publishes when the binary is missing
+#   (REBUILD)     rebuilds when a source is newer than the binary
+#   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
+#   (GOMOD)       a go.mod-only change still counts as newer (tk-ohdex)
+#   (FAILKEEP)    a failed build leaves the previous binary untouched, exits 1
+#   (ATOMIC)      the binary is published by rename, never built in place
+#   (STAGE)       the failed build's staging file does not survive
+#   (SWEEPSTAGE)  old stranded staging files are reclaimed; fresh ones are not
 #   (SCRATCH)     the toolchain is handed $GOTMP/run.<pid>, never $GOTMP itself
-#   (OWN)         that dir — and the scratch the toolchain leaked inside it — is
-#                 gone before the exec that would otherwise outlive the trap
-#   (DEAD)        a run dir whose pid is gone is reclaimed on sight
-#   (LIVE)        a run dir whose pid is alive is left alone (concurrent build)
-#   (STALE)       un-owned scratch a day old is reclaimed (the 33G backlog)
-#   (FRESH)       un-owned scratch from minutes ago is left alone
+#   (OWN)         that dir — and scratch the toolchain leaked inside it — is gone
+#   (DEAD/LIVE)   a dead pid's run dir is reclaimed; a live pid's is not
+#   (STALE/FRESH) day-old un-owned scratch is reclaimed; minutes-old is not
 #   (NONPID)      a non-numeric run.* is not mistaken for a dead pid
-#   (FAILHARD)    a failed build with no cached binary still exits 1 — and still
-#                 cleans up, via the EXIT trap
-#   (FAILSOFT)    a failed build with a cached binary still serves it — and the
-#                 failed build's leak does not survive the exec
-#   (NOBUILD)     nothing to build: no toolchain call, scratch untouched
-#   (DEGRADE)     an unwritable scratch root degrades — the service still starts
-#                 on the cached binary and the shared root is not removed
-#   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP
+#   (DEGRADE)     an unwritable scratch root degrades to a reported failure,
+#                 leaves the last good binary intact, and the service still starts
+#   (LISTROOT)    the state root comes from the city's own service listing
+#   (ROOT)        it falls back to GC_CITY_ROOT when there is no listing
+#   (NOROOT)      with no hint at all it refuses instead of hunting for a city
+#   (ISOLATION)   the suite cannot reach a real city's service root
+#
+#   deploy mode (--deploy, what the order runs)
+#   (SKIP)        a city with no helm service builds nothing
+#   (LISTFAIL)    a failed service listing does NOT read as "not registered"
+#   (QFAIL)       nor does one the filter cannot parse
+#   (RESTART)     a successful build restarts the service
+#   (NORESTART)   an up-to-date binary restarts nothing
+#   (RCFAIL)      a failed restart is reported as a failure
+#   (RETRY)       a failed restart is retried on the NEXT run, even though the
+#                 binary is by then current — and stops once it is serving
+#   (HANDBUILT)   a hand-run build's binary is restarted onto by the next tick
+#
+#   static guards
+#   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
+#                 the launcher contains no build at all
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="$HERE/gc-helm-svc.sh"
+SVC="$HERE/gc-helm-svc.sh"
+BUILD="$HERE/gc-helm-build.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# ---------------------------------------------------------------------------
+# This suite must never be able to write into a real city.
+#
+# It runs inside one: GC_CITY, GC_CITY_PATH, GC_RIG_ROOT and friends are all in
+# the ambient environment. Several cases deliberately omit GC_SERVICE_STATE_ROOT
+# in order to exercise the builder's fallback chain — and that chain ends at
+# "$GC_CITY/.gc/services/<name>". Inherit the ambient city and such a case
+# publishes its stub binary straight into the running service's bin/.
+#
+# That is not hypothetical. On 2026-08-22 it replaced the live 161MB helm-svc
+# with a 39-byte shell stub, twice. Nothing failed at the time: the fallback
+# "worked", the case passed, and the damage was invisible until the next restart
+# would have exec'd the stub.
+#
+# Three independent layers, because one guard that can be edited away is not a
+# guard for a file whose whole job is to survive edits:
+#
+#   1. strip the city from THIS process, so every child inherits a clean env —
+#      no per-call wrapper to forget at a new call site;
+#   2. refuse to run at all if anything still points at a city;
+#   3. give the fallback cases a sacrificial service name, so even a defeated
+#      (1) and (2) resolves to .../services/helm-selftest-<pid>/, never to the
+#      real service's binary.
+# ---------------------------------------------------------------------------
+unset GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_CITY_RUNTIME_DIR GC_SERVICE_STATE_ROOT
+unset GC_RIG GC_RIG_ROOT GC_PACK_DIR PACK_DIR GC_HELM_SERVICE_NAME GC_HELM_GC_BIN
+for _leak in GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_SERVICE_STATE_ROOT; do
+    if [ -n "$(eval "printf '%s' \"\${$_leak:-}\"")" ]; then
+        echo "REFUSING TO RUN: $_leak is still set — this suite writes service" >&2
+        echo "state roots and must not run against a real city." >&2
+        exit 1
+    fi
+done
+unset _leak
+
+# The name the fallback cases build under. Never "helm", so the resolution chain
+# cannot land on the live service's binary even if the strip above is defeated.
+SAFE_NAME="helm-selftest-$$"
 
 PASS=0; FAIL=0
 ok()      { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -49,34 +122,56 @@ eq()      { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 present() { [ -e "$1" ] && ok "$2" || bad "$2 (missing: $1)"; }
 absent()  { [ ! -e "$1" ] && ok "$2" || bad "$2 (still present: $1)"; }
 has()     { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (got: $1)" ;; esac; }
+hasnt()   { case "$1" in *"$2"*) bad "$3 (unexpectedly got: $1)" ;; *) ok "$3" ;; esac; }
 
-[ -f "$SCRIPT" ] && ok "gc-helm-svc.sh present" || bad "gc-helm-svc.sh missing at $SCRIPT"
+[ -f "$SVC" ]   && ok "gc-helm-svc.sh present"   || bad "gc-helm-svc.sh missing at $SVC"
+[ -f "$BUILD" ] && ok "gc-helm-build.sh present" || bad "gc-helm-build.sh missing at $BUILD"
 
 # A pid the kernel cannot have handed out: allocation stops below pid_max, so
 # this one is dead by construction and no case can flake on pid reuse.
 DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 32768) + 7 ))
 
-# Backdate an entry past the sweep's one-day threshold. The sweep stats the
-# entry itself, so fill it BEFORE calling this — writing inside afterwards
-# refreshes the directory mtime and un-ages it.
+# A gc that is not there, so the service listing is unavailable.
+NO_SUCH_GC="$TMP/no-such-gc"
+
+# Backdate an entry past a sweep threshold. The sweep stats the entry itself, so
+# fill it BEFORE calling this — writing inside afterwards refreshes the
+# directory mtime and un-ages it.
 age_days() { # <path> <days>
     local when
     when="$(date -u -d "$2 days ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"d +%Y%m%d%H%M)"
+    touch -t "$when" "$1"
+}
+age_mins() { # <path> <minutes>
+    local when
+    when="$(date -u -d "$2 minutes ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"M +%Y%m%d%H%M)"
     touch -t "$when" "$1"
 }
 
 # --- fixture ------------------------------------------------------------------
 CASE=0
 FAIL_BUILD=""
-fixture() { # -> ROOT GOTMP STATE RECORD GOBIN
+fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     CASE=$((CASE + 1))
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
+    STATE_CITY="$base/city"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
+    GCBIN="$base/bin/gc"; GCLOG="$base/gc-calls"; SERVICES="$base/services.json"
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
-             "$GOTMP" "$STATE" "$base/bin"
-    cp "$SCRIPT" "$ROOT/assets/scripts/gc-helm-svc.sh"
+             "$GOTMP" "$STATE" "$base/bin" "$STATE_CITY/.gc/services/helm"
+    cp "$SVC" "$ROOT/assets/scripts/gc-helm-svc.sh"
+    cp "$BUILD" "$ROOT/assets/scripts/gc-helm-build.sh"
     echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/main.go"
+    printf 'module helm\n' > "$ROOT/services/helm/go.mod"
+    # The REAL `gc service list --json` reports `service_name`, not `name`, and
+    # carries `city_path` + a relative `state_root`. An earlier stub here said
+    # `name`; the suite passed while the live gate matched nothing, so the order
+    # would have skipped every city forever. The stub answers what the tool
+    # answers — verified against the live CLI on 2026-08-22.
+    printf '{"city_path":"%s","services":[{"service_name":"helm","state_root":".gc/services/helm"}]}' \
+        "$STATE_CITY" > "$SERVICES"
+
     # Stub toolchain: records the scratch env it was handed, leaks a go-link dir
     # into it the way a killed linker does, then fails or writes a stand-in
     # binary. `go build -o` produces an executable; mktemp staged $BIN_TMP 0600,
@@ -95,23 +190,61 @@ out=""
 while [ $# -gt 0 ]; do
     case "$1" in -o) out="$2"; shift 2 ;; *) shift ;; esac
 done
+# Record what the build was told to write to, so (ATOMIC) can prove the
+# toolchain was never pointed straight at the published binary.
+printf '%s\n' "$out" >> "$STUB_RECORD.out"
 printf '#!/bin/sh\necho "helm-svc-stub ran: $*"\n' > "$out"
 chmod +x "$out"
 STUB
     chmod +x "$GOBIN"
+
+    # Stub gc: answers `service list --json` from a file the case controls and
+    # logs every invocation so restart behaviour can be asserted.
+    cat > "$GCBIN" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_GC_LOG"
+if [ "${1:-} ${2:-}" = "service list" ]; then
+    [ -n "${STUB_GC_LIST_FAIL:-}" ] && exit 1
+    cat "$STUB_GC_SERVICES"
+    exit 0
+fi
+if [ "${1:-} ${2:-}" = "service restart" ]; then
+    [ -n "${STUB_GC_RESTART_FAIL:-}" ] && { echo "restart refused" >&2; exit 1; }
+    echo "restarted ${3:-}"
+    exit 0
+fi
+exit 0
+STUB
+    chmod +x "$GCBIN"
 }
 
-cache_binary() { # plant a previously-built binary, then make a source newer
+cache_binary() { # plant a previously-built binary
     mkdir -p "$STATE/bin"
     printf '#!/bin/sh\necho "cached-binary ran: $*"\n' > "$STATE/bin/helm-svc"
     chmod +x "$STATE/bin/helm-svc"
 }
 
-run_script() { # -> OUT ERR RC
-    local err="$TMP/case$CASE/stderr"
+touch_source() { touch "$ROOT/services/helm/cmd/helm-svc/main.go"; }
+
+run_build() { # -> OUT ERR RC
+    local err="$TMP/case$CASE/stderr-build"
     set +e
     OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" \
+           STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" \
+           STUB_GC_LIST_FAIL="${LIST_FAIL:-}" STUB_GC_RESTART_FAIL="${RESTART_FAIL:-}" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
+           GC_HELM_GC_BIN="$GCBIN" \
+           bash "$ROOT/assets/scripts/gc-helm-build.sh" "$@" 2>"$err")"
+    RC=$?
+    set -e
+    ERR="$(cat "$err")"
+}
+
+run_svc() { # -> OUT ERR RC
+    local err="$TMP/case$CASE/stderr-svc"
+    set +e
+    OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
+           GC_SERVICE_STATE_ROOT="$STATE" \
            bash "$ROOT/assets/scripts/gc-helm-svc.sh" "$@" 2>"$err")"
     RC=$?
     set -e
@@ -120,7 +253,46 @@ run_script() { # -> OUT ERR RC
 
 run_dir_of() { sed -n 's/^GOTMPDIR=//p' "$RECORD"; }
 
-# --- case 1: build, sweep, and clean up after itself --------------------------
+# ==============================================================================
+# LAUNCHER — gc-helm-svc.sh must exec and never build
+# ==============================================================================
+
+# --- the happy path: exec what the builder left -------------------------------
+fixture
+cache_binary
+run_svc --socket /run/helm.sock
+eq "$RC" 0 "(EXEC) exits 0 exec'ing the prebuilt binary"
+has "$OUT" "cached-binary ran: --socket /run/helm.sock" "(EXEC) args reach the binary"
+absent "$RECORD" "(EXEC) the launcher invoked no toolchain"
+
+# --- sources newer than the binary: STILL no build ----------------------------
+# This is the split. Before it, a newer source here triggered a ~12.5s build
+# inside a 5s readiness window, which the supervisor then killed along with the
+# start. The launcher must now serve what it has and leave the build to the
+# out-of-band builder.
+fixture
+cache_binary
+touch_source
+run_svc --socket /run/helm.sock
+eq "$RC" 0 "(NOSTALE) a stale binary is still served"
+has "$OUT" "cached-binary ran:" "(NOSTALE) the stale binary is the one exec'd"
+absent "$RECORD" "(NOBUILD) the launcher does not build even when sources are newer"
+eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l)" "0" \
+   "(NOBUILD) the launcher creates no build scratch at all"
+
+# --- no binary at all ---------------------------------------------------------
+fixture
+run_svc --socket /run/helm.sock
+eq "$RC" 1 "(NOBIN) exits 1 when there is no binary to exec"
+has "$ERR" "no binary at" "(NOBIN) says what is missing"
+has "$ERR" "gc-helm-build.sh" "(NOBIN) names the out-of-band builder"
+absent "$RECORD" "(NOBIN) still refuses to build its way out"
+
+# ==============================================================================
+# BUILDER — gc-helm-build.sh
+# ==============================================================================
+
+# --- case: builds when the binary is missing, and sweeps while it is there ----
 fixture
 mkdir -p "$GOTMP/run.$DEAD_PID" "$GOTMP/run.$$" "$GOTMP/run.bogus" \
          "$GOTMP/go-link-old" "$GOTMP/go-link-fresh"
@@ -128,11 +300,13 @@ mkdir -p "$GOTMP/run.$DEAD_PID" "$GOTMP/run.$$" "$GOTMP/run.bogus" \
 : > "$GOTMP/go-link-old/obj"
 age_days "$GOTMP/run.$DEAD_PID" 2      # stranded AND stale: the pid decides first
 age_days "$GOTMP/go-link-old" 2
-run_script --socket /run/helm.sock
+run_build
 
-eq "$RC" 0 "(BUILD) exits 0 after building and exec'ing the binary"
-has "$OUT" "helm-svc-stub ran: --socket /run/helm.sock" "(BUILD) args reach the built binary"
+eq "$RC" 0 "(BUILD) exits 0 after building"
+has "$OUT" "built" "(BUILD) reports that it built"
 present "$STATE/bin/helm-svc" "(BUILD) binary published to the state root"
+[ -x "$STATE/bin/helm-svc" ] && ok "(BUILD) the published binary is executable" \
+                             || bad "(BUILD) the published binary is not executable"
 
 RUN_DIR="$(run_dir_of)"
 eq "$(sed -n 's/^TMPDIR=//p' "$RECORD")" "$RUN_DIR" "(SCRATCH) TMPDIR and GOTMPDIR agree"
@@ -140,97 +314,331 @@ case "$RUN_DIR" in
     "$GOTMP"/run.[0-9]*) ok "(SCRATCH) toolchain got a per-invocation \$GOTMP/run.<pid>" ;;
     *) bad "(SCRATCH) toolchain scratch was '$RUN_DIR', want $GOTMP/run.<pid>" ;;
 esac
-absent "$RUN_DIR" "(OWN) the invocation's own scratch is removed before the exec"
+absent "$RUN_DIR" "(OWN) the invocation's own scratch is removed"
 absent "$RUN_DIR/go-link-stub" "(OWN) scratch the toolchain leaked inside it goes with it"
 
 absent "$GOTMP/run.$DEAD_PID" "(DEAD) run dir of a gone pid is reclaimed"
-present "$GOTMP/run.$$"       "(LIVE) run dir of a live pid is left alone"
-absent  "$GOTMP/go-link-old"  "(STALE) day-old un-owned scratch is reclaimed"
+present "$GOTMP/run.$$"        "(LIVE) run dir of a live pid is left alone"
+absent  "$GOTMP/go-link-old"   "(STALE) day-old un-owned scratch is reclaimed"
 present "$GOTMP/go-link-fresh" "(FRESH) minutes-old un-owned scratch is left alone"
-present "$GOTMP/run.bogus"    "(NONPID) non-numeric run.* is not read as a dead pid"
+present "$GOTMP/run.bogus"     "(NONPID) non-numeric run.* is not read as a dead pid"
 
-# --- case 2: build fails, nothing cached -> propagate, still clean up ---------
-fixture
-FAIL_BUILD=1
-run_script
-FAIL_BUILD=""
-eq "$RC" 1 "(FAILHARD) exits 1 when the build fails with no cached binary"
-has "$ERR" "build failed and no cached binary to serve" "(FAILHARD) reports why"
-absent "$(run_dir_of)" "(FAILHARD) EXIT trap removes the scratch on the exit path"
-eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 -name 'run.*' | wc -l)" "0" \
-   "(FAILHARD) no run dir survives"
+# The toolchain must be told to write somewhere other than the published path,
+# so a failed link can never truncate the binary that is currently serving.
+BUILT_TO="$(cat "$RECORD.out")"
+[ "$BUILT_TO" != "$STATE/bin/helm-svc" ] \
+    && ok "(ATOMIC) the toolchain built to staging, not to the published binary" \
+    || bad "(ATOMIC) the toolchain was pointed straight at $STATE/bin/helm-svc"
+case "$BUILT_TO" in
+    "$STATE/bin/".helm-svc.build.*) ok "(ATOMIC) staging sits beside the binary, so the rename is atomic" ;;
+    *) bad "(ATOMIC) staging was '$BUILT_TO', not a .helm-svc.build.* beside the binary" ;;
+esac
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+   "(STAGE) no staging file survives a successful build"
 
-# --- case 3: build fails, cached binary -> serve it, drop the failed scratch --
+# --- case: rebuilds when a source is newer ------------------------------------
 fixture
 cache_binary
-touch "$ROOT/services/helm/cmd/helm-svc/main.go"   # source newer -> rebuild attempted
-FAIL_BUILD=1
-run_script --socket /run/helm.sock
-FAIL_BUILD=""
-eq "$RC" 0 "(FAILSOFT) keeps serving the cached binary when the rebuild fails"
-has "$OUT" "cached-binary ran: --socket /run/helm.sock" "(FAILSOFT) the cached binary is the one exec'd"
-has "$ERR" "rebuild failed; continuing to serve existing" "(FAILSOFT) the failure still surfaces"
-absent "$(run_dir_of)" "(FAILSOFT) a failed build's leak does not survive the exec"
+touch_source
+run_build
+eq "$RC" 0 "(REBUILD) exits 0"
+present "$RECORD" "(REBUILD) the toolchain WAS invoked for a newer source"
+run_svc --socket /run/helm.sock
+has "$OUT" "helm-svc-stub ran:" "(REBUILD) the freshly built binary replaced the cached one"
 
-# --- case 4: nothing to build -> toolchain untouched, scratch untouched ------
+# --- case: go.mod-only change still counts (tk-ohdex) -------------------------
 fixture
-cache_binary                                        # newer than main.go -> no rebuild
+cache_binary
+touch "$ROOT/services/helm/go.mod"
+run_build
+eq "$RC" 0 "(GOMOD) exits 0"
+present "$RECORD" "(GOMOD) a go.mod-only change triggers a rebuild"
+
+# --- case: nothing to build ---------------------------------------------------
+fixture
+cache_binary                                        # newer than main.go -> current
 mkdir -p "$GOTMP/go-link-old"
 : > "$GOTMP/go-link-old/obj"
 age_days "$GOTMP/go-link-old" 3
-run_script --socket /run/helm.sock
-eq "$RC" 0 "(NOBUILD) serves the up-to-date binary"
-has "$OUT" "cached-binary ran:" "(NOBUILD) exec'd without rebuilding"
-absent "$RECORD" "(NOBUILD) the toolchain was never invoked"
-present "$GOTMP/go-link-old" "(NOBUILD) the sweep is scoped to builds; scratch is untouched"
+run_build
+eq "$RC" 0 "(CURRENT) exits 0 when the binary is current"
+has "$OUT" "up to date" "(CURRENT) says so"
+absent "$RECORD" "(CURRENT) the toolchain was never invoked"
+present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch is untouched"
 
-# --- case 5: scratch hygiene cannot stop the service starting -----------------
-# `set -e` is live in the script, so an unguarded mkdir/rm in the hygiene would
-# abort the start — and the case where it aborts is a full or unwritable disk,
-# exactly when the cached-binary fallback is the behaviour that matters. An
-# unwritable $GOTMP stands in for that here: every cleanup call fails, and the
-# run dir cannot be created at all.
+# --- case: build fails -> previous binary untouched, non-zero -----------------
 fixture
 cache_binary
-touch "$ROOT/services/helm/cmd/helm-svc/main.go"    # source newer -> rebuild attempted
+touch_source
+FAIL_BUILD=1
+run_build
+FAIL_BUILD=""
+eq "$RC" 1 "(FAILKEEP) exits 1 when the build fails"
+has "$ERR" "BUILD FAILED" "(FAILKEEP) reports the failure"
+run_svc --socket /run/helm.sock
+has "$OUT" "cached-binary ran:" "(FAILKEEP) the previously-built binary is untouched and still serves"
+absent "$(run_dir_of)" "(FAILKEEP) the failed build's scratch does not survive"
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+   "(STAGE) the failed build's staging file does not survive either"
+
+# --- case: the 2,677 stranded staging files are reclaimed ---------------------
+# One per killed start, laid down by the inline-build era between 08-19 and
+# 08-22. mktemp publishes the name before the build writes a byte, so a kill in
+# between leaves one behind.
+fixture
+cache_binary
+touch_source
+mkdir -p "$STATE/bin"
+: > "$STATE/bin/.helm-svc.build.OLD001"
+: > "$STATE/bin/.helm-svc.build.OLD002"
+: > "$STATE/bin/.helm-svc.build.FRESH1"
+age_mins "$STATE/bin/.helm-svc.build.OLD001" 120
+age_mins "$STATE/bin/.helm-svc.build.OLD002" 120
+run_build
+absent "$STATE/bin/.helm-svc.build.OLD001" "(SWEEPSTAGE) stranded staging files are reclaimed"
+absent "$STATE/bin/.helm-svc.build.OLD002" "(SWEEPSTAGE) all of them, not just one"
+present "$STATE/bin/.helm-svc.build.FRESH1" \
+    "(SWEEPSTAGE) a fresh staging file — a concurrent build's — is left alone"
+
+# --- case: scratch hygiene degrades rather than aborting ----------------------
+# `set -e` is live in the script, so an unguarded mkdir/rm in the hygiene would
+# abort it at the first EACCES — before the build, before any diagnostic, and
+# before the cleanup that protects the published binary. An unwritable $GOTMP
+# stands in for the full disk: every sweep call fails and the run dir cannot be
+# created at all.
+#
+# The build genuinely cannot succeed on a disk it cannot write to, so this does
+# NOT assert a green build. What it asserts is that the script degrades all the
+# way through to a reported failure with the previously-built binary intact —
+# rather than dying mid-hygiene, which is the state that would leave a
+# half-swept scratch root and no diagnostic at all.
+fixture
+cache_binary
+touch_source
 mkdir -p "$GOTMP/go-link-old" "$GOTMP/run.$DEAD_PID"
 : > "$GOTMP/go-link-old/obj"
 : > "$GOTMP/run.$DEAD_PID/obj"
 age_days "$GOTMP/go-link-old" 2                     # both sweepable, but every
 chmod 500 "$GOTMP"                                  # rm below will fail on EACCES
-run_script --socket /run/helm.sock
+run_build
 chmod 700 "$GOTMP"
-eq "$RC" 0 "(DEGRADE) an unwritable scratch root does not stop the service starting"
-has "$OUT" "cached-binary ran:" "(DEGRADE) the cached binary is still served"
-has "$ERR" "cannot create" "(DEGRADE) the degraded path says so"
+eq "$RC" 1 "(DEGRADE) reaches a reported build failure instead of dying in the hygiene"
+has "$ERR" "cannot create" "(DEGRADE) the degraded scratch path says so"
+has "$ERR" "BUILD FAILED" "(DEGRADE) and the build failure is still reported"
 present "$GOTMP" "(DEGRADE) the shared root is not removed as if it were owned scratch"
 present "$GOTMP/go-link-old" "(DEGRADE) a failed age sweep is swallowed, not fatal"
 present "$GOTMP/run.$DEAD_PID" "(DEGRADE) a failed dead-pid sweep is swallowed, not fatal"
+run_svc --socket /run/helm.sock
+eq "$RC" 0 "(DEGRADE) the service still starts — the launcher does not depend on the build"
+has "$OUT" "cached-binary ran:" "(DEGRADE) on the binary the last good build left"
 
-# --- case 5: static guard ----------------------------------------------------
-# The regression that caused the incident is pointing the toolchain straight at
-# the shared, unbounded $GOTMP. Whatever else the build line grows, it must hand
-# the toolchain a dir this invocation owns and deletes.
-if grep -qE '(TMPDIR|GOTMPDIR)="\$GOTMP"' "$SCRIPT"; then
+# --- case: the listing's state_root is authoritative -------------------------
+# The order has no GC_SERVICE_STATE_ROOT — only the supervisor's own spawn does.
+# Reproducing gascity's StateRootOrDefault() here would be a second copy of a
+# rule that lives in another repo; reading `city_path` + `state_root` off the
+# listing cannot drift from it. Pinned because a build published to the wrong
+# path is invisible: it succeeds, and the service keeps serving the old binary.
+fixture
+set +e
+OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
+       STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" GC_HELM_GC_BIN="$GCBIN" \
+       bash "$ROOT/assets/scripts/gc-helm-build.sh" 2>&1)"
+RC=$?
+set -e
+eq "$RC" 0 "(LISTROOT) builds using the state root the city reported"
+present "$STATE_CITY/.gc/services/helm/bin/helm-svc" \
+    "(LISTROOT) the binary lands where the listing said, not at a guessed path"
+
+# --- case: the state root is derived when there is no listing to read ---------
+# The builder runs from an order, which sets GC_CITY_ROOT but not
+# GC_SERVICE_STATE_ROOT — that one only exists inside the supervisor's own spawn.
+fixture
+CITY="$TMP/case$CASE/city2"
+mkdir -p "$CITY/.gc/services/$SAFE_NAME"
+set +e
+OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
+       GC_CITY_ROOT="$CITY" GC_HELM_GC_BIN="$NO_SUCH_GC" GC_HELM_SERVICE_NAME="$SAFE_NAME" \
+       bash "$ROOT/assets/scripts/gc-helm-build.sh" 2>&1)"
+RC=$?
+set -e
+eq "$RC" 0 "(ROOT) builds with only GC_CITY_ROOT set"
+present "$CITY/.gc/services/$SAFE_NAME/bin/helm-svc" \
+    "(ROOT) the binary lands where the supervisor will look for it"
+
+# --- case: no state-root hint at all -> refuse, do not go hunting -------------
+# Every earlier resolution step is unavailable here: no GC_SERVICE_STATE_ROOT,
+# no listing, no GC_CITY_ROOT/GC_CITY, and a module in a throwaway tree with no
+# .gc above it. The builder must say it cannot locate the city and stop.
+#
+# This is the assertion that would have caught the 2026-08-22 accident, in which
+# a case with no explicit state root silently inherited the ambient GC_CITY and
+# published into the live service. `sandboxed` strips that env; this proves what
+# the script does once it is stripped.
+fixture
+set +e
+OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
+       GC_HELM_GC_BIN="$NO_SUCH_GC" GC_HELM_SERVICE_NAME="$SAFE_NAME" \
+       bash "$ROOT/assets/scripts/gc-helm-build.sh" 2>&1)"
+RC=$?
+set -e
+eq "$RC" 1 "(NOROOT) refuses when it cannot locate a state root"
+has "$OUT" "cannot locate the city runtime dir" "(NOROOT) says so, naming the env to set"
+hasnt "$OUT" "built" "(NOROOT) publishes nothing"
+
+# ==============================================================================
+# DEPLOY MODE — what the helm-build order runs
+# ==============================================================================
+
+# --- case: a city with no helm service does nothing ---------------------------
+fixture
+printf '{"city_path":"%s","services":[{"service_name":"something-else","state_root":".gc/services/other"}]}' \
+    "$STATE_CITY" > "$SERVICES"
+run_build --deploy
+eq "$RC" 0 "(SKIP) exits 0 in a city with no helm service"
+has "$OUT" "nothing to deploy" "(SKIP) says why"
+absent "$RECORD" "(SKIP) no 161MB build for a city that will never run it"
+absent "$STATE/bin/helm-svc" "(SKIP) nothing published"
+
+# --- case: a broken listing is not proof of absence ---------------------------
+# Reading a failed `gc service list` as "not registered" would silently stop
+# deploying on any transient CLI failure — the class of silent stall this whole
+# change exists to end.
+fixture
+LIST_FAIL=1
+run_build --deploy
+LIST_FAIL=""
+eq "$RC" 0 "(LISTFAIL) proceeds when the service listing fails"
+has "$ERR" "could not list services" "(LISTFAIL) says it is proceeding blind"
+present "$RECORD" "(LISTFAIL) the build still happened"
+
+# --- case: an unreadable listing is not proof of absence either ---------------
+# `gc service list` SUCCEEDS here but hands back something the filter cannot
+# answer from. Collapsing that into "no helm service" is the same silent-stall
+# bug as (LISTFAIL): one missing dependency or one schema change and the order
+# deploys nothing, forever, without ever failing.
+fixture
+printf 'not json at all' > "$SERVICES"
+run_build --deploy
+eq "$RC" 0 "(QFAIL) proceeds when the listing cannot be parsed"
+has "$ERR" "could not read the service listing" "(QFAIL) says the lookup broke, not that helm is absent"
+present "$RECORD" "(QFAIL) the build still happened"
+hasnt "$OUT" "nothing to deploy" "(QFAIL) an unparseable listing is never read as absence"
+
+# --- case: a build restarts the service ---------------------------------------
+fixture
+run_build --deploy
+eq "$RC" 0 "(RESTART) exits 0"
+present "$STATE/bin/helm-svc" "(RESTART) the binary was published"
+has "$(cat "$GCLOG")" "service restart helm" "(RESTART) build and restart are one step"
+
+# --- case: nothing to build restarts nothing ----------------------------------
+# A restart on every tick would bounce the board every 5 minutes forever.
+fixture
+cache_binary
+run_build --deploy
+eq "$RC" 0 "(NORESTART) exits 0 with the binary already current"
+hasnt "$(cat "$GCLOG")" "service restart" "(NORESTART) an up-to-date binary restarts nothing"
+
+# --- case: a failed restart is a failure --------------------------------------
+# The binary is published but not serving; that is exactly the "landed but
+# inert" state this order exists to prevent, so it must not exit 0.
+fixture
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(RCFAIL) a failed restart exits non-zero"
+has "$ERR" "not yet serving" "(RCFAIL) names the half-applied state"
+present "$STATE/restart-pending" "(RCFAIL) the unfinished restart is recorded for the next run"
+
+# --- case: the next run finishes a restart the last one could not -------------
+# Two runs, because the hole only opens on the second. Run 1 publishes and its
+# restart fails, which leaves the binary NEWER than every source: nothing is
+# stale any more, so the up-to-date branch is the only one any later run can
+# reach. Exiting 0 there — "is up to date", no restart — is what would make a
+# transient restart failure permanent, the old process serving the old inode for
+# as long as nobody edits a source file again. That is the "landed but inert"
+# state this whole order exists to end, reached the other way round.
+fixture
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(RETRY) run 1's restart fails"
+present "$STATE/bin/helm-svc" "(RETRY) run 1 published the binary regardless"
+rm -f "$RECORD"; : > "$GCLOG"          # judge run 2 on its own calls alone
+run_build --deploy
+eq "$RC" 0 "(RETRY) run 2 exits 0"
+absent "$RECORD" "(RETRY) run 2 rebuilds nothing — the binary is current"
+has "$(cat "$GCLOG")" "service restart helm" "(RETRY) run 2 restarts onto it anyway"
+absent "$STATE/restart-pending" "(RETRY) and the record is cleared by the restart that worked"
+rm -f "$RECORD"; : > "$GCLOG"
+run_build --deploy
+eq "$RC" 0 "(RETRY) run 3 exits 0"
+hasnt "$(cat "$GCLOG")" "service restart" "(RETRY) a served binary is not restarted again every tick"
+
+# --- case: a hand-run build reaches the service on the next tick --------------
+# `gc-helm-build.sh` with no --deploy publishes and restarts nothing by design.
+# Before the pending record existed, that binary was inert until the next SOURCE
+# edit made it stale again — the same dead end as a failed restart, entered by
+# someone building by hand.
+fixture
+run_build
+eq "$RC" 0 "(HANDBUILT) a hand-run build exits 0"
+hasnt "$(cat "$GCLOG")" "service restart" "(HANDBUILT) and restarts nothing itself"
+rm -f "$RECORD"; : > "$GCLOG"
+run_build --deploy
+eq "$RC" 0 "(HANDBUILT) the next deploy tick exits 0"
+absent "$RECORD" "(HANDBUILT) with nothing left to build"
+has "$(cat "$GCLOG")" "service restart helm" "(HANDBUILT) and serves what the hand build left"
+
+# ==============================================================================
+# STATIC GUARDS
+# ==============================================================================
+
+# The regression that caused the tk-m18ml incident is pointing the toolchain
+# straight at the shared, unbounded $GOTMP. Whatever else the build line grows,
+# it must hand the toolchain a dir this invocation owns and deletes.
+if grep -qE '(TMPDIR|GOTMPDIR)="\$GOTMP"' "$BUILD"; then
     bad "(STATIC) build points TMPDIR/GOTMPDIR at the unbounded \$GOTMP again"
 else
     ok "(STATIC) build never points TMPDIR/GOTMPDIR at the unbounded \$GOTMP"
 fi
-grep -q 'GOTMPDIR="\$GOTMP_RUN"' "$SCRIPT" \
+grep -q 'GOTMPDIR="\$GOTMP_RUN"' "$BUILD" \
     && ok "(STATIC) build is handed the per-invocation scratch dir" \
     || bad "(STATIC) build no longer uses \$GOTMP_RUN"
 
-# On the degraded path $GOTMP_RUN IS the shared root, so the cleanup after the
-# build must be ownership-guarded: unguarded, a fallback triggered by ENOSPC —
-# mkdir fails while the directory is still perfectly writable — would rm -rf
-# every concurrent build's scratch, on the full disk this whole change exists to
-# prevent. (DEGRADE) above cannot demonstrate that: its fallback is triggered by
-# unwritability, and the same unwritability defeats the destructive rm. So the
-# guard is pinned here instead.
-grep -q '\[ "\$GOTMP_RUN_OWNED" -eq 1 \]' "$SCRIPT" \
-    && ok "(STATIC) post-build cleanup only removes scratch this invocation created" \
-    || bad "(STATIC) post-build cleanup is no longer ownership-guarded — a degraded run can rm -rf the shared root"
+# On the degraded path $GOTMP_RUN IS the shared root, so cleanup must be
+# ownership-guarded: unguarded, a fallback triggered by ENOSPC — mkdir fails
+# while the directory is still perfectly writable — would rm -rf every
+# concurrent build's scratch, on the full disk this bounding exists to prevent.
+# (DEGRADE) cannot demonstrate that: its fallback is triggered by unwritability,
+# and the same unwritability defeats the destructive rm. So it is pinned here.
+grep -q 'GOTMP_RUN_OWNED" -eq 1' "$BUILD" \
+    && ok "(STATIC) cleanup only removes scratch this invocation created" \
+    || bad "(STATIC) cleanup is no longer ownership-guarded — a degraded run can rm -rf the shared root"
+
+# The launcher must contain no build. (NOBUILD) proves the current one does not
+# build for the cases it exercises; this refuses the whole shape, so a future
+# edit cannot reintroduce a build down some path the cases do not reach.
+if grep -qE '(go build|GC_GO_BIN|GOTMPDIR|newer_than_binary)' "$SVC"; then
+    bad "(STATIC) the launcher has grown a build again — it has 5s, and the build needs 12.5s"
+else
+    ok "(STATIC) the launcher contains no build"
+fi
+grep -q 'exec "\$BIN"' "$SVC" \
+    && ok "(STATIC) the launcher still exec's, so SIGTERM reaches the Go process" \
+    || bad "(STATIC) the launcher no longer exec's the binary"
+
+# The isolation is load-bearing, so it is asserted rather than assumed. If a
+# future edit drops the strip above, this fails in the suite instead of being
+# discovered as a replaced production binary.
+[ -z "${GC_CITY:-}${GC_CITY_PATH:-}${GC_CITY_ROOT:-}${GC_SERVICE_STATE_ROOT:-}" ] \
+    && ok "(ISOLATION) the ambient city is stripped for the whole suite" \
+    || bad "(ISOLATION) a city env var survived — cases can reach the live service root"
+case "$SAFE_NAME" in
+    helm) bad "(ISOLATION) the fallback cases build under the REAL service name" ;;
+    *)    ok "(ISOLATION) fallback cases build under a sacrificial service name" ;;
+esac
 
 echo ""
-echo "gc-helm-svc build-scratch bounding: $PASS passed, $FAIL failed"
+echo "helm build/start split: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

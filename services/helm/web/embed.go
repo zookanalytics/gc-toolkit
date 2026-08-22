@@ -2,8 +2,8 @@
 //
 // The app source (Vite + React + TypeScript) and its build output live in this
 // same directory: `npm run build` here produces dist/, which the `all:` embed
-// below compiles into helm-svc. dist/ is COMMITTED on purpose — the launcher
-// (assets/scripts/gc-helm-svc.sh) rebuilds the Go binary on demand but never
+// below compiles into helm-svc. dist/ is COMMITTED on purpose — the builder
+// (assets/scripts/gc-helm-build.sh) rebuilds the Go binary on demand but never
 // runs npm, so a Node-less build must still yield a working board. Rebuild and
 // commit dist/ whenever the app source changes; see README.md.
 //
