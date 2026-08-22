@@ -54,8 +54,8 @@ expiry.
 
 ## What shipped, and why it is not that hazardous half
 
-`assets/scripts/converse-claim.sh` claims, and **puts a foreign turn back**
-before telling the session to drain. The release is what converts the hazardous
+`assets/scripts/converse-claim.sh` claims, and **puts every foreign turn the
+claim assigned back** before telling the session to drain. The release is what converts the hazardous
 remedy into a safe one, so it is the part that had to be verified rather than
 assumed.
 
@@ -93,6 +93,32 @@ still be held, so the script re-reads the bead and only drains on a confirmed
 `reason=unreleasable` rather than stranded — which is also where upstream
 clause 2 applies: a claim in hand is authoritative. Pinned by `(FAILSAFE)`.
 
+**One claim can assign more than one turn** (added on the pre-open re-gate of
+this branch; the first version released only `.bead_id`). `gc hook --claim`
+preassigns the claimed bead's continuation-group siblings onto the same session
+in the same call — `preassignHookContinuationGroup` in
+`cmd/gc/cmd_hook_claim.go`, which assigns every open, unassigned, route-matching
+sibling sharing the bead's `gc.root_bead_id` and `gc.continuation_group` — and
+reports them as `continuation_assigned`. Releasing only the named turn therefore
+drained with the vacuumed siblings still `in_progress` on a dying session: the
+strand this script exists to prevent, reached through the door next to the one
+it was watching. It is not a rare shape — a live `gc hook --claim` on
+2026-08-22 returned five siblings in one call.
+
+Every id in that set is in the claimed turn's group by construction, so when the
+named turn is foreign they all are, and the whole set goes back through the same
+three ordered writes and the same read-back. Absent the key the set is just the
+named turn, which is the previous behaviour. The set is taken from the claim
+result rather than from a query for "everything assigned to this session",
+because the claim is what did the assigning and names its own work exactly,
+whereas a session-wide sweep would also catch turns from the session's OWN
+group — not this script's to return. Residual, and legible rather than silent:
+if `gc` fails part way through the preassign it exits non-zero having already
+assigned some siblings and prints no JSON, so no release list reaches the
+script at all. The upstream `--continuation-group` filter retires that along
+with the round trip. Pinned by `(VACUUM)`, `(VACUUM-ORDER)`, `(VACUUM-SPLIT)`,
+`(VACUUM-NOROUTE)`, `(VACUUM-FAILSAFE)` and `(VACUUM-ABSENT)`.
+
 ## Rejected
 
 - **Editing only the prompt.** Instruction-dependent fixes fail silently, and
@@ -107,14 +133,34 @@ clause 2 applies: a claim in hand is authoritative. Pinned by `(FAILSAFE)`.
 
 ## Verification
 
-`assets/scripts/converse-signoff.test.sh` — 110 passed, 0 failed. New section
+`assets/scripts/converse-signoff.test.sh` — 122 passed, 0 failed. New section
 "the claim boundary is scoped to the continuation group": `(NOWORK)` `(FIRST)`
-`(SAME)` `(NOGROUP)` `(FOREIGN)` `(SPLIT)` `(ORDER)` `(NOROUTE)` `(FAILSAFE)`,
-plus static assertions that the prompt no longer carries the broadened sentence
-and that the wake nudge names the claimer (the nudge is read before step 1, so a
-stale nudge re-teaches the unscoped claim whatever the prompt says).
+`(SAME)` `(NOGROUP)` `(FOREIGN)` `(SPLIT)` `(ORDER)` `(NOROUTE)` `(FAILSAFE)`
+and, for the vacuumed set, `(VACUUM)` `(VACUUM-ORDER)` `(VACUUM-SPLIT)`
+`(VACUUM-NOROUTE)` `(VACUUM-FAILSAFE)` `(VACUUM-ABSENT)`, plus static assertions
+that the prompt no longer carries the broadened sentence and that the wake nudge
+names the claimer (the nudge is read before step 1, so a stale nudge re-teaches
+the unscoped claim whatever the prompt says).
 
 Each guard was mutation-tested and each fails its own assertion when removed:
 dropping the group comparison, batching the release into one update, moving the
 session-pointer unset after the assignee clear, also clearing `gc.routed_to`,
 and trusting the writes instead of re-reading.
+
+The `VACUUM` guards were verified the same way, against the pre-fix script in a
+parallel tree rather than by removal: the new assertions fail 6 of 122 on the
+version that released only `.bead_id`, and the two that pass there vacuously —
+`(VACUUM-SPLIT)` and `(VACUUM-NOROUTE)`, which have no sibling writes to judge —
+were mutated on the fixed script (batching a sibling's status+assignee into one
+update, and clearing a sibling's `gc.routed_to`) and each then failed.
+
+`bash -n`, `shellcheck -s sh assets/scripts/converse-claim.sh` (clean) and
+`shellcheck -s bash assets/scripts/converse-signoff.test.sh` (info-level only,
+all of them shapes already present in the file). Adjacent suites unchanged:
+`converse-fold-scope.test.sh` 22/0, `liveness-recheck.test.sh` 67/0,
+`doctor/check-operator-next-step-wiring/run.test.sh` 14/0.
+
+One harness defect surfaced and was fixed here: `bad` interpolated `$2`
+unconditionally under `set -u`, so a one-argument call aborted the run and every
+assertion after it went unreported — a truncated suite that reads as a pass. The
+detail argument is now optional.

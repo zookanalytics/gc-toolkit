@@ -66,6 +66,30 @@
 # reached by a different route. The session pointers are cleared FIRST so the
 # instant the turn becomes offerable it no longer names a dead session.
 #
+# ── The release covers the whole claim, not just the named turn ──────
+# One claim can assign MORE than one turn. `gc hook --claim` preassigns the
+# claimed bead's continuation-group siblings onto the same session in the same
+# call (`preassignHookContinuationGroup` in cmd/gc/cmd_hook_claim.go) and
+# reports them back as `continuation_assigned`. Releasing only `.bead_id` left
+# every vacuumed sibling `in_progress` on a session that was about to drain —
+# the exact strand this script exists to prevent, reached by the door next to
+# the one it was watching.
+#
+# Every id in that set is in the SAME group as the claimed turn — the preassign
+# filters on it — so when the claimed turn is foreign, all of them are, and the
+# whole set goes back. Absent the key (an older `gc`, or a claim that vacuumed
+# nothing) the set is just the claimed bead, which is the previous behaviour.
+#
+# The set comes from the claim result rather than from a query for "everything
+# assigned to this session", because the claim is the thing that did the
+# assigning and names its own work exactly; a session-wide sweep would also
+# catch turns from the session's OWN group, which are not this script's to
+# return. The residual: if `gc` fails PART WAY through the preassign it exits
+# non-zero having already assigned some siblings and prints no JSON, so no
+# release list reaches us. That is an upstream partial failure this script
+# cannot see; the group filter in `gc hook --claim` retires it along with the
+# round trip.
+#
 # ── What it does NOT own ─────────────────────────────────────────────
 # Everything about the sitting itself. This is the claim boundary only: which
 # turn this session may work, and how a turn it may not work gets back to the
@@ -111,24 +135,54 @@ if [ -z "$CURRENT_GROUP" ] || [ -z "$GROUP" ] || [ "$GROUP" = "$CURRENT_GROUP" ]
     exit 0
 fi
 
-# Foreign group. Put it back before draining — see the header.
-RELEASED=1
-gc bd update "$BEAD" --unset-metadata gc.session_id --unset-metadata gc.session_name >/dev/null 2>&1 || RELEASED=0
-gc bd update "$BEAD" --status=open >/dev/null 2>&1 || RELEASED=0
-gc bd update "$BEAD" --assignee="" >/dev/null 2>&1 || RELEASED=0
+# Foreign group. Put back everything this claim assigned, then drain — header.
 
-# Trust the read, not the writes: a partial release still holds the turn.
-STATE=$(gc bd show "$BEAD" --json 2>/dev/null | tr -d '\000-\037' \
-        | jq -r 'if type=="array" then "\(.[0].status // "")|\(.[0].assignee // "")" else "|" end' 2>/dev/null || printf '')
-case "$STATE" in
-    "open|") ;;                       # back in the pool
-    *)       RELEASED=0 ;;
-esac
+# release_turn <bead-id> — the three ordered writes, then the read-back that
+# decides. Every write is attempted even after one fails, so a bead is never
+# left half-cleared, and a failed write is sticky: the read must ALSO agree
+# before a turn counts as returned.
+release_turn() {
+    _id="$1"
+    _ok=1
+    gc bd update "$_id" --unset-metadata gc.session_id --unset-metadata gc.session_name >/dev/null 2>&1 || _ok=0
+    gc bd update "$_id" --status=open >/dev/null 2>&1 || _ok=0
+    gc bd update "$_id" --assignee="" >/dev/null 2>&1 || _ok=0
+
+    # Trust the read, not the writes: a partial release still holds the turn.
+    STATE=$(gc bd show "$_id" --json 2>/dev/null | tr -d '\000-\037' \
+            | jq -r 'if type=="array" then "\(.[0].status // "")|\(.[0].assignee // "")" else "|" end' 2>/dev/null || printf '')
+    case "$STATE" in
+        "open|") ;;                   # back in the pool
+        *)       _ok=0 ;;
+    esac
+    [ "$_ok" = "1" ]
+}
+
+# The claimed turn FIRST, then every sibling the same claim vacuumed onto this
+# session. Order preserved and duplicates dropped, so the claimed bead is still
+# the first thing put back even when `gc` also names it in the sibling list.
+RELEASE_IDS=$(printf '%s' "$CLAIM" | jq -r '
+    ([.bead_id // empty] + (.continuation_assigned // []))
+    | map(select(type == "string" and . != ""))
+    | reduce .[] as $x ([]; if index($x) then . else . + [$x] end)
+    | .[]' 2>/dev/null || printf '')
+# A claim we could not re-read is still a claim: fall back to the turn we know.
+[ -z "$RELEASE_IDS" ] && RELEASE_IDS="$BEAD"
+
+RELEASED=1
+UNRELEASED=""
+for _turn in $RELEASE_IDS; do
+    if ! release_turn "$_turn"; then
+        RELEASED=0
+        UNRELEASED="${UNRELEASED:+$UNRELEASED }$_turn(${STATE:-unreadable})"
+    fi
+done
 
 if [ "$RELEASED" = "0" ]; then
-    # Could not put it back. Working it out of group is a legible surprise the
-    # sitting can open by naming; stranding it is a silent one nobody sees.
-    echo "$PROG: could not release $BEAD back to the pool (state: ${STATE:-unreadable}); working it rather than stranding it" >&2
+    # Could not put it all back. Working the claimed turn out of group is a
+    # legible surprise the sitting can open by naming; draining now would
+    # strand whatever is still held, which is the silent one nobody sees.
+    echo "$PROG: could not release $UNRELEASED back to the pool; working $BEAD rather than stranding it" >&2
     echo "action=work bead=$BEAD group=$GROUP reason=unreleasable"
     exit 0
 fi

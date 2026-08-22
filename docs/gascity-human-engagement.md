@@ -100,9 +100,10 @@ Each entry: the upstream fact, its verification status, and the seam.
   in conflict: the first governs whether to CLAIM across a group, the second
   what a claim already in hand is worth. The pack now honours both —
   `assets/scripts/converse-claim.sh` refuses to *make* the cross-group claim
-  (it puts the turn back and drains, per clause 1), and when a turn cannot be
-  released it is worked rather than stranded, because clause 2 says a claim in
-  hand is authoritative. The scoping is pack-side only because
+  (it puts back every turn that claim assigned — the named one and any
+  continuation-group siblings the claim vacuumed onto the session with it — and
+  drains, per clause 1), and when a turn cannot be released it is worked rather
+  than stranded, because clause 2 says a claim in hand is authoritative. The scoping is pack-side only because
   `gc hook --claim` has no group filter — its whole option set is `--claim`,
   `--drain-ack`, `--inject`, `--json` (verified 2026-08-22) — which is the
   upstream ask: a `--continuation-group` filter would make the claim/release

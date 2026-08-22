@@ -51,9 +51,16 @@ ok() {
     PASS=$((PASS + 1))
     printf '  ok    %s\n' "$1"
 }
+# bad <label> [detail] — the detail is OPTIONAL. Under `set -u` a one-argument
+# call used to abort the whole run on `$2`, so the first such failure truncated
+# the suite and every assertion after it went unreported — a silent pass.
 bad() {
     FAIL=$((FAIL + 1))
-    printf '  FAIL  %s\n        %s\n' "$1" "$2"
+    if [ -n "${2:-}" ]; then
+        printf '  FAIL  %s\n        %s\n' "$1" "$2"
+    else
+        printf '  FAIL  %s\n' "$1"
+    fi
 }
 # have <label> <literal> <file> — fixed-string presence
 have() {
@@ -668,21 +675,41 @@ cat > "$CTMP/bin/gc" <<'GCC'
 case "$1 ${2:-}" in
   "hook --claim") cat "$FAKE_CLAIM" ;;
   "bd update")    printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
-  "bd show")      cat "$FAKE_SHOW" ;;
+  # A per-bead fixture wins when one exists, so a case can hold ONE turn of a
+  # vacuumed set back while the rest release. Otherwise the shared file answers
+  # for every bead, which is what the single-turn cases below rely on.
+  "bd show")      if [ -n "${FAKE_SHOW_DIR:-}" ] && [ -f "$FAKE_SHOW_DIR/${3:-}.json" ]; then
+                      cat "$FAKE_SHOW_DIR/${3:-}.json"
+                  else
+                      cat "$FAKE_SHOW"
+                  fi ;;
 esac
 exit 0
 GCC
 chmod +x "$CTMP/bin/gc"
 
-# run_claim <claim-json> <current-group> <show-json> -> CRC / COUT / CUPD
+# run_claim <claim-json> <current-group> <show-json> [held-id ...]
+#   -> CRC / COUT / CUPD
+# Any id listed after the show fixture reads back as STILL HELD, so a case can
+# hold one turn of a vacuumed set back and prove the verdict is gated on the
+# whole set rather than on the turn the claim happened to name.
 run_claim() {
     printf '%s' "$1" > "$CTMP/claim.json"
     printf '%s' "$3" > "$CTMP/show.json"
+    rm -rf "$CTMP/show.d"
+    mkdir -p "$CTMP/show.d"
+    _rc_group="$2"
+    shift 3
+    for _rc_held in "$@"; do
+        printf '[{"id":"%s","status":"in_progress","assignee":"converse-1"}]' \
+            "$_rc_held" > "$CTMP/show.d/$_rc_held.json"
+    done
     : > "$CTMP/updates"
     CRC=0
     COUT=$(env PATH="$CTMP/bin:$PATH" FAKE_CLAIM="$CTMP/claim.json" \
                FAKE_UPDATES="$CTMP/updates" FAKE_SHOW="$CTMP/show.json" \
-               sh "$CLAIMER" "$2" 2>"$CTMP/err") || CRC=$?
+               FAKE_SHOW_DIR="$CTMP/show.d" \
+               sh "$CLAIMER" "$_rc_group" 2>"$CTMP/err") || CRC=$?
     CUPD=$(cat "$CTMP/updates")
 }
 
@@ -763,6 +790,78 @@ eq "$CRC" "0" "(FAILSAFE) …and the session does not drain onto a held bead"
 grep -q 'could not release' "$CTMP/err" \
   && ok "(FAILSAFE) …and the failure is reported, not swallowed" \
   || bad "(FAILSAFE) the failed release was silent: $(cat "$CTMP/err")"
+
+# --- (VACUUM) one claim can assign MORE turns than the one it names ---------
+# `gc hook --claim` preassigns the claimed bead's continuation-group siblings
+# onto the SAME session in the SAME call — `preassignHookContinuationGroup` in
+# cmd/gc/cmd_hook_claim.go — and reports them back as `continuation_assigned`.
+# Releasing only `.bead_id` drained with every vacuumed sibling still
+# in_progress on a dying session: the exact strand this script exists to
+# prevent, reached through the door next to the one it was watching. The
+# siblings are in the claimed turn's group by construction (the preassign
+# filters on it), so when the named turn is foreign they all are.
+run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1","tk-sib2"]}' \
+          "tk-subj" "$RELEASED"
+eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \
+   "(VACUUM) the named turn still decides the verdict"
+eq "$CRC" "1" "(VACUUM) …and the session is told to drain"
+for vb in tk-foreign tk-sib1 tk-sib2; do
+    if grep -q -- "update $vb --unset-metadata gc.session_id" <<< "$CUPD" \
+       && grep -q -- "update $vb --status=open" <<< "$CUPD" \
+       && grep -q -- "update $vb --assignee=" <<< "$CUPD"; then
+        ok "(VACUUM) $vb is put back before the drain"
+    else
+        bad "(VACUUM) $vb is put back before the drain" "not fully released in: $CUPD"
+    fi
+done
+
+# (VACUUM-ORDER) the ordered writes are PER TURN, not just for the first one:
+# a sibling made offerable while it still names a dead session is the same
+# failure the (ORDER) case pins for the named turn.
+v_sess=$(grep -n -- 'update tk-sib2 --unset-metadata gc.session_id' <<< "$CUPD" | head -1 | cut -d: -f1)
+v_asg=$(grep -n -- 'update tk-sib2 --assignee=' <<< "$CUPD" | head -1 | cut -d: -f1)
+if [ -n "$v_sess" ] && [ -n "$v_asg" ] && [ "$v_sess" -lt "$v_asg" ]; then
+    ok "(VACUUM-ORDER) a sibling's session pointers are cleared before it is offerable"
+else
+    bad "(VACUUM-ORDER) a sibling's session pointers are cleared before it is offerable" \
+        "unset=${v_sess:-none} assignee=${v_asg:-none} in: $CUPD"
+fi
+
+# (VACUUM-SPLIT) the split that the claim guard forces applies to siblings too.
+if grep -qE -- 'update tk-sib1 .*(--status=open.*--assignee=|--assignee=.*--status=open)' <<< "$CUPD"; then
+    bad "(VACUUM-SPLIT) a sibling's release is split into separate writes" \
+        "status and assignee ride one update — the claim guard rolls both back"
+else
+    ok "(VACUUM-SPLIT) a sibling's release is split into separate writes"
+fi
+
+# (VACUUM-NOROUTE) parking a sibling is as bad as parking the named turn.
+if grep -q -- 'gc.routed_to' <<< "$CUPD"; then
+    bad "(VACUUM-NOROUTE) the sibling release leaves gc.routed_to alone" \
+        "the route was cleared — a parked turn is not a returned one: $CUPD"
+else
+    ok "(VACUUM-NOROUTE) the sibling release leaves gc.routed_to alone"
+fi
+
+# --- (VACUUM-FAILSAFE) a sibling that will not go back blocks the drain -----
+# The named turn releases cleanly here; only tk-sib1 stays held. Draining on
+# that is the strand, so the whole set gates the verdict.
+run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1"]}' \
+          "tk-subj" "$RELEASED" tk-sib1
+eq "$COUT" "action=work bead=tk-foreign group=tk-other reason=unreleasable" \
+   "(VACUUM-FAILSAFE) a held sibling stops the drain even when the named turn released"
+eq "$CRC" "0" "(VACUUM-FAILSAFE) …and the session does not drain onto it"
+grep -q 'could not release .*tk-sib1' "$CTMP/err" \
+  && ok "(VACUUM-FAILSAFE) …and the held sibling is named in the report" \
+  || bad "(VACUUM-FAILSAFE) …and the held sibling is named in the report" \
+         "tk-sib1 missing from: $(cat "$CTMP/err")"
+
+# --- (VACUUM-ABSENT) an older gc names no siblings — unchanged behaviour ----
+# Guards the other direction: the release set must not invent ids when the key
+# is missing, or every claim writes to beads that were never assigned.
+run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "$RELEASED"
+eq "$(grep -c -- '--status=open' <<< "$CUPD")" "1" \
+   "(VACUUM-ABSENT) a claim naming no siblings still releases exactly one turn"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
