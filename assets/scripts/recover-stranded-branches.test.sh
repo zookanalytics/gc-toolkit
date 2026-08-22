@@ -50,6 +50,21 @@
 #   (BEHIND)   0 commits ahead of the target -> nothing left to land, left for the
 #              refinery to reconcile, never handed off
 #   (FRESH)    a tip younger than --min-age-minutes is work in motion, not a strand
+#   (REWORK)   a pre-open rework CHILD is not a strand. It wears the candidate
+#              shape exactly — open, unassigned, unrouted, `branch` stamped —
+#              because every field the filter rejects on lives on its
+#              `parent-child` PARENT: an anchor at merge_result=pre_open_gate
+#              carrying check.codex=fixable@<oid>. The child is left completely
+#              alone, so `acting()` still holds on the anchor and its review gate
+#              stays suppressed. A parent carrying NEITHER marker protects nothing,
+#              and an unreadable parent fails closed — both when the listing
+#              errors and when it returns a payload the filter cannot evaluate
+#   (ONCE)     the recovery stamp is READ BACK, so a declined handoff cannot
+#              re-arm. The refinery's hand-back restores the candidate shape and
+#              bumps `updated_at`, which is all the age gate reads — so without a
+#              once-marker the decline sets the loop PERIOD instead of breaking the
+#              loop. Keyed by EQUALITY on `<branch>@<tip>`, so a branch that has
+#              genuinely moved is still rescued
 #   (SKIPSET)  the non-candidates, each excluded by exactly one field: an assignee,
 #              a gc.routed_to, a merge_result, a recorded PR, duplicate_of, a live
 #              merge_hold, and a non-impl task_kind
@@ -222,12 +237,29 @@ b-inprog|c-strand
 b-clobber|c-strand
 b-depfail|c-strand
 b-convfail|c-unreadable
+b-rework|c-strand
+b-plainkid|c-strand
+b-parentfail|c-strand
+b-parentshape|c-strand
+b-redo|c-strand
 D
 
 # convoy -> metadata.target (only the owned convoy carries one)
 cat > "$TMP/convoy_targets" <<'C'
 c-conv|integration/gc-2026
 C
+
+# bead -> its `parent-child` PARENT, and the two markers that decide whether that
+# parent is carrying the child's next move: `child|parent|merge_result|check.codex`,
+# with `-` meaning the key is absent. This is what `gc bd dep list <id>
+# --direction=down --json` answers — the parent-child edge sits on the CHILD with
+# the parent in the depends-on slot, so `--direction=up` (which the convoy gate
+# reads) does NOT see it. b-plainkid is the discriminator: a parent carrying neither
+# marker protects nothing, or the gate would be "any bead with a parent is exempt".
+cat > "$TMP/parents" <<'PP'
+b-rework|b-anchor|pre_open_gate|fixable@sha-anchor
+b-plainkid|b-plainparent|-|-
+PP
 
 # branch -> sha on origin. A branch absent here does not exist on origin — which is
 # what a live polecat's branch looks like right up until it pushes (b-mid-impl), and
@@ -253,6 +285,11 @@ polecat/b-inprog|sha-inprog
 polecat/b-clobber|sha-clobber
 polecat/b-depfail|sha-depfail
 polecat/b-convfail|sha-convfail
+polecat/b-anchor|sha-anchor
+polecat/b-plainkid|sha-plainkid
+polecat/b-parentfail|sha-parentfail
+polecat/b-parentshape|sha-parentshape
+polecat/b-redo|sha-redo
 R
 
 # sha -> commits ahead of its base
@@ -272,6 +309,12 @@ sha-inprog|2
 sha-clobber|1
 sha-depfail|1
 sha-convfail|1
+sha-anchor|1
+sha-plainkid|1
+sha-parentfail|1
+sha-parentshape|1
+sha-redo|1
+sha-redo2|3
 A
 
 # branch -> the `gh pr list` payload for it. Absent -> [] (no PR).
@@ -359,7 +402,8 @@ case "$sub" in
           esac
         done ;;
       dep)
-        # `dep list <id> --direction=up --json`
+        # `dep list <id> --direction=up --json`   -> the convoys that TRACK the bead
+        # `dep list <id> --direction=down --json` -> its `parent-child` PARENT
         id="$2"
         # b-depfail models the dep listing FAILING the way bd really fails it: an
         # error object on stdout with rc=1, which `.[]?.id` reduces to the same
@@ -368,6 +412,34 @@ case "$sub" in
           printf '{"error":"resolving b-depfail: connection refused","schema_version":1}\n'
           exit 1
         fi
+        case " $* " in
+          *--direction=down*)
+            # b-parentfail models the same failure one edge over: the parent listing
+            # that did not read. An unread parent is not proof that no anchor stands
+            # behind the bead, so it must not be taken as "no parent".
+            if [ "$id" = "b-parentfail" ]; then
+              printf '{"error":"resolving b-parentfail: connection refused","schema_version":1}\n'
+              exit 1
+            fi
+            # b-parentshape is the NASTIER half, the one rc alone cannot catch: the
+            # same error object at rc=0. `.[]?` reduces it to the very empty output a
+            # parentless bead gives, so only a shape check tells "this bead has no
+            # anchor" from "the parent listing did not answer".
+            if [ "$id" = "b-parentshape" ]; then
+              printf '{"error":"resolving b-parentshape: connection refused","schema_version":1}\n'
+              exit 0
+            fi
+            prow=$(awk -F'|' -v b="$id" '$1==b{print; exit}' "$FAKE_PARENTS")
+            if [ -z "$prow" ]; then printf '[]\n'; exit 0; fi
+            pid=$(printf '%s' "$prow" | cut -d'|' -f2)
+            pmr=$(printf '%s' "$prow" | cut -d'|' -f3)
+            pcx=$(printf '%s' "$prow" | cut -d'|' -f4)
+            jq -n --arg p "$pid" --arg mr "$pmr" --arg cx "$pcx" \
+              '[{id: $p, dependency_type: "parent-child", status: "open",
+                 metadata: ((if $mr == "-" then {} else {merge_result: $mr} end)
+                            + (if $cx == "-" then {} else {"check.codex": $cx} end))}]'
+            exit 0 ;;
+        esac
         c=$(awk -F'|' -v b="$id" '$1==b{print $2; exit}' "$FAKE_DEPS")
         if [ -n "$c" ]; then jq -n --arg c "$c" '[{id:$c, issue_type:"convoy"}]'; else printf '[]\n'; fi ;;
       *) : ;;
@@ -435,13 +507,35 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_CANDIDATES="$TMP/candidates.json" FAKE_LIVE="$TMP/live.json"
 export FAKE_SESSIONS="$TMP/sessions.json" FAKE_DEPS="$TMP/deps"
 export FAKE_CONVOY_TARGETS="$TMP/convoy_targets" FAKE_REMOTE="$TMP/remote"
+export FAKE_PARENTS="$TMP/parents"
 export FAKE_AHEAD="$TMP/ahead" FAKE_PRS="$TMP/prs" FAKE_UPDATES="$TMP/updates"
 export FAKE_MAIL="$TMP/mail" FAKE_NUDGES="$TMP/nudges" FAKE_STATE="$TMP/state"
 export FAKE_OLD_EPOCH="$OLD_EPOCH" FAKE_FRESH_EPOCH="$FRESH_EPOCH"
 export GC_RIG="gc-toolkit" GC_AGENT="gc-toolkit/gc-toolkit.witness"
 
 REFINERY="gc-toolkit/gc-toolkit.refinery"
-run() { "$SCRIPT" --refinery "$REFINERY" --root "$TMP/repo" "$@" 2> "$TMP/err" > "$TMP/out"; }
+# `run_as` takes the script to drive so the mutation cases below can run a copy of
+# the pass with one guard cut out of it, against these same fixtures.
+run_as() { local s="$1"; shift; "$s" --refinery "$REFINERY" --root "$TMP/repo" "$@" 2> "$TMP/err" > "$TMP/out"; }
+run() { run_as "$SCRIPT" "$@"; }
+
+# Cut one guard out of the pass and prove the cut LANDED. A mutation test whose sed
+# silently matched nothing is a tautology — it asserts the fixture, not the guard.
+MUTANT_PATH=""
+mutant() { # <name> <sed-expression> -> sets MUTANT_PATH
+  local name="$1"
+  local expr="$2"
+  local out="$TMP/mutants/$name.sh"
+  mkdir -p "$TMP/mutants"
+  sed -e "$expr" "$SCRIPT" > "$out"
+  chmod +x "$out"
+  if cmp -s "$SCRIPT" "$out"; then
+    bad "(MUTANT) $name: the guard-removal expression matched nothing — the case below would prove nothing"
+  else
+    ok "(MUTANT) $name: the guard is cut out of the mutant"
+  fi
+  MUTANT_PATH="$out"
+}
 
 # --- pass 1: --dry-run --------------------------------------------------------
 set +e
@@ -715,6 +809,144 @@ hasnt "would land on 'integration/gone'" "$TMP/err" "(ESCALATE) nor re-warned"
 hasnt "gc bd update b-depfail" "$TMP/updates" \
   "(ESCALATE) an escalated tip suppresses a quieter refusal at the same tip too"
 has "6 reported" "$TMP/out" "(ESCALATE) every suppressed refusal is still counted"
+
+# --- pass 6: a rework child is queued, not stranded --------------------------
+# (REWORK) The shape that produced this guard (tk-6tlcu, live on tk-kbb8s/tk-y3tks):
+# the refinery's pre-open gate found fixable findings, filed a rework CHILD, and
+# parked the anchor. The child is open, unassigned, unrouted and carries `branch` —
+# the candidate shape, in full — because `merge_result`, the PR fields and the holds
+# all live on the anchor. Grabbing it does more than waste a handoff: the assignee
+# write breaks `gc.execution_routed_to != "" AND assignee == ""`, which is the only
+# way a queued child satisfies check-set-heal's `acting()`, so each grab
+# un-suppresses the anchor's review gate and burns a round against an unchanged head.
+cat > "$TMP/candidates-rework.json" <<JSON
+[
+  {"id":"b-rework","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-anchor","gc.routed_to":"",
+               "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"b-plainkid","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-plainkid"}},
+  {"id":"b-parentfail","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-parentfail"}},
+  {"id":"b-parentshape","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-parentshape"}}
+]
+JSON
+sed -i -e "s#__OLD__#$OLD_ISO#g" "$TMP/candidates-rework.json"
+
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_CANDIDATES="$TMP/candidates-rework.json" run
+set -e
+# Not merely "not handed off" but NOT WRITTEN TO AT ALL, which is the property the
+# guard exists for: `gc.execution_routed_to` set with the assignee still empty is the
+# only way a queued child satisfies check-set-heal's `acting()`, so any write that
+# lands an assignee on it un-suppresses the anchor's review gate.
+hasnt "b-rework" "$TMP/updates" \
+  "(REWORK) a rework child whose anchor is parked is never written to — so acting() still holds on that anchor"
+hasnt "b-rework" "$TMP/mail" "(REWORK) nor is a human summoned about it"
+has "b-rework is a rework child of b-anchor (merge_result=pre_open_gate, check.codex=fixable@sha-anchor)" \
+  "$TMP/out" "(REWORK) and the refusal names the anchor and both markers"
+# The discriminator: a parent carrying NEITHER marker protects nothing, or the gate
+# would read as "any bead with a parent is exempt" and strand every child forever.
+has "gc bd update b-plainkid --status=open --assignee=$REFINERY" "$TMP/updates" \
+  "(REWORK) a child whose parent carries neither marker is still recovered"
+# And the read itself fails closed, exactly as the convoy listing above does.
+has "stranded_branch_flagged=polecat/b-parentfail@sha-parentfail" "$TMP/updates" \
+  "(REWORK) an unreadable parent listing flags the bead"
+hasnt "gc bd update b-parentfail --assignee" "$TMP/updates" \
+  "(REWORK) and never hands it off on an unread parent"
+has "its parent-child parent could not be established" "$TMP/err" \
+  "(REWORK) explaining the refusal"
+# Both halves of the read, exactly as (DEPFAIL) covers both halves of the convoy
+# read: rc=1 above, and here an error object at rc=0 — which `.[]?` reduces to the
+# same empty answer a parentless bead gives. Failing open on it would grab the very
+# bead this gate exists to protect.
+has "stranded_branch_flagged=polecat/b-parentshape@sha-parentshape" "$TMP/updates" \
+  "(REWORK) a parent listing that reads but does not EVALUATE flags the bead too"
+hasnt "gc bd update b-parentshape --assignee" "$TMP/updates" \
+  "(REWORK) and is never taken for 'this bead has no anchor'"
+
+# MUTATION: cut the parent walk out and the same fixture must be grabbed. Without
+# this the case above would also pass against a pass that skips b-rework for some
+# unrelated reason — a fixture that is not a candidate at all proves nothing.
+# shellcheck disable=SC2016  # the $ is sed's, not the shell's — single quotes are required
+mutant no-parent-walk 's/if \[ -n "\$PARENT_GUARD" \]; then/if false; then/'
+MUT_PARENT="$MUTANT_PATH"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_CANDIDATES="$TMP/candidates-rework.json" run_as "$MUT_PARENT"
+set -e
+has "gc bd update b-rework --status=open --assignee=$REFINERY" "$TMP/updates" \
+  "(REWORK) MUTANT: with the parent walk removed the rework child IS grabbed"
+
+# --- pass 7: a declined handoff does not re-arm ------------------------------
+# (ONCE) Run the pass TWICE over the same bead, with the refinery's decline in
+# between. The decline clears the assignee and hands the bead back, restoring the
+# candidate shape exactly — and the hand-back itself bumps `updated_at`, which is
+# all the age gate reads. So the decline set the loop PERIOD rather than breaking
+# the loop, and the bead returned every --min-age-minutes forever (observed twice
+# on tk-kbb8s). The stamp was always written; nothing ever read it back.
+cat > "$TMP/candidates-once.json" <<JSON
+[
+  {"id":"b-redo","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-redo"}}
+]
+JSON
+sed -i -e "s#__OLD__#$OLD_ISO#g" "$TMP/candidates-once.json"
+
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_CANDIDATES="$TMP/candidates-once.json" run
+set -e
+has "gc bd update b-redo --status=open --assignee=$REFINERY" "$TMP/updates" \
+  "(ONCE) the first pass recovers the bead"
+has "stranded_branch_recovered=polecat/b-redo@sha-redo" "$TMP/updates" \
+  "(ONCE) and stamps the tip it recovered it at"
+
+# The hand-back, modelled from the stamp the pass ACTUALLY wrote rather than a
+# hand-typed copy of it: that is what proves the writer and the reader agree on the
+# key, which is the whole defect — the stamp was correct and simply never read.
+STAMP=$(sed -n 's/.*stranded_branch_recovered=\([^ ]*\).*/\1/p' "$TMP/updates")
+eq "$STAMP" "polecat/b-redo@sha-redo" "(ONCE) the stamp the guard reads is the stamp the pass writes"
+jq -c --arg s "$STAMP" 'map(.metadata.stranded_branch_recovered = $s)' \
+  "$TMP/candidates-once.json" > "$TMP/candidates-once2.json"
+
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_CANDIDATES="$TMP/candidates-once2.json" run
+set -e
+hasnt "gc bd update b-redo" "$TMP/updates" \
+  "(ONCE) the second pass does not hand the same tip off again"
+hasnt "b-redo" "$TMP/mail" "(ONCE) nor re-mails the mayor about it"
+has "declining to re-arm" "$TMP/out" "(ONCE) and says why it declined"
+
+# EQUALITY, not a blacklist: the same bead with the same marker, on a branch that
+# has since moved, is a genuinely new strand and must still be rescued. Without
+# this the marker would retire the bead permanently on its first decline.
+sed -e 's#^polecat/b-redo|sha-redo$#polecat/b-redo|sha-redo2#' "$TMP/remote" > "$TMP/remote2"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_REMOTE="$TMP/remote2" FAKE_CANDIDATES="$TMP/candidates-once2.json" run
+set -e
+has "gc bd update b-redo --status=open --assignee=$REFINERY" "$TMP/updates" \
+  "(ONCE) a branch that has MOVED since the stamp is rescued again"
+has "stranded_branch_recovered=polecat/b-redo@sha-redo2" "$TMP/updates" \
+  "(ONCE) and the marker is re-keyed to the new tip"
+
+# MUTATION: cut the once-marker out and the declined bead is grabbed a second time.
+# Tested on its own fixture, where the parent walk cannot also be holding it back —
+# two guards in series mask each other, and both mutants would read green.
+# shellcheck disable=SC2016  # the $ is sed's, not the shell's — single quotes are required
+mutant no-once-marker \
+  's/if \[ -n "\$HEAD_SHA" \] && \[ "\$RECOVERED" = "\$BRANCH@\$HEAD_SHA" \]; then/if false; then/'
+MUT_ONCE="$MUTANT_PATH"
+: > "$TMP/updates"; : > "$TMP/mail"; : > "$TMP/state"; : > "$TMP/nudges"
+set +e
+FAKE_CANDIDATES="$TMP/candidates-once2.json" run_as "$MUT_ONCE"
+set -e
+has "gc bd update b-redo --status=open --assignee=$REFINERY" "$TMP/updates" \
+  "(ONCE) MUTANT: with the once-marker removed the declined bead IS re-armed"
 
 echo
 echo "passed: $PASS, failed: $FAIL"

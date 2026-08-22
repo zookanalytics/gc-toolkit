@@ -60,6 +60,30 @@ else
     ' "$dir/$script" \
         || errors+=("$script: the unpublished-branch refusal is no longer gated by the liveness resolution — a running polecat that has not pushed yet would be flagged as vanished work on every pass")
 
+    # The two ways a bead can be UN-STRANDED while carrying none of the fields the
+    # candidate filter rejects on (tk-6tlcu). Both were live loops, and neither is
+    # visible from the outside — the pass reports a clean recovery either way.
+    #
+    # A pre-open rework CHILD carries no merge_result, no PR field and no hold: they
+    # all sit on its `parent-child` anchor, so only a walk to the parent tells it
+    # from a strand. Grabbing it writes an assignee, and that breaks the
+    # `gc.execution_routed_to != "" AND assignee == ""` clause which is the only way
+    # a queued child satisfies check-set-heal's `acting()` — un-suppressing the
+    # anchor's review gate and burning a round of GC_MAX_REVIEW_ROUNDS against an
+    # unchanged head, until the cap escalates the anchor to a human as "review
+    # rounds exhausted", falsely.
+    grep -q -- '--direction=down' "$dir/$script" \
+        || errors+=("$script: the parent-anchor walk is gone — a queued pre-open rework child wears the candidate shape exactly (every field the filter rejects on lives on its parent), so the pass grabs it, breaks acting() on the anchor and burns a review round against an unchanged head")
+
+    # And the recovery stamp has to be READ BACK, not merely written. When the
+    # refinery declines a handoff it clears the assignee and hands the bead back —
+    # restoring the candidate shape — and the hand-back itself bumps `updated_at`,
+    # which is all the age gate reads. Without a once-marker the decline sets the
+    # loop PERIOD instead of breaking the loop.
+    # shellcheck disable=SC2016  # a fixed string to find in the script, not an expansion
+    grep -qF -- '"$RECOVERED" = "$BRANCH@$HEAD_SHA"' "$dir/$script" \
+        || errors+=("$script: the recovery stamp is write-only again — nothing reads it back, so every handoff the refinery declines returns --min-age-minutes later, forever")
+
     # A refusal this pass can outlive has to be withdrawable. `<branch>@missing` is
     # the only marker that does not name a tip, so nothing about a later push expires
     # it, and the bead it sits on is usually handed to the refinery minutes later —
@@ -136,6 +160,10 @@ else
         || errors+=("$test_script: no live-but-unpushed case — that the liveness gate is reached BEFORE the unpublished-branch refusal, and not merely present, is unproven")
     grep -q 'RETRACT' "$dir/$test_script" \
         || errors+=("$test_script: no retraction case — that a '<branch>@missing' marker is withdrawn once the branch appears on origin is unproven")
+    grep -q '(REWORK)' "$dir/$test_script" \
+        || errors+=("$test_script: no rework-child case — that a queued pre-open child is left alone, and acting() on its anchor left standing with it, is unproven")
+    grep -q '(ONCE)' "$dir/$test_script" \
+        || errors+=("$test_script: no once-marker case — that a handoff the refinery declined does not re-arm every --min-age-minutes is unproven")
 fi
 
 # --- the call site ---------------------------------------------------------
