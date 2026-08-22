@@ -6,6 +6,17 @@ Attention Canvas operator dashboard (epic `tk-eemvf`) and the Go port of the
 board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces —
 the bash dies).
 
+> **The bash has not died, and it is still what `prefix+b` runs.**
+> `tmux-pick-helm.sh:52` invokes `gc-helm.sh --json`; the terminal board never
+> calls this service. So the port above is a **snapshot, not a link** — two
+> implementations of one model, neither reading the other. `tk-2v08m` fixed the
+> visits-invisible defect here and not there; `tk-fkeft` then fixed it (and the
+> false-stranded defect) in `gc-helm.sh`. **A change to this board's gather,
+> ranking, or anchor kinds is a standing question against the sibling** — say
+> in the PR whether it needs the same change. Whether the two should converge
+> or one should be retired is an open operator decision, recorded under
+> "Two helm boards, and they diverge" in `docs/gascity-human-engagement.md`.
+
 The spine came from the `tk-sy3vj` spike; `tk-x89rn` then widened the source seam
 so the board can read `updated_at` and bead metadata, which is what makes
 `stale_days` real. The model port is still partial — see *Still deferred*, below.

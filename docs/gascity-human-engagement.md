@@ -539,6 +539,40 @@ operator's *own* unsent words have no such protection, and until
   `proxy_process` `/svc/` route (`services/helm/` already uses it). Any
   conversation surface work should land behind that seam, not in new
   bespoke plumbing.
+- **Two helm boards, and they diverge (recorded 2026-08-21, `tk-fkeft`)**
+  — the board exists **twice**, and the operator's two surfaces are not
+  the same program:
+
+  | | reached by | implementation | gather |
+  |---|---|---|---|
+  | terminal | `prefix+b` (`tmux-pick-helm.sh:52` → `gc-helm.sh --json`) | `assets/scripts/gc-helm.sh`, POSIX sh | its own, direct `gc bd list` per rig |
+  | web | the dashboard | `services/helm/`, Go + React | the beads library / supervisor API |
+
+  `services/helm/internal/board` is documented as "ported field-for-field
+  from `gc-helm.sh`", and that port is a **snapshot, not a link**: nothing
+  keeps the two in step and neither reads the other. The divergence is
+  not hypothetical. `tk-2v08m` fixed the visits-invisible defect in the Go
+  board alone (every file it touched is under `services/helm/`) and closed
+  honestly on that scope; the terminal board — the one behind `prefix+b` —
+  still had it eleven days later, along with the false-stranded defect,
+  and `tk-fkeft` fixed both there. Each fix was correct and each board was
+  right about itself; the operator still spent that window reading a board
+  that was wrong in a way the other one no longer was.
+
+  **This is deliberately left open.** Three futures are coherent — keep
+  them independent (accepting that every board change is two changes),
+  share one gather behind a seam, or retire one — and the terminal board
+  is a surface the operator uses daily, so which one is theirs to pick,
+  not a polecat's to take on its own initiative. `services/helm/README.md`
+  already asserts an answer ("the bash PoC, which this replaces — the bash
+  dies"), but the bash has outlived that sentence by months and is still
+  the `prefix+b` target, so treat it as an intention, not a decision.
+
+  **Until it is decided, the tripwire:** a change to either board's
+  gather, ranking, or anchor kinds is a standing question against the
+  other. Say in the PR which board you touched and whether the sibling
+  needs the same change — `tk-2v08m` did say so, in as many words, which
+  is the only reason `tk-fkeft` was findable.
 
 ## What upstream does not ship (the pack's actual seam)
 
