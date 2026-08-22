@@ -71,7 +71,20 @@ SUBJECTS=$(jq '[.[] | select((.metadata.task_kind // "") == "triage-subject")
      scope: (.metadata["triage.scope"] // ""),
      last_seen: (if ((.metadata // {}) | has("triage.last_seen"))
                  then (.metadata["triage.last_seen"] // "") else null end)}]' "$OPEN")
-CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // empty)]' "$LIVE")
+CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | ((.metadata["gc.continuation_group"] // ""), (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // ""))) | select(. != "")]' "$LIVE")
+# A visit names its subject TWICE — the gc.continuation_group stamp and the
+# tracks edge the gate-visit block adds in the same breath — and only the edge
+# has proved reliable: on su-ab9je (shutupandlisten, 2026-08-20, bead tk-d6ddn)
+# the stamp landed EMPTY while the title, the sibling stamps in the same update,
+# and the tracks edge all carried the subject. Root cause never established, so
+# the guard reads BOTH and takes the union rather than trusting either alone —
+# a guard that misses a HELD sitting stacks a second visit on its subject.
+# gc bd list renders the edge as .type + .depends_on_id (gc bd show renders the
+# same edge as .dependency_type + .id); this is the LIST shape.
+# The select(. != "") is not tidying: an empty stamp would otherwise enter the
+# set as "", and a lookup for an empty subject id would match it and report a
+# live visit that does not exist.
+#
 # $LIVE, not $OPEN, for the visit set: a visit being held is
 # in_progress, not open — and a sitting already live is exactly the
 # case the skip below exists to protect.
@@ -86,7 +99,9 @@ CONVGROUPS=$(jq '[.[] | select((.metadata.task_kind // "") == "visit") | (.metad
 **2. Per subject, in order:**
 
 - **Skip if a visit is live** — the subject's id appears in
-  `$CONVGROUPS` (open AND held visits, per the listing above). Log
+  `$CONVGROUPS` (open AND held visits, and named by EITHER the visit's
+  `gc.continuation_group` stamp or its `tracks` edge, per the listing
+  above). Log
   `skipped-live-visit`. Never stack a second visit on one subject.
   **Stamp nothing on this path.** A bead that enters the scope while a
   sitting is held must still surface on the first run after that visit

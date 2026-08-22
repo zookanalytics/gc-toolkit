@@ -450,8 +450,23 @@ if [ "$READS_OK" -eq 1 ]; then
         # Class 3 at the subject level: a sitting is already live on this
         # subject. `index` returns a POSITION or null, and position 0 is a real
         # hit — the same reading the normalize step's step-3 skip uses.
+        # A visit names its subject TWICE — the gc.continuation_group stamp and
+        # the tracks edge the gate-visit block adds in the same breath — and only
+        # the edge has proved reliable: on su-ab9je (shutupandlisten, 2026-08-20,
+        # bead tk-d6ddn) the stamp landed EMPTY while the title, the sibling
+        # stamps in the same update, and the tracks edge all carried the subject.
+        # Root cause never established, so the guard reads BOTH and takes the
+        # union rather than trusting either alone — a guard that misses a HELD
+        # sitting stacks a second visit on its subject. gc bd list renders the
+        # edge as .type + .depends_on_id (gc bd show renders the same edge as
+        # .dependency_type + .id); this is the LIST shape. The select(. != "") is
+        # not tidying: an empty stamp would otherwise enter the set as "", and a
+        # lookup for an empty subject id would match it and report a live visit
+        # that does not exist.
         LIVE_VISIT=$(jq -r --arg s "$SUBJECT" '[.[] | select((.metadata.task_kind // "") == "visit")
-                                                    | (.metadata["gc.continuation_group"] // "")]
+                                                    | ((.metadata["gc.continuation_group"] // ""),
+                                                       (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
+                                                    | select(. != "")]
                                                | (index($s) // "") | tostring' "$LIVE" 2>/dev/null)
     fi
 fi
@@ -461,12 +476,17 @@ SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
     SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" '
-      # Live-visit continuation groups (class 3), from the open+in_progress set:
-      # a visit being HELD is in_progress, so an open-only read would re-file on
-      # exactly the subjects whose sittings are live.
+      # Live-visit subjects (class 3), from the open+in_progress set: a visit
+      # being HELD is in_progress, so an open-only read would re-file on exactly
+      # the subjects whose sittings are live. Union of the gc.continuation_group
+      # stamp and the tracks edge — the stamp alone has been observed empty on a
+      # live visit (su-ab9je, bead tk-d6ddn), and the mol-liveness-sweep step-3
+      # guard this mirrors carries the full account.
       ([ ($live[0] // [])[]
          | select((.metadata.task_kind // "") == "visit")
-         | (.metadata["gc.continuation_group"] // empty) ]) as $convgroups
+         | ((.metadata["gc.continuation_group"] // ""),
+            (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
+         | select(. != "") ]) as $convgroups
 
       # Every NOT-CLOSED id: the set every "is that target still alive?" test
       # resolves against. Never $live alone — that is open+in_progress only, and

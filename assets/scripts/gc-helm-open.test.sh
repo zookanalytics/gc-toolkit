@@ -77,7 +77,15 @@ case "$1 ${2:-}" in
     esac ;;
   "bd list")
     # The already-held lookup. $FAKE_VISIT set => one open visit on the subject.
-    if [ -n "${FAKE_VISIT:-}" ]; then
+    # FAKE_VISIT_EDGE=1 emits the su-ab9je shape instead (bead tk-d6ddn): the
+    # gc.continuation_group stamp landed EMPTY and only the tracks edge names the
+    # subject. Rendered in the `gc bd list` key pair (.type + .depends_on_id),
+    # which is the shape this call returns.
+    if [ -n "${FAKE_VISIT:-}" ] && [ -n "${FAKE_VISIT_EDGE:-}" ]; then
+      jq -n --arg v "$FAKE_VISIT" --arg s "$FAKE_SUBJECT" \
+        '[{id:$v, metadata:{task_kind:"visit","gc.continuation_group":""},
+           dependencies:[{issue_id:$v, depends_on_id:$s, type:"tracks"}]}]'
+    elif [ -n "${FAKE_VISIT:-}" ]; then
       jq -n --arg v "$FAKE_VISIT" --arg s "$FAKE_SUBJECT" \
         '[{id:$v, metadata:{task_kind:"visit","gc.continuation_group":$s}}]'
     else printf '[]\n'; fi ;;
@@ -103,7 +111,7 @@ export TMPDIR="$TMP"
 # run_open <show-mode> <bead-id> [visit-id] -> sets RC/OUT/ERR/CALLS
 run_open() {
     : > "$FAKE_CALLS"
-    export FAKE_SHOW_MODE="$1" FAKE_SUBJECT="$2" FAKE_VISIT="${3:-}"
+    export FAKE_SHOW_MODE="$1" FAKE_SUBJECT="$2" FAKE_VISIT="${3:-}" FAKE_VISIT_EDGE="${4:-}"
     set +e
     OUT="$(sh "$SCRIPT" open "$2" 2>"$TMP/err")"; RC=$?
     set -e
@@ -135,6 +143,20 @@ grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
   && ok "(HELD) prints the existing visit id" || bad "(HELD) existing visit reported (out: $OUT)"
 [ -z "$CALLS" ] \
   && ok "(HELD) no second visit filed" || bad "(HELD) must not file a second visit (calls: $CALLS)"
+
+# --- (HELDEDGE) the su-ab9je shape: stamp EMPTY, tracks edge intact ------------
+# bead tk-d6ddn. A visit records its subject twice and only the edge proved
+# reliable; keyed on the stamp alone this verb files the duplicate it exists to
+# prevent — and this is the OPERATOR's front door, so the duplicate is filed by
+# hand, on a subject a converse session is still holding.
+run_open found tk-real1 tk-visit0 edge
+eq "$RC" "0" "(HELDEDGE) a subject held by an edge-only visit exits 0"
+grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
+  && ok "(HELDEDGE) the existing visit is found via its tracks edge" \
+  || bad "(HELDEDGE) edge-only visit NOT found — the verb would file a duplicate (out: $OUT)"
+[ -z "$CALLS" ] \
+  && ok "(HELDEDGE) no second visit filed" \
+  || bad "(HELDEDGE) filed a duplicate visit (calls: $CALLS)"
 
 # --- (MISSING) the bug: a typo must file NOTHING -------------------------------
 run_open missing tk-nope1

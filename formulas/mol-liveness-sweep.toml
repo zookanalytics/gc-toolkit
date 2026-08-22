@@ -19,12 +19,12 @@ The baseline lives in `sweep.reported` on the standing subject; its
 failure mode is to re-report, never to hide (operator decision
 2026-08-10, bead tk-snnpp) — and that bias governs every check added
 since: a probe that cannot be read excludes nothing.
-`assets/scripts/liveness-sweep-delta.test.sh` extracts the eight marked
+`assets/scripts/liveness-sweep-delta.test.sh` extracts the nine marked
 blocks below and executes them, so the delta split, the class filters
 (machine convoy, landed-anchor husk, worked-via-convoy, takeaway, gating
 state, operator hold, and the root fold that keeps this sweep out of a
-conversation another formula is already having) and the
-classify→normalize handoff cannot drift from what an agent actually
+conversation another formula is already having), the live-visit guard and
+the classify→normalize handoff cannot drift from what an agent actually
 runs. The re-file guard is extracted with them.
 
 The visit body is a SNAPSHOT of the pass, and a sitting reads it whenever
@@ -748,9 +748,16 @@ CANDIDATES=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --argjson
         | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
     | ($gates | length) > 0
       and all($gates[]; ($m["check." + .] // "") | startswith("green@"));
+  # Live-visit subjects: the union of the gc.continuation_group stamp and the
+  # tracks edge, because the stamp alone has been observed empty on a live
+  # visit (su-ab9je, bead tk-d6ddn) — see the step-3 guard below for the full
+  # account. The trailing select drops the empty stamp so an empty subject id
+  # cannot match it.
   ([($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
-     | (.metadata["gc.continuation_group"] // empty)]) as $convgroups
+     | ((.metadata["gc.continuation_group"] // ""),
+        (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
+     | select(. != "")]) as $convgroups
   | ([($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata.stall_root // empty)
@@ -1021,12 +1028,33 @@ any other language would read the FIRST id in the baseline as a miss and
 re-report that one bead on every pass forever.
 
 **3. Skip if its visit is already live (open or held)** — recompute the
-live-visit continuation groups from `$LIVE` (built fresh in step 1, no longer
-inherited from classify) and check whether one already names `$SWEEP_SUBJECT`:
+live-visit subjects from `$LIVE` (built fresh in step 1, no longer inherited
+from classify) and check whether one already names `$SWEEP_SUBJECT`:
 
 ```bash
-LIVE_VISIT=$(jq -r --arg s "$SWEEP_SUBJECT" '[.[] | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "")] | (index($s) // "") | tostring' "$LIVE")
+# >>> live-visit-guard
+LIVE_VISIT=$(jq -r --arg s "$SWEEP_SUBJECT" '[.[] | select((.metadata.task_kind // "") == "visit") | ((.metadata["gc.continuation_group"] // ""), (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // ""))) | select(. != "")] | (index($s) // "") | tostring' "$LIVE")
+# <<< live-visit-guard
 ```
+
+A visit names its subject TWICE — the `gc.continuation_group` stamp and
+the `tracks` edge the gate-visit block adds in the same breath — and only
+the edge has proved reliable. Measured on `su-ab9je` (shutupandlisten,
+filed 2026-08-20, bead tk-d6ddn): the stamp landed EMPTY while the visit
+title, the two sibling stamps in the same `gc bd update`, and the tracks
+edge all carried `su-7sjl`. Root cause never established — which is the
+point: a guard that trusts one of two recordings of the same fact reads a
+HELD sitting as absent and stacks a second visit on a subject that already
+has one, the exact invariant this step exists to hold. So read both and
+take the union; the edge is the durable half. `gc bd list` renders that
+edge as `.type` + `.depends_on_id` (`gc bd show` renders the same edge as
+`.dependency_type` + `.id` — different key names, and `$LIVE` is the
+LIST shape, so read the list keys here).
+
+The `select(. != "")` is load-bearing on its own, not tidying: without it
+an empty stamp enters the set as `""`, and any pass whose `$SWEEP_SUBJECT`
+came back empty would match that entry and skip on a visit that does not
+exist — filing nothing, forever, in silence.
 
 `index` returns a position or null; position 0 (`"0"`) is a real hit and
 null coalesces to `""`, so a non-empty `$LIVE_VISIT` means a visit is live.

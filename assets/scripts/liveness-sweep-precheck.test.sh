@@ -139,7 +139,8 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-child","title":"a child whose parent is open — workable, not a wait","issue_type":"bug","metadata":{},"dependencies":[{"issue_id":"f-child","depends_on_id":"f-epic-open","type":"parent-child"}]},
   {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
   {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green@756d5d7"}},
-  {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}}
+  {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
+  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}}
 ]
 JSON
 
@@ -149,6 +150,7 @@ cat > "$FIX/live.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits","sweep.reported":"f-carried"}},
   {"id":"v-1","title":"visit: f-ingroup — a live sitting","metadata":{"task_kind":"visit","gc.continuation_group":"f-ingroup"}},
+  {"id":"v-3","title":"visit: f-trackedvisit — live, but its group stamp landed EMPTY","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-3","depends_on_id":"f-trackedvisit","type":"tracks"}]},
   {"id":"f-member","title":"the bead the convoy carries","metadata":{}},
   {"id":"f-root-live","title":"a routed root the spec bead hangs off","metadata":{}},
   {"id":"f-child","title":"a child whose parent is open","metadata":{},"dependencies":[{"issue_id":"f-child","depends_on_id":"f-epic-open","type":"parent-child"}]},
@@ -213,6 +215,11 @@ hasnt ",$SURV," ",f-routed," "gc.routed_to non-empty is excluded (class 1)"
 hasnt ",$SURV," ",f-visit," "task_kind=visit is excluded (class 3)"
 hasnt ",$SURV," ",f-subject," "task_kind=triage-subject is excluded (class 4a)"
 hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)"
+# bead tk-d6ddn: the same class-3 exclusion, on a visit that named its subject
+# ONLY through the tracks edge because the gc.continuation_group stamp landed
+# empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
+# runs, and the sweep files a SECOND visit on a subject converse still holds.
+hasnt ",$SURV," ",f-trackedvisit," "a subject whose live visit names it only by the tracks edge is excluded (class 3)"
 hasnt ",$SURV," ",f-takeaway," "gc.takeaway non-empty is excluded (class 4c)"
 hasnt ",$SURV," ",f-hold," "triage.hold non-empty is excluded (class 4d)"
 hasnt ",$SURV," ",f-carried," "a bead already in the baseline is CARRIED, not new"
@@ -241,7 +248,7 @@ cp "$TMP/live.bak" "$FIX/live.json"
 # --- 2. the empty path: no agent session at all ------------------------------
 echo "── an empty board ends the pass with no agent session ──"
 # Keep only the beads a local rule excludes. Nothing survives, so nothing is new.
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 run_precheck
 eq "$RC" "1" "exit 1 — no agent session is dispatched at all"
@@ -271,6 +278,22 @@ jq '(.[] | select(.id == "f-subject") | .metadata["sweep.reported"]) |= "f-carri
 run_precheck
 eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 
+# The su-ab9je shape at the SUBJECT level (bead tk-d6ddn). The sitting is live
+# and held, but its gc.continuation_group stamp landed empty, so only the tracks
+# edge names f-subject. Read on the stamp alone this is "no visit", and the
+# precheck greenlights a pass that files a SECOND visit on a subject converse is
+# still holding — the mirror of mol-liveness-sweep's own step-3 guard, on the
+# same fixture shape, so the two cannot drift apart.
+echo "── a live visit named ONLY by its tracks edge still runs the pass ──"
+jq 'map(select(.id == "f-carried" or .id == "f-plain"))' "$TMP/ready.bak" > "$FIX/ready.json"
+jq '(.[] | select(.id == "f-subject") | .metadata["sweep.reported"]) |= "f-carried,f-plain"' \
+   "$TMP/live.bak" \
+  | jq '. + [{"id":"v-4","title":"visit: the sweep subject — stamp landed empty","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-4","depends_on_id":"f-subject","type":"tracks"}]}]' \
+  > "$TMP/live.visit2" && cp "$TMP/live.visit2" "$FIX/live.json"
+run_precheck
+eq "$RC" "0" "a visit whose stamp is EMPTY still reads as live, via its tracks edge"
+has "$OUT" "a visit is already live" "and says which condition fired"
+
 # --- 3. "empty" only from verified reads -------------------------------------
 # The inverted failure mode. Each of these must RUN: a probe that cannot be read
 # excludes nothing, and a short-circuit that reads it as "nothing to do" would
@@ -279,7 +302,7 @@ echo "── an unreadable probe NEVER produces a silent empty pass ──"
 # The board is emptied first, so the ONLY thing that could make these run is the
 # failed read itself. Without this the test would pass on leftover candidates
 # and prove nothing.
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 cp "$TMP/live.bak" "$FIX/live.json"
 run_precheck

@@ -281,7 +281,9 @@ case "$1 ${2:-}" in
       *--parent*)          cat "$FAKE_CHILDREN" ;;
       *"--type epic"*)     cat "$FAKE_EPICS" ;;
       *"--type decision"*) printf '[]\n' ;;
-      *)                   printf '[]\n' ;;   # the visits query
+      *)  # the open+in_progress listing, which is also what gather_visits reads
+          if [ -n "${FAKE_OPEN:-}" ] && [ -f "${FAKE_OPEN:-}" ]; then cat "$FAKE_OPEN"
+          else printf '[]\n'; fi ;;
     esac ;;
 esac
 exit 0
@@ -298,6 +300,7 @@ run_board() {
     BRC=0
     BOUT="$(env PATH="$GTMP/bin:$PATH" TMPDIR="$run" \
                 FAKE_RIG_PATH="$GTMP/rig" FAKE_EPICS="$GTMP/epics.json" FAKE_CHILDREN="$kids" \
+                FAKE_OPEN="${FAKE_OPEN:-}" \
                 GC_HELM_FIXTURE= \
                 sh "$SCRIPT" board --json --refresh 2>"$run/err")" || BRC=$?
     BERR="$(cat "$run/err" 2>/dev/null || true)"
@@ -375,6 +378,51 @@ run_board "$GTMP/children-400.json" many400
 eq "$BRC" "0" "(HEADROOM) 400 children render clean"
 eq "$(printf '%s' "$BOUT" | jq -r 'first(.[]? | select(.id=="tk-epic1")) | .m_total' 2>/dev/null || true)" \
    "400" "(HEADROOM) all 400 children survive the roll-up"
+
+# --- (VISITEDGE) a live visit whose group stamp landed EMPTY (bead tk-d6ddn) --
+# gather_visits feeds $held, and $held is the ONLY thing keeping an anchor that
+# is already in conversation out of the stranded band. A visit records its
+# subject twice — the gc.continuation_group stamp and the tracks edge filed with
+# it — and su-ab9je (shutupandlisten, 2026-08-20) proved the stamp can land
+# EMPTY while the edge is intact. Read on the stamp alone that anchor bands HIGH
+# and the board tells the operator to open a visit that already exists.
+#
+# These run through the REAL gather (GC_HELM_FIXTURE is cleared by run_board),
+# so gather_open's listing IS the visits listing — the stub serves both from
+# $FAKE_OPEN.
+printf '[{"id":"tk-c1","status":"open","assignee":null},{"id":"tk-c2","status":"closed","assignee":null}]\n' \
+  > "$GTMP/children-stranded.json"
+
+# Positive control FIRST: with the stamp populated the anchor is held. Without
+# this a broken stub would make the real case below "pass" by gathering nothing.
+cat > "$GTMP/open-stamped.json" <<'JSON'
+[{"id":"tk-v1","title":"visit: tk-epic1","metadata":{"task_kind":"visit","gc.continuation_group":"tk-epic1"}}]
+JSON
+FAKE_OPEN="$GTMP/open-stamped.json" run_board "$GTMP/children-stranded.json" visit-stamped
+held_of() { printf '%s' "$BOUT" | jq -r --arg k "$1" 'first(.[]? | select(.id=="tk-epic1")) | .[$k]' 2>/dev/null || true; }
+eq "$BRC" "0" "(VISITEDGE) control: the board renders with a stamped visit in the gather"
+eq "$(held_of held)" "true" "(VISITEDGE) control: a visit naming the anchor by its STAMP is gathered"
+eq "$(held_of stranded)" "false" "(VISITEDGE) control: an anchor in conversation is not stranded"
+
+# A visit with NO visit at all: the anchor really is stranded. This is what
+# makes the assertion below mean something — it pins that `held` tracks the
+# gather rather than being true for every anchor.
+printf '[]\n' > "$GTMP/open-novisit.json"
+FAKE_OPEN="$GTMP/open-novisit.json" run_board "$GTMP/children-stranded.json" visit-none
+eq "$(held_of held)" "false" "(VISITEDGE) control: no visit at all → not held"
+eq "$(held_of stranded)" "true" "(VISITEDGE) control: and the anchor bands as stranded"
+
+# The regression: stamp EMPTY, tracks edge intact — the su-ab9je shape. Rendered
+# in the `gc bd list` key pair (.type + .depends_on_id), which is what this
+# listing emits; `gc bd show` names the same edge .dependency_type + .id.
+cat > "$GTMP/open-edge.json" <<'JSON'
+[{"id":"tk-v2","title":"visit: tk-epic1","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"tk-v2","depends_on_id":"tk-epic1","type":"tracks"}]}]
+JSON
+FAKE_OPEN="$GTMP/open-edge.json" run_board "$GTMP/children-stranded.json" visit-edge
+eq "$(held_of held)" "true" \
+   "(VISITEDGE) a visit whose stamp is EMPTY is still gathered, via its tracks edge"
+eq "$(held_of stranded)" "false" \
+   "(VISITEDGE) so the anchor already in conversation is not banded stranded"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SCENARIO 3 — the board reads work-bead status, so live work reads as stranded
