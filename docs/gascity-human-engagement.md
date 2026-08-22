@@ -240,9 +240,19 @@ gc-visit-open "a gascity topic" --rig gascity
 gc-visit-open "just talk to me about X" --no-react
 ```
 
-It creates the subject bead from the topic string — the string is both title
-and durable body, because the converse session reads the **body** at claim time
-— and then opens the conversation one of two ways.
+It creates the subject bead from the topic string — the string is the durable
+**body**, which is what the converse session reads at claim time, and the title
+is a one-line label derived from it — and then opens the conversation one of
+two ways.
+
+**The topic is a paragraph, and the title is not the topic.** The key exists so
+the operator can type as much as they need to (the popup is sized multi-line to
+invite it), and `bd create` refuses a title over 500 bytes — so passing the
+topic through as the title made the key fail on exactly the input it was built
+for: a 579-character paragraph filed nothing at all, and said only that the
+create "returned no id" (tk-wp50s). The title is now collapsed to one line and
+cut back to a word boundary with an ellipsis if it is long; the body always
+carries what was typed, verbatim.
 
 **The default rig is fixed: `gc-toolkit`** (`--rig` overrides,
 `GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"` and its
