@@ -105,6 +105,15 @@ inject_fragments_append = [
     # Feedback-learning capture: file corrective feedback as observation
     # beads (specs/2026-08-learning-system/implementation-design.md §2a).
     "file-feedback-observations",
+    # The `gc doctor` grant every agent carries (gastown's
+    # operational-awareness fragment, its closing bullet) is conditional but
+    # unbounded, and the mayor acted on it as a start-up sweep. tk-julp3 bounded
+    # it in the mechanik's own prompt body; the mayor's prompt is gastown's and
+    # carries no doctor reference of its own, so the bound has to arrive the way
+    # the grant does — as a fragment. Deliberately NOT city-wide via
+    # city.toml [agent_defaults]: that list reaches the deacon, which owns the
+    # instruments (tk-vvnkj, specs/tk-vvnkj/decision.md).
+    "health-instruments-boundary",
 ]
 
 [[patches.agent]]
