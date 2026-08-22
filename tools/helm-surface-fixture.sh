@@ -280,6 +280,46 @@ eq   "doubly-gathered bead dedups to a single row" "1"    "$(printf '%s' "$DUPJ"
 eq   "the surviving row is the higher-ranked one"  "epic" "$(printf '%s' "$DUPJ" | jq -r '.[0].kind')"
 rm -rf "$DUP"
 
+echo "── hermetic: the ID/RIG columns never truncate (tk-mtuej) ──"
+# rpad TRUNCATES, so a fixed-width identifier column silently merges rows: at
+# the old ID width of 11, the three sibling anchors sl-kg9z6.4.1/.2/.9 — 12
+# characters each, discriminated only by the last one — all rendered
+# "sl-kg9z6.4." and the operator could not tell which row was which. RIG failed
+# the same way at 13 ("shutupandlisten" → "shutupandlist", butted against KIND).
+# Both widths are now derived from the widest value on the board.
+WIDE="$(mktemp -d)"; printf '{}' > "$WIDE/sessions.json"
+cat > "$WIDE/rigs.json" <<'JSON'
+[{"name":"shutupandlisten","path":"/tmp/fx-shutupandlisten","prefix":"sl"}]
+JSON
+cat > "$WIDE/anchors.ndjson" <<'JSON'
+{"id":"sl-kg9z6.4.1","title":"Sibling one","kind":"convoy","source":"convoy","owned":true,"rig":"shutupandlisten","prefix":"sl","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"sl-c1","status":"open","assignee":""}]}
+{"id":"sl-kg9z6.4.2","title":"Sibling two","kind":"convoy","source":"convoy","owned":true,"rig":"shutupandlisten","prefix":"sl","priority":2,"updated_at":"2026-06-02T00:00:00Z","description":"","progress":null,"children":[{"id":"sl-c2","status":"open","assignee":""}]}
+{"id":"sl-kg9z6.4.9","title":"Sibling nine","kind":"convoy","source":"convoy","owned":true,"rig":"shutupandlisten","prefix":"sl","priority":2,"updated_at":"2026-06-03T00:00:00Z","description":"","progress":null,"children":[{"id":"sl-c9","status":"open","assignee":""}]}
+JSON
+WIDET="$(GC_HELM_FIXTURE="$WIDE" "$TOOL")"
+eq "all three 12-char sibling ids are on the board" "3" \
+   "$(GC_HELM_FIXTURE="$WIDE" "$TOOL" --json | jq '[.[]|select(.id|startswith("sl-kg9z6.4."))]|length')"
+has "12-char id .1 renders in full"  "sl-kg9z6.4.1" "$WIDET"
+has "12-char id .2 renders in full"  "sl-kg9z6.4.2" "$WIDET"
+has "12-char id .9 renders in full"  "sl-kg9z6.4.9" "$WIDET"
+absent "no row renders the truncated collision cell" "sl-kg9z6.4. " "$WIDET"
+has "a long rig name keeps its tail and its gutter" "shutupandlisten " "$WIDET"
+# Widening moves the LAYOUT, not just the cell: every data row must still start
+# RIG at the same column the header does. (Byte offsets are safe here — the text
+# left of RIG is ASCII on all four lines; none of these rows is held.)
+WIDE_HDR_COL="$(printf '%s\n' "$WIDET" | awk '/^  SEV/ {print index($0, "RIG"); exit}')"
+WIDE_ROW_COLS="$(printf '%s\n' "$WIDET" | awk '/shutupandlisten/ {print index($0, "shutupandlisten")}' | sort -u)"
+eq "the three rows agree on one RIG column"     "1"                "$(printf '%s\n' "$WIDE_ROW_COLS" | wc -l | tr -d ' ')"
+eq "rows start RIG where the header says"       "$WIDE_HDR_COL"    "$WIDE_ROW_COLS"
+# RIG's 1-based start column minus the 11 columns before ID (held + SEV) and
+# minus 1 for the 1-based index IS the ID column's width.
+eq "the ID column widened to 13 (12-char id + gutter)" "13" "$((WIDE_HDR_COL - 12))"
+rm -rf "$WIDE"
+# Control — the quiet path: a board of ordinary ids keeps the classic layout,
+# so the fix widens on demand rather than permanently reflowing every board.
+eq "ordinary board keeps RIG at its classic column" "23" \
+   "$(B | awk '/^  SEV/ {print index($0, "RIG"); exit}')"
+
 echo "── hermetic: empty board ──"
 EMPTY="$(mktemp -d)"; : > "$EMPTY/anchors.ndjson"; cp "$FXDIR/rigs.json" "$EMPTY/rigs.json"; printf '{}' > "$EMPTY/sessions.json"
 has  "empty board says nothing floats" "Nothing floats" "$(GC_HELM_FIXTURE="$EMPTY" "$TOOL" 2>/dev/null)"

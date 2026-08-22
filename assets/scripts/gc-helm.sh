@@ -1347,9 +1347,17 @@ def wf_live($id):
 
     printf '%s' "$BOARD" | jq -r '
 def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as $g | if $g>0 then (" "*$g) else "" end);
-( (" "|rpad(2)) + ("SEV"|rpad(9)) + ("ID"|rpad(11)) + ("RIG"|rpad(13)) + ("KIND"|rpad(9)) + ("N/M"|rpad(7)) + ("FRONTIER"|rpad(36)) + "NEEDS" ),
-( ("─"*1|rpad(2)) + ("─"*8|rpad(9)) + ("─"*10|rpad(11)) + ("─"*12|rpad(13)) + ("─"*8|rpad(9)) + ("─"*6|rpad(7)) + ("─"*35|rpad(36)) + ("─"*16) ),
-( .[] | ((if .held then "●" else " " end)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad(11)) + ((.rig)|rpad(13)) + ((.kind)|rpad(9))
+# ID and RIG are sized to the widest value on THIS board (plus a gutter),
+# never fixed: rpad truncates, and an identifier keeps its discriminator in
+# the TAIL, so the old fixed 11 rendered sl-kg9z6.4.1, .2 and .9 as three
+# identical "sl-kg9z6.4." cells — three anchors the operator could not tell
+# apart (tk-mtuej). The floors keep a board of ordinary ids laid out as before.
+# helm-svc board derives the same two widths (services/helm/cmd/helm-svc/board.go).
+(([.[] | (.id|tostring|length)] + [10] | max) + 1) as $idw
+| (([.[] | (.rig|tostring|length)] + [12] | max) + 1) as $rigw
+| ( (" "|rpad(2)) + ("SEV"|rpad(9)) + ("ID"|rpad($idw)) + ("RIG"|rpad($rigw)) + ("KIND"|rpad(9)) + ("N/M"|rpad(7)) + ("FRONTIER"|rpad(36)) + "NEEDS" ),
+( ("─"*1|rpad(2)) + ("─"*8|rpad(9)) + ("─"*($idw-1)|rpad($idw)) + ("─"*($rigw-1)|rpad($rigw)) + ("─"*8|rpad(9)) + ("─"*6|rpad(7)) + ("─"*35|rpad(36)) + ("─"*16) ),
+( .[] | ((if .held then "●" else " " end)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad($idw)) + ((.rig)|rpad($rigw)) + ((.kind)|rpad(9))
         + ((if (.kind=="decision" or .kind=="human" or .kind=="parked") then "—"
             else "\(.n_closed)/\(.m_total)" end)|rpad(7))
         + ((.frontier)|rpad(36)) + (.needs) )
