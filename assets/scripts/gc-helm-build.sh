@@ -75,16 +75,28 @@ GC_BIN="${GC_HELM_GC_BIN:-gc}"
 # service is proof of absence.
 SERVICES=""
 if SERVICES="$("$GC_BIN" service list --json 2>/dev/null)"; then
-    if ! printf '%s' "$SERVICES" | jq -e --arg n "$SERVICE_NAME" \
-            '[.services[]? | select((.service_name // .name) == $n)] | length > 0' >/dev/null 2>&1; then
-        # In --deploy mode this order ships to every city, but only some declare
-        # a helm service. Building a 161MB binary for a city that will never run
-        # it is pure waste, so leave quietly. A hand-run build is not gated:
-        # someone asking for a build by name means it.
+    # Distinguish "jq ran and found nothing" from "jq could not run". `jq -e`
+    # exits 1 for a false result and something else entirely for a missing
+    # binary, a parse error or a bad filter. Collapsing those into "absent"
+    # would be the same silent-stall bug the failed-listing arm below avoids:
+    # one missing dependency and the order deploys nothing, forever, quietly.
+    set +e
+    printf '%s' "$SERVICES" | jq -e --arg n "$SERVICE_NAME" \
+        '[.services[]? | select((.service_name // .name) == $n)] | length > 0' >/dev/null 2>&1
+    _q_rc=$?
+    set -e
+    if [ "$_q_rc" -eq 1 ]; then
+        # The city was asked and does not run helm. In --deploy mode this order
+        # ships everywhere but only some cities declare the service, and
+        # building a 161MB binary for one that will never run it is pure waste.
+        # A hand-run build is not gated: someone asking for a build means it.
         if [ "$DEPLOY" -eq 1 ]; then
             echo "gc-helm-build: no '$SERVICE_NAME' service in this city; nothing to deploy"
             exit 0
         fi
+        SERVICES=""
+    elif [ "$_q_rc" -ne 0 ]; then
+        echo "gc-helm-build: could not read the service listing (jq exit $_q_rc); proceeding" >&2
         SERVICES=""
     fi
 else

@@ -24,8 +24,14 @@
 # interrupted-build pathology the split exists to end.
 #
 # scope = "city" because the helm service is declared city-scoped; the script
-# self-locates its module from its own path and derives the service state root
-# from the order's city env.
+# self-locates its module from its own path and takes the service state root
+# from `gc service list --json` (city_path + state_root).
+#
+# Known edge, deliberately not guarded: `find -newer` is a make-style
+# dependency, so a source file with a FUTURE mtime — clock skew, a bad checkout
+# — reads as permanently newer and every tick would rebuild and restart. The
+# remedy is to fix the mtime, exactly as it would be for make. A rate limiter
+# here would be the bespoke staleness machinery this change exists to remove.
 [order]
 description = "Build the helm binary when services/helm is newer than it, and restart the service onto the result"
 trigger = "cooldown"

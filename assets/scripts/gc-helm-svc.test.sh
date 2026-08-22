@@ -57,6 +57,7 @@
 #   deploy mode (--deploy, what the order runs)
 #   (SKIP)        a city with no helm service builds nothing
 #   (LISTFAIL)    a failed service listing does NOT read as "not registered"
+#   (QFAIL)       nor does one the filter cannot parse
 #   (RESTART)     a successful build restarts the service
 #   (NORESTART)   an up-to-date binary restarts nothing
 #   (RCFAIL)      a failed restart is reported as a failure
@@ -506,6 +507,19 @@ LIST_FAIL=""
 eq "$RC" 0 "(LISTFAIL) proceeds when the service listing fails"
 has "$ERR" "could not list services" "(LISTFAIL) says it is proceeding blind"
 present "$RECORD" "(LISTFAIL) the build still happened"
+
+# --- case: an unreadable listing is not proof of absence either ---------------
+# `gc service list` SUCCEEDS here but hands back something the filter cannot
+# answer from. Collapsing that into "no helm service" is the same silent-stall
+# bug as (LISTFAIL): one missing dependency or one schema change and the order
+# deploys nothing, forever, without ever failing.
+fixture
+printf 'not json at all' > "$SERVICES"
+run_build --deploy
+eq "$RC" 0 "(QFAIL) proceeds when the listing cannot be parsed"
+has "$ERR" "could not read the service listing" "(QFAIL) says the lookup broke, not that helm is absent"
+present "$RECORD" "(QFAIL) the build still happened"
+hasnt "$OUT" "nothing to deploy" "(QFAIL) an unparseable listing is never read as absence"
 
 # --- case: a build restarts the service ---------------------------------------
 fixture
