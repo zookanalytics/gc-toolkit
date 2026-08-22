@@ -119,8 +119,8 @@ fi
 
 It mails the first time, then stays quiet until `--state` changes or the
 cooldown elapses. It suppresses REPETITION, never news — with one class it
-declines outright rather than deduping: a PR that is mergeable, green and
-merely unapproved is a resting state, and the correct number of escalations
+declines outright rather than deduping: a PR that is mergeable, green on
+every check that gates its merge, and merely unapproved is a resting state, and the correct number of escalations
 about it is zero, not one (tk-qe2tv). That only applies where the block
 names the PR through `--pr`, which the queue-health step does and no
 one-shot notice does. A rig that has not synced the script falls back to
