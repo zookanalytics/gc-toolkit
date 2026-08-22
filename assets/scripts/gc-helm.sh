@@ -9,7 +9,7 @@
 # Usage:
 #   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
 #   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (converse holds it)
-#   gc-helm takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline
+#   gc-helm takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
 #
 #   board → the operator glances the ranked rows (with a held glyph,
 #           a row cap, and a cache so the ~12s gather is paid once,
@@ -258,6 +258,7 @@ XREF_CAP=5                                       # max cross-rig refs that count
 MAX_ROWS="${GC_HELM_MAX_ROWS:-50}"          # default row cap (--limit=0 disables)
 MAX_PARKED="${GC_HELM_MAX_PARKED:-15}"      # separate budget for `parked` rows (see below)
 CACHE_TTL="${GC_HELM_CACHE_TTL:-45}"        # seconds the gather cache stays fresh
+TAKEAWAY_MAX=140                            # hard cap on a takeaway headline, in CODEPOINTS
 FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook (see header)
 # Fall back to defaults on a non-numeric override so `set -e` arithmetic
 # (the cap + cache-age tests) can't crash the board on a bad env value.
@@ -271,7 +272,7 @@ Usage:
   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release]  set the board-visible takeaway headline
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, and decisions) by how much
@@ -286,11 +287,14 @@ session reads at claim time (default: the board-pick wording) — while
 react's is log-only operator intent.
 takeaway writes that NEEDS headline directly — the thin writer the host, the
 proactive worker, and the converse role call to stamp gc.takeaway (+_at/+_by)
-in one update; with --release it also reopens/unassigns/clears the route and
-marks the proactive reaction in that same write (the proactive worker's
-one-call close). converse calls it WITHOUT --release, twice per sitting: once
-when the hold begins and once at sign-off, so a reaped thread still leaves a
-dated trace of what it was waiting for (tk-bzm86).
+in one update. The 140-char cap is enforced, not advisory: a longer text is
+REFUSED so the author cuts it, because only the author knows which clause is
+the headline; the board clips anything already stored over it. With --release
+it also reopens/unassigns/clears the route and marks the proactive reaction in
+that same write (the proactive worker's one-call close). converse calls it
+WITHOUT --release, twice per sitting: once when the hold begins and once at
+sign-off, so a reaped thread still leaves a dated trace of what it was waiting
+for (tk-bzm86).
 --waiting-on <bead-id> (repeatable) records the same wait as a `blocks` EDGE
 alongside the prose, so the board can re-ask whether it is still true. Pass it
 for every bead a sitting routes work into. Without it the wait is a frozen
@@ -690,7 +694,37 @@ cmd_takeaway() {
     # text is rejected as missing.
     text=$(printf '%s' "$text" | tr -s '[:space:]' ' ')
     text="${text# }"; text="${text% }"
-    [ -n "$text" ] || { echo "$PROG: takeaway needs \"<text>\" (the ≤140-char one-line headline)" >&2; usage; exit 2; }
+    [ -n "$text" ] || { echo "$PROG: takeaway needs \"<text>\" (the ≤${TAKEAWAY_MAX}-char one-line headline)" >&2; usage; exit 2; }
+
+    # >>> takeaway-length-gate
+    # The cap was DOCUMENTED and unenforced, and it ran 22-for-23 against: the
+    # live board carried 23 takeaways averaging 597 chars (max 1876) and they
+    # were 91% of all its NEEDS text (tk-9tbbk.1). NEEDS is the last column of a
+    # terminal table, so a paragraph there is not a wide cell — it is one row
+    # wrapping over the rest of the board. The prior remedy attempted was a
+    # note-to-self in a bead's notes; the sitting that wrote it then stamped a
+    # 200-char takeaway. Prose cannot enforce this. The gate has to.
+    #
+    # REJECT, never truncate. The writer knows which clause is the headline and
+    # which is the detail; this script does not, and a silent trim would drop
+    # the half the sitting most wanted read while still reporting success. The
+    # detail belongs in the bead's notes or a first-reaction card — the
+    # takeaway is the one line that has to survive a glance.
+    #
+    # Measured in CODEPOINTS, because that is what both renderers measure (jq
+    # `length`/`rpad`, and helm-svc's []rune): an em dash costs three bytes and
+    # one column, so a byte cap would refuse a headline that fits on the board.
+    # jq is a hard dependency, checked at startup. Should it somehow answer
+    # with a non-number, fall back to the shell's own count rather than let the
+    # gate evaporate — a guard that fails open is the defect being fixed here.
+    tlen=$(printf '%s' "$text" | jq -Rsr 'length' 2>/dev/null || true)
+    case "$tlen" in ''|*[!0-9]*) tlen=${#text} ;; esac
+    if [ "$tlen" -gt "$TAKEAWAY_MAX" ]; then
+        echo "$PROG: takeaway: text is $tlen chars; the cap is $TAKEAWAY_MAX" >&2
+        echo "$PROG: takeaway: it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in the bead's notes." >&2
+        exit 2
+    fi
+    # <<< takeaway-length-gate
 
     # Provenance: host (default) or proactive; free-form.
     [ -n "$by" ] || by="host"
@@ -1412,8 +1446,23 @@ def wf_live($id):
         return 0
     fi
 
-    printf '%s' "$BOARD" | jq -r '
+    # >>> board-table-render
+    printf '%s' "$BOARD" | jq -r --argjson needsw "$TAKEAWAY_MAX" '
 def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as $g | if $g>0 then (" "*$g) else "" end);
+# clip is the DISPLAY guard on the last column, and the ONLY place the board
+# shortens something a human reads. NEEDS is prose and it is where the
+# LLM-authored takeaway lands, so one 1876-char cell — a real one, on the live
+# board — is not a wide column but a single row wrapping over every row below
+# it. The cap is the same 140 the takeaway writer now enforces, so a conforming
+# headline renders in FULL and this only ever fires on text that was stored
+# before the gate existed or written around it. The ellipsis is deliberate: a
+# clipped cell must say it was clipped, and `--json` still carries the whole
+# string (both `needs` and `takeaway`) for anything that wants to read it.
+#
+# Prose only. It is NOT a general ellipsis policy: the mechanical heads and
+# xref ids are --json-only by construction, so nothing in this column is an
+# identifier, and clipping one would be the tk-mtuej defect one column over.
+def clip($w): . as $s | if (($s|length) > $w) then (($s[0:$w-1]) + "…") else $s end;
 # ID and RIG are sized to the widest value on THIS board (plus a gutter),
 # never fixed: rpad truncates, and an identifier keeps its discriminator in
 # the TAIL, so the old fixed 11 rendered sl-kg9z6.4.1, .2 and .9 as three
@@ -1427,8 +1476,9 @@ def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as 
 ( .[] | ((if .held then "●" else " " end)|rpad(2)) + ((.severity)|rpad(9)) + ((.id)|rpad($idw)) + ((.rig)|rpad($rigw)) + ((.kind)|rpad(9))
         + ((if (.kind=="decision" or .kind=="human" or .kind=="parked") then "—"
             else "\(.n_closed)/\(.m_total)" end)|rpad(7))
-        + ((.frontier)|rpad(36)) + (.needs) )
+        + ((.frontier)|rpad(36)) + ((.needs)|clip($needsw)) )
 '
+    # <<< board-table-render
     printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck/blocker-landed · NORMAL=active · LOW=empty/complete/parked\n'
     printf 'Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n'
     printf 'A parked row reading "blocker landed" was waiting on work that has since closed — it needs a disposition, not a re-read\n'

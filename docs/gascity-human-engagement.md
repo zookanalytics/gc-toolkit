@@ -364,6 +364,15 @@ subject to look at next. Longevity is deliberately not the remedy:
 raising `idle_timeout` only widens the window in which a dead thread
 looks alive.
 
+*The size of that trace (2026-08-22, `tk-9tbbk.1`):* the takeaway is the
+board's NEEDS cell — one line in a terminal table — and it is capped at
+**140 characters**, which `gc-helm takeaway` now enforces by refusing a
+longer text rather than trimming it. While the cap was documentation
+alone it ran 22-for-23 against: the stored takeaways averaged
+597 characters and were 91% of all the NEEDS text on the board, and
+converse wrote all five of the longest. Whatever does not fit is detail,
+and detail belongs in the subject's notes or the thread.
+
 *The limit of a written trace, and what closes it (2026-08-22,
 `tk-2plde`):* the takeaway is **one string, frozen when it is written**.
 That is enough for a reap — the record survives — and not enough for a

@@ -218,8 +218,34 @@ func rpad(s string, w int) string {
 	return string(r) + strings.Repeat(" ", w-len(r))
 }
 
+// clip bounds a PROSE cell, counting runes, and marks the cut with an ellipsis
+// so a shortened cell says it was shortened. rpad already truncates the
+// fixed-width columns; this is for the last one, which has no width at all.
+func clip(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w < 1 {
+		// No room even for the marker. Unreachable from the one caller, which
+		// passes a const, but a render path must not panic on arithmetic.
+		return ""
+	}
+	return string(r[:w-1]) + "…"
+}
+
 // Column widths, in the order gc-helm.sh lays them out. ID and RIG are
 // MINIMUMS rather than fixed widths — see colWidth.
+//
+// colNeedsMax is not a column width — NEEDS is last and unpadded — but a
+// bound on how much prose one row may spend. It matters because NEEDS is
+// where the LLM-authored takeaway lands: on the live board 23 takeaways
+// averaged 597 characters and one ran to 1876, which is not a wide cell but a
+// single row wrapping over every row beneath it (tk-9tbbk.1). It is the same
+// 140 gc-helm.sh's takeaway writer now enforces at write time, so a
+// conforming headline renders in full and this only fires on text stored
+// before that gate existed. --json is untouched: board.Tile.Needs keeps the
+// whole string for anything that reads the wire.
 const (
 	colHeld     = 2
 	colSeverity = 9
@@ -228,6 +254,7 @@ const (
 	colKind     = 9
 	colNM       = 7
 	colFrontier = 36
+	colNeedsMax = 140
 )
 
 // colWidth sizes an identifier column to the widest value on THIS board plus a
@@ -301,7 +328,7 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 		}
 		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
 			rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+t.Needs+"\n")
+			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
 	}
 
 	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/parked\n")
