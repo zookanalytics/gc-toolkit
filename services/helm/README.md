@@ -234,10 +234,12 @@ the other sanctioned path — is recorded, with the measurements, in
 supervisor is the `gc` binary in the **gascity** rig and cannot be changed from
 this repository.
 
-**Costs of the library backend, paid at build and startup, not per request:** the
+**Costs of the library backend, paid at build time, not per request:** the
 module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
-`helm-svc` is ~158 MB, a *cold* build takes minutes (the build cache keeps
-restarts instant thereafter), and the Go floor moved to 1.26.5.
+`helm-svc` is ~161 MB, and the Go floor moved to 1.26.5. A cold build measured
+**2m29s** on 2026-08-22 (1.3 GB of build cache); a warm one ~12.5s. Those
+numbers are why the build does not run in the service start path — see
+*Building* below. Startup itself is an `exec` and costs nothing.
 
 **One behavioural difference.** The HTTP backend reports one extra anchor,
 because gascity's `mapBdStatus` flattens every status that is not
@@ -304,8 +306,8 @@ kind = "proxy_process"
 
 `publish_mode` defaults to `private` (a pack must not set `direct`), and
 `state_root` defaults to `.gc/services/helm`. The launcher
-(`assets/scripts/gc-helm-svc.sh`) builds the binary on demand (Go's build
-cache makes restarts instant) and `exec`s it so SIGTERM reaches the Go process.
+(`assets/scripts/gc-helm-svc.sh`) `exec`s the prebuilt binary — so SIGTERM
+reaches the Go process — and builds nothing. See *Building* for what does.
 
 Once declared, the board is reachable:
 
@@ -314,6 +316,48 @@ curl http://127.0.0.1:8372/v0/city/<city>/svc/helm/helm   # ranked board
 open http://127.0.0.1:8372/v0/city/<city>/svc/helm/       # the web app
 # and through the same tailscale origin the gc dashboard uses (:8372).
 ```
+
+### Building
+
+The build does **not** run in the service start path, and this is load-bearing.
+
+The supervisor gives a `proxy_process` **5 seconds** to answer its health probe
+(`proxyProcessReadyTimeout`, gascity `internal/workspacesvc/proxy_process.go`).
+A warm build of this module takes ~12.5s and a cold one 2m29s. A build started
+by the launcher therefore never finished inside the window — not on a slow day,
+ever — and `waitReady` then called `stopProcessGroup()`, killing the build along
+with the start. The next start began again and was killed at 5s again.
+
+That loop was visible on disk: on 2026-08-22 this service's `bin/` held **2,677**
+zero-byte `.helm-svc.build.XXXXXX` staging files laid down over three days, one
+per killed start, each a `mktemp` that never reached its `mv`.
+
+So the two jobs are separate:
+
+| | script | when |
+|---|---|---|
+| build | `assets/scripts/gc-helm-build.sh` | the `helm-build` order, every 5m |
+| start | `assets/scripts/gc-helm-svc.sh` | the supervisor, on demand |
+
+`gc-helm-build.sh` rebuilds only when a source is newer than the binary — an
+ordinary `find -newer` dependency, the same question `make` asks — publishes by
+atomic rename so a failed link can never truncate a serving binary, and in
+`--deploy` mode restarts the service **iff** it published something. Build and
+restart are one step on purpose: a new binary that nothing restarts onto is the
+other half of the defect. On 2026-08-22 the helm process had been up 14h55m on a
+binary built at 02:40 while three commits touching `services/helm` had landed
+after it, all three inert in the served board.
+
+To build by hand — after editing Go sources or rebuilding `web/dist` — run:
+
+```bash
+assets/scripts/gc-helm-build.sh            # build iff stale
+gc service restart helm                    # serve it
+```
+
+If the binary is missing entirely the launcher exits non-zero with a message
+naming the builder, and the service sits `degraded` until the order builds one.
+It deliberately does not build its way out: it has 5 seconds.
 
 ## Web UI
 
@@ -348,7 +392,7 @@ The same proxy maps both `.../svc/helm` and `.../svc/helm/` to `/`, so the
 server cannot redirect the slash-less form either. An inline script in
 `index.html` normalizes it client-side, before the deferred module scripts run.
 
-**`dist/` is committed.** The launcher rebuilds the Go binary on demand but
+**`dist/` is committed.** The builder rebuilds the Go binary on demand but
 never runs npm, so the built bundle is tracked — same contract as the stock
 dashboard SPA. After changing anything under `web/`, rebuild and commit the
 output:
@@ -360,7 +404,7 @@ npm run build      # tsc + vite build -> dist/
 git add dist       # the bundle ships in the repo
 ```
 
-The launcher treats `web/dist/**` as build input alongside `*.go`, so a
+The builder treats `web/dist/**` as build input alongside `*.go`, so a
 bundle-only change still triggers a rebuild of the binary that embeds it.
 
 **The bare mount answers two audiences.** It has always returned the board
@@ -592,7 +636,7 @@ which is absent from the supervisor spec; do not hand-write supervisor shapes.
 ```bash
 cd services/helm
 go test ./...                 # unit tests (model golden cases + mock-supervisor source + server/cache + the embedded app)
-go build ./cmd/helm-svc  # or let the launcher build it
+go build ./cmd/helm-svc  # or: assets/scripts/gc-helm-build.sh
 
 cd web && npm test            # the app's own tests: ttyd protocol, endpoint check, detach invariant
 
