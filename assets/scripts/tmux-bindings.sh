@@ -49,6 +49,7 @@ gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # the operator is typing, and a foreground `run-shell` would hold tmux's
 # command queue — the whole server — open for that entire time. Nothing is
 # lost by backgrounding it now that the handler reads its message from a
-# per-press tmpfile instead of one shared paste buffer, which is what the
-# foreground read used to be ordering against. See tmux-visit-prompt.sh.
+# per-press draft file instead of one shared paste buffer, which is what the
+# foreground read used to be ordering against. That draft is also what
+# survives a failed intake (tk-w4dp4). See tmux-visit-prompt.sh.
 gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")"

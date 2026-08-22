@@ -41,12 +41,52 @@
 #               still running. The popup is modal for the length of the
 #               typing, so the slow half has to stay backgrounded or the key
 #               serialises the operator behind `gc bd create`.
-#   (TMPFILE)   each press reads its own mktemp file, and the file is gone when
-#               the handler exits. The predecessor parked the message in a
+#   (TMPFILE)   each press reads its own file, and the file is gone once the
+#               intake CONFIRMS an id. The predecessor parked the message in a
 #               paste buffer with a FIXED name, so press N+1 could overwrite
 #               what press N had not read yet — the foreground read existed
 #               only to sequence around that. A file per press removes the
 #               collision instead, and this is what pins it.
+#   (DRAFTKEEP) tk-w4dp4, and the reason the rest of this group exists: the
+#               handler used to arm `trap 'rm -f' EXIT` over the draft, so
+#               EVERY exit destroyed the only copy of what was typed. An
+#               operator lost a paragraph to it with zero trace — no subject,
+#               no visit, no bead in any ledger. A failed intake must now leave
+#               the text on disk and NAME its path, because a draft that
+#               survives is a retry and a deleted one is the bug.
+#   (DRAFTOK)   the inverse, and what keeps DRAFTKEEP from being "never delete
+#               anything": a confirmed filing DOES remove it. An id came back,
+#               the thought is durable, and a draft left behind would train the
+#               operator to ignore the directory.
+#   (UNCONFIRM) rc=0 is not the confirmation — the id is. An intake that exits
+#               clean having named neither subject nor visit has said nothing
+#               about what survived, so the draft is kept.
+#   (MKTEMPFAIL) the draft file could not be created. This was unguarded under
+#               `set -eu`, so the handler died before the popup with no message
+#               at all — indistinguishable, from the operator's seat, from a
+#               key that does nothing. /tmp here is a shared tmpfs whose
+#               pressure fluctuates, so this is a live path. Driven by refusing
+#               `mktemp`, NOT by an unwritable directory: those are two guards
+#               and the directory one has a fallback, so it never reaches the
+#               call. An unwritable-dir fixture passes against the unguarded
+#               script and proves nothing.
+#   (DRAFTDIRFAIL) the other half of that split — an unwritable draft directory
+#               falls back and the press still files. A bad directory must not
+#               cost the thought.
+#   (CANCELKEEP) a cancel with text in the buffer is not the same event as an
+#               Esc on an empty one. tmux cannot tell them apart (both exit
+#               non-zero with empty stderr) but the FILE can, and silence is
+#               only correct for the empty case.
+#   (BLANKDUR)  the blank branch is also where a truncated write lands: a
+#               paragraph whose redirect wrote nothing arrives here looking
+#               exactly like an empty submit. It flashed for 3s. Too short
+#               when the cost is a paragraph.
+#   (DRAFTDIR)  drafts default off the city's shared /tmp, and the directory is
+#               stable and greppable rather than a random name, so "where did
+#               my text go" has one answer.
+#   (REAP)      ...and the directory that never deletes anything is a new
+#               problem, so drafts older than the retention window are reaped
+#               and fresh ones are not.
 #   (CANCEL)    Esc is a true cancel: gum exits non-zero, `display-popup -E`
 #               propagates it, and nothing is filed and nothing is said.
 #   (POPUPFAIL) ...but a popup that could not OPEN is not a cancel. tmux
@@ -213,11 +253,31 @@ chmod +x "$TMP/bin/tmux"
 cat > "$TMP/gumbin/gum" <<'GUMSTUB'
 #!/usr/bin/env bash
 printf 'gum %s\n' "$*" >> "$GUM_CALLS"
+# A cancel that still put text in the buffer: gum writes, THEN exits non-zero.
+# The tmux layer cannot tell this from an Esc on an empty buffer — same exit
+# code, same empty stderr — so only the file distinguishes them.
+if [ -n "${FAKE_GUM_PARTIAL:-}" ]; then
+    printf '%s\n' "${FAKE_TOPIC:-}"
+    exit "${FAKE_GUM_PARTIAL}"
+fi
 # Esc (or ^C): gum exits non-zero having written nothing.
 [ "${FAKE_GUM_RC:-0}" = 0 ] || exit "${FAKE_GUM_RC}"
 printf '%s\n' "${FAKE_TOPIC:-}"
 GUMSTUB
 chmod +x "$TMP/gumbin/gum"
+
+# `mktemp` stubbed as a PASS-THROUGH, so the handler's own mktemp guard can be
+# driven without touching the directory — which is a DIFFERENT guard. Making a
+# directory unwritable exercises the mkdir/-w check and its /tmp fallback; it
+# never reaches the mktemp call, so an unguarded mktemp survives that case
+# entirely. Only refusing mktemp itself tests the guard that was missing.
+REAL_MKTEMP="$(command -v mktemp)"; export REAL_MKTEMP
+cat > "$TMP/bin/mktemp" <<'MKSTUB'
+#!/usr/bin/env bash
+[ -n "${FAKE_MKTEMP_RC:-}" ] && exit "${FAKE_MKTEMP_RC}"
+exec "$REAL_MKTEMP" "$@"
+MKSTUB
+chmod +x "$TMP/bin/mktemp"
 
 # run_handler <cfg-dir> <topic> — "type" the topic into the stubbed popup, run
 # the handler, wait for the backgrounded half to report. Returns the handler's
@@ -228,6 +288,9 @@ run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     local cfg="$1" topic="$2" rc=0
     export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux.log" GUM_CALLS="$TMP/gum.log"
     export FAKE_TOPIC="$topic" TMPDIR="$TMP/tmpfiles"
+    # Drafts are durable by design now, so the test must own the directory or
+    # a run would write into the operator's real XDG state.
+    export GC_VISIT_DRAFT_DIR="${DRAFT_DIR_OVERRIDE:-$TMP/drafts}"
     : > "$CALLS"; : > "$TMUX_CALLS"; : > "$GUM_CALLS"
     # The stubs are prepended for THIS call only: the live half below needs the
     # real tmux and the real gum, and a global override would hand it the stubs.
@@ -285,12 +348,34 @@ tmpf2=$(sed -n "s/.*> '\([^']*\)'.*/\1/p" "$TMP/tmux.log" | head -1)
 { [ -n "$tmpf1" ] && [ "$tmpf1" != "$tmpf2" ]; } \
     && ok "TMPFILE: each press reads its own file, so no press can overwrite another's topic" \
     || bad "TMPFILE: both presses used '${tmpf1:-none}' — a shared slot is exactly the hazard"
-eq "$(find "$TMP/tmpfiles" -mindepth 1 | wc -l | tr -d ' ')" "0" "TMPFILE: the topic file is removed when the handler exits"
+# (DRAFTOK) — the confirmed filing above removed its draft. Asserted on the
+# draft directory, not on TMPDIR: drafts are durable state now and live where
+# the handler puts them.
+eq "$(find "$TMP/drafts" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
+   "DRAFTOK: a confirmed filing removes the draft"
+eq "$(find "$TMP/tmpfiles" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
+   "TMPFILE: nothing is left in TMPDIR either"
 
-# (CANCEL)
+# (CANCEL) — Esc on an EMPTY buffer. Deliberate, so: nothing filed, nothing
+# said, and nothing kept — there is no text to keep.
 EXPECT_SAY=0 FAKE_GUM_RC=1 run_handler "$CFG_OK" "typed, then thought better of it"
 eq "$(cat "$TMP/calls.log")" "" "CANCEL: Esc files nothing"
 hasnt "$(cat "$TMP/tmux.log")" "-d " "CANCEL: ...and says nothing, because it was deliberate"
+eq "$(find "$TMP/drafts" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
+   "CANCEL: an empty buffer leaves no draft behind"
+
+# (CANCELKEEP) — the same non-zero exit and the same empty stderr, but with
+# text in the buffer. tmux cannot tell these apart; the file can, and this is
+# the branch that used to swallow a paragraph in silence.
+FAKE_GUM_PARTIAL=1 run_handler "$CFG_OK" "half a thought I did not mean to lose" || true
+tcalls=$(cat "$TMP/tmux.log")
+has "$tcalls" "DRAFT KEPT" "CANCELKEEP: a cancel with text in the buffer reports rather than staying silent"
+kept=$(find "$TMP/drafts" -type f -name 'draft-*' 2>/dev/null | head -1)
+{ [ -n "$kept" ] && grep -q 'half a thought I did not mean to lose' "$kept"; } \
+    && ok "CANCELKEEP: the typed text is still on disk" \
+    || bad "CANCELKEEP: the typed text is gone (kept='${kept:-none}')"
+has "$tcalls" "$(basename "${kept:-none}")" "CANCELKEEP: the message names the draft's path"
+rm -f "$TMP"/drafts/draft-*
 
 # (POPUPFAIL) — the same non-zero exit, but with tmux complaining on stderr.
 FAKE_POPUP_OPEN_ERR="no current client" run_handler "$CFG_OK" "a topic nobody can type" || true
@@ -308,6 +393,97 @@ run_handler "$CFG_FAIL" "something that will fail"
 tcalls=$(cat "$TMP/tmux.log")
 has "$tcalls" "gc visit FAILED (rc=4)" "SAYFAIL: failure is surfaced with its exit code"
 has "$tcalls" "subject tk-sub03 exists" "SAYFAIL: the surviving subject bead is named"
+
+# (DRAFTKEEP) — the bead. The same failing intake as SAYFAIL: the subject bead
+# survives, and so must the text, because the subject id alone does not let the
+# operator retry — the paragraph does. The path leads the message because
+# display-message truncates at the client width and the recovery handle is the
+# half that must survive.
+kept=$(find "$TMP/drafts" -type f -name 'draft-*' 2>/dev/null | head -1)
+{ [ -n "$kept" ] && grep -q 'something that will fail' "$kept"; } \
+    && ok "DRAFTKEEP: a failed intake leaves the typed text on disk" \
+    || bad "DRAFTKEEP: a failed intake destroyed the draft (kept='${kept:-none}')"
+has "$tcalls" "DRAFT KEPT" "DRAFTKEEP: ...and says so"
+has "$tcalls" "$(basename "${kept:-none}")" "DRAFTKEEP: ...naming the path it was kept at"
+case "$tcalls" in *"DRAFT KEPT"*"gc visit FAILED"*) ok "DRAFTKEEP: the path leads, so a truncated message still carries it" ;;
+                  *) bad "DRAFTKEEP: the draft path is not first in the message" ;; esac
+rm -f "$TMP"/drafts/draft-*
+
+# (UNCONFIRM) — rc=0 is not the confirmation; the id is. An intake that exits
+# clean and names neither subject nor visit has said nothing about what
+# survived, so the draft is kept rather than assumed durable.
+CFG_QUIET="$TMP/cfg-quiet"; mkcfg "$CFG_QUIET" '#!/bin/sh
+echo "gc-visit-open: done."'
+run_handler "$CFG_QUIET" "a topic whose fate nobody reported"
+tcalls=$(cat "$TMP/tmux.log")
+has "$tcalls" "named no subject or visit" "UNCONFIRM: a clean exit with no id is reported as unconfirmed"
+kept=$(find "$TMP/drafts" -type f -name 'draft-*' 2>/dev/null | head -1)
+{ [ -n "$kept" ] && grep -q 'a topic whose fate nobody reported' "$kept"; } \
+    && ok "UNCONFIRM: ...and the draft is kept" \
+    || bad "UNCONFIRM: the draft was dropped on an unconfirmed filing"
+rm -f "$TMP"/drafts/draft-*
+
+# (MKTEMPFAIL) — the draft file cannot be created. This was an unguarded
+# `mktemp` under `set -eu`: the handler died before the popup with NO message
+# at all, which is exactly what "the key does nothing" looks like from the
+# operator's seat. Driven by refusing mktemp rather than by an unwritable
+# directory, because those are two different guards and only this one reaches
+# the call: the directory check below has a fallback and never gets there.
+FAKE_MKTEMP_RC=1 EXPECT_SAY=0 run_handler "$CFG_OK" "a topic with nowhere to land" || true
+tcalls=$(cat "$TMP/tmux.log")
+has "$tcalls" "cannot create a draft file" "MKTEMPFAIL: a draft file that cannot be created is reported, not silent"
+eq "$(cat "$TMP/gum.log")" "" "MKTEMPFAIL: ...and the popup never opens, so no typing is wasted"
+eq "$(cat "$TMP/calls.log")" "" "MKTEMPFAIL: ...and nothing is filed"
+
+# The OTHER guard, and the reason the case above cannot stand in for it: an
+# unwritable draft directory must not kill the key. It falls back, says so, and
+# the press still files.
+UNWRITABLE="$TMP/nodraft"
+mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
+DRAFT_DIR_OVERRIDE="$UNWRITABLE" run_handler "$CFG_OK" "a topic whose dir is read-only" || true
+tcalls=$(cat "$TMP/tmux.log")
+has "$tcalls" "not writable" "DRAFTDIRFAIL: an unwritable draft dir is reported"
+has "$(cat "$TMP/calls.log")" "argv=[a topic whose dir is read-only]" \
+    "DRAFTDIRFAIL: ...and the press still files, because a bad dir must not cost the thought"
+chmod 700 "$UNWRITABLE"
+
+# (BLANKDUR) — the blank branch is also where a truncated write lands, so a
+# paragraph can be lost behind it. Three seconds was too short for that.
+run_handler "$CFG_OK" ""
+blankdur=$(sed -n 's/.*-d \([0-9][0-9]*\) gc visit: nothing typed.*/\1/p' "$TMP/tmux.log" | head -1)
+{ [ -n "$blankdur" ] && [ "$blankdur" -gt 3000 ]; } \
+    && ok "BLANKDUR: the blank message holds longer than the old 3s flash (${blankdur}ms)" \
+    || bad "BLANKDUR: the blank message is still a flash (-d '${blankdur:-unset}')"
+has "$(cat "$TMP/tmux.log")" "draft write failed" \
+    "BLANKDUR: ...and names the other thing it might have been"
+
+# (DRAFTDIR) — with no override, drafts land off the city's shared /tmp, in a
+# stable directory rather than a random name.
+FAKE_HOME="$TMP/fakehome"; mkdir -p "$FAKE_HOME"
+(
+    export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux-dd.log" GUM_CALLS="$TMP/gum.log"
+    export FAKE_TOPIC="where does this land" TMPDIR="$TMP/tmpfiles"
+    export HOME="$FAKE_HOME"
+    unset GC_VISIT_DRAFT_DIR GC_PACK_STATE_DIR XDG_STATE_HOME
+    : > "$TMUX_CALLS"
+    PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
+    for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
+)
+ddpath=$(sed -n "s/.*> '\([^']*\)'.*/\1/p" "$TMP/tmux-dd.log" | head -1)
+case "$ddpath" in "$FAKE_HOME"/.local/state/gc/visit-drafts/draft-*)
+    ok "DRAFTDIR: with no override the draft lands in XDG state, off the shared /tmp" ;;
+  *) bad "DRAFTDIR: the draft landed at '${ddpath:-none}'" ;; esac
+
+# (REAP) — a directory that never deletes anything is a new problem. Drafts
+# past the retention window go; anything inside it stays.
+REAPDIR="$TMP/reap"; mkdir -p "$REAPDIR"
+: > "$REAPDIR/draft-old"; touch -d '30 days ago' "$REAPDIR/draft-old" 2>/dev/null || touch -t 202001010000 "$REAPDIR/draft-old"
+: > "$REAPDIR/draft-recent"
+: > "$REAPDIR/not-a-draft"; touch -d '30 days ago' "$REAPDIR/not-a-draft" 2>/dev/null || touch -t 202001010000 "$REAPDIR/not-a-draft"
+DRAFT_DIR_OVERRIDE="$REAPDIR" run_handler "$CFG_OK" "a fresh press that reaps"
+[ -e "$REAPDIR/draft-old" ] && bad "REAP: a draft past the window was not reaped" || ok "REAP: a draft past the retention window is reaped"
+[ -e "$REAPDIR/draft-recent" ] && ok "REAP: a fresh draft is left alone" || bad "REAP: a fresh draft was reaped"
+[ -e "$REAPDIR/not-a-draft" ] && ok "REAP: only this script's own drafts are touched" || bad "REAP: it deleted a file it does not own"
 
 # (BLANK) — blank and whitespace-only both file nothing.
 for blank in "" "   "; do

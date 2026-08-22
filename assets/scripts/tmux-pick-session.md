@@ -51,8 +51,11 @@ judgment those mechanics force on agents.
   (`gc-visit-open.sh`, tk-4ojka) — so `prefix+S` has something to
   switch to. It held the `-thread` spawner until tk-bn1oi; threads
   are retired and the key was dead. The message reaches the handler
-  through a **`gum write` popup** writing a per-press tmpfile, not
-  through the command line. tmux's `command-prompt` held the key
+  through a **`gum write` popup** writing a per-press draft file,
+  not through the command line. That draft outlives every failure
+  path and is only deleted once an id comes back (tk-w4dp4), so a
+  topic the intake could not file is recoverable rather than gone;
+  the handler names its path in the message. tmux's `command-prompt` held the key
   for one commit and is wrong on both counts: it substitutes the
   response as text and then parses the result as a tmux command, so
   a `;` or a `"` typed into a message spliced straight into
