@@ -6,6 +6,7 @@ description: Why gc-helm-svc.sh's detached-build lock had to be keyed on a per-r
 # The build lock identifies a request, not a process
 
 Bead: tk-kbb8s (rework of tk-y3tks) · review: tk-e0l83 · branch: polecat/tk-y3tks
+Round 3: tk-iyhay · review: tk-0fp0i — see "Attaching presupposes wanting a build" below.
 
 ## The defect
 
@@ -54,6 +55,46 @@ A pre-token (pid-only) lock is refused rather than trusted: nothing distinguishe
 its verdict from an older one. That costs at most one redundant build on the
 first start after upgrade, and it is the only safe reading.
 
+## Attaching presupposes wanting a build
+
+The rule above says *which* locks may be attached to. It does not say *when the
+question may be asked at all*, and the launcher used to ask it unconditionally:
+the attach/wait arm was entered whenever a lock looked live, `need_build` or not.
+
+That reopened defect 2 of tk-y3tks through the lock path. Condition (3) — no
+verdict published yet — is satisfied not only by a build in flight but also by a
+builder that **died before writing one** (reboot, OOM, ENOSPC mid-link). Its lock
+is then alive-looking forever once the pid is recycled: the dead-pid sweep cannot
+collect it, because the pid is genuinely alive, and the poll arm deliberately
+does not clear it. A start that needed no build would attach to that lock and
+poll it for up to `GC_HELM_BUILD_WAIT` (900s default) — far past the supervisor's
+readiness window. The launcher is killed before it reaches the exec, every
+restart repeats it, and Helm stays down with a current, usable binary sitting
+beside the lock. `gc service restart helm` cannot recover it, which is precisely
+the property tk-y3tks exists to restore. A reboot supplies both halves at once:
+it kills the builder and re-seeds pids low enough to collide with the stale lock.
+
+So the rule gains a precondition: **attach only when this start actually wants a
+build.** When `$BIN` is already current with its sources there is nothing to wait
+for — the artifact served after the wait is the one available right now — so the
+launcher serves it immediately and logs why it did not wait.
+
+The suspect lock is **left in place**, not cleaned. It cannot be told apart from
+the one narrow case where it is genuine: a real builder that has already renamed
+the new binary into place — which is exactly what makes `need_build` 0 — but has
+not yet written its verdict. Clearing it there would let the next start begin a
+second build beside the first, the duplicate-build loop the attach path exists to
+prevent. Leaving it costs nothing: its owner releases it, and an impostor's is
+collected by the dead-pid sweep the moment that process exits.
+
+One consequence is worth recording because it removes code. With the attach arm
+reachable only when `need_build` is 1, the "we never wanted this build, so do not
+distrust `$BIN`" arm inside the failure path became unreachable and was deleted.
+Every start that now reaches the fallback guard wanted a rebuild and did not get
+one, so its artifact *is* superseded by its own sources and the self-check is
+exactly the right judge of it. A no-build start never arrives there at all — it
+serves `$BIN` without waiting on anyone and without paying for a probe.
+
 ## Evidence
 
 `assets/scripts/gc-helm-svc.test.sh` — 60 passed, 0 failed (was 54).
@@ -77,3 +118,29 @@ Shellcheck was run this round (`podman`, `koalaman/shellcheck:stable`) — the
 reviewer could not, it is absent from the review worktree: clean at `-S warning`,
 and byte-identical to HEAD at info level. `go vet ./...` passes; the diff touches
 no Go.
+
+### Round 3 (tk-iyhay, review tk-0fp0i)
+
+`assets/scripts/gc-helm-svc.test.sh` — 78 passed, 0 failed (was 72). The six new
+assertions are one case, `(STALELOCK-CURRENT)`: a live tokened lock with no
+verdict, a cached binary current with its sources, and `GC_HELM_BUILD_WAIT=900`.
+
+Against the pre-fix script in a parallel tree it fails with the reviewer's exact
+symptom — the launcher logs `waiting for it`, never execs, and the run ends at
+timeout's `124` instead of the launcher's own status. It is the only case that
+fails there; the other 75 assertions pass unchanged, which is what shows the fix
+is scoped to the no-build path and did not disturb the attach behaviour the
+earlier rounds pinned.
+
+The bound is load-bearing rather than cosmetic. Without it the regression cannot
+fail — it simply hangs the suite for the length of `GC_HELM_BUILD_WAIT` — so
+`run_script` gained an optional `$RUN_TIMEOUT`, and `124` is what makes "it
+waited" assertable. Note that the pre-existing `(CONCURRENT)` case does **not**
+catch this defect despite sharing its fixture shape: its stand-in builder
+publishes a verdict and exits after a second, so the poll it triggers ends
+promptly. Only a builder that stays alive and never publishes reproduces it.
+
+`(CONCURRENT)` keeps its assertions and its outcome, now for a stronger reason:
+the start no longer waits for that failing build at all, so its `fail` is never
+consumed. Shellcheck (`podman`, `koalaman/shellcheck:stable`, `-S warning`) is
+clean on both changed scripts; `bash -n` clean. The diff touches no Go.

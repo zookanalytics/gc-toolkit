@@ -62,6 +62,12 @@
 #                 probe runs with that socket stripped
 #   (PROBEBOUND)  a probe that hangs is killed by the launcher and read as a
 #                 refusal, rather than stalling the start it exists to unblock
+#
+# tk-iyhay (round 3 of the tk-y3tks signoff) then found defect 2 still reachable
+# through the lock path itself:
+#   (STALELOCK-CURRENT) a start that needs no build serves the current binary
+#                 immediately instead of polling a live tokened lock for
+#                 GC_HELM_BUILD_WAIT and being killed by the readiness window
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,7 +107,7 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN SELFCHECK COUNT
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
     SELFCHECK="$base/selfcheck-calls"; COUNT="$base/build-count"
-    STUB_SLEEP=""; SELFCHECK_RC=0; ALLOW_STALE=""; BUILD_WAIT=""
+    STUB_SLEEP=""; SELFCHECK_RC=0; ALLOW_STALE=""; BUILD_WAIT=""; RUN_TIMEOUT=""
     # The supervisor exports GC_SERVICE_SOCKET into the launcher. Empty here is
     # equivalent to unset for every consumer (the launcher never reads it), so
     # the cases that predate this knob are unaffected; the tk-lv5qf cases set it.
@@ -212,13 +218,19 @@ build_count()     { [ -f "$COUNT" ] && wc -l < "$COUNT" | tr -d ' ' || echo 0; }
 
 run_script() { # -> OUT ERR RC
     local err="$TMP/case$CASE/stderr"
+    # $RUN_TIMEOUT bounds the launcher itself. A case whose whole point is that
+    # the start must NOT block has no other way to fail: without a bound the
+    # regression simply hangs the suite for GC_HELM_BUILD_WAIT instead of
+    # reporting, and timeout's 124 is what makes "it waited" an assertable RC.
+    local -a bound=()
+    if [ -n "${RUN_TIMEOUT:-}" ]; then bound=(timeout "$RUN_TIMEOUT"); fi
     set +e
     OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" STUB_GO_SLEEP="$STUB_SLEEP" \
            STUB_COUNT="$COUNT" SELFCHECK_RECORD="$SELFCHECK" SELFCHECK_RC="$SELFCHECK_RC" \
            GC_HELM_ALLOW_STALE="$ALLOW_STALE" GC_HELM_BUILD_WAIT="$BUILD_WAIT" \
            GC_SERVICE_SOCKET="$SERVICE_SOCKET" GC_HELM_SELFCHECK_WAIT="$SELFCHECK_WAIT" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
-           bash "$ROOT/assets/scripts/gc-helm-svc.sh" "$@" 2>"$err")"
+           "${bound[@]}" bash "$ROOT/assets/scripts/gc-helm-svc.sh" "$@" 2>"$err")"
     RC=$?
     set -e
     ERR="$(cat "$err")"
@@ -482,10 +494,15 @@ eq "$(build_count)" "1" "(ATTACH) the second start attached to the running build
 # --- case: someone else's failed build does not condemn a current binary -----
 # The guard must fire on a SUPERSEDED artifact, not on any artifact that happens
 # to be present when a build fails. Here $BIN is newer than every source, so
-# this start wanted no build at all — it only waited on one another start left
-# running, and that one failed. Refusing here would take a good binary out of
-# service on the strength of an unrelated failure, and the self-check cannot
-# tell "too old to read the stores" from "the stores are down right now".
+# this start wanted no build at all, and another start's build fails underneath
+# it. Refusing here would take a good binary out of service on the strength of
+# an unrelated failure, and the self-check cannot tell "too old to read the
+# stores" from "the stores are down right now".
+#
+# Since tk-iyhay this start does not even wait for that verdict — a no-build
+# start serves $BIN immediately (see STALELOCK-CURRENT below), so the failing
+# build's `fail` is never consumed at all. The outcome asserted here is
+# unchanged and now holds for a stronger reason.
 fixture
 cache_binary                                    # newer than main.go -> need_build=0
 SELFCHECK_RC=1                                  # would REFUSE if the guard ran here
@@ -577,6 +594,48 @@ mkdir -p "$STATE/bin"
 echo "$DEAD_PID btest-dead-1" > "$STATE/bin/.build.pid"
 run_script --socket /run/helm.sock
 absent "$STATE/bin/.build.pid" "(STALELOCK-SWEEP) a dead builder's lock is cleared even on a no-build start"
+
+# (STALELOCK-CURRENT) a live tokened lock with no verdict must not make a
+# NO-BUILD start wait. This is what a builder killed mid-link leaves behind —
+# reboot, OOM, ENOSPC — once its pid has been reused by an unrelated
+# long-running process: pid alive, token present, .build.result never written.
+# Neither sweep above can reach it (the pid IS alive, and the token is
+# well-formed) and the poll arm deliberately does not clear it, so it persists
+# across every restart.
+#
+# The old code entered the attach/wait path on the strength of that lock even
+# though $BIN was already current with its sources, and polled it for up to
+# GC_HELM_BUILD_WAIT. That is past the supervisor's readiness window, so the
+# launcher was killed before reaching the exec and every restart repeated it:
+# defect 2 of tk-y3tks reintroduced through the lock path, with helm down and a
+# usable current binary sitting right there. A reboot supplies both halves at
+# once — it kills the builder and re-seeds pids low enough to collide.
+#
+# The bound IS the assertion: with the defect the run never finishes, so RC is
+# timeout's 124 rather than the launcher's own status.
+fixture
+cache_binary                                    # current with sources -> need_build=0
+sleep 30 &                                      # a live process that is NOT a builder
+IMPOSTOR=$!
+mkdir -p "$STATE/bin"
+echo "$IMPOSTOR btest-missing-result" > "$STATE/bin/.build.pid"   # tokened, no verdict
+BUILD_WAIT=900                                  # the production default
+RUN_TIMEOUT=5                                   # far below it: only the fix finishes
+run_script --socket /run/helm.sock
+kill "$IMPOSTOR" 2>/dev/null || true
+wait "$IMPOSTOR" 2>/dev/null || true
+eq "$RC" 0 "(STALELOCK-CURRENT) a no-build start does not wait on a live tokened lock"
+has "$OUT" "cached-binary ran:" "(STALELOCK-CURRENT) the current binary is exec'd instead"
+eq "$(build_count)" "0" "(STALELOCK-CURRENT) nothing is rebuilt: the binary was already current"
+eq "$(selfcheck_calls)" "0" "(STALELOCK-CURRENT) no self-check is paid for: nothing here is superseded"
+has "$ERR" "already current with its sources" "(STALELOCK-CURRENT) the log says why it did not wait"
+# Left deliberately. A lock in this shape cannot be told from a real builder
+# that has already renamed the new binary into place — which is precisely what
+# makes need_build 0 — but has not yet written its verdict. Clearing it would
+# let the next start begin a second build beside that one, the duplicate-build
+# loop the attach path exists to prevent. Its owner releases it; an impostor's
+# is collected by the dead-pid sweep the moment that process exits.
+present "$STATE/bin/.build.pid" "(STALELOCK-CURRENT) the suspect lock is left for its owner, not cleared"
 
 # --- case 5: static guard ----------------------------------------------------
 # The regression that caused the incident is pointing the toolchain straight at

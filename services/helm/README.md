@@ -215,6 +215,20 @@ own. A lock left by a dead builder is cleared on sight, including on starts that
 wanted no build — which is what stops one becoming old enough to collide with a
 recycled pid.
 
+*And attaching happens only when this start actually wants a build.* "Alive,
+tokened, no verdict yet" also describes a builder that died before it could write
+one — killed by a reboot, an OOM, an ENOSPC mid-link — whose lock then looks live
+forever once its pid is recycled: the dead-builder sweep cannot collect it,
+because that pid really is alive. A start whose binary is already current with
+its sources therefore serves it immediately rather than waiting on such a lock;
+otherwise it would poll for up to `GC_HELM_BUILD_WAIT`, be killed by the
+readiness window before reaching the exec, and repeat that on every restart —
+Helm down with a working binary sitting right beside the lock, which is the exact
+failure detaching the build was meant to end. The suspect lock is left alone
+rather than cleared, because it cannot be told apart from a real builder that has
+already published the binary but not yet its verdict, and clearing it there would
+start a second build beside the first.
+
 **A cached binary is served only if it still works.** When a rebuild fails the
 launcher may fall back to the previously built artifact — but not blindly. It
 first runs `helm-svc -selfcheck`, which opens the city's bead stores through the
@@ -240,7 +254,8 @@ appears where the operator is already looking.
 Launcher env: `GC_GO_BIN` (toolchain override), `GC_SERVICE_STATE_ROOT` (binary
 cache), `GC_HELM_GOTMP` (build scratch root, default `/var/tmp/gotmp`),
 `GC_HELM_ALLOW_STALE`, `GC_HELM_BUILD_WAIT` (seconds to wait on a build another
-start left running, default 900).
+start left running, default 900 — consulted only when this start needs a build;
+one that is already current never waits).
 
 Once declared, the board is reachable:
 

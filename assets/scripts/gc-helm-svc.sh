@@ -377,7 +377,33 @@ if [ -f "$BUILD_LOCK" ]; then
     esac
 fi
 
-if [ "$need_build" -eq 1 ] || [ -n "$builder_pid" ]; then
+# Attaching is for a start that WANTS a build. When $BIN is already current with
+# its sources there is nothing to wait for: the artifact this start would serve
+# after the wait is the one it can serve right now.
+#
+# Waiting anyway is defect 2 of tk-y3tks coming back through the lock path. A
+# tokened lock whose builder died before writing .build.result survives — the
+# dead-pid sweep above cannot reach it once an unrelated long-running process
+# has inherited that pid, and the poll arm below deliberately does not clear it
+# — so a no-build start used to poll it for up to GC_HELM_BUILD_WAIT (900s by
+# default). That is far past the supervisor's readiness window, so the launcher
+# is killed before it ever reaches the exec, and every restart repeats it. Helm
+# stays down with a perfectly good current binary sitting beside it, and
+# `gc service restart helm` cannot recover it.
+#
+# The lock is left in place rather than cleaned. It cannot be told apart from
+# the one narrow case where it is genuine: a real builder that has already
+# renamed the new binary into place (which is what makes need_build 0) but has
+# not yet written its verdict. Removing it there would let the next start begin
+# a second build beside the first, which is the duplicate-build loop the attach
+# path exists to prevent. Leaving it costs nothing — its owner releases it, and
+# if the pid is an impostor the sweep above collects it the moment that process
+# exits.
+if [ "$need_build" -eq 0 ] && [ -n "$builder_pid" ]; then
+    record_status "a build started by an earlier start is still running (pid $builder_pid), but $BIN is already current with its sources; serving it now instead of waiting for that build"
+fi
+
+if [ "$need_build" -eq 1 ]; then
     builder_is_child=0
     if [ -n "$builder_pid" ]; then
         record_status "a build started by an earlier start is still running (pid $builder_pid); waiting for it"
@@ -475,14 +501,12 @@ if [ "$need_build" -eq 1 ] || [ -n "$builder_pid" ]; then
             exit 1
         fi
         stale_date="$(bin_mtime)"
-        if [ "$need_build" -eq 0 ]; then
-            # We never wanted a build — we only waited on one another start had
-            # left running, and THAT failed. $BIN is still current with its own
-            # sources, so nothing about it is superseded and there is nothing
-            # for the guard below to distrust. Probing here would refuse a good
-            # binary on the strength of someone else's failure.
-            record_status "a concurrent build failed, but $BIN from $stale_date is current with its sources; serving it. See $BUILD_LOG"
-        elif [ -n "${GC_HELM_ALLOW_STALE:-}" ]; then
+        # No "$BIN was current anyway" arm here: this block runs only when
+        # need_build was 1, so the artifact IS superseded by its own sources and
+        # the guard below is exactly what should judge it. A start that wanted
+        # no build never reaches this point — it serves $BIN directly, without
+        # waiting on anyone else's build and without paying for a self-check.
+        if [ -n "${GC_HELM_ALLOW_STALE:-}" ]; then
             record_status "rebuild failed; continuing to serve existing $BIN from $stale_date — SELF-CHECK SKIPPED by GC_HELM_ALLOW_STALE; see $BUILD_LOG"
         elif artifact_selfcheck_ok; then
             record_status "rebuild failed; continuing to serve existing $BIN from $stale_date (self-check passed); see $BUILD_LOG"
