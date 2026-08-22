@@ -305,6 +305,111 @@ grep -q 'GC_HELM_RIG_TIMEOUT:-30' "$SCRIPT" \
   && ok "(RIGTIMEOUT) the shipped default is 30s, not the board's 10" \
   || bad "(RIGTIMEOUT) shipped default changed — a one-shot verb must not inherit the board budget"
 
+# --- (RIGWHY) enumerate_rigs names WHICH failure it hit ----------------------
+# THE BUG (tk-lzdty half 2): every unhappy reading of `gc rig list` ended in one
+# sentence — "could not enumerate rigs (gc rig list returned nothing)" — and
+# exit 3. `|| true` threw away the exit status and `2>/dev/null` threw away the
+# stderr, so a timeout kill, a wedged data plane, unparseable output and a city
+# that genuinely has no rigs were indistinguishable. Four different operator
+# moves, one string. On the CLI that is a bad message; behind the web board's
+# open button (tk-66rwg) the exit code plus that string is the ENTIRE signal the
+# browser gets, so all four render as the same dead end.
+#
+# Each case below drives ONE cause through the real script and asserts the
+# message names that cause. (DISTINCT) is the assertion the bead is actually
+# about: the six sentences must be pairwise different, so no two causes can
+# collapse back together.
+mkdir -p "$TMP/rigbin"
+cat > "$TMP/rigbin/gc" <<'RIGSTUB'
+#!/usr/bin/env bash
+if [ "$1 ${2:-}" = "rig list" ]; then
+  case "${RIGMODE:-}" in
+    slow)     sleep 3; jq -n '{rigs:[{name:"gc-toolkit",path:"/nonexistent-rig",prefix:"tk"}]}' ;;
+    exitfail) echo "dial tcp 127.0.0.1:3307: connect: connection refused" >&2; exit 7 ;;
+    empty)    : ;;                                  # exit 0, prints NOTHING
+    notjson)  echo "warning: rebuilding stale rig cache" ;;
+    shape)    jq -n '{other:[]}' ;;                 # valid JSON, no .rigs
+    rigless)  jq -n '{rigs:[]}' ;;                  # valid, correct, and empty
+    ok)       jq -n '{rigs:[{name:"gc-toolkit",path:"/nonexistent-rig",prefix:"tk"}]}' ;;
+  esac
+  exit 0
+fi
+printf '%s %s\n' "$1" "${2:-}" >> "$FAKE_CALLS"
+case "$1 ${2:-}" in
+  "bd show") jq -n --arg i "$3" '[{id:$i, title:"a real bead", status:"open"}]' ;;
+  "bd list") printf '[]\n' ;;
+  "bd create") jq -n '{id:"tk-visit9"}' ;;
+esac
+exit 0
+RIGSTUB
+chmod +x "$TMP/rigbin/gc"
+
+# Drive one cause; capture stderr and status. Bound is 1s so (TIMEOUT) is quick.
+rigwhy() {
+  : > "$FAKE_CALLS"
+  set +e
+  RIGWHY_ERR=$(PATH="$TMP/rigbin:$PATH" RIGMODE="$1" GC_HELM_RIG_TIMEOUT="${2:-30}" \
+    sh "$SCRIPT" open tk-any1 2>&1 >/dev/null)
+  RIGWHY_RC=$?
+  set -e
+}
+# says <mode> <bound> <substring> <label> — the message names this cause, the
+# script still fails closed on 3, and nothing was filed on the way out.
+says() {
+  rigwhy "$1" "$2"
+  case "$RIGWHY_ERR" in
+    *"$3"*) ok "(RIGWHY) $4" ;;
+    *)      bad "(RIGWHY) $4 — got: $RIGWHY_ERR" ;;
+  esac
+  eq "$RIGWHY_RC" "3" "(RIGWHY) …and still exits 3 ($4)"
+  eq "$(cat "$FAKE_CALLS")" "" "(RIGWHY) …having filed nothing ($4)"
+}
+
+says slow     1  "did not answer within 1s and was killed" "a timeout kill says it timed out, and names the bound"
+says exitfail 30 "exited 7"                                "a non-zero gc exit reports the status"
+says exitfail 30 "connection refused"                      "…and carries gc's own stderr, instead of discarding it"
+says empty    30 "exited 0 but printed nothing"            "a silent empty answer is not read as an empty city"
+says notjson  30 "is not JSON"                             "unparseable output says so, rather than 'returned nothing'"
+says shape    30 "no '.rigs' array"                        "valid JSON of the wrong shape is a gc contract change"
+says rigless  30 "no rigs in this city"                    "a genuinely rigless city is reported as a CITY state"
+
+# (DISTINCT) is the whole point of the bead: the causes must not collapse back
+# into one string. Collect every message and require six unique ones.
+: > "$TMP/rigmsgs"
+for m in slow exitfail empty notjson shape rigless; do
+  if [ "$m" = slow ]; then rigwhy "$m" 1; else rigwhy "$m" 30; fi
+  printf '%s\n' "$RIGWHY_ERR" >> "$TMP/rigmsgs"
+done
+NUNIQ=$(sort -u "$TMP/rigmsgs" | wc -l | tr -d ' ')
+eq "$NUNIQ" "6" "(RIGWHY-DISTINCT) six causes produce six different sentences"
+
+# The rigless message must NOT accuse the data plane — that is the wrong move
+# for a city that answered correctly.
+rigwhy rigless 30
+case "$RIGWHY_ERR" in
+  *"gc doctor"*|*Dolt*) bad "(RIGWHY-DISTINCT) an empty city is blamed on the data plane: $RIGWHY_ERR" ;;
+  *)                    ok  "(RIGWHY-DISTINCT) an empty city is not blamed on the data plane" ;;
+esac
+# …and the happy path still works through the same stub, so none of the new
+# gates fire on a good answer.
+rigwhy ok 30
+eq "$RIGWHY_RC" "0" "(RIGWHY) a well-formed rig list still enumerates and files"
+
+# MUTATION CHECK (static): the evidence the taxonomy is built on must still be
+# captured. If either of these reverts to the old discard-everything form, the
+# cases above keep passing only because the stub is cooperative — so assert the
+# source directly. See tk-lzdty.
+grep -q 'gc rig list --json 2>"\$_er_errf"' "$SCRIPT" \
+  && ok "(RIGWHY-EVIDENCE) gc's stderr is captured, not sent to /dev/null" \
+  || bad "(RIGWHY-EVIDENCE) stderr capture removed — messages will lose their 'why'"
+# Match the ASSIGNMENT lines only, bounded to the function body. An earlier
+# version of this check matched the first line containing "gc rig list", which
+# in both the fixed and the broken script is a COMMENT — so it passed against
+# the very code it was meant to catch. Anchor guards to code, never to prose.
+awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw=\$\(/' "$SCRIPT" | grep -q '|| true' \
+  && bad "(RIGWHY-EVIDENCE) '|| true' is back — the exit status is discarded again" \
+  || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
+
 # --- (SYNTAX) the shipped script still parses ---------------------------------
 sh -n "$SCRIPT" 2>/dev/null && ok "(SYNTAX) gc-helm.sh parses as POSIX sh" || bad "(SYNTAX) sh -n failed"
 

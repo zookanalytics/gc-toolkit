@@ -227,7 +227,13 @@
 #   2   usage error
 #   3   missing dependency (jq / gc), could not enumerate rigs, or the
 #       gather failed (nothing cached — a transient gather failure must
-#       never be served as a "0 anchors" all-clear)
+#       never be served as a "0 anchors" all-clear). The rig-enumeration
+#       failures all share this code but deliberately NOT the message: a
+#       timeout kill, gc exiting non-zero, an empty / unparseable /
+#       wrong-shaped answer, and a legitimately rigless city each name
+#       their own operator move, because the code alone cannot tell them
+#       apart and for a non-CLI caller the code plus the sentence is the
+#       whole signal (tk-lzdty).
 #   4   verb runtime failure (e.g. bead not found, visit filing failed)
 #
 # Test hook: GC_HELM_FIXTURE=<dir> — when set, the board reads
@@ -372,12 +378,73 @@ enumerate_rigs() {
     # (2026-08-14), i.e. the old bound was marginal, and the failure it caused
     # is worst for gc-visit-open.sh's topic path: the subject bead is already
     # created by then, so a timeout here strands it visit-less.
-    rigs_raw=$(with_timeout "${TIMEOUT:-${GC_HELM_RIG_TIMEOUT:-30}}" gc rig list --json 2>/dev/null || true)
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null || printf '[]')
-    if [ "$(rigs_count)" -eq 0 ]; then
-        echo "$PROG: could not enumerate rigs (gc rig list returned nothing)" >&2
+    _er_secs="${TIMEOUT:-${GC_HELM_RIG_TIMEOUT:-30}}"
+    # >>> rig-enumeration-taxonomy
+    # KEEP THE EVIDENCE. This used to end in `|| true` with stderr sent to
+    # /dev/null, so the one line below reported a timeout kill, a wedged data
+    # plane, malformed output and a genuinely rigless city identically — and
+    # `exit 3` carried no more information than the sentence did. Four
+    # different operator moves (raise the bound / check Dolt / look at what gc
+    # actually printed / add a rig) rendered as one string you could not act
+    # on. On the CLI that is a bad message. Behind the web board's open button
+    # (tk-66rwg) the exit code plus that one string is the ENTIRE signal the
+    # browser gets, so all four render as the same dead end.
+    #
+    # The status and stderr are the only things that separate them, so capture
+    # both rather than discarding them. mktemp failing is not worth aborting
+    # over: fall back to the un-captured form and lose only the `why` clause.
+    _er_errf=$(mktemp 2>/dev/null || printf '')
+    _er_rc=0
+    if [ -n "$_er_errf" ]; then
+        rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>"$_er_errf") || _er_rc=$?
+        # One line, bounded: this is quoted into a message, not parsed.
+        _er_why=$(tr '\n' ' ' < "$_er_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+        rm -f "$_er_errf" 2>/dev/null || true
+    else
+        rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>/dev/null) || _er_rc=$?
+        _er_why=""
+    fi
+
+    if [ "$_er_rc" -ne 0 ]; then
+        # 124 is the timeout kill, and it is only reachable when a timeout
+        # binary exists — without one, with_timeout runs the command unbounded
+        # and a 124 could only be gc's own exit status. Do not blame the bound
+        # for something that was never applied.
+        if [ -n "$TIMEOUT_BIN" ] && [ "$_er_rc" -eq 124 ]; then
+            echo "$PROG: could not enumerate rigs: 'gc rig list' did not answer within ${_er_secs}s and was killed. Raise the bound with GC_HELM_RIG_TIMEOUT=<seconds>, or check whether gc/Dolt is wedged. This command wrote nothing." >&2
+        else
+            echo "$PROG: could not enumerate rigs: 'gc rig list' exited ${_er_rc}${_er_why:+ — $_er_why}. That is the data plane, not this script — try 'gc doctor' and check Dolt. This command wrote nothing." >&2
+        fi
         exit 3
     fi
+
+    # gc exited 0, so whatever is wrong is with what it PRINTED. jq -e reports
+    # each of those separately in its own exit status: 4 = it produced no
+    # output at all (empty input), 5 = the input would not parse as JSON,
+    # 1 = it parsed but the shape is not the {"rigs":[…]} contract. Each is a
+    # different operator move, so each gets its own sentence.
+    _er_shape=0
+    printf '%s' "$rigs_raw" | jq -e 'type=="object" and (.rigs|type)=="array"' >/dev/null 2>&1 || _er_shape=$?
+    case "$_er_shape" in
+        0) : ;;
+        4) echo "$PROG: could not enumerate rigs: 'gc rig list --json' exited 0 but printed nothing. A silent empty answer usually means gc was killed or the city path is wrong — check GC_CITY and 'gc doctor'. This command wrote nothing." >&2
+           exit 3 ;;
+        5) echo "$PROG: could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." >&2
+           exit 3 ;;
+        *) echo "$PROG: could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem — this script reads {\"rigs\":[{name,path,prefix}]}. This command wrote nothing." >&2
+           exit 3 ;;
+    esac
+
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null || printf '[]')
+    if [ "$(rigs_count)" -eq 0 ]; then
+        # The one reading that is NOT a malfunction: gc answered correctly and
+        # the answer is that this city has no rigs. Say that, so nobody goes
+        # looking for a broken data plane. Still exit 3 — every caller needs a
+        # rig to do anything — but the sentence has to name the real move.
+        echo "$PROG: no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." >&2
+        exit 3
+    fi
+    # <<< rig-enumeration-taxonomy
 }
 
 # rig_path_for_bead <bead-id> — the rig repo path owning the bead, by id
