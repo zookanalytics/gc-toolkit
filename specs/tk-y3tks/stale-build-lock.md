@@ -1,3 +1,8 @@
+---
+name: Decision record — the gc-helm-svc build lock identifies a request, not a process
+description: Why gc-helm-svc.sh's detached-build lock had to be keyed on a per-request token rather than on a live pid, what a pid alone cannot distinguish (a reused pid, a foreign builder, a verdict already published), the rule the launcher now follows, and the mutation evidence behind each STALELOCK case. Read alongside the tk-y3tks review trail when changing the attach/rebuild arms.
+---
+
 # The build lock identifies a request, not a process
 
 Bead: tk-kbb8s (rework of tk-y3tks) · review: tk-e0l83 · branch: polecat/tk-y3tks

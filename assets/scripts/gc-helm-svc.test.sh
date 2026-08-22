@@ -52,6 +52,16 @@
 #                 second one
 #   (CONCURRENT)  a binary that is current with its sources is NOT condemned by
 #                 an unrelated start's failed build
+#
+# tk-lv5qf then found the guard did not hold in the environment it was written
+# for — the supervisor exports GC_SERVICE_SOCKET, so the probe handed the very
+# artifact it was interrogating everything it needed to start and serve — so
+# also covered, one case per layer of the fix:
+#   (PRESELFCHECK) an artifact too old to know -selfcheck is refused even when
+#                 the supervisor's socket is in the environment, because the
+#                 probe runs with that socket stripped
+#   (PROBEBOUND)  a probe that hangs is killed by the launcher and read as a
+#                 refusal, rather than stalling the start it exists to unblock
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,6 +102,10 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN SELFCHECK COUNT
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
     SELFCHECK="$base/selfcheck-calls"; COUNT="$base/build-count"
     STUB_SLEEP=""; SELFCHECK_RC=0; ALLOW_STALE=""; BUILD_WAIT=""
+    # The supervisor exports GC_SERVICE_SOCKET into the launcher. Empty here is
+    # equivalent to unset for every consumer (the launcher never reads it), so
+    # the cases that predate this knob are unaffected; the tk-lv5qf cases set it.
+    SERVICE_SOCKET=""; SELFCHECK_WAIT=""
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin"
     cp "$SCRIPT" "$ROOT/assets/scripts/gc-helm-svc.sh"
@@ -147,6 +161,51 @@ CACHED
     chmod +x "$STATE/bin/helm-svc"
 }
 
+# Plant the artifact the guard actually exists to catch: the Aug 11 vintage,
+# which predates -selfcheck entirely. It does NOT branch on argv — that is the
+# whole point, an unknown flag is not a flag it knows — it branches on the
+# environment, exactly as helm-svc's main() did and does: no GC_SERVICE_SOCKET
+# is a fatal, a socket is a service to run. Serving is modelled as a sleep,
+# because "starts normally and keeps running" is the failure: the probe never
+# returns, the readiness window expires, and the stale board is what the
+# supervisor proxies to.
+cache_binary_preselfcheck() {
+    mkdir -p "$STATE/bin"
+    cat > "$STATE/bin/helm-svc" <<'OLD'
+#!/bin/sh
+[ -n "${SELFCHECK_RECORD:-}" ] &&     printf 'args=[%s] socket=[%s]
+' "$*" "${GC_SERVICE_SOCKET:-}" >> "$SELFCHECK_RECORD"
+if [ -z "${GC_SERVICE_SOCKET:-}" ]; then
+    echo "helm: GC_SERVICE_SOCKET is not set; run me as a proxy_process workspace-service" >&2
+    exit 1
+fi
+echo "stale-binary SERVING on ${GC_SERVICE_SOCKET}"
+sleep "${OLD_SERVE_SECS:-30}"
+OLD
+    chmod +x "$STATE/bin/helm-svc"
+}
+
+# Plant an artifact whose probe HANGS regardless of the environment, and then
+# reports success. Models a probe blocked on something other than a missing
+# socket — an unreachable store, a wedged filesystem — in a binary with no
+# internal bound of its own. Only the launcher-side bound can end this.
+cache_binary_hangs() {
+    mkdir -p "$STATE/bin"
+    cat > "$STATE/bin/helm-svc" <<'HANG'
+#!/bin/sh
+for a in "$@"; do
+    case "$a" in
+        -selfcheck|--selfcheck)
+            [ -n "${SELFCHECK_RECORD:-}" ] && echo asked >> "$SELFCHECK_RECORD"
+            sleep "${HANG_SECS:-30}"
+            exit 0 ;;
+    esac
+done
+echo "hanging-binary ran: $*"
+HANG
+    chmod +x "$STATE/bin/helm-svc"
+}
+
 selfcheck_calls() { [ -f "$SELFCHECK" ] && wc -l < "$SELFCHECK" | tr -d ' ' || echo 0; }
 build_count()     { [ -f "$COUNT" ] && wc -l < "$COUNT" | tr -d ' ' || echo 0; }
 
@@ -156,6 +215,7 @@ run_script() { # -> OUT ERR RC
     OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" STUB_GO_SLEEP="$STUB_SLEEP" \
            STUB_COUNT="$COUNT" SELFCHECK_RECORD="$SELFCHECK" SELFCHECK_RC="$SELFCHECK_RC" \
            GC_HELM_ALLOW_STALE="$ALLOW_STALE" GC_HELM_BUILD_WAIT="$BUILD_WAIT" \
+           GC_SERVICE_SOCKET="$SERVICE_SOCKET" GC_HELM_SELFCHECK_WAIT="$SELFCHECK_WAIT" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
            bash "$ROOT/assets/scripts/gc-helm-svc.sh" "$@" 2>"$err")"
     RC=$?
@@ -317,6 +377,71 @@ eq "$RC" 0 "(ALLOWSTALE) GC_HELM_ALLOW_STALE serves the artifact anyway"
 has "$OUT" "cached-binary ran:" "(ALLOWSTALE) the cached artifact is the one exec'd"
 has "$ERR" "SELF-CHECK SKIPPED" "(ALLOWSTALE) the override announces itself"
 
+# --- case: the socket the supervisor exports never reaches the probe ---------
+# tk-lv5qf. The guard above rests on one claim: an artifact too old to know
+# -selfcheck fails by construction, because it ignores the unknown argv, finds
+# no GC_SERVICE_SOCKET, and dies. The first half is a property of the artifact;
+# the SECOND half is a property of the CALLER, and the caller had it backwards.
+# The supervisor exports GC_SERVICE_SOCKET into this launcher, so a probe that
+# inherited the environment handed the Aug 11 binary a live socket — and that
+# binary does what it has always done with a socket: binds it and serves. The
+# probe never returns, the readiness window expires, and the supervisor proxies
+# the stale board. The guard reproduced the outage it was written to prevent.
+#
+# The socket strip is what carries this case: SELFCHECK_WAIT is set short so a
+# regression fails fast rather than hanging, but the timeout must not be what
+# saves us — a probe that has to be KILLED has already run the old binary as a
+# server. So the assertions are that the artifact saw an EMPTY socket and never
+# reached its serving path, neither of which the timeout can make true.
+fixture
+cache_binary_preselfcheck
+SERVICE_SOCKET="$TMP/case$CASE/helm.sock"
+SELFCHECK_WAIT=5
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"   # source newer -> rebuild attempted
+FAIL_BUILD=1
+run_script --socket "$SERVICE_SOCKET"
+FAIL_BUILD=""
+PROBE_ARGV="$(cat "$SELFCHECK" 2>/dev/null || true)"
+BUILD_LOG_TXT="$(cat "$STATE/bin/build.log" 2>/dev/null || true)"
+eq "$RC" 1 "(PRESELFCHECK) a pre-selfcheck artifact is refused, not served"
+has "$PROBE_ARGV" "socket=[]" "(PRESELFCHECK) the probe runs with GC_SERVICE_SOCKET stripped"
+case "$PROBE_ARGV" in
+    *"socket=[$SERVICE_SOCKET]"*) bad "(PRESELFCHECK) the probe leaked the live service socket to the artifact" ;;
+    *)                            ok  "(PRESELFCHECK) the probe leaked the live service socket to the artifact — it did not" ;;
+esac
+case "$BUILD_LOG_TXT" in
+    *SERVING*) bad "(PRESELFCHECK) the old artifact started serving during its own probe" ;;
+    *)         ok  "(PRESELFCHECK) the old artifact never reaches its serving path" ;;
+esac
+case "$BUILD_LOG_TXT" in
+    *"self-check exceeded"*) bad "(PRESELFCHECK) the probe had to be killed — it was handed a socket and ran as a server" ;;
+    *)                       ok  "(PRESELFCHECK) the probe exits on its own, immediately" ;;
+esac
+has "$ERR" "REFUSING to serve" "(PRESELFCHECK) the refusal is explicit"
+
+# --- case: a probe that hangs cannot stall the start -------------------------
+# The second layer, pinned where only it is observable. Stripping the socket
+# ends the case above; it does nothing for a probe blocked on an unreachable
+# store or a wedged filesystem, in a binary carrying no bound of its own. An
+# unbounded probe stalls the very start it exists to unblock, and the operator
+# gets `did not become ready before timeout` again — the message that started
+# all of this. Bounded, the artifact is refused and the reason is on the record.
+fixture
+cache_binary_hangs
+SELFCHECK_WAIT=3
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"
+FAIL_BUILD=1
+run_script --socket /run/helm.sock
+FAIL_BUILD=""
+BUILD_LOG_TXT="$(cat "$STATE/bin/build.log" 2>/dev/null || true)"
+eq "$RC" 1 "(PROBEBOUND) a hanging probe is a refusal, not a hang"
+eq "$(selfcheck_calls)" "1" "(PROBEBOUND) the artifact was asked exactly once"
+has "$BUILD_LOG_TXT" "self-check exceeded" "(PROBEBOUND) the log says the probe was killed on its bound"
+case "$OUT" in
+    *"hanging-binary ran:"*) bad "(PROBEBOUND) the unprobeable artifact was exec'd anyway" ;;
+    *)                       ok  "(PROBEBOUND) the unprobeable artifact is never exec'd" ;;
+esac
+
 # --- case: the build outlives the start that began it ------------------------
 # The second tk-y3tks defect. Rebuild-on-start runs inside the supervisor's
 # readiness window and a ~160MB link does not fit; when the window expires the
@@ -475,6 +600,27 @@ grep -q 'GOTMPDIR="\$GOTMP_RUN"' "$SCRIPT" \
 grep -q '\[ "\$GOTMP_RUN_OWNED" -eq 1 \]' "$SCRIPT" \
     && ok "(STATIC) post-build cleanup only removes scratch this invocation created" \
     || bad "(STATIC) post-build cleanup is no longer ownership-guarded — a degraded run can rm -rf the shared root"
+
+# The socket strip is invisible in every passing run — (PRESELFCHECK) is the
+# only case that can see it, and only because it plants an artifact that reads
+# the environment. Nothing about the probe LOOKS wrong without it, which is how
+# it was written that way in the first place. Pin the invocation itself.
+grep -q 'env -u GC_SERVICE_SOCKET' "$SCRIPT" \
+    && ok "(STATIC) the self-check probe strips the supervisor's service socket" \
+    || bad "(STATIC) the self-check probe no longer strips GC_SERVICE_SOCKET — an artifact too old to know the flag will read it and serve"
+# ...and pin that EVERY probe call site has one, not just that the string
+# appears somewhere. The strip and the invocation are on different lines of the
+# bounded arm (a line continuation), so this counts occurrences rather than
+# matching them per-line. `|| true` on both: grep -c exits 1 on a zero count,
+# and under this file's pipefail that would abort the suite instead of failing
+# the assertion.
+PROBE_SITES="$(grep -cE '"\$BIN" -selfcheck' "$SCRIPT" || true)"
+STRIP_SITES="$(grep -cE 'env -u GC_SERVICE_SOCKET' "$SCRIPT" || true)"
+if [ "${PROBE_SITES:-0}" -gt 0 ] && [ "$PROBE_SITES" = "$STRIP_SITES" ]; then
+    ok "(STATIC) every -selfcheck call site is paired with an environment strip"
+else
+    bad "(STATIC) -selfcheck call sites ($PROBE_SITES) and environment strips ($STRIP_SITES) disagree — a probe can hand the artifact a live socket"
+fi
 
 echo ""
 echo "gc-helm-svc build-scratch bounding: $PASS passed, $FAIL failed"

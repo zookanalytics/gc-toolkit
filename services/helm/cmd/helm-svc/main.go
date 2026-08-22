@@ -55,6 +55,13 @@ func main() {
 	// ignores argv, finds no GC_SERVICE_SOCKET and exits non-zero on the line
 	// below. That is the correct verdict rather than an accident — a binary
 	// predating the guard is exactly the vintage the guard exists to catch.
+	//
+	// "Finds no GC_SERVICE_SOCKET" is a PROPERTY OF THE CALLER, not of the
+	// environment. The supervisor exports that variable into the launcher, so
+	// gc-helm-svc.sh strips it for the probe (artifact_selfcheck_ok, `env -u`).
+	// Without that strip an old binary reads the socket, starts normally, and
+	// serves the stale board — the outage this flag exists to prevent. Anything
+	// else adding a -selfcheck caller owes it the same strip.
 	if isSelfcheck(os.Args[1:]) {
 		os.Exit(selfcheck())
 	}

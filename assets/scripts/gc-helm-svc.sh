@@ -14,6 +14,7 @@
 # (override the go toolchain), GC_SERVICE_STATE_ROOT (binary cache location),
 # GC_HELM_GOTMP (build-scratch root; the test points it off /var/tmp),
 # GC_HELM_ALLOW_STALE (serve a cached binary that fails its own self-check),
+# GC_HELM_SELFCHECK_WAIT (seconds to allow that self-check; default 45),
 # GC_HELM_BUILD_WAIT (seconds to wait on a build another start left running),
 # GC_HELM_BUILDER (internal: marks the detached build re-exec of this script).
 set -euo pipefail
@@ -69,6 +70,50 @@ emit_build_log_tail() {
     echo "gc-helm-svc: --- last ${BUILD_LOG_TAIL_LINES} lines of $BUILD_LOG ---" >&2
     tail -n "$BUILD_LOG_TAIL_LINES" "$BUILD_LOG" 2>/dev/null | sed 's/^/gc-helm-svc:   /' >&2 || true
     echo "gc-helm-svc: --- end of $BUILD_LOG ---" >&2
+}
+
+# Ask the CACHED artifact whether it can still read the city's bead stores.
+# Exit status is the whole verdict; the artifact's own output goes to
+# $BUILD_LOG beside the build that failed.
+#
+# Two properties of HOW it is invoked are load-bearing, and neither is
+# cosmetic — without them the guard does not hold in the environment it was
+# written for (tk-lv5qf).
+#
+# 1. GC_SERVICE_SOCKET IS STRIPPED. The guard's whole premise is that an
+#    artifact too old to know -selfcheck fails by construction: it ignores the
+#    unknown argv, finds no socket, and dies on helm-svc's
+#    "GC_SERVICE_SOCKET is not set" fatal. But the supervisor EXPORTS that
+#    variable into this launcher, so a probe that inherits the environment
+#    hands the old binary exactly what it needs to start normally — it binds
+#    the live service socket and serves the stale board through it, which is
+#    the tk-y3tks outage reproduced by the very check meant to prevent it.
+#    `env -u` is what makes the premise true rather than merely intended.
+#
+# 2. THE PROBE IS BOUNDED FROM OUT HERE. A binary that predates -selfcheck has
+#    no internal bound on anything; one that knows the flag bounds only its own
+#    store open. Either can block past the readiness window, and a probe that
+#    hangs stalls the very start it exists to unblock. An unbounded refusal is
+#    strictly worse than a bounded one, because a bounded one at least says
+#    why. GC_HELM_SELFCHECK_WAIT defaults ABOVE helm-svc's own 30s
+#    selfcheckTimeout on purpose: when both bounds are live the binary's should
+#    fire first, since it reports a reason and this one can only report a
+#    stopwatch. `timeout` is degraded-to-absent the way setsid is below —
+#    stripping the socket is the fix, this is the backstop.
+artifact_selfcheck_ok() {
+    _asc_rc=0
+    if command -v timeout >/dev/null 2>&1; then
+        env -u GC_SERVICE_SOCKET timeout "${GC_HELM_SELFCHECK_WAIT:-45}" \
+            "$BIN" -selfcheck >>"$BUILD_LOG" 2>&1 || _asc_rc=$?
+        # 124 is timeout's own "I killed it"; 137 is the SIGKILL escalation.
+        if [ "$_asc_rc" -eq 124 ] || [ "$_asc_rc" -eq 137 ]; then
+            echo "gc-helm-svc: self-check exceeded ${GC_HELM_SELFCHECK_WAIT:-45}s and was killed" \
+                >>"$BUILD_LOG" 2>/dev/null || true
+        fi
+    else
+        env -u GC_SERVICE_SOCKET "$BIN" -selfcheck >>"$BUILD_LOG" 2>&1 || _asc_rc=$?
+    fi
+    return "$_asc_rc"
 }
 
 # When was the cached artifact built? Named in every message about serving or
@@ -439,7 +484,7 @@ if [ "$need_build" -eq 1 ] || [ -n "$builder_pid" ]; then
             record_status "a concurrent build failed, but $BIN from $stale_date is current with its sources; serving it. See $BUILD_LOG"
         elif [ -n "${GC_HELM_ALLOW_STALE:-}" ]; then
             record_status "rebuild failed; continuing to serve existing $BIN from $stale_date — SELF-CHECK SKIPPED by GC_HELM_ALLOW_STALE; see $BUILD_LOG"
-        elif ( "$BIN" -selfcheck ) >>"$BUILD_LOG" 2>&1; then
+        elif artifact_selfcheck_ok; then
             record_status "rebuild failed; continuing to serve existing $BIN from $stale_date (self-check passed); see $BUILD_LOG"
         else
             # Refusing propagates, and the supervisor will restart us. That is
