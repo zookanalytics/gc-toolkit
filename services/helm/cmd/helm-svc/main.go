@@ -36,9 +36,28 @@ const defaultCacheTTL = 45 * time.Second
 // shutdownGrace is kept under the proxy_process SIGTERM→SIGKILL window (2s).
 const shutdownGrace = 1500 * time.Millisecond
 
+// selfcheckTimeout bounds -selfcheck. The launcher runs it on the recovery
+// path, where a probe that hangs on an unhealthy Dolt would stall the very
+// start it is meant to unblock; a bounded failure is the useful answer there.
+const selfcheckTimeout = 30 * time.Second
+
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("helm: ")
+
+	// -selfcheck answers one question for the LAUNCHER: can this artifact read
+	// the live stores? It is deliberately ahead of the socket requirement,
+	// because the caller is assets/scripts/gc-helm-svc.sh deciding whether a
+	// CACHED binary is worth serving — there is no supervisor and no socket in
+	// that moment (tk-y3tks).
+	//
+	// An artifact too old to know this flag fails the check by construction: it
+	// ignores argv, finds no GC_SERVICE_SOCKET and exits non-zero on the line
+	// below. That is the correct verdict rather than an accident — a binary
+	// predating the guard is exactly the vintage the guard exists to catch.
+	if isSelfcheck(os.Args[1:]) {
+		os.Exit(selfcheck())
+	}
 
 	socket := os.Getenv("GC_SERVICE_SOCKET")
 	if socket == "" {
@@ -79,6 +98,47 @@ func main() {
 		log.Fatalf("serve: %v", err)
 	}
 	log.Print("shut down cleanly")
+}
+
+// isSelfcheck reports whether argv asks for the launcher's readability probe.
+// Both spellings are accepted so the launcher's call site reads naturally
+// whichever convention the reader expects.
+func isSelfcheck(args []string) bool {
+	for _, a := range args {
+		if a == "-selfcheck" || a == "--selfcheck" {
+			return true
+		}
+	}
+	return false
+}
+
+// selfcheck opens the city's bead stores through the same in-process backend
+// the board itself reads, and reports the process exit code.
+//
+// It probes ONLY the beads backend. The supervisor backend is not a substitute
+// here: it would answer "can I reach the supervisor", which a stale artifact
+// can do perfectly well while every board gather dies on a schema its embedded
+// library is too old to read. The question this flag exists to answer is about
+// THIS BINARY, so the fallback that keeps the service alive at runtime must not
+// be allowed to mask it.
+//
+// The diagnostic goes to stderr and names the skew verbatim, because it is what
+// the launcher records for the operator; without it the only surviving symptom
+// is "did not become ready before timeout", which names neither the artifact
+// nor the reason.
+func selfcheck() int {
+	bs := source.NewBeadsSource()
+	defer func() { _ = bs.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), selfcheckTimeout)
+	defer cancel()
+
+	if err := bs.Probe(ctx); err != nil {
+		log.Printf("selfcheck FAILED: %v", err)
+		return 1
+	}
+	log.Print("selfcheck ok: the city bead stores are readable by this binary")
+	return 0
 }
 
 // spaHandler builds the embedded single-page app's handler, or returns nil to

@@ -127,6 +127,46 @@ func (s *BeadsSource) Check() error {
 	return err
 }
 
+// Probe reports whether THIS BINARY can actually read the live stores, by
+// opening them. It is the deep counterpart to [Check]: Check resolves paths,
+// which is all the entrypoint needs to pick a backend, while Probe pays for the
+// Dolt connections Check deliberately skips.
+//
+// WHY BOTH EXIST (tk-y3tks). The cheap check cannot see the failure that
+// matters most to a CACHED ARTIFACT: a binary whose embedded beads library is
+// older than the stores it must read. A helm-svc built at schema v61 against
+// rigs since migrated to v65 passes Check — the directories are all still there
+// — and only fails later, per rig, inside Gather. That is why a stale artifact
+// could be served for days while every board gather died. The launcher runs
+// this (via `helm-svc -selfcheck`) before it agrees to fall back to a cached
+// binary, so "the rebuild failed but we have something to serve" is decided on
+// whether that something WORKS rather than on whether it is executable.
+//
+// The success condition MIRRORS [BeadsSource.Gather]: one readable rig is
+// enough, because that is exactly when Gather returns a board rather than the
+// "no rig bead store could be read" error. The two must not drift — a Probe
+// stricter than Gather would refuse an artifact that serves fine, and a looser
+// one would bless an artifact whose every gather fails.
+//
+// Opening is the whole test: the schema-mismatch error this exists to catch is
+// raised by the store OPEN, which is also the only per-rig error Gather itself
+// reports before it reads anything.
+func (s *BeadsSource) Probe(ctx context.Context) error {
+	rigs, err := s.rigs()
+	if err != nil {
+		return err
+	}
+	var errs []string
+	for _, r := range rigs {
+		if _, err := s.store(ctx, r); err != nil {
+			errs = append(errs, "rig "+r.name+": "+err.Error())
+			continue
+		}
+		return nil // one readable store is what Gather needs
+	}
+	return fmt.Errorf("no rig bead store could be read: %s", strings.Join(errs, "; "))
+}
+
 // Close releases every cached store handle. The sidecar calls this on shutdown;
 // it is safe to call more than once.
 func (s *BeadsSource) Close() error {

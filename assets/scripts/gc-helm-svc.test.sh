@@ -35,6 +35,23 @@
 #   (DEGRADE)     an unwritable scratch root degrades — the service still starts
 #                 on the cached binary and the shared root is not removed
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP
+#
+# tk-y3tks then added the two defects that took Helm down for days — a failed
+# rebuild falling back to an artifact that could not read the stores, and a
+# build that could not finish inside the readiness window — so also covered:
+#   (GUARD)       a cached artifact failing its own self-check is REFUSED, not
+#                 served, and the refusal says why
+#   (FAILSOFT)    ...while one that passes is still served (the guard is a
+#                 usability test, not a blanket ban on falling back)
+#   (NOPROBE)     the up-to-date path pays for no self-check at all
+#   (ALLOWSTALE)  GC_HELM_ALLOW_STALE forces the old behaviour, loudly
+#   (LOGTAIL)     the detached build's own error reaches the service log
+#   (DETACH)      a build survives the supervisor killing the start's process
+#                 group at the readiness timeout
+#   (ATTACH)      the next start attaches to that build rather than starting a
+#                 second one
+#   (CONCURRENT)  a binary that is current with its sources is NOT condemned by
+#                 an unrelated start's failed build
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -68,11 +85,13 @@ age_days() { # <path> <days>
 # --- fixture ------------------------------------------------------------------
 CASE=0
 FAIL_BUILD=""
-fixture() { # -> ROOT GOTMP STATE RECORD GOBIN
+fixture() { # -> ROOT GOTMP STATE RECORD GOBIN SELFCHECK COUNT
     CASE=$((CASE + 1))
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
+    SELFCHECK="$base/selfcheck-calls"; COUNT="$base/build-count"
+    STUB_SLEEP=""; SELFCHECK_RC=0; ALLOW_STALE=""
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin"
     cp "$SCRIPT" "$ROOT/assets/scripts/gc-helm-svc.sh"
@@ -85,8 +104,13 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'TMPDIR=%s\nGOTMPDIR=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" > "$STUB_RECORD"
+# One line per invocation: the attach case asserts a second start does NOT
+# start a second build, which is only observable by counting.
+[ -n "${STUB_COUNT:-}" ] && echo build >> "$STUB_COUNT"
 mkdir -p "$GOTMPDIR/go-link-stub"
 head -c 4096 /dev/zero > "$GOTMPDIR/go-link-stub/obj"
+# A slow link, so a test can kill the start while the build is still running.
+[ -n "${STUB_GO_SLEEP:-}" ] && sleep "$STUB_GO_SLEEP"
 if [ -n "${STUB_GO_FAIL:-}" ]; then
     echo "stub go: link failed" >&2
     exit 1
@@ -101,16 +125,37 @@ STUB
     chmod +x "$GOBIN"
 }
 
-cache_binary() { # plant a previously-built binary, then make a source newer
+# Plant a previously-built binary. It answers -selfcheck the way the real one
+# does — exit status IS the verdict — and records that it was asked, so a case
+# can assert the launcher actually consulted the artifact rather than assuming
+# it was fine. $SELFCHECK_RC picks the verdict: 0 = this artifact still reads
+# the stores, 1 = the tk-y3tks artifact, executable but too old to read v65.
+cache_binary() {
     mkdir -p "$STATE/bin"
-    printf '#!/bin/sh\necho "cached-binary ran: $*"\n' > "$STATE/bin/helm-svc"
+    cat > "$STATE/bin/helm-svc" <<'CACHED'
+#!/bin/sh
+for a in "$@"; do
+    case "$a" in
+        -selfcheck|--selfcheck)
+            [ -n "${SELFCHECK_RECORD:-}" ] && echo asked >> "$SELFCHECK_RECORD"
+            [ "${SELFCHECK_RC:-0}" = 0 ] || echo "selfcheck FAILED: schema version mismatch" >&2
+            exit "${SELFCHECK_RC:-0}" ;;
+    esac
+done
+echo "cached-binary ran: $*"
+CACHED
     chmod +x "$STATE/bin/helm-svc"
 }
+
+selfcheck_calls() { [ -f "$SELFCHECK" ] && wc -l < "$SELFCHECK" | tr -d ' ' || echo 0; }
+build_count()     { [ -f "$COUNT" ] && wc -l < "$COUNT" | tr -d ' ' || echo 0; }
 
 run_script() { # -> OUT ERR RC
     local err="$TMP/case$CASE/stderr"
     set +e
-    OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" \
+    OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" STUB_GO_SLEEP="$STUB_SLEEP" \
+           STUB_COUNT="$COUNT" SELFCHECK_RECORD="$SELFCHECK" SELFCHECK_RC="$SELFCHECK_RC" \
+           GC_HELM_ALLOW_STALE="$ALLOW_STALE" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
            bash "$ROOT/assets/scripts/gc-helm-svc.sh" "$@" 2>"$err")"
     RC=$?
@@ -119,6 +164,29 @@ run_script() { # -> OUT ERR RC
 }
 
 run_dir_of() { sed -n 's/^GOTMPDIR=//p' "$RECORD"; }
+
+# Start the launcher in its OWN session, so a test can kill the whole process
+# group the way the supervisor kills a service that missed its readiness
+# window. That is the only way to observe the fix: a build left in this
+# session dies with the group, while a build the launcher detached does not.
+run_script_bg() { # -> BG_PID
+    local base="$TMP/case$CASE"
+    STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" STUB_GO_SLEEP="$STUB_SLEEP" \
+    STUB_COUNT="$COUNT" SELFCHECK_RECORD="$SELFCHECK" SELFCHECK_RC="$SELFCHECK_RC" \
+    GC_HELM_ALLOW_STALE="$ALLOW_STALE" \
+    GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
+    setsid bash "$ROOT/assets/scripts/gc-helm-svc.sh" "$@" \
+        >"$base/bg.out" 2>"$base/bg.err" &
+    BG_PID=$!
+}
+
+# Poll until <file> exists, up to <secs>. Used instead of a fixed sleep so the
+# timing cases neither flake on a slow machine nor pad the suite on a fast one.
+await() { # <path> <secs>
+    local waited=0 limit=$(( ${2:-10} * 10 ))
+    while [ ! -e "$1" ] && [ "$waited" -lt "$limit" ]; do sleep 0.1; waited=$((waited + 1)); done
+    [ -e "$1" ]
+}
 
 # --- case 1: build, sweep, and clean up after itself --------------------------
 fixture
@@ -171,6 +239,8 @@ eq "$RC" 0 "(FAILSOFT) keeps serving the cached binary when the rebuild fails"
 has "$OUT" "cached-binary ran: --socket /run/helm.sock" "(FAILSOFT) the cached binary is the one exec'd"
 has "$ERR" "rebuild failed; continuing to serve existing" "(FAILSOFT) the failure still surfaces"
 absent "$(run_dir_of)" "(FAILSOFT) a failed build's leak does not survive the exec"
+eq "$(selfcheck_calls)" "1" "(FAILSOFT) the artifact was asked to prove itself before being served"
+has "$ERR" "stub go: link failed" "(LOGTAIL) the toolchain's own error reaches the service log"
 
 # --- case 4: nothing to build -> toolchain untouched, scratch untouched ------
 fixture
@@ -183,6 +253,7 @@ eq "$RC" 0 "(NOBUILD) serves the up-to-date binary"
 has "$OUT" "cached-binary ran:" "(NOBUILD) exec'd without rebuilding"
 absent "$RECORD" "(NOBUILD) the toolchain was never invoked"
 present "$GOTMP/go-link-old" "(NOBUILD) the sweep is scoped to builds; scratch is untouched"
+eq "$(selfcheck_calls)" "0" "(NOPROBE) an up-to-date binary is served without paying for a self-check"
 
 # --- case 5: scratch hygiene cannot stop the service starting -----------------
 # `set -e` is live in the script, so an unguarded mkdir/rm in the hygiene would
@@ -206,6 +277,103 @@ has "$ERR" "cannot create" "(DEGRADE) the degraded path says so"
 present "$GOTMP" "(DEGRADE) the shared root is not removed as if it were owned scratch"
 present "$GOTMP/go-link-old" "(DEGRADE) a failed age sweep is swallowed, not fatal"
 present "$GOTMP/run.$DEAD_PID" "(DEGRADE) a failed dead-pid sweep is swallowed, not fatal"
+
+# --- case: a cached artifact that cannot read the stores is REFUSED ----------
+# The tk-y3tks outage in one case. The rebuild fails (ENOSPC, in the incident)
+# and a cached binary is present and executable — but it is the Aug 11 artifact
+# whose embedded beads library knows v61 against stores since migrated to v65,
+# so every board gather dies. The old launcher served it on the strength of
+# `-x "$BIN"` alone and reported a running service for days. Serving a binary
+# that cannot read the store is not availability.
+fixture
+cache_binary
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"   # source newer -> rebuild attempted
+FAIL_BUILD=1
+SELFCHECK_RC=1                                     # the artifact fails its own probe
+run_script --socket /run/helm.sock
+FAIL_BUILD=""
+eq "$RC" 1 "(GUARD) refuses to start on an artifact that fails its self-check"
+eq "$(selfcheck_calls)" "1" "(GUARD) the artifact was actually asked"
+has "$ERR" "REFUSING to serve" "(GUARD) the refusal is explicit"
+has "$ERR" "failed its own self-check" "(GUARD) it says WHY, not just that it failed"
+case "$OUT" in
+    *"cached-binary ran: --socket"*) bad "(GUARD) the unusable artifact was exec'd anyway" ;;
+    *) ok "(GUARD) the unusable artifact is never exec'd" ;;
+esac
+
+# --- case: the operator can still force the old behaviour --------------------
+# The guard fails closed, so there has to be a way past it: a board that cannot
+# read one rig is still worth more than no board at all, and that judgement
+# belongs to the operator rather than to this script. It stays loud.
+fixture
+cache_binary
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"
+FAIL_BUILD=1
+SELFCHECK_RC=1
+ALLOW_STALE=1
+run_script --socket /run/helm.sock
+FAIL_BUILD=""
+eq "$RC" 0 "(ALLOWSTALE) GC_HELM_ALLOW_STALE serves the artifact anyway"
+has "$OUT" "cached-binary ran:" "(ALLOWSTALE) the cached artifact is the one exec'd"
+has "$ERR" "SELF-CHECK SKIPPED" "(ALLOWSTALE) the override announces itself"
+
+# --- case: the build outlives the start that began it ------------------------
+# The second tk-y3tks defect. Rebuild-on-start runs inside the supervisor's
+# readiness window and a ~160MB link does not fit; when the window expires the
+# supervisor kills the service, and an inline build dies with it. Every restart
+# threw away the same partial link, so `gc service restart helm` could not fix
+# what `gc service restart helm` is the remedy for, and the binary sat at Aug 11
+# through two restart attempts.
+#
+# The kill here is the supervisor's: the whole process group, which is why the
+# launcher is started in a session of its own. A build left in that group dies
+# with it; a build the launcher detached survives and publishes.
+fixture
+STUB_SLEEP=2
+run_script_bg --socket /run/helm.sock
+await "$RECORD" 15 && ok "(DETACH) the build starts" || bad "(DETACH) the build never started"
+kill -TERM "-$BG_PID" 2>/dev/null || true          # as the readiness timeout does
+wait "$BG_PID" 2>/dev/null || true
+await "$STATE/bin/helm-svc" 30 \
+    && ok "(DETACH) the killed start's build still finishes and publishes the binary" \
+    || bad "(DETACH) killing the start killed the build — the binary was never published"
+
+# --- case: the next start attaches to that build instead of restarting it ----
+# Attaching is the half that actually breaks the loop. A second start that began
+# its own build would restart the same link from scratch and be killed by the
+# same window, forever. Only ONE toolchain invocation may happen across both.
+fixture
+STUB_SLEEP=3
+run_script_bg --socket /run/helm.sock
+await "$RECORD" 15 || bad "(ATTACH) the first build never started"
+kill -TERM "-$BG_PID" 2>/dev/null || true
+wait "$BG_PID" 2>/dev/null || true
+run_script --socket /run/helm.sock                 # start 2, while the build runs
+eq "$RC" 0 "(ATTACH) the next start serves the binary the detached build published"
+has "$OUT" "helm-svc-stub ran: --socket /run/helm.sock" "(ATTACH) it exec'd the freshly built binary"
+eq "$(build_count)" "1" "(ATTACH) the second start attached to the running build, it did not start another"
+
+# --- case: someone else's failed build does not condemn a current binary -----
+# The guard must fire on a SUPERSEDED artifact, not on any artifact that happens
+# to be present when a build fails. Here $BIN is newer than every source, so
+# this start wanted no build at all — it only waited on one another start left
+# running, and that one failed. Refusing here would take a good binary out of
+# service on the strength of an unrelated failure, and the self-check cannot
+# tell "too old to read the stores" from "the stores are down right now".
+fixture
+cache_binary                                    # newer than main.go -> need_build=0
+SELFCHECK_RC=1                                  # would REFUSE if the guard ran here
+mkdir -p "$STATE/bin"
+sleep 2 &                                       # stand in for another start's builder
+FAKE_BUILDER=$!
+echo "$FAKE_BUILDER" > "$STATE/bin/.build.pid"
+echo fail > "$STATE/bin/.build.result"
+run_script --socket /run/helm.sock
+wait "$FAKE_BUILDER" 2>/dev/null || true
+eq "$RC" 0 "(CONCURRENT) a current binary is served even though another start's build failed"
+has "$OUT" "cached-binary ran:" "(CONCURRENT) it is the binary that gets exec'd"
+eq "$(selfcheck_calls)" "0" "(CONCURRENT) no self-check is paid for: nothing here is superseded"
+has "$ERR" "current with its sources" "(CONCURRENT) the log says why it was trusted"
 
 # --- case 5: static guard ----------------------------------------------------
 # The regression that caused the incident is pointing the toolchain straight at

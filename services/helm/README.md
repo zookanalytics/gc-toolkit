@@ -185,6 +185,49 @@ kind = "proxy_process"
 (`assets/scripts/gc-helm-svc.sh`) builds the binary on demand (Go's build
 cache makes restarts instant) and `exec`s it so SIGTERM reaches the Go process.
 
+### How the launcher builds, and why it looks the way it does
+
+Two properties of the build are load-bearing, and both were learned from an
+outage in which Helm was unreachable for days (`tk-y3tks`).
+
+**The build is detached, and the next start attaches to it.** A cold build takes
+minutes, which does not fit inside the supervisor's readiness window. When the
+window expires the supervisor kills the service — and an inline build dies with
+it, throwing away the same partial link every time. That made `gc service
+restart helm` unable to repair the one failure it is the documented remedy for;
+recovery took a hand-run `go build`. The launcher now runs the build in a
+session of its own (`setsid`), so a killed start leaves the build running, and
+the next start **waits for that build** instead of starting a second one.
+Consequence worth knowing: a start can exit non-zero while a build is still
+progressing, and the following start is the one that succeeds.
+
+**A cached binary is served only if it still works.** When a rebuild fails the
+launcher may fall back to the previously built artifact — but not blindly. It
+first runs `helm-svc -selfcheck`, which opens the city's bead stores through the
+same in-process backend the board reads. The artifact that caused the outage was
+executable and started fine; its embedded beads library knew schema v61 against
+stores migrated to v65, so every board gather died while the service reported
+itself up. An artifact too old to know the flag fails the check by construction,
+which is the correct verdict for that vintage. `GC_HELM_ALLOW_STALE=1` forces
+the old serve-anyway behaviour, loudly.
+
+Both paths leave a record beside the binary under `state_root`, because the
+symptom an operator actually sees (`did not become ready before timeout`) names
+neither the artifact nor the reason:
+
+| file | holds |
+|---|---|
+| `bin/build-status` | one line: what was decided and when |
+| `bin/build.log` | the toolchain's own output, across starts |
+
+A failing build also replays its log tail onto the service log, so the reason
+appears where the operator is already looking.
+
+Launcher env: `GC_GO_BIN` (toolchain override), `GC_SERVICE_STATE_ROOT` (binary
+cache), `GC_HELM_GOTMP` (build scratch root, default `/var/tmp/gotmp`),
+`GC_HELM_ALLOW_STALE`, `GC_HELM_BUILD_WAIT` (seconds to wait on a build another
+start left running, default 900).
+
 Once declared, the board is reachable:
 
 ```bash

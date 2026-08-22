@@ -600,6 +600,72 @@ func TestBeadsCheckAndRigDiscovery(t *testing.T) {
 	}
 }
 
+// TestBeadsProbeSeesWhatCheckCannot is the tk-y3tks defect in one test: the
+// cheap startup Check passes on a city whose every store fails to open, because
+// it only resolves paths. That gap is why a helm-svc built against beads v61
+// could be served for days against stores migrated to v65 — executable, and
+// blind. Probe opens, so it sees it.
+func TestBeadsProbeSeesWhatCheckCannot(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	src := NewBeadsSource(
+		WithCityPath(root),
+		withStoreOpener(func(context.Context, string) (beadStore, error) {
+			return nil, errors.New("schema version mismatch: database is at v65, binary knows up to v61")
+		}),
+	)
+
+	if err := src.Check(); err != nil {
+		t.Fatalf("Check resolves paths only, so it must still pass here: %v", err)
+	}
+
+	err := src.Probe(context.Background())
+	if err == nil {
+		t.Fatal("Probe must fail when no rig store can be opened")
+	}
+	// The launcher records this verbatim for the operator, so the skew has to
+	// survive into the message rather than being flattened to "unavailable".
+	if !strings.Contains(err.Error(), "schema version mismatch") {
+		t.Errorf("Probe error must carry the underlying reason, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rig ") {
+		t.Errorf("Probe error must say which rig failed, got: %v", err)
+	}
+}
+
+// TestBeadsProbeMirrorsGather pins the success condition to Gather's: one
+// readable store is enough. A Probe stricter than Gather would refuse an
+// artifact that serves fine.
+func TestBeadsProbeMirrorsGather(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	src := NewBeadsSource(
+		WithCityPath(root),
+		withStoreOpener(func(_ context.Context, beadsDir string) (beadStore, error) {
+			if filepath.Base(filepath.Dir(beadsDir)) == "gc-toolkit" {
+				return populatedStore(), nil
+			}
+			return nil, errors.New("dolt unreachable")
+		}),
+	)
+
+	if err := src.Probe(context.Background()); err != nil {
+		t.Errorf("one readable rig is what Gather needs, so Probe must accept it: %v", err)
+	}
+	if _, err := src.Gather(context.Background()); err != nil {
+		t.Errorf("the fixture Probe accepted must also gather: %v", err)
+	}
+}
+
+// TestBeadsProbeFailsWithoutACity keeps Probe's path errors aligned with
+// Check's: no city root is a failure, not an empty success.
+func TestBeadsProbeFailsWithoutACity(t *testing.T) {
+	if err := NewBeadsSource(WithCityPath("")).Probe(context.Background()); err == nil {
+		t.Error("empty city path must fail Probe")
+	}
+	if err := NewBeadsSource(WithCityPath(t.TempDir())).Probe(context.Background()); err == nil {
+		t.Error("a city with no rigs dir must fail Probe")
+	}
+}
+
 // TestBeadsSourceCloses verifies shutdown releases the cached handles.
 func TestBeadsSourceCloses(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
