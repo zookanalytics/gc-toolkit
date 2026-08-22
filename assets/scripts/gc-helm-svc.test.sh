@@ -91,7 +91,7 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN SELFCHECK COUNT
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
     SELFCHECK="$base/selfcheck-calls"; COUNT="$base/build-count"
-    STUB_SLEEP=""; SELFCHECK_RC=0; ALLOW_STALE=""
+    STUB_SLEEP=""; SELFCHECK_RC=0; ALLOW_STALE=""; BUILD_WAIT=""
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin"
     cp "$SCRIPT" "$ROOT/assets/scripts/gc-helm-svc.sh"
@@ -155,7 +155,7 @@ run_script() { # -> OUT ERR RC
     set +e
     OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" STUB_GO_SLEEP="$STUB_SLEEP" \
            STUB_COUNT="$COUNT" SELFCHECK_RECORD="$SELFCHECK" SELFCHECK_RC="$SELFCHECK_RC" \
-           GC_HELM_ALLOW_STALE="$ALLOW_STALE" \
+           GC_HELM_ALLOW_STALE="$ALLOW_STALE" GC_HELM_BUILD_WAIT="$BUILD_WAIT" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
            bash "$ROOT/assets/scripts/gc-helm-svc.sh" "$@" 2>"$err")"
     RC=$?
@@ -364,16 +364,93 @@ fixture
 cache_binary                                    # newer than main.go -> need_build=0
 SELFCHECK_RC=1                                  # would REFUSE if the guard ran here
 mkdir -p "$STATE/bin"
-sleep 2 &                                       # stand in for another start's builder
+# A build that is genuinely IN FLIGHT: it holds a tokened lock and has not
+# published a verdict yet. It publishes `fail` a moment later, stamped with the
+# token from its own lock, which is what makes the verdict provably its answer.
+# (Writing the verdict up front would instead describe a build that already
+# finished — a stale lock — and is covered by the STALELOCK cases below.)
+CONC_TOKEN="btest-concurrent-1"
+( sleep 1; echo "$CONC_TOKEN fail" > "$STATE/bin/.build.result" ) &
 FAKE_BUILDER=$!
-echo "$FAKE_BUILDER" > "$STATE/bin/.build.pid"
-echo fail > "$STATE/bin/.build.result"
+echo "$FAKE_BUILDER $CONC_TOKEN" > "$STATE/bin/.build.pid"
 run_script --socket /run/helm.sock
 wait "$FAKE_BUILDER" 2>/dev/null || true
 eq "$RC" 0 "(CONCURRENT) a current binary is served even though another start's build failed"
 has "$OUT" "cached-binary ran:" "(CONCURRENT) it is the binary that gets exec'd"
 eq "$(selfcheck_calls)" "0" "(CONCURRENT) no self-check is paid for: nothing here is superseded"
 has "$ERR" "current with its sources" "(CONCURRENT) the log says why it was trusted"
+
+# --- case: a STALE lock must not suppress a required rebuild -----------------
+# The lock outlives the start that wrote it by design, and a pid is not an
+# identity: pids are reused. So "the locked pid is alive" can mean an unrelated
+# process inherited the number long after the build ended. The old code took
+# that as "a build is running", skipped the rebuild it had already decided it
+# needed, then read the PREVIOUS build's `ok` and logged "rebuilt" over a binary
+# nobody rebuilt — serving a stale artifact while reporting success. This is the
+# reviewer's reproduction from tk-e0l83, verbatim in shape: live impostor pid,
+# leftover ok verdict, sources newer than the binary, no patience for waiting.
+fixture
+cache_binary                                    # the artifact that must NOT be served
+sleep 30 &                                      # a live process that is NOT a builder
+IMPOSTOR=$!
+mkdir -p "$STATE/bin"
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"   # sources newer -> need_build=1
+echo "$IMPOSTOR btest-stale-1" > "$STATE/bin/.build.pid"
+echo "btest-stale-1 ok"        > "$STATE/bin/.build.result"
+BUILD_WAIT=0
+run_script --socket /run/helm.sock
+kill "$IMPOSTOR" 2>/dev/null || true
+wait "$IMPOSTOR" 2>/dev/null || true
+eq "$(build_count)" "1" "(STALELOCK) a stale lock does not suppress the rebuild the start needed"
+has "$OUT" "helm-svc-stub ran:" "(STALELOCK) the rebuilt binary is served, not the superseded cache"
+
+# (STALELOCK-PIDONLY) a pre-token lock proves nothing about .build.result — there
+# is no way to tell that verdict from an older one — so it is refused outright
+# rather than trusted. Guards the upgrade path: a lock written by the previous
+# version of this script is exactly this shape.
+fixture
+cache_binary
+sleep 30 &
+IMPOSTOR=$!
+mkdir -p "$STATE/bin"
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"
+echo "$IMPOSTOR" > "$STATE/bin/.build.pid"      # pid only: no token
+echo ok         > "$STATE/bin/.build.result"    # and an untokened verdict
+BUILD_WAIT=0
+run_script --socket /run/helm.sock
+kill "$IMPOSTOR" 2>/dev/null || true
+wait "$IMPOSTOR" 2>/dev/null || true
+eq "$(build_count)" "1" "(STALELOCK-PIDONLY) a pre-token lock is not trusted, so the rebuild still runs"
+has "$OUT" "helm-svc-stub ran:" "(STALELOCK-PIDONLY) the rebuilt binary is served"
+
+# (STALELOCK-FOREIGN) the verdict of a DIFFERENT build is never consumed as this
+# one's answer. Here the attach is legitimate — live pid, tokened lock, no
+# verdict for that token — but the verdict that lands carries another token. It
+# must read as "no result", i.e. the failure path, not as a silent success.
+fixture
+cache_binary
+mkdir -p "$STATE/bin"
+touch "$ROOT/services/helm/cmd/helm-svc/main.go"
+( sleep 1; echo "btest-someone-else ok" > "$STATE/bin/.build.result" ) &
+FOREIGN=$!
+echo "$FOREIGN btest-mine-1" > "$STATE/bin/.build.pid"
+run_script --socket /run/helm.sock
+wait "$FOREIGN" 2>/dev/null || true
+case "$ERR" in
+    *"rebuilt"*) bad "(STALELOCK-FOREIGN) another build's ok is not reported as our rebuild" ;;
+    *)           ok  "(STALELOCK-FOREIGN) another build's ok is not reported as our rebuild" ;;
+esac
+
+# (STALELOCK-SWEEP) a lock whose builder is gone is cleared on sight. It used to
+# survive every no-build start — the block that released it only ran when a
+# build was wanted — which is how a dead pid stayed on disk long enough to be
+# reused in the first place.
+fixture
+cache_binary                                    # current with sources -> need_build=0
+mkdir -p "$STATE/bin"
+echo "$DEAD_PID btest-dead-1" > "$STATE/bin/.build.pid"
+run_script --socket /run/helm.sock
+absent "$STATE/bin/.build.pid" "(STALELOCK-SWEEP) a dead builder's lock is cleared even on a no-build start"
 
 # --- case 5: static guard ----------------------------------------------------
 # The regression that caused the incident is pointing the toolchain straight at

@@ -201,6 +201,20 @@ the next start **waits for that build** instead of starting a second one.
 Consequence worth knowing: a start can exit non-zero while a build is still
 progressing, and the following start is the one that succeeds.
 
+*Attaching is gated on identity, not on a pid.* The lock that says "a build is
+running" outlives the start that wrote it — that is the point of detaching — so
+it is routinely still on disk after the build ends, and pids get reused. A start
+that reads only the pid can therefore mistake an unrelated live process for a
+builder, skip the rebuild it had already decided it needed, read the *previous*
+build's verdict, and exec a stale binary while logging "rebuilt". Each build
+request now carries a token minted before the builder is spawned: it is written
+into the lock, handed to the builder, and stamped on the verdict. A start
+attaches only to a lock that is tokened, alive, and has not yet published a
+verdict for that token, and it believes a verdict only when the token is its
+own. A lock left by a dead builder is cleared on sight, including on starts that
+wanted no build — which is what stops one becoming old enough to collide with a
+recycled pid.
+
 **A cached binary is served only if it still works.** When a rebuild fails the
 launcher may fall back to the previously built artifact — but not blindly. It
 first runs `helm-svc -selfcheck`, which opens the city's bead stores through the

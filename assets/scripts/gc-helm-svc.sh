@@ -119,6 +119,33 @@ pid_alive() {
     fi
 }
 
+# A pid is not an identity. Pids are reused, and this lock outlives the start
+# that wrote it by design (that is what detaching the build buys), so "the
+# locked pid is alive" does NOT mean "that build is still running" — it can
+# equally mean an unrelated process inherited the number. Every build request
+# therefore carries a TOKEN minted before the builder is spawned: it goes in the
+# lock, it is handed to the builder, and the builder stamps it on its verdict.
+# A verdict is believed only when it carries the token of the build this start
+# is actually waiting on.
+mint_build_token() {
+    _mbt_now="$(date +%s%N 2>/dev/null || true)"
+    case "$_mbt_now" in ''|*[!0-9]*) _mbt_now="$(date +%s 2>/dev/null || echo 0)" ;; esac
+    printf 'b%s-%s-%s' "$_mbt_now" "$$" "${RANDOM:-0}"
+}
+
+# .build.result is "<token> <ok|fail>". A verdict with no token — an older
+# builder, or one run by hand — yields an empty token, which matches no minted
+# token and so is never consumed. Unreadable and absent both read as empty.
+read_build_result() {
+    _rbr_line="$(cat "$BUILD_RESULT" 2>/dev/null || true)"
+    case "$_rbr_line" in
+        *' '*) build_result_token="${_rbr_line%% *}"
+               build_result_verdict="${_rbr_line#* }" ;;
+        *)     build_result_token=""
+               build_result_verdict="$_rbr_line" ;;
+    esac
+}
+
 # ---------------------------------------------------------------------------
 # Builder mode
 # ---------------------------------------------------------------------------
@@ -230,10 +257,14 @@ if [ -n "${GC_HELM_BUILDER:-}" ]; then
     # The result file is the ONLY channel back to the waiting start — the
     # builder is detached, so its exit status reaches nobody once the start that
     # spawned it has been killed. Write it last, and unconditionally.
+    # Stamped with this build's token so the waiting start can prove the verdict
+    # answers ITS request. Absent the env (a hand-run builder) the token is "-",
+    # which no minted token equals, so such a verdict is inert rather than
+    # accidentally authoritative.
     if [ "$build_ok" -eq 1 ]; then
-        printf 'ok\n' > "$BUILD_RESULT" 2>/dev/null || true
+        printf '%s ok\n' "${GC_HELM_BUILD_TOKEN:--}" > "$BUILD_RESULT" 2>/dev/null || true
     else
-        printf 'fail\n' > "$BUILD_RESULT" 2>/dev/null || true
+        printf '%s fail\n' "${GC_HELM_BUILD_TOKEN:--}" > "$BUILD_RESULT" 2>/dev/null || true
     fi
     exit 0
 fi
@@ -256,11 +287,48 @@ fi
 # helm down. The lock is written by the start that spawns the builder, so it is
 # never read before it exists.
 builder_pid=""
+builder_token=""
 if [ -f "$BUILD_LOCK" ]; then
-    lock_pid="$(cat "$BUILD_LOCK" 2>/dev/null || true)"
+    lock_line="$(cat "$BUILD_LOCK" 2>/dev/null || true)"
+    lock_pid="${lock_line%% *}"
+    case "$lock_line" in
+        *' '*) lock_token="${lock_line#* }" ;;
+        *)     lock_token="" ;;                          # pid-only: pre-token lock
+    esac
     case "$lock_pid" in
-        ''|*[!0-9]*) ;;                                  # not a pid: ignore
-        *) if pid_alive "$lock_pid"; then builder_pid="$lock_pid"; fi ;;
+        ''|*[!0-9]*) rm -f "$BUILD_LOCK" 2>/dev/null || true ;;   # not a pid: junk
+        *)
+            read_build_result
+            if ! pid_alive "$lock_pid"; then
+                # The locked builder is gone. Its lock is residue — the start
+                # that spawned it was killed by the readiness window before it
+                # could reach the release below. Clearing it HERE is what stops
+                # the residue outliving the build: on a no-build start the block
+                # below never runs, so this was the only path that ever saw it,
+                # and it used to leave it in place for the next pid to collide
+                # with.
+                rm -f "$BUILD_LOCK" 2>/dev/null || true
+            elif [ -z "$lock_token" ]; then
+                # A pid-only lock cannot prove anything about .build.result:
+                # there is no way to tell that verdict apart from an older one.
+                # Refusing to attach costs at most one redundant build; trusting
+                # it serves an unproven artifact, which is the failure this whole
+                # guard exists to close.
+                rm -f "$BUILD_LOCK" 2>/dev/null || true
+                rm -f "$BUILD_RESULT" 2>/dev/null || true
+            elif [ "$build_result_token" = "$lock_token" ]; then
+                # The locked build has ALREADY published its verdict, so it is
+                # not running any more — whatever holds that pid now is an
+                # unrelated process that inherited the number. This is the exact
+                # stale-lock shape: pid alive, result present, build long over.
+                # Attaching would wait on a stranger and then read a verdict
+                # about a build that predates our sources.
+                rm -f "$BUILD_LOCK" 2>/dev/null || true
+            else
+                # Alive, tokened, and no verdict yet: a genuine build in flight.
+                builder_pid="$lock_pid"
+                builder_token="$lock_token"
+            fi ;;
     esac
 fi
 
@@ -272,6 +340,9 @@ if [ "$need_build" -eq 1 ] || [ -n "$builder_pid" ]; then
         # Clear the previous verdict only when actually starting a new build —
         # clearing it while attached would discard the running builder's answer.
         rm -f "$BUILD_RESULT" 2>/dev/null || true
+        # Minted BEFORE the spawn so the builder is told what to stamp, and so
+        # the lock names the request rather than only the process running it.
+        builder_token="$(mint_build_token)"
         # setsid puts the build in its own session so the supervisor's kill at
         # the end of the readiness window cannot reach it. Without setsid the
         # build shares this script's process group and dies with it, which is
@@ -279,13 +350,15 @@ if [ "$need_build" -eq 1 ] || [ -n "$builder_pid" ]; then
         # unavailable: still an improvement on an inline build, since the parent
         # exiting no longer waits on it.
         if command -v setsid >/dev/null 2>&1; then
-            setsid env GC_HELM_BUILDER=1 bash "$SELF" >>"$BUILD_LOG" 2>&1 &
+            setsid env GC_HELM_BUILDER=1 GC_HELM_BUILD_TOKEN="$builder_token" \
+                bash "$SELF" >>"$BUILD_LOG" 2>&1 &
         else
-            env GC_HELM_BUILDER=1 bash "$SELF" >>"$BUILD_LOG" 2>&1 &
+            env GC_HELM_BUILDER=1 GC_HELM_BUILD_TOKEN="$builder_token" \
+                bash "$SELF" >>"$BUILD_LOG" 2>&1 &
         fi
         builder_pid=$!
         builder_is_child=1
-        printf '%s\n' "$builder_pid" > "$BUILD_LOCK" 2>/dev/null || true
+        printf '%s %s\n' "$builder_pid" "$builder_token" > "$BUILD_LOCK" 2>/dev/null || true
     fi
 
     if [ "$builder_is_child" -eq 1 ]; then
@@ -315,7 +388,16 @@ if [ "$need_build" -eq 1 ] || [ -n "$builder_pid" ]; then
         rm -f "$BUILD_LOCK" 2>/dev/null || true
     fi
 
-    build_result="$(cat "$BUILD_RESULT" 2>/dev/null || true)"
+    # Only a verdict stamped with the token of the build we actually waited on
+    # counts. A leftover verdict from an earlier build carries an earlier token
+    # and is therefore invisible here, which is what stops "rebuilt" being
+    # logged over an artifact nobody rebuilt.
+    read_build_result
+    if [ -n "$builder_token" ] && [ "$build_result_token" = "$builder_token" ]; then
+        build_result="$build_result_verdict"
+    else
+        build_result=""
+    fi
     if [ "$build_result" = ok ]; then
         record_status "rebuilt $BIN"
     else
