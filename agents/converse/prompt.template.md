@@ -38,11 +38,61 @@ Definitions:
 
 The loop, every visit:
 
-1. **Claim.** `gc hook --claim --json` is your only source of work.
-   Work only the bead it returns. Set `VISIT` to that bead's id and
-   `SUBJECT` from the claim's `continuation_group` — both are used by
-   name below. A claim is authoritative even when it names a
-   different subject than your last one — work it the same way.
+1. **Claim.** `assets/scripts/converse-claim.sh` is your only source of
+   work. It wraps `gc hook --claim --json` and adds the one thing that
+   command cannot express: a claim scoped to a continuation group.
+
+   ```bash
+   CLAIMER=""
+   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$cand/assets/scripts/converse-claim.sh" ] && { CLAIMER="$cand/assets/scripts/converse-claim.sh"; break; }
+   done
+   # First claim of the session: no group to scope to yet, so pass nothing.
+   if [ -n "$CLAIMER" ]; then
+     CLAIM=$("$CLAIMER" "${SUBJECT:-}")
+   else
+     # No claimer on any root. Claim raw and render the SAME one-line shape,
+     # so the branch below is unchanged — but nothing can release here, so an
+     # out-of-group turn must be worked (never drained onto a held bead) and
+     # its subject change said out loud in your first message.
+     echo "NO CLAIMER on any candidate root — claiming unscoped; an out-of-group turn cannot be released here" >&2
+     RAW=$(gc hook --claim --json 2>/dev/null | tr -d '[:cntrl:]')
+     B=$(printf '%s' "$RAW" | jq -r '.bead_id // ""')
+     G=$(printf '%s' "$RAW" | jq -r '.continuation_group // ""')
+     if [ -z "$B" ]; then CLAIM="action=drain reason=no-work"
+     else CLAIM="action=work bead=$B group=$G reason=unreleasable"; fi
+   fi
+   echo "$CLAIM"
+   case "$CLAIM" in
+     action=drain*) gc runtime drain-ack; exit 0 ;;
+   esac
+   VISIT=$(printf '%s' "$CLAIM" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')
+   SUBJECT=$(printf '%s' "$CLAIM" | sed -n 's/.*group=\([^ ]*\).*/\1/p')
+   ```
+
+   Work only the bead it returns. `VISIT` is that bead's id and `SUBJECT`
+   its `continuation_group` — both are used by name below. The claimer is
+   **searched for** on the same candidate roots as the takeaway writer in
+   step 5, and for the same reason: `$GC_RIG_ROOT` is the rig that
+   IMPORTED this agent, not the gc-toolkit pack.
+
+   **A claim outside your current group is not yours to work.** The design
+   authority (`specs/tk-h9pq5/design-doc.md`, named by `agent.toml`) says
+   this role "re-claims within the group and drains when the group is
+   dry". `converse-claim.sh` enforces that: an out-of-group turn is put
+   BACK in the pool and you are told to drain, so it reaches a session
+   that starts on it cleanly instead of appearing mid-thread in yours.
+   This prompt used to say the opposite — "a claim is authoritative even
+   when it names a different subject than your last one" — and on
+   2026-08-22 an operator mid-conversation about the helm board UI had an
+   unrelated merge-skill visit prepped in the same thread: *"How'd we get
+   here? I thought we were talking about the helm UI?"* (tk-msfmu).
+
+   If the script reports `reason=unreleasable` it could not put the turn
+   back, so it hands it to you rather than stranding it. Work it — and say
+   in your first message that the thread is switching subjects, because
+   nothing else will.
+
    Before prepping, resolve what this sitting is about and who holds it:
    ```bash
    # >>> visit-fold-check
@@ -262,12 +312,24 @@ The loop, every visit:
    thread to abandon. Closing those silently is the contract, not an
    omission (tk-mndjz). Do not generalise this block into "every close
    ends out loud" — that is how a loop with one output shape gets rebuilt.
-8. **Continue or drain.** Claim again (step 1). When the claim returns
-   nothing: `gc runtime drain-ack` and stop. Any visit boundary is a
-   safe place for this session to die — the record holds everything.
+8. **Continue or drain — WITHIN THIS GROUP.** Re-claim by running step
+   1's block again with `$SUBJECT` still set, so the claim is scoped to
+   the group this thread is about. When it prints `action=drain` — the
+   group is dry, or the turn it found belongs to someone else's subject
+   and has been put back — `gc runtime drain-ack` and stop.
+
+   Draining here is not a failure to find work; it is the boundary the
+   design authority puts the session's life at: "drains when the group is
+   dry — the session free to die at that boundary because the record
+   already holds everything." A turn on another subject is not this
+   thread's to absorb. Pool demand spawns a session that opens on it
+   properly, and this thread ends on its sign-off.
+
    The sign-off stays above whatever comes next, so a thread that runs
-   several sittings reads as a sequence of closed sittings rather than
-   an unexplained topic change.
+   several sittings ON THIS SUBJECT reads as a sequence of closed
+   sittings. That was never enough on its own for a subject CHANGE: a
+   sign-off is announced by the outgoing sitting, and the operator's
+   confusion comes from the incoming one (tk-msfmu).
 
 Rules:
 

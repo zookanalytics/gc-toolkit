@@ -10,7 +10,13 @@ work_dir = ".gc/agents/converse/{{.AgentBase}}"
 # The nudge names the premise re-check on purpose: it is the one-line
 # restatement of the loop the session reads at wake, and a version that
 # goes straight from claim to hold re-teaches the shape tk-mndjz fixed.
-nudge = "Run gc hook --claim --json; converse demand is a routed visit bead. Re-check the visit's premise against live state — a dead or benign premise closes silently, with nothing posted. Otherwise rebuild the subject's state, prep, hold for the operator."
+# It names the CLAIMER rather than `gc hook --claim` for the same reason:
+# the wake instruction is read before the prompt's step 1, so a nudge that
+# says "gc hook --claim" teaches the unscoped claim this pack removed —
+# the one that vacuumed an unrelated subject onto a live operator thread
+# (tk-msfmu). `gc hook --claim` has no group filter; converse-claim.sh is
+# where the group scoping the design authority requires actually lives.
+nudge = "Run assets/scripts/converse-claim.sh (step 1 resolves it; it wraps gc hook --claim --json and scopes the claim to your continuation group); converse demand is a routed visit bead. Re-check the visit's premise against live state — a dead or benign premise closes silently, with nothing posted. Otherwise rebuild the subject's state, prep, hold for the operator."
 # Long idle, but a timeout DOES end a held sitting — do not read this as
 # "visit boundaries are the only ending" (it said that until tk-bzm86
 # checked). Verified 2026-08-11 against the gascity source; the full

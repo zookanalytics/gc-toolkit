@@ -63,6 +63,10 @@ have() {
 lacks() {
     if grep -qF -- "$2" "$3"; then bad "$1" "$4"; else ok "$1"; fi
 }
+# eq <got> <want> <label>
+eq() {
+    if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi
+}
 
 for f in "$PROMPT" "$ATOML" "$HELM" "$ENGAGE"; do
     [ -r "$f" ] || {
@@ -611,6 +615,154 @@ have "takeaway usage documents the converse caller" 'host|proactive|converse' "$
 # The stamp keys are the contract with the board; renaming one silently
 # empties every NEEDS cell.
 have "takeaway stamps gc.takeaway" 'gc.takeaway=$text' "$HELM"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# THE CLAIM BOUNDARY — a turn is claimed WITHIN a continuation group (tk-msfmu)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# THE BUG: `agent.toml` names `specs/tk-h9pq5/design-doc.md` as the design
+# authority, and it says the role "re-claims within the group and drains when
+# the group is dry". The shipped prompt said the opposite — "a claim is
+# authoritative even when it names a different subject than your last one" —
+# because `gc hook --claim` has no group filter, so the scoped re-claim was not
+# expressible with the tool the prompt calls its only source of work. On
+# 2026-08-22 an operator mid-conversation about the helm board UI had an
+# unrelated merge-skill visit prepped in the same thread.
+#
+# THE FIX: `assets/scripts/converse-claim.sh` claims, and puts a foreign turn
+# BACK in the pool before telling the session to drain. The release is the
+# load-bearing half — draining on a turn still assigned to a dying session is
+# worse than the bug, because the reconciler's reassign path refuses a held
+# visit by design.
+#
+# These run the REAL script against a stubbed `gc` on PATH: no city, no Dolt.
+
+echo "── the claim boundary is scoped to the continuation group ──"
+
+CLAIMER="$REPO/assets/scripts/converse-claim.sh"
+have "the claimer ships" "claim one turn FOR A CONTINUATION GROUP" "$CLAIMER"
+[ -x "$CLAIMER" ] && ok "the claimer is executable" || bad "the claimer is executable" "chmod +x $CLAIMER"
+
+# The prompt must not carry the sentence that broadened the contract, and must
+# route its claim through the claimer. Prose is where this silently reverts.
+# Key on the IMPERATIVE half. The sentence itself is QUOTED in step 1 as the
+# thing that was removed, so a literal matching the quote would fire on the
+# fix's own prose; "work it the same way" is the directive and appears nowhere
+# in that quotation.
+lacks "the prompt no longer authorises an out-of-group claim" \
+      "work it the same way" "$PROMPT" \
+      "the broadened contract is back — this is the directive tk-msfmu removed"
+have "the prompt claims through the claimer" 'converse-claim.sh' "$PROMPT"
+have "step 8 re-claims within the group" "Continue or drain — WITHIN THIS GROUP" "$PROMPT"
+# The wake nudge is read BEFORE step 1, so a nudge naming the raw command
+# re-teaches the unscoped claim whatever the prompt says.
+have "the wake nudge names the claimer, not the raw claim" 'converse-claim.sh' "$ATOML"
+lacks "…and does not still tell the session to run the raw claim" \
+      'nudge = "Run gc hook --claim' "$ATOML" \
+      "the nudge teaches the unscoped claim the prompt just removed"
+
+CTMP="$TMPD/claim"
+mkdir -p "$CTMP/bin"
+cat > "$CTMP/bin/gc" <<'GCC'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "hook --claim") cat "$FAKE_CLAIM" ;;
+  "bd update")    printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
+  "bd show")      cat "$FAKE_SHOW" ;;
+esac
+exit 0
+GCC
+chmod +x "$CTMP/bin/gc"
+
+# run_claim <claim-json> <current-group> <show-json> -> CRC / COUT / CUPD
+run_claim() {
+    printf '%s' "$1" > "$CTMP/claim.json"
+    printf '%s' "$3" > "$CTMP/show.json"
+    : > "$CTMP/updates"
+    CRC=0
+    COUT=$(env PATH="$CTMP/bin:$PATH" FAKE_CLAIM="$CTMP/claim.json" \
+               FAKE_UPDATES="$CTMP/updates" FAKE_SHOW="$CTMP/show.json" \
+               sh "$CLAIMER" "$2" 2>"$CTMP/err") || CRC=$?
+    CUPD=$(cat "$CTMP/updates")
+}
+
+RELEASED='[{"id":"tk-foreign","status":"open","assignee":null}]'
+HELD='[{"id":"tk-foreign","status":"in_progress","assignee":"converse-1"}]'
+
+# --- (NOWORK) an empty claim drains, and writes nothing ----------------------
+run_claim '{"ok":true}' "tk-subj" "$RELEASED"
+eq "$COUT" "action=drain reason=no-work" "(NOWORK) an empty claim drains"
+eq "$CRC"  "1"                           "(NOWORK) …and exits 1 so a caller can branch on status"
+eq "${CUPD:-<none>}" "<none>"            "(NOWORK) …touching no bead"
+
+# --- (FIRST) the session's first claim has no group to scope to --------------
+run_claim '{"bead_id":"tk-a","continuation_group":"tk-subj"}' "" "$RELEASED"
+eq "$COUT" "action=work bead=tk-a group=tk-subj" "(FIRST) the first claim of a session is always workable"
+eq "$CRC"  "0"                                    "(FIRST) …exit 0"
+eq "${CUPD:-<none>}" "<none>"                     "(FIRST) …and is never released"
+
+# --- (SAME) the group this thread is already about ---------------------------
+run_claim '{"bead_id":"tk-b","continuation_group":"tk-subj"}' "tk-subj" "$RELEASED"
+eq "$COUT" "action=work bead=tk-b group=tk-subj" "(SAME) a turn in the current group is worked"
+eq "${CUPD:-<none>}" "<none>"                     "(SAME) …with no release writes"
+
+# --- (NOGROUP) a claim that names no group cannot be proven foreign ----------
+run_claim '{"bead_id":"tk-c"}' "tk-subj" "$RELEASED"
+eq "$COUT" "action=work bead=tk-c group=" "(NOGROUP) an ungrouped turn is worked, not released on a guess"
+eq "${CUPD:-<none>}" "<none>"             "(NOGROUP) …and nothing is written"
+
+# --- (FOREIGN) the defect itself --------------------------------------------
+run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "$RELEASED"
+eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \
+   "(FOREIGN) a turn on another subject is NOT worked in this thread"
+eq "$CRC"  "1" "(FOREIGN) …and the session is told to drain"
+grep -q -- '--status=open' <<< "$CUPD" \
+  && ok "(FOREIGN) the turn is reopened" || bad "(FOREIGN) never reopened: $CUPD"
+grep -q -- '--assignee=' <<< "$CUPD" \
+  && ok "(FOREIGN) …and unassigned, so the pool can offer it again" \
+  || bad "(FOREIGN) the assignee was never cleared: $CUPD"
+
+# (SPLIT) bd's claim guard refuses --assignee "" on an in_progress bead and
+# rolls the WHOLE update back, so batching the clears loses the ones that
+# needed no claim (tk-z27pw). One call doing both is the shape that fails.
+if grep -qE -- '--status=open.*--assignee=|--assignee=.*--status=open' <<< "$CUPD"; then
+    bad "(SPLIT) the release is split into separate writes" \
+        "status and assignee ride one update — the claim guard rolls both back"
+else
+    ok "(SPLIT) the release is split into separate writes"
+fi
+
+# (ORDER) the session pointers must be gone BEFORE the bead becomes offerable,
+# or the pool offers a turn that still names a dead session.
+sess_ln=$(grep -n -- '--unset-metadata gc.session_id' <<< "$CUPD" | head -1 | cut -d: -f1)
+asg_ln=$(grep -n -- '--assignee=' <<< "$CUPD" | head -1 | cut -d: -f1)
+if [ -n "$sess_ln" ] && [ -n "$asg_ln" ] && [ "$sess_ln" -lt "$asg_ln" ]; then
+    ok "(ORDER) the session pointers are cleared before the turn is offerable"
+else
+    bad "(ORDER) the session pointers are cleared before the turn is offerable" \
+        "unset=${sess_ln:-none} assignee=${asg_ln:-none} in: $CUPD"
+fi
+
+# (NOROUTE) gc.routed_to is the pool's offer predicate. Clearing it would PARK
+# the turn instead of returning it — the same failure by another route.
+if grep -q -- 'gc.routed_to' <<< "$CUPD"; then
+    bad "(NOROUTE) the release leaves gc.routed_to alone" \
+        "the route was cleared — a parked turn is not a returned one: $CUPD"
+else
+    ok "(NOROUTE) the release leaves gc.routed_to alone"
+fi
+
+# --- (FAILSAFE) never drain on a turn still held -----------------------------
+# The read is trusted over the writes: every update can exit 0 and the bead
+# still be held. Stranding it is the hazard that made a prompt-only fix
+# unshippable, so an unreleasable turn is WORKED instead.
+run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "$HELD"
+eq "$COUT" "action=work bead=tk-foreign group=tk-other reason=unreleasable" \
+   "(FAILSAFE) a turn that could not be released is worked, never stranded"
+eq "$CRC" "0" "(FAILSAFE) …and the session does not drain onto a held bead"
+grep -q 'could not release' "$CTMP/err" \
+  && ok "(FAILSAFE) …and the failure is reported, not swallowed" \
+  || bad "(FAILSAFE) the failed release was silent: $(cat "$CTMP/err")"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
