@@ -275,3 +275,22 @@ tr.drilled {
 .stream-closed {
   opacity: 0.8;
 }
+
+/* The panel's one write action.
+   A real <button>, not the underlined link `.drill-open` uses for a row: that
+   one moves around inside the board, this one changes the city, and two
+   affordances with different consequences should not look the same. */
+.open-conversation {
+  margin: 0.75rem 0 0;
+}
+
+.open-conversation-go {
+  font: inherit;
+}
+
+/* The outcome sits under the button and stays readable at the panel's smaller
+   scale; it carries the tool's own sentence, so it can run to a few lines. */
+.open-conversation-result {
+  font-size: 0.875rem;
+  margin: 0.5rem 0 0;
+}

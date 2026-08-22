@@ -22,7 +22,9 @@
 # destroy.
 #
 # Env honoured: GC_SERVICE_SOCKET (required, set by the supervisor),
-# GC_SERVICE_STATE_ROOT (binary cache location).
+# GC_SERVICE_STATE_ROOT (binary cache location), GC_HELM_OPEN_TOOL (path to
+# gc-helm.sh for the board's write route — defaulted to this script's sibling
+# below, so it is an override rather than a requirement).
 set -euo pipefail
 
 BIN_DIR="${GC_SERVICE_STATE_ROOT:-${TMPDIR:-/tmp}}/bin"
@@ -43,6 +45,22 @@ Deliberately NOT building here: the readiness window is 5s and this build needs
 12.5s warm / 2m29s cold, so a build started here is always killed with the start.
 MSG
     exit 1
+fi
+
+# The board's one write route (POST /helm/open) files visits by running
+# gc-helm.sh's `open` verb, which sits beside THIS launcher in the pack.
+# Resolving it here rather than in Go is deliberate: this script's own location
+# is the only thing that knows which rig checkout the service was started from,
+# so pointing at a sibling keeps the binary from having to guess a rig name
+# (gc-toolkit is rig-imported by four rigs, and running a different rig's copy
+# than the one that shipped this launcher would be silent and wrong). An
+# operator override wins; a missing sibling leaves the variable unset, and the
+# service then serves the board read-only and says so.
+if [ -z "${GC_HELM_OPEN_TOOL:-}" ]; then
+    HERE="$(cd "$(dirname "$0")" && pwd)"
+    if [ -x "$HERE/gc-helm.sh" ]; then
+        export GC_HELM_OPEN_TOOL="$HERE/gc-helm.sh"
+    fi
 fi
 
 exec "$BIN" "$@"

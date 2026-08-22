@@ -27,6 +27,11 @@ type Server struct {
 	now func() time.Time
 	spa http.Handler
 
+	// opener files visits for POST /helm/open; nil disables the route (it
+	// then answers 503 rather than 404 — see handleOpen).
+	opener   Opener
+	openGate *openGate
+
 	mu     sync.Mutex
 	cached *board.Board
 	expiry time.Time
@@ -48,9 +53,25 @@ func WithSPA(h http.Handler) Option {
 	}
 }
 
+// WithOpener enables the board's one write route, POST /helm/open, which files
+// a visit on a bead by shelling out to `gc-helm.sh open` (see open.go).
+//
+// It is an Option rather than a constructor argument because the write surface
+// is genuinely optional: a helm-svc that cannot locate the script still serves
+// the whole board, and says so honestly when the route is called. A nil opener
+// is ignored, which keeps the read-only behaviour this service had before the
+// route existed.
+func WithOpener(o Opener) Option {
+	return func(s *Server) {
+		if o != nil {
+			s.opener = o
+		}
+	}
+}
+
 // New builds a Server. ttl<=0 disables caching (every request recomputes).
 func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
-	s := &Server{src: src, ttl: ttl, now: time.Now}
+	s := &Server{src: src, ttl: ttl, now: time.Now, openGate: newOpenGate()}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -58,12 +79,18 @@ func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
 }
 
 // Handler returns the HTTP routes: GET /helm (and bare /) serve the board;
-// GET /healthz is the liveness probe (no gather). With [WithSPA] the bare
-// mount also serves the app shell to browsers, and its assets beneath.
+// GET /healthz is the liveness probe (no gather); POST /helm/open files a visit
+// on a bead. With [WithSPA] the bare mount also serves the app shell to
+// browsers, and its assets beneath.
+//
+// /helm/open is registered as its own exact pattern, which ServeMux prefers
+// over the "/" catch-all — so it reaches [Server.handleOpen] rather than the
+// SPA handler, whatever the bundle does with unknown paths.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/helm", s.handleBoard)
+	mux.HandleFunc("/helm/open", s.handleOpen)
 	mux.HandleFunc("/", s.handleRoot)
 	return mux
 }
