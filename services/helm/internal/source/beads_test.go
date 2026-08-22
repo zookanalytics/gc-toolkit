@@ -33,10 +33,22 @@ type fakeStore struct {
 // returned its fixtures regardless would let the gather ask a wrong question
 // and still pass.
 func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.IssueFilter) ([]*beads.Issue, error) {
-	// The source must ask for OPEN anchors only; a fake that ignored the filter
-	// would let a regression through silently.
-	if filter.Status == nil || *filter.Status != beads.StatusOpen {
-		return nil, errors.New("expected a status=open filter on the anchor query")
+	// Every gather query must scope its statuses; a fake that ignored the filter
+	// would let a regression through silently. Exactly two shapes are legal:
+	//
+	//   Status=open              the ANCHOR queries — an anchor is an open bead.
+	//   Statuses=[open,inprog]   the JOIN queries (visits, workflow roots and
+	//                            steps) — a CLAIMED visit is a held conversation,
+	//                            not a finished one, and a claimed step is the
+	//                            normal state of a live molecule.
+	//
+	// Anything else — no scope at all, or a widened one — is refused, so the
+	// filter stays load-bearing rather than decorative.
+	switch {
+	case filter.Status != nil && *filter.Status == beads.StatusOpen && len(filter.Statuses) == 0:
+	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
+	default:
+		return nil, errors.New("expected status=open (anchors) or statuses=[open,in_progress] (joins)")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -65,17 +77,24 @@ func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, 
 	if err, bad := f.failMeta[key]; bad {
 		return nil, err
 	}
-	// Without the exclusion a type-agnostic query re-gathers every epic that
-	// happens to carry the key, and the board shows it twice. Pinning it here
-	// is what makes the dedup in BuildBoard a safety net rather than the only
-	// thing standing between the operator and a duplicated row.
 	excluded := map[string]bool{}
 	for _, t := range filter.ExcludeTypes {
 		excluded[string(t)] = true
 	}
-	for _, want := range []string{"epic", "decision", "convoy"} {
-		if !excluded[want] {
-			return nil, errors.New("a metadata-keyed gather must exclude the typed anchor kinds; missing " + want)
+	// Without the exclusion a type-agnostic ANCHOR query re-gathers every epic
+	// that happens to carry the key, and the board shows it twice. Pinning it
+	// here is what makes the dedup in BuildBoard a safety net rather than the
+	// only thing standing between the operator and a duplicated row.
+	//
+	// The rule is scoped to the anchor gathers. A JOIN query (statuses=[open,
+	// in_progress]) is not gathering anchors at all — it is reading visit beads
+	// and molecule steps, which are ordinary tasks — so demanding the exclusion
+	// there would be asserting a rule that does not apply.
+	if len(filter.Statuses) == 0 {
+		for _, want := range []string{"epic", "decision", "convoy"} {
+			if !excluded[want] {
+				return nil, errors.New("a metadata-keyed gather must exclude the typed anchor kinds; missing " + want)
+			}
 		}
 	}
 
@@ -228,10 +247,45 @@ func populatedStore() *fakeStore {
 	}
 }
 
-func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore) *BeadsSource {
+// fakeGC stands in for the `gc` CLI. Every test uses one: without it a gather
+// would shell out to the real binary against the developer's live city, which
+// is both slow (each call carries a 30s bound) and a test that reads whatever
+// happens to be running.
+type fakeGC struct {
+	sessions map[string]string
+	convoys  []convoyRow
+	members  map[string]string // convoy id -> single tracked member
+	err      error             // when set, every call fails with it
+	memberN  int               // ConvoyMember call count
+}
+
+func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.sessions, nil
+}
+
+func (f *fakeGC) Convoys(context.Context) ([]convoyRow, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.convoys, nil
+}
+
+func (f *fakeGC) ConvoyMember(_ context.Context, id string) (string, error) {
+	f.memberN++
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.members[id], nil
+}
+
+func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore, opts ...BeadsOption) *BeadsSource {
 	t.Helper()
-	return NewBeadsSource(
+	base := []BeadsOption{
 		WithCityPath(root),
+		withGCClient(&fakeGC{}),
 		withStoreOpener(func(_ context.Context, beadsDir string) (beadStore, error) {
 			rig := filepath.Base(filepath.Dir(beadsDir))
 			st, ok := stores[rig]
@@ -240,7 +294,8 @@ func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore)
 			}
 			return st, nil
 		}),
-	)
+	}
+	return NewBeadsSource(append(base, opts...)...)
 }
 
 func findAnchor(res *Result, id string) (int, bool) {
@@ -554,6 +609,7 @@ func TestBeadsGatherErrorsOnTotalOutage(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	src := NewBeadsSource(
 		WithCityPath(root),
+		withGCClient(&fakeGC{}),
 		withStoreOpener(func(context.Context, string) (beadStore, error) {
 			return nil, errors.New("dolt unreachable")
 		}),
@@ -628,6 +684,7 @@ func TestBeadsStoreHandleIsReused(t *testing.T) {
 	st := populatedStore()
 	src := NewBeadsSource(
 		WithCityPath(root),
+		withGCClient(&fakeGC{}),
 		withStoreOpener(func(context.Context, string) (beadStore, error) {
 			opens++
 			return st, nil
@@ -705,5 +762,286 @@ func TestReadIssuePrefix(t *testing.T) {
 	}
 	if got := readIssuePrefix(filepath.Join(dir, "missing.yaml")); got != "" {
 		t.Errorf("missing config yields empty prefix, got %q", got)
+	}
+}
+
+// --- the cross-anchor joins (tk-134d7) --------------------------------------
+
+// joinStore is a store whose ordinary beads carry the markers the three joins
+// read: an open VISIT naming its subject, a workflow ROOT pointing at its input
+// convoy, and that root's STEP carrying the session name.
+func joinStore() *fakeStore {
+	st := populatedStore()
+	st.issues["task"] = append(st.issues["task"],
+		issue("tk-visit1", "visit: tk-epic — operator pick", "task", 2, testNow,
+			`{"task_kind":"visit","gc.continuation_group":"tk-epic"}`),
+		issue("tk-root1", "mol-polecat-work", "task", 2, testNow,
+			`{"gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+		// A root with NO session of its own: the name has to come off its steps.
+		issue("tk-root2", "mol-polecat-work", "task", 2, testNow,
+			`{"gc.input_convoy_id":"tk-icv2"}`),
+		issue("tk-step2", "implement", "task", 2, testNow,
+			`{"gc.root_bead_id":"tk-root2","gc.session_name":"gc-toolkit__polecat-lx-steps"}`),
+		// A HUSK: an open root whose session is long gone. Joining on root
+		// existence alone would flip it to "in flight".
+		issue("tk-root3", "mol-polecat-work", "task", 2, testNow,
+			`{"gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-lx-dead"}`),
+	)
+	return st
+}
+
+func liveGC() *fakeGC {
+	return &fakeGC{
+		sessions: map[string]string{
+			"gc-toolkit__polecat-lx-live":  "active",
+			"gc-toolkit__polecat-lx-steps": "active",
+			"gc-toolkit__polecat-lx-dead":  "archived",
+		},
+		members: map[string]string{
+			"tk-icv1": "tk-work1",
+			"tk-icv2": "tk-work2",
+			"tk-icv3": "tk-work3",
+		},
+	}
+}
+
+// TestGatherJoinsVisitsAndInflight is the whole point of the join gather: an
+// open visit marks its subject held, and a LIVE workflow root resolves through
+// its input convoy to the work bead it stands over.
+func TestGatherJoinsVisitsAndInflight(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	gc := liveGC()
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": joinStore()}, withGCClient(gc))
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	if !res.Facts.Visits["tk-epic"] {
+		t.Errorf("an open visit marks its subject held: visits=%v", res.Facts.Visits)
+	}
+	if got := res.Facts.Inflight["tk-work1"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+		t.Errorf("root with its own session_name resolves: got %v", got)
+	}
+	if got := res.Facts.Inflight["tk-work2"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-steps" {
+		t.Errorf("root without a session_name falls back to its steps: got %v", got)
+	}
+	if got, ok := res.Facts.Inflight["tk-work3"]; ok {
+		t.Errorf("a husk (archived session) must not read as in flight: got %v", got)
+	}
+	// Liveness is filtered BEFORE the convoy reads, so the husk costs no
+	// subprocess at all — that bound is what keeps the gather proportional to
+	// live polecats rather than to the husk pile.
+	if gc.memberN != 2 {
+		t.Errorf("convoy status called %d times, want 2 (live roots only)", gc.memberN)
+	}
+	if res.Facts.OwnerState["gc-toolkit__polecat-lx-live"] != "active" {
+		t.Errorf("session states carried: %v", res.Facts.OwnerState)
+	}
+}
+
+// TestGatherCarriesPrefixesAndDescription pins the two anchor-side inputs the
+// cross-rig scan needs: every rig's prefix/name, and the anchor's prose.
+func TestGatherCarriesPrefixesAndDescription(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{
+		"gc-toolkit": populatedStore(), "signal-loom": {},
+	})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !slices.Equal(res.Facts.Prefixes, []string{"sl", "tk"}) {
+		t.Errorf("prefixes = %v, want [sl tk]", res.Facts.Prefixes)
+	}
+	if !slices.Equal(res.Facts.RigNames, []string{"gc-toolkit", "signal-loom"}) {
+		t.Errorf("rig names = %v, want [gc-toolkit signal-loom]", res.Facts.RigNames)
+	}
+	i, ok := findAnchor(res, "tk-epic")
+	if !ok {
+		t.Fatal("tk-epic missing")
+	}
+	// The takeaway triple must reach the anchor, or NEEDS falls back to the
+	// deterministic phrase and the headline is silently lost.
+	if res.Anchors[i].Takeaway != "needs a decision" {
+		t.Errorf("takeaway carried onto the anchor: got %q", res.Anchors[i].Takeaway)
+	}
+}
+
+// TestConvoyOwnershipJoin: `gc convoy list` decides whether a convoy is a normal
+// row or the unowned-orphan exception, and an ABSENT answer must not be read as
+// "unowned" — that would flag every convoy in the city the first time the call
+// failed.
+func TestConvoyOwnershipJoin(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+
+	t.Run("unowned convoy flips kind", func(t *testing.T) {
+		gc := liveGC()
+		gc.convoys = []convoyRow{{ID: "tk-cv", Owned: false, Progress: &convoyProgress{Closed: 1, Total: 2}}}
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
+		res, err := src.Gather(context.Background())
+		if err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		i, ok := findAnchor(res, "tk-cv")
+		if !ok {
+			t.Fatal("tk-cv missing")
+		}
+		a := res.Anchors[i]
+		if a.Kind != "unowned" || a.Source != "unowned" {
+			t.Errorf("an unowned convoy is the orphan exception: kind=%q source=%q", a.Kind, a.Source)
+		}
+		if a.Owned == nil || *a.Owned {
+			t.Errorf("owned=false carried: %v", a.Owned)
+		}
+		if a.Progress == nil || a.Progress.Total != 2 || a.Progress.Closed != 1 {
+			t.Errorf("progress carried: %+v", a.Progress)
+		}
+	})
+
+	t.Run("owned convoy stays a convoy", func(t *testing.T) {
+		gc := liveGC()
+		gc.convoys = []convoyRow{{ID: "tk-cv", Owned: true}}
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
+		res, _ := src.Gather(context.Background())
+		i, _ := findAnchor(res, "tk-cv")
+		if res.Anchors[i].Kind != "convoy" {
+			t.Errorf("kind = %q, want convoy", res.Anchors[i].Kind)
+		}
+		if res.Anchors[i].Owned == nil || !*res.Anchors[i].Owned {
+			t.Errorf("owned=true carried: %v", res.Anchors[i].Owned)
+		}
+	})
+
+	t.Run("absent ownership is not an orphan", func(t *testing.T) {
+		gc := liveGC() // no convoy rows at all
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withGCClient(gc))
+		res, _ := src.Gather(context.Background())
+		i, _ := findAnchor(res, "tk-cv")
+		if res.Anchors[i].Kind != "convoy" {
+			t.Errorf("an unlisted convoy keeps kind convoy, got %q", res.Anchors[i].Kind)
+		}
+		if res.Anchors[i].Owned != nil {
+			t.Errorf("owned stays null when unknown, got %v", res.Anchors[i].Owned)
+		}
+	})
+}
+
+// TestGatherDegradesWhenGCUnavailable: losing the `gc` CLI must narrow the
+// board, not abort it — and must say so, because without the session map every
+// claim reads as a dead owner and a healthy board would turn bright red with no
+// explanation.
+func TestGatherDegradesWhenGCUnavailable(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": joinStore()},
+		withGCClient(&fakeGC{err: errors.New("gc binary not found")}))
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("a missing gc must not abort the gather: %v", err)
+	}
+	if len(res.Anchors) == 0 {
+		t.Error("anchors still gather without gc")
+	}
+	if !res.Partial {
+		t.Error("a lost liveness join is a partial gather")
+	}
+	var sawSessions bool
+	for _, e := range res.PartialErrors {
+		if strings.Contains(e, "session liveness unavailable") {
+			sawSessions = true
+		}
+	}
+	if !sawSessions {
+		t.Errorf("the degradation must name itself: %v", res.PartialErrors)
+	}
+	if len(res.Facts.Inflight) != 0 {
+		t.Errorf("no session map means no in-flight claims: %v", res.Facts.Inflight)
+	}
+	// Visits do NOT come from gc, so they survive.
+	if !res.Facts.Visits["tk-epic"] {
+		t.Error("the visit join reads beads, not gc, so it must survive")
+	}
+}
+
+// TestDecodeLooseJSON: `gc --json` output is not reliably JSON from byte zero —
+// deprecation warnings and named-session advisories precede it.
+func TestDecodeLooseJSON(t *testing.T) {
+	want := map[string]string{"a": "b"}
+	cases := []struct {
+		name string
+		in   string
+		ok   bool
+	}{
+		{"clean", `{"a":"b"}`, true},
+		{"leading warning", "named_session \"x\": mode \"always\"\n{\"a\":\"b\"}", true},
+		{"warning containing a brace", "warn: got {not json} here\n{\"a\":\"b\"}", true},
+		{"whole-input trim handles an indented payload", "  {\"a\":\"b\"}", true},
+		{"no json at all", "boom\n", false},
+	}
+	for _, c := range cases {
+		var got map[string]string
+		err := decodeLooseJSON([]byte(c.in), &got)
+		if c.ok != (err == nil) {
+			t.Errorf("%s: err=%v, wanted ok=%v", c.name, err, c.ok)
+			continue
+		}
+		if c.ok && !maps.Equal(got, want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, want)
+		}
+	}
+}
+
+// TestHQBeadStoreIsGathered: `gc rig list` reports the city root itself as a rig
+// ("hq": true) with its own issue prefix, and gc-helm.sh gathers it like any
+// other. Scanning only rigs/*/ dropped it silently — and city-scope work is
+// where the `gc.routed_to=human` beads live, i.e. exactly the rows the
+// operator's own board exists to show.
+func TestHQBeadStoreIsGathered(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	// The HQ store sits at <city>/.beads, beside rigs/, not inside it.
+	hq := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(hq, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hq, "config.yaml"), []byte("issue_prefix: lx\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := newBeadsTestSource(t, root, nil)
+	rigs, err := src.rigs()
+	if err != nil {
+		t.Fatalf("rigs: %v", err)
+	}
+	var names, prefixes []string
+	for _, r := range rigs {
+		names = append(names, r.name)
+		prefixes = append(prefixes, r.prefix)
+	}
+	// The HQ rig is named for the city directory, which is what `gc rig list`
+	// reports for it.
+	if !slices.Contains(names, filepath.Base(root)) {
+		t.Errorf("the HQ store must be gathered as a rig: got %v", names)
+	}
+	if !slices.Contains(prefixes, "lx") {
+		t.Errorf("the HQ prefix must reach Facts.Prefixes (it scopes the cross-rig scan): got %v", prefixes)
+	}
+	if !slices.Contains(names, "gc-toolkit") {
+		t.Errorf("adding HQ must not displace the ordinary rigs: got %v", names)
+	}
+}
+
+// TestCityWithoutHQStoreStillWorks: not every city root has its own .beads, and
+// one that does not must gather its rigs exactly as before.
+func TestCityWithoutHQStoreStillWorks(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, nil)
+	rigs, err := src.rigs()
+	if err != nil {
+		t.Fatalf("rigs: %v", err)
+	}
+	if len(rigs) != 1 || rigs[0].name != "gc-toolkit" {
+		t.Errorf("want exactly the one rig, got %+v", rigs)
 	}
 }

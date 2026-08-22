@@ -426,40 +426,108 @@ func TestSeverityParity(t *testing.T) {
 // could not read the timestamp), which is why the coverage check below unions
 // the tiles instead of demanding every tile be complete.
 func fixtureBoard() board.Board {
+	no := false
+	p1, p3 := 1, 3
+	takeaway := "the drill-in plane needs an operator decision on tile density"
+	takeawayAt := "2026-08-07T09:31:00Z"
+	takeawayBy := "host"
+
 	return board.Board{
 		GeneratedAt: time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
 		Total:       2,
 		Tiles: []board.Tile{
 			{
-				ID:         "tk-eemvf",
-				Rig:        "gc-toolkit",
-				Kind:       "epic",
-				Title:      "Attention Canvas — spatial in-canvas operator dashboard",
-				Severity:   board.SevHigh,
+				ID:       "tk-eemvf",
+				Rig:      "gc-toolkit",
+				Kind:     "epic",
+				Title:    "Attention Canvas — spatial in-canvas operator dashboard",
+				Severity: board.SevHigh,
+
+				Weight: 14,
+				Held:   true,
+
 				NClosed:    3,
 				MTotal:     11,
 				Open:       8,
-				InProgress: 0,
-				Frontier:   "tk-eemvf.3 helm web (U8): drill-in plane",
-				Needs:      "no work in progress",
-				StaleDays:  4,
-				UpdatedAt:  time.Date(2026, 8, 7, 9, 30, 0, 0, time.UTC),
-				RankScore:  3000011,
+				InProgress: 2,
+				Assigned:   3,
+
+				InProgressLive: 1,
+				InProgressDead: 1,
+				DeadOwner:      true,
+
+				InFlight:      1,
+				InFlightHeads: []string{"tk-eemvf.3"},
+
+				Owned: nil,
+
+				Stranded:         false,
+				Empty:            false,
+				Complete:         false,
+				ProgressMismatch: false,
+
+				StaleDays:      4,
+				Priority:       &p1,
+				CrossRigRefs:   []string{"sl-9k2mq"},
+				OpenHeads:      []string{"tk-eemvf.5", "tk-eemvf.6"},
+				DeadOwnerHeads: []string{"tk-eemvf.4"},
+
+				Takeaway:   &takeaway,
+				TakeawayAt: &takeawayAt,
+				TakeawayBy: &takeawayBy,
+
+				UpdatedAt: time.Date(2026, 8, 7, 9, 30, 0, 0, time.UTC),
+				Frontier:  "8 open · 1 in flight · 1 stuck (dead owner)",
+				Needs:     takeaway,
+				RankScore: 3014004,
 			},
 			{
-				ID:         "gt-1a2b3",
-				Rig:        "gascity",
-				Kind:       "convoy",
-				Title:      "A convoy whose source could not read updated_at",
-				Severity:   board.SevLow,
+				ID:       "gt-1a2b3",
+				Rig:      "gascity",
+				Kind:     "convoy",
+				Title:    "A convoy whose source could not read updated_at",
+				Severity: board.SevLow,
+
+				Weight: 3,
+				Held:   false,
+
 				NClosed:    2,
 				MTotal:     2,
 				Open:       0,
 				InProgress: 0,
-				Frontier:   "",
-				Needs:      "nothing",
-				StaleDays:  0,
-				RankScore:  2,
+				Assigned:   0,
+
+				InProgressLive: 0,
+				InProgressDead: 0,
+				DeadOwner:      false,
+
+				InFlight:      0,
+				InFlightHeads: []string{},
+
+				// A convoy is the one kind that carries `owned`; false marks the
+				// orphan exception, and the fixture pins BOTH pointer states so
+				// the TypeScript `boolean | null` is exercised either way.
+				Owned: &no,
+
+				Stranded:         false,
+				Empty:            false,
+				Complete:         true,
+				ProgressMismatch: true,
+
+				StaleDays:      0,
+				Priority:       &p3,
+				CrossRigRefs:   []string{},
+				OpenHeads:      []string{},
+				DeadOwnerHeads: []string{},
+
+				// The absent case for the takeaway triple: null, never omitted.
+				Takeaway:   nil,
+				TakeawayAt: nil,
+				TakeawayBy: nil,
+
+				Frontier:  "all 2 closed · 0 open",
+				Needs:     "all 2 closed — graduate",
+				RankScore: 3000,
 			},
 		},
 		Partial:       true,

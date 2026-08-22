@@ -4,33 +4,27 @@
 // gathers raw [Anchor] data, and [BuildBoard] turns it into a ranked,
 // deduplicated [Board].
 //
-// SCOPE. This started as the minimal subset proven by the tk-sy3vj spike and
-// was widened by tk-x89rn, which restored the two raw facts the spike could not
-// read — [Anchor.UpdatedAt] and [Anchor.Metadata] — and with them the real
-// stale_days. The per-tile fields are {id, rig, kind, title, severity, n_closed,
-// m_total, open, in_progress, frontier, needs, stale_days, updated_at,
-// rank_score} plus the envelope {generated_at, total, tiles}.
+// SCOPE. This started as the minimal subset proven by the tk-sy3vj spike,
+// was widened by tk-x89rn (which restored [Anchor.UpdatedAt] and
+// [Anchor.Metadata], and with them the real stale_days), and reached full
+// gc-helm.sh parity in tk-134d7. [Tile] now carries every field the bash
+// board's `--json` emits, in the same order, inside the envelope
+// {generated_at, total, tiles}.
 //
-// Carrying a fact is not the same as spending it. tk-x89rn shipped only the
-// CAPABILITY — Metadata populated on every anchor and child, read by nothing —
-// because its three consumers are separate beads, kept apart to stay
-// reviewable. tk-2v08m has since spent it in the GATHER: `source.BeadsSource`
-// selects two further anchor kinds by metadata (`human` for
-// `gc.routed_to=human`, `parked` for a bead carrying `gc.takeaway`), so the
-// board's KIND is no longer a synonym for the bead's issue type. No derivation
-// in THIS package reads Metadata yet; the two beads that will are tk-x55wt
-// (dead columns + constant NEEDS) and tk-b3rga (decision tiles). So the
-// following gc-helm.sh behaviours remain NOT reproduced here:
+// PARITY (tk-134d7). The board is now ONE model with TWO renderers — the web
+// dashboard and the `helm-svc board` CLI — so the field set here is the whole
+// of gc-helm.sh's `--json` contract rather than the spike subset. Everything
+// the bash board computes is computed here: the full rank weight (subtree size
+// + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
+// sentence, the stranded/empty/complete/progress_mismatch booleans, the `held`
+// visit fact, and the in-flight/dead-owner join that distinguishes a slung
+// bead being worked from one nobody has touched.
 //
-//   - the full rank weight (priority + cross-rig-ref scan): the weight is
-//     m_total + prio_w(priority); the cross-rig description scan is dropped.
-//   - the takeaway-driven NEEDS sentence: NEEDS uses the deterministic phrase.
-//   - the stranded/empty/complete/progress_mismatch booleans.
-//   - the `held` visit fact (the bash board's glyph: an open visit bead with
-//     task_kind=visit whose gc.continuation_group names the anchor). Metadata
-//     is now readable, so this is derivable — but deriving it belongs to the
-//     consumer bead, not here. (The retired v1 `live` hot/warm/cold host field
-//     is gone with the host mechanism itself — do not reintroduce it.)
+// Three of those are CROSS-ANCHOR joins rather than per-anchor facts, so they
+// arrive in [Facts] beside the anchors instead of on [Anchor]: visit presence,
+// the live-workflow map, and session liveness. gc-helm.sh passes the same three
+// into its render as --argjson visits/inflight/ownermap; [Facts] is that
+// argument list, typed.
 //
 // The struct tags are an additive contract: the TypeScript frontend mirrors
 // them, so fields may be added but never renamed or removed.
@@ -81,48 +75,151 @@ type Child struct {
 // in gc-helm.sh's anchors.ndjson. A [Source] produces these; [BuildBoard]
 // consumes them.
 //
-// UpdatedAt and Metadata are the two facts tk-x89rn widened the seam to carry.
-// UpdatedAt drives stale_days (and through it the NORMAL→ELEVATED bump); a zero
-// value means the source could not read it and staleness reads as 0, exactly as
-// gc-helm.sh treats a null updated_at. Metadata is what a source SELECTS the
-// `human` and `parked` kinds by; carrying it here keeps that decision auditable
-// from the anchor, but no derivation reads it — see the package doc.
+// UpdatedAt drives stale_days (and through it the NORMAL→ELEVATED stale bump);
+// a zero value means the source could not read it and staleness reads as 0,
+// exactly as gc-helm.sh treats a null updated_at. Metadata is what a source
+// SELECTS the `human` and `parked` kinds by, and is also where the three
+// takeaway fields below are read from.
+//
+// Description is carried for ONE purpose: the cross-rig-ref scan, which reads
+// bead ids belonging to other rigs out of the prose. It is never rendered.
 type Anchor struct {
-	ID        string            `json:"id"`
-	Title     string            `json:"title"`
-	Kind      string            `json:"kind"`   // epic | decision | convoy | human | parked
-	Source    string            `json:"source"` // same string as Kind; drives derivation branches
-	Rig       string            `json:"rig"`
-	Prefix    string            `json:"prefix"`
-	Priority  *int              `json:"priority,omitempty"`
-	UpdatedAt time.Time         `json:"updated_at,omitzero"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Children  []Child           `json:"children,omitempty"`
+	ID          string            `json:"id"`
+	Title       string            `json:"title"`
+	Kind        string            `json:"kind"`   // epic | decision | convoy | unowned | human | parked
+	Source      string            `json:"source"` // same string as Kind; drives derivation branches
+	Rig         string            `json:"rig"`
+	Prefix      string            `json:"prefix"`
+	Priority    *int              `json:"priority,omitempty"`
+	UpdatedAt   time.Time         `json:"updated_at,omitzero"`
+	Description string            `json:"description,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Children    []Child           `json:"children,omitempty"`
+
+	// Owned distinguishes a convoy that an owning bead accounts for from the
+	// orphan exception (kind "unowned"). nil for every non-convoy kind, which
+	// is what keeps the wire field null rather than a misleading false.
+	Owned *bool `json:"owned,omitempty"`
+
+	// Progress is the convoy's OWN closed/total claim, as `gc convoy list`
+	// reports it. It is compared against the rolled-up child counts to derive
+	// progress_mismatch; nothing renders it directly.
+	Progress *Progress `json:"progress,omitempty"`
+
+	// The takeaway triple: the LLM-authored headline a converse sitting leaves
+	// on a bead, plus its provenance. Read from gc.takeaway / gc.takeaway_at /
+	// gc.takeaway_by. An anchor with a takeaway spends it as its NEEDS
+	// sentence, which is the whole reason the field is gathered.
+	Takeaway   string `json:"takeaway,omitempty"`
+	TakeawayAt string `json:"takeaway_at,omitempty"`
+	TakeawayBy string `json:"takeaway_by,omitempty"`
+}
+
+// Progress is a convoy's self-reported roll-up, mirroring the `progress` object
+// on `gc convoy list --json`.
+type Progress struct {
+	Closed int `json:"closed"`
+	Total  int `json:"total"`
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
-// frontend. Field order matches the gc-helm.sh --json object for the spike
-// subset.
+// frontend and emitted verbatim by `helm-svc board --json`.
+//
+// FIELD ORDER IS THE BASH OBJECT LITERAL'S ORDER, deliberately.
+// encoding/json emits struct fields in declaration order, so keeping this
+// sequence aligned with gc-helm.sh's `{ id:…, rig:…, … }` means the two boards
+// serialize the same keys in the same sequence and a human can diff the two
+// outputs line for line. Renaming or removing a field breaks both the
+// TypeScript mirror and the CLI contract; adding one is safe if it is added to
+// the bash literal in the same position.
 type Tile struct {
-	ID         string   `json:"id"`
-	Rig        string   `json:"rig"`
-	Kind       string   `json:"kind"`
-	Title      string   `json:"title"`
-	Severity   Severity `json:"severity"`
-	NClosed    int      `json:"n_closed"`
-	MTotal     int      `json:"m_total"`
-	Open       int      `json:"open"`
-	InProgress int      `json:"in_progress"`
-	Frontier   string   `json:"frontier"`
-	Needs      string   `json:"needs"`
+	ID       string   `json:"id"`
+	Rig      string   `json:"rig"`
+	Kind     string   `json:"kind"`
+	Title    string   `json:"title"`
+	Severity Severity `json:"severity"`
+
+	// Weight is the rank PROXY: subtree size + priority weight + a capped
+	// cross-rig-ref count. It is the middle lane of rank_score.
+	Weight int `json:"weight"`
+	// Held is visit presence: an open visit bead names this anchor in its
+	// gc.continuation_group, so a conversation is holding it. A held anchor is
+	// never stranded — the conversation IS the attention it would be flagged
+	// for lacking.
+	Held bool `json:"held"`
+
+	NClosed int `json:"n_closed"`
+	MTotal  int `json:"m_total"`
+	Open    int `json:"open"`
+	// InProgress is the RAW status count — honestly 0 for a slung bead, whose
+	// work never leaves status=open. InProgressLive is the count that answers
+	// "is anything actually moving", under both mechanisms.
+	InProgress int `json:"in_progress"`
+	Assigned   int `json:"assigned"`
+
+	InProgressLive int  `json:"in_progress_live"`
+	InProgressDead int  `json:"in_progress_dead"`
+	DeadOwner      bool `json:"dead_owner"`
+
+	// InFlight is the part of InProgressLive attributable to a live graph.v2
+	// workflow rather than to a claimed child, surfaced so the join can be
+	// audited without re-deriving it.
+	InFlight      int      `json:"in_flight"`
+	InFlightHeads []string `json:"in_flight_heads"`
+
+	Owned *bool `json:"owned"`
+
+	Stranded         bool `json:"stranded"`
+	Empty            bool `json:"empty"`
+	Complete         bool `json:"complete"`
+	ProgressMismatch bool `json:"progress_mismatch"`
+
 	// StaleDays is whole days since the anchor was last updated, and UpdatedAt
 	// is the timestamp it came from. Both are 0/zero when the source cannot read
 	// updated_at — indistinguishable, on the wire, from an anchor touched today.
 	// That ambiguity is why UpdatedAt is carried alongside: absent means unknown,
 	// present means genuinely fresh.
-	StaleDays int       `json:"stale_days"`
+	StaleDays      int      `json:"stale_days"`
+	Priority       *int     `json:"priority"`
+	CrossRigRefs   []string `json:"cross_rig_refs"`
+	OpenHeads      []string `json:"open_heads"`
+	DeadOwnerHeads []string `json:"dead_owner_heads"`
+
+	// The takeaway triple is null-when-absent rather than omitted: the key is
+	// part of the contract, and a consumer distinguishes "no takeaway" from
+	// "field gone" by the null.
+	Takeaway   *string `json:"takeaway"`
+	TakeawayAt *string `json:"takeaway_at"`
+	TakeawayBy *string `json:"takeaway_by"`
+
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	Frontier  string    `json:"frontier"`
+	Needs     string    `json:"needs"`
 	RankScore int       `json:"rank_score"`
+}
+
+// Facts are the CROSS-ANCHOR joins one gather pass produces alongside the
+// anchors — the typed form of the three --argjson maps gc-helm.sh hands its
+// render. A zero Facts is legal and means "the gather could not supply these":
+// every anchor then reads as unheld, with nothing in flight and no owner
+// liveness known.
+type Facts struct {
+	// Visits holds the ids of anchors an open visit bead names.
+	Visits map[string]bool
+	// Inflight maps a WORK-BEAD id — an anchor's CHILD, not the anchor — to the
+	// session names of the live graph.v2 workflows standing over it. The gather
+	// resolves each live workflow root through its input convoy to that
+	// convoy's single tracked member, and that member is the key.
+	Inflight map[string][]string
+	// OwnerState maps a session name AND its alias to that session's state, so
+	// a child's assignee can be resolved whichever form it was written in.
+	OwnerState map[string]string
+	// Prefixes is every rig's issue prefix; RigNames is every rig's name. The
+	// cross-rig-ref scan looks for OTHER rigs' prefixes in an anchor's prose and
+	// discards any hit that is really a rig name (so "signal-loom" is not read
+	// as a "signal-" bead id).
+	Prefixes []string
+	RigNames []string
 }
 
 // Board is the envelope returned by the service. Tiles are sorted by rank_score

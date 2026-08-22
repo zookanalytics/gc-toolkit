@@ -65,6 +65,12 @@ type BeadsSource struct {
 
 	// openStore is injectable so tests can exercise Gather without a live Dolt.
 	openStore func(ctx context.Context, beadsDir string) (beadStore, error)
+
+	// gc reads the two facts no bead carries — session liveness and convoy
+	// ownership — through the `gc` CLI. Injectable for the same reason
+	// openStore is. See gccli.go for why this is a third sanctioned backend
+	// rather than a contract violation.
+	gc gcClient
 }
 
 // beadStore is the slice of [beads.Storage] this source uses. Narrowing it to
@@ -88,6 +94,11 @@ func withStoreOpener(f func(ctx context.Context, beadsDir string) (beadStore, er
 	return func(s *BeadsSource) { s.openStore = f }
 }
 
+// withGCClient overrides the `gc` CLI shim (used by tests).
+func withGCClient(c gcClient) BeadsOption {
+	return func(s *BeadsSource) { s.gc = c }
+}
+
 // NewBeadsSource builds a source over the city's per-rig bead stores. The city
 // root comes from GC_HELM_CITY_PATH, else GC_CITY_PATH, else GC_CITY.
 func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
@@ -98,6 +109,9 @@ func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.gc == nil {
+		s.gc = newGCExec(s.cityPath)
 	}
 	return s
 }
@@ -152,40 +166,62 @@ type rigRef struct {
 	beadsDir string
 }
 
-// rigs enumerates <city>/rigs/*/.beads. Scanning the directory (rather than
-// asking the supervisor for the roster) keeps this source self-contained: it
-// needs no HTTP at all, so a supervisor outage degrades the board's freshness
-// but not its ability to read. Rig NAME is the directory name, matching what
-// `gc rig list` reports.
+// rigs enumerates the city's bead stores: the HQ store at <city>/.beads, then
+// <city>/rigs/*/.beads.
+//
+// THE HQ STORE IS A RIG. `gc rig list` reports the city root itself as a rig
+// (`"hq": true`) with its own issue prefix, and gc-helm.sh gathers it like any
+// other. Scanning only rigs/*/ silently dropped it, and what lives there is
+// city-scope work — including the `gc.routed_to=human` beads that are the
+// highest-value rows this board has, since they are the ones provably waiting
+// on the operator. A board that hides the operator's own queue is the exact
+// failure the metadata-keyed kinds were added to fix.
+//
+// Scanning the directory (rather than asking the supervisor for the roster)
+// keeps this source self-contained: it needs no HTTP at all, so a supervisor
+// outage degrades the board's freshness but not its ability to read. Rig NAME
+// is the directory name, matching what `gc rig list` reports for both shapes.
 func (s *BeadsSource) rigs() ([]rigRef, error) {
 	if s.cityPath == "" {
 		return nil, fmt.Errorf("no city path (set GC_HELM_CITY_PATH, GC_CITY_PATH or GC_CITY)")
 	}
-	root := filepath.Join(s.cityPath, "rigs")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, fmt.Errorf("read rigs dir %s: %w", root, err)
-	}
+
 	var out []rigRef
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		beadsDir := filepath.Join(root, e.Name(), ".beads")
+	add := func(name, dir string) {
+		beadsDir := filepath.Join(dir, ".beads")
 		if st, err := os.Stat(beadsDir); err != nil || !st.IsDir() {
-			continue
+			return
 		}
 		out = append(out, rigRef{
-			name:     e.Name(),
+			name:     name,
 			prefix:   readIssuePrefix(filepath.Join(beadsDir, "config.yaml")),
 			beadsDir: beadsDir,
 		})
 	}
+
+	add(filepath.Base(strings.TrimRight(s.cityPath, string(filepath.Separator))), s.cityPath)
+
+	root := filepath.Join(s.cityPath, "rigs")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		// A city with no rigs/ directory is still readable if it has an HQ
+		// store; only a city with neither is an error.
+		if len(out) == 0 {
+			return nil, fmt.Errorf("read rigs dir %s: %w", root, err)
+		}
+		entries = nil
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			add(e.Name(), filepath.Join(root, e.Name()))
+		}
+	}
+
 	// Deterministic order so the board's pre-sort anchor sequence — and thus
 	// the tie-break among equal rank_scores — does not depend on readdir order.
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no rig bead stores under %s", root)
+		return nil, fmt.Errorf("no bead stores under %s", s.cityPath)
 	}
 	return out, nil
 }
@@ -231,34 +267,65 @@ func (s *BeadsSource) store(ctx context.Context, r rigRef) (beadStore, error) {
 	return st, nil
 }
 
-// Gather reads every anchor kind from every rig. A rig that cannot be opened or
-// queried degrades to empty and records a partial error; only a total failure —
-// no rig produced anything — aborts, so the server returns 502 rather than an
-// empty board that reads as "nothing needs attention".
+// Gather reads every anchor kind from every rig, plus the three cross-anchor
+// joins the derivation needs. A rig that cannot be opened or queried degrades
+// to empty and records a partial error; only a total failure — no rig produced
+// anything — aborts, so the server returns 502 rather than an empty board that
+// reads as "nothing needs attention".
 func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	rigs, err := s.rigs()
 	if err != nil {
 		return nil, err
 	}
 
+	// Convoy ownership comes from `gc convoy list`, which is city-wide, so it is
+	// read ONCE and joined onto the convoy anchors by id as they are gathered.
+	// A failure leaves every convoy's `owned` null rather than guessing false,
+	// which would promote every convoy in the city to the unowned-orphan band.
 	g := &gatherState{rigByPrefix: map[string]string{}}
+	convoys := s.convoyIndex(ctx, g)
+
+	var visits []string
+	var roots []workflowRoot
 	for _, r := range rigs {
 		st, err := s.store(ctx, r)
 		if err != nil {
 			g.note(true, []string{"rig " + r.name + ": " + err.Error()})
 			continue
 		}
-		s.gatherRig(ctx, g, st, r)
+		s.gatherRig(ctx, g, st, r, convoys)
+		visits = append(visits, s.visitSubjects(ctx, st, r, g)...)
+		roots = append(roots, s.workflowRoots(ctx, st, r, g)...)
 	}
 
 	if !g.anyOK {
 		return nil, fmt.Errorf("no rig bead store could be read: %s", strings.Join(g.partialErrs, "; "))
 	}
+
+	owners := sessionStates(ctx, s.gc, g)
+	inflight := resolveInflight(ctx, s.gc, roots, owners, g)
+
 	return &Result{
 		Anchors:       g.anchors,
+		Facts:         buildFacts(visits, inflight, owners, rigs),
 		Partial:       g.partial,
 		PartialErrors: g.partialErrs,
 	}, nil
+}
+
+// convoyIndex reads city-wide convoy ownership and progress, keyed by convoy
+// id. An empty map is a legal answer: the join below simply leaves `owned` nil.
+func (s *BeadsSource) convoyIndex(ctx context.Context, g *gatherState) map[string]convoyRow {
+	rows, err := s.gc.Convoys(ctx)
+	if err != nil {
+		g.note(true, []string{"convoy ownership unavailable (owned/progress will be null): " + err.Error()})
+		return nil
+	}
+	out := make(map[string]convoyRow, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r
+	}
+	return out
 }
 
 // typedAnchorKinds are the anchor kinds selected by ISSUE TYPE. The list is
@@ -308,7 +375,7 @@ var metadataAnchors = []metadataAnchor{
 
 // gatherRig collects every anchor kind from one rig's store. Each kind fails
 // independently: a rig whose convoys error still contributes its epics.
-func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef) {
+func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow) {
 	// Anchors are OPEN beads only, mirroring gc-helm.sh's `--status open` on
 	// each anchor query. Children below are read at ALL statuses so n_closed is
 	// a real count rather than a count of the still-open ones.
@@ -335,6 +402,7 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 				a.Children = s.epicChildren(ctx, g, st, iss.ID)
 			case "convoy":
 				a.Children = s.convoyChildren(ctx, g, st, iss.ID)
+				applyConvoyOwnership(&a, convoys)
 			}
 			// A decision needs no roll-up: its band is ELEVATED regardless.
 			g.anchors = append(g.anchors, a)
@@ -385,8 +453,10 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 // newAnchor projects one bead onto a board anchor under the given kind. Kind
 // and Source are the same string: Kind is displayed, Source drives the
 // derivation branches, and nothing in this source has ever needed them to
-// differ.
+// differ (the one exception is a convoy, whose kind flips to "unowned" in
+// applyConvoyOwnership once its ownership is known).
 func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
+	md := decodeMetadata(iss.Metadata)
 	return board.Anchor{
 		ID:        iss.ID,
 		Title:     iss.Title,
@@ -396,7 +466,44 @@ func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
 		Prefix:    r.prefix,
 		Priority:  clonePriority(iss.Priority),
 		UpdatedAt: iss.UpdatedAt,
-		Metadata:  decodeMetadata(iss.Metadata),
+		// Carried for the cross-rig-ref scan only; never rendered.
+		Description: iss.Description,
+		Metadata:    md,
+		// The takeaway triple a converse sitting stamps. `gc.takeaway` becomes
+		// the tile's NEEDS sentence, replacing the deterministic phrase.
+		Takeaway:   md["gc.takeaway"],
+		TakeawayAt: md["gc.takeaway_at"],
+		TakeawayBy: md["gc.takeaway_by"],
+	}
+}
+
+// applyConvoyOwnership folds `gc convoy list`'s view of a convoy onto its
+// anchor: the ownership bool, the convoy's own progress claim, and — when it is
+// NOT owned — the kind flip that makes it the orphan exception.
+//
+// Under the everything-is-owned law every PR or unit is accounted for by a
+// bead, so an unowned non-machine convoy is exactly what the observer must
+// surface rather than let pass as a normal row. (The machine convoys — the
+// `sling-*` wrappers and the per-sling `input convoy for …` ones — are already
+// dropped by admitConvoy before this runs.)
+//
+// A convoy MISSING from the index keeps kind "convoy" and a nil `owned`. That
+// is deliberate: absent ownership data is not evidence of an orphan, and
+// guessing false would flag every convoy in the city HIGH the first time
+// `gc convoy list` failed.
+func applyConvoyOwnership(a *board.Anchor, convoys map[string]convoyRow) {
+	row, ok := convoys[a.ID]
+	if !ok {
+		return
+	}
+	owned := row.Owned
+	a.Owned = &owned
+	if row.Progress != nil {
+		a.Progress = &board.Progress{Closed: row.Progress.Closed, Total: row.Progress.Total}
+	}
+	if !owned {
+		a.Kind = "unowned"
+		a.Source = "unowned"
 	}
 }
 

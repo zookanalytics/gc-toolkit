@@ -2,8 +2,10 @@ package source
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -56,7 +58,11 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 func writeJSON(w http.ResponseWriter, body string) { _, _ = w.Write([]byte(body)) }
 
 func newTestSource(t *testing.T, srv *httptest.Server) *SupervisorSource {
-	return NewSupervisorSource(WithBaseURL(srv.URL), WithCity("testcity"), WithHTTPClient(srv.Client()))
+	// withSupervisorGCClient is not optional hygiene: without it this source
+	// shells out to the real `gc` for session liveness, against whatever city
+	// happens to be running on the developer's box.
+	return NewSupervisorSource(WithBaseURL(srv.URL), WithCity("testcity"), WithHTTPClient(srv.Client()),
+		withSupervisorGCClient(&fakeGC{sessions: map[string]string{"polecat-live": "active"}}))
 }
 
 func anchorByID(res *Result, id string) (have bool, kind, rig string, mTotal, nClosed int) {
@@ -158,5 +164,53 @@ func TestDiscoverCityFromURLPrefix(t *testing.T) {
 	t.Setenv("GC_SERVICE_URL_PREFIX", "/v0/city/loomington/svc/helm")
 	if got := discoverCity(); got != "loomington" {
 		t.Errorf("discoverCity from URL prefix = %q, want loomington", got)
+	}
+}
+
+// TestSupervisorSourceCarriesSessionLiveness: no supervisor endpoint reports
+// session state, and the derivation reads a claimed child with no known owner
+// as an ORPHAN. Leaving Facts.OwnerState empty on this backend would therefore
+// not narrow the board, it would INVERT it — every claim in the city would band
+// HIGH. So this backend reads liveness through `gc` like the other one.
+func TestSupervisorSourceCarriesSessionLiveness(t *testing.T) {
+	src := newTestSource(t, mockSupervisor(t, nil))
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Facts.OwnerState["polecat-live"] != "active" {
+		t.Errorf("session states must reach Facts: %v", res.Facts.OwnerState)
+	}
+	// The rig roster feeds the cross-rig scan on this backend too.
+	if len(res.Facts.Prefixes) == 0 || len(res.Facts.RigNames) == 0 {
+		t.Errorf("rig prefixes/names must reach Facts: %v / %v", res.Facts.Prefixes, res.Facts.RigNames)
+	}
+}
+
+// TestSupervisorSourceWithoutGCDegradesLoudly: losing `gc` here must narrow the
+// board and SAY SO, not fail the gather — the anchors are still real.
+func TestSupervisorSourceWithoutGCDegradesLoudly(t *testing.T) {
+	srv := mockSupervisor(t, nil)
+	src := NewSupervisorSource(WithBaseURL(srv.URL), WithCity("testcity"), WithHTTPClient(srv.Client()),
+		withSupervisorGCClient(&fakeGC{err: errors.New("gc binary not found")}))
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("a missing gc must not abort the gather: %v", err)
+	}
+	if len(res.Anchors) == 0 {
+		t.Error("anchors still gather without gc")
+	}
+	if !res.Partial {
+		t.Error("a lost liveness join is a partial gather")
+	}
+	var named bool
+	for _, e := range res.PartialErrors {
+		if strings.Contains(e, "session liveness unavailable") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("the degradation must name itself: %v", res.PartialErrors)
 	}
 }
