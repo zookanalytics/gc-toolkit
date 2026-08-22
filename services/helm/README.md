@@ -7,34 +7,89 @@ board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces �
 the bash dies).
 
 > **The bash has not died, and it is still what `prefix+b` runs.**
-> `tmux-pick-helm.sh:52` invokes `gc-helm.sh --json`; the terminal board never
-> calls this service. So the port above is a **snapshot, not a link** — two
-> implementations of one model, neither reading the other. `tk-2v08m` fixed the
-> visits-invisible defect here and not there; `tk-fkeft` then fixed it (and the
-> false-stranded defect) in `gc-helm.sh`. **A change to this board's gather,
-> ranking, or anchor kinds is a standing question against the sibling** — say
-> in the PR whether it needs the same change. Whether the two should converge
-> or one should be retired is an open operator decision, recorded under
-> "Two helm boards, and they diverge" in `docs/gascity-human-engagement.md`.
+> `tmux-pick-helm.sh:52` invokes `gc-helm.sh --json`, not this binary. But the
+> two are no longer two IMPLEMENTATIONS: since `tk-134d7` this repo also builds
+> `helm-svc board`, a terminal renderer over *this* gather and *this*
+> derivation, and `internal/board` carries the whole of the bash board's
+> `--json` field set rather than a subset of it. The remaining bash-only
+> surface is its verbs (`open`, `react`, `takeaway`), which have no Go
+> equivalent — so `gc-helm.sh` stays in place and working, and retiring it is a
+> separate decision recorded under "Two helm boards, and they diverge" in
+> `docs/gascity-human-engagement.md`.
+>
+> **A change to this board's gather, ranking, or anchor kinds is still a
+> standing question against `gc-helm.sh`** — `cmd/helm-svc/contract_parity_test.go`
+> fails when the two field sets drift, but nothing compares their VALUES
+> automatically. Say in the PR whether the sibling needs the same change.
 
 The spine came from the `tk-sy3vj` spike; `tk-x89rn` then widened the source seam
 so the board can read `updated_at` and bead metadata, which is what makes
-`stale_days` real. The model port is still partial — see *Still deferred*, below.
+`stale_days` real; `tk-134d7` completed the model port and added the CLI view.
+See *What's proven vs. deferred*, below.
 
 ## What it does
 
+Two entry points over ONE board. They share `internal/source` (the gather) and
+`internal/board` (the ranking); neither reimplements the other.
+
 ```
-GET /helm   -> { generated_at, total, tiles:[ {id,rig,kind,title,severity,
-                      n_closed,m_total,open,in_progress,frontier,needs,
-                      stale_days,updated_at,rank_score}, ... ],
-                 partial?, partial_errors? }
+helm-svc                 serve  — the sidecar (below). Bare invocation, which is
+                                  how the supervisor spawns it.
+helm-svc board [--json]  render — the terminal board (tk-134d7). See *CLI view*.
+```
+
+As the sidecar:
+
+```
+GET /helm   -> { generated_at, total, tiles:[ Tile, ... ], partial?, partial_errors? }
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 GET /            -> the board JSON, or the embedded web app for a browser
                     (Accept: text/html) — see *Web UI*
 GET /assets/...  -> the web app's bundle
 ```
 
+A `Tile` carries the full `gc-helm.sh --json` field set — 34 fields, declared in
+the bash object literal's order in `internal/board/model.go` and mirrored in
+`web/src/contract.ts`:
+
+```
+id rig kind title severity weight held
+n_closed m_total open in_progress assigned
+in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
+stranded empty complete progress_mismatch
+stale_days priority cross_rig_refs open_heads dead_owner_heads
+takeaway takeaway_at takeaway_by updated_at frontier needs rank_score
+```
+
 Tiles are ranked `rank_score` descending and deduplicated by id.
+
+### CLI view (`helm-svc board`)
+
+```
+helm-svc board                     # the ranked table a human glances at
+helm-svc board --json              # the ranked JSON ARRAY (the gc-helm.sh contract)
+helm-svc board --json --limit=0    # uncapped, for tooling
+```
+
+`--json` emits a bare **array**, not the service's envelope, because that array
+is what `gc-helm.sh --json` emits and what `assets/scripts/tmux-pick-helm.sh`
+consumes. Rows are capped at 50 by default with a separate budget of 15 for
+`parked` rows (`--limit=0` opts out of both), matching the bash board's split
+cap. Exit codes match too: `0` rendered, `2` usage, `3` gather failed — a failed
+gather is never rendered as an empty "nothing needs you".
+
+It runs the gather **in-process and uncached**: no daemon, no dependency on the
+sidecar being up, which is most of the point of having a CLI. Measured on the
+loomington city (5 stores, 55 anchors):
+
+| | cold | warm |
+|---|---|---|
+| `gc-helm.sh --json --limit=0` | 19.9 / 22.2 / 26.6 s | 1.75 / 1.82 / 1.77 s (45s file cache) |
+| `helm-svc board --json --limit=0` | 3.27 / 2.76 / 2.73 s | *(no cache — every run is cold)* |
+
+Same binary as the sidecar on purpose: a separately-built CLI would be a second
+artifact that can go stale on its own, which is the failure that motivated the
+epic (`tk-5nm0p`). Full rationale in `cmd/helm-svc/board.go`.
 
 ### Anchor kinds
 
@@ -85,20 +140,32 @@ Three packages, a clean dependency line `board <- source <- server <- cmd`:
 
 All bead/Dolt access goes through a Gas City API — **never raw Dolt**. There is
 no `sql.Open("mysql")`, no `JSON_EXTRACT` against bead DBs. The `source.Source`
-interface is the seam, and both shipped backends sit behind it without the model
+interface is the seam, and the shipped backends sit behind it without the model
 or serving code knowing which one is live.
 
 **`BeadsSource` — the in-process beads library (default).** Opens each rig's own
 `.beads` store through `beads.OpenFromConfig`, the same library the `bd` CLI uses
 and the same access pattern the bash PoC always had (`bd list --db
-<rig>/.beads`). Rigs are enumerated from `<city>/rigs/*/.beads`, so it needs the
-city root on disk and no HTTP at all. Store handles are opened lazily and reused
-for the process lifetime; the rig *set* is re-read each gather, so a rig added
-later is picked up without a restart.
+<rig>/.beads`). Rigs are enumerated on disk — the HQ store at `<city>/.beads`,
+then `<city>/rigs/*/.beads` — so it needs the city root and no HTTP at all.
+Store handles are opened lazily and reused for the process lifetime; the rig
+*set* is re-read each gather, so a rig added later is picked up without a
+restart.
 
 **`SupervisorSource` — the loopback HTTP API (fallback).** Endpoints consumed
 (all under `/v0/city/<city>/`): `/rigs`, `/beads?type=epic`, `/beads/graph/{id}`
 (all-status child roll-up), `/beads?type=decision`, `/convoys` + `/convoy/{id}`.
+
+**The `gc` CLI (`internal/source/gccli.go`) — for two facts no bead carries.**
+`gc session list --state all --json` for session liveness, and `gc convoy list`
+/ `gc convoy status` for convoy ownership and the in-flight join. This is the
+same source `gc-helm.sh` reads, so the two boards agree by construction rather
+than by two derivations. It honours the contract for the same reason the other
+two do — a Gas City interface, not raw Dolt — and every call is best-effort: a
+missing or failing `gc` records a partial error and narrows the board (nothing
+reads as held or in flight) instead of aborting the gather. The lost session map
+is named explicitly in `partial_errors`, because without it every claim reads as
+a dead owner and a healthy board would otherwise turn red with no explanation.
 
 Either way, cross-rig `partial` / `partial_errors` are propagated to the board
 envelope, and a total outage (no rig or no endpoint readable) surfaces as a 502
@@ -480,13 +547,20 @@ GC_SERVICE_URL_PREFIX=/v0/city/<city>/svc/helm \
 GC_CITY_PATH=$GC_CITY_PATH \
   ./helm-svc &
 curl --unix-socket /tmp/helm.sock http://x/helm | jq .
+
+# The CLI view needs only the city root — no socket, no running sidecar:
+GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board
+GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board --json --limit=0 | jq length
 ```
 
 Discovery env:
 
 - `GC_HELM_SOURCE` — `beads` | `supervisor`; see *Picking a backend* above.
 - `GC_HELM_CITY_PATH` (else `GC_CITY_PATH`, else `GC_CITY`) — the city root the
-  beads backend enumerates `rigs/*/.beads` under.
+  beads backend enumerates `.beads` and `rigs/*/.beads` under. Required by
+  `helm-svc board`, which has no HTTP fallback by design.
+- `GC_HELM_GC_BIN` — override the `gc` binary the liveness/ownership reads shell
+  out to (otherwise `gc` on `PATH`).
 - `GC_HELM_SUPERVISOR_URL` (else supervisor.toml port, default `127.0.0.1:8372`)
   and `GC_HELM_CITY` (else parsed from `GC_SERVICE_URL_PREFIX`, else the
   `GC_CITY_PATH` basename) — the HTTP backend's target.
@@ -529,30 +603,42 @@ attached to the city's existing ttyd, peek at rest and live on focus, with the
 same-origin reachability confirmed and detach-not-kill verified — see
 *Terminal*.
 
+**Delivered since** (tk-134d7, the CLI view + the completed model port):
+
+- **`helm-svc board`** — a second renderer over this gather and this
+  derivation. See *CLI view*.
+- **The full rank `weight`** — `m_total + prio_w(priority) + min(xrefs,5)`, with
+  the cross-rig-ref description scan restored.
+- **The takeaway-driven NEEDS sentence** — an anchor carrying `gc.takeaway`
+  spends it as its NEEDS. This is the DATA half of `tk-x55wt`; that bead's
+  remaining scope is the web tile's presentation.
+- **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans, and `held`.
+- **The in-flight / dead-owner join.** A child counts as moving only when its
+  owning session is demonstrably live, or a live graph.v2 workflow stands over
+  it. This is the false-stranded defect `tk-fkeft` fixed in `gc-helm.sh`, fixed
+  here too: a slung bead never leaves `status=open`, so a board reading only
+  child status called a polecat mid-implementation "stranded — assign or visit".
+- **owned-convoy partition** — `gc convoy list` supplies `owned` and `progress`,
+  and an unowned non-machine convoy is banded HIGH as the orphan exception.
+- **The HQ bead store.** `gc rig list` reports the city root itself as a rig
+  (`hq: true`); the gather scanned only `rigs/*/.beads` and silently dropped it,
+  hiding the city-scope `gc.routed_to=human` beads.
+
+Session liveness and convoy ownership come from the `gc` CLI — see
+*Data-access contract*, which that adds a third sanctioned backend to.
+
 **Still deferred** (and *why*):
 
-- **The full rank `weight`** — the weight is `m_total + prio_w(priority)`; the
-  cross-rig-ref description scan (`min(xrefs,5)`) is dropped.
-- **The takeaway-driven NEEDS sentence** — NEEDS uses the deterministic phrase.
-  `gc.takeaway` is now readable; spending it is `tk-x55wt`.
-- **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans. (STRANDED
-  itself is already in the severity derivation: open work with none in
-  progress.)
-- **The `held` visit fact** — the bash board's glyph (an open visit bead with
-  `task_kind=visit` whose `gc.continuation_group` names the anchor). Metadata is
-  now readable, so this is derivable; deriving it belongs to the consumer bead.
-  It is a different question from the `parked` kind: `held` marks an anchor whose
-  conversation is *live*, `parked` surfaces a subject bead whose conversation
-  *ended with a takeaway* and would otherwise have no row at all.
-- **owned-convoy filter** — floating + non-`sling-` title still approximates
-  ownership. `BeadsSource` could resolve the real edge, but changing *which*
-  convoys reach the board is a gather change and was kept out of tk-x89rn.
-- **event-invalidation** — the cache is TTL-only; the supervisor SSE
+- **Retiring `gc-helm.sh`.** Its `open`, `react` and `takeaway` verbs have no Go
+  equivalent, so the script stays. Retirement is a follow-up once the board view
+  is proven at parity in daily use.
+- **A CLI cache.** `helm-svc board` re-gathers every run (~2.7-3.3s). The bash
+  board's 45s file cache makes a repeat glance ~1.8s. Caching here would buy
+  about a second and re-introduce a staleness surface, which is the thing this
+  epic exists to reduce — so it is deliberately not done, not merely undone.
+- **`tk-b3rga`** (decision tiles) — still open, in the presentation.
+- **event-invalidation** — the sidecar's cache is TTL-only; the supervisor SSE
   `/v0/events/stream` can later replace polling.
-
-The beads that spend the widened seam: `tk-2v08m` (human-routed and parked beads
-invisible) — **landed**, in the gather; `tk-x55wt` (dead columns + constant
-NEEDS) and `tk-b3rga` (decision tiles) still open, both in the derivation.
 
 ## Handoff
 

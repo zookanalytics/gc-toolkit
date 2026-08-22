@@ -539,9 +539,9 @@ operator's *own* unsent words have no such protection, and until
   `proxy_process` `/svc/` route (`services/helm/` already uses it). Any
   conversation surface work should land behind that seam, not in new
   bespoke plumbing.
-- **Two helm boards, and they diverge (recorded 2026-08-21, `tk-fkeft`)**
-  — the board exists **twice**, and the operator's two surfaces are not
-  the same program:
+- **Two helm boards — RESOLVED for the gather (2026-08-22, `tk-134d7`),
+  still open for retirement.** The board existed **twice**, and the
+  operator's two surfaces were not the same program:
 
   | | reached by | implementation | gather |
   |---|---|---|---|
@@ -559,20 +559,34 @@ operator's *own* unsent words have no such protection, and until
   right about itself; the operator still spent that window reading a board
   that was wrong in a way the other one no longer was.
 
-  **This is deliberately left open.** Three futures are coherent — keep
-  them independent (accepting that every board change is two changes),
-  share one gather behind a seam, or retire one — and the terminal board
-  is a surface the operator uses daily, so which one is theirs to pick,
-  not a polecat's to take on its own initiative. `services/helm/README.md`
-  already asserts an answer ("the bash PoC, which this replaces — the bash
-  dies"), but the bash has outlived that sentence by months and is still
-  the `prefix+b` target, so treat it as an intention, not a decision.
+  **The operator picked the middle future (2026-08-22): share one gather
+  behind a seam.** Of the three that were coherent — keep them
+  independent, share one gather, retire one — `tk-134d7` implemented the
+  second. `services/helm` now builds `helm-svc board`, a terminal renderer
+  over the SAME `internal/source` gather and `internal/board` derivation
+  the dashboard serves, and the shared model was widened to carry the
+  whole of `gc-helm.sh`'s 34-field `--json` contract. Verified equal on
+  live data at the time it landed — identical anchor sets, all 34 fields
+  equal on all 55 rows — with the evidence and the three chosen
+  divergences in `specs/tk-134d7/parity-and-benchmark.md`.
 
-  **Until it is decided, the tripwire:** a change to either board's
-  gather, ranking, or anchor kinds is a standing question against the
-  other. Say in the PR which board you touched and whether the sibling
-  needs the same change — `tk-2v08m` did say so, in as many words, which
-  is the only reason `tk-fkeft` was findable.
+  **What is still open is retirement, and `prefix+b` still runs the
+  bash.** `tmux-pick-helm.sh` was deliberately NOT repointed: `gc-helm.sh`
+  keeps verbs (`open`, `react`, `takeaway`) that have no Go equivalent, so
+  retiring it is a separate piece of work and still the operator's call.
+  Until the script is gone there are still two programs, and the tripwire
+  stands — but it is now cheaper to honour, because the field sets are
+  pinned against each other by
+  `services/helm/cmd/helm-svc/contract_parity_test.go`, which fails when
+  either side grows or drops a field.
+
+  **The tripwire, as it now reads:** a change to either board's gather,
+  ranking, or anchor kinds is still a standing question against the other
+  — the parity test compares field SETS, not values, so a derivation that
+  changes meaning without changing shape passes it. Say in the PR which
+  board you touched and whether the sibling needs the same change.
+  `tk-2v08m` did say so, in as many words, which is the only reason
+  `tk-fkeft` was findable.
 
 ## What upstream does not ship (the pack's actual seam)
 
