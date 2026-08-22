@@ -252,6 +252,50 @@ func crossRigRefs(a Anchor, f Facts) []string {
 	return out
 }
 
+// waitingSplit returns an anchor's `blocks` blockers and the subset of them
+// still outstanding, mirroring gc-helm.sh's $waiting / $waiting_open.
+//
+// A blocker is discharged only on a POSITIVE closed from the source. One it
+// could not resolve — a store in another rig, an `external:` reference, a read
+// that failed — is absent from WaitingOnClosed and therefore counted open. That
+// is the quiet direction on purpose: a missed promotion costs a glance, while a
+// false "everything landed" invites the operator to dispose of a subject whose
+// work is still in flight.
+//
+// Both slices are non-nil so the wire shape matches jq's `[]`, which emits an
+// empty array rather than a null.
+func waitingSplit(a Anchor) (all, open []string) {
+	all = make([]string, 0, len(a.WaitingOn))
+	open = make([]string, 0, len(a.WaitingOn))
+	closed := make(map[string]bool, len(a.WaitingOnClosed))
+	for _, id := range a.WaitingOnClosed {
+		closed[id] = true
+	}
+	seen := make(map[string]bool, len(a.WaitingOn))
+	for _, id := range a.WaitingOn {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		all = append(all, id)
+		if !closed[id] {
+			open = append(open, id)
+		}
+	}
+	sort.Strings(all) // jq's `unique` sorts; keep the wire order identical.
+	sort.Strings(open)
+	return all, open
+}
+
+// dispositionDue is the state the waiting edges exist to express: a parked
+// conversation that WAS waiting on something, every piece of which has landed.
+// The takeaway still says what the sitting decided at dispatch time, and
+// nothing else in the city re-reads it, so this is the only thing that can
+// notice the wait ended (tk-2plde).
+func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
+	return a.Source == "parked" && len(waiting) > 0 && len(waitingOpen) == 0
+}
+
 // severity mirrors gc-helm.sh's band derivation.
 //
 // The three metadata/shape-keyed kinds are placed AHEAD of the count branches
@@ -265,20 +309,26 @@ func crossRigRefs(a Anchor, f Facts) []string {
 //     means no agent will take it.
 //   - `parked` is LOW for the opposite reason — the conversation reached a
 //     takeaway and wants nothing, it only has to stay FINDABLE, so the band
-//     floor keeps it out of the contest whatever its priority or age.
+//     floor keeps it out of the contest whatever its priority or age. UNLESS
+//     it was waiting on work that has since landed, which is a disposition the
+//     operator owes and so is banded with the other human-gated rows: the
+//     floor is what made a finished topic indistinguishable from a live hold
+//     (tk-2plde).
 //
 // STRANDED (HIGH) is open work with nothing LIVE in it and no open visit. Two
 // things make that different from the naive "0 in progress": inProgressLive
 // counts a slung bead whose movement lives on its workflow, and `held` means a
 // conversation is holding the anchor — attention is already on it, so silence
 // in the child beads is not abandonment.
-func severity(a Anchor, r rollup, held bool, stale int) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue bool) Severity {
 	var sev0 Severity
 	inProgressLive := len(r.liveHeads)
 	switch {
 	case a.Source == "unowned":
 		sev0 = SevHigh
 	case a.Source == "decision", a.Source == "human":
+		sev0 = SevElevated
+	case dispDue:
 		sev0 = SevElevated
 	case a.Source == "parked":
 		sev0 = SevLow
@@ -317,7 +367,7 @@ func rankScore(sev Severity, w, stale int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool) string {
+func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue bool) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	deadSfx := ""
@@ -332,6 +382,10 @@ func frontier(a Anchor, r rollup, held bool) string {
 		return "human-gated decision"
 	case a.Source == "human":
 		return "routed to the operator — no agent will take it"
+	case dispDue:
+		return "parked · blocker landed"
+	case a.Source == "parked" && len(waitingOpen) > 0:
+		return fmt.Sprintf("parked · waiting on %d", len(waitingOpen))
 	case a.Source == "parked":
 		return "conversation parked — takeaway recorded"
 	case r.mTotal == 0:
@@ -364,7 +418,16 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string) string {
+func needs(a Anchor, r rollup, held bool, takeaway string, dispDue bool) string {
+	// The disposition phrase OUTRANKS the takeaway, and only here. Every other
+	// row spends its takeaway as NEEDS because the sentence is the best answer
+	// available; on this row the sentence is precisely what has gone stale —
+	// it was written when the work was dispatched and still says so. The
+	// takeaway itself stays on the wire for anyone who wants to read what the
+	// sitting concluded.
+	if dispDue {
+		return "blocker landed — dispose or resume"
+	}
 	if takeaway != "" {
 		return takeaway
 	}
@@ -420,7 +483,9 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	held := f.Visits[a.ID]
 	stale := staleDays(a.UpdatedAt, now)
 	xrefs := crossRigRefs(a, f)
-	sev := severity(a, r, held, stale)
+	waiting, waitingOpen := waitingSplit(a)
+	dispDue := dispositionDue(a, waiting, waitingOpen)
+	sev := severity(a, r, held, stale, dispDue)
 	w := weight(r, a.Priority, xrefs)
 	takeaway := collapseWS(a.Takeaway)
 
@@ -467,13 +532,17 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		OpenHeads:      r.openHeads,
 		DeadOwnerHeads: r.deadOwnerHeads,
 
+		WaitingOn:      waiting,
+		WaitingOnOpen:  waitingOpen,
+		DispositionDue: dispDue,
+
 		Takeaway:   nilIfEmpty(takeaway),
 		TakeawayAt: nilIfEmpty(a.TakeawayAt),
 		TakeawayBy: nilIfEmpty(a.TakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
-		Frontier:  frontier(a, r, held),
-		Needs:     needs(a, r, held, takeaway),
+		Frontier:  frontier(a, r, held, waitingOpen, dispDue),
+		Needs:     needs(a, r, held, takeaway, dispDue),
 		RankScore: rankScore(sev, w, stale),
 	}
 }

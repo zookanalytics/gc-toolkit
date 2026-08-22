@@ -119,6 +119,12 @@ case "$1 ${2:-}" in
     else printf '{"children":[]}\n'; fi ;;
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
+  "bd dep")
+    printf '%s\n' "$*" >> "$FAKE_DEPS"
+    # A blocker named NOPE stands for every edge that cannot be written: a
+    # blocker in another rig's store, a typo, a cycle. bd exits non-zero and
+    # gc-helm must survive it.
+    case "$*" in *NOPE*) exit 1 ;; esac ;;
 esac
 exit 0
 GC
@@ -126,7 +132,9 @@ chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
-       FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates"
+       FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
+       FAKE_DEPS="$TMP/deps"
+: > "$TMP/deps"
 # Neutralize any inherited helm fixture hook so enumerate_rigs uses the stub.
 unset GC_HELM_FIXTURE || true
 
@@ -239,6 +247,76 @@ DANGER="$(printf '%s\n' "$BLOCK" | grep -v 'bd list --status' | grep -E 'bd clos
 
 # Surface any script stderr for debugging only (not an assertion).
 if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
+
+# ── takeaway --waiting-on: the wait as a GRAPH EDGE (tk-2plde) ────────────────
+#
+# THE BUG: a sitting that routed work out of a subject recorded the wait only
+# inside the takeaway string. Nothing re-reads prose, so "routed — tk-hgmob
+# slung; nothing further needed here" went on saying exactly that after
+# tk-hgmob merged, and the subject sat parked at LOW for 29 hours until a whole
+# sitting was spent rediscovering it was finished.
+#
+# THE WRITER HALF: --waiting-on adds `subject depends on <work bead>` as a
+# `blocks` edge beside the prose, which is the thing the board can re-ask.
+# Covered:
+#   (EDGE)      one --waiting-on writes one edge, in the depends-on direction
+#   (EDGEMANY)  the flag is repeatable, and --waiting-on=<id> parses too
+#   (EDGESTAMP) the takeaway is still stamped in the same run
+#   (EDGESELF)  a bead cannot be made to wait on itself
+#   (EDGEFAIL)  an edge that will not take does NOT lose the takeaway — the
+#               conclusion is what the sitting owes the operator
+#   (EDGENONE)  no flag, no edges: every existing caller is unchanged
+: > "$TMP/updates"; : > "$TMP/deps"
+WOUT="$(sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --by converse \
+          --waiting-on tk-blk1 --waiting-on=tk-blk2 2>"$TMP/werr" || true)"
+WERR="$(cat "$TMP/werr")"
+DEPS="$(cat "$TMP/deps")"
+
+grep -qE '^bd dep add A-PARKED tk-blk1 -t blocks' <<< "$DEPS" \
+  && ok "(EDGE) the wait is written as an edge: A-PARKED depends on tk-blk1" \
+  || bad "(EDGE) no depends-on edge for tk-blk1 (got: ${DEPS:-<none>})"
+grep -qE '^bd dep add A-PARKED tk-blk2 -t blocks' <<< "$DEPS" \
+  && ok "(EDGEMANY) --waiting-on repeats, and the =VALUE form parses" \
+  || bad "(EDGEMANY) tk-blk2 missing (got: ${DEPS:-<none>})"
+eq "$(grep -c '^bd dep add' <<< "$DEPS")" "2" "(EDGEMANY) exactly one edge per flag, no duplicates"
+grep -q -- '--set-metadata gc.takeaway=routed — the fix is slung' "$TMP/updates" \
+  && ok "(EDGESTAMP) the takeaway itself is still stamped in the same run" \
+  || bad "(EDGESTAMP) the stamp was lost: $(cat "$TMP/updates")"
+
+# (EDGESELF) a self-wait is a cycle, and bd would reject it later; refuse here
+# where the message can say which flag was wrong.
+: > "$TMP/updates"; : > "$TMP/deps"
+sh "$SCRIPT" takeaway A-PARKED "self" --waiting-on A-PARKED >/dev/null 2>"$TMP/werr" || true
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" "(EDGESELF) a bead is never made to wait on itself"
+grep -q 'bead itself' "$TMP/werr" \
+  && ok "(EDGESELF) …and the refusal names the reason" \
+  || bad "(EDGESELF) silent skip (stderr: $(cat "$TMP/werr"))"
+
+# (EDGEFAIL) THE ORDERING RULE. The takeaway is written FIRST and an edge that
+# fails only warns. A sitting that could not wire its graph must still leave the
+# conclusion it reached — losing that is the data loss the edge exists to
+# prevent, arriving by another door.
+: > "$TMP/updates"; : > "$TMP/deps"
+WRC=0
+sh "$SCRIPT" takeaway A-PARKED "held for review" --waiting-on NOPE >/dev/null 2>"$TMP/werr" || WRC=$?
+grep -q -- '--set-metadata gc.takeaway=held for review' "$TMP/updates" \
+  && ok "(EDGEFAIL) a rejected edge does not cost the takeaway" \
+  || bad "(EDGEFAIL) the stamp was lost when the edge failed: $(cat "$TMP/updates")"
+grep -q 'could not wire' "$TMP/werr" \
+  && ok "(EDGEFAIL) …and the failure is reported, not swallowed" \
+  || bad "(EDGEFAIL) the failed edge was silent (stderr: $(cat "$TMP/werr"))"
+# The exit status is what pins the ORDER. Warning and exiting non-zero would
+# leave the stamp on the bead but tell the caller the verb failed, and the
+# converse step that calls it treats a failure as "this hold left no trace".
+eq "$WRC" "0" "(EDGEFAIL) …and the verb still succeeds: the takeaway landed"
+
+# (EDGENONE) the flag is opt-in; every existing caller must be byte-identical.
+: > "$TMP/updates"; : > "$TMP/deps"
+sh "$SCRIPT" takeaway A-PARKED "no edges here" >/dev/null 2>&1 || true
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(EDGENONE) no --waiting-on, no graph writes"
+grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
+  && ok "(EDGENONE) …and the plain stamp path is unchanged" \
+  || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ANCHOR GATHER — the argv boundary (tk-hgmob)
@@ -418,6 +496,21 @@ eq "$(printf '%s' "$BOUT" | jq -r 'first(.[]? | select(.id=="tk-epic1")) | .m_to
 #   (PARKED)    gc.takeaway gathers as kind `parked`, band LOW
 #   (EXCLUDE)   an EPIC carrying a takeaway stays kind `epic` — gathered once
 #   (FLOOR)     a parked row never outranks a stranded epic
+#
+# THE BUG (c) — tk-2plde. A sitting that ROUTES work out of a subject recorded
+# the wait as prose inside gc.takeaway, and nothing ever re-read it. So
+# "holding — awaiting X" and "nothing further needed here" were mechanically the
+# same row, both LOW, forever: tk-yps55 sat parked for 29 hours after its work
+# merged and cost a whole sitting to discover it was finished. The wait is now a
+# `blocks` EDGE, and the board re-derives — per render, storing nothing —
+# whether it has been discharged.
+#
+#   (DISPO)     every blocker closed -> ELEVATED, "blocker landed", and the
+#               STALE takeaway is replaced as the NEEDS answer
+#   (LIVEHOLD)  a blocker still open -> LOW, and the frontier counts it
+#   (BAREPARK)  a parked row with NO edges renders exactly as it did before
+#   (FAILCLOSE) a blocker the store cannot resolve counts as OPEN, never as
+#               landed — a false "go dispose of this" is the costly direction
 # ══════════════════════════════════════════════════════════════════════════════
 
 ITMP="$TMP/inflight"
@@ -485,7 +578,30 @@ cat > "$ITMP/open.json" <<'J'
   "metadata":{"gc.routed_to":"human"}},
  {"id":"tk-both","status":"open","assignee":null,"issue_type":"task","title":"routed to the operator AND parked","priority":2,
   "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human","gc.takeaway":"parked, and still owed to the operator"}}
+  "metadata":{"gc.routed_to":"human","gc.takeaway":"parked, and still owed to the operator"}},
+ {"id":"tk-pdone","status":"open","assignee":null,"issue_type":"task","title":"routed, and the work has landed","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"routed — tk-blkC slung. Nothing further needed here."},
+  "dependencies":[{"issue_id":"tk-pdone","depends_on_id":"tk-blkC","type":"blocks"}]},
+ {"id":"tk-phold","status":"open","assignee":null,"issue_type":"task","title":"routed, and the work is still in flight","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"holding — awaiting tk-blkO"},
+  "dependencies":[{"issue_id":"tk-phold","depends_on_id":"tk-blkO","type":"blocks"},
+                  {"issue_id":"tk-phold","depends_on_id":"cv-LIVE","type":"tracks"}]},
+ {"id":"tk-punk","status":"open","assignee":null,"issue_type":"task","title":"waiting on a bead this store cannot resolve","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.takeaway":"holding — awaiting sl-9999 over in another rig"},
+  "dependencies":[{"issue_id":"tk-punk","depends_on_id":"sl-9999","type":"blocks"}]}
+]
+J
+
+# What `bd show <blocker-ids>` answers with. tk-blkC has closed; tk-blkO has
+# not; sl-9999 is deliberately ABSENT — the shape a cross-store or `external:`
+# reference produces, which must read as still-waiting rather than as landed.
+cat > "$ITMP/blockers.json" <<'J'
+[
+ {"id":"tk-blkC","status":"closed","title":"the routed fix","metadata":{}},
+ {"id":"tk-blkO","status":"open","title":"the routed fix, still in flight","metadata":{}}
 ]
 J
 
@@ -506,7 +622,14 @@ case "$1 ${2:-}" in
   "rig list")     jq -n --arg p "$FAKE_RIG_PATH" '{rigs:[{name:"gc-toolkit",path:$p,prefix:"tk"}]}' ;;
   "convoy list")  printf '{"convoys":[]}\n' ;;
   "session list") cat "$FAKE_SESSIONS" ;;
-  "bd show")      printf '[]\n' ;;
+  "bd show")
+    # resolve_waiting_status batches a rig's DISTINCT blocker ids into one
+    # call. Every other `bd show` on the board path is unrelated and keeps
+    # answering empty, so the match is on the ids themselves.
+    case "$args" in
+      *tk-blk*|*sl-9999*) cat "$FAKE_BLOCKERS" ;;
+      *)                  printf '[]\n' ;;
+    esac ;;
   "convoy status")
     case "$3" in
       cv-LIVE) jq -n '{children:[{id:"tk-wLIVE"}]}' ;;
@@ -537,7 +660,7 @@ IRC=0
 IOUT="$(env PATH="$ITMP/bin:$PATH" TMPDIR="$IRUN" \
             FAKE_RIG_PATH="$ITMP/rig" FAKE_EPICS="$ITMP/epics.json" \
             FAKE_OPEN="$ITMP/open.json" FAKE_SESSIONS="$ITMP/sessions.json" \
-            FAKE_DIR="$ITMP" GC_HELM_FIXTURE= \
+            FAKE_DIR="$ITMP" FAKE_BLOCKERS="$ITMP/blockers.json" GC_HELM_FIXTURE= \
             sh "$SCRIPT" board --json --refresh --limit=0 2>"$IRUN/err")" || IRC=$?
 IERR="$(cat "$IRUN/err" 2>/dev/null || true)"
 eq "$IRC" "0" "(SCENARIO3) board renders (err: ${IERR:-none})"
@@ -586,6 +709,47 @@ eq "$(row tk-human kind)"     "human"    "(HUMAN) gc.routed_to=human reaches the
 eq "$(row tk-human severity)" "ELEVATED" "(HUMAN) banded with the other human-gated rows"
 eq "$(row tk-parked kind)"     "parked"  "(PARKED) a takeaway-bearing bead is findable"
 eq "$(row tk-parked severity)" "LOW"     "(PARKED) floored — it wants nothing, it just has to be findable"
+
+# --- (DISPO) the defect tk-2plde is about ------------------------------------
+# The subject routed work out of a sitting and the work has since closed. The
+# takeaway is FROZEN at dispatch time — it still says "nothing further needed
+# here" — so the row has to be promoted by the EDGE, not by re-reading prose.
+eq "$(row tk-pdone severity)" "ELEVATED" "(DISPO) a parked row whose blocker landed leaves the LOW floor"
+eq "$(row tk-pdone disposition_due)" "true" "(DISPO) …and says so structurally, not just in a phrase"
+eq "$(row tk-pdone frontier)" "parked · blocker landed" "(DISPO) the frontier names what changed"
+eq "$(row tk-pdone needs)" "blocker landed — dispose or resume" \
+   "(DISPO) the STALE takeaway is not the answer for this row"
+eq "$(row tk-pdone waiting_on)" '["tk-blkC"]' "(DISPO) the wait is on the wire as an id, not as prose"
+eq "$(row tk-pdone waiting_on_open)" '[]' "(DISPO) nothing outstanding"
+# The takeaway itself is still carried — the row is promoted, not censored.
+printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-pdone")).takeaway | test("Nothing further needed")' >/dev/null 2>&1 \
+  && ok "(DISPO) the takeaway stays on the wire for anyone reading the row" \
+  || bad "(DISPO) the takeaway was dropped: $(row tk-pdone takeaway)"
+
+# --- (LIVEHOLD) the case that must stay quiet --------------------------------
+# A genuine hold: the work it is waiting on is still open. Promoting this would
+# reintroduce the noise the LOW floor exists to prevent.
+eq "$(row tk-phold severity)" "LOW" "(LIVEHOLD) a hold whose work is still in flight stays floored"
+eq "$(row tk-phold disposition_due)" "false" "(LIVEHOLD) …and owes no disposition"
+eq "$(row tk-phold frontier)" "parked · waiting on 1" "(LIVEHOLD) the frontier counts what is outstanding"
+eq "$(row tk-phold needs)" "holding — awaiting tk-blkO" "(LIVEHOLD) its takeaway still answers for it"
+eq "$(row tk-phold waiting_on)" '["tk-blkO"]' "(LIVEHOLD) only blocks edges count — a tracks edge is not a wait"
+
+# --- (BAREPARK) every parked row in the city today ---------------------------
+# No edges have been written yet, so this is the shape the change must leave
+# byte-identical or it is a regression dressed as a feature.
+eq "$(row tk-parked disposition_due)" "false" "(BAREPARK) no edges is not a discharged wait"
+eq "$(row tk-parked frontier)" "conversation parked — takeaway recorded" \
+   "(BAREPARK) an edgeless parked row renders exactly as before"
+eq "$(row tk-parked waiting_on)" '[]' "(BAREPARK) the field is an empty ARRAY, never null (jq/Go parity)"
+
+# --- (FAILCLOSE) the direction to be wrong in --------------------------------
+# sl-9999 is absent from the blocker read — a cross-store id, an `external:`
+# ref, or a query that died. Reading absence as "closed" would tell the operator
+# to dispose of a subject whose work is still in flight.
+eq "$(row tk-punk disposition_due)" "false" "(FAILCLOSE) an unresolvable blocker never reads as landed"
+eq "$(row tk-punk severity)" "LOW" "(FAILCLOSE) …so the row keeps its pre-fix band"
+eq "$(row tk-punk waiting_on_open)" '["sl-9999"]' "(FAILCLOSE) …and it is still counted outstanding"
 
 # --- (EXCLUDE) the typed kinds are not re-gathered by metadata --------------
 eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-eTAKE")]|length')" "1" \

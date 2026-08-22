@@ -163,6 +163,137 @@ func TestParkedNeverOutranksAttention(t *testing.T) {
 	}
 }
 
+// TestParkedDispositionDue covers the derivation tk-2plde asks for: a parked
+// conversation that routed work out of a sitting carries a `blocks` edge to
+// that work, and once every blocker has closed the row is no longer "wants
+// nothing" — it owes a disposition.
+//
+// The pre-fix board could not express this. tk-yps55 sat parked for 29 hours
+// carrying "routed — tk-hgmob slung; nothing further needed here" AFTER
+// tk-hgmob merged, and the next sitting was spent rediscovering that.
+func TestParkedDispositionDue(t *testing.T) {
+	anchors := []Anchor{
+		// Every blocker closed: the wait is over.
+		{ID: "tk-done", Title: "routed; nothing further needed here", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway:        "routed — fix+guard ruled; tk-hgmob slung. Nothing further needed here.",
+			WaitingOn:       []string{"tk-hgmob"},
+			WaitingOnClosed: []string{"tk-hgmob"}},
+		// One of two still open: a live hold, and it must stay quiet.
+		{ID: "tk-hold", Title: "holding — awaiting the fix", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway:        "holding — awaiting tk-aaa and tk-bbb",
+			WaitingOn:       []string{"tk-aaa", "tk-bbb"},
+			WaitingOnClosed: []string{"tk-aaa"}},
+		// No edges at all — every parked row in the city before the writer
+		// starts recording them. It must render exactly as it did before.
+		{ID: "tk-bare", Title: "parked, no edges", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	done, ok := tileByID(b, "tk-done")
+	if !ok {
+		t.Fatal("the discharged parked tile is missing")
+	}
+	if !done.DispositionDue {
+		t.Error("every blocker closed: the row owes a disposition")
+	}
+	// ELEVATED, not LOW: it has to leave the floor to be seen at all, and the
+	// floor is what made a finished topic look like a live hold.
+	if done.Severity != SevElevated {
+		t.Errorf("a discharged parked row is ELEVATED, not %s", done.Severity)
+	}
+	if !strings.Contains(done.Frontier, "blocker landed") {
+		t.Errorf("frontier must say the wait ended: %q", done.Frontier)
+	}
+	// The takeaway is exactly what has gone stale — it still says the work was
+	// just dispatched — so the deterministic phrase must outrank it here, and
+	// ONLY here.
+	if done.Needs != "blocker landed — dispose or resume" {
+		t.Errorf("the stale takeaway must not answer for this row: needs=%q", done.Needs)
+	}
+	if done.Takeaway == nil || !strings.Contains(*done.Takeaway, "fix+guard") {
+		t.Error("the takeaway itself stays on the wire for anyone reading the row")
+	}
+	if len(done.WaitingOnOpen) != 0 {
+		t.Errorf("nothing is outstanding: %v", done.WaitingOnOpen)
+	}
+
+	hold, _ := tileByID(b, "tk-hold")
+	if hold.DispositionDue {
+		t.Error("one blocker still open is a LIVE hold, not a disposition")
+	}
+	if hold.Severity != SevLow {
+		t.Errorf("a live hold stays on the floor: got %s", hold.Severity)
+	}
+	if len(hold.WaitingOnOpen) != 1 || hold.WaitingOnOpen[0] != "tk-bbb" {
+		t.Errorf("the outstanding blocker is named: %v", hold.WaitingOnOpen)
+	}
+	if !strings.Contains(hold.Frontier, "waiting on 1") {
+		t.Errorf("frontier counts what is outstanding: %q", hold.Frontier)
+	}
+	// The takeaway still answers for a row that is genuinely waiting.
+	if hold.Needs != "holding — awaiting tk-aaa and tk-bbb" {
+		t.Errorf("needs: %q", hold.Needs)
+	}
+
+	bare, _ := tileByID(b, "tk-bare")
+	if bare.DispositionDue {
+		t.Error("no edges is not a discharged wait — it is no wait at all")
+	}
+	if bare.Severity != SevLow || !strings.Contains(bare.Frontier, "takeaway recorded") {
+		t.Errorf("an edgeless parked row is unchanged: sev=%s frontier=%q", bare.Severity, bare.Frontier)
+	}
+	// Non-nil empty, matching jq's `[]` rather than a JSON null.
+	if bare.WaitingOn == nil || bare.WaitingOnOpen == nil {
+		t.Error("the waiting lists are always emitted as arrays, never null")
+	}
+}
+
+// TestUnresolvedBlockerStaysQuiet pins the fail-closed direction. A blocker the
+// source could not read at all — another rig's store, an `external:` ref, a
+// failed query — is absent from WaitingOnClosed, and that must read as "still
+// waiting", never as "everything landed". A false promotion invites the
+// operator to dispose of a subject whose work is still in flight.
+func TestUnresolvedBlockerStaysQuiet(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-unk", Title: "waiting on something unreadable", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			WaitingOn: []string{"sl-9999"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	tile, _ := tileByID(b, "tk-unk")
+	if tile.DispositionDue {
+		t.Error("an unresolvable blocker must not read as discharged")
+	}
+	if tile.Severity != SevLow {
+		t.Errorf("the row keeps its pre-fix band: got %s", tile.Severity)
+	}
+	if len(tile.WaitingOnOpen) != 1 {
+		t.Errorf("the unresolved blocker counts as outstanding: %v", tile.WaitingOnOpen)
+	}
+}
+
+// TestDispositionDueIsParkedOnly: the promotion is scoped to the kind whose
+// band it overrides. A `human` row carrying the same edges is already ELEVATED
+// and must not acquire the parked wording.
+func TestDispositionDueIsParkedOnly(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-h", Title: "operator-owned, with a discharged edge", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			WaitingOn: []string{"tk-x"}, WaitingOnClosed: []string{"tk-x"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	tile, _ := tileByID(b, "tk-h")
+	if tile.DispositionDue {
+		t.Error("disposition_due is a parked-row distinction")
+	}
+	if tile.Needs != "operator action" {
+		t.Errorf("the human row keeps its own phrase: %q", tile.Needs)
+	}
+}
+
 // TestMetadataKindDedup: one bead carrying both markers is gathered twice, and
 // the higher band wins — the operator sees the thing they must act on, not the
 // note that it was parked.

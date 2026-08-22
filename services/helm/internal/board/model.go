@@ -113,6 +113,23 @@ type Anchor struct {
 	Takeaway   string `json:"takeaway,omitempty"`
 	TakeawayAt string `json:"takeaway_at,omitempty"`
 	TakeawayBy string `json:"takeaway_by,omitempty"`
+
+	// WaitingOn is the ids this bead depends on by a `blocks` edge, and
+	// WaitingOnClosed the subset of those the source found already closed.
+	//
+	// For a `parked` subject these are the work a converse sitting routed out
+	// of the conversation. A takeaway is one frozen string — "routed; nothing
+	// further needed here" reads the same the day it is written and a week
+	// after the work merged — so the wait has to exist as an EDGE for anything
+	// to re-ask it (tk-2plde). The derivation is in computeTile; nothing about
+	// it is stored, so no state has to be cleared when a blocker lands.
+	//
+	// Both are ids, not a boolean, because the source knows the blockers and
+	// the derivation must be able to say how many are still outstanding.
+	// A blocker the source could not resolve at all is simply absent from
+	// WaitingOnClosed, which reads as still-waiting — the quiet direction.
+	WaitingOn       []string `json:"waiting_on,omitempty"`
+	WaitingOnClosed []string `json:"waiting_on_closed,omitempty"`
 }
 
 // Progress is a convoy's self-reported roll-up, mirroring the `progress` object
@@ -184,6 +201,19 @@ type Tile struct {
 	CrossRigRefs   []string `json:"cross_rig_refs"`
 	OpenHeads      []string `json:"open_heads"`
 	DeadOwnerHeads []string `json:"dead_owner_heads"`
+
+	// WaitingOn is every bead this row depends on by a `blocks` edge;
+	// WaitingOnOpen is the subset that has NOT closed. DispositionDue is the
+	// state the pair exists to express: a parked conversation that was waiting
+	// on something, all of which has now landed. It is no longer "wants
+	// nothing" — it wants a disposition, so it leaves the LOW floor.
+	//
+	// A blocker whose status could not be resolved counts as OPEN, so an
+	// unreadable graph keeps the pre-fix quiet row rather than inviting the
+	// operator to dispose of a subject whose work is still in flight.
+	WaitingOn      []string `json:"waiting_on"`
+	WaitingOnOpen  []string `json:"waiting_on_open"`
+	DispositionDue bool     `json:"disposition_due"`
 
 	// The takeaway triple is null-when-absent rather than omitted: the key is
 	// part of the contract, and a consumer distinguishes "no takeaway" from

@@ -445,9 +445,46 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 			if iss == nil {
 				continue
 			}
-			g.anchors = append(g.anchors, newAnchor(iss, ma.kind, r))
+			a := newAnchor(iss, ma.kind, r)
+			if ma.kind == "parked" {
+				a.WaitingOn, a.WaitingOnClosed = s.waitingEdges(ctx, g, st, iss.ID)
+			}
+			g.anchors = append(g.anchors, a)
 		}
 	}
+}
+
+// waitingEdges reads the `blocks` blockers of a parked subject and reports
+// which of them have closed.
+//
+// WHY ONLY PARKED. The edge answers one question — "is the work this
+// conversation was waiting on done?" — and only a parked row spends the answer
+// (board.dispositionDue). Restricting it here also keeps the query count tied
+// to the parked rows rather than to every metadata-keyed anchor, and keeps this
+// gather field-for-field identical to gc-helm.sh's, which emits waiting_on for
+// the parked kind alone.
+//
+// FAILURE IS SILENT AND QUIET-SIDE. A store that errors yields no blockers at
+// all, so the row carries no waiting edges and stays exactly as it rendered
+// before this existed. A blocker that IS read but is not closed is simply
+// omitted from the closed list, which the derivation counts as outstanding.
+// Neither shape can promote a row whose work is still in flight.
+func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadStore, id string) (all, closed []string) {
+	deps, err := st.GetDependenciesWithMetadata(ctx, id)
+	if err != nil {
+		g.note(true, []string{"waiting@" + id + ": " + err.Error()})
+		return nil, nil
+	}
+	for _, d := range deps {
+		if d == nil || string(d.DependencyType) != "blocks" {
+			continue
+		}
+		all = append(all, d.Issue.ID)
+		if d.Issue.Status == beads.StatusClosed {
+			closed = append(closed, d.Issue.ID)
+		}
+	}
+	return all, closed
 }
 
 // newAnchor projects one bead onto a board anchor under the given kind. Kind
