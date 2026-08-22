@@ -173,14 +173,15 @@ cache_binary_preselfcheck() {
     mkdir -p "$STATE/bin"
     cat > "$STATE/bin/helm-svc" <<'OLD'
 #!/bin/sh
-[ -n "${SELFCHECK_RECORD:-}" ] &&     printf 'args=[%s] socket=[%s]
-' "$*" "${GC_SERVICE_SOCKET:-}" >> "$SELFCHECK_RECORD"
+if [ -n "${SELFCHECK_RECORD:-}" ]; then
+    printf 'args=[%s] socket=[%s]\n' "$*" "${GC_SERVICE_SOCKET:-}" >> "$SELFCHECK_RECORD"
+fi
 if [ -z "${GC_SERVICE_SOCKET:-}" ]; then
     echo "helm: GC_SERVICE_SOCKET is not set; run me as a proxy_process workspace-service" >&2
     exit 1
 fi
 echo "stale-binary SERVING on ${GC_SERVICE_SOCKET}"
-sleep "${OLD_SERVE_SECS:-30}"
+sleep 30      # "keeps running" is the failure; bounded only so a regression ends
 OLD
     chmod +x "$STATE/bin/helm-svc"
 }
@@ -197,7 +198,7 @@ for a in "$@"; do
     case "$a" in
         -selfcheck|--selfcheck)
             [ -n "${SELFCHECK_RECORD:-}" ] && echo asked >> "$SELFCHECK_RECORD"
-            sleep "${HANG_SECS:-30}"
+            sleep 30      # far past the launcher's bound; only it can end this
             exit 0 ;;
     esac
 done
