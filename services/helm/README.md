@@ -733,7 +733,13 @@ same-origin reachability confirmed and detach-not-kill verified — see
   the cross-rig-ref description scan restored.
 - **The takeaway-driven NEEDS sentence** — an anchor carrying `gc.takeaway`
   spends it as its NEEDS. This is the DATA half of `tk-x55wt`; that bead's
-  remaining scope is the web tile's presentation.
+  remaining scope is the web tile's presentation. The sentence is bounded at
+  **140 characters**, enforced by `gc-helm.sh takeaway` at write time (a longer
+  text is refused, not trimmed — only the author knows which clause is the
+  headline) and clipped with an ellipsis by both terminal tables for anything
+  stored before that gate existed. `--json` always carries the whole string, in
+  `needs` and in `takeaway`. It is a bound on PROSE only: NEEDS never holds an
+  identifier, because the mechanical heads are `--json`-only (`tk-9tbbk.1`).
 - **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans, and `held`.
 - **The in-flight / dead-owner join.** A child counts as moving only when its
   owning session is demonstrably live, or a live graph.v2 workflow stands over

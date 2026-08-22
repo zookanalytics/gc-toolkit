@@ -231,7 +231,7 @@ The loop, every visit:
      [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
-   "$HELM" takeaway "$ITEM" "holding — <the one decision or input needed>" --by converse
+   "$HELM" takeaway "$ITEM" "holding — <the one decision or input needed, ≤140 chars>" --by converse
    ```
    Stamp BEFORE you wait, not after. This session can be reaped mid-hold
    (**The reap**, below) and the stamp is the only thing that survives
@@ -246,6 +246,15 @@ The loop, every visit:
    its own shell: a variable set in one does not reach the other. Never
    pass `--release`: it clears the assignee and route, parking a bead you
    are mid-conversation about.)
+
+   **One sentence, ≤140 characters — the writer refuses a longer one.**
+   Both takeaway blocks are bound by it. This is the board's NEEDS cell,
+   read at a glance in a terminal table, not a summary of the sitting: a
+   paragraph there is one row wrapping over every row below it. While the
+   cap was advisory, 22 of the 23 takeaways on the board broke it —
+   averaging 597 characters — and converse wrote all five of the longest.
+   Whatever will not fit is detail, and detail goes in the item's notes or
+   the thread; the takeaway is the one line that has to survive a glance.
 
    **The stamp lands on the ITEM, not on the shared bucket.** Siblings of
    a standing scope would otherwise overwrite each other's headline — one
@@ -294,7 +303,7 @@ The loop, every visit:
    # empty when it routed nothing. Unquoted on purpose so empty expands to
    # nothing rather than to an empty argument.
    WAITING=""   # e.g. WAITING="--waiting-on tk-hgmob --waiting-on tk-st143"
-   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next>" --by converse $WAITING
+   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next, ≤140 chars>" --by converse $WAITING
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    gc bd close "$VISIT"

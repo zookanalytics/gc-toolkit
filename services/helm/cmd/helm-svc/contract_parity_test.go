@@ -482,3 +482,187 @@ func TestEmptyBoardSaysSo(t *testing.T) {
 		t.Errorf("an empty board says so explicitly:\n%s", buf.String())
 	}
 }
+
+// TestRenderTableClipsNeeds is the render half of tk-9tbbk.1. NEEDS is where
+// the LLM-authored takeaway lands, and on the live board 23 of them averaged
+// 597 characters with one at 1876 — 91% of all the NEEDS text there. Because
+// NEEDS is the LAST column it is never padded, so an oversized cell does not
+// widen a column: it prints a ~490-column row that wraps over the rows beneath
+// it, and the table stops being a table.
+//
+// The bound is a DISPLAY guard and nothing more. Clipping the model instead
+// would make this test pass while silently truncating every consumer of the
+// --json contract, which is why the wire half is asserted right below.
+func TestRenderTableClipsNeeds(t *testing.T) {
+	long := strings.Repeat("Z", 400)
+	fits := strings.Repeat("Z", colNeedsMax)
+	tiles := []board.Tile{
+		{ID: "tk-long", Rig: "gc-toolkit", Kind: "parked", Severity: board.SevLow,
+			Frontier: "conversation parked — takeaway recorded", Needs: long},
+		{ID: "tk-fits", Rig: "gc-toolkit", Kind: "parked", Severity: board.SevLow,
+			Frontier: "conversation parked — takeaway recorded", Needs: fits},
+		{ID: "tk-plain", Rig: "gc-toolkit", Kind: "epic", Severity: board.SevHigh,
+			MTotal: 3, Frontier: "3 open · 0 in flight (stranded)", Needs: "decomposed, idle — assign or visit"},
+	}
+	var buf bytes.Buffer
+	renderTable(&buf, board.Board{Total: 3, Tiles: tiles}, tiles, time.Date(2026, 8, 22, 1, 2, 3, 0, time.UTC), 1)
+
+	// The NEEDS cell is everything from the first Z: no id, rig, severity, kind
+	// or frontier on this board contains one.
+	rowFor := func(id string) string {
+		for _, ln := range strings.Split(buf.String(), "\n") {
+			if strings.Contains(ln, id) {
+				return ln
+			}
+		}
+		t.Fatalf("no rendered row for %s:\n%s", id, buf.String())
+		return ""
+	}
+	cell := func(row string) string {
+		if i := strings.IndexRune(row, 'Z'); i >= 0 {
+			return row[i:]
+		}
+		return ""
+	}
+
+	longRow := rowFor("tk-long")
+	if got := len([]rune(cell(longRow))); got != colNeedsMax {
+		t.Errorf("an oversized NEEDS rendered %d runes, want the %d bound", got, colNeedsMax)
+	}
+	if !strings.HasSuffix(longRow, "…") {
+		t.Errorf("a clipped cell must say it was clipped:\n%s", longRow)
+	}
+	// The defect measured on the whole row. Unbounded this printed 490 columns.
+	if got := len([]rune(longRow)); got > 240 {
+		t.Errorf("the rendered row is %d columns — it wraps over the rows below it", got)
+	}
+
+	// A conforming headline is rendered whole and is NOT marked as clipped.
+	fitsRow := rowFor("tk-fits")
+	if got := cell(fitsRow); got != fits {
+		t.Errorf("a conforming %d-char takeaway was altered: %d runes, ends %q",
+			colNeedsMax, len([]rune(got)), lastRunes(got, 5))
+	}
+
+	// A deterministic state phrase is untouched — the bound is on prose length,
+	// not a licence to shorten the phrases the board derives.
+	if !strings.HasSuffix(rowFor("tk-plain"), "decomposed, idle — assign or visit") {
+		t.Errorf("a deterministic NEEDS phrase changed:\n%s", rowFor("tk-plain"))
+	}
+
+	// The wire keeps the whole string.
+	var jsonBuf, errBuf bytes.Buffer
+	if rc := renderJSON(&jsonBuf, &errBuf, tiles); rc != boardExitOK {
+		t.Fatalf("renderJSON rc=%d: %s", rc, errBuf.String())
+	}
+	var wire []map[string]any
+	if err := json.Unmarshal(jsonBuf.Bytes(), &wire); err != nil {
+		t.Fatalf("decode board json: %v", err)
+	}
+	if got, _ := wire[0]["needs"].(string); got != long {
+		t.Errorf("--json truncated needs to %d chars; the bound is a display guard only", len([]rune(got)))
+	}
+}
+
+// lastRunes is the tail of s, for an error message that must not print 400
+// characters of filler.
+func lastRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[len(r)-n:])
+}
+
+// TestClipLeavesShortProseAlone pins the quiet half: clip must be a no-op on
+// everything the board renders today. Every derived NEEDS phrase is well under
+// the bound, so a clip that fired on them would be a regression dressed as a
+// fix — and the boundary is INCLUSIVE, matching the writer's own gate.
+func TestClipLeavesShortProseAlone(t *testing.T) {
+	for _, s := range []string{
+		"", "operator action", "blocker landed — dispose or resume",
+		"resume: prefix+a, then the bead id", strings.Repeat("Z", colNeedsMax),
+	} {
+		if got := clip(s, colNeedsMax); got != s {
+			t.Errorf("clip(%d runes) altered a cell that fits: %q", len([]rune(s)), got)
+		}
+	}
+	// One rune over is the first cut, and it costs one rune to the ellipsis so
+	// the result still measures the bound.
+	over := strings.Repeat("Z", colNeedsMax+1)
+	got := clip(over, colNeedsMax)
+	if len([]rune(got)) != colNeedsMax || !strings.HasSuffix(got, "…") {
+		t.Errorf("clip of %d runes gave %d runes, suffix %q", len([]rune(over)), len([]rune(got)), lastRunes(got, 1))
+	}
+	// Runes, not bytes: an em dash is three bytes and one column, and a byte
+	// bound would cut a cell that fits — mid-rune, at that.
+	dashes := strings.Repeat("—", colNeedsMax)
+	if got := clip(dashes, colNeedsMax); got != dashes {
+		t.Errorf("clip measured bytes, not runes: %d runes in, %d out", colNeedsMax, len([]rune(got)))
+	}
+}
+
+// TestBashBoardClipsNeeds pins the OTHER renderer's half, the same way
+// TestBashBoardDerivesIDWidth does for the id columns. Field-set parity cannot
+// see this: the two boards can agree on every wire field and still disagree
+// about whether a 1876-char takeaway destroys the table, which is exactly how
+// both of them shipped an unbounded NEEDS.
+func TestBashBoardClipsNeeds(t *testing.T) {
+	src, err := os.ReadFile(shBoardPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", shBoardPath, err)
+	}
+	text := string(src)
+	if strings.Contains(text, "rpad(36)) + (.needs) )") {
+		t.Errorf("%s still renders NEEDS unbounded; one 1876-char takeaway is a 490-column row that wraps over the rows below it (tk-9tbbk.1)",
+			shBoardPath)
+	}
+	if !strings.Contains(text, "clip($needsw)") {
+		t.Errorf("%s no longer clips the NEEDS cell; both renderers must bound it, as helm-svc board does",
+			shBoardPath)
+	}
+	// The two boards must agree on the NUMBER, not merely on having one.
+	if !strings.Contains(text, "TAKEAWAY_MAX=140") {
+		t.Errorf("%s no longer bounds the takeaway at %d; the two renderers would clip at different widths",
+			shBoardPath, colNeedsMax)
+	}
+}
+
+// TestBashBoardEnforcesTakeawayCap pins the WRITE half, which has no Go
+// counterpart at all: helm-svc reads the board, it never stamps a takeaway. The
+// cap lived in gc-helm.sh's usage string and nowhere else for long enough to go
+// 22-for-23 against, and a documented-but-unenforced limit is what this test
+// exists to keep from coming back.
+func TestBashBoardEnforcesTakeawayCap(t *testing.T) {
+	src, err := os.ReadFile(shBoardPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", shBoardPath, err)
+	}
+	gate := between(string(src), "# >>> takeaway-length-gate", "# <<< takeaway-length-gate")
+	if gate == "" {
+		t.Fatalf("%s has no takeaway-length-gate block; the ≤%d cap is documentation again", shBoardPath, colNeedsMax)
+	}
+	if !strings.Contains(gate, "$TAKEAWAY_MAX") {
+		t.Errorf("the write gate does not read the shared bound:\n%s", gate)
+	}
+	// Refuse, never trim: only the author knows which clause is the headline,
+	// and a silent shortening reports success while dropping it.
+	if regexp.MustCompile(`(?m)^\s*text=`).MatchString(gate) {
+		t.Errorf("the write gate rewrites the takeaway instead of refusing it:\n%s", gate)
+	}
+}
+
+// between returns the lines strictly inside a marked block, or "" if the
+// markers are absent.
+func between(text, open, close string) string {
+	i := strings.Index(text, open)
+	if i < 0 {
+		return ""
+	}
+	rest := text[i+len(open):]
+	j := strings.Index(rest, close)
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}

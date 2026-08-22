@@ -318,6 +318,86 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
 
+# ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
+#
+# THE BUG: `140` appeared in this script's usage string and nowhere else — not
+# in the writer, not in either renderer. Measured live on 2026-08-22, it ran
+# 22-for-23 against: 23 stored takeaways averaging 597 characters, longest
+# 1876, together 91% of ALL the NEEDS text on the board. NEEDS is the last
+# column of a terminal table, so those are not wide cells; each one is a row
+# wrapping over the rows beneath it. The remedy tried before this was a
+# note-to-self in a bead's notes ("keep gc.takeaway SHORT"); the sitting that
+# wrote it then stamped a 200-char takeaway. Documentation cannot hold a cap.
+#
+# REJECT, never truncate: only the author knows which clause is the headline.
+# Covered:
+#   (CAP)        over the cap -> usage error, exit 2
+#   (CAPNOWRITE) …and NOTHING is written — the bead keeps its old takeaway
+#   (CAPMSG)     …and the refusal names the measured length and the cap
+#   (CAPOK)      exactly 140 is accepted — the boundary is inclusive
+#   (CAPRUNE)    140 multi-byte chars are accepted: the unit is CODEPOINTS,
+#                which is what both renderers measure. A byte cap would refuse
+#                a headline that fits on the board
+#   (CAPWS)      length is measured AFTER the whitespace collapse, so a text
+#                padded by a run of spaces is judged on what gets stored
+#   (CAPFIRST)   the gate runs before every side effect: --release does not
+#                park the bead and --waiting-on writes no edge
+#   (CAPNOTRIM)  static: the gate rewrites nothing — a silent trim would drop
+#                the half the sitting most wanted read and still report success
+T140="$(printf 'x%.0s' {1..140})"
+T141="$(printf 'x%.0s' {1..141})"
+T140M="$(printf '—%.0s' {1..140})"   # 140 codepoints, 420 bytes
+
+: > "$TMP/updates"; : > "$TMP/deps"
+CRC=0
+sh "$SCRIPT" takeaway A-PARKED "$T141" >/dev/null 2>"$TMP/cerr" || CRC=$?
+CERR="$(cat "$TMP/cerr")"
+eq "$CRC" "2" "(CAP) a 141-char takeaway is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" \
+   "(CAPNOWRITE) nothing is written — the bead keeps whatever it had"
+grep -q '141 chars' <<< "$CERR" && grep -q 'cap is 140' <<< "$CERR" \
+  && ok "(CAPMSG) the refusal names the measured length and the cap" \
+  || bad "(CAPMSG) the refusal does not say what was wrong (stderr: ${CERR:-<none>})"
+
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "$T140" >/dev/null 2>&1 || true
+grep -q -- "--set-metadata gc.takeaway=$T140" "$TMP/updates" \
+  && ok "(CAPOK) exactly 140 chars is accepted — the boundary is inclusive" \
+  || bad "(CAPOK) a conforming 140-char headline was refused: $(cat "$TMP/updates")"
+
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "$T140M" >/dev/null 2>"$TMP/cerr" || true
+grep -q -- "--set-metadata gc.takeaway=$T140M" "$TMP/updates" \
+  && ok "(CAPRUNE) 140 multi-byte chars (420 bytes) are accepted: the unit is codepoints" \
+  || bad "(CAPRUNE) a 140-CHARACTER headline was refused for its byte count (stderr: $(cat "$TMP/cerr"))"
+
+# (CAPWS) the collapse runs first, so what is measured is what gets stored.
+# 200 spaces between two words is 3 characters by the time it reaches the gate.
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "a$(printf ' %.0s' {1..200})b" >/dev/null 2>&1 || true
+grep -q -- '--set-metadata gc.takeaway=a b' "$TMP/updates" \
+  && ok "(CAPWS) the cap measures the collapsed text, not the raw argument" \
+  || bad "(CAPWS) whitespace padding was counted against the cap: $(cat "$TMP/updates")"
+
+# (CAPFIRST) THE ORDERING RULE, the mirror of (EDGEFAIL). A refusal must cost
+# nothing: --release would park the bead and --waiting-on would write an edge,
+# and both would outlive a takeaway that never landed.
+: > "$TMP/updates"; : > "$TMP/deps"
+sh "$SCRIPT" takeaway A-PARKED "$T141" --release --waiting-on tk-blk1 >/dev/null 2>&1 || true
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(CAPFIRST) a refused takeaway does not park the bead"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)"       "0" "(CAPFIRST) …and writes no waiting-on edge"
+
+# (CAPNOTRIM) static: the gate must REFUSE, not silently shorten. A trim would
+# be invisible — the update succeeds, the board looks tidy, and the clause the
+# sitting cared about is gone with no record that it existed.
+GATE="$(awk '/# >>> takeaway-length-gate/{f=1;next} /# <<< takeaway-length-gate/{f=0} f' "$SCRIPT")"
+[ -n "$GATE" ] && ok "(CAPNOTRIM) length-gate block extracted between markers" \
+               || bad "(CAPNOTRIM) block extraction EMPTY — markers missing"
+TRIM="$(printf '%s\n' "$GATE" | grep -vE '^\s*#' | grep -E 'text=|text:0:|cut -c' || true)"
+[ -z "$TRIM" ] \
+  && ok "(CAPNOTRIM) the gate never rewrites the text — it refuses it" \
+  || bad "(CAPNOTRIM) the gate silently shortens the takeaway: $TRIM"
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ANCHOR GATHER — the argv boundary (tk-hgmob)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -982,6 +1062,91 @@ eq "$(printf '%s' "$COUT" | jq -r '[.[]?|select(.kind=="parked")]|length')" "8" 
 # --limit=0 means ALL, both kinds, regardless of the parked budget.
 cap_run 0 2
 eq "$(printf '%s' "$COUT" | jq -r 'length')" "13" "(CAPSPLIT) --limit=0 is uncapped for both kinds"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCENARIO 6 — the NEEDS cell is bounded in the TABLE and whole on the WIRE
+#
+# The write gate (scenario 1) is the cure; this is the backstop. 22 oversized
+# takeaways are already stored, nothing re-renders a stamp, and a paragraph in
+# NEEDS is not a wide cell — NEEDS is the last column, so the row simply wraps
+# over every row below it and the table stops being one.
+#
+# The two halves must be pinned separately because each hides the other under a
+# single assertion: clip the derived model instead of the cell and the table
+# still looks right while `--json` quietly loses text; leave the table alone and
+# the wire still looks right. So: same board, rendered both ways.
+#
+#   (CLIP)      an oversized takeaway renders as exactly 140 chars ending in …
+#   (CLIPROW)   …so the whole rendered row is bounded — the defect itself,
+#               since a 490-column row is what wraps over the rows below it
+#   (CLIPFITS)  a conforming 140-char takeaway renders in FULL, no ellipsis
+#   (CLIPPHRASE) a deterministic state phrase is untouched
+#   (CLIPWIRE)  --json still carries the whole string, in `needs` AND `takeaway`
+# ══════════════════════════════════════════════════════════════════════════════
+
+NTMP="$TMP/needs"; mkdir -p "$NTMP/fx" "$NTMP/bin" "$NTMP/run"
+# Filler is Z: it appears in no id, rig, severity, kind or frontier on this
+# board, so "everything from the first Z" is exactly the NEEDS cell.
+Z400="$(printf 'Z%.0s' {1..400})"
+Z140="$(printf 'Z%.0s' {1..140})"
+{
+  printf '{"id":"tk-clip-long","title":"paragraph takeaway","kind":"parked","source":"parked","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"%s","takeaway_at":"","takeaway_by":"converse","children":[]}\n' "$Z400"
+  printf '{"id":"tk-clip-fits","title":"conforming takeaway","kind":"parked","source":"parked","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"%s","takeaway_at":"","takeaway_by":"converse","children":[]}\n' "$Z140"
+  printf '{"id":"tk-clip-plain","title":"no takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[]}\n'
+} > "$NTMP/fx/anchors.ndjson"
+printf '[]\n' > "$NTMP/fx/visits.json"
+printf '{}\n'  > "$NTMP/fx/inflight.json"
+printf '{"sessions":[]}\n' > "$NTMP/fx/sessions.json"
+cp "$FTMP/bin/gc" "$NTMP/bin/gc"
+
+nboard() {
+    env PATH="$NTMP/bin:$PATH" TMPDIR="$NTMP/run" GC_HELM_FIXTURE="$NTMP/fx" \
+        sh "$SCRIPT" board --limit=0 "$@" 2>"$NTMP/err"
+}
+NTAB="$(nboard || true)"
+NJSON="$(nboard --json || printf '[]')"
+# The NEEDS cell of a row: nothing to its left on this board contains a Z.
+ncell() { grep -- "$1" <<< "$NTAB" | head -1 | sed 's/^[^Z]*//' || true; }
+nlen()  { printf '%s' "$1" | jq -Rsr 'length' 2>/dev/null || printf 'ERR'; }
+
+LONGCELL="$(ncell tk-clip-long)"
+eq "$(nlen "$LONGCELL")" "140" "(CLIP) an oversized takeaway is bounded to 140 chars in the table"
+case "$LONGCELL" in
+  *…) ok "(CLIP) …and the cut is marked, so a clipped cell says it was clipped" ;;
+  *)  bad "(CLIP) the cell was cut with no ellipsis: '${LONGCELL: -20}'" ;;
+esac
+# The defect is measured on the WHOLE row, not the cell: this row printed 490
+# columns before the bound, which is three wrapped lines on a wide terminal and
+# five on a normal one. The fixed columns ahead of NEEDS come to 90 here, so a
+# bounded row lands at 230; 240 leaves room for the id/rig columns to size
+# themselves without turning this into a layout assertion.
+NROWLEN="$(nlen "$(grep -- 'tk-clip-long' <<< "$NTAB" | head -1 || true)")"
+case "$NROWLEN" in
+  ''|*[!0-9]*) bad "(CLIPROW) could not measure the rendered row (got '$NROWLEN')" ;;
+  *) [ "$NROWLEN" -le 240 ] \
+       && ok "(CLIPROW) the whole rendered row is bounded ($NROWLEN columns)" \
+       || bad "(CLIPROW) the row is $NROWLEN columns — it wraps over the rows below it" ;;
+esac
+eq "$(grep -c -- 'tk-clip-long' <<< "$NTAB" || true)" "1" \
+   "(CLIPROW) …and the bound does not split it into two lines"
+
+eq "$(nlen "$(ncell tk-clip-fits)")" "140" \
+   "(CLIPFITS) a conforming 140-char takeaway renders in full"
+case "$(ncell tk-clip-fits)" in
+  *…) bad "(CLIPFITS) a conforming headline was clipped anyway" ;;
+  *)  ok "(CLIPFITS) …and is not marked as clipped, because it was not" ;;
+esac
+
+grep -- 'tk-clip-plain' <<< "$NTAB" | grep -q 'no children — decompose or assign' \
+  && ok "(CLIPPHRASE) a deterministic state phrase is untouched" \
+  || bad "(CLIPPHRASE) the state phrase changed: $(grep -- 'tk-clip-plain' <<< "$NTAB" || true)"
+
+# (CLIPWIRE) the bound is a DISPLAY guard. Applying it to the model would make
+# the table pass and silently truncate every consumer of the contract.
+nfield() { printf '%s' "$NJSON" | jq -r --arg i "$1" --arg k "$2" \
+           'first(.[]?|select(.id==$i)) | .[$k] // "" | length' 2>/dev/null || printf 'ERR'; }
+eq "$(nfield tk-clip-long needs)"    "400" "(CLIPWIRE) --json keeps the whole NEEDS string"
+eq "$(nfield tk-clip-long takeaway)" "400" "(CLIPWIRE) …and the whole takeaway beside it"
 
 echo ""
 echo "gc-helm takeaway --release quiesce + anchor-gather argv boundary + in-flight/metadata kinds: $PASS passed, $FAIL failed"
