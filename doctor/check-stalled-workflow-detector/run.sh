@@ -134,6 +134,22 @@ else
     grep -q 'join("\\u001f")' "$dir/$script" \
         || errors+=("$script: the row separator is no longer \\u001f — under IFS whitespace an empty triage.hold collapses and the title reads as a hold, silently suppressing every signal")
 
+    # The takeaway carve-out (tk-2cyxo). A takeaway is a hold while the wait it names
+    # is live and a stale marker once that wait has ended — "next sitting when the
+    # findings land" says nothing after they land. Muting on it forever is half of why
+    # a parked subject could never be brought back by anything.
+    grep -q "wait_spent \"\$root\"" "$dir/$script" \
+        || errors+=("$script: the takeaway carve-out is gone — a gc.takeaway whose recorded wait has fully closed would mute this pass forever, which is the blind spot tk-2cyxo closed")
+    # ...and it must stay ONE case, not a removal. All four stamps are still tested;
+    # dropping triage.hold or the anchor's stamps from this line would report every
+    # deliberately held workflow in the rig.
+    grep -qF "if [ -n \"\$rhold\" ] || [ -n \"\$rtakeaway\" ] || [ -n \"\$ahold\" ] || [ -n \"\$atakeaway\" ]; then" "$dir/$script" \
+        || errors+=("$script: the operator-hold check no longer tests all four stamps (triage.hold and gc.takeaway, on the root and on the anchor) — the carve-out is one case, and widening it into a removal floods the operator with deliberately-held workflows")
+    # ...and it must fail CLOSED. A rig that has not synced the sibling predicate keeps
+    # the old behaviour; losing the mute instead is the flood above.
+    grep -qF "[ -x \"\$SPENT_TOOL\" ] || return 1" "$dir/$script" \
+        || errors+=("$script: the carve-out no longer fails closed on a missing predicate script — an unavailable detect-parked-dispositions.sh must leave the takeaway muting, not un-mute every parked workflow")
+
     # This pass reports; it never repairs. A close path here would retire a workflow
     # nobody has looked at.
     if grep -qE '(^|[^-[:alnum:]_])(bd|gc bd) close|--status=closed[^ ]' "$dir/$script"; then
@@ -167,6 +183,8 @@ else
         || errors+=("$test_script: no mixed-frontier case — that descriptor beads are dropped from BOTH the report and the stall_flagged key, while the real step is still reported, is unproven; that key is what suppresses re-reports once the real frontier moves (tk-6mccf)")
     grep -q 'CONTROL' "$dir/$test_script" \
         || errors+=("$test_script: no control-kind case — that all eight beadmeta.ControlKinds survive the frontier filter is unproven, and five of them have never been poured in this rig, so nothing else in the suite would notice them being dropped back out (tk-6mccf)")
+    grep -q 'SPENT' "$dir/$test_script" \
+        || errors+=("$test_script: no takeaway-spent case — that a takeaway whose wait has ENDED stops muting, that one whose wait is still open does NOT, that triage.hold is never carved out, and that a missing predicate script fails closed are all unproven (tk-2cyxo)")
     grep -q 'REPEAT' "$dir/$test_script" \
         || errors+=("$test_script: no repeated-pass case — that ONE visit is filed per stalled bead across passes (the guard while the visit is open, the frontier marker once it is closed) is unproven, and a stub that never bumps updated_at would hide the re-flag amplifier tk-1g9yw fixed")
 fi

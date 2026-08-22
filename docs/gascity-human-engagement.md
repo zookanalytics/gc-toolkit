@@ -308,6 +308,84 @@ gascity has its own external-messaging process and it belongs there.
 
 The key binding that fires this from anywhere is tracked separately (tk-bn1oi).
 
+**The intake also stamps `gc.origin=operator` on the subject** (both paths: a
+topic it creates, and an existing bead pointed at — never over an origin
+already recorded). The prose line in the body says the same thing to a human
+and is not a predicate: it has already drifted across two script generations
+plus one an agent typed by hand, and a `--desc-contains` sweep for it matches
+beads that merely *quote* it — three of thirteen live hits, including the bead
+that specified this change. The key is what the return trip below selects on.
+Subjects filed before it existed are carried across by
+`assets/scripts/backfill-operator-origin.sh`, which owns the anchored
+line-match, once, where a wrong match is visible and re-runnable.
+
+## How a parked conversation comes back (2026-08-22)
+
+A sitting that reaches a conclusion **parks** its subject with a
+`gc.takeaway` — one board-visible headline of what was settled or what is
+being waited for. That stamp does three unrelated jobs, and two of them
+conspired:
+
+1. it parks the board row (`gather_meta_anchors` emits `kind:"parked"`,
+   floored at `LOW`, because a conversation that reached a takeaway wants
+   nothing and only has to stay findable); and
+2. it **mutes the stall detector** — `detect-stalled-workflows.sh` reads a
+   takeaway on a root or its anchor as a wait a human named and owns.
+
+So the one automation in the city that files visits was silenced by the exact
+stamp that recorded the wait. A subject that had dispatched work could not be
+brought back *by* the system — only by the operator noticing a row. Measured:
+`tk-z9nln` parked with *"next sitting when findings land"*; the findings landed
+at 17:54Z; the operator found it by eye at 22:13Z, **4h19m** later, and the
+audit's headline sat in a merged file, untold.
+
+Two changes close that (tk-2cyxo), and they are deliberately separate:
+
+- **The push.** `assets/scripts/detect-parked-dispositions.sh`, a step of the
+  witness patrol, files one visit back to the converse pool when a **parked,
+  operator-origin** subject's routed work has **all landed**. It goes through
+  `gc-helm.sh open`, so it inherits the canonical `gate-visit` block and the
+  one-open-visit-per-subject gate rather than re-deriving them. It writes
+  exactly one key — `disposition_flagged`, the sorted id set of the work that
+  landed, which is the dedup key for after that visit closes — and it **never
+  clears the takeaway**: that stamp is the record of what the sitting
+  concluded, and the visit is additive.
+- **The un-mute.** A takeaway whose recorded wait has *fully closed* no longer
+  exempts a workflow from `detect-stalled-workflows.sh`. One carve-out, not a
+  removal: `triage.hold` still mutes unconditionally, because it names its wait
+  in prose with no edge to discharge. The predicate lives once, in the sweep
+  (`--wait-spent <bead-id>`), and the detector asks it — a mirrored predicate in
+  two scripts is two things to keep in step.
+
+**"Routed work" is wider than the board's `disposition_due`, and it has to
+be.** The board derives disposition-due from `waiting_on` alone — the `blocks`
+edges `gc-helm takeaway --waiting-on` writes. But the canonical converse shape
+files routed work as a **child** of the subject, and a parent cannot be blocked
+by its own descendant:
+
+```
+$ gc bd dep add tk-z9nln tk-wvrga -t blocks
+Error: tk-z9nln cannot be blocked by its descendant tk-wvrga:
+blocked status cascades to descendants, so tk-wvrga would inherit
+the block and never close
+```
+
+The guard is correct. The consequence is that the default shape produces zero
+`waiting_on` edges, so a readiness test keyed on them can never fire for it —
+including for the very subject the incident was measured on. The sweep
+therefore reads the **union** of the subject's `blocks` edges and its children
+(`bd list --parent`, the only way to ask, since a parent-child edge is stored
+on the child). Readiness is: at least one recorded wait exists, and every one
+of them is closed.
+
+The two surfaces are knowingly out of step until the board can see children at
+all — a parked row currently hardcodes `children:[]` (tk-a9k0l). The board
+stays quiet and correct; the sweep is what pushes.
+
+**What is still not covered.** Work routed with *neither* recording — a sibling
+bead named only in the takeaway prose — is invisible to both. So is an
+agent-origin park, by the ruling's own scope. Both wait for an eye.
+
 ## How a held sitting ends (source-verified 2026-08-11; attachment rung reconciled 2026-08-12)
 
 A hold has no timeout *in the pack's doctrine* — but the runtime under it

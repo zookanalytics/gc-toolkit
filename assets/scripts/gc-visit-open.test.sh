@@ -45,6 +45,15 @@
 #               Keeping only .id off the response reported every refusal as
 #               "bd create returned no id", which sent the operator looking for
 #               a broken ledger instead of an over-long title.
+#   (ORIGIN)    the origin is recorded as `gc.origin=operator`, on BOTH intake
+#               paths, in the subject's own rig ledger — and never over an
+#               origin already recorded. The prose line in the body says the
+#               same thing to a human and cannot be selected on: it has drifted
+#               across script generations and a --desc-contains sweep for it
+#               matches beads that merely quote it. That key is what
+#               detect-parked-dispositions.sh reads to decide whether a parked
+#               subject is owed a visit back once its routed work lands
+#               (tk-2cyxo), so a missing stamp costs the return trip silently.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,6 +88,16 @@ case "$1 ${2:-}" in
     jq -n --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
       '{rigs:[{name:"gc-toolkit", path:$t, prefix:"tk"},
               {name:"gascity",    path:$g, prefix:"gc"}]}' ;;
+  "bd show")
+    # Answers the origin read-back. $FAKE_ORIGIN is the value already on the
+    # bead, so the "never overrule an existing origin" case is a real read of a
+    # real value rather than an assertion about argv.
+    jq -n --arg id "${3:-tk-newsub}" --arg o "${FAKE_ORIGIN:-}" \
+      '[{id:$id, status:"open", metadata:(if $o == "" then {} else {"gc.origin":$o} end)}]' ;;
+  "bd update")
+    printf 'bd update %s\n' "$*" >> "$FAKE_CALLS"
+    [ -n "${FAKE_UPDATE_FAIL:-}" ] && exit 1
+    exit 0 ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
     # The argv line above flattens the title and body into one blob. Record
@@ -249,6 +268,44 @@ eq "$RC" "2" "(SUBJECT) --rig on an existing bead is refused, not ignored"
 eq "$CALLS" "" "(SUBJECT) and files nothing"
 run disabled tk-abc12 --type decision
 eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
+
+# --- (ORIGIN) the origin is recorded as a KEY, not only as prose --------------
+# The description sentence ("Operator-origin intake, filed by …") is for a human
+# to read; it is not a predicate. It has already drifted across two script
+# generations plus one an agent typed by hand, and a --desc-contains sweep for it
+# matches beads that merely QUOTE it. gc.origin=operator is what
+# detect-parked-dispositions.sh selects on to decide whether a parked subject is
+# owed a visit back once its routed work lands — without it that sweep cannot see
+# the subject at all, which is the defect tk-2cyxo closes.
+run disabled "why is dolt wedging under load"
+has "$CALLS" "bd update tk-newsub --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
+  "(ORIGIN) the created subject is stamped with the key the sweep reads, in its own rig's ledger"
+
+# Both intake paths are the operator asking for a conversation — typing a topic,
+# and pointing at a bead that already exists — so both stamp. Pointing at an
+# existing bead is the path the key would most easily be missed on, since nothing
+# is created there.
+run disabled tk-abc12
+has "$CALLS" "bd update tk-abc12 --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
+  "(ORIGIN) an existing bead is stamped too, in its own rig's ledger"
+
+# NEVER overrule an origin that is already recorded: this establishes one, it
+# does not decide one. A bead adopted as a subject may have arrived any way.
+export FAKE_ORIGIN=agent
+run disabled tk-abc12
+unset FAKE_ORIGIN
+hasnt "$CALLS" "gc.origin=operator" "(ORIGIN) a subject that already carries an origin is left exactly as it is"
+has "$CALLS" "helm open tk-abc12" "(ORIGIN) and the conversation is still opened"
+
+# Best-effort, never fatal: the deliverable of this script is the CONVERSATION.
+# A failed stamp costs the automatic return trip, which the backfill can repair;
+# refusing to file the visit would cost the conversation, which nothing repairs.
+export FAKE_UPDATE_FAIL=1
+run disabled tk-abc12
+unset FAKE_UPDATE_FAIL
+eq "$RC" "0" "(ORIGIN) a stamp that fails does not fail the intake"
+has "$CALLS" "helm open tk-abc12" "(ORIGIN) the visit is filed anyway"
+has "$ERR" "could not stamp gc.origin=operator" "(ORIGIN) and the operator is told the return trip will not fire on its own"
 
 # --- (SHAPE) prefix, not hyphen, decides id-vs-topic --------------------------
 run disabled "dolt-latency"

@@ -1607,6 +1607,15 @@ means a blocker is naming the wait in the graph; `triage.hold` or `gc.takeaway` 
 the root or the anchor is an operator holding it deliberately. A suspended rig needs
 no test — it runs no patrol.
 
+**One carve-out on that last exemption (tk-2cyxo).** A `gc.takeaway` whose RECORDED
+WAIT — its `blocks` edges and its children — has fully closed names a wait that has
+ENDED, and stops muting: "next sitting when the findings land" is a hold until they
+land and a stale marker afterwards. `triage.hold` is never carved out, because it
+names its wait in prose with no edge to discharge. The predicate is asked of
+`detect-parked-dispositions.sh` (`--wait-spent`) rather than copied, and it fails
+closed — an absent sibling script or any unreadable read leaves the takeaway muting
+exactly as before.
+
 **The anchor is consulted for exactly two states, and this is the load-bearing
 choice.** `closed` and `merge_result=merged` mean the work landed, so the workflow
 is finished. Every OTHER state `quiesce-completed-workflows.sh` treats as terminal —
@@ -1655,13 +1664,96 @@ marker unstamped, all three fail-safes, that no bead is ever closed or written o
 the visit, and that `--dry-run` writes nothing).
 
 **Exit criteria:** Stalled workflows signalled, or none found. Continue to
+`detect-parked-dispositions` — do NOT exit the wisp here. The `next-iteration` step is
+the only place that pours the next wisp and burns this one."""
+
+[[steps]]
+id = "detect-parked-dispositions"
+title = "Bring a parked conversation back when its routed work lands"
+needs = ["detect-stalled-workflows"]
+description = """
+File one visit back to converse when a parked, operator-origin subject's routed work
+has all landed (tk-2cyxo).
+
+**The failure this catches.** A `gc.takeaway` stamp does three unrelated jobs at
+once, and two of them conspire: it parks the board row at LOW (a conversation that
+reached a takeaway wants nothing and only has to stay findable), and it MUTES the
+stall detector above. So the one automation in the city that files visits is silenced
+by the exact stamp that records the wait, and a subject that dispatched work could
+never be brought back BY the system — only by the operator noticing a row.
+
+Measured on the incident that produced this step: `tk-z9nln` (an operator ask) parked
+with the takeaway *"next sitting when findings land"*. The findings landed at 17:54Z.
+At 22:13Z — **4h19m later** — the operator found it by eye. Nothing had noticed, and
+the audit's headline sat in a merged file, untold.
+
+```bash
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" \\
+            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \\
+            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/detect-parked-dispositions.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# Best-effort, like every other patrol pass: a failed pass is retried next cycle and
+# must never abort the wisp. The -x guard means a rig that has not synced this script
+# keeps the old behavior (no return trip at all).
+if [ -n "$SCRIPTS_DIR" ]; then
+  "$SCRIPTS_DIR/detect-parked-dispositions.sh" \\
+    || echo "detect-parked-dispositions: pass failed (non-fatal); retries next cycle" >&2
+fi
+```
+
+Run it with `--dry-run` to see the selection without writing.
+
+**What makes a subject ready, and why it is wider than the board's own predicate.**
+Parked (`gc.takeaway` non-empty — an EMPTY stamp is a CLEARED park), operator-origin
+(`gc.origin=operator`, ruled deliberately narrow: that is the set where the operator
+has a standing expectation of an answer), and its recorded wait has at least one
+member and every one of them is CLOSED.
+
+The recorded wait is the union of the subject's `blocks` edges — what `gc-helm
+takeaway --waiting-on` writes, and all the board's `disposition_due` can see — AND
+its CHILDREN. The children half is not an embellishment: a sitting that routes work
+files it as a child of the subject, and a parent cannot be blocked by its own
+descendant (`bd` refuses the edge, because blocked cascades and the child would never
+close), so the canonical converse shape produces zero `waiting_on` edges. Keyed on
+`waiting_on` alone this pass could not fire for the subject the incident was measured
+on.
+
+**It never clears the takeaway.** That stamp is the durable record of what the sitting
+concluded and the operator's headline on the board; the visit is ADDITIVE. The pass
+writes exactly one key, `disposition_flagged`, and only after a visit exists.
+
+**One visit per observation.** Same two guards as the pass above, for the same reason
+(tk-1g9yw): an open visit naming the subject is the primary bound — the filing goes
+through `gc-helm.sh open`, which owns that guard and matches BOTH recordings of a
+visit's subject — and `disposition_flagged`, keyed to the sorted id set of the work
+that landed, is the backstop for after that visit is closed. Never keyed on a
+timestamp: stamping the marker bumps `updated_at`, so such a key invalidates itself
+and re-files forever.
+
+**It also owns the predicate the step above asks for.** `--wait-spent <bead-id>`
+answers whether a takeaway's recorded wait has fully closed;
+`detect-stalled-workflows.sh` calls it before letting a takeaway mute a stall, rather
+than keeping a second copy that drifts.
+
+Regression test: `assets/scripts/detect-parked-dispositions.test.sh` (hermetic; stubs
+`gc` and `gc-helm.sh`; covers readiness by edge, by child and by both, an open child
+or blocker holding the subject, a parent-child row on the subject NOT being read as
+routed work, a park that routed nothing, an agent-origin park, an empty takeaway,
+both recordings of an already-open visit, the dedupe marker and its re-flag, an
+unresolvable blocker, both fail-safes, a filing that exits 0 without filing, the
+takeaway never being cleared, `--dry-run`, one visit across repeated passes with the
+real `updated_at` bump in play, and every answer of `--wait-spent`).
+
+**Exit criteria:** Dispositions signalled, or none due. Continue to
 `check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is the
 only place that pours the next wisp and burns this one."""
 
 [[steps]]
 id = "check-polecat-health"
 title = "Check polecat work progress"
-needs = ["detect-stalled-workflows"]
+needs = ["detect-parked-dispositions"]
 description = """
 Detect polecats that are alive but not making progress on their work.
 
