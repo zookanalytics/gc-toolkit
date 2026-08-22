@@ -66,7 +66,8 @@ compares. The better this city gets at producing PRs, the worse the drip
 **You do not have to remember this.** `escalation-gate.sh` REFUSES the
 class outright when the held-anchor block below hands it `--pr`: it
 re-reads the PR itself and sends nothing if GitHub says the PR is
-mergeable, green, unobjected-to and merely unapproved. A refusal exits 0,
+mergeable, green on every check that gates its merge, unobjected-to and
+merely unapproved. A refusal exits 0,
 prints `REFUSED`, and stamps nothing. It is not the gate failing and it
 is not a licence to mail anyway — there is nothing being held back to
 retry.
@@ -79,8 +80,12 @@ proves each of these is outside it rather than trusting you to:
 - a head move that strands a gate (`check.<name>=green@<old-head>` on the
   anchor while the PR sits at a newer head);
 - a merge that errors, or a PR GitHub reports as CONFLICTING;
-- failing or still-running checks, a CHANGES_REQUESTED review, a draft, a
-  closed PR;
+- a failing or still-running REQUIRED check, a CHANGES_REQUESTED review, a
+  draft, a closed PR. The gate asks `gh pr checks --required`, which is
+  GitHub's own answer to which checks gate this merge and what each one's
+  CURRENT run said — so an ADVISORY check that is red is not a hold (it
+  cannot block the merge), and a required check that failed and was re-run
+  green is green (tk-ayt0n);
 - an anchor a previous pass already blocked — `blocked_reason` or
   `merge_result=blocked`, which is where "Existing PR metadata needs
   human correction" lands.

@@ -265,9 +265,16 @@ chmod +x "$TMP/bin/gc"
 # --- Stub `gh` ----------------------------------------------------------------
 # In its OWN PATH entry, so (SENDNOGH) can rebuild PATH without it — and without
 # any real gh — and exercise the "not on PATH" branch rather than asserting it by
-# inspection. Backed by one state file:
-#   pr   emitted verbatim as `gh pr view --json ...` output. ABSENT means the
-#        call fails, which is the rate-limited / offline / wrong-repo case.
+# inspection. Backed by three state files:
+#   pr              emitted verbatim as `gh pr view --json ...` output. ABSENT
+#                   means the call fails, which is the rate-limited / offline /
+#                   wrong-repo case.
+#   checks_required emitted for `gh pr checks --required --json ...`
+#   checks_all      emitted for that same call without --required
+# An ABSENT checks file exits NON-ZERO WITH NOTHING ON STDOUT, which is the one
+# shape real gh uses for three different answers — no checks reported, no
+# REQUIRED checks reported, and a call that failed — and it is why the gate reads
+# stdout rather than the exit status.
 mkdir -p "$TMP/gh"
 cat > "$TMP/gh/gh" <<'GH'
 #!/usr/bin/env bash
@@ -276,6 +283,15 @@ printf 'gh %s\n' "$*" >> "$S/calls"
 if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
   [ -f "$S/pr" ] || exit 1
   cat "$S/pr"
+  exit 0
+fi
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "checks" ]; then
+  f="$S/checks_all"
+  for a in "$@"; do
+    if [ "$a" = "--required" ]; then f="$S/checks_required"; fi
+  done
+  [ -f "$f" ] || exit 1
+  cat "$f"
   exit 0
 fi
 exit 0
@@ -335,6 +351,11 @@ pr_json() { # [key=<json> ...] -> a PR blocked solely on a human approval
 }
 seed_pr()   { printf '%s' "$1" > "$GATE_STATE/pr"; }        # after reset(), never before
 seed_meta() { printf 'su-lou.10.8|%s|%s\n' "$1" "$2" >> "$GATE_STATE/meta"; }
+# `gh pr checks` output, as a JSON array of {name, bucket}. Seed the fixture the
+# case is ABOUT and leave the other absent: an absent file is gh printing nothing,
+# which is what a branch with no required checks and a failed call both look like.
+seed_checks_required() { printf '%s' "$1" > "$GATE_STATE/checks_required"; }
+seed_checks_all()      { printf '%s' "$1" > "$GATE_STATE/checks_all"; }
 
 seed_prior() { # <state> <epoch> — a prior stamp for <state>, aged to <epoch>
   local token; token=$(token_for "$1")
@@ -507,23 +528,9 @@ send_case SENDAPPROVED "approved and green and still not landing is a real fault
   "$(pr_json 'reviewDecision="APPROVED"' 'mergeStateStatus="CLEAN"')"
 send_case SENDCONFLICT "a CONFLICTING PR still escalates" \
   "$(pr_json 'mergeable="CONFLICTING"' 'mergeStateStatus="DIRTY"')"
-send_case SENDCHECKRED "a failing required check still escalates" \
-  "$(pr_json 'statusCheckRollup=[{"status":"COMPLETED","conclusion":"FAILURE"}]')"
-send_case SENDCHECKCTX "...including one reported as a StatusContext, not a CheckRun" \
-  "$(pr_json 'statusCheckRollup=[{"state":"FAILURE"}]')"
-send_case SENDCHECKRUN "a check still running is not 'green or irrelevant' either" \
-  "$(pr_json 'statusCheckRollup=[{"status":"IN_PROGRESS","conclusion":null}]')"
-# ...and the StatusContext spelling of "still running". `state` is GitHub's
-# StatusState enum, and only SUCCESS in it means a check passed. EXPECTED is the
-# one that reads like an outcome and is a WAIT — a required status declared for
-# the ref that has not reported yet — so it is the value a PR blocked on an owed
-# check actually carries. Scoring any of these green refuses that PR, and a
-# refusal stamps nothing, so it is silenced permanently rather than deferred.
-for ctx_state in EXPECTED PENDING ERROR; do
-  send_case "SENDCHECKCTX$ctx_state" \
-    "a StatusContext state=$ctx_state is not green — the PR still escalates" \
-    "$(pr_json "statusCheckRollup=[{\"state\":\"$ctx_state\"}]")"
-done
+# The checks are not among these: what a check says no longer comes from the PR
+# row at all, so they carry their own fixtures and live in the CHECKS section
+# below (tk-ayt0n).
 send_case SENDCHANGES "a CHANGES_REQUESTED review still escalates" \
   "$(pr_json 'reviews=[{"state":"CHANGES_REQUESTED"}]')"
 send_case SENDDRAFT "a draft is not awaiting anyone's approval" \
@@ -539,26 +546,127 @@ send_case SENDUNKNOWN "mergeable=UNKNOWN is not a claim that the PR is fine" \
 reset; seed_pr "$(pr_json)"
 run "MERGE_HELD: PR #35" --state "s" --pr 35 >/dev/null 2>&1
 eq "$(mails)" "0" "SENDCONTROL: the unmodified fixture is still refused"
+# ...and it got there on the PR row alone. An empty rollup is green by vacuous
+# truth, so a repo with no CI configured (this one) must not be made to depend on
+# a second call that would decline the refusal whenever it could not be answered.
+eq "$(count_calls '^gh pr checks')" "0" \
+  "SENDCONTROL: a PR reporting no checks is decided without reading any"
 
-# --- REFUSEGREEN (the other side of the same predicate) -----------------------
-# The SENDCHECK* cases above all pass on an empty rollup too, so on their own
-# they cannot tell "not-green vetoes" apart from "any non-empty rollup vetoes" —
-# and the second is the fix that quietly does nothing, refusing nothing on a repo
-# that reports checks at all. These fixtures carry a NON-EMPTY GREEN rollup in
-# each of the two shapes and must still be refused.
-refuse_case() { # <label> <description> <pr-json>
-  reset; seed_pr "$3"
+# --- CHECKS (which checks actually hold this PR) -------------------------------
+# THE REGRESSION THESE EXIST FOR (tk-ayt0n). The class predicate used to score
+# `statusCheckRollup` itself — every entry had to be green — and that array is
+# neither the current verdict nor the blocking set:
+#
+#   it holds SUPERSEDED attempts: a check that failed and was re-run green is in
+#   it TWICE, failed attempt included, and nothing later removes that entry;
+#
+#   it holds ADVISORY checks: one outside the branch's required set cannot block
+#   a merge, so a red one is a lint the operator lands over, not a blocker.
+#
+# Both fired on signal-loom's `Validate PR Title` at once, and cost four
+# escalations — PRs #546, #548, #549 and #550, every one mergeable and merely
+# unapproved, every one carrying the gate's own `-REVIEW_REQUIRED-BLOCKED`
+# fingerprint to prove the gate had been asked and had said send.
+#
+# The rollup now answers ONE question, "does this PR report checks at all", and
+# `gh pr checks --required` answers the rest. The first two cases are those four
+# PRs; the SENDREQ* ones are the carve-out the fix must not take with them.
+#
+# EVERY case seeds BOTH reads, and that pairing is what isolates the two halves
+# of the fix. Seeding only the required read would let "score all the checks
+# instead" pass by being unanswerable rather than by being right; seeding only a
+# rollup would let "stop reading checks at all" pass the same way.
+checks_case() { # <label> <mails> <description> <rollup> <required|-> <all|-> [<phrase>]
+  reset; seed_pr "$(pr_json "statusCheckRollup=$4")"
+  if [ "$5" != "-" ]; then seed_checks_required "$5"; fi
+  if [ "$6" != "-" ]; then seed_checks_all "$6"; fi
   out=$(run "MERGE_HELD: PR #35" --state "s" --pr 35 2>&1)
-  eq "$(mails)" "0" "$1: $2"
-  case "$out" in
-    *"checks green"*) ok "$1: and says the checks were read as green" ;;
-    *) bad "$1: reason should say 'checks green', not 'no checks configured' (got '$out')" ;;
-  esac
+  eq "$(mails)" "$2" "$1: $3"
+  if [ -n "${7:-}" ]; then
+    case "$out" in
+      *"$7"*) ok "$1: and the reason names how the checks were read" ;;
+      *)      bad "$1: reason should contain '$7' (got '$out')" ;;
+    esac
+  fi
 }
-refuse_case REFUSEGREENCTX "a green StatusContext is green — SUCCESS still refuses" \
-  "$(pr_json 'statusCheckRollup=[{"state":"SUCCESS"}]')"
-refuse_case REFUSEGREENRUN "a passed CheckRun is green — COMPLETED/SUCCESS still refuses" \
-  "$(pr_json 'statusCheckRollup=[{"status":"COMPLETED","conclusion":"SUCCESS"}]')"
+RED_RUN='{"name":"Validate PR Title","status":"COMPLETED","conclusion":"FAILURE"}'
+RERUN_OK='{"name":"Validate PR Title","status":"COMPLETED","conclusion":"SUCCESS"}'
+GREEN_RUN='{"name":"CI","status":"COMPLETED","conclusion":"SUCCESS"}'
+VPT_PASS='[{"name":"Validate PR Title","bucket":"pass"}]'
+REQ_PASS='[{"name":"CI","bucket":"pass"}]'
+
+# PR #546/#550: the advisory check failed and was re-run green BEFORE the pass
+# that escalated. `gh` reports the current run; the rollup still holds both.
+checks_case REFUSESUPERSEDED 0 \
+  "a check that failed and was re-run green is green, though the failed attempt is still in the rollup" \
+  "[$RED_RUN,$RERUN_OK]" "$VPT_PASS" "$VPT_PASS" \
+  "required checks green"
+# PR #548/#549: the advisory check was still red at the escalating pass, and
+# `Validate PR Title` is not in signal-loom's required set — so nothing but the
+# missing signature was holding the PR. The `all` read carries the red one, so a
+# fix that dropped --required would score it and mail.
+checks_case REFUSEADVISORY 0 \
+  "a red check outside the branch's required set is not holding the PR" \
+  "[$RED_RUN,$GREEN_RUN]" "$REQ_PASS" '[{"name":"CI","bucket":"pass"},{"name":"Validate PR Title","bucket":"fail"}]' \
+  "required checks green"
+# ...and the same rollup with the REQUIRED read saying otherwise. Without this
+# pair the two cases above would also pass against a fix that stopped reading
+# checks altogether, which is the "quietly does nothing" shape of this change.
+checks_case SENDREQFAIL 1 \
+  "a failing REQUIRED check still escalates" \
+  "[$RED_RUN,$GREEN_RUN]" '[{"name":"CI","bucket":"fail"}]' '[{"name":"CI","bucket":"fail"}]'
+checks_case SENDREQPENDING 1 \
+  "a required check still running is not 'green or irrelevant' either" \
+  "[$GREEN_RUN]" '[{"name":"CI","bucket":"pending"}]' '[{"name":"CI","bucket":"pending"}]'
+checks_case SENDREQCANCEL 1 \
+  "...nor is a cancelled one" \
+  "[$GREEN_RUN]" '[{"name":"CI","bucket":"cancel"}]' '[{"name":"CI","bucket":"cancel"}]'
+# Green is a WHITELIST of buckets, so a bucket this script has never heard of is
+# not green. The alternative — blacklisting the failing ones — silently scores a
+# bucket a later gh adds as a pass, and a refusal stamps nothing, so that PR
+# would be muted for good rather than deferred.
+checks_case SENDREQUNKNOWN 1 \
+  "an unrecognised bucket is not green" \
+  "[$GREEN_RUN]" '[{"name":"CI","bucket":"quantum"}]' '[{"name":"CI","bucket":"quantum"}]'
+# One green required check among several is not enough: EVERY one must be.
+checks_case SENDREQPARTIAL 1 \
+  "one green required check does not carry a red sibling" \
+  "[$GREEN_RUN]" '[{"name":"CI","bucket":"pass"},{"name":"E2E","bucket":"fail"}]' '-'
+checks_case REFUSEREQGREEN 0 \
+  "...and all of them green refuses, so the case above is not passing on arity" \
+  "[$GREEN_RUN]" '[{"name":"CI","bucket":"pass"},{"name":"E2E","bucket":"skipping"}]' '-' \
+  "required checks green"
+
+# --- CHECKSFALLBACK -----------------------------------------------------------
+# `gh pr checks --required` prints nothing BOTH on a branch that requires no
+# checks and when the call failed — one shape, two meanings, told apart only by
+# gh's prose. Rather than match that prose, the gate asks the same question over
+# every check: on a branch requiring none that is the honest answer, and on a
+# failed call it is the old, stricter rule, which can only decline the refusal.
+reset; seed_pr "$(pr_json "statusCheckRollup=[$GREEN_RUN]")"
+seed_checks_all "$REQ_PASS"
+out=$(run "MERGE_HELD: PR #35" --state "s" --pr 35 2>&1)
+eq "$(mails)" "0" "CHECKSFALLBACK: a branch requiring no checks falls back to all-green and refuses"
+case "$out" in
+  *"no required checks configured"*) ok "CHECKSFALLBACK: and the reason says which read decided it" ;;
+  *) bad "CHECKSFALLBACK: says which read decided it (got '$out')" ;;
+esac
+
+reset; seed_pr "$(pr_json "statusCheckRollup=[$RED_RUN]")"
+seed_checks_all '[{"name":"Validate PR Title","bucket":"fail"}]'
+run "MERGE_HELD: PR #35" --state "s" --pr 35 >/dev/null 2>&1
+eq "$(mails)" "1" "CHECKSFALLBACK: ...and a red check on that same branch still escalates"
+
+# Neither read answered. A PR that reports checks nobody can read is not a
+# demonstrated resting state, so it is decided by the ordinary gate — the same
+# direction as an unreadable PR (SENDGHFAIL) and a missing gh (SENDNOGH).
+reset; seed_pr "$(pr_json "statusCheckRollup=[$GREEN_RUN]")"
+out=$(run "MERGE_HELD: PR #35" --state "s" --pr 35 2>&1)
+eq "$(mails)" "1" "CHECKSUNREADABLE: a PR reporting checks neither read can answer still escalates"
+case "$out" in
+  *"could not read the checks"*) ok "CHECKSUNREADABLE: and names what it could not read" ;;
+  *) bad "CHECKSUNREADABLE: names what it could not read (got '$out')" ;;
+esac
 
 # --- SENDFAULT (the city-side half) -------------------------------------------
 # GitHub cannot see these, and "GitHub is happy" is not "nothing is wrong". Each

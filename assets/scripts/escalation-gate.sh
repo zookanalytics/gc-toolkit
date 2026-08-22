@@ -70,8 +70,9 @@
 #
 # ...AND ONE CLASS NEVER OPENS AT ALL. Dedup answers "have I said this already?"
 # It cannot answer "is this worth saying once?", and for one situation the honest
-# answer is no: a PR that is mergeable, green, and simply not approved yet. The
-# city structurally cannot approve its own PRs, and the operator reviews the
+# answer is no: a PR that is mergeable, green on every check that gates its merge,
+# and simply not approved yet. The city structurally cannot approve its own PRs,
+# and the operator reviews the
 # queue on their own cadence — reviewing PRs periodically IS the workflow
 # (operator, 2026-08-20: "a PR waiting approval is a totally valid state ... I
 # just periodically review PRs, that's the workflow"). Nothing is stuck and
@@ -110,7 +111,11 @@
 #   changes requested / a blocking      reviewDecision=CHANGES_REQUESTED, and a
 #   review                              CHANGES_REQUESTED review is checked directly
 #   conflicts, or a merge that errors   mergeable must be MERGEABLE
-#   failing or still-running checks     statusCheckRollup must be green or empty
+#   a failing or still-running          `gh pr checks --required` must report
+#   REQUIRED check                      every one green, or the PR must report no
+#                                       checks at all. A check OUTSIDE the
+#                                       required set cannot block a merge, so a
+#                                       red one is not something holding the PR
 #   a draft, a closed or merged PR      state=OPEN and isDraft=false
 #   a head move that strands a gate     check.<name>=green@<oid> on the anchor at
 #                                       an oid that is not the PR's live head
@@ -844,45 +849,63 @@ fi
 # the list of conditions each term below is here to let through.
 GH_PR_FIELDS='state,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews,headRefOid'
 
-# GitHub reports a check two different ways in one array. A CheckRun carries
-# `status` + `conclusion`; a StatusContext carries `state`. Reading only one
-# shape would score the other as not-green and veto every refusal on a repo that
-# uses it — a fix that quietly does nothing. An EMPTY rollup is green by
-# vacuous truth, which is the "or irrelevant" half: a repo with no CI configured
-# (this one) has nothing to be red about.
+# WHICH CHECKS HOLD A PR IS A QUESTION ONLY GITHUB CAN ANSWER, AND
+# `statusCheckRollup` IS NOT THE ANSWER (tk-ayt0n). This term used to score that
+# array directly — every entry had to be green — and it was wrong in two
+# independent ways, each of which vetoed the refusal permanently and silently:
 #
-# GREEN IS `SUCCESS` AND NOTHING ELSE ON THE StatusContext SIDE. Its `state` is
-# GitHub's StatusState enum — ERROR, EXPECTED, FAILURE, PENDING, SUCCESS — and
-# only the last one says a check passed. EXPECTED is the trap: it reads like an
-# outcome and is a WAIT, the value GitHub reports for a required status that has
-# been declared for the ref and has not reported yet. Scoring it green refuses a
-# PR whose only unmet blocker is a check still owed, which is precisely the
-# "failing or still-running checks" carve-out in the header — and a refusal
-# stamps nothing, so that PR is not deferred for a cooldown but silenced for
-# good. The CheckRun side already draws the same line by requiring COMPLETED
-# before it reads a conclusion; this is that rule stated once for the other
-# shape (tk-oig44).
+#   SUPERSEDED ATTEMPTS. The rollup is every check RUN against the head commit,
+#   not the current verdict per check. A check that failed and was re-run green
+#   is in it TWICE, failed attempt included, so `all` reads a red that GitHub,
+#   the merge button and every human looking at the PR no longer see. Nothing
+#   later makes that entry go away: the refusal is dead for the life of the head.
+#
+#   ADVISORY CHECKS. A check outside the branch's required set cannot block a
+#   merge. A red one is a lint the operator lands over, not something holding the
+#   PR, and GitHub's own mergeability ignores it — so scoring it here invents a
+#   blocker that does not exist.
+#
+# Both fired together on signal-loom, where an advisory `Validate PR Title`
+# failed and was re-run green: PRs #546, #548, #549 and #550 were each mergeable
+# and merely unapproved, and each escalated anyway with the gate's own
+# `-REVIEW_REQUIRED-BLOCKED` fingerprint on the anchor to prove it had been asked.
+#
+# `gh pr checks --required` answers exactly what the class needs — the CURRENT
+# bucket of each check that actually gates this merge — and it is GitHub's own
+# reduction of the rollup rather than a second copy of the rule maintained here.
+# The rollup keeps one job: saying whether the PR reports any checks AT ALL, so a
+# repo with no CI configured (this one) stays green by vacuous truth — the "or
+# irrelevant" half — without a second call.
+#
+# GREEN IS A WHITELIST OF BUCKETS. `gh` flattens both rollup shapes — a CheckRun's
+# `status`+`conclusion` and a StatusContext's `state` — into one `bucket`
+# documented as pass|fail|pending|skipping|cancel, so the dual-shape reading this
+# used to do by hand comes for free and cannot fall out of step with one of them.
+# Only `pass` and `skipping` count, which is the line the old scorer drew
+# (SUCCESS/SKIPPED/NEUTRAL); everything else is not green, INCLUDING a bucket a
+# later gh adds. That keeps tk-oig44's rule intact without restating it: a
+# StatusContext state=EXPECTED is a required status declared for the ref that has
+# not reported yet, gh buckets it `pending`, and a PR whose only unmet blocker is
+# a check still owed goes on escalating instead of being silenced for good.
+GH_CHECK_BUCKET_JQ='
+  if (type != "array") or (length == 0) then "unreadable"
+  elif all(.[]; ((.bucket // "") == "pass") or ((.bucket // "") == "skipping")) then "green"
+  else "not-green" end'
+
+# Everything the PR itself has to say EXCEPT the checks. Answers with the PR's
+# mergeStateStatus when every other term holds, and with NOTHING in every other
+# case, including every case it could not read. See "AND ONE CLASS NEVER OPENS AT
+# ALL" in the header for why this class is refused rather than deduped, and for
+# the list of conditions each term below is here to let through.
 APPROVAL_WAIT_JQ='
-  def check_green:
-    ((.state // "") | ascii_upcase) as $ctx
-    | if $ctx != "" then ($ctx == "SUCCESS")
-      else (((.status // "") | ascii_upcase) == "COMPLETED")
-           and ((((.conclusion // "") | ascii_upcase)) as $c
-                | $c == "SUCCESS" or $c == "SKIPPED" or $c == "NEUTRAL")
-      end;
-  ((.statusCheckRollup // [])) as $rollup
-  | if ((.state // "") == "OPEN")
-       and ((.isDraft // false) == false)
-       and ((.mergeable // "") == "MERGEABLE")
-       and ((.reviewDecision // "") == "REVIEW_REQUIRED")
-       and (((.mergeStateStatus // "") | . == "BLOCKED" or . == "CLEAN"))
-       and (([.reviews[]? | select(((.state // "") | ascii_upcase) == "CHANGES_REQUESTED")] | length) == 0)
-       and (($rollup | map(check_green) | all))
-    then "mergeable, "
-         + (if ($rollup | length) == 0 then "no checks configured" else "checks green" end)
-         + ", no blocking review, reviewDecision=REVIEW_REQUIRED, mergeStateStatus="
-         + (.mergeStateStatus // "?")
-    else "" end'
+  if ((.state // "") == "OPEN")
+     and ((.isDraft // false) == false)
+     and ((.mergeable // "") == "MERGEABLE")
+     and ((.reviewDecision // "") == "REVIEW_REQUIRED")
+     and (((.mergeStateStatus // "") | . == "BLOCKED" or . == "CLEAN"))
+     and (([.reviews[]? | select(((.state // "") | ascii_upcase) == "CHANGES_REQUESTED")] | length) == 0)
+  then (.mergeStateStatus // "?")
+  else "" end'
 
 # The city-side half, read from the ANCHOR. `gh` cannot see a gate stranded at a
 # head the PR has moved past, or a bead a previous pass already blocked, and
@@ -904,11 +927,39 @@ ANCHOR_FAULT_JQ='
           else empty end)
     ] | join("; ")'
 
+# One `gh pr checks` read, reduced to green / not-green / unreadable. Called with
+# `--required` first and bare as the fallback; `$PR` and `$REPO` are the caller's.
+#
+# THE EXIT STATUS SAYS NOTHING THIS CAN USE. `gh pr checks` exits non-zero for a
+# failing check, for a pending one, and for "no checks reported" alike — three
+# answers, one status — and under `--json` it prints the array and exits 0 even
+# when a check failed. So the decision is read from STDOUT only: a JSON array is
+# an answer, anything else is the absence of one.
+#
+# Built as an ARRAY rather than passed through `"$@"`, and never left empty:
+# bash 3.2 under `set -u` trips on both an empty `"${arr[@]}"` and a `"$@"` with
+# no positional parameters, and a gate that aborts is the silent mute this whole
+# script is written against (same hazard reconcile-merged-prs.sh:1561 documents).
+gh_check_bucket_verdict() { # [--required] -> green|not-green|unreadable
+  local out v
+  local -a args
+  args=(pr checks "$PR")
+  if [ -n "$REPO" ]; then args+=(--repo "$REPO"); fi
+  if [ "${1:-}" = "--required" ]; then args+=(--required); fi
+  args+=(--json "name,bucket")   # quoted: one gh argument, not two array elements
+  out=$(gh "${args[@]}" 2>/dev/null)
+  v=$(printf '%s' "$out" | jq -r "$GH_CHECK_BUCKET_JQ" 2>/dev/null)
+  case "$v" in
+    green|not-green) printf '%s' "$v" ;;
+    *)               printf 'unreadable' ;;
+  esac
+}
+
 approval_wait_refusal() {
   # $1 is the anchor row this run already read, so the anchor is not fetched
   # twice. Everything else is read here, live: the caller told us WHICH PR, never
   # what state it is in.
-  local row="$1" pr_row reason head fault
+  local row="$1" pr_row mss head fault rollup verdict checks
   command -v gh >/dev/null 2>&1 || {
     echo "escalation-gate: $ANCHOR [$KIND] --pr $PR was passed but gh is not on PATH; the awaiting-approval class cannot be decided, so this escalation is decided by the ordinary gate" >&2
     return 0
@@ -922,8 +973,12 @@ approval_wait_refusal() {
     echo "escalation-gate: $ANCHOR [$KIND] could not read PR #$PR${REPO:+ in $REPO}; the awaiting-approval class cannot be decided, so this escalation is decided by the ordinary gate" >&2
     return 0
   fi
-  reason=$(printf '%s' "$pr_row" | jq -r "$APPROVAL_WAIT_JQ" 2>/dev/null)
-  [ -n "$reason" ] || return 0
+  mss=$(printf '%s' "$pr_row" | jq -r "$APPROVAL_WAIT_JQ" 2>/dev/null)
+  [ -n "$mss" ] || return 0
+
+  # The city-side veto comes BEFORE the checks read: it is decided from two rows
+  # already in hand, and a fault here ends in sending whatever the checks say, so
+  # spending a second network call to reach the same answer only widens the lock.
   head=$(printf '%s' "$pr_row" | jq -r '.headRefOid // empty' 2>/dev/null)
   fault=$(printf '%s' "$row" | jq -r --arg head "$head" "$ANCHOR_FAULT_JQ" 2>/dev/null)
   if [ -n "$fault" ]; then
@@ -932,7 +987,40 @@ approval_wait_refusal() {
     echo "escalation-gate: $ANCHOR [$KIND] PR #$PR is waiting on approval, but the anchor carries a city-side fault ($fault); NOT refusing — this is not the resting state, and it is escalated on its merits" >&2
     return 0
   fi
-  printf 'PR #%s is %s' "$PR" "$reason"
+
+  # Does this PR report any checks at all? Answered from the row already read, so
+  # a repo with no CI costs no second call and no dependency on `gh pr checks`.
+  rollup=$(printf '%s' "$pr_row" | jq -r '(.statusCheckRollup // []) | length' 2>/dev/null)
+  case "$rollup" in
+    0) checks="no checks configured" ;;
+    ''|*[!0-9]*)
+      echo "escalation-gate: $ANCHOR [$KIND] could not read the check rollup on PR #$PR${REPO:+ in $REPO}; the awaiting-approval class cannot be decided, so this escalation is decided by the ordinary gate" >&2
+      return 0 ;;
+    *)
+      verdict=$(gh_check_bucket_verdict --required)
+      case "$verdict" in
+        green)     checks="required checks green" ;;
+        not-green) return 0 ;;
+        *)
+          # `--required` prints nothing on a branch that requires no checks, and
+          # prints nothing when the call failed — one shape, two meanings, and
+          # telling them apart means matching gh's prose. Ask the same question
+          # over EVERY check instead: on a branch requiring none that is the
+          # honest answer, and on a failed call it is the old, stricter rule,
+          # which can only decline the refusal. Both land on the safe side.
+          verdict=$(gh_check_bucket_verdict)
+          case "$verdict" in
+            green)     checks="checks green (no required checks configured)" ;;
+            not-green) return 0 ;;
+            *)
+              echo "escalation-gate: $ANCHOR [$KIND] could not read the checks on PR #$PR${REPO:+ in $REPO}; the awaiting-approval class cannot be decided, so this escalation is decided by the ordinary gate" >&2
+              return 0 ;;
+          esac ;;
+      esac ;;
+  esac
+
+  printf 'PR #%s is mergeable, %s, no blocking review, reviewDecision=REVIEW_REQUIRED, mergeStateStatus=%s' \
+    "$PR" "$checks" "$mss"
 }
 
 iso_of() {
@@ -977,12 +1065,16 @@ fi
 # already decided it is worth making, and an escape hatch a predicate can close
 # is not one.
 #
-# It runs INSIDE the lock, which widens the critical section by one `gh pr view`.
-# That is deliberate: the anchor has to be re-read after the lock is taken
-# anyway — a peer can stamp while we wait — so deciding the class before it would
-# cost a second `gc bd show` to buy back a few hundred milliseconds. The cost of
-# the widening is bounded and already handled: a peer that outwaits LOCK_WAIT
-# against a live holder DEFERS, sends nothing, and re-derives next cycle.
+# It runs INSIDE the lock, which widens the critical section by one `gh pr view`
+# plus, on a PR that reports any checks, one or two `gh pr checks`. That is
+# deliberate: the anchor has to be re-read after the lock is taken anyway — a
+# peer can stamp while we wait — so deciding the class before it would cost a
+# second `gc bd show` to buy back a few hundred milliseconds. The cost of the
+# widening is bounded and already handled: a peer that outwaits LOCK_WAIT
+# against a live holder DEFERS, sends nothing, and re-derives next cycle. The
+# calls are also ordered cheapest-first inside the class — the PR row decides
+# most non-members, the anchor veto is decided from rows already in hand, and
+# only a PR that survives both is worth asking about its checks.
 if [ -n "$PR" ] && [ "$FORCE" != "1" ]; then
   CLASS_REFUSAL=$(approval_wait_refusal "$ROW")
   if [ -n "$CLASS_REFUSAL" ]; then
