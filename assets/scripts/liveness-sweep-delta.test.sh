@@ -102,6 +102,7 @@ extract stamp-handoff       "$FORMULA" > "$TMP/stamp.sh"
 extract read-handoff        "$FORMULA" > "$TMP/read.sh"
 extract landed-husks        "$FORMULA" > "$TMP/husk.sh"
 extract refile-guard        "$FORMULA" > "$TMP/refile.sh"
+extract live-visit-guard    "$FORMULA" > "$TMP/guard.sh"
 [ -s "$TMP/classify.sh" ] || { echo "no marked classify-candidates block"; exit 1; }
 [ -s "$TMP/delta.sh" ]    || { echo "no marked sweep-delta block"; exit 1; }
 [ -s "$TMP/openprs.sh" ]  || { echo "no marked open-prs block"; exit 1; }
@@ -110,6 +111,7 @@ extract refile-guard        "$FORMULA" > "$TMP/refile.sh"
 [ -s "$TMP/read.sh" ]     || { echo "no marked read-handoff block"; exit 1; }
 [ -s "$TMP/husk.sh" ]     || { echo "no marked landed-husks block"; exit 1; }
 [ -s "$TMP/refile.sh" ]   || { echo "no marked refile-guard block"; exit 1; }
+[ -s "$TMP/guard.sh" ]    || { echo "no marked live-visit-guard block"; exit 1; }
 
 echo "── the extracted blocks are valid shell ──"
 bash -n "$TMP/classify.sh" && ok "classify-candidates: valid bash" \
@@ -128,6 +130,8 @@ bash -n "$TMP/husk.sh" && ok "landed-husks: valid bash" \
     || bad "landed-husks: valid bash" "bash -n failed"
 bash -n "$TMP/refile.sh" && ok "refile-guard: valid bash" \
     || bad "refile-guard: valid bash" "bash -n failed"
+bash -n "$TMP/guard.sh" && ok "live-visit-guard: valid bash" \
+    || bad "live-visit-guard: valid bash" "bash -n failed"
 
 # The blocks live inside a TOML `"""` string, so TOML consumes escapes before an
 # agent ever sees them: a trailing backslash joins two lines, backslash-n becomes
@@ -141,7 +145,7 @@ bash -n "$TMP/refile.sh" && ok "refile-guard: valid bash" \
 echo "── the formula parses as TOML and the blocks survive it unchanged ──"
 python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$FORMULA" 2>/dev/null \
     && ok "formula parses as TOML" || bad "formula parses as TOML" "tomllib rejected it"
-for blk in classify.sh delta.sh openprs.sh worked.sh stamp.sh read.sh husk.sh refile.sh; do
+for blk in classify.sh delta.sh openprs.sh worked.sh stamp.sh read.sh husk.sh refile.sh guard.sh; do
     grep -q '[\]' "$TMP/$blk" \
         && bad "${blk%.sh}: no backslash (TOML would eat it)" "found a backslash" \
         || ok "${blk%.sh}: no backslash (TOML would eat it)"
@@ -161,6 +165,7 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-pattern","title":"pattern: a distiller cluster anchor","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
   {"id":"c-docupdate","title":"a doc-update bead nobody has routed","issue_type":"task","metadata":{"task_kind":"doc-update"}},
   {"id":"c-ingroup","title":"subject of a live visit","issue_type":"task","metadata":{}},
+  {"id":"c-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}},
   {"id":"c-takeaway","title":"parked by a human","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify; resume on ping","gc.takeaway_by":"proactive"}},
   {"id":"c-takeaway-empty","title":"hold was cleared","issue_type":"task","metadata":{"gc.takeaway":""}},
   {"id":"c-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
@@ -195,10 +200,17 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-rootvisit-step","title":"a step of a root a live stall visit already names","issue_type":"task","metadata":{"gc.root_bead_id":"root-underconversation"}}
 ]
 JSON
+# v-2 is the su-ab9je shape (bead tk-d6ddn): a live visit whose
+# gc.continuation_group stamp landed EMPTY while the tracks edge filed in the
+# same breath carried the subject. The edge is rendered in the `gc bd list`
+# shape (.type + .depends_on_id) because $LIVE is a `gc bd list` read — the
+# `gc bd show` shape (.dependency_type + .id) is a DIFFERENT key pair for the
+# same edge, and reading the wrong one yields nothing in silence.
 cat > "$TMP/live.json" <<'JSON'
 [
   {"id":"v-1","title":"visit: c-ingroup — a live sitting","metadata":{"task_kind":"visit","gc.continuation_group":"c-ingroup"}},
-  {"id":"v-stall","title":"visit: root-underconversation — workflow stalled with an unclaimable frontier","metadata":{"task_kind":"visit","gc.continuation_group":"subj-stalled","stall_root":"root-underconversation"}}
+  {"id":"v-stall","title":"visit: root-underconversation — workflow stalled with an unclaimable frontier","metadata":{"task_kind":"visit","gc.continuation_group":"subj-stalled","stall_root":"root-underconversation"}},
+  {"id":"v-2","title":"visit: c-trackedvisit — a live sitting whose stamp is empty","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-2","depends_on_id":"c-trackedvisit","type":"tracks"}]}
 ]
 JSON
 
@@ -335,7 +347,9 @@ eq "$(printf '%s' "$CANDIDATES" | jq -r '.[] | select(.id=="c-plain") | .type')"
 # Each drop asserted on its own so a regression names the class it broke.
 for drop in c-routed:worked c-visit:conversing c-subject:held-by-design \
             c-pattern:held-by-design-standing-record \
-            c-ingroup:live-visit-in-group c-takeaway:takeaway-held \
+            c-ingroup:live-visit-in-group \
+            c-trackedvisit:live-visit-named-only-by-its-tracks-edge \
+            c-takeaway:takeaway-held \
             c-pr-open:gated-on-an-open-pr c-pr-case:gated-case-and-path-insensitive \
             c-hold:operator-held c-hold-bare:operator-held-reasonless; do
     id="${drop%%:*}"; why="${drop##*:}"
@@ -347,6 +361,42 @@ done
 # test, not "carries a task_kind at all" — the over-broad rule that would hide
 # every kind-stamped bead. A doc-update bead is ordinary work: nothing has
 # routed it, so it is exactly the unnamed wait this sweep exists to surface.
+# --- 1b. the step-3 live-visit guard (bead tk-d6ddn) -------------------------
+# Classify asks "does this candidate already have a sitting?"; step 3 asks the
+# same question from the other end, about the sweep's own subject. Both used to
+# key on gc.continuation_group ALONE, and su-ab9je proved that stamp can land
+# empty on a visit whose tracks edge is intact — at which point the guard reads
+# a HELD sitting as absent and the sweep's next pass stacks a SECOND visit on a
+# subject converse is still talking about. The block reads $SWEEP_SUBJECT and
+# $LIVE and sets $LIVE_VISIT; non-empty means a visit is live.
+LIVE_VISIT=""
+run_guard() { SWEEP_SUBJECT="$1"; export SWEEP_SUBJECT
+              # shellcheck disable=SC1090
+              . "$TMP/guard.sh"; }
+
+echo "── the step-3 guard finds a live visit by EITHER of the two recordings ──"
+run_guard c-ingroup
+[ -n "$LIVE_VISIT" ] \
+    && ok "a visit whose group stamp names the subject reads as live" \
+    || bad "a visit whose group stamp names the subject reads as live" "LIVE_VISIT empty"
+run_guard c-trackedvisit
+[ -n "$LIVE_VISIT" ] \
+    && ok "a visit whose stamp is EMPTY still reads as live, via its tracks edge" \
+    || bad "a visit whose stamp is EMPTY still reads as live, via its tracks edge" \
+          "LIVE_VISIT empty — this pass would file a SECOND visit on c-trackedvisit (the su-ab9je shape)"
+run_guard c-plain
+[ -z "$LIVE_VISIT" ] \
+    && ok "a subject with no visit at all does not read as live" \
+    || bad "a subject with no visit at all does not read as live" "LIVE_VISIT='$LIVE_VISIT'"
+# The inverse defect, and the reason the union filters empties: an empty stamp
+# left in the set is MATCHABLE, so a pass whose subject id came back empty would
+# find it, skip, and file nothing forever — the silent half of the same bug.
+run_guard ""
+[ -z "$LIVE_VISIT" ] \
+    && ok "an empty subject id matches no visit (the empty stamp is not a member)" \
+    || bad "an empty subject id matches no visit" \
+          "LIVE_VISIT='$LIVE_VISIT' — an empty stamp stayed matchable"
+
 echo "── a task_kind outside the standing list is ordinary work and stays visible ──"
 for keep in c-docupdate:a-kind-stamp-is-not-a-standing-record-unless-listed; do
     id="${keep%%:*}"; why="${keep##*:}"

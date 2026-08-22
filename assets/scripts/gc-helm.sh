@@ -801,13 +801,30 @@ cmd_open() {
     fi
     # <<< open-subject-exists
 
-    # Already held? An open visit in this bead's continuation group IS
-    # the conversation — filing a second would split it. Print the
-    # existing visit and the same attach hint instead.
+    # Already held? An open visit on this bead IS the conversation — filing a
+    # second would split it. Print the existing visit and the same attach hint
+    # instead.
+    #
+    # A visit records its subject TWICE — the gc.continuation_group stamp and
+    # the tracks edge the gate-visit block files with it — and only the edge has
+    # proved reliable: on su-ab9je (shutupandlisten, 2026-08-20, bead tk-d6ddn)
+    # the stamp landed EMPTY while the edge carried the subject. This guard is
+    # the operator's front door, so keying it on the stamp alone means `gc helm
+    # open` cheerfully files the duplicate the guard exists to prevent. Match on
+    # EITHER recording. `gc bd list` renders the edge as .type + .depends_on_id
+    # (`gc bd show` names the same edge .dependency_type + .id).
+    #
+    # The `$s != ""` arm is not redundant with the existence gate above: without
+    # it an empty subject would match a visit whose stamp is empty, and the verb
+    # would report an unrelated sitting as this bead's.
     existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
         | jq -r --arg s "$bead" \
-            '[ .[]? | select((.metadata.task_kind // "") == "visit"
-                            and (.metadata["gc.continuation_group"] // "") == $s)
+            '[ .[]? | select((.metadata.task_kind // "") == "visit")
+               | select($s != ""
+                        and (((.metadata["gc.continuation_group"] // "") == $s)
+                             or ([ .dependencies[]?
+                                   | select((.type // "") == "tracks")
+                                   | select((.depends_on_id // "") == $s) ] | length > 0)))
                | .id ] | first // empty' 2>/dev/null || true)
     if [ -n "$existing" ]; then
         echo "$PROG: visit $existing is already open for $bead — a converse session holds it (or will spawn/vacuum it)."
@@ -1485,15 +1502,27 @@ gather_open_beads() {
 
 # ── Visit gather (rides the shared snapshot) ─────────────────────────
 # Writes ONE JSON-array line to $VISITS_FILE: the unique subject ids
-# carried by open visit beads (task_kind=visit, gc.continuation_group).
-# Both open AND in_progress count as "open" here — a claimed visit is a
-# held conversation, not a finished one.
+# carried by open visit beads (task_kind=visit). Both open AND in_progress
+# count as "open" here — a claimed visit is a held conversation, not a
+# finished one.
+#
+# A visit names its subject twice — the gc.continuation_group stamp and the
+# tracks edge filed with it — and only the edge has proved reliable: on
+# su-ab9je (shutupandlisten, 2026-08-20, bead tk-d6ddn) the stamp landed
+# EMPTY while the tracks edge carried the subject. This set feeds $held in
+# the render, which is what keeps an anchor already in conversation out of
+# the stranded band; a missed subject bands it HIGH and asks the operator
+# to open the visit that already exists. So take the union of both, and drop
+# the empty stamp so an anchor can never match it by having no id to match.
+# The same union guards the sweep (mol-liveness-sweep.toml) and its precheck.
 gather_visits() {
     : > "$TMP/visit-subjects.txt"
     for f in "$OPEN_DIR"/*.json; do
         [ -f "$f" ] || continue
         jq -r '(.beads // [])[] | select((.metadata.task_kind // "") == "visit")
-               | .metadata["gc.continuation_group"] // empty' \
+               | ((.metadata["gc.continuation_group"] // ""),
+                  (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")))
+               | select(. != "")' \
             < "$f" >> "$TMP/visit-subjects.txt" 2>/dev/null || true
     done
     jq -R -s -c 'split("\n") | map(select(length > 0)) | unique' \
