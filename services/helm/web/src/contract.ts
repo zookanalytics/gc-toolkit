@@ -95,6 +95,15 @@ export interface Tile {
   /** Idle open children — unclaimed, and not carried by a live workflow. */
   open_heads: string[] | null;
   dead_owner_heads: string[] | null;
+  /**
+   * Beads this row depends on by a `blocks` edge, and the subset still open.
+   * On a parked conversation these are the work a sitting routed out of it:
+   * `disposition_due` is true once every one of them has closed, which is the
+   * board's only way to tell a finished topic from a live hold (tk-2plde).
+   */
+  waiting_on: string[] | null;
+  waiting_on_open: string[] | null;
+  disposition_due: boolean;
   /** The LLM-authored headline a converse sitting left. `null`, not absent, when there is none. */
   takeaway: string | null;
   takeaway_at: string | null;

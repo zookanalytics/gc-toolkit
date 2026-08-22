@@ -39,6 +39,9 @@
       "dead_owner_heads": [
         "tk-eemvf.4"
       ],
+      "waiting_on": null,
+      "waiting_on_open": null,
+      "disposition_due": false,
       "takeaway": "the drill-in plane needs an operator decision on tile density",
       "takeaway_at": "2026-08-07T09:31:00Z",
       "takeaway_by": "host",
@@ -75,6 +78,9 @@
       "cross_rig_refs": [],
       "open_heads": [],
       "dead_owner_heads": [],
+      "waiting_on": null,
+      "waiting_on_open": null,
+      "disposition_due": false,
       "takeaway": null,
       "takeaway_at": null,
       "takeaway_by": null,
