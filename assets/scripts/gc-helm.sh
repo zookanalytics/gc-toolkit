@@ -64,6 +64,18 @@
 #           with real attention items whatever its priority or age.
 #           Resume with prefix+a, then the bead id.
 #
+#           EXCEPT when it was waiting on something that has since landed.
+#           A sitting that routes work out of a subject writes a `blocks`
+#           edge to that work (`takeaway --waiting-on`), and the render
+#           re-asks whether the blocker closed. All of them closed and the
+#           row is no longer "wants nothing" — it is a disposition the
+#           operator owes, so it is banded ELEVATED and says so. Without
+#           that, "holding — awaiting X" and "nothing further needed here"
+#           are the same row forever, and a finished topic sits on the
+#           board until a sitting is spent rediscovering that it finished
+#           (tk-2plde: 29 hours, one wasted sitting). DERIVED per render —
+#           nothing is stored, so no state has to be cleared later.
+#
 # Both EXCLUDE the four typed kinds, so an epic or decision that happens to
 # carry a marker stays its own kind instead of arriving twice. A bead
 # carrying BOTH markers is emitted twice on purpose and the id-dedup below
@@ -253,7 +265,7 @@ Usage:
   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--release]  set the board-visible takeaway headline
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release]  set the board-visible takeaway headline
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, and decisions) by how much
@@ -273,6 +285,13 @@ marks the proactive reaction in that same write (the proactive worker's
 one-call close). converse calls it WITHOUT --release, twice per sitting: once
 when the hold begins and once at sign-off, so a reaped thread still leaves a
 dated trace of what it was waiting for (tk-bzm86).
+--waiting-on <bead-id> (repeatable) records the same wait as a `blocks` EDGE
+alongside the prose, so the board can re-ask whether it is still true. Pass it
+for every bead a sitting routes work into. Without it the wait is a frozen
+sentence: the row keeps saying "awaiting X" after X merges, stays LOW, and the
+next sitting is spent rediscovering that the work landed (tk-2plde). With it,
+the row promotes to "blocker landed — dispose or resume" as soon as the last
+blocker closes.
 
   --json             Emit the ranked board as a JSON array (stable contract).
   --limit=N          Show only the top N rows (0 = all/uncapped; default caps at 50).
@@ -552,12 +571,37 @@ quiesce_release_molecule_steps() (
 # ALSO quiesces that molecule's step beads (quiesce_release_molecule_steps,
 # above) so the park doesn't leave affine/routed steps that re-spawn a polecat
 # onto the parked husk (tk-xypcy).
+#
+# --waiting-on <bead-id> (repeatable) writes the wait as a GRAPH EDGE beside the
+# prose: this bead depends on <bead-id> by a `blocks` edge. It exists because a
+# takeaway is a single frozen string, and "routed — tk-hgmob slung; nothing
+# further needed here" goes on saying that after tk-hgmob merges. Nothing
+# re-reads prose, so the subject parks at LOW forever and the next sitting is
+# spent rediscovering that its work landed (tk-2plde: 29 hours on the board,
+# one sitting burned). With the edge, the board re-asks the question on every
+# render and promotes the row to "blocker landed — dispose or resume" the
+# moment the work closes. The edge is the durable half; nothing about the
+# render is stored, so there is no state to clear afterwards.
+#
+# The edge is added, never removed: this verb only ever says "also waiting on
+# X". A wait that turns out to be wrong is unwired with `bd dep remove`, which
+# is a correction and not something a takeaway stamp should do implicitly.
+#
+# Best-effort by construction. A `blocks` edge can only join two beads in ONE
+# store, so a blocker in another rig cannot be wired at all; that, a typo, and
+# a cycle all surface as a warning on stderr while the takeaway itself still
+# lands. The stamp is the thing the operator is waiting on — a sitting must
+# never fail to record its conclusion because a graph edge would not take.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; npos=0
+    waiting_ids=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)    by="${1#--by=}"; shift ;;
             --by)      shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --by requires a value" >&2; exit 2; }; by="$1"; shift ;;
+            --waiting-on=*) waiting_ids="$waiting_ids ${1#--waiting-on=}"; shift ;;
+            --waiting-on)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --waiting-on requires a bead id" >&2; exit 2; }
+                            waiting_ids="$waiting_ids $1"; shift ;;
             --release) release=1; shift ;;
             -h|--help) usage; exit 0 ;;
             -*) echo "$PROG: takeaway: unknown flag '$1'" >&2; exit 2 ;;
@@ -600,6 +644,25 @@ cmd_takeaway() {
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
+    # Wire the waits as edges, AFTER the stamp has landed. Order matters: the
+    # takeaway is what the sitting owes the operator, so it is written first and
+    # a failure here degrades to today's behaviour (prose only) rather than
+    # losing the conclusion. `dep add <bead> <blocker>` reads its second
+    # argument as the DEPENDS-ON id, so this says "<bead> is blocked by
+    # <blocker>" and the row lands on <bead> — which is what the board reads.
+    for _w in $waiting_ids; do
+        [ -n "$_w" ] || continue
+        if [ "$_w" = "$bead" ]; then
+            echo "$PROG: takeaway: --waiting-on $_w is the bead itself; skipped" >&2
+            continue
+        fi
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        if gc bd dep add "$bead" "$_w" -t blocks ${db:+--db "$db"} >/dev/null 2>&1; then
+            echo "waiting-on edge: $bead depends on $_w"
+        else
+            echo "$PROG: takeaway: could not wire --waiting-on $_w (same store? already wired? cycle?) — the takeaway text still stands, but the board cannot see this wait" >&2
+        fi
+    done
     bust_cache
     # On --release the anchor's own route was cleared above, but if this bead is
     # the anchor of a mol-polecat-work molecule its STEP beads keep their own
@@ -881,6 +944,10 @@ cmd_board() {
     printf '[]\n' > "$VISITS_FILE"
     INFLIGHT_FILE="$TMP/inflight.json"
     printf '{}\n' > "$INFLIGHT_FILE"
+    # Blocker id -> status, for the `waiting_on` edges. Resolved AFTER the
+    # cache block and never stored in it (see resolve_waiting_status).
+    WAITING_FILE="$TMP/waiting.json"
+    printf '{}\n' > "$WAITING_FILE"
     # Per-rig open-bead snapshots, written once and read by three consumers
     # (visits, the metadata-keyed anchor kinds, the in-flight join). Kept as
     # FILES because a rig's open set carries every bead's description and
@@ -974,6 +1041,14 @@ cmd_board() {
                 && mv "$CACHE_FILE.tmp.$$" "$CACHE_FILE" 2>/dev/null || rm -f "$CACHE_FILE.tmp.$$" 2>/dev/null || true
         fi
     fi
+
+    # ── Blocker liveness for the `waiting_on` edges ──────────────────
+    # Outside the cache on purpose, and outside the gather-failure gate: see
+    # resolve_waiting_status. Runs on the cached path too, because a cached
+    # anchor's EDGES are still current even when its blocker's status is not.
+    resolve_waiting_status
+    WAITMAP=$(cat "$WAITING_FILE" 2>/dev/null || printf '{}')
+    printf '%s' "$WAITMAP" | jq -e 'type=="object"' >/dev/null 2>&1 || WAITMAP='{}'
 
     # ── Visit map (held glyph): subject ids with an open visit ────────
     # An anchor is HELD when an open visit bead (task_kind=visit) names
@@ -1091,6 +1166,24 @@ def wf_live($id):
               | unique ) end) as $xrefs
     # held: an open visit in this anchor'\''s continuation group exists
     | (($visits | index($a.id)) != null) as $held
+    # ── Is the thing this subject was waiting on still open? ─────────
+    # `waiting_on` is the set of ids this bead depends on by a `blocks` edge —
+    # for a parked subject, the work a converse sitting routed out of it. The
+    # board re-asks the question the takeaway string froze at dispatch time:
+    # DERIVED here, never stored, so it needs nothing from the
+    # never-clearing stored `blocked` status of tk-puh9d.
+    #
+    # A blocker counts as LANDED only on a positive `closed` from the fresh
+    # $waitmap. An id the map cannot answer for — a store in another rig, an
+    # `external:` reference, a query that timed out — reads as still open, so
+    # the row keeps its pre-fix LOW band. Wrong in the quiet direction on
+    # purpose: a missed promotion costs a glance, a false "go dispose of this"
+    # invites closing a subject whose work is still in flight.
+    | (($a.waiting_on // []) | if type=="array" then . else [] end) as $waiting
+    | ([ $waiting[] | select((($waitmap[.] // "") | tostring) != "closed") ]) as $waiting_open
+    # DISPOSITION DUE: it was waiting on something, and every one of those has
+    # landed. The row is no longer "wants nothing" — it wants a disposition.
+    | ($a.source=="parked" and ($waiting|length) > 0 and ($waiting_open|length) == 0) as $disposition_due
     # severity band. A held anchor is active work via its conversation,
     # not via in-progress child polecats — so "0 in-progress" is NOT
     # stranded when a visit is open. Stranded/HIGH is reserved for a
@@ -1109,6 +1202,7 @@ def wf_live($id):
     | (if $a.source=="unowned" then "HIGH"
        elif $a.source=="decision" then "ELEVATED"
        elif $a.source=="human" then "ELEVATED"
+       elif $disposition_due then "ELEVATED"
        elif $a.source=="parked" then "LOW"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
@@ -1122,6 +1216,9 @@ def wf_live($id):
     | (if $a.source=="unowned" then "unowned convoy — no owning bead"
        elif $a.source=="decision" then "human-gated decision"
        elif $a.source=="human" then "routed to the operator — no agent will take it"
+       elif $disposition_due then "parked · blocker landed"
+       elif ($a.source=="parked" and ($waiting_open|length) > 0)
+            then "parked · waiting on \($waiting_open|length)"
        elif $a.source=="parked" then "conversation parked — takeaway recorded"
        elif $m==0 then "empty — no children"
        elif $open==0 then "all \($m) closed · 0 open"
@@ -1138,7 +1235,8 @@ def wf_live($id):
     # bead-id list. The mechanical heads/xref ids move to --json only
     # (open_heads, cross_rig_refs), so the human table stays explanatory and
     # cannot emit a raw/truncated bead-id.
-    | (if ($takeaway|length) > 0 then $takeaway
+    | (if $disposition_due then "blocker landed — dispose or resume"
+       elif ($takeaway|length) > 0 then $takeaway
        elif $a.source=="unowned" then "unowned — assign an owning bead"
        elif $a.source=="decision" then "operator decision"
        elif $a.source=="human" then "operator action"
@@ -1164,6 +1262,8 @@ def wf_live($id):
         progress_mismatch:$pmismatch,
         stale_days:$stale, priority:$a.priority, cross_rig_refs:$xrefs,
         open_heads:$open_ids, dead_owner_heads:$dead_owner_heads,
+        waiting_on:$waiting, waiting_on_open:$waiting_open,
+        disposition_due:$disposition_due,
         takeaway:(if ($takeaway|length)>0 then $takeaway else null end),
         takeaway_at:(($a.takeaway_at // "") | if .=="" then null else . end),
         takeaway_by:(($a.takeaway_by // "") | if .=="" then null else . end),
@@ -1181,7 +1281,7 @@ def wf_live($id):
 '
     FULL=$(jq -c -n --argjson prefixes "$PREFIXES" --argjson rignames "$RIGNAMES" \
         --argjson now "$NOW_EPOCH" --argjson visits "$VISITS" --argjson ownermap "$OWNER_MAP" \
-        --argjson inflight "$INFLIGHT" \
+        --argjson inflight "$INFLIGHT" --argjson waitmap "$WAITMAP" \
         "$RENDER" < "$ANCHORS")
     TOTAL=$(printf '%s' "$FULL" | jq 'length')
     # ── Row cap, with a RESERVED budget for `parked` ─────────────────
@@ -1237,8 +1337,9 @@ def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as 
             else "\(.n_closed)/\(.m_total)" end)|rpad(7))
         + ((.frontier)|rpad(36)) + (.needs) )
 '
-    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/parked\n'
+    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck/blocker-landed · NORMAL=active · LOW=empty/complete/parked\n'
     printf 'Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n'
+    printf 'A parked row reading "blocker landed" was waiting on work that has since closed — it needs a disposition, not a re-read\n'
     printf 'Held: ● an open visit holds this anchor'\''s conversation (attach via the sessions picker) · blank = none\n'
     printf 'open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
 }
@@ -1411,6 +1512,14 @@ gather_visits() {
 #   parked  gc.takeaway present  a conversation that reached a takeaway.
 #                                It wants nothing; it has to stay findable.
 #
+# `waiting_on` rides along: the ids this bead depends on by a `blocks` edge.
+# A converse sitting that ROUTES work out of a subject writes that edge
+# (`gc-helm takeaway … --waiting-on <bead>`), which is what turns "waiting on
+# tk-hgmob" from prose inside the takeaway string into a fact the board can
+# re-ask. Only the ids are gathered here; whether they have LANDED is resolved
+# fresh on every render (resolve_waiting_status), never cached — a blocker
+# that merged is exactly the fact a cached board would go on hiding.
+#
 # Both EXCLUDE the three typed kinds, so an epic or decision that happens
 # to carry a marker stays its own kind instead of arriving twice. A bead
 # carrying BOTH markers is emitted twice on purpose and the render's
@@ -1430,6 +1539,10 @@ gather_meta_anchors() {
             | ($b.metadata // {}) as $md
             | (($md["gc.routed_to"] // "") | tostring) as $routed
             | (($md["gc.takeaway"]  // "") | tostring) as $tk
+            | ([ ($b.dependencies // [])[]
+                 | select(((.type // "") | tostring) == "blocks")
+                 | ((.depends_on_id // "") | tostring)
+                 | select(length > 0) ] | unique) as $waiting
             | [ (if $routed == "human" then "human" else empty end),
                 (if ($tk | length) > 0 then "parked" else empty end) ][]
             | . as $kind
@@ -1437,11 +1550,78 @@ gather_meta_anchors() {
                rig:$rig, prefix:$prefix, priority:($b.priority // 3),
                updated_at:($b.updated_at // ""), description:($b.description // ""),
                progress:null, children:[],
+               # Only the parked kind spends these (the disposition derivation
+               # keys on source=="parked"), and the Go gather pays a query per
+               # anchor for them — so both sides gather them for parked alone.
+               waiting_on:(if $kind == "parked" then $waiting else [] end),
                takeaway:$tk,
                takeaway_at:(($md["gc.takeaway_at"] // "") | tostring),
                takeaway_by:(($md["gc.takeaway_by"] // "") | tostring)}' \
             < "$f" >> "$ANCHORS" 2>/dev/null || gather_mark "meta-anchors@$f"
     done
+}
+
+# ── Blocker liveness for `waiting_on` (deliberately NOT cached) ──────
+# Writes ONE JSON-object line to $WAITING_FILE: blocker bead id -> its
+# current status. The render calls a blocker LANDED only when this map
+# says `closed`, so anything it cannot answer for reads as still-waiting.
+#
+# WHY IT IS SEPARATE FROM THE GATHER. The edge is structural and belongs with
+# the anchors; whether the edge has been DISCHARGED is the fact the board
+# exists to re-ask, and it is the fact a cache would freeze. A subject parked
+# "holding — awaiting tk-hgmob" is indistinguishable, in stored state, from one
+# whose blocker merged an hour ago; that is the whole defect (tk-2plde). Reading
+# it live puts it in the same class as session liveness, which is likewise held
+# outside the cache so a polecat that died mid-TTL stops counting at once.
+#
+# WHY IT IS FREE UNTIL THE EDGES EXIST. It reads $ANCHORS first and returns
+# before touching a rig when no anchor carries a `waiting_on` id, so a city
+# whose sittings have not yet written any edge pays nothing for this at all.
+#
+# COST WHEN THEY DO. One `bd show` per rig that has any, over the DISTINCT
+# blocker ids of that rig's anchors — bounded by EDGE count at ~8 bytes an id,
+# so it stays far from the MAX_ARG_STRLEN boundary the child payload crossed
+# (tk-hgmob); the reply, which carries whole beads, comes back through a pipe.
+#
+# FAIL-CLOSED, AND SILENTLY. A rig that errors, times out or answers with a
+# shape this cannot read simply contributes no entries, and its anchors keep
+# reading as waiting — the pre-fix behaviour. That is the safe direction: a
+# missed promotion costs a glance, a false "blocker landed" invites the
+# operator to dispose of a subject whose work is still in flight. It does NOT
+# gather_mark: this runs after the gather's fail-closed check, and a blocker
+# status the board could not resolve is not grounds to refuse the whole board.
+resolve_waiting_status() {
+    _wids=$(jq -r '(.waiting_on // [])[]' < "$ANCHORS" 2>/dev/null | sort -u)
+    [ -n "$_wids" ] || return 0
+    _acc="$TMP/waiting-parts.ndjson"
+    : > "$_acc"
+    printf '%s' "$RIGS" | jq -c '.[]' | while IFS= read -r _rig; do
+        _rname=$(printf '%s' "$_rig" | jq -r '.name')
+        _rpath=$(printf '%s' "$_rig" | jq -r '.path')
+        _rdb="$_rpath/.beads"
+        [ -d "$_rdb" ] || continue
+        _ids=$(jq -r --arg rig "$_rname" \
+                  'select((.rig // "") == $rig) | (.waiting_on // [])[]' \
+                  < "$ANCHORS" 2>/dev/null | sort -u | tr '\n' ' ')
+        [ -n "$_ids" ] || continue
+        # `bd show` answers with an ARRAY when any id resolves and a bare
+        # OBJECT when none do, rc=0 either way, so the shape is tested rather
+        # than assumed. Control characters in a bead's notes make the payload
+        # invalid JSON for jq, hence the strip.
+        # shellcheck disable=SC2086  # $_ids is a deliberate list of bare ids
+        _raw=$(gcq bd show $_ids --db "$_rdb" --json | tr -d '\000-\037')
+        printf '%s' "$_raw" | jq -c '
+            if type == "array"
+            then [ .[]? | select(type == "object")
+                   | {key: ((.id // "") | tostring), value: ((.status // "") | tostring)}
+                   | select(.key != "") ] | from_entries
+            else {} end' >> "$_acc" 2>/dev/null || true
+    done
+    if [ -s "$_acc" ]; then
+        jq -c -s 'add // {}' < "$_acc" > "$WAITING_FILE.tmp" 2>/dev/null \
+            && mv "$WAITING_FILE.tmp" "$WAITING_FILE" 2>/dev/null \
+            || rm -f "$WAITING_FILE.tmp" 2>/dev/null || true
+    fi
 }
 
 # ── In-flight join (rides the shared snapshot) ───────────────────────

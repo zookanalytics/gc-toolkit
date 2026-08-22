@@ -236,7 +236,11 @@ The loop, every visit:
      [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the item carries no trace of this sitting"
-   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next>" --by converse
+   # One --waiting-on per bead this sitting ROUTED work into; leave WAITING
+   # empty when it routed nothing. Unquoted on purpose so empty expands to
+   # nothing rather than to an empty argument.
+   WAITING=""   # e.g. WAITING="--waiting-on tk-hgmob --waiting-on tk-st143"
+   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next>" --by converse $WAITING
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    gc bd close "$VISIT"
@@ -247,6 +251,23 @@ The loop, every visit:
    Ended (<one-word-outcome>): <what this sitting settled, in one line>
    Look at: <subject-id> — <the one thing to read or do next>
    ```
+   **If this sitting ROUTED work, pass `--waiting-on <work-bead>` for each
+   bead it slung.** The takeaway is one frozen string, and the readers of
+   it are all human — nothing in the city re-reads prose. So a sitting
+   that files and slings a fix leaves the subject saying "routed —
+   nothing further needed here" for as long as the bead is open,
+   including long after the fix merges. `--waiting-on` records the same
+   wait as a `blocks` edge, and the board re-asks it on every render:
+   once every blocker closes the row stops reading LOW/"wants nothing"
+   and becomes *"blocker landed — dispose or resume"*. Without it,
+   tk-yps55 sat parked for 29 hours after its fix merged and the next
+   sitting existed only to re-derive by hand what the first had already
+   written down (tk-2plde). The operator's rule: *waiting and holding are
+   graph states, not comments.* An edge that will not take (a blocker in
+   another rig's store, a typo) warns on stderr and the takeaway still
+   lands, so this can never cost you the stamp — but a wait you did not
+   pass is a wait nothing will ever re-ask.
+
    Never close without the stamp verifying — an unstamped closed visit
    is invisible to everything that reads outcomes. Never end a sitting
    without the sign-off: the operator may be reading this thread right
@@ -321,7 +342,11 @@ Rules:
   sling.** Discover the options: `gc formula list` if available, else
   read the `description` field of each `formulas/*.toml` in the rig
   checkout — each states what it is for. Name the formula you chose
-  when you frame the choice.
+  when you frame the choice. **Then wire the wait**: the sign-off
+  takeaway (step 7) takes `--waiting-on <work-bead>` once per bead you
+  slung, which is what lets the board notice later that the work landed.
+  Routing without it parks the subject on a sentence that stops being
+  true the moment the work merges, and nothing re-reads it (tk-2plde).
 - **Filing a visit on another subject:** use the marked block in
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.

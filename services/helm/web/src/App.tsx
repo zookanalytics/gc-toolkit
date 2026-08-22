@@ -3,7 +3,7 @@ import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
 import { resolveTerminalBase, resolveTerminalSession } from './terminal/endpoint';
-import type { Board } from './contract';
+import type { Board, Tile } from './contract';
 
 // The board shape lives in ./contract.ts — the hand-written mirror of the Go
 // structs in internal/board, guarded by the parity check in
@@ -21,7 +21,18 @@ const REFRESH_MS = 30_000;
 // nothing, it only has to stay FINDABLE. Ranking those against stranded epics is
 // what tk-2v08m asks not to do — the LOW band already floors them, and splitting
 // them into their own section keeps them out of the contest visually too.
+//
+// EXCEPT a tile whose `disposition_due` is set. That row was waiting on work
+// that has since landed, so "wants nothing" has stopped being true of it: it
+// owes the operator a disposition, and the service already bands it ELEVATED.
+// Leaving it in the parked section would re-hide the one row this distinction
+// exists to surface — the section's own sub-heading promises nothing there is
+// waiting on work (tk-2plde).
 const PARKED_KIND = 'parked';
+
+// A tile that belongs in the quiet parked section rather than the attention
+// table: parked, and not owed a disposition.
+const isParked = (tile: Tile): boolean => tile.kind === PARKED_KIND && !tile.disposition_due;
 
 // Document-relative on purpose. The app is served under a runtime-city-named
 // prefix (/v0/city/<city>/svc/helm/), so an absolute '/helm' would address the
@@ -89,8 +100,8 @@ export function App() {
   }, [refresh]);
 
   const tiles = board?.tiles ?? [];
-  const attention = tiles.filter((tile) => tile.kind !== PARKED_KIND);
-  const parked = tiles.filter((tile) => tile.kind === PARKED_KIND);
+  const attention = tiles.filter((tile) => !isParked(tile));
+  const parked = tiles.filter(isParked);
 
   return (
     <main>
@@ -174,8 +185,9 @@ export function App() {
         <section className="parked" aria-labelledby="parked-heading">
           <h2 id="parked-heading">parked conversations</h2>
           <p className="sub">
-            Open beads whose visit ended with a takeaway. Nothing here is waiting on work — these
-            are threads to pick back up: press prefix+a and type the id.
+            Open beads whose visit ended with a takeaway. Nothing here is owed a disposition —
+            a row whose routed work has landed moves up to the anchor table. These are threads to
+            pick back up: press prefix+a and type the id.
           </p>
           {/* No progress columns. A parked bead carries no roll-up, so n/m and
               open/wip would read 0/0 on every row — a number that looks like an

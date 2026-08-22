@@ -612,6 +612,41 @@ have "takeaway usage documents the converse caller" 'host|proactive|converse' "$
 # empties every NEEDS cell.
 have "takeaway stamps gc.takeaway" 'gc.takeaway=$text' "$HELM"
 
+echo "── a routed wait is written as an EDGE, not only as prose (tk-2plde) ──"
+# The same failure mode as the stamp, one level up. A takeaway is ONE frozen
+# string, so a sitting that routes work leaves the subject saying "routed —
+# nothing further needed here" long after the work merges, and nothing in the
+# city re-reads prose. The board can only re-ask a wait that exists as a
+# `blocks` edge. Each assertion below is one way that quietly stops happening:
+# the flag can be dropped from the writer, or — far more likely — the
+# instruction to PASS it can be tidied out of the prompt, leaving a verb
+# nothing calls.
+have "gc-helm takeaway accepts --waiting-on" '--waiting-on)' "$HELM"
+have "…and writes it as a depends-on edge" 'bd dep add "$bead" "$_w" -t blocks' "$HELM"
+have "…and documents it in usage" '--waiting-on <bead-id>' "$HELM"
+# The prompt is the half that decides whether the flag is ever passed.
+have "the sign-off block can carry the waits" '--by converse $WAITING' "$PROMPT"
+have "the routing rule tells converse to wire the wait" '--waiting-on <work-bead>' "$PROMPT"
+# The ORDER is the safety property: the stamp is written first, so an edge that
+# cannot be wired warns and the conclusion still lands. A writer that exits on a
+# failed edge would trade the data loss this fixes for the one it replaces.
+if awk '/^cmd_takeaway\(\)/ {f=1} f' "$HELM" | grep -n 'gc.takeaway=$text' | head -1 | cut -d: -f1 | {
+       read -r stamp_ln || stamp_ln=0
+       edge_ln=$(awk '/^cmd_takeaway\(\)/ {f=1} f' "$HELM" | grep -n 'bd dep add' | head -1 | cut -d: -f1)
+       [ -n "$edge_ln" ] && [ "$stamp_ln" -gt 0 ] && [ "$stamp_ln" -lt "$edge_ln" ]
+   }; then
+    ok "the takeaway is stamped BEFORE any edge is attempted"
+else
+    bad "the takeaway is stamped BEFORE any edge is attempted" \
+        "an edge wired first can fail the verb and cost the sitting its conclusion"
+fi
+if awk '/^cmd_takeaway\(\)/ {f=1} f' "$HELM" | grep -A3 'could not wire' | grep -qE 'exit [0-9]'; then
+    bad "a failed edge does not abort the verb" \
+        "the warning arm exits — the takeaway lands but the caller reads a failure"
+else
+    ok "a failed edge does not abort the verb"
+fi
+
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

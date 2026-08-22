@@ -102,7 +102,7 @@ Five kinds are gathered. The first three are selected by the bead's issue
 | `decision` | `issue_type=decision` | ELEVATED | human-gated |
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
 | `human` | `gc.routed_to=human` | ELEVATED | the operator owns it; no agent will take it |
-| `parked` | `gc.takeaway` present | LOW | a conversation that reached a takeaway |
+| `parked` | `gc.takeaway` present | LOW, or ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
 
 **Why metadata is an anchor key at all.** The type question cannot see an
 operator-owned item. `gc.routed_to=human` and `gc.takeaway` are stamped on
@@ -123,6 +123,45 @@ needs from these is not triage but recall: an open bead whose visit ended with a
 takeaway is already resumable — typing a bare bead id into the `prefix+a` popup
 reopens the conversation on that bead (`assets/scripts/tmux-visit-prompt.sh`) —
 it was only unfindable.
+
+**Until its wait is over.** A takeaway is one frozen string, so a sitting that
+ROUTES work out of a subject leaves it saying "routed — nothing further needed
+here" for as long as the bead stays open, including long after the work merged.
+Nothing re-read that sentence, so a finished topic and a live hold were the same
+LOW row: tk-yps55 sat parked for 29 hours after its fix landed and cost a whole
+sitting to discover it was done. Roughly 40% of the reserved parked budget was
+going to already-terminal rows.
+
+So the wait is recorded as a **`blocks` edge** —
+`gc-helm takeaway <subject> "…" --waiting-on <work-bead>` writes it beside the
+prose — and the board re-derives, per render, whether it has been discharged:
+
+| `waiting_on` | `waiting_on_open` | row |
+|---|---|---|
+| empty | — | unchanged: LOW, "conversation parked — takeaway recorded" |
+| non-empty | non-empty | LOW, "parked · waiting on N" — a live hold, still quiet |
+| non-empty | empty | `disposition_due`: ELEVATED, "parked · blocker landed", and NEEDS becomes "blocker landed — dispose or resume" |
+
+Two properties are load-bearing:
+
+- **Derived, never stored.** The board re-gathers every run, so this needs no
+  new field on the bead and nothing has to clear it when a blocker lands. It is
+  also why it does not depend on tk-puh9d (stored `blocked` status never
+  auto-clearing) being fixed first — it never consults stored status.
+- **Fail-closed.** A blocker counts as landed only on a positive `closed`. One
+  that cannot be resolved — a store in another rig, an `external:` reference, a
+  read that failed — counts as still open, so the row keeps its pre-fix LOW
+  band. A missed promotion costs a glance; a false "everything landed" invites
+  the operator to dispose of a subject whose work is still in flight.
+
+The blocker statuses are read **outside the gather cache**, in the same class as
+session liveness: a cached "still waiting" is exactly the answer this exists to
+stop serving. The read is skipped entirely when no anchor carries an edge, so a
+city whose sittings have not written any yet pays nothing.
+
+The disposition-due row is also the one `parked` row the web app lifts OUT of
+the quiet section and into the ranked table — leaving it below would re-hide the
+row the distinction exists to surface.
 
 ## Architecture
 

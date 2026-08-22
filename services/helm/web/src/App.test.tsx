@@ -3,9 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { Board, Tile } from './contract';
 
-// A board carrying all three shapes the split has to tell apart: an ordinary
-// ranked anchor, an operator-owned bead that IS attention, and a parked
-// conversation that is not.
+// A board carrying all four shapes the split has to tell apart: an ordinary
+// ranked anchor, an operator-owned bead that IS attention, a parked
+// conversation that is not, and a parked conversation whose routed work has
+// landed — which stopped being "wants nothing" and has to leave the quiet
+// section (tk-2plde).
 function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severity'>): Tile {
   return {
     rig: 'gc-toolkit',
@@ -31,6 +33,9 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     cross_rig_refs: [],
     open_heads: [],
     dead_owner_heads: [],
+    waiting_on: [],
+    waiting_on_open: [],
+    disposition_due: false,
     takeaway: null,
     takeaway_at: null,
     takeaway_by: null,
@@ -43,7 +48,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
 
 const BOARD: Board = {
   generated_at: '2026-08-21T19:14:00Z',
-  total: 3,
+  total: 4,
   tiles: [
     tile({
       id: 'tk-epic',
@@ -73,6 +78,20 @@ const BOARD: Board = {
       frontier: 'conversation parked — takeaway recorded',
       needs: 'resume: prefix+a, then the bead id',
       rank_score: 2_001,
+    }),
+    // Parked by kind, but the work it was waiting on has closed. The service
+    // bands it ELEVATED; the app must not file it under "wants nothing".
+    tile({
+      id: 'tk-dispo',
+      kind: 'parked',
+      title: 'routed — fix+guard ruled, nothing further needed here',
+      severity: 'ELEVATED',
+      waiting_on: ['tk-hgmob'],
+      waiting_on_open: [],
+      disposition_due: true,
+      frontier: 'parked · blocker landed',
+      needs: 'blocker landed — dispose or resume',
+      rank_score: 2_002_001,
     }),
   ],
 };
@@ -142,7 +161,26 @@ it('lists a parked conversation in its own section, not in the ranked table', as
 
 it('counts the two sections separately in the header', async () => {
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/2 anchors · 1 parked/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/3 anchors · 1 parked/)).toBeTruthy());
+});
+
+// The defect this split exists to prevent (tk-2plde): a subject that routed
+// work out of a sitting kept saying "nothing further needed here" after that
+// work merged, and the quiet section is where it went on saying it. Once the
+// blocker closes the row owes a disposition, so it must be in the ranked table
+// — a parked row the operator has to open to discover is the whole bug.
+it('promotes a parked row whose blocker landed into the ranked table', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/fix\+guard ruled/)).toBeTruthy());
+
+  expect(within(attentionTable()).getByText(/fix\+guard ruled/)).toBeTruthy();
+  expect(within(parkedSection()).queryByText(/fix\+guard ruled/)).toBeNull();
+
+  const row = within(attentionTable()).getByText(/fix\+guard ruled/).closest('tr');
+  expect(row).not.toBeNull();
+  // The stale takeaway must not be the row's answer — the deterministic
+  // disposition phrase outranks it.
+  expect(within(row as HTMLElement).getByText(/blocker landed — dispose or resume/)).toBeTruthy();
 });
 
 it('drills into a parked row like any other tile', async () => {

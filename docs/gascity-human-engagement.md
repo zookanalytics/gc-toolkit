@@ -336,6 +336,24 @@ subject to look at next. Longevity is deliberately not the remedy:
 raising `idle_timeout` only widens the window in which a dead thread
 looks alive.
 
+*The limit of a written trace, and what closes it (2026-08-22,
+`tk-2plde`):* the takeaway is **one string, frozen when it is written**.
+That is enough for a reap — the record survives — and not enough for a
+wait. A sitting that ROUTES work out of a subject records "routed —
+tk-hgmob slung; nothing further needed here" and the subject goes on
+saying exactly that after tk-hgmob merges, because nothing in the city
+re-reads prose. The operator's framing: *"waiting, holding, those are
+graph states, not comments."* So a routed wait is also written as a
+**`blocks` edge** — `gc-helm takeaway <subject> "…" --waiting-on
+<work-bead>` writes both in one call — and the board re-derives on every
+render whether the blocker has closed, promoting the row to *"blocker
+landed — dispose or resume"* when it has. Without the edge the wait is
+unaskable: tk-yps55 sat parked for 29 hours after its fix merged and
+cost a whole sitting to rediscover that it was finished, on a parked
+budget where roughly 40% of the reserved rows were already terminal.
+Pass `--waiting-on` for every bead a sitting routes work into; a wait
+recorded only in prose is a wait nothing will ever re-ask.
+
 *The converse of that rule (added 2026-08-14, tk-mndjz):* a visit that
 never held closes **silently** — no sign-off, no thread output at all,
 only the note appended to its subject. That covers a visit folded into a
