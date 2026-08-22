@@ -395,6 +395,78 @@ run disabled "topic one" "topic two"
 eq "$RC" "2" "(FAILCLOSE) two positionals are a usage error (quote the topic)"
 eq "$CALLS" "" "(FAILCLOSE) and create nothing"
 
+# --- (RIGWHY) this script's own enumerate_rigs names WHICH failure it hit -----
+# The same defect as gc-helm.sh's (tk-lzdty half 2), in this script's hand-rolled
+# copy — and worse here, because it piped `gc rig list` STRAIGHT into jq. A
+# pipeline reports the LAST command's status, so gc's exit code was discarded
+# structurally, not just by a `|| true`, and its stderr went to /dev/null. A
+# wedged data plane, unparseable output and a city that genuinely has no rigs
+# all produced one sentence and exit 3.
+#
+# This matters here specifically because the topic path shells out to
+# `gc-helm.sh open`: if the two front doors disagree about why a city has no
+# rigs, the operator gets a different story depending on which one they hit.
+# There is no timeout arm — unlike gc-helm.sh this script does not bound the
+# call, so there is no kill to report.
+mkdir -p "$TMP/rigbin"
+cat > "$TMP/rigbin/gc" <<'RIGSTUB'
+#!/usr/bin/env bash
+if [ "$1 ${2:-}" = "rig list" ]; then
+  case "${RIGMODE:-}" in
+    exitfail) echo "dial tcp 127.0.0.1:3307: connect: connection refused" >&2; exit 7 ;;
+    empty)    : ;;
+    notjson)  echo "warning: rebuilding stale rig cache" ;;
+    shape)    jq -n '{other:[]}' ;;
+    rigless)  jq -n '{rigs:[]}' ;;
+  esac
+  exit 0
+fi
+printf '%s %s\n' "$1" "${2:-}" >> "$FAKE_CALLS"
+exit 0
+RIGSTUB
+chmod +x "$TMP/rigbin/gc"
+
+# A bead-id-shaped argument is what sends this script down the rig-resolution
+# path in the first place, so drive it with one.
+rigwhy() {
+    : > "$FAKE_CALLS"
+    set +e
+    PATH="$TMP/rigbin:$TMP/bin:$PATH" RIGMODE="$1" sh "$SCRIPT" tk-abc12 >/dev/null 2>"$TMP/rigerr"
+    RIGWHY_RC=$?
+    set -e
+    RIGWHY_ERR="$(cat "$TMP/rigerr")"
+}
+saysv() {
+    rigwhy "$1"
+    has "$RIGWHY_ERR" "$2" "(RIGWHY) $3"
+    eq "$RIGWHY_RC" "3" "(RIGWHY) …and still exits 3 ($3)"
+    eq "$(cat "$FAKE_CALLS")" "" "(RIGWHY) …having filed nothing ($3)"
+}
+saysv exitfail "exited 7"                     "a non-zero gc exit reports the status, not 'returned nothing'"
+saysv exitfail "connection refused"           "…and carries gc's stderr, which the old pipeline discarded"
+saysv empty    "exited 0 but printed nothing" "a silent empty answer is not read as an empty city"
+saysv notjson  "is not JSON"                  "unparseable output says so"
+saysv shape    "no '.rigs' array"             "valid JSON of the wrong shape is a gc contract change"
+saysv rigless  "no rigs in this city"         "a genuinely rigless city is reported as a CITY state"
+
+: > "$TMP/rigmsgs"
+for m in exitfail empty notjson shape rigless; do
+    rigwhy "$m"; printf '%s\n' "$RIGWHY_ERR" >> "$TMP/rigmsgs"
+done
+eq "$(sort -u "$TMP/rigmsgs" | wc -l | tr -d ' ')" "5" \
+   "(RIGWHY-DISTINCT) five causes produce five different sentences"
+
+# Guard the evidence itself: if the pipeline form comes back, gc's status is
+# structurally unavailable again and every message above degrades to one.
+# Match "gc rig list" and a jq pipe on the SAME code line, with the redirect
+# that sits between them left unspecified — the old form was
+# `gc rig list --json 2>/dev/null | jq`, so requiring the two to be adjacent
+# missed it and this guard passed against the very code it exists to catch.
+# Comment lines are excluded so the prose above cannot satisfy it either.
+awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/&&/gc rig list/&&/\|[[:space:]]*jq/' "$SCRIPT" | grep -q . \
+  && bad "(RIGWHY-EVIDENCE) the pipe-into-jq form is back — gc's exit status is discarded" \
+  || ok "(RIGWHY-EVIDENCE) gc is run on its own, so its exit status survives"
+
 # --- (HELP/SYNTAX) ------------------------------------------------------------
 run yes --help
 eq "$RC" "0" "(HELP) --help exits 0"

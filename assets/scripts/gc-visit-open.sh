@@ -67,7 +67,12 @@
 # ── Exit codes ───────────────────────────────────────────────────────
 #   0  a conversation is queued (visit filed, or first reaction slung)
 #   2  usage error (no topic, unknown flag, unknown rig)
-#   3  environment failure (cannot enumerate rigs, gc-helm.sh missing)
+#   3  environment failure (cannot enumerate rigs, gc-helm.sh missing).
+#      The rig-enumeration failures share this code but not the message:
+#      gc exiting non-zero, an empty / unparseable / wrong-shaped answer
+#      and a legitimately rigless city each name their own operator move
+#      (tk-lzdty), matching gc-helm.sh's taxonomy so the two front doors
+#      cannot tell the operator different stories.
 #   4  runtime failure (subject bead create failed, visit filing failed)
 #
 # Side effects: creates ONE bead (the subject) and then either slings a
@@ -225,10 +230,43 @@ esac
 RIGS=""
 enumerate_rigs() {
     [ -n "$RIGS" ] && return 0
-    RIGS=$(gc rig list --json 2>/dev/null | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null)
+    # >>> rig-enumeration-taxonomy
+    # Mirrors gc-helm.sh's enumerate_rigs on purpose: this script's own topic
+    # path shells out to `gc-helm.sh open`, so the two front doors must not
+    # give different accounts of why a city has no rigs. The old one-liner
+    # piped gc straight into jq, which discards gc's exit status (a pipeline
+    # reports the LAST command's) along with its stderr, and then reported a
+    # wedged data plane, unparseable output and a genuinely rigless city with
+    # one identical sentence (tk-lzdty). No timeout arm here — unlike
+    # gc-helm.sh this script does not bound the call, so there is no kill to
+    # report and claiming one would be a lie.
+    _er_errf=$(mktemp 2>/dev/null || printf '')
+    _er_rc=0
+    if [ -n "$_er_errf" ]; then
+        rigs_raw=$(gc rig list --json 2>"$_er_errf") || _er_rc=$?
+        _er_why=$(tr '\n' ' ' < "$_er_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+        rm -f "$_er_errf" 2>/dev/null || true
+    else
+        rigs_raw=$(gc rig list --json 2>/dev/null) || _er_rc=$?
+        _er_why=""
+    fi
+    [ "$_er_rc" -eq 0 ] \
+        || die "could not enumerate rigs: 'gc rig list' exited ${_er_rc}${_er_why:+ — $_er_why}. That is the data plane, not this script — try 'gc doctor' and check Dolt. This command wrote nothing." 3
+    # jq -e separates the rest by exit status: 4 = no output at all,
+    # 5 = would not parse, 1 = parsed but not the {"rigs":[…]} contract.
+    _er_shape=0
+    printf '%s' "$rigs_raw" | jq -e 'type=="object" and (.rigs|type)=="array"' >/dev/null 2>&1 || _er_shape=$?
+    case "$_er_shape" in
+        0) : ;;
+        4) die "could not enumerate rigs: 'gc rig list --json' exited 0 but printed nothing. A silent empty answer usually means gc was killed or the city path is wrong — check GC_CITY and 'gc doctor'. This command wrote nothing." 3 ;;
+        5) die "could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." 3 ;;
+        *) die "could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem. This command wrote nothing." 3 ;;
+    esac
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null)
     [ -n "$RIGS" ] || RIGS='[]'
     [ "$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)" -gt 0 ] \
-        || die "could not enumerate rigs (gc rig list returned nothing)" 3
+        || die "no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." 3
+    # <<< rig-enumeration-taxonomy
 }
 
 if [ -n "$looks_like_bead_id" ]; then
