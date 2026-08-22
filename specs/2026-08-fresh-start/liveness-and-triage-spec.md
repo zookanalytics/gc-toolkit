@@ -286,6 +286,80 @@ hardest because it fails worst: a broken precheck makes the condition
 check fail, a failing condition check reads as not due, and the sweep
 retires itself on every rig with every other file still correct.
 
+**Amendment, 2026-08-22 (bead tk-st143).** The sweep was nominating work
+that did not exist and filing conversations another conversation was
+already having. Three corrections, shipped in
+`formulas/mol-liveness-sweep.toml` and pinned by the same
+`liveness-sweep-delta.test.sh`.
+
+- **A landed workflow's step beads are teardown, not waits (class 0(b)).**
+  `mol-polecat-work` runs its steps inline and closes none of them, ever,
+  so when its anchor lands the whole step chain stays open, stays ready,
+  and arrives as unnamed waits on every subsequent pass. The classifier
+  read each step's own edges and never asked whether the workflow it
+  belongs to had finished. Measured on shutupandlisten 2026-08-13:
+  sixteen step beads across two dead roots (su-zu1j, anchor su-uzy9.4, PR
+  #57 merged; su-vc8n, anchor su-uzy9.5, PR #58 merged), every one of them
+  nominated, none of them work anybody could do — routing such a bead
+  re-implements landed work on a branch whose PR already merged. The new
+  `landed-husks` block resolves root → input convoy → anchor once per
+  ROOT and drops every step of a landed root at once. **Landed is
+  `status=closed` OR `merge_result=merged` and deliberately only that
+  pair**, because every other terminal-looking marker is a state a live
+  molecule wears mid-flight — `pull_request` is what a rework anchor
+  carries from the round being reworked. The sibling implementation of
+  this same test in `assets/scripts/detect-stalled-workflows.sh` learned
+  that the expensive way, and this one inherits its rule and its reason.
+  Like the machine convoys of class 0(a) these owe a reaper rather than a
+  sitting, so the pass excludes them and stamps the root ids as
+  `sweep.husk_roots` — exclusion first, the reaper follows.
+
+- **Visits dedupe by `gc.root_bead_id`, not only by continuation group
+  (class 3).** A root-scoped stall visit
+  (`detect-stalled-workflows.sh`, stamping `stall_root`) hangs off the
+  stalled-workflows subject and this sweep's batch visit off the
+  unnamed-waits subject, so the sibling dedupe keyed on
+  `gc.continuation_group` could never fold them: both filed about one
+  frozen workflow, and on 2026-08-13 the operator was holding three
+  concurrent sittings on a single shape. A candidate whose root a live
+  visit already names is now class 3. **The precedence is deliberate and
+  one-directional**: the root-scoped visit is a diagnosis of one workflow
+  and this sweep's contribution is one line of a batch census, so the
+  census folds into the diagnosis and never the reverse — which is why
+  `detect-stalled-workflows.sh` still does not read this sweep's visits.
+
+- **An agenda a sitting already dispositioned is not re-filed.** The
+  step-3 skip deliberately does not advance `sweep.reported`, and a
+  baseline can be lost or reset, so the same NEW set can come round again
+  after a sitting has worked it — su-qoma was a verbatim re-file of
+  su-7j8b, closed two days earlier with `gc.outcome=dispositioned`. The
+  guard compares the id SET rather than the title, which is a pair of
+  counts that collide by accident, and fires only on
+  `gc.outcome=dispositioned`: a visit closed `cut-short` ran out of time
+  with its agenda un-worked and re-filing it is correct. Suppression
+  advances the baseline, which is what makes the guard terminate rather
+  than fire forever.
+
+One consequence is accepted rather than fixed. A landed husk is not
+locally decidable, so the precheck of the amendment above cannot exclude
+it and must not try — excluding more than classify does is the direction
+that breaks the superset guarantee. Husks therefore never enter
+`sweep.reported`, never close on their own, and keep the precheck reading
+them as new: a pass runs every cadence and files nothing. That trades one
+operator sitting on work that does not exist for one session that
+produces no visit, which is the better trade but is residue, not a cure.
+The reaper that `sweep.husk_roots` feeds is what ends it. Measured on
+gc-toolkit 2026-08-22: 16 of the 21 root-bearing ready candidates were
+husks — including one whose anchor was closed with no `merge_result` at
+all, and, as the negative control, one live anchor carrying
+`merge_result=pull_request` that the rule correctly left visible.
+
+All three keep the report-don't-hide bias every other check here obeys:
+a failed root, convoy or anchor read contributes no husk and leaves the
+bead visible (with `sweep.husk_liveness=unverified` disclosed in the
+body), and an unreadable closed-visit listing files rather than
+suppresses.
+
 ## 3. Triage recurrence
 
 **The subject:** an ordinary bead, `task_kind=triage-subject`, body =
