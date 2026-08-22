@@ -217,9 +217,25 @@ healthy.
 
 | `GC_HELM_SOURCE` | Behaviour |
 |---|---|
-| unset (default) | beads library if `<city>/rigs/*/.beads` is readable; otherwise the HTTP API, with a log line naming the consequence |
-| `beads` | force the library; **fatal** if the stores are unreadable, rather than a quiet downgrade |
+| unset (default) | beads library if this binary can actually OPEN a rig store; otherwise the HTTP API, with a log line naming the consequence |
+| `beads` | force the library; **fatal** if no store can be opened, rather than a quiet downgrade |
 | `supervisor` | force the HTTP API (accepting `stale_days = 0` and no `human`/`parked` kinds) |
+
+**The test is an OPEN, not a path check** (tk-4cqtv). Resolving
+`<city>/rigs/*/.beads` is not enough to know this backend can serve: a binary
+whose embedded beads library is older than the live stores finds every directory
+present and fails only later, per rig, inside each gather with a schema-version
+mismatch. Selecting on the cheap check therefore made the one failure the
+fallback exists for invisible to the code choosing the fallback — a helm-svc
+reported itself healthy while every gather across all four rigs died. The
+startup probe opens a store, which is where that error is raised.
+
+Paying for that open at startup costs nothing extra: the handle is cached, so
+the first gather reuses the connection the probe made. It moves the first
+connection earlier rather than adding one, and only a *candidate* beads backend
+is probed — a forced `supervisor` never pays. A probe that fails or times out
+selects the HTTP API rather than refusing to start, because a degraded board
+beats no board.
 
 ## Wiring it as a workspace-service
 
@@ -565,6 +581,12 @@ Discovery env:
   and `GC_HELM_CITY` (else parsed from `GC_SERVICE_URL_PREFIX`, else the
   `GC_CITY_PATH` basename) — the HTTP backend's target.
 - `GC_HELM_CACHE_TTL` — seconds or a Go duration; default 45s.
+- `GC_HELM_PROBE_TIMEOUT` — seconds or a Go duration; default 10s. Bounds the
+  startup open described under *Picking a backend*. The socket is not created
+  until the backend is chosen, so an unbounded probe would turn a wedged Dolt
+  into a service that never starts. Zero and negative values fall back to the
+  default: a zero deadline would fail every probe and pin the service to the
+  HTTP backend for good.
 
 The standalone invocation above reaches the supervisor over HTTP; to run it on
 the library backend instead, pass `GC_CITY_PATH` (the supervisor already injects

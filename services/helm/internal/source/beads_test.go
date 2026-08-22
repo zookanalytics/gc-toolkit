@@ -1045,3 +1045,101 @@ func TestCityWithoutHQStoreStillWorks(t *testing.T) {
 		t.Errorf("want exactly the one rig, got %+v", rigs)
 	}
 }
+
+// TestBeadsProbeVersusCheck pins the gap between the two predicates, which is
+// the whole of tk-4cqtv: on a binary whose embedded beads library is behind the
+// live stores, every path still resolves — so Check passes and reports the
+// backend usable — while every store OPEN fails, which is where Gather would
+// have died. Probe asks the question Check cannot.
+func TestBeadsProbeVersusCheck(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	skew := errors.New("schema version mismatch: database is at v65, binary knows up to v61")
+
+	var tried []string
+	broken := NewBeadsSource(
+		WithCityPath(root),
+		withGCClient(&fakeGC{}),
+		withStoreOpener(func(_ context.Context, beadsDir string) (beadStore, error) {
+			tried = append(tried, filepath.Base(filepath.Dir(beadsDir)))
+			return nil, skew
+		}),
+	)
+
+	// The defect, stated as an assertion: the cheap check is blind to this.
+	if err := broken.Check(); err != nil {
+		t.Fatalf("Check passes on a skewed binary — that is the premise of this test: %v", err)
+	}
+	err := broken.Probe(context.Background())
+	if err == nil {
+		t.Fatal("Probe must fail when no rig store can be opened")
+	}
+	// The diagnostic is what an operator reads out of the service log, so the
+	// underlying error has to survive verbatim rather than be summarised away.
+	if !strings.Contains(err.Error(), "v65") || !strings.Contains(err.Error(), "gc-toolkit") {
+		t.Errorf("Probe must name the rig and the underlying failure, got: %v", err)
+	}
+	if !slices.Equal(tried, []string{"gc-toolkit", "signal-loom"}) {
+		t.Errorf("Probe must try every rig before giving up, tried %v", tried)
+	}
+}
+
+// TestBeadsProbeSucceedsOnOneReadableRig pins Probe's success condition to
+// Gather's. Gather returns a board as long as ONE rig could be read, so a Probe
+// that demanded all of them would refuse a backend that serves fine.
+func TestBeadsProbeSucceedsOnOneReadableRig(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	var tried []string
+	src := NewBeadsSource(
+		WithCityPath(root),
+		withGCClient(&fakeGC{}),
+		withStoreOpener(func(_ context.Context, beadsDir string) (beadStore, error) {
+			rig := filepath.Base(filepath.Dir(beadsDir))
+			tried = append(tried, rig)
+			if rig == "gc-toolkit" {
+				return nil, errors.New("schema version mismatch")
+			}
+			return populatedStore(), nil
+		}),
+	)
+	if err := src.Probe(context.Background()); err != nil {
+		t.Fatalf("one readable rig must satisfy Probe: %v", err)
+	}
+	// Rigs are walked in sorted order and Probe stops at the first success, so
+	// it must not have looked past signal-loom.
+	if !slices.Equal(tried, []string{"gc-toolkit", "signal-loom"}) {
+		t.Errorf("Probe must stop at the first readable rig, tried %v", tried)
+	}
+
+	// A city it cannot even enumerate fails the same way Check does.
+	if err := NewBeadsSource(WithCityPath("")).Probe(context.Background()); err == nil {
+		t.Error("Probe with no city path must fail")
+	}
+}
+
+// TestBeadsProbeHandleIsReusedByGather is the cost argument for probing at
+// startup, as an assertion rather than a claim in a comment: store() caches, so
+// the connection Probe opens is the one the first Gather uses. Probing moves
+// the first connection earlier; it does not add one. If this ever fails, the
+// entrypoint is paying twice and selectSource's "affordable" reasoning is void.
+func TestBeadsProbeHandleIsReusedByGather(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	var opens int
+	st := populatedStore()
+	src := NewBeadsSource(
+		WithCityPath(root),
+		withGCClient(&fakeGC{}),
+		withStoreOpener(func(context.Context, string) (beadStore, error) {
+			opens++
+			return st, nil
+		}),
+	)
+	if err := src.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if _, err := src.Gather(context.Background()); err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if opens != 1 {
+		t.Errorf("probe + gather opened the store %d times, want 1 — a startup probe must not cost an extra connection", opens)
+	}
+}
