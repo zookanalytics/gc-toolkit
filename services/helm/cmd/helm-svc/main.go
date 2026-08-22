@@ -1,4 +1,14 @@
-// Command helm-svc is the Attention Canvas backend sidecar. It runs as a
+// Command helm-svc has TWO entry points over ONE board:
+//
+//	helm-svc            the Attention Canvas backend sidecar (default; `serve`)
+//	helm-svc board      the terminal board — the CLI VIEW of the same data
+//
+// They share the gather (internal/source) and the ranking (internal/board)
+// rather than reimplementing either, which is the whole point: a fix to the
+// board is a fix to both views. Keeping them in one binary also keeps them from
+// going stale independently — see the comment atop board.go.
+//
+// As the sidecar, it runs as a
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
 // a unix socket path in GC_SERVICE_SOCKET, dials that socket as a reverse proxy,
 // and reaches GET /helm (the board), GET /healthz (liveness) and the embedded
@@ -14,6 +24,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -40,6 +51,36 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("helm: ")
 
+	// Subcommand dispatch. A BARE invocation still serves, because that is how
+	// the supervisor spawns this binary and that contract predates the CLI.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "board":
+			boardMain(os.Args[2:])
+			return
+		case "serve":
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		case "-h", "--help", "help":
+			fmt.Print(topUsage)
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "helm-svc: unknown subcommand %q\n\n%s", os.Args[1], topUsage)
+			os.Exit(2)
+		}
+	}
+
+	serve()
+}
+
+const topUsage = `Usage:
+  helm-svc [serve]        run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
+  helm-svc board [flags]  render the cross-rig attention board in the terminal
+
+Both views share one gather and one ranking. Run "helm-svc board --help" for
+the board's flags.
+`
+
+func serve() {
 	socket := os.Getenv("GC_SERVICE_SOCKET")
 	if socket == "" {
 		log.Fatal("GC_SERVICE_SOCKET is not set; run me as a proxy_process workspace-service")

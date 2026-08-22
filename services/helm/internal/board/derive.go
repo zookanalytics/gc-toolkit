@@ -172,6 +172,18 @@ func rollUp(children []Child, f Facts) rollup {
 			r.openHeads = append(r.openHeads, c.ID)
 		}
 	}
+
+	// Sort every head list. gc-helm.sh emits them in child-enumeration order,
+	// which is whatever order the store returned the dependency rows in — so
+	// the bash board's own output for these three fields is not stable run to
+	// run, and neither would a port of it be. Sorting makes THIS board's wire
+	// bytes deterministic, which is what a golden test and a polling frontend
+	// both need. Parity against the bash board on these fields is therefore by
+	// SET, not by sequence; every other field matches element for element.
+	sort.Strings(r.liveHeads)
+	sort.Strings(r.deadOwnerHeads)
+	sort.Strings(r.inFlightHeads)
+	sort.Strings(r.openHeads)
 	return r
 }
 
@@ -505,4 +517,50 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 		Partial:       partial,
 		PartialErrors: partialErrors,
 	}
+}
+
+// DefaultMaxRows and DefaultMaxParked mirror gc-helm.sh's GC_HELM_MAX_ROWS=50
+// and GC_HELM_MAX_PARKED=15.
+const (
+	DefaultMaxRows   = 50
+	DefaultMaxParked = 15
+)
+
+// CapRows applies gc-helm.sh's SPLIT row cap and returns one globally ranked
+// slice. limit<=0 means uncapped (both kinds), which is what tooling asks for.
+//
+// A single rank-ordered cap would silently undo half of what the `parked` kind
+// is for. Parked is band-floored to LOW, so it sorts last by construction, and
+// the operator's own surface asks for 36 rows (tmux-pick-helm.sh) against a
+// board whose attention bands alone fill most of that — so every parked row
+// falls off the end, and a bead added to the gather specifically so it could be
+// FOUND is once again absent from the board the operator actually reads.
+//
+// So the budgets are separate: attention rows keep the whole of limit (their
+// budget is not reduced by parked existing) and parked rows draw on maxParked.
+// The two slices are re-merged by rank_score, so the output stays one ranked
+// array and the --json shape is unchanged.
+func CapRows(tiles []Tile, limit, maxParked int) []Tile {
+	if limit <= 0 {
+		return tiles
+	}
+	out := make([]Tile, 0, min(len(tiles), limit+maxParked))
+	var attention, parked int
+	for _, t := range tiles {
+		if t.Kind == "parked" {
+			if parked >= maxParked {
+				continue
+			}
+			parked++
+		} else {
+			if attention >= limit {
+				continue
+			}
+			attention++
+		}
+		out = append(out, t)
+	}
+	// tiles arrives ranked and the filter above preserves that order, so the
+	// re-merge gc-helm.sh does with an explicit sort is already done.
+	return out
 }
