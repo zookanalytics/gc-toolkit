@@ -19,9 +19,14 @@ import (
 )
 
 // Result is one gather pass: the raw anchors that [board.BuildBoard] consumes,
-// plus cross-rig degradation signals propagated from the underlying API.
+// the cross-anchor joins it derives `held` and the in-flight counts from, plus
+// cross-rig degradation signals propagated from the underlying API.
 type Result struct {
-	Anchors       []board.Anchor
+	Anchors []board.Anchor
+	// Facts are the visit / in-flight / session-liveness maps. A backend that
+	// cannot supply them leaves the zero value, which yields a narrower board
+	// (nothing held, nothing in flight) rather than a wrong one.
+	Facts         board.Facts
 	Partial       bool
 	PartialErrors []string
 }

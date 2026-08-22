@@ -2,7 +2,9 @@ package board
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -21,7 +23,12 @@ const (
 // untouched for MORE than this many days is bumped to ELEVATED.
 const staleThresholdDays = 14
 
-// staleDays is whole days since updatedAt, mirroring gc-helm.sh line 769
+// xrefCap mirrors gc-helm.sh's XREF_CAP=5: the most cross-rig references that
+// can count toward an anchor's weight. Uncapped, one prose-heavy epic naming a
+// dozen other rigs' beads would outrank a genuinely stranded frontier.
+const xrefCap = 5
+
+// staleDays is whole days since updatedAt, mirroring gc-helm.sh
 // (`(($now - $upd) / 86400) | floor`). A zero updatedAt means the source could
 // not read the field, which the bash treats as `$upd == null` → 0.
 //
@@ -51,56 +58,226 @@ func prioWeight(priority *int) int {
 	return max(0, 4-*priority)
 }
 
-// counts derives the four child-status counts (lines 592-601 of gc-helm.sh).
-// open counts every non-closed child (including blocked/deferred); inProgress is
-// strictly status=="in_progress".
-func counts(children []Child) (mTotal, nClosed, open, inProgress int) {
-	mTotal = len(children)
-	for _, c := range children {
-		switch c.Status {
-		case "closed":
-			nClosed++
-		case "in_progress":
-			inProgress++
-			open++
-		default:
-			open++
-		}
+// ownerLive answers gc-helm.sh's `def owner_live($assignee)`: is the session
+// that claimed this child still alive?
+//
+// Keyed off the session STATE per the witness orphan-liveness rule —
+// archived/closed/absent all mean a dead owner, the canonical orphaned
+// in-progress bead. An empty assignee is no owner at all, so also false. The
+// bash never consults `.running`, which is null for an active session mid-churn
+// and would false-flag a live polecat; neither does this, because [Facts]
+// carries state only.
+func (f Facts) ownerLive(assignee string) bool {
+	if assignee == "" {
+		return false
 	}
-	return mTotal, nClosed, open, inProgress
+	st, ok := f.OwnerState[assignee]
+	if !ok {
+		return false
+	}
+	return st != "archived" && st != "closed"
 }
 
-// severity mirrors gc-helm.sh's band derivation. STRANDED (HIGH) is open work
-// with none in progress. The stale bump (NORMAL→ELEVATED when stale>14) fires
-// on a real stale, which an anchor with an unreadable updated_at never reaches:
-// staleness there is 0, so an unknown age is treated as fresh rather than
-// silently promoted.
+// wfLive answers gc-helm.sh's `def wf_live($id)`: is this child covered by a
+// LIVE graph.v2 workflow?
 //
-// The two metadata-gathered kinds (tk-2v08m) sit at opposite ends on purpose. A
-// `human` bead is ELEVATED for the same reason a decision is: it is stamped
-// `gc.routed_to=human`, so no agent will take it and it moves only when the
-// operator moves it. A `parked` bead is LOW because it is the opposite claim —
-// the conversation reached a takeaway and wants nothing, it just has to stay
-// FINDABLE. Ranking it against stranded epics is what the bead asks not to do,
-// and LOW is how it stays out of that contest: the band floor puts every parked
-// row beneath every real attention item, whatever its priority or age.
-func severity(src string, mTotal, open, inProgress, stale int) Severity {
+// `gc sling` leaves the work bead at status=open/assignee=null and puts the
+// in-flight state on the workflow, so this is the only way a polecat
+// mid-implementation is visible at all. Liveness is re-derived HERE, against
+// the session states in the same Facts, rather than trusted from the gather:
+// the gather can only record which workflows were live when it ran, and a
+// polecat that drained since must stop counting at once — otherwise the fix
+// trades a false "stranded" for a false "in flight", the worse lie on a board
+// whose job is to say what needs a human.
+func (f Facts) wfLive(childID string) bool {
+	for _, name := range f.Inflight[childID] {
+		if f.ownerLive(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// rollup is every count and id-list the derivation reads off an anchor's
+// children — the block of `as $…` bindings in the middle of gc-helm.sh's jq
+// pass, computed once so the branches below can all read from it.
+type rollup struct {
+	mTotal     int
+	nClosed    int
+	open       int
+	inProgress int // RAW status count; 0 for a slung bead by construction
+	assigned   int
+
+	// liveHeads is the union of the two ways a child can be demonstrably
+	// moving: claimed by a live session, OR covered by a live workflow. Unioned
+	// by id, so a child matched both ways is counted once.
+	liveHeads []string
+	// deadOwnerHeads is claimed, owner dead, AND no live workflow behind it.
+	// The workflow clause matters: a re-dispatched bead can carry a stale
+	// assignee from the session that died while a live workflow works it now,
+	// and calling that "dead owner" would be the same error in a new place.
+	deadOwnerHeads []string
+	// inFlightHeads is the part of liveHeads attributable to a workflow.
+	inFlightHeads []string
+	// openHeads is unclaimed/unowned open children MINUS anything a live
+	// workflow already carries — those are not idle, they are in flight.
+	openHeads []string
+}
+
+// rollUp derives every child-derived quantity for one anchor.
+func rollUp(children []Child, f Facts) rollup {
+	r := rollup{
+		mTotal:         len(children),
+		liveHeads:      []string{},
+		deadOwnerHeads: []string{},
+		inFlightHeads:  []string{},
+		openHeads:      []string{},
+	}
+
+	live := make(map[string]bool, len(children))
+	for _, c := range children {
+		if c.Status == "closed" {
+			r.nClosed++
+			continue
+		}
+		r.open++
+		if c.Status == "in_progress" {
+			r.inProgress++
+		}
+		if c.Assignee != "" {
+			r.assigned++
+		}
+
+		wf := f.wfLive(c.ID)
+		claimed := c.Status == "in_progress" && f.ownerLive(c.Assignee)
+		if claimed || wf {
+			r.liveHeads = append(r.liveHeads, c.ID)
+			live[c.ID] = true
+		}
+		if wf {
+			r.inFlightHeads = append(r.inFlightHeads, c.ID)
+		}
+		if c.Status == "in_progress" && !f.ownerLive(c.Assignee) && !wf {
+			r.deadOwnerHeads = append(r.deadOwnerHeads, c.ID)
+		}
+	}
+
+	// Second pass: openHeads subtracts liveHeads, which is only complete once
+	// every child has been classified.
+	for _, c := range children {
+		if c.Status == "closed" {
+			continue
+		}
+		if (c.Assignee == "" || c.Status != "in_progress") && !live[c.ID] {
+			r.openHeads = append(r.openHeads, c.ID)
+		}
+	}
+	return r
+}
+
+// beadRef matches a bead id with one of the given prefixes: `<prefix>-<suffix>`
+// where the suffix is 3-8 lowercase alphanumerics. Mirrors gc-helm.sh's
+// `scan("(?:" + ($others|join("|")) + ")-[a-z0-9]{3,8}")`.
+func beadRef(prefixes []string) *regexp.Regexp {
+	quoted := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		if p != "" {
+			quoted = append(quoted, regexp.QuoteMeta(p))
+		}
+	}
+	if len(quoted) == 0 {
+		return nil
+	}
+	return regexp.MustCompile(`(?:` + strings.Join(quoted, "|") + `)-[a-z0-9]{3,8}`)
+}
+
+// crossRigRefs is the DETERMINISTIC prose scan for bead ids belonging to OTHER
+// rigs. Cross-rig work is forced into prose today (formal cross-rig dep edges
+// are rare), and a stranded anchor that blocks another rig is more urgent, so
+// the refs add weight.
+//
+// A decision carries no roll-up and is banded by what it IS, so gc-helm.sh
+// skips the scan for it entirely; so does this.
+//
+// ONE DELIBERATE DIVERGENCE from the bash. With a single-rig city the "other
+// prefixes" set is empty, and jq's `(?:)-[a-z0-9]{3,8}` then matches a bare
+// `-abc` anywhere in the prose — every hyphenated word becomes a phantom
+// cross-rig reference and silently inflates the weight lane. An empty prefix
+// set yields no refs here instead.
+func crossRigRefs(a Anchor, f Facts) []string {
+	out := []string{}
+	if a.Source == "decision" || a.Description == "" {
+		return out
+	}
+
+	others := make([]string, 0, len(f.Prefixes))
+	for _, p := range f.Prefixes {
+		if p != a.Prefix {
+			others = append(others, p)
+		}
+	}
+	re := beadRef(others)
+	if re == nil {
+		return out
+	}
+
+	rigNames := make(map[string]bool, len(f.RigNames))
+	for _, n := range f.RigNames {
+		rigNames[n] = true
+	}
+
+	seen := map[string]bool{}
+	for _, m := range re.FindAllString(a.Description, -1) {
+		// A hit that is really a rig NAME is not a bead id: "signal-loom" must
+		// not read as a `signal-` bead.
+		if rigNames[m] || m == a.ID || seen[m] {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	sort.Strings(out) // jq's `unique` sorts; keep the wire order identical.
+	return out
+}
+
+// severity mirrors gc-helm.sh's band derivation.
+//
+// The three metadata/shape-keyed kinds are placed AHEAD of the count branches
+// on purpose: they carry no roll-up by construction — the gather admits the
+// bead itself, not a set it owns — so the band must come from what the bead IS,
+// and falling through would read every one of them as an empty anchor.
+//
+//   - `unowned` is HIGH: under the everything-is-owned law an unowned
+//     non-machine convoy is exactly the orphan the observer exists to catch.
+//   - `human` is ELEVATED for the same reason a decision is: gc.routed_to=human
+//     means no agent will take it.
+//   - `parked` is LOW for the opposite reason — the conversation reached a
+//     takeaway and wants nothing, it only has to stay FINDABLE, so the band
+//     floor keeps it out of the contest whatever its priority or age.
+//
+// STRANDED (HIGH) is open work with nothing LIVE in it and no open visit. Two
+// things make that different from the naive "0 in progress": inProgressLive
+// counts a slung bead whose movement lives on its workflow, and `held` means a
+// conversation is holding the anchor — attention is already on it, so silence
+// in the child beads is not abandonment.
+func severity(a Anchor, r rollup, held bool, stale int) Severity {
 	var sev0 Severity
+	inProgressLive := len(r.liveHeads)
 	switch {
-	// These three kinds carry no roll-up by construction — the gather admits
-	// the bead itself, not a set it owns — so the band comes from what the bead
-	// IS. Falling through to the count branches below would read every one of
-	// them as an empty anchor and file it under LOW.
-	case src == "decision", src == "human":
-		sev0 = SevElevated
-	case src == "parked":
-		sev0 = SevLow
-	case mTotal == 0:
-		sev0 = SevLow
-	case open == 0:
-		sev0 = SevLow
-	case open > 0 && inProgress == 0:
+	case a.Source == "unowned":
 		sev0 = SevHigh
+	case a.Source == "decision", a.Source == "human":
+		sev0 = SevElevated
+	case a.Source == "parked":
+		sev0 = SevLow
+	case r.mTotal == 0:
+		sev0 = SevLow
+	case r.open == 0:
+		sev0 = SevLow
+	case r.open > 0 && inProgressLive == 0 && !held:
+		sev0 = SevHigh
+	case len(r.deadOwnerHeads) > 0:
+		sev0 = SevElevated
 	default:
 		sev0 = SevNormal
 	}
@@ -110,106 +287,198 @@ func severity(src string, mTotal, open, inProgress, stale int) Severity {
 	return sev0
 }
 
-// rankScore reproduces line 672: sevrank*1e6 + weight*1e3 + min(stale,999). The
-// weight is m_total + prio_w(priority) (the cross-rig-ref term is deferred).
-// weight is capped so it can never bleed into the severity lane; stale arrives
-// already clamped to the units lane by [staleDays].
-func rankScore(sev Severity, mTotal int, priority *int, stale int) int {
-	weight := min(mTotal+prioWeight(priority), rankTermCap)
+// weight is the rank PROXY: subtree size + priority weight + a capped cross-rig
+// ref count. Intentionally crude — blast radius, not an LLM judgement.
+func weight(r rollup, priority *int, xrefs []string) int {
+	return r.mTotal + prioWeight(priority) + min(len(xrefs), xrefCap)
+}
+
+// rankScore is sevrank*1e6 + weight*1e3 + min(stale,999). The weight is capped
+// so it can never bleed into the severity lane; stale arrives already clamped
+// to the units lane by [staleDays].
+func rankScore(sev Severity, w, stale int) int {
 	return sev.rank()*rankSeverityMultiplier +
-		weight*rankWeightMultiplier +
+		min(w, rankTermCap)*rankWeightMultiplier +
 		min(stale, rankTermCap)
 }
 
-// frontier is the one-line human summary. Display-only; it does
-// not feed rank_score. The metadata-gathered kinds describe their own state
-// rather than a roll-up they do not have.
-func frontier(a Anchor, mTotal, open, inProgress int) string {
+// frontier is the one-line human summary. Display-only; it does not feed
+// rank_score. The kinds that describe themselves do so instead of reporting a
+// roll-up they do not have.
+func frontier(a Anchor, r rollup, held bool) string {
+	inProgressLive := len(r.liveHeads)
+	dead := len(r.deadOwnerHeads)
+	deadSfx := ""
+	if dead > 0 {
+		deadSfx = fmt.Sprintf(" · %d stuck (dead owner)", dead)
+	}
+
 	switch {
+	case a.Source == "unowned":
+		return "unowned convoy — no owning bead"
 	case a.Source == "decision":
 		return "human-gated decision"
 	case a.Source == "human":
 		return "routed to the operator — no agent will take it"
 	case a.Source == "parked":
 		return "conversation parked — takeaway recorded"
-	case mTotal == 0:
+	case r.mTotal == 0:
 		return "empty — no children"
-	case open == 0:
-		return fmt.Sprintf("all %d closed · 0 open", mTotal)
-	case inProgress == 0:
-		return fmt.Sprintf("%d open · 0 in-progress (stranded)", open)
+	case r.open == 0:
+		return fmt.Sprintf("all %d closed · 0 open", r.mTotal)
+	case inProgressLive == 0 && dead > 0 && !held:
+		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.open, dead)
+	case inProgressLive == 0 && held:
+		return fmt.Sprintf("%d open · in conversation", r.open) + deadSfx
+	case inProgressLive == 0:
+		return fmt.Sprintf("%d open · 0 in flight (stranded)", r.open)
 	default:
-		return fmt.Sprintf("%d open · %d in-progress", open, inProgress)
+		return fmt.Sprintf("%d open · %d in flight", r.open, inProgressLive) + deadSfx
 	}
 }
 
-// needs is the "what does a human do" hint, using the
-// deterministic phrase only. The takeaway-driven sentence is deferred, so the
-// leading takeaway branch of gc-helm.sh is intentionally omitted here — a
-// `parked` bead names the resume GESTURE, not what its takeaway said, because
-// deriving a sentence from `gc.takeaway` is tk-x55wt's bead, not this one.
+// collapseWS mirrors jq's `gsub("[[:space:]]+";" ") | gsub("^ | $";"")`: a
+// takeaway is free prose and a stray newline would break the terminal table.
+var wsRun = regexp.MustCompile(`\s+`)
+
+func collapseWS(s string) string {
+	return strings.TrimSpace(wsRun.ReplaceAllString(s, " "))
+}
+
+// needs is the one-glance answer for a human.
 //
-// The gesture is real: `gc-visit-open` resolves a bare bead id against the live
-// rig prefixes and reopens the conversation on that bead, which is what the
-// prefix+a popup feeds it (assets/scripts/tmux-visit-prompt.sh). Resume already
-// worked before this change; only finding the id did not.
-func needs(a Anchor, mTotal, open, inProgress int) string {
+// The LLM-authored takeaway sentence WINS when one exists — that is the whole
+// point of gathering it, and it is why this branch sits ahead of every state
+// phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
+// the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
+// human table stays explanatory and cannot emit a raw or truncated bead id.
+func needs(a Anchor, r rollup, held bool, takeaway string) string {
+	if takeaway != "" {
+		return takeaway
+	}
+	inProgressLive := len(r.liveHeads)
+	dead := len(r.deadOwnerHeads)
+
 	switch {
+	case a.Source == "unowned":
+		return "unowned — assign an owning bead"
 	case a.Source == "decision":
 		return "operator decision"
 	case a.Source == "human":
 		return "operator action"
 	case a.Source == "parked":
 		return "resume: prefix+a, then the bead id"
-	case mTotal == 0:
+	case r.mTotal == 0:
 		return "no children — decompose or assign"
-	case open == 0:
+	case r.open == 0:
 		if a.Source == "convoy" {
-			return fmt.Sprintf("all %d closed — graduate", mTotal)
+			return fmt.Sprintf("all %d closed — graduate", r.mTotal)
 		}
-		return fmt.Sprintf("all %d closed — close or extend", mTotal)
-	case inProgress == 0:
+		return fmt.Sprintf("all %d closed — close or extend", r.mTotal)
+	case inProgressLive == 0 && dead > 0 && !held:
+		return "dead owner — recover or reassign"
+	case inProgressLive == 0 && held:
+		return "open to join"
+	case inProgressLive == 0:
 		return "decomposed, idle — assign or visit"
+	case dead > 0:
+		return fmt.Sprintf("in flight — %d stuck, recover", dead)
+	case held:
+		return "in flight (in conversation)"
 	default:
 		return "in flight"
 	}
 }
 
+// nilIfEmpty renders an absent string field as a JSON null rather than "". The
+// takeaway triple is always-present-but-nullable in the bash contract, and a
+// consumer tells "no takeaway" from "field gone" by the null.
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // computeTile derives a single tile from an anchor. now is the board's
 // generation instant, shared by every tile so one board never mixes staleness
 // measured against two different clock reads.
-func computeTile(a Anchor, now time.Time) Tile {
-	mTotal, nClosed, open, inProgress := counts(a.Children)
+func computeTile(a Anchor, now time.Time, f Facts) Tile {
+	r := rollUp(a.Children, f)
+	held := f.Visits[a.ID]
 	stale := staleDays(a.UpdatedAt, now)
-	sev := severity(a.Source, mTotal, open, inProgress, stale)
+	xrefs := crossRigRefs(a, f)
+	sev := severity(a, r, held, stale)
+	w := weight(r, a.Priority, xrefs)
+	takeaway := collapseWS(a.Takeaway)
+
+	// progress_mismatch: the convoy's own closed/total claim disagrees with the
+	// membership actually rolled up. Only meaningful where the source supplied
+	// a progress object.
+	mismatch := a.Progress != nil &&
+		(a.Progress.Total != r.mTotal || a.Progress.Closed != r.nClosed)
 
 	return Tile{
-		ID:         a.ID,
-		Rig:        a.Rig,
-		Kind:       a.Kind,
-		Title:      a.Title,
-		Severity:   sev,
-		NClosed:    nClosed,
-		MTotal:     mTotal,
-		Open:       open,
-		InProgress: inProgress,
-		Frontier:   frontier(a, mTotal, open, inProgress),
-		Needs:      needs(a, mTotal, open, inProgress),
-		StaleDays:  stale,
-		UpdatedAt:  a.UpdatedAt,
-		RankScore:  rankScore(sev, mTotal, a.Priority, stale),
+		ID:       a.ID,
+		Rig:      a.Rig,
+		Kind:     a.Kind,
+		Title:    a.Title,
+		Severity: sev,
+
+		Weight: w,
+		Held:   held,
+
+		NClosed:    r.nClosed,
+		MTotal:     r.mTotal,
+		Open:       r.open,
+		InProgress: r.inProgress,
+		Assigned:   r.assigned,
+
+		InProgressLive: len(r.liveHeads),
+		InProgressDead: len(r.deadOwnerHeads),
+		DeadOwner:      len(r.deadOwnerHeads) > 0,
+
+		InFlight:      len(r.inFlightHeads),
+		InFlightHeads: r.inFlightHeads,
+
+		Owned: a.Owned,
+
+		Stranded: r.mTotal > 0 && r.open > 0 && len(r.liveHeads) == 0 && !held,
+		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
+			a.Source != "human" && a.Source != "parked",
+		Complete:         r.mTotal > 0 && r.open == 0,
+		ProgressMismatch: mismatch,
+
+		StaleDays:      stale,
+		Priority:       a.Priority,
+		CrossRigRefs:   xrefs,
+		OpenHeads:      r.openHeads,
+		DeadOwnerHeads: r.deadOwnerHeads,
+
+		Takeaway:   nilIfEmpty(takeaway),
+		TakeawayAt: nilIfEmpty(a.TakeawayAt),
+		TakeawayBy: nilIfEmpty(a.TakeawayBy),
+
+		UpdatedAt: a.UpdatedAt,
+		Frontier:  frontier(a, r, held),
+		Needs:     needs(a, r, held, takeaway),
+		RankScore: rankScore(sev, w, stale),
 	}
 }
 
 // BuildBoard derives every tile, ranks by rank_score descending, and
 // deduplicates by id keeping the highest-ranked occurrence (so a bead matched
 // by two gathers appears once, in its higher band). Ties break by id ascending
-// for deterministic output. now stamps
-// GeneratedAt. partial/partialErrors propagate cross-rig degradation.
-func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []string) Board {
+// for deterministic output. now stamps GeneratedAt. partial/partialErrors
+// propagate cross-rig degradation.
+//
+// facts carries the three cross-anchor joins (visits, in-flight workflows,
+// session liveness); a zero value is legal and yields a board with no held or
+// in-flight signal — narrower, not wrong.
+func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []string, facts Facts) Board {
 	tiles := make([]Tile, 0, len(anchors))
 	for _, a := range anchors {
-		tiles = append(tiles, computeTile(a, now))
+		tiles = append(tiles, computeTile(a, now, facts))
 	}
 
 	sort.SliceStable(tiles, func(i, j int) bool {

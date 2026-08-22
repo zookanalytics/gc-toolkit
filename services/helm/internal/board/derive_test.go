@@ -16,6 +16,17 @@ var fixtureNow = time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 // daysAgo builds an updated_at that many days before fixtureNow.
 func daysAgo(d int) time.Time { return fixtureNow.Add(-time.Duration(d) * 24 * time.Hour) }
 
+// liveOwners builds a Facts in which every named session is alive. Since
+// tk-134d7 a child is only "moving" when its owning session is demonstrably
+// live, so any case that means "work is in flight" has to say whose.
+func liveOwners(names ...string) Facts {
+	st := map[string]string{}
+	for _, n := range names {
+		st[n] = "active"
+	}
+	return Facts{OwnerState: st}
+}
+
 // tileByID is a test helper.
 func tileByID(b Board, id string) (Tile, bool) {
 	for _, t := range b.Tiles {
@@ -44,7 +55,7 @@ func TestFourAnchorBoard(t *testing.T) {
 		}},
 	}
 
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	if got := len(b.Tiles); got != 4 {
 		t.Fatalf("all four anchors admitted: want 4, got %d", got)
@@ -87,7 +98,7 @@ func TestMetadataKindDerivation(t *testing.T) {
 		{ID: "tk-parked", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	human, ok := tileByID(b, "tk-human")
 	if !ok {
@@ -137,7 +148,7 @@ func TestParkedNeverOutranksAttention(t *testing.T) {
 				{ID: "c1", Status: "in_progress"},
 			}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if b.Tiles[0].ID != "tk-live" {
 		t.Errorf("in-flight work sorts above a parked conversation: got %q first", b.Tiles[0].ID)
 	}
@@ -162,7 +173,7 @@ func TestMetadataKindDedup(t *testing.T) {
 		{ID: "tk-both", Title: "routed and parked", Kind: "human", Source: "human",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if len(b.Tiles) != 1 {
 		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
 	}
@@ -182,7 +193,7 @@ func TestDedupKeepsHigherBand(t *testing.T) {
 			{ID: "c2", Status: "closed"},
 		}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if len(b.Tiles) != 1 {
 		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
 	}
@@ -200,7 +211,7 @@ func TestLowSeverity(t *testing.T) {
 			{ID: "d1", Status: "closed"}, {ID: "d2", Status: "closed"},
 		}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if e, _ := tileByID(b, "tk-empty"); e.Severity != SevLow {
 		t.Errorf("empty epic is LOW: got %s", e.Severity)
 	}
@@ -214,8 +225,8 @@ func TestLowSeverity(t *testing.T) {
 func TestRankLanesNonOverlapping(t *testing.T) {
 	// A LOW tile cannot be produced with a huge weight via the normal path
 	// (LOW means m==0 or all-closed), so test the rankScore function directly.
-	lowMax := rankScore(SevLow, 10_000, ptr(1), 10_000) // weight and stale both capped at 999
-	normalMin := rankScore(SevNormal, 0, ptr(4), 0)
+	lowMax := rankScore(SevLow, 10_000, 10_000) // weight and stale both capped at 999
+	normalMin := rankScore(SevNormal, 0, 0)
 	if lowMax >= normalMin {
 		t.Errorf("severity lanes overlap: LOW(maxweight)=%d >= NORMAL(minweight)=%d", lowMax, normalMin)
 	}
@@ -249,12 +260,12 @@ func TestStaleDays(t *testing.T) {
 // report an uncapped age, but rank_score must still cap its units term, or an
 // ancient anchor would borrow into the weight lane and outrank its own band.
 func TestRankStaleLaneStaysBounded(t *testing.T) {
-	ancient := rankScore(SevNormal, 0, ptr(4), 50_000)
-	ceiling := rankScore(SevNormal, 0, ptr(4), rankTermCap)
+	ancient := rankScore(SevNormal, 0, 50_000)
+	ceiling := rankScore(SevNormal, 0, rankTermCap)
 	if ancient != ceiling {
 		t.Errorf("stale term must cap at %d: 50000d scored %d, %dd scored %d", rankTermCap, ancient, rankTermCap, ceiling)
 	}
-	if ancient >= rankScore(SevHigh, 0, ptr(4), 0) {
+	if ancient >= rankScore(SevHigh, 0, 0) {
 		t.Error("a maximally stale NORMAL must never reach the HIGH band")
 	}
 }
@@ -267,9 +278,13 @@ func TestStaleBumpFires(t *testing.T) {
 	mk := func(id string, upd time.Time) Anchor {
 		return Anchor{ID: id, Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
 			UpdatedAt: upd,
-			Children:  []Child{{ID: id + "-a", Status: "in_progress"}, {ID: id + "-b", Status: "open"}}}
+			Children: []Child{
+				{ID: id + "-a", Status: "in_progress", Assignee: "polecat-live"},
+				{ID: id + "-b", Status: "open"},
+			}}
 	}
-	b := BuildBoard([]Anchor{mk("tk-fresh", daysAgo(1)), mk("tk-idle", daysAgo(40))}, fixtureNow, false, nil)
+	live := liveOwners("polecat-live")
+	b := BuildBoard([]Anchor{mk("tk-fresh", daysAgo(1)), mk("tk-idle", daysAgo(40))}, fixtureNow, false, nil, live)
 
 	fresh, _ := tileByID(b, "tk-fresh")
 	idle, _ := tileByID(b, "tk-idle")
@@ -288,7 +303,7 @@ func TestStaleBumpFires(t *testing.T) {
 		t.Errorf("the stale anchor must outrank the fresh one: idle=%d fresh=%d", idle.RankScore, fresh.RankScore)
 	}
 	// Exactly at the threshold is NOT stale — gc-helm.sh bumps on `> 14`.
-	atThreshold := BuildBoard([]Anchor{mk("tk-edge", daysAgo(staleThresholdDays))}, fixtureNow, false, nil)
+	atThreshold := BuildBoard([]Anchor{mk("tk-edge", daysAgo(staleThresholdDays))}, fixtureNow, false, nil, live)
 	if got := atThreshold.Tiles[0].Severity; got != SevNormal {
 		t.Errorf("exactly %d days is not yet stale: got %s", staleThresholdDays, got)
 	}
@@ -304,7 +319,7 @@ func TestStaleDoesNotBumpOtherBands(t *testing.T) {
 		{ID: "tk-done", Kind: "epic", Source: "epic", Priority: ptr(2), UpdatedAt: daysAgo(400),
 			Children: []Child{{ID: "d1", Status: "closed"}}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 	for id, want := range map[string]Severity{"tk-stranded": SevHigh, "tk-dec": SevElevated, "tk-done": SevLow} {
 		if tl, _ := tileByID(b, id); tl.Severity != want {
 			t.Errorf("%s: severity %s, want %s (staleness must not move this band)", id, tl.Severity, want)
@@ -319,7 +334,7 @@ func TestTileCarriesUpdatedAt(t *testing.T) {
 	b := BuildBoard([]Anchor{
 		{ID: "tk-known", Kind: "epic", Source: "epic", Priority: ptr(2), UpdatedAt: fixtureNow},
 		{ID: "tk-unknown", Kind: "epic", Source: "epic", Priority: ptr(2)},
-	}, fixtureNow, false, nil)
+	}, fixtureNow, false, nil, Facts{})
 
 	known, _ := tileByID(b, "tk-known")
 	unknown, _ := tileByID(b, "tk-unknown")
@@ -334,15 +349,15 @@ func TestTileCarriesUpdatedAt(t *testing.T) {
 	}
 }
 
-// TestInProgressNotStranded confirms an epic with an in-progress child is NORMAL
-// (the default branch of severity).
+// TestInProgressNotStranded confirms an epic whose in-progress child has a LIVE
+// owner is NORMAL (the default branch of severity).
 func TestInProgressNotStranded(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-busy", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
-			{ID: "b1", Status: "in_progress"}, {ID: "b2", Status: "open"},
+			{ID: "b1", Status: "in_progress", Assignee: "polecat-live"}, {ID: "b2", Status: "open"},
 		}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil)
+	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live"))
 	tl := b.Tiles[0]
 	if tl.Severity != SevNormal {
 		t.Errorf("epic with in-progress work is NORMAL: got %s", tl.Severity)
@@ -350,7 +365,225 @@ func TestInProgressNotStranded(t *testing.T) {
 	if tl.InProgress != 1 || tl.Open != 2 {
 		t.Errorf("counts: inprog=%d open=%d (want 1, 2)", tl.InProgress, tl.Open)
 	}
-	if !strings.Contains(tl.Frontier, "1 in-progress") {
-		t.Errorf("frontier shows in-progress: got %q", tl.Frontier)
+	if tl.InProgressLive != 1 || tl.InProgressDead != 0 {
+		t.Errorf("liveness split: live=%d dead=%d (want 1, 0)", tl.InProgressLive, tl.InProgressDead)
 	}
+	if !strings.Contains(tl.Frontier, "1 in flight") {
+		t.Errorf("frontier shows in flight: got %q", tl.Frontier)
+	}
+}
+
+// TestDeadOwnerIsNotMoving is the other half of that split, and the reason the
+// liveness join exists: the SAME anchor whose owner has gone is not in flight —
+// it is stranded work with a corpse attached, and the board must say so.
+func TestDeadOwnerIsNotMoving(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-busy", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
+			{ID: "b1", Status: "in_progress", Assignee: "polecat-gone"}, {ID: "b2", Status: "open"},
+		}},
+	}
+	// "polecat-gone" is absent from OwnerState entirely — the canonical orphan.
+	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("someone-else"))
+	tl := b.Tiles[0]
+	if tl.InProgress != 1 {
+		t.Errorf("raw in_progress still counts the claim: got %d", tl.InProgress)
+	}
+	if tl.InProgressLive != 0 || tl.InProgressDead != 1 || !tl.DeadOwner {
+		t.Errorf("dead owner: live=%d dead=%d flag=%v (want 0, 1, true)", tl.InProgressLive, tl.InProgressDead, tl.DeadOwner)
+	}
+	if tl.Severity != SevHigh || !tl.Stranded {
+		t.Errorf("a dead-owner-only frontier is stranded/HIGH: got %s stranded=%v", tl.Severity, tl.Stranded)
+	}
+	if got := []string{"b1"}; !equalIDs(tl.DeadOwnerHeads, got) {
+		t.Errorf("dead_owner_heads = %v, want %v", tl.DeadOwnerHeads, got)
+	}
+}
+
+// TestSlungWorkIsInFlight is the false-stranded defect the bash board fixed in
+// tk-fkeft, now fixed here too: `gc sling` leaves the work bead at
+// status=open/assignee=null and puts the in-flight state on the WORKFLOW, so a
+// board reading only child status calls a polecat mid-implementation "stranded".
+func TestSlungWorkIsInFlight(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-slung", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
+			{ID: "w1", Status: "open"}, // never claimed; the workflow carries it
+		}},
+	}
+	f := liveOwners("gc-toolkit__polecat-lx-1")
+	f.Inflight = map[string][]string{"w1": {"gc-toolkit__polecat-lx-1"}}
+
+	b := BuildBoard(anchors, fixtureNow, false, nil, f)
+	tl := b.Tiles[0]
+	if tl.Severity != SevNormal || tl.Stranded {
+		t.Errorf("slung work is in flight, not stranded: got %s stranded=%v", tl.Severity, tl.Stranded)
+	}
+	if tl.InFlight != 1 || tl.InProgressLive != 1 {
+		t.Errorf("in_flight=%d in_progress_live=%d (want 1, 1)", tl.InFlight, tl.InProgressLive)
+	}
+	if !equalIDs(tl.InFlightHeads, []string{"w1"}) {
+		t.Errorf("in_flight_heads = %v, want [w1]", tl.InFlightHeads)
+	}
+	// A live workflow head is NOT idle, so it must not also appear in open_heads.
+	if len(tl.OpenHeads) != 0 {
+		t.Errorf("a head in flight must be subtracted from open_heads: got %v", tl.OpenHeads)
+	}
+
+	// The same workflow, but its session has drained: back to stranded. Liveness
+	// is re-derived at derive time precisely so this flips without a re-gather.
+	dead := Facts{Inflight: f.Inflight, OwnerState: map[string]string{"gc-toolkit__polecat-lx-1": "archived"}}
+	if tl := BuildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]; !tl.Stranded {
+		t.Errorf("a drained workflow stops counting: got severity=%s stranded=%v", tl.Severity, tl.Stranded)
+	}
+}
+
+// TestHeldAnchorIsNotStranded pins the visit glyph: a conversation IS attention,
+// so an anchor someone is conversing about is not flagged for lacking it.
+func TestHeldAnchorIsNotStranded(t *testing.T) {
+	a := Anchor{ID: "tk-held", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+		Children: []Child{{ID: "c1", Status: "open"}}}
+
+	bare := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+	if bare.Severity != SevHigh || bare.Held {
+		t.Fatalf("without a visit the anchor is stranded/HIGH: got %s held=%v", bare.Severity, bare.Held)
+	}
+
+	held := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-held": true}}).Tiles[0]
+	if !held.Held || held.Severity != SevNormal || held.Stranded {
+		t.Errorf("a held anchor is NORMAL and not stranded: got %s held=%v stranded=%v", held.Severity, held.Held, held.Stranded)
+	}
+	if held.Needs != "open to join" {
+		t.Errorf("needs names the conversation: got %q", held.Needs)
+	}
+}
+
+// TestTakeawayWinsNeeds: the LLM headline replaces the deterministic phrase, and
+// its internal whitespace is collapsed so it cannot break the terminal table.
+func TestTakeawayWinsNeeds(t *testing.T) {
+	a := Anchor{ID: "tk-parked", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
+		Takeaway: "  needs a  decision\n  from the operator ", TakeawayAt: "2026-06-01T00:00:00Z", TakeawayBy: "host"}
+	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+
+	if tl.Takeaway == nil || *tl.Takeaway != "needs a decision from the operator" {
+		t.Errorf("takeaway collapsed and trimmed: got %v", tl.Takeaway)
+	}
+	if tl.Needs != "needs a decision from the operator" {
+		t.Errorf("takeaway wins NEEDS: got %q", tl.Needs)
+	}
+	if tl.TakeawayBy == nil || *tl.TakeawayBy != "host" {
+		t.Errorf("takeaway_by carried: got %v", tl.TakeawayBy)
+	}
+
+	// No takeaway -> the key is null, not absent, and NEEDS falls back.
+	plain := BuildBoard([]Anchor{{ID: "tk-p2", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk"}},
+		fixtureNow, false, nil, Facts{}).Tiles[0]
+	if plain.Takeaway != nil {
+		t.Errorf("absent takeaway is null: got %v", plain.Takeaway)
+	}
+	if plain.Needs != "resume: prefix+a, then the bead id" {
+		t.Errorf("fallback NEEDS: got %q", plain.Needs)
+	}
+}
+
+// TestCrossRigRefsWeighAnchor pins the prose scan: another rig's bead id in the
+// body adds weight (blast radius), capped, and never matches this rig's own
+// prefix, a rig NAME, or the anchor itself.
+func TestCrossRigRefsWeighAnchor(t *testing.T) {
+	f := Facts{Prefixes: []string{"tk", "sl", "su"}, RigNames: []string{"gc-toolkit", "signal-loom"}}
+	a := Anchor{ID: "tk-xref", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
+		Description: "blocks sl-abc12 and su-9zz, follows tk-local1 and tk-xref itself",
+		Children:    []Child{{ID: "c1", Status: "open"}}}
+
+	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, f).Tiles[0]
+	if !equalIDs(tl.CrossRigRefs, []string{"sl-abc12", "su-9zz"}) {
+		t.Errorf("cross_rig_refs = %v, want [sl-abc12 su-9zz] (own prefix and self excluded)", tl.CrossRigRefs)
+	}
+	// weight = m_total(1) + prio_w(3)=1 + min(2 refs, cap)
+	if tl.Weight != 1+1+2 {
+		t.Errorf("weight folds the ref count: got %d, want 4", tl.Weight)
+	}
+
+	// A decision is banded by what it IS, so the scan is skipped entirely.
+	dec := Anchor{ID: "sl-dec", Kind: "decision", Source: "decision", Rig: "signal-loom", Prefix: "sl",
+		Description: "mentions tk-abc12"}
+	if refs := BuildBoard([]Anchor{dec}, fixtureNow, false, nil, f).Tiles[0].CrossRigRefs; len(refs) != 0 {
+		t.Errorf("a decision is not scanned: got %v", refs)
+	}
+
+	// Single-rig city: the "other prefixes" set is empty, so nothing matches.
+	// (jq's empty alternation would match a bare "-abc" here; see crossRigRefs.)
+	solo := Facts{Prefixes: []string{"tk"}, RigNames: []string{"gc-toolkit"}}
+	if refs := BuildBoard([]Anchor{a}, fixtureNow, false, nil, solo).Tiles[0].CrossRigRefs; len(refs) != 0 {
+		t.Errorf("no other rigs, no refs: got %v", refs)
+	}
+}
+
+// TestUnownedConvoyIsHigh: under the everything-is-owned law an unowned
+// non-machine convoy is the orphan the observer exists to catch.
+func TestUnownedConvoyIsHigh(t *testing.T) {
+	no, yes := false, true
+	anchors := []Anchor{
+		{ID: "tk-orphan", Kind: "unowned", Source: "unowned", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Owned: &no},
+		{ID: "tk-owncv", Kind: "convoy", Source: "convoy", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Owned: &yes,
+			Children: []Child{{ID: "m1", Status: "closed"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	orphan, _ := tileByID(b, "tk-orphan")
+	if orphan.Severity != SevHigh {
+		t.Errorf("unowned convoy is HIGH: got %s", orphan.Severity)
+	}
+	if orphan.Owned == nil || *orphan.Owned {
+		t.Errorf("owned=false is carried, not dropped: got %v", orphan.Owned)
+	}
+	// It has no roll-up, but `empty` is reserved for anchors that should have
+	// had one — an unowned convoy is excluded by construction.
+	if orphan.Empty {
+		t.Error("an unowned convoy is not an `empty` anchor")
+	}
+
+	owncv, _ := tileByID(b, "tk-owncv")
+	if !owncv.Complete || owncv.Severity != SevLow {
+		t.Errorf("an all-closed owned convoy is complete/LOW: got %s complete=%v", owncv.Severity, owncv.Complete)
+	}
+	if owncv.Needs != "all 1 closed — graduate" {
+		t.Errorf("a complete convoy graduates: got %q", owncv.Needs)
+	}
+}
+
+// TestProgressMismatch: the convoy's own closed/total claim disagreeing with the
+// membership actually rolled up is a real signal, and absent progress is not one.
+func TestProgressMismatch(t *testing.T) {
+	kids := []Child{{ID: "m1", Status: "closed"}, {ID: "m2", Status: "open"}}
+	mk := func(id string, p *Progress) Anchor {
+		return Anchor{ID: id, Kind: "convoy", Source: "convoy", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
+			Progress: p, Children: kids}
+	}
+	b := BuildBoard([]Anchor{
+		mk("tk-agree", &Progress{Closed: 1, Total: 2}),
+		mk("tk-differ", &Progress{Closed: 0, Total: 5}),
+		mk("tk-none", nil),
+	}, fixtureNow, false, nil, Facts{})
+
+	if tl, _ := tileByID(b, "tk-agree"); tl.ProgressMismatch {
+		t.Error("matching progress is not a mismatch")
+	}
+	if tl, _ := tileByID(b, "tk-differ"); !tl.ProgressMismatch {
+		t.Error("a disagreeing progress object is a mismatch")
+	}
+	if tl, _ := tileByID(b, "tk-none"); tl.ProgressMismatch {
+		t.Error("an absent progress object makes no claim to disagree with")
+	}
+}
+
+// equalIDs compares two id lists for exact contents and order.
+func equalIDs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -38,19 +38,50 @@
  */
 export type Severity = 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW';
 
-/** Tile is one rendered row of the board. */
+/**
+ * Tile is one rendered row of the board.
+ *
+ * The field set and its order mirror the `--json` object gc-helm.sh emits, so
+ * the dashboard and the `helm-svc board` CLI describe a row the same way. Every
+ * `*_heads` / `cross_rig_refs` list is always emitted (`[]` when empty) even
+ * though the mechanical Go mapping widens it to `| null`; narrow before
+ * iterating.
+ */
 export interface Tile {
   id: string;
   rig: string;
   kind: string;
   title: string;
   severity: Severity;
+  /** Rank proxy: subtree size + priority weight + capped cross-rig refs. */
+  weight: number;
+  /** An open visit bead names this anchor — a conversation is holding it. */
+  held: boolean;
   n_closed: number;
   m_total: number;
   open: number;
+  /**
+   * RAW status count, honestly 0 for a slung bead whose work never leaves
+   * `status=open`. Use `in_progress_live` to ask "is anything moving".
+   */
   in_progress: number;
-  frontier: string;
-  needs: string;
+  assigned: number;
+  /** Children demonstrably moving: claimed by a live session, OR under a live workflow. */
+  in_progress_live: number;
+  /** Claimed, owner gone, and no live workflow behind it. */
+  in_progress_dead: number;
+  dead_owner: boolean;
+  /** The part of `in_progress_live` attributable to a workflow rather than a claim. */
+  in_flight: number;
+  in_flight_heads: string[] | null;
+  /** Convoys only: `false` marks the unowned-convoy orphan exception. `null` for every other kind. */
+  owned: boolean | null;
+  /** Open work with nothing live in it and no open visit. */
+  stranded: boolean;
+  empty: boolean;
+  complete: boolean;
+  /** The convoy's own closed/total claim disagrees with the rolled-up membership. */
+  progress_mismatch: boolean;
   /**
    * Whole days since the anchor was last updated. 0 both when the anchor was
    * touched today and when the source could not read `updated_at` at all —
@@ -58,8 +89,20 @@ export interface Tile {
    * unknown, present means genuinely fresh.
    */
   stale_days: number;
+  priority: number | null;
+  /** Bead ids belonging to OTHER rigs, scanned out of the anchor's prose. */
+  cross_rig_refs: string[] | null;
+  /** Idle open children — unclaimed, and not carried by a live workflow. */
+  open_heads: string[] | null;
+  dead_owner_heads: string[] | null;
+  /** The LLM-authored headline a converse sitting left. `null`, not absent, when there is none. */
+  takeaway: string | null;
+  takeaway_at: string | null;
+  takeaway_by: string | null;
   /** RFC 3339. Omitted (Go `omitzero`) when the source could not read it. */
   updated_at?: string;
+  frontier: string;
+  needs: string;
   rank_score: number;
 }
 

@@ -153,7 +153,7 @@ func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := board.BuildBoard(res.Anchors, s.now(), res.Partial, res.PartialErrors)
+	b := board.BuildBoard(res.Anchors, s.now(), res.Partial, res.PartialErrors, res.Facts)
 	s.cached = &b
 	s.expiry = s.now().Add(s.ttl)
 	return &b, nil
