@@ -60,6 +60,25 @@ extract() {
 GATE="$(extract submit-branch-gate)"
 RESOLVE="$(extract submit-target-resolve)"
 CONSUME="$(extract submit-target-consume)"
+CLOSE="$(extract submit-chain-close)"
+HALT="$(extract submit-auto-push-halt)"
+HALT_CLOSE="$(extract submit-halt-chain-close)"
+
+[ -n "$CLOSE" ] \
+  && ok "chain close extracted between submit-chain-close markers" \
+  || bad "chain-close extraction EMPTY — markers missing from $TOML"
+
+[ -n "$HALT" ] \
+  && ok "auto_push=false arm extracted between submit-auto-push-halt markers" \
+  || bad "halt-arm extraction EMPTY — markers missing from $TOML"
+
+# The halt arm nests its chain-close copy under a DIFFERENT marker name on
+# purpose. `extract` is a flag-flip over the whole file, so two regions sharing
+# one name concatenate into a single extraction and every assertion below
+# silently doubles. Pin the outer name to one occurrence so a rename that
+# collides is caught here rather than as a confusing diff.
+eq "$(sed -n '/^# >>> submit-chain-close$/p' "$TOML" | wc -l | tr -d ' ')" "1" \
+   "exactly one submit-chain-close region (the halt copy has its own name)"
 
 [ -n "$CONSUME" ] \
   && ok "consumer extracted between submit-target-consume markers" \
@@ -77,7 +96,7 @@ CONSUME="$(extract submit-target-consume)"
 # inside one therefore silently joins lines. Both snippets are written
 # backslash-free so what the polecat reads is what this test runs; assert it,
 # because reintroducing a continuation is an easy and invisible edit.
-case "$GATE$RESOLVE$CONSUME" in
+case "$GATE$RESOLVE$CONSUME$CLOSE$HALT$HALT_CLOSE" in
   *\\*) bad "snippets contain a backslash — TOML line-ending escapes will mangle them" ;;
   *)    ok  "snippets are backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
@@ -292,7 +311,255 @@ eq "$(tr '\n' ';' < "$TMP/log")" \
    "UPDATE|tk-work --set-metadata target=main --append-notes Implemented: <brief summary>;" \
    "composed run writes only the handoff, with target=main"
 
-# --- 5. Negative control. -----------------------------------------------------
+# --- 5. Step-chain close. -----------------------------------------------------
+# The husk generator (tk-y389z, tk-zab6q): mol-polecat-work closed no step
+# bead, so every completed run left all seven open. They keep gc.routed_to on
+# the polecat pool, the drain releases their assignee, and `load-context` — the
+# only step nothing blocks — goes ready and claimable. The next polecat is
+# offered a finished run as if it were new work. Half the open ledger was this.
+#
+# THE FAKE MODELS bd's BLOCKED-ISSUE RULE, and that is the point. Each step is
+# blocked by the one before it and `bd` refuses to close a blocked issue:
+#
+#     tk-3kabdu: updating issue: cannot close blocked issue: tk-3kabdu is blocked by [tk-8yvm91]
+#
+# A fake that closed anything asked of it would pass a dependent-first loop
+# that, run live, closes exactly ONE bead and reports five refusals — which is
+# what shipped in the first draft of this change and what a live run caught.
+# A stub must refuse what the tool refuses, or it hides a dead branch behind a
+# green suite.
+
+mkdir -p "$TMP/pack/assets/scripts"
+cat > "$TMP/pack/assets/scripts/step-close.sh" <<'STEPCLOSE'
+#!/usr/bin/env bash
+# Fake step-close. Records every step ATTEMPTED, and closes one only when its
+# blocker is already closed — bd's rule. $FAKE_REFUSE forces an identity
+# refusal ("not this session's bead") independently of blocking.
+step=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --step)    step="$2"; shift 2 ;;
+    --outcome) shift 2 ;;
+    *)         shift ;;
+  esac
+done
+printf '%s\n' "$step" >> "$FAKE_ATTEMPTED"
+case "${step#mol-polecat-work.}" in
+  load-context)     blocker="" ;;
+  workspace-setup)  blocker="load-context" ;;
+  preflight-tests)  blocker="workspace-setup" ;;
+  implement)        blocker="preflight-tests" ;;
+  self-review)      blocker="implement" ;;
+  submit-and-exit)  blocker="self-review" ;;
+  *)                blocker="" ;;
+esac
+if [ -n "${FAKE_REFUSE:-}" ] && [ "$step" = "$FAKE_REFUSE" ]; then
+  echo "step-close: FATAL — not this session's bead for $step" >&2; exit 2
+fi
+if [ -n "$blocker" ] && ! grep -qx "mol-polecat-work.$blocker" "$FAKE_CLOSED"; then
+  echo "  ${step}: updating issue: cannot close blocked issue: blocked by [$blocker]" >&2
+  exit 2
+fi
+printf '%s\n' "$step" >> "$FAKE_CLOSED"
+# Also into the shared ordered log, when one is set: the halt-arm test needs
+# the closes placed relative to the bead write and the drain, and one file is
+# the only way to see that order.
+[ -n "${FAKE_LOG:-}" ] && printf 'CLOSE|%s\n' "$step" >> "$FAKE_LOG"
+exit 0
+STEPCLOSE
+chmod +x "$TMP/pack/assets/scripts/step-close.sh"
+
+printf '%s\n' "$CLOSE" > "$TMP/close.sh"
+bash -n "$TMP/close.sh" \
+  && ok "extracted chain close is syntactically valid bash" \
+  || bad "extracted chain close failed bash -n"
+
+# Run the block under `set -e`. That is the strict reading of a shell snippet,
+# and it is what makes the loop's `|| echo` load-bearing rather than
+# decorative: without `set -e` a refused close is ignored by the shell anyway,
+# so a test that dropped it would pass against a block with no tolerance at
+# all. It also proves the snippet is safe to paste into a fail-fast harness —
+# the candidate-resolution `[ -x ... ] && { ...; }` is exempt from `set -e`
+# because a failing command before the final `&&` does not trigger the exit.
+printf 'set -e\n%s\n' "$CLOSE" > "$TMP/close-run.sh"
+
+# run_close [refused-step] [pack-dir] -> "<rc>|<steps CLOSED, in order>"
+run_close() {
+  : > "$TMP/closed"; : > "$TMP/attempted"; : > "$TMP/log"
+  local rc=0
+  GC_PACK_DIR="${2-$TMP/pack}" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    FAKE_REFUSE="${1-}" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    FAKE_LOG="$TMP/log" \
+    bash "$TMP/close-run.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')"
+}
+# steps the loop TRIED, regardless of outcome — proves it did not abort early.
+attempted() { sed 's/^mol-polecat-work\.//' "$TMP/attempted" | tr '\n' ',' | sed 's/,$//'; }
+
+ALL_SIX="load-context,workspace-setup,preflight-tests,implement,self-review,submit-and-exit"
+
+# THE ORDER. Forward is the only order bd permits: the chain can unwind only
+# from the unblocked end, and closing each step is what unblocks the next.
+eq "$(run_close)" "0|$ALL_SIX" \
+   "closes all six session-owned steps, forward order, load-context first"
+
+# submit-and-exit closes LAST. It is workflow-finalize's only blocker, so
+# reaching it is what arms the control-dispatcher finalizer as the backstop.
+eq "$(run_close | sed 's/.*,//')" "submit-and-exit" \
+   "submit-and-exit closes last, arming the control-dispatcher backstop"
+
+# `workflow-finalize` is routed to core.control-dispatcher, which closes the
+# workflow root and force-closes whatever is still open. Closing it here would
+# take the finalizer's job and skip the root close.
+case ",$(run_close)," in
+  *workflow-finalize*) bad "chain close must never close workflow-finalize" ;;
+  *)                   ok  "leaves workflow-finalize to the control-dispatcher" ;;
+esac
+
+# The work bead belongs to the refinery from step 6 onward. This block closes
+# machinery only — it must not write to a bead at all.
+eq "$(run_close >/dev/null; sed -n '/^UPDATE|/p' "$TMP/log" | tr '\n' ';')" "" \
+   "writes nothing to any bead (the work bead stays the refinery's)"
+
+# A refusal must not abort the loop. Refusing the FIRST step is the worst case:
+# every later step is then blocked, so nothing closes at all — but all six must
+# still be attempted and the block must exit 0.
+REFUSED_FIRST="$(run_close mol-polecat-work.load-context)"
+eq "$REFUSED_FIRST|$(attempted)" "0||$ALL_SIX" \
+   "a refusal on the first step: nothing closes, but all six are still attempted"
+
+# A refusal mid-chain closes everything up to it and blocks the rest, and still
+# must not abort.
+REFUSED_MID="$(run_close mol-polecat-work.implement)"
+eq "$REFUSED_MID|$(attempted)" \
+   "0|load-context,workspace-setup,preflight-tests|$ALL_SIX" \
+   "a refusal mid-chain: predecessors close, successors block, loop continues"
+
+# No step-close.sh on any candidate path must fail loudly rather than drain
+# with the chain silently open — that is the failure this whole section exists
+# to prevent, and `:?` is what makes it audible.
+eq "$(run_close '' "$TMP/nonexistent")" "1|" \
+   "missing step-close.sh: fails loudly, closes nothing"
+
+# CONTROL: the same loop reversed. This is the shape that shipped in the first
+# draft, and against a fake that ignored blocking it passed. Against bd's real
+# rule it closes exactly one bead. Keeping it here is what stops the order
+# being "simplified" back.
+: > "$TMP/closed"; : > "$TMP/attempted"; : > "$TMP/log"
+printf 'set -e\n%s\n' "$CLOSE" \
+  | sed 's/^for STEP in .*; do$/for STEP in submit-and-exit self-review implement preflight-tests workspace-setup load-context; do/' \
+  > "$TMP/close-rev.sh"
+GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+  FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_LOG="$TMP/log" \
+  bash "$TMP/close-rev.sh" > "$TMP/out" 2>&1 || true
+eq "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')" \
+   "load-context" \
+   "control: dependent-first closes only load-context (bd refuses blocked issues)"
+
+# The done sequence is written three times — the base prompt's two copies and
+# this formula's step — and the pack corrects the prompt copies with a
+# fragment. Two copies of the same shell block are exactly how the `--notes`
+# correction was defeated before (tk-t41dq), so require them byte-identical
+# rather than merely both present.
+FRAG="$ROOT/template-fragments/polecat-close-step-chain.template.md"
+if [ -f "$FRAG" ]; then
+  # The fragment carries the block in its one ```bash fence.
+  awk '/^```bash$/{f=1;next} /^```$/{f=0} f' "$FRAG" > "$TMP/frag-close.sh"
+  if diff -q "$TMP/frag-close.sh" "$TMP/close.sh" >/dev/null 2>&1; then
+    ok "prompt fragment ships the same chain-close block, byte for byte"
+  else
+    bad "prompt fragment and formula chain-close blocks have DRIFTED"
+    # `|| true`: diff exits 1 precisely when it has something to report, and
+    # under `set -euo pipefail` that status aborts the suite here — killing the
+    # summary line and every assertion after it. The failure is already
+    # recorded; this is only the detail.
+    diff "$TMP/frag-close.sh" "$TMP/close.sh" | sed 's/^/       /' || true
+  fi
+else
+  bad "template-fragments/polecat-close-step-chain.template.md is missing — the prompt copies of the done sequence still end at drain-ack"
+fi
+
+# --- 6. The auto_push=false halt exit. ----------------------------------------
+# There are two TERMINAL exits from submit-and-exit — the refinery handoff, and
+# this branch-ready halt — and only terminal exits close the chain. Every other
+# arm halts with the work resumable, where the open chain IS the recovery
+# mechanism. The first cut of this change closed the chain at the handoff and
+# left the halt arm a comment saying to run "step 8's block", four lines above
+# an `exit 0` that never reaches step 8 (tk-qkfwp7). An opt-out halt therefore
+# stranded exactly the husk the change exists to stop, and nothing here ran the
+# arm to notice. This section runs it.
+
+# run_halt <script> -> "<rc>"; the ordered trace is left in $TMP/log.
+run_halt() {
+  : > "$TMP/log"; : > "$TMP/closed"; : > "$TMP/attempted"
+  local rc=0
+  FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
+    GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    bash "$1" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s' "$rc"
+}
+# The sequence of things the arm DID, one token per event — the only view that
+# can show the closes landing between the bead write and the drain.
+trace() { sed 's/|.*//' "$TMP/log" | tr '\n' ',' | sed 's/,$//'; }
+
+printf '%s\n' "$HALT" > "$TMP/halt.sh"
+bash -n "$TMP/halt.sh" \
+  && ok "extracted auto_push=false arm is syntactically valid bash" \
+  || bad "extracted halt arm failed bash -n"
+
+# THE REGRESSION. The six closes must happen, and they must happen after the
+# bead is parked and before the session drains.
+HALT_RC="$(run_halt "$TMP/halt.sh")"
+eq "$HALT_RC" "0" "halt arm exits 0"
+eq "$(trace)" "UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "halt arm parks the bead, closes six steps, THEN drains"
+eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
+   "$ALL_SIX" \
+   "halt arm closes the same six steps, forward order"
+
+# The bead write is the halt's whole point and is unchanged by this: branch and
+# target recorded, assignee cleared, branch_ready + halt_reason set so the
+# caller can tell an opt-out halt from a failure, and --append-notes rather
+# than the --notes that erases the dispatch note (tk-6kf6r).
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log")" \
+   "tk-work --status=open --assignee= --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to= --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
+   "halt arm's bead write is intact (branch_ready, halt_reason, --append-notes)"
+
+# The arm must not reach the push. A fake `git` answers everything with exit 0,
+# so a stray `git push` would pass unnoticed; the drain-then-exit trace above is
+# what proves the arm stopped, and this pins the arm's own contents.
+case "$HALT" in
+  *"git push"*) bad "halt arm contains a push — it must not reach one" ;;
+  *)            ok  "halt arm never reaches git push" ;;
+esac
+
+# The two copies of the block must not drift. They cannot be one function: the
+# arm exits before step 8, and each fenced block is its own shell. So the halt
+# copy is step 8's, indented one level to sit inside the `if` — assert exactly
+# that, not merely that both are present. Two copies of one shell block is how
+# the --notes correction was defeated before (tk-t41dq).
+printf '%s\n' "$HALT_CLOSE" > "$TMP/halt-close.sh"
+sed 's/^/  /' "$TMP/close.sh" > "$TMP/close-indented.sh"
+if diff -q "$TMP/halt-close.sh" "$TMP/close-indented.sh" >/dev/null 2>&1; then
+  ok "halt arm ships step 8's chain-close block, byte for byte (+2 indent)"
+else
+  bad "halt arm and step 8 chain-close blocks have DRIFTED"
+  diff "$TMP/halt-close.sh" "$TMP/close-indented.sh" | sed 's/^/       /' || true
+fi
+
+# CONTROL: the arm as it was reviewed — same shell, chain-close block removed,
+# comment left behind. It still exits 0 and still parks the bead, so nothing
+# short of looking for the closes can tell the two apart. That is why the trace
+# assertion above is the one that matters.
+printf '%s\n' "$HALT" \
+  | awk '/# >>> submit-halt-chain-close$/{f=1} /# <<< submit-halt-chain-close$/{f=0; next} !f' \
+  > "$TMP/halt-nochain.sh"
+CTRL_RC="$(run_halt "$TMP/halt-nochain.sh")"
+eq "$CTRL_RC|$(trace)" "0|UPDATE,DRAIN" \
+   "control: comment-only halt arm drains with the chain open (the defect is real)"
+
+# --- 7. Negative control. -----------------------------------------------------
 # Everything above passes against the shipped snippets. That proves nothing
 # unless the same fixtures FAIL against the implementation being replaced —
 # otherwise a future reconciliation could restore base and the suite would stay

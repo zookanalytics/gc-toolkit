@@ -357,9 +357,10 @@ defect is one that reports nothing when it fires.
   2a snippet and asserts over the shipped step text; run it after any
   reconciliation of this formula.
 
-- **`formulas/mol-polecat-work.toml`** — base + two `submit-and-exit` deltas
-  that stop the step from spending `{{base_branch}}` on a question it does not
-  answer (tk-3yj8g, 2026-08-17). `{{base_branch}}` is *what the worktree was
+- **`formulas/mol-polecat-work.toml`** — base + three `submit-and-exit`
+  deltas. Deltas 1 and 2 stop the step from spending `{{base_branch}}` on a
+  question it does not answer (tk-3yj8g, 2026-08-17); delta 3 closes the step
+  chain (tk-zab6q, 2026-08-23). `{{base_branch}}` is *what the worktree was
   poured from*; `metadata.target` is *where the work lands*. On a rework child
   those are deliberately different — the signoff dispatch slings the child with
   `--var base_branch=<the reviewed branch>` so the worktree has the PR-only
@@ -386,6 +387,51 @@ defect is one that reports nothing when it fires.
      can name neither halts with nothing pushed. Both consumers (the
      `auto_push=false` halt arm and the step-5 handoff) read that one variable
      so they cannot disagree.
+
+  3. **Step-chain close (new step 8, and step 3's halt arm).** Neither base
+     nor the mirror closed a single step bead, and a graph.v2 step advances
+     only by closing its own. Every completed run therefore left all seven
+     steps open; the drain released their assignee while `gc.routed_to` still
+     pointed at the polecat pool, so `load-context` — the one step nothing
+     blocks — went ready and claimable, and the finished run was re-offered as
+     new work. At the census that filed this, 490 of 746 open beads in the
+     store were husk chains, roughly doubling in 31 hours (tk-y389z,
+     tk-zab6q). The mirror closes the six steps the session owns through
+     `assets/scripts/step-close.sh`, which resolves each bead from the
+     `(assignee, gc.step_ref)` pair rather than from `$GC_TRIGGER_BEAD_ID`
+     (tk-niu2f). Three things about it are load-bearing and are asserted by
+     the test:
+     - **It ships at both terminal exits.** `submit-and-exit` ends the session
+       for good in two places — the step-8 refinery handoff, and the step-3
+       `auto_push=false` branch-ready halt — and a chain left open at either
+       one is the same husk. The halt arm therefore carries its own copy of the
+       block, because its `exit 0` never reaches step 8 and each fenced block
+       is its own shell, so a shared function would be out of scope. The test
+       runs the arm end to end and asserts the ordering — bead parked, six
+       steps closed, then drain — and pins the copy byte-identical to step 8's
+       (tk-qkfwp7). Every *other* arm in the step halts with the work
+       resumable, and there the open chain is the recovery mechanism; those
+       deliberately do not close.
+     - **The order is forward, and `bd` enforces it** — `load-context` first,
+       `submit-and-exit` last. Each step is blocked by the one before it and
+       `bd` refuses to close a blocked issue, so the chain can only unwind
+       from the unblocked end. Dependent-first was tried first and closes
+       exactly one bead while reporting five refusals; the test keeps that
+       reversed loop as a control. The cost of the forward order is that
+       closing a step briefly makes the next one ready — bounded, not removed,
+       by the steps staying assigned to the session for the whole loop and by
+       the loop running only after the work is out of reach of a mistaken
+       claim — after the refinery handoff at step 8, after the branch-ready
+       bead write in the halt arm.
+     - **`workflow-finalize` is not ours.** It is routed to
+       `core.control-dispatcher`, whose finalizer closes the workflow root and
+       then force-closes any member still open. `submit-and-exit` closes last
+       and is that step's only blocker, so finishing the loop arms this as a
+       backstop for whatever the loop could not close.
+
+     Note `gc.session_affinity` does not protect any of this: it is an
+     advisory marker no routing path reads. It is the assignee, not the
+     affinity marker, that keeps a ready step out of the pool.
 
   The mirror also writes `--append-notes` at both sites where base writes
   `--notes`. That is not a new opinion — `template-fragments/` already tells

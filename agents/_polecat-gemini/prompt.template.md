@@ -214,6 +214,8 @@ is the "Idle Polecat heresy."
 
 {{ template "polecat-append-notes" . }}
 
+{{ template "polecat-close-step-chain" . }}
+
 ---
 
 ## Command Quick-Reference
