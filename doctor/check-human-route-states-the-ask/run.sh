@@ -160,8 +160,15 @@ while IFS=$'\037' read -r rig_name rig_path; do
         | select((($b.metadata["gc.routed_to"] // "") | tostring) == $human)
         # Present-but-blank is not an ask. blocked_reason is routinely built by
         # interpolation, and an empty interpolation leaves a field that is
-        # present, non-empty, and says nothing — which is exactly what the board
-        # renderer treats as absent, so the two must agree.
+        # present, non-empty, and says nothing — the same thing the board
+        # renderer treats as absent, so a bead reads the same way in both.
+        #
+        # [:cntrl:] makes this test WIDER than the renderer, which collapses
+        # whitespace only. They agree on every whitespace spelling, which is the
+        # one interpolation actually produces; on a value of nothing but control
+        # characters this check reports and the board would render the garbage.
+        # That asymmetry is the safe direction and is deliberate — the stricter
+        # side is the one that speaks up.
         | (($b.metadata["blocked_reason"] // "") | tostring
            | gsub("[[:space:][:cntrl:]]"; "")) as $ask
         | select($ask == "")
