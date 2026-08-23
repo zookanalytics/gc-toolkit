@@ -72,12 +72,16 @@ smuggle it through the rebase as commit-preservation.
 
 Landing a rebase against `upstream/main` requires
 `git push --force-with-lease HEAD:main` — there is no fast-forward path,
-and that is intrinsic to rebase, not a workflow choice. **You do not
-perform it.** Push your working branch, set `metadata.target = main` and
-the rebase-bead metadata, and reassign to refinery exactly like every
-other polecat. The rig-scoped refinery owns the force-push under its own
-overlay; the full ownership rule is the `rebase-conventions-force-push`
-fragment, injected into refinery only.
+and that is intrinsic to rebase, not a workflow choice. **The rig-scoped
+refinery owns that push; the polecat never performs it.** A rebase
+polecat pushes its working branch, sets `metadata.target = main` and the
+rebase-bead metadata, and reassigns to refinery exactly like every other
+polecat.
+
+The full ownership rule — the core-vs-rig-scoped split, the overlay that
+authorises the push, and what happens to a rebase-shaped bead that
+reaches a refinery without that overlay — is the
+`rebase-conventions-force-push` fragment, injected into refinery only.
 
 ### The rebase step is a check loop
 

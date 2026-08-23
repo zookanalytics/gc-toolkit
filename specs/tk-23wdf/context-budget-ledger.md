@@ -584,7 +584,7 @@ evidence for candidate 1's premise that the block is judged, not executed.
 Risk: none to fix; the risk is leaving it.
 
 **4. Narrow `rebase-conventions` so the polecat slice excludes refinery-only policy.**
-**BANKED (tk-yhwfv.1) — realized −1,376 B/spawn, not ~4,000. See §9.2.**
+**BANKED (tk-yhwfv.1) — realized −1,212 B/spawn, not ~4,000. See §9.2.**
 Saving: ~4,000 B/spawn, gascity rig only.
 Risk: low. Requires splitting one fragment into two defines; the force-push and
 re-pour sections are already separately headed.
@@ -762,7 +762,7 @@ proxy and should be re-derived before anyone quotes it as a dollar figure.
 
 | Item | Ledger estimate | Realized | Where |
 |---|---|---|---|
-| Candidate 4 — narrow `rebase-conventions` | ~4,000 B/spawn | **−1,376 B/spawn** | gascity polecat |
+| Candidate 4 — narrow `rebase-conventions` | ~4,000 B/spawn | **−1,212 B/spawn** | gascity polecat |
 | Candidate 5 — compress `watch-dispatched-work` | ~2,000 B/spawn | **−2,380 B/spawn** | mechanik **and** keeper |
 | Candidate 5 — keeper prompt | unquantified | still unmeasured live | see 9.3 |
 | Candidate 6 — `cycle-recycle` citations | 0 live bytes | **0 B**, as predicted | repointed, delete unblocked |
@@ -772,9 +772,11 @@ the polecat slice could shed both the force-push *and* the re-pour sections.
 Read against the live text only force-push is refinery-only (1,946 B); the
 re-pour section opens "When you claim `load-context` for a fresh
 `mol-upstream-gc-rebase` root" and addresses the polecat driving the rebase
-throughout. It stays. Net is 1,376 B after the pointer that preserves the one
-instruction the polecat does need from the removed section — you do not
-force-push, you hand the bead to refinery.
+throughout. It stays. Net is 1,212 B after the pointer that preserves what both readers
+need from the removed section: the refinery owns the push, the polecat hands
+the bead over like any other. The pointer is worded role-neutrally on purpose
+— the refinery is injected with BOTH fragments, so a polecat-addressed "you
+do not perform it" would have been false for one of its two readers.
 
 **Candidate 5 came in high, and reaches one more agent than §7 recorded.**
 The fragment is included by `agents/mechanik/prompt.template.md:154` *and*
