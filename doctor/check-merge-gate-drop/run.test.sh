@@ -33,6 +33,16 @@
 #   (20) the verdict arm's SIDECAR keys (.reason/.attempts/.exception_escalated)
 #        are never mistaken for a gate marker, and green@/fixable@ are not flagged
 #   (21) an exception on a MERGED anchor is out of scope, like every other arm
+#   (22) an exception-held gate whose anchor has LIVE remediation naming it
+#        (source_anchor_bead) -> NOT escalated: noted, exit 0, and counted in the
+#        summary  [tk-ezgr2, the acceptance case]
+#   (23) ...same via the BROAD surface, a live rework child on the anchor's branch
+#   (24) an INERT bead on that branch (open, unrouted, unclaimed) does NOT
+#        suppress — a stranded anchor must still be reported
+#   (25) the anchor ITSELF is on its own branch, and does not suppress itself
+#        (the live shape: a held anchor sits open with gc.routed_to=human)
+#   (26) a live bead on the branch that names ANOTHER anchor does not suppress
+#   (27) an unreadable ledger reports the exception anyway, as UNDETERMINED
 #   (17) .config.Rigs schema drift -> WARN (exit 1), arm 1b declared unread
 #   (18) error outranks warning when both fire
 #   (INV) detect-only: no fix.sh ships next to run.sh (a sibling fix.sh would
@@ -76,7 +86,31 @@ case "$sub" in
         if [ "${1:-}" = "--rig" ]; then rig="${2:-}"; shift 2; fi
         case "${1:-}" in
             formula) f="$D/formula-$rig.json" ;;
-            list)    f="$D/anchors-$rig.json" ;;
+            list)
+                # Two shapes of `list` reach here and they must not share a
+                # fixture: the anchor sweep (--has-metadata-key check_set) and
+                # the ownership lookups (--metadata-field <key>=<value>). One
+                # fixture for both would answer "is anything remediating this
+                # anchor?" with the anchor list itself.
+                mf=""; prev=""
+                for a in "$@"; do
+                    [ "$prev" = "--metadata-field" ] && mf="$a"
+                    case "$a" in --metadata-field=*) mf="${a#--metadata-field=}" ;; esac
+                    prev="$a"
+                done
+                if [ -n "$mf" ]; then
+                    # `live-fail` makes the ledger unanswerable, which is NOT
+                    # the same as answering "nothing in flight".
+                    [ -f "$D/live-fail" ] && exit 1
+                    key="${mf%%=*}"; val="${mf#*=}"
+                    safe=$(printf '%s' "$val" | tr -c 'A-Za-z0-9._-' '_')
+                    f="$D/live-$key-$safe.json"
+                    # An absent fixture is an empty answer, not a broken store.
+                    [ -f "$f" ] || { echo '[]'; exit 0; }
+                else
+                    f="$D/anchors-$rig.json"
+                fi
+                ;;
             *)       exit 1 ;;
         esac
         if [ -f "$f" ]; then cat "$f"; exit 0; fi
@@ -166,6 +200,9 @@ has "2 rig(s)" "$D/out" "(1) clean city counts both active rigs"
 has "zulu: skipped (suspended" "$D/out" "(12) suspended rig is reported as skipped"
 hasnt "\-\-rig zulu" "$D/calls.log" "(12) suspended rig's bead store is never queried"
 hasnt "\-\-rig loomington" "$D/calls.log" "(13) HQ rig is never queried"
+# The ownership lookups are per-exception, not per-rig: a city with no held gate
+# must not spend a single extra query on them.
+hasnt "metadata-field" "$D/calls.log" "(22) no ownership lookup runs when no gate is held in exception"
 
 # --- (2) live pull_request anchor stamped "" -------------------------------
 D=$(scenario live-empty)
@@ -327,6 +364,112 @@ cat > "$D/anchors-alpha.json" <<'JSON'
 JSON
 rc=$(run_check "$D")
 eq "$rc" "0" "(21) exception on a merged anchor -> exit 0 (landed work is out of scope)"
+
+# --- (22) a held gate with LIVE remediation is not escalated -----------------
+# The tk-ezgr2 acceptance case. Three false escalations in under 24 hours, each
+# sent while a rebase-and-re-author child was mid-flight against the same branch,
+# and each costing a full mayor re-triage. Remediation does not run on the anchor
+# — it runs on a separate child that names the anchor — so testing the anchor
+# alone cannot see it.
+D=$(scenario gate-exception-owned)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x5","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":81,
+  "branch":"polecat/a-x5",
+  "check.codex":"exception@deadbeef",
+  "check.codex.reason":"attempts-exhausted: 3 remediation round(s) spent against a cap of 3"}}]
+JSON
+cat > "$D/live-source_anchor_bead-a-x5.json" <<'JSON'
+[{"id":"a-fix","status":"in_progress","assignee":"alpha/rig.polecat",
+  "metadata":{"source_anchor_bead":"a-x5","branch":"polecat/a-x5"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "0" "(22) held gate with live remediation -> exit 0 (nothing to rule on)"
+hasnt "HELD IN EXCEPTION" "$D/out" "(22) the held gate is not escalated"
+has "a-fix" "$D/out" "(22) the note names the bead that is remediating it"
+has "matched on source_anchor_bead" "$D/out" "(22) the note names the surface that linked them"
+has "NOT flagged" "$D/out" "(22) the suppression is stated, never silent"
+has "already being remediated" "$D/out" "(22) the green summary counts it"
+
+# --- (23) ...and via the BROAD surface: a rework child on the branch ---------
+# Rework children never carry source_anchor_bead; the branch they push to is the
+# only thing tying them to the anchor.
+D=$(scenario gate-exception-owned-branch)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x6","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":82,
+  "branch":"polecat/a-x6","check.codex":"exception@cafe0001"}}]
+JSON
+cat > "$D/live-branch-polecat_a-x6.json" <<'JSON'
+[{"id":"a-rework","status":"open","assignee":"",
+  "metadata":{"branch":"polecat/a-x6","gc.routed_to":"alpha/rig.polecat"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "0" "(23) live rework child on the anchor's branch -> exit 0"
+has "a-rework" "$D/out" "(23) the note names the rework child"
+has "matched on branch" "$D/out" "(23) the note names the weaker surface as such"
+
+# --- (24) an INERT bead on the branch does NOT suppress ---------------------
+# The failure mode this check exists to catch is a stranded anchor, so mere
+# EXISTENCE must never buy silence. Open + unrouted + unclaimed carries no actor:
+# it is exactly what a rebase child whose metadata stamp was dropped leaves
+# behind ("a bounded orphan"), and it is not remediation.
+D=$(scenario gate-exception-inert)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x7","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":83,
+  "branch":"polecat/a-x7","check.codex":"exception@cafe0002"}}]
+JSON
+cat > "$D/live-branch-polecat_a-x7.json" <<'JSON'
+[{"id":"a-husk","status":"open","assignee":"","metadata":{"branch":"polecat/a-x7"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "1" "(24) an inert husk on the branch -> exit 1 (still reported)"
+has "HELD IN EXCEPTION" "$D/out" "(24) the stranded anchor is still escalated"
+has "nothing is remediating it" "$D/out" "(24) the warning says the lookup came back empty"
+
+# --- (25) the anchor does not suppress ITSELF --------------------------------
+# The branch lookup returns the anchor: it carries its own metadata.branch. Live
+# shape, verified against signal-loom/sl-kg9z6.1.2 — open, routed to `human`,
+# which makes it claimable and therefore ACTING. Without the self-exclusion this
+# arm would go silent on every held anchor in the city.
+D=$(scenario gate-exception-self)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x8","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":84,
+  "branch":"polecat/a-x8","check.codex":"exception@cafe0003"}}]
+JSON
+cat > "$D/live-branch-polecat_a-x8.json" <<'JSON'
+[{"id":"a-x8","status":"open","assignee":"",
+  "metadata":{"branch":"polecat/a-x8","gc.routed_to":"human"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "1" "(25) the anchor alone on its own branch -> exit 1 (no self-suppression)"
+has "HELD IN EXCEPTION" "$D/out" "(25) the held anchor is still escalated"
+
+# --- (26) a bead naming ANOTHER anchor does not suppress --------------------
+# `anchor_bead` is authoritative: a bead naming another anchor is positively not
+# about this one, and its own anchor holds its own merge.
+D=$(scenario gate-exception-theirs)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-x9","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":85,
+  "branch":"polecat/a-x9","check.codex":"exception@cafe0004"}}]
+JSON
+cat > "$D/live-branch-polecat_a-x9.json" <<'JSON'
+[{"id":"a-other","status":"in_progress","assignee":"",
+  "metadata":{"branch":"polecat/a-x9","anchor_bead":"a-zzz"}}]
+JSON
+rc=$(run_check "$D")
+eq "$rc" "1" "(26) a live bead naming another anchor -> exit 1 (still reported)"
+has "HELD IN EXCEPTION" "$D/out" "(26) the held anchor is still escalated"
+
+# --- (27) an unreadable ledger is not "nothing in flight" -------------------
+D=$(scenario gate-exception-undetermined)
+cat > "$D/anchors-alpha.json" <<'JSON'
+[{"id":"a-xa","metadata":{"check_set":"codex","merge_result":"pull_request","pr_number":86,
+  "branch":"polecat/a-xa","check.codex":"exception@cafe0005"}}]
+JSON
+touch "$D/live-fail"
+rc=$(run_check "$D")
+eq "$rc" "1" "(27) unreadable ownership lookup -> exit 1, never a silent OK"
+has "HELD IN EXCEPTION" "$D/out" "(27) the exception is reported anyway"
+has "UNDETERMINED" "$D/out" "(27) the failed lookup is named, not assumed owned"
 
 # --- (INV) detect-only: no fix script --------------------------------------
 [ -e "$HERE/fix.sh" ] \

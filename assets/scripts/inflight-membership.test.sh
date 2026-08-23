@@ -12,8 +12,8 @@
 # is what makes a copy that drifts fail loudly instead of silently.
 #
 # There is no sourced-library pattern in this pack — every assets/scripts/*.sh is
-# standalone and the readers span three media (shell, TOML formula body, markdown
-# fragment) — so this mirrors the pack's existing answer to exactly that problem:
+# standalone and the readers span four media (shell, TOML formula body, markdown
+# fragment, doctor check) — so this mirrors the pack's existing answer to exactly that problem:
 # formulas/mol-visit.toml + assets/scripts/gate-visit.test.sh (the gate-visit
 # block), and assets/scripts/signoff-round-cap.test.sh, which additionally EXECUTES
 # the extracted block rather than grepping its text.
@@ -41,6 +41,7 @@ REPO="$HERE/../.."
 SDIR="$REPO/assets/scripts"
 FDIR="$REPO/formulas"
 TDIR="$REPO/template-fragments"
+DDIR="$REPO/doctor"
 CANON_FILE="$SDIR/check-set-heal.sh"
 
 TMP="$(mktemp -d)"
@@ -71,10 +72,13 @@ fi
 echo "── (CENSUS)/(DRIFT)/(VALID) every copy ──"
 # The known hosts, by surface. A floor rather than an exact list: adding a reader
 # is expected, losing one is the regression.
-HOSTS="$SDIR/check-set-heal.sh $SDIR/recover-stranded-branches.sh $SDIR/reconcile-merged-prs.sh $FDIR/mol-refinery-patrol.toml"
+HOSTS="$SDIR/check-set-heal.sh $SDIR/recover-stranded-branches.sh $SDIR/reconcile-merged-prs.sh $FDIR/mol-refinery-patrol.toml $DDIR/check-merge-gate-drop/run.sh"
 COPIES=0
 for f in $HOSTS; do
     name="$(basename "$f")"
+    # Every doctor check's file is run.sh, so a bare basename would name none of
+    # them. Say which check it is.
+    case "$f" in "$DDIR"/*) name="doctor/$(basename "$(dirname "$f")")/$name" ;; esac
     blk="$(extract "$f")"
     if [ -z "$blk" ]; then
         bad "(CENSUS) $name carries a marked copy" "no # >>> inflight-membership block — did it get unmarked or hand-rolled?"
@@ -92,10 +96,10 @@ for f in $HOSTS; do
     bash -n "$TMP/copy.sh" 2>/dev/null && ok "(VALID) $name copy is valid bash" \
         || bad "(VALID) $name copy is valid bash" "bash -n failed"
 done
-if [ "$COPIES" -ge 4 ]; then
-    ok "(CENSUS) all four known readers carry the block ($COPIES found)"
+if [ "$COPIES" -ge 5 ]; then
+    ok "(CENSUS) every known reader carries the block ($COPIES found)"
 else
-    bad "(CENSUS) all four known readers carry the block" "expected >=4, found $COPIES"
+    bad "(CENSUS) every known reader carries the block" "expected >=5, found $COPIES"
 fi
 
 # --- behaviour, run against the extracted block ------------------------------
@@ -169,7 +173,7 @@ echo "── (NOROLL) the predicate is defined ONCE ──"
 # Swept across the WHOLE pack, not just the known hosts: a fifth reader that
 # hand-rolls the predicate is exactly what this is for, and it would carry no
 # marker to be found by.
-for f in "$SDIR"/*.sh "$FDIR"/*.toml "$TDIR"/*.md; do
+for f in "$SDIR"/*.sh "$FDIR"/*.toml "$TDIR"/*.md "$DDIR"/*/run.sh; do
     [ -f "$f" ] || continue
     case "$f" in *.test.sh) continue ;; esac   # tests quote the block; they do not ship it
     name="$(basename "$f")"
