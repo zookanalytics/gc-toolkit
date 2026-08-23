@@ -1,4 +1,40 @@
+---
+name: Design — The Bead-Universe Operating Model (v1)
+description: The June-2026 v1 design of the bead-universe. Superseded in part by specs/tk-h9pq5/design-doc.md (v2, 2026-07-29), which replaced the binding and lifecycle; Phases 2 and 4 are untouched and this doc is still their authority. Read the supersession banner before citing any part of it.
+---
+
 # Design: The Bead-Universe Operating Model (v1)
+
+> **⚠ SUPERSEDED IN PART — read this before citing anything below.**
+>
+> This is **v1**, written in the 2026-06-06 design run and landed 2026-06-10
+> (`857ce24`). Its **binding and lifecycle** were superseded on 2026-07-29 by
+> **`specs/tk-h9pq5/design-doc.md`** (Bead-Universe v2,
+> Conversation-as-Continuation-Group). The rest of v1 still stands and is
+> still cited by live code. Nothing below is deleted or rewritten — this
+> document is a point-in-time record. The map is how to read it.
+>
+> | v1 part | Standing today | Where the authority is |
+> |---|---|---|
+> | **Phase 1 / Key Components 1–2** — the bead-host, the per-bead session, the `hosts_bead` / `host_session` / `gc.session_lineage` link, warm-while-live grounding | **RETIRED** | `specs/tk-h9pq5/design-doc.md`. The binding is now `gc.continuation_group = <subject-bead-id>` and each turn is an ordinary filed bead; the role ships as `agents/converse/`. `agents/bead-host/` does not exist. |
+> | **Phase 2 / Key Component 3 + Data Model** — the universe slice (fed / fetchable / out) | **STANDS.** v2 does not touch it | this doc. Ships as `tools/gc-bd-universe.sh`, gated by `tools/bead-universe-reachability-fixture.sh`. |
+> | **Phase 3 / Key Component 4** — the attention surface | **REWIRED.** The board survived; what a pick *does* changed | `specs/tk-h9pq5/design-doc.md` — pick-a-row files-or-attaches a visit instead of resume-or-create a host. Separately, the `gc attention flag` hand-raise was **removed** by operator decision 2026-08-08 (`specs/2026-08-fresh-start/attention-flag-removal.md`); raising a hand is now filing a visit. Ships as `assets/scripts/gc-helm.sh` + `services/helm/`. |
+> | **Phase 4 / Key Component 5** — proactive-via-slung-mol — plus Key Component 6's merge-path invariant (proactive work stays on the codex-gated `mr` path, never `direct`) | **STANDS.** v2 scopes itself to the binding and lifecycle | this doc. Ships as `formulas/mol-first-reaction.toml`, `agents/proactive/`, `tools/gc-proactive.sh`. Key Component 6's *role* assignments (mayor-as-root-node, mechanik-as-strategy-thread) were flagged provisional by v1 itself and are not settled by either doc. |
+>
+> **The command names below are design names, not shipped ones.** A pack
+> cannot add subcommands to the `gc` Go binary, so `gc attention open`,
+> `gc bd universe <id> --slice` and `gc bead-host` shipped as path-invoked
+> tools under `tools/` and `assets/scripts/` instead. Searching for the v1
+> names and finding nothing is **not** evidence the capability is absent —
+> that inference is the false premise the tk-z9nln audit had to overturn
+> (`specs/tk-z9nln/divergence-record.md`, D1).
+>
+> **Provenance.** The brief this design answered is bead **tk-yrio** (closed
+> 2026-08-22, `gc.superseded_by = tk-mcyd1`). Its body describes two
+> mechanisms that are now retired — the `gc.attention` hand-raise and the
+> per-bead host binding — and its open question Q5 rests on the first. It is
+> a point-in-time record too, and carries no forward pointer of its own
+> beyond that metadata; read it through this banner.
 
 *Synthesis of 6 design-exploration legs (api, data, ux, scale, security, integration), each
 grounded in the gc-toolkit codebase, against the operator-converged brief tk-yrio and the gate

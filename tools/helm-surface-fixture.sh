@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # helm-surface-fixture.sh — the automatable assertions for the Phase 3
-# attention surface (specs/bead-universe/design-doc.md, Phase 3).
+# attention surface. Phase 3 originates in Bead-Universe v1
+# (specs/bead-universe/design-doc.md, Phase 3), but what this fixture asserts
+# is governed by v2 (specs/tk-h9pq5/design-doc.md): v2 kept the board and
+# rewired what a pick does — file-or-attach a visit, not resume-or-create a
+# per-bead host — which is why the held glyph below reads visit presence.
+# The v1 flag scenarios are gone outright: the gc.attention flag was removed
+# by operator decision 2026-08-08
+# (specs/2026-08-fresh-start/attention-flag-removal.md).
 #
 # The operator-judged capstone (board → pick a bead → converse session
 # holds the conversation) is human-in-the-loop by design and is NOT

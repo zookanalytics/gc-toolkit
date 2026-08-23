@@ -6,21 +6,28 @@
 # The board half of the bead-universe loop, bound to a sibling of the
 # live-session picker (prefix+S stays "what's running"; this is "what
 # needs me"). Phase 3 of the Bead-Universe Operating Model (bead
-# tk-qkags; design Key Component 4, Interface "board loop").
+# tk-qkags; v1 design Key Component 4, Interface "board loop",
+# specs/bead-universe/design-doc.md) — but the pick-a-row action is
+# governed by v2 (specs/tk-h9pq5/design-doc.md), which retired v1's
+# per-bead resident host.
 #
 # Reads the ranked board from `gc-helm.sh --json` (cached, so a
 # glance is sub-second) and renders it as a tmux display-menu. Picking a
-# row runs `gc-helm.sh open <bead>`, which resumes-or-materializes
-# that bead's resident host and lands the operator in the conversation —
+# row runs `gc-helm.sh open <bead>`, which files a VISIT on that bead —
+# a converse session holds it and lands the operator in the conversation —
 # one keystroke from "I see the row" to "I'm in the advanced universe."
 #
-# Liveness drives how a row opens, using the `live` field the board
-# already computes (alias==bead-id join over `gc session list`):
-#   ● hot   — host is live: open in the FOREGROUND, an instant reattach.
-#   ◐ warm  — host suspended: open in the BACKGROUND (run-shell -b) so the
-#   · cold  — no host yet:    seconds-long resume/materialize never freezes
-#                             the tmux server; the host's status indicator
-#                             shows it coming up, then it lands.
+# Row opening still branches on a `live` (hot/warm/cold) field — a v1
+# host-liveness concept (an alias==bead-id join over `gc session list`,
+# answering "is this bead's resident host up?"). The board no longer emits
+# it: the `--json` contract dropped it with the per-bead host, and `held`
+# (visit presence) is its one glyph fact now (gc-helm.sh, "There is no
+# `live` … host field"). So `.live//"cold"` always reads cold, every row
+# opens in the BACKGROUND (run-shell -b), and the ●/◐ branches below are
+# unreachable. Backgrounding is the safe branch — a cold visit-file plus
+# converse spawn takes seconds and must never freeze the tmux server — so
+# this is dead code, not a live defect. Which rows deserve a foreground
+# attach under group-shaped liveness is tracked on tk-5cy6g.
 #
 # --city-path is the absolute path of the city this binding belongs to —
 # baked in by tmux-bindings.sh at install time so `gc`'s city discovery
@@ -76,7 +83,7 @@ CMD_PREFIX=""
 SQ_ATTN=$(sq "$ATTN")
 
 # One TSV row per anchor: live, severity, id, rig, title, frontier. (The
-# severity band already carries the kind signal — FLAGGED vs HIGH/etc.)
+# severity band already carries the kind signal.)
 ROWS=$(printf '%s' "$BOARD" | jq -r '
     .[] | [(.live//"cold"), (.severity//"?"), .id, (.rig//"?"),
            ((.title//"")[0:38]), ((.frontier//"")[0:34])] | @tsv')
@@ -93,8 +100,8 @@ while IFS="$TAB" read -r live sev id rig title frontier; do
     esac
     label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$title" "$frontier")
 
-    # Hot host: foreground reattach (instant). Warm/cold: background the
-    # resume/materialize so a slow cold-start can't freeze the server.
+    # Dead branch: the board emits no `live` field, so this always takes
+    # the background arm (see the header note and tk-5cy6g).
     if [ "$live" = "hot" ]; then runflag=""; else runflag="-b"; fi
     cmd="run-shell $runflag \"${CMD_PREFIX}${SQ_ATTN} open ${id}\""
 

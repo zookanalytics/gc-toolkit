@@ -2,7 +2,11 @@
 # gc-bd-universe.sh — emit a bead's "universe slice": the fed/fetchable/out
 # context tiers that prime a converse session. Phase 2 of the Bead-Universe Operating
 # Model (specs/bead-universe/design-doc.md — Key Component 3, Data Model,
-# Phase 2).
+# Phase 2). That design is v1, superseded in part by
+# specs/tk-h9pq5/design-doc.md (v2): v2 replaced the binding and lifecycle —
+# which is why the consumer here is a converse session and not v1's per-bead
+# bead-host — and left Phase 2 untouched, so v1 still defines the slice.
+# Read its supersession banner before citing the rest of it.
 #
 # This is the design's `gc bd universe <id> --slice` projection. `gc bd` is a
 # passthrough to upstream `bd` (Go) and has no `universe` subcommand, so the

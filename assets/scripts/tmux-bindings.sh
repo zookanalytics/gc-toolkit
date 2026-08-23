@@ -31,10 +31,13 @@ gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --cit
 
 # Helm — the sibling of prefix+S. prefix+S answers "what's
 # running"; prefix+b answers "what needs me": a ranked cross-rig board of
-# OPEN anchors (epics, floating convoys, decisions, flagged beads). Pick a
-# row and it resumes-or-materializes that bead's resident host and lands
-# you in the conversation. Phase 3 of the Bead-Universe Operating Model
-# (bead tk-qkags; design Key Component 4). See tmux-pick-helm.sh.
+# OPEN anchors (epics, floating and unowned convoys, decisions, human-routed
+# beads, parked beads — six kinds; see gc-helm.sh). Pick a row and it files a
+# VISIT on that bead, which a converse session holds for you. Phase 3 of the
+# Bead-Universe Operating Model (bead tk-qkags; v1 design Key Component 4,
+# specs/bead-universe/design-doc.md) — but the pick-a-row action is governed
+# by v2 (specs/tk-h9pq5/design-doc.md), which retired v1's per-bead resident
+# host that this binding used to resume. See tmux-pick-helm.sh.
 gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
 
 # Operator-origin visit intake — type a message, get a durable, routed

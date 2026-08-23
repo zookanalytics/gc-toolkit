@@ -13,6 +13,11 @@ reaction (read the body, write a first-reaction card to the notes, file a
 visit on it), and drains. It makes the human arrive at *advanced*
 work — a bead that already moved one step.
 
+That design is **v1**, superseded in part by specs/tk-h9pq5/design-doc.md
+(v2, 2026-07-29): v2 replaced the binding and lifecycle and left Phase 4
+standing, so v1 is still this pool's authority. Read its supersession banner
+before citing the rest of it.
+
 ## Why we built this
 
 "Proactive" in v1 is deliberately NOT a resident loop (the operator deferred

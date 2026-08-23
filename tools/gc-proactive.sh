@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # gc-proactive.sh — the proactive-via-slung-mol engine. Phase 4 of the
 # Bead-Universe Operating Model (specs/bead-universe/design-doc.md —
-# Key Components 5-6, Phase 4).
+# Key Components 5-6, Phase 4). That design is v1, superseded in part by
+# specs/tk-h9pq5/design-doc.md (v2): v2 replaced the binding and lifecycle
+# and left Phase 4 standing, so v1 still governs this tool — read its
+# supersession banner before citing the rest of it.
 #
 # "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
 # slung at a bead: a cheap first reaction (read the body → articulate /
