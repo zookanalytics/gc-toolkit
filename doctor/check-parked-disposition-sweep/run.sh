@@ -21,7 +21,7 @@
 # The script existing without a caller is the same failure, and so is the script
 # existing without its PRODUCER: the sweep selects on `gc.origin=operator`, and if
 # gc-visit-open.sh stops stamping that key the population quietly becomes empty and
-# the pass reports "no parked operator-origin subjects" forever.
+# the pass reports "no parked operator-origin subjects, and nothing holding" forever.
 #
 # Exit codes: 0=OK, 1=Warning, 2=Error
 # stdout: first line=message, rest=details
@@ -44,11 +44,15 @@ else
     [ -x "$dir/$script" ] \
         || errors+=("$script is not executable — the call site guards on -x, so a non-executable script is silently never run")
 
-    # THE scope ruling (operator, 2026-08-22): operator-origin subjects only, because
-    # that is the set where a standing expectation of an answer exists. Widening it
-    # files visits on every parked conversation in the rig.
-    grep -qF '"gc.origin"] // "") | tostring) == "operator"' "$dir/$script" \
-        || errors+=("$script: the operator-origin filter is gone — the ruling scopes this to operator-origin subjects, and without the filter every parked conversation in the rig gets a visit and a converse session")
+    # THE scope ruling (operator, 2026-08-22): the DISPOSITION arm covers
+    # operator-origin subjects only, because that is the set where a standing
+    # expectation of an answer exists. Widening it files visits on every parked
+    # conversation in the rig. (The stranded-hold arm carries no origin filter and is
+    # not scoped by this ruling — a hold is by contract a wait on the operator
+    # whoever filed the subject — but it is bounded by the hold predicate instead,
+    # checked below.)
+    grep -qF 'if [ "$origin" = "operator" ] && [ "$READY" = "1" ] && [ "$flagged" != "$LANDED_KEY" ]; then' "$dir/$script" \
+        || errors+=("$script: the disposition arm no longer requires gc.origin=operator — the ruling scopes it to operator-origin subjects, and without the filter every parked conversation in the rig gets a visit and a converse session")
 
     # THE readiness half the board cannot express. A sitting files its routed work as
     # a CHILD of the subject, and a parent cannot be blocked by its own descendant, so
@@ -60,14 +64,52 @@ else
     # ...and the at-least-one half. Without it every parked conversation that routed
     # NOTHING reads as ready forever — the ordinary "we talked, here is the
     # conclusion" park, which is most of them.
-    grep -qF "if [ -z \"\$WAIT_IDS\" ]; then" "$dir/$script" \
-        || errors+=("$script: the at-least-one-recorded-wait guard is gone — a park that routed nothing has an empty wait set, which trivially satisfies 'all closed', so every such park would be signalled")
+    #
+    # Anchored on the READY computation in the PASS, not on the `-z "$WAIT_IDS"` test
+    # in the --wait-spent verb: both exist, they say the same thing, and matching the
+    # loose string keeps this check green while the pass's own guard is gone.
+    grep -qF '[ -n "$WAIT_IDS" ] && [ -z "$WAIT_OPEN" ] && READY=1' "$dir/$script" \
+        || errors+=("$script: the at-least-one-recorded-wait guard is gone from the pass — a park that routed nothing has an empty wait set, which trivially satisfies 'all closed', so every such park would be signalled")
 
     # The dedupe marker, and that it is keyed on the OBSERVATION. A key keyed on a
     # timestamp is self-defeating: stamping the marker is a bd update, every update
     # bumps updated_at, so the same subject re-files every pass forever (tk-1g9yw).
     grep -qF "disposition_flagged=\$LANDED_KEY" "$dir/$script" \
         || errors+=("$script: the dedupe marker is no longer keyed on the landed id set — a timestamp key is invalidated by its own stamp and re-files the same subject every pass, minting a converse session each time (the amplifier tk-1g9yw)")
+
+    # --- the stranded-hold arm (tk-jsyci7) ---------------------------------
+    # The second observation, and the three things that keep it from manufacturing
+    # work. It exists because the field that RECORDS a hold is the field that MUTES
+    # the stall detector, and the un-mute keys on a recorded wait closing — which a
+    # hold, waiting on a human answer, never has. Measured: tk-fhlv4, 10h16m
+    # unattended and permanently invisible, because its disposition marker had
+    # already retired the other arm.
+    grep -qF 'test("^holding' "$dir/$script" \
+        || errors+=("$script: the hold predicate is gone — nothing then distinguishes a sitting reaped mid-hold from an ordinary park, and the case tk-fhlv4 was measured on goes back to being invisible")
+
+    # The half that keeps it off work still in flight. A hold whose recorded wait is
+    # OPEN is waiting, not stranded, and the disposition arm fires for it when that
+    # work lands. Drop this and every ordinary mid-flight hold becomes a visit about
+    # work still in progress — the one thing this whole pass is written not to do.
+    grep -qF '[ "$is_hold" = "1" ] && [ -z "$WAIT_OPEN" ]' "$dir/$script" \
+        || errors+=("$script: the hold arm no longer requires the recorded wait to be empty of open ids — a hold that is merely mid-flight would be signalled, inviting the operator into a conversation about work still in progress")
+
+    # The live-visit union must include stall_root. A takeaway lands on the ITEM, not
+    # the shared bucket, so a stalled-workflow sitting stamps the ROOT while its
+    # visit's continuation_group names the triage subject. This guard is the ONLY one
+    # standing there: gc-helm.sh open's own already-held check reads the stamp and the
+    # tracks edge only, so it would file the duplicate rather than refuse it.
+    grep -qF '(((.metadata // {}).stall_root // "") | tostring),' "$dir/$script" \
+        || errors+=("$script: stall_root is gone from the live-visit union — an item a live sitting holds as its stall_root reads as having no visit, and the hold arm files a second one onto a conversation in progress")
+
+    # Keyed on the HOLD, and recorded by BOTH arms. `hold_flagged=<gc.takeaway_at>`
+    # says which hold was last put in front of converse; a dispose filing records it
+    # too, or the two arms amplify each other — a sitting concludes a disposition
+    # visit and closes it WITHOUT clearing a takeaway that still begins "holding",
+    # which is ordinary, and the next pass reads a stranded hold. One visit per round,
+    # forever, which is the amplifier tk-1g9yw in a new place.
+    grep -qF 'MARKER="$MARKER hold_flagged=$tk_at"' "$dir/$script" \
+        || errors+=("$script: a disposition filing no longer records the hold stamp — closing its visit hands the same subject straight to the hold arm, and the two arms amplify each other one visit per pass")
 
     # The filing goes through gc-helm.sh open — the one place the canonical gate-visit
     # block lives, which also owns the subject-exists gate, the one-open-visit-per-
@@ -109,7 +151,7 @@ if [ ! -s "$dir/$producer" ]; then
     errors+=("missing: $producer — the operator-origin intake front door, which is what stamps the key the sweep selects on")
 else
     grep -q 'gc.origin=operator' "$dir/$producer" \
-        || errors+=("$producer: it no longer stamps gc.origin=operator — the sweep's population silently becomes empty, and 'no parked operator-origin subjects' reads exactly like a healthy pass. The prose line in the body is NOT a substitute: it has drifted across script generations and a --desc-contains sweep for it matches beads that merely quote it")
+        || errors+=("$producer: it no longer stamps gc.origin=operator — the sweep's population silently becomes empty, and 'no parked operator-origin subjects, and nothing holding' reads exactly like a healthy pass. The prose line in the body is NOT a substitute: it has drifted across script generations and a --desc-contains sweep for it matches beads that merely quote it")
 fi
 [ -s "$dir/$backfill" ] \
     || errors+=("missing: $backfill — the subjects filed before the key existed keep the prose and nothing else, so the sweep cannot see them")
@@ -136,6 +178,14 @@ else
         || errors+=("$test_script: no silent-filing case — that a filing which exits 0 without persisting leaves the disposition un-retired is unproven")
     grep -q 'NOCLEAR' "$dir/$test_script" \
         || errors+=("$test_script: no takeaway-preserved case — that the pass writes exactly one key and never touches the takeaway is unproven")
+    grep -q 'HOLDSPENT' "$dir/$test_script" \
+        || errors+=("$test_script: no already-disposed-then-re-parked case — that is tk-fhlv4's actual shape (its disposition marker equals its landed set, so that arm can never fire again), and it is the reason the hold arm exists at all")
+    grep -q 'HOLDWAIT' "$dir/$test_script" \
+        || errors+=("$test_script: no mid-flight-hold case — that a hold whose routed work is still open is never signalled is unproven, and that is the failure that would put the operator in a conversation about work in progress")
+    grep -q 'HOLDSTALL' "$dir/$test_script" \
+        || errors+=("$test_script: no stall_root case — that an item a LIVE sitting holds only through its visit's stall_root is skipped is unproven, and gc-helm.sh open does not catch that one")
+    grep -q 'NOAMPLIFY' "$dir/$test_script" \
+        || errors+=("$test_script: no cross-arm amplifier case — that closing a disposition visit does not hand the subject to the hold arm is unproven, and the takeaway is not cleared on the ordinary path")
     grep -q 'CENSUS' "$dir/$test_script" \
         || errors+=("$test_script: no bucket census — the skip buckets MASK each other (a park with no recorded wait has an empty landed key, which equals an empty marker, so dropping the at-least-one guard silently reclassifies it instead of filing), and the counts are the only place that shows it")
 fi

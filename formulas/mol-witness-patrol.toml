@@ -1630,11 +1630,12 @@ the only place that pours the next wisp and burns this one."""
 
 [[steps]]
 id = "detect-parked-dispositions"
-title = "Bring a parked conversation back when its routed work lands"
+title = "Bring a parked conversation back — landed work, or a hold nobody is holding"
 needs = ["detect-stalled-workflows"]
 description = """
-File one visit back to converse when a parked, operator-origin subject's routed work
-has all landed (tk-2cyxo).
+File one visit back to converse on either of two observations: a parked,
+operator-origin subject whose routed work has all landed (tk-2cyxo), or a `holding`
+takeaway with no live sitting behind it (tk-jsyci7).
 
 **The failure this catches.** A `gc.takeaway` stamp does three unrelated jobs at
 once, and two of them conspire: it parks the board row at LOW (a conversation that
@@ -1682,8 +1683,10 @@ close), so the canonical converse shape produces zero `waiting_on` edges. Keyed 
 on.
 
 **It never clears the takeaway.** That stamp is the durable record of what the sitting
-concluded and the operator's headline on the board; the visit is ADDITIVE. The pass
-writes exactly one key, `disposition_flagged`, and only after a visit exists.
+concluded — or of what it is still waiting for — and the operator's headline on the
+board; the visit is ADDITIVE. The pass writes only its observation markers
+(`disposition_flagged`, `hold_flagged`), one key per write, and only after a visit
+exists.
 
 **One visit per observation.** Same two guards as the pass above, for the same reason
 (tk-1g9yw): an open visit naming the subject is the primary bound — the filing goes
@@ -1692,6 +1695,31 @@ visit's subject — and `disposition_flagged`, keyed to the sorted id set of the
 that landed, is the backstop for after that visit is closed. Never keyed on a
 timestamp: stamping the marker bumps `updated_at`, so such a key invalidates itself
 and re-files forever.
+
+**The second observation: a hold nobody is holding (tk-jsyci7).** The converse
+contract stamps `gc.takeaway` when a hold BEGINS — `holding — <the decision needed>`
+— precisely so a session reaped mid-hold leaves a dated trace. But that same stamp is
+what mutes the stall detector, and the un-mute above keys on a RECORDED wait closing.
+A sitting holding on the OPERATOR has no recorded wait at all: what it waits on is a
+human answer, not a bead. Nothing can close, so the mute never lifts.
+
+Measured the day it was filed: `tk-fhlv4` held from 06:09:20Z and was found by hand at
+16:2xZ — **10h16m**, no live visit, no assignee, a substantive finding unanswered. It
+was not merely outside the disposition arm, it was RETIRED from it: that arm had
+already fired and stamped `disposition_flagged` when its routed work landed, and the
+sitting then re-parked into a hold, which routes nothing — so no new landed set can
+ever form and that marker can never differ again.
+
+So: a `holding` takeaway, no visit naming the bead by any of its three recordings
+(`gc.continuation_group`, the `tracks` edge, or a visit's `stall_root` — the takeaway
+lands on the ITEM, so a stalled-workflow sitting stamps the ROOT), and nothing still
+recorded as in flight. That last half is what keeps it off work in progress: a hold
+whose recorded wait is OPEN is waiting, not stranded. No origin filter, unlike the
+arm above — a hold is by contract a wait on the operator whoever filed the subject.
+Deduped by `hold_flagged=<gc.takeaway_at>`, which BOTH arms stamp: a sitting that
+concludes a disposition visit does not always clear a takeaway that still reads
+"holding", and without that record the two arms would hand the subject back and forth
+one visit per pass.
 
 **It also owns the predicate the step above asks for.** `--wait-spent <bead-id>`
 answers whether a takeaway's recorded wait has fully closed;
@@ -1705,7 +1733,12 @@ routed work, a park that routed nothing, an agent-origin park, an empty takeaway
 both recordings of an already-open visit, the dedupe marker and its re-flag, an
 unresolvable blocker, both fail-safes, a filing that exits 0 without filing, the
 takeaway never being cleared, `--dry-run`, one visit across repeated passes with the
-real `updated_at` bump in play, and every answer of `--wait-spent`).
+real `updated_at` bump in play, and every answer of `--wait-spent`; and for the hold
+arm: a stranded hold, one on a subject nobody filed as operator-origin, a mid-flight
+hold that is NOT signalled, the per-hold dedupe and its re-stamp, the already-disposed
+subject that only this arm can reach, an item held by a live sitting through its
+visit's `stall_root` alone, an undated hold with and without an existing marker, and
+that closing one arm's visit does not hand the subject to the other).
 
 **Exit criteria:** Dispositions signalled, or none due. Continue to
 `check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is the

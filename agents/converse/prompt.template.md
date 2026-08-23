@@ -248,7 +248,17 @@ The loop, every visit:
    (**The reap**, below) and the stamp is the only thing that survives
    it: reaped, the item still says what the sitting was waiting for and
    when. Unstamped, a reaped hold is indistinguishable from one that
-   never happened. (The writer is **searched for**, never assumed:
+   never happened — and it is now also what BRINGS THE HOLD BACK:
+   `assets/scripts/detect-parked-dispositions.sh` files a fresh visit on
+   a `holding` takeaway that no live visit names, once per hold, keyed on
+   this stamp's `gc.takeaway_at` (tk-jsyci7). Before that, a hold was the
+   one wait nothing could re-ask — it names no bead to close, and the
+   takeaway that records it is the same field that mutes the stall
+   detector, so tk-fhlv4 sat 10h16m unattended. Two consequences for you:
+   write the takeaway so it still states the decision needed when read
+   cold by a sitting that was not here, and when you resume a hold and
+   hold again, RE-STAMP it — a fresh `gc.takeaway_at` is what earns the
+   next visit if this session is reaped too. (The writer is **searched for**, never assumed:
    `$GC_RIG_ROOT` is the rig that IMPORTED this agent, not the gc-toolkit
    pack — a `signal-loom/gc-toolkit.converse` session gets signal-loom's
    root, which has no `assets/` at all, so a path built from it alone

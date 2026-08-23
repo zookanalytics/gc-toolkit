@@ -26,10 +26,17 @@
 # the necessary half and it is not sufficient: ELEVATED is passive, and it still
 # waits for someone to look at a board. This pass is the push.
 #
-# WHAT IT DOES. One visit, routed to the rig's converse pool, on a parked
-# operator-origin subject whose routed work has ALL landed. It writes exactly one
-# metadata key (the dedup marker) and nothing else. It never closes anything, never
-# clears the takeaway, and never touches the work.
+# WHAT IT DOES. One visit, routed to the rig's converse pool, on a parked subject
+# that nobody is talking to and that one of TWO observations applies to:
+#
+#   DISPOSITION DUE  an operator-origin park whose routed work has ALL landed
+#                    (below: The four questions)
+#   STRANDED HOLD    a `holding` takeaway with no live sitting behind it — the
+#                    sitting was reaped mid-hold (below: The second observation)
+#
+# It writes exactly one metadata key per visit (that observation's dedup marker) and
+# nothing else. It never closes anything, never clears the takeaway, and never
+# touches the work.
 #
 # ── The four questions, and why each is asked this way ───────────────────────
 #
@@ -132,12 +139,96 @@
 # it early. A wait for a settling period would only delay the push the ruling asked
 # for.
 #
+# ── The second observation: a stranded hold (tk-jsyci7) ──────────────────────
+#
+# THE INTERACTION. The converse contract stamps `gc.takeaway` when a hold BEGINS —
+# `gc-helm takeaway <item> "holding — <the one decision or input needed>"`,
+# agents/converse/prompt.template.md step 5 — precisely so that a session reaped
+# mid-hold still leaves a dated trace of what it was waiting for. That is correct and
+# does not change here.
+#
+# But a non-empty takeaway is also what MUTES detect-stalled-workflows.sh. So the
+# field written to survive the reap is the same field that hides it, and the tk-2cyxo
+# un-mute cannot help: it keys on a RECORDED wait closing, and a sitting holding on
+# the OPERATOR has no recorded wait at all — what it waits on is a human answer, not
+# a bead. No edge, no child, nothing that can close. The mute is therefore permanent.
+#
+# MEASURED. tk-fhlv4, 2026-08-23: holding since 06:09:20Z, found by hand at 16:2xZ —
+# 10h16m, no live visit, no assignee, its substantive finding unanswered. A second
+# the same day (tk-hs2e8's sitting, reaped ~07:34Z) came back only when the pool
+# re-offered its still-open visit at ~16:12Z: 8h38m, and by a slower path than
+# anything purpose-built.
+#
+# WHY THE DISPOSITION ARM CANNOT REACH IT — the sharper half. tk-fhlv4 is not merely
+# outside that arm, it is RETIRED from it: `disposition_flagged=tk-yhwfv.1,tk-yhwfv.2`
+# was stamped when its routed work landed and a visit was filed for that. The sitting
+# that took the visit then re-parked into a HOLD, which routes nothing, so no new
+# landed set can ever form and the marker can never differ again. Every path to a
+# push was closed. That is the shape this arm exists for.
+#
+# THE PREDICATE, and what each half refuses:
+#
+#   a `holding` takeaway   the one shape the contract writes, anchored and
+#                          word-bounded. Tested ONCE, in the row query, so the shell
+#                          and jq halves cannot drift into two definitions.
+#
+#   no live visit          the same is_held union as the disposition arm, plus
+#                          `stall_root` — see below. This is what separates a
+#                          stranded hold from a live one: a live sitting holds its
+#                          visit, a reaped one does not.
+#
+#   nothing still in       a hold whose recorded wait is OPEN is not stranded, it is
+#   flight                 WAITING, and the disposition arm fires for it when that
+#                          wait lands. Without this half every ordinary mid-flight
+#                          hold becomes a visit about work still in progress — the
+#                          one thing the whole pass is written not to do.
+#
+# NO ORIGIN FILTER, deliberately, and unlike the disposition arm. That arm is narrow
+# because an agent-origin PARK is not owed a push. A HOLD is different in kind: the
+# contract's own rule is that "a hold with nothing for the operator to decide is not
+# a hold", so the standing expectation of an answer comes from the hold itself, not
+# from who filed the subject. A hold stamped on a workflow root by a stalled-workflow
+# sitting is owed the same push as one on an operator's own question.
+#
+# WHY `stall_root` IS IN THE LIVE-VISIT UNION, and why it is load-bearing rather than
+# thorough. The takeaway lands on the ITEM, never on the shared bucket (contract step
+# 5), and for a stalled-workflow visit the item is the root named in that visit's
+# `stall_root` while its `gc.continuation_group` is the shared triage subject. Match
+# only the stamp and the tracks edge and such an item reads as having no visit while
+# a session is mid-conversation about it. `gc-helm.sh open` does NOT close this gap:
+# its own already-held guard reads the stamp and the edge only, so it would file the
+# duplicate rather than refuse it. This guard is the only thing standing there.
+#
+# KEYED ON THE HOLD, not on a clock. `hold_flagged=<gc.takeaway_at>` records THE
+# TAKEAWAY STAMP THAT WAS CURRENT WHEN THIS PASS LAST PUT THE SUBJECT IN FRONT OF
+# CONVERSE. So the same hold is signalled exactly once, and a NEW hold — a re-park,
+# which restamps `gc.takeaway_at` — earns exactly one more visit. Same discipline as
+# `disposition_flagged`, for the same reason: this runs from a patrol, so anything
+# keyed on a last-touch re-files forever, since stamping the marker is itself a
+# write. An undated `holding` takeaway has no stable observation key, so it is
+# reported and skipped rather than signalled off a key that cannot dedupe.
+#
+# WHICH IS WHY A DISPOSITION FILING STAMPS IT TOO. Both arms send the subject to the
+# same place, so both have to record it. Left to the hold arm alone, the two arms
+# amplify each other: the disposition arm files, a sitting takes the visit, concludes
+# and closes it — WITHOUT clearing a takeaway that still begins "holding", which is
+# the ordinary case, since the takeaway is the sitting's headline and not its state
+# machine — and the next pass reads a hold with no live visit and files again, once
+# per round, forever. Recording the stamp on every filing closes that: after either
+# arm fires, only a genuine RE-PARK reopens the question. Not bundling — the same
+# fact, written by whichever arm observed it.
+#
+# PRECEDENCE. The disposition arm is tried first. When both apply, the landed work is
+# the more specific thing to say and its body is the better brief; the hold arm is
+# the residue, which is exactly how it reaches a subject the disposition marker has
+# already retired.
+#
 # ── What it never does ───────────────────────────────────────────────────────
 #
 # It never clears `gc.takeaway`. That stamp is the durable record of what the sitting
 # concluded and the operator's own headline on the board; the visit is ADDITIVE. It
-# writes one key, `disposition_flagged`, and only to a subject it has just filed a
-# visit for.
+# writes one key per visit — `disposition_flagged` or `hold_flagged`, whichever
+# observation fired — and only to a subject it has just filed a visit for.
 #
 # ── --wait-spent, the shared predicate ───────────────────────────────────────
 #
@@ -247,6 +338,22 @@ recorded_wait() {
 # order any listing happened to return.
 sorted_key() { printf '%s' "${1:-}" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort -u | tr '\n' ',' | sed 's/,$//'; }
 
+# How long a stamp has stood, as "10h16m". DISPLAY ONLY — never a key and never a
+# gate, so the two date dialects are tried in turn and an unparsable stamp yields the
+# EMPTY string rather than a wrong duration. Every caller omits the line when it is
+# empty: "holding 10h16m" is the number that makes an operator act, and a fabricated
+# one is worse than none.
+held_for() {
+  _t=""
+  _t=$(date -u -d "${1:-}" +%s 2>/dev/null) || _t=""
+  [ -n "$_t" ] || _t=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${1:-}" +%s 2>/dev/null) || _t=""
+  [ -n "$_t" ] || return 0
+  _n=$(date -u +%s 2>/dev/null) || return 0
+  _d=$((_n - _t))
+  [ "$_d" -ge 0 ] || return 0
+  printf '%dh%02dm' "$((_d / 3600))" "$(((_d % 3600) / 60))"
+}
+
 # ── Query mode: is this bead's named wait spent? ─────────────────────────────
 # The shared predicate, exposed so detect-stalled-workflows.sh can ask it instead of
 # growing a second copy that drifts.
@@ -284,31 +391,63 @@ if [ -z "$LIVE" ] || ! printf '%s' "$LIVE" | scrub | jq -e 'type == "array"' >/d
   exit 0
 fi
 
-# Candidate rows: id US takeaway US takeaway_at US takeaway_by US flagged US blocks-csv US title
+# Candidate rows, for BOTH observations:
+#   id US takeaway US takeaway_at US takeaway_by US flagged US hold_flagged US origin
+#      US is_hold US blocks-csv US title
+#
+# A row qualifies as operator-origin (the disposition arm) OR as a hold (the stranded
+# -hold arm, which carries no origin filter — see the header). Non-empty is still the
+# park test, not presence: an EMPTY stamp is a CLEARED park.
+#
+# `$hold` IS THE HOLD PREDICATE, and it is defined here and nowhere else. The loop
+# reads the flag rather than re-testing the string, so the shell and jq halves cannot
+# drift into two definitions of what a hold is. Anchored and word-bounded against the
+# one shape the contract writes — `holding — <the one decision or input needed>` —
+# so a takeaway that merely mentions holding something is not one; case-insensitive
+# because the writer is a machine but the field is hand-editable.
 ROWS=$(printf '%s' "$LIVE" | scrub | jq -r '
   .[]
   | ((.metadata // {})) as $m
-  | select((($m["gc.takeaway"] // "") | tostring) != "")
-  | select((($m["gc.origin"] // "") | tostring) == "operator")
+  | ((($m["gc.takeaway"] // "") | tostring)) as $tk
+  | select($tk != "")
+  | ((($m["gc.origin"] // "") | tostring)) as $origin
+  | ($tk | test("^holding\\b"; "i")) as $hold
+  | select($origin == "operator" or $hold)
   | [ (.dependencies // [])[]
       | select((((.type // .dependency_type // "") | tostring)) == "blocks")
       | (((.depends_on_id // .id // "") | tostring)) | select(length > 0) ] as $blocks
   | [(.id // ""),
-     ((($m["gc.takeaway"] // "") | tostring) | split("\n") | join(" ")),
+     ($tk | split("\n") | join(" ")),
      (($m["gc.takeaway_at"] // "") | tostring),
      (($m["gc.takeaway_by"] // "") | tostring),
      (($m.disposition_flagged // "") | tostring),
+     (($m.hold_flagged // "") | tostring),
+     $origin,
+     (if $hold then "1" else "0" end),
      ($blocks | unique | join(",")),
      (((.title // "") | tostring) | split("\n") | join(" "))]
   | join("\u001f")' 2>/dev/null)
 
-# Subjects already under conversation. A visit records its subject TWICE — the
-# gc.continuation_group stamp and the tracks edge — and only the edge has proved
-# reliable (su-ab9je, 2026-08-20: the stamp landed EMPTY while the edge carried it),
-# so take the union and drop the empty stamp, which anything with no id would match.
+# Beads already under conversation, by ALL THREE recordings a visit makes of what it
+# is about. The union, with the empty ones dropped — anything with no id would match
+# those.
+#
+#   gc.continuation_group  the stamp the gate-visit block writes
+#   tracks                 the edge it files alongside; the only one that has proved
+#                          reliable on its own (su-ab9je, 2026-08-20: the stamp
+#                          landed EMPTY while the edge carried the subject)
+#   stall_root             the visit's ITEM, when that differs from its subject. The
+#                          takeaway lands on the ITEM, never on the shared bucket
+#                          (converse contract step 5), so a stalled-workflow sitting
+#                          stamps the ROOT while its visit's continuation_group names
+#                          the shared triage subject. Without this the hold arm reads
+#                          such an item as having no visit and files a duplicate onto
+#                          a live sitting — and `gc-helm.sh open` will NOT catch it,
+#                          because its own guard reads the stamp and the edge only.
 HELD_SUBJECTS=$(printf '%s' "$LIVE" | scrub | jq -r '
   .[] | select(((.metadata // {}).task_kind // "") == "visit")
   | (((.metadata // {})["gc.continuation_group"] // ""),
+     (((.metadata // {}).stall_root // "") | tostring),
      ((.dependencies // [])[]? | select((((.type // .dependency_type // "") | tostring)) == "tracks") | ((.depends_on_id // .id // "") | tostring)))
   | select(. != "")' 2>/dev/null)
 # A here-string, never `... | grep -qxF`: with pipefail on, `grep -q` exits at its
@@ -316,7 +455,7 @@ HELD_SUBJECTS=$(printf '%s' "$LIVE" | scrub | jq -r '
 is_held() { [ -n "${1:-}" ] && grep -Fxq -- "$1" <<< "$HELD_SUBJECTS"; }
 
 if [ -z "$ROWS" ]; then
-  echo "$PROG: no parked operator-origin subjects"
+  echo "$PROG: no parked operator-origin subjects, and nothing holding"
   exit 0
 fi
 
@@ -329,49 +468,143 @@ if [ "$DRY_RUN" -eq 0 ] && [ ! -x "$HELM" ]; then
   DRY_RUN=1
 fi
 
-filed=0; waiting=0; no_wait=0; already=0; visit_open=0; unreadable=0; failed=0
+filed=0; holds=0; waiting=0; no_wait=0; already=0; hold_already=0; hold_undated=0
+visit_open=0; unreadable=0; failed=0
 
-while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged blocks title; do
+while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged hold_flagged origin is_hold blocks title; do
   [ -n "${subj:-}" ] || continue
+
+  # (0) ALREADY UNDER CONVERSATION — asked FIRST, because it answers both
+  # observations at once and reads nothing the pass has not already loaded. Hoisted
+  # above the child listing so a live sitting costs no extra read, and so a hold
+  # whose sitting is alive can never be classified as a stranded one. gc-helm.sh open
+  # re-checks the subject half of this authoritatively.
+  if is_held "$subj"; then
+    visit_open=$((visit_open + 1)); continue
+  fi
 
   if ! recorded_wait "$subj" "$(printf '%s' "$blocks" | tr ',' ' ')"; then
     echo "$PROG: $subj — $WAIT_WHY; skipped, so a visit is never filed on a read that did not happen" >&2
     unreadable=$((unreadable + 1)); continue
   fi
 
-  # It routed nothing this pass can see. The ordinary "we talked, here is the
-  # conclusion" park — it is not waiting on anything, so there is nothing to come
-  # back about.
-  if [ -z "$WAIT_IDS" ]; then
-    no_wait=$((no_wait + 1)); continue
-  fi
-  if [ -n "$WAIT_OPEN" ]; then
-    waiting=$((waiting + 1)); continue
-  fi
-
   LANDED_KEY=$(sorted_key "$WAIT_IDS")
+  READY=0
+  [ -n "$WAIT_IDS" ] && [ -z "$WAIT_OPEN" ] && READY=1
 
-  # Already under conversation: the primary bound. Counted here so the summary line
-  # says why nothing was filed; gc-helm.sh open re-checks it authoritatively.
-  if is_held "$subj"; then
-    visit_open=$((visit_open + 1)); continue
+  # ── Which observation, if either ────────────────────────────────────────────
+  # The disposition arm is tried first: when both apply, the landed work is the more
+  # specific thing to say. The hold arm is the RESIDUE, which is how it reaches a
+  # subject whose disposition marker already retired it (tk-fhlv4) — a hold routes
+  # nothing, so no new landed set can ever form there and that marker can never
+  # differ again.
+  ACTION=""
+  if [ "$origin" = "operator" ] && [ "$READY" = "1" ] && [ "$flagged" != "$LANDED_KEY" ]; then
+    ACTION=dispose
+  elif [ "$is_hold" = "1" ] && [ -z "$WAIT_OPEN" ] && [ -n "$tk_at" ] && [ "$hold_flagged" != "$tk_at" ]; then
+    # `-z "$WAIT_OPEN"`: a hold whose recorded wait is still OPEN is not stranded, it
+    # is waiting, and the disposition arm fires for it when that wait lands. Filing
+    # here would invite the operator into a conversation about work still in flight.
+    ACTION=hold
   fi
 
-  # Same observation already signalled — the backstop for after that visit closed.
-  if [ "$flagged" = "$LANDED_KEY" ]; then
-    already=$((already + 1)); continue
+  # Exactly ONE bucket per candidate, in the same order the arms were tried, so the
+  # census line says which test held it. The buckets can MASK each other — an empty
+  # landed key equals an empty marker, so a dropped guard reclassifies rather than
+  # firing — and the counts are the only place that shows it.
+  if [ -z "$ACTION" ]; then
+    if [ -n "$WAIT_OPEN" ]; then
+      waiting=$((waiting + 1))
+    elif [ "$origin" = "operator" ] && [ "$READY" = "1" ] && [ "$flagged" = "$LANDED_KEY" ]; then
+      already=$((already + 1))
+    elif [ "$is_hold" = "1" ] && [ -z "$tk_at" ]; then
+      # No gc.takeaway_at means no stable observation key. `gc-helm takeaway` always
+      # stamps one, so this is a hand-written field; report it rather than signal off
+      # a key that cannot dedupe — an empty key equals an unset marker forever.
+      echo "$PROG: $subj — a 'holding' takeaway with no gc.takeaway_at has no observation key to dedupe on; reported, not signalled" >&2
+      hold_undated=$((hold_undated + 1))
+    elif [ "$is_hold" = "1" ]; then
+      hold_already=$((hold_already + 1))
+    else
+      # Nothing recorded as waited-on: the ordinary "we talked, here is the
+      # conclusion" park. It is not waiting on anything, so there is nothing to come
+      # back about.
+      no_wait=$((no_wait + 1))
+    fi
+    continue
   fi
 
-  filed=$((filed + 1))
-  echo "$PROG: $subj DISPOSITION DUE — parked${tk_at:+ at $tk_at}${tk_by:+ by $tk_by}, routed work landed: $LANDED_KEY"
+  # ── The observation, in the caller's words and the marker it retires on ─────
+  HELD_SINCE=$(held_for "$tk_at")
+  if [ "$ACTION" = "dispose" ]; then
+    filed=$((filed + 1))
+    MARKER="disposition_flagged=$LANDED_KEY"
+    # Plus the hold marker, so closing this visit does not hand the same subject
+    # straight to the hold arm — see the header. Skipped when the takeaway carries no
+    # stamp, since there is then nothing to record.
+    [ -n "$tk_at" ] && MARKER="$MARKER hold_flagged=$tk_at"
+    REASON="parked · routed work landed — dispose or resume"
+    echo "$PROG: $subj DISPOSITION DUE — parked${tk_at:+ at $tk_at}${tk_by:+ by $tk_by}, routed work landed: $LANDED_KEY"
+  else
+    holds=$((holds + 1))
+    MARKER="hold_flagged=$tk_at"
+    REASON="stranded hold · the sitting that stamped it is gone"
+    echo "$PROG: $subj STRANDED HOLD — holding since $tk_at${HELD_SINCE:+ ($HELD_SINCE)}${tk_by:+, stamped by $tk_by}, and no live visit names it"
+  fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
     continue
   fi
 
   # The visit body IS the premise, written so converse's step-2 re-check can kill it
-  # cheaply if the situation changed between filing and claiming: what was parked,
-  # what has since closed, and when this was true.
+  # cheaply if the situation changed between filing and claiming: what was observed,
+  # what it rests on, and when this was true. One body per observation — they rest on
+  # DIFFERENT premises, so a single body would have to hedge about which is being
+  # claimed, and a hedged premise is one no re-check can falsify.
+  if [ "$ACTION" = "hold" ]; then
+  BODY=$(printf '%s\n' \
+    "Held subject: $subj — $title" \
+    "" \
+    "A converse sitting stamped this hold and is no longer here. The takeaway it" \
+    "left${tk_at:+, at $tk_at}${tk_by:+, by $tk_by}${HELD_SINCE:+ — $HELD_SINCE ago}:" \
+    "  \"$takeaway\"" \
+    "" \
+    "Nothing is talking to it (checked $NOW_ISO): no open visit names $subj by its" \
+    "gc.continuation_group stamp, by a tracks edge, or as a stall_root item." \
+    "" \
+    "A hold waits on a HUMAN ANSWER, so it routes no work and records no wait — which" \
+    "is why nothing brought it back on its own. Resume it: read the takeaway, rebuild" \
+    "enough of the thread to state the decision it is waiting for, and put that to the" \
+    "operator. What the sitting concluded is in this subject's notes." \
+    "" \
+    "PREMISE, re-checkable in two commands — if a sitting is in fact live on this," \
+    "or the takeaway no longer names a hold, this visit is moot and costs one close:" \
+    "  gc bd show $subj --json | jq -r '.[0].metadata.\"gc.takeaway\"'" \
+    "  gc bd list --status=open,in_progress --json --limit=0 | jq '[.[]" \
+    "    | select(.metadata.task_kind == \"visit\")" \
+    "    | select(.metadata[\"gc.continuation_group\"] == \"$subj\"" \
+    "             or .metadata.stall_root == \"$subj\")]'" \
+    "" \
+    "Why this arrived on its own: the stamp that records a hold is the same field that" \
+    "MUTES the stall detector, and the un-mute keys on a recorded wait closing — which" \
+    "a hold never has. So a sitting reaped mid-hold was invisible permanently, not" \
+    "briefly. Measured on tk-fhlv4: 10h16m unattended, found by eye (2026-08-23)." \
+    "" \
+    "Dispositions:" \
+    "  - resume   put the decision to the operator and hold again; re-stamp the" \
+    "             takeaway so the new hold is dated — that is what earns the next" \
+    "             visit if this one is reaped too" \
+    "  - close    if the answer arrived elsewhere, or the question is moot, close the" \
+    "             subject (docs/work-bead-state-machine.md)" \
+    "  - re-park  if it is now waiting on WORK rather than an answer, say so as an" \
+    "             edge, not as prose:" \
+    "             gc-helm takeaway $subj \"<new headline>\" --waiting-on <bead-id>" \
+    "" \
+    "The takeaway above is untouched — it is the record of what the sitting was" \
+    "waiting for, and this visit is additive." \
+    "" \
+    "Filed once per hold by assets/scripts/detect-parked-dispositions.sh (tk-jsyci7).")
+  else
   BODY=$(printf '%s\n' \
     "Parked subject: $subj — $title" \
     "" \
@@ -405,12 +638,13 @@ while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged blocks title; do
     "concluded, and this visit is additive." \
     "" \
     "Filed once per observation by assets/scripts/detect-parked-dispositions.sh (tk-2cyxo).")
+  fi
 
   # The filer's own diagnostic is kept, not discarded: it is the difference between
   # "the subject id does not resolve" and "the data plane is down", and this pass runs
   # unattended, so a swallowed reason is one nobody ever recovers.
   HELM_OUT=$("$HELM" open "$subj" \
-        --reason "parked · routed work landed — dispose or resume" \
+        --reason "$REASON" \
         --body "$BODY" 2>&1)
   HELM_RC=$?
   if [ "$HELM_RC" -ne 0 ]; then
@@ -421,10 +655,13 @@ while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged blocks title; do
   # VERIFIED, not assumed. `open` exits 0 both when it files and when it finds an
   # existing visit, and a create that reports success without persisting is exactly
   # the failure a marker would retire forever. Ask the store instead: is there now an
-  # open visit naming this subject?
+  # open visit naming this subject? Matched on the same three recordings the
+  # already-held guard reads, so a filing cannot read back as missing on a shape that
+  # guard would have counted.
   VNOW=$(bd_pinned list --status=open,in_progress --brief --limit=0 --json 2>/dev/null | scrub \
     | jq -r --arg s "$subj" '[ .[]? | select(((.metadata // {}).task_kind // "") == "visit")
         | select((((.metadata // {})["gc.continuation_group"] // "") == $s)
+                 or ((((.metadata // {}).stall_root // "") | tostring) == $s)
                  or ([ (.dependencies // [])[]? | select((((.type // .dependency_type // "") | tostring)) == "tracks")
                        | select((((.depends_on_id // .id // "") | tostring)) == $s) ] | length > 0)) ] | length' 2>/dev/null)
   [ -n "$VNOW" ] || VNOW=0
@@ -438,16 +675,25 @@ while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged blocks title; do
   # would retire the disposition on a conversation nobody ever had. If this stamp
   # itself fails, the visit is open, so next pass the visit-already-open guard covers
   # it — the marker only matters after that visit is closed.
-  if ! bd_pinned update "$subj" --set-metadata "disposition_flagged=$LANDED_KEY" >/dev/null 2>&1; then
-    echo "$PROG: $subj — visit filed but the disposition_flagged marker did not stick; harmless while the visit stays open (the guard dedupes), a duplicate only if it is closed before the next pass" >&2
+  # One key per write, so a partial failure names the key that did not stick and the
+  # other one still lands. Safe to word-split: a landed key is comma-joined and a
+  # takeaway stamp is an ISO instant — neither can contain a space.
+  STAMP_FAILED=0
+  # shellcheck disable=SC2086  # a deliberate list of key=value markers
+  for _mark in $MARKER; do
+    bd_pinned update "$subj" --set-metadata "$_mark" >/dev/null 2>&1 && continue
+    echo "$PROG: $subj — visit filed but the ${_mark%%=*} marker did not stick; harmless while the visit stays open (the guard dedupes), a duplicate only if it is closed before the next pass" >&2
+    STAMP_FAILED=1
+  done
+  if [ "$STAMP_FAILED" -ne 0 ]; then
     failed=$((failed + 1)); continue
   fi
-  echo "  -> visit filed on $subj, stamped disposition_flagged=$LANDED_KEY"
+  echo "  -> visit filed on $subj, stamped $MARKER"
 done <<< "$ROWS"
 
 MODE=""
 [ "$DRY_RUN" -eq 1 ] && MODE="(dry-run) "
-echo "$PROG: ${MODE}${filed} disposition(s) signalled; $waiting still waiting, $no_wait with no recorded wait, $visit_open already under an open visit, $already already flagged, $unreadable unreadable, $failed failed"
+echo "$PROG: ${MODE}${filed} disposition(s) and ${holds} stranded hold(s) signalled; $waiting still waiting, $no_wait with no recorded wait, $visit_open already under an open visit, $already already flagged, $hold_already hold(s) already signalled, $hold_undated undated hold(s), $unreadable unreadable, $failed failed"
 
 # Only failed WRITES decide the exit code. An unreadable subject is a deliberate
 # fail-closed skip, already reported on stderr, and correct.
