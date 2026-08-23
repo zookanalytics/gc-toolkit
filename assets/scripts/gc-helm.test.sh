@@ -1259,6 +1259,248 @@ nfield() { printf '%s' "$NJSON" | jq -r --arg i "$1" --arg k "$2" \
 eq "$(nfield tk-clip-long needs)"    "400" "(CLIPWIRE) --json keeps the whole NEEDS string"
 eq "$(nfield tk-clip-long takeaway)" "400" "(CLIPWIRE) …and the whole takeaway beside it"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SCENARIO 3 — `gc-helm closed`, the disposition view (tk-sfg2e)
+#
+# THE GAP: the board is open-only by construction, so a subject whose sitting
+# concluded LEAVES it and nothing afterwards says what was decided. `closed`
+# reads the visits that reached a disposition inside a window.
+#
+# The stub HONOURS `--closed-after`, filtering its fixture the way the server
+# does. That is the point: the window is computed on this side (--since ->
+# duration_to_seconds -> iso_at -> the flag), so a stub that ignored the flag
+# would return every row and the window assertions would pass while proving
+# nothing about the code that owns them.
+#
+# Covered:
+#   (WINDOW)   a visit closed inside the window renders, with its outcome and
+#              its SUBJECT's takeaway
+#   (OLD)      a visit closed outside it does not render — and the same fixture
+#              row DOES render at --since 48h, so it is the cutoff excluding it
+#   (EDGE)     the subject resolves from the `tracks` edge
+#   (STAMP)    ...and falls back to gc.continuation_group when the edge is absent
+#   (NOOUT)    a visit missing gc.outcome still renders (degrades, not crashes)
+#   (PERVISIT) two sittings on ONE subject are TWO rows, not one
+#   (NOTVISIT) a closed bead that is not a visit is not a row
+#   (JSON)     --json is a well-formed array carrying the documented fields
+#   (LIMIT)    --limit caps the rows
+#   (QUIET)    an empty window exits 0 and says so — distinguishable from failure
+#   (FAILCLOSED) a failed query exits 3 and renders NOTHING: answering "nothing
+#              was decided" because Dolt was wedged is the one wrong answer
+#   (UNIT)     an unsupported duration unit is REFUSED, never misparsed (awk's
+#              int() reads "2w" as 2, i.e. two seconds instead of two weeks)
+#   (WRITES)   the verb issues no write of any kind — it is a read
+#   (BOARD)    `board --json` still answers with its own shape (stable contract)
+
+CTMP="$TMP/closed"
+mkdir -p "$CTMP/bin" "$CTMP/rig/.beads"
+
+# Timestamps relative to now, so the window is exercised rather than frozen.
+ts_ago() { date -u -d "@$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -r "$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ; }
+
+jq -n \
+  --arg t30 "$(ts_ago 1800)" --arg t45 "$(ts_ago 2700)" --arg t50 "$(ts_ago 3000)" \
+  --arg t55 "$(ts_ago 3300)" --arg t20 "$(ts_ago 1200)" --arg told "$(ts_ago 144000)" '
+[ # subject from the tracks EDGE, no stamp at all
+  {id:"tk-v1", title:"visit one", status:"closed", closed_at:$t30,
+   metadata:{"task_kind":"visit","gc.outcome":"routed"},
+   dependencies:[{type:"tracks", depends_on_id:"tk-s1"}]},
+  # subject from the STAMP only — the edge is missing
+  {id:"tk-v2", title:"visit two", status:"closed", closed_at:$t45,
+   metadata:{"task_kind":"visit","gc.outcome":"moot","gc.continuation_group":"tk-s2"},
+   dependencies:[]},
+  # no gc.outcome recorded
+  {id:"tk-v3", title:"visit three", status:"closed", closed_at:$t50,
+   metadata:{"task_kind":"visit"},
+   dependencies:[{type:"tracks", depends_on_id:"tk-s3"}]},
+  # a SECOND sitting on tk-s1
+  {id:"tk-v4", title:"visit four", status:"closed", closed_at:$t55,
+   metadata:{"task_kind":"visit","gc.outcome":"ruled"},
+   dependencies:[{type:"tracks", depends_on_id:"tk-s1"}]},
+  # closed 40h ago — outside a 24h window, inside a 48h one
+  {id:"tk-vold", title:"visit old", status:"closed", closed_at:$told,
+   metadata:{"task_kind":"visit","gc.outcome":"disposed"},
+   dependencies:[{type:"tracks", depends_on_id:"tk-s4"}]},
+  # closed, recent, but NOT a visit
+  {id:"tk-plain", title:"an ordinary closed bead", status:"closed", closed_at:$t20,
+   metadata:{}, dependencies:[]} ]' > "$CTMP/closed.json"
+
+cat > "$CTMP/subjects.json" <<'JSON'
+[ {"id":"tk-s1","title":"Subject one","metadata":{"gc.takeaway":"one why — routed to tk-work1"}},
+  {"id":"tk-s2","title":"Subject two","metadata":{"gc.takeaway":"two why — ruled moot"}},
+  {"id":"tk-s3","title":"Subject three","metadata":{"gc.takeaway":"three why"}},
+  {"id":"tk-s4","title":"Subject four","metadata":{"gc.takeaway":"four why"}} ]
+JSON
+
+cat > "$CTMP/bin/gc" <<'GCC'
+#!/usr/bin/env bash
+# closed-path stub. Logs every invocation so a test can assert no writes.
+args="$*"
+echo "$args" >> "$FAKE_CALLS"
+case "$1 ${2:-}" in
+  "rig list") jq -n --arg p "$FAKE_RIG_PATH" '{rigs:[{name:"gc-toolkit",path:$p,prefix:"tk"}]}' ;;
+  "bd list")
+    [ -n "${FAKE_FAIL:-}" ] && { echo "boom" >&2; exit 1; }
+    # Honour --closed-after exactly as the server does, so the assertions
+    # measure the cutoff this script computed rather than the fixture.
+    cutoff=""; prev=""
+    for a in $args; do
+      [ "$prev" = "--closed-after" ] && cutoff="$a"
+      case "$a" in --closed-after=*) cutoff="${a#--closed-after=}" ;; esac
+      prev="$a"
+    done
+    jq --arg c "$cutoff" '[ .[] | select($c == "" or ((.closed_at // "") >= $c)) ]' "$FAKE_CLOSED" ;;
+  "bd show") jq '.' "$FAKE_SUBJECTS" ;;
+esac
+exit 0
+GCC
+chmod +x "$CTMP/bin/gc"
+
+# run_closed <case-tag> [args…] -> sets CRC / COUT / CERR
+run_closed() {
+    local tag="$1"; shift
+    local run="$CTMP/run-$tag"
+    rm -rf "$run"; mkdir -p "$run"
+    CRC=0
+    COUT="$(env PATH="$CTMP/bin:$PATH" TMPDIR="$run" \
+                FAKE_RIG_PATH="$CTMP/rig" FAKE_CLOSED="$CTMP/closed.json" \
+                FAKE_SUBJECTS="$CTMP/subjects.json" FAKE_CALLS="$run/calls.log" \
+                FAKE_FAIL="${FAKE_FAIL:-}" GC_HELM_FIXTURE= \
+                sh "$SCRIPT" closed "$@" 2>"$run/err")" || CRC=$?
+    CERR="$(cat "$run/err" 2>/dev/null || true)"
+    CCALLS="$run/calls.log"
+}
+
+# --- (WINDOW) the default read ------------------------------------------------
+run_closed w24 --since 24h --json
+eq "$CRC" "0" "(WINDOW) closed exits 0"
+eq "$(printf '%s' "$COUT" | jq 'length')" "4" "(WINDOW) 4 in-window visits render"
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v1")) | .outcome')" \
+   "routed" "(WINDOW) the row carries the visit's gc.outcome"
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v1")) | .takeaway')" \
+   "one why — routed to tk-work1" "(WINDOW) the row carries the SUBJECT's takeaway"
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v1")) | .subject_title')" \
+   "Subject one" "(WINDOW) the row carries the subject title, never id-only"
+eq "$(printf '%s' "$COUT" | jq -r '.[0].visit')" "tk-v1" "(WINDOW) newest first"
+
+# --- (OLD) the window is what excludes, and it is THIS side's cutoff ----------
+printf '%s' "$COUT" | jq -e 'any(.[]; .visit=="tk-vold")' >/dev/null 2>&1 \
+  && bad "(OLD) a visit closed 40h ago rendered inside a 24h window" \
+  || ok "(OLD) a visit closed outside the window does not render"
+run_closed w48 --since 48h --json
+printf '%s' "$COUT" | jq -e 'any(.[]; .visit=="tk-vold")' >/dev/null 2>&1 \
+  && ok "(OLD) the same row DOES render at --since 48h — the cutoff excluded it, not the fixture" \
+  || bad "(OLD) --since 48h failed to widen the window (got $(printf '%s' "$COUT" | jq -c '[.[].visit]'))"
+
+# --- (EDGE)/(STAMP) how the subject is resolved -------------------------------
+run_closed subj --since 24h --json
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v1")) | .subject')" \
+   "tk-s1" "(EDGE) subject resolved from the tracks edge"
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v2")) | .subject')" \
+   "tk-s2" "(STAMP) subject falls back to gc.continuation_group when no edge exists"
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v2")) | .subject_title')" \
+   "Subject two" "(STAMP) ...and still resolves a title"
+
+# --- (NOOUT) a missing disposition degrades, it does not crash ----------------
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v3")) | .outcome')" \
+   "" "(NOOUT) a visit with no gc.outcome renders with an empty outcome"
+run_closed noout --since 24h
+eq "$CRC" "0" "(NOOUT) the TABLE render survives a visit with no gc.outcome"
+grep -q 'tk-s3' <<< "$COUT" \
+  && ok "(NOOUT) the outcome-less row is still shown, not dropped" \
+  || bad "(NOOUT) the outcome-less row vanished from the table"
+
+# --- (PERVISIT) rows are per visit, not per subject ---------------------------
+run_closed pervisit --since 24h --json
+eq "$(printf '%s' "$COUT" | jq '[.[] | select(.subject=="tk-s1")] | length')" \
+   "2" "(PERVISIT) two sittings on one subject are two rows"
+
+# --- (NOTVISIT) a closed non-visit bead is not a disposition ------------------
+printf '%s' "$COUT" | jq -e 'any(.[]; .visit=="tk-plain")' >/dev/null 2>&1 \
+  && bad "(NOTVISIT) an ordinary closed bead rendered as a disposition" \
+  || ok "(NOTVISIT) a closed bead that is not a visit is not a row"
+
+# --- (JSON) well-formed, with the documented fields ---------------------------
+printf '%s' "$COUT" | jq -e 'type=="array" and all(.[];
+    has("rig") and has("visit") and has("closed_at") and has("outcome")
+    and has("subject") and has("subject_title") and has("takeaway"))' >/dev/null 2>&1 \
+  && ok "(JSON) every row carries the documented fields" \
+  || bad "(JSON) row shape drifted: $(printf '%s' "$COUT" | jq -c '.[0]')"
+
+# --- (LIMIT) ------------------------------------------------------------------
+run_closed limit --since 24h --limit=2 --json
+eq "$(printf '%s' "$COUT" | jq 'length')" "2" "(LIMIT) --limit caps the rows"
+
+# --- (QUIET) an empty window is not a failure --------------------------------
+run_closed quiet --since 30s
+eq "$CRC" "0" "(QUIET) an empty window exits 0"
+grep -qi 'no visit reached a disposition' <<< "$COUT" \
+  && ok "(QUIET) the empty window says so in words" \
+  || bad "(QUIET) empty window rendered nothing recognisable: $COUT"
+
+# --- (FAILCLOSED) a wedged read must never read as "nothing was decided" ------
+FAKE_FAIL=1 run_closed fail --since 24h
+FAKE_FAIL=""
+eq "$CRC" "3" "(FAILCLOSED) a failed query exits 3"
+[ -z "$COUT" ] \
+  && ok "(FAILCLOSED) nothing is rendered on a failed gather" \
+  || bad "(FAILCLOSED) rendered rows despite a failed gather: $COUT"
+grep -qi 'gather failed' <<< "$CERR" \
+  && ok "(FAILCLOSED) the failure is named on stderr" \
+  || bad "(FAILCLOSED) no gather-failure message: $CERR"
+grep -qi 'no visit reached a disposition' <<< "$COUT" \
+  && bad "(FAILCLOSED) a failed read masqueraded as a quiet window" \
+  || ok "(FAILCLOSED) a failed read is not reported as a quiet window"
+
+# --- (UNIT) an unsupported unit is refused, never misparsed -------------------
+# awk's int() reads "2w" as 2, so an unvalidated spelling becomes TWO SECONDS —
+# a window three orders of magnitude short, rendering as a plausible empty read.
+run_closed unit --since 2w
+eq "$CRC" "2" "(UNIT) an unsupported duration unit exits 2"
+grep -qi 'must be a duration' <<< "$CERR" \
+  && ok "(UNIT) the refusal names the accepted spellings" \
+  || bad "(UNIT) no usable message for --since 2w: $CERR"
+run_closed zero --since 0h
+eq "$CRC" "2" "(UNIT) a zero-length window is refused"
+
+# --- (WRITES) it is a read ----------------------------------------------------
+run_closed writes --since 24h --json
+if grep -Eq '(^| )bd (update|create|close|dep)( |$)|--set-metadata|session (nudge|wake)|mail send' "$CCALLS"; then
+    bad "(WRITES) closed issued a write: $(grep -Em1 'update|create|close|dep|set-metadata|nudge|wake|mail' "$CCALLS")"
+else
+    ok "(WRITES) closed issues no write, no nudge and no mail — pull only"
+fi
+
+# --- (DISPATCH) the new verb did not disturb the existing ones ---------------
+# The board's OUTPUT contract — the load-bearing constraint in this bead — is
+# covered by SCENARIO 2 above, which runs the same edited script through a stub
+# that serves the whole board gather. Re-asserting it here would mean a second
+# copy of that stub for no extra coverage. What IS worth pinning here is the
+# DISPATCH: that `closed` became its own verb without capturing anything else.
+# The board path is identified by its exit 3 against this closed-only stub — it
+# reached the board gather (which this fixture does not serve) rather than
+# cmd_closed, which would have exited 0 with rows.
+DRC=0
+DOUT="$(env PATH="$CTMP/bin:$PATH" TMPDIR="$CTMP/run-dispatch" \
+             FAKE_RIG_PATH="$CTMP/rig" FAKE_CLOSED="$CTMP/closed.json" \
+             FAKE_SUBJECTS="$CTMP/subjects.json" FAKE_CALLS="$CTMP/dispatch-calls.log" \
+             GC_HELM_FIXTURE= \
+             sh "$SCRIPT" board --json --refresh 2>/dev/null)" || DRC=$?
+eq "$DRC" "3" "(DISPATCH) \`board\` still routes to the board, not to closed"
+[ -z "$DOUT" ] \
+  && ok "(DISPATCH) ...and rendered no closed rows on the board path" \
+  || bad "(DISPATCH) the board path emitted closed-shaped output: $DOUT"
+
+URC=0
+UOUT="$(env PATH="$CTMP/bin:$PATH" FAKE_CALLS="$CTMP/unknown-calls.log" \
+             sh "$SCRIPT" clsoed 2>&1)" || URC=$?
+eq "$URC" "2" "(DISPATCH) an unknown verb still exits 2"
+grep -q 'closed' <<< "$UOUT" \
+  && ok "(DISPATCH) ...and the verb list now names closed" \
+  || bad "(DISPATCH) the unknown-verb hint does not mention closed: $UOUT"
+
+
 echo ""
-echo "gc-helm takeaway --release quiesce + anchor-gather argv boundary + in-flight/metadata kinds: $PASS passed, $FAIL failed"
+echo "gc-helm takeaway --release quiesce + anchor-gather argv boundary + in-flight/metadata kinds + closed dispositions: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

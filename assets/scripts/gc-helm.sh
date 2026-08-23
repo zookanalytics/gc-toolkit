@@ -8,6 +8,7 @@
 #
 # Usage:
 #   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
+#   gc-helm closed [--since 24h] [--json] [--limit=N] [--timeout=SECONDS]
 #   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (converse holds it)
 #   gc-helm takeaway <bead-id> "<text>" [--by …] [--release]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
 #
@@ -289,13 +290,20 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm [board] [--json] [--limit=N] [--timeout=SECONDS] [--refresh]
+  gc-helm closed [--since 24h] [--json] [--limit=N] [--timeout=SECONDS]  what closed with a disposition, and why
   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
 
 The board (default verb) is a read-only cross-rig ranking of OPEN anchors
 (epics, floating owned convoys, and decisions) by how much
-they need a human's attention. open files a visit in the picked bead's
+they need a human's attention. Being open-only is what closed answers: a
+subject whose sitting concluded LEAVES the board, and nothing afterwards says
+what was decided. closed lists the visits that reached a disposition inside a
+window, newest first, with the outcome stamped on the visit and the takeaway
+stamped on its subject. It is a read over what sign-off already records, it
+writes nothing, and it is PULL only — there is deliberately no cadence, order,
+nudge or mail behind it. open files a visit in the picked bead's
 continuation group (pool demand spawns/vacuums a converse session —
 attach via the sessions picker); react slings a proactive first
 reaction (via tools/gc-proactive.sh, on the codex-gated mr path) so a
@@ -323,6 +331,10 @@ the row promotes to "blocker landed — dispose or resume" as soon as the last
 blocker closes.
 
   --json             Emit the ranked board as a JSON array (stable contract).
+                     On closed, emits the disposition rows as a JSON array.
+  --since DURATION   closed only: how far back to look (default 24h). Spelled
+                     the way this pack spells durations — 30s, 90m, 24h, 7d, or
+                     a bare integer meaning seconds.
   --limit=N          Show only the top N rows (0 = all/uncapped; default caps at 50).
   --timeout=SECONDS  Per-query timeout bound for Dolt reads (default 10).
   --refresh          Bypass the gather cache and re-query every rig now.
@@ -351,6 +363,35 @@ with_timeout() {
 }
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# duration_to_seconds <spec> — timeout(1)-style duration to integer seconds.
+# Mirrors assets/scripts/gc-bd-watch.sh, which is where this pack already spells
+# durations ("30s", "5m", "24h", "1d", or a bare integer meaning seconds). The
+# CALLER validates the spelling: awk's int() reads "2w" as 2, so an unsupported
+# unit would silently become two SECONDS — a --since window three orders of
+# magnitude off, rendering as a plausible-looking empty result.
+duration_to_seconds() {
+    awk -v d="$1" 'BEGIN {
+        n = d
+        sub(/[smhd]$/, "", n)
+        if (d ~ /d$/)      print int(n * 86400)
+        else if (d ~ /h$/) print int(n * 3600)
+        else if (d ~ /m$/) print int(n * 60)
+        else               print int(n)
+    }'
+}
+
+# iso_at <epoch-seconds> — RFC3339 UTC, or EMPTY if this host's date(1) cannot.
+# GNU spells it `-d @<epoch>` and BSD/macOS `-r <epoch>`, and BSD's `-d` is a
+# different flag entirely (DST), so it can exit 0 having parsed something else.
+# The SHAPE of the output is therefore what decides, never the exit status.
+iso_at() {
+    _ia=$(date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf '')
+    case "$_ia" in [0-9][0-9][0-9][0-9]-*) printf '%s' "$_ia"; return 0 ;; esac
+    _ia=$(date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf '')
+    case "$_ia" in [0-9][0-9][0-9][0-9]-*) printf '%s' "$_ia"; return 0 ;; esac
+    printf ''
+}
 
 # Resolve sibling tools regardless of where the pack is materialized:
 # assets/scripts/ and tools/ are siblings under the pack root.
@@ -1954,13 +1995,237 @@ gather_inflight() {
         < "$TMP/inflight-map.tsv" > "$INFLIGHT_FILE" 2>/dev/null || printf '{}\n' > "$INFLIGHT_FILE"
 }
 
+# ── closed: what reached a disposition, and why ──────────────────────
+# The board is open-only BY CONSTRUCTION — cmd_board gathers `--type epic
+# --status open` and `--type decision --status open` — so when a sitting
+# concludes and its subject closes, the row simply leaves the board. Nothing
+# afterwards says what was decided, or why. This verb is that answer.
+#
+# PULL, NOT PUSH, and that is a ruling rather than a default (operator,
+# 2026-08-23: "pull, I won't read a random digest nor can we easily have a
+# cadence when my schedule varies"). So this ships as a verb and NOTHING else:
+# no order, no cadence, no nudge, no mail. Adding any of them would invert the
+# ruling the verb exists to satisfy. The daily digest-generate order is not this
+# either — it is a CODE digest of commits, it comes from the gastown base pack,
+# and it is addressed to the mayor.
+#
+# NOTHING NEW IS WRITTEN, and nothing new needs to be. Sign-off already stamps
+# every fact below, in three durable places:
+#   gc.outcome   on the closed VISIT    the machine-readable disposition
+#                                       (routed / moot / ruled / disposed / …)
+#   gc.takeaway  on the SUBJECT         the ≤140-char headline — the why
+#   the `tracks` edge                   what ties the visit to its subject
+# Measured 2026-08-23: 41 visits closed city-wide since 08-22, every one
+# carrying gc.outcome, none stranded. This is a read over that, not new
+# instrumentation.
+#
+# ROWS ARE PER-VISIT, NOT PER-SUBJECT. A subject with three sittings that closed
+# inside the window is three decisions and earns three rows. Collapsing to the
+# subject would keep only the last one and silently drop the rest — and the
+# earlier sittings are exactly the ones no other surface still shows.
+#
+# A NEW VERB, not a mode flag on `board`: `board --json` is a documented stable
+# contract, and this returns a different shape entirely.
+#
+# NOT CACHED, unlike the board. The board re-renders one gather on every glance,
+# so a 45s cache is free there. This is a one-shot read over an EXPLICIT window,
+# and a cached one would answer the previous `--since` instead of this one.
+#
+# The subject is read from the `tracks` edge FIRST and the gc.continuation_group
+# stamp only as a fallback — the same order, for the same measured reason, as
+# gather_visits: on su-ab9je (2026-08-20, bead tk-d6ddn) the stamp landed EMPTY
+# while the edge carried the subject.
+cmd_closed() {
+    JSON=0; LIMIT=""; TIMEOUT=10; SINCE="24h"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) JSON=1; shift ;;
+            --since=*) SINCE="${1#--since=}"; shift ;;
+            --since) shift; [ $# -gt 0 ] || { echo "$PROG: --since requires a value" >&2; usage; exit 2; }; SINCE="$1"; shift ;;
+            --limit=*) LIMIT="${1#--limit=}"; shift ;;
+            --limit) shift; [ $# -gt 0 ] || { echo "$PROG: --limit requires a value" >&2; usage; exit 2; }; LIMIT="$1"; shift ;;
+            --timeout=*) TIMEOUT="${1#--timeout=}"; shift ;;
+            --timeout) shift; [ $# -gt 0 ] || { echo "$PROG: --timeout requires a value" >&2; usage; exit 2; }; TIMEOUT="$1"; shift ;;
+            -h|--help) usage; exit 0 ;;
+            --) shift; break ;;
+            -*) echo "$PROG: unknown flag '$1'" >&2; usage; exit 2 ;;
+            *) echo "$PROG: unexpected argument '$1'" >&2; usage; exit 2 ;;
+        esac
+    done
+    case "$LIMIT" in ""|*[!0-9]*) [ -z "$LIMIT" ] || { echo "$PROG: --limit must be a non-negative integer" >&2; exit 2; } ;; esac
+    case "$TIMEOUT" in *[!0-9]*) echo "$PROG: --timeout must be a non-negative integer (seconds)" >&2; exit 2 ;; esac
+    if [ -n "$LIMIT" ]; then EFFLIMIT="$LIMIT"; else EFFLIMIT="$MAX_ROWS"; fi
+
+    # Validate the SPELLING before converting: see duration_to_seconds on why an
+    # unsupported unit must be refused rather than parsed. "2w" keeps its "w"
+    # here, fails the digits test, and is reported instead of becoming 2s.
+    _since_digits="$SINCE"
+    case "$_since_digits" in *[smhd]) _since_digits="${_since_digits%?}" ;; esac
+    case "$_since_digits" in
+        ''|*[!0-9]*) echo "$PROG: --since must be a duration like 24h, 90m, 7d, 30s, or bare seconds (got '$SINCE')" >&2; exit 2 ;;
+    esac
+    SINCE_SECS=$(duration_to_seconds "$SINCE")
+    case "$SINCE_SECS" in ''|*[!0-9]*) SINCE_SECS=0 ;; esac
+    [ "$SINCE_SECS" -gt 0 ] || { echo "$PROG: --since must be a positive duration (got '$SINCE')" >&2; exit 2; }
+
+    NOW_EPOCH=$(date -u +%s)
+    CUTOFF=$(iso_at $((NOW_EPOCH - SINCE_SECS)))
+    # No cutoff means no window, and an unbounded query here would silently
+    # answer a DIFFERENT question (everything ever closed) rather than fail.
+    [ -n "$CUTOFF" ] || { echo "$PROG: could not compute a --since cutoff with this host's date(1)" >&2; exit 3; }
+
+    TMP=$(mktemp -d 2>/dev/null) || { echo "$PROG: could not allocate temp dir" >&2; exit 3; }
+    trap 'rm -rf "$TMP"' EXIT INT TERM HUP
+    ROWS="$TMP/rows.ndjson"; : > "$ROWS"
+    SUBJ_ACC="$TMP/subjects.ndjson"; : > "$SUBJ_ACC"
+    # Gather-failure marker. The loops below run in pipeline SUBSHELLS, so a
+    # shell variable cannot carry "a query died" back up — a file can. Same
+    # device, and the same reason, as cmd_board's GATHER_ERR.
+    GATHER_ERR="$TMP/gather-failed"
+
+    # Bounded gc wrapper. Deliberately a second copy of cmd_board's, not a hoist
+    # of it: board's reads $TIMEOUT, which ONLY board's flag parser sets, and
+    # moving it to file scope would change what the one-shot verbs bind (see
+    # enumerate_rigs on exactly that trap). A stable board contract is worth one
+    # duplicated line.
+    gcq() { with_timeout "$TIMEOUT" gc "$@" 2>/dev/null || true; }
+    gather_mark() { printf '%s\n' "$1" >> "$GATHER_ERR" 2>/dev/null || true; }
+
+    enumerate_rigs
+
+    # ── Closed visits, one bounded query per rig ─────────────────────
+    # `--closed-after` filters SERVER-side, so the window never crosses back
+    # over a pipe as a full store dump. `--brief` drops description/notes, which
+    # this row does not read; metadata and dependencies — the outcome and the
+    # tracks edge — both survive it.
+    printf '%s' "$RIGS" | jq -c '.[]' | while IFS= read -r _rig; do
+        _rname=$(printf '%s' "$_rig" | jq -r '.name')
+        _rpath=$(printf '%s' "$_rig" | jq -r '.path')
+        _rdb="$_rpath/.beads"
+        [ -d "$_rdb" ] || continue
+        # </dev/null: gcq would otherwise eat this loop's stdin and truncate the
+        # rig sweep to its first entry.
+        _raw=$(gcq bd list --db "$_rdb" --status closed --closed-after "$CUTOFF" \
+                   --json --limit=0 --brief </dev/null | tr -d '\000-\037')
+        printf '%s' "$_raw" | jq -e 'type=="array"' >/dev/null 2>&1 \
+            || { gather_mark "closed@$_rname"; continue; }
+        printf '%s' "$_raw" | jq -c --arg rig "$_rname" '
+            .[]?
+            | select((.metadata.task_kind // "") == "visit")
+            | . as $v
+            | ([ (.dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "")),
+                 ((.metadata["gc.continuation_group"]) // "") ]
+               | map(select(. != "")) | (.[0] // "")) as $subj
+            | { rig: $rig,
+                visit:     (($v.id // "") | tostring),
+                closed_at: (($v.closed_at // $v.updated_at // "") | tostring),
+                outcome:   ((($v.metadata["gc.outcome"]) // "") | tostring),
+                subject:   $subj }' >> "$ROWS" 2>/dev/null \
+            || gather_mark "project@$_rname"
+    done
+
+    # ── Subject titles + takeaways, one batched query per rig ────────
+    # Resolved by the SUBJECT's own id prefix, not the visit's rig, so a visit
+    # naming a bead in another rig still renders a title. Subjects are looked up
+    # WITHOUT a status filter on purpose: a subject is routinely still open
+    # after the sitting that disposed of it closes.
+    jq -r 'select((.subject // "") != "") | .subject' < "$ROWS" 2>/dev/null | sort -u > "$TMP/subject-ids.txt" || : > "$TMP/subject-ids.txt"
+    if [ -s "$TMP/subject-ids.txt" ]; then
+        printf '%s' "$RIGS" | jq -c '.[]' | while IFS= read -r _rig; do
+            _rname=$(printf '%s' "$_rig" | jq -r '.name')
+            _rpath=$(printf '%s' "$_rig" | jq -r '.path')
+            _rpfx=$(printf '%s' "$_rig" | jq -r '.prefix')
+            _rdb="$_rpath/.beads"
+            [ -d "$_rdb" ] || continue
+            _ids=$(awk -v p="$_rpfx-" 'index($0, p) == 1' < "$TMP/subject-ids.txt" | tr '\n' ' ')
+            [ -n "$_ids" ] || continue
+            # `bd show` answers with an ARRAY when any id resolves and a bare
+            # OBJECT when none do, rc=0 either way, so the shape is TESTED
+            # rather than assumed — the same guard resolve_waiting_status
+            # carries. Control characters in a bead's notes would make the
+            # payload invalid JSON, hence the strip.
+            # shellcheck disable=SC2086  # $_ids is a deliberate list of bare ids
+            _raw=$(gcq bd show $_ids --db "$_rdb" --json </dev/null | tr -d '\000-\037')
+            printf '%s' "$_raw" | jq -c '
+                if type == "array"
+                then [ .[]? | select(type == "object")
+                       | { key:   ((.id // "") | tostring),
+                           value: { title:    ((.title // "") | tostring),
+                                    takeaway: (((.metadata["gc.takeaway"]) // "") | tostring) } }
+                       | select(.key != "") ] | from_entries
+                else {} end' >> "$SUBJ_ACC" 2>/dev/null \
+                || gather_mark "subject@$_rname"
+        done
+    fi
+
+    # A failed gather is an ERROR, not a quiet window. This surface exists to
+    # tell a human what was decided; answering "nothing" because Dolt was wedged
+    # is the one wrong answer it must never give. Distinct message, distinct
+    # exit code, nothing rendered.
+    if [ -s "$GATHER_ERR" ]; then
+        echo "$PROG: gather failed ($(sort -u "$GATHER_ERR" | head -n 5 | tr '\n' ' ' | sed 's/ $//')) — nothing rendered; retry, raise --timeout, or check gc/Dolt" >&2
+        exit 3
+    fi
+
+    SUBJMAP=$(jq -c -s 'add // {}' < "$SUBJ_ACC" 2>/dev/null || printf '{}')
+    printf '%s' "$SUBJMAP" | jq -e 'type=="object"' >/dev/null 2>&1 || SUBJMAP='{}'
+
+    # Newest first. sort_by is on the RFC3339 close time, which sorts correctly
+    # as a string precisely because it is zero-padded and UTC.
+    CLOSED_JSON=$(jq -s -c --argjson subj "$SUBJMAP" --argjson lim "$EFFLIMIT" '
+        map(. + { subject_title: ((($subj[.subject] // {}).title    // "") | tostring),
+                  takeaway:      ((($subj[.subject] // {}).takeaway // "") | tostring) })
+        | sort_by(.closed_at) | reverse
+        | (if $lim > 0 then .[0:$lim] else . end)' < "$ROWS" 2>/dev/null || printf '[]')
+    printf '%s' "$CLOSED_JSON" | jq -e 'type=="array"' >/dev/null 2>&1 || CLOSED_JSON='[]'
+
+    if [ "$JSON" -eq 1 ]; then
+        printf '%s' "$CLOSED_JSON" | jq '.'
+        return 0
+    fi
+
+    _n=$(printf '%s' "$CLOSED_JSON" | jq 'length' 2>/dev/null || echo 0)
+    case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+    if [ "$_n" -eq 0 ]; then
+        printf 'No visit reached a disposition in the last %s (window opens %s).\n' "$SINCE" "$CUTOFF"
+        printf 'That is a quiet window, not a failed read — a failed read exits 3 and says so.\n'
+        return 0
+    fi
+
+    printf '%s' "$CLOSED_JSON" | jq -r '
+def rpad($w): . as $s | ($s|tostring)[0:$w] as $t | $t + (($w - ($t|length)) as $g | if $g>0 then (" "*$g) else "" end);
+# clip is the display guard on the two prose columns. --json still carries both
+# strings whole, so nothing is lost — only shortened where a 140-char takeaway
+# would otherwise wrap over every row beneath it.
+def clip($w): . as $s | if (($s|length) > $w) then (($s[0:$w-1]) + "…") else $s end;
+# Widths sized to the widest value in THIS result, never fixed: rpad truncates,
+# and an id keeps its discriminator in the TAIL, so a fixed width renders
+# tk-hgmob.1, .2 and .9 as three identical cells (tk-mtuej, one column over).
+(([.[] | ((.subject // "-")|tostring|length)] + [10] | max) + 1) as $sw
+| (([.[] | ((.outcome // "")|tostring|length)] + [8] | max) + 1) as $ow
+| ( ("CLOSED (UTC)"|rpad(18)) + ("SUBJECT"|rpad($sw)) + ("OUTCOME"|rpad($ow)) + ("TITLE"|rpad(38)) + "WHY (takeaway at sign-off)" ),
+  ( ("─"*17|rpad(18)) + ("─"*($sw-1)|rpad($sw)) + ("─"*($ow-1)|rpad($ow)) + ("─"*37|rpad(38)) + ("─"*25) ),
+  ( .[]
+    # An id-less or outcome-less row still RENDERS. A closed visit is terminal
+    # whether or not sign-off stamped it, and dropping the row would hide the
+    # very disposition whose record is incomplete — the one worth seeing.
+    | (((.closed_at // "") | tostring | .[0:16] | sub("T"; " "))|rpad(18))
+      + (((.subject // "") | if . == "" then "(unlinked)" else . end)|rpad($sw))
+      + (((.outcome // "") | if . == "" then "—" else . end)|rpad($ow))
+      + (((.subject_title // "") | if . == "" then "—" else . end)|clip(37)|rpad(38))
+      + (((.takeaway // "") | if . == "" then "—" else . end)|clip(60)) )'
+    printf '\nWindow: %s (since %s) · rows are per VISIT, so a subject with three sittings shows three.\n' "$SINCE" "$CUTOFF"
+    printf 'Read-only: gc.outcome comes off the closed visit, the takeaway off its subject. Nothing here is written by this verb.\n'
+}
+
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
     react)         shift; cmd_react "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     board)         shift; cmd_board "$@" ;;
+    closed)        shift; cmd_closed "$@" ;;
     -h|--help|help) usage; exit 0 ;;
     ''|-*)         cmd_board "$@" ;;          # no verb, or a board flag → board (back-compat)
-    *)             echo "$PROG: unknown verb '$1' (try: board, open, react, takeaway, help)" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '$1' (try: board, closed, open, react, takeaway, help)" >&2; usage; exit 2 ;;
 esac
