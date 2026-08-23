@@ -48,9 +48,34 @@ merge review.
 The polecat sets `metadata.branch` and `metadata.target` on the work bead
 and reassigns it to the refinery. The refinery merges and closes.
 
-**NEVER CLOSE BEADS.** You must not run `bd close` or set status=closed.
-Even if you believe the code is already merged, reassign to refinery —
-only the refinery verifies merges and closes beads.
+**NEVER CLOSE THE WORK BEAD.** You must not run `bd close` or set
+status=closed on the issue you were dispatched to implement. Even if you
+believe the code is already merged, reassign to refinery — only the refinery
+verifies merges and closes work beads.
+
+**ALWAYS CLOSE YOUR OWN STEP BEADS.** This is not an exception to the rule
+above; it is a different bead. A graph.v2 step advances only by closing the
+step bead that carries it, so a run that closes nothing leaves all seven steps
+open forever, `workflow-finalize` never becomes ready, and the whole chain is
+re-offered as if it were unstarted work. That is the husk generator this
+formula shipped for months (tk-y389z, tk-zab6q): the blanket "never close
+beads" rule was read as covering step beads, which are machinery, not work.
+
+The two are told apart by who owns them, not by judgement:
+
+| Bead | Carries | Closed by |
+|---|---|---|
+| work bead | the issue being implemented | the refinery, after a verified merge |
+| step bead | `metadata."gc.step_ref"` + your session as `assignee` | **you**, via `assets/scripts/step-close.sh` |
+| `workflow-finalize` | `gc.kind=workflow-finalize`, routed to `core.control-dispatcher` | the control-dispatcher — never you |
+
+`submit-and-exit` step 8 closes the chain. Close a step bead ONLY through
+`assets/scripts/step-close.sh`, which resolves the bead from the
+`(assignee, gc.step_ref)` pair — never from `$GC_TRIGGER_BEAD_ID` or
+`$GC_BEAD_ID`, both of which name the wrong bead after a hook-claim and fail
+silently (tk-niu2f, tk-7w69a). `doctor/check-step-close-owns-bead` enforces
+this.
+
 `{{base_branch}}` may come from the work bead's own `metadata.target` or
 be inherited from a parent convoy with `metadata.target` set.
 

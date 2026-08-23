@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- source digest: `66e57e264dbd5bae48b51fd99ba0313522285e1f90c6b582f669dc527a112c42`
+- source digest: `d0418708dfaace453008359b3d452fe4dbd656e1e69990f8010dd5d49c7df463`
 - agents: 16 · formulas: 28
 
 ## Scope
@@ -35,19 +35,19 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 4,457 | 1,114 |
 | [`codex`](agents/codex.md) | 4,457 | 1,114 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 4,461 | 1,115 |
-| [`converse`](agents/converse.md) | 38,554 | 9,638 |
+| [`converse`](agents/converse.md) | 39,302 | 9,825 |
 | [`deacon`](agents/deacon.md) | 29,873 | 7,468 |
 | [`dog`](agents/dog.md) | 7,790 | 1,947 |
 | [`gemini`](agents/gemini.md) | 4,457 | 1,114 |
 | [`keeper`](agents/keeper.md) | 61,850 | 15,462 |
 | [`mayor`](agents/mayor.md) | 38,255 | 9,563 |
 | [`mechanik`](agents/mechanik.md) | 36,222 | 9,055 |
-| [`polecat`](agents/polecat.md) | 35,984 | 8,996 |
-| [`polecat-codex`](agents/polecat-codex.md) | 120,315 | 30,078 |
+| [`polecat`](agents/polecat.md) | 39,078 | 9,769 |
+| [`polecat-codex`](agents/polecat-codex.md) | 123,409 | 30,852 |
 | [`proactive`](agents/proactive.md) | 12,902 | 3,225 |
 | [`refinery`](agents/refinery.md) | 34,292 | 8,573 |
 | [`witness`](agents/witness.md) | 39,290 | 9,822 |
-| **total** | **492,391** | **123,097** |
+| **total** | **499,327** | **124,831** |
 
 ## Formula recipes
 
@@ -73,7 +73,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 2,661 | 665 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 2,596 | 649 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 2,632 | 658 |
-| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 5,632 | 1,408 |
+| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 7,029 | 1,757 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,400 | 600 |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 21,054 | 5,263 |
 | [`mol-review-leg`](formulas/mol-review-leg.md) | `city` | 1,653 | 413 |
@@ -86,10 +86,10 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 6,076 | 1,519 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 4,054 | 1,013 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 16,631 | 4,157 |
-| **total** | | **140,284** | **35,071** |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 16,649 | 4,162 |
+| **total** | | **141,699** | **35,424** |
 
-**Grand total: 632,675 bytes / ~158,168 tokens.**
+**Grand total: 641,026 bytes / ~160,256 tokens.**
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
@@ -118,9 +118,9 @@ runs to re-prime after compaction.
 | keeper | `gascity` | 1 | _none_ |
 | mayor | `city` | 1 | `canonical-self-rename`, `convoy-integration-branch-mayor`, `bead-disposition`, `operator-next-step-trailing`, `file-feedback-observations`, `health-instruments-boundary` |
 | mechanik | `city` | 1 | _none_ |
-| polecat **DIVERGES** | `gc-toolkit` | 2 | `polecat-convoys`, `polecat-append-notes`, `file-work-records`, `file-feedback-observations`, `learned-conventions-polecat` |
-|  | `gascity` | 2 | `polecat-convoys`, `polecat-append-notes`, `file-work-records`, `file-feedback-observations`, `learned-conventions-polecat`, `rebase-conventions`, `polecat-patterns` |
-| polecat-codex | `gascity`, `gc-toolkit` | 1 | `polecat-convoys`, `polecat-append-notes`, `polecat-non-impl-done`, `file-work-records`, `file-feedback-observations`, `learned-conventions-polecat` |
+| polecat **DIVERGES** | `gc-toolkit` | 2 | `polecat-convoys`, `polecat-append-notes`, `polecat-close-step-chain`, `file-work-records`, `file-feedback-observations`, `learned-conventions-polecat` |
+|  | `gascity` | 2 | `polecat-convoys`, `polecat-append-notes`, `polecat-close-step-chain`, `file-work-records`, `file-feedback-observations`, `learned-conventions-polecat`, `rebase-conventions`, `polecat-patterns` |
+| polecat-codex | `gascity`, `gc-toolkit` | 1 | `polecat-convoys`, `polecat-append-notes`, `polecat-close-step-chain`, `polecat-non-impl-done`, `file-work-records`, `file-feedback-observations`, `learned-conventions-polecat` |
 | proactive | `gascity`, `gc-toolkit` | 1 | _none_ |
 | refinery **DIVERGES** | `gc-toolkit` | 2 | `layered-startup-discovery-refinery`, `operator-next-step-trailing` |
 |  | `gascity` | 2 | `layered-startup-discovery-refinery`, `operator-next-step-trailing`, `rebase-conventions`, `refinery-rebase-handling` |

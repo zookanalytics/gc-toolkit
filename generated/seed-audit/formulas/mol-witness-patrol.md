@@ -265,6 +265,6 @@ Steps (9):
   ├── mol-witness-patrol.check-refinery: Check refinery queue health [needs: mol-witness-patrol.recover-stranded-branches]
   ├── mol-witness-patrol.quiesce-completed-workflows: Quiesce completed workflows [needs: mol-witness-patrol.check-refinery]
   ├── mol-witness-patrol.detect-stalled-workflows: Signal workflows that stopped advancing [needs: mol-witness-patrol.quiesce-completed-workflows]
-  ├── mol-witness-patrol.detect-parked-dispositions: Bring a parked conversation back when its routed work lands [needs: mol-witness-patrol.detect-stalled-workflows]
+  ├── mol-witness-patrol.detect-parked-dispositions: Bring a parked conversation back — landed work, or a hold nobody is holding [needs: mol-witness-patrol.detect-stalled-workflows]
   ├── mol-witness-patrol.check-polecat-health: Check polecat work progress [needs: mol-witness-patrol.detect-parked-dispositions]
   └── mol-witness-patrol.next-iteration: Pour next iteration and loop [needs: mol-witness-patrol.check-polecat-health]
