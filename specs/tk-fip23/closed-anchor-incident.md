@@ -152,3 +152,58 @@ pass.
   the repair arm reopens their anchors on the next refinery pass regardless.
   This work is itself a PR in the same stranded queue — the self-sealing
   property the bead names — so the first landing still needs one human action.
+
+## Verification: the mutation matrix
+
+The four new phase-0a cases were run against the fixed script and against two
+deliberately broken copies of it, in parallel trees, to establish that each
+assertion is sensitive to the thing it claims to test and to nothing else.
+`check-set-heal-visibility.test.sh` carries 328 assertions in total.
+
+| tree | phase-0a predicate | result | which assertions died |
+|---|---|---|---|
+| fixed | `$mr == "" or $mr == "pull_request" or $mr == "pre_open_gate"` | **328 passed, 0 failed** | — |
+| `mut-absent` | `$mr == ""` (the original guard) | 323 passed, **5 failed** | all four `CLOSEDINFLIGHT`, plus `CLOSEDPREOPEN` |
+| `mut-denylist` | `($mr \| IN("merged","abandoned","retargeted","duplicate","blocked")) \| not` | 327 passed, **1 failed** | `CLOSEDUNKNOWN` |
+
+Both mutants are precise: reverting the widening kills exactly the cases that
+assert the widening and leaves every pre-existing assertion green, and replacing
+the allow-list with a deny-list of today's terminal values kills exactly the case
+that asserts an unrecognised marker is left alone. The second row is why
+`CLOSEDUNKNOWN` exists at all — without it, a deny-list would pass the whole
+suite while quietly reopening beads wearing a marker some later pass invents.
+
+`CLOSEDABANDON` is not a discriminator on its own (a terminal marker is refused
+by every variant above), and neither is the negative `recovered
+b-CLOSEDINFLIGHT`; they are there to pin the fail-closed direction against future
+edits, not to catch these two mutations.
+
+Other verification:
+
+- `reconcile-merged-prs.test.sh`: 421 passed, 0 failed, including the three new
+  `AF` cases. `AF2` is the load-bearing one — delete the rollback and it fails,
+  because the retry pass then reports "already escalated" and mails nothing.
+- `shellcheck -S warning` (containerized, `-S warning`) over all four changed
+  scripts reports the same two pre-existing `SC2034`s as `origin/main` and
+  nothing new.
+- `bash -n` clean on all four scripts; `tomllib` parses `mol-refinery-patrol.toml`.
+
+## State of the queue at hand-off
+
+Unchanged: `main` is still at `4a82be7`, and #425-#432 are all still open,
+APPROVED and CLEAN. This branch's own PR joins the same queue, so the first
+landing still needs one action from the refinery or an operator — either merging
+one PR by hand, or reopening the eight anchors so the merge skill enumerates them
+again:
+
+```bash
+# refinery/operator action — NOT a polecat's to take
+for pair in tk-yhwfv.1:431 tk-vie5k:427 tk-yhwfv.2:429 tk-03wjb:430 \
+            tk-2cy79:426 tk-jj2ad:432 tk-wvrga:428 tk-mcyd1:425; do
+  gc bd update "${pair%%:*}" --status=open \
+    --append-notes "Reopened by hand: closed at PR-creation while merge_result=pull_request and PR#${pair##*:} was still open (tk-fip23)."
+done
+```
+
+Once this branch lands, that repair runs on its own from the next
+refinery-reconcile pass, for this incident and every recurrence of its shape.
