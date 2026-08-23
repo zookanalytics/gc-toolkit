@@ -443,7 +443,7 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 			a := newAnchor(iss, kind, r)
 			switch kind {
 			case "epic":
-				a.Children = s.epicChildren(ctx, g, st, iss.ID)
+				a.Children = s.parentChildren(ctx, g, st, iss.ID)
 			case "convoy":
 				a.Children = s.convoyChildren(ctx, g, st, iss.ID)
 				applyConvoyOwnership(&a, convoys)
@@ -457,8 +457,18 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 }
 
 // gatherMetadataAnchors runs the metadata-keyed gathers for one rig. They fail
-// independently of each other and of the typed kinds, and neither carries a
-// child roll-up: the gather admits the bead itself, not a set it owns.
+// independently of each other and of the typed kinds.
+//
+// Both kinds carry a child roll-up, read the same way an epic's is. They used
+// to carry none — "the gather admits the bead itself, not a set it owns" — and
+// that was not a cheap approximation but a false statement of the relation: a
+// plain (non-epic/convoy/decision) bead reaches the board ONLY through its
+// parent's roll-up, so a parked subject that decomposed reported zero children
+// AND deleted its own open children from every surface (tk-a9k0l). The relation
+// matters most for exactly this kind, because beads REFUSES a `blocks` edge
+// from a parent to its own descendant, so the canonical converse shape — file
+// the routed work as a CHILD of the subject — can never express its wait as a
+// waiting edge (tk-2cyxo).
 func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, open beads.Status) {
 	excluded := make([]beads.IssueType, 0, len(typedAnchorKinds))
 	for _, kind := range typedAnchorKinds {
@@ -490,6 +500,7 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 				continue
 			}
 			a := newAnchor(iss, ma.kind, r)
+			a.Children = s.parentChildren(ctx, g, st, iss.ID)
 			if ma.kind == "parked" {
 				a.WaitingOn, a.WaitingOnClosed = s.waitingEdges(ctx, g, st, iss.ID)
 			}
@@ -598,13 +609,15 @@ func admitConvoy(title string) bool {
 	return !strings.HasPrefix(title, "sling-") && !strings.HasPrefix(title, "input convoy for")
 }
 
-// epicChildren returns an epic's DIRECT children — the beads joined to it by a
-// parent-child edge, which in the beads model points child→parent, so the
-// children are the epic's DEPENDENTS.
-func (s *BeadsSource) epicChildren(ctx context.Context, g *gatherState, st beadStore, epicID string) []board.Child {
-	deps, err := st.GetDependentsWithMetadata(ctx, epicID)
+// parentChildren returns an anchor's DIRECT children — the beads joined to it
+// by a parent-child edge, which in the beads model points child→parent, so the
+// children are the anchor's DEPENDENTS. Epics answer for their children this
+// way, and so do the metadata-keyed kinds: the relation belongs to the bead,
+// not to the kind.
+func (s *BeadsSource) parentChildren(ctx context.Context, g *gatherState, st beadStore, id string) []board.Child {
+	deps, err := st.GetDependentsWithMetadata(ctx, id)
 	if err != nil {
-		g.note(true, []string{"children@" + epicID + ": " + err.Error()})
+		g.note(true, []string{"children@" + id + ": " + err.Error()})
 		return nil
 	}
 	return childrenOf(deps, "parent-child")

@@ -3,11 +3,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { Board, Tile } from './contract';
 
-// A board carrying all four shapes the split has to tell apart: an ordinary
+// A board carrying all five shapes the split has to tell apart: an ordinary
 // ranked anchor, an operator-owned bead that IS attention, a parked
-// conversation that is not, and a parked conversation whose routed work has
+// conversation that is not, a parked conversation whose routed work has
 // landed — which stopped being "wants nothing" and has to leave the quiet
-// section (tk-2plde).
+// section (tk-2plde) — and a parked conversation whose routed work is still
+// OPEN, which never was "wants nothing" (tk-a9k0l).
 function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severity'>): Tile {
   return {
     rig: 'gc-toolkit',
@@ -48,7 +49,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
 
 const BOARD: Board = {
   generated_at: '2026-08-21T19:14:00Z',
-  total: 4,
+  total: 5,
   tiles: [
     tile({
       id: 'tk-epic',
@@ -92,6 +93,24 @@ const BOARD: Board = {
       frontier: 'parked · blocker landed',
       needs: 'blocker landed — dispose or resume',
       rank_score: 2_002_001,
+    }),
+    // Parked by kind, and the work the sitting routed is its own OPEN child.
+    // No waiting edge can exist on this shape — beads refuses a parent→
+    // descendant `blocks` edge — so disposition_due is false and the roll-up
+    // is the only thing that can say the subject is not quiet (tk-a9k0l).
+    tile({
+      id: 'tk-z9nln',
+      kind: 'parked',
+      title: 'audit the gc-toolkit workflow and write the composition-seam doc',
+      severity: 'HIGH',
+      n_closed: 1,
+      m_total: 2,
+      open: 1,
+      stranded: true,
+      open_heads: ['tk-wvrga'],
+      frontier: '1 open · 0 in flight (stranded)',
+      needs: 'kept open as the seat for the strategic conversation',
+      rank_score: 3_005_000,
     }),
   ],
 };
@@ -161,7 +180,7 @@ it('lists a parked conversation in its own section, not in the ranked table', as
 
 it('counts the two sections separately in the header', async () => {
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/3 anchors · 1 parked/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/4 anchors · 1 parked/)).toBeTruthy());
 });
 
 // The defect this split exists to prevent (tk-2plde): a subject that routed
@@ -181,6 +200,25 @@ it('promotes a parked row whose blocker landed into the ranked table', async () 
   // The stale takeaway must not be the row's answer — the deterministic
   // disposition phrase outranks it.
   expect(within(row as HTMLElement).getByText(/blocker landed — dispose or resume/)).toBeTruthy();
+});
+
+// The defect tk-a9k0l is about. A parked subject that decomposed keeps its
+// takeaway, so it stays kind `parked`, and its open child is not a tile of its
+// own — a plain bead reaches the board only through its parent's roll-up. Filed
+// under "wants nothing", the row hides the only surface that work has.
+it('promotes a parked row with open children into the ranked table', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/composition-seam doc/)).toBeTruthy());
+
+  expect(within(attentionTable()).getByText(/composition-seam doc/)).toBeTruthy();
+  expect(within(parkedSection()).queryByText(/composition-seam doc/)).toBeNull();
+
+  // …carrying the roll-up that promoted it, so the open child is countable
+  // from the row rather than only from --json.
+  const row = within(attentionTable()).getByText(/composition-seam doc/).closest('tr');
+  expect(row).not.toBeNull();
+  expect(within(row as HTMLElement).getByText('1/2')).toBeTruthy();
+  expect(within(row as HTMLElement).getByText(/1 open · 0 in flight \(stranded\)/)).toBeTruthy();
 });
 
 it('drills into a parked row like any other tile', async () => {

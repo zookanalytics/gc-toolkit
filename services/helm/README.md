@@ -102,7 +102,7 @@ Five kinds are gathered. The first three are selected by the bead's issue
 | `decision` | `issue_type=decision` | ELEVATED | human-gated |
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
 | `human` | `gc.routed_to=human` | ELEVATED | the operator owns it; no agent will take it |
-| `parked` | `gc.takeaway` present | LOW, or ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
+| `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
 
 **Why metadata is an anchor key at all.** The type question cannot see an
 operator-owned item. `gc.routed_to=human` and `gc.takeaway` are stamped on
@@ -116,6 +116,10 @@ already an anchor (an epic carrying a takeaway, say) is not gathered twice. A
 bead carrying both markers is, and `BuildBoard`'s dedup keeps the higher band —
 `human` over `parked`.
 
+Both gathers read the anchor's `parent-child` children, exactly as the `epic`
+gather does. The relation belongs to the bead, not to the kind, and it is
+load-bearing for `parked` in particular — see *Until its work is done* below.
+
 **`parked` is deliberately not an attention item.** It is LOW so it can never
 compete for rank with a stranded epic, and the web app lists it in a section of
 its own below the ranked table rather than as a row inside it. What the operator
@@ -124,7 +128,33 @@ takeaway is already resumable — typing a bare bead id into the `prefix+a` popu
 reopens the conversation on that bead (`assets/scripts/tmux-visit-prompt.sh`) —
 it was only unfindable.
 
-**Until its wait is over.** A takeaway is one frozen string, so a sitting that
+**Until its work is done.** The floor is a claim about the bead — it wants
+nothing — and open work hanging under it falsifies the claim. So a `parked`
+anchor with children is banded by that roll-up like any other anchor: HIGH when
+its frontier is stranded, NORMAL when something is moving, and LOW again once
+every child has closed.
+
+That relation is the ONLY one that can see the canonical converse shape. A
+sitting files the work it routes as a CHILD of the subject, and beads refuses a
+`blocks` edge from a parent to its own descendant —
+
+    $ bd dep add tk-z9nln tk-wvrga -t blocks
+    Error: tk-z9nln cannot be blocked by its descendant tk-wvrga
+
+— so those subjects have no `waiting_on` edge at all and the disposition rule
+below can never fire for them. Worse, before `tk-a9k0l` both gathers hardcoded
+an empty child slice, and a plain (non-epic/convoy/decision) bead reaches the
+board ONLY through its parent's roll-up: the row reported zero children AND its
+open children were on no board anywhere. Measured on `tk-z9nln`, 2026-08-22 —
+the row read `m_total=0 · conversation parked`, while the deliverable it was
+waiting for sat open, unassigned and unrouted, invisible.
+
+A roll-up whose children have ALL closed stays LOW. The row can now *say* the
+work landed (`m_total>0`, `complete`, "all N closed · 0 open"), which is what a
+sweep needs to act on it; pushing the operator at that moment is `tk-2cyxo`'s
+bead, not the board's.
+
+**Until its named wait is over.** A takeaway is one frozen string, so a sitting that
 ROUTES work out of a subject leaves it saying "routed — nothing further needed
 here" for as long as the bead stays open, including long after the work merged.
 Nothing re-read that sentence, so a finished topic and a live hold were the same
@@ -138,7 +168,7 @@ prose — and the board re-derives, per render, whether it has been discharged:
 
 | `waiting_on` | `waiting_on_open` | row |
 |---|---|---|
-| empty | — | unchanged: LOW, "conversation parked — takeaway recorded" |
+| empty | — | LOW, "conversation parked — takeaway recorded" (a childless row; with children the roll-up answers instead) |
 | non-empty | non-empty | LOW, "parked · waiting on N" — a live hold, still quiet |
 | non-empty | empty | `disposition_due`: ELEVATED, "parked · blocker landed", and NEEDS becomes "blocker landed — dispose or resume" |
 
@@ -159,9 +189,10 @@ session liveness: a cached "still waiting" is exactly the answer this exists to
 stop serving. The read is skipped entirely when no anchor carries an edge, so a
 city whose sittings have not written any yet pays nothing.
 
-The disposition-due row is also the one `parked` row the web app lifts OUT of
-the quiet section and into the ranked table — leaving it below would re-hide the
-row the distinction exists to surface.
+The disposition-due row is one of two `parked` shapes the web app lifts OUT of
+the quiet section and into the ranked table — the other is a row with open
+children. Leaving either below would re-hide the row the distinction exists to
+surface.
 
 ## Architecture
 
@@ -386,12 +417,13 @@ U6 and land on top of this.
 
 It renders the board as **two** tables. The ranked one is the board proper;
 below it, when the gather found any, a *parked conversations* section lists the
-`parked` tiles — id, rig, title, staleness, and how to resume. They are split
-because they answer different questions, and mixing them would put a thread that
-wants nothing in the same ranking as work that is stuck (`tk-2v08m`). The parked
-table drops the progress columns: a `parked` bead carries no roll-up, so `n/m`
-and `open/wip` would read `0/0` on every row — a number that looks like an answer
-and is not one.
+QUIET `parked` tiles — id, rig, title, staleness, and how to resume. They are
+split because they answer different questions, and mixing them would put a
+thread that wants nothing in the same ranking as work that is stuck
+(`tk-2v08m`). A `parked` tile that is owed a disposition (`tk-2plde`) or has
+open children (`tk-a9k0l`) is not quiet and stays in the ranked table. The
+parked table drops the progress columns: every row that reaches it has an empty
+open frontier, so `open/wip` reads the same answerless `0` on all of them.
 
 Four things about it are load-bearing.
 
