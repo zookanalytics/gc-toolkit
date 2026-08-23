@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- source digest: `126e535e428fda70524ca16b26c89b1b597a5ee87b56bb7255610fbecae63510`
+- source digest: `a0a18b6baf0b06dd2a7789f87ec08d7ff8082f866d6e7e42147f30bbce6ebfd4`
 - agents: 16 · formulas: 28
 
 ## Scope
@@ -67,7 +67,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,555 | 1,138 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 3,333 | 833 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 5,713 | 1,428 |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 5,950 | 1,487 |
 | [`mol-idea-to-plan`](formulas/mol-idea-to-plan.md) | `city` | 3,598 | 899 |
 | [`mol-liveness-sweep`](formulas/mol-liveness-sweep.md) | `city` | 6,282 | 1,570 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 2,661 | 665 |
@@ -87,9 +87,9 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 4,054 | 1,013 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 16,631 | 4,157 |
-| **total** | | **140,047** | **35,011** |
+| **total** | | **140,284** | **35,071** |
 
-**Grand total: 632,438 bytes / ~158,109 tokens.**
+**Grand total: 632,675 bytes / ~158,168 tokens.**
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not

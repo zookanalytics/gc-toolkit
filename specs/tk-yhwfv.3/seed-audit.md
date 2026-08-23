@@ -31,7 +31,11 @@ gate; `specs/tk-yhwfv.2` owns it.
 | `doctor/check-seed-audit-current/` | The gate: cheap digest comparison, plus a report when the hook is not wired |
 | `docs/seed-audit/` | The artifact: 16 agent prompts, 28 formula recipes, `INDEX.md` manifest |
 
-627,696 bytes / ~156,924 estimated tokens across 44 rendered scenarios.
+44 rendered scenarios. **`docs/seed-audit/INDEX.md` is the only source for the
+totals** — they move on every render, so a number restated here is stale by the
+next fragment edit. (It already was: this line carried 627,696 B / ~156,924 tok
+against the artifact's 632,438 B / ~158,109 tok one rebase later — tk-wchab,
+pre-open signoff P2.)
 
 ## Decision: render against a pinned synthetic city, not the live one
 
@@ -72,7 +76,19 @@ exist in loomington. The scenario is repo content, so it is reviewed and diffed
 like anything else, and the artifact stays a pure function of the repo plus the
 `gc` version.
 
-Two mechanical requirements follow, and both are load-bearing:
+Three mechanical requirements follow, and all are load-bearing:
+
+- **The renderer is itself a digest input.** Pinning the scenario inside the
+  script makes the script part of the audited surface, so the staleness gate has
+  to hash it. The first cut did not, and the gate was blind in exactly the place
+  it was supposed to be sharp: editing one line of the embedded
+  `[agent_defaults]` moved 13 agent prompts, `--check` reported the tree stale,
+  and `doctor/check-seed-audit-current` still reported it current (tk-wchab,
+  pre-open signoff P1). `digest_inputs()` hashes the whole file rather than
+  parsing the scenario out of it — a comment-only edit costs one re-render, and
+  no scenario edit can slip past. `assets/hooks/pre-commit`'s `INPUT_RE` carries
+  the same path, and `run.test.sh` asserts both halves see a renderer-only
+  change, because two hand-synced lists are how one of them ends up short.
 
 - **Every `gc` call is `env -i`.** Not tidiness. An inherited `GC_CITY` points
   the render at the operator's live city; inherited `GC_RIG`/`GC_AGENT` leak the
@@ -110,12 +126,17 @@ env -i PATH="$PATH" HOME="$HOME" TERM=dumb NO_COLOR=1 \
   | diff - docs/seed-audit/agents/polecat.md
 ```
 
-Measured at `5225c1a`. Both columns must read the SAME inputs, and that is not
-automatic: the `live B` column renders from the rig checkout at
-`rigs/<rig>/`, which lags `main` by however long it has been since the last
-land. Check `git -C rigs/gc-toolkit rev-parse HEAD` against the branch's base
-before believing a delta — a lagging checkout shows up here as a fidelity
-regression that is really just checkout drift.
+Measured against base `origin/main` at `faeb7a4`, with the rig checkout
+verified to be at that same commit. The base is what to stamp here, not the
+branch head: the head moves on every rebase while these numbers do not, and a
+stamp that rots is the P2 defect this spec already collected once.
+
+Both columns must read the SAME inputs, and that is not automatic: the `live B`
+column renders from the rig checkout at `rigs/<rig>/`, which lags `main` by
+however long it has been since the last land. Check
+`git -C rigs/gc-toolkit rev-parse HEAD` against the branch's base before
+believing a delta — a lagging checkout shows up here as a fidelity regression
+that is really just checkout drift.
 
 | agent | live B | artifact B | Δ | differing lines |
 |---|---:|---:|---:|---:|

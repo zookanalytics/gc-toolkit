@@ -5,6 +5,14 @@
 #   * the MISSING arm — the renderer ships but the artifact does not;
 #   * the STALE arm — an input file moves and the recorded digest no longer
 #     matches, which is the whole reason the check exists;
+#   * the RENDERER-only STALE arm — the script carries the synthetic city the
+#     prompts render against, so editing its scenario moves the artifact. This
+#     one shipped broken (tk-wchab P1): digest_inputs() hashed the content
+#     directories and not the renderer, so `--check` saw the tree stale while
+#     this check called it current;
+#   * that assets/hooks/pre-commit's INPUT_RE covers every root
+#     digest_inputs() hashes — two hand-synced lists, asserted against drift —
+#     and does NOT match the generated tree;
 #   * the UNVERIFIABLE arm — an INDEX.md with no digest line (hand-edited, or
 #     written by an older renderer) is a finding, not a silent pass;
 #   * the OK arm, with core.hooksPath wired;
@@ -135,6 +143,58 @@ if [ "$(rc_of)" = "2" ]; then
     ok "a formula edit also moves the digest"
 else
     bad "stale-formula arm (rc=$(rc_of)): $(out_of | head -1)"
+fi
+
+# THE REGRESSION THIS CHECK SHIPPED WITHOUT (tk-wchab, pre-open signoff P1).
+# The renderer carries the synthetic city the prompts render against, so a
+# renderer-only edit really does move the artifact — one line of its
+# [agent_defaults] moves 13 agent prompts. While digest_inputs() hashed only the
+# content directories, `render-seed-audit.sh --check` reported the tree stale
+# and this check still reported it current: the gate was blind to the one file
+# that defines what "current" means.
+P="$TMP/stale-renderer"; make_pack "$P"
+D="$("$P/assets/scripts/render-seed-audit.sh" --root "$P" --print-digest)"
+write_index "$P" "$D" "$GCVER"
+python3 - "$P/assets/scripts/render-seed-audit.sh" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+old = 'append_fragments = ["command-glossary", "operational-awareness"]'
+assert old in s, "the embedded scenario no longer carries append_fragments — update this test"
+open(p, "w", encoding="utf-8").write(s.replace(old, 'append_fragments = ["command-glossary"]', 1))
+PY
+run_check "$P"
+if [ "$(rc_of)" = "2" ] && grep -F 'STALE' <<< "$(out_of)" >/dev/null; then
+    ok "a renderer-only scenario edit is seen as STALE (the P1 gate hole)"
+else
+    bad "stale-renderer arm (rc=$(rc_of)): $(out_of | head -1)"
+fi
+
+# The hook and digest_inputs() are two hand-maintained lists of the same input
+# set, which is precisely how one of them ends up missing a path. Assert the
+# SHIPPED hook's INPUT_RE matches a representative path under every root
+# digest_inputs() hashes, so the pair cannot drift silently.
+hook_matches() {
+    local path="$1" re
+    re="$(sed -n "s/^INPUT_RE='\(.*\)'$/\1/p" "$ROOT/assets/hooks/pre-commit" | head -1)"
+    [ -n "$re" ] || return 2
+    grep -Eq "$re" <<< "$path"
+}
+drift=""
+for probe in agents/x/prompt.template.md template-fragments/x.template.md \
+             formulas/mol-x.toml packs/p/formulas/mol-y.toml pack.toml \
+             assets/scripts/render-seed-audit.sh; do
+    hook_matches "$probe" || drift="$drift $probe"
+done
+if [ -z "$drift" ]; then
+    ok "the pre-commit INPUT_RE covers every root digest_inputs() hashes"
+else
+    bad "pre-commit INPUT_RE does not match:$drift"
+fi
+if hook_matches docs/seed-audit/INDEX.md; then
+    bad "pre-commit INPUT_RE matches the generated tree — the hook would loop on its own output"
+else
+    ok "the pre-commit INPUT_RE does not match the generated tree"
 fi
 
 # A file OUTSIDE the input set must NOT move the digest, or every commit in the

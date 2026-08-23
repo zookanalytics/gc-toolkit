@@ -35,7 +35,12 @@ set -uo pipefail
 # digest_inputs() in assets/scripts/render-seed-audit.sh — over-inclusive on
 # both sides, since a spurious re-render costs seconds and a missed one ships a
 # stale audit.
-INPUT_RE='^(agents/|template-fragments/|formulas/|packs/|pack\.toml$)'
+#
+# The renderer is on the list because it CARRIES the synthetic city the prompts
+# render against: one line of that scenario moves 13 agent prompts. Omitting it
+# let a renderer-only edit stale the artifact while the doctor check still
+# reported it current (tk-wchab, pre-open signoff P1).
+INPUT_RE='^(agents/|template-fragments/|formulas/|packs/|pack\.toml$|assets/scripts/render-seed-audit\.sh$)'
 
 staged="$(git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null)"
 [ -n "$staged" ] || exit 0

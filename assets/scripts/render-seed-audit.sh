@@ -109,6 +109,21 @@ PH_HOME="[[HOME]]"
 # it holds the per-agent inject_fragments_append lists AND the `sha:` pin for
 # the imported gastown pack, so an upstream prompt change moves it too.
 #
+# THIS SCRIPT IS ITSELF AN INPUT, and leaving it out was a hole in the gate
+# (tk-wchab, pre-open signoff P1). The synthetic city below is not a wrapper
+# around the render — it is a variable the rendered prompts depend on, and the
+# scenario comment says so. Edit one line of its [agent_defaults] and 13 agent
+# prompts move; with only the content directories hashed, `--check` reported the
+# tree stale while doctor/check-seed-audit-current still reported it current.
+# That is the exact failure the check exists to catch, in the check.
+#
+# Hashing the whole file rather than parsing the scenario out of it is the same
+# over-inclusive trade as above: a comment-only edit now costs one re-render,
+# and no scenario edit can ever slip past. `assets/hooks/pre-commit` watches the
+# same path for the same reason — the two input sets are kept in step by hand,
+# and doctor/check-seed-audit-current/run.test.sh asserts a renderer-only change
+# is seen by both.
+#
 # The `gc` version is deliberately NOT folded in. Prompt composition lives in
 # the binary, so an upgrade really can move every byte of the artifact — but with
 # no commit in this repo to explain it. INDEX.md records the version on its own
@@ -120,6 +135,7 @@ digest_inputs() {
     find "$root/agents" "$root/template-fragments" "$root/formulas" "$root/packs" \
         -type f \( -name '*.md' -o -name '*.toml' \) -print 2>/dev/null | LC_ALL=C sort
     printf '%s\n' "$root/pack.toml"
+    printf '%s\n' "$root/assets/scripts/render-seed-audit.sh"
 }
 
 source_digest() {

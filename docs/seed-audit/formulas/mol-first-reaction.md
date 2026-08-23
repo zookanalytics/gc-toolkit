@@ -2,7 +2,10 @@ Formula: mol-first-reaction
 Description: Proactive first reaction — a cheap, one-shot reaction slung at a bead.
 
 Phase 4 of the Bead-Universe Operating Model
-(specs/bead-universe/design-doc.md — Key Components 5-6, Phase 4).
+(specs/bead-universe/design-doc.md — Key Components 5-6, Phase 4). That design
+is v1, superseded in part by specs/tk-h9pq5/design-doc.md (v2): v2 replaced the
+binding and lifecycle and left Phase 4 standing, so v1 still governs this
+formula — read its supersession banner before citing the rest of it.
 Modeled on `mol-review-leg`
 (read the bead, do the work, persist to notes) — but where a review leg
 closes its assignment bead, a first reaction ADVANCES a real work bead and
