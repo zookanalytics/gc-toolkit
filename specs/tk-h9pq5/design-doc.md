@@ -15,6 +15,43 @@ this bead.*
 
 ---
 
+## Amendments
+
+*This doc is the live design authority for `agents/converse/`
+(`agents/converse/PROVENANCE.md`), so it has to read true. Three things in it
+were overtaken by decisions recorded after it landed. The body below is left as
+written — it is the point-in-time record of what was designed on 2026-07-29 —
+and these are the deltas. Each is a decision already recorded elsewhere; nothing
+here is new judgment.*
+
+- **The `gc.attention` flag is gone; the board is not.** Operator decision
+  2026-08-08 removed the flag and the flag-this-for-attention concept
+  (`specs/2026-08-fresh-start/attention-flag-removal.md`); `gc.attention` now has
+  zero live references and zero upstream meaning
+  (`docs/gascity-human-engagement.md`). This **supersedes Key Component 6's
+  "`gc.attention` flag … is unchanged" clause** — a bead's LLM raising its own
+  hand is now *filing a visit on the subject* — which that record calls
+  Remaining Open Question 4 ("First-reaction proactivity as turns") landing on
+  the side this design predicted. Everything else about the surface stands: the
+  board survived the removal, so read every "`gc.attention` board" below
+  (Executive Summary, Interface, Trade-offs, and Mandated Question 4) as **the
+  Helm board** — a live surface under a name it no longer keys on. The
+  direction is right; only the mechanism name is stale.
+- **No reaper-skip clause was built.** `specs/2026-08-fresh-start/spine-port.md`
+  D4 deliberately deviates from Phase 2's witness-patrol skip: main's
+  orphan-recovery is liveness-keyed with no time threshold, so a held visit
+  assigned to a live session is already unreachable by it, and for a visit whose
+  session died mid-hold recovery *is* the cold-restart path. `task_kind` is still
+  stamped for legibility; nothing skips on it. Q1's resolution below should be
+  read as that ground truth.
+- **Vocabulary: "turn" is now "visit", and "conversation" was demoted.** Operator
+  rename, 2026-08-08 (`specs/2026-08-fresh-start/spine-port.md`, vocabulary
+  addendum; glossary in `docs/gascity-human-engagement.md`). The pack's two nouns
+  are **subject** and **visit** — `mol-visit.toml`, `task_kind=visit`. Read every
+  "turn" below as "visit". Mechanism unchanged.
+
+---
+
 ## Executive Summary
 
 **The reframe, and everything follows from it:** *A conversation is not a session. It is a
@@ -51,7 +88,8 @@ claim contract, `gc.continuation_group`'s vacuum-onto-the-claiming-session behav
 `gc.run_target`→`gc.routed_to` pool routing. **What v2 supersedes:** the bead-host *binding and
 lifecycle* (the per-bead session, `hosts_bead`, warm-while-live grounding). **What v2 keeps:** the
 `gc.attention` board / Helm picker as the human-facing surface, rewired to route a turn instead of
-resuming a host. Migration cost is near-zero: bead-host ships as *capability, not deployment* and has
+resuming a host (see [Amendments](#amendments): the board survived, the flag it is named for did
+not). Migration cost is near-zero: bead-host ships as *capability, not deployment* and has
 no live instances to migrate.
 
 **Sequence:** role + turn-mechanism → continuity (warm/cold) → reaper-skip for the hold → attention
@@ -221,6 +259,8 @@ changes only what a pick *does*:
   implementation.
 - **`gc.attention` flag** (a bead's LLM raising its own hand) is unchanged — but now a flag *is* the
   natural precursor to a turn: flag sets the board metadata; pick-a-row files the turn.
+  **[Superseded 2026-08-08 — the flag and the flag-for-attention concept were removed; raising a
+  hand is filing a visit on the subject. See [Amendments](#amendments).]**
 - **`takeaway --release`** (Helm's teardown) maps to *ending the conversation*: it stops routing new
   turns and lets any warm session drain — no host to put down, because there is no host.
 

@@ -1,6 +1,9 @@
 # proactive — the dedicated, small, mr-only pool that runs slung first
 # reactions. Phase 4 of the Bead-Universe Operating Model
-# (specs/bead-universe/design-doc.md — Key Components 5-6, Phase 4).
+# (specs/bead-universe/design-doc.md — Key Components 5-6, Phase 4). That
+# design is v1, superseded in part by specs/tk-h9pq5/design-doc.md (v2):
+# v2 replaced the binding and lifecycle and left Phase 4 standing, so v1
+# still governs here — read its supersession banner before citing the rest.
 #
 # "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
 # (formulas/mol-first-reaction.toml) slung at a bead: a cheap first reaction

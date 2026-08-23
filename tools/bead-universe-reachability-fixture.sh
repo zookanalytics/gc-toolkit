@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # bead-universe-reachability-fixture.sh — the automatable Phase 2 gate for the
 # Bead-Universe Operating Model (specs/bead-universe/design-doc.md, Phase 2).
+# That design is v1, superseded in part by specs/tk-h9pq5/design-doc.md (v2):
+# v2 replaced the binding and lifecycle and left Phase 2 untouched, so v1 is
+# still the gate this fixture scores against — read its supersession banner
+# before citing the rest of it.
 #
 # THE GATE (design Phase 2, "dual metric, automatable"):
 #   A seeded subtree + a fixed list of questions, each with a known ground-truth
