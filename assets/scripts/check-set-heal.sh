@@ -547,20 +547,74 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # park, the same one the `gc.routed_to` line has always accepted, now reached by the
 # dispatch form that superseded it.
 
-# The ACTING half, as a jq function so the exact and broad surfaces cannot drift on it
-# (the same reason the identity predicate below is one variable). $live is
-# LIVE_STATUSES; `open` is dropped from it because plain-open is the one status that
-# carries no actor of its own.
-ACTING_JQ_DEF='def acting($live):
+# ONE definition of "what is already acting on this anchor", for every reader that
+# has to answer it before minting a signoff review. THE CANONICAL COPY IS THIS ONE.
+#
+# WHY IT IS A COPIED BLOCK and not a sourced library: there is no sourced-library
+# pattern in this pack — every assets/scripts/*.sh is standalone, and the readers
+# span three media (shell script, TOML formula body, markdown template fragment).
+# The pack already answers exactly this with a marked block plus a drift test
+# (formulas/mol-visit.toml + assets/scripts/gate-visit.test.sh). Same shape here:
+# copy the block markers included, and assets/scripts/inflight-membership.test.sh
+# extracts EVERY copy, diffs it against this one, and fails on drift or on a
+# hand-rolled guard that carries no markers at all.
+#
+# WHY ONE DEFINITION AT ALL (tk-j5wrs). Four dispatchers can mint a review and each
+# computed membership its own way, from a different edge convention. Every symptom
+# under that bead is a different wrong answer to this one question, and the class has
+# already been fixed three times at one site each and returned through another
+# (#387, #390, #395).
+#
+# AUTHORITY: `metadata.anchor_bead` is authoritative, and nothing else is (operator
+# ruling, converse visit tk-9glgp, 2026-08-22). It is the only one of the four
+# conventions with a SINGLE WRITER — the signoff dispatch, which stamps it
+# atomically with the review's routing fields. The other three name the same
+# relationship by inference and are NON-CANONICAL heuristics; each is documented as
+# such where it is read:
+#   * a `blocks` edge      — written by the dispatch AND by hand-filed holds, so a
+#                            blocker is not evidence of a review (reconcile-gate-verdicts.sh R11).
+#   * a `parent-child` edge — written by rework filing, refinery rebase beads and
+#                            hand decomposition alike; a rebase bead read as
+#                            remediation is tk-21b70 (reconcile-gate-verdicts.sh).
+#   * convoy membership     — a dispatch artifact, and a molecule husk outlives the
+#                            work (recover-stranded-branches.sh convoy_is_live).
+# `anchor_authority` below is that ruling as code: a bead naming ANOTHER anchor is
+# positively not about this one, and only a bead naming no anchor at all is left to
+# a caller-specific heuristic.
+#
+# DEFERRED, DELIBERATELY — the read-to-create race. Every guard built on this is a
+# plain read and none takes a lock, so two dispatchers can both read "nothing in
+# flight" and both create (tk-cnmlx: twin reviews 3s apart). The ruling accepts the
+# race and asks that duplicate reviews be cheaply reversible instead. Do NOT add
+# locking here. This note is why the next reader does not have to re-litigate it.
+#
+# $live is LIVE_STATUSES; `open` is dropped from it because plain-open is the one
+# status that carries no actor of its own.
+# >>> inflight-membership
+# shellcheck disable=SC2034  # part of the shared block; not every host spends it
+INFLIGHT_LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+INFLIGHT_MEMBERSHIP_JQ='def claimable:
+  . as $b
+  | (($b.metadata // {})) as $m
+  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
+  | ((($m["gc.routed_to"] // "") | tostring) != "")
+    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
+def acting($live):
   . as $b
   | (($b.metadata // {})) as $m
   | (($live | split(",")) | map(select(. != "open"))) as $owning
-  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
   | ((($m.task_kind // "") | tostring) == "review")
     or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
-    or ((($m["gc.routed_to"] // "") | tostring) != "")
-    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
+    or ($b | claimable);
+def anchor_authority($a):
+  ((((. // {}).metadata // {}).anchor_bead // "") | tostring) as $ab
+  | if $ab == "" then "unattributed" elif $ab == $a then "mine" else "theirs" end;
 '
+# <<< inflight-membership
+
+# Back-compat alias for the sites below that still name the ACTING half alone. One
+# variable, so a reader cannot pick up a stale second definition.
+ACTING_JQ_DEF="$INFLIGHT_MEMBERSHIP_JQ"
 
 # The validation predicate, as a jq filter over a `gc bd list` array. Kept in one
 # variable because both broad lookups must apply exactly the same rule — two copies
@@ -571,7 +625,7 @@ INFLIGHT_OK_JQ="$ACTING_JQ_DEF"'[.[]
   | select(.id != $a)
   | select(acting($live))
   | ((.metadata // {})) as $m
-  | ((($m.anchor_bead // "") | tostring)) as $ab
+  | (anchor_authority($a)) as $auth
   | ((($m.task_kind // "") | tostring)) as $tk
   | ((($m["gc.routed_to"] // "") | tostring)) as $rt
   | (((.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
@@ -580,10 +634,10 @@ INFLIGHT_OK_JQ="$ACTING_JQ_DEF"'[.[]
       | .[0]) as $c
   | (if $c == null then "?" else ($c.h + "/" + $c.r) end) as $cr
   | select(
-      if $ab == $a then
+      if $auth == "mine" then
         # Names THIS anchor: ours by construction, whatever else it is.
         true
-      elif $ab != "" then
+      elif $auth == "theirs" then
         # Names ANOTHER anchor: positively not about this one. Its own anchor holds
         # its own merge; holding ours on it is a hold nothing will ever lift.
         false
@@ -2939,6 +2993,56 @@ while IFS= read -r row; do
   # say so LOUDLY — the anchor is held, not merged, which is the safe side.
   if [ -z "$REVIEW_POOL" ]; then
     echo "check-set-heal: WARN $id gate '$DEFAULT_CHECK_SET' armed but no --review-pool given; no signoff dispatched (merge is HELD until one is)" >&2
+    continue
+  fi
+
+  # CONVERGENCE CAP, this dispatcher's half (tk-vie5k, tk-j5wrs ruling 3). Both
+  # arms that reach here — the ABSENT-marker dispatch and the `fixable@` re-gate —
+  # had no cap at all, so this pass minted round N+1 in exactly the window the cap
+  # exists to close: measured live on tk-fdstg, review tk-vlu61 dispatched as round
+  # 4 past a cap of 3 (tk-vx2et). The count is the anchor's, read through the shared
+  # block, so this dispatcher and the refinery's cannot disagree about how many
+  # rounds have been spent.
+  #
+  # DECLINING IS THE WHOLE ACTION. This arm does NOT route the anchor to a human and
+  # does NOT touch check.<gate>: the terminal verdict has one writer,
+  # reconcile-gate-verdicts.sh's R11, which stamps `check.<gate>=exception@<head>`
+  # for exactly this condition (signoff-cap-no-gate-write). Stamping anything here
+  # would re-create tk-mf3em one dispatcher over. With no new review the gate stays
+  # unsatisfied, so the merge stays HELD — the safe side.
+  CAP_ANCHOR="$id"
+# >>> signoff-round-cap
+# Rounds spent on CAP_ANCHOR, counted off the anchor itself: one rework child per
+# round by construction, each stamped `source_review_bead` by the signoff that
+# filed it. EVERY status counts — a closed child is a COMPLETED round.
+#
+# THE COUNT BELONGS TO THE ANCHOR, not to whoever is about to dispatch (tk-j5wrs
+# ruling 3). Three of the four dispatchers had no cap at all, so round N+1 was
+# minted in exactly the window the cap exists to close; a count read off the anchor
+# cannot drift between them. Copy this block, markers included — every copy is
+# extracted, diffed against canonical and EXECUTED by
+# assets/scripts/signoff-round-cap.test.sh.
+#
+# Inputs:  CAP_ANCHOR (may be empty), GC_MAX_REVIEW_ROUNDS (default 3)
+# Outputs: ROUNDS, CAP_HIT
+#
+# NO ANCHOR NEVER CAPS: without one there is no reliable round history, and capping
+# on a guess parks live work for a human. An unreadable ledger reads as 0 for the
+# same reason — the wrong direction here strands every review during an outage.
+CAP_ANCHOR="${CAP_ANCHOR:-}"
+ROUNDS=0
+if [ -n "$CAP_ANCHOR" ]; then
+  ROUNDS=$(gc bd dep list "$CAP_ANCHOR" --direction=up -t parent-child --json 2>/dev/null | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
+fi
+case "${ROUNDS:-}" in ''|*[!0-9]*) ROUNDS=0 ;; esac
+CAP_HIT=0
+if [ -n "$CAP_ANCHOR" ] && [ "$ROUNDS" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+  CAP_HIT=1
+fi
+# <<< signoff-round-cap
+  if [ "$CAP_HIT" = 1 ]; then
+    echo "check-set-heal: $id has spent $ROUNDS rework round(s) against a cap of ${GC_MAX_REVIEW_ROUNDS:-3}; no further signoff dispatched (merge stays HELD; reconcile-gate-verdicts.sh records the exception)"
+    skipped=$((skipped + 1))
     continue
   fi
 

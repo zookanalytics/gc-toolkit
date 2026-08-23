@@ -831,13 +831,22 @@ case "$2" in
                   "$id" "$pr" "$id" "$rhold")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_ANCHORS"
-        while IFS="$(printf '\t')" read -r pr cid cbranch cstatus crhold ckey; do
+        while IFS="$(printf '\t')" read -r pr cid cbranch cstatus crhold ckey cab cinert; do
           [ -n "$cid" ] || continue
           [ -n "$cstatus" ] && [ "$cstatus" != "-" ] || cstatus="open"
           [ "$cbranch" = "-" ] && cbranch=""
           [ "$crhold" = "-" ] && crhold=""
           # 6th column: which key this child names its PR with (default pr_number).
           [ -n "$ckey" ] && [ "$ckey" != "-" ] || ckey="pr_number"
+          # 7th column: the anchor this child names, if it names one. A PR number is
+          # shared by every anchor that ever gated the branch, so this is the only
+          # field that says WHICH one a child belongs to (tk-vie5k).
+          [ "$cab" = "-" ] && cab=""
+          # 8th column: "inert" models a child that EXISTS on the PR but is acting
+          # on nothing — handed back or never routed, so unassigned AND unrouted.
+          # Default is a live in-flight child, which is what every other row here
+          # means, so it is emitted routed (tk-frimm).
+          [ "$cinert" = "-" ] && cinert=""
           case "$key" in
             pr_number|fork_pr) [ "$ckey" = "$key" ] && [ "$pr" = "$val" ] || continue ;;
             fork_pr_url)       [ "$ckey" = "fork_pr_url" ] || continue ;;
@@ -845,8 +854,16 @@ case "$2" in
             *)                 continue ;;
           esac
           visible "$cstatus" || continue
-          obj=$(printf '{"id":"%s","metadata":{%s,"branch":"%s","rebase_hold":"%s"}}' \
-                  "$cid" "$(keyjson_for "$ckey" "$pr")" "$cbranch" "$crhold")
+          abjson=""
+          [ -n "$cab" ] && abjson=$(printf ',"anchor_bead":"%s"' "$cab")
+          # `status`, `assignee` and `gc.routed_to` are emitted because the probe
+          # projection now carries them and the canonical `acting($live)` reads
+          # them. A stub that omits what the real bead carries cannot exercise the
+          # predicate under test — it makes every row read as inert (tk-frimm).
+          rtjson=',"gc.routed_to":"test-rig/gc-toolkit.polecat"'
+          [ "$cinert" = "inert" ] && rtjson=',"gc.routed_to":""'
+          obj=$(printf '{"id":"%s","status":"%s","assignee":"","metadata":{%s,"branch":"%s","rebase_hold":"%s"%s%s}}' \
+                  "$cid" "$cstatus" "$(keyjson_for "$ckey" "$pr")" "$cbranch" "$crhold" "$abjson" "$rtjson")
           if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
         done < "$FAKE_CHILDREN"
         printf '[%s]\n' "$out" ;;
@@ -1125,6 +1142,24 @@ case "$2" in
       printf '%s\t%s\t%s\topen\t-\n' "$child_pr" "$id" "$child_branch" >> "$FAKE_CHILDREN"
     fi ;;
   dep)
+    # `gc bd dep list <anchor> --direction=up -t parent-child --json` — the shared
+    # signoff-round-cap read. Answers from $FAKE_ROUNDS (anchor<TAB>n): n rework
+    # children each stamped source_review_bead, which is what one spent round looks
+    # like. An anchor absent from the file has spent none, which is every fixture
+    # that is not exercising the cap.
+    if [ "$3" = "list" ]; then
+      danchor="$4"
+      dn=$(awk -F'\t' -v a="$danchor" '$1==a{print $2; exit}' "${FAKE_ROUNDS:-/nonexistent}" 2>/dev/null)
+      case "${dn:-}" in ''|*[!0-9]*) dn=0 ;; esac
+      dout=""; di=0
+      while [ "$di" -lt "$dn" ]; do
+        di=$((di + 1))
+        dobj=$(printf '{"id":"fix-%s-%s","metadata":{"source_review_bead":"rv-%s"}}' "$danchor" "$di" "$di")
+        if [ -z "$dout" ]; then dout="$dobj"; else dout="$dout,$dobj"; fi
+      done
+      printf '[%s]\n' "$dout"
+      exit 0
+    fi
     printf '%s\n' "$*" >> "$FAKE_DEPS" ;;
   show)
     # Reconstruct the metadata a later read would see, from the update log. The
@@ -1259,6 +1294,7 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_RETARGETED="$TMP/retargeted" \
        FAKE_AUTOMERGE="$TMP/automerge" FAKE_MAIL="$TMP/mail" FAKE_CLOSELOG="$TMP/closelog" \
        FAKE_CREATED="$TMP/created" FAKE_UPDATES="$TMP/updates" FAKE_DEPS="$TMP/deps" \
+       FAKE_ROUNDS="$TMP/rounds" \
        FAKE_WAKES="$TMP/wakes" FAKE_SLINGS="$TMP/slings" FAKE_STALED="$TMP/staled" FAKE_CHILDREN="$TMP/children" \
        FAKE_GATEHEAD="$TMP/gatehead" FAKE_GATENOPOOL="$TMP/gatenopool" \
        FAKE_BLOCKED="$TMP/blocked" \
@@ -1888,18 +1924,42 @@ REVIEW_POOL="test-rig/gc-toolkit.polecat-codex"
 #   bead-T 220 codex green@old220, live head head220 -> STALE -> re-review filed
 #   bead-U 221 codex green@head221 == live head       -> current, nothing
 #   bead-V 222 codex green@old222 STALE but a review child already open -> no twin
+#   bead-Y 226 codex green@old226 STALE, and the only live bead on its PR names a
+#          DIFFERENT anchor -> the gate is NOT held by it (tk-vie5k)
+#   bead-IN 228 codex green@old228 STALE, and the only live bead on its PR names
+#          THIS anchor but is INERT — open, unassigned, unrouted (a handed-back
+#          child). It satisfies anchor_authority but not acting(), so it must NOT
+#          hold the gate (tk-frimm)
 printf '%s\n' \
   'bead-T|220|main|||codex|green@old220' \
   'bead-U|221|main|||codex|green@head221' \
   'bead-V|222|main|||codex|green@old222' \
+  'bead-Y|226|main|||codex|green@old226' \
+  'bead-Z|227|main|||codex|green@old227' \
+  'bead-IN|228|main|||codex|green@old228' \
   > "$TMP/anchors"
 # All open, ready, non-conflicting: the stale gate is the ONLY thing holding them.
 printf '%s\n' \
   '220|OPEN||false||main|polecat/bead-T|head220|MERGEABLE|BLOCKED' \
   '221|OPEN||false||main|polecat/bead-U|head221|MERGEABLE|BLOCKED' \
   '222|OPEN||false||main|polecat/bead-V|head222|MERGEABLE|BLOCKED' \
+  '226|OPEN||false||main|polecat/bead-Y|head226|MERGEABLE|BLOCKED' \
+  '227|OPEN||false||main|polecat/bead-Z|head227|MERGEABLE|BLOCKED' \
+  '228|OPEN||false||main|polecat/bead-IN|head228|MERGEABLE|BLOCKED' \
   > "$TMP/prs"
-printf '222\tchild-V\n' > "$TMP/children"       # bead-V already has an open review child
+# bead-Z has already spent the default cap of 3 rework rounds. Every other anchor
+# is absent from this file and has spent none.
+printf 'bead-Z	3\n' > "$TMP/rounds"
+# child-V names no anchor at all — the ordinary unattributed rework child, which
+# still holds the gate. child-FOREIGN names bead-OTHER: a PR number is shared by
+# every anchor that ever gated the branch, so keyed on the PR alone it reads as
+# "someone is on it" for bead-Y and holds a gate its own anchor will never raise.
+#   pr<TAB>id<TAB>branch<TAB>status<TAB>rebase_hold<TAB>pr-key<TAB>anchor_bead<TAB>inert
+printf '%s\n' \
+  '222	child-V' \
+  '226	child-FOREIGN	-	open	-	-	bead-OTHER' \
+  '228	child-INERT	-	open	-	-	bead-IN	inert' \
+  > "$TMP/children"
 : > "$TMP/created"; : > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/wakes"; : > "$TMP/slings"
 : > "$TMP/gatehead"; : > "$TMP/gatenopool"; : > "$TMP/openprs"
 OUT8="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL")"
@@ -1980,8 +2040,46 @@ eq "$(grep -c 'Review PR#221' "$TMP/created")" "0" \
 eq "$(grep -c 'Review PR#222' "$TMP/created")" "0" \
    "(26) stale gate but a review child already open -> no second re-review"
 
-hasin "$OUT8" '1 stale-gate re-reviews routed' \
-  && ok "(24) run 8 summary reports 1 stale-gate re-review routed" \
+# (26b) tk-vie5k: `anchor_bead` is the authoritative statement of membership, and a
+# bead naming ANOTHER anchor is positively not about this one — its own anchor holds
+# its own merge, so holding ours on it is a hold nothing will ever lift. Keyed on the
+# PR number alone (every anchor that ever gated the branch shares it) the foreign
+# child reads as "someone is already on it" and the gate sits held forever.
+eq "$(grep -c 'Review PR#226' "$TMP/created")" "1" \
+   "(26b) a live child naming a DIFFERENT anchor does not hold this anchor's gate"
+
+# (26d) tk-frimm: naming this anchor is NOT enough to hold its gate — the bead has
+# to be ACTING. child-INERT names bead-IN and so passes anchor_authority, but it is
+# open, unassigned and unrouted: nothing will ever claim it, so the gate it holds is
+# a hold nothing lifts. The arm imported the canonical membership block for exactly
+# this call and then never made it — it filtered on anchor_authority alone, and the
+# probe projection dropped every field acting() reads, so the predicate could not
+# have answered even if it had been called.
+eq "$(grep -c 'Review PR#228' "$TMP/created")" "1" \
+   "(26d) an INERT child naming THIS anchor does not hold the gate"
+# The paired control: (26) above is the same shape with a LIVE child (child-V, open
+# and routed) and must still suppress. One case proves the filter is not too tight,
+# the other that it is not too loose; neither is meaningful alone.
+
+# (26c) tk-vie5k: the convergence cap reaches THIS dispatcher too. It was the
+# fourth of four and the only one left with no cap after the refinery half landed,
+# so every head move minted another round with nothing counting them (tk-vx2et).
+eq "$(grep -c 'Review PR#227' "$TMP/created")" "0" \
+   "(26c) an anchor past the round cap gets no re-review from the stale-gate arm"
+hasin "$OUT8" 'bead-Z — PR#227 check.codex stale but 3 rework round(s) have been spent' \
+  && ok "(26c) …and the pass says why it declined" \
+  || bad "(26c) capped stale gate should report the cap (got: $OUT8)"
+# The verdict has ONE writer (reconcile-gate-verdicts.sh R11). A cap arm that also
+# stamped check.codex is tk-mf3em, and this is the dispatcher it would return through.
+grep -q 'check\.codex' < <(grep '^bead-Z' "$TMP/updates" 2>/dev/null) \
+  && bad "(26c) the cap arm must write nothing under check.codex" \
+  || ok "(26c) the cap arm writes nothing under check.codex"
+grep -q 'anchor_bead=bead-Y' "$TMP/updates" \
+  && ok "(26b) the re-review it dispatched is anchored to bead-Y" \
+  || bad "(26b) re-review carries anchor_bead=bead-Y"
+
+hasin "$OUT8" '3 stale-gate re-reviews routed' \
+  && ok "(24) run 8 summary reports 3 stale-gate re-reviews routed (bead-T, bead-Y, bead-IN)" \
   || bad "(24) run 8 summary stale-gate count (got: $OUT8)"
 
 # --- Run 9: stale_gate_head bounds it (unchanged head), re-arms when head moves. -
