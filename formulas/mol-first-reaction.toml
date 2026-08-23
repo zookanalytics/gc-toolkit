@@ -113,6 +113,9 @@ WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 
 
 **2. Read the bead and its universe slice:**
 ```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
 gc bd show "$WORK_BEAD_ID"
 gc bd show "$WORK_BEAD_ID" --json | jq '.[0].metadata'
 
@@ -127,6 +130,9 @@ TOOLS="$(git rev-parse --show-toplevel 2>/dev/null)/tools"
 the trusted seed. If the reaction needs a child's full body, the PR text, or
 CI status, fetch it on demand:
 ```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
 "$TOOLS/gc-bd-universe.sh" fetch "$WORK_BEAD_ID" pr     # PR title/body/diff
 "$TOOLS/gc-bd-universe.sh" fetch "$WORK_BEAD_ID" ci     # CI status
 ```
@@ -204,6 +210,9 @@ notes-only by default. If — and only if — you wrote code, it takes the
 codex-gated `mr` path, NEVER `direct`:
 ```bash
 # code case ONLY: commit on a polecat branch, hand to the refinery with mr.
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
 gc bd update "$WORK_BEAD_ID" --set-metadata merge_strategy=mr
 # ... then the standard polecat branch/push/refinery handoff (mol-polecat-work
 # done sequence). Do NOT push to main; do NOT use --merge direct.
@@ -264,6 +273,9 @@ advance marker (which stops the scan from re-reacting), all in the same Dolt
 write. The **takeaway** is your card's one-line headline, derived from
 **## Decision needed**, ≤140 chars on ONE line:
 ```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
 ATTN="$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts/gc-helm.sh"
 TAKEAWAY="<one-line distillation of ## Decision needed, ≤140 chars>"
 "$ATTN" takeaway "$WORK_BEAD_ID" "$TAKEAWAY" --by proactive --release
