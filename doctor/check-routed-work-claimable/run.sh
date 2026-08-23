@@ -95,6 +95,13 @@ BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 # Routes that name no agent BY DESIGN. `human` is the escalation marker the
 # signoff round cap stamps and the quiesce sweeps read; flagging it would turn
 # every parked human decision into a doctor error.
+#
+# Exempt from THIS question, not from every question. `human` is unclaimable on
+# purpose, but it still has to be justified, and the sibling check
+# check-human-route-states-the-ask asks that half — whether the bead records the
+# judgment it is asking for, in `blocked_reason` (tk-wfufb9). Between them the
+# two cover the marker: one says a route names somebody, the other says a route
+# that names nobody said why.
 SENTINEL_ROUTES='["human"]'
 
 errors=()

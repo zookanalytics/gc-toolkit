@@ -1082,6 +1082,76 @@ error, so the agent that stamped it believes the bead is parked. The
 only party who learns otherwise is the next worker — by claiming the
 bead and starting the very work the flag was meant to prevent.
 
+### `gc.routed_to=human` means *unclaimable*, not *unclaimed*
+
+`human` is the one value of `gc.routed_to` that names no agent. Every other
+value is a pool or a session identity that some worker matches byte-for-byte;
+`human` matches nobody by design, and the checks that scan for dead routes
+exempt it as a sentinel (`doctor/check-routed-work-claimable`).
+
+That is what makes it the one value nothing can correct. A typo'd pool name is
+loud — the bead sits unclaimed and `check-routed-work-claimable` says so.
+`human` is *silently* unclaimed, forever, and looks deliberate while it is.
+
+**The rule.** Write `human` only when a **person** is the sole party who can
+perform the next action — a judgment, a consent, an irreversible call, an
+approval no non-human check can satisfy. It is not a synonym for *unassigned*,
+*unclaimed*, *nobody picked it up*, or *I could not find a pool for this*. Work
+an agent can perform belongs in a pool, whatever its current claim state:
+
+| the next action is | route |
+|---|---|
+| a decision only a person can make | `human` |
+| an irreversible or destructive act needing consent | `human` |
+| a code fix, a diagnostic, a rework dispatch, a chore | the owning pool |
+| blocked on another bead | the owning pool, plus a `blocks` edge to that bead |
+| unknown, or no pool exists yet | *not* `human` — file the pool, or say so in `blocked_reason` |
+
+**What you owe when you write it.** The marker is a claim, and a claim needs a
+subject: `blocked_reason`, in the **same** `gc bd update`, naming the judgment
+being asked for. Every pack writer already does this — the refinery patrol's
+merge-blocked and signoff-cap arms, the merge reconciler's retargeted /
+abandoned / stale-base arms, `check-set-heal`'s reopen-flap arm — so the pair,
+not the marker, is the actual convention:
+
+```bash
+gc bd update "$BEAD" \
+  --assignee="" \
+  --set-metadata gc.routed_to=human \
+  --set-metadata blocked_reason="<the judgment being asked for>"
+```
+
+Write `blocked_reason` even when the ask feels obvious from the title. The
+operator reads a board row, not a bead.
+
+**How it is enforced.** Two halves, because a rule with no teeth is what
+produced the census below:
+
+- The **helm board** renders `blocked_reason` as a human row's NEEDS. A row with
+  the marker and no ask reads `unexplained human route — state the ask or return
+  it to the pool`, and its frontier says `no ask recorded` instead of asserting
+  `no agent will take it` (`services/helm/README.md`, "What a `human` row asks
+  for"). The band does not move: whether a route was justified is not evidence
+  about whether it was *correct*, and a quiet demotion would hide exactly the
+  rows worth seeing.
+- **`doctor/check-human-route-states-the-ask`** fails the pair city-wide, so an
+  unexplained route is a red doctor line and not just a dull board cell.
+
+**The census that filed this (`tk-wfufb9`, 2026-08-23).** Nine ELEVATED rows on
+the live board carried `gc.routed_to=human`. Four were plainly agent work — a
+polecat rework dispatch, a doctor check that could not be computed, a witness
+bug with a code fix, and a request for a reaper nobody had built. Three more
+were stale-branch keep/abandon chores that had gone 11-22 days without triage.
+Two were genuinely the operator's. None of the four misrouted beads had ever
+been *decided* to be the operator's; they were routed `human` because no other
+route was to hand, and the marker made them look decided.
+
+An earlier note said as much and changed nothing —
+[gascity-human-engagement.md](gascity-human-engagement.md) already called the
+raw `routed_to=human` lane "a trap, not a feature". The difference here is that
+the rule is stated where routes are written, and both halves above make the
+marker cost something to misuse.
+
 ### A `blocks` dep between work beads does not hold a graph.v2 dispatch
 
 A dependency edge is the other thing that looks like enforcement and
