@@ -1287,6 +1287,10 @@ eq "$(nfield tk-clip-long takeaway)" "400" "(CLIPWIRE) …and the whole takeaway
 #   (QUIET)    an empty window exits 0 and says so — distinguishable from failure
 #   (FAILCLOSED) a failed query exits 3 and renders NOTHING: answering "nothing
 #              was decided" because Dolt was wedged is the one wrong answer
+#   (SUBJFAIL) the HALF-failure — visits read but the batched subject lookup did
+#              not. Empty and invalid payloads BOTH exit 3 and name subject@<rig>
+#   (SUBJNONE) ...while a subject set that legitimately resolves nothing is a
+#              quiet result, not a wedge, and still renders its rows
 #   (UNIT)     an unsupported duration unit is REFUSED, never misparsed (awk's
 #              int() reads "2w" as 2, i.e. two seconds instead of two weeks)
 #   (WRITES)   the verb issues no write of any kind — it is a read
@@ -1351,7 +1355,19 @@ case "$1 ${2:-}" in
       prev="$a"
     done
     jq --arg c "$cutoff" '[ .[] | select($c == "" or ((.closed_at // "") >= $c)) ]' "$FAKE_CLOSED" ;;
-  "bd show") jq '.' "$FAKE_SUBJECTS" ;;
+  "bd show")
+    # Independent of FAKE_FAIL: the SUBJECT lookup must be failable on its own,
+    # because the defect it exposes needs the visit list to SUCCEED. The empty
+    # stdout is not laziness — `gcq` swallows bd's status with `|| true`, so an
+    # empty string is exactly what a timeout or a non-zero bd delivers.
+    [ -n "${FAKE_SUBJ_FAIL:-}" ] && { echo "boom" >&2; exit 1; }
+    [ -n "${FAKE_SUBJ_GARBAGE:-}" ] && { printf 'not json at all\n'; exit 0; }
+    # `bd show` answers with a bare OBJECT, rc=0, when NONE of the ids resolve.
+    # Without this arm the quiet-path assertion below is vacuous: the stub would
+    # return the ordinary array and the object branch of the gate would never be
+    # entered (verified — narrowing the gate to arrays-only left it green).
+    [ -n "${FAKE_SUBJ_NONE:-}" ] && { printf '{"error":"no issues found"}\n'; exit 0; }
+    jq '.' "$FAKE_SUBJECTS" ;;
 esac
 exit 0
 GCC
@@ -1366,7 +1382,10 @@ run_closed() {
     COUT="$(env PATH="$CTMP/bin:$PATH" TMPDIR="$run" \
                 FAKE_RIG_PATH="$CTMP/rig" FAKE_CLOSED="$CTMP/closed.json" \
                 FAKE_SUBJECTS="$CTMP/subjects.json" FAKE_CALLS="$run/calls.log" \
-                FAKE_FAIL="${FAKE_FAIL:-}" GC_HELM_FIXTURE= \
+                FAKE_FAIL="${FAKE_FAIL:-}" \
+                FAKE_SUBJ_FAIL="${FAKE_SUBJ_FAIL:-}" \
+                FAKE_SUBJ_GARBAGE="${FAKE_SUBJ_GARBAGE:-}" \
+                FAKE_SUBJ_NONE="${FAKE_SUBJ_NONE:-}" GC_HELM_FIXTURE= \
                 sh "$SCRIPT" closed "$@" 2>"$run/err")" || CRC=$?
     CERR="$(cat "$run/err" 2>/dev/null || true)"
     CCALLS="$run/calls.log"
@@ -1452,6 +1471,48 @@ grep -qi 'gather failed' <<< "$CERR" \
 grep -qi 'no visit reached a disposition' <<< "$COUT" \
   && bad "(FAILCLOSED) a failed read masqueraded as a quiet window" \
   || ok "(FAILCLOSED) a failed read is not reported as a quiet window"
+
+# --- (SUBJFAIL) the HALF-failure: visits read, subjects did not ---------------
+# The reviewed branch shipped this hole (tk-4yvzln, pre-open signoff P1). The
+# visit list succeeds, so rows exist and GATHER_ERR stays empty; only the
+# batched `bd show <subjects>` fails. `gcq` hides bd's status behind `|| true`,
+# so that failure arrives as an EMPTY string, and jq over empty input exits 0
+# having emitted nothing. Nothing was appended, nothing was marked, and `closed`
+# exited 0 rendering every row with a blank title and a blank takeaway — the
+# disposition view answering "what closed and why" with "why: (nothing)". A
+# gather that silently loses half its payload is the same wrong answer
+# (FAILCLOSED) exists to forbid, one column over.
+FAKE_SUBJ_FAIL=1 run_closed subjfail --since 24h
+FAKE_SUBJ_FAIL=""
+eq "$CRC" "3" "(SUBJFAIL) a failed SUBJECT lookup exits 3, like any failed gather"
+[ -z "$COUT" ] \
+  && ok "(SUBJFAIL) nothing is rendered when the subject lookup failed" \
+  || bad "(SUBJFAIL) rendered rows with an unresolved subject payload: $COUT"
+grep -qi 'gather failed' <<< "$CERR" \
+  && ok "(SUBJFAIL) the failure is named on stderr" \
+  || bad "(SUBJFAIL) no gather-failure message: $CERR"
+grep -qi 'subject@' <<< "$CERR" \
+  && ok "(SUBJFAIL) stderr names the SUBJECT gather, not just 'something failed'" \
+  || bad "(SUBJFAIL) the failing gather is not identified: $CERR"
+
+# Invalid JSON rather than an empty payload. This one the reviewed branch
+# ALREADY handled — jq exits non-zero on garbage, so its `|| gather_mark` arm
+# fired (verified: this assertion passes against 6d3aa97a). It is here so the
+# new gate cannot regress it, not as part of the defect.
+FAKE_SUBJ_GARBAGE=1 run_closed subjgarbage --since 24h
+FAKE_SUBJ_GARBAGE=""
+eq "$CRC" "3" "(SUBJFAIL) an INVALID subject payload also exits 3, not 0"
+
+# The quiet counterpart, and the reason the gate admits a bare object: `bd show`
+# answers with an OBJECT when none of the ids resolve, rc=0. That is a healthy
+# empty result, not a wedge, and it must still render the rows it does have.
+FAKE_SUBJ_NONE=1 run_closed subjnone --since 24h --json
+FAKE_SUBJ_NONE=""
+eq "$CRC" "0" "(SUBJNONE) an id set that resolves nothing is NOT a gather failure"
+eq "$(printf '%s' "$COUT" | jq 'length')" "4" \
+   "(SUBJNONE) ...and the rows it DOES have still render"
+eq "$(printf '%s' "$COUT" | jq -r 'first(.[] | select(.visit=="tk-v1")) | .takeaway')" "" \
+   "(SUBJNONE) an unresolved subject degrades to a blank takeaway, not an error"
 
 # --- (UNIT) an unsupported unit is refused, never misparsed -------------------
 # awk's int() reads "2w" as 2, so an unvalidated spelling becomes TWO SECONDS —

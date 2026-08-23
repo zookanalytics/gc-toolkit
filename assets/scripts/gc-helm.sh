@@ -2146,6 +2146,22 @@ cmd_closed() {
             # payload invalid JSON, hence the strip.
             # shellcheck disable=SC2086  # $_ids is a deliberate list of bare ids
             _raw=$(gcq bd show $_ids --db "$_rdb" --json </dev/null | tr -d '\000-\037')
+            # The shape test is a GATE, not a branch inside the projection.
+            # `gcq` swallows a timeout or non-zero bd with `|| true`, so a failed
+            # lookup arrives here as an EMPTY string — and jq over empty input
+            # exits 0 having emitted nothing. Left to the `if type == "array"`
+            # arm below, that failure appended nothing, never reached
+            # gather_mark, and `closed` exited 0 rendering blank titles and blank
+            # takeaways: the surface whose whole job is to say what closed and
+            # why, answering "nothing" because Dolt was wedged. That is the one
+            # answer the GATHER_ERR contract exists to prevent, and the closed
+            # gather above already tests its payload the same way.
+            #
+            # Both a resolving ARRAY and a bare OBJECT are healthy answers here
+            # (an id set that resolves nothing is a legitimate quiet result), so
+            # the gate admits either and only empty/invalid marks the rig.
+            printf '%s' "$_raw" | jq -e 'type=="array" or type=="object"' >/dev/null 2>&1 \
+                || { gather_mark "subject@$_rname"; continue; }
             printf '%s' "$_raw" | jq -c '
                 if type == "array"
                 then [ .[]? | select(type == "object")
