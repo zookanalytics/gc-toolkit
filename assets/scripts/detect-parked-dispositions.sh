@@ -133,11 +133,56 @@
 #                       a second round of work routed and landed has a DIFFERENT set
 #                       and earns exactly one more visit.
 #
-# There is deliberately NO staleness window. The trigger is an EDGE — the moment the
-# last piece of routed work closed — not a duration, and readiness is all-or-nothing
-# (one open child holds the whole subject), so a half-finished dispatch cannot fire
-# it early. A wait for a settling period would only delay the push the ruling asked
-# for.
+# ── CLOSED IS NOT LANDED, and a marker must be able to be wrong (tk-vathjv) ──
+#
+# This block used to read: "There is deliberately NO staleness window. The trigger is
+# an EDGE — the moment the last piece of routed work closed — not a duration, and
+# readiness is all-or-nothing (one open child holds the whole subject), so a
+# half-finished dispatch cannot fire it early."
+#
+# The last clause is false, and it was falsified in production. All-or-nothing across
+# the SET says nothing about a single member being TRANSIENTLY closed. On 2026-08-23
+# tk-b3rga was closed at 17:05:51Z with the stock-GasTown reason "PR #445 opened (mr
+# strategy)" — a close this pack's refinery charter explicitly overrides, since here
+# `closed` must mean LANDED — and `check-set-heal.sh` phase 0a reopened it 5m39s
+# later. This pass sampled at 17:07:41Z, inside that window, and filed a visit on
+# tk-jr8rw saying every piece of work it routed had landed. PR #445 was open with
+# zero reviews. The edge it actually triggered on was not "the work landed", it was
+# "a work bead was momentarily closed mid-handoff".
+#
+# TWO CHANGES, and they are complementary — the first makes the misread rare, the
+# second makes it survivable:
+#
+#   THE SETTLE (prevention). A member that closed within GC_PARKED_SETTLE_SECONDS
+#   (default 900) counts as still open. This is NOT the staleness window the old text
+#   refused: that would have been a wait on the SUBJECT's trigger, delaying a push
+#   whose whole purpose is promptness. This is a settle on the OBSERVATION'S INPUTS —
+#   a close that recent has not yet been past the repair passes that would reverse it
+#   — and it costs at most one patrol cycle plus the window on a genuine landing,
+#   against the 4h19m this pass exists to prevent. Unparsable or absent `closed_at`
+#   reads as SETTLED rather than blocking forever: permanent silence is the failure
+#   mode being fixed here, and the re-arm below is what makes that direction safe.
+#
+#   THE RE-ARM (recovery). `disposition_flagged` equal to the CURRENT landed key over
+#   a wait that is NOT spent is a marker stamped on an observation that has since been
+#   falsified — the ids have not changed, so it will suppress the real landing
+#   forever, which is precisely how the incident concealed itself. That state is
+#   impossible to reach honestly: a genuine fire leaves every member closed, and
+#   closed beads stay closed. So the marker is cleared and the subject re-arms. Any
+#   wrong reading — this one or one nobody has thought of yet — then costs ONE wasted
+#   visit, which converse closes in one action on the re-check the visit body already
+#   asks for, instead of costing the wake-up permanently.
+#
+# WHAT WAS REJECTED, with the measurement that killed it: deriving landedness from
+# the member's own metadata — fire only when a closed member carries `merged_sha` or
+# `merge_result=merged`. Of 786 closed gc-toolkit beads carrying a `pr_number`, 531
+# carry NEITHER (2026-08-23): review beads legitimately close against an open PR, and
+# genuinely-merged anchors carry stale handoff spellings — tk-wvrga is closed with
+# `close_reason` "merged to main via PR, verified ancestor of origin/main" and
+# `merge_result` still `pull_request`. That predicate reads 68% of landed work as
+# never-landed and silently mutes the pass on the exact subject the 4h19m incident was
+# measured on. Asking `gh` per member instead puts a network call per candidate in a
+# patrol and re-derives, badly, a judgement `check-set-heal.sh` already owns.
 #
 # ── The second observation: a stranded hold (tk-jsyci7) ──────────────────────
 #
@@ -253,6 +298,11 @@ HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
 DRY_RUN=0
 RIG_PIN=""
 WAIT_SPENT=""
+
+# How long a close has to stand before it is trusted as a landing (tk-vathjv). Zero
+# disables the settle entirely, which is what the pass did before the incident above.
+SETTLE_SECONDS="${GC_PARKED_SETTLE_SECONDS:-900}"
+case "$SETTLE_SECONDS" in ''|*[!0-9]*) SETTLE_SECONDS=900 ;; esac
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
@@ -290,10 +340,14 @@ SEP=$(printf '\037')
 # can fail closed rather than treat an unreadable store as "nothing is waiting".
 #
 # $1 = bead id, $2 = its own `blocks` depends-on ids (space-separated, may be empty)
-WAIT_IDS=""; WAIT_OPEN=""; WAIT_WHY=""
+# WAIT_OPEN is "not proved landed", which is a wider set than "status != closed": it
+# also carries the members whose close is still SETTLING (tk-vathjv). WAIT_SETTLING
+# names that subset, for the census and the report only — every readiness test reads
+# WAIT_OPEN, so the settle cannot be dropped by adding a caller that forgets it.
+WAIT_IDS=""; WAIT_OPEN=""; WAIT_SETTLING=""; WAIT_WHY=""
 recorded_wait() {
   _bead="${1:-}"; _blocks="${2:-}"
-  WAIT_IDS=""; WAIT_OPEN=""; WAIT_WHY=""
+  WAIT_IDS=""; WAIT_OPEN=""; WAIT_SETTLING=""; WAIT_WHY=""
   [ -n "$_bead" ] || { WAIT_WHY="no bead id"; return 1; }
 
   # CHILDREN. `bd list --parent` is the only way to ask: a parent-child edge is
@@ -308,15 +362,34 @@ recorded_wait() {
   _kid_open=$(printf '%s' "$_kids" | scrub | jq -r '.[] | select(((.status // "") | ascii_downcase) != "closed") | .id // empty' 2>/dev/null)
   _kid_all=$(printf '%s' "$_kids" | scrub | jq -r '.[] | .id // empty' 2>/dev/null)
 
+  # A CLOSED child is not automatically a LANDED one. Emit each closed child with its
+  # `closed_at` and let the settle decide — the timestamp is carried by the same
+  # `--brief` listing already read, so this costs no extra call.
+  # `< <(...)`, NOT `<<< "$(...)"`. Both keep the loop in the current shell so the
+  # accumulator survives, but bash backs a here-string with a temp file in $TMPDIR:
+  # under disk pressure that redirection fails SILENTLY in a script that is
+  # deliberately not `set -e`, the body runs zero times, and every closed member then
+  # reads as settled. Process substitution needs no temp file. (tk-lslk2 is the same
+  # vector one layer up, where it manufactures an empty queue.)
+  _kid_settling=""
+  while IFS="$SEP" read -r _kid _kid_at; do
+    [ -n "${_kid:-}" ] || continue
+    unsettled "${_kid_at:-}" && _kid_settling="${_kid_settling:+$_kid_settling }$_kid"
+  done < <(printf '%s' "$_kids" | scrub | jq -r --arg sep "$SEP" '
+      .[] | select(((.status // "") | ascii_downcase) == "closed")
+      | [(.id // ""), ((.closed_at // "") | tostring)] | join($sep)' 2>/dev/null)
+
   # BLOCKERS. One batched read for every id at once. `bd show` answers with an ARRAY
   # when any id resolves and a bare OBJECT when none do, rc=0 either way, so the
   # shape is tested rather than assumed.
-  _blk_open=""
+  _blk_open=""; _blk_settling=""
   if [ -n "$_blocks" ]; then
     # shellcheck disable=SC2086  # a deliberate list of bare ids
     _raw=$(bd_pinned show $_blocks --json 2>/dev/null | scrub)
-    _map=$(printf '%s' "$_raw" | jq -c 'if type == "array"
-        then [ .[]? | select(type == "object") | {key: ((.id // "") | tostring), value: ((.status // "") | ascii_downcase)} | select(.key != "") ] | from_entries
+    # The value is status AND `closed_at`, because a closed blocker still has to face
+    # the settle. Joined on US like every other pair here, never on a tab.
+    _map=$(printf '%s' "$_raw" | jq -c --arg sep "$SEP" 'if type == "array"
+        then [ .[]? | select(type == "object") | {key: ((.id // "") | tostring), value: (((.status // "") | ascii_downcase) + $sep + ((.closed_at // "") | tostring))} | select(.key != "") ] | from_entries
         else {} end' 2>/dev/null)
     [ -n "$_map" ] || _map='{}'
     # An id the map cannot answer for reads as STILL OPEN. Wrong in the quiet
@@ -324,13 +397,22 @@ recorded_wait() {
     # glance, a false "the work landed" invites the operator into a conversation
     # about work that is still in flight.
     for _b in $_blocks; do
-      _st=$(printf '%s' "$_map" | jq -r --arg i "$_b" '.[$i] // ""' 2>/dev/null)
-      [ "$_st" = "closed" ] || _blk_open="${_blk_open:+$_blk_open }$_b"
+      _row=$(printf '%s' "$_map" | jq -r --arg i "$_b" '.[$i] // ""' 2>/dev/null)
+      _st=""; _at=""
+      IFS="$SEP" read -r _st _at <<< "${_row:-}"
+      if [ "${_st:-}" != "closed" ]; then
+        _blk_open="${_blk_open:+$_blk_open }$_b"
+      elif unsettled "${_at:-}"; then
+        _blk_settling="${_blk_settling:+$_blk_settling }$_b"
+      fi
     done
   fi
 
   WAIT_IDS=$(printf '%s %s' "$(printf '%s' "$_kid_all" | tr '\n' ' ')" "$_blocks" | tr -s ' ' | sed 's/^ //; s/ $//')
-  WAIT_OPEN=$(printf '%s %s' "$(printf '%s' "$_kid_open" | tr '\n' ' ')" "$_blk_open" | tr -s ' ' | sed 's/^ //; s/ $//')
+  WAIT_SETTLING=$(printf '%s %s' "$_kid_settling" "$_blk_settling" | tr -s ' ' | sed 's/^ //; s/ $//')
+  # The settling members are folded in HERE, once, so that every readiness test in the
+  # script — both arms and --wait-spent — inherits the settle without knowing it exists.
+  WAIT_OPEN=$(printf '%s %s %s' "$(printf '%s' "$_kid_open" | tr '\n' ' ')" "$_blk_open" "$WAIT_SETTLING" | tr -s ' ' | sed 's/^ //; s/ $//')
   return 0
 }
 
@@ -338,18 +420,54 @@ recorded_wait() {
 # order any listing happened to return.
 sorted_key() { printf '%s' "${1:-}" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort -u | tr '\n' ',' | sed 's/,$//'; }
 
-# How long a stamp has stood, as "10h16m". DISPLAY ONLY — never a key and never a
-# gate, so the two date dialects are tried in turn and an unparsable stamp yields the
-# EMPTY string rather than a wrong duration. Every caller omits the line when it is
-# empty: "holding 10h16m" is the number that makes an operator act, and a fabricated
-# one is worse than none.
-held_for() {
+# One instant, in epoch seconds, or the EMPTY string when it cannot be read. GNU and
+# BSD `date` are tried in turn — this runs on both. Every caller has to handle empty:
+# no clock reading is ever allowed to become a fabricated fact here.
+epoch_of() {
   _t=""
+  # THE EMPTY GUARD IS LOAD-BEARING, and it is not defensive tidiness. GNU `date -d ""`
+  # does not fail — it returns TODAY AT MIDNIGHT, rc=0. Without this line an absent
+  # `closed_at` reads as a real instant ~00:00Z, so `unsettled` would answer "settled"
+  # for most of the day and "still settling" for the first SETTLE_SECONDS after
+  # midnight UTC: a fixture-invisible, once-a-day inversion of the fail-direction the
+  # header commits to. Caught by mutation m3 surviving (tk-vathjv).
+  case "$(printf '%s' "${1:-}" | tr -d '[:space:]')" in '') return 0 ;; esac
   _t=$(date -u -d "${1:-}" +%s 2>/dev/null) || _t=""
   [ -n "$_t" ] || _t=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${1:-}" +%s 2>/dev/null) || _t=""
+  printf '%s' "$_t"
+}
+
+# NOW, once. Empty if the clock cannot be read, which disables the settle rather than
+# holding every subject forever — see the fail-direction argued in the header.
+NOW_EPOCH=$(date -u +%s 2>/dev/null) || NOW_EPOCH=""
+case "$NOW_EPOCH" in ''|*[!0-9]*) NOW_EPOCH="" ;; esac
+SETTLE_CUTOFF=""
+[ -n "$NOW_EPOCH" ] && SETTLE_CUTOFF=$((NOW_EPOCH - SETTLE_SECONDS))
+
+# Is this close too recent to be trusted as a landing? Exit 0 = yes, still settling.
+#
+# ABSENT OR UNPARSABLE READS AS SETTLED, deliberately, and it is the one place in this
+# script where the quiet direction is NOT the safe one. A member whose `closed_at`
+# cannot be read would otherwise hold its subject on every pass forever — the
+# permanent silence tk-vathjv is about — and a wrong fire is now recoverable by the
+# re-arm, while a permanent hold is not.
+unsettled() { # <closed_at>
+  [ "$SETTLE_SECONDS" -gt 0 ] || return 1
+  [ -n "$SETTLE_CUTOFF" ] || return 1
+  _ct=$(epoch_of "${1:-}")
+  [ -n "$_ct" ] || return 1
+  [ "$_ct" -gt "$SETTLE_CUTOFF" ]
+}
+
+# How long a stamp has stood, as "10h16m". DISPLAY ONLY — never a key and never a
+# gate, so an unparsable stamp yields the EMPTY string rather than a wrong duration.
+# Every caller omits the line when it is empty: "holding 10h16m" is the number that
+# makes an operator act, and a fabricated one is worse than none.
+held_for() {
+  _t=$(epoch_of "${1:-}")
   [ -n "$_t" ] || return 0
-  _n=$(date -u +%s 2>/dev/null) || return 0
-  _d=$((_n - _t))
+  [ -n "$NOW_EPOCH" ] || return 0
+  _d=$((NOW_EPOCH - _t))
   [ "$_d" -ge 0 ] || return 0
   printf '%dh%02dm' "$((_d / 3600))" "$(((_d % 3600) / 60))"
 }
@@ -372,7 +490,15 @@ if [ -n "$WAIT_SPENT" ]; then
     exit 1
   fi
   if [ -n "$WAIT_OPEN" ]; then
-    echo "$PROG: --wait-spent $WAIT_SPENT: NOT spent — still open: $(sorted_key "$WAIT_OPEN")"
+    # The settle applies here too, and has to: this predicate exists so that
+    # detect-stalled-workflows.sh and this pass cannot disagree about what a spent
+    # park is. Keeping the mute for one settle window is the quiet direction on that
+    # side as well.
+    if [ -n "$WAIT_SETTLING" ] && [ "$WAIT_OPEN" = "$WAIT_SETTLING" ]; then
+      echo "$PROG: --wait-spent $WAIT_SPENT: NOT spent — closed within the ${SETTLE_SECONDS}s settle, not yet trusted as landed: $(sorted_key "$WAIT_SETTLING")"
+    else
+      echo "$PROG: --wait-spent $WAIT_SPENT: NOT spent — still open: $(sorted_key "$WAIT_OPEN")"
+    fi
     exit 1
   fi
   echo "$PROG: --wait-spent $WAIT_SPENT: SPENT — all landed: $(sorted_key "$WAIT_IDS")"
@@ -469,7 +595,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ ! -x "$HELM" ]; then
 fi
 
 filed=0; holds=0; waiting=0; no_wait=0; already=0; hold_already=0; hold_undated=0
-visit_open=0; unreadable=0; failed=0
+visit_open=0; unreadable=0; failed=0; settling=0; rearmed=0
 
 while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged hold_flagged origin is_hold blocks title; do
   [ -n "${subj:-}" ] || continue
@@ -514,7 +640,48 @@ while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged hold_flagged origin i
   # firing — and the counts are the only place that shows it.
   if [ -z "$ACTION" ]; then
     if [ -n "$WAIT_OPEN" ]; then
-      waiting=$((waiting + 1))
+      # ── THE RE-ARM (tk-vathjv) ───────────────────────────────────────────────
+      # A marker equal to the CURRENT landed key, over a wait that is not spent, is a
+      # marker stamped on an observation that has since been falsified. That state is
+      # unreachable honestly — a genuine filing leaves every member closed, and closed
+      # beads stay closed — so reaching it means the ids went closed → open again
+      # after the stamp. The ids are the whole key, so they will read identically when
+      # the work really lands, and the subject would be skipped FOREVER. Clear it.
+      #
+      # This is what bounds the cost of ANY wrong reading, not just the transient
+      # close that produced it: one wasted visit, which the visit body already tells
+      # converse how to falsify and close, instead of the wake-up itself.
+      #
+      # It cannot loop. Clearing writes an ABSENT marker, so the next pass has nothing
+      # to clear; and it fires only when the marker EQUALS the current key, which the
+      # ordinary "a second round of work was routed" case never satisfies — there the
+      # key already differs and REFLAG handles it with no write at all.
+      #
+      # `hold_flagged` is deliberately NOT cleared alongside. The hold arm is gated on
+      # an empty WAIT_OPEN, so it cannot fire while this condition holds; and when the
+      # wait does land, the disposition arm runs first by precedence and re-stamps
+      # both. Clearing it here would only add a path for a hold to be re-signalled.
+      if [ -n "$flagged" ] && [ "$flagged" = "$LANDED_KEY" ]; then
+        echo "$PROG: $subj RE-ARMED — disposition_flagged=$flagged was stamped over a wait that is open again ($(sorted_key "$WAIT_OPEN")); clearing it so the real landing is not skipped" >&2
+        if [ "$DRY_RUN" -eq 0 ]; then
+          if bd_pinned update "$subj" --unset-metadata disposition_flagged >/dev/null 2>&1; then
+            rearmed=$((rearmed + 1))
+          else
+            echo "$PROG: $subj — could not clear the stale disposition_flagged marker; it still suppresses the real landing, retrying next pass" >&2
+            failed=$((failed + 1))
+          fi
+        else
+          rearmed=$((rearmed + 1))
+        fi
+      fi
+      if [ "$WAIT_OPEN" = "$WAIT_SETTLING" ]; then
+        # Every member is closed; the closes are just too fresh to trust yet. Counted
+        # apart from `waiting` so a settle that starts holding real work back is
+        # visible in the census rather than looking like ordinary in-flight work.
+        settling=$((settling + 1))
+      else
+        waiting=$((waiting + 1))
+      fi
     elif [ "$origin" = "operator" ] && [ "$READY" = "1" ] && [ "$flagged" = "$LANDED_KEY" ]; then
       already=$((already + 1))
     elif [ "$is_hold" = "1" ] && [ -z "$tk_at" ]; then
@@ -700,7 +867,7 @@ done <<< "$ROWS"
 
 MODE=""
 [ "$DRY_RUN" -eq 1 ] && MODE="(dry-run) "
-echo "$PROG: ${MODE}${filed} disposition(s) and ${holds} stranded hold(s) signalled; $waiting still waiting, $no_wait with no recorded wait, $visit_open already under an open visit, $already already flagged, $hold_already hold(s) already signalled, $hold_undated undated hold(s), $unreadable unreadable, $failed failed"
+echo "$PROG: ${MODE}${filed} disposition(s) and ${holds} stranded hold(s) signalled; $waiting still waiting, $settling settling (closed inside the ${SETTLE_SECONDS}s window), $rearmed re-armed, $no_wait with no recorded wait, $visit_open already under an open visit, $already already flagged, $hold_already hold(s) already signalled, $hold_undated undated hold(s), $unreadable unreadable, $failed failed"
 
 # Only failed WRITES decide the exit code. An unreadable subject is a deliberate
 # fail-closed skip, already reported on stderr, and correct.

@@ -109,6 +109,42 @@
 #   (PRECEDENCE) when both observations apply the DISPOSITION arm wins: the landed
 #               work is the more specific thing to say, and the hold arm is the
 #               residue that reaches what the disposition marker has retired
+#
+# CLOSED IS NOT LANDED — the settle and the re-arm (tk-vathjv):
+#
+#   (SETTLE)    a member that closed INSIDE the window holds its subject, on either
+#               edge kind. This is the tk-b3rga shape: a work bead closed at PR-open
+#               with a stock-GasTown reason, reopened by check-set-heal 5m39s later,
+#               and sampled at 1m50s. Bucketed as `settling`, not `waiting`, so a
+#               settle that starts holding real work back is visible
+#   (SETTLED)   the positive control the settle is worthless without: the SAME shape
+#               with an old close still fires. Without it a settle that blocked
+#               everything forever would pass every SETTLE assertion
+#   (SETTLEOFF) GC_PARKED_SETTLE_SECONDS=0 fires on the fresh close — which proves
+#               the freshness, not some other property of the fixture, is what held
+#               it, and that the escape hatch is real
+#   (NOCLOSEDAT) a closed member with NO closed_at reads as SETTLED and fires — and
+#               it must do so by the empty guard in epoch_of, not by GNU `date -d ""`
+#               happening to return today's MIDNIGHT (rc=0, not an error), which is
+#               the same answer for all but the first SETTLE_SECONDS of each UTC day.
+#               fail-direction is deliberately loud here and nowhere else: holding
+#               such a member would reinstate the permanent silence this fixes, and
+#               a wrong fire is now recoverable. Every other fixture in this file is
+#               dateless, so this is also the compatibility guarantee
+#   (REARM)     the incident: disposition_flagged equal to the CURRENT landed key
+#               over a wait that is open again is a marker stamped on an observation
+#               since falsified. It is UNSET, not emptied, and nothing is filed
+#   (REARMONCE) and the point of it — after the re-arm, the real landing files
+#               exactly one visit. Delete the re-arm and this subject is skipped
+#               FOREVER, which is how the incident concealed itself
+#   (REARMNOT)  a DIFFERENT landed key with work still open is the ordinary
+#               second-round case: no clear, no write, no filing. The re-arm must
+#               not fire on new work being routed
+#   (REARMHOLD) the re-arm clears disposition_flagged ALONE — hold_flagged survives,
+#               or a disposition repair becomes a way to re-signal a hold
+#   (SPENTSETTLE) --wait-spent inherits the settle, so this pass and
+#               detect-stalled-workflows.sh cannot disagree about what a spent park
+#               is, and says which of the two 'not spent' answers it gave
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -132,6 +168,16 @@ PARKED='{"gc.takeaway":"holding — waiting on the routed work","gc.takeaway_at"
 # disposition arm can ever look at it. Cases about that arm's own guards use this, so
 # a hold-arm change cannot quietly reclassify them.
 CONCLUDED='{"gc.takeaway":"decided: ship as-is, nothing routed","gc.takeaway_at":"2026-08-22T05:25:00Z","gc.takeaway_by":"converse","gc.origin":"operator"}'
+
+# The settle is measured against NOW, so the two closes it discriminates between have
+# to be written relative to NOW — a hardcoded instant would pass today and invert the
+# moment the window elapsed. GNU takes `-d @epoch`, BSD takes `-r epoch`.
+NOW_S=$(date -u +%s)
+iso_ago() { date -u -d "@$(( NOW_S - $1 ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$(( NOW_S - $1 ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null; }
+FRESH_AT=$(iso_ago 120)    # 2m ago — inside the 900s default, the tk-vathjv window
+OLD_AT=$(iso_ago 7200)     # 2h ago — well outside it
+[ -n "$FRESH_AT" ] && [ -n "$OLD_AT" ] && ok "settle fixtures are dated relative to now" \
+  || { bad "could not build relative timestamps for the settle fixtures"; exit 1; }
 
 # --- fixture ------------------------------------------------------------------
 # One mutable store per run: the stub reads it, and update/helm-open mutate it in
@@ -240,7 +286,35 @@ cat > "$TMP/beads.json" <<EOF
   "metadata":{"gc.takeaway":"holding — rewritten by hand, losing the stamp","gc.origin":"operator","hold_flagged":"2026-08-23T06:12:00Z"}},
 
  {"id":"s-holdspacey","title":"a hold whose takeaway stamp was hand-written with a space","status":"open",
-  "metadata":{"gc.takeaway":"holding — the stamp here is not an ISO instant","gc.takeaway_at":"2026-08-23 06:09:20","gc.takeaway_by":"converse","gc.origin":"operator"}}
+  "metadata":{"gc.takeaway":"holding — the stamp here is not an ISO instant","gc.takeaway_at":"2026-08-23 06:09:20","gc.takeaway_by":"converse","gc.origin":"operator"}},
+
+ {"id":"s-settle","title":"parked, and its routed work closed moments ago","status":"open","metadata":$CONCLUDED,
+  "dependencies":[{"issue_id":"s-settle","depends_on_id":"w-fresh","type":"blocks"}]},
+ {"id":"w-fresh","title":"closed inside the handoff window — tk-b3rga's shape","status":"closed","closed_at":"$FRESH_AT","metadata":{}},
+
+ {"id":"s-settled","title":"parked, and its routed work closed hours ago","status":"open","metadata":$CONCLUDED,
+  "dependencies":[{"issue_id":"s-settled","depends_on_id":"w-old","type":"blocks"}]},
+ {"id":"w-old","title":"closed well before the window","status":"closed","closed_at":"$OLD_AT","metadata":{}},
+
+ {"id":"s-settlekid","title":"parked, and a CHILD closed moments ago","status":"open","metadata":$CONCLUDED},
+ {"id":"w-freshkid","title":"closed inside the handoff window","status":"closed","closed_at":"$FRESH_AT","metadata":{},"_parent":"s-settlekid"},
+
+ {"id":"s-rearm","title":"flagged on a transient close, and the work is in flight again","status":"open",
+  "metadata":{"gc.takeaway":"routed — waiting on the fix","gc.origin":"operator","disposition_flagged":"w-rearm"},
+  "dependencies":[{"issue_id":"s-rearm","depends_on_id":"w-rearm","type":"blocks"}]},
+ {"id":"w-rearm","title":"reopened by check-set-heal: it was closed but had not landed","status":"open","metadata":{}},
+
+ {"id":"s-rearmhold","title":"the same, on a subject that also carries a hold marker","status":"open",
+  "metadata":{"gc.takeaway":"holding — the operator's call on the split","gc.takeaway_at":"2026-08-23T06:20:00Z","gc.takeaway_by":"converse","gc.origin":"operator","disposition_flagged":"w-rearmhold","hold_flagged":"2026-08-23T06:20:00Z"},
+  "dependencies":[{"issue_id":"s-rearmhold","depends_on_id":"w-rearmhold","type":"blocks"}]},
+ {"id":"w-rearmhold","title":"in flight again","status":"open","metadata":{}},
+
+ {"id":"s-rearmnot","title":"a second round of work is in flight; the first round's marker still stands","status":"open",
+  "metadata":{"gc.takeaway":"routed — round two is out","gc.origin":"operator","disposition_flagged":"w-r1"},
+  "dependencies":[{"issue_id":"s-rearmnot","depends_on_id":"w-r1","type":"blocks"},
+                  {"issue_id":"s-rearmnot","depends_on_id":"w-r2","type":"blocks"}]},
+ {"id":"w-r1","title":"round one landed and was signalled","status":"closed","metadata":{}},
+ {"id":"w-r2","title":"round two is still in flight","status":"open","metadata":{}}
 ]
 EOF
 
@@ -278,18 +352,24 @@ case "$sub" in
     # bump is what makes the REPEAT coverage real: a marker keyed on a last-touch
     # would be invalidated by its own stamp.
     bump="${FAKE_BUMP_TS:-2026-08-22T23:59:00Z}"
-    pairs=""
+    pairs=""; drops=""
     while [ $# -gt 0 ]; do
       if [ "${1:-}" = "--set-metadata" ]; then pairs="${pairs}${2:-}
 "; shift; fi
+      # --unset-metadata REMOVES the key rather than emptying it. The distinction is
+      # load-bearing here: absent-vs-empty is a real tri-state in this store, and a
+      # stub that wrote "" would let a re-arm pass while the real bd left a key behind.
+      if [ "${1:-}" = "--unset-metadata" ]; then drops="${drops}${2:-}
+"; shift; fi
       shift
     done
-    printf '%s' "$pairs" | jq -c -R -s --arg id "$id" --arg bump "$bump" --slurpfile store "$FAKE_STORE" '
+    printf '%s' "$pairs" | jq -c -R -s --arg id "$id" --arg bump "$bump" --arg drops "$drops" --slurpfile store "$FAKE_STORE" '
       (split("\n") | map(select(length > 0))
        | map((index("=")) as $i | if $i == null then {key: ., value: ""} else {key: .[0:$i], value: .[$i+1:]} end)
        | from_entries) as $new
+      | ($drops | split("\n") | map(select(length > 0))) as $gone
       | ($store[0] // [])
-      | map(if .id == $id then (.metadata = ((.metadata // {}) + $new)) | (.updated_at = $bump) else . end)' \
+      | map(if .id == $id then (.metadata = ((((.metadata // {}) + $new)) | delpaths([$gone[] | [.]]))) | (.updated_at = $bump) else . end)' \
       > "$FAKE_STORE.tmp" && mv "$FAKE_STORE.tmp" "$FAKE_STORE"
     exit 0 ;;
   list)
@@ -456,14 +536,104 @@ has "$TMP/updates" "update s-child --set-metadata disposition_flagged=w-child" \
 has "$TMP/updates" "update s-child --set-metadata hold_flagged=2026-08-22T05:25:00Z" \
   "(NOAMPLIFY) a disposition filing records the hold stamp that was current when it filed"
 
+# --- closed is not landed: the settle and the re-arm (tk-vathjv) --------------
+hasnt "$TMP/out" "s-settle DISPOSITION" \
+  "(SETTLE) a blocker that closed inside the window holds its subject — tk-b3rga was closed at PR-open and reopened 5m39s later"
+hasnt "$TMP/out" "s-settlekid DISPOSITION" \
+  "(SETTLE) and a CHILD that closed inside the window does the same — both edge kinds, or the canonical converse shape stays exposed"
+hasnt "$TMP/updates" "update s-settle " "(SETTLE) and nothing is written about it"
+has "$TMP/out" "2 settling (closed inside the 900s window)" \
+  "(SETTLE) counted apart from 'still waiting' — a settle that holds real work back has to be visible in the census"
+
+has "$TMP/out" "s-settled DISPOSITION DUE" \
+  "(SETTLED) the positive control: the same shape with an old close still fires, so the settle is not just silence"
+has "$TMP/updates" "update s-settled --set-metadata disposition_flagged=w-old" "(SETTLED) and is flagged normally"
+
+has "$TMP/out" "s-blocks DISPOSITION DUE" \
+  "(NOCLOSEDAT) a closed member with NO closed_at reads as SETTLED and fires — holding it would reinstate the permanent silence being fixed"
+
+# (REARM) the incident. The marker equals the current landed key while the work is
+# open again, which is unreachable honestly: a genuine filing leaves every member
+# closed, and closed beads stay closed.
+has "$TMP/err" "s-rearm RE-ARMED" "(REARM) a marker stamped over a wait that is open again is reported"
+has "$TMP/updates" "update s-rearm --unset-metadata disposition_flagged" \
+  "(REARM) and UNSET — not emptied, because absent-vs-empty is a real tri-state in this store"
+RA=$(jq -r '.[] | select(.id=="s-rearm") | .metadata | has("disposition_flagged")' "$FAKE_STORE")
+eq "$RA" "false" "(REARM) the key is gone from the store, not present-and-empty"
+hasnt "$TMP/out" "s-rearm DISPOSITION" "(REARM) and nothing is filed — the work is still in flight"
+eq "$(grep -c '^open s-rearm ' "$TMP/opens")" "0" "(REARM) no visit either way"
+
+has "$TMP/err" "s-rearmhold RE-ARMED" "(REARMHOLD) the same on a subject that also carries a hold marker"
+hasnt "$TMP/updates" "s-rearmhold --unset-metadata hold_flagged" \
+  "(REARMHOLD) hold_flagged survives — clearing it would make a disposition repair a way to re-signal a hold"
+RH=$(jq -r '.[] | select(.id=="s-rearmhold") | .metadata.hold_flagged // ""' "$FAKE_STORE")
+eq "$RH" "2026-08-23T06:20:00Z" "(REARMHOLD) and reads back unchanged"
+hasnt "$TMP/out" "s-rearmhold STRANDED" \
+  "(REARMHOLD) nor is the hold arm reached — a hold with an open wait is WAITING, not stranded"
+
+# (REARMNOT) the ordinary second round, and the case that separates the re-arm from a
+# blanket "clear any marker over an open wait": s-rearmnot carries
+# disposition_flagged=w-r1 while w-r2 is still in flight, so the landed key is
+# "w-r1,w-r2" and the marker ALREADY differs. Nothing is falsified here — round one
+# really did land and really was signalled — so the marker is the record of that and
+# must survive. Drop the equality half of the guard and this clears it, after which a
+# later pass that sees the wait return to {w-r1} alone files a duplicate visit about
+# work it has already visited: the amplifier, through the repair.
+#
+# s-reflag cannot stand in for this: its wait is fully CLOSED, so it takes the dispose
+# path and never reaches the branch the re-arm lives in at all.
+hasnt "$TMP/err" "s-rearmnot RE-ARMED" \
+  "(REARMNOT) a marker that already differs from the current key is not a falsified observation"
+hasnt "$TMP/updates" "update s-rearmnot" "(REARMNOT) and nothing at all is written to it"
+RN=$(jq -r '.[] | select(.id=="s-rearmnot") | .metadata.disposition_flagged // ""' "$FAKE_STORE")
+eq "$RN" "w-r1" "(REARMNOT) the first round's marker reads back intact"
+hasnt "$TMP/out" "s-rearmnot DISPOSITION" "(REARMNOT) and nothing is filed while round two is in flight"
+hasnt "$TMP/err" "s-reflag RE-ARMED" "(REARMNOT) nor is a subject whose wait is fully spent re-armed"
+hasnt "$TMP/err" "s-openblock RE-ARMED" "(REARMNOT) nor is an unflagged subject with open work touched"
+
 # (CENSUS) every candidate lands in exactly one bucket, and the summary line names
 # which. Asserted as one exact string because the buckets can MASK each other: a
 # subject with no recorded wait has an empty landed key, which equals an empty
 # disposition_flagged, so dropping the at-least-one-wait guard does not produce a
 # visit — it silently reclassifies the park as "already flagged" and every
 # hasnt-assertion above still passes. The counts are the only place that shows it.
-has "$TMP/out" "4 disposition(s) and 5 stranded hold(s) signalled; 4 still waiting, 2 with no recorded wait, 3 already under an open visit, 1 already flagged, 1 hold(s) already signalled, 2 undated hold(s), 0 unreadable, 0 failed" \
-  "(CENSUS) 22 candidates, one bucket each — the classification itself is pinned, not just the absence of a report"
+has "$TMP/out" "5 disposition(s) and 5 stranded hold(s) signalled; 7 still waiting, 2 settling (closed inside the 900s window), 2 re-armed, 2 with no recorded wait, 3 already under an open visit, 1 already flagged, 1 hold(s) already signalled, 2 undated hold(s), 0 unreadable, 0 failed" \
+  "(CENSUS) 28 candidates, one bucket each — the classification itself is pinned, not just the absence of a report"
+
+# (SETTLEOFF) the knob, and the discriminator: the ONLY thing holding s-settle is the
+# freshness of that close. Turn the settle off and the identical fixture fires.
+cp "$TMP/beads.json" "$FAKE_STORE"
+: > "$TMP/updates.off"
+FAKE_UPDATES="$TMP/updates.off" GC_PARKED_SETTLE_SECONDS=0 "$SCRIPT" > "$TMP/out.off" 2> "$TMP/err.off" || true
+has "$TMP/out.off" "s-settle DISPOSITION DUE" \
+  "(SETTLEOFF) with the settle disabled the fresh close fires — freshness, not some other property of the fixture, is what held it"
+has "$TMP/out.off" "s-settlekid DISPOSITION DUE" "(SETTLEOFF) on the child edge too"
+has "$TMP/out.off" "0 settling" "(SETTLEOFF) and nothing is bucketed as settling"
+
+# --- (REARMONCE) the incident end to end --------------------------------------
+# Pass 1 clears the falsified marker; the work then lands for real, with a close old
+# enough to be past the settle; pass 2 must file exactly one visit. Without the
+# re-arm the landed key is "w-rearm" again, matches the burned marker, and the
+# subject is skipped forever — which is how the incident concealed itself.
+: > "$TMP/calls"; : > "$TMP/opens"
+cp "$TMP/beads.json" "$FAKE_STORE"
+export FAKE_CALLS="$TMP/calls" FAKE_HELM_OPENS="$TMP/opens"
+ra() { export FAKE_UPDATES="$TMP/updates.ra$1"; : > "$FAKE_UPDATES"; "$SCRIPT" > "$TMP/raout.$1" 2>&1 || true; }
+
+ra 1
+RA1=$(jq -r '.[] | select(.id=="s-rearm") | .metadata | has("disposition_flagged")' "$FAKE_STORE")
+eq "$RA1" "false" "(REARMONCE p1) the falsified marker is cleared"
+
+jq -c --arg at "$OLD_AT" '[ .[] | if .id == "w-rearm" then (.status = "closed") | (.closed_at = $at) else . end ]' \
+  "$FAKE_STORE" > "$FAKE_STORE.tmp" && mv "$FAKE_STORE.tmp" "$FAKE_STORE"
+ra 2
+has "$TMP/raout.2" "s-rearm DISPOSITION DUE" \
+  "(REARMONCE p2) the real landing IS signalled — the whole point: a wrong reading costs one visit, never the wake-up"
+eq "$(grep -c '^open s-rearm ' "$TMP/opens")" "1" "(REARMONCE) and exactly one visit across both passes"
+RA2=$(jq -r '.[] | select(.id=="s-rearm") | .metadata.disposition_flagged // ""' "$FAKE_STORE")
+eq "$RA2" "w-rearm" "(REARMONCE) re-flagged on the observation that was finally true"
+ra 3
+hasnt "$TMP/raout.3" "s-rearm RE-ARMED" "(REARMONCE p3) and it does not re-arm again — the wait is spent, so the marker stands"
 
 # The filing goes through gc-helm.sh open — the one place the canonical gate-visit
 # block lives, which also owns the subject-exists gate, the one-visit-per-subject
@@ -491,13 +661,23 @@ hasnt "$TMP/updates" "status=closed" "(NOCLEAR) nothing is ever closed"
 hasnt "$TMP/calls" "bd close" "(NOCLEAR) and no close path is reached"
 WROTE=$(grep -c 'update ' "$TMP/updates")
 STAMPS=$(grep -cE 'disposition_flagged=|hold_flagged=' "$TMP/updates")
-eq "$WROTE" "$STAMPS" "(NOCLEAR) every write this pass made is one of the two observation markers"
-eq "$(grep -c 'set-metadata' "$TMP/updates")" "$STAMPS" "(NOCLEAR) one key per write, nothing bundled alongside"
-# 3 dispositions carry a gc.takeaway_at and so write both markers; s-reflag has no
-# takeaway stamp, so there is nothing to record and it writes only its own. The 4
-# holds write one each. A filing that wrote a key nobody accounted for shows up here.
-eq "$WROTE" "12" \
-  "(NOCLEAR) and every write is accounted for: 3 dispositions x 2 markers + 1 undated x 1 + 5 holds x 1"
+# The re-arm is the one write that is not a stamp: it UNSETS a marker rather than
+# recording an observation. Counted on its own so "every write is a marker" stays a
+# real claim rather than being widened to admit anything.
+# `|| true`: grep exits 1 on ZERO matches, and an assignment from a failing command
+# substitution aborts this suite under `set -e`. Without it, deleting the re-arm makes
+# the run truncate here instead of reporting — the mutation looks like a crash rather
+# than a failed assertion, and every later case silently stops being run.
+CLEARS=$(grep -c -- '--unset-metadata disposition_flagged' "$TMP/updates" || true)
+eq "$WROTE" "$((STAMPS + CLEARS))" "(NOCLEAR) every write this pass made is an observation marker or a re-arm"
+eq "$(grep -c -- '--set-metadata' "$TMP/updates")" "$STAMPS" "(NOCLEAR) one key per write, nothing bundled alongside (anchored on the dashes: '--unset-metadata' contains 'set-metadata')"
+eq "$CLEARS" "2" "(NOCLEAR) and the only non-stamp writes are the two re-arms"
+# 4 dispositions carry a gc.takeaway_at and so write both markers; s-reflag has no
+# takeaway stamp, so there is nothing to record and it writes only its own. The 5
+# holds write one each, and the 2 re-arms clear one each. A filing that wrote a key
+# nobody accounted for shows up here.
+eq "$WROTE" "16" \
+  "(NOCLEAR) and every write is accounted for: 4 dispositions x 2 markers + 1 undated x 1 + 5 holds x 1 + 2 re-arms x 1"
 hasnt "$TMP/updates" "update s-reflag --set-metadata hold_flagged" \
   "(NOCLEAR) an undated takeaway records no hold stamp — there is none to record"
 
@@ -521,7 +701,7 @@ eq "$(wc -l < "$TMP/updates")" "0" "(LISTFAIL) and nothing is written"
 FAKE_HELM_SILENT=1 run verify
 unset FAKE_HELM_SILENT
 has "$TMP/err" "no open visit names this subject" "(VERIFY) the filing is READ BACK, not trusted"
-hasnt "$TMP/updates" "disposition_flagged" "(VERIFY) and the marker is not stamped over a visit nobody can see"
+hasnt "$TMP/updates" "--set-metadata disposition_flagged" "(VERIFY) and the marker is not stamped over a visit nobody can see"
 hasnt "$TMP/updates" "hold_flagged" "(VERIFY) neither marker — the read-back gates both arms"
 eq "$RC" "1" "(VERIFY) the pass exits non-zero so the failure is visible"
 
@@ -529,7 +709,7 @@ eq "$RC" "1" "(VERIFY) the pass exits non-zero so the failure is visible"
 FAKE_HELM_RC=4 run helmfail
 unset FAKE_HELM_RC
 has "$TMP/err" "refused to file the visit (exit 4)" "(HELMFAIL) the refusal is reported, with the filer's own exit code"
-hasnt "$TMP/updates" "disposition_flagged" "(HELMFAIL) and nothing is retired on it"
+hasnt "$TMP/updates" "--set-metadata disposition_flagged" "(HELMFAIL) and nothing is retired on it"
 hasnt "$TMP/updates" "hold_flagged" "(HELMFAIL) on either arm"
 eq "$RC" "1" "(HELMFAIL) exits non-zero"
 
@@ -614,6 +794,18 @@ eq "$(spent s-parentdep)" "1" "(SPENT) a closed PARENT is not routed work, so th
 FAKE_KIDS_BROKEN=s-child; export FAKE_KIDS_BROKEN
 eq "$(spent s-child)" "1" "(SPENT) an unreadable read is NOT spent — fail-closed, the mute stays"
 unset FAKE_KIDS_BROKEN
+
+# (SPENTSETTLE) the settle reaches this predicate too. It has to: this is the shared
+# definition detect-stalled-workflows.sh asks for, and the whole reason it exists is
+# that the two passes must not drift into disagreeing about what a spent park is. A
+# park whose work closed a moment ago keeps MUTING the stall detector for one window —
+# the quiet direction on that side as well.
+eq "$(spent s-settle)" "1" "(SPENTSETTLE) a wait closed inside the settle is NOT spent"
+has "$TMP/spent.out" "settle, not yet trusted as landed: w-fresh" \
+  "(SPENTSETTLE) and says which of the two 'not spent' answers it gave, so the mute is not read as an open blocker"
+eq "$(spent s-settled)" "0" "(SPENTSETTLE) the same shape past the window IS spent — the positive control"
+eq "$(GC_PARKED_SETTLE_SECONDS=0 "$SCRIPT" --wait-spent s-settle > "$TMP/spent.out" 2>&1; echo $?)" "0" \
+  "(SPENTSETTLE) and with the settle disabled it is spent — freshness is what held it"
 
 echo
 echo "detect-parked-dispositions: $PASS passed, $FAIL failed"

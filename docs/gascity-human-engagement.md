@@ -376,7 +376,54 @@ including for the very subject the incident was measured on. The sweep
 therefore reads the **union** of the subject's `blocks` edges and its children
 (`bd list --parent`, the only way to ask, since a parent-child edge is stored
 on the child). Readiness is: at least one recorded wait exists, and every one
-of them is closed.
+of them is closed **and settled** — see below.
+
+### Closed is not landed (2026-08-23, tk-vathjv)
+
+Readiness was originally "at least one recorded wait exists and every one of
+them is CLOSED", with no settling period, on the reasoning that readiness is
+all-or-nothing so a half-finished dispatch cannot fire it early. That is true
+across the *set* and says nothing about one member being **transiently** closed.
+
+`tk-b3rga` was closed at 17:05:51Z with the stock-GasTown reason *"PR #445
+opened (mr strategy)"* — a close this pack's refinery charter overrides, since
+here `closed` must mean *landed* — and `check-set-heal.sh` phase 0a reopened it
+5m39s later. The sweep sampled at 17:07:41Z, inside that window, and filed a
+visit on `tk-jr8rw` announcing that every piece of work it routed had landed.
+PR #445 was open with zero reviews. Worse, the filing burned `disposition_flagged`
+against the id set `tk-b3rga` — so when the PR really merged, the landed key
+would read identically, match the burned marker, and the subject would be
+skipped **forever**: the 4h19m incident class this sweep exists to prevent,
+re-entered through a different door and self-concealing.
+
+Two changes, complementary:
+
+- **The settle.** A wait member that closed within `GC_PARKED_SETTLE_SECONDS`
+  (default 900) counts as still open. This is not a window on the *trigger* —
+  that would delay a push whose whole value is promptness — it is a settle on
+  the observation's *inputs*: a close that recent has not yet been past the
+  repair passes that would reverse it. An absent or unparsable `closed_at` reads
+  as **settled**, deliberately, because a member that could hold its subject
+  forever is the failure being fixed.
+- **The re-arm.** `disposition_flagged` equal to the *current* landed key over a
+  wait that is not spent is a marker stamped on an observation since falsified —
+  a state unreachable honestly, since a genuine filing leaves every member
+  closed and closed beads stay closed. It is cleared, and the subject re-arms.
+  Any wrong reading then costs one visit, which converse closes on the re-check
+  the visit body already carries, instead of costing the wake-up permanently.
+
+`--wait-spent` inherits both, so this sweep and `detect-stalled-workflows.sh`
+cannot drift into disagreeing about what a spent park is.
+
+**Rejected:** deriving landedness from the member's own metadata (`merged_sha`
+or `merge_result=merged`). Of 786 closed gc-toolkit beads carrying a
+`pr_number`, 531 carry neither — review beads legitimately close against an open
+PR, and genuinely-merged anchors keep stale handoff spellings (`tk-wvrga` is
+closed *"merged to main via PR, verified ancestor of origin/main"* with
+`merge_result` still `pull_request`). That predicate reads 68% of landed work as
+never-landed and silently mutes the sweep. Asking `gh` per member instead puts a
+network call per candidate in a patrol and re-derives, badly, a judgement
+`check-set-heal.sh` already owns.
 
 The two surfaces are knowingly out of step until the board can see children at
 all — a parked row currently hardcodes `children:[]` (tk-a9k0l). The board
