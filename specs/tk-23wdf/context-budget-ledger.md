@@ -11,6 +11,9 @@ description: What every gc-toolkit agent actually pays in always-on prompt bytes
 - **Author:** gc-toolkit/gc-toolkit.nux (polecat, claude provider)
 - **Measured:** 2026-08-10 19:16Z, city `/home/zook/loomington`
 - **Status:** Measurement complete; dispositions proposed for implementation beads
+- **Leg 2 (tk-yhwfv.1, 2026-08-23):** candidates 4/5/6 banked; the per-spawn unit
+  restated per-request; two items reassigned to the gascity rig. **See §9** —
+  it corrects the seed figure and the realized savings for 4 and 5.
 
 ---
 
@@ -581,16 +584,23 @@ evidence for candidate 1's premise that the block is judged, not executed.
 Risk: none to fix; the risk is leaving it.
 
 **4. Narrow `rebase-conventions` so the polecat slice excludes refinery-only policy.**
+**BANKED (tk-yhwfv.1) — realized −1,376 B/spawn, not ~4,000. See §9.2.**
 Saving: ~4,000 B/spawn, gascity rig only.
 Risk: low. Requires splitting one fragment into two defines; the force-push and
 re-pour sections are already separately headed.
 
 **5. Compress `watch-dispatched-work` and the keeper prompt.**
+**PARTLY BANKED (tk-yhwfv.1) — fragment realized −2,380 B/spawn and reaches
+the keeper too, not just mechanik; the keeper prompt is still unmeasured live.
+See §9.2 and §9.3.**
 Saving: ~2,000 B/spawn (mechanik) and unquantified (keeper).
 Risk: low, but the keeper number should be measured live before anyone spends
 effort — capture it the next time the keeper wakes.
 
 **6. Do not delete `cycle-recycle` outright — repoint its references first (follow-up).**
+**BANKED (tk-yhwfv.1) — there were three citations, not two, and all three
+misdescribed the file. Policy promoted to `docs/cycle-recycle.md`; the delete
+now dangles nothing. See §9.2.**
 Saving: 0 live bytes.
 The define renders into no prompt, but the file
 `template-fragments/cycle-recycle.template.md` is cited as the canonical policy
@@ -690,3 +700,153 @@ Two premises need adjusting:
    spawn and its sessions almost never compact (`continuation_epoch=1` for 37 of 38
    sampled sessions) — which is why it is *explicitly not recommended* (§7) despite
    its prerequisite having landed.
+
+---
+
+## 9. Leg 2 — per-request restatement, realized deltas (tk-yhwfv.1)
+
+- **Bead:** tk-yhwfv.1 — "context budget leg 2: cut the pack's standing per-request cost"
+- **Author:** gc-toolkit/gc-toolkit.furiosa (polecat, claude provider)
+- **Measured:** 2026-08-23 ~01:30Z, same city
+- **Status:** candidates 4/5/6 banked; the two NEW items are not gc-toolkit's to land
+
+### 9.1 The unit was wrong: per spawn, not per request
+
+Everything in §1–§8 is **bytes per spawn**. That understates the real cost,
+because the seed — base prompt, tool schemas, skills appendix, agent role
+prompt — is re-read on **every request** of a session, not once at spawn.
+
+Method: `specs/tk-23wdf/measure-per-request.py` (committed beside
+`measure-context-budget.sh`). It walks `~/.claude/projects/**/*.jsonl`,
+filters to files touched in the window, and reads the `usage` block off every
+assistant turn. Run it as `./measure-per-request.py 24`.
+
+Trailing 24h at 2026-08-23 01:30Z — 995 sessions, 68,789 assistant requests:
+
+| Quantity | Value |
+|---|---|
+| Median seed, lower bound | 34,672 tok/request |
+| Median seed, upper bound | 72,410 tok/request |
+| Median requests per session | 62 |
+| Cache-read tokens, total | 8.42B |
+| — attributable to seed re-reads | 2.14B (25.5%) |
+| Amplification per seed byte | ~7.1x its per-spawn face value |
+
+**Why a bracket and not a number.** The seed is not directly reported. Two
+proxies bound it, and they disagree by 2x, so quoting either alone is a
+false precision:
+
+- **Lower bound** = the minimum non-zero `cache_read_input_tokens` across a
+  session's turns. Cache reads grow monotonically as the conversation
+  accumulates, so the minimum isolates the stable prefix — but cache
+  breakpoints can split the seed, so part of it may arrive as
+  `cache_creation` on a later turn and never appear in this figure.
+- **Upper bound** = turn 1's `cache_read + cache_creation`, i.e. the whole
+  prompt at the first request. That is seed **plus the first user message**,
+  so it overshoots.
+
+The bead that opened this leg quoted **median seed = 73,106 tok** and
+**58.6%** of cache reads as seed re-reads. The first figure reproduces here
+as 72,410 — it is the *upper* bound, the turn-1 prompt, not the seed. The
+re-read share does not reproduce: measured on the same definition it is
+25.5%, because the denominator (total cache reads) grows with conversation
+length while the seed does not. Median requests/session also came out 62,
+not 34, which moves the amplification factor from ~4.5x to ~7.1x.
+
+**None of this weakens the case for cutting seed bytes — it strengthens it.**
+The amplification is larger than the bead claimed. What changes is that the
+"~38% of list-price-weighted spend" attribution rests on the upper-bound
+proxy and should be re-derived before anyone quotes it as a dollar figure.
+
+### 9.2 Realized deltas
+
+| Item | Ledger estimate | Realized | Where |
+|---|---|---|---|
+| Candidate 4 — narrow `rebase-conventions` | ~4,000 B/spawn | **−1,376 B/spawn** | gascity polecat |
+| Candidate 5 — compress `watch-dispatched-work` | ~2,000 B/spawn | **−2,380 B/spawn** | mechanik **and** keeper |
+| Candidate 5 — keeper prompt | unquantified | still unmeasured live | see 9.3 |
+| Candidate 6 — `cycle-recycle` citations | 0 live bytes | **0 B**, as predicted | repointed, delete unblocked |
+
+**Candidate 4 came in low, and the estimate's premise was wrong.** §7 assumed
+the polecat slice could shed both the force-push *and* the re-pour sections.
+Read against the live text only force-push is refinery-only (1,946 B); the
+re-pour section opens "When you claim `load-context` for a fresh
+`mol-upstream-gc-rebase` root" and addresses the polecat driving the rebase
+throughout. It stays. Net is 1,376 B after the pointer that preserves the one
+instruction the polecat does need from the removed section — you do not
+force-push, you hand the bead to refinery.
+
+**Candidate 5 came in high, and reaches one more agent than §7 recorded.**
+The fragment is included by `agents/mechanik/prompt.template.md:154` *and*
+`packs/gascity-keeper/agents/keeper/prompt.template.md:942`. Those two do not
+have the same reach: `ConfigDir` resolves to the consuming agent's own pack
+(`cmd/gc/template_resolve.go:352-354`; `SourceDir` stamped at
+`internal/config/pack.go:1560`), so mechanik can run
+`assets/scripts/gc-bd-watch.sh` and the sub-pack keeper cannot. The rewrite
+names which form belongs to which agent instead of presenting the wrapper as
+the default.
+
+That resolution rule has a **correctness** consequence beyond byte counts,
+filed as its own bead: every `{{ .ConfigDir }}` path handed to a sub-pack
+agent is dangling. That includes the keeper's own
+`{{ .ConfigDir }}/docs/gascity-agents.md` "front-door" citation and the
+`deferred-dispatch.sh` invocation in this very fragment — the latter is the
+prescribed alternative to holding a dispatch in context, so a keeper that
+obeys it gets "no such file" precisely when it is trying not to lose work.
+
+**Candidate 6 was understated in a different way.** §7 recorded two live
+citations; there are three, and all three were already wrong about what the
+file holds. `template-fragments/cycle-recycle.template.md` is 156 bytes
+containing one sentence about threshold notification — not policy, not the
+rationale. `heartbeat-no-consent-ui.template.md:28` called it "policy in",
+`skills/handoff/SKILL.md:88` said "See", and the hook script itself
+(`overlays/cycle-recycle/.claude/hooks/cycle-recycle.sh:17`) cited it "for
+the full rationale". The hook header was the real policy; it is now promoted
+to `docs/cycle-recycle.md` and all three citations point there. The fragment
+is left in place — repointing was the scope — but it is now unreferenced, so
+the delete dangles nothing.
+
+### 9.3 Not banked, and why
+
+**The keeper prompt could not be measured live.** §3.1 is the only capture
+method (there is no `gc agent render`) and it requires a running process;
+`gc session list --state all` shows no keeper session, exactly as §7
+predicted. Statically the source is 50,480 B, and its own top-level sections
+break down as:
+
+| Bytes | Section |
+|---|---|
+| 12,244 | `## Rebase-In-Progress Handback (legacy v11 path)` |
+| 10,353 | `## On Wake / Prime` |
+| 8,420 | `## Operator Commands` |
+| 6,163 | `## Conflict-Questions Handback` |
+| 3,866 | `## Handback Conversation` |
+
+The largest block is **self-labelled a legacy v11 path**, and the
+`rebase-conventions` fragment states that v12 superseded those mechanisms —
+"those were the v11 mechanisms", and v11's `metadata.rebase_in_progress` flag
+"is no longer written". That is 24% of the keeper prompt describing a
+retired path, and it is the obvious first cut for whoever picks this up.
+Confirm against the live formula before deleting: a legacy label is a lead,
+not a licence.
+
+**The two NEW items in the bead are gc binary changes and cannot land from a
+gc-toolkit branch.** Both were investigated to a fix site and filed in the
+gascity rig:
+
+- **`gc-dqn8l`** — the always+fresh `named_session` advisory printed on every
+  command. Text at `internal/config/config.go:4196`; emitted from
+  `emitLoadCityConfigWarnings` (`cmd/gc/cmd_agent.go:111`) via the shared
+  `loadCityConfigFS` path every command takes, defaulting to `os.Stderr`.
+  `configWarnWriter` already discards it in JSON mode, but only at the two
+  call sites that thread it through (`cmd_convoy.go:164`,
+  `cmd_sling.go:420`), which is why `--json` elsewhere still gets it.
+- **`gc-zm9pq`** — no per-role skill selection exists.
+  `materializeSkillsIntoWorkdir` unions the whole city catalog with the
+  agent-local one (`cmd/gc/cmd_internal_materialize_skills.go:194-200`), and
+  the `skills` TOML key that would express a subset is an explicit tombstone,
+  "accepted but ignored by the active materializer"
+  (`internal/config/config.go:3326-3331`). A pack can add private skills per
+  agent; it cannot subtract from the shared catalog. Not to be confused with
+  re-enabling `inject_assigned_skills`, which §4b rejected for adding a
+  duplicate index — this is about shrinking the one the harness already ships.
