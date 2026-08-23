@@ -1811,26 +1811,78 @@ The repair (`check-set-heal.sh` phase 0a, ahead of the `merge_result` recovery i
 the same script) keys on a signature narrow enough to leave every legitimate close
 alone:
 
-> `closed` **+** a PR reference **+** `merge_result` **absent** **+** that PR still
-> **open**
+> `closed` **+** a PR reference **+** a `merge_result` that is **not a
+> disposition** **+** that PR still **open**
 
-`merge_result` is what separates the two: a genuinely landed anchor is closed with
+### A handoff is not a completion, and `merge_result` spells them the same way
+
+`merge_result` carries two different kinds of fact under one key. A pass that
+**finished** with a bead writes a *disposition* into it: the merge skill closes with
 `merge_result=merged`, and the observer's other dispositions record `abandoned` or
-`retargeted`. A closed bead carrying **any** `merge_result` has a disposition
-written by a pass that knew what it was doing, and is left alone — resurrecting an
-anchor something deliberately retired is worse than one more pass of a stall.
+`retargeted`. But the refinery writes a *handoff* into the same key long before
+anything is finished — `pull_request` means "the PR is open and waiting to be
+landed", `pre_open_gate` means "the branch is waiting on its codex signoff". Those
+are **in-flight** markers, the opposite of a disposition; `pull_request` is the very
+value the merge skill's gating enumeration keys on, precisely because it means
+*still to do*.
 
-**The repair is only to reopen.** A reopened bead is, by construction, exactly the
-shape the `merge_result` recovery above already handles, so it is re-stamped,
-gated, and given a signoff on the *same pass*, by code that is already reviewed and
-tested. That is also why the reopen is deliberately the **first** write rather than
-the last. Stamping `merge_result` first and reopening second would, on a dropped
-second write, leave a *closed* bead carrying a `merge_result` — no longer a
-candidate for either phase, and still invisible to every open-bead pass: a
-permanent strand minted by the repair itself. Reopening first cannot do that; if
-everything after it fails, the bead is an ordinary recovery candidate and the next
-pass finishes the job. The exposure that ordering costs is nil, because an open
-bead with no `merge_result` is invisible to the merge skill regardless.
+This arm originally required `merge_result` **absent**, which read the handoff
+spelling as if it were the completion spelling and declined to repair the exact case
+it exists for. On 2026-08-23 eight gc-toolkit anchors were closed in a 19-second
+span, each carrying `merge_result=pull_request`, `pr_number`, and `check.codex`
+green at the live head. The operator then approved all eight PRs; every one was
+APPROVED, CLEAN and MERGEABLE. None landed. The merge skill cannot enumerate a
+closed anchor, this arm would not reopen one carrying a `merge_result`, and the
+anchorless scan could only log a report — so the rig's entire merge queue sat dead
+for hours, one API call from eight landings, and the fix for it was itself a PR
+stranded in the same queue. This is the pathology of `gc.takeaway` (tk-16f29) one
+layer down: **a state that encodes a handoff must not be spelled the same way as a
+state that encodes completion**, or the second reading mutes whatever consumes the
+first.
+
+So the discriminator is an explicit **allow-list of the non-terminal spellings**,
+never a deny-list of the terminal ones:
+
+| `merge_result` | means | this arm |
+|---|---|---|
+| *(absent)* | nothing was ever recorded | **repair** (the `sl-jcr4` case) |
+| `pull_request` | PR open, awaiting land | **repair** (the tk-fip23 case) |
+| `pre_open_gate` | branch awaiting its signoff | **repair** — same window, one step earlier: a PR exists, so something opened it and did not finish the transaction |
+| anything else | a disposition, or a marker this pass does not know | **leave alone** |
+
+An allow-list is what keeps the widening fail-closed. A value some future pass
+invents reads as a disposition and is left alone — the same direction the original
+`absent` test erred in, and the right one: resurrecting an anchor something
+deliberately retired is worse than one more pass of a stall.
+
+**The repair is only to reopen** — and reopening lands nothing by itself. Everything
+that decides whether a PR *may* merge (approval, mergeability, `check.*` at the live
+head) is still evaluated by the merge skill, on live state, by code this arm does not
+duplicate. What the reopen restores is only the bead's *visibility* to the pass that
+makes that decision.
+
+What happens next depends on which spelling was repaired:
+
+- **`merge_result` absent** — the reopened bead is, by construction, exactly the
+  shape the `merge_result` recovery above already handles, so it is re-stamped,
+  gated, and given a signoff on the *same pass*, by code that is already reviewed
+  and tested.
+- **`merge_result` in-flight** — nothing needs re-stamping. The bead already carries
+  the marker the merge skill enumerates on, so `--status=open` alone restores it to
+  the queue; the recovery phase correctly skips it (its projection wants an absent
+  `merge_result`) and the check-set normalization sees it as the ordinary open gating
+  anchor it always was.
+
+That is also why the reopen is deliberately the **first** write rather than the last.
+Stamping `merge_result` first and reopening second would, on a dropped second write,
+leave a *closed* bead carrying a **terminal** `merge_result` — no longer a candidate
+for either phase, and still invisible to every open-bead pass: a permanent strand
+minted by the repair itself. Reopening first cannot do that; if everything after it
+fails, the bead is an ordinary recovery candidate and the next pass finishes the job.
+The exposure that ordering costs is nil for an absent marker, because an open bead
+with no `merge_result` is invisible to the merge skill regardless — and for an
+in-flight one the "exposure" *is* the repair: it is the state the bead was in before
+it was wrongly closed.
 
 **The closed set is bounded before it is touched.** Hundreds of beads per rig are
 legitimately closed while carrying a `pr_url` — every anchor closed before
@@ -1934,6 +1986,26 @@ it honest:
   ledger read is empty rather than `[]`, and the scan fails **closed** on it —
   treating "I could not read the ledger" as "nothing is tracked" would flag every
   open PR at once.
+
+  **A bound that outlives a failed send is worse than no bound.** Stamping first
+  is right — an unbounded mail storms — but the stamp is the *only* thing
+  suppressing the next pass, so if the send then fails and the marker stands, one
+  dropped mail buys permanent silence on a finding that stays true forever, under
+  a log line reading "routed to operator + escalated" that an operator has no way
+  to falsify. So a failed send rolls the marker back, on the same terms
+  `escalation-gate.sh` does: re-read first and undo only *our own* value, because
+  a peer that mailed and stamped in between has a delivered notice on the record
+  and unsetting over it would erase the evidence and re-storm. All three outcomes
+  are reported distinctly — rolled back (the next pass retries), deferred to a
+  peer, or a rollback that itself failed, which names the command that clears the
+  stuck marker by hand.
+
+  **And "already escalated" says where.** `gc mail send` writes a *wisp*, which
+  `bd list` cannot see in any store at any status — so an operator told a notice
+  exists, searching the ledger for it, finds nothing and reasonably concludes
+  nothing was ever filed. That is not hypothetical: it is how tk-fip23 came to be
+  written, against eight escalations that had in fact been delivered. The repeat
+  line now names the mailbox and the fact that `bd list` cannot reach it.
 - **Tracked is not owned.** A live bead naming a PR is enough to prove the PR is
   not *anchorless*, but not enough to prove anything will land it. A bead
   carrying none of `merge_result`, `merge_strategy`, `branch` or `target` tracks

@@ -476,12 +476,30 @@ nothing escalates because nothing can see it. signal-loom sl-jcr4 was closed car
 the anchor's `gc.work_commit`, base main, mergeStateStatus CLEAN, all 11 checks SUCCESS
 and APPROVED by an admin — with zero escalations; the observer could only report it as
 "ANCHORLESS", which is a report, not a repair. The signature is narrow: `closed` + a PR
-reference + `merge_result` ABSENT + that PR still OPEN. A genuinely landed anchor
-carries `merge_result=merged` (or `abandoned`/`retargeted`), so a closed bead with ANY
-merge_result has a disposition recorded by a pass that knew what it was doing and is
-left alone. The repair is ONLY to reopen: a reopened bead is by construction the shape
-(a-norm0) already handles, so it is re-stamped and gated on the SAME pass by code that
-is already reviewed. The reopen is deliberately the FIRST write — stamping merge_result
+reference + a `merge_result` that is NOT a disposition + that PR still OPEN.
+`merge_result` spells two different facts with one key, and only one of them means a
+pass decided this bead was finished: a DISPOSITION (`merged`, written by the merge
+skill; `abandoned`/`retargeted`, written by the observer) is terminal, while a HANDOFF
+(`pull_request` — the PR is open and waiting to be landed; `pre_open_gate` — the branch
+is waiting on its codex signoff) is the opposite, and is the very marker merge-skill's
+own gating enumeration keys on. So the test is an explicit ALLOW-LIST of the
+non-terminal spellings — absent, `pull_request`, `pre_open_gate` — and anything else,
+including a marker no pass here has heard of, reads as a disposition and is left alone.
+Requiring merge_result ABSENT, as this arm first did, read the handoff spelling as a
+completion record and declined the exact case it exists for: on 2026-08-23 eight
+gc-toolkit anchors were closed in a 19-second span carrying `merge_result=pull_request`
+and a green `check.codex` at the live head, the operator approved all eight PRs, every
+one was CLEAN and MERGEABLE, and none landed — merge-skill cannot enumerate a closed
+anchor, this arm would not reopen one carrying a merge_result, and the observer could
+only log ANCHORLESS every pass, so the whole rig's merge queue sat dead for hours one
+API call from eight landings (tk-fip23). The repair is ONLY to reopen, and what happens
+next depends on which spelling it repaired: an ABSENT merge_result makes the bead by
+construction the shape (a-norm0) already handles, so it is re-stamped and gated on the
+SAME pass by code that is already reviewed; an IN-FLIGHT one needs no re-stamp at all,
+since the bead already wears the marker merge-skill enumerates on and `--status=open`
+alone restores it to the queue. Reopening lands nothing by itself — every gate that
+decides whether the PR MAY merge (approval, mergeability, `check.*` at the live head)
+is still evaluated by the merge skill, on live state. The reopen is deliberately the FIRST write — stamping merge_result
 onto a still-closed bead would make it a non-candidate for both phases and strand it
 permanently — and the closed set is bounded by ONE `gh pr list --state open` before any
 per-bead work, since hundreds of legitimately closed beads per rig carry a `pr_url`.
