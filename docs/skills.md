@@ -70,11 +70,12 @@ A skill is **Gas-City-bound** the moment it depends on any of:
 - beads, mail, worktrees, or the routing model;
 - prompt fragments or any pack-composition artifact.
 
-The two skills shipping today are both Gas-City-bound by this test:
+Two of the skills shipping today show the test failing plainly:
 [`handoff`](../skills/handoff/SKILL.md) branches on `$GC_TEMPLATE` and
 drives `gc handoff`; `session-title` reads and writes session state
 through `gc`. Neither is portable, and that is correct — they exist to
-operate a running city.
+operate a running city. They are examples, not the whole inventory; read
+`skills/` for that, and expect it to move.
 
 A **portable** skill (a "core primitive") is the dual-use case the
 foundation calls for: authored once, discoverable in Gas City *and*
@@ -249,8 +250,11 @@ and stays out of the manifest.
 
 ## Validation
 
-- `name` matches the directory; frontmatter parses; `description` and
-  `compatibility` are present.
+- `name` matches the directory; frontmatter parses; `description` is
+  present. `compatibility` is *recommended*, not required — see
+  [Frontmatter](#frontmatter). Checking it as mandatory here would mark every
+  skill in `skills/` invalid today, which is the opposite of what a validation
+  list is for.
 - Portable skills contain no reference to `gc `, `$GC_`, beads, mail, or
   fragments anywhere in the body or `scripts/`.
 - Every skill in `marketplace.json` declares portable `compatibility`, and
