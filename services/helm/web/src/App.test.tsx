@@ -68,7 +68,7 @@ const BOARD: Board = {
       title: 'Disposition: 1 anchorless open PR remains (#88)',
       severity: 'ELEVATED',
       frontier: 'routed to the operator — no agent will take it',
-      needs: 'operator action',
+      needs: 'PR#88 closed out-of-band without merging',
       rank_score: 2_003_011,
     }),
     tile({
@@ -158,7 +158,7 @@ it('ranks an operator-owned bead with the rest of the attention', async () => {
   const row = within(attentionTable()).getByText(/anchorless open PR/).closest('tr');
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText('ELEVATED')).toBeTruthy();
-  expect(within(row as HTMLElement).getByText('operator action')).toBeTruthy();
+  expect(within(row as HTMLElement).getByText('PR#88 closed out-of-band without merging')).toBeTruthy();
 });
 
 // The other half of the bead: a parked conversation must be FINDABLE without

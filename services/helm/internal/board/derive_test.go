@@ -96,7 +96,8 @@ func TestFourAnchorBoard(t *testing.T) {
 func TestMetadataKindDerivation(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-human", Title: "Disposition: one PR needs the operator", Kind: "human", Source: "human",
-			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(4)},
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(4),
+			Metadata: map[string]string{"blocked_reason": "PR#88 closed out-of-band without merging"}},
 		{ID: "tk-parked", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
 	}
@@ -113,7 +114,9 @@ func TestMetadataKindDerivation(t *testing.T) {
 	if !strings.Contains(human.Frontier, "routed to the operator") {
 		t.Errorf("frontier must say who owns it: %q", human.Frontier)
 	}
-	if human.Needs != "operator action" {
+	// The ASK the router recorded, not a constant. See
+	// TestHumanRowSpendsTheRecordedAsk for the pair of shapes in full.
+	if human.Needs != "PR#88 closed out-of-band without merging" {
 		t.Errorf("needs: %q", human.Needs)
 	}
 
@@ -400,6 +403,7 @@ func TestDispositionDueIsParkedOnly(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-h", Title: "operator-owned, with a discharged edge", Kind: "human", Source: "human",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata:  map[string]string{"blocked_reason": "operator policy call: dismiss stale reviews on push, or declare approval in check_set"},
 			WaitingOn: []string{"tk-x"}, WaitingOnClosed: []string{"tk-x"}},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
@@ -407,7 +411,7 @@ func TestDispositionDueIsParkedOnly(t *testing.T) {
 	if tile.DispositionDue {
 		t.Error("disposition_due is a parked-row distinction")
 	}
-	if tile.Needs != "operator action" {
+	if tile.Needs != "operator policy call: dismiss stale reviews on push, or declare approval in check_set" {
 		t.Errorf("the human row keeps its own phrase: %q", tile.Needs)
 	}
 }
@@ -947,8 +951,12 @@ func TestRuledNeedsTheWaitsToBeLegible(t *testing.T) {
 			Takeaway:       "ROUTED: mayor mailed to excise gc-8yr6px",
 			WaitingUnknown: true},
 		// And on the other human-gated kind.
+		// Carries an ask so the frontier below is the canonical human phrase:
+		// this test is about the WAIT clause, and an anchor with no recorded
+		// ask would additionally trip the unexplained-route wording.
 		{ID: "tk-j5wrs", Title: "membership predicate", Kind: "human", Source: "human",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata:       map[string]string{"blocked_reason": "design ruling needed on the membership predicate"},
 			Takeaway:       "routed — design ruled; tk-vie5k slung",
 			WaitingUnknown: true},
 	}
@@ -997,12 +1005,105 @@ func TestDispositionDueSurvivesUnreadableWaits(t *testing.T) {
 	}
 }
 
+// TestHumanRowSpendsTheRecordedAsk pins both halves of tk-wfufb9.
+//
+// The census that filed it: nine ELEVATED rows on the 2026-08-23 board whose
+// entire NEEDS cell was the constant "operator action" — and roughly half of
+// them were ordinary agent work, parked in the operator band because nobody had
+// claimed them. A constant cannot separate the two, so the operator had to open
+// every bead to find out which was which.
+//
+// So the cell answers from the bead: the ask its router recorded, or, failing
+// that, the fact that no ask was recorded — which is itself the more useful
+// answer, because an unexplained human route is the bug.
+func TestHumanRowSpendsTheRecordedAsk(t *testing.T) {
+	const ask = "operator call: prune 63 leftover worktrees (4.7G), or keep them"
+	anchors := []Anchor{
+		// The router stated the judgment. Every pack writer of
+		// gc.routed_to=human sets blocked_reason in the same update.
+		{ID: "tk-ask", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Metadata: map[string]string{"gc.routed_to": "human", "blocked_reason": ask}},
+		// The marker alone. Three of the nine census rows looked exactly like
+		// this — a bare gc.routed_to=human and nothing else on the bead.
+		{ID: "tk-bare", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+		// Whitespace-only is not an ask. blocked_reason is free prose a writer
+		// may have built by interpolation, and an empty interpolation leaves a
+		// field that is present, non-empty, and says nothing.
+		{ID: "tk-blank", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Metadata: map[string]string{"gc.routed_to": "human", "blocked_reason": "  \n\t "}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	const unexplained = "unexplained human route — state the ask or return it to the pool"
+	for _, c := range []struct{ id, needs, frontier string }{
+		{"tk-ask", ask, "routed to the operator — no agent will take it"},
+		{"tk-bare", unexplained, "routed to the operator — no ask recorded"},
+		{"tk-blank", unexplained, "routed to the operator — no ask recorded"},
+	} {
+		tile, ok := tileByID(b, c.id)
+		if !ok {
+			t.Fatalf("%s is missing from the board", c.id)
+		}
+		if tile.Needs != c.needs {
+			t.Errorf("%s needs: %q, want %q", c.id, tile.Needs, c.needs)
+		}
+		// The frontier asserts "no agent will take it". On a bead nobody
+		// justified, nothing backs that assertion, and saying so is the whole
+		// point — the marker was being spent as "unclaimed", not "unclaimable".
+		if tile.Frontier != c.frontier {
+			t.Errorf("%s frontier: %q, want %q", c.id, tile.Frontier, c.frontier)
+		}
+		// The BAND does not move. Whether the route was justified is not
+		// evidence about whether it was correct, and quietly demoting an
+		// unexplained row would hide exactly the beads this change surfaces.
+		if tile.Severity != SevElevated {
+			t.Errorf("%s: a human row stays ELEVATED, got %s", c.id, tile.Severity)
+		}
+	}
+}
+
+// TestHumanAskIsCollapsedAndYieldsToATakeaway: the ask is free prose from a
+// writer that may have wrapped it, so it is collapsed the way a takeaway is —
+// one stray newline breaks the terminal table for every row below it.
+//
+// And it stays UNDER the takeaway. A takeaway is what a sitting concluded about
+// this bead; blocked_reason is what the machinery recorded when it routed the
+// bead away. When both exist the human answer wins, which is the same ordering
+// every other kind already has.
+func TestHumanAskIsCollapsedAndYieldsToATakeaway(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-wrap", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Metadata: map[string]string{"blocked_reason": "PR#88 closed out-of-band\n  without merging"}},
+		{ID: "tk-both", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Metadata: map[string]string{"blocked_reason": "the machinery reason"},
+			Takeaway: "the sitting ruled: fold it into tk-9k2ab"},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	wrap, _ := tileByID(b, "tk-wrap")
+	if wrap.Needs != "PR#88 closed out-of-band without merging" {
+		t.Errorf("a wrapped ask reached the table uncollapsed: %q", wrap.Needs)
+	}
+	// tk-both has no recorded waits, so it is also RULED — which spends NEEDS
+	// on the disposition and keeps the ruling itself on the wire. Either way
+	// the machinery reason must not be what the row shows.
+	both, _ := tileByID(b, "tk-both")
+	if both.Needs == "the machinery reason" {
+		t.Errorf("blocked_reason outranked the takeaway: %q", both.Needs)
+	}
+	if both.Takeaway == nil || *both.Takeaway != "the sitting ruled: fold it into tk-9k2ab" {
+		t.Errorf("the takeaway must stay on the wire: %v", both.Takeaway)
+	}
+}
+
 // TestUnruledHumanGatedRowsAreUnchanged: a decision or human bead with NO
 // takeaway has not been answered, and nothing about it moves.
 func TestUnruledHumanGatedRowsAreUnchanged(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-dec", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)},
-		{ID: "tk-hum", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)},
+		{ID: "tk-hum", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Metadata: map[string]string{"blocked_reason": "land as-is, split the findings into follow-ups, or abandon"}},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 	dec, _ := tileByID(b, "tk-dec")
@@ -1010,7 +1111,7 @@ func TestUnruledHumanGatedRowsAreUnchanged(t *testing.T) {
 	if dec.Severity != SevElevated || dec.Frontier != "human-gated decision" || dec.Needs != "operator decision" {
 		t.Errorf("unanswered decision: %s / %q / %q", dec.Severity, dec.Frontier, dec.Needs)
 	}
-	if hum.Severity != SevElevated || hum.Needs != "operator action" {
+	if hum.Severity != SevElevated || hum.Needs != "land as-is, split the findings into follow-ups, or abandon" {
 		t.Errorf("unanswered human row: %s / %q", hum.Severity, hum.Needs)
 	}
 }

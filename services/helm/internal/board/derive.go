@@ -462,6 +462,14 @@ func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRu
 	case !isRuled && a.Source == "decision":
 		return "human-gated decision"
 	case !isRuled && a.Source == "human":
+		// The marker's claim, and whether anything backs it. "no agent will
+		// take it" is an assertion ABOUT the work, and on a bead whose router
+		// recorded no ask nobody ever made that assertion — the marker was
+		// spent as "unclaimed" rather than "unclaimable". The row says which of
+		// the two it is instead of granting the claim for free.
+		if humanAsk(a) == "" {
+			return "routed to the operator — no ask recorded"
+		}
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
@@ -494,6 +502,27 @@ var wsRun = regexp.MustCompile(`\s+`)
 
 func collapseWS(s string) string {
 	return strings.TrimSpace(wsRun.ReplaceAllString(s, " "))
+}
+
+// humanAsk is the JUDGMENT a human-routed row is asking for, as its router
+// recorded it.
+//
+// `gc.routed_to=human` is a CLAIM — only a person can move this — and
+// `blocked_reason` is where the city states what that person is being asked to
+// decide. Reading it here is not a new contract: every pack writer of the
+// marker already writes the pair in ONE `gc bd update` (the refinery patrol's
+// merge-blocked and signoff-cap arms, the merge reconciler's
+// retargeted/abandoned/stale-base arms, check-set-heal's reopen-flap arm), and
+// the board simply never spent the field.
+//
+// ONLY `blocked_reason`, deliberately. Other prose fields turn up on these
+// beads too — `hold_reason`, `rejection_reason`, a doctor filing's `reason` —
+// and chaining over them would turn "state the ask" into "state it anywhere",
+// which is the same open-ended contract that let the marker mean nothing in the
+// first place. It would also double the surface gc-helm.sh has to mirror, for a
+// rule neither renderer could then state in one line.
+func humanAsk(a Anchor) string {
+	return collapseWS(a.Metadata["blocked_reason"])
 }
 
 // needs is the one-glance answer for a human.
@@ -540,7 +569,24 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	case a.Source == "decision":
 		return "operator decision"
 	case a.Source == "human":
-		return "operator action"
+		// The ask when the router stated one; otherwise NAME the omission.
+		//
+		// "operator action" was a constant, and it said the same nothing on all
+		// nine human rows of the 2026-08-23 board — four of which were ordinary
+		// agent work parked there because nobody had claimed it (tk-wfufb9). A
+		// cell that cannot tell "approve this irreversible prune" from
+		// "somebody fix this doctor check" is not a summary; it forces the
+		// operator to open every bead to learn what any of them wants, which is
+		// exactly the glance tk-b3rga established a row owes.
+		//
+		// The fallback is not a politer constant. It is the repair, addressed
+		// to whoever can make it: a route with no recorded ask is either a
+		// judgment nobody wrote down or work that was never the operator's, and
+		// the same two moves settle both.
+		if ask := humanAsk(a); ask != "" {
+			return ask
+		}
+		return "unexplained human route — state the ask or return it to the pool"
 	case a.Source == "parked" && r.mTotal == 0:
 		return "resume: prefix+a, then the bead id"
 	case r.mTotal == 0:

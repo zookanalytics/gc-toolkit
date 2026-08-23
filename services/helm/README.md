@@ -119,6 +119,39 @@ already an anchor (an epic carrying a takeaway, say) is not gathered twice. A
 bead carrying both markers is, and `BuildBoard`'s dedup keeps the higher band —
 `human` over `parked`.
 
+#### What a `human` row asks for
+
+A human row's NEEDS is `blocked_reason`, the field every writer of
+`gc.routed_to=human` sets in the *same* `gc bd update` as the marker — the
+refinery patrol's merge-blocked and signoff-cap arms, the merge reconciler's
+retargeted / abandoned / stale-base arms, `check-set-heal`'s reopen-flap arm.
+The board did not read it, and rendered the constant `"operator action"` for
+every such row instead.
+
+That constant was the defect (`tk-wfufb9`). On the 2026-08-23 board it was the
+entire NEEDS text of nine ELEVATED rows, and roughly half of those were ordinary
+agent work sitting in the operator's band because nobody had claimed it. A cell
+that cannot separate "approve this irreversible prune" from "somebody fix this
+doctor check" is not a summary — the operator has to open every bead to find out
+which is which, which is exactly the glance `tk-b3rga` established a row owes.
+
+| the bead has | NEEDS | FRONTIER |
+|---|---|---|
+| `blocked_reason` | that text, whitespace-collapsed | `routed to the operator — no agent will take it` |
+| the marker alone (or a blank `blocked_reason`) | `unexplained human route — state the ask or return it to the pool` | `routed to the operator — no ask recorded` |
+
+The fallback is the repair, not a politer constant: an unexplained route is
+either a judgment nobody wrote down or work that was never the operator's, and
+the same two moves settle both. The **band does not move** either way — whether
+a route was justified is not evidence about whether it was correct, and a quiet
+demotion would hide the very rows this surfaces. `doctor/check-human-route-states-the-ask`
+is the enforcing half; `docs/gascity-routing-model.md` states the rule.
+
+Only `blocked_reason` is read. Other prose turns up on these beads
+(`hold_reason`, `rejection_reason`, the bare `reason` a doctor filing leaves),
+and chaining over them would turn "state the ask" into "state it anywhere" —
+the same open-ended contract that let the marker mean nothing to begin with.
+
 That dedup is why the two takeaway rules below key on *human-gatedness* rather
 than on the kind alone. Two rows for one bead, each banded on its own, means the
 LOUDER derivation always wins, so a rule that quiets the `human` row would be
@@ -224,7 +257,7 @@ A row is **ruled** when all three hold:
 
 | shape | row |
 |---|---|
-| no takeaway | unchanged: ELEVATED, "human-gated decision" / "operator action" |
+| no takeaway | unchanged: ELEVATED, "human-gated decision" / the row's recorded ask (see below) |
 | takeaway, waits unreadable | unchanged — an unread graph proves nothing |
 | takeaway, a wait still open | unchanged — answering is not finishing |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |

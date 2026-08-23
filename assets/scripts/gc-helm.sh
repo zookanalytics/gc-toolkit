@@ -1343,6 +1343,17 @@ def wf_live($id):
     # internal whitespace (a stray newline would break the table) and trim.
     # Bound BEFORE the bands because $ruled below reads it.
     | (($a.takeaway // "") | gsub("[[:space:]]+";" ") | gsub("^ | $";"")) as $takeaway
+    # THE ASK a human-routed row is making — `blocked_reason`, collapsed the
+    # same way and for the same reason as the takeaway above (it is free prose
+    # a writer may have wrapped, and a stray newline would break the table).
+    # Only `blocked_reason`: every pack writer of gc.routed_to=human sets it in
+    # the same update as the marker, and chaining over the other prose fields
+    # that turn up on these beads (`hold_reason`, `rejection_reason`, the bare
+    # `reason` a doctor filing leaves) would turn "state the ask" into "state
+    # it anywhere". No apostrophes in here: this jq program is a single-quoted
+    # shell string, and one would end it.
+    | (($a.blocked_reason // "") | tostring
+       | gsub("[[:space:]]+";" ") | gsub("^ | $";"")) as $ask
     # HUMAN-GATED: no agent will take this — it moves only when a human moves it.
     # The two kinds that say so by BEING what they are, plus the marker that says
     # so on an ordinary bead. The marker clause is not redundant with the kinds:
@@ -1426,7 +1437,14 @@ def wf_live($id):
        # ruled row that decomposed skips this and reports its counts.
        elif ($ruled and $m==0) then "ruled — takeaway recorded"
        elif ((($ruled)|not) and $a.source=="decision") then "human-gated decision"
-       elif ((($ruled)|not) and $a.source=="human") then "routed to the operator — no agent will take it"
+       # What the marker CLAIMS, and whether anything backs it. "no agent will
+       # take it" is an assertion ABOUT the work; on a bead whose router left no
+       # ask, nobody ever made that assertion — the marker was spent as
+       # "unclaimed" rather than "unclaimable" (tk-wfufb9).
+       elif ((($ruled)|not) and $a.source=="human")
+            then (if ($ask|length) == 0
+                  then "routed to the operator — no ask recorded"
+                  else "routed to the operator — no agent will take it" end)
        elif $disposition_due then "parked · blocker landed"
        elif ($a.source=="parked" and ($waiting_open|length) > 0)
             then "parked · waiting on \($waiting_open|length)"
@@ -1465,7 +1483,14 @@ def wf_live($id):
        # the decision/human branches need no guard of their own.
        elif $a.source=="unowned" then "unowned — assign an owning bead"
        elif $a.source=="decision" then "operator decision"
-       elif $a.source=="human" then "operator action"
+       # The ask when the router stated one; otherwise NAME the omission.
+       # "operator action" was a constant that said the same nothing on all
+       # nine human rows of the 2026-08-23 board, four of them ordinary agent
+       # work parked there because nobody had claimed it. The fallback is the
+       # repair, not a politer constant (tk-wfufb9).
+       elif $a.source=="human"
+            then (if ($ask|length) > 0 then $ask
+                  else "unexplained human route — state the ask or return it to the pool" end)
        elif ($a.source=="parked" and $m==0) then "resume: prefix+a, then the bead id"
        elif $m==0 then "no children — decompose or assign"
        elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
@@ -1898,6 +1923,14 @@ gather_meta_anchors() {
                # keeps the higher band — so without this the twin would keep a
                # band the stand-down just took off its sibling, and win.
                routed_to:$routed,
+               # THE ASK. `blocked_reason` is the field every writer of
+               # gc.routed_to=human sets in the same `gc bd update` as the
+               # marker, and it is what the render spends as the NEEDS cell
+               # of a human row — so that cell names the judgment asked for
+               # instead of the constant "operator action" (tk-wfufb9). The
+               # other anchor gathers do not emit it and do not need to: only
+               # the `human` branch reads it, and `// ""` covers its absence.
+               blocked_reason:(($md["blocked_reason"] // "") | tostring),
                takeaway:$tk,
                takeaway_at:(($md["gc.takeaway_at"] // "") | tostring),
                takeaway_by:(($md["gc.takeaway_by"] // "") | tostring)}' \

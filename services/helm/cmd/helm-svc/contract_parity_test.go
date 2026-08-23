@@ -580,7 +580,8 @@ func lastRunes(s string, n int) string {
 // fix — and the boundary is INCLUSIVE, matching the writer's own gate.
 func TestClipLeavesShortProseAlone(t *testing.T) {
 	for _, s := range []string{
-		"", "operator action", "blocker landed — dispose or resume",
+		"", "unexplained human route — state the ask or return it to the pool",
+		"blocker landed — dispose or resume",
 		"resume: prefix+a, then the bead id", strings.Repeat("Z", colNeedsMax),
 	} {
 		if got := clip(s, colNeedsMax); got != s {

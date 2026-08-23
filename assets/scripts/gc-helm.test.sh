@@ -751,6 +751,12 @@ cat > "$ITMP/open.json" <<'J'
  {"id":"tk-hkids","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, and decomposed","priority":2,
   "updated_at":"2026-08-21T00:00:00Z","description":"",
   "metadata":{"gc.routed_to":"human"}},
+ {"id":"tk-hASK","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, with the ask stated","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human","blocked_reason":"PR#88 closed\n  out-of-band without merging"}},
+ {"id":"tk-hBLANK","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, ask field present but empty","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human","blocked_reason":"   "}},
  {"id":"tk-hRULED","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, and answered","priority":2,
   "updated_at":"2026-08-21T00:00:00Z","description":"",
   "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — design settled; tk-blkC slung"},
@@ -765,7 +771,8 @@ cat > "$ITMP/open.json" <<'J'
   "dependencies":[{"issue_id":"tk-hRDONE","depends_on_id":"tk-blkC","type":"blocks"}]},
  {"id":"tk-hHOLD","status":"open","assignee":null,"issue_type":"bug","title":"answered, but the routed work is still open","priority":2,
   "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — tk-blkO slung, landing next"},
+  "metadata":{"gc.routed_to":"human","blocked_reason":"land it, or split the rest into follow-ups",
+              "gc.takeaway":"ruled — tk-blkO slung, landing next"},
   "dependencies":[{"issue_id":"tk-hHOLD","depends_on_id":"tk-blkO","type":"blocks"}]}
 ]
 J
@@ -997,6 +1004,27 @@ eq "$(row tk-pdone2 frontier)" "all 2 closed · 0 open" "(PALLDONE) the frontier
 # --- (HKIDS) the same hole on the other metadata-keyed kind ------------------
 eq "$(row tk-hkids m_total)"  "1"        "(HKIDS) a human-routed bead rolls up its children too"
 eq "$(row tk-hkids severity)" "ELEVATED" "(HKIDS) …and its band still comes from the marker, not the counts"
+
+# --- (ASK) a human row spends the ask its router recorded (tk-wfufb9) --------
+# The census that filed it: nine ELEVATED rows whose entire NEEDS cell was the
+# constant "operator action", roughly half of them ordinary agent work parked in
+# the operator band because nobody had claimed it. A constant cannot tell those
+# apart, so the cell answers from the bead instead — the ask `blocked_reason`
+# carries, or the fact that no ask was recorded, which is itself the bug.
+eq "$(row tk-hASK needs)" "PR#88 closed out-of-band without merging"    "(ASK) the NEEDS cell is the recorded ask, not a constant"
+eq "$(row tk-hASK frontier)" "routed to the operator — no agent will take it"    "(ASK) …and a justified route keeps the claim it earned"
+eq "$(row tk-hASK severity)" "ELEVATED"    "(ASK) …at the band it already had — being justified is not being answered"
+# Collapsed like a takeaway: blocked_reason is free prose a writer may have
+# wrapped, and one stray newline breaks the table for every row below it.
+printf '%s' "$IOUT" | jq -e '[.[]?|select(.id=="tk-hASK")|.needs|test("\n")]|any|not' >/dev/null 2>&1   && ok "(ASK) …and a wrapped ask reaches the table collapsed"   || bad "(ASK) a newline survived into the NEEDS cell"
+
+# The marker alone. Three of the nine census rows looked exactly like this.
+eq "$(row tk-hkids needs)" "unexplained human route — state the ask or return it to the pool"    "(ASK) a bare marker NAMES the omission — and outranks the roll-up it has"
+eq "$(row tk-hkids frontier)" "routed to the operator — no ask recorded"    "(ASK) …and the frontier stops asserting a claim nobody made"
+# Present-but-empty is not an ask: blocked_reason is often built by
+# interpolation, and an empty interpolation leaves a field that says nothing.
+eq "$(row tk-hBLANK needs)" "unexplained human route — state the ask or return it to the pool"    "(ASK) a whitespace-only ask is no ask"
+eq "$(row tk-hBLANK severity)" "ELEVATED"    "(ASK) …and an unexplained row is NOT quietly demoted off the board"
 
 # --- (PRANK) the floor was the thing hiding it ------------------------------
 PK_SCORE="$(row tk-pkids rank_score)"; BARE_SCORE="$(row tk-parked rank_score)"
