@@ -47,7 +47,10 @@
 #       hold is correct and deliberate, so this is not a drop; what earns the line
 #       is that the hold is UNBOUNDED and self-announces exactly once per head, so
 #       nothing surfaces it afterwards. A PR held forever belongs in the answer to
-#       "what is stuck".
+#       "what is stuck" — but only while it is actually stuck. An anchor with live
+#       remediation already in flight is NOT (see `remediation_for` below); it is
+#       noted and not flagged, because a held anchor somebody is already fixing
+#       costs an operator a re-triage and buys nothing (tk-ezgr2).
 #
 # WHAT IS NOT FLAGGED — deliberately:
 #
@@ -64,6 +67,13 @@
 #     merge_result filter plus the live-bead query (no --all) scope this to
 #     work that has not merged yet. Past PRs are reviewed manually and are
 #     explicitly out of scope (operator, 2026-07-22).
+#   - An exception-held gate whose anchor ALREADY HAS live remediation. Arm 3
+#     only asks an operator for a ruling; a ruling is already unnecessary when a
+#     rework or rebase child is running against the anchor. It is downgraded to a
+#     note, never dropped silently, and the green summary counts it. Suppression
+#     requires a LIVE bead (the shared `acting` predicate) that is not the anchor
+#     itself — an inert husk on the branch leaves the anchor reported, which is
+#     the stranded-anchor case this check exists to catch.
 #
 # Suspended rigs are skipped, matching the doctor core's own per-rig rule:
 # opening their bead store triggers bd auto-start of orphan Dolt servers.
@@ -104,6 +114,109 @@ run_bounded() {
         # call rather than skipping the check entirely.
         "$@" </dev/null
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Is remediation for an exception-held anchor ALREADY RUNNING?
+#
+# Arm 3 reports a held gate so a human can rule on it. That is only worth an
+# operator's attention when nothing is already coming for the anchor — and three
+# times in under 24 hours it was not (tk-ezgr2): the hold was reported while a
+# live rework ran against the very same branch, and each report cost a full mayor
+# re-triage. One patrol earlier the same class was caught by hand and written
+# down — "unassigned is not the right liveness test for a held anchor" — and the
+# check still did not implement it. The deacon restarts fresh every cycle, so
+# nothing instruction-shaped survives to the next patrol; the remedy has to be
+# mechanical, and this is it.
+#
+# WHY TESTING THE ANCHOR CANNOT SEE IT. Remediation does not run on the anchor.
+# It runs on a SEPARATE child bead with its own workflow — a rework, or a
+# rebase-and-re-author child — which leaves the anchor unassigned and unmentioned
+# by id in any bead title. An anchor with vigorous live work against its branch is
+# indistinguishable, from the anchor alone, from an abandoned one. Asking the
+# LEDGER for a bead that names the anchor is what distinguishes them.
+#
+# Two surfaces, each one indexed metadata lookup:
+#   EXACT — `source_anchor_bead=<anchor>`, stamped by reconcile-merged-prs.sh on
+#           every rebase child it files. Carrying it IS naming this anchor.
+#   BROAD — `branch=<the anchor's branch>`. Rework children never carry
+#           source_anchor_bead — check-set-heal.sh's `inflight_for` splits its own
+#           surfaces on exactly that fact — and the branch they push to is what
+#           ties them to this anchor.
+#
+# MEMBERSHIP IS THE SHARED PREDICATE, not a local rule. `acting` is what separates
+# a live rework from an inert husk, and a local answer here would fail in the
+# direction this check exists to prevent: a bead that merely EXISTS would silence
+# a genuinely stranded anchor forever. Two live facts make that concrete — an
+# anchor's own branch lookup returns THE ANCHOR ITSELF (the self-exclusion is
+# load-bearing, not defensive), and a rebase child whose metadata stamp was
+# dropped sits open, unrouted and unclaimed by design (reconcile-merged-prs.sh
+# calls it "a bounded orphan"), which is not remediation. On the BROAD surface a
+# bead naming ANOTHER anchor is dropped too: its own anchor holds its own merge.
+#
+# AN UNREADABLE LEDGER IS NOT "NOTHING IN FLIGHT". The lookup returns rc=2 and the
+# exception is reported anyway with the failure named — the same rule every other
+# arm here follows: an undeterminable arm always reports, never silently passes.
+# The block below is COPIED VERBATIM from assets/scripts/check-set-heal.sh, the
+# canonical copy, and is drift-checked by assets/scripts/inflight-membership.test.sh.
+# Copy the markers too.
+# >>> inflight-membership
+# shellcheck disable=SC2034  # part of the shared block; not every host spends it
+INFLIGHT_LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+INFLIGHT_MEMBERSHIP_JQ='def claimable:
+  . as $b
+  | (($b.metadata // {})) as $m
+  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
+  | ((($m["gc.routed_to"] // "") | tostring) != "")
+    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
+def acting($live):
+  . as $b
+  | (($b.metadata // {})) as $m
+  | (($live | split(",")) | map(select(. != "open"))) as $owning
+  | ((($m.task_kind // "") | tostring) == "review")
+    or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
+    or ($b | claimable);
+def anchor_authority($a):
+  ((((. // {}).metadata // {}).anchor_bead // "") | tostring) as $ab
+  | if $ab == "" then "unattributed" elif $ab == $a then "mine" else "theirs" end;
+'
+# <<< inflight-membership
+
+# Echoes `<surface> <bead-id>` for a bead that is actively remediating
+# <anchor-id>, or nothing when none is. rc=2 means the ledger could not answer
+# and the caller must NOT read that as "nothing in flight".
+#
+# The surface is tagged — `inflight_for` tags review-vs-rework for the same
+# reason — because the two are not equally strong evidence: `source_anchor_bead`
+# NAMES this anchor, while a shared branch infers it. A human re-reading the note
+# should not have to guess which one bought the silence.
+remediation_for() { # <rig> <anchor-id> <anchor-branch>
+    local rig="$1" aid="$2" br="$3" raw="" found=""
+
+    raw=$(run_bounded gc bd --rig "$rig" list \
+              --metadata-field "source_anchor_bead=$aid" \
+              --status="$INFLIGHT_LIVE_STATUSES" --json --limit 0 --brief 2>/dev/null)
+    printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+    found=$(printf '%s' "$raw" \
+        | jq -r --arg a "$aid" --arg live "$INFLIGHT_LIVE_STATUSES" \
+            "$INFLIGHT_MEMBERSHIP_JQ"'[.[] | select(.id != $a) | select(acting($live))]
+                | .[0].id // empty' 2>/dev/null) || return 2
+    if [ -n "$found" ]; then printf 'source_anchor_bead %s' "$found"; return 0; fi
+
+    # The anchor's branch is the only tie a rework child leaves. No branch
+    # recorded means this surface asks nothing — not that it answered "none".
+    [ -n "$br" ] || return 0
+    raw=$(run_bounded gc bd --rig "$rig" list \
+              --metadata-field "branch=$br" \
+              --status="$INFLIGHT_LIVE_STATUSES" --json --limit 0 --brief 2>/dev/null)
+    printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+    found=$(printf '%s' "$raw" \
+        | jq -r --arg a "$aid" --arg live "$INFLIGHT_LIVE_STATUSES" \
+            "$INFLIGHT_MEMBERSHIP_JQ"'[.[] | select(.id != $a) | select(acting($live))
+                | select(anchor_authority($a) != "theirs")]
+                | .[0].id // empty' 2>/dev/null) || return 2
+    [ -n "$found" ] && printf 'branch %s' "$found"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -197,6 +310,10 @@ rig_formula_var_state() {
 # ---------------------------------------------------------------------------
 checked=0
 skipped_suspended=0
+# Exception-held gates suppressed because remediation is already in flight.
+# Counted rather than dropped: a suppression nobody can see reads as "there was
+# nothing to suppress", which is the failure this arm is one step away from.
+exception_owned=0
 
 while IFS=$'\t' read -r rig suspended; do
     [ -z "$rig" ] && continue
@@ -287,9 +404,33 @@ EOF
     # the verdict arm writes beside the marker: check.<name>.reason holds prose,
     # .attempts holds "<n>@<sha>", .exception_escalated holds a bare sha, and none
     # of them can begin with "exception@".
-    while IFS=$'\t' read -r bead gate marker merge_result pr reason; do
+    #
+    # `reason` stays LAST in the row: it is prose, and only the final field can
+    # absorb a stray separator. (@tsv escapes tabs anyway; the ordering keeps that
+    # from being the only thing standing between prose and a shifted field.)
+    while IFS=$'\t' read -r bead gate marker merge_result pr branch reason; do
         [ -z "$bead" ] && continue
-        warnings+=("$rig/$bead: merge gate '$gate' is HELD IN EXCEPTION ($marker) on a live gating anchor (merge_result=$merge_result, PR $pr) — reason: ${reason:-<none recorded>}. The gate holds the merge and no automated path will lift it; it re-arms only when the input changes and the head moves.")
+        held="$rig/$bead: merge gate '$gate' is HELD IN EXCEPTION ($marker) on a live gating anchor (merge_result=$merge_result, PR $pr) — reason: ${reason:-<none recorded>}. The gate holds the merge and no automated path will lift it; it re-arms only when the input changes and the head moves."
+        owner_rc=0
+        owner=$(remediation_for "$rig" "$bead" "$branch") || owner_rc=$?
+        if [ "$owner_rc" != "0" ]; then
+            warnings+=("$held Whether remediation is already in flight is UNDETERMINED (the ledger lookup failed or timed out at ${BOUND}s) — reported rather than assumed owned.")
+        elif [ -n "$owner" ]; then
+            # Live remediation names this anchor. The hold is tracked, so there is
+            # nothing here for an operator to rule on until that work lands — and
+            # reporting it anyway is what cost three mayor re-triages (tk-ezgr2).
+            # Noted, not flagged: the trail stays readable in the details without
+            # spending a warning.
+            exception_owned=$((exception_owned + 1))
+            # The broad surface names the branch it matched on; the exact one
+            # needs no qualifier, and repeating the branch there would read as
+            # though both surfaces had fired.
+            via="${owner%% *}"
+            [ "$via" = "branch" ] && via="branch $branch"
+            notes+=("$rig/$bead: merge gate '$gate' held in exception ($marker) — NOT flagged: $rig/${owner#* } is live and remediating it (matched on $via). Nothing to rule on until that work lands.")
+        else
+            warnings+=("$held No live bead names this anchor or its branch${branch:+ ($branch)}, so nothing is remediating it.")
+        fi
     done <<EOF
 $(printf '%s' "$anchors_json" | jq -r '
     .[]?
@@ -304,6 +445,7 @@ $(printf '%s' "$anchors_json" | jq -r '
         .value,
         ($b.metadata.merge_result // ""),
         ("#" + (($b.metadata.pr_number // "?") | tostring)),
+        (($b.metadata.branch // "") | tostring),
         (($b.metadata[.key + ".reason"] // "") | tostring) ]
     | @tsv' 2>/dev/null)
 EOF
@@ -340,6 +482,7 @@ if [ "$n_warn" -gt 0 ]; then
 fi
 
 summary="no silently-dropped merge gates: $checked rig(s) checked, no empty $VAR override, 0 live gating anchor(s) stamped empty, 0 gate(s) held in exception"
+[ "$exception_owned" -gt 0 ] && summary="$summary needing a ruling ($exception_owned already being remediated — see notes)"
 [ "$skipped_suspended" -gt 0 ] && summary="$summary ($skipped_suspended suspended rig(s) skipped)"
 [ -z "$formula_vars_readable" ] && summary="$summary [formula_vars overrides unread]"
 echo "$summary"
