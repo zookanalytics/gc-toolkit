@@ -304,6 +304,15 @@ Naming it keeps the rest honest about fact versus aspiration.
   transitional; the direction is to lean less on gastown and more on Gas City's
   own evolving primitives — used where they genuinely fit, not adopted for their
   own sake. It is deliberately not encoded here as the architecture.
+- **The lifecycle seam.** Each of the three flows a piece of work crosses — bead,
+  PR, visit — is settled and owned. Their *composition* is not: the handoff where
+  a conversation routes work out of a subject and the finished result has to
+  propagate back. The rule is now stated
+  ([lifecycle-composition.md](lifecycle-composition.md)), and the half that
+  records a wait as a graph edge and re-derives it is running. The half that
+  pushes completion back — so a finished subject announces itself rather than
+  waiting to be noticed — is being built. Until it is, that last step is carried
+  by the operator's eye, which is the cost this pack most wants off the human.
 
 ## The consistency test
 
