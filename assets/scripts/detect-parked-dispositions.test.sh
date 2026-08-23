@@ -597,6 +597,10 @@ hasnt "$TMP/err" "s-openblock RE-ARMED" "(REARMNOT) nor is an unflagged subject 
 # disposition_flagged, so dropping the at-least-one-wait guard does not produce a
 # visit — it silently reclassifies the park as "already flagged" and every
 # hasnt-assertion above still passes. The counts are the only place that shows it.
+#
+# The BUCKETS partition the 28 candidates (5+5+7+2+2+3+1+1+2). `re-armed` is not a
+# bucket — it is an action count, and both re-armed subjects are also counted in
+# `still waiting` — so it is deliberately outside that sum.
 has "$TMP/out" "5 disposition(s) and 5 stranded hold(s) signalled; 7 still waiting, 2 settling (closed inside the 900s window), 2 re-armed, 2 with no recorded wait, 3 already under an open visit, 1 already flagged, 1 hold(s) already signalled, 2 undated hold(s), 0 unreadable, 0 failed" \
   "(CENSUS) 28 candidates, one bucket each — the classification itself is pinned, not just the absence of a report"
 

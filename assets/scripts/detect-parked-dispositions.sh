@@ -867,6 +867,11 @@ done <<< "$ROWS"
 
 MODE=""
 [ "$DRY_RUN" -eq 1 ] && MODE="(dry-run) "
+# The bucket counts partition the candidates — every candidate lands in exactly one,
+# which is what makes a dropped guard visible as a reclassification. `re-armed` is NOT
+# one of them: it is an action count layered on top, and a re-armed subject is also
+# counted in `waiting` or `settling`. So the buckets sum to the candidate count and
+# `re-armed` does not.
 echo "$PROG: ${MODE}${filed} disposition(s) and ${holds} stranded hold(s) signalled; $waiting still waiting, $settling settling (closed inside the ${SETTLE_SECONDS}s window), $rearmed re-armed, $no_wait with no recorded wait, $visit_open already under an open visit, $already already flagged, $hold_already hold(s) already signalled, $hold_undated undated hold(s), $unreadable unreadable, $failed failed"
 
 # Only failed WRITES decide the exit code. An unreadable subject is a deliberate
