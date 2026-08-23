@@ -58,6 +58,22 @@
 #   human   `gc.routed_to=human` is the city's durable "a human must act"
 #           marker. Banded ELEVATED for a decision's reason: no agent will
 #           take it, so it moves only when the operator moves it.
+#
+#           UNTIL IT IS ANSWERED. Both human-gated kinds are banded by what
+#           they ARE, and what they are never changes while the bead is
+#           open — so the row asked for the operator on the day it was filed
+#           and went on asking after they answered it. On the 2026-08-23
+#           board seven of 24 ELEVATED rows carried a `gc.takeaway`
+#           recording their own ruling, one of them for thirty days, and
+#           converse never closes a subject by contract, so nothing else
+#           could ever retire them. A takeaway PLUS no outstanding
+#           `--waiting-on` work stands the row DOWN to LOW, reading
+#           "ruled — close or extend" (tk-b3rga). Same derivation as the
+#           parked disposition below — per render, storing nothing — pointed
+#           the other way, so a re-opened question stands back up by itself.
+#           A ruled row that DECOMPOSED is banded by its roll-up instead:
+#           "answered" is a claim about the bead, and open work under it
+#           falsifies the claim, exactly as it does for a parked subject.
 #   parked  a `gc.takeaway` means the conversation reached a conclusion.
 #           Banded LOW — the opposite claim. It wants nothing; it only has
 #           to stay FINDABLE, and the band floor keeps it from competing
@@ -92,7 +108,11 @@
 # Both EXCLUDE the four typed kinds, so an epic or decision that happens to
 # carry a marker stays its own kind instead of arriving twice. A bead
 # carrying BOTH markers is emitted twice on purpose and the id-dedup below
-# keeps the higher band.
+# keeps the higher band — which is why the stand-down and the disposition
+# promotion both key on human-gatedness rather than on the kind alone. Two
+# rows for one bead, each with its own band, means the LOUDER derivation
+# always wins; a quieting rule that reads only the kind would be undone by
+# its own twin on every row it was written for.
 #
 # This mirrors the Go helm service's gather (services/helm/README.md,
 # "Anchor kinds", tk-2v08m). THE TWO BOARDS ARE SEPARATE IMPLEMENTATIONS
@@ -1318,9 +1338,46 @@ def wf_live($id):
     # invites closing a subject whose work is still in flight.
     | (($a.waiting_on // []) | if type=="array" then . else [] end) as $waiting
     | ([ $waiting[] | select((($waitmap[.] // "") | tostring) != "closed") ]) as $waiting_open
+    # The LLM-authored takeaway (host or proactive), if any: the board-visible
+    # headline of what this anchor concluded / what it needs. Collapse any
+    # internal whitespace (a stray newline would break the table) and trim.
+    # Bound BEFORE the bands because $ruled below reads it.
+    | (($a.takeaway // "") | gsub("[[:space:]]+";" ") | gsub("^ | $";"")) as $takeaway
+    # HUMAN-GATED: no agent will take this — it moves only when a human moves it.
+    # The two kinds that say so by BEING what they are, plus the marker that says
+    # so on an ordinary bead. The marker clause is not redundant with the kinds:
+    # a bead carrying BOTH gc.routed_to=human and a gc.takeaway is emitted twice
+    # on purpose, once per marker, and the id-dedup below keeps the HIGHER band —
+    # so a rule that quiets the `human` row is undone by its `parked` twin unless
+    # the twin is recognised as the same human-gated bead.
+    | ((($a.routed_to // "") | tostring) == "human"
+       or $a.source=="decision" or $a.source=="human") as $human_gated
     # DISPOSITION DUE: it was waiting on something, and every one of those has
     # landed. The row is no longer "wants nothing" — it wants a disposition.
-    | ($a.source=="parked" and ($waiting|length) > 0 and ($waiting_open|length) == 0) as $disposition_due
+    #
+    # NOT for a human-gated subject, twin included. The promotion exists to lift a
+    # row out of the parked LOW FLOOR where nobody would look at it again; a
+    # human-gated bead was never in that floor, and $ruled below answers for the
+    # same state at the volume the operator asked for. Both firing would put an
+    # ELEVATED duplicate of every stood-down row back on the board.
+    | ($a.source=="parked" and ($waiting|length) > 0 and ($waiting_open|length) == 0
+       and (($human_gated)|not)) as $disposition_due
+    # RULED — the STAND-DOWN state: a human-gated row that has already been
+    # answered, and whose recorded waits have all landed.
+    #
+    # A decision or a human-routed bead is banded by what it IS, and what it is
+    # never changes while the bead is open — so the row asked for the operator on
+    # the day it was filed and went on asking after they answered it. Measured
+    # 2026-08-23: seven ELEVATED rows on a 62-row board carried a takeaway
+    # recording their own ruling, one of them (tk-z130v) for THIRTY DAYS. Nothing
+    # else in the city re-reads a takeaway, and converse never closes a subject by
+    # contract, so no other actor could ever retire them.
+    #
+    # Same shape as $disposition_due: derived per render from state the bead
+    # already carries, storing nothing, so a re-opened question stands back up by
+    # itself. The wait clause is what keeps it honest — a decision whose
+    # `--waiting-on` work is still open has not finished being a decision.
+    | ($human_gated and ($takeaway|length) > 0 and ($waiting_open|length) == 0) as $ruled
     # severity band. A held anchor is active work via its conversation,
     # not via in-progress child polecats — so "0 in-progress" is NOT
     # stranded when a visit is open. Stranded/HIGH is reserved for a
@@ -1330,6 +1387,11 @@ def wf_live($id):
     # a CHILDLESS one has no roll-up to band on, and falling through would read
     # every such bead as an empty anchor. `human` is ELEVATED for the same
     # reason a decision is: gc.routed_to=human means no agent will take it.
+    # Both stand DOWN once $ruled — the row was answered, and a recorded ruling
+    # that keeps asking is the loudest kind of noise. A ruled row that DECOMPOSED
+    # is banded by its roll-up instead, exactly as a decomposed parked subject is:
+    # "answered" is a claim about the bead, and open work hanging under it
+    # falsifies the claim (tk-a9k0l).
     # `parked` is LOW for the opposite reason — the conversation reached a
     # takeaway and wants nothing, it only has to stay FINDABLE, so the band
     # floor keeps it out of the contest with real attention items whatever its
@@ -1345,8 +1407,8 @@ def wf_live($id):
     # refuses a parent→descendant `blocks` edge, so $waiting is empty for
     # exactly the subjects that decomposed (tk-a9k0l, tk-2cyxo).
     | (if $a.source=="unowned" then "HIGH"
-       elif $a.source=="decision" then "ELEVATED"
-       elif $a.source=="human" then "ELEVATED"
+       elif ($ruled and $m==0) then "LOW"
+       elif ((($ruled)|not) and ($a.source=="decision" or $a.source=="human")) then "ELEVATED"
        elif $disposition_due then "ELEVATED"
        elif ($a.source=="parked" and $m==0) then "LOW"
        elif $m==0 then "LOW"
@@ -1359,8 +1421,12 @@ def wf_live($id):
     # one-line frontier summary
     | (if $inprog_dead>0 then " · \($inprog_dead) stuck (dead owner)" else "" end) as $deadsfx
     | (if $a.source=="unowned" then "unowned convoy — no owning bead"
-       elif $a.source=="decision" then "human-gated decision"
-       elif $a.source=="human" then "routed to the operator — no agent will take it"
+       # Parallel to the parked phrase below, and for the same reason: the row is
+       # reporting what it IS, because it has no roll-up to report instead. A
+       # ruled row that decomposed skips this and reports its counts.
+       elif ($ruled and $m==0) then "ruled — takeaway recorded"
+       elif ((($ruled)|not) and $a.source=="decision") then "human-gated decision"
+       elif ((($ruled)|not) and $a.source=="human") then "routed to the operator — no agent will take it"
        elif $disposition_due then "parked · blocker landed"
        elif ($a.source=="parked" and ($waiting_open|length) > 0)
             then "parked · waiting on \($waiting_open|length)"
@@ -1377,17 +1443,26 @@ def wf_live($id):
        elif ($inprog_live==0 and $held) then ("\($open) open · in conversation" + $deadsfx)
        elif $inprog_live==0 then "\($open) open · 0 in flight (stranded)"
        else "\($open) open · \($inprog_live) in flight" + $deadsfx end) as $frontier
-    # The LLM-authored takeaway (host or proactive), if any: the board-visible
-    # headline of what this anchor concluded / what it needs. Collapse any
-    # internal whitespace (a stray newline would break the table) and trim.
-    | (($a.takeaway // "") | gsub("[[:space:]]+";" ") | gsub("^ | $";"")) as $takeaway
     # NEEDS is the one-glance answer for a human: the LLM takeaway sentence
     # when one exists, else a TERSE deterministic STATE phrase — never a
     # bead-id list. The mechanical heads/xref ids move to --json only
     # (open_heads, cross_rig_refs), so the human table stays explanatory and
     # cannot emit a raw/truncated bead-id.
     | (if $disposition_due then "blocker landed — dispose or resume"
+       # A ruled row spends its NEEDS on the DISPOSITION for the same reason, and
+       # with the same trade. The takeaway is not stale here — it is the ruling —
+       # but NEEDS answers "what does this row want from me", and what a ruled row
+       # wants is to be closed or re-opened, not re-read. The ruling itself stays
+       # on the wire in `takeaway`, where nothing truncates it; in this table it
+       # was the longest cell in that column (n=20 over the 140-char cap on
+       # the 2026-08-23 board, max 1343) and the least actionable.
+       #
+       # Only while the row has no roll-up. A ruled row with children reports the
+       # takeaway and is banded by those children, so its two halves agree.
+       elif ($ruled and $m==0) then "ruled — close or extend"
        elif ($takeaway|length) > 0 then $takeaway
+       # Below here the takeaway is empty, so $ruled is false by construction and
+       # the decision/human branches need no guard of their own.
        elif $a.source=="unowned" then "unowned — assign an owning bead"
        elif $a.source=="decision" then "operator decision"
        elif $a.source=="human" then "operator action"
@@ -1516,9 +1591,10 @@ def clip($w): . as $s | if (($s|length) > $w) then (($s[0:$w-1]) + "…") else $
         + ((.frontier)|rpad(36)) + ((.needs)|clip($needsw)) )
 '
     # <<< board-table-render
-    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck/blocker-landed · NORMAL=active · LOW=empty/complete/childless-parked\n'
+    printf '\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck/blocker-landed · NORMAL=active · LOW=empty/complete/childless-parked/ruled\n'
     printf 'Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n'
     printf 'A parked row reading "blocker landed" was waiting on work that has since closed — it needs a disposition, not a re-read\n'
+    printf 'A row reading "ruled" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n'
     printf 'A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n'
     printf 'Held: ● an open visit holds this anchor'\''s conversation (attach via the sessions picker) · blank = none\n'
     printf 'open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n'
@@ -1569,7 +1645,10 @@ gather_anchors() {
                   children:$ch}' >> "$ANCHORS" || gather_mark "anchor@$eid"
         done
 
-        # Decisions: human-gated; no child roll-up needed (rank is elevated regardless).
+        # Decisions: human-gated; no child roll-up needed (it is banded by what
+        # it IS). It does carry its `blocks` waiting edges, which are half of
+        # the stand-down test ($ruled in the render): a decision whose
+        # `--waiting-on` work is still open has not finished being a decision.
         decisions_raw=$(gcq bd list --db "$beads" --type decision --status open --json)
         printf '%s' "$decisions_raw" | jq -e 'type=="array"' >/dev/null 2>&1 || gather_mark "decisions@$name"
         decisions=$(as_array "$decisions_raw")
@@ -1578,6 +1657,10 @@ gather_anchors() {
             '.[] | {id, title:(.title//""), kind:"decision", source:"decision", rig:$rig, prefix:$prefix,
                     priority:(.priority//3), updated_at:(.updated_at//""), description:(.description//""),
                     progress:null, children:[],
+                    waiting_on:([ (.dependencies // [])[]
+                                  | select(((.type // "") | tostring) == "blocks")
+                                  | ((.depends_on_id // "") | tostring)
+                                  | select(length > 0) ] | unique),
                     takeaway:(.metadata["gc.takeaway"] // ""),
                     takeaway_at:(.metadata["gc.takeaway_at"] // ""),
                     takeaway_by:(.metadata["gc.takeaway_by"] // "")}' >> "$ANCHORS"
@@ -1804,10 +1887,17 @@ gather_meta_anchors() {
                rig:$rig, prefix:$prefix, priority:($b.priority // 3),
                updated_at:($b.updated_at // ""), description:($b.description // ""),
                progress:null, children:(($kids[$b.id] // []) | if type=="array" then . else [] end),
-               # Only the parked kind spends these (the disposition derivation
-               # keys on source=="parked"), and the Go gather pays a query per
-               # anchor for them — so both sides gather them for parked alone.
-               waiting_on:(if $kind == "parked" then $waiting else [] end),
+               # Both kinds spend these now: `parked` through the disposition
+               # derivation, `human` through the stand-down one ($ruled below).
+               # The Go gather reads them for the same two, so the two boards
+               # stay field-for-field identical.
+               waiting_on:$waiting,
+               # The marker itself, so the render can tell that a `parked` row
+               # is the TWIN of a human-routed bead. A bead carrying BOTH
+               # markers is emitted once per marker on purpose and the id-dedup
+               # keeps the higher band — so without this the twin would keep a
+               # band the stand-down just took off its sibling, and win.
+               routed_to:$routed,
                takeaway:$tk,
                takeaway_at:(($md["gc.takeaway_at"] // "") | tostring),
                takeaway_by:(($md["gc.takeaway_by"] // "") | tostring)}' \

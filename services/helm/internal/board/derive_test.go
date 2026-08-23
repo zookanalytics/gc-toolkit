@@ -836,3 +836,233 @@ func equalIDs(got, want []string) bool {
 	}
 	return true
 }
+
+// ── the stand-down rule (tk-b3rga) ───────────────────────────────────────────
+//
+// A decision and a human-routed bead are banded by what they ARE, and what they
+// are never changes while the bead is open. So the row asked for the operator on
+// the day it was filed and went on asking after they answered it: on the
+// 2026-08-23 board, seven of 24 ELEVATED rows carried a takeaway recording their
+// own ruling, one of them for thirty days.
+
+// TestRuledStandsDown is the headline case: answered, nothing outstanding, so
+// the row leaves the attention band and says what it now wants instead.
+func TestRuledStandsDown(t *testing.T) {
+	anchors := []Anchor{
+		// The regression case named on the bead: ruled 2026-07-24, still
+		// ELEVATED thirty days later. No waiting edges at all — "every wait
+		// landed" is vacuously true, which is the common shape.
+		{ID: "tk-z130v", Title: "excise the fork", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(30),
+			Takeaway: "ROUTED: mayor mailed to excise gc-8yr6px"},
+		// The same state reached through a discharged edge.
+		{ID: "tk-lpf9g", Title: "fragment vs prompt body", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway:  "accepted — crux ANSWERED YES",
+			WaitingOn: []string{"tk-vvnkj"}, WaitingOnClosed: []string{"tk-vvnkj"}},
+		// And on the other human-gated kind.
+		{ID: "tk-j5wrs", Title: "membership predicate", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway:  "routed — design ruled; tk-vie5k slung",
+			WaitingOn: []string{"tk-vie5k"}, WaitingOnClosed: []string{"tk-vie5k"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	for _, id := range []string{"tk-z130v", "tk-lpf9g", "tk-j5wrs"} {
+		tile, ok := tileByID(b, id)
+		if !ok {
+			t.Fatalf("%s is missing from the board", id)
+		}
+		if tile.Severity != SevLow {
+			t.Errorf("%s: an answered row stands down to LOW, got %s", id, tile.Severity)
+		}
+		if tile.Frontier != "ruled — takeaway recorded" {
+			t.Errorf("%s frontier: %q", id, tile.Frontier)
+		}
+		if tile.Needs != "ruled — close or extend" {
+			t.Errorf("%s needs: %q", id, tile.Needs)
+		}
+		// The ruling is still on the wire — the row is quieted, not censored.
+		if tile.Takeaway == nil || *tile.Takeaway == "" {
+			t.Errorf("%s: the takeaway must survive the stand-down", id)
+		}
+	}
+
+	// LOW is not stale-bumped, which is what makes the thirty-day case stay
+	// down. Land this on NORMAL instead and tk-z130v is ELEVATED again by the
+	// next render.
+	old, _ := tileByID(b, "tk-z130v")
+	if old.StaleDays <= staleThresholdDays {
+		t.Fatalf("the regression case has to BE stale for this to prove anything: %d days", old.StaleDays)
+	}
+	if old.Severity != SevLow {
+		t.Errorf("a ruled row is not re-elevated by age: %s at %d days", old.Severity, old.StaleDays)
+	}
+}
+
+// TestRuledNeedsTheWaitToHaveLanded is the guard. "Answered" is not "answered
+// and the work landed": a decision whose `--waiting-on` edge is still open has
+// not finished being a decision, and must keep its band.
+//
+// This is also what makes the wait clause non-vacuous, and it only holds
+// because the gather reads waiting edges for these kinds at all — see
+// source.waitingEdges.
+func TestRuledNeedsTheWaitToHaveLanded(t *testing.T) {
+	a := Anchor{ID: "tk-hs2e8", Title: "clean-exit rate", Kind: "decision", Source: "decision",
+		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+		Takeaway:  "answered NO — real bug is stranded holds, routed tk-jsyci7",
+		WaitingOn: []string{"tk-jsyci7"}}
+	tile := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+
+	if tile.Severity != SevElevated {
+		t.Errorf("the routed work is still open — the row keeps its band, got %s", tile.Severity)
+	}
+	if tile.Frontier != "human-gated decision" {
+		t.Errorf("frontier unchanged while the wait is live: %q", tile.Frontier)
+	}
+	if tile.Needs != "answered NO — real bug is stranded holds, routed tk-jsyci7" {
+		t.Errorf("its takeaway still answers for it: %q", tile.Needs)
+	}
+}
+
+// TestUnruledHumanGatedRowsAreUnchanged: a decision or human bead with NO
+// takeaway has not been answered, and nothing about it moves.
+func TestUnruledHumanGatedRowsAreUnchanged(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-dec", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)},
+		{ID: "tk-hum", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	dec, _ := tileByID(b, "tk-dec")
+	hum, _ := tileByID(b, "tk-hum")
+	if dec.Severity != SevElevated || dec.Frontier != "human-gated decision" || dec.Needs != "operator decision" {
+		t.Errorf("unanswered decision: %s / %q / %q", dec.Severity, dec.Frontier, dec.Needs)
+	}
+	if hum.Severity != SevElevated || hum.Needs != "operator action" {
+		t.Errorf("unanswered human row: %s / %q", hum.Severity, hum.Needs)
+	}
+}
+
+// TestRuledWithChildrenIsBandedByItsRollUp: "answered" is a claim about the
+// BEAD, and open work hanging under it falsifies the claim — the same reason
+// the parked LOW floor stops at a decomposed subject (tk-a9k0l). A ruling must
+// not become a new way to hide stranded children.
+func TestRuledWithChildrenIsBandedByItsRollUp(t *testing.T) {
+	// Both human-gated kinds, because each has its own short-circuit branch in
+	// severity and in frontier, and a guard on one does not reach the other.
+	anchors := []Anchor{
+		{ID: "tk-rkids", Title: "ruled, and decomposed", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway:  "routed — the work is filed as children",
+			WaitingOn: []string{"tk-w"}, WaitingOnClosed: []string{"tk-w"},
+			Children: []Child{{ID: "tk-kid", Status: "open"}}},
+		{ID: "tk-dkids", Title: "a ruled decision that decomposed", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway: "decided — the follow-up is filed under this bead",
+			Children: []Child{{ID: "tk-dkid", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	for _, id := range []string{"tk-rkids", "tk-dkids"} {
+		tile, ok := tileByID(b, id)
+		if !ok {
+			t.Fatalf("%s is missing from the board", id)
+		}
+		if tile.Severity != SevHigh {
+			t.Errorf("%s: open work under a ruled row still strands it, got %s", id, tile.Severity)
+		}
+		if !tile.Stranded {
+			t.Errorf("%s: stranded is the structural claim behind that band", id)
+		}
+		if tile.Needs == "ruled — close or extend" {
+			t.Errorf("%s: a decomposed row must not claim there is nothing left but a close", id)
+		}
+		if !strings.Contains(tile.Frontier, "stranded") {
+			t.Errorf("%s: the frontier explains the band, got %q", id, tile.Frontier)
+		}
+	}
+}
+
+// TestRuledTwinDoesNotReElevate is the reason [humanGated] reads the marker and
+// not just the kind. A bead carrying BOTH `gc.routed_to=human` and a takeaway is
+// gathered twice, once per marker, and the dedup keeps the HIGHER band — so the
+// `parked` twin's disposition-due promotion would hand back the exact band the
+// stand-down just removed, on every one of these rows.
+func TestRuledTwinDoesNotReElevate(t *testing.T) {
+	md := map[string]string{"gc.routed_to": "human", "gc.takeaway": "routed — tk-w slung"}
+	anchors := []Anchor{
+		{ID: "tk-both", Title: "routed and parked", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: md,
+			Takeaway:  "routed — tk-w slung",
+			WaitingOn: []string{"tk-w"}, WaitingOnClosed: []string{"tk-w"}},
+		{ID: "tk-both", Title: "routed and parked", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: md,
+			Takeaway:  "routed — tk-w slung",
+			WaitingOn: []string{"tk-w"}, WaitingOnClosed: []string{"tk-w"}},
+	}
+	// The same bead once more, DECOMPOSED with every child closed. This is the
+	// shape that actually needs the exclusion inside dispositionDue: the
+	// childless pair above is already caught by the `isRuled && mTotal == 0`
+	// branch, which sits above dispDue, so it would pass with the exclusion
+	// gone. sl-kg9z6.1.2 — one of the seven rows this rule was measured on —
+	// is exactly this shape (5 children, all closed, 7 discharged waits).
+	kidsMD := map[string]string{"gc.routed_to": "human", "gc.takeaway": "routed — all of it landed"}
+	kids := []Child{{ID: "tk-k1", Status: "closed"}, {ID: "tk-k2", Status: "closed"}}
+	anchors = append(anchors,
+		Anchor{ID: "tk-bothkids", Title: "routed, parked, and decomposed", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: kidsMD,
+			Takeaway:  "routed — all of it landed",
+			WaitingOn: []string{"tk-w2"}, WaitingOnClosed: []string{"tk-w2"}, Children: kids},
+		Anchor{ID: "tk-bothkids", Title: "routed, parked, and decomposed", Kind: "parked", Source: "parked",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: kidsMD,
+			Takeaway:  "routed — all of it landed",
+			WaitingOn: []string{"tk-w2"}, WaitingOnClosed: []string{"tk-w2"}, Children: kids})
+
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	if len(b.Tiles) != 2 {
+		t.Fatalf("dedup by id: want 2 tiles, got %d", len(b.Tiles))
+	}
+	tile, ok := tileByID(b, "tk-both")
+	if !ok {
+		t.Fatal("tk-both is missing from the board")
+	}
+	if tile.Severity != SevLow {
+		t.Errorf("the twin must not hand the band back: got %s (kind %s)", tile.Severity, tile.Kind)
+	}
+	if tile.DispositionDue {
+		t.Error("a human-gated subject owes its disposition through the ruled row, not through a parked twin")
+	}
+	if tile.Needs != "ruled — close or extend" {
+		t.Errorf("needs: %q", tile.Needs)
+	}
+
+	withKids, ok := tileByID(b, "tk-bothkids")
+	if !ok {
+		t.Fatal("tk-bothkids is missing from the board")
+	}
+	if withKids.Severity != SevLow {
+		t.Errorf("a decomposed-and-finished twin stays down: got %s (kind %s)", withKids.Severity, withKids.Kind)
+	}
+	if withKids.DispositionDue {
+		t.Error("the parked twin of a human-gated bead must not re-promote it")
+	}
+}
+
+// TestDispositionDueSurvivesForAPlainParkedRow: the stand-down must not become
+// a way to silence tk-2plde. A parked subject that is NOT human-gated keeps the
+// promotion — it is in the LOW floor, where the promotion is the only thing
+// that can ever make the landing visible.
+func TestDispositionDueSurvivesForAPlainParkedRow(t *testing.T) {
+	a := Anchor{ID: "tk-p", Title: "parked, blocker landed", Kind: "parked", Source: "parked",
+		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+		Takeaway:  "routed — nothing further needed here",
+		WaitingOn: []string{"tk-w"}, WaitingOnClosed: []string{"tk-w"}}
+	tile := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+
+	if !tile.DispositionDue || tile.Severity != SevElevated {
+		t.Errorf("tk-2plde intact: disposition_due=%v severity=%s", tile.DispositionDue, tile.Severity)
+	}
+	if tile.Needs != "blocker landed — dispose or resume" {
+		t.Errorf("needs: %q", tile.Needs)
+	}
+}

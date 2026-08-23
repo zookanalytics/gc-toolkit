@@ -336,9 +336,10 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
 	}
 
-	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked\n")
+	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
+	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
 	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
 }

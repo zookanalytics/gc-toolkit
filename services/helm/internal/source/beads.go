@@ -453,8 +453,14 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 			case "convoy":
 				a.Children = s.convoyChildren(ctx, g, st, iss.ID)
 				applyConvoyOwnership(&a, convoys)
+			case "decision":
+				// A decision needs no roll-up: it is banded by what it IS.
+				// It does need its waiting edges, though — they are half of
+				// the stand-down test (board.ruled), and without them the
+				// "and the work landed" clause would be vacuous for exactly
+				// the kind an operator files a `--waiting-on` edge on.
+				a.WaitingOn, a.WaitingOnClosed = s.waitingEdges(ctx, g, st, iss.ID)
 			}
-			// A decision needs no roll-up: its band is ELEVATED regardless.
 			g.anchors = append(g.anchors, a)
 		}
 	}
@@ -507,23 +513,21 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 			}
 			a := newAnchor(iss, ma.kind, r)
 			a.Children = s.parentChildren(ctx, g, st, iss.ID)
-			if ma.kind == "parked" {
-				a.WaitingOn, a.WaitingOnClosed = s.waitingEdges(ctx, g, st, iss.ID)
-			}
+			a.WaitingOn, a.WaitingOnClosed = s.waitingEdges(ctx, g, st, iss.ID)
 			g.anchors = append(g.anchors, a)
 		}
 	}
 }
 
-// waitingEdges reads the `blocks` blockers of a parked subject and reports
-// which of them have closed.
+// waitingEdges reads the `blocks` blockers of a subject and reports which of
+// them have closed.
 //
-// WHY ONLY PARKED. The edge answers one question — "is the work this
-// conversation was waiting on done?" — and only a parked row spends the answer
-// (board.dispositionDue). Restricting it here also keeps the query count tied
-// to the parked rows rather than to every metadata-keyed anchor, and keeps this
-// gather field-for-field identical to gc-helm.sh's, which emits waiting_on for
-// the parked kind alone.
+// WHO SPENDS IT. The edge answers one question — "is the work this row was
+// waiting on done?" — and three kinds spend the answer: `parked` through
+// board.dispositionDue, and `decision` / `human` through board.ruled. It is
+// read for those three and not for `epic` or `convoy`, whose bands come from a
+// child roll-up that already says whether their work is moving. gc-helm.sh
+// gathers the same three, so the two boards stay field-for-field identical.
 //
 // FAILURE IS SILENT AND QUIET-SIDE. A store that errors yields no blockers at
 // all, so the row carries no waiting edges and stays exactly as it rendered

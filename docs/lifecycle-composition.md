@@ -79,6 +79,15 @@ whose members have closed (`assets/scripts/gc-helm.sh`, mirrored in
 `services/helm/internal/board/derive.go`). Nothing is stored, so nothing has to
 be cleared later, and no cleanup path can be missed.
 
+The same edges answer the same question for the two human-gated kinds, and there
+the answer points the other way: a `decision` or `gc.routed_to=human` row whose
+takeaway is recorded and whose waits have all landed stands DOWN out of the
+attention band rather than up out of the parked floor, reading "ruled — close or
+extend" (`tk-b3rga`, *Until it is answered* in `services/helm/README.md`). One
+bead can be gathered under both readings, so `disposition_due` yields to the
+stand-down on a human-gated subject: the two would otherwise band the same bead
+two ways and the louder row would win the dedup.
+
 Concretely: `tk-puh9d` (open since 2026-08-02) is the defect that a bead's
 stored `blocked` status never auto-clears when its dependencies close. The edge
 is right there and nothing re-derives from it. The board is unaffected by that

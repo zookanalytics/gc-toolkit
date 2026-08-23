@@ -241,6 +241,7 @@ cat > "$TKV/anchors.ndjson" <<'JSON'
 {"id":"tk-tk","title":"has takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"takeaway":"need operator to pick the storage backend before schema lands","takeaway_at":"2026-06-10T00:00:00Z","takeaway_by":"proactive","children":[{"id":"tk-c1","status":"open","assignee":""},{"id":"tk-c2","status":"closed","assignee":""}]}
 {"id":"tk-bare","title":"stranded no takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"blocks sl-zzz9 downstream","progress":null,"takeaway":"","children":[{"id":"tk-c3","status":"open","assignee":""},{"id":"tk-c4","status":"open","assignee":""}]}
 {"id":"tk-ml","title":"whitespacey takeaway","kind":"decision","source":"decision","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"takeaway":"line one\nline two   trailing  ","children":[]}
+{"id":"tk-mlp","title":"whitespacey takeaway, parked","kind":"parked","source":"parked","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"takeaway":"line one\nline two   trailing  ","children":[]}
 JSON
 TKJ="$(GC_HELM_FIXTURE="$TKV" "$TOOL" --json)"
 # Present: the takeaway sentence IS the NEEDS, and the by/at ride into --json.
@@ -261,8 +262,22 @@ eq     "takeaway absent → JSON .takeaway is null"         "null"             "
 has "frontier heads moved to --json open_heads"    "tk-c3"   "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").open_heads|join(",")')"
 has "cross-rig refs moved to --json cross_rig_refs" "sl-zzz9" "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").cross_rig_refs|join(",")')"
 # Whitespace/newlines in a takeaway are collapsed to one table-safe line.
+# Asserted on BOTH surfaces the collapsed string reaches, because a human-gated
+# row no longer spends its takeaway on NEEDS: tk-ml is a decision with nothing
+# outstanding, so it is RULED (tk-b3rga) and NEEDS becomes the disposition
+# phrase. The collapsing is unchanged; only which column shows it moved, and
+# `takeaway` is the field that carries it everywhere.
 eq  "whitespacey takeaway collapses to one line" "line one line two trailing" \
+    "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-ml").takeaway')"
+eq  "…and on the NEEDS path, where a non-human-gated row still spends it" \
+    "line one line two trailing" \
+    "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-mlp").needs')"
+# The ruled row says what it now wants instead — and stands out of the band.
+eq  "an answered decision spends NEEDS on the disposition, not the ruling" \
+    "ruled — close or extend" \
     "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-ml").needs')"
+eq  "…and leaves the ELEVATED band" "LOW" \
+    "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-ml").severity')"
 # Human table: the takeaway sentence shows; no raw/truncated bead-id leaks in.
 HT="$(GC_HELM_FIXTURE="$TKV" "$TOOL")"
 has    "human table shows the takeaway sentence"        "pick the storage backend" "$HT"

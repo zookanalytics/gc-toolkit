@@ -639,6 +639,25 @@ eq "$(held_of stranded)" "false" \
 #   (BAREPARK)  a parked row with NO edges renders exactly as it did before
 #   (FAILCLOSE) a blocker the store cannot resolve counts as OPEN, never as
 #               landed — a false "go dispose of this" is the costly direction
+#
+# THE BUG (d) — tk-b3rga. A `decision` and a `human` row are banded by what they
+# ARE, and what they are never changes while the bead is open. So the row asked
+# for the operator on the day it was filed and went on asking after they
+# answered it: seven of the 24 ELEVATED rows on the 2026-08-23 board carried a
+# takeaway recording their own ruling, one of them (tk-z130v) for thirty days,
+# and converse never closes a subject by contract so nothing else could retire
+# them. Same derivation shape as (c) — per render, storing nothing — pointed the
+# other way: DOWN out of the band rather than up out of the floor.
+#
+#   (RULED)     takeaway + every wait landed -> LOW, "ruled — takeaway
+#               recorded" / "ruled — close or extend", on both kinds
+#   (RULEHOLD)  takeaway + a wait still OPEN -> band unchanged. Without the
+#               waiting edges now gathered for these kinds this clause would be
+#               vacuous, so it is what proves them wired
+#   (RULEKIDS)  a ruled row that DECOMPOSED is banded by its roll-up — a ruling
+#               must not become a new way to hide stranded children (tk-a9k0l)
+#   (RULETWIN)  the `parked` twin of a ruled human bead must not hand the band
+#               straight back through the dedup
 # ══════════════════════════════════════════════════════════════════════════════
 
 ITMP="$TMP/inflight"
@@ -731,7 +750,23 @@ cat > "$ITMP/open.json" <<'J'
   "metadata":{"gc.takeaway":"routed — next sitting when the findings land"}},
  {"id":"tk-hkids","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, and decomposed","priority":2,
   "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human"}}
+  "metadata":{"gc.routed_to":"human"}},
+ {"id":"tk-hRULED","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, and answered","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — design settled; tk-blkC slung"},
+  "dependencies":[{"issue_id":"tk-hRULED","depends_on_id":"tk-blkC","type":"blocks"}]},
+ {"id":"tk-hRKIDS","status":"open","assignee":null,"issue_type":"bug","title":"answered, but its own child is stranded","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — the follow-up is filed under this bead"},
+  "dependencies":[{"issue_id":"tk-hRKIDS","depends_on_id":"tk-blkC","type":"blocks"}]},
+ {"id":"tk-hRDONE","status":"open","assignee":null,"issue_type":"bug","title":"answered, decomposed, and every child closed","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — all of it landed"},
+  "dependencies":[{"issue_id":"tk-hRDONE","depends_on_id":"tk-blkC","type":"blocks"}]},
+ {"id":"tk-hHOLD","status":"open","assignee":null,"issue_type":"bug","title":"answered, but the routed work is still open","priority":2,
+  "updated_at":"2026-08-21T00:00:00Z","description":"",
+  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — tk-blkO slung, landing next"},
+  "dependencies":[{"issue_id":"tk-hHOLD","depends_on_id":"tk-blkO","type":"blocks"}]}
 ]
 J
 
@@ -752,7 +787,12 @@ cat > "$ITMP/dependents.json" <<'J'
    {"id":"tk-kDONE1","status":"closed","assignee":null,"dependency_type":"parent-child"},
    {"id":"tk-kDONE2","status":"closed","assignee":null,"dependency_type":"parent-child"}]},
  {"id":"tk-hkids","dependents":[
-   {"id":"tk-kHUM","status":"open","assignee":null,"dependency_type":"parent-child"}]}
+   {"id":"tk-kHUM","status":"open","assignee":null,"dependency_type":"parent-child"}]},
+ {"id":"tk-hRKIDS","dependents":[
+   {"id":"tk-kRULE","status":"open","assignee":null,"dependency_type":"parent-child"}]},
+ {"id":"tk-hRDONE","dependents":[
+   {"id":"tk-kRD1","status":"closed","assignee":null,"dependency_type":"parent-child"},
+   {"id":"tk-kRD2","status":"closed","assignee":null,"dependency_type":"parent-child"}]}
 ]
 J
 
@@ -768,7 +808,13 @@ J
 
 cat > "$ITMP/decisions.json" <<'J'
 [{"id":"tk-dHUMAN","title":"decision routed to human","priority":1,"updated_at":"2026-08-21T00:00:00Z",
-  "metadata":{"gc.routed_to":"human"}}]
+  "metadata":{"gc.routed_to":"human"}},
+ {"id":"tk-dRULED","title":"a decision that has been answered","priority":1,"updated_at":"2026-07-01T00:00:00Z",
+  "metadata":{"gc.takeaway":"ROUTED: excise the fork; tk-blkC slung"},
+  "dependencies":[{"issue_id":"tk-dRULED","depends_on_id":"tk-blkC","type":"blocks"}]},
+ {"id":"tk-dHOLD","title":"answered, but the routed work is still open","priority":1,"updated_at":"2026-08-21T00:00:00Z",
+  "metadata":{"gc.takeaway":"answered NO — real bug is elsewhere, routed tk-blkO"},
+  "dependencies":[{"issue_id":"tk-dHOLD","depends_on_id":"tk-blkO","type":"blocks"}]}]
 J
 
 # lx-live is active; lx-gone is ABSENT from the list entirely (the dead shape).
@@ -969,6 +1015,85 @@ eq "$(row tk-punk disposition_due)" "false" "(FAILCLOSE) an unresolvable blocker
 eq "$(row tk-punk severity)" "LOW" "(FAILCLOSE) …so the row keeps its pre-fix band"
 eq "$(row tk-punk waiting_on_open)" '["sl-9999"]' "(FAILCLOSE) …and it is still counted outstanding"
 
+# --- (RULED) the defect tk-b3rga is about ------------------------------------
+# The row was ANSWERED and went on demanding the operator anyway, because the
+# band came from the kind and the kind never changes. tk-dRULED is the shape of
+# tk-z130v: ruled on 2026-07-01 against a fixture clock in August, so it is also
+# the proof that a stood-down row is not re-elevated by the staleness bump.
+eq "$(row tk-dRULED severity)" "LOW" "(RULED) an answered decision leaves the attention band"
+eq "$(row tk-dRULED frontier)" "ruled — takeaway recorded" "(RULED) the frontier says the row was answered"
+eq "$(row tk-dRULED needs)" "ruled — close or extend" "(RULED) …and NEEDS names the disposition it now wants"
+eq "$(row tk-dRULED waiting_on)" '["tk-blkC"]' "(RULED) the decision gather carries its blocks edges at all"
+eq "$(row tk-dRULED waiting_on_open)" '[]' "(RULED) …and nothing is outstanding"
+# The ruling itself is not censored — it is still on the wire for the reader.
+printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-dRULED")).takeaway | test("excise the fork")' >/dev/null 2>&1 \
+  && ok "(RULED) the takeaway survives the stand-down" \
+  || bad "(RULED) the takeaway was dropped: $(row tk-dRULED takeaway)"
+# LOW is not stale-bumped; NORMAL would be, and tk-z130v would be back tomorrow.
+STALE_D="$(row tk-dRULED stale_days)"
+case "$STALE_D" in
+  ''|*[!0-9]*) bad "(RULED) stale_days is missing or non-numeric ('$STALE_D')" ;;
+  *) [ "$STALE_D" -gt 14 ] \
+       && ok "(RULED) …and it is genuinely stale ($STALE_D days), so the band is holding it down" \
+       || bad "(RULED) the fixture is not stale enough to prove the bump does not fire ($STALE_D days)" ;;
+esac
+# The same state on the other human-gated kind.
+eq "$(row tk-hRULED severity)" "LOW" "(RULED) a human-routed bead stands down the same way"
+eq "$(row tk-hRULED needs)" "ruled — close or extend" "(RULED) …with the same disposition phrase"
+
+# --- (RULEHOLD) the guard that keeps the rule honest -------------------------
+# "Answered" is not "answered and the work landed". A decision whose
+# `--waiting-on` work is still open has not finished being a decision. This is
+# also the only assertion that can fail if the waiting edges stop being
+# gathered for these kinds — without them the clause is vacuously true and
+# every answered row stands down whether or not its work landed.
+eq "$(row tk-dHOLD severity)" "ELEVATED" "(RULEHOLD) a live wait keeps the row in the band"
+eq "$(row tk-dHOLD frontier)" "human-gated decision" "(RULEHOLD) …and its frontier is unchanged"
+eq "$(row tk-dHOLD waiting_on_open)" '["tk-blkO"]' "(RULEHOLD) the outstanding blocker is named"
+eq "$(row tk-dHOLD needs)" "answered NO — real bug is elsewhere, routed tk-blkO" \
+   "(RULEHOLD) its takeaway still answers for it"
+# The same guard on the human kind — and the ONLY assertion in this suite that
+# can see whether the META gather still reads waiting edges for `human`. Nothing
+# else can: every other human fixture here has its waits already discharged, so
+# dropping the edges leaves waiting_on_open empty either way and the rows stand
+# down for the wrong reason. Here the edge is what holds the row up.
+eq "$(row tk-hHOLD severity)" "ELEVATED" "(RULEHOLD) a human row whose routed work is open keeps its band"
+eq "$(row tk-hHOLD waiting_on)" '["tk-blkO"]' "(RULEHOLD) …because the meta gather carries its blocks edges"
+eq "$(row tk-hHOLD waiting_on_open)" '["tk-blkO"]' "(RULEHOLD) …and the blocker is still outstanding"
+eq "$(row tk-hHOLD frontier)" "routed to the operator — no agent will take it" \
+   "(RULEHOLD) …so its frontier is unchanged too"
+# And the unanswered rows are untouched: no takeaway, no stand-down.
+eq "$(row tk-human severity)" "ELEVATED" "(RULEHOLD) an unanswered human row keeps its band"
+eq "$(row tk-dHUMAN severity)" "ELEVATED" "(RULEHOLD) …and so does an unanswered decision"
+
+# --- (RULEKIDS) a ruling is not a new way to hide open work ------------------
+# The tk-a9k0l lesson, one kind over: "answered" is a claim about the BEAD, and
+# open work hanging under it falsifies the claim. A ruled row that DECOMPOSED is
+# banded by its roll-up like any other anchor.
+eq "$(row tk-hRKIDS severity)" "HIGH" "(RULEKIDS) a stranded child outranks the ruling"
+eq "$(row tk-hRKIDS stranded)" "true" "(RULEKIDS) …structurally, not just in a phrase"
+eq "$(row tk-hRKIDS frontier)" "1 open · 0 in flight (stranded)" \
+   "(RULEKIDS) the frontier reports the roll-up, not the ruling"
+eq "$(row tk-hRKIDS needs)" "ruled — the follow-up is filed under this bead" \
+   "(RULEKIDS) NEEDS falls back to the takeaway, never to a bare close-or-extend"
+
+# --- (RULETWIN) the dedup would hand the band straight back ------------------
+# A bead carrying BOTH gc.routed_to=human and gc.takeaway is gathered once per
+# marker, and the dedup keeps the HIGHER band. So the `parked` twin of a
+# stood-down row must stand down with it: with a discharged wait the twin would
+# otherwise be promoted by the disposition rule and win, on every row this fix
+# was written for. tk-hRDONE decomposed with all children closed — the shape of
+# sl-kg9z6.1.2 — because the childless twin is already caught one branch above.
+eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-hRDONE")]|length')" "1" \
+   "(RULETWIN) the doubly-marked bead still renders exactly once"
+eq "$(row tk-hRDONE severity)" "LOW" "(RULETWIN) …and the twin does not re-elevate it"
+eq "$(row tk-hRDONE disposition_due)" "false" \
+   "(RULETWIN) a human-gated subject owes its disposition through the ruled row"
+eq "$(row tk-hRDONE m_total)" "2" "(RULETWIN) the roll-up is still reported"
+# tk-2plde intact: a parked row that is NOT human-gated keeps its promotion.
+eq "$(row tk-pdone severity)" "ELEVATED" "(RULETWIN) a plain parked row still leaves the floor"
+eq "$(row tk-pdone disposition_due)" "true" "(RULETWIN) …and still says so"
+
 # --- (EXCLUDE) the typed kinds are not re-gathered by metadata --------------
 eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-eTAKE")]|length')" "1" \
    "(EXCLUDE) an epic carrying a takeaway appears exactly once"
@@ -979,8 +1104,15 @@ eq "$(row tk-dHUMAN kind)" "decision" "(EXCLUDE) …and stays kind decision, not
 
 eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-both")]|length')" "1" \
    "(BOTH) …and renders exactly once after dedup"
-eq "$(row tk-both kind)"     "human"    "(BOTH) the higher band wins the row"
-eq "$(row tk-both severity)" "ELEVATED" "(BOTH) an owed-to-the-operator bead is not floored by its takeaway"
+eq "$(row tk-both kind)"     "human"    "(BOTH) the human reading wins the row"
+# SUPERSEDED by tk-b3rga, deliberately. This row used to assert ELEVATED — "an
+# owed-to-the-operator bead is not floored by its takeaway" — which is exactly
+# the behaviour the operator ruled against on 2026-08-23: a takeaway on a
+# human-gated bead RECORDS the answer, and a row that keeps demanding an
+# operator who already answered it is the single largest false contributor to
+# the board. tk-both carries a takeaway and no outstanding wait, which is the
+# same shape as tk-z130v — the thirty-day regression case the rule is named for.
+eq "$(row tk-both severity)" "LOW"       "(BOTH) an answered bead stands down, whichever marker gathered it"
 
 # --- (FLOOR) a parked row never competes with real attention ----------------
 # Guard the comparison on both scores being REAL numbers first. Defaulting a
