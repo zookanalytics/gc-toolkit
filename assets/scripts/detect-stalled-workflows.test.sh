@@ -49,6 +49,11 @@
 #              deny-listing spec/scope: the next descriptor kind poured is excluded on
 #              the day it appears, not the day someone remembers to name it
 #   (HOLD)     triage.hold on the root, and gc.takeaway on the ANCHOR -> exempt
+#   (SPENT)    ...but a gc.takeaway whose RECORDED WAIT (its blocks edges and its
+#              children) has fully closed no longer mutes: the wait it named has
+#              ENDED. The negative controls ride alongside — a takeaway with an open
+#              child still mutes, and triage.hold is never carved out, because it
+#              names its wait in prose with no edge to discharge (tk-2cyxo)
 #   (EMPTYHOLD) an EMPTY triage.hold is a CLEARED hold, not a hold -> still reported
 #   (DEDUP)    stall_flagged already equal to the current FRONTIER key -> silent
 #   (REFLAG)   ... but a stall_flagged from a DIFFERENT frontier (it advanced and
@@ -180,6 +185,24 @@ cat > "$TMP/beads.json" <<EOF
  {"id":"m-ahold","status":"open","updated_at":"$OLD","_ready":true,
   "metadata":{"gc.root_bead_id":"r-ahold","gc.step_ref":"mol-scoped-work.implement"}},
 
+ {"id":"r-spent","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-spent","gc.takeaway":"next sitting when the findings land"}},
+ {"id":"m-spent","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-spent","gc.step_ref":"mol-scoped-work.implement"}},
+ {"id":"k-spent","status":"closed","updated_at":"$OLD","_parent":"r-spent","metadata":{}},
+
+ {"id":"r-takeopen","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-takeopen","gc.takeaway":"waiting on the routed work"}},
+ {"id":"m-takeopen","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-takeopen","gc.step_ref":"mol-scoped-work.implement"}},
+ {"id":"k-takeopen","status":"open","updated_at":"$OLD","_parent":"r-takeopen","metadata":{}},
+
+ {"id":"r-holdspent","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
+  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-holdspent","triage.hold":"the operator is deciding"}},
+ {"id":"m-holdspent","status":"open","updated_at":"$OLD","_ready":true,
+  "metadata":{"gc.root_bead_id":"r-holdspent","gc.step_ref":"mol-scoped-work.implement"}},
+ {"id":"k-holdspent","status":"closed","updated_at":"$OLD","_parent":"r-holdspent","metadata":{}},
+
  {"id":"r-emptyhold","title":"mol-scoped-work","status":"open","updated_at":"$OLD",
   "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"c-emptyhold","triage.hold":"","gc.takeaway":""}},
  {"id":"m-emptyhold","status":"open","updated_at":"$OLD","_ready":true,
@@ -280,7 +303,10 @@ cat > "$TMP/closed.json" <<EOF
  {"id":"c19","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-finalize"}},
  {"id":"c20","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-newkind"}},
  {"id":"c21","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-control"}},
- {"id":"c22","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-checkonly"}}
+ {"id":"c22","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-checkonly"}},
+ {"id":"c23","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-spent"}},
+ {"id":"c24","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-takeopen"}},
+ {"id":"c25","status":"closed","updated_at":"$OLD","metadata":{"gc.root_bead_id":"r-holdspent"}}
 ]
 EOF
 
@@ -308,6 +334,9 @@ c-finalize|a-plain
 c-control|a-plain
 c-checkonly|a-plain
 c-newkind|a-plain
+c-spent|a-plain
+c-takeopen|a-plain
+c-holdspent|a-plain
 C
 
 cat > "$TMP/sessions.json" <<'S'
@@ -400,14 +429,25 @@ if [ "${1:-}" = "bd" ]; then
       if [ "${FAKE_LIST_BROKEN:-0}" = "1" ]; then echo 'not json'; exit 0; fi
       # the session-bead listing this pass makes alongside the roster
       case "$*" in *--type=session*) echo '[]'; exit 0 ;; esac
-      statuses=""; mdkey=""; mdval=""
+      statuses=""; mdkey=""; mdval=""; parent=""; withclosed=0
       while [ $# -gt 0 ]; do
         case "$1" in
           --status=*) statuses="${1#--status=}" ;;
           --metadata-field) mdkey="${2%%=*}"; mdval="${2#*=}"; shift ;;
+          --parent) parent="${2:-}"; shift ;;
+          --parent=*) parent="${1#--parent=}" ;;
+          --all) withclosed=1 ;;
         esac
         shift
       done
+      # `bd list --parent X` is the only way to ask for children — a parent-child
+      # edge lives on the CHILD — and it is what detect-parked-dispositions.sh reads
+      # for the takeaway-spent predicate this pass now asks about.
+      if [ -n "$parent" ]; then
+        jq -c --arg p "$parent" --argjson all "$withclosed" \
+          '[.[] | select((._parent // "") == $p) | select($all == 1 or (.status != "closed"))]' "$FAKE_STORE"
+        exit 0
+      fi
       # One store, one filter: the status set AND (when given) a metadata-field match.
       # The non-closed branch honours --metadata-field too — the visit-already-open
       # guard relies on it to count only the visits that name THIS root (stall_root),
@@ -460,6 +500,21 @@ hasnt "$TMP/out" "root r-gated STALLED"   "(GATED) no ready member means the wai
 hasnt "$TMP/out" "root r-hold STALLED"    "(HOLD) triage.hold on the root exempts"
 hasnt "$TMP/out" "root r-ahold STALLED"   "(HOLD) gc.takeaway on the ANCHOR exempts"
 has "$TMP/out" "root r-emptyhold STALLED" "(EMPTYHOLD) an EMPTY hold is a cleared hold, not a hold"
+
+# (SPENT) THE CARVE-OUT (tk-2cyxo). A takeaway is a hold while the wait it names is
+# live and a stale marker once that wait has ended — "next sitting when the findings
+# land" says nothing after they land. Muting on it forever is half of why a parked
+# subject could never be brought back by anything. The predicate is asked of
+# detect-parked-dispositions.sh rather than copied, so the two passes cannot drift
+# into disagreeing about what a spent park is.
+has "$TMP/out" "root r-spent STALLED" \
+  "(SPENT) a takeaway whose recorded wait has FULLY CLOSED no longer mutes this pass"
+has "$TMP/out" "the takeaway's recorded wait has fully closed" \
+  "(SPENT) and the pass says why it stopped honouring the stamp"
+hasnt "$TMP/out" "root r-takeopen STALLED" \
+  "(SPENT) a takeaway whose wait is STILL OPEN mutes exactly as before — the carve-out is one case, not a removal"
+hasnt "$TMP/out" "root r-holdspent STALLED" \
+  "(SPENT) triage.hold is NOT carved out even when the same bead's children have all closed: it names its wait in prose, with no edge to discharge"
 hasnt "$TMP/out" "root r-dedup STALLED"   "(DEDUP) stall_flagged equal to the current frontier key is silent"
 has "$TMP/out" "root r-reflag STALLED"    "(REFLAG) a stall_flagged from a DIFFERENT frontier (it advanced and re-stalled) is reported once more"
 
@@ -523,8 +578,8 @@ grep -q 'join("\\u001f")' "$SCRIPT" \
 # --- the signal itself --------------------------------------------------------
 eq "$(grep -c 'triage: stalled workflows' "$TMP/created")" "1" \
   "the standing triage subject is created once, not once per stalled workflow"
-eq "$(grep -c 'visit: r-' "$TMP/created")" "8" \
-  "one visit per stalled workflow — r-stall, r-pr, r-emptyhold, r-reflag, r-mixed, r-finalize, r-control and r-checkonly, all eight on the one subject"
+eq "$(grep -c 'visit: r-' "$TMP/created")" "9" \
+  "one visit per stalled workflow — r-stall, r-pr, r-emptyhold, r-spent, r-reflag, r-mixed, r-finalize, r-control and r-checkonly, all nine on the one subject"
 has "$TMP/updates" "stall_flagged=" "the root is stamped with the dedupe marker"
 has "$TMP/updates" "task_kind=visit" "the visit is stamped as a visit"
 has "$TMP/updates" "gc.routed_to=" "the visit is routed to the conversation pool"
@@ -559,6 +614,19 @@ hasnt "$TMP/updates" "--status=closed" "(NOWRITE) no bead is ever closed"
 hasnt "$TMP/calls" "bd close"          "(NOWRITE) no close path at all"
 hasnt "$TMP/updates" "update m-"       "(NOWRITE) no member bead is written"
 hasnt "$TMP/updates" "update a-"       "(NOWRITE) no anchor is written"
+
+# --- (SPENT) fail-closed when the sibling predicate is not there ---------------
+# The carve-out asks detect-parked-dispositions.sh whether a takeaway's wait has
+# ended. A rig that has not synced that script must keep the OLD behaviour — the
+# takeaway keeps muting — because the alternative is losing the mute entirely and
+# reporting every deliberately parked workflow in the rig.
+export GC_PARKED_DISPOSITIONS_TOOL="$TMP/no-such-predicate.sh"
+run nospent
+unset GC_PARKED_DISPOSITIONS_TOOL
+hasnt "$TMP/out" "root r-spent STALLED" \
+  "(SPENT) with the predicate unavailable the takeaway keeps muting — fail-closed, not fail-open"
+has "$TMP/out" "root r-stall STALLED" \
+  "(SPENT) while every signal that does not depend on it is unaffected"
 
 # --- dry run ------------------------------------------------------------------
 run dry --dry-run

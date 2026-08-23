@@ -82,6 +82,11 @@
 #   operator hold     `triage.hold` or `gc.takeaway` on the root: a human decided
 #                     this waits, and the value is the reason (mol-liveness-sweep
 #                     class 4(c)/(d) — same fields, same absent-vs-empty tri-state).
+#                     ONE exception, and only for the takeaway (tk-2cyxo): one whose
+#                     RECORDED WAIT — its `blocks` edges and its children — has fully
+#                     closed names a wait that ENDED, and stops muting. `triage.hold`
+#                     never does: it names its wait in prose, with no edge to
+#                     discharge, so nothing can say it is over.
 #   suspended rig     needs no test: this pass runs FROM the rig's own witness patrol,
 #                     so a rig that is stopped runs no patrol and emits no signal.
 #
@@ -143,6 +148,29 @@ esac
 # The conversation pool a stall is surfaced to, same address mol-liveness-sweep
 # files its batch visit to. Resolved from the env when not given.
 [ -n "$CONVERSE" ] || CONVERSE="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+
+# ── Is a takeaway's named wait SPENT? (tk-2cyxo) ─────────────────────────────
+# The predicate has ONE implementation — detect-parked-dispositions.sh, which also
+# files the visit back when a parked subject's routed work lands — and this pass
+# ASKS it rather than growing a second copy. A mirrored predicate in two scripts is
+# two things to keep in step, and the failure of that is silent on both sides.
+#
+# FAIL-CLOSED, and the direction matters: no sibling script, not executable, an
+# unreadable read, or a wait that was never recorded all answer "not spent", which
+# leaves the takeaway muting exactly as it did before this carve-out existed. A rig
+# that has not synced the sibling script keeps the old behaviour rather than losing
+# the mute.
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+SPENT_TOOL="${GC_PARKED_DISPOSITIONS_TOOL:-$SCRIPT_DIR/detect-parked-dispositions.sh}"
+wait_spent() { # <bead-id>
+  [ -n "${1:-}" ] || return 1
+  [ -x "$SPENT_TOOL" ] || return 1
+  if [ -n "$RIG_PIN" ]; then
+    "$SPENT_TOOL" --rig "$RIG_PIN" --wait-spent "$1" >/dev/null 2>&1
+  else
+    "$SPENT_TOOL" --wait-spent "$1" >/dev/null 2>&1
+  fi
+}
 
 bd_pinned() { # <bd-subcommand> [args...]
   if [ -n "$RIG_PIN" ]; then
@@ -486,6 +514,27 @@ while IFS="$SEP" read -r root rupd rsession rhold rtakeaway rflagged rconvoy rti
   # an EMPTY stamp is a CLEARED hold, the same tri-state mol-liveness-sweep reads.
   # Checked on the anchor as well as the root, because a hold is placed on the bead a
   # human is looking at, which is the work bead far more often than the workflow root.
+  #
+  # ONE CARVE-OUT, and only for `gc.takeaway` (tk-2cyxo). The rule above is right in
+  # general: a takeaway means a human named the wait and owns it. It is wrong in
+  # exactly one case — a takeaway whose recorded wait has FULLY CLOSED, where the
+  # named wait has ENDED. A stamp that says "next sitting when the findings land" is
+  # a hold until they land and a stale marker afterwards, and this pass treating it
+  # as a live hold forever is half of why a parked subject could never be brought
+  # back by anything (the other half is that nothing filed the visit; that is the
+  # sibling pass). `triage.hold` is deliberately NOT carved out: it names a wait in
+  # prose with no edge to discharge, so nothing can say it ended.
+  #
+  # Asked per bead, because each stamp names its own wait: a spent takeaway on the
+  # ROOT does not clear a live one on the ANCHOR.
+  if [ -n "$rtakeaway" ] && wait_spent "$root"; then
+    rtakeaway=""
+    echo "detect-stalled-workflows: root $root — the takeaway's recorded wait has fully closed; it no longer mutes this pass (tk-2cyxo)"
+  fi
+  if [ -n "$atakeaway" ] && wait_spent "$anchor"; then
+    atakeaway=""
+    echo "detect-stalled-workflows: root $root — anchor $anchor's takeaway wait has fully closed; it no longer mutes this pass (tk-2cyxo)"
+  fi
   if [ -n "$rhold" ] || [ -n "$rtakeaway" ] || [ -n "$ahold" ] || [ -n "$atakeaway" ]; then
     held=$((held + 1)); continue
   fi

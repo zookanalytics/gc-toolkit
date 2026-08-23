@@ -166,6 +166,17 @@ The loop, every visit:
      their own review queue, and handing it back to them as a decision to
      make is the bug this step exists to prevent (tk-mndjz).
 
+     **A takeaway is not a benign wait when the wait it named has
+     ENDED.** A disposition visit — filed by
+     `assets/scripts/detect-parked-dispositions.sh`, and saying so —
+     exists *because* a parked subject's routed work all landed, so the
+     subject it names necessarily carries a takeaway. Reading that stamp
+     as "the wait is already named" closes the exact signal the stamp
+     made impossible to see (tk-2cyxo). Its premise is the landed ids in
+     the body, not the presence of a takeaway: re-check those (`bd show`
+     them, and `gc bd list --parent "$SUBJECT" --all`) and treat it as
+     moot only if something is open again.
+
    Neither is the filer's failure — a premise that dies between filing
    and claiming is the ordinary cost of an asynchronous signal, and the
    detectors are right not to guess at claim time. Close it out:
@@ -261,11 +272,13 @@ The loop, every visit:
    field, one bucket, N sittings — and the readers that consume it look
    at the item: `assets/scripts/detect-stalled-workflows.sh` treats a
    non-empty `gc.takeaway` on the workflow root (or its anchor) as the
-   named wait that exempts it from being re-reported, and never reads the
-   subject at all. Stamped on the bucket, a held sitting leaves the thing
-   it is about looking unattended, and the next pass files another visit
-   on it. Where no target is named `$ITEM` IS the subject, so the
-   ordinary one-topic subject stamps exactly where it always did.
+   named wait that exempts it from being re-reported — until the edges
+   that wait names have all closed, at which point it stops exempting
+   (tk-2cyxo) — and never reads the subject at all. Stamped on the bucket,
+   a held sitting leaves the thing it is about looking unattended, and the
+   next pass files another visit on it. Where no target is named `$ITEM`
+   IS the subject, so the ordinary one-topic subject stamps exactly where
+   it always did.
 
    Then post the framing. Every message you post while holding ends with
    the operator's decision — labeled `Next (yours):`, standing alone:
@@ -330,6 +343,20 @@ The loop, every visit:
    another rig's store, a typo) warns on stderr and the takeaway still
    lands, so this can never cost you the stamp — but a wait you did not
    pass is a wait nothing will ever re-ask.
+
+   **A recorded wait is now also the return trip.** On an
+   operator-origin subject (`gc.origin=operator`), once every recorded
+   wait has closed, `assets/scripts/detect-parked-dispositions.sh` files
+   a fresh visit back to this pool from the witness patrol — so the
+   conversation resumes without the operator having to notice a board
+   row (tk-2cyxo). It reads two things as the recorded wait: the
+   `--waiting-on` edges above, AND the subject's CHILDREN. If you filed
+   the work as a child of the subject you are already covered — which is
+   the usual shape, because a parent cannot be blocked by its own
+   descendant, so `--waiting-on` is refused for exactly that bead. What
+   is NOT covered is work routed with neither recording: a sibling bead
+   named only in the takeaway prose. That subject waits for an eye.
+   None of this ever clears the takeaway.
 
    Never close without the stamp verifying — an unstamped closed visit
    is invisible to everything that reads outcomes. Never end a sitting

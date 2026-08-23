@@ -287,6 +287,9 @@ if [ -n "$looks_like_bead_id" ]; then
     [ -z "$SUBJ_TYPE" ] || die "--type does not apply to an existing bead ('$ARG' already has a type)" 2
     SUBJECT="$ARG"
     RIG_NAME="$prefix_hit"
+    SUBJ_DB=$(printf '%s' "$RIGS" | jq -r --arg n "$prefix_hit" \
+        '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
+    [ -n "$SUBJ_DB" ] && SUBJ_DB="$SUBJ_DB/.beads"
     note "$PROG: subject $SUBJECT (existing bead, rig $RIG_NAME)"
 else
     # ── Create the subject bead from the topic string ────────────────
@@ -335,7 +338,38 @@ board; this body is the record. Ask before assuming scope."
         die "could not create the subject bead in rig '$RIG': $SUBJ_ERR — nothing filed" 4
     fi
     RIG_NAME="$RIG"
+    SUBJ_DB="$RIG_PATH/.beads"
     note "$PROG: subject $SUBJECT created in rig $RIG_NAME ($SUBJ_TYPE)"
+fi
+
+# ── Record the origin as a KEY, not only as prose ────────────────────
+# The body above says "Operator-origin intake, filed by …" for a human to read.
+# That sentence is not a predicate: it has already drifted across two script
+# generations plus one an agent typed by hand, and a `--desc-contains` sweep for
+# it matches beads that merely QUOTE it (measured on this rig: 13 hits, 3 of them
+# discussion, tk-2cyxo). So the same fact is recorded as `gc.origin=operator`,
+# which is what `assets/scripts/detect-parked-dispositions.sh` selects on when it
+# decides whether a parked subject is owed a visit back once its routed work
+# lands. Without the key that sweep cannot see this subject at all.
+#
+# BOTH intake paths stamp it, because both are the operator asking for a
+# conversation: typing a topic, and pointing at a bead that already exists. What
+# is deliberately NOT stamped is `gc-helm.sh open` — picking a row off the board
+# is the operator glancing at something, not commissioning it, and widening the
+# key to that population would turn the narrow ruling ("operator-origin subjects
+# only") into "nearly every subject".
+#
+# ONLY WHEN ABSENT, and never fatal. An existing bead may already carry an origin
+# from somewhere else and this must not overrule it; and the deliverable of this
+# script is the conversation, so a stamp that fails is a warning, not an exit —
+# the visit still lands, and `backfill-operator-origin.sh` re-stamps later.
+ORIGIN_NOW=$(gc bd show "$SUBJECT" --json 2>/dev/null \
+    | tr -d '\000-\010\013\014\016-\037' \
+    | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.origin"] // "") else "" end' 2>/dev/null)
+if [ -z "$ORIGIN_NOW" ]; then
+    # shellcheck disable=SC2086  # ${SUBJ_DB:+--db "$SUBJ_DB"} expands to 0 or 2 space-free fields
+    gc bd update "$SUBJECT" ${SUBJ_DB:+--db "$SUBJ_DB"} --set-metadata "gc.origin=operator" >/dev/null 2>&1 \
+        || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected, but a parked disposition on this subject will not bring it back on its own (re-run assets/scripts/backfill-operator-origin.sh, or stamp it by hand)"
 fi
 
 # ── Path selection: can a slung first reaction actually be picked up? ─
