@@ -103,7 +103,7 @@ func withGCClient(c gcClient) BeadsOption {
 // root comes from GC_HELM_CITY_PATH, else GC_CITY_PATH, else GC_CITY.
 func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
 	s := &BeadsSource{
-		cityPath:  discoverCityPath(),
+		cityPath:  DiscoverCityPath(),
 		stores:    map[string]beadStore{},
 		openStore: openLibraryStore,
 	}
@@ -123,7 +123,13 @@ func openLibraryStore(ctx context.Context, beadsDir string) (beadStore, error) {
 	return beads.OpenFromConfig(ctx, beadsDir)
 }
 
-func discoverCityPath() string {
+// DiscoverCityPath returns the city root this process should read, from the
+// first of GC_HELM_CITY_PATH, GC_CITY_PATH, GC_CITY that is set. Exported
+// because the entrypoint needs the same answer to locate the visit tool's
+// working directory (cmd/helm-svc wires internal/visit with it) — one
+// resolution, so the board and the write route cannot disagree about which
+// city they are acting on.
+func DiscoverCityPath() string {
 	for _, k := range []string{"GC_HELM_CITY_PATH", "GC_CITY_PATH", "GC_CITY"} {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 			return v

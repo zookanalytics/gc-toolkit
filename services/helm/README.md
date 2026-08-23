@@ -46,6 +46,9 @@ GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 GET /            -> the board JSON, or the embedded web app for a browser
                     (Accept: text/html) — see *Web UI*
 GET /assets/...  -> the web app's bundle
+
+POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
+                    — the ONE write route; see *Starting a conversation*
 ```
 
 A `Tile` carries the full `gc-helm.sh --json` field set — 34 fields, declared in
@@ -623,6 +626,108 @@ narrow it (`board.tiles ?? []`) before iterating.
 
 Reasoning and rejected alternatives (codegen, a TS test runner, a `.ts`
 fixture): `specs/tk-eemvf.2/decisions.md`.
+
+## Starting a conversation (`POST <mount>/helm/open`, tk-yc00g)
+
+The board's **one write route**, and the drill panel's one write action: file a
+visit on a bead so a converse session picks it up. Everything else this service
+serves is a read.
+
+The affordance already existed in tmux (`tmux-pick-helm.sh` → `gc-helm.sh open`),
+but the operator's main surface is the web board, so it needed to exist there.
+
+**It owns no visit logic.** Visit filing lives once, in `gc-helm.sh open`'s
+marked `gate-visit` block, and this route *shells out to that verb* exactly as
+`assets/scripts/gc-visit-open.sh` does — so the subject-existence gate
+(tk-ujwvt), the one-open-visit-per-subject gate, rig resolution by id prefix and
+the board cache bust are inherited, not reimplemented.
+`assets/scripts/gate-visit.test.sh` guards that single copy; a Go
+reimplementation would be an unguarded second one.
+
+```bash
+curl -X POST http://127.0.0.1:8372/v0/city/<city>/svc/helm/helm/open \
+  -H 'Content-Type: application/json' -d '{"bead":"tk-abc12"}'
+```
+
+**What it does not do: attach.** In tmux, `open` reattaches the caller. In a
+browser there is no pane to attach to until the embedded ttyd can be retargeted
+at the new session (tk-rbf9r, whose city-repo half tk-xlup8 is written but
+unapplied). So the button *files* the visit and says a conversation is opening;
+the panel copy is explicit that it did not attach you. That is a follow-on, not
+a reason to hold this.
+
+### What the operator is told
+
+`gc-helm.sh`'s exit codes are its contract, and the handler maps each to its own
+status and a stable `reason` slug. The tool's own stderr sentence is passed
+through **verbatim** as `error` — `cmd_open` already writes a different, specific
+sentence per failure (wrong id prefix vs. no ledger answers vs. data plane
+down), and re-deriving that here would be a second copy of the script's
+knowledge.
+
+| exit | HTTP | `reason` | meaning |
+|---|---|---|---|
+| 0 | 200 | — | `outcome` is `filed`, or `existing` when one was already open |
+| 2 | 500 | `usage` | the handler and the script disagree about the request — a wiring bug |
+| 3 | 503 | `environment` | missing dependency, rigs unenumerable, gather failed |
+| 4 | 422 | `verb_failed` | bead not found / unverifiable / filing failed |
+| — | 504 | `timeout` | the tool did not finish; a visit may or may not have been filed — check the bead |
+| — | 503 | `unavailable` | no visit tool resolved, or it could not be run |
+
+Refused before the subprocess runs: `invalid_bead` (400), `forbidden` (403),
+`busy` (409).
+
+**Exit 3 is knowingly coarse, and deliberately not papered over here.** In the
+script it still collapses a rig-enumeration timeout, a jq parse failure and a
+genuinely rigless city into one sentence (tk-lzdty half 2). Guessing between
+them in Go would hard-code that ambiguity in a second place; passing the
+sentence through means the day tk-lzdty lands and the script's sentences
+separate, the browser separates with it and **nothing here changes**.
+`internal/server/open_parity_test.go` reads `gc-helm.sh` and feeds the parser the
+sentences it really contains, so a reworded echo fails a test instead of quietly
+degrading every open to an unclassified outcome.
+
+### Exposure
+
+helm-svc is published to the tailnet by tailscale-serve, so reaching this route
+already requires being on the tailnet — the same boundary that admits the
+board's reads and the ttyd terminal. **This route does not widen it**, and adds
+no login or token: the service has no session concept, and inventing one here
+would be a second, weaker authentication story beside tailscale's (the same
+reasoning `web/src/terminal/endpoint.ts` gives for not re-checking the ttyd
+session name in the browser).
+
+What POST adds over GET is not reachability but **CSRF** — the operator's
+browser is *on* the tailnet, so any page they visit could otherwise write here
+with their network position. So the handler requires a same-origin write
+(`Sec-Fetch-Site`, with `Origin` as the fallback tell for a browser-shaped
+request), and validates the bead id against the id syntax **before** it becomes
+an argv element — an id beginning with `-` would otherwise be read by
+`cmd_open`'s flag loop as a flag. Whether the bead *exists* stays the script's
+gate; a second copy in front of it would only drift.
+
+Concurrent opens of the same bead are collapsed in-process (409 `busy`):
+`cmd_open`'s one-visit-per-subject gate is read-then-create, so a double-click
+could otherwise race it and file the second visit it exists to prevent.
+
+### Configuration
+
+| env | default | meaning |
+|---|---|---|
+| `GC_HELM_OPEN_TOOL` | set by `gc-helm-svc.sh` to its sibling `gc-helm.sh` | path to the visit tool |
+| `GC_HELM_OPEN_TIMEOUT` | `120s` | bounds one `open` run (Go duration or bare seconds) |
+
+The launcher resolves the tool as its own sibling rather than the binary
+guessing `rigs/<rig>/…`: gc-toolkit is rig-imported by four rigs, so there is no
+single correct rig name to hardcode. If nothing resolves, the board serves
+read-only and the route answers 503 saying so — rather than 404ing as though it
+were a typo.
+
+The run is placed in its own **process group** and cancelled by signalling the
+group. `gc-helm.sh` spawns `gc`/`bd` children, and killing only the script
+leaves a child holding the inherited stdout pipe — measured, that made a 50ms
+deadline return after a full 5s, which is precisely the wedged-data-plane case
+the bound exists for.
 
 ## Drill-in plane (`web/src/drill/`, U8)
 

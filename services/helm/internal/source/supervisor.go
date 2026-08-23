@@ -77,7 +77,7 @@ func NewSupervisorSource(opts ...Option) *SupervisorSource {
 		opt(s)
 	}
 	if s.gc == nil {
-		s.gc = newGCExec(discoverCityPath())
+		s.gc = newGCExec(DiscoverCityPath())
 	}
 	return s
 }

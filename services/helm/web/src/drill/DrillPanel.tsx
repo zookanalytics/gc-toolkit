@@ -6,6 +6,7 @@
 // the operator dives in for is present and honest, including the states where
 // something is missing.
 
+import { OpenConversation } from '../open/OpenConversation';
 import type { CityEvent, Session } from './client';
 import { PartialNotice } from './PartialNotice';
 import { useDrill } from './useDrill';
@@ -107,7 +108,12 @@ export function DrillPanel({ beadId, onClose }: DrillPanelProps) {
         </details>
       )}
 
-      <SessionSection session={session} uncertain={sessionUncertain} loading={loading} />
+      <SessionSection
+        beadId={beadId}
+        session={session}
+        uncertain={sessionUncertain}
+        loading={loading}
+      />
 
       <section className="drill-activity">
         <h3>activity</h3>
@@ -136,10 +142,12 @@ export function DrillPanel({ beadId, onClose }: DrillPanelProps) {
 }
 
 function SessionSection({
+  beadId,
   session,
   uncertain,
   loading,
 }: {
+  beadId: string;
   session: Session | null;
   uncertain: boolean;
   loading: boolean;
@@ -158,6 +166,12 @@ function SessionSection({
               ? 'Could not tell whether an agent is working this anchor — the session list came back incomplete.'
               : 'No agent is working this anchor right now.'}
         </p>
+        {/* Offered even when the session list did not answer. A visit is filed
+            against the BEAD, and gc-helm.sh's own one-open-visit-per-subject
+            gate is what prevents a duplicate — so an uncertain read is no
+            reason to withhold the action, and withholding it would strand the
+            operator exactly when the board is least informative. */}
+        <OpenConversation beadId={beadId} />
       </section>
     );
   }
@@ -176,6 +190,11 @@ function SessionSection({
       {session.last_output !== undefined && session.last_output !== '' && (
         <pre className="peek">{session.last_output}</pre>
       )}
+      {/* Still offered with a session running: that session is an agent working
+          the anchor, which is not the same as a conversation the operator can
+          have about it. The duplicate gate lives in the tool, so the worst case
+          here is being told one is already open. */}
+      <OpenConversation beadId={beadId} />
     </section>
   );
 }

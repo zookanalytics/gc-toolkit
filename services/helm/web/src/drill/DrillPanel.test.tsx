@@ -237,6 +237,28 @@ describe('DrillPanel', () => {
     expect(await screen.findByText(/No agent is working/)).toBeTruthy();
   });
 
+  // The write action is offered in BOTH session states, and the unworked one is
+  // the case that matters most: an anchor with nobody on it is exactly when the
+  // operator wants to start a conversation, so hiding the action there would
+  // remove it from the row it is most needed on.
+  it('offers the start-a-conversation action when no session is working the anchor', async () => {
+    render(
+      <DrillProvider origin={ORIGIN}>
+        <DrillPanel beadId="tk-unworked" onClose={() => {}} />
+      </DrillProvider>,
+    );
+    expect(await screen.findByRole('button', { name: /start a conversation/i })).toBeTruthy();
+  });
+
+  it('offers the start-a-conversation action alongside a running session', async () => {
+    sessionItems = [SESSION];
+    renderPanel();
+    // An agent working the anchor is not the same as a conversation the
+    // operator can have about it, so the action stands beside the session.
+    expect(await screen.findByRole('button', { name: /start a conversation/i })).toBeTruthy();
+    expect(await screen.findByText(/gc-toolkit__polecat-lx-8y6j/)).toBeTruthy();
+  });
+
   // Partial data is first-class on this surface, and the failure mode it
   // prevents is specific: an unanswered session store rendering as the sentence
   // an operator reads to mean "nothing is happening here, look elsewhere".
