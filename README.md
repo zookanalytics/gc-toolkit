@@ -43,6 +43,7 @@ opinions rather than cloned directly.
 - `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
 - `docs/file-structure.md` — conventions for where docs and specs live in this pack
 - `docs/skills.md` — how skills are authored, filed, and exposed so one `SKILL.md` serves both Gas City and (when portable) Claude / Codex
+- `docs/seed-audit/` — generated: the full standing prompt of every agent this pack configures and every formula recipe it exposes, with per-scenario byte and token counts. Regenerate with `assets/scripts/render-seed-audit.sh`; never hand-edit
 
 ## Usage
 
@@ -76,6 +77,28 @@ See [`docs/install.md`](docs/install.md) for the full install
 reference — remote imports, opt-in sub-packs (`gascity-keeper`),
 `[[rigs.patches]]` fragment wiring, per-rig overrides, and `gc
 doctor` verification.
+
+## Developing this pack
+
+Run once per clone, so the generated seed audit stays in step with the
+fragments it renders:
+
+```bash
+assets/scripts/render-seed-audit.sh --install-hook
+```
+
+That sets `core.hooksPath = assets/hooks`, which wires
+`assets/hooks/pre-commit`. The hook regenerates `docs/seed-audit/` only on a
+commit that touches `agents/`, `template-fragments/`, `formulas/`, `packs/` or
+`pack.toml`; every other commit pays a single `git diff --cached` and exits.
+
+`gc doctor` reports it when the hook is not wired, and
+`doctor/check-seed-audit-current` fails when a prompt input moved without the
+artifact moving with it. For certainty rather than the cheap digest comparison:
+
+```bash
+assets/scripts/render-seed-audit.sh --check
+```
 
 ## Relationship to gastown
 
