@@ -359,8 +359,18 @@ cmd_cap() {
 # set GC_PROACTIVE_ENABLED, versus wait for city load to fall).
 cmd_deliverable() {
     if ! proactive_auto_enabled; then
-        printf 'no: proactive auto-spawn is disabled (GC_PROACTIVE_ENABLED is unset or not truthy in this process env AND in %s'"'"'s city config) — a slung reaction would sit routed and unclaimed\n' \
-            "$(resolve_pool_target 2>/dev/null || printf 'the proactive pool')"
+        # Name the pool whose config was consulted, so "disabled" is
+        # actionable. Capture in two steps: `resolve_pool_target` reports an
+        # unqualifiable target through `die`, and `die` EXITS — inside `$( )`
+        # that terminates the substitution's subshell outright, so an inline
+        # `|| printf <fallback>` never runs and the %s lands empty ("AND in 's
+        # city config"). Absorbing the failure into the assignment is the same
+        # idiom `pool_config_env` uses for the same reason.
+        local why_target=""
+        why_target="$(resolve_pool_target 2>/dev/null)" || why_target=""
+        [ -n "$why_target" ] || why_target="the proactive pool, which could not be named because GC_RIG is unset"
+        printf 'no: proactive auto-spawn is disabled (GC_PROACTIVE_ENABLED is unset or not truthy in this process env AND in the city config for %s) — a slung reaction would sit routed and unclaimed\n' \
+            "$why_target"
         return 1
     fi
     if at_cap; then

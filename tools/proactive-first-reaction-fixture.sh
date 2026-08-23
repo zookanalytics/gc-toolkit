@@ -339,7 +339,11 @@ has "card · Proposal"                           "Proposal"                "$F"
 has "card · Decision needed"                    "Decision needed"         "$F"
 # Surfaces as advanced: it flags the bead onto the board.
 has "formula flags the bead onto the board"     "gc-helm.sh"         "$F"
-has "formula raises the hand (flag verb)"       "flag {{issue}}"          "$F"
+# There is no longer a `flag` verb to assert: gc-helm.sh's verbs are
+# open/react/takeaway/board, and raising the hand folded into `takeaway …
+# --release` (see the three assertions below). The assertion that used to sit
+# here looked for "flag {{issue}}" and had been red since that fold — a stale
+# expectation, not a finding.
 # Never closes the target work bead.
 has "formula forbids closing the target"        "gc bd close"             "$F"
 # The release is folded into `takeaway … --release` (one Dolt write), so there is
@@ -353,7 +357,7 @@ has "formula tags reached content untrusted"    "UNTRUSTED DATA"          "$F"
 # (reopen, unassign, clear route, the gc.proactive_reaction advance marker) into
 # the SAME Dolt write — one call replaces the takeaway stamp + a separate release
 # update. The raw metadata moved into the wrapper, so we assert the call shape.
-has "formula stamps the board takeaway via the wrapper" "takeaway {{issue}}"      "$F"
+has "formula stamps the board takeaway via the wrapper" 'takeaway "$WORK_BEAD_ID"' "$F"
 has "formula attributes the takeaway to proactive"      "--by proactive"          "$F"
 has "formula collapses stamp+release into one --release call" "--release"         "$F"
 has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
