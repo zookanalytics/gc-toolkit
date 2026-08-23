@@ -27,7 +27,10 @@ a change goes. It does not restate the beliefs it derives from
 ([foundation.md](foundation.md)) or the conventions for filing what it produces
 ([file-structure.md](file-structure.md)), and it defers the lifecycle machinery
 it only names to its canonical owner,
-[the work-bead state machine](work-bead-state-machine.md).
+[the work-bead state machine](work-bead-state-machine.md). Where this document
+names the primitives, [component-model.md](component-model.md) states which of
+them would survive a from-scratch rewrite, draws the PR lifecycle as one state
+machine, and binds each invariant to the check that fails when it stops holding.
 
 ## The Gas City primitives we build on
 
