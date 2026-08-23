@@ -407,10 +407,40 @@ def gating:
   | map(select(. != "")) | length > 0;
 '
 
+# Shared membership predicate — canonical copy in assets/scripts/check-set-heal.sh,
+# drift-checked by assets/scripts/inflight-membership.test.sh. Copy the markers too.
+# >>> inflight-membership
+# shellcheck disable=SC2034  # part of the shared block; not every host spends it
+INFLIGHT_LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+INFLIGHT_MEMBERSHIP_JQ='def claimable:
+  . as $b
+  | (($b.metadata // {})) as $m
+  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
+  | ((($m["gc.routed_to"] // "") | tostring) != "")
+    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
+def acting($live):
+  . as $b
+  | (($b.metadata // {})) as $m
+  | (($live | split(",")) | map(select(. != "open"))) as $owning
+  | ((($m.task_kind // "") | tostring) == "review")
+    or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
+    or ($b | claimable);
+def anchor_authority($a):
+  ((((. // {}).metadata // {}).anchor_bead // "") | tostring) as $ab
+  | if $ab == "" then "unattributed" elif $ab == $a then "mine" else "theirs" end;
+'
+# <<< inflight-membership
+
 # The compact row every branch-ownership probe yields: the id, whether the bead
-# is an anchor (merge_result set) rather than a rework child, and its
-# rebase_hold marker.
-PROBE_ROW_JQ='.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // "")}'
+# is an anchor (merge_result set) rather than a rework child, its rebase_hold
+# marker, and the ONE field that says which anchor it belongs to.
+#
+# `metadata.anchor_bead` is carried through the projection in its original shape,
+# not flattened, so `anchor_authority` above reads a probe row exactly as it reads a
+# whole bead. Membership has one definition in this pack and a projection is not a
+# licence to write a second one (tk-j5wrs ruling 2).
+PROBE_ROW_JQ='.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // ""),
+                     metadata: {anchor_bead: (.metadata.anchor_bead // "")}}'
 
 # One guarded ledger read -> the matching beads as a JSON array on stdout.
 # --limit=0 so a probe sees the whole set, not a page of it: a truncated page
@@ -1324,7 +1354,10 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
     # Beads carrying merge_result are anchors, not rework children, and are
     # excluded; the anchor under consideration is excluded by id.
     inflight=$(printf '%s\n' "$probe" \
-      | jq -r --arg anchor "$id" 'select(.id != $anchor) | select(.mres == "") | .id' 2>/dev/null \
+      | jq -r --arg anchor "$id" "$INFLIGHT_MEMBERSHIP_JQ"'select(.id != $anchor)
+          | select(.mres == "")
+          | select((anchor_authority($anchor)) != "theirs")
+          | .id' 2>/dev/null \
       | head -1)
     if [ -n "$inflight" ]; then
       skipped=$((skipped + 1)); continue
@@ -1733,7 +1766,10 @@ Repair — check the child's work order, then dispatch it:
         skipped=$((skipped + 1)); continue
       fi
       inflight=$(printf '%s\n' "$gate_probe" \
-        | jq -r --arg anchor "$id" 'select(.id != $anchor) | select(.mres == "") | .id' 2>/dev/null \
+        | jq -r --arg anchor "$id" "$INFLIGHT_MEMBERSHIP_JQ"'select(.id != $anchor)
+            | select(.mres == "")
+            | select((anchor_authority($anchor)) != "theirs")
+            | .id' 2>/dev/null \
         | head -1)
       if [ -n "$inflight" ]; then
         # Normally a healthy in-flight review/rework already re-raises the gate, so
@@ -1790,6 +1826,55 @@ Repair — check the child's work order, then dispatch it:
           continue
         fi
         skipped=$((skipped + 1)); continue
+      fi
+      # CONVERGENCE CAP, this dispatcher's half (tk-vie5k, tk-j5wrs ruling 3). This
+      # arm is the fourth dispatcher and had no cap: every head move minted another
+      # round, with nothing counting them. The count is the ANCHOR's, through the
+      # shared block, so this pass and the refinery's merge-push arm cannot disagree
+      # about how many rounds have been spent.
+      #
+      # DECLINING IS THE WHOLE ACTION — no human route, and nothing under
+      # check.<gate>: reconcile-gate-verdicts.sh R11 owns that verdict
+      # (signoff-cap-no-gate-write). With no new review the gate stays unsatisfied
+      # and the merge stays HELD, which is the safe side.
+      #
+      # AFTER the repair arm above on purpose: a review that already exists and is
+      # merely unroutable is REPAIRED past the cap. The cap bounds new rounds, not
+      # the health of the round already in flight — refusing to repair would strand
+      # the very bead that could still discharge the gate.
+      CAP_ANCHOR="$id"
+      # >>> signoff-round-cap
+      # Rounds spent on CAP_ANCHOR, counted off the anchor itself: one rework child per
+      # round by construction, each stamped `source_review_bead` by the signoff that
+      # filed it. EVERY status counts — a closed child is a COMPLETED round.
+      #
+      # THE COUNT BELONGS TO THE ANCHOR, not to whoever is about to dispatch (tk-j5wrs
+      # ruling 3). Three of the four dispatchers had no cap at all, so round N+1 was
+      # minted in exactly the window the cap exists to close; a count read off the anchor
+      # cannot drift between them. Copy this block, markers included — every copy is
+      # extracted, diffed against canonical and EXECUTED by
+      # assets/scripts/signoff-round-cap.test.sh.
+      #
+      # Inputs:  CAP_ANCHOR (may be empty), GC_MAX_REVIEW_ROUNDS (default 3)
+      # Outputs: ROUNDS, CAP_HIT
+      #
+      # NO ANCHOR NEVER CAPS: without one there is no reliable round history, and capping
+      # on a guess parks live work for a human. An unreadable ledger reads as 0 for the
+      # same reason — the wrong direction here strands every review during an outage.
+      CAP_ANCHOR="${CAP_ANCHOR:-}"
+      ROUNDS=0
+      if [ -n "$CAP_ANCHOR" ]; then
+        ROUNDS=$(gc bd dep list "$CAP_ANCHOR" --direction=up -t parent-child --json 2>/dev/null | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
+      fi
+      case "${ROUNDS:-}" in ''|*[!0-9]*) ROUNDS=0 ;; esac
+      CAP_HIT=0
+      if [ -n "$CAP_ANCHOR" ] && [ "$ROUNDS" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+        CAP_HIT=1
+      fi
+      # <<< signoff-round-cap
+      if [ "$CAP_HIT" = 1 ]; then
+        echo "reconcile-merged-prs: $id — PR#$num check.codex stale but $ROUNDS rework round(s) have been spent against a cap of ${GC_MAX_REVIEW_ROUNDS:-3}; no re-review dispatched (merge stays HELD; reconcile-gate-verdicts.sh records the exception)"
+        gate_held=$((gate_held + 1)); continue
       fi
       if [ -z "$REVIEW_POOL_DEFAULT" ]; then
         # No review pool: cannot dispatch. Do NOT hand-stamp the gate green (that

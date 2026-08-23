@@ -163,6 +163,7 @@ bead-EXCEPT|pull_request|EMPTY|409|polecat/feat-except|main|exception@HEAD409|
 bead-FIXABLE|pull_request|EMPTY|410|polecat/feat-fixable|main|fixable@HEAD410|
 bead-WEIRD|pull_request|EMPTY|411|polecat/feat-weird|main|weird@HEAD411|
 bead-NOVERB|pull_request|EMPTY|412|polecat/feat-noverb|main|green|
+bead-CAPPED|pull_request|EMPTY|413|polecat/feat-capped|main||
 A
 
 # An open review already referencing bead-INFLGT (so the heal must NOT dispatch a
@@ -489,6 +490,24 @@ case "$2" in
       prev="$arg"
     done ;;
   dep)
+    # `gc bd dep list <anchor> --direction=up -t parent-child --json` — the shared
+    # signoff-round-cap block's read. Answers from $FAKE_ROUNDS (anchor<TAB>n): n
+    # rework children, each stamped source_review_bead, which is what one spent
+    # round looks like. An anchor absent from the file has none, which is every
+    # fixture that is not exercising the cap.
+    if [ "$3" = "list" ]; then
+      anchor="$4"
+      n=$(awk -F'\t' -v a="$anchor" '$1==a{print $2; exit}' "$FAKE_ROUNDS" 2>/dev/null)
+      case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
+      out=""; i=0
+      while [ "$i" -lt "$n" ]; do
+        i=$((i + 1))
+        obj=$(printf '{"id":"fix-%s-%s","metadata":{"source_review_bead":"rv-%s"}}' "$anchor" "$i" "$i")
+        if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
+      done
+      printf '[%s]\n' "$out"
+      exit 0
+    fi
     # gc bd dep <review> --blocks <anchor>
     rev="$3"; anchor=$(printf '%s' "$*" | sed -n 's/.*--blocks \([^ ]*\).*/\1/p')
     printf '%s\t%s\n' "$rev" "$anchor" >> "$FAKE_DEPS" ;;
@@ -593,6 +612,11 @@ chmod +x "$TMP/bin/gh"
 : > "$TMP/flagfail"; : > "$TMP/flagtries"; echo 0 > "$TMP/seq"
 : > "$TMP/branchbeads"; : > "$TMP/heads"; : > "$TMP/routefail"
 : > "$TMP/noorigin"; : > "$TMP/revstate"; : > "$TMP/prs"; : > "$TMP/ghlog"
+: > "$TMP/rounds"
+# anchor<TAB>rework rounds already spent. bead-CAPPED is at the default cap of 3;
+# everything else is absent from the file and has spent none.
+printf 'bead-CAPPED\t3\n' > "$TMP/rounds"
+printf '413\tOPEN\tpolecat/feat-capped\n' > "$TMP/prs"
 mkdir -p "$TMP/bodies"
 
 export PATH="$TMP/bin:$PATH"
@@ -604,7 +628,8 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_REVIEWS="$TMP/reviews" \
        FAKE_SEQ="$TMP/seq" FAKE_CLOSED="$TMP/closed" FAKE_BODIES="$TMP/bodies" \
        FAKE_BRANCHBEADS="$TMP/branchbeads" FAKE_HEADS="$TMP/heads" \
        FAKE_ROUTEFAIL="$TMP/routefail" FAKE_NOORIGIN="$TMP/noorigin" \
-       FAKE_REVSTATE="$TMP/revstate" FAKE_PRS="$TMP/prs" FAKE_GHLOG="$TMP/ghlog"
+       FAKE_REVSTATE="$TMP/revstate" FAKE_PRS="$TMP/prs" FAKE_GHLOG="$TMP/ghlog" \
+       FAKE_ROUNDS="$TMP/rounds"
 
 # --- Run 1. -------------------------------------------------------------------
 RC1=0
@@ -779,8 +804,32 @@ fi
 # an anchor whose marker blocks the dispatch is still stamped, exactly as (GREEN)
 # has always been — the stamp is the audit trail that the gate was normalized, and
 # withholding it would leave the anchor ungated to merge-skill.sh.
-hasin "$OUT1" '10 healed' \
-  && ok "run 1 summary reports 10 healed" || bad "run 1 summary healed count (got: $OUT1)"
+hasin "$OUT1" '11 healed' \
+  && ok "run 1 summary reports 11 healed" || bad "run 1 summary healed count (got: $OUT1)"
+
+# --- (CAP) the convergence cap, on THIS dispatcher (tk-vie5k) ------------------
+# Both arms that reach the dispatch — the ABSENT-marker one and the `fixable@`
+# re-gate — had no cap at all, so this pass minted round N+1 in exactly the window
+# the cap exists to close (tk-vx2et, observed on tk-fdstg as round 4 of a cap of 3).
+# bead-CAPPED is at the cap and otherwise dispatches: same shape as bead-EMPTY.
+hasin "$OUT1" 'bead-CAPPED has spent 3 rework round(s) against a cap of 3' \
+  && ok "(CAP) an anchor at the cap declines to dispatch, and says so" \
+  || bad "(CAP) capped anchor should decline the dispatch (got: $OUT1)"
+grep -q 'anchor_bead=bead-CAPPED' "$TMP/revmeta" \
+  && bad "(CAP) a review was dispatched for an anchor past the cap" \
+  || ok "(CAP) no review bead is minted for an anchor past the cap"
+# THE STAMP IS NOT THE DISPATCH. The gate is still normalized — that is the audit
+# trail that it was armed, and withholding it would leave the anchor ungated to
+# merge-skill.sh. Only the SPAWN is declined.
+hasin "$OUT1" "bead-CAPPED (pull_request PR#413) has NO normalized check_set" \
+  && ok "(CAP) the gate is still stamped; only the spawn is declined" \
+  || bad "(CAP) capped anchor must still be normalized"
+# AND NOTHING IS WRITTEN UNDER check.<gate> here: the terminal verdict has ONE
+# writer, reconcile-gate-verdicts.sh's R11 (signoff-cap-no-gate-write). Stamping an
+# exception from this arm too is tk-mf3em, one dispatcher over.
+grep -q 'check\.' < <(grep -E '^bead-CAPPED\s' "$TMP/revmeta" 2>/dev/null) \
+  && bad "(CAP) the cap arm must write nothing under check.<gate>" \
+  || ok "(CAP) the cap arm writes nothing under check.<gate>"
 hasin "$OUT1" '2 explicit opt-out' \
   && ok "run 1 summary reports 2 explicit opt-out" || bad "run 1 summary opt-out count (got: $OUT1)"
 

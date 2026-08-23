@@ -168,6 +168,10 @@ cat > "$TMP/candidates.json" <<JSON
    "metadata":{"branch":"polecat/b-depfail"}},
   {"id":"b-convfail","status":"open","assignee":"","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/b-convfail"}},
+  {"id":"b-offered","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-offered"}},
+  {"id":"b-heldoffer","status":"open","assignee":"","updated_at":"__OLD__",
+   "metadata":{"branch":"polecat/b-heldoffer"}},
 
   {"id":"x-assigned","status":"open","assignee":"gc-toolkit__polecat-lx-1","updated_at":"__OLD__",
    "metadata":{"branch":"polecat/x-assigned"}},
@@ -203,7 +207,12 @@ cat > "$TMP/live.json" <<'JSON'
   {"id":"s-livestep","status":"in_progress","assignee":"gc-toolkit__polecat-lx-busy",
    "metadata":{"gc.root_bead_id":"r-livestep","gc.step_ref":"mol-polecat-work.implement"}},
   {"id":"s-dead","status":"in_progress","assignee":"gc-toolkit__polecat-lx-dead",
-   "metadata":{"gc.root_bead_id":"r-strand","gc.step_ref":"mol-polecat-work.load-context"}}
+   "metadata":{"gc.root_bead_id":"r-strand","gc.step_ref":"mol-polecat-work.load-context"}},
+  {"id":"r-offered","status":"in_progress","assignee":"",
+   "metadata":{"gc.input_convoy_id":"c-offered","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"r-heldoffer","status":"in_progress","assignee":"",
+   "metadata":{"gc.input_convoy_id":"c-heldoffer","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
+               "gc.session_name":"gc-toolkit__polecat-lx-dead"}}
 ]
 JSON
 
@@ -237,6 +246,8 @@ b-inprog|c-strand
 b-clobber|c-strand
 b-depfail|c-strand
 b-convfail|c-unreadable
+b-offered|c-offered
+b-heldoffer|c-heldoffer
 b-rework|c-strand
 b-plainkid|c-strand
 b-parentfail|c-strand
@@ -285,6 +296,8 @@ polecat/b-inprog|sha-inprog
 polecat/b-clobber|sha-clobber
 polecat/b-depfail|sha-depfail
 polecat/b-convfail|sha-convfail
+polecat/b-offered|sha-offered
+polecat/b-heldoffer|sha-heldoffer
 polecat/b-anchor|sha-anchor
 polecat/b-plainkid|sha-plainkid
 polecat/b-parentfail|sha-parentfail
@@ -309,6 +322,8 @@ sha-inprog|2
 sha-clobber|1
 sha-depfail|1
 sha-convfail|1
+sha-offered|2
+sha-heldoffer|2
 sha-anchor|1
 sha-plainkid|1
 sha-parentfail|1
@@ -546,6 +561,19 @@ eq "$DRY_RC" "0" "(DRY) dry run exits 0"
 has "DRY-RUN would hand b-strand" "$TMP/out" "(DRY) selects the stranded bead"
 has "DRY-RUN would hand b-conv" "$TMP/out" "(DRY) selects the convoy-targeted bead"
 hasnt "b-live" "$TMP/out" "(DRY) does not select the live molecule"
+# (OFFER) tk-vie5k. A molecule that is routed to a pool and has never been claimed
+# has NO session to answer for it — that is what a queued pool offer looks like, and
+# under pool saturation it is what every waiting rework child looks like. Salvage
+# used to read the absent session as "no landing path" and hand the work back out
+# from under a dispatch that was simply waiting its turn.
+hasnt "would hand b-offered" "$TMP/out" \
+      "(OFFER) a routed, never-claimed molecule is a pending offer, not a husk"
+# (OFFER) the other side of the same clause, and the reason it is not just
+# `claimable`: a molecule whose session is stamped HAS been claimed, and a husk keeps
+# its route (clearing it is what quiescing does). Widen the clause to any routed root
+# and this bead stops being salvageable — which is every husk in the store.
+has "DRY-RUN would hand b-heldoffer" "$TMP/out" \
+    "(OFFER) a routed molecule whose stamped session is dead is still a husk"
 has "retracting the stale" "$TMP/out" "(RETRACT) --dry-run says what it would retract"
 # Covers the retraction as much as the handoff: it is the one write in this pass
 # that fires on beads the loop below never even examines.
@@ -625,8 +653,12 @@ hasnt "gc bd update b-flagged" "$TMP/updates" \
 # assignee is not durable, and b-clobber, whose target is rolled back under it). Both
 # belong in this count precisely because the pass DECIDED they were stranded.
 # b-metafail is deliberately NOT here: its handoff is refused one step earlier.
-eq "$(grep -c 'assignee=gc-toolkit/gc-toolkit.refinery' "$TMP/updates")" "5" \
-  "(DEADROOT) exactly the five dead-molecule beads reach a handoff"
+# b-heldoffer joins them (tk-vie5k): its molecule IS routed to a pool, but the root
+# carries a stamped session that is dead, so it has been claimed and abandoned — a
+# husk, and husks keep their route. It is the negative control for the pending-offer
+# clause; widen that clause to "routed" and this count drops back to six.
+eq "$(grep -c 'assignee=gc-toolkit/gc-toolkit.refinery' "$TMP/updates")" "6" \
+  "(DEADROOT) exactly the six dead-molecule beads reach a handoff"
 
 # (VERIFY): the branch/target write reported success and was not durable, so the
 # assignee is never written — the bead stays unassigned, i.e. still a candidate.
@@ -642,7 +674,7 @@ has "b-metafail" "$TMP/err" "(VERIFY) naming the bead it left stranded"
 # write as the assignee, exactly as the done sequence does.
 has "gc bd update b-inprog --status=open --assignee=gc-toolkit/gc-toolkit.refinery" \
   "$TMP/updates" "(INPROG) an in_progress strand is handed over as status=open"
-eq "$(grep -c -- '--status=open --assignee=gc-toolkit/gc-toolkit.refinery' "$TMP/updates")" "5" \
+eq "$(grep -c -- '--status=open --assignee=gc-toolkit/gc-toolkit.refinery' "$TMP/updates")" "6" \
   "(INPROG) every handoff sets status=open in the same write as the assignee"
 has "RECOVERED b-inprog" "$TMP/out" "(INPROG) and the in_progress strand is recovered"
 
