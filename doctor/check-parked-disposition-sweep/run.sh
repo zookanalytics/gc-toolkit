@@ -108,7 +108,7 @@ else
     # visit and closes it WITHOUT clearing a takeaway that still begins "holding",
     # which is ordinary, and the next pass reads a stranded hold. One visit per round,
     # forever, which is the amplifier tk-1g9yw in a new place.
-    grep -qF 'MARKER="$MARKER hold_flagged=$tk_at"' "$dir/$script" \
+    grep -qF 'MARK2="hold_flagged=$tk_at"' "$dir/$script" \
         || errors+=("$script: a disposition filing no longer records the hold stamp — closing its visit hands the same subject straight to the hold arm, and the two arms amplify each other one visit per pass")
 
     # The filing goes through gc-helm.sh open — the one place the canonical gate-visit
@@ -184,6 +184,8 @@ else
         || errors+=("$test_script: no mid-flight-hold case — that a hold whose routed work is still open is never signalled is unproven, and that is the failure that would put the operator in a conversation about work in progress")
     grep -q 'HOLDSTALL' "$dir/$test_script" \
         || errors+=("$test_script: no stall_root case — that an item a LIVE sitting holds only through its visit's stall_root is skipped is unproven, and gc-helm.sh open does not catch that one")
+    grep -q 'HOLDSPACEY' "$dir/$test_script" \
+        || errors+=("$test_script: no non-ISO-stamp case — gc.takeaway_at is hand-editable, and a stamp with a space in it word-splits a joined marker list into a truncated key, after which the subject re-files every pass (tk-1g9yw through a quoting bug)")
     grep -q 'NOAMPLIFY' "$dir/$test_script" \
         || errors+=("$test_script: no cross-arm amplifier case — that closing a disposition visit does not hand the subject to the hold arm is unproven, and the takeaway is not cleared on the ordinary path")
     grep -q 'CENSUS' "$dir/$test_script" \

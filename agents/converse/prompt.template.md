@@ -258,7 +258,9 @@ The loop, every visit:
    write the takeaway so it still states the decision needed when read
    cold by a sitting that was not here, and when you resume a hold and
    hold again, RE-STAMP it — a fresh `gc.takeaway_at` is what earns the
-   next visit if this session is reaped too. (The writer is **searched for**, never assumed:
+   next visit if this session is reaped too.
+
+   (The writer is **searched for**, never assumed:
    `$GC_RIG_ROOT` is the rig that IMPORTED this agent, not the gc-toolkit
    pack — a `signal-loom/gc-toolkit.converse` session gets signal-loom's
    root, which has no `assets/` at all, so a path built from it alone

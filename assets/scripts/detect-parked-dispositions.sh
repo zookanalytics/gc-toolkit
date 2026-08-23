@@ -536,13 +536,21 @@ while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged hold_flagged origin i
 
   # ── The observation, in the caller's words and the marker it retires on ─────
   HELD_SINCE=$(held_for "$tk_at")
+
+  # The markers this filing retires, held in two SEPARATE variables rather than one
+  # space-joined list. `gc.takeaway_at` is machine-written as an ISO instant, but the
+  # field is hand-editable, and one written "2026-08-23 06:09:20" would word-split a
+  # joined list into a TRUNCATED marker plus a garbage argument — after which the
+  # stamped value never equals the takeaway again and the subject re-files every
+  # pass. That is the amplifier tk-1g9yw, reached through a quoting bug.
+  MARK2=""
   if [ "$ACTION" = "dispose" ]; then
     filed=$((filed + 1))
     MARKER="disposition_flagged=$LANDED_KEY"
     # Plus the hold marker, so closing this visit does not hand the same subject
     # straight to the hold arm — see the header. Skipped when the takeaway carries no
     # stamp, since there is then nothing to record.
-    [ -n "$tk_at" ] && MARKER="$MARKER hold_flagged=$tk_at"
+    [ -n "$tk_at" ] && MARK2="hold_flagged=$tk_at"
     REASON="parked · routed work landed — dispose or resume"
     echo "$PROG: $subj DISPOSITION DUE — parked${tk_at:+ at $tk_at}${tk_by:+ by $tk_by}, routed work landed: $LANDED_KEY"
   else
@@ -676,11 +684,10 @@ while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged hold_flagged origin i
   # itself fails, the visit is open, so next pass the visit-already-open guard covers
   # it — the marker only matters after that visit is closed.
   # One key per write, so a partial failure names the key that did not stick and the
-  # other one still lands. Safe to word-split: a landed key is comma-joined and a
-  # takeaway stamp is an ISO instant — neither can contain a space.
+  # other one still lands. Both expansions are QUOTED — see above.
   STAMP_FAILED=0
-  # shellcheck disable=SC2086  # a deliberate list of key=value markers
-  for _mark in $MARKER; do
+  for _mark in "$MARKER" "$MARK2"; do
+    [ -n "$_mark" ] || continue
     bd_pinned update "$subj" --set-metadata "$_mark" >/dev/null 2>&1 && continue
     echo "$PROG: $subj — visit filed but the ${_mark%%=*} marker did not stick; harmless while the visit stays open (the guard dedupes), a duplicate only if it is closed before the next pass" >&2
     STAMP_FAILED=1
@@ -688,7 +695,7 @@ while IFS="$SEP" read -r subj takeaway tk_at tk_by flagged hold_flagged origin i
   if [ "$STAMP_FAILED" -ne 0 ]; then
     failed=$((failed + 1)); continue
   fi
-  echo "  -> visit filed on $subj, stamped $MARKER"
+  echo "  -> visit filed on $subj, stamped $MARKER${MARK2:+ $MARK2}"
 done <<< "$ROWS"
 
 MODE=""

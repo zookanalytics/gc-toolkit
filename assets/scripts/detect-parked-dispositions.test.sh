@@ -237,7 +237,10 @@ cat > "$TMP/beads.json" <<EOF
   "metadata":{"gc.takeaway":"holding — hand-written, and undated","gc.origin":"operator"}},
 
  {"id":"s-holdundated2","title":"an undated hold on a subject that already carries a marker","status":"open",
-  "metadata":{"gc.takeaway":"holding — rewritten by hand, losing the stamp","gc.origin":"operator","hold_flagged":"2026-08-23T06:12:00Z"}}
+  "metadata":{"gc.takeaway":"holding — rewritten by hand, losing the stamp","gc.origin":"operator","hold_flagged":"2026-08-23T06:12:00Z"}},
+
+ {"id":"s-holdspacey","title":"a hold whose takeaway stamp was hand-written with a space","status":"open",
+  "metadata":{"gc.takeaway":"holding — the stamp here is not an ISO instant","gc.takeaway_at":"2026-08-23 06:09:20","gc.takeaway_by":"converse","gc.origin":"operator"}}
 ]
 EOF
 
@@ -428,6 +431,15 @@ hasnt "$TMP/out" "s-holdundated2 STRANDED" \
   "(HOLDUNDATED) an undated hold is refused even when an older marker makes the key comparison pass"
 hasnt "$TMP/updates" "hold_flagged=$" "(HOLDUNDATED) and no empty marker is ever stamped"
 
+# (HOLDSPACEY) gc.takeaway_at is machine-written as an ISO instant, but the field is
+# hand-editable. Held in one space-joined marker list, a stamp with a space inside
+# word-splits into a TRUNCATED marker plus a garbage argument — after which the value
+# on the bead never equals the takeaway again and the subject re-files every pass.
+# That is the amplifier tk-1g9yw, reached through a quoting bug.
+has "$TMP/out" "s-holdspacey STRANDED HOLD" "(HOLDSPACEY) a hold with a space in its stamp is still signalled"
+has "$TMP/updates" "update s-holdspacey --set-metadata hold_flagged=2026-08-23 06:09:20" \
+  "(HOLDSPACEY) and the WHOLE stamp is written as one marker, not truncated at the space"
+
 # (PRECEDENCE) s-child's takeaway is $PARKED, which begins "holding" — so both
 # observations apply to it. The disposition arm wins: the landed work is the more
 # specific thing to say, and the hold arm is the residue.
@@ -450,8 +462,8 @@ has "$TMP/updates" "update s-child --set-metadata hold_flagged=2026-08-22T05:25:
 # disposition_flagged, so dropping the at-least-one-wait guard does not produce a
 # visit — it silently reclassifies the park as "already flagged" and every
 # hasnt-assertion above still passes. The counts are the only place that shows it.
-has "$TMP/out" "4 disposition(s) and 4 stranded hold(s) signalled; 4 still waiting, 2 with no recorded wait, 3 already under an open visit, 1 already flagged, 1 hold(s) already signalled, 2 undated hold(s), 0 unreadable, 0 failed" \
-  "(CENSUS) 21 candidates, one bucket each — the classification itself is pinned, not just the absence of a report"
+has "$TMP/out" "4 disposition(s) and 5 stranded hold(s) signalled; 4 still waiting, 2 with no recorded wait, 3 already under an open visit, 1 already flagged, 1 hold(s) already signalled, 2 undated hold(s), 0 unreadable, 0 failed" \
+  "(CENSUS) 22 candidates, one bucket each — the classification itself is pinned, not just the absence of a report"
 
 # The filing goes through gc-helm.sh open — the one place the canonical gate-visit
 # block lives, which also owns the subject-exists gate, the one-visit-per-subject
@@ -484,8 +496,8 @@ eq "$(grep -c 'set-metadata' "$TMP/updates")" "$STAMPS" "(NOCLEAR) one key per w
 # 3 dispositions carry a gc.takeaway_at and so write both markers; s-reflag has no
 # takeaway stamp, so there is nothing to record and it writes only its own. The 4
 # holds write one each. A filing that wrote a key nobody accounted for shows up here.
-eq "$WROTE" "11" \
-  "(NOCLEAR) and every write is accounted for: 3 dispositions x 2 markers + 1 undated x 1 + 4 holds x 1"
+eq "$WROTE" "12" \
+  "(NOCLEAR) and every write is accounted for: 3 dispositions x 2 markers + 1 undated x 1 + 5 holds x 1"
 hasnt "$TMP/updates" "update s-reflag --set-metadata hold_flagged" \
   "(NOCLEAR) an undated takeaway records no hold stamp — there is none to record"
 
@@ -559,7 +571,11 @@ hasnt "$TMP/rout.2" "s-child DISPOSITION DUE" "(REPEAT p2) with its visit still 
 has "$TMP/rout.2" "already under an open visit" "(REPEAT p2) held by the primary guard"
 
 # Close the visit: now only the id-keyed marker stands between the bump and a duplicate.
-jq -c '[ .[] | if ((.metadata.task_kind // "") == "visit" and (.metadata["gc.continuation_group"] // "") == "s-child")
+# s-holdspacey's visit is closed alongside, so pass 3 exercises the HOLD marker's
+# round trip — stamped in pass 1, read back here — and not just the guard.
+jq -c '[ .[] | if ((.metadata.task_kind // "") == "visit"
+                   and ((.metadata["gc.continuation_group"] // "") == "s-child"
+                        or (.metadata["gc.continuation_group"] // "") == "s-holdspacey"))
                then .status = "closed" else . end ]' "$FAKE_STORE" > "$FAKE_STORE.tmp" && mv "$FAKE_STORE.tmp" "$FAKE_STORE"
 rp 3
 hasnt "$TMP/rout.3" "s-child DISPOSITION DUE" "(REPEAT p3) visit closed, nothing changed: the marker keeps it silent despite the bump"
@@ -574,6 +590,9 @@ eq "$(grep -c '^open s-child ' "$TMP/opens")" "1" "(REPEAT) exactly ONE visit fi
 
 # The same loop for the hold arm: it too must file once and stay quiet.
 eq "$(grep -c '^open s-hold ' "$TMP/opens")" "1" "(REPEAT) and exactly one for a stranded hold, across the same three passes"
+hasnt "$TMP/rout.3" "s-holdspacey STRANDED" \
+  "(HOLDSPACEY) with its visit CLOSED and nothing changed, the stamped marker still matches — the space did not truncate it"
+eq "$(grep -c '^open s-holdspacey ' "$TMP/opens")" "1" "(HOLDSPACEY) so exactly one visit across all three passes"
 HFLAG=$(jq -r '.[] | select(.id=="s-hold") | .metadata.hold_flagged // ""' "$FAKE_STORE")
 eq "$HFLAG" "2026-08-23T06:09:20Z" "(REPEAT) whose marker is the hold's own stamp, unmoved by the updated_at bump"
 
