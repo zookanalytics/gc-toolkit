@@ -34,11 +34,22 @@ type fakeOpener struct {
 	// block, when non-nil, holds Open until it is closed — used to make two
 	// requests genuinely concurrent.
 	block chan struct{}
+
+	// ctx is the context the handler actually handed the subprocess. Recorded so
+	// a test can assert what cancelling the REQUEST does to it.
+	ctx context.Context
 }
 
-func (f *fakeOpener) Open(_ context.Context, bead string) (ToolResult, error) {
+func (f *fakeOpener) handedCtx() context.Context {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ctx
+}
+
+func (f *fakeOpener) Open(ctx context.Context, bead string) (ToolResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, bead)
+	f.ctx = ctx
 	f.mu.Unlock()
 	if f.block != nil {
 		<-f.block
@@ -284,13 +295,110 @@ func TestOpenToolFailures(t *testing.T) {
 	}
 }
 
-// A timeout must say that nothing was filed — the operator's next move (retry,
-// or go look) depends on it.
-func TestOpenTimeoutSaysNoVisitWasFiled(t *testing.T) {
+// A timeout must NOT claim that nothing was filed (review of PR#421, P1). The
+// operator's next move depends on this sentence, and the sentence has to be
+// true: `gc-helm.sh open` creates the visit bead before it stamps the routing
+// metadata and adds the tracks edge, so a kill inside that window leaves a real
+// visit behind. Telling the operator nothing happened sends them to retry, and
+// the script's duplicate guard keys on exactly the fields that never landed —
+// so the retry files a second one.
+func TestOpenTimeoutDoesNotClaimNothingWasFiled(t *testing.T) {
 	f := &fakeOpener{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
-	if got := decodeErr(t, rr).Error; !strings.Contains(got, "no visit was filed") {
-		t.Errorf("error = %q, want it to say no visit was filed", got)
+	got := decodeErr(t, rr).Error
+	for _, forbidden := range []string{"no visit was filed", "nothing was filed"} {
+		if strings.Contains(strings.ToLower(got), forbidden) {
+			t.Errorf("error = %q, must not assert %q — a timeout cannot prove it", got, forbidden)
+		}
+	}
+	// ...and it must still tell them what to do about the uncertainty.
+	if !strings.Contains(got, "may or may not") || !strings.Contains(got, "check the bead") {
+		t.Errorf("error = %q, want it to name the uncertainty and send the operator to the bead", got)
+	}
+}
+
+// THE SIDE EFFECT OUTLIVES THE CLIENT (review of PR#421, P1). The handler used
+// to pass r.Context() straight to the opener, so a browser refresh or a dropped
+// proxy connection SIGKILLed `gc-helm.sh open` mid-write. Once the request is
+// validated and the per-bead gate is held, cancelling the request must no longer
+// reach the subprocess — only the opener's own timeout may stop it.
+func TestOpenSurvivesClientDisconnect(t *testing.T) {
+	f := &fakeOpener{res: ToolResult{Stdout: "gc-helm: open: filed visit tk-v1 on tk-abc12\n"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`).WithContext(ctx))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	handed := f.handedCtx()
+	if handed == nil {
+		t.Fatal("the opener was never handed a context")
+	}
+	cancel() // the operator closes the tab
+	if err := handed.Err(); err != nil {
+		t.Errorf("cancelling the REQUEST cancelled the subprocess context (%v); "+
+			"the write must be bound by the opener timeout alone", err)
+	}
+}
+
+// A SUCCESSFUL OPEN DROPS THE CACHED BOARD (review of PR#421, P2). `gc-helm.sh`
+// busts its own on-disk cache, which this binary never reads; Server.Board
+// serves s.cached until s.expiry. Without the invalidate, the row the operator
+// just acted on keeps rendering unheld for up to the TTL, which invites a second
+// click on work already in flight.
+func TestOpenInvalidatesTheBoardCache(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdout string
+	}{
+		{"filed", "gc-helm: open: filed visit tk-v1 on tk-abc12\n"},
+		{"existing", "gc-helm: open: visit tk-v1 is already open on tk-abc12\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeOpener{res: ToolResult{Stdout: tc.stdout}}
+			s := New(newFake(), time.Minute, WithOpener(f))
+			// Warm the cache the way a board read does.
+			if _, err := s.Board(context.Background()); err != nil {
+				t.Fatalf("warm the board: %v", err)
+			}
+			s.mu.Lock()
+			warm := s.cached != nil
+			s.mu.Unlock()
+			if !warm {
+				t.Fatal("precondition: the board cache did not warm, so this test proves nothing")
+			}
+
+			rr := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+			}
+
+			s.mu.Lock()
+			still := s.cached != nil
+			s.mu.Unlock()
+			if still {
+				t.Error("the board cache survived a successful open; the next refresh can show the pre-open board")
+			}
+		})
+	}
+}
+
+// ...and a FAILED open must leave the cache alone: nothing changed, and dropping
+// it would make every bad click pay for a fresh gather.
+func TestOpenFailureKeepsTheBoardCache(t *testing.T) {
+	f := &fakeOpener{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
+	s := New(newFake(), time.Minute, WithOpener(f))
+	if _, err := s.Board(context.Background()); err != nil {
+		t.Fatalf("warm the board: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))
+	if rr.Code == http.StatusOK {
+		t.Fatalf("precondition: wanted a failure, got 200")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cached == nil {
+		t.Error("a failed open dropped the board cache; nothing changed, so nothing needed dropping")
 	}
 }
 

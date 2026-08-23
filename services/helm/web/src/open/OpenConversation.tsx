@@ -27,7 +27,8 @@ const NEXT_MOVE: Record<string, string> = {
     'The board refused a write that did not come from its own page. Open the board directly rather than through another site.',
   environment:
     'The city could not be read, so no visit was filed. Check the data plane (gc doctor, then dolt) and try again.',
-  timeout: 'Nothing was filed. Try again once the city is responding.',
+  timeout:
+    'The board stopped waiting; the filing may still have gone through. Check the bead before retrying, then try again once the city is responding.',
   unavailable:
     'This board cannot file visits — it was started without the visit tool, or the service is unreachable.',
   usage: 'The board and the visit tool disagree about the request. That is a bug here, not something to retry.',

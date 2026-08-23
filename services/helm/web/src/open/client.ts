@@ -100,7 +100,11 @@ export async function openConversation(bead: string, signal?: AbortSignal): Prom
     // The request never reached the service: offline, the tailnet dropped, the
     // service is down. Distinct from every server-decided failure below.
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
-    throw new OpenError(0, 'unavailable', 'could not reach the board service — no visit was filed');
+    throw new OpenError(
+      0,
+      'unavailable',
+      'could not reach the board service — if the request had already been sent, a visit may still have been filed',
+    );
   }
 
   // Read the body once, then interpret. A non-JSON error body (a proxy's HTML

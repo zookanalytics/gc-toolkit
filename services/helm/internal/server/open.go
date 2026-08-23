@@ -230,7 +230,29 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.openGate.leave(bead)
 
-	res, err := s.opener.Open(r.Context(), bead)
+	// THE SIDE EFFECT DOES NOT DIE WITH THE CLIENT (review of PR#421, P1).
+	//
+	// This used to pass r.Context() straight through, which tied the subprocess
+	// to the browser: a refresh, a closed tab or a proxy dropping the connection
+	// cancelled it, cmd.Cancel SIGKILLed the process GROUP, and the handler
+	// reported the timeout path. That is unsafe for this verb specifically,
+	// because `gc-helm.sh open` is not atomic — the gate-visit block creates the
+	// visit bead first and only then stamps gc.routed_to / task_kind and adds the
+	// tracks edge (assets/scripts/gc-helm.sh). A kill inside that window leaves an
+	// open, unrouted, unlinked visit task while the browser is told nothing was
+	// filed, and a retry files a SECOND one, because the script's duplicate guard
+	// keys on exactly the metadata and edge that never landed.
+	//
+	// WithoutCancel keeps the request's values and drops only its cancellation, so
+	// once the request is validated and the per-bead gate is held the run is bound
+	// by the opener's own timeout and nothing else. A disconnected operator now
+	// loses the RESPONSE, not the write.
+	//
+	// The timeout window is narrowed, not closed: a genuinely wedged data plane
+	// can still be killed mid-window. That case is no longer described as "no
+	// visit was filed" anywhere — see mapOpenErr below, the README's exit table,
+	// and the web client's messages.
+	res, err := s.opener.Open(context.WithoutCancel(r.Context()), bead)
 	if err != nil {
 		status, reason, msg := mapOpenErr(err)
 		log.Printf("helm: open %s: %v", bead, err)
@@ -251,6 +273,15 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	outcome, visit := parseOpenStdout(res.Stdout)
+	// A FILED VISIT CHANGES THE BOARD, SO DROP THE ONE WE ARE HOLDING (review of
+	// PR#421, P2). `gc-helm.sh open` busts its OWN cache, but that is the script's
+	// on-disk cache and this service never reads it: Server.Board serves s.cached
+	// until s.expiry. Without this, the next refresh can show the pre-open board
+	// for up to the TTL even though the POST succeeded — the row the operator just
+	// acted on still reads unheld, which invites a second click on work already in
+	// flight. Both success outcomes invalidate: `existing` means a visit is open
+	// that this board may equally not be showing yet.
+	s.invalidateBoard()
 	writeJSON(w, http.StatusOK, openResponse{
 		Bead:    bead,
 		Outcome: outcome,
@@ -297,7 +328,8 @@ func mapOpenErr(err error) (status int, reason, msg string) {
 	switch {
 	case errors.Is(err, ErrToolTimeout):
 		return http.StatusGatewayTimeout, reasonTimeout,
-			"the visit tool did not finish in time — the city's data plane may be slow or wedged; no visit was filed"
+			"the visit tool did not finish in time — the city's data plane may be slow or wedged; " +
+				"a visit may or may not have been filed, so check the bead before retrying"
 	case errors.Is(err, ErrToolUnavailable):
 		return http.StatusServiceUnavailable, reasonUnavailable,
 			"the visit tool could not be run: " + err.Error()

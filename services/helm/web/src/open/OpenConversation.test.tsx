@@ -119,9 +119,12 @@ describe('OpenConversation', () => {
       },
       {
         reason: 'timeout',
+        // NOT "nothing was filed" (review of PR#421, P1): the tool creates the
+        // visit before it routes and links it, so a timeout cannot prove the
+        // write did not land. The copy has to send the operator to look.
         error: 'the visit tool did not finish in time',
         status: 504,
-        want: /nothing was filed/i,
+        want: /may still have gone through|check the bead/i,
       },
       {
         reason: 'unavailable',
@@ -154,7 +157,11 @@ describe('OpenConversation', () => {
 
     const alert = await screen.findByRole('alert');
     expect(text(alert)).toMatch(/could not reach the board service/i);
-    expect(text(alert)).toMatch(/no visit was filed/i);
+    // A transport failure does not prove the request never arrived — since the
+    // handler stopped tying the subprocess to the request, a dropped connection
+    // loses the RESPONSE, not necessarily the write (review of PR#421, P1).
+    expect(text(alert)).toMatch(/may still have been filed/i);
+    expect(text(alert)).not.toMatch(/no visit was filed/i);
   });
 
   it('falls back to the status code when the body carries no message', async () => {

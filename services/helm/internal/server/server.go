@@ -165,6 +165,24 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// invalidateBoard drops the cached board so the next read re-gathers.
+//
+// Written for POST /helm/open (review of PR#421, P2): a filed visit changes the
+// `held` glyph and the frontier of the row it was filed on, and this service
+// serves s.cached until s.expiry. `gc-helm.sh open` busts its own on-disk cache,
+// which this binary never reads, so without this the operator can act on a row
+// and watch the board go on saying nothing happened for up to the TTL.
+//
+// Deliberately a plain invalidate rather than a re-gather: the gather is the
+// expensive call, the caller is holding an HTTP request open, and the next board
+// read is going to pay for it anyway.
+func (s *Server) invalidateBoard() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cached = nil
+	s.expiry = time.Time{}
+}
+
 // Board returns the cached board when fresh, otherwise gathers and computes a new
 // one. The lock is held across the gather so concurrent misses do not stampede
 // the supervisor; a follow-up can add stale-while-revalidate.

@@ -671,7 +671,7 @@ knowledge.
 | 2 | 500 | `usage` | the handler and the script disagree about the request — a wiring bug |
 | 3 | 503 | `environment` | missing dependency, rigs unenumerable, gather failed |
 | 4 | 422 | `verb_failed` | bead not found / unverifiable / filing failed |
-| — | 504 | `timeout` | the tool did not finish; nothing was filed |
+| — | 504 | `timeout` | the tool did not finish; a visit may or may not have been filed — check the bead |
 | — | 503 | `unavailable` | no visit tool resolved, or it could not be run |
 
 Refused before the subprocess runs: `invalid_bead` (400), `forbidden` (403),
