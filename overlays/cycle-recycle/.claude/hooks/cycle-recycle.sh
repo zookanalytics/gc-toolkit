@@ -14,7 +14,7 @@
 #
 # When the agent's measured input_tokens crosses 200K — an absolute
 # work-product threshold (= 20% of a 1M window; a 200K-window agent would fire
-# at its own compaction edge), see template-fragments/cycle-recycle.template.md
+# at its own compaction edge), see docs/cycle-recycle.md
 # for the full rationale — it writes a durable HANDOFF mail (`gc handoff`) and
 # triggers a restart (`gc session reset`).
 #

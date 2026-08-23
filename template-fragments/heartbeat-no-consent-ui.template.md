@@ -26,5 +26,5 @@ cannot do without you.
 This rule applies to all heartbeat agents (witness, deacon, refinery)
 and is re-enforced at the threshold boundary by the cycle-recycle
 `Stop` hook (`overlays/cycle-recycle/`; policy in
-`template-fragments/cycle-recycle.template.md`).
+`docs/cycle-recycle.md`).
 {{ end }}
