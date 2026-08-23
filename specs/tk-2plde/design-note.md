@@ -113,52 +113,108 @@ reordering is invisible at runtime.
   and in Go each anchor costs a query. Both sides gather it for `parked` alone so
   the wire shapes stay identical.
 
-## NOT DONE: the backfill
+## The backfill: a method, not a checklist
 
-The bead's `## Backfill` section is **not** executed here, deliberately.
+The code half above makes a routed wait an edge *going forward*. The parked
+rows that already existed were left for **`tk-jj2ad`** (linked
+`discovered-from` this one), which executed the safe part of it on
+2026-08-23.
 
-Disposing of a parked subject is an operator ruling. This repo's own converse
-contract says so in as many words — *"You do not close subjects on your own
-judgment"* — and the correct instrument (`bead-rehome.sh --origin … --successor
-…`) needs a successor pointer that only the ruling can supply. Writing the
-missing edges is not mechanical either: a takeaway names bead ids for several
-reasons, and `tk-gy1ws` names `tk-x2tw7` as its *successor*, not as something it
-waits on. A wrong `blocks` edge on a live subject is worse than no edge, because
-`bd` then refuses to close it.
+This section used to carry an 18-row census taken at one instant and read like
+a checklist. It is not one, and presenting it as one caused real error: by the
+time anyone worked it, the set had decayed **18 -> 8 -> 4 -> 2**, and two of
+the rows an earlier note told a worker to *wire* had to be re-classified
+because the work they named had since closed. **Re-derive the set. Never
+replay a table.**
 
-So the census is recorded here and filed as its own bead — **`tk-jj2ad`**,
-linked `discovered-from` this one — rather than acted on.
+### The carve-out: ten of those rows are standing scopes, not conversations
 
-Census taken 2026-08-22 ~06:33Z from `gc-helm.sh board --json --limit=0 --refresh`
-against the live city — 58 rows, 18 parked, of which exactly **one**
-(`tk-gnrhr`) already carried a `blocks` edge, and it renders correctly as
-`parked · waiting on 1` with its blocker still open.
+`gc-helm.sh` kind `parked` is "any non-typed open bead carrying a
+`gc.takeaway`", and it has no notion of `task_kind=triage-subject`. A standing
+triage scope — a permanent bucket the detectors file visits *into* — therefore
+renders forever as a concluded conversation, headlined by whatever its last
+sitting happened to be about. `sl-6u5z` is the worked example: its 08-13
+headline read "NOW SELF-DRIVING ... only a pool cycle remains", true for about
+seven hours and false for the eight days after.
 
-| bead | rig | age | takeaway (first 96 chars) |
-|---|---|---|---|
-| `tk-zmrui` | gc-toolkit | 8d | dispatched holistically — no content discriminator adopted; census showed only 1 of 3 terminal b |
-| `tk-gnrhr` | gc-toolkit | 0d | split — membership half PARKED on design bead tk-j5wrs (blocks edge, load-bearing); mechanical g |
-| `tk-3a176` | gc-toolkit | 0d | holding — the parked-band fix did NOT self-resolve; decide: enforce ≤140 at write, clamp at rend |
-| `sl-6u5z` | signal-loom | 8d | disposed — sl-jnjd complete-and-closed (operator-approved 2026-08-13). It was a COMPLETION HUSK, |
-| `su-vehr` | shutupandlisten | 8d | resolved — su-vc8n needed no operator decision: it closed itself 2026-08-13T19:59:37Z with gc.ou |
-| `tk-mxrq9` | gc-toolkit | 0d | verified, unruled — real + reachable (signal-loom requires 3 checks; comment at :1808 denying th |
-| `tk-z9nln` | gc-toolkit | 0d | dispatched — audit-as-diff ruled; tk-z9nln.1 slung (workflow tk-z1ror) to produce the divergence |
-| `tk-x2tw7` | gc-toolkit | 0d | routed — website-eval breakdown built as sl-kg9z6 (44 beads, 5 tracks); 6 dispatched, naming + i |
-| `tk-gy1ws` | gc-toolkit | 0d | superseded — the question is answered and owned elsewhere. The operator filed tk-x2tw7 at 06:47Z |
-| `su-6013` | shutupandlisten | 8d | TABLED — su-uzy9 STAYS PARKED (standing home open-through-MVP; MVP not reached: Mac xcodebuild b |
-| `su-zia4` | shutupandlisten | 4d | executed (operator CONFIRM, 2026-08-17) — su-5dee + su-ykcs STILL TABLED, unchanged, both mechan |
-| `tk-n3we6` | gc-toolkit | 2d | cleared — 17 husk workflow roots closed with successor pointers (tk-lxthp + 16 siblings), verifi |
-| `tk-hok6w` | gc-toolkit | 0d | folded-1-routed-2-gated-2 — helm outage over (hand-recovered, tk-5nm0p folded into in-flight tk- |
-| `sl-djvs` | signal-loom | 0d | routed — sitting 11: operator ruled 'route the six'; all 6 slung to mol-polecat-work, verified a |
-| `gc-b0pmq` | gascity | 0d | holding (visit gc-qcvca, resumed 2026-08-22 by converse-2 -- this sitting has now been REAPED TW |
-| `su-7sjl` | shutupandlisten | 0d | settled — sitting 9 routed the single candidate su-g1n9s (workflow su-jtqo1, mol-polecat-work) a |
-| `tk-mw9qz` | gc-toolkit | 8d | SPLIT + HELD (operator, 2026-08-13). Funded half is tk-rbf9r: make the terminal attach target DY |
-| `su-g48h` | shutupandlisten | 8d | dispatched — appetite GRANTED for the automation route, not more manual gating. Item 3 RETIRED:  |
+**Closing one does not dispose of it.** Two code paths say so:
 
-Read by their own takeaway text, roughly eleven of the eighteen are
-self-declared terminal ("disposed", "resolved", "superseded", "cleared",
-"settled", "executed", "dispatched", "routed", "nothing further needed") — on a
-budget of 15 reserved rows, which is the cost the bead quantifies.
+- `assets/scripts/detect-stalled-workflows.sh:378-396` (`resolve_subject`)
+  looks the scope up in LIVE (`bd list --status=open,in_progress`) and
+  **creates a new one** when it finds none. Closing a stalled-workflows scope
+  mints a replacement under a fresh id on the next patrol pass and orphans the
+  old bead's visit history — verified on `sl-6u5z`, which holds 6 visits and
+  two full diagnoses in its notes.
+- `assets/scripts/liveness-sweep-precheck.sh:42-46` states it outright for the
+  unnamed-waits scopes: the standing subject is "a permanent open, unassigned,
+  unblocked bead in every rig, so without this the survivor set could never be
+  empty and the whole precheck would be dead code." That path is read-only, so
+  a close there does not respawn — it breaks the precheck instead.
+
+Identify them by metadata, not by reading the headline:
+`task_kind=triage-subject`, carrying a `triage.scope` value.
+
+### The re-derive rule
+
+Re-run `gc-helm.sh board --json --limit=0 --refresh`, take `kind == "parked"`,
+and exclude in this order. What survives is the work set.
+
+1. `metadata.task_kind == "triage-subject"` -> standing scope. Never dispose.
+2. An open or `in_progress` visit naming it
+   (`gc.continuation_group == <bead>`) -> a sitting holds it. Leave it alone.
+3. An existing dependency edge to something still open -> already wired.
+4. The takeaway self-describes as awaiting an operator ruling -> not yours.
+
+Only category (1) of the three dispositions below is safe unsupervised.
+
+### The three dispositions
+
+1. **Still waiting on work genuinely in flight** -> wire the edge:
+   `gc-helm takeaway <subject> "<unchanged text>" --waiting-on <work-bead>`.
+   The board then promotes the row by itself when the work lands. Safe for an
+   agent **only where the takeaway names the routed bead unambiguously.**
+2. **Finished** -> operator ruling, then `bead-rehome.sh --origin <bead>
+   --successor <bead> --kind re-homed|folded|fixed-upstream|duplicate`. The
+   successor pointer is the whole point; a bare close is what
+   `bead-rehome.sh`'s own header exists to prevent.
+3. **Neither — the topic simply ended** -> ruling, then close with a reason.
+
+### Re-derivation of 2026-08-23 ~01:45Z
+
+63 rows, **25 parked** (up from 18). Applying the rules: 10 standing scopes
+excluded by (1) — `sl-djvs`, `su-vehr`, `sl-6u5z`, `su-6013`, `su-zia4`,
+`tk-n3we6`, `tk-hok6w`, `gc-b0pmq`, `su-7sjl`, `su-g48h`, each confirmed by its
+own `task_kind`, not by the earlier note's say-so. `tk-82epi` excluded by (2),
+held by live visit `tk-nd84o` on converse-1. `tk-gnrhr`, `tk-66rwg`,
+`tk-fhlv4`, `tk-16f29` excluded by (3), already wired to open work.
+`tk-6v7nm`, `tk-mxrq9`, `tk-mw9qz` excluded by (4). `tk-z9nln` also excluded:
+its takeaway records that the wait *cannot* be an edge on its shape (a parent
+cannot be blocked by its own child) and that the return trip is hand-executed
+until `tk-2cyxo` ships a child-aware predicate.
+
+**Executed:**
+
+| bead | action | detail |
+|---|---|---|
+| `tk-x2tw7` | WIRED | `--waiting-on sl-kg9z6` (open, 44 beads). Takeaway text unchanged. |
+| `tk-gy1ws` | DISPOSED | `bead-rehome.sh --kind folded --successor tk-x2tw7`; self-declared superseded, "No decision pending in this thread." |
+
+**Left for a ruling** — each needs a decision this bead could not supply:
+
+| bead | why it is not an agent's call |
+|---|---|
+| `tk-zmrui` | Says it "stays open to be subsumed", but both beads it named (`tk-cwsj1`, `tk-tbkkf`) have since **closed**. The subsuming work landed, so the remedy moved from *wire* to *dispose* — and disposal needs a ruling. An earlier note listed this as a wiring target; that was true when written. |
+| `tk-3a176` | Its edge to `tk-9tbbk.1` is now discharged (that bead closed) and the takeaway says "No design work left on this subject" — terminal, so disposal, so a ruling. |
+| `tk-fs2n4` | Names a real fix ("count only contendable sessions") but no successor bead exists to wire to. Needs a bead filed or a ruling. |
+| `tk-u28iw` | Same shape: a recommendation ("publish check.codex as a commit status") with nothing filed. |
+
+### Trap: a cross-store edge is invisible to `bd show`
+
+`tk-x2tw7` is in the gc-toolkit store and `sl-kg9z6` in signal-loom. The edge
+wrote fine, but afterwards `gc bd show tk-x2tw7 --json` reports
+`dependencies: null` — while `bd list --id tk-x2tw7 --json` shows the row, and
+the board reads it correctly. Verify a cross-store wire with `bd list`, not
+`bd show`, or you will conclude a successful write failed and wire it twice.
 
 ## Verification
 
