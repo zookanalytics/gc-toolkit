@@ -61,10 +61,11 @@
 #
 # Tunables (env):
 #   GC_PROACTIVE_ENABLED       master switch for demand-driven AUTO-SPAWN.
-#                              Default-disabled: unset ⇒ `demand` emits [] (no
-#                              auto-spawn). Truthy (1/true/yes/on) opts in.
+#                              Default-disabled: unanswered ⇒ `demand` emits []
+#                              (no auto-spawn). Truthy (1/true/yes/on) opts in.
 #                              Gates auto-spawn ONLY — manual sling/scan ignore
-#                              it.
+#                              it. Resolved env-first, then from the target
+#                              pool's city config — see "Tunable resolution".
 #   GC_PROACTIVE_POOL          proactive pool agent name. A bare base name
 #                              (default "gc-toolkit.proactive") is rig-
 #                              qualified to "<GC_RIG>/<base>" — the form the
@@ -74,7 +75,9 @@
 #                              already-qualified "<rig>/<base>" to override.
 #   GC_PROACTIVE_CITY_CAP      city-wide active-session ceiling for the
 #                              shed clamp (default 20; operator-tunable in
-#                              the design's 8-16 band).
+#                              the design's 8-16 band). Resolved env-first,
+#                              then from the target pool's city config — see
+#                              "Tunable resolution".
 #   GC_PROACTIVE_MERGE         merge strategy for slung output (default
 #                              "mr"; "local" allowed; "direct" REFUSED).
 #   GC_PROACTIVE_SCAN_LIMIT    max candidates scan/--sling considers
@@ -94,7 +97,12 @@ set -euo pipefail
 PROG="${0##*/}"
 
 POOL_BASE="${GC_PROACTIVE_POOL:-gc-toolkit.proactive}"
-CITY_CAP="${GC_PROACTIVE_CITY_CAP:-20}"
+CITY_CAP_DEFAULT=20
+# Provisional. `resolve_tunables` (run from main) fills whichever of these two
+# the process env left unanswered from the proactive pool's resolved city
+# config. Read them only after that call — never at load time.
+CITY_CAP="${GC_PROACTIVE_CITY_CAP:-$CITY_CAP_DEFAULT}"
+PROACTIVE_ENABLED="${GC_PROACTIVE_ENABLED:-}"
 MERGE="${GC_PROACTIVE_MERGE:-mr}"
 SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
@@ -164,6 +172,107 @@ board_rank() {
         sort_by(-(prio_w(.priority)), (.created_at // ""))'
 }
 
+# ---------------------------------------------------------------------------
+# Tunable resolution — the process env first, then the pool's CITY CONFIG.
+# ---------------------------------------------------------------------------
+# GC_PROACTIVE_ENABLED and GC_PROACTIVE_CITY_CAP are declared in city.toml on
+# the proactive pool itself ([[rigs.overrides]] agent = "proactive", then
+# [rigs.overrides.env]). The reconciler reads them from there and injects them
+# into work_query/scale_check and into the pool's own sessions — so every
+# CONSUMER of the decision sees them. Nothing else does.
+#
+# The decision is made on the PRODUCER side, in a process that gets no such
+# injection. `deliverable` is called by assets/scripts/gc-visit-open.sh, whose
+# primary caller is the helm service (services/helm/internal/server/open.go);
+# helm-svc's process env carries no GC_PROACTIVE_* and structurally cannot — a
+# [[service]] block has no env field at all (gascity internal/config/service.go:
+# ServiceProcessConfig is {Command, HealthPath}). Reading the env alone made the
+# gate answer "disabled" to the one caller that has to ask, so every visit the
+# board opened was filed with no framing card, for as long as the switch was on
+# (tk-hscs0).
+#
+# So resolve each tunable the way the reconciler effectively does:
+#
+#   1. the PROCESS ENV when set — an explicit operator override, and what an
+#      already-injected caller (a proactive session, work_query) carries;
+#   2. otherwise the RESOLVED CITY CONFIG for the pool this run targets — the
+#      same [agent.env] the reconciler injects from;
+#   3. otherwise the built-in default.
+#
+# Step 2 costs one `gc config show --json` (~0.3s), taken at most once per run
+# and only for a tunable the env left unanswered, so an injected caller pays
+# nothing. It fails SOFT in every direction: an unreachable city, an
+# unparsable document, an unknown pool, or a non-numeric cap all leave the
+# env/default answer standing, which is exactly the pre-existing behavior.
+
+# pool_config_env -> the target pool's resolved [agent.env] as a JSON object,
+# or `{}` when it cannot be read. In fixture mode the raw `gc config show
+# --json` document is read from $GC_PROACTIVE_FIXTURE/config.json (absent = no
+# config layer at all), so the target derivation and the extraction below are
+# the SAME code the live path runs — the fixture stubs the source, not the
+# logic.
+#
+# The config keys an agent by its own bare name plus the rig dir it belongs to
+# (Name = "proactive", Dir = "<rig>"), while the pool TARGET is the qualified
+# import form "<rig>/<binding>.<agent-base>". Strip both wrappers to look it up.
+pool_config_env() {
+    local target rig base raw out
+    target=""
+    # resolve_pool_target `die`s when it cannot rig-qualify. That is fatal for a
+    # sling and merely unanswerable here, so absorb it in the subshell and fall
+    # back to "no config layer".
+    target="$(resolve_pool_target 2>/dev/null)" || target=""
+    [ -n "$target" ] || { printf '{}'; return 0; }
+    rig="${target%%/*}"
+    base="${target##*/}"        # <binding>.<agent-base>, or already bare
+    base="${base##*.}"          # the agent's own name, which is what config keys
+
+    raw=""
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/config.json" ] || { printf '{}'; return 0; }
+        raw="$(cat "$FIXTURE/config.json")"
+    else
+        raw="$(gc config show --json 2>/dev/null)" || raw=""
+    fi
+    [ -n "$raw" ] || { printf '{}'; return 0; }
+
+    out=""
+    out="$(printf '%s' "$raw" | jq -c --arg rig "$rig" --arg base "$base" \
+        '[ (.config.Agents // [])[]
+           | select((.Dir // "") == $rig and (.Name // "") == $base)
+           | (.Env // {}) ] | (.[0] // {})' 2>/dev/null)" || out=""
+    [ -n "$out" ] || out='{}'
+    printf '%s' "$out"
+}
+
+# resolve_tunables — fill PROACTIVE_ENABLED / CITY_CAP from the pool's city
+# config for whichever of the two the process env did not answer. Exactly one
+# config read, or none at all when the env answered both.
+resolve_tunables() {
+    if [ -n "$PROACTIVE_ENABLED" ] && [ -n "${GC_PROACTIVE_CITY_CAP:-}" ]; then
+        return 0
+    fi
+    local env_json v
+    env_json=""
+    env_json="$(pool_config_env)" || env_json='{}'
+    [ -n "$env_json" ] || env_json='{}'
+
+    if [ -z "$PROACTIVE_ENABLED" ]; then
+        v=""
+        v="$(printf '%s' "$env_json" | jq -r '.GC_PROACTIVE_ENABLED // empty' 2>/dev/null)" || v=""
+        if [ -n "$v" ]; then PROACTIVE_ENABLED="$v"; fi
+    fi
+    if [ -z "${GC_PROACTIVE_CITY_CAP:-}" ]; then
+        v=""
+        v="$(printf '%s' "$env_json" | jq -r '.GC_PROACTIVE_CITY_CAP // empty' 2>/dev/null)" || v=""
+        case "$v" in
+            ''|*[!0-9]*) : ;;      # unset, or not a bare number: keep the default
+            *)           CITY_CAP="$v" ;;
+        esac
+    fi
+    return 0
+}
+
 usage() {
     cat <<EOF
 Usage: $PROG demand [<pool-target>]   Pool work_query: emit routed proactive
@@ -184,7 +293,8 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit routed proactive
                                       fall back when it is no.
 
 Budget: pool cap = agents/proactive/agent.toml max_active_sessions; city cap =
-GC_PROACTIVE_CITY_CAP (default $CITY_CAP). Security: proactive output is mr-only
+GC_PROACTIVE_CITY_CAP (default $CITY_CAP_DEFAULT, else the pool's city config).
+Security: proactive output is mr-only
 (GC_PROACTIVE_MERGE=$MERGE; "direct" is refused).
 EOF
 }
@@ -249,7 +359,18 @@ cmd_cap() {
 # set GC_PROACTIVE_ENABLED, versus wait for city load to fall).
 cmd_deliverable() {
     if ! proactive_auto_enabled; then
-        printf 'no: proactive auto-spawn is disabled (GC_PROACTIVE_ENABLED unset or not truthy) — a slung reaction would sit routed and unclaimed\n'
+        # Name the pool whose config was consulted, so "disabled" is
+        # actionable. Capture in two steps: `resolve_pool_target` reports an
+        # unqualifiable target through `die`, and `die` EXITS — inside `$( )`
+        # that terminates the substitution's subshell outright, so an inline
+        # `|| printf <fallback>` never runs and the %s lands empty ("AND in 's
+        # city config"). Absorbing the failure into the assignment is the same
+        # idiom `pool_config_env` uses for the same reason.
+        local why_target=""
+        why_target="$(resolve_pool_target 2>/dev/null)" || why_target=""
+        [ -n "$why_target" ] || why_target="the proactive pool, which could not be named because GC_RIG is unset"
+        printf 'no: proactive auto-spawn is disabled (GC_PROACTIVE_ENABLED is unset or not truthy in this process env AND in the city config for %s) — a slung reaction would sit routed and unclaimed\n' \
+            "$why_target"
         return 1
     fi
     if at_cap; then
@@ -269,12 +390,17 @@ cmd_deliverable() {
 # emit the standard pool demand (ready, unassigned, routed-to-us beads).
 # ---------------------------------------------------------------------------
 
-# proactive_auto_enabled -> true iff auto-spawn is opted in via
-# GC_PROACTIVE_ENABLED. Mirrored inline in agents/proactive/agent.toml's
-# work_query (the real reconciler clamp); keep the two truthy sets in sync
-# (gate-asserted).
+# proactive_auto_enabled -> true iff auto-spawn is opted in. Reads the RESOLVED
+# tunable (env, else the pool's city config — see "Tunable resolution"), never
+# the raw env, so the answer does not depend on which process asks.
+#
+# The truthy set is mirrored inline in agents/proactive/agent.toml's work_query
+# and scale_check (the real reconciler clamp); keep the three in sync
+# (gate-asserted). Those two copies read the env directly and correctly: the
+# reconciler injects the pool's [agent.env] into them, so the env IS the config
+# there. This resolution exists for every caller that gets no such injection.
 proactive_auto_enabled() {
-    case "${GC_PROACTIVE_ENABLED:-}" in
+    case "$PROACTIVE_ENABLED" in
         1|true|yes|on) return 0 ;;
         *)             return 1 ;;
     esac
@@ -448,9 +574,14 @@ cmd_sling() {
 
     # Build the sling argv. The target is rig-qualified (resolve_pool_target)
     # so `gc sling` resolves the rig-scoped pool agent rather than rejecting a
-    # bare name; --on attaches the mol-first-reaction wisp to the existing
-    # bead; --merge pins the path; --reassign hands a human-held bead to the
-    # pool cleanly.
+    # bare name; --on attaches the mol-first-reaction workflow to the existing
+    # bead and routes THAT bead to the pool (the pool's work_query selects on
+    # the bead's gc.routed_to, not on the workflow root); --merge pins the
+    # path; --reassign hands a human-held bead to the pool cleanly.
+    #
+    # --on is load-bearing and must not be dropped: the proactive pool declares
+    # no default_sling_formula of its own and inherits agent_defaults'
+    # "mol-polecat-work", so a plain sling would pour the wrong formula.
     set -- "$target" "$bead" --on "$FORMULA" --merge "$MERGE" --reassign
     [ -n "$nudge" ] && set -- "$@" --nudge
 
@@ -476,6 +607,11 @@ main() {
     local verb="$1"; shift || true
     case "$verb" in
         -h|--help|help) usage; exit 0 ;;
+    esac
+    # Every remaining verb consults at least one of the two clamps. Resolve both
+    # once, here — after --help, which must stay free of a config read.
+    resolve_tunables
+    case "$verb" in
         demand) cmd_demand "$@" ;;
         scan)   cmd_scan "$@" ;;
         sling)  cmd_sling "$@" ;;

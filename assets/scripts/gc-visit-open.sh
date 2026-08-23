@@ -385,7 +385,25 @@ if [ -n "$NO_REACT" ]; then
 elif [ ! -x "$PROACTIVE_TOOL" ]; then
     REACT_WHY="no: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)"
 else
-    REACT_WHY="$("$PROACTIVE_TOOL" deliverable 2>/dev/null)" && REACT=1
+    # Ask under the SUBJECT's rig. The answer is per-rig: the proactive pool
+    # is rig-scoped (agents/proactive/agent.toml watches
+    # {{.Rig}}/gc-toolkit.proactive), and both clamps are declared on that
+    # pool's own city config, so the gate has to know which pool it is asking
+    # about before it can read them. gc-proactive.sh qualifies its target from
+    # GC_RIG and fails CLOSED when it is unset — and the caller that matters
+    # most here, helm-svc, has no GC_RIG at all (it is a city-wide service),
+    # so without this the gate answered "disabled" to the very front door the
+    # board opens conversations through, and every visit was filed with no
+    # framing card (tk-hscs0).
+    #
+    # Set for this ONE command rather than exported: RIG_NAME is authoritative
+    # for this subject, but the rest of the script's gc calls resolve their own
+    # scope and must not inherit it. Same move gc-helm.sh's `react` already
+    # makes on the sling side, for the same reason. `${RIG_NAME:-}` cannot be
+    # empty by the time we get here (both subject branches assign it, and
+    # neither falls through), but an empty value would simply mean "no
+    # override" — today's behavior — rather than tripping `set -u`.
+    REACT_WHY="$(GC_RIG="${RIG_NAME:-}" "$PROACTIVE_TOOL" deliverable 2>/dev/null)" && REACT=1
     [ -n "$REACT_WHY" ] || REACT_WHY="no: gc-proactive.sh deliverable gave no answer"
 fi
 
