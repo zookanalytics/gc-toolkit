@@ -20,6 +20,12 @@
 #   * the gc-version WARNING being a warning and not an error, which is the
 #     tier-1/tier-2 split this artifact was scoped on;
 #   * the no-renderer skip, so a pack without the script is not reported broken;
+#   * ...and that a renderer which is PRESENT but NOT EXECUTABLE is NOT read as
+#     absent. Testing -x for both was a fail-open (pre-open signoff P1): a
+#     committed `chmod -x` turned the upkeep loop off while this check printed
+#     OK and the pre-commit hook silently skipped. The mode bit must not be able
+#     to decide whether this pack is audited, so the staleness read still fires
+#     with the bit off;
 #   * that the check reads GC_PACK_DIR rather than its own location, since
 #     `gc doctor` runs it against an installed pack, not this checkout.
 #
@@ -87,6 +93,100 @@ if [ "$(rc_of)" = "0" ] && grep -F 'no render-seed-audit.sh' <<< "$(out_of)" >/d
     ok "a pack without the renderer is skipped, not reported broken"
 else
     bad "no-renderer skip (rc=$(rc_of)): $(out_of | head -1)"
+fi
+
+# ------------------------------------------------- renderer present, not +x
+# The fail-open the pre-open signoff caught. `chmod -x` is a COMMITTED change —
+# a mode bit rides in a commit like any other — so this is reachable by an
+# ordinary diff, and it used to silence both gates at once while each reported
+# success. Two things must hold: the check must not call the renderer absent,
+# and the staleness read must still work, because a mode bit deciding whether a
+# pack is audited is the whole defect.
+P="$TMP/noexec"; make_pack "$P"
+chmod -x "$P/assets/scripts/render-seed-audit.sh"
+write_index "$P" "$(bash "$P/assets/scripts/render-seed-audit.sh" --root "$P" --print-digest)"
+run_check "$P"
+if grep -F 'no render-seed-audit.sh' <<< "$(out_of)" >/dev/null; then
+    bad "(NOEXEC) a non-executable renderer is reported as ABSENT — the fail-open is back"
+else
+    ok "(NOEXEC) a present-but-not-executable renderer is not reported as absent"
+fi
+if [ "$(rc_of)" = "0" ]; then
+    bad "(NOEXEC) the check passed clean with the upkeep loop's entry point unrunnable"
+else
+    ok "(NOEXEC) it is reported (rc=$(rc_of)), not passed as OK"
+fi
+if grep -qiF 'NOT EXECUTABLE' <<< "$(out_of)"; then
+    ok "(NOEXEC) the report names the mode bit, so the fix is obvious"
+else
+    bad "(NOEXEC) the report must name the executable bit: $(out_of | head -2)"
+fi
+
+# ...and the gate is still LIVE with the bit off: stale the artifact and the
+# check must still catch it. This is the assertion that makes the arm mean
+# something — reporting the mode while going blind to staleness would trade one
+# silent failure for another.
+printf 'moved\n' >> "$P/agents/sample/prompt.template.md"
+run_check "$P"
+if [ "$(rc_of)" = "2" ] && grep -F 'STALE' <<< "$(out_of)" >/dev/null; then
+    ok "(NOEXEC) staleness is still detected with the renderer non-executable"
+else
+    bad "(NOEXEC) the mode bit darkened the staleness read (rc=$(rc_of)): $(out_of | head -1)"
+fi
+
+# ---------------------------------------------- the hook, with the bit off
+# The OTHER half of the same fail-open: assets/hooks/pre-commit tested -x and
+# `exit 0`, so the identical `chmod -x` skipped the regeneration silently — the
+# reviewer reproduced it by staging nothing but the mode change.
+#
+# The renderer is STUBBED here, and deliberately. What is under test is whether
+# the hook INVOKES it when the executable bit is off, not what a render produces;
+# and a real render cannot run against make_pack's fixture at all, because its
+# one-line pack.toml does not compose a synthetic city (the renderer says so and
+# refuses). The stub echoes a marker no skipped or refused invocation can forge,
+# which is the only signal that actually separates the two behaviours — the
+# hook's own "regenerating ..." banner is printed BEFORE the renderer is called
+# and survives a render that fails outright. A first draft of this test asserted
+# on that banner and passed while the hook was invoking a non-executable file and
+# aborting the commit.
+#
+# The real render path is covered by the shipped-tree arm at the end of this file
+# and by every --print-digest call above.
+P="$TMP/hooknoexec"; make_pack "$P"
+write_index "$P" "$(bash "$P/assets/scripts/render-seed-audit.sh" --root "$P" --print-digest)"
+git -C "$P" add -A >/dev/null 2>&1
+git -C "$P" -c user.email=t@t -c user.name=t commit -q --no-verify -m base >/dev/null 2>&1
+cat > "$P/assets/scripts/render-seed-audit.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'STUB-RENDERER-RAN\n'
+root="$(git rev-parse --show-toplevel)"
+mkdir -p "$root/docs/seed-audit"
+printf 'stub\n' > "$root/docs/seed-audit/STUB.md"
+exit 0
+STUB
+chmod -x "$P/assets/scripts/render-seed-audit.sh"
+printf 'moved by the test\n' >> "$P/agents/sample/prompt.template.md"
+git -C "$P" add agents/sample/prompt.template.md >/dev/null 2>&1
+( cd "$P" && bash assets/hooks/pre-commit >"$TMP/hook.out" 2>&1 ); hook_rc=$?
+if grep -qF 'STUB-RENDERER-RAN' "$TMP/hook.out"; then
+    ok "(HOOKNOEXEC) the hook INVOKES a non-executable renderer instead of skipping it"
+else
+    bad "(HOOKNOEXEC) the renderer was never run: $(head -4 "$TMP/hook.out")"
+fi
+if [ "$hook_rc" = "0" ]; then
+    ok "(HOOKNOEXEC) ...and the hook completes, so the commit is not aborted"
+else
+    bad "(HOOKNOEXEC) the hook aborted the commit (rc=$hook_rc): $(tail -2 "$TMP/hook.out")"
+fi
+if grep -qF 'render FAILED' "$TMP/hook.out"; then
+    bad "(HOOKNOEXEC) the invocation itself failed — the mode bit still breaks the loop"
+else
+    ok "(HOOKNOEXEC) ...with no render failure"
+fi
+if grep -qiF 'not executable' "$TMP/hook.out"; then
+    ok "(HOOKNOEXEC) ...and the mode bit is noted, not silently tolerated forever"
+else
+    bad "(HOOKNOEXEC) the hook must note the mode bit: $(head -3 "$TMP/hook.out")"
 fi
 
 # ------------------------------------------------------------------- missing

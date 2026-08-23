@@ -89,8 +89,10 @@ assets/scripts/render-seed-audit.sh --install-hook
 
 That sets `core.hooksPath = assets/hooks`, which wires
 `assets/hooks/pre-commit`. The hook regenerates `docs/seed-audit/` only on a
-commit that touches `agents/`, `template-fragments/`, `formulas/`, `packs/` or
-`pack.toml`; every other commit pays a single `git diff --cached` and exits.
+commit that touches the renderer's input set — `agents/`, `template-fragments/`,
+`formulas/`, `packs/`, `pack.toml`, or `assets/scripts/render-seed-audit.sh`
+itself, which carries the synthetic city the prompts render against; every other
+commit pays a single `git diff --cached` and exits.
 
 `gc doctor` reports it when the hook is not wired, and
 `doctor/check-seed-audit-current` fails when a prompt input moved without the

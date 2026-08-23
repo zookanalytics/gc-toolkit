@@ -51,9 +51,27 @@ audit="$dir/docs/seed-audit"
 index="$audit/INDEX.md"
 script="$dir/assets/scripts/render-seed-audit.sh"
 
-if [ ! -x "$script" ]; then
+# ABSENT and PRESENT-BUT-NOT-EXECUTABLE are different facts, and only the first
+# one is "nothing to keep current". Testing -x for both was a fail-open on this
+# check's own contract (pre-open signoff P1): `chmod -x
+# assets/scripts/render-seed-audit.sh` turned the upkeep loop off while this
+# check printed OK and the pre-commit hook silently skipped — a committed mode
+# bit disabling the gate, with both gates still green. A renderer that SHIPS is
+# one this pack expects to keep the audit current, whatever its mode says.
+if [ ! -e "$script" ]; then
     echo "OK: no render-seed-audit.sh in this pack — nothing to keep current"
     exit 0
+fi
+
+# It ships but cannot be exec'd. The staleness read below still works — every
+# invocation of it goes through `bash`, precisely so a mode bit cannot decide
+# whether this pack is audited — so this is a WARNING carried into the details,
+# not a hard stop. It still must never read as OK: the documented operator
+# command (`assets/scripts/render-seed-audit.sh`) and `--install-hook` are both
+# broken until the bit is back.
+renderer_mode_warning=""
+if [ ! -x "$script" ]; then
+    renderer_mode_warning="yes"
 fi
 
 if [ ! -f "$index" ]; then
@@ -83,10 +101,10 @@ fi
 # --print-digest hashes files and shells out to nothing; it works on a host with
 # no gc binary, which is why the version lives on its own INDEX line rather than
 # inside the digest.
-actual_digest="$("$script" --root "$dir" --print-digest 2>/dev/null)"
+actual_digest="$(bash "$script" --root "$dir" --print-digest 2>/dev/null)"
 if [ -z "$actual_digest" ]; then
     echo "Could not recompute the seed-audit source digest — staleness is UNVERIFIED"
-    echo "$script --print-digest produced no output."
+    echo "bash $script --print-digest produced no output."
     echo "This is not a benign skip: it means the one cheap staleness signal is dark."
     exit 1
 fi
@@ -100,8 +118,10 @@ if [ "$recorded_digest" != "$actual_digest" ]; then
     echo "recorded digest: $recorded_digest"
     echo "actual digest:   $actual_digest"
     echo ""
-    echo "One or more of agents/, template-fragments/, formulas/, packs/ or pack.toml"
-    echo "changed since docs/seed-audit/ was generated, so the committed audit now"
+    echo "One or more of agents/, template-fragments/, formulas/, packs/, pack.toml or"
+    echo "the renderer itself (assets/scripts/render-seed-audit.sh, which carries the"
+    echo "synthetic city the prompts render against) changed since docs/seed-audit/ was"
+    echo "generated, so the committed audit now"
     echo "describes a seed no agent receives. Every file in it still reads as a valid"
     echo "prompt, which is exactly why this needs a check rather than a review."
     echo ""
@@ -110,6 +130,14 @@ if [ "$recorded_digest" != "$actual_digest" ]; then
 fi
 
 rc=0
+
+if [ -n "$renderer_mode_warning" ]; then
+    add_detail "assets/scripts/render-seed-audit.sh is NOT EXECUTABLE. The staleness read"
+    add_detail "above still works (it runs the renderer through bash), but the documented"
+    add_detail "operator command and --install-hook both invoke it directly and will fail."
+    add_detail "Restore it: chmod +x assets/scripts/render-seed-audit.sh"
+    rc=1
+fi
 
 if command -v gc >/dev/null 2>&1; then
     actual_gcver="$(gc version 2>/dev/null | head -1)"

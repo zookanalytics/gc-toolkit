@@ -50,7 +50,17 @@ touched="$(grep -E "$INPUT_RE" <<< "$staged")"
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 script="$root/assets/scripts/render-seed-audit.sh"
-[ -x "$script" ] || exit 0
+# Absent is "this pack has no renderer" — nothing to do. NOT executable is a
+# different thing entirely, and testing -x for both let a committed `chmod -x`
+# disable the upkeep loop silently while the doctor check also reported OK
+# (pre-open signoff P1). Every invocation below therefore goes through `bash`,
+# so a mode bit cannot decide whether a seed change regenerates the artifact.
+[ -f "$script" ] || exit 0
+if [ ! -x "$script" ]; then
+    printf 'pre-commit: NOTE — %s is not executable; running it through bash.\n' \
+        "assets/scripts/render-seed-audit.sh" >&2
+    printf 'pre-commit: restore it with: chmod +x assets/scripts/render-seed-audit.sh\n' >&2
+fi
 
 if ! command -v gc >/dev/null 2>&1; then
     printf 'pre-commit: seed audit NOT regenerated — gc is not on PATH.\n' >&2
@@ -69,7 +79,7 @@ if [ -n "$dirty" ]; then
 fi
 
 printf 'pre-commit: seed inputs changed — regenerating docs/seed-audit ...\n' >&2
-if ! "$script" >&2; then
+if ! bash "$script" >&2; then
     printf 'pre-commit: render FAILED. Commit aborted so a broken audit is not committed.\n' >&2
     printf 'pre-commit: re-run it directly to see why: assets/scripts/render-seed-audit.sh\n' >&2
     exit 1
