@@ -597,6 +597,60 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 	}
 }
 
+// TestWaitingEdgeFailureIsUnknownNotEmpty is the fail-closed half of the read
+// above: WHICH kinds pay it is pinned there, what a FAILED payment reports is
+// pinned here.
+//
+// The per-anchor dependency query can fail on its own — a Dolt timeout, a
+// schema skew — while the anchor query that found the row succeeded. The row is
+// still gathered, because dropping it would hide work, so the only trace of the
+// failure is what this reports about its edges. Report an empty set and the
+// anchor is indistinguishable from one that genuinely has no waits, which is
+// precisely the state board.ruled reads as "every recorded wait has landed":
+// the answered row stands down because its graph could not be read (tk-fhd705).
+func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := populatedStore()
+	// Only the decision's read fails. The other two kinds that spend the edges
+	// are the control: one anchor's failure must not mark the rest unknown, or
+	// a single slow query quietly re-elevates half the board.
+	st.failDeps = map[string]error{"tk-dec": errors.New("dolt timeout")}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	i, ok := findAnchor(res, "tk-dec")
+	if !ok {
+		t.Fatal("an anchor whose edge read fails must still appear")
+	}
+	dec := res.Anchors[i]
+	if len(dec.WaitingOn) != 0 || len(dec.WaitingOnClosed) != 0 {
+		t.Errorf("a failed read invents no edges: %v / %v", dec.WaitingOn, dec.WaitingOnClosed)
+	}
+	if !dec.WaitingUnknown {
+		t.Error("a failed edge read must report UNKNOWN, not an empty wait set — " +
+			"board.ruled cannot tell the two apart without it, and stands the row down")
+	}
+	if !res.Partial {
+		t.Error("a failed edge read must set partial")
+	}
+
+	for _, id := range []string{"tk-human", "tk-parked"} {
+		j, ok := findAnchor(res, id)
+		if !ok {
+			t.Fatalf("%s: anchor missing", id)
+		}
+		if res.Anchors[j].WaitingUnknown {
+			t.Errorf("%s: one anchor's failed read must not mark another unknown", id)
+		}
+		if len(res.Anchors[j].WaitingOn) == 0 {
+			t.Errorf("%s: the control anchors must still carry their real edges", id)
+		}
+	}
+}
+
 // TestBeadsGatherMetadataKindsDegradeIndependently: the metadata gathers are
 // two more independently-failing kinds, not a second chance to lose the board.
 func TestBeadsGatherMetadataKindsDegradeIndependently(t *testing.T) {

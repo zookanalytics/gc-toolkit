@@ -220,11 +220,12 @@ A row is **ruled** when all three hold:
 1. it is human-gated — kind `decision` or `human`, or a bead carrying
    `gc.routed_to=human` (which is how the `parked` twin of one is recognised);
 2. it carries a `gc.takeaway`; and
-3. none of its `blocks` waits is still open.
+3. its `blocks` waits were READ, and none of them is still open.
 
 | shape | row |
 |---|---|
 | no takeaway | unchanged: ELEVATED, "human-gated decision" / "operator action" |
+| takeaway, waits unreadable | unchanged — an unread graph proves nothing |
 | takeaway, a wait still open | unchanged — answering is not finishing |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
 | takeaway, every wait landed, *with* children | banded by the roll-up, like a decomposed `parked` subject |
@@ -241,6 +242,15 @@ Three properties carry over from the disposition rule, and one is new:
   "every wait landed" is vacuously true and an answered decision whose routed
   work is still open would stand down anyway. Nothing errors and no field goes
   missing — the only symptom is a row that quietly stopped asking too early.
+- **An empty wait set only counts when it was READ.** The clause fires on the
+  absence of open waits, and a failed per-anchor dependency query produces that
+  same absence — so a Dolt timeout would stand an answered row down and invite
+  the operator to close or extend a question whose routed work the board never
+  checked. `waitingEdges` therefore reports a read failure as
+  `Anchor.WaitingUnknown` rather than as an empty set, and `ruled` refuses it
+  (tk-fhd705). `gc-helm.sh` needs no counterpart: there `waiting_on` rides on
+  the same payload that produced the anchor, so a failed read drops the row
+  rather than leaving it standing with its edges missing.
 - **LOW, not NORMAL.** NORMAL is stale-bumped past fourteen days, which would
   put `tk-z130v` — thirty days old — straight back in the band it was standing
   down from.

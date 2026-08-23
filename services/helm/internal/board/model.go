@@ -130,6 +130,26 @@ type Anchor struct {
 	// WaitingOnClosed, which reads as still-waiting — the quiet direction.
 	WaitingOn       []string `json:"waiting_on,omitempty"`
 	WaitingOnClosed []string `json:"waiting_on_closed,omitempty"`
+
+	// WaitingUnknown says the source could not READ this anchor's edges at
+	// all: the per-anchor dependency query itself failed, so the empty
+	// WaitingOn above is an absence of knowledge rather than a proof that
+	// nothing is outstanding.
+	//
+	// The two are not interchangeable, and only one consumer can tell them
+	// apart. An unresolved BLOCKER is already handled — it is absent from
+	// WaitingOnClosed and so counts as outstanding, the quiet direction. An
+	// unreadable EDGE SET has no such fallback: it looks exactly like a row
+	// with no waits, which is the state [ruled] reads as "every recorded wait
+	// has landed". Without this flag a per-anchor Dolt timeout would satisfy
+	// that clause vacuously and stand an answered human-gated row down,
+	// telling the operator to close or extend a question whose routed work may
+	// still be open (tk-fhd705).
+	//
+	// Only the kinds that spend the edges pay the read, so this stays false
+	// for an epic or a convoy: they never asked, so nothing about them is
+	// unknown.
+	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 }
 
 // Progress is a convoy's self-reported roll-up, mirroring the `progress` object
@@ -210,7 +230,11 @@ type Tile struct {
 	//
 	// A blocker whose status could not be resolved counts as OPEN, so an
 	// unreadable graph keeps the pre-fix quiet row rather than inviting the
-	// operator to dispose of a subject whose work is still in flight.
+	// operator to dispose of a subject whose work is still in flight. The
+	// harder case — the edge read failing outright, which yields no blocker to
+	// count either way — is carried separately as Anchor.WaitingUnknown and
+	// never reaches the wire, because these two arrays stay a report of what
+	// was actually read.
 	WaitingOn      []string `json:"waiting_on"`
 	WaitingOnOpen  []string `json:"waiting_on_open"`
 	DispositionDue bool     `json:"disposition_due"`

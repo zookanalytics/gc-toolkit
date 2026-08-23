@@ -323,8 +323,18 @@ func humanGated(a Anchor) bool {
 // finished being a decision, so it keeps its band. Those edges are gathered for
 // these kinds precisely so this clause can fire; without them it would be a
 // guard that guards nothing.
+//
+// And the clause counts only when the source actually READ those edges. An
+// empty waitingOpen means "every recorded wait has landed" if and only if the
+// waits were legible; when the dependency query failed it means nothing at
+// all, and the row keeps the band it already had. That asymmetry is the whole
+// point of the wait clause: NOT standing a row down costs the operator a
+// glance, while standing one down on an unread graph invites them to close or
+// extend a question whose routed work is still open — the exact fail-open the
+// clause exists to prevent (tk-fhd705).
 func ruled(a Anchor, takeaway string, waitingOpen []string) bool {
-	return humanGated(a) && takeaway != "" && len(waitingOpen) == 0
+	return humanGated(a) && takeaway != "" &&
+		!a.WaitingUnknown && len(waitingOpen) == 0
 }
 
 // dispositionDue is the state the waiting edges exist to express: a parked
@@ -340,6 +350,11 @@ func ruled(a Anchor, takeaway string, waitingOpen []string) bool {
 // this — at the volume the operator asked for. Letting both fire would put an
 // ELEVATED duplicate of every stood-down row back on the board, and the dedup
 // would keep it.
+//
+// It needs no unreadable-edges clause of its own. This promotion fires only on
+// a row that HAS recorded waits, so an anchor whose edge read failed — which
+// carries none — can never reach it. [ruled] needs the clause precisely
+// because it fires on the empty set.
 func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 	return a.Source == "parked" && len(waiting) > 0 && len(waitingOpen) == 0 &&
 		!humanGated(a)

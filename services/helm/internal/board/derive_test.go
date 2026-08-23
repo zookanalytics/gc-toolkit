@@ -925,6 +925,78 @@ func TestRuledNeedsTheWaitToHaveLanded(t *testing.T) {
 	}
 }
 
+// TestRuledNeedsTheWaitsToBeLegible is the same guard against the other way an
+// empty `waiting_on_open` can arise. TestRuledNeedsTheWaitToHaveLanded covers a
+// wait that WAS read and is still open; this covers a wait set the source could
+// not read at all.
+//
+// The two look identical on the anchor — WaitingOn is empty in both the
+// "nothing outstanding" case and the "never learned" one — and reading the
+// empty set as an answer is the hazard. A per-anchor Dolt timeout or schema
+// skew would otherwise stand an answered row down and tell the operator to
+// close or extend a question whose routed work the board never checked
+// (tk-fhd705). Not standing it down costs a glance; standing it down on an
+// unread graph costs the thing the wait clause exists to protect.
+func TestRuledNeedsTheWaitsToBeLegible(t *testing.T) {
+	anchors := []Anchor{
+		// The thirty-day regression case from TestRuledStandsDown, which
+		// stands down on a legible empty wait set — with the read failed
+		// instead, it must hold its band.
+		{ID: "tk-z130v", Title: "excise the fork", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(30),
+			Takeaway:       "ROUTED: mayor mailed to excise gc-8yr6px",
+			WaitingUnknown: true},
+		// And on the other human-gated kind.
+		{ID: "tk-j5wrs", Title: "membership predicate", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Takeaway:       "routed — design ruled; tk-vie5k slung",
+			WaitingUnknown: true},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	for _, c := range []struct{ id, frontier, needs string }{
+		{"tk-z130v", "human-gated decision", "ROUTED: mayor mailed to excise gc-8yr6px"},
+		{"tk-j5wrs", "routed to the operator — no agent will take it", "routed — design ruled; tk-vie5k slung"},
+	} {
+		tile, ok := tileByID(b, c.id)
+		if !ok {
+			t.Fatalf("%s is missing from the board", c.id)
+		}
+		if tile.Severity != SevElevated {
+			t.Errorf("%s: the waits were never read — the row keeps its band, got %s", c.id, tile.Severity)
+		}
+		if tile.Frontier != c.frontier {
+			t.Errorf("%s frontier: %q, want %q", c.id, tile.Frontier, c.frontier)
+		}
+		// NOT "ruled — close or extend": the board must not invite a
+		// disposition it cannot support.
+		if tile.Needs != c.needs {
+			t.Errorf("%s needs: %q, want %q", c.id, tile.Needs, c.needs)
+		}
+	}
+}
+
+// TestDispositionDueSurvivesUnreadableWaits: the parked promotion needs no
+// unreadable-edges clause, because it fires only on a row that HAS recorded
+// waits. A failed read carries none, so it cannot reach the promotion — and the
+// row keeps the LOW floor it had before any of this existed.
+func TestDispositionDueSurvivesUnreadableWaits(t *testing.T) {
+	a := Anchor{ID: "tk-2plde", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
+		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
+		Takeaway: "routed to tk-9k2ab; nothing further needed here", WaitingUnknown: true}
+	tile := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+
+	if tile.DispositionDue {
+		t.Error("an unread wait set is not a landed blocker")
+	}
+	if tile.Severity != SevLow {
+		t.Errorf("the parked floor holds when the edges cannot be read, got %s", tile.Severity)
+	}
+	if tile.Needs != "routed to tk-9k2ab; nothing further needed here" {
+		t.Errorf("needs: %q", tile.Needs)
+	}
+}
+
 // TestUnruledHumanGatedRowsAreUnchanged: a decision or human bead with NO
 // takeaway has not been answered, and nothing about it moves.
 func TestUnruledHumanGatedRowsAreUnchanged(t *testing.T) {

@@ -123,6 +123,51 @@ negative control turned up during implementation: `tk-hs2e8`, a decision
 answered "NO" at 16:28Z on 2026-08-23 with `tk-jsyci7` routed and still
 open. It stays ELEVATED, which is correct.
 
+## …and then it was fail-open on an unread graph
+
+Widening the gathers made the clause non-vacuous, but it also gave `ruled` a
+second way to see an empty `waiting_on_open`, and the two are not the same
+fact:
+
+- **nothing outstanding** — the edges were read and every wait has landed;
+- **never learned** — the per-anchor `GetDependenciesWithMetadata` call failed,
+  so there are no edges to count.
+
+While the read was `parked`-only this did not matter: `dispositionDue` fires
+only on a row that HAS recorded waits, so an empty set fires nothing and a
+failed read left the row exactly as it rendered before. `ruled` fires ON the
+empty set. The pre-existing "FAILURE IS SILENT AND QUIET-SIDE" comment on
+`waitingEdges` was carried across the widening unchanged, and it stopped being
+true at that moment: a per-anchor Dolt timeout or schema skew on an answered
+decision now produced LOW / "ruled — close or extend" — the board telling the
+operator to dispose of a question whose routed work it never checked. That is
+the exact fail-open the wait clause was added to prevent, reached through the
+clause itself (raised in pre-open review of PR#445, fixed on `tk-fhd705`).
+
+The fix carries the distinction instead of erasing it. `waitingEdges` returns a
+third value, `Anchor.WaitingUnknown`, and `ruled` requires it false: the row
+stands down only when the source PROVED the waits are empty or closed. The flag
+is internal to the gather-to-derivation projection and never reaches the wire,
+so `waiting_on` / `waiting_on_open` stay a report of what was actually read and
+the two boards remain field-for-field identical. The gather was already marked
+partial on this path, so the degradation was — and still is — announced.
+
+`dispositionDue` needs no matching clause, and deliberately does not get one: a
+failed read carries no waits, so the promotion it guards can never be reached.
+`TestDispositionDueSurvivesUnreadableWaits` pins that rather than leaving it to
+be re-derived.
+
+`gc-helm.sh` has no counterpart to fix. There `waiting_on` is projected from
+the same `bd list --json` payload that produced the anchor, so a failed read
+drops the anchor entirely — there is no "anchor standing with its edges
+silently missing" state. The separate per-anchor query is what creates the
+third case, and it exists only in the Go source.
+
+Both guards were mutated out and the regressions re-run to confirm they bite:
+dropping `!a.WaitingUnknown` from `ruled` turns `tk-z130v` and `tk-j5wrs` LOW /
+"ruled — close or extend"; returning `false` for `unknown` from `waitingEdges`
+fails the source-level assertion.
+
 ## Measurements
 
 Paired control on the live loomington board, `board --json --limit=0
