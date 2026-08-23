@@ -406,7 +406,7 @@ grep -q 'gc rig list --json 2>"\$_er_errf"' "$SCRIPT" \
 # version of this check matched the first line containing "gc rig list", which
 # in both the fixed and the broken script is a COMMENT — so it passed against
 # the very code it was meant to catch. Anchor guards to code, never to prose.
-awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw=\$\(/' "$SCRIPT" | grep -q '|| true' \
+grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw=\$\(/' "$SCRIPT") \
   && bad "(RIGWHY-EVIDENCE) '|| true' is back — the exit status is discarded again" \
   || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
 
