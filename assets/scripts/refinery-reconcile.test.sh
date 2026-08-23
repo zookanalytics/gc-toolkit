@@ -17,12 +17,15 @@
 # (h) the state dir is keyed per rig, so co-tenant rigs cannot share a handoff
 # dedup; (i) the fresh-handoff detector gates on the branch existing on origin,
 # reports each id once, and re-reports one that returns; (j) an anchored bead is
-# never reported as a lost handoff; (k) the pass log is bounded; (l) the order
-# file parses and still carries the wiring the runner depends on; (m) the
-# refinery identity is projected to the convoy-graduation pass and to NOTHING
-# else, since a process-wide export would silence the other passes' "wake the
-# refinery" nudges; (n) the real graduation pass's GC_AGENT gate still matches
-# the contract (m) relies on, and both of its states exit 0.
+# never reported as a lost handoff, while an UNROUTED bead assigned to a
+# near-miss refinery address IS — it is polled by nobody, and since tk-qf2l0j
+# retired the pass that repaired it, this detector is what reports it;
+# (k) the pass log is bounded; (l) the order file parses and still carries
+# the wiring the runner depends on; (m) the refinery identity is projected to
+# the convoy-graduation pass and to NOTHING else, since a process-wide export
+# would silence the other passes' "wake the refinery" nudges; (n) the real
+# graduation pass's GC_AGENT gate still matches the contract (m) relies on,
+# and both of its states exit 0.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,7 +50,7 @@ PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts" "$TMP/bin" "$TMP/state" "$TMP/
 cp "$SCRIPT" "$PACK/assets/scripts/refinery-reconcile.sh"
 RUNNER="$PACK/assets/scripts/refinery-reconcile.sh"
 
-PASSES="reconcile-refinery-handoffs check-set-heal pre-open-resolve merge-skill reconcile-merged-prs reconcile-gate-verdicts reconcile-graduated-convoys"
+PASSES="check-set-heal pre-open-resolve merge-skill reconcile-merged-prs reconcile-gate-verdicts reconcile-graduated-convoys"
 
 # Stub pass: appends "<name> <argv...>" to the trace, exits with the rc named in
 # $TMP/rc.<name> (default 0).
@@ -133,8 +136,8 @@ run
 eq "$RC" 0 "(1) a clean pass exits 0"
 ORDER_SEEN="$(printf '%s\n' "$TRACE" | awk '{print $1}' | paste -sd, -)"
 eq "$ORDER_SEEN" \
-   "reconcile-refinery-handoffs,check-set-heal,pre-open-resolve,merge-skill,reconcile-merged-prs,reconcile-gate-verdicts,reconcile-graduated-convoys" \
-   "(2) all seven passes ran, in the formula's order"
+   "check-set-heal,pre-open-resolve,merge-skill,reconcile-merged-prs,reconcile-gate-verdicts,reconcile-graduated-convoys" \
+   "(2) all six passes ran, in the formula's order"
 
 # --- 2. no loop, no sleep ----------------------------------------------------
 echo "── 2. the cadence is the order's, not the script's ──"
@@ -246,12 +249,16 @@ cat > "$TMP/beads.json" <<'JSON'
  {"id":"tk-pushed","assignee":"","metadata":{"branch":"polecat/tk-pushed","gc.routed_to":""}},
  {"id":"tk-unpushed","assignee":"","metadata":{"branch":"polecat/tk-unpushed","gc.routed_to":""}},
  {"id":"tk-anchored","assignee":"","metadata":{"branch":"polecat/tk-anchored","gc.routed_to":"","merge_result":"pull_request"}},
- {"id":"tk-someone","assignee":"alpha/gc-toolkit.polecat","metadata":{"branch":"polecat/tk-someone","gc.routed_to":"alpha/gc-toolkit.polecat"}}
+ {"id":"tk-someone","assignee":"alpha/gc-toolkit.polecat","metadata":{"branch":"polecat/tk-someone","gc.routed_to":"alpha/gc-toolkit.polecat"}},
+ {"id":"tk-nearmiss","assignee":"alpha/refinery","metadata":{"branch":"polecat/tk-nearmiss","gc.routed_to":""}},
+ {"id":"tk-handed","assignee":"alpha/gc-toolkit.refinery","metadata":{"branch":"polecat/tk-handed","gc.routed_to":""}}
 ]
 JSON
 echo "polecat/tk-pushed"   >  "$TMP/branches"
 echo "polecat/tk-anchored" >> "$TMP/branches"
 echo "polecat/tk-someone"  >> "$TMP/branches"
+echo "polecat/tk-nearmiss" >> "$TMP/branches"
+echo "polecat/tk-handed"   >> "$TMP/branches"
 GCSTUB_BEADS="$TMP/beads.json"
 
 run
@@ -260,6 +267,12 @@ has  "$OUT" "tk-pushed"     "(28) by id"
 hasnt "$OUT" "tk-unpushed"  "(29) a bead whose branch is not on origin is live WIP, not a lost handoff"
 hasnt "$OUT" "tk-anchored"  "(30) an anchored bead belongs to the passes, not the detector"
 hasnt "$OUT" "tk-someone"   "(31) a bead someone else holds is not a lost handoff"
+# The set the retired reconcile-refinery-handoffs pass used to repair (tk-qf2l0j).
+# An assignee is only reachability if something POLLS it: the refinery's find-work
+# matches "$AGENT" exactly, so an unrouted bead addressed to anything else is read
+# by no one — and no bead-keyed pass can see it either, because it has no anchor.
+has  "$OUT" "tk-nearmiss"   "(51) an unrouted bead at a near-miss refinery address is polled by nobody, so it IS a lost handoff (tk-0nn3f)"
+hasnt "$OUT" "tk-handed"    "(52) a correctly-addressed handoff is this refinery's own find-work, not a lost one"
 eq "$RC" 0 "(32) a fresh handoff is news, not a failure"
 
 run
@@ -326,11 +339,9 @@ run
 ENVTRACE="$(cat "$TMP/envtrace" 2>/dev/null)"
 has "$ENVTRACE" "reconcile-graduated-convoys GC_AGENT=[alpha/gc-toolkit.refinery]" \
     "(44) the graduation pass sees the resolved refinery identity, not an empty one"
-has "$ENVTRACE" "reconcile-refinery-handoffs GC_AGENT=[]" \
-    "(45) the handoff pass still sees GC_AGENT unset, so its refinery nudge is NOT suppressed"
 # Any pass other than the graduation one seeing a non-empty GC_AGENT means the
-# export leaked process-wide — which would silence the nudges at
-# reconcile-refinery-handoffs.sh:415 and recover-stranded-branches.sh:855.
+# export leaked process-wide — which would silence the "wake the refinery" nudge
+# at recover-stranded-branches.sh:855.
 LEAKED="$(printf '%s\n' "$ENVTRACE" | grep -v '^reconcile-graduated-convoys ' \
     | grep -v 'GC_AGENT=\[\]$' || true)"
 eq "$LEAKED" "" "(46) no other pass sees GC_AGENT — the identity does not leak process-wide"

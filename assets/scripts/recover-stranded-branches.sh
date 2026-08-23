@@ -22,8 +22,6 @@
 #                                returns the bead; and it carries no gc.routed_to,
 #                                so it is not pool demand either way
 #   refinery find-work           exact `--assignee=$GC_AGENT`; nobody is the assignee
-#   reconcile-refinery-handoffs  requires an assignee that LOOKS like a refinery —
-#                                this bead has none at all
 #   check-set-heal / observer    enumerate on pr_url / pr_number / merge_result;
 #                                the bead has none of the three, no PR was opened
 #   witness recover-orphaned     scoped to "beads assigned to agents that will never
@@ -144,7 +142,7 @@ DRY_RUN=0
 MIN_AGE_MINUTES=30
 REPO_SLUG=""
 REPO_ROOT=""
-# WHICH LEDGER this pass reads and writes, exactly as reconcile-refinery-handoffs.sh
+# WHICH LEDGER this pass reads and writes, exactly as reconcile-gate-verdicts.sh
 # pins it: an unpinned `gc bd` resolves to whatever ledger is ambient, which in an
 # imported rig is not the one whose work this pass was handed.
 RIG_PIN="${GC_RIG:-}"
@@ -185,7 +183,7 @@ bd_pinned() { # <bd-subcommand> [args...]
 
 # The identity a recovered handoff is addressed to. Without it there is nothing to
 # hand off TO, and inventing one is how a bead moves from one dead address to
-# another (the failure reconcile-refinery-handoffs.sh refuses for the same reason).
+# another.
 if [ -z "$REFINERY_ID" ]; then
   echo "recover-stranded-branches: no --refinery identity given; skipping (nothing to hand a recovered branch to)" >&2
   exit 0
@@ -362,7 +360,7 @@ if [ -z "$CANDIDATES" ]; then
 fi
 
 # --- session roster: who is actually alive ----------------------------------
-# Same two sources, and the same fail-safe, as reconcile-refinery-handoffs.sh: the
+# Same two sources, and the same fail-safe, as reconcile-gate-verdicts.sh: the
 # LIVE roster is the only thing that can prove a session dead, and a roster that did
 # not read makes every molecule look husked — which here would hand a running
 # polecat's branch to the refinery. Both blobs reach jq on STDIN, never --argjson on

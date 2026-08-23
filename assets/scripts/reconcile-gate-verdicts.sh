@@ -195,7 +195,7 @@ esac
 # resolves to whatever ledger is ambient (BEADS_DIR, or the cwd's rig), and this
 # pass runs from a patrol worktree whose ambient ledger is not necessarily the rig
 # whose anchors it was asked about. Same pin, same reason, as
-# reconcile-refinery-handoffs.sh.
+# recover-stranded-branches.sh.
 bd_pinned() { # <bd-subcommand> [args...]
   if [ -n "$RIG_PIN" ]; then
     gc bd --rig "$RIG_PIN" "$@"
@@ -341,7 +341,7 @@ gate_members() { # <check_set>
 
 # ---------------------------------------------------------------------------
 # Live session roster: who actually answers to an address. Two sources, exactly as
-# reconcile-refinery-handoffs.sh and the witness's liveness recipe use them — the
+# recover-stranded-branches.sh and the witness's liveness recipe use them — the
 # live roster, plus the session BEADS, because a configured named session that is
 # not currently spawned (scale-from-zero) is absent from the live roster while its
 # configured identity still owns the queue.
