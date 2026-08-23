@@ -718,18 +718,22 @@ prompt — is re-read on **every request** of a session, not once at spawn.
 
 Method: `specs/tk-23wdf/measure-per-request.py` (committed beside
 `measure-context-budget.sh`). It walks `~/.claude/projects/**/*.jsonl`,
-filters to files touched in the window, and reads the `usage` block off every
-assistant turn. Run it as `./measure-per-request.py 24`.
+opens the files touched in the window, and reads the `usage` block off every
+assistant turn **whose own timestamp is inside the window**. Run it as
+`./measure-per-request.py 24`.
 
-Trailing 24h at 2026-08-23 01:30Z — 995 sessions, 68,789 assistant requests:
+*That second filter was missing in the first cut of this section, and the
+numbers below are the corrected ones — see [§9.4](#94-correction-the-window-was-file-scoped-not-turn-scoped).*
+
+Trailing 24h at 2026-08-23 02:12Z — 994 sessions, 68,296 assistant requests:
 
 | Quantity | Value |
 |---|---|
 | Median seed, lower bound | 34,672 tok/request |
 | Median seed, upper bound | 72,410 tok/request |
 | Median requests per session | 62 |
-| Cache-read tokens, total | 8.42B |
-| — attributable to seed re-reads | 2.14B (25.5%) |
+| Cache-read tokens, total | 8.47B |
+| — attributable to seed re-reads | 2.32B (27.4%) |
 | Amplification per seed byte | ~7.1x its per-spawn face value |
 
 **Why a bracket and not a number.** The seed is not directly reported. Two
@@ -749,7 +753,7 @@ The bead that opened this leg quoted **median seed = 73,106 tok** and
 **58.6%** of cache reads as seed re-reads. The first figure reproduces here
 as 72,410 — it is the *upper* bound, the turn-1 prompt, not the seed. The
 re-read share does not reproduce: measured on the same definition it is
-25.5%, because the denominator (total cache reads) grows with conversation
+27.4%, because the denominator (total cache reads) grows with conversation
 length while the seed does not. Median requests/session also came out 62,
 not 34, which moves the amplification factor from ~4.5x to ~7.1x.
 
@@ -853,3 +857,37 @@ gascity rig:
   agent; it cannot subtract from the shared catalog. Not to be confused with
   re-enabling `inject_assigned_skills`, which §4b rejected for adding a
   duplicate index — this is about shrinking the one the harness already ships.
+
+### 9.4 Correction: the window was file-scoped, not turn-scoped
+
+The first cut of this section reported a "trailing 24h" figure that was not one.
+`measure-per-request.py` filtered **files** by mtime and then counted **every**
+assistant turn inside them, including turns from days earlier. A long-running
+session touched five minutes ago carried its whole history into the window; the
+script read each turn's `timestamp` and never compared it to the cutoff.
+
+Caught by the pre-open signoff on this branch (review `tk-jsmnv`, P1) and fixed
+in `measure-per-request.py`: a turn now enters the counters only when its own
+timestamp is inside the window, and the number of turns dropped for being older
+is printed on every run so the exclusion is never silent. A turn with no
+readable timestamp is also dropped — it cannot be shown to be in the window, and
+this is quoted as a windowed figure — and is reported under its own line.
+
+What it moved, same transcript set, same 24h:
+
+| Quantity | file-scoped | turn-scoped |
+|---|---|---|
+| assistant requests | 69,652 | 68,296 |
+| sessions | 996 | 994 |
+| cache-read tokens | 8.66B | 8.47B |
+| seed re-read share | 25.1% | **27.4%** |
+
+~1,300 phantom requests, and the share this section exists to report moved by
+2.3 points — in the direction that *strengthens* the argument, which is exactly
+why it needed fixing rather than rounding past: a number that flatters the
+conclusion is the one most worth checking. The median seed, the median
+requests/session and the ~7.1x amplification are unchanged, because they are
+medians over per-session values rather than sums over turns.
+
+Two sessions left the set entirely: every one of their turns was older than the
+cutoff, so the files were touched in the window but the work was not done in it.
