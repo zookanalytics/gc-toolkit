@@ -51,6 +51,10 @@ const BOARD: Board = {
   generated_at: '2026-08-21T19:14:00Z',
   total: 5,
   tiles: [
+    // The takeaway is what keeps an idle epic in the HIGH band since
+    // tk-9tbbk.3: without one the server derives `awaiting dispatch` and stands
+    // the row down to LOW, so a HIGH tile with a mechanical NEEDS phrase is a
+    // board this app can no longer be sent.
     tile({
       id: 'tk-epic',
       kind: 'epic',
@@ -58,8 +62,10 @@ const BOARD: Board = {
       severity: 'HIGH',
       m_total: 2,
       open: 2,
-      frontier: '2 open · 0 in-progress (stranded)',
-      needs: 'decomposed, idle — assign or visit',
+      stranded: true,
+      takeaway: 'the ink-model decision is the operator\u2019s and blocks both tracks',
+      frontier: '2 open · 0 in flight (stranded)',
+      needs: 'the ink-model decision is the operator\u2019s and blocks both tracks',
       rank_score: 3_005_003,
     }),
     tile({

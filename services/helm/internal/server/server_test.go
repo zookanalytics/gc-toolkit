@@ -35,7 +35,12 @@ func newFake() *fakeSource {
 	return &fakeSource{result: &source.Result{
 		Anchors: []board.Anchor{
 			{ID: "sl-dec", Kind: "decision", Source: "decision", Rig: "signal-loom"},
-			{ID: "tk-epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Children: []board.Child{{ID: "c", Status: "open"}}},
+			// The takeaway is load-bearing: since tk-9tbbk.3 an idle epic with
+			// nothing authored on it is [board.awaitingDispatch] and stands down
+			// to LOW, which would leave this fixture with no HIGH row to rank.
+			{ID: "tk-epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit",
+				Takeaway: "schema cutover needs the operator to pick a window",
+				Children: []board.Child{{ID: "c", Status: "open"}}},
 		},
 	}}
 }
@@ -64,7 +69,7 @@ func TestBoardEndpointRanks(t *testing.T) {
 		if b.Total != 2 || len(b.Tiles) != 2 {
 			t.Fatalf("%s: want 2 tiles, got total=%d tiles=%d", path, b.Total, len(b.Tiles))
 		}
-		// The stranded epic must rank first (HIGH band dominates ELEVATED).
+		// The HIGH epic must rank first (HIGH band dominates ELEVATED).
 		if b.Tiles[0].ID != "tk-epic" || b.Tiles[0].Severity != board.SevHigh {
 			t.Errorf("%s: top tile = %s/%s, want tk-epic/HIGH", path, b.Tiles[0].ID, b.Tiles[0].Severity)
 		}

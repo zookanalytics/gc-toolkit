@@ -501,8 +501,8 @@ func TestRenderTableClipsNeeds(t *testing.T) {
 			Frontier: "conversation parked — takeaway recorded", Needs: long},
 		{ID: "tk-fits", Rig: "gc-toolkit", Kind: "parked", Severity: board.SevLow,
 			Frontier: "conversation parked — takeaway recorded", Needs: fits},
-		{ID: "tk-plain", Rig: "gc-toolkit", Kind: "epic", Severity: board.SevHigh,
-			MTotal: 3, Frontier: "3 open · 0 in flight (stranded)", Needs: "decomposed, idle — assign or visit"},
+		{ID: "tk-plain", Rig: "gc-toolkit", Kind: "epic", Severity: board.SevLow,
+			MTotal: 3, Frontier: "3 open · awaiting dispatch", Needs: "awaiting dispatch — no operator action"},
 	}
 	var buf bytes.Buffer
 	renderTable(&buf, board.Board{Total: 3, Tiles: tiles}, tiles, time.Date(2026, 8, 22, 1, 2, 3, 0, time.UTC), 1)
@@ -546,7 +546,7 @@ func TestRenderTableClipsNeeds(t *testing.T) {
 
 	// A deterministic state phrase is untouched — the bound is on prose length,
 	// not a licence to shorten the phrases the board derives.
-	if !strings.HasSuffix(rowFor("tk-plain"), "decomposed, idle — assign or visit") {
+	if !strings.HasSuffix(rowFor("tk-plain"), "awaiting dispatch — no operator action") {
 		t.Errorf("a deterministic NEEDS phrase changed:\n%s", rowFor("tk-plain"))
 	}
 

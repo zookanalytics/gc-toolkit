@@ -673,7 +673,10 @@ cat > "$ITMP/epics.json" <<'J'
  {"id":"tk-eCLAIM","title":"claimed epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
  {"id":"tk-eMANY","title":"many-member epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
  {"id":"tk-eTAKE","title":"epic that carries a takeaway","priority":1,"updated_at":"2026-08-21T00:00:00Z",
-  "metadata":{"gc.takeaway":"an epic may carry one of these too"}}
+  "metadata":{"gc.takeaway":"an epic may carry one of these too"}},
+ {"id":"tk-eSAID","title":"idle epic somebody wrote a NEEDS for","priority":1,"updated_at":"2026-08-21T00:00:00Z",
+  "metadata":{"gc.takeaway":"PRs 557/559 are green and held on the operator"}},
+ {"id":"tk-eGONE","title":"idle epic whose worker died mid-claim","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}}
 ]
 J
 
@@ -692,6 +695,16 @@ cat > "$ITMP/kids-eMANY.json"  <<'J'
 J
 cat > "$ITMP/kids-eTAKE.json"  <<'J'
 [{"id":"tk-done5","status":"closed","assignee":null}]
+J
+# (DISPATCH) controls. tk-eSAID is idle by exactly the counts that stand a row
+# down, and is held in the band by its takeaway alone. tk-eGONE is idle in the
+# other sense — a child claimed by a session that is gone — which is a recovery,
+# not a missing dispatch.
+cat > "$ITMP/kids-eSAID.json"  <<'J'
+[{"id":"tk-wSAID","status":"open","assignee":null},{"id":"tk-done6","status":"closed","assignee":null}]
+J
+cat > "$ITMP/kids-eGONE.json"  <<'J'
+[{"id":"tk-wGONE","status":"in_progress","assignee":"gc-toolkit__polecat-lx-gone"},{"id":"tk-open7","status":"open","assignee":null}]
 J
 
 # The shared per-rig open-bead snapshot: workflow roots, their steps, and the
@@ -856,6 +869,8 @@ case "$1 ${2:-}" in
       *"--parent tk-eCLAIM"*) cat "$FAKE_DIR/kids-eCLAIM.json" ;;
       *"--parent tk-eMANY"*)  cat "$FAKE_DIR/kids-eMANY.json" ;;
       *"--parent tk-eTAKE"*)  cat "$FAKE_DIR/kids-eTAKE.json" ;;
+      *"--parent tk-eSAID"*)  cat "$FAKE_DIR/kids-eSAID.json" ;;
+      *"--parent tk-eGONE"*)  cat "$FAKE_DIR/kids-eGONE.json" ;;
       *"--type epic"*)        cat "$FAKE_EPICS" ;;
       *"--type decision"*)    cat "$FAKE_DIR/decisions.json" ;;
       *)                      cat "$FAKE_OPEN" ;;   # the shared snapshot
@@ -895,8 +910,41 @@ printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-eLIVE")).frontier | test
 # existence alone counted, every one of them would render a false all-clear.
 eq "$(row tk-eHUSK stranded)"         "true" "(HUSK) a dead-session workflow does NOT clear stranded"
 eq "$(row tk-eHUSK in_flight)"        "0"    "(HUSK) the husk contributes no in-flight movement"
-eq "$(row tk-eHUSK severity)"         "HIGH" "(HUSK) the row stays in the attention band"
 eq "$(row tk-eHUSK in_progress_dead)" "0"    "(HUSK) an unclaimed child is not a dead OWNER either"
+# The three lines above are the guard, and they are what "no false all-clear"
+# means: the husk must never be counted as MOVING. The BAND moved with
+# tk-9tbbk.3 and that is not the same claim — LOW here says nobody has picked
+# the work up and a dispatch is what it wants, which is exactly true of a husk:
+# the child is open and unassigned, so the pool re-offers it. Contrast tk-eGONE
+# below, where the child is in_progress under a dead session and CANNOT be
+# re-offered until somebody recovers it — that row keeps HIGH.
+eq "$(row tk-eHUSK severity)"         "LOW"  "(HUSK) an open unassigned child is re-offerable, so the row stands down"
+
+# --- (DISPATCH) the stand-down, and the two clauses that hold a row in place --
+# tk-9tbbk.3. An idle decomposed epic banded HIGH and rendered "decomposed, idle
+# — assign or visit" — a sentence whose verb no operator performs. Twelve of the
+# fourteen HIGH rows on the 2026-08-23 board were that one string, so 86% of the
+# loudest band was a single request addressed to a machine. The row now stands
+# down and says who it is waiting for. Mirrors the Go side
+# (TestAwaitingDispatchStandsDown and its neighbours).
+eq "$(row tk-eHUSK frontier)" "1 open · awaiting dispatch" \
+   "(DISPATCH) the frontier says what it waits for, and drops the alarm word"
+eq "$(row tk-eHUSK needs)" "awaiting dispatch — no operator action" \
+   "(DISPATCH) NEEDS answers the reader honestly: nothing, this one is not yours"
+printf '%s' "$IOUT" | jq -e '[.[]?|select(.needs=="decomposed, idle — assign or visit")]|length==0' >/dev/null 2>&1 \
+  && ok "(DISPATCH) the retired phrase is gone from every row" \
+  || bad "(DISPATCH) a row still renders the retired phrase"
+# An authored takeaway is a judgement, not a mechanical constant. It is what
+# held the other two HIGH rows of that census in place.
+eq "$(row tk-eSAID severity)" "HIGH" \
+   "(DISPATCH) an idle row somebody wrote a NEEDS for keeps its band"
+eq "$(row tk-eSAID needs)" "PRs 557/559 are green and held on the operator" \
+   "(DISPATCH) …and still spends NEEDS on the sentence"
+# A dead owner is a recovery, and it keeps its own actor and its own phrase.
+eq "$(row tk-eGONE severity)" "HIGH" \
+   "(DISPATCH) a dead-owner child is not a missing dispatch"
+eq "$(row tk-eGONE needs)" "dead owner — recover or reassign" \
+   "(DISPATCH) …and the row still names the recovery"
 
 # --- (CLAIMED) the pre-existing path is untouched ---------------------------
 eq "$(row tk-eCLAIM stranded)"         "false" "(CLAIMED) claimed + live owner still counts as moving"
@@ -1123,8 +1171,8 @@ PARKED_SCORE="$(row tk-parked rank_score)"; HUSK_SCORE="$(row tk-eHUSK rank_scor
 case "${PARKED_SCORE}${HUSK_SCORE}" in
   ''|*[!0-9]*) bad "(FLOOR) a rank_score is missing or non-numeric (parked='$PARKED_SCORE' husk='$HUSK_SCORE')" ;;
   *) [ "$PARKED_SCORE" -lt "$HUSK_SCORE" ] \
-       && ok "(FLOOR) parked ranks below a stranded epic ($PARKED_SCORE < $HUSK_SCORE)" \
-       || bad "(FLOOR) parked outranked a stranded epic ($PARKED_SCORE >= $HUSK_SCORE)" ;;
+       && ok "(FLOOR) parked ranks below an epic with open work ($PARKED_SCORE < $HUSK_SCORE)" \
+       || bad "(FLOOR) parked outranked an epic with open work ($PARKED_SCORE >= $HUSK_SCORE)" ;;
 esac
 
 # --- (MAPGATHER) the gather-side filter, asserted on its own output ----------

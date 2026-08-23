@@ -180,6 +180,13 @@
 #                      moving: it is the canonical UNKNOWN-stuck case, so a
 #                      frontier of only dead-owner children reads stranded,
 #                      not active (PROBLEM 1).
+#                      SHAPE, NOT BAND, since tk-9tbbk.3. The flag still
+#                      reports exactly this, but the band splits on WHO the
+#                      row needs: an idle frontier with no dead owner and no
+#                      authored takeaway wants a DISPATCH, which no operator
+#                      performs, so it stands down to LOW (see the ranking
+#                      heuristic below). A consumer asking "is there open
+#                      work with nothing in it" still reads this field.
 #   • dead_owner     — count of in-progress children with a dead/absent
 #                      owner. Surfaced as "stuck (dead owner)" and never
 #                      masks a stall; the stuck ids ride into --json as
@@ -210,17 +217,30 @@
 #             no open visit — incl. a frontier whose only in-progress
 #             children have dead owners), OR an unowned non-machine convoy
 #             (the orphan exception).
+#             MINUS the dispatch stand-down (tk-9tbbk.3): a stranded row
+#             with NO dead-owner child and NO authored takeaway is asking
+#             for an assignment, which is a dispatcher action and not an
+#             operator one, so it bands LOW and says "awaiting dispatch"
+#             instead. Twelve of the fourteen HIGH rows on the 2026-08-23
+#             board were that one derived sentence. What stays HIGH is what
+#             a human can act on: a recovery, or a row somebody wrote a
+#             NEEDS sentence for.
 #   ELEVATED  a `decision` (human-gated); a `human` bead (same reason); an
 #             otherwise-NORMAL anchor gone stale (> STALE_DAYS days); OR a
 #             still-moving anchor that has a dead-owner (stuck) in-progress
 #             child to recover.
 #   NORMAL    active frontier (work in flight, OR an open visit — a
 #             conversation is held).
-#   LOW       empty epic (0 children), complete convoy (all closed), or a
-#             CHILDLESS `parked` bead (floored by band, never by score).
+#   LOW       empty epic (0 children), complete convoy (all closed), a
+#             CHILDLESS `parked` bead (floored by band, never by score), an
+#             ANSWERED human-gated row (the tk-b3rga stand-down), or a
+#             decomposed row awaiting a dispatch (the tk-9tbbk.3 stand-down).
 #             A parked bead that decomposed is banded by its children like
 #             any other roll-up anchor — the floor claims it wants nothing,
 #             which stops being true the moment open work hangs under it.
+#             LOW is "wants nothing from YOU", not "hidden": these rows stay
+#             in the ranked table, and only kind `parked` moves to the web
+#             app quiet section.
 #
 #   weight PROXY = M (subtree size)
 #                + priority weight (P1→3, P2→2, P3→1, P4→0)
@@ -1378,6 +1398,38 @@ def wf_live($id):
     # itself. The wait clause is what keeps it honest — a decision whose
     # `--waiting-on` work is still open has not finished being a decision.
     | ($human_gated and ($takeaway|length) > 0 and ($waiting_open|length) == 0) as $ruled
+    # AWAITING DISPATCH — the stand-down one band up, and the same rule as
+    # $ruled: band a row by WHO it needs, not by what it IS (tk-b3rga).
+    #
+    # An idle decomposed anchor bands HIGH, and HIGH says the operator must act.
+    # But the phrase it renders in that band names its own actor, and that actor
+    # is not the operator: "decomposed, idle — assign or visit". Assigning open
+    # work to a pool is a DISPATCH — gc sling and the dispatching agents do it,
+    # no human does it by hand. Measured 2026-08-23: twelve of the fourteen HIGH
+    # rows on the live board carried that one byte-identical sentence, so 86% of
+    # the loudest band was a single repeated request addressed to a machine
+    # (tk-9tbbk.3, subject tk-jr8rw).
+    #
+    # The takeaway clause is what separates a mechanical constant from a
+    # judgement: everywhere else here an authored takeaway WINS the NEEDS cell,
+    # because somebody looked at the row and said what it wants, and quieting
+    # one would overrule that. It holds the other two HIGH rows of that census
+    # in place — sl-kg9z6, whose takeaway reports PRs held on the operator, and
+    # tk-6v7nm, whose takeaway ends "the operator call" — both genuinely
+    # operator-facing, and both keep their band.
+    #
+    # A dead-owner child is NOT undispatched: it was dispatched and the worker
+    # fell over, which is a recovery, so it keeps its own phrase and its band.
+    # And $held means the attention is already on the row — the clause the
+    # stranded band has always carried.
+    #
+    # LOW cannot hide the one thing that would falsify the claim. An idle child
+    # no agent will take carries gc.routed_to=human, and every such open bead is
+    # gathered as a `human` anchor in its OWN right at ELEVATED, so it holds a
+    # row on this board whatever the band of its parent. What a quiet parent
+    # hides is exactly the work a dispatcher can take.
+    | ($m > 0 and $open > 0 and $inprog_live == 0 and $inprog_dead == 0
+       and ($held|not) and ($takeaway|length) == 0) as $awaiting_dispatch
     # severity band. A held anchor is active work via its conversation,
     # not via in-progress child polecats — so "0 in-progress" is NOT
     # stranded when a visit is open. Stranded/HIGH is reserved for a
@@ -1413,6 +1465,11 @@ def wf_live($id):
        elif ($a.source=="parked" and $m==0) then "LOW"
        elif $m==0 then "LOW"
        elif $open==0 then "LOW"
+       # LOW, not NORMAL, for the reason $ruled is: NORMAL is stale-bumped past
+       # STALE_DAYS, so a NORMAL stand-down would hold for two weeks and then
+       # put the same rows back in the contest. Five of the nine rows measured
+       # for tk-9tbbk.3 were already 12 days old or more.
+       elif $awaiting_dispatch then "LOW"
        elif ($open>0 and $inprog_live==0 and ($held|not)) then "HIGH"
        elif ($inprog_dead>0) then "ELEVATED"
        else "NORMAL" end) as $sev0
@@ -1441,6 +1498,10 @@ def wf_live($id):
        elif $open==0 then "all \($m) closed · 0 open"
        elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "\($open) open · \($inprog_dead) stuck (dead owner)"
        elif ($inprog_live==0 and $held) then ("\($open) open · in conversation" + $deadsfx)
+       # "(stranded)" is an alarm word, and it would contradict the band this row
+       # just got. What is true of it is narrower, and short: FRONTIER is padded
+       # to 36 columns and rpad truncates without a gutter.
+       elif $awaiting_dispatch then "\($open) open · awaiting dispatch"
        elif $inprog_live==0 then "\($open) open · 0 in flight (stranded)"
        else "\($open) open · \($inprog_live) in flight" + $deadsfx end) as $frontier
     # NEEDS is the one-glance answer for a human: the LLM takeaway sentence
@@ -1471,6 +1532,13 @@ def wf_live($id):
        elif $open==0 then (if $a.source=="convoy" then "all \($m) closed — graduate" else "all \($m) closed — close or extend" end)
        elif ($inprog_live==0 and $inprog_dead>0 and ($held|not)) then "dead owner — recover or reassign"
        elif ($inprog_live==0 and $held) then "open to join"
+       # NEEDS answers what this row wants from the reader, and for an idle row
+       # with no takeaway the honest answer is nothing — what it wants is a
+       # dispatch, which is not something the person reading this column does.
+       elif $awaiting_dispatch then "awaiting dispatch — no operator action"
+       # Reachable only for a row that is idle but does NOT stand down. The
+       # takeaway short-circuit above owns every one of those today, so nothing
+       # renders this; it is the fallback the frontier keeps in the same place.
        elif $inprog_live==0 then "decomposed, idle — assign or visit"
        else (if $inprog_dead>0 then "in flight — \($inprog_dead) stuck, recover"
              else ("in flight" + (if $held then " (in conversation)" else "" end)) end) end) as $needs

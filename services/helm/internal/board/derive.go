@@ -360,6 +360,50 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 		!humanGated(a)
 }
 
+// awaitingDispatch is the STAND-DOWN for an idle decomposed anchor: open work
+// under it, nothing moving in that work, and nobody has written what the row
+// needs. It is the [ruled] rule one band up, and for the same reason — band a
+// row by WHO it needs, not by what it IS (tk-b3rga).
+//
+// Such a row bands HIGH, and HIGH says the operator must act. But the phrase
+// the row renders in that band names its own actor and it is not the operator:
+// "decomposed, idle — assign or visit". Assigning open work to a pool is a
+// DISPATCH, which `gc sling` and the dispatching agents perform and which no
+// human performs by hand. Measured 2026-08-23 on the live board: twelve of the
+// fourteen HIGH rows carried that one byte-identical sentence — 86% of the
+// operator's loudest band was a single repeated request addressed to a machine
+// (tk-9tbbk.3, subject tk-jr8rw).
+//
+// Three clauses keep it honest, and each is the analogue of one the stand-down
+// already carries.
+//
+// NO TAKEAWAY. The clause is what separates a mechanical constant from a
+// judgement. Everywhere else on this board an authored takeaway WINS the NEEDS
+// cell, because someone looked at the row and said what it wants; quieting one
+// would overrule that. Only a row with no takeaway is rendering the constant
+// this rule exists to retire. Not hypothetical: it is what holds the other two
+// HIGH rows of that census in place — `sl-kg9z6`, whose takeaway reports PRs
+// held on the operator, and `tk-6v7nm`, whose takeaway ends "the operator's
+// call". Both are genuinely operator-facing and both keep their band.
+//
+// NO DEAD OWNER. A child claimed by a session that died is not undispatched —
+// it was dispatched and the worker fell over — so it is a recovery, which the
+// row already says in its own phrase ("dead owner — recover or reassign"). It
+// keeps HIGH.
+//
+// NOT HELD. An open visit means the attention is already on the row. This is
+// the clause `stranded` has always carried, kept for the same reason.
+//
+// And the LOW band cannot hide the one thing that would falsify the claim. An
+// idle child that no agent will take carries `gc.routed_to=human`, and every
+// such open bead is gathered as a `human` anchor in its OWN right at ELEVATED —
+// so it holds a row on the board whatever its parent's band. The children that
+// vanish into a quiet parent are exactly the ones a dispatcher can take.
+func awaitingDispatch(r rollup, held bool, takeaway string) bool {
+	return r.mTotal > 0 && r.open > 0 && len(r.liveHeads) == 0 &&
+		len(r.deadOwnerHeads) == 0 && !held && takeaway == ""
+}
+
 // severity mirrors gc-helm.sh's band derivation.
 //
 // The three metadata/shape-keyed kinds are placed AHEAD of the count branches
@@ -394,7 +438,16 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // counts a slung bead whose movement lives on its workflow, and `held` means a
 // conversation is holding the anchor — attention is already on it, so silence
 // in the child beads is not abandonment.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) Severity {
+//
+// …and it is HIGH only for the rows the operator can act on. [awaitingDispatch]
+// takes the rest of that band — an idle row with no dead owner and no authored
+// takeaway, whose one need is a dispatch — down to LOW, for the same reason
+// [ruled] stands an answered decision down: the row is addressed to somebody
+// else. LOW, not NORMAL, and for the reason recorded there — NORMAL is
+// stale-bumped past fourteen days, so a NORMAL stand-down would hold for about
+// two weeks and then put the same rows back in the contest. Five of the nine
+// live rows measured for tk-9tbbk.3 were already 12 days old or more.
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, awaitDisp bool) Severity {
 	var sev0 Severity
 	inProgressLive := len(r.liveHeads)
 	switch {
@@ -411,6 +464,8 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) S
 	case r.mTotal == 0:
 		sev0 = SevLow
 	case r.open == 0:
+		sev0 = SevLow
+	case awaitDisp:
 		sev0 = SevLow
 	case r.open > 0 && inProgressLive == 0 && !held:
 		sev0 = SevHigh
@@ -443,7 +498,7 @@ func rankScore(sev Severity, w, stale int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRuled bool) string {
+func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRuled, awaitDisp bool) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	deadSfx := ""
@@ -481,6 +536,13 @@ func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRu
 		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.open, dead)
 	case inProgressLive == 0 && held:
 		return fmt.Sprintf("%d open · in conversation", r.open) + deadSfx
+	// "(stranded)" is an alarm word, and it would now contradict the band this
+	// row just got. What is true of it is narrower and is what the phrase says:
+	// the work is there and nothing has picked it up yet. Kept in the counts
+	// shape every other roll-up row uses, and short — FRONTIER is padded to 36
+	// runes and truncates without a gutter.
+	case awaitDisp:
+		return fmt.Sprintf("%d open · awaiting dispatch", r.open)
 	case inProgressLive == 0:
 		return fmt.Sprintf("%d open · 0 in flight (stranded)", r.open)
 	default:
@@ -503,7 +565,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool) string {
+func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, awaitDisp bool) string {
 	// The disposition phrase OUTRANKS the takeaway, and only here. Every other
 	// row spends its takeaway as NEEDS because the sentence is the best answer
 	// available; on this row the sentence is precisely what has gone stale —
@@ -554,6 +616,17 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return "dead owner — recover or reassign"
 	case inProgressLive == 0 && held:
 		return "open to join"
+	// The sentence this whole rule is about. NEEDS answers "what does this row
+	// want from me", and the honest answer for an idle row with no takeaway is
+	// "nothing" — what it wants is a dispatch, which is not a thing the person
+	// reading this column does. It still reports the state, so a sweep can act
+	// on it and the operator can choose to.
+	case awaitDisp:
+		return "awaiting dispatch — no operator action"
+	// Reachable only for a row that is idle but does NOT stand down. Today the
+	// takeaway short-circuit above owns every one of those, so nothing renders
+	// this; it is the same fallback frontier keeps, in the same place, and the
+	// two functions have to be read together.
 	case inProgressLive == 0:
 		return "decomposed, idle — assign or visit"
 	case dead > 0:
@@ -587,7 +660,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	takeaway := collapseWS(a.Takeaway)
 	dispDue := dispositionDue(a, waiting, waitingOpen)
 	isRuled := ruled(a, takeaway, waitingOpen)
-	sev := severity(a, r, held, stale, dispDue, isRuled)
+	awaitDisp := awaitingDispatch(r, held, takeaway)
+	sev := severity(a, r, held, stale, dispDue, isRuled, awaitDisp)
 	w := weight(r, a.Priority, xrefs)
 
 	// progress_mismatch: the convoy's own closed/total claim disagrees with the
@@ -642,8 +716,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		TakeawayBy: nilIfEmpty(a.TakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
-		Frontier:  frontier(a, r, held, waitingOpen, dispDue, isRuled),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled),
+		Frontier:  frontier(a, r, held, waitingOpen, dispDue, isRuled, awaitDisp),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, awaitDisp),
 		RankScore: rankScore(sev, w, stale),
 	}
 }

@@ -38,9 +38,15 @@ func tileByID(b Board, id string) (Tile, bool) {
 }
 
 // TestFourAnchorBoard reproduces the primary golden case from
-// tools/helm-surface-fixture.sh: three epics (two stranded, one with a
-// closed child) and a decision. The assertions mirror the fixture's
-// eq/has checks for the fields this port carries.
+// tools/helm-surface-fixture.sh: three epics (two idle, one with a closed
+// child) and a decision. The assertions mirror the fixture's eq/has checks
+// for the fields this port carries.
+//
+// The ordering it asserts INVERTED with tk-9tbbk.3, and that is the point of
+// the change rather than a casualty of it. None of these epics carries a
+// takeaway, so each is [awaitingDispatch] — a row whose only need is a
+// dispatch, which no operator performs — and each stands down to LOW. The
+// decision, which genuinely wants a human, now floats above all three.
 func TestFourAnchorBoard(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-one", Title: "CI mystery", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Children: []Child{
@@ -60,22 +66,29 @@ func TestFourAnchorBoard(t *testing.T) {
 	if got := len(b.Tiles); got != 4 {
 		t.Fatalf("all four anchors admitted: want 4, got %d", got)
 	}
-	if got := b.Tiles[0].Severity; got != SevHigh {
-		t.Errorf("top row is a stranded epic: want HIGH, got %s", got)
+	if got := b.Tiles[0].Severity; got != SevElevated {
+		t.Errorf("top row is the decision, the one row that wants a human: want ELEVATED, got %s", got)
 	}
-	// the stranded epic floats above the decision.
+	// the decision floats above the idle epics.
 	epic, _ := tileByID(b, "tk-epic")
 	dec, _ := tileByID(b, "sl-dec")
-	if !(epic.RankScore > dec.RankScore) {
-		t.Errorf("stranded epic must outrank the decision: epic=%d decision=%d", epic.RankScore, dec.RankScore)
+	if !(dec.RankScore > epic.RankScore) {
+		t.Errorf("the decision must outrank an idle epic: decision=%d epic=%d", dec.RankScore, epic.RankScore)
 	}
 
-	// Severity of the stranded epic: open work, none in progress.
-	if epic.Severity != SevHigh {
-		t.Errorf("stranded epic is HIGH: got %s", epic.Severity)
+	// Severity of the idle epic: open work, none in progress, no takeaway —
+	// awaiting a dispatch, so it stands down.
+	if epic.Severity != SevLow {
+		t.Errorf("an idle takeaway-less epic stands down: got %s", epic.Severity)
 	}
-	if !strings.Contains(epic.Frontier, "stranded") {
-		t.Errorf("stranded epic frontier says stranded: got %q", epic.Frontier)
+	if !strings.Contains(epic.Frontier, "awaiting dispatch") {
+		t.Errorf("its frontier says what it is waiting for: got %q", epic.Frontier)
+	}
+	// The shape claim is unchanged and still on the wire — only the band and
+	// the phrases moved. A consumer asking "is there open work with nothing in
+	// it" still gets a yes.
+	if !epic.Stranded {
+		t.Error("the stranded shape flag still reports open work with nothing live in it")
 	}
 	// Decision is ELEVATED.
 	if dec.Severity != SevElevated {
@@ -434,10 +447,15 @@ func TestMetadataKindDedup(t *testing.T) {
 // TestDedupKeepsHigherBand verifies that an id gathered twice survives once,
 // in its higher band — the sort-then-dedup contract from gc-helm.sh.
 func TestDedupKeepsHigherBand(t *testing.T) {
+	// The epic side carries a takeaway, which is what holds an idle row in the
+	// HIGH band since tk-9tbbk.3: without one it would be [awaitingDispatch] and
+	// both derivations would land on LOW, leaving the dedup nothing to choose
+	// between and this test asserting nothing.
 	anchors := []Anchor{
-		{ID: "tk-dup", Title: "as epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
-			{ID: "c1", Status: "open"},
-		}},
+		{ID: "tk-dup", Title: "as epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Takeaway: "the auth cutover blocks this; operator picks the window", Children: []Child{
+				{ID: "c1", Status: "open"},
+			}},
 		{ID: "tk-dup", Title: "as convoy", Kind: "convoy", Source: "convoy", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "c2", Status: "closed"},
 		}},
@@ -447,7 +465,7 @@ func TestDedupKeepsHigherBand(t *testing.T) {
 		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
 	}
 	if b.Tiles[0].Severity != SevHigh {
-		t.Errorf("dedup keeps the higher (HIGH, stranded-epic) band: got %s", b.Tiles[0].Severity)
+		t.Errorf("dedup keeps the higher (HIGH, idle-epic) band: got %s", b.Tiles[0].Severity)
 	}
 }
 
@@ -561,15 +579,23 @@ func TestStaleBumpFires(t *testing.T) {
 // TestStaleDoesNotBumpOtherBands confirms the bump is scoped to NORMAL: a
 // stranded (HIGH) anchor stays HIGH and a decision stays ELEVATED, however old.
 func TestStaleDoesNotBumpOtherBands(t *testing.T) {
+	// tk-awaiting is the case tk-9tbbk.3 turns on. The stand-down chose LOW over
+	// NORMAL precisely so a stale-bump could not undo it, and 400 days is the
+	// exaggerated form of the live rows that motivated it (five of nine were
+	// already 12+ days old). A NORMAL stand-down passes its own acceptance test
+	// for two weeks and then silently stops working; this row is what says so.
 	anchors := []Anchor{
 		{ID: "tk-stranded", Kind: "epic", Source: "epic", Priority: ptr(2), UpdatedAt: daysAgo(400),
+			Takeaway: "waiting on the vendor contract; operator owns the escalation",
 			Children: []Child{{ID: "s1", Status: "open"}}},
+		{ID: "tk-awaiting", Kind: "epic", Source: "epic", Priority: ptr(2), UpdatedAt: daysAgo(400),
+			Children: []Child{{ID: "a1", Status: "open"}}},
 		{ID: "tk-dec", Kind: "decision", Source: "decision", Priority: ptr(2), UpdatedAt: daysAgo(400)},
 		{ID: "tk-done", Kind: "epic", Source: "epic", Priority: ptr(2), UpdatedAt: daysAgo(400),
 			Children: []Child{{ID: "d1", Status: "closed"}}},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
-	for id, want := range map[string]Severity{"tk-stranded": SevHigh, "tk-dec": SevElevated, "tk-done": SevLow} {
+	for id, want := range map[string]Severity{"tk-stranded": SevHigh, "tk-awaiting": SevLow, "tk-dec": SevElevated, "tk-done": SevLow} {
 		if tl, _ := tileByID(b, id); tl.Severity != want {
 			t.Errorf("%s: severity %s, want %s (staleness must not move this band)", id, tl.Severity, want)
 		}
@@ -691,9 +717,16 @@ func TestHeldAnchorIsNotStranded(t *testing.T) {
 	a := Anchor{ID: "tk-held", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
 		Children: []Child{{ID: "c1", Status: "open"}}}
 
+	// Without a visit this row is idle and takeaway-less, so it stands down to
+	// LOW (tk-9tbbk.3) — but the shape flag still reports what it is. The
+	// contrast the test is about survives the stand-down and in fact sharpens:
+	// opening a conversation is now the thing that RAISES the band, because a
+	// live conversation is something happening and an undispatched backlog is
+	// not.
 	bare := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
-	if bare.Severity != SevHigh || bare.Held {
-		t.Fatalf("without a visit the anchor is stranded/HIGH: got %s held=%v", bare.Severity, bare.Held)
+	if bare.Severity != SevLow || bare.Held || !bare.Stranded {
+		t.Fatalf("without a visit the anchor is idle/LOW and still flagged stranded: got %s held=%v stranded=%v",
+			bare.Severity, bare.Held, bare.Stranded)
 	}
 
 	held := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-held": true}}).Tiles[0]
@@ -1136,5 +1169,141 @@ func TestDispositionDueSurvivesForAPlainParkedRow(t *testing.T) {
 	}
 	if tile.Needs != "blocker landed — dispose or resume" {
 		t.Errorf("needs: %q", tile.Needs)
+	}
+}
+
+// TestAwaitingDispatchStandsDown is the tk-9tbbk.3 regression. An epic that
+// decomposed and whose children nobody has picked up bands HIGH — the loudest
+// band, the one that means the operator must act — and renders a sentence whose
+// verb the operator does not perform: "decomposed, idle — assign or visit".
+// Twelve of the fourteen HIGH rows on the 2026-08-23 board were that one
+// sentence.
+func TestAwaitingDispatchStandsDown(t *testing.T) {
+	a := Anchor{ID: "tk-idle", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+		Children: []Child{{ID: "c1", Status: "open"}, {ID: "c2", Status: "open"}, {ID: "c3", Status: "closed"}}}
+
+	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+	if tl.Severity != SevLow {
+		t.Errorf("an idle decomposed epic stands down: got %s", tl.Severity)
+	}
+	if tl.Frontier != "2 open · awaiting dispatch" {
+		t.Errorf("frontier reports the count and what it waits for: got %q", tl.Frontier)
+	}
+	if tl.Needs != "awaiting dispatch — no operator action" {
+		t.Errorf("needs names the actor, and it is not the reader: got %q", tl.Needs)
+	}
+	if strings.Contains(tl.Needs, "assign") || strings.Contains(tl.Frontier, "stranded") {
+		t.Errorf("the retired phrasing must be gone: frontier=%q needs=%q", tl.Frontier, tl.Needs)
+	}
+	// The counts and the shape flag are untouched — only the band and the two
+	// phrases moved. A sweep looking for open work with nothing in it still
+	// finds this row.
+	if !tl.Stranded || tl.Open != 2 || tl.MTotal != 3 {
+		t.Errorf("shape unchanged: stranded=%v open=%d m=%d", tl.Stranded, tl.Open, tl.MTotal)
+	}
+}
+
+// TestAuthoredTakeawayKeepsAnIdleRowLoud is the clause that separates a
+// mechanical constant from a judgement, and it is not decoration: it is what
+// held the OTHER two HIGH rows of the 2026-08-23 census in place. `sl-kg9z6`
+// reported PRs held on the operator and `tk-6v7nm` ended "the operator's call"
+// — both idle by the counts, both genuinely wanting a human, both still HIGH.
+//
+// Everywhere else on this board an authored takeaway WINS the NEEDS cell,
+// because somebody looked at the row and said what it wants. Standing such a
+// row down would overrule that with a derived guess.
+func TestAuthoredTakeawayKeepsAnIdleRowLoud(t *testing.T) {
+	a := Anchor{ID: "tk-said", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+		Takeaway: "25 still undispatched incl. 17 behind CLEARED gates; PRs 557/559 held on operator",
+		Children: []Child{{ID: "c1", Status: "open"}}}
+
+	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+	if tl.Severity != SevHigh {
+		t.Errorf("an idle row somebody wrote a NEEDS for keeps its band: got %s", tl.Severity)
+	}
+	if !strings.Contains(tl.Needs, "held on operator") {
+		t.Errorf("and keeps spending NEEDS on the sentence: got %q", tl.Needs)
+	}
+	if !strings.Contains(tl.Frontier, "stranded") {
+		t.Errorf("and keeps the stranded frontier: got %q", tl.Frontier)
+	}
+}
+
+// TestAwaitingDispatchDoesNotSwallowADeadOwner: a child claimed by a session
+// that died is not undispatched. It WAS dispatched and the worker fell over,
+// which is a recovery — a different actor and a different phrase — so the row
+// keeps HIGH and keeps saying so.
+func TestAwaitingDispatchDoesNotSwallowADeadOwner(t *testing.T) {
+	a := Anchor{ID: "tk-dead", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+		Children: []Child{{ID: "c1", Status: "in_progress", Assignee: "gone"}, {ID: "c2", Status: "open"}}}
+
+	f := Facts{OwnerState: map[string]string{"gone": "archived"}}
+	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, f).Tiles[0]
+	if tl.Severity != SevHigh {
+		t.Errorf("a dead owner is a recovery, not a missing dispatch: got %s", tl.Severity)
+	}
+	if tl.Needs != "dead owner — recover or reassign" {
+		t.Errorf("and keeps its own phrase: got %q", tl.Needs)
+	}
+	if tl.InProgressDead != 1 {
+		t.Errorf("dead-owner count: got %d", tl.InProgressDead)
+	}
+}
+
+// TestAwaitingDispatchStopsAtTheKindsThatAlreadyAnswer pins the rules the
+// stand-down must not disturb. Each of these anchors is idle by the counts, and
+// each is held in place by a clause that is already load-bearing for an earlier
+// ruling: a decomposed `parked` subject always carries a takeaway by
+// construction (it is how the kind is SELECTED), so tk-a9k0l's "open work under
+// a parked row falsifies its claim to want nothing" survives untouched, and so
+// does the same lesson for a ruled decision (tk-b3rga).
+func TestAwaitingDispatchStopsAtTheKindsThatAlreadyAnswer(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-parked", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Takeaway: "routed the fix to a polecat", Children: []Child{{ID: "p1", Status: "open"}}},
+		{ID: "tk-ruled", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Takeaway: "ruled: take option B", Children: []Child{{ID: "r1", Status: "open"}}},
+		{ID: "tk-unowned", Kind: "convoy", Source: "unowned", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Children: []Child{{ID: "u1", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	for id, want := range map[string]Severity{"tk-parked": SevHigh, "tk-ruled": SevHigh, "tk-unowned": SevHigh} {
+		tl, ok := tileByID(b, id)
+		if !ok {
+			t.Fatalf("%s missing from the board", id)
+		}
+		if tl.Severity != want {
+			t.Errorf("%s: severity %s, want %s (the stand-down must not reach this row)", id, tl.Severity, want)
+		}
+	}
+}
+
+// TestAwaitingDispatchCannotHideWorkNoAgentWillTake is why the rule needs no
+// per-child metadata read to be safe. The one thing that would falsify "a
+// dispatcher can take this" is a child routed to the operator — and every open
+// bead carrying gc.routed_to=human is gathered as a `human` anchor in its OWN
+// right, so it holds an ELEVATED row on the board whatever its parent's band.
+// The children a quiet parent hides are exactly the ones an agent can pick up.
+func TestAwaitingDispatchCannotHideWorkNoAgentWillTake(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-parent", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Children: []Child{{ID: "tk-kid", Status: "open"}}},
+		{ID: "tk-kid", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	parent, _ := tileByID(b, "tk-parent")
+	kid, ok := tileByID(b, "tk-kid")
+	if !ok {
+		t.Fatal("the human-routed child must hold a row of its own")
+	}
+	if parent.Severity != SevLow {
+		t.Errorf("the parent stands down: got %s", parent.Severity)
+	}
+	if kid.Severity != SevElevated || kid.Needs != "operator action" {
+		t.Errorf("the child still asks for the operator: %s / %q", kid.Severity, kid.Needs)
+	}
+	if !(kid.RankScore > parent.RankScore) {
+		t.Errorf("and outranks the parent that went quiet: kid=%d parent=%d", kid.RankScore, parent.RankScore)
 	}
 }

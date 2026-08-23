@@ -97,8 +97,15 @@ J="$(B --json)"
 eq   "board returns a JSON array"            "array"  "$(printf '%s' "$J" | jq -r 'type')"
 eq   "all four anchors admitted"             "4"      "$(printf '%s' "$J" | jq 'length')"
 eq   "epic kind present"                     "3"      "$(printf '%s' "$J" | jq '[.[]|select(.kind=="epic")]|length')"
-eq   "top row is the stranded epic (HIGH)"   "HIGH"   "$(printf '%s' "$J" | jq -r '.[0].severity')"
-eq   "the stranded epic floats above the decision" "true" "$(printf '%s' "$J" | jq -r '(.[]|select(.id=="tk-epic").rank_score) > (.[]|select(.id=="sl-dec").rank_score)')"
+# This ordering INVERTED with tk-9tbbk.3, and the inversion is the change. None
+# of these epics carries a takeaway, so each is idle with nothing authored on it
+# — a row whose only need is a dispatch, which no operator performs — and each
+# stands down to LOW. The decision, the one row here that genuinely wants a
+# human, now floats above them.
+eq   "top row is the decision (ELEVATED)"   "ELEVATED" "$(printf '%s' "$J" | jq -r '.[0].severity')"
+eq   "the decision floats above an idle epic" "true" "$(printf '%s' "$J" | jq -r '(.[]|select(.id=="sl-dec").rank_score) > (.[]|select(.id=="tk-epic").rank_score)')"
+eq   "the idle epic stands down"            "LOW"    "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").severity')"
+eq   "…and still reports the shape on the wire" "true" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="tk-epic").stranded')"
 has  "decision frontier is human-gated"      "human-gated" "$(printf '%s' "$J" | jq -r '.[]|select(.id=="sl-dec").frontier')"
 
 echo "── hermetic: held glyph (visit presence, not sessions) ──"
@@ -136,11 +143,19 @@ has    "visited epic frontier reads in-conversation" "in conversation" "$(printf
 absent "visited epic frontier drops (stranded)" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").frontier')"
 has    "visited epic needs is open-to-join"     "open to join" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-visited").needs')"
 has    "visited epic still shows the held glyph" "●" "$(GC_HELM_FIXTURE="$LIVE" "$TOOL")"
-# Control: the unvisited sibling, identical shape but no visit, stays HIGH.
+# Control: the unvisited sibling, identical shape but no visit. Since
+# tk-9tbbk.3 it stands down to LOW rather than HIGH — so what the visit now
+# demonstrates is a band CHANGE in the other direction, which is the honest
+# reading: an open conversation is something happening, and an undispatched
+# backlog is not. The visit-gating this case exists for is unaffected; the two
+# siblings still land in different bands, with different frontiers and needs,
+# on nothing but the visit.
 eq     "unvisited sibling is not held"          "false"  "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").held')"
-eq     "unvisited sibling stays HIGH"           "HIGH"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
+eq     "unvisited sibling stands down"          "LOW"    "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").severity')"
+eq     "…so the visit is what separates the two siblings" "true" "$(printf '%s' "$LIVEJ" | jq -r '(.[]|select(.id=="tk-visited").severity) != (.[]|select(.id=="tk-lonely").severity)')"
 eq     "unvisited sibling stays stranded"       "true"   "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").stranded')"
-has    "unvisited sibling frontier says stranded" "stranded" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
+has    "unvisited sibling frontier says what it waits for" "awaiting dispatch" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").frontier')"
+has    "unvisited sibling needs names the actor" "awaiting dispatch — no operator action" "$(printf '%s' "$LIVEJ" | jq -r '.[]|select(.id=="tk-lonely").needs')"
 rm -rf "$LIVE"
 
 echo "── hermetic: dead-owner in-progress is stuck, not moving (PROBLEM 1) ──"
@@ -254,7 +269,9 @@ eq  "takeaway present → JSON .takeaway_by is recorded" "proactive" \
     "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-tk").takeaway_by')"
 # Absent: a terse phrase, NO frontier bead-id and NO cross-rig bead-id.
 NB="$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").needs')"
-has    "takeaway absent → NEEDS is a terse human phrase"  "decomposed, idle" "$NB"
+has    "takeaway absent → NEEDS is a terse human phrase"  "awaiting dispatch" "$NB"
+eq     "takeaway absent → and the row stands out of the operator band" "LOW" \
+       "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").severity')"
 absent "takeaway absent → NEEDS has NO frontier bead-id"  "tk-c3"            "$NB"
 absent "takeaway absent → NEEDS has NO cross-rig bead-id" "sl-zzz9"          "$NB"
 eq     "takeaway absent → JSON .takeaway is null"         "null"             "$(printf '%s' "$TKJ" | jq -r '.[]|select(.id=="tk-bare").takeaway')"

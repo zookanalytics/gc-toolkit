@@ -36,10 +36,10 @@ import "time"
 type Severity string
 
 const (
-	SevHigh     Severity = "HIGH"     // stranded: open work with none in progress
+	SevHigh     Severity = "HIGH"     // stalled work a human can act on: a recovery, or an idle row somebody wrote a NEEDS for
 	SevElevated Severity = "ELEVATED" // a human-gated decision (or, with staleness, an aged NORMAL)
 	SevNormal   Severity = "NORMAL"   // healthy in-flight work
-	SevLow      Severity = "LOW"      // empty or fully closed
+	SevLow      Severity = "LOW"      // empty, fully closed, answered, or awaiting a dispatch — wants nothing from the operator
 )
 
 // sevRank mirrors gc-helm.sh's `def sevrank`. It is the dominant term in
@@ -206,6 +206,12 @@ type Tile struct {
 
 	Owned *bool `json:"owned"`
 
+	// Stranded is a SHAPE claim and not a band: decomposed, open children,
+	// nothing live in them, no open visit. Most such rows band LOW since
+	// tk-9tbbk.3 — what they want is a dispatch — so a consumer must not read
+	// this as "the operator must act". It answers "is there open work with
+	// nothing in it", which is what a sweep needs and what the two boards have
+	// always reported here.
 	Stranded         bool `json:"stranded"`
 	Empty            bool `json:"empty"`
 	Complete         bool `json:"complete"`

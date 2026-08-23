@@ -101,9 +101,9 @@ Five kinds are gathered. The first three are selected by the bead's issue
 
 | kind | selected by | band | why |
 |---|---|---|---|
-| `epic` | `issue_type=epic` | derived from the roll-up | durable per-rig anchor |
+| `epic` | `issue_type=epic` | derived from the roll-up, LOW once *awaiting dispatch* | durable per-rig anchor |
 | `decision` | `issue_type=decision` | ELEVATED, LOW once *ruled* | human-gated |
-| `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
+| `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up, LOW once *awaiting dispatch* | floating epic-improviser |
 | `human` | `gc.routed_to=human` | ELEVATED, LOW once *ruled* | the operator owns it; no agent will take it |
 | `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
 
@@ -267,6 +267,75 @@ ruling — but NEEDS answers "what does this row want from me", and what a ruled
 row wants is a close or a re-open, not a re-read. The ruling stays on the wire
 in `takeaway`, where nothing truncates it; in the terminal table it was the
 longest cell in that column and the least actionable.
+
+### Until somebody picks it up — the dispatch stand-down (`tk-9tbbk.3`)
+
+The same question again, asked of the band directly above.
+
+An anchor that decomposed, has open children and nothing live in any of them
+bands **HIGH** — *stranded* — and renders `decomposed, idle — assign or visit`.
+That phrase names its own actor, and it is not the operator. Assigning open
+work to a pool is a **dispatch**: `gc sling` and the dispatching agents perform
+it and no human performs it by hand. Measured on the 2026-08-23 board, twelve
+of the fourteen HIGH rows carried that one byte-identical sentence — 86% of the
+operator's loudest band was a single repeated request addressed to a machine.
+
+A row is **awaiting dispatch** when all four hold:
+
+1. it has open children and nothing LIVE in them (the `stranded` shape);
+2. none of those children is claimed by a dead session;
+3. no open visit holds it; and
+4. it carries no `gc.takeaway`.
+
+| shape | row |
+|---|---|
+| idle, nothing authored on it | LOW, "N open · awaiting dispatch", NEEDS "awaiting dispatch — no operator action" |
+| idle, but carrying a takeaway | unchanged: banded by the roll-up, and NEEDS is the sentence |
+| a child claimed by a dead session | unchanged: HIGH, "dead owner — recover or reassign" |
+| an open visit on the anchor | unchanged: NORMAL, "open to join" |
+
+**The takeaway clause is the one that does the work.** Everywhere else on this
+board an authored takeaway WINS the NEEDS cell, because somebody looked at the
+row and said what it wants; a derived rule that quiets such a row overrules a
+judgement with a guess. It is not hypothetical — it is what holds the *other*
+two HIGH rows of that census in place. `sl-kg9z6` reports "PRs 557/559 held on
+operator" and `tk-6v7nm` ends "the operator's call": both idle by the counts,
+both genuinely operator-facing, both still HIGH. It also keeps every earlier
+ruling intact by construction, because a decomposed `parked` subject carries a
+takeaway *by definition* — it is how the kind is selected — so tk-a9k0l's "open
+work under a parked row falsifies its claim to want nothing" is untouched, and
+so is the same lesson for a ruled decision.
+
+**A dead owner is not a missing dispatch.** That child was dispatched and the
+worker fell over; it sits at `in_progress` under a session that is gone, so the
+pool will never re-offer it and somebody has to recover it. Contrast a *husk* —
+a dead workflow over an `open`, unassigned child: nothing is moving there
+either, but the bead is re-offerable, which is exactly what "awaiting dispatch"
+says. Same silence, two different actors, and the `in_progress` status is what
+separates them.
+
+**LOW, not NORMAL**, for the reason recorded in the stand-down above: NORMAL is
+stale-bumped past fourteen days. Five of the nine live rows this was measured
+against were already 12 days old or more, so a NORMAL stand-down would have
+passed its own acceptance test and then quietly stopped working within a week.
+
+**Nothing that needs a human can hide behind a quiet parent.** The one thing
+that would falsify "a dispatcher can take this" is a child routed to the
+operator — and every open bead carrying `gc.routed_to=human` is gathered as a
+`human` anchor in its OWN right, so it holds an ELEVATED row whatever its
+parent's band. The children a quiet parent stops advertising are precisely the
+ones an agent can pick up. That is why the rule needs no per-child metadata read
+to be safe, and why neither gather was widened for it.
+
+**`stranded` stays a shape flag, and stays on the wire unchanged.** It still
+answers "is there open work with nothing in it", which is what a sweep needs;
+what moved is the band and the two phrases. Nothing branches on the field
+today, and a consumer that starts to must read it as shape and not as urgency.
+
+One consequence worth naming: opening a visit on an idle row now RAISES its
+band, LOW → NORMAL, where before it lowered it. That reads correctly — a live
+conversation is something happening and an undispatched backlog is not — but it
+is the reverse of what the `held` clause was originally for.
 
 ## Architecture
 
