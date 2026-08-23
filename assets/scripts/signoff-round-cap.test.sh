@@ -77,10 +77,44 @@ grep -q 'source_review_bead' "$TMP/cap.sh" \
   && ok "snippet extracted from template and counts on source_review_bead" \
   || bad "extracted snippet does not filter on source_review_bead"
 
+# --- every dispatcher carries the SAME block ---------------------------------
+# The cap belongs to the ANCHOR, not to whoever is about to dispatch (tk-j5wrs
+# ruling 3), and it only belongs to the anchor if all four dispatchers read the
+# same count the same way. Three of them had no cap at all until tk-vie5k, which is
+# how round N+1 got minted in exactly the window the cap exists to close — so a
+# copy going missing, or drifting, is the regression this census exists to catch.
+# The template is canonical; every other host is diffed against it, modulo the
+# indentation its own surface adds.
+CAP_CANON="$(sed 's/^[[:space:]]*//' "$TMP/cap.sh")"
+CAP_HOSTS="$PATROL $ROOT/assets/scripts/check-set-heal.sh $ROOT/assets/scripts/reconcile-merged-prs.sh"
+CAP_COPIES=0
+for capf in $CAP_HOSTS; do
+  capname="$(basename "$capf")"
+  capblk="$(awk '/# >>> signoff-round-cap/{f=1;next} /# <<< signoff-round-cap/{f=0} f' "$capf" \
+              | sed 's/^[[:space:]]*//')"
+  if [ -z "$capblk" ]; then
+    bad "$capname carries the signoff-round-cap block (none found — unmarked or hand-rolled?)"
+    continue
+  fi
+  CAP_COPIES=$((CAP_COPIES + 1))
+  if [ "$capblk" = "$CAP_CANON" ]; then
+    ok "$capname carries the canonical cap block, byte-identical"
+  else
+    bad "$capname cap block DRIFTED from the template copy"
+  fi
+done
+[ "$CAP_COPIES" -ge 3 ] \
+  && ok "every known dispatcher carries the cap block ($CAP_COPIES + the template)" \
+  || bad "a dispatcher lost its cap block (found $CAP_COPIES of 3 besides the template)"
+
 # run_cap <anchor> <children-json> [max] -> "ROUNDS CAP_HIT"
+#
+# CAP_ANCHOR is the block's input, not the host's local name: the same block now
+# ships in four files whose anchor variables are ANCHOR, GATING_ANCHOR and `id`,
+# and one shared block cannot read three different names (tk-vie5k).
 run_cap() {
-  ANCHOR="$1" FAKE_CHILDREN="$2" GC_MAX_REVIEW_ROUNDS="${3-}" \
-  bash -c 'set -euo pipefail; ANCHOR="${ANCHOR}"; source "$1"; echo "$ROUNDS $CAP_HIT"' _ "$TMP/cap.sh"
+  CAP_ANCHOR="$1" FAKE_CHILDREN="$2" GC_MAX_REVIEW_ROUNDS="${3-}" \
+  bash -c 'set -euo pipefail; source "$1"; echo "$ROUNDS $CAP_HIT"' _ "$TMP/cap.sh"
 }
 
 child() { printf '{"id":"%s","metadata":{"source_review_bead":"rv-%s"}}' "$1" "$1"; }

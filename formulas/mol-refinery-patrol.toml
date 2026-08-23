@@ -2144,9 +2144,43 @@ if [ "$CODEX_GATE" = 1 ]; then
   CODEX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
   FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 
+  # Shared membership predicate — canonical copy in assets/scripts/check-set-heal.sh,
+  # drift-checked by assets/scripts/inflight-membership.test.sh. Copy the markers too.
+  # >>> inflight-membership
+  # shellcheck disable=SC2034  # part of the shared block; not every host spends it
+  INFLIGHT_LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+  INFLIGHT_MEMBERSHIP_JQ='def claimable:
+  . as $b
+  | (($b.metadata // {})) as $m
+  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
+  | ((($m["gc.routed_to"] // "") | tostring) != "")
+    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
+def acting($live):
+  . as $b
+  | (($b.metadata // {})) as $m
+  | (($live | split(",")) | map(select(. != "open"))) as $owning
+  | ((($m.task_kind // "") | tostring) == "review")
+    or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
+    or ($b | claimable);
+def anchor_authority($a):
+  ((((. // {}).metadata // {}).anchor_bead // "") | tostring) as $ab
+  | if $ab == "" then "unattributed" elif $ab == $a then "mine" else "theirs" end;
+'
+  # <<< inflight-membership
+
   # Dedup an in-flight review so a second refinery pass reuses it (idempotent)
   # rather than dispatching a twin. Pre-open keys the lookup on the branch +
   # anchor (no PR number exists yet); post-open keys on the PR number.
+  #
+  # BOTH ARMS DECIDE MEMBERSHIP THE SAME WAY, through `anchor_authority` above:
+  # `anchor_bead` is authoritative and a review naming ANOTHER anchor is positively
+  # not this one's (tk-j5wrs ruling 2). The pre-open arm asks the ledger for it
+  # directly; the post-open arm cannot, because a PR number is shared by every
+  # anchor that ever gated the branch — one-anchor-per-PR resolves $GATING_ANCHOR
+  # for exactly that reason — so it filters what the PR-keyed query returns instead
+  # of trusting the first row. Reusing another anchor's review is how one signoff
+  # ends up holding two merges, and minting a twin because the query returned
+  # somebody else's row first is the other half of the same mistake.
   if [ "$PRE_OPEN" = 1 ]; then
     REVIEW_TITLE="Review branch $BRANCH -> $TARGET: $ISSUE_TITLE"
     EXISTING_REVIEW=$(gc bd list \
@@ -2160,23 +2194,49 @@ if [ "$CODEX_GATE" = 1 ]; then
     EXISTING_REVIEW=$(gc bd list \
       --metadata-field task_kind=review \
       --metadata-field pr_number="$PR_NUMBER" \
-      --status=open,in_progress --limit=1 --json 2>/dev/null \
-      | jq -r '.[0].id // empty')
+      --status=open,in_progress --limit=0 --json 2>/dev/null \
+      | jq -r --arg a "$GATING_ANCHOR" "$INFLIGHT_MEMBERSHIP_JQ"'
+          [ .[]? | select((anchor_authority($a)) != "theirs") ] | .[0].id // empty' 2>/dev/null)
   fi
 
   # CONVERGENCE CAP, refinery half (tk-uqfk1). The polecat half declines to file
   # a rework child past the cap (template-fragments/polecat-non-impl-done.template.md,
   # signoff-round-cap). This is the same check on the OTHER side of the loop: the
   # two halves are independent, so a rig running a stale prompt fragment still
-  # cannot mint round N+1 here. Identical count — rework children of the anchor,
-  # which carry source_review_bead, every status, since a closed child is a
-  # completed round. A first dispatch counts 0 and is never capped.
+  # cannot mint round N+1 here. The count is now the SHARED block rather than a
+  # second implementation of it (tk-vie5k) — it used to be re-typed here, which is
+  # how three of the four dispatchers ended up with no cap at all.
+  CAP_ANCHOR="$GATING_ANCHOR"
+  # >>> signoff-round-cap
+  # Rounds spent on CAP_ANCHOR, counted off the anchor itself: one rework child per
+  # round by construction, each stamped `source_review_bead` by the signoff that
+  # filed it. EVERY status counts — a closed child is a COMPLETED round.
+  #
+  # THE COUNT BELONGS TO THE ANCHOR, not to whoever is about to dispatch (tk-j5wrs
+  # ruling 3). Three of the four dispatchers had no cap at all, so round N+1 was
+  # minted in exactly the window the cap exists to close; a count read off the anchor
+  # cannot drift between them. Copy this block, markers included — every copy is
+  # extracted, diffed against canonical and EXECUTED by
+  # assets/scripts/signoff-round-cap.test.sh.
+  #
+  # Inputs:  CAP_ANCHOR (may be empty), GC_MAX_REVIEW_ROUNDS (default 3)
+  # Outputs: ROUNDS, CAP_HIT
+  #
+  # NO ANCHOR NEVER CAPS: without one there is no reliable round history, and capping
+  # on a guess parks live work for a human. An unreadable ledger reads as 0 for the
+  # same reason — the wrong direction here strands every review during an outage.
+  CAP_ANCHOR="${CAP_ANCHOR:-}"
   ROUNDS=0
-  if [ -n "$GATING_ANCHOR" ]; then
-    ROUNDS=$(gc bd dep list "$GATING_ANCHOR" --direction=up -t parent-child --json 2>/dev/null \
-      | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
+  if [ -n "$CAP_ANCHOR" ]; then
+    ROUNDS=$(gc bd dep list "$CAP_ANCHOR" --direction=up -t parent-child --json 2>/dev/null | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
   fi
-  if [ -n "$GATING_ANCHOR" ] && [ "${ROUNDS:-0}" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+  case "${ROUNDS:-}" in ''|*[!0-9]*) ROUNDS=0 ;; esac
+  CAP_HIT=0
+  if [ -n "$CAP_ANCHOR" ] && [ "$ROUNDS" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+    CAP_HIT=1
+  fi
+  # <<< signoff-round-cap
+  if [ "$CAP_HIT" = 1 ]; then
     # Do NOT mint a review bead and do NOT wake the codex pool. Leave the anchor
     # OPEN and held: with no open rework child the merge skill still will not
     # land it, so this parks for a human rather than merging past an owed gate.

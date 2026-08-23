@@ -905,16 +905,33 @@ if [ -n "$FIX_POOL" ]; then
       # Count every status — a closed child is a COMPLETED round.
       # The markers let the regression test extract and exercise this exact
       # snippet (assets/scripts/signoff-round-cap.test.sh).
+      CAP_ANCHOR="$ANCHOR"
       # >>> signoff-round-cap
+      # Rounds spent on CAP_ANCHOR, counted off the anchor itself: one rework child per
+      # round by construction, each stamped `source_review_bead` by the signoff that
+      # filed it. EVERY status counts — a closed child is a COMPLETED round.
+      #
+      # THE COUNT BELONGS TO THE ANCHOR, not to whoever is about to dispatch (tk-j5wrs
+      # ruling 3). Three of the four dispatchers had no cap at all, so round N+1 was
+      # minted in exactly the window the cap exists to close; a count read off the anchor
+      # cannot drift between them. Copy this block, markers included — every copy is
+      # extracted, diffed against canonical and EXECUTED by
+      # assets/scripts/signoff-round-cap.test.sh.
+      #
+      # Inputs:  CAP_ANCHOR (may be empty), GC_MAX_REVIEW_ROUNDS (default 3)
+      # Outputs: ROUNDS, CAP_HIT
+      #
+      # NO ANCHOR NEVER CAPS: without one there is no reliable round history, and capping
+      # on a guess parks live work for a human. An unreadable ledger reads as 0 for the
+      # same reason — the wrong direction here strands every review during an outage.
+      CAP_ANCHOR="${CAP_ANCHOR:-}"
       ROUNDS=0
-      if [ -n "$ANCHOR" ]; then
-        ROUNDS=$(gc bd dep list "$ANCHOR" --direction=up -t parent-child --json 2>/dev/null \
-          | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
+      if [ -n "$CAP_ANCHOR" ]; then
+        ROUNDS=$(gc bd dep list "$CAP_ANCHOR" --direction=up -t parent-child --json 2>/dev/null | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
       fi
-      # No anchor means no reliable round history — never cap on a guess, since
-      # capping wrongly parks live work for a human.
+      case "${ROUNDS:-}" in ''|*[!0-9]*) ROUNDS=0 ;; esac
       CAP_HIT=0
-      if [ -n "$ANCHOR" ] && [ "${ROUNDS:-0}" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+      if [ -n "$CAP_ANCHOR" ] && [ "$ROUNDS" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
         CAP_HIT=1
       fi
       # <<< signoff-round-cap

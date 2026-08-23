@@ -436,12 +436,75 @@ is_alive() {
 # distinct `gc.root_bead_id` values on the live step beads), so root -> convoy needs
 # no per-root read.
 #
-# A molecule counts as LIVE when either the root records a session that is alive, or
-# any of its live step beads is held by a session that is alive. Two signals because
-# each covers a different moment: a root's `gc.session_name` is stamped when the
+# A molecule counts as LIVE on any of THREE signals. The first two are sessions,
+# and each covers a different moment: a root's `gc.session_name` is stamped when the
 # molecule is poured, while a step's assignee is what a re-claimed or re-nudged
 # molecule carries.
 #
+# THE THIRD IS NOT A SESSION, and it is the one this pass was missing (tk-vie5k, the
+# salvage reader of tk-j5wrs). A molecule that is dispatched and CLAIMABLE — routed
+# to a pool, unclaimed, with no session ever stamped on it — has no session to answer
+# for it and is nonetheless the most ordinary live state there is: a pending pool
+# offer. Under pool saturation EVERY queued rework child sat in it, so salvage read
+# each one as having no landing path and handed back work that was simply waiting its
+# turn.
+#
+# THE CLAUSE IS `claimable`, NOT `acting`, and the difference is the whole safety
+# property of this pass. `acting` also counts an owning STATUS, and a graph.v2 root
+# is `in_progress` from the moment it is poured until somebody closes it — which
+# nothing does, so husks sit in_progress forever (this file exists because of that).
+# Reading `acting` here would call every husk in the store live and blind salvage
+# completely. `claimable` asks only "is a worker still owed this", which is the
+# question salvage is actually asking.
+#
+# AND ONLY WHEN NOBODY HAS EVER HELD IT. A root stamps `gc.session_name` at claim
+# time, so a root that carries one has been claimed; if that session is dead (the two
+# clauses above already answered no) the molecule is a husk, and a husk keeps its
+# route — clearing it is what quiescing does. Session-stamped therefore stays
+# salvageable exactly as before, and only a never-claimed offer is new. Boundary,
+# deliberately not coded: a husk that the reconciler RE-OFFERS to the pool still
+# carries its dead session name and so still reads as salvageable here. That is the
+# pre-existing reading and tk-vie5k does not widen it.
+#
+# CONVOY MEMBERSHIP IS NON-CANONICAL (tk-j5wrs ruling 2). The convoy edge this map
+# is built from is a DISPATCH ARTIFACT: it says a molecule was poured over the bead,
+# not that anything is acting on it, and the husk pile below is the proof — every
+# one of those roots is still a convoy member. It is read here because salvage's
+# question really is "did a molecule ever get poured, and is it still coming", and
+# it is paired with a liveness test for exactly that reason. It must never be read
+# as membership: `metadata.anchor_bead` is the only authoritative statement of that,
+# and the shared predicate in check-set-heal.sh defines it.
+#
+# Salvage is a CALLER of the predicate, never a dispatcher: it mints no review and
+# writes no anchor_bead. It is in the set because it writes an ASSIGNEE, which
+# falsifies `acting`'s fourth clause for anyone reading afterwards — a non-dispatcher
+# can arm a dispatcher by writing an unrelated field, which is why "collapse dispatch
+# to one owner" was rejected in favour of one shared predicate (tk-j5wrs ruling 1).
+#
+# Shared membership predicate — canonical copy in assets/scripts/check-set-heal.sh,
+# drift-checked by assets/scripts/inflight-membership.test.sh. Copy the markers too.
+# >>> inflight-membership
+# shellcheck disable=SC2034  # part of the shared block; not every host spends it
+INFLIGHT_LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+INFLIGHT_MEMBERSHIP_JQ='def claimable:
+  . as $b
+  | (($b.metadata // {})) as $m
+  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
+  | ((($m["gc.routed_to"] // "") | tostring) != "")
+    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
+def acting($live):
+  . as $b
+  | (($b.metadata // {})) as $m
+  | (($live | split(",")) | map(select(. != "open"))) as $owning
+  | ((($m.task_kind // "") | tostring) == "review")
+    or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
+    or ($b | claimable);
+def anchor_authority($a):
+  ((((. // {}).metadata // {}).anchor_bead // "") | tostring) as $ab
+  | if $ab == "" then "unattributed" elif $ab == $a then "mine" else "theirs" end;
+'
+# <<< inflight-membership
+
 # ROOT_ROWS / STEP_ROWS / MOLECULE_OK are initialized BEFORE the branch that fills
 # them: `set -u` is on, and a variable first assigned inside one arm kills the whole
 # pass the first time the other arm runs.
@@ -456,14 +519,33 @@ if [ "$LIVE_BEADS_RC" -ne 0 ] || [ -z "$LIVE_BEADS" ] \
   echo "recover-stranded-branches: FAIL-SAFE the live bead listing did not return a readable result (rc=$LIVE_BEADS_RC); NOT handing off any bead this pass — without it no molecule can be proved husked. Reporting only; retries next cycle" >&2
 else
   MOLECULE_OK=1
-  # convoy_id<TAB>root_id<TAB>root_status<TAB>root_session
-  ROOT_ROWS=$(printf '%s' "$LIVE_BEADS" | tr -d '\000-\010\013\014\016-\037' | jq -r '
+  # convoy_id<TAB>root_id<TAB>root_status<TAB>pending_offer<TAB>root_session
+  # `pending_offer` is the shared `claimable` predicate on the ROOT bead, narrowed to
+  # a root nobody has ever held: 1 when the molecule is routed and waiting for a pool
+  # to pick it up. Emitted as a column rather than re-derived in convoy_is_live so
+  # the whole map is built from one read.
+  #
+  # COLUMN ORDER IS LOAD-BEARING, for the reason handoff_state spells out below: a
+  # tab is an IFS *whitespace* character, so `IFS=$'\t' read` folds runs of tabs and
+  # every field after an empty one shifts left. `root_session` is empty on exactly
+  # the roots this clause is about, so it is emitted LAST, where an empty value is
+  # just an empty trailing variable. `root_status` carries a "?" sentinel for the
+  # same reason — it reads as a non-closed unknown, which is what an empty status
+  # already meant, and it cannot fold the columns after it.
+  ROOT_ROWS=$(printf '%s' "$LIVE_BEADS" | tr -d '\000-\010\013\014\016-\037' \
+    | jq -r --arg live "$INFLIGHT_LIVE_STATUSES" "$INFLIGHT_MEMBERSHIP_JQ"'
     .[]
+    | . as $b
     | ((.metadata // {})) as $m
     | select(((($m["gc.input_convoy_id"] // "") | tostring)) != "")
+    | (((.status // "") | ascii_downcase)) as $st
     | [(($m["gc.input_convoy_id"] | tostring)),
        (.id // ""),
-       ((.status // "") | ascii_downcase),
+       (if $st == "" then "?" else $st end),
+       (if (($b | claimable)
+             and (((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) == "")
+             and (((($m["gc.session_name"] // "") | tostring)) == ""))
+        then "1" else "0" end),
        ((($m["gc.session_name"] // "") | tostring))]
     | @tsv' 2>/dev/null)
   # root_id<TAB>assignee, for every live step bead that names a root
@@ -478,12 +560,16 @@ fi
 
 # Is any molecule whose input convoy is $1 still held by a live session?
 convoy_is_live() { # <convoy-id>
-  local convoy="$1" root status session assignee
+  local convoy="$1" root status pending session assignee
   [ -n "$convoy" ] || return 1
-  while IFS=$'\t' read -r c root status session; do
+  while IFS=$'\t' read -r c root status pending session; do
     [ "$c" = "$convoy" ] || continue
     [ "$status" = "closed" ] && continue
     is_alive "$session" && return 0
+    # Routed, unclaimed, never held — a pending pool offer. Read from the shared
+    # predicate, so this clause cannot drift from the one the dispatchers guard on
+    # (tk-vie5k).
+    [ "$pending" = "1" ] && return 0
     while IFS=$'\t' read -r r assignee; do
       [ "$r" = "$root" ] || continue
       is_alive "$assignee" && return 0

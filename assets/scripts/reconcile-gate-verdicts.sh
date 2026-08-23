@@ -590,9 +590,19 @@ while IFS= read -r row; do
     | jq '[.[] | select(((.status // "") | ascii_downcase) != "closed")] | length' 2>/dev/null)
   case "$open_kids" in ''|*[!0-9]*) open_kids=0 ;; esac
 
+  # NON-CANONICAL, ON PURPOSE (tk-j5wrs ruling 2). The parent-child walk above is a
+  # ROUND COUNT, not a membership test: it asks how many remediation rounds this
+  # anchor has spent, and `source_review_bead` is what makes a child one of them.
+  # parent-child by itself names nothing — a refinery rebase bead and a hand-filed
+  # decomposition child both wear it, which is tk-21b70 — so it must never be read
+  # as "a review is in flight". The one authoritative statement of THAT is
+  # `anchor_bead`, below, and the shared predicate in check-set-heal.sh
+  # (`# >>> inflight-membership`) is where it is defined.
+  #
   # The gate's own dispatch: the review beads that carry this anchor. Keyed on
   # `anchor_bead`, which every signoff dispatch stamps atomically with the review's
-  # routing fields precisely so the anchor is resolvable without walking edges.
+  # routing fields precisely so the anchor is resolvable without walking edges —
+  # and which is the AUTHORITATIVE convention, because it has a single writer.
   reviews=$(bd_pinned list --metadata-field "anchor_bead=$id" --all --limit=0 --json 2>/dev/null \
     | tr -d '\000-\010\013\014\016-\037')
   printf '%s' "$reviews" | jq -e 'type == "array"' >/dev/null 2>&1 || reviews="[]"
