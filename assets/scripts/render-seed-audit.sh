@@ -49,7 +49,7 @@
 # upgrade for reasons nobody here controls. specs/tk-yhwfv.2 already probes it.
 #
 # USAGE
-#   render-seed-audit.sh                  regenerate docs/seed-audit/ in place
+#   render-seed-audit.sh                  regenerate generated/seed-audit/
 #   render-seed-audit.sh --check          fail if the committed tree is stale
 #   render-seed-audit.sh --print-digest   print the source digest and exit
 #   render-seed-audit.sh --install-hook   point core.hooksPath at assets/hooks
@@ -81,7 +81,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-[ -n "$OUT" ] || OUT="$ROOT/docs/seed-audit"
+[ -n "$OUT" ] || OUT="$ROOT/generated/seed-audit"
 [ -f "$ROOT/pack.toml" ] || die "not a pack checkout (no pack.toml): $ROOT"
 
 if [ -z "$JOBS" ]; then
@@ -662,7 +662,7 @@ find "$STAGE" -name '*.scope' -delete
 if [ "$MODE" = "check" ]; then
     if [ ! -d "$OUT" ]; then
         printf 'seed audit is MISSING at %s\n' "${OUT#"$ROOT"/}" >&2
-        printf 'run: assets/scripts/render-seed-audit.sh && git add docs/seed-audit\n' >&2
+        printf 'run: assets/scripts/render-seed-audit.sh && git add generated/seed-audit\n' >&2
         exit 1
     fi
     if diff -r -q "$OUT" "$STAGE" >"$TMPROOT/diff.txt" 2>&1; then
@@ -672,7 +672,7 @@ if [ "$MODE" = "check" ]; then
     fi
     printf 'seed audit is STALE — the committed tree does not match a fresh render:\n' >&2
     sed "s|$STAGE|<fresh>|g; s|$OUT|<committed>|g" < "$TMPROOT/diff.txt" | head -40 >&2
-    printf '\nrun: assets/scripts/render-seed-audit.sh && git add docs/seed-audit\n' >&2
+    printf '\nrun: assets/scripts/render-seed-audit.sh && git add generated/seed-audit\n' >&2
     exit 1
 fi
 

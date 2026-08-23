@@ -43,7 +43,6 @@ opinions rather than cloned directly.
 - `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
 - `docs/file-structure.md` — conventions for where docs and specs live in this pack
 - `docs/skills.md` — how skills are authored, filed, and exposed so one `SKILL.md` serves both Gas City and (when portable) Claude / Codex
-- `docs/seed-audit/` — generated: the full standing prompt of every agent this pack configures and every formula recipe it exposes, with per-scenario byte and token counts. Regenerate with `assets/scripts/render-seed-audit.sh`; never hand-edit
 
 ## Usage
 
@@ -88,11 +87,22 @@ assets/scripts/render-seed-audit.sh --install-hook
 ```
 
 That sets `core.hooksPath = assets/hooks`, which wires
-`assets/hooks/pre-commit`. The hook regenerates `docs/seed-audit/` only on a
-commit that touches the renderer's input set — `agents/`, `template-fragments/`,
-`formulas/`, `packs/`, `pack.toml`, or `assets/scripts/render-seed-audit.sh`
-itself, which carries the synthetic city the prompts render against; every other
-commit pays a single `git diff --cached` and exits.
+`assets/hooks/pre-commit`. The hook regenerates `generated/seed-audit/` only on
+a commit that touches the renderer's input set — `agents/`,
+`template-fragments/`, `formulas/`, `packs/`, `pack.toml`, or
+`assets/scripts/render-seed-audit.sh` itself, which carries the synthetic city
+the prompts render against; every other commit pays a single `git diff --cached`
+and exits.
+
+`generated/seed-audit/` is the artifact it maintains: the full standing prompt
+of every agent this pack configures and the compiled recipe of every formula it
+exposes, one file per scenario, with per-scenario byte and token counts in
+`INDEX.md`. It is a rendered mirror of things tracked elsewhere in this repo,
+not documentation anybody keeps current by hand — which is why it sits under
+`generated/` rather than `docs/`. Nothing in that tier is hand-edited; an edit
+to it survives until the next render and no longer. `.gitattributes` marks the
+whole tier `linguist-generated`, so a one-line fragment change arrives for
+review as that one line instead of as the 45-file re-render it also produced.
 
 `gc doctor` reports it when the hook is not wired, and
 `doctor/check-seed-audit-current` fails when a prompt input moved without the

@@ -317,3 +317,12 @@ leaving a clean working tree.
   The 12 assertions in it (including mutation-verified guards) run only when
   invoked by hand — `bash doctor/check-seed-audit-current/run.test.sh`. The
   load-bearing gate is the check itself, which `gc doctor` does run.
+
+---
+
+**2026-08-23 — the tree moved.** `docs/seed-audit/` is now
+`generated/seed-audit/`, a new top-level tier for machine-written artifacts
+(tk-yhwfv.3.1); the renderer, the pre-commit hook and
+`doctor/check-seed-audit-current` moved with it. Every path above this line is
+left as-built on 2026-08-23. This file is the record of what was decided then,
+preserved as context — not a description anybody refreshes.

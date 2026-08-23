@@ -23,6 +23,8 @@
 #   * an id that appears as a later flag VALUE rather than the update target,
 #     which is not a self-close;
 #   * base-snapshots exclusion (vendored upstream, never executed);
+#   * the generated/ tier exclusion, asserted against two distinct trees under
+#     it, because it is a tier rule and not a carve-out for one artifact;
 #   * the SHIPPED pack tree, asserted clean — the regression anchor. If a future
 #     formula reintroduces the idiom, this line goes red.
 #
@@ -114,6 +116,18 @@ cp "$TMP/dirty/mol-bad.toml" "$TMP/rec/specs/2026-08-x/findings.md"
 eq "$(rc_of "$TMP/rec")" "0" "(SPECS) a dated spec record is not scanned"
 cp "$TMP/dirty/mol-bad.toml" "$TMP/rec/docs/live-guide.md"
 eq "$(rc_of "$TMP/rec")" "2" "(DOCS) the same content under docs/ IS scanned"
+
+# --- 4c. generated/ is a TIER rule, not a per-tree exception -----------------
+# The exclusion is written */generated/*, so any machine-written tree inherits
+# it — not only generated/seed-audit/. Both fixtures below are the same content
+# 4b just proved IS scanned under docs/, so a pass here is the exclusion firing
+# and not an inert fixture.
+mkdir -p "$TMP/gen/generated/seed-audit/formulas" \
+         "$TMP/gen/generated/next-artifact"
+cp "$TMP/dirty/mol-bad.toml" \
+   "$TMP/gen/generated/seed-audit/formulas/mol-shutdown-dance.md"
+cp "$TMP/dirty/mol-bad.toml" "$TMP/gen/generated/next-artifact/mol-bad.md"
+eq "$(rc_of "$TMP/gen")" "0" "(GENERATED) the generated tier is not scanned"
 
 # --- 5. an empty tree is OK, not a false pass on a broken scan ---------------
 mkdir -p "$TMP/empty"

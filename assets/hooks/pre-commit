@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Keep docs/seed-audit/ in step with the fragments it renders.
+# Keep generated/seed-audit/ in step with the fragments it renders.
 #
-# WHY A HOOK AND NOT ONLY A CHECK. docs/seed-audit/ is a golden file over every
-# agent prompt and formula recipe in this pack, so it moves whenever a fragment
-# moves. A check alone would turn every fragment edit into "your change is fine,
+# WHY A HOOK AND NOT ONLY A CHECK. generated/seed-audit/ is a golden file over
+# every agent prompt and formula recipe in this pack, so it moves whenever a
+# fragment moves. A check alone would turn every fragment edit into "your change is fine,
 # now go run a command and amend" — which is how golden files acquire a
 # reputation for being a tax. Regenerating here means the artifact is simply
 # never out of date, and doctor/check-seed-audit-current only ever fires on a
@@ -66,7 +66,7 @@ if ! command -v gc >/dev/null 2>&1; then
     printf 'pre-commit: seed audit NOT regenerated — gc is not on PATH.\n' >&2
     printf 'pre-commit: %s input file(s) changed; run the render on a host with gc:\n' \
         "$(printf '%s\n' "$touched" | wc -l | tr -d ' ')" >&2
-    printf 'pre-commit:   assets/scripts/render-seed-audit.sh && git add docs/seed-audit\n' >&2
+    printf 'pre-commit:   assets/scripts/render-seed-audit.sh && git add generated/seed-audit\n' >&2
     exit 0
 fi
 
@@ -78,16 +78,16 @@ if [ -n "$dirty" ]; then
     while IFS= read -r f; do printf 'pre-commit:   %s\n' "$f" >&2; done <<< "$dirty"
 fi
 
-printf 'pre-commit: seed inputs changed — regenerating docs/seed-audit ...\n' >&2
+printf 'pre-commit: seed inputs changed — regenerating generated/seed-audit ...\n' >&2
 if ! bash "$script" >&2; then
     printf 'pre-commit: render FAILED. Commit aborted so a broken audit is not committed.\n' >&2
     printf 'pre-commit: re-run it directly to see why: assets/scripts/render-seed-audit.sh\n' >&2
     exit 1
 fi
 
-git add "$root/docs/seed-audit" || {
-    printf 'pre-commit: could not stage docs/seed-audit\n' >&2
+git add "$root/generated/seed-audit" || {
+    printf 'pre-commit: could not stage generated/seed-audit\n' >&2
     exit 1
 }
-printf 'pre-commit: docs/seed-audit regenerated and staged.\n' >&2
+printf 'pre-commit: generated/seed-audit regenerated and staged.\n' >&2
 exit 0

@@ -52,8 +52,8 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 make_pack() {
     local d="$1"
     mkdir -p "$d/agents/sample" "$d/template-fragments" "$d/formulas" "$d/packs" \
-             "$d/assets/scripts" "$d/assets/hooks" "$d/docs/seed-audit/agents" \
-             "$d/docs/seed-audit/formulas"
+             "$d/assets/scripts" "$d/assets/hooks" "$d/generated/seed-audit/agents" \
+             "$d/generated/seed-audit/formulas"
     printf 'name = "fixture"\n' > "$d/pack.toml"
     printf 'prompt body\n'      > "$d/agents/sample/prompt.template.md"
     printf 'fragment body\n'    > "$d/template-fragments/frag.template.md"
@@ -67,14 +67,14 @@ make_pack() {
 
 write_index() {
     local d="$1" digest="$2" gcver="${3:-1.4.1}"
-    printf 'placeholder\n' > "$d/docs/seed-audit/agents/sample.md"
-    printf 'placeholder\n' > "$d/docs/seed-audit/formulas/mol-x.md"
+    printf 'placeholder\n' > "$d/generated/seed-audit/agents/sample.md"
+    printf 'placeholder\n' > "$d/generated/seed-audit/formulas/mol-x.md"
     {
         echo "# Agent Seed Audit"
         echo ""
         echo "- \`gc\` version: \`$gcver\`"
         echo "- source digest: \`$digest\`"
-    } > "$d/docs/seed-audit/INDEX.md"
+    } > "$d/generated/seed-audit/INDEX.md"
 }
 
 run_check() {
@@ -160,8 +160,8 @@ cat > "$P/assets/scripts/render-seed-audit.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'STUB-RENDERER-RAN\n'
 root="$(git rev-parse --show-toplevel)"
-mkdir -p "$root/docs/seed-audit"
-printf 'stub\n' > "$root/docs/seed-audit/STUB.md"
+mkdir -p "$root/generated/seed-audit"
+printf 'stub\n' > "$root/generated/seed-audit/STUB.md"
 exit 0
 STUB
 chmod -x "$P/assets/scripts/render-seed-audit.sh"
@@ -200,7 +200,7 @@ fi
 
 # --------------------------------------------------------------- no digest
 P="$TMP/nodigest"; make_pack "$P"
-printf '# Agent Seed Audit\n\nno digest line here\n' > "$P/docs/seed-audit/INDEX.md"
+printf '# Agent Seed Audit\n\nno digest line here\n' > "$P/generated/seed-audit/INDEX.md"
 run_check "$P"
 if [ "$(rc_of)" = "2" ] && grep -F 'UNVERIFIABLE' <<< "$(out_of)" >/dev/null; then
     ok "an INDEX.md with no digest line is a finding, not a silent pass"
@@ -291,7 +291,7 @@ if [ -z "$drift" ]; then
 else
     bad "pre-commit INPUT_RE does not match:$drift"
 fi
-if hook_matches docs/seed-audit/INDEX.md; then
+if hook_matches generated/seed-audit/INDEX.md; then
     bad "pre-commit INPUT_RE matches the generated tree — the hook would loop on its own output"
 else
     ok "the pre-commit INPUT_RE does not match the generated tree"
@@ -362,8 +362,8 @@ fi
 
 # ------------------------------------------------------ the SHIPPED pack tree
 # The regression anchor. If a future change edits a fragment without
-# regenerating docs/seed-audit/, this line goes red. A hook-not-wired warning
-# (rc=1) is tolerated here because core.hooksPath is per-checkout local config
+# regenerating generated/seed-audit/, this line goes red. A hook-not-wired
+# warning (rc=1) is tolerated here because core.hooksPath is per-checkout local config
 # and cannot travel in a commit; a STALE or MISSING content finding is not.
 run_check "$ROOT"
 case "$(rc_of)" in
