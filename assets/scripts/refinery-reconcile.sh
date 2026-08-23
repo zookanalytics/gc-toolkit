@@ -233,19 +233,49 @@ run_pass "(a-pre) pre-open-resolve" pre-open-resolve.sh \
     || FAILED="${FAILED}pre-open-resolve rc=$?; "
 
 # (a0) The merge skill — the single writer of merged truth.
+# BEADS_ACTOR is projected for the two passes that CLOSE anchors.
+#
+# Why it is needed (tk-5kfhl): core stamps the order exec env with
+# BEADS_ACTOR="order:<name>" (order_store.go), so under this cadence every
+# `gc bd close` runs as the actor `order:refinery-reconcile`. The anchors it
+# closes are assigned to the rig's refinery, because that is what a polecat's
+# done sequence writes — so bd refuses every one of them:
+#
+#   cannot close tk-vie5k: assignee is "gc-toolkit/gc-toolkit.refinery",
+#   actor is "order:refinery-reconcile"; reclaim or use --force to override
+#
+# That is not the identity-ENCODING mismatch close_anchor recovers from — the two
+# strings are genuinely different principals — so the override correctly declines,
+# and the close fails on every pass forever. Measured 2026-08-23: 8 anchors open
+# over MERGED PRs, ~80 failed closes across 12 passes, zero closed since
+# 2026-08-22T23:31Z, two mayor escalations. The board read the work as unlanded
+# when it had shipped.
+#
+# Why the actor and not --force: the cadence IS the refinery (this order replaced
+# its idle loop), so closing as the refinery is TRUE, and it leaves an audit trail
+# that says so. Forcing past the guard would instead teach these passes to override
+# the one check that stops them closing somebody else's bead.
+#
+# Why per-pass and not process-wide: same reason the GC_AGENT projection below is
+# scoped. Everything this cadence FILES is stamped with the actor too, and
+# `order:refinery-reconcile` is honest provenance for a bead an order filed. Only
+# the close needs the refinery's own name, so only the closing passes get it.
 if [ "$MERGE_SKILL_HELD" = 1 ]; then
     log "-- (a0) merge-skill: HELD this pass (check-set-heal unsafe)"
 else
-    run_pass "(a0) merge-skill" merge-skill.sh \
+    ( export BEADS_ACTOR="$AGENT"
+      run_pass "(a0) merge-skill" merge-skill.sh ) \
         || FAILED="${FAILED}merge-skill rc=$?; "
 fi
 
 # <<< heal-gates-merge
 
 # (a1) Close-on-land observer (detect-only).
-run_pass "(a1) reconcile-merged-prs" reconcile-merged-prs.sh \
-    --fix-pool "$FIX_POOL" \
-    --review-pool "$REVIEW_POOL" \
+# BEADS_ACTOR: see the note above (a0) — this pass closes anchors too.
+( export BEADS_ACTOR="$AGENT"
+  run_pass "(a1) reconcile-merged-prs" reconcile-merged-prs.sh \
+      --fix-pool "$FIX_POOL" \
+      --review-pool "$REVIEW_POOL" ) \
     || FAILED="${FAILED}reconcile-merged-prs rc=$?; "
 
 # (a2) Merge-gate verdict arm — records exception/fixable verdicts so a gate

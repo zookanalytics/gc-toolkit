@@ -615,7 +615,16 @@ close_anchor() { # <id> <reason>
   local id="${1:-}" reason="${2:-}" out
   CLOSE_FORCED=""
   out=$(gc bd close "$id" --reason "$reason" 2>&1) && return 0
-  close_refusal_is_identity "$out" || return 1
+  # ECHO THE REFUSAL. This return used to drop $out on the floor, and the caller
+  # logs only a COUNT ("close failed ... N consecutive pass(es)"). That is how one
+  # outage ran 8+ hours and ~80 failed closes without recording WHY even once, and
+  # escalated to the mayor twice carrying a count with no cause (tk-5kfhl). The
+  # identity path below already proves the value of echoing it; the path that
+  # deliberately does NOT recover is the one that owes a human the reason.
+  close_refusal_is_identity "$out" || {
+    echo "merge-skill: $id close REFUSED, and not on an identity-encoding mismatch (no override applies): $out" >&2
+    return 1
+  }
   echo "merge-skill: $id close refused on an identity-ENCODING mismatch (assignee and actor name the same principal in different renderings); retrying once with --force" >&2
   out=$(gc bd close "$id" --reason "$reason" --force 2>&1) || {
     echo "merge-skill: $id --force retry ALSO failed after the identity-encoding refusal: $out" >&2

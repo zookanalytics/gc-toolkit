@@ -647,8 +647,22 @@ close_refusal_is_identity() { # <close output>
 close_anchor() { # <id> <reason>
   local id="${1:-}" reason="${2:-}" out
   CLOSE_FORCED=""
+  # Published for the caller's escalation, the same way CLOSE_FORCED is published
+  # for its counter. An escalation that carries a COUNT and no CAUSE is what sent
+  # the mayor to re-triage this twice with nothing to act on (tk-5kfhl).
+  CLOSE_REFUSAL=""
   out=$(gc bd close "$id" --reason "$reason" 2>&1) && return 0
-  close_refusal_is_identity "$out" || return 1
+  # ECHO THE REFUSAL. This return used to drop $out on the floor, and the caller
+  # logs only a COUNT ("close failed ... N consecutive pass(es)"). That is how one
+  # outage ran 8+ hours and ~80 failed closes without recording WHY even once, and
+  # escalated to the mayor twice carrying a count with no cause (tk-5kfhl). The
+  # identity path below already proves the value of echoing it; the path that
+  # deliberately does NOT recover is the one that owes a human the reason.
+  close_refusal_is_identity "$out" || {
+    CLOSE_REFUSAL="$out"
+    echo "reconcile-merged-prs: $id close REFUSED, and not on an identity-encoding mismatch (no override applies): $out" >&2
+    return 1
+  }
   echo "reconcile-merged-prs: $id close refused on an identity-ENCODING mismatch (assignee and actor name the same principal in different renderings); retrying once with --force" >&2
   out=$(gc bd close "$id" --reason "$reason" --force 2>&1) || {
     echo "reconcile-merged-prs: $id --force retry ALSO failed after the identity-encoding refusal: $out" >&2
@@ -1178,6 +1192,9 @@ EOF
       # override; what reaches here is everything that override deliberately does
       # not cover.)
       fails=$((closefails + 1))
+      # Snapshot the refusal before anything else can overwrite it.
+      refusal="${CLOSE_REFUSAL:-}"
+      [ -n "$refusal" ] || refusal="(none recorded — the close failed without a message this pass)"
       gc bd update "$id" --set-metadata close_failures="$fails" >/dev/null 2>&1 || true
       echo "reconcile-merged-prs: $id close failed for merged PR#$num ($fails consecutive pass(es)); retry next pass" >&2
       if [ "$fails" -ge "$CLOSE_FAIL_ESCALATE" ] && [ -z "$closeesc" ]; then
@@ -1193,8 +1210,13 @@ dangerous direction, invisible to every \"what shipped\" query.
 The one refusal this pass DOES recover from is the identity-encoding mismatch
 (assignee \`<rig>/<pack>.<role>\` vs actor \`<rig>--<pack>__<role>\`), retried with
 --force. Anything else is left alone deliberately: a genuinely foreign assignee
-or an open-children hold must not be forced past. Run the close by hand to see
-the refusal:
+or an open-children hold must not be forced past.
+
+WHAT BD ACTUALLY SAID, verbatim from the last attempt:
+
+$refusal
+
+Reproduce it by hand with:
 
     gc bd close $id --reason \"Merged to $target at ${short:-merge}\"
 
