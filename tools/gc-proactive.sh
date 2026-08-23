@@ -564,9 +564,14 @@ cmd_sling() {
 
     # Build the sling argv. The target is rig-qualified (resolve_pool_target)
     # so `gc sling` resolves the rig-scoped pool agent rather than rejecting a
-    # bare name; --on attaches the mol-first-reaction wisp to the existing
-    # bead; --merge pins the path; --reassign hands a human-held bead to the
-    # pool cleanly.
+    # bare name; --on attaches the mol-first-reaction workflow to the existing
+    # bead and routes THAT bead to the pool (the pool's work_query selects on
+    # the bead's gc.routed_to, not on the workflow root); --merge pins the
+    # path; --reassign hands a human-held bead to the pool cleanly.
+    #
+    # --on is load-bearing and must not be dropped: the proactive pool declares
+    # no default_sling_formula of its own and inherits agent_defaults'
+    # "mol-polecat-work", so a plain sling would pour the wrong formula.
     set -- "$target" "$bead" --on "$FORMULA" --merge "$MERGE" --reassign
     [ -n "$nudge" ] && set -- "$@" --nudge
 
