@@ -77,7 +77,13 @@ check skips silently rather than guessing. There is no fallback heuristic.
   `AskUserQuestion` or other consent UI at the boundary — see
   `template-fragments/heartbeat-no-consent-ui.template.md`. Blocking a
   heartbeat on consent stalls patrol activity for as long as the prompt
-  sits unanswered.
+  sits unanswered. That fragment is the wider rule and the hook is one
+  instance of it: it prohibits blocking consent UI from a heartbeat agent
+  about *anything*, not only about recycling. It is injected onto the same
+  three roles this overlay is wired to, and
+  `doctor/check-cycle-recycle-hook` asserts both halves together, because a
+  role that has the hook but not the doctrine has a boundary that will not
+  prompt and an agent that was never told not to (tk-17wggn).
 - **Always exit 0**, so the `Stop` event is never blocked.
 - **Keep stdout empty** — all diagnostics go to stderr, so Claude never
   parses a stray block decision.
