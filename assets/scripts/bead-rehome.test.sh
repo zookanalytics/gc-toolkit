@@ -22,7 +22,10 @@
 #   (k) that repair is idempotent;
 #   (l) a pointer the live sweep half-wrote (`gc.superseded_by`, no store) is
 #       completed rather than read as a conflict;
-#   (m) the legacy bare `superseded_by` still counts as a prior disposition.
+#   (m) the legacy bare `superseded_by` still counts as a prior disposition;
+#   (n) a `blocks` edge naming the SUCCESSOR is dropped, so the wait a converse
+#       sitting wired beside the ruling does not refuse the ruling's own close;
+#   (o) any OTHER blocker is left alone and its refusal still stands.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +48,10 @@ cat > "$TMP/rigs.json" <<JSON
 ]}
 JSON
 
-# A bead is a file of `key=value` lines: status, reason, and m.<key> metadata.
+# A bead is a file of `key=value` lines: status, reason, m.<key> metadata, and
+# `dep.<blocker>=<type>` for each edge the bead carries as the BLOCKED side —
+# which is the side `bd show` reports in `.dependencies[]` and the side
+# `bd close` consults.
 mkbead() { printf 'status=%s\n' "${2:-open}" > "$TMP/rigs/$1/.beads/$3"; }
 field()  { sed -n "s/^$2=//p" "$TMP/rigs/$1/.beads/$3" 2>/dev/null | tail -1; }
 
@@ -71,6 +77,26 @@ while [ $# -gt 0 ]; do
   esac
 done
 sub="${1:-}"; shift || true
+
+# `bd dep <verb> <id> <depends-on-id>` puts the verb where every other
+# subcommand puts the bead id, so it is parsed on its own.
+if [ "$sub" = "dep" ]; then
+  verb="${1:-}"; shift || true
+  id="${1:-}"; shift || true
+  other="${1:-}"; shift || true
+  f="$DB/$id"
+  [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
+  case "$verb" in
+    add)    printf 'dep.%s=blocks\n' "$other" >> "$f" ;;
+    # Real `bd dep remove` prints ✓ and exits 0 for an edge that never existed,
+    # so a stub that failed there would let a read-back-free caller pass.
+    remove) { grep -v "^dep\.$other=" "$f" || true; } > "$f.tmp"; mv "$f.tmp" "$f"
+            echo "✓ removed dependency: $id -> $other" ;;
+    *)      exit 1 ;;
+  esac
+  exit 0
+fi
+
 id="${1:-}"; shift || true
 f="$DB/$id"
 [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
@@ -83,12 +109,33 @@ meta_json() {
     | map(split("=") | {key: .[0], value: (.[1:] | join("="))}) | from_entries'
 }
 
+deps_json() {
+  local lines
+  lines=$(sed -n 's/^dep\.//p' "$f" 2>/dev/null || true)
+  if [ -z "$lines" ]; then printf '[]'; return; fi
+  printf '%s' "$lines" | jq -R -s 'split("\n") | map(select(length > 0))
+    | map(split("=") | {id: .[0], dependency_type: (.[1:] | join("="))})'
+}
+
+# The blockers still holding this bead, by the same rule real bd applies: an
+# edge counts unless the bead it names is closed.
+open_blockers() {
+  local b bf st out=""
+  for b in $(sed -n 's/^dep\.\([^=]*\)=blocks$/\1/p' "$f" 2>/dev/null | sort -u); do
+    st=""; bf="$DB/$b"
+    [ -f "$bf" ] && st=$(sed -n 's/^status=//p' "$bf" | tail -1)
+    [ "$st" = "closed" ] || out="$out $b"
+  done
+  printf '%s' "${out# }"
+}
+
 case "$sub" in
   show)
     jq -n --arg id "$id" --arg st "$(sed -n 's/^status=//p' "$f" | tail -1)" \
           --arg notes "$(sed -n 's/^notes=//p' "$f" | tr '\n' ' ')" \
           --argjson meta "$(meta_json)" \
-          '[{id: $id, status: $st, notes: $notes, metadata: $meta}]'
+          --argjson deps "$(deps_json)" \
+          '[{id: $id, status: $st, notes: $notes, metadata: $meta, dependencies: $deps}]'
     ;;
   update)
     while [ $# -gt 0 ]; do
@@ -107,6 +154,13 @@ case "$sub" in
   close)
     if [ -n "${FAKE_BD_CLOSE_REFUSE:-}" ]; then
       echo "cannot close issue assigned to other-agent (actor: someone-else)" >&2
+      exit 1
+    fi
+    # A stub that closes a blocked bead would report a green suite for the bug
+    # in case (n) below: the whole defect is that real bd refuses here.
+    BLOCKED=$(open_blockers)
+    if [ -n "$BLOCKED" ]; then
+      echo "cannot close blocked issue: $id is blocked by [${BLOCKED// /, }] (use --force to override)" >&2
       exit 1
     fi
     reason=""
@@ -243,6 +297,45 @@ rc=0; run --origin al-origin12 --successor bt-succ12 --kind folded || rc=$?
 eq "$rc" 6 "a legacy bare superseded_by naming another successor is refused"
 eq "$(field alpha status al-origin12)" open "the bead is not closed over it"
 
+# --- (n) the wait edge to the successor does not refuse the disposition ---
+# A converse sitting that BOTH routes work and disposes of its subject writes
+# `--waiting-on <successor>` onto the subject — a real `blocks` edge — and then
+# closes it. `bd close` refuses a blocked issue, so the wait refused the ruling
+# it was written beside (tk-hs5rz, live at visit tk-e9ffv). A disposed bead is
+# not waiting to proceed, and gc.superseded_by already records the relationship,
+# so the edge to THIS successor goes. Same store: a `blocks` edge can only join
+# two beads in one.
+mkbead alpha open al-origin13
+mkbead alpha open al-succ13
+printf 'dep.al-succ13=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin13"
+rc=0; run --origin al-origin13 --successor al-succ13 --kind folded --note "operator ruling" || rc=$?
+eq "$rc" 0 "a subject blocked by its own successor is still disposed"
+eq "$(field alpha status al-origin13)" closed "the close is not refused by the wait edge"
+eq "$(grep -c '^dep\.al-succ13=' "$TMP/rigs/alpha/.beads/al-origin13")" 0 \
+   "the wait edge to the successor is dropped"
+eq "$(field alpha m.gc.superseded_by al-origin13)" al-succ13 "the pointer is the record that replaces it"
+has "$(cat "$TMP/out")" "dropped the wait edge" "the drop is reported, not silent"
+
+# --- (o) any OTHER blocker is a real hold: untouched, and it still refuses -
+# The narrow drop is the point. A script that cleared the origin's blockers to
+# make the close succeed would close beads somebody is genuinely holding — the
+# same overreach `--force` was rejected for above.
+mkbead alpha open al-origin14
+mkbead alpha open al-succ14
+mkbead alpha open al-block14
+printf 'dep.al-succ14=blocks\ndep.al-block14=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin14"
+rc=0; run --origin al-origin14 --successor al-succ14 --kind duplicate || rc=$?
+eq "$rc" 5 "an unrelated blocker still refuses the close"
+eq "$(field alpha status al-origin14)" open "the bead is left open, pointed and visible"
+eq "$(field alpha m.gc.superseded_by al-origin14)" al-succ14 "the pointer is recorded either way"
+eq "$(grep -c '^dep\.al-block14=' "$TMP/rigs/alpha/.beads/al-origin14")" 1 \
+   "the unrelated blocker's edge is left alone"
+# The drop is not conditional on the close succeeding: the edge to the successor
+# is a wrong assertion the moment the pointer is stamped, whoever else holds it.
+eq "$(grep -c '^dep\.al-succ14=' "$TMP/rigs/alpha/.beads/al-origin14")" 0 \
+   "…while the successor's edge goes even though the close was refused"
+has "$(cat "$TMP/err")" "blocked by" "the refusal names the hold the caller must judge"
+
 # --- (i) --dry-run writes nothing ----------------------------------------
 mkbead alpha open al-origin9
 mkbead beta  open bt-succ9
@@ -251,6 +344,13 @@ eq "$rc" 0 "--dry-run succeeds"
 eq "$(field alpha status al-origin9)" open "--dry-run does not close"
 eq "$(field alpha m.gc.superseded_by al-origin9)" "" "--dry-run does not stamp"
 has "$(cat "$TMP/out")" "dry run" "--dry-run says so"
+mkbead alpha open al-origin15
+mkbead alpha open al-succ15
+printf 'dep.al-succ15=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin15"
+rc=0; run --origin al-origin15 --successor al-succ15 --kind folded --dry-run || rc=$?
+eq "$rc" 0 "--dry-run succeeds over a wait edge"
+has "$(cat "$TMP/out")" "drop the 'blocked by al-succ15' wait edge" "--dry-run names the edge it would drop"
+eq "$(grep -c '^dep\.al-succ15=' "$TMP/rigs/alpha/.beads/al-origin15")" 1 "--dry-run does not drop it"
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

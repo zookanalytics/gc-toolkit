@@ -172,17 +172,24 @@ behind.
 # Every failure degrades to today's behaviour (pour without the extra vars), so
 # this can only improve on it: an absent `gc formula show`, an unparseable
 # payload, or a default carrying anything but plain word characters — that last
-# one is skipped rather than word-split into the command line. This mirrors
-# `patrol-wisp-vars` in the witness block, which carries the same treatment for
-# the same reason.
-PATROL_VARS=""
+# one is skipped rather than forwarded as a --var the pour cannot parse. This
+# mirrors `patrol-wisp-vars` in the witness block, which carries the same
+# treatment for the same reason.
+#
+# An ARRAY, not a string, and forwarded as "${PATROL_VARS[@]}" (tk-2cy79). A
+# string passed unquoted relies on word-splitting to become several arguments,
+# and this city runs zsh, which does not word-split an unquoted parameter: a
+# populated PATROL_VARS reached the pour as ONE argument and took the whole
+# wisp down with it. The array expands to one argument per element — and to no
+# argument at all when empty — in bash and zsh alike.
+PATROL_VARS=()
 PATROL_FORMULA=$(gc formula show mol-deacon-patrol --json 2>/dev/null)
 for v in $(printf '%s' "$PATROL_FORMULA" | jq -r '.vars[]?.name // empty' 2>/dev/null); do
   [ "$v" = "binding_prefix" ] && continue
   d=$(printf '%s' "$PATROL_FORMULA" | jq -r --arg v "$v" '.vars[]? | select(.name == $v) | .default // empty' 2>/dev/null)
   [ -n "$d" ] || continue
   case "$d" in *[!A-Za-z0-9._:/-]*) continue ;; esac
-  PATROL_VARS="$PATROL_VARS --var $v=$d"
+  PATROL_VARS+=(--var "$v=$d")
 done
 # <<< deacon-patrol-wisp-vars
 
@@ -202,7 +209,7 @@ if [ -z "$WISP" ]; then
     | jq -r '.[0].id // empty')
   if [ -n "$WORK" ]; then
     echo "Found routed work bead: $WORK — pouring wisp; formula handles the work"
-    WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id')
+    WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' "${PATROL_VARS[@]}" --json | jq -r '.new_epic_id')
     gc bd update "$WISP" --assignee="$GC_AGENT"
   fi
 fi
@@ -230,7 +237,7 @@ fi
 
 # Tier 4 — Pour fresh wisp (no in-progress, no routed work, no open wisp)
 if [ -z "$WISP" ]; then
-  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' "${PATROL_VARS[@]}" --json | jq -r '.new_epic_id')
   gc bd update "$WISP" --assignee="$GC_AGENT"
   echo "Poured fresh wisp: $WISP"
 fi
@@ -413,15 +420,20 @@ done
 # Every failure degrades to today's behaviour (pour without the extra vars), so
 # this can only improve on it: an absent `gc formula show`, an unparseable payload,
 # or a default carrying anything but plain word characters — that last one is
-# skipped rather than word-split into the command line.
-PATROL_VARS=""
+# skipped rather than forwarded as a --var the pour cannot parse.
+#
+# An ARRAY, not a string, and forwarded as "${PATROL_VARS[@]}" (tk-2cy79): an
+# unquoted string relies on word-splitting that zsh — the shell this runs in —
+# does not do, so a populated PATROL_VARS arrived as one argument and killed
+# the pour. The array expands to one argument per element in bash and zsh both.
+PATROL_VARS=()
 PATROL_FORMULA=$(gc formula show mol-witness-patrol --json 2>/dev/null)
 for v in $(printf '%s' "$PATROL_FORMULA" | jq -r '.vars[]?.name // empty' 2>/dev/null); do
   [ "$v" = "binding_prefix" ] && continue
   d=$(printf '%s' "$PATROL_FORMULA" | jq -r --arg v "$v" '.vars[]? | select(.name == $v) | .default // empty' 2>/dev/null)
   [ -n "$d" ] || continue
   case "$d" in *[!A-Za-z0-9._:/-]*) continue ;; esac
-  PATROL_VARS="$PATROL_VARS --var $v=$d"
+  PATROL_VARS+=(--var "$v=$d")
 done
 # <<< patrol-wisp-vars
 
@@ -430,7 +442,7 @@ if [ -n "$WISP" ]; then
   echo "Resuming patrol wisp $WISP"
 else
   gc mail inbox
-  WISP=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' "${PATROL_VARS[@]}" --json | jq -r '.new_epic_id')
 fi
 
 # Adopt the wisp you are about to execute: CLAIM it (--assignee) and mark it
@@ -463,14 +475,14 @@ surplus is invisible and gets leaked instead of burned.
 # Same var materialization as Step 2 — this block is run standalone (crash
 # recovery), so it cannot inherit PATROL_VARS from a shell that is long gone, and
 # a recovery pour that drops the vars loses them for every cycle after it.
-PATROL_VARS=""
+PATROL_VARS=()
 PATROL_FORMULA=$(gc formula show mol-witness-patrol --json 2>/dev/null)
 for v in $(printf '%s' "$PATROL_FORMULA" | jq -r '.vars[]?.name // empty' 2>/dev/null); do
   [ "$v" = "binding_prefix" ] && continue
   d=$(printf '%s' "$PATROL_FORMULA" | jq -r --arg v "$v" '.vars[]? | select(.name == $v) | .default // empty' 2>/dev/null)
   [ -n "$d" ] || continue
   case "$d" in *[!A-Za-z0-9._:/-]*) continue ;; esac
-  PATROL_VARS="$PATROL_VARS --var $v=$d"
+  PATROL_VARS+=(--var "$v=$d")
 done
 CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
@@ -503,7 +515,7 @@ if [ -n "$QUEUED_WISP" ] && ! gc bd update "$QUEUED_WISP" --assignee="$GC_AGENT"
   QUEUED_WISP=""
 fi
 if [ -n "$CURRENT_WISP" ] && [ -z "$QUEUED_WISP" ]; then
-  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id // empty')
+  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' "${PATROL_VARS[@]}" --json | jq -r '.new_epic_id // empty')
   if [ -z "$NEXT" ]; then
     echo "Could not pour next witness wisp; not burning."
     exit 1
@@ -520,7 +532,7 @@ if [ -n "$CURRENT_WISP" ] && [ -z "$QUEUED_WISP" ]; then
 elif [ -n "$CURRENT_WISP" ]; then
   gc bd mol burn "$CURRENT_WISP" --force
 elif [ -z "$QUEUED_WISP" ]; then
-  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' $PATROL_VARS --json | jq -r '.new_epic_id // empty')
+  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' "${PATROL_VARS[@]}" --json | jq -r '.new_epic_id // empty')
   if [ -z "$NEXT" ]; then
     echo "Could not bootstrap next witness wisp."
     exit 1

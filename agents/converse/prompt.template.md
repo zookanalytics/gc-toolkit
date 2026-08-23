@@ -300,10 +300,22 @@ The loop, every visit:
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the item carries no trace of this sitting"
    # One --waiting-on per bead this sitting ROUTED work into; leave WAITING
-   # empty when it routed nothing. Unquoted on purpose so empty expands to
-   # nothing rather than to an empty argument.
-   WAITING=""   # e.g. WAITING="--waiting-on tk-hgmob --waiting-on tk-st143"
-   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next, ≤140 chars>" --by converse $WAITING
+   # empty when it routed nothing. An ARRAY, not a string: this city runs zsh,
+   # which does not word-split an unquoted parameter, so a populated string
+   # arrives as ONE argument and the call dies with `unknown flag` on exactly
+   # the sittings the flag exists for (tk-2cy79). "${WAITING[@]}" expands to
+   # nothing when empty and to one argument per element otherwise, in both
+   # bash and zsh.
+   WAITING=()   # e.g. WAITING=(--waiting-on tk-hgmob --waiting-on tk-st143)
+   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next, ≤140 chars>" --by converse "${WAITING[@]}" \
+     || echo "TAKEAWAY FAILED on $ITEM — re-run it before closing; nothing below records this sitting"
+   # Read the takeaway back on the ITEM. The gc.outcome check below proves the
+   # VISIT stamp and says nothing about the item, so a takeaway that died still
+   # closes clean — the unstamped close this block exists to prevent, one bead
+   # over (tk-2cy79).
+   gc bd show "$ITEM" --json | tr -d '[:cntrl:]' \
+     | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
+     || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    gc bd close "$VISIT"
