@@ -717,23 +717,26 @@ because the seed — base prompt, tool schemas, skills appendix, agent role
 prompt — is re-read on **every request** of a session, not once at spawn.
 
 Method: `specs/tk-23wdf/measure-per-request.py` (committed beside
-`measure-context-budget.sh`). It walks `~/.claude/projects/**/*.jsonl`,
-opens the files touched in the window, and reads the `usage` block off every
-assistant turn **whose own timestamp is inside the window**. Run it as
-`./measure-per-request.py 24`.
+`measure-context-budget.sh`). It walks `~/.claude/projects/**/*.jsonl` and
+parses the `usage` block off **every** assistant turn in the files touched in
+the window — but a turn enters the request and token counters only when **its
+own timestamp** is inside the window. The two populations are deliberately
+different: the counts are a windowed question, the per-session seed is not.
+Run it as `./measure-per-request.py 24`.
 
-*That second filter was missing in the first cut of this section, and the
-numbers below are the corrected ones — see [§9.4](#94-correction-the-window-was-file-scoped-not-turn-scoped).*
+*Both halves of that split were got wrong in turn, and the numbers below are
+the twice-corrected ones — see [§9.4](#94-correction-the-window-was-file-scoped-not-turn-scoped)
+and [§9.5](#95-correction-the-window-must-not-bound-the-seed-evidence).*
 
-Trailing 24h at 2026-08-23 02:12Z — 994 sessions, 68,296 assistant requests:
+Trailing 24h at 2026-08-23 ~02:40Z — 987 sessions, 68,118 assistant requests:
 
 | Quantity | Value |
 |---|---|
 | Median seed, lower bound | 34,672 tok/request |
-| Median seed, upper bound | 72,410 tok/request |
+| Median seed, upper bound | 72,409 tok/request |
 | Median requests per session | 62 |
-| Cache-read tokens, total | 8.47B |
-| — attributable to seed re-reads | 2.32B (27.4%) |
+| Cache-read tokens, total | 8.51B |
+| — attributable to seed re-reads | 2.13B (25.0%) |
 | Amplification per seed byte | ~7.1x its per-spawn face value |
 
 **Why a bracket and not a number.** The seed is not directly reported. Two
@@ -751,9 +754,9 @@ false precision:
 
 The bead that opened this leg quoted **median seed = 73,106 tok** and
 **58.6%** of cache reads as seed re-reads. The first figure reproduces here
-as 72,410 — it is the *upper* bound, the turn-1 prompt, not the seed. The
+as 72,409 — it is the *upper* bound, the turn-1 prompt, not the seed. The
 re-read share does not reproduce: measured on the same definition it is
-27.4%, because the denominator (total cache reads) grows with conversation
+25.0%, because the denominator (total cache reads) grows with conversation
 length while the seed does not. Median requests/session also came out 62,
 not 34, which moves the amplification factor from ~4.5x to ~7.1x.
 
@@ -882,12 +885,75 @@ What it moved, same transcript set, same 24h:
 | cache-read tokens | 8.66B | 8.47B |
 | seed re-read share | 25.1% | **27.4%** |
 
-~1,300 phantom requests, and the share this section exists to report moved by
-2.3 points — in the direction that *strengthens* the argument, which is exactly
-why it needed fixing rather than rounding past: a number that flatters the
-conclusion is the one most worth checking. The median seed, the median
-requests/session and the ~7.1x amplification are unchanged, because they are
-medians over per-session values rather than sums over turns.
+~1,300 phantom requests. The median seed, the median requests/session and the
+~7.1x amplification are unchanged, because they are medians over per-session
+values rather than sums over turns.
 
 Two sessions left the set entirely: every one of their turns was older than the
 cutoff, so the files were touched in the window but the work was not done in it.
+
+**The 2.3-point move in the share was NOT a correction — it was a second bug,
+and §9.5 undoes it.** This section originally read that move as the fix
+working, "in the direction that *strengthens* the argument". It was the
+opposite: applying the cutoff before collecting seed evidence inflated the
+per-session seed, and the share with it. Re-measured on one window, the same
+transcripts give 27.3% with this section's script and 25.0% with §9.5's —
+against the 25.1% the file-scoped version reported. The file-scoped number was
+close to right by accident, because counting out-of-window turns as requests
+and estimating seeds from full history were two errors that partly cancelled.
+
+The lesson is the one this section reached for and then misapplied: a number
+that moves in the direction you want is the one most worth checking. That
+applies to a *correction* that flatters the argument just as much as to the
+original figure.
+
+
+### 9.5 Correction: the window must not bound the seed evidence
+
+§9.4 made the cutoff bound each turn rather than each file, which was right for
+the counters and wrong for everything else: it applied the same filter before
+collecting the per-session read samples the seed is estimated from.
+
+For a session that began before the cutoff and continued into it, that leaves
+only the tail in view — and a tail's minimum `cache_read` is the seed *plus*
+every token of conversation accumulated before the cutoff. The same filter also
+made "turn 1" mean "the first turn inside the window", so the upper bound was
+read off a mid-conversation turn.
+
+Caught by the pre-open signoff on this branch (review `tk-7ipt9`, P1), with a
+synthetic transcript: one pre-window turn reading 1,000 tokens of cache and one
+in-window turn reading 20,000 reported `seed = 20,000` and a **100%** seed-reread
+share, where the truth for that in-window request is 1,000/20,000 = **5%**. The
+script now reproduces exactly that case.
+
+The fix separates the two populations. Every assistant record in a touched file
+is parsed and contributes seed evidence; only turns whose own timestamp is
+inside the window increment the request and token counters; and the per-session
+seed multiplies only the in-window turns that actually read cache. Sessions with
+no in-window turn are dropped from the reported population entirely — their
+files were touched in the window, their work was not done in it.
+
+Same transcript set, one window:
+
+| Quantity | §9.4 script | corrected |
+|---|---|---|
+| assistant requests | 68,119 | 68,118 |
+| median seed (lower) | 34,672 | 34,672 |
+| median turn-1 (upper) | 72,410 | 72,409 |
+| cache-read tokens | 8.51B | 8.51B |
+| seed re-read share | 27.3% | **25.0%** |
+
+The median seed is unchanged because the medians are dominated by sessions that
+sit wholly inside the window; the damage was concentrated in the straddling
+sessions, which is why it showed up in the *sum* (`seed re-reads`) and not in
+the median. A per-session median can be healthy while the aggregate it feeds is
+wrong — check both.
+
+**Rejected while fixing this**, and recorded so it is not re-proposed: also
+requiring the turn-1 candidate to have `cache_read == 0`, on the theory that a
+genuine first turn creates its cache rather than reading one. The prompt cache
+is shared across sessions, so a real turn 1 normally reads a warm prefix.
+Measured here it omitted 967 of 987 sessions and computed the upper-bound median
+from the 20 survivors — a worse statistic than the one it was protecting. The
+turn-1 candidate is simply the session's earliest dated record, which is sound
+because a session's transcript is one file and every file is read from its start.
