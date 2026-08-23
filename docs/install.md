@@ -160,7 +160,7 @@ agent's prompt** without forking the agent.
 ```toml
 [[rigs.patches]]
 agent = "refinery"
-inject_fragments_append = ["rebase-conventions", "refinery-rebase-handling"]
+inject_fragments_append = ["rebase-conventions", "rebase-conventions-force-push", "refinery-rebase-handling"]
 ```
 
 The block goes inside the relevant `[[rigs]]` block. TOML table

@@ -22,7 +22,8 @@ schema = 2
 
 # The sub-pack ships the keeper, its `mol-upstream-gc-*` formulas, and
 # the gascity-rig-specific fragments (rebase-conventions,
-# polecat-patterns, refinery-rebase-handling). It does NOT carry
+# rebase-conventions-force-push, polecat-patterns,
+# refinery-rebase-handling). It does NOT carry
 # `[[patches.agent]]` blocks: sub-pack patches can only target agents
 # the sub-pack itself imports, and importing gastown here would
 # duplicate gastown's agents under the `gascity-keeper` binding (so the
@@ -49,11 +50,20 @@ schema = 2
 #
 #   [[rigs.patches]]
 #   agent = "refinery"
-#   inject_fragments_append = ["rebase-conventions", "refinery-rebase-handling"]
+#   inject_fragments_append = ["rebase-conventions", "rebase-conventions-force-push", "refinery-rebase-handling"]
 #
 #   [[rigs.patches]]
 #   agent = "polecat"
 #   inject_fragments_append = ["rebase-conventions", "polecat-patterns"]
+#
+# `rebase-conventions` is the polecat-facing doctrine (classification,
+# check loop, conflict policy, resume). `rebase-conventions-force-push`
+# is the refinery-only half: who owns
+# `git push --force-with-lease HEAD:main` on the rebase tail. Elect it
+# for refinery ONLY — the polecat never performs the force-push, and the
+# polecat slice already carries a short pointer to it. Injecting it into
+# polecat costs ~2.3 KB of prompt on every spawn of that pool and buys
+# nothing (tk-yhwfv.1).
 #
 # The `[[rigs.patches]]` blocks are nested inside the `[[rigs]]`
 # block (TOML scoping), so they apply to that one rig only.
