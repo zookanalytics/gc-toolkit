@@ -3772,6 +3772,11 @@ grep -q -- '--unset-metadata anchorless_flagged' < <(grep '^dead-450' "$TMP/upda
 grep -q "NOT rolling back, anchorless_flagged on dead-450 now reads '450-by-peer'" "$TMP/aferr3" \
   && ok "(AF3) ...and the line says whose record it deferred to" \
   || bad "(AF3) must report the peer's marker (err: $(cat "$TMP/aferr3"))"
+# Deferring to the peer's record is not the same as having escalated: THIS pass's
+# mail still failed, so it may not claim the send either.
+grep -q 'routed to operator + escalated' <<< "$OUTAF3" \
+  && bad "(AF3) a pass that deferred to a peer's marker still did not send its own mail" \
+  || ok "(AF3) ...without claiming an escalation this pass did not make"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -1495,7 +1495,13 @@ if [ -n "$CLOSED_CANDS" ]; then
     xmr=$(printf '%s' "$crow" | jq -r '.mr // empty')
     if [ -n "$xmr" ]; then
       xmr_phrase="it carries merge_result=$xmr, which records a HANDOFF (still in flight), not a disposition"
-      xmr_next="it already carries the marker merge-skill enumerates on, so reopening alone restores it to the merge queue"
+      # Named per marker rather than generically: `pull_request` is enumerated by
+      # merge-skill.sh, `pre_open_gate` by pre-open-resolve.sh, and an operator
+      # reading this line wants to know which pass is about to pick the bead up.
+      case "$xmr" in
+        pre_open_gate) xmr_next="it already carries the marker pre-open-resolve enumerates on, so reopening alone restores it to the pre-open gate" ;;
+        *)             xmr_next="it already carries the marker merge-skill enumerates on, so reopening alone restores it to the merge queue" ;;
+      esac
     else
       xmr_phrase="it carries NO merge_result"
       xmr_next="the merge_result recovery re-stamps it on this same pass"

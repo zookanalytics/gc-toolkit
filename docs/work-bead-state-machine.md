@@ -1971,6 +1971,26 @@ it honest:
   ledger read is empty rather than `[]`, and the scan fails **closed** on it —
   treating "I could not read the ledger" as "nothing is tracked" would flag every
   open PR at once.
+
+  **A bound that outlives a failed send is worse than no bound.** Stamping first
+  is right — an unbounded mail storms — but the stamp is the *only* thing
+  suppressing the next pass, so if the send then fails and the marker stands, one
+  dropped mail buys permanent silence on a finding that stays true forever, under
+  a log line reading "routed to operator + escalated" that an operator has no way
+  to falsify. So a failed send rolls the marker back, on the same terms
+  `escalation-gate.sh` does: re-read first and undo only *our own* value, because
+  a peer that mailed and stamped in between has a delivered notice on the record
+  and unsetting over it would erase the evidence and re-storm. All three outcomes
+  are reported distinctly — rolled back (the next pass retries), deferred to a
+  peer, or a rollback that itself failed, which names the command that clears the
+  stuck marker by hand.
+
+  **And "already escalated" says where.** `gc mail send` writes a *wisp*, which
+  `bd list` cannot see in any store at any status — so an operator told a notice
+  exists, searching the ledger for it, finds nothing and reasonably concludes
+  nothing was ever filed. That is not hypothetical: it is how tk-fip23 came to be
+  written, against eight escalations that had in fact been delivered. The repeat
+  line now names the mailbox and the fact that `bd list` cannot reach it.
 - **Tracked is not owned.** A live bead naming a PR is enough to prove the PR is
   not *anchorless*, but not enough to prove anything will land it. A bead
   carrying none of `merge_result`, `merge_strategy`, `branch` or `target` tracks
