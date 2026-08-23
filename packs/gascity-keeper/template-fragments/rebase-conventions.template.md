@@ -68,43 +68,20 @@ If a piece of the absorbed commit genuinely has independent value
 scope and let it land as a fresh commit on its own merits — don't
 smuggle it through the rebase as commit-preservation.
 
-### Force-push ownership: rig-scoped refinery, not core refinery
+### Force-push ownership lives with the refinery
 
-Rebase outcomes against `upstream/main` produce divergent history
-(post-rebase `origin/main` shows N ahead, M behind in *both*
-directions until the push lands). Landing that history **requires**
-`git push --force-with-lease HEAD:main`. There is no fast-forward
-path — that is intrinsic to rebase, not a workflow choice.
+Landing a rebase against `upstream/main` requires
+`git push --force-with-lease HEAD:main` — there is no fast-forward path,
+and that is intrinsic to rebase, not a workflow choice. **The rig-scoped
+refinery owns that push; the polecat never performs it.** A rebase
+polecat pushes its working branch, sets `metadata.target = main` and the
+rebase-bead metadata, and reassigns to refinery exactly like every other
+polecat.
 
-Two correct rules collide on this point. The reconciliation is *who*
-does the force-push:
-
-- **Core gc-toolkit refinery's "NEVER force-push to main/master" is
-  absolute.** It handles routine feature/bugfix landings and must
-  never destroy main history. Do not carve out exceptions like
-  `requires_force_push=true` metadata flags. The rule stays absolute
-  in the core prompt.
-- **The gascity-flavored refinery owns the rebase tail.** The
-  `gascity-keeper` sub-pack's refinery overlay (see the
-  `refinery-rebase-handling` fragment) detects rebase-shaped beads
-  via `metadata.molecule_id` (matching `mol-upstream-gc-rebase*`,
-  with `metadata.backup_ref` as fallback) and OWNS the
-  `git push --force-with-lease HEAD:main` step for them. The
-  exception lives in this rig-scoped overlay, not in the polecat
-  formula's terminal `push` step.
-- **Polecat hands the bead to refinery like every other polecat.**
-  The rebase polecat (running `mol-upstream-gc-rebase`) no longer
-  carries its own terminal force-push: it pushes the working
-  branch, sets `metadata.target = main` and the rebase-bead
-  metadata, and reassigns to refinery. Refinery performs the
-  force-push under the overlay's authorisation.
-
-If a rebase-shaped bead lands at a refinery that does NOT carry the
-gascity overlay (i.e., a refinery in a rig that doesn't import the
-`gascity-keeper` sub-pack), refinery escalates to mayor instead of
-force-pushing. That preserves PR #17's defensive intent for the
-mis-routed case while keeping the legitimate path automated for the
-intended case.
+The full ownership rule — the core-vs-rig-scoped split, the overlay that
+authorises the push, and what happens to a rebase-shaped bead that
+reaches a refinery without that overlay — is the
+`rebase-conventions-force-push` fragment, injected into refinery only.
 
 ### The rebase step is a check loop
 
@@ -223,4 +200,49 @@ racing before any `metadata.work_dir` exists, or any root whose
 `metadata.resume_handoff`. A concurrent live polecat
 on the same worktree is the separate `polecat-patterns`
 worktree-reclaim/liveness concern, not this rule.
+{{ end }}
+
+{{ define "rebase-conventions-force-push" }}
+## Force-push ownership on the gascity rebase tail
+
+This fragment is the refinery half of the gascity rebase conventions. It
+ships with the `gascity-keeper` sub-pack and is injected into the
+rig-scoped **refinery only** — the polecat slice carries a pointer to it
+instead of the rule, because the polecat never performs the force-push.
+
+Rebase outcomes against `upstream/main` produce divergent history
+(post-rebase `origin/main` shows N ahead, M behind in *both*
+directions until the push lands). Landing that history **requires**
+`git push --force-with-lease HEAD:main`. There is no fast-forward
+path — that is intrinsic to rebase, not a workflow choice.
+
+Two correct rules collide on this point. The reconciliation is *who*
+does the force-push:
+
+- **Core gc-toolkit refinery's "NEVER force-push to main/master" is
+  absolute.** It handles routine feature/bugfix landings and must
+  never destroy main history. Do not carve out exceptions like
+  `requires_force_push=true` metadata flags. The rule stays absolute
+  in the core prompt.
+- **The gascity-flavored refinery owns the rebase tail.** The
+  `gascity-keeper` sub-pack's refinery overlay (see the
+  `refinery-rebase-handling` fragment) detects rebase-shaped beads
+  via `metadata.molecule_id` (matching `mol-upstream-gc-rebase*`,
+  with `metadata.backup_ref` as fallback) and OWNS the
+  `git push --force-with-lease HEAD:main` step for them. The
+  exception lives in this rig-scoped overlay, not in the polecat
+  formula's terminal `push` step.
+- **Polecat hands the bead to refinery like every other polecat.**
+  The rebase polecat (running `mol-upstream-gc-rebase`) no longer
+  carries its own terminal force-push: it pushes the working
+  branch, sets `metadata.target = main` and the rebase-bead
+  metadata, and reassigns to refinery. Refinery performs the
+  force-push under the overlay's authorisation.
+
+If a rebase-shaped bead lands at a refinery that does NOT carry the
+gascity overlay (i.e., a refinery in a rig that doesn't import the
+`gascity-keeper` sub-pack), refinery escalates to mayor instead of
+force-pushing. That preserves PR #17's defensive intent for the
+mis-routed case while keeping the legitimate path automated for the
+intended case.
 {{ end }}

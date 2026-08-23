@@ -85,7 +85,7 @@ carry-forward sweep** flow this skill governs. Cycle-recycle is a
 different flow: it legitimately chains `gc handoff` (state-capture)
 followed by `gc session reset` (restart-trigger) for on-demand named
 sessions, and that chaining is correct there. See
-`template-fragments/cycle-recycle.template.md`.
+`docs/cycle-recycle.md`.
 
 (A conversation about one work bead — a converse session holding a
 visit — needs no recycle path here: its carry-forward is the subject
