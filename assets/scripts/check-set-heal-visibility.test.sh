@@ -351,6 +351,10 @@ b-CLOSEDRETRY	closed	PR#769
 b-CLOSEDROUTED	closed
 b-CLOSEDHELD	closed
 b-CLOSEDTRACK	closed
+b-CLOSEDINFLIGHT	closed
+b-CLOSEDPREOPEN	closed
+b-CLOSEDABANDON	closed
+b-CLOSEDUNKNOWN	closed
 S
 
 # $FAKE_FLIP rows are "<num>\t<state>": the PR's state CHANGES to <state> after its
@@ -2703,7 +2707,11 @@ b-CLOSEDAMBIG2|||https://github.com/o/r/pull/765|765|polecat/feat-ambig-b|main||
 b-CLOSEDHEAD|||https://github.com/o/r/pull/766|766|polecat/feat-closedhead|main||||||
 b-CLOSEDFLAP|||https://github.com/o/r/pull/767|767|polecat/feat-closedflap|main||||||
 b-CLOSEDROUTED|||https://github.com/o/r/pull/768|768|polecat/feat-closedrouted|main||||pool/polecat||
-b-CLOSEDRETRY|||https://github.com/o/r/pull/769|769|polecat/feat-closedretry|main||||||'
+b-CLOSEDRETRY|||https://github.com/o/r/pull/769|769|polecat/feat-closedretry|main||||||
+b-CLOSEDINFLIGHT||pull_request|https://github.com/o/r/pull/774|774|polecat/feat-closedinflight|main|||||codex||
+b-CLOSEDPREOPEN||pre_open_gate|https://github.com/o/r/pull/775|775|polecat/feat-closedpreopen|main||||||
+b-CLOSEDABANDON||abandoned|https://github.com/o/r/pull/776|776|polecat/feat-closedabandon|main||||||
+b-CLOSEDUNKNOWN||quarantined|https://github.com/o/r/pull/777|777|polecat/feat-closedunknown|main||||||'
 CLOSED_PRS='708|OPEN|main|polecat/feat-oneanch|
 760|OPEN|main|polecat/feat-closedok|
 761|OPEN|main|polecat/feat-closedlanded|
@@ -2713,7 +2721,11 @@ CLOSED_PRS='708|OPEN|main|polecat/feat-oneanch|
 766|OPEN|main|polecat/somebody-elses-branch|
 767|OPEN|main|polecat/feat-closedflap|
 768|OPEN|main|polecat/feat-closedrouted|
-769|OPEN|main|polecat/feat-closedretry|'
+769|OPEN|main|polecat/feat-closedretry|
+774|OPEN|main|polecat/feat-closedinflight|
+775|OPEN|main|polecat/feat-closedpreopen|
+776|OPEN|main|polecat/feat-closedabandon|
+777|OPEN|main|polecat/feat-closedunknown|'
 closed_fixture() {
   reset_run
   printf '%s\n' "$CLOSED_BEADS" > "$TMP/beads"
@@ -2763,6 +2775,67 @@ grep -q 'CLOSED while PR#760 is still OPEN' <<< "$OUT12" \
 reopened b-CLOSEDLANDED \
   && bad "(CLOSEDLANDED) a landed anchor (merge_result=merged) must NEVER be reopened" \
   || ok "(CLOSEDLANDED) a landed anchor (merge_result=merged) is left closed"
+
+# --- tk-fip23: `merge_result` present is NOT the same fact as `merge_result` terminal ---
+#
+# The arm's original test was "merge_result ABSENT", which read the refinery's own
+# in-flight HANDOFF marker as if it were a completion record and declined to repair the
+# exact case it exists for. On 2026-08-23 eight gc-toolkit anchors were closed in a
+# 19-second span carrying `merge_result=pull_request` + a green `check.codex` at the live
+# head; the operator approved all eight PRs, every one was CLEAN and MERGEABLE, and none
+# landed — merge-skill cannot enumerate a closed anchor, this arm would not reopen one
+# carrying a merge_result, and the observer could only log "ANCHORLESS" every pass.
+#
+# The four cases below are the discriminator, in both directions. They are the mutation
+# test for the allow-list: replacing it with the old `== ""` fails INFLIGHT and PREOPEN,
+# and replacing it with a deny-list of the known terminal values fails UNKNOWN.
+
+# (CLOSEDINFLIGHT) THE POSITIVE CONTROL for the incident shape: closed, PR still OPEN,
+# and merge_result=pull_request — the marker merge-skill.sh's own gating enumeration
+# keys on, i.e. "still to do", the opposite of a disposition.
+reopened b-CLOSEDINFLIGHT \
+  && ok "(CLOSEDINFLIGHT) a closed anchor carrying the in-flight merge_result IS reopened" \
+  || bad "(CLOSEDINFLIGHT) must reopen an anchor closed while merge_result=pull_request (stamps: $(cat "$TMP/stamps"))"
+stamped b-CLOSEDINFLIGHT reopened_not_landed "PR#774@open" \
+  && ok "(CLOSEDINFLIGHT) ...with the same two-stage marker, so a re-close is still detectable" \
+  || bad "(CLOSEDINFLIGHT) must confirm the reopen marker"
+# It must NOT be re-stamped by phase 0: that phase repairs a LOST merge_result, and this
+# bead's was never lost. Reopening alone is the whole repair here — the bead already
+# wears the shape merge-skill enumerates.
+recovered b-CLOSEDINFLIGHT \
+  && bad "(CLOSEDINFLIGHT) phase 0 must not re-stamp a merge_result that was never lost" \
+  || ok "(CLOSEDINFLIGHT) reopening alone restores it; phase 0 correctly leaves it be"
+# ...and it reaches the ordinary gate on this same pass, which is what "back in the merge
+# queue" has to mean to be worth anything.
+dispatched_for b-CLOSEDINFLIGHT \
+  && ok "(CLOSEDINFLIGHT) ...and the reopened anchor reaches phase 1's normal gating" \
+  || bad "(CLOSEDINFLIGHT) a reopened in-flight anchor must be gated like any other (revmeta: $(cat "$TMP/revmeta"))"
+# The line an operator reads has to say WHICH spelling it repaired — an absent marker
+# still needs phase 0, an in-flight one does not, and the log is where that is visible.
+grep -q 'b-CLOSEDINFLIGHT is CLOSED while PR#774 is still OPEN and it carries merge_result=pull_request, which records a HANDOFF' <<< "$OUT12" \
+  && ok "(CLOSEDINFLIGHT) the repair line names the handoff marker it read" \
+  || bad "(CLOSEDINFLIGHT) must report which merge_result it repaired (out: $OUT12)"
+
+# (CLOSEDPREOPEN) the same window one step earlier: `pre_open_gate` is the OTHER
+# non-terminal spelling. A bead wearing it whose PR is nonetheless open was closed
+# mid-transaction — something opened the PR and did not finish the handoff.
+reopened b-CLOSEDPREOPEN \
+  && ok "(CLOSEDPREOPEN) pre_open_gate is a handoff too, and is repaired" \
+  || bad "(CLOSEDPREOPEN) must reopen an anchor closed while merge_result=pre_open_gate"
+
+# (CLOSEDABANDON) the deny-list direction: `abandoned` is a DISPOSITION written by a pass
+# that knew what it was doing, exactly like `merged`, and an open PR does not override it.
+reopened b-CLOSEDABANDON \
+  && bad "(CLOSEDABANDON) a deliberately abandoned anchor must NEVER be reopened" \
+  || ok "(CLOSEDABANDON) a terminal merge_result other than 'merged' is left closed too"
+
+# (CLOSEDUNKNOWN) WHY IT IS AN ALLOW-LIST. A marker this script has never heard of must
+# read as a disposition, not as a candidate: the widening has to fail in the same
+# direction the original ABSENT test did. A deny-list of the known terminal values would
+# reopen this bead, which is the whole difference between the two spellings.
+reopened b-CLOSEDUNKNOWN \
+  && bad "(CLOSEDUNKNOWN) an UNRECOGNISED merge_result must be treated as a disposition — the allow-list is what keeps the widening fail-closed" \
+  || ok "(CLOSEDUNKNOWN) an unrecognised merge_result is left closed (allow-list, not deny-list)"
 
 # (CLOSEDMERGEDPR) merge_result absent, but the PR itself already MERGED -> not in the
 # open-PR set, so nothing to re-engage. This is also the cheap discriminator doing its

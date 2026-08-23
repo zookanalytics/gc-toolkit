@@ -681,6 +681,16 @@ if [ "$1" = "mail" ]; then
       *) shift ;;
     esac
   done
+  # A SEND THAT FAILS. $FAKE_MAILFAIL is a substring of the subject; a matching
+  # send records NOTHING and exits non-zero, which is what a `gc mail send` the
+  # script's `>/dev/null 2>&1` swallows actually looks like from the inside. The
+  # escalation arms bound themselves with a stamp written BEFORE the send, so a
+  # stamp that outlives a failed send suppresses the notice forever — that is the
+  # whole of tk-fip23, and it is untestable without this.
+  case "${FAKE_MAILFAIL:-}" in
+    "") : ;;
+    *) case "$subj" in *"$FAKE_MAILFAIL"*) exit 1 ;; esac ;;
+  esac
   printf '%s\n' "$subj" >> "$FAKE_MAIL"
   printf '%s\n' "$body" >> "$FAKE_MAILBODY"
   exit 0
@@ -1088,6 +1098,15 @@ case "$2" in
     case "$*" in
       *"--unset-metadata stale_gate_nopool_head"*) printf '%s\t\n' "$id" >> "$FAKE_GATENOPOOL" ;;
     esac
+    # The anchorless escalation's ROLLBACK (tk-fip23), replayed onto $FAKE_DEAD so a
+    # LATER pass sees the bound gone and re-escalates. Without this the rollback is
+    # write-only in the harness and "the next pass retries" cannot be asserted at all
+    # — which is exactly the property the fix exists to restore.
+    case "$*" in
+      *"--unset-metadata anchorless_flagged"*)
+        awk -F'\t' -v i="$id" 'BEGIN{OFS="\t"} $2==i{$3="-"} {print}' "$FAKE_DEAD" > "$FAKE_DEAD.n" \
+          && mv "$FAKE_DEAD.n" "$FAKE_DEAD" ;;
+    esac
     printf '%s\t%s\n' "$id" "$upd_args" >> "$FAKE_UPDATES"
     case "$*" in
       *merge_result=abandoned*)  printf '%s\n' "$id" >> "$FAKE_ABANDONED" ;;
@@ -1169,6 +1188,18 @@ case "$2" in
     # update log: the gate reads it BEFORE the close, so it is pre-existing bead
     # state a fixture seeds, not something a pass under test writes.
     dc=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "${FAKE_DOCTOR_CHECK:-/dev/null}" 2>/dev/null | tail -1)
+    # anchorless_flagged, read back the way the escalation ROLLBACK reads it
+    # (tk-fip23). Sourced from $FAKE_DEAD rather than replayed from the update log,
+    # because the `--set-metadata` mirror above already keeps that file in step —
+    # so this answers with the ledger's real live value, which is the whole point
+    # of a re-read. $FAKE_ANCHORLESS_NOW (id<TAB>value) OVERRIDES it, modelling the
+    # seam the rollback exists to respect: a PEER that mailed and stamped between
+    # this pass's write and its re-read, whose record must not be erased.
+    af=$(awk -F'\t' -v i="$sid" '$1==i{print $2}' "${FAKE_ANCHORLESS_NOW:-/dev/null}" 2>/dev/null | tail -1)
+    if [ -z "$af" ]; then
+      af=$(awk -F'\t' -v i="$sid" '$2==i{print $3}' "$FAKE_DEAD" 2>/dev/null | tail -1)
+      [ "$af" = "-" ] && af=""
+    fi
     # The rebase child's WORK ORDER, replayed from the update log the same way. The
     # conflict arm reads these back before it arms the child (review tk-c9rh7
     # finding 1): the stamp is nonfatal, so a dropped write has to be VISIBLE here
@@ -1245,8 +1276,8 @@ case "$2" in
     fi
     childjson=$(printf '"target":"%s","existing_pr":"%s","source_anchor_bead":"%s","rejection_reason":"%s"' \
       "$u_target" "$u_existing" "$u_srcanchor" "$u_reason")
-    printf '[{"id":"%s","status":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s","review_pool":"%s","signoff_dismissed":"%s","doctor_check":"%s",%s,%s"merged_target":"%s","pr_url":"%s","branch":"%s","merge_result":"%s","check.codex":"%s","merge_hold":"%s"}}]\n' \
-      "$sid" "$s_status" "$ab" "$tk" "$rt" "$rp" "$sd" "$dc" "$childjson" \
+    printf '[{"id":"%s","status":"%s","metadata":{"anchor_bead":"%s","task_kind":"%s","gc.routed_to":"%s","review_pool":"%s","signoff_dismissed":"%s","doctor_check":"%s","anchorless_flagged":"%s",%s,%s"merged_target":"%s","pr_url":"%s","branch":"%s","merge_result":"%s","check.codex":"%s","merge_hold":"%s"}}]\n' \
+      "$sid" "$s_status" "$ab" "$tk" "$rt" "$rp" "$sd" "$dc" "$af" "$childjson" \
       "${prkey_json:+$prkey_json,}" "$s_target" "$s_prurl" "$s_branch" "$s_result" "$s_mark" "$s_hold" ;;
 esac
 exit 0
@@ -1274,7 +1305,8 @@ export FAKE_ANCHORS="$TMP/anchors" FAKE_PRS="$TMP/prs" \
        FAKE_CLOSE_REFUSE="$TMP/closerefuse" FAKE_CLOSE_HARDFAIL="$TMP/closehard" \
        FAKE_FORCED="$TMP/forced" FAKE_CLOSEFAILS="$TMP/closefails" \
        FAKE_CLOSEESC="$TMP/closeesc" FAKE_DOCTOR_CHECK="$TMP/doctorcheck" \
-       FAKE_DOCTOR_SUCC="$TMP/doctorsucc"
+       FAKE_DOCTOR_SUCC="$TMP/doctorsucc" FAKE_ANCHORLESS_NOW="$TMP/anchorlessnow"
+: > "$TMP/anchorlessnow"
 
 # The close-time doctor-finding gate is OFF for every run but Run 16, which turns
 # it on explicitly. Not a convenience: left on, the arm resolves its cache from
@@ -3661,6 +3693,85 @@ eq "$(grep -c 'still fires after its fix bead closed' "$TMP/created")" "0" \
 # (DG-INV) the gate never acquired merge authority, in any of the arms above.
 eq "$(wc -l < "$TMP/automerge" | tr -d ' ')" "0" \
    "(DG-INV) the doctor gate ran no merge"
+
+# --- (AF1)-(AF3) A FAILED ESCALATION MUST NOT LEAVE ITS BOUND BEHIND. ----------
+# tk-fip23. The anchorless arm stamps `anchorless_flagged` BEFORE it mails, which
+# is right — an unbounded mail storms. But the send's failure was SWALLOWED: the
+# stamp stood, the pass printed "routed to operator + escalated", and every later
+# pass read the marker and took the "already escalated, awaiting operator
+# disposition" branch. One dropped mail therefore bought PERMANENT silence, on a
+# finding that stays true forever, reported in a line an operator has no way to
+# falsify — they are told a notice was sent and there is none to find.
+#
+# This is the seam that turned an incident into a 90-minute stall: eight approved,
+# CLEAN, MERGEABLE PRs whose anchors had been closed, detected correctly on every
+# pass, escalated by a line of text and nothing else.
+#
+# The mutation this pins: delete the rollback and (AF2) fails — the retry pass
+# reports "already escalated" and mails nothing, forever.
+afreset() {
+  : > "$TMP/mail"; : > "$TMP/mailbody"; : > "$TMP/updates"; : > "$TMP/anchors"
+  : > "$TMP/prs"; : > "$TMP/created"; : > "$TMP/children"; : > "$TMP/livex"
+  : > "$TMP/anchorlessnow"
+  printf '450|false|polecat/dead-450|main\n' > "$TMP/openprs"
+  printf '450\tdead-450\t-\tpull_request\t2026-01-01T00:00:00Z\t-\t-\n' > "$TMP/dead"
+}
+
+# (AF1) the send fails: nothing is claimed, and the bound is undone.
+afreset
+OUTAF1="$(FAKE_MAILFAIL='anchorless open PR#450' bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>"$TMP/aferr1")"
+eq "$(grep -c 'anchorless open PR#450' "$TMP/mail")" "0" \
+   "(AF1) the failing send delivers nothing (control: the stub really refused it)"
+grep -q 'routed to operator + escalated' <<< "$OUTAF1" \
+  && bad "(AF1) a pass whose mail FAILED must never report the escalation as done" \
+  || ok "(AF1) a failed send is not reported as 'routed to operator + escalated'"
+grep -q 'escalation mail FAILED; the stamp is rolled back so the next pass retries' "$TMP/aferr1" \
+  && ok "(AF1) ...it says the mail failed and that the bound was undone" \
+  || bad "(AF1) must report the failed send + rollback (err: $(cat "$TMP/aferr1"))"
+grep -q 'NOBODY HAS BEEN TOLD YET' "$TMP/aferr1" \
+  && ok "(AF1) ...in terms that cannot be mistaken for a delivered notice" \
+  || bad "(AF1) the line must say nobody was notified (err: $(cat "$TMP/aferr1"))"
+grep -q -- '--unset-metadata anchorless_flagged' < <(grep '^dead-450' "$TMP/updates") \
+  && ok "(AF1) the stamp this pass wrote is rolled back off the closed bead" \
+  || bad "(AF1) expected an anchorless_flagged rollback (got: $(grep '^dead-450' "$TMP/updates" || true))"
+eq "$(awk -F'\t' '$2=="dead-450"{print $3}' "$TMP/dead")" "-" \
+   "(AF1) ...and the ledger really reads unflagged again, not just the log"
+
+# (AF2) THE POINT OF THE ROLLBACK: the very next pass retries and the mail lands.
+# Without it this pass prints "already escalated" and the notice is lost for good.
+OUTAF2="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>"$TMP/aferr2")"
+eq "$(grep -c 'anchorless open PR#450' "$TMP/mail")" "1" \
+   "(AF2) the next pass RE-ESCALATES and the mail is delivered exactly once"
+grep -q 'ANCHORLESS PR#450.*routed to operator + escalated' <<< "$OUTAF2" \
+  && ok "(AF2) ...and only now does the pass report it as escalated" \
+  || bad "(AF2) the retry must report the escalation (out: $OUTAF2)"
+grep -q 'already escalated' <<< "$OUTAF2" \
+  && bad "(AF2) a rolled-back bound must NOT suppress the retry as 'already escalated'" \
+  || ok "(AF2) the retry is not suppressed by a bound from the failed pass"
+
+# ...and it converges: the delivered escalation IS bounded, exactly as before.
+OUTAF2B="$(bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>/dev/null)"
+eq "$(grep -c 'anchorless open PR#450' "$TMP/mail")" "1" \
+   "(AF2) a DELIVERED escalation still bounds every later pass — no storm"
+grep -q 'already escalated' <<< "$OUTAF2B" \
+  && ok "(AF2) ...and the later pass reports the finding as already escalated" \
+  || bad "(AF2) the bounded pass must still report the standing finding (out: $OUTAF2B)"
+grep -q 'gc mail inbox mayor' <<< "$OUTAF2B" \
+  && ok "(AF2) ...naming WHERE the escalation is, since a wisp is invisible to bd list" \
+  || bad "(AF2) 'already escalated' must say where to read it (out: $OUTAF2B)"
+
+# (AF3) ROLL BACK OUR OWN STAMP, NOT WHATEVER IS THERE NOW. A peer that mailed and
+# stamped between this pass's write and its re-read has a DELIVERED notice on the
+# record; unsetting over it would erase the only evidence of it and re-storm.
+afreset
+printf 'dead-450\t450-by-peer\n' > "$TMP/anchorlessnow"
+OUTAF3="$(FAKE_MAILFAIL='anchorless open PR#450' bash "$SCRIPT" --fix-pool "$FIX_POOL" 2>"$TMP/aferr3")"
+grep -q -- '--unset-metadata anchorless_flagged' < <(grep '^dead-450' "$TMP/updates") \
+  && bad "(AF3) must NOT roll back a marker a peer wrote — that erases a delivered notice" \
+  || ok "(AF3) a peer's newer marker is left standing"
+grep -q "NOT rolling back, anchorless_flagged on dead-450 now reads '450-by-peer'" "$TMP/aferr3" \
+  && ok "(AF3) ...and the line says whose record it deferred to" \
+  || bad "(AF3) must report the peer's marker (err: $(cat "$TMP/aferr3"))"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

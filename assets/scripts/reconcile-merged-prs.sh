@@ -83,6 +83,15 @@
 #                          automated path can see it at all. Report it and
 #                          escalate once. DETECT + SURFACE ONLY — never merge,
 #                          close, or reopen it; disposition is an operator call.
+#                          THE REPAIR FOR THIS LIVES ELSEWHERE, on purpose:
+#                          check-set-heal.sh's closed-but-not-landed arm reopens
+#                          a closed anchor whose PR is still open, carrying the
+#                          guards such a repair needs (ambiguity, incumbent
+#                          anchor, operator holds, PR-identity certification, a
+#                          flap marker). Duplicating it here would mint a second
+#                          writer for one repair. What this arm owes is a
+#                          TRUTHFUL escalation — see the rollback below, and
+#                          tk-fip23 for the incident where it did not have one.
 #
 #   Open PR, live bead but no gating metadata -> UNOWNED: something names the PR
 #                          (so it is not anchorless) but nothing will land it —
@@ -2366,13 +2375,31 @@ elif [ "$PR_LIST" != "[]" ]; then
       if [ "$dead_flag" = "$pnum" ]; then
         # Already escalated for this PR. Keep reporting it (it is still stranded)
         # but do not re-mail.
-        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED; already escalated, awaiting operator disposition"
+        #
+        # SAY WHERE THE ESCALATION WENT (tk-fip23). The stamp is now only left in
+        # place by a mail that actually sent (see the rollback below), so this line
+        # is true — but "already escalated" alone sent the operator looking for a
+        # bead, and `gc mail send` writes a WISP, which `bd list` cannot see at all.
+        # An escalation an operator cannot find reads exactly like one that never
+        # happened, which is how eight approved PRs sat stranded for 90 minutes with
+        # this line firing every pass (tk-fip23).
+        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED; already escalated (mailed to mayor/ — a wisp, read it with \`gc mail inbox mayor\`; \`bd list\` cannot see it), awaiting operator disposition"
         continue
       fi
       # Stamp FIRST, mail second — the same close-FIRST convergence the merged
       # path uses. If the stamp fails we have no bound, so we must NOT mail:
       # report loudly and retry next pass. A delayed escalation is recoverable;
       # a mail storm is not.
+      #
+      # AND ROLL THE STAMP BACK IF THE MAIL DOES NOT GO (tk-fip23). The stamp is the
+      # ONLY thing suppressing the next pass, so a stamp that outlives a failed send
+      # converts one dropped mail into a PERMANENT silence: every later pass reads
+      # `anchorless_flagged` and takes the "already escalated, awaiting operator
+      # disposition" branch above — a line that is then false in the one way an
+      # operator cannot check, since it describes a notice nobody ever received.
+      # This is escalation-gate.sh's rollback, applied to the one escalation in this
+      # file that was still stamping unconditionally: on a failed send, undo our own
+      # stamp so the next pass retries.
       if gc bd update "$dead_id" --set-metadata anchorless_flagged="$pnum" >/dev/null 2>&1; then
         if gc mail send mayor/ -s "ESCALATION: anchorless open PR#$pnum (bead $dead_id is closed)" \
              -m "PR#$pnum is OPEN but its bead $dead_id is CLOSED, so no automated path can see it.
@@ -2390,10 +2417,38 @@ one. Decide: LAND it (approve on GitHub, then reopen the bead as a gating anchor
 status=open, merge_result=pull_request, check_set/check.* at the live head — so the
 merge skill lands and closes it), CLOSE the PR as abandoned (the bead is already
 closed; nothing else to do), or REWORK it (reopen the bead and route it to a
-polecat). This pass reports it once and will not act on it." >/dev/null 2>&1; then
+polecat). This pass reports it once and will not act on it.
+
+ONE CASE IS REPAIRED WITHOUT YOU, so check before doing the LAND steps by hand: if
+$dead_id still carries a NON-TERMINAL merge_result (pull_request / pre_open_gate),
+check-set-heal.sh's closed-but-not-landed arm reopens it on its own and the merge
+skill takes it from there (tk-fip23). Seeing this mail anyway means that arm is
+REFUSING the repair, and its own log line on the refinery-reconcile pass says which
+guard did it — an operator hold (merge_hold / rebase_hold / tracking_only), two
+closed candidates for one PR, a live anchor already driving it, or a PR whose
+identity did not certify. Read that line first; it is usually the real decision." >/dev/null 2>&1; then
           escalated=$((escalated + 1))
+          echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED; routed to operator + escalated"
+        else
+          # The send failed after the stamp landed. Undo OUR OWN stamp — re-read
+          # first, and write only while the value is still the one this pass wrote,
+          # for the reason escalation-gate.sh does the same: a peer may have mailed
+          # and stamped in between, and restoring over that record would erase a
+          # notice that WAS delivered. An unreadable re-read rolls back anyway; a
+          # duplicate escalation is recoverable, a silent one is not.
+          cur_flag=$(gc bd show "$dead_id" --json 2>/dev/null | tr -d '[:cntrl:]' \
+            | jq -r '.[0].metadata.anchorless_flagged // empty' 2>/dev/null)
+          if [ -n "$cur_flag" ] && [ "$cur_flag" != "$pnum" ]; then
+            echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note — escalation mail FAILED; NOT rolling back, anchorless_flagged on $dead_id now reads '$cur_flag' and a peer's record must stand" >&2
+          elif gc bd update "$dead_id" --unset-metadata anchorless_flagged >/dev/null 2>&1; then
+            echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED but the escalation mail FAILED; the stamp is rolled back so the next pass retries. NOBODY HAS BEEN TOLD YET." >&2
+          else
+            # The worst case, and the one that must never be reported as an
+            # escalation: the mail did not go and the bound survives, so every later
+            # pass reads it and suppresses. Name the command that clears it.
+            echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED, the escalation mail FAILED, AND the stamp could NOT be rolled back; anchorless_flagged=$pnum REMAINS on $dead_id, so later passes will report 'already escalated' for a notice that was never sent. Clear it by hand: gc bd update $dead_id --unset-metadata anchorless_flagged" >&2
+          fi
         fi
-        echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note ($phead -> $pbase) — anchor $dead_id is CLOSED; routed to operator + escalated"
       else
         echo "reconcile-merged-prs: ANCHORLESS PR#$pnum$draft_note — could not mark bead $dead_id; not escalating unbounded (retry next pass)" >&2
       fi

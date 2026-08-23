@@ -1165,32 +1165,79 @@ PASS_ORIGIN_REPO_Q=$(resolve_origin_repo_q)
 #
 # THE SIGNATURE IS NARROW ON PURPOSE:
 #
-#   closed + a PR reference + merge_result ABSENT + that PR still OPEN
-#     => closed-but-not-landed: reopen, and let phase 0 re-stamp it below.
+#   closed + a PR reference + merge_result NOT a disposition + that PR still OPEN
+#     => closed-but-not-landed: reopen, and let the merge queue drive the PR again.
 #
-# `merge_result` ABSENT is what separates this from a genuinely landed anchor, which
-# merge-skill.sh closes with `merge_result=merged` (and reconcile-merged-prs.sh with
-# `merged`/`abandoned`/`retargeted`). A closed bead carrying ANY merge_result has a
-# disposition recorded by a pass that knew what it was doing, and is left alone — the
-# fail-closed direction, since resurrecting an anchor an operator or a pass deliberately
-# retired is worse than one more pass of a stall.
+# WHAT "NOT A DISPOSITION" MEANS, AND WHY IT IS NOT "ABSENT" (tk-fip23). `merge_result`
+# spells two different facts with one key. A pass that FINISHED with a bead writes a
+# DISPOSITION into it — merge-skill.sh closes with `merge_result=merged`,
+# reconcile-merged-prs.sh with `merged`/`abandoned`/`retargeted`. But the refinery also
+# writes a HANDOFF into the same key long before anything is finished:
+# `merge_result=pull_request` means "the PR is open and waiting to be landed", and
+# `merge_result=pre_open_gate` means "the branch is waiting on its codex signoff". Those
+# are IN-FLIGHT markers, the opposite of a disposition — merge-skill.sh's own gating
+# enumeration keys on `pull_request` precisely because it means "still to do".
 #
-# WHY IT ONLY REOPENS. Reopening is the WHOLE repair: a reopened bead is, by
-# construction, exactly the shape phase 0 below already handles (open, PR-referencing,
-# no merge_result), so it is recovered, gated and dispatched on THIS SAME PASS by code
-# that is already reviewed and tested. Ordering the arms this way is what makes one
-# `--status=open` write converge to a fully gated anchor, and it is why this arm writes
-# nothing else.
+# This arm originally required merge_result ABSENT, which read the handoff spelling as if
+# it were the completion spelling and declined to repair the exact case it exists for. On
+# 2026-08-23 eight gc-toolkit anchors were closed in a 19-second span carrying
+# `merge_result=pull_request` + `pr_number` + `check.codex` green at the live head; the
+# operator then APPROVED all eight PRs and every one of them was CLEAN and MERGEABLE.
+# Nothing landed. merge-skill.sh cannot enumerate a closed anchor, this arm would not
+# reopen one carrying a merge_result, and reconcile-merged-prs.sh's anchorless scan could
+# only report them. The whole rig's merge queue sat dead for hours one API call from
+# eight landings, and the fix for it was itself a PR stranded in the same queue.
+#
+# So the discriminator is an explicit ALLOW-LIST of the non-terminal markers, never a
+# deny-list of the terminal ones:
+#
+#   ""              nothing was ever recorded          -> repair (the tk-vnlll case)
+#   pull_request    PR open, awaiting land             -> repair (the tk-fip23 case)
+#   pre_open_gate   branch awaiting its signoff        -> repair (same window, one step
+#                                                        earlier: a PR exists, so
+#                                                        something opened it and did not
+#                                                        finish the transaction)
+#   anything else   a disposition, or a marker this
+#                   script does not know               -> LEAVE ALONE
+#
+# An allow-list is what keeps the widening fail-closed. A marker some future pass invents
+# reads as a disposition and is left alone — the same direction the original ABSENT test
+# erred in, and the right one, since resurrecting an anchor an operator or a pass
+# deliberately retired is worse than one more pass of a stall.
+#
+# The reopen is safe for the in-flight shapes specifically BECAUSE they are in-flight: a
+# reopened `pull_request` anchor is exactly the shape merge-skill.sh already enumerates,
+# gates and lands, and everything that decides whether it MAY land — approval,
+# mergeability, `check.*` at the live head — is re-evaluated there, on live state, by
+# code this arm does not duplicate. Reopening does not land anything; it only puts the
+# bead back where the landing decision is made.
+#
+# WHY IT ONLY REOPENS. Reopening is the WHOLE repair, by two different routes depending
+# on which marker the bead wore:
+#
+#   merge_result ABSENT — the reopened bead is, by construction, exactly the shape
+#     phase 0 below already handles (open, PR-referencing, no merge_result), so it is
+#     recovered, gated and dispatched on THIS SAME PASS by code that is already reviewed
+#     and tested.
+#   merge_result IN-FLIGHT — nothing needs re-stamping at all. The bead already carries
+#     the marker merge-skill.sh enumerates on, so `--status=open` alone restores it to
+#     the merge queue; phase 0 correctly skips it (its projection wants an absent
+#     merge_result) and phase 1 sees it as the ordinary open gating anchor it always was.
+#
+# Either way this arm writes nothing but the status and its own marker.
 #
 # ORDERED SO A FAILURE IS A RETRY, NOT A STRAND. The reopen is deliberately the FIRST
 # write, not the last. Stamping merge_result first and reopening second would, on a
-# dropped second write, leave a CLOSED bead carrying a merge_result — no longer a
-# candidate for this arm (the signature requires merge_result absent) and still
-# invisible to every open-bead pass: a permanent strand, minted by the repair. Reopening
-# first cannot do that. If everything after it fails, the bead is an ordinary open phase-0
-# candidate and the next pass finishes the job. The exposure that ordering costs is nil:
-# an open bead with NO merge_result is invisible to merge-skill.sh, which enumerates on
-# `merge_result=pull_request`, so nothing can merge it in the meantime.
+# dropped second write, leave a CLOSED bead carrying a TERMINAL merge_result — no longer
+# a candidate for this arm (the allow-list above admits only the non-terminal spellings)
+# and still invisible to every open-bead pass: a permanent strand, minted by the repair.
+# Reopening first cannot do that. If everything after it fails, the bead is an ordinary
+# open phase-0 candidate and the next pass finishes the job. The exposure that ordering
+# costs is nil: an open bead with NO merge_result is invisible to merge-skill.sh, which
+# enumerates on `merge_result=pull_request`, so nothing can merge it in the meantime.
+# A reopened IN-FLIGHT anchor is visible to merge-skill.sh immediately — which is the
+# entire repair, not an exposure: it is the state the bead was in before it was wrongly
+# closed, and every gate that decides whether it may land still runs there.
 #
 # COST. The closed set is LARGE (hundreds of beads per rig carry a pr_url and no
 # merge_result — every anchor closed before merge_result existed), and certifying each
@@ -1329,7 +1376,13 @@ if [ "$CLOSED_ARM_OK" = 1 ] && [ -n "$OPEN_PR_NUMS" ]; then
       ($open | split("\n") | map(select(. != ""))) as $openprs
       | ((add // []) | unique_by(.id))[]
       | . as $b | (($b.metadata // {})) as $m
-      | select((($m.merge_result // "") | tostring | ascii_downcase | gsub("[[:space:]]"; "")) == "")
+      # THE NON-TERMINAL ALLOW-LIST (tk-fip23). See the header: `merge_result` spells a
+      # DISPOSITION and an in-flight HANDOFF with one key, and only the first means a
+      # pass decided this bead was finished. Written as an allow-list, never as a
+      # deny-list of the terminal values, so a marker this script has never heard of
+      # reads as a disposition and is left alone.
+      | ((($m.merge_result // "") | tostring | ascii_downcase | gsub("[[:space:]]"; ""))) as $mr
+      | select($mr == "" or $mr == "pull_request" or $mr == "pre_open_gate")
       | select((($m.branch // "") | tostring) != "")
       | select((($m.anchor_bead // "") | tostring) == "")
       | select((($m.task_kind // "") | tostring) == "")
@@ -1367,6 +1420,13 @@ if [ "$CLOSED_ARM_OK" = 1 ] && [ -n "$OPEN_PR_NUMS" ]; then
           num:      $n,
           repo:     $repo,
           already:  (($m.reopened_not_landed // "") | tostring),
+          # WHICH non-terminal spelling this candidate wore. Carried because the two
+          # cases converge on different code after the reopen — an absent marker is
+          # re-stamped by phase 0 on this same pass, an in-flight one is already the
+          # shape merge-skill.sh enumerates — and every line this arm prints about the
+          # bead has to say which, or an operator reading the log cannot tell whether
+          # the repair is finished or still has a phase to go.
+          mr:       $mr,
           # AN OPERATOR HOLD, carried on the same terms and skipped in the same place
           # as the phase-0 one (tk-44xkw / tk-rlm94) — see the note there. This arm
           # needs it because REOPENING is the act that turns a closed bead into a
@@ -1427,6 +1487,19 @@ if [ -n "$CLOSED_CANDS" ]; then
     xalready=$(printf '%s' "$crow" | jq -r '.already // empty')
     xrepo=$(printf '%s' "$crow" | jq -r '.repo // empty')
     [ -n "$xrepo" ] || xrepo="?"
+    # The non-terminal spelling this bead wore, and the two phrases every line below
+    # uses to say it. Kept as data rather than branching at each print site: the arm
+    # states the same fact from three places (the repair line, the reopen note, and
+    # the flap escalation's mail body), and a phrase rebuilt at each one is how they
+    # drift apart.
+    xmr=$(printf '%s' "$crow" | jq -r '.mr // empty')
+    if [ -n "$xmr" ]; then
+      xmr_phrase="it carries merge_result=$xmr, which records a HANDOFF (still in flight), not a disposition"
+      xmr_next="it already carries the marker merge-skill enumerates on, so reopening alone restores it to the merge queue"
+    else
+      xmr_phrase="it carries NO merge_result"
+      xmr_next="the merge_result recovery re-stamps it on this same pass"
+    fi
 
     # Here-string, never a `printf ... | grep -qxF` pipeline (tk-zfjg9): `grep -q`
     # exits at its first match and SIGPIPEs the writer, which `pipefail` promotes
@@ -1562,7 +1635,7 @@ if [ -n "$CLOSED_CANDS" ]; then
         echo "check-set-heal: $xid was reopened for PR#$xnum by this arm and has been CLOSED again by a live writer; NOT reopening a second time (that would flap the bead every idle pass) — routed to human with blocked_reason, PR#$xnum stays open and untracked until an operator finds that writer"
         gc mail send mayor/ -s "ESCALATION: $xid re-closed while PR#$xnum is still open" \
           -m "check-set-heal reopened $xid because it was CLOSED while PR#$xnum was still
-open and it carried no merge_result. Something LIVE has closed it again since. This pass
+open and $xmr_phrase. Something LIVE has closed it again since. This pass
 will not reopen it a second time — that would fight the writer every idle loop — so the
 bead is left CLOSED, routed to human with a blocked_reason.
 
@@ -1585,7 +1658,7 @@ deliberately (merge it, close it, or re-anchor it on a fresh bead)." >/dev/null 
         ;;
     esac
 
-    echo "check-set-heal: $xid is CLOSED while PR#$xnum is still OPEN and it carries NO merge_result — under close-on-land that reads as LANDED, so the bead is a false durable record AND invisible to merge-skill, pre-open-resolve, the observer and phase 0 alike; reopening so the PR is driven again (tk-vnlll)"
+    echo "check-set-heal: $xid is CLOSED while PR#$xnum is still OPEN and $xmr_phrase — under close-on-land that reads as LANDED, so the bead is a false durable record AND invisible to merge-skill, pre-open-resolve, the observer and phase 0 alike; reopening so the PR is driven again ($xmr_next) (tk-vnlll, tk-fip23)"
 
     # THE ONLY WRITES: the ATTEMPT marker that makes a re-close detectable, the status,
     # and then the CONFIRMATION that tells the two apart.
@@ -1602,7 +1675,7 @@ deliberately (merge it, close it, or re-anchor it on a fresh bead)." >/dev/null 
     fi
 
     gc bd update "$xid" --status=open \
-      --append-notes "check-set-heal: this bead was CLOSED while PR#$xnum was still OPEN and it carried NO merge_result. Under the close-on-land contract a closed bead means LANDED, so this was both a false durable record and invisible to every pass at once (merge-skill, pre-open-resolve, the observer and the merge_result recovery all enumerate OPEN beads). Reopened so the PR is driven again; the merge_result recovery re-stamps it on this same pass (tk-vnlll)." \
+      --append-notes "check-set-heal: this bead was CLOSED while PR#$xnum was still OPEN and $xmr_phrase. Under the close-on-land contract a closed bead means LANDED, so this was both a false durable record and invisible to every pass at once (merge-skill, pre-open-resolve, the observer and the merge_result recovery all enumerate OPEN beads). Reopened so the PR is driven again; $xmr_next (tk-vnlll, tk-fip23)." \
       >/dev/null 2>&1
 
     GOT_STATUS=$(gc bd show "$xid" --json 2>/dev/null \
