@@ -199,14 +199,6 @@ run_pass() { # label script [args...]
 # Order is load-bearing and is the formula's (mol-refinery-patrol, find-work).
 # Each pass's rationale lives in that step; this is the caller, not the spec.
 
-# (a-addr) Near-miss handoff ADDRESS recovery. FIRST, because it is the only
-# pass that can make a bead visible to everything below: a handoff routed to a
-# non-canonical "<rig>/refinery" carries no merge_result and is invisible to
-# every bead-keyed pass at once.
-run_pass "(a-addr) reconcile-refinery-handoffs" reconcile-refinery-handoffs.sh \
-    --refinery "$AGENT" \
-    || FAILED="${FAILED}reconcile-refinery-handoffs rc=$?; "
-
 # (a-norm) Check-set normalization. GATES the merge skill THIS pass: rc=3 means
 # the heal could not establish a safe gating picture, and landing anything on
 # that reading is exactly the unreviewed-merge this pass exists to prevent.
@@ -268,15 +260,15 @@ else
     # that early exit is silent AND rc=0, so the cadence reported a healthy
     # queue every tick while owned integration convoys never graduated at all.
     #
-    # Why it is NOT exported process-wide: reconcile-refinery-handoffs.sh
-    # (:415) suppresses its "wake the refinery" nudge when GC_AGENT is already
-    # the refinery, reasoning that the refinery's own idle loop re-checks
-    # find-work in the same cycle. recover-stranded-branches.sh (:855) shares
-    # the shape. That is an AGENT-SESSION premise, and it is false here: this
-    # order is the session-less cadence that REPLACED that idle loop, so there
-    # is no find-work re-check to fall back on. A process-wide export would fix
-    # graduation and simultaneously silence those nudges, leaving a recovered
-    # handoff to wake nobody. Scope the identity to the pass that consumes it.
+    # Why it is NOT exported process-wide: recover-stranded-branches.sh (:855)
+    # suppresses its "wake the refinery" nudge when GC_AGENT is already the
+    # refinery, reasoning that the refinery's own idle loop re-checks find-work
+    # in the same cycle. That is an AGENT-SESSION premise, and it is false
+    # here: this order is the session-less cadence that REPLACED that idle
+    # loop, so there is no find-work re-check to fall back on. A process-wide
+    # export would fix graduation and simultaneously silence that nudge,
+    # leaving a recovered handoff to wake nobody. Scope the identity to the
+    # pass that consumes it.
     ( export GC_AGENT="$AGENT"
       run_pass "(b) reconcile-graduated-convoys" reconcile-graduated-convoys.sh \
           --target "$TARGET" ) \
@@ -288,6 +280,26 @@ fi
 # MERGE_READY nudge was lost carries metadata.branch and no merge_result, so it
 # is invisible to all of them — the queue reads healthy while a pushed branch
 # waits. Report it once per bead id.
+#
+# THE PREDICATE IS "NOBODY POLLS IT", not "nobody owns it". Two pollers exist: a
+# pool offers on exact `gc.routed_to` equality, and the refinery's find-work
+# filters on exact `assignee == $me`. So an unrouted bead assigned to anything
+# OTHER than this refinery is polled by no one — and that set includes the
+# near-miss ADDRESS: a handoff composed by hand as "<rig>/refinery" when the
+# canonical identity is "<rig>/<binding>refinery" is accepted as free text and
+# then read by nobody. Every detector is blind to it at once — it carries no
+# merge_result, so no bead-keyed pass sees it; check-set-heal's non-canonical
+# assignee arm walks GATING anchors only; check-routed-work-claimable skips both
+# assigned beads and empty routes by design; the witness's orphan recovery steps
+# over a refinery-shaped assignee as infrastructure. An idle refinery with an
+# empty queue is what a healthy city looks like, so nothing escalates: the live
+# case sat 1h07m on completed, pushed work until a human noticed (tk-0nn3f).
+#
+# Reporting is the whole remedy. An identity is a routing decision, so this names
+# the bead and leaves the address to an operator — the same call check-set-heal
+# makes on its own set (tk-wsxd0). The 761-line pass that used to REPAIR this set
+# was retired once every automated writer emitted the qualified form and it had
+# gone 410 refinery passes across four rigs without a single repair (tk-qf2l0j).
 #
 # Gate on the branch EXISTING ON ORIGIN: a bead carries metadata.branch from the
 # moment a polecat claims it, long before anything is pushed, so "has branch"
@@ -302,7 +314,7 @@ HANDOFF_ROWS="$(gc bd list --rig="$RIG" --status=open --exclude-type=epic \
                  | (["pull_request","pre_open_gate","merged","abandoned","retargeted"]
                     | index($mr)) | not)
         | select(((.metadata["gc.routed_to"] // "") == $me)
-                 or (((.metadata["gc.routed_to"] // "") == "") and ((.assignee // "") == "")))
+                 or (((.metadata["gc.routed_to"] // "") == "") and ((.assignee // "") != $me)))
         | "\(.id)\t\(.metadata.branch)"' 2>/dev/null | sort -u)"
 
 HANDOFF=""
