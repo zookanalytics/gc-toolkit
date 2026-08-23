@@ -433,14 +433,28 @@ def anchor_authority($a):
 
 # The compact row every branch-ownership probe yields: the id, whether the bead
 # is an anchor (merge_result set) rather than a rework child, its rebase_hold
-# marker, and the ONE field that says which anchor it belongs to.
+# marker, the field that says which anchor it belongs to, and EVERY field the
+# canonical `acting($live)` reads.
 #
 # `metadata.anchor_bead` is carried through the projection in its original shape,
 # not flattened, so `anchor_authority` above reads a probe row exactly as it reads a
 # whole bead. Membership has one definition in this pack and a projection is not a
 # licence to write a second one (tk-j5wrs ruling 2).
-PROBE_ROW_JQ='.[] | {id, mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // ""),
-                     metadata: {anchor_bead: (.metadata.anchor_bead // "")}}'
+#
+# THE PROJECTION IS PART OF THE PREDICATE. `acting($live)` reads `.status`,
+# `.assignee`, `.metadata.task_kind`, `.metadata["gc.routed_to"]` and
+# `.metadata["gc.execution_routed_to"]`. Drop any of them here and the predicate
+# still EVALUATES on a probe row — it just silently answers as though the bead
+# were inert, because every field it consults defaults to "". That is the failure
+# this block exists to prevent, inverted: importing the canonical membership
+# definition and then feeding it a row that cannot express membership. Carry the
+# fields or do not call the predicate.
+PROBE_ROW_JQ='.[] | {id, status: (.status // ""), assignee: (.assignee // ""),
+                     mres: (.metadata.merge_result // ""), rhold: (.metadata.rebase_hold // ""),
+                     metadata: {anchor_bead: (.metadata.anchor_bead // ""),
+                                task_kind: (.metadata.task_kind // ""),
+                                "gc.routed_to": (.metadata["gc.routed_to"] // ""),
+                                "gc.execution_routed_to": (.metadata["gc.execution_routed_to"] // "")}}'
 
 # One guarded ledger read -> the matching beads as a JSON array on stdout.
 # --limit=0 so a probe sees the whole set, not a page of it: a truncated page
@@ -1354,8 +1368,9 @@ auto-closes an unmerged anchor it did not abandon." >/dev/null 2>&1; then
     # Beads carrying merge_result are anchors, not rework children, and are
     # excluded; the anchor under consideration is excluded by id.
     inflight=$(printf '%s\n' "$probe" \
-      | jq -r --arg anchor "$id" "$INFLIGHT_MEMBERSHIP_JQ"'select(.id != $anchor)
+      | jq -r --arg anchor "$id" --arg live "$LIVE_STATUSES" "$INFLIGHT_MEMBERSHIP_JQ"'select(.id != $anchor)
           | select(.mres == "")
+          | select(acting($live))
           | select((anchor_authority($anchor)) != "theirs")
           | .id' 2>/dev/null \
       | head -1)
@@ -1766,8 +1781,9 @@ Repair — check the child's work order, then dispatch it:
         skipped=$((skipped + 1)); continue
       fi
       inflight=$(printf '%s\n' "$gate_probe" \
-        | jq -r --arg anchor "$id" "$INFLIGHT_MEMBERSHIP_JQ"'select(.id != $anchor)
+        | jq -r --arg anchor "$id" --arg live "$LIVE_STATUSES" "$INFLIGHT_MEMBERSHIP_JQ"'select(.id != $anchor)
             | select(.mres == "")
+            | select(acting($live))
             | select((anchor_authority($anchor)) != "theirs")
             | .id' 2>/dev/null \
         | head -1)
