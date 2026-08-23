@@ -520,7 +520,7 @@ eq "$(sort -u "$TMP/rigmsgs" | wc -l | tr -d ' ')" "5" \
 # `gc rig list --json 2>/dev/null | jq`, so requiring the two to be adjacent
 # missed it and this guard passed against the very code it exists to catch.
 # Comment lines are excluded so the prose above cannot satisfy it either.
-awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/&&/gc rig list/&&/\|[[:space:]]*jq/' "$SCRIPT" | grep -q . \
+grep -q . < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/&&/gc rig list/&&/\|[[:space:]]*jq/' "$SCRIPT") \
   && bad "(RIGWHY-EVIDENCE) the pipe-into-jq form is back — gc's exit status is discarded" \
   || ok "(RIGWHY-EVIDENCE) gc is run on its own, so its exit status survives"
 

@@ -1248,7 +1248,7 @@ case "$(ncell tk-clip-fits)" in
   *)  ok "(CLIPFITS) …and is not marked as clipped, because it was not" ;;
 esac
 
-grep -- 'tk-clip-plain' <<< "$NTAB" | grep -q 'no children — decompose or assign' \
+grep -q 'no children — decompose or assign' < <(grep -- 'tk-clip-plain' <<< "$NTAB") \
   && ok "(CLIPPHRASE) a deterministic state phrase is untouched" \
   || bad "(CLIPPHRASE) the state phrase changed: $(grep -- 'tk-clip-plain' <<< "$NTAB" || true)"
 
