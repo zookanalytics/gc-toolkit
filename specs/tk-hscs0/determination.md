@@ -143,6 +143,40 @@ standalone `--formula` sling or a pool **order** for this formula. Neither is
 in use today; if a scheduled producer is ever wanted for proactive reactions,
 v2 is the precondition for it.
 
+### What the compiler actually produces, both sides
+
+The bead proposes `gc sling <pool> <bead> --on mol-first-reaction --dry-run`
+as the verification. That is not a useful check: `--dry-run` prints the
+intended route without compiling the formula or applying any pool guard, so it
+returns rc=0 for the v1 formula too. It cannot distinguish the two shapes.
+
+Compiling both sides does. Built a throwaway city (city.toml + packs.lock +
+`.gc/site.toml`, with the builtin `core` and `bd` packs declared explicitly
+because the live city resolves them implicitly), pointed `rigs/gc-toolkit` at
+this worktree for one run and at a clean `git archive origin/main` export for
+the other, and ran `gc formula show mol-first-reaction --rig gc-toolkit
+--json`. Identical search paths on both sides; only the rig symlink differs.
+
+| | v1 (origin/main) | v2 (this branch) |
+|---|---|---|
+| root bead type | `molecule` — a container | `task`, `gc.kind=workflow` |
+| steps | 4 | 5 |
+| `workflow-finalize` | absent | present, `gc.kind=workflow-finalize` |
+| dep edges | 3 `parent-child` + 2 `blocks` | 4 `blocks`, no `parent-child` |
+| root's own dep | none | `blocks` on `workflow-finalize` |
+| `vars` in the recipe | present (`issue`) | absent |
+
+Three things follow, and they are the whole case for the migration:
+
+1. The root is Ready-visible now (`task` + `gc.kind=workflow`), where before it
+   was the `molecule` container `RecipeHasReadySurface` rejects. That is the
+   guard from the falsified defect 3 — real, just never on the `--on` path.
+2. The compiler injects `workflow-finalize`, and the **root blocks on it**.
+   That is the mechanism that retires the root once every step closes, and its
+   absence under v1 is precisely why each completed reaction left a husk.
+3. The `parent-child` edges are gone. Under v1 those transmit a parent's
+   blocked state down to the steps; a pure `blocks` chain does not.
+
 ## Scope item 3 — the husk reap
 
 Six roots named by the bead, each a 4-bead chain (root + `load-bead` +
