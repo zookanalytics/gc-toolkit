@@ -83,6 +83,35 @@ GRACE="${GC_DOCTOR_FINALIZED_STEP_GRACE:-300}"
 # large open-step population cannot build an argv past the exec limit.
 CHUNK="${GC_DOCTOR_ROOT_CHUNK:-100}"
 
+# ...and the RESOLVED roots come back across that same boundary, which is the
+# half that was unguarded. Linux caps a SINGLE argv string at MAX_ARG_STRLEN —
+# 32 pages, 131072 B on a 4K-page host — independently of the much larger
+# ARG_MAX, and `bd show` answers each root's full description and notes. At the
+# census that found this, gc-toolkit's 73 roots came back as 436 KB: 3.3x over
+# the per-argument cap, so `jq --argjson roots ...` never execed at all, the
+# join exited non-zero, and the busiest store in the city reported "could not be
+# computed -- this store was NOT checked" on EVERY run while the four smaller
+# rigs passed. Chunking the `bd show` batches cannot help: the cap falls on the
+# accumulated map, not on the batch that produced it.
+#
+# So the map is staged in a FILE and read back with `--slurpfile`. That, and
+# only that, is what removes the cap — a filename is a filename however many
+# molecules it names. Trimming the map instead would merely move the ceiling:
+# past roughly two thousand molecules a store breaches the cap on the trimmed
+# map alone, and the check would be silently back to skipping the busiest store.
+# Both shapes are pinned in run.test.sh (fat beads; then many small ones).
+#
+# The projection in flush_chunk below is a separate, smaller claim — a bound on
+# jq's working set, not on argv (tk-gu2ctv).
+ROOTMAP_DIR=$(mktemp -d 2>/dev/null) || ROOTMAP_DIR=""
+if [ -z "$ROOTMAP_DIR" ] || [ ! -d "$ROOTMAP_DIR" ]; then
+    echo "cannot determine whether any finalized molecule is still offering steps"
+    echo "could not create a temporary directory to stage the molecule-root map; the join this check performs has nowhere to put its input, and a verdict computed without it would be a guess."
+    exit 1
+fi
+trap 'rm -rf "$ROOTMAP_DIR"' EXIT
+roots_file="$ROOTMAP_DIR/roots.jsonl"
+
 errors=()
 warnings=()
 notes=()
@@ -194,13 +223,16 @@ while IFS=$'\037' read -r rig_name rig_path; do
     # store: a partial root map would silently reclassify every step under a
     # missing root as "cross-store, not judged", which is exactly the fail-open
     # this check exists to remove.
-    roots_json='[]'
+    if ! : > "$roots_file" 2>/dev/null; then
+        warnings+=("$label: could not stage the molecule-root map at $roots_file — this store was NOT checked")
+        continue
+    fi
     chunk_failed=""
     chunk=()
 
     flush_chunk() {
         [ "${#chunk[@]}" -ne 0 ] || return 0
-        local out rc merged
+        local out rc
         out=$(run_bounded bd show --db "$db" "${chunk[@]}" --json 2>/dev/null)
         rc=$?
         if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
@@ -217,15 +249,28 @@ while IFS=$'\037' read -r rig_name rig_path; do
         # An object contributes nothing; its ids then surface as unresolved-root
         # notes, which is what they are. Anything that is neither shape is still
         # corruption and still fails the store.
-        merged=$(printf '%s' "$out" | jq -c --argjson a "$roots_json" '
-            if type == "array" then $a + .
-            elif type == "object" then $a
-            else error("unexpected root payload") end' 2>/dev/null)
-        if [ -z "$merged" ]; then
+        #
+        # Projected to the three fields the join actually reads — id, status,
+        # closed_at — before anything is retained. This is NOT what keeps the
+        # map under the argv cap; staging it in a file is (see the header). It
+        # bounds what the two programs below slurp into memory, twice per store
+        # and once per store in the city, to something proportional to molecule
+        # COUNT rather than to however much prose has accumulated on the roots:
+        # the store that prompted this shrinks 436 KB -> ~5 KB. Drop the
+        # projection and the check still passes its suite — correctly, because
+        # nothing about the verdict changes.
+        #
+        # One object per line, so `--slurpfile` reconstitutes precisely the
+        # array-of-roots shape both jq programs below already expect. Their
+        # bodies are unchanged by this staging.
+        if ! printf '%s' "$out" | jq -c '
+                if type == "array" then .[] | select(type == "object")
+                                            | {id, status, closed_at}
+                elif type == "object" then empty
+                else error("unexpected root payload") end' >> "$roots_file" 2>/dev/null; then
             chunk_failed="unparseable root payload"
             return 1
         fi
-        roots_json="$merged"
         chunk=()
         return 0
     }
@@ -248,7 +293,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
     # One line per molecule per shape, not one per step: a molecule that
     # finalized around seven open steps is ONE defect, and seven lines of it
     # would bury the single-step reopen loop that is the more urgent shape.
-    rows=$(printf '%s' "$steps" | jq -r --argjson roots "$roots_json" '
+    rows=$(printf '%s' "$steps" | jq -r --slurpfile roots "$roots_file" '
         ($roots | map(select(type == "object" and ((.id // "") | tostring) != ""))
                 | map({key: (.id | tostring), value: .}) | from_entries) as $R
         | [ .[]?
@@ -280,7 +325,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
     # Steps whose root resolved nowhere in this store. A cross-store root is
     # legitimate, so this is a note; but it is REPORTED, because a root that
     # simply does not exist any more looks identical from here.
-    unresolved=$(printf '%s' "$steps" | jq -r --argjson roots "$roots_json" '
+    unresolved=$(printf '%s' "$steps" | jq -r --slurpfile roots "$roots_file" '
         ($roots | map(select(type == "object" and ((.id // "") | tostring) != ""))
                 | map({key: (.id | tostring), value: .}) | from_entries) as $R
         | [ .[]?

@@ -346,6 +346,99 @@ eq "$RC" "1" "a root payload that is neither array nor object is a WARNING"
 has "$OUT" "could not resolve molecule roots" "corrupt root bytes are reported as a failed probe"
 clear_store alpha
 
+# --- 13. The root map must never cross jq's argv boundary (tk-gu2ctv) --------
+# Linux caps a SINGLE argv string at MAX_ARG_STRLEN — 32 pages, 131072 B on a
+# 4K-page host — independently of the much larger ARG_MAX. `bd show` answers
+# each root's full description and notes, so a root map passed as `jq --argjson
+# roots ...` stops working once a store's molecules carry enough prose: jq never
+# execs at all, the join exits non-zero, and the store is reported UNCHECKED.
+#
+# The failure is silent, total, and biased toward exactly the store that matters
+# most — it lands on whichever store is busiest, while the small rigs keep
+# passing and hold the check green. Observed: gc-toolkit's 73 roots came back as
+# 436 KB, 3.3x the cap, and that store went unexamined on EVERY run.
+#
+# So the fixture is a root fat enough to breach the cap with a REAL finding
+# underneath it, and the assertion is that the finding is REPORTED — not merely
+# that the check survives. A check that degraded to a clean pass here would be
+# the original silence wearing a green badge.
+FAT=$(head -c 200000 /dev/zero | tr '\0' 'x')
+# The padding lives in description/notes — the fields the check must drop before
+# the map is retained. Put it anywhere the join actually reads and no projection
+# could save it.
+root_fat() { # root_fat <id> <status> <closed_at>
+    printf '{"id":"%s","status":"%s","closed_at":"%s","description":"%s","notes":"%s"}' \
+        "$1" "$2" "$3" "$FAT" "$FAT"
+}
+gt() { if [ "$1" -gt "$2" ]; then ok "$3"; else bad "$3 (got '$1', want > '$2')"; fi; }
+
+put steps alpha "$(step a-s12 a-r8 pass)"
+put roots alpha "$(root_fat a-r8 closed "$LONG_AGO")"
+gt "$(wc -c < "$TMP/roots/alpha.json" | tr -d ' ')" 131072 \
+   "positive control: the root fixture really does exceed MAX_ARG_STRLEN"
+
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a root map larger than the argv cap is still JOINED, not skipped"
+has "$OUT" "a-s12" "the finding under an oversized root map is reported"
+has "$OUT" "a-r8" "the finalized molecule is named"
+hasnt "$OUT" "could not be computed" "the join is not reported as uncomputable"
+hasnt "$OUT" "was NOT checked" "the oversized store is not reported as unchecked"
+
+# The same cap applies to the ACCUMULATOR, which grows across chunks: resolving
+# roots in batches bounds the ids going OUT to `bd show`, but nothing bounded
+# the map coming BACK. Forcing one root per chunk puts the overflow on the
+# accumulate step instead of the join, which is the same defect one call earlier.
+put steps alpha "$(step a-s13 a-r9 pass)" "$(step a-s14 a-r10)"
+put roots alpha "$(root_fat a-r9 closed "$LONG_AGO")" "$(root_fat a-r10 closed "$LONG_AGO")"
+OUT=$(GC_DOCTOR_ROOT_CHUNK=1 run_check); RC=$?
+eq "$RC" "2" "the root map survives being accumulated one chunk at a time"
+has "$OUT" "a-s13" "the reopened step under a fat multi-chunk map is reported"
+has "$OUT" "a-s14" "the never-closed step under a fat multi-chunk map is reported"
+hasnt "$OUT" "could not resolve molecule roots" "accumulating fat roots is not a failed probe"
+hasnt "$OUT" "was NOT checked" "a chunked fat root map does not skip the store"
+
+# A fat root that is HEALTHY must still stay quiet — the projection must not
+# manufacture a finding by losing the status it filters on.
+put steps alpha "$(step a-s15 a-r11)"
+put roots alpha "$(root_fat a-r11 in_progress "")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an oversized root map for a LIVE molecule still passes"
+hasnt "$OUT" "a-s15" "the live molecule's step is not named as a finding"
+clear_store alpha
+
+# --- 14. ...and COUNT alone can breach the cap, with no fat bead in sight ----
+# The case above is fixable two ways: drop the prose, or get the map off argv.
+# Projecting the map to the fields the join reads is worth doing — it is what
+# keeps jq's working set proportional to molecules rather than to accumulated
+# notes — but on its own it only moves the ceiling. A store with enough
+# molecules breaches the cap on the projection itself, and then a check that
+# had merely been trimmed is silently back to reporting the busiest store
+# UNCHECKED. So this store is the opposite shape of the last one: every bead is
+# small and there are simply a lot of them. It fails against a projection-only
+# fix, which is what makes the staging file load-bearing rather than belt.
+MANY=2500
+jq -nc --arg ca "$LONG_AGO" --argjson n "$MANY" \
+   '[range(0;$n) | {id:("m-r"+(.|tostring)), status:"closed", closed_at:$ca}]' \
+   > "$TMP/roots/alpha.json"
+jq -nc --argjson n "$MANY" \
+   '[range(0;$n) | {id:("m-s"+(.|tostring)), status:"open",
+                    metadata:{"gc.root_bead_id":("m-r"+(.|tostring)), "gc.outcome":"pass"}}]' \
+   > "$TMP/steps/alpha.json"
+
+# The control that gives this case its meaning: the map is over the cap AFTER
+# projection, so trimming fields cannot rescue it.
+gt "$(jq -c '.[] | {id, status, closed_at}' "$TMP/roots/alpha.json" | wc -c | tr -d ' ')" 131072 \
+   "positive control: even the PROJECTED root map for this store exceeds the argv cap"
+
+# One chunk, so the map crosses the boundary once and the assertion is about
+# size rather than about how many times the stub was asked.
+OUT=$(GC_DOCTOR_ROOT_CHUNK="$MANY" run_check); RC=$?
+eq "$RC" "2" "a store with more molecules than fit on argv is still joined"
+has "$OUT" "$MANY molecule(s)" "every finalized molecule in the large store is reported"
+hasnt "$OUT" "was NOT checked" "a large store is not skipped"
+hasnt "$OUT" "could not be computed" "the join over a large store is computed"
+clear_store alpha
+
 # --- Summary ----------------------------------------------------------------
 echo
 echo "passed: $PASS  failed: $FAIL"
