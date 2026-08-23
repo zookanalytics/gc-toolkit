@@ -254,6 +254,22 @@ func populatedStore() *fakeStore {
 				// A convoy's own blocks-edges are not membership.
 				withDepType(child("tk-m2", "open", testNow, ""), "blocks"),
 			},
+			// The `--waiting-on` edges. Every kind that spends them gets one
+			// here, so a gather that stops reading them for a kind is visible
+			// as a missing edge rather than as a silently vacuous derivation:
+			// board.ruled reads waiting_on_open, and with no edges gathered at
+			// all that clause is trivially satisfied and every answered row
+			// stands down whether or not its work landed.
+			"tk-dec": {
+				withDepType(child("tk-w1", "closed", testNow, ""), "blocks"),
+				// Not a wait — only `blocks` counts.
+				withDepType(child("tk-w2", "open", testNow, ""), "related"),
+			},
+			"tk-human":  {withDepType(child("tk-w3", "open", testNow, ""), "blocks")},
+			"tk-parked": {withDepType(child("tk-w4", "closed", testNow, ""), "blocks")},
+			// An epic is banded by a child roll-up that already says whether
+			// its work is moving, so its edges are deliberately NOT read.
+			"tk-epic": {withDepType(child("tk-w5", "closed", testNow, ""), "blocks")},
 		},
 	}
 }
@@ -510,6 +526,128 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 	}
 	if got := human.Metadata["gc.routed_to"]; got != "human" {
 		t.Errorf("the marker that selected the anchor must ride on it: %v", human.Metadata)
+	}
+}
+
+// TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem pins WHICH kinds pay
+// the per-anchor dependency read.
+//
+// Three spend the answer: `parked` through board.dispositionDue, and
+// `decision` / `human` through board.ruled (tk-b3rga). The last two are why
+// this is not a parked-only read any more — and the failure mode of getting it
+// wrong is silent rather than loud. board.ruled asks "has every recorded wait
+// landed?"; with no edges gathered, waiting_on_open is empty and the answer is
+// vacuously yes, so an answered decision whose routed work is still open would
+// stand down anyway. Nothing errors, no field goes missing, and the only
+// visible symptom is a row that quietly stopped asking too early.
+//
+// `epic` and `convoy` deliberately do not pay it: they are banded by a child
+// roll-up that already reports whether their work is moving.
+func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	find := func(id, kind string) (int, bool) {
+		for i, a := range res.Anchors {
+			if a.ID == id && a.Kind == kind {
+				return i, true
+			}
+		}
+		return 0, false
+	}
+
+	for _, c := range []struct {
+		id, kind string
+		want     []string
+		closed   []string
+		why      string
+	}{
+		{"tk-dec", "decision", []string{"tk-w1"}, []string{"tk-w1"},
+			"a decision spends its waits through the stand-down rule"},
+		{"tk-human", "human", []string{"tk-w3"}, nil,
+			"so does a human-routed bead — and this one is still outstanding"},
+		{"tk-parked", "parked", []string{"tk-w4"}, []string{"tk-w4"},
+			"the parked read tk-2plde added is unchanged"},
+		{"tk-epic", "epic", nil, nil,
+			"an epic is banded by its roll-up; it does not pay the extra read"},
+	} {
+		idx, ok := find(c.id, c.kind)
+		if !ok {
+			t.Errorf("%s/%s: anchor missing", c.id, c.kind)
+			continue
+		}
+		a := res.Anchors[idx]
+		if len(a.WaitingOn) != len(c.want) {
+			t.Errorf("%s/%s: waiting_on=%v, want %v — %s", c.id, c.kind, a.WaitingOn, c.want, c.why)
+		} else {
+			for i := range c.want {
+				if a.WaitingOn[i] != c.want[i] {
+					t.Errorf("%s/%s: waiting_on=%v, want %v — %s", c.id, c.kind, a.WaitingOn, c.want, c.why)
+					break
+				}
+			}
+		}
+		if len(a.WaitingOnClosed) != len(c.closed) {
+			t.Errorf("%s/%s: waiting_on_closed=%v, want %v", c.id, c.kind, a.WaitingOnClosed, c.closed)
+		}
+	}
+}
+
+// TestWaitingEdgeFailureIsUnknownNotEmpty is the fail-closed half of the read
+// above: WHICH kinds pay it is pinned there, what a FAILED payment reports is
+// pinned here.
+//
+// The per-anchor dependency query can fail on its own — a Dolt timeout, a
+// schema skew — while the anchor query that found the row succeeded. The row is
+// still gathered, because dropping it would hide work, so the only trace of the
+// failure is what this reports about its edges. Report an empty set and the
+// anchor is indistinguishable from one that genuinely has no waits, which is
+// precisely the state board.ruled reads as "every recorded wait has landed":
+// the answered row stands down because its graph could not be read (tk-fhd705).
+func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := populatedStore()
+	// Only the decision's read fails. The other two kinds that spend the edges
+	// are the control: one anchor's failure must not mark the rest unknown, or
+	// a single slow query quietly re-elevates half the board.
+	st.failDeps = map[string]error{"tk-dec": errors.New("dolt timeout")}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	i, ok := findAnchor(res, "tk-dec")
+	if !ok {
+		t.Fatal("an anchor whose edge read fails must still appear")
+	}
+	dec := res.Anchors[i]
+	if len(dec.WaitingOn) != 0 || len(dec.WaitingOnClosed) != 0 {
+		t.Errorf("a failed read invents no edges: %v / %v", dec.WaitingOn, dec.WaitingOnClosed)
+	}
+	if !dec.WaitingUnknown {
+		t.Error("a failed edge read must report UNKNOWN, not an empty wait set — " +
+			"board.ruled cannot tell the two apart without it, and stands the row down")
+	}
+	if !res.Partial {
+		t.Error("a failed edge read must set partial")
+	}
+
+	for _, id := range []string{"tk-human", "tk-parked"} {
+		j, ok := findAnchor(res, id)
+		if !ok {
+			t.Fatalf("%s: anchor missing", id)
+		}
+		if res.Anchors[j].WaitingUnknown {
+			t.Errorf("%s: one anchor's failed read must not mark another unknown", id)
+		}
+		if len(res.Anchors[j].WaitingOn) == 0 {
+			t.Errorf("%s: the control anchors must still carry their real edges", id)
+		}
 	}
 }
 

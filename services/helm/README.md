@@ -102,9 +102,9 @@ Five kinds are gathered. The first three are selected by the bead's issue
 | kind | selected by | band | why |
 |---|---|---|---|
 | `epic` | `issue_type=epic` | derived from the roll-up | durable per-rig anchor |
-| `decision` | `issue_type=decision` | ELEVATED | human-gated |
+| `decision` | `issue_type=decision` | ELEVATED, LOW once *ruled* | human-gated |
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
-| `human` | `gc.routed_to=human` | ELEVATED | the operator owns it; no agent will take it |
+| `human` | `gc.routed_to=human` | ELEVATED, LOW once *ruled* | the operator owns it; no agent will take it |
 | `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
 
 **Why metadata is an anchor key at all.** The type question cannot see an
@@ -118,6 +118,11 @@ Both metadata gathers **exclude** the three typed kinds, so a bead that is
 already an anchor (an epic carrying a takeaway, say) is not gathered twice. A
 bead carrying both markers is, and `BuildBoard`'s dedup keeps the higher band —
 `human` over `parked`.
+
+That dedup is why the two takeaway rules below key on *human-gatedness* rather
+than on the kind alone. Two rows for one bead, each banded on its own, means the
+LOUDER derivation always wins, so a rule that quiets the `human` row would be
+undone by its `parked` twin on every row it was written for.
 
 Both gathers read the anchor's `parent-child` children, exactly as the `epic`
 gather does. The relation belongs to the bead, not to the kind, and it is
@@ -196,6 +201,72 @@ The disposition-due row is one of two `parked` shapes the web app lifts OUT of
 the quiet section and into the ranked table — the other is a row with open
 children. Leaving either below would re-hide the row the distinction exists to
 surface.
+
+### Until it is answered — the stand-down (`tk-b3rga`)
+
+The same question, asked of the two human-gated kinds, has the opposite answer.
+
+`decision` and `human` are banded by what they ARE, and what they are never
+changes while the bead is open. So a row asked for the operator on the day it
+was filed and went on asking after they answered it. Measured on the 2026-08-23
+board: seven of 24 ELEVATED rows carried a `gc.takeaway` recording their own
+ruling — `tk-z130v` had been ELEVATED for thirty days after being ruled — and
+since converse never closes a subject by contract, nothing in the city could
+ever have retired them. Two constants that never stand down are not
+*unmissable*; uniform is the same thing as invisible.
+
+A row is **ruled** when all three hold:
+
+1. it is human-gated — kind `decision` or `human`, or a bead carrying
+   `gc.routed_to=human` (which is how the `parked` twin of one is recognised);
+2. it carries a `gc.takeaway`; and
+3. its `blocks` waits were READ, and none of them is still open.
+
+| shape | row |
+|---|---|
+| no takeaway | unchanged: ELEVATED, "human-gated decision" / "operator action" |
+| takeaway, waits unreadable | unchanged — an unread graph proves nothing |
+| takeaway, a wait still open | unchanged — answering is not finishing |
+| takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
+| takeaway, every wait landed, *with* children | banded by the roll-up, like a decomposed `parked` subject |
+
+The last row is the `tk-a9k0l` lesson one kind over: "answered" is a claim about
+the BEAD, and open work hanging under it falsifies the claim. A ruling must not
+become a new way to hide a stranded child.
+
+Three properties carry over from the disposition rule, and one is new:
+
+- **Derived, never stored** — so a re-opened question stands back up by itself.
+- **The wait clause is not decoration.** It is why `waitingEdges` is read for
+  `decision` and `human` and not for `parked` alone: with no edges gathered,
+  "every wait landed" is vacuously true and an answered decision whose routed
+  work is still open would stand down anyway. Nothing errors and no field goes
+  missing — the only symptom is a row that quietly stopped asking too early.
+- **An empty wait set only counts when it was READ.** The clause fires on the
+  absence of open waits, and a failed per-anchor dependency query produces that
+  same absence — so a Dolt timeout would stand an answered row down and invite
+  the operator to close or extend a question whose routed work the board never
+  checked. `waitingEdges` therefore reports a read failure as
+  `Anchor.WaitingUnknown` rather than as an empty set, and `ruled` refuses it
+  (tk-fhd705). `gc-helm.sh` needs no counterpart: there `waiting_on` rides on
+  the same payload that produced the anchor, so a failed read drops the row
+  rather than leaving it standing with its edges missing.
+- **LOW, not NORMAL.** NORMAL is stale-bumped past fourteen days, which would
+  put `tk-z130v` — thirty days old — straight back in the band it was standing
+  down from.
+- **`dispositionDue` yields to it.** That promotion exists to lift a row out of
+  the parked LOW *floor*; a human-gated bead was never in that floor, and the
+  stand-down answers for the same state at the volume the operator asked for.
+  Both firing would put an ELEVATED duplicate of every stood-down row back on
+  the board, and the dedup would keep it. A `parked` row that is not
+  human-gated is untouched.
+
+NEEDS spends itself on the disposition rather than on the takeaway, the same
+trade the disposition rule makes. The takeaway here is not stale — it IS the
+ruling — but NEEDS answers "what does this row want from me", and what a ruled
+row wants is a close or a re-open, not a re-read. The ruling stays on the wire
+in `takeaway`, where nothing truncates it; in the terminal table it was the
+longest cell in that column and the least actionable.
 
 ## Architecture
 

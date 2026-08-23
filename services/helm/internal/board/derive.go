@@ -287,13 +287,77 @@ func waitingSplit(a Anchor) (all, open []string) {
 	return all, open
 }
 
+// humanGated is "no agent will take this — it moves only when a human moves
+// it". The two kinds that say so by BEING what they are, plus the marker that
+// says so on an ordinary bead.
+//
+// The third clause is not redundant with the second. A bead carrying BOTH
+// `gc.routed_to=human` and a `gc.takeaway` is gathered twice on purpose, once
+// per marker, and the two rows are reconciled by BuildBoard's id-dedup, which
+// keeps the HIGHER band. So any rule that lowers the `human` row is silently
+// undone by its `parked` twin unless the twin is recognised as the same
+// human-gated bead — which is what reading the marker off the anchor does.
+func humanGated(a Anchor) bool {
+	return a.Source == "decision" || a.Source == "human" ||
+		a.Metadata["gc.routed_to"] == "human"
+}
+
+// ruled is the STAND-DOWN state: a human-gated row that has already been
+// answered, and whose recorded waits have all landed.
+//
+// A decision or a human-routed bead is banded by what it IS, and what it is
+// never changes while the bead is open — so the row asked for the operator on
+// the day it was filed and went on asking after they answered it. Measured
+// 2026-08-23: seven ELEVATED rows on a 62-row board carried a takeaway
+// recording their own ruling, one of them (tk-z130v) for THIRTY DAYS. Nothing
+// else in the city re-reads a takeaway, and converse never closes a subject by
+// contract, so no other actor could ever retire them.
+//
+// The shape is the one `parked` already has (dispositionDue below, tk-2plde):
+// derived per render from state the bead already carries, storing nothing, so
+// nothing has to be cleared when it changes and a re-opened question stands
+// back up by itself.
+//
+// The wait clause is what keeps it honest — "answered" is not "answered and
+// the work landed". A decision whose `--waiting-on` edge is still open has not
+// finished being a decision, so it keeps its band. Those edges are gathered for
+// these kinds precisely so this clause can fire; without them it would be a
+// guard that guards nothing.
+//
+// And the clause counts only when the source actually READ those edges. An
+// empty waitingOpen means "every recorded wait has landed" if and only if the
+// waits were legible; when the dependency query failed it means nothing at
+// all, and the row keeps the band it already had. That asymmetry is the whole
+// point of the wait clause: NOT standing a row down costs the operator a
+// glance, while standing one down on an unread graph invites them to close or
+// extend a question whose routed work is still open — the exact fail-open the
+// clause exists to prevent (tk-fhd705).
+func ruled(a Anchor, takeaway string, waitingOpen []string) bool {
+	return humanGated(a) && takeaway != "" &&
+		!a.WaitingUnknown && len(waitingOpen) == 0
+}
+
 // dispositionDue is the state the waiting edges exist to express: a parked
 // conversation that WAS waiting on something, every piece of which has landed.
 // The takeaway still says what the sitting decided at dispatch time, and
 // nothing else in the city re-reads it, so this is the only thing that can
 // notice the wait ended (tk-2plde).
+//
+// NOT for a human-gated subject, including the `parked` TWIN of one. The
+// promotion exists to lift a row out of the parked LOW FLOOR, where nobody
+// would ever look at it again; a human-gated bead was never in that floor, and
+// once [ruled] answers for the same state it says the same thing — dispose of
+// this — at the volume the operator asked for. Letting both fire would put an
+// ELEVATED duplicate of every stood-down row back on the board, and the dedup
+// would keep it.
+//
+// It needs no unreadable-edges clause of its own. This promotion fires only on
+// a row that HAS recorded waits, so an anchor whose edge read failed — which
+// carries none — can never reach it. [ruled] needs the clause precisely
+// because it fires on the empty set.
 func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
-	return a.Source == "parked" && len(waiting) > 0 && len(waitingOpen) == 0
+	return a.Source == "parked" && len(waiting) > 0 && len(waitingOpen) == 0 &&
+		!humanGated(a)
 }
 
 // severity mirrors gc-helm.sh's band derivation.
@@ -305,7 +369,11 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 //   - `unowned` is HIGH: under the everything-is-owned law an unowned
 //     non-machine convoy is exactly the orphan the observer exists to catch.
 //   - `human` is ELEVATED for the same reason a decision is: gc.routed_to=human
-//     means no agent will take it.
+//     means no agent will take it. Both stand DOWN once [ruled] — the row was
+//     answered, and a recorded ruling that keeps asking is the loudest kind of
+//     noise. A ruled row that DECOMPOSED is banded by its roll-up instead,
+//     exactly as a decomposed `parked` subject is: "answered" is a claim about
+//     the bead, and open work hanging under it falsifies the claim (tk-a9k0l).
 //   - `parked` is LOW for the opposite reason — the conversation reached a
 //     takeaway and wants nothing, it only has to stay FINDABLE, so the band
 //     floor keeps it out of the contest whatever its priority or age. UNLESS
@@ -326,13 +394,15 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // counts a slung bead whose movement lives on its workflow, and `held` means a
 // conversation is holding the anchor — attention is already on it, so silence
 // in the child beads is not abandonment.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) Severity {
 	var sev0 Severity
 	inProgressLive := len(r.liveHeads)
 	switch {
 	case a.Source == "unowned":
 		sev0 = SevHigh
-	case a.Source == "decision", a.Source == "human":
+	case isRuled && r.mTotal == 0:
+		sev0 = SevLow
+	case !isRuled && (a.Source == "decision" || a.Source == "human"):
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
@@ -373,7 +443,7 @@ func rankScore(sev Severity, w, stale int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue bool) string {
+func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRuled bool) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	deadSfx := ""
@@ -384,9 +454,14 @@ func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue bool)
 	switch {
 	case a.Source == "unowned":
 		return "unowned convoy — no owning bead"
-	case a.Source == "decision":
+	// Parallel to the parked phrase below, and for the same reason: the row is
+	// reporting what it IS, because it has no roll-up to report instead. A
+	// ruled row that decomposed skips this and reports its counts.
+	case isRuled && r.mTotal == 0:
+		return "ruled — takeaway recorded"
+	case !isRuled && a.Source == "decision":
 		return "human-gated decision"
-	case a.Source == "human":
+	case !isRuled && a.Source == "human":
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
@@ -428,7 +503,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue bool) string {
+func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool) string {
 	// The disposition phrase OUTRANKS the takeaway, and only here. Every other
 	// row spends its takeaway as NEEDS because the sentence is the best answer
 	// available; on this row the sentence is precisely what has gone stale —
@@ -438,9 +513,24 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue bool) string 
 	if dispDue {
 		return "blocker landed — dispose or resume"
 	}
+	// A ruled row spends its NEEDS on the DISPOSITION for the same reason, and
+	// with the same trade. The takeaway is not stale here — it is the ruling —
+	// but NEEDS answers "what does this row want from me", and what a ruled row
+	// wants is to be closed or re-opened, not re-read. The ruling itself stays
+	// on the wire in `takeaway`, where nothing truncates it; in the terminal
+	// table it was the column's longest cells (n=20 over the 140-char cap on
+	// the 2026-08-23 board, max 1343) and the least actionable.
+	//
+	// Only while the row has no roll-up. A ruled row with children reports the
+	// takeaway and is banded by those children, so the two halves of it agree.
+	if isRuled && r.mTotal == 0 {
+		return "ruled — close or extend"
+	}
 	if takeaway != "" {
 		return takeaway
 	}
+	// Below here the takeaway is empty, so isRuled is false by construction and
+	// the decision/human branches need no guard of their own.
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 
@@ -494,10 +584,11 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	stale := staleDays(a.UpdatedAt, now)
 	xrefs := crossRigRefs(a, f)
 	waiting, waitingOpen := waitingSplit(a)
-	dispDue := dispositionDue(a, waiting, waitingOpen)
-	sev := severity(a, r, held, stale, dispDue)
-	w := weight(r, a.Priority, xrefs)
 	takeaway := collapseWS(a.Takeaway)
+	dispDue := dispositionDue(a, waiting, waitingOpen)
+	isRuled := ruled(a, takeaway, waitingOpen)
+	sev := severity(a, r, held, stale, dispDue, isRuled)
+	w := weight(r, a.Priority, xrefs)
 
 	// progress_mismatch: the convoy's own closed/total claim disagrees with the
 	// membership actually rolled up. Only meaningful where the source supplied
@@ -551,8 +642,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		TakeawayBy: nilIfEmpty(a.TakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
-		Frontier:  frontier(a, r, held, waitingOpen, dispDue),
-		Needs:     needs(a, r, held, takeaway, dispDue),
+		Frontier:  frontier(a, r, held, waitingOpen, dispDue, isRuled),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled),
 		RankScore: rankScore(sev, w, stale),
 	}
 }

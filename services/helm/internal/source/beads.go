@@ -453,8 +453,14 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 			case "convoy":
 				a.Children = s.convoyChildren(ctx, g, st, iss.ID)
 				applyConvoyOwnership(&a, convoys)
+			case "decision":
+				// A decision needs no roll-up: it is banded by what it IS.
+				// It does need its waiting edges, though — they are half of
+				// the stand-down test (board.ruled), and without them the
+				// "and the work landed" clause would be vacuous for exactly
+				// the kind an operator files a `--waiting-on` edge on.
+				a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
 			}
-			// A decision needs no roll-up: its band is ELEVATED regardless.
 			g.anchors = append(g.anchors, a)
 		}
 	}
@@ -507,34 +513,45 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 			}
 			a := newAnchor(iss, ma.kind, r)
 			a.Children = s.parentChildren(ctx, g, st, iss.ID)
-			if ma.kind == "parked" {
-				a.WaitingOn, a.WaitingOnClosed = s.waitingEdges(ctx, g, st, iss.ID)
-			}
+			a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
 			g.anchors = append(g.anchors, a)
 		}
 	}
 }
 
-// waitingEdges reads the `blocks` blockers of a parked subject and reports
-// which of them have closed.
+// waitingEdges reads the `blocks` blockers of a subject and reports which of
+// them have closed.
 //
-// WHY ONLY PARKED. The edge answers one question — "is the work this
-// conversation was waiting on done?" — and only a parked row spends the answer
-// (board.dispositionDue). Restricting it here also keeps the query count tied
-// to the parked rows rather than to every metadata-keyed anchor, and keeps this
-// gather field-for-field identical to gc-helm.sh's, which emits waiting_on for
-// the parked kind alone.
+// WHO SPENDS IT. The edge answers one question — "is the work this row was
+// waiting on done?" — and three kinds spend the answer: `parked` through
+// board.dispositionDue, and `decision` / `human` through board.ruled. It is
+// read for those three and not for `epic` or `convoy`, whose bands come from a
+// child roll-up that already says whether their work is moving. gc-helm.sh
+// gathers the same three, so the two boards stay field-for-field identical.
 //
-// FAILURE IS SILENT AND QUIET-SIDE. A store that errors yields no blockers at
-// all, so the row carries no waiting edges and stays exactly as it rendered
-// before this existed. A blocker that IS read but is not closed is simply
-// omitted from the closed list, which the derivation counts as outstanding.
-// Neither shape can promote a row whose work is still in flight.
-func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadStore, id string) (all, closed []string) {
+// FAILURE REPORTS ITSELF. The two failure shapes are not the same, and only
+// one of them used to be safe. A blocker that IS read but is not closed is
+// simply omitted from the closed list, which the derivation counts as
+// outstanding — the quiet direction. A store that ERRORS yields no blockers at
+// all, and while this read was parked-only that was equally quiet
+// (board.dispositionDue needs a recorded wait to fire, so an empty set fires
+// nothing), it stopped being quiet the moment `decision` and `human` started
+// spending the same edges: board.ruled fires ON the empty set, reading it as
+// "every recorded wait has landed". So the error is returned as unknown rather
+// than as absence, and the derivation keeps the row's band (tk-fhd705). The
+// gather is marked partial either way, so the board also says out loud that it
+// is degraded.
+//
+// gc-helm.sh has no matching state to guard: there, `waiting_on` rides on the
+// SAME `bd list --json` payload that produced the anchor, so a failed read
+// drops the anchor entirely and cannot leave one standing with its edges
+// silently missing. The separate per-anchor query here is what creates the
+// third case.
+func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadStore, id string) (all, closed []string, unknown bool) {
 	deps, err := st.GetDependenciesWithMetadata(ctx, id)
 	if err != nil {
 		g.note(true, []string{"waiting@" + id + ": " + err.Error()})
-		return nil, nil
+		return nil, nil, true
 	}
 	for _, d := range deps {
 		if d == nil || string(d.DependencyType) != "blocks" {
@@ -545,7 +562,7 @@ func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadS
 			closed = append(closed, d.Issue.ID)
 		}
 	}
-	return all, closed
+	return all, closed, false
 }
 
 // newAnchor projects one bead onto a board anchor under the given kind. Kind
