@@ -51,6 +51,7 @@ prompt_template = "gastown//agents/polecat/prompt.template.md"
 inject_fragments = [
     "polecat-convoys",
     "polecat-append-notes",
+    "polecat-close-step-chain",
     "polecat-non-impl-done",
     "file-work-records",
     "file-feedback-observations",

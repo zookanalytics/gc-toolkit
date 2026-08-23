@@ -151,6 +151,14 @@ inject_fragments_append = [
     # submit-and-exit step. It is the anti-case to polecat-non-impl-done: a
     # 2,583 B correction on the path EVERY polecat takes.
     "polecat-append-notes",
+    # The same two done-sequence copies (plus mol-polecat-work's
+    # submit-and-exit) all end at `gc runtime drain-ack` without closing a
+    # single step bead. A graph.v2 step advances only by closing its own, so
+    # every completed run left its whole chain open, pool-routed and
+    # re-offered as new work — 490 of 746 open beads at the census (tk-zab6q).
+    # This fragment supersedes that ending in all three copies. Like
+    # polecat-append-notes, a correction on the path EVERY polecat takes.
+    "polecat-close-step-chain",
     "file-work-records",
     # Feedback-learning loop (specs/2026-08-learning-system/
     # implementation-design.md §2a, §5): the capture fragment files

@@ -48,9 +48,34 @@ merge review.
 The polecat sets `metadata.branch` and `metadata.target` on the work bead
 and reassigns it to the refinery. The refinery merges and closes.
 
-**NEVER CLOSE BEADS.** You must not run `bd close` or set status=closed.
-Even if you believe the code is already merged, reassign to refinery —
-only the refinery verifies merges and closes beads.
+**NEVER CLOSE THE WORK BEAD.** You must not run `bd close` or set
+status=closed on the issue you were dispatched to implement. Even if you
+believe the code is already merged, reassign to refinery — only the refinery
+verifies merges and closes work beads.
+
+**ALWAYS CLOSE YOUR OWN STEP BEADS.** This is not an exception to the rule
+above; it is a different bead. A graph.v2 step advances only by closing the
+step bead that carries it, so a run that closes nothing leaves all seven steps
+open forever, `workflow-finalize` never becomes ready, and the whole chain is
+re-offered as if it were unstarted work. That is the husk generator this
+formula shipped for months (tk-y389z, tk-zab6q): the blanket "never close
+beads" rule was read as covering step beads, which are machinery, not work.
+
+The two are told apart by who owns them, not by judgement:
+
+| Bead | Carries | Closed by |
+|---|---|---|
+| work bead | the issue being implemented | the refinery, after a verified merge |
+| step bead | `metadata."gc.step_ref"` + your session as `assignee` | **you**, via `assets/scripts/step-close.sh` |
+| `workflow-finalize` | `gc.kind=workflow-finalize`, routed to `core.control-dispatcher` | the control-dispatcher — never you |
+
+`submit-and-exit` step 8 closes the chain. Close a step bead ONLY through
+`assets/scripts/step-close.sh`, which resolves the bead from the
+`(assignee, gc.step_ref)` pair — never from `$GC_TRIGGER_BEAD_ID` or
+`$GC_BEAD_ID`, both of which name the wrong bead after a hook-claim and fail
+silently (tk-niu2f, tk-7w69a). `doctor/check-step-close-owns-bead` enforces
+this.
+
 `{{base_branch}}` may come from the work bead's own `metadata.target` or
 be inherited from a parent convoy with `metadata.target` set.
 
@@ -494,23 +519,50 @@ This is a belt-and-suspenders check — self-review should have caught this,
 but we never push with untracked work left behind.
 
 **3. Push your branch:**
+
+The `auto_push=false` arm is a *terminal* exit — it ends the run deliberately
+without a handoff — so it carries its own copy of step 8's chain-close block.
+It has to be a copy rather than a call: `exit 0` never reaches step 8, and each
+fenced block is its own shell, so a function defined in one is out of scope in
+the other. The suite pins the two byte-identical (modulo this arm's two-space
+indent), exactly as it already pins the prompt fragment's copy — a block
+written twice is how the `--notes` correction was defeated before (tk-t41dq).
+
+The `gc bd update` below is one long line on purpose. Everything between the
+markers is extracted from this file verbatim and executed by the test, so it
+has to be backslash-free: TOML eats a trailing backslash together with the
+newline and the next line's indent, and a shell continuation written here would
+mean the test runs something other than what the polecat reads. The suite
+asserts the absence.
+
 ```bash
+# >>> submit-auto-push-halt
 AUTO_PUSH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata | if has("auto_push") then (.auto_push | tostring) else "" end')
 if [ "$AUTO_PUSH" = "false" ]; then
   echo "auto_push=false: halting at branch-ready (no push, no refinery handoff)"
   BRANCH=$(git branch --show-current)
   [ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
-  gc bd update "$WORK_BEAD_ID" \
-    --status=open --assignee="" \
-    --set-metadata branch="$BRANCH" \
-    --set-metadata target="$LANDING_TARGET" \
-    --set-metadata branch_ready=true \
-    --set-metadata halt_reason=auto_push_false \
-    --set-metadata gc.routed_to="" \
-    --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  gc bd update "$WORK_BEAD_ID" --status=open --assignee="" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  # The bead is at rest. What is still open is the step chain, and it is still
+  # this session's — an opt-out halt strands the same husk as any other
+  # unclosed exit, and it is the one exit tidy enough to forget. Close it here,
+  # after the bead write and before the drain, for the reasons step 8 gives:
+  # forward order because `bd` refuses to close a blocked issue, and
+  # `workflow-finalize` left for the control-dispatcher.
+  # >>> submit-halt-chain-close
+  SC=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+  done
+  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment (tk-niu2f)}"
+  for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+    "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+  done
+  # <<< submit-halt-chain-close
   gc runtime drain-ack
   exit 0
 fi
+# <<< submit-auto-push-halt
 git push origin HEAD
 PUSH_EXIT=$?
 if [ $PUSH_EXIT -ne 0 ]; then
@@ -609,7 +661,80 @@ starts a stopped on_demand session; nudge leaves a visible prompt for a running
 one as soon as it is ready for input. Failure is non-fatal: the refinery finds
 the work on its next poll.
 
-**8. Signal reconciler and exit.**
+**8. Close this workflow's step chain (before draining).**
+
+This step and the `auto_push=false` arm in step 3 are the run's only *terminal*
+exits — the two places the session ends for good rather than halting for a
+resume — so both close the chain, each with its own copy of the block below.
+Every other arm in this step halts with the work resumable, and there the open
+chain **is** the recovery mechanism: a fresh polecat picks the run back up.
+
+The work bead is now the refinery's. What is still yours is the graph.v2
+machinery that carried this run, and it does not clean itself up: a step
+advances only by closing its own bead, so a session that drains while its
+steps are open leaves all seven behind. They keep `gc.routed_to` pointing at
+the polecat pool, the drain releases their assignee, and `load-context` — the
+one step nothing blocks — becomes ready and claimable. The next polecat is
+then offered a finished run that is indistinguishable from new work, and if
+it takes the offer at face value `workspace-setup` rebuilds a branch that may
+already be green-gated under a live review. This is the husk generator
+(tk-y389z, tk-zab6q); closing the chain here is what stops it.
+
+```bash
+# >>> submit-chain-close
+SC=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+: "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment (tk-niu2f)}"
+for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+  "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+done
+# <<< submit-chain-close
+```
+
+**The order is forward, and it is not a preference — `bd` enforces it.** Each
+step is blocked by the one before it, and `bd` refuses to close a blocked
+issue:
+
+    tk-3kabdu: updating issue: cannot close blocked issue: tk-3kabdu is blocked by [tk-8yvm91]
+
+So the chain can only unwind from the unblocked end. `load-context` closes
+first because nothing blocks it; closing it is what unblocks
+`workspace-setup`, and so on down to `submit-and-exit`. Any other order closes
+exactly one bead — whichever happens to be unblocked — and reports five
+refusals. Do not "improve" this into dependent-first; it was tried, and it is
+the shape above.
+
+**What the order costs, and why it is still safe enough.** Closing a step is
+what makes the next one *ready*, so this order does briefly publish a ready
+`workspace-setup` — the step that rebuilds a branch — before the loop reaches
+the end. That window is real and cannot be designed away, so it is bounded
+instead:
+
+- The steps stay **assigned to this session** for the whole loop. Pool
+  fallback only offers *unassigned* beads, so a ready step is not claimable
+  while you are alive, and the loop is six consecutive local calls.
+- The loop runs **after** the refinery handoff, so there is no unsubmitted
+  work for a mistaken claim to destroy.
+- `submit-and-exit` closes **last**, and it is the only blocker on
+  `workflow-finalize`. Reaching the end therefore arms
+  `core.control-dispatcher`, whose finalizer closes the workflow root and
+  force-closes any member still open — the backstop for anything this loop
+  missed.
+
+If the session dies mid-loop the remainder is re-pooled, which is exactly the
+pre-fix behaviour for a strictly smaller set of steps. Never run this loop
+before the handoff — or, in the `auto_push=false` arm, before the bead write
+that parks the branch as ready. Both are the moment the work stops being
+something a mistaken claim could destroy.
+
+A non-zero exit from `step-close.sh` means it refused — the bead it would have
+closed is not this session's for that step, or `bd` rejected the close — so
+the loop reports it and carries on. It must not stop the remaining steps from
+closing.
+
+**9. Signal reconciler and exit.**
 ```bash
 gc runtime drain-ack
 exit
@@ -619,4 +744,4 @@ exit
 reconciler only restarts you if the pool check command finds more work.
 You are GONE. Done means gone. There is no idle state.
 
-**Exit criteria:** Branch pushed, metadata set, bead reassigned, refinery signaled, drain acknowledged, session exited."""
+**Exit criteria:** Branch pushed, metadata set, bead reassigned, refinery signaled, step chain closed, drain acknowledged, session exited."""
