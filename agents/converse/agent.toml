@@ -7,16 +7,35 @@
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
-# The nudge names the premise re-check on purpose: it is the one-line
-# restatement of the loop the session reads at wake, and a version that
-# goes straight from claim to hold re-teaches the shape tk-mndjz fixed.
-# It names the CLAIMER rather than `gc hook --claim` for the same reason:
-# the wake instruction is read before the prompt's step 1, so a nudge that
-# says "gc hook --claim" teaches the unscoped claim this pack removed —
-# the one that vacuumed an unrelated subject onto a live operator thread
-# (tk-msfmu). `gc hook --claim` has no group filter; converse-claim.sh is
-# where the group scoping the design authority requires actually lives.
-nudge = "Run assets/scripts/converse-claim.sh (step 1 resolves it; it wraps gc hook --claim --json and scopes the claim to your continuation group); converse demand is a routed visit bead. Re-check the visit's premise against live state — a dead or benign premise closes silently, with nothing posted. Otherwise rebuild the subject's state, prep, hold for the operator."
+# This value is typed into the agent's tmux pane and submitted as if the
+# operator had typed it ("Nudge is text typed into the agent's tmux session
+# after startup" — gascity internal/config/config.go). Converse is the one
+# role whose pane is a human conversation surface; every other pane is a
+# machine work-log where a nudge is invisible plumbing. So this line is
+# operator-facing text, and it stays at peer length — polecat-codex 12 words,
+# mechanik 13, proactive 23.
+#
+# It reached 55 words by ratchet — 21 (ce471c1) -> 40 (ef58879, tk-mndjz) ->
+# 55 (6044336, tk-msfmu) — because each converse incident appended a clause
+# and none ever removed one. The operator read the result in their own thread
+# on 2026-08-22 and ruled it cut back (tk-82epi -> tk-mpl1c).
+#
+# Both appended clauses were redundant on arrival: each restated a mechanism
+# that landed in the same commit. The premise re-check IS step 2 of
+# prompt.template.md. Group scoping is enforced by
+# assets/scripts/converse-claim.sh, which releases an out-of-group turn back
+# to the pool whether or not this line mentions it. That is where the guards
+# live now, and mechanism holds without spending the operator's attention.
+#
+# Two things must survive any future edit. Name the CLAIMER, not
+# `gc hook --claim`: the nudge is read before the prompt's step 1, so naming
+# the raw command re-teaches the unscoped claim tk-msfmu removed. And do not
+# empty the field — a CLI agent needs something typed to start a turn, so an
+# empty nudge wakes a session that then does nothing.
+#
+# STANDING RULE: the next converse incident does not get another clause here.
+# Put the fix in the prompt or in a script.
+nudge = "Run assets/scripts/converse-claim.sh; work the visit it returns."
 # Long idle, but a timeout DOES end a held sitting — do not read this as
 # "visit boundaries are the only ending" (it said that until tk-bzm86
 # checked). Verified 2026-08-11 against the gascity source; the full

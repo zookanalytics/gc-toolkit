@@ -663,10 +663,44 @@ have "the prompt claims through the claimer" 'converse-claim.sh' "$PROMPT"
 have "step 8 re-claims within the group" "Continue or drain — WITHIN THIS GROUP" "$PROMPT"
 # The wake nudge is read BEFORE step 1, so a nudge naming the raw command
 # re-teaches the unscoped claim whatever the prompt says.
-have "the wake nudge names the claimer, not the raw claim" 'converse-claim.sh' "$ATOML"
+#
+# Read the nudge VALUE, not the file. agent.toml's own comment block names
+# converse-claim.sh (that is where it records why the guard moved to
+# mechanism), so a file-wide grep is satisfied by the prose alone: mutating
+# the nudge to "Claim with gc hook --claim --json; work the visit." — the
+# regression this pair exists to catch — left all assertions green while these
+# two read the whole file (tk-mpl1c).
+NUDGE_VAL="$TMPD/converse-nudge.txt"
+# `tr -d` the newline: sed prints an empty LINE for an empty capture, so
+# without it `nudge = ""` writes one byte and reads as non-empty below.
+sed -n 's/^nudge = "\(.*\)"$/\1/p' "$ATOML" | tr -d '\n' > "$NUDGE_VAL"
+if [ -s "$NUDGE_VAL" ]; then
+    ok "agent.toml still carries a non-empty nudge"
+else
+    bad "agent.toml still carries a non-empty nudge" \
+        "a CLI agent needs something typed to start a turn; an empty nudge wakes a session that then does nothing"
+fi
+have "the wake nudge names the claimer, not the raw claim" 'converse-claim.sh' "$NUDGE_VAL"
 lacks "…and does not still tell the session to run the raw claim" \
-      'nudge = "Run gc hook --claim' "$ATOML" \
+      'gc hook --claim' "$NUDGE_VAL" \
       "the nudge teaches the unscoped claim the prompt just removed"
+# Converse is the ONE role whose pane is a human conversation surface — core
+# types this text into it and submits it as if the operator had. Every other
+# pane is a machine work-log, so only here does nudge length cost the operator
+# anything. It ratcheted 21 -> 40 -> 55 words in 13 days because each incident
+# appended a clause and none removed one, and the operator read the result in
+# their own thread (tk-82epi -> tk-mpl1c). The standing rule is "put the fix in
+# the prompt or a script, not another clause here"; an instruction-dependent
+# rule fails silently, so the cap is the enforcement. It sits just above the
+# longest peer (proactive, 23 words) and well under the 40 that drew the first
+# complaint.
+NUDGE_WORDS=$(wc -w < "$NUDGE_VAL" | tr -d ' ')
+if [ "$NUDGE_WORDS" -le 25 ]; then
+    ok "the wake nudge stays at peer length ($NUDGE_WORDS words)"
+else
+    bad "the wake nudge stays at peer length ($NUDGE_WORDS words)" \
+        "converse's pane is the operator's conversation surface — put the fix in the prompt or a script, not another clause here (tk-mpl1c)"
+fi
 
 CTMP="$TMPD/claim"
 mkdir -p "$CTMP/bin"
