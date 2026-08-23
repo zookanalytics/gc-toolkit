@@ -3535,12 +3535,14 @@ reset_close() {
     'cl-FRGN|602|main' \
     'cl-KIDS|603|main' \
     'cl-OK|604|main' \
+    'cl-ORDER|605|main' \
     > "$TMP/anchors"
   printf '%s\n' \
     '601|MERGED|2026-08-09T04:58:00Z|false|6016016016016016|main|polecat/cl-ENC|head601|MERGEABLE|CLEAN' \
     '602|MERGED|2026-08-09T04:58:00Z|false|6026026026026026|main|polecat/cl-FRGN|head602|MERGEABLE|CLEAN' \
     '603|MERGED|2026-08-09T04:58:00Z|false|6036036036036036|main|polecat/cl-KIDS|head603|MERGEABLE|CLEAN' \
     '604|MERGED|2026-08-09T04:58:00Z|false|6046046046046046|main|polecat/cl-OK|head604|MERGEABLE|CLEAN' \
+    '605|MERGED|2026-08-09T04:58:00Z|false|6056056056056056|main|polecat/cl-ORDER|head605|MERGEABLE|CLEAN' \
     > "$TMP/prs"
   # The refusals, transcribed from bd's own format string:
   #   cannot close %s: assignee is %q, actor is %q; reclaim or use --force to override
@@ -3549,7 +3551,11 @@ reset_close() {
   # matching the message alone would be a blanket --force.
   printf 'cl-ENC\tcannot close cl-ENC: assignee is "signal-loom/gc-toolkit.refinery", actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override\n' \
     > "$TMP/closerefuse"
-  printf 'cl-FRGN\tcannot close cl-FRGN: assignee is "signal-loom/gc-toolkit.polecat", actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override\ncl-KIDS\tcannot close cl-KIDS: 2 open child issue(s); close children first or use --force to override\n' \
+  # cl-ORDER is the LIVE shape from the outage (tk-5kfhl): under the exec order,
+  # core stamps BEADS_ACTOR="order:<name>", so the actor is neither encoding of the
+  # refinery. It is correctly NOT forced past — and it is the case that produced ~80
+  # silent failures, so what it must now do is SAY SO.
+  printf 'cl-FRGN\tcannot close cl-FRGN: assignee is "signal-loom/gc-toolkit.polecat", actor is "signal-loom--gc-toolkit__refinery"; reclaim or use --force to override\ncl-KIDS\tcannot close cl-KIDS: 2 open child issue(s); close children first or use --force to override\ncl-ORDER\tcannot close cl-ORDER: assignee is "signal-loom/gc-toolkit.refinery", actor is "order:refinery-reconcile"; reclaim or use --force to override\n' \
     > "$TMP/closehard"
 }
 CLRUN() { bash "$SCRIPT" --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL"; }
@@ -3599,6 +3605,27 @@ has '^cl-OK$' "$TMP/forced" \
   && bad "(CL2-CTL) an unrefused close must not report as forced" \
   || ok "(CL2-CTL) ...and it is not counted as a forced close"
 
+# (CL4) THE REASON IS RECORDED. Every refusal above that the override declines
+# used to return 1 with $out dropped on the floor, and the caller logs only a
+# COUNT. That is how tk-5kfhl ran 8+ hours and ~80 failed closes without recording
+# a cause once, and escalated to the mayor twice carrying a count and no reason.
+# The bead is diagnosable only if the pass writes down what bd actually said.
+for b in cl-FRGN cl-KIDS cl-ORDER; do
+  grep -q "$b close REFUSED" "$TMP/errcl1" \
+    && ok "(CL4) $b: the refusal is reported, not swallowed" \
+    || bad "(CL4) $b: no refusal line on stderr (got: $(cat "$TMP/errcl1"))"
+done
+# ...and it carries bd's OWN text, not a paraphrase: the actor string is the whole
+# diagnosis, and it is the one thing a count can never carry.
+grep -q 'actor is "order:refinery-reconcile"' "$TMP/errcl1" \
+  && ok "(CL4) the echoed refusal carries bd's verbatim message, actor included" \
+  || bad "(CL4) the refusal text must be echoed verbatim (got: $(cat "$TMP/errcl1"))"
+# The live shape must still NOT be forced: order:<name> and the refinery are two
+# principals, whatever this pass believes about itself.
+has '^cl-ORDER$' "$TMP/forced" \
+  && bad "(CL4) the order-actor refusal must never be forced past" \
+  || ok "(CL4) ...and the order-actor refusal is still not forced"
+
 # (CL3) the wedge does not spin silently. cl-FRGN and cl-KIDS fail every pass by
 # construction, so they are the standing case for "a retry loop that can never
 # succeed must not look like routine skipping". The count is per-anchor and
@@ -3621,9 +3648,25 @@ eq "$(grep -c 'will not close over merged PR#602' "$TMP/mail")" "1" \
    "(CL3) ...and ESCALATES to mayor — the ~40 silent retries of PR#518 cannot recur"
 eq "$(grep -c 'will not close over merged PR#603' "$TMP/mail")" "1" \
    "(CL3) each wedged anchor escalates on its own count (cl-KIDS too)"
-hasin "$OUTCL3" '2 wedged-close escalations' \
+# THREE, not two: cl-ORDER wedges on the same never-forced path (tk-5kfhl's live
+# shape). It escalates on its own count like the other two — the count is what the
+# echoed refusal now gives a cause for.
+eq "$(grep -c 'will not close over merged PR#605' "$TMP/mail")" "1" \
+   "(CL3) the order-actor wedge escalates too"
+hasin "$OUTCL3" '3 wedged-close escalations' \
   && ok "(CL3) the summary line reports the wedge instead of burying it in 'skipped'" \
   || bad "(CL3) summary must count wedged-close escalations (got: $OUTCL3)"
+# (CL3-WHY) the escalation carries the CAUSE, not just the count. This is the
+# whole of tk-5kfhl: two mayor escalations fired over an 8-hour outage, each
+# naming a number of failed passes and nothing a human could act on. The refusal
+# text is the diagnosis — for the live case it is the actor string, and nothing
+# else in the mail can carry it.
+grep -q 'WHAT BD ACTUALLY SAID' "$TMP/mailbody" \
+  && ok "(CL3-WHY) the escalation quotes bd's refusal, not only the count" \
+  || bad "(CL3-WHY) the escalation must carry the refusal (got: $(cat "$TMP/mailbody"))"
+grep -q 'actor is "order:refinery-reconcile"' "$TMP/mailbody" \
+  && ok "(CL3-WHY) ...verbatim, so the actor mismatch is diagnosable from the mail alone" \
+  || bad "(CL3-WHY) the mail must carry the verbatim refusal for the order-actor wedge"
 grep -q 'gc bd close cl-FRGN' "$TMP/mailbody" \
   && ok "(CL3) the escalation hands the operator the command that shows the refusal" \
   || bad "(CL3) escalation body should name the by-hand close command"

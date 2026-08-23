@@ -2967,6 +2967,34 @@ has '^bead-CLEAN$' "$TMP/forced" \
 has 'MERGED but close failed' "$TMP/errcl2" \
   && ok "(CL2) it falls through to the existing hand-off: the observer records it next pass" \
   || bad "(CL2) must report the failed close for the observer (got: $(cat "$TMP/errcl2"))"
+# ...and it says WHY. The refusal used to be dropped on the floor here exactly as
+# it was in the observer, so a merged PR whose anchor would not close produced two
+# scripts' worth of "close failed" and not one line of cause (tk-5kfhl: ~80
+# failures over 12 passes, two mayor escalations carrying a count and no reason).
+has 'close REFUSED' "$TMP/errcl2" \
+  && ok "(CL2) the refusal itself is reported, not swallowed" \
+  || bad "(CL2) the refusal text must reach stderr (got: $(cat "$TMP/errcl2"))"
+grep -q 'assignee is "signal-loom/gc-toolkit.polecat"' "$TMP/errcl2" \
+  && ok "(CL2) ...verbatim from bd, so the assignee/actor pair is diagnosable" \
+  || bad "(CL2) the echoed refusal must carry bd's own text"
+
+# (CL-ORDER) the LIVE shape of tk-5kfhl. Under the exec order core stamps
+# BEADS_ACTOR="order:<name>", so the actor is neither encoding of the refinery and
+# the override correctly declines — which is why this pass could never close an
+# anchor it had just merged. Not forced, and now reported.
+reset_close_ms
+printf 'bead-CLEAN\tcannot close bead-CLEAN: assignee is "signal-loom/gc-toolkit.refinery", actor is "order:refinery-reconcile"; reclaim or use --force to override\n' \
+  > "$TMP/closehard"
+OUTCLO="$(bash "$SCRIPT" 2>"$TMP/errclo")"
+has '^301$' "$TMP/merged" \
+  && ok "(CL-ORDER) the PR still merges — the close gate never blocks the merge" \
+  || bad "(CL-ORDER) PR#301 must still merge (got: $OUTCLO)"
+has '^bead-CLEAN$' "$TMP/forced" \
+  && bad "(CL-ORDER) an order actor is not the refinery; it must never be forced past" \
+  || ok "(CL-ORDER) the order-actor refusal is not forced past"
+grep -q 'actor is "order:refinery-reconcile"' "$TMP/errclo" \
+  && ok "(CL-ORDER) the refusal names the order actor — the whole diagnosis" \
+  || bad "(CL-ORDER) the order-actor refusal must be echoed (got: $(cat "$TMP/errclo"))"
 
 # (CL3) an open-children hold — the OTHER refusal that suggests --force in its own
 # text, and the one a message-keyword match would most easily swallow.

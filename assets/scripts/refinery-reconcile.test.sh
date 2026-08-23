@@ -56,6 +56,7 @@ mkstub() { # name
 #!/usr/bin/env bash
 printf '%s %s\n' "$1" "\$*" >> "$TMP/trace"
 printf '%s GC_AGENT=[%s]\n' "$1" "\${GC_AGENT-}" >> "$TMP/envtrace"
+printf '%s BEADS_ACTOR=[%s]\n' "$1" "\${BEADS_ACTOR-}" >> "$TMP/actortrace"
 rcfile="$TMP/rc.$1"
 [ -f "\$rcfile" ] && exit "\$(cat "\$rcfile")"
 exit 0
@@ -110,12 +111,13 @@ export GCSTUB_BEADS="$TMP/beads-empty.json"
 export GITSTUB_BRANCHES="$TMP/branches"
 
 run() { # [env assignments handled by caller]; runs the runner, captures out+rc
-    : > "$TMP/trace"; : > "$TMP/envtrace"
+    : > "$TMP/trace"; : > "$TMP/envtrace"; : > "$TMP/actortrace"
     # `env -u GC_AGENT` reproduces the order's environment exactly: core's
     # exec env sets BEADS_ACTOR/GC_RIG/GC_RIG_ROOT/BEADS_DIR and no GC_AGENT.
     # Without the scrub this suite would inherit a GC_AGENT from whatever agent
     # session invoked it and silently stop testing the condition that matters.
     OUT="$(env -u GC_AGENT PATH="$TMP/bin:$PATH" \
+        BEADS_ACTOR="order:refinery-reconcile" \
         GC_RIG="${RIG_OVERRIDE-alpha}" \
         GC_RIG_ROOT="$TMP/rigroot" \
         GC_PACK_STATE_DIR="$TMP/state" \
@@ -338,6 +340,38 @@ GCSTUB_AGENTS="$TMP/agents-bare.json" run
 ENVTRACE="$(cat "$TMP/envtrace" 2>/dev/null)"
 has "$ENVTRACE" "reconcile-graduated-convoys GC_AGENT=[alpha/refinery]" \
     "(47) an unbound refinery projects its own discovered address"
+GCSTUB_AGENTS="$TMP/agents.json"
+
+# --- 13b. the closing passes run as the REFINERY, not as the order -----------
+# Regression for tk-5kfhl. Core stamps the order exec env with
+# BEADS_ACTOR="order:<name>", and `bd close` is assignee-gated: it compares the
+# ASSIGNEE (the refinery, because that is what a polecat's done sequence writes)
+# against the ACTOR. `order:refinery-reconcile` is neither encoding of the
+# refinery, so close_anchor's identity-encoding override correctly declines and
+# every close fails — forever, on every pass. Measured on the live city: 8 anchors
+# open over MERGED PRs, ~80 failed closes across 12 passes, zero closed in 8+
+# hours, two mayor escalations. The board read shipped work as unlanded.
+echo "── 13b. BEADS_ACTOR reaches the two closing passes, and only them ──"
+rm -f "$TMP"/rc.*
+run
+ACTORTRACE="$(cat "$TMP/actortrace" 2>/dev/null)"
+has "$ACTORTRACE" "merge-skill BEADS_ACTOR=[alpha/gc-toolkit.refinery]" \
+    "(44b) merge-skill closes the anchor it just merged AS the refinery"
+has "$ACTORTRACE" "reconcile-merged-prs BEADS_ACTOR=[alpha/gc-toolkit.refinery]" \
+    "(45b) the close-on-land observer closes as the refinery too"
+# Every OTHER pass must still carry the order's own actor. The cadence files beads
+# as well as closing them, and `order:refinery-reconcile` is honest provenance for
+# a bead an order filed — so this identity is scoped to the closes, exactly as
+# GC_AGENT is scoped to graduation above.
+LEAKEDACTOR="$(printf '%s\n' "$ACTORTRACE" \
+    | grep -vE '^(merge-skill|reconcile-merged-prs) ' \
+    | grep -v 'BEADS_ACTOR=\[order:refinery-reconcile\]$' || true)"
+eq "$LEAKEDACTOR" "" "(46b) no other pass sees the refinery actor — it does not leak process-wide"
+# ...and it follows the discovery, not a hardcoded address.
+GCSTUB_AGENTS="$TMP/agents-bare.json" run
+ACTORTRACE="$(cat "$TMP/actortrace" 2>/dev/null)"
+has "$ACTORTRACE" "reconcile-merged-prs BEADS_ACTOR=[alpha/refinery]" \
+    "(47b) an unbound refinery closes under its own discovered address"
 GCSTUB_AGENTS="$TMP/agents.json"
 
 # --- 14. the contract with the REAL graduation pass --------------------------
