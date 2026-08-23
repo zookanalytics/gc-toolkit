@@ -634,7 +634,7 @@ has '.vars[]?.name' "$VARS_BLOCK" \
 toml_default() { awk -v v="$1" '$0 == "[vars." v "]" {f=1; next} f && /^default = /{sub(/^default = /, ""); gsub(/"/, ""); print; exit} f && /^\[/{exit}' "$TOML"; }
 FORMULA_JSON=$(for v in $DECLARED_VARS; do printf '%s\t%s\n' "$v" "$(toml_default "$v")"; done \
   | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t")) | {vars: map({name: .[0], default: (.[1] // "")})}')
-{ printf '%s\n' "$VARS_BLOCK"; printf 'printf "%%s" "$PATROL_VARS"\n'; } > "$TMP/vars-probe.sh"
+{ printf '%s\n' "$VARS_BLOCK"; printf 'printf "%%s" "${PATROL_VARS[*]}"\n'; } > "$TMP/vars-probe.sh"
 GOT_VARS=$(STUB_FORMULA_JSON="$FORMULA_JSON" bash "$TMP/vars-probe.sh" 2>/dev/null)
 for v in $DECLARED_VARS; do
   d=$(toml_default "$v")
@@ -744,7 +744,7 @@ has '.vars[]?.name' "$DVARS_BLOCK" \
 # Behavioural, against the REAL declared vars and their REAL defaults.
 DFORMULA_JSON=$(for v in $DDECLARED_VARS; do printf '%s\t%s\n' "$v" "$(dtoml_default "$v")"; done \
   | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t")) | {vars: map({name: .[0], default: (.[1] // "")})}')
-{ printf '%s\n' "$DVARS_BLOCK"; printf 'printf "%%s" "$PATROL_VARS"\n'; } > "$TMP/deacon-vars-probe.sh"
+{ printf '%s\n' "$DVARS_BLOCK"; printf 'printf "%%s" "${PATROL_VARS[*]}"\n'; } > "$TMP/deacon-vars-probe.sh"
 DGOT_VARS=$(STUB_FORMULA_JSON="$DFORMULA_JSON" bash "$TMP/deacon-vars-probe.sh" 2>/dev/null)
 for v in $DDECLARED_VARS; do
   d=$(dtoml_default "$v")
@@ -797,6 +797,41 @@ for v in $DDECLARED_VARS; do
     *) bad "FRAGMENT-DEACON: the next-iteration pour drops $v — a configured $v dies after this cycle (want --var $v='{{$v}}')" ;;
   esac
 done
+
+# --- ARGV: the vars must reach the pour as ARGUMENTS, not as one word --------
+# Contents were checked above by joining the accumulator back into a string —
+# which is exactly what the bug looked like. The vars were built in a STRING and
+# forwarded unquoted (`... $PATROL_VARS ...`), an idiom that needs the shell to
+# word-split it into several arguments. Agents run zsh, which does not word-split
+# an unquoted parameter: a populated PATROL_VARS arrived as a SINGLE argument and
+# the pour died on it, while an empty one expanded to nothing and looked fine —
+# so the failure was invisible on the path with nothing to forward and certain on
+# the path this whole section exists to protect (tk-2cy79).
+#
+# Counting ARGUMENTS is the only thing that separates the two shapes: the joined
+# string is byte-identical either way. The fixture is fixed rather than derived
+# from the live formula so the expected count is a constant a reader can check.
+ARGV_FIXTURE='{"vars":[{"name":"alpha","default":"1"},{"name":"beta","default":"2"}]}'
+argv_probe() {  # <block> <tmpname> -> one line per argument
+  { printf '%s\n' "$1"; printf 'printf "%%s\\n" "${PATROL_VARS[@]}"\n'; } > "$TMP/$2"
+  STUB_FORMULA_JSON="$ARGV_FIXTURE" bash "$TMP/$2" 2>/dev/null
+}
+eq "$(argv_probe "$VARS_BLOCK" argv-witness.sh | grep -c .)" "4" \
+   "ARGV: the witness block yields 4 arguments (--var alpha=1 --var beta=2), not 1 joined word"
+eq "$(argv_probe "$DVARS_BLOCK" argv-deacon.sh | grep -c .)" "4" \
+   "ARGV: the deacon block yields 4 arguments, not 1 joined word"
+# ...and an empty accumulator still contributes nothing, so the no-vars pour is
+# byte-identical to the one that shipped before any of this existed.
+eq "$(ARGV_FIXTURE='' argv_probe "$VARS_BLOCK" argv-witness-empty.sh | grep -c .)" "0" \
+   "ARGV: an unavailable formula lookup contributes no argument at all"
+# The pours are the other half: an array built correctly and then forwarded bare
+# is the same bug with an extra step. Every forwarding site must be quoted.
+BARE_POURS=$(grep -c 'root-only.*[^"]\$PATROL_VARS' "$FRAG" 2>/dev/null)
+eq "${BARE_POURS:-0}" "0" \
+   "ARGV: no pour forwards PATROL_VARS unquoted (zsh hands it over as one argument)"
+QUOTED_POURS=$(grep -c 'root-only.*"\${PATROL_VARS\[@\]}"' "$FRAG" 2>/dev/null)
+eq "${QUOTED_POURS:-0}" "$(( ${POUR_LINES:-0} + ${DPOUR_LINES:-0} ))" \
+   "ARGV: every witness and deacon pour forwards it as \"\${PATROL_VARS[@]}\""
 
 # --- SELFREOPEN: the gate's own stamp must not reopen the fingerprint ---------
 # THE P1 REGRESSION. This runs the REAL gate, not the recording stub, twice over

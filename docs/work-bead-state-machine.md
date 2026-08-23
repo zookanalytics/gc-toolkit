@@ -1206,6 +1206,21 @@ and does **not** `--force` past a refused close (that flag also overrides a
 foreign assignee and an open-children hold; see [When the close itself is
 refused](#when-the-close-itself-is-refused)).
 
+It also **drops one graph edge** on the way: a `blocks` edge from the origin to
+the successor. `gc-helm takeaway --waiting-on <bead>` records a wait as a real
+`blocks` edge, so a converse sitting that both routes work and disposes of its
+subject writes "waiting on X" onto the very bead it then closes — and `bd close`
+refuses a blocked issue, so the wait **refuses the ruling it was written beside**
+(`cannot close blocked issue: tk-yrio is blocked by [tk-mcyd1]`, visit tk-e9ffv,
+2026-08-22). A `blocks` edge asserts the bead is waiting to *proceed*; a disposed
+bead is not proceeding, and `gc.superseded_by` records the same relationship more
+strongly and in the field a reader actually asks. Left standing it also misfires
+later — the board renders "was waiting on something, and every blocker has
+landed" as DISPOSITION DUE, so an already-ruled subject resurfaces asking for a
+disposition the moment its successor closes, which is the churn `--waiting-on`
+exists to prevent, inverted. Only the edge to **that** successor goes: any other
+blocker is a real hold and its refusal is correct.
+
 An **already-closed** origin is the script's repair path, not an error — that is
 the shape every pre-rule bare close left behind, and there are hundreds of them.
 It stamps the pointer and appends the disposition to the notes; `bd` has no flag

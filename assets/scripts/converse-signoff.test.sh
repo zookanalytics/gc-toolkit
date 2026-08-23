@@ -953,8 +953,30 @@ have "gc-helm takeaway accepts --waiting-on" '--waiting-on)' "$HELM"
 have "…and writes it as a depends-on edge" 'bd dep add "$bead" "$_w" -t blocks' "$HELM"
 have "…and documents it in usage" '--waiting-on <bead-id>' "$HELM"
 # The prompt is the half that decides whether the flag is ever passed.
-have "the sign-off block can carry the waits" '--by converse $WAITING' "$PROMPT"
+have "the sign-off block can carry the waits" '--by converse "${WAITING[@]}"' "$PROMPT"
+have "…and accumulates them in an array" 'WAITING=()' "$PROMPT"
+# THE SHELL, not style. The block was written `WAITING=""` … `--by converse
+# $WAITING`, unquoted, with a comment saying that was deliberate — an idiom that
+# needs word-splitting to become several arguments. This city runs zsh, which
+# does not word-split an unquoted parameter: a populated WAITING arrived as ONE
+# argument and gc-helm died with `unknown flag '--waiting-on tk-… --waiting-on
+# tk-…'`. The empty case splits to nothing in every shell, so the bug was
+# invisible on sittings that routed nothing and fired reliably on the ones the
+# flag exists for — twice in one day before it was diagnosed (tk-2cy79). It
+# reverts by one pair of quotes coming off, so it is pinned from both sides.
+lacks "…and never as an unquoted string, which zsh does not split" \
+      '--by converse $WAITING' "$PROMPT" \
+      "an unquoted parameter is ONE argument under zsh — the flags never reach gc-helm and the wait is lost on exactly the sittings that routed work (tk-2cy79)"
+lacks "…nor teaches the broken idiom as deliberate" \
+      'Unquoted on purpose' "$PROMPT" \
+      "the comment blessed the word-splitting idiom, so the next editor restores it"
 have "the routing rule tells converse to wire the wait" '--waiting-on <work-bead>' "$PROMPT"
+# The takeaway is read back on the ITEM. The verification the block already
+# shipped checks `gc.outcome` on the VISIT, which is a different bead: a sitting
+# whose takeaway died still passed it and closed clean — the "unstamped closed
+# visit" this same step warns against, one bead over (tk-2cy79, recurrence 2).
+have "the takeaway is read back, not just the visit's outcome stamp" \
+     'metadata["gc.takeaway"]' "$PROMPT"
 # The ORDER is the safety property: the stamp is written first, so an edge that
 # cannot be wired warns and the conclusion still lands. A writer that exits on a
 # failed edge would trade the data loss this fixes for the one it replaces.

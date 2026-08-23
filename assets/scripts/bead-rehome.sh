@@ -50,6 +50,12 @@
 #   3. `gc.supersedes` + `gc.supersedes_store` on the SUCCESSOR — the
 #      back-pointer, best-effort, so the target side is legible too.
 #
+# It also DROPS one graph edge on the way: a `blocks` edge from the origin to
+# the successor. That edge says the origin is waiting to proceed, and `bd close`
+# refuses a blocked issue — so on a sitting that both routes work and disposes
+# of its subject, the wait edge refuses the very disposition it was written
+# beside. See step 1b.
+#
 # Fail-closed throughout: it would rather leave the origin OPEN than close it
 # unpointed. Every refusal exits non-zero and says what to run.
 #
@@ -210,6 +216,20 @@ ORIGIN_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | ascii_
 PRIOR_SUCC=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.superseded_by"] // .[0].metadata.superseded_by // empty' 2>/dev/null || true)
 PRIOR_STORE=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.superseded_by_store"] // .[0].metadata.superseded_by_store // empty' 2>/dev/null || true)
 
+# Does the origin carry a `blocks` edge naming the successor as its blocker?
+# `bd show` puts a bead's own blockers in `.dependencies[]` with `.id` and
+# `.dependency_type`, so this asks the question from the origin's side — the
+# side `bd close` consults. Answers a count; anything unparseable answers 0,
+# because a probe that cannot read the graph must not claim an edge exists.
+wait_edge_count() {
+    local n
+    n=$(printf '%s' "$1" | jq -r --arg s "$SUCCESSOR" \
+        '[.[0].dependencies[]? | select((.id // "") == $s and ((.dependency_type // "") == "blocks"))] | length' \
+        2>/dev/null || true)
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    printf '%s' "$n"
+}
+
 # A disposition already on the record for a DIFFERENT successor is somebody
 # else's decision. Overwriting it silently would erase the one signal this
 # script exists to create, so refuse and let a human reconcile the two.
@@ -233,10 +253,15 @@ if [ -n "$DRY_RUN" ]; then
     else
         CLOSE_PLAN="$REASON"
     fi
-    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     gc.superseded_by=%s gc.superseded_by_store=%s\n  close:     %s\n  actor:     %s\n' \
+    if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
+        EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
+    else
+        EDGE_PLAN="none ($ORIGIN carries no wait edge to $SUCCESSOR)"
+    fi
+    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     gc.superseded_by=%s gc.superseded_by_store=%s\n  edge:      %s\n  close:     %s\n  actor:     %s\n' \
         "$ORIGIN" "${ORIGIN_STATUS:-unknown}" "$ORIGIN_STORE" \
         "$SUCCESSOR" "$SUCCESSOR_STORE" "$SUCCESSOR" "$SUCCESSOR_STORE" \
-        "$CLOSE_PLAN" "${ACTOR:-<bd default>}"
+        "$EDGE_PLAN" "$CLOSE_PLAN" "${ACTOR:-<bd default>}"
     exit 0
 fi
 
@@ -255,6 +280,45 @@ GOT_SUCC=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by"] 
 GOT_STORE=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by_store"] // empty' 2>/dev/null || true)
 if [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$SUCCESSOR_STORE" ]; then
     die "successor pointer did NOT stick on $ORIGIN (read back gc.superseded_by='${GOT_SUCC:-}' gc.superseded_by_store='${GOT_STORE:-}'); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
+fi
+
+# --- 1b. a disposed bead is not waiting on its successor -------------------
+# `gc-helm takeaway --waiting-on <blocker>` records a wait as a real `blocks`
+# edge, which is what lets the board re-ask it later. A converse sitting that
+# BOTH routes work and disposes of its subject writes that edge onto the very
+# bead it then closes — and `bd close` refuses a blocked issue, so the edge does
+# not merely misdescribe the disposition, it refuses it (tk-hs5rz, live at visit
+# tk-e9ffv 2026-08-22):
+#
+#     bead-rehome: pointer IS recorded on tk-yrio (gc.superseded_by=tk-mcyd1)
+#     but the close was refused:
+#     cannot close blocked issue: tk-yrio is blocked by [tk-mcyd1]
+#
+# A `blocks` edge asserts the origin is waiting to PROCEED. A disposed origin is
+# not proceeding, and the relationship is already recorded — more strongly, and
+# in the field a reader actually asks — by the `gc.superseded_by` stamped above.
+# Left standing the edge also misfires later: gc-helm.sh renders "was waiting on
+# something, and every blocker has landed" as DISPOSITION DUE, so a subject
+# whose disposition was already ruled would resurface asking for one the moment
+# its successor closes — the churn `--waiting-on` exists to prevent, inverted.
+#
+# ONLY the edge to THIS successor goes. Any other blocker is a real hold and the
+# refusal it produces below is correct: that is a bead somebody has to judge,
+# not one this script may quietly unblock.
+#
+# Mechanical on purpose. The alternative — instruct the writer not to wire the
+# edge when it is also closing — is invisible when skipped, which is the failure
+# mode this whole file exists to answer.
+if [ "$(wait_edge_count "$CHECK_JSON")" -gt 0 ]; then
+    bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 || true
+    # `bd dep remove` reports success for an edge that never existed, so its
+    # exit status carries nothing. Read the graph back instead.
+    if [ "$(wait_edge_count "$(bead_json "$ORIGIN_PATH" "$ORIGIN")")" -gt 0 ]; then
+        echo "bead-rehome: WARN could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge; while it stands the close below is refused — clear it with: bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR" >&2
+    else
+        printf 'bead-rehome: dropped the wait edge (%s blocked by %s) — a disposed bead is not waiting on its successor; gc.superseded_by is the record\n' \
+            "$ORIGIN" "$SUCCESSOR"
+    fi
 fi
 
 # --- 2. the prose carrier --------------------------------------------------
