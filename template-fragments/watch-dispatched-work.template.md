@@ -29,13 +29,18 @@ per-line-notifying tool; `gc` is always on `PATH`.
 
 ```
 gc sling <pool> <bead>
-Monitor(
-  command: "{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>",   # gc-toolkit-native
+
+# Then spawn exactly ONE watcher — whichever line your pack supports.
+# Two watchers on one bead is the double-subscription mistake below.
+
+Monitor(                                                    # gc-toolkit-native
+  command: "{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>",
   description: "watching <bead>",
   persistent: true,
 )
-Monitor(
-  command: "gc events --follow --payload-match 'bead.id=<bead>'",     # portable
+
+Monitor(                                                    # portable
+  command: "gc events --follow --payload-match 'bead.id=<bead>'",
   description: "watching <bead>",
   persistent: true,
 )

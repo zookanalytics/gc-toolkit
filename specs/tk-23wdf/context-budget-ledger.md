@@ -590,7 +590,7 @@ Risk: low. Requires splitting one fragment into two defines; the force-push and
 re-pour sections are already separately headed.
 
 **5. Compress `watch-dispatched-work` and the keeper prompt.**
-**PARTLY BANKED (tk-yhwfv.1) — fragment realized −2,380 B/spawn and reaches
+**PARTLY BANKED (tk-yhwfv.1) — fragment realized −2,140 B/spawn and reaches
 the keeper too, not just mechanik; the keeper prompt is still unmeasured live.
 See §9.2 and §9.3.**
 Saving: ~2,000 B/spawn (mechanik) and unquantified (keeper).
@@ -763,7 +763,7 @@ proxy and should be re-derived before anyone quotes it as a dollar figure.
 | Item | Ledger estimate | Realized | Where |
 |---|---|---|---|
 | Candidate 4 — narrow `rebase-conventions` | ~4,000 B/spawn | **−1,212 B/spawn** | gascity polecat |
-| Candidate 5 — compress `watch-dispatched-work` | ~2,000 B/spawn | **−2,380 B/spawn** | mechanik **and** keeper |
+| Candidate 5 — compress `watch-dispatched-work` | ~2,000 B/spawn | **−2,140 B/spawn** | mechanik **and** keeper |
 | Candidate 5 — keeper prompt | unquantified | still unmeasured live | see 9.3 |
 | Candidate 6 — `cycle-recycle` citations | 0 live bytes | **0 B**, as predicted | repointed, delete unblocked |
 
@@ -778,7 +778,8 @@ the bead over like any other. The pointer is worded role-neutrally on purpose
 — the refinery is injected with BOTH fragments, so a polecat-addressed "you
 do not perform it" would have been false for one of its two readers.
 
-**Candidate 5 came in high, and reaches one more agent than §7 recorded.**
+**Candidate 5 came in slightly high, and reaches one more agent than §7
+recorded.**
 The fragment is included by `agents/mechanik/prompt.template.md:154` *and*
 `packs/gascity-keeper/agents/keeper/prompt.template.md:942`. Those two do not
 have the same reach: `ConfigDir` resolves to the consuming agent's own pack
