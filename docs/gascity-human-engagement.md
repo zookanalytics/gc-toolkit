@@ -692,9 +692,11 @@ operator's *own* unsent words have no such protection, and until
   `proxy_process` `/svc/` route (`services/helm/` already uses it). Any
   conversation surface work should land behind that seam, not in new
   bespoke plumbing.
-- **Two helm boards — RESOLVED for the gather (2026-08-22, `tk-134d7`),
-  still open for retirement.** The board existed **twice**, and the
-  operator's two surfaces were not the same program:
+- **Two helm boards — RESOLVED (2026-08-24, `tk-clvkf6`).** There is now
+  ONE board. The entry is kept because the mechanism it records is the
+  one worth remembering, not because the condition persists. The board
+  existed **twice**, and the operator's two surfaces were not the same
+  program:
 
   | | reached by | implementation | gather |
   |---|---|---|---|
@@ -723,23 +725,32 @@ operator's *own* unsent words have no such protection, and until
   equal on all 55 rows — with the evidence and the three chosen
   divergences in `specs/tk-134d7/parity-and-benchmark.md`.
 
-  **What is still open is retirement, and `prefix+b` still runs the
-  bash.** `tmux-pick-helm.sh` was deliberately NOT repointed: `gc-helm.sh`
-  keeps verbs (`open`, `react`, `takeaway`) that have no Go equivalent, so
-  retiring it is a separate piece of work and still the operator's call.
-  Until the script is gone there are still two programs, and the tripwire
-  stands — but it is now cheaper to honour, because the field sets are
-  pinned against each other by
-  `services/helm/cmd/helm-svc/contract_parity_test.go`, which fails when
-  either side grows or drops a field.
+  **The duplicate is now gone (2026-08-24, `tk-clvkf6`).** `gc-helm.sh`'s
+  board half — `cmd_board` plus every `gather_*`, 973 lines — was replaced
+  by a ~210-line thin renderer that locates the `helm-svc` binary,
+  forwards the caller's flags and passes its bytes and exit code back.
+  `prefix+b` still runs `gc-helm.sh`, and that is now a fork rather than a
+  second program. What remains in the script is its WRITE verbs (`open`,
+  `react`, `takeaway`), which have no Go equivalent and which `helm-svc`
+  itself shells out to for `POST /helm/open`.
 
-  **The tripwire, as it now reads:** a change to either board's gather,
-  ranking, or anchor kinds is still a standing question against the other
-  — the parity test compares field SETS, not values, so a derivation that
-  changes meaning without changing shape passes it. Say in the PR which
-  board you touched and whether the sibling needs the same change.
-  `tk-2v08m` did say so, in as many words, which is the only reason
-  `tk-fkeft` was findable.
+  **The tripwire is retired with the duplicate it policed**, and one last
+  divergence was found while retiring it — which is the argument for
+  having deleted rather than re-pinned. `contract_parity_test.go` compared
+  field SETS, not values, so a derivation that changed meaning without
+  changing shape passed it. Exactly that was live: `internal/source` read
+  a visit's subject from the `gc.continuation_group` stamp alone while
+  `gc-helm.sh` read the `tracks` edge as well, and on gc-toolkit's last
+  seven days 49 of 49 closed visits carried the edge while only 44 carried
+  the stamp. Five conversations could therefore read *held* on the
+  terminal board and *unheld* — hence STRANDED, hence "go and attend to
+  this" — on the web one. The fix landed in
+  `services/helm/internal/source/facts.go` in the same change, because
+  deleting a renderer cannot fix a divergence.
+
+  **What to carry forward.** Two renderers over one model is fine; two
+  models is not, and a field-set parity test is not a substitute for
+  having one model — it passes precisely the divergences that matter.
 
 ## What upstream does not ship (the pack's actual seam)
 

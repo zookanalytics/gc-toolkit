@@ -80,8 +80,11 @@ Two selection rules are load-bearing enough to state on their own:
 session during controller churn, so a `running == true` filter drops exactly
 the live sessions it means to select — and a quota-parked one in that state
 would never be peeked at all. The helm's owner-liveness join keys off `.state`
-for the same reason (`assets/scripts/gc-helm.sh`, with a `running: null` case
-pinned in `tools/helm-surface-fixture.sh`); this order follows it.
+for the same reason; this order follows it. That join moved into Go with the
+board (`tk-clvkf6`), where the rule is now structural rather than tested:
+`services/helm/internal/source/gccli.go`'s `Sessions` decodes `id`, `alias`,
+`session_name` and `state` and does not declare `running` at all, so no future
+edit can key off a field the type cannot see.
 
 **Every `gc` call is bounded.** The order runner applies no timeout of its own,
 and these calls go through the runtime and Dolt — the layers most likely to be

@@ -3,24 +3,29 @@
 A long-lived Go sidecar that serves a ranked **Helm board** as JSON, sourced live
 from the city's bead state. It is the backend data + serving plane for the
 Attention Canvas operator dashboard (epic `tk-eemvf`) and the Go port of the
-board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces —
-the bash dies).
+board MODEL that began in `assets/scripts/gc-helm.sh` (the bash PoC, which this
+replaced — the bash board died in `tk-clvkf6`).
 
-> **The bash has not died, and it is still what `prefix+b` runs.**
-> `tmux-pick-helm.sh:52` invokes `gc-helm.sh --json`, not this binary. But the
-> two are no longer two IMPLEMENTATIONS: since `tk-134d7` this repo also builds
-> `helm-svc board`, a terminal renderer over *this* gather and *this*
-> derivation, and `internal/board` carries the whole of the bash board's
-> `--json` field set rather than a subset of it. The remaining bash-only
-> surface is its verbs (`open`, `react`, `takeaway`), which have no Go
-> equivalent — so `gc-helm.sh` stays in place and working, and retiring it is a
-> separate decision recorded under "Two helm boards, and they diverge" in
-> `docs/gascity-human-engagement.md`.
+> **The bash board is gone; this is the only board** (`tk-clvkf6`,
+> 2026-08-24). `prefix+b` still runs `gc-helm.sh --json`, but that script's
+> board half is now a ~210-line THIN RENDERER: it locates this binary, forwards
+> the caller's flags, and passes the bytes and the exit code back. It keeps a
+> rendered-output cache (45s) because this CLI is deliberately daemonless and
+> pays a full gather per run, and the tmux picker re-glances constantly — warm
+> replay is 0.11s. Its remaining own surface is the WRITE verbs (`open`,
+> `react`, `takeaway`), which have no Go equivalent and are what this service's
+> `POST /helm/open` shells out to.
 >
-> **A change to this board's gather, ranking, or anchor kinds is still a
-> standing question against `gc-helm.sh`** — `cmd/helm-svc/contract_parity_test.go`
-> fails when the two field sets drift, but nothing compares their VALUES
-> automatically. Say in the PR whether the sibling needs the same change.
+> **A change to the gather, the ranking or the anchor kinds is no longer a
+> standing question against a sibling.** There is no sibling to keep equal, so
+> the "say in the PR whether the other board needs this too" rule is retired
+> with the duplicate it policed. The divergence it was managing was real and
+> still live when it was removed: this package read a visit's subject from
+> `gc.continuation_group` alone while `gc-helm.sh` also read the `tracks` edge,
+> and 5 of gc-toolkit's last 49 closed visits carry the edge and no stamp — so
+> the same conversation could read held on one board and unheld (hence
+> STRANDED) on the other. Fixed in `internal/source/facts.go` in the same
+> change, because deleting a renderer cannot fix a divergence.
 
 The spine came from the `tk-sy3vj` spike; `tk-x89rn` then widened the source seam
 so the board can read `updated_at` and bead metadata, which is what makes
@@ -42,6 +47,9 @@ As the sidecar:
 
 ```
 GET /helm   -> { generated_at, total, tiles:[ Tile, ... ], partial?, partial_errors? }
+GET /helm/closed -> { generated_at, since, cutoff, total, rows:[ Disposition, ... ] }
+                    ?since=24h (default) &limit=50 — what reached a disposition
+                    in a window; see *Closed dispositions*
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 GET /            -> the board JSON, or the embedded web app for a browser
                     (Accept: text/html) — see *Web UI*
@@ -87,8 +95,14 @@ loomington city (5 stores, 55 anchors):
 
 | | cold | warm |
 |---|---|---|
-| `gc-helm.sh --json --limit=0` | 19.9 / 22.2 / 26.6 s | 1.75 / 1.82 / 1.77 s (45s file cache) |
+| `gc-helm.sh --json --limit=0` (before `tk-clvkf6`) | 19.9 / 22.2 / 26.6 s | 1.75 / 1.82 / 1.77 s (45s file cache) |
 | `helm-svc board --json --limit=0` | 3.27 / 2.76 / 2.73 s | *(no cache — every run is cold)* |
+
+Re-measured 2026-08-24 on the same city, by then 5 stores / 62 anchors:
+`helm-svc board --json --limit=0` at 7.06 / 6.03 / 6.64 s against the bash
+board's 51.9 s cold. Both grew with the ledger; the ratio did not. `gc-helm.sh`
+now renders through this binary and caches the OUTPUT, so its warm glance is
+0.11s and its cold one is this row plus a fork.
 
 Same binary as the sidecar on purpose: a separately-built CLI would be a second
 artifact that can go stale on its own, which is the failure that motivated the
@@ -268,15 +282,79 @@ row wants is a close or a re-open, not a re-read. The ruling stays on the wire
 in `takeaway`, where nothing truncates it; in the terminal table it was the
 longest cell in that column and the least actionable.
 
+## Closed dispositions — the half the board cannot show
+
+The board is **open-only by construction**: every anchor gather filters on
+`status=open`, so when a sitting concludes and its subject closes, the row
+simply *leaves* the board and nothing afterwards says what was decided or why.
+`tk-clvkf6` added the answer, in three renderers over one gather:
+
+```
+GET  <mount>/helm/closed?since=24h&limit=50   # the {generated_at,since,cutoff,total,rows} envelope
+helm-svc closed [--since 24h] [--json]        # the CLI view; --json is a bare ARRAY
+gc-helm.sh closed [--since 24h] [--json]      # the same, through the thin renderer
+```
+
+Rendered in the dashboard as the collapsible **what was decided** panel
+(`web/src/closed/`), which fetches nothing until it is opened and then does not
+poll — see *pull, not push* below.
+
+**Nothing new is written, and nothing needed instrumenting.** Sign-off already
+stamps every fact this reads, in three durable places:
+
+| fact | where | what it is |
+|---|---|---|
+| `gc.outcome` | the closed **visit** | the machine-readable disposition — routed / moot / ruled / disposed / … |
+| `gc.takeaway` | the **subject** | the ≤140-char headline: the *why* |
+| the `tracks` edge | visit → subject | what ties the two together |
+
+**Rows are per VISIT, not per subject.** A subject with three sittings that
+closed inside the window is three decisions and three rows. Collapsing to the
+subject would keep only the last and silently drop the rest — and the earlier
+sittings are exactly the ones no other surface still shows.
+
+**The subject comes off the `tracks` edge first**, the `gc.continuation_group`
+stamp only as a fallback. Measured over gc-toolkit's last seven days on
+2026-08-24: 49 closed visits, 49 carrying the edge, 44 carrying the stamp. A
+stamp-first read loses five rows' subjects, and with them the title and the
+takeaway that are the whole payload.
+
+**Pull, not push**, and that is a ruling rather than a default (operator,
+2026-08-23: *"pull, I won't read a random digest nor can we easily have a
+cadence when my schedule varies"*). So this ships as a view and nothing else:
+no order, no cadence, no nudge, no mail.
+
+**It is not cached, unlike the board.** The board is one standing question
+re-asked on every glance, so a TTL is free there; this answers an *explicit*
+window, and a cached answer would be the previous `--since` returned without
+saying so.
+
+**A failed gather is an error, never an empty list** — HTTP 502, CLI exit 3.
+`closed.Dispositions` carries no `partial` field and `source.ClosedSource`
+degrades to nothing, which is the deliberate difference from the board: a board
+missing a rig is still a true statement about the rigs it read, but a
+disposition list quietly missing a wedged rig's sittings is indistinguishable
+from a genuinely quiet window. A quiet window says so in words.
+
+**`--since` is validated, not coerced.** `2w`, `1.5h`, `-1h` and `0` are
+refused. The shell original parsed with awk's `int()`, which reads `"2w"` as
+`2` — a window three orders of magnitude short that renders as a
+plausible-looking empty result.
+
+The view was first built as 285 lines of shell (PR #439, codex-green); the
+operator ruled that it belonged in the service, and its semantics were ported
+here rather than re-derived. Only its location was ever wrong.
+
 ## Architecture
 
-Three packages, a clean dependency line `board <- source <- server <- cmd`:
+Four packages, a clean dependency line `board,closed <- source <- server <- cmd`:
 
 | Package | Responsibility |
 |---|---|
-| `internal/board` | The MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
-| `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). |
-| `internal/server` | HTTP routes + a server-side TTL cache of the computed board. |
+| `internal/board` | The board MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
+| `internal/closed` | The closed-dispositions MODEL, also pure: the `--since` spelling, the newest-first order, the cap. Separate from `internal/board` rather than a mode on it — the board ranks open anchors by how much they need a human, this ranks nothing and answers for closed visits, and sharing a package would only share the word "row". |
+| `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). `ClosedSource` is a second, OPTIONAL interface — only `BeadsSource` can honour it, since the supervisor API carries no metadata on its list endpoints and no closed-after filter. |
+| `internal/server` | HTTP routes + a server-side TTL cache of the computed board (the closed view is deliberately uncached). |
 | `web` | The operator's web app (Vite + React + TS) and the `go:embed` that compiles its built bundle into the binary. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
 
@@ -303,8 +381,8 @@ restart.
 **The `gc` CLI (`internal/source/gccli.go`) — for two facts no bead carries.**
 `gc session list --state all --json` for session liveness, and `gc convoy list`
 / `gc convoy status` for convoy ownership and the in-flight join. This is the
-same source `gc-helm.sh` reads, so the two boards agree by construction rather
-than by two derivations. It honours the contract for the same reason the other
+same source `gc-helm.sh` used to read for its own gather; since `tk-clvkf6`
+there is one gather, so there is nothing left to agree. It honours the contract for the same reason the other
 two do — a Gas City interface, not raw Dolt — and every call is best-effort: a
 missing or failing `gc` records a partial error and narrows the board (nothing
 reads as held or in flight) instead of aborting the gather. The lost session map
@@ -965,13 +1043,19 @@ Session liveness and convoy ownership come from the `gc` CLI — see
 
 **Still deferred** (and *why*):
 
-- **Retiring `gc-helm.sh`.** Its `open`, `react` and `takeaway` verbs have no Go
-  equivalent, so the script stays. Retirement is a follow-up once the board view
-  is proven at parity in daily use.
-- **A CLI cache.** `helm-svc board` re-gathers every run (~2.7-3.3s). The bash
-  board's 45s file cache makes a repeat glance ~1.8s. Caching here would buy
-  about a second and re-introduce a staleness surface, which is the thing this
-  epic exists to reduce — so it is deliberately not done, not merely undone.
+- **Retiring `gc-helm.sh` entirely.** Its board half is gone (`tk-clvkf6`); the
+  script is now a thin renderer over this binary plus the `open`, `react` and
+  `takeaway` WRITE verbs, which have no Go equivalent — and which this service
+  itself calls for `POST /helm/open`. Retiring what is left means porting those
+  writes, which is a different piece of work.
+- **A CLI cache *in this binary*.** `helm-svc board` still re-gathers every run
+  and that is deliberate: the CLI exists so `prefix+b` works when the sidecar is
+  down, and a daemonless path with no cache cannot serve a stale board it forgot
+  it had. The cheap layer lives one level up instead — `gc-helm.sh` caches this
+  binary's rendered OUTPUT for 45s, which is where a repeat glance is
+  recognisable as a repeat. That is a staleness surface, so it is bounded, it is
+  busted by every write verb, and a replay of a stale cache says its age out
+  loud on stderr.
 - **`tk-b3rga`** (decision tiles) — still open, in the presentation.
 - **event-invalidation** — the sidecar's cache is TTL-only; the supervisor SSE
   `/v0/events/stream` can later replace polling.

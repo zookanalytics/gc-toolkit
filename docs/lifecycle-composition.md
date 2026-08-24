@@ -75,8 +75,8 @@ was supposed to have updated.
 This is the clause that carries the most weight, because it is what makes the
 rule robust against the rest of the system being imperfect. The board derives
 `disposition_due` per render — parked, with a non-empty waiting set, all of
-whose members have closed (`assets/scripts/gc-helm.sh`, mirrored in
-`services/helm/internal/board/derive.go`). Nothing is stored, so nothing has to
+whose members have closed (`services/helm/internal/board/derive.go`; since
+`tk-clvkf6` that is the only implementation, and `gc-helm.sh` renders it). Nothing is stored, so nothing has to
 be cleared later, and no cleanup path can be missed.
 
 The same edges answer the same question for the two human-gated kinds, and there
@@ -184,9 +184,14 @@ the operator found it by eye — nothing in the system had noticed
 (`tk-16f29`, the operator-origin bead reporting the seam failing on the very
 audit that produced this document).
 
-One caveat applies to every fix in this class: the shell board and
+That caveat is retired (2026-08-24, `tk-clvkf6`). It read: "the shell board and
 `services/helm/` are separate implementations of the same derivation, so a fix
-to one does not reach the other. Any change to shared derivation lands in both.
+to one does not reach the other." There is now one implementation —
+`assets/scripts/gc-helm.sh`'s board half is a thin renderer over the `helm-svc`
+binary — so a fix to the derivation reaches every surface by construction. It
+is recorded rather than deleted because it was true for eleven days and cost at
+least two duplicated fixes (`tk-2v08m`, `tk-fkeft`) and one divergence that
+outlived the parity test written to catch it.
 
 ## The test for new work
 
