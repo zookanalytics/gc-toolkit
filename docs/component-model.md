@@ -234,7 +234,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 
 | # | Proposition | Today | Check |
 |---|---|---|---|
-| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or in a metadata string. | **PARTIAL** | Takeaway waits *are* edges (`gc-helm.sh takeaway --waiting-on`). Gate waits (`check.<g>=green@<oid>`), route waits (`gc.routed_to`) and push waits (`metadata.branch`) are strings. **UNCHECKED** → `check-wait-is-an-edge` (tk-wz4igt) |
+| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or in a metadata string. | **PARTIAL, DETECTED** | Takeaway waits *are* edges (`gc-helm.sh takeaway --waiting-on`). Gate waits (`check.<g>=green@<oid>`), route waits (`gc.routed_to`) and push waits (`metadata.branch`) are strings. `doctor/check-wait-is-an-edge` reports the prose half: an open bead whose notes or reason-shaped metadata say it is waiting on, blocked by or gated on a named bead, with no edge either way. First run, 2026-08-24: **18 across four rigs**, 15 of them naming a bead that had already CLOSED — the frozen sentence in its terminal form. It does not police the three *typed* string-waits above; those are a writer change, not a detection gap. |
 | **I2** | The set of states is closed, and every state has exactly one handler. | **FALSE** | Pack code writes 7 `merge_result` literals across 5 files. Two readers each keep their own hand-maintained list, and the lists disagree: `refinery-reconcile.sh:344` excludes 5 values and treats anything else as *not yet anchored*; `mol-refinery-patrol.toml:486` allows 3 and treats anything else as *terminal, leave it alone*. Neither knows `blocked` or `refused_false_completion`. Opposite defaults for the same unknown value — the formula's own comment concedes "a marker no pass here has heard of". **UNCHECKED** → `check-state-space-declared` (tk-jozah0) |
 | **I3** | Every routed bead is claimable by the agent it is routed to. | **TRUE** | `doctor/check-routed-work-claimable` — exact-equality on `gc.routed_to` vs live pool names. The one seed invariant with a real structural check. Scope hole: skips *assigned* beads, which is the near-miss-address case §2.4 leaves to a report-only detector. |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | **PARTIAL** | Enforced as a *runtime hold* inside `merge-skill.sh` (tk-ynz4b), not as a property. A second anchor is invisible until someone tries to merge. **UNCHECKED** → `check-one-anchor-per-pr` (tk-qz6081) |
@@ -244,9 +244,10 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I8** | Every graph.v2 step bead reaches a terminal state. | **NEWLY TRUE** | `doctor/check-finalized-molecule-step-reoffer`; the writer half landed 2026-08-23 (`step-close.sh` wired into `mol-polecat-work`, PR #443). The violation it closed: 490 of 746 open beads were husks. |
 | **I9** | A molecule executes the formula text that is current when it runs. | **FALSE** | Step descriptions are frozen at pour, and `rigs/<rig>/` — the checkout the runtime executes — advances on a 15-minute cooldown (`orders/reconcile-rig-checkouts.toml`). Measured during this bead: the molecule poured 16:06:31Z from pre-#443 text; the checkout advanced to #443 at 16:14:32Z. The molecule ran the old text for its whole life. **UNCHECKED** → `check-pour-text-current` (tk-5w3boh) |
 
-**Six UNCHECKED invariants — I1, I2, I4, I5, I7, I9 — are the output of this
-document.** Each is filed as its own bead, named in the table above, proposing
-the concrete check. They are what stops this file being another
+**Five UNCHECKED invariants — I2, I4, I5, I7, I9 — are the output of this
+document.** I1 was the sixth and is now detected by
+`doctor/check-wait-is-an-edge`. Each of the rest is filed as its own bead,
+named in the table above, proposing the concrete check. They are what stops this file being another
 `docs/roadmap.md`: when one lands, edit the row to name the check instead of
 the bead.
 

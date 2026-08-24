@@ -66,6 +66,14 @@ repeatable, writes a `blocks` edge beside the takeaway string
 the durable record of what the sitting concluded, and it is never cleared. The
 edge is what makes the wait *machine-answerable*.
 
+**This clause is now checked.** `doctor/check-wait-is-an-edge` (component-model
+I1) reports an open bead whose prose says it is waiting on, blocked by or gated
+on a named bead where no edge records it either way. First run, 2026-08-24: 18
+across four rigs, and **15 of them named a bead that had already closed** —
+which is this section's argument, measured. The check asserts the EDGE exists;
+it never asks for the sentence to be removed, because the sentence is the
+conclusion and the conclusion is prose.
+
 ### 2. The waiting side re-derives; it never trusts stored state
 
 Whoever needs to know "has this landed yet?" asks the question fresh, at the
