@@ -310,7 +310,9 @@ usage: escalation-gate.sh --anchor <bead-id> --subject <s> --body <b>
   --kind      escalation channel, default "witness". Names the sending ROLE, not
               the topic — see the header. One anchor + kind = one escalation. A
               fingerprint the caller could not build the usual way belongs on its
-              own kind (e.g. "witness-degraded"), never on the normal one.
+              own kind (e.g. "witness-degraded"), never on the normal one. Any '-'
+              is stored as '_' in the stamp key ("escalated.witness_degraded"),
+              because '-' is not legal in a bead metadata key.
   --cooldown  seconds before an UNCHANGED situation may re-mail (default 86400)
   --pr        the PR whose holding state this escalation reports. Naming it lets
               the gate REFUSE the one class that is never news — a mergeable,
@@ -423,9 +425,16 @@ fi
 # `--set-metadata "<key>=<value>"`. A kind carrying '=' would split the pair at
 # the wrong place; whitespace or a metacharacter would land a key no reader can
 # address — either way the channel silently stops deduplicating and the storm is
-# back. Constrain it to the character set bead metadata keys already use. This is
-# a usage error like a bad --cooldown: it is caught before anything is sent, and
-# the marked formula snippets do not pass --kind at all.
+# back. This is a usage error like a bad --cooldown: it is caught before anything
+# is sent, and the marked formula snippets do not pass --kind at all.
+#
+# '-' IS ACCEPTED HERE AND TRANSLATED BELOW, NOT REJECTED. It is not a legal
+# character in a bead metadata key, but every degraded channel in the city is
+# spelled with one — mol-witness-patrol sends `witness-degraded`, mol-refinery-
+# patrol sends `refinery-degraded` — and a step bead's text is frozen at pour, so
+# already-poured molecules will keep passing those spellings for as long as they
+# live. Rejecting here would turn a broken stamp into a broken argument and mute
+# the same channel either way. See KIND_KEY below.
 case "$KIND" in
   '')
     echo "escalation-gate: --kind must not be empty" >&2
@@ -476,7 +485,29 @@ case "$REPO" in
     REPO="" ;;
 esac
 
-KEY="escalated.$KIND"
+# THE STAMP KEY IS THE KIND WITH '-' TRANSLATED TO '_'.
+#
+# `bd` validates every metadata key against ^[a-zA-Z_][a-zA-Z0-9_./]*$ — no '-' — so
+# `escalated.witness-degraded` is REFUSED: nothing written, non-zero exit. That
+# lands on the "could not stamp" path below, which sends NOTHING. The degraded
+# channel, whose entire job is to report that the normal channel's inputs are
+# unavailable, was therefore dead on every call that used it — deterministically,
+# not under load. Worse than the storm this script exists to prevent, and silent,
+# because the failure is on the channel nobody hears from when things are healthy
+# (tk-cp6of; reproduced live 2026-08-23, when check-refinery's QUEUE_HEALTH
+# escalation fell to this path after `gh pr view` failed and no notice went out).
+#
+# Translating rather than rejecting preserves the one property that matters: the
+# channel keeps deduplicating. The caller's own spelling is what every message
+# still prints; only the key it is stored under is normalized.
+#
+# The mapping is many-to-one — `witness-degraded` and `witness_degraded` land on
+# one key — which is exactly why the LOCK below is taken on KIND_KEY and not on
+# KIND. Two spellings that share a stamp must share the mutex guarding it, or
+# both runs read "no prior stamp", both decide "first escalation", and both mail:
+# the lost update the lock exists to prevent, reintroduced by the normalization.
+KIND_KEY="${KIND//-/_}"
+KEY="escalated.$KIND_KEY"
 NOW=$(date +%s)
 
 # TAKE THE LOCK.
@@ -698,10 +729,15 @@ take_lock() {
     return 0
   fi
   local dir key started age now deadline owner liveness breakable
-  # The key lands in a path, so reduce it to the same character set the metadata
-  # key already constrains --kind to. ANCHOR is a bead id; a stray character in it
-  # must not escape the lock root.
-  key=$(printf '%s.%s' "$ANCHOR" "$KIND" | tr -c 'A-Za-z0-9._-' '-')
+  # Keyed on KIND_KEY, not KIND: the lock must serialize whatever shares a stamp,
+  # and the stamp is keyed on the normalized kind (see KEY above). Using the raw
+  # kind here would give `witness-degraded` and `witness_degraded` one metadata
+  # key but two different lock dirs, so neither would wait for the other.
+  #
+  # The key also lands in a path, so reduce it to the character set the metadata
+  # key is constrained to. ANCHOR is a bead id; a stray character in it must not
+  # escape the lock root.
+  key=$(printf '%s.%s' "$ANCHOR" "$KIND_KEY" | tr -c 'A-Za-z0-9._-' '-')
   dir="$LOCK_ROOT/$key.lock"
   deadline=$(( NOW + LOCK_WAIT ))
   # Terminates unconditionally: every iteration either acquires, or re-checks a
