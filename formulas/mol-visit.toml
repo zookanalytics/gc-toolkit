@@ -52,6 +52,33 @@ gc bd dep add "$VISIT" {{subject}} --type=tracks
 # the beads that most need conversation.
 # To gate other work on this conversation, add a blocking edge:
 # gc bd dep add "$VISIT" --blocks "<blocked-bead-id>"
+# tk-ax6y4: read the group stamp BACK, and repair it if it did not land.
+# It lands PRESENT-BUT-EMPTY on a minority of these updates while every
+# sibling stamp in the SAME call lands and the tracks edge below lands —
+# 5 instances across 3 rigs, ~1 in 3 of the daily sweep visits. An empty
+# group silently disables converse's group-scoped re-claim fence, which
+# is how an operator mid-conversation gets an unrelated visit prepped in
+# the same thread (tk-msfmu).
+#
+# REPAIR, NEVER REFUSE. This block files the ONLY visit for its scope, so
+# refusing on a lost stamp would trade a quiet degradation for a louder
+# outage of the same surface — ~1 pass in 3 filing no visit at all.
+#
+# The WARNING is the deliverable. The failure is per-invocation, not
+# ambient — two visits two minutes apart have disagreed — so a logged
+# instance, with what the read actually returned, is the only thing that
+# will pin the cause.
+GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""')
+if [ "$GROUP_GOT" != "{{subject}}" ]; then
+  echo "gate-visit: WARNING gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '{{subject}}' — repairing (tk-ax6y4)" >&2
+  gc bd update "$VISIT" --set-metadata "gc.continuation_group={{subject}}"
+  GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""')
+  if [ "$GROUP_GOT" = "{{subject}}" ]; then
+    echo "gate-visit: the repair landed on $VISIT" >&2
+  else
+    echo "gate-visit: WARNING the repair did NOT land on $VISIT either — its tracks edge still carries the subject, and every live-visit guard reads the union (tk-d6ddn)" >&2
+  fi
+fi
 # <<< gate-visit
 ```
 
