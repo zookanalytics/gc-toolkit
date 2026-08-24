@@ -153,6 +153,18 @@ if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
     case "$1" in
       --set-metadata)
         kv="$2"; k="${kv%%=*}"; v="${kv#*=}"
+        # Refuse exactly what real `bd` refuses. Its metadata keys must match
+        # ^[a-zA-Z_][a-zA-Z0-9_./]*$ — no '-' — and a key outside that set is
+        # rejected with exit 1 and NOTHING written. A stub that accepted any key
+        # would hide a dead branch behind a green suite, which is exactly how the
+        # degraded channel shipped broken: `escalated.witness-degraded` passed
+        # here from #335 (2026-08-12) until tk-cp6of, while real bd refused it on
+        # every call for those same twelve days.
+        case "$k" in
+          ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_./]*)
+            echo "Error updating: validation failed: invalid metadata key \"$k\": must match ^[a-zA-Z_][a-zA-Z0-9_./]*$" >&2
+            exit 1 ;;
+        esac
         grep -v "^$k|" "$S/meta" > "$S/meta.new" 2>/dev/null || true; mv "$S/meta.new" "$S/meta"
         printf '%s|%s\n' "$k" "$v" >> "$S/meta"
         shift 2 ;;
@@ -438,9 +450,16 @@ case "$(stub_meta escalated.witness)" in
   oid123-APPROVED-BLOCKED*) ok "GHFLAP: the PR channel's stamp still holds the last PR fingerprint actually observed" ;;
   *) bad "GHFLAP: the outage overwrote the PR channel's stamp (got '$(stub_meta escalated.witness)')" ;;
 esac
-[ -n "$(stub_meta escalated.witness-degraded)" ] \
+# The channel is spelled `witness-degraded` but the STAMP KEY is
+# `escalated.witness_degraded`: '-' is not legal in a bead metadata key, so the
+# gate translates it (see KIND_KEY in escalation-gate.sh). Asserting the stored
+# key — not the flag — is the point. This assertion named the hyphenated key from
+# #335 (2026-08-12) and passed anyway, because the bd stub above used to accept
+# any key while real bd refused this one on every call — so the degraded channel
+# was dead in production and green here for twelve days (tk-cp6of).
+[ -n "$(stub_meta escalated.witness_degraded)" ] \
   && ok "GHFLAP: and the outage was recorded on its own key" \
-  || bad "GHFLAP: no escalated.witness-degraded stamp — the degraded channel did not dedup"
+  || bad "GHFLAP: no escalated.witness_degraded stamp — the degraded channel did not dedup"
 # ...and the dedup is not a mute: a PR that genuinely moves during all this still
 # escalates on the very next cycle.
 PR_NUMBER=35 GH_FINGERPRINT="oidNEW/APPROVED/BLOCKED" GC_RIG_ROOT="$TMP/realrig" GC_CITY_PATH="" \

@@ -186,6 +186,18 @@ if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
     case "$1" in
       --set-metadata)
         kv="$2"; k="${kv%%=*}"; v="${kv#*=}"
+        # Refuse exactly what real `bd` refuses. Its metadata keys must match
+        # ^[a-zA-Z_][a-zA-Z0-9_./]*$ — no '-' — and a key outside that set is
+        # rejected with exit 1 and NOTHING written. A stub that accepted any key
+        # would hide a dead branch behind a green suite, which is exactly how the
+        # degraded channel shipped broken: `escalated.refinery-degraded` passed
+        # here from #346 (2026-08-13) until tk-cp6of, while real bd refused it on
+        # every call for those same eleven days.
+        case "$k" in
+          ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_./]*)
+            echo "Error updating: validation failed: invalid metadata key \"$k\": must match ^[a-zA-Z_][a-zA-Z0-9_./]*$" >&2
+            exit 1 ;;
+        esac
         grep -v "^$k|" "$S/meta" > "$S/meta.new" 2>/dev/null || true; mv "$S/meta.new" "$S/meta"
         printf '%s|%s\n' "$k" "$v" >> "$S/meta"
         shift 2 ;;

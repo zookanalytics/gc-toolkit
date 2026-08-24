@@ -237,6 +237,18 @@ if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
     case "$1" in
       --set-metadata)
         kv="$2"; k="${kv%%=*}"; v="${kv#*=}"
+        # Refuse exactly what real `bd` refuses. Its metadata keys must match
+        # ^[a-zA-Z_][a-zA-Z0-9_./]*$ — no '-' — and a key outside that set is
+        # rejected with exit 1 and NOTHING written. A stub that accepted any key
+        # would hide a dead branch behind a green suite, which is exactly how the
+        # degraded channel shipped broken: `escalated.witness-degraded` passed
+        # here from #335 (2026-08-12) until tk-cp6of, while real bd refused it on
+        # every call for those same twelve days.
+        case "$k" in
+          ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_./]*)
+            echo "Error updating: validation failed: invalid metadata key \"$k\": must match ^[a-zA-Z_][a-zA-Z0-9_./]*$" >&2
+            exit 1 ;;
+        esac
         grep -v "^$id|$k|" "$S/meta" > "$S/meta.new" 2>/dev/null || true
         mv "$S/meta.new" "$S/meta"
         printf '%s|%s|%s\n' "$id" "$k" "$v" >> "$S/meta"
@@ -1406,6 +1418,65 @@ reset
 "$SCRIPT" --anchor su-lou.10.8 --subject s --body b --state abc --kind refinery.queue >/dev/null 2>&1
 eq "$?" "0" "KINDSAFE: a dotted channel name is still valid"
 eq "$(mails)" "1" "KINDSAFE: and is delivered"
+
+# --- KINDDEGRADED -------------------------------------------------------------
+# THE BUG (tk-cp6of). Every degraded channel in the city is spelled with a hyphen
+# — mol-witness-patrol sends `--kind witness-degraded`, mol-refinery-patrol sends
+# `--kind refinery-degraded` — but '-' is not legal in a bead metadata key, which
+# bd validates against ^[a-zA-Z_][a-zA-Z0-9_./]*$. The gate used to paste the kind
+# onto `escalated.` unchanged, so the stamp write was REFUSED on every such call:
+# the run took the "could not stamp" path and exited 1 having sent NOTHING. The
+# one channel whose entire job is to report that the normal channel's inputs are
+# unavailable was itself dead — deterministically, on every call, and only ever
+# reached while something else was already broken. Reproduced live 2026-08-23,
+# when check-refinery's QUEUE_HEALTH escalation fell to the degraded channel after
+# `gh pr view` failed and no notice went out at all.
+reset
+out=$(run "QUEUE_HEALTH: gh unavailable" --state "degraded-abc" --kind witness-degraded 2>&1); rc=$?
+eq "$rc" "0" "KINDDEGRADED: a hyphenated channel is not fatal"
+eq "$(mails)" "1" "KINDDEGRADED: the degraded observation is actually delivered"
+[ -n "$(stamp_of su-lou.10.8 witness_degraded)" ] \
+  && ok "KINDDEGRADED: stamped under the translated key bd accepts" \
+  || bad "KINDDEGRADED: nothing stamped under escalated.witness_degraded (out: $out)"
+[ -z "$(stamp_of su-lou.10.8 witness-degraded)" ] \
+  && ok "KINDDEGRADED: and never under the raw hyphenated key bd refuses" \
+  || bad "KINDDEGRADED: stamped escalated.witness-degraded, a key bd rejects"
+# Delivery is only half of it: a stamp that cannot be written cannot dedup, so the
+# storm would return on the degraded channel instead. An UNCHANGED outage must go
+# quiet on the next cycle, and a CHANGED one must still get through.
+run "QUEUE_HEALTH: gh unavailable" --state "degraded-abc" --kind witness-degraded >/dev/null 2>&1
+eq "$(mails)" "1" "KINDDEGRADED: an unchanged outage is suppressed next cycle"
+run "QUEUE_HEALTH: bd unreadable too" --state "degraded-xyz" --kind witness-degraded >/dev/null 2>&1
+eq "$(mails)" "2" "KINDDEGRADED: but a CHANGED degraded state still escalates"
+# Separation is the whole reason the degraded observation has its own kind: it must
+# leave the real channel's stamp — and the cooldown riding on it — untouched.
+[ -z "$(stamp_of su-lou.10.8 witness)" ] \
+  && ok "KINDDEGRADED: the normal channel's stamp is untouched" \
+  || bad "KINDDEGRADED: the degraded run wrote the normal channel's key"
+# The translation is many-to-one, so the two spellings are ONE channel and must
+# dedup against each other. The lock is taken on the same translated value for
+# exactly this reason: keyed on the raw kind, these two would share a stamp but
+# take different lock dirs, so neither would wait for the other and a race would
+# read "no prior stamp" twice and mail twice.
+reset
+run "collide" --state "same" --kind witness-degraded >/dev/null 2>&1
+eq "$(mails)" "1" "KINDDEGRADED: the hyphen spelling escalates"
+run "collide" --state "same" --kind witness_degraded >/dev/null 2>&1
+eq "$(mails)" "1" "KINDDEGRADED: the underscore spelling dedups against it — one key, one channel"
+
+# --- STUBSTRICT ---------------------------------------------------------------
+# The bug above shipped GREEN because the `gc bd update` stub in this file accepted
+# any metadata key while the real tool refused this one. A stub more permissive
+# than the tool it stands in for does not merely miss a defect, it certifies one.
+# Pin the stub to bd's actual rule so that can never be quietly relaxed again.
+reset
+"$TMP/bin/gc" bd update su-lou.10.8 --set-metadata "escalated.witness-degraded=x" >/dev/null 2>&1
+eq "$?" "1" "STUBSTRICT: the bd stub refuses a key containing '-', as real bd does"
+"$TMP/bin/gc" bd update su-lou.10.8 --set-metadata "1leading=x" >/dev/null 2>&1
+eq "$?" "1" "STUBSTRICT: and one that does not start with a letter or underscore"
+"$TMP/bin/gc" bd update su-lou.10.8 --set-metadata "escalated.witness_degraded=x" >/dev/null 2>&1
+eq "$?" "0" "STUBSTRICT: while the translated key is accepted"
+reset
 
 # --- ARGEND (the hang) --------------------------------------------------------
 # A value-taking option at the END of argv had no $2, so `shift 2` failed and —
