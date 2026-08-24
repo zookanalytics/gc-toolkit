@@ -50,10 +50,20 @@
 # The id pattern alone is not safe here. Rig and tool names collide with it
 # head-on: `gc-toolkit` and `gc-helm` both match a `gc-` prefixed id, and both
 # appear constantly in exactly the prose being scanned. Resolving each
-# candidate against the store before judging it removes that class entirely and
-# costs one batched read per store. An id resolving to nothing is reported as
-# its own note — prose naming a bead that does not exist is a different defect,
-# and swallowing it would hide it.
+# candidate before judging it removes that class entirely, at a handful of
+# batched reads. An id resolving to nothing is reported as its own note —
+# prose naming a bead that does not exist is a different defect, and swallowing
+# it would hide it.
+#
+# ── RESOLUTION IS CITY-WIDE, NOT STORE-LOCAL ────────────────────────────────
+# A candidate is resolved in the store its PREFIX names. Waits cross rigs:
+# signal-loom sl-djvs says it is blocked on gc-toolkit tk-bq9ua, which is open
+# in gc-toolkit with no edge either way. Looked up only in signal-loom that id
+# answers "no issues found", the finding is downgraded to an unresolved NOTE,
+# and the check can exit 0 with a real unedged wait standing in the graph
+# (tk-w2dk5k P1). Both directions still answer across the boundary: the
+# source's edge ids ride along on each pair, and the candidate's own edges come
+# from its own store — so a cross-rig wait that IS recorded still reads as ok.
 #
 # ── BOTH EDGE SPELLINGS, BOTH DIRECTIONS ────────────────────────────────────
 # `bd list --json` renders an edge as {type, depends_on_id}; `bd show --json`
@@ -84,8 +94,10 @@ set -u
 
 # `gc doctor` DOES bound pack checks (`--check-timeout`, default 60s) and a
 # check that overruns is abandoned with its findings DISCARDED — so every probe
-# is individually bounded. Cost is two reads per store: one open listing (0.4s
-# for 909 beads) and one batched resolve of the candidate ids.
+# is individually bounded. Cost per store is one open listing (0.4s for 909
+# beads) plus one batched resolve per OWNING store the candidates name — at
+# most one per rig, and in practice one or two, because a store's waits name
+# their own rig or one neighbour.
 BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 
 # Candidate ids are resolved with a batched `bd show`. Chunked so a store with a
@@ -161,6 +173,18 @@ WAIT_JQ='
 # real violations sat in the store. A silent false negative is the worst thing
 # a doctor check can be, so the shape of what scan() returns is pinned by the
 # (SCAN) case in run.test.sh.
+# BOUNDED ON BOTH SIDES at the call site below. Without a trailing boundary the
+# alternation matches a PREFIX of a longer word and converts conclusion prose
+# into a dependency demand: `Blocked only on mechanism - see tk-bq9ua` matched
+# `blocked on` inside `blocked onl`, and was reported as a wait on tk-bq9ua
+# (tk-w2dk5k P2). Without a leading one, `unblocked by tk-x` matches `blocked
+# by`, inverting the sentence outright.
+#
+# Boundaries are the whole guard, deliberately — no negated-verb heuristic sits
+# on top. `not`/`no longer`/`previously` before a verb would have to be
+# enumerated, and every phrase the list missed would silently drop a REAL wait.
+# A detector whose failure mode is silence is the thing this check exists to
+# remove, so the tightening stops where it can be proved: at word edges.
 def verbs: "(waiting on|waits on|waiting for|blocked on|blocked by|awaiting|await|pending|depends on|dependent on|gated on|holding for|held by)";
 # The tail is 3+ characters, which is the SHORTEST id this city actually mints:
 # measured 2026-08-24 over every store, 2 open beads carry a 3-character tail
@@ -176,7 +200,7 @@ def idpat: "((?:" + $prefixes + ")-[a-z0-9][a-z0-9.]{2,})";
          | select(.key | test("(?i)reason|blocked")) | (.value | tostring)) ]
   ) as $prose
 | $prose[]
-| [ scan("(?i)" + verbs + "[^.\n]{0,40}?\\b" + idpat) ]
+| [ scan("(?i)\\b" + verbs + "\\b[^.\n]{0,40}?\\b" + idpat) ]
 | .[]?
 # A sentence-final period is swallowed by the id pattern, which has to admit
 # dots for hierarchical ids like tk-yhwfv.3 — so "awaiting tk-8rm3q." yields
@@ -216,12 +240,30 @@ PREFIXES=$(printf '%s' "$rigs_raw" \
     | jq -r '[ .rigs[]? | (.prefix // "") | select(test("^[a-z]{1,8}$")) ]
              | unique | sort_by(-length) | join("|")' 2>/dev/null)
 
+# The same roster again, as a prefix -> STORE map. A candidate id is resolved in
+# the store its prefix names, not in the store that happened to mention it; see
+# the resolve block below for why that is a correctness requirement and not an
+# optimisation.
+PREFIX_MAP=$(printf '%s' "$rigs_raw" \
+    | jq -r '.rigs[]? | select((.path // "") != "")
+             | (.prefix // "") as $p | select($p | test("^[a-z]{1,8}$"))
+             | [$p, (.path + "/.beads")] | join("\u001f")' 2>/dev/null)
+
 if [ -z "$PREFIXES" ]; then
     # Without the prefix set the scan cannot tell a bead id from a hyphenated
     # word, and a check that guesses is worse than one that says it could not
     # look.
     echo "cannot determine whether every wait is recorded as an edge"
     echo "\`gc rig list --json\` reported no usable issue prefixes; a bead id cannot be told from ordinary hyphenated prose without them."
+    exit 1
+fi
+
+if [ -z "$PREFIX_MAP" ]; then
+    # PREFIXES parsed but the map did not, so the two views of one roster
+    # disagree. Candidates could still be MATCHED and never RESOLVED, which
+    # reports every wait as an unresolved note and the city as clean.
+    echo "cannot determine whether every wait is recorded as an edge"
+    echo "\`gc rig list --json\` yielded issue prefixes but no prefix-to-store map; a candidate bead id could be recognised but never resolved."
     exit 1
 fi
 
@@ -269,9 +311,27 @@ while IFS=$'\037' read -r rig_name rig_path; do
     fi
     [ -n "$pairs" ] || continue
 
-    # ── Resolve the candidate ids ───────────────────────────────────────────
+    # ── Resolve the candidate ids, ACROSS STORES ────────────────────────────
     # Batched, and the ONLY thing separating a bead id from a rig or tool name
     # of the same shape.
+    #
+    # Each candidate is resolved in the store its PREFIX names, not in the
+    # store that happened to mention it. A wait can cross rigs, and one does
+    # today: signal-loom sl-djvs says it is blocked on gc-toolkit tk-bq9ua,
+    # which is OPEN in gc-toolkit and carries no edge in either direction.
+    # Resolved store-locally that lookup answers
+    # {"error":"no issues found matching the provided IDs"}, so a real unedged
+    # wait was downgraded to an "unresolved" NOTE and the check could exit 0
+    # over it — the exact fail-open it exists to remove (tk-w2dk5k P1).
+    #
+    # Both halves of the judgement survive the crossing: the SOURCE's edge ids
+    # ride along on each pair and a cross-store edge is just a foreign id in
+    # that list, while the REVERSE direction comes from the candidate's own
+    # `bd show` in its own store. So a cross-rig pair that IS recorded still
+    # reads as ok.
+    #
+    # A candidate whose prefix names no rig in this city is resolvable nowhere
+    # and stays a note, which is the honest answer for it.
     cand_ids=$(printf '%s\n' "$pairs" | awk -F'\037' 'NF>=3 {print $3}' | sort -u)
     [ -n "$cand_ids" ] || continue
 
@@ -280,15 +340,38 @@ while IFS=$'\037' read -r rig_name rig_path; do
     chunk_failed=""
 
     flush_chunk() {
+        local cdb="$1"
         [ "${#chunk[@]}" -ne 0 ] || return 0
         local out rc merged
-        out=$(run_bounded bd show --db "$db" "${chunk[@]}" --json 2>/dev/null)
+        out=$(run_bounded bd show --db "$cdb" "${chunk[@]}" --json 2>/dev/null)
         rc=$?
-        if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
-            chunk_failed="rc=$rc"
+        out=$(printf '%s' "$out" | strip_ctl)
+        if [ -z "$out" ]; then
+            chunk_failed="rc=$rc, no output from $cdb"
             return 1
         fi
-        out=$(printf '%s' "$out" | strip_ctl)
+        # `bd show` EXITS 1 when nothing in the batch resolved, printing a
+        # well-formed {"error":"no issues found matching the provided IDs"} on
+        # stdout. That is a determinate answer — "none of these are beads here"
+        # — and not a failed read, so it must not fail the store closed.
+        #
+        # Grouping by owning store is what makes an all-non-id batch routine:
+        # `gc-toolkit` and `gc-toolkit.furiosa` are rig and agent names that
+        # match the `gc-` id shape, and in a store whose waits name no gascity
+        # bead they are the ENTIRE `gc-` group. Before grouping, every
+        # candidate went to one store in one batch that always held at least
+        # one real id, so rc was always 0 and this arm was never reached —
+        # the old code was accidentally protected rather than correct.
+        #
+        # Narrow on purpose: only the no-matches error is accepted. Any OTHER
+        # non-zero exit, or an error object saying anything else, is still an
+        # unreadable store and still fails closed.
+        if [ "$rc" -ne 0 ] \
+           && ! printf '%s' "$out" | jq -e 'type == "object"
+                   and ((.error // "") | test("no issues? found"; "i"))' >/dev/null 2>&1; then
+            chunk_failed="rc=$rc reading $cdb"
+            return 1
+        fi
         # `bd show` answers an ARRAY when at least one id resolves and a bare
         # OBJECT — {"error":"no issues found..."} — when none does, rc=0 either
         # way. Adding an object to an array is a jq type error, so treating that
@@ -317,22 +400,40 @@ while IFS=$'\037' read -r rig_name rig_path; do
         return 0
     }
 
-    while IFS= read -r cid; do
-        [ -n "$cid" ] || continue
-        chunk+=("$cid")
-        if [ "${#chunk[@]}" -ge "$CHUNK" ]; then
-            flush_chunk || break
-        fi
-    done <<CAND_EOF
-$cand_ids
-CAND_EOF
-    [ -n "$chunk_failed" ] || flush_chunk || true
+    # One pass per OWNING store. The candidate set is small (dozens at most),
+    # so this is a handful of bounded reads even on a five-rig city.
+    while IFS=$'\037' read -r cand_pfx cand_db; do
+        [ -n "$cand_pfx" ] && [ -n "$cand_db" ] || continue
+        [ -d "$cand_db" ] || continue
+        # Prefixes are `[a-z]{1,8}` by the roster filter, so this pattern
+        # carries no regex metacharacters.
+        group=$(printf '%s\n' "$cand_ids" | grep -E "^${cand_pfx}-" 2>/dev/null) || group=""
+        [ -n "$group" ] || continue
+        # Start each owning store with an EMPTY batch: a leftover id from the
+        # previous prefix would be looked up in the wrong store and resolve to
+        # nothing, turning a real bead into an unresolved note.
+        chunk=()
+        while IFS= read -r cid; do
+            [ -n "$cid" ] || continue
+            chunk+=("$cid")
+            if [ "${#chunk[@]}" -ge "$CHUNK" ]; then
+                flush_chunk "$cand_db" || break
+            fi
+        done <<GROUP_EOF
+$group
+GROUP_EOF
+        [ -n "$chunk_failed" ] && break
+        flush_chunk "$cand_db" || true
+        [ -n "$chunk_failed" ] && break
+    done <<PFX_EOF
+$PREFIX_MAP
+PFX_EOF
 
     if [ -n "$chunk_failed" ]; then
         # A partial resolve would silently reclassify real beads as "not a bead
         # id" and drop every finding under them — the fail-open this check
         # exists to remove.
-        warnings+=("$label: could not resolve candidate bead ids in $db ($chunk_failed) — this store was NOT checked")
+        warnings+=("$label: could not resolve candidate bead ids for beads in $db ($chunk_failed) — this store was NOT checked")
         continue
     fi
 
@@ -379,7 +480,7 @@ CAND_EOF
             unedged)
                 errors+=("$label/$src: prose says \"$verb $cand\" ($cand is $status) but no dependency edge records it, so no query can answer whether this is still waiting. Add the edge (I1).") ;;
             unresolved)
-                notes+=("$label/$src: prose says \"$verb $cand\" but $cand resolves to no bead in this store — a wait naming something that does not exist, or a cross-store reference") ;;
+                notes+=("$label/$src: prose says \"$verb $cand\" but $cand resolves to no bead in any store this city knows — a wait naming something that does not exist, or an id whose prefix belongs to no rig here") ;;
         esac
     done <<VERDICT_EOF
 $verdicts
