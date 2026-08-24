@@ -392,6 +392,23 @@ is_terminal_anchor() {
   case "$1" in                       # $1 = anchor status
     closed) TERMINAL_REASON=closed; return 0 ;;
   esac
+  # THE TERMINAL SET HERE IS NARROWER THAN THE DECLARED DISPOSITIONS, and that
+  # is a deliberate hold rather than a claim of completeness. It names the two
+  # handoff spellings plus `merged` — the shapes that prove the work reached the
+  # merge queue. The four operator-owned dispositions (`abandoned`, `blocked`,
+  # `retargeted`, `refused_false_completion`) are terminal too, and they fall
+  # through this clause to the `human` one below, which only fires when the
+  # anchor's own status is `blocked` — so today only `refused_false_completion`
+  # is caught there. The rest leave their husk live. That is a real gap and it
+  # is filed as tk-62a2pf, not fixed here: quiescing writes over molecule state,
+  # and widening the set that authorizes it is a change to this pass's blast
+  # radius, not to the state space.
+  #
+  # So the default holds in the safe direction. A quiesce that declines leaves a
+  # husk for the next pass; a quiesce that fires on a molecule still wearing a
+  # state nobody classified destroys live work. An unrecognised value is NOT
+  # terminal. See docs/work-bead-state-machine.md for the declared set.
+  # merge-result-reader: covers=pre_open_gate,pull_request,merged default=not terminal — an unclassified state must never authorize a quiesce, which overwrites molecule state
   case "$2" in                       # $2 = anchor metadata.merge_result
     pre_open_gate|pull_request|merged) TERMINAL_REASON="$2"; return 0 ;;
   esac

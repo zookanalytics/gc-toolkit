@@ -334,15 +334,34 @@ fi
 # Gate on the branch EXISTING ON ORIGIN: a bead carries metadata.branch from the
 # moment a polecat claims it, long before anything is pushed, so "has branch"
 # alone reports live in-flight work as a lost handoff.
+#
+# ANCHORED IS "HAS A merge_result AT ALL", not "has one of the five this line
+# happened to know". This used to exclude an explicit list — pull_request,
+# pre_open_gate, merged, abandoned, retargeted — which contradicted the premise
+# stated four paragraphs up ("carries metadata.branch and no merge_result"), and
+# left the two states the list predated, `blocked` and `refused_false_completion`,
+# reading as NOT YET ANCHORED. Both are dispositions: the refinery saw the
+# handoff, refused it, and routed the bead to a human. Reporting one as a fresh
+# handoff is a false alarm on every pass, forever, because nothing about a
+# disposition changes.
+#
+# The list never produced that alarm, and the reason is worth naming rather than
+# relying on: both states also set gc.routed_to=human, so the routing predicate
+# below excluded them a second time. Two guards in series, one of them wrong,
+# and the wrong one invisible for exactly as long as the other holds — an
+# operator clearing gc.routed_to to hand a repaired bead back is all it takes.
+#
+# Absence is the only test that stays closed as the state space grows: a state
+# added tomorrow gets a value, and a bead carrying any value has been anchored
+# by whoever wrote it. The declared set lives in docs/work-bead-state-machine.md
+# and doctor/check-state-space-declared holds every reader to it (tk-jozah0).
 HANDOFF_ROWS="$(gc bd list --rig="$RIG" --status=open --exclude-type=epic \
         --has-metadata-key=branch --limit=400 --json 2>/dev/null \
     | tr -d '\000-\010\013\014\016-\037' \
     | jq -r --arg me "$AGENT" '
         .[]?
         | select((.metadata.branch // "") != "")
-        | select((.metadata.merge_result // "") as $mr
-                 | (["pull_request","pre_open_gate","merged","abandoned","retargeted"]
-                    | index($mr)) | not)
+        | select((.metadata.merge_result // "") == "")
         | select(((.metadata["gc.routed_to"] // "") == $me)
                  or (((.metadata["gc.routed_to"] // "") == "") and ((.assignee // "") != $me)))
         | "\(.id)\t\(.metadata.branch)"' 2>/dev/null | sort -u)"

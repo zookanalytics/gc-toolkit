@@ -376,6 +376,68 @@ is deliberate: one authority over "did it land" means no second place for that
 state to drift. No coordinator (mayor / mechanik / deacon / witness) sits in this
 loop.
 
+### The `merge_result` state space is closed
+
+`merge_result` is the anchor's second state field. Unlike `status`, whose values
+`bd` owns, its value set is the pack's own — and it is **closed**. This table is
+where it is declared, and `doctor/check-state-space-declared` parses this table
+and holds the code to it: a literal written by pack code that is not declared
+here is an error, and so is a declared state that nothing writes (tk-jozah0).
+
+Every value carries a **kind**, and the kind is what a reader keys on:
+
+- **handoff** — the unit is still in flight and a later pass is expected to act
+  on it. The bead is the merge queue's live work.
+- **disposition** — a pass has decided this unit is finished with the merge
+  queue. Nothing further is expected of it there.
+
+<!-- merge-result-state-space: declared -->
+
+| state | kind | written by | means |
+|---|---|---|---|
+| `pre_open_gate` | handoff | `formulas/mol-refinery-patrol.toml` | the branch is waiting on its pre-open codex signoff; no PR yet |
+| `pull_request` | handoff | `assets/scripts/pre-open-resolve.sh`, `assets/scripts/check-set-heal.sh`, `formulas/mol-refinery-patrol.toml` | the PR is open and waiting to be landed |
+| `merged` | disposition | `assets/scripts/merge-skill.sh`, `assets/scripts/reconcile-merged-prs.sh`, `formulas/mol-refinery-patrol.toml` | the PR squashed to its target; `merged_sha` records the commit |
+| `retargeted` | disposition | `assets/scripts/reconcile-merged-prs.sh` | HEAL: the PR's base changed out from under the anchor; routed to `human` |
+| `abandoned` | disposition | `assets/scripts/reconcile-merged-prs.sh` | HEAL: the PR was closed unmerged; routed to `human` |
+| `blocked` | disposition | `formulas/mol-refinery-patrol.toml` | the handoff named an `existing_pr` the refinery cannot use; routed to `human` |
+| `refused_false_completion` | disposition | `formulas/mol-refinery-patrol.toml` | the branch carried no verified change over its target, so the merge-close was refused; routed to `human` |
+
+<!-- /merge-result-state-space -->
+
+**ABSENT is not a value and is not declared above.** A bead with no
+`merge_result` has not been anchored yet — it is the shape the fresh-handoff
+detector and `check-set-heal.sh`'s phase-0 recovery both key on, and
+`--unset-metadata merge_result` returns a bead to it deliberately (the rejection
+path in `mol-refinery-patrol.toml`). Absence is closed under the state space by
+construction: adding a state never changes what "no value" means. Presence tests
+(`== ""`, `!= ""`) are therefore safe by construction and are not readers in the
+sense below.
+
+**A reader keys on a kind, not on a hand-rolled list.** Every pass that
+discriminates among two or more of these values is choosing a *set*, and the
+only sets that stay correct when a state is added are the ones declared above:
+all `handoff`, all `disposition`, or the whole space. A hand-rolled list is the
+defect this section exists to close — it is correct on the day it is written and
+silently wrong on the day the eighth state lands, because the states it never
+heard of fall to whatever its default happens to be. Two such lists disagreed on
+that default: `refinery-reconcile.sh` read an unknown value as *not yet
+anchored* and reported it as a fresh handoff, while `check-set-heal.sh` reads
+one as *terminal* and leaves it alone. Neither list contained `blocked` or
+`refused_false_completion`.
+
+`doctor/check-state-space-declared` is the standing gate: a line naming two or
+more of these literals must name exactly one declared kind-set, or carry an
+explicit
+
+```
+# merge-result-reader: covers=<states> default=<what an undeclared value does>
+```
+
+declaration saying what it covers and what an unrecognised value does. Both
+forms are "covers the declared set, or declares its default" — the check will
+not accept a list that does neither.
+
 ## The check-set: one class of gate
 
 A gating convoy does not wait on a single "is it reviewed?" flag. It waits on a

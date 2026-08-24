@@ -948,6 +948,19 @@ APPROVAL_WAIT_JQ='
 # those are faults however healthy the PR looks from GitHub. An unreadable live
 # head scores every green@ marker as stale, which vetoes the refusal — the safe
 # direction, since it ends in sending.
+#
+# THE merge_result TERM IS THIS PASS'S OWN JUDGEMENT, not the declared
+# disposition set, so it is declared rather than derived. Two of the five
+# dispositions are deliberately absent. `merged` is not a fault — it is the
+# outcome this whole gate exists to reach. `retargeted` is a fault, and it is
+# already caught one term up: every operator-owned disposition also stamps
+# `blocked_reason`, so the first element of this list reports it with a better
+# sentence than a bare state name would. That makes `blocked_reason` the
+# general signal and this list the narrow one, which is why an unrecognised
+# value here must NOT read as a fault: a state nobody has classified is not
+# evidence of anything, and the pass that ends in sending should not be vetoed
+# by one. See docs/work-bead-state-machine.md for the declared set.
+# merge-result-reader: covers=blocked,refused_false_completion,abandoned default=not a fault by itself; blocked_reason is the general signal and catches every operator-owned disposition
 ANCHOR_FAULT_JQ='
   (.[0].metadata // {}) as $m
   | [ (if (($m.blocked_reason // "") | tostring | length) > 0 then "blocked_reason is set on the anchor" else empty end),
