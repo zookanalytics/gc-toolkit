@@ -184,6 +184,24 @@ overlay_dir = "overlays/work-context"
 [[patches.agent]]
 name = "refinery"
 inject_fragments_append = [
+    # Every other artifact in this pack already treats the refinery as a
+    # heartbeat agent: the cycle-recycle `Stop` hook self-gates to
+    # `witness | deacon | refinery`, doctor/check-cycle-recycle-hook requires
+    # the overlay on all three, and the fragment's own closing line says the
+    # rule "applies to all heartbeat agents (witness, deacon, refinery)".
+    # Only the injection was missing, which left the refinery the one patrol
+    # role whose hook will never prompt while the agent reading the prompt was
+    # never told not to — and the deacon and witness, who DO read the line, are
+    # told the refinery is covered.
+    #
+    # This is the same derivation error as operator-next-step-trailing below
+    # (tk-l1pj6): a fragment set scoped by "which roles does the operator
+    # converse with" rather than by what the fragment governs. It is also the
+    # same shape as the defect that widened the fragment itself (tk-17wggn,
+    # lx-nc2kw) — a guardrail that reads as covering a case it does not reach.
+    # check-cycle-recycle-hook now asserts the injection per-agent, so the trio
+    # cannot silently drift apart again.
+    "heartbeat-no-consent-ui",
     "layered-startup-discovery-refinery",
     # The refinery holds the human-approval merge gate, so its entire subject
     # matter is work that is waiting on the operator — and it went the whole
