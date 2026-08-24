@@ -128,7 +128,15 @@ The loop, every visit:
        | jq -r --arg s "$SUBJECT" --arg i "$ITEM" --arg v "$VISIT" '
            [ .[]
              | select((.metadata.task_kind // "")=="visit")
-             | select((.metadata["gc.continuation_group"] // "")==$s)
+             | . as $c
+             # a sibling wears the same flaky stamp: read ITS group the same way
+             | (if (($c.metadata // {})["gc.continuation_group"] // "") != ""
+                then (($c.metadata // {})["gc.continuation_group"] // "")
+                else ([ ($c.dependencies // [])[]?
+                        | select((((.type // .dependency_type // "") | tostring))=="tracks")
+                        | ((.depends_on_id // .id // "") | tostring) ]
+                      | map(select(. != "")) | .[0] // "") end) as $cg
+             | select($cg==$s)
              | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
              | select((.assignee // "")!="")
              | .id ]
@@ -165,6 +173,16 @@ The loop, every visit:
    was added to prevent, arriving by the other door. The `tracks` edge is
    the visit's second recording of its own subject and has held where the
    stamp did not (su-ab9je); when even that is missing, you hold.
+
+   Recovering only YOUR OWN subject is not enough, and stopping there
+   breaks the interlock from the other side. A sibling visit wears the
+   same flaky stamp, so a scan that matches siblings by stamp alone cannot
+   see an empty-stamped one: two live sittings whose edges name the SAME
+   subject each find only themselves, both read as holder, and both
+   proceed. That is precisely the duplicate the lowest-id tiebreak exists
+   to collapse, so every candidate's group is resolved the same
+   stamp-or-edge way inside the scan. The listing already carries
+   `dependencies`, so this costs no extra read.
    `assets/scripts/converse-fold-scope.test.sh` runs this block against
    every one of those shapes; keep them in step.
 2. **Re-check the premise.** A visit can sit for days before anyone

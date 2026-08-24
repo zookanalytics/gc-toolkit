@@ -247,6 +247,43 @@ is "an empty stamp is recovered from the tracks edge" "$(holder v-two '')" "v-on
 fixture "$(visit v-two '' '' sess-2 other)" "$(visit v-one sub '' sess-1)"
 is "a recovered subject still scopes the fold" "$(holder v-two '')" "v-two"
 
+
+# The interlock, from the SIBLING side. Recovering only our own subject left
+# the candidate scan matching siblings by stamp alone — so two live sittings
+# whose edges name the same subject each saw only themselves, both read as
+# holder, and both proceeded. That is the duplicate the lowest-id tiebreak
+# exists to collapse, reintroduced by the fix for the other half.
+fixture "$(visit v-two '' '' sess-2 sub)" "$(visit v-one '' '' sess-1 sub)"
+h1="$(holder v-one '')"
+h2="$(holder v-two '')"
+is "two EMPTY-stamped siblings tracking the same subject: lowest id holds" "$h1" "v-one"
+is "…and the higher id folds into it" "$h2" "v-one"
+folds=0
+[ "$h1" = "v-one" ] || folds=$((folds + 1))
+[ "$h2" = "v-two" ] || folds=$((folds + 1))
+is "…so exactly one of the two folds (never both, never neither)" "$folds" "1"
+
+# The mirror: the scan must not over-match once it resolves candidates. Two
+# empty stamps whose EDGES name different subjects are different sittings.
+fixture "$(visit v-two '' '' sess-2 other)" "$(visit v-one '' '' sess-1 sub)"
+is "two EMPTY-stamped siblings tracking DIFFERENT subjects do not fold (v-two)" \
+    "$(holder v-two '')" "v-two"
+is "…nor the other way (v-one)" "$(holder v-one '')" "v-one"
+
+# Mixed recording: one sibling stamped, one recovered from its edge. They are
+# the same sitting and must see each other.
+fixture "$(visit v-two '' '' sess-2 sub)" "$(visit v-one sub '' sess-1)"
+is "an empty-stamped visit sees a properly stamped sibling" "$(holder v-two '')" "v-one"
+fixture "$(visit v-two sub '' sess-2)" "$(visit v-one '' '' sess-1 sub)"
+is "…and a properly stamped visit sees an empty-stamped sibling" "$(holder v-two sub)" "v-one"
+
+# A candidate with neither recording cannot be placed, so it is nobody's
+# holder — resolving candidates must not turn an unplaceable one into a match.
+fixture "$(visit v-two '' '' sess-2)" "$(visit v-one sub '' sess-1)"
+is "an unresolvable SIBLING is not a holder for a known subject" "$(holder v-two sub)" "v-one"
+fixture "$(visit v-one '' '' sess-1)" "$(visit v-two sub '' sess-2)"
+is "…and it does not match a subject it cannot be shown to share" "$(holder v-two sub)" "v-two"
+
 # The item still comes from the visit's own stall_root once the subject is
 # recovered — recovery must not flatten the per-visit target back to the bucket.
 fixture "$(visit v-two '' r-beta sess-2 sub)" "$(visit v-one sub r-alpha sess-1)"
