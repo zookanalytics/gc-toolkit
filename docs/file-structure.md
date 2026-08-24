@@ -434,3 +434,33 @@ doc in the right place with the right content, and that the
 discoverability surface (READMEs, agent prompts, sibling docs)
 updates in the same PR.
 
+### A document whose output is a set of follow-up work names the beads in its rows
+
+Some documents schedule work: a plan with targets, an audit with
+findings, an analysis with a ranked shortlist. The work itself becomes
+beads — a document is not a queue, and nothing dispatches from one.
+**File those beads in the same PR as the document, and write each bead ID
+into the row that proposes it.** A member that deliberately gets no bead
+says so in the same place, for the same reason. Keep the rows current as
+work lands: when a member is done, edit its row to name what landed
+instead of the bead it was waiting on.
+
+Like the [`## Scope`](#the-scope-section) standard above, this constrains
+what a scheduling document must *carry*, not what it may conclude.
+
+**Why the ID goes in the row and not in the prose.** A single promise is
+either kept or obviously absent — one item, asked once. A *set* is where
+members vanish, because a set can be three-quarters converted and still
+read as finished; nothing records which rows were dealt with. Of this
+repo's three set-shaped documents, the two that write IDs into their rows
+converted every member, and the one that promised in prose lost its
+largest target for 21 hours — long enough for 283 lines to land in the
+file that target exists to shrink, plus 304 lines of test for them.
+The measurements, and the second dropped target found by applying this
+rule once by hand, are in
+[`specs/tk-twp697/`](../specs/tk-twp697/plan-targets-never-filed.md).
+
+**This is not a gate.** Nothing checks it and nothing should. A row
+missing its ID is a blank cell in the diff of the PR that adds the
+document — a review that already happens, given something to see. It
+makes an omission visible; it does not prevent one.

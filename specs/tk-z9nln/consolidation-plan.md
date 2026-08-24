@@ -30,16 +30,31 @@ propose a rewrite, a language migration, or a new abstraction layer.
 
 Ordered by (lines removed × brittleness removed) / risk. Do them in this order.
 
-| # | Target | Lines out | What stops happening | Risk |
-|---|---|---|---|---|
-| **1** | **Close the graph.v2 step chain** in the local `mol-polecat-work.toml` mirror; retire the quiesce sweeper | **2,099** | 461 stranded beads (62% of this rig's open ledger), growing ~40/day; every polecat's husk-classification toll | Medium |
-| **2** | **Finish the helm consolidation** — `gc-helm.sh`'s board half becomes a thin renderer | **~2,370** | "fixed on one board, not the other" — already recorded 3× | Low-Med |
-| **3** | **Retire `reconcile-refinery-handoffs.sh`** — its root cause was fixed in the formula | **761** | A repair pass for a defect the writer can no longer produce | Low |
-| **4** | **One control-char scrubber** — 7 definitions, 3 names, 2 incompatible byte sets | ~10 | Silent disagreement about whether TAB survives a bd read | Very low |
-| — | ~~Merge the `reconcile-*` family~~ | **0** | **Dropped — already done.** `refinery-reconcile.sh` is the driver | — |
-| — | ~~Add a shared library~~ | **~180** | **Dropped — not worth it.** The duplicates are one-liners | — |
+| # | Target | Bead | Lines out | What stops happening | Risk |
+|---|---|---|---|---|---|
+| **1** | **Close the graph.v2 step chain** in the local `mol-polecat-work.toml` mirror; retire the quiesce sweeper | close path: `tk-zab6q` **landed** (#443) · sweeper delete: `tk-eh0r3m` | **2,099** | 461 stranded beads (62% of this rig's open ledger), growing ~40/day; every polecat's husk-classification toll | Medium |
+| **2** | **Finish the helm consolidation** — `gc-helm.sh`'s board half becomes a thin renderer | `tk-clvkf6` | **~2,370** | "fixed on one board, not the other" — already recorded 3× | Low-Med |
+| **3** | **Retire `reconcile-refinery-handoffs.sh`** — its root cause was fixed in the formula | `tk-qf2l0j` **landed** (#442) | **761** | A repair pass for a defect the writer can no longer produce | Low |
+| **4** | **One control-char scrubber** — 7 definitions, 3 names, 2 incompatible byte sets | **none, by design** — folds into 1–3 | ~10 | Silent disagreement about whether TAB survives a bd read | Very low |
+| — | ~~Merge the `reconcile-*` family~~ | — | **0** | **Dropped — already done.** `refinery-reconcile.sh` is the driver | — |
+| — | ~~Add a shared library~~ | — | **~180** | **Dropped — not worth it.** The duplicates are one-liners | — |
 
 **Total: ~5,235 lines, ~85% of it in the top two.**
+
+**The Bead column was retrofitted 2026-08-24 (`tk-twp697`), and the retrofit
+found a dropped target.** This document said *"consolidations get filed as their
+own beads from it"* in prose and named no bead in any row. Target 2 went unfiled
+for 21 hours, during which `tk-sfg2e` — filed four minutes after this plan
+merged — put +283 lines into the `gc-helm.sh` half Target 2 exists to shrink,
+plus +304 of test for them (PR #439, closed unmerged 41 seconds after
+`tk-clvkf6` was finally filed).
+Target 1's *second* half, retiring the sweeper, is where all 2,099 of its lines
+live and had no bead either: `tk-zab6q`/#443 landed only the close path, so
+`tk-eh0r3m` now carries the delete. Keep this column current — when a target
+lands, say so in its row. The rule is
+[`docs/file-structure.md`](../../docs/file-structure.md#a-document-whose-output-is-a-set-of-follow-up-work-names-the-beads-in-its-rows);
+the measurements are in
+[`specs/tk-twp697/`](../tk-twp697/plan-targets-never-filed.md).
 
 **The finding that should change what you do first.** Target 1 has been
 believed unfixable in this repo since 2026-08-17. It is not. Both

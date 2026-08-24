@@ -34,7 +34,20 @@ Unsure? Ask which claim the document makes. *What is true* is central;
 pack's `docs/file-structure.md` carries the tier rules in full, including
 the bead-ID-alone directory naming.
 
-## 3. Commit it
+## 3. Does this document schedule work?
+
+If the document's output is a *set* of follow-up work — a plan with
+targets, an audit with findings, a ranked shortlist — file each member as
+a bead now, and write the bead ID into the row that proposes it. A member
+that deliberately gets no bead says so in the same place.
+
+Do this before you commit, because the IDs belong in the file. The set is
+what makes it necessary: a lone promise is either kept or obviously
+absent, but a four-row table can be three-quarters converted and still
+read as finished. `docs/file-structure.md` carries the rule and the
+measured case.
+
+## 4. Commit it
 
 Write the file on your work branch and commit it with the rest of your
 work. That commit is what makes it durable and reviewable — the point of
