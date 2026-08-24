@@ -269,64 +269,21 @@ num_min "$PEEK_LINES"     1 || PEEK_LINES=20
 num_min "$TAIL_LINES"     1 || TAIL_LINES=12
 num_min "$STALE_AFTER"    1 || STALE_AFTER=600
 
-# --- The status surface -----------------------------------------------------
-#
+# --- The status surface -------------------------------------------------------
 #   quota-park-nudge.sh --status [<session-id>]
-#
-# What the patrols read INSTEAD of peeking a pane, and the reason this order can
-# be allowed to hold a warrant back at all.
-#
-# The pane is agent-controlled output. A patrol step that says "peek the pane,
-# and if you see a limit banner do not file a warrant" hands every agent an off
-# switch for its own stuck-session recovery: print a provider-shaped line, sit
-# idle, and the path that would have recovered the work stands down. The agents
-# most likely to do that are the wedged and the compromised ones — precisely the
-# two the warrant exists for. Pane text cannot be the thing that suppresses it.
-#
-# So the classification stays here, in a non-LLM helper, and reaches the patrols
-# only as CLOSED fields: a yes/no/unknown, a label from detector_class's fixed
-# set, a `reason` from a fixed set, and integers out of this script's own state
-# files. Not one byte of pane text is emitted. A patrol never sees the screen and
-# so cannot be talked into anything by it.
-#
-# `unknown` is the field that keeps this honest, and it is deliberately NOT
-# folded into `no`. Everything reported here is evidence this order produced; if
-# the order is not running — disabled, wedged before it could list sessions, no
-# jq, a host without the pack — there is no evidence at all. Read as "not
-# parked" that silence is right by accident; read as "parked" it would suppress
-# warrants city-wide on the strength of a stopped clock. `unknown` says which
-# one it is, and the patrol prose sends it down the normal warrant path.
-#
-# Consequently EVERY answer is conditional on evidence about THAT session, never
-# merely on a pass having run:
-#   yes     — an episode whose last sighting is within STALE_AFTER
-#   no      — no episode, AND this order classified that session within
-#             STALE_AFTER (the per-session coverage record, `.sweep-coverage`)
-#   unknown — anything else, with `reason` saying which:
-#               no-recent-sweep  the heartbeat is stale: no pass lately at all
-#               not-swept        a pass ran but never reached this session —
-#                                deferred by the budget, an unreadable pane, an
-#                                id it refused, attached, or not in the list
-#               stale-episode    an episode nothing has confirmed lately
-#               unsafe-session-id  an id this order will not name a file with
-#               foreign-state    something is at that session's state path that
-#                                this order did not write, so there is no episode
-#                                to read and no clean path to report either
-#               state-dir-unavailable  the state directory could not be created
-#                                or cannot be written, so this order holds no
-#                                evidence about ANY session and cannot record any
-#
-# The `no` case is the one that has to be earned rather than inferred: a pass
-# that runs out of SWEEP_BUDGET defers its whole tail without peeking it and
-# still writes a fresh heartbeat, so "a sweep ran recently and there is no
-# episode" is not the same statement as "that session is not parked".
+# What the patrols read INSTEAD of peeking a pane: pane text is agent output,
+# so a "saw a banner, hold the warrant" rule would hand every agent an off
+# switch for its own recovery. The classification stays here and reaches the
+# patrols only as CLOSED fields — yes/no/unknown, a detector_class label, a
+# reason from a fixed set, integers from this order's own state. `unknown` is
+# NOT folded into `no`: with no recent evidence about THAT session the patrol
+# takes its normal warrant path. reasons: no-recent-sweep, not-swept,
+# stale-episode, unsafe-session-id, foreign-state, state-dir-unavailable.
+# `no` has to be earned per session (the coverage record), because a
+# budget-deferred pass writes a fresh heartbeat without peeking its tail.
 
-# A full closed-field line for a session this order can say nothing about, every
-# field at its no-evidence value. The surface has to answer in the SAME shape
-# whether or not it has state to read: a consumer that greps one field out of a
-# status line must not have to handle a short line as a special case, and a
-# short line is how a missing field silently becomes whatever default the reader
-# assumed. `-` for the id where there is not even a session to name.
+# The no-evidence line, SAME shape as a full one — a short line is how a
+# missing field silently becomes whatever default the reader assumed.
 status_unknown() {
     printf 'session=%s quota_park=unknown detector_class=unknown age_s=-1 parked_for=- attempts=0 unconfirmed=0 escalated=0 last_seen_age=-1 reason=%s\n' \
         "$1" "$2"
@@ -474,47 +431,26 @@ status_report() {
     done
 }
 
-# Only `--status` is special; anything else falls through to a normal sweep,
-# which is what the order runner invokes with no arguments at all.
+# Only --status is special; anything else falls through to a normal sweep.
 if [ "${1:-}" = "--status" ]; then
     status_report "${2:-}"
     exit 0
 fi
 
-# The sweep, unlike the surface above, genuinely cannot proceed without the
-# state directory: with nowhere to write an episode every park would be
-# re-detected as new, nudged on every cycle, and escalated forever. It stops —
-# but it stops LOUDLY, in the order runner's log, which is the half the silent
-# `|| exit 0` never had. Still exit 0: the pass had nothing to do, which is not
-# the same as the order crashing, and a non-zero rc here would read as one.
-# The path is bounded through sanitize_display like every other value this
-# script prints, since it arrives from the environment.
+# The sweep genuinely cannot proceed without the state dir (every park would
+# re-detect as new each cycle). Stop LOUDLY, exit 0 — nothing to do is not a
+# crash.
 if [ "$STATE_DIR_OK" != "1" ]; then
     echo "quota-park-nudge: state dir unavailable ($(sanitize_display "$STATE_DIR")) — no sweep this pass; --status reports unknown/state-dir-unavailable"
     exit 0
 fi
 
-# --- Pattern overrides, validated before the sweep uses them ----------------
-#
-# The numeric knobs above are validated for the same reason these are, but a bad
-# ERE fails in a nastier direction: `grep` answers a malformed pattern with rc 2,
-# and every test below reads a non-zero rc as "did not match". So
-# `QUOTA_PARK_MATCH='('` does not disable the detector loudly — it reports every
-# pane in the city as CLEAN, which deletes the episode state of every session
-# genuinely parked and leaves `--status` answering `no` for all of them. One
-# malformed character in a tuning knob, and quota recovery is silently off
-# city-wide while the summary line reports a healthy sweep. (Reproduced during
-# review: `QUOTA_PARK_MATCH='('` → `0 parked`, `quota_park=no` on a parked pane.)
-#
-# The other two fail the same way in their own direction: a malformed BUSY
-# pattern matches nothing, so every busy pane reads as idle and gets nudged
-# mid-turn; a malformed EXCLUDE pattern matches nothing, so the operator's escape
-# hatch is silently ignored. Each falls back to its own default and says so — the
-# fallback is chosen so that recovery keeps working, never so that a typo can
-# switch it off. That is also why an unusable EXCLUDE falls back to "no
-# exclusions" rather than to "exclude everything": the cost of the first is one
-# unwanted nudge per backoff window on one session, the cost of the second is the
-# whole city unrecovered.
+# --- Pattern overrides, validated before the sweep uses them -------------------
+# grep answers a malformed ERE with rc 2, which every test below reads as "no
+# match": a bad QUOTA_PARK_MATCH would report every pane CLEAN (recovery off
+# city-wide, silently); a bad BUSY nudges mid-turn; a bad EXCLUDE ignores the
+# escape hatch. Each falls back to its own default, loudly, in the direction
+# that keeps recovery working.
 valid_ere() {
     local rc=0
     # Zero bytes of input by redirect, not by `printf '' |` (tk-zfjg9). Nothing
@@ -542,40 +478,19 @@ if [ -n "$EXCLUDE_RE" ] && ! valid_ere "$EXCLUDE_RE"; then
     EXCLUDE_RE=""
 fi
 
-# What kind of bound this host can actually enforce, resolved once:
-#   2  hard — `timeout -k`: SIGTERM at CALL_TIMEOUT, SIGKILL KILL_AFTER later
-#   1  soft — `timeout` only: SIGTERM, then wait for a child free to ignore it
-#   0  none — no timeout(1) at all (some macOS hosts)
-#
-# Probed rather than assumed: `-k` is GNU/uutils/busybox, but this order runs
-# wherever the pack does and an unsupported flag would fail EVERY bounded call
-# with a usage error — every pane unreadable, recovery silently off. `true` is
-# the cheapest possible probe and the bounds are 1s it never reaches.
+# What bound this host can enforce, probed once (`-k` is GNU/uutils/busybox):
+#   2 hard (timeout -k) · 1 soft (SIGTERM only) · 0 none (no timeout(1)).
 BOUND_MODE=0
 if command -v timeout >/dev/null 2>&1; then
     if timeout -k 1 1 true >/dev/null 2>&1; then BOUND_MODE=2; else BOUND_MODE=1; fi
 fi
 
-# Every `gc` call goes through here. Two things it guarantees:
-#
-#   1. A bound (CALL_TIMEOUT), and where the host allows it, a HARD one. Plain
-#      `timeout` sends SIGTERM and then waits — indefinitely, if the child
-#      ignores it (`timeout 1 bash -c 'trap "" TERM; sleep 4'` runs the full 4s).
-#      A `gc` call wedged in the runtime or in Dolt is the process least likely
-#      to service a signal promptly, so the bound most relied on to stop one
-#      wedged call stranding the sweep is the one likeliest to be ignored. `-k`
-#      adds the SIGKILL nothing can ignore. Either way expiry is a non-zero rc —
-#      124 for the timeout, 128+n where the kill lands first (137 on the hosts
-#      tested) — so a wedged call falls into the caller's existing failure branch
-#      (empty pane, failed nudge). Both are already handled as the ambiguous
-#      case by the nudge and escalation branches below, which is what they are:
-#      the call may have been accepted before it stopped answering. Same idiom
-#      and env-override shape as merge-skill.sh's run_bounded. No coreutils
-#      `timeout` degrades to an unbounded call rather than dropping the probe:
-#      skipping every call would silently disable recovery on such a host.
-#   2. stdin CLOSED. The session loop below reads its work list from a
-#      here-string on fd 0; a child that inherited and consumed it would
-#      truncate the sweep — sessions would vanish from the run rather than fail.
+# Every gc call goes through here. Guarantees: (1) a bound, HARD where the
+# host allows (a wedged gc is the process least likely to service SIGTERM);
+# expiry is a non-zero rc (124, or 128+n when the kill lands) that falls into
+# the caller's existing failure branch. (2) stdin CLOSED — the session loop
+# reads its work list on fd 0, and a child that consumed it would silently
+# truncate the sweep. No timeout(1) degrades to an unbounded call.
 run_bounded() {
     if [ "$CALL_TIMEOUT" -le 0 ] || [ "$BOUND_MODE" -eq 0 ]; then
         "$@" </dev/null
@@ -586,19 +501,14 @@ run_bounded() {
     fi
 }
 
-# Said out loud, once per pass, on a host that can only bound softly: the sweep
-# still runs and still recovers agents, but a `gc` call that ignores SIGTERM can
-# hold it past its budget, and the summary line's numbers are then a floor
-# rather than a full pass. An operator reading a short sweep deserves to know
-# which of the two it was. Deliberately after the `--status` exit above: the
-# patrols read that surface every cycle and this is not their problem.
+# Said once per pass on a soft-bound host: the summary's numbers are then a
+# floor, not a full pass.
 if [ "$CALL_TIMEOUT" -gt 0 ] && [ "$BOUND_MODE" -eq 1 ]; then
     echo "quota-park-nudge: this host's timeout(1) has no -k — call bounds are SIGTERM-only, so a gc call that ignores it is effectively unbounded"
 fi
 
-# True once the pass has run longer than SWEEP_BUDGET (0 = no budget). Checked
-# per session so a slow sweep stops at a session boundary, with its state files
-# consistent, instead of overrunning into the next cycle.
+# True once the pass outran SWEEP_BUDGET (0 = none); checked per session so a
+# slow sweep stops at a session boundary.
 sweep_expired() {
     [ "$SWEEP_BUDGET" -gt 0 ] || return 1
     [ "$(( $(date +%s) - NOW ))" -ge "$SWEEP_BUDGET" ]
@@ -609,27 +519,14 @@ state_failed=0
 last_attempted=""
 covered_now=""
 
-# Vouch for one session: this pass reached it, classified it, and its verdict is
-# readable back out of the state directory. That last clause is the whole point
-# — see write_state_vouched.
+# Vouch for one session: this pass classified it AND the verdict is readable
+# back out of the state dir (see write_state_vouched).
 vouch() { covered_now="$covered_now$1 $NOW"$'\n'; }
 
-# Persist an episode, and vouch for the session only if the write landed.
-#
-# Coverage used to be recorded as soon as the pane was read, which conflates two
-# different facts: that this pass CLASSIFIED a session, and that the
-# classification is still there to be read. For a parked session the state file
-# IS the verdict — `--status` answers `yes` out of it — so a write that fails
-# leaves a session that was detected, nudged, and then published as `no`, on the
-# strength of a coverage line saying we looked. Reproduced during review with a
-# directory at `$STATE_DIR/<id>`: swept, nudged, `quota_park=no reason=-`. A
-# parked agent reported clean is precisely the answer that sends a patrol down
-# the warrant path this order exists to hold back.
-#
-# So a failed write withholds the vouch instead, and `--status` falls to
-# `unknown` / `not-swept` — the same answer any other uninspected session gets,
-# in a vocabulary the patrols already handle. Counted and logged, because
-# silently uncovering a session looks identical to never having reached it.
+# Persist an episode; vouch only if the write landed. A parked session whose
+# state write failed must fall to unknown/not-swept, never publish as `no` —
+# counted and logged, because silently uncovering a session looks identical
+# to never having reached it.
 write_state_vouched() {
     if write_state "$@"; then
         vouch "$id"
@@ -640,30 +537,16 @@ write_state_vouched() {
     return 1
 }
 
-# That a pass RAN, and what it saw. This is what makes the status surface
-# refusable: warrant suppression in the patrols is conditional on a recent sweep,
-# so an order that is disabled, wedged, or absent from a host cannot hold a
-# warrant back by leaving old evidence lying around. Written only where a pass
-# actually completed — every early exit below (a session list that failed, no
-# jq, an unwritable state dir) leaves the previous heartbeat to go stale, which
-# is exactly what a patrol reads as `unknown`.
+# That a pass RAN. Written only where a pass completed, so a disabled or
+# wedged order's evidence goes stale rather than vouching city-wide.
 write_heartbeat() {
     printf 'last_run=%s\nchecked=%s\nparked=%s\nnudged=%s\ndeferred=%s\n' \
         "$NOW" "$checked" "$parked" "$nudged" "$skipped" | write_owned "$HEARTBEAT_FILE" || true
 }
 
-# WHICH sessions a pass classified, which is a different fact from that a pass
-# ran, and the one `--status` needs before it may answer `no` for a session with
-# no episode. A pass is not a census: the sweep is round-robin under a budget, so
-# a session can be deferred, unreadable, refused, attached, or absent from the
-# list — uninspected, every one of them, on a pass that completes and writes a
-# perfectly fresh heartbeat.
-#
-# Merged rather than overwritten, because a classification stays evidence for
-# STALE_AFTER: this pass's records go in first so they win the dedup, and
-# anything past the cutoff is dropped, which keeps the file bounded by the number
-# of live sessions instead of growing forever. Atomic and dot-prefixed for the
-# same reasons as the heartbeat.
+# WHICH sessions a pass classified — the record `--status` needs before it
+# may answer `no`. Merged, this pass first (wins the dedup), entries past
+# STALE_AFTER dropped, so the file stays bounded by live-session count.
 write_coverage() {
     local cutoff=$((NOW - STALE_AFTER)) prior=""
     if owned_file "$COVERAGE_FILE"; then
@@ -678,46 +561,21 @@ write_coverage() {
         | write_owned "$COVERAGE_FILE" || true
 }
 
-# Only sessions the controller believes are alive. Keyed on `.state`, NEVER on
-# `.running`: running is null for an active session during controller churn, so
-# a `.running == true` filter drops exactly the live sessions it is meant to
-# select — and a quota-parked one in that state would never be peeked at all.
-# The same rule is already load-bearing in the helm's owner-liveness join
-# (assets/scripts/gc-helm.sh, with a running:null case in
-# tools/helm-surface-fixture.sh). `attached` is skipped: a human is looking at
-# that pane and can act, and injecting keys under their cursor is rude.
-#
-# `@tsv`, not an interpolated "\(.id)\t\(.alias)": jq escapes tab, newline,
-# carriage return and backslash inside @tsv fields, so one session is always
-# exactly one record. Interpolated, they pass through raw and mutable session
-# metadata can forge a row — an alias holding a newline followed by
-# `../escaped-state` produced a second row whose "id" was that path, and the
-# state file built from it was written outside STATE_DIR. Encoding here and
-# validating with safe_id below are the two halves of that fix: the encoding
-# stops a field from becoming a record, the validation stops a record from
-# becoming a path.
+# Only live sessions. Keyed on .state, NEVER .running (null during controller
+# churn — a filter on it drops exactly the live sessions). `attached` is
+# skipped: a human is at that pane. @tsv, not interpolation: jq escapes
+# tab/newline inside @tsv fields, so mutable session metadata cannot forge a
+# row (an alias with a newline once wrote state outside STATE_DIR).
 sessions=$(run_bounded gc session list --json 2>/dev/null \
     | jq -r '.sessions[]? | select(.state == "active" and (.attached // false) == false)
              | [.id, (.alias // .session_name // .id)] | @tsv' 2>/dev/null) || exit 0
-# An empty list is a complete pass over nothing, not a failure: the list came
-# back and parsed, there was simply nothing sweepable in it. It gets a heartbeat
-# — every session then reports `no` (no episode), which is true.
+# An empty list is a complete pass over nothing, not a failure.
 [ -n "$sessions" ] || { write_heartbeat; echo "quota-park-nudge: 0 checked, 0 parked, 0 nudged"; exit 0; }
 
-# Where to start. `gc session list` returns a stable order and every peek that
-# hangs costs a whole CALL_TIMEOUT out of SWEEP_BUDGET, so a fixed starting point
-# means a prefix of slow sessions is paid for FIRST on every pass — eight of them
-# at the defaults (8 × 15s = the 120s budget) and the sweep never reaches the
-# rest. Not once: every cycle, the same prefix, the same deferral. The sessions
-# behind it are then never inspected at all, which is the one outcome this order
-# exists to prevent — a genuinely parked agent going unrecovered while the city
-# logs a healthy 3m sweep over it.
-#
-# So the cursor records the last session a pass attempted and the next pass
-# resumes AFTER it, round-robin. An unreadable prefix ends up at the back of the
-# next pass's order and cannot consume it twice. A pass that gets through the
-# whole list leaves the cursor on the final record, and rotating past the last
-# record is the identity — the steady state is the plain order, unchanged.
+# Round-robin cursor: the list order is stable and each hung peek costs a
+# CALL_TIMEOUT out of SWEEP_BUDGET, so a fixed start would pay the same slow
+# prefix every pass and never reach the tail. Resume AFTER the last session
+# the previous pass attempted; rotating past the end is the identity.
 cursor="$(state_get "$CURSOR_FILE" session)"
 safe_id "$cursor" || cursor=""
 if [ -n "$cursor" ]; then
@@ -980,39 +838,15 @@ fi
 write_coverage
 write_heartbeat
 
-# A recovered agent's state file is removed above, the moment its pane goes
-# clean. This only sweeps files no cycle has touched in a week — sessions that
-# were closed or renamed while parked.
-#
-# Narrow on purpose, because STATE_DIR is an override and its default sits
-# inside the shared city runtime directory: a broad `find "$STATE_DIR" -type f
-# -mtime +7 -delete` is a city-scoped order deleting week-old files it has never
-# heard of, and a mis-set or shared QUOTA_PARK_STATE_DIR is all it takes to
-# point that at somebody else's state. The ownership test is `owned_state_rm`'s
-# — a regular non-symlink file, directly in STATE_DIR, named like the session ids
-# we write, carrying this order's own marker line — and it is the same one the
-# two every-cycle removal paths use, so no path can drift into deleting more
-# than the others. Anything failing it is somebody else's file and is left alone,
-# including this order's OWN `.sweep-cursor` and `.heartbeat`, whose leading dot
-# puts them outside safe_id on purpose.
-#
-# Iterated with a glob rather than `find`, and aged from the record rather than
-# from mtime, so the whole thing is POSIX shell. `find -maxdepth`/`-print0` are
-# GNU/BSD extensions and `stat` spells mtime differently on each — this order
-# degrades carefully everywhere else (BOUND_MODE probes for `timeout -k` rather
-# than assuming it), and the cleanup path had no reason to be the one piece that
-# needs GNU. The two globs cover the dotted names too, since `*` alone skips
-# them; `owned_state_rm`'s STATE_DIR check is the depth guard `-maxdepth 1` was,
-# and a glob never descends anyway. A hostile filename is just one more element
-# here — there is no line-splitting to be confused by, which is what `-print0`
-# was defending.
+# Prune: only files no cycle has touched in a week (sessions closed/renamed
+# while parked), by the SAME ownership test as every removal path. Glob, not
+# find; aged from the record inside, not mtime — POSIX everywhere. The two
+# globs cover dotted names; owned_state_rm's STATE_DIR check is the depth
+# guard.
 PRUNE_AFTER=604800   # 7 days, in seconds
 
-# Age of an episode file this order owns, from the record inside it: the last
-# time a sweep confirmed the session parked, or failing that when the episode
-# began. A file of ours with neither is one no sweep can have written — every
-# write is atomic and complete — so it is corrupt or hand-made, and reported as
-# ancient to be collected rather than left to sit forever.
+# Age of an owned episode file, from its own record (last_seen, else
+# first_seen; neither = corrupt, reported ancient so it gets collected).
 owned_state_age() {
     local ts
     ts="$(state_get "$1" last_seen)"
@@ -1053,8 +887,8 @@ prune_stale_state() {
 }
 prune_stale_state
 
-# Everything the sweep could not conclude is named in the summary rather than
-# folded into "checked" — a short sweep must not read as a complete one.
+# Everything the sweep could not conclude is named in the summary — a short
+# sweep must not read as a complete one.
 unread=""
 [ "$unreadable" -gt 0 ] && unread=", $unreadable unreadable"
 unsafe=""
