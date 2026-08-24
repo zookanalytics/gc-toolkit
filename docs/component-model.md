@@ -238,29 +238,30 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I2** | The set of states is closed, and every state has exactly one handler. | **FALSE** | Pack code writes 7 `merge_result` literals across 5 files. Two readers each keep their own hand-maintained list, and the lists disagree: `refinery-reconcile.sh:344` excludes 5 values and treats anything else as *not yet anchored*; `mol-refinery-patrol.toml:486` allows 3 and treats anything else as *terminal, leave it alone*. Neither knows `blocked` or `refused_false_completion`. Opposite defaults for the same unknown value — the formula's own comment concedes "a marker no pass here has heard of". **UNCHECKED** → `check-state-space-declared` (tk-jozah0) |
 | **I3** | Every routed bead is claimable by the agent it is routed to. | **TRUE** | `doctor/check-routed-work-claimable` — exact-equality on `gc.routed_to` vs live pool names. The one seed invariant with a real structural check. Scope hole: skips *assigned* beads, which is the near-miss-address case §2.4 leaves to a report-only detector. |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | **PARTIAL** | Enforced as a *runtime hold* inside `merge-skill.sh` (tk-ynz4b), not as a property. A second anchor is invisible until someone tries to merge. **UNCHECKED** → `check-one-anchor-per-pr` (tk-qz6081) |
-| **I5** | No bead is closed while the work it represents is unlanded. | **FALSE** | `merge-skill.sh` closes only after a verified merge, and the observer re-verifies — but nothing stops a *different* writer. Violated live on 2026-08-23: eight gc-toolkit anchors closed in a 19-second span carrying `merge_result=pull_request` and a green `check.codex` at the live head; all eight PRs were approved, CLEAN and MERGEABLE; none landed, because `merge-skill` cannot enumerate a closed anchor (`mol-refinery-patrol.toml:490`). `bd close --force` also bypasses open children and live blockers by design. **UNCHECKED** → `check-closed-implies-landed` (tk-39tv12) |
+| **I5** | No bead is closed while the work it represents is unlanded. | **NEWLY TRUE** | `doctor/check-closed-implies-landed` observes it on the live ledger; `check-set-heal.sh` phase 0a repairs it. Measured clean 2026-08-24 — 5 rigs, 1,513 closed PR-referencing beads, 0 unlanded. The two violations it was written from: 2026-08-05, signal-loom sl-jcr4 closed at PR-creation with no `merge_result`, PR#518 then open four days with every non-codex gate satisfied and zero escalations (tk-vnlll); and 2026-08-23, eight gc-toolkit anchors closed in a 19-second span carrying `merge_result=pull_request` and a green `check.codex` at the live head — all approved, CLEAN and MERGEABLE, none landed, because `merge-skill` cannot enumerate a closed anchor (`mol-refinery-patrol.toml:490`) (tk-fip23). Like I6 it needs a healer to hold, and the check is the independent observer of whether it does — phase 0a fires only from `refinery-reconcile`, so a rig whose cadence stopped has no repair at all, and phase 0a deliberately refuses the ambiguous and the already-reopened-then-re-closed. `bd close --force` remains an unguarded write route. |
 | **I6** | Every gating anchor declares a non-empty check-set. | **TRUE** | `doctor/check-merge-gate-drop` detects; `check-set-heal.sh` repairs at the refinery boundary before `merge-skill.sh` can read empty as *ungated*. The strongest binding in the system — and note it needs a healer to hold. |
 | **I7** | A `green` gate marker was written by something that actually ran the check. | **FALSE** | The marker is stamped by a shell block inside an **agent prompt fragment** an LLM elects to run (`polecat-non-impl-done.template.md:465`), whose own code warns the write may not stick. Nothing binds the marker to evidence. This is the most load-bearing token in the merge path. **UNCHECKED** → `check-gate-marker-provenance` (tk-iljtmq) |
 | **I8** | Every graph.v2 step bead reaches a terminal state. | **NEWLY TRUE** | `doctor/check-finalized-molecule-step-reoffer`; the writer half landed 2026-08-23 (`step-close.sh` wired into `mol-polecat-work`, PR #443). The violation it closed: 490 of 746 open beads were husks. |
 | **I9** | A molecule executes the formula text that is current when it runs. | **FALSE** | Step descriptions are frozen at pour, and `rigs/<rig>/` — the checkout the runtime executes — advances on a 15-minute cooldown (`orders/reconcile-rig-checkouts.toml`). Measured during this bead: the molecule poured 16:06:31Z from pre-#443 text; the checkout advanced to #443 at 16:14:32Z. The molecule ran the old text for its whole life. **UNCHECKED** → `check-pour-text-current` (tk-5w3boh) |
 
-**Six UNCHECKED invariants — I1, I2, I4, I5, I7, I9 — are the output of this
+**Five UNCHECKED invariants — I1, I2, I4, I7, I9 — are the output of this
 document.** Each is filed as its own bead, named in the table above, proposing
 the concrete check. They are what stops this file being another
 `docs/roadmap.md`: when one lands, edit the row to name the check instead of
-the bead.
+the bead. I5 was the sixth and is the first to land that way — its row now
+names `doctor/check-closed-implies-landed` instead of tk-39tv12.
 
 ### Why the existing checks do not already cover these
 
-Measured across `doctor/` (25 checks): **22 read only pack source**, greping
-that a fix is still present. Only 3 —
+Measured across `doctor/` (27 checks): **23 read only pack source**, greping
+that a fix is still present. Only 4 — `check-closed-implies-landed`,
 `check-finalized-molecule-step-reoffer`, `check-merge-gate-drop`,
 `check-routed-work-claimable` — query the live ledger. A source grep proves
 the pack still *contains* a
 remedy; it cannot observe whether the running system holds a property. Every
-check is named for the defect that produced it. None asserts a structural
-property. That is the tactical/structural split, present in the enforcement
-layer itself.
+check is named for the defect that produced it, and until I5 landed none
+asserted a structural property. That is the tactical/structural split, present
+in the enforcement layer itself.
 
 ---
 
@@ -274,7 +275,7 @@ layer itself.
 | Gates are evidence-bound | the green marker is prompt-authored | I7 |
 | Design carried by diagrams | `docs/` = 10,151 lines, **1** mermaid diagram (in `architecture.md`) before this file | `git ls-tree -r origin/main -- docs` |
 | A state machine is drawn | `docs/work-bead-state-machine.md` is 2,070 lines, 0 diagrams | same |
-| Checks assert properties | 22 of 25 assert only that a past fix is still in the source | §3 |
+| Checks assert properties | 23 of 27 assert only that a past fix is still in the source | §3 |
 | Live pack == landed pack | up to 15 min of lag; a molecule poured inside it runs stale text for life | I9 |
 
 Remediation sequencing is not this document's; see
