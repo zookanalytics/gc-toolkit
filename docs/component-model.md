@@ -242,20 +242,24 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I6** | Every gating anchor declares a non-empty check-set. | **TRUE** | `doctor/check-merge-gate-drop` detects; `check-set-heal.sh` repairs at the refinery boundary before `merge-skill.sh` can read empty as *ungated*. The strongest binding in the system — and note it needs a healer to hold. |
 | **I7** | A `green` gate marker was written by something that actually ran the check. | **FALSE** | The marker is stamped by a shell block inside an **agent prompt fragment** an LLM elects to run (`polecat-non-impl-done.template.md:465`), whose own code warns the write may not stick. Nothing binds the marker to evidence. This is the most load-bearing token in the merge path. **UNCHECKED** → `check-gate-marker-provenance` (tk-iljtmq) |
 | **I8** | Every graph.v2 step bead reaches a terminal state. | **NEWLY TRUE** | `doctor/check-finalized-molecule-step-reoffer`; the writer half landed 2026-08-23 (`step-close.sh` wired into `mol-polecat-work`, PR #443). The violation it closed: 490 of 746 open beads were husks. |
-| **I9** | A molecule executes the formula text that is current when it runs. | **FALSE** | Step descriptions are frozen at pour, and `rigs/<rig>/` — the checkout the runtime executes — advances on a 15-minute cooldown (`orders/reconcile-rig-checkouts.toml`). Measured during this bead: the molecule poured 16:06:31Z from pre-#443 text; the checkout advanced to #443 at 16:14:32Z. The molecule ran the old text for its whole life. **UNCHECKED** → `check-pour-text-current` (tk-5w3boh) |
+| **I9** | A molecule executes the formula text that is current when it runs. | **FALSE, DETECTED** | Step descriptions are frozen at pour, and `rigs/<rig>/` — the checkout the runtime executes — advances on a 15-minute cooldown (`orders/reconcile-rig-checkouts.toml`). Measured during this bead: the molecule poured 16:06:31Z from pre-#443 text; the checkout advanced to #443 at 16:14:32Z. The molecule ran the old text for its whole life. `doctor/check-pour-text-current` now reports all three shapes — a checkout past the reconciler's self-heal window, a live molecule whose formula changed after it poured, and the fail-open case where the remote-tracking ref is itself stale so the behind-count reads 0 while the lag is unbounded. Detection only: the freeze is in the pour, and nothing yet re-renders a running molecule's text. |
 
-**Six UNCHECKED invariants — I1, I2, I4, I5, I7, I9 — are the output of this
-document.** Each is filed as its own bead, named in the table above, proposing
-the concrete check. They are what stops this file being another
+**Five UNCHECKED invariants — I1, I2, I4, I5, I7 — are the output of this
+document.** I9 was the sixth and is now detected by
+`doctor/check-pour-text-current`. Each of the rest is filed as its own bead,
+named in the table above, proposing the concrete check. They are what stops this file being another
 `docs/roadmap.md`: when one lands, edit the row to name the check instead of
 the bead.
 
 ### Why the existing checks do not already cover these
 
-Measured across `doctor/` (25 checks): **22 read only pack source**, greping
-that a fix is still present. Only 3 —
+Measured across `doctor/` (25 checks at the time of writing): **22 read only
+pack source**, greping that a fix is still present. Only 3 —
 `check-finalized-molecule-step-reoffer`, `check-merge-gate-drop`,
-`check-routed-work-claimable` — query the live ledger. A source grep proves
+`check-routed-work-claimable` — query the live ledger. `check-pour-text-current`
+is a fourth, and the first to compare the live ledger against the live
+*checkout*: a source grep cannot see that the source it is greping is not the
+source that runs. A source grep proves
 the pack still *contains* a
 remedy; it cannot observe whether the running system holds a property. Every
 check is named for the defect that produced it. None asserts a structural
@@ -275,7 +279,7 @@ layer itself.
 | Design carried by diagrams | `docs/` = 10,151 lines, **1** mermaid diagram (in `architecture.md`) before this file | `git ls-tree -r origin/main -- docs` |
 | A state machine is drawn | `docs/work-bead-state-machine.md` is 2,070 lines, 0 diagrams | same |
 | Checks assert properties | 22 of 25 assert only that a past fix is still in the source | §3 |
-| Live pack == landed pack | up to 15 min of lag; a molecule poured inside it runs stale text for life | I9 |
+| Live pack == landed pack | up to 15 min of lag; a molecule poured inside it runs stale text for life. Now DETECTED (`check-pour-text-current`), not prevented | I9 |
 
 Remediation sequencing is not this document's; see
 `specs/tk-z9nln/consolidation-plan.md`.
