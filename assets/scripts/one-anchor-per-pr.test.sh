@@ -177,6 +177,42 @@ grep -q 'merge_result=' <<< "$REWORK_ARM" \
   && bad "(8) rework arm must NOT stamp merge_result (would mint a second anchor)" \
   || ok "(8) rework arm stamps no merge_result — \$WORK never enters the anchor class"
 
+# --- Executable pin: the terminal arm never stamps an unaddressable PR. -------
+# An empty pr_url/pr_number on a pull_request anchor is skipped by merge.sh and
+# pr-facts.sh forever; the arm must fall back to pre_open_gate (pr-open.sh then
+# adopts the recorded PR and stamps real coordinates).
+TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-per-pr-terminal/{f=0} f' "$TOML")"
+[ -n "$TERMINAL" ] \
+  && ok "(9a) terminal snippet extracted for execution" \
+  || bad "(9a) terminal snippet extraction EMPTY"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/git"
+chmod +x "$TMP/bin/git"
+export LCLOG="$TMP/lc.log"
+cat > "$TMP/bin/lc-stub" <<'L'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${LCLOG:?}"
+L
+chmod +x "$TMP/bin/lc-stub"
+printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
+run_terminal() { # <pre_open> <pr_url> <pr_number>
+  : > "$LCLOG"
+  EXISTING_ANCHOR="" WORK=w1 BRANCH=polecat/w1 TARGET=main CHECK_SET=codex \
+    LC="$TMP/bin/lc-stub" PRE_OPEN="$1" PR_URL="$2" PR_NUMBER="$3" \
+    bash "$TMP/terminal.sh" >/dev/null 2>&1
+  cat "$LCLOG"
+}
+lc_out=$(run_terminal 0 "https://github.com/o/r/pull/7" 7)
+case "$lc_out" in
+  *"--to pull_request"*"pr_url=https://github.com/o/r/pull/7"*) ok "(9b) resolved PR coordinates transition to pull_request" ;;
+  *) bad "(9b) resolved PR coordinates must transition to pull_request (got: $lc_out)" ;;
+esac
+lc_out=$(run_terminal 0 "" "")
+case "$lc_out" in
+  *"--to pull_request"*) bad "(9c) unresolved PR coordinates must NEVER stamp pull_request (got: $lc_out)" ;;
+  *"--to pre_open_gate"*) ok "(9c) unresolved PR coordinates fall back to pre_open_gate (pr-open adopts the PR)" ;;
+  *) bad "(9c) expected a pre_open_gate fallback transition (got: $lc_out)" ;;
+esac
+
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining
 # duty is that the transitions land on the right bead, checked below.
 

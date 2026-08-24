@@ -39,6 +39,10 @@ formula_compiler = ">=2.0.0"
 description = "Agent identity prefix, including trailing dot when bound."
 default = ""
 
+[vars.rig_name]
+description = "Rig this patrol serves; injected by the pour (forwarded verbatim by next-iteration). Declared so the {{rig_name}} token in the pour commands resolves instead of surviving literally."
+default = ""
+
 [vars.run_tests]
 description = "Whether to run tests before merging."
 default = "true"
@@ -505,10 +509,18 @@ fi
 if [ -n "$RECORDED_PR" ] && [ -z "$EXISTING_PR" ]; then
   echo "merge-push: $WORK already records PR $RECORDED_PR (pr_url/pr_number); taking the POST-OPEN path so the existing PR is reused, not re-parked to pre_open_gate." >&2
 fi
+# The post-open transition needs BOTH url and number; resolve them here so the
+# terminal arm never stamps an unaddressable pull_request (empty pr_number is
+# skipped by merge.sh and pr-facts.sh forever).
+PR_URL=""; PR_NUMBER=""
+if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
+  PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  PR_URL=$(printf '%s' "$PR_VIEW" | jq -r '.url // empty' 2>/dev/null)
+  PR_NUMBER=$(printf '%s' "$PR_VIEW" | jq -r '.number // empty | tostring' 2>/dev/null)
+fi
 # <<< pre-open-recorded-pr
 ```
-On the post-open path, resolve the PR (`gh pr view "$RECORDED_PR" --json
-url,number,state,headRefName,baseRefName`) and verify OPEN + head==$BRANCH
+On the post-open path, verify `$PR_VIEW` reports OPEN + head==$BRANCH
 + base==$TARGET; a caller-supplied PR that fails goes to the blocked arm
 above, anything else stops the wisp for debugging without mutating state.
 
@@ -556,7 +568,10 @@ if [ -n "$EXISTING_ANCHOR" ]; then
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   gc bd update "$WORK" --unset-metadata rejection_reason >/dev/null 2>&1 || true
   gc bd close "$WORK" --reason "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"
-elif [ "$PRE_OPEN" = 1 ]; then
+elif [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
+  if [ "$PRE_OPEN" != 1 ]; then
+    echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
+  fi
   "$LC" transition "$WORK" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
 else
   "$LC" transition "$WORK" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason

@@ -29,6 +29,7 @@ LIFECYCLE_CLOSED_STATES="merged"
 LIFECYCLE_TRANSITIONS="
 unanchored>pre_open_gate
 unanchored>pull_request
+unanchored>merged
 unanchored>blocked
 unanchored>refused_false_completion
 pre_open_gate>pull_request

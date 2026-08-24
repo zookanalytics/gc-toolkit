@@ -103,7 +103,8 @@ GATE_UNSAFE_RC=3
 MERGE_HELD=0
 gate_rc=0
 run_pass "(1) gate-ensure" gate-ensure.sh \
-  --default "$CHECK_SET_DEFAULT" --review-pool "$REVIEW_POOL" || gate_rc=$?
+  --default "$CHECK_SET_DEFAULT" --review-pool "$REVIEW_POOL" \
+  --fix-pool "$FIX_POOL" || gate_rc=$?
 if [ "$gate_rc" = "$GATE_UNSAFE_RC" ]; then
   MERGE_HELD=1
   note "gate-ensure UNSAFE (rc=$gate_rc) — merge.sh HELD this pass"

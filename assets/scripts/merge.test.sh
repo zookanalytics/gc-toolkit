@@ -217,6 +217,58 @@ printf '%s' "$(prview 70 MERGED CLEAN)" > "$GH_DIR/pr_view_70.json"
 out=$("$SUT" 2>&1)
 has "$out" "1 skipped" "a merged PR is skipped (the skill only merges)"
 
+echo "# empty/absent check_set holds (empty is never the 'none' opt-out)"
+store '[{"id":"E1","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"80","pr_url":"https://github.com/zook/gc-toolkit/pull/80","branch":"polecat/x80","merged_target":"main"}}]'
+printf '%s' "$(prview 80 OPEN CLEAN)" > "$GH_DIR/pr_view_80.json"
+echo '[]' > "$GH_DIR/reviews_80.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "no normalized check_set" "an anchor with no check_set holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged ungated"
+store '[{"id":"E2","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"81","pr_url":"https://github.com/zook/gc-toolkit/pull/81","branch":"polecat/x81","merged_target":"main","check_set":" , "}}]'
+printf '%s' "$(prview 81 OPEN CLEAN)" > "$GH_DIR/pr_view_81.json"
+echo '[]' > "$GH_DIR/reviews_81.json"
+out=$("$SUT" 2>&1)
+has "$out" "no normalized check_set" "a whitespace-only check_set holds too"
+store '[{"id":"E3","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"82","pr_url":"https://github.com/zook/gc-toolkit/pull/82","branch":"polecat/x82","merged_target":"main","check_set":"none"}}]'
+printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
+echo '[]' > "$GH_DIR/reviews_82.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded E3" "the explicit 'none' sentinel still opts out"
+
+echo "# empty mergeCommit read never records an empty merged_sha"
+store "[$(anchor V1 61)]"
+printf '%s' "$(prview 61 OPEN CLEAN)" | jq -c 'del(.mergeCommit)' > "$GH_DIR/pr_view_61.json"
+echo '[]' > "$GH_DIR/reviews_61.json"
+out=$("$SUT" 2>&1); rc=$?
+eq "$rc" 0 "the pass still exits 0 (the merge itself landed)"
+has "$out" "recording merged_sha=unverified:PR#61" "the degraded record is loud"
+eq "$(meta V1 merged_sha)" "unverified:PR#61" "merged_sha is never empty"
+eq "$(bstatus V1)" "closed" "the anchor still closed"
+
+echo "# terminal re-read HOLDS on a real mid-pass write (hook mutates the store)"
+store "[$(anchor T2 51)]"
+printf '%s' "$(prview 51 OPEN CLEAN)" > "$GH_DIR/pr_view_51.json"
+echo '[]' > "$GH_DIR/reviews_51.json"
+HOOK_COUNT="$TMP/hookcount"; : > "$HOOK_COUNT"
+cat > "$TMP/hook.sh" <<HOOK
+#!/usr/bin/env bash
+# Sets merge_hold on T2 immediately before its SECOND read (the terminal
+# re-read) — the validation read saw no hold, so only the re-read can catch it.
+[ "\${1:-}" = "T2" ] || exit 0
+n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp)
+  jq -c 'map(if .id == "T2" then .metadata.merge_hold = "true" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+fi
+HOOK
+chmod +x "$TMP/hook.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/hook.sh" "$SUT" 2>&1)
+has "$out" "merge_hold was set after validation; merge held" "the terminal re-read caught the mid-pass hold"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 51" "…and the merge was withheld"
+eq "$(bstatus T2)" "open" "the anchor was not closed"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

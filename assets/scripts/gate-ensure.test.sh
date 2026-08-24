@@ -22,7 +22,8 @@ printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispa
 chmod +x "$SD/review-dispatch-body.sh"
 SUT="$SD/gate-ensure.sh"
 POOL="rig/gc-toolkit.polecat-codex"
-run() { "$SUT" --default codex --review-pool "$POOL" 2>&1; }
+FIXP="rig/gc-toolkit.polecat"
+run() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
 
 anchor() { # id mr checkset marker branch extra-json
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"main"%s%s%s}}' \
@@ -45,6 +46,8 @@ eq "$(meta "$rid" check_name)" "codex" "review bead names the gate"
 eq "$(meta "$rid" anchor_bead)" "A1" "review bead links the anchor"
 eq "$(meta "$rid" review_branch)" "polecat/a1" "review bead carries review_branch"
 eq "$(meta "$rid" review_base)" "main" "review bead carries review_base"
+eq "$(meta "$rid" reviewed_oid)" "sha-a1" "dispatch pins reviewed_oid at the live head (signoff binds the verdict to it)"
+eq "$(meta "$rid" fix_target_pool)" "$FIXP" "dispatch stamps the derived fix pool for the rework path"
 eq "$(meta "$rid" 'gc.routed_to')" "$POOL" "review routed by direct stamp (stamp-don't-sling)"
 eq "$(meta "$rid" review_pool)" "$POOL" "durable route copy stamped with it"
 grep -qxF "$rid|blocks|A1" "$STUB_DEPS" && ok "review blocks the anchor" || bad "blocks edge missing"
@@ -130,6 +133,18 @@ echo "sha-f1" > "$GH_DIR/head_polecat_f1"
 out=$(run)
 has "$out" "cap of 3" "the round cap declines further dispatches"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
+
+echo "# a created-but-unstamped orphan is ADOPTED, never twinned"
+store "[$(anchor H1 pull_request codex "" polecat/h1)]"
+echo "sha-h1" > "$GH_DIR/head_polecat_h1"
+out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
+has "$out" "did not record anchor_bead=H1" "the failed stamp is reported (orphan left behind)"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "the orphan exists"
+out=$(run)
+has "$out" "adopting unstamped review orphan new-2" "the next pass adopts the orphan by its deterministic title"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
+eq "$(meta new-2 anchor_bead)" "H1" "the adopted orphan is now fully stamped"
+eq "$(meta new-2 'gc.routed_to')" "$POOL" "…and routed"
 
 echo "# route write that does not persist is not counted"
 store "[$(anchor G1 pull_request codex "" polecat/g1)]"

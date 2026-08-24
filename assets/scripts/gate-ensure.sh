@@ -7,8 +7,13 @@
 # or a fresh dispatch — stamp first (fail-closed), review bead body from
 # review-dispatch-body.sh, metadata + blocks edge + direct gc.routed_to stamp
 # (stamp-don't-sling: a bare sling would be hijacked by default_sling_formula),
-# anchor link and route read back before the dispatch is counted.
-# Args: --default <check_set> --review-pool <pool>.
+# anchor link and route read back before the dispatch is counted. The dispatch
+# pins reviewed_oid=<live head> so signoff.sh binds the verdict to the commit
+# the review was dispatched for, and stamps fix_target_pool so a
+# request-changes rework routes to the driver-derived pool. Before creating, a
+# title probe adopts a created-but-unstamped orphan from a prior failed stamp
+# instead of minting a twin every pass.
+# Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 ok (a dispatch failure leaves the gate armed and merge HELD);
 # 3 = a gating anchor could not be made safe (unreadable enumeration, or a
 # check_set stamp that did not persist) — the driver holds merge.sh this pass.
@@ -20,10 +25,12 @@ scrub() { tr -d '\000-\010\013\014\016-\037'; }
 
 DEFAULT_CHECK_SET="codex"
 REVIEW_POOL=""
+FIX_POOL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --default)     DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
     --review-pool) REVIEW_POOL="${2:-}"; shift 2 ;;
+    --fix-pool)    FIX_POOL="${2:-}"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -224,27 +231,46 @@ while IFS= read -r row; do
       skipped=$((skipped + 1)); continue
     fi
 
-    body=""
-    [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$why" 2>/dev/null) || body=""
-    if [ -n "$body" ]; then
-      RID=$(printf '%s' "$body" \
-        | gc bd create "Review branch $branch -> $target: $title" -t task --body-file - --json 2>/dev/null \
-        | jq -r '.id // empty' 2>/dev/null)
+    # Orphan adoption BEFORE create: a bead this arm created whose stamp then
+    # failed carries the deterministic title but no anchor_bead — invisible to
+    # inflight_review, so re-creating would mint a twin every pass. Adopt it
+    # instead. An unreadable probe dispatches nothing (retry next pass).
+    RID_TITLE="Review branch $branch -> $target:"
+    if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
+      echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    RID=$(printf '%s' "$orphans" | jq -r '
+      [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$RID" ]; then
+      echo "$PROG: $id adopting unstamped review orphan $RID for gate '$g' (created by a prior pass whose stamp failed)"
     else
-      echo "$PROG: WARN review method unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-      RID=$(gc bd create "Review branch $branch -> $target: $title" -t task --json 2>/dev/null \
-        | jq -r '.id // empty' 2>/dev/null)
+      body=""
+      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$why" 2>/dev/null) || body=""
+      if [ -n "$body" ]; then
+        RID=$(printf '%s' "$body" \
+          | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
+          | jq -r '.id // empty' 2>/dev/null)
+      else
+        echo "$PROG: WARN review method unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
+        RID=$(gc bd create "$RID_TITLE $title" -t task --json 2>/dev/null \
+          | jq -r '.id // empty' 2>/dev/null)
+      fi
     fi
     if [ -z "$RID" ]; then
       echo "$PROG: $id could not create the review bead for gate '$g'; merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
+    # reviewed_oid pins the dispatch head (signoff binds the verdict to it);
+    # fix_target_pool routes a request-changes rework to the derived pool.
     gc bd update "$RID" \
       --set-metadata task_kind=review \
       --set-metadata check_name="$g" \
       --set-metadata anchor_bead="$id" \
       --set-metadata review_branch="$branch" \
-      --set-metadata review_base="$target" >/dev/null 2>&1
+      --set-metadata review_base="$target" \
+      ${head:+--set-metadata reviewed_oid="$head"} \
+      ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
     gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 \
       || echo "$PROG: WARN could not attach review $RID as a blocks-dep of $id (anchor_bead persists the link)" >&2
     # The anchor link is what lets the signoff find the gate to stamp; verify it

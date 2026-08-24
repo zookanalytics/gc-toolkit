@@ -75,11 +75,16 @@ case "$verb" in
   show)
     [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "gc: simulated show failure" >&2; exit 1; }
     id="${1:-}"
+    # STUB_SHOW_HOOK: executable run before serving each show (gets the id);
+    # lets a test mutate the store between reads (mid-pass write modelling).
+    if [ -n "${STUB_SHOW_HOOK:-}" ] && [ -x "${STUB_SHOW_HOOK:-}" ]; then
+      "$STUB_SHOW_HOOK" "$id" || true
+    fi
     jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$S"
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
-    statuses=""; fields=(); haskey=""; typ=""; excl=""
+    statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --status=*) statuses="${1#--status=}" ;;
@@ -90,17 +95,20 @@ case "$verb" in
         --has-metadata-key=*) haskey="${1#--has-metadata-key=}" ;;
         --type=*) typ="${1#--type=}" ;;
         --exclude-type=*) excl="${1#--exclude-type=}" ;;
+        --title-contains) shift; tcontains="${1:-}" ;;
+        --title-contains=*) tcontains="${1#--title-contains=}" ;;
         *) : ;;
       esac
       shift || true
     done
-    out=$(jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" '
+    out=$(jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
       [ .[]
         | (.status // "open") as $bst
         | select($st == "" or (($st | split(",")) | index($bst)))
         | select($hk == "" or ((.metadata // {}) | has($hk)))
         | select($ty == "" or ((.issue_type // "task") == $ty))
-        | select($ex == "" or ((.issue_type // "task") != $ex)) ]' "$S")
+        | select($ex == "" or ((.issue_type // "task") != $ex))
+        | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase))) ]' "$S")
     for f in ${fields[@]+"${fields[@]}"}; do
       k="${f%%=*}"; v="${f#*=}"
       out=$(printf '%s' "$out" | jq -c --arg k "$k" --arg v "$v" \
@@ -185,15 +193,44 @@ case "$verb" in
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   dep)
+    # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
+    # child A parent-childs parent B). Dependency orientation per type:
+    # blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
+    # depends_on=B). Queries honor --direction (down = follow the id's own
+    # dependency rows; up = rows depending on the id) and -t/--type.
     case "${1:-}" in
       list)
-        id="${2:-}"
-        ids=$(awk -F'|' -v id="$id" '$3 == id { print $1 }' "$D")
+        id="${2:-}"; shift 2 || true
+        dir=""; dtyp=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --direction=*) dir="${1#--direction=}" ;;
+            --direction) shift; dir="${1:-}" ;;
+            -t|--type) shift; dtyp="${1:-}" ;;
+            --type=*) dtyp="${1#--type=}" ;;
+            *) : ;;
+          esac
+          shift || true
+        done
+        ids=$(awk -F'|' -v id="$id" -v dir="$dir" -v t="$dtyp" '
+          {
+            a=$1; ty=$2; b=$3
+            if (t != "" && ty != t) next
+            if (ty == "blocks") { issue=b; dep=a } else { issue=a; dep=b }
+            if (dir == "down")    { if (issue == id) print dep }
+            else if (dir == "up") { if (dep == id) print issue }
+            else                  { if (b == id) print a }   # legacy: who names me
+          }' "$D")
         jq -c --arg ids "$ids" '($ids | split("\n")) as $want
           | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S"
         ;;
       add)
-        printf '%s|%s|%s\n' "${2:-}" "parent-child" "${3:-}" >> "$D" ;;
+        a="${2:-}"; b="${3:-}"; ty="parent-child"; shift 3 || true
+        while [ $# -gt 0 ]; do
+          case "$1" in --type=*) ty="${1#--type=}" ;; --type) shift; ty="${1:-}" ;; esac
+          shift || true
+        done
+        printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D" ;;
       *)
         # gc bd dep <src> --blocks <dst>
         src="${1:-}"; shift || true

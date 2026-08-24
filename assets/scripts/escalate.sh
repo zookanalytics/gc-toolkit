@@ -49,9 +49,14 @@ esac
 bd_json() { gc bd "$@" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'; }
 
 # Idempotence: an open (or claimed) visit for this subject+key means the human
-# is already asked. An unreadable listing files anyway — a duplicate visit is
-# a bounded nuisance, a silent mute is the failure this replaces.
-OPEN=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" --limit=20 \
+# is already asked. BOTH filters ride the listing itself: a shared key (e.g.
+# triage-recurrence across many subjects) must dedup exactly even when more
+# than the row window carry it — subject-side filtering of a truncated window
+# would re-file a duplicate every pass. An unreadable listing files anyway —
+# a duplicate visit is a bounded nuisance, a silent mute is the failure this
+# replaces.
+OPEN=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" \
+    --metadata-field "gc.continuation_group=$SUBJECT" --limit=20 \
   | jq -r --arg s "$SUBJECT" \
       'if type == "array" then (.[] | select((.metadata["gc.continuation_group"] // "") == $s) | .id) else empty end' 2>/dev/null \
   | head -n 1)

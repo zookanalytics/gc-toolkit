@@ -27,19 +27,25 @@ shift
 case "${1:-}" in
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "bd: down" >&2; exit 1; }
-    key=""; val=""; statuses=""
+    fields=(); statuses=""; limit=0
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --status=*) statuses="${1#--status=}" ;;
-        --metadata-field) shift; key="${1%%=*}"; val="${1#*=}" ;;
+        --limit=*) limit="${1#--limit=}" ;;
+        --metadata-field) shift; fields+=("${1:-}") ;;
       esac
       shift || true
     done
-    jq -c --arg k "$key" --arg v "$val" --arg st ",$statuses," '
-      [ .[]
-        | select(.status as $s | $st | contains("," + $s + ","))
-        | select($k == "" or ((.metadata[$k] // "") == $v)) ]' "$STORE" ;;
+    out=$(jq -c --arg st ",$statuses," '
+      [ .[] | select(.status as $s | $st | contains("," + $s + ",")) ]' "$STORE")
+    for f in ${fields[@]+"${fields[@]}"}; do
+      k="${f%%=*}"; v="${f#*=}"
+      out=$(printf '%s' "$out" | jq -c --arg k "$k" --arg v "$v" \
+        '[ .[] | select((.metadata[$k] // "") == $v) ]')
+    done
+    case "$limit" in ''|0|*[!0-9]*) : ;; *) out=$(printf '%s' "$out" | jq -c --argjson n "$limit" '.[0:$n]') ;; esac
+    printf '%s\n' "$out" ;;
   show)
     out=$(jq -c --arg id "$2" '[.[] | select(.id == $id)]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
@@ -136,6 +142,22 @@ eq "$(visits)" "1" "same key on ANOTHER subject does not suppress"
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k2","gc.continuation_group":"tk-a"},"notes":""}]'
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "1" "a different key on the same subject does not suppress"
+
+echo "# shared-key dedup survives the row window (both filters ride the listing)"
+# 21 open visits share key k1 on OTHER subjects; ours is the 21st row. A
+# key-only listing truncated at --limit=20 would drop ours and re-file a
+# duplicate every pass; the subject filter on the listing itself dedups exactly.
+crowd="["
+for i in $(seq 1 20); do
+  crowd="$crowd{\"id\":\"other-$i\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k1\",\"gc.continuation_group\":\"tk-other-$i\"},\"notes\":\"\"},"
+done
+crowd="$crowd{\"id\":\"vis-0\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k1\",\"gc.continuation_group\":\"tk-a\"},\"notes\":\"\"}]"
+reset "$crowd"
+out=$("$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "the crowded-key situation exits 0"
+eq "$(visits)" "0" "no duplicate filed past the 20-row window"
+has "$out" "already open" "the existing visit was found"
+has "$(cat "$STUB_GC_LOG")" "--metadata-field gc.continuation_group=tk-a" "the subject filter rides the listing itself"
 
 echo "# an unreadable listing files anyway (a duplicate beats a mute)"
 reset

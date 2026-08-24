@@ -24,7 +24,8 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
                  or request-changes (required)
   --notes-file   the verdict body; default: the review bead's notes
-  --reviewed-oid the commit the review pinned; default: the live head of the
+  --reviewed-oid the commit the review pinned; default: the review bead's own
+                 reviewed_oid (stamped at dispatch), else the live head of the
                  anchor's branch (git ls-remote origin <branch>)
 
 env: GC_MAX_REVIEW_ROUNDS  rework rounds before the gate records
@@ -100,7 +101,14 @@ fi
 
 BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 [ -n "$BRANCH" ] || BRANCH=$(row_meta "$REVIEW_ROW" review_branch)
+# Evidence binding, in order: the caller's --reviewed-oid; the reviewed_oid the
+# DISPATCH pinned on the review bead (gate-ensure/pr-facts stamp the live head
+# at dispatch time); only then the live head. The live-head fallback is the
+# weakest binding — a push between review and signoff would stamp green at a
+# commit nobody reviewed, so a dispatch-pinned oid always wins (a moved head
+# then correctly fails the merge's green@<live head> condition and re-gates).
 REVIEWED_OID="$OID_OVERRIDE"
+[ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid)
 if [ -z "$REVIEWED_OID" ]; then
   [ -n "$BRANCH" ] || { warn "anchor $ANCHOR names no branch and no --reviewed-oid was given; nothing to bind the verdict to"; exit 1; }
   REVIEWED_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}')
@@ -194,14 +202,15 @@ dismiss_superseded() {
 }
 
 # Rework rounds already spent on this anchor: one routed child per round, each
-# stamped source_review_bead by the signoff that filed it. An unreadable
-# ledger reads 0 — capping on a guess parks live work for a human.
+# stamped source_review_bead by the signoff that filed it (the primary count).
+# The backup is dispatch_count on the ANCHOR — that is where gate-ensure
+# writes it. An unreadable ledger reads 0 — capping on a guess parks live work.
 count_rounds() {
   local kids n dc
   kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
   n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
   case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  dc=$(row_meta "$REVIEW_ROW" dispatch_count)
+  dc=$(row_meta "$ANCHOR_ROW" dispatch_count)
   case "$dc" in ''|*[!0-9]*) dc=0 ;; esac
   [ "$dc" -gt "$n" ] && n="$dc"
   printf '%s' "$n"

@@ -7,12 +7,15 @@
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING -> file ONE rework child per head to
 # the fix pool (dedup: an existing rework child naming this branch whose
-# rejection_reason names this head); gate green at a STALE head -> file one
-# re-review child per head to the review pool (dedup: a live review naming the
-# anchor, or one with review_branch=branch and reviewed_oid=<live head>);
-# hold-resolved retraction of our own blocked_reason; dismissal of our OWN
-# superseded CHANGES_REQUESTED (never a human's; signoff_dismissed recorded and
-# read back FIRST; skipped when native auto-merge is armed).
+# rejection_reason names this head; a created-but-unstamped orphan is adopted
+# by its deterministic title, never twinned); gate green at a STALE head ->
+# file one re-review child per head to the review pool (dedup: a live review
+# naming the anchor, or one with review_branch=branch and reviewed_oid=<live
+# head>; same orphan adoption), stamped with fix_target_pool for the rework
+# path; dismissal of our OWN superseded CHANGES_REQUESTED (never a human's;
+# signoff_dismissed recorded and read back FIRST; skipped when native
+# auto-merge is armed). A merged record never carries an empty merged_sha —
+# an unreadable mergeCommit records merged_sha=unverified:PR#<n>, loudly.
 # Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
@@ -83,7 +86,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-recorded=0; flagged=0; reworked=0; regated=0; cleared=0; dismissed_n=0; skipped=0
+recorded=0; flagged=0; reworked=0; regated=0; dismissed_n=0; skipped=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -96,7 +99,6 @@ while IFS= read -r row; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
-  breason=$(printf '%s' "$row" | jq -r '.metadata.blocked_reason // ""')
 
   # --- pinned identity read (same shape as merge.sh) ----------------------------
   PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
@@ -131,11 +133,20 @@ while IFS= read -r row; do
   if [ "$state" = "MERGED" ]; then
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
+    if [ -z "$merge_oid" ]; then
+      # Never record an empty merged_sha (I5: closed anchor => merged+merged_sha).
+      echo "$PROG: WARN PR#$num is MERGED but the mergeCommit read came back empty; recording merged_sha=unverified:PR#$num" >&2
+      merge_oid="unverified:PR#$num"
+    fi
+    case "$merge_oid" in
+      unverified:*) short_oid="$merge_oid" ;;
+      *) short_oid=$(printf '%.8s' "$merge_oid") ;;
+    esac
     if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
          --set "merged_sha=$merge_oid" --unset rejection_reason \
-         --append-notes "Merged to $target at $(printf '%.8s' "$merge_oid") (recorded by pr-facts)"; then
+         --append-notes "Merged to $target at $short_oid (recorded by pr-facts)"; then
       recorded=$((recorded + 1))
-      echo "$PROG: recorded $id — PR#$num is MERGED ($(printf '%.8s' "$merge_oid"))"
+      echo "$PROG: recorded $id — PR#$num is MERGED ($short_oid)"
     else
       echo "$PROG: PR#$num is MERGED but the record failed for $id; retry next pass" >&2
       skipped=$((skipped + 1))
@@ -224,8 +235,23 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rebase dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    FIX=$(gc bd create "Rebase PR#$num onto $base: base rewritten, PR conflicts" -t task --json 2>/dev/null \
-      | jq -r '.id // empty' 2>/dev/null)
+    # Orphan adoption BEFORE create: a child this arm created whose stamp then
+    # failed carries the deterministic title but no branch metadata — invisible
+    # to the branch dedup above, so re-creating would mint a twin every pass.
+    # An unreadable probe dispatches nothing (retry next pass).
+    FIX_TITLE="Rebase PR#$num onto $base:"
+    if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
+      echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rebase dispatched (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    FIX=$(printf '%s' "$forphans" | jq -r '
+      [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$FIX" ]; then
+      echo "$PROG: $id adopting unstamped rebase orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
+    else
+      FIX=$(gc bd create "$FIX_TITLE base rewritten, PR conflicts" -t task --json 2>/dev/null \
+        | jq -r '.id // empty' 2>/dev/null)
+    fi
     if [ -z "$FIX" ]; then
       echo "$PROG: $id could not file the rebase child for PR#$num; retry next pass" >&2
       skipped=$((skipped + 1)); continue
@@ -246,16 +272,6 @@ GATES
     reworked=$((reworked + 1))
     echo "$PROG: $id — PR#$num conflicts with '$base'; filed rebase $FIX routed to $FIX_POOL"
     continue
-  fi
-
-  # --- hold-resolved retraction: only a reason THIS pass's arms wrote ------------
-  if [ -n "$breason" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$merge_state" != "DIRTY" ]; then
-    case "$breason" in
-      "PR#$num conflicts with base "*|"stale base at head "*)
-        gc bd update "$id" --unset-metadata blocked_reason >/dev/null 2>&1 || true
-        cleared=$((cleared + 1))
-        echo "$PROG: $id — PR#$num no longer conflicts; retracted the resolved blocked_reason" ;;
-    esac
   fi
 
   # --- gate green at a STALE head: one re-review child per head ------------------
@@ -298,14 +314,27 @@ GATES
       skipped=$((skipped + 1)); continue
     fi
     NOTE="Stale-gate re-review: check.$stale_gate was green@$stale_oid; the PR head moved to $head_oid with no rework filed. Re-review the live head."
-    body=""
-    [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$NOTE" 2>/dev/null) || body=""
-    if [ -n "$body" ]; then
-      RID=$(printf '%s' "$body" | gc bd create "Review PR#$num: re-review at live head" -t task --body-file - --json 2>/dev/null \
-        | jq -r '.id // empty' 2>/dev/null)
+    # Orphan adoption BEFORE create (same shape as the rebase arm): an
+    # unstamped re-review carries the deterministic title but no anchor_bead.
+    REV_TITLE="Review PR#$num: re-review at live head"
+    if ! rorphans=$(bd_list --status=open --title-contains "$REV_TITLE"); then
+      echo "$PROG: $id — re-review orphan probe failed; no dispatch (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    RID=$(printf '%s' "$rorphans" | jq -r '
+      [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$RID" ]; then
+      echo "$PROG: $id adopting unstamped re-review orphan $RID for PR#$num (created by a prior pass whose stamp failed)"
     else
-      RID=$(gc bd create "Review PR#$num: re-review at live head" -t task --json 2>/dev/null \
-        | jq -r '.id // empty' 2>/dev/null)
+      body=""
+      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$NOTE" 2>/dev/null) || body=""
+      if [ -n "$body" ]; then
+        RID=$(printf '%s' "$body" | gc bd create "$REV_TITLE" -t task --body-file - --json 2>/dev/null \
+          | jq -r '.id // empty' 2>/dev/null)
+      else
+        RID=$(gc bd create "$REV_TITLE" -t task --json 2>/dev/null \
+          | jq -r '.id // empty' 2>/dev/null)
+      fi
     fi
     if [ -z "$RID" ]; then
       echo "$PROG: $id could not file the re-review for PR#$num; retry next pass" >&2
@@ -319,7 +348,8 @@ GATES
       --set-metadata review_base="$base" \
       --set-metadata reviewed_oid="$head_oid" \
       --set-metadata pr_url="$live_url" \
-      --set-metadata pr_number="$num" >/dev/null 2>&1
+      --set-metadata pr_number="$num" \
+      ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
     gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 || true
     got=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
     if [ "$got" != "$id" ]; then
@@ -392,5 +422,5 @@ done <<ROWS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
 ROWS_EOF
 
-echo "$PROG: $recorded recorded, $flagged flagged-to-human, $reworked reworks filed, $regated re-reviews filed, $cleared holds retracted, $dismissed_n reviews dismissed, $skipped skipped"
+echo "$PROG: $recorded recorded, $flagged flagged-to-human, $reworked reworks filed, $regated re-reviews filed, $dismissed_n reviews dismissed, $skipped skipped"
 exit 0

@@ -43,15 +43,15 @@ stateDiagram-v2
     claimed --> routed: witness patrol — dead session
   }
 
-  claimed --> handed_off: mol-polecat-work submit (lifecycle.sh)
+  claimed --> handed_off: mol-polecat-work submit (one atomic bd update)
   handed_off --> pre_open_gate: mol-refinery-patrol merge-push (lifecycle.sh)
   handed_off --> pull_request: merge-push, post-open path (lifecycle.sh)
+  handed_off --> merged: merge-push, direct strategy (lifecycle.sh)
   pre_open_gate --> pull_request: pr-open.sh
   pull_request --> merged: merge.sh
   merged --> [*]
 
   handed_off --> routed: mol-refinery-patrol — rejection_reason
-  pull_request --> routed: signoff.sh — rework child path
 
   handed_off --> blocked: mol-refinery-patrol — existing_pr unusable
   handed_off --> refused_false_completion: mol-refinery-patrol — no commits
@@ -77,9 +77,10 @@ anchored states are the `merge_result` values. `merged` is the only state with
 | filed → routed | `gc sling` (runtime); `deferred-dispatch.sh` when blockers must close first | dispatch |
 | routed → claimed | `gc hook --claim` (runtime) | pool demand spawns a session |
 | claimed → routed | witness patrol (`mol-witness-patrol`) | session died with the claim held |
-| claimed → handed_off | `mol-polecat-work` submit step, via `lifecycle.sh` | push verified on the remote |
+| claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | gates armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
+| handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
 | pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | `check.codex == green@<live head>` |
 | pull_request → merged | `merge.sh` (cadence arm 3) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 4) | GitHub merged the PR out-of-band; record only |
@@ -87,7 +88,12 @@ anchored states are the `merge_result` values. `merged` is the only state with
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
-| handed_off / pull_request → routed | `mol-refinery-patrol` (rejection); `signoff.sh` (rework child path) | `rejection_reason` written, re-routed to the pool |
+| handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
+
+A request-changes verdict does NOT transition the anchor: `signoff.sh` clears
+the gate marker and files one routed rework child that blocks the anchor — the
+anchor stays `pull_request` (or `pre_open_gate`) and the cleared marker holds
+the merge until the child lands and the gate re-evaluates.
 
 Convoy graduation is a separate transition on the convoy bead:
 `convoy-graduate.sh` (cadence arm 5) moves a convoy to refinery-assigned with
@@ -112,8 +118,17 @@ city's own account. **`signoff.sh` is the single writer of gate verdicts**
 re-arms markers staled by a head move. A head move stales every verb at once,
 so a fixed branch re-evaluates fresh with no manual reset.
 
+The dispatch pins `reviewed_oid=<live head>` on the review bead, and
+`signoff.sh` binds its verdict to that pinned commit (an explicit
+`--reviewed-oid` outranks it; the live head is only a last-resort fallback) —
+so a push between dispatch and verdict stamps green at the *reviewed* commit
+and correctly fails the merge's live-head condition instead of green-lighting
+an unreviewed head.
+
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
-before merging): every gate named in `check_set` is `green@<live head>`; no
+before merging): `check_set` is non-empty (empty is never the `none` opt-out —
+an unnormalized anchor holds); every gate named in `check_set` is
+`green@<live head>`; no
 unclosed rework or review child; PR base equals `merged_target`; GitHub reports
 CLEAN; no holds (`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
 pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
@@ -138,7 +153,7 @@ sequenceDiagram
   P->>G: git push origin polecat/BEAD
   P->>G: git ls-remote — verify HEAD == remote
   Note over P: push unverified ⇒ abort, keep the bead
-  P->>L: lifecycle.sh handoff — branch, target,<br/>assignee=RIG/refinery, in one bd update
+  P->>L: handoff — branch, target,<br/>assignee=RIG/refinery, in ONE atomic gc bd update
   P->>P: step-close + drain
   C->>L: gate-ensure — check_set present, every gate raisable
   C->>L: merge-push → pre_open_gate (lifecycle.sh)

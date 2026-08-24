@@ -183,6 +183,19 @@ reset "$ANCHOR_PR"
 "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid beef01 >/dev/null 2>&1
 eq "$(meta tk-anc check.codex)" "green@beef01" "the override pins the stamped oid"
 
+echo "# a dispatch-pinned reviewed_oid wins over a moved live head"
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "rv-1" then .metadata.reviewed_oid = "ccc111" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+STUB_LSREMOTE="moved222" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "pinned-oid approve exits 0"
+eq "$(meta tk-anc check.codex)" "green@ccc111" "green is stamped at the PINNED oid, not the moved live head (merge then holds on head mismatch)"
+
+echo "# …and the explicit --reviewed-oid flag still outranks the bead pin"
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "rv-1" then .metadata.reviewed_oid = "ccc111" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid beef02 >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "green@beef02" "the flag outranks the dispatch pin"
+
 echo "# notes-file body"
 reset "$ANCHOR_PR"
 printf 'P2: nit at foo.sh:3\n' > "$TMP/notes"
@@ -286,11 +299,15 @@ seed_cap_deps c1
 GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
 eq "$(meta tk-anc check.codex)" "exception@aaa111" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
 
-echo "# dispatch_count on the review bead also counts"
+echo "# dispatch_count on the ANCHOR (gate-ensure's writer) also counts"
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "exception@aaa111" "anchor dispatch_count past the cap trips it with no children"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "rv-1" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "dispatch_count past the cap trips it with no children"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "a stray dispatch_count on the REVIEW bead does not cap (wrong writer)"
 
 echo "# an unreadable dep list never caps"
 reset "$ANCHOR_PR"

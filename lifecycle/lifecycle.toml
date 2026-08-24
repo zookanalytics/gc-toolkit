@@ -70,6 +70,11 @@ writer = "formulas/mol-refinery-patrol.toml merge-push, post-open path (via life
 
 [[transition]]
 from = "unanchored"
+to = "merged"
+writer = "formulas/mol-refinery-patrol.toml merge-push, direct strategy (via lifecycle.sh): FF push verified, record + close in one call"
+
+[[transition]]
+from = "unanchored"
 to = "blocked"
 writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable; via lifecycle.sh)"
 
@@ -86,7 +91,7 @@ writer = "assets/scripts/pr-open.sh"
 [[transition]]
 from = "pre_open_gate"
 to = "unanchored"
-writer = "rejection: formulas/mol-refinery-patrol.toml or assets/scripts/signoff.sh"
+writer = "rejection: formulas/mol-refinery-patrol.toml (via lifecycle.sh). signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "pull_request"
@@ -106,7 +111,7 @@ writer = "assets/scripts/pr-facts.sh"
 [[transition]]
 from = "pull_request"
 to = "unanchored"
-writer = "rejection: formulas/mol-refinery-patrol.toml or assets/scripts/signoff.sh"
+writer = "rejection: formulas/mol-refinery-patrol.toml (via lifecycle.sh). signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "abandoned"
@@ -151,13 +156,14 @@ keys = [
   "branch", "target", "merged_target", "merged_sha", "pr_url", "pr_number",
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
+  "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
 ]
 
 [metadata.gates]
 keys = [
   "check_set", "check.<g>", "signoff_dismissed", "check_name", "anchor_bead",
   "review_branch", "review_base", "reviewed_oid", "review_pool",
-  "source_review_bead", "task_kind", "dispatch_count",
+  "source_review_bead", "task_kind", "dispatch_count", "fix_target_pool",
 ]
 
 [metadata.holds]
@@ -167,6 +173,7 @@ keys = ["merge_hold", "rebase_hold", "tracking_only"]
 keys = [
   "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.continuation_group",
   "gc.origin", "escalation_key", "visit.recheck",
+  "sweep.*", "triage.*", "stall_root",
 ]
 
 [metadata.deferred_dispatch]

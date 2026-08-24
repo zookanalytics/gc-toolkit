@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/pr-facts.sh — external PR facts, no merge
-# authority. Covers: recording an out-of-band merge; abandoned (+ escalate);
-# retargeted (+ escalate, gate markers cleared, human-routed); CONFLICTING ->
-# one rework child per head (dedup on branch+head, holds veto); stale-gate ->
-# one re-review child per head (dedup, route read-back); hold-resolved
-# retraction of our own blocked_reason only; and dismissing our OWN superseded
-# CHANGES_REQUESTED (marker recorded first; auto-merge armed skips; a human's
-# review is never dismissed).
+# authority. Covers: recording an out-of-band merge (never with an empty
+# merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
+# cleared, human-routed); CONFLICTING -> one rework child per head (dedup on
+# branch+head, holds veto, unstamped orphans adopted); stale-gate -> one
+# re-review child per head (dedup, route read-back, fix_target_pool stamped);
+# and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
+# auto-merge armed skips; a human's review is never dismissed).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,17 +99,24 @@ printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
 out=$(run)
 has "$out" "already covers branch" "a closed child at the same head suppresses a re-file"
 
-echo "# hold-resolved retraction (our own reason only)"
-store "[$(anchor F7 16 ',"blocked_reason":"PR#16 conflicts with base ..."')]"
-printf '%s' "$(prview 16 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_16.json"
+echo "# …a created-but-unstamped rework orphan is ADOPTED, never twinned"
+store "[$(anchor F4b 19)]"
+printf '%s' "$(prview 19 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_19.json"
+out=$(STUB_DROP_KEYS="new-2:branch,target,rejection_reason,merge_strategy,existing_pr,pr_url,pr_number,gc.routed_to" run)
+eq "$(meta new-2 branch)" "<absent>" "first pass left an unstamped orphan (stamp dropped)"
 out=$(run)
-has "$out" "retracted the resolved blocked_reason" "our conflict reason is retracted once resolved"
-eq "$(meta F7 blocked_reason)" "<absent>" "blocked_reason unset"
+has "$out" "adopting unstamped rebase orphan new-2" "the next pass adopts the orphan by its deterministic title"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
+eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
 
-store "[$(anchor F8 17 ',"blocked_reason":"round cap: routed to human"')]"
-printf '%s' "$(prview 17 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_17.json"
+echo "# an empty mergeCommit read never records an empty merged_sha"
+store "[$(anchor F1b 24)]"
+printf '%s' "$(prview 24 MERGED CLEAN MERGEABLE)" | jq -c 'del(.mergeCommit)' > "$GH_DIR/pr_view_24.json"
 out=$(run)
-eq "$(meta F8 blocked_reason)" "round cap: routed to human" "another writer's reason is left alone"
+has "$out" "recording merged_sha=unverified:PR#24" "the degraded record is loud"
+eq "$(meta F1b merged_sha)" "unverified:PR#24" "merged_sha is never empty"
+eq "$(bstatus F1b)" "closed" "the anchor still closed"
 
 echo "# stale gate -> one re-review child per head"
 store "[$(anchor F9 18 ',"check.codex":"green@sha-OLD"')]"
@@ -120,7 +127,8 @@ eq "$(meta new-2 task_kind)" "review" "re-review carries task_kind=review"
 eq "$(meta new-2 check_name)" "codex" "re-review names the gate"
 eq "$(meta new-2 anchor_bead)" "F9" "re-review links the anchor"
 eq "$(meta new-2 review_branch)" "polecat/x18" "re-review carries review_branch"
-eq "$(meta new-2 reviewed_oid)" "sha-18" "re-review pins the live head (the dedup key)"
+eq "$(meta new-2 reviewed_oid)" "sha-18" "re-review pins the live head (the dedup key, and signoff's verdict binding)"
+eq "$(meta new-2 fix_target_pool)" "$FIX" "re-review carries the derived fix pool for the rework path"
 eq "$(meta new-2 'gc.routed_to')" "$REV" "re-review routed to the review pool"
 grep -qxF "new-2|blocks|F9" "$STUB_DEPS" && ok "re-review blocks the anchor" || bad "re-review blocks edge missing"
 

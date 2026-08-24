@@ -3,7 +3,9 @@
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
 # repo, not a fork, right head branch, OPEN non-draft), live anchor re-read,
 # then validate in order: merge_hold; one-anchor-per-PR (hold + escalate once —
-# fail-closed defense; the structural check is doctor's); base == merged_target;
+# fail-closed defense; the structural check is doctor's); non-empty check_set
+# (empty is never the 'none' opt-out — an unnormalized anchor holds);
+# base == merged_target;
 # every check_set gate green@<live head>; approval (armed by the check_set
 # member, signoff_dismissed, or a DISMISSED review of our own — satisfied only
 # by a latest APPROVED from another account at the live head; a standing
@@ -44,6 +46,13 @@ gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
 
 # Used only to exclude our own reviews; unresolved holds the approval gate.
 SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
+if [ -z "$SELF_LOGIN" ]; then
+  # Bounded fail-open: with no login, an own DISMISSED review cannot arm the
+  # approval requirement from the GitHub side this pass. The signoff_dismissed
+  # marker (stamped before any dismissal) still arms it, and an armed approval
+  # gate still holds below.
+  echo "$PROG: WARN acting login unresolved; own-dismissed-review approval arming is unavailable this pass (signoff_dismissed still arms it)" >&2
+fi
 
 url_repo_q() {
   printf '%s' "${1:-}" \
@@ -182,6 +191,13 @@ while IFS= read -r row; do
   fi
 
   # --- validate, in order -------------------------------------------------------
+  # Empty/absent check_set is NEVER "no gates": the declared gateless opt-out is
+  # the 'none' sentinel; empty means never normalized (gate-ensure stamps the
+  # default). Fail closed rather than merge ungated.
+  if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
+    echo "$PROG: PR#$num anchor $id has no normalized check_set (empty is never the 'none' opt-out); merge held"
+    held=$((held + 1)); continue
+  fi
   if is_held "$hold"; then
     echo "$PROG: PR#$num merge_hold set (operator gate); merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -374,12 +390,15 @@ while IFS= read -r row; do
       elif ($t != "" and $t != $base) then "retargeted after validation (merged_target=\($t))"
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"
+      elif ($fcs | gsub("[[:space:],]"; "")) == "" then "check_set emptied after validation"
       elif $red != "" then "check \($red) is no longer green at \($head)"
-      else "" end' 2>/dev/null)
-  if [ -z "$freason" ] && ! printf '%s' "$final" | jq -e '.meta' >/dev/null 2>&1; then
-    freason="terminal re-read unreadable"
+      else "OK" end' 2>/dev/null); frc=$?
+  # Explicit sentinel: "OK" is the only authorization. An empty result or a
+  # non-zero jq means the comparison itself failed — hold, never merge blind.
+  if [ "$frc" -ne 0 ] || [ -z "$freason" ]; then
+    freason="terminal re-read comparison unreadable"
   fi
-  if [ -n "$freason" ]; then
+  if [ "$freason" != "OK" ]; then
     echo "$PROG: PR#$num anchor $id changed between validation and the merge — $freason; merge held"
     held=$((held + 1)); continue
   fi
@@ -393,7 +412,15 @@ while IFS= read -r row; do
   fi
   merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
     | scrub | jq -r '.mergeCommit.oid // ""')
-  short=$(printf '%.8s' "$merge_oid")
+  if [ -z "$merge_oid" ]; then
+    # Never record an empty merged_sha (I5: closed anchor => merged+merged_sha).
+    echo "$PROG: WARN PR#$num merged but the mergeCommit read came back empty; recording merged_sha=unverified:PR#$num" >&2
+    merge_oid="unverified:PR#$num"
+  fi
+  case "$merge_oid" in
+    unverified:*) short="$merge_oid" ;;
+    *) short=$(printf '%.8s' "$merge_oid") ;;
+  esac
   if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
        --set "merged_sha=$merge_oid" --unset rejection_reason \
        --append-notes "Merged to ${target:-$base} at ${short:-merge}"; then
