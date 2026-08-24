@@ -709,6 +709,10 @@ Two premises need adjusting:
 - **Author:** gc-toolkit/gc-toolkit.furiosa (polecat, claude provider)
 - **Measured:** 2026-08-23 ~01:30Z, same city
 - **Status:** candidates 4/5/6 banked; the two NEW items are not gc-toolkit's to land
+- **Merged as:** `e0ae6c7` — "context budget leg 2: cut the pack's standing
+  per-request cost (tk-yhwfv.1)" (#431)
+- **Superseded by, in part:** `specs/tk-yhwfv.2/harness-seed-floor.md` (bead
+  tk-yhwfv.2, the sibling leg) — see [§9.6](#96-correction-the-harness-floor-is-a-constant-and-our-share-is-the-expensive-half)
 
 ### 9.1 The unit was wrong: per spawn, not per request
 
@@ -957,3 +961,49 @@ Measured here it omitted 967 of 987 sessions and computed the upper-bound median
 from the 20 survivors — a worse statistic than the one it was protecting. The
 turn-1 candidate is simply the session's earliest dated record, which is sound
 because a session's transcript is one file and every file is read from its start.
+
+
+### 9.6 Correction: the harness floor is a constant, and our share is the expensive half
+
+The epic's FINDING 2 — **"only ~21% of the seed is ours to edit"** — is wrong by
+about 3x, and it is the figure most likely to be quoted as a reason not to bother
+cutting pack bytes. It is left visible here rather than overwritten, because the
+ledger's method section is cited as reproducible and a reader needs to see which
+pass produced which number. It does not appear anywhere in §1–§8 — it lives in
+the epic bead's notes, which is exactly why it needed carrying into the document
+that actually gets read.
+
+What the cache boundary actually shows:
+
+| | |
+|---|---|
+| Harness prefix | a **constant 26,166 tokens**, read by every session in the city |
+| The pack's share of the seed | **51–68%** |
+| Which half amplifies | **ours** — cache creation at 1.25x, then re-read on every request |
+| The floor's half | the cheap one — 0.1x |
+
+So the majority of the seed is ours, and our majority sits on the expensive side
+of the boundary while the part we cannot touch sits on the cheap side. Combined
+with the ~7.1x amplification established in [§9.1](#91-the-unit-was-wrong-per-spawn-not-per-request),
+this moves pack bytes from "a fifth of a fixed cost" to the dominant, amplified
+term — the opposite of what FINDING 2 implied.
+
+**Provenance, stated precisely because these two numbers come from different
+places.** The 26,166 constant and the 51–68% share were measured at the tk-fhlv4
+disposition sitting (2026-08-24, visit `tk-knzcr2`) and recorded in that bead's
+notes; they are transcribed here because a bead comment is not the record. The
+sibling leg's committed report, `specs/tk-yhwfv.2/harness-seed-floor.md`, is the
+source for the floor's *behaviour* — it is deterministic to the token, and it is
+**model-dependent**: 26,102 (opus) against 37,344 (sonnet) on identical inputs,
+an 11,242-token spread.
+
+Do not silently merge 26,166 with that report's 26,102. They are close and they
+are not the same measurement — one is the cache-boundary prefix across the city,
+the other is one model's floor under the probe's spawn shape. Anyone re-deriving
+the dollar figure should say which they used.
+
+**Still open, and deliberately not settled here:** the "~38% of list-price-weighted
+spend" headline remains keyed to the upper-bound proxy, exactly as
+[§9.1](#91-the-unit-was-wrong-per-spawn-not-per-request) flagged. The bound moved;
+the re-derivation has not been done. Until it is, quote the bracket, not the
+percentage.
