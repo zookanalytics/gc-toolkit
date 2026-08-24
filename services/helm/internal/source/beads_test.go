@@ -25,6 +25,13 @@ type fakeStore struct {
 	failMeta map[string]error                                // metadata key -> forced SearchIssues error
 	failDeps map[string]error                                // issue id -> forced dependency error
 	closed   bool
+
+	// closedIssues are the closed visits the dispositions gather reads, and
+	// subjects the beads those visits point at. They are separate from issues
+	// because neither is an anchor: an anchor is open and typed, and these are
+	// selected by a window and by an id set respectively.
+	closedIssues []*beads.Issue
+	subjects     []*beads.Issue
 }
 
 // SearchIssues answers both gather shapes: the type-keyed anchor queries, and
@@ -42,13 +49,33 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	//                            not a finished one, and a claimed step is the
 	//                            normal state of a live molecule.
 	//
+	//   Status=closed + ClosedAfter  the CLOSED-DISPOSITIONS gather, which is
+	//                            the only query that looks backwards. The
+	//                            window must be bound in the FILTER: a closed
+	//                            scan with no ClosedAfter is a full-store dump
+	//                            wearing the right status, so the fake refuses
+	//                            it rather than quietly answering it.
+	//
+	//   IDs=[…]                  the subject lookup, which is deliberately
+	//                            unscoped by status — a subject is routinely
+	//                            still open after the sitting that disposed of
+	//                            it closes — and so is admitted on the id set
+	//                            alone.
+	//
 	// Anything else — no scope at all, or a widened one — is refused, so the
 	// filter stays load-bearing rather than decorative.
 	switch {
 	case filter.Status != nil && *filter.Status == beads.StatusOpen && len(filter.Statuses) == 0:
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
+	case filter.Status != nil && *filter.Status == beads.StatusClosed && len(filter.Statuses) == 0:
+		if filter.ClosedAfter == nil {
+			return nil, errors.New("a closed scan must bound its window with ClosedAfter")
+		}
+		return f.searchClosed(filter)
+	case len(filter.IDs) > 0:
+		return f.searchByIDs(filter)
 	default:
-		return nil, errors.New("expected status=open (anchors) or statuses=[open,in_progress] (joins)")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (dispositions), or IDs (subjects)")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -112,6 +139,74 @@ func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, 
 			if exact && got != filter.MetadataFields[key] {
 				continue
 			}
+			out = append(out, iss)
+		}
+	}
+	return out, nil
+}
+
+// searchClosed models the closed-visit gather: the ClosedAfter window and the
+// task_kind=visit predicate are both APPLIED, so a gather that forgot either
+// would return the wrong fixtures rather than passing on the fake's goodwill.
+//
+// closed holds the fixtures keyed by nothing in particular — they are not
+// anchors and have no issue type worth indexing by — so the window and the
+// metadata match are the whole of the selection.
+func (f *fakeStore) searchClosed(filter beads.IssueFilter) ([]*beads.Issue, error) {
+	if err, bad := f.failMeta["closed"]; bad {
+		return nil, err
+	}
+	var out []*beads.Issue
+	for _, iss := range f.closedIssues {
+		if iss.ClosedAt != nil && iss.ClosedAt.Before(*filter.ClosedAfter) {
+			continue
+		}
+		match := true
+		for k, want := range filter.MetadataFields {
+			if decodeMetadata(iss.Metadata)[k] != want {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		if !filter.IncludeDependencies {
+			// The gather reads the `tracks` edge off Issue.Dependencies, which
+			// the library populates ONLY under this flag. Handing them over
+			// regardless would hide a gather that forgot to ask — and the
+			// symptom of that is subjects silently going unresolved.
+			clone := *iss
+			clone.Dependencies = nil
+			out = append(out, &clone)
+			continue
+		}
+		out = append(out, iss)
+	}
+	return out, nil
+}
+
+// searchByIDs models the subject lookup. A store answers only for the ids it
+// holds, which is what lets the sweep ask every rig for whatever is still
+// unresolved instead of routing by id prefix.
+func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error) {
+	if err, bad := f.failMeta["subjects"]; bad {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, id := range filter.IDs {
+		want[id] = true
+	}
+	var out []*beads.Issue
+	for _, kind := range slices.Sorted(maps.Keys(f.issues)) {
+		for _, iss := range f.issues[kind] {
+			if want[iss.ID] {
+				out = append(out, iss)
+			}
+		}
+	}
+	for _, iss := range f.subjects {
+		if want[iss.ID] {
 			out = append(out, iss)
 		}
 	}

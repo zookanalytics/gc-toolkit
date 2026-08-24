@@ -13,103 +13,39 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
-// Parity between `helm-svc board --json` and `gc-helm.sh --json`.
+// The CLI half of helm-svc: the `board` renderer, its flags, and the wire
+// contract its --json emits.
 //
-// The two boards are two renderers over one model, but only the Go side is
-// compiled: nothing stops the bash board's `--json` object from growing a field
-// this one does not emit, or vice versa, and the failure is silent — a consumer
-// reads `null` and behaves as though the fact were absent rather than
-// unmirrored. assets/scripts/tmux-pick-helm.sh is the consumer that matters
-// today; it reads the array shape and six of the fields.
+// WHAT THIS FILE USED TO BE. It was contract_parity_test.go, and most of it
+// policed a DUPLICATE: gc-helm.sh computed its own board, so nothing stopped
+// one side's --json object growing a field the other did not emit, and the
+// failure was silent — a consumer read `null` and behaved as though the fact
+// were absent rather than unmirrored. Those tests are gone with the duplicate
+// (tk-clvkf6): gc-helm.sh's board half is now a thin renderer over this
+// binary, so the two cannot disagree about a field they no longer both build.
 //
-// This is the same idea as web/contract_parity_test.go, which reflects over the
-// Go structs and PARSES the other side's declaration (there, contract.ts). Here
-// the other side is a jq object literal inside a shell script, so the test
-// parses that. It is deliberately static:
+// WHAT SURVIVED, AND WHY IT IS NOT PARITY. Everything below states a
+// requirement of THIS renderer, not an agreement with another one:
 //
-//   - it does not run gc-helm.sh, so it needs no jq, no `gc`, and no live city;
-//   - it does not compare live output, which depends on session liveness and
-//     could not be deterministic.
+//   - the array-not-envelope shape, and the six fields
+//     assets/scripts/tmux-pick-helm.sh dereferences. That test was written to
+//     outlive gc-helm.sh — "retiring gc-helm.sh later cannot quietly retire
+//     the contract with it" — and this is the change it was written for.
+//   - the row cap's split budget, and the flag surface's fail-closed cases.
+//   - the table's rune-counted columns, the content-sized id widths
+//     (tk-mtuej) and the bounded NEEDS cell (tk-9tbbk.1).
 //
-// What a live run DOES prove — that the two agree field for field on real data
-// — was verified when this landed (55 anchors, all 34 fields equal) and is
-// recorded in specs/tk-134d7/. This test is what keeps them equal afterwards.
+// One reader of gc-helm.sh remains, at the bottom: the takeaway WRITE gate.
+// That verb never moved — helm-svc reads the board, it never stamps a
+// takeaway — so the cap has no Go counterpart to be checked against and the
+// script itself is the only place to look.
 
-const (
-	shBoardPath = "../../../../assets/scripts/gc-helm.sh"
-	// emitMarker is the last line of the jq object literal gc-helm.sh builds
-	// per anchor. Anchoring on rank_score rather than on a comment keeps the
-	// parse tied to the code itself.
-	emitMarker = "rank_score:"
-)
-
-// shEmittedKeys extracts the key set of gc-helm.sh's per-anchor `--json` object.
-//
-// The literal is the final `| { … }` of the RENDER jq program: it opens on a
-// line that is exactly `| {` and closes at the matching `}`. Inside, every
-// `name:` at the start of a key position is a wire field.
-func shEmittedKeys(t *testing.T) []string {
-	t.Helper()
-	src, err := os.ReadFile(shBoardPath)
-	if err != nil {
-		t.Fatalf("read %s: %v\nThis test pins the CLI against the bash board; it cannot run without it.", shBoardPath, err)
-	}
-	lines := strings.Split(string(src), "\n")
-
-	start := -1
-	for i, ln := range lines {
-		if strings.TrimSpace(ln) == "| {" {
-			start = i
-		}
-		// Take the LAST such block that contains the emit marker below it.
-		if start >= 0 && strings.Contains(ln, emitMarker) {
-			break
-		}
-	}
-	if start < 0 {
-		t.Fatalf("could not find the `| {` that opens the per-anchor object in %s", shBoardPath)
-	}
-
-	// Walk to the matching close brace, tracking depth so a nested object does
-	// not end the block early.
-	var body []string
-	depth := 0
-	for i := start; i < len(lines); i++ {
-		body = append(body, lines[i])
-		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-		if i > start && depth == 0 {
-			break
-		}
-	}
-	if depth != 0 {
-		t.Fatalf("unbalanced braces in the per-anchor object of %s", shBoardPath)
-	}
-
-	// A key is `name:` appearing after `{` or `,` (possibly across a newline).
-	// jq values contain colons too — `\(.a):\(.b)` inside a string, `if…then`
-	// — so the position rule, not the colon alone, is what identifies a key.
-	joined := strings.Join(body, "\n")
-	keyRe := regexp.MustCompile(`(?m)(?:[{,]|^)\s*([a-z_][a-z0-9_]*)\s*:`)
-	var keys []string
-	seen := map[string]bool{}
-	for _, m := range keyRe.FindAllStringSubmatch(joined, -1) {
-		k := m[1]
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		keys = append(keys, k)
-	}
-	if len(keys) < 20 {
-		t.Fatalf("parsed only %d keys from %s (%v) — the parser has drifted from the script", len(keys), shBoardPath, keys)
-	}
-	slices.Sort(keys)
-	return keys
-}
+const shBoardPath = "../../../../assets/scripts/gc-helm.sh"
 
 // goEmittedKeys is the key set one tile actually serializes through the CLI's
-// own renderer, so the test reads the real bytes rather than reflecting over
-// the struct: a bad `omitempty` is exactly the kind of drift it must catch.
+// own renderer, read from the real bytes rather than reflected off the struct:
+// a bad `omitempty` is exactly the kind of drift a reflection-based check
+// cannot see.
 func goEmittedKeys(t *testing.T) []string {
 	t.Helper()
 	// A fully-populated anchor: an omitzero/omitempty field left at its zero
@@ -157,34 +93,6 @@ func goEmittedKeys(t *testing.T) []string {
 	return keys
 }
 
-// TestCLIFieldParityWithBashBoard is the check: the two boards emit the SAME
-// per-row field set. A field added to one and not the other fails here, naming
-// which side is behind.
-func TestCLIFieldParityWithBashBoard(t *testing.T) {
-	sh := shEmittedKeys(t)
-	go_ := goEmittedKeys(t)
-
-	if slices.Equal(sh, go_) {
-		return
-	}
-	for _, k := range sh {
-		if !slices.Contains(go_, k) {
-			t.Errorf("gc-helm.sh emits %q and `helm-svc board --json` does not.\n"+
-				"Add it to board.Tile (and mirror it in web/src/contract.ts), or the CLI is a lossy view of the same board.", k)
-		}
-	}
-	for _, k := range go_ {
-		if !slices.Contains(sh, k) {
-			t.Errorf("`helm-svc board --json` emits %q and gc-helm.sh does not.\n"+
-				"Add it to the jq object literal in %s in the same change, or the two boards have forked.", k, shBoardPath)
-		}
-	}
-}
-
-// TestCLIEmitsArrayNotEnvelope pins the shape, which is the half of the contract
-// a field-set check cannot see. tmux-pick-helm.sh runs `jq 'length'` and `.[]`
-// over this output; the service's {generated_at,total,tiles} envelope would
-// make every row invisible while still parsing cleanly.
 func TestCLIEmitsArrayNotEnvelope(t *testing.T) {
 	var buf bytes.Buffer
 	if rc := renderJSON(&buf, &buf, nil); rc != boardExitOK {
@@ -447,34 +355,6 @@ func TestRenderTableKeepsClassicWidthsForShortIDs(t *testing.T) {
 	}
 }
 
-// TestBashBoardDerivesIDWidth pins the OTHER renderer's half of the same fix.
-// The field-set parity above cannot see this: the two boards can agree on every
-// wire field and still disagree about whether an id survives rendering, which
-// is exactly how gc-helm.sh and helm-svc board both shipped a fixed 11.
-func TestBashBoardDerivesIDWidth(t *testing.T) {
-	src, err := os.ReadFile(shBoardPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", shBoardPath, err)
-	}
-	text := string(src)
-	for _, fixed := range []string{"(.id)|rpad(11)", "(.rig)|rpad(13)"} {
-		if strings.Contains(text, fixed) {
-			t.Errorf("%s still renders %s at a FIXED width; a 12-char hierarchical id loses the tail that discriminates it (tk-mtuej)",
-				shBoardPath, fixed)
-		}
-	}
-	for _, derived := range []string{"(.id)|rpad($idw)", "(.rig)|rpad($rigw)"} {
-		if !strings.Contains(text, derived) {
-			t.Errorf("%s no longer renders %s; the bash board must size these columns from the widest value on the board, as helm-svc board does",
-				shBoardPath, derived)
-		}
-	}
-}
-
-// TestEmptyBoardSaysSo: zero anchors is a legitimate answer and must read as
-// one. The failure mode it guards is the opposite reading — a gather that could
-// not look reported as "nothing needs you" — which runBoard keeps distinct by
-// exiting 3 without rendering at all.
 func TestEmptyBoardSaysSo(t *testing.T) {
 	var buf bytes.Buffer
 	renderTable(&buf, board.Board{Total: 0}, nil, time.Now(), 4)
@@ -601,38 +481,6 @@ func TestClipLeavesShortProseAlone(t *testing.T) {
 		t.Errorf("clip measured bytes, not runes: %d runes in, %d out", colNeedsMax, len([]rune(got)))
 	}
 }
-
-// TestBashBoardClipsNeeds pins the OTHER renderer's half, the same way
-// TestBashBoardDerivesIDWidth does for the id columns. Field-set parity cannot
-// see this: the two boards can agree on every wire field and still disagree
-// about whether a 1876-char takeaway destroys the table, which is exactly how
-// both of them shipped an unbounded NEEDS.
-func TestBashBoardClipsNeeds(t *testing.T) {
-	src, err := os.ReadFile(shBoardPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", shBoardPath, err)
-	}
-	text := string(src)
-	if strings.Contains(text, "rpad(36)) + (.needs) )") {
-		t.Errorf("%s still renders NEEDS unbounded; one 1876-char takeaway is a 490-column row that wraps over the rows below it (tk-9tbbk.1)",
-			shBoardPath)
-	}
-	if !strings.Contains(text, "clip($needsw)") {
-		t.Errorf("%s no longer clips the NEEDS cell; both renderers must bound it, as helm-svc board does",
-			shBoardPath)
-	}
-	// The two boards must agree on the NUMBER, not merely on having one.
-	if !strings.Contains(text, "TAKEAWAY_MAX=140") {
-		t.Errorf("%s no longer bounds the takeaway at %d; the two renderers would clip at different widths",
-			shBoardPath, colNeedsMax)
-	}
-}
-
-// TestBashBoardEnforcesTakeawayCap pins the WRITE half, which has no Go
-// counterpart at all: helm-svc reads the board, it never stamps a takeaway. The
-// cap lived in gc-helm.sh's usage string and nowhere else for long enough to go
-// 22-for-23 against, and a documented-but-unenforced limit is what this test
-// exists to keep from coming back.
 func TestBashBoardEnforcesTakeawayCap(t *testing.T) {
 	src, err := os.ReadFile(shBoardPath)
 	if err != nil {
