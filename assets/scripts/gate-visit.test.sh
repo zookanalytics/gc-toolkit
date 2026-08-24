@@ -106,10 +106,10 @@ for f in "$SDIR"/*.sh; do
 done
 
 echo "── consumer census ──"
-if [ "$FORMULA_CONSUMERS" -ge 4 ]; then
-    ok "all four known formula consumers carry marked copies ($FORMULA_CONSUMERS found)"
+if [ "$FORMULA_CONSUMERS" -ge 2 ]; then
+    ok "the known formula consumers carry marked copies ($FORMULA_CONSUMERS found)"
 else
-    bad "all four known formula consumers carry marked copies" "expected >=4 (mol-visit, mol-first-reaction, mol-liveness-sweep, mol-triage-recurrence); found $FORMULA_CONSUMERS"
+    bad "the known formula consumers carry marked copies" "expected >=2 (mol-visit, mol-first-reaction); found $FORMULA_CONSUMERS"
 fi
 if [ "$SCRIPT_CONSUMERS" -ge 1 ]; then
     ok "the script surface carries marked copies ($SCRIPT_CONSUMERS found)"

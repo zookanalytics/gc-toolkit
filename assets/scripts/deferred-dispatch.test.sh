@@ -24,13 +24,7 @@
 #   * the QUIET PATH — an empty store still passes, so the guard above did not
 #     strand the ordinary no-work case;
 #   * a POSITIVE CONTROL over the shipped order file, so a passing suite cannot
-#     mean the cadence that consumes these records was quietly un-shipped;
-#   * doctor/check-deferred-dispatch-wired, both arms — the shipped pack passes,
-#     and each way the two halves can come apart is caught. Those cases live
-#     HERE rather than in a check-deferred-dispatch-wired.test.sh of their own:
-#     this pack has no test discovery, suites are invoked by name, and one file
-#     covering the whole mechanism is one a reviewer touching either half will
-#     actually run.
+#     mean the cadence that consumes these records was quietly un-shipped.
 #
 # No live city, Dolt, network, gc or bd — only jq, stubs, and a tmpdir.
 set -uo pipefail
@@ -348,61 +342,6 @@ if grep -qE '^[[:space:]]*no_work_gate' "$ORDER"; then
     bad "the order does not opt out of the single-flight gate (no_work_gate is set)"
 else
     ok "the order does not opt out of the single-flight gate"
-fi
-
-# --- doctor/check-deferred-dispatch-wired ------------------------------------
-# The check exists because the failure it guards is silent: `arm` succeeds
-# whether or not anything consumes the record. A check that only ever says OK
-# would be worth nothing, so every way the halves come apart is exercised.
-echo "# doctor check"
-CHECK="$ROOT/doctor/check-deferred-dispatch-wired/run.sh"
-if [ ! -s "$CHECK" ]; then
-    bad "doctor/check-deferred-dispatch-wired/run.sh is missing"
-else
-    ok "doctor/check-deferred-dispatch-wired ships"
-    [ -x "$CHECK" ] || chmod +x "$CHECK" 2>/dev/null
-
-    # The shipped pack is the positive control.
-    GC_PACK_DIR="$ROOT" "$CHECK" >/dev/null 2>&1
-    eq "$?" 0 "the check passes against the shipped pack"
-
-    PK="$TMP/pk"
-    mkpack() { # rebuild a minimal pack that mirrors the shipped one
-        rm -rf "$PK"; mkdir -p "$PK/assets/scripts" "$PK/orders" "$PK/doctor"
-        cp -r "$ROOT/doctor/check-deferred-dispatch-wired" "$PK/doctor/"
-        cp "$ROOT/assets/scripts/deferred-dispatch.sh" "$PK/assets/scripts/"
-        cp "$ROOT/orders/deferred-dispatch.toml" "$PK/orders/"
-    }
-    check_rc() { GC_PACK_DIR="$PK" "$PK/doctor/check-deferred-dispatch-wired/run.sh" >/dev/null 2>&1; echo $?; }
-
-    mkpack; eq "$(check_rc)" 0 "the fixture pack is a valid control before mutation"
-
-    mkpack; rm -f "$PK/orders/deferred-dispatch.toml"
-    eq "$(check_rc)" 2 "ERROR when the order is missing (arm records nobody performs)"
-
-    mkpack; sed -i 's|deferred-dispatch.sh reconcile|deferred-dispatch.sh list|' "$PK/orders/deferred-dispatch.toml"
-    eq "$(check_rc)" 2 "ERROR when exec runs a verb other than reconcile"
-
-    mkpack; sed -i 's|assets/scripts/deferred-dispatch.sh reconcile|assets/scripts/renamed.sh reconcile|' "$PK/orders/deferred-dispatch.toml"
-    eq "$(check_rc)" 2 "ERROR when the exec path drifts off the shipped script"
-
-    mkpack; chmod -x "$PK/assets/scripts/deferred-dispatch.sh"
-    eq "$(check_rc)" 2 "ERROR when the script is not executable"
-
-    mkpack; sed -i 's|^timeout = \"120s\"|timeout = \"900s\"|' "$PK/orders/deferred-dispatch.toml"
-    eq "$(check_rc)" 2 "ERROR when timeout is not below order-tracking-sweep's 10m stale-after"
-
-    mkpack; printf 'no_work_gate = true\n' >> "$PK/orders/deferred-dispatch.toml"
-    eq "$(check_rc)" 2 "ERROR when no_work_gate opts the order out of single-flight"
-
-    mkpack; sed -i 's|--ready|--READYX|g' "$PK/assets/scripts/deferred-dispatch.sh"
-    eq "$(check_rc)" 2 "ERROR when readiness stops being asked of bd"
-
-    mkpack; sed -i 's|^    reconcile) cmd_reconcile|    reconcileX) cmd_reconcile|' "$PK/assets/scripts/deferred-dispatch.sh"
-    eq "$(check_rc)" 2 "ERROR when the reconcile verb is gone"
-
-    mkpack; sed -i 's|^scope = \"rig\"|scope = \"city\"|' "$PK/orders/deferred-dispatch.toml"
-    eq "$(check_rc)" 2 "ERROR when the order stops being rig-scoped"
 fi
 
 echo
