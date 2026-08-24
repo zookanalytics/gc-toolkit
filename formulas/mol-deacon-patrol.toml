@@ -783,7 +783,22 @@ the old behavior, not a dropped escalation.
 **Keep the resolution loop in the SAME shell as the send.** Each tool call is
 a fresh shell, so a `SCRIPTS_DIR` resolved in an earlier call is gone, and an
 empty one expands to `/escalation-gate.sh` — which fails and sends nothing, a
-silent mute that is worse than the storm.
+silent mute that is worse than the storm. Note which failure that is: with no
+`SCRIPTS_DIR`, `finding-anchor.sh` never runs, `ANCHOR` is empty, and a
+`[ -n "$ANCHOR" ] && ...` line then sends neither the gated mail NOR the
+fallback. The escalation does not degrade; it disappears.
+
+**So every real call site below carries its own copy of that loop**, between
+`# >>> deacon-escalation-wiring-<name>` markers — the same shape the witness
+and refinery formulas use. The duplication is the point: a block has to work
+when it is the only thing in the shell, because that is how it runs.
+`assets/scripts/deacon-escalation-wiring.test.sh` extracts each marked block
+through a real TOML decode and EXECUTES it against stubs, so a site that stops
+being self-contained fails there instead of going quiet in production. That
+test also scans this whole file for any `gc mail send` outside a marked block:
+the only exception is relaying an inbound HELP message in `check-inbox`, which
+fires once per message rather than once per cycle and so has no repetition for
+a gate to suppress.
 
 
 **Server down (CRITICAL):** `server.reachable == false` — either no
@@ -792,12 +807,29 @@ answering SQL (wedged goroutines, migration lock, saturated pool).
 Gated like everything else in this step — a server that is down stays down,
 and re-mailing it every cycle buries the diagnostics that would fix it:
 ```bash
+# >>> deacon-escalation-wiring-server-unreachable
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ] && [ -x "$cand/finding-anchor.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
 BODY="gc dolt health reports server.reachable=false"
-ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" dolt-server-unreachable \\
-  --title "dolt server unreachable" --body "$BODY")
-[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
-  --state unreachable --cooldown "{{escalation_cooldown}}" \\
-  --subject "ESCALATION: Dolt server unreachable [CRITICAL]" --body "$BODY"
+SUBJECT="ESCALATION: Dolt server unreachable [CRITICAL]"
+if [ -n "$SCRIPTS_DIR" ]; then
+  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" dolt-server-unreachable \\
+    --title "dolt server unreachable" --body "$BODY")
+  if [ -n "$ANCHOR" ]; then
+    if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+         --state unreachable --cooldown "{{escalation_cooldown}}" \\
+         --subject "$SUBJECT" --body "$BODY"; then
+      echo "deacon: escalation-gate did not send dolt-server-unreachable (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    fi
+  else
+    echo "deacon: finding-anchor could not resolve an anchor for dolt-server-unreachable; NOT mailing unbounded. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "$SUBJECT" -m "$BODY" || echo "deacon: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
+# <<< deacon-escalation-wiring-server-unreachable
 ```
 
 **Commit bloat (commits > 50k in any DB):**
@@ -856,11 +888,28 @@ case "$FLAG_LINE" in
   *"manifest is"*"old"*)               CLASS=stale-manifest ;;
   *)                                   CLASS=flagged ;;
 esac
-ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "dolt-backup-manifest:$DB" \\
-  --title "$DB has no restorable backup" --body "$BODY")
-[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
-  --state "$CLASS" --cooldown "{{escalation_cooldown}}" \\
-  --subject "ESCALATION: $DB has no restorable backup [HIGH]" --body "$BODY"
+# >>> deacon-escalation-wiring-backup-manifest
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ] && [ -x "$cand/finding-anchor.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+SUBJECT="ESCALATION: $DB has no restorable backup [HIGH]"
+if [ -n "$SCRIPTS_DIR" ]; then
+  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "dolt-backup-manifest:$DB" \\
+    --title "$DB has no restorable backup" --body "$BODY")
+  if [ -n "$ANCHOR" ]; then
+    if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+         --state "$CLASS" --cooldown "{{escalation_cooldown}}" \\
+         --subject "$SUBJECT" --body "$BODY"; then
+      echo "deacon: escalation-gate did not send dolt-backup-manifest:$DB (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    fi
+  else
+    echo "deacon: finding-anchor could not resolve an anchor for dolt-backup-manifest:$DB; NOT mailing unbounded. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "$SUBJECT" -m "$BODY" || echo "deacon: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
+# <<< deacon-escalation-wiring-backup-manifest
 ```
 **Do not hand-check "was this already escalated".** The old instruction here
 was to `grep` the mayor's inbox for a prior mail and, on a hit, "escalate
@@ -885,11 +934,28 @@ case "$FLAG_ROOT_LINE" in
   *)                        ROOT_CLASS=flag-root ;;
 esac
 BODY="$FLAG_ROOT_LINE"
-ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" dolt-backup-root \\
-  --title "no Dolt backup root — nothing is restorable" --body "$BODY")
-[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
-  --state "$ROOT_CLASS" --cooldown "{{escalation_cooldown}}" \\
-  --subject "ESCALATION: no Dolt backups exist at all [CRITICAL]" --body "$BODY"
+# >>> deacon-escalation-wiring-backup-root
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ] && [ -x "$cand/finding-anchor.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+SUBJECT="ESCALATION: no Dolt backups exist at all [CRITICAL]"
+if [ -n "$SCRIPTS_DIR" ]; then
+  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" dolt-backup-root \\
+    --title "no Dolt backup root — nothing is restorable" --body "$BODY")
+  if [ -n "$ANCHOR" ]; then
+    if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+         --state "$ROOT_CLASS" --cooldown "{{escalation_cooldown}}" \\
+         --subject "$SUBJECT" --body "$BODY"; then
+      echo "deacon: escalation-gate did not send dolt-backup-root (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    fi
+  else
+    echo "deacon: finding-anchor could not resolve an anchor for dolt-backup-root; NOT mailing unbounded. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "$SUBJECT" -m "$BODY" || echo "deacon: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
+# <<< deacon-escalation-wiring-backup-root
 ```
 
 **Indeterminate (`RECHECK`):** a sync may be in flight. Re-run the Step 2a
@@ -992,23 +1058,47 @@ ungated mail here is a storm about the storm-detector. `--state` is the return
 code (a small enum) and the drifted key list — both stable while the breakage
 lasts, both genuinely different when it changes shape:
 ```bash
+# >>> deacon-escalation-wiring-doctor-payload
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ] && [ -x "$cand/finding-anchor.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+# Both branches share one send, so FINDING doubles as the "did a branch fire"
+# flag. A clean payload leaves it empty and nothing below runs.
+FINDING=""
 if [ "$DOCTOR_RC" != 0 ] && [ "$DOCTOR_RC" != 1 ]; then
+  FINDING=doctor-run-incomplete
+  TITLE="gc doctor --json does not complete"
+  STATE="rc=$DOCTOR_RC"
+  SUBJECT="DOCTOR: gc doctor --json did not complete [HIGH]"
   BODY="rc=$DOCTOR_RC at a 300s bound (124 = the bound fired), payload empty or partial. NOT reporting clean."
-  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" doctor-run-incomplete \\
-    --title "gc doctor --json does not complete" --body "$BODY")
-  [ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
-    --state "rc=$DOCTOR_RC" --cooldown "{{escalation_cooldown}}" \\
-    --subject "DOCTOR: gc doctor --json did not complete [HIGH]" --body "$BODY"
 elif ! printf '%s' "$DOCTOR_JSON" | jq -e 'has("results")' >/dev/null 2>&1; then
   KEYS=$(printf '%s' "$DOCTOR_JSON" | jq -c 'keys' 2>/dev/null)
   [ -n "$KEYS" ] || KEYS="unparseable (payload is not JSON)"
+  FINDING=doctor-json-schema-drift
+  TITLE="gc doctor --json has no .results key"
+  STATE="$KEYS"
+  SUBJECT="DOCTOR: --json schema drift, no .results key [HIGH]"
   BODY="Top-level keys: $KEYS. Findings moved or the payload is not JSON; the findings filter is now blind and this step reports clean regardless of city state."
-  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" doctor-json-schema-drift \\
-    --title "gc doctor --json has no .results key" --body "$BODY")
-  [ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
-    --state "$KEYS" --cooldown "{{escalation_cooldown}}" \\
-    --subject "DOCTOR: --json schema drift, no .results key [HIGH]" --body "$BODY"
 fi
+if [ -n "$FINDING" ]; then
+  if [ -n "$SCRIPTS_DIR" ]; then
+    ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "$FINDING" \\
+      --title "$TITLE" --body "$BODY")
+    if [ -n "$ANCHOR" ]; then
+      if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+           --state "$STATE" --cooldown "{{escalation_cooldown}}" \\
+           --subject "$SUBJECT" --body "$BODY"; then
+        echo "deacon: escalation-gate did not send $FINDING (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+      fi
+    else
+      echo "deacon: finding-anchor could not resolve an anchor for $FINDING; NOT mailing unbounded. Next cycle retries." >&2
+    fi
+  else
+    gc mail send mayor/ -s "$SUBJECT" -m "$BODY" || echo "deacon: fallback 'gc mail send' failed; next cycle retries." >&2
+  fi
+fi
+# <<< deacon-escalation-wiring-doctor-payload
 ```
 
 Either branch is a **failed** health scan, not a clean one. Do not run
@@ -1158,11 +1248,28 @@ than forking a second tracker for one check:
 CHECK=<the .results[].name you are about to escalate>
 finding=$(printf '%s' "$DOCTOR_JSON" | jq -c --arg c "$CHECK" '.results[] | select(.name==$c)')
 STATE=$(printf '%s' "$finding" | jq -r '[.status, (.severity // "-")] | join("/")')
-ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "$CHECK" --key doctor_check \\
-  --title "doctor check $CHECK is firing" --body "$finding")
-[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
-  --state "$STATE" --cooldown "{{escalation_cooldown}}" \\
-  --subject "DOCTOR: $CHECK" --body "$finding"
+# >>> deacon-escalation-wiring-doctor-finding
+SUBJECT="DOCTOR: $CHECK"
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ] && [ -x "$cand/finding-anchor.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+if [ -n "$SCRIPTS_DIR" ]; then
+  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "$CHECK" --key doctor_check \\
+    --title "doctor check $CHECK is firing" --body "$finding")
+  if [ -n "$ANCHOR" ]; then
+    if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+         --state "$STATE" --cooldown "{{escalation_cooldown}}" \\
+         --subject "$SUBJECT" --body "$finding"; then
+      echo "deacon: escalation-gate did not send doctor check $CHECK (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    fi
+  else
+    echo "deacon: finding-anchor could not resolve an anchor for doctor check $CHECK; NOT mailing unbounded. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "$SUBJECT" -m "$finding" || echo "deacon: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
+# <<< deacon-escalation-wiring-doctor-finding
 ```
 `--state` is the finding's `.status` and `.severity`, NOT its `.message`. The
 message carries live numbers — `dolt-noms-size: lx 2.24 GB, largest of 5` —

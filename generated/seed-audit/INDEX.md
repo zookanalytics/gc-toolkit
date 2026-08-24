@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- source digest: `150d917f3cf14e65e663fe97f273d910df210446764f99057bbba1ac8797042e`
+- source digest: `7d9450af6ec66fbe69c9e0532bb5377de7f7af5226567f1722aefc8847dd8937`
 - agents: 16 · formulas: 28
 
 ## Scope

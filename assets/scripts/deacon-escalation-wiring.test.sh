@@ -152,6 +152,8 @@ mkdir -p "$LINK/assets"
 ln -sfn "$TMP/scripts" "$LINK/assets/scripts"
 
 run_wiring() { # run_wiring — execute the extracted snippet with BODY preset
+  # Subshell isolation is deliberate here too; see run_block below.
+  # shellcheck disable=SC2030,SC2031
   ( export GC_RIG_ROOT="$LINK" GC_CITY_PATH="/nonexistent-city"
     # Consumed by the sourced snippet below, which shellcheck cannot follow.
     # shellcheck disable=SC2034
@@ -237,13 +239,43 @@ for s in d["steps"]:
         sys.stdout.write("### %s\n%s\n" % (s["id"], s["description"]))
 PY
 
-# NOBARE: no un-gated mayor mail survives in the two escalating steps. The only
-# permitted `gc mail send mayor/` is the fallback inside the marked snippet.
-BARE=$(grep -c 'gc mail send mayor/' "$DECODED" || true)
-eq "$BARE" "1" "NOBARE: exactly one gc mail send mayor/ remains (the unsynced-rig fallback)"
-grep -n 'gc mail send mayor/' "$DECODED" | grep -q '"<subject>"' \
-  && ok "NOBARE: the survivor is the fallback, not a real escalation site" \
-  || bad "NOBARE: the surviving bare mail is not the documented fallback"
+# NOBARE: every `gc mail send` in the WHOLE formula is either inside a marked
+# escalation-wiring block (where it is the documented unsynced-rig fallback) or
+# on the exception list below. This is the same scan witness-escalation-wiring
+# and refinery-escalation-wiring run, and it is deliberately wider than the two
+# escalating steps: a new ungated mail added to any step is how the storm comes
+# back, and counting occurrences would just drift with every block added.
+#
+# EXCEPTIONS — relaying an inbound HELP message is not a patrol finding. It
+# fires once per message received, not once per cycle while a condition
+# persists, so there is no repetition for a gate to suppress.
+python3 - "$TOML" > "$TMP/ungated.txt" <<'PY2'
+import re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+body = "\n".join(s["description"] for s in d["steps"])
+spans = [m.span() for m in
+         re.finditer(r"# >>> (deacon-escalation-wiring[\w-]*)\n.*?# <<< \1", body, re.S)]
+EXCEPT = ('ESCALATION: <agent> needs help',)
+for m in re.finditer(r"^.*\bgc mail send\b.*$", body, re.M):
+    line = m.group(0).strip()
+    if any(a <= m.start() < b for a, b in spans):      # inside a marked block
+        continue
+    if line.startswith(("#", "*", "-", ">")) or "`gc mail send`" in line:
+        continue                                        # prose, not a call site
+    if any(e in line for e in EXCEPT):
+        continue
+    print(line)
+PY2
+UNGATED=$(grep -c . "$TMP/ungated.txt" || true)
+[ "$UNGATED" = "0" ] \
+  && ok "NOBARE: no ungated gc mail send outside a marked block" \
+  || bad "NOBARE: $UNGATED ungated mail site(s): $(tr '\n' '|' < "$TMP/ungated.txt")"
+
+# ...and the scan is not vacuous: the marked blocks DO contain fallbacks, so a
+# regex that stopped matching would be caught here rather than reading as clean.
+FB=$(grep -c 'gc mail send mayor/' "$DECODED" || true)
+[ "$FB" -ge 5 ] && ok "NOBARE: $FB in-block fallbacks present (the scan sees real call sites)" \
+  || bad "NOBARE: only $FB in-block fallbacks found (expected >= 5)"
 
 # EVERYGATE: every escalation site pairs finding-anchor with the gate.
 #
@@ -374,6 +406,150 @@ has 'escalation_cooldown' "$RAW" "COOLDOWNVAR: the var exists"
 POURS=$(grep -c "mol wisp mol-deacon-patrol --root-only" "$TOML" || true)
 FWD=$(grep "mol wisp mol-deacon-patrol --root-only" "$TOML" | grep -c 'escalation_cooldown' || true)
 eq "$FWD" "$POURS" "COOLDOWNVAR: every pour forwards escalation_cooldown (a --root-only wisp materializes no defaults)"
+
+# --- CONCRETE: every REAL call site is self-contained and behaves ------------
+#
+# The placeholder template above is not what the deacon runs. The real
+# escalations are the five blocks below, and they used to be bare
+# `"$SCRIPTS_DIR/..."` calls with the resolution loop living only in the
+# template. Each agent tool call is a FRESH SHELL, so `SCRIPTS_DIR` arrived
+# unset, the call expanded to `/finding-anchor.sh`, it failed, `ANCHOR` came
+# back empty, and the old `[ -n "$ANCHOR" ] && ...` form then sent NOTHING —
+# not the gated mail, not the fallback. A silent mute of every deacon
+# escalation, which is strictly worse than the storm it replaced.
+#
+# So each block is executed here exactly as the formula ships it, through the
+# same TOML decode, against the same stubs. A block that stops being
+# self-contained fails FALLBACK or GATED below rather than going quiet in
+# production.
+python3 - "$TOML" "$TMP/blocks" <<'PY'
+import os, re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+out = sys.argv[2]; os.makedirs(out, exist_ok=True)
+body = "\n".join(s["description"] for s in d["steps"])
+names = []
+for m in re.finditer(r"# >>> (deacon-escalation-wiring-[\w-]+)\n(.*?)# <<< \1", body, re.S):
+    open(os.path.join(out, m.group(1) + ".sh"), "w").write(m.group(2))
+    names.append(m.group(1))
+open(os.path.join(out, "INDEX"), "w").write("\n".join(names) + "\n")
+PY
+BLOCKS=$(cat "$TMP/blocks/INDEX" 2>/dev/null)
+NBLOCKS=$(printf '%s\n' "$BLOCKS" | grep -c . || true)
+# A FLOOR, so a marker rename cannot make every assertion below vacuous by
+# extracting nothing at all.
+[ "$NBLOCKS" -ge 5 ] && ok "CONCRETE: $NBLOCKS real call sites are marked and extractable" \
+  || bad "CONCRETE: only $NBLOCKS marked call sites (expected >= 5)"
+
+# The variables each site computes UPSTREAM of its own block, standing in for
+# what the patrol step would have set by the time it escalates.
+run_block() { # run_block <block-file>
+  # The subshell is the point: each block must run in an environment it did not
+  # help build, which is how the deacon actually invokes it. SC2030/SC2031 read
+  # that isolation as an accident.
+  # shellcheck disable=SC2030,SC2031
+  ( export GC_RIG_ROOT="$LINK" GC_CITY_PATH="/nonexistent-city"
+    # Consumed by the sourced block, which shellcheck cannot follow.
+    # shellcheck disable=SC2034
+    {
+      DB=lx
+      CLASS=stale-manifest
+      ROOT_CLASS=missing
+      BODY="lx: manifest is 40h old"
+      DOCTOR_RC=124
+      DOCTOR_JSON='{}'
+      CHECK=dolt-noms-size
+      finding='{"name":"dolt-noms-size","status":"warn","severity":"medium"}'
+      STATE="warn/medium"
+    }
+    # shellcheck disable=SC1090
+    . "$1" ) >"$TMP/out" 2>"$TMP/err"
+  echo $?
+}
+
+expected_subject() { # expected_subject <block-name>
+  case "$1" in
+    *server-unreachable) echo "Dolt server unreachable" ;;
+    *backup-manifest)    echo "no restorable backup" ;;
+    *backup-root)        echo "no Dolt backups exist at all" ;;
+    *doctor-payload)     echo "did not complete" ;;
+    *doctor-finding)     echo "DOCTOR: dolt-noms-size" ;;
+  esac
+}
+expected_finding() { # expected_finding <block-name>
+  case "$1" in
+    *server-unreachable) echo "dolt-server-unreachable" ;;
+    *backup-manifest)    echo "dolt-backup-manifest:lx" ;;
+    *backup-root)        echo "dolt-backup-root" ;;
+    *doctor-payload)     echo "doctor-run-incomplete" ;;
+    *doctor-finding)     echo "dolt-noms-size" ;;
+  esac
+}
+
+for B in $BLOCKS; do
+  F="$TMP/blocks/$B.sh"
+  SUBJ=$(expected_subject "$B")
+  WANT=$(expected_finding "$B")
+
+  # GATED — the happy path goes through the gate, never bare.
+  reset; make_scripts "tk-track1" 0 0
+  RC=$(run_block "$F")
+  eq "$RC" 0 "[$B] GATED: exits 0"
+  has "gate" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "[$B] GATED: the gate was called"
+  hasnt "mail" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "[$B] GATED: no bare mail"
+  eq "$(gate_flag --anchor)" "tk-track1" "[$B] GATED: --anchor carries the resolved tracker"
+  eq "$(gate_flag --kind)" "deacon" "[$B] GATED: --kind deacon, never the witness default"
+  has "$WANT" "$(anchor_args)" "[$B] GATED: the finding name is passed verbatim"
+
+  # FALLBACK — an unsynced rig keeps the OLD behavior. This is the assertion
+  # that fails if the block stops resolving SCRIPTS_DIR in its own shell: with
+  # the loop gone, SCRIPTS_DIR is empty, and an empty one must take the
+  # fallback rather than expand to /finding-anchor.sh and vanish.
+  reset
+  rm -f "$TMP/scripts/escalation-gate.sh" "$TMP/scripts/finding-anchor.sh"
+  RC=$(run_block "$F")
+  eq "$RC" 0 "[$B] FALLBACK: exits 0"
+  has "mail" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "[$B] FALLBACK: a rig without the scripts still mails"
+  has "$SUBJ" "$(jq -r '.[]' < "$STUB_LOG/mail-args.json" 2>/dev/null)" \
+    "[$B] FALLBACK: mails its OWN subject (so SUBJECT is in the block's scope)"
+
+  # NOANCHOR — fail closed. No anchor means nothing can bound the escalation,
+  # so it must not be sent at all.
+  reset; make_scripts "" 2 0
+  RC=$(run_block "$F")
+  hasnt "mail" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "[$B] NOANCHOR: does not fall back to a bare mail"
+  hasnt "gate" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "[$B] NOANCHOR: does not call the gate unanchored"
+  has "NOT mailing unbounded" "$(cat "$TMP/err")" "[$B] NOANCHOR: says why on stderr"
+
+  # GATEFAIL — a refusing gate is logged, never worked around.
+  reset; make_scripts "tk-track1" 0 1
+  RC=$(run_block "$F")
+  eq "$RC" 0 "[$B] GATEFAIL: does not abort the patrol pass"
+  hasnt "mail" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "[$B] GATEFAIL: does not mail past a refusal"
+  has "NOT falling back to a bare mail" "$(cat "$TMP/err")" "[$B] GATEFAIL: logs the refusal"
+
+  # BOTHSCRIPTS — a half-synced rig must fall back, not go silent.
+  reset; make_scripts "tk-track1" 0 0
+  rm -f "$TMP/scripts/finding-anchor.sh"
+  RC=$(run_block "$F")
+  has "mail" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "[$B] BOTHSCRIPTS: half-synced rig falls back, not silence"
+
+  # SELFCONTAINED — the property stated structurally as well as behaviorally.
+  has 'SCRIPTS_DIR=""' "$(cat "$F")" "[$B] SELFCONTAINED: initialises SCRIPTS_DIR"
+  has 'for cand in' "$(cat "$F")" "[$B] SELFCONTAINED: resolves it in its own shell"
+done
+
+# --- CLEANPAYLOAD: a healthy doctor payload escalates nothing ----------------
+# The doctor-payload block guards two branches with one send. If the guard were
+# dropped, a clean run would mail an empty finding every cycle.
+reset; make_scripts "tk-track1" 0 0
+# shellcheck disable=SC2030,SC2031
+( export GC_RIG_ROOT="$LINK" GC_CITY_PATH="/nonexistent-city"
+  # shellcheck disable=SC2034
+  { DOCTOR_RC=0; DOCTOR_JSON='{"results":[]}'; }
+  # shellcheck disable=SC1090
+  . "$TMP/blocks/deacon-escalation-wiring-doctor-payload.sh" ) >"$TMP/out" 2>"$TMP/err"
+hasnt "gate" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "CLEANPAYLOAD: a valid payload escalates nothing"
+hasnt "mail" "$(cat "$STUB_LOG/calls" 2>/dev/null)" "CLEANPAYLOAD: and mails nothing"
 
 echo
 echo "passed: $PASS   failed: $FAIL"

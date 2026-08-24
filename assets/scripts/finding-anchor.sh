@@ -25,12 +25,11 @@
 # re-confirmed the shape on 2026-08-24 with 26 messages in one cycle, ~6 of them
 # re-escalations of already-tracked findings, dolt-noms-size again among them.
 #
-# WHY THE LOOKUP IS AN EXACT METADATA MATCH AND NEVER `bd search`. This is the
-# constraint the mayor measured before it could defeat the fix, and it is the
-# reason this script exists as a script rather than as three lines of formula
-# prose telling an agent to "grep open beads first". `bd search` matches a
-# CONTIGUOUS SUBSTRING of title/description, not tokens. Measured in
-# rigs/gascity:
+# WHY THE LOOKUP LEADS WITH AN EXACT METADATA MATCH, NEVER A PROSE `bd search`.
+# This is the constraint the mayor measured before it could defeat the fix, and
+# it is the reason this script exists as a script rather than as three lines of
+# formula prose telling an agent to "grep open beads first". `bd search` matches
+# a CONTIGUOUS SUBSTRING, not tokens. Measured in rigs/gascity:
 #
 #     bd search "backup"                      -> gc-17rl4 gc-b1n7a gc-ltbm5
 #     bd search "bd-backup"                   -> gc-b1n7a gc-ltbm5
@@ -48,8 +47,25 @@
 #
 # The key is therefore the finding's OWN NAME, verbatim, as a single token, in a
 # metadata field. It is always present in the finding, it is stable across
-# cycles, and it is what tracker beads already carry. It is never composed out of
-# prose from the message text — that is the query shape proven above to miss.
+# cycles, and it is never composed out of prose from the message text — that is
+# the query shape proven above to miss.
+#
+# WHAT THAT KEY DOES NOT COVER, AND THE TWO TIERS THAT FOLLOW FROM IT. A stamp
+# only exists on beads minted since this script did. Every tracker filed before
+# it is title-only — gc-b1n7a and gc-ltbm5 are open, track bd-backup-freshness,
+# and carry neither finding_key nor doctor_check — so an exact-match-only lookup
+# reads metadata absence as tracker absence and mints a third beside two live
+# ones. And `bd` answers for ONE store, while these findings name databases and
+# doctor checks belonging to no rig: both of those trackers live in rigs/gascity
+# and are invisible to the identical query issued from rigs/gc-toolkit.
+#
+# So the lookup runs city-wide in two tiers: the exact metadata match in every
+# store first, and only where that misses everywhere, a search for the SAME
+# verbatim token against TITLES, adopting and stamping the oldest live hit. That
+# second tier is not the prose query ruled out above — it is the identical single
+# token, which the measurements above show hitting where a composed phrase does
+# not, and it is reached only after the precise lookup has come back empty. The
+# tiers are documented in full at their call sites below.
 #
 # WHY A BEAD AND NOT A MARKER FILE. The su refinery's existing dedupe writes
 # /tmp, and it fails in both directions at once (su-xgz2): it survives a session
@@ -185,23 +201,193 @@ command -v jq >/dev/null 2>&1 || {
 # `tr -d` strips control characters BEFORE jq: bead notes carry raw escapes from
 # prose, and one of those kills the parse. Losing the parse must never look like
 # losing the tracker — that would mint a duplicate AND escalate on it.
-RAW=$(gc bd list --status=open,in_progress,blocked \
-        --metadata-field "$KEY=$FINDING" --limit=20 --json 2>/dev/null \
-      | tr -d '\000-\010\013\014\016-\037')
-
-if [ -z "$RAW" ]; then
-  echo "finding-anchor: could not read the ledger for $KEY=$FINDING; NOT minting (a failed read is not an empty one) and NOT answering — retry next cycle" >&2
-  exit 2
+#
+# WHY THE SWEEP IS CITY-WIDE AND NOT ONE STORE
+#
+# `bd` is pinned to a single store by BEADS_DIR, and the deacon patrols the
+# whole city. Its findings are about a DATABASE or a doctor check, which belong
+# to no rig in particular, while the beads already tracking them were filed
+# wherever whoever noticed happened to be standing. Measured 2026-08-24: the two
+# open trackers for `bd-backup-freshness` are gc-b1n7a and gc-ltbm5, both in
+# rigs/gascity, and the identical `--metadata-field` query issued from
+# rigs/gc-toolkit returns neither. A single-store lookup therefore answers
+# "untracked" for a finding two open beads are tracking, mints a third, and
+# escalates — the storm this script exists to end, wearing the look of a gate.
+#
+# The HQ/city store is addressed by PATH and the rig stores by NAME, because
+# they are not interchangeable: `gc bd --rig` does not accept the HQ rig at all
+# (`gc bd: rig "loomington" not found`), and that leg holds the `lx-*` beads
+# this bug's own escalation storm was about.
+# The AMBIENT store goes first, and that ordering is load-bearing rather than an
+# optimisation. `doctor-finding-gate.sh` mints and reads its successors per
+# store by design ("at most one open successor per check per store"), so a check
+# whose tracker this script minted locally must keep resolving to that same
+# local bead — otherwise the two scripts name different beads for one check and
+# the convergence `--key doctor_check` exists to provide is lost. Looking here
+# first means the sweep changes the answer ONLY when the ambient store has
+# nothing, which is exactly the case this fix is about. It is also the fast
+# path: the common lookup still costs one query.
+STORES=("L:")
+ENUM_OK=0
+RIGS_JSON=$(gc rig list --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037')
+if printf '%s' "$RIGS_JSON" | jq -e '.rigs | type == "array"' >/dev/null 2>&1; then
+  ENUM_OK=1
+  while IFS='|' read -r r_name r_hq r_path; do
+    [ -n "$r_name" ] || continue
+    if [ "$r_hq" = "true" ]; then
+      [ -n "$r_path" ] && STORES+=("C:$r_path")
+    else
+      STORES+=("R:$r_name")
+    fi
+  done <<EOF
+$(printf '%s' "$RIGS_JSON" | jq -r '.rigs[]
+      | select((.beads // "initialized") == "initialized")
+      | [.name, (.hq // false | tostring), (.path // "")]
+      | join("|")' 2>/dev/null)
+EOF
 fi
-if ! printf '%s' "$RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  echo "finding-anchor: ledger query for $KEY=$FINDING did not return a JSON array; NOT minting — retry next cycle" >&2
-  exit 2
+# A store that could not be READ is not a store with nothing in it. Any leg that
+# fails makes "absent from the whole city" unprovable, so the mint is refused
+# below rather than run on a partial sweep — the same rule as the single-store
+# version, applied to each leg. Losing the rig enumeration itself is the same
+# class of failure: fall back to the ambient store so an existing tracker is
+# still found, but never mint on what that one store alone could not see.
+READ_FAILED=0
+if [ "$ENUM_OK" != 1 ] || [ "${#STORES[@]}" -le 1 ]; then
+  STORES=("L:")
+  READ_FAILED=1
 fi
 
-EXISTING=$(printf '%s' "$RAW" | jq -r '.[0].id // empty' 2>/dev/null)
-if [ -n "$EXISTING" ]; then
-  printf '%s\n' "$EXISTING"
+# Route one `bd` invocation at one store. The spec prefix is the addressing
+# mode, not decoration: `C:` is a path for the HQ store, `R:` a rig name, `L:`
+# the ambient store BEADS_DIR already points at.
+bd_store() { # bd_store <spec> <bd args...>
+  local spec="$1"; shift
+  case "$spec" in
+    C:*) gc bd -C "${spec#C:}" "$@" ;;
+    R:*) gc bd --rig "${spec#R:}" "$@" ;;
+    *)   gc bd "$@" ;;
+  esac
+}
+
+# Print one store's JSON array, or return 1 for a leg that could not be read.
+# An error is not an empty result and the two must never collapse: `gc bd --rig`
+# reports an unknown rig as PROSE on stdout with a zero exit, so the array-shape
+# assertion — not the exit code — is what separates them. An empty store answers
+# `[]`, which is an array and therefore an answer.
+store_json() { # store_json <spec> <bd args...>
+  local raw
+  raw=$(bd_store "$@" 2>/dev/null | tr -d '\000-\010\013\014\016-\037')
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$raw"
+  return 0
+}
+
+# TIER 1 — the exact metadata match, in every store. This is the authoritative
+# lookup and the only one that mints beads carry, so it runs first and alone
+# decides the common case.
+for spec in ${STORES[@]+"${STORES[@]}"}; do
+  RAW=$(store_json "$spec" list --status=open,in_progress,blocked \
+          --metadata-field "$KEY=$FINDING" --limit=20 --json) || { READ_FAILED=1; continue; }
+  EXISTING=$(printf '%s' "$RAW" | jq -r '.[0].id // empty' 2>/dev/null)
+  if [ -n "$EXISTING" ]; then
+    printf '%s\n' "$EXISTING"
+    exit 0
+  fi
+done
+
+# TIER 2 — ADOPT A PRE-EXISTING TITLE-TOKEN TRACKER.
+#
+# Every tracker filed before this script existed is title-only: gc-b1n7a and
+# gc-ltbm5 are open, track `bd-backup-freshness`, and carry no finding_key and no
+# doctor_check (verified live 2026-08-24). Tier 1 cannot see them, so treating a
+# metadata miss as absence mints a duplicate beside two live trackers and mails
+# about it — exactly the false "no open bead in any store matches" that filed
+# gc-woe2r. Metadata absence is absence of a STAMP, never absence of a TRACKER.
+#
+# THIS IS NOT THE PROSE QUERY THE HEADER RULES OUT, and the difference is the
+# whole reason it is safe. What was measured to fail is a query composed out of a
+# finding's MESSAGE — `bd search "backup freshness"` returns nothing for a title
+# reading `bd-backup-freshness`, because matching is substring, not token. What
+# runs here is the finding's OWN NAME, verbatim, the identical single token tier
+# 1 looks up; the header's own measurements show that shape hitting
+# (`bd search "bd-backup" -> gc-b1n7a gc-ltbm5`). Nothing is ever composed from
+# prose, and this tier is reached only after the exact match has missed
+# everywhere.
+#
+# A CANDIDATE ALREADY CLAIMED BY ANOTHER FINDING IS SKIPPED, and this is not a
+# refinement — without it the tier regresses into the storm. Roll-up beads exist:
+# lx-0ojcv is open and its title names FOUR findings at once (session-model,
+# dolt-noms-size, bd-backup-freshness, pipefail-grep-q). The gate keys its stamp
+# `escalated.<kind>` on the ANCHOR, so one anchor holds exactly one deacon
+# escalation slot. Two findings sharing that bead do not merely dedupe into one
+# notice — they overwrite each other's state fingerprint, each cycle reads the
+# other's value as a CHANGED state, and both re-mail forever. So a bead already
+# carrying finding_key/doctor_check for a DIFFERENT finding is not adopted; that
+# finding mints its own tracker instead, and the roll-up stays the first one's.
+#
+# `bd search` matches TITLE and ID (its own help: "Text queries search titles"),
+# so a bead that merely discusses the finding in its body is not a candidate —
+# tk-mvc72 itself names `bd-backup-freshness` in its description and correctly
+# does not match. The ID half is the trap: an ID-like query takes a prefix fast
+# path, so `bd search "gc-b1n7a"` returns gc-b1n7a whose title holds no such
+# token. Adopting that would anchor the escalation on an unrelated bead and MUTE
+# the finding, which is worse than the storm. So every candidate is re-checked
+# against its own title here, and the fast-path hit is dropped.
+#
+# Tier 2 runs even when a leg of tier 1 failed: FINDING a tracker is a valid
+# answer no matter what else was unreadable, and refusing one that is demonstrably
+# open would mute a tracked finding. Only the MINT below needs a complete sweep.
+CANDS=""
+for spec in ${STORES[@]+"${STORES[@]}"}; do
+  RAW=$(store_json "$spec" search "$FINDING" --status open,in_progress,blocked \
+          --limit 50 --json) || { READ_FAILED=1; continue; }
+  HIT=$(printf '%s' "$RAW" | jq -r --arg f "$FINDING" --arg k "$KEY" '
+          [ .[]
+            | select(((.title // "") | ascii_downcase)
+                     | contains($f | ascii_downcase))
+            | select(
+                ( [ (.metadata // {}) | .finding_key?, .doctor_check?, .[$k]? ]
+                  | map(select(. != null and . != "" and . != $f))
+                  | length ) == 0 )
+          ]
+          | sort_by(.created_at // "")
+          | .[0] // empty
+          | [(.created_at // ""), .id] | join("|")' 2>/dev/null)
+  [ -n "$HIT" ] && CANDS="${CANDS}${HIT}|${spec}
+"
+done
+# Oldest wins, city-wide. The choice has to be DETERMINISTIC, not merely
+# reasonable: two open trackers for one finding is the observed state, and a
+# rule that picks a different one per cycle re-mails under a new anchor every
+# cycle. First-filed is the canonical tracker and sorts stably (created_at is
+# RFC3339, so lexical order is chronological order).
+BEST=$(printf '%s' "$CANDS" | grep -v '^[[:space:]]*$' | LC_ALL=C sort | head -1)
+if [ -n "$BEST" ]; then
+  ADOPT_REST=${BEST#*|}
+  ADOPT_ID=${ADOPT_REST%%|*}
+  ADOPT_SPEC=${ADOPT_REST#*|}
+  # Stamp it so tier 1 owns it from the next cycle on. Unlike the mint below,
+  # a failed stamp here is NOT fatal and must not be: the bead exists, the
+  # title search that just found it is repeatable, and its oldest-first pick is
+  # stable — so an unstamped adoption still converges on the same anchor every
+  # cycle. A fresh mint has no such second route to itself, which is why that
+  # one refuses to answer.
+  if ! bd_store "$ADOPT_SPEC" update "$ADOPT_ID" \
+         --set-metadata "$KEY=$FINDING" >/dev/null 2>&1; then
+    echo "finding-anchor: adopted pre-existing tracker $ADOPT_ID for $KEY=$FINDING but could not stamp it; still usable as an anchor (the title lookup re-finds it), but stamp it to make the lookup exact: gc bd update $ADOPT_ID --set-metadata $KEY=$FINDING" >&2
+  fi
+  printf '%s\n' "$ADOPT_ID"
   exit 0
+fi
+
+# Nothing anywhere — but only a COMPLETE sweep proves that. Minting on a partial
+# one is how a single transient error becomes a duplicate tracker every cycle,
+# and then an escalation about it.
+if [ "$READ_FAILED" != 0 ]; then
+  echo "finding-anchor: could not read every store while looking for $KEY=$FINDING; NOT minting (a failed read is not an empty one) and NOT answering — retry next cycle" >&2
+  exit 2
 fi
 
 # THE MINT. Reached only on a ledger that was read successfully and holds no live
